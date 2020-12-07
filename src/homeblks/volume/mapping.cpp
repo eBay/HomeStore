@@ -410,8 +410,7 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
             if (param->m_ctx->op == READ_VAL_WITH_seqid) {
                 if (param->m_ctx->seqid == INVALID_SEQ_ID || ve.get_seqid() <= param->m_ctx->seqid) {
                     result_kv.emplace_back(make_pair(overlap, MappingValue(ve)));
-                    if (m_pending_read_blk_cb && param->m_ctx->vreq &&
-                        ve.get_blkId().to_integer() != BlkId::invalid_internal_id()) {
+                    if (m_pending_read_blk_cb && param->m_ctx->vreq && ve.get_blkId().is_valid()) {
                         Free_Blk_Entry fbe(ve.get_blkId());
                         m_pending_read_blk_cb(fbe); // mark this blk as pending read
                     }
@@ -424,7 +423,7 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
                               m_vol_page_size, HomeBlks::instance()->get_data_pagesz(), ve.get_nlba(), overlap.start(),
                               overlap.end(), lba_offset);
                 uint64_t nblks = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
-                if (ve.get_blkId().to_integer() != BlkId::invalid_internal_id()) {
+                if (ve.get_blkId().is_valid()) {
                     Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nblks);
                     fbe_list.push_back(fbe);
                 }
@@ -608,13 +607,13 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
             }
 #if 0
             // check if replace entries dont overlap free entries
-            auto blk_start = curve.get_blkId().get_id() + curve.get_blk_offset();
+            auto blk_start = curve.get_blkId().get_blk_num() + curve.get_blk_offset();
             auto blk_end =
                 blk_start + (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * curve.get_nlba() - 1;
             req->init_fbe_iterator();
             while (auto fbe = req->get_next_fbe()) {
                 if (fbe->m_blkId.get_chunk_num() != curve.get_blkId().get_chunk_num()) { continue; }
-                auto fblk_start = fbe->m_blkId.get_id() + fbe->m_blk_offset;
+                auto fblk_start = fbe->m_blkId.get_blk_num() + fbe->m_blk_offset;
                 auto fblk_end = fblk_start + fbe->m_nblks_to_free - 1;
                 if (blk_end < fblk_start || fblk_end < blk_start) {
                 } // non overlapping
@@ -693,7 +692,7 @@ void mapping::compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, u
     if (new_seq_id > e_seq_id) {
         /* override */
         uint16_t e_blk_offset = (e_val_offset * m_vol_page_size) / HomeBlks::instance()->get_data_pagesz();
-        if (e_ve.get_blkId().to_integer() != BlkId::invalid_internal_id()) {
+        if (e_ve.get_blkId().is_valid()) {
             Free_Blk_Entry fbe(e_ve.get_blkId(), e_ve.get_blk_offset() + e_blk_offset,
                                (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba);
             fbe_list.push_back(fbe);
@@ -705,7 +704,7 @@ void mapping::compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, u
         const Blob_Array< ValueEntry >& new_varray = new_val.get_array_const();
         ValueEntry new_ve;
         new_varray.get(0, new_ve, false);
-        if (new_ve.get_blkId().to_integer() != BlkId::invalid_internal_id()) {
+        if (new_ve.get_blkId().is_valid()) {
             Free_Blk_Entry fbe(new_ve.get_blkId(), new_ve.get_blk_offset() + new_val_offset,
                                (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * nlba);
             fbe_list.push_back(fbe);
@@ -749,7 +748,7 @@ void mapping::validate_get_response(uint64_t lba_start, uint32_t n_lba,
             HS_ASSERT_CMP(DEBUG, values[i].second.get_array().get_total_elements(), ==, 1);
             values[i].second.get_array().get(0, ve, false);
 
-            if (!values[i].second.is_valid() || ve.get_blkId().get_id() != expBid.get_id() ||
+            if (!values[i].second.is_valid() || ve.get_blkId().get_blk_num() != expBid.get_blk_num() ||
                 ve.get_blk_offset() != last_bid_offset) {
                 m_bt->print_tree();
                 std::this_thread::sleep_for(std::chrono::seconds(10));
@@ -844,7 +843,7 @@ btree_status_t mapping::update_indx_tbl(const indx_req_ptr& ireq, const btree_cp
     btree_status_t ret = btree_status_t::success;
 
     if (vreq->is_unmap()) {
-        BlkId bid_invalid{BlkId::invalid_internal_id()};
+        BlkId bid_invalid;
         uint64_t nlbas_rem = get_nlbas(end_lba, next_start_lba);
         uint64_t nlbas_cur = (nlbas_rem > MAX_NUM_LBA) ? MAX_NUM_LBA : nlbas_rem;
         MappingKey m_key(next_start_lba, nlbas_cur);
@@ -972,7 +971,7 @@ btree_status_t mapping::update_unmap_active_indx_tbl(blkid_list_ptr free_list, u
     uint64_t start_lba = j_key->lba;
     uint64_t end_lba = get_end_lba(start_lba, j_key->nlbas);
     btree_status_t ret = btree_status_t::success;
-    BlkId bid_invalid{BlkId::invalid_internal_id()};
+    BlkId bid_invalid;
     mapping_op_cntx cntx;
     cntx.op = UPDATE_UNMAP;
     cntx.free_list = free_list.get();

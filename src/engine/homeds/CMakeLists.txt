@@ -39,10 +39,11 @@ if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")
     target_link_libraries(test_avector ${CONAN_LIBS})
 
     set(TEST_LOAD_FILES 
-        tests/loadgen_tests/test_load.cpp
-        loadgen/iomgr_executor.cpp
-        )
+            tests/loadgen_tests/test_load.cpp
+            loadgen/iomgr_executor.cpp
+            )
     add_executable(test_load ${TEST_LOAD_FILES})
+    target_compile_options(test_load PRIVATE -Wno-deprecated)
     target_link_libraries(test_load homeblks ${CONAN_LIBS})
 
     set(TEST_IOMGR_EXEC_FILES 

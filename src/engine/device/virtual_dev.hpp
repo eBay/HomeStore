@@ -32,47 +32,25 @@ namespace homestore {
 
 class VdevFixedBlkAllocatorPolicy {
 public:
-    typedef FixedBlkAllocator AllocatorType;
-    typedef BlkAllocConfig AllocatorConfig;
-
-    static void get_config(uint64_t size, uint32_t vpage_size, BlkAllocConfig* out_config) {
-        /* for fixed block allocator page and block size is kept same as it doesn't make any
-         * difference.
-         */
-        out_config->set_blk_size(vpage_size);
-        out_config->set_total_blks(size / vpage_size);
-        out_config->set_blks_per_portion(BLKS_PER_PORTION); // Have locking etc for every 1024 pages
+    static std::shared_ptr< FixedBlkAllocator > create_allocator(const uint64_t size, const uint32_t vpage_size,
+                                                                 const bool is_auto_recovery, const uint32_t unique_id,
+                                                                 const bool init) {
+        BlkAllocConfig cfg{vpage_size, size, std::string("fixed_chunk_") + std::to_string(unique_id)};
+        cfg.set_auto_recovery(is_auto_recovery);
+        return std::make_shared< FixedBlkAllocator >(cfg, init, unique_id);
     }
 };
 
 class VdevVarSizeBlkAllocatorPolicy {
 public:
-    typedef VarsizeBlkAllocator AllocatorType;
-    typedef VarsizeBlkAllocConfig AllocatorConfig;
-
-    static void get_config(uint64_t size, uint32_t vpage_size, BlkAllocConfig* out_config) {
-        VarsizeBlkAllocConfig* vconfig = (VarsizeBlkAllocConfig*)out_config;
-
-        vconfig->set_blk_size(vpage_size);
-        vconfig->set_phys_page_size(HS_STATIC_CONFIG(drive_attr.phys_page_size)); // SSD Page size.
-        vconfig->set_blks_per_portion(BLKS_PER_PORTION); // Have locking etc for every 1024 pages
-        vconfig->set_total_segments(TOTAL_SEGMENTS);     // 8 Segments per chunk
-
-        HS_ASSERT_CMP(DEBUG, (size % MIN_CHUNK_SIZE), ==, 0);
-
-        vconfig->set_total_blks(((uint64_t)size) / vpage_size);
-        vconfig->set_blks_per_temp_group(100); // TODO: Recalculate based on size set aside for temperature entries
-        vconfig->set_max_cache_blks(vconfig->get_total_blks() / 4); // Cache quarter of the blocks
-        /* Blk sizes in slabs : nblks < 1, nblks < 2, 2 <= nblks < 4,
-         * 4 <= nblks < 8, 8 <= nblks < 16, nblks >= 16
-         */
-        int num_slabs = 10;
-        std::vector< uint32_t > slab_limits(num_slabs - 1, 0);
-        std::vector< float > slab_weights(num_slabs, 0.1); // (1 / num_slabs) = 0.1
-        for (auto i = 0U; i < slab_limits.size(); i++) {
-            slab_limits[i] = (1 << i);
-        }
-        vconfig->set_slab(slab_limits, slab_weights);
+    static std::shared_ptr< VarsizeBlkAllocator > create_allocator(const uint64_t size, const uint32_t vpage_size,
+                                                                   const bool is_auto_recovery,
+                                                                   const uint32_t unique_id, const bool is_init) {
+        VarsizeBlkAllocConfig cfg{vpage_size, size, std::string("varsize_chunk_") + std::to_string(unique_id)};
+        HS_DEBUG_ASSERT_EQ((size % MIN_CHUNK_SIZE), 0);
+        cfg.set_phys_page_size(HS_STATIC_CONFIG(drive_attr.phys_page_size));
+        cfg.set_auto_recovery(is_auto_recovery);
+        return std::make_shared< VarsizeBlkAllocator >(cfg, is_init, unique_id);
     }
 };
 
@@ -331,7 +309,8 @@ public:
 
             // Create a chunk on selected physical device and add it to chunks in physdev list
             auto chunk = create_dev_chunk(pdev_ind, nullptr, INVALID_CHUNK_ID);
-            std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, chunk->get_chunk_id(), true);
+            std::shared_ptr< BlkAllocator > ba = Allocator::create_allocator(
+                m_chunk_size, get_page_size(), m_auto_recovery, chunk->get_chunk_id(), true /* init */);
             chunk->set_blk_allocator(ba);
             m_primary_pdev_chunks_list[pdev_ind].chunks_in_pdev.push_back(chunk);
 
@@ -900,20 +879,14 @@ public:
                   get_tail_offset(), tail);
     }
 
-    bool is_blk_alloced(BlkId& in_blkid) {
-        PhysicalDevChunk* primary_chunk;
-        auto blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
+    bool is_blk_alloced(const BlkId& blkid) const {
+        PhysicalDevChunk* primary_chunk = m_mgr->get_chunk(blkid.get_chunk_num());
         return (primary_chunk->get_blk_allocator()->is_blk_alloced(blkid));
     }
 
-    BlkAllocStatus reserve_blk(const BlkId& in_blkid) {
-        PhysicalDevChunk* primary_chunk;
-        auto blkid = to_chunk_specific_id(in_blkid, &primary_chunk);
-
-        auto status = primary_chunk->get_blk_allocator()->alloc(blkid);
-        if (status == BlkAllocStatus::BLK_ALLOC_SUCCESS) { /* insert it only if it is not previously allocated */
-        }
-        return BlkAllocStatus::BLK_ALLOC_SUCCESS;
+    BlkAllocStatus reserve_blk(const BlkId& blkid) {
+        PhysicalDevChunk* primary_chunk = m_mgr->get_chunk(blkid.get_chunk_num());
+        return primary_chunk->get_blk_allocator()->alloc_on_disk(blkid);
     }
 
     BlkAllocStatus alloc_contiguous_blk(const uint8_t nblks, const blk_alloc_hints& hints, BlkId* const out_blkid) {
@@ -922,7 +895,7 @@ public:
             std::vector< BlkId > blkid;
             HS_ASSERT_CMP(DEBUG, hints.is_contiguous, ==, true);
             ret = alloc_blk(nblks, hints, blkid);
-            if (ret == BlkAllocStatus::BLK_ALLOC_SUCCESS) {
+            if (ret == BlkAllocStatus::SUCCESS) {
                 HS_RELEASE_ASSERT_EQ(blkid.size(), 1, "out blkid more than 1 entries({}) will lead to blk leak!",
                                      blkid.size());
                 *out_blkid = blkid[0];
@@ -930,7 +903,7 @@ public:
                 HS_ASSERT_CMP(DEBUG, blkid.size(), ==, 0);
             }
         } catch (const std::exception& e) {
-            ret = BlkAllocStatus::BLK_ALLOC_FAILED;
+            ret = BlkAllocStatus::FAILED;
             HS_ASSERT(DEBUG, 0, "{}", e.what());
         }
         return ret;
@@ -940,23 +913,15 @@ public:
         try {
             uint32_t dev_ind{0};
             uint32_t chunk_num, start_chunk_num;
-            BlkAllocStatus status = BlkAllocStatus::BLK_ALLOC_FAILED;
+            BlkAllocStatus status = BlkAllocStatus::FAILED;
 
             // First select a device to allocate from
-            if (hints.dev_id_hint == -1) {
-                dev_ind = m_selector->select(hints);
-            } else {
-                dev_ind = (uint32_t)hints.dev_id_hint;
-            }
-
-            // m_total_allocations++;
+            dev_ind = (hints.dev_id_hint == -1) ? m_selector->select(hints) : (uint32_t)hints.dev_id_hint;
 
             // Pick a physical chunk based on physDevId.
             // TODO: Right now there is only one primary chunk per device in a virtualdev. Need to support multiple
             // chunks. In that case just using physDevId as chunk number is not right strategy.
             uint32_t start_dev_ind = dev_ind;
-            PhysicalDevChunk* picked_chunk = nullptr;
-
             do {
                 for (auto chunk : m_primary_pdev_chunks_list[dev_ind].chunks_in_pdev) {
 #ifdef _PRERELEASE
@@ -965,42 +930,25 @@ public:
                         return (BlkAllocStatus)fake_status.get();
                     }
 #endif
-
                     status = chunk->get_blk_allocator()->alloc(nblks, hints, out_blkid);
-
-                    if (status == BlkAllocStatus::BLK_ALLOC_SUCCESS) {
-                        picked_chunk = chunk;
-                        break;
-                    }
+                    if (status == BlkAllocStatus::SUCCESS) { break; }
                 }
 
-                if (status == BlkAllocStatus::BLK_ALLOC_SUCCESS) { break; }
-                if (!hints.can_look_for_other_dev) { break; }
+                if ((status == BlkAllocStatus::SUCCESS) || !hints.can_look_for_other_dev) { break; }
                 dev_ind = (uint32_t)((dev_ind + 1) % m_primary_pdev_chunks_list.size());
             } while (dev_ind != start_dev_ind);
 
-            if (status == BlkAllocStatus::BLK_ALLOC_SUCCESS) {
-                // Set the id as globally unique id
-                uint64_t tot_size = 0;
-                for (uint32_t i = 0; i < out_blkid.size(); i++) {
-                    out_blkid[i] = to_glob_uniq_blkid(out_blkid[i], picked_chunk);
-                    tot_size += out_blkid[i].data_size(m_pagesz);
-                }
-            }
             return status;
         } catch (const std::exception& e) {
             LOGERROR("exception happened {}", e.what());
             assert(0);
-            return BlkAllocStatus::BLK_ALLOC_FAILED;
+            return BlkAllocStatus::FAILED;
         }
     }
 
     void free_blk(const BlkId& b) {
-        PhysicalDevChunk* chunk;
-
-        // Convert blk id to chunk specific id and call its allocator to free
-        BlkId cb = to_chunk_specific_id(b, &chunk);
-        chunk->get_blk_allocator()->free(cb);
+        PhysicalDevChunk* chunk = m_mgr->get_chunk(b.get_chunk_num());
+        chunk->get_blk_allocator()->free(b);
     }
 
     void recovery_done() {
@@ -1035,7 +983,7 @@ public:
 
     void write(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req,
                uint32_t data_offset = 0) {
-        BlkOpStatus ret_status = BlkOpStatus::BLK_OP_SUCCESS;
+        BlkOpStatus ret_status = BlkOpStatus::SUCCESS;
         uint32_t size = bid.get_nblks() * get_page_size();
         struct iovec iov[BlkId::max_blks_in_op()];
         int iovcnt = 0;
@@ -1183,7 +1131,7 @@ public:
             for (uint32_t chunk_indx = 0; chunk_indx < m_primary_pdev_chunks_list[i].chunks_in_pdev.size();
                  ++chunk_indx) {
                 auto chunk = m_primary_pdev_chunks_list[i].chunks_in_pdev[chunk_indx];
-                alloc_cnt += chunk->get_blk_allocator()->total_alloc_blks();
+                alloc_cnt += chunk->get_blk_allocator()->get_used_blks();
             }
         }
         return (alloc_cnt * get_page_size());
@@ -1596,7 +1544,8 @@ private:
             m_selector->add_pdev(pcm.pdev);
         }
         HS_ASSERT_CMP(DEBUG, m_chunk_size, <=, MAX_CHUNK_SIZE);
-        std::shared_ptr< BlkAllocator > ba = create_allocator(m_chunk_size, chunk->get_chunk_id(), m_recovery_init);
+        std::shared_ptr< BlkAllocator > ba = Allocator::create_allocator(m_chunk_size, get_page_size(), m_auto_recovery,
+                                                                         chunk->get_chunk_id(), m_recovery_init);
         chunk->set_blk_allocator(ba);
         if (!m_recovery_init) { chunk->recover(); }
         /* set the same blk allocator to other mirror chunks */
@@ -1635,7 +1584,12 @@ private:
         }
     }
 
+#if 0
     std::shared_ptr< BlkAllocator > create_allocator(uint64_t size, uint32_t unique_id, bool init) {
+        std::shared_ptr< BlkAllocator > allocator =
+            std::make_shared< typename Allocator::AllocatorType >(
+        Allocator::get_config(size, get_page_size(), m_auto_recovery);
+
         typename Allocator::AllocatorConfig cfg(std::string("chunk_") + std::to_string(unique_id));
         Allocator::get_config(size, get_page_size(), &cfg);
         cfg.set_auto_recovery(m_auto_recovery);
@@ -1644,6 +1598,7 @@ private:
             std::make_shared< typename Allocator::AllocatorType >(cfg, init, unique_id);
         return allocator;
     }
+#endif
 
     PhysicalDevChunk* create_dev_chunk(uint32_t pdev_ind, std::shared_ptr< BlkAllocator > ba, uint32_t primary_id) {
         auto pdev = m_primary_pdev_chunks_list[pdev_ind].pdev;
@@ -1655,22 +1610,10 @@ private:
         return chunk;
     }
 
-    BlkId to_glob_uniq_blkid(const BlkId& chunk_local_blkid, PhysicalDevChunk* chunk) const {
-        return BlkId(chunk_local_blkid.get_id(), chunk_local_blkid.get_nblks(), chunk->get_chunk_id());
-    }
-
-    BlkId to_chunk_specific_id(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const {
-        // Extract the chunk id from glob_uniq_id
-        auto cid = glob_uniq_id.get_chunk_num();
-        *chunk = m_mgr->get_chunk_mutable(cid);
-
-        return BlkId(glob_uniq_id.get_id(), glob_uniq_id.get_nblks(), 0);
-    }
-
     uint64_t to_dev_offset(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const {
         *chunk = m_mgr->get_chunk_mutable(glob_uniq_id.get_chunk_num());
 
-        uint64_t dev_offset = glob_uniq_id.get_id() * get_page_size() + (*chunk)->get_start_offset();
+        uint64_t dev_offset = glob_uniq_id.get_blk_num() * get_page_size() + (*chunk)->get_start_offset();
         return dev_offset;
     }
 

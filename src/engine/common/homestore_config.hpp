@@ -6,6 +6,8 @@
 #include <sds_options/options.h>
 #include <engine/common/error.h>
 #include <cassert>
+#include <array>
+#include <cstdint>
 #include <boost/intrusive_ptr.hpp>
 #include <settings/settings.hpp>
 #include "engine/common/generated/homestore_config_generated.h"
@@ -28,6 +30,7 @@ constexpr uint32_t MAX_PDEVS = 8;
 namespace homestore {
 #define HS_DYNAMIC_CONFIG_WITH(...) SETTINGS(homestore_config, __VA_ARGS__)
 #define HS_DYNAMIC_CONFIG_THIS(...) SETTINGS_THIS(homestore_config, __VA_ARGS__)
+#define HS_DYNAMIC_CONFIG_WITH_CAP(...) SETTINGS_THIS_CAP1(homestore_config, __VA_ARGS__)
 #define HS_DYNAMIC_CONFIG(...) SETTINGS_VALUE(homestore_config, __VA_ARGS__)
 
 #define HS_SETTINGS_FACTORY() SETTINGS_FACTORY(homestore_config)
@@ -94,8 +97,7 @@ public:
 };
 
 struct hs_engine_config {
-    size_t min_io_size = 8192; // minimum io size supported by HS
-    uint64_t max_blk_cnt = 0;  // Total number of blks engine can support
+    size_t min_io_size = 8192;  // minimum io size supported by 
 
     uint64_t max_chunks = MAX_CHUNKS; // These 3 parameters can be ONLY changed with upgrade/revert from device manager
     uint64_t max_vdevs = MAX_VDEVS;
@@ -104,7 +106,6 @@ struct hs_engine_config {
     nlohmann::json to_json() const {
         nlohmann::json json;
         json["min_io_size"] = min_io_size;
-        json["max_blk_count_supported"] = max_blk_cnt;
         json["max_chunks"] = max_chunks;
         json["max_vdevs"] = max_vdevs;
         json["max_pdevs"] = max_pdevs;
@@ -138,17 +139,52 @@ struct HomeStoreStaticConfig {
 #endif
 };
 
-constexpr uint32_t ID_BITS = 32;
+class HomeStoreDynamicConfig {
+public:
+    static constexpr std::array< double, 9 > default_slab_distribution() {
+        // Aassuming blk_size=4K      [4K,   8K,  16K, 32K, 64K,  128K, 256K, 512K, 1M ]
+        return std::array< double, 9 >{15.0, 7.0, 7.0, 6.0, 10.0, 10.0, 10.0, 10.0, 25.0};
+
+        // return std::array< double, 9 >{20.0, 10.0, 10.0, 10.0, 36.0, 4.0, 4.0, 4.0, 2.0};
+    }
+
+    // This method sets up the default for settings factory when there is no override specified in the json
+    // file and .fbs cannot specify default because they are not scalar.
+    static void init_settings_default() {
+        bool is_modified = false;
+
+        HS_SETTINGS_FACTORY().modifiable_settings([&is_modified](auto& s) {
+            /* Setup slab config of blk alloc cache, if they are not set already - first time */
+            auto& slab_pct_dist = s.blkallocator.free_blk_slab_distribution;
+            if (slab_pct_dist.size() == 0) {
+                LOGINFO("Free Blks Slab distribution is not initialized, possibly first boot - setting with defaults");
+
+                // Slab distribution is not initialized, defaults
+                const auto d = default_slab_distribution();
+                slab_pct_dist.insert(slab_pct_dist.begin(), std::cbegin(d), std::cend(d));
+                is_modified = true;
+            }
+
+            // Any more default overrides or set non-scalar entries come here
+        });
+
+        if (is_modified) {
+            LOGINFO("Some settings are defaultted or overridden explicitly in the code, saving the new settings");
+            HS_SETTINGS_FACTORY().save();
+        }
+    }
+};
+constexpr uint32_t BLK_NUM_BITS = 32;
 constexpr uint32_t NBLKS_BITS = 8;
 constexpr uint32_t CHUNK_NUM_BITS = 8;
-constexpr uint32_t BLKID_SIZE_BITS = ID_BITS + NBLKS_BITS + CHUNK_NUM_BITS;
+constexpr uint32_t BLKID_SIZE_BITS = BLK_NUM_BITS + NBLKS_BITS + CHUNK_NUM_BITS;
 constexpr uint32_t MEMPIECE_ENCODE_MAX_BITS = 8;
 constexpr uint64_t MAX_NBLKS = ((1 << NBLKS_BITS) - 1);
-constexpr uint64_t MAX_CHUNK_ID = ((1 << CHUNK_NUM_BITS) - 1);
+constexpr uint64_t MAX_CHUNK_ID = ((1 << CHUNK_NUM_BITS) - 2); // one less to indicate invalid chunks
 constexpr uint64_t BLKID_SIZE = (BLKID_SIZE_BITS / 8) + (((BLKID_SIZE_BITS % 8) != 0) ? 1 : 0);
 constexpr uint32_t BLKS_PER_PORTION = 1024;
 constexpr uint32_t TOTAL_SEGMENTS = 8;
-constexpr uint32_t MAX_ID_BITS_PER_CHUNK = ((1lu << ID_BITS) - 1);
+constexpr uint32_t MAX_BLK_NUM_BITS_PER_CHUNK = ((1lu << BLK_NUM_BITS) - 1);
 
 /* NOTE: it can give size more then the size passed in argument to make it aligned */
 // #define ALIGN_SIZE(size, align) (((size % align) == 0) ? size : (size + (align - (size % align))))
@@ -159,7 +195,7 @@ constexpr uint32_t MAX_ID_BITS_PER_CHUNK = ((1lu << ID_BITS) - 1);
 #define MEMVEC_MAX_IO_SIZE (HS_STATIC_CONFIG(engine.min_io_size) * ((1 << MEMPIECE_ENCODE_MAX_BITS) - 1))
 #define MIN_CHUNK_SIZE (HS_STATIC_CONFIG(drive_attr.phys_page_size) * BLKS_PER_PORTION * TOTAL_SEGMENTS)
 #define MAX_CHUNK_SIZE                                                                                                 \
-    sisl::round_down((MAX_ID_BITS_PER_CHUNK * HS_STATIC_CONFIG(engine.min_io_size)), MIN_CHUNK_SIZE) // 16T
+    sisl::round_down((MAX_BLK_NUM_BITS_PER_CHUNK * HS_STATIC_CONFIG(engine.min_io_size)), MIN_CHUNK_SIZE) // 16T
 
 /* TODO: we store global unique ID in blkid. Instead it we only store chunk offset then
  * max cacapity will increase from MAX_CHUNK_SIZE to MAX_CHUNKS * MAX_CHUNK_SIZE.

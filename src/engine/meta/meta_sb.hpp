@@ -2,6 +2,9 @@
 #include <initializer_list>
 #include <cstdint>
 #include <cstddef>
+#include <array>
+#include <string>
+#include <set>
 #include "engine/blkalloc/blk.h"
 
 namespace homestore {
@@ -13,7 +16,6 @@ static constexpr uint32_t META_BLK_SB_VERSION = 0x1;
 static constexpr uint32_t META_BLK_VERSION = 0x1;
 static constexpr uint32_t MAX_SUBSYS_TYPE_LEN = 32;
 static constexpr uint32_t META_BLK_CONTEXT_SZ = (META_BLK_PAGE_SZ - META_BLK_HDR_MAX_SZ); // meta blk context data sz
-static const uint64_t invalid_bid = BlkId::invalid_internal_id();
 
 /**
  * Sub system types and their priorities
@@ -132,7 +134,12 @@ struct meta_blk_ovf_hdr {
     meta_blk_ovf_hdr_s h;
     char padding[META_BLK_OVF_HDR_RSVD_SZ];
     uint32_t nbids;
-    BlkId data_bid[MAX_NUM_DATA_BLKID]; // contigous blks that holds context data;
+    std::array< BlkId, MAX_NUM_DATA_BLKID > data_bid; // contigous blks that holds context data;
+
+    std::string to_string() const {
+        return fmt::format("h: <next_bid=[{}] self_bid=[{}] context_sz={}> data_bids=[<{}>]", h.next_bid, h.bid,
+                           h.context_sz, fmt::join(data_bid.begin(), data_bid.begin() + nbids, ">, "));
+    }
 };
 
 static_assert(sizeof(meta_blk_ovf_hdr) <= META_BLK_PAGE_SZ);

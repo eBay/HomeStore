@@ -224,7 +224,7 @@ bool Cache< K >::insert(const K& k, const sisl::blob& b, uint32_t value_offset,
     // Allocate a new Cachebuffer and set the blob address to it.
     auto cbuf = sisl::ObjectAllocator< CacheBuffer< K > >::make_object(k, b, this, value_offset);
 
-    CacheBuffer< K >* out_buf;
+    CacheBuffer< K >* out_buf{nullptr};
     bool inserted = IntrusiveCache< K, CacheBuffer< K > >::insert(*cbuf, &out_buf, found_cb);
     if (out_buf != nullptr) { *out_smart_buf = boost::intrusive_ptr< CacheBuffer< K > >(out_buf, false); }
 
@@ -236,7 +236,7 @@ bool Cache< K >::insert(const K& k, const sisl::blob& b, uint32_t value_offset,
 template < typename K >
 bool Cache< K >::insert(const K& k, const boost::intrusive_ptr< CacheBuffer< K > > in_buf,
                         boost::intrusive_ptr< CacheBuffer< K > >* out_smart_buf) {
-    CacheBuffer< K >* out_buf;
+    CacheBuffer< K >* out_buf{nullptr};
     bool inserted = IntrusiveCache< K, CacheBuffer< K > >::insert(*in_buf, &out_buf, NULL_LAMBDA);
     if (out_buf != nullptr) { *out_smart_buf = boost::intrusive_ptr< CacheBuffer< K > >(out_buf, false); }
 

@@ -126,7 +126,8 @@ public:
                 std::this_thread::sleep_for(std::chrono::seconds(5));
                 assert(0); // less blks freed than expected
             }
-            long long int bst = req->blkIds_to_free[index].m_blkId.get_id() + req->blkIds_to_free[index].m_blk_offset;
+            long long int bst =
+                req->blkIds_to_free[index].m_blkId.get_blk_num() + req->blkIds_to_free[index].m_blk_offset;
             long long int ben = bst + (int)(req->blkIds_to_free[index].m_nlbas_to_free) - 1;
             while (bst <= ben) {
                 if (st > et) assert(0);                 // more blks freeed than expected
@@ -139,7 +140,7 @@ public:
         assert(index == req->blkIds_to_free.size()); // check if more blks freed
 
         // update new blks
-        for (auto st = req->lba, bst = req->blkId.get_id(); st < req->lba + req->nlbas; st++, bst++)
+        for (auto st = req->lba, bst = req->blkId.get_blk_num(); st < req->lba + req->nlbas; st++, bst++)
             m_blk_id_arr[st] = bst;
 
         // release lbas
@@ -246,8 +247,8 @@ public:
 
     void release_blkId_lock(BlkId& blkId, uint8_t offset, uint8_t nlbas_to_free) {
         std::unique_lock< std::mutex > lk(mutex);
-        assert(m_blk_bm->is_bits_set(blkId.get_id() + offset, nlbas_to_free));
-        m_blk_bm->reset_bits(blkId.get_id() + offset, nlbas_to_free);
+        assert(m_blk_bm->is_bits_set(blkId.get_blk_num() + offset, nlbas_to_free));
+        m_blk_bm->reset_bits(blkId.get_blk_num() + offset, nlbas_to_free);
     }
 
     void generate_random_blkId(BlkId& blkId, uint64_t nlbas) {
@@ -334,7 +335,7 @@ public:
             bool is_invalid = false;
             if (kv.second.is_valid()) {
                 kv.second.get_array().get(0, ve, false);
-                bst = ve.get_blkId().get_id() + ve.get_blk_offset();
+                bst = ve.get_blkId().get_blk_num() + ve.get_blk_offset();
             } else {
                 is_invalid = true;
             }

@@ -9,140 +9,119 @@
 #include <iostream>
 #include <thread>
 #include <fds/utils.hpp>
+#include <fmt/format.h>
+#include <random>
 #include "engine/homeds/btree/mem_btree.hpp"
 #include <sds_logging/logging.h>
 #include <utility/thread_factory.hpp>
 #include "engine/common/homestore_flip.hpp"
+#include "blk_cache_queue.h"
 
-#ifndef NDEBUG
-bool blk_alloc_test = false;
-#endif
-
-SDS_LOGGING_DECL(varsize_blk_alloc)
+SDS_LOGGING_DECL(blkalloc)
 
 namespace homestore {
+static thread_local std::default_random_engine g_rd;
 
-VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const bool init, const uint32_t id) :
-        BlkAllocator(cfg, id),
-        m_cfg(cfg),
-        m_region_state(BlkAllocatorState::BLK_ALLOCATOR_DONE),
-        m_temp_groups(cfg.get_total_temp_group()),
-        m_cache_n_entries(0),
-        m_metrics(cfg.get_name().c_str(), cfg.get_slab_cnt()) {
+VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const bool init,
+                                         const chunk_num_t chunk_id) :
+        BlkAllocator{cfg, chunk_id},
+        m_chunk_id{chunk_id},
+        m_cfg{cfg},
+        m_state{BlkAllocatorState::WAITING},
+        m_rand_portion_num_generator{0, static_cast< blk_count_t >(cfg.get_total_portions() - 1)},
+        m_metrics{cfg.get_name().c_str()} {
+    BLKALLOC_LOG(INFO, "Creating VarsizeBlkAllocator with config: {}", cfg.to_string());
 
     // TODO: Raise exception when blk_size > page_size or total blks is less than some number etc...
-    m_cache_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
-
-#ifndef NDEBUG
-    for (auto i = 0U; i < cfg.get_total_temp_group(); i++) {
-        m_temp_groups[i].m_temp_group_id = i;
-    }
-
-#endif
-
-    // Initialize the slab counters
-    for (auto i = 0U; i < cfg.get_slab_cnt(); i++) {
-        atomwrapper< uint32_t > a_i(0);
-        m_slab_entries.push_back(a_i);
-        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Capacity of slab {} = {}", i,
-                     m_slab_entries[i]._a.load(std::memory_order_acq_rel));
-    }
+    m_bm = std::make_unique< sisl::Bitset >(cfg.get_total_blks(), chunk_id, HS_STATIC_CONFIG(drive_attr.align_size));
 
     // Create segments with as many blk groups as configured.
-    uint64_t seg_nblks = cfg.get_total_blks() / cfg.get_total_segments();
-    uint64_t portions_per_seg = get_portions_per_segment();
-    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Segment Count = {}, Blocks per segment = {}, portions={}",
-                 cfg.get_total_segments(), seg_nblks, portions_per_seg);
-    for (auto i = 0U; i < cfg.get_total_segments(); i++) {
-        std::string seg_name = cfg.get_name() + "_seg_" + std::to_string(i);
-        BlkAllocSegment* seg = new BlkAllocSegment(seg_nblks, i, portions_per_seg, seg_name);
-        m_segments.push_back(seg);
+    const blk_cap_t seg_nblks = cfg.get_total_blks() / cfg.get_total_segments();
+
+    m_segments.reserve(cfg.get_total_segments());
+    for (seg_num_t i{0U}; i < cfg.get_total_segments(); ++i) {
+        const std::string seg_name = fmt::format("{}_seg_{}", cfg.get_name(), i);
+        auto seg = std::make_unique< BlkAllocSegment >(seg_nblks, i, cfg.get_portions_per_segment(), seg_name);
+        m_segments.push_back(std::move(seg));
     }
 
-    BtreeConfig btree_cfg(HS_DYNAMIC_CONFIG(btree->mem_btree_page_size), cfg.get_name().c_str());
-
-    btree_cfg.set_max_objs(cfg.get_max_cache_blks());
-    btree_cfg.set_max_key_size(sizeof(VarsizeAllocCacheEntry));
-    btree_cfg.set_max_value_size(0);
-    m_blk_cache = VarsizeBlkAllocatorBtree::create_btree(btree_cfg);
+    // Create free blk Cache of type Queue
+    m_fb_cache = std::make_unique< FreeBlkCacheQueue >(cfg.m_slab_config, &m_metrics);
 
     // Start a thread which will do sweeping job of free segments
     if (init) { inited(); }
 }
 
-uint64_t VarsizeBlkAllocator::get_portions_per_segment() {
-    return (m_cfg.get_total_portions() / m_cfg.get_total_segments());
-}
-
 VarsizeBlkAllocator::~VarsizeBlkAllocator() {
     {
         std::lock_guard< std::mutex > lk(m_mutex);
-        if (m_region_state != BlkAllocatorState::BLK_ALLOCATOR_EXITING) {
-            BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "Region state = {}, set to {}", m_region_state,
-                         BlkAllocatorState::BLK_ALLOCATOR_EXITING);
-            m_region_state = BlkAllocatorState::BLK_ALLOCATOR_EXITING;
+        if (m_state != BlkAllocatorState::EXITING) {
+            BLKALLOC_LOG(DEBUG, "Allocator state change from {} to {}", m_state, BlkAllocatorState::EXITING);
+            m_state = BlkAllocatorState::EXITING;
         }
     }
 
     m_cv.notify_all();
     if (m_thread_id.joinable()) { m_thread_id.join(); }
-    delete (m_blk_cache);
-    delete (m_cache_bm);
-    for (auto i = 0U; i < m_cfg.get_total_segments(); i++) {
-        delete (m_segments[i]);
-        BLKALLOC_LOG(INFO, varsize_blk_alloc, "Deleted segment {}", i);
-    }
 }
 
 // Runs only in per sweep thread. In other words, this is a single threaded state machine.
 void VarsizeBlkAllocator::allocator_state_machine() {
-    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Starting new blk sweep thread, thread num = {}",
-     			 sisl::ThreadLocalContext::my_thread_num());
-    BlkAllocSegment* allocate_seg{nullptr};
-    int slab_indx;
-    bool allocate = false;
+    BLKALLOC_LOG(INFO, "Starting new blk sweep thread, thread num = {}", sisl::ThreadLocalContext::my_thread_num());
+    BlkAllocSegment* sweep_seg = nullptr;
+    std::shared_ptr< blk_cache_fill_session > fill_session;
+    bool sweep = false;
+
+    // Before entering to wait state, the state machine should fill the cache first.
+    request_more_blks(nullptr, true /* fill_entire_cache */);
 
     while (true) {
-        allocate_seg = nullptr;
-        slab_indx = -1;
-        allocate = false;
+        sweep_seg = nullptr;
+        sweep = false;
         {
             std::unique_lock< std::mutex > lk(m_mutex);
+            if (m_state == BlkAllocatorState::WAITING) {
+                BLKALLOC_LOG(TRACE, "Allocator is going to Waiting State");
 
-            if (m_region_state == BlkAllocatorState::BLK_ALLOCATOR_DONE) {
-                m_cv.wait(lk);
-                BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Region state : done");
+                auto woken = m_cv.wait_for(
+                    lk, std::chrono::milliseconds(HS_DYNAMIC_CONFIG(blkallocator.free_blk_cache_refill_frequency_ms)),
+                    [&]() { return (m_state != BlkAllocatorState::WAITING); });
+                if (!woken) { // Timed out
+                    _prepare_sweep(nullptr, false /* fill_entire_cache */);
+                }
             }
 
-            if (m_region_state == BlkAllocatorState::BLK_ALLOCATOR_WAIT_ALLOC) {
-                m_region_state = BlkAllocatorState::BLK_ALLOCATOR_ALLOCATING;
-                allocate_seg = m_wait_alloc_segment;
-                slab_indx = m_wait_slab_indx;
-                allocate = true;
-                BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Region state : wait-alloc -> allocating");
-            } else if (m_region_state == BlkAllocatorState::BLK_ALLOCATOR_EXITING) {
-                BLKALLOC_LOG(TRACE, varsize_blk_alloc, "TODO: Handle exiting message more periodically");
+            if (m_state == BlkAllocatorState::SWEEP_SCHEDULED) {
+                BLKALLOC_LOG(TRACE, "Allocator state change from {} to {}", m_state, BlkAllocatorState::SWEEPING);
+                m_state = BlkAllocatorState::SWEEPING;
+                sweep_seg = m_sweep_segment;
+                fill_session = m_cur_fill_session;
+                sweep = true;
+            } else if (m_state == BlkAllocatorState::EXITING) {
+                BLKALLOC_LOG(TRACE, "TODO: Handle exiting message more periodically");
                 break;
+            } else {
+                BLKALLOC_ASSERT(DEBUG, 0, "Allocator thread is woken on unexpected state = {}", m_state);
             }
         }
-        if (allocate) {
-            BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Fill cache for segment");
-            fill_cache(&allocate_seg, slab_indx);
+
+        if (sweep) {
+            BLKALLOC_LOG(DEBUG, "Starting to sweep based on requirement {}", fill_session->to_string());
+            fill_cache(sweep_seg, *fill_session);
             {
-                // acquire lock
                 std::unique_lock< std::mutex > lk(m_mutex);
-                m_wait_alloc_segment = nullptr;
-                if (m_region_state != BlkAllocatorState::BLK_ALLOCATOR_EXITING) { m_region_state = BlkAllocatorState::BLK_ALLOCATOR_DONE; }
+                m_sweep_segment = nullptr;
+                if (m_state != BlkAllocatorState::EXITING) { m_state = BlkAllocatorState::WAITING; }
                 m_cv.notify_all();
             }
-            BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Done with fill cache for segment");
+            BLKALLOC_LOG(DEBUG, "Sweep session completed with fill details {}", fill_session->to_string());
         }
     }
 }
 
 bool VarsizeBlkAllocator::is_blk_alloced(const BlkId& b) const {
     if (!m_inited) { return true; }
-    if (!m_cache_bm->is_bits_set(b.get_id(), b.get_nblks())) {
+    if (!m_bm->is_bits_set(b.get_blk_num(), b.get_nblks())) {
         BLKALLOC_ASSERT(RELEASE, 0, "Expected bits to reset");
         return false;
     }
@@ -150,309 +129,12 @@ bool VarsizeBlkAllocator::is_blk_alloced(const BlkId& b) const {
 }
 
 void VarsizeBlkAllocator::inited() {
-    m_cache_bm->copy(*(get_disk_bm()));
-    m_thread_id = sisl::named_thread("blkalloc_sweep", bind_this(VarsizeBlkAllocator::allocator_state_machine, 0));
-    LOGINFO("blk allocator inited");
+    m_bm->copy(*(get_disk_bm()));
     BlkAllocator::inited();
-}
 
-/* Check cache to see what blks are available */
-uint64_t VarsizeBlkAllocator::get_best_fit_cache(const uint64_t blks_rqstd) const {
-
-    auto slab_index = get_config().get_slab(blks_rqstd).first;
-    while (slab_index > 0) {
-        if (m_slab_entries[slab_index]._a.load()) { return (get_config().get_slab_lower_bound(slab_index)); }
-        slab_index--;
-    }
-
-    return 0;
-}
-
-BlkAllocStatus VarsizeBlkAllocator::alloc(const uint8_t nblks, const blk_alloc_hints& hints,
-                                          std::vector< BlkId >& out_blkid) {
-    uint8_t blks_alloced = 0;
-    uint32_t retry_cnt = 0;
-
-    uint8_t blks_rqstd = nblks;
-
-    BLKALLOC_ASSERT(LOGMSG, m_inited, "Alloc before initialized");
-    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "nblks={}, hints multiplier={}", nblks, hints.multiplier);
-    BLKALLOC_ASSERT_CMP(LOGMSG, nblks % hints.multiplier, ==, 0);
-
-#ifdef _PRERELEASE
-    if (homestore_flip->test_flip("varsize_blkalloc_no_blks", nblks)) { return BlkAllocStatus::BLK_ALLOC_SPACEFULL; }
-
-    auto split_cnt = homestore_flip->get_test_flip< int >("blkalloc_split_blk");
-    if (!hints.is_contiguous && split_cnt && nblks > split_cnt.get()) {
-        blks_rqstd = sisl::round_up((nblks / split_cnt.get()), hints.multiplier);
-        BLKALLOC_LOG(DEBUG, varsize_blk_alloc, "blocks requested={}, nblks={}, split_cnt={}", blks_rqstd, nblks,
-                     split_cnt.get());
-    }
-#endif
-
-    COUNTER_INCREMENT(m_metrics, num_alloc, 1);
-
-    do {
-        BlkId blkid;
-        COUNTER_INCREMENT(m_metrics, num_split, 1);
-        if (blks_rqstd > HS_STATIC_CONFIG(engine.max_blk_cnt)) {
-            blks_rqstd = sisl::round_down(HS_STATIC_CONFIG(engine.max_blk_cnt), hints.multiplier);
-        }
-        if (alloc(blks_rqstd, hints, &blkid, true) != BlkAllocStatus::BLK_ALLOC_SUCCESS) {
-            /* check the cache to see what blocks are available and get those
-             * blocks from the btree cache.
-             */
-            auto new_blks_rqstd = get_best_fit_cache(blks_rqstd);
-
-            /* It is because of a bug in btree where we can keep checking for the leaf node
-             * in the btree cache which doesn't have any keys. This code will go away once we
-             * have the range query implemented in btree.
-             */
-            if (new_blks_rqstd >= blks_rqstd) {
-                blks_rqstd = sisl::round_up((blks_rqstd / 2), hints.multiplier);
-            } else {
-                blks_rqstd = new_blks_rqstd;
-            }
-            if (blks_rqstd == 0) {
-                /* It should never happen. It means we are running out of space */
-                blks_rqstd = nblks - blks_alloced;
-                BLKALLOC_LOG(ERROR, varsize_blk_alloc, "Could not allocate any blocks. Running out of space");
-            }
-        } else {
-            blks_alloced += blkid.get_nblks();
-            BLKALLOC_LOG(TRACE, varsize_blk_alloc, "blks_alloced={}, hints multiplier={}", blks_alloced,
-                         hints.multiplier);
-            BLKALLOC_ASSERT_CMP(LOGMSG, blks_alloced % hints.multiplier, ==, 0);
-
-            blks_rqstd = nblks - blks_alloced;
-            BLKALLOC_ASSERT_CMP(LOGMSG, blkid.get_nblks(), !=, 0);
-            out_blkid.push_back(blkid);
-        }
-
-        retry_cnt++;
-        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Retry count={}", retry_cnt);
-    } while (blks_alloced != nblks &&
-             !hints.is_contiguous && // fail immediately if this is a request for contiguous blks;
-             retry_cnt < HS_DYNAMIC_CONFIG(blkallocator->max_varsize_blk_alloc_attempt));
-
-    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "blks_alloced={}, blocks requested={}", blks_alloced, nblks);
-
-    if (blks_alloced != nblks) {
-        if (hints.is_contiguous) {
-            BLKALLOC_LOG(DEBUG, varsize_blk_alloc,
-                         "Not enough contiguous requested blks available, blks_alloced != nblks : {}  {}", blks_alloced,
-                         nblks);
-        } else {
-            BLKALLOC_LOG(ERROR, varsize_blk_alloc, "Blk allocation failed. blks_alloced != nblks : {}  {}",
-                         blks_alloced, nblks);
-            if (m_cache_n_entries.load(std::memory_order_acquire) != 0) { m_blk_cache->print_tree(); }
-        }
-
-        COUNTER_INCREMENT(m_metrics, alloc_fail, 1);
-
-        /* free blks */
-        for (uint32_t i = 0; i < out_blkid.size(); ++i) {
-            free(out_blkid[i]);
-        }
-
-        out_blkid.clear();
-        return BlkAllocStatus::BLK_ALLOC_SPACEFULL;
-    }
-
-    return BlkAllocStatus::BLK_ALLOC_SUCCESS;
-}
-
-BlkAllocStatus VarsizeBlkAllocator::alloc(const uint8_t nblks, const blk_alloc_hints& hints, BlkId* const out_blkid,
-                                          const bool best_fit) {
-    BlkAllocStatus ret = BlkAllocStatus::BLK_ALLOC_SUCCESS;
-    bool found = false;
-
-    // TODO: Instead of given value, try to have leeway like 10% of both sides as range for desired_temp or bkt.
-    VarsizeAllocCacheEntry start_entry(BLKID_RANGE_FIRST, PAGEID_RANGE_FIRST, nblks, hints.desired_temp);
-    VarsizeAllocCacheEntry end_entry(BLKID_RANGE_LAST, PAGEID_RANGE_LAST, BLKCOUNT_RANGE_LAST, TEMP_RANGE_LAST);
-    VarsizeAllocCacheEntry actual_entry;
-
-    BtreeSearchRange regex(start_entry, true, /* start_incl */ end_entry, false, /* end incl */
-                           _MultiMatchSelector::BEST_FIT_TO_CLOSEST_FOR_REMOVE);
-
-    EmptyClass dummy_val;
-    uint32_t attempt = 1;
-    while (true) {
-        auto status = m_blk_cache->remove_any(regex, &actual_entry, &dummy_val);
-        found = (status == btree_status_t::success);
-        if (found) {
-#ifdef _PRERELEASE
-            if (homestore_flip->test_flip("blkalloc_no_blks_cache", nblks)) {
-                EmptyClass dummy;
-                m_blk_cache->put(actual_entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-                found = false;
-            }
-#endif
-            if (best_fit) {
-                if (actual_entry.get_blk_count() < hints.multiplier) {
-                    /* it should be atleast equal to hints multiplier. If not then wait for cache to populate */
-                    EmptyClass dummy;
-                    m_blk_cache->put(actual_entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-                    found = false;
-                } else {
-                    /* trigger blk allocator to populate cache */
-                    if (actual_entry.get_blk_count() != nblks) {
-                        auto slab_indx = get_config().get_slab(nblks).first;
-                        request_more_blks(nullptr, slab_indx);
-                    }
-                    break;
-                }
-            } else {
-                if (actual_entry.get_blk_count() < nblks) {
-                    found = false;
-                    EmptyClass dummy;
-                    m_blk_cache->put(actual_entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-                } else {
-                    break;
-                }
-            }
-        }
-
-        // Wait for cache to refill and then retry original request
-        if (attempt > HS_DYNAMIC_CONFIG(blkallocator->max_cache_fill_varsize_blk_alloc_attempt)) {
-            BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Exceeding max retries {} to allocate. Failing the alloc",
-                         HS_DYNAMIC_CONFIG(blkallocator->max_cache_fill_varsize_blk_alloc_attempt));
-            for (auto i = 0U; i < m_slab_entries.size(); i++) {
-                BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Capacity of slab {} = {}", i,
-                             m_slab_entries[i]._a.load(std::memory_order_acq_rel));
-            }
-            COUNTER_INCREMENT(m_metrics, num_attempts_failed, 1);
-            break;
-        } else {
-            BLKALLOC_LOG(TRACE, varsize_blk_alloc,
-                         "Attempt #{} to allocate nblks={} temperature={} failed. Waiting for cache to be filled",
-                         attempt, (uint32_t)nblks, hints.desired_temp);
-            COUNTER_INCREMENT(m_metrics, num_retry, 1);
-        }
-
-        auto slab_indx = get_config().get_slab(nblks).first;
-        request_more_blks_wait(nullptr, slab_indx);
-        attempt++;
-    }
-
-    if (!found) { return BlkAllocStatus::BLK_ALLOC_SPACEFULL; }
-
-    /* get excess blks */
-    int excess_nblks = actual_entry.get_blk_count() - nblks;
-    if (excess_nblks < 0) {
-        BLKALLOC_ASSERT_CMP(LOGMSG, best_fit, ==, true);
-        /* it has to be multiplier of hints */
-        excess_nblks = actual_entry.get_blk_count() % hints.multiplier;
-    }
-    BLKALLOC_ASSERT_CMP(LOGMSG, excess_nblks, >=, 0);
-
-    auto slab_index = get_config().get_slab(actual_entry.get_blk_count()).first;
-    m_slab_entries[slab_index]._a.fetch_sub(actual_entry.get_blk_count(), std::memory_order_acq_rel);
-    decr_slab_counter(slab_index, actual_entry.get_blk_count());
-
-    /* If we have more blks than what we need, insert the remaining blks to
-       the bitmap. We can give either the leading blocks or trailing blocks.
-       In case one of them is part of less number of pages than others, it
-       is better to pick the lesser ones.
-     */
-    uint64_t alloc_blks = actual_entry.get_blk_count() - excess_nblks;
-    if (excess_nblks > 0) {
-        uint64_t blknum = actual_entry.get_blk_num();
-        int leading_npages = (int)(blknum_to_phys_pageid(blknum + alloc_blks) - actual_entry.get_phys_page_id());
-        int trailing_npages = (int)(blknum_to_phys_pageid(blknum + actual_entry.get_blk_count()) -
-                                    blknum_to_phys_pageid(blknum + excess_nblks));
-
-        VarsizeAllocCacheEntry excess_entry;
-        if (leading_npages <= trailing_npages) {
-            out_blkid->set(blknum, alloc_blks);
-            gen_cache_entry(blknum + alloc_blks, (uint32_t)excess_nblks, &excess_entry);
-        } else {
-            out_blkid->set(blknum + excess_nblks, alloc_blks);
-            gen_cache_entry(blknum, (uint32_t)excess_nblks, &excess_entry);
-        }
-        EmptyClass dummy;
-        m_blk_cache->put(excess_entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-
-        auto slab_index = get_config().get_slab(excess_nblks).first;
-        m_slab_entries[slab_index]._a.fetch_add(excess_nblks, std::memory_order_acq_rel);
-        incr_slab_counter(slab_index, excess_nblks);
-
-    } else {
-        out_blkid->set(actual_entry.get_blk_num(), alloc_blks);
-    }
-    m_alloc_blk_cnt.fetch_add(alloc_blks, std::memory_order_relaxed);
-    m_cache_n_entries.fetch_sub(alloc_blks, std::memory_order_acq_rel);
-    return ret;
-}
-
-bool VarsizeBlkAllocator::try_add_blks_to_cache(const BlkId& b) {
-    BlkAllocPortion* portion = blknum_to_portion(b.get_id());
-    BlkAllocSegment* segment = blknum_to_segment(b.get_id());
-
-    {
-        auto lock{portion->portion_auto_lock()};
-
-        /* Check if cache is full */
-        if (m_cache_n_entries.load(std::memory_order_acq_rel) >= get_config().get_max_cache_blks()) {
-            BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Cache is full. Entry count = {}",
-                         m_cache_n_entries.load(std::memory_order_acq_rel));
-            return false;
-        }
-        /* Check if relevant slab is empty */
-        auto slab_index = get_config().get_slab(b.get_nblks()).first;
-        if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) >=
-            get_config().get_slab_capacity(slab_index)) {
-            BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Slab {} is full, capacity = {}", slab_index,
-                         m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
-            return false;
-        }
-
-        /* Create cache entry */
-        set_blk_temperature(b.get_id(), 1);
-        VarsizeAllocCacheEntry entry;
-        gen_cache_entry(b.get_id(), b.get_nblks(), &entry);
-
-        EmptyClass dummy;
-        m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-        auto cnt = m_alloc_blk_cnt.fetch_sub(b.get_nblks(), std::memory_order_relaxed);
-        BLKALLOC_ASSERT_CMP(LOGMSG, cnt, >=, 0);
-
-        m_slab_entries[slab_index]._a.fetch_add(b.get_nblks(), std::memory_order_acq_rel);
-        incr_slab_counter(slab_index, b.get_nblks());
-        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Added {} blocks to slab {}, slab capacity = {}, temp = {}",
-                     b.get_nblks(), slab_index, m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel),
-                     get_blk_temperature(b.get_id()));
-
-        m_cache_n_entries.fetch_add(b.get_nblks(), std::memory_order_acq_rel);
-    }
-
-    segment->reportFragmentation(b.get_nblks(), 1);
-    return true;
-}
-
-void VarsizeBlkAllocator::free(const BlkId& b) {
-
-    if (!m_inited) {
-        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Free not required for blk id = {}", b.get_id());
-        return;
-    }
-    if (try_add_blks_to_cache(b)) return;
-
-    BlkAllocPortion* portion = blknum_to_portion(b.get_id());
-    BlkAllocSegment* segment = blknum_to_segment(b.get_id());
-
-    /* No need to set in cache if it is not recovered. When recovery is complete we copy the
-     * disk_bm to cache bm.
-     */
-    {
-        auto lock{portion->portion_auto_lock()};
-        BLKALLOC_ASSERT(RELEASE, m_cache_bm->is_bits_set(b.get_id(), b.get_nblks()),
-                                                        "Expected bits to reset");
-        segment->add_free_blks(b.get_nblks());
-        m_cache_bm->reset_bits(b.get_id(), b.get_nblks());
-        auto cnt = m_alloc_blk_cnt.fetch_sub(b.get_nblks(), std::memory_order_relaxed);
-        BLKALLOC_ASSERT_CMP(LOGMSG, cnt, >=, 0);
-    }
+    BLKALLOC_LOG(INFO, "VarSizeBlkAllocator initialized loading bitmap of size={} used blks={} from persistent storage",
+                 m_bm->size(), get_alloced_blk_count());
+    m_thread_id = sisl::named_thread("blkalloc_sweep", bind_this(VarsizeBlkAllocator::allocator_state_machine, 0));
 }
 
 // This runs on per region thread and is at present single threaded.
@@ -460,341 +142,404 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
  * We might need to find a efficient way of doing it later. It stop processing the segment when any slab greater
  * then slab_indx is full.
  */
-void VarsizeBlkAllocator::fill_cache(BlkAllocSegment** const pSeg, const int slab_indx) {
-    uint64_t nadded_blks = 0;
+void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* seg, blk_cache_fill_session& fill_session) {
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("varsize_blkalloc_bypass_cache")) {
+        m_fb_cache->close_cache_fill_session(fill_session);
+        return;
+    }
+#endif
 
-    BLKALLOC_ASSERT_NULL(LOGMSG, *pSeg);
-    /* While cache is not full */
-    uint32_t total_segments = 0;
-    uint32_t max_blks = 0;
-    for (uint32_t i = 0; i < m_segments.size(); ++i) {
-        if (m_segments[i]->get_free_blks() > max_blks) {
-            *pSeg = m_segments[i];
-            max_blks = m_segments[i]->get_free_blks();
+    // Pick a segment if scan if not provided
+    if (seg == nullptr) {
+        // For now we are picking segment[0], we need to find a way to track allocation per segment
+        seg = m_segments[0].get();
+#if 0
+        uint64_t max_blks{0};
+        for (uint32_t i{0}; i < m_segments.size(); ++i) {
+            if (m_segments[i]->get_free_blks() > max_blks) {
+                seg = m_segments[i];
+                max_blks = m_segments[i]->get_free_blks();
+            }
         }
+
+        if (seg == nullptr) {
+            BLKALLOC_LOG(ERROR, "There are no more free blocks in bitset, everything is swept");
+            return;
+        }
+#endif
     }
 
-    if (*pSeg == nullptr) {
-        LOGINFO("There are no free blocks in var size blk allocator");
+    blk_num_t start_portion_num = seg->get_seg_num() * m_cfg.get_portions_per_segment() + seg->get_clock_hand();
+    auto portion_num = start_portion_num;
+
+    do {
+        BLKALLOC_ASSERT_CMP(LOGMSG, portion_num, <, m_cfg.get_total_portions());
+        fill_cache_in_portion(portion_num, fill_session);
+
+        // We have fully satisifed this session requirements
+        if (fill_session.overall_refill_done) { break; }
+
+        // Goto next group within the segment.
+        seg->inc_clock_hand();
+        portion_num = seg->get_clock_hand();
+    } while (portion_num != start_portion_num);
+
+    if (fill_session.overall_refilled_num_blks) {
+        BLKALLOC_LOG(DEBUG, "Allocator sweep session={} added {} blks to blk cache", fill_session.session_id,
+                     fill_session.overall_refilled_num_blks);
+    } else {
+        BLKALLOC_LOG(DEBUG, "Allocator sweep session={} failed to add any blocks to blk cache",
+                     fill_session.session_id);
+    }
+    m_fb_cache->close_cache_fill_session(fill_session);
+}
+
+void VarsizeBlkAllocator::fill_cache_in_portion(const blk_num_t portion_num, blk_cache_fill_session& fill_session) {
+    auto cur_blk_id = portion_num * m_cfg.get_blks_per_portion();
+    auto end_blk_id = cur_blk_id + m_cfg.get_blks_per_portion();
+
+    blk_cache_fill_req fill_req;
+    fill_req.preferred_level = 1;
+
+    BLKALLOC_LOG(TRACE, "Allocator sweep session={} for portion_num={} sweep blk_id_range=[{}-{}]",
+                 fill_session.session_id, portion_num, cur_blk_id, end_blk_id);
+
+    BlkAllocPortion& portion = *(get_blk_portion(portion_num));
+    {
+        auto lock{portion.portion_auto_lock()};
+        while (!fill_session.overall_refill_done && (cur_blk_id < end_blk_id)) {
+            // Get next reset bits and insert to cache and then reset those bits
+            const auto b = m_bm->get_next_contiguous_n_reset_bits(cur_blk_id, end_blk_id, 1, end_blk_id - cur_blk_id);
+
+            // If there are no free blocks are none within the assigned portion
+            if (b.nbits == 0) { break; }
+
+            HS_DEBUG_ASSERT_GE(end_blk_id, b.start_bit, "Expected start bit to be greater than end bit");
+            HISTOGRAM_OBSERVE(m_metrics, frag_pct_distribution, 100 / (static_cast< double >(b.nbits)));
+
+            // Fill the blk cache and keep accounting of number of blks added
+            fill_req.start_blk_num = b.start_bit;
+            fill_req.nblks = b.nbits;
+            fill_req.preferred_level = portion.temperature();
+            auto nblks_added = m_fb_cache->try_fill_cache(fill_req, fill_session);
+
+            HS_DEBUG_ASSERT_LE(nblks_added, b.nbits);
+
+            // Set the bitmap indicating the blks are allocated
+            m_bm->set_bits(b.start_bit, nblks_added);
+            cur_blk_id = b.start_bit + b.nbits;
+
+            BLKALLOC_LOG(DEBUG, "Sweep session={} portion_num={}, setting bit={} nblks={} set_bits_count={}",
+                         fill_session.session_id, portion_num, b.start_bit, nblks_added, get_alloced_blk_count());
+        }
+
+        if (fill_session.need_notify()) {
+            // If we have filled enough to satisy notification, do so
+            fill_session.set_urgent_satisfied();
+            m_cv.notify_all();
+        }
+    }
+    BLKALLOC_LOG(TRACE, "Allocator Portion num={} sweep session={} completed, so far added {} blks",
+                 fill_session.session_id, portion_num, fill_session.overall_refilled_num_blks);
+}
+
+BlkAllocStatus VarsizeBlkAllocator::alloc(BlkId& out_blkid) {
+    static thread_local std::vector< BlkId > s_ids;
+    s_ids.clear();
+
+    auto status = alloc(1, blk_alloc_hints{}, s_ids);
+    if (status == BlkAllocStatus::SUCCESS) { out_blkid = s_ids[0]; }
+    return status;
+}
+
+BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_alloc_hints& hints,
+                                          std::vector< BlkId >& out_blkids) {
+    BLKALLOC_ASSERT(LOGMSG, m_inited, "Alloc before initialized");
+    BLKALLOC_ASSERT_CMP(LOGMSG, nblks % hints.multiplier, ==, 0);
+    BLKALLOC_LOG(TRACE, "nblks={}, hints multiplier={}", nblks, hints.multiplier);
+
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("varsize_blkalloc_no_blks", nblks)) { return BlkAllocStatus::SPACE_FULL; }
+
+#if 0
+    auto split_cnt = homestore_flip->get_test_flip< int >("blkalloc_split_blk");
+    if (!hints.is_contiguous && split_cnt && nblks > split_cnt.get()) {
+        nblks = sisl::round_up((nblks / split_cnt.get()), hints.multiplier);
+        BLKALLOC_LOG(DEBUG, "nblks={}, split_cnt={}",  nblks, split_cnt.get());
+    }
+#endif
+
+    if (homestore_flip->test_flip("varsize_blkalloc_bypass_cache")) {
+        return alloc_blks_direct(nblks, hints, out_blkids);
+    }
+#endif
+
+    // Allocate from blk cache
+    static thread_local blk_cache_alloc_resp s_alloc_resp;
+    blk_cache_alloc_req alloc_req{nblks, hints.desired_temp, hints.is_contiguous,
+                                  FreeBlkCache::find_slab(hints.multiplier)};
+
+    uint32_t retry{0};
+    auto status{BlkAllocStatus::FAILED};
+    COUNTER_INCREMENT(m_metrics, num_alloc, 1);
+
+    do {
+        s_alloc_resp.reset();
+        status = m_fb_cache->try_alloc_blks(alloc_req, s_alloc_resp);
+
+        // If there are some excess blks which are removed from cache, but couldn't put it back in to the cache it is
+        // reported in the response as excess blks, we need to put that back to bitmap.
+        for (const auto& e : s_alloc_resp.excess_blks) {
+            BLKALLOC_LOG(DEBUG, "Freeing in bitmap of entry={} - excess of alloc_blks size={}", e.to_string(),
+                         s_alloc_resp.excess_blks.size());
+            free_on_bitmap(blk_cache_entry_to_blkid(e));
+        }
+
+        if (status == BlkAllocStatus::SUCCESS) {
+            // If the cache has depleted a bit, kick of sweep thread to fill the cache.
+            if (s_alloc_resp.need_refill) { request_more_blks(nullptr, false /* fill_entire_cache */); }
+            BLKALLOC_LOG(TRACE, "Alloced blk_num={}", s_alloc_resp.out_blks[0].to_string());
+
+            // Convert the resp blk cache entries to blkids
+            blk_cache_entries_to_blkids(s_alloc_resp.out_blks, out_blkids);
+#ifndef NDEBUG
+            blk_count_t alloced_nblks = 0;
+            for (const auto& b : out_blkids) {
+                BLKALLOC_ASSERT(DEBUG, is_set_on_bitmap(b), "Expected blkid={} to be already set in bitmap",
+                                b.to_string());
+                alloced_nblks += b.get_nblks();
+            }
+            BLKALLOC_ASSERT(DEBUG, (nblks == alloced_nblks), "Requested blks={} alloced_blks={}", nblks,
+                            alloced_nblks);
+#endif
+            incr_alloced_blk_count(nblks);
+            break;
+        }
+
+        BLKALLOC_LOG(DEBUG, "nblks={} failed to alloc from fb cache, trying to alloc from bitset directly", nblks);
+        status = alloc_blks_direct(nblks, hints, out_blkids);
+        if (status == BlkAllocStatus::SUCCESS) {
+            BLKALLOC_LOG(TRACE, "Alloced blk_num={} directly", s_alloc_resp.out_blks[0].to_string());
+            break;
+        }
+
+        // If we come here cache is not having any data. This is not normal case. Hence ask only upto twice the
+        // biggest slab to allow concurrent blk allocator just doesn't gobble up the new blks alloced
+        if (++retry < HS_DYNAMIC_CONFIG(blkallocator.max_varsize_blk_alloc_attempt)) {
+            COUNTER_INCREMENT(m_metrics, num_retries, 1);
+            const auto min_nblks = m_cfg.highest_slab_blks_count() * 2;
+            BLKALLOC_LOG(DEBUG,
+                         "Failed to allocate {} blks from blk cache, requesting refill atleast {} blks and retry={}",
+                         nblks, min_nblks, retry);
+            request_more_blks_wait(nullptr /* seg */, min_nblks);
+        } else {
+            break;
+        }
+
+#if 0
+        // If we come here cache is not having any data. This is not normal case. Hence ask only upto twice the
+        // biggest slab to allow concurrent blk allocator just doesn't gobble up the new blks alloced
+        if (++retry < HS_DYNAMIC_CONFIG(blkallocator.max_varsize_blk_alloc_attempt)) {
+            COUNTER_INCREMENT(m_metrics, num_retries, 1);
+            const auto min_nblks = m_cfg.highest_slab_blks_count() * 2;
+            BLKALLOC_LOG(DEBUG,
+                         "Failed to allocate {} blks from blk cache, requesting refill atleast {} blks and retry={}",
+                         nblks, min_nblks, retry);
+            request_more_blks_wait(nullptr /* seg */, min_nblks);
+        } else {
+            BLKALLOC_LOG(
+                DEBUG, "nblks={} failed to alloc after retries={} from blk cache, trying to alloc from bitset directly",
+                nblks, retry);
+            status = alloc_blks_direct(nblks, hints, out_blkids);
+            break;
+        }
+#endif
+    } while (true);
+
+    if (status != BlkAllocStatus::SUCCESS) {
+        BLKALLOC_LOG(ERROR, "nblks={} failed to alloc cache and direct after retries={}, giving up", nblks, retry);
+        COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
+        status = BlkAllocStatus::SPACE_FULL;
+    }
+    return status;
+}
+
+void VarsizeBlkAllocator::free(const BlkId& b) {
+    if (!m_inited) {
+        BLKALLOC_LOG(DEBUG, "Free not required for blk num = {}", b.get_blk_num());
         return;
     }
 
-    uint64_t start_portion_num = (*pSeg)->get_clock_hand();
-    while (m_cache_n_entries.load(std::memory_order_acquire) < get_config().get_max_cache_blks()) {
+    static thread_local std::vector< blk_cache_entry > excess_blks;
+    excess_blks.clear();
+    uint16_t num_zombied{0};
 
-        bool refill_needed = true;
-        BLKALLOC_ASSERT_CMP(LOGMSG, slab_indx, >=, 0);
-        for (auto i{std::max(slab_indx, 0)}; i < static_cast< int >(m_slab_entries.size()); ++i) {
-            // Low water mark for cache slabs is half of full capacity
-            auto count = m_slab_entries[i]._a.load(std::memory_order_acq_rel);
-            if (count <= get_config().get_slab_capacity(i) / 2) {
-                BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Hit low water mark for slab {} capacity = {}", i,
-                             m_slab_entries[i]._a.load(std::memory_order_acq_rel));
-            } else {
-                // atleast one slab is full.Wake up the IO thread
-                refill_needed = false;
-                /* break; // commented out so that logs for all slabs can be printed
-                 */
-            }
-        }
-        if (!refill_needed) break; // Atleast one slab has sufficient blocks
-
-        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Refill cache");
-        uint64_t portion_num = (*pSeg)->get_clock_hand();
-        nadded_blks += fill_cache_in_portion(portion_num, *pSeg);
-        if (nadded_blks > 0) {
-            /* We got some blks. wake the IO threads if there are waiting. This thread will continue to
-             * populate the desired slab.
-             */
-            std::unique_lock< std::mutex > lk(m_mutex);
-            m_cv.notify_all();
-        }
-
-        // Goto next group within the segment.
-        (*pSeg)->inc_clock_hand();
-        portion_num = (*pSeg)->get_clock_hand();
-
-        if (portion_num == start_portion_num) {
-            // Came one full circle, no need to look more.
-            break;
+    if (m_fb_cache->try_free_blks(blkid_to_blk_cache_entry(b), excess_blks, num_zombied) != BlkAllocStatus::SUCCESS) {
+        for (const auto& e : excess_blks) {
+            BLKALLOC_LOG(TRACE, "Freeing in bitmap of entry={} - excess of free_blks size={}", e.to_string(),
+                         excess_blks.size());
+            free_on_bitmap(blk_cache_entry_to_blkid(e));
         }
     }
-
-    if (nadded_blks) {
-        BLKALLOC_ASSERT_CMP(LOGMSG, (*pSeg)->get_free_blks(), >=, nadded_blks);
-        (*pSeg)->remove_free_blks(nadded_blks);
-        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Bitset sweep thread added {} blks to blk cache", nadded_blks);
-    } else {
-        BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Bitset sweep failed to add any blocks to blk cache");
-    }
+    decr_alloced_blk_count(b.get_nblks());
+    BLKALLOC_LOG(TRACE, "Freed blk_num={}", blkid_to_blk_cache_entry(b).to_string());
 }
 
-uint64_t VarsizeBlkAllocator::fill_cache_in_portion(const uint64_t seg_portion_num, BlkAllocSegment* const seg) {
-    EmptyClass dummy;
-    uint64_t n_added_blks = 0;
-    uint64_t n_fragments = 0;
+blk_cap_t VarsizeBlkAllocator::get_available_blks() const { return m_cfg.get_total_blks() - get_used_blks(); }
+blk_cap_t VarsizeBlkAllocator::get_used_blks() const { return get_alloced_blk_count(); }
 
-    uint64_t portion_num = seg->get_seg_num() * get_portions_per_segment() + seg_portion_num;
-    BLKALLOC_ASSERT_CMP(LOGMSG, m_cfg.get_total_portions(), >, portion_num);
-    BlkAllocPortion& portion = *(get_blk_portions(portion_num));
-    auto num_blks_per_portion = get_config().get_blks_per_portion();
-    auto cur_blk_id = portion_num * num_blks_per_portion;
-    auto end_blk_id = cur_blk_id + num_blks_per_portion;
-    uint32_t num_blks_per_phys_page = get_config().get_blks_per_phys_page();
-
+void VarsizeBlkAllocator::free_on_bitmap(const BlkId& b) {
+    BlkAllocPortion* portion = blknum_to_portion(b.get_blk_num());
     {
-        auto lock{portion.portion_auto_lock()};
-        /* TODO: Consider caching the m_cache_n_entries and give some leeway
-         *       to max cache blks and thus avoid atomic operations
-         */
-        while ((m_cache_n_entries.load(std::memory_order_acq_rel) < get_config().get_max_cache_blks()) &&
-               (cur_blk_id < end_blk_id)) {
-
-            // Get next reset bits and insert to cache and then reset those bits
-            auto b = m_cache_bm->get_next_contiguous_upto_n_reset_bits(cur_blk_id, MAX_NBLKS);
-            BLKALLOC_ASSERT_CMP(LOGMSG, b.nbits, <=, MAX_NBLKS);
-
-            /* If there are no free blocks are none within the assigned portion */
-            if (!b.nbits || b.start_bit >= end_blk_id) { break; }
-
-            /* Limit cache update to within portion boundary */
-            if (b.start_bit + b.nbits > end_blk_id) { b.nbits = end_blk_id - b.start_bit; }
-
-            /* Create cache entry for start till end or upto next page boundary,
-               whichever is earlier. This will be used if start is not aligned
-               with a page boundary
-             */
-            uint64_t total_bits = 0;
-            unsigned int nbits = b.start_bit % num_blks_per_phys_page;
-            if (nbits) {
-                nbits = std::min(num_blks_per_phys_page - nbits, b.nbits);
-                auto slab_index = get_config().get_slab(nbits).first;
-                if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) <
-                    get_config().get_slab_capacity(slab_index)) {
-                    VarsizeAllocCacheEntry entry;
-                    gen_cache_entry(b.start_bit, nbits, &entry);
-#ifndef NDEBUG
-                    BLKALLOC_ASSERT(DEBUG, m_cache_bm->is_bits_reset(b.start_bit, nbits), "Expected bits to reset");
-#endif
-                    m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-                    // TODO: Trap the return status of insert
-                    m_cache_bm->set_bits(b.start_bit, nbits);
-                    total_bits += nbits;
-                    m_slab_entries[slab_index]._a.fetch_add(nbits, std::memory_order_acq_rel);
-                    incr_slab_counter(slab_index, nbits);
-                    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Freed {} blocks for slab {}, remaining slab capacity = {}",
-                                 nbits, slab_index, m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
-                } else {
-                    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Slab {} is full, capacity = {}", slab_index,
-                                 m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
-                }
-                b.nbits -= nbits;
-                b.start_bit += nbits;
-            }
-
-            /* Create cache entry for end page, if end page has partial entry */
-            /* At this point start is aligned with blks end point or page boundary,
-               whichever occurs earlier
-             */
-            cur_blk_id = b.start_bit + b.nbits;
-            nbits = cur_blk_id % num_blks_per_phys_page;
-            if (b.nbits && nbits) {
-                /* If code enters this section, it means that start is aligned to a page
-                   boundary
-                 */
-                BLKALLOC_ASSERT_CMP(LOGMSG, b.start_bit % num_blks_per_phys_page, ==, 0);
-                auto start = cur_blk_id - nbits;
-                auto slab_index = get_config().get_slab(nbits).first;
-                if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) <
-                    get_config().get_slab_capacity(slab_index)) {
-                    VarsizeAllocCacheEntry entry;
-                    gen_cache_entry(start, nbits, &entry);
-#ifndef NDEBUG
-                    BLKALLOC_ASSERT(DEBUG, m_cache_bm->is_bits_reset(start, nbits), "Expected cache_bm bits to reset");
-#endif
-                    m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-                    // TODO: Trap the return status of insert
-                    m_cache_bm->set_bits(start, nbits);
-                    total_bits += nbits;
-                    m_slab_entries[slab_index]._a.fetch_add(nbits, std::memory_order_acq_rel);
-                    incr_slab_counter(slab_index, nbits);
-                    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Freed {} blocks for slab {}, remaining slab capacity = {}",
-                                 nbits, slab_index, m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
-                } else {
-                    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Slab {} is full, capacity = {}", slab_index,
-                                 m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
-                }
-                b.nbits -= nbits;
-            }
-
-            /* Create cache entry for complete pages between start and end */
-            if (b.nbits) {
-                /* If code enters this section, it means that start is aligned to a page
-                   boundary and nbits left is a multiple of page size
-                 */
-                BLKALLOC_ASSERT_CMP(LOGMSG, b.start_bit % num_blks_per_phys_page, ==, 0);
-                BLKALLOC_ASSERT_CMP(LOGMSG, b.nbits % num_blks_per_phys_page, ==, 0);
-                auto slab_index = get_config().get_slab(b.nbits).first;
-                if (m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel) <
-                    get_config().get_slab_capacity(slab_index)) {
-                    VarsizeAllocCacheEntry entry;
-                    gen_cache_entry(b.start_bit, b.nbits, &entry);
-#ifndef NDEBUG
-                    BLKALLOC_ASSERT(DEBUG, m_cache_bm->is_bits_reset(b.start_bit, b.nbits),
-                                    "Expected cache_bm bits to reset");
-#endif
-                    m_blk_cache->put(entry, dummy, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-                    // TODO: Trap the return status of insert
-                    m_cache_bm->set_bits(b.start_bit, b.nbits);
-                    total_bits += b.nbits;
-                    m_slab_entries[slab_index]._a.fetch_add(b.nbits, std::memory_order_acq_rel);
-                    incr_slab_counter(slab_index, b.nbits);
-                    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Freed {} blocks for slab {}, remaining slab capacity = {}",
-                                 b.nbits, slab_index, m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
-                } else {
-                    BLKALLOC_LOG(TRACE, varsize_blk_alloc, "Slab {} is full, capacity = {}", slab_index,
-                                 m_slab_entries[slab_index]._a.load(std::memory_order_acq_rel));
-                }
-            }
-
-            // Update the counters
-            if (total_bits) {
-                n_added_blks += total_bits;
-                n_fragments++;
-                m_cache_n_entries.fetch_add(total_bits, std::memory_order_acq_rel);
-            }
-        }
+        // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache bm.
+        auto lock{portion->portion_auto_lock()};
+        BLKALLOC_ASSERT(RELEASE, m_bm->is_bits_set(b.get_blk_num(), b.get_nblks()), "Expected bits to be set");
+        m_bm->reset_bits(b.get_blk_num(), b.get_nblks());
     }
-    seg->reportFragmentation(n_added_blks, n_fragments);
-    return n_added_blks;
+    BLKALLOC_LOG(DEBUG, "Freeing directly to portion={} blkid={} set_bits_count={}",
+                 blknum_to_portion_num(b.get_blk_num()), b.to_string(), get_alloced_blk_count());
 }
 
-// Run in non-region threads. It can be called by multiple threads simultaneously.
-// Request for more blocks from a specified segment. If BlkSegment is NULL, then it picks the 1st segment to
-// allocate from.
-void VarsizeBlkAllocator::request_more_blks(BlkAllocSegment* const seg, const int slab_indx) {
-    bool allocate = false;
+#ifndef NDEBUG
+bool VarsizeBlkAllocator::is_set_on_bitmap(const BlkId& b) {
+    BlkAllocPortion* portion = blknum_to_portion(b.get_blk_num());
     {
-        // acquire lock
+        // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache bm.
+        auto lock{portion->portion_auto_lock()};
+        return m_bm->is_bits_set(b.get_blk_num(), b.get_nblks());
+    }
+}
+#endif
+
+/**
+ * @brief Request more blocks to be filled into cache from optionally a specified segment. This method can be run on
+ * any thread and concurrently.
+ *
+ * @param seg [OPTIONAL] If seg is nullptr, then it picks the 1st segment to allocate from.
+ * @param fill_entire_cache Should entire blk cache be filled or we need to fill upto the limit requested
+ */
+void VarsizeBlkAllocator::request_more_blks(BlkAllocSegment* seg, const bool fill_entire_cache) {
+    bool notify = false;
+    {
         std::unique_lock< std::mutex > lk(m_mutex);
-        if (m_region_state == BlkAllocatorState::BLK_ALLOCATOR_DONE) {
-            m_wait_alloc_segment = seg;
-            m_wait_slab_indx = slab_indx;
-            m_region_state = BlkAllocatorState::BLK_ALLOCATOR_WAIT_ALLOC;
-            allocate = true;
+        if (m_state == BlkAllocatorState::WAITING) {
+            _prepare_sweep(seg, fill_entire_cache);
+            notify = true;
+            BLKALLOC_LOG(DEBUG, "Allocator is requested to refill blk cache and move to {} state", m_state);
+        } else {
+            BLKALLOC_LOG(TRACE,
+                         "Allocator is requested to refill blk cache but it is in {} state, ignoring this request",
+                         m_state);
         }
-    } // release lock
+    }
 
-    if (allocate) { m_cv.notify_all(); }
+    if (notify) { m_cv.notify_all(); }
 }
 
-void VarsizeBlkAllocator::request_more_blks_wait(BlkAllocSegment* const seg, const int slab_indx) {
-    /* TODO: rishabh if segment is not NULL then this function won't work */
+void VarsizeBlkAllocator::request_more_blks_wait(BlkAllocSegment* seg, const blk_cap_t wait_for_blks_count) {
     std::unique_lock< std::mutex > lk(m_mutex);
-    BLKALLOC_ASSERT_NULL(LOGMSG, seg);
-    if (m_region_state == BlkAllocatorState::BLK_ALLOCATOR_DONE) {
-        m_wait_alloc_segment = seg;
-        m_wait_slab_indx = slab_indx;
-        m_region_state = BlkAllocatorState::BLK_ALLOCATOR_WAIT_ALLOC;
+    if (m_state == BlkAllocatorState::WAITING) {
+        _prepare_sweep(seg, false /* fill_entire_cache */);
         m_cv.notify_all();
     }
-    // Wait for notification that it is done
-    if (m_region_state != BlkAllocatorState::BLK_ALLOCATOR_DONE && m_region_state != BlkAllocatorState::BLK_ALLOCATOR_EXITING) { m_cv.wait(lk); }
+
+    if ((m_state == BlkAllocatorState::SWEEP_SCHEDULED) || (m_state == BlkAllocatorState::SWEEPING)) {
+        // Wait for notification that it is either done sweeping or if it is sweeping it satisfies the requirement
+        // to wait for blks
+        m_cur_fill_session->urgent_need_atleast(wait_for_blks_count);
+        m_cv.wait(lk, [this]() {
+            return (((m_state != BlkAllocatorState::SWEEPING) && (m_state != BlkAllocatorState::SWEEP_SCHEDULED)) ||
+                    (!m_cur_fill_session->is_urgent_req_pending()));
+        });
+        BLKALLOC_LOG(DEBUG, "Refill session={} refilled {} blks overall and atleast {} blks since waiting",
+                     m_cur_fill_session->session_id, m_cur_fill_session->overall_refilled_num_blks,
+                     wait_for_blks_count);
+    } else {
+        BLKALLOC_LOG(DEBUG,
+                     "Allocator is requested to refill blk cache but it is in {} state, so ignoring this request",
+                     m_state);
+    }
 }
 
-std::string VarsizeBlkAllocator::state_string(BlkAllocatorState state) const {
-    if (state == BlkAllocatorState::BLK_ALLOCATOR_DONE) {
-        return "BLK_REGION_DONE";
-    } else if (state == BlkAllocatorState::BLK_ALLOCATOR_WAIT_ALLOC) {
-        return "BLK_REGION_WAIT_ALLOC";
-    } else if (state == BlkAllocatorState::BLK_ALLOCATOR_ALLOCATING) {
-        return "BLK_REGION_ALLOCATING";
-    } else if (state == BlkAllocatorState::BLK_ALLOCATOR_EXITING) {
-        return "BLK_REGION_EXITING";
-    } else {
-        return "STATUS_UNKNOWN";
+BlkAllocStatus VarsizeBlkAllocator::alloc_blks_direct(const blk_count_t nblks, const blk_alloc_hints& hints,
+                                                      std::vector< BlkId >& out_blkids) {
+    // Search all segments starting with some random portion num within each segment
+    const blk_num_t start_portion_num = m_rand_portion_num_generator(g_rd);
+    auto portion_num = start_portion_num;
+    const blk_count_t min_blks = hints.is_contiguous ? nblks : hints.multiplier;
+    const auto out_blk_idx = out_blkids.size();
+    blk_count_t nblks_remain = nblks;
+
+    do {
+        BlkAllocPortion& portion = *(get_blk_portion(portion_num));
+        auto cur_blk_id = portion_num * m_cfg.get_blks_per_portion();
+        auto end_blk_id = cur_blk_id + m_cfg.get_blks_per_portion();
+        {
+            auto lock{portion.portion_auto_lock()};
+            while (nblks_remain && (cur_blk_id < end_blk_id)) {
+                // Get next reset bits and insert to cache and then reset those bits
+                const auto b = m_bm->get_next_contiguous_n_reset_bits(cur_blk_id, end_blk_id,
+                                                                      std::min(min_blks, nblks_remain), nblks_remain);
+                if (b.nbits == 0) { break; }
+                HS_DEBUG_ASSERT_GE(end_blk_id, b.start_bit, "Expected start bit to be greater than end bit");
+                HS_DEBUG_ASSERT_LE(b.nbits, nblks_remain);
+
+                nblks_remain -= b.nbits;
+                out_blkids.emplace_back(b.start_bit, b.nbits, m_chunk_id);
+
+                // Set the bitmap indicating the blks are allocated
+                m_bm->set_bits(b.start_bit, b.nbits);
+                cur_blk_id = b.start_bit + b.nbits;
+
+                BLKALLOC_LOG(DEBUG,
+                             "Allocated directly from portion={} nnblks={} Blk_num={} nblks={} set_bit_count={}",
+                             portion_num, nblks, b.start_bit, b.nbits, get_alloced_blk_count());
+            }
+        }
+        if (++portion_num == m_cfg.get_total_portions()) { portion_num = 0; }
+        BLKALLOC_LOG(TRACE, "alloc direct unable to find in prev portion, searching in portion={}, start_portion={}",
+                     portion_num, start_portion_num);
+    } while (nblks_remain && (portion_num != start_portion_num));
+
+    if (nblks_remain) {
+        for (auto i{out_blk_idx}; i < out_blkids.size(); ++i) {
+            free_on_bitmap(out_blkids[i]);
+        }
+        out_blkids.erase(std::next(std::begin(out_blkids), out_blk_idx), std::end(out_blkids));
+        return BlkAllocStatus::SPACE_FULL;
     }
+    COUNTER_INCREMENT(m_metrics, num_blks_alloc_direct, 1);
+    incr_alloced_blk_count(nblks);
+    return BlkAllocStatus::SUCCESS;
+}
+
+/* This method assumes that mutex to protect state is already taken. */
+void VarsizeBlkAllocator::_prepare_sweep(BlkAllocSegment* seg, const bool fill_entire_cache) {
+    m_sweep_segment = seg;
+    m_cur_fill_session = m_fb_cache->create_cache_fill_session(fill_entire_cache);
+    m_state = BlkAllocatorState::SWEEP_SCHEDULED;
+}
+
+void VarsizeBlkAllocator::blk_cache_entries_to_blkids(const std::vector< blk_cache_entry >& entries,
+                                                      std::vector< BlkId >& out_blkids) {
+    for (const auto& e : entries) {
+        out_blkids.emplace_back(e.get_blk_num(), e.get_nblks(), m_chunk_id);
+    }
+}
+
+BlkId VarsizeBlkAllocator::blk_cache_entry_to_blkid(const blk_cache_entry& e) {
+    return BlkId{e.get_blk_num(), e.get_nblks(), m_chunk_id};
+}
+
+blk_cache_entry VarsizeBlkAllocator::blkid_to_blk_cache_entry(const BlkId& bid) {
+    return blk_cache_entry{bid.get_blk_num(), bid.get_nblks(), 0};
 }
 
 std::string VarsizeBlkAllocator::to_string() const {
-    ostringstream oss;
-    oss << "ThreadId=" << m_thread_id.get_id() << " RegionState=" << state_string(m_region_state)
-        << " Total cache entries = " << m_cache_n_entries.load(std::memory_order_relaxed);
-    return oss.str();
+    return fmt::format("BlkAllocator={} state={} total_blks={} cached_blks={} alloced_blks={}", m_cfg.get_name(),
+                       m_state, m_cfg.get_total_blks(), m_fb_cache->total_free_blks(), get_alloced_blk_count());
 }
 
-int VarsizeAllocCacheEntry::is_in_range(const uint64_t val, const uint64_t start, const bool start_incl, const uint64_t end,
-                                        const bool end_incl) const {
-    if (val < start) {
-        return -1;
-    } else if ((val == start) && (!start_incl)) {
-        return -1;
-    } else if (val > end) {
-        return 1;
-    } else if ((val == end) && (!end_incl)) {
-        return 1;
-    } else {
-        return 0;
-    }
-}
-
-int VarsizeAllocCacheEntry::compare_range(const BtreeSearchRange& range) const {
-    auto start_entry = (VarsizeAllocCacheEntry*)range.get_start_key();
-    auto end_entry = (VarsizeAllocCacheEntry*)range.get_end_key();
-
-    int ret = is_in_range(this->get_blk_count(), start_entry->get_blk_count(), range.is_start_inclusive(),
-                          end_entry->get_blk_count(), range.is_end_inclusive());
-    if (ret != 0) { return ret; }
-
-    ret = is_in_range(this->get_temperature(), start_entry->get_temperature(), range.is_start_inclusive(),
-                      end_entry->get_temperature(), range.is_end_inclusive());
-    if (ret != 0) { return ret; }
-
-    ret = is_in_range(this->get_phys_page_id(), start_entry->get_phys_page_id(), range.is_start_inclusive(),
-                      end_entry->get_phys_page_id(), range.is_end_inclusive());
-    return ret;
-}
-
-#if 0
-int VarsizeAllocCacheEntry::compare_range(const VarsizeAllocCacheEntry *start, bool start_incl,
-                                          const VarsizeAllocCacheEntry *end, bool end_incl) const {
-    int ret = is_in_range(this->get_blk_count(), start->get_blk_count(), start_incl, end->get_blk_count(),
-                          end_incl);
-    if (ret != 0) {
-        return ret;
-    }
-
-    ret = is_in_range(this->get_temperature(), start->get_temperature(), start_incl, end->get_temperature(),
-                      end_incl);
-    if (ret != 0) {
-        return ret;
-    }
-
-    ret = is_in_range(this->get_page_id(), start->get_page_id(), start_incl, end->get_page_id(), end_incl);
-    return ret;
-}
-#endif
-
-int VarsizeAllocCacheEntry::compare(const BtreeKey* o) const {
-    auto* other = (VarsizeAllocCacheEntry*)o;
-    if (get_blk_count() < other->get_blk_count()) {
-        return -1;
-    } else if (get_blk_count() > other->get_blk_count()) {
-        return 1;
-    } else if (get_temperature() < other->get_temperature()) {
-        return -1;
-    } else if (get_temperature() > other->get_temperature()) {
-        return 1;
-    } else if (get_phys_page_id() < other->get_phys_page_id()) {
-        return -1;
-    } else if (get_phys_page_id() > other->get_phys_page_id()) {
-        return 1;
-    } else if (get_blk_num() < other->get_blk_num()) {
-        return -1;
-    } else if (get_blk_num() > other->get_blk_num()) {
-        return 1;
-    } else {
-        return 0;
-    }
-}
+nlohmann::json VarsizeBlkAllocator::get_metrics_in_json() { return m_metrics.get_result_in_json(true); }
 } // namespace homestore

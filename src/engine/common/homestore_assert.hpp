@@ -53,6 +53,26 @@
  * 9) msg_params [optional]: Paramters for the above message if any.
  */
 // clang-format on
+#if 0
+#define LOGCUSTOMTRACEMOD_FMT(mod, logger, formatter, msg, ...)                                                        \
+    CUSTOM_LOGTRACEMOD_FMT(mod, HSCustomLogger::logger(), formatter, msg, ##__VA_ARGS__)
+
+#define LOGCUSTOMDEBUGMOD_FMT(mod, logger, formatter, msg, ...)                                                        \
+    CUSTOM_LOGDEBUGMOD_FMT(mod, HSCustomLogger::logger(), formatter, msg, ##__VA_ARGS__)
+
+#define LOGCUSTOMINFOMOD_FMT(mod, logger, formatter, msg, ...)                                                         \
+    CUSTOM_LOGINFOMOD_FMT(mod, HSCustomLogger::logger(), formatter, msg, ##__VA_ARGS__)
+
+#define LOGCUSTOMWARNMOD_FMT(mod, logger, formatter, msg, ...)                                                         \
+    CUSTOM_LOGWARNMOD_FMT(mod, HSCustomLogger::logger(), formatter, msg, ##__VA_ARGS__)
+
+#define LOGCUSTOMERRORMOD_FMT(mod, logger, formatter, msg, ...)                                                        \
+    CUSTOM_LOGERMOD_FMT(mod, HSCustomLogger::logger(), formatter, msg, ##__VA_ARGS__)
+
+#define LOGCUSTOMCRITICALMOD_FMT(mod, logger, formatter, msg, ...)                                                     \
+    CUSTOM_LOGCRITICALMOD_FMT(mod, HSCustomLogger::logger(), formatter, msg, ##__VA_ARGS__)
+#endif
+
 #define HS_DETAILED_LOG(level, mod, req, submod_name, submod_val, detail_name, detail_val, msg, ...)                   \
     {                                                                                                                  \
         LOG##level##MOD_FMT(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                                            \
@@ -68,6 +88,7 @@
                             }),                                                                                        \
                             msg, ##__VA_ARGS__);                                                                       \
     }
+
 #define HS_SUBMOD_LOG(level, mod, req, submod_name, submod_val, msg, ...)                                              \
     HS_DETAILED_LOG(level, mod, req, submod_name, submod_val, , , msg, ##__VA_ARGS__)
 #define HS_REQ_LOG(level, mod, req, msg, ...) HS_SUBMOD_LOG(level, mod, req, , , msg, ##__VA_ARGS__)

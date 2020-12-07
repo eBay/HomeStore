@@ -673,8 +673,8 @@ private:
 struct Free_Blk_Entry {
     BlkId m_blkId;
     /* These entries are needed only to invalidate cache. We store the actual blkid in journal */
-    uint8_t m_blk_offset : NBLKS_BITS;
-    uint8_t m_nblks_to_free : NBLKS_BITS;
+    blk_count_t m_blk_offset;
+    blk_count_t m_nblks_to_free;
     hs_cp* m_hcp = nullptr;
 
     Free_Blk_Entry() {}

@@ -24,7 +24,7 @@ public:
     uint64_t start() {
         ValueEntry ve;
         get_array().get(0, ve, false);
-        return ve.get_blkId().m_id + ve.get_blk_offset();
+        return ve.get_blkId().get_blk_num() + ve.get_blk_offset();
     }
 
     // NOTE assuming data block size is same as lba-volume block size
@@ -37,13 +37,13 @@ public:
     void addToId(uint64_t val) {
         ValueEntry ve;
         get_array().get(0, ve, false);
-        ve.get_blkId().m_id += val;
+        ve.get_blkId().set_blk_num(ve.get_blkId().get_blk_num() + val);
     }
 
     void reset() {
         ValueEntry ve;
         get_array().get(0, ve, false);
-        ve.get_blkId().m_id = 0;
+        ve.get_blkId().set_blk_num(0);
     }
 
     static std::shared_ptr< MapValue > gen_value(ValuePattern spec, MapValue* ref_value = nullptr) {

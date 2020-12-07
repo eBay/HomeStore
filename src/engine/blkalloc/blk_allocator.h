@@ -15,11 +15,14 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <memory>
 
 #include <boost/range/irange.hpp>
 #include <fds/bitset.hpp>
-#include <folly/ThreadLocal.h>
+#include <folly/MPMCQueue.h>
+#include <utility/enum.hpp>
 
+#include "blk.h"
 #include "engine/device/device.h"
 #include "engine/homeds/btree/btree.hpp"
 #include "engine/homestore_base.hpp"
@@ -28,8 +31,10 @@
 
 #include "blk.h"
 
+SDS_LOGGING_DECL(blkalloc)
+
 namespace homestore {
-#define BLKALLOC_LOG(level, mod, msg, ...) HS_SUBMOD_LOG(level, mod, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
+#define BLKALLOC_LOG(level, msg, ...) HS_SUBMOD_LOG(level, blkalloc, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
 #define BLKALLOC_ASSERT(assert_type, cond, msg, ...)                                                                   \
     HS_SUBMOD_ASSERT(assert_type, cond, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
 #define BLKALLOC_ASSERT_CMP(assert_type, val1, cmp, val2, ...)                                                         \
@@ -44,17 +49,17 @@ struct blkalloc_cp;
 class BlkAllocConfig {
 private:
     uint32_t m_blk_size;
-    uint64_t m_nblks;
-    uint32_t m_blks_per_portion;
+    blk_cap_t m_capacity;
+    blk_cap_t m_blks_per_portion;
     std::string m_unique_name;
     bool m_auto_recovery = false;
 
 public:
-    explicit BlkAllocConfig(const std::string& name) : BlkAllocConfig(8192, 0, name) {}
-    explicit BlkAllocConfig(const uint64_t nblks) : BlkAllocConfig(8192, nblks, "") {}
-
-    BlkAllocConfig(const uint32_t blk_size = 8192, const uint64_t nblks = 0, const std::string& name = "") :
-            m_blk_size(blk_size), m_nblks(nblks), m_blks_per_portion(nblks), m_unique_name(name) {}
+    BlkAllocConfig(const uint32_t blk_size, const uint64_t size, const std::string& name = "") :
+            m_blk_size{blk_size},
+            m_capacity{static_cast< blk_cap_t >(size / blk_size)},
+            m_blks_per_portion{std::min(HS_DYNAMIC_CONFIG(blkallocator.num_blks_per_portion), m_capacity)},
+            m_unique_name{name} {}
 
     BlkAllocConfig(const BlkAllocConfig&) = default;
     BlkAllocConfig(BlkAllocConfig&&) noexcept = delete;
@@ -62,90 +67,62 @@ public:
     BlkAllocConfig& operator=(BlkAllocConfig&&) noexcept = delete;
     virtual ~BlkAllocConfig() = default;
 
-    void set_blk_size(const uint64_t blk_size) { m_blk_size = blk_size; }
-
+    void set_blk_size(const uint32_t blk_size) { m_blk_size = blk_size; }
     [[nodiscard]] uint32_t get_blk_size() const { return m_blk_size; }
 
-    void set_total_blks(const uint64_t nblks) { m_nblks = nblks; }
+    void set_total_blks(const blk_cap_t cap) { m_capacity = cap; }
+    [[nodiscard]] blk_cap_t get_total_blks() const { return m_capacity; }
 
-    [[nodiscard]] uint64_t get_total_blks() const { return m_nblks; }
+    void set_blks_per_portion(const blk_cap_t pg_per_portion) { m_blks_per_portion = pg_per_portion; }
+    [[nodiscard]] blk_cap_t get_blks_per_portion() const { return m_blks_per_portion; }
+
+    [[nodiscard]] blk_cap_t get_total_portions() const { return (get_total_blks() - 1) / get_blks_per_portion() + 1; }
+
+    void set_auto_recovery(const bool auto_recovery) { m_auto_recovery = auto_recovery; }
+    [[nodiscard]] bool get_auto_recovery() const { return m_auto_recovery; }
 
     [[nodiscard]] const std::string& get_name() const { return m_unique_name; }
 
     [[nodiscard]] virtual std::string to_string() const {
-        std::stringstream oss{};
-        oss << "Blksize=" << get_blk_size() << " TotalBlks=" << get_total_blks();
-        return oss.str();
+        return fmt::format("BlkSize={} TotalBlks={} BlksPerPortion={} auto_recovery={}", get_blk_size(),
+                           get_total_blks(), get_blks_per_portion(), get_auto_recovery());
     }
-
-    //! Set Blocks per Portion
-    /*!
-      \param pg_per_portion an uint32 argument signifies pages per portion
-      \return void
-    */
-    void set_blks_per_portion(const uint32_t pg_per_portion) { m_blks_per_portion = pg_per_portion; }
-
-    //! Get Blocks per Portion
-    /*!
-      \return blocks per portion as uint64
-    */
-    [[nodiscard]] uint64_t get_blks_per_portion() const { return m_blks_per_portion; }
-
-    //! Get Total Portions
-    /*!
-      \return portion count as uint64
-    */
-    [[nodiscard]] uint64_t get_total_portions() const {
-        assert(get_total_blks() % get_blks_per_portion() == 0);
-        return get_total_blks() / get_blks_per_portion();
-    }
-
-    void set_auto_recovery(const bool auto_recovery) { m_auto_recovery = auto_recovery; }
-    [[nodiscard]] bool get_auto_recovery() const { return m_auto_recovery; }
 };
 
-enum class BlkAllocStatus : uint8_t {
-    BLK_ALLOC_NONE = 0,
-    BLK_ALLOC_SUCCESS = 1 << 0, // Success
-    BLK_ALLOC_FAILED = 1 << 1,  // Failed
-    BLK_ALLOC_REQMORE = 1 << 2, // Indicate that we need more
-    BLK_ALLOC_SPACEFULL = 1 << 3,
-    BLK_ALLOC_INVALID_DEV = 1 << 4,
-};
+VENUM(BlkOpStatus, uint8_t,
+      NONE = 0,           // Default no status
+      SUCCESS = 1u << 0,   // Success
+      FAILED = 1u << 1,    // Generic failure
+      SPACEFULL = 1u << 2, // Space full failure
+      PARTIAL_FAILED = 1u << 3);
 
-enum class BlkOpStatus : uint8_t {
-    BLK_OP_NONE = 0,
-    BLK_OP_SUCCESS = 1 << 0, // Success
-    BLK_OP_FAILED = 1 << 1,  // Failed
-    BLK_OP_SPACEFULL = 1 << 2,
-    BLK_OP_PARTIAL_FAILED = 1 << 3
-};
-
-enum class BlkAllocatorState : uint8_t {
-    BLK_ALLOCATOR_DONE = 0,
-    BLK_ALLOCATOR_WAIT_ALLOC = 1,
-    BLK_ALLOCATOR_ALLOCATING = 2,
-    BLK_ALLOCATOR_EXITING = 3
-};
+ENUM(BlkAllocatorState, uint8_t, WAITING, SWEEP_SCHEDULED, SWEEPING, EXITING, DONE);
 
 /* Hints for various allocators */
 struct blk_alloc_hints {
     blk_alloc_hints() :
-            desired_temp(0), dev_id_hint(-1), can_look_for_other_dev(true), is_contiguous(false), multiplier(1) {}
+            desired_temp(0),
+            dev_id_hint(-1),
+            can_look_for_other_dev(true),
+            is_contiguous(false),
+            multiplier(1) {}
 
-    uint32_t desired_temp;       // Temperature hint for the device
+    blk_temp_t desired_temp;     // Temperature hint for the device
     int dev_id_hint;             // which physical device to pick (hint if any) -1 for don't care
     bool can_look_for_other_dev; // If alloc on device not available can I pick other device
     bool is_contiguous;
     uint32_t multiplier; // blks allocated in a blkid should be a multiple of multiplier
 };
 
+static constexpr blk_temp_t default_temperature() { return 1; }
+
 class BlkAllocPortion {
 private:
     std::mutex m_blk_lock;
+    blk_temp_t m_temperature;
 
 public:
-    BlkAllocPortion() = default;
+    BlkAllocPortion(const blk_temp_t temp = default_temperature()) : m_temperature(temp) {}
     ~BlkAllocPortion() = default;
     BlkAllocPortion(const BlkAllocPortion&) = delete;
     BlkAllocPortion(BlkAllocPortion&&) noexcept = delete;
@@ -153,6 +130,8 @@ public:
     BlkAllocPortion& operator=(BlkAllocPortion&&) noexcept = delete;
 
     auto portion_auto_lock() { return std::scoped_lock< std::mutex >(m_blk_lock); }
+    void set_temperature(const blk_temp_t temp) { m_temperature = temp; }
+    [[nodiscard]] blk_temp_t temperature() const { return m_temperature; }
 };
 
 /* We have the following design requirement it is used in auto recovery mode
@@ -163,7 +142,7 @@ public:
  *  - Allocate BlkIDs should not be persisted until it is persisted in journal. If system crash after writing to
  *    in use bm but before writing to journal then blkid will be leak forever.
  *
- * To acheive the above requirements we free blks in three phase
+ * To achieve the above requirements we free blks in three phase
  *      - accumulate all the blkids in the consumer
  *      - Reset bits in disk bitmap only
  *      - persist disk bitmap
@@ -193,21 +172,11 @@ public:
  */
 
 class BlkAllocator {
-    std::vector< BlkAllocPortion > m_blk_portions;
-    sisl::Bitset* m_disk_bm; // NOTE: This can be a unique_ptr but requires changes to sisl
-
-    bool m_auto_recovery = false;
-
-protected:
-    bool m_inited = false;
-    std::atomic< int64_t > m_alloc_blk_cnt;
-
 public:
-    explicit BlkAllocator(const BlkAllocConfig& cfg, const uint32_t id = 0) :
-            m_blk_portions(cfg.get_total_portions()), m_alloc_blk_cnt(0) {
+    BlkAllocator(const BlkAllocConfig& cfg, const uint32_t id = 0) : m_cfg{cfg} {
+        m_blk_portions = std::make_unique< BlkAllocPortion[] >(cfg.get_total_portions());
         m_auto_recovery = cfg.get_auto_recovery();
         m_disk_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
-        m_cfg = cfg;
     }
     BlkAllocator(const BlkAllocator&) = delete;
     BlkAllocator(BlkAllocator&&) noexcept = delete;
@@ -217,17 +186,20 @@ public:
     virtual ~BlkAllocator() {
         if (m_disk_bm) delete m_disk_bm;
     }
+
     [[nodiscard]] sisl::Bitset* get_disk_bm() { return m_disk_bm; }
     void set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm) {
-        LOGINFO("bitmap found");
+        BLKALLOC_LOG(INFO, "Persistent bitmap of size={} recovered", recovered_bm->size());
         m_disk_bm->move(*(recovered_bm.get()));
     }
-    [[nodiscard]] BlkAllocPortion* get_blk_portions(const uint32_t portion_num) {
-        return &(m_blk_portions[portion_num]);
+
+    [[nodiscard]] BlkAllocPortion* get_blk_portion(const blk_num_t portion_num) {
+        HS_DEBUG_ASSERT_LT(portion_num, m_cfg.get_total_portions(), "Portion num is not in range");
+        return &m_blk_portions[portion_num];
     }
 
     virtual void inited() {
-        m_alloc_blk_cnt.fetch_add(m_disk_bm->get_set_count(), std::memory_order_relaxed);
+        m_alloced_blk_count.fetch_add(m_disk_bm->get_set_count(), std::memory_order_relaxed);
         if (!m_auto_recovery) {
             delete m_disk_bm;
             m_disk_bm = nullptr;
@@ -235,12 +207,19 @@ public:
         m_inited = true;
     }
 
-    [[nodiscard]] uint32_t total_alloc_blks() const { return m_alloc_blk_cnt.load(); }
+    void incr_alloced_blk_count(const blk_count_t nblks) {
+        m_alloced_blk_count.fetch_add(nblks, std::memory_order_relaxed);
+    }
+    void decr_alloced_blk_count(const blk_count_t nblks) {
+        m_alloced_blk_count.fetch_sub(nblks, std::memory_order_relaxed);
+    }
+    [[nodiscard]] int64_t get_alloced_blk_count() const { return m_alloced_blk_count.load(std::memory_order_relaxed); }
+
     [[nodiscard]] bool is_blk_alloced_on_disk(const BlkId& b) const {
         if (!m_auto_recovery) {
             return true; // nothing to compare. So always return true
         }
-        if (!m_disk_bm->is_bits_set(b.get_id(), b.get_nblks())) {
+        if (!m_disk_bm->is_bits_set(b.get_blk_num(), b.get_nblks())) {
             BLKALLOC_ASSERT(RELEASE, 0, "Expected bits to reset");
             return false;
         }
@@ -250,36 +229,36 @@ public:
     /* It is used during recovery in both mode :- auto recovery and manual recovery
      * It is also used in normal IO during auto recovery mode.
      */
-    BlkAllocStatus alloc(const BlkId& in_bid) {
+    BlkAllocStatus alloc_on_disk(const BlkId& in_bid) {
         /* enable this assert later when reboot is supported */
         // assert(m_auto_recovery || !m_inited);
-        if (!m_auto_recovery && m_inited) { return BlkAllocStatus::BLK_ALLOC_FAILED; }
-        BlkAllocPortion* portion = blknum_to_portion(in_bid.get_id());
+        if (!m_auto_recovery && m_inited) { return BlkAllocStatus::FAILED; }
+        BlkAllocPortion* portion = blknum_to_portion(in_bid.get_blk_num());
         {
             auto lock{portion->portion_auto_lock()};
             if (m_inited) {
-                BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_reset(in_bid.get_id(), in_bid.get_nblks()),
+                BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_reset(in_bid.get_blk_num(), in_bid.get_nblks()),
                                 "Expected disk blks to reset");
             }
-            get_disk_bm()->set_bits(in_bid.get_id(), in_bid.get_nblks());
+            get_disk_bm()->set_bits(in_bid.get_blk_num(), in_bid.get_nblks());
         }
-        return BlkAllocStatus::BLK_ALLOC_SUCCESS;
+        return BlkAllocStatus::SUCCESS;
     };
 
     void free_on_disk(const BlkId& b) {
         /* this api should be called only when auto recovery is enabled */
         assert(m_auto_recovery);
-        BlkAllocPortion* portion = blknum_to_portion(b.get_id());
+        BlkAllocPortion* portion = blknum_to_portion(b.get_blk_num());
         {
             auto lock{portion->portion_auto_lock()};
             if (m_inited) {
                 /* During recovery we might try to free the entry which is already freed while replaying the journal,
                  * This assert is valid only post recovery.
                  */
-                BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(b.get_id(), b.get_nblks()),
+                BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks()),
                                 "Expected disk bits to set");
             }
-            get_disk_bm()->reset_bits(b.get_id(), b.get_nblks());
+            get_disk_bm()->reset_bits(b.get_blk_num(), b.get_nblks());
         }
     }
 
@@ -290,29 +269,37 @@ public:
         return (m_disk_bm->serialize());
     }
 
+    virtual BlkAllocStatus alloc(BlkId& bid) = 0;
+    virtual BlkAllocStatus alloc(const blk_count_t nblks, const blk_alloc_hints& hints,
+                                 std::vector< BlkId >& out_blkid) = 0;
+    virtual void free(const BlkId& id) = 0;
+    virtual blk_cap_t get_available_blks() const = 0;
+    virtual blk_cap_t get_used_blks() const = 0;
     virtual bool is_blk_alloced(const BlkId& b) const = 0;
     [[nodiscard]] virtual std::string to_string() const = 0;
-    virtual BlkAllocStatus alloc(const uint8_t nblks, const blk_alloc_hints& hints,
-                                 std::vector< BlkId >& out_blkid) = 0;
-    virtual BlkAllocStatus alloc(const uint8_t nblks, const blk_alloc_hints& hints, BlkId* const out_blkid,
-                                 const bool best_fit = false) = 0;
-    virtual void free(const BlkId& id) = 0;
 
     [[nodiscard]] virtual const BlkAllocConfig& get_config() const { return m_cfg; }
-    [[nodiscard]] uint64_t blknum_to_portion_num(const uint64_t blknum) const {
+    [[nodiscard]] blk_num_t blknum_to_portion_num(const blk_num_t blknum) const {
         return blknum / get_config().get_blks_per_portion();
     }
 
-    [[nodiscard]] BlkAllocPortion* blknum_to_portion(const uint64_t blknum) {
+    [[nodiscard]] BlkAllocPortion* blknum_to_portion(const blk_num_t blknum) {
         return &m_blk_portions[blknum_to_portion_num(blknum)];
     }
 
-    [[nodiscard]] const BlkAllocPortion* blknum_to_portion_const(const uint64_t blknum) const {
+    [[nodiscard]] const BlkAllocPortion* blknum_to_portion_const(const blk_num_t blknum) const {
         return &m_blk_portions[blknum_to_portion_num(blknum)];
     }
 
 protected:
     BlkAllocConfig m_cfg;
+    bool m_inited{false};
+
+private:
+    std::unique_ptr< BlkAllocPortion[] > m_blk_portions;
+    sisl::Bitset* m_disk_bm{nullptr}; // NOTE: This can be a unique_ptr but requires changes to sisl
+    std::atomic< int64_t > m_alloced_blk_count{0};
+    bool m_auto_recovery{false};
 };
 
 /* FixedBlkAllocator is a fast allocator where it allocates only 1 size block and ALL free blocks are cached instead of
@@ -320,68 +307,31 @@ protected:
  * does not support temperature of blocks and allocates simply on first come first serve basis
  */
 class FixedBlkAllocator : public BlkAllocator {
-private:
-    struct __fixed_blk_node {
-#ifndef NDEBUG
-        uint32_t this_blk_id;
-#endif
-        uint32_t next_blk;
-    } __attribute__((__packed__));
-
-    struct __top_blk {
-        struct blob {
-            uint32_t gen;
-            uint32_t top_blk_id;
-        } __attribute__((__packed__));
-
-        blob b;
-
-        __top_blk(uint64_t id) { memcpy(&b, &id, sizeof(uint64_t)); }
-
-        __top_blk(uint32_t gen, uint32_t blk_id) {
-            b.gen = gen;
-            b.top_blk_id = blk_id;
-        }
-
-        uint64_t to_integer() const {
-            uint64_t x;
-            memcpy(&x, &b, sizeof(uint64_t));
-            return x;
-        }
-
-        uint32_t get_gen() const { return b.gen; }
-
-        uint32_t get_top_blk_id() const { return b.top_blk_id; }
-
-        void set_gen(uint32_t gen) { b.gen = gen; }
-
-        void set_top_blk_id(uint32_t p) { b.top_blk_id = p; }
-    } __attribute__((__packed__));
-
-    std::atomic< uint64_t > m_top_blk_id;
-
-    std::unique_ptr<__fixed_blk_node[]> m_blk_nodes;
-
 public:
-    explicit FixedBlkAllocator(const BlkAllocConfig& cfg, const bool init, const uint32_t id);
+    FixedBlkAllocator(const BlkAllocConfig& cfg, const bool init, const chunk_num_t chunk_id);
     FixedBlkAllocator(const FixedBlkAllocator&) = delete;
     FixedBlkAllocator(FixedBlkAllocator&&) noexcept = delete;
     FixedBlkAllocator& operator=(const FixedBlkAllocator&) = delete;
     FixedBlkAllocator& operator=(FixedBlkAllocator&&) noexcept = delete;
-    virtual ~FixedBlkAllocator() override;
+    ~FixedBlkAllocator() override = default;
 
-    BlkAllocStatus alloc(const uint8_t nblks, const blk_alloc_hints& hints, BlkId* const out_blkid,
-                         const bool best_fit = false) override;
-    BlkAllocStatus alloc(const uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) override;
+    BlkAllocStatus alloc(BlkId& bid) override;
+    BlkAllocStatus alloc(const blk_count_t nblks, const blk_alloc_hints& hints,
+                         std::vector< BlkId >& out_blkid) override;
     void free(const BlkId& b) override;
-    virtual void inited() override;
+    void inited() override;
+
+    [[nodiscard]] blk_cap_t get_available_blks() const override;
+    [[nodiscard]] blk_cap_t get_used_blks() const override;
+    [[nodiscard]] bool is_blk_alloced(const BlkId& in_bid) const override;
     [[nodiscard]] std::string to_string() const override;
-    [[nodiscard]] virtual bool is_blk_alloced(const BlkId& in_bid) const override;
 
 private:
-    void free_blk(const uint32_t id);
-    uint32_t m_first_blk_id;
-    std::mutex m_bm_mutex;
+    blk_num_t init_portion(BlkAllocPortion* portion, const blk_num_t start_blk_num);
+
+private:
+    folly::MPMCQueue< BlkId > m_blk_q;
+    chunk_num_t m_chunk_id;
 };
 
 struct blkalloc_cp {

@@ -153,11 +153,11 @@ public:
 
         meta_blk* mblk = (meta_blk*)cookie;
         if (overflow) {
-            HS_ASSERT_CMP(DEBUG, sz_to_wrt, >=, META_BLK_PAGE_SZ);
-            HS_ASSERT_CMP(DEBUG, mblk->hdr.h.ovf_bid.to_integer(), !=, BlkId::invalid_internal_id());
+            HS_DEBUG_ASSERT_GE(sz_to_wrt, META_BLK_PAGE_SZ);
+            HS_DEBUG_ASSERT(mblk->hdr.h.ovf_bid.is_valid(), "Expected valid meta blkid");
         } else {
-            HS_ASSERT_CMP(DEBUG, sz_to_wrt, <=, META_BLK_CONTEXT_SZ);
-            HS_ASSERT_CMP(DEBUG, mblk->hdr.h.ovf_bid.to_integer(), ==, BlkId::invalid_internal_id());
+            HS_DEBUG_ASSERT_LE(sz_to_wrt, META_BLK_CONTEXT_SZ);
+            HS_DEBUG_ASSERT(!mblk->hdr.h.ovf_bid.is_valid(), "Expected valid meta blkid");
         }
 
         // verify context_sz

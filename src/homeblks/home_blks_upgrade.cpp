@@ -27,7 +27,7 @@ bool HomeBlks::vol_sb_sanity(vol_mem_sb* sb) {
 
 vol_mem_sb* HomeBlks::vol_sb_read(BlkId bid) {
     bool rewrite = false;
-    if (bid.to_integer() == BlkId::invalid_internal_id()) return nullptr;
+    if (!bid.is_valid()) return nullptr;
     std::vector< blk_buf_t > bbuf = m_sb_blk_store->read_nmirror(bid, m_cfg.devices.size() - 1);
     blk_buf_t valid_buf = get_valid_buf(bbuf, rewrite);
 
@@ -99,7 +99,7 @@ void HomeBlks::scan_volumes() {
     if (homestore_flip->test_flip("reboot_abort")) { abort(); }
 #endif
     try {
-        while (blkid.to_integer() != BlkId::invalid_internal_id()) {
+        while (blkid.is_valid()) {
             vol_mem_sb* sb = vol_sb_read(blkid);
             if (sb == nullptr) {
                 // TODO: Error handling here...
@@ -201,7 +201,7 @@ void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
 
     /* get the blkid of homeblks super block */
     sb_blkstore_blob* blob = (sb_blkstore_blob*)(&(vb->context_data));
-    if (blob->blkid.to_integer() == BlkId::invalid_internal_id()) {
+    if (!blob->blkid.is_valid()) {
         LOGINFO("init was failed last time. Should retry it with init flag");
         throw homestore::homestore_exception("init was failed last time. Should retry it with init",
                                              homestore_error::init_failed);
@@ -247,12 +247,12 @@ std::error_condition Volume::alloc_blk(volume_req_ptr& vreq, std::vector< BlkId 
     THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}", vreq->lba, vreq->nlbas);
     try {
         BlkAllocStatus status = m_hb->get_data_blkstore()->alloc_blk(vreq->nlbas * get_page_size(), hints, bid);
-        if (status != BLK_ALLOC_SUCCESS) {
+        if (status != BlkAllocStatus::SUCCESS) {
             LOGERROR("failing IO as it is out of disk space");
             check_and_complete_req(vreq, std::make_error_condition(std::errc::no_space_on_device));
             return std::errc::no_space_on_device;
         }
-        assert(status == BLK_ALLOC_SUCCESS);
+        assert(status == BlkAllocStatus::SUCCESS);
         HISTOGRAM_OBSERVE(m_metrics, volume_blkalloc_latency, get_elapsed_time_ns(vreq->io_start_time));
         COUNTER_INCREMENT(m_metrics, volume_write_count, 1);
     } catch (const std::exception& e) {

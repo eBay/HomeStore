@@ -29,9 +29,9 @@ class CacheKey : public BlkId, public KeySpec {
         std::default_random_engine generator{rd()};
 
         /* Distribution on which to apply the generator */
-        std::uniform_int_distribution< long long unsigned > distribution{0, KeySpec::MAX_KEYS};
+        std::uniform_int_distribution< blk_cap_t > distribution{0, std::numeric_limits< blk_cap_t >::max()};
 
-        const auto sblkid{distribution(generator)};
+        const blk_num_t sblkid{distribution(generator)};
         return CacheKey{sblkid, 1};
     }
 
@@ -41,7 +41,7 @@ public:
         case KeyPattern::SEQUENTIAL: {
             uint64_t newblkId = 0;
             if (ref_key) {
-                newblkId = (ref_key->get_id() + 1) % KeySpec::MAX_KEYS;
+                newblkId = (ref_key->get_blk_num() + 1) % std::numeric_limits< blk_cap_t >::max();
                 return CacheKey(newblkId, 1, 0);
             } else {
                 return generate_random_key();
@@ -51,7 +51,7 @@ public:
             return generate_random_key();
         }
         case KeyPattern::OUT_OF_BOUND:
-            return CacheKey(std::numeric_limits<uint64_t>::max(), 1, 0);
+            return CacheKey(std::numeric_limits< blk_num_t >::max(), 1, 0);
 
         default:
             // We do not support other gen spec yet
@@ -61,7 +61,7 @@ public:
     }
 
     explicit CacheKey() : BlkId{0, 0, 0} {}
-    explicit CacheKey(const uint64_t id, const uint8_t nblks, const uint16_t chunk_num = 0) :
+    explicit CacheKey(const blk_num_t id, const blk_count_t nblks, const chunk_num_t chunk_num = 0) :
             BlkId{id, nblks, chunk_num} {}
     CacheKey(const CacheKey& key) : BlkId{key} {}
 
@@ -75,7 +75,7 @@ public:
         return compare(*this, cache_key);
     }
 
-    BlkId* getBlkId() { return static_cast<BlkId*>(this); }
+    BlkId* getBlkId() { return static_cast< BlkId* >(this); }
 
     virtual bool is_consecutive(KeySpec& k) override {
         // this is hokey down casting
@@ -84,7 +84,7 @@ public:
 #else
         const CacheKey& cache_key{dynamic_cast< const CacheKey& >(k)};
 #endif
-        if (get_id() + get_nblks() == cache_key.get_id())
+        if (get_blk_num() + get_nblks() == cache_key.get_blk_num())
             return true;
         else
             return false;
@@ -99,8 +99,9 @@ public:
         return v;
     }
 
-    static void gen_keys_in_range(const CacheKey& k1, const uint32_t num_of_keys, std::vector< CacheKey >& keys_inrange) {
-        uint64_t start{k1.get_id()};
+    static void gen_keys_in_range(const CacheKey& k1, const uint32_t num_of_keys,
+                                  std::vector< CacheKey >& keys_inrange) {
+        uint64_t start{k1.get_blk_num()};
         const uint64_t end{start + num_of_keys - 1};
         while (start <= end) {
             keys_inrange.push_back(CacheKey(start, 1, 0));
@@ -110,7 +111,8 @@ public:
 };
 
 template < typename charT, typename traits >
-std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream, const CacheKey& cache_key) {
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream,
+                                                const CacheKey& cache_key) {
     // copy the stream formatting
     std::basic_ostringstream< charT, traits > outStringStream;
     outStringStream.copyfmt(outStream);
@@ -129,11 +131,11 @@ std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, trait
 // hash function definitions
 namespace std {
 template <>
-struct hash<homeds::loadgen::CacheKey > {
+struct hash< homeds::loadgen::CacheKey > {
     typedef homeds::loadgen::CacheKey argument_type;
     typedef size_t result_type;
     result_type operator()(const argument_type& cache_key) const noexcept {
-        return std::hash< uint64_t >()(static_cast<const homestore::BlkId&>(cache_key).to_integer());
+        return std::hash< uint64_t >()(static_cast< const homestore::BlkId& >(cache_key).to_integer());
     }
 };
 } // namespace std

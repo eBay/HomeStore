@@ -1,4 +1,4 @@
-message(WARNING "BlkStore test disabled due to interface change.")
+message(INFO "BlkStore test disabled due to interface change.")
 # XXX: Out of date with BlkStore interface
 #set(TEST_BLKSTORE_SOURCE_FILES
 #        test_blkstore.cpp

@@ -2,6 +2,8 @@
 #ifdef _PRERELEASE
 #include <flip/flip.hpp>
 #include <iomgr/iomgr.hpp>
+#include <functional>
+#include <memory>
 
 namespace homestore {
 class FlipTimerIOMgr : public flip::FlipTimerBase {

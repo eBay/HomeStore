@@ -6,8 +6,45 @@ attribute "hotswap";
 attribute "deprecated";
 
 table BlkAllocator {
-    max_cache_fill_varsize_blk_alloc_attempt: uint32 = 3 (hotswap); 
-    max_varsize_blk_alloc_attempt: uint32 = 1000 (hotswap);
+    /* Number of attempts we try to allocate from cache before giving up */
+    max_varsize_blk_alloc_attempt: uint32 = 2 (hotswap);
+
+    /* Total number of segments the blkallocator is divided upto */
+    max_segments: uint32 = 1;
+
+    /* Total number of blk temperature supported. Having more temperature helps better block allocation if the
+     * classification is set correctly during blk write */
+    num_blk_temperatures: uint8 = 1;
+
+    /* The entire blk space is divided into multiple portions and atomicity and temperature are assigned to
+     * portion. Having large number of portions provide lot of lock sharding and also more room for fine grained
+     * temperature of blk, but increases the memory usage */
+    num_blks_per_portion: uint32 = 16384;
+
+    /* Count of free blks cache in-terms of device size */
+    free_blk_cache_count_by_vdev_percent: double = 80.0;
+
+    /* Percentage of overall memory allocated for blkallocator free blks cache. The memory allocated effictively is the 
+     * min of memory occupied by (free_blk_cache_size_by_vdev_percent, max_free_blk_cache_memory_percent) */
+    max_free_blk_cache_memory_percent: double = 1.0;
+
+    /* Free blk cache slab distribution percentage */
+    //    An example assuming blk_size=4K      [4K,   8K,   16K,  32K,  64K,  128K,256K,512K,1M,  2M,  4M,  8M,  16M ]  
+    // free_blk_slab_distribution : [double] = [20.0, 10.0, 10.0, 10.0, 35.0, 3.0, 3.0, 3.0, 2.0, 1.0, 1.0, 1.0, 1.0]
+    free_blk_slab_distribution : [double];
+
+    /* Percentage of free blks in a slab dedicated for reuse of blks to avoid write amplification. By reusing
+     * the same blocks we are writing soon enough before SSD has to garbage collect, so that not many garbage
+     * nodes are present in the system */
+    free_blk_reuse_pct: double = 70;
+
+    /* Threshold percentage below which we start refilling the cache on that slab */
+    free_blk_cache_refill_threshold_pct: double = 60;
+
+    /* Frequency at which blk cache refill is scheduled proactively so that a slab doesn't run out of space. This is
+     * specified in ms. Default to 5 minutes. Having this value too low will cause more CPU usage in scanning
+     * the bitmap, setting too high will cause run-out-of-slabs during allocation and thus cause increased write latency */
+    free_blk_cache_refill_frequency_ms: uint64 =  300000;
 }
 
 table Btree {

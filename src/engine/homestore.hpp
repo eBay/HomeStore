@@ -11,6 +11,7 @@
 #include "homelogstore/log_store.hpp"
 
 #include "homestore_base.hpp"
+#include "engine/common/homestore_config.hpp"
 
 using namespace homeds::btree;
 
@@ -52,6 +53,8 @@ public:
         hs_config.drive_attr =
             (input.drive_attr) ? *input.drive_attr : get_drive_attrs(input.devices, input.device_type);
 
+        HomeStoreDynamicConfig::init_settings_default();
+
 #ifndef NDEBUG
         flip::Flip::instance().start_rpc_server();
 #endif
@@ -62,7 +65,7 @@ public:
          * conservatively 4 entries in a node with avg size of 2 for each blk.
          * Note :- This restriction will go away once btree start supporinting higher size value.
          */
-        hs_config.engine.max_blk_cnt = hs_config.drive_attr.atomic_phys_page_size / (4 * 2);
+        // hs_config.engine.max_blk_cnt = hs_config.drive_attr.atomic_phys_page_size / (4 * 2);
         hs_config.engine.min_io_size =
             std::min(input.min_virtual_page_size, (uint32_t)hs_config.drive_attr.atomic_phys_page_size);
         m_data_pagesz = input.min_virtual_page_size;
@@ -112,10 +115,10 @@ public:
         hints.dev_id_hint = -1;
         hints.is_contiguous = true;
         auto ret = m_sb_blk_store->alloc_contiguous_blk(sz, hints, &bid);
-        if (ret != BlkAllocStatus::BLK_ALLOC_SUCCESS) {
+        if (ret != BlkAllocStatus::SUCCESS) {
             throw homestore::homestore_exception("space not available", homestore_error::space_not_avail);
         }
-        assert(ret == BlkAllocStatus::BLK_ALLOC_SUCCESS);
+        assert(ret == BlkAllocStatus::SUCCESS);
         return bid;
     }
 
@@ -183,7 +186,7 @@ protected:
     void create_data_blkstore(vdev_info_block* vb) {
         if (vb == nullptr) {
             /* change it to context */
-            struct blkstore_blob blob;
+            struct blkstore_blob blob {};
             blob.type = blkstore_type::DATA_STORE;
             uint64_t size = (90 * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
@@ -206,7 +209,7 @@ protected:
 
     void create_index_blkstore(vdev_info_block* vb) {
         if (vb == nullptr) {
-            struct blkstore_blob blob;
+            struct blkstore_blob blob {};
             blob.type = blkstore_type::INDEX_STORE;
             uint64_t size = (2 * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
@@ -228,9 +231,9 @@ protected:
     void create_sb_blkstore(vdev_info_block* vb) { // deprecated
         if (vb == nullptr) {
             /* create a blkstore */
-            struct sb_blkstore_blob blob;
+            struct sb_blkstore_blob blob {};
             blob.type = blkstore_type::SB_STORE;
-            blob.blkid.set(BlkId::invalid_internal_id());
+            blob.blkid.invalidate();
             uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
             m_sb_blk_store = std::make_unique< sb_blkstore_t >(
@@ -258,7 +261,7 @@ protected:
 
             /* get the blkid of homestore super block */
             sb_blkstore_blob* blob = (sb_blkstore_blob*)(&(vb->context_data));
-            if (blob->blkid.to_integer() == BlkId::invalid_internal_id()) {
+            if (!blob->blkid.is_valid()) {
                 LOGINFO("init was failed last time. Should retry it with init flag");
                 throw homestore::homestore_exception("init was failed last time. Should retry it with init",
                                                      homestore_error::init_failed);
@@ -275,7 +278,7 @@ protected:
         sb_blkstore_blob* sb_blob = nullptr;
         bool init = true;
         if (vb == nullptr) {
-            struct blkstore_blob blob;
+            struct blkstore_blob blob {};
             blob.type = blkstore_type::META_STORE;
             uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
@@ -295,7 +298,7 @@ protected:
 
             /* get the blkid of homestore super block */
             sb_blob = (sb_blkstore_blob*)(&(vb->context_data));
-            if (sb_blob->blkid.to_integer() == BlkId::invalid_internal_id()) {
+            if (!sb_blob->blkid.is_valid()) {
                 LOGINFO("init was failed last time. Should retry it with init flag");
                 throw homestore::homestore_exception("init was failed last time. Should retry it with init",
                                                      homestore_error::init_failed);
@@ -307,7 +310,7 @@ protected:
 
     void create_logdev_blkstore(vdev_info_block* vb) {
         if (vb == nullptr) {
-            struct blkstore_blob blob;
+            struct blkstore_blob blob{};
             blob.type = blkstore_type::LOGDEV_STORE;
             uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));

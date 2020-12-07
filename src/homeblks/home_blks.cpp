@@ -725,7 +725,7 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
         LOGCRITICAL("System experienced sudden panic since last boot!");
     } else {
         HS_ASSERT(RELEASE, m_dev_mgr->is_first_time_boot(), "not the first boot");
-        LOGINFO("first time boot");
+        LOGINFO("System is booting up first time");
         HS_ASSERT_CMP(DEBUG, MetaBlkMgr::is_self_recovered(), ==, false);
     }
 
@@ -741,17 +741,17 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     vol_recovery_start_phase1();
 
     // start log store recovery
-    LOGINFO("home log store recovery is started");
+    LOGINFO("HomeLogStore recovery is started");
     home_log_store_mgr.start(m_dev_mgr->is_first_time_boot());
 
     /* indx would have recovered by now */
     indx_recovery_done();
 
     // start volume data recovery
-    LOGINFO("volume recovery is started");
+    LOGINFO("All volumes recovery is started");
     vol_recovery_start_phase2();
 
-    LOGINFO("writing homeblks superblk in init");
+    LOGINFO("Writing homeblks super block during init");
     homeblks_sb_write();
 
     /* scan all the volumes and check if it needs to be mounted */
@@ -760,13 +760,13 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     }
 
     // trigger CP
-    LOGINFO("triggering system CP in init");
+    LOGINFO("Triggering system CP during initialization");
     Volume::trigger_homeblks_cp(([this](bool success) {
         if (success) {
-            LOGINFO("system CP is taken in init");
+            LOGINFO("System CP taken upon init is completed successfully");
             init_done(no_error);
         } else {
-            LOGERROR("{}", "system cp failed");
+            LOGERROR("{}", "System CP taken upon init is failed");
             init_done(std::make_error_condition(std::errc::io_error));
         }
     }));

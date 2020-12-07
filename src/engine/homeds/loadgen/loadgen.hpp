@@ -76,7 +76,7 @@ public:
     void insert(KeyPattern key_pattern, ValuePattern value_pattern, store_error_cb_t error_cb, bool expected_success,
                 bool new_key, loadgen_success_cb_t success_cb = nullptr) {
         this->op_start();
-        m_executor.add([=] {
+        m_executor.add([=, this] {
             this->_insert(key_pattern, value_pattern, error_cb, expected_success, new_key);
             this->op_done(success_cb);
         });
@@ -86,7 +86,7 @@ public:
                 bool expected_success = true, bool valid_key = true, loadgen_success_cb_t success_cb = nullptr,
                 store_error_cb_t error_cb = handle_generic_error) {
         this->op_start();
-        m_executor.add([=] {
+        m_executor.add([=, this] {
             this->_update(key_pattern, exclusive_access, value_pattern, error_cb, expected_success, valid_key);
             this->op_done(success_cb);
         });
@@ -96,7 +96,7 @@ public:
                       bool start_incl, bool end_incl, loadgen_success_cb_t success_cb = nullptr,
                       store_error_cb_t error_cb = handle_generic_error) {
         this->op_start();
-        m_executor.add([=] {
+        m_executor.add([=, this] {
             this->_range_update(pattern, value_pattern, num_keys_in_range, true, exclusive_access, start_incl, end_incl,
                                 error_cb);
             this->op_done(success_cb, 0);
@@ -107,7 +107,7 @@ public:
                      bool end_incl, loadgen_success_cb_t success_cb = nullptr,
                      store_error_cb_t error_cb = handle_generic_error) {
         this->op_start();
-        m_executor.add([=] {
+        m_executor.add([=, this] {
             this->_range_query(pattern, num_keys_in_range, true, exclusive_access, start_incl, end_incl, error_cb);
             this->op_done(success_cb, -1);
         });
@@ -115,7 +115,7 @@ public:
 
     void verify_all(uint32_t num_keys_in_range) {
         this->op_start();
-        m_executor.add([=] {
+        m_executor.add([=, this] {
             this->_verify_all(num_keys_in_range);
             this->op_done(nullptr);
         });
@@ -130,7 +130,7 @@ public:
     void get(KeyPattern pattern, bool exclusive_access = true, bool expected_success = true, bool valid_key = true,
              loadgen_success_cb_t success_cb = nullptr, store_error_cb_t error_cb = handle_generic_error) {
         this->op_start();
-        m_executor.add([=] {
+        m_executor.add([=, this] {
             this->_get(pattern, exclusive_access, error_cb, expected_success, valid_key);
             this->op_done(success_cb);
         });
@@ -140,7 +140,7 @@ public:
                 loadgen_success_cb_t success_cb = nullptr, bool valid_key = true,
                 store_error_cb_t error_cb = handle_generic_error) {
         this->op_start();
-        m_executor.add([=] {
+        m_executor.add([=, this] {
             this->_remove(pattern, exclusive_access, error_cb, expected_success, valid_key);
             this->op_done(success_cb);
         });
@@ -164,7 +164,7 @@ public:
 
     void range_query_nonexisting(store_error_cb_t error_cb = handle_generic_error) {
         this->op_start();
-        m_executor.add([=] {
+        m_executor.add([=, this] {
             this->_range_query(KeyPattern::SEQUENTIAL, 1, false, true, error_cb);
             this->op_done();
         });

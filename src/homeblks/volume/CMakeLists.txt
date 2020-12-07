@@ -26,7 +26,7 @@ if (NOT "${CONAN_TEST_TARGET}" STREQUAL "coverage")
     #target_link_libraries(test_mapping homeblks)
 endif ()
 
-if (${CONAN_TEST_TARGET} STREQUAL "full")
+if ("${CONAN_TEST_TARGET}" STREQUAL "full")
     set(TEST_VOLUME_SOURCE_FILES
         vol_gtest.cpp
         )

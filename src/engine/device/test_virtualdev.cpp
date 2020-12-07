@@ -61,7 +61,7 @@ int main(int argc, char** argv) {
     for (auto i = 0; i < 4; i++) {
         uint8_t nblks = 1;
         auto status = vdev->alloc_blk(nblks, hints, &bids[i]);
-        assert(status == BLK_ALLOC_SUCCESS);
+        assert(status == BlkAllocStatus::SUCCESS);
 
         LOG(INFO) << "Requested nblks: " << (uint32_t)nblks << " Allocation info: " << bids[i].to_string();
     }

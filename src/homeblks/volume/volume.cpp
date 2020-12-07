@@ -86,7 +86,10 @@ void Volume::set_io_flip() {
 #endif
 
 Volume::Volume(const vol_params& params) :
-        m_params(params), m_metrics(params.vol_name), m_comp_cb(params.io_comp_cb), m_indx_mgr_destroy_started(false) {
+        m_params(params),
+        m_metrics(params.vol_name),
+        m_comp_cb(params.io_comp_cb),
+        m_indx_mgr_destroy_started(false) {
 
     /* this counter is decremented later when this volume become part of a cp. until then shutdown is
      * not allowed.
@@ -239,7 +242,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
         goto done;
     }
 
-    // Allocate blkid 
+    // Allocate blkid
     if ((ret = alloc_blk(vreq, bid)) != no_error) { goto done; }
 
     // Note: If we crash before we write this entry to a journal then there is a chance
@@ -253,7 +256,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
 
         for (size_t i{0}; i < bid.size(); ++i) {
             if (bid[i].get_nblks() == 0) {
-                // It should not happen. But it happened once so adding a safe check in case it happens again 
+                // It should not happen. But it happened once so adding a safe check in case it happens again
                 VOL_LOG_ASSERT(0, vreq, "{}", bid[i].to_string());
                 continue;
             }
@@ -265,7 +268,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
             start_lba += nlbas;
 
             // Issue child request
-            // store blkid which is used later to create journal entry 
+            // store blkid which is used later to create journal entry
             vreq->push_blkid(bid[i]);
             if (std::holds_alternative< volume_req::MemVecData >(vreq->data)) {
                 // managed memory write
@@ -322,7 +325,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
         }
         VOL_DEBUG_ASSERT_CMP((start_lba - vreq->lba()), ==, vreq->nlbas(), vreq, "lba don't match");
 
-        // complete the request 
+        // complete the request
         ret = no_error;
     } catch (const std::exception& e) {
         VOL_LOG_ASSERT(0, vreq, "Exception: {}", e.what())
@@ -385,7 +388,7 @@ std::error_condition Volume::unmap(const vol_interface_req_ptr& iface_req) {
         THIS_VOL_LOG(TRACE, volume, vreq, "unmap: not yet supported");
 
         vreq->state = volume_req_state::data_io;
-        BlkId bid_invalid{BlkId::invalid_internal_id()};
+        BlkId bid_invalid;
 
         /* complete the request */
         ret = no_error;
@@ -602,7 +605,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
                                    "Insufficient iovec storage space");
         }};
 
-        // we populate the entire LBA range asked even if it is not populated by the user 
+        // we populate the entire LBA range asked even if it is not populated by the user
         uint64_t next_start_lba = vreq->lba();
         for (size_t i{0}; i < vreq->result_kv.size(); ++i) {
             /* create child req and read buffers */
@@ -616,10 +619,8 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             // check if there are any holes in the beginning or in the middle
             ValueEntry ve;
             (mv->get_array()).get(0, ve, false);
-            if (ve.get_blkId().to_integer() == BlkId::invalid_internal_id()) {
-                // it is trimmed.
-                continue;
-            }
+            if (!ve.get_blkId().is_valid()) { continue; } // it is trimmed.
+
             while (next_start_lba < start_lba) {
                 const auto blob{m_only_in_mem_buff->at_offset(0)};
                 if (!std::holds_alternative< volume_req::IoVecData >(vreq->data)) {
@@ -642,12 +643,12 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             volume_child_req_ptr vc_req =
                 Volume::create_vol_child_req(ve.get_blkId(), vreq, mk->start(), mk->get_n_lba());
 
-            // store csum read so that we can verify it later after data is read 
+            // store csum read so that we can verify it later after data is read
             for (uint16_t i{0}; i < mk->get_n_lba(); i++) {
                 vreq->push_csum(ve.get_checksum_at(i));
             }
 
-            // Read data 
+            // Read data
             const auto sz{get_page_size() * mk->get_n_lba()};
             const auto blkid_offset{m_hb->get_data_pagesz() * ve.get_blk_offset()};
             if (std::holds_alternative< volume_req::IoVecData >(vreq->data)) {
@@ -665,12 +666,12 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
                 boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->read(
                     ve.get_blkId(), blkid_offset, sz, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req));
                 // TODO: @hkadayam There is a potential for race of read_buf_list getting emplaced after complevtion
-                // Add buffer to read_buf_list. User read data from read buf list 
+                // Add buffer to read_buf_list. User read data from read buf list
                 vreq->read_buf().emplace_back(sz, blkid_offset, std::move(bbuf));
             }
         }
 
-        // check if there are any holes at the end 
+        // check if there are any holes at the end
         while (next_start_lba <= mapping::get_end_lba(vreq->lba(), vreq->nlbas())) {
             const auto blob{m_only_in_mem_buff->at_offset(0)};
             if (!std::holds_alternative< volume_req::IoVecData >(vreq->data)) {
@@ -686,10 +687,10 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
         }
         VOL_RELEASE_ASSERT_CMP(next_start_lba, ==, mapping::get_end_lba(vreq->lba(), vreq->nlbas()) + 1, vreq,
                                "mismatch start lba and next start lba");
-    }  catch (const std::exception& e) {
+    } catch (const std::exception& e) {
         VOL_LOG_ASSERT(0, vreq, "Exception: {}", e.what())
         ret = std::make_error_condition(std::errc::device_or_resource_busy);
-    } 
+    }
 
     COUNTER_DECREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
     HISTOGRAM_OBSERVE(m_metrics, volume_map_read_latency, get_elapsed_time_us(vreq->io_start_time));
@@ -735,11 +736,11 @@ std::error_condition Volume::alloc_blk(const volume_req_ptr& vreq, std::vector< 
 
     try {
         BlkAllocStatus status = m_hb->get_data_blkstore()->alloc_blk(vreq->nlbas() * get_page_size(), hints, bid);
-        if (status != BlkAllocStatus::BLK_ALLOC_SUCCESS) {
+        if (status != BlkAllocStatus::SUCCESS) {
             LOGERROR("failing IO as it is out of disk space");
             return std::errc::no_space_on_device;
         }
-        VOL_LOG_ASSERT((status == BlkAllocStatus::BLK_ALLOC_SUCCESS), vreq, "blk alloc status not valid");
+        VOL_LOG_ASSERT((status == BlkAllocStatus::SUCCESS), vreq, "blk alloc status not valid");
         HISTOGRAM_OBSERVE(m_metrics, volume_blkalloc_latency, get_elapsed_time_ns(vreq->io_start_time));
         COUNTER_INCREMENT(m_metrics, volume_write_count, 1);
     } catch (const std::exception& e) {
@@ -906,8 +907,6 @@ std::vector< iovec > Volume::get_next_iovecs(IoVecTransversal& iovec_transversal
         }
     }
     assert(data_consumed == size);
-    if (data_consumed != size) {
-        throw std::runtime_error("Insufficient data iovecs");
-    }
+    if (data_consumed != size) { throw std::runtime_error("Insufficient data iovecs"); }
     return iovecs;
 }

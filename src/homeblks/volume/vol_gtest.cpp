@@ -40,6 +40,7 @@
 #include "api/vol_interface.hpp"
 #include "api/meta_interface.hpp"
 #include "engine/common/homestore_header.hpp"
+#include "engine/common/homestore_flip.hpp"
 #include "engine/homestore_base.hpp"
 #include "engine/common/homestore_flip.hpp"
 #include "test_common/homestore_test_common.hpp"
