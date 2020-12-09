@@ -56,7 +56,6 @@ RCU_REGISTER_INIT;
 #define MAX_DEVICES 2
 #define HOMEBLKS_SB_FLAGS_SHUTDOWN 0x00000001UL
 
-#define STAGING_VOL_PREFIX "staging"
 #define VOL_PREFIX "test_files/vol"
 
 constexpr uint64_t Ki{1024};
@@ -78,6 +77,12 @@ enum class verify_type_t : uint8_t {
     header = 2,
     null = 3,
 };
+
+struct file_hdr {
+    bool is_deleted;
+    boost::uuids::uuid uuid;
+};
+#define RESERVE_FILE_BYTE sizeof(struct file_hdr)
 
 struct TestCfg {
     TestCfg() = default;
@@ -132,6 +137,7 @@ struct TestCfg {
     bool read_iovec{false};
     bool write_iovec{false};
     bool batch_completion{false};
+    bool create_del_with_io{false};
 
     bool verify_csum() { return verify_type == verify_type_t::csum; }
     bool verify_data() { return verify_type == verify_type_t::data; }
@@ -189,7 +195,10 @@ class TestJob {
 public:
     enum class job_status_t { not_started = 0, running = 1, stopped = 2, completed = 3 };
 
-    TestJob(VolTest* test) : m_voltest(test), m_start_time(Clock::now()) {}
+    TestJob(VolTest* test) : m_voltest(test), m_start_time(Clock::now()) {
+        iomanager.schedule_global_timer(5 * 1000ul * 1000ul * 1000ul, true, nullptr, iomgr::thread_regex::all_worker,
+                                        [this](void* cookie) { try_run_one_iteration(); });
+    }
     virtual ~TestJob() = default;
     TestJob(const TestJob&) = delete;
     TestJob(TestJob&&) noexcept = delete;
@@ -211,49 +220,51 @@ public:
     }
 
     virtual void try_run_one_iteration() {
-        bool notify = true;
         if (!time_to_stop() && !is_this_thread_running_io &&
             m_status_threads_executing.increment_if_status(job_status_t::running)) {
             is_this_thread_running_io = true;
             run_one_iteration();
             is_this_thread_running_io = false;
-            notify = m_status_threads_executing.decrement_testz_and_test_status(job_status_t::stopped);
+            m_status_threads_executing.decrement_testz_and_test_status(job_status_t::stopped);
         }
-        if (notify && !is_this_thread_running_io) { notify_completions(); }
+        if (time_to_stop()) { notify_completions(); }
     }
 
     void notify_completions() {
-        auto notify_job_done = false;
+        std::unique_lock< std::mutex > lk(m_mutex);
+        LOGINFO("notifying completions");
         if (is_job_done()) {
             m_status_threads_executing.set_status(job_status_t::completed);
-            notify_job_done = true;
+            m_notify_job_done = true;
         } else {
             m_status_threads_executing.set_status(job_status_t::stopped);
         }
 
-        {
-            std::unique_lock< std::mutex > lk(m_mutex);
-            m_execution_cv.notify_all();
-            if (notify_job_done) m_completion_cv.notify_all();
-        }
+        m_execution_cv.notify_all();
+        if (m_notify_job_done) m_completion_cv.notify_all();
     }
 
     virtual void wait_for_execution() {
         std::unique_lock< std::mutex > lk(m_mutex);
-        m_execution_cv.wait(lk, [this] {
-            auto status = m_status_threads_executing.get_status();
-            return (((status == job_status_t::stopped) || (status == job_status_t::completed)) &&
-                    (m_status_threads_executing.count() == 0));
-        });
+        if (!m_notify_job_done) {
+            m_execution_cv.wait(lk, [this] {
+                auto status = m_status_threads_executing.get_status();
+                LOGINFO("status {}", status);
+                return (((status == job_status_t::stopped) || (status == job_status_t::completed)) &&
+                        (m_status_threads_executing.count() == 0));
+            });
+        }
         LOGINFO("Job {} is done executing", job_name());
     }
 
     virtual void wait_for_completion() {
         std::unique_lock< std::mutex > lk(m_mutex);
-        /*m_completion_cv.wait(
-            lk, [this] { return (m_status_threads_executing.get_status() == job_status_t::job_completed); }); */
-        m_completion_cv.wait(lk,
-                             [this] { return (m_status_threads_executing.get_status() == job_status_t::completed); });
+        if (!m_notify_job_done) {
+            m_completion_cv.wait(lk, [this] {
+                return ((m_status_threads_executing.get_status() == job_status_t::completed) &&
+                        (m_status_threads_executing.count() == 0));
+            });
+        }
         LOGINFO("Job {} is completed", job_name());
     }
 
@@ -263,6 +274,7 @@ protected:
     std::condition_variable m_execution_cv;
     std::condition_variable m_completion_cv;
     Clock::time_point m_start_time;
+    bool m_notify_job_done = false;
     // std::atomic< job_status_t > m_status = job_status_t::not_started;
     // std::atomic< int32_t > m_threads_executing = 0;
     sisl::atomic_status_counter< job_status_t, job_status_t::not_started > m_status_threads_executing;
@@ -281,6 +293,8 @@ struct vol_info_t {
     std::atomic< uint64_t > start_large_lba = 0;
     std::atomic< uint64_t > num_io = 0;
     size_t vol_idx = 0;
+    sisl::atomic_counter< uint64_t > ref_cnt;
+    std::atomic< bool > vol_destroyed = false;
 
     vol_info_t() = default;
     vol_info_t(const vol_info_t&) = delete;
@@ -439,7 +453,8 @@ protected:
 public:
     static thread_local uint32_t _n_completed_this_thread;
 
-    VolTest() : vol_info(0), device_info(0) {
+    VolTest() : vol_info(tcfg.max_vols), device_info(0) {
+        vol_info.reserve(tcfg.max_vols);
         tcfg = gcfg; // Reset the config from global config
 
         // cur_vol = 0;
@@ -475,8 +490,6 @@ public:
 
         for (uint32_t i = 0; i < tcfg.max_vols; i++) {
             std::string name = VOL_PREFIX + std::to_string(i);
-            remove(name.c_str());
-            name = name + STAGING_VOL_PREFIX;
             remove(name.c_str());
         }
     }
@@ -530,10 +543,6 @@ public:
                 max_capacity += tcfg.max_disk_capacity;
             }
         }
-        /* Don't populate the whole disks. Only 60 % of it */
-        max_vol_size = (tcfg.p_volume_size * max_capacity) / (100 * tcfg.max_vols);
-        max_vol_size_csum = (sizeof(uint16_t) * max_vol_size) / tcfg.vol_page_size;
-
         iomanager.start(tcfg.num_threads, tcfg.is_spdk);
 
         init_params params;
@@ -595,7 +604,7 @@ public:
 
     bool vol_found_cb(boost::uuids::uuid uuid) {
         assert(!tcfg.init);
-        return true;
+        return (is_valid_vol_file(uuid));
     }
 
     void vol_mounted_cb(const VolumePtr& vol_obj, vol_state state) {
@@ -619,7 +628,7 @@ public:
 
     void vol_init(const VolumePtr& vol_obj) {
         std::string file_name = std::string(VolInterface::get_instance()->get_name(vol_obj));
-        std::string staging_file_name = file_name + STAGING_VOL_PREFIX;
+        int indx = get_vol_indx(file_name);
 
         std::shared_ptr< vol_info_t > info = std::make_shared< vol_info_t >();
         info->vol = vol_obj;
@@ -629,23 +638,21 @@ public:
             VolInterface::get_instance()->get_size(vol_obj) / VolInterface::get_instance()->get_page_size(vol_obj);
         info->m_vol_bm = std::make_unique< sisl::Bitset >(info->max_vol_blks);
         info->cur_checkpoint = 0;
+        info->ref_cnt.increment(1);
 
         assert(info->fd > 0);
 
-        {
-            std::unique_lock< std::mutex > lk(m_mutex);
-            vol_info.push_back(info);
-            info->vol_idx = vol_info.size();
-        }
+        vol_info[indx] = info;
     }
 
     void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) {
         assert(new_state == homestore::vol_state::FAILED);
     }
 
-    void create_volume() {
-        static std::atomic< uint32_t > _vol_counter{1};
+    /* Note: It assumes that create volume is not happening in parallel */
+    void create_volume(int indx) {
 
+        if (vol_info.size() != 0 && vol_info[indx] && vol_info[indx]->ref_cnt.get()) { return; }
         /* Create a volume */
         vol_params params;
         params.page_size = tcfg.vol_page_size;
@@ -653,8 +660,9 @@ public:
         params.io_comp_cb = tcfg.batch_completion ? io_comp_callback(bind_this(VolTest::process_multi_completions, 1))
                                                   : io_comp_callback(bind_this(VolTest::process_single_completion, 1));
         params.uuid = boost::uuids::random_generator()();
-        const std::string name{VOL_PREFIX + std::to_string(_vol_counter.fetch_add(1))};
+        const std::string name{VOL_PREFIX + std::to_string(indx)};
         ::strcpy(params.vol_name, name.c_str());
+        /* check if same volume exist or not */
 
         auto vol_obj = VolInterface::get_instance()->create_volume(params);
         if (vol_obj == nullptr) {
@@ -664,18 +672,13 @@ public:
         assert(VolInterface::get_instance()->lookup_volume(params.uuid) == vol_obj);
         /* create file for verification */
         std::ofstream ofs{name, std::ios::binary | std::ios::out | std::ios::trunc};
-        ofs.seekp(tcfg.verify_csum() ? max_vol_size_csum : max_vol_size);
+        ofs.seekp(tcfg.verify_csum() ? max_vol_size_csum + RESERVE_FILE_BYTE : max_vol_size + RESERVE_FILE_BYTE);
         ofs.write("", 1);
         ofs.close();
 
-        /* create staging file for the outstanding IOs. we compare it from staging file
-         * if mismatch fails from main file.
-         */
-        const std::string staging_name{name + STAGING_VOL_PREFIX};
-        std::ofstream staging_ofs{name, std::ios::binary | std::ios::out | std::ios::trunc};
-        staging_ofs.seekp(tcfg.verify_csum() ? max_vol_size_csum : max_vol_size);
-        staging_ofs.write("", 1);
-        staging_ofs.close();
+        auto fd = open(name.c_str(), O_RDWR);
+        init_vol_files(fd, params.uuid);
+        close(fd);
 
         LOGINFO("Created volume {} of size: {}", name, tcfg.verify_csum() ? max_vol_size_csum : max_vol_size);
         ++output.vol_create_cnt;
@@ -695,9 +698,15 @@ public:
             return;
         }
 
+        /* Don't populate the whole disks. Only 60 % of it */
+        auto max_capacity = VolInterface::get_instance()->get_system_capacity().initial_total_size;
+        max_vol_size = (tcfg.p_volume_size * max_capacity) / (100 * tcfg.max_vols);
+        max_vol_size_csum = (sizeof(uint16_t) * max_vol_size) / tcfg.vol_page_size;
+
         if (tcfg.init) {
             HS_RELEASE_ASSERT_EQ(params.first_time_boot, true);
         } else {
+            assert(output.vol_mounted_cnt == get_mounted_vols());
             HS_RELEASE_ASSERT_EQ(params.first_time_boot, false);
         }
 
@@ -710,14 +719,11 @@ public:
         if (tcfg.init) {
             if (tcfg.precreate_volume) {
                 for (uint64_t i{0}; i < tcfg.max_vols; ++i) {
-                    create_volume();
+                    create_volume(i);
                 }
-                init_files();
             }
             // verify_done = true;
             // startTime = Clock::now();
-        } else {
-            assert(output.vol_mounted_cnt == tcfg.max_vols);
         }
         tcfg.max_io_size = params.max_io_size;
         /* TODO :- Rishabh: remove it */
@@ -785,7 +791,83 @@ public:
     }
 
 private:
-    void init_files() {
+
+    void init_vol_file_hdr(int fd) {
+        /* set first bit to 0 */
+        file_hdr hdr;
+        hdr.is_deleted = true;
+        auto buf = iomanager.iobuf_alloc(512, sizeof(file_hdr));
+        *reinterpret_cast< file_hdr* >(buf) = hdr;
+        const auto ret{pwrite(fd, buf, sizeof(file_hdr), 0)};
+        assert(static_cast< uint64_t >(ret) == sizeof(file_hdr));
+        iomanager.iobuf_free(buf);
+    }
+
+    void set_vol_file_hdr(int fd, boost::uuids::uuid uuid) {
+        /* set first bit to 1 */
+        file_hdr hdr;
+        hdr.is_deleted = false;
+        hdr.uuid = uuid;
+        auto buf = iomanager.iobuf_alloc(512, sizeof(file_hdr));
+        *reinterpret_cast< file_hdr* >(buf) = hdr;
+        const auto ret{pwrite(fd, buf, sizeof(file_hdr), 0)};
+        assert(static_cast< uint64_t >(ret) == sizeof(file_hdr));
+        iomanager.iobuf_free(buf);
+    }
+
+    bool is_valid_vol_file(const boost::uuids::uuid& uuid) {
+        auto buf = iomanager.iobuf_alloc(512, sizeof(file_hdr));
+        bool found = false;
+        for (uint32_t i = 0; i < tcfg.max_vols; ++i) {
+            const std::string name = VOL_PREFIX + std::to_string(i);
+            auto fd = open(name.c_str(), O_RDWR);
+            const auto ret{pread(fd, buf, sizeof(file_hdr), 0)};
+            close(fd);
+            file_hdr hdr = *reinterpret_cast< file_hdr* >(buf);
+            if (hdr.is_deleted) { continue; }
+            if (hdr.uuid == uuid) {
+                found = true;
+                break;
+            }
+        }
+
+        iomanager.iobuf_free(buf);
+        return found;
+    }
+
+    uint64_t get_mounted_vols() {
+        auto buf = iomanager.iobuf_alloc(512, sizeof(file_hdr));
+        uint64_t mounted_vols = 0;
+        for (uint32_t i = 0; i < tcfg.max_vols; ++i) {
+            const std::string name = VOL_PREFIX + std::to_string(i);
+            auto fd = open(name.c_str(), O_RDWR);
+            const auto ret{pread(fd, buf, sizeof(file_hdr), 0)};
+            close(fd);
+            file_hdr hdr = *reinterpret_cast< file_hdr* >(buf);
+            if (hdr.is_deleted) { continue; }
+            ++mounted_vols;
+        }
+
+        iomanager.iobuf_free(buf);
+        return mounted_vols;
+    }
+
+    void write_vol_file(int fd, void* buf, uint64_t write_size, off_t offset) {
+        const auto ret(pwrite(fd, buf, write_size, offset + RESERVE_FILE_BYTE));
+        assert(static_cast< uint64_t >(ret) == write_size);
+    }
+
+    void read_vol_file(int fd, void* buf, uint64_t read_size, off_t offset) {
+        const auto ret(pread(fd, buf, read_size, offset + RESERVE_FILE_BYTE));
+        assert(static_cast< uint64_t >(ret) == read_size);
+    }
+
+    int get_vol_indx(std::string file_name) {
+        std::string str = file_name.substr(strlen(VOL_PREFIX));
+        return (std::stoi(str));
+    }
+
+    void init_vol_files(int fd, boost::uuids::uuid uuid) {
         // initialize the file
         uint8_t* init_csum_buf{nullptr};
         const uint16_t csum_zero{
@@ -794,24 +876,22 @@ private:
             init_csum_buf = iomanager.iobuf_alloc(512, sizeof(uint16_t));
             *reinterpret_cast< uint16_t* >(init_csum_buf) = csum_zero;
         }
-        for (uint64_t i{0}; i < tcfg.max_vols; ++i) {
-            const uint64_t offset_increment{tcfg.verify_csum() ? sizeof(uint16_t) : tcfg.max_io_size};
-            const uint64_t max_offset{tcfg.verify_csum() ? max_vol_size_csum : max_vol_size};
+        const uint64_t offset_increment{tcfg.verify_csum() ? sizeof(uint16_t) : tcfg.max_io_size};
+        const uint64_t max_offset{tcfg.verify_csum() ? max_vol_size_csum : max_vol_size};
 
-            for (uint64_t offset{0}; offset < max_offset; offset += offset_increment) {
-                uint64_t write_size;
-                if (offset + offset_increment > max_offset) {
-                    write_size = max_offset - offset;
-                } else {
-                    write_size = offset_increment;
-                }
-                const auto ret{pwrite(vol_info[i]->fd,
-                                      static_cast< const void* >(tcfg.verify_csum() ? init_csum_buf : init_buf),
-                                      write_size, static_cast< off_t >(offset))};
-                assert(static_cast< uint64_t >(ret) == write_size);
+        for (uint64_t offset{0}; offset < max_offset; offset += offset_increment) {
+            uint64_t write_size;
+            if (offset + offset_increment > max_offset) {
+                write_size = max_offset - offset;
+            } else {
+                write_size = offset_increment;
             }
-        }
+
+            write_vol_file(fd, static_cast< void* >(tcfg.verify_csum() ? init_csum_buf : init_buf), write_size,
+                           static_cast< off_t >(offset));
+        };
         if (init_csum_buf) iomanager.iobuf_free(init_csum_buf);
+        set_vol_file_hdr(fd, uuid);
     }
 
     static thread_local std::list< vol_interface_req_ptr > _completed_reqs_this_thread;
@@ -844,6 +924,7 @@ private:
         }
 
         // Second iteration gives the job a chance to refill the work if it is not time to stop
+        assert(!_completed_reqs_this_thread.empty());
         while (!_completed_reqs_this_thread.empty()) {
             auto vol_req = _completed_reqs_this_thread.front();
             _completed_reqs_this_thread.pop_front();
@@ -858,14 +939,19 @@ private:
     bool delete_volume(int vol_indx) {
         // std::move will release the ref_count in VolTest::vol and pass to HomeBlks::remove_volume
         boost::uuids::uuid uuid;
-        {
-            std::unique_lock< std::mutex > lk(m_mutex);
-            if (vol_indx >= (int)vol_info.size() || vol_info[vol_indx]->vol == nullptr) { return false; }
+        if (!vol_info[vol_indx]) { return false; }
+        auto vol = vol_info[vol_indx]->vol;
+        bool expected = false;
+        bool desired = true;
+        if (vol_info[vol_indx]->vol_destroyed.compare_exchange_strong(expected, desired)) {
+            assert(VolInterface::get_instance()->get_state(vol) == vol_state::ONLINE);
             uuid = VolInterface::get_instance()->get_uuid(vol_info[vol_indx]->vol);
-            vol_info[vol_indx]->vol = nullptr;
+            /* initialize file hdr */
+            init_vol_file_hdr(vol_info[vol_indx]->fd);
+            VolInterface::get_instance()->remove_volume(uuid);
+            vol_info[vol_indx]->ref_cnt.decrement_testz(1);
+            output.vol_del_cnt++;
         }
-        VolInterface::get_instance()->remove_volume(uuid);
-        output.vol_del_cnt++;
         return true;
     }
 
@@ -890,7 +976,7 @@ private:
             remove(name.c_str());
         }
     }
-};
+    };
 
 bool VolTest::m_am_sb_received = false;
 boost::uuids::uuid VolTest::m_am_uuid;
@@ -906,25 +992,26 @@ public:
     VolCreateDeleteJob& operator=(VolCreateDeleteJob&&) noexcept = delete;
 
     void run_one_iteration() override {
+
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine engine{rd()};
         static thread_local std::uniform_int_distribution< uint64_t > dist{0, RAND_MAX};
-
+        m_voltest->create_volume(dist(engine) % tcfg.max_vols);
+        m_voltest->delete_volume(dist(engine) % tcfg.max_vols);
+#if 0
         while (!time_to_stop()) {
             m_voltest->create_volume();
             m_voltest->delete_volume(dist(engine) % tcfg.max_vols);
         }
         m_is_job_done = true;
+#endif
     }
 
     void on_one_iteration_completed(const boost::intrusive_ptr< io_req_t >& req) override {}
 
-    bool time_to_stop() const override {
-        return ((m_voltest->output.vol_create_cnt >= tcfg.max_vols && m_voltest->output.vol_del_cnt >= tcfg.max_vols) ||
-                (get_elapsed_time_sec(m_start_time) > tcfg.run_time));
-    }
+    bool time_to_stop() const override { return (get_elapsed_time_sec(m_start_time) > tcfg.run_time); }
 
-    virtual bool is_job_done() const override { return m_is_job_done; }
+    virtual bool is_job_done() const override { return true; }
     bool is_async_job() const override { return false; };
 
     std::string job_name() const { return "VolCreateDeleteJob"; }
@@ -944,7 +1031,8 @@ public:
 
     virtual void run_one_iteration() override {
         static thread_local uint32_t num_rw_without_unmap = tcfg.unmap_frequency;
-        int cnt = 0;
+        uint64_t cnt = 0;
+        assert(tcfg.max_outstanding_ios >= tcfg.num_threads);
         while ((cnt++ < 1) && (m_outstanding_ios < tcfg.max_outstanding_ios)) {
             write_io();
             if (tcfg.read_enable) { read_io(); }
@@ -967,16 +1055,16 @@ public:
                 /* read from the file and verify it */
                 if (!tcfg.verify_hdr()) {
                     /* no need to read from the file to verify hdr */
-                    const auto ret{pread(req->fd, req->validate_buffer, req->verify_size, req->verify_offset)};
-                    assert(static_cast< uint64_t >(ret) == req->verify_size);
+                    m_voltest->read_vol_file(req->vol_info->fd, req->validate_buffer, req->verify_size,
+                                             req->verify_offset);
                 }
                 verify(req);
             } else if (!req->is_read()) {
                 /* write to a file */
                 if (!tcfg.verify_hdr()) {
                     /* no need to write to a file to verify hdr */
-                    const auto ret{pwrite(req->fd, req->validate_buffer, req->verify_size, req->verify_offset)};
-                    assert(static_cast< uint64_t >(ret) == req->verify_size);
+                    m_voltest->write_vol_file(req->vol_info->fd, req->validate_buffer, req->verify_size,
+                                              req->verify_offset);
                 }
             }
         }
@@ -1000,6 +1088,8 @@ public:
             print_startTime = Clock::now();
             m_voltest->output.print("volume completion");
         }
+
+        req->vol_info->ref_cnt.decrement_testz(1);
     }
 
     bool time_to_stop() const override {
@@ -1084,6 +1174,7 @@ protected:
             cur = ++m_cur_vol % tcfg.max_vols;
             // we won't be writing more then 128 blocks in one io
             const auto vinfo{m_voltest->vol_info[cur]};
+            if (vinfo == nullptr) { return false; }
             const auto vol{vinfo->vol};
             if (vol == nullptr) { return false; }
 
@@ -1158,11 +1249,14 @@ protected:
 
         ++m_voltest->output.write_cnt;
         ++m_outstanding_ios;
+        vinfo->ref_cnt.increment(1);
         const auto ret_io{VolInterface::get_instance()->write(vol, vreq)};
         LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas,
                  m_outstanding_ios.load(), (tcfg.write_iovec != 0 ? true : false),
                  (tcfg.write_cache != 0 ? true : false));
-        if (ret_io != no_error) { return false; }
+        if (ret_io != no_error) {
+            return false;
+        }
         return true;
     }
 
@@ -1210,11 +1304,14 @@ protected:
 
         ++m_voltest->output.read_cnt;
         ++m_outstanding_ios;
+        vinfo->ref_cnt.increment(1);
         const auto ret_io{VolInterface::get_instance()->read(vol, vreq)};
         LOGDEBUG("Read lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas,
                  m_outstanding_ios.load(), (tcfg.read_iovec != 0 ? true : false),
                  (tcfg.read_cache != 0 ? true : false));
-        if (ret_io != no_error) { return false; }
+        if (ret_io != no_error) {
+            return false;
+        }
         return true;
     }
 
@@ -1363,6 +1460,7 @@ public:
 
     void run_one_iteration() override {
         for (uint32_t cur = 0u; cur < tcfg.max_vols; ++cur) {
+            if (!vol_info(cur)) { continue; }
             uint64_t max_blks = (tcfg.max_io_size / VolInterface::get_instance()->get_page_size(vol_info(cur)->vol));
             for (uint64_t lba = vol_info(cur)->cur_checkpoint; lba < vol_info(cur)->max_vol_blks;) {
                 uint64_t io_size = 0;
@@ -1434,8 +1532,18 @@ TEST_F(VolTest, lifecycle_test) {
  */
 TEST_F(VolTest, init_io_test) {
     this->start_homestore();
+
+    std::unique_ptr< VolCreateDeleteJob > cdjob;
+    if (tcfg.create_del_with_io) {
+        cdjob = std::make_unique< VolCreateDeleteJob >(this);
+        this->start_job(cdjob.get(), wait_type_t::no_wait);
+    }
+
     this->start_io_job();
     output.print("init_io_test");
+
+    if (tcfg.create_del_with_io) { cdjob->wait_for_completion(); }
+
     this->shutdown();
     if (tcfg.remove_file) { this->remove_files(); }
 }
@@ -1454,8 +1562,17 @@ TEST_F(VolTest, recovery_io_test) {
         this->start_job(verify_job.get(), wait_type_t::for_completion);
     }
 
+    std::unique_ptr< VolCreateDeleteJob > cdjob;
+    if (tcfg.create_del_with_io) {
+        cdjob = std::make_unique< VolCreateDeleteJob >(this);
+        this->start_job(cdjob.get(), wait_type_t::for_execution);
+    }
+
     this->start_io_job();
     output.print("recovery_io_test");
+
+    if (tcfg.create_del_with_io) { cdjob->wait_for_completion(); }
+
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();
     if (tcfg.remove_file) { this->remove_files(); }
@@ -1716,7 +1833,9 @@ SDS_OPTION_GROUP(
      "true or false"),
     (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
     (vol_create_del, "", "vol_create_del", "vol_create_del", ::cxxopts::value< bool >()->default_value("false"),
-     "true or false"))
+     "true or false"),
+    (create_del_with_io, "", "create_del_with_io", "create_del_with_io",
+     ::cxxopts::value< bool >()->default_value("false"), "true or false"))
 #define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
@@ -1769,6 +1888,7 @@ int main(int argc, char* argv[]) {
     _gcfg.write_iovec = SDS_OPTIONS["write_iovec"].as< uint32_t >() != 0 ? true : false;
     _gcfg.batch_completion = SDS_OPTIONS["batch_completion"].as< bool >();
     _gcfg.vol_create_del = SDS_OPTIONS["vol_create_del"].as< bool >();
+    _gcfg.create_del_with_io = SDS_OPTIONS["create_del_with_io"].as< bool >();
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();

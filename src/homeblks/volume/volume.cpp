@@ -835,8 +835,7 @@ vol_state Volume::set_state(vol_state state, bool persist) {
 
 bool Volume::is_offline() {
     auto state = get_state();
-    return (state == vol_state::DESTROYING || state == vol_state::FAILED || state == vol_state::OFFLINE ||
-            m_hb->is_shutdown());
+    return (state != vol_state::ONLINE || m_hb->is_shutdown());
 }
 
 void Volume::write_sb() {

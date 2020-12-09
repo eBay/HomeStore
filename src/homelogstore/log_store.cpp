@@ -162,7 +162,7 @@ void HomeLogStoreMgr::__on_io_completion(logstore_id_t id, logdev_key ld_key, lo
 void HomeLogStoreMgr::__on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key, log_buffer buf) {
     auto it = m_id_logstore_map.rlock()->find(id);
     auto& log_store = it->second.m_log_store;
-    log_store->on_log_found(seq_num, ld_key, buf);
+    if (it->second.m_log_store) { log_store->on_log_found(seq_num, ld_key, buf); }
 }
 
 void HomeLogStoreMgr::device_truncate(const device_truncate_cb_t& cb, bool wait_till_done, bool dry_run) {

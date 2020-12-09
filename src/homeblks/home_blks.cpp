@@ -395,7 +395,7 @@ void HomeBlks::init_done(std::error_condition err) {
     data_recovery_done();
     cap_attrs used_size;
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
-        vol_mounted(it->second, it->second->get_state());
+        if (it->second->get_state() == vol_state::ONLINE) { vol_mounted(it->second, it->second->get_state()); }
         used_size.add(it->second->get_used_size());
     }
     auto system_cap = get_system_capacity();
