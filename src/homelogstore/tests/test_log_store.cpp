@@ -85,14 +85,19 @@ public:
                 m_hole_lsns.wlock()->insert(std::make_pair<>(lsn, false));
                 --nholes;
             } else {
-                auto d = prepare_data(lsn);
-                m_log_store->write_async(
-                    lsn, {(uint8_t*)d, d->total_size(), false}, nullptr,
-                    [d, this](logstore_seq_num_t seq_num, const sisl::io_blob& b, logdev_key ld_key, void* ctx) {
-                        assert(ld_key);
-                        iomanager.iobuf_free((uint8_t*)d);
-                        m_comp_cb(seq_num, ld_key);
-                    });
+                bool io_memory{false};
+                auto d{prepare_data(lsn, io_memory)};
+                m_log_store->write_async(lsn, {reinterpret_cast< uint8_t* >(d), d->total_size(), false}, nullptr,
+                                         [io_memory, d, this](logstore_seq_num_t seq_num, const sisl::io_blob& b,
+                                                              logdev_key ld_key, void* ctx) {
+                                             assert(ld_key);
+                                             if (io_memory) {
+                                                 iomanager.iobuf_free(reinterpret_cast< uint8_t* >(d));
+                                             } else {
+                                                 std::free(static_cast< void* >(d));
+                                             }
+                                             m_comp_cb(seq_num, ld_key);
+                                         });
             }
         }
     }
@@ -255,7 +260,7 @@ public:
     bool has_all_lsns_truncated() const { return (m_truncated_upto_lsn.load() == (m_cur_lsn.load() - 1)); }
 
 private:
-    test_log_data* prepare_data(logstore_seq_num_t lsn) {
+    test_log_data* prepare_data(logstore_seq_num_t lsn, bool& io_memory) {
         uint32_t sz;
         uint8_t* raw_buf;
 
@@ -265,13 +270,18 @@ private:
             auto alloc_sz = sisl::round_up((rand() % max_data_size) + sizeof(test_log_data), dma_boundary);
             raw_buf = iomanager.iobuf_alloc(dma_boundary, alloc_sz);
             sz = alloc_sz - sizeof(test_log_data);
+            io_memory = true;
         } else {
             sz = rand() % max_data_size;
-            raw_buf = (uint8_t*)malloc(sizeof(test_log_data) + sz);
+            raw_buf = (uint8_t*)std::malloc(sizeof(test_log_data) + sz);
+            io_memory = false;
         }
 
         test_log_data* d = new (raw_buf) test_log_data();
         d->size = sz;
+
+        assert((uint8_t*)d == raw_buf);
+
         char c = ((lsn % 94) + 33);
         for (auto i = 0u; i < sz; ++i) {
             // Get printable ascii character range
