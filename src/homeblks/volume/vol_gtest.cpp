@@ -44,6 +44,7 @@
 #include "engine/homestore_base.hpp"
 #include "engine/common/homestore_flip.hpp"
 #include "test_common/homestore_test_common.hpp"
+#include "engine/common/mod_test_iface.hpp"
 
 using namespace homestore;
 using namespace flip;
@@ -65,11 +66,7 @@ constexpr uint64_t Gi{Ki * Mi};
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-enum class load_type_t : uint8_t {
-    random = 0,
-    same = 1,
-    sequential = 2,
-};
+enum class load_type_t : uint8_t { random = 0, same = 1, sequential = 2 };
 
 enum class verify_type_t : uint8_t {
     csum = 0,
@@ -214,6 +211,9 @@ public:
 
     virtual void start_in_this_thread() {
         m_status_threads_executing.set_status(job_status_t::running);
+        for (uint32_t i = 0; i < mod_tests.size(); ++i) {
+            mod_tests[i]->run_start();
+        }
         try_run_one_iteration();
         if (time_to_stop()) { notify_completions(); }
         VolInterface::get_instance()->submit_io_batch();
@@ -223,6 +223,9 @@ public:
         if (!time_to_stop() && !is_this_thread_running_io &&
             m_status_threads_executing.increment_if_status(job_status_t::running)) {
             is_this_thread_running_io = true;
+            for (uint32_t i = 0; i < mod_tests.size(); ++i) {
+                mod_tests[i]->try_run_one_iteration();
+            }
             run_one_iteration();
             is_this_thread_running_io = false;
             m_status_threads_executing.decrement_testz_and_test_status(job_status_t::stopped);
@@ -331,7 +334,7 @@ struct io_req_t : public vol_interface_req {
                 uint8_t* validate_ptr{validate_buffer};
                 const uint64_t pg_size{VolInterface::get_instance()->get_page_size(vinfo->vol)};
                 for (const auto& iov : req_ptr->iovecs) {
-                    assert(iov.iov_len % pg_size == 0);
+                    HS_RELEASE_ASSERT_EQ(iov.iov_len % pg_size, 0);
                     populate_csum_buf(reinterpret_cast< uint16_t* >(validate_ptr),
                                       static_cast< const uint8_t* >(iov.iov_base), iov.iov_len, vinfo.get());
                     validate_ptr += (iov.iov_len / pg_size) * sizeof(uint16_t);
@@ -393,7 +396,7 @@ private:
         cur_vol = vol_info->vol_idx;
 
         validate_buffer = iomanager.iobuf_alloc(512, verify_size);
-        assert(validate_buffer != nullptr);
+        HS_ASSERT_NOTNULL(RELEASE, validate_buffer);
     }
 
     // compute checksum and store in a buf which will be used for verification
@@ -603,12 +606,12 @@ public:
     }
 
     bool vol_found_cb(boost::uuids::uuid uuid) {
-        assert(!tcfg.init);
+        HS_RELEASE_ASSERT_EQ(tcfg.init, false);
         return (is_valid_vol_file(uuid));
     }
 
     void vol_mounted_cb(const VolumePtr& vol_obj, vol_state state) {
-        assert(!tcfg.init);
+        HS_RELEASE_ASSERT_EQ(tcfg.init, false);
         int cnt = output.vol_mounted_cnt.fetch_add(1, std::memory_order_relaxed);
         vol_init(vol_obj);
 
@@ -619,7 +622,7 @@ public:
         } else {
             viface->attach_vol_completion_cb(vol_obj, bind_this(VolTest::process_single_completion, 1));
         }
-        assert(state == tcfg.expected_vol_state);
+        HS_RELEASE_ASSERT_EQ(state, tcfg.expected_vol_state);
         if (tcfg.expected_vol_state == homestore::vol_state::DEGRADED ||
             tcfg.expected_vol_state == homestore::vol_state::OFFLINE) {
             VolInterface::get_instance()->vol_state_change(vol_obj, vol_state::ONLINE);
@@ -646,7 +649,7 @@ public:
     }
 
     void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) {
-        assert(new_state == homestore::vol_state::FAILED);
+        HS_RELEASE_ASSERT_EQ(new_state, homestore::vol_state::FAILED);
     }
 
     /* Note: It assumes that create volume is not happening in parallel */
@@ -669,7 +672,7 @@ public:
             LOGINFO("creation failed");
             return;
         }
-        assert(VolInterface::get_instance()->lookup_volume(params.uuid) == vol_obj);
+        HS_RELEASE_ASSERT_EQ(VolInterface::get_instance()->lookup_volume(params.uuid), vol_obj);
         /* create file for verification */
         std::ofstream ofs{name, std::ios::binary | std::ios::out | std::ios::trunc};
         ofs.seekp(tcfg.verify_csum() ? max_vol_size_csum + RESERVE_FILE_BYTE : max_vol_size + RESERVE_FILE_BYTE);
@@ -690,7 +693,7 @@ public:
     void init_done_cb(std::error_condition err, const out_params& params) {
         /* create volume */
         if (err) {
-            assert(tcfg.expected_init_fail);
+            HS_RELEASE_ASSERT_EQ(tcfg.expected_init_fail, true);
             {
                 std::unique_lock< std::mutex > lk(m_mutex);
                 m_init_done_cv.notify_all();
@@ -706,7 +709,7 @@ public:
         if (tcfg.init) {
             HS_RELEASE_ASSERT_EQ(params.first_time_boot, true);
         } else {
-            assert(output.vol_mounted_cnt == get_mounted_vols());
+            HS_RELEASE_ASSERT_EQ(output.vol_mounted_cnt, get_mounted_vols());
             HS_RELEASE_ASSERT_EQ(params.first_time_boot, false);
         }
 
@@ -715,7 +718,7 @@ public:
 
         init_buf = iomanager.iobuf_alloc(512, init_buf_size);
         ::memset(static_cast< void* >(init_buf), 0, init_buf_size);
-        assert(!tcfg.expected_init_fail);
+        HS_RELEASE_ASSERT_EQ(tcfg.expected_init_fail, false);
         if (tcfg.init) {
             if (tcfg.precreate_volume) {
                 for (uint64_t i{0}; i < tcfg.max_vols; ++i) {
@@ -780,7 +783,7 @@ public:
     void delete_volumes() {
         uint64_t tot_cap = VolInterface::get_instance()->get_system_capacity().initial_total_size;
         uint64_t used_cap = VolInterface::get_instance()->get_system_capacity().used_total_size;
-        assert(used_cap <= tot_cap);
+        HS_ASSERT_CMP(RELEASE, used_cap, <=, tot_cap);
         for (uint64_t i = 0; i < vol_info.size(); ++i) {
             delete_volume(i);
         }
@@ -799,7 +802,7 @@ private:
         auto buf = iomanager.iobuf_alloc(512, sizeof(file_hdr));
         *reinterpret_cast< file_hdr* >(buf) = hdr;
         const auto ret{pwrite(fd, buf, sizeof(file_hdr), 0)};
-        assert(static_cast< uint64_t >(ret) == sizeof(file_hdr));
+        HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(ret), sizeof(file_hdr));
         iomanager.iobuf_free(buf);
     }
 
@@ -811,7 +814,7 @@ private:
         auto buf = iomanager.iobuf_alloc(512, sizeof(file_hdr));
         *reinterpret_cast< file_hdr* >(buf) = hdr;
         const auto ret{pwrite(fd, buf, sizeof(file_hdr), 0)};
-        assert(static_cast< uint64_t >(ret) == sizeof(file_hdr));
+        HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(ret), sizeof(file_hdr));
         iomanager.iobuf_free(buf);
     }
 
@@ -854,12 +857,12 @@ private:
 
     void write_vol_file(int fd, void* buf, uint64_t write_size, off_t offset) {
         const auto ret(pwrite(fd, buf, write_size, offset + RESERVE_FILE_BYTE));
-        assert(static_cast< uint64_t >(ret) == write_size);
+        HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(ret), write_size);
     }
 
     void read_vol_file(int fd, void* buf, uint64_t read_size, off_t offset) {
         const auto ret(pread(fd, buf, read_size, offset + RESERVE_FILE_BYTE));
-        assert(static_cast< uint64_t >(ret) == read_size);
+        HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(ret), read_size);
     }
 
     int get_vol_indx(std::string file_name) {
@@ -924,7 +927,7 @@ private:
         }
 
         // Second iteration gives the job a chance to refill the work if it is not time to stop
-        assert(!_completed_reqs_this_thread.empty());
+        HS_RELEASE_ASSERT_EQ(_completed_reqs_this_thread.empty(), false);
         while (!_completed_reqs_this_thread.empty()) {
             auto vol_req = _completed_reqs_this_thread.front();
             _completed_reqs_this_thread.pop_front();
@@ -944,7 +947,7 @@ private:
         bool expected = false;
         bool desired = true;
         if (vol_info[vol_indx]->vol_destroyed.compare_exchange_strong(expected, desired)) {
-            assert(VolInterface::get_instance()->get_state(vol) == vol_state::ONLINE);
+            HS_RELEASE_ASSERT_EQ(VolInterface::get_instance()->get_state(vol), vol_state::ONLINE);
             uuid = VolInterface::get_instance()->get_uuid(vol_info[vol_indx]->vol);
             /* initialize file hdr */
             init_vol_file_hdr(vol_info[vol_indx]->fd);
@@ -1032,7 +1035,7 @@ public:
     virtual void run_one_iteration() override {
         static thread_local uint32_t num_rw_without_unmap = tcfg.unmap_frequency;
         uint64_t cnt = 0;
-        assert(tcfg.max_outstanding_ios >= tcfg.num_threads);
+        HS_ASSERT_CMP(RELEASE, tcfg.max_outstanding_ios, >=, tcfg.num_threads);
         while ((cnt++ < 1) && (m_outstanding_ios < tcfg.max_outstanding_ios)) {
             write_io();
             if (tcfg.read_enable) { read_io(); }
@@ -1225,7 +1228,7 @@ protected:
         boost::intrusive_ptr< io_req_t > vreq{};
         if (!tcfg.write_iovec) {
             uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
-            assert(wbuf != nullptr);
+            HS_ASSERT_NOTNULL(RELEASE, wbuf);
 
             populate_buf(wbuf, size, lba, vinfo.get());
 
@@ -1235,7 +1238,7 @@ protected:
             std::vector< iovec > iovecs{};
             for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
                 uint8_t* const wbuf{iomanager.iobuf_alloc(512, page_size)};
-                assert(wbuf != nullptr);
+                HS_ASSERT_NOTNULL(RELEASE, wbuf);
                 iovec iov{static_cast< void* >(wbuf), static_cast< size_t >(page_size)};
                 iovecs.emplace_back(std::move(iov));
 
@@ -1292,7 +1295,7 @@ protected:
             std::vector< iovec > iovecs{};
             for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
                 uint8_t* const rbuf{iomanager.iobuf_alloc(512, page_size)};
-                assert(rbuf != nullptr);
+                HS_ASSERT_NOTNULL(RELEASE, rbuf);
                 iovec iov{static_cast< void* >(rbuf), static_cast< size_t >(page_size)};
                 iovecs.emplace_back(std::move(iov));
             }
@@ -1394,7 +1397,7 @@ protected:
                     LOGINFO("lba {} {}", req->lba, req->nlbas);
                     std::this_thread::sleep_for(std::chrono::seconds(5));
                     sleep(30);
-                    assert(0);
+                    HS_RELEASE_ASSERT(0, "");
                 }
                 // need to return false
                 return false;
@@ -1410,7 +1413,7 @@ protected:
             for (auto& info : vol_req->read_buf_list) {
                 uint32_t offset{static_cast< uint32_t >(info.offset)};
                 uint64_t size{info.size};
-                assert(size % size_read == 0);
+                HS_RELEASE_ASSERT_EQ(size % size_read, 0);
                 const auto buf{info.buf};
                 while (size != 0) {
                     const sisl::blob b{VolInterface::get_instance()->at_offset(buf, offset)};
@@ -1427,7 +1430,7 @@ protected:
             for (const auto& iov : vol_req->iovecs) {
                 uint64_t size{static_cast< uint64_t >(iov.iov_len)};
                 uint32_t offset{0};
-                assert(size % size_read == 0);
+                HS_RELEASE_ASSERT_EQ(size % size_read, 0);
                 while (size != 0) {
                     const uint8_t* const buffer{static_cast< uint8_t* >(iov.iov_base) + offset};
                     const uint8_t* const validate_buffer{req->validate_buffer +
@@ -1440,8 +1443,8 @@ protected:
                 }
             }
         }
-        tcfg.verify_csum() ? assert(total_size_read_csum == req->verify_size)
-                           : assert(total_size_read == req->original_size);
+        tcfg.verify_csum() ? (HS_RELEASE_ASSERT_EQ(total_size_read_csum, req->verify_size))
+                           : (HS_RELEASE_ASSERT_EQ(total_size_read, req->original_size));
         return true;
     }
 };
@@ -1779,6 +1782,11 @@ TEST_F(VolTest, btree_fix_rerun_io_test) {
     if (tcfg.remove_file) { this->remove_files(); }
 }
 
+#define MAX_MODULES 1
+std::vector< module_test* > mod_tests;
+void indx_mgr_test_main();
+std::array< std::function< void() >, MAX_MODULES > mod_init_funcs = {indx_mgr_test_main};
+
 /************************* CLI options ***************************/
 
 SDS_OPTION_GROUP(
@@ -1836,7 +1844,7 @@ SDS_OPTION_GROUP(
      "true or false"),
     (create_del_with_io, "", "create_del_with_io", "create_del_with_io",
      ::cxxopts::value< bool >()->default_value("false"), "true or false"))
-#define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr
+#define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
@@ -1904,6 +1912,10 @@ int main(int argc, char* argv[]) {
     if (_gcfg.is_spdk) { _gcfg.num_threads = 2; } /* default to 2 to avoid high cpu usage with spdk */
 
     LOGINFO("Testing with vol_gtest with gcfg spdk: {}, nthreads: {}", _gcfg.is_spdk, _gcfg.num_threads);
+
+    for (size_t i = 0; i < mod_init_funcs.size(); ++i) {
+        mod_init_funcs[i]();
+    }
 
     return RUN_ALL_TESTS();
 }

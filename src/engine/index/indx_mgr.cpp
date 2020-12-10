@@ -703,6 +703,16 @@ indx_cp_ptr IndxMgr::create_new_indx_cp(const indx_cp_ptr& cur_icp) {
 void IndxMgr::set_indx_cp_state(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp) {
     /* We have to make a decision here to take blk alloc cp or not. We can not reverse our
      * decisioin beyond this point. */
+
+#ifdef _PRERELEASE
+    if (cur_icp == m_first_icp) {
+        if (homestore_flip->test_flip("vol_create_suspend_cp")) {
+            LOGINFO("suspending cp because of flip");
+            m_active_cp_suspend = true;
+        }
+    }
+#endif
+
     if (m_active_cp_suspend.load()) {
         cur_icp->flags = cp_state::suspend_cp;
         return;
