@@ -18,7 +18,7 @@ add_executable(test_blkalloc
                  $<TARGET_OBJECTS:hs_blkalloc>
                )
 target_link_libraries(test_blkalloc homestore ${CONAN_LIBS})
-add_test(NAME BlkAlloc COMMAND test_blkalloc)
+add_test(NAME BlkAlloc COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh --retry_log_mods "blkalloc:trace,base:trace" ${CMAKE_BINARY_DIR}/bin/test_blkalloc)
 
 set(TEST_BLK_CACHE_QUEUE_SOURCE_FILES
     test_blk_cache_queue.cpp

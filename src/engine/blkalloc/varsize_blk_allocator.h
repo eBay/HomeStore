@@ -146,10 +146,7 @@ private:
 
 public:
     BlkAllocSegment(blk_cap_t nblks, seg_num_t seg_num, blk_num_t nportions, const std::string& seg_name) :
-            m_total_blks{nblks},
-            m_total_portions{nportions},
-            m_seg_num{seg_num},
-            m_alloc_clock_hand{0} {}
+            m_total_blks{nblks}, m_total_portions{nportions}, m_seg_num{seg_num}, m_alloc_clock_hand{0} {}
 
     BlkAllocSegment(const BlkAllocSegment&) = delete;
     BlkAllocSegment(BlkAllocSegment&&) noexcept = delete;
@@ -244,7 +241,9 @@ private:
     void allocator_state_machine();
 
 #ifndef NDEBUG
-    [[nodiscard]] bool is_set_on_bitmap(const BlkId& b);
+    [[nodiscard]] bool is_set_on_bitmap(const BlkId& b) const;
+    void alloc_sanity_check(const blk_count_t nblks, const blk_alloc_hints& hints,
+                            const std::vector< BlkId >& out_blkids) const;
 #endif
 
     const VarsizeBlkAllocConfig& get_config() const override { return (VarsizeBlkAllocConfig&)m_cfg; }

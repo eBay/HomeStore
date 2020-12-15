@@ -18,6 +18,8 @@ namespace homestore {
 typedef blk_count_t slab_idx_t;
 
 static constexpr uint16_t slab_tbl_size{257};
+
+// Lookup table that converts number_of_blks to slab
 static constexpr std::array< slab_idx_t, slab_tbl_size > nblks_to_slab_tbl = {
     0, 0, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6,
     6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 7, 7, 7,
@@ -27,6 +29,7 @@ static constexpr std::array< slab_idx_t, slab_tbl_size > nblks_to_slab_tbl = {
     8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8,
     8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8};
 
+// Lookup table that converts number_of_blks to the lower slab and the difference with the lower slab
 static constexpr std::array< std::pair< slab_idx_t, uint8_t >, slab_tbl_size > nblks_to_round_down_slab_tbl = {
     {{0, 0},   {0, 0},   {1, 0},   {1, 1},   {2, 0},   {2, 1},   {2, 2},   {2, 3},   {3, 0},   {3, 1},   {3, 2},
      {3, 3},   {3, 4},   {3, 5},   {3, 6},   {3, 7},   {4, 0},   {4, 1},   {4, 2},   {4, 3},   {4, 4},   {4, 5},
@@ -86,10 +89,7 @@ private:
 
 struct blk_cache_alloc_req {
     blk_cache_alloc_req(const blk_count_t n, const blk_temp_t l, const bool contiguous, const slab_idx_t m = 0) :
-            nblks{n},
-            preferred_level{l},
-            is_contiguous(contiguous),
-            min_slab_idx{m} {}
+            nblks{n}, preferred_level{l}, is_contiguous(contiguous), min_slab_idx{m} {}
 
     const blk_count_t nblks;
     const blk_temp_t preferred_level;

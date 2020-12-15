@@ -116,7 +116,7 @@ pipeline {
                     }
                     stage("Deploy Package") {
                         when {
-                            expression { not { branch "PR_*" } }
+                            expression { not { branch "PR-*" } }
                         }
                         steps {
                             sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
@@ -132,8 +132,8 @@ pipeline {
                     }
                     stage("Deploy Image") {
                         when { anyOf {
-				branch "testing/v*"
-				branch "master"
+                            branch "testing/v*"
+                            branch "master"
                         } }
                         steps {
                             withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
@@ -144,8 +144,8 @@ pipeline {
                             success {
                                 slackSend color: '#85B717', channel: '#sds-ci', message: "*${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been uploaded to ECR."
                             }
-			}
-		    }
+		                }
+                    }
                 }
             }
         }

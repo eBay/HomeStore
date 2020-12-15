@@ -90,7 +90,7 @@ public:
 };
 
 VENUM(BlkOpStatus, uint8_t,
-      NONE = 0,           // Default no status
+      NONE = 0,            // Default no status
       SUCCESS = 1u << 0,   // Success
       FAILED = 1u << 1,    // Generic failure
       SPACEFULL = 1u << 2, // Space full failure
@@ -101,11 +101,7 @@ ENUM(BlkAllocatorState, uint8_t, WAITING, SWEEP_SCHEDULED, SWEEPING, EXITING, DO
 /* Hints for various allocators */
 struct blk_alloc_hints {
     blk_alloc_hints() :
-            desired_temp(0),
-            dev_id_hint(-1),
-            can_look_for_other_dev(true),
-            is_contiguous(false),
-            multiplier(1) {}
+            desired_temp(0), dev_id_hint(-1), can_look_for_other_dev(true), is_contiguous(false), multiplier(1) {}
 
     blk_temp_t desired_temp;     // Temperature hint for the device
     int dev_id_hint;             // which physical device to pick (hint if any) -1 for don't care
@@ -118,7 +114,7 @@ static constexpr blk_temp_t default_temperature() { return 1; }
 
 class BlkAllocPortion {
 private:
-    std::mutex m_blk_lock;
+    mutable std::mutex m_blk_lock;
     blk_temp_t m_temperature;
 
 public:
@@ -129,7 +125,7 @@ public:
     BlkAllocPortion& operator=(const BlkAllocPortion&) = delete;
     BlkAllocPortion& operator=(BlkAllocPortion&&) noexcept = delete;
 
-    auto portion_auto_lock() { return std::scoped_lock< std::mutex >(m_blk_lock); }
+    auto portion_auto_lock() const { return std::scoped_lock< std::mutex >(m_blk_lock); }
     void set_temperature(const blk_temp_t temp) { m_temperature = temp; }
     [[nodiscard]] blk_temp_t temperature() const { return m_temperature; }
 };
@@ -188,6 +184,8 @@ public:
     }
 
     [[nodiscard]] sisl::Bitset* get_disk_bm() { return m_disk_bm; }
+    [[nodiscard]] const sisl::Bitset* get_disk_bm_const() const { return m_disk_bm; }
+
     void set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm) {
         BLKALLOC_LOG(INFO, "Persistent bitmap of size={} recovered", recovered_bm->size());
         m_disk_bm->move(*(recovered_bm.get()));

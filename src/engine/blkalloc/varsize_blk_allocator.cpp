@@ -303,16 +303,6 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_all
 
             // Convert the resp blk cache entries to blkids
             blk_cache_entries_to_blkids(s_alloc_resp.out_blks, out_blkids);
-#ifndef NDEBUG
-            blk_count_t alloced_nblks = 0;
-            for (const auto& b : out_blkids) {
-                BLKALLOC_ASSERT(DEBUG, is_set_on_bitmap(b), "Expected blkid={} to be already set in bitmap",
-                                b.to_string());
-                alloced_nblks += b.get_nblks();
-            }
-            BLKALLOC_ASSERT(DEBUG, (nblks == alloced_nblks), "Requested blks={} alloced_blks={}", nblks,
-                            alloced_nblks);
-#endif
             incr_alloced_blk_count(nblks);
             break;
         }
@@ -361,7 +351,12 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_all
         BLKALLOC_LOG(ERROR, "nblks={} failed to alloc cache and direct after retries={}, giving up", nblks, retry);
         COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
         status = BlkAllocStatus::SPACE_FULL;
+    } else {
+#ifndef NDEBUG
+        alloc_sanity_check(nblks, hints, out_blkids);
+#endif
     }
+
     return status;
 }
 
@@ -395,6 +390,8 @@ void VarsizeBlkAllocator::free_on_bitmap(const BlkId& b) {
         // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache bm.
         auto lock{portion->portion_auto_lock()};
         BLKALLOC_ASSERT(RELEASE, m_bm->is_bits_set(b.get_blk_num(), b.get_nblks()), "Expected bits to be set");
+        // BLKALLOC_ASSERT(DEBUG, !get_disk_bm_const()->is_bits_set(b.get_blk_num(), b.get_nblks()),
+        //                "Expected blkid={} to be free in disk bitmap during free operation", b.to_string());
         m_bm->reset_bits(b.get_blk_num(), b.get_nblks());
     }
     BLKALLOC_LOG(DEBUG, "Freeing directly to portion={} blkid={} set_bits_count={}",
@@ -402,13 +399,29 @@ void VarsizeBlkAllocator::free_on_bitmap(const BlkId& b) {
 }
 
 #ifndef NDEBUG
-bool VarsizeBlkAllocator::is_set_on_bitmap(const BlkId& b) {
-    BlkAllocPortion* portion = blknum_to_portion(b.get_blk_num());
+bool VarsizeBlkAllocator::is_set_on_bitmap(const BlkId& b) const {
+    const BlkAllocPortion* portion = blknum_to_portion_const(b.get_blk_num());
     {
         // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache bm.
         auto lock{portion->portion_auto_lock()};
         return m_bm->is_bits_set(b.get_blk_num(), b.get_nblks());
     }
+}
+
+void VarsizeBlkAllocator::alloc_sanity_check(const blk_count_t nblks, const blk_alloc_hints& hints,
+                                             const std::vector< BlkId >& out_blkids) const {
+    blk_count_t alloced_nblks = 0;
+    for (const auto& b : out_blkids) {
+        BLKALLOC_ASSERT(DEBUG, is_set_on_bitmap(b), "Expected blkid={} to be already set in cache bitmap",
+                        b.to_string());
+        // BLKALLOC_ASSERT(DEBUG, !get_disk_bm_const()->is_bits_set(b.get_blk_num(), b.get_nblks()),
+        //                "Expected blkid={} to be already free in disk bitmap", b.to_string());
+        alloced_nblks += b.get_nblks();
+    }
+    BLKALLOC_ASSERT(DEBUG, (nblks == alloced_nblks), "Requested blks={} alloced_blks={} num_pieces={}", nblks,
+                    alloced_nblks, out_blkids.size());
+    BLKALLOC_ASSERT(DEBUG, (!hints.is_contiguous || (out_blkids.size() == 1)),
+                    "Multiple blkids allocated for contiguous request");
 }
 #endif
 
@@ -484,6 +497,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc_blks_direct(const blk_count_t nblks, c
                 if (b.nbits == 0) { break; }
                 HS_DEBUG_ASSERT_GE(end_blk_id, b.start_bit, "Expected start bit to be greater than end bit");
                 HS_DEBUG_ASSERT_LE(b.nbits, nblks_remain);
+                HS_DEBUG_ASSERT_GE(b.nbits, std::min(min_blks, nblks_remain));
 
                 nblks_remain -= b.nbits;
                 out_blkids.emplace_back(b.start_bit, b.nbits, m_chunk_id);
@@ -492,8 +506,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc_blks_direct(const blk_count_t nblks, c
                 m_bm->set_bits(b.start_bit, b.nbits);
                 cur_blk_id = b.start_bit + b.nbits;
 
-                BLKALLOC_LOG(DEBUG,
-                             "Allocated directly from portion={} nnblks={} Blk_num={} nblks={} set_bit_count={}",
+                BLKALLOC_LOG(DEBUG, "Allocated directly from portion={} nnblks={} Blk_num={} nblks={} set_bit_count={}",
                              portion_num, nblks, b.start_bit, b.nbits, get_alloced_blk_count());
             }
         }

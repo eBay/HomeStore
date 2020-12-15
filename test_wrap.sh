@@ -73,23 +73,23 @@ if [ "$log_mods" != "" ] ; then
 fi
 
 
-run_num=$(($run_num+1))
-cmd="$base_cmd -v trace"
-level+=("All mods trace")
-run_cmd $cmd
-if [ ${run_status[$run_num]} != "Success" ] ; then
-    report
-    exit 1
-fi
+#run_num=$(($run_num+1))
+#cmd="$base_cmd -v trace"
+#level+=("All mods trace")
+#run_cmd $cmd
+#if [ ${run_status[$run_num]} != "Success" ] ; then
+#    report
+#    exit 1
+#fi
 
-run_num=$(($run_num+1))
-cmd="$base_cmd -v debug"
-level+=("All mods debug")
-run_cmd $cmd
-if [ ${run_status[$run_num]} != "Success" ] ; then
-    report
-    exit 1
-fi
+#run_num=$(($run_num+1))
+#cmd="$base_cmd -v debug"
+#level+=("All mods debug")
+#run_cmd $cmd
+#if [ ${run_status[$run_num]} != "Success" ] ; then
+#    report
+#    exit 1
+#fi
 
 
 report
