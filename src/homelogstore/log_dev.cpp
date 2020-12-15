@@ -242,7 +242,7 @@ void LogDev::get_registered_store_ids(std::vector< logstore_id_t >& registered, 
  * This method prepares the log records to be flushed and returns the log_group which is fully prepared
  */
 LogGroup* LogDev::prepare_flush(int32_t estimated_records) {
-    int64_t flushing_upto_idx = 0u;
+    int64_t flushing_upto_idx = -1;
 
     assert(estimated_records > 0);
     auto lg = make_log_group((uint32_t)estimated_records);
@@ -256,7 +256,7 @@ LogGroup* LogDev::prepare_flush(int32_t estimated_records) {
     });
 
     lg->finish();
-    if (sisl_unlikely(flushing_upto_idx == 0)) { return nullptr; }
+    if (sisl_unlikely(flushing_upto_idx == -1)) { return nullptr; }
     lg->m_flush_log_idx_from = m_last_flush_idx + 1;
     lg->m_flush_log_idx_upto = flushing_upto_idx;
     HS_DEBUG_ASSERT_GE(lg->m_flush_log_idx_upto, lg->m_flush_log_idx_from,

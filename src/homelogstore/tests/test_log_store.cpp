@@ -258,9 +258,7 @@ public:
     }
 
     bool has_all_lsns_truncated() const { return (m_truncated_upto_lsn.load() == (m_cur_lsn.load() - 1)); }
-
-private:
-    test_log_data* prepare_data(logstore_seq_num_t lsn, bool& io_memory) {
+    static test_log_data* prepare_data(logstore_seq_num_t lsn, bool& io_memory) {
         uint32_t sz;
         uint8_t* raw_buf;
 
@@ -290,6 +288,7 @@ private:
         return d;
     }
 
+private:
     void validate_data(test_log_data* d, logstore_seq_num_t lsn) {
         char c = ((lsn % 94) + 33);
         std::string actual = std::string((const char*)&d->data[0], (size_t)d->size);
@@ -895,6 +894,39 @@ TEST_F(LogStoreTest, DeleteMultipleLogStores) {
 
     LOGINFO("Step 9: Truncate again, this time expected to have first log store delete is actually garbage collected");
     this->truncate_validate();
+}
+
+TEST_F(LogStoreTest, WriteSyncThenRead) {
+    std::shared_ptr< homestore::HomeLogStore > tmp_log_store =
+        homestore::home_log_store_mgr.create_new_log_store(false);
+    auto store_id = tmp_log_store->get_store_id();
+    LOGINFO("Created new log store -> id {}", store_id);
+    int count = 10;
+    for (int i = 0; i < count; i++) {
+
+        bool io_memory{false};
+        auto d{SampleLogStoreClient::prepare_data(i, io_memory)};
+        bool succ = tmp_log_store->write_sync(i, {reinterpret_cast< uint8_t* >(d), d->total_size(), false});
+        EXPECT_TRUE(succ);
+        LOGINFO("Written sync data for LSN -> {}", i);
+
+        if (io_memory) {
+            iomanager.iobuf_free(reinterpret_cast< uint8_t* >(d));
+        } else {
+            std::free(static_cast< void* >(d));
+        }
+
+        auto b = tmp_log_store->read_sync(i);
+        auto tl = (test_log_data*)b.bytes();
+        ASSERT_EQ(tl->total_size(), b.size()) << "Size Mismatch for lsn=" << store_id << ":" << i;
+        char c = ((i % 94) + 33);
+        std::string actual = std::string((const char*)&tl->data[0], (size_t)tl->size);
+        std::string expected = std::string((size_t)tl->size, c);
+        ASSERT_EQ(actual, expected) << "Data mismatch for LSN=" << store_id << ":" << i << " size=" << tl->size;
+    }
+
+    homestore::home_log_store_mgr.remove_log_store(store_id);
+    LOGINFO("Remove logstore -> i {}", store_id);
 }
 
 SDS_OPTIONS_ENABLE(logging, test_log_store)

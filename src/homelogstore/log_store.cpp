@@ -287,6 +287,33 @@ HomeLogStore::HomeLogStore(const logstore_id_t id, const bool append_mode, const
     m_safe_truncation_boundary.seq_num.store(start_lsn - 1, std::memory_order_release);
 }
 
+bool HomeLogStore::write_sync(logstore_seq_num_t seq_num, const sisl::io_blob& b) {
+    HS_ASSERT(LOGMSG, (!iomanager.am_i_worker_reactor()), "Sync can not be done in worker reactor thread");
+
+    std::mutex write_mutex;
+    bool write_done = false;
+    bool ret = false;
+    std::condition_variable write_cv;
+
+    this->write_async(seq_num, b, nullptr,
+                      [&write_cv, &write_done, &write_mutex, &ret, seq_num,
+                       this](homestore::logstore_seq_num_t seq_num_cb, const sisl::io_blob& b,
+                             homestore::logdev_key ld_key, void* ctx) {
+                          HS_DEBUG_ASSERT((ld_key && seq_num == seq_num_cb), "Write_Async failed or corrupted");
+                          {
+                              std::unique_lock< std::mutex > lk(write_mutex);
+                              write_done = true;
+                              ret = true;
+                          }
+                          write_cv.notify_all();
+                      });
+
+    std::unique_lock< std::mutex > lk(write_mutex);
+    write_cv.wait(lk, [&] { return write_done; });
+
+    return ret;
+}
+
 void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     HS_ASSERT(LOGMSG, ((cb != nullptr) || (m_comp_cb != nullptr)),
               "Expected either cb is not null or default cb registered");
