@@ -224,6 +224,10 @@ def force_reinit():
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("Homestore Force Reinit passed")
 
+def hs_svc_tool():
+    cmd_opts = "--zero_boot_sb"
+    subprocess.check_call(dirpath + "hs_svc_tool " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+
 def nightly():
 
     normal()
@@ -346,3 +350,5 @@ if test_suits == "meta_blk_store_nightly":
 if test_suits == "force_reinit":
         force_reinit()
 
+if test_suits == "hs_svc_tool":
+    hs_svc_tool()

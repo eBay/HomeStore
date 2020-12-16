@@ -141,7 +141,7 @@ int main(int argc, char* argv[]) {
 #endif
     
     bool is_spdk = SDS_OPTIONS["spdk"].as< bool >();
-    uint32_t nthreads = SDS_OPTIONS["num_threads"].as< bool >();
+    uint32_t nthreads = SDS_OPTIONS["num_threads"].as< uint32_t >();
     if (is_spdk) {
         nthreads = 2;
     }
@@ -157,7 +157,7 @@ int main(int argc, char* argv[]) {
 
     auto drive_type = iomgr::iomgr_drive_type::unknown;
 
-    if (gp.restricted_mode && gp.zero_boot_sb) {
+    if (gp.zero_boot_sb) {
         VolInterface::get_instance()->zero_boot_sbs(device_info, drive_type, homestore::io_flag::DIRECT_IO);
     }
 

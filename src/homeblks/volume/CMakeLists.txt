@@ -50,6 +50,8 @@ if ("${CONAN_TEST_TARGET}" STREQUAL "full")
 #              )
 
 # Coverage doesn't like binaries that don't run...
+    add_test(NAME TestHSSvcTool COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh --retry_log_mods "volume:trace,indx_mgr:trace" ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=hs_svc_tool --dirpath=${CMAKE_BINARY_DIR}/bin/ --)
+
     add_test(NAME TestVol COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh --retry_log_mods "volume:trace,indx_mgr:trace" ${CMAKE_BINARY_DIR}/bin/test_volume)
 #add_test(NAME TestMapBtreeFix COMMAND test_volume --gtest_filter=*btree_fix_rerun_io* --max_num_writes=1000 --max_volume=10)
 #SET_TESTS_PROPERTIES(TestMapBtreeFix PROPERTIES DEPENDS TestVol)
