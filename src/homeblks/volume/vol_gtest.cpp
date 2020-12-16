@@ -554,7 +554,7 @@ public:
         params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
         params.devices = device_info;
 #ifdef _PRERELEASE
-		params.force_reinit = false;
+		params.force_reinit = force_reinit;
 #endif
         params.init_done_cb = bind_this(VolTest::init_done_cb, 2);
         params.vol_mounted_cb = bind_this(VolTest::vol_mounted_cb, 2);
@@ -1587,13 +1587,13 @@ TEST_F(VolTest, recovery_io_test) {
 TEST_F(VolTest, hs_force_reinit_test) {
     output.print("hs_force_reinit_test");
 
-    tcfg.init = true;
+    tcfg.init = true; // so that we can assert first time boot in init_done_cb
 
     // 1. set input params with force_reinit;
     // 2. boot homestore which should be first-time-boot
     this->start_homestore(true /* wait_for_init_complete */, true /* force_reinit */);
 
-    // 3. verify it is first time boot which is done in init_done_cb;
+    // 3. verify it is first time boot which is done in init_done_cb
 
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();

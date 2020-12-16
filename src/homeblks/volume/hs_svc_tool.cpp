@@ -16,8 +16,9 @@ std::vector< std::shared_ptr< Volume > > vol_list;
 THREAD_BUFFER_INIT;
 RCU_REGISTER_INIT;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-SDS_OPTIONS_ENABLE(logging, hs_svc_tool)
 SDS_LOGGING_DECL(hs_svc_tool)
+
+SDS_OPTIONS_ENABLE(logging, hs_svc_tool)
 
 struct Param {
     bool restricted_mode = 0;
@@ -112,6 +113,7 @@ SDS_OPTION_GROUP(hs_svc_tool,
                   ::cxxopts::value< bool >()->default_value("false"), "true or false"),
                  (zero_boot_sb, "", "zero_boot_sb", "mark homestore init state",
                   ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+                 (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
                   cxxopts::value< int32_t >()->default_value("5004"), "port"));
 
@@ -137,13 +139,18 @@ int main(int argc, char* argv[]) {
     VolInterface::get_instance()->shutdown();
     iomanager.stop();
 #endif
-
-    iomanager.start(1);
+    
+    bool is_spdk = SDS_OPTIONS["spdk"].as< bool >();
+    uint32_t nthreads = SDS_OPTIONS["num_threads"].as< bool >();
+    if (is_spdk) {
+        nthreads = 2;
+    }
+    iomanager.start(nthreads, is_spdk);
 
     auto ndevices = SDS_OPTIONS["num_devs"].as< uint32_t >();
     std::vector< dev_info > device_info;
 
-    auto dev_size = SDS_OPTIONS["dev_size_gb"].as< uint32_t >() * 1024 * 1024 * 1024;
+    auto dev_size = SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024;
     gen_device_info(device_info, ndevices, dev_size);
 
     HS_DEBUG_ASSERT_EQ(device_info.size() > 0, true);
