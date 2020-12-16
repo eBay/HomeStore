@@ -262,7 +262,7 @@ public:
             wb_req->bn = bn;
             wb_req->bid.set(bn->get_node_id());
             // batch requests
-            wb_req->part_of_batch = false;
+            wb_req->part_of_batch = true;
             // we can assume that btree is not destroyed until cp is not completed
             wb_req->wb_cache = this;
             HS_ASSERT_CMP(DEBUG, wb_req->state, ==, writeback_req_state::WB_REQ_INIT);
