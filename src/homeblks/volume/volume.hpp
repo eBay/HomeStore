@@ -483,7 +483,7 @@ public:
     void migrate_sb();
     void recovery_start_phase1();
     void recovery_start_phase2();
-    static void force_reinit(){};
+    static void fake_reboot(){};
 };
 
 /* Note :- Any member inside this structure is not lock protected. Its caller responsibility to call it under lock

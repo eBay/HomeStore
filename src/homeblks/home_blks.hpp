@@ -110,10 +110,10 @@ public:
      * @brief Initialize the HomeBlks. Before init called, none of the other HomeBlks methods can be used.
      *
      * @param cfg : Input Parameters to initialize the homeblks.
-     * @param force_reinit Do we need to forcefully reinitialize the homeblks, even if its initialized already
+     * @param fake_reboot: simulate fake reboot, used for testing only
      * @return Pointer to the base VolInterface
      */
-    static VolInterface* init(const init_params& cfg, bool force_reinit = false);
+    static VolInterface* init(const init_params& cfg, bool fake_reboot = false);
 
     /**
      * @brief Get the instance or safe instance of this object. It is expected the caller to use safe_instance() and

@@ -513,7 +513,7 @@ public:
         HS_RELEASE_ASSERT_EQ(str.compare(boost::uuids::to_string(m_am_uuid)), 0);
     }
 
-    void start_homestore(bool wait_for_init_done = true) {
+    void start_homestore(bool wait_for_init_done = true, bool force_reinit = false) {
         uint64_t max_capacity = 0;
 
         /* start homestore */
@@ -553,6 +553,9 @@ public:
         params.min_virtual_page_size = tcfg.vol_page_size;
         params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
         params.devices = device_info;
+#ifdef _PRERELEASE
+		params.force_reinit = false;
+#endif
         params.init_done_cb = bind_this(VolTest::init_done_cb, 2);
         params.vol_mounted_cb = bind_this(VolTest::vol_mounted_cb, 2);
         params.vol_state_change_cb = bind_this(VolTest::vol_state_change_cb, 3);
@@ -1575,6 +1578,22 @@ TEST_F(VolTest, recovery_io_test) {
     output.print("recovery_io_test");
 
     if (tcfg.create_del_with_io) { cdjob->wait_for_completion(); }
+
+    if (tcfg.can_delete_volume) { this->delete_volumes(); }
+    this->shutdown();
+    if (tcfg.remove_file) { this->remove_files(); }
+}
+
+TEST_F(VolTest, hs_force_reinit_test) {
+    output.print("hs_force_reinit_test");
+
+    tcfg.init = true;
+
+    // 1. set input params with force_reinit;
+    // 2. boot homestore which should be first-time-boot
+    this->start_homestore(true /* wait_for_init_complete */, true /* force_reinit */);
+
+    // 3. verify it is first time boot which is done in init_done_cb;
 
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();

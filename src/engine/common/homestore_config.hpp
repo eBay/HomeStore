@@ -75,6 +75,10 @@ public:
     bool is_read_only = false;                      // Is read only
     bool is_restricted_mode = false;                // boot in restricted mode
 
+#ifdef _PRERELEASE
+    bool force_reinit = false;
+#endif
+
     /* optional parameters - if provided will override the startup config */
     boost::optional< iomgr::drive_attributes > drive_attr;
 

@@ -216,6 +216,13 @@ def meta_blk_store_nightly():
     subprocess.check_call(dirpath + "test_meta_blk_mgr --run_time=24000 --num_io=1000000", stderr=subprocess.STDOUT, shell=True)
     print("meta blk store test completed")
 
+def force_reinit():
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=5 --enable_crash_handler=0 --remove_file=0"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+
+    cmd_opts = "--gtest_filter=VolTest.hs_force_reinit_test --run_time=5 --enable_crash_handler=1 --remove_file=1 --delete_volume=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    print("Homestore Force Reinit passed")
 
 def nightly():
 
@@ -335,3 +342,7 @@ if test_suits == "vdev_nightly":
 
 if test_suits == "meta_blk_store_nightly":
     meta_blk_store_nightly()
+
+if test_suits == "force_reinit":
+        force_reinit()
+

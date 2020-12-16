@@ -33,8 +33,14 @@ void VolInterfaceImpl::zero_boot_sbs(const std::vector< dev_info >& devices, iom
     return (HomeBlks::zero_boot_sbs(devices, drive_type, oflags));
 }
 
-VolInterface* VolInterfaceImpl::init(const init_params& cfg, bool force_reinit) {
-    return (HomeBlks::init(cfg, force_reinit));
+VolInterface* VolInterfaceImpl::init(const init_params& cfg, bool fake_reboot) {
+#ifdef _PRERELEASE
+    if (cfg.force_reinit) {
+        zero_boot_sbs(cfg.devices, cfg.device_type, cfg.open_flags);
+    }
+#endif
+
+    return (HomeBlks::init(cfg, fake_reboot));
 }
 #if 0
 boost::intrusive_ptr< VolInterface > VolInterfaceImpl::safe_instance() {
@@ -43,17 +49,17 @@ boost::intrusive_ptr< VolInterface > VolInterfaceImpl::safe_instance() {
 #endif
 VolInterface* VolInterfaceImpl::raw_instance() { return HomeBlks::instance(); }
 
-VolInterface* HomeBlks::init(const init_params& cfg, bool force_reinit) {
+VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
     fLI::FLAGS_minloglevel = 3;
 
     static std::once_flag flag1;
     try {
 
         /* Note :- it is not thread safe. We only support it for testing */
-        if (force_reinit) {
-            HomeStore::force_reinit();
+        if (fake_reboot) {
+            HomeStore::fake_reboot();
             meta_blk_mgr->register_handler("HOMEBLK", HomeBlks::meta_blk_found_cb, HomeBlks::meta_blk_recovery_comp_cb);
-            Volume::force_reinit();
+            Volume::fake_reboot();
             m_meta_blk_found = false;
             auto instance = boost::static_pointer_cast< homestore::HomeStoreBase >(HomeBlksSafePtr(new HomeBlks(cfg)));
             set_instance(boost::static_pointer_cast< homestore::HomeStoreBase >(instance));

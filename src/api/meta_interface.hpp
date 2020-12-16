@@ -80,7 +80,7 @@ public:
     static MetaBlkMgr* instance();
 
     /* Note: it assumes that it is called in a single thread */
-    static void force_reinit();
+    static void fake_reboot();
 
     static void del_instance();
 

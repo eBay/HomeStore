@@ -402,7 +402,7 @@ public:
     static void trigger_indx_cp_with_cb(const cp_done_cb& cb);
 
     /* reinitialize indx mgr. It is used in fake reboot */
-    static void force_reinit() { m_shutdown_started = false; }
+    static void fake_reboot() { m_shutdown_started = false; }
     static void cp_done(bool blkalloc_cp);
     /* It registers a callback which is triggered at the end of cp.
      * @params cp_done_cb :- callback

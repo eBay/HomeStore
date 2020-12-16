@@ -347,9 +347,9 @@ protected:
 
 public:
     /////////////////////////////////////////// static HomeStore member functions /////////////////////////////////
-    static void force_reinit() {
-        MetaBlkMgr::force_reinit();
-        IndxMgr::force_reinit();
+    static void fake_reboot() {
+        MetaBlkMgr::fake_reboot();
+        IndxMgr::fake_reboot();
         meta_blk_mgr->register_handler("LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr);
     }
 

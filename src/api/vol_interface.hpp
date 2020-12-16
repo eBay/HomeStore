@@ -42,7 +42,7 @@ class VolInterface;
 struct init_params;
 class VolInterfaceImpl {
 public:
-    static VolInterface* init(const init_params& cfg, bool force_reinit);
+    static VolInterface* init(const init_params& cfg, bool fake_reboot);
     static boost::intrusive_ptr< VolInterface > safe_instance();
     static VolInterface* raw_instance();
     static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr::iomgr_drive_type drive_type,
@@ -211,8 +211,8 @@ public:
 class VolInterface {
 public:
     ////////////////////////////////  static Volinterface member functions for its consumer ///////////////
-    static bool init(const init_params& cfg, bool force_reinit = false) {
-        return (VolInterfaceImpl::init(cfg, force_reinit) != nullptr);
+    static bool init(const init_params& cfg, bool fake_reboot = false) {
+        return (VolInterfaceImpl::init(cfg, fake_reboot) != nullptr);
     }
 
     static VolInterface* get_instance() { return VolInterfaceImpl::raw_instance(); }

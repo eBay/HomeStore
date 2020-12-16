@@ -23,7 +23,7 @@ MetaBlkMgr* MetaBlkMgr::instance() {
     return s_instance.get();
 }
 
-void MetaBlkMgr::force_reinit() { s_instance = std::make_unique< MetaBlkMgr >(); }
+void MetaBlkMgr::fake_reboot() { s_instance = std::make_unique< MetaBlkMgr >(); }
 
 void MetaBlkMgr::del_instance() { s_instance.reset(); }
 
