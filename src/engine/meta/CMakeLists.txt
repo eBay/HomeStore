@@ -15,5 +15,5 @@ if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")
                    )
 
     target_link_libraries(test_meta_blk_mgr homeblks ${CONAN_LIBS})
-    add_test(NAME TestMetaBlkMgr COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_meta_blk_mgr)
+    add_test(NAME TestMetaBlkMgr COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_meta_blk_mgr) 
 endif()

@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -513,14 +514,8 @@ public:
         HS_RELEASE_ASSERT_EQ(str.compare(boost::uuids::to_string(m_am_uuid)), 0);
     }
 
-    void start_homestore(bool wait_for_init_done = true, bool force_reinit = false) {
+    uint64_t get_dev_info(std::vector< dev_info >& device_info) {
         uint64_t max_capacity = 0;
-
-        /* start homestore */
-        /* create files */
-        struct stat st;
-        if (stat("test_files", &st) == -1) { mkdir("test_files", 0700); }
-
         /* create files */
         if (tcfg.dev_names.size() != 0) {
             for (uint32_t i = 0; i < tcfg.dev_names.size(); i++) {
@@ -546,6 +541,28 @@ public:
                 max_capacity += tcfg.max_disk_capacity;
             }
         }
+
+        return max_capacity;
+    }
+
+    void start_homestore(const bool wait_for_init_done = true, const bool force_reinit = false) {
+        uint64_t max_capacity = 0;
+
+        /* start homestore */
+        /* create files */
+#if 0
+        struct stat st;
+        if (stat("test_files", &st) == -1) { mkdir("test_files", 0700); }
+#endif
+        std::filesystem::create_directory("test_files");
+        std::filesystem::permissions("test_files", std::filesystem::perms::owner_all);
+
+        max_capacity = get_dev_info(device_info);
+
+        /* Don't populate the whole disks. Only 60 % of it */
+        max_vol_size = (tcfg.p_volume_size * max_capacity) / (100 * tcfg.max_vols);
+        max_vol_size_csum = (sizeof(uint16_t) * max_vol_size) / tcfg.vol_page_size;
+
         iomanager.start(tcfg.num_threads, tcfg.is_spdk);
 
         init_params params;
@@ -982,7 +999,13 @@ private:
             remove(name.c_str());
         }
     }
-    };
+
+    void force_reinit(const std::vector< dev_info >& devices, iomgr::iomgr_drive_type drive_type, io_flag oflags) {
+        iomanager.start(1);
+        VolInterface::get_instance()->zero_boot_sbs(devices, drive_type, oflags);
+        iomanager.stop();
+    }
+};
 
 bool VolTest::m_am_sb_received = false;
 boost::uuids::uuid VolTest::m_am_uuid;
@@ -1513,7 +1536,6 @@ thread_local std::list< vol_interface_req_ptr > VolTest::_completed_reqs_this_th
 TEST_F(VolTest, lifecycle_test) {
     this->start_homestore();
     this->start_io_job();
-
     output.print("lifecycle_test");
 
     FlipClient fc(HomeStoreFlip::instance());
@@ -1584,6 +1606,12 @@ TEST_F(VolTest, recovery_io_test) {
     if (tcfg.remove_file) { this->remove_files(); }
 }
 
+#ifdef _PRERELEASE
+/*
+ * @test    hs_force_reinit_test only works in PRERELEASE mode;
+ * @brief   This test cases works with force_reinit field in input_params which is only valid in PRERELEASE mode;
+ * if not in PRERELEASE mode, assert for first_time_boot will fail in init_done_cb 
+ * */
 TEST_F(VolTest, hs_force_reinit_test) {
     output.print("hs_force_reinit_test");
 
@@ -1599,6 +1627,35 @@ TEST_F(VolTest, hs_force_reinit_test) {
     this->shutdown();
     if (tcfg.remove_file) { this->remove_files(); }
 }
+#else 
+
+/*!
+    @test   hs_force_reinit_test works as always (not depend on force_reinit field)
+    @brief  Tests force reinit to boot as first time boot;
+    This test case is supposed to be called after init_io_test.
+    It can also be run standalone.
+    The expected result is it will always boot as first time boot;
+ */
+TEST_F(VolTest, hs_force_reinit_test) {
+    output.print("hs_force_reinit_test");
+
+    // 1. first calling init_done to zero sb on physical device_boot_fail
+    std::vector< dev_info > tmp_dev_info;
+    get_dev_info(tmp_dev_info);
+    HS_RELEASE_ASSERT_GT(tmp_dev_info.size(), 0);
+
+    this->force_reinit(tmp_dev_info, iomgr::iomgr_drive_type::unknown, homestore::io_flag::DIRECT_IO);
+
+    // 2. boot homestore which should be first-time-boot
+    this->start_homestore();
+
+    // 3. verify it is first time boot which is done in init_done_cb;
+
+    if (tcfg.can_delete_volume) { this->delete_volumes(); }
+    this->shutdown();
+    if (tcfg.remove_file) { this->remove_files(); }
+}
+#endif
 
 /*!
     @test   vol_create_del_test

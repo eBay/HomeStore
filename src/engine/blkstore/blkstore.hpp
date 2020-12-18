@@ -223,6 +223,8 @@ public:
         req->missing_pieces.clear();
     }
 
+    uint32_t get_page_size() { return m_pagesz; }
+
     void update_cache(boost::intrusive_ptr< blkstore_req< Buffer > > req) {
         Clock::time_point start_time = Clock::now();
 
@@ -588,6 +590,7 @@ public:
 
     /* This api is very expensive api as it goes through the entire bitmap */
     uint64_t get_used_size() const { return m_vdev.get_used_size(); }
+    uint64_t get_available_blks() const { return m_vdev.get_available_blks(); }
 
     void update_vb_context(const sisl::blob& ctx_data) { m_vdev.update_vb_context(ctx_data); }
 

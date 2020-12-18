@@ -213,7 +213,11 @@ def vdev_nightly():
 
 def meta_blk_store_nightly():
     print("meta blk store test started")
+    subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.min_drive_size_test", stderr=subprocess.STDOUT, shell=True)
+    #subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.write_to_full_test", stderr=subprocess.STDOUT, shell=True)   # currently blocked by SDSTOR-3607
+    subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.single_read_test", stderr=subprocess.STDOUT, shell=True)
     subprocess.check_call(dirpath + "test_meta_blk_mgr --run_time=24000 --num_io=1000000", stderr=subprocess.STDOUT, shell=True)
+
     print("meta blk store test completed")
 
 def force_reinit():
@@ -348,7 +352,7 @@ if test_suits == "meta_blk_store_nightly":
     meta_blk_store_nightly()
 
 if test_suits == "force_reinit":
-        force_reinit()
+    force_reinit()
 
 if test_suits == "hs_svc_tool":
     hs_svc_tool()

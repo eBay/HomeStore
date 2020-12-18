@@ -18,7 +18,9 @@ std::unique_ptr< MetaBlkMgr > MetaBlkMgr::s_instance{};
 // and operator= functions require a complete definition
 MetaBlkMgr* MetaBlkMgr::instance() {
     static std::once_flag flag1;
-    std::call_once(flag1, []() { if (!s_instance) s_instance = std::make_unique<MetaBlkMgr>(); });
+    std::call_once(flag1, []() {
+        if (!s_instance) s_instance = std::make_unique< MetaBlkMgr >();
+    });
 
     return s_instance.get();
 }
@@ -37,9 +39,8 @@ MetaBlkMgr::~MetaBlkMgr() {
         std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
         m_sub_info.clear();
     }
-    iomanager.iobuf_free(reinterpret_cast<uint8_t*>(m_ssb));
+    iomanager.iobuf_free(reinterpret_cast< uint8_t* >(m_ssb));
 }
-
 
 bool MetaBlkMgr::is_aligned_buf_needed(const size_t size) { return (size <= META_BLK_CONTEXT_SZ) ? false : true; }
 
@@ -925,9 +926,13 @@ uint64_t MetaBlkMgr::get_meta_size(const void* cookie) {
     return nblks * META_BLK_PAGE_SZ;
 }
 
-uint64_t MetaBlkMgr::get_size() { return m_sb_blk_store->get_size(); }
+uint64_t MetaBlkMgr::get_size() const { return m_sb_blk_store->get_size(); }
 
-uint64_t MetaBlkMgr::get_used_size() { return m_sb_blk_store->get_used_size(); }
+uint64_t MetaBlkMgr::get_used_size() const { return m_sb_blk_store->get_used_size(); }
+
+uint32_t MetaBlkMgr::get_page_size() const { return m_sb_blk_store->get_page_size(); }
+
+uint64_t MetaBlkMgr::get_available_blks() const { return m_sb_blk_store->get_available_blks(); }
 
 bool MetaBlkMgr::m_self_recover{false};
 } // namespace homestore

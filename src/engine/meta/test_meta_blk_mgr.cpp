@@ -138,10 +138,33 @@ public:
 
     uint64_t total_size_written(const void* cookie) { return m_mbm->get_meta_size(cookie); }
 
-    void do_sb_write(bool overflow) {
-        m_wrt_cnt++;
-        auto sz_to_wrt = rand_size(overflow);
+    void do_write_to_full() {
+        ssize_t free_size{static_cast< ssize_t >(m_mbm->get_size() - m_mbm->get_used_size())};
 
+        HS_RELEASE_ASSERT_LT(free_size, 0);
+        HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(free_size), m_mbm->get_available_blks() * m_mbm->get_page_size());
+
+        uint64_t size_written{0};
+        while (free_size > 0) {
+            if (free_size >= gp.max_wrt_sz) {
+                size_written = do_sb_write(do_overflow());
+            } else {
+                size_written = do_sb_write(false, META_BLK_CONTEXT_SZ);
+                HS_RELEASE_ASSERT_EQ(size_written, m_mbm->get_page_size());
+            }
+
+            free_size -= size_written;
+        
+            HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(free_size), m_mbm->get_available_blks() * m_mbm->get_page_size());
+        }
+
+        HS_RELEASE_ASSERT_EQ(free_size, 0);
+    }
+
+    uint64_t do_sb_write(bool overflow, size_t sz_to_wrt = 0) {
+        ++m_wrt_cnt;
+        if (!sz_to_wrt) { sz_to_wrt = rand_size(overflow); }
+        uint64_t ret_size_written = 0;
         uint8_t* buf = iomanager.iobuf_alloc(512, sz_to_wrt);
         gen_rand_buf(buf, sz_to_wrt);
 
@@ -154,10 +177,10 @@ public:
         meta_blk* mblk = (meta_blk*)cookie;
         if (overflow) {
             HS_DEBUG_ASSERT_GE(sz_to_wrt, META_BLK_PAGE_SZ);
-            HS_DEBUG_ASSERT(mblk->hdr.h.ovf_bid.is_valid(), "Expected valid meta blkid");
+            HS_DEBUG_ASSERT(mblk->hdr.h.ovf_bid.is_valid(), "Expected valid ovf meta blkid");
         } else {
             HS_DEBUG_ASSERT_LE(sz_to_wrt, META_BLK_CONTEXT_SZ);
-            HS_DEBUG_ASSERT(!mblk->hdr.h.ovf_bid.is_valid(), "Expected valid meta blkid");
+            HS_DEBUG_ASSERT(!mblk->hdr.h.ovf_bid.is_valid(), "Expected invalid ovf meta blkid");
         }
 
         // verify context_sz
@@ -174,7 +197,8 @@ public:
             m_write_sbs[bid].cookie = cookie;
             m_write_sbs[bid].str = std::string((char*)buf, sz_to_wrt);
 
-            m_total_wrt_sz += total_size_written(cookie);
+            ret_size_written = total_size_written(cookie);
+            m_total_wrt_sz += ret_size_written;
             HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
                       m_mbm->get_used_size());
         }
@@ -190,6 +214,8 @@ public:
         }
 
         iomanager.iobuf_free(buf);
+
+        return ret_size_written;
     }
 
     void do_sb_remove() {
@@ -219,19 +245,28 @@ public:
         }
     }
 
-    void do_sb_read() {
-        std::unique_lock< std::mutex > lg(m_mtx);
-        const auto it{m_write_sbs.begin()};
+    void do_single_sb_read() {
+        meta_blk* mblk = nullptr;
+        std::string str;
+        {
+            std::unique_lock< std::mutex > lg(m_mtx);
+            const auto it{m_write_sbs.begin()};
 
-        HS_DEBUG_ASSERT_EQ(it != m_write_sbs.end(), true);
-        const auto mblk = static_cast< meta_blk* >(it->second.cookie);
+            HS_DEBUG_ASSERT_EQ(it != m_write_sbs.end(), true);
+            str = it->second.str;
+            mblk = static_cast< meta_blk* >(it->second.cookie);
+        }
 
+        // read output will be sent via callback which also holds mutex;
         m_mbm->read_sub_sb(mblk->hdr.h.type);
 
-        const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()];
-        const std::string write_buf_str(it->second.str);
-        auto ret = read_buf_str.compare(write_buf_str);
-        HS_ASSERT(DEBUG, ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
+        {
+            std::unique_lock< std::mutex > lg(m_mtx);
+            const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()];
+            const std::string write_buf_str(str);
+            auto ret = read_buf_str.compare(write_buf_str);
+            HS_ASSERT(DEBUG, ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
+        }
     }
 
     void do_sb_update() {
@@ -297,26 +332,7 @@ public:
         }
     }
 
-    void execute() {
-        reset_counters();
-
-        m_start_time = Clock::now();
-        m_mbm = MetaBlkMgr::instance();
-
-        // there is some overhead by MetaBlkMgr, such as meta ssb;
-        m_total_wrt_sz = m_mbm->get_used_size();
-
-        m_mbm->deregister_handler(mtype);
-        m_mbm->register_handler(
-            mtype,
-            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-                if (mblk) {
-                    std::unique_lock< std::mutex > lg(m_mtx);
-                    m_cb_blks[mblk->hdr.h.bid.to_integer()] = std::string((char*)(buf.bytes()), size);
-                }
-            },
-            [this](bool success) { HS_ASSERT_CMP(DEBUG, success, ==, true); });
-
+    void do_rand_load() {
         while (keep_running()) {
             switch (get_op()) {
             case meta_op_type::write:
@@ -423,9 +439,12 @@ public:
         m_total_wrt_sz = 0;
     }
 
-    void register_read_client() {
+    void register_client() {
         m_mbm = MetaBlkMgr::instance();
         m_total_wrt_sz = m_mbm->get_used_size();
+        
+        HS_RELEASE_ASSERT_EQ(m_mbm->get_size() - m_total_wrt_sz, m_mbm->get_available_blks() * m_mbm->get_page_size());
+
         m_mbm->deregister_handler(mtype);
         m_mbm->register_handler(
             mtype,
@@ -450,26 +469,58 @@ private:
     std::mutex m_mtx;
 };
 
-#if 0
-TEST_F(VMetaBlkMgrTest, VMetaBlkMgrTestRead) {
-    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                    SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
-    mtype = "Test_Read";
-    this->register_read_client();
+#define MIN_DRIVE_SIZE 2147483648 // 2 GB
+TEST_F(VMetaBlkMgrTest, min_drive_size_test) {
+    start_homestore(1, (uint64_t)MIN_DRIVE_SIZE, gp.num_threads);
+    mtype = "Test_Min_Drive_Size";
+    this->register_client();
 
     this->do_sb_write(false);
 
-    this->do_sb_read();
+    this->do_single_sb_read();
 
     this->shutdown();
 }
-#endif
 
-TEST_F(VMetaBlkMgrTest, VMetaBlkMgrTest) {
+TEST_F(VMetaBlkMgrTest, write_to_full_test) {
     start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
                     SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
-    mtype = "Test";
-    this->execute();
+    mtype = "Test_Write_to_Full";
+    reset_counters();
+    m_start_time = Clock::now();
+    this->register_client();
+
+    this->do_write_to_full();
+
+    this->shutdown();
+}
+
+TEST_F(VMetaBlkMgrTest, single_read_test) {
+    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
+                    SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
+    mtype = "Test_Read";
+    reset_counters();
+    m_start_time = Clock::now();
+    this->register_client();
+
+    this->do_sb_write(false);
+
+    this->do_single_sb_read();
+
+    this->shutdown();
+}
+
+// 1. randome write, update, remove;
+// 2. recovery test and verify callback context data matches;
+TEST_F(VMetaBlkMgrTest, random_load_test) {
+    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
+                    SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
+    mtype = "Test_Rand_Load";
+    reset_counters();
+    m_start_time = Clock::now();
+    register_client();
+
+    this->do_rand_load();
 
     // simulate reboot case that MetaBlkMgr will scan the disk for all the metablks that were written;
     this->scan_blks();
@@ -508,8 +559,9 @@ SDS_OPTION_GROUP(
     (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 int main(int argc, char* argv[]) {
-    SDS_OPTIONS_LOAD(argc, argv, logging, test_meta_blk_mgr);
+    ::testing::GTEST_FLAG(filter) = "*random_load_test*";
     testing::InitGoogleTest(&argc, argv);
+    SDS_OPTIONS_LOAD(argc, argv, logging, test_meta_blk_mgr);
     sds_logging::SetLogger("test_meta_blk_mgr");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
