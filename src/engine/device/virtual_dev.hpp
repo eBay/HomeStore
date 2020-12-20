@@ -1625,7 +1625,8 @@ private:
     uint64_t to_dev_offset(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const {
         *chunk = m_mgr->get_chunk_mutable(glob_uniq_id.get_chunk_num());
 
-        uint64_t dev_offset = glob_uniq_id.get_blk_num() * get_page_size() + (*chunk)->get_start_offset();
+        uint64_t dev_offset =
+            (uint64_t)glob_uniq_id.get_blk_num() * get_page_size() + (uint64_t)(*chunk)->get_start_offset();
         return dev_offset;
     }
 

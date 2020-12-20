@@ -322,8 +322,9 @@ struct io_req_t : public vol_interface_req {
     bool done = false;
 
     io_req_t(const std::shared_ptr< vol_info_t >& vinfo, const Op_type op, std::vector< iovec >&& iovecs,
-             const uint64_t lba, const uint32_t nlbas, const bool is_csum, const bool cache = false) :
-            vol_interface_req{std::move(iovecs), lba, nlbas, false, cache},
+             const uint64_t lba, const uint32_t nlbas, const bool is_csum, const bool cache = false,
+             const bool sync = false) :
+            vol_interface_req{std::move(iovecs), lba, nlbas, sync, cache},
             buffer{nullptr},
             op_type{op},
             vol_info{vinfo} {
@@ -351,8 +352,8 @@ struct io_req_t : public vol_interface_req {
     }
 
     io_req_t(const std::shared_ptr< vol_info_t >& vinfo, const Op_type op, uint8_t* const buf, const uint64_t lba,
-             const uint32_t nlbas, const bool is_csum, const bool cache = false) :
-            vol_interface_req{buf, lba, nlbas, false, cache},
+             const uint32_t nlbas, const bool is_csum, const bool cache = false, const bool sync = false) :
+            vol_interface_req{buf, lba, nlbas, sync, cache},
 
             buffer{buf},
             op_type{op},
@@ -1080,7 +1081,7 @@ public:
         if (req->err != no_error) {
             assert((req->err == std::errc::no_such_device) || tcfg.expect_io_error);
         } else {
-            if (req->is_read() && (tcfg.read_verify || tcfg.verify_type_set())) {
+            if (req->is_read() && (tcfg.verify_type_set())) {
                 /* read from the file and verify it */
                 if (!tcfg.verify_hdr()) {
                     /* no need to read from the file to verify hdr */
@@ -1094,6 +1095,18 @@ public:
                     /* no need to write to a file to verify hdr */
                     m_voltest->write_vol_file(req->vol_info->fd, req->validate_buffer, req->verify_size,
                                               req->verify_offset);
+                }
+                if (tcfg.read_verify) {
+                    auto vol = req->vol_info->vol;
+                    if (vol) {
+                        auto read_req = read_vol_internal(req->vol_info, vol, req->lba, req->nlbas, true);
+                        if (!tcfg.verify_hdr()) {
+                            /* no need to read from the file to verify hdr */
+                            m_voltest->read_vol_file(read_req->fd, read_req->validate_buffer, read_req->verify_size,
+                                                     read_req->verify_offset);
+                        }
+                        verify(read_req);
+                    }
                 }
             }
         }
@@ -1311,12 +1324,18 @@ protected:
         const auto vinfo{m_voltest->vol_info[cur]};
         const auto vol{vinfo->vol};
         if (vol == nullptr) { return false; }
+        if (read_vol_internal(vinfo, vol, lba, nlbas, false)) { return true; }
+        return false;
+    }
+    boost::intrusive_ptr< io_req_t > read_vol_internal(std::shared_ptr< vol_info_t > vinfo, VolumePtr vol,
+                                                       const uint64_t lba, const uint32_t nlbas,
+                                                       const bool sync = false) {
 
         const uint64_t page_size{VolInterface::get_instance()->get_page_size(vol)};
         boost::intrusive_ptr< io_req_t > vreq{};
         if (!tcfg.read_iovec) {
             vreq = boost::intrusive_ptr< io_req_t >(
-                new io_req_t{vinfo, Op_type::READ, nullptr, lba, nlbas, tcfg.verify_csum(), tcfg.read_cache});
+                new io_req_t{vinfo, Op_type::READ, nullptr, lba, nlbas, tcfg.verify_csum(), tcfg.read_cache, sync});
         } else {
             std::vector< iovec > iovecs{};
             for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
@@ -1326,8 +1345,8 @@ protected:
                 iovecs.emplace_back(std::move(iov));
             }
 
-            vreq = boost::intrusive_ptr< io_req_t >(
-                new io_req_t{vinfo, Op_type::READ, std::move(iovecs), lba, nlbas, tcfg.verify_csum(), tcfg.read_cache});
+            vreq = boost::intrusive_ptr< io_req_t >(new io_req_t{vinfo, Op_type::READ, std::move(iovecs), lba, nlbas,
+                                                                 tcfg.verify_csum(), tcfg.read_cache, sync});
         }
         vreq->cookie = static_cast< void* >(this);
 
@@ -1338,10 +1357,12 @@ protected:
         LOGDEBUG("Read lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas,
                  m_outstanding_ios.load(), (tcfg.read_iovec != 0 ? true : false),
                  (tcfg.read_cache != 0 ? true : false));
-        if (ret_io != no_error) {
-            return false;
+        if (sync) {
+            --m_outstanding_ios;
+            vinfo->ref_cnt.decrement(1);
         }
-        return true;
+        if (ret_io != no_error) { return nullptr; }
+        return vreq;
     }
 
     bool unmap_vol(const uint32_t cur, const uint64_t lba, const uint32_t nlbas) {

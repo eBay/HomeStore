@@ -76,7 +76,6 @@ struct volume_child_req : public blkstore_req< BlkBuffer > {
     uint16_t checksum[MAX_NUM_LBA];
     uint64_t read_buf_offset;
     uint64_t read_size;
-    bool sync = false;
     bool use_cache{true};
 
     volume_req_ptr parent_req = nullptr;

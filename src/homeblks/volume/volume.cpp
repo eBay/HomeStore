@@ -549,7 +549,6 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 void Volume::attach_completion_cb(const io_comp_callback& cb) { m_comp_cb = cb; }
 
 void Volume::verify_csum(const volume_req_ptr& vreq) {
-    uint64_t offset = 0;
     uint32_t csum_indx = 0;
 
     for (auto& info : vreq->read_buf()) {
@@ -708,9 +707,10 @@ volume_child_req_ptr Volume::create_vol_child_req(BlkId& bid, const volume_req_p
     vc_req->bid = bid;
     vc_req->lba = start_lba;
     vc_req->op_start_time = Clock::now();
-    vc_req->sync = vreq->is_sync();
+    vc_req->isSyncCall = vreq->is_sync();
     vc_req->use_cache = vreq->use_cache();
     vc_req->part_of_batch = vreq->iface_req->part_of_batch;
+    vc_req->request_id = vreq->request_id;
 
     assert((bid.data_size(HomeBlks::instance()->get_data_pagesz()) % get_page_size()) == 0);
     vc_req->nlbas = nlbas;
