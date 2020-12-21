@@ -1098,7 +1098,21 @@ void IndxMgr::destroy_indx_tbl() {
                                         mhdr->size = cursor_blob.size + sizeof(hs_cp_base_sb);
                                         memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_base_sb)),
                                                cursor_blob.bytes, cursor_blob.size);
+#ifdef _PRERELEASE
+                                        if (homestore_flip->test_flip(
+                                                "indx_del_partial_free_data_blks_before_meta_write")) {
+                                            LOGINFO("aborting because of flip");
+                                            raise(SIGKILL);
+                                        }
+#endif
                                         write_meta_blk(m_destroy_meta_blk, b);
+#ifdef _PRERELEASE
+                                        if (homestore_flip->test_flip(
+                                                "indx_del_partial_free_data_blks_after_meta_write")) {
+                                            LOGINFO("aborting because of flip");
+                                            raise(SIGKILL);
+                                        }
+#endif
                                     }
 
                                     /* send message to thread to start freeing the blkid */
@@ -1112,7 +1126,21 @@ void IndxMgr::destroy_indx_tbl() {
     THIS_INDX_LOG(TRACE, indx_mgr, , "All user logs are collected");
     uint64_t free_node_cnt = 0;
     m_active_tbl->destroy(free_list, free_node_cnt);
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("indx_del_partial_free_indx_blks")) {
+        LOGINFO("aborting because of flip");
+        raise(SIGKILL);
+    }
+#endif
+
     attach_user_fblkid_list(free_list, ([this](bool success) {
+
+#ifdef _PRERELEASE
+                                if (homestore_flip->test_flip("indx_del_free_blks_completed")) {
+                                    LOGINFO("aborting because of flip");
+                                    raise(SIGKILL);
+                                }
+#endif
                                 /* remove the meta blk which is used to track vol destroy progress */
                                 if (m_destroy_meta_blk) { MetaBlkMgr::instance()->remove_sub_sb(m_destroy_meta_blk); }
                                 m_stop_cb(success);

@@ -136,6 +136,9 @@ struct TestCfg {
     bool write_iovec{false};
     bool batch_completion{false};
     bool create_del_with_io{false};
+    bool delete_with_io;
+    uint32_t create_del_ops_cnt;
+    uint32_t create_del_ops_interval;
 
     bool verify_csum() { return verify_type == verify_type_t::csum; }
     bool verify_data() { return verify_type == verify_type_t::data; }
@@ -195,6 +198,12 @@ public:
 
     TestJob(VolTest* test) : m_voltest(test), m_start_time(Clock::now()) {
         iomanager.schedule_global_timer(5 * 1000ul * 1000ul * 1000ul, true, nullptr, iomgr::thread_regex::all_worker,
+                                        [this](void* cookie) { try_run_one_iteration(); });
+    }
+
+    TestJob(VolTest* test, uint32_t interval_ops_sec) : m_voltest(test), m_start_time(Clock::now()) {
+        iomanager.schedule_global_timer(interval_ops_sec * 1000ul * 1000ul * 1000ul, true, nullptr,
+                                        iomgr::thread_regex::all_worker,
                                         [this](void* cookie) { try_run_one_iteration(); });
     }
     virtual ~TestJob() = default;
@@ -674,9 +683,9 @@ public:
     }
 
     /* Note: It assumes that create volume is not happening in parallel */
-    void create_volume(int indx) {
+    bool create_volume(int indx) {
 
-        if (vol_info.size() != 0 && vol_info[indx] && vol_info[indx]->ref_cnt.get()) { return; }
+        if (vol_info.size() != 0 && vol_info[indx] && vol_info[indx]->ref_cnt.get()) { return false; }
         /* Create a volume */
         vol_params params;
         params.page_size = tcfg.vol_page_size;
@@ -691,7 +700,7 @@ public:
         auto vol_obj = VolInterface::get_instance()->create_volume(params);
         if (vol_obj == nullptr) {
             LOGINFO("creation failed");
-            return;
+            return false;
         }
         HS_RELEASE_ASSERT_EQ(VolInterface::get_instance()->lookup_volume(params.uuid), vol_obj);
         /* create file for verification */
@@ -709,6 +718,7 @@ public:
 
         /* open a corresponding file */
         vol_init(vol_obj);
+        return true;
     }
 
     void init_done_cb(std::error_condition err, const out_params& params) {
@@ -1014,7 +1024,7 @@ REGISTER_METABLK_SUBSYSTEM(vol_gtest_am, access_mgr_mtype, VolTest::am_meta_blk_
 
 class VolCreateDeleteJob : public TestJob {
 public:
-    VolCreateDeleteJob(VolTest* test) : TestJob(test) {}
+    VolCreateDeleteJob(VolTest* test) : TestJob(test, tcfg.create_del_ops_interval) {}
     virtual ~VolCreateDeleteJob() override = default;
     VolCreateDeleteJob(const VolCreateDeleteJob&) = delete;
     VolCreateDeleteJob(VolCreateDeleteJob&&) noexcept = delete;
@@ -1026,20 +1036,15 @@ public:
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine engine{rd()};
         static thread_local std::uniform_int_distribution< uint64_t > dist{0, RAND_MAX};
-        m_voltest->create_volume(dist(engine) % tcfg.max_vols);
-        m_voltest->delete_volume(dist(engine) % tcfg.max_vols);
-#if 0
-        while (!time_to_stop()) {
-            m_voltest->create_volume();
-            m_voltest->delete_volume(dist(engine) % tcfg.max_vols);
-        }
-        m_is_job_done = true;
-#endif
+        if (tcfg.create_del_with_io && m_voltest->create_volume(dist(engine) % tcfg.max_vols)) { ++m_op_cnt; }
+        if (m_voltest->delete_volume(dist(engine) % tcfg.max_vols)) { ++m_op_cnt; }
     }
 
     void on_one_iteration_completed(const boost::intrusive_ptr< io_req_t >& req) override {}
 
-    bool time_to_stop() const override { return (get_elapsed_time_sec(m_start_time) > tcfg.run_time); }
+    bool time_to_stop() const override {
+        return ((m_op_cnt > tcfg.create_del_ops_cnt) || (get_elapsed_time_sec(m_start_time) > tcfg.run_time));
+    }
 
     virtual bool is_job_done() const override { return true; }
     bool is_async_job() const override { return false; };
@@ -1047,7 +1052,7 @@ public:
     std::string job_name() const { return "VolCreateDeleteJob"; }
 
 private:
-    bool m_is_job_done = false;
+    uint32_t m_op_cnt = 0;
 };
 
 class IOTestJob : public TestJob {
@@ -1583,7 +1588,7 @@ TEST_F(VolTest, init_io_test) {
     this->start_homestore();
 
     std::unique_ptr< VolCreateDeleteJob > cdjob;
-    if (tcfg.create_del_with_io) {
+    if (tcfg.create_del_with_io || tcfg.delete_with_io) {
         cdjob = std::make_unique< VolCreateDeleteJob >(this);
         this->start_job(cdjob.get(), wait_type_t::no_wait);
     }
@@ -1591,7 +1596,7 @@ TEST_F(VolTest, init_io_test) {
     this->start_io_job();
     output.print("init_io_test");
 
-    if (tcfg.create_del_with_io) { cdjob->wait_for_completion(); }
+    if (tcfg.create_del_with_io || tcfg.delete_with_io) { cdjob->wait_for_completion(); }
 
     this->shutdown();
     if (tcfg.remove_file) { this->remove_files(); }
@@ -1612,7 +1617,7 @@ TEST_F(VolTest, recovery_io_test) {
     }
 
     std::unique_ptr< VolCreateDeleteJob > cdjob;
-    if (tcfg.create_del_with_io) {
+    if (tcfg.create_del_with_io || tcfg.delete_with_io) {
         cdjob = std::make_unique< VolCreateDeleteJob >(this);
         this->start_job(cdjob.get(), wait_type_t::for_execution);
     }
@@ -1620,7 +1625,7 @@ TEST_F(VolTest, recovery_io_test) {
     this->start_io_job();
     output.print("recovery_io_test");
 
-    if (tcfg.create_del_with_io) { cdjob->wait_for_completion(); }
+    if (tcfg.create_del_with_io || tcfg.delete_with_io) { cdjob->wait_for_completion(); }
 
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();
@@ -1940,7 +1945,14 @@ SDS_OPTION_GROUP(
     (vol_create_del, "", "vol_create_del", "vol_create_del", ::cxxopts::value< bool >()->default_value("false"),
      "true or false"),
     (create_del_with_io, "", "create_del_with_io", "create_del_with_io",
-     ::cxxopts::value< bool >()->default_value("false"), "true or false"))
+     ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+    (delete_with_io, "", "delete_with_io", "delete_with_io", ::cxxopts::value< bool >()->default_value("false"),
+     "true or false"),
+    (create_del_ops_cnt, "", "create_del_ops_cnt", "create_del_ops_cnt",
+     ::cxxopts::value< uint32_t >()->default_value("100"), "number of ops"),
+    (create_del_ops_interval, "", "create_del_ops_interval", "create_del_ops_interval",
+     ::cxxopts::value< uint32_t >()->default_value("10"), "interval between create del in seconds"))
+
 #define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
@@ -1994,6 +2006,9 @@ int main(int argc, char* argv[]) {
     _gcfg.batch_completion = SDS_OPTIONS["batch_completion"].as< bool >();
     _gcfg.vol_create_del = SDS_OPTIONS["vol_create_del"].as< bool >();
     _gcfg.create_del_with_io = SDS_OPTIONS["create_del_with_io"].as< bool >();
+    _gcfg.delete_with_io = SDS_OPTIONS["delete_with_io"].as< bool >();
+    _gcfg.create_del_ops_cnt = SDS_OPTIONS["create_del_ops_cnt"].as< uint32_t >();
+    _gcfg.create_del_ops_interval = SDS_OPTIONS["create_del_ops_interval"].as< uint32_t >();
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
