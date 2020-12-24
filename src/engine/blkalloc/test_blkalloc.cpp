@@ -1,4 +1,4 @@
-#include <iostream>
+﻿#include <iostream>
 #include <gtest/gtest.h>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
@@ -106,9 +106,10 @@ public:
                 ++blk_num;
             }
         }
+
         LOGTRACEMOD(blkalloc, "After Alloced nblks={} blk_range=[{}-{}] skip_list_size={} alloced_count={}",
-                    bid.get_nblks(), blk_num, blk_num + bid.get_nblks() - 1, blk_list(slab_idx).size(),
-                    m_alloced_count.load(std::memory_order_relaxed));
+                    bid.get_nblks(), bid.get_blk_num(), bid.get_blk_num() + bid.get_nblks() - 1,
+                    blk_list(slab_idx).size(), m_alloced_count.load(std::memory_order_relaxed));
     }
 
     void freed(const uint32_t blk_num) {
@@ -326,7 +327,7 @@ public:
             s.adjust_limits(limit_pct);
         }
 
-        int64_t overall_hi_limit = (m_total_count * limit_pct)/100;
+        int64_t overall_hi_limit = (m_total_count * limit_pct) / 100;
         run_parallel(nthreads, num_iters, [&](uint64_t iters_per_thread) {
             uint64_t alloced_nblks{0};
             uint64_t freed_nblks{0};
@@ -437,6 +438,7 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_roundrandsize) {
                   true /* round_blks */);
 }
 
+#if 0
 TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_slabrandsize) {
     start_track_slabs();
 
@@ -454,6 +456,7 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_slabrandsize) {
     do_alloc_free(num_iters, true /* is_contiguous */, BlkAllocatorTest::round_rand_size, runtime_pct,
                   false /* round_blks */);
 }
+#endif
 
 TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_onesize) {
     auto nthreads = SDS_OPTIONS["num_threads"].as< uint32_t >();
@@ -472,6 +475,7 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_onesize) {
     ASSERT_EQ(m_allocator->get_available_blks(), 0u) << "Expected no blocks to be free";
 }
 
+#if 0
 TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_scatter_unirandsize) {
     auto nthreads = SDS_OPTIONS["num_threads"].as< uint32_t >();
     uint8_t prealloc_pct = 5;
@@ -490,6 +494,7 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_scatter_unirandsize) {
     preload(m_allocator->get_available_blks(), false /* is_contiguous */, BlkAllocatorTest::single_blk_size);
     ASSERT_EQ(m_allocator->get_available_blks(), 0u) << "Expected no blocks to be free";
 }
+#endif
 
 TEST_F(VarsizeBlkAllocatorTest, alloc_var_scatter_direct_unirandsize) {
     LOGINFO("Step 1: Set the flip to force directly bypassing freeblk cache");

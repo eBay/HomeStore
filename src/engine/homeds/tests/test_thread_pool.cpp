@@ -1,17 +1,24 @@
-/*
+﻿/*
  * Copyright 2019 eBay
  *
  * */
 
-#include <gtest/gtest.h>
+#include <chrono>
+#include <cstdint>
+#include <iostream>
+#include <vector>
+
+#include <flip/flip.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <chrono>
-#include <iostream>
-#include <flip/flip.hpp>
+#include <utility/thread_buffer.hpp>
+
+#include <gtest/gtest.h>
+
 #include "homeds/thread/threadpool/thread_pool.h"
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+THREAD_BUFFER_INIT;
 
 using homestore::submit_job;
 using homestore::ThreadPool;

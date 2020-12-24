@@ -172,23 +172,21 @@ public:
     BlkAllocator(const BlkAllocConfig& cfg, const uint32_t id = 0) : m_cfg{cfg} {
         m_blk_portions = std::make_unique< BlkAllocPortion[] >(cfg.get_total_portions());
         m_auto_recovery = cfg.get_auto_recovery();
-        m_disk_bm = new sisl::Bitset(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
+        m_disk_bm = std::make_unique< sisl::Bitset >(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
     }
     BlkAllocator(const BlkAllocator&) = delete;
     BlkAllocator(BlkAllocator&&) noexcept = delete;
     BlkAllocator& operator=(const BlkAllocator&) = delete;
     BlkAllocator& operator=(BlkAllocator&&) noexcept = delete;
 
-    virtual ~BlkAllocator() {
-        if (m_disk_bm) delete m_disk_bm;
-    }
+    virtual ~BlkAllocator() = default;
 
-    [[nodiscard]] sisl::Bitset* get_disk_bm() { return m_disk_bm; }
-    [[nodiscard]] const sisl::Bitset* get_disk_bm_const() const { return m_disk_bm; }
+    [[nodiscard]] sisl::Bitset* get_disk_bm() { return m_disk_bm.get(); }
+    [[nodiscard]] const sisl::Bitset* get_disk_bm_const() const { return m_disk_bm.get(); };
 
     void set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm) {
         BLKALLOC_LOG(INFO, "Persistent bitmap of size={} recovered", recovered_bm->size());
-        m_disk_bm->move(*(recovered_bm.get()));
+        m_disk_bm = std::move(recovered_bm);
     }
 
     [[nodiscard]] BlkAllocPortion* get_blk_portion(const blk_num_t portion_num) {
@@ -198,10 +196,7 @@ public:
 
     virtual void inited() {
         m_alloced_blk_count.fetch_add(m_disk_bm->get_set_count(), std::memory_order_relaxed);
-        if (!m_auto_recovery) {
-            delete m_disk_bm;
-            m_disk_bm = nullptr;
-        }
+        if (!m_auto_recovery) { m_disk_bm.reset(); }
         m_inited = true;
     }
 
@@ -211,17 +206,28 @@ public:
     void decr_alloced_blk_count(const blk_count_t nblks) {
         m_alloced_blk_count.fetch_sub(nblks, std::memory_order_relaxed);
     }
-    [[nodiscard]] int64_t get_alloced_blk_count() const { return m_alloced_blk_count.load(std::memory_order_relaxed); }
+    [[nodiscard]] int64_t get_alloced_blk_count() const { return m_alloced_blk_count.load(std::memory_order_acquire); }
 
-    [[nodiscard]] bool is_blk_alloced_on_disk(const BlkId& b) const {
+    [[nodiscard]] bool is_blk_alloced_on_disk(const BlkId& b, const bool use_lock = false) const {
         if (!m_auto_recovery) {
             return true; // nothing to compare. So always return true
         }
-        if (!m_disk_bm->is_bits_set(b.get_blk_num(), b.get_nblks())) {
-            BLKALLOC_ASSERT(RELEASE, 0, "Expected bits to reset");
-            return false;
+        auto bits_set{[this, &b]() {
+            // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache
+            // bm.
+            if (!m_disk_bm->is_bits_set(b.get_blk_num(), b.get_nblks())) {
+                BLKALLOC_ASSERT(RELEASE, 0, "Expected bits to set");
+                return false;
+            }
+            return true;
+        }};
+        if (use_lock) {
+            const BlkAllocPortion* const portion{blknum_to_portion_const(b.get_blk_num())};
+            auto lock{portion->portion_auto_lock()};
+            return bits_set();
+        } else {
+            return bits_set();
         }
-        return true;
     }
 
     /* It is used during recovery in both mode :- auto recovery and manual recovery
@@ -273,7 +279,7 @@ public:
     virtual void free(const BlkId& id) = 0;
     virtual blk_cap_t get_available_blks() const = 0;
     virtual blk_cap_t get_used_blks() const = 0;
-    virtual bool is_blk_alloced(const BlkId& b) const = 0;
+    virtual bool is_blk_alloced(const BlkId& b, const bool use_lock = false) const = 0;
     [[nodiscard]] virtual std::string to_string() const = 0;
 
     [[nodiscard]] virtual const BlkAllocConfig& get_config() const { return m_cfg; }
@@ -295,7 +301,7 @@ protected:
 
 private:
     std::unique_ptr< BlkAllocPortion[] > m_blk_portions;
-    sisl::Bitset* m_disk_bm{nullptr}; // NOTE: This can be a unique_ptr but requires changes to sisl
+    std::unique_ptr< sisl::Bitset > m_disk_bm{nullptr};
     std::atomic< int64_t > m_alloced_blk_count{0};
     bool m_auto_recovery{false};
 };
@@ -321,7 +327,7 @@ public:
 
     [[nodiscard]] blk_cap_t get_available_blks() const override;
     [[nodiscard]] blk_cap_t get_used_blks() const override;
-    [[nodiscard]] bool is_blk_alloced(const BlkId& in_bid) const override;
+    [[nodiscard]] bool is_blk_alloced(const BlkId& in_bid, const bool use_lock = false) const override;
     [[nodiscard]] std::string to_string() const override;
 
 private:

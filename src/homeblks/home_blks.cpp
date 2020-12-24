@@ -1,17 +1,20 @@
-#include "home_blks.hpp"
-#include "volume/volume.hpp"
-#include <engine/device/device.h>
-#include <engine/device/virtual_dev.hpp>
-#include <cassert>
-#include <engine/device/blkbuffer.hpp>
-#include <iostream>
+﻿
 #include <fstream>
+#include <iterator>
+#include <iostream>
 #include <stdexcept>
-#include <nlohmann/json.hpp>
+
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <homelogstore/log_store.hpp>
-#include <map>
+#include <nlohmann/json.hpp>
+
+#include "engine/device/blkbuffer.hpp"
+#include "engine/device/device.h"
+#include "engine/device/virtual_dev.hpp"
+#include "homelogstore/log_store.hpp"
+#include "volume/volume.hpp"
+
+#include "home_blks.hpp"
 
 SDS_OPTION_GROUP(home_blks,
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
@@ -35,9 +38,7 @@ void VolInterfaceImpl::zero_boot_sbs(const std::vector< dev_info >& devices, iom
 
 VolInterface* VolInterfaceImpl::init(const init_params& cfg, bool fake_reboot) {
 #ifdef _PRERELEASE
-    if (cfg.force_reinit) {
-        zero_boot_sbs(cfg.devices, cfg.device_type, cfg.open_flags);
-    }
+    if (cfg.force_reinit) { zero_boot_sbs(cfg.devices, cfg.device_type, cfg.open_flags); }
 #endif
 
     return (HomeBlks::init(cfg, fake_reboot));

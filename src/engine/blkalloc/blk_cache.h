@@ -1,4 +1,4 @@
-//
+﻿//
 // Created by Kadayam, Hari on Sep 20 2020
 //
 #pragma once
@@ -236,7 +236,9 @@ public:
     virtual blk_num_t total_free_blks() const = 0;
 
     static slab_idx_t find_slab(const blk_count_t nblks) {
-        if (sisl_unlikely(nblks >= slab_tbl_size)) { return static_cast< slab_idx_t >(sisl::logBase2(nblks - 1)) + 1; }
+        if (sisl_unlikely(nblks >= slab_tbl_size)) {
+            return static_cast< slab_idx_t >(sisl::logBase2(static_cast< blk_count_t >(nblks - 1)) + 1);
+        }
         return nblks_to_slab_tbl[nblks];
     }
 

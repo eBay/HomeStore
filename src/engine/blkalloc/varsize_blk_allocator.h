@@ -3,15 +3,21 @@
 //
 #pragma once
 
-#include <boost/heap/binomial_heap.hpp>
-#include <condition_variable>
-#include <vector>
-#include <atomic>
-#include <flip/flip.hpp>
-#include <sds_logging/logging.h>
-#include <metrics/metrics.hpp>
 #include <algorithm>
+#include <atomic>
+#include <condition_variable>
 #include <cstdint>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <boost/heap/binomial_heap.hpp>
+#include <flip/flip.hpp>
+#include <metrics/metrics.hpp>
+#include <sds_logging/logging.h>
+
 #include "blk_allocator.h"
 #include "blk_cache.h"
 #include "engine/common/homestore_assert.hpp"
@@ -214,7 +220,7 @@ public:
 
     [[nodiscard]] blk_cap_t get_available_blks() const override;
     [[nodiscard]] blk_cap_t get_used_blks() const override;
-    [[nodiscard]] bool is_blk_alloced(const BlkId& in_bid) const override;
+    [[nodiscard]] bool is_blk_alloced(const BlkId& in_bid, const bool use_lock = false) const override;
     [[nodiscard]] std::string to_string() const override;
     [[nodiscard]] nlohmann::json get_metrics_in_json();
 

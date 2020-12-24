@@ -1,4 +1,4 @@
-#ifndef WRITEBACK_CACHE_HPP
+﻿#ifndef WRITEBACK_CACHE_HPP
 #define WRITEBACK_CACHE_HPP
 
 #include <cassert>
@@ -182,7 +182,7 @@ public:
         for (size_t i{0}; i < MAX_CP_CNT; ++i) {
             m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
             m_req_list[i] = std::make_unique< sisl::ThreadVector< writeback_req_ptr > >();
-            m_dirty_buf_cnt[i] = 0;
+            m_dirty_buf_cnt[i].set(0);
         }
         m_cp_comp_cb = std::move(cb);
         m_blkstore = static_cast< btree_blkstore_t* >(blkstore);

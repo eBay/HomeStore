@@ -1,4 +1,4 @@
-//
+﻿//
 // Created by Kadayam, Hari on Sep 20 2020
 //
 #include "blk_cache_queue.h"
@@ -7,8 +7,7 @@
 
 namespace homestore {
 FreeBlkCacheQueue::FreeBlkCacheQueue(const SlabCacheConfig& cfg, BlkAllocMetrics* metrics) :
-        m_cfg{cfg},
-        m_metrics{metrics} {
+        m_cfg{cfg}, m_metrics{metrics} {
 #ifndef NDEBUG
     blk_count_t slab_size = 1;
 #endif
@@ -42,11 +41,15 @@ BlkAllocStatus FreeBlkCacheQueue::try_alloc_blks(const blk_cache_alloc_req& req,
 
     COUNTER_INCREMENT(slab_metrics(slab_idx), num_slab_alloc, 1);
     BlkAllocStatus status = try_alloc_in_slab(slab_idx, req, resp);
-    if (status == BlkAllocStatus::SUCCESS) { return status; }
+    if (status == BlkAllocStatus::SUCCESS) {
+        BLKALLOC_LOG(TRACE, "Alloced in slab {}", resp.out_blks.front().to_string());
+        return status;
+    }
 
     // We were not able to secure all blks in this slab, try to break higher slabs
     status = break_up(slab_idx, req, resp);
     if (status == BlkAllocStatus::SUCCESS) {
+        BLKALLOC_LOG(TRACE, "Alloced break up {}", resp.out_blks.front().to_string());
         COUNTER_INCREMENT(slab_metrics(slab_idx), num_slab_alloc_with_split, 1);
         return status;
     }
@@ -55,6 +58,7 @@ BlkAllocStatus FreeBlkCacheQueue::try_alloc_blks(const blk_cache_alloc_req& req,
     if (!req.is_contiguous) {
         status = merge_down(slab_idx, req, resp);
         if (status == BlkAllocStatus::SUCCESS) {
+            BLKALLOC_LOG(TRACE, "Alloced merge down {}", resp.out_blks.front().to_string());
             COUNTER_INCREMENT(slab_metrics(slab_idx), num_slab_alloc_with_merge, 1);
             return status;
         }
@@ -90,7 +94,6 @@ BlkAllocStatus FreeBlkCacheQueue::try_free_blks(const blk_cache_entry& entry,
         if (!push_slab(slab_idx, e, false /* only_this_level */)) {
             excess_blks.push_back(e);
             num_zombied += e.get_nblks();
-            ret = BlkAllocStatus::PARTIAL;
         }
 
         if (excess == 0) { break; }
@@ -107,11 +110,9 @@ BlkAllocStatus FreeBlkCacheQueue::try_free_blks(const std::vector< blk_cache_ent
     num_zombied = 0;
 
     for (const auto& e : blks) {
-        uint16_t _zombied;
-        if (try_free_blks(e, excess_blks, _zombied) != BlkAllocStatus::SUCCESS) {
-            num_zombied += _zombied;
-            ret = BlkAllocStatus::PARTIAL;
-        }
+        uint16_t free_zombied{};
+        [[maybe_unused]] const auto free_result{try_free_blks(e, excess_blks, free_zombied)};
+        num_zombied += free_zombied;
     }
     return ret;
 }
@@ -171,12 +172,12 @@ BlkAllocStatus FreeBlkCacheQueue::try_alloc_in_slab(const slab_idx_t slab_idx, c
 
     for (blk_num_t i{0}; i < nentries; ++i) {
         blk_cache_entry e;
-        if (const auto poped_level = pop_slab(slab_idx, req.preferred_level, false /* only_this_level */, e)) {
+        if (const auto popped_level = pop_slab(slab_idx, req.preferred_level, false /* only_this_level */, e)) {
             resp.out_blks.push_back(e);
             resp.nblks_alloced += m_slab_queues[slab_idx]->slab_size();
 
             // If we didn't get the level we requested for, its time to refill this slab
-            if (poped_level != req.preferred_level) { resp.need_refill = true; }
+            if (popped_level != req.preferred_level) { resp.need_refill = true; }
         } else {
             return (i == 0) ? BlkAllocStatus::FAILED : BlkAllocStatus::PARTIAL;
         }
@@ -194,6 +195,7 @@ BlkAllocStatus FreeBlkCacheQueue::try_alloc_in_slab(const slab_idx_t slab_idx, c
         auto residue_e = resp.out_blks.back();
         residue_e.set_blk_num(residue_e.get_blk_num() + m_slab_queues[slab_idx]->slab_size() - residue_nblks);
         residue_e.set_nblks(residue_nblks);
+        BLKALLOC_LOG(TRACE, "Residue blocks {}", residue_e.to_string());
         try_free_blks(residue_e, resp.excess_blks, resp.nblks_zombied);
     }
     return BlkAllocStatus::SUCCESS;
@@ -248,7 +250,7 @@ std::optional< blk_temp_t > FreeBlkCacheQueue::pop_slab(const slab_idx_t slab_id
                                                         const bool only_this_level, blk_cache_entry& out_entry) {
     auto ret = m_slab_queues[slab_idx]->pop(level, only_this_level, out_entry);
     if (ret) {
-        BLKALLOC_LOG(TRACE, "BlkCache: Poped entry=[{}] from level=[{}.{}], slab_queue size={}", out_entry.to_string(),
+        BLKALLOC_LOG(TRACE, "BlkCache: Popped entry=[{}] from level=[{}.{}], slab_queue size={}", out_entry.to_string(),
                      m_slab_queues[slab_idx]->slab_size(), *ret, m_slab_queues[slab_idx]->num_level_entries(*ret));
     }
     return ret;
@@ -256,8 +258,7 @@ std::optional< blk_temp_t > FreeBlkCacheQueue::pop_slab(const slab_idx_t slab_id
 
 SlabCacheQueue::SlabCacheQueue(const blk_count_t slab_size, const std::vector< blk_cap_t >& level_limits,
                                const float refill_pct, BlkAllocMetrics* parent_metrics) :
-        m_slab_size(slab_size),
-        m_metrics{m_slab_size, this, parent_metrics} {
+        m_slab_size(slab_size), m_metrics{m_slab_size, this, parent_metrics} {
     for (auto& limit : level_limits) {
         auto ptr = std::make_unique< folly::MPMCQueue< blk_cache_entry > >(limit);
         m_level_queues.push_back(std::move(ptr));
@@ -288,17 +289,17 @@ std::optional< blk_temp_t > SlabCacheQueue::pop(const blk_temp_t input_level, co
     blk_temp_t picked_level = input_level;
     if (input_level >= m_level_queues.size()) { picked_level = m_level_queues.size() - 1; }
 
-    bool poped = m_level_queues[picked_level]->read(out_entry);
-    if (!only_this_level && !poped) {
-        for (size_t l{0}; (!poped && (l < m_level_queues.size())); ++l) {
+    bool popped = m_level_queues[picked_level]->read(out_entry);
+    if (!only_this_level && !popped) {
+        for (size_t l{0}; (!popped && (l < m_level_queues.size())); ++l) {
             if (l != input_level) {
-                poped = m_level_queues[l]->read(out_entry);
+                popped = m_level_queues[l]->read(out_entry);
                 picked_level = l;
             }
         }
     }
 
-    return poped ? std::optional< blk_temp_t >{picked_level} : std::nullopt;
+    return popped ? std::optional< blk_temp_t >{picked_level} : std::nullopt;
 }
 
 blk_cap_t SlabCacheQueue::entry_count() const {

@@ -1,4 +1,4 @@
-#include <gtest/gtest.h>
+﻿#include <gtest/gtest.h>
 #include <utility/thread_buffer.hpp>
 #include <sds_options/options.h>
 #include <sds_logging/logging.h>
@@ -128,13 +128,15 @@ TEST_F(BlkCacheQueueTest, rand_alloc_free_blks) {
             << "Failure in freeing the blks to cache for entry e = " << e.to_string();
     }
 
+    // NOTE: Not being able to try_free_blks which is used in alloc_on_slab is not necessarily an error
+    // since the entire result could have been allocated which should return SUCCESS and not PARTIAL
     // Freeing one more blk of any size should result in failure because all of them should have been freed in
     // the previous step to its original slab
     LOGINFO("Step 3: Now all slots are back full, try freeing one additional blocks and expect to fail");
     for (auto& slab_cfg : m_cfg.m_per_slab_cfg) {
         blk_cache_entry e{10000u, slab_cfg.slab_size, 0};
-        ASSERT_NE(m_fb_cache->try_free_blks(e, _excess_blks, num_zombied), BlkAllocStatus::SUCCESS)
-            << "Expected failure to add after queue is full, but not for entry=" << e.to_string();
+        const auto result{m_fb_cache->try_free_blks(e, _excess_blks, num_zombied)};
+        ASSERT_GT(num_zombied, 0) << "Expected failure to add after queue is full, but not for entry=" << e.to_string();
     }
 
     LOGINFO("Step 4: Realloc 1000 more random blks and it should succeed");

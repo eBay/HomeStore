@@ -7,26 +7,36 @@
  *  Copyright © 2016 Kadayam, Hari. All rights reserved.
  */
 #pragma once
-#include <vector>
-#include <iostream>
+
+#include <atomic>
 #include <cmath>
-#include <fds/utils.hpp>
-#include <fds/freelist_allocator.hpp>
-#include "engine/common/error.h"
-#include "engine/common/homestore_header.hpp"
-#include <metrics/metrics.hpp>
-#include <utility/enum.hpp>
+#include <cstdint>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <vector>
+
 #include <boost/intrusive_ptr.hpp>
-#include <fds/utils.hpp>
-#include <fds/obj_allocator.hpp>
-#include <utility/atomic_counter.hpp>
-#include <utility/obj_life_counter.hpp>
-#include <sds_logging/logging.h>
 #include <boost/preprocessor/cat.hpp>
 #include <boost/preprocessor/control/if.hpp>
 #include <boost/preprocessor/stringize.hpp>
-#include "engine/common/homestore_assert.hpp"
+#include <boost/smart_ptr/intrusive_ref_counter.hpp>
+
+#include <fds/obj_allocator.hpp>
+#include <fds/utils.hpp>
+#include <fds/freelist_allocator.hpp>
+#include <metrics/metrics.hpp>
+#include <sds_logging/logging.h>
+#include <utility/atomic_counter.hpp>
+#include <utility/enum.hpp>
+#include <utility/obj_life_counter.hpp>
+
 #include "engine/blkalloc/blk.h"
+#include "engine/common/error.h"
+#include "engine/common/homestore_assert.hpp"
+#include "engine/common/homestore_header.hpp"
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed,
@@ -147,10 +157,7 @@ struct bt_journal_node_info {
 
 struct btree_journal_entry {
     btree_journal_entry(journal_op p, bool root, bt_node_gen_pair ninfo, int64_t cp_id) :
-            op(p),
-            is_root(root),
-            cp_id(cp_id),
-            parent_node(ninfo) {}
+            op(p), is_root(root), cp_id(cp_id), parent_node(ninfo) {}
 
     void append_node(bt_journal_node_op node_op, bnodeid_t node_id, uint64_t gen, sisl::blob key = {nullptr, 0}) {
         ++node_count;
@@ -412,7 +419,6 @@ struct BtreeQueryCursor {
     };
 
     BtreeQueryCursor(){};
-
 };
 
 using create_key_func = std::function< std::unique_ptr< BtreeKey >(BtreeKey* start_key) >;
@@ -626,9 +632,7 @@ public:
 
 protected:
     BRangeRequest(BRangeCBParam* cb_param, BtreeSearchRange& search_range, uint32_t batch_size = UINT32_MAX) :
-            m_cb_param(cb_param),
-            m_input_range(&search_range),
-            m_batch_size(UINT32_MAX) {}
+            m_cb_param(cb_param), m_input_range(&search_range), m_batch_size(UINT32_MAX) {}
 
 protected:
     BRangeCBParam* m_cb_param; // additional parameters that is passed to callback
@@ -646,9 +650,7 @@ public:
                       BtreeQueryType query_type = BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
                       uint32_t batch_size = UINT32_MAX, match_item_cb_t< K, V > cb = nullptr,
                       BRangeCBParam* cb_param = nullptr) :
-            BRangeRequest(cb_param, search_range, batch_size),
-            m_query_type(query_type),
-            m_cb(cb) {}
+            BRangeRequest(cb_param, search_range, batch_size), m_query_type(query_type), m_cb(cb) {}
 
     ~BtreeQueryRequest() = default;
 
@@ -669,9 +671,7 @@ public:
     BtreeUpdateRequest(BtreeSearchRange& search_range, match_item_cb_t< K, V > cb = nullptr,
                        get_size_needed_cb_t< K, V > size_cb = nullptr, BRangeCBParam* cb_param = nullptr,
                        uint32_t batch_size = UINT32_MAX) :
-            BRangeRequest(cb_param, search_range, batch_size),
-            m_cb(cb),
-            m_size_cb(size_cb) {}
+            BRangeRequest(cb_param, search_range, batch_size), m_cb(cb), m_size_cb(size_cb) {}
 
     match_item_cb_t< K, V > callback() const { return m_cb; }
     BRangeCBParam* get_cb_param() const { return (BRangeCBParam*)m_cb_param; }

@@ -1,26 +1,29 @@
-/*
+﻿/*
  * varsize_blk_allocator.cpp
  *
  *  Created on: Jun 17, 2015
  *      Author: Hari Kadayam
  */
 
-#include "varsize_blk_allocator.h"
 #include <iostream>
-#include <thread>
+#include <random>
+
 #include <fds/utils.hpp>
 #include <fmt/format.h>
-#include <random>
-#include "engine/homeds/btree/mem_btree.hpp"
 #include <sds_logging/logging.h>
 #include <utility/thread_factory.hpp>
-#include "engine/common/homestore_flip.hpp"
+
 #include "blk_cache_queue.h"
+#include "engine/common/homestore_flip.hpp"
+#include "engine/homeds/btree/mem_btree.hpp"
+
+#include "varsize_blk_allocator.h"
 
 SDS_LOGGING_DECL(blkalloc)
 
 namespace homestore {
-static thread_local std::default_random_engine g_rd;
+static thread_local std::random_device g_rd{};
+static thread_local std::default_random_engine g_re{g_rd()};
 
 VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const bool init,
                                          const chunk_num_t chunk_id) :
@@ -119,13 +122,25 @@ void VarsizeBlkAllocator::allocator_state_machine() {
     }
 }
 
-bool VarsizeBlkAllocator::is_blk_alloced(const BlkId& b) const {
+bool VarsizeBlkAllocator::is_blk_alloced(const BlkId& b, const bool use_lock) const {
     if (!m_inited) { return true; }
-    if (!m_bm->is_bits_set(b.get_blk_num(), b.get_nblks())) {
-        BLKALLOC_ASSERT(RELEASE, 0, "Expected bits to reset");
-        return false;
+    auto bits_set{[this, &b]() {
+        // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache
+        // bm.
+        if (!m_bm->is_bits_set(b.get_blk_num(), b.get_nblks())) {
+            BLKALLOC_ASSERT(RELEASE, 0, "Expected bits to set");
+            return false;
+        }
+        return true;
+    }};
+    if (use_lock) {
+        const BlkAllocPortion* const portion{blknum_to_portion_const(b.get_blk_num())};
+        auto lock{portion->portion_auto_lock()};
+        if (!bits_set()) return false;
+    } else {
+        if (!bits_set()) return false;
     }
-    return (BlkAllocator::is_blk_alloced_on_disk(b));
+    return (BlkAllocator::is_blk_alloced_on_disk(b, use_lock));
 }
 
 void VarsizeBlkAllocator::inited() {
@@ -227,7 +242,7 @@ void VarsizeBlkAllocator::fill_cache_in_portion(const blk_num_t portion_num, blk
             HS_DEBUG_ASSERT_LE(nblks_added, b.nbits);
 
             // Set the bitmap indicating the blks are allocated
-            m_bm->set_bits(b.start_bit, nblks_added);
+            if (nblks_added > 0) { m_bm->set_bits(b.start_bit, nblks_added); }
             cur_blk_id = b.start_bit + b.nbits;
 
             BLKALLOC_LOG(DEBUG, "Sweep session={} portion_num={}, setting bit={} nblks={} set_bits_count={}",
@@ -370,12 +385,12 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
     excess_blks.clear();
     uint16_t num_zombied{0};
 
-    if (m_fb_cache->try_free_blks(blkid_to_blk_cache_entry(b), excess_blks, num_zombied) != BlkAllocStatus::SUCCESS) {
-        for (const auto& e : excess_blks) {
-            BLKALLOC_LOG(TRACE, "Freeing in bitmap of entry={} - excess of free_blks size={}", e.to_string(),
-                         excess_blks.size());
-            free_on_bitmap(blk_cache_entry_to_blkid(e));
-        }
+    [[maybe_unused]] const auto free_result{
+        m_fb_cache->try_free_blks(blkid_to_blk_cache_entry(b), excess_blks, num_zombied)};
+    for (const auto& e : excess_blks) {
+        BLKALLOC_LOG(TRACE, "Freeing in bitmap of entry={} - excess of free_blks size={}", e.to_string(),
+                     excess_blks.size());
+        free_on_bitmap(blk_cache_entry_to_blkid(e));
     }
     decr_alloced_blk_count(b.get_nblks());
     BLKALLOC_LOG(TRACE, "Freed blk_num={}", blkid_to_blk_cache_entry(b).to_string());
@@ -385,7 +400,7 @@ blk_cap_t VarsizeBlkAllocator::get_available_blks() const { return m_cfg.get_tot
 blk_cap_t VarsizeBlkAllocator::get_used_blks() const { return get_alloced_blk_count(); }
 
 void VarsizeBlkAllocator::free_on_bitmap(const BlkId& b) {
-    BlkAllocPortion* portion = blknum_to_portion(b.get_blk_num());
+    BlkAllocPortion* const portion{blknum_to_portion(b.get_blk_num())};
     {
         // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache bm.
         auto lock{portion->portion_auto_lock()};
@@ -400,7 +415,7 @@ void VarsizeBlkAllocator::free_on_bitmap(const BlkId& b) {
 
 #ifndef NDEBUG
 bool VarsizeBlkAllocator::is_set_on_bitmap(const BlkId& b) const {
-    const BlkAllocPortion* portion = blknum_to_portion_const(b.get_blk_num());
+    const BlkAllocPortion* const portion{blknum_to_portion_const(b.get_blk_num())};
     {
         // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache bm.
         auto lock{portion->portion_auto_lock()};
@@ -478,7 +493,7 @@ void VarsizeBlkAllocator::request_more_blks_wait(BlkAllocSegment* seg, const blk
 BlkAllocStatus VarsizeBlkAllocator::alloc_blks_direct(const blk_count_t nblks, const blk_alloc_hints& hints,
                                                       std::vector< BlkId >& out_blkids) {
     // Search all segments starting with some random portion num within each segment
-    const blk_num_t start_portion_num = m_rand_portion_num_generator(g_rd);
+    const blk_num_t start_portion_num = m_rand_portion_num_generator(g_re);
     auto portion_num = start_portion_num;
     const blk_count_t min_blks = hints.is_contiguous ? nblks : hints.multiplier;
     const auto out_blk_idx = out_blkids.size();

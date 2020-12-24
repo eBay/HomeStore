@@ -581,7 +581,7 @@ public:
         params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
         params.devices = device_info;
 #ifdef _PRERELEASE
-		params.force_reinit = force_reinit;
+        params.force_reinit = force_reinit;
 #endif
         params.init_done_cb = bind_this(VolTest::init_done_cb, 2);
         params.vol_mounted_cb = bind_this(VolTest::vol_mounted_cb, 2);
@@ -1003,9 +1003,9 @@ private:
 
     void remove_journal_files() {
         // Remove journal folders
-        for (auto i = 0u; i < vol_info.size(); i++) {
-            std::string name = boost::lexical_cast< std::string >(vol_info[i]->uuid);
-            boost::filesystem::remove_all(name);
+        for (size_t i{0}; i < vol_info.size(); ++i) {
+            const std::string name{boost::lexical_cast< std::string >(vol_info[i]->uuid)};
+            std::filesystem::remove_all(name);
             LOGINFO("Removed journal dir: {}", name);
             remove(name.c_str());
         }

@@ -1,22 +1,32 @@
-#ifndef VOL_CONFIG_HPP
+﻿#ifndef VOL_CONFIG_HPP
 #define VOL_CONFIG_HPP
 
-#include "engine/homestore.hpp"
-#include "api/vol_interface.hpp"
+#include <atomic>
+#include <cassert>
+#include <condition_variable>
+#include <cstdint>
+#include <map>
 #include <memory>
-#include "engine/homeds/btree/btree.hpp"
-#include "engine/homeds/btree/ssd_btree.hpp"
-#include <engine/blkstore/blkstore.hpp>
+#include <mutex>
+#include <system_error>
+#include <type_traits>
+#include <vector>
+
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include "engine/homeds/thread/threadpool/thread_pool.h"
-#include <system_error>
-#include <utility/atomic_counter.hpp>
+#include <fds/sparse_vector.hpp>
 #include <metrics/metrics.hpp>
 #include <settings/settings.hpp>
-#include <engine/homeds/btree/writeBack_cache.hpp>
-#include <fds/sparse_vector.hpp>
+#include <utility/atomic_counter.hpp>
+
 #include "api/meta_interface.hpp"
+#include "api/vol_interface.hpp"
+#include "engine/blkstore/blkstore.hpp"
+#include "engine/homeds/btree/btree.hpp"
+#include "engine/homeds/btree/ssd_btree.hpp"
+#include "engine/homeds/btree/writeBack_cache.hpp"
+#include "engine/homeds/thread/threadpool/thread_pool.h"
+#include "engine/homestore.hpp"
 #include "homeblks_config.hpp"
 #include "homeblks_http_server.hpp"
 #include "homeblks_status_mgr.hpp"
@@ -27,8 +37,8 @@ extern bool same_value_gen;
 
 namespace homestore {
 
-#define VOL_MAX_IO_SIZE MEMVEC_MAX_IO_SIZE
-#define LBA_BITS 56
+const uint64_t VOL_MAX_IO_SIZE{MEMVEC_MAX_IO_SIZE};
+constexpr uint8_t LBA_BITS{56};
 
 class MappingKey;
 class MappingValue;
@@ -37,13 +47,13 @@ class MappingValue;
  * then we need to use double buffer.
  */
 
-#define HOMEBLKS_SB_SIZE HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size)
-#define HOMEBLKS_SB_MAGIC 0xCEEDDEEB
-#define HOMEBLKS_SB_VERSION 0x2
+const uint32_t HOMEBLKS_SB_SIZE{HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size)};
+constexpr uint32_t HOMEBLKS_SB_MAGIC{0xCEEDDEEB};
+constexpr uint16_t HOMEBLKS_SB_VERSION{0x2};
 
 typedef uint32_t homeblks_sb_flag_t;
 
-#define HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN 0x00000001UL
+const uint32_t HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN{0x00000001};
 struct homeblks_sb {
     uint64_t version;
 
@@ -79,12 +89,16 @@ public:
         REGISTER_HISTOGRAM(scan_volumes_latency, "Scan Volumes latency");
         register_me_to_farm();
     }
+    HomeBlksMetrics(const HomeBlksMetrics&) = delete;
+    HomeBlksMetrics(HomeBlksMetrics&&) noexcept = delete;
+    HomeBlksMetrics& operator=(const HomeBlksMetrics&) = delete;
+    HomeBlksMetrics& operator=(HomeBlksMetrics&&) noexcept = delete;
 
     ~HomeBlksMetrics() { deregister_me_from_farm(); }
 };
 
-#define BLKSTORE_BUFFER_TYPE                                                                                           \
-    WriteBackCacheBuffer< MappingKey, MappingValue, btree_node_type::VAR_VALUE, btree_node_type::VAR_VALUE >
+typedef WriteBackCacheBuffer< MappingKey, MappingValue, btree_node_type::VAR_VALUE, btree_node_type::VAR_VALUE >
+    BLKSTORE_BUFFER_TYPE;
 
 /**
  * @brief HomeBlks - Implementor of VolInterface.
@@ -106,6 +120,11 @@ public:
 
     friend class Volume;
 
+    HomeBlks(const HomeBlks&) = delete;
+    HomeBlks(HomeBlks&&) noexcept = delete;
+    HomeBlks& operator=(const HomeBlks&) = delete;
+    HomeBlks& operator=(HomeBlks&&) noexcept = delete;
+
     /**
      * @brief Initialize the HomeBlks. Before init called, none of the other HomeBlks methods can be used.
      *
@@ -125,7 +144,7 @@ public:
     static HomeBlksSafePtr safe_instance();
     static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, io_flag oflags);
 
-    ~HomeBlks() {}
+    virtual ~HomeBlks() override {}
     virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req,
                                        bool part_of_batch = false) override;
     virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req,
