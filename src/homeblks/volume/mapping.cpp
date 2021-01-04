@@ -437,6 +437,10 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
             HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "size : {}", size);
             if (size > 0) {
                 param->m_ctx->free_blk_size += size;
+                for (uint32_t i = 0; i < fbe_list.size(); i++) {
+                    HS_SUBMOD_LOG(INFO, volume, , "vol", m_unique_name, "blkid : {}",
+                                  fbe_list[i].get_free_blkid().to_string());
+                }
                 ValueEntry ve; // create a default value
                 /* TODO : we should only add last key */
                 result_kv.emplace_back(make_pair(overlap, MappingValue(ve)));

@@ -419,6 +419,13 @@ struct BtreeQueryCursor {
     };
 
     BtreeQueryCursor(){};
+    std::string to_string() const {
+        if (m_last_key) {
+            return (m_last_key->to_string());
+        } else {
+            return "null";
+        }
+    };
 };
 
 using create_key_func = std::function< std::unique_ptr< BtreeKey >(BtreeKey* start_key) >;

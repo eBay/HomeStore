@@ -57,6 +57,7 @@ struct bufferInfo {
 
 template < typename Buffer = BlkBuffer >
 struct blkstore_req : public virtualdev_req {
+    int blkstore_magic = 12345;
     boost::intrusive_ptr< Buffer > bbuf;
     BlkId bid;
     sisl::atomic_counter< int > blkstore_ref_cnt; /* It is used for reads to see how many
@@ -97,11 +98,11 @@ public:
     std::string to_string() const {
         return fmt::format("req={} id={} version={} size={} err={} is_read={} "
                            "isSyncCall={} refcount={} chunk={} elapsed_io_start_time={}(ms) part_of_batch={} "
-                           "blkstore_ref_cnt={} bid={} "
+                           "blkstore_ref_cnt={} bid={} blkstore_magic {}"
                            "bbuf={} missing_pieces_size={} data_offset={} elapsed_blkstore_op_start_time={}(ms)",
                            (void*)this, request_id, version, size, err.message(), is_read, isSyncCall, refcount.get(),
                            (void*)chunk, get_elapsed_time_ms(io_start_time), part_of_batch, blkstore_ref_cnt.get(), bid,
-                           (void*)bbuf.get(), missing_pieces.size(), data_offset,
+                           blkstore_magic, (void*)bbuf.get(), missing_pieces.size(), data_offset,
                            get_elapsed_time_ms(blkstore_op_start_time));
     }
 

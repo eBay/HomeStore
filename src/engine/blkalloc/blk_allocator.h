@@ -260,7 +260,7 @@ public:
                  * This assert is valid only post recovery.
                  */
                 BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks()),
-                                "Expected disk bits to set");
+                                "Expected disk bits to set blk num {} num blks {}", b.get_blk_num(), b.get_nblks());
             }
             get_disk_bm()->reset_bits(b.get_blk_num(), b.get_nblks());
         }

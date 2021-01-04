@@ -6,6 +6,7 @@
 #include "engine/common/mod_test_iface.hpp"
 #include "engine/common/homestore_flip.hpp"
 #include <random>
+#include "common/homestore_config.hpp"
 
 using namespace homestore;
 using namespace flip;
@@ -17,7 +18,7 @@ struct indx_mgr_test_cfg {
     bool indx_del_partial_free_data_blks_before_meta_write = false;
     bool indx_del_partial_free_indx_blks = false;
     bool indx_del_free_blks_completed = false;
-
+    uint32_t free_blk_cnt = 0;
 };
 
 indx_mgr_test_cfg indx_cfg;
@@ -42,6 +43,11 @@ class indx_test : public module_test {
         }
         if (indx_cfg.indx_del_partial_free_indx_blks) { indx_del_partial_free_indx_blks(); }
         if (indx_cfg.indx_del_free_blks_completed) { indx_del_free_blks_completed(); }
+        if (indx_cfg.free_blk_cnt) {
+            HS_SETTINGS_FACTORY().modifiable_settings(
+                [](auto& s) { s.resource_limits.free_blk_cnt = indx_cfg.free_blk_cnt; });
+            HS_SETTINGS_FACTORY().save();
+        }
     }
 
     /* It simulate the crash before first cp is taken on a index. It simulate 3 scenarios before crash
@@ -129,7 +135,8 @@ SDS_OPTION_GROUP(
      "true or false"),
     (indx_del_partial_free_data_blks_before_meta_write, "", "indx_del_partial_free_data_blks_before_meta_write",
      "indx_del_partial_free_data_blks_before_meta_write", ::cxxopts::value< bool >()->default_value("false"),
-     "true or false"))
+     "true or false"),
+    (free_blk_cnt, "", "free_blk_cnt", "free_blk_cnt", ::cxxopts::value< uint32_t >()->default_value("0"), ""))
 
 void indx_mgr_test_main() {
     indx_cfg.indx_create_first_cp_abort = SDS_OPTIONS["indx_create_first_cp_abort"].as< bool >();
@@ -139,6 +146,7 @@ void indx_mgr_test_main() {
         SDS_OPTIONS["indx_del_partial_free_data_blks_after_meta_write"].as< bool >();
     indx_cfg.indx_del_partial_free_data_blks_before_meta_write =
         SDS_OPTIONS["indx_del_partial_free_data_blks_before_meta_write"].as< bool >();
+    indx_cfg.free_blk_cnt = SDS_OPTIONS["free_blk_cnt"].as< uint32_t >();
 
     mod_tests.push_back(&test);
     return;

@@ -1085,7 +1085,10 @@ void IndxMgr::destroy_indx_tbl() {
     btree_status_t ret = m_active_tbl->free_user_blkids(free_list, m_destroy_btree_cur, free_size);
     if (ret != btree_status_t::success) {
         HS_ASSERT_CMP(RELEASE, ret, ==, btree_status_t::resource_full);
-        THIS_INDX_LOG(INFO, base, , "free_user_blkids btree ret status resource_full");
+        THIS_INDX_LOG(INFO, base, , "free_user_blkids btree ret status resource_full cur {}",
+                      m_destroy_btree_cur.to_string());
+        const sisl::blob& cursor_blob = m_destroy_btree_cur.serialize();
+        if (cursor_blob.size == 0) { HS_ASSERT_CMP(RELEASE, free_size, ==, 0); }
         attach_user_fblkid_list(free_list, ([this](bool success) {
                                     /* persist superblock */
                                     const sisl::blob& cursor_blob = m_destroy_btree_cur.serialize();
@@ -1123,7 +1126,7 @@ void IndxMgr::destroy_indx_tbl() {
         return;
     }
 
-    THIS_INDX_LOG(TRACE, indx_mgr, , "All user logs are collected");
+    THIS_INDX_LOG(INFO, indx_mgr, , "All user logs are collected");
     uint64_t free_node_cnt = 0;
     m_active_tbl->destroy(free_list, free_node_cnt);
 #ifdef _PRERELEASE
@@ -1133,6 +1136,7 @@ void IndxMgr::destroy_indx_tbl() {
     }
 #endif
 
+    THIS_INDX_LOG(INFO, indx_mgr, , "Collected all the btree blocks {}", free_node_cnt);
     attach_user_fblkid_list(free_list, ([this](bool success) {
 
 #ifdef _PRERELEASE
