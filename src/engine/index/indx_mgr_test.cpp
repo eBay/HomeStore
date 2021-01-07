@@ -7,6 +7,8 @@
 #include "engine/common/homestore_flip.hpp"
 #include <random>
 #include "common/homestore_config.hpp"
+#include "indx_mgr.hpp"
+
 
 using namespace homestore;
 using namespace flip;
@@ -19,6 +21,11 @@ struct indx_mgr_test_cfg {
     bool indx_del_partial_free_indx_blks = false;
     bool indx_del_free_blks_completed = false;
     uint32_t free_blk_cnt = 0;
+
+    bool cp_bitmap_abort = 0;         // crash while bitmap is persisting
+    bool cp_wb_flush_abort = 0;       // abort in middle of wb flush
+    bool cp_logstore_truncate_abort = 0; // crash after logstore is truncated
+
 };
 
 indx_mgr_test_cfg indx_cfg;
@@ -32,6 +39,17 @@ class indx_test : public module_test {
         m_start_time = Clock::now();
     }
 
+    bool is_cp_abort_test() {
+        if (indx_cfg.cp_bitmap_abort || indx_cfg.cp_wb_flush_abort || indx_cfg.cp_logstore_truncate_abort) {
+            return true;
+        }
+        return false;
+    }
+
+    virtual void try_run_last_iteration() override {
+        std::unique_lock< std::mutex > lk{m_mutex};
+        if (is_cp_abort_test()) { indx_cp_abort_test(); }
+    }
     virtual void try_run_one_iteration() override {
         std::unique_lock< std::mutex > lk{m_mutex};
         if (indx_cfg.indx_create_first_cp_abort) { indx_create_first_cp_abort(); }
@@ -48,12 +66,34 @@ class indx_test : public module_test {
                 [](auto& s) { s.resource_limits.free_blk_cnt = indx_cfg.free_blk_cnt; });
             HS_SETTINGS_FACTORY().save();
         }
+
+        if (is_cp_abort_test()) { suspend_cp(); }
+    }
+
+    virtual void try_init_iteration() override { std::unique_lock< std::mutex > lk{m_mutex}; }
+
+    void suspend_cp() {
+        if (get_elapsed_time_sec(m_start_time) > run_time_sec) { IndxMgr::hs_cp_suspend(); }
+    }
+
+    void indx_cp_abort_test() {
+        FlipCondition null_cond;
+        FlipFrequency freq;
+        freq.set_count(1);
+        freq.set_percent(100);
+        if (indx_cfg.cp_bitmap_abort) { m_fc.inject_noreturn_flip("indx_cp_bitmap_abort", {null_cond}, freq); }
+        if (indx_cfg.cp_wb_flush_abort) { m_fc.inject_noreturn_flip("indx_cp_wb_flush_abort", {null_cond}, freq); }
+        if (indx_cfg.cp_logstore_truncate_abort) {
+            m_fc.inject_noreturn_flip("indx_cp_logstore_truncate_abort", {null_cond}, freq);
+        }
+        IndxMgr::hs_cp_resume();
+
     }
 
     /* It simulate the crash before first cp is taken on a index. It simulate 3 scenarios before crash
      * 1. Few IOs
      * 2. No IOs
-     * 3. index delete
+     * 3. index delete just after create
      */
     void indx_create_first_cp_abort() {
 
@@ -136,7 +176,13 @@ SDS_OPTION_GROUP(
     (indx_del_partial_free_data_blks_before_meta_write, "", "indx_del_partial_free_data_blks_before_meta_write",
      "indx_del_partial_free_data_blks_before_meta_write", ::cxxopts::value< bool >()->default_value("false"),
      "true or false"),
-    (free_blk_cnt, "", "free_blk_cnt", "free_blk_cnt", ::cxxopts::value< uint32_t >()->default_value("0"), ""))
+    (free_blk_cnt, "", "free_blk_cnt", "free_blk_cnt", ::cxxopts::value< uint32_t >()->default_value("0"), ""),
+    (cp_bitmap_abort, "", "cp_bitmap_abort", "cp_bitmap_abort", ::cxxopts::value< bool >()->default_value("0"), ""),
+    (cp_wb_flush_abort, "", "cp_wb_flush_abort", "cp_wb_flush_abort", ::cxxopts::value< bool >()->default_value("0"),
+     ""),
+    (cp_logstore_truncate_abort, "", "cp_logstore_truncate_abort", "cp_logstore_truncate_abort",
+     ::cxxopts::value< bool >()->default_value("0"), ""))
+
 
 void indx_mgr_test_main() {
     indx_cfg.indx_create_first_cp_abort = SDS_OPTIONS["indx_create_first_cp_abort"].as< bool >();
@@ -147,6 +193,10 @@ void indx_mgr_test_main() {
     indx_cfg.indx_del_partial_free_data_blks_before_meta_write =
         SDS_OPTIONS["indx_del_partial_free_data_blks_before_meta_write"].as< bool >();
     indx_cfg.free_blk_cnt = SDS_OPTIONS["free_blk_cnt"].as< uint32_t >();
+    indx_cfg.cp_bitmap_abort = SDS_OPTIONS["cp_bitmap_abort"].as< bool >();
+    indx_cfg.cp_wb_flush_abort = SDS_OPTIONS["cp_wb_flush_abort"].as< bool >();
+    indx_cfg.cp_logstore_truncate_abort = SDS_OPTIONS["cp_logstore_truncate_abort"].as< bool >();
+
 
     mod_tests.push_back(&test);
     return;

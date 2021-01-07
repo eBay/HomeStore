@@ -152,6 +152,12 @@ void HomeStoreCPMgr::blkalloc_cp_start(hs_cp* hcp) {
 
     /* persist blk alloc bit maps */
     HomeStoreBase::instance()->blkalloc_cp_start(hcp->ba_cp);
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("indx_cp_bitmap_abort")) {
+        LOGINFO("aborting because of flip");
+        raise(SIGKILL);
+    }
+#endif
 
     /* All dirty buffers are flushed. Write super block */
     IndxMgr::write_hs_cp_sb(hcp);
@@ -165,6 +171,12 @@ void HomeStoreCPMgr::blkalloc_cp_start(hs_cp* hcp) {
         it->second->indx_mgr->truncate(it->second);
     }
     home_log_store_mgr.device_truncate();
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("indx_cp_logstore_truncate_abort")) {
+        LOGINFO("aborting because of flip");
+        raise(SIGKILL);
+    }
+#endif
 }
 
 /* It attaches the new CP and prepare for cur cp flush */
@@ -1495,6 +1507,8 @@ uint64_t StaticIndxMgr::free_blk(hs_cp* hcp, sisl::ThreadVector< homestore::BlkI
 void StaticIndxMgr::remove_read_tracker(Free_Blk_Entry& fbe) { m_read_blk_tracker->remove(fbe); }
 
 void StaticIndxMgr::add_read_tracker(Free_Blk_Entry& fbe) { m_read_blk_tracker->insert(fbe); }
+void StaticIndxMgr::hs_cp_suspend() { m_cp_mgr->cp_suspend(); }
+void StaticIndxMgr::hs_cp_resume() { m_cp_mgr->cp_resume(); }
 
 void StaticIndxMgr::safe_to_free_blk(Free_Blk_Entry& fbe) {
     /* We don't allow cp to complete until all required blkids are freed. We increment the ref count in

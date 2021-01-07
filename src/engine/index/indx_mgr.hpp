@@ -445,6 +445,8 @@ public:
 
     static void add_read_tracker(Free_Blk_Entry& bid);
     static void remove_read_tracker(Free_Blk_Entry& fbe);
+    static void hs_cp_suspend();
+    static void hs_cp_resume();
 
 protected:
     /*********************** static private members **********************/

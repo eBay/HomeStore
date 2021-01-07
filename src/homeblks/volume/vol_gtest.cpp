@@ -253,6 +253,9 @@ public:
             m_status_threads_executing.set_status(job_status_t::stopped);
         }
 
+        for (uint32_t i = 0; i < mod_tests.size(); ++i) {
+            mod_tests[i]->try_run_last_iteration();
+        }
         m_execution_cv.notify_all();
         if (m_notify_job_done) m_completion_cv.notify_all();
     }
@@ -598,6 +601,9 @@ public:
         m_am_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
 
         VolInterface::init(params);
+        for (uint32_t i = 0; i < mod_tests.size(); ++i) {
+            mod_tests[i]->try_init_iteration();
+        }
 
         if (wait_for_init_done) { wait_homestore_init_done(); }
 

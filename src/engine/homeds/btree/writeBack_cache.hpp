@@ -427,6 +427,12 @@ public:
                         ++wb_cache_outstanding_cnt;
                         m_blkstore->write(depend_req->bid, depend_req->m_mem, 0, depend_req, false);
                         ++write_count;
+#ifdef _PRERELEASE
+                        if (homestore_flip->test_flip("indx_cp_wb_flush_abort")) {
+                            LOGINFO("aborting because of flip");
+                            raise(SIGKILL);
+                        }
+#endif
                         if (wb_cache_outstanding_cnt > HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt)) {
                             if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
                             return false;

@@ -77,6 +77,7 @@ private:
     cp_type* m_cur_cp = nullptr;
     std::atomic< bool > in_cp_phase = false;
     std::mutex trigger_cp_mtx;
+    bool m_cp_suspend = false;
 
 public:
     CPMgr() {
@@ -181,6 +182,7 @@ public:
      */
     void trigger_cp(const cp_done_cb& cb = nullptr, bool force = false) {
 
+        if (m_cp_suspend) { return; }
         /* check the state of previous CP */
         bool expected = false;
 
@@ -219,6 +221,10 @@ public:
         LOGDEBUGMOD(cp, "CP critical section done, doing cp_io_exit");
         cp_io_exit(prev_cp);
     }
+
+    void cp_suspend() { m_cp_suspend = true; }
+
+    void cp_resume() { m_cp_suspend = false; }
 
     /* CP is divided into two stages :- CP prepare and CP start */
 
