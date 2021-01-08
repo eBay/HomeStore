@@ -47,9 +47,9 @@ def recovery_crash():
 
 ## @test    normal
 #  @brief   Normal IO test
-def normal():
+def normal(num_secs = "20000"):
     print("normal test started")
-    cmd_opts = "--run_time=20000 --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0 --flip=1"
+    cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0 --flip=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("normal test completed")
 
@@ -77,10 +77,10 @@ def load_volume():
 
 ## @test    recovery_nightly
 #  @brief   Nightly recovery test
-def recovery_nightly():
+def recovery_nightly(num_iteration = 10):
     print("recovery test started")
     i = 1
-    while i < 10:
+    while i < num_iteration:
 #        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --enable_crash_handler=1 --verify_only=1 --flip=1 --remove_file=0 --verify_type=2"
  #       subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
         
@@ -233,6 +233,13 @@ def hs_svc_tool():
     cmd_opts = "--zero_boot_sb"
     subprocess.check_call(dirpath + "hs_svc_tool " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
 
+# It is subset of nightly which should be completed in an hour
+def hourly():
+    normal("10 * 60")
+    sleep(5)
+    recovery_nightly(2)
+    sleep(5)
+
 def nightly():
 
     normal()
@@ -324,6 +331,9 @@ if test_suits == "normal_flip":
 
 if test_suits == "nightly":
     nightly()
+
+if test_suits == "hourly":
+    hourly()
 
 if test_suits == "recovery_nightly":
     recovery_nightly()
