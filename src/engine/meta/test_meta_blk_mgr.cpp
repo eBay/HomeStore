@@ -141,7 +141,7 @@ public:
     void do_write_to_full() {
         ssize_t free_size{static_cast< ssize_t >(m_mbm->get_size() - m_mbm->get_used_size())};
 
-        HS_RELEASE_ASSERT_LT(free_size, 0);
+        HS_RELEASE_ASSERT_GT(free_size, 0);
         HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(free_size), m_mbm->get_available_blks() * m_mbm->get_page_size());
 
         uint64_t size_written{0};
@@ -153,9 +153,13 @@ public:
                 HS_RELEASE_ASSERT_EQ(size_written, m_mbm->get_page_size());
             }
 
+            // size_written should be at least one page;
+            HS_RELEASE_ASSERT_GE(size_written, m_mbm->get_page_size());
+
             free_size -= size_written;
-        
-            HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(free_size), m_mbm->get_available_blks() * m_mbm->get_page_size());
+
+            HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(free_size),
+                                 m_mbm->get_available_blks() * m_mbm->get_page_size());
         }
 
         HS_RELEASE_ASSERT_EQ(free_size, 0);
@@ -442,7 +446,7 @@ public:
     void register_client() {
         m_mbm = MetaBlkMgr::instance();
         m_total_wrt_sz = m_mbm->get_used_size();
-        
+
         HS_RELEASE_ASSERT_EQ(m_mbm->get_size() - m_total_wrt_sz, m_mbm->get_available_blks() * m_mbm->get_page_size());
 
         m_mbm->deregister_handler(mtype);

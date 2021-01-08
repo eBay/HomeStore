@@ -150,6 +150,7 @@ public:
         REGISTER_COUNTER(vdev_write_count, "vdev total write cnt");
         REGISTER_COUNTER(vdev_truncate_count, "vdev total truncate cnt");
         REGISTER_COUNTER(vdev_high_watermark_count, "vdev total high watermark cnt");
+        REGISTER_COUNTER(vdev_num_alloc_failure, "vdev blk alloc failure cnt");
 
         register_me_to_farm();
     }
@@ -241,8 +242,7 @@ public:
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
     VirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, vdev_comp_cb_t cb, bool recovery_init,
                bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
-            m_name{name},
-            m_metrics(name) {
+            m_name{name}, m_metrics(name) {
         init(mgr, vb, cb, vb->page_size, auto_recovery, hwm_cb);
 
         m_recovery_init = recovery_init;
@@ -257,8 +257,7 @@ public:
     VirtualDev(DeviceManager* mgr, const char* name, uint64_t context_size, uint32_t nmirror, bool is_stripe,
                uint32_t page_size, const std::vector< PhysicalDev* >& pdev_list, vdev_comp_cb_t cb, char* blob,
                uint64_t size, bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
-            m_name{name},
-            m_metrics(name) {
+            m_name{name}, m_metrics(name) {
         init(mgr, nullptr, cb, page_size, auto_recovery, hwm_cb);
 
         // Now its time to allocate chunks as needed
@@ -938,6 +937,11 @@ public:
                 dev_ind = (uint32_t)((dev_ind + 1) % m_primary_pdev_chunks_list.size());
             } while (dev_ind != start_dev_ind);
 
+            if (status != BlkAllocStatus::SUCCESS) {
+                LOGERROR("nblks={} failed to alloc after trying to allo on every chunks {} and devices {}.", nblks);
+                COUNTER_INCREMENT(m_metrics, vdev_num_alloc_failure, 1);
+            }
+
             return status;
         } catch (const std::exception& e) {
             LOGERROR("exception happened {}", e.what());
@@ -1124,7 +1128,7 @@ public:
 
     void update_vb_context(const sisl::blob& ctx_data) { m_mgr->update_vb_context(m_vb->vdev_id, ctx_data); }
     uint64_t get_size() const { return m_vb->size; }
-    
+
     uint64_t get_available_blks() const {
         uint64_t avl_blks = 0;
         for (uint32_t i = 0; i < m_primary_pdev_chunks_list.size(); ++i) {

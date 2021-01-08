@@ -214,17 +214,18 @@ def vdev_nightly():
 def meta_blk_store_nightly():
     print("meta blk store test started")
     subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.min_drive_size_test", stderr=subprocess.STDOUT, shell=True)
-    #subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.write_to_full_test", stderr=subprocess.STDOUT, shell=True)   # currently blocked by SDSTOR-3607
+    subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.write_to_full_test", stderr=subprocess.STDOUT, shell=True)
     subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.single_read_test", stderr=subprocess.STDOUT, shell=True)
     subprocess.check_call(dirpath + "test_meta_blk_mgr --run_time=24000 --num_io=1000000", stderr=subprocess.STDOUT, shell=True)
 
     print("meta blk store test completed")
 
 def force_reinit():
-    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=5 --enable_crash_handler=0 --remove_file=0"
+    # test force reinit with recovery (e.g. with complete homestore shutdown);
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=1 --enable_crash_handler=0 --remove_file=0"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
 
-    cmd_opts = "--gtest_filter=VolTest.hs_force_reinit_test --run_time=5 --enable_crash_handler=1 --remove_file=1 --delete_volume=1"
+    cmd_opts = "--gtest_filter=VolTest.hs_force_reinit_test --run_time=1 --enable_crash_handler=1 --remove_file=1 --delete_volume=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("Homestore Force Reinit passed")
 

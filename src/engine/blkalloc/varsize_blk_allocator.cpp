@@ -363,7 +363,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_all
     } while (true);
 
     if (status != BlkAllocStatus::SUCCESS) {
-        BLKALLOC_LOG(ERROR, "nblks={} failed to alloc cache and direct after retries={}, giving up", nblks, retry);
+        // BLKALLOC_LOG(ERROR, "nblks={} failed to alloc cache and direct after retries={}, giving up", nblks, retry);
         COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
         status = BlkAllocStatus::SPACE_FULL;
     } else {
