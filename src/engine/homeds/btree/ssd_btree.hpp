@@ -44,10 +44,9 @@ public:
         return std::make_unique< SSDBtreeStore >(btree, cfg);
     }
 
-    BtreeStore(ssd_btree_t* btree, BtreeConfig& cfg) :
-            m_btree(btree),
-            m_cfg(cfg),
-            m_wb_cache(cfg.blkstore, cfg.align_size, bind_this(SSDBtreeStore::cp_done_store, 1), cfg.trigger_cp_cb) {
+    BtreeStore(ssd_btree_t* btree, BtreeConfig& cfg) : m_btree(btree), m_cfg(cfg) {
+        m_wb_cache = std::make_shared< wb_cache_t >(cfg.blkstore, cfg.align_size,
+                                                    bind_this(SSDBtreeStore::cp_done_store, 1), cfg.trigger_cp_cb);
         m_node_size = cfg.get_node_size();
         m_cfg.set_node_area_size(m_node_size - sizeof(LeafPhysicalNode));
         m_first_cp = btree_cp_ptr(new (btree_cp));
@@ -89,7 +88,7 @@ public:
             new_cp->start_seqid = cur_bcp->end_seqid;
             new_cp->cp_id = cur_bcp->cp_id + 1;
         }
-        m_wb_cache.prepare_cp(new_cp, cur_bcp, blkalloc_checkpoint);
+        m_wb_cache->prepare_cp(new_cp, cur_bcp, blkalloc_checkpoint);
         return new_cp;
     }
 
@@ -124,7 +123,7 @@ public:
             sb.journal_id = get_journal_id_store();
         }
 
-        m_wb_cache.prepare_cp(m_first_cp, nullptr, false);
+        m_wb_cache->prepare_cp(m_first_cp, nullptr, false);
     }
 
     logstore_id_t get_journal_id_store() { return (m_journal->get_store_id()); }
@@ -167,9 +166,7 @@ public:
                                      assert(node_info.node_id != empty_bnodeid);
                                      BlkId bid(node_info.node_id);
                                      m_blkstore->reserve_blk(bid);
-                                     if (is_replayed) {
-                                         m_first_cp->btree_size.fetch_add(1);
-                                     }
+                                     if (is_replayed) { m_first_cp->btree_size.fetch_add(1); }
                                  }));
         }
     }
@@ -198,7 +195,7 @@ public:
 
     void try_cp_start(const btree_cp_ptr& bcp) {
         auto ref_cnt = bcp->ref_cnt.fetch_sub(1);
-        if (ref_cnt == 1) { m_wb_cache.cp_start(bcp); }
+        if (ref_cnt == 1) { m_wb_cache->cp_start(bcp); }
     }
 
     static void flush_free_blks(SSDBtreeStore* store, const btree_cp_ptr& bcp,
@@ -207,7 +204,7 @@ public:
     }
 
     void flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
-        m_wb_cache.flush_free_blks(bcp, ba_cp);
+        m_wb_cache->flush_free_blks(bcp, ba_cp);
     }
 
     static void truncate(SSDBtreeStore* store, const btree_cp_ptr& bcp) { store->truncate_store(bcp); }
@@ -285,7 +282,7 @@ public:
     }
 
     uint32_t get_node_size() { return m_node_size; }
-    wb_cache_t* get_wb_cache() { return &m_wb_cache; }
+    std::shared_ptr< wb_cache_t > get_wb_cache() { return m_wb_cache; }
 
     static btree_status_t read_node(SSDBtreeStore* store, bnodeid_t id, boost::intrusive_ptr< SSDBtreeNode >& bnode) {
         auto ret = btree_status_t::success;
@@ -514,7 +511,7 @@ private:
     std::shared_ptr< HomeLogStore > m_journal;
     BtreeConfig m_cfg;
     uint32_t m_node_size;
-    wb_cache_t m_wb_cache;
+    std::shared_ptr< wb_cache_t > m_wb_cache;
     btree_cp_ptr m_first_cp;
     bool m_is_recovering = false;
     uint64_t m_replayed_count = 0;

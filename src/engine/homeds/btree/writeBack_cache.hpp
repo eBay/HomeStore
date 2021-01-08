@@ -159,7 +159,7 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
 };
 
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
-class WriteBackCache {
+class WriteBackCache : public std::enable_shared_from_this< WriteBackCache< K, V, InteriorNodeType, LeafNodeType > > {
     friend struct WriteBackCacheBuffer< K, V, InteriorNodeType, LeafNodeType >;
 
 private:
@@ -371,9 +371,11 @@ public:
             return; // nothing to flush
         }
 
-        queue_flush_buffers([this, it = typename sisl::ThreadVector< writeback_req_ptr >::thread_vector_iterator(),
+        auto shared_this = this->shared_from_this();
+        queue_flush_buffers([shared_this,
+                             it = typename sisl::ThreadVector< writeback_req_ptr >::thread_vector_iterator(),
                              iterator_invalid = true, cp_id]() mutable -> bool {
-            auto list = m_req_list[cp_id].get();
+            auto list = shared_this->m_req_list[cp_id].get();
             writeback_req_ptr wb_req = nullptr;
             size_t write_count{0};
             if (iterator_invalid) {
@@ -386,7 +388,7 @@ public:
                 if (wb_req->dependent_cnt.decrement_testz(1)) {
                     wb_req->state = homeds::btree::writeback_req_state::WB_REQ_SENT;
                     ++wb_cache_outstanding_cnt;
-                    m_blkstore->write(wb_req->bid, wb_req->m_mem, 0, wb_req, false);
+                    shared_this->m_blkstore->write(wb_req->bid, wb_req->m_mem, 0, wb_req, false);
                     ++write_count;
                     if (wb_cache_outstanding_cnt > HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt)) {
                         if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
@@ -414,9 +416,10 @@ public:
         wb_req->state = homeds::btree::writeback_req_state::WB_REQ_COMPL;
 
         --wb_cache_outstanding_cnt;
+        auto shared_this = this->shared_from_this();
         /* Scan if it has any req depending on this req */
         if (!wb_req->req_q.empty()) {
-            queue_flush_buffers([this, wb_req]() -> bool {
+            queue_flush_buffers([shared_this, wb_req]() -> bool {
                 size_t write_count{0};
                 // std::unique_lock< std::mutex > req_mtx(wb_req->mtx); No need to take a lock here
                 while (!wb_req->req_q.empty()) {
@@ -425,7 +428,7 @@ public:
                     if (depend_req->dependent_cnt.decrement_testz(1)) {
                         depend_req->state = homeds::btree::writeback_req_state::WB_REQ_SENT;
                         ++wb_cache_outstanding_cnt;
-                        m_blkstore->write(depend_req->bid, depend_req->m_mem, 0, depend_req, false);
+                        shared_this->m_blkstore->write(depend_req->bid, depend_req->m_mem, 0, depend_req, false);
                         ++write_count;
 #ifdef _PRERELEASE
                         if (homestore_flip->test_flip("indx_cp_wb_flush_abort")) {
