@@ -286,15 +286,15 @@ public:
 
     static btree_status_t read_node(SSDBtreeStore* store, bnodeid_t id, boost::intrusive_ptr< SSDBtreeNode >& bnode) {
         auto ret = btree_status_t::success;
+        auto req = writeback_req_t::make_request();
+        req->is_read = true;
+        req->isSyncCall = true;
         // Read the data from the block store
         try {
 #ifdef _PRERELEASE
             if (homestore_flip->test_flip("btree_read_fail", id)) { folly::throwSystemError("flip error"); }
 #endif
             homestore::BlkId blkid(id);
-            auto req = writeback_req_t::make_request();
-            req->is_read = true;
-            req->isSyncCall = true;
             auto cache_only = iomanager.am_i_tight_loop_reactor();
 
 #ifndef NDEBUG
