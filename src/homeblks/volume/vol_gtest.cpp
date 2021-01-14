@@ -788,12 +788,13 @@ public:
 
     void shutdown() {
         LOGINFO("shutting down homeblks");
-        VolInterface::get_instance()->shutdown();
 
         {
             std::unique_lock< std::mutex > lk(m_mutex);
             vol_info.clear();
         }
+
+        VolInterface::get_instance()->shutdown();
 
         LOGINFO("stopping iomgr");
         iomanager.stop();
@@ -831,7 +832,6 @@ public:
     }
 
 private:
-
     void init_vol_file_hdr(int fd) {
         /* set first bit to 0 */
         file_hdr hdr;
@@ -1307,9 +1307,7 @@ protected:
         LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas,
                  m_outstanding_ios.load(), (tcfg.write_iovec != 0 ? true : false),
                  (tcfg.write_cache != 0 ? true : false));
-        if (ret_io != no_error) {
-            return false;
-        }
+        if (ret_io != no_error) { return false; }
         return true;
     }
 
@@ -1642,7 +1640,7 @@ TEST_F(VolTest, recovery_io_test) {
 /*
  * @test    hs_force_reinit_test only works in PRERELEASE mode;
  * @brief   This test cases works with force_reinit field in input_params which is only valid in PRERELEASE mode;
- * if not in PRERELEASE mode, assert for first_time_boot will fail in init_done_cb 
+ * if not in PRERELEASE mode, assert for first_time_boot will fail in init_done_cb
  * */
 TEST_F(VolTest, hs_force_reinit_test) {
     output.print("hs_force_reinit_test");
@@ -1659,7 +1657,7 @@ TEST_F(VolTest, hs_force_reinit_test) {
     this->shutdown();
     if (tcfg.remove_file) { this->remove_files(); }
 }
-#else 
+#else
 
 /*!
     @test   hs_force_reinit_test works as always (not depend on force_reinit field)
