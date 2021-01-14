@@ -4,7 +4,8 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "2.2.11"
+    version = "2.2.12"
+
     revision_mode = "scm"
 
     license = "Proprietary"
@@ -17,14 +18,14 @@ class HomestoreConan(ConanFile):
                 "fPIC": ['True', 'False'],
                 "sanitize": ['True', 'False'],
                 'malloc_impl' : ['libc', 'jemalloc'],
-                'testing' : ['coverage', 'full', 'min', 'off'],
+                'testing' : ['coverage', 'full', 'min', 'off', 'epoll_mode', 'spdk_mode'],
                 }
     default_options = (
                         'shared=False',
                         'fPIC=True',
                         'sanitize=True',
                         'malloc_impl=libc',
-                        'testing=full',
+                        'testing=epoll_mode',
                         )
 
     build_requires = (

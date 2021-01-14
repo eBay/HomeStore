@@ -1,28 +1,18 @@
-# Coverage doesn't like binaries that don't run...
-if (NOT ${CONAN_TEST_TARGET} STREQUAL "coverage")
-    if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")
-        set(PERF_CACHE_SOURCE_FILES
-            perf_cache.cpp
-            )
-        add_executable(perf_cache
-                       ${PERF_CACHE_SOURCE_FILES}
-                      )
-        target_link_libraries(perf_cache homestore ${CONAN_LIBS})
-        message(WARNING "Cache perf test will not be run...fails")
-        #add_test(NAME CachePerf COMMAND perf_cache)
-    endif ()
-endif ()
-
+include (${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
 include_directories (BEFORE ..)
 
-if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")
-    set(TEST_CACHE_SOURCE_FILES
-        test_cache.cpp
-        )
+is_non_coverage_build(non_coverage_build)
+if (${non_coverage_build})
+    # Coverage doesn't like binaries that don't run...
+    set(PERF_CACHE_SOURCE_FILES perf_cache.cpp)
+    add_executable(perf_cache ${PERF_CACHE_SOURCE_FILES})
+    target_link_libraries(perf_cache homestore ${CONAN_LIBS})
+endif ()
 
-    add_executable(test_cache
-                   ${TEST_CACHE_SOURCE_FILES}
-                  )
+can_build_nonio_tests(non_io_tests)
+if (${non_io_tests})
+    set(TEST_CACHE_SOURCE_FILES test_cache.cpp)
+    add_executable(test_cache ${TEST_CACHE_SOURCE_FILES})
     target_link_libraries(test_cache homestore iberty ${CONAN_LIBS})
     add_test(NAME TestCache COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_cache)
 endif()

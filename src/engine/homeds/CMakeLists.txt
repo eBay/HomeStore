@@ -1,3 +1,4 @@
+include(${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
 message(WARNING "BTree test disabled due to interface change.")
 # XXX: Out of date with BTree interface
 #set(TEST_BTREE_SOURCE_FILES
@@ -25,7 +26,8 @@ endif()
 
 include_directories(BEFORE ..)
 
-if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")
+can_build_nonio_tests(non_io_tests)
+if (${non_io_tests})
     set(TEST_BTREE_CRUD_SOURCE_FILES tests/test_btree_crud.cpp)
     add_executable(test_btree_crud ${TEST_BTREE_CRUD_SOURCE_FILES})
     target_link_libraries(test_btree_crud homestore ${CONAN_LIBS})
@@ -54,13 +56,9 @@ if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")
     target_link_libraries(test_iomgr_exec homestore ${CONAN_LIBS})
 
     if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-        set(TEST_THREAD_POOL_SOURCE_FILES
-            tests/test_thread_pool.cpp
-            )
-    add_executable(test_threadpool
-        ${TEST_THREAD_POOL_SOURCE_FILES}
-        )
-    target_link_libraries(test_threadpool ${CONAN_LIBS})
+        set(TEST_THREAD_POOL_SOURCE_FILES tests/test_thread_pool.cpp)
+        add_executable(test_threadpool ${TEST_THREAD_POOL_SOURCE_FILES})
+        target_link_libraries(test_threadpool ${CONAN_LIBS})
     endif()
 
     add_test(NAME BTreeCRUD COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_btree_crud)
@@ -73,9 +71,9 @@ if (NOT ${CONAN_TEST_TARGET} STREQUAL "off")
     endif()
     SET_TESTS_PROPERTIES(TestLoadVDev PROPERTIES DEPENDS TestLoadCache)
 
-#add_test(NAME TestVolLoadgen COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*Volume* --num_vols=20)
-#SET_TESTS_PROPERTIES(TestVolLoadgen PROPERTIES DEPENDS TestLoadVDev)
+    #add_test(NAME TestVolLoadgen COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*Volume* --num_vols=20)
+    #SET_TESTS_PROPERTIES(TestVolLoadgen PROPERTIES DEPENDS TestLoadVDev)
 
-#add_test(NAME TestLoadMap COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*Map*)
-#SET_TESTS_PROPERTIES(TestLoadMap PROPERTIES DEPENDS TestVolLoadgen)
+    #add_test(NAME TestLoadMap COMMAND ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*Map*)
+    #SET_TESTS_PROPERTIES(TestLoadMap PROPERTIES DEPENDS TestVolLoadgen)
 endif()

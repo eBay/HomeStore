@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 ## @file vol_test.py
 #  Regression Tests linked to PR merge
-
 import subprocess
 import os
 import sys
@@ -18,10 +17,10 @@ dirpath = "./"
 for opt,arg in opts:
     if opt in ('-t', '--test_suits'):
         test_suits = arg
-        print(("testing suits (%s)")%(arg))
+        print(("testing suits (%s)") % (arg))
     if opt in ('-d', '--dirpath'):
         dirpath = arg
-        print(("dir path (%s)")%(arg))
+        print(("dir path (%s)") % (arg))
 
 addln_opts = ' '
 addln_opts += ' '.join(map(str, args)) 
@@ -45,9 +44,9 @@ def recovery_crash():
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery crash passed")
 
-## @test    normal
-#  @brief   Normal IO test
-def normal(num_secs = "20000"):
+## @test normal
+#  @brief Normal IO test
+def normal(num_secs="20000"):
     print("normal test started")
     cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0 --flip=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
@@ -59,29 +58,30 @@ def normal_flip():
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("normal test completed with flip =  2")
 
-## @test    load
-#  @brief   Test using load generator
+## @test load
+#  @brief Test using load generator
 def load():
     print("load test started")
     cmd_opts = "--num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=Map*"
     subprocess.check_call(dirpath + "test_load " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("load test completed")
 
-## @test    load
-#  @brief   Test Volume using load generator
+## @test load
+#  @brief Test Volume using load generator
 def load_volume():
     print("Volume load test started")
     cmd_opts = "--num_io=100000000000 --num_keys=500000 --run_time=21600 --gtest_filter=*Volume*" 
     subprocess.check_call(dirpath + "test_load " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("Volume load test completed")
 
-## @test    recovery_nightly
-#  @brief   Nightly recovery test
-def recovery_nightly(num_iteration = 10):
+## @test recovery_nightly
+#  @brief Nightly recovery test
+def recovery_nightly(num_iteration=10):
     print("recovery test started")
     i = 1
     while i < num_iteration:
-#        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --enable_crash_handler=1 --verify_only=1 --flip=1 --remove_file=0 --verify_type=2"
+#        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --enable_crash_handler=1 --verify_only=1
+#        --flip=1 --remove_file=0 --verify_type=2"
  #       subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
         
         cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --verify_type=3 --abort=1 --flip=1 --remove_file=0"
@@ -94,20 +94,20 @@ def recovery_nightly(num_iteration = 10):
         print(s)
         i += 1
     
-    cmd_opts="--gtest_filter=VolTest.recovery_io_test --run_time=300 --remove_file=1 --delete_volume=1 --verify_type=2"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --remove_file=1 --delete_volume=1 --verify_type=2"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery test completed")
 
-## @test    one_disk_replace
-#  @brief   One disk is replaced during boot time
+## @test one_disk_replace
+#  @brief One disk is replaced during boot time
 def one_disk_replace():
-    print("one disk replace test started");
+    print("one disk replace test started")
     cmd_opts = "--gtest_filter=VolTest.one_disk_replace_test --run_time=300 --remove_file=0 --verify_type=3"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery test with one disk replace passed")
 
-## @test    one_disk_replace_abort
-#  @brief   Homestore crashed during recovery with one disk replace
+## @test one_disk_replace_abort
+#  @brief Homestore crashed during recovery with one disk replace
 def one_disk_replace_abort():
     print("recovery abort with one disk replace started")
     cmd_opts = "--gtest_filter=VolTest.one_disk_replace_abort_test --run_time=300 --remove_file=0 --verify_type=3 --enable_crash_handler=0"
@@ -117,8 +117,8 @@ def one_disk_replace_abort():
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery abort with one disk replace passed")
 
-## @test    both_disk_replace
-#  @brief   Both disks are replaced during boot time
+## @test both_disk_replace
+#  @brief Both disks are replaced during boot time
 def both_disk_replace():
     print("Both disk replace started")
     cmd_opts = "--gtest_filter=VolTest.two_disk_replace_test --run_time=300"
@@ -128,16 +128,16 @@ def both_disk_replace():
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("Both disk replace passed")
 
-## @test    one_disk_fail
-#  @brief   One Disk failure during boot time
+## @test one_disk_fail
+#  @brief One Disk failure during boot time
 def one_disk_fail():
     print("one disk fail test started")
     cmd_opts = "--gtest_filter=VolTest.one_disk_fail_test --run_time=300"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("one disk fail test passed")
 
-## @test    vol_offline_test
-#  @brief   Move volume to offline when IOs are going on
+## @test vol_offline_test
+#  @brief Move volume to offline when IOs are going on
 def vol_offline_test():
     print("vol offline test started")
     cmd_opts = "--gtest_filter=VolTest.vol_offline_test --run_time=300"
@@ -149,8 +149,8 @@ def vol_offline_test():
     status = subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("vol offline test recovery passed")
 
-## @test    vol_io_fail_test
-#  @brief   Set IO error and verify all volumes come online
+## @test vol_io_fail_test
+#  @brief Set IO error and verify all volumes come online
 #           after reboot and data is verified.
 def vol_io_fail_test():
     print("vol io fail test started")
@@ -158,7 +158,7 @@ def vol_io_fail_test():
     process = Popen([dirpath + "test_volume", "--gtest_filter=VolTest.vol_io_fail_test", "--run_time=30", "--remove_file=0"])
     p_status = process.wait()
     if p_status != 0:
-        print ("test failed")
+        print("test failed")
         sys.exit(-1)
     print("vol io test test passed")
     
@@ -167,8 +167,8 @@ def vol_io_fail_test():
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("vol io fail test recovery passed")
 
-##  @test   vol_create_del_test
-#   @brief  Create and Delete Volume
+##  @test vol_create_del_test
+#   @brief Create and Delete Volume
 def vol_create_del_test():
     print("create del vol test started")
     cmd_opts = "--gtest_filter=VolTest.vol_create_del_test --max_volume=1000"
@@ -221,7 +221,7 @@ def meta_blk_store_nightly():
     print("meta blk store test completed")
 
 def force_reinit():
-    # test force reinit with recovery (e.g. with complete homestore shutdown);
+    # test force reinit with recovery (e.g.  with complete homestore shutdown);
     cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=1 --enable_crash_handler=0 --remove_file=0"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
 
@@ -292,7 +292,6 @@ def nightly():
     
     #vdev_nightly()
     #sleep(5)
-
 if test_suits == "normal":
     normal()
     
