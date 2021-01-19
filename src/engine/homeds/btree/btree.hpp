@@ -203,11 +203,14 @@ public:
     }
 
     Btree(BtreeConfig& cfg) :
-            m_btree_cfg(cfg),
-            m_metrics(BtreeStoreType, cfg.get_name().c_str()),
-            m_node_size(cfg.get_node_size()) {}
+            m_btree_cfg(cfg), m_metrics(BtreeStoreType, cfg.get_name().c_str()), m_node_size(cfg.get_node_size()) {}
 
     ~Btree() {
+        if (BtreeStoreType == btree_store_type::SSD_BTREE) {
+            LOGINFO("Skipping destroy in-memory btree nodes for ssd_btree.");
+            return;
+        }
+
         uint64_t free_node_cnt;
         if (!m_destroy) { destroy(nullptr, free_node_cnt, true); }
     }
