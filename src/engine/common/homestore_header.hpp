@@ -17,6 +17,8 @@ struct blob {
 };
 } // namespace homeds
 
+SDS_LOGGING_DECL(transient)
+
 namespace homestore {
 
 ENUM(io_flag, uint8_t,
@@ -64,7 +66,7 @@ struct dev_info {
 
 #define HOMESTORE_LOG_MODS                                                                                             \
     btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, blkalloc, volume, flip, cp,         \
-        metablk, indx_mgr, logstore, IOMGR_LOG_MODS
+        metablk, indx_mgr, logstore, transient, IOMGR_LOG_MODS
 
 template < typename T >
 std::string to_hex(T i) {

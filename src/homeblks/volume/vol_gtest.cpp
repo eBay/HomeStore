@@ -2022,6 +2022,9 @@ int main(int argc, char* argv[]) {
 
     if (_gcfg.enable_crash_handler) { sds_logging::install_crash_handler(); }
 
+    // TODO: Remove this once we found the root cause of the problem.
+    sds_logging::SetModuleLogLevel("transient", spdlog::level::debug);
+
     /* if --spdk is not set, check env variable if user want to run spdk */
     if (!_gcfg.is_spdk && std::getenv(SPDK_ENV_VAR_STRING.c_str())) { _gcfg.is_spdk = true; }
 
