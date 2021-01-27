@@ -24,11 +24,12 @@ class DiskInitializer {
     // boost::uuids::uuid uuid;
 
 public:
-    ~DiskInitializer() {
+    ~DiskInitializer() {}
+    void cleanup() {
         auto success = homestore::VolInterface::get_instance()->shutdown();
         assert(success);
+        remove("file_load_gen");
     }
-    void cleanup() { remove("file_load_gen"); }
     void init(Executor& executor, init_done_callback init_done_cb, size_t atomic_phys_page_size = 2048) {
         start_homestore(init_done_cb, atomic_phys_page_size);
     }

@@ -1262,6 +1262,12 @@ void IndxMgr::register_indx_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp) {
     }));
 }
 
+hs_cp* IndxMgr::cp_io_enter() {
+    return (m_cp_mgr->cp_io_enter());
+}
+
+void IndxMgr::cp_io_exit(hs_cp* hcp) { m_cp_mgr->cp_io_exit(hcp); }
+
 /********************** Static Indx mgr functions *********************************/
 
 REGISTER_METABLK_SUBSYSTEM(indx_mgr, "INDX_MGR_CP", StaticIndxMgr::meta_blk_found_cb, nullptr)

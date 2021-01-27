@@ -141,6 +141,13 @@ btree_status_t mapping::get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCu
     /* run query */
     auto ret = m_bt->query(qreq, result_kv);
 
+#ifndef NDEBUG
+    for (uint32_t i = 0; i < result_kv.size(); ++i) {
+        HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "GET : start_lba {} end lba {} value {}",
+                      result_kv[i].first.start(), result_kv[i].first.end(), result_kv[i].second.to_string());
+    }
+#endif
+
     HS_ASSERT(RELEASE,
               (ret == btree_status_t::resource_full || ret == btree_status_t::fast_path_not_possible ||
                ret == btree_status_t::success),
@@ -159,6 +166,8 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
                             BtreeQueryCursor& cur) {
     HS_ASSERT_CMP(DEBUG, value.get_array().get_total_elements(), ==, 1);
 
+    HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "PUT : start_lba {} end lba {} value {}", key.start(),
+                  key.end(), value.to_string());
     /* create search range */
     uint64_t start_lba;
     if (cur.m_last_key != nullptr) { // last key will be null for first read or if no read happened in the last read

@@ -269,6 +269,8 @@ public:
 
     int64_t get_seqid() const { return m_ptr->m_meta.seqid; }
 
+    void set_seqid(int64_t seqid) { m_ptr->m_meta.seqid = seqid; }
+
     BlkId& get_blkId() const { return m_ptr->m_meta.blkId; }
 
     uint8_t get_blk_offset() const { return (uint8_t)m_ptr->m_meta.blk_offset; }

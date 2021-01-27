@@ -571,6 +571,9 @@ public:
     void register_indx_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp = false);
     /* unmap api called by volume layer */
     void unmap(const indx_req_ptr& ireq);
+    hs_cp* cp_io_enter();
+    void cp_io_exit(hs_cp* cp);
+    btree_cp_ptr get_btree_cp(hs_cp* hcp);
 
 protected:
     /*********************** virtual functions required to support snapshot  **********************/
@@ -632,7 +635,6 @@ private:
     void journal_write(const indx_req_ptr& ireq);
     void journal_comp_cb(logstore_req* req, logdev_key ld_key);
     btree_status_t update_indx_tbl(const indx_req_ptr& ireq, bool is_active);
-    btree_cp_ptr get_btree_cp(hs_cp* hcp);
     indx_cp_ptr get_indx_cp(hs_cp* hcp);
     void destroy_indx_tbl();
     void add_prepare_cb_list(const prepare_cb& cb);

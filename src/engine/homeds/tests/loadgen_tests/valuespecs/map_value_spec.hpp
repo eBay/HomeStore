@@ -112,7 +112,12 @@ public:
     //            }
     //
     virtual uint64_t get_hash_code() override {
+        ValueEntry ve;
+        get_array().get(0, ve, false);
+        auto seqid = ve.get_seqid();
+        ve.set_seqid(INVALID_SEQ_ID);
         sisl::blob b = get_blob();
+        ve.set_seqid(seqid);
         return util::Hash64((const char*)b.bytes, (size_t)b.size);
     }
 };

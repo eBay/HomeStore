@@ -20,8 +20,6 @@ class MapStoreSpec : public StoreSpec< K, V > {
     typedef std::function< void(generator_op_error, const key_info< K, V >*, void*, const std::string&) >
         store_error_cb_t;
 
-    btree_cp m_cp_id;
-
 public:
     MapStoreSpec() {}
 
@@ -37,6 +35,7 @@ public:
     virtual bool upsert(K& k, std::shared_ptr< V > v) override { return update(k, v); }
 
     virtual void init_store(homeds::loadgen::Param& parameters) override {
+        /* Create a volume */
         vol_params params;
         params.page_size = NodeSize;
         params.size = 10 * Gi;
@@ -47,23 +46,23 @@ public:
         boost::uuids::string_generator gen;
         uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
 
-        m_map = std::make_unique< mapping >(params.size, params.page_size, name, nullptr);
+        m_vol = VolInterface::get_instance()->create_volume(params);
+        m_map = m_vol->get_active_indx();
+        m_indx_mgr = m_vol->get_indx_mgr_instance();
     }
 
     /* Map put always appends if exists, no feature to force udpate/insert and return error */
     virtual bool update(K& k, std::shared_ptr< V > v) override {
         auto iface_req = vol_interface_req_ptr(new vol_interface_req(nullptr, k.start(), k.get_n_lba()));
+        iface_req->vol_instance = m_vol;
+        iface_req->op_type = Op_type::WRITE;
         auto req = volume_req::make(iface_req);
         ValueEntry ve;
         v->get_array().get(0, ve, false);
-        req->seqid = ve.get_seqid();
+        ve.set_seqid(req->seqid);
         req->lastCommited_seqid = req->seqid; // keeping only latest version always
         req->push_blkid(ve.get_blkId());
-        mapping_op_cntx cntx;
-        cntx.op = UPDATE_VAL_AND_FREE_BLKS;
-        cntx.vreq = req.get();
-        BtreeQueryCursor cur;
-        m_map->put(cntx, k, *(v.get()), nullptr, cur);
+        send_io(k, *(v.get()), req);
         return true;
     }
 
@@ -96,14 +95,15 @@ public:
         auto lba = start_incl ? start_key.start() : start_key.start() + 1;
         auto nblks = end_key.end() - lba + 1;
         if (!end_incl) { --nblks; }
-        auto iface_req = vol_interface_req_ptr(new vol_interface_req(nullptr, lba, nblks));
-        auto volreq = volume_req::make(iface_req);
 
-        volreq->seqid = INVALID_SEQ_ID;
-        volreq->lastCommited_seqid = INVALID_SEQ_ID; // read only latest value
-
+        mapping_op_cntx cntx;
+        cntx.op = READ_VAL_WITH_seqid;
+        cntx.vreq = nullptr;
+        MappingKey key(lba, nblks);
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
-        m_map->get(volreq.get(), kvs);
+        BtreeQueryCursor cur;
+        auto ret = m_map->get(cntx, key, cur, kvs);
+        assert(ret == btree_status_t::success);
         uint64_t j = 0;
 
         std::array< uint16_t, CS_ARRAY_STACK_SIZE > carr;
@@ -111,19 +111,19 @@ public:
             carr[i] = 1;
         }
 
-        for (uint64_t lba = volreq->lba(); lba < volreq->lba() + volreq->nlbas();) {
-            if (kvs[j].first.start() != lba) {
-                lba++;
+        for (uint64_t next_lba = lba; next_lba < lba + nblks;) {
+            if (kvs[j].first.start() != next_lba) {
+                next_lba++;
                 continue;
             }
             ValueEntry ve;
             (kvs[j].second.get_array()).get(0, ve, false);
             int cnt = 0;
-            while (lba <= kvs[j].first.end()) {
+            while (next_lba <= kvs[j].first.end()) {
                 auto storeblk = ve.get_blkId().get_blk_num() + ve.get_blk_offset() + cnt;
                 ValueEntry ve(INVALID_SEQ_ID, BlkId(storeblk, 1, 0), 0, 1, &carr[0], 1);
-                result.push_back(std::make_pair(K(lba, 1), V(ve)));
-                lba++;
+                result.push_back(std::make_pair(K(next_lba, 1), V(ve)));
+                next_lba++;
                 cnt++;
             }
             j++;
@@ -141,12 +141,14 @@ public:
         auto lba = start_key.start();
         auto nblks = end_key.end() - lba + 1;
         auto iface_req = vol_interface_req_ptr(new vol_interface_req(nullptr, lba, nblks));
+        iface_req->vol_instance = m_vol;
+        iface_req->op_type = Op_type::WRITE;
         auto req = volume_req::make(iface_req);
 
+        req->lastCommited_seqid = req->seqid; // keeping only latest version always
         V& start_value = *(result[0].get());
         V& end_value = *(result.back());
 
-        req->seqid = INVALID_SEQ_ID;
         req->lastCommited_seqid = INVALID_SEQ_ID; // keeping only latest version always
 
         BlkId bid = start_value.get_blkId();
@@ -160,23 +162,33 @@ public:
             carr[i] = 1;
 
         // NOTE assuming data block size is same as lba-volume block size
-        ValueEntry ve(INVALID_SEQ_ID, BlkId(bid.get_blk_num(), bid.get_nblks(), 0), 0, bid.get_nblks(), &carr[0], 1);
+        ValueEntry ve(req->seqid, BlkId(bid.get_blk_num(), bid.get_nblks(), 0), 0, bid.get_nblks(), &carr[0], 1);
         MappingValue value(ve);
         LOGDEBUG("Mapping range put:{} {} ", key.to_string(), value.to_string());
 
+        send_io(key, value, req);
         assert(req->nlbas() == bid.get_nblks());
+        return true;
+    }
+
+    auto send_io(MappingKey& key, MappingValue& value, volume_req_ptr& req) {
         mapping_op_cntx cntx;
         cntx.op = UPDATE_VAL_AND_FREE_BLKS;
         cntx.vreq = req.get();
         BtreeQueryCursor cur;
-        m_map->put(cntx, key, value, nullptr, cur);
-
-        return true;
+        auto hs_cp = m_indx_mgr->cp_io_enter();
+        auto cp_id = m_indx_mgr->get_btree_cp(hs_cp);
+        auto ret = m_map->put(cntx, key, value, cp_id, cur);
+        m_indx_mgr->cp_io_exit(hs_cp);
+        HS_ASSERT_CMP(RELEASE, ret, ==, btree_status_t::success);
+        return ret;
     }
 
 private:
-    std::unique_ptr< mapping > m_map;
+    std::shared_ptr< Volume > m_vol;
+    mapping* m_map;
     boost::uuids::uuid uuid;
+    std::shared_ptr< SnapMgr > m_indx_mgr;
 };
 
 } // namespace loadgen

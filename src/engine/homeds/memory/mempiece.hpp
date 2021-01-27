@@ -138,8 +138,10 @@ private:
 public:
     MemVector(uint8_t* ptr, uint32_t size, uint32_t offset) : ObjLifeCounter(), m_refcnt(0) {
         m_list.reserve(1);
-        MemPiece m(ptr, size, offset);
-        m_list.push_back(m);
+        if (ptr) {
+            MemPiece m(ptr, size, offset);
+            m_list.push_back(m);
+        }
         assert(size || (ptr == nullptr));
     }
 
