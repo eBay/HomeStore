@@ -228,7 +228,6 @@ private:
     std::unique_ptr< sisl::Bitset > m_bm;       // Bitset representing entire blks in this allocator
     std::unique_ptr< FreeBlkCache > m_fb_cache; // Free Blks cache
 
-    chunk_num_t m_chunk_id;       // Chunk ID this allocator is associated to (this will be filled in BlkId generated)
     VarsizeBlkAllocConfig m_cfg;  // Config for Varsize
     std::thread m_thread_id;      // Sweeper thread
     std::mutex m_mutex;           // Mutex to protect regionstate & cb

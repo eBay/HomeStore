@@ -168,8 +168,9 @@ public:
  */
 
 class BlkAllocator {
+
 public:
-    BlkAllocator(const BlkAllocConfig& cfg, const uint32_t id = 0) : m_cfg{cfg} {
+    BlkAllocator(const BlkAllocConfig& cfg, const uint32_t id = 0) : m_cfg{cfg}, m_chunk_id{(chunk_num_t)id} {
         m_blk_portions = std::make_unique< BlkAllocPortion[] >(cfg.get_total_portions());
         m_auto_recovery = cfg.get_auto_recovery();
         m_disk_bm = std::make_unique< sisl::Bitset >(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
@@ -245,6 +246,7 @@ public:
                                 "Expected disk blks to reset");
             }
             get_disk_bm()->set_bits(in_bid.get_blk_num(), in_bid.get_nblks());
+            LOGDEBUGMOD(transient, "blks allocated {} chunk number {}", in_bid.to_string(), m_chunk_id);
         }
         return BlkAllocStatus::SUCCESS;
     };
@@ -259,8 +261,17 @@ public:
                 /* During recovery we might try to free the entry which is already freed while replaying the journal,
                  * This assert is valid only post recovery.
                  */
-                BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks()),
-                                "Expected disk bits to set blk num {} num blks {}", b.get_blk_num(), b.get_nblks());
+                if (!get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks())) {
+                    LOGDEBUGMOD(transient, "bit not set {} nblks{} chunk number {}", b.get_blk_num(), b.get_nblks(),
+                                m_chunk_id);
+                    for (uint32_t i = 0; i < b.get_nblks(); ++i) {
+                        if (!get_disk_bm()->is_bits_set(b.get_blk_num() + i, 1)) {
+                            LOGDEBUGMOD(transient, "bit not set {}", b.get_blk_num() + i);
+                        }
+                    }
+                    BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks()),
+                                    "Expected disk bits to set blk num {} num blks {}", b.get_blk_num(), b.get_nblks());
+                }
             }
             get_disk_bm()->reset_bits(b.get_blk_num(), b.get_nblks());
         }
@@ -298,6 +309,7 @@ public:
 protected:
     BlkAllocConfig m_cfg;
     bool m_inited{false};
+    chunk_num_t m_chunk_id;
 
 private:
     std::unique_ptr< BlkAllocPortion[] > m_blk_portions;
@@ -335,7 +347,6 @@ private:
 
 private:
     folly::MPMCQueue< BlkId > m_blk_q;
-    chunk_num_t m_chunk_id;
 };
 
 struct blkalloc_cp {

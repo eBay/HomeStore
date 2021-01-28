@@ -247,6 +247,8 @@ public:
         assert(size % m_pagesz == 0);
         auto nblks = size / m_pagesz;
         hints.is_contiguous = true;
+        HS_ASSERT_CMP(DEBUG, nblks, <=, (uint32_t)BlkId::max_blks_in_op(), "nblks {} more than max blks {}", nblks,
+                      (uint32_t)BlkId::max_blks_in_op());
         return (m_vdev.alloc_contiguous_blk(nblks, hints, out_blkid));
     }
 
@@ -255,7 +257,18 @@ public:
         // Allocate a block from the device manager
         assert(size % m_pagesz == 0);
         auto nblks = size / m_pagesz;
-        return (m_vdev.alloc_blk(nblks, hints, out_blkid));
+        if (nblks <= BlkId::max_blks_in_op()) {
+            return (m_vdev.alloc_blk(nblks, hints, out_blkid));
+        } else {
+            while (nblks != 0) {
+                std::vector< BlkId > result_blkid;
+                auto ret = m_vdev.alloc_blk(std::min((uint32_t)BlkId::max_blks_in_op(), nblks), hints, result_blkid);
+                out_blkid.insert(out_blkid.end(), result_blkid.begin(), result_blkid.end());
+                if (ret != BlkAllocStatus::SUCCESS) { return ret; }
+                nblks -= std::min((uint32_t)BlkId::max_blks_in_op(), nblks);
+            }
+        }
+        return BlkAllocStatus::SUCCESS;
     }
 
     /* Allocate a new block and add entry to the cache. This method allows the caller to create its own

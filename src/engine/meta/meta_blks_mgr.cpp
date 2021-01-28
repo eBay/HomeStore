@@ -730,6 +730,14 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(const uint64_t size, std::vector
             HS_LOG(ERROR, metablk, "failing as it is out of disk space!");
             return std::errc::no_space_on_device;
         }
+#ifndef NDEBUG
+        uint64_t debug_size = 0;
+        for (uint32_t i = 0; i < bid.size(); ++i) {
+            debug_size += bid[i].data_size(get_page_size());
+        }
+        HS_DEBUG_ASSERT_EQ(debug_size, size);
+#endif
+
         HS_DEBUG_ASSERT_EQ(ret, BlkAllocStatus::SUCCESS);
     } catch (const std::exception& e) {
         HS_ASSERT(RELEASE, 0, "{}", e.what());

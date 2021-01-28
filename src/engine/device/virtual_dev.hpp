@@ -888,7 +888,7 @@ public:
         return primary_chunk->get_blk_allocator()->alloc_on_disk(blkid);
     }
 
-    BlkAllocStatus alloc_contiguous_blk(const uint8_t nblks, const blk_alloc_hints& hints, BlkId* const out_blkid) {
+    BlkAllocStatus alloc_contiguous_blk(const blk_count_t nblks, const blk_alloc_hints& hints, BlkId* const out_blkid) {
         BlkAllocStatus ret;
         try {
             std::vector< BlkId > blkid;
@@ -908,7 +908,7 @@ public:
         return ret;
     }
 
-    BlkAllocStatus alloc_blk(const uint8_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
+    BlkAllocStatus alloc_blk(const blk_count_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
         try {
             uint32_t dev_ind{0};
             uint32_t chunk_num, start_chunk_num;

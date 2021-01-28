@@ -28,7 +28,6 @@ static thread_local std::default_random_engine g_re{g_rd()};
 VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const bool init,
                                          const chunk_num_t chunk_id) :
         BlkAllocator{cfg, chunk_id},
-        m_chunk_id{chunk_id},
         m_cfg{cfg},
         m_state{BlkAllocatorState::WAITING},
         m_rand_portion_num_generator{0, static_cast< blk_count_t >(cfg.get_total_portions() - 1)},
