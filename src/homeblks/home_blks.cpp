@@ -69,7 +69,7 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
 #ifndef NDEBUG
             LOGINFO("HomeBlks DEBUG version: {}", HomeBlks::version);
 #else
-                LOGINFO("HomeBlks RELEASE version: {}", HomeBlks::version);
+            LOGINFO("HomeBlks RELEASE version: {}", HomeBlks::version);
 #endif
             auto instance = boost::static_pointer_cast< homestore::HomeStoreBase >(HomeBlksSafePtr(new HomeBlks(cfg)));
             set_instance(boost::static_pointer_cast< homestore::HomeStoreBase >(instance));

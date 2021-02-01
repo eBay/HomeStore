@@ -32,6 +32,7 @@
 #include "blk.h"
 
 SDS_LOGGING_DECL(blkalloc)
+SDS_LOGGING_DECL(transient)
 
 namespace homestore {
 #define BLKALLOC_LOG(level, msg, ...) HS_SUBMOD_LOG(level, blkalloc, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)

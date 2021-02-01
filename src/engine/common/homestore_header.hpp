@@ -17,8 +17,6 @@ struct blob {
 };
 } // namespace homeds
 
-SDS_LOGGING_DECL(transient)
-
 namespace homestore {
 
 ENUM(io_flag, uint8_t,
