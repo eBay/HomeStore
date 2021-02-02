@@ -245,7 +245,7 @@ public:
     void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
     void meta_blk_recovery_comp(bool success);
 
-    void verify_vols();
+    bool verify_vols();
 
     HomeBlksStatusMgr* get_status_mgr();
 

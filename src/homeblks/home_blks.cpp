@@ -412,6 +412,10 @@ void HomeBlks::init_done(std::error_condition err) {
     HS_RELEASE_ASSERT_EQ(system_cap.used_index_size, used_size.used_index_size,
                          "index used size mismatch. used size {}", used_size.to_string());
 
+    /* verifying volumes */
+    LOGINFO("verifying vols");
+    /* TODO: we should remove this check later in release. It will increase the recovery time */
+    HS_RELEASE_ASSERT((verify_vols()), "vol verify failed");
     LOGINFO("init done");
     m_cfg.init_done_cb(err, m_out_params);
     m_init_finished = true;
@@ -446,13 +450,16 @@ bool HomeBlks::verify_tree(const VolumePtr& vol) {
     return vol->verify_tree();
 }
 
-void HomeBlks::verify_vols() {
+bool HomeBlks::verify_vols() {
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
     auto it = m_volume_map.begin();
+    bool ret = true;
     while (it != m_volume_map.end()) {
-        verify_tree(it->second);
+        ret = verify_tree(it->second);
+        if (!ret) { return ret; }
         ++it;
     }
+    return ret;
 }
 
 void HomeBlks::print_node(const VolumePtr& vol, uint64_t blkid, bool chksum) {
