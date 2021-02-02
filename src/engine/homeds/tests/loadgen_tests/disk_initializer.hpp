@@ -14,7 +14,7 @@
 namespace homeds {
 namespace loadgen {
 
-static constexpr uint64_t DISK_MAX_SIZE{7 * Gi};
+static constexpr uint64_t DISK_MAX_SIZE{14 * Gi};
 
 typedef std::function< void(std::error_condition err, const homestore::out_params& params) > init_done_callback;
 

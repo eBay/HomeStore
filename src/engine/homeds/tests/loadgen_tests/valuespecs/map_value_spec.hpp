@@ -117,8 +117,9 @@ public:
         auto seqid = ve.get_seqid();
         ve.set_seqid(INVALID_SEQ_ID);
         sisl::blob b = get_blob();
+        auto hash = util::Hash64((const char*)b.bytes, (size_t)b.size);
         ve.set_seqid(seqid);
-        return util::Hash64((const char*)b.bytes, (size_t)b.size);
+        return hash;
     }
 };
 } // namespace loadgen

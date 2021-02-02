@@ -351,8 +351,8 @@ private:
         std::vector< std::pair< K, V > > kvs;
 
         if (valid_query) {
-            kis =
-                m_key_registry.get_contiguous_keys(pattern, exclusive_access, false /* is_mutate */, num_keys_in_range);
+            kis = m_key_registry.get_consecutive_keys(pattern, exclusive_access, false /* is_mutate */,
+                                                      num_keys_in_range);
         } else {
             kis.emplace_back(m_key_registry.generate_invalid_key());
         }

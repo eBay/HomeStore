@@ -7,6 +7,10 @@
 #include <engine/homeds/btree/btree.hpp>
 
 using namespace homestore;
+namespace homestore {
+bool vol_test_run = false;
+}
+
 SDS_LOGGING_DECL(indx_mgr)
 /* Journal entry
  * --------------------------------------------------------------------

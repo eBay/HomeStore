@@ -37,7 +37,9 @@ using namespace flip;
 #endif
 
 SDS_LOGGING_DECL(btree_structures, btree_nodes, btree_generics)
-
+namespace homestore {
+extern bool vol_test_run;
+}
 namespace homeds {
 namespace btree {
 
@@ -1415,19 +1417,29 @@ private:
             auto end_key_ptr = const_cast< BtreeKey* >(subrange.get_end_key());
             bur->get_input_range().set_cursor_key(
                 end_key_ptr, ([](BtreeKey* end_key) { return std::move(std::make_unique< K >(*((K*)end_key))); }));
+            if (homestore::vol_test_run) {
+                // sorted check
+                for (auto i = 1u; i < my_node->get_total_entries(); i++) {
+                    K curKey, prevKey;
+                    my_node->get_nth_key(i - 1, &prevKey, false);
+                    my_node->get_nth_key(i, &curKey, false);
+                    if (prevKey.compare(&curKey) < 0) {
+                        LOGINFO("my_node {}", my_node->to_string());
+                        for (uint32_t i = 0; i < match.size(); ++i) {
+                            LOGINFO("match key {} value {}", match[i].first.to_string(), match[i].second.to_string());
+                        }
+                        for (uint32_t i = 0; i < replace_kv.size(); ++i) {
+                            LOGINFO("replace key {} value {}", replace_kv[i].first.to_string(),
+                                    replace_kv[i].second.to_string());
+                        }
+                    }
+                    BT_RELEASE_ASSERT_CMP(prevKey.compare(&curKey), <, 0, my_node);
+                }
+            }
         } else {
             if (!my_node->put(k, v, put_type, existing_val)) { ret = btree_status_t::put_failed; }
         }
 
-#ifndef NDEBUG
-        // sorted check
-        for (auto i = 1u; i < my_node->get_total_entries(); i++) {
-            K curKey, prevKey;
-            my_node->get_nth_key(i - 1, &prevKey, false);
-            my_node->get_nth_key(i, &curKey, false);
-            BT_DEBUG_ASSERT_CMP(prevKey.compare(&curKey), <=, 0, my_node);
-        }
-#endif
         write_node(my_node, bcp);
         COUNTER_INCREMENT(m_metrics, btree_obj_count, 1);
         return ret;

@@ -60,6 +60,9 @@ RCU_REGISTER_INIT;
 
 #define VOL_PREFIX "test_files/vol"
 
+namespace homestore {
+extern bool vol_test_run;
+}
 constexpr uint64_t Ki{1024};
 constexpr uint64_t Mi{Ki * Ki};
 constexpr uint64_t Gi{Ki * Mi};
@@ -1987,6 +1990,7 @@ int main(int argc, char* argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     sds_logging::SetLogger("test_volume");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
+    homestore::vol_test_run = true;
 
     TestCfg& _gcfg = const_cast< TestCfg& >(gcfg);
     _gcfg.run_time = SDS_OPTIONS["run_time"].as< uint32_t >();

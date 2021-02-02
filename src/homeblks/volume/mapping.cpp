@@ -427,10 +427,11 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
                 }
             } else if (param->m_ctx->op == FREE_ALL_USER_BLKID) {
                 /* free all the blkids */
-                HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name,
-                              "Free Blk: vol_page: {}, data_page: {}, n_lba: {} start lba {} end lba {} lba offset {}",
-                              m_vol_page_size, HomeBlks::instance()->get_data_pagesz(), ve.get_nlba(), overlap.start(),
-                              overlap.end(), lba_offset);
+                LOGDEBUGMOD(transient,
+                            "vol name {} Free Blk: vol_page: {}, data_page: {}, n_lba: {} start lba {} end lba {} lba "
+                            "offset {} ve {}",
+                            m_unique_name, m_vol_page_size, HomeBlks::instance()->get_data_pagesz(), ve.get_nlba(),
+                            overlap.start(), overlap.end(), lba_offset, ve.to_string());
                 uint64_t nblks = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
                 if (ve.get_blkId().is_valid()) {
                     Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nblks);
@@ -446,14 +447,11 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
             HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "size : {}", size);
             if (size > 0) {
                 param->m_ctx->free_blk_size += size;
-                for (uint32_t i = 0; i < fbe_list.size(); i++) {
-                    HS_SUBMOD_LOG(INFO, volume, , "vol", m_unique_name, "blkid : {}",
-                                  fbe_list[i].get_free_blkid().to_string());
-                }
                 ValueEntry ve; // create a default value
                 /* TODO : we should only add last key */
                 result_kv.emplace_back(make_pair(overlap, MappingValue(ve)));
             } else {
+                LOGINFO("failing because of resource_full error");
                 return btree_status_t::resource_full;
             }
         }
