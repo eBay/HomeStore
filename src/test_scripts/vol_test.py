@@ -38,11 +38,29 @@ def recovery_crash():
         cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file=0 --abort=1"
         subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     except:
-        print("test aborted")
+        print("recovery_crash test aborted")
     
     cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 --remove_file=1 --delete_volume=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery crash passed")
+
+def meta_random_abort():
+    flip_list = ["write_sb_abort", "write_with_ovf_abort", "remove_sb_abort", "update_sb_abort", "abort_before_recover_cb_sent", "abort_after_recover_cb_sent"]
+    for flip in flip_list: 
+        print("testing flip point: " + flip);
+        try:
+            cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --max_volume=5 --enable_crash_handler=1 --remove_file=0 --mod_list=meta " + "--" + flip + "=1"
+            print(dirpath + "test_volume " + cmd_opts + addln_opts);
+            subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+        except:
+            print("meta_random_abort aborted: " + flip)
+    
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --max_volume=5 --enable_crash_handler=1 --remove_file=1 --delete_volume=1"
+        subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+        print("meta_random_abort passed: " + flip)
+
+    print("All meta_random_abort passed")
+
 
 ## @test normal
 #  @brief Normal IO test
@@ -366,3 +384,6 @@ if test_suits == "force_reinit":
 
 if test_suits == "hs_svc_tool":
     hs_svc_tool()
+
+if test_suits == "meta_random_abort":
+    meta_random_abort()

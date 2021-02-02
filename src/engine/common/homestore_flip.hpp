@@ -30,6 +30,18 @@ public:
     HomeStoreFlip() : flip::Flip() {
         override_timer((std::unique_ptr< flip::FlipTimerBase >(std::make_unique< homestore::FlipTimerIOMgr >())));
     }
+
+    /**
+     * @brief : test flip and abort without core dump
+     *
+     * @param flip_name :
+     */
+    void test_and_abort(const std::string& flip_name) {
+        if (test_flip(flip_name.c_str())) {
+            // abort without generating core dump
+            raise(SIGKILL);
+        }
+    }
 };
 
 #define homestore_flip HomeStoreFlip::instance()

@@ -3,6 +3,7 @@
 #include "api/meta_interface.hpp"
 #include "blkstore/blkstore.hpp"
 #include "engine/blkalloc/blk_allocator.h"
+#include "engine/common/homestore_flip.hpp"
 #include "homestore.hpp"
 #include "meta_sb.hpp"
 
@@ -520,6 +521,10 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_dat
 
         HS_DEBUG_ASSERT(obid.is_valid(), "Expected valid blkid");
         mblk->hdr.h.ovf_bid = obid;
+
+#ifdef _PRERELEASE
+        homestore_flip->test_and_abort("write_with_ovf_abort");
+#endif
     }
 
     // for both in-band and ovf buffer, we store crc in meta blk header;
@@ -529,6 +534,10 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_dat
 
     // write meta blk;
     write_meta_blk_to_disk(mblk);
+
+#ifdef _PRERELEASE
+    homestore_flip->test_and_abort("write_sb_abort");
+#endif
 }
 
 //
@@ -558,6 +567,10 @@ void MetaBlkMgr::update_sub_sb(const void* context_data, const uint64_t sz, void
 
     // write this meta blk to disk
     write_meta_blk_internal(mblk, context_data, sz);
+
+#ifdef _PRERELEASE
+    homestore_flip->test_and_abort("update_sb_abort");
+#endif
 
     // free the overflow bid if it is there
     free_ovf_blk_chain(ovf_bid_to_free);
@@ -643,6 +656,10 @@ std::error_condition MetaBlkMgr::remove_sub_sb(const void* cookie) {
 
     // free the on-disk meta blk
     free_meta_blk(rm_blk);
+
+#ifdef _PRERELEASE
+    homestore_flip->test_and_abort("remove_sb_abort");
+#endif
 
     HS_LOG(DEBUG, metablk, "after remove, mstore used size: {}", m_sb_blk_store->get_used_size());
     return no_error;

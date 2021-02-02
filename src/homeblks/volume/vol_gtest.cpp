@@ -92,6 +92,7 @@ struct TestCfg {
     std::array< std::string, 4 > default_names = {"test_files/vol_file1", "test_files/vol_file2",
                                                   "test_files/vol_file3", "test_files/vol_file4"};
     std::vector< std::string > dev_names;
+    std::vector< std::string > mod_list;
     uint64_t max_vols = 50;
     uint64_t max_num_writes = 100000;
     uint64_t run_time = 60;
@@ -466,6 +467,7 @@ protected:
 
     static boost::uuids::uuid m_am_uuid; // simulate am system uuid
     static bool m_am_sb_received;        // used in recovery mode;
+    static bool m_am_sb_written;         // track whether am sb is written or not
 
 public:
     static thread_local uint32_t _n_completed_this_thread;
@@ -513,7 +515,8 @@ public:
 
     static void am_meta_blk_comp_cb(bool success) {
         HS_RELEASE_ASSERT_EQ(success, true);
-        if (!tcfg.init) {
+        // it is possible that abort (intentional test) can happen before am got chance to be written;
+        if (!tcfg.init && m_am_sb_written) {
             // should have received am sb callback from MetaBlkStore;
             HS_RELEASE_ASSERT_EQ(m_am_sb_received, true);
         }
@@ -614,6 +617,7 @@ public:
             void* cookie{nullptr};
             meta_blk_mgr->add_sub_sb(access_mgr_mtype, (void*)(boost::uuids::to_string(m_am_uuid).c_str()),
                                      boost::uuids::to_string(m_am_uuid).size(), cookie);
+            m_am_sb_written = true;
         }
     }
 
@@ -1028,6 +1032,7 @@ private:
 };
 
 bool VolTest::m_am_sb_received = false;
+bool VolTest::m_am_sb_written = false;
 boost::uuids::uuid VolTest::m_am_uuid;
 REGISTER_METABLK_SUBSYSTEM(vol_gtest_am, access_mgr_mtype, VolTest::am_meta_blk_found_cb, VolTest::am_meta_blk_comp_cb)
 
@@ -1891,10 +1896,11 @@ TEST_F(VolTest, btree_fix_rerun_io_test) {
     if (tcfg.remove_file) { this->remove_files(); }
 }
 
-#define MAX_MODULES 1
+// TODO: MAX_MODULES should be 1, only one module should be enabled at one time;
 std::vector< module_test* > mod_tests;
 void indx_mgr_test_main();
-std::array< std::function< void() >, MAX_MODULES > mod_init_funcs = {indx_mgr_test_main};
+void meta_mod_test_main();
+std::vector< std::function< void() > > mod_init_funcs;
 
 /************************* CLI options ***************************/
 
@@ -1933,6 +1939,8 @@ SDS_OPTION_GROUP(
      "vol_page_size"),
     (device_list, "", "device_list", "List of device paths", ::cxxopts::value< std::vector< std::string > >(),
      "path [...]"),
+    (mod_list, "", "mod_list", "List of modules to be enbaled for test",
+     ::cxxopts::value< std::vector< std::string > >(), "mod [...]"),
     (phy_page_size, "", "phy_page_size", "phy_page_size", ::cxxopts::value< uint32_t >()->default_value("4096"),
      "phy_page_size"),
     (io_flags, "", "io_flags", "io_flags", ::cxxopts::value< uint32_t >()->default_value("1"), "0 or 1"),
@@ -1960,7 +1968,7 @@ SDS_OPTION_GROUP(
     (create_del_ops_interval, "", "create_del_ops_interval", "create_del_ops_interval",
      ::cxxopts::value< uint32_t >()->default_value("10"), "interval between create del in seconds"))
 
-#define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr
+#define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr, test_meta_mod
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
@@ -2019,6 +2027,20 @@ int main(int argc, char* argv[]) {
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
+    }
+
+    if (SDS_OPTIONS.count("mod_list")) {
+        _gcfg.mod_list = SDS_OPTIONS["mod_list"].as< std::vector< std::string > >();
+        for (size_t i = 0; i < _gcfg.mod_list.size(); ++i) {
+            if (_gcfg.mod_list[i] == "meta") {
+                mod_init_funcs.push_back(meta_mod_test_main);
+            } else if (_gcfg.mod_list[i] == "index") {
+                mod_init_funcs.push_back(indx_mgr_test_main);
+            } else {
+                LOGERROR("Unsported mod_list: {}, supported list: [ indx | meta ]", _gcfg.mod_list[i]);
+                return 1;
+            }
+        }
     }
 
     if (_gcfg.load_type == load_type_t::sequential) { _gcfg.verify_type = verify_type_t::null; }

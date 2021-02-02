@@ -9,9 +9,10 @@
 #include "common/homestore_config.hpp"
 #include "indx_mgr.hpp"
 
-
 using namespace homestore;
 using namespace flip;
+
+// TODO: make it under mode_test namespace
 
 struct indx_mgr_test_cfg {
 
@@ -22,10 +23,9 @@ struct indx_mgr_test_cfg {
     bool indx_del_free_blks_completed = false;
     uint32_t free_blk_cnt = 0;
 
-    bool cp_bitmap_abort = 0;         // crash while bitmap is persisting
-    bool cp_wb_flush_abort = 0;       // abort in middle of wb flush
+    bool cp_bitmap_abort = 0;            // crash while bitmap is persisting
+    bool cp_wb_flush_abort = 0;          // abort in middle of wb flush
     bool cp_logstore_truncate_abort = 0; // crash after logstore is truncated
-
 };
 
 indx_mgr_test_cfg indx_cfg;
@@ -87,7 +87,6 @@ class indx_test : public module_test {
             m_fc.inject_noreturn_flip("indx_cp_logstore_truncate_abort", {null_cond}, freq);
         }
         IndxMgr::hs_cp_resume();
-
     }
 
     /* It simulate the crash before first cp is taken on a index. It simulate 3 scenarios before crash
@@ -151,7 +150,6 @@ class indx_test : public module_test {
         m_fc.inject_noreturn_flip("indx_del_free_blks_completed", {null_cond}, freq);
     }
 
-
 protected:
     Clock::time_point m_start_time;
     Clock::time_point m_flip_start_time;
@@ -183,7 +181,6 @@ SDS_OPTION_GROUP(
     (cp_logstore_truncate_abort, "", "cp_logstore_truncate_abort", "cp_logstore_truncate_abort",
      ::cxxopts::value< bool >()->default_value("0"), ""))
 
-
 void indx_mgr_test_main() {
     indx_cfg.indx_create_first_cp_abort = SDS_OPTIONS["indx_create_first_cp_abort"].as< bool >();
     indx_cfg.indx_del_free_blks_completed = SDS_OPTIONS["indx_del_free_blks_completed"].as< bool >();
@@ -196,7 +193,6 @@ void indx_mgr_test_main() {
     indx_cfg.cp_bitmap_abort = SDS_OPTIONS["cp_bitmap_abort"].as< bool >();
     indx_cfg.cp_wb_flush_abort = SDS_OPTIONS["cp_wb_flush_abort"].as< bool >();
     indx_cfg.cp_logstore_truncate_abort = SDS_OPTIONS["cp_logstore_truncate_abort"].as< bool >();
-
 
     mod_tests.push_back(&test);
     return;
