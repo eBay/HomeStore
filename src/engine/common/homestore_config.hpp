@@ -79,6 +79,8 @@ public:
     bool force_reinit = false;
 #endif
 
+    bool start_http = true;
+
     /* optional parameters - if provided will override the startup config */
     boost::optional< iomgr::drive_attributes > drive_attr;
 
@@ -101,7 +103,7 @@ public:
 };
 
 struct hs_engine_config {
-    size_t min_io_size = 8192;  // minimum io size supported by 
+    size_t min_io_size = 8192; // minimum io size supported by
 
     uint64_t max_chunks = MAX_CHUNKS; // These 3 parameters can be ONLY changed with upgrade/revert from device manager
     uint64_t max_vdevs = MAX_VDEVS;

@@ -586,6 +586,9 @@ public:
 #ifdef _PRERELEASE
         params.force_reinit = force_reinit;
 #endif
+        if (std::getenv(HTTP_SVC_ENV_VAR_STRING.c_str())) {
+            params.start_http = false; // do not start http server;
+        }
         params.init_done_cb = bind_this(VolTest::init_done_cb, 2);
         params.vol_mounted_cb = bind_this(VolTest::vol_mounted_cb, 2);
         params.vol_state_change_cb = bind_this(VolTest::vol_state_change_cb, 3);

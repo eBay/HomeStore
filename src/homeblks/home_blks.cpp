@@ -559,9 +559,11 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     }
 
     // Waiting for http server thread to join
-    m_hb_http_server->stop();
-    m_hb_http_server.reset();
-    LOGINFO("http server stopped");
+    if (m_cfg.start_http) {
+        m_hb_http_server->stop();
+        m_hb_http_server.reset();
+        LOGINFO("http server stopped");
+    }
 
     /* XXX: can we move it to indx mgr */
     home_log_store_mgr.stop();
@@ -741,8 +743,10 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
     ++sb->boot_cnt;
 
-    m_hb_http_server = std::make_unique< HomeBlksHttpServer >(this);
-    m_hb_http_server->start();
+    if (m_cfg.start_http) {
+        m_hb_http_server = std::make_unique< HomeBlksHttpServer >(this);
+        m_hb_http_server->start();
+    }
 
     /* phase 1 updates a btree superblock required for btree recovery during journal replay */
     vol_recovery_start_phase1();
