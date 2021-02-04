@@ -300,7 +300,7 @@ public:
         btree_sb.btree_size = bcp->btree_size.load() + m_last_cp_sb.btree_size;
         btree_sb.cp_id = bcp->cp_id;
         HS_ASSERT_CMP(DEBUG, (int64_t)m_last_cp_sb.cp_id, ==, (int64_t)bcp->cp_id - 1);
-        THIS_BT_LOG(INFO, base, , "btree cp size {}", bcp->btree_size.load());
+        // THIS_BT_LOG(INFO, base, , "btree cp size {}", bcp->btree_size.load());
         memcpy(&m_last_cp_sb, &btree_sb, sizeof(m_last_cp_sb));
     }
 
@@ -1423,7 +1423,7 @@ private:
                     K curKey, prevKey;
                     my_node->get_nth_key(i - 1, &prevKey, false);
                     my_node->get_nth_key(i, &curKey, false);
-                    if (prevKey.compare(&curKey) < 0) {
+                    if (prevKey.compare(&curKey) >= 0) {
                         LOGINFO("my_node {}", my_node->to_string());
                         for (uint32_t i = 0; i < match.size(); ++i) {
                             LOGINFO("match key {} value {}", match[i].first.to_string(), match[i].second.to_string());
