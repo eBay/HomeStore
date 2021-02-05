@@ -1,7 +1,7 @@
 include(${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
 include_directories (BEFORE ../)
 
-set(METABLK_SOURCE_FILES meta_blks_mgr.cpp mod_test_meta.cpp)
+set(METABLK_SOURCE_FILES meta_blks_mgr.cpp)
 add_library(hs_metablk OBJECT ${METABLK_SOURCE_FILES})
 
 can_build_io_tests(io_tests)

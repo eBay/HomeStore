@@ -9,29 +9,29 @@ add_library(hs_volume OBJECT ${VOLUME_SOURCE_FILES})
 # Coverage doesn't like binaries that don't run...
 is_non_coverage_build(non_coverage_build)
 if (${non_coverage_build})
-    set(BTREE_CHECKER_SOURCE_FILES btree_checker.cpp)
+    set(BTREE_CHECKER_SOURCE_FILES tool/btree_checker.cpp)
     add_executable(check_btree ${BTREE_CHECKER_SOURCE_FILES})
     target_link_libraries(check_btree homeblks ${CONAN_LIBS})
 
-    #set(PERF_TEST_VOLUME_SOURCE_FILES vol_perf_gtest.cpp)
+    #set(PERF_TEST_VOLUME_SOURCE_FILES tests/vol_perf_gtest.cpp)
     #add_executable(perf_test_volume ${PERF_TEST_VOLUME_SOURCE_FILES})
     #target_link_libraries(perf_test_volume homeblks ${CONAN_LIBS})
 endif()
 
 can_build_io_tests(build_io_tests)
 if (${build_io_tests})
-    #set(TEST_MAP_SOURCE_FILES map_gtest.cpp)
+    #set(TEST_MAP_SOURCE_FILES tests/map_gtest.cpp)
     #add_executable(test_mapping ${TEST_MAP_SOURCE_FILES})
     #target_link_libraries(test_mapping homeblks)
 
-    #set(TEST_MERGE_SOURCE_FILES vol_merge.cpp)
+    #set(TEST_MERGE_SOURCE_FILES tests/vol_merge.cpp)
     #add_executable(test_merge ${TEST_MERGE_SOURCE_FILES})
 
-    set(TEST_VOLUME_SOURCE_FILES vol_gtest.cpp)
+    set(TEST_VOLUME_SOURCE_FILES tests/vol_gtest.cpp tests/mod_test_vdev.cpp tests/mod_test_meta.cpp)
     add_executable(test_volume ${TEST_VOLUME_SOURCE_FILES})
     target_link_libraries(test_volume homeblks ${CONAN_LIBS})
 
-    set(HS_SVC_TOOL_SOURCE_FILES hs_svc_tool.cpp)
+    set(HS_SVC_TOOL_SOURCE_FILES tool/hs_svc_tool.cpp)
     add_executable(hs_svc_tool ${HS_SVC_TOOL_SOURCE_FILES})
     target_link_libraries(hs_svc_tool homeblks ${CONAN_LIBS})
     

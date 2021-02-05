@@ -8,7 +8,7 @@
 #include <sds_options/options.h>
 #include "engine/common/mod_test_iface.hpp"
 #include "engine/common/homestore_flip.hpp"
-#include "common/homestore_config.hpp"
+#include "engine/common/homestore_config.hpp"
 #include "api/meta_interface.hpp"
 
 using namespace homestore;
@@ -53,15 +53,15 @@ class mod_test_meta : public module_test {
         // checking whether volume creation finished successfuly (vs. hit abort), instead of just by checking on
         // disk files, e.g. it creates files before sending create volume to homestore which can hit flip abort;
         //
-        if (meta_cfg.write_sb_abort) { set_meta_flip("write_sb_abort", 1, 1); }
-        if (meta_cfg.write_with_ovf_abort) { set_meta_flip("write_with_ovf_abort", 1, 1); }
-        if (meta_cfg.update_sb_abort) { set_meta_flip("update_sb_abort", 1, 1); }
-        if (meta_cfg.remove_sb_abort) { set_meta_flip("remove_sb_abort", 1, 100); }
-        if (meta_cfg.abort_before_recover_cb_sent) { set_meta_flip("abort_before_recover_cb_sent", 1, 100); }
-        if (meta_cfg.abort_after_recover_cb_sent) { set_meta_flip("abort_after_recover_cb_sent", 1, 100); }
+        if (meta_cfg.write_sb_abort) { set_flip("write_sb_abort", 1, 1); }
+        if (meta_cfg.write_with_ovf_abort) { set_flip("write_with_ovf_abort", 1, 1); }
+        if (meta_cfg.update_sb_abort) { set_flip("update_sb_abort", 1, 1); }
+        if (meta_cfg.remove_sb_abort) { set_flip("remove_sb_abort", 1, 100); }
+        if (meta_cfg.abort_before_recover_cb_sent) { set_flip("abort_before_recover_cb_sent", 1, 100); }
+        if (meta_cfg.abort_after_recover_cb_sent) { set_flip("abort_after_recover_cb_sent", 1, 100); }
     }
 
-    void set_meta_flip(const std::string& flip_name, const uint32_t count, const uint32_t percent) {
+    void set_flip(const std::string& flip_name, const uint32_t count, const uint32_t percent) {
         // set flip point
         FlipCondition null_cond;
         FlipFrequency freq;

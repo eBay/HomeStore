@@ -25,6 +25,9 @@ for opt,arg in opts:
 addln_opts = ' '
 addln_opts += ' '.join(map(str, args)) 
 
+meta_flip_list = ["write_sb_abort", "write_with_ovf_abort", "remove_sb_abort", "update_sb_abort", "abort_before_recover_cb_sent", "abort_after_recover_cb_sent"]
+vdev_flip_list = ["abort_before_update_eof_cur_chunk", "abort_after_update_eof_cur_chunk", "abort_after_update_eof_next_chunk"]
+
 def recovery():
     cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file=0"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
@@ -44,23 +47,21 @@ def recovery_crash():
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery crash passed")
 
-def meta_random_abort():
-    flip_list = ["write_sb_abort", "write_with_ovf_abort", "remove_sb_abort", "update_sb_abort", "abort_before_recover_cb_sent", "abort_after_recover_cb_sent"]
+def vol_mod_test(mod_name, flip_list):
     for flip in flip_list: 
         print("testing flip point: " + flip);
         try:
-            cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --max_volume=5 --enable_crash_handler=1 --remove_file=0 --mod_list=meta " + "--" + flip + "=1"
+            cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --max_volume=5 --enable_crash_handler=1 --remove_file=0 --mod_list=" + mod_name + " " + "--" + flip + "=1"
             print(dirpath + "test_volume " + cmd_opts + addln_opts);
             subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
         except:
-            print("meta_random_abort aborted: " + flip)
+            print("vol_mod_test aborted: " + flip)
     
         cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --max_volume=5 --enable_crash_handler=1 --remove_file=1 --delete_volume=1"
         subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
-        print("meta_random_abort passed: " + flip)
+        print("vol_mod_test passed: " + flip)
 
-    print("All meta_random_abort passed")
-
+    print("All vol_mod_test passed with mod_name: " + mod_name)
 
 ## @test normal
 #  @brief Normal IO test
@@ -270,6 +271,12 @@ def nightly():
     meta_blk_store_nightly()
     sleep(5)
 
+    vol_mod_test("meta", meta_flip_list)
+    sleep(5)
+
+    vol_mod_test("vdev", vdev_flip_list)
+    sleep(5)
+
     # normal IO test
     #normal_flip()
     #sleep(5)
@@ -385,5 +392,8 @@ if test_suits == "force_reinit":
 if test_suits == "hs_svc_tool":
     hs_svc_tool()
 
-if test_suits == "meta_random_abort":
-    meta_random_abort()
+if test_suits == "meta_mod_abort":
+    vol_mod_test("meta", meta_flip_list)
+
+if test_suits == "vdev_mod_abort":
+    vol_mod_test("vdev", vdev_flip_list)

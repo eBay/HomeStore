@@ -1899,10 +1899,11 @@ TEST_F(VolTest, btree_fix_rerun_io_test) {
     if (tcfg.remove_file) { this->remove_files(); }
 }
 
-// TODO: MAX_MODULES should be 1, only one module should be enabled at one time;
+// Only one module should be enabled now, though the module-framework itself support multiple modules.
 std::vector< module_test* > mod_tests;
 void indx_mgr_test_main();
 void meta_mod_test_main();
+void vdev_mod_test_main();
 std::vector< std::function< void() > > mod_init_funcs;
 
 /************************* CLI options ***************************/
@@ -1971,7 +1972,7 @@ SDS_OPTION_GROUP(
     (create_del_ops_interval, "", "create_del_ops_interval", "create_del_ops_interval",
      ::cxxopts::value< uint32_t >()->default_value("10"), "interval between create del in seconds"))
 
-#define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr, test_meta_mod
+#define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr, test_meta_mod, test_vdev_mod
 
 SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
@@ -2034,17 +2035,24 @@ int main(int argc, char* argv[]) {
     }
 
     if (SDS_OPTIONS.count("mod_list")) {
+        // currently we should only have use-case for one module enabled concurrently,
+        // but this framework allows user to enable multiple;
         _gcfg.mod_list = SDS_OPTIONS["mod_list"].as< std::vector< std::string > >();
         for (size_t i = 0; i < _gcfg.mod_list.size(); ++i) {
             if (_gcfg.mod_list[i] == "meta") {
                 mod_init_funcs.push_back(meta_mod_test_main);
             } else if (_gcfg.mod_list[i] == "index") {
                 mod_init_funcs.push_back(indx_mgr_test_main);
+            } else if (_gcfg.mod_list[i] == "vdev") {
+                mod_init_funcs.push_back(vdev_mod_test_main);
             } else {
-                LOGERROR("Unsported mod_list: {}, supported list: [ indx | meta ]", _gcfg.mod_list[i]);
+                LOGERROR("Unsported mod_list: {}, supported list: [ indx | meta | vdev ]", _gcfg.mod_list[i]);
                 return 1;
             }
         }
+
+        // log a warning messaeg if more than one module enabled is really what user wants.
+        if (mod_init_funcs.size() > 1) { LOGWARN("User want more than one module enabled for testing!"); }
     }
 
     if (_gcfg.load_type == load_type_t::sequential) { _gcfg.verify_type = verify_type_t::null; }

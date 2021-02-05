@@ -522,6 +522,10 @@ public:
             return INVALID_OFFSET;
         }
 
+#ifdef _PRERELEASE
+        homestore_flip->test_and_abort("abort_before_update_eof_cur_chunk");
+#endif
+
         off_t ds_off = data_start_offset();
         off_t end_offset = get_tail_offset();
         off_t offset_in_chunk = 0;
@@ -547,6 +551,9 @@ public:
             auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
             m_mgr->update_end_of_chunk(chunk, offset_in_chunk);
 
+#ifdef _PRERELEASE
+            homestore_flip->test_and_abort("abort_after_update_eof_cur_chunk");
+#endif
             // get next chunk handle
             auto next_chunk = get_next_chunk(dev_id, chunk_id);
             if (next_chunk != chunk) {
@@ -569,6 +576,9 @@ public:
 
         high_watermark_check();
 
+#ifdef _PRERELEASE
+        homestore_flip->test_and_abort("abort_after_update_eof_next_chunk");
+#endif
         // assert that returnning logical offset is in good range;
         HS_ASSERT_CMP(DEBUG, (uint64_t)offset, <=, get_size());
         return offset;

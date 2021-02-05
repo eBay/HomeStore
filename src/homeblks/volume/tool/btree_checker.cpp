@@ -24,7 +24,7 @@
 #include <utility/thread_buffer.hpp>
 
 #include "api/vol_interface.hpp"
-#include "volume.hpp"
+#include "homeblks/volume/volume.hpp"
 
 using namespace homestore;
 

@@ -1,13 +1,15 @@
+#include <random>
+#include <mutex>
+#include <memory>
+#include <cstdint>
 #include <sys/timeb.h>
-
 #include <fds/utils.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include "engine/common/mod_test_iface.hpp"
 #include "engine/common/homestore_flip.hpp"
-#include <random>
-#include "common/homestore_config.hpp"
-#include "indx_mgr.hpp"
+#include "engine/common/homestore_config.hpp"
+#include "engine/index/indx_mgr.hpp"
 
 using namespace homestore;
 using namespace flip;
