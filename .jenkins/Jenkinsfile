@@ -163,7 +163,7 @@ pipeline {
         stage("Downstream Build") {
             when { allOf {
                expression { (env.BRANCH_NAME == "${MASTER_BRANCH}") }
-               expression { "${upstream_triggered}" == "" }
+               expression { (!"${upstream_triggered}") || ("${upstream_triggered}" == "") }
             } }
         
             stages {
