@@ -4,7 +4,8 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "2.2.20"
+
+    version = "2.2.21"
 
     revision_mode = "scm"
 
@@ -25,7 +26,7 @@ class HomestoreConan(ConanFile):
                         'fPIC=True',
                         'sanitize=True',
                         'malloc_impl=libc',
-                        'testing=epoll_mode',
+                        'testing=spdk_mode',
                         )
 
     build_requires = (
