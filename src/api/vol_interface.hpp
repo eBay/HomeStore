@@ -56,9 +56,7 @@ struct buf_info {
 
     buf_info(uint64_t sz, int off, boost::intrusive_ptr< BlkBuffer >& bbuf) : size(sz), offset(off), buf(bbuf) {}
     buf_info(const uint64_t sz, const int off, boost::intrusive_ptr< BlkBuffer >&& bbuf) :
-            size{sz},
-            offset{off},
-            buf{std::move(bbuf)} {}
+            size{sz}, offset{off}, buf{std::move(bbuf)} {}
 };
 
 struct _counter_generator {
@@ -195,7 +193,7 @@ public:
     std::string to_string() const {
         std::ostringstream oss;
         oss << "min_virtual_page_size=" << min_virtual_page_size << ",app_mem_size=" << app_mem_size
-            << ",dev_type=" << enum_name(device_type) << ",open_flags =" << open_flags
+            << ",dev_type=" << enum_name(device_type) << ",open_flags =" << open_flags << ", start_http=" << start_http
             << ",number of devices =" << devices.size();
         oss << "device names = ";
         for (size_t i{0}; i < devices.size(); ++i) {

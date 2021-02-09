@@ -570,6 +570,8 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
         m_hb_http_server->stop();
         m_hb_http_server.reset();
         LOGINFO("http server stopped");
+    } else {
+        LOGINFO("Skip stopping http server since it was not started before.");
     }
 
     /* XXX: can we move it to indx mgr */
@@ -753,6 +755,8 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     if (m_cfg.start_http) {
         m_hb_http_server = std::make_unique< HomeBlksHttpServer >(this);
         m_hb_http_server->start();
+    } else {
+        LOGINFO("Http server is not started by user! start_http = {}", m_cfg.start_http);
     }
 
     /* phase 1 updates a btree superblock required for btree recovery during journal replay */
