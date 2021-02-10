@@ -173,12 +173,12 @@ void Volume::destroy(indxmgr_stop_cb cb) {
 
     vol_ref_cnt.increment(1);
     auto prev_state = set_state(vol_state::DESTROYING);
-    if (prev_state == vol_state::DESTROYING) {
+    if (!m_hb->is_recovery_mode() && prev_state == vol_state::DESTROYING) {
         shutdown_if_needed();
         return;
     }
-
     m_destroy_done_cb = cb;
+
     if (vol_ref_cnt.decrement_testz(1)) { destroy_internal(); }
 }
 

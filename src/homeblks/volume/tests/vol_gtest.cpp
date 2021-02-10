@@ -609,10 +609,10 @@ public:
         boost::uuids::string_generator gen;
         m_am_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
 
-        VolInterface::init(params);
         for (uint32_t i = 0; i < mod_tests.size(); ++i) {
             mod_tests[i]->try_init_iteration();
         }
+        VolInterface::init(params);
 
         if (wait_for_init_done) { wait_homestore_init_done(); }
 
@@ -2046,7 +2046,7 @@ int main(int argc, char* argv[]) {
             } else if (_gcfg.mod_list[i] == "vdev") {
                 mod_init_funcs.push_back(vdev_mod_test_main);
             } else {
-                LOGERROR("Unsported mod_list: {}, supported list: [ indx | meta | vdev ]", _gcfg.mod_list[i]);
+                LOGERROR("Unsported mod_list: {}, supported list: [ index | meta | vdev ]", _gcfg.mod_list[i]);
                 return 1;
             }
         }

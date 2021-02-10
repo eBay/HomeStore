@@ -224,6 +224,7 @@ public:
         return (uint16_t)sb->boot_cnt;
     }
 
+    bool is_recovery_mode() { return !m_rdy; }
     bool is_shutdown() const { return (m_shutdown_start_time.load(std::memory_order_acquire) != 0); }
 
     void init_done(std::error_condition err);
@@ -275,6 +276,7 @@ private:
     void homeblks_sb_write();
     homeblks_sb* superblock_init();
 
+    std::error_condition remove_volume_internal(const boost::uuids::uuid& uuid, bool force);
     void vol_mounted(const VolumePtr& vol, vol_state state);
     void vol_state_change(const VolumePtr& vol, vol_state old_state, vol_state new_state);
     void scan_volumes();
@@ -291,6 +293,7 @@ private:
     void migrate_cp_sb();
     void vol_recovery_start_phase1();
     void vol_recovery_start_phase2();
+    void trigger_cp_init(uint32_t vol_mount_cnt);
 
 private:
     init_params m_cfg;

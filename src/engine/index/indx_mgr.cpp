@@ -722,9 +722,10 @@ void IndxMgr::set_indx_cp_state(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp) {
 
 #ifdef _PRERELEASE
     if (cur_icp == m_first_icp) {
-        if (homestore_flip->test_flip("vol_create_suspend_cp")) {
+        if (homestore_flip->test_flip("indx_create_suspend_cp")) {
             LOGINFO("suspending cp because of flip");
             m_active_cp_suspend = true;
+            indx_test_status::indx_create_suspend_cp_test = true;
         }
     }
 #endif
@@ -1560,3 +1561,4 @@ std::atomic< int64_t > ResourceMgr::m_hs_fb_cnt;
 std::atomic< int64_t > ResourceMgr::m_hs_fb_size;
 std::atomic< int64_t > ResourceMgr::m_memory_used_in_recovery;
 uint64_t ResourceMgr::m_total_cap;
+bool indx_test_status::indx_create_suspend_cp_test = false;

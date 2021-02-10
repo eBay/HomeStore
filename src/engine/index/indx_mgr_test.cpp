@@ -31,15 +31,14 @@ struct indx_mgr_test_cfg {
 };
 
 indx_mgr_test_cfg indx_cfg;
-const uint64_t run_time_sec = 10;
+const uint64_t run_time_sec = 300;
 const uint64_t abort_time_sec = 10;
+
+enum flip_state { FLIP_NOT_SET = 0, FLIP_SET = 1, SYSTEM_PANIC = 2 };
 
 class indx_test : public module_test {
     indx_test() : m_fc(HomeStoreFlip::instance()) {}
-    virtual void run_start() override {
-        // set start time
-        m_start_time = Clock::now();
-    }
+    virtual void run_start() override {}
 
     bool is_cp_abort_test() {
         if (indx_cfg.cp_bitmap_abort || indx_cfg.cp_wb_flush_abort || indx_cfg.cp_logstore_truncate_abort) {
@@ -53,6 +52,7 @@ class indx_test : public module_test {
         if (is_cp_abort_test()) { indx_cp_abort_test(); }
     }
     virtual void try_run_one_iteration() override {
+        static std::atomic< int > cnt = 0;
         std::unique_lock< std::mutex > lk{m_mutex};
         if (indx_cfg.indx_create_first_cp_abort) { indx_create_first_cp_abort(); }
         if (indx_cfg.indx_del_partial_free_data_blks_after_meta_write) {
@@ -63,16 +63,15 @@ class indx_test : public module_test {
         }
         if (indx_cfg.indx_del_partial_free_indx_blks) { indx_del_partial_free_indx_blks(); }
         if (indx_cfg.indx_del_free_blks_completed) { indx_del_free_blks_completed(); }
-        if (indx_cfg.free_blk_cnt) {
-            HS_SETTINGS_FACTORY().modifiable_settings(
-                [](auto& s) { s.resource_limits.free_blk_cnt = indx_cfg.free_blk_cnt; });
-            HS_SETTINGS_FACTORY().save();
-        }
 
         if (is_cp_abort_test()) { suspend_cp(); }
     }
 
-    virtual void try_init_iteration() override { std::unique_lock< std::mutex > lk{m_mutex}; }
+    virtual void try_init_iteration() override {
+        // set start time
+        m_start_time = Clock::now();
+        try_run_one_iteration();
+    }
 
     void suspend_cp() {
         if (get_elapsed_time_sec(m_start_time) > run_time_sec) { IndxMgr::hs_cp_suspend(); }
@@ -100,19 +99,28 @@ class indx_test : public module_test {
 
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine engine{rd()};
-        static thread_local std::uniform_int_distribution< uint64_t > dist{0, 10};
-        if (get_elapsed_time_sec(m_start_time) > run_time_sec && !m_flip_enabled) {
-            // set flip point
-            FlipCondition null_cond;
-            FlipFrequency freq;
-            freq.set_count(1);
-            freq.set_percent(100);
-            m_fc.inject_noreturn_flip("indx_create_suspend_cp", {null_cond}, freq);
-
-            m_flip_enabled = true;
-            m_flip_start_time = Clock::now();
-        } else if (m_flip_enabled && get_elapsed_time_sec(m_flip_start_time) > dist(engine) * abort_time_sec) {
-            raise(SIGKILL);
+        static thread_local std::uniform_int_distribution< uint64_t > dist{5, 10};
+        switch (m_flip_state) {
+        case flip_state::FLIP_NOT_SET:
+            if (get_elapsed_time_sec(m_start_time) > run_time_sec) {
+                // set flip point
+                FlipCondition null_cond;
+                FlipFrequency freq;
+                freq.set_count(1);
+                freq.set_percent(100);
+                m_fc.inject_noreturn_flip("indx_create_suspend_cp", {null_cond}, freq);
+                m_flip_state = FLIP_SET;
+            }
+            break;
+        case flip_state::FLIP_SET:
+            std::atomic_thread_fence(std::memory_order_acquire);
+            if (indx_test_status::indx_create_suspend_cp_test) {
+                m_flip_start_time = Clock::now();
+                m_flip_state = SYSTEM_PANIC;
+            }
+            break;
+        case flip_state::SYSTEM_PANIC:
+            if (get_elapsed_time_sec(m_flip_start_time) > dist(engine)) { raise(SIGKILL); }
         }
     }
 
@@ -120,7 +128,7 @@ class indx_test : public module_test {
         // set flip point
         FlipCondition null_cond;
         FlipFrequency freq;
-        freq.set_count(1);
+        freq.set_count(100);
         freq.set_percent(100);
         m_fc.inject_noreturn_flip("indx_del_partial_free_data_blks_after_meta_write", {null_cond}, freq);
     }
@@ -157,6 +165,7 @@ protected:
     Clock::time_point m_flip_start_time;
     std::mutex m_mutex;
     bool m_flip_enabled = false;
+    enum flip_state m_flip_state = flip_state::FLIP_NOT_SET;
     FlipClient m_fc;
 };
 
@@ -195,6 +204,11 @@ void indx_mgr_test_main() {
     indx_cfg.cp_bitmap_abort = SDS_OPTIONS["cp_bitmap_abort"].as< bool >();
     indx_cfg.cp_wb_flush_abort = SDS_OPTIONS["cp_wb_flush_abort"].as< bool >();
     indx_cfg.cp_logstore_truncate_abort = SDS_OPTIONS["cp_logstore_truncate_abort"].as< bool >();
+    if (indx_cfg.free_blk_cnt) {
+        HS_SETTINGS_FACTORY().modifiable_settings(
+            [](auto& s) { s.resource_limits.free_blk_cnt = indx_cfg.free_blk_cnt; });
+        HS_SETTINGS_FACTORY().save();
+    }
 
     mod_tests.push_back(&test);
     return;

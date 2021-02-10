@@ -427,11 +427,11 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
                 }
             } else if (param->m_ctx->op == FREE_ALL_USER_BLKID) {
                 /* free all the blkids */
-                LOGDEBUGMOD(transient,
-                            "vol name {} Free Blk: vol_page: {}, data_page: {}, n_lba: {} start lba {} end lba {} lba "
-                            "offset {} ve {}",
-                            m_unique_name, m_vol_page_size, HomeBlks::instance()->get_data_pagesz(), ve.get_nlba(),
-                            overlap.start(), overlap.end(), lba_offset, ve.to_string());
+                HS_LOG(DEBUG, volume,
+                       "vol name {} Free Blk: vol_page: {}, data_page: {}, n_lba: {} start lba {} end lba {} lba "
+                       "offset {} ve {}",
+                       m_unique_name, m_vol_page_size, HomeBlks::instance()->get_data_pagesz(), ve.get_nlba(),
+                       overlap.start(), overlap.end(), lba_offset, ve.to_string());
                 uint64_t nblks = (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * ve.get_nlba();
                 if (ve.get_blkId().is_valid()) {
                     Free_Blk_Entry fbe(ve.get_blkId(), ve.get_blk_offset(), nblks);

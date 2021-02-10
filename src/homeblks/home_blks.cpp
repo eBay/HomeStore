@@ -1,5 +1,4 @@
-﻿
-#include <fstream>
+﻿#include <fstream>
 #include <iterator>
 #include <iostream>
 #include <stdexcept>
@@ -625,12 +624,15 @@ void HomeBlks::do_volume_shutdown(bool force) {
 //
 
 std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
+    return (remove_volume_internal(uuid, false));
+}
+std::error_condition HomeBlks::remove_volume_internal(const boost::uuids::uuid& uuid, bool force) {
     if (HS_STATIC_CONFIG(input.is_read_only)) {
         assert(0);
         return std::make_error_condition(std::errc::device_or_resource_busy);
     }
 
-    if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
+    if ((!force && !m_rdy) || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
 
     try {
         VolumePtr cur_vol = nullptr;
@@ -776,14 +778,34 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     LOGINFO("Writing homeblks super block during init");
     homeblks_sb_write();
 
+    uint32_t vol_mnt_cnt = 0;
     /* scan all the volumes and check if it needs to be mounted */
-    for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
-        if (!m_cfg.vol_found_cb(it->second->get_uuid())) { remove_volume(it->second->get_uuid()); }
+    {
+        std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
+        for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
+            if (!m_cfg.vol_found_cb(it->second->get_uuid())) {
+                remove_volume_internal(it->second->get_uuid(), true);
+            } else {
+                ++vol_mnt_cnt;
+            }
+        }
     }
 
+    trigger_cp_init(vol_mnt_cnt);
+}
+
+void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
     // trigger CP
     LOGINFO("Triggering system CP during initialization");
-    Volume::trigger_homeblks_cp(([this](bool success) {
+    Volume::trigger_homeblks_cp(([this, vol_mnt_cnt](bool success) {
+        {
+            std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
+            if (m_volume_map.size() != vol_mnt_cnt) {
+                /* trigger another CP until all volumes are not deleted */
+                trigger_cp_init(vol_mnt_cnt);
+                return;
+            }
+        }
         if (success) {
             LOGINFO("System CP taken upon init is completed successfully");
             init_done(no_error);

@@ -45,6 +45,10 @@ struct indx_req;
 
 using read_indx_comp_cb_t = std::function< void(const indx_req_ptr& ireq, std::error_condition ret) >;
 
+struct indx_test_status {
+    static bool indx_create_suspend_cp_test;
+};
+
 /********************************* Journal ****************************************************/
 
 /* Journal entry

@@ -247,7 +247,7 @@ public:
                                 "Expected disk blks to reset");
             }
             get_disk_bm()->set_bits(in_bid.get_blk_num(), in_bid.get_nblks());
-            LOGDEBUGMOD(transient, "blks allocated {} chunk number {}", in_bid.to_string(), m_chunk_id);
+            BLKALLOC_LOG(DEBUG, "blks allocated {} chunk number {}", in_bid.to_string(), m_chunk_id);
         }
         return BlkAllocStatus::SUCCESS;
     };
@@ -263,11 +263,11 @@ public:
                  * This assert is valid only post recovery.
                  */
                 if (!get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks())) {
-                    LOGDEBUGMOD(transient, "bit not set {} nblks{} chunk number {}", b.get_blk_num(), b.get_nblks(),
-                                m_chunk_id);
+                    BLKALLOC_LOG(DEBUG, "bit not set {} nblks{} chunk number {}", b.get_blk_num(), b.get_nblks(),
+                                 m_chunk_id);
                     for (uint32_t i = 0; i < b.get_nblks(); ++i) {
                         if (!get_disk_bm()->is_bits_set(b.get_blk_num() + i, 1)) {
-                            LOGDEBUGMOD(transient, "bit not set {}", b.get_blk_num() + i);
+                            BLKALLOC_LOG(DEBUG, "bit not set {}", b.get_blk_num() + i);
                         }
                     }
                     BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks()),
@@ -362,7 +362,6 @@ struct blkalloc_cp {
         while (bid != nullptr) {
             auto chunk = HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num());
             auto ba = chunk->get_blk_allocator();
-            LOGDEBUGMOD(transient, "Freeing blk [{}]", bid->to_string());
             ba->free_on_disk(*bid);
             bid = list->next(it);
         }
