@@ -259,7 +259,14 @@ def hourly():
     recovery_nightly(2)
     sleep(5)
 
+def set_nightly_sysenv():
+    os.environ['USER_WANT_HTTP_OFF'] = '1'
+
+def unset_nightly_sysenv():
+    del os.environ['USER_WANT_HTTP_OFF']
+
 def nightly():
+    set_nightly_sysenv()
 
     normal()
     sleep(5)
@@ -302,6 +309,7 @@ def nightly():
     #vol_create_del_test()
     #sleep(5)
     print("nightly test passed")
+    unset_nightly_sysenv()
     
     #load_volume()
     #sleep(5)
