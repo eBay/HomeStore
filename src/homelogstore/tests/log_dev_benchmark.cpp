@@ -1,46 +1,57 @@
+#include <condition_variable>
+#include <cstdint>
+#include <fstream>
+#include <iostream>
+#include <mutex>
+#include <string>
+#include <vector>
+
 #include <benchmark/benchmark.h>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
+
 #include "../log_dev.hpp"
-#include <string>
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT;
-RCU_REGISTER_INIT;
+THREAD_BUFFER_INIT
+RCU_REGISTER_INIT
 
-#define ITERATIONS 100000
-#define THREADS 64
+static constexpr size_t ITERATIONS{100000};
+static constexpr size_t THREADS{64};
+
+static std::vector< logdev_key > s_log_keys;
+static uint64_t first_offset{~static_cast< uint64_t >(0)};
 
 void test_append(benchmark::State& state) {
-    uint64_t counter = 0U;
-    for (auto _ : state) { // Loops upto iteration count
-        my_request* req;
+    uint64_t counter{0};
+    for ([[maybe_unused]] auto current_state : state) { // Loops upto iteration count
+        my_request* req{nullptr};
         benchmark::DoNotOptimize(req = new my_request());
         LogDev::instance()->append();
     }
     std::cout << "Counter = " << counter << "\n";
 }
 
-static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads) {
+[[nodiscard]] static std::shared_ptr< iomgr::ioMgr > start_homestore(const uint32_t ndevices, const uint64_t dev_size, const uint32_t nthreads) {
     std::vector< dev_info > device_info;
     std::mutex start_mutex;
     std::condition_variable cv;
-    bool inited = false;
+    bool inited{false};
 
     LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
-    for (uint32_t i = 0; i < ndevices; i++) {
-        std::string fpath = "/tmp/" + std::to_string(i + 1);
-        std::ofstream ofs(fpath.c_str(), std::ios::binary | std::ios::out);
+    for (uint32_t i{0}; i < ndevices; ++i) {
+        const std::string fpath{"/tmp/" + std::to_string(i + 1)};
+        std::ofstream ofs{fpath, std::ios::binary | std::ios::out};
         ofs.seekp(dev_size - 1);
         ofs.write("", 1);
         ofs.close();
-        device_info.push_back({fpath});
+        device_info.emplace_back(fpath);
     }
 
     LOGINFO("Creating iomgr with {} threads", nthreads);
-    auto iomgr_obj = std::make_shared< iomgr::ioMgr >(2, nthreads);
+    auto iomgr_obj{std::make_shared< iomgr::ioMgr >(2, nthreads)};
 
-    uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
+    const uint64_t app_mem_size{((ndevices * dev_size) * 15) / 100};
     LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", app_mem_size);
 
     boost::uuids::string_generator gen;
@@ -54,7 +65,7 @@ static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64
         iomgr_obj->start();
         LOGINFO("HomeBlks Init completed");
         {
-            std::unique_lock< std::mutex > lk(start_mutex);
+            std::unique_lock< std::mutex > lk{start_mutex};
             inited = true;
         }
         cv.notify_all();
@@ -64,19 +75,21 @@ static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64
     params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
     VolInterface::init(params);
 
-    std::unique_lock< std::mutex > lk(start_mutex);
-    cv.wait(lk, [&] { return inited; });
+    {
+        std::unique_lock< std::mutex > lk{start_mutex};
+        cv.wait(lk, [&] { return inited; });
+    }
     return iomgr_obj;
 }
 
-static void on_append_completion(logdev_key lkey, void* ctx) {
-    _log_keys.push_back(lkey);
+static void on_append_completion(const logdev_key lkey, void* const ctx) {
+    s_log_keys.push_back(lkey);
     LOGINFO("Append completed with log_idx = {} offset = {}", lkey.idx, lkey.dev_offset);
-    if (first_offset == -1UL) { first_offset = lkey.dev_offset; }
+    if (first_offset == ~static_cast<uint64_t>(0)) { first_offset = lkey.dev_offset; }
 }
 
-static void on_log_found(logdev_key lkey, log_buffer buf) {
-    _log_keys.push_back(lkey);
+static void on_log_found(const logdev_key lkey, const log_buffer buf) {
+    s_log_keys.push_back(lkey);
     LOGINFO("Found a log with log_idx = {} offset = {}", lkey.idx, lkey.dev_offset);
 }
 

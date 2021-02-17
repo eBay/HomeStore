@@ -1,11 +1,19 @@
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
 #include <cstdint>
-#include <optional>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <set>
 #include <unordered_map>
+#include <vector>
 
 #include <fds/utils.hpp>
 #include <folly/Synchronized.h>
+
 #include "homelogstore/logstore_header.hpp"
 #include "log_dev.hpp"
 
@@ -39,14 +47,20 @@ struct logstore_req {
     log_req_comp_cb_t cb;       // Callback upon completion of write (overridden than default)
     Clock::time_point start_time;
 
+    logstore_req(const logstore_req&) = delete;
+    logstore_req& operator=(const logstore_req&) = delete;
+    logstore_req(logstore_req&&) noexcept = delete;
+    logstore_req& operator=(logstore_req&&) noexcept = delete;
+    ~logstore_req() = default;
+
     // Get the size of the read or written record
-    size_t size() const {
+    [[nodiscard]] size_t size() const {
         // TODO: Implement this method
         return 0;
     }
-    static logstore_req* make(HomeLogStore* store, logstore_seq_num_t seq_num, const sisl::io_blob& data,
-                              bool is_write_req = true) {
-        logstore_req* req = sisl::ObjectAllocator< logstore_req >::make_object();
+    [[nodiscard]] static logstore_req* make(HomeLogStore* const store, const logstore_seq_num_t seq_num, const sisl::io_blob& data,
+                              const bool is_write_req = true) {
+        logstore_req* const req{sisl::ObjectAllocator< logstore_req >::make_object()};
         req->log_store = store;
         req->seq_num = seq_num;
         req->data = data;
@@ -57,28 +71,31 @@ struct logstore_req {
         return req;
     }
 
-    static void free(logstore_req* req) {
+    static void free(logstore_req* const req) {
         if (req->is_internal_req) { sisl::ObjectAllocator< logstore_req >::deallocate(req); }
     }
+
+private:
+    logstore_req() = default;
 };
 
 struct seq_ld_key_pair {
-    logstore_seq_num_t seq_num = -1;
+    logstore_seq_num_t seq_num{-1};
     logdev_key ld_key;
 };
 
 struct truncation_info {
     // Safe log dev location upto which it is truncatable
-    logdev_key ld_key = {std::numeric_limits< logid_t >::min(), 0};
+    logdev_key ld_key{std::numeric_limits< logid_t >::min(), 0};
 
     // LSN of this log store upto which it is truncated
-    std::atomic< logstore_seq_num_t > seq_num = -1;
+    std::atomic< logstore_seq_num_t > seq_num{-1};
 
     // Is there any entry which is already store truncated but waiting for device truncation
-    bool pending_dev_truncation = false;
+    bool pending_dev_truncation{false};
 
     // Any truncation entries/barriers which are not part of this truncation
-    bool active_writes_not_part_of_truncation = false;
+    bool active_writes_not_part_of_truncation{false};
 };
 
 struct logstore_info_t {
@@ -109,11 +126,11 @@ public:
     HomeLogStoreMgr& operator=(const HomeLogStoreMgr&) = delete;
     HomeLogStoreMgr& operator=(HomeLogStoreMgr&&) noexcept = delete;
 
-    static HomeLogStoreMgr& instance();
-    static LogDev& logdev();
-    static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
+    [[nodiscard]] static HomeLogStoreMgr& instance();
+    [[nodiscard]] static LogDev& logdev();
+    static void meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
 
-    using device_truncate_cb_t = std::function< void(const logdev_key&) >;
+    typedef std::function< void(const logdev_key&) > device_truncate_cb_t;
 
     /**
      * @brief Start the entire HomeLogStore set and does recover the existing logstores. Really this is the first
@@ -121,7 +138,7 @@ public:
      *
      * @param format If set to true, will not recover, but create a fresh log store set.
      */
-    void start(bool format);
+    void start(const bool format);
 
     /**
      * @brief Stop the HomeLogStore. It resets all parameters and can be restarted with start method.
@@ -135,7 +152,7 @@ public:
      *
      * @return std::shared_ptr< HomeLogStore >
      */
-    std::shared_ptr< HomeLogStore > create_new_log_store(bool append_mode = false);
+    [[nodiscard]] std::shared_ptr< HomeLogStore > create_new_log_store(const bool append_mode = false);
 
     /**
      * @brief Open an existing log store and does a recovery. It then creates an instance of this logstore and
@@ -144,7 +161,7 @@ public:
      * @param store_id: Store ID of the log store to open
      * @return std::shared_ptr< HomeLogStore >
      */
-    void open_log_store(logstore_id_t store_id, bool append_mode, const log_store_opened_cb_t& on_open_cb);
+    void open_log_store(const logstore_id_t store_id, const bool append_mode, const log_store_opened_cb_t& on_open_cb);
 
     /**
      * @brief Close the log store instance and free-up the resources
@@ -152,7 +169,7 @@ public:
      * @param store_id: Store ID of the log store to close
      * @return true on success
      */
-    bool close_log_store(const logstore_id_t store_id) {
+    [[nodiscard]] bool close_log_store(const logstore_id_t store_id) {
         // TODO: Implement this method
         return true;
     }
@@ -163,7 +180,7 @@ public:
      *
      * @param store_id
      */
-    void remove_log_store(logstore_id_t store_id);
+    void remove_log_store(const logstore_id_t store_id);
 
     /**
      * @brief Schedule a truncate all the log stores physically on the device.
@@ -173,7 +190,7 @@ public:
      * Default to false
      * @param dry_run: If the truncate is a real one or just dry run to simulate the truncation
      */
-    void device_truncate(const device_truncate_cb_t& cb = nullptr, bool wait_till_done = false, bool dry_run = false);
+    void device_truncate(const device_truncate_cb_t& cb = nullptr, const bool wait_till_done = false, const bool dry_run = false);
 
     /**
      * @brief Register a callback upon opening a new log store during recovery. As soon as HomeLogStoreMgr::start is
@@ -184,26 +201,26 @@ public:
      */
     void register_log_store_opened_cb(const log_store_opened_cb_t& cb) { m_log_store_opened_cb = cb; }
 
-    nlohmann::json dump_log_store(const log_dump_req& dum_req);
+    [[nodiscard]] nlohmann::json dump_log_store(const log_dump_req& dum_req);
 
 private:
     struct truncate_req {
         std::mutex mtx;
         std::condition_variable cv;
-        bool wait_till_done = false;
-        bool dry_run = false;
+        bool wait_till_done{false};
+        bool dry_run{false};
         device_truncate_cb_t cb;
-        bool trunc_done = false;
+        bool trunc_done{false};
     };
     void device_truncate_in_user_reactor(const std::shared_ptr< truncate_req >& treq);
 
-    logdev_key do_device_truncate(bool dry_run = false);
-    void __on_log_store_found(logstore_id_t store_id, const logstore_meta& meta);
-    void __on_io_completion(logstore_id_t id, logdev_key ld_key, logdev_key flush_idx, uint32_t nremaining_in_batch,
-                            void* ctx);
-    void __on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key, log_buffer buf);
+    [[nodiscard]] logdev_key do_device_truncate(const bool dry_run = false);
+    void on_log_store_found(const logstore_id_t store_id, const logstore_meta& meta);
+    void on_io_completion(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_idx, const uint32_t nremaining_in_batch,
+                            void* const ctx);
+    void on_logfound(const logstore_id_t id, const logstore_seq_num_t seq_num, const logdev_key ld_key, const log_buffer buf);
 
-    void truncate_after_flush_lock(logstore_id_t store_id, logstore_id_t upto_seq_num);
+    void truncate_after_flush_lock(const logstore_id_t store_id, const logstore_id_t upto_seq_num);
     void start_truncate_thread();
 
 private:
@@ -227,6 +244,7 @@ public:
     HomeLogStore(HomeLogStore&&) noexcept = delete;
     HomeLogStore& operator=(const HomeLogStore&) = delete;
     HomeLogStore& operator=(HomeLogStore&&) noexcept = delete;
+    ~HomeLogStore() = default;
 
     /**
      * @brief Register default request completion callback. In case every write does not carry a callback, this
@@ -261,7 +279,7 @@ public:
      *
      * @return is write completed successfully.
      */
-    bool write_sync(logstore_seq_num_t seq_num, const sisl::io_blob& b);
+    [[nodiscard]] bool write_sync(const logstore_seq_num_t seq_num, const sisl::io_blob& b);
 
     /**
      * @brief Write the blob at the user specified seq number - prepared as a request in async fashion.
@@ -270,7 +288,7 @@ public:
      * @param cb [OPTIONAL] Callback if caller wants specific callback as against common/default callback registed.
      * The callback returns the request back with status of execution
      */
-    void write_async(logstore_req* req, const log_req_comp_cb_t& cb = nullptr);
+    void write_async(logstore_req* const req, const log_req_comp_cb_t& cb = nullptr);
 
     /**
      * @brief Write the blob at the user specified seq number
@@ -280,7 +298,7 @@ public:
      * @param cookie : Any cookie or context which will passed back in the callback
      * @param cb Callback upon completion which is called with the status, seq_num and cookie that was passed.
      */
-    void write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie, const log_write_comp_cb_t& cb);
+    void write_async(const logstore_seq_num_t seq_num, const sisl::io_blob& b, void* const cookie, const log_write_comp_cb_t& cb);
 
     /**
      * @brief This method appends the blob into the log and it returns the generated seq number
@@ -289,7 +307,7 @@ public:
      * @return logstore_seq_num_t Returns the seqnum generated by the log
      */
     // This method is not implemented yet
-    logstore_seq_num_t append_sync(const sisl::io_blob& b);
+    [[nodiscard]] logstore_seq_num_t append_sync(const sisl::io_blob& b);
 
     /**
      * @brief This method appends the blob into the log and makes a callback at the end of the append.
@@ -299,7 +317,7 @@ public:
      * @param completion_cb Completion callback which contains the seqnum, status and cookie
      * @return internally generated sequence number
      */
-    logstore_seq_num_t append_async(const sisl::io_blob& b, void* cookie, const log_write_comp_cb_t& completion_cb);
+    [[nodiscard]] logstore_seq_num_t append_async(const sisl::io_blob& b, void* const cookie, const log_write_comp_cb_t& completion_cb);
 
     /**
      * @brief Read the log provided the sequence number synchronously. This is not the most efficient way to read
@@ -311,7 +329,7 @@ public:
      * @param seq_num
      * @return log_buffer Returned log_buffer (which is a safe smart ptr) that contains the data blob.
      */
-    log_buffer read_sync(logstore_seq_num_t seq_num);
+    [[nodiscard]] log_buffer read_sync(const logstore_seq_num_t seq_num);
 
     /**
      * @brief Read the log based on the logstore_req prepared. In case callback is supplied, it uses the callback
@@ -321,7 +339,7 @@ public:
      * @param cb [OPTIONAL] Callback to get the data back, if it needs to be different from the default registered
      * one.
      */
-    void read_async(logstore_req* req, const log_found_cb_t& cb = nullptr);
+    void read_async(logstore_req* const req, const log_found_cb_t& cb = nullptr);
 
     /**
      * @brief Read the log for the seq_num and make the callback with the data
@@ -330,7 +348,7 @@ public:
      * @param cookie Any cookie or context which will passed back in the callback
      * @param cb Callback which contains seq_num, cookie and
      */
-    void read_async(logstore_seq_num_t seq_num, void* cookie, const log_found_cb_t& cb);
+    void read_async(const logstore_seq_num_t seq_num, void* const cookie, const log_found_cb_t& cb);
 
     /**
      * @brief Truncate the logs for this log store upto the seq_num provided (inclusive). Once truncated, the reads
@@ -343,7 +361,7 @@ public:
      * completed, a device truncation can be triggered for all the logstores. The device truncation is more
      * expensive and grouping them together yields better results.
      */
-    void truncate(logstore_seq_num_t upto_seq_num, bool in_memory_truncate_only = true);
+    void truncate(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only = true);
 
     /**
      * @brief Fill the gap in the seq_num with a dummy value. This ensures that get_contiguous_issued and completed
@@ -352,7 +370,7 @@ public:
      *
      * @param seq_num: Seq_num to fill to.
      */
-    void fill_gap(logstore_seq_num_t seq_num);
+    void fill_gap(const logstore_seq_num_t seq_num);
 
     /**
      * @brief Get the safe truncation log dev key from this log store perspective. Please note that the safe idx is
@@ -374,8 +392,8 @@ public:
      *
      * @return logstore_seq_num_t
      */
-    logstore_seq_num_t truncated_upto() const {
-        auto ts = m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire);
+    [[nodiscard]] logstore_seq_num_t truncated_upto() const {
+        const auto ts{m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire)};
         return (ts == std::numeric_limits< logstore_seq_num_t >::max()) ? -1 : ts;
     }
 
@@ -386,14 +404,14 @@ public:
      * @param cb called with current idx and log buffer.
      * Return value of the cb: true means proceed, false means stop;
      */
-    void foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb);
+    void foreach (const int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb);
 
     /**
      * @brief Get the store id of this HomeLogStore
      *
      * @return logstore_id_t
      */
-    logstore_id_t get_store_id() const { return m_store_id; }
+    [[nodiscard]] logstore_id_t get_store_id() const { return m_store_id; }
 
     /**
      * @brief Get the next contiguous seq num which are already issued from the given start seq number.
@@ -403,7 +421,7 @@ public:
      * @return logstore_seq_num_t Returns upto the seqnum upto which contiguous number is issued (inclusive). If it
      * is same as input `from`, then there are no more new contiguous issued.
      */
-    logstore_seq_num_t get_contiguous_issued_seq_num(logstore_seq_num_t from);
+    [[nodiscard]] logstore_seq_num_t get_contiguous_issued_seq_num(const logstore_seq_num_t from);
 
     /**
      * @brief Get the next contiguous seq num which are already completed from the given start seq number.
@@ -413,7 +431,7 @@ public:
      * @return logstore_seq_num_t Returns upto the seqnum upto which contiguous number is completed (inclusive). If
      * it is same as input `from`, then there are no more new contiguous completed.
      */
-    logstore_seq_num_t get_contiguous_completed_seq_num(logstore_seq_num_t from);
+    [[nodiscard]] logstore_seq_num_t get_contiguous_completed_seq_num(const logstore_seq_num_t from);
 
     /**
      * @brief Flush this log store (write/sync to disk) up to the sequence number
@@ -421,7 +439,7 @@ public:
      * @param seq_num Sequence number upto which logs are to be flushed
      * @return True on success
      */
-    bool flush_logs(const logstore_seq_num_t seq_num) {
+    [[nodiscard]] bool flush_logs(const logstore_seq_num_t seq_num) {
         // TODO: Implement this method
         return true;
     }
@@ -432,7 +450,7 @@ public:
      * @param
      * @return True on success
      */
-    bool sync() {
+    [[nodiscard]] bool sync() {
         // TODO: Implement this method
         return true;
     }
@@ -443,29 +461,31 @@ public:
      * @param seq_num Sequence number back which logs are to be rollbacked
      * @return True on success
      */
-    bool rollback(const logstore_seq_num_t seq_num) {
+    [[nodiscard]] bool rollback(const logstore_seq_num_t seq_num) {
         // TODO: Implement this method
         return true;
     }
 
-    nlohmann::json dump_log_store(const log_dump_req& dump_req = log_dump_req());
+    [[nodiscard]] nlohmann::json dump_log_store(const log_dump_req& dump_req = log_dump_req());
 
-    static bool is_aligned_buf_needed(size_t size) { return (log_record::is_size_inlineable(size) == false); }
+    [[nodiscard]] static bool is_aligned_buf_needed(size_t size) {
+        return (log_record::is_size_inlineable(size) == false);
+    }
 
 private:
-    const truncation_info& pre_device_truncation();
+    [[nodiscard]] const truncation_info& pre_device_truncation();
     void post_device_truncation(const logdev_key& trunc_upto_key);
-    void on_write_completion(logstore_req* req, logdev_key ld_key);
-    void on_read_completion(logstore_req* req, logdev_key ld_key);
-    void on_log_found(logstore_seq_num_t seq_num, logdev_key ld_key, log_buffer buf);
+    void on_write_completion(logstore_req* const req, const logdev_key ld_key);
+    void on_read_completion(logstore_req* const req, const logdev_key ld_key);
+    void on_log_found(const logstore_seq_num_t seq_num, const logdev_key ld_key, const log_buffer buf);
     void on_batch_completion(const logdev_key& flush_batch_ld_key);
-    void do_truncate(logstore_seq_num_t upto_seq_num);
-    int search_max_le(logstore_seq_num_t input_sn);
+    void do_truncate(const logstore_seq_num_t upto_seq_num);
+    [[nodiscard]] int search_max_le(const logstore_seq_num_t input_sn);
 
 private:
     logstore_id_t m_store_id;
     sisl::StreamTracker< logstore_record > m_records;
-    bool m_append_mode = false;
+    bool m_append_mode{false};
     log_req_comp_cb_t m_comp_cb;
     log_found_cb_t m_found_cb;
     log_replay_done_cb_t m_replay_done_cb;
@@ -473,19 +493,27 @@ private:
 
     // seq_ld_key_pair m_flush_batch_max = {-1, {0, 0}}; // The maximum seqnum we have seen in the prev flushed
     // batch
-    logstore_seq_num_t m_flush_batch_max_lsn = std::numeric_limits< logstore_seq_num_t >::min();
+    logstore_seq_num_t m_flush_batch_max_lsn{std::numeric_limits< logstore_seq_num_t >::min()};
 
     std::vector< seq_ld_key_pair > m_truncation_barriers; // List of truncation barriers
     truncation_info m_safe_truncation_boundary;
 };
 
+#pragma pack(1)
 struct logstore_meta {
-    logstore_meta(logstore_seq_num_t seq_num = 0) : m_first_seq_num(seq_num) {}
-    static logstore_meta default_value();
+    logstore_meta(const logstore_seq_num_t seq_num = 0) : m_first_seq_num{seq_num} {}
+    logstore_meta(const logstore_meta&) = default;
+    logstore_meta(logstore_meta&&) noexcept = default;
+    logstore_meta& operator=(const logstore_meta&) = default;
+    logstore_meta& operator=(logstore_meta&&) noexcept = default;
+    ~logstore_meta() = default;
+
+    [[nodiscard]] static logstore_meta default_value();
     static void init(logstore_meta& m);
     static void clear(logstore_meta& m);
-    static bool is_valid(const logstore_meta& m);
+    [[nodiscard]] static bool is_valid(const logstore_meta& m);
 
-    logstore_seq_num_t m_first_seq_num = 0;
-} __attribute__((packed));
+    logstore_seq_num_t m_first_seq_num{0};
+};
+#pragma pack()
 } // namespace homestore

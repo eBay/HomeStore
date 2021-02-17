@@ -1,46 +1,56 @@
-#include "../log_dev.hpp"
+#include <array>
+#include <condition_variable>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <fstream>
+#include <string>
+#include <vector>
+
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <memory>
+
+#include "../log_dev.hpp"
 
 using namespace homestore;
-THREAD_BUFFER_INIT;
-RCU_REGISTER_INIT;
+THREAD_BUFFER_INIT
+RCU_REGISTER_INIT
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-std::vector< logdev_key > _logdev_keys;
-static uint64_t first_offset = (uint64_t)-1UL;
-static void on_append_completion(logdev_key lkey, void* ctx) {
-    _logdev_keys.push_back(lkey);
+std::vector< logdev_key > s_logdev_keys;
+static uint64_t first_offset{~static_cast< uint64_t >(0)};
+
+static void on_append_completion(const logdev_key lkey, void* const ctx) {
+    s_logdev_keys.push_back(lkey);
     LOGINFO("Append completed with log_idx = {} offset = {}", lkey.idx, lkey.dev_offset);
-    if (first_offset == -1UL) { first_offset = lkey.dev_offset; }
+    if (first_offset == ~static_cast< uint64_t >(0)) { first_offset = lkey.dev_offset; }
 }
 
-static void on_log_found(logdev_key lkey, log_buffer buf) {
-    _logdev_keys.push_back(lkey);
+static void on_log_found(const logdev_key lkey, const log_buffer buf) {
+    s_logdev_keys.push_back(lkey);
     LOGINFO("Found a log with log_idx = {} offset = {}", lkey.idx, lkey.dev_offset);
 }
 
-static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads) {
+[[nodiscard]] static std::shared_ptr< iomgr::ioMgr > start_homestore(const uint32_t ndevices, const uint64_t dev_size, const uint32_t nthreads) {
     std::vector< dev_info > device_info;
     std::mutex start_mutex;
     std::condition_variable cv;
-    bool inited = false;
+    bool inited{false};
 
     LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
-    for (uint32_t i = 0; i < ndevices; i++) {
-        std::string fpath = "/tmp/" + std::to_string(i + 1);
-        std::ofstream ofs(fpath.c_str(), std::ios::binary | std::ios::out);
+    for (uint32_t i{0}; i < ndevices; ++i) {
+        const std::string fpath{"/tmp/" + std::to_string(i + 1)};
+        std::ofstream ofs{fpath, std::ios::binary | std::ios::out};
         ofs.seekp(dev_size - 1);
         ofs.write("", 1);
         ofs.close();
-        device_info.push_back({fpath});
+        device_info.emplace_back(fpath);
     }
 
     LOGINFO("Creating iomgr with {} threads", nthreads);
-    auto iomgr_obj = std::make_shared< iomgr::ioMgr >(2, nthreads);
+    auto iomgr_obj{std::make_shared< iomgr::ioMgr >(2, nthreads)};
 
-    uint64_t cache_size = ((ndevices * dev_size) * 10) / 100;
+    const uint64_t cache_size{((ndevices * dev_size) * 10) / 100};
     LOGINFO("Initialize and start HomeBlks with cache_size = {}", cache_size);
 
     boost::uuids::string_generator gen;
@@ -54,7 +64,7 @@ static std::shared_ptr< iomgr::ioMgr > start_homestore(uint32_t ndevices, uint64
         iomgr_obj->start();
         LOGINFO("HomeBlks Init completed");
         {
-            std::unique_lock< std::mutex > lk(start_mutex);
+            std::unique_lock< std::mutex > lk{start_mutex};
             inited = true;
         }
         cv.notify_all();
@@ -83,25 +93,25 @@ int main(int argc, char* argv[]) {
     sds_logging::SetLogger("test_log_dev");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    auto iomgr_obj = start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                                     SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
-                                     SDS_OPTIONS["num_threads"].as< uint32_t >());
+    auto iomgr_obj{start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
+                                   SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
+                                   SDS_OPTIONS["num_threads"].as< uint32_t >())};
 
-    std::string s[1024];
-    auto ld = LogDev::instance();
+    std::array<std::string, 1024> s;
+    auto ld{LogDev::instance()};
     ld->register_append_cb(on_append_completion);
     ld->register_logfound_cb(on_log_found);
 
-    for (auto i = 0u; i < 195; i++) {
+    for (size_t i{0}; (i < std::min<size_t>(195, s.size()); ++i) {
         s[i] = std::to_string(i);
-        ld->append_async(0, 0, (uint8_t*)s[i].c_str(), s[i].size() + 1, nullptr);
+        ld->append_async(0, 0, reinterpret_cast<const uint8_t*>(s[i].c_str()), s[i].size() + 1, nullptr);
     }
 
-    auto i = 0;
-    for (auto& lk : _logdev_keys) {
-        auto b = ld->read(lk);
-        auto exp_val = std::to_string(i);
-        auto actual_val = std::string((const char*)b.data(), (size_t)b.size());
+    size_t i{0};
+    for (const auto& lk : s_logdev_keys) {
+        const auto b{ld->read(lk)};
+        const auto exp_val{std::to_string(i)};
+        const auto actual_val{reinterpret_cast< const char* >(b.data()), static_cast< size_t >(b.size())};
         if (actual_val != exp_val) {
             LOGERROR("Error in reading value for log_idx {} actual_val={} expected_val={}", i, actual_val, exp_val);
         } else {

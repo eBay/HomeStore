@@ -1,20 +1,21 @@
-#include <utility/thread_factory.hpp>
-#include <iomgr/iomgr.hpp>
+#include <iterator>
 #include <string>
+
 #include <fmt/format.h>
+#include <iomgr/iomgr.hpp>
+#include <utility/thread_factory.hpp>
 
 #include "engine/common/homestore_assert.hpp"
 #include "log_dev.hpp"
+
 #include "log_store.hpp"
 
 namespace homestore {
 SDS_LOGGING_DECL(logstore)
 
-static constexpr logdev_key out_of_bound_ld_key = {std::numeric_limits< logid_t >::max(), 0};
-
 #define THIS_LOGSTORE_LOG(level, msg, ...) HS_SUBMOD_LOG(level, logstore, , "store", m_store_id, msg, __VA_ARGS__)
 
-void HomeLogStoreMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
+void HomeLogStoreMgr::meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size) {
     HomeLogStoreMgr::instance().m_log_dev.meta_blk_found(mblk, buf, size);
 }
 
@@ -28,10 +29,10 @@ HomeLogStoreMgr::HomeLogStoreMgr() {
     REGISTER_METABLK_SUBSYSTEM(log_dev, "LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr)
 }
 
-void HomeLogStoreMgr::start(bool format) {
-    m_log_dev.register_store_found_cb(bind_this(HomeLogStoreMgr::__on_log_store_found, 2));
-    m_log_dev.register_append_cb(bind_this(HomeLogStoreMgr::__on_io_completion, 5));
-    m_log_dev.register_logfound_cb(bind_this(HomeLogStoreMgr::__on_logfound, 4));
+void HomeLogStoreMgr::start(const bool format) {
+    m_log_dev.register_store_found_cb(bind_this(HomeLogStoreMgr::on_log_store_found, 2));
+    m_log_dev.register_append_cb(bind_this(HomeLogStoreMgr::on_io_completion, 5));
+    m_log_dev.register_logfound_cb(bind_this(HomeLogStoreMgr::on_logfound, 4));
 
     // Start the logdev
     m_log_dev.start(format);
@@ -44,8 +45,8 @@ void HomeLogStoreMgr::start(bool format) {
     // do the remove from store id reserver now.
     // TODO: At present we are assuming all unopened store ids could be removed. In future have a callback to this
     // start routine, which takes the list of unopened store ids and can return a new set, which can be removed.
-    m_id_logstore_map.withWLock([&](auto& m) {
-        for (auto it = m_unopened_store_id.begin(); it != m_unopened_store_id.end();) {
+    m_id_logstore_map.withWLock(
+        [&](auto& m) { for (auto it{std::begin(m_unopened_store_id)}; it != std::end(m_unopened_store_id);) {
             if (m.find(*it) == m.end()) {
                 // Not opened even on second time check, simply unreserve id
                 m_log_dev.unreserve_store_id(*it);
@@ -56,7 +57,7 @@ void HomeLogStoreMgr::start(bool format) {
         // Also call the logstore to inform that start/replay is completed.
         if (!format) {
             for (auto& p : m) {
-                auto& lstore = p.second.m_log_store;
+                auto& lstore{p.second.m_log_store};
                 if (lstore && lstore->m_replay_done_cb) {
                     lstore->m_replay_done_cb(lstore, lstore->m_seq_num.load(std::memory_order_acquire) - 1);
                 }
@@ -70,8 +71,8 @@ void HomeLogStoreMgr::stop() {
     m_log_dev.stop();
 }
 
-std::shared_ptr< HomeLogStore > HomeLogStoreMgr::create_new_log_store(bool append_mode) {
-    auto store_id = m_log_dev.reserve_store_id();
+std::shared_ptr< HomeLogStore > HomeLogStoreMgr::create_new_log_store(const bool append_mode) {
+    const auto store_id{m_log_dev.reserve_store_id()};
     std::shared_ptr< HomeLogStore > lstore;
 
     lstore = std::make_shared< HomeLogStore >(store_id, append_mode, 0);
@@ -80,13 +81,13 @@ std::shared_ptr< HomeLogStore > HomeLogStoreMgr::create_new_log_store(bool appen
     return lstore;
 }
 
-void HomeLogStoreMgr::open_log_store(logstore_id_t store_id, bool append_mode,
+void HomeLogStoreMgr::open_log_store(const logstore_id_t store_id, const bool append_mode,
                                      const log_store_opened_cb_t& on_open_cb) {
     COUNTER_INCREMENT(m_metrics, logstores_count, 1);
     m_id_logstore_map.wlock()->insert(std::make_pair<>(store_id, logstore_info_t{nullptr, on_open_cb, append_mode}));
 }
 
-void HomeLogStoreMgr::remove_log_store(logstore_id_t store_id) {
+void HomeLogStoreMgr::remove_log_store(const logstore_id_t store_id) {
     LOGINFO("Removing log store id {}", store_id);
     m_id_logstore_map.wlock()->erase(store_id);
     m_log_dev.unreserve_store_id(store_id);
@@ -94,27 +95,27 @@ void HomeLogStoreMgr::remove_log_store(logstore_id_t store_id) {
 }
 
 void HomeLogStoreMgr::start_truncate_thread() {
-    std::condition_variable _cv;
-    std::mutex _mtx;
+    std::condition_variable cv;
+    std::mutex mtx;
 
     m_truncate_thread = nullptr;
-    auto sthread = sisl::named_thread("logstore_truncater", [this, &_cv, &_mtx]() {
-        iomanager.run_io_loop(false, nullptr, ([this, &_cv, &_mtx](bool is_started) {
+    auto sthread = sisl::named_thread("logstore_truncater", [this, &cv, &mtx]() {
+        iomanager.run_io_loop(false, nullptr, ([this, &cv, &mtx](bool is_started) {
                                   if (is_started) {
-                                      std::unique_lock< std::mutex > lk(_mtx);
+                                      std::unique_lock< std::mutex > lk{mtx};
                                       m_truncate_thread = iomanager.iothread_self();
-                                      _cv.notify_all();
+                                      cv.notify_all();
                                   }
                               }));
     });
-    std::unique_lock< std::mutex > lk(_mtx);
-    _cv.wait(lk, [this] { return (m_truncate_thread != nullptr); });
+    std::unique_lock< std::mutex > lk{mtx};
+    cv.wait(lk, [this] { return (m_truncate_thread != nullptr); });
     sthread.detach();
 }
 
-void HomeLogStoreMgr::__on_log_store_found(logstore_id_t store_id, const logstore_meta& meta) {
-    auto m = m_id_logstore_map.rlock();
-    auto it = m->find(store_id);
+void HomeLogStoreMgr::on_log_store_found(const logstore_id_t store_id, const logstore_meta& meta) {
+    auto m{m_id_logstore_map.rlock()};
+    const auto it{m->find(store_id)};
     if (it == m->end()) {
         LOGERROR("Store Id {} found but not opened yet, ignoring the store", store_id);
         m_unopened_store_id.insert(store_id);
@@ -123,24 +124,24 @@ void HomeLogStoreMgr::__on_log_store_found(logstore_id_t store_id, const logstor
 
     LOGINFO("Found a logstore store_id={} with start seq_num={}, Creating a new HomeLogStore instance", store_id,
             meta.m_first_seq_num);
-    auto& l_info = const_cast< logstore_info_t& >(it->second);
+    auto& l_info{const_cast< logstore_info_t& >(it->second)};
     l_info.m_log_store = std::make_shared< HomeLogStore >(store_id, l_info.append_mode, meta.m_first_seq_num);
     if (l_info.m_on_log_store_opened) l_info.m_on_log_store_opened(l_info.m_log_store);
 }
 
-static thread_local std::vector< HomeLogStore* > _cur_flush_batch_stores;
+static thread_local std::vector< HomeLogStore* > s_cur_flush_batch_stores;
 
-void HomeLogStoreMgr::__on_io_completion(logstore_id_t id, logdev_key ld_key, logdev_key flush_ld_key,
-                                         uint32_t nremaining_in_batch, void* ctx) {
-    auto req = (logstore_req*)ctx;
-    HomeLogStore* log_store = req->log_store;
+void HomeLogStoreMgr::on_io_completion(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_ld_key,
+                                       const uint32_t nremaining_in_batch, void* const ctx) {
+    auto* const req{static_cast< logstore_req* >(ctx)};
+    HomeLogStore* const log_store{req->log_store};
 
     if (req->is_write) {
-        auto it = m_last_flush_info.find(id);
-        if ((it == m_last_flush_info.end()) || (it->second != flush_ld_key.idx)) {
+        const auto it{m_last_flush_info.find(id)};
+        if ((it == std::end(m_last_flush_info)) || (it->second != flush_ld_key.idx)) {
             // first time completion in this batch for a given store_id
             m_last_flush_info.insert_or_assign(id, flush_ld_key.idx);
-            _cur_flush_batch_stores.push_back(log_store);
+            s_cur_flush_batch_stores.push_back(log_store);
         }
 
         HS_LOG_ASSERT_EQ(log_store->m_store_id, id, "Expecting store id in log store and io completion to match");
@@ -148,25 +149,25 @@ void HomeLogStoreMgr::__on_io_completion(logstore_id_t id, logdev_key ld_key, lo
 
         if (nremaining_in_batch == 0) {
             // This batch is completed, call all log stores participated in this batch about the end of batch
-            HS_LOG_ASSERT_GT(_cur_flush_batch_stores.size(), 0U, "Expecting one store to be flushed in batch");
-            for (auto& l : _cur_flush_batch_stores) {
+            HS_LOG_ASSERT_GT(s_cur_flush_batch_stores.size(), 0U, "Expecting one store to be flushed in batch");
+            for (auto& l : s_cur_flush_batch_stores) {
                 l->on_batch_completion(flush_ld_key);
             }
-            _cur_flush_batch_stores.clear();
+            s_cur_flush_batch_stores.clear();
         }
     } else {
         log_store->on_read_completion(req, ld_key);
     }
 }
 
-void HomeLogStoreMgr::__on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key, log_buffer buf) {
-    auto it = m_id_logstore_map.rlock()->find(id);
-    auto& log_store = it->second.m_log_store;
+void HomeLogStoreMgr::on_logfound(const logstore_id_t id, const logstore_seq_num_t seq_num, const logdev_key ld_key, const log_buffer buf) {
+    auto it{m_id_logstore_map.rlock()->find(id)};
+    auto& log_store{it->second.m_log_store};
     if (it->second.m_log_store) { log_store->on_log_found(seq_num, ld_key, buf); }
 }
 
-void HomeLogStoreMgr::device_truncate(const device_truncate_cb_t& cb, bool wait_till_done, bool dry_run) {
-    auto treq = std::make_shared< truncate_req >();
+void HomeLogStoreMgr::device_truncate(const device_truncate_cb_t& cb, const bool wait_till_done, const bool dry_run) {
+    const auto treq{std::make_shared< truncate_req >()};
     treq->wait_till_done = wait_till_done;
     treq->dry_run = dry_run;
     treq->cb = cb;
@@ -174,13 +175,13 @@ void HomeLogStoreMgr::device_truncate(const device_truncate_cb_t& cb, bool wait_
     device_truncate_in_user_reactor(treq);
 
     if (treq->wait_till_done) {
-        std::unique_lock< std::mutex > lk(treq->mtx);
+        std::unique_lock< std::mutex > lk{treq->mtx};
         treq->cv.wait(lk, [&] { return treq->trunc_done; });
     }
 }
 
 void HomeLogStoreMgr::device_truncate_in_user_reactor(const std::shared_ptr< truncate_req >& treq) {
-    bool locked_now = m_log_dev.try_lock_flush([this, treq]() {
+    const bool locked_now{m_log_dev.try_lock_flush([this, treq]() {
         if (iomanager.am_i_tight_loop_reactor()) {
             iomanager.run_on(m_truncate_thread, [this, treq]([[maybe_unused]] io_thread_addr_t addr) {
                 device_truncate_in_user_reactor(treq);
@@ -190,28 +191,28 @@ void HomeLogStoreMgr::device_truncate_in_user_reactor(const std::shared_ptr< tru
             if (treq->cb) { treq->cb(trunc_upto); }
 
             if (treq->wait_till_done) {
-                std::lock_guard< std::mutex > lk(treq->mtx);
+                std::lock_guard< std::mutex > lk{treq->mtx};
                 treq->trunc_done = true;
                 treq->cv.notify_one();
             }
         }
-    });
+    })};
     if (locked_now) { m_log_dev.unlock_flush(); }
 }
 
-logdev_key HomeLogStoreMgr::do_device_truncate(bool dry_run) {
+logdev_key HomeLogStoreMgr::do_device_truncate(const bool dry_run) {
     static thread_local std::vector< std::shared_ptr< HomeLogStore > > m_min_trunc_stores;
     static thread_local std::vector< std::shared_ptr< HomeLogStore > > m_non_participating_stores;
 
     m_min_trunc_stores.clear();
     m_non_participating_stores.clear();
-    logdev_key min_safe_ld_key = out_of_bound_ld_key;
+    logdev_key min_safe_ld_key{logdev_key::out_of_bound_ld_key()};
 
-    std::string dbg_str = "Format [store_id:trunc_lsn:logidx:dev_trunc_pending?:active_writes_in_trucate?] ";
+    std::string dbg_str{"Format [store_id:trunc_lsn:logidx:dev_trunc_pending?:active_writes_in_trucate?] "};
     m_id_logstore_map.withRLock([&](auto& id_logstore_map) {
         for (auto& id_logstore : id_logstore_map) {
-            auto& store_ptr = id_logstore.second.m_log_store;
-            const auto& trunc_info = store_ptr->pre_device_truncation();
+            auto& store_ptr{id_logstore.second.m_log_store};
+            const auto& trunc_info{store_ptr->pre_device_truncation()};
 
             if (!trunc_info.pending_dev_truncation && !trunc_info.active_writes_not_part_of_truncation) {
                 // This log store neither have any pending device truncation nor active logstore io going on for now.
@@ -235,7 +236,7 @@ logdev_key HomeLogStoreMgr::do_device_truncate(bool dry_run) {
         }
     });
 
-    if (min_safe_ld_key == out_of_bound_ld_key || min_safe_ld_key.idx < 0) {
+    if ((min_safe_ld_key == logdev_key::out_of_bound_ld_key()) || (min_safe_ld_key.idx < 0)) {
         LOGINFOMOD(logstore, "No log store append on any log stores, skipping device truncation");
         return min_safe_ld_key;
     } else {
@@ -259,18 +260,22 @@ logdev_key HomeLogStoreMgr::do_device_truncate(bool dry_run) {
 }
 
 nlohmann::json HomeLogStoreMgr::dump_log_store(const log_dump_req& dump_req) {
-    nlohmann::json json_dump = nlohmann::json::object();
+    nlohmann::json json_dump{}; // create root object
     if (dump_req.log_store == nullptr) {
         m_id_logstore_map.withRLock([&](auto& id_logstore_map) {
             for (auto& id_logstore : id_logstore_map) {
-                auto& store_ptr = id_logstore.second.m_log_store;
+                auto store_ptr{id_logstore.second.m_log_store};
+                const std::string id{std::to_string(store_ptr->get_store_id())};
+                // must use operator= construction as copy construction results in error
                 nlohmann::json val = store_ptr->dump_log_store(dump_req);
-                json_dump[std::to_string(store_ptr->get_store_id())] = val;
+                json_dump[id] = std::move(val);
             }
         });
     } else {
+        const std::string id{std::to_string(dump_req.log_store->get_store_id())};
+        // must use operator= construction as copy construction results in error
         nlohmann::json val = dump_req.log_store->dump_log_store(dump_req);
-        json_dump[std::to_string(dump_req.log_store->get_store_id())] = val;
+        json_dump[id] = std::move(val);
     }
     return json_dump;
 }
@@ -287,12 +292,12 @@ HomeLogStore::HomeLogStore(const logstore_id_t id, const bool append_mode, const
     m_safe_truncation_boundary.seq_num.store(start_lsn - 1, std::memory_order_release);
 }
 
-bool HomeLogStore::write_sync(logstore_seq_num_t seq_num, const sisl::io_blob& b) {
+bool HomeLogStore::write_sync(const logstore_seq_num_t seq_num, const sisl::io_blob& b) {
     HS_ASSERT(LOGMSG, (!iomanager.am_i_worker_reactor()), "Sync can not be done in worker reactor thread");
 
     std::mutex write_mutex;
-    bool write_done = false;
-    bool ret = false;
+    bool write_done{false};
+    bool ret{false};
     std::condition_variable write_cv;
 
     this->write_async(seq_num, b, nullptr,
@@ -308,20 +313,20 @@ bool HomeLogStore::write_sync(logstore_seq_num_t seq_num, const sisl::io_blob& b
                           write_cv.notify_all();
                       });
 
-    std::unique_lock< std::mutex > lk(write_mutex);
+    std::unique_lock< std::mutex > lk{write_mutex};
     write_cv.wait(lk, [&] { return write_done; });
 
     return ret;
 }
 
-void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
+void HomeLogStore::write_async(logstore_req* const req, const log_req_comp_cb_t& cb) {
     HS_ASSERT(LOGMSG, ((cb != nullptr) || (m_comp_cb != nullptr)),
               "Expected either cb is not null or default cb registered");
     req->cb = cb;
     req->start_time = Clock::now();
 
 #ifndef NDEBUG
-    auto trunc_upto_lsn = truncated_upto();
+    const auto trunc_upto_lsn{truncated_upto()};
     if (req->seq_num <= trunc_upto_lsn) {
         THIS_LOGSTORE_LOG(ERROR, "Assert: Appending lsn={} lesser than or equal to truncated_upto_lsn={}", req->seq_num,
                           trunc_upto_lsn);
@@ -332,13 +337,14 @@ void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     m_records.create(req->seq_num);
     COUNTER_INCREMENT(home_log_store_mgr.m_metrics, logstore_append_count, 1);
     HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logstore_record_size, req->data.size);
-    HomeLogStoreMgr::logdev().append_async(m_store_id, req->seq_num, req->data.bytes, req->data.size, (void*)req);
+    [[maybe_unused]] const auto logid{
+        HomeLogStoreMgr::logdev().append_async(m_store_id, req->seq_num, req->data.bytes, req->data.size, static_cast<void*>(req))};
 }
 
-void HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie,
+void HomeLogStore::write_async(const logstore_seq_num_t seq_num, const sisl::io_blob& b, void* const cookie,
                                const log_write_comp_cb_t& cb) {
     // Form an internal request and issue the write
-    auto* req = logstore_req::make(this, seq_num, b, true /* is_write_req */);
+    auto* const req{logstore_req::make(this, seq_num, b, true /* is_write_req */)};
     req->cookie = cookie;
 
     write_async(req, [cb](logstore_req* req, logdev_key written_lkey) {
@@ -347,24 +353,25 @@ void HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::io_blob& 
     });
 }
 
-int64_t HomeLogStore::append_async(const sisl::io_blob& b, void* cookie, const log_write_comp_cb_t& cb) {
+logstore_seq_num_t HomeLogStore::append_async(const sisl::io_blob& b, void* const cookie,
+                                              const log_write_comp_cb_t& cb) {
     HS_DEBUG_ASSERT_EQ(m_append_mode, true, "append_async can be called only on append only mode");
-    auto seq_num = m_seq_num.fetch_add(1, std::memory_order_acq_rel);
+    const auto seq_num{m_seq_num.fetch_add(1, std::memory_order_acq_rel)};
     write_async(seq_num, b, cookie, cb);
     return seq_num;
 }
 
 log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
-    auto record = m_records.at(seq_num);
-    logdev_key ld_key = record.m_dev_key;
+    const auto record{m_records.at(seq_num)};
+    const logdev_key ld_key{record.m_dev_key};
     if (ld_key.idx == -1) { return log_buffer(); }
 
-    auto start_time = Clock::now();
+    const auto start_time{Clock::now()};
     THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} mapped to logdev_key=[idx={} dev_offset={}]", m_store_id, seq_num,
                       ld_key.idx, ld_key.dev_offset);
     COUNTER_INCREMENT(home_log_store_mgr.m_metrics, logstore_read_count, 1);
     serialized_log_record header;
-    auto b = HomeLogStoreMgr::logdev().read(ld_key, header);
+    const auto b{HomeLogStoreMgr::logdev().read(ld_key, header)};
     HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logstore_read_latency, get_elapsed_time_us(start_time));
     return b;
 }
@@ -390,7 +397,7 @@ void HomeLogStore::read_async(logstore_seq_num_t seq_num, void* cookie, const lo
 }
 #endif
 
-void HomeLogStore::on_write_completion(logstore_req* req, logdev_key ld_key) {
+void HomeLogStore::on_write_completion(logstore_req* const req, const logdev_key ld_key) {
     // Upon completion, create the mapping between seq_num and log dev key
     m_records.update(req->seq_num, [&](logstore_record& rec) -> bool {
         rec.m_dev_key = ld_key;
@@ -406,11 +413,11 @@ void HomeLogStore::on_write_completion(logstore_req* req, logdev_key ld_key) {
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 }
 
-void HomeLogStore::on_read_completion(logstore_req* req, logdev_key ld_key) {
+void HomeLogStore::on_read_completion(logstore_req* const req, const logdev_key ld_key) {
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 }
 
-void HomeLogStore::on_log_found(logstore_seq_num_t seq_num, logdev_key ld_key, log_buffer buf) {
+void HomeLogStore::on_log_found(const logstore_seq_num_t seq_num, const logdev_key ld_key, const log_buffer buf) {
     THIS_LOGSTORE_LOG(DEBUG, "Found a log lsn={} logdev_key={}", seq_num, ld_key);
 
     if (seq_num <= m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire)) {
@@ -448,7 +455,7 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_trun
 #endif
 
 #ifndef NDEBUG
-    auto s = m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire);
+    const auto s{m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire)};
     // Don't check this if we don't know our truncation boundary. The call is made to inform us about
     // correct truncation point.
     if (s != -1) {
@@ -458,24 +465,25 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_trun
 #endif
 
     // First try to block the flushing of logdevice and if we are successfully able to do, then
-    auto shared_this = shared_from_this();
-    bool locked_now = HomeLogStoreMgr::logdev().try_lock_flush([shared_this, upto_seq_num, in_memory_truncate_only]() {
-        shared_this->do_truncate(upto_seq_num);
-        if (!in_memory_truncate_only) home_log_store_mgr.do_device_truncate();
-    });
+    auto shared_this{shared_from_this()};
+    const bool locked_now{
+        HomeLogStoreMgr::logdev().try_lock_flush([shared_this, upto_seq_num, in_memory_truncate_only]() {
+            shared_this->do_truncate(upto_seq_num);
+            if (!in_memory_truncate_only) { [[maybe_unused]] const auto key{home_log_store_mgr.do_device_truncate()}; }
+        })};
 
     if (locked_now) { HomeLogStoreMgr::logdev().unlock_flush(); }
 }
 
 // NOTE: This method assumes the flush lock is already acquired by the caller
-void HomeLogStore::do_truncate(logstore_seq_num_t upto_seq_num) {
+void HomeLogStore::do_truncate(const logstore_seq_num_t upto_seq_num) {
     m_records.truncate(upto_seq_num);
     m_safe_truncation_boundary.seq_num.store(upto_seq_num, std::memory_order_release);
 
     // Need to update the superblock with meta, we don't persist yet, will be done as part of log dev truncation
     HomeLogStoreMgr::logdev().update_store_meta(m_store_id, logstore_meta{upto_seq_num + 1}, false /* persist_now */);
 
-    int ind = search_max_le(upto_seq_num);
+    const int ind{search_max_le(upto_seq_num)};
     if (ind < 0) {
         // m_safe_truncation_boundary.pending_dev_truncation = false;
         THIS_LOGSTORE_LOG(DEBUG,
@@ -487,7 +495,7 @@ void HomeLogStore::do_truncate(logstore_seq_num_t upto_seq_num) {
 
     THIS_LOGSTORE_LOG(
         DEBUG, "Truncate upto lsn={}, nearest safe device truncation barrier <ind={} log_id={}>, is_last_barrier={}",
-        upto_seq_num, ind, m_truncation_barriers[ind].ld_key, (ind == (int)m_truncation_barriers.size() - 1));
+        upto_seq_num, ind, m_truncation_barriers[ind].ld_key, (ind == static_cast<int>(m_truncation_barriers.size() - 1)));
 
     m_safe_truncation_boundary.ld_key = m_truncation_barriers[ind].ld_key;
     m_safe_truncation_boundary.pending_dev_truncation = true;
@@ -514,7 +522,7 @@ void HomeLogStore::post_device_truncation(const logdev_key& trunc_upto_loc) {
     }
 }
 
-void HomeLogStore::fill_gap(logstore_seq_num_t seq_num) {
+void HomeLogStore::fill_gap(const logstore_seq_num_t seq_num) {
     HS_DEBUG_ASSERT_EQ(m_records.status(seq_num).is_hole, true, "Attempted to fill gap lsn={} which has valid data",
                        seq_num);
 
@@ -522,14 +530,14 @@ void HomeLogStore::fill_gap(logstore_seq_num_t seq_num) {
     m_records.create_and_complete(seq_num, empty_ld_key);
 }
 
-int HomeLogStore::search_max_le(logstore_seq_num_t input_sn) {
-    int mid = 0;
-    int start = -1;
-    int end = m_truncation_barriers.size();
+int HomeLogStore::search_max_le(const logstore_seq_num_t input_sn) {
+    int mid{0};
+    int start{-1};
+    int end{static_cast<int>(m_truncation_barriers.size())};
 
     while ((end - start) > 1) {
         mid = start + (end - start) / 2;
-        auto& mid_entry = m_truncation_barriers[mid];
+        const auto& mid_entry{m_truncation_barriers[mid]};
 
         if (mid_entry.seq_num == input_sn) {
             return mid;
@@ -544,67 +552,70 @@ int HomeLogStore::search_max_le(logstore_seq_num_t input_sn) {
 }
 
 nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
-    nlohmann::json json_dump = nlohmann::json::object();
+    nlohmann::json json_dump{}; // create root object
     json_dump["store_id"] = this->m_store_id;
 
-    auto trunc_upto = this->truncated_upto();
-    int64_t idx = trunc_upto + 1;
+    const auto trunc_upto{this->truncated_upto()};
+    std::remove_const_t< decltype(trunc_upto) > idx{trunc_upto + 1};
     if (dump_req.start_seq_num != 0) idx = dump_req.start_seq_num;
 
+    // must use move operator= operation instead of move copy constructor
     nlohmann::json json_records = nlohmann::json::array();
-    bool end_iterate = false;
+    bool end_iterate{false};
     m_records.foreach_completed(idx,
-                                [&json_records, &dump_req, &end_iterate](long int cur_idx, long int max_idx,
-                                                                         homestore::logstore_record& record) -> bool {
+                                [&json_records, &dump_req, &end_iterate](decltype(idx) cur_idx, decltype(idx) max_idx,
+                                                                         const homestore::logstore_record& record) -> bool {
                                     // do a sync read
+                                    // must use move operator= operation instead of move copy constructor
                                     nlohmann::json json_val = nlohmann::json::object();
                                     serialized_log_record record_header;
 
-                                    auto log_buffer = HomeLogStoreMgr::logdev().read(record.m_dev_key, record_header);
+                                    const auto log_buffer{
+                                        HomeLogStoreMgr::logdev().read(record.m_dev_key, record_header)};
 
                                     try {
-                                        json_val["size"] = (uint32_t)record_header.size;
-                                        json_val["offset"] = (uint32_t)record_header.offset;
-                                        json_val["is_inlined"] = (uint32_t)record_header.is_inlined;
-                                        json_val["store_seq_num"] = (uint64_t)record_header.store_seq_num;
-                                        json_val["store_id"] = (logstore_id_t)record_header.store_id;
+                                        json_val["size"] = static_cast<uint32_t>(record_header.size);
+                                        json_val["offset"] = static_cast<uint32_t>(record_header.offset);
+                                        json_val["is_inlined"] = static_cast< uint32_t >(record_header.is_inlined);
+                                        json_val["store_seq_num"] = static_cast<uint64_t>(record_header.store_seq_num);
+                                        json_val["store_id"] = static_cast<logstore_id_t>(record_header.store_id);
                                     } catch (const std::exception& ex) {
                                         LOGERRORMOD(logstore, "Exception in json dump- {}", ex.what());
                                     }
 
-                                    if (dump_req.verbosity_level == log_dump_verbosity::CONTENT) {
-                                        uint8_t* b = log_buffer.bytes();
-                                        std::vector< uint8_t > bv(b, b + log_buffer.size());
+                                    if (dump_req.verbosity_level == homestore::log_dump_verbosity::CONTENT) {
+                                        const uint8_t* const b{log_buffer.bytes()};
+                                        const std::vector< uint8_t > bv(b, b + log_buffer.size());
                                         auto content = nlohmann::json::binary_t(bv);
-                                        json_val["content"] = content;
+                                        json_val["content"] = std::move(content);
                                     }
-                                    json_records.emplace_back(json_val);
-                                    int64_t end_idx = std::min(max_idx, dump_req.end_seq_num);
+                                    json_records.emplace_back(std::move(json_val));
+                                    decltype(idx) end_idx{std::min(max_idx, dump_req.end_seq_num)};
                                     end_iterate = (cur_idx < end_idx) ? true : false;
                                     return end_iterate;
                                 });
 
-    json_dump["log_records"] = json_records;
+    json_dump["log_records"] = std::move(json_records);
     return json_dump;
 }
 
-void HomeLogStore::foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
+void HomeLogStore::foreach (const int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
 
     m_records.foreach_completed(start_idx,
                                 [&](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
                                     // do a sync read
                                     serialized_log_record header;
 
-                                    auto log_buf = HomeLogStoreMgr::logdev().read(record.m_dev_key, header);
+                                    auto log_buf{HomeLogStoreMgr::logdev().read(record.m_dev_key, header)};
                                     return cb(cur_idx, log_buf);
                                 });
 }
 
-logstore_seq_num_t HomeLogStore::get_contiguous_issued_seq_num(logstore_seq_num_t from) {
+logstore_seq_num_t HomeLogStore::get_contiguous_issued_seq_num(const logstore_seq_num_t from) {
     return (logstore_seq_num_t)m_records.active_upto(from + 1);
 }
 
-logstore_seq_num_t HomeLogStore::get_contiguous_completed_seq_num(logstore_seq_num_t from) {
+logstore_seq_num_t HomeLogStore::get_contiguous_completed_seq_num(const logstore_seq_num_t from) {
     return (logstore_seq_num_t)m_records.completed_upto(from + 1);
 }
 

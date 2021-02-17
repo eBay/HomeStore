@@ -1,3 +1,5 @@
+#include <cstring>
+
 #include "log_dev.hpp"
 #include "log_store.hpp"
 
@@ -10,10 +12,10 @@ LogGroup::LogGroup() {
         sisl::aligned_unique_ptr< uint8_t >::make_sized(HS_STATIC_CONFIG(drive_attr.align_size), inline_log_buf_size);
 }
 
-void LogGroup::reset(uint32_t max_records) {
+void LogGroup::reset(const uint32_t max_records) {
     m_cur_log_buf = m_log_buf.get();
     m_cur_buf_len = inline_log_buf_size;
-    m_record_slots = (serialized_log_record*)(m_cur_log_buf + sizeof(log_group_header));
+    m_record_slots = reinterpret_cast<serialized_log_record*>(m_cur_log_buf + sizeof(log_group_header));
     m_inline_data_pos = sizeof(log_group_header) + (sizeof(serialized_log_record) * max_records);
     m_oob_data_pos = 0;
 
@@ -23,23 +25,23 @@ void LogGroup::reset(uint32_t max_records) {
     m_actual_data_size = 0;
 
     m_iovecs.clear();
-    m_iovecs.emplace_back((void*)m_cur_log_buf, m_inline_data_pos);
+    m_iovecs.emplace_back(static_cast<void*>(m_cur_log_buf), m_inline_data_pos);
 }
 
-void LogGroup::create_overflow_buf(uint32_t min_needed) {
-    auto new_len = sisl::round_up(std::max(min_needed, m_cur_buf_len * 2), dma_boundary);
-    auto new_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(dma_boundary, new_len);
-    std::memcpy((void*)new_buf.get(), (void*)m_cur_log_buf, m_cur_buf_len);
+void LogGroup::create_overflow_buf(const uint32_t min_needed) {
+    const auto new_len{sisl::round_up(std::max(min_needed, m_cur_buf_len * 2), dma_boundary)};
+    auto new_buf{sisl::aligned_unique_ptr< uint8_t >::make_sized(dma_boundary, new_len)};
+    std::memcpy(static_cast<void*>(new_buf.get()), static_cast<const void*>(m_cur_log_buf), m_cur_buf_len);
 
     m_overflow_log_buf = std::move(new_buf);
     m_cur_log_buf = m_overflow_log_buf.get();
     m_cur_buf_len = new_len;
-    m_record_slots = (serialized_log_record*)(m_cur_log_buf + sizeof(log_group_header));
+    m_record_slots = reinterpret_cast<serialized_log_record*>(m_cur_log_buf + sizeof(log_group_header));
 
     m_iovecs[0].iov_base = m_cur_log_buf;
 }
 
-bool LogGroup::add_record(const log_record& record, int64_t log_idx) {
+bool LogGroup::add_record(const log_record& record, const int64_t log_idx) {
     if (m_nrecords >= m_max_records) {
         LOGDEBUGMOD(logstore,
                     "Will exceed estimated records={} if we add idx={} record. Hence stopping adding in this batch",
@@ -62,17 +64,17 @@ bool LogGroup::add_record(const log_record& record, int64_t log_idx) {
     if (record.is_inlineable()) {
         m_record_slots[m_nrecords].offset = m_inline_data_pos;
         m_record_slots[m_nrecords].is_inlined = true;
-        std::memcpy((void*)(m_cur_log_buf + m_inline_data_pos), record.data_ptr, record.size);
+        std::memcpy(static_cast<void*>(m_cur_log_buf + m_inline_data_pos), static_cast<const void*>(record.data_ptr), record.size);
         m_inline_data_pos += record.size;
         m_iovecs[0].iov_len = m_inline_data_pos;
     } else {
         // We do not round it now, it will be rounded during finish
         m_record_slots[m_nrecords].offset = m_oob_data_pos;
         m_record_slots[m_nrecords].is_inlined = false;
-        m_iovecs.emplace_back((void*)record.data_ptr, record.size);
+        m_iovecs.emplace_back(static_cast<void*>(record.data_ptr), record.size);
         m_oob_data_pos += record.size;
     }
-    m_nrecords++;
+    ++m_nrecords;
 
     return true;
 }
@@ -80,7 +82,7 @@ bool LogGroup::add_record(const log_record& record, int64_t log_idx) {
 const iovec_array& LogGroup::finish() {
     m_iovecs[0].iov_len = sisl::round_up(m_iovecs[0].iov_len, dma_boundary);
 
-    log_group_header* hdr = header();
+    log_group_header* const hdr{header()};
     hdr->magic = LOG_GROUP_HDR_MAGIC;
     hdr->n_log_records = m_nrecords;
     hdr->prev_grp_crc = HomeLogStoreMgr::logdev().get_prev_crc();
@@ -93,10 +95,10 @@ const iovec_array& LogGroup::finish() {
 }
 
 crc32_t LogGroup::compute_crc() {
-    crc32_t crc = crc32_ieee(init_crc32, (unsigned char*)(m_iovecs[0].iov_base) + sizeof(log_group_header),
+    crc32_t crc = crc32_ieee(init_crc32, static_cast<const unsigned char*>(m_iovecs[0].iov_base) + sizeof(log_group_header),
                              m_iovecs[0].iov_len - sizeof(log_group_header));
-    for (auto i = 1u; i < m_iovecs.size(); ++i) {
-        crc = crc32_ieee(crc, (unsigned char*)(m_iovecs[i].iov_base), m_iovecs[i].iov_len);
+    for (size_t i{1}; i < m_iovecs.size(); ++i) {
+        crc = crc32_ieee(crc, static_cast<const unsigned char*>(m_iovecs[i].iov_base), m_iovecs[i].iov_len);
     }
 
     return crc;

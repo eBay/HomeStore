@@ -1,22 +1,32 @@
 #pragma once
 
-#include <sds_logging/logging.h>
+#include <atomic>
+#include <cstdint>
+#include <functional>
+#include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <ostream>
+#include <set>
+#include <vector>
+
+#include <boost/intrusive_ptr.hpp>
+#include <fds/id_reserver.hpp>
 #include <fds/stream_tracker.hpp>
 #include <fds/utils.hpp>
-#include "engine/blkstore/blkstore.hpp"
-#include <fds/id_reserver.hpp>
-#include <boost/intrusive_ptr.hpp>
 #include <fmt/format.h>
-#include <map>
-#include <vector>
+#include <sds_logging/logging.h>
+
+#include "engine/blkstore/blkstore.hpp"
 #include "engine/homestore_base.hpp"
 #include "homelogstore/logstore_header.hpp"
 
 namespace homestore {
 
-static constexpr uint32_t LOG_GROUP_HDR_MAGIC = 0xDABAF00D;
-static constexpr uint32_t dma_boundary = 512; // Mininum size the dma/writes to be aligned with
-static constexpr uint32_t initial_read_size = 4096;
+static constexpr uint32_t LOG_GROUP_HDR_MAGIC{0xDABAF00D};
+static constexpr uint32_t dma_boundary{512}; // Mininum size the dma/writes to be aligned with
+static constexpr uint32_t initial_read_size{4096};
 
 // clang-format off
 /*
@@ -36,54 +46,61 @@ static constexpr uint32_t initial_read_size = 4096;
 
 /************************************* Log Record Section ************************************/
 /* Each log record which is serialized to the persistent store in the following format */
+#pragma pack(1)
 struct serialized_log_record {
     uint32_t size;                    // Size of this log record
     uint32_t offset : 31;             // Offset within the log_group where data is residing
     uint32_t is_inlined : 1;          // Is the log data is inlined or out-of-band area
     logstore_seq_num_t store_seq_num; // Seqnum by the log store
     logstore_id_t store_id;           // ID of the store this log is associated with
-    serialized_log_record() {}
-    serialized_log_record(uint32_t s, uint32_t o, uint32_t is, logstore_seq_num_t sq, logstore_id_t id) :
-            size(s),
-            offset(o),
-            is_inlined(is),
-            store_seq_num(sq),
-            store_id(id) {}
-} __attribute__((packed));
+
+    serialized_log_record() = default;
+    serialized_log_record(const uint32_t s, const uint32_t o, const uint32_t is, const logstore_seq_num_t sq,
+                          const logstore_id_t id) :
+            size{s}, offset{o}, is_inlined{is}, store_seq_num{sq}, store_id(id) {}
+    serialized_log_record(const serialized_log_record&) = default;
+    serialized_log_record& operator=(const serialized_log_record&) = default;
+    serialized_log_record(serialized_log_record&&) noexcept = default;
+    serialized_log_record& operator=(serialized_log_record&&) noexcept = default;
+    ~serialized_log_record() = default;
+};
+#pragma pack()
 
 /* This structure represents the in-memory representation of a log record */
 struct log_record {
-    serialized_log_record* pers_record = nullptr;
+    serialized_log_record* pers_record{nullptr};
     uint8_t* data_ptr;
     uint32_t size;
     void* context;
     logstore_id_t store_id;
     logstore_seq_num_t seq_num;
 
-    log_record(logstore_id_t sid, logstore_seq_num_t snum, uint8_t* d, uint32_t sz, void* ctx) {
-        store_id = sid;
-        seq_num = snum;
-        data_ptr = d;
-        size = sz;
-        context = ctx;
-    }
-    size_t inlined_size() const { return sizeof(serialized_log_record) + (is_inlineable() ? size : 0); }
-    size_t serialized_size() const { return sizeof(serialized_log_record) + size; }
-    bool is_inlineable() const {
+    log_record(const logstore_id_t sid, const logstore_seq_num_t snum, uint8_t* const d, const uint32_t sz, void* const ctx) :
+            data_ptr{d}, size{sz}, context{ctx}, store_id{sid}, seq_num{snum} {}
+    log_record(const log_record&) = delete;
+    log_record& operator=(const log_record&) = delete;
+    log_record(log_record&&) noexcept = delete;
+    log_record& operator=(log_record&&) noexcept = delete;
+    ~log_record() = default;
+
+    [[nodiscard]] size_t inlined_size() const { return sizeof(serialized_log_record) + (is_inlineable() ? size : 0); }
+    [[nodiscard]] size_t serialized_size() const { return sizeof(serialized_log_record) + size; }
+    [[nodiscard]] bool is_inlineable() const {
         // Need inlining if size is smaller or size/buffer is not in dma'ble boundary.
         // return ((size < inline_size) || ((size % dma_boundary) != 0) || (((uintptr_t)data_ptr % dma_boundary) != 0));
-        return (is_size_inlineable(size) || (((uintptr_t)data_ptr % dma_boundary) != 0));
+        return (is_size_inlineable(size) || ((reinterpret_cast<uintptr_t>(data_ptr) % dma_boundary) != 0));
     }
 
-    static bool is_size_inlineable(size_t sz) {
+    [[nodiscard]] static bool is_size_inlineable(const size_t sz) {
         return ((sz < HS_DYNAMIC_CONFIG(logstore.optimal_inline_data_size)) || ((sz % dma_boundary) != 0));
     }
 
-    static size_t serialized_size(uint32_t sz) { return sizeof(serialized_log_record) + sz; }
+    [[nodiscard]] static size_t serialized_size(const uint32_t sz) { return sizeof(serialized_log_record) + sz; }
 };
 
 /************************************* Log Group Section ************************************/
 /* This structure represents a group commit log header */
+#pragma pack(1)
 struct log_group_header {
     uint32_t magic;
     uint32_t n_log_records;      // Total number of log records
@@ -94,53 +111,79 @@ struct log_group_header {
     crc32_t prev_grp_crc;        // Checksum of the previous group that was written
     crc32_t cur_grp_crc;         // Checksum of the current group record
 
-    uint32_t inline_data_size() const {
+    log_group_header() = default;
+    log_group_header(const log_group_header&) = delete;
+    log_group_header& operator=(const log_group_header&) = delete;
+    log_group_header(log_group_header&&) noexcept = delete;
+    log_group_header& operator=(log_group_header&&) noexcept = delete;
+    ~log_group_header() = default;
+
+    [[nodiscard]] uint32_t inline_data_size() const {
         return oob_data_offset ? (oob_data_offset - inline_data_offset) : (group_size - inline_data_offset);
     }
 
-    uint8_t* inline_area() const { return (((uint8_t*)this) + inline_data_offset); }
-    uint8_t* oob_area() const { return (((uint8_t*)this) + oob_data_offset); }
-    uint8_t* record_area() const { return (((uint8_t*)this) + sizeof(log_group_header)); }
-
-    serialized_log_record* nth_record(uint32_t n) const {
-        return (serialized_log_record*)(record_area() + (sizeof(serialized_log_record) * n));
+    [[nodiscard]] const uint8_t* inline_area() const {
+        return (reinterpret_cast< const uint8_t* >(this) + inline_data_offset);
+    }
+    [[nodiscard]] const uint8_t* oob_area() const {
+        return (reinterpret_cast< const uint8_t* >(this) + oob_data_offset);
+    }
+    [[nodiscard]] const uint8_t* record_area() const {
+        return (reinterpret_cast< const uint8_t* >(this) + sizeof(log_group_header));
     }
 
-    sisl::blob data(logid_t idx) const {
+    [[nodiscard]] const serialized_log_record* nth_record(const uint32_t n) const {
+        return reinterpret_cast< const serialized_log_record* >(record_area() + (sizeof(serialized_log_record) * n));
+    }
+
+    [[nodiscard]] sisl::blob data(const logid_t idx) const {
         assert(idx >= start_log_idx);
         assert(idx - start_log_idx < n_log_records);
 
-        serialized_log_record* lr = nth_record(start_log_idx - idx);
+        const serialized_log_record* const lr{nth_record(start_log_idx - idx)};
 
-        sisl::blob b;
-        b.bytes = (lr->is_inlined ? inline_area() : oob_area()) + lr->offset;
+        sisl::blob b{};
+        b.bytes = const_cast< uint8_t* >(lr->is_inlined ? inline_area() : oob_area()) + lr->offset;
         b.size = lr->size;
         return b;
     }
 
-    uint32_t magic_word() const { return magic; }
-    logid_t start_idx() const { return start_log_idx; }
-    uint32_t nrecords() const { return n_log_records; }
-    uint32_t total_size() const { return group_size; }
-    crc32_t this_group_crc() const { return cur_grp_crc; }
-    crc32_t prev_group_crc() const { return prev_grp_crc; }
-    uint32_t _inline_data_offset() const { return inline_data_offset; }
+    [[nodiscard]] uint32_t magic_word() const { return magic; }
+    [[nodiscard]] logid_t start_idx() const { return start_log_idx; }
+    [[nodiscard]] uint32_t nrecords() const { return n_log_records; }
+    [[nodiscard]] uint32_t total_size() const { return group_size; }
+    [[nodiscard]] crc32_t this_group_crc() const { return cur_grp_crc; }
+    [[nodiscard]] crc32_t prev_group_crc() const { return prev_grp_crc; }
+    [[nodiscard]] uint32_t _inline_data_offset() const { return inline_data_offset; }
+};
+#pragma pack()
 
-    friend std::ostream& operator<<(std::ostream& os, const log_group_header& h) {
-        auto s = fmt::format("magic = {} n_log_records = {} start_log_idx = {} group_size = {} inline_data_offset = {} "
-                             "oob_data_offset = {} prev_grp_crc = {} cur_grp_crc = {}",
-                             h.magic, h.n_log_records, h.start_log_idx, h.group_size, h.inline_data_offset,
-                             h.oob_data_offset, h.prev_grp_crc, h.cur_grp_crc);
-        os << s;
-        return os;
-    }
-} __attribute__((packed));
+template < typename charT, typename traits >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& out_stream,
+                                                const log_group_header& header) {
+    // copy the stream formatting
+    std::basic_ostringstream< charT, traits > out_string_stream;
+    out_string_stream.copyfmt(out_stream);
+
+    // print the stream
+    const auto s{fmt::format("magic = {} n_log_records = {} start_log_idx = {} group_size = {} inline_data_offset = {} "
+                         "oob_data_offset = {} prev_grp_crc = {} cur_grp_crc = {}",
+                             header.magic, header.n_log_records, header.start_log_idx, header.group_size,
+                             header.inline_data_offset, header.oob_data_offset, header.prev_grp_crc,
+                             header.cur_grp_crc)};
+    out_string_stream << s;
+    out_stream << out_string_stream.str();
+
+    return out_stream;
+}
 
 struct iovec_wrapper : public iovec {
-    iovec_wrapper(void* base, size_t len) {
-        iov_base = base;
-        iov_len = len;
-    }
+    iovec_wrapper(void* const base, const size_t len) : iovec{base, len} {}
+    iovec_wrapper(const iovec_wrapper&) = default;
+    iovec_wrapper& operator=(const iovec_wrapper&) = default;
+    iovec_wrapper(iovec_wrapper&&) noexcept = default;
+    iovec_wrapper& operator=(iovec_wrapper&&) noexcept = default;
+    ~iovec_wrapper() = default;
 };
 typedef std::vector< iovec_wrapper > iovec_array;
 
@@ -149,39 +192,37 @@ class LogGroup {
 public:
     /* These are going to be compile time constants to build the inline array, so they are not using dynamic
      * settings to change them */
-    static constexpr uint32_t optimal_num_records = 16;
-    static constexpr uint32_t estimated_iovs = 10;
-    static constexpr size_t inline_log_buf_size = 512 * optimal_num_records;
-    static constexpr uint32_t max_records_in_a_batch =
-        (initial_read_size - sizeof(log_group_header)) / sizeof(serialized_log_record);
+    static constexpr uint32_t optimal_num_records{16};
+    static constexpr uint32_t estimated_iovs{10};
+    static constexpr size_t inline_log_buf_size{512 * optimal_num_records};
+    static constexpr uint32_t max_records_in_a_batch{(initial_read_size - sizeof(log_group_header)) /
+                                                     sizeof(serialized_log_record)};
 
     friend class LogDev;
 
     LogGroup();
+    LogGroup(const LogGroup&) = delete;
+    LogGroup& operator=(const LogGroup&) = delete;
+    LogGroup(LogGroup&&) noexcept = delete;
+    LogGroup& operator=(LogGroup&&) noexcept = delete;
     ~LogGroup() = default;
 
-    void reset(uint32_t max_records);
-    void create_overflow_buf(uint32_t min_needed);
-    bool add_record(const log_record& record, int64_t log_idx);
-    bool can_accomodate(const log_record& record) const { return (m_nrecords <= m_max_records); }
+    void reset(const uint32_t max_records);
+    void create_overflow_buf(const uint32_t min_needed);
+    [[nodiscard]] bool add_record(const log_record& record, const int64_t log_idx);
+    [[nodiscard]] bool can_accomodate(const log_record& record) const { return (m_nrecords <= m_max_records); }
 
     const iovec_array& finish();
     crc32_t compute_crc();
 
-    log_group_header* header() const { return (log_group_header*)m_cur_log_buf; }
-    iovec_array& iovecs() { return m_iovecs; }
-    // uint32_t data_size() const { return header()->group_size - sizeof(log_group_header); }
-    uint32_t actual_data_size() const { return m_actual_data_size; }
-    uint32_t nrecords() const { return m_nrecords; }
-
-    friend std::ostream& operator<<(std::ostream& os, const LogGroup& lg) {
-        auto s = fmt::format("Header:[{}]\nLog_idx_range: [{} - {}] DevOffset: {} Max_Records: {} IOVecSize: {}\n"
-                             "-----------------------------------------------------------------\n",
-                             *((log_group_header*)lg.m_cur_log_buf), lg.m_flush_log_idx_from, lg.m_flush_log_idx_upto,
-                             lg.m_log_dev_offset, lg.m_max_records, lg.m_iovecs.size());
-        os << s;
-        return os;
+    [[nodiscard]] log_group_header* header() { return reinterpret_cast< log_group_header* >(m_cur_log_buf); }
+    [[nodiscard]] const log_group_header* header() const {
+        return reinterpret_cast< const log_group_header* >(m_cur_log_buf);
     }
+    [[nodiscard]] iovec_array& iovecs() { return m_iovecs; }
+    // uint32_t data_size() const { return header()->group_size - sizeof(log_group_header); }
+    [[nodiscard]] uint32_t actual_data_size() const { return m_actual_data_size; }
+    [[nodiscard]] uint32_t nrecords() const { return m_nrecords; }
 
 private:
     sisl::aligned_unique_ptr< uint8_t > m_log_buf;
@@ -194,9 +235,9 @@ private:
     uint32_t m_inline_data_pos;
     uint32_t m_oob_data_pos;
 
-    uint32_t m_nrecords = 0;
-    uint32_t m_max_records = 0;
-    uint32_t m_actual_data_size = 0;
+    uint32_t m_nrecords{0};
+    uint32_t m_max_records{0};
+    uint32_t m_actual_data_size{0};
 
     // Info about the final data
     iovec_array m_iovecs;
@@ -205,6 +246,25 @@ private:
     uint64_t m_log_dev_offset;
 };
 
+template < typename charT, typename traits >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& out_stream,
+                                                const LogGroup& lg) {
+    // copy the stream formatting
+    std::basic_ostringstream< charT, traits > out_string_stream;
+    out_string_stream.copyfmt(out_stream);
+
+    // print the stream
+    const auto* const header{reinterpret_cast<const log_group_header*>(lg.m_cur_log_buf)};
+    const auto s{fmt::format("Header:[{}]\nLog_idx_range: [{} - {}] DevOffset: {} Max_Records: {} IOVecSize: {}\n"
+                             "-----------------------------------------------------------------\n",
+                             *header, lg.m_flush_log_idx_from, lg.m_flush_log_idx_upto, lg.m_log_dev_offset,
+                             lg.m_max_records, lg.m_iovecs.size())};
+    out_string_stream << s;
+    out_stream << out_string_stream.str();
+
+    return out_stream;
+}
+
 /************************************* LogDev Request to BlkStore Section ************************************/
 struct logdev_req;
 #define to_logdev_req(req) boost::static_pointer_cast< logdev_req >(req)
@@ -212,17 +272,21 @@ typedef boost::intrusive_ptr< logdev_req > logdev_req_ptr;
 
 struct logdev_req : public blkstore_req< BlkBuffer > {
 public:
-    static boost::intrusive_ptr< logdev_req > make_request() {
+    [[nodiscard]] static boost::intrusive_ptr< logdev_req > make_request() {
         return boost::intrusive_ptr< logdev_req >(sisl::ObjectAllocator< logdev_req >::make_object());
     }
 
     virtual void free_yourself() override { sisl::ObjectAllocator< logdev_req >::deallocate(this); }
 
-    virtual ~logdev_req() = default;
+    logdev_req(const logdev_req&) = delete;
+    logdev_req& operator=(const logdev_req&) = delete;
+    logdev_req(logdev_req&&) noexcept = delete;
+    logdev_req& operator=(logdev_req&&) noexcept = delete;
+    virtual ~logdev_req() override = default;
 
     // virtual size_t get_your_size() const override { return sizeof(ssd_loadgen_req); }
 
-    static logdev_req_ptr cast(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
+    [[nodiscard]] static logdev_req_ptr cast(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
         return boost::static_pointer_cast< logdev_req >(bs_req);
     }
 
@@ -230,18 +294,22 @@ public:
 
 protected:
     friend class sisl::ObjectAllocator< logdev_req >;
+
+private:
+    logdev_req() = default;
 };
 
 typedef int64_t logid_t;
 struct logdev_key {
-    logid_t idx = std::numeric_limits< logid_t >::min();
-    uint64_t dev_offset = std::numeric_limits< uint64_t >::min();
+    constexpr logdev_key(const logid_t idx = std::numeric_limits< logid_t >::min(),
+                         const uint64_t dev_offset = std::numeric_limits< uint64_t >::min()) : idx{idx}, dev_offset{dev_offset} {}
+    logdev_key(const logdev_key&) = default;
+    logdev_key& operator=(const logdev_key&) = default;
+    logdev_key(logdev_key&&) noexcept = default;
+    logdev_key& operator=(logdev_key&&) noexcept = default;
+    ~logdev_key() = default;
 
     bool operator==(const logdev_key& other) { return (other.idx == idx) && (other.dev_offset == dev_offset); }
-    friend std::ostream& operator<<(std::ostream& os, const logdev_key& k) {
-        os << "[idx=" << k.idx << " dev_offset=" << k.dev_offset << "]";
-        return os;
-    }
 
     operator bool() const { return is_valid(); }
     bool is_valid() const { return !is_lowest() && !is_highest(); }
@@ -258,7 +326,32 @@ struct logdev_key {
         idx = std::numeric_limits< logid_t >::max();
         dev_offset = std::numeric_limits< uint64_t >::max();
     }
+
+    static const logdev_key& out_of_bound_ld_key()
+    {
+        static constexpr logdev_key s_out_of_bound_ld_key{std::numeric_limits< logid_t >::max(), 0};
+        return s_out_of_bound_ld_key;
+    }
+
+    logid_t idx;
+    uint64_t dev_offset;
 };
+
+template < typename charT, typename traits >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& out_stream,
+                                                const logdev_key& key) {
+
+    // copy the stream formatting
+    std::basic_ostringstream< charT, traits > out_string_stream;
+    out_string_stream.copyfmt(out_stream);
+
+    // print the stream
+    out_string_stream << "[idx=" << key.idx << " dev_offset=" << key.dev_offset << "]";
+    out_stream << out_string_stream.str();
+
+    return out_stream;
+}
+
 } // namespace homestore
 
 namespace fmt {
@@ -285,67 +378,91 @@ struct truncation_request_t {
 };
 
 /* This structure represents the logdevice super block which will be loaded upto start of the homestore */
+struct logstore_meta;
+
+#pragma pack(1)
 struct logdev_superblk {
-    static constexpr uint32_t LOGDEV_SB_VERSION = 1;
+    static constexpr uint32_t LOGDEV_SB_VERSION{1};
 
-    uint32_t version = LOGDEV_SB_VERSION;
-    uint32_t num_stores = 0;
-    uint64_t start_dev_offset = 0;
-    uint8_t store_meta[0];
+    uint32_t version{LOGDEV_SB_VERSION};
+    uint32_t num_stores{0};
+    uint64_t start_dev_offset{0};
 
-    uint32_t get_version() const { return version; }
-} __attribute__((packed));
+    [[nodiscard]] uint32_t get_version() const { return version; }
+    // The meta data starts immediately after the super block
+    [[nodiscard]] logstore_meta* get_logstore_meta() {
+        return reinterpret_cast< logstore_meta* >(reinterpret_cast< uint8_t* >(this) + sizeof(logdev_superblk));
+    }
+    [[nodiscard]] const logstore_meta* get_logstore_meta() const {
+        return reinterpret_cast< const logstore_meta* >(reinterpret_cast< const uint8_t* >(this) +
+                                                        sizeof(logdev_superblk));
+    }
+};
+#pragma pack()
 
 class logstore_meta;
 // This class represents the metadata of logdev providing methods to change/access log dev super block.
 class LogDevMetadata {
 public:
-    logdev_superblk* create();
+    LogDevMetadata() = default;
+    LogDevMetadata(const LogDevMetadata&) = delete;
+    LogDevMetadata& operator=(const LogDevMetadata&) = delete;
+    LogDevMetadata(LogDevMetadata&&) noexcept = delete;
+    LogDevMetadata& operator=(LogDevMetadata&&) noexcept = delete;
+    ~LogDevMetadata() = default;
+
+    [[nodiscard]] logdev_superblk* create();
     void reset();
-    void meta_buf_found(const sisl::byte_view& buf, void* meta_cookie);
-    std::vector< std::pair< logstore_id_t, logstore_meta > > load();
+    void meta_buf_found(const sisl::byte_view& buf, void* const meta_cookie);
+    [[nodiscard]] std::vector< std::pair< logstore_id_t, logstore_meta > > load();
     void persist();
 
-    bool is_empty() const { return (m_sb == nullptr); }
-    inline uint64_t get_start_dev_offset() const { return m_sb->start_dev_offset; }
-    void update_start_dev_offset(uint64_t offset, bool persist_now);
+    [[nodiscard]] bool is_empty() const { return (m_sb == nullptr); }
+    [[nodiscard]] inline uint64_t get_start_dev_offset() const { return m_sb->start_dev_offset; }
+    void update_start_dev_offset(const uint64_t offset, const bool persist_now);
 
-    logstore_id_t reserve_store(bool persist_now);
-    void unreserve_store(logstore_id_t idx, bool persist_now);
-    const std::set< logstore_id_t >& reserved_store_ids() const { return m_store_info; }
+    [[nodiscard]] logstore_id_t reserve_store(const bool persist_now);
+    void unreserve_store(const logstore_id_t idx, const bool persist_now);
+    [[nodiscard]] const std::set< logstore_id_t >& reserved_store_ids() const { return m_store_info; }
 
-    void update_store_meta(const logstore_id_t idx, const logstore_meta& meta, bool persist_now);
-    logstore_meta& mutable_store_meta(const logstore_id_t idx);
+    void update_store_meta(const logstore_id_t idx, const logstore_meta& meta, const bool persist_now);
+    [[nodiscard]] logstore_meta& mutable_store_meta(const logstore_id_t idx);
 
 private:
-    bool resize_if_needed();
+    [[nodiscard]] bool resize_if_needed();
 
-    uint32_t required_sb_size(uint32_t nstores) const {
+    [[nodiscard]] uint32_t required_sb_size(const uint32_t nstores) const {
         return sisl::round_up(size_needed(nstores), HS_STATIC_CONFIG(drive_attr.phys_page_size));
     }
 
-    uint32_t size_needed(uint32_t nstores) const {
+    [[nodiscard]] uint32_t size_needed(const uint32_t nstores) const {
         return sizeof(logdev_superblk) + (nstores * sizeof(logstore_seq_num_t));
     }
 
-    uint32_t store_capacity() const;
+    [[nodiscard]] uint32_t store_capacity() const;
 
     sisl::byte_view m_raw_buf;
-    logdev_superblk* m_sb = nullptr;
-    void* m_meta_mgr_cookie = nullptr;
+    logdev_superblk* m_sb{nullptr};
+    void* m_meta_mgr_cookie{nullptr};
     std::unique_ptr< sisl::IDReserver > m_id_reserver;
     std::set< logstore_id_t > m_store_info;
 };
 
 class log_stream_reader {
 public:
-    log_stream_reader(uint64_t device_cursor);
-    sisl::byte_view next_group(uint64_t* out_dev_offset);
-    sisl::byte_view group_in_next_page();
-    uint64_t group_cursor() const { return m_cur_group_cursor; }
+    log_stream_reader(const uint64_t device_cursor);
+    log_stream_reader(const log_stream_reader&) = delete;
+    log_stream_reader& operator=(const log_stream_reader&) = delete;
+    log_stream_reader(log_stream_reader&&) noexcept = delete;
+    log_stream_reader& operator=(log_stream_reader&&) noexcept = delete;
+    ~log_stream_reader() = default;
+
+    [[nodiscard]] sisl::byte_view next_group(uint64_t* const out_dev_offset);
+    [[nodiscard]] sisl::byte_view group_in_next_page();
+    [[nodiscard]] uint64_t group_cursor() const { return m_cur_group_cursor; }
 
 private:
-    sisl::byte_view read_next_bytes(uint64_t nbytes);
+    [[nodiscard]] sisl::byte_view read_next_bytes(const uint64_t nbytes);
 
 private:
     boost::intrusive_ptr< HomeStoreBase > m_hb;
@@ -355,21 +472,26 @@ private:
     crc32_t m_prev_crc;
 };
 
-enum log_dump_verbosity { CONTENT, HEADER };
+enum log_dump_verbosity : uint8_t { CONTENT, HEADER };
 
 class LogDev {
 public:
+    // NOTE: Possibly change these in future to include constant correctness
     typedef std::function< void(logstore_id_t, logdev_key, logdev_key, uint32_t nremaining_in_batch, void*) >
         log_append_comp_callback;
     typedef std::function< void(logstore_id_t, logstore_seq_num_t, logdev_key, log_buffer) > log_found_callback;
     typedef std::function< void(logstore_id_t, const logstore_meta&) > store_found_callback;
     typedef std::function< void(void) > flush_blocked_callback;
 
-    static inline int64_t flush_data_threshold_size() {
+    [[nodiscard]] static inline int64_t flush_data_threshold_size() {
         return HS_DYNAMIC_CONFIG(logstore.flush_threshold_size) - sizeof(log_group_header);
     }
 
     LogDev();
+    LogDev(const LogDev&) = delete;
+    LogDev& operator=(const LogDev&) = delete;
+    LogDev(LogDev&&) noexcept = delete;
+    LogDev& operator=(LogDev&&) noexcept = delete;
     ~LogDev();
 
     /**
@@ -378,7 +500,7 @@ public:
      *
      * @param format: Do we need to format the logdev or not.
      */
-    void start(bool format);
+    void start(const bool format);
 
     /**
      * @brief Stop the logdev. It resets all the parameters it is using and thus can be started later
@@ -400,8 +522,8 @@ public:
      *
      * @return logid_t : log_idx of the log of the data.
      */
-    logid_t append_async(logstore_id_t store_id, logstore_seq_num_t seq_num, uint8_t* data, uint32_t size,
-                         void* cb_context);
+    [[nodiscard]] logid_t append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, uint8_t* const data, const uint32_t size,
+                         void* const cb_context);
 
     /**
      * @brief Read the log id from the device offset
@@ -415,7 +537,7 @@ public:
      * @return log_buffer : Opaque structure which contains the data blob and its size. It is safe buffer and hence it
      * need not be freed and can be cheaply passed it around.
      */
-    log_buffer read(const logdev_key& key, serialized_log_record& record_header);
+    [[nodiscard]] log_buffer read(const logdev_key& key, serialized_log_record& record_header);
 
     /**
      * @brief Load the data from the blkstore starting with offset. This method loads data in bulk and then call
@@ -424,7 +546,7 @@ public:
      *
      * @param offset Log blkstore device offset.
      */
-    void load(uint64_t offset);
+    void load(const uint64_t offset);
 
     /**
      * @brief Register the callback to receive upon completion of append.
@@ -465,7 +587,7 @@ public:
      *
      * @return uint32_t : Return the reserved id
      */
-    logstore_id_t reserve_store_id();
+    [[nodiscard]] logstore_id_t reserve_store_id();
 
     /**
      * @brief Unreserve the logstore id. It does not immediately unregisters and persist the unregistered map, but it
@@ -473,14 +595,14 @@ public:
      *
      * @param store_id
      */
-    void unreserve_store_id(uint32_t store_id);
+    void unreserve_store_id(const uint32_t store_id);
 
     /**
      * @brief Is the given store id already reserved.
      *
      * @return true or false
      */
-    bool is_reserved_store_id(logstore_id_t id);
+    [[nodiscard]] bool is_reserved_store_id(const logstore_id_t id);
 
     /**
      * @brief This method persist the store ids reserved/unreserved inside the vdev super block
@@ -496,7 +618,7 @@ public:
      */
     void get_registered_store_ids(std::vector< logstore_id_t >& registered, std::vector< logstore_id_t >& garbage);
 
-    crc32_t get_prev_crc() const { return m_last_crc; }
+    [[nodiscard]] crc32_t get_prev_crc() const { return m_last_crc; }
 
     /**
      * @brief This method attempts to block the log flush and then make a callback cb. If it is already blocked,
@@ -505,7 +627,7 @@ public:
      * @param cb Callback
      * @return true or false based on if it is able to block the flush right away.
      */
-    bool try_lock_flush(const flush_blocked_callback& cb);
+    [[nodiscard]] bool try_lock_flush(const flush_blocked_callback& cb);
 
     /**
      * @brief Unblock the flush. While unblocking if there are other requests to block or any flush pending it first
@@ -519,23 +641,23 @@ public:
      * @param key : the key containing log id that needs to be truncate up to;
      */
     void truncate(const logdev_key& key);
-    void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
+    void meta_blk_found(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
 
-    void update_store_meta(const logstore_id_t idx, const logstore_meta& meta, bool persist_now);
+    void update_store_meta(const logstore_id_t idx, const logstore_meta& meta, const bool persist_now);
 
 private:
-    LogGroup* make_log_group(uint32_t estimated_records) {
+    [[nodiscard]] LogGroup* make_log_group(const uint32_t estimated_records) {
         m_log_group_idx = !m_log_group_idx;
         m_log_group_pool[m_log_group_idx].reset(estimated_records);
         return &m_log_group_pool[m_log_group_idx];
     }
 
-    LogGroup* prepare_flush(int32_t estimated_record);
-    void do_flush(LogGroup* lg);
+    [[nodiscard]] LogGroup* prepare_flush(const int32_t estimated_record);
+    void do_flush(LogGroup* const lg);
     void flush_if_needed(const uint32_t new_record_size = 0, logid_t new_idx = -1);
-    void flush_by_size(const uint32_t min_threshold, const uint32_t new_record_size = 0, logid_t new_idx = -1);
-    void on_flush_completion(LogGroup* lg);
-    void do_load(uint64_t offset);
+    void flush_by_size(const uint32_t min_threshold, const uint32_t new_record_size = 0, const logid_t new_idx = -1);
+    void on_flush_completion(LogGroup* const lg);
+    void do_load(const uint64_t offset);
 
 #if 0
     log_group_header* read_validate_header(uint8_t* buf, uint32_t size, bool* read_more);
@@ -549,20 +671,20 @@ private:
     boost::intrusive_ptr< HomeStoreBase > m_hb; // Back pointer to homestore
     std::unique_ptr< sisl::StreamTracker< log_record > >
         m_log_records;                               // The container which stores all in-memory log records
-    std::atomic< logid_t > m_log_idx = 0;            // Generator of log idx
-    std::atomic< int64_t > m_pending_flush_size = 0; // How much flushable logs are pending
-    std::atomic< bool > m_is_flushing = false; // Is LogDev currently flushing (so far supports one flusher at a time)
-    bool m_stopped = false; // Is Logdev stopped. We don't need lock here, because it is updated under flush lock
+    std::atomic< logid_t > m_log_idx{0};             // Generator of log idx
+    std::atomic< int64_t > m_pending_flush_size{0};  // How much flushable logs are pending
+    std::atomic< bool > m_is_flushing{false}; // Is LogDev currently flushing (so far supports one flusher at a time)
+    bool m_stopped{false}; // Is Logdev stopped. We don't need lock here, because it is updated under flush lock
     std::map< logid_t, logstore_id_t > m_garbage_store_ids;
     Clock::time_point m_last_flush_time;
 
-    logid_t m_last_flush_idx = -1; // Track last flushed and truncated log idx
-    logid_t m_last_truncate_idx = -1;
+    logid_t m_last_flush_idx{-1}; // Track last flushed and truncated log idx
+    logid_t m_last_truncate_idx{-1};
 
-    crc32_t m_last_crc = INVALID_CRC32_VALUE;
-    log_append_comp_callback m_append_comp_cb = nullptr;
-    log_found_callback m_logfound_cb = nullptr;
-    store_found_callback m_store_found_cb = nullptr;
+    crc32_t m_last_crc{INVALID_CRC32_VALUE};
+    log_append_comp_callback m_append_comp_cb{nullptr};
+    log_found_callback m_logfound_cb{nullptr};
+    store_found_callback m_store_found_cb{nullptr};
 
     // LogDev Info block related fields
     std::mutex m_meta_mutex;
@@ -574,11 +696,11 @@ private:
 
     // Timer handle
     iomgr::timer_handle_t m_flush_timer_hdl;
-    void* m_sb_cookie = nullptr;
+    void* m_sb_cookie{nullptr};
 
     // Pool for creating log group
     LogGroup m_log_group_pool[2];
-    uint32_t m_log_group_idx = 1;
+    uint32_t m_log_group_idx{1};
 }; // LogDev
 
 } // namespace homestore

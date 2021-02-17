@@ -1,35 +1,52 @@
+#include <atomic>
+#include <condition_variable>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <random>
+#include <string>
+#include <vector>
+
+#include <api/vol_interface.hpp>
 #include <benchmark/benchmark.h>
+#include <iomgr/aio_drive_interface.hpp>
+#include <iomgr/iomgr.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include "../log_store.hpp"
-#include <iomgr/iomgr.hpp>
-#include <iomgr/aio_drive_interface.hpp>
-#include <api/vol_interface.hpp>
-#include <string>
-#include <malloc.h>
+
 #include "engine/common/homestore_header.hpp"
 
+#include "../log_store.hpp"
+
 using namespace homestore;
-THREAD_BUFFER_INIT;
+THREAD_BUFFER_INIT
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-#define ITERATIONS 100000
-#define THREADS 64
+static constexpr size_t ITERATIONS{100000};
+static constexpr size_t THREADS{64};
 
 typedef std::function< void(logstore_seq_num_t) > test_log_store_comp_cb_t;
 
 class SampleLogStoreClient {
 public:
     friend class SampleDB;
-    SampleLogStoreClient(std::shared_ptr< HomeLogStore > store, uint64_t nentries, const test_log_store_comp_cb_t& cb) :
-            m_comp_cb(cb),
-            m_nentries(nentries) {
+    SampleLogStoreClient(std::shared_ptr< HomeLogStore > store, const uint64_t nentries, const test_log_store_comp_cb_t& cb) :
+            m_comp_cb{cb}, m_nentries{nentries} {
         init(store);
         generate_rand_data(nentries);
     }
 
-    explicit SampleLogStoreClient(uint64_t nentries, const test_log_store_comp_cb_t& cb) :
+    explicit SampleLogStoreClient(const uint64_t nentries, const test_log_store_comp_cb_t& cb) :
             SampleLogStoreClient(home_log_store_mgr.create_new_log_store(false /* append_mode */), nentries, cb) {}
+
+    SampleLogStoreClient(const SampleLogStoreClient&) = delete;
+    SampleLogStoreClient& operator=(const SampleLogStoreClient&) = delete;
+    SampleLogStoreClient(SampleLogStoreClient&&) noexcept = delete;
+    SampleLogStoreClient& operator=(SampleLogStoreClient&&) noexcept = delete;
+    ~SampleLogStoreClient() = default;
 
     void init(std::shared_ptr< HomeLogStore > store) {
         m_log_store = store;
@@ -38,29 +55,33 @@ public:
         m_nth_entry.store(0);
     }
 
-    bool append() {
-        auto ind = m_nth_entry.fetch_add(1, std::memory_order_acq_rel);
+    [[nodiscard]] bool append() {
+        const auto ind{m_nth_entry.fetch_add(1, std::memory_order_acq_rel)};
         if (ind >= m_nentries) { return false; }
         DLOGDEBUG("Appending log entry for ind {}", ind);
-        m_log_store->append_async(
-            sisl::io_blob((uint8_t*)m_data[ind].data(), (uint32_t)m_data[ind].size(), false), nullptr,
-            [this](logstore_seq_num_t seq_num, sisl::io_blob& iob, bool success, void* ctx) { m_comp_cb(seq_num); });
+        [[maybe_unused]] const auto seq_num{m_log_store->append_async(
+            sisl::io_blob(reinterpret_cast<uint8_t*>(m_data[ind].data()), static_cast<uint32_t>(m_data[ind].size()), false), nullptr,
+            [this](logstore_seq_num_t seq_num, sisl::io_blob& iob, bool success, void* ctx) { m_comp_cb(seq_num); })};
         return true;
     }
 
-    void read(logstore_seq_num_t lsn) { auto b = m_log_store->read_sync(lsn); }
+    void read(const logstore_seq_num_t lsn) { [[maybe_unused]] const auto b{m_log_store->read_sync(lsn)}; }
 
-    void on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
+    void on_log_found(const logstore_seq_num_t lsn, const log_buffer buf, void* const ctx) {
         // LOGDEBUG("Recovered lsn {}:{} with log data of size {}", m_log_store->get_store_id(), lsn, buf.size())
     }
 
 private:
-    void generate_rand_data(uint64_t nentries) {
-        static unsigned char ch = 0;
+    void generate_rand_data(const uint64_t nentries) {
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine re{rd()};
+        std::uniform_int_distribution< uint32_t > data_size{0, max_data_size - 1};
+
+        static unsigned char ch{0};
         m_data.reserve(nentries);
 
-        for (auto i = 0u; i < nentries; ++i) {
-            auto sz = rand() % max_data_size;
+        for (uint64_t i{0}; i < nentries; ++i) {
+            const auto sz{data_size(re)};
             m_data.emplace_back(std::string(sz, ++ch));
         }
     }
@@ -78,19 +99,25 @@ private:
 
 class SampleDB {
 public:
+    SampleDB(const SampleDB&) = delete;
+    SampleDB& operator=(const SampleDB&) = delete;
+    SampleDB(SampleDB&&) noexcept = delete;
+    SampleDB& operator=(SampleDB&&) noexcept = delete;
+    ~SampleDB() = default;
+
     static SampleDB& instance() {
         static SampleDB inst;
         return inst;
     }
 
-    void start_homestore(const std::string& devname, uint32_t nthreads, uint32_t n_log_stores, uint32_t n_entries,
-                         uint32_t qdepth, bool restart = false) {
+    void start_homestore(const std::string& devname, const uint32_t nthreads, const uint32_t n_log_stores, const uint32_t n_entries,
+                         const uint32_t qdepth, const bool restart = false) {
         if (restart) { shutdown(); }
 
         std::vector< dev_info > device_info;
         std::mutex start_mutex;
         std::condition_variable cv;
-        bool inited = false;
+        bool inited{false};
 
         m_q_depth = qdepth;
         LOGINFO("opening {} device of size {} ", devname);
@@ -100,14 +127,14 @@ public:
         iomanager.start(nthreads);
 
         if (restart) {
-            for (auto i = 0u; i < n_log_stores; ++i) {
+            for (uint32_t i{0}; i < n_log_stores; ++i) {
                 home_log_store_mgr.open_log_store(
                     i, false /* append_mode */,
                     [i, this](std::shared_ptr< HomeLogStore > log_store) { m_log_store_clients[i]->init(log_store); });
             }
         }
 
-        uint64_t app_mem_size = 2ul * 1024 * 1024 * 1024;
+        constexpr uint64_t app_mem_size{static_cast< uint64_t >(2) * 1024 * 1024 * 1024};
         LOGINFO("Initialize and start HomeBlks with memory size = {}", app_mem_size);
 
         boost::uuids::string_generator gen;
@@ -119,7 +146,7 @@ public:
         params.init_done_cb = [&](std::error_condition err, const out_params& params) {
             LOGINFO("HomeBlks Init completed");
             {
-                std::unique_lock< std::mutex > lk(start_mutex);
+                std::unique_lock< std::mutex > lk{start_mutex};
                 inited = true;
             }
             cv.notify_all();
@@ -129,11 +156,13 @@ public:
         params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
         VolInterface::init(params, restart);
 
-        std::unique_lock< std::mutex > lk(start_mutex);
-        cv.wait(lk, [&] { return inited; });
+        {
+            std::unique_lock< std::mutex > lk{start_mutex};
+            cv.wait(lk, [&] { return inited; });
+        }
 
         if (!restart) {
-            for (auto i = 0u; i < n_log_stores; ++i) {
+            for (uint32_t i{0}; i < n_log_stores; ++i) {
                 m_log_store_clients.push_back(std::make_unique< SampleLogStoreClient >(
                     n_entries, std::bind(&SampleDB::on_log_append_completion, this, std::placeholders::_1)));
             }
@@ -156,7 +185,7 @@ public:
     }
 
     void initial_io() {
-        for (auto i = 0u; i < m_q_depth; ++i) {
+        for (decltype(m_q_depth) i{0}; i < m_q_depth; ++i) {
             issue_io();
         }
     }
@@ -167,9 +196,9 @@ public:
         // TODO: Pick a log store later, right now use only 1st
         if (!m_log_store_clients[0]->append()) {
             DLOGDEBUG("Notify that append has reached limit outstanding = {}", m_outstanding.load());
-            bool notify = false;
+            bool notify{false};
             {
-                std::unique_lock< std::mutex > lk(m_pending_mtx);
+                std::unique_lock< std::mutex > lk{m_pending_mtx};
                 notify = m_done = (m_outstanding.fetch_sub(1, std::memory_order_acq_rel) == 1);
             }
             if (notify) {
@@ -179,41 +208,43 @@ public:
         }
     }
 
-    void on_log_append_completion(logstore_seq_num_t lsn) {
-        auto outstanding = m_outstanding.fetch_sub(1, std::memory_order_acq_rel);
-        if (outstanding < (int)m_q_depth) { issue_io(); }
+    void on_log_append_completion(const logstore_seq_num_t lsn) {
+        const auto outstanding{m_outstanding.fetch_sub(1, std::memory_order_acq_rel)};
+        if (outstanding < static_cast<int>(m_q_depth)) { issue_io(); }
     }
 
     void wait_for_appends() {
         {
-            std::unique_lock< std::mutex > lk(m_pending_mtx);
+            std::unique_lock< std::mutex > lk{m_pending_mtx};
             m_pending_cv.wait(lk, [&] { return (m_done); });
         }
         DLOGDEBUG("All appends completed and waiting is done, outstanding = {}", m_outstanding.load());
     }
 
 private:
+    SampleDB() = default;
+
     std::function< void() > m_on_schedule_io_cb;
     std::vector< std::unique_ptr< SampleLogStoreClient > > m_log_store_clients;
 
-    std::atomic< int32_t > m_outstanding = 0;
-    uint32_t m_q_depth = 0;
-    bool m_done = false;
+    std::atomic< int32_t > m_outstanding{0};
+    uint32_t m_q_depth{0};
+    bool m_done{false};
     std::mutex m_pending_mtx;
     std::condition_variable m_pending_cv;
 };
 
 #define sample_db SampleDB::instance()
 
-void test_append(benchmark::State& state) {
-    uint64_t counter = 0U;
-    for (auto _ : state) { // Loops upto iteration count
+static void test_append(benchmark::State& state) {
+    [[maybe_unused]] uint64_t counter{0};
+    for ([[maybe_unused]] auto current_state : state) { // Loops upto iteration count
         sample_db.kickstart_io();
         sample_db.wait_for_appends();
     }
 }
 
-void setup() {
+static void setup() {
     sample_db.start_homestore(SDS_OPTIONS["dev_name"].as< std::string >(),   // devname
                               SDS_OPTIONS["num_threads"].as< uint32_t >(),   // num threads
                               SDS_OPTIONS["num_logstores"].as< uint32_t >(), // num log stores
@@ -222,7 +253,7 @@ void setup() {
                               false                                          // restart
     );
 }
-void teardown() { sample_db.shutdown(); }
+static void teardown() { sample_db.shutdown(); }
 
 SDS_OPTIONS_ENABLE(logging, log_store_benchmark)
 SDS_OPTION_GROUP(log_store_benchmark,
@@ -244,7 +275,7 @@ SDS_OPTION_GROUP(log_store_benchmark,
 // BENCHMARK(test_append)->Iterations(10)->Threads(SDS_OPTIONS["num_threads"].as< uint32_t >());
 BENCHMARK(test_append)->Iterations(1);
 
-uint32_t SampleLogStoreClient::max_data_size = 1024;
+uint32_t SampleLogStoreClient::max_data_size{1024};
 int main(int argc, char** argv) {
     SDS_OPTIONS_LOAD(argc, argv, logging, log_store_benchmark)
     sds_logging::SetLogger("log_store_benchmark");

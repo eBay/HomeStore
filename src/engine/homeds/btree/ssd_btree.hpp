@@ -467,7 +467,7 @@ private:
         // will avoid a copy and write directly)
         if (!j_iob.aligned) j_iob.size = blob_to_entry(j_iob)->actual_size;
 
-        m_journal->append_async(
+        [[maybe_unused]] const auto seq_num{m_journal->append_async(
             j_iob, nullptr, ([this, bcp](logstore_seq_num_t seq_num, sisl::io_blob& iob, bool status, void* cookie) {
                 btree_journal_entry* jentry = blob_to_entry(iob);
                 if (jentry->op != journal_op::BTREE_CREATE) {
@@ -486,7 +486,7 @@ private:
                 iob.buf_free();
 
                 try_cp_start(bcp);
-            }));
+            }))};
     }
 
     static constexpr size_t journal_entry_alloc_increment = 256;

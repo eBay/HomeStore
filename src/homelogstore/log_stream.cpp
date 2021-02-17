@@ -5,14 +5,14 @@
 namespace homestore {
 SDS_LOGGING_DECL(logstore)
 
-log_stream_reader::log_stream_reader(uint64_t device_cursor) {
+log_stream_reader::log_stream_reader(const uint64_t device_cursor) {
     m_hb = HomeStoreBase::safe_instance();
     m_first_group_cursor = device_cursor;
     m_cur_group_cursor = device_cursor;
 }
 
-sisl::byte_view log_stream_reader::next_group(uint64_t* out_dev_offset) {
-    uint64_t min_needed = dma_boundary;
+sisl::byte_view log_stream_reader::next_group(uint64_t* const out_dev_offset) {
+    uint64_t min_needed{dma_boundary};
     sisl::byte_view ret_buf;
 
 read_again:
@@ -24,7 +24,7 @@ read_again:
     if (m_cur_log_buf.size() == 0) { return m_cur_log_buf; } // No more data available.
 
     assert(m_cur_log_buf.size() >= dma_boundary);
-    auto header = (log_group_header*)m_cur_log_buf.bytes();
+    const auto* const header{reinterpret_cast< log_group_header* >(m_cur_log_buf.bytes())};
     if (header->magic_word() != LOG_GROUP_HDR_MAGIC) {
         LOGINFOMOD(logstore, "Logdev data not seeing magic at pos {}, must have come to end of logdev",
                    m_cur_group_cursor);
@@ -43,8 +43,9 @@ read_again:
                 header->nrecords(), m_cur_group_cursor);
 
     // verify crc with data
-    crc32_t cur_crc = crc32_ieee(init_crc32, (unsigned char*)(m_cur_log_buf.bytes()) + sizeof(log_group_header),
-                                 (header->total_size() - sizeof(log_group_header)));
+    const crc32_t cur_crc{
+        crc32_ieee(init_crc32, static_cast< const unsigned char* >(m_cur_log_buf.bytes()) + sizeof(log_group_header),
+                   (header->total_size() - sizeof(log_group_header)))};
     if (cur_crc != header->cur_grp_crc) {
         LOGINFOMOD(logstore, "crc doesn't match {}", m_cur_group_cursor);
         return ret_buf;
@@ -75,12 +76,12 @@ sisl::byte_view log_stream_reader::group_in_next_page() {
     return next_group(&dev_offset);
 }
 
-sisl::byte_view log_stream_reader::read_next_bytes(uint64_t nbytes) {
-    auto buf = sisl::byte_view(nbytes, dma_boundary);
-    auto store = m_hb->get_logdev_blkstore();
+sisl::byte_view log_stream_reader::read_next_bytes(const uint64_t nbytes) {
+    auto buf{sisl::byte_view(nbytes, dma_boundary)};
+    auto store{m_hb->get_logdev_blkstore()};
 
-    auto prev_pos = store->seeked_pos();
-    auto actual_read = store->read((void*)buf.bytes(), nbytes);
+    const auto prev_pos{store->seeked_pos()};
+    auto actual_read{store->read(static_cast<void*>(buf.bytes()), nbytes)};
     LOGTRACEMOD(logstore, "LogStream read {} bytes from offset {} ", actual_read, prev_pos);
     if (actual_read != 0) {
         buf.set_size(actual_read);
@@ -93,7 +94,7 @@ sisl::byte_view log_stream_reader::read_next_bytes(uint64_t nbytes) {
                prev_pos);
     store->lseek(0);
     m_cur_group_cursor = 0;
-    actual_read = store->read((void*)buf.bytes(), nbytes);
+    actual_read = store->read(static_cast<void*>(buf.bytes()), nbytes);
     LOGINFOMOD(logstore, "LogStream read {} bytes from offset 0 ", actual_read);
     buf.set_size(actual_read);
     return buf;

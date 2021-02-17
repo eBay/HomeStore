@@ -1,7 +1,13 @@
+#include <algorithm>
+#include <condition_variable>
+#include <cstring>
+#include <iterator>
+
+#include <fds/vector_pool.hpp>
+
 #include "engine/homestore_base.hpp"
 #include "log_dev.hpp"
 #include "log_store.hpp"
-#include <fds/vector_pool.hpp>
 
 namespace homestore {
 
@@ -9,11 +15,11 @@ SDS_LOGGING_DECL(logstore)
 LogDev::LogDev() = default;
 LogDev::~LogDev() = default;
 
-void LogDev::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
-    m_logdev_meta.meta_buf_found(buf, (void*)mblk);
+void LogDev::meta_blk_found(meta_blk* const mblk, const sisl::byte_view buf, const size_t size) {
+    m_logdev_meta.meta_buf_found(buf, static_cast<void*>(mblk));
 }
 
-void LogDev::start(bool format) {
+void LogDev::start(const bool format) {
     HS_ASSERT(LOGMSG, (m_append_comp_cb != nullptr), "Expected Append callback to be registered");
     HS_ASSERT(LOGMSG, (m_store_found_cb != nullptr), "Expected Log store found callback to be registered");
     HS_ASSERT(LOGMSG, (m_logfound_cb != nullptr), "Expected Logs found callback to be registered");
@@ -25,14 +31,14 @@ void LogDev::start(bool format) {
     // First read the info block
     if (format) {
         HS_ASSERT(LOGMSG, m_logdev_meta.is_empty(), "Expected meta to be not present");
-        m_logdev_meta.create();
+        [[maybe_unused]] auto* const superblock{m_logdev_meta.create()};
         m_hb->get_logdev_blkstore()->update_data_start_offset(0);
     } else {
         HS_ASSERT(LOGMSG, !m_logdev_meta.is_empty(), "Expected meta data to be read already before loading");
-        auto store_list = m_logdev_meta.load();
+        const auto store_list{m_logdev_meta.load()};
 
         // Notify to the caller that a new log store was reserved earlier and it is being loaded, with its meta info
-        for (auto& spair : store_list) {
+        for (const auto& spair : store_list) {
             m_store_found_cb(spair.first, spair.second);
         }
 
@@ -49,21 +55,21 @@ void LogDev::start(bool format) {
 }
 
 void LogDev::stop() {
-    std::condition_variable _cv;
+    std::condition_variable cv;
 
     HS_ASSERT(LOGMSG, (m_pending_flush_size == 0),
               "LogDev stop attempted while writes to logdev are pending completion");
-    bool locked_now = try_lock_flush([this, &_cv]() {
+    const bool locked_now{try_lock_flush([this, &cv]() {
         m_stopped = true;
-        _cv.notify_one();
-    });
+        cv.notify_one();
+    })};
 
     if (!locked_now) { LOGINFOMOD(logstore, "LogDev stop is queued because of pending flush or truncation ongoing"); }
 
     {
         // Wait for the stopped to be completed
-        std::unique_lock< std::mutex > lk(m_block_flush_q_mutex);
-        _cv.wait(lk, [&] { return m_stopped; });
+        std::unique_lock< std::mutex > lk{m_block_flush_q_mutex};
+        cv.wait(lk, [&] { return m_stopped; });
     }
 
     iomanager.cancel_timer(m_flush_timer_hdl);
@@ -83,33 +89,33 @@ void LogDev::stop() {
     LOGINFOMOD(logstore, "LogDev stopped successfully");
 }
 
-void LogDev::do_load(uint64_t device_cursor) {
-    log_stream_reader lstream(device_cursor);
-    logid_t loaded_from = -1;
+void LogDev::do_load(const uint64_t device_cursor) {
+    log_stream_reader lstream{device_cursor};
+    logid_t loaded_from{-1};
 
     do {
         uint64_t group_dev_offset;
-        auto buf = lstream.next_group(&group_dev_offset);
+        const auto buf{lstream.next_group(&group_dev_offset)};
         if (buf.size() == 0) {
             assert_next_pages(lstream);
             LOGINFOMOD(logstore, "LogDev loaded log_idx in range of [{} - {}]", loaded_from, m_log_idx - 1);
             break;
         }
 
-        log_group_header* header = (log_group_header*)buf.bytes();
+        const log_group_header* const header{reinterpret_cast< log_group_header* >(buf.bytes())};
         if (loaded_from != -1) {
             HS_ASSERT_CMP(RELEASE, header->start_idx(), ==, m_log_idx, "log indx is not the expected one");
         }
         if (loaded_from == -1) { loaded_from = header->start_idx(); }
 
         // Loop through each record within the log group and do a callback
-        auto i = 0u;
+        decltype(header->nrecords()) i{0};
         while (i < header->nrecords()) {
-            auto* rec = header->nth_record(i);
-            uint32_t data_offset = (rec->offset + (rec->is_inlined ? 0 : header->oob_data_offset));
+            const auto* const rec{header->nth_record(i)};
+            const uint32_t data_offset{(rec->offset + (rec->is_inlined ? 0 : header->oob_data_offset))};
 
             // Do a callback on the found log entry
-            sisl::byte_view b = buf;
+            sisl::byte_view b{buf};
             b.move_forward(data_offset);
             b.set_size(rec->size);
             if (m_last_truncate_idx == -1) { m_last_truncate_idx = header->start_idx() + i; }
@@ -122,7 +128,7 @@ void LogDev::do_load(uint64_t device_cursor) {
 
     // Update the tail offset with where we finally end up loading, so that new append entries can be written from
     // here.
-    auto store = m_hb->get_logdev_blkstore();
+    auto store{m_hb->get_logdev_blkstore()};
     store->update_tail_offset(store->seeked_pos());
 }
 
@@ -131,11 +137,11 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
                "Logdev reached offset, which has invalid header, because of end of stream. Validating if it is "
                "indeed the case or there is any corruption");
 
-    auto cursor = lstream.group_cursor();
-    for (auto i = 0u; i < HS_DYNAMIC_CONFIG(logstore->recovery_max_blks_read_for_additional_check); ++i) {
-        auto buf = lstream.group_in_next_page();
+    const auto cursor{lstream.group_cursor()};
+    for (uint32_t i{0}; i < HS_DYNAMIC_CONFIG(logstore->recovery_max_blks_read_for_additional_check); ++i) {
+        const auto buf{lstream.group_in_next_page()};
         if (buf.size() != 0) {
-            log_group_header* header = (log_group_header*)buf.bytes();
+            const log_group_header* const header{reinterpret_cast< log_group_header* >(buf.bytes())};
             HS_ASSERT_CMP(RELEASE, m_log_idx.load(std::memory_order_acquire), >, header->start_idx(),
                           "Found a header with future log_idx after reaching end of log. Hence rbuf which was read "
                           "must have been corrupted, Header: {}",
@@ -145,25 +151,25 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
     m_hb->get_logdev_blkstore()->lseek(cursor); // Reset back
 }
 
-int64_t LogDev::append_async(logstore_id_t store_id, logstore_seq_num_t seq_num, uint8_t* data, uint32_t size,
-                             void* cb_context) {
-    auto idx = m_log_idx.fetch_add(1, std::memory_order_acq_rel);
+int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, uint8_t* const data, const uint32_t size,
+                             void* const cb_context) {
+    const auto idx{m_log_idx.fetch_add(1, std::memory_order_acq_rel)};
     m_log_records->create(idx, store_id, seq_num, data, size, cb_context);
     flush_if_needed(size, idx);
     return idx;
 }
 
 log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_record_header) {
-    static thread_local sisl::aligned_unique_ptr< uint8_t > _read_buf;
+    static thread_local sisl::aligned_unique_ptr< uint8_t > read_buf;
 
     // First read the offset and read the log_group. Then locate the log_idx within that and get the actual data
     // Read about 4K of buffer
-    if (!_read_buf) { _read_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(dma_boundary, initial_read_size); }
-    auto rbuf = _read_buf.get();
-    auto store = m_hb->get_logdev_blkstore();
-    store->pread((void*)rbuf, initial_read_size, key.dev_offset);
+    if (!read_buf) { read_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(dma_boundary, initial_read_size); }
+    auto* rbuf{read_buf.get()};
+    auto* const store{m_hb->get_logdev_blkstore()};
+    store->pread(static_cast<void*>(rbuf), initial_read_size, key.dev_offset);
 
-    auto header = (log_group_header*)rbuf;
+    const auto* const header{reinterpret_cast< log_group_header* >(rbuf)};
     HS_ASSERT_CMP(RELEASE, header->magic_word(), ==, LOG_GROUP_HDR_MAGIC, "Log header corrupted with magic mismatch!");
     HS_ASSERT_CMP(RELEASE, header->start_idx(), <=, key.idx, "log key offset does not match with log_idx");
     HS_ASSERT_CMP(RELEASE, (header->start_idx() + header->nrecords()), >, key.idx,
@@ -174,24 +180,24 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
     // We can only do crc match in read if we have read all the blocks. We don't want to aggressively read more data
     // than we need to just to compare CRC for read operation. It can be done during recovery.
     if (header->total_size() <= initial_read_size) {
-        crc32_t crc = crc32_ieee(init_crc32, ((uint8_t*)rbuf) + sizeof(log_group_header),
-                                 header->total_size() - sizeof(log_group_header));
+        const crc32_t crc{crc32_ieee(init_crc32, reinterpret_cast<const uint8_t*>(rbuf) + sizeof(log_group_header),
+                                     header->total_size() - sizeof(log_group_header))};
         HS_ASSERT_CMP(RELEASE, header->this_group_crc(), ==, crc, "CRC mismatch on read data");
     }
 
-    serialized_log_record* record_header = header->nth_record(key.idx - header->start_log_idx);
-    uint32_t data_offset = (record_header->offset + (record_header->is_inlined ? 0 : header->oob_data_offset));
+    const serialized_log_record* const record_header{header->nth_record(key.idx - header->start_log_idx)};
+    const uint32_t data_offset{(record_header->offset + (record_header->is_inlined ? 0 : header->oob_data_offset))};
 
-    log_buffer b((size_t)record_header->size);
+    const log_buffer b{static_cast< uint32_t >(record_header->size)};
     if ((data_offset + b.size()) < initial_read_size) {
-        std::memcpy((void*)b.bytes(), (void*)(rbuf + data_offset),
+        std::memcpy(static_cast<void*>(b.bytes()), static_cast< const void*>(rbuf + data_offset),
                     b.size()); // Already read them enough, copy the data
     } else {
         // Round them data offset to dma boundary in-order to make sure pread on direct io succeed. We need to skip
         // the rounded portion while copying to user buffer
-        auto rounded_data_offset = sisl::round_down(data_offset, HS_STATIC_CONFIG(drive_attr.align_size));
-        auto rounded_size =
-            sisl::round_up(b.size() + data_offset - rounded_data_offset, HS_STATIC_CONFIG(drive_attr.align_size));
+        const auto rounded_data_offset{sisl::round_down(data_offset, HS_STATIC_CONFIG(drive_attr.align_size))};
+        const auto rounded_size{
+            sisl::round_up(b.size() + data_offset - rounded_data_offset, HS_STATIC_CONFIG(drive_attr.align_size))};
 
         // Allocate a fresh aligned buffer, if size cannot fit standard size
         if (rounded_size > initial_read_size) { rbuf = hs_iobuf_alloc(rounded_size); }
@@ -201,8 +207,9 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
                     "data_offset={} size={} rounded_data_offset={} rounded_size={}",
                     initial_read_size, key.idx, key.dev_offset, data_offset, b.size(), rounded_data_offset,
                     rounded_size);
-        store->pread((void*)rbuf, rounded_size, key.dev_offset + rounded_data_offset);
-        memcpy((void*)b.bytes(), (void*)(rbuf + data_offset - rounded_data_offset), b.size());
+        store->pread(static_cast<void*>(rbuf), rounded_size, key.dev_offset + rounded_data_offset);
+        std::memcpy(static_cast< void* >(b.bytes()), static_cast< const void* >(rbuf + data_offset - rounded_data_offset),
+               b.size());
 
         // Free the buffer in case we allocated above
         if (rounded_size > initial_read_size) { iomanager.iobuf_free(rbuf); }
@@ -213,27 +220,27 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
 }
 
 uint32_t LogDev::reserve_store_id() {
-    std::unique_lock lg(m_meta_mutex);
+    std::unique_lock lg{m_meta_mutex};
     return m_logdev_meta.reserve_store(true /* persist_now */);
 }
 
-void LogDev::unreserve_store_id(uint32_t store_id) {
-    std::unique_lock lg(m_meta_mutex);
+void LogDev::unreserve_store_id(const uint32_t store_id) {
+    std::unique_lock lg{m_meta_mutex};
 
     /* Get the current log_idx as marker and insert into garbage store id. Upon device truncation, these ids will
      * be reclaimed */
-    auto log_id = m_log_idx.load(std::memory_order_acquire) - 1;
+    const auto log_id{m_log_idx.load(std::memory_order_acquire) - 1};
     m_garbage_store_ids.insert(std::pair< logid_t, logstore_id_t >(log_id, store_id));
 }
 
 void LogDev::get_registered_store_ids(std::vector< logstore_id_t >& registered, std::vector< logstore_id_t >& garbage) {
-    std::unique_lock lg(m_meta_mutex);
+    std::unique_lock lg{m_meta_mutex};
     for (const auto& id : m_logdev_meta.reserved_store_ids()) {
         registered.push_back(id);
     }
 
     garbage.clear();
-    for (auto& elem : m_garbage_store_ids) {
+    for (const auto& elem : m_garbage_store_ids) {
         garbage.push_back(elem.second);
     }
 }
@@ -241,11 +248,11 @@ void LogDev::get_registered_store_ids(std::vector< logstore_id_t >& registered, 
 /*
  * This method prepares the log records to be flushed and returns the log_group which is fully prepared
  */
-LogGroup* LogDev::prepare_flush(int32_t estimated_records) {
-    int64_t flushing_upto_idx = -1;
+LogGroup* LogDev::prepare_flush(const int32_t estimated_records) {
+    int64_t flushing_upto_idx{-1};
 
     assert(estimated_records > 0);
-    auto lg = make_log_group((uint32_t)estimated_records);
+    auto* const lg{make_log_group(static_cast<uint32_t>(estimated_records))};
     m_log_records->foreach_active(m_last_flush_idx + 1, [&](int64_t idx, int64_t upto_idx, log_record& record) -> bool {
         if (lg->add_record(record, idx)) {
             flushing_upto_idx = idx;
@@ -275,13 +282,14 @@ LogGroup* LogDev::prepare_flush(int32_t estimated_records) {
 void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
     // If after adding the record size, if we have enough to flush or if its been too much time before we actually
     // flushed, attempt to flush by setting the atomic bool variable.
-    auto pending_sz = m_pending_flush_size.fetch_add(new_record_size, std::memory_order_relaxed) + new_record_size;
-    bool flush_by_size = (pending_sz >= LogDev::flush_data_threshold_size());
-    bool flush_by_time = !flush_by_size && pending_sz &&
-        (get_elapsed_time_us(m_last_flush_time) > HS_DYNAMIC_CONFIG(logstore.max_time_between_flush_us));
+    const auto pending_sz{m_pending_flush_size.fetch_add(new_record_size, std::memory_order_relaxed) + new_record_size};
+    const bool flush_by_size{(pending_sz >= LogDev::flush_data_threshold_size())};
+    const bool flush_by_time{
+        !flush_by_size && pending_sz &&
+        (get_elapsed_time_us(m_last_flush_time) > HS_DYNAMIC_CONFIG(logstore.max_time_between_flush_us))};
 
     if ((iomanager.am_i_worker_reactor() || iomanager.am_i_tight_loop_reactor()) && (flush_by_size || flush_by_time)) {
-        bool expected_flushing = false;
+        bool expected_flushing{false};
         if (m_is_flushing.compare_exchange_strong(expected_flushing, true, std::memory_order_acq_rel)) {
             LOGTRACEMOD(
                 logstore,
@@ -298,7 +306,8 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
                 unlock_flush();
                 return;
             }
-            auto lg = prepare_flush(new_idx - m_last_flush_idx + 4); // Estimate 4 more extra in case of parallel writes
+            auto* const lg{
+                prepare_flush(new_idx - m_last_flush_idx + 4)}; // Estimate 4 more extra in case of parallel writes
             if (sisl_unlikely(!lg)) {
                 LOGTRACEMOD(logstore, "Log idx {} last_flush_idx {} prepare flush failed", new_idx, m_last_flush_idx);
                 unlock_flush();
@@ -317,19 +326,19 @@ void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
     }
 }
 
-void LogDev::do_flush(LogGroup* lg) {
-    auto* store = m_hb->get_logdev_blkstore();
+void LogDev::do_flush(LogGroup* const lg) {
+    auto* const store{m_hb->get_logdev_blkstore()};
     // auto offset = store->reserve(lg->data_size() + sizeof(log_group_header));
 
     HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logdev_flush_records_distribution, lg->nrecords());
     HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logdev_flush_size_distribution, lg->actual_data_size());
     auto req = logdev_req::make_request();
     req->m_log_group = lg;
-    store->pwritev(lg->iovecs().data(), (int)lg->iovecs().size(), lg->m_log_dev_offset, req);
+    store->pwritev(lg->iovecs().data(), static_cast<int>(lg->iovecs().size()), lg->m_log_dev_offset, req);
 }
 
 void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
-    auto req = to_logdev_req(bs_req);
+    const auto req{to_logdev_req(bs_req)};
     if (req->is_read) {
         // update logdev read metrics;
     } else {
@@ -338,14 +347,14 @@ void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req
     }
 }
 
-void LogDev::on_flush_completion(LogGroup* lg) {
+void LogDev::on_flush_completion(LogGroup* const lg) {
     LOGTRACEMOD(logstore, "Flush completed for logid[{} - {}]", lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
     m_log_records->complete(lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
     m_last_flush_idx = lg->m_flush_log_idx_upto;
-    auto flush_ld_key = logdev_key{m_last_flush_idx, lg->m_log_dev_offset};
+    const auto flush_ld_key{logdev_key{m_last_flush_idx, lg->m_log_dev_offset}};
 
     for (auto idx = lg->m_flush_log_idx_from; idx <= lg->m_flush_log_idx_upto; ++idx) {
-        auto& record = m_log_records->at(idx);
+        auto& record{m_log_records->at(idx)};
         m_append_comp_cb(record.store_id, logdev_key{idx, lg->m_log_dev_offset}, flush_ld_key,
                          lg->m_flush_log_idx_upto - idx, record.context);
     }
@@ -356,13 +365,13 @@ void LogDev::on_flush_completion(LogGroup* lg) {
 
 bool LogDev::try_lock_flush(const flush_blocked_callback& cb) {
     {
-        std::unique_lock lk(m_block_flush_q_mutex);
+        std::unique_lock lk{m_block_flush_q_mutex};
         if (m_stopped) {
             LOGWARNMOD(logstore, "Trying to lock a flush on a stopped logdev, not locking the flush");
             return false;
         }
 
-        bool expected_flushing = false;
+        bool expected_flushing{false};
         if (!m_is_flushing.compare_exchange_strong(expected_flushing, true, std::memory_order_acq_rel)) {
             // Flushing is blocked already, add it to the callback q
             if (m_block_flush_q == nullptr) { m_block_flush_q = sisl::VectorPool< flush_blocked_callback >::alloc(); }
@@ -379,7 +388,7 @@ void LogDev::unlock_flush() {
     std::vector< flush_blocked_callback >* flush_q{nullptr};
 
     if (m_block_flush_q != nullptr) {
-        std::unique_lock lk(m_block_flush_q_mutex);
+        std::unique_lock lk{m_block_flush_q_mutex};
         flush_q = m_block_flush_q;
         m_block_flush_q = nullptr;
     }
@@ -402,7 +411,7 @@ void LogDev::unlock_flush() {
 }
 
 void LogDev::truncate(const logdev_key& key) {
-    auto store = m_hb->get_logdev_blkstore();
+    auto* const store{m_hb->get_logdev_blkstore()};
 
     LOGINFOMOD(logstore, "Truncating log device upto log_id={} vdev_offset={} truncated {} log records", key.idx,
                key.dev_offset, key.idx - m_last_truncate_idx);
@@ -411,13 +420,13 @@ void LogDev::truncate(const logdev_key& key) {
     m_last_truncate_idx = key.idx;
 
     {
-        std::unique_lock< std::mutex > lk(m_meta_mutex);
+        std::unique_lock< std::mutex > lk{m_meta_mutex};
 
         // Update the start offset to be read upon restart
         m_logdev_meta.update_start_dev_offset(key.dev_offset, false /* persist_now */);
 
         // Now that store is truncated, we can reclaim the store ids which are garbaged (if any) earlier
-        for (auto it = m_garbage_store_ids.cbegin(); it != m_garbage_store_ids.cend();) {
+        for (auto it{std::cbegin(m_garbage_store_ids)}; it != std::cend(m_garbage_store_ids);) {
             if (it->first > key.idx) break;
 
             LOGINFOMOD(logstore, "Garbage collecting the log store id {} log_idx={}", it->second, it->first);
@@ -429,19 +438,19 @@ void LogDev::truncate(const logdev_key& key) {
     }
 }
 
-void LogDev::update_store_meta(const logstore_id_t idx, const logstore_meta& meta, bool persist_now) {
-    std::unique_lock lg(m_meta_mutex);
+void LogDev::update_store_meta(const logstore_id_t idx, const logstore_meta& meta, const bool persist_now) {
+    std::unique_lock lg{m_meta_mutex};
     m_logdev_meta.update_store_meta(idx, meta, persist_now);
 }
 
 /////////////////////////////// LogDevMetadata Section ///////////////////////////////////////
 logdev_superblk* LogDevMetadata::create() {
-    auto req_sz = required_sb_size(0);
+    const auto req_sz{required_sb_size(0)};
     m_raw_buf = hs_create_byte_view(req_sz, meta_blk_mgr->is_aligned_buf_needed(req_sz));
     m_sb = new (m_raw_buf.bytes()) logdev_superblk();
 
-    logstore_meta* m = (logstore_meta*)m_sb->store_meta;
-    std::fill_n(m, store_capacity(), logstore_meta::default_value());
+    logstore_meta* const smeta{m_sb->get_logstore_meta()};
+    std::fill_n(smeta, store_capacity(), logstore_meta::default_value());
 
     m_id_reserver = std::make_unique< sisl::IDReserver >(store_capacity());
     persist();
@@ -456,10 +465,10 @@ void LogDevMetadata::reset() {
     m_store_info.clear();
 }
 
-void LogDevMetadata::meta_buf_found(const sisl::byte_view& buf, void* meta_cookie) {
+void LogDevMetadata::meta_buf_found(const sisl::byte_view& buf, void* const meta_cookie) {
     m_meta_mgr_cookie = meta_cookie;
     m_raw_buf = buf;
-    m_sb = (logdev_superblk*)m_raw_buf.bytes();
+    m_sb = reinterpret_cast<logdev_superblk*>(m_raw_buf.bytes());
 }
 
 std::vector< std::pair< logstore_id_t, logstore_meta > > LogDevMetadata::load() {
@@ -470,9 +479,9 @@ std::vector< std::pair< logstore_id_t, logstore_meta > > LogDevMetadata::load() 
     HS_RELEASE_ASSERT_NE(m_raw_buf.bytes(), nullptr, "Load called without getting metadata");
     HS_RELEASE_ASSERT_LE(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Logdev super blk version mismatch");
 
-    logstore_meta* smeta = (logstore_meta*)m_sb->store_meta;
-    logstore_id_t idx = 0;
-    auto n = 0u;
+    const logstore_meta* const smeta{m_sb->get_logstore_meta()};
+    logstore_id_t idx{0};
+    decltype(m_sb->num_stores) n{0};
     while (n < m_sb->num_stores) {
         if (logstore_meta::is_valid(smeta[idx])) {
             m_store_info.insert(idx);
@@ -487,19 +496,20 @@ std::vector< std::pair< logstore_id_t, logstore_meta > > LogDevMetadata::load() 
 
 void LogDevMetadata::persist() {
     if (m_meta_mgr_cookie) {
-        meta_blk_mgr->update_sub_sb((void*)m_raw_buf.bytes(), m_raw_buf.size(), m_meta_mgr_cookie);
+        meta_blk_mgr->update_sub_sb(static_cast<const void*>(m_raw_buf.bytes()), m_raw_buf.size(), m_meta_mgr_cookie);
     } else {
-        meta_blk_mgr->add_sub_sb("LOG_DEV", (void*)m_raw_buf.bytes(), m_raw_buf.size(), m_meta_mgr_cookie);
+        meta_blk_mgr->add_sub_sb("LOG_DEV", static_cast<const void*>(m_raw_buf.bytes()), m_raw_buf.size(), m_meta_mgr_cookie);
     }
 }
 
-logstore_id_t LogDevMetadata::reserve_store(bool persist_now) {
-    auto idx = m_id_reserver->reserve(); // Search the id reserver and alloc an idx;
+logstore_id_t LogDevMetadata::reserve_store(const bool persist_now) {
+    const auto idx{m_id_reserver->reserve()}; // Search the id reserver and alloc an idx;
     m_store_info.insert(idx);
 
     // Write the meta inforation on-disk meta
-    resize_if_needed(); // In case the idx falls out of the alloc boundary, resize them
-    logstore_meta* smeta = (logstore_meta*)m_sb->store_meta;
+    [[maybe_unused]] const bool resize_result{
+        resize_if_needed()}; // In case the idx falls out of the alloc boundary, resize them
+    logstore_meta* const smeta{m_sb->get_logstore_meta()};
     logstore_meta::init(smeta[idx]);
     ++m_sb->num_stores;
     if (persist_now) { persist(); }
@@ -507,54 +517,54 @@ logstore_id_t LogDevMetadata::reserve_store(bool persist_now) {
     return idx;
 }
 
-void LogDevMetadata::unreserve_store(logstore_id_t idx, bool persist_now) {
+void LogDevMetadata::unreserve_store(const logstore_id_t idx, const bool persist_now) {
     m_id_reserver->unreserve(idx); // Search the id reserver and alloc an idx;
     m_store_info.erase(idx);
 
-    bool shrunk = resize_if_needed(); // In case the idx unregistered falls out of boundary, we can shrink them
+    const bool shrunk{resize_if_needed()}; // In case the idx unregistered falls out of boundary, we can shrink them
     if (!shrunk) {
         // We have not shrunk the store info, so we need to explicitly clear the store meta in on-disk meta
-        logstore_meta* smeta = (logstore_meta*)m_sb->store_meta;
+        logstore_meta* const smeta{m_sb->get_logstore_meta()};
         logstore_meta::clear(smeta[idx]);
     }
     --m_sb->num_stores;
     if (persist_now) { persist(); }
 }
 
-void LogDevMetadata::update_store_meta(const logstore_id_t idx, const logstore_meta& meta, bool persist_now) {
+void LogDevMetadata::update_store_meta(const logstore_id_t idx, const logstore_meta& meta, const bool persist_now) {
     // Update the in-memory copy
     m_store_info.insert(idx);
 
     // Update the on-disk copy
-    resize_if_needed();
-    logstore_meta* smeta = (logstore_meta*)m_sb->store_meta;
+    [[maybe_unused]] const bool resize_result{resize_if_needed()};
+    logstore_meta* const smeta{m_sb->get_logstore_meta()};
     smeta[idx] = meta;
 
     if (persist_now) { persist(); }
 }
 
 logstore_meta& LogDevMetadata::mutable_store_meta(const logstore_id_t idx) {
-    logstore_meta* smeta = (logstore_meta*)m_sb->store_meta;
+    logstore_meta* const smeta{m_sb->get_logstore_meta()};
     return smeta[idx];
 }
 
-void LogDevMetadata::update_start_dev_offset(uint64_t offset, bool persist_now) {
+void LogDevMetadata::update_start_dev_offset(const uint64_t offset, const bool persist_now) {
     m_sb->start_dev_offset = offset;
     if (persist_now) { persist(); }
 }
 
 bool LogDevMetadata::resize_if_needed() {
-    auto req_sz = required_sb_size((m_store_info.size() == 0) ? 0 : *m_store_info.rbegin());
+    const auto req_sz{required_sb_size((m_store_info.size() == 0) ? 0 : *m_store_info.rbegin())};
     if (req_sz != m_raw_buf.size()) {
-        auto old_buf = m_raw_buf;
+        const auto old_buf{m_raw_buf};
 
-        auto m_raw_buf = hs_create_byte_view(req_sz, meta_blk_mgr->is_aligned_buf_needed(req_sz));
+        auto m_raw_buf{hs_create_byte_view(req_sz, meta_blk_mgr->is_aligned_buf_needed(req_sz))};
         m_sb = new (m_raw_buf.bytes()) logdev_superblk();
 
-        logstore_meta* m = (logstore_meta*)m_sb->store_meta;
-        std::fill_n(m, store_capacity(), logstore_meta::default_value());
+        logstore_meta* const smeta{m_sb->get_logstore_meta()};
+        std::fill_n(smeta, store_capacity(), logstore_meta::default_value());
 
-        std::memcpy(m_raw_buf.bytes(), old_buf.bytes(), std::min(old_buf.size(), m_raw_buf.size()));
+        std::memcpy(static_cast<void*>(m_raw_buf.bytes()), static_cast<const void*>(old_buf.bytes()), std::min(old_buf.size(), m_raw_buf.size()));
         return true;
     } else {
         return false;
