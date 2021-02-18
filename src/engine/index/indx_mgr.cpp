@@ -900,6 +900,13 @@ void IndxMgr::do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_
     cur_icp->user_free_blkid_list.push_back(free_list);
     cur_icp->indx_size.fetch_sub(free_size, std::memory_order_relaxed);
 
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("unmap_post_free_blks_abort_before_cp")) {
+        LOGINFO("aborting because of flip");
+        raise(SIGKILL);
+    }
+#endif
+
     if (ret != btree_status_t::success) {
         HS_ASSERT_CMP(RELEASE, m_recovery_mode, ==, false);
         HS_ASSERT_CMP(DEBUG, ret, ==, btree_status_t::resource_full);
@@ -911,6 +918,12 @@ void IndxMgr::do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_
                             }));
     } else {
         m_cp_mgr->attach_cb(hcp, ([this, ireq, unmap_meta_blk_cntx](bool success) {
+#ifdef _PRERELEASE
+                                if (homestore_flip->test_flip("unmap_pre_sb_remove_abort")) {
+                                    LOGINFO("aborting because of flip");
+                                    raise(SIGKILL);
+                                }
+#endif
                                 /* remove the meta blk which is used to track unmap progress */
                                 MetaBlkMgr::instance()->remove_sub_sb(unmap_meta_blk_cntx);
                                 if (!m_recovery_mode) {
@@ -950,6 +963,13 @@ void IndxMgr::unmap_indx_async(const indx_req_ptr& ireq) {
     void* unmap_meta_blk_cntx = nullptr;
 
     auto b = write_cp_unmap_sb(unmap_meta_blk_cntx, ireq);
+
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("unmap_post_sb_write_abort")) {
+        LOGINFO("aborting because of flip");
+        raise(SIGKILL);
+    }
+#endif    
 
     /* call completion cb */
     m_io_cb(ireq, ireq->indx_err);

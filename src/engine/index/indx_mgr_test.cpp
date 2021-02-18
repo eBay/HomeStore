@@ -28,6 +28,11 @@ struct indx_mgr_test_cfg {
     bool cp_bitmap_abort = 0;            // crash while bitmap is persisting
     bool cp_wb_flush_abort = 0;          // abort in middle of wb flush
     bool cp_logstore_truncate_abort = 0; // crash after logstore is truncated
+
+    bool unmap_post_sb_write_abort = false;
+    bool unmap_pre_sb_remove_abort = false;
+    bool unmap_post_free_blks_abort_before_cp = false;
+    bool unmap_pre_second_cp_abort = false;
 };
 
 indx_mgr_test_cfg indx_cfg;
@@ -63,6 +68,12 @@ class indx_test : public module_test {
         }
         if (indx_cfg.indx_del_partial_free_indx_blks) { indx_del_partial_free_indx_blks(); }
         if (indx_cfg.indx_del_free_blks_completed) { indx_del_free_blks_completed(); }
+        if (indx_cfg.unmap_post_sb_write_abort) { unmap_post_sb_write_abort(); }
+        if (indx_cfg.unmap_pre_sb_remove_abort) { unmap_pre_sb_remove_abort(); }
+        if (indx_cfg.unmap_post_free_blks_abort_before_cp) { 
+            unmap_post_free_blks_abort_before_cp();
+        }
+        if (indx_cfg.unmap_pre_second_cp_abort) { unmap_pre_second_cp_abort(); }
 
         if (is_cp_abort_test()) { suspend_cp(); }
     }
@@ -78,14 +89,10 @@ class indx_test : public module_test {
     }
 
     void indx_cp_abort_test() {
-        FlipCondition null_cond;
-        FlipFrequency freq;
-        freq.set_count(1);
-        freq.set_percent(100);
-        if (indx_cfg.cp_bitmap_abort) { m_fc.inject_noreturn_flip("indx_cp_bitmap_abort", {null_cond}, freq); }
-        if (indx_cfg.cp_wb_flush_abort) { m_fc.inject_noreturn_flip("indx_cp_wb_flush_abort", {null_cond}, freq); }
+        if (indx_cfg.cp_bitmap_abort) { set_flip_point("indx_cp_bitmap_abort"); }
+        if (indx_cfg.cp_wb_flush_abort) { set_flip_point("indx_cp_wb_flush_abort");  }
         if (indx_cfg.cp_logstore_truncate_abort) {
-            m_fc.inject_noreturn_flip("indx_cp_logstore_truncate_abort", {null_cond}, freq);
+            set_flip_point("indx_cp_logstore_truncate_abort");
         }
         IndxMgr::hs_cp_resume();
     }
@@ -103,12 +110,7 @@ class indx_test : public module_test {
         switch (m_flip_state) {
         case flip_state::FLIP_NOT_SET:
             if (get_elapsed_time_sec(m_start_time) > run_time_sec) {
-                // set flip point
-                FlipCondition null_cond;
-                FlipFrequency freq;
-                freq.set_count(1);
-                freq.set_percent(100);
-                m_fc.inject_noreturn_flip("indx_create_suspend_cp", {null_cond}, freq);
+                set_flip_point("indx_create_suspend_cp");
                 m_flip_state = FLIP_SET;
             }
             break;
@@ -125,39 +127,45 @@ class indx_test : public module_test {
     }
 
     void indx_del_partial_free_data_blks_after_meta_write() {
-        // set flip point
-        FlipCondition null_cond;
-        FlipFrequency freq;
-        freq.set_count(100);
-        freq.set_percent(100);
-        m_fc.inject_noreturn_flip("indx_del_partial_free_data_blks_after_meta_write", {null_cond}, freq);
+        set_flip_point("indx_del_partial_free_data_blks_after_meta_write");
     }
 
     void indx_del_partial_free_data_blks_before_meta_write() {
-        // set flip point
-        FlipCondition null_cond;
-        FlipFrequency freq;
-        freq.set_count(1);
-        freq.set_percent(100);
-        m_fc.inject_noreturn_flip("indx_del_partial_free_data_blks_before_meta_write", {null_cond}, freq);
+        set_flip_point("indx_del_partial_free_data_blks_before_meta_write");
     }
 
     void indx_del_partial_free_indx_blks() {
-        // set flip point
-        FlipCondition null_cond;
-        FlipFrequency freq;
-        freq.set_count(1);
-        freq.set_percent(100);
-        m_fc.inject_noreturn_flip("indx_del_partial_free_indx_blks", {null_cond}, freq);
+        set_flip_point("indx_del_partial_free_indx_blks");
     }
 
     void indx_del_free_blks_completed() {
-        // set flip point
+        set_flip_point("indx_del_free_blks_completed");
+    }
+
+    void unmap_post_sb_write_abort() {
+        set_flip_point("unmap_post_sb_write_abort");
+    }
+
+    void unmap_pre_sb_remove_abort() {
+        set_flip_point("unmap_pre_sb_remove_abort");
+    }
+
+    void unmap_post_free_blks_abort_before_cp() {
+        set_flip_point("unmap_post_free_blks_abort_before_cp");
+    }
+
+    void unmap_pre_second_cp_abort() {
+        set_flip_point("unmap_pre_second_cp_abort");
+    }
+
+private:
+    void set_flip_point(const std::string flip_name) {
         FlipCondition null_cond;
         FlipFrequency freq;
         freq.set_count(1);
         freq.set_percent(100);
-        m_fc.inject_noreturn_flip("indx_del_free_blks_completed", {null_cond}, freq);
+        m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
+        LOGDEBUG("Flip " + flip_name + " set");
     }
 
 protected:
@@ -190,7 +198,15 @@ SDS_OPTION_GROUP(
     (cp_wb_flush_abort, "", "cp_wb_flush_abort", "cp_wb_flush_abort", ::cxxopts::value< bool >()->default_value("0"),
      ""),
     (cp_logstore_truncate_abort, "", "cp_logstore_truncate_abort", "cp_logstore_truncate_abort",
-     ::cxxopts::value< bool >()->default_value("0"), ""))
+     ::cxxopts::value< bool >()->default_value("0"), ""),
+    (unmap_post_sb_write_abort, "", "unmap_post_sb_write_abort", "abort after unmap sb is written",
+    ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+    (unmap_pre_sb_remove_abort, "", "unmap_pre_sb_remove_abort", "abort after cp is complete and before sb is removed",
+    ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+    (unmap_post_free_blks_abort_before_cp, "", "unmap_post_free_blks_abort_before_cp", "abort after unmap free blks collected and before cp",
+    ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+    (unmap_pre_second_cp_abort, "", "unmap_pre_second_cp_abort", "abort after the first blk alloc CP with unmap is completed "
+    "and before the next blk alloc cp", ::cxxopts::value< bool >()->default_value("false"), "true or false"))
 
 void indx_mgr_test_main() {
     indx_cfg.indx_create_first_cp_abort = SDS_OPTIONS["indx_create_first_cp_abort"].as< bool >();
@@ -204,6 +220,11 @@ void indx_mgr_test_main() {
     indx_cfg.cp_bitmap_abort = SDS_OPTIONS["cp_bitmap_abort"].as< bool >();
     indx_cfg.cp_wb_flush_abort = SDS_OPTIONS["cp_wb_flush_abort"].as< bool >();
     indx_cfg.cp_logstore_truncate_abort = SDS_OPTIONS["cp_logstore_truncate_abort"].as< bool >();
+    indx_cfg.unmap_post_sb_write_abort = SDS_OPTIONS["unmap_post_sb_write_abort"].as< bool >();
+    indx_cfg.unmap_pre_sb_remove_abort = SDS_OPTIONS["unmap_pre_sb_remove_abort"].as< bool >();
+    indx_cfg.unmap_post_free_blks_abort_before_cp = 
+        SDS_OPTIONS["unmap_post_free_blks_abort_before_cp"].as< bool >();
+    indx_cfg.unmap_pre_second_cp_abort = SDS_OPTIONS["unmap_pre_second_cp_abort"].as< bool >();
     if (indx_cfg.free_blk_cnt) {
         HS_SETTINGS_FACTORY().modifiable_settings(
             [](auto& s) { s.resource_limits.free_blk_cnt = indx_cfg.free_blk_cnt; });
