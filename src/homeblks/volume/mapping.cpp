@@ -75,10 +75,31 @@ mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique
     btree_cfg.blkstore = (void*)m_hb->get_index_blkstore();
     btree_cfg.trigger_cp_cb = trigger_cp_cb;
 
-    m_bt = MappingBtreeDeclType::create_btree(btree_sb, btree_cfg, btree_cp_sb);
+    m_bt = MappingBtreeDeclType::create_btree(btree_sb, btree_cfg, btree_cp_sb,
+                                              std::bind(&mapping::split_key_recovery, this, placeholders::_1,
+                                                        placeholders::_2, placeholders::_3, placeholders::_4));
 }
 
 mapping::~mapping() { delete m_bt; }
+
+void mapping::split_key_recovery(const MappingKey& key, const MappingValue& val, const MappingKey& split_key,
+                                 std::vector< std::pair< MappingKey, MappingValue > >& replace_kv) {
+    HS_ASSERT_CMP(RELEASE, split_key.start(), ==, split_key.end());
+    HS_ASSERT_CMP(RELEASE, key.start(), <=, split_key.start());
+    HS_ASSERT_CMP(RELEASE, key.end(), >, split_key.end());
+    auto start_lba = key.start();
+    auto end_lba = split_key.end();
+    uint16_t offset = 0;
+
+    /* split it into two */
+    add_new_interval(start_lba, end_lba, val, offset, replace_kv);
+
+    offset += get_nlbas(end_lba, start_lba);
+    start_lba = end_lba + 1;
+    end_lba = key.end();
+
+    add_new_interval(start_lba, end_lba, val, offset, replace_kv);
+}
 
 btree_status_t mapping::read_indx(const indx_req_ptr& ireq, const read_indx_comp_cb_t& read_cb) {
     auto vreq = static_cast< volume_req* >(ireq.get());

@@ -216,7 +216,7 @@ public:
         } else {
             /* TODO add error messages */
             for (uint32_t i = 0; i < req->missing_pieces.size(); i++) {
-                free(req->missing_pieces[i].ptr);
+                iomanager.iobuf_free(req->missing_pieces[i].ptr);
             }
         }
 
@@ -236,7 +236,7 @@ public:
                                                        req->missing_pieces[i].ptr);
             if (!inserted) {
                 /* someone else has inserted it */
-                free(req->missing_pieces[i].ptr);
+                iomanager.iobuf_free(req->missing_pieces[i].ptr);
             }
         }
         HISTOGRAM_OBSERVE(m_metrics, blkstore_cache_read_latency, get_elapsed_time_us(start_time));
@@ -499,6 +499,7 @@ public:
         for (uint32_t i = 0; i < missing_mp.size(); i++) {
             // Create a new block of memory for the missing piece
             uint8_t* ptr = hs_iobuf_alloc(missing_mp[i].second);
+            HS_ASSERT_NOTNULL(RELEASE, ptr, "ptr is null");
 
             int64_t sz = (int64_t)missing_mp[i].second;
             COUNTER_INCREMENT(m_metrics, blkstore_cache_miss_size, sz);

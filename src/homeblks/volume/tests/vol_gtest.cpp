@@ -118,6 +118,7 @@ struct TestCfg {
     bool read_verify = false;
     bool remove_file = true;
     bool verify_only = false;
+    bool pre_init_verify = true;
     bool is_abort = false;
     bool vol_create_del = false;
 
@@ -1626,7 +1627,7 @@ TEST_F(VolTest, recovery_io_test) {
     this->start_homestore();
 
     std::unique_ptr< VolVerifyJob > verify_job;
-    if (tcfg.verify_type_set() || tcfg.verify_only) {
+    if (tcfg.pre_init_verify || tcfg.verify_only) {
         verify_job = std::make_unique< VolVerifyJob >(this);
         this->start_job(verify_job.get(), wait_type_t::for_completion);
     }
@@ -1934,6 +1935,8 @@ SDS_OPTION_GROUP(
     (expected_vol_state, "", "expected_vol_state", "volume state expected during boot",
      ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (verify_only, "", "verify_only", "verify only boot", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (pre_init_verify, "", "pre_init_verify", "pre_init_verify", ::cxxopts::value< bool >()->default_value("true"),
+     "validate data before starting io"),
     (abort, "", "abort", "abort", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (flip, "", "flip", "flip", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (delete_volume, "", "delete_volume", "delete_volume", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
@@ -2003,6 +2006,7 @@ int main(int argc, char* argv[]) {
     _gcfg.max_num_writes = SDS_OPTIONS["max_num_writes"].as< uint64_t >();
     _gcfg.enable_crash_handler = SDS_OPTIONS["enable_crash_handler"].as< uint32_t >();
     _gcfg.verify_type = static_cast< verify_type_t >(SDS_OPTIONS["verify_type"].as< uint32_t >());
+    _gcfg.pre_init_verify = SDS_OPTIONS["pre_init_verify"].as< bool >();
     _gcfg.read_verify = SDS_OPTIONS["read_verify"].as< uint64_t >() ? true : false;
     _gcfg.load_type = static_cast< load_type_t >(SDS_OPTIONS["load_type"].as< uint32_t >());
     _gcfg.remove_file = SDS_OPTIONS["remove_file"].as< uint32_t >();

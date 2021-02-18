@@ -683,6 +683,14 @@ public:
     static uint64_t get_end_key_from_cursor(BtreeQueryCursor& cur);
 
 private:
+    /* It split a key and value.
+     * @key :- Split this key into two
+     * @value :- split this value as per the key
+     * @split_key :- key should be split around split_key
+     * @replace_kv :- add the split keys and values in replace_kv
+     */
+    void split_key_recovery(const MappingKey& key, const MappingValue& val, const MappingKey& split_key,
+                            std::vector< std::pair< MappingKey, MappingValue > >& replace_kv);
     btree_status_t update_indx_tbl(const indx_req_ptr& ireq, const btree_cp_ptr& bcp, bool active_btree_update = true);
     btree_status_t get_alloc_blks_cb(std::vector< std::pair< MappingKey, MappingValue > >& match_kv,
                                      std::vector< std::pair< MappingKey, MappingValue > >& result_kv,

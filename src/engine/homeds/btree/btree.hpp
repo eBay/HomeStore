@@ -63,8 +63,10 @@ template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_t
 class Btree {
     typedef std::function< void(V& mv) > free_blk_callback;
     typedef std::function< void() > destroy_btree_comp_callback;
+    typedef std::function< void(const K& k, const V& v, const K& split_key,
+                                std::vector< std::pair< K, V > >& replace_kv) >
+        split_key_callback;
 
-public:
 private:
     bnodeid_t m_root_node;
     homeds::thread::RWLock m_btree_lock;
@@ -79,6 +81,7 @@ private:
     std::atomic< uint64_t > m_total_nodes = 0;
     uint32_t m_node_size = 4096;
     btree_cp_sb m_last_cp_sb;
+    split_key_callback m_split_key_cb;
 #ifndef NDEBUG
     std::atomic< uint64_t > m_req_id = 0;
 #endif
@@ -161,11 +164,12 @@ public:
         return bt;
     }
 
-    static btree_t* create_btree(btree_super_block& btree_sb, BtreeConfig& cfg, btree_cp_sb* cp_sb) {
+    static btree_t* create_btree(btree_super_block& btree_sb, BtreeConfig& cfg, btree_cp_sb* cp_sb,
+                                 const split_key_callback& split_key_cb) {
         Btree* bt = new Btree(cfg);
         auto impl_ptr = btree_store_t::init_btree(bt, cfg);
         bt->m_btree_store = std::move(impl_ptr);
-        bt->init_recovery(btree_sb, cp_sb);
+        bt->init_recovery(btree_sb, cp_sb, split_key_cb);
         LOGINFO("btree recovered and created {} node size {}", cfg.get_name(), cfg.get_node_size());
         return bt;
     }
@@ -197,8 +201,9 @@ public:
         return (create_root_node());
     }
 
-    void init_recovery(btree_super_block btree_sb, btree_cp_sb* cp_sb) {
+    void init_recovery(btree_super_block btree_sb, btree_cp_sb* cp_sb, const split_key_callback& split_key_cb) {
         m_sb = btree_sb;
+        m_split_key_cb = split_key_cb;
         if (cp_sb) { memcpy(&m_last_cp_sb, cp_sb, sizeof(m_last_cp_sb)); }
         do_common_init(true);
         m_root_node = m_sb.root_node;
@@ -922,8 +927,17 @@ private:
                     success = false;
                     goto exit_on_error;
                 }
+                BT_LOG_ASSERT_CMP(parent_key.compare_start(&last_key), >=, 0, parent_node,
+                                  "last key {} parent_key {} child {}", last_key.to_string(), parent_key.to_string(),
+                                  my_node->to_string());
+                if (parent_key.compare_start(&last_key) < 0) {
+                    success = false;
+                    goto exit_on_error;
+                }
             }
-        } else if (parent_node) {
+        }
+
+        if (parent_node && indx != 0) {
             K parent_key;
             parent_node->get_nth_key(indx - 1, &parent_key, false);
 
@@ -931,6 +945,13 @@ private:
             my_node->get_nth_key(0, &first_key, false);
             BT_LOG_ASSERT_CMP(first_key.compare(&parent_key), >, 0, parent_node, "my node {}", my_node->to_string());
             if (first_key.compare(&parent_key) <= 0) {
+                success = false;
+                goto exit_on_error;
+            }
+
+            BT_LOG_ASSERT_CMP(parent_key.compare_start(&first_key), <, 0, parent_node, "my node {}",
+                              my_node->to_string());
+            if (parent_key.compare_start(&first_key) > 0) {
                 success = false;
                 goto exit_on_error;
             }
@@ -2152,9 +2173,31 @@ private:
         THIS_BT_LOG(INFO, btree_generics, , "Journal replay: split key {}, split indx {} child_node1 {}",
                     split_key.to_string(), ret.end_of_search_index, child_node1->to_string());
         /* if it is not found than end_of_search_index points to first ind which is greater than split key */
-        auto ind = ret.end_of_search_index;
-        if (ret.found) { ind = ind + 1; } // we don't want to move split key */
-        child_node1->move_out_to_right_by_entries(m_btree_cfg, child_node2, child_node1->get_total_entries() - ind);
+        auto split_ind = ret.end_of_search_index;
+        if (ret.found) { ++split_ind; } // we don't want to move split key */
+        if (child_node1->is_leaf() && split_ind < (int)child_node1->get_total_entries()) {
+            K key;
+            child_node1->get_nth_key(split_ind, &key, false);
+
+            if (split_key.compare_start(&key) >= 0) { /* we need to split the key range */
+                THIS_BT_LOG(INFO, btree_generics, , "splitting a leaf node key {}", key.to_string());
+                V v;
+                child_node1->get_nth_value(split_ind, &v, false);
+                vector< pair< K, V > > replace_kv;
+                child_node1->remove(split_ind, split_ind);
+                m_split_key_cb(key, v, split_key, replace_kv);
+                for (auto& pair : replace_kv) {
+                    auto status = child_node1->insert(pair.first, pair.second);
+                    BT_RELEASE_ASSERT((status == btree_status_t::success), child_node1, "unexpected insert failure");
+                }
+                auto ret = child_node1->find(split_key, nullptr, false);
+                BT_RELEASE_ASSERT((ret.found && (ret.end_of_search_index == split_ind)), child_node1,
+                                  "found new indx {}, old split indx{}", ret.end_of_search_index, split_ind);
+                ++split_ind;
+            }
+        }
+        child_node1->move_out_to_right_by_entries(m_btree_cfg, child_node2,
+                                                  child_node1->get_total_entries() - split_ind);
 
         child_node2->set_next_bnode(child_node1->get_next_bnode());
         child_node2->set_gen(j_child_nodes[1]->node_gen());
@@ -2475,14 +2518,18 @@ private:
             if (ind > 0) {
                 parent_node->get_nth_key(ind - 1, &parent_key, false);
                 HS_ASSERT_CMP(RELEASE, child_first_key.compare(&parent_key), >, 0);
+                HS_ASSERT_CMP(RELEASE, parent_key.compare_start(&child_first_key), <, 0);
             }
         } else {
             parent_node->get_nth_key(ind, &parent_key, false);
             HS_ASSERT_CMP(RELEASE, child_first_key.compare(&parent_key), <=, 0);
             HS_ASSERT_CMP(RELEASE, child_last_key.compare(&parent_key), <=, 0);
+            HS_ASSERT_CMP(RELEASE, parent_key.compare_start(&child_first_key), >=, 0);
+            HS_ASSERT_CMP(RELEASE, parent_key.compare_start(&child_first_key), >=, 0);
             if (ind != 0) {
                 parent_node->get_nth_key(ind - 1, &parent_key, false);
                 HS_ASSERT_CMP(RELEASE, child_first_key.compare(&parent_key), >, 0);
+                HS_ASSERT_CMP(RELEASE, parent_key.compare_start(&child_first_key), <, 0);
             }
         }
     }
@@ -2515,6 +2562,7 @@ private:
         child_node->get_first_key(&child_key);
         parent_node->get_nth_key(ind, &parent_key, false);
         HS_ASSERT_CMP(RELEASE, child_key.compare(&parent_key), >, 0);
+        HS_ASSERT_CMP(RELEASE, parent_key.compare_start(&child_key), <, 0);
     }
 
     BtreeNodePtr alloc_leaf_node() {

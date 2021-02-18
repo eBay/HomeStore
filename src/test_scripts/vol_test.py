@@ -100,17 +100,17 @@ def recovery_nightly(num_iteration=10):
     i = 1
     while i < num_iteration:
         
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --verify_type=3 --abort=1 --flip=1 --remove_file=0"
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --pre_init_verify=false --abort=1 --flip=1 --remove_file=0"
         subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
         
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --verify_type=3 --abort=0 --flip=1 --remove_file=0"
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --pre_init_verify=false --abort=0 --flip=1 --remove_file=0"
         subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
 
         s = "recovery test iteration" + repr(i) + "passed" 
         print(s)
         i += 1
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --remove_file=1 --delete_volume=1 --verify_type=2"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --remove_file=1 --delete_volume=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery test completed")
 
@@ -322,19 +322,19 @@ def vol_create_delete_test():
     recovery_nightly_with_create_del()
 
 def vol_io_flip_test():
-    cmd_opts = "--gtest_filter=*init* --mod_list=\"index\" --remove_file=0 --run_time=1200 --cp_bitmap_abort=true --max_volume=3"
+    cmd_opts = "--gtest_filter=*init* --mod_list=\"index\" --remove_file=0 --run_time=600 --cp_bitmap_abort=true --max_volume=3 --max_num_writes=1000000"
     subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=*recovery* --remove_file=0 --run_time=1200 --delete_volume=0 --max_volume=3"
+    cmd_opts = "--gtest_filter=*recovery* --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
     
-    cmd_opts = "--gtest_filter=*recovery* --mod_list=\"index\" --remove_file=0 --run_time=1200 --delete_volume = 0 --cp_wb_flush_abort=true --max_volume=3"
+    cmd_opts = "--gtest_filter=*recovery* --mod_list=\"index\" --remove_file=0 --run_time=600 --delete_volume = 0 --cp_wb_flush_abort=true --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
     subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=*recovery* --remove_file=0 --run_time=1200 --delete_volume=0 --max_volume=3"
+    cmd_opts = "--gtest_filter=*recovery* --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
     
-    cmd_opts = "--gtest_filter=*recovery* --mod_list=\"index\" --remove_file=0 --run_time=1200 --delete_volume=0 --cp_logstore_truncate_abort=true --max_volume=3"
+    cmd_opts = "--gtest_filter=*recovery* --mod_list=\"index\" --remove_file=0 --run_time=600 --delete_volume=0 --cp_logstore_truncate_abort=true --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
     subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=*recovery* --remove_file=0 --run_time=1200 --delete_volume=0 --max_volume=3"
+    cmd_opts = "--gtest_filter=*recovery* --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
 
 # It is subset of nightly which should be completed in an hour
