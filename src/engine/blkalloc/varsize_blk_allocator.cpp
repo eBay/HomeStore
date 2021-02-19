@@ -31,13 +31,15 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const
         m_state{BlkAllocatorState::WAITING},
         m_rand_portion_num_generator{0, static_cast< blk_count_t >(cfg.get_total_portions() - 1)},
         m_metrics{cfg.get_name().c_str()} {
-    // NOTE: Number of blocks must be modulo word size so locks do not fall on same word
-    assert(m_cfg.get_blks_per_portion() % m_bm->word_size() == 0);
 
     BLKALLOC_LOG(INFO, "Creating VarsizeBlkAllocator with config: {}", cfg.to_string());
 
     // TODO: Raise exception when blk_size > page_size or total blks is less than some number etc...
     m_bm = std::make_unique< sisl::Bitset >(cfg.get_total_blks(), chunk_id, HS_STATIC_CONFIG(drive_attr.align_size));
+
+    // NOTE: Number of blocks must be modulo word size so locks do not fall on same word
+    HS_RELEASE_ASSERT_EQ(m_cfg.get_blks_per_portion() % m_bm->word_size(), 0,
+                 "Blocks per portion must be multiple of bitmpa word size.")
 
     // Create segments with as many blk groups as configured.
     const blk_cap_t seg_nblks{cfg.get_total_blks() / cfg.get_total_segments()};
