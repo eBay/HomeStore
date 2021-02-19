@@ -3,15 +3,17 @@
 //
 #pragma once
 
-#include <string>
-#include <vector>
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <string>
+#include <vector>
+
+#include <fds/bitword.hpp>
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 #include <utility/enum.hpp>
-#include <fds/bitword.hpp>
+
 #include "blk.h"
 
 namespace homestore {
@@ -56,6 +58,7 @@ static constexpr std::array< std::pair< slab_idx_t, uint8_t >, slab_tbl_size > n
      {7, 114}, {7, 115}, {7, 116}, {7, 117}, {7, 118}, {7, 119}, {7, 120}, {7, 121}, {7, 122}, {7, 123}, {7, 124},
      {7, 125}, {7, 126}, {7, 127}, {8, 0}}};
 
+#pragma pack(1)
 struct blk_cache_entry {
 public:
     blk_cache_entry() : blk_cache_entry{0, 0, 0} {}
@@ -85,7 +88,8 @@ private:
     blk_num_t m_blk_num;            // Blk number within the chunk
     blk_count_serialized_t m_nblks; // Total number of blocks
     blk_temp_t m_temp;              // Temperature of each page
-} __attribute__((packed, aligned(1)));
+};
+#pragma pack()
 
 struct blk_cache_alloc_req {
     blk_cache_alloc_req(const blk_count_t n, const blk_temp_t l, const bool contiguous, const slab_idx_t m = 0) :
@@ -146,7 +150,7 @@ struct blk_cache_fill_session {
     bool overall_refill_done{false};
     std::atomic< blk_cap_t > urgent_refill_blks_count{0}; // Send notification after approx this much blks refilled
 
-    static uint64_t gen_session_id() {
+    [[nodiscard]] static uint64_t gen_session_id() {
         static std::atomic< uint64_t > s_session_id{1};
         return s_session_id.fetch_add(1, std::memory_order_relaxed);
     }
@@ -178,7 +182,7 @@ struct blk_cache_fill_session {
         urgent_refill_blks_count.store(0, std::memory_order_release);
     }
 
-    std::string to_string() const {
+    [[nodiscard]] std::string to_string() const {
         return fmt::format("session={} slab_reqs={} blks_refilled_so_far={} refill_done={}", session_id,
                            fmt::join(slab_requirements, ","), overall_refilled_num_blks, overall_refill_done);
     }
@@ -210,6 +214,11 @@ struct SlabCacheConfig {
 
 class FreeBlkCache {
 public:
+    FreeBlkCache() = default;
+    FreeBlkCache(const FreeBlkCache&) = delete;
+    FreeBlkCache(FreeBlkCache&&) noexcept = delete;
+    FreeBlkCache& operator=(const FreeBlkCache&) = delete;
+    FreeBlkCache& operator=(FreeBlkCache&&) noexcept = delete;
     virtual ~FreeBlkCache() = default;
 
     /**
@@ -222,29 +231,32 @@ public:
      * @param resp
      * @return BlkAllocStatus
      */
-    virtual BlkAllocStatus try_alloc_blks(const blk_cache_alloc_req& req, blk_cache_alloc_resp& resp) = 0;
+    [[nodiscard]] virtual BlkAllocStatus try_alloc_blks(const blk_cache_alloc_req& req, blk_cache_alloc_resp& resp) = 0;
 
-    virtual BlkAllocStatus try_free_blks(const blk_cache_entry& entry, std::vector< blk_cache_entry >& excess_blks,
-                                         blk_count_t& num_zombied) = 0;
-    virtual BlkAllocStatus try_free_blks(const std::vector< blk_cache_entry >& blks,
-                                         std::vector< blk_cache_entry >& excess_blks, blk_count_t& num_zombied) = 0;
-    virtual blk_cap_t try_fill_cache(const blk_cache_fill_req& fill_req, blk_cache_fill_session& fill_session) = 0;
+    [[maybe_unused]] virtual blk_count_t try_free_blks(const blk_cache_entry& entry,
+                                                       std::vector< blk_cache_entry >& excess_blks) = 0;
+    [[maybe_unused]] virtual blk_count_t try_free_blks(const std::vector< blk_cache_entry >& blks,
+                                                       std::vector< blk_cache_entry >& excess_blks) = 0;
+    [[nodiscard]] virtual blk_cap_t try_fill_cache(const blk_cache_fill_req& fill_req,
+                                                   blk_cache_fill_session& fill_session) = 0;
 
-    virtual std::shared_ptr< blk_cache_fill_session > create_cache_fill_session(const bool fill_entire_cache) = 0;
+    [[nodiscard]] virtual std::shared_ptr< blk_cache_fill_session >
+    create_cache_fill_session(const bool fill_entire_cache) = 0;
     virtual void close_cache_fill_session(blk_cache_fill_session& fill_session) = 0;
 
-    virtual blk_num_t total_free_blks() const = 0;
+    [[nodiscard]] virtual blk_num_t total_free_blks() const = 0;
 
-    static slab_idx_t find_slab(const blk_count_t nblks) {
+    [[nodiscard]] static slab_idx_t find_slab(const blk_count_t nblks) {
         if (sisl_unlikely(nblks >= slab_tbl_size)) {
-            return static_cast< slab_idx_t >(sisl::logBase2(static_cast< blk_count_t >(nblks - 1)) + 1);
+            return static_cast< slab_idx_t >((nblks > 1) ? sisl::logBase2(static_cast< blk_count_t >(nblks - 1)) + 1
+                                                         : 0);
         }
         return nblks_to_slab_tbl[nblks];
     }
 
-    static std::pair< slab_idx_t, blk_count_t > find_round_down_slab(const blk_count_t nblks) {
+    [[nodiscard]] static std::pair< slab_idx_t, blk_count_t > find_round_down_slab(const blk_count_t nblks) {
         if (sisl_unlikely(nblks >= slab_tbl_size)) {
-            auto s = find_slab(nblks + 1) - 1;
+            const auto s{find_slab(nblks + 1) - 1};
             return std::make_pair<>(s, nblks - (1 << s));
         }
         return nblks_to_round_down_slab_tbl[nblks];

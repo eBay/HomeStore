@@ -28,9 +28,9 @@ table BlkAllocator {
      * min of memory occupied by (free_blk_cache_size_by_vdev_percent, max_free_blk_cache_memory_percent) */
     max_free_blk_cache_memory_percent: double = 1.0;
 
-    /* Free blk cache slab distribution percentage */
-    //    An example assuming blk_size=4K      [4K,   8K,   16K,  32K,  64K,  128K,256K,512K,1M,  2M,  4M,  8M,  16M ]  
-    // free_blk_slab_distribution : [double] = [20.0, 10.0, 10.0, 10.0, 35.0, 3.0, 3.0, 3.0, 2.0, 1.0, 1.0, 1.0, 1.0]
+    /* Free blk cache slab distribution percentage
+     * An example assuming blk_size=4K is      [4K,   8K,   16K,  32K,  64K,  128K, 256K, 512K, 1M,  2M,  4M,  8M,  16M]  
+     * free_blk_slab_distribution : [double] = [20.0, 10.0, 10.0, 10.0, 35.0, 3.0,  3.0,  3.0,  2.0, 1.0, 1.0, 1.0, 1.0] */
     free_blk_slab_distribution : [double];
 
     /* Percentage of free blks in a slab dedicated for reuse of blks to avoid write amplification. By reusing

@@ -248,6 +248,9 @@ std::error_condition Volume::alloc_blk(volume_req_ptr& vreq, std::vector< BlkId 
     try {
         BlkAllocStatus status = m_hb->get_data_blkstore()->alloc_blk(vreq->nlbas * get_page_size(), hints, bid);
         if (status != BlkAllocStatus::SUCCESS) {
+            if (status == BlkAllocStatus::PARTIAL) {
+                m_hb->get_data_blkstore()->free(bid);
+            }
             LOGERROR("failing IO as it is out of disk space");
             check_and_complete_req(vreq, std::make_error_condition(std::errc::no_space_on_device));
             return std::errc::no_space_on_device;

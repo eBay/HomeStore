@@ -155,7 +155,7 @@ public:
     [[nodiscard]] chunk_num_t get_chunk_num() const { return m_chunk_num; }
 
     /* A blkID represent a page size which is assigned to a blk allocator */
-    [[nodiscard]] uint64_t data_size(const uint32_t page_size) const { return ((uint64_t)get_nblks() * page_size); }
+    [[nodiscard]] uint64_t data_size(const uint32_t page_size) const { return (static_cast<uint64_t>(get_nblks()) * page_size); }
 
     [[nodiscard]] std::string to_string() const {
         return is_valid() ? fmt::format("BlkNum={} nblks={} chunk={}", get_blk_num(), get_nblks(), get_chunk_num())

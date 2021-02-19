@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <iostream>
+#include <thread>
 #include <vector>
 
 #include <flip/flip.hpp>

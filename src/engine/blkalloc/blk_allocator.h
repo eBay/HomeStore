@@ -10,12 +10,12 @@
 
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
-#include <memory>
 
 #include <boost/range/irange.hpp>
 #include <fds/bitset.hpp>
@@ -102,7 +102,7 @@ ENUM(BlkAllocatorState, uint8_t, WAITING, SWEEP_SCHEDULED, SWEEPING, EXITING, DO
 /* Hints for various allocators */
 struct blk_alloc_hints {
     blk_alloc_hints() :
-            desired_temp(0), dev_id_hint(-1), can_look_for_other_dev(true), is_contiguous(false), multiplier(1) {}
+            desired_temp{0}, dev_id_hint{-1}, can_look_for_other_dev{true}, is_contiguous{false}, multiplier{1} {}
 
     blk_temp_t desired_temp;     // Temperature hint for the device
     int dev_id_hint;             // which physical device to pick (hint if any) -1 for don't care
@@ -111,12 +111,12 @@ struct blk_alloc_hints {
     uint32_t multiplier; // blks allocated in a blkid should be a multiple of multiplier
 };
 
-static constexpr blk_temp_t default_temperature() { return 1; }
-
 class BlkAllocPortion {
 private:
     mutable std::mutex m_blk_lock;
+    blk_num_t m_portion_num;
     blk_temp_t m_temperature;
+    blk_num_t m_available_blocks;
 
 public:
     BlkAllocPortion(const blk_temp_t temp = default_temperature()) : m_temperature(temp) {}
@@ -127,8 +127,16 @@ public:
     BlkAllocPortion& operator=(BlkAllocPortion&&) noexcept = delete;
 
     auto portion_auto_lock() const { return std::scoped_lock< std::mutex >(m_blk_lock); }
+    void set_portion_num(const blk_num_t portion_num) { m_portion_num = portion_num; }
+    [[nodiscard]] blk_num_t get_portion_num() const { return m_portion_num; }
+    void set_available_blocks(const blk_num_t available_blocks) { m_available_blocks = available_blocks; }
+    [[nodiscard]] blk_num_t get_available_blocks() const { return m_available_blocks; }
+    [[maybe_unused]] blk_num_t decrease_available_blocks(const blk_num_t count) { return (m_available_blocks -= count); }
+    [[maybe_unused]] blk_num_t increase_available_blocks(const blk_num_t count) { return (m_available_blocks += count); }
     void set_temperature(const blk_temp_t temp) { m_temperature = temp; }
     [[nodiscard]] blk_temp_t temperature() const { return m_temperature; }
+
+    static constexpr blk_temp_t default_temperature() { return 1; }
 };
 
 /* We have the following design requirement it is used in auto recovery mode
@@ -173,8 +181,15 @@ class BlkAllocator {
 public:
     BlkAllocator(const BlkAllocConfig& cfg, const uint32_t id = 0) : m_cfg{cfg}, m_chunk_id{(chunk_num_t)id} {
         m_blk_portions = std::make_unique< BlkAllocPortion[] >(cfg.get_total_portions());
+        for (blk_num_t index{0}; index < cfg.get_total_portions(); ++index)
+        {
+            m_blk_portions[index].set_portion_num(index);
+            m_blk_portions[index].set_available_blocks(m_cfg.get_blks_per_portion());
+        }
         m_auto_recovery = cfg.get_auto_recovery();
         m_disk_bm = std::make_unique< sisl::Bitset >(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
+        // NOTE:  Blocks per portion must be modulo word size so locks do not fall on same word
+        assert(m_cfg.get_blks_per_portion() % m_disk_bm->word_size() == 0);     
     }
     BlkAllocator(const BlkAllocator&) = delete;
     BlkAllocator(BlkAllocator&&) noexcept = delete;
@@ -197,9 +212,11 @@ public:
     }
 
     virtual void inited() {
-        m_alloced_blk_count.fetch_add(m_disk_bm->get_set_count(), std::memory_order_relaxed);
-        if (!m_auto_recovery) { m_disk_bm.reset(); }
-        m_inited = true;
+        if (!m_inited) {
+            m_alloced_blk_count.fetch_add(m_disk_bm->get_set_count(), std::memory_order_relaxed);
+            if (!m_auto_recovery) { m_disk_bm.reset(); }
+            m_inited = true;
+        }
     }
 
     void incr_alloced_blk_count(const blk_count_t nblks) {
@@ -208,7 +225,9 @@ public:
     void decr_alloced_blk_count(const blk_count_t nblks) {
         m_alloced_blk_count.fetch_sub(nblks, std::memory_order_relaxed);
     }
-    [[nodiscard]] int64_t get_alloced_blk_count() const { return m_alloced_blk_count.load(std::memory_order_acquire); }
+    [[nodiscard]] int64_t get_alloced_blk_count() const {
+        return m_alloced_blk_count.load(std::memory_order_acquire);
+    }
 
     [[nodiscard]] bool is_blk_alloced_on_disk(const BlkId& b, const bool use_lock = false) const {
         if (!m_auto_recovery) {
@@ -239,7 +258,7 @@ public:
         /* enable this assert later when reboot is supported */
         // assert(m_auto_recovery || !m_inited);
         if (!m_auto_recovery && m_inited) { return BlkAllocStatus::FAILED; }
-        BlkAllocPortion* portion = blknum_to_portion(in_bid.get_blk_num());
+        BlkAllocPortion* const portion{blknum_to_portion(in_bid.get_blk_num())};
         {
             auto lock{portion->portion_auto_lock()};
             if (m_inited) {
@@ -247,6 +266,7 @@ public:
                                 "Expected disk blks to reset");
             }
             get_disk_bm()->set_bits(in_bid.get_blk_num(), in_bid.get_nblks());
+            portion->decrease_available_blocks(in_bid.get_nblks());
             BLKALLOC_LOG(DEBUG, "blks allocated {} chunk number {}", in_bid.to_string(), m_chunk_id);
         }
         return BlkAllocStatus::SUCCESS;
@@ -255,7 +275,7 @@ public:
     void free_on_disk(const BlkId& b) {
         /* this api should be called only when auto recovery is enabled */
         assert(m_auto_recovery);
-        BlkAllocPortion* portion = blknum_to_portion(b.get_blk_num());
+        BlkAllocPortion* const portion{blknum_to_portion(b.get_blk_num())};
         {
             auto lock{portion->portion_auto_lock()};
             if (m_inited) {
@@ -275,6 +295,7 @@ public:
                 }
             }
             get_disk_bm()->reset_bits(b.get_blk_num(), b.get_nblks());
+            portion->increase_available_blocks(b.get_nblks());
         }
     }
 
@@ -288,10 +309,11 @@ public:
     virtual BlkAllocStatus alloc(BlkId& bid) = 0;
     virtual BlkAllocStatus alloc(const blk_count_t nblks, const blk_alloc_hints& hints,
                                  std::vector< BlkId >& out_blkid) = 0;
+    virtual void free(const std::vector< BlkId >& blk_ids) = 0;
     virtual void free(const BlkId& id) = 0;
-    virtual blk_cap_t get_available_blks() const = 0;
-    virtual blk_cap_t get_used_blks() const = 0;
-    virtual bool is_blk_alloced(const BlkId& b, const bool use_lock = false) const = 0;
+    [[nodiscard]] virtual blk_cap_t get_available_blks() const = 0;
+    [[nodiscard]] virtual blk_cap_t get_used_blks() const = 0;
+    [[nodiscard]] virtual bool is_blk_alloced(const BlkId& b, const bool use_lock = false) const = 0;
     [[nodiscard]] virtual std::string to_string() const = 0;
 
     [[nodiscard]] virtual const BlkAllocConfig& get_config() const { return m_cfg; }
@@ -335,6 +357,7 @@ public:
     BlkAllocStatus alloc(BlkId& bid) override;
     BlkAllocStatus alloc(const blk_count_t nblks, const blk_alloc_hints& hints,
                          std::vector< BlkId >& out_blkid) override;
+    void free(const std::vector< BlkId >& blk_ids) override;
     void free(const BlkId& b) override;
     void inited() override;
 
@@ -344,7 +367,7 @@ public:
     [[nodiscard]] std::string to_string() const override;
 
 private:
-    blk_num_t init_portion(BlkAllocPortion* portion, const blk_num_t start_blk_num);
+    [[nodiscard]] blk_num_t init_portion(BlkAllocPortion* portion, const blk_num_t start_blk_num);
 
 private:
     folly::MPMCQueue< BlkId > m_blk_q;
@@ -358,10 +381,10 @@ struct blkalloc_cp {
     void resume_cp() { suspend = false; }
     void free_blks(const blkid_list_ptr& list) {
         sisl::ThreadVector< BlkId >::thread_vector_iterator it;
-        auto bid = list->begin(it);
+        auto bid{list->begin(it)};
         while (bid != nullptr) {
-            auto chunk = HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num());
-            auto ba = chunk->get_blk_allocator();
+            auto chunk{HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num())};
+            auto ba{chunk->get_blk_allocator()};
             ba->free_on_disk(*bid);
             bid = list->next(it);
         }
@@ -372,13 +395,13 @@ struct blkalloc_cp {
     ~blkalloc_cp() {
         /* free all the blkids in the cache */
         for (size_t i{0}; i < blkid_list_vector.size(); ++i) {
-            auto list = blkid_list_vector[i];
+            auto list{blkid_list_vector[i]};
             sisl::ThreadVector< BlkId >::thread_vector_iterator it;
-            auto bid = list->begin(it);
+            auto bid{list->begin(it)};
             while (bid != nullptr) {
-                auto chunk = HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num());
+                auto chunk{HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num())};
                 chunk->get_blk_allocator()->free(*bid);
-                auto page_size = chunk->get_blk_allocator()->get_config().get_blk_size();
+                auto page_size{chunk->get_blk_allocator()->get_config().get_blk_size()};
                 ResourceMgr::dec_free_blk(bid->data_size(page_size));
                 bid = list->next(it);
             }

@@ -5,8 +5,7 @@
  *      Author: hkadayam
  */
 #include <cassert>
-#include "blk_allocator.h"
-#include "engine/common/homestore_flip.hpp"
+
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_flip.hpp"
 
@@ -19,7 +18,7 @@ FixedBlkAllocator::FixedBlkAllocator(const BlkAllocConfig& cfg, const bool init,
 }
 
 void FixedBlkAllocator::inited() {
-    blk_num_t blk_num = 0;
+    blk_num_t blk_num{0};
 
     while (blk_num < m_cfg.get_total_blks()) {
         blk_num = init_portion(blknum_to_portion(blk_num), blk_num);
@@ -27,12 +26,12 @@ void FixedBlkAllocator::inited() {
     BlkAllocator::inited();
 }
 
-blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion* portion, const blk_num_t start_blk_num) {
+blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion* const portion, const blk_num_t start_blk_num) {
     auto lock{portion->portion_auto_lock()};
 
-    auto blk_num = start_blk_num;
+    auto blk_num{start_blk_num};
     while (blk_num < m_cfg.get_total_blks()) {
-        BlkAllocPortion* cur_portion = blknum_to_portion(blk_num);
+        BlkAllocPortion* const cur_portion{blknum_to_portion(blk_num)};
         if (portion != cur_portion) break;
 
         if (!get_disk_bm()->is_bits_set(blk_num, 1)) {
@@ -58,7 +57,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(const blk_count_t nblks, const blk_alloc
     HS_DEBUG_ASSERT_EQ(nblks, 1, "FixedBlkAllocator does not support multiple blk allocation yet");
 
     BlkId bid;
-    const auto status = alloc(bid);
+    const auto status{alloc(bid)};
     if (status == BlkAllocStatus::SUCCESS) { out_blkid.push_back(bid); }
     return status;
 }
@@ -68,6 +67,12 @@ BlkAllocStatus FixedBlkAllocator::alloc(BlkId& out_blkid) {
     if (homestore_flip->test_flip("fixed_blkalloc_no_blks")) { return BlkAllocStatus::SPACE_FULL; }
 #endif
     return m_blk_q.read(out_blkid) ? BlkAllocStatus::SUCCESS : BlkAllocStatus::SPACE_FULL;
+}
+
+void FixedBlkAllocator::free(const std::vector< BlkId >& blk_ids) {
+    for (const auto& blk_id : blk_ids) {
+        free(blk_id);
+    }
 }
 
 void FixedBlkAllocator::free(const BlkId& b) {

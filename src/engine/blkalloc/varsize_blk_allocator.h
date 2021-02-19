@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <condition_variable>
 #include <cstdint>
 #include <memory>
@@ -13,11 +14,11 @@
 #include <thread>
 #include <vector>
 
-#include <boost/heap/binomial_heap.hpp>
 #include <flip/flip.hpp>
 #include <metrics/metrics.hpp>
 #include <sds_logging/logging.h>
 
+#include "blk.h"
 #include "blk_allocator.h"
 #include "blk_cache.h"
 #include "engine/common/homestore_assert.hpp"
@@ -43,27 +44,30 @@ public:
             m_nsegments{HS_DYNAMIC_CONFIG(blkallocator.max_segments)},
             m_blks_per_temp_group{get_total_blks() / HS_DYNAMIC_CONFIG(blkallocator.num_blk_temperatures)} {
         // Initialize the max cache blks as minimum dictated by the number of blks or memory limits whichever is lower
-        const auto size_by_count =
-            HS_DYNAMIC_CONFIG(blkallocator.free_blk_cache_count_by_vdev_percent) * get_total_blks() / 100;
-        const auto size_by_mem = HS_DYNAMIC_CONFIG(blkallocator.max_free_blk_cache_memory_percent) *
-            HS_STATIC_CONFIG(input.app_mem_size) / 100;
+        const blk_cap_t size_by_count{static_cast< blk_cap_t >(std::trunc(
+            HS_DYNAMIC_CONFIG(blkallocator.free_blk_cache_count_by_vdev_percent) * get_total_blks() / 100.0))};
+        const blk_cap_t size_by_mem{
+            static_cast< blk_cap_t >(std::trunc(HS_DYNAMIC_CONFIG(blkallocator.max_free_blk_cache_memory_percent) *
+                                                HS_STATIC_CONFIG(input.app_mem_size) / 100.0))};
         m_max_cache_blks = std::min(size_by_count, size_by_mem);
 
         // Initialize the slab config based on number of temperatures
-        slab_idx_t slab_idx = 0;
-        int64_t cum_slab_nblks = 0;
+        slab_idx_t slab_idx{0};
+        uint64_t cum_slab_nblks{0};
+        double cum_pct{0.0};
 
         HS_RELEASE_ASSERT_GT(HS_DYNAMIC_CONFIG(blkallocator.free_blk_slab_distribution).size(), 0,
                              "Config does not have free blk slab distribution");
-        const auto reuse_pct = HS_DYNAMIC_CONFIG(blkallocator.free_blk_reuse_pct);
-        const auto num_temp = HS_DYNAMIC_CONFIG(blkallocator.num_blk_temperatures);
-        const auto num_temp_slab_pct = (100 - reuse_pct) / num_temp;
+        const auto reuse_pct{HS_DYNAMIC_CONFIG(blkallocator.free_blk_reuse_pct)};
+        const auto num_temp{HS_DYNAMIC_CONFIG(blkallocator.num_blk_temperatures)};
+        const auto num_temp_slab_pct{(100.0 - reuse_pct) / static_cast<double>(num_temp)};
 
         m_slab_config.m_name = name;
         for (const auto& pct : HS_DYNAMIC_CONFIG(blkallocator.free_blk_slab_distribution)) {
+            cum_pct += pct;
             SlabCacheConfig::_slab_config s_cfg;
-            s_cfg.slab_size = (1 << slab_idx);
-            s_cfg.max_entries = (m_max_cache_blks / s_cfg.slab_size) * pct / 100;
+            s_cfg.slab_size = static_cast< blk_count_t >(1) << slab_idx;
+            s_cfg.max_entries = static_cast< blk_cap_t >((m_max_cache_blks / s_cfg.slab_size) * (pct / 100.0));
             s_cfg.m_name = name;
             s_cfg.refill_threshold_pct = HS_DYNAMIC_CONFIG(blkallocator.free_blk_cache_refill_threshold_pct);
 
@@ -78,9 +82,13 @@ public:
             m_slab_config.m_per_slab_cfg.push_back(s_cfg);
         }
 
-        // If after percentage calculation, if there are any remaining (possible if config doesn't add upto 100),
+        // If after percentage calculation, if there are any remaining (possible if config doesn't add up to 100),
         // then put that in first slab.
-        m_slab_config.m_per_slab_cfg[0].max_entries += ((int64_t)m_max_cache_blks - cum_slab_nblks);
+        assert(cum_pct < 100.0 * (1.0 + std::numeric_limits< double >::epsilon()));
+        if (cum_slab_nblks < m_max_cache_blks)
+        {
+            m_slab_config.m_per_slab_cfg[0].max_entries += m_max_cache_blks - cum_slab_nblks;            
+        }
     }
 
     VarsizeBlkAllocConfig(const VarsizeBlkAllocConfig& other) :
@@ -116,11 +124,17 @@ public:
     }
 
     //////////// Slab related getters/setters /////////////
-    [[nodiscard]] blk_count_t get_slab_cnt() const { return m_slab_config.m_per_slab_cfg.size(); }
+    [[nodiscard]] slab_idx_t get_slab_cnt() const { return m_slab_config.m_per_slab_cfg.size(); }
+    [[nodiscard]] blk_count_t get_slab_block_count(const slab_idx_t index) {
+        return m_slab_config.m_per_slab_cfg[index].slab_size;
+    }
     [[nodiscard]] blk_cap_t get_slab_capacity(const slab_idx_t slab_idx) const {
         return m_slab_config.m_per_slab_cfg[slab_idx].max_entries;
     }
-    [[nodiscard]] blk_cap_t highest_slab_blks_count() const { return (1 << (m_slab_config.m_per_slab_cfg.size() - 1)); }
+    [[nodiscard]] blk_cap_t highest_slab_blks_count() const {
+        const slab_idx_t index{get_slab_cnt()};
+        return (index > 0) ? m_slab_config.m_per_slab_cfg[index - 1].slab_size : 0;
+    }
 
     [[nodiscard]] std::string to_string() const override {
         return fmt::format("{} Pagesize={} Totalsegments={} BlksPerPortion={} MaxCacheBlks={} Slabconfig=[{}]",
@@ -130,20 +144,6 @@ public:
 };
 
 class BlkAllocSegment {
-public:
-#if 0
-    class CompareSegAvail {
-    public:
-        bool operator()(const BlkAllocSegment* const seg1, const BlkAllocSegment* const seg2) const {
-            return (seg1->get_free_blks() < seg2->get_free_blks());
-        }
-    };
-
-    // typedef boost::heap::binomial_heap< BlkAllocSegment *, boost::heap::compare< BlkAllocSegment::CompareSegAvail>>
-    // SegQueue;
-    typedef boost::heap::binomial_heap< BlkAllocSegment*, boost::heap::compare< CompareSegAvail > > SegQueue;
-#endif
-
 private:
     blk_cap_t m_total_blks;
     blk_num_t m_total_portions;
@@ -151,7 +151,7 @@ private:
     blk_num_t m_alloc_clock_hand;
 
 public:
-    BlkAllocSegment(blk_cap_t nblks, seg_num_t seg_num, blk_num_t nportions, const std::string& seg_name) :
+    BlkAllocSegment(const blk_cap_t nblks, const seg_num_t seg_num, const blk_num_t nportions, const std::string& seg_name) :
             m_total_blks{nblks}, m_total_portions{nportions}, m_seg_num{seg_num}, m_alloc_clock_hand{0} {}
 
     BlkAllocSegment(const BlkAllocSegment&) = delete;
@@ -175,9 +175,10 @@ public:
 
 class BlkAllocMetrics : public sisl::MetricsGroup {
 public:
-    explicit BlkAllocMetrics(const char* inst_name) : sisl::MetricsGroup("BlkAlloc", inst_name) {
+    explicit BlkAllocMetrics(const char* const inst_name) : sisl::MetricsGroup("BlkAlloc", inst_name) {
         REGISTER_COUNTER(num_alloc, "Number of blks alloc attempts");
         REGISTER_COUNTER(num_alloc_failure, "Number of blk alloc failures");
+        REGISTER_COUNTER(num_alloc_partial, "Number of blk alloc partial allocations");
         REGISTER_COUNTER(num_retries, "Number of times it retried because of empty cache");
         REGISTER_COUNTER(num_blks_alloc_direct, "Number of blks alloc attempt directly because of empty cache");
 
@@ -210,13 +211,14 @@ public:
     VarsizeBlkAllocator& operator=(VarsizeBlkAllocator&&) noexcept = delete;
     virtual ~VarsizeBlkAllocator() override;
 
-    BlkAllocStatus alloc(BlkId& bid) override;
-    BlkAllocStatus alloc(const blk_count_t nblks, const blk_alloc_hints& hints,
-                         std::vector< BlkId >& out_blkid) override;
+    [[nodiscard]] BlkAllocStatus alloc(BlkId& bid) override;
+    [[nodiscard]] BlkAllocStatus alloc(const blk_count_t nblks, const blk_alloc_hints& hints,
+                                       std::vector< BlkId >& out_blkid) override;
+    void free(const std::vector< BlkId >& blk_ids) override;
     void free(const BlkId& b) override;
     void inited() override;
-    BlkAllocStatus alloc_blks_direct(const blk_count_t nblks, const blk_alloc_hints& hints,
-                                     std::vector< BlkId >& out_blkids);
+    [[nodiscard]] BlkAllocStatus alloc_blks_direct(const blk_count_t nblks, const blk_alloc_hints& hints,
+                                                   std::vector< BlkId >& out_blkids, blk_count_t& num_allocated);
 
     [[nodiscard]] blk_cap_t get_available_blks() const override;
     [[nodiscard]] blk_cap_t get_used_blks() const override;
@@ -251,14 +253,14 @@ private:
                             const std::vector< BlkId >& out_blkids) const;
 #endif
 
-    const VarsizeBlkAllocConfig& get_config() const override { return (VarsizeBlkAllocConfig&)m_cfg; }
+    [[nodiscard]] const VarsizeBlkAllocConfig& get_config() const override { return (VarsizeBlkAllocConfig&)m_cfg; }
     [[nodiscard]] blk_num_t get_portions_per_segment() const;
 
     // Sweep and cache related functions
-    void _prepare_sweep(BlkAllocSegment* seg, const bool fill_entire_cache);
-    void request_more_blks(BlkAllocSegment* seg, const bool fill_entire_cache);
-    void request_more_blks_wait(BlkAllocSegment* seg, const blk_cap_t wait_for_blks_count);
-    void fill_cache(BlkAllocSegment* seg, blk_cache_fill_session& fill_session);
+    void prepare_sweep(BlkAllocSegment* const seg, const bool fill_entire_cache);
+    void request_more_blks(BlkAllocSegment* const seg, const bool fill_entire_cache);
+    void request_more_blks_wait(BlkAllocSegment* const seg, const blk_count_t wait_for_blks_count);
+    void fill_cache(BlkAllocSegment* const seg, blk_cache_fill_session& fill_session);
     void fill_cache_in_portion(const blk_num_t portion_num, blk_cache_fill_session& fill_session);
 
     void free_on_bitmap(const BlkId& b);
@@ -274,18 +276,18 @@ private:
 
     ///////////////////// Segment related routines ////////////////////////
     [[nodiscard]] seg_num_t blknum_to_segment_num(const blk_num_t blknum) const {
-        const auto seg_num = blknum / get_config().get_blks_per_segment();
+        const auto seg_num{blknum / get_config().get_blks_per_segment()};
         assert(seg_num < m_cfg.get_total_segments());
         return seg_num;
     }
 
-    BlkAllocSegment* blknum_to_segment(const blk_num_t blknum) const {
+    [[nodiscard]] BlkAllocSegment* blknum_to_segment(const blk_num_t blknum) const {
         return m_segments[blknum_to_segment_num(blknum)].get();
     }
 
     ///////////////////// Cache Entry related routines ////////////////////////
     void blk_cache_entries_to_blkids(const std::vector< blk_cache_entry >& entries, std::vector< BlkId >& out_blkids);
     [[nodiscard]] BlkId blk_cache_entry_to_blkid(const blk_cache_entry& e);
-    [[nodiscard]] blk_cache_entry blkid_to_blk_cache_entry(const BlkId& bid);
+    [[nodiscard]] blk_cache_entry blkid_to_blk_cache_entry(const BlkId& bid, const blk_temp_t preferred_level = 1);
 };
 } // namespace homestore

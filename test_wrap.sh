@@ -1,7 +1,7 @@
 #!/bin/bash
 #set -x
 
-cmd=$*
+cmd="$*"
 run_num=0
 run_status=()
 level=()
@@ -10,7 +10,7 @@ run_cmd() {
     echo "Running test run_num=$run_num: $1"
     echo "Command: $*"
     echo "----------------------------------------------------------------------------"
-    $*
+    "$@"
     status=$?
 
     if [ $status -eq 0 ] ; then
@@ -40,20 +40,20 @@ report() {
 read -r -a array <<< "$*"
 log_mods=""
 if [ ${array[0]} == "--retry_log_mods" ] ; then
-    log_mods=${array[1]}
+    log_mods="${array[1]}"
     base_cmd=""
     for i in `seq 3 ${#array[@]}`; do 
         i=$((i-1))
         base_cmd="$base_cmd ${array[$i]}"
     done
 else
-    base_cmd=$*
+    base_cmd="$*"
 fi
 
 echo "Log mods for retry = " $log_mods
 echo "*******************************************************************************************"
 
-cmd=$base_cmd
+cmd="$base_cmd"
 level+=("Normal")
 run_cmd $cmd
 if [ ${run_status[$run_num]} == "Success" ] ; then

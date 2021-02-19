@@ -6,6 +6,7 @@
 #include "engine/common/homestore_flip.hpp"
 #include "homestore.hpp"
 #include "meta_sb.hpp"
+#include "engine/blkstore/blkstore.hpp"
 
 SDS_LOGGING_DECL(metablk)
 
@@ -742,7 +743,7 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(const uint64_t size, std::vector
     hints.is_contiguous = false;
 
     try {
-        auto ret = m_sb_blk_store->alloc_blk(size, hints, bid);
+        const auto ret{m_sb_blk_store->alloc_blk(size, hints, bid)};
         if (ret != BlkAllocStatus::SUCCESS) {
             HS_LOG(ERROR, metablk, "failing as it is out of disk space!");
             return std::errc::no_space_on_device;

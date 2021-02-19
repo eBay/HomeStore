@@ -940,7 +940,13 @@ public:
                     }
 #endif
                     status = chunk->get_blk_allocator()->alloc(nblks, hints, out_blkid);
-                    if (status == BlkAllocStatus::SUCCESS) { break; }
+                    if (status == BlkAllocStatus::PARTIAL) {
+                        // free partial result
+                        chunk->get_blk_allocator()->free(out_blkid);
+                        status = BlkAllocStatus::FAILED;
+                    } else if (status == BlkAllocStatus::SUCCESS) {
+                        break;
+                    }
                 }
 
                 if ((status == BlkAllocStatus::SUCCESS) || !hints.can_look_for_other_dev) { break; }
@@ -1640,7 +1646,7 @@ private:
         *chunk = m_mgr->get_chunk_mutable(glob_uniq_id.get_chunk_num());
 
         uint64_t dev_offset =
-            (uint64_t)glob_uniq_id.get_blk_num() * get_page_size() + (uint64_t)(*chunk)->get_start_offset();
+            static_cast<uint64_t>(glob_uniq_id.get_blk_num()) * get_page_size() + static_cast<uint64_t>((*chunk)->get_start_offset());
         return dev_offset;
     }
 
