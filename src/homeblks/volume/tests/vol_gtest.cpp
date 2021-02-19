@@ -35,7 +35,6 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <utility/thread_buffer.hpp>
-
 #include <gtest/gtest.h>
 
 #include "api/vol_interface.hpp"
@@ -306,8 +305,11 @@ struct vol_info_t {
     VolumePtr vol;
     boost::uuids::uuid uuid;
     int fd;
+
     std::mutex vol_mutex;
-    std::unique_ptr< sisl::Bitset > m_vol_bm;
+    std::unique_ptr< sisl::Bitset > m_pending_lbas_bm;
+    std::unique_ptr< sisl::Bitset > m_hole_lbas_bm;
+
     uint64_t max_vol_blks;
     uint64_t cur_checkpoint;
     std::atomic< uint64_t > start_lba = 0;
@@ -323,6 +325,25 @@ struct vol_info_t {
     vol_info_t& operator=(const vol_info_t&) = delete;
     vol_info_t& operator=(vol_info_t&&) noexcept = delete;
     ~vol_info_t() = default;
+
+    void mark_lbas_busy(const uint64_t start_lba, const uint32_t nlbas) {
+        m_pending_lbas_bm->set_bits(start_lba, nlbas);
+    }
+
+    void mark_lbas_free(const uint64_t start_lba, const uint32_t nlbas) {
+        m_pending_lbas_bm->reset_bits(start_lba, nlbas);
+    }
+
+    bool is_lbas_free(const uint64_t start_lba, const uint32_t nlbas) {
+        return m_pending_lbas_bm->is_bits_reset(start_lba, nlbas);
+    }
+
+    void invalidate_lbas(const uint64_t start_lba, const uint32_t nlbas) { m_hole_lbas_bm->set_bits(start_lba, nlbas); }
+    void validate_lbas(const uint64_t start_lba, const uint32_t nlbas) { m_hole_lbas_bm->reset_bits(start_lba, nlbas); }
+    auto get_next_valid_lbas(const uint64_t start_lba, const uint32_t min_nlbas, const uint32_t max_nlbas) {
+        const auto bb{m_hole_lbas_bm->get_next_contiguous_n_reset_bits(start_lba, std::nullopt, min_nlbas, max_nlbas)};
+        return std::make_pair<>(bb.start_bit, bb.nbits);
+    }
 };
 
 struct io_req_t : public vol_interface_req {
@@ -686,7 +707,10 @@ public:
         info->fd = open(file_name.c_str(), O_RDWR);
         info->max_vol_blks =
             VolInterface::get_instance()->get_size(vol_obj) / VolInterface::get_instance()->get_page_size(vol_obj);
-        info->m_vol_bm = std::make_unique< sisl::Bitset >(info->max_vol_blks);
+
+        info->m_pending_lbas_bm = std::make_unique< sisl::Bitset >(info->max_vol_blks);
+        info->m_hole_lbas_bm = std::make_unique< sisl::Bitset >(info->max_vol_blks);
+        info->invalidate_lbas(0, info->max_vol_blks); // Punch hole for all.
         info->cur_checkpoint = 0;
         info->ref_cnt.increment(1);
 
@@ -1143,8 +1167,9 @@ public:
 
         {
             std::unique_lock< std::mutex > lk(req->vol_info->vol_mutex);
-            req->vol_info->m_vol_bm->reset_bits(req->lba, req->nlbas);
+            req->vol_info->mark_lbas_free(req->lba, req->nlbas);
         }
+
         --m_outstanding_ios;
         static Clock::time_point print_startTime = Clock::now();
         auto elapsed_time = get_elapsed_time_ms(print_startTime);
@@ -1173,18 +1198,124 @@ protected:
     std::atomic< uint64_t > m_outstanding_ios{0};
     typedef std::function< bool(const uint32_t, const uint64_t, const uint32_t) > IoFuncType;
 
+    struct io_lba_range_t {
+        io_lba_range_t() {}
+        io_lba_range_t(bool valid, uint64_t vidx, uint64_t l, uint32_t n) :
+                valid_io{valid}, vol_idx{vidx}, lba{l}, num_lbas{n} {}
+        bool valid_io{false};
+        uint64_t vol_idx{0};
+        uint64_t lba{0};
+        uint32_t num_lbas{0};
+    };
+    typedef std::function< io_lba_range_t(void) > LbaGeneratorType;
+
+    io_lba_range_t same_lbas() { return io_lba_range_t{true, 0u, 1u, 100u}; }
+
+    std::shared_ptr< vol_info_t > pick_vol_round_robin(io_lba_range_t& r) {
+        r.vol_idx = ++m_cur_vol % tcfg.max_vols;
+        return (m_voltest->vol_info[r.vol_idx] && m_voltest->vol_info[r.vol_idx]->vol) ? m_voltest->vol_info[r.vol_idx]
+                                                                                       : nullptr;
+    }
+
+    io_lba_range_t seq_lbas() {
+        io_lba_range_t ret;
+        const auto vinfo{pick_vol_round_robin(ret)};
+        if (vinfo == nullptr) { return ret; }
+
+        if (vinfo->num_io.fetch_add(1, std::memory_order_acquire) == 1000) {
+            ret.num_lbas = 200;
+            ret.lba = (vinfo->start_large_lba.fetch_add(ret.num_lbas, std::memory_order_acquire)) %
+                (vinfo->max_vol_blks - ret.num_lbas);
+        } else {
+            ret.num_lbas = 2;
+            ret.lba = (vinfo->start_lba.fetch_add(ret.num_lbas, std::memory_order_acquire)) %
+                (vinfo->max_vol_blks - ret.num_lbas);
+        }
+        if (ret.num_lbas == 0) { ret.num_lbas = 1; }
+
+        ret.valid_io = true;
+        return ret;
+    }
+
+    enum class lbas_choice_t : uint8_t { dont_care, atleast_one_valid, all_valid };
+    enum class lba_validate_t : uint8_t { dont_care, validate, invalidate };
+
+    io_lba_range_t do_get_rand_lbas(const lbas_choice_t lba_choice, const lba_validate_t validate_choice) {
+        static thread_local random_device rd{};
+        static thread_local default_random_engine engine{rd()};
+
+        io_lba_range_t ret;
+        const auto vinfo{pick_vol_round_robin(ret)};
+        if (vinfo == nullptr) { return ret; }
+
+        const uint32_t max_blks{
+            static_cast< uint32_t >(tcfg.max_io_size / VolInterface::get_instance()->get_page_size(vinfo->vol))};
+        // lba: [0, max_vol_blks - max_blks)
+        std::uniform_int_distribution< uint64_t > lba_random{0, vinfo->max_vol_blks - max_blks - 1};
+        // nlbas: [1, max_blks]
+        std::uniform_int_distribution< uint32_t > nlbas_random{1, max_blks};
+
+        // we won't be writing more then 128 blocks in one io
+        uint32_t attempt{1};
+        while (attempt <= 2u) {
+            // can not support concurrent overlapping writes if whole data need to be verified
+            std::unique_lock< std::mutex > lk{vinfo->vol_mutex};
+            if (lba_choice == lbas_choice_t::dont_care) {
+                ret.lba = lba_random(engine);
+                ret.num_lbas = nlbas_random(engine);
+            } else {
+                const auto start_lba = (attempt++ == 1u) ? lba_random(engine) : 0;
+                std::tie(ret.lba, ret.num_lbas) = vinfo->get_next_valid_lbas(
+                    start_lba, 1u, (lba_choice == lbas_choice_t::all_valid) ? nlbas_random(engine) : 1u);
+                if ((lba_choice == lbas_choice_t::atleast_one_valid) && (ret.num_lbas)) {
+                    ret.num_lbas = nlbas_random(engine);
+                    std::uniform_int_distribution< uint32_t > pivot_random{0, ret.num_lbas - 1};
+                    const auto pivot{pivot_random(engine)};
+                    ret.lba = (ret.lba < pivot) ? 0 : ret.lba - pivot;
+                    if ((ret.lba + ret.num_lbas) > vinfo->max_vol_blks) {
+                        ret.num_lbas = vinfo->max_vol_blks - ret.lba;
+                    }
+                }
+            }
+
+            // check if someone is already doing writes/reads
+            if (ret.num_lbas && vinfo->is_lbas_free(ret.lba, ret.num_lbas)) {
+                vinfo->mark_lbas_busy(ret.lba, ret.num_lbas);
+                if (validate_choice == lba_validate_t::validate) {
+                    vinfo->validate_lbas(ret.lba, ret.num_lbas);
+                } else if (validate_choice == lba_validate_t::invalidate) {
+                    vinfo->invalidate_lbas(ret.lba, ret.num_lbas);
+                }
+                ret.valid_io = true;
+                break;
+            }
+        }
+
+        return ret;
+    }
+
+    io_lba_range_t readable_rand_lbas() {
+        return do_get_rand_lbas(lbas_choice_t::atleast_one_valid, lba_validate_t::dont_care);
+    }
+    io_lba_range_t writeable_rand_lbas() {
+        return do_get_rand_lbas(lbas_choice_t::dont_care, lba_validate_t::validate);
+    }
+    io_lba_range_t unmappable_rand_lbas() {
+        return do_get_rand_lbas(lbas_choice_t::atleast_one_valid, lba_validate_t::invalidate);
+    }
+
     bool write_io() {
         bool ret = false;
         const IoFuncType write_function{bind_this(IOTestJob::write_vol, 3)};
         switch (m_load_type) {
         case load_type_t::random:
-            ret = run_io(load_type_t::random, write_function);
+            ret = run_io(bind_this(IOTestJob::writeable_rand_lbas, 0), write_function);
             break;
         case load_type_t::same:
-            ret = run_io(load_type_t::same, write_function);
+            ret = run_io(bind_this(IOTestJob::same_lbas, 0), write_function);
             break;
         case load_type_t::sequential:
-            ret = run_io(load_type_t::sequential, write_function);
+            ret = run_io(bind_this(IOTestJob::seq_lbas, 0), write_function);
             break;
         }
         return ret;
@@ -1195,10 +1326,10 @@ protected:
         bool ret = false;
         switch (m_load_type) {
         case load_type_t::random:
-            ret = run_io(load_type_t::random, read_function);
+            ret = run_io(bind_this(IOTestJob::readable_rand_lbas, 0), read_function);
             break;
         case load_type_t::same:
-            ret = run_io(load_type_t::same, read_function);
+            ret = run_io(bind_this(IOTestJob::same_lbas, 0), read_function);
             break;
         case load_type_t::sequential:
             assert(0);
@@ -1212,7 +1343,7 @@ protected:
         bool ret = false;
         switch (m_load_type) {
         case load_type_t::random:
-            ret = run_io(load_type_t::random, unmap_function);
+            ret = run_io(bind_this(IOTestJob::unmappable_rand_lbas, 0), unmap_function);
             break;
         case load_type_t::same:
             assert(0);
@@ -1224,60 +1355,9 @@ protected:
         return ret;
     }
 
-    bool run_io(load_type_t load_type, const IoFuncType& io_function) {
-        static thread_local random_device rd{};
-        static thread_local default_random_engine engine{rd()};
-
-        uint64_t lba{};
-        uint32_t nlbas{};
-        uint64_t cur{};
-        if (load_type == load_type_t::same) {
-            cur = 0;
-            lba = 1;
-            nlbas = 100;
-        } else {
-            cur = ++m_cur_vol % tcfg.max_vols;
-            // we won't be writing more then 128 blocks in one io
-            const auto vinfo{m_voltest->vol_info[cur]};
-            if (vinfo == nullptr) { return false; }
-            const auto vol{vinfo->vol};
-            if (vol == nullptr) { return false; }
-
-            if (load_type == load_type_t::sequential) {
-                if (vinfo->num_io.fetch_add(1, std::memory_order_acquire) == 1000) {
-                    nlbas = 200;
-                    lba = (vinfo->start_large_lba.fetch_add(nlbas, std::memory_order_acquire)) %
-                        (vinfo->max_vol_blks - nlbas);
-                } else {
-                    nlbas = 2;
-                    lba =
-                        (vinfo->start_lba.fetch_add(nlbas, std::memory_order_acquire)) % (vinfo->max_vol_blks - nlbas);
-                }
-                if (nlbas == 0) { nlbas = 1; }
-            } else {
-                const uint32_t max_blks{
-                    static_cast< uint32_t >(tcfg.max_io_size / VolInterface::get_instance()->get_page_size(vol))};
-                // lba: [0, max_vol_blks - max_blks)
-                std::uniform_int_distribution< uint64_t > lba_random{0, vinfo->max_vol_blks - max_blks - 1};
-                // nlbas: [1, max_blks]
-                std::uniform_int_distribution< uint32_t > nlbas_random{1, max_blks};
-
-                // we won't be writing more then 128 blocks in one io
-                for (;;) {
-                    lba = lba_random(engine);
-                    nlbas = nlbas_random(engine);
-
-                    // can not support concurrent overlapping writes if whole data need to be verified
-                    std::unique_lock< std::mutex > lk{vinfo->vol_mutex};
-                    // check if someone is already doing writes/reads
-                    if (nlbas && vinfo->m_vol_bm->is_bits_reset(lba, nlbas)) {
-                        vinfo->m_vol_bm->set_bits(lba, nlbas);
-                        break;
-                    }
-                }
-            }
-        }
-        return io_function(cur, lba, nlbas);
+    bool run_io(const LbaGeneratorType& lba_generator, const IoFuncType& io_function) {
+        const auto gen_lba{lba_generator()};
+        return (gen_lba.valid_io) ? io_function(gen_lba.vol_idx, gen_lba.lba, gen_lba.num_lbas) : false;
     }
 
     bool write_vol(const uint32_t cur, const uint64_t lba, const uint32_t nlbas) {
@@ -1348,10 +1428,10 @@ protected:
         if (read_vol_internal(vinfo, vol, lba, nlbas, false)) { return true; }
         return false;
     }
+
     boost::intrusive_ptr< io_req_t > read_vol_internal(std::shared_ptr< vol_info_t > vinfo, VolumePtr vol,
                                                        const uint64_t lba, const uint32_t nlbas,
                                                        const bool sync = false) {
-
         const uint64_t page_size{VolInterface::get_instance()->get_page_size(vol)};
         boost::intrusive_ptr< io_req_t > vreq{};
         if (!tcfg.read_iovec) {
@@ -1900,7 +1980,6 @@ TEST_F(VolTest, btree_fix_rerun_io_test) {
     if (tcfg.remove_file) { this->remove_files(); }
 }
 
-// Only one module should be enabled now, though the module-framework itself support multiple modules.
 std::vector< module_test* > mod_tests;
 void indx_mgr_test_main();
 void meta_mod_test_main();
