@@ -4,7 +4,8 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "2.4.4"
+
+    version = "2.4.5"
 
     revision_mode = "scm"
 
@@ -77,11 +78,11 @@ class HomestoreConan(ConanFile):
 
         definitions['CONAN_TEST_TARGET'] = self.options.testing
         if self.options.testing == 'coverage':
-            test_target = test_target
+            test_target = 'coverage'
 
         if self.settings.build_type == 'Debug':
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
-
+        
         definitions['MALLOC_IMPL'] = self.options.malloc_impl
 
         cmake.configure(defs=definitions)
