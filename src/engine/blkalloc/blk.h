@@ -187,7 +187,7 @@ std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, trait
 using blkid_list_ptr = std::shared_ptr< sisl::ThreadVector< BlkId > >;
 
 VENUM(BlkAllocStatus, uint32_t,
-      BLK_ALLOC_NONE = 0,   // No Action taken
+      BLK_ALLOC_NONE = 0,     // No Action taken
       SUCCESS = 1ul << 0,     // Success
       FAILED = 1ul << 1,      // Failed to alloc/free
       REQ_MORE = 1ul << 2,    // Indicate that we need more

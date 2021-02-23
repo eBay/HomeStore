@@ -131,8 +131,12 @@ public:
     [[nodiscard]] blk_num_t get_portion_num() const { return m_portion_num; }
     void set_available_blocks(const blk_num_t available_blocks) { m_available_blocks = available_blocks; }
     [[nodiscard]] blk_num_t get_available_blocks() const { return m_available_blocks; }
-    [[maybe_unused]] blk_num_t decrease_available_blocks(const blk_num_t count) { return (m_available_blocks -= count); }
-    [[maybe_unused]] blk_num_t increase_available_blocks(const blk_num_t count) { return (m_available_blocks += count); }
+    [[maybe_unused]] blk_num_t decrease_available_blocks(const blk_num_t count) {
+        return (m_available_blocks -= count);
+    }
+    [[maybe_unused]] blk_num_t increase_available_blocks(const blk_num_t count) {
+        return (m_available_blocks += count);
+    }
     void set_temperature(const blk_temp_t temp) { m_temperature = temp; }
     [[nodiscard]] blk_temp_t temperature() const { return m_temperature; }
 
@@ -181,15 +185,14 @@ class BlkAllocator {
 public:
     BlkAllocator(const BlkAllocConfig& cfg, const uint32_t id = 0) : m_cfg{cfg}, m_chunk_id{(chunk_num_t)id} {
         m_blk_portions = std::make_unique< BlkAllocPortion[] >(cfg.get_total_portions());
-        for (blk_num_t index{0}; index < cfg.get_total_portions(); ++index)
-        {
+        for (blk_num_t index{0}; index < cfg.get_total_portions(); ++index) {
             m_blk_portions[index].set_portion_num(index);
             m_blk_portions[index].set_available_blocks(m_cfg.get_blks_per_portion());
         }
         m_auto_recovery = cfg.get_auto_recovery();
         m_disk_bm = std::make_unique< sisl::Bitset >(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
         // NOTE:  Blocks per portion must be modulo word size so locks do not fall on same word
-        assert(m_cfg.get_blks_per_portion() % m_disk_bm->word_size() == 0);     
+        assert(m_cfg.get_blks_per_portion() % m_disk_bm->word_size() == 0);
     }
     BlkAllocator(const BlkAllocator&) = delete;
     BlkAllocator(BlkAllocator&&) noexcept = delete;
@@ -225,9 +228,7 @@ public:
     void decr_alloced_blk_count(const blk_count_t nblks) {
         m_alloced_blk_count.fetch_sub(nblks, std::memory_order_relaxed);
     }
-    [[nodiscard]] int64_t get_alloced_blk_count() const {
-        return m_alloced_blk_count.load(std::memory_order_acquire);
-    }
+    [[nodiscard]] int64_t get_alloced_blk_count() const { return m_alloced_blk_count.load(std::memory_order_acquire); }
 
     [[nodiscard]] bool is_blk_alloced_on_disk(const BlkId& b, const bool use_lock = false) const {
         if (!m_auto_recovery) {
@@ -380,13 +381,12 @@ struct blkalloc_cp {
     void suspend_cp() { suspend = true; }
     void resume_cp() { suspend = false; }
     void free_blks(const blkid_list_ptr& list) {
-        sisl::ThreadVector< BlkId >::thread_vector_iterator it;
-        auto bid{list->begin(it)};
-        while (bid != nullptr) {
+        auto it = list->begin(true /* latest */);
+        BlkId* bid;
+        while ((bid = list->next(it)) != nullptr) {
             auto chunk{HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num())};
             auto ba{chunk->get_blk_allocator()};
             ba->free_on_disk(*bid);
-            bid = list->next(it);
         }
         blkid_list_vector.push_back(list);
     }
@@ -394,18 +394,16 @@ struct blkalloc_cp {
     blkalloc_cp() = default;
     ~blkalloc_cp() {
         /* free all the blkids in the cache */
-        for (size_t i{0}; i < blkid_list_vector.size(); ++i) {
-            auto list{blkid_list_vector[i]};
-            sisl::ThreadVector< BlkId >::thread_vector_iterator it;
-            auto bid{list->begin(it)};
-            while (bid != nullptr) {
+        for (auto& list : blkid_list_vector) {
+            BlkId* bid;
+            auto it = list->begin(false /* latest */);
+            while ((bid = list->next(it)) != nullptr) {
                 auto chunk{HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num())};
                 chunk->get_blk_allocator()->free(*bid);
                 auto page_size{chunk->get_blk_allocator()->get_config().get_blk_size()};
                 ResourceMgr::dec_free_blk(bid->data_size(page_size));
-                bid = list->next(it);
             }
-            list->erase();
+            list->clear();
         }
     }
 };

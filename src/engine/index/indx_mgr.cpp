@@ -542,6 +542,16 @@ indx_mgr_sb IndxMgr::get_immutable_sb() {
     return sb;
 }
 
+#ifndef NDEBUG
+void IndxMgr::dump_free_blk_list(const blkid_list_ptr& free_blk_list) {
+    auto it = free_blk_list->begin(false /* latest */);
+    BlkId* bid;
+    while ((bid = free_blk_list->next(it)) != nullptr) {
+        THIS_INDX_LOG(DEBUG, indx_mgr, , "Freeing blk [{}]", bid->to_string());
+    }
+}
+#endif
+
 void IndxMgr::flush_free_blks(const indx_cp_ptr& icp, hs_cp* hcp) {
     THIS_INDX_LOG(TRACE, cp, , "flush free blks");
     /* free blks in a indx mgr */
@@ -967,7 +977,7 @@ void IndxMgr::unmap_indx_async(const indx_req_ptr& ireq) {
         LOGINFO("aborting because of flip");
         raise(SIGKILL);
     }
-#endif    
+#endif
 
     /* call completion cb */
     m_io_cb(ireq, ireq->indx_err);
@@ -977,16 +987,15 @@ void IndxMgr::unmap_indx_async(const indx_req_ptr& ireq) {
 }
 
 void IndxMgr::do_remaining_unmap(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx) {
-    add_prepare_cb_list(
-        [this, ireq, unmap_meta_blk_cntx](const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp) mutable {
-            if (cur_icp->flags & cp_state::ba_cp) {
-                do_remaining_unmap_internal(ireq, unmap_meta_blk_cntx,
-                                            ireq->j_ent.get_key(ireq->j_ent.m_iob.bytes).first, ireq->get_seqid(),
-                                            ireq->active_btree_cur);
-            } else {
-                do_remaining_unmap(ireq, unmap_meta_blk_cntx);
-            }
-        });
+    add_prepare_cb_list([this, ireq, unmap_meta_blk_cntx](const indx_cp_ptr& cur_icp, hs_cp* cur_hcp,
+                                                          hs_cp* new_hcp) mutable {
+        if (cur_icp->flags & cp_state::ba_cp) {
+            do_remaining_unmap_internal(ireq, unmap_meta_blk_cntx, ireq->j_ent.get_key(ireq->j_ent.m_iob.bytes).first,
+                                        ireq->get_seqid(), ireq->active_btree_cur);
+        } else {
+            do_remaining_unmap(ireq, unmap_meta_blk_cntx);
+        }
+    });
 }
 
 void IndxMgr::unmap(const indx_req_ptr& ireq) { update_indx(ireq); }
@@ -1124,40 +1133,38 @@ void IndxMgr::destroy_indx_tbl() {
                       m_destroy_btree_cur.to_string());
         const sisl::blob& cursor_blob = m_destroy_btree_cur.serialize();
         if (cursor_blob.size == 0) { HS_ASSERT_CMP(RELEASE, free_size, ==, 0); }
-        attach_user_fblkid_list(free_list, ([this](bool success) {
-                                    /* persist superblock */
-                                    const sisl::blob& cursor_blob = m_destroy_btree_cur.serialize();
-                                    if (cursor_blob.size) {
-                                        uint64_t size = cursor_blob.size + sizeof(hs_cp_base_sb);
-                                        sisl::byte_view b = alloc_sb_bytes(size);
-                                        hs_cp_base_sb* mhdr = (hs_cp_base_sb*)b.bytes();
-                                        mhdr->uuid = m_uuid;
-                                        mhdr->type = INDX_DESTROY;
-                                        mhdr->size = cursor_blob.size + sizeof(hs_cp_base_sb);
-                                        memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_base_sb)),
-                                               cursor_blob.bytes, cursor_blob.size);
+        attach_user_fblkid_list(
+            free_list, ([this](bool success) {
+                /* persist superblock */
+                const sisl::blob& cursor_blob = m_destroy_btree_cur.serialize();
+                if (cursor_blob.size) {
+                    uint64_t size = cursor_blob.size + sizeof(hs_cp_base_sb);
+                    sisl::byte_view b = alloc_sb_bytes(size);
+                    hs_cp_base_sb* mhdr = (hs_cp_base_sb*)b.bytes();
+                    mhdr->uuid = m_uuid;
+                    mhdr->type = INDX_DESTROY;
+                    mhdr->size = cursor_blob.size + sizeof(hs_cp_base_sb);
+                    memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_base_sb)), cursor_blob.bytes,
+                           cursor_blob.size);
 #ifdef _PRERELEASE
-                                        if (homestore_flip->test_flip(
-                                                "indx_del_partial_free_data_blks_before_meta_write")) {
-                                            LOGINFO("aborting because of flip");
-                                            raise(SIGKILL);
-                                        }
+                    if (homestore_flip->test_flip("indx_del_partial_free_data_blks_before_meta_write")) {
+                        LOGINFO("aborting because of flip");
+                        raise(SIGKILL);
+                    }
 #endif
-                                        write_meta_blk(m_destroy_meta_blk, b);
+                    write_meta_blk(m_destroy_meta_blk, b);
 #ifdef _PRERELEASE
-                                        if (homestore_flip->test_flip(
-                                                "indx_del_partial_free_data_blks_after_meta_write")) {
-                                            LOGINFO("aborting because of flip");
-                                            raise(SIGKILL);
-                                        }
+                    if (homestore_flip->test_flip("indx_del_partial_free_data_blks_after_meta_write")) {
+                        LOGINFO("aborting because of flip");
+                        raise(SIGKILL);
+                    }
 #endif
-                                    }
+                }
 
-                                    /* send message to thread to start freeing the blkid */
-                                    iomanager.run_on(m_thread_id,
-                                                     [this](io_thread_addr_t addr) { this->destroy_indx_tbl(); });
-                                }),
-                                free_size);
+                /* send message to thread to start freeing the blkid */
+                iomanager.run_on(m_thread_id, [this](io_thread_addr_t addr) { this->destroy_indx_tbl(); });
+            }),
+            free_size);
         return;
     }
 
@@ -1285,9 +1292,7 @@ void IndxMgr::register_indx_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp) {
     }));
 }
 
-hs_cp* IndxMgr::cp_io_enter() {
-    return (m_cp_mgr->cp_io_enter());
-}
+hs_cp* IndxMgr::cp_io_enter() { return (m_cp_mgr->cp_io_enter()); }
 
 void IndxMgr::cp_io_exit(hs_cp* hcp) { m_cp_mgr->cp_io_exit(hcp); }
 

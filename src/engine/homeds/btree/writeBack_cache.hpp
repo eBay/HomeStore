@@ -164,7 +164,7 @@ class WriteBackCache : public std::enable_shared_from_this< WriteBackCache< K, V
 
 private:
     static constexpr size_t MAX_CP_CNT{2};
-    // TODO :- need to have concurrent list
+
     std::unique_ptr< sisl::ThreadVector< writeback_req_ptr > > m_req_list[MAX_CP_CNT];
     homestore::blkid_list_ptr m_free_list[MAX_CP_CNT];
     sisl::atomic_counter< uint64_t > m_dirty_buf_cnt[MAX_CP_CNT];
@@ -175,6 +175,7 @@ private:
     static std::vector< iomgr::io_thread_t > m_thread_ids;
     static thread_local std::vector< flush_buffer_callback > flush_buffer_q;
     static thread_local uint64_t wb_cache_outstanding_cnt;
+    static thread_local uint64_t s_cbq_id;
 
 public:
     WriteBackCache(void* const blkstore, const uint64_t align_size, cp_comp_callback cb,
@@ -224,7 +225,7 @@ public:
     ~WriteBackCache() {
         for (size_t i{0}; i < MAX_CP_CNT; ++i) {
 #ifndef NDEBUG
-            HS_ASSERT_CMP(DEBUG, m_dirty_buf_cnt[i].get(), ==, 0);
+            HS_ASSERT_CMP(DEBUG, m_dirty_buf_cnt[i].testz(), ==, true);
             HS_ASSERT_CMP(DEBUG, m_req_list[i]->size(), ==, 0);
             HS_ASSERT_CMP(DEBUG, m_free_list[i]->size(), ==, 0);
 #endif
@@ -234,7 +235,7 @@ public:
     void prepare_cp(const btree_cp_ptr& new_bcp, const btree_cp_ptr& cur_bcp, const bool blkalloc_checkpoint) {
         if (new_bcp) {
             const size_t cp_id{(new_bcp->cp_id) % MAX_CP_CNT};
-            HS_ASSERT_CMP(DEBUG, m_dirty_buf_cnt[cp_id].get(), ==, 0);
+            HS_ASSERT_CMP(DEBUG, m_dirty_buf_cnt[cp_id].testz(), ==, true);
             // decrement it by all cache threads at the end after writing all pending requests
             HS_ASSERT_CMP(DEBUG, m_req_list[cp_id]->size(), ==, 0);
             blkid_list_ptr free_list;
@@ -358,7 +359,6 @@ public:
 
     void cp_start(const btree_cp_ptr& bcp) {
         static size_t thread_cnt{0};
-        const size_t cp_id{bcp->cp_id % MAX_CP_CNT};
         const size_t thread_index{static_cast< size_t >(thread_cnt++ % HS_DYNAMIC_CONFIG(generic.cache_flush_threads))};
         iomanager.run_on(m_thread_ids[thread_index],
                          [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
@@ -366,39 +366,47 @@ public:
 
     void flush_buffers(const btree_cp_ptr& bcp) {
         const size_t cp_id = bcp->cp_id % MAX_CP_CNT;
-        if (m_dirty_buf_cnt[cp_id].get() == 0) {
+        if (m_dirty_buf_cnt[cp_id].testz()) {
             m_cp_comp_cb(bcp);
             return; // nothing to flush
         }
 
+        ++s_cbq_id;
+        CP_LOG(DEBUG, bcp->cp_id,
+               "[fcbq_id={}] Starting btree flush buffers dirty_buf_count={} wb_req_cnt={} flush_cb_size={}", s_cbq_id,
+               m_dirty_buf_cnt[cp_id].get(), m_req_list[cp_id]->size(), flush_buffer_q.size());
+
         auto shared_this = this->shared_from_this();
-        queue_flush_buffers([shared_this,
-                             it = typename sisl::ThreadVector< writeback_req_ptr >::thread_vector_iterator(),
-                             iterator_invalid = true, cp_id]() mutable -> bool {
-            auto list = shared_this->m_req_list[cp_id].get();
-            writeback_req_ptr wb_req = nullptr;
+        queue_flush_buffers([shared_this, cp_id, it = m_req_list[cp_id]->begin(true /* latest */),
+                             bt_cp_id = bcp->cp_id, cbq_id = s_cbq_id]() mutable -> bool {
             size_t write_count{0};
-            if (iterator_invalid) {
-                if (auto wb_req_ptr_ref = (list->begin(it))) { wb_req = *wb_req_ptr_ref; }
-                iterator_invalid = false;
-            } else {
-                if (auto wb_req_ptr_ref = (list->next(it))) { wb_req = *wb_req_ptr_ref; }
-            }
-            while (wb_req) {
+            size_t dep_wait_count{0};
+
+            auto& req_list = shared_this->m_req_list[cp_id];
+            writeback_req_ptr* wb_req_ref;
+            while ((wb_req_ref = req_list->next(it)) != nullptr) {
+                writeback_req_ptr wb_req = *wb_req_ref;
                 if (wb_req->dependent_cnt.decrement_testz(1)) {
                     wb_req->state = homeds::btree::writeback_req_state::WB_REQ_SENT;
                     ++wb_cache_outstanding_cnt;
                     shared_this->m_blkstore->write(wb_req->bid, wb_req->m_mem, 0, wb_req, false);
                     ++write_count;
                     if (wb_cache_outstanding_cnt > HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt)) {
+                        CP_LOG(DEBUG, bt_cp_id,
+                               "[fcbq_id={}] Flush throttled: flushed_cnt={} outstanding_io_cnt={} dep_wait_cnt={}",
+                               cbq_id, write_count, wb_cache_outstanding_cnt, dep_wait_count);
                         if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
                         return false;
                     }
+                } else {
+                    ++dep_wait_count;
                 }
-                wb_req = nullptr;
-                if (auto wb_req_ptr_ref = list->next(it)) { wb_req = *wb_req_ptr_ref; }
             }
-            list->clear();
+
+            req_list->clear(); // Freeup the req list which frees the all wb_req memory
+            CP_LOG(DEBUG, bt_cp_id, "[fcbq_id={}] Flush finish: flushed_cnt={} outstanding_io_cnt={} dep_wait_cnt={}",
+                   cbq_id, write_count, wb_cache_outstanding_cnt, dep_wait_count);
+
             if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
             return true;
         });
@@ -417,10 +425,17 @@ public:
 
         --wb_cache_outstanding_cnt;
         auto shared_this = this->shared_from_this();
+        ++s_cbq_id;
+
+        CP_LOG(DEBUG, wb_req->bcp->cp_id, "[wbreq_id={}] completed: depq_cnt={} dirty_buf_cnt={} outstanding_io_cnt={}",
+               wb_req->request_id, wb_req->req_q.size(), m_dirty_buf_cnt[cp_id].get() - 1, wb_cache_outstanding_cnt);
+
         /* Scan if it has any req depending on this req */
         if (!wb_req->req_q.empty()) {
-            queue_flush_buffers([shared_this, wb_req]() -> bool {
+            queue_flush_buffers([shared_this, wb_req, cbq_id = s_cbq_id]() -> bool {
                 size_t write_count{0};
+                size_t dep_wait_count{0};
+
                 // std::unique_lock< std::mutex > req_mtx(wb_req->mtx); No need to take a lock here
                 while (!wb_req->req_q.empty()) {
                     auto depend_req = wb_req->req_q.back();
@@ -437,15 +452,30 @@ public:
                         }
 #endif
                         if (wb_cache_outstanding_cnt > HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt)) {
+                            CP_LOG(DEBUG, wb_req->bcp->cp_id,
+                                   "[fcbq_id={}] [wbreq_id={}] dependentq flush throttled: flushed_cnt={} "
+                                   "remain_depq_cnt={} outstanding_io_cnt={} dep_wait_cnt={}",
+                                   cbq_id, wb_req->request_id, write_count, wb_req->req_q.size(),
+                                   wb_cache_outstanding_cnt, dep_wait_count);
                             if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
                             return false;
                         }
+                    } else {
+                        ++dep_wait_count;
                     }
                 }
+
+                CP_LOG(DEBUG, wb_req->bcp->cp_id,
+                       "[fcbq_id={}] [wbreq_id={}] dependentq flushed: flushed_cnt={} outstanding_io_cnt={} "
+                       "dep_wait_cnt={}",
+                       cbq_id, wb_req->request_id, write_count, wb_cache_outstanding_cnt, dep_wait_count);
                 if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
                 return true;
             });
         } else if (wb_cache_outstanding_cnt < HS_DYNAMIC_CONFIG(generic.cache_min_throttle_cnt)) {
+            CP_LOG(DEBUG, wb_req->bcp->cp_id,
+                   "[wbreq_id={}] no depq entries: outstanding_io_cnt={} flush next leading reqs", wb_req->request_id,
+                   wb_cache_outstanding_cnt);
             queue_flush_buffers(nullptr);
         }
         wb_req->bn->req[cp_id] = nullptr;
@@ -476,7 +506,8 @@ template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_
 thread_local std::vector< flush_buffer_callback > wb_cache_t::flush_buffer_q;
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 thread_local uint64_t wb_cache_t::wb_cache_outstanding_cnt;
-
+template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
+thread_local uint64_t wb_cache_t::s_cbq_id;
 } // namespace btree
 } // namespace homeds
 

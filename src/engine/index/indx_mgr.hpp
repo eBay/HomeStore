@@ -312,9 +312,7 @@ struct indx_mgr_sb {
     homeds::btree::btree_super_block btree_sb;
     bool is_snap_enabled = false;
     indx_mgr_sb(homeds::btree::btree_super_block btree_sb, logstore_id_t journal_id, bool is_snap_enabled) :
-            journal_id(journal_id),
-            btree_sb(btree_sb),
-            is_snap_enabled(is_snap_enabled) {}
+            journal_id(journal_id), btree_sb(btree_sb), is_snap_enabled(is_snap_enabled) {}
     indx_mgr_sb() {}
 } __attribute__((__packed__));
 
@@ -665,7 +663,7 @@ private:
                                    homeds::btree::BtreeQueryCursor& unmap_btree_cur);
     sisl::byte_view alloc_sb_bytes(uint64_t size_);
 #ifndef NDEBUG
-    void dump_free_blk_list(blkid_list_ptr free_blk_list);
+    void dump_free_blk_list(const blkid_list_ptr& free_blk_list);
 #endif
     void unmap_indx_async(const indx_req_ptr& ireq);
     void do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx, void* key, uint64_t seqid,
@@ -688,9 +686,7 @@ struct Free_Blk_Entry {
     Free_Blk_Entry() {}
     Free_Blk_Entry(const BlkId& blkId) : m_blkId(blkId), m_blk_offset(0), m_nblks_to_free(0) {}
     Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
-            m_blkId(blkId),
-            m_blk_offset(blk_offset),
-            m_nblks_to_free(nblks_to_free) {
+            m_blkId(blkId), m_blk_offset(blk_offset), m_nblks_to_free(nblks_to_free) {
 #ifndef NDEBUG
         assert(blk_offset + m_nblks_to_free <= m_blkId.get_nblks());
 #endif

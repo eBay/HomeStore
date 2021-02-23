@@ -35,6 +35,8 @@ typedef std::function< void(bool success) > cp_done_cb;
 namespace homestore {
 SDS_LOGGING_DECL(cp)
 
+#define CP_LOG(level, cp_id, msg, ...) HS_SUBMOD_LOG(level, cp, , "cp_id", cp_id, msg, ##__VA_ARGS__)
+
 ENUM(cp_status_t, uint8_t,
      cp_init,     // It is not inited yet.
      cp_io_ready, // IOs can start in a CP
