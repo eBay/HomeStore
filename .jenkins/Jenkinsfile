@@ -237,15 +237,17 @@ pipeline {
                               expression { "${COVERAGE}" == 'False' }
                             } }
                         steps {
-                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
-                                sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
+                            retry(3) {
+                                withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
+                                  sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
+                                }
                             }
                         }
                         post {
                             success {
                                 slackSend color: '#85B717', channel: '#sds-ci', message: "*${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been uploaded to ECR."
                             }
-		                }
+                        }
                     }
                 }
             }
