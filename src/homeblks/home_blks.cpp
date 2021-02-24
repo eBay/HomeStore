@@ -151,12 +151,12 @@ void HomeBlks::attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr 
 
         /* get the cur cp id ptr */
         indx_cp_ptr cur_icp = nullptr;
-        if (cur_icp_map) {
-            auto id_it = cur_icp_map->find(it->first);
-            if (id_it != cur_icp_map->end()) {
-                /* It is a new volume which is created after this cp */
-                cur_icp = id_it->second;
-            }
+        auto id_it = cur_icp_map->find(it->first);
+        if (id_it != cur_icp_map->end()) {
+            cur_icp = id_it->second;
+        } else {
+            /* It is a new volume which is created after this cp */
+            cur_icp = nullptr;
         }
 
         /* get the cur cp id ptr */
@@ -761,12 +761,16 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
         LOGINFO("Http server is not started by user! start_http = {}", m_cfg.start_http);
     }
 
+    /* We don't allow any cp to happen during phase1 */
+    StaticIndxMgr::init();
     /* phase 1 updates a btree superblock required for btree recovery during journal replay */
     vol_recovery_start_phase1();
 
     // start log store recovery
     LOGINFO("HomeLogStore recovery is started");
     home_log_store_mgr.start(m_dev_mgr->is_first_time_boot());
+
+    StaticIndxMgr::hs_cp_resume(); // cp is suspended by default
 
     /* indx would have recovered by now */
     indx_recovery_done();

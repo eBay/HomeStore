@@ -89,10 +89,7 @@ sisl::io_blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
  * 6. cp end :- CP is completed.
  */
 
-HomeStoreCPMgr::HomeStoreCPMgr() : CPMgr() {
-    auto cp = get_cur_cp();
-    cp_attach_prepare(nullptr, cp);
-}
+HomeStoreCPMgr::HomeStoreCPMgr() : CPMgr() {}
 
 HomeStoreCPMgr::~HomeStoreCPMgr() {}
 
@@ -125,15 +122,17 @@ void HomeStoreCPMgr::indx_tbl_cp_done(hs_cp* hcp) {
     if (!hcp->ref_cnt.decrement_testz(1)) { return; }
 
     HS_LOG(TRACE, cp, "Cp of type {} is completed", (hcp->blkalloc_checkpoint ? "blkalloc" : "Index"));
-    if (hcp->blkalloc_checkpoint) {
-        /* flush all the blks that are freed in this hcp */
-        StaticIndxMgr::flush_hs_free_blks(hcp);
+    if (hcp->indx_cp_list.size()) {
+        if (hcp->blkalloc_checkpoint) {
+            /* flush all the blks that are freed in this hcp */
+            StaticIndxMgr::flush_hs_free_blks(hcp);
 
-        /* persist alloc blkalloc. It is a sync call */
-        blkalloc_cp_start(hcp);
-    } else {
-        /* All dirty buffers are flushed. Write super block */
-        IndxMgr::write_hs_cp_sb(hcp);
+            /* persist alloc blkalloc. It is a sync call */
+            blkalloc_cp_start(hcp);
+        } else {
+            /* All dirty buffers are flushed. Write super block */
+            IndxMgr::write_hs_cp_sb(hcp);
+        }
     }
 
     bool is_blkalloc_cp = hcp->blkalloc_checkpoint;
@@ -164,7 +163,7 @@ void HomeStoreCPMgr::blkalloc_cp_start(hs_cp* hcp) {
 #endif
 
     /* All dirty buffers are flushed. Write super block */
-    IndxMgr::write_hs_cp_sb(hcp);
+    if (hcp->indx_cp_list.size()) { IndxMgr::write_hs_cp_sb(hcp); }
 
     /* Now it is safe to truncate as blkalloc bitsmaps are persisted */
     for (auto it = hcp->indx_cp_list.begin(); it != hcp->indx_cp_list.end(); ++it) {
@@ -185,8 +184,7 @@ void HomeStoreCPMgr::blkalloc_cp_start(hs_cp* hcp) {
 
 /* It attaches the new CP and prepare for cur cp flush */
 void HomeStoreCPMgr::cp_attach_prepare(hs_cp* cur_cp, hs_cp* new_cp) {
-    IndxMgr::attach_prepare_indx_cp_list(cur_cp ? &cur_cp->indx_cp_list : nullptr, &new_cp->indx_cp_list, cur_cp,
-                                         new_cp);
+    IndxMgr::attach_prepare_indx_cp_list(&cur_cp->indx_cp_list, &new_cp->indx_cp_list, cur_cp, new_cp);
 }
 
 /****************************************** IndxMgr class ****************************************/
@@ -300,7 +298,6 @@ void IndxMgr::indx_init() {
     HS_ASSERT_CMP(RELEASE, m_recovery_mode, ==, false); // it is not called in recovery mode;
     create_first_cp();
     indx_create_done(m_active_tbl);
-    std::call_once(m_flag, []() { StaticIndxMgr::init(); });
 }
 
 /* Note: snap mgr should not call it multiple times if a snapshot create is in progress. Indx mgr doesn't monitor
@@ -366,7 +363,6 @@ void IndxMgr::recovery() {
 
 void IndxMgr::io_replay() {
     HS_ASSERT_CMP(RELEASE, m_recovery_mode, ==, true);
-    std::call_once(m_flag, []() { StaticIndxMgr::init(); });
 
     /* get the indx id */
     auto hcp = m_cp_mgr->cp_io_enter();
@@ -1301,9 +1297,8 @@ void IndxMgr::cp_io_exit(hs_cp* hcp) { m_cp_mgr->cp_io_exit(hcp); }
 REGISTER_METABLK_SUBSYSTEM(indx_mgr, "INDX_MGR_CP", StaticIndxMgr::meta_blk_found_cb, nullptr)
 
 void StaticIndxMgr::init() {
-    static std::atomic< int64_t > thread_cnt = 0;
+    std::atomic< int64_t > thread_cnt = 0;
     int expected_thread_cnt = 0;
-    HS_ASSERT(DEBUG, !m_inited, "init is true");
     m_hs = HomeStoreBase::instance();
     m_shutdown_started.store(false);
     try_blkalloc_checkpoint.set(false);
@@ -1314,8 +1309,8 @@ void StaticIndxMgr::init() {
     m_hs_cp_timer_hdl =
         iomanager.schedule_global_timer(HS_DYNAMIC_CONFIG(generic.blkalloc_cp_timer_us) * 1000, true, nullptr,
                                         iomgr::thread_regex::all_user, [](void* cookie) { trigger_hs_cp(); });
-    auto sthread = sisl::named_thread("indx_mgr", []() mutable {
-        iomanager.run_io_loop(false, nullptr, [](bool is_started) {
+    auto sthread = sisl::named_thread("indx_mgr", [&thread_cnt]() mutable {
+        iomanager.run_io_loop(false, nullptr, [&thread_cnt](bool is_started) {
             if (is_started) {
                 IndxMgr::m_thread_id = iomanager.iothread_self();
                 thread_cnt++;
@@ -1325,8 +1320,8 @@ void StaticIndxMgr::init() {
     sthread.detach();
     expected_thread_cnt++;
 
-    auto sthread2 = sisl::named_thread("indx_mgr_btree_slow", []() {
-        iomanager.run_io_loop(false, nullptr, [](bool is_started) {
+    auto sthread2 = sisl::named_thread("indx_mgr_btree_slow", [&thread_cnt]() {
+        iomanager.run_io_loop(false, nullptr, [&thread_cnt](bool is_started) {
             if (is_started) {
                 IndxMgr::m_slow_path_thread_id = iomanager.iothread_self();
                 thread_cnt++;
@@ -1373,7 +1368,7 @@ void StaticIndxMgr::write_hs_cp_sb(hs_cp* hcp) {
 void StaticIndxMgr::attach_prepare_indx_cp_list(std::map< boost::uuids::uuid, indx_cp_ptr >* cur_icp,
                                                 std::map< boost::uuids::uuid, indx_cp_ptr >* new_icp, hs_cp* cur_hcp,
                                                 hs_cp* new_hcp) {
-    if (cur_hcp == nullptr || try_blkalloc_checkpoint.get()) {
+    if (try_blkalloc_checkpoint.get()) {
         new_hcp->ba_cp = HomeStoreBase::instance()->blkalloc_attach_prepare_cp(cur_hcp ? cur_hcp->ba_cp : nullptr);
         if (cur_hcp) {
             cur_hcp->blkalloc_checkpoint = true;

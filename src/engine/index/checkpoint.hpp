@@ -79,7 +79,7 @@ private:
     cp_type* m_cur_cp = nullptr;
     std::atomic< bool > in_cp_phase = false;
     std::mutex trigger_cp_mtx;
-    bool m_cp_suspend = false;
+    std::atomic< bool > m_cp_suspend = true;
 
 public:
     CPMgr() {
@@ -184,7 +184,7 @@ public:
      */
     void trigger_cp(const cp_done_cb& cb = nullptr, bool force = false) {
 
-        if (m_cp_suspend) { return; }
+        if (m_cp_suspend.load()) { return; }
         /* check the state of previous CP */
         bool expected = false;
 
