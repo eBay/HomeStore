@@ -282,14 +282,14 @@ protected:
             blob.type = blkstore_type::META_STORE;
             uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
-            m_meta_blk_store =
-                std::make_unique< meta_blkstore_t >(m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, 0, (char*)&blob,
-                                                    sizeof(blkstore_blob), META_BLK_PAGE_SZ, "meta", false);
+            m_meta_blk_store = std::make_unique< meta_blkstore_t >(
+                m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
+                HS_STATIC_CONFIG(drive_attr.phys_page_size), "meta", false);
 
         } else {
-            m_meta_blk_store =
-                std::make_unique< meta_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU, META_BLK_PAGE_SZ,
-                                                    "meta", (vb->failed ? true : false), false);
+            m_meta_blk_store = std::make_unique< meta_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU,
+                                                                   HS_STATIC_CONFIG(drive_attr.phys_page_size), "meta",
+                                                                   (vb->failed ? true : false), false);
             if (vb->failed) {
                 m_vdev_failed = true;
                 LOGINFO("meta block store is in failed state");
@@ -310,7 +310,7 @@ protected:
 
     void create_logdev_blkstore(vdev_info_block* vb) {
         if (vb == nullptr) {
-            struct blkstore_blob blob{};
+            struct blkstore_blob blob {};
             blob.type = blkstore_type::LOGDEV_STORE;
             uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));

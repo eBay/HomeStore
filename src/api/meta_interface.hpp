@@ -36,8 +36,6 @@ typedef std::map< uint64_t, meta_blk* > meta_blk_map_t;                 // blkid
 typedef std::map< uint64_t, meta_blk_ovf_hdr* > ovf_hdr_map_t;          // ovf_blkid to ovf_blk_hdr map;
 typedef std::string meta_sub_type;
 
-static constexpr uint32_t META_BLK_PAGE_SZ = 4096; // meta block page size
-
 class MetaBlkMgr {
 private:
     static std::unique_ptr< MetaBlkMgr > s_instance;
@@ -173,6 +171,10 @@ public:
      * @return : size of space occupied by this meta blk;
      */
     uint64_t get_meta_size(const void* cookie);
+
+    uint64_t meta_blk_context_sz();
+
+    uint64_t ovf_blk_max_num_data_blk();
 
 public:
     /*********************** static public function **********************/

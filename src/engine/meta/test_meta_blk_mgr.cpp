@@ -131,7 +131,7 @@ public:
         } else {
             std::random_device rd;
             std::default_random_engine g(rd());
-            std::uniform_int_distribution< long unsigned > dist(64, META_BLK_CONTEXT_SZ);
+            std::uniform_int_distribution< long unsigned > dist(64, m_mbm->meta_blk_context_sz());
             return dist(g);
         }
     }
@@ -149,7 +149,7 @@ public:
             if (free_size >= gp.max_wrt_sz) {
                 size_written = do_sb_write(do_overflow());
             } else {
-                size_written = do_sb_write(false, META_BLK_CONTEXT_SZ);
+                size_written = do_sb_write(false, m_mbm->meta_blk_context_sz());
                 HS_RELEASE_ASSERT_EQ(size_written, m_mbm->get_page_size());
             }
 
@@ -180,10 +180,10 @@ public:
 
         meta_blk* mblk = (meta_blk*)cookie;
         if (overflow) {
-            HS_DEBUG_ASSERT_GE(sz_to_wrt, META_BLK_PAGE_SZ);
+            HS_DEBUG_ASSERT_GE(sz_to_wrt, m_mbm->get_page_size());
             HS_DEBUG_ASSERT(mblk->hdr.h.ovf_bid.is_valid(), "Expected valid ovf meta blkid");
         } else {
-            HS_DEBUG_ASSERT_LE(sz_to_wrt, META_BLK_CONTEXT_SZ);
+            HS_DEBUG_ASSERT_LE(sz_to_wrt, m_mbm->meta_blk_context_sz());
             HS_DEBUG_ASSERT(!mblk->hdr.h.ovf_bid.is_valid(), "Expected invalid ovf meta blkid");
         }
 
@@ -587,7 +587,7 @@ int main(int argc, char* argv[]) {
         gp.per_remove = 20;
     }
 
-    if (gp.max_wrt_sz < gp.min_wrt_sz || gp.min_wrt_sz < META_BLK_CONTEXT_SZ) {
+    if (gp.max_wrt_sz < gp.min_wrt_sz || gp.min_wrt_sz < 4096) {
         gp.min_wrt_sz = 4096;
         gp.max_wrt_sz = 65536;
         LOGINFO("Invalid input for min/max wrt sz: defaulting to {}/{}", gp.min_wrt_sz, gp.max_wrt_sz);
