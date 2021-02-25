@@ -10,8 +10,34 @@ run_cmd() {
     echo "Running test run_num=$run_num: $1"
     echo "Command: $*"
     echo "----------------------------------------------------------------------------"
-    "$@"
+    $@ & # run in background
+
+    my_pid=$!  # get process id
+
+    bin_name="$(ps -p $my_pid -o comm=)"  # get running process name associated with that pid
+    echo running pid is $my_pid and process is $bin_name
+
+    sleep_cnt=0
+    while   [ -d /proc/$my_pid ] 
+    do
+        if [[ "$sleep_cnt" -gt 200 ]]; then  # set timeout to be 10 mins
+            curl http://localhost:5000/api/v1/dumpStackTrace
+            sleep 10 # sleep for a while for dump stack trace log to finish flushing;
+            echo Killing $my_pid $bin_name because of timeout
+            kill -9 $my_pid
+            exit 1
+        fi
+        sleep 3
+        ((sleep_cnt++))
+    done
+
+    echo "$my_pid $bin_name completed running, checking return status"
+    wait $my_pid
+    # The variable $? always holds the exit code of the last command to finish.
+    # Here it holds the exit code of $my_pid, since wait exits with that code. 
+
     status=$?
+    echo The exit status of the process was $status
 
     if [ $status -eq 0 ] ; then
         echo "---------------------------------------------------------------------------"
