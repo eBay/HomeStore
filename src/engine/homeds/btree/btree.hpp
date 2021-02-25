@@ -54,9 +54,16 @@ template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_t
 struct _btree_locked_node_info {
     btree_node_t* node;
     Clock::time_point start_time;
+    const char* fname;
+    int line;
+    void dump() { LOGINFO("node locked by file: {}, line: {}", fname, line); }
 };
 
 #define btree_locked_node_info _btree_locked_node_info< BtreeStoreType, K, V, InteriorNodeType, LeafNodeType >
+
+#define lock_and_refresh_node(a, b, c) _lock_and_refresh_node(a, b, c, __FILE__, __LINE__)
+#define lock_node_upgrade(a, b) _lock_node_upgrade(a, b, __FILE__, __LINE__)
+#define start_of_lock(a, b) _start_of_lock(a, b, __FILE__, __LINE__)
 
 template < btree_store_type BtreeStoreType, typename K, typename V, btree_node_type InteriorNodeType,
            btree_node_type LeafNodeType >
@@ -2726,8 +2733,8 @@ private:
         return (btree_store_t::read_node(m_btree_store.get(), id, node));
     }
 
-    btree_status_t lock_and_refresh_node(const BtreeNodePtr& node, homeds::thread::locktype type,
-                                         const btree_cp_ptr& bcp) {
+    btree_status_t _lock_and_refresh_node(const BtreeNodePtr& node, homeds::thread::locktype type,
+                                          const btree_cp_ptr& bcp, const char* fname, int line) {
         bool is_write_modifiable;
         node->lock(type);
         if (type == homeds::thread::LOCKTYPE_WRITE) {
@@ -2744,11 +2751,12 @@ private:
             node->unlock(type);
             return ret;
         }
+
         start_of_lock(node, type);
         return btree_status_t::success;
     }
 
-    btree_status_t lock_node_upgrade(const BtreeNodePtr& node, const btree_cp_ptr& bcp) {
+    btree_status_t _lock_node_upgrade(const BtreeNodePtr& node, const btree_cp_ptr& bcp, const char* fname, int line) {
         // Explicitly dec and incr, for upgrade, since it does not call top level functions to lock/unlock node
         auto time_spent = end_of_lock(node, LOCKTYPE_READ);
 
@@ -2801,8 +2809,13 @@ private:
         return ss.str();
     }
 
-    static void start_of_lock(const BtreeNodePtr& node, locktype ltype) {
+    static void _start_of_lock(const BtreeNodePtr& node, locktype ltype, const char* fname, int line) {
         btree_locked_node_info info;
+
+#ifndef NDEBUG
+        info.fname = fname;
+        info.line = line;
+#endif
 
         info.start_time = Clock::now();
         info.node = node.get();
@@ -2870,6 +2883,14 @@ private:
 
 #ifndef NDEBUG
     static void check_lock_debug() {
+        // both wr_locked_nodes and rd_locked_nodes are thread_local;
+        // nothing will be dumpped if there is no assert failure;
+        for (auto& x : wr_locked_nodes) {
+            x.dump();
+        }
+        for (auto& x : rd_locked_nodes) {
+            x.dump();
+        }
         DEBUG_ASSERT_EQ(wr_locked_nodes.size(), 0);
         DEBUG_ASSERT_EQ(rd_locked_nodes.size(), 0);
     }
