@@ -82,7 +82,7 @@ pipeline {
                     }
                     axis {
                         name 'COVERAGE'
-                        values 'True', 'False'
+                        values 'False'
                     }
                 }
                 excludes {
