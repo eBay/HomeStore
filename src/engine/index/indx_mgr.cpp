@@ -198,7 +198,8 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io
         m_last_cp_sb(m_uuid),
         m_recovery_mode(false),
         m_create_indx_tbl(func),
-        m_is_snap_enabled(is_snap_enabled) {
+        m_is_snap_enabled(is_snap_enabled),
+        m_metrics(name.c_str()) {
     m_prepare_cb_list = std::make_unique< std::vector< prepare_cb > >();
     m_prepare_cb_list->reserve(4);
     m_active_tbl = m_create_indx_tbl();
@@ -222,7 +223,8 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io
         m_recovery_mode(true),
         m_create_indx_tbl(create_func),
         m_recover_indx_tbl(recover_func),
-        m_immutable_sb(sb) {
+        m_immutable_sb(sb),
+        m_metrics(name.c_str()) {
     m_journal = nullptr;
     m_prepare_cb_list = std::make_unique< std::vector< prepare_cb > >();
     m_prepare_cb_list->reserve(4);

@@ -67,7 +67,7 @@ void Volume::set_io_flip() {
     fc->inject_retval_flip("vol_delay_read_us", {null_cond}, freq, 20);
 
     fc->inject_retval_flip("cache_insert_race", {null_cond}, freq, 20);
-    fc->inject_retval_flip("io_write_iocb_empty_flip", {null_cond}, freq, 20);
+    //    fc->inject_retval_flip("io_write_iocb_empty_flip", {null_cond}, freq, 20);
     fc->inject_retval_flip("io_read_iocb_empty_flip", {null_cond}, freq, 20);
 
     fc->inject_retval_flip("blkalloc_split_blk", {null_cond}, freq, 4);

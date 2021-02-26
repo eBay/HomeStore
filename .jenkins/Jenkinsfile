@@ -198,7 +198,7 @@ pipeline {
                                     sh "echo \"sonar.branch.name=${BRANCH_NAME}\" >> sonar-project.properties"
                                     sh "conan install -pr ${BUILD_TYPE} ${BUILD_MISSING} -o ${PROJECT}:testing=coverage -o ${PROJECT}:sanitize=False ."
                                     sh "build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ."
-                                    sh "find . -name \"*.gcno\" -exec gcov {} \\;"
+                                    sh "find . -name \"/home/jenkins/workspace/Homestore_master/*.cpp\" -exec gcov {} \\;"
                                     withSonarQubeEnv('sds-sonar')  {
                                         sh "sonar-scanner -Dsonar.projectBaseDir=. -Dsonar.projectVersion=\"${VER}\""
                                     }

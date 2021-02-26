@@ -70,6 +70,21 @@ struct cp_base {
     }
 };
 
+class CPMgrMetrics : public sisl::MetricsGroupWrapper {
+    explicit CPMgrMetrics() : sisl::MetricsGroupWrapper("CPMgr") {
+        REGISTER_COUNTER(back_to_back_cps, "back to back cp");
+        REGISTER_COUNTER(cp_cnt, "cp cnt");
+        REGISTER_HISTOGRAM(cp_latency, "cp latency (in us)");
+        register_me_to_farm();
+    }
+
+    CPMgrMetrics(const CPMgrMetrics&) = delete;
+    CPMgrMetrics(CPMgrMetrics&&) noexcept = delete;
+    CPMgrMetrics& operator=(const CPMgrMetrics&) = delete;
+    CPMgrMetrics& operator=(const CPMgrMetrics&&) noexcept = delete;
+    ~CPMgrMetrics() { deregister_me_from_farm(); }
+};
+
 /* It is responsible to trigger the checkpoints when all concurrent IOs are completed.
  * @ cp_type :- It is a consumer checkpoint with a base class of cp
  */
@@ -80,6 +95,8 @@ private:
     std::atomic< bool > in_cp_phase = false;
     std::mutex trigger_cp_mtx;
     std::atomic< bool > m_cp_suspend = true;
+    CPMgrMetrics m_metrics;
+    Clock::time_point m_cp_start_time;
 
 public:
     CPMgr() {
@@ -154,6 +171,7 @@ public:
         HS_ASSERT_CMP(DEBUG, cp->cp_status, ==, cp_status_t::cp_start);
         auto cb_list = cp->cb_list;
         LOGDEBUGMOD(cp, ">>>>>>>>>>>> cp ID completed {}, notified {} callbacks", cp->to_string(), cb_list.size());
+        HISTOGRAM_OBSERVE(m_metrics, cp_latency, get_elapsed_time_ns(m_cp_start_time));
         delete (cp);
 
         for (uint32_t i = 0; i < cb_list.size(); ++i) {
@@ -172,6 +190,7 @@ public:
         if (!cur_cp) { return; }
         if (cur_cp->cp_trigger_waiting) {
             LOGINFOMOD(cp, "Triggering back to back CP");
+            COUNTER_INCREMENT(m_metrics, back_to_back_cps, 1);
             trigger_cp();
         }
         cp_io_exit(cur_cp);
@@ -204,6 +223,8 @@ public:
         auto prev_cp = cp_io_enter();
         prev_cp->cp_status = cp_status_t::cp_trigger;
         LOGDEBUGMOD(cp, "<<<<<<<<<<< Triggering new CP {}", prev_cp->to_string());
+        COUNTER_INCREMENT(m_metrics, cp_cnt, 1);
+        m_cp_start_time = Clock::now();
 
         /* allocate a new cp */
         auto new_cp = new cp_type();
