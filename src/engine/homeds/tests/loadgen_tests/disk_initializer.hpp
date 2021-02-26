@@ -4,6 +4,8 @@
 #include <functional>
 #include <system_error>
 #include <vector>
+#include <fstream>
+#include <filesystem>
 
 #include <boost/uuid/string_generator.hpp>
 #include <boost/uuid/uuid.hpp>
@@ -41,9 +43,10 @@ public:
         homestore::dev_info temp_info;
         temp_info.dev_names = "file_load_gen";
         device_info.push_back(temp_info);
+
         std::ofstream ofs(temp_info.dev_names.c_str(), std::ios::binary | std::ios::out);
-        ofs.seekp(DISK_MAX_SIZE - 1);
-        ofs.write("", 1);
+        std::filesystem::path p = temp_info.dev_names.c_str();
+        std::filesystem::resize_file(p, DISK_MAX_SIZE); // set the file size
 
         //                iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
         homestore::init_params params;

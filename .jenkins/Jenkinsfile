@@ -214,8 +214,10 @@ pipeline {
                             }
                         }
                         steps {
-                            sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
-                            sh "conan upload ${PROJECT}/${TAG} -c --all -r ebay-local"
+                            retry(3) {
+                                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
+                                sh "conan upload ${PROJECT}/${TAG} -c --all -r ebay-local"
+                            }
                         }
                     }
                     stage("Image") {
@@ -223,8 +225,10 @@ pipeline {
                             expression { "${COVERAGE}" == 'False' }
                         }
                         steps {
-                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
-                                sh "docker build -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins/"
+                            retry(3) {
+                                withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
+                                    sh "docker build -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins/"
+                                }
                             }
                         }
                     }
@@ -292,9 +296,10 @@ pipeline {
             script {
                 if ("${failed_pkg}" != "") {
                     slackSend color: '#E43237', channel: '#homestore-build', message: "@here HomeStore downstream pkg - *${failed_pkg}* build failed.\n*URL:* ${BUILD_URL}\n*Last 2 commits:* ```${LAST_COMMITS}```\nIf result not expected, revert (aka `conan remove -r ebay-local`) these pkgs: ```${built_chain}```"
+                } else {
+                    slackSend color: '#E43237', channel: '#homestore-build', message: "@here HomeStore build *${PROJECT}/${TAG}* has had a failure : ${BUILD_URL}"
                 }
             }
-            slackSend color: '#E43237', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* has had a failure : ${BUILD_URL}"
         }
         success {
             slackSend color: '#85B717', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* has completed successfully."
