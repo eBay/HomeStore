@@ -1088,7 +1088,7 @@ int main(int argc, char* argv[]) {
     } else {
         Timer tmr;
         LOGINFO("Running longevity test for {} seconds.", running_time);
-        ::testing::GTEST_FLAG(filter) = "-LogStoreTest.DeleteMultipleLogStores";
+        ::testing::GTEST_FLAG(filter) = "-LogStoreTest.DeleteMultipleLogStores:LogStoreTest.WriteSyncThenRead";
         uint16_t count{0};
         while ((tmr.elapsed() < running_time) && (ret == 0)) {
             ret = RUN_ALL_TESTS();

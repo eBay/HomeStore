@@ -255,6 +255,13 @@ def meta_blk_store_nightly():
 
     print("meta blk store test completed")
 
+def logstore_nightly():
+    print("log store test started")
+    subprocess.check_call(
+        dirpath + "test_log_store --longevity_tests=24000", stderr=subprocess.STDOUT, shell=True)
+
+    print("log store test completed")
+    
 def force_reinit():
     # test force reinit with recovery (e.g.  with complete homestore shutdown);
     cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=1 --enable_crash_handler=0 --remove_file=0"
@@ -368,7 +375,10 @@ def nightly():
     # metablkstore IO test
     meta_blk_store_nightly()
     sleep(5)
-
+    
+    logstore_nightly()
+    sleep(5)
+    
     vol_mod_test("meta", meta_flip_list)
     sleep(5)
 
@@ -482,6 +492,9 @@ if test_suits == "vdev_nightly":
 
 if test_suits == "meta_blk_store_nightly":
     meta_blk_store_nightly()
+
+if test_suits == "logstore_nightly":
+    logstore_nightly()
 
 if test_suits == "force_reinit":
     force_reinit()
