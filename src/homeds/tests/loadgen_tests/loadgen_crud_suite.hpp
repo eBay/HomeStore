@@ -128,13 +128,13 @@ struct BtreeLoadGen {
         stored_keys += kc;
         assert(kvg->get_keys_count() == (uint64_t)kc);
         kvg->reset_pattern(KeyPattern::SEQUENTIAL, 0);
-
+#ifdef _PRERELEASE
         FlipClient fc(HomeStoreFlip::instance());
         FlipFrequency freq;
         freq.set_count(1);
         freq.set_percent(100);
         fc.inject_noreturn_flip("btree_leaf_node_split", {}, freq);
-
+#endif
         kvg->run_parallel([&]() {
             // single range update over entire tree
             for (int i = 0; i < kc; i += UPDATE_RANGE_BATCH_SIZE) {

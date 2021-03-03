@@ -28,7 +28,9 @@
 
 using namespace std;
 using namespace homeds::thread;
+#ifdef _PRERELEASE
 using namespace flip;
+#endif
 
 #ifndef NDEBUG
 #define MAX_BTREE_DEPTH 100
@@ -248,9 +250,7 @@ public:
     }
 
     Btree(BtreeConfig& cfg) :
-            m_btree_cfg(cfg),
-            m_metrics(BtreeStoreType, cfg.get_name().c_str()),
-            m_node_size(cfg.get_node_size()) {}
+            m_btree_cfg(cfg), m_metrics(BtreeStoreType, cfg.get_name().c_str()), m_node_size(cfg.get_node_size()) {}
 
     ~Btree() {
         if (!m_destroy) {

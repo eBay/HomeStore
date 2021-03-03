@@ -26,7 +26,9 @@ extern "C" {
 }
 
 using namespace homestore;
+#ifdef _PRERELEASE
 using namespace flip;
+#endif
 
 THREAD_BUFFER_INIT;
 
@@ -418,8 +420,9 @@ public:
         max_io_size = params.max_io_size;
         ev_fd = eventfd(0, EFD_NONBLOCK);
 
-        iomgr_obj->add_fd(ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); },
-                          EPOLLIN, 9, nullptr);
+        iomgr_obj->add_fd(
+            ev_fd, [this](auto fd, auto cookie, auto event) { process_ev_common(fd, cookie, event); }, EPOLLIN, 9,
+            nullptr);
         ep = new test_ep(iomgr_obj);
         iomgr_obj->add_ep(ep);
         iomgr_obj->start();
@@ -1048,13 +1051,14 @@ TEST_F(IOTest, lifecycle_test) {
     this->wait_cmpl();
     LOGINFO("write_cnt {}", write_cnt);
     LOGINFO("read_cnt {}", read_cnt);
-
+#ifdef _PRERELEASE
     FlipClient fc(HomeStoreFlip::instance());
     FlipFrequency freq;
     freq.set_count(10);
     freq.set_percent(100);
 
     fc.inject_retval_flip("vol_comp_delay_us", {}, freq, 100);
+#endif
     this->delete_volumes();
     this->shutdown();
     this->remove_files();
@@ -1132,13 +1136,13 @@ TEST_F(IOTest, one_disk_replace_abort_test) {
     this->disk_replace_cnt = 1;
     this->expected_init_fail = true;
     this->m_expected_vol_state = homestore::vol_state::DEGRADED;
-
+#ifdef _PRERELEASE
     FlipClient fc(HomeStoreFlip::instance());
     FlipFrequency freq;
     freq.set_count(100);
     freq.set_percent(100);
     fc.inject_noreturn_flip("reboot_abort", {}, freq);
-
+#endif
     this->start_homestore();
     this->wait_cmpl();
     this->shutdown();
@@ -1159,6 +1163,7 @@ TEST_F(IOTest, two_disk_replace_test) {
 TEST_F(IOTest, one_disk_fail_test) {
     this->init = false;
 
+#ifdef _PRERELEASE
     FlipClient fc(HomeStoreFlip::instance());
     FlipFrequency freq;
     FlipCondition cond1;
@@ -1167,7 +1172,7 @@ TEST_F(IOTest, one_disk_fail_test) {
     freq.set_percent(100);
     fc.create_condition("setting error on file1", flip::Operator::EQUAL, names[0], &cond1);
     fc.inject_noreturn_flip("device_boot_fail", {cond1}, freq);
-
+#endif
     this->expected_init_fail = true;
     this->start_homestore();
     this->wait_cmpl();
@@ -1194,6 +1199,7 @@ TEST_F(IOTest, vol_io_fail_test) {
     this->start_homestore();
     this->wait_homestore_init_done();
 
+#ifdef _PRERELEASE
     FlipClient fc(HomeStoreFlip::instance());
     FlipCondition cond1;
     FlipCondition cond2;
@@ -1204,7 +1210,7 @@ TEST_F(IOTest, vol_io_fail_test) {
     freq.set_percent(50);
     fc.inject_noreturn_flip("io_write_comp_error_flip", {}, freq);
     fc.inject_noreturn_flip("device_fail", {cond1, cond2}, freq);
-
+#endif
     this->wait_cmpl();
     this->shutdown();
     if (remove_file) {
@@ -1237,8 +1243,17 @@ TEST_F(IOTest, btree_fix_read_failure_test) {
 
     this->move_vol_to_offline();
 
-    VolInterface::get_instance()->set_error_flip();
+#ifdef _PRERELEASE
+    FlipClient* fc = homestore::HomeStoreFlip::client_instance();
+    FlipFrequency freq;
+    freq.set_count(100);
+    freq.set_percent(1);
 
+    FlipCondition null_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
+
+    fc->inject_noreturn_flip("btree_read_fail", {null_cond}, freq);
+#endif
     auto ret = this->fix_vol_mapping_btree();
     EXPECT_EQ(ret, false);
 
