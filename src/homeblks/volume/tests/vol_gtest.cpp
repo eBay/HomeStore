@@ -1908,7 +1908,15 @@ TEST_F(VolTest, btree_fix_read_failure_test) {
     output.print("btree_fix_read_failure_test");
 
     this->move_vol_to_offline();
-    VolInterface::get_instance()->set_error_flip();
+    FlipClient* fc = homestore::HomeStoreFlip::client_instance();
+    FlipFrequency freq;
+    freq.set_count(2000000000);
+    freq.set_percent(1);
+
+    FlipCondition null_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
+
+    fc->inject_noreturn_flip("btree_read_fail", {null_cond}, freq);
     auto ret = this->fix_vol_mapping_btree();
     EXPECT_EQ(ret, false);
 
