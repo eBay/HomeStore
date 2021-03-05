@@ -14,7 +14,7 @@ static constexpr uint32_t META_BLK_OVF_MAGIC = 0xDEADBEEF;
 static constexpr uint32_t META_BLK_SB_MAGIC = 0xABCDCEED;
 static constexpr uint32_t META_BLK_SB_VERSION = 0x1;
 static constexpr uint32_t META_BLK_VERSION = 0x1;
-static constexpr uint32_t MAX_SUBSYS_TYPE_LEN = 32;
+static constexpr uint32_t MAX_SUBSYS_TYPE_LEN = 64;
 static constexpr uint32_t CONTEXT_DATA_OFFSET_ALIGNMENT = 64;
 // static constexpr uint32_t META_BLK_CONTEXT_SZ = (META_BLK_PAGE_SZ - META_BLK_HDR_MAX_SZ); // meta blk context data sz
 
@@ -93,12 +93,12 @@ struct meta_blk_hdr_s {
     uint32_t version;
     uint32_t magic; // magic
     crc32_t crc;
-    char type[MAX_SUBSYS_TYPE_LEN]; // sub system type;
     BlkId next_bid;                 // next metablk
     BlkId prev_bid;                 // previous metablk
     BlkId ovf_bid;                  // overflow blk id;
     BlkId bid;                      // current blk id; might not be needd;
     uint64_t context_sz;            // total size of context data;
+    char type[MAX_SUBSYS_TYPE_LEN]; // sub system type;
 };
 
 static constexpr uint32_t META_BLK_HDR_RSVD_SZ =
