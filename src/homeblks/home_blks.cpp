@@ -809,6 +809,13 @@ void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
                 trigger_cp_init(vol_mnt_cnt);
                 return;
             }
+            /* check if all the volumes have flushed their dirty buffers */
+            for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
+                if (!it->second->is_recovery_done()) {
+                    /* trigger another CP */
+                    trigger_cp_init(vol_mnt_cnt);
+                }
+            }
         }
         if (success) {
             LOGINFO("System CP taken upon init is completed successfully");

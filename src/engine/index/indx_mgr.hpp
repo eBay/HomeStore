@@ -590,6 +590,7 @@ public:
     hs_cp* cp_io_enter();
     void cp_io_exit(hs_cp* cp);
     btree_cp_ptr get_btree_cp(hs_cp* hcp);
+    bool is_recovery_done();
 
 protected:
     /*********************** virtual functions required to support snapshot  **********************/
