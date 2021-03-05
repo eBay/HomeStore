@@ -249,12 +249,20 @@ def vdev_nightly():
 def meta_blk_store_nightly():
     print("meta blk store test started")
     subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.min_drive_size_test", stderr=subprocess.STDOUT, shell=True)
-    subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.write_to_full_test", stderr=subprocess.STDOUT, shell=True)
+    #subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.write_to_full_test", stderr=subprocess.STDOUT, shell=True)  // Turn on this once SDSTOR-3981 is resolved;
     subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.single_read_test", stderr=subprocess.STDOUT, shell=True)
-    subprocess.check_call(dirpath + "test_meta_blk_mgr --run_time=24000 --num_io=1000000", stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr --run_time=7200 --num_io=1000000", stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr --min_write_size=65536 --max_write_size=2097152 --run_time=14400 --num_io=1000000", stderr=subprocess.STDOUT, shell=True)
 
     print("meta blk store test completed")
 
+def logstore_nightly():
+    print("log store test started")
+    subprocess.check_call(
+        dirpath + "test_log_store --longevity_tests=24000", stderr=subprocess.STDOUT, shell=True)
+
+    print("log store test completed")
+    
 def force_reinit():
     # test force reinit with recovery (e.g.  with complete homestore shutdown);
     cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=1 --enable_crash_handler=0 --remove_file=0"
@@ -368,7 +376,10 @@ def nightly():
     # metablkstore IO test
     meta_blk_store_nightly()
     sleep(5)
-
+    
+    logstore_nightly()
+    sleep(5)
+    
     vol_mod_test("meta", meta_flip_list)
     sleep(5)
 
@@ -482,6 +493,9 @@ if test_suits == "vdev_nightly":
 
 if test_suits == "meta_blk_store_nightly":
     meta_blk_store_nightly()
+
+if test_suits == "logstore_nightly":
+    logstore_nightly()
 
 if test_suits == "force_reinit":
     force_reinit()

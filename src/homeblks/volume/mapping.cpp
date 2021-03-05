@@ -32,9 +32,7 @@ uint64_t mapping::get_next_start_key_from_cursor(BtreeQueryCursor& cur) {
 
 mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name,
                  trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb) :
-        m_pending_read_blk_cb{pending_read_cb},
-        m_vol_page_size{page_size},
-        m_unique_name{unique_name} {
+        m_pending_read_blk_cb{pending_read_cb}, m_vol_page_size{page_size}, m_unique_name{unique_name} {
     m_vol_size = volsize;
     m_hb = HomeBlks::safe_instance();
     m_match_item_cb_put =
@@ -56,9 +54,7 @@ mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique
 
 mapping::mapping(uint64_t volsize, uint32_t page_size, const std::string& unique_name, btree_super_block btree_sb,
                  trigger_cp_callback trigger_cp_cb, pending_read_blk_cb pending_read_cb, btree_cp_sb* btree_cp_sb) :
-        m_pending_read_blk_cb{pending_read_cb},
-        m_vol_page_size{page_size},
-        m_unique_name{unique_name} {
+        m_pending_read_blk_cb{pending_read_cb}, m_vol_page_size{page_size}, m_unique_name{unique_name} {
     m_vol_size = volsize;
     m_hb = HomeBlks::safe_instance();
     m_match_item_cb_put =
@@ -286,6 +282,7 @@ bool mapping::fix(const btree_cp_ptr& bcp, uint64_t start_lba, uint64_t end_lba,
         auto ret = get(vreq, kvs, false /* fill_gaps */);
         if (ret != no_error) {
             LOGERROR("failed to get KVs from btree");
+            delete new_bt;
             return false;
         }
 

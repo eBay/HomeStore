@@ -809,7 +809,7 @@ void MetaBlkMgr::read_sub_sb_internal(const meta_blk* mblk, sisl::byte_view& buf
         buf = hs_create_byte_view(mblk->hdr.h.context_sz, true /* aligned byte_view */);
 
         auto total_sz = mblk->hdr.h.context_sz;
-        uint64_t read_offset = 0;
+        uint64_t read_offset = 0; // read offset in overall context data;
 
         auto obid = mblk->hdr.h.ovf_bid;
         while (read_offset < total_sz) {
@@ -819,15 +819,25 @@ void MetaBlkMgr::read_sub_sb_internal(const meta_blk* mblk, sisl::byte_view& buf
             // copy the remaining data from ovf blk chain;
             // we don't cache context data, so read from disk;
             auto ovf_hdr = m_ovf_blk_hdrs[obid.to_integer()];
+            uint64_t read_offset_in_this_ovf = 0; // read offset in data covered by this overflow blk;
             for (size_t i = 0; i < ovf_hdr->h.nbids; ++i) {
-                size_t read_sz_per_db = (i < ovf_hdr->h.nbids - 1 ? ovf_hdr->data_bid[i].get_nblks() * get_page_size()
-                                                                  : ovf_hdr->h.context_sz - read_offset);
+                size_t read_sz_per_db = 0;
+                if (i < ovf_hdr->h.nbids - 1) {
+                    read_sz_per_db = ovf_hdr->data_bid[i].get_nblks() * get_page_size();
+                } else {
+                    // it is possible user context data doesn't occupy the whole block, so we need to remember the size
+                    // that was written to the last data blk;
+                    read_sz_per_db = ovf_hdr->h.context_sz - read_offset_in_this_ovf;
+                }
+
                 read(ovf_hdr->data_bid[i], buf.bytes() + read_offset,
                      sisl::round_up(read_sz_per_db, HS_STATIC_CONFIG(drive_attr.align_size)));
+
+                read_offset_in_this_ovf += read_sz_per_db;
                 read_offset += read_sz_per_db;
             }
 
-            HS_DEBUG_ASSERT_EQ(read_offset, ovf_hdr->h.context_sz);
+            HS_DEBUG_ASSERT_EQ(read_offset_in_this_ovf, ovf_hdr->h.context_sz);
 
             // verify self bid
             HS_RELEASE_ASSERT_EQ(ovf_hdr->h.bid.to_integer(), obid.to_integer(), "{}, Corrupted self-bid: {}/{}",
