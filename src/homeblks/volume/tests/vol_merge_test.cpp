@@ -478,7 +478,7 @@ public:
     void shutdown() {
         std::unique_lock< std::mutex > lk(m_mutex);
         vol_info.clear();
-        bool success = VolInterface::get_instance()->shutdown();
+        bool success = VolInterface::shutdown();
         assert(success);
     }
 

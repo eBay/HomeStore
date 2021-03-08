@@ -1,7 +1,7 @@
 #include <algorithm> // std::shuffle
 #include <array>
 #include <atomic>
-#include <chrono>    // std::chrono::system_clock
+#include <chrono> // std::chrono::system_clock
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
@@ -13,7 +13,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <random>    // std::default_random_engine
+#include <random> // std::default_random_engine
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -47,7 +47,7 @@ struct test_log_data {
     test_log_data& operator=(test_log_data&&) noexcept = delete;
     ~test_log_data() = default;
 
-    uint32_t size; 
+    uint32_t size;
     uint8_t data[1]; // 0 size arrays are illegal according to C++ standard
 
     uint32_t total_size() const { return sizeof(test_log_data) + size - 1; }
@@ -200,7 +200,7 @@ public:
 
     void read_validate(const bool expect_all_completed = false) {
         const auto trunc_upto{m_log_store->truncated_upto()};
-        for (std::remove_const_t<decltype(trunc_upto)> i{0}; i <= trunc_upto; ++i) {
+        for (std::remove_const_t< decltype(trunc_upto) > i{0}; i <= trunc_upto; ++i) {
             ASSERT_THROW([[maybe_unused]] const auto result{m_log_store->read_sync(i)}, std::out_of_range)
                 << "Expected std::out_of_range exception for lsn=" << m_log_store->get_store_id() << ":" << i
                 << " but not thrown";
@@ -325,18 +325,19 @@ public:
         test_log_data* const d{new (raw_buf) test_log_data()};
         d->size = sz;
 
-        assert(reinterpret_cast<uint8_t*>(d) == raw_buf);
+        assert(reinterpret_cast< uint8_t* >(d) == raw_buf);
 
-        const char c{static_cast<char>((lsn % 94) + 33)};
-        std::memset(static_cast< void* >(d->data), c, static_cast<size_t>(d->size));
+        const char c{static_cast< char >((lsn % 94) + 33)};
+        std::memset(static_cast< void* >(d->data), c, static_cast< size_t >(d->size));
         return d;
     }
 
 private:
     void validate_data(const test_log_data* const d, const logstore_seq_num_t lsn) {
-        const char c{static_cast<char>((lsn % 94) + 33)};
+        const char c{static_cast< char >((lsn % 94) + 33)};
         const std::string actual{reinterpret_cast< const char* >(&d->data[0]), static_cast< size_t >(d->size)};
-        const std::string expected(static_cast< size_t >(d->size), c); // needs to be () because of same reason as vector
+        const std::string expected(static_cast< size_t >(d->size),
+                                   c); // needs to be () because of same reason as vector
         ASSERT_EQ(actual, expected) << "Data mismatch for LSN=" << m_log_store->get_store_id() << ":" << lsn
                                     << " size=" << d->size;
     }
@@ -374,8 +375,8 @@ public:
         return inst;
     }
 
-    void start_homestore(const uint32_t ndevices, const uint64_t dev_size, uint32_t nthreads, const uint32_t n_log_stores,
-                         const bool restart = false) {
+    void start_homestore(const uint32_t ndevices, const uint64_t dev_size, uint32_t nthreads,
+                         const uint32_t n_log_stores, const bool restart = false) {
         if (restart) {
             shutdown();
             std::this_thread::sleep_for(std::chrono::seconds{5});
@@ -407,7 +408,7 @@ public:
         iomanager.start(nthreads, is_spdk);
 
         if (restart) {
-            for (std::remove_const_t<decltype(n_log_stores)> i{0}; i < n_log_stores; ++i) {
+            for (std::remove_const_t< decltype(n_log_stores) > i{0}; i < n_log_stores; ++i) {
                 home_log_store_mgr.open_log_store(i, false /* append_mode */,
                                                   [i, this](std::shared_ptr< HomeLogStore > log_store) {
                                                       m_log_store_clients[i]->set_log_store(log_store);
@@ -441,7 +442,7 @@ public:
         cv.wait(lk, [&] { return inited; });
 
         if (!restart) {
-            for (std::remove_const_t<decltype(n_log_stores)> i{0}; i < n_log_stores; ++i) {
+            for (std::remove_const_t< decltype(n_log_stores) > i{0}; i < n_log_stores; ++i) {
                 m_log_store_clients.push_back(std::make_unique< SampleLogStoreClient >(std::bind(
                     &SampleDB::on_log_insert_completion, this, std::placeholders::_1, std::placeholders::_2)));
             }
@@ -449,7 +450,7 @@ public:
     }
 
     void shutdown() {
-        VolInterface::get_instance()->shutdown();
+        VolInterface::shutdown();
 
         // m_log_store_clients.clear();
         iomanager.stop();
@@ -460,7 +461,7 @@ public:
         if (m_io_closure) m_io_closure(lsn, ld_key);
     }
 
-    [[nodiscard]] bool  delete_log_store(const logstore_id_t store_id) {
+    [[nodiscard]] bool delete_log_store(const logstore_id_t store_id) {
         bool removed{false};
         for (auto it{std::begin(m_log_store_clients)}; it != std::end(m_log_store_clients); ++it) {
             if ((*it)->m_log_store->get_store_id() == store_id) {
@@ -490,7 +491,7 @@ public:
     LogStoreTest& operator=(LogStoreTest&&) noexcept = delete;
     virtual ~LogStoreTest() override = default;
 
-protected:    
+protected:
     virtual void SetUp() override{};
     virtual void TearDown() override{};
 
@@ -568,8 +569,8 @@ protected:
         }
         EXPECT_EQ(expected_num_records, count);
     }
-    void dump_validate_filter(const logstore_id_t id, const logstore_seq_num_t start_seq, const logstore_seq_num_t end_seq,
-                              const bool print_content = false) {
+    void dump_validate_filter(const logstore_id_t id, const logstore_seq_num_t start_seq,
+                              const logstore_seq_num_t end_seq, const bool print_content = false) {
         for (const auto& lsc : sample_db.m_log_store_clients) {
             if (lsc->m_log_store->get_store_id() == id) {
                 homestore::log_dump_req dump_req{homestore::log_dump_req()};
@@ -584,20 +585,17 @@ protected:
                 LOGINFO("Printing json dump of logstore id {}, start_seq {}, end_seq {}, \n\n {}", id, start_seq,
                         end_seq, json_dump.dump());
                 const auto itr_id{json_dump.find(std::to_string(id))};
-                if (itr_id != std::end(json_dump))
-                {
+                if (itr_id != std::end(json_dump)) {
                     const auto itr_records{itr_id->find("log_records")};
-                    if (itr_records != std::end(*itr_id))
-                    {
-                        EXPECT_EQ(static_cast<size_t>(end_seq - start_seq + 1), itr_records->size());
+                    if (itr_records != std::end(*itr_id)) {
+                        EXPECT_EQ(static_cast< size_t >(end_seq - start_seq + 1), itr_records->size());
                     } else {
                         EXPECT_FALSE(true);
                     }
-                } else
-                {
+                } else {
                     EXPECT_FALSE(true);
                 }
-                
+
                 return;
             }
         }
@@ -650,8 +648,7 @@ protected:
                 if (expect_forward_progress) {
                     if (trunc_loc == logdev_key::out_of_bound_ld_key()) {
                         LOGINFO("No forward progress for device truncation yet.");
-                    } else
-                    {
+                    } else {
                         // Validate the truncation is actually moving forw1ard
                         ASSERT_GT(trunc_loc.idx, m_truncate_log_idx.load());
                         m_truncate_log_idx.store(trunc_loc.idx);
@@ -663,7 +660,7 @@ protected:
             true /* wait_till_done */);
 
         const auto upto_count{find_garbage_upto(m_truncate_log_idx.load())};
-        std::remove_const_t<decltype(upto_count)> count{0};
+        std::remove_const_t< decltype(upto_count) > count{0};
         for (auto it{std::begin(m_garbage_stores_upto)}; count < upto_count; ++count) {
             it = m_garbage_stores_upto.erase(it);
         }
@@ -720,7 +717,7 @@ protected:
         size_t d{0};
         for (size_t s{0}; s < sample_db.m_log_store_clients.size(); ++s) {
             const auto upto{store_freqs[s].has_value() ? *store_freqs[s] : default_freq};
-            for (std::remove_const_t<decltype(upto)> i{0}; i < upto; ++i) {
+            for (std::remove_const_t< decltype(upto) > i{0}; i < upto; ++i) {
                 m_store_distribution[d++] = s;
             }
             LOGINFO("LogStore Client: {} distribution pct = {}", s, upto);
@@ -797,7 +794,7 @@ TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
         std::this_thread::sleep_for(std::chrono::microseconds(1000));
         this->truncate_validate(true /* is_parallel_to_write */);
         ++trunc_attempt;
-        ASSERT_LT(trunc_attempt, static_cast<uint16_t>(30));
+        ASSERT_LT(trunc_attempt, static_cast< uint16_t >(30));
         LOGINFO("Still pending completions = {}, pending issued = {}", this->m_nrecords_waiting_to_complete.load(),
                 m_nrecords_waiting_to_issue.load());
     } while (((this->m_nrecords_waiting_to_complete != 0) || (m_nrecords_waiting_to_issue != 0)));
@@ -1008,9 +1005,10 @@ TEST_F(LogStoreTest, WriteSyncThenRead) {
         auto b{tmp_log_store->read_sync(i)};
         auto* const tl{reinterpret_cast< test_log_data* >(b.bytes())};
         ASSERT_EQ(tl->total_size(), b.size()) << "Size Mismatch for lsn=" << store_id << ":" << i;
-        const char c{static_cast<char>((i % 94) + 33)};
+        const char c{static_cast< char >((i % 94) + 33)};
         const std::string actual{reinterpret_cast< const char* >(&tl->data[0]), static_cast< size_t >(tl->size)};
-        const std::string expected(static_cast< size_t >(tl->size) , c); // needs to be () because of same reason as vector
+        const std::string expected(static_cast< size_t >(tl->size),
+                                   c); // needs to be () because of same reason as vector
         ASSERT_EQ(actual, expected) << "Data mismatch for LSN=" << store_id << ":" << i << " size=" << tl->size;
     }
 
@@ -1097,9 +1095,7 @@ int main(int argc, char* argv[]) {
         }
         if (ret != 0) {
             LOGERROR("longevity test failed, ran for {} seconds, number of iterations {}", tmr.elapsed(), count);
-        }
-        else
-        {
+        } else {
             LOGINFO("longevity test ended, ran for {} seconds, number of iterations {}", tmr.elapsed(), count);
         }
     }

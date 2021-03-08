@@ -25,33 +25,28 @@ class VdevVarSizeBlkAllocatorPolicy;
 typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer > data_blkstore_t;
 typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer > logdev_blkstore_t;
 
+class HomeStoreBase;
+typedef boost::intrusive_ptr< HomeStoreBase > HomeStoreBaseSafePtr;
+
 /* This class is introduced only to avoid template in any of its subsystem. Subsystem can get any homestore info other
  * then indx blkstore from this base class.
  */
 class HomeStoreBase {
-public:
-    using HomeStoreBaseSafePtr = boost::intrusive_ptr< HomeStoreBase >;
-
 private:
-    sisl::atomic_counter< uint64_t > m_usage_counter = 1;
-    static HomeStoreBaseSafePtr _instance;
+    sisl::atomic_counter< uint64_t > m_usage_counter{0};
+    static HomeStoreBaseSafePtr s_instance;
 
 public:
     virtual ~HomeStoreBase() = default;
     friend void intrusive_ptr_add_ref(HomeStoreBase* hs) { hs->m_usage_counter.increment(1); }
     friend void intrusive_ptr_release(HomeStoreBase* hs) {
-        // If there is only one reference remaining after decrementing, then we are done with shutdown, cleanup the
-        // _instance and delete the homeblks.
-        if (hs->m_usage_counter.decrement_test_eq(1)) {
-            auto p = HomeStoreBase::_instance.detach();
-            HS_DEBUG_ASSERT_EQ((void*)p, (void*)hs);
-            delete hs;
-        }
+        if (hs->m_usage_counter.decrement_testz()) { delete hs; }
     }
 
-    static void set_instance(HomeStoreBaseSafePtr instance) { _instance = instance; }
-    static HomeStoreBase* instance() { return _instance.get(); }
-    static HomeStoreBaseSafePtr safe_instance() { return _instance; }
+    static void set_instance(HomeStoreBaseSafePtr instance) { s_instance = instance; }
+    static void reset_instance() { s_instance.reset(); }
+    static HomeStoreBase* instance() { return s_instance.get(); }
+    static HomeStoreBaseSafePtr safe_instance() { return s_instance; }
     virtual data_blkstore_t* get_data_blkstore() const = 0;
     virtual void attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr >* cur_icp_map,
                                         std::map< boost::uuids::uuid, indx_cp_ptr >* new_icp_map, hs_cp* cur_hcp,
@@ -62,6 +57,9 @@ public:
     virtual DeviceManager* get_device_manager() = 0;
     virtual logdev_blkstore_t* get_logdev_blkstore() const = 0;
 };
+
+static inline HomeStoreBaseSafePtr HomeStorePtr() { return HomeStoreBase::safe_instance(); }
+static inline HomeStoreBase* HomeStoreRawPtr() { return HomeStoreBase::instance(); }
 
 static inline auto hs_iobuf_alloc(size_t size) {
     return iomanager.iobuf_alloc(HS_STATIC_CONFIG(drive_attr.align_size), size);

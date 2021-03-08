@@ -43,6 +43,7 @@ struct init_params;
 class VolInterfaceImpl {
 public:
     static VolInterface* init(const init_params& cfg, bool fake_reboot);
+    static bool shutdown(const bool force = false);
     static boost::intrusive_ptr< VolInterface > safe_instance();
     static VolInterface* raw_instance();
     static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr::iomgr_drive_type drive_type,
@@ -213,6 +214,8 @@ public:
         return (VolInterfaceImpl::init(cfg, fake_reboot) != nullptr);
     }
 
+    static bool shutdown(const bool force = false) { return VolInterfaceImpl::shutdown(force); }
+
     static VolInterface* get_instance() { return VolInterfaceImpl::raw_instance(); }
 
     static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr::iomgr_drive_type drive_type,
@@ -331,7 +334,6 @@ public:
     virtual void attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) = 0;
     virtual void attach_end_of_batch_cb(const end_of_batch_callback& cb) = 0;
 
-    virtual bool shutdown(bool force = false) = 0;
     virtual bool trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force = false) = 0;
     virtual cap_attrs get_system_capacity() = 0;
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) = 0;

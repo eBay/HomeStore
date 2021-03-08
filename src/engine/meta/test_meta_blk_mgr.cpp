@@ -425,7 +425,7 @@ public:
 
     void shutdown() {
         LOGINFO("shutting down homeblks");
-        VolInterface::get_instance()->shutdown();
+        VolInterface::shutdown();
         {
             std::unique_lock< std::mutex > lk(m_mtx);
             reset_counters();

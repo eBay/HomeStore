@@ -106,7 +106,7 @@ public:
 
     virtual ~CPMgr() { HS_ASSERT(RELEASE, !m_cur_cp, "cir cp is not null"); }
 
-    void shutdown() {
+    virtual void shutdown() {
         auto cp = get_cur_cp();
         delete (cp);
         rcu_xchg_pointer(&m_cur_cp, nullptr);

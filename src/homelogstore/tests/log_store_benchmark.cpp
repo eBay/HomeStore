@@ -33,7 +33,8 @@ typedef std::function< void(logstore_seq_num_t) > test_log_store_comp_cb_t;
 class SampleLogStoreClient {
 public:
     friend class SampleDB;
-    SampleLogStoreClient(std::shared_ptr< HomeLogStore > store, const uint64_t nentries, const test_log_store_comp_cb_t& cb) :
+    SampleLogStoreClient(std::shared_ptr< HomeLogStore > store, const uint64_t nentries,
+                         const test_log_store_comp_cb_t& cb) :
             m_comp_cb{cb}, m_nentries{nentries} {
         init(store);
         generate_rand_data(nentries);
@@ -60,7 +61,9 @@ public:
         if (ind >= m_nentries) { return false; }
         DLOGDEBUG("Appending log entry for ind {}", ind);
         [[maybe_unused]] const auto seq_num{m_log_store->append_async(
-            sisl::io_blob(reinterpret_cast<uint8_t*>(m_data[ind].data()), static_cast<uint32_t>(m_data[ind].size()), false), nullptr,
+            sisl::io_blob(reinterpret_cast< uint8_t* >(m_data[ind].data()), static_cast< uint32_t >(m_data[ind].size()),
+                          false),
+            nullptr,
             [this](logstore_seq_num_t seq_num, sisl::io_blob& iob, bool success, void* ctx) { m_comp_cb(seq_num); })};
         return true;
     }
@@ -110,8 +113,8 @@ public:
         return inst;
     }
 
-    void start_homestore(const std::string& devname, const uint32_t nthreads, const uint32_t n_log_stores, const uint32_t n_entries,
-                         const uint32_t qdepth, const bool restart = false) {
+    void start_homestore(const std::string& devname, const uint32_t nthreads, const uint32_t n_log_stores,
+                         const uint32_t n_entries, const uint32_t qdepth, const bool restart = false) {
         if (restart) { shutdown(); }
 
         std::vector< dev_info > device_info;
@@ -170,7 +173,7 @@ public:
     }
 
     void shutdown() {
-        VolInterface::get_instance()->shutdown();
+        VolInterface::shutdown();
 
         // m_log_store_clients.clear();
         iomanager.stop();
@@ -210,7 +213,7 @@ public:
 
     void on_log_append_completion(const logstore_seq_num_t lsn) {
         const auto outstanding{m_outstanding.fetch_sub(1, std::memory_order_acq_rel)};
-        if (outstanding < static_cast<int>(m_q_depth)) { issue_io(); }
+        if (outstanding < static_cast< int >(m_q_depth)) { issue_io(); }
     }
 
     void wait_for_appends() {

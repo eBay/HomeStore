@@ -42,6 +42,9 @@ VolInterface* VolInterfaceImpl::init(const init_params& cfg, bool fake_reboot) {
 
     return (HomeBlks::init(cfg, fake_reboot));
 }
+
+bool VolInterfaceImpl::shutdown(const bool force) { return HomeBlks::shutdown(force); }
+
 #if 0
 boost::intrusive_ptr< VolInterface > VolInterfaceImpl::safe_instance() {
     return boost::dynamic_pointer_cast< VolInterface >(HomeBlks::safe_instance());
@@ -51,6 +54,7 @@ VolInterface* VolInterfaceImpl::raw_instance() { return HomeBlks::instance(); }
 
 VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
     fLI::FLAGS_minloglevel = 3;
+    HomeBlksSafePtr instance;
 
     static std::once_flag flag1;
     try {
@@ -61,21 +65,19 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
             meta_blk_mgr->register_handler("HOMEBLK", HomeBlks::meta_blk_found_cb, HomeBlks::meta_blk_recovery_comp_cb);
             Volume::fake_reboot();
             m_meta_blk_found = false;
-            auto instance = boost::static_pointer_cast< homestore::HomeStoreBase >(HomeBlksSafePtr(new HomeBlks(cfg)));
-            set_instance(boost::static_pointer_cast< homestore::HomeStoreBase >(instance));
+            instance = HomeBlksSafePtr(new HomeBlks(cfg));
         }
-        std::call_once(flag1, [&cfg]() {
+        std::call_once(flag1, [&cfg, &instance]() {
 #ifndef NDEBUG
             LOGINFO("HomeBlks DEBUG version: {}", HomeBlks::version);
 #else
             LOGINFO("HomeBlks RELEASE version: {}", HomeBlks::version);
 #endif
-            auto instance = boost::static_pointer_cast< homestore::HomeStoreBase >(HomeBlksSafePtr(new HomeBlks(cfg)));
-            set_instance(boost::static_pointer_cast< homestore::HomeStoreBase >(instance));
-
+            instance = HomeBlksSafePtr(new HomeBlks(cfg));
             LOGINFO("HomeBlks Dynamic config verssion: {}", HB_DYNAMIC_CONFIG(version));
         });
-        return (VolInterface*)(HomeStoreBase::instance());
+        set_instance(boost::static_pointer_cast< homestore::HomeStoreBase >(instance));
+        return static_cast< VolInterface* >(instance.get());
     } catch (const std::exception& e) {
         LOGERROR("{}", e.what());
         assert(0);
@@ -466,13 +468,14 @@ void HomeBlks::print_node(const VolumePtr& vol, uint64_t blkid, bool chksum) {
     vol->print_node(blkid);
 }
 
-bool HomeBlks::shutdown(bool force) {
-    std::mutex stop_mutex;
-    std::condition_variable cv;
+bool HomeBlks::shutdown(const bool force) {
+    static std::mutex stop_mutex;
+    static std::condition_variable cv;
     bool status = false;
     bool done = false;
 
-    done = !trigger_shutdown(
+    auto hb = HomeBlks::safe_instance();
+    done = !hb->trigger_shutdown(
         [&](bool is_success) {
             LOGINFO("Completed the shutdown of HomeBlks with success ? {}", is_success);
             {
@@ -484,11 +487,14 @@ bool HomeBlks::shutdown(bool force) {
         },
         force);
 
-    // Wait for the shutdown completion.
-    std::unique_lock< std::mutex > lk(stop_mutex);
-    if (!done) {
-        cv.wait(lk, [&] { return done; });
+    {
+        // Wait for the shutdown completion.
+        std::unique_lock< std::mutex > lk(stop_mutex);
+        if (!done) {
+            cv.wait(lk, [&] { return done; });
+        }
     }
+    HomeStoreBase::reset_instance();
     return status;
 }
 
@@ -581,13 +587,6 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     iomanager.stop_io_loop();
 
     auto cb = m_shutdown_done_cb;
-
-    /*
-     * Decrement a counter which is incremented for indicating that homeblks is up and running. Once homeblks
-     * usage count is 1, which means only remaining instance is the global _instance variable, we can do the
-     * _instance cleanup
-     */
-    intrusive_ptr_release(this);
 
     if (cb) cb(true);
     return;

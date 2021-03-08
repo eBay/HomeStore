@@ -319,10 +319,14 @@ struct indx_mgr_sb {
 class HomeStoreCPMgr : public CPMgr< hs_cp > {
 public:
     HomeStoreCPMgr();
+    HomeStoreBaseSafePtr m_hs{HomeStoreBase::safe_instance()};
+
     void try_cp_trigger(hs_cp* hcp);
     virtual void cp_start(hs_cp* hcp);
     virtual void cp_attach_prepare(hs_cp* cur_hcp, hs_cp* new_hcp);
     virtual ~HomeStoreCPMgr();
+    virtual void shutdown() override;
+
     void try_cp_start(hs_cp* hcp);
     void indx_tbl_cp_done(hs_cp* hcp);
     void blkalloc_cp_start(hs_cp* hcp);
@@ -466,7 +470,7 @@ protected:
     static size_t m_recovery_sb_size;
     static std::map< boost::uuids::uuid, indx_cp_base_sb > cp_sb_map;
     static std::map< boost::uuids::uuid, std::vector< std::pair< void*, sisl::byte_view > > > indx_meta_map;
-    static HomeStoreBase* m_hs; // Hold onto the home store to maintain reference
+    static HomeStoreBaseSafePtr m_hs; // Hold onto the home store to maintain reference
     static uint64_t memory_used_in_recovery;
     static std::atomic< bool > m_inited;
     static std::mutex cb_list_mtx;
@@ -496,8 +500,7 @@ class IndxMgrMetrics : public sisl::MetricsGroupWrapper {
 };
 
 /************************************************* Indx Mgr *************************************/
-class IndxMgr : public StaticIndxMgr,
-                public std::enable_shared_from_this< IndxMgr > {
+class IndxMgr : public StaticIndxMgr, public std::enable_shared_from_this< IndxMgr > {
 
 public:
     /* It is called in first time create.

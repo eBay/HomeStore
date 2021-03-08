@@ -93,6 +93,11 @@ HomeStoreCPMgr::HomeStoreCPMgr() : CPMgr() {}
 
 HomeStoreCPMgr::~HomeStoreCPMgr() {}
 
+void HomeStoreCPMgr::shutdown() {
+    CPMgr< hs_cp >::shutdown();
+    m_hs.reset();
+}
+
 void HomeStoreCPMgr::cp_start(hs_cp* hcp) {
     iomanager.run_on(IndxMgr::get_thread_id(), [this, hcp](io_thread_addr_t addr) {
         hcp->ref_cnt.increment(1);
@@ -154,7 +159,7 @@ void HomeStoreCPMgr::blkalloc_cp_start(hs_cp* hcp) {
     HS_LOG(TRACE, cp, "Cp of type blkalloc, writing super block about cp");
 
     /* persist blk alloc bit maps */
-    HomeStoreBase::instance()->blkalloc_cp_start(hcp->ba_cp);
+    m_hs->blkalloc_cp_start(hcp->ba_cp);
 #ifdef _PRERELEASE
     if (homestore_flip->test_flip("indx_cp_bitmap_abort")) {
         LOGINFO("aborting because of flip");
@@ -1301,7 +1306,7 @@ REGISTER_METABLK_SUBSYSTEM(indx_mgr, "INDX_MGR_CP", StaticIndxMgr::meta_blk_foun
 void StaticIndxMgr::init() {
     std::atomic< int64_t > thread_cnt = 0;
     int expected_thread_cnt = 0;
-    m_hs = HomeStoreBase::instance();
+    m_hs = HomeStoreBase::safe_instance();
     m_shutdown_started.store(false);
     try_blkalloc_checkpoint.set(false);
 
@@ -1371,7 +1376,7 @@ void StaticIndxMgr::attach_prepare_indx_cp_list(std::map< boost::uuids::uuid, in
                                                 std::map< boost::uuids::uuid, indx_cp_ptr >* new_icp, hs_cp* cur_hcp,
                                                 hs_cp* new_hcp) {
     if (try_blkalloc_checkpoint.get()) {
-        new_hcp->ba_cp = HomeStoreBase::instance()->blkalloc_attach_prepare_cp(cur_hcp ? cur_hcp->ba_cp : nullptr);
+        new_hcp->ba_cp = m_hs->blkalloc_attach_prepare_cp(cur_hcp ? cur_hcp->ba_cp : nullptr);
         if (cur_hcp) {
             cur_hcp->blkalloc_checkpoint = true;
             try_blkalloc_checkpoint.set(false);
@@ -1433,6 +1438,7 @@ void StaticIndxMgr::shutdown(indxmgr_stop_cb cb) {
                       /* verify that all the indx mgr have called their last cp */
                       if (m_cp_mgr) { m_cp_mgr->shutdown(); }
                       m_read_blk_tracker = nullptr;
+                      m_hs.reset();
                       cb(success);
                   }),
                   true, true);
@@ -1566,10 +1572,10 @@ std::once_flag StaticIndxMgr::m_flag;
 sisl::aligned_unique_ptr< uint8_t > StaticIndxMgr::m_recovery_sb;
 std::map< boost::uuids::uuid, indx_cp_base_sb > StaticIndxMgr::cp_sb_map;
 size_t StaticIndxMgr::m_recovery_sb_size = 0;
-HomeStoreBase* StaticIndxMgr::m_hs;
+HomeStoreBaseSafePtr StaticIndxMgr::m_hs;
 uint64_t StaticIndxMgr::memory_used_in_recovery = 0;
 std::atomic< bool > StaticIndxMgr::m_inited = false;
-HomeStoreBase::HomeStoreBaseSafePtr HomeStoreBase::_instance;
+HomeStoreBaseSafePtr HomeStoreBase::s_instance;
 std::mutex StaticIndxMgr::cb_list_mtx;
 std::vector< cp_done_cb > StaticIndxMgr::indx_cp_done_cb_list;
 std::vector< cp_done_cb > StaticIndxMgr::hs_cp_done_cb_list;
