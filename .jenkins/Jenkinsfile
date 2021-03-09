@@ -172,7 +172,7 @@ pipeline {
                         }
                         post {
                             failure {
-                                archiveArtifacts artifacts: "build_logs/*", fingerprint: true
+                                archiveArtifacts artifacts: "logs/*", fingerprint: true
                             }
                         }
                     }
