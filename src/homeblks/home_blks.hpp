@@ -134,6 +134,8 @@ public:
      */
     static VolInterface* init(const init_params& cfg, bool fake_reboot = false);
 
+    static bool shutdown(bool force = false);
+
     /**
      * @brief Get the instance or safe instance of this object. It is expected the caller to use safe_instance() and
      * retain the reference, to ensure that HomeBlks is the last one to be freed.
@@ -185,7 +187,6 @@ public:
     virtual void attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) override;
     virtual void attach_end_of_batch_cb(const end_of_batch_callback& cb) override;
 
-    virtual bool shutdown(bool force = false) override;
     virtual bool trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb = nullptr,
                                   bool force = false) override;
     virtual cap_attrs get_system_capacity() override {
@@ -329,6 +330,9 @@ private:
 
     static thread_local std::vector< std::shared_ptr< Volume > >* s_io_completed_volumes;
 };
+
+static inline HomeBlksSafePtr HomeBlksPtr() { return HomeBlks::safe_instance(); }
+static inline HomeBlks* HomeBlksRawPtr() { return HomeBlks::instance(); }
 
 } // namespace homestore
 #endif // OMSTORE_OMSTORE_HPP

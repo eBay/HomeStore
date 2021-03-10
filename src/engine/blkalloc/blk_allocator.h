@@ -375,8 +375,12 @@ private:
 };
 
 struct blkalloc_cp {
+public:
     bool suspend = false;
     std::vector< blkid_list_ptr > blkid_list_vector;
+    HomeStoreBaseSafePtr m_hs{HomeStoreBase::safe_instance()};
+
+public:
     [[nodiscard]] bool is_suspend() const { return suspend; }
     void suspend_cp() { suspend = true; }
     void resume_cp() { suspend = false; }
@@ -384,7 +388,7 @@ struct blkalloc_cp {
         auto it = list->begin(true /* latest */);
         BlkId* bid;
         while ((bid = list->next(it)) != nullptr) {
-            auto chunk{HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num())};
+            auto chunk{m_hs->get_device_manager()->get_chunk(bid->get_chunk_num())};
             auto ba{chunk->get_blk_allocator()};
             ba->free_on_disk(*bid);
         }
@@ -398,7 +402,7 @@ struct blkalloc_cp {
             BlkId* bid;
             auto it = list->begin(false /* latest */);
             while ((bid = list->next(it)) != nullptr) {
-                auto chunk{HomeStoreBase::safe_instance()->get_device_manager()->get_chunk(bid->get_chunk_num())};
+                auto chunk{m_hs->get_device_manager()->get_chunk(bid->get_chunk_num())};
                 chunk->get_blk_allocator()->free(*bid);
                 auto page_size{chunk->get_blk_allocator()->get_config().get_blk_size()};
                 ResourceMgr::dec_free_blk(bid->data_size(page_size));

@@ -136,15 +136,13 @@ int main(int argc, char* argv[]) {
     start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
                     SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024,
                     SDS_OPTIONS["num_threads"].as< uint32_t >());
-    VolInterface::get_instance()->shutdown();
+    VolInterface::shutdown();
     iomanager.stop();
 #endif
-    
+
     bool is_spdk = SDS_OPTIONS["spdk"].as< bool >();
     uint32_t nthreads = SDS_OPTIONS["num_threads"].as< uint32_t >();
-    if (is_spdk) {
-        nthreads = 2;
-    }
+    if (is_spdk) { nthreads = 2; }
     iomanager.start(nthreads, is_spdk);
 
     auto ndevices = SDS_OPTIONS["num_devs"].as< uint32_t >();

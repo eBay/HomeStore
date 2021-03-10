@@ -28,7 +28,7 @@ class DiskInitializer {
 public:
     ~DiskInitializer() {}
     void cleanup() {
-        auto success = homestore::VolInterface::get_instance()->shutdown();
+        auto success = homestore::VolInterface::shutdown();
         assert(success);
         remove("file_load_gen");
     }
