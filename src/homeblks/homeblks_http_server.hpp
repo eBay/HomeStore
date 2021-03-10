@@ -1,6 +1,8 @@
 #pragma once
 
 #include <memory>
+#include <string>
+
 #include <async_http/http_server.hpp>
 
 namespace homestore {

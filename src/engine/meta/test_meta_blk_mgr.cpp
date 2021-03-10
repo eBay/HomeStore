@@ -17,8 +17,8 @@
 
 using namespace homestore;
 
-THREAD_BUFFER_INIT;
-RCU_REGISTER_INIT;
+THREAD_BUFFER_INIT
+RCU_REGISTER_INIT
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 SDS_OPTIONS_ENABLE(logging, test_meta_blk_mgr)
@@ -44,14 +44,16 @@ static Param gp;
 
 static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads) {
     std::vector< dev_info > device_info;
-    std::mutex start_mutex;
-    std::condition_variable cv;
-    bool inited = false;
+    // these should be static so that they stay in scope in the lambda in case function ends before lambda completes
+    static std::mutex start_mutex;
+    static std::condition_variable cv;
+    static bool inited;
 
+    inited = false;
     LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
     for (uint32_t i = 0; i < ndevices; i++) {
         std::string fpath = "/tmp/test_meta_blk_mgr_" + std::to_string(i + 1);
-        std::ofstream ofs(fpath.c_str(), std::ios::binary | std::ios::out);
+        std::ofstream ofs(fpath, std::ios::binary | std::ios::out);
         ofs.seekp(dev_size - 1);
         ofs.write("", 1);
         ofs.close();
@@ -70,21 +72,24 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
     params.min_virtual_page_size = 4096;
     params.app_mem_size = app_mem_size;
     params.devices = device_info;
-    params.init_done_cb = [&](std::error_condition err, const out_params& params) {
+    params.init_done_cb = [&tl_start_mutex = start_mutex, &tl_cv = cv, &tl_inited = inited](std::error_condition err,
+                                                                                            const out_params& params) {
         LOGINFO("HomeBlks Init completed");
         {
-            std::unique_lock< std::mutex > lk(start_mutex);
-            inited = true;
+            std::unique_lock< std::mutex > lk{tl_start_mutex};
+            tl_inited = true;
         }
-        cv.notify_all();
+        tl_cv.notify_one();
     };
     params.vol_mounted_cb = [](const VolumePtr& vol_obj, vol_state state) {};
     params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
     params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
     VolInterface::init(params);
 
-    std::unique_lock< std::mutex > lk(start_mutex);
-    cv.wait(lk, [&] { return inited; });
+    {
+        std::unique_lock< std::mutex > lk{start_mutex};
+        cv.wait(lk, [] { return inited; });
+    }
 }
 
 struct sb_info_t {
@@ -564,7 +569,7 @@ SDS_OPTION_GROUP(
 
 int main(int argc, char* argv[]) {
     ::testing::GTEST_FLAG(filter) = "*random_load_test*";
-    testing::InitGoogleTest(&argc, argv);
+    ::testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, logging, test_meta_blk_mgr);
     sds_logging::SetLogger("test_meta_blk_mgr");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");

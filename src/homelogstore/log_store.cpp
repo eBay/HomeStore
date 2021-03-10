@@ -6,6 +6,7 @@
 #include <utility/thread_factory.hpp>
 
 #include "engine/common/homestore_assert.hpp"
+
 #include "log_dev.hpp"
 
 #include "log_store.hpp"
@@ -45,8 +46,8 @@ void HomeLogStoreMgr::start(const bool format) {
     // do the remove from store id reserver now.
     // TODO: At present we are assuming all unopened store ids could be removed. In future have a callback to this
     // start routine, which takes the list of unopened store ids and can return a new set, which can be removed.
-    m_id_logstore_map.withWLock(
-        [&](auto& m) { for (auto it{std::begin(m_unopened_store_id)}; it != std::end(m_unopened_store_id);) {
+    m_id_logstore_map.withWLock([&](auto& m) {
+        for (auto it{std::begin(m_unopened_store_id)}; it != std::end(m_unopened_store_id);) {
             if (m.find(*it) == m.end()) {
                 // Not opened even on second time check, simply unreserve id
                 m_log_dev.unreserve_store_id(*it);
@@ -95,21 +96,25 @@ void HomeLogStoreMgr::remove_log_store(const logstore_id_t store_id) {
 }
 
 void HomeLogStoreMgr::start_truncate_thread() {
-    std::condition_variable cv;
-    std::mutex mtx;
+    // these should be thread local so that they stay in scope in the lambda in case function ends
+    // before lambda completes
+    static thread_local std::condition_variable cv;
+    static thread_local std::mutex mtx;
 
     m_truncate_thread = nullptr;
-    auto sthread = sisl::named_thread("logstore_truncater", [this, &cv, &mtx]() {
-        iomanager.run_io_loop(false, nullptr, ([this, &cv, &mtx](bool is_started) {
+    auto sthread = sisl::named_thread("logstore_truncater", [this, &tl_cv = cv, &tl_mtx = mtx]() {
+        iomanager.run_io_loop(false, nullptr, ([this, &tl_cv, &tl_mtx](bool is_started) {
                                   if (is_started) {
-                                      std::unique_lock< std::mutex > lk{mtx};
+                                      std::unique_lock< std::mutex > lk{tl_mtx};
                                       m_truncate_thread = iomanager.iothread_self();
-                                      cv.notify_all();
+                                      tl_cv.notify_one();
                                   }
                               }));
     });
-    std::unique_lock< std::mutex > lk{mtx};
-    cv.wait(lk, [this] { return (m_truncate_thread != nullptr); });
+    {
+        std::unique_lock< std::mutex > lk{mtx};
+        cv.wait(lk, [this] { return (m_truncate_thread != nullptr); });
+    }
     sthread.detach();
 }
 
@@ -160,7 +165,8 @@ void HomeLogStoreMgr::on_io_completion(const logstore_id_t id, const logdev_key 
     }
 }
 
-void HomeLogStoreMgr::on_logfound(const logstore_id_t id, const logstore_seq_num_t seq_num, const logdev_key ld_key, const log_buffer buf) {
+void HomeLogStoreMgr::on_logfound(const logstore_id_t id, const logstore_seq_num_t seq_num, const logdev_key ld_key,
+                                  const log_buffer buf) {
     auto it{m_id_logstore_map.rlock()->find(id)};
     auto& log_store{it->second.m_log_store};
     if (it->second.m_log_store) { log_store->on_log_found(seq_num, ld_key, buf); }
@@ -187,12 +193,14 @@ void HomeLogStoreMgr::device_truncate_in_user_reactor(const std::shared_ptr< tru
                 device_truncate_in_user_reactor(treq);
             });
         } else {
-            logdev_key trunc_upto = do_device_truncate(treq->dry_run);
+            const logdev_key trunc_upto{do_device_truncate(treq->dry_run)};
             if (treq->cb) { treq->cb(trunc_upto); }
 
             if (treq->wait_till_done) {
-                std::lock_guard< std::mutex > lk{treq->mtx};
-                treq->trunc_done = true;
+                {
+                    std::lock_guard< std::mutex > lk{treq->mtx};
+                    treq->trunc_done = true;
+                }
                 treq->cv.notify_one();
             }
         }
@@ -209,13 +217,13 @@ logdev_key HomeLogStoreMgr::do_device_truncate(const bool dry_run) {
     logdev_key min_safe_ld_key{logdev_key::out_of_bound_ld_key()};
 
     std::string dbg_str{"Format [store_id:trunc_lsn:logidx:dev_trunc_pending?:active_writes_in_trucate?] "};
-    m_id_logstore_map.withRLock([&](auto& id_logstore_map) {
+    m_id_logstore_map.withRLock([this, &min_safe_ld_key, &dbg_str](auto& id_logstore_map) {
         for (auto& id_logstore : id_logstore_map) {
             auto& store_ptr{id_logstore.second.m_log_store};
             const auto& trunc_info{store_ptr->pre_device_truncation()};
 
             if (!trunc_info.pending_dev_truncation && !trunc_info.active_writes_not_part_of_truncation) {
-                // This log store neither have any pending device truncation nor active logstore io going on for now.
+                // This log store neither has any pending device truncation nor active logstore io going on for now.
                 // Ignore this log store for min safe boundary calculation.
                 fmt::format_to(std::back_inserter(dbg_str), "[{}:None] ", store_ptr->get_store_id());
                 m_non_participating_stores.push_back(store_ptr);
@@ -255,7 +263,10 @@ logdev_key HomeLogStoreMgr::do_device_truncate(const bool dry_run) {
         m_non_participating_stores.clear();
     }
     // Got the safest log id to truncate and actually truncate upto the safe log idx to the log device
-    if (!dry_run && (min_safe_ld_key.idx >= 0)) m_log_dev.truncate(min_safe_ld_key);
+    if (!dry_run) { 
+        const auto num_records_to_truncate{m_log_dev.truncate(min_safe_ld_key)};
+        if (num_records_to_truncate == 0) min_safe_ld_key = logdev_key::out_of_bound_ld_key();
+    }
     return min_safe_ld_key;
 }
 
@@ -295,34 +306,39 @@ HomeLogStore::HomeLogStore(const logstore_id_t id, const bool append_mode, const
 bool HomeLogStore::write_sync(const logstore_seq_num_t seq_num, const sisl::io_blob& b) {
     HS_ASSERT(LOGMSG, (!iomanager.am_i_worker_reactor()), "Sync can not be done in worker reactor thread");
 
-    std::mutex write_mutex;
-    bool write_done{false};
-    bool ret{false};
-    std::condition_variable write_cv;
+    // these should be static so that they stay in scope in the lambda in case function ends before lambda completes
+    static thread_local std::mutex write_mutex;
+    static thread_local std::condition_variable write_cv;
+    static thread_local bool write_done;
+    static thread_local bool ret;
 
+    write_done = false;
+    ret = false;
     this->write_async(seq_num, b, nullptr,
-                      [&write_cv, &write_done, &write_mutex, &ret, seq_num,
-                       this](homestore::logstore_seq_num_t seq_num_cb, const sisl::io_blob& b,
-                             homestore::logdev_key ld_key, void* ctx) {
+                      [seq_num, this, &tl_write_mutex = write_mutex, &tl_write_cv = write_cv,
+                       &tl_write_done = write_done, &tl_ret = ret](homestore::logstore_seq_num_t seq_num_cb,
+                                                                   const sisl::io_blob& b, homestore::logdev_key ld_key,
+                                                                   void* ctx) {
                           HS_DEBUG_ASSERT((ld_key && seq_num == seq_num_cb), "Write_Async failed or corrupted");
                           {
-                              std::unique_lock< std::mutex > lk(write_mutex);
-                              write_done = true;
-                              ret = true;
+                              std::unique_lock< std::mutex > lk{tl_write_mutex};
+                              tl_write_done = true;
+                              tl_ret = true;
                           }
-                          write_cv.notify_all();
+                          tl_write_cv.notify_one();
                       });
 
-    std::unique_lock< std::mutex > lk{write_mutex};
-    write_cv.wait(lk, [&] { return write_done; });
+    {
+        std::unique_lock< std::mutex > lk{write_mutex};
+        write_cv.wait(lk, [] { return write_done; });
+    }
 
     return ret;
 }
 
 void HomeLogStore::write_async(logstore_req* const req, const log_req_comp_cb_t& cb) {
-    HS_ASSERT(LOGMSG, ((cb != nullptr) || (m_comp_cb != nullptr)),
-              "Expected either cb is not null or default cb registered");
-    req->cb = cb;
+    HS_ASSERT(LOGMSG, (cb || m_comp_cb), "Expected either cb is not null or default cb registered");
+    req->cb = (cb ? cb : m_comp_cb);
     req->start_time = Clock::now();
 
 #ifndef NDEBUG
@@ -337,8 +353,8 @@ void HomeLogStore::write_async(logstore_req* const req, const log_req_comp_cb_t&
     m_records.create(req->seq_num);
     COUNTER_INCREMENT(home_log_store_mgr.m_metrics, logstore_append_count, 1);
     HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logstore_record_size, req->data.size);
-    [[maybe_unused]] const auto logid{
-        HomeLogStoreMgr::logdev().append_async(m_store_id, req->seq_num, req->data.bytes, req->data.size, static_cast<void*>(req))};
+    [[maybe_unused]] const auto logid{HomeLogStoreMgr::logdev().append_async(
+        m_store_id, req->seq_num, req->data.bytes, req->data.size, static_cast< void* >(req))};
 }
 
 void HomeLogStore::write_async(const logstore_seq_num_t seq_num, const sisl::io_blob& b, void* const cookie,
@@ -348,7 +364,7 @@ void HomeLogStore::write_async(const logstore_seq_num_t seq_num, const sisl::io_
     req->cookie = cookie;
 
     write_async(req, [cb](logstore_req* req, logdev_key written_lkey) {
-        cb(req->seq_num, req->data, written_lkey, req->cookie);
+        if (cb) { cb(req->seq_num, req->data, written_lkey, req->cookie); }
         logstore_req::free(req);
     });
 }
@@ -446,7 +462,7 @@ void HomeLogStore::on_batch_completion(const logdev_key& flush_batch_ld_key) {
     m_flush_batch_max_lsn = std::numeric_limits< logstore_seq_num_t >::min(); // Reset the flush batch for next batch.
 }
 
-void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_truncate_only) {
+void HomeLogStore::truncate(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only) {
 #if 0
     if (!iomanager.is_io_thread()) {
         LOGDFATAL("Expected truncate to be called from iomanager thread. Ignoring truncate");
@@ -495,7 +511,8 @@ void HomeLogStore::do_truncate(const logstore_seq_num_t upto_seq_num) {
 
     THIS_LOGSTORE_LOG(
         DEBUG, "Truncate upto lsn={}, nearest safe device truncation barrier <ind={} log_id={}>, is_last_barrier={}",
-        upto_seq_num, ind, m_truncation_barriers[ind].ld_key, (ind == static_cast<int>(m_truncation_barriers.size() - 1)));
+        upto_seq_num, ind, m_truncation_barriers[ind].ld_key,
+        (ind == static_cast< int >(m_truncation_barriers.size() - 1)));
 
     m_safe_truncation_boundary.ld_key = m_truncation_barriers[ind].ld_key;
     m_safe_truncation_boundary.pending_dev_truncation = true;
@@ -533,7 +550,7 @@ void HomeLogStore::fill_gap(const logstore_seq_num_t seq_num) {
 int HomeLogStore::search_max_le(const logstore_seq_num_t input_sn) {
     int mid{0};
     int start{-1};
-    int end{static_cast<int>(m_truncation_barriers.size())};
+    int end{static_cast< int >(m_truncation_barriers.size())};
 
     while ((end - start) > 1) {
         mid = start + (end - start) / 2;
@@ -562,38 +579,36 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
     // must use move operator= operation instead of move copy constructor
     nlohmann::json json_records = nlohmann::json::array();
     bool end_iterate{false};
-    m_records.foreach_completed(idx,
-                                [&json_records, &dump_req, &end_iterate](decltype(idx) cur_idx, decltype(idx) max_idx,
-                                                                         const homestore::logstore_record& record) -> bool {
-                                    // do a sync read
-                                    // must use move operator= operation instead of move copy constructor
-                                    nlohmann::json json_val = nlohmann::json::object();
-                                    serialized_log_record record_header;
+    m_records.foreach_completed(
+        idx,
+        [&json_records, &dump_req, &end_iterate](decltype(idx) cur_idx, decltype(idx) max_idx,
+                                                 const homestore::logstore_record& record) -> bool {
+            // do a sync read
+            // must use move operator= operation instead of move copy constructor
+            nlohmann::json json_val = nlohmann::json::object();
+            serialized_log_record record_header;
 
-                                    const auto log_buffer{
-                                        HomeLogStoreMgr::logdev().read(record.m_dev_key, record_header)};
+            const auto log_buffer{HomeLogStoreMgr::logdev().read(record.m_dev_key, record_header)};
 
-                                    try {
-                                        json_val["size"] = static_cast<uint32_t>(record_header.size);
-                                        json_val["offset"] = static_cast<uint32_t>(record_header.offset);
-                                        json_val["is_inlined"] = static_cast< uint32_t >(record_header.is_inlined);
-                                        json_val["store_seq_num"] = static_cast<uint64_t>(record_header.store_seq_num);
-                                        json_val["store_id"] = static_cast<logstore_id_t>(record_header.store_id);
-                                    } catch (const std::exception& ex) {
-                                        LOGERRORMOD(logstore, "Exception in json dump- {}", ex.what());
-                                    }
+            try {
+                json_val["size"] = static_cast< uint32_t >(record_header.size);
+                json_val["offset"] = static_cast< uint32_t >(record_header.offset);
+                json_val["is_inlined"] = static_cast< uint32_t >(record_header.get_inlined());
+                json_val["store_seq_num"] = static_cast< uint64_t >(record_header.store_seq_num);
+                json_val["store_id"] = static_cast< logstore_id_t >(record_header.store_id);
+            } catch (const std::exception& ex) { LOGERRORMOD(logstore, "Exception in json dump- {}", ex.what()); }
 
-                                    if (dump_req.verbosity_level == homestore::log_dump_verbosity::CONTENT) {
-                                        const uint8_t* const b{log_buffer.bytes()};
-                                        const std::vector< uint8_t > bv(b, b + log_buffer.size());
-                                        auto content = nlohmann::json::binary_t(bv);
-                                        json_val["content"] = std::move(content);
-                                    }
-                                    json_records.emplace_back(std::move(json_val));
-                                    decltype(idx) end_idx{std::min(max_idx, dump_req.end_seq_num)};
-                                    end_iterate = (cur_idx < end_idx) ? true : false;
-                                    return end_iterate;
-                                });
+            if (dump_req.verbosity_level == homestore::log_dump_verbosity::CONTENT) {
+                const uint8_t* const b{log_buffer.bytes()};
+                const std::vector< uint8_t > bv(b, b + log_buffer.size());
+                auto content = nlohmann::json::binary_t(bv);
+                json_val["content"] = std::move(content);
+            }
+            json_records.emplace_back(std::move(json_val));
+            decltype(idx) end_idx{std::min(max_idx, dump_req.end_seq_num)};
+            end_iterate = (cur_idx < end_idx) ? true : false;
+            return end_iterate;
+        });
 
     json_dump["log_records"] = std::move(json_records);
     return json_dump;

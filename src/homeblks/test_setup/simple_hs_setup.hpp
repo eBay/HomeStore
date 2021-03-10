@@ -143,7 +143,7 @@ public:
 
         /* Create devices as files */
         for (auto& di : m_dev_infos) {
-            std::ofstream ofs(di.dev_names.c_str(), std::ios::binary | std::ios::out);
+            std::ofstream ofs(di.dev_names, std::ios::binary | std::ios::out);
             ofs.seekp(m_cfg.m_dev_size - 1);
             ofs.write("", 1);
         }

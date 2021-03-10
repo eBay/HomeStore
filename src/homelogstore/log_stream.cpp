@@ -12,13 +12,15 @@ log_stream_reader::log_stream_reader(const uint64_t device_cursor) {
 }
 
 sisl::byte_view log_stream_reader::next_group(uint64_t* const out_dev_offset) {
+    const uint64_t bulk_read_size{
+        static_cast< uint64_t >(sisl::round_up(HS_DYNAMIC_CONFIG(logstore.bulk_read_size), dma_boundary))};
     uint64_t min_needed{dma_boundary};
     sisl::byte_view ret_buf;
 
 read_again:
-    if (m_cur_log_buf.size() == 0 || m_cur_log_buf.size() < min_needed) {
+    if (m_cur_log_buf.size() < min_needed) {
         m_hb->get_logdev_blkstore()->lseek(m_cur_group_cursor);
-        m_cur_log_buf = read_next_bytes(std::max(min_needed, HS_DYNAMIC_CONFIG(logstore.bulk_read_size)));
+        m_cur_log_buf = read_next_bytes(std::max(min_needed, bulk_read_size));
         min_needed = 0;
     }
     if (m_cur_log_buf.size() == 0) { return m_cur_log_buf; } // No more data available.
@@ -83,6 +85,11 @@ sisl::byte_view log_stream_reader::read_next_bytes(const uint64_t nbytes) {
     const auto prev_pos{store->seeked_pos()};
     auto actual_read{store->read(static_cast<void*>(buf.bytes()), nbytes)};
     LOGTRACEMOD(logstore, "LogStream read {} bytes from offset {} ", actual_read, prev_pos);
+    buf.set_size(actual_read);
+    return buf;
+
+    // NOTE: Reading from the beginning of the file after reaching the end usually does not make sense for a stream
+    /*
     if (actual_read != 0) {
         buf.set_size(actual_read);
         return buf;
@@ -98,5 +105,6 @@ sisl::byte_view log_stream_reader::read_next_bytes(const uint64_t nbytes) {
     LOGINFOMOD(logstore, "LogStream read {} bytes from offset 0 ", actual_read);
     buf.set_size(actual_read);
     return buf;
+    */
 }
 } // namespace homestore

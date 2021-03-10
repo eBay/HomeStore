@@ -13,8 +13,8 @@ using namespace homestore;
 
 std::vector< std::shared_ptr< Volume > > vol_list;
 
-THREAD_BUFFER_INIT;
-RCU_REGISTER_INIT;
+THREAD_BUFFER_INIT
+RCU_REGISTER_INIT
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SDS_LOGGING_DECL(hs_svc_tool)
 
@@ -36,7 +36,7 @@ static void gen_device_info(std::vector< dev_info >& device_info, uint32_t ndevi
     } else {
         for (uint32_t i = 0; i < ndevices; i++) {
             std::string fpath = "/tmp/hs_svc_tool_" + std::to_string(i + 1);
-            std::ofstream ofs(fpath.c_str(), std::ios::binary | std::ios::out);
+            std::ofstream ofs(fpath, std::ios::binary | std::ios::out);
             ofs.seekp(dev_size - 1);
             ofs.write("", 1);
             ofs.close();
@@ -48,10 +48,12 @@ static void gen_device_info(std::vector< dev_info >& device_info, uint32_t ndevi
 /* start homestore */
 static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads) {
     std::vector< dev_info > device_info;
-    std::mutex start_mutex;
-    std::condition_variable cv;
-    bool inited = false;
+    // this should be static so that it stays in scope in the lambda in case function ends before lambda completes
+    static std::mutex start_mutex;
+    static std::condition_variable cv;
+    static bool inited;
 
+    inited = false;
     LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
 
     gen_device_info(device_info, ndevices, dev_size);
@@ -69,24 +71,27 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
     params.app_mem_size = app_mem_size;
     params.devices = device_info;
     params.is_restricted_mode = gp.restricted_mode;
-    params.init_done_cb = [&](std::error_condition err, const out_params& params) {
+    params.init_done_cb = [&tl_start_mutex = start_mutex, &tl_cv = cv, &tl_inited = inited](std::error_condition err,
+                                                                                            const out_params& params) {
         LOGINFO("HomeBlks Init completed");
         {
-            std::unique_lock< std::mutex > lk(start_mutex);
-            inited = true;
+            std::unique_lock< std::mutex > lk{tl_start_mutex};
+            tl_inited = true;
 #if 0
             if (gp.restricted_mode && gp.zero_pdev_sb) { VolInterface::get_instance()->zero_pdev_sbs(); }
 #endif
         }
-        cv.notify_all();
+        tl_cv.notify_one();
     };
     params.vol_mounted_cb = [&](const VolumePtr& vol, vol_state state) { vol_list.push_back(vol); };
     params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
     params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
     VolInterface::init(params);
 
-    std::unique_lock< std::mutex > lk(start_mutex);
-    cv.wait(lk, [&] { return inited; });
+    {
+        std::unique_lock< std::mutex > lk{start_mutex};
+        cv.wait(lk, [] { return inited; });
+    }
 }
 
 #if 0
@@ -121,7 +126,7 @@ SDS_OPTION_GROUP(hs_svc_tool,
 
 int main(int argc, char* argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, logging, hs_svc_tool)
-    testing::InitGoogleTest(&argc, argv);
+    ::testing::InitGoogleTest(&argc, argv);
     sds_logging::SetLogger("hs_svc_tool");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
 

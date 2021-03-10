@@ -27,7 +27,7 @@
 #include <gtest/gtest.h>
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT;
+THREAD_BUFFER_INIT
 
 using namespace homestore;
 
@@ -354,7 +354,7 @@ private:
     }
 };
 
-struct FixedBlkAllocatorTest : public testing::Test, BlkAllocatorTest {
+struct FixedBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
 protected:
     std::unique_ptr< FixedBlkAllocator > m_allocator;
 
@@ -405,7 +405,7 @@ protected:
     }
 };
 
-struct VarsizeBlkAllocatorTest : public testing::Test, BlkAllocatorTest {
+struct VarsizeBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
 protected:
     std::unique_ptr< VarsizeBlkAllocator > m_allocator;
 
@@ -774,7 +774,7 @@ SDS_OPTION_GROUP(test_blkalloc,
                  (num_threads, "", "num_threads", "num_threads", opt_default< uint32_t >("8"), "number"))
 
 int main(int argc, char* argv[]) {
-    testing::InitGoogleTest(&argc, argv);
+    ::testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     sds_logging::SetLogger("test_blkalloc");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");

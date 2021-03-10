@@ -26,7 +26,7 @@
 
 using namespace homestore;
 
-THREAD_BUFFER_INIT;
+THREAD_BUFFER_INIT
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 /************************* CLI options ***************************/
@@ -68,7 +68,7 @@ extern "C" __attribute__((no_sanitize_address)) const char* __asan_default_optio
 int main(int argc, char* argv[]) {
     srand(time(0));
     //::testing::GTEST_FLAG(filter) = "*normal_random*";
-    // testing::InitGoogleTest(&argc, argv);
+    //::testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     sds_logging::SetLogger("perf_test_volume");
     spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
@@ -80,7 +80,7 @@ int main(int argc, char* argv[]) {
         LOGINFO("creating files");
         for (uint32_t i = 0; i < MAX_DEVICES; i++) {
             if (disk_init) {
-                std::ofstream ofs(names[i].c_str(), std::ios::binary | std::ios::out);
+                std::ofstream ofs(names[i], std::ios::binary | std::ios::out);
                 ofs.seekp(10 * Gi - 1);
                 ofs.write("", 1);
                 ofs.close();

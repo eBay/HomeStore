@@ -49,8 +49,8 @@
 using namespace homestore;
 using namespace flip;
 
-THREAD_BUFFER_INIT;
-RCU_REGISTER_INIT;
+THREAD_BUFFER_INIT
+RCU_REGISTER_INIT
 
 /************************** GLOBAL VARIABLES ***********************/
 
@@ -573,7 +573,7 @@ public:
                 device_info.push_back(temp_info);
                 if (tcfg.init || tcfg.disk_replace_cnt > 0) {
                     if (!tcfg.init) { remove(tcfg.default_names[i].c_str()); }
-                    std::ofstream ofs(tcfg.default_names[i].c_str(), std::ios::binary | std::ios::out);
+                    std::ofstream ofs(tcfg.default_names[i], std::ios::binary | std::ios::out);
                     ofs.seekp(tcfg.max_disk_capacity - 1);
                     ofs.write("", 1);
                     ofs.close();
@@ -1543,8 +1543,7 @@ protected:
                     VolInterface::get_instance()->print_tree(req->vol_info->vol);
 #endif
                     LOGINFO("lba {} {}", req->lba, req->nlbas);
-                    std::this_thread::sleep_for(std::chrono::seconds(5));
-                    sleep(30);
+                    std::this_thread::sleep_for(std::chrono::seconds{30});
                     HS_RELEASE_ASSERT(0, "");
                 }
                 // need to return false
@@ -2077,7 +2076,7 @@ SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
  */
 int main(int argc, char* argv[]) {
     ::testing::GTEST_FLAG(filter) = "*lifecycle_test*";
-    testing::InitGoogleTest(&argc, argv);
+    ::testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
     sds_logging::SetLogger("test_volume");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");

@@ -50,8 +50,8 @@ extern bool same_value_gen;
 #endif
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-THREAD_BUFFER_INIT;
-RCU_REGISTER_INIT;
+THREAD_BUFFER_INIT
+RCU_REGISTER_INIT
 
 using namespace homeds::loadgen;
 
@@ -84,7 +84,7 @@ using namespace homeds::loadgen;
 static Param parameters;
 bool loadgen_verify_mode = false;
 
-struct BtreeTest : public testing::Test {
+struct BtreeTest : public ::testing::Test {
     std::unique_ptr< G_SimpleKV_Mem > loadgen;
 
     void execute() {
@@ -100,7 +100,7 @@ struct BtreeTest : public testing::Test {
 TEST_F(BtreeTest, SimpleKVMemTest) { this->execute(); }
 
 // TODO: combine the SimpleKVMem/SimpleKVSSD/VarKVSSD in one class
-struct SSDBtreeTest : public testing::Test {
+struct SSDBtreeTest : public ::testing::Test {
     std::unique_ptr< G_SimpleKV_SSD > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
@@ -131,7 +131,7 @@ struct SSDBtreeTest : public testing::Test {
 
 TEST_F(SSDBtreeTest, SimpleKVSSDTest) { this->execute(); }
 
-struct SSDBtreeVarKVTest : public testing::Test {
+struct SSDBtreeVarKVTest : public ::testing::Test {
     std::unique_ptr< G_VarKV_SSD > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
@@ -162,7 +162,7 @@ struct SSDBtreeVarKVTest : public testing::Test {
 
 TEST_F(SSDBtreeVarKVTest, VarKVSSDTest) { this->execute(); }
 
-struct MapTest : public testing::Test {
+struct MapTest : public ::testing::Test {
     DiskInitializer< IOMgrExecutor > di;
     std::unique_ptr< G_MapKV_SSD > loadgen;
     std::mutex m_mtx;
@@ -194,7 +194,7 @@ struct MapTest : public testing::Test {
 
 TEST_F(MapTest, MapSSDTest) { this->execute(); }
 
-struct FileTest : public testing::Test {
+struct FileTest : public ::testing::Test {
     std::unique_ptr< G_FileKV > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
@@ -241,7 +241,7 @@ struct FileTest : public testing::Test {
 
 TEST_F(FileTest, FileTest) { this->execute(); }
 
-struct VDevTest_RW : public testing::Test {
+struct VDevTest_RW : public ::testing::Test {
     std::unique_ptr< G_VDev_Test_RW > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
@@ -274,7 +274,7 @@ struct VDevTest_RW : public testing::Test {
 
 TEST_F(VDevTest_RW, VDevTest_RW) { this->execute(); }
 
-struct VDevTest_PRW : public testing::Test {
+struct VDevTest_PRW : public ::testing::Test {
     std::unique_ptr< G_VDev_Test_PRW > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
@@ -307,7 +307,7 @@ struct VDevTest_PRW : public testing::Test {
 
 TEST_F(VDevTest_PRW, VDevTest_PRW) { this->execute(); }
 
-struct CacheTest : public testing::Test {
+struct CacheTest : public ::testing::Test {
     std::unique_ptr< G_CacheKV > loadgen;
 
     void execute() {
@@ -320,7 +320,7 @@ struct CacheTest : public testing::Test {
 
 TEST_F(CacheTest, CacheMemTest) { this->execute(); }
 
-class VolumeLoadTest : public testing::Test {
+class VolumeLoadTest : public ::testing::Test {
 private:
     std::unique_ptr< G_Volume_Test > m_loadgen;
     VolumeManager< IOMgrExecutor >* m_vol_mgr = nullptr;
@@ -376,7 +376,7 @@ public:
 
 TEST_F(VolumeLoadTest, VolumeTest) { this->execute(); }
 
-struct LogStoreLoadTest : public testing::Test {
+struct LogStoreLoadTest : public ::testing::Test {
     std::unique_ptr< G_LogStore_Test > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
@@ -448,7 +448,7 @@ SDS_OPTIONS_ENABLE(logging, test_load)
 // bing to the same port 5001
 int main(int argc, char* argv[]) {
     ::testing::GTEST_FLAG(filter) = "*Map*:*Cache*";
-    testing::InitGoogleTest(&argc, argv);
+    ::testing::InitGoogleTest(&argc, argv);
 
     SDS_OPTIONS_LOAD(argc, argv, logging, test_load)
     sds_logging::SetLogger("test_load");

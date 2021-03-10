@@ -19,7 +19,7 @@
 #include "homeds/thread/threadpool/thread_pool.h"
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT;
+THREAD_BUFFER_INIT
 
 using homestore::submit_job;
 using homestore::ThreadPool;
@@ -49,7 +49,7 @@ TEST(THREAD_POOL, TEST1) {
 
 int main(int argc, char* argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, logging)
-    testing::InitGoogleTest(&argc, argv);
+    ::testing::InitGoogleTest(&argc, argv);
     sds_logging::SetLogger("test_threadpool");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 

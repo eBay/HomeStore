@@ -26,7 +26,7 @@ struct dev_info {
     std::string dev_names;
 };
 #endif
-THREAD_BUFFER_INIT;
+THREAD_BUFFER_INIT
 
 std::array< std::string, 4 > names = {"/var/tmp/min1", "/var/tmp/min2", "/var/tmp/min3", "/var/tmp/min4"};
 uint64_t max_vols = 2;
@@ -201,7 +201,7 @@ public:
             temp_info.dev_names = names[i];
             device_info.push_back(temp_info);
             if (init) {
-                std::ofstream ofs(names[i].c_str(), std::ios::binary | std::ios::out);
+                std::ofstream ofs(names[i], std::ios::binary | std::ios::out);
                 ofs.seekp(max_disk_capacity - 1);
                 ofs.write("", 1);
                 ofs.close();

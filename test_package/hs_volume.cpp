@@ -1,6 +1,8 @@
+#include <condition_variable>
+#include <mutex>
+
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <mutex>
 
 /* Facility headers */
 #include <sds_logging/logging.h>
@@ -11,7 +13,7 @@
 #include <engine/common/homestore_header.hpp>
 #include <iomgr/iomgr.hpp>
 
-THREAD_BUFFER_INIT;
+THREAD_BUFFER_INIT
 
 SDS_OPTION_GROUP(test_hs_vol,
                  (capacity, "", "capacity", "Size of volume",
@@ -34,10 +36,12 @@ constexpr size_t Mi = Ki * Ki;
 constexpr size_t Gi = Ki * Mi;
 
 static void init_homestore(std::string const& device_address) {
-    std::condition_variable wait_cv;
-    std::mutex init_lock;
-    bool init_done{false};
-
+    // this should be static so that it stays in scope in the lambda in case function ends before lambda completes
+    static std::mutex init_lock;
+    static std::condition_variable wait_cv;
+    static bool init_done;
+    
+    init_done = false;
     homestore::dev_info dev;
     dev.dev_names = device_address;
 
@@ -45,14 +49,14 @@ static void init_homestore(std::string const& device_address) {
     params.devices.push_back(dev);
     params.min_virtual_page_size = 4 * Ki;
     params.app_mem_size = 2 * Gi;
-    params.init_done_cb = [&](std::error_condition,
+    params.init_done_cb = [&tl_init_lock=init_lock, &tl_wait_cv=wait_cv, &tl_init_done=init_done](std::error_condition,
                               struct homestore::out_params) mutable {
         LOGDEBUG("Homestore completed initialization");
         {
-            std::lock_guard<std::mutex> lg(init_lock);
-            init_done = true;
+            std::lock_guard<std::mutex> lg{ tl_init_lock };
+            tl_init_done = true;
         }
-        wait_cv.notify_one();
+        tl_wait_cv.notify_one();
     };
     params.vol_mounted_cb = [&](std::shared_ptr<homestore::Volume> v,
                                 homestore::vol_state s) mutable {};
@@ -63,8 +67,8 @@ static void init_homestore(std::string const& device_address) {
 
     homestore::VolInterface::init(params);
     {
-        std::unique_lock<std::mutex> lk(init_lock);
-        wait_cv.wait(lk, [&] { return init_done; });
+        std::unique_lock<std::mutex> lk{ init_lock };
+        wait_cv.wait(lk, [] { return init_done; });
     }
     LOGINFO("Volume interface init success.\n");
 }

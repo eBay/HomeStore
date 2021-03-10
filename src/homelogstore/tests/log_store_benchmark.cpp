@@ -118,10 +118,12 @@ public:
         if (restart) { shutdown(); }
 
         std::vector< dev_info > device_info;
-        std::mutex start_mutex;
-        std::condition_variable cv;
-        bool inited{false};
+        // these should be static so that they stay in scope in the lambda in case function ends before lambda completes
+        static std::mutex start_mutex;
+        static std::condition_variable cv;
+        static bool inited;
 
+        inited = false;
         m_q_depth = qdepth;
         LOGINFO("opening {} device of size {} ", devname);
         device_info.push_back({devname});
@@ -146,13 +148,14 @@ public:
         params.min_virtual_page_size = 4096;
         params.app_mem_size = app_mem_size;
         params.devices = device_info;
-        params.init_done_cb = [&](std::error_condition err, const out_params& params) {
+        params.init_done_cb = [&tl_start_mutex = start_mutex, &tl_cv = cv,
+                               &tl_inited = inited](std::error_condition err, const out_params& params) {
             LOGINFO("HomeBlks Init completed");
             {
-                std::unique_lock< std::mutex > lk{start_mutex};
-                inited = true;
+                std::unique_lock< std::mutex > lk{tl_start_mutex};
+                tl_inited = true;
             }
-            cv.notify_all();
+            tl_cv.notify_one();
         };
         params.vol_mounted_cb = [](const VolumePtr& vol_obj, vol_state state) {};
         params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
@@ -161,7 +164,7 @@ public:
 
         {
             std::unique_lock< std::mutex > lk{start_mutex};
-            cv.wait(lk, [&] { return inited; });
+            cv.wait(lk, [] { return inited; });
         }
 
         if (!restart) {

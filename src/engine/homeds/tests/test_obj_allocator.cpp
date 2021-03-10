@@ -3,8 +3,8 @@
 #include <sds_options/options.h>
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT;
-RCU_REGISTER_INIT;
+THREAD_BUFFER_INIT
+RCU_REGISTER_INIT
 
 using namespace homeds;
 using namespace std;

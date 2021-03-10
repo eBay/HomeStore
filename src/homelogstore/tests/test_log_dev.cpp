@@ -31,12 +31,15 @@ static void on_log_found(const logdev_key lkey, const log_buffer buf) {
     LOGINFO("Found a log with log_idx = {} offset = {}", lkey.idx, lkey.dev_offset);
 }
 
-[[nodiscard]] static std::shared_ptr< iomgr::ioMgr > start_homestore(const uint32_t ndevices, const uint64_t dev_size, const uint32_t nthreads) {
+[[nodiscard]] static std::shared_ptr< iomgr::ioMgr > start_homestore(const uint32_t ndevices, const uint64_t dev_size,
+                                                                     const uint32_t nthreads) {
     std::vector< dev_info > device_info;
-    std::mutex start_mutex;
-    std::condition_variable cv;
-    bool inited{false};
+    // these should be static so that they stay in scope in the lambda in case function ends before lambda completes
+    static std::mutex start_mutex;
+    static std::condition_variable cv;
+    static bool inited;
 
+    inited = false;
     LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
     for (uint32_t i{0}; i < ndevices; ++i) {
         const std::string fpath{"/tmp/" + std::to_string(i + 1)};
@@ -60,22 +63,25 @@ static void on_log_found(const logdev_key lkey, const log_buffer buf) {
     params.cache_size = cache_size;
     params.devices = device_info;
     params.iomgr = iomgr_obj;
-    params.init_done_cb = [&](std::error_condition err, const out_params& params) {
+    params.init_done_cb = [&iomgr_obj, &tl_start_mutex = start_mutex, &tl_cv = cv,
+                           &tl_inited = inited](std::error_condition err, const out_params& params) {
         iomgr_obj->start();
         LOGINFO("HomeBlks Init completed");
         {
-            std::unique_lock< std::mutex > lk{start_mutex};
-            inited = true;
+            std::unique_lock< std::mutex > lk{tl_start_mutex};
+            tl_inited = true;
         }
-        cv.notify_all();
+        tl_cv.notify_one();
     };
     params.vol_mounted_cb = [](const VolumePtr& vol_obj, vol_state state) {};
     params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
     params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
     VolInterface::init(params);
 
-    std::unique_lock< std::mutex > lk(start_mutex);
-    cv.wait(lk, [&] { return inited; });
+    {
+        std::unique_lock< std::mutex > lk{start_mutex};
+        cv.wait(lk, [] { return inited; });
+    }
     return iomgr_obj;
 }
 
@@ -97,14 +103,14 @@ int main(int argc, char* argv[]) {
                                    SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
                                    SDS_OPTIONS["num_threads"].as< uint32_t >())};
 
-    std::array<std::string, 1024> s;
+    std::array< std::string, 1024 > s;
     auto ld{LogDev::instance()};
     ld->register_append_cb(on_append_completion);
     ld->register_logfound_cb(on_log_found);
 
     for (size_t i{0}; (i < std::min<size_t>(195, s.size()); ++i) {
         s[i] = std::to_string(i);
-        ld->append_async(0, 0, reinterpret_cast<const uint8_t*>(s[i].c_str()), s[i].size() + 1, nullptr);
+        ld->append_async(0, 0, reinterpret_cast< const uint8_t* >(s[i].c_str()), s[i].size() + 1, nullptr);
     }
 
     size_t i{0};

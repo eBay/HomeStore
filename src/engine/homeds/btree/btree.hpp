@@ -6,28 +6,35 @@
  */
 #pragma once
 
-#include <iostream>
-#include <cassert>
-#include <pthread.h>
-#include <vector>
 #include <atomic>
-#include <array>
+#include <chrono>
+#include <csignal>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <boost/intrusive_ptr.hpp>
+#include <fds/utils.hpp>
+#include <flip/flip.hpp>
+#include <fmt/ostream.h>
+#include <sds_logging/logging.h>
+
+#include "engine/common/error.h"
+#include "engine/common/homestore_config.hpp"
+#include "engine/common/homestore_flip.hpp"
+#include "engine/common/homestore_header.hpp"
+#include "engine/homeds/array/reserve_vector.hpp"
 #include "engine/homeds/thread/lock.hpp"
+
 #include "btree_internal.h"
 #include "btree_node.cpp"
 #include "physical_node.hpp"
-#include <sds_logging/logging.h>
-#include <boost/intrusive_ptr.hpp>
-#include "engine/common/error.h"
-#include <csignal>
-#include <fds/utils.hpp>
-#include <fmt/ostream.h>
-#include <flip/flip.hpp>
-#include "engine/homeds/array/reserve_vector.hpp"
-#include "engine/common/homestore_header.hpp"
-#include "engine/common/homestore_config.hpp"
-#include "engine/common/homestore_flip.hpp"
 
+// need to remove these.  polluting scope in headers is a bad idea
 using namespace std;
 using namespace homeds::thread;
 using namespace flip;
@@ -1355,7 +1362,7 @@ private:
 #ifdef _PRERELEASE
         {
             auto time = homestore_flip->get_test_flip< uint64_t >("btree_upgrade_delay");
-            if (time) { usleep(time.get()); }
+            if (time) { std::this_thread::sleep_for(std::chrono::microseconds{time.get()}); }
         }
 #endif
         ret = lock_node_upgrade(my_node, bcp);
@@ -1516,7 +1523,7 @@ private:
             time = homestore_flip->get_test_flip< int >("btree_delay_and_split", child_node->get_total_entries());
         }
         if (time && child_node->get_total_entries() > 2) {
-            usleep(time.get());
+            std::this_thread::sleep_for(std::chrono::microseconds{time.get()});
         } else
 #endif
         {
