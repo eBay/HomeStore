@@ -164,7 +164,7 @@ void start_homestore() {
 void shutdown() {
     std::unique_lock< std::mutex > lk(m_mutex);
     vol_list.clear();
-    VolInterface::get_instance()->shutdown();
+    VolInterface::shutdown();
 }
 
 /************************* CLI options ***************************/

@@ -49,8 +49,7 @@ void PhysicalDevChunk::cp_start(std::shared_ptr< blkalloc_cp > ba_cp) {
 }
 
 std::shared_ptr< blkalloc_cp > PhysicalDevChunk::attach_prepare_cp(std::shared_ptr< blkalloc_cp > cur_ba_cp) {
-    std::shared_ptr< blkalloc_cp > new_ba_cp(new blkalloc_cp());
-    return new_ba_cp;
+    return std::make_shared< blkalloc_cp >();
 }
 
 DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,

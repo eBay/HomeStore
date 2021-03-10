@@ -171,7 +171,7 @@ public:
 
     void shutdown() {
         LOGINFO("shutting homestore");
-        VolInterface::get_instance()->shutdown();
+        VolInterface::shutdown();
 
         LOGINFO("stopping iomgr");
         iomanager.stop();

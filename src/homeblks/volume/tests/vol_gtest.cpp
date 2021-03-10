@@ -829,7 +829,7 @@ public:
             vol_info.clear();
         }
 
-        VolInterface::get_instance()->shutdown();
+        VolInterface::shutdown(false /* force */);
 
         LOGINFO("stopping iomgr");
         iomanager.stop();
@@ -1039,7 +1039,7 @@ private:
             vol_info.clear();
             force = true;
         }
-        VolInterface::get_instance()->shutdown(force);
+        VolInterface::shutdown(force);
     }
 
     void remove_journal_files() {
