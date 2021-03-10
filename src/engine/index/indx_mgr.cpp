@@ -1295,6 +1295,11 @@ void IndxMgr::register_indx_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp) {
     }));
 }
 
+bool IndxMgr::is_recovery_done() {
+    /* this volume hasn't participated in a cp if first cp is not null. We can add more conditions in future */
+    return (m_first_icp ? false : true);
+}
+
 hs_cp* IndxMgr::cp_io_enter() { return (m_cp_mgr->cp_io_enter()); }
 
 void IndxMgr::cp_io_exit(hs_cp* hcp) { m_cp_mgr->cp_io_exit(hcp); }

@@ -484,6 +484,7 @@ public:
     void recovery_start_phase2();
     static void fake_reboot(){};
     std::shared_ptr< SnapMgr > get_indx_mgr_instance() { return m_indx_mgr; }
+    bool is_recovery_done() { return m_indx_mgr->is_recovery_done(); }
 };
 
 /* Note :- Any member inside this structure is not lock protected. Its caller responsibility to call it under lock

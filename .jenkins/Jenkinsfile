@@ -172,7 +172,7 @@ pipeline {
                         }
                         post {
                             failure {
-                                archiveArtifacts artifacts: "/root/.conan/data/${PROJECT}/${VER}/${CONAN_USER}/${CONAN_CHANNEL}/build/*/src/logs/*", fingerprint: true
+                                archiveArtifacts artifacts: "logs/*", fingerprint: true
                             }
                         }
                     }

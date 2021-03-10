@@ -804,9 +804,17 @@ void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
         {
             std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
             if (m_volume_map.size() != vol_mnt_cnt) {
-                /* trigger another CP until all volumes are not deleted */
+                /* trigger another CP until all partial deleted volumes are completed */
                 trigger_cp_init(vol_mnt_cnt);
                 return;
+            }
+            /* check if all the volumes have flushed their dirty buffers */
+            for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
+                if (!it->second->is_recovery_done()) {
+                    /* trigger another CP */
+                    trigger_cp_init(vol_mnt_cnt);
+                    return;
+                }
             }
         }
         if (success) {
