@@ -171,7 +171,9 @@ pipeline {
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
                         }
                         post {
-                            archiveArtifacts artifacts: "build/**/logs/*", fingerprint: true
+                            success {
+                                archiveArtifacts artifacts: "build/**/logs/*", fingerprint: true
+                            }
                         }
                     }
 
