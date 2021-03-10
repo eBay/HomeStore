@@ -172,7 +172,7 @@ pipeline {
                         }
                         post {
                             success {
-                                archiveArtifacts artifacts: "**/logs/*", fingerprint: true
+                                archiveArtifacts artifacts: "**/logs/**/*", fingerprint: true
                             }
                         }
                     }
