@@ -814,6 +814,7 @@ void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
                 if (!it->second->is_recovery_done()) {
                     /* trigger another CP */
                     trigger_cp_init(vol_mnt_cnt);
+                    return;
                 }
             }
         }
