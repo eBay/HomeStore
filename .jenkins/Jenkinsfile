@@ -172,7 +172,11 @@ pipeline {
                         }
                         post {
                             success {
-                                archiveArtifacts artifacts: '**/*_log', fingerprint: true
+                                script {
+                                    sh "mkdir ./build_logs"
+                                    sh "mv **/*_log ./build_logs/"
+                                }
+                                archiveArtifacts artifacts: "build_logs/*", fingerprint: true
                             }
                         }
                     }
