@@ -177,6 +177,12 @@ pipeline {
                                 }
                                 archiveArtifacts artifacts: "logs.tar", fingerprint: true
                             }
+                            failure {
+                                script {
+                                    sh "find . -name *_log -print | xargs tar cif logs.tar"
+                                }
+                                archiveArtifacts artifacts: "logs.tar", fingerprint: true
+                            }
                         }
                     }
 
