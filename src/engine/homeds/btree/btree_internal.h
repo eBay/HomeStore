@@ -66,6 +66,10 @@ struct blkalloc_cp_id;
 #define THIS_BT_LOG(level, mod, node, msg, ...)                                                                        \
     HS_DETAILED_LOG(level, mod, , "btree", m_btree_cfg.get_name(), BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), , "node"),     \
                     node->to_string(), msg, ##__VA_ARGS__)
+
+#define THIS_BT_CP_LOG(level, cp_id, msg, ...)                                                                         \
+    HS_PERIODIC_DETAILED_LOG(level, cp, "cp", cp_id, "btree", m_btree_cfg.get_name(), msg, ##__VA_ARGS__)
+
 #define BT_ASSERT(assert_type, cond, node, ...)                                                                        \
     HS_DETAILED_ASSERT(assert_type, cond, , "btree", m_btree_cfg.get_name(),                                           \
                        BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), , "node"), node->to_string(), ##__VA_ARGS__)
@@ -111,10 +115,8 @@ struct btree_cp_sb {
 
     /* we can add more statistics as well like number of interior nodes etc. */
     std::string to_string() const {
-        std::stringstream ss;
-        ss << "active seqid " << active_seqid << " cp_id " << cp_id << " blkalloc_cp_id " << blkalloc_cp_id
-           << " btree_size " << btree_size;
-        return ss.str();
+        return fmt::format("active_seqid={} cp_id={} blkalloc_cp_id={} btree_size={}", active_seqid, cp_id,
+                           blkalloc_cp_id, btree_size);
     }
 } __attribute__((__packed__));
 

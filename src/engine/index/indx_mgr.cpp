@@ -268,7 +268,7 @@ void IndxMgr::create_first_cp() {
                                           m_free_list[++m_free_list_cnt % MAX_CP_CNT]));
     m_first_icp->acp.bcp = m_active_tbl->attach_prepare_cp(nullptr, false, false);
     if (m_recovery_mode) {
-        THIS_INDX_LOG(TRACE, indx_mgr, , "creating indx mgr in recovery mode ");
+        THIS_INDX_LOG(TRACE, indx_mgr, , "creating indx mgr in recovery mode");
         suspend_active_cp();
         if (!m_is_snap_enabled) { return; }
 
@@ -334,7 +334,7 @@ void IndxMgr::indx_snap_create() {
 
 void IndxMgr::recovery() {
     HS_ASSERT_CMP(RELEASE, m_recovery_mode, ==, true);
-    THIS_INDX_LOG(INFO, base, , "recovery state {}", m_recovery_state);
+    THIS_INDX_LOG(INFO, replay, , "recovery state {}", m_recovery_state);
 
     switch (m_recovery_state) {
     case indx_recovery_state::create_sb_st: {
@@ -359,7 +359,7 @@ void IndxMgr::recovery() {
     case indx_recovery_state::meta_ops_replay_st: {
         /* lets go through all index meta blks to see if anything needs to be done */
         recover_meta_ops();
-        THIS_INDX_LOG(INFO, base, , "recovery completed");
+        THIS_INDX_LOG(INFO, replay, , "recovery completed");
     }
     // fall through
     default: {
@@ -387,7 +387,7 @@ void IndxMgr::io_replay() {
     } else {
         next_replay_seq_num = m_last_cp_sb.icp_sb.active_data_seqid + 1;
     }
-    THIS_INDX_LOG(INFO, base, , "last cp {} next_replay_seq_num {} seq_buf_map size {}", m_last_cp_sb.to_string(),
+    THIS_INDX_LOG(INFO, replay, , "last cp {} next_replay_seq_num {} seq_buf_map size {}", m_last_cp_sb.to_string(),
                   next_replay_seq_num, seq_buf_map.size());
     uint64_t read_sync_cnt = 0;
 
@@ -414,7 +414,7 @@ void IndxMgr::io_replay() {
                 BlkId fbid(fblkid_pair.first[i]);
                 Free_Blk_Entry fbe(fbid, 0, fbid.get_nblks());
 
-                THIS_INDX_LOG(DEBUG, base, , "free blk id {} sequence number {}", fbid.to_string(), seq_num);
+                THIS_INDX_LOG(DEBUG, replay, , "free blk id {} sequence number {}", fbid.to_string(), seq_num);
                 auto size = free_blk(nullptr, icp->io_free_blkid_list, fbe, true);
                 HS_ASSERT_CMP(DEBUG, size, >, 0);
 
@@ -429,7 +429,7 @@ void IndxMgr::io_replay() {
             /* allocate blkids */
             auto alloc_pair = indx_journal_entry::get_alloc_bid_list(buf.bytes());
             for (uint32_t i = 0; i < alloc_pair.second; ++i) {
-                THIS_INDX_LOG(DEBUG, base, , "alloc blk id {} sequence number {}", alloc_pair.first[i].to_string(),
+                THIS_INDX_LOG(DEBUG, replay, , "alloc blk id {} sequence number {}", alloc_pair.first[i].to_string(),
                               seq_num);
                 m_hs->get_data_blkstore()->reserve_blk(alloc_pair.first[i]);
                 if (hdr->cp_id > m_last_cp_sb.icp_sb.active_cp_id) {
@@ -450,7 +450,7 @@ void IndxMgr::io_replay() {
              * these IOs are lost and are never going to be recovered.
              */
             m_journal->fill_gap(next_replay_seq_num);
-            THIS_INDX_LOG(INFO, base, , "fill gap seq num {} ", next_replay_seq_num);
+            THIS_INDX_LOG(INFO, replay, , "fill gap seq num {} ", next_replay_seq_num);
             ++next_replay_seq_num;
             ++gaps_found_cnt;
         }
@@ -459,7 +459,7 @@ void IndxMgr::io_replay() {
 
         /* update active indx_tbl */
         if (hdr->cp_id > m_last_cp_sb.icp_sb.active_cp_id) {
-            THIS_INDX_LOG(DEBUG, base, , "updating active indx table sequence number {}", seq_num);
+            THIS_INDX_LOG(DEBUG, replay, , "updating active indx table sequence number {}", seq_num);
             auto ret = m_active_tbl->recovery_update(seq_num, hdr, icp->acp.bcp);
             if (ret != btree_status_t::success) { abort(); }
             ++active_replay_cnt;
@@ -479,7 +479,7 @@ void IndxMgr::io_replay() {
     }
 
     HS_ASSERT_CMP(DEBUG, seq_buf_map.size(), ==, 0);
-    THIS_INDX_LOG(INFO, base, ,
+    THIS_INDX_LOG(INFO, replay, ,
                   "blk alloc replay cnt {} active_replay_cnt {} diff_replay_cnt{} gaps found {} last replay seq num {} "
                   "read_sync_cnt {}",
                   blk_alloc_replay_cnt, active_replay_cnt, diff_replay_cnt, gaps_found_cnt, (next_replay_seq_num - 1),
@@ -494,7 +494,7 @@ void IndxMgr::recover_meta_ops() {
     std::vector< std::pair< void*, sisl::byte_view > >& meta_blk_list = it->second;
     for (uint32_t i = 0; i < meta_blk_list.size(); ++i) {
         auto hdr = (hs_cp_base_sb*)(meta_blk_list[i].second.bytes());
-        THIS_INDX_LOG(INFO, base, , "found meta ops {} in recovery", (uint64_t)hdr->type);
+        THIS_INDX_LOG(INFO, replay, , "found meta ops {} in recovery", (uint64_t)hdr->type);
         switch (hdr->type) {
         case INDX_CP:
             HS_ASSERT(DEBUG, 0, "invalid op");
@@ -556,7 +556,7 @@ void IndxMgr::dump_free_blk_list(const blkid_list_ptr& free_blk_list) {
 #endif
 
 void IndxMgr::flush_free_blks(const indx_cp_ptr& icp, hs_cp* hcp) {
-    THIS_INDX_LOG(TRACE, cp, , "flush free blks");
+    THIS_INDX_CP_LOG(TRACE, icp->cp_id, "flush free blks");
     /* free blks in a indx mgr */
     hcp->ba_cp->free_blks(icp->io_free_blkid_list);
 
@@ -572,7 +572,7 @@ void IndxMgr::flush_free_blks(const indx_cp_ptr& icp, hs_cp* hcp) {
 
 void IndxMgr::update_cp_sb(indx_cp_ptr& icp, hs_cp* hcp, indx_cp_base_sb* sb) {
     /* copy the last superblock and then override the change values */
-    THIS_INDX_LOG(INFO, cp, , "updating cp superblock. CP info {}", icp->to_string());
+    THIS_INDX_CP_LOG(INFO, icp->cp_id, "updating cp superblock. CP info {}", icp->to_string());
     memcpy(sb, &m_last_cp_sb, sizeof(m_last_cp_sb));
 
     if (icp->flags == cp_state::suspend_cp) {
@@ -610,7 +610,7 @@ void IndxMgr::update_cp_sb(indx_cp_ptr& icp, hs_cp* hcp, indx_cp_base_sb* sb) {
         icp->dcp.diff_tbl->update_btree_cp_sb(icp->dcp.bcp, sb->dcp_sb, (icp->flags & cp_state::ba_cp));
     }
     memcpy(&m_last_cp_sb, sb, sizeof(m_last_cp_sb));
-    THIS_INDX_LOG(TRACE, cp, , "updating cp superblock. CP superblock info {}", m_last_cp_sb.to_string());
+    THIS_INDX_CP_LOG(TRACE, icp->cp_id, "updating cp superblock. CP superblock info {}", m_last_cp_sb.to_string());
 }
 
 /* It attaches the new CP and prepare for cur cp flush */
@@ -624,7 +624,7 @@ indx_cp_ptr IndxMgr::attach_prepare_indx_cp(const indx_cp_ptr& cur_icp, hs_cp* c
         /* if cur_hcp->blkalloc_checkpoint is set to true then it means it is created/destroy in a same cp.
          * we can not resume CP in this checkpoint. A indx mgr can never be added in a current cp.
          */
-        THIS_INDX_LOG(TRACE, cp, , "returning first cp");
+        THIS_INDX_CP_LOG(TRACE, 0, "returning first cp");
         return m_first_icp;
     }
 
@@ -633,7 +633,7 @@ indx_cp_ptr IndxMgr::attach_prepare_indx_cp(const indx_cp_ptr& cur_icp, hs_cp* c
 
     if (cur_icp->flags == cp_state::suspend_cp) {
         /* this indx mgr is not going to participate in a current cp */
-        THIS_INDX_LOG(TRACE, cp, , "cp is suspended");
+        THIS_INDX_CP_LOG(TRACE, cur_icp->cp_id, "cp is suspended");
         return cur_icp;
     }
 
@@ -653,7 +653,7 @@ indx_cp_ptr IndxMgr::attach_prepare_indx_cp(const indx_cp_ptr& cur_icp, hs_cp* c
     btree_cp_ptr diff_bcp;
     if (cur_icp->flags & cp_state::diff_cp) {
         /* if this diff table is going to a snapshot than this is the last cp on this indx tbl */
-        THIS_INDX_LOG(TRACE, cp, , "it is diff cp");
+        THIS_INDX_CP_LOG(TRACE, cur_icp->cp_id, "it is diff cp");
         diff_bcp =
             cur_icp->dcp.diff_tbl->attach_prepare_cp(cur_icp->dcp.bcp, m_is_snap_started ? true : m_last_cp, is_ba_cp);
     } else {
@@ -665,12 +665,12 @@ indx_cp_ptr IndxMgr::attach_prepare_indx_cp(const indx_cp_ptr& cur_icp, hs_cp* c
     if (m_last_cp) {
         HS_ASSERT_CMP(DEBUG, active_bcp, ==, nullptr);
         HS_ASSERT_CMP(DEBUG, diff_bcp, ==, nullptr);
-        THIS_INDX_LOG(TRACE, cp, , "Last cp of this index triggered");
+        THIS_INDX_CP_LOG(TRACE, cur_icp->cp_id, "Last cp of this index triggered");
         return nullptr;
     }
 
     auto new_icp = create_new_indx_cp(cur_icp);
-    THIS_INDX_LOG(TRACE, cp, , "is blk allocator cp {}", is_ba_cp);
+    THIS_INDX_CP_LOG(TRACE, cur_icp->cp_id, "is blk allocator cp? {}", is_ba_cp);
 
     /* attach btree checkpoint to this new CP */
     new_icp->acp.bcp = active_bcp;
@@ -752,7 +752,7 @@ void IndxMgr::set_indx_cp_state(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp) {
         cur_icp->flags |= cp_state::ba_cp;
         if (m_is_snap_enabled) { cur_icp->flags |= cp_state::diff_cp; }
     }
-    THIS_INDX_LOG(TRACE, cp, , "cp state {}", cur_icp->flags);
+    THIS_INDX_CP_LOG(TRACE, cur_icp->cp_id, "cp state {}", cur_icp->flags);
 }
 
 void IndxMgr::call_prepare_cb(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp) {
@@ -773,7 +773,7 @@ void IndxMgr::call_prepare_cb(const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp*
     }
 
     if (cb_list) {
-        THIS_INDX_LOG(TRACE, indx_mgr, , "Attach prepare cp waiting list size = {}", cb_list->size());
+        THIS_INDX_CP_LOG(TRACE, cur_icp->cp_id, "Attach prepare cp waiting list size = {}", cb_list->size());
         for (auto& prep_cb : *cb_list) {
             prep_cb(cur_icp, cur_hcp, new_hcp);
         }
@@ -785,13 +785,13 @@ void IndxMgr::create_new_diff_tbl(indx_cp_ptr& icp) {
     icp->dcp.diff_snap_id = snap_create(icp->dcp.diff_tbl, icp->cp_id);
     icp->dcp.bcp = icp->dcp.diff_tbl->attach_prepare_cp(nullptr, false, false);
     indx_create_done(icp->dcp.diff_tbl);
-    THIS_INDX_LOG(TRACE, cp, , "create new diff table");
+    THIS_INDX_CP_LOG(TRACE, icp->cp_id, "create new diff table");
 }
 
 void IndxMgr::truncate(const indx_cp_ptr& icp) {
     m_journal->truncate(icp->acp.end_seqid);
     m_active_tbl->truncate(icp->acp.bcp);
-    THIS_INDX_LOG(INFO, base, , "uuid={} Truncating upto last seqid={}", m_uuid, icp->acp.end_seqid);
+    THIS_INDX_CP_LOG(DEBUG, icp->cp_id, "uuid={} Truncating upto last seqid={}", m_uuid, icp->acp.end_seqid);
 }
 
 indx_tbl* IndxMgr::get_active_indx() { return m_active_tbl; }
@@ -1120,7 +1120,7 @@ sisl::byte_view IndxMgr::alloc_sb_bytes(uint64_t size) {
  */
 void IndxMgr::destroy(const indxmgr_stop_cb& cb) {
     /* we can assume that there is no io going on this indx mgr now */
-    THIS_INDX_LOG(INFO, base, , "Destroying Indx Manager");
+    THIS_INDX_LOG(INFO, indx_mgr, , "Destroying Indx Manager");
     m_stop_cb = cb;
     iomanager.run_on(m_thread_id, [this](io_thread_addr_t addr) { this->destroy_indx_tbl(); });
 }
@@ -1132,7 +1132,7 @@ void IndxMgr::destroy_indx_tbl() {
     btree_status_t ret = m_active_tbl->free_user_blkids(free_list, m_destroy_btree_cur, free_size);
     if (ret != btree_status_t::success) {
         HS_ASSERT_CMP(RELEASE, ret, ==, btree_status_t::resource_full);
-        THIS_INDX_LOG(INFO, base, , "free_user_blkids btree ret status resource_full cur {}",
+        THIS_INDX_LOG(INFO, indx_mgr, , "free_user_blkids btree ret status resource_full cur {}",
                       m_destroy_btree_cur.to_string());
         const sisl::blob& cursor_blob = m_destroy_btree_cur.serialize();
         if (cursor_blob.size == 0) { HS_ASSERT_CMP(RELEASE, free_size, ==, 0); }
@@ -1271,7 +1271,7 @@ cap_attrs IndxMgr::get_used_size() {
     cap_attrs attrs;
     attrs.used_data_size = m_last_cp_sb.icp_sb.indx_size;
     attrs.used_index_size = m_active_tbl->get_used_size();
-    THIS_INDX_LOG(INFO, base, , "tree used index size {} node cnt {}", attrs.used_index_size / 4096,
+    THIS_INDX_LOG(INFO, indx_mgr, , "tree used index size {} node cnt {}", attrs.used_index_size / 4096,
                   m_active_tbl->get_btree_node_cnt());
     attrs.used_total_size = attrs.used_data_size + attrs.used_index_size;
     return attrs;

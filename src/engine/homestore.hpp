@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sds_logging/logging.h>
+
 #include "engine/blkstore/blkstore.hpp"
 #include "engine/common/homestore_config.hpp"
 #include "engine/device/device.h"
@@ -54,6 +56,13 @@ public:
             (input.drive_attr) ? *input.drive_attr : get_drive_attrs(input.devices, input.device_type);
 
         HomeStoreDynamicConfig::init_settings_default();
+
+        // Start a custom periodic logger
+        static std::once_flag flag1;
+        std::call_once(flag1, [this]() {
+            m_periodic_logger = sds_logging::CreateCustomLogger("homestore", "_periodic", false /* tee_to_stdout */);
+        });
+        sds_logging::SetLogPattern("[%D %T.%f] [%^%L%$] [%t] %v", m_periodic_logger);
 
 #ifndef NDEBUG
         flip::Flip::instance().start_rpc_server();

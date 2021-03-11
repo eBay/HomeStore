@@ -123,7 +123,9 @@ void LogDev::do_load(const uint64_t device_cursor) {
             b.move_forward(data_offset);
             b.set_size(rec->size);
             if (m_last_truncate_idx == -1) { m_last_truncate_idx = header->start_idx() + i; }
-            if (m_logfound_cb) m_logfound_cb(rec->store_id, rec->store_seq_num, {header->start_idx() + i, group_dev_offset}, b);
+            if (m_logfound_cb) {
+                m_logfound_cb(rec->store_id, rec->store_seq_num, {header->start_idx() + i, group_dev_offset}, b);
+            }
             ++i;
         }
         m_log_idx = header->start_idx() + i;
@@ -218,8 +220,9 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
         // Free the buffer in case we allocated above
         if (rounded_size > initial_read_size) { iomanager.iobuf_free(rbuf); }
     }
-    return_record_header = serialized_log_record(record_header->size, record_header->offset, record_header->get_inlined(),
-                                                 record_header->store_seq_num, record_header->store_id);
+    return_record_header =
+        serialized_log_record(record_header->size, record_header->offset, record_header->get_inlined(),
+                              record_header->store_seq_num, record_header->store_id);
     return b;
 }
 
@@ -416,12 +419,12 @@ void LogDev::unlock_flush() {
 
 uint64_t LogDev::truncate(const logdev_key& key) {
     assert(key.idx >= m_last_truncate_idx);
-    const uint64_t num_records_to_truncate{static_cast<uint64_t>(key.idx - m_last_truncate_idx)};
+    const uint64_t num_records_to_truncate{static_cast< uint64_t >(key.idx - m_last_truncate_idx)};
     if (num_records_to_truncate > 0) {
         auto* const store{m_hb->get_logdev_blkstore()};
 
-        LOGINFOMOD(logstore, "Truncating log device upto log_id={} vdev_offset={} truncated {} log records", key.idx,
-                   key.dev_offset, num_records_to_truncate);
+        HS_PERIODIC_LOG(INFO, logstore, "Truncating log device upto log_id={} vdev_offset={} truncated {} log records",
+                        key.idx, key.dev_offset, num_records_to_truncate);
         m_log_records->truncate(key.idx);
         store->truncate(key.dev_offset);
         m_last_truncate_idx = key.idx;
@@ -436,7 +439,8 @@ uint64_t LogDev::truncate(const logdev_key& key) {
             for (auto it{std::cbegin(m_garbage_store_ids)}; it != std::cend(m_garbage_store_ids);) {
                 if (it->first > key.idx) break;
 
-                LOGINFOMOD(logstore, "Garbage collecting the log store id {} log_idx={}", it->second, it->first);
+                HS_PERIODIC_LOG(INFO, logstore, "Garbage collecting the log store id {} log_idx={}", it->second,
+                                it->first);
                 m_logdev_meta.unreserve_store(it->second, false /* persist_now */);
                 it = m_garbage_store_ids.erase(it);
             }

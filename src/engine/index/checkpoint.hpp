@@ -11,6 +11,7 @@
 #include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_assert.hpp"
+#include "engine/homestore_base.hpp"
 
 /*
  * These are the design requirements of this class. If we don't follow these requirements then there can be serious
@@ -33,8 +34,10 @@
  */
 typedef std::function< void(bool success) > cp_done_cb;
 namespace homestore {
-SDS_LOGGING_DECL(cp)
+SDS_LOGGING_DECL(cp, replay)
 
+#define CP_PERIODIC_LOG(level, cp_id, msg, ...)                                                                        \
+    HS_PERIODIC_DETAILED_LOG(level, cp, "cp_id", cp_id, , , msg, ##__VA_ARGS__)
 #define CP_LOG(level, cp_id, msg, ...) HS_SUBMOD_LOG(level, cp, , "cp_id", cp_id, msg, ##__VA_ARGS__)
 
 ENUM(cp_status_t, uint8_t,
@@ -104,7 +107,7 @@ public:
         m_cur_cp->cp_status = cp_status_t::cp_io_ready;
     }
 
-    virtual ~CPMgr() { HS_ASSERT(RELEASE, !m_cur_cp, "cir cp is not null"); }
+    virtual ~CPMgr() { HS_ASSERT(RELEASE, !m_cur_cp, "cur cp is not null"); }
 
     virtual void shutdown() {
         auto cp = get_cur_cp();
@@ -158,7 +161,7 @@ public:
         auto cnt = cp->enter_cnt.fetch_sub(1);
         if (cnt == 1 && cp->cp_status == cp_status_t::cp_prepare) {
             cp->cp_status = cp_status_t::cp_start;
-            LOGDEBUGMOD(cp, "Outside of CP critical section, ref_count is 0, starting CP");
+            HS_PERIODIC_LOG(INFO, cp, "Outside of CP critical section, ref_count is 0, starting new CP");
             cp_start(cp);
         }
     }
@@ -170,7 +173,8 @@ public:
         HS_ASSERT(DEBUG, in_cp_phase, "in_cp_phase");
         HS_ASSERT_CMP(DEBUG, cp->cp_status, ==, cp_status_t::cp_start);
         auto cb_list = cp->cb_list;
-        LOGDEBUGMOD(cp, ">>>>>>>>>>>> cp ID completed {}, notified {} callbacks", cp->to_string(), cb_list.size());
+        HS_PERIODIC_LOG(DEBUG, cp, ">>>>>>>>>>>> cp ID completed {}, notified {} callbacks", cp->to_string(),
+                        cb_list.size());
         HISTOGRAM_OBSERVE(m_metrics, cp_latency, get_elapsed_time_ns(m_cp_start_time));
         delete (cp);
 
@@ -189,7 +193,7 @@ public:
         auto cur_cp = cp_io_enter();
         if (!cur_cp) { return; }
         if (cur_cp->cp_trigger_waiting) {
-            LOGINFOMOD(cp, "Triggering back to back CP");
+            HS_PERIODIC_LOG(INFO, cp, "Triggering back to back CP");
             COUNTER_INCREMENT(m_metrics, back_to_back_cps, 1);
             trigger_cp();
         }
@@ -222,7 +226,7 @@ public:
 
         auto prev_cp = cp_io_enter();
         prev_cp->cp_status = cp_status_t::cp_trigger;
-        LOGDEBUGMOD(cp, "<<<<<<<<<<< Triggering new CP {}", prev_cp->to_string());
+        HS_PERIODIC_LOG(INFO, cp, "<<<<<<<<<<< Triggering new CP {}", prev_cp->to_string());
         COUNTER_INCREMENT(m_metrics, cp_cnt, 1);
         m_cp_start_time = Clock::now();
 
@@ -230,9 +234,9 @@ public:
         auto new_cp = new cp_type();
         {
             std::unique_lock< std::mutex > lk(trigger_cp_mtx);
-            LOGDEBUGMOD(cp, "About to attach and prepare into the CP");
+            HS_PERIODIC_LOG(DEBUG, cp, "About to attach and prepare into the CP");
             cp_attach_prepare(prev_cp, new_cp);
-            LOGDEBUGMOD(cp, "CP Attached completed, proceed to exit cp critical section");
+            HS_PERIODIC_LOG(DEBUG, cp, "CP Attached completed, proceed to exit cp critical section");
             if (cb) { prev_cp->push_cb(std::move(cb)); }
             prev_cp->cp_status = cp_status_t::cp_prepare;
             new_cp->cp_status = cp_status_t::cp_io_ready;
@@ -241,7 +245,7 @@ public:
         }
         // At this point we are sure that there is no thread working on prev_cp without incrementing the cp_enter cnt
 
-        LOGDEBUGMOD(cp, "CP critical section done, doing cp_io_exit");
+        HS_PERIODIC_LOG(DEBUG, cp, "CP critical section done, doing cp_io_exit");
         cp_io_exit(prev_cp);
     }
 

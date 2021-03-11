@@ -13,6 +13,7 @@
 
 #include <fds/thread_vector.hpp>
 #include <wisr/wisr_ds.hpp>
+#include <utility/enum.hpp>
 
 #include "api/meta_interface.hpp"
 #include "checkpoint.hpp"
@@ -42,6 +43,12 @@ struct indx_req;
 
 #define THIS_INDX_LOG(level, mod, req, msg, ...)                                                                       \
     HS_SUBMOD_LOG(level, mod, req, "indx_tbl", this->get_name(), msg, ##__VA_ARGS__)
+
+#define THIS_INDX_PERIODIC_LOG(level, mod, msg, ...)                                                                   \
+    HS_PERIODIC_DETAILED_LOG(level, mod, "indx_tbl", this->get_name(), , , msg, ##__VA_ARGS__)
+
+#define THIS_INDX_CP_LOG(level, cp_id, msg, ...)                                                                       \
+    HS_PERIODIC_DETAILED_LOG(level, cp, "cp", cp_id, "indx_tbl", this->get_name(), msg, ##__VA_ARGS__)
 
 using read_indx_comp_cb_t = std::function< void(const indx_req_ptr& ireq, std::error_condition ret) >;
 
@@ -179,12 +186,8 @@ struct indx_active_cp {
     int64_t end_seqid = -1;   // inclusive
     btree_cp_ptr bcp;
     indx_active_cp(int64_t start_seqid) : start_seqid(start_seqid) {}
-    std::string to_string() {
-        std::stringstream ss;
-        ss << " start_seqid " << start_seqid << " end_seqid " << end_seqid << " btree checkpoint info "
-           << "\n"
-           << bcp->to_string();
-        return ss.str();
+    std::string to_string() const {
+        return fmt::format("start_seqid={} end_seqid={} btree_cp_info=[{}]", start_seqid, end_seqid, bcp->to_string());
     }
 };
 
@@ -195,13 +198,9 @@ struct indx_diff_cp {
     int64_t diff_snap_id = -1;
     btree_cp_ptr bcp;
     indx_diff_cp(int64_t start_seqid) : start_seqid(start_seqid) {}
-    std::string to_string() {
-        std::stringstream ss;
-        ss << " start_seqid " << start_seqid << " end_seqid " << end_seqid << " diff_snap_id " << diff_snap_id
-           << " btree checkpoint info "
-           << "\n";
-        if (bcp) { ss << bcp->to_string(); }
-        return ss.str();
+    std::string to_string() const {
+        return fmt::format("start_seqid={} end_seqid={} diff_snap_id={} btree_cp_info=[{}]", start_seqid, end_seqid,
+                           diff_snap_id, (bcp ? bcp->to_string() : ""));
     }
 };
 
@@ -237,16 +236,11 @@ struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
     int64_t get_max_seqid() { return 0; }
     void set_max_seqid(int64_t seqid){};
 
-    std::string to_string() {
-        std::stringstream ss;
-        ss << "flags " << flags << " indx cp_id " << cp_id << " indx_size " << indx_size << " active checkpoint "
-           << "\n"
-           << acp.to_string() << "\n"
-           << " diff checkpoint "
-           << "\n"
-           << dcp.to_string() << "\n"
-           << " size freed " << io_free_blkid_list->size() << " user size freed " << user_free_blkid_list.size();
-        return ss.str();
+    std::string to_string() const {
+        return fmt::format(
+            "flags={} indx_cp_id={} indx_size={} active_cp=[{}] diff_cp=[{}] size_freed={} user_size_freed={}", flags,
+            cp_id, indx_size, acp.to_string(), dcp.to_string(), io_free_blkid_list->size(),
+            user_free_blkid_list.size());
     }
 };
 
@@ -365,7 +359,8 @@ public:
 typedef std::function< void(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) > io_done_cb;
 typedef std::function< indx_tbl*() > create_indx_tbl;
 typedef std::function< indx_tbl*(homeds::btree::btree_super_block& sb, btree_cp_sb& cp_info) > recover_indx_tbl;
-enum indx_recovery_state { create_sb_st, create_indx_tbl_st, create_first_cp_st, io_replay_st, meta_ops_replay_st };
+ENUM(indx_recovery_state, uint8_t, create_sb_st, create_indx_tbl_st, create_first_cp_st, io_replay_st,
+     meta_ops_replay_st);
 
 /************************************ Static indx manager *****************************************/
 /* this class defines all the static members of indx_mgr */

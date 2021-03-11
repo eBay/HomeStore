@@ -249,7 +249,7 @@ public:
 
     void notify_completions() {
         std::unique_lock< std::mutex > lk(m_mutex);
-        LOGINFO("notifying completions");
+        LOGDEBUG("notifying completions");
         if (is_job_done()) {
             m_status_threads_executing.set_status(job_status_t::completed);
             m_notify_job_done = true;

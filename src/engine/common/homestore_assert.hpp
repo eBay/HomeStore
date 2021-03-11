@@ -53,25 +53,20 @@
  * 9) msg_params [optional]: Paramters for the above message if any.
  */
 // clang-format on
-#if 0
-#define LOGCUSTOMTRACEMOD_FMT(mod, logger, formatter, msg, ...)                                                        \
-    CUSTOM_LOGTRACEMOD_FMT(mod, HSCustomLogger::logger(), formatter, msg, ##__VA_ARGS__)
-
-#define LOGCUSTOMDEBUGMOD_FMT(mod, logger, formatter, msg, ...)                                                        \
-    CUSTOM_LOGDEBUGMOD_FMT(mod, HSCustomLogger::logger(), formatter, msg, ##__VA_ARGS__)
-
-#define LOGCUSTOMINFOMOD_FMT(mod, logger, formatter, msg, ...)                                                         \
-    CUSTOM_LOGINFOMOD_FMT(mod, HSCustomLogger::logger(), formatter, msg, ##__VA_ARGS__)
-
-#define LOGCUSTOMWARNMOD_FMT(mod, logger, formatter, msg, ...)                                                         \
-    CUSTOM_LOGWARNMOD_FMT(mod, HSCustomLogger::logger(), formatter, msg, ##__VA_ARGS__)
-
-#define LOGCUSTOMERRORMOD_FMT(mod, logger, formatter, msg, ...)                                                        \
-    CUSTOM_LOGERMOD_FMT(mod, HSCustomLogger::logger(), formatter, msg, ##__VA_ARGS__)
-
-#define LOGCUSTOMCRITICALMOD_FMT(mod, logger, formatter, msg, ...)                                                     \
-    CUSTOM_LOGCRITICALMOD_FMT(mod, HSCustomLogger::logger(), formatter, msg, ##__VA_ARGS__)
-#endif
+#define HS_PERIODIC_DETAILED_LOG(level, mod, submod_name, submod_val, detail_name, detail_val, msg, ...)               \
+    {                                                                                                                  \
+        LOG##level##MOD_FMT_USING_LOGGER(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                               \
+                                         ([&](fmt::memory_buffer& buf, const char* __m, auto&&... args) {              \
+                                             fmt::format_to(buf, "[{}:{}] ", file_name(__FILE__), __LINE__);           \
+                                             BOOST_PP_IF(BOOST_PP_IS_EMPTY(submod_name), ,                             \
+                                                         fmt::format_to(buf, "[{}={}] ", submod_name, submod_val));    \
+                                             BOOST_PP_IF(BOOST_PP_IS_EMPTY(detail_name), ,                             \
+                                                         fmt::format_to(buf, "[{}={}] ", detail_name, detail_val));    \
+                                             fmt::format_to(buf, __m, args...);                                        \
+                                         }),                                                                           \
+                                         HomeStoreBase::periodic_logger(), msg, ##__VA_ARGS__);                        \
+    }
+#define HS_PERIODIC_LOG(level, mod, msg, ...) HS_PERIODIC_DETAILED_LOG(level, mod, , , , , msg, ##__VA_ARGS__)
 
 #define HS_DETAILED_LOG(level, mod, req, submod_name, submod_val, detail_name, detail_val, msg, ...)                   \
     {                                                                                                                  \

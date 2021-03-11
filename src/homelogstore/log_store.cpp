@@ -15,6 +15,8 @@ namespace homestore {
 SDS_LOGGING_DECL(logstore)
 
 #define THIS_LOGSTORE_LOG(level, msg, ...) HS_SUBMOD_LOG(level, logstore, , "store", m_store_id, msg, __VA_ARGS__)
+#define THIS_LOGSTORE_PERIODIC_LOG(level, msg, ...)                                                                    \
+    HS_PERIODIC_DETAILED_LOG(level, logstore, "store", m_store_id, , , msg, __VA_ARGS__)
 
 void HomeLogStoreMgr::meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size) {
     HomeLogStoreMgr::instance().m_log_dev.meta_blk_found(mblk, buf, size);
@@ -245,11 +247,11 @@ logdev_key HomeLogStoreMgr::do_device_truncate(const bool dry_run) {
     });
 
     if ((min_safe_ld_key == logdev_key::out_of_bound_ld_key()) || (min_safe_ld_key.idx < 0)) {
-        LOGINFOMOD(logstore, "No log store append on any log stores, skipping device truncation");
+        HS_PERIODIC_LOG(INFO, logstore, "No log store append on any log stores, skipping device truncation");
         return min_safe_ld_key;
     } else {
-        LOGINFOMOD(logstore, "LogDevice truncate, all_logstore_info:<{}> safe log dev key to truncate={}", dbg_str,
-                   min_safe_ld_key);
+        HS_PERIODIC_LOG(INFO, logstore, "LogDevice truncate, all_logstore_info:<{}> safe log dev key to truncate={}",
+                        dbg_str, min_safe_ld_key);
 
         // We call post device truncation only to the log stores whose prepared truncation points are fully truncated or
         // to stores which didn't particpate in this device truncation.
@@ -502,14 +504,14 @@ void HomeLogStore::do_truncate(const logstore_seq_num_t upto_seq_num) {
     const int ind{search_max_le(upto_seq_num)};
     if (ind < 0) {
         // m_safe_truncation_boundary.pending_dev_truncation = false;
-        THIS_LOGSTORE_LOG(DEBUG,
-                          "Truncate upto lsn={}, possibly already truncated so ignoring. Current safe device "
-                          "truncation barrier=<log_id={}>",
-                          upto_seq_num, m_safe_truncation_boundary.ld_key);
+        THIS_LOGSTORE_PERIODIC_LOG(DEBUG,
+                                   "Truncate upto lsn={}, possibly already truncated so ignoring. Current safe device "
+                                   "truncation barrier=<log_id={}>",
+                                   upto_seq_num, m_safe_truncation_boundary.ld_key);
         return;
     }
 
-    THIS_LOGSTORE_LOG(
+    THIS_LOGSTORE_PERIODIC_LOG(
         DEBUG, "Truncate upto lsn={}, nearest safe device truncation barrier <ind={} log_id={}>, is_last_barrier={}",
         upto_seq_num, ind, m_truncation_barriers[ind].ld_key,
         (ind == static_cast< int >(m_truncation_barriers.size() - 1)));
