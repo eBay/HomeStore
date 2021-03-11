@@ -173,7 +173,7 @@ pipeline {
                         post {
                             success {
                                 script {
-                                    find . -name "*_log" -print | xargs tar cif logs.tar
+                                    sh find . -name "*_log" -print | xargs tar cif logs.tar
                                 }
                                 archiveArtifacts artifacts: "logs.tar", fingerprint: true
                             }
