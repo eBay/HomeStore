@@ -173,13 +173,13 @@ pipeline {
                         post {
                             success {
                                 script {
-                                    sh "find . -name *_log | xargs -r mv -t  ."
+                                    sh "find /root -name *_log | xargs -r mv -t  ."
                                 }
                                 archiveArtifacts artifacts: "*_log", fingerprint: true
                             }
                             failure {
                                 script {
-                                    sh "find . -name *_log | xargs -r mv -t  ."
+                                    sh "find /root -name *_log | xargs -r mv -t  ."
                                 }
                                 archiveArtifacts artifacts: "*_log", fingerprint: true
                             }
