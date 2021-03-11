@@ -173,15 +173,15 @@ pipeline {
                         post {
                             success {
                                 script {
-                                    sh "find . -name *_log -print | xargs tar cif logs.tar"
+                                    sh "find . -name *_log | xargs -r mv -t  ."
                                 }
-                                archiveArtifacts artifacts: "logs.tar", fingerprint: true
+                                archiveArtifacts artifacts: "*_log", fingerprint: true
                             }
                             failure {
                                 script {
-                                    sh "find . -name *_log -print | xargs tar cif logs.tar"
+                                    sh "find . -name *_log | xargs -r mv -t  ."
                                 }
-                                archiveArtifacts artifacts: "logs.tar", fingerprint: true
+                                archiveArtifacts artifacts: "*_log", fingerprint: true
                             }
                         }
                     }
