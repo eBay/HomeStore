@@ -173,10 +173,9 @@ pipeline {
                         post {
                             success {
                                 script {
-                                    sh "mkdir ./build_logs"
-                                    sh "mv **/*_log ./build_logs/"
+                                    find . -name "*_log" -print | xargs tar cif logs.tar
                                 }
-                                archiveArtifacts artifacts: "build_logs/*", fingerprint: true
+                                archiveArtifacts artifacts: "logs.tar", fingerprint: true
                             }
                         }
                     }
