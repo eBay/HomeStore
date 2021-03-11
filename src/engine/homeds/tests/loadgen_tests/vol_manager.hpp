@@ -1,8 +1,22 @@
 #pragma once
 
+#include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
+#include <cstring>
+#include <deque>
+#include <fstream>
+#include <functional>
+#include <limits>
+#include <map>
+#include <memory>
 #include <mutex>
+#include <random>
+#include <string>
+#include <system_error>
+#include <thread>
+#include <vector>
 
 #include <fds/bitset.hpp>
 
@@ -107,7 +121,7 @@ public:
                 LOGERROR("Wait outstanding io timeout ...");
                 assert(0);
             }
-            sleep(2);
+            std::this_thread::sleep_for(std::chrono::seconds{2});
         }
 
         shutdown();
@@ -120,7 +134,7 @@ public:
                 LOGERROR("Wait shutdown callback timeout ...");
                 assert(0);
             }
-            sleep(2);
+            std::this_thread::sleep_for(std::chrono::seconds{2});
         }
 
         remove_files();
@@ -368,7 +382,7 @@ private:
         // This is just for the ease of testing code only, not a restriction for production code;
         //
         while (!m_logdev_read_verified) {
-            sleep(1);
+            std::this_thread::sleep_for(std::chrono::seconds{1});
         }
 #endif
         if (offset_1 != INVALID_OFFSET) {
@@ -393,15 +407,15 @@ private:
 
 #endif
     uint64_t get_rand_vol() {
-        std::random_device rd;
-        std::default_random_engine generator(rd());
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine generator{rd()};
         std::uniform_int_distribution< long long unsigned > dist(0, m_max_vols - 1);
         return dist(generator);
     }
 
     uint64_t get_rand_lba() {
-        std::random_device rd;
-        std::default_random_engine generator(rd());
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine generator{rd()};
         // make sure the the lba doesn't write accross max vol size;
         // MAX_KEYS is initiated as max vol size;
         // lba: [0, max_vol_blks - max_io_nblks)
@@ -410,8 +424,8 @@ private:
     }
 
     uint64_t get_rand_nblks() {
-        std::random_device rd;
-        std::default_random_engine generator(rd());
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine generator{rd()};
         // nblks: [1, max_io_nblks]
         std::uniform_int_distribution< long long unsigned > dist(1, max_io_nblks());
         return dist(generator);
@@ -421,8 +435,8 @@ private:
         assert(size > 0);
         assert(size % sizeof(uint64_t) == 0);
 
-        std::random_device rd;
-        std::default_random_engine generator(rd());
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine generator{rd()};
         std::uniform_int_distribution< long long unsigned > dist(std::numeric_limits< unsigned long long >::min(),
                                                                  std::numeric_limits< unsigned long long >::max());
 
@@ -448,7 +462,7 @@ private:
             temp_info.dev_names = m_file_names[i];
             m_device_info.push_back(temp_info);
 
-            std::ofstream ofs(m_file_names[i].c_str(), std::ios::binary | std::ios::out);
+            std::ofstream ofs(m_file_names[i], std::ios::binary | std::ios::out);
             ofs.seekp(m_max_disk_cap - 1);
             ofs.write("", 1);
             ofs.close();
@@ -498,10 +512,7 @@ private:
         p.uuid = boost::uuids::random_generator()();
         std::string name = VOL_PREFIX + std::to_string(vol_index);
 
-        memcpy(p.vol_name, name.c_str(), (name.length() + 1));
-
-        // wait for VolInterface to run firstly to initiate instance.
-        // sleep(2);
+        std::memcpy(p.vol_name, name.c_str(), (name.length() + 1));
 
         auto vol_obj = VolInterface::get_instance()->create_volume(p);
 

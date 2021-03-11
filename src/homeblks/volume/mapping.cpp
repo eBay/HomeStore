@@ -1,4 +1,7 @@
+#include <chrono>
 #include <cstring>
+#include <thread>
+
 #include "mapping.hpp"
 #include "volume.hpp"
 
@@ -315,7 +318,7 @@ bool mapping::fix(const btree_cp_ptr& bcp, uint64_t start_lba, uint64_t end_lba,
     delete old_bt;
 
     while (m_outstanding_io != 0) {
-        sleep(2);
+        std::this_thread::sleep_for(std::chrono::seconds{2});
     }
 
     // reset fix state to false

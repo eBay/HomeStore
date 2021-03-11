@@ -5,20 +5,26 @@
 #ifndef OMSTORE_BLKSTORE_HPP
 #define OMSTORE_BLKSTORE_HPP
 
+#include <chrono>
+#include <cstdint>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <boost/optional.hpp>
+#include <fds/utils.hpp>
+#include <utility/atomic_counter.hpp>
+
 #include "engine/cache/cache.h"
+#include "engine/cache/cache.cpp" // this should be ipp or h since it is templates
+#include "engine/common/error.h"
+#include "engine/common/homestore_config.hpp"
+#include "engine/common/homestore_flip.hpp"
+#include "engine/device/blkbuffer.hpp"
 #include "engine/device/device_selector.hpp"
 #include "engine/device/device.h"
-#include <boost/optional.hpp>
 #include "engine/device/virtual_dev.hpp"
 #include "engine/homeds/memory/mempiece.hpp"
-#include "engine/cache/cache.cpp"
-#include "engine/common/error.h"
-//#include "writeBack_cache.hpp"
-#include "engine/device/blkbuffer.hpp"
-#include "engine/common/homestore_config.hpp"
-#include <utility/atomic_counter.hpp>
-#include <fds/utils.hpp>
-#include "engine/common/homestore_flip.hpp"
 
 namespace homestore {
 
@@ -195,7 +201,7 @@ public:
 #ifdef _PRERELEASE
             if (auto flip_ret = homestore_flip->get_test_flip< int >("delay_us_and_inject_error_on_completion",
                                                                      v_req->request_id)) {
-                usleep(flip_ret.get());
+                std::this_thread::sleep_for(std::chrono::microseconds{flip_ret.get()});
                 req->err = homestore_error::write_failed;
             }
 #endif
@@ -483,7 +489,7 @@ public:
         req->is_read = true;
 
         /* first is offset and second is size in a pair */
-        vector< std::pair< uint32_t, uint32_t > > missing_mp;
+        std::vector< std::pair< uint32_t, uint32_t > > missing_mp;
         assert(bid.data_size(m_pagesz) >= (offset + size));
         bool ret = m_cache->insert_missing_pieces(bbuf, offset, size, missing_mp);
         BlkId read_blkid(bid.get_blkid_at(offset, size, m_pagesz));

@@ -447,8 +447,8 @@ public:
 
         COUNTER_INCREMENT(m_metrics, vdev_truncate_count, 1);
 
-        HS_LOG(INFO, device, "truncating to logical offset: {}, start: {}, m_write_sz_in_total: {} ", to_hex(offset),
-               to_hex(ds_off), to_hex(m_write_sz_in_total.load()));
+        HS_PERIODIC_LOG(INFO, device, "truncating to logical offset: {}, start: {}, m_write_sz_in_total: {} ",
+                        to_hex(offset), to_hex(ds_off), to_hex(m_write_sz_in_total.load()));
 
         uint64_t size_to_truncate = 0;
         if (offset >= ds_off) {
@@ -456,10 +456,10 @@ public:
             size_to_truncate = offset - ds_off;
         } else {
             // the truncate offset is smaller than current start offset, meaning we are looping back to previous chunks;
-            HS_LOG(INFO, device,
-                   "Loop-back truncating to logical offset: {} which is smaller than current data start offset: {}, "
-                   "m_write_sz_in_total: {} ",
-                   to_hex(offset), to_hex(ds_off), to_hex(m_write_sz_in_total.load()));
+            HS_PERIODIC_LOG(INFO, device,
+                            "Loop-back truncating to logical offset: {} which is smaller than current data start "
+                            "offset: {}, m_write_sz_in_total: {}",
+                            to_hex(offset), to_hex(ds_off), to_hex(m_write_sz_in_total.load()));
             size_to_truncate = get_size() - (ds_off - offset);
             HS_ASSERT_CMP(RELEASE, m_write_sz_in_total.load(), >=, size_to_truncate, "invalid truncate offset");
             HS_ASSERT_CMP(RELEASE, get_tail_offset(), >=, offset);
@@ -471,8 +471,8 @@ public:
         // Update our start offset, to keep track of actual size
         update_data_start_offset(offset);
 
-        HS_LOG(INFO, device, "after truncate: m_write_sz_in_total: {}, start: {} ", to_hex(m_write_sz_in_total.load()),
-               to_hex(data_start_offset()));
+        HS_PERIODIC_LOG(INFO, device, "after truncate: m_write_sz_in_total: {}, start: {} ",
+                        to_hex(m_write_sz_in_total.load()), to_hex(data_start_offset()));
         m_truncate_done = true;
     }
 
@@ -1645,8 +1645,8 @@ private:
     uint64_t to_dev_offset(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const {
         *chunk = m_mgr->get_chunk_mutable(glob_uniq_id.get_chunk_num());
 
-        uint64_t dev_offset =
-            static_cast<uint64_t>(glob_uniq_id.get_blk_num()) * get_page_size() + static_cast<uint64_t>((*chunk)->get_start_offset());
+        uint64_t dev_offset = static_cast< uint64_t >(glob_uniq_id.get_blk_num()) * get_page_size() +
+            static_cast< uint64_t >((*chunk)->get_start_offset());
         return dev_offset;
     }
 

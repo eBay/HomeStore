@@ -19,8 +19,8 @@
 #include "cache.cpp"
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT;
-RCU_REGISTER_INIT;
+THREAD_BUFFER_INIT
+RCU_REGISTER_INIT
 
 struct blk_id {
     static int compare(const blk_id& one, const blk_id& two) {
@@ -65,7 +65,7 @@ struct hash< blk_id > {
 constexpr uint64_t MAX_CACHE_SIZE{2 * 1024 * 1024};
 constexpr size_t NTHREADS{1};
 
-struct CacheTest : public testing::Test {
+struct CacheTest : public ::testing::Test {
 protected:
     std::unique_ptr< homestore::Cache< blk_id > > m_cache;
 
@@ -142,7 +142,7 @@ SDS_OPTIONS_ENABLE(logging)
 
 int main(int argc, char* argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, logging)
-    testing::InitGoogleTest(&argc, argv);
+    ::testing::InitGoogleTest(&argc, argv);
     sds_logging::SetLogger("test_cache");
     sds_logging::install_crash_handler();
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");

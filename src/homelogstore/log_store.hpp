@@ -23,7 +23,7 @@ struct log_dump_req {
     log_dump_req(log_dump_verbosity level = log_dump_verbosity::HEADER,
                  std::shared_ptr< HomeLogStore > logstore = nullptr, logstore_seq_num_t s_seq = 0,
                  logstore_seq_num_t e_seq = std::numeric_limits< int64_t >::max()) :
-            verbosity_level(level), log_store(logstore), start_seq_num(s_seq), end_seq_num(e_seq) {}
+            verbosity_level{level}, log_store{logstore}, start_seq_num{s_seq}, end_seq_num{e_seq} {}
     log_dump_verbosity verbosity_level;        // How much information we need of log file (entire content or header)
     std::shared_ptr< HomeLogStore > log_store; // if null all log stores are dumped
     logstore_seq_num_t start_seq_num;          // empty_key if from start of log file
@@ -34,7 +34,7 @@ struct logstore_record {
     logdev_key m_dev_key;
 
     logstore_record() = default;
-    logstore_record(const logdev_key& key) : m_dev_key(key) {}
+    logstore_record(const logdev_key& key) : m_dev_key{key} {}
 };
 
 struct logstore_req {
@@ -360,6 +360,7 @@ public:
      * to set this to true on cases where there are multiple log stores, so that once all in-memory truncation is
      * completed, a device truncation can be triggered for all the logstores. The device truncation is more
      * expensive and grouping them together yields better results.
+     * @return number of records to truncate
      */
     void truncate(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only = true);
 

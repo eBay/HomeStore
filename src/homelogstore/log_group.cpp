@@ -63,14 +63,14 @@ bool LogGroup::add_record(const log_record& record, const int64_t log_idx) {
     m_record_slots[m_nrecords].store_seq_num = record.seq_num;
     if (record.is_inlineable()) {
         m_record_slots[m_nrecords].offset = m_inline_data_pos;
-        m_record_slots[m_nrecords].is_inlined = true;
+        m_record_slots[m_nrecords].set_inlined(true);
         std::memcpy(static_cast<void*>(m_cur_log_buf + m_inline_data_pos), static_cast<const void*>(record.data_ptr), record.size);
         m_inline_data_pos += record.size;
         m_iovecs[0].iov_len = m_inline_data_pos;
     } else {
         // We do not round it now, it will be rounded during finish
         m_record_slots[m_nrecords].offset = m_oob_data_pos;
-        m_record_slots[m_nrecords].is_inlined = false;
+        m_record_slots[m_nrecords].set_inlined(false);
         m_iovecs.emplace_back(static_cast<void*>(record.data_ptr), record.size);
         m_oob_data_pos += record.size;
     }
@@ -95,8 +95,9 @@ const iovec_array& LogGroup::finish() {
 }
 
 crc32_t LogGroup::compute_crc() {
-    crc32_t crc = crc32_ieee(init_crc32, static_cast<const unsigned char*>(m_iovecs[0].iov_base) + sizeof(log_group_header),
-                             m_iovecs[0].iov_len - sizeof(log_group_header));
+    crc32_t crc {
+        crc32_ieee(init_crc32, static_cast< const unsigned char* >(m_iovecs[0].iov_base) + sizeof(log_group_header),
+                   m_iovecs[0].iov_len - sizeof(log_group_header))};
     for (size_t i{1}; i < m_iovecs.size(); ++i) {
         crc = crc32_ieee(crc, static_cast<const unsigned char*>(m_iovecs[i].iov_base), m_iovecs[i].iov_len);
     }

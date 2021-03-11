@@ -34,6 +34,7 @@ typedef boost::intrusive_ptr< HomeStoreBase > HomeStoreBaseSafePtr;
 class HomeStoreBase {
 private:
     sisl::atomic_counter< uint64_t > m_usage_counter{0};
+    std::shared_ptr< sds_logging::logger_t > m_periodic_logger;
     static HomeStoreBaseSafePtr s_instance;
 
 public:
@@ -47,6 +48,8 @@ public:
     static void reset_instance() { s_instance.reset(); }
     static HomeStoreBase* instance() { return s_instance.get(); }
     static HomeStoreBaseSafePtr safe_instance() { return s_instance; }
+    static std::shared_ptr< spdlog::logger >& periodic_logger() { return instance()->m_periodic_logger; }
+
     virtual data_blkstore_t* get_data_blkstore() const = 0;
     virtual void attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr >* cur_icp_map,
                                         std::map< boost::uuids::uuid, indx_cp_ptr >* new_icp_map, hs_cp* cur_hcp,

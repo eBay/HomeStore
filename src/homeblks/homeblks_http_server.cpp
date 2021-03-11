@@ -1,8 +1,16 @@
+#include <chrono>
+#include <csignal>
+#include <cstdint>
+#include <sstream>
+#include <thread>
+
+#include <nlohmann/json.hpp>
+
+#include "engine/common/homestore_config.hpp"
+
+#include "homeblks_config.hpp"
 #include "homeblks_http_server.hpp"
 #include "home_blks.hpp"
-#include "engine/common/homestore_config.hpp"
-#include "homeblks_config.hpp"
-#include <nlohmann/json.hpp>
 
 namespace homestore {
 HomeBlksHttpServer* HomeBlksHttpServer::pThis(sisl::HttpCallData cd) { return (HomeBlksHttpServer*)cd->cookie(); }
@@ -140,8 +148,8 @@ void HomeBlksHttpServer::reload_dynamic_config(sisl::HttpCallData cd) {
         fmt::format("All config reloaded, is app restarted {}\n", (restart_needed ? "true" : "false")));
     if (restart_needed) {
         LOGINFO("Restarting HomeBlks because of config change which needed a restart");
-        usleep(1000);
-        raise(SIGTERM);
+        std::this_thread::sleep_for(std::chrono::microseconds{1000});
+        std::raise(SIGTERM);
     }
 }
 

@@ -32,12 +32,15 @@ void test_append(benchmark::State& state) {
     std::cout << "Counter = " << counter << "\n";
 }
 
-[[nodiscard]] static std::shared_ptr< iomgr::ioMgr > start_homestore(const uint32_t ndevices, const uint64_t dev_size, const uint32_t nthreads) {
+[[nodiscard]] static std::shared_ptr< iomgr::ioMgr > start_homestore(const uint32_t ndevices, const uint64_t dev_size,
+                                                                     const uint32_t nthreads) {
     std::vector< dev_info > device_info;
-    std::mutex start_mutex;
-    std::condition_variable cv;
-    bool inited{false};
+    // these should be static so that they stay in scope in the lambda in case function ends before lambda completes
+    static std::mutex start_mutex;
+    static std::condition_variable cv;
+    static bool inited;
 
+    inited = false;
     LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
     for (uint32_t i{0}; i < ndevices; ++i) {
         const std::string fpath{"/tmp/" + std::to_string(i + 1)};
@@ -61,14 +64,15 @@ void test_append(benchmark::State& state) {
     params.app_mem_size = app_mem_size;
     params.devices = device_info;
     params.iomgr = iomgr_obj;
-    params.init_done_cb = [&](std::error_condition err, const out_params& params) {
+    params.init_done_cb = [&iomgr_obj, &tl_start_mutex = start_mutex, &tl_cv = cv,
+                           &tl_inited = inited](std::error_condition err, const out_params& params) {
         iomgr_obj->start();
         LOGINFO("HomeBlks Init completed");
         {
-            std::unique_lock< std::mutex > lk{start_mutex};
-            inited = true;
+            std::unique_lock< std::mutex > lk{tl_start_mutex};
+            tl_inited = true;
         }
-        cv.notify_all();
+        tl_cv.notify_one();
     };
     params.vol_mounted_cb = [](const VolumePtr& vol_obj, vol_state state) {};
     params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
@@ -77,7 +81,7 @@ void test_append(benchmark::State& state) {
 
     {
         std::unique_lock< std::mutex > lk{start_mutex};
-        cv.wait(lk, [&] { return inited; });
+        cv.wait(lk, [] { return inited; });
     }
     return iomgr_obj;
 }
@@ -85,7 +89,7 @@ void test_append(benchmark::State& state) {
 static void on_append_completion(const logdev_key lkey, void* const ctx) {
     s_log_keys.push_back(lkey);
     LOGINFO("Append completed with log_idx = {} offset = {}", lkey.idx, lkey.dev_offset);
-    if (first_offset == ~static_cast<uint64_t>(0)) { first_offset = lkey.dev_offset; }
+    if (first_offset == ~static_cast< uint64_t >(0)) { first_offset = lkey.dev_offset; }
 }
 
 static void on_log_found(const logdev_key lkey, const log_buffer buf) {

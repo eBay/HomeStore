@@ -468,31 +468,32 @@ void HomeBlks::print_node(const VolumePtr& vol, uint64_t blkid, bool chksum) {
     vol->print_node(blkid);
 }
 
-bool HomeBlks::shutdown(const bool force) {
+bool HomeBlks::shutdown(bool force) {
+    // this should be static so that it stays in scope in the lambda in case function ends before lambda completes
     static std::mutex stop_mutex;
     static std::condition_variable cv;
-    bool status = false;
-    bool done = false;
+    static bool status;
+    static bool done;
 
-    auto hb = HomeBlks::safe_instance();
-    done = !hb->trigger_shutdown(
-        [&](bool is_success) {
+    status = false;
+    done = false;
+    auto hb{HomeBlks::safe_instance()};
+    const bool wait{hb->trigger_shutdown(
+        [](bool is_success) {
             LOGINFO("Completed the shutdown of HomeBlks with success ? {}", is_success);
             {
-                std::unique_lock< std::mutex > lk(stop_mutex);
+                std::unique_lock< std::mutex > lk{stop_mutex};
                 status = is_success;
                 done = true;
             }
-            cv.notify_all();
+            cv.notify_one();
         },
-        force);
+        force)};
 
-    {
-        // Wait for the shutdown completion.
-        std::unique_lock< std::mutex > lk(stop_mutex);
-        if (!done) {
-            cv.wait(lk, [&] { return done; });
-        }
+    // Wait for the shutdown completion.
+    if (wait) {
+        std::unique_lock< std::mutex > lk{stop_mutex};
+        cv.wait(lk, [] { return done; });
     }
     HomeStoreBase::reset_instance();
     return status;
@@ -583,6 +584,8 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     home_log_store_mgr.stop();
     meta_blk_mgr->stop();
     this->close_devices();
+
+    // stop io
     iomanager.default_drive_interface()->detach_end_of_batch_cb();
     iomanager.stop_io_loop();
 

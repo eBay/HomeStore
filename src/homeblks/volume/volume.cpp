@@ -6,8 +6,10 @@
 /* volume file */
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <fstream>
 #include <iterator>
+#include <thread>
 
 #include <fds/utils.hpp>
 
@@ -479,7 +481,7 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
 #ifdef _PRERELEASE
                 if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_comp_delay_us")) {
                     LOGINFO("delaying completion in volume for {} us", flip_ret.get());
-                    usleep(flip_ret.get());
+                    std::this_thread::sleep_for(std::chrono::microseconds{flip_ret.get()});
                 }
 #endif
                 THIS_VOL_LOG(TRACE, volume, vreq, "IO DONE");

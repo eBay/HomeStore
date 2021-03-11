@@ -43,8 +43,7 @@ public:
         homestore::dev_info temp_info;
         temp_info.dev_names = "file_load_gen";
         device_info.push_back(temp_info);
-
-        std::ofstream ofs(temp_info.dev_names.c_str(), std::ios::binary | std::ios::out);
+        std::ofstream ofs(temp_info.dev_names, std::ios::binary | std::ios::out);
         std::filesystem::path p = temp_info.dev_names.c_str();
         std::filesystem::resize_file(p, DISK_MAX_SIZE); // set the file size
 

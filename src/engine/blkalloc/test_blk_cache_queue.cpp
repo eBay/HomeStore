@@ -15,13 +15,13 @@
 #include <gtest/gtest.h>
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT;
+THREAD_BUFFER_INIT
 
 using namespace homestore;
 
 std::unique_ptr< BlkAllocMetrics > g_metrics;
 
-struct BlkCacheQueueTest : public testing::Test {
+struct BlkCacheQueueTest : public ::testing::Test {
 protected:
     std::unique_ptr< FreeBlkCacheQueue > m_fb_cache;
     SlabCacheConfig m_cfg;
@@ -263,7 +263,7 @@ TEST_F(BlkCacheQueueTest, join_from_multiple_levels) {
 
 SDS_OPTIONS_ENABLE(logging)
 int main(int argc, char* argv[]) {
-    testing::InitGoogleTest(&argc, argv);
+    ::testing::InitGoogleTest(&argc, argv);
     SDS_OPTIONS_LOAD(argc, argv, logging)
     sds_logging::SetLogger("test_blkalloc");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");

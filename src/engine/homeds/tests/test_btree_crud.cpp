@@ -18,8 +18,8 @@
 #include "common/homestore_header.hpp"
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT;
-RCU_REGISTER_INIT;
+THREAD_BUFFER_INIT
+RCU_REGISTER_INIT
 
 #define MAX_CACHE_SIZE 2 * 1024 * 1024 * 1024
 using namespace std;
@@ -270,7 +270,7 @@ struct SimpleKeyComparator {
 //#define NTHREADS 4
 #define NTHREADS 1
 
-struct BtreeCrudTest : public testing::Test {
+struct BtreeCrudTest : public ::testing::Test {
 protected:
     TestBtreeDeclType* m_bt;
     std::array< TestSimpleKey*, TOTAL_ENTRIES > m_entries;
@@ -449,6 +449,6 @@ int main(int argc, char* argv[]) {
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
     // setup_devices(2);
-    testing::InitGoogleTest(&argc, argv);
+    ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

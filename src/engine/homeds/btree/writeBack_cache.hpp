@@ -192,26 +192,35 @@ public:
         static std::once_flag flag1;
         std::call_once(
             flag1, ([]() {
-                for (int32_t i{0}; i < HS_DYNAMIC_CONFIG(generic.cache_flush_threads); ++i) {
-                    bool thread_initialized{false};
-                    std::condition_variable cv;
-                    std::mutex cv_m;
+                // these should be static so that they stay in scope in the lambda in case function ends before lambda
+                // completes
+                const size_t flush_threads{static_cast< size_t >(HS_DYNAMIC_CONFIG(generic.cache_flush_threads))};
+                static std::vector< uint8_t > threads_initialized(flush_threads, 0x00);
+                static std::vector< std::condition_variable > cvs(flush_threads);
+                static std::vector< std::mutex > cvs_m(flush_threads);
+                auto initialized_itr{std::begin(threads_initialized)};
+                auto cv_itr{std::begin(cvs)};
+                auto cv_m_itr{std::begin(cvs_m)};
+                for (size_t i{0}; i < flush_threads; ++i, ++initialized_itr, ++cv_itr, ++cv_m_itr) {
                     // XXX : there can be race condition when message is sent before run_io_loop is called
-                    auto sthread = sisl::named_thread("wbcache_flusher", [i, &cv, &cv_m, &thread_initialized]() {
-                        iomanager.run_io_loop(false, nullptr, ([i, &cv, &cv_m, &thread_initialized](bool is_started) {
-                                                  if (is_started) {
-                                                      wb_cache_t::m_thread_ids.push_back(iomanager.iothread_self());
-                                                      {
-                                                          std::unique_lock< std::mutex > lk(cv_m);
-                                                          thread_initialized = true;
+                    auto sthread{sisl::named_thread(
+                        "wbcache_flusher",
+                        [i, &tl_cv = *cv_itr, &tl_cv_m = *cv_m_itr, &tl_thread_initialized = *initialized_itr]() {
+                            iomanager.run_io_loop(false, nullptr,
+                                                  ([i, &tl_cv, &tl_cv_m, &tl_thread_initialized](bool is_started) {
+                                                      if (is_started) {
+                                                          wb_cache_t::m_thread_ids.push_back(iomanager.iothread_self());
+                                                          {
+                                                              std::unique_lock< std::mutex > lk{tl_cv_m};
+                                                              tl_thread_initialized = 0x01;
+                                                          }
+                                                          tl_cv.notify_one();
                                                       }
-                                                      cv.notify_one();
-                                                  }
-                                              }));
-                    });
+                                                  }));
+                        })};
                     {
-                        std::unique_lock< std::mutex > lk(cv_m);
-                        cv.wait(lk, [&thread_initialized]() { return thread_initialized; });
+                        std::unique_lock< std::mutex > lk{*cv_m_itr};
+                        cv_itr->wait(lk, [&initialized_itr]() { return *initialized_itr == 0x01; });
                     }
                     sthread.detach();
                 }
@@ -372,9 +381,9 @@ public:
         }
 
         ++s_cbq_id;
-        CP_LOG(DEBUG, bcp->cp_id,
-               "[fcbq_id={}] Starting btree flush buffers dirty_buf_count={} wb_req_cnt={} flush_cb_size={}", s_cbq_id,
-               m_dirty_buf_cnt[cp_id].get(), m_req_list[cp_id]->size(), flush_buffer_q.size());
+        CP_PERIODIC_LOG(DEBUG, bcp->cp_id,
+                        "[fcbq_id={}] Starting btree flush buffers dirty_buf_count={} wb_req_cnt={} flush_cb_size={}",
+                        s_cbq_id, m_dirty_buf_cnt[cp_id].get(), m_req_list[cp_id]->size(), flush_buffer_q.size());
 
         auto shared_this = this->shared_from_this();
         queue_flush_buffers([shared_this, cp_id, it = m_req_list[cp_id]->begin(true /* latest */),
@@ -392,9 +401,10 @@ public:
                     shared_this->m_blkstore->write(wb_req->bid, wb_req->m_mem, 0, wb_req, false);
                     ++write_count;
                     if (wb_cache_outstanding_cnt > HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt)) {
-                        CP_LOG(DEBUG, bt_cp_id,
-                               "[fcbq_id={}] Flush throttled: flushed_cnt={} outstanding_io_cnt={} dep_wait_cnt={}",
-                               cbq_id, write_count, wb_cache_outstanding_cnt, dep_wait_count);
+                        CP_PERIODIC_LOG(
+                            DEBUG, bt_cp_id,
+                            "[fcbq_id={}] Flush throttled: flushed_cnt={} outstanding_io_cnt={} dep_wait_cnt={}",
+                            cbq_id, write_count, wb_cache_outstanding_cnt, dep_wait_count);
                         if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
                         return false;
                     }
@@ -404,8 +414,9 @@ public:
             }
 
             req_list->clear(); // Freeup the req list which frees the all wb_req memory
-            CP_LOG(DEBUG, bt_cp_id, "[fcbq_id={}] Flush finish: flushed_cnt={} outstanding_io_cnt={} dep_wait_cnt={}",
-                   cbq_id, write_count, wb_cache_outstanding_cnt, dep_wait_count);
+            CP_PERIODIC_LOG(DEBUG, bt_cp_id,
+                            "[fcbq_id={}] Flush finish: flushed_cnt={} outstanding_io_cnt={} dep_wait_cnt={}", cbq_id,
+                            write_count, wb_cache_outstanding_cnt, dep_wait_count);
 
             if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
             return true;
@@ -427,8 +438,9 @@ public:
         auto shared_this = this->shared_from_this();
         ++s_cbq_id;
 
-        CP_LOG(DEBUG, wb_req->bcp->cp_id, "[wbreq_id={}] completed: depq_cnt={} dirty_buf_cnt={} outstanding_io_cnt={}",
-               wb_req->request_id, wb_req->req_q.size(), m_dirty_buf_cnt[cp_id].get() - 1, wb_cache_outstanding_cnt);
+        CP_PERIODIC_LOG(
+            DEBUG, wb_req->bcp->cp_id, "[wbreq_id={}] completed: depq_cnt={} dirty_buf_cnt={} outstanding_io_cnt={}",
+            wb_req->request_id, wb_req->req_q.size(), m_dirty_buf_cnt[cp_id].get() - 1, wb_cache_outstanding_cnt);
 
         /* Scan if it has any req depending on this req */
         if (!wb_req->req_q.empty()) {
@@ -452,11 +464,11 @@ public:
                         }
 #endif
                         if (wb_cache_outstanding_cnt > HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt)) {
-                            CP_LOG(DEBUG, wb_req->bcp->cp_id,
-                                   "[fcbq_id={}] [wbreq_id={}] dependentq flush throttled: flushed_cnt={} "
-                                   "remain_depq_cnt={} outstanding_io_cnt={} dep_wait_cnt={}",
-                                   cbq_id, wb_req->request_id, write_count, wb_req->req_q.size(),
-                                   wb_cache_outstanding_cnt, dep_wait_count);
+                            CP_PERIODIC_LOG(DEBUG, wb_req->bcp->cp_id,
+                                            "[fcbq_id={}] [wbreq_id={}] dependentq flush throttled: flushed_cnt={} "
+                                            "remain_depq_cnt={} outstanding_io_cnt={} dep_wait_cnt={}",
+                                            cbq_id, wb_req->request_id, write_count, wb_req->req_q.size(),
+                                            wb_cache_outstanding_cnt, dep_wait_count);
                             if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
                             return false;
                         }
@@ -465,17 +477,17 @@ public:
                     }
                 }
 
-                CP_LOG(DEBUG, wb_req->bcp->cp_id,
-                       "[fcbq_id={}] [wbreq_id={}] dependentq flushed: flushed_cnt={} outstanding_io_cnt={} "
-                       "dep_wait_cnt={}",
-                       cbq_id, wb_req->request_id, write_count, wb_cache_outstanding_cnt, dep_wait_count);
+                CP_PERIODIC_LOG(DEBUG, wb_req->bcp->cp_id,
+                                "[fcbq_id={}] [wbreq_id={}] dependentq flushed: flushed_cnt={} outstanding_io_cnt={} "
+                                "dep_wait_cnt={}",
+                                cbq_id, wb_req->request_id, write_count, wb_cache_outstanding_cnt, dep_wait_count);
                 if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
                 return true;
             });
         } else if (wb_cache_outstanding_cnt < HS_DYNAMIC_CONFIG(generic.cache_min_throttle_cnt)) {
-            CP_LOG(DEBUG, wb_req->bcp->cp_id,
-                   "[wbreq_id={}] no depq entries: outstanding_io_cnt={} flush next leading reqs", wb_req->request_id,
-                   wb_cache_outstanding_cnt);
+            CP_PERIODIC_LOG(DEBUG, wb_req->bcp->cp_id,
+                            "[wbreq_id={}] no depq entries: outstanding_io_cnt={} flush next leading reqs",
+                            wb_req->request_id, wb_cache_outstanding_cnt);
             queue_flush_buffers(nullptr);
         }
         wb_req->bn->req[cp_id] = nullptr;

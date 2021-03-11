@@ -54,10 +54,15 @@ struct serialized_log_record {
     logstore_seq_num_t store_seq_num; // Seqnum by the log store
     logstore_id_t store_id;           // ID of the store this log is associated with
 
+    void set_inlined(const bool inlined) { is_inlined = static_cast< uint32_t >(inlined ? 0x1 : 0x0); }
+    [[nodiscard]] bool get_inlined() const { return ((is_inlined == static_cast< uint32_t >(0x1)) ? true : false); }
+
     serialized_log_record() = default;
-    serialized_log_record(const uint32_t s, const uint32_t o, const uint32_t is, const logstore_seq_num_t sq,
+    serialized_log_record(const uint32_t s, const uint32_t o, const bool inlined, const logstore_seq_num_t sq,
                           const logstore_id_t id) :
-            size{s}, offset{o}, is_inlined{is}, store_seq_num{sq}, store_id(id) {}
+            size{s}, offset{o}, store_seq_num{sq}, store_id{id} {
+        set_inlined(inlined);
+    }
     serialized_log_record(const serialized_log_record&) = default;
     serialized_log_record& operator=(const serialized_log_record&) = default;
     serialized_log_record(serialized_log_record&&) noexcept = default;
@@ -143,7 +148,7 @@ struct log_group_header {
         const serialized_log_record* const lr{nth_record(start_log_idx - idx)};
 
         sisl::blob b{};
-        b.bytes = const_cast< uint8_t* >(lr->is_inlined ? inline_area() : oob_area()) + lr->offset;
+        b.bytes = const_cast< uint8_t* >(lr->get_inlined() ? inline_area() : oob_area()) + lr->offset;
         b.size = lr->size;
         return b;
     }
@@ -639,8 +644,9 @@ public:
      * @brief : truncate up to input log id;
      *
      * @param key : the key containing log id that needs to be truncate up to;
+     * @return number of records to truncate
      */
-    void truncate(const logdev_key& key);
+    [[nodiscard]] uint64_t truncate(const logdev_key& key);
     void meta_blk_found(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
 
     void update_store_meta(const logstore_id_t idx, const logstore_meta& meta, const bool persist_now);

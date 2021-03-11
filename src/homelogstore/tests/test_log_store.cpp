@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iterator>
@@ -35,8 +36,8 @@
 #include <gtest/gtest.h>
 
 using namespace homestore;
-THREAD_BUFFER_INIT;
-RCU_REGISTER_INIT;
+THREAD_BUFFER_INIT
+RCU_REGISTER_INIT
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 struct test_log_data {
@@ -48,9 +49,10 @@ struct test_log_data {
     ~test_log_data() = default;
 
     uint32_t size;
-    uint8_t data[1]; // 0 size arrays are illegal according to C++ standard
 
-    uint32_t total_size() const { return sizeof(test_log_data) + size - 1; }
+    uint8_t* get_data() { return reinterpret_cast< uint8_t* >(this) + sizeof(test_log_data); };
+    const uint8_t* get_data() const { return reinterpret_cast< const uint8_t* >(this) + sizeof(test_log_data); }
+    uint32_t total_size() const { return sizeof(test_log_data) + size; }
 };
 
 typedef std::function< void(logstore_seq_num_t, logdev_key) > test_log_store_comp_cb_t;
@@ -169,7 +171,7 @@ public:
                             EXPECT_EQ(tl->total_size(), b.size());
                             validate_data(tl, seq_num);
                         }
-                        idx++;
+                        ++idx;
                         hole_entry = m_hole_lsns.rlock()->find(idx);
                         if ((hole_entry != hole_end) && !hole_entry->second) { // Hole entry exists and not filled
                             hole_expected = true;
@@ -289,7 +291,7 @@ public:
         validate_data(tl, lsn);
 
         // Count only the ones which are after truncated, because recovery could receive even truncated lsns
-        (lsn > m_truncated_upto_lsn) ? m_n_recovered_lsns++ : m_n_recovered_truncated_lsns++;
+        (lsn > m_truncated_upto_lsn) ? ++m_n_recovered_lsns : ++m_n_recovered_truncated_lsns;
     }
 
     void truncate(const logstore_seq_num_t lsn) {
@@ -312,13 +314,13 @@ public:
         std::uniform_int_distribution< uint32_t > gen_data_size{0, max_data_size - 1};
         if (gen_percentage(re) < static_cast< uint8_t >(10)) {
             // 10% of data is dma'ble aligned boundary
-            const auto alloc_sz{sisl::round_up(gen_data_size(re) + (sizeof(test_log_data) - 1), dma_boundary)};
+            const auto alloc_sz{sisl::round_up(gen_data_size(re) + sizeof(test_log_data), dma_boundary)};
             raw_buf = iomanager.iobuf_alloc(dma_boundary, alloc_sz);
-            sz = alloc_sz - (sizeof(test_log_data) - 1);
+            sz = alloc_sz - sizeof(test_log_data);
             io_memory = true;
         } else {
             sz = gen_data_size(re);
-            raw_buf = static_cast< uint8_t* >(std::malloc((sizeof(test_log_data) - 1) + sz));
+            raw_buf = static_cast< uint8_t* >(std::malloc(sizeof(test_log_data) + sz));
             io_memory = false;
         }
 
@@ -328,14 +330,14 @@ public:
         assert(reinterpret_cast< uint8_t* >(d) == raw_buf);
 
         const char c{static_cast< char >((lsn % 94) + 33)};
-        std::memset(static_cast< void* >(d->data), c, static_cast< size_t >(d->size));
+        std::memset(static_cast< void* >(d->get_data()), c, static_cast< size_t >(d->size));
         return d;
     }
 
 private:
     void validate_data(const test_log_data* const d, const logstore_seq_num_t lsn) {
         const char c{static_cast< char >((lsn % 94) + 33)};
-        const std::string actual{reinterpret_cast< const char* >(&d->data[0]), static_cast< size_t >(d->size)};
+        const std::string actual{reinterpret_cast< const char* >(d->get_data()), static_cast< size_t >(d->size)};
         const std::string expected(static_cast< size_t >(d->size),
                                    c); // needs to be () because of same reason as vector
         ASSERT_EQ(actual, expected) << "Data mismatch for LSN=" << m_log_store->get_store_id() << ":" << lsn
@@ -354,8 +356,6 @@ private:
     int64_t m_n_recovered_truncated_lsns = 0;
     static constexpr uint32_t max_data_size = 1024;
 };
-
-#define sample_db SampleDB::instance()
 
 class SampleDB {
 private:
@@ -378,24 +378,21 @@ public:
     void start_homestore(const uint32_t ndevices, const uint64_t dev_size, uint32_t nthreads,
                          const uint32_t n_log_stores, const bool restart = false) {
         if (restart) {
-            shutdown();
+            shutdown(ndevices, false);
             std::this_thread::sleep_for(std::chrono::seconds{5});
         }
 
         std::vector< dev_info > device_info;
-        std::mutex start_mutex;
-        std::condition_variable cv;
-        bool inited{false};
+        // these should be static so that they stay in scope in the lambda in case function ends before lambda completes
+        static std::mutex start_mutex;
+        static std::condition_variable cv;
+        static bool inited;
 
+        inited = false;
         LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
+        if (!restart) init_files(ndevices, dev_size);
         for (uint32_t i{0}; i < ndevices; ++i) {
-            const std::string fpath{"/tmp/log_store_dev_" + std::to_string(i + 1)};
-            if (!restart) {
-                std::ofstream ofs{fpath, std::ios::binary | std::ios::out};
-                ofs.seekp(dev_size - 1);
-                ofs.write("", 1);
-                ofs.close();
-            }
+            const std::string fpath{s_fpath_root + std::to_string(i + 1)};
             device_info.push_back({fpath});
         }
 
@@ -425,21 +422,24 @@ public:
         params.min_virtual_page_size = 4096;
         params.app_mem_size = app_mem_size;
         params.devices = device_info;
-        params.init_done_cb = [&](std::error_condition err, const out_params& params) {
+        params.init_done_cb = [&tl_cv = cv, &tl_start_mutex = start_mutex,
+                               &tl_inited = inited](std::error_condition err, const out_params& params) {
             LOGINFO("HomeBlks Init completed");
             {
-                std::unique_lock< std::mutex > lk{start_mutex};
-                inited = true;
+                std::unique_lock< std::mutex > lk{tl_start_mutex};
+                tl_inited = true;
             }
-            cv.notify_all();
+            tl_cv.notify_one();
         };
         params.vol_mounted_cb = [](const VolumePtr& vol_obj, vol_state state) {};
         params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
         params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
         VolInterface::init(params, restart);
 
-        std::unique_lock< std::mutex > lk{start_mutex};
-        cv.wait(lk, [&] { return inited; });
+        {
+            std::unique_lock< std::mutex > lk{start_mutex};
+            cv.wait(lk, [] { return inited; });
+        }
 
         if (!restart) {
             for (std::remove_const_t< decltype(n_log_stores) > i{0}; i < n_log_stores; ++i) {
@@ -449,11 +449,31 @@ public:
         }
     }
 
-    void shutdown() {
+    void shutdown(const uint32_t ndevices, const bool cleanup = true) {
         VolInterface::shutdown();
-
-        // m_log_store_clients.clear();
         iomanager.stop();
+
+        if (cleanup) { 
+            m_log_store_clients.clear();
+            remove_files(ndevices);
+        }
+    }
+
+    void init_files(const uint32_t ndevices, const uint64_t dev_size) {
+        remove_files(ndevices);
+        for (uint32_t i{0}; i < ndevices; ++i) {
+            const std::string fpath{s_fpath_root + std::to_string(i + 1)};
+            std::ofstream ofs{fpath, std::ios::binary | std::ios::out | std::ios::trunc};
+            std::filesystem::resize_file(fpath, dev_size);
+            ofs.close();
+        }
+    }
+
+    void remove_files(const uint32_t ndevices) {
+        for (uint32_t i{0}; i < ndevices; ++i) {
+            const std::string fpath{s_fpath_root + std::to_string(i + 1)};
+            if (std::filesystem::exists(fpath)) { std::filesystem::remove(fpath); }
+        }
     }
 
     void on_log_insert_completion(const logstore_seq_num_t lsn, const logdev_key ld_key) {
@@ -476,13 +496,18 @@ public:
 
     [[nodiscard]] logid_t highest_log_idx() const { return m_highest_log_idx.load(); }
 
+private:
+    const static std::string s_fpath_root;
     std::function< void() > m_on_schedule_io_cb;
     test_log_store_comp_cb_t m_io_closure;
     std::vector< std::unique_ptr< SampleLogStoreClient > > m_log_store_clients;
     std::atomic< logid_t > m_highest_log_idx = -1;
 };
 
-class LogStoreTest : public testing::Test {
+const std::string SampleDB::s_fpath_root{"/tmp/log_store_dev_"};
+
+
+class LogStoreTest : public ::testing::Test {
 public:
     LogStoreTest() = default;
     LogStoreTest(const LogStoreTest&) = delete;
@@ -492,18 +517,18 @@ public:
     virtual ~LogStoreTest() override = default;
 
 protected:
-    virtual void SetUp() override{};
+    virtual void SetUp() override {};
     virtual void TearDown() override{};
 
     void init(const uint64_t n_total_records, const std::vector< std::pair< size_t, int > >& inp_freqs = {}) {
         // m_nrecords_waiting_to_issue = std::lround(n_total_records / _batch_size) * _batch_size;
         m_nrecords_waiting_to_issue = n_total_records;
         m_nrecords_waiting_to_complete = 0;
-        sample_db.m_on_schedule_io_cb = std::bind(&LogStoreTest::do_insert, this);
-        sample_db.m_io_closure =
+        SampleDB::instance().m_on_schedule_io_cb = std::bind(&LogStoreTest::do_insert, this);
+        SampleDB::instance().m_io_closure =
             std::bind(&LogStoreTest::on_insert_completion, this, std::placeholders::_1, std::placeholders::_2);
 
-        for (auto& lsc : sample_db.m_log_store_clients) {
+        for (auto& lsc : SampleDB::instance().m_log_store_clients) {
             lsc->reset_recovery();
         }
         set_store_workload_freq(inp_freqs); // Equal distribution by default
@@ -514,7 +539,7 @@ protected:
         m_q_depth = q_depth;
         m_holes_per_batch = holes_per_batch;
         iomanager.run_on(iomgr::thread_regex::all_io, [](io_thread_addr_t addr) {
-            if (sample_db.m_on_schedule_io_cb) sample_db.m_on_schedule_io_cb();
+            if (SampleDB::instance().m_on_schedule_io_cb) SampleDB::instance().m_on_schedule_io_cb();
         });
     }
 
@@ -545,13 +570,13 @@ protected:
     }
 
     void read_validate(const bool expect_all_completed = false) {
-        for (const auto& lsc : sample_db.m_log_store_clients) {
+        for (const auto& lsc : SampleDB::instance().m_log_store_clients) {
             lsc->read_validate(expect_all_completed);
         }
     }
 
     void iterate_validate(const bool expect_all_completed = false) {
-        for (const auto& lsc : sample_db.m_log_store_clients) {
+        for (const auto& lsc : SampleDB::instance().m_log_store_clients) {
             lsc->iterate_validate(expect_all_completed);
         }
     }
@@ -561,7 +586,7 @@ protected:
         // must use operator= construction as copy construction results in error
         nlohmann::json json_dump = home_log_store_mgr.dump_log_store(dump_req);
         LOGINFO("Printing json dump of all logstores. \n {}", json_dump.dump());
-        EXPECT_EQ(sample_db.m_log_store_clients.size(), json_dump.size());
+        EXPECT_EQ(SampleDB::instance().m_log_store_clients.size(), json_dump.size());
         int64_t count{0};
         for (const auto& logdump : json_dump) {
             const auto itr{logdump.find("log_records")};
@@ -571,7 +596,7 @@ protected:
     }
     void dump_validate_filter(const logstore_id_t id, const logstore_seq_num_t start_seq,
                               const logstore_seq_num_t end_seq, const bool print_content = false) {
-        for (const auto& lsc : sample_db.m_log_store_clients) {
+        for (const auto& lsc : SampleDB::instance().m_log_store_clients) {
             if (lsc->m_log_store->get_store_id() == id) {
                 homestore::log_dump_req dump_req{homestore::log_dump_req()};
 
@@ -614,27 +639,28 @@ protected:
     }
 
     void fill_hole_and_validate() {
-        for (size_t i{0}; i < sample_db.m_log_store_clients.size(); ++i) {
-            const auto& lsc{sample_db.m_log_store_clients[i]};
+        for (size_t i{0}; i < SampleDB::instance().m_log_store_clients.size(); ++i) {
+            const auto& lsc{SampleDB::instance().m_log_store_clients[i]};
             lsc->fill_hole_and_validate();
         }
     }
 
     void truncate_validate(const bool is_parallel_to_write = false) {
-        for (size_t i{0}; i < sample_db.m_log_store_clients.size(); ++i) {
-            const auto& lsc{sample_db.m_log_store_clients[i]};
+        for (size_t i{0}; i < SampleDB::instance().m_log_store_clients.size(); ++i) {
+            const auto& lsc{SampleDB::instance().m_log_store_clients[i]};
 
             // lsc->truncate(lsc->m_cur_lsn.load() - 1);
             lsc->truncate(lsc->m_log_store->get_contiguous_completed_seq_num(0));
             lsc->read_validate();
         }
 
+        bool failed{false};
         home_log_store_mgr.device_truncate(
-            [this, is_parallel_to_write](const logdev_key& trunc_loc) {
+            [this, is_parallel_to_write, &failed](const logdev_key& trunc_loc) {
                 bool expect_forward_progress{true};
                 uint32_t n_fully_truncated{0};
                 if (is_parallel_to_write) {
-                    for (const auto& lsc : sample_db.m_log_store_clients) {
+                    for (const auto& lsc : SampleDB::instance().m_log_store_clients) {
                         if (lsc->has_all_lsns_truncated()) ++n_fully_truncated;
                     }
 
@@ -649,7 +675,8 @@ protected:
                     if (trunc_loc == logdev_key::out_of_bound_ld_key()) {
                         LOGINFO("No forward progress for device truncation yet.");
                     } else {
-                        // Validate the truncation is actually moving forw1ard
+                        // Validate the truncation is actually moving forward
+                        if (trunc_loc.idx <= m_truncate_log_idx.load()) { failed = true; }
                         ASSERT_GT(trunc_loc.idx, m_truncate_log_idx.load());
                         m_truncate_log_idx.store(trunc_loc.idx);
                     }
@@ -658,6 +685,7 @@ protected:
                 }
             },
             true /* wait_till_done */);
+        ASSERT_FALSE(failed);
 
         const auto upto_count{find_garbage_upto(m_truncate_log_idx.load())};
         std::remove_const_t< decltype(upto_count) > count{0};
@@ -668,19 +696,26 @@ protected:
     }
 
     void recovery_validate() {
-        for (size_t i{0}; i < sample_db.m_log_store_clients.size(); ++i) {
-            const auto& lsc{sample_db.m_log_store_clients[i]};
+        for (size_t i{0}; i < SampleDB::instance().m_log_store_clients.size(); ++i) {
+            const auto& lsc{SampleDB::instance().m_log_store_clients[i]};
             lsc->recovery_validate();
+        }
+    }
+
+    void reset_recovery() {
+        for (size_t i{0}; i < SampleDB::instance().m_log_store_clients.size(); ++i) {
+            const auto& lsc{SampleDB::instance().m_log_store_clients[i]};
+            lsc->reset_recovery();
         }
     }
 
     void validate_num_stores() {
         std::vector< logstore_id_t > reg_ids, garbage_ids;
         home_log_store_mgr.logdev().get_registered_store_ids(reg_ids, garbage_ids);
-        ASSERT_EQ(sample_db.m_log_store_clients.size(), reg_ids.size() - garbage_ids.size());
+        ASSERT_EQ(SampleDB::instance().m_log_store_clients.size(), reg_ids.size() - garbage_ids.size());
 
         size_t exp_garbage_store_count{0};
-        auto upto_count{find_garbage_upto(sample_db.highest_log_idx() + 1)};
+        auto upto_count{find_garbage_upto(SampleDB::instance().highest_log_idx() + 1)};
         decltype(upto_count) count{0};
         for (auto it{std::begin(m_garbage_stores_upto)}; count < upto_count; ++it, ++count) {
             exp_garbage_store_count += it->second;
@@ -690,13 +725,13 @@ protected:
 
     void delete_validate(const uint32_t store_id) {
         validate_num_stores();
-        const auto l_idx{sample_db.highest_log_idx()};
+        const auto l_idx{SampleDB::instance().highest_log_idx()};
         if (m_garbage_stores_upto.find(l_idx) != m_garbage_stores_upto.end()) {
             m_garbage_stores_upto[l_idx]++;
         } else {
             m_garbage_stores_upto.insert(std::pair< logid_t, uint32_t >(l_idx, 1u));
         }
-        [[maybe_unused]] const bool result{sample_db.delete_log_store(store_id)};
+        [[maybe_unused]] const bool result{SampleDB::instance().delete_log_store(store_id)};
         validate_num_stores();
     }
 
@@ -712,10 +747,10 @@ protected:
         }
 
         ASSERT_LE(cum_freqs, 100) << "Input error, frequency pct cannot exceed 100";
-        int default_freq = (100 - cum_freqs) / (sample_db.m_log_store_clients.size() - inp_freqs.size());
+        int default_freq = (100 - cum_freqs) / (SampleDB::instance().m_log_store_clients.size() - inp_freqs.size());
 
         size_t d{0};
-        for (size_t s{0}; s < sample_db.m_log_store_clients.size(); ++s) {
+        for (size_t s{0}; s < SampleDB::instance().m_log_store_clients.size(); ++s) {
             const auto upto{store_freqs[s].has_value() ? *store_freqs[s] : default_freq};
             for (std::remove_const_t< decltype(upto) > i{0}; i < upto; ++i) {
                 m_store_distribution[d++] = s;
@@ -724,7 +759,7 @@ protected:
         }
         // Fill in the last reminder with last store
         while (d < 100) {
-            m_store_distribution[d++] = sample_db.m_log_store_clients.size() - 1;
+            m_store_distribution[d++] = SampleDB::instance().m_log_store_clients.size() - 1;
         }
     }
 
@@ -733,7 +768,7 @@ private:
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine re{rd()};
         std::uniform_int_distribution< size_t > gen_log_store{0, 99};
-        return sample_db.m_log_store_clients[m_store_distribution[gen_log_store(re)]].get();
+        return SampleDB::instance().m_log_store_clients[m_store_distribution[gen_log_store(re)]].get();
     }
 
 protected:
@@ -751,199 +786,223 @@ protected:
 };
 
 TEST_F(LogStoreTest, BurstRandInsertThenTruncate) {
-    LOGINFO("Step 1: Prepare num records and create reqd log stores");
-    this->init(SDS_OPTIONS["num_records"].as< uint32_t >());
+    const auto num_records{SDS_OPTIONS["num_records"].as< uint32_t >()};
+    const auto iterations{SDS_OPTIONS["iterations"].as< uint32_t >()};
 
-    LOGINFO("Step 2: Inserting randomly within a batch of 10 in parallel fashion as a burst");
-    this->kickstart_inserts(10, 5000);
+    for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
+        LOGINFO("Iteration {}", iteration);
+        LOGINFO("Step 1: Prepare num records and create reqd log stores");
+        this->init(num_records);
 
-    LOGINFO("Step 3: Wait for the Inserts to complete");
-    this->wait_for_inserts();
+        LOGINFO("Step 2: Inserting randomly within a batch of 10 in parallel fashion as a burst");
+        this->kickstart_inserts(10, 5000);
 
-    LOGINFO("Step 4: Read all the inserts one by one for each log store to validate if what is written is valid");
-    this->read_validate(true);
+        LOGINFO("Step 3: Wait for the Inserts to complete");
+        this->wait_for_inserts();
 
-    LOGINFO("Step 4.1: Iterate all inserts one by one for each log store and validate if what is written is valid");
-    this->iterate_validate(true);
+        LOGINFO("Step 4: Read all the inserts one by one for each log store to validate if what is written is valid");
+        this->read_validate(true);
 
-    const uint64_t running_time{SDS_OPTIONS["longevity_tests"].as< uint64_t >()};
-    // Exclude dump logstore test from longevity tests
-    if (running_time == 0) {
-        LOGINFO("Step 4.2: Read all inserts and dump all logstore records into json");
-        this->dump_validate(SDS_OPTIONS["num_records"].as< uint32_t >());
+        LOGINFO("Step 4.1: Iterate all inserts one by one for each log store and validate if what is written is valid");
+        this->iterate_validate(true);
 
-        LOGINFO("Step 4.2: Read some specific interval/filter of seq number in one logstore and dump it into json");
-        this->dump_validate_filter(0, 10, 100, true);
+        // Exclude dump from further iterations
+        if (iteration == 0) {
+            LOGINFO("Step 4.2: Read all inserts and dump all logstore records into json");
+            this->dump_validate(num_records);
+
+            LOGINFO("Step 4.2: Read some specific interval/filter of seq number in one logstore and dump it into json");
+            this->dump_validate_filter(0, 10, 100, true);
+        }
+
+        LOGINFO("Step 5: Truncate all of the inserts one log store at a time and validate log dev truncation is marked "
+                "correctly and also validate if all data prior to truncation return exception");
+        this->truncate_validate();
     }
-
-    LOGINFO("Step 5: Truncate all of the inserts one log store at a time and validate log dev truncation is marked "
-            "correctly and also validate if all data prior to truncation return exception");
-    this->truncate_validate();
 }
 
 TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
-    LOGINFO("Step 1: Reinit the num records to start sequential write test");
-    this->init(SDS_OPTIONS["num_records"].as< uint32_t >());
+    const auto num_records{SDS_OPTIONS["num_records"].as< uint32_t >()};
+    const auto iterations{SDS_OPTIONS["iterations"].as< uint32_t >()};
 
-    LOGINFO("Step 2: Issue sequential inserts as a burst");
-    this->kickstart_inserts(1, 5000);
+    for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
+        LOGINFO("Iteration {}", iteration);
+        LOGINFO("Step 1: Reinit the num records to start sequential write test");
+        this->init(num_records);
 
-    uint16_t trunc_attempt{0};
-    LOGINFO("Step 3: In parallel to writes issue truncation upto completion");
-    do {
-        std::this_thread::sleep_for(std::chrono::microseconds(1000));
-        this->truncate_validate(true /* is_parallel_to_write */);
-        ++trunc_attempt;
-        ASSERT_LT(trunc_attempt, static_cast< uint16_t >(30));
-        LOGINFO("Still pending completions = {}, pending issued = {}", this->m_nrecords_waiting_to_complete.load(),
-                m_nrecords_waiting_to_issue.load());
-    } while (((this->m_nrecords_waiting_to_complete != 0) || (m_nrecords_waiting_to_issue != 0)));
-    LOGINFO("Truncation has been issued and validated for {} times before all records are completely truncated",
-            trunc_attempt);
+        LOGINFO("Step 2: Issue sequential inserts as a burst");
+        this->kickstart_inserts(1, 5000);
 
-    LOGINFO("Step 4: Wait for the Inserts to complete");
-    this->wait_for_inserts();
+        uint16_t trunc_attempt{0};
+        LOGINFO("Step 3: In parallel to writes issue truncation upto completion");
+        do {
+            std::this_thread::sleep_for(std::chrono::microseconds(1000));
+            this->truncate_validate(true /* is_parallel_to_write */);
+            ++trunc_attempt;
+            ASSERT_LT(trunc_attempt, static_cast< uint16_t >(30));
+            LOGINFO("Still pending completions = {}, pending issued = {}", this->m_nrecords_waiting_to_complete.load(),
+                    m_nrecords_waiting_to_issue.load());
+        } while (((this->m_nrecords_waiting_to_complete != 0) || (m_nrecords_waiting_to_issue != 0)));
+        LOGINFO("Truncation has been issued and validated for {} times before all records are completely truncated",
+                trunc_attempt);
 
-    LOGINFO("Step 5: Do a final truncation and validate");
-    this->truncate_validate();
+        LOGINFO("Step 4: Wait for the Inserts to complete");
+        this->wait_for_inserts();
+
+        LOGINFO("Step 5: Do a final truncation and validate");
+        this->truncate_validate();
+    }
 }
 
 TEST_F(LogStoreTest, RandInsertsWithHoles) {
-    LOGINFO("Step 1: Reinit the num records to start sequential write test");
-    this->init(SDS_OPTIONS["num_records"].as< uint32_t >());
+    const auto num_records{SDS_OPTIONS["num_records"].as< uint32_t >()};
+    const auto iterations{SDS_OPTIONS["iterations"].as< uint32_t >()};
 
-    LOGINFO("Step 2: Issue randomy within a batch of 10 with 1 hole per batch");
-    this->kickstart_inserts(10, 5000, 1);
+    for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
+        LOGINFO("Iteration {}", iteration);
+        LOGINFO("Step 1: Reinit the num records to start sequential write test");
+        this->init(num_records);
 
-    LOGINFO("Step 3: Wait for the Inserts to complete");
-    this->wait_for_inserts();
+        LOGINFO("Step 2: Issue randomy within a batch of 10 with 1 hole per batch");
+        this->kickstart_inserts(10, 5000, 1);
 
-    LOGINFO("Step 4: Read all the inserts one by one for each log store to validate if what is written is valid");
-    this->read_validate(true);
+        LOGINFO("Step 3: Wait for the Inserts to complete");
+        this->wait_for_inserts();
 
-    LOGINFO("Step 4.1: Iterate all inserts one by one for each log store and validate if what is written is valid");
-    this->iterate_validate(true);
+        LOGINFO("Step 4: Read all the inserts one by one for each log store to validate if what is written is valid");
+        this->read_validate(true);
 
-    LOGINFO("Step 5: Fill the hole and do validation if they are indeed filled");
-    this->fill_hole_and_validate();
+        LOGINFO("Step 4.1: Iterate all inserts one by one for each log store and validate if what is written is valid");
+        this->iterate_validate(true);
 
-    LOGINFO("Step 6: Do a final truncation and validate");
-    this->truncate_validate();
+        LOGINFO("Step 5: Fill the hole and do validation if they are indeed filled");
+        this->fill_hole_and_validate();
+
+        LOGINFO("Step 6: Do a final truncation and validate");
+        this->truncate_validate();
+    }
 }
 
 TEST_F(LogStoreTest, VarRateInsertThenTruncate) {
     const auto nrecords{SDS_OPTIONS["num_records"].as< uint32_t >()};
-    LOGINFO("Step 1: Reinit the num records={} and insert them as batch of 10 with qdepth=500 and wait for all records "
+    const auto iterations{SDS_OPTIONS["iterations"].as< uint32_t >()};
+
+    for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
+        LOGINFO("Iteration {}", iteration);
+        LOGINFO(
+            "Step 1: Reinit the num records={} and insert them as batch of 10 with qdepth=500 and wait for all records "
             "to be inserted and then validate them",
             nrecords);
-    this->init(nrecords);
-    this->kickstart_inserts(10, 500);
-    this->wait_for_inserts();
-    this->read_validate(true);
-    this->iterate_validate(true);
-    this->truncate_validate();
-
-    LOGINFO("Step 2: Stop the workload on stores 0,1 and write num records={} on other stores, wait for their "
-            "completion, validate it is readable, then truncate - all in a loop for 3 times",
-            nrecords);
-    for (auto i{0u}; i < 3u; ++i) {
-        LOGINFO("Step 2.{}.1: Write and wait for {}", i + 1, nrecords);
-        this->init(nrecords, {{0, 0}, {1, 0}});
+        this->init(nrecords);
         this->kickstart_inserts(10, 500);
         this->wait_for_inserts();
         this->read_validate(true);
         this->iterate_validate(true);
-
-        LOGINFO("Step 2.{}.2: Do a truncation on all log stores and validate", i + 1);
         this->truncate_validate();
-    }
 
-    LOGINFO("Step 3: Change data rate on stores 0,1 but still slower than other stores, write num_records={} wait for "
+        LOGINFO("Step 2: Stop the workload on stores 0,1 and write num records={} on other stores, wait for their "
+                "completion, validate it is readable, then truncate - all in a loop for 3 times",
+                nrecords);
+        for (auto i{0u}; i < 3u; ++i) {
+            LOGINFO("Step 2.{}.1: Write and wait for {}", i + 1, nrecords);
+            this->init(nrecords, {{0, 0}, {1, 0}});
+            this->kickstart_inserts(10, 500);
+            this->wait_for_inserts();
+            this->read_validate(true);
+            this->iterate_validate(true);
+
+            LOGINFO("Step 2.{}.2: Do a truncation on all log stores and validate", i + 1);
+            this->truncate_validate();
+        }
+
+        LOGINFO(
+            "Step 3: Change data rate on stores 0,1 but still slower than other stores, write num_records={} wait for "
             "their completion, validate it is readable, then truncate - all in a loop for 3 times",
             nrecords);
-    for (auto i{0u}; i < 3u; ++i) {
-        LOGINFO("Step 3.{}.1: Write and wait for {}", i + 1, nrecords);
-        this->init(nrecords, {{0, 5}, {1, 20}});
-        this->kickstart_inserts(10, 500);
+        for (auto i{0u}; i < 3u; ++i) {
+            LOGINFO("Step 3.{}.1: Write and wait for {}", i + 1, nrecords);
+            this->init(nrecords, {{0, 5}, {1, 20}});
+            this->kickstart_inserts(10, 500);
+            this->wait_for_inserts();
+            this->read_validate(true);
+            this->iterate_validate(true);
+            LOGINFO("Step 3.{}.2: Do a truncation on all log stores and validate", i + 1);
+            this->truncate_validate();
+        }
+
+        LOGINFO("Step 4: Write the data with similar variable data rate, but truncate run in parallel to writes");
+        this->init(nrecords, {{0, 20}, {1, 20}});
+        this->kickstart_inserts(10, 10);
+
+        for (auto i{0u}; i < 5u; ++i) {
+            std::this_thread::sleep_for(std::chrono::microseconds{300});
+            LOGINFO("Step 4.{}: Truncating ith time with 200us delay between each truncation", i + 1);
+            this->truncate_validate(true);
+        }
+
         this->wait_for_inserts();
         this->read_validate(true);
         this->iterate_validate(true);
-        LOGINFO("Step 3.{}.2: Do a truncation on all log stores and validate", i + 1);
         this->truncate_validate();
     }
-
-    LOGINFO("Step 4: Write the data with similar variable data rate, but truncate run in parallel to writes");
-    this->init(nrecords, {{0, 20}, {1, 20}});
-    this->kickstart_inserts(10, 10);
-
-    for (auto i{0u}; i < 5u; ++i) {
-        std::this_thread::sleep_for(std::chrono::microseconds{300});
-        LOGINFO("Step 4.{}: Truncating ith time with 200us delay between each truncation", i + 1);
-        this->truncate_validate(true);
-    }
-
-    this->wait_for_inserts();
-    this->read_validate(true);
-    this->iterate_validate(true);
-    this->truncate_validate();
 }
 
 TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
-    LOGINFO("Step 1: Reinit the num records to start sequential write test");
-    this->init(SDS_OPTIONS["num_records"].as< uint32_t >());
+    const auto num_devs{SDS_OPTIONS["num_devs"].as< uint32_t >()}; // num devices
+    const auto dev_size_bytes{SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024};
+    const auto num_records{SDS_OPTIONS["num_records"].as< uint32_t >()};
+    const auto num_threads{SDS_OPTIONS["num_threads"].as< uint32_t >()};
+    const auto num_logstores{SDS_OPTIONS["num_logstores"].as< uint32_t >()};
+    // somewhere between 4-15 iterations depending on if run with other tests or not this will fail
+    const auto iterations{std::min(SDS_OPTIONS["iterations"].as< uint32_t >(), static_cast<uint32_t>(1))};
 
-    LOGINFO("Step 2: Issue sequential inserts with q depth of 30");
-    this->kickstart_inserts(1, 30);
+    for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
+        LOGINFO("Iteration {}", iteration);
+        LOGINFO("Step 1: Reinit the num records to start sequential write test");
+        this->init(num_records);
 
-    LOGINFO("Step 3: Wait for the Inserts to complete");
-    this->wait_for_inserts();
+        LOGINFO("Step 2: Issue sequential inserts with q depth of 30");
+        this->kickstart_inserts(1, 30);
 
-    LOGINFO("Step 4: Read all the inserts one by one for each log store to validate if what is written is valid");
-    this->read_validate(true);
+        LOGINFO("Step 3: Wait for the Inserts to complete");
+        this->wait_for_inserts();
 
-    LOGINFO("Step 4.1: Iterate all inserts one by one for each log store and validate if what is written is valid");
-    this->iterate_validate(true);
+        LOGINFO("Step 4: Read all the inserts one by one for each log store to validate if what is written is valid");
+        this->read_validate(true);
 
-    LOGINFO("Step 5: Restart homestore");
-    sample_db.start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),                  // num devices
-                              SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024, // device sizes
-                              SDS_OPTIONS["num_threads"].as< uint32_t >(),               // num threads
-                              SDS_OPTIONS["num_logstores"].as< uint32_t >(),             // num log stores
-                              true                                                       // restart
-    );
-    this->recovery_validate();
-    this->init(SDS_OPTIONS["num_records"].as< uint32_t >());
+        LOGINFO("Step 4.1: Iterate all inserts one by one for each log store and validate if what is written is valid");
+        this->iterate_validate(true);
 
-    LOGINFO("Step 6: Restart homestore again to validate recovery on consecutive restarts");
-    sample_db.start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),                  // num devices
-                              SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024, // device sizes
-                              SDS_OPTIONS["num_threads"].as< uint32_t >(),               // num threads
-                              SDS_OPTIONS["num_logstores"].as< uint32_t >(),             // num log stores
-                              true                                                       // restart
-    );
-    this->recovery_validate();
-    this->init(SDS_OPTIONS["num_records"].as< uint32_t >());
+        LOGINFO("Step 5: Restart homestore");
+        SampleDB::instance().start_homestore(num_devs, dev_size_bytes, num_threads, num_logstores, true /* restart */);
+        this->recovery_validate();
+        this->init(num_records);
 
-    LOGINFO("Step 7: Issue more sequential inserts after restarts with q depth of 15");
-    this->kickstart_inserts(1, 15);
+        LOGINFO("Step 6: Restart homestore again to validate recovery on consecutive restarts");
+        SampleDB::instance().start_homestore(num_devs, dev_size_bytes, num_threads, num_logstores, true /* restart */);
+        this->recovery_validate();
+        this->init(num_records);
 
-    LOGINFO("Step 8: Wait for the previous Inserts to complete");
-    this->wait_for_inserts();
+        LOGINFO("Step 7: Issue more sequential inserts after restarts with q depth of 15");
+        this->kickstart_inserts(1, 15);
 
-    LOGINFO("Step 9: Read all the inserts one by one for each log store to validate if what is written is valid");
-    this->read_validate(true);
+        LOGINFO("Step 8: Wait for the previous Inserts to complete");
+        this->wait_for_inserts();
 
-    LOGINFO("Step 9.1: Iterate all inserts one by one for each log store and validate if what is written is valid");
-    this->iterate_validate(true);
+        LOGINFO("Step 9: Read all the inserts one by one for each log store to validate if what is written is valid");
+        this->read_validate(true);
 
-    LOGINFO("Step 10: Restart homestore again to validate recovery of inserted data after restarts");
-    sample_db.start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),                  // num devices
-                              SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024, // device sizes
-                              SDS_OPTIONS["num_threads"].as< uint32_t >(),               // num threads
-                              SDS_OPTIONS["num_logstores"].as< uint32_t >(),             // num log stores
-                              true                                                       // restart
-    );
-    this->recovery_validate();
+        LOGINFO("Step 9.1: Iterate all inserts one by one for each log store and validate if what is written is valid");
+        this->iterate_validate(true);
+
+        LOGINFO("Step 10: Restart homestore again to validate recovery after inserts");
+        SampleDB::instance().start_homestore(num_devs, dev_size_bytes, num_threads, num_logstores, true /* restart */);
+        this->recovery_validate();
+        this->init(num_records);
+
+        LOGINFO("Step 11: Truncate");
+        this->truncate_validate();
+    }
 }
 
 TEST_F(LogStoreTest, DeleteMultipleLogStores) {
@@ -984,36 +1043,42 @@ TEST_F(LogStoreTest, DeleteMultipleLogStores) {
 }
 
 TEST_F(LogStoreTest, WriteSyncThenRead) {
-    std::shared_ptr< homestore::HomeLogStore > tmp_log_store{homestore::home_log_store_mgr.create_new_log_store(false)};
-    const auto store_id{tmp_log_store->get_store_id()};
-    LOGINFO("Created new log store -> id {}", store_id);
-    const unsigned count{10};
-    for (unsigned i{0}; i < count; ++i) {
+    const auto iterations{SDS_OPTIONS["iterations"].as< uint32_t >()};
 
-        bool io_memory{false};
-        auto* const d{SampleLogStoreClient::prepare_data(i, io_memory)};
-        const bool succ{tmp_log_store->write_sync(i, {reinterpret_cast< uint8_t* >(d), d->total_size(), false})};
-        EXPECT_TRUE(succ);
-        LOGINFO("Written sync data for LSN -> {}", i);
+    for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
+        LOGINFO("Iteration {}", iteration);
+        std::shared_ptr< homestore::HomeLogStore > tmp_log_store{
+            homestore::home_log_store_mgr.create_new_log_store(false)};
+        const auto store_id{tmp_log_store->get_store_id()};
+        LOGINFO("Created new log store -> id {}", store_id);
+        const unsigned count{10};
+        for (unsigned i{0}; i < count; ++i) {
 
-        if (io_memory) {
-            iomanager.iobuf_free(reinterpret_cast< uint8_t* >(d));
-        } else {
-            std::free(static_cast< void* >(d));
+            bool io_memory{false};
+            auto* const d{SampleLogStoreClient::prepare_data(i, io_memory)};
+            const bool succ{tmp_log_store->write_sync(i, {reinterpret_cast< uint8_t* >(d), d->total_size(), false})};
+            EXPECT_TRUE(succ);
+            LOGINFO("Written sync data for LSN -> {}", i);
+
+            if (io_memory) {
+                iomanager.iobuf_free(reinterpret_cast< uint8_t* >(d));
+            } else {
+                std::free(static_cast< void* >(d));
+            }
+
+            auto b{tmp_log_store->read_sync(i)};
+            auto* const tl{reinterpret_cast< test_log_data* >(b.bytes())};
+            ASSERT_EQ(tl->total_size(), b.size()) << "Size Mismatch for lsn=" << store_id << ":" << i;
+            const char c{static_cast< char >((i % 94) + 33)};
+            const std::string actual{reinterpret_cast< const char* >(tl->get_data()), static_cast< size_t >(tl->size)};
+            const std::string expected(static_cast< size_t >(tl->size),
+                                       c); // needs to be () because of same reason as vector
+            ASSERT_EQ(actual, expected) << "Data mismatch for LSN=" << store_id << ":" << i << " size=" << tl->size;
         }
 
-        auto b{tmp_log_store->read_sync(i)};
-        auto* const tl{reinterpret_cast< test_log_data* >(b.bytes())};
-        ASSERT_EQ(tl->total_size(), b.size()) << "Size Mismatch for lsn=" << store_id << ":" << i;
-        const char c{static_cast< char >((i % 94) + 33)};
-        const std::string actual{reinterpret_cast< const char* >(&tl->data[0]), static_cast< size_t >(tl->size)};
-        const std::string expected(static_cast< size_t >(tl->size),
-                                   c); // needs to be () because of same reason as vector
-        ASSERT_EQ(actual, expected) << "Data mismatch for LSN=" << store_id << ":" << i << " size=" << tl->size;
+        homestore::home_log_store_mgr.remove_log_store(store_id);
+        LOGINFO("Remove logstore -> i {}", store_id);
     }
-
-    homestore::home_log_store_mgr.remove_log_store(store_id);
-    LOGINFO("Remove logstore -> i {}", store_id);
 }
 
 SDS_OPTIONS_ENABLE(logging, test_log_store)
@@ -1033,8 +1098,8 @@ SDS_OPTION_GROUP(test_log_store,
                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
                   cxxopts::value< int32_t >()->default_value("5002"), "port"),
                  (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
-                 (longevity_tests, "", "longevity_tests", "Run tests for a longer time",
-                  ::cxxopts::value< uint64_t >()->default_value("0"), "time in seconds"));
+                 (iterations, "", "iterations", "Iterations", ::cxxopts::value< uint32_t >()->default_value("1"),
+                  "the number of iterations to run each test"));
 
 #if 0
 void parse() {
@@ -1066,8 +1131,9 @@ void parse() {
 #endif
 
 int main(int argc, char* argv[]) {
-    testing::InitGoogleTest(&argc, argv);
-    SDS_OPTIONS_LOAD(argc, argv, logging, test_log_store);
+    int parsed_argc{argc};
+    ::testing::InitGoogleTest(&parsed_argc, argv);
+    SDS_OPTIONS_LOAD(parsed_argc, argv, logging, test_log_store);
     sds_logging::SetLogger("test_log_store");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
 
@@ -1076,56 +1142,11 @@ int main(int argc, char* argv[]) {
         LOGINFO("Log store test needs minimum 4 log stores for testing, setting them to 4");
         n_log_stores = 4u;
     }
-    const uint64_t running_time{SDS_OPTIONS["longevity_tests"].as< uint64_t >()};
-    int ret{0};
-    sample_db.start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                              SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
-                              SDS_OPTIONS["num_threads"].as< uint32_t >(), n_log_stores);
-    if (running_time == 0) {
-        ret = RUN_ALL_TESTS();
-    } else {
-        Timer tmr;
-        LOGINFO("Running longevity test for {} seconds.", running_time);
-        ::testing::GTEST_FLAG(filter) = "-LogStoreTest.DeleteMultipleLogStores:LogStoreTest.WriteSyncThenRead";
-        uint16_t count{0};
-        while ((tmr.elapsed() < running_time) && (ret == 0)) {
-            ret = RUN_ALL_TESTS();
-            ++count;
-            LOGINFO("Running longevity test, iteration {}", count);
-        }
-        if (ret != 0) {
-            LOGERROR("longevity test failed, ran for {} seconds, number of iterations {}", tmr.elapsed(), count);
-        } else {
-            LOGINFO("longevity test ended, ran for {} seconds, number of iterations {}", tmr.elapsed(), count);
-        }
-    }
 
-    sample_db.shutdown();
+    SampleDB::instance().start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
+                                         SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
+                                         SDS_OPTIONS["num_threads"].as< uint32_t >(), n_log_stores);
+    const int ret{RUN_ALL_TESTS()};
+    SampleDB::instance().shutdown(SDS_OPTIONS["num_devs"].as< uint32_t >());
     return ret;
-
-#if 0
-    home_log_store_mgr.start(true);
-    auto ls = home_log_store_mgr.create_new_log_store();
-
-    std::atomic< int64_t > pending_count = 0;
-    std::mutex _mtx;
-    std::condition_variable _cv;
-    std::vector< std::string > s;
-    s.reserve(200);
-
-    for (auto i = 0; i < 195; i++) {
-        ++pending_count;
-        s.push_back(std::to_string(i));
-        ls->write_async(i, {(uint8_t*)s.back().c_str(), (uint32_t)s.back().size() + 1}, nullptr,
-                        [&pending_count, &_cv](logstore_seq_num_t seq_num, bool success, void* ctx) {
-                            LOGINFO("Completed write of seq_num {} ", seq_num);
-                            if (--pending_count == 0) { _cv.notify_all(); }
-                        });
-    }
-
-    {
-        std::unique_lock< std::mutex > lk(_mtx);
-        _cv.wait(lk, [&] { return (pending_count == 0); });
-    }
-#endif
 }

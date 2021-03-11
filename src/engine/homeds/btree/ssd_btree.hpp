@@ -44,11 +44,11 @@ public:
         return std::make_unique< SSDBtreeStore >(btree, cfg);
     }
 
-    BtreeStore(ssd_btree_t* btree, BtreeConfig& cfg) : m_btree(btree), m_cfg(cfg) {
+    BtreeStore(ssd_btree_t* btree, BtreeConfig& cfg) : m_btree(btree), m_btree_cfg(cfg) {
         m_wb_cache = std::make_shared< wb_cache_t >(cfg.blkstore, cfg.align_size,
                                                     bind_this(SSDBtreeStore::cp_done_store, 1), cfg.trigger_cp_cb);
         m_node_size = cfg.get_node_size();
-        m_cfg.set_node_area_size(m_node_size - sizeof(LeafPhysicalNode));
+        m_btree_cfg.set_node_area_size(m_node_size - sizeof(LeafPhysicalNode));
         m_first_cp = btree_cp_ptr(new (btree_cp));
     }
 
@@ -117,7 +117,7 @@ public:
             // reserve this blk unconditionally as root node never changes
             BlkId bid(sb.root_node);
             m_blkstore->reserve_blk(bid);
-            HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "{}", cp_sb->to_string());
+            THIS_BT_CP_LOG(INFO, m_first_cp->cp_id, "btree_cp_info=[{}]", cp_sb->to_string());
         } else {
             m_journal = HomeLogStoreMgr::instance().create_new_log_store(true /* append_mode */);
             sb.journal_id = get_journal_id_store();
@@ -134,7 +134,7 @@ public:
         bool is_replayed = false;
 
         auto cp_id = jentry->cp_id;
-        HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "seqnum {} entry cp cnt {}", seqnum, cp_id);
+        THIS_BT_LOG(INFO, replay, , "seqnum={} entry cp_id={}", seqnum, cp_id);
         if (jentry->cp_id > cp_sb.cp_id) {
             // Entry is not replayed yet
             if (jentry->op == journal_op::BTREE_CREATE) {
@@ -146,8 +146,7 @@ public:
             is_replayed = true;
         }
 
-        HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "blkalloc cp_id {} seqid {}", cp_sb.blkalloc_cp_id,
-                      seqnum);
+        THIS_BT_LOG(INFO, replay, , "blkalloc cp_id={} seqid={}", cp_sb.blkalloc_cp_id, seqnum);
         if (jentry->cp_id > cp_sb.blkalloc_cp_id) {
             /* get all the free blks and allocated blks and set it in a bitmap. These entries are not persisted yet in a
              * bitmap.
@@ -172,15 +171,14 @@ public:
     }
 
     void replay_done(std::shared_ptr< HomeLogStore > store, [[maybe_unused]] logstore_seq_num_t upto_lsn) {
-        HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "Replay of btree completed and replayed {} entries",
-                      m_replayed_count);
+        THIS_BT_LOG(INFO, replay, , "Replay of btree completed and replayed {} entries", m_replayed_count);
         m_is_recovering = false;
         auto& cp_sb = m_btree->get_last_cp_cb();
         if (cp_sb.cp_id == -1 && m_replayed_count == 0) {
             m_btree->create_btree_replay(nullptr, m_first_cp);
             m_first_cp->btree_size.fetch_add(1);
         }
-        HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "size {}", m_first_cp->btree_size.load());
+        THIS_BT_LOG(INFO, replay, , "Btree size after replay {}", m_first_cp->btree_size.load());
         m_btree->replay_done(m_first_cp);
     }
 
@@ -210,7 +208,7 @@ public:
     static void truncate(SSDBtreeStore* store, const btree_cp_ptr& bcp) { store->truncate_store(bcp); }
 
     void truncate_store(const btree_cp_ptr& bcp) {
-        HS_SUBMOD_LOG(INFO, base, , "btree", m_cfg.get_name(), "truncate seq id {}", bcp->end_seqid);
+        THIS_BT_CP_LOG(INFO, bcp->cp_id, "truncate seq_id={}", bcp->end_seqid);
         m_journal->truncate(bcp->end_seqid);
     }
 
@@ -266,10 +264,10 @@ public:
         assert(b.size == store->get_node_size());
         if (is_leaf) {
             bnodeid_t bid = blkid.to_integer();
-            auto n = new (b.bytes) VariantNode< LeafNodeType, K, V >(&bid, true, store->m_cfg);
+            auto n = new (b.bytes) VariantNode< LeafNodeType, K, V >(&bid, true, store->m_btree_cfg);
         } else {
             bnodeid_t bid = blkid.to_integer();
-            auto n = new (b.bytes) VariantNode< InteriorNodeType, K, V >(&bid, true, store->m_cfg);
+            auto n = new (b.bytes) VariantNode< InteriorNodeType, K, V >(&bid, true, store->m_btree_cfg);
         }
         boost::intrusive_ptr< SSDBtreeNode > new_node = boost::static_pointer_cast< SSDBtreeNode >(safe_buf);
 
@@ -509,7 +507,7 @@ private:
 private:
     ssd_btree_t* m_btree;
     std::shared_ptr< HomeLogStore > m_journal;
-    BtreeConfig m_cfg;
+    BtreeConfig m_btree_cfg;
     uint32_t m_node_size;
     std::shared_ptr< wb_cache_t > m_wb_cache;
     btree_cp_ptr m_first_cp;

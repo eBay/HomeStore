@@ -9,8 +9,8 @@
 
 SDS_LOGGING_INIT(iomgr)
 SDS_OPTIONS_ENABLE(logging)
-THREAD_BUFFER_INIT;
-RCU_REGISTER_INIT;
+THREAD_BUFFER_INIT
+RCU_REGISTER_INIT
 
 using namespace homeds::loadgen;
 
@@ -87,7 +87,7 @@ TEST_F(IOMgrExecTest, TEST2) {
 
 int main(int argc, char* argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, logging)
-    testing::InitGoogleTest(&argc, argv);
+   ::testing::InitGoogleTest(&argc, argv);
     sds_logging::SetLogger("test_iomgr_exec");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 

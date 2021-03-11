@@ -12,8 +12,8 @@
 #include <utility/thread_buffer.hpp>
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT;
-RCU_REGISTER_INIT;
+THREAD_BUFFER_INIT
+RCU_REGISTER_INIT
 
 using namespace std;
 

@@ -16,7 +16,7 @@ extern "C" {
 }
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT;
+THREAD_BUFFER_INIT
 
 using namespace std;
 using namespace homestore;
@@ -62,7 +62,7 @@ private:
     MapTest* m_test_store;
 };
 
-struct MapTest : public testing::Test {
+struct MapTest : public ::testing::Test {
 protected:
     std::condition_variable m_cv;
     std::mutex m_cv_mtx;
@@ -169,7 +169,7 @@ public:
         dev_info temp_info;
         temp_info.dev_names = "file101";
         device_info.push_back(temp_info);
-        std::ofstream ofs(temp_info.dev_names.c_str(), std::ios::binary | std::ios::out);
+        std::ofstream ofs(temp_info.dev_names, std::ios::binary | std::ios::out);
         ofs.seekp(MAX_SIZE - 1);
         ofs.write("", 1);
 
@@ -434,6 +434,6 @@ int main(int argc, char* argv[]) {
     num_ios = SDS_OPTIONS["num_ios"].as< uint64_t >();
     num_ios /= 2; // half read half write
 
-    testing::InitGoogleTest(&argc, argv);
+    ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
