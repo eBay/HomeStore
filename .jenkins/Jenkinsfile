@@ -173,14 +173,14 @@ pipeline {
                         post {
                             success {
                                 script {
-                                    sh "cd /root/.conan/data/homestore/"
+                                    sh "mv /root/.conan/data/homestore ."
                                     sh "find . -name *_log -print | xargs tar cif logs.tar"
                                 }
                                 archiveArtifacts artifacts: "logs.tar", fingerprint: true
                             }
                             failure {
                                 script {
-                                    sh "cd /root/.conan/data/homestore/"
+                                    sh "mv /root/.conan/data/homestore ."
                                     sh "find . -name *_log -print | xargs tar cif logs.tar"
                                 }
                                 archiveArtifacts artifacts: "logs.tar", fingerprint: true
