@@ -498,6 +498,7 @@ std::vector< std::pair< logstore_id_t, logstore_meta > > LogDevMetadata::load() 
     while (n < m_sb->num_stores) {
         if (logstore_meta::is_valid(smeta[idx])) {
             m_store_info.insert(idx);
+            m_id_reserver->reserve(idx);
             ret_list.push_back(std::make_pair<>(idx, smeta[idx]));
             ++n;
         }

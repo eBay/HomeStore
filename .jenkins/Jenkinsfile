@@ -172,7 +172,11 @@ pipeline {
                         }
                         post {
                             failure {
-                                archiveArtifacts artifacts: "logs/*", fingerprint: true
+                                script {
+                                    sh "mv /root/.conan/data/homestore ."
+                                    sh "find . -name *_log -print | xargs tar cif logs.tar"
+                                }
+                                archiveArtifacts artifacts: "logs.tar", fingerprint: true
                             }
                         }
                     }
