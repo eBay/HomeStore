@@ -171,13 +171,6 @@ pipeline {
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
                         }
                         post {
-                            success {
-                                script {
-                                    sh "mv /root/.conan/data/homestore ."
-                                    sh "find . -name *_log -print | xargs tar cif logs.tar"
-                                }
-                                archiveArtifacts artifacts: "logs.tar", fingerprint: true
-                            }
                             failure {
                                 script {
                                     sh "mv /root/.conan/data/homestore ."
