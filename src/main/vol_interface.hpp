@@ -39,10 +39,12 @@ struct cap_attrs {
     uint64_t used_metadata_size;
     uint64_t used_total_size;
     uint64_t initial_total_size;
+    uint64_t initial_total_data_meta_size;
     std::string to_string() {
         std::stringstream ss;
         ss << "used_data_size = " << used_data_size << ", used_metadata_size = " << used_metadata_size
-           << ", used_total_size = " << used_total_size << ", initial_total_size = " << initial_total_size;
+           << ", used_total_size = " << used_total_size << ", initial_total_size = " << initial_total_size
+           << ", initial_total_data_meta_size = " << initial_total_data_meta_size;
         return ss.str();
     }
 };

@@ -329,7 +329,6 @@ public:
         info->max_vol_blks = VolInterface::get_instance()->get_vol_capacity(vol_obj).initial_total_size /
             VolInterface::get_instance()->get_page_size(vol_obj);
         info->m_vol_bm = new homeds::Bitset(info->max_vol_blks);
-        ;
         info->cur_checkpoint = 0;
 
         assert(info->fd > 0);
@@ -983,7 +982,7 @@ public:
     }
 
     void delete_volumes() {
-        uint64_t tot_cap = VolInterface::get_instance()->get_system_capacity().initial_total_size;
+        uint64_t tot_cap = VolInterface::get_instance()->get_system_capacity().initial_total_data_meta_size;
         uint64_t used_cap = VolInterface::get_instance()->get_system_capacity().used_total_size;
         assert(used_cap <= tot_cap);
         for (uint64_t i = 0; i < vol_info.size(); ++i) {

@@ -158,7 +158,8 @@ cap_attrs HomeBlks::get_system_capacity() {
     cap.used_data_size = get_data_blkstore()->get_used_size();
     cap.used_metadata_size = get_metadata_blkstore()->get_used_size();
     cap.used_total_size = cap.used_data_size + cap.used_metadata_size;
-    cap.initial_total_size = get_data_blkstore()->get_size() + get_metadata_blkstore()->get_size();
+    cap.initial_total_data_meta_size = get_data_blkstore()->get_size() + get_metadata_blkstore()->get_size();
+    cap.initial_total_size = get_data_blkstore()->get_size();
     return cap;
 }
 
