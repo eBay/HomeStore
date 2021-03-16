@@ -103,7 +103,7 @@ def recovery_nightly(num_iteration=10):
         cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --pre_init_verify=false --abort=1 --flip=1 --remove_file=0 --verify_type=2"
         subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
         
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --pre_init_verify=false --abort=0 --flip=1 --remove_file=0i --verify_type=2"
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --pre_init_verify=false --abort=0 --flip=1 --remove_file=0 --verify_type=2"
         subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
 
         s = "recovery test iteration" + repr(i) + "passed" 
