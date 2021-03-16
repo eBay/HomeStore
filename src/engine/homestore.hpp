@@ -156,13 +156,17 @@ protected:
         if (first_time_boot) {
             create_data_blkstore(nullptr);
             create_index_blkstore(nullptr);
-            create_sb_blkstore(nullptr);
             create_logdev_blkstore(nullptr);
             create_meta_blkstore(nullptr);
         }
+        init_done(first_time_boot);
+    }
 
+    void init_done(bool first_time_boot) {
+        auto cnt = m_format_cnt.fetch_sub(1);
+        if (cnt != 1) { return; }
         m_dev_mgr->init_done();
-
+        meta_blk_mgr->start(m_meta_blk_store.get(), m_meta_sb_blob, first_time_boot);
         ResourceMgr::set_total_cap(m_dev_mgr->get_total_cap());
     }
 
@@ -225,6 +229,8 @@ protected:
             m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
                 m_dev_mgr.get(), m_cache.get(), size, RD_MODIFY_WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob),
                 HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "index", true);
+            ++m_format_cnt;
+            m_index_blk_store->format(([this](bool success) { init_done(true); }));
         } else {
             m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
                 m_dev_mgr.get(), m_cache.get(), vb, RD_MODIFY_WRITEBACK_CACHE,
@@ -284,8 +290,6 @@ protected:
     }
 
     void create_meta_blkstore(vdev_info_block* vb) {
-        sb_blkstore_blob* sb_blob = nullptr;
-        bool init = true;
         if (vb == nullptr) {
             struct blkstore_blob blob {};
             blob.type = blkstore_type::META_STORE;
@@ -294,6 +298,8 @@ protected:
             m_meta_blk_store = std::make_unique< meta_blkstore_t >(
                 m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
                 HS_STATIC_CONFIG(drive_attr.phys_page_size), "meta", false);
+            ++m_format_cnt;
+            m_meta_blk_store->format(([this](bool success) { init_done(true); }));
 
         } else {
             m_meta_blk_store = std::make_unique< meta_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU,
@@ -306,15 +312,13 @@ protected:
             }
 
             /* get the blkid of homestore super block */
-            sb_blob = (sb_blkstore_blob*)(&(vb->context_data));
-            if (!sb_blob->blkid.is_valid()) {
+            m_meta_sb_blob = (sb_blkstore_blob*)(&(vb->context_data));
+            if (!m_meta_sb_blob->blkid.is_valid()) {
                 LOGINFO("init was failed last time. Should retry it with init flag");
                 throw homestore::homestore_exception("init was failed last time. Should retry it with init",
                                                      homestore_error::init_failed);
             }
-            init = false;
         }
-        meta_blk_mgr->start(m_meta_blk_store.get(), sb_blob, init);
     }
 
     void create_logdev_blkstore(vdev_info_block* vb) {
@@ -327,6 +331,8 @@ protected:
                 m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
                 HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "logdev", false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::logdev(), std::placeholders::_1));
+            ++m_format_cnt;
+            m_logdev_blk_store->format(([this](bool success) { init_done(true); }));
         } else {
             m_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
                 m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU, HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size),
@@ -400,6 +406,8 @@ protected:
 private:
     uint64_t m_size_avail = 0;
     uint32_t m_data_pagesz = 0;
+    std::atomic< uint32_t > m_format_cnt = 1;
+    sb_blkstore_blob* m_meta_sb_blob = nullptr;
 };
 
 } // namespace homestore

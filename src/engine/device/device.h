@@ -392,6 +392,7 @@ public:
     void write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch = false);
     void writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
                 bool part_of_batch = false);
+    void write_zero(uint32_t size, uint64_t offset, uint8_t* cookie);
 
     void read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch = false);
     void readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
