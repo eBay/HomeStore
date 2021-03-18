@@ -70,7 +70,7 @@ using vdev_high_watermark_cb_t = std::function< void(void) >;
 struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     uint64_t request_id = 0;
     uint64_t version;
-    vdev_comp_cb_t cb;
+    vdev_comp_cb_t cb; // callback into vdev from static completion function. It is set for all the ops
     uint64_t size;
     std::error_condition err = no_error;
     bool is_read = false;
@@ -80,7 +80,7 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     Clock::time_point io_start_time;
     bool part_of_batch = false;
     bool format = false;
-    vdev_format_cb_t format_cb;
+    vdev_format_cb_t format_cb; // callback stored for format operation.
 
 #ifndef NDEBUG
     uint64_t dev_offset;
