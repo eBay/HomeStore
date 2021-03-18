@@ -369,6 +369,10 @@ ssize_t PhysicalDev::sync_writev(const iovec* iov, int iovcnt, uint32_t size, ui
     }
 }
 
+void PhysicalDev::write_zero(uint32_t size, uint64_t offset, uint8_t* cookie) {
+    drive_iface->write_zero(m_iodev.get(), size, offset, cookie);
+}
+
 ssize_t PhysicalDev::sync_read(char* data, uint32_t size, uint64_t offset) {
     try {
         HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));

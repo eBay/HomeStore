@@ -62,6 +62,7 @@ struct pdev_chunk_map {
 struct virtualdev_req;
 
 using vdev_comp_cb_t = std::function< void(const boost::intrusive_ptr< virtualdev_req >& req) >;
+using vdev_format_cb_t = std::function< void(bool success) >;
 using vdev_high_watermark_cb_t = std::function< void(void) >;
 
 #define to_vdev_req(req) boost::static_pointer_cast< virtualdev_req >(req)
@@ -69,7 +70,7 @@ using vdev_high_watermark_cb_t = std::function< void(void) >;
 struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     uint64_t request_id = 0;
     uint64_t version;
-    vdev_comp_cb_t cb;
+    vdev_comp_cb_t cb; // callback into vdev from static completion function. It is set for all the ops
     uint64_t size;
     std::error_condition err = no_error;
     bool is_read = false;
@@ -78,6 +79,8 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     PhysicalDevChunk* chunk;
     Clock::time_point io_start_time;
     bool part_of_batch = false;
+    bool format = false;
+    vdev_format_cb_t format_cb; // callback stored for format operation.
 
 #ifndef NDEBUG
     uint64_t dev_offset;
@@ -95,8 +98,7 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     // static boost::intrusive_ptr< virtualdev_req > make_request() {
     //    return boost::intrusive_ptr< virtualdev_req >(sisl::ObjectAllocator< virtualdev_req >::make_object());
     //}
-    // virtual void free_yourself() { sisl::ObjectAllocator< virtualdev_req >::deallocate(this); }
-    virtual void free_yourself() = 0;
+    virtual void free_yourself() { sisl::ObjectAllocator< virtualdev_req >::deallocate(this); }
     friend void intrusive_ptr_add_ref(virtualdev_req* req) { req->refcount.increment(1); }
     friend void intrusive_ptr_release(virtualdev_req* req) {
         if (req->refcount.decrement_testz()) { req->free_yourself(); }
@@ -129,13 +131,15 @@ private:
     if (homestore_flip->test_flip("io_read_comp_error_flip")) { vd_req->err = read_failed; }
 #endif
 
-    auto pdev = vd_req->chunk->get_physical_dev_mutable();
-    if (vd_req->err) {
-        COUNTER_INCREMENT_IF_ELSE(pdev->get_metrics(), vd_req->is_read, drive_read_errors, drive_write_errors, 1);
-        pdev->device_manager()->handle_error(pdev);
-    } else {
-        HISTOGRAM_OBSERVE_IF_ELSE(pdev->get_metrics(), vd_req->is_read, drive_read_latency, drive_write_latency,
-                                  get_elapsed_time_us(vd_req->io_start_time));
+    if (!vd_req->format) {
+        auto pdev = vd_req->chunk->get_physical_dev_mutable();
+        if (vd_req->err) {
+            COUNTER_INCREMENT_IF_ELSE(pdev->get_metrics(), vd_req->is_read, drive_read_errors, drive_write_errors, 1);
+            pdev->device_manager()->handle_error(pdev);
+        } else {
+            HISTOGRAM_OBSERVE_IF_ELSE(pdev->get_metrics(), vd_req->is_read, drive_read_latency, drive_write_latency,
+                                      get_elapsed_time_us(vd_req->io_start_time));
+        }
     }
 
     vd_req->cb(vd_req);
@@ -365,7 +369,13 @@ public:
 #endif
         if (req->outstanding_cb.load() > 0) { req->outstanding_cb.fetch_sub(1, std::memory_order_relaxed); }
 
-        if (req->outstanding_cb.load() == 0) { m_comp_cb(req); }
+        if (req->outstanding_cb.load() == 0) {
+            if (req->format) {
+                req->format_cb(req->err ? false : true);
+            } else {
+                m_comp_cb(req);
+            }
+        }
 
         /* XXX:we probably have to do something if a write/read is spread
          *
@@ -380,8 +390,12 @@ public:
         HS_LOG(INFO, device, "Adding chunk {} from vdev id {} from pdev id = {}", chunk->get_chunk_id(),
                chunk->get_vdev_id(), chunk->get_physical_dev()->get_dev_id());
         std::lock_guard< decltype(m_mgmt_mutex) > lock(m_mgmt_mutex);
-        m_num_chunks++;
-        (chunk->get_primary_chunk()) ? add_mirror_chunk(chunk) : add_primary_chunk(chunk);
+        if (chunk->get_primary_chunk()) {
+            add_mirror_chunk(chunk);
+        } else {
+            m_num_chunks++;
+            add_primary_chunk(chunk);
+        }
     }
 
     /**
@@ -584,6 +598,29 @@ public:
         return offset;
     }
 
+    void format(const vdev_format_cb_t& cb) {
+        boost::intrusive_ptr< virtualdev_req > req = sisl::ObjectAllocator< virtualdev_req >::make_object();
+        req->outstanding_cb = get_num_chunks() * (get_nmirrors() + 1);
+        req->format = true;
+        req->format_cb = cb;
+        req->version = 0xDEAD;
+        req->cb = std::bind(&VirtualDev::process_completions, this, std::placeholders::_1);
+
+        for (uint32_t dev_ind = 0; dev_ind < m_primary_pdev_chunks_list.size(); ++dev_ind) {
+            for (auto pchunk : m_primary_pdev_chunks_list[dev_ind].chunks_in_pdev) {
+                auto pdev = pchunk->get_physical_dev_mutable();
+                req->inc_ref();
+                pdev->write_zero(pchunk->get_size(), pchunk->get_start_offset(), (uint8_t*)req.get());
+                auto mchunks_list = m_mirror_chunks[pchunk];
+                for (auto& mchunk : mchunks_list) {
+                    auto m_pdev = mchunk->get_physical_dev_mutable();
+                    req->inc_ref();
+                    m_pdev->write_zero(mchunk->get_size(), mchunk->get_start_offset(), (uint8_t*)req.get());
+                }
+            }
+        }
+    }
+
     /**
      * @brief : writes up to count bytes from the buffer starting at buf.
      * write advances seek cursor;
@@ -615,6 +652,7 @@ public:
 
         return bytes_written;
     }
+
 
     ssize_t write(const void* buf, size_t count) { return write(buf, count, nullptr); }
 

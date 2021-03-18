@@ -364,6 +364,7 @@ public:
         return;
     }
 
+    void format(const vdev_format_cb_t& cb) { m_vdev.format(cb); }
     void write(BlkId& bid, homeds::MemVector& mvec) { m_vdev.write(bid, mvec, nullptr, 0); }
 
     //
