@@ -5,7 +5,7 @@ from conans import ConanFile, CMake, tools
 class HomestoreConan(ConanFile):
     name = "homestore"
 
-    version = "0.13.10"
+    version = "0.13.11"
     revision_mode = "scm"
 
     license = "Proprietary"
@@ -30,8 +30,8 @@ class HomestoreConan(ConanFile):
 
     requires = (
             "flip/[~=0.2]@sds/testing",
-            "iomgr/[~=2.3]@sds/testing",
-            "sds_logging/[~=7.0]@sds/testing",
+            "iomgr/[~=2,        include_prerelease=True]@sds/develop",
+            "sds_logging/[~=9,  include_prerelease=True]@sds/master",
             "sisl/[~=1.1]@sisl/testing",
 
             # FOSS, rarely updated
@@ -40,10 +40,10 @@ class HomestoreConan(ConanFile):
             "double-conversion/3.1.5",
             "evhtp/1.2.18.2",
             "farmhash/1.0.0",
-            "folly/2020.05.04.00",
             "isa-l/2.21.0",
             "libevent/2.1.11",
             "openssl/1.1.1g",
+            ("nlohmann_json/3.8.0", "override"),
             )
 
     generators = "cmake"
