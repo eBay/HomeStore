@@ -7,6 +7,7 @@
 #include "homestore.hpp"
 #include "meta_sb.hpp"
 #include "engine/blkstore/blkstore.hpp"
+#include "fds/compress.hpp"
 
 SDS_LOGGING_DECL(metablk)
 
@@ -25,6 +26,15 @@ MetaBlkMgr* MetaBlkMgr::instance() {
     });
 
     return s_instance.get();
+}
+
+void MetaBlkMgr::free_compress_buf() { hs_iobuf_free(m_compress_info.bytes); }
+
+void MetaBlkMgr::alloc_compress_buf(size_t size) {
+    m_compress_info.size = size;
+    m_compress_info.bytes = hs_iobuf_alloc(size);
+
+    HS_RELEASE_ASSERT_NE(m_compress_info.bytes, nullptr, "fail to allocate iobuf for compression of size: {}", size);
 }
 
 void MetaBlkMgr::fake_reboot() { s_instance = std::make_unique< MetaBlkMgr >(); }
@@ -46,6 +56,7 @@ MetaBlkMgr::~MetaBlkMgr() {
         m_sub_info.clear();
     }
     iomanager.iobuf_free(reinterpret_cast< uint8_t* >(m_ssb));
+    free_compress_buf();
 }
 
 bool MetaBlkMgr::is_aligned_buf_needed(const size_t size) { return (size <= meta_blk_context_sz()) ? false : true; }
@@ -59,6 +70,7 @@ void MetaBlkMgr::start(blk_store_t* sb_blk_store, const sb_blkstore_blob* blob, 
 
     m_sb_blk_store = sb_blk_store;
     MetaBlkMgr::reset_self_recover();
+    alloc_compress_buf(get_init_compress_memory_size());
     if (is_init) {
         // write the meta blk manager's sb;
         init_ssb();
@@ -214,11 +226,12 @@ void MetaBlkMgr::scan_meta_blks() {
                              "{}, corrupted: prev_mblk's next_bid: {} should equal to mblk's bid: {}", mblk->hdr.h.type,
                              bid.to_string(), mblk->hdr.h.bid.to_string());
         // verify magic
-        HS_RELEASE_ASSERT_EQ(mblk->hdr.h.magic, META_BLK_MAGIC, "type: {}, magic mismatch: found: {}, expected: {}",
-                             mblk->hdr.h.type, mblk->hdr.h.magic, META_BLK_MAGIC);
+        HS_RELEASE_ASSERT_EQ(static_cast< uint32_t >(mblk->hdr.h.magic), META_BLK_MAGIC,
+                             "type: {}, magic mismatch: found: {}, expected: {}", mblk->hdr.h.type, mblk->hdr.h.magic,
+                             META_BLK_MAGIC);
 
         // verify version
-        HS_RELEASE_ASSERT_EQ(mblk->hdr.h.version, META_BLK_VERSION,
+        HS_RELEASE_ASSERT_EQ(static_cast< uint32_t >(mblk->hdr.h.version), META_BLK_VERSION,
                              "type: {}, version mismatch: found: {}, expected: {}", mblk->hdr.h.type,
                              mblk->hdr.h.version, META_BLK_VERSION);
 
@@ -263,7 +276,7 @@ void MetaBlkMgr::scan_meta_blks() {
             obid = ovf_hdr->h.next_bid;
         }
 
-        HS_RELEASE_ASSERT_EQ(read_sz, mblk->hdr.h.context_sz,
+        HS_RELEASE_ASSERT_EQ(read_sz, static_cast< uint64_t >(mblk->hdr.h.context_sz),
                              "{}, total size read: {} mismatch from meta blk context_sz: {}", mblk->hdr.h.type, read_sz,
                              mblk->hdr.h.context_sz);
 
@@ -330,14 +343,14 @@ void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* context_data, 
     meta_blk* mblk = init_meta_blk(meta_bid, type, context_data, sz);
 
     HS_LOG(DEBUG, metablk, "{}, Done adding bid: {}, prev: {}, next: {}, size: {}, crc: {}, mstore used size: {}", type,
-           mblk->hdr.h.bid, mblk->hdr.h.prev_bid, mblk->hdr.h.next_bid, mblk->hdr.h.context_sz, mblk->hdr.h.crc,
-           m_sb_blk_store->get_used_size());
+           mblk->hdr.h.bid, mblk->hdr.h.prev_bid, mblk->hdr.h.next_bid, static_cast< uint64_t >(mblk->hdr.h.context_sz),
+           static_cast< uint32_t >(mblk->hdr.h.crc), m_sb_blk_store->get_used_size());
 
 #ifndef NDEBUG
-    if (m_sub_info[type].do_crc) {
-        HS_DEBUG_ASSERT_EQ(crc, mblk->hdr.h.crc,
+    if (m_sub_info[type].do_crc && !(mblk->hdr.h.compressed)) {
+        HS_DEBUG_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
                            "Input context data has been changed since received, crc mismatch: {}/{}", crc,
-                           mblk->hdr.h.crc);
+                           static_cast< uint32_t >(mblk->hdr.h.crc));
     }
 #endif
 
@@ -398,6 +411,7 @@ void MetaBlkMgr::write_meta_blk_to_disk(meta_blk* mblk) {
 //
 meta_blk* MetaBlkMgr::init_meta_blk(BlkId& bid, const meta_sub_type type, const void* context_data, const size_t sz) {
     meta_blk* mblk = (meta_blk*)hs_iobuf_alloc(get_page_size());
+    mblk->hdr.h.compressed = false;
     mblk->hdr.h.bid = bid;
     memset(mblk->hdr.h.type, 0, MAX_SUBSYS_TYPE_LEN);
     std::memcpy(mblk->hdr.h.type, type.c_str(), type.length());
@@ -509,24 +523,74 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& out_obid, const void* context_data, c
 }
 
 void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_data, const uint64_t sz) {
-    mblk->hdr.h.context_sz = sz;
+    auto data_sz = sz;
+    // start compression
+    if (sz >= get_min_compress_size()) {
+        const uint64_t max_dst_size =
+            sisl::round_up(sisl::Compress::max_compress_len(sz), HS_STATIC_CONFIG(drive_attr.align_size));
+        if (max_dst_size <= get_max_compress_memory_size()) {
+            if (max_dst_size > m_compress_info.size) {
+                free_compress_buf();
+                alloc_compress_buf(max_dst_size);
+            }
+
+            std::memset(m_compress_info.bytes, 0, max_dst_size);
+
+            size_t compressed_size = max_dst_size;
+            auto ret =
+                sisl::Compress::compress((const char*)context_data, (char*)m_compress_info.bytes, sz, &compressed_size);
+            if (ret != 0) {
+                LOGERROR("hs_compress_default indicates a failure trying to compress the data, ret: {}", ret);
+                HS_RELEASE_ASSERT(false, "failed to compress");
+            }
+            auto ratio_percent = (uint64_t)compressed_size * 100 / sz;
+            if (ratio_percent <= get_compress_ratio_limit()) {
+                mblk->hdr.h.compressed = true;
+                mblk->hdr.h.src_context_sz = sz;
+                mblk->hdr.h.context_sz = sisl::round_up(compressed_size, HS_STATIC_CONFIG(drive_attr.align_size));
+                mblk->hdr.h.compressed_sz = compressed_size;
+
+                HS_PERIODIC_LOG(INFO, metablk, "type: {} Successfully compressed some data! Ratio: {}",
+                                mblk->hdr.h.type, (float)compressed_size / sz);
+
+                HS_LOG(DEBUG, metablk, "compressed_sz: {}, src_context_sz: {}, context_sz: {}", compressed_size, sz,
+                       static_cast< uint64_t >(mblk->hdr.h.context_sz));
+
+                HS_RELEASE_ASSERT_GE(max_dst_size, static_cast< uint64_t >(mblk->hdr.h.context_sz));
+
+                // point context_data to compressed data;
+                context_data = (void*)(m_compress_info.bytes);
+                data_sz = mblk->hdr.h.context_sz;
+            } else {
+                // back off compression if compress ratio doesn't meet criteria.
+                HS_PERIODIC_LOG(INFO, metablk, "Bypass compress because percent ratio: {} is exceeding limit: {}",
+                                ratio_percent, get_compress_ratio_limit());
+            }
+        } else {
+            // back off compression if compress memory size is exceeding limit;
+            HS_PERIODIC_LOG(INFO, metablk, "Bypass compress because memory required: {} is exceeding limit: {}",
+                            max_dst_size, get_max_compress_memory_size());
+        }
+    }
+
+    if (!mblk->hdr.h.compressed) { mblk->hdr.h.context_sz = sz; }
 
     // within block context size;
-    if (sz <= meta_blk_context_sz()) {
+    if (data_sz <= meta_blk_context_sz()) {
         // for inline case, set ovf_bid to invalid
         mblk->hdr.h.ovf_bid.invalidate();
 
-        memcpy(mblk->context_data, context_data, sz);
+        memcpy(mblk->context_data, context_data, data_sz);
     } else {
-        HS_RELEASE_ASSERT_EQ(sz % HS_STATIC_CONFIG(drive_attr.align_size), 0,
-                             "{}, context_data sz: {} needs to be dma_boundary {} aligned. ", mblk->hdr.h.type, sz,
+        HS_RELEASE_ASSERT_EQ(data_sz % HS_STATIC_CONFIG(drive_attr.align_size), 0,
+                             "{}, context_data sz: {} needs to be dma_boundary {} aligned. ", mblk->hdr.h.type, data_sz,
                              HS_STATIC_CONFIG(drive_attr.align_size));
 
         // all context data will be in overflow buffer to avoid data copy and non dma_boundary aligned write;
         BlkId obid;
 
         // write overflow block to disk;
-        write_meta_blk_ovf(obid, context_data, sz);
+        write_meta_blk_ovf(obid, context_data, data_sz);
 
         HS_DEBUG_ASSERT(obid.is_valid(), "Expected valid blkid");
         mblk->hdr.h.ovf_bid = obid;
@@ -538,7 +602,7 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_dat
 
     // for both in-band and ovf buffer, we store crc in meta blk header;
     if (m_sub_info[mblk->hdr.h.type].do_crc) {
-        mblk->hdr.h.crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz);
+        mblk->hdr.h.crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), data_sz);
     }
 
     // write meta blk;
@@ -585,13 +649,14 @@ void MetaBlkMgr::update_sub_sb(const void* context_data, const uint64_t sz, void
     free_ovf_blk_chain(ovf_bid_to_free);
 
     HS_LOG(DEBUG, metablk, "{}, update_sub_sb new sb: context_sz: {}, ovf_bid: {}, mstore used size: {}",
-           mblk->hdr.h.type, mblk->hdr.h.context_sz, mblk->hdr.h.ovf_bid.to_string(), m_sb_blk_store->get_used_size());
+           mblk->hdr.h.type, static_cast< uint64_t >(mblk->hdr.h.context_sz), mblk->hdr.h.ovf_bid.to_string(),
+           m_sb_blk_store->get_used_size());
 
 #ifndef NDEBUG
-    if (it->second.do_crc) {
-        HS_DEBUG_ASSERT_EQ(crc, mblk->hdr.h.crc,
+    if (!(mblk->hdr.h.compressed) && it->second.do_crc) {
+        HS_DEBUG_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
                            "Input context data has been changed since received, crc mismatch: {}/{}", crc,
-                           mblk->hdr.h.crc);
+                           static_cast< uint32_t >(mblk->hdr.h.crc));
     }
 #endif
 
@@ -797,6 +862,7 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid) {
 void MetaBlkMgr::read_sub_sb_internal(const meta_blk* mblk, sisl::byte_view& buf) {
     HS_DEBUG_ASSERT_EQ(mblk != nullptr, true);
     if (mblk->hdr.h.context_sz <= meta_blk_context_sz()) {
+        // data can be compressed
         buf = hs_create_byte_view(mblk->hdr.h.context_sz, false /* aligned_byte_view */);
         HS_DEBUG_ASSERT_EQ(mblk->hdr.h.ovf_bid.is_valid(), false, "{}, unexpected ovf_bid: {}", mblk->hdr.h.type,
                            mblk->hdr.h.ovf_bid.to_string());
@@ -872,20 +938,54 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
                 auto crc = crc32_ieee(init_crc32, static_cast< uint8_t* >(buf.bytes()), mblk->hdr.h.context_sz);
                 // HS_LOG(DEBUG, metablk, "type: {}, context sz: {}, data: {}", mblk->hdr.h.type,
                 // mblk->hdr.h.context_sz, static_cast< unsigned char* >(buf.bytes()));
-                HS_RELEASE_ASSERT_EQ(crc, mblk->hdr.h.crc, "{}, CRC mismatch: {}/{}, on mblk bid: {}, context_sz: {}",
-                                     mblk->hdr.h.type, crc, mblk->hdr.h.crc, mblk->hdr.h.bid.to_string(),
-                                     mblk->hdr.h.context_sz);
+
+                HS_RELEASE_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
+                                     "{}, CRC mismatch: {}/{}, on mblk bid: {}, context_sz: {}", mblk->hdr.h.type, crc,
+                                     static_cast< uint32_t >(mblk->hdr.h.crc), mblk->hdr.h.bid.to_string(),
+                                     static_cast< uint64_t >(mblk->hdr.h.context_sz));
             } else {
                 HS_LOG(DEBUG, metablk, "type: {} meta blk found with bypassing crc.", mblk->hdr.h.type);
             }
 
             // send the callbck;
             auto cb = itr->second.cb;
-            if (cb != nullptr) {
-                // There is use case that cb could be nullptr because client want to get its superblock via read api;
-                cb(mblk, buf, mblk->hdr.h.context_sz);
+            if (cb != nullptr) { // cb could be nullptr because client want to get its superblock via read api;
+                // decompress if necessary
+                if (mblk->hdr.h.compressed) {
+                    // HS_DEBUG_ASSERT_GE(mblk->hdr.h.context_sz, META_BLK_CONTEXT_SZ);
+                    sisl::byte_view decompressed_buf =
+                        hs_create_byte_view(mblk->hdr.h.src_context_sz, true /* aligned byte_view */);
+                    size_t decompressed_size{mblk->hdr.h.src_context_sz};
+                    auto ret = sisl::Compress::decompress((const char*)buf.bytes(), (char*)decompressed_buf.bytes(),
+                                                          mblk->hdr.h.compressed_sz, &decompressed_size);
+                    if (ret != 0) {
+                        LOGERROR("type: {}, negative result: {} from decompress trying to decompress the "
+                                 "data. compressed_sz: {}, src_context_sz: {}",
+                                 mblk->hdr.h.type, ret, static_cast< uint64_t >(mblk->hdr.h.compressed_sz),
+                                 static_cast< uint64_t >(mblk->hdr.h.src_context_sz));
+                        HS_RELEASE_ASSERT(false, "failed to decompress");
+                    } else {
+                        // decompressed_size must equal to input sz before compress
+                        HS_RELEASE_ASSERT_EQ(
+                            static_cast< uint64_t >(mblk->hdr.h.src_context_sz),
+                            (uint64_t)
+                                decompressed_size); /* since decompressed_size is >=0 it is safe to cast to uint64_t */
+                        HS_LOG(DEBUG, metablk,
+                               "type: {} Successfully decompressed, compressed_sz: {}, src_context_sz: {}, "
+                               "decompressed_size: {}",
+                               mblk->hdr.h.type, static_cast< uint64_t >(mblk->hdr.h.compressed_sz),
+                               static_cast< uint64_t >(mblk->hdr.h.src_context_sz), decompressed_size);
+                    }
+
+                    cb(mblk, decompressed_buf, mblk->hdr.h.src_context_sz);
+                } else {
+                    // There is use case that cb could be nullptr because client want to get its superblock via read
+                    // api;
+                    cb(mblk, buf, mblk->hdr.h.context_sz);
+                }
+
                 HS_LOG(DEBUG, metablk, "type: {} meta blk sent with size: {}.", mblk->hdr.h.type,
-                       mblk->hdr.h.context_sz);
+                       static_cast< uint64_t >(mblk->hdr.h.context_sz));
             }
         } else {
             HS_LOG(DEBUG, metablk, "type: {}, unregistered client found. ");
@@ -969,6 +1069,20 @@ uint64_t MetaBlkMgr::get_meta_size(const void* cookie) {
 
     return nblks * get_page_size();
 }
+
+uint64_t MetaBlkMgr::get_min_compress_size() {
+    return HS_DYNAMIC_CONFIG(metablk.min_compress_size_mb) * 1024 * 1024ull;
+}
+
+uint64_t MetaBlkMgr::get_max_compress_memory_size() {
+    return HS_DYNAMIC_CONFIG(metablk.max_compress_memory_size_mb) * 1024 * 1024ull;
+}
+
+uint64_t MetaBlkMgr::get_init_compress_memory_size() {
+    return HS_DYNAMIC_CONFIG(metablk.init_compress_memory_size_mb) * 1024 * 1024ull;
+}
+
+uint32_t MetaBlkMgr::get_compress_ratio_limit() { return HS_DYNAMIC_CONFIG(metablk.compress_ratio_limit); }
 
 uint64_t MetaBlkMgr::get_size() const { return m_sb_blk_store->get_size(); }
 

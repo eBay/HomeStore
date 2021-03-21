@@ -48,6 +48,7 @@ private:
     std::map< meta_sub_type, MetaSubRegInfo > m_sub_info; // map of callbacks
     std::unique_ptr< BlkId > m_last_mblk_id;              // last meta blk;
     meta_blk_sb* m_ssb{nullptr};                          // meta super super blk;
+    sisl::blob m_compress_info;
 
 public:
     MetaBlkMgr();
@@ -290,6 +291,14 @@ private:
      * @param buf
      */
     void read_sub_sb_internal(const meta_blk* mblk, sisl::byte_view& buf);
+
+    void free_compress_buf();
+    void alloc_compress_buf(size_t size);
+
+    uint64_t get_min_compress_size();
+    uint64_t get_max_compress_memory_size();
+    uint64_t get_init_compress_memory_size();
+    uint32_t get_compress_ratio_limit();
 };
 
 #define meta_blk_mgr MetaBlkMgr::instance()
