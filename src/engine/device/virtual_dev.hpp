@@ -763,7 +763,7 @@ public:
                       "Invalid m_seek_cursor: {} which falls in beyond end of chunk: {}!", m_seek_cursor, end_of_chunk);
 
         // if read size is larger then what's left in this chunk
-        if (count > (chunk_size - offset_in_chunk)) {
+        if (count >= (chunk_size - offset_in_chunk)) {
             // truncate size to what is left;
             count = chunk_size - offset_in_chunk;
             across_chunk = true;
@@ -777,6 +777,7 @@ public:
                           "bytes_read returned: {} must be equal to requested size: {}!", bytes_read, count);
             m_seek_cursor += bytes_read;
             if (across_chunk) { m_seek_cursor += (m_chunk_size - end_of_chunk); }
+            m_seek_cursor = m_seek_cursor % get_size();
         }
 
         return bytes_read;

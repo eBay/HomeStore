@@ -601,8 +601,10 @@ public:
         max_capacity = get_dev_info(device_info);
 
         /* Don't populate the whole disks. Only 60 % of it */
-        max_vol_size = (tcfg.p_volume_size * max_capacity) / (100 * tcfg.max_vols);
-        max_vol_size_csum = (sizeof(uint16_t) * max_vol_size) / tcfg.vol_page_size;
+        if (tcfg.max_vols) {
+            max_vol_size = (tcfg.p_volume_size * max_capacity) / (100 * tcfg.max_vols);
+            max_vol_size_csum = (sizeof(uint16_t) * max_vol_size) / tcfg.vol_page_size;
+        }
 
         iomanager.start(tcfg.num_threads, tcfg.is_spdk);
 
@@ -775,8 +777,10 @@ public:
 
         /* Don't populate the whole disks. Only 60 % of it */
         auto max_capacity = VolInterface::get_instance()->get_system_capacity().initial_total_size;
-        max_vol_size = (tcfg.p_volume_size * max_capacity) / (100 * tcfg.max_vols);
-        max_vol_size_csum = (sizeof(uint16_t) * max_vol_size) / tcfg.vol_page_size;
+        if (tcfg.max_vols) {
+            max_vol_size = (tcfg.p_volume_size * max_capacity) / (100 * tcfg.max_vols);
+            max_vol_size_csum = (sizeof(uint16_t) * max_vol_size) / tcfg.vol_page_size;
+        }
 
         if (tcfg.init) {
             HS_RELEASE_ASSERT_EQ(params.first_time_boot, true);
@@ -1356,6 +1360,7 @@ protected:
     }
 
     bool run_io(const LbaGeneratorType& lba_generator, const IoFuncType& io_function) {
+        if (!tcfg.max_vols) { return false; }
         const auto gen_lba{lba_generator()};
         return (gen_lba.valid_io) ? io_function(gen_lba.vol_idx, gen_lba.lba, gen_lba.num_lbas) : false;
     }

@@ -98,8 +98,7 @@ void LogDev::do_load(const uint64_t device_cursor) {
     logid_t loaded_from{-1};
 
     do {
-        uint64_t group_dev_offset;
-        const auto buf{lstream.next_group(&group_dev_offset)};
+        const auto buf{lstream.next_group()};
         if (buf.size() == 0) {
             assert_next_pages(lstream);
             LOGINFOMOD(logstore, "LogDev loaded log_idx in range of [{} - {}]", loaded_from, m_log_idx - 1);
@@ -170,7 +169,9 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
 
     // First read the offset and read the log_group. Then locate the log_idx within that and get the actual data
     // Read about 4K of buffer
-    if (!read_buf) { read_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(dma_boundary, initial_read_size); }
+    if (!read_buf) {
+        read_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(log_record::dma_boundary(), initial_read_size);
+    }
     auto* rbuf{read_buf.get()};
     auto* const store{m_hb->get_logdev_blkstore()};
     store->pread(static_cast< void* >(rbuf), initial_read_size, key.dev_offset);

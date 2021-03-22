@@ -25,7 +25,7 @@
 namespace homestore {
 
 static constexpr uint32_t LOG_GROUP_HDR_MAGIC{0xDABAF00D};
-static constexpr uint32_t dma_boundary{512}; // Mininum size the dma/writes to be aligned with
+static constexpr uint32_t dma_address_boundary{512}; // Mininum size the dma/writes to be aligned with
 static constexpr uint32_t initial_read_size{4096};
 
 // clang-format off
@@ -92,12 +92,12 @@ struct log_record {
     [[nodiscard]] size_t serialized_size() const { return sizeof(serialized_log_record) + size; }
     [[nodiscard]] bool is_inlineable() const {
         // Need inlining if size is smaller or size/buffer is not in dma'ble boundary.
-        // return ((size < inline_size) || ((size % dma_boundary) != 0) || (((uintptr_t)data_ptr % dma_boundary) != 0));
-        return (is_size_inlineable(size) || ((reinterpret_cast<uintptr_t>(data_ptr) % dma_boundary) != 0));
+        return (is_size_inlineable(size) || ((reinterpret_cast< uintptr_t >(data_ptr) % dma_boundary()) != 0));
     }
 
+    [[nodiscard]] static size_t dma_boundary() { return HS_STATIC_CONFIG(drive_attr.phys_page_size); }
     [[nodiscard]] static bool is_size_inlineable(const size_t sz) {
-        return ((sz < HS_DYNAMIC_CONFIG(logstore.optimal_inline_data_size)) || ((sz % dma_boundary) != 0));
+        return ((sz < HS_DYNAMIC_CONFIG(logstore.optimal_inline_data_size)) || ((sz % dma_boundary()) != 0));
     }
 
     [[nodiscard]] static size_t serialized_size(const uint32_t sz) { return sizeof(serialized_log_record) + sz; }
@@ -462,9 +462,9 @@ public:
     log_stream_reader& operator=(log_stream_reader&&) noexcept = delete;
     ~log_stream_reader() = default;
 
-    [[nodiscard]] sisl::byte_view next_group(uint64_t* const out_dev_offset);
+    [[nodiscard]] sisl::byte_view next_group();
     [[nodiscard]] sisl::byte_view group_in_next_page();
-    [[nodiscard]] uint64_t group_cursor() const { return m_cur_group_cursor; }
+    [[nodiscard]] uint64_t group_cursor() const { return store->seeked_pos(); }
 
 private:
     [[nodiscard]] sisl::byte_view read_next_bytes(const uint64_t nbytes);
@@ -472,7 +472,6 @@ private:
 private:
     boost::intrusive_ptr< HomeStoreBase > m_hb;
     sisl::byte_view m_cur_log_buf;
-    uint64_t m_cur_group_cursor;
     uint64_t m_first_group_cursor;
     crc32_t m_prev_crc;
 };

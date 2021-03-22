@@ -272,10 +272,13 @@ public:
     void recovery_validate() {
         LOGINFO("Totally recovered {} non-truncated lsns and {} truncated lsns for store {}", m_n_recovered_lsns,
                 m_n_recovered_truncated_lsns, m_log_store->get_store_id());
-        EXPECT_EQ(m_n_recovered_lsns, m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1)
-            << "Recovered " << m_n_recovered_lsns << " valid lsns for store " << m_log_store->get_store_id()
-            << " Expected to have " << m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1
-            << " lsns: m_cur_lsn=" << m_cur_lsn.load() << " truncated_upto_lsn=" << m_truncated_upto_lsn;
+        if (m_n_recovered_lsns != (m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1)) {
+            EXPECT_EQ(m_n_recovered_lsns, m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1)
+                << "Recovered " << m_n_recovered_lsns << " valid lsns for store " << m_log_store->get_store_id()
+                << " Expected to have " << m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1
+                << " lsns: m_cur_lsn=" << m_cur_lsn.load() << " truncated_upto_lsn=" << m_truncated_upto_lsn;
+            assert(0);
+        }
     }
 
     void read(const logstore_seq_num_t lsn) {
@@ -314,8 +317,9 @@ public:
         std::uniform_int_distribution< uint32_t > gen_data_size{0, max_data_size - 1};
         if (gen_percentage(re) < static_cast< uint8_t >(10)) {
             // 10% of data is dma'ble aligned boundary
-            const auto alloc_sz{sisl::round_up(gen_data_size(re) + sizeof(test_log_data), dma_boundary)};
-            raw_buf = iomanager.iobuf_alloc(dma_boundary, alloc_sz);
+            const auto alloc_sz{
+                sisl::round_up(gen_data_size(re) + sizeof(test_log_data), HomeLogStore::dma_boundary())};
+            raw_buf = iomanager.iobuf_alloc(dma_address_boundary, alloc_sz);
             sz = alloc_sz - sizeof(test_log_data);
             io_memory = true;
         } else {
