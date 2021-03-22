@@ -134,6 +134,20 @@ table ResourceLimits {
     journal_size_percent: uint32 = 50;
 }
 
+table MetaBlkStore {
+    // Compress buffer larger than this memory limit in MB will not trigger compress; 
+    max_compress_memory_size_mb: uint32 = 512 (hotswap);
+    
+    // Inital memory allocated for compress buffer
+    init_compress_memory_size_mb: uint32 = 10 (hotswap);
+    
+    // Try to do compress only when input buffer is larger than this size
+    min_compress_size_mb: uint32 = 8 (hotswap);
+
+    // Percentage of compress ratio that allowed for compress to take place
+    compress_ratio_limit: uint32 = 75 (hotswap);
+}
+
 table HomeStoreSettings {
     version: uint32 = 1;
     generic: Generic;
@@ -143,6 +157,7 @@ table HomeStoreSettings {
     device: Device;
     logstore: LogStore;
     resource_limits: ResourceLimits;
+    metablk: MetaBlkStore;
 }
 
 root_type HomeStoreSettings;

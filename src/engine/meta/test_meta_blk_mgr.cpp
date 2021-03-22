@@ -14,6 +14,7 @@
 #include <fstream>
 #include <cstdint>
 #include "test_common/homestore_test_common.hpp"
+#include "test_common/bits_generator.hpp"
 
 using namespace homestore;
 
@@ -38,6 +39,7 @@ struct Param {
     uint32_t max_wrt_sz;
     bool always_do_overflow;
     bool is_spdk;
+    bool is_bitmap;
 };
 
 static Param gp;
@@ -119,11 +121,15 @@ public:
     uint64_t io_cnt() { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
 
     void gen_rand_buf(uint8_t* s, uint32_t len) {
-        static const char alphanum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-        for (size_t i = 0u; i < len - 1; ++i) {
-            s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
+        if (gp.is_bitmap) {
+            BitsGenerator::gen_random_bits(len, s);
+        } else {
+            static const char alphanum[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+            for (size_t i = 0u; i < len - 1; ++i) {
+                s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
+            }
+            s[len - 1] = 0;
         }
-        s[len - 1] = 0;
     }
 
     // size between 512 ~ 8192, 512 aligned;
@@ -182,19 +188,22 @@ public:
         HS_ASSERT_CMP(DEBUG, cookie, !=, nullptr);
 
         // LOGINFO("buf written: size: {}, data: {}", sz_to_wrt, (char*)buf);
-
         meta_blk* mblk = (meta_blk*)cookie;
-        if (overflow) {
-            HS_DEBUG_ASSERT_GE(sz_to_wrt, m_mbm->get_page_size());
-            HS_DEBUG_ASSERT(mblk->hdr.h.ovf_bid.is_valid(), "Expected valid ovf meta blkid");
-        } else {
-            HS_DEBUG_ASSERT_LE(sz_to_wrt, m_mbm->meta_blk_context_sz());
-            HS_DEBUG_ASSERT(!mblk->hdr.h.ovf_bid.is_valid(), "Expected invalid ovf meta blkid");
-        }
-
         // verify context_sz
-        HS_ASSERT(DEBUG, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
-                  (uint64_t)mblk->hdr.h.context_sz, sz_to_wrt);
+
+        if (mblk->hdr.h.compressed == false) {
+            if (overflow) {
+                HS_DEBUG_ASSERT_GE(sz_to_wrt, m_mbm->get_page_size());
+                HS_DEBUG_ASSERT(mblk->hdr.h.ovf_bid.is_valid(), "Expected valid ovf meta blkid");
+            } else {
+                HS_DEBUG_ASSERT_LE(sz_to_wrt, m_mbm->meta_blk_context_sz());
+                HS_DEBUG_ASSERT(!mblk->hdr.h.ovf_bid.is_valid(), "Expected invalid ovf meta blkid");
+            }
+
+            // verify context_sz
+            HS_ASSERT(DEBUG, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
+                      (uint64_t)mblk->hdr.h.context_sz, sz_to_wrt);
+        }
 
         {
             // save cookie;
@@ -219,7 +228,9 @@ public:
             const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()];
             const std::string write_buf_str((char*)buf, sz_to_wrt);
             auto ret = read_buf_str.compare(write_buf_str);
-            HS_ASSERT(DEBUG, ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
+            if (mblk->hdr.h.compressed == false) {
+                HS_ASSERT(DEBUG, ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
+            }
         }
 
         iomanager.iobuf_free(buf);
@@ -311,8 +322,10 @@ public:
 
             // verify context_sz
             meta_blk* mblk = (meta_blk*)cookie;
-            HS_ASSERT(DEBUG, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
-                      (uint64_t)mblk->hdr.h.context_sz, sz_to_wrt);
+            if (mblk->hdr.h.compressed == false) {
+                HS_ASSERT(DEBUG, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
+                          (uint64_t)mblk->hdr.h.context_sz, sz_to_wrt);
+            }
 
             // update total size, add size of metablk back;
             m_total_wrt_sz += total_size_written(cookie);
@@ -565,6 +578,7 @@ SDS_OPTION_GROUP(
     (per_remove, "", "per_remove", "remove percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
     (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
      cxxopts::value< int32_t >()->default_value("5004"), "port"),
+    (bitmap, "", "bitmap", "bitmap test", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
     (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 int main(int argc, char* argv[]) {
@@ -585,6 +599,7 @@ int main(int argc, char* argv[]) {
     gp.max_wrt_sz = SDS_OPTIONS["max_write_size"].as< uint32_t >();
     gp.always_do_overflow = SDS_OPTIONS["overflow"].as< uint32_t >();
     gp.is_spdk = SDS_OPTIONS["spdk"].as< bool >();
+    gp.is_bitmap = SDS_OPTIONS["bitmap"].as< bool >();
 
     if (gp.per_update == 0 || gp.per_write == 0 || (gp.per_update + gp.per_write + gp.per_remove != 100)) {
         gp.per_update = 20;

@@ -36,6 +36,14 @@ def recovery():
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery passed")
 
+# Disabled for SDSTOR-4033
+#    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file=0 --max_disk_capacity=300 --max_volume=1"
+#    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+#    
+#    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 --remove_file=1 --delete_volume=1 --max_disk_capacity=300 --max_volume=1"
+#    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+#    print("recovery with 300GB volume passed")
+
 def recovery_crash():
     try:
         cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file=0 --abort=1"
@@ -103,7 +111,7 @@ def recovery_nightly(num_iteration=10):
         cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --pre_init_verify=false --abort=1 --flip=1 --remove_file=0 --verify_type=2"
         subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
         
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --pre_init_verify=false --abort=0 --flip=1 --remove_file=0i --verify_type=2"
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --pre_init_verify=false --abort=0 --flip=1 --remove_file=0 --verify_type=2"
         subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
 
         s = "recovery test iteration" + repr(i) + "passed" 
@@ -253,6 +261,7 @@ def meta_blk_store_nightly():
     subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.single_read_test", stderr=subprocess.STDOUT, shell=True)
     subprocess.check_call(dirpath + "test_meta_blk_mgr --run_time=7200 --num_io=1000000", stderr=subprocess.STDOUT, shell=True)
     subprocess.check_call(dirpath + "test_meta_blk_mgr --min_write_size=65536 --max_write_size=2097152 --run_time=14400 --num_io=1000000", stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr --min_write_size=10485760 --max_write_size=104857600 --bitmap=1", stderr=subprocess.STDOUT, shell=True)
 
     print("meta blk store test completed")
 
