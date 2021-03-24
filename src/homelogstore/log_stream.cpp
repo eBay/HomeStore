@@ -33,6 +33,10 @@ read_again:
         LOGINFOMOD(logstore, "Logdev data not seeing magic at pos {}, must have come to end of logdev offset {}",
                    store->seeked_pos(), store->logdev_offset_to_vdev_offset(m_cur_logdev_offset));
         *out_dev_offset = store->logdev_offset_to_vdev_offset(m_cur_logdev_offset);
+
+        // move it by dma boundary if header is not valid
+        m_cur_logdev_offset += log_record::dma_boundary();
+        m_cur_log_buf.move_forward(log_record::dma_boundary());
         return ret_buf;
     }
 
@@ -44,10 +48,12 @@ read_again:
         goto read_again;
     }
 
-    LOGTRACEMOD(logstore,
-                "Logstream read log group of size={} nrecords={} from device offset={} m_cur_log_dev_offset {}",
-                header->total_size(), header->nrecords(), store->seeked_pos(),
-                store->logdev_offset_to_vdev_offset(m_cur_logdev_offset));
+    LOGTRACEMOD(
+        logstore,
+        "Logstream read log group of size={} nrecords={} from device offset={} m_cur_log_dev_offset {} buf size "
+        "remaining {} ",
+        header->total_size(), header->nrecords(), store->seeked_pos(),
+        store->logdev_offset_to_vdev_offset(m_cur_logdev_offset), m_cur_log_buf.size());
 
     // verify crc with data
     const crc32_t cur_crc{
@@ -56,6 +62,10 @@ read_again:
     if (cur_crc != header->cur_grp_crc) {
         LOGINFOMOD(logstore, "crc doesn't match {}", store->seeked_pos());
         *out_dev_offset = store->logdev_offset_to_vdev_offset(m_cur_logdev_offset);
+
+        // move it by dma boundary if header is not valid
+        m_cur_logdev_offset += log_record::dma_boundary();
+        m_cur_log_buf.move_forward(log_record::dma_boundary());
         return ret_buf;
     }
 
@@ -64,6 +74,10 @@ read_again:
         // we reached at the end
         LOGINFOMOD(logstore, "crc doesn't match with the prev crc {}", store->seeked_pos());
         *out_dev_offset = store->logdev_offset_to_vdev_offset(m_cur_logdev_offset);
+
+        // move it by dma boundary if header is not valid
+        m_cur_logdev_offset += log_record::dma_boundary();
+        m_cur_log_buf.move_forward(log_record::dma_boundary());
         return ret_buf;
     }
 
@@ -95,7 +109,7 @@ sisl::byte_view log_stream_reader::read_next_bytes(const uint64_t nbytes) {
 
     const auto prev_pos{store->seeked_pos()};
     auto actual_read{store->read(static_cast< void* >(out_buf.bytes()), nbytes)};
-    LOGTRACEMOD(logstore, "LogStream read {} bytes from offset {} ", actual_read, prev_pos);
+    LOGINFOMOD(logstore, "LogStream read {} bytes from offset {} ", actual_read, prev_pos);
     ret_buf.set_size(actual_read + m_cur_log_buf.size());
     return ret_buf;
 }

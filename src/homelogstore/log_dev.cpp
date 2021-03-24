@@ -340,6 +340,7 @@ void LogDev::do_flush(LogGroup* const lg) {
     HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logdev_flush_size_distribution, lg->actual_data_size());
     auto req = logdev_req::make_request();
     req->m_log_group = lg;
+    LOGTRACEMOD(logstore, "offset {} size {}", lg->m_log_dev_offset, lg->header()->total_size());
     store->pwritev(lg->iovecs().data(), static_cast< int >(lg->iovecs().size()), lg->m_log_dev_offset, req);
 }
 

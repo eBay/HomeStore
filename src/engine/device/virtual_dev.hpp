@@ -572,7 +572,7 @@ public:
             auto next_chunk = get_next_chunk(dev_id, chunk_id);
             if (next_chunk != chunk) {
                 // Since we are re-using a new chunk, update this chunk's end as its original size;
-                m_mgr->update_end_of_chunk(chunk, m_chunk_size);
+                m_mgr->update_end_of_chunk(next_chunk, m_chunk_size);
             }
         } else {
             // across chunk boundary and no space left;
