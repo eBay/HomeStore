@@ -93,12 +93,13 @@ void LogDev::stop() {
     LOGINFOMOD(logstore, "LogDev stopped successfully");
 }
 
-void LogDev::do_load(const uint64_t device_cursor) {
+void LogDev::do_load(const off_t device_cursor) {
     log_stream_reader lstream{device_cursor};
     logid_t loaded_from{-1};
 
+    off_t group_dev_offset;
     do {
-        const auto buf{lstream.next_group()};
+        const auto buf{lstream.next_group(&group_dev_offset)};
         if (buf.size() == 0) {
             assert_next_pages(lstream);
             LOGINFOMOD(logstore, "LogDev loaded log_idx in range of [{} - {}]", loaded_from, m_log_idx - 1);
@@ -134,15 +135,13 @@ void LogDev::do_load(const uint64_t device_cursor) {
     // Update the tail offset with where we finally end up loading, so that new append entries can be written from
     // here.
     auto store{m_hb->get_logdev_blkstore()};
-    store->update_tail_offset(store->seeked_pos());
+    store->update_tail_offset(group_dev_offset);
 }
 
 void LogDev::assert_next_pages(log_stream_reader& lstream) {
     LOGINFOMOD(logstore,
                "Logdev reached offset, which has invalid header, because of end of stream. Validating if it is "
                "indeed the case or there is any corruption");
-
-    const auto cursor{lstream.group_cursor()};
     for (uint32_t i{0}; i < HS_DYNAMIC_CONFIG(logstore->recovery_max_blks_read_for_additional_check); ++i) {
         const auto buf{lstream.group_in_next_page()};
         if (buf.size() != 0) {
@@ -153,7 +152,6 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
                           *header);
         }
     }
-    m_hb->get_logdev_blkstore()->lseek(cursor); // Reset back
 }
 
 int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, uint8_t* const data,
@@ -564,7 +562,7 @@ logstore_meta& LogDevMetadata::mutable_store_meta(const logstore_id_t idx) {
     return smeta[idx];
 }
 
-void LogDevMetadata::update_start_dev_offset(const uint64_t offset, const bool persist_now) {
+void LogDevMetadata::update_start_dev_offset(const off_t offset, const bool persist_now) {
     m_sb->start_dev_offset = offset;
     if (persist_now) { persist(); }
 }

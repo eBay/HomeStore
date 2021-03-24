@@ -248,7 +248,7 @@ private:
     iovec_array m_iovecs;
     int64_t m_flush_log_idx_from;
     int64_t m_flush_log_idx_upto;
-    uint64_t m_log_dev_offset;
+    off_t m_log_dev_offset;
 };
 
 template < typename charT, typename traits >
@@ -307,7 +307,8 @@ private:
 typedef int64_t logid_t;
 struct logdev_key {
     constexpr logdev_key(const logid_t idx = std::numeric_limits< logid_t >::min(),
-                         const uint64_t dev_offset = std::numeric_limits< uint64_t >::min()) : idx{idx}, dev_offset{dev_offset} {}
+                         const off_t dev_offset = std::numeric_limits< uint64_t >::min()) :
+            idx{idx}, dev_offset{dev_offset} {}
     logdev_key(const logdev_key&) = default;
     logdev_key& operator=(const logdev_key&) = default;
     logdev_key(logdev_key&&) noexcept = default;
@@ -339,7 +340,7 @@ struct logdev_key {
     }
 
     logid_t idx;
-    uint64_t dev_offset;
+    off_t dev_offset;
 };
 
 template < typename charT, typename traits >
@@ -391,7 +392,7 @@ struct logdev_superblk {
 
     uint32_t version{LOGDEV_SB_VERSION};
     uint32_t num_stores{0};
-    uint64_t start_dev_offset{0};
+    off_t start_dev_offset{0};
 
     [[nodiscard]] uint32_t get_version() const { return version; }
     // The meta data starts immediately after the super block
@@ -423,8 +424,8 @@ public:
     void persist();
 
     [[nodiscard]] bool is_empty() const { return (m_sb == nullptr); }
-    [[nodiscard]] inline uint64_t get_start_dev_offset() const { return m_sb->start_dev_offset; }
-    void update_start_dev_offset(const uint64_t offset, const bool persist_now);
+    [[nodiscard]] inline off_t get_start_dev_offset() const { return (m_sb->start_dev_offset); }
+    void update_start_dev_offset(const off_t offset, const bool persist_now);
 
     [[nodiscard]] logstore_id_t reserve_store(const bool persist_now);
     void unreserve_store(const logstore_id_t idx, const bool persist_now);
@@ -455,16 +456,15 @@ private:
 
 class log_stream_reader {
 public:
-    log_stream_reader(const uint64_t device_cursor);
+    log_stream_reader(const off_t device_cursor);
     log_stream_reader(const log_stream_reader&) = delete;
     log_stream_reader& operator=(const log_stream_reader&) = delete;
     log_stream_reader(log_stream_reader&&) noexcept = delete;
     log_stream_reader& operator=(log_stream_reader&&) noexcept = delete;
     ~log_stream_reader() = default;
 
-    [[nodiscard]] sisl::byte_view next_group();
+    [[nodiscard]] sisl::byte_view next_group(off_t* const out_dev_offset);
     [[nodiscard]] sisl::byte_view group_in_next_page();
-    [[nodiscard]] uint64_t group_cursor() const { return store->seeked_pos(); }
 
 private:
     [[nodiscard]] sisl::byte_view read_next_bytes(const uint64_t nbytes);
@@ -472,8 +472,9 @@ private:
 private:
     boost::intrusive_ptr< HomeStoreBase > m_hb;
     sisl::byte_view m_cur_log_buf;
-    uint64_t m_first_group_cursor;
-    crc32_t m_prev_crc;
+    off_t m_first_group_cursor;
+    off_t m_cur_logdev_offset{0};
+    crc32_t m_prev_crc{0};
 };
 
 enum log_dump_verbosity : uint8_t { CONTENT, HEADER };
@@ -662,7 +663,7 @@ private:
     void flush_if_needed(const uint32_t new_record_size = 0, logid_t new_idx = -1);
     void flush_by_size(const uint32_t min_threshold, const uint32_t new_record_size = 0, const logid_t new_idx = -1);
     void on_flush_completion(LogGroup* const lg);
-    void do_load(const uint64_t offset);
+    void do_load(const off_t offset);
 
 #if 0
     log_group_header* read_validate_header(uint8_t* buf, uint32_t size, bool* read_more);
