@@ -45,7 +45,7 @@ uint64_t MetaBlkMgr::meta_blk_context_sz() { return get_page_size() - META_BLK_H
 
 uint64_t MetaBlkMgr::ovf_blk_max_num_data_blk() { return (get_page_size() - MAX_BLK_OVF_HDR_MAX_SZ) / sizeof(BlkId); }
 
-MetaBlkMgr::MetaBlkMgr() { m_last_mblk_id = std::make_unique< BlkId >(); }
+MetaBlkMgr::MetaBlkMgr(const char* name) : m_metrics(name) { m_last_mblk_id = std::make_unique< BlkId >(); }
 
 MetaBlkMgr::~MetaBlkMgr() {
     std::lock_guard< decltype(m_shutdown_mtx) > lg_shutdown{m_shutdown_mtx};
@@ -525,7 +525,7 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& out_obid, const void* context_data, c
 void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_data, const uint64_t sz) {
     auto data_sz = sz;
     // start compression
-    if (sz >= get_min_compress_size()) {
+    if (compress_feature_on() && sz >= get_min_compress_size()) {
         const uint64_t max_dst_size =
             sisl::round_up(sisl::Compress::max_compress_len(sz), HS_STATIC_CONFIG(drive_attr.align_size));
         if (max_dst_size <= get_max_compress_memory_size()) {
@@ -545,6 +545,8 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_dat
             }
             auto ratio_percent = (uint64_t)compressed_size * 100 / sz;
             if (ratio_percent <= get_compress_ratio_limit()) {
+                COUNTER_INCREMENT(m_metrics, compress_success_cnt, 1);
+                HISTOGRAM_OBSERVE(m_metrics, compress_ratio_percent, ratio_percent);
                 mblk->hdr.h.compressed = true;
                 mblk->hdr.h.src_context_sz = sz;
                 mblk->hdr.h.context_sz = sisl::round_up(compressed_size, HS_STATIC_CONFIG(drive_attr.align_size));
@@ -565,11 +567,14 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_dat
                 // back off compression if compress ratio doesn't meet criteria.
                 HS_PERIODIC_LOG(INFO, metablk, "Bypass compress because percent ratio: {} is exceeding limit: {}",
                                 ratio_percent, get_compress_ratio_limit());
+
+                COUNTER_INCREMENT(m_metrics, compress_backoff_ratio_cnt, 1);
             }
         } else {
             // back off compression if compress memory size is exceeding limit;
             HS_PERIODIC_LOG(INFO, metablk, "Bypass compress because memory required: {} is exceeding limit: {}",
                             max_dst_size, get_max_compress_memory_size());
+            COUNTER_INCREMENT(m_metrics, compress_backoff_memory_cnt, 1);
         }
     }
 
@@ -1069,6 +1074,8 @@ uint64_t MetaBlkMgr::get_meta_size(const void* cookie) {
 
     return nblks * get_page_size();
 }
+
+bool MetaBlkMgr::compress_feature_on() { return HS_DYNAMIC_CONFIG(metablk.compress_feature_on); }
 
 uint64_t MetaBlkMgr::get_min_compress_size() {
     return HS_DYNAMIC_CONFIG(metablk.min_compress_size_mb) * 1024 * 1024ull;
