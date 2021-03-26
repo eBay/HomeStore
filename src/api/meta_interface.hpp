@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <fds/utils.hpp>
+#include <metrics/metrics.hpp>
 
 namespace homestore {
 
@@ -36,6 +37,20 @@ typedef std::map< uint64_t, meta_blk* > meta_blk_map_t;                 // blkid
 typedef std::map< uint64_t, meta_blk_ovf_hdr* > ovf_hdr_map_t;          // ovf_blkid to ovf_blk_hdr map;
 typedef std::string meta_sub_type;
 
+class MetablkMetrics : public sisl::MetricsGroupWrapper {
+public:
+    explicit MetablkMetrics(const char* inst_name) : sisl::MetricsGroupWrapper("MetaBlkStore", inst_name) {
+        REGISTER_COUNTER(compress_success_cnt, "compression successful cnt");
+        REGISTER_COUNTER(compress_backoff_memory_cnt, "compression back-off cnt because of exceending memory limit")
+        REGISTER_COUNTER(compress_backoff_ratio_cnt, "compression back-off cnt because of exceeding ratio limit");
+
+        REGISTER_HISTOGRAM(compress_ratio_percent, "compression ration percentage");
+        register_me_to_farm();
+    }
+
+    ~MetablkMetrics() { deregister_me_from_farm(); }
+};
+
 class MetaBlkMgr {
 private:
     static std::unique_ptr< MetaBlkMgr > s_instance;
@@ -49,9 +64,10 @@ private:
     std::unique_ptr< BlkId > m_last_mblk_id;              // last meta blk;
     meta_blk_sb* m_ssb{nullptr};                          // meta super super blk;
     sisl::blob m_compress_info;
+    MetablkMetrics m_metrics;
 
 public:
-    MetaBlkMgr();
+    MetaBlkMgr(const char* name = "MetaBlkStore");
     MetaBlkMgr(const MetaBlkMgr&) = delete;
     MetaBlkMgr(MetaBlkMgr&&) noexcept = delete;
     MetaBlkMgr& operator=(const MetaBlkMgr&) = delete;
@@ -299,6 +315,7 @@ private:
     uint64_t get_max_compress_memory_size();
     uint64_t get_init_compress_memory_size();
     uint32_t get_compress_ratio_limit();
+    bool compress_feature_on();
 };
 
 #define meta_blk_mgr MetaBlkMgr::instance()

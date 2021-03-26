@@ -36,14 +36,6 @@ def recovery():
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery passed")
 
-# Disabled for SDSTOR-4033
-#    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file=0 --max_disk_capacity=300 --max_volume=1"
-#    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
-#    
-#    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 --remove_file=1 --delete_volume=1 --max_disk_capacity=300 --max_volume=1"
-#    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
-#    print("recovery with 300GB volume passed")
-
 def recovery_crash():
     try:
         cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file=0 --abort=1"
@@ -121,6 +113,13 @@ def recovery_nightly(num_iteration=10):
     cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --remove_file=1 --delete_volume=1 --verify_type=2"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery test completed")
+
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file=0 --max_disk_capacity=300 --max_volume=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 --remove_file=1 --delete_volume=1 --max_disk_capacity=300 --max_volume=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    print("recovery with 300GB single volume passed")
 
 def recovery_nightly_with_create_del(num_iteration=10):
     print("recovery test started")

@@ -135,6 +135,9 @@ table ResourceLimits {
 }
 
 table MetaBlkStore {
+    // turn on/off compression feature 
+    compress_feature_on : bool = false (hotswap);
+
     // Compress buffer larger than this memory limit in MB will not trigger compress; 
     max_compress_memory_size_mb: uint32 = 512 (hotswap);
     

@@ -15,7 +15,7 @@ LogGroup::LogGroup() {
 void LogGroup::reset(const uint32_t max_records) {
     m_cur_log_buf = m_log_buf.get();
     m_cur_buf_len = inline_log_buf_size;
-    m_record_slots = reinterpret_cast<serialized_log_record*>(m_cur_log_buf + sizeof(log_group_header));
+    m_record_slots = reinterpret_cast< serialized_log_record* >(m_cur_log_buf + sizeof(log_group_header));
     m_inline_data_pos = sizeof(log_group_header) + (sizeof(serialized_log_record) * max_records);
     m_oob_data_pos = 0;
 
@@ -25,7 +25,7 @@ void LogGroup::reset(const uint32_t max_records) {
     m_actual_data_size = 0;
 
     m_iovecs.clear();
-    m_iovecs.emplace_back(static_cast<void*>(m_cur_log_buf), m_inline_data_pos);
+    m_iovecs.emplace_back(static_cast< void* >(m_cur_log_buf), m_inline_data_pos);
 }
 
 void LogGroup::create_overflow_buf(const uint32_t min_needed) {
@@ -36,7 +36,7 @@ void LogGroup::create_overflow_buf(const uint32_t min_needed) {
     m_overflow_log_buf = std::move(new_buf);
     m_cur_log_buf = m_overflow_log_buf.get();
     m_cur_buf_len = new_len;
-    m_record_slots = reinterpret_cast<serialized_log_record*>(m_cur_log_buf + sizeof(log_group_header));
+    m_record_slots = reinterpret_cast< serialized_log_record* >(m_cur_log_buf + sizeof(log_group_header));
 
     m_iovecs[0].iov_base = m_cur_log_buf;
 }
@@ -49,8 +49,10 @@ bool LogGroup::add_record(const log_record& record, const int64_t log_idx) {
         return false;
     }
 
-    m_actual_data_size += record.size;
-    if ((m_inline_data_pos + record.size) >= m_cur_buf_len) { create_overflow_buf(m_inline_data_pos + record.size); }
+    m_actual_data_size += record.data.size;
+    if ((m_inline_data_pos + record.data.size) >= m_cur_buf_len) {
+        create_overflow_buf(m_inline_data_pos + record.data.size);
+    }
 
     // We use log_idx reference in the header as we expect each slot record is in order.
     if (m_nrecords == 0) { header()->start_log_idx = log_idx; }
@@ -58,21 +60,22 @@ bool LogGroup::add_record(const log_record& record, const int64_t log_idx) {
     // assert(header()->start_log_idx - log_idx);
 
     // Fill the slots
-    m_record_slots[m_nrecords].size = record.size;
+    m_record_slots[m_nrecords].size = record.data.size;
     m_record_slots[m_nrecords].store_id = record.store_id;
     m_record_slots[m_nrecords].store_seq_num = record.seq_num;
     if (record.is_inlineable()) {
         m_record_slots[m_nrecords].offset = m_inline_data_pos;
         m_record_slots[m_nrecords].set_inlined(true);
-        std::memcpy(static_cast<void*>(m_cur_log_buf + m_inline_data_pos), static_cast<const void*>(record.data_ptr), record.size);
-        m_inline_data_pos += record.size;
+        std::memcpy(static_cast< void* >(m_cur_log_buf + m_inline_data_pos),
+                    static_cast< const void* >(record.data.bytes), record.data.size);
+        m_inline_data_pos += record.data.size;
         m_iovecs[0].iov_len = m_inline_data_pos;
     } else {
         // We do not round it now, it will be rounded during finish
         m_record_slots[m_nrecords].offset = m_oob_data_pos;
         m_record_slots[m_nrecords].set_inlined(false);
-        m_iovecs.emplace_back(static_cast<void*>(record.data_ptr), record.size);
-        m_oob_data_pos += record.size;
+        m_iovecs.emplace_back(static_cast< void* >(record.data.bytes), record.data.size);
+        m_oob_data_pos += record.data.size;
     }
     ++m_nrecords;
 
@@ -95,11 +98,11 @@ const iovec_array& LogGroup::finish() {
 }
 
 crc32_t LogGroup::compute_crc() {
-    crc32_t crc {
-        crc32_ieee(init_crc32, static_cast< const unsigned char* >(m_iovecs[0].iov_base) + sizeof(log_group_header),
-                   m_iovecs[0].iov_len - sizeof(log_group_header))};
+    crc32_t crc{crc32_ieee(init_crc32,
+                           static_cast< const unsigned char* >(m_iovecs[0].iov_base) + sizeof(log_group_header),
+                           m_iovecs[0].iov_len - sizeof(log_group_header))};
     for (size_t i{1}; i < m_iovecs.size(); ++i) {
-        crc = crc32_ieee(crc, static_cast<const unsigned char*>(m_iovecs[i].iov_base), m_iovecs[i].iov_len);
+        crc = crc32_ieee(crc, static_cast< const unsigned char* >(m_iovecs[i].iov_base), m_iovecs[i].iov_len);
     }
 
     return crc;
