@@ -45,7 +45,6 @@ void LogDev::start(const bool format) {
         LOGINFOMOD(logstore, "get start offset {}", m_logdev_meta.get_start_dev_offset());
 
         m_hb->get_logdev_blkstore()->update_data_start_offset(m_logdev_meta.get_start_dev_offset());
-        m_log_idx = m_logdev_meta.get_last_log_indx();
         do_load(m_logdev_meta.get_start_dev_offset());
         m_log_records->reinit(m_log_idx);
         m_last_flush_idx = m_log_idx - 1;
@@ -98,7 +97,7 @@ void LogDev::stop() {
 
 void LogDev::do_load(const off_t device_cursor) {
     log_stream_reader lstream{device_cursor};
-    logid_t loaded_from{m_log_idx};
+    logid_t loaded_from{-1};
 
     off_t group_dev_offset;
     do {
@@ -151,12 +150,10 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
         const auto buf{lstream.group_in_next_page()};
         if (buf.size() != 0) {
             const log_group_header* const header{reinterpret_cast< log_group_header* >(buf.bytes())};
-            if (m_log_idx.load(std::memory_order_acquire) != 0) {
-                HS_ASSERT_CMP(RELEASE, m_log_idx.load(std::memory_order_acquire), >, header->start_idx(),
-                              "Found a header with future log_idx after reaching end of log. Hence rbuf which was read "
-                              "must have been corrupted, Header: {}",
-                              *header);
-            }
+            HS_ASSERT_CMP(RELEASE, m_log_idx.load(std::memory_order_acquire), >, header->start_idx(),
+                          "Found a header with future log_idx after reaching end of log. Hence rbuf which was read "
+                          "must have been corrupted, Header: {}",
+                          *header);
         }
     }
 }
@@ -440,7 +437,7 @@ uint64_t LogDev::truncate(const logdev_key& key) {
             std::unique_lock< std::mutex > lk{m_meta_mutex};
 
             // Update the start offset to be read upon restart
-            m_logdev_meta.update_start_dev_offset(key.dev_offset, key.idx, false /* persist_now */);
+            m_logdev_meta.update_start_dev_offset(key.dev_offset, false /* persist_now */);
 
             // Now that store is truncated, we can reclaim the store ids which are garbaged (if any) earlier
             for (auto it{std::cbegin(m_garbage_store_ids)}; it != std::cend(m_garbage_store_ids);) {
@@ -570,9 +567,8 @@ logstore_meta& LogDevMetadata::mutable_store_meta(const logstore_id_t idx) {
     return smeta[idx];
 }
 
-void LogDevMetadata::update_start_dev_offset(const off_t offset, logid_t id, const bool persist_now) {
+void LogDevMetadata::update_start_dev_offset(const off_t offset, const bool persist_now) {
     m_sb->start_dev_offset = offset;
-    m_sb->last_log_idx = id;
     if (persist_now) { persist(); }
 }
 
