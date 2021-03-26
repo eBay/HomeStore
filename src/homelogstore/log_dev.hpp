@@ -393,6 +393,7 @@ struct logdev_superblk {
     uint32_t version{LOGDEV_SB_VERSION};
     uint32_t num_stores{0};
     off_t start_dev_offset{0};
+    logid_t last_log_idx;
 
     [[nodiscard]] uint32_t get_version() const { return version; }
     // The meta data starts immediately after the super block
@@ -425,7 +426,8 @@ public:
 
     [[nodiscard]] bool is_empty() const { return (m_sb == nullptr); }
     [[nodiscard]] inline off_t get_start_dev_offset() const { return (m_sb->start_dev_offset); }
-    void update_start_dev_offset(const off_t offset, const bool persist_now);
+    [[nodiscard]] logid_t get_last_log_indx() const { return (m_sb->last_log_idx); }
+    void update_start_dev_offset(const off_t offset, logid_t id, const bool persist_now);
 
     [[nodiscard]] logstore_id_t reserve_store(const bool persist_now);
     void unreserve_store(const logstore_id_t idx, const bool persist_now);
@@ -473,7 +475,7 @@ private:
     boost::intrusive_ptr< HomeStoreBase > m_hb;
     sisl::byte_view m_cur_log_buf;
     off_t m_first_group_cursor;
-    off_t m_cur_logdev_offset{0};
+    off_t m_cur_read_bytes{0};
     crc32_t m_prev_crc{0};
 };
 

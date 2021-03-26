@@ -628,7 +628,7 @@ public:
 
     off_t lseek(off_t offset, int whence = SEEK_SET) { return m_vdev.lseek(offset, whence); }
 
-    off_t logdev_offset_to_vdev_offset(off_t offset) { return m_vdev.logdev_offset_to_vdev_offset(offset); }
+    off_t get_dev_offset(off_t bytes_read) { return m_vdev.get_dev_offset(bytes_read); }
     off_t seeked_pos() const { return m_vdev.seeked_pos(); }
 
     ssize_t read(void* buf, size_t count) { return m_vdev.read(buf, count); }

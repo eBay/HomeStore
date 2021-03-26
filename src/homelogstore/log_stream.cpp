@@ -31,11 +31,12 @@ read_again:
     const auto* const header{reinterpret_cast< log_group_header* >(m_cur_log_buf.bytes())};
     if (header->magic_word() != LOG_GROUP_HDR_MAGIC) {
         LOGINFOMOD(logstore, "Logdev data not seeing magic at pos {}, must have come to end of logdev",
-                   store->logdev_offset_to_vdev_offset(m_cur_logdev_offset));
-        *out_dev_offset = store->logdev_offset_to_vdev_offset(m_cur_logdev_offset);
+                   store->get_dev_offset(m_cur_read_bytes));
+        *out_dev_offset = store->get_dev_offset(m_cur_read_bytes);
+        m_prev_crc = 0;
 
         // move it by dma boundary if header is not valid
-        m_cur_logdev_offset += log_record::dma_boundary();
+        m_cur_read_bytes += log_record::dma_boundary();
         m_cur_log_buf.move_forward(log_record::dma_boundary());
         return ret_buf;
     }
@@ -51,7 +52,7 @@ read_again:
     LOGTRACEMOD(logstore,
                 "Logstream read log group of size={} nrecords={} m_cur_log_dev_offset {} buf size "
                 "remaining {} ",
-                header->total_size(), header->nrecords(), store->logdev_offset_to_vdev_offset(m_cur_logdev_offset),
+                header->total_size(), header->nrecords(), store->get_dev_offset(m_cur_read_bytes),
                 m_cur_log_buf.size());
 
     // verify crc with data
@@ -59,11 +60,12 @@ read_again:
         crc32_ieee(init_crc32, static_cast< const unsigned char* >(m_cur_log_buf.bytes()) + sizeof(log_group_header),
                    (header->total_size() - sizeof(log_group_header)))};
     if (cur_crc != header->cur_grp_crc) {
-        LOGINFOMOD(logstore, "crc doesn't match {}", store->logdev_offset_to_vdev_offset(m_cur_logdev_offset));
-        *out_dev_offset = store->logdev_offset_to_vdev_offset(m_cur_logdev_offset);
+        LOGINFOMOD(logstore, "crc doesn't match {}", store->get_dev_offset(m_cur_read_bytes));
+        *out_dev_offset = store->get_dev_offset(m_cur_read_bytes);
+        m_prev_crc = 0;
 
         // move it by dma boundary if header is not valid
-        m_cur_logdev_offset += log_record::dma_boundary();
+        m_cur_read_bytes += log_record::dma_boundary();
         m_cur_log_buf.move_forward(log_record::dma_boundary());
         return ret_buf;
     }
@@ -71,12 +73,12 @@ read_again:
     // compare it with prev crc
     if (m_prev_crc != 0 && m_prev_crc != header->prev_grp_crc) {
         // we reached at the end
-        LOGINFOMOD(logstore, "crc doesn't match with the prev crc {}",
-                   store->logdev_offset_to_vdev_offset(m_cur_logdev_offset));
-        *out_dev_offset = store->logdev_offset_to_vdev_offset(m_cur_logdev_offset);
+        LOGINFOMOD(logstore, "crc doesn't match with the prev crc {}", store->get_dev_offset(m_cur_read_bytes));
+        *out_dev_offset = store->get_dev_offset(m_cur_read_bytes);
 
         // move it by dma boundary if header is not valid
-        m_cur_logdev_offset += log_record::dma_boundary();
+        m_prev_crc = 0;
+        m_cur_read_bytes += log_record::dma_boundary();
         m_cur_log_buf.move_forward(log_record::dma_boundary());
         return ret_buf;
     }
@@ -85,8 +87,8 @@ read_again:
     m_prev_crc = cur_crc;
 
     ret_buf = m_cur_log_buf;
-    *out_dev_offset = store->logdev_offset_to_vdev_offset(m_cur_logdev_offset);
-    m_cur_logdev_offset += header->total_size();
+    *out_dev_offset = store->get_dev_offset(m_cur_read_bytes);
+    m_cur_read_bytes += header->total_size();
     m_cur_log_buf.move_forward(header->total_size());
 
     return ret_buf;
@@ -109,7 +111,7 @@ sisl::byte_view log_stream_reader::read_next_bytes(const uint64_t nbytes) {
 
     const auto prev_pos{store->seeked_pos()};
     auto actual_read{store->read(static_cast< void* >(out_buf.bytes()), nbytes)};
-    LOGINFOMOD(logstore, "LogStream read {} bytes from vdev offset {} and vdev cur offset ", actual_read, prev_pos,
+    LOGINFOMOD(logstore, "LogStream read {} bytes from vdev offset {} and vdev cur offset {}", actual_read, prev_pos,
                store->seeked_pos());
     ret_buf.set_size(actual_read + m_cur_log_buf.size());
     return ret_buf;

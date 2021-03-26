@@ -958,7 +958,7 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
     const auto num_threads{SDS_OPTIONS["num_threads"].as< uint32_t >()};
     const auto num_logstores{SDS_OPTIONS["num_logstores"].as< uint32_t >()};
     // somewhere between 4-15 iterations depending on if run with other tests or not this will fail
-    const auto iterations{std::min(SDS_OPTIONS["iterations"].as< uint32_t >(), static_cast<uint32_t>(1))};
+    const auto iterations = SDS_OPTIONS["iterations"].as< uint32_t >();
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);

@@ -752,6 +752,7 @@ public:
         logical_to_dev_offset(m_seek_cursor, dev_id, chunk_id, offset_in_chunk);
 
         auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
+        LOGINFO("cursor {} chunk {} offset in chunk {}", m_seek_cursor, chunk_id, offset_in_chunk);
         auto end_of_chunk = chunk->get_end_of_chunk();
         auto chunk_size = std::min((uint64_t)end_of_chunk, m_chunk_size);
 
@@ -896,25 +897,28 @@ public:
         return m_seek_cursor;
     }
 
-    off_t logdev_offset_to_vdev_offset(off_t orig_read_cur) {
+    /**
+     * @brief :- it returns the vdev offset after nbytes from start offset
+     */
+    off_t get_dev_offset(off_t nbytes) {
         off_t vdev_offset = data_start_offset();
         uint32_t dev_id = 0, chunk_id = 0;
         off_t offset_in_chunk = 0;
         off_t cur_read_cur = 0;
 
-        while (cur_read_cur != orig_read_cur) {
+        while (cur_read_cur != nbytes) {
             logical_to_dev_offset(vdev_offset, dev_id, chunk_id, offset_in_chunk);
 
             auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
             auto end_of_chunk = chunk->get_end_of_chunk();
             auto chunk_size = std::min((uint64_t)end_of_chunk, m_chunk_size);
-            if ((uint64_t)(orig_read_cur - cur_read_cur) >= chunk_size) {
-                cur_read_cur += chunk_size;
-                vdev_offset += end_of_chunk - offset_in_chunk;
+            if ((nbytes - cur_read_cur) >= ((off_t)chunk_size - offset_in_chunk)) {
+                cur_read_cur += (chunk_size - offset_in_chunk);
+                vdev_offset += (m_chunk_size - offset_in_chunk);
                 vdev_offset = vdev_offset % get_size();
             } else {
-                vdev_offset += (uint64_t)(orig_read_cur - cur_read_cur);
-                cur_read_cur = orig_read_cur;
+                vdev_offset += (uint64_t)(nbytes - cur_read_cur);
+                cur_read_cur = nbytes;
             }
         }
         return vdev_offset;
