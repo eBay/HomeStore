@@ -93,7 +93,7 @@ struct log_record {
     [[nodiscard]] size_t serialized_size() const { return sizeof(serialized_log_record) + data.size; }
     [[nodiscard]] bool is_inlineable() const {
         // Need inlining if size is smaller or size/buffer is not in dma'ble boundary.
-        return (is_size_inlineable(size) || ((reinterpret_cast< uintptr_t >(data_ptr) % dma_boundary()) != 0) ||
+        return (is_size_inlineable(data.size) || ((reinterpret_cast< uintptr_t >(data.bytes) % dma_boundary()) != 0) ||
                 !data.aligned);
     }
 

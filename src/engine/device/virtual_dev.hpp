@@ -752,7 +752,6 @@ public:
         logical_to_dev_offset(m_seek_cursor, dev_id, chunk_id, offset_in_chunk);
 
         auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
-        LOGINFO("cursor {} chunk {} offset in chunk {}", m_seek_cursor, chunk_id, offset_in_chunk);
         auto end_of_chunk = chunk->get_end_of_chunk();
         auto chunk_size = std::min((uint64_t)end_of_chunk, m_chunk_size);
 
