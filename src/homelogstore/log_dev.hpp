@@ -74,26 +74,28 @@ struct serialized_log_record {
 /* This structure represents the in-memory representation of a log record */
 struct log_record {
     serialized_log_record* pers_record{nullptr};
-    uint8_t* data_ptr;
-    uint32_t size;
+    sisl::io_blob data;
     void* context;
     logstore_id_t store_id;
     logstore_seq_num_t seq_num;
 
-    log_record(const logstore_id_t sid, const logstore_seq_num_t snum, uint8_t* const d, const uint32_t sz, void* const ctx) :
-            data_ptr{d}, size{sz}, context{ctx}, store_id{sid}, seq_num{snum} {}
+    log_record(const logstore_id_t sid, const logstore_seq_num_t snum, const sisl::io_blob& d, void* const ctx) :
+            data{d}, context{ctx}, store_id{sid}, seq_num{snum} {}
     log_record(const log_record&) = delete;
     log_record& operator=(const log_record&) = delete;
     log_record(log_record&&) noexcept = delete;
     log_record& operator=(log_record&&) noexcept = delete;
     ~log_record() = default;
 
-    [[nodiscard]] size_t inlined_size() const { return sizeof(serialized_log_record) + (is_inlineable() ? size : 0); }
-    [[nodiscard]] size_t serialized_size() const { return sizeof(serialized_log_record) + size; }
+    [[nodiscard]] size_t inlined_size() const {
+        return sizeof(serialized_log_record) + (is_inlineable() ? data.size : 0);
+    }
+    [[nodiscard]] size_t serialized_size() const { return sizeof(serialized_log_record) + data.size; }
     [[nodiscard]] bool is_inlineable() const {
         // Need inlining if size is smaller or size/buffer is not in dma'ble boundary.
         // return ((size < inline_size) || ((size % dma_boundary) != 0) || (((uintptr_t)data_ptr % dma_boundary) != 0));
-        return (is_size_inlineable(size) || ((reinterpret_cast<uintptr_t>(data_ptr) % dma_boundary) != 0));
+        return (is_size_inlineable(data.size) || ((reinterpret_cast< uintptr_t >(data.bytes) % dma_boundary) != 0) ||
+                !data.aligned);
     }
 
     [[nodiscard]] static bool is_size_inlineable(const size_t sz) {
@@ -172,7 +174,7 @@ std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, trait
 
     // print the stream
     const auto s{fmt::format("magic = {} n_log_records = {} start_log_idx = {} group_size = {} inline_data_offset = {} "
-                         "oob_data_offset = {} prev_grp_crc = {} cur_grp_crc = {}",
+                             "oob_data_offset = {} prev_grp_crc = {} cur_grp_crc = {}",
                              header.magic, header.n_log_records, header.start_log_idx, header.group_size,
                              header.inline_data_offset, header.oob_data_offset, header.prev_grp_crc,
                              header.cur_grp_crc)};
@@ -252,14 +254,13 @@ private:
 };
 
 template < typename charT, typename traits >
-std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& out_stream,
-                                                const LogGroup& lg) {
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& out_stream, const LogGroup& lg) {
     // copy the stream formatting
     std::basic_ostringstream< charT, traits > out_string_stream;
     out_string_stream.copyfmt(out_stream);
 
     // print the stream
-    const auto* const header{reinterpret_cast<const log_group_header*>(lg.m_cur_log_buf)};
+    const auto* const header{reinterpret_cast< const log_group_header* >(lg.m_cur_log_buf)};
     const auto s{fmt::format("Header:[{}]\nLog_idx_range: [{} - {}] DevOffset: {} Max_Records: {} IOVecSize: {}\n"
                              "-----------------------------------------------------------------\n",
                              *header, lg.m_flush_log_idx_from, lg.m_flush_log_idx_upto, lg.m_log_dev_offset,
@@ -307,7 +308,8 @@ private:
 typedef int64_t logid_t;
 struct logdev_key {
     constexpr logdev_key(const logid_t idx = std::numeric_limits< logid_t >::min(),
-                         const uint64_t dev_offset = std::numeric_limits< uint64_t >::min()) : idx{idx}, dev_offset{dev_offset} {}
+                         const uint64_t dev_offset = std::numeric_limits< uint64_t >::min()) :
+            idx{idx}, dev_offset{dev_offset} {}
     logdev_key(const logdev_key&) = default;
     logdev_key& operator=(const logdev_key&) = default;
     logdev_key(logdev_key&&) noexcept = default;
@@ -332,8 +334,7 @@ struct logdev_key {
         dev_offset = std::numeric_limits< uint64_t >::max();
     }
 
-    static const logdev_key& out_of_bound_ld_key()
-    {
+    static const logdev_key& out_of_bound_ld_key() {
         static constexpr logdev_key s_out_of_bound_ld_key{std::numeric_limits< logid_t >::max(), 0};
         return s_out_of_bound_ld_key;
     }
@@ -519,16 +520,15 @@ public:
      *
      * @param store_id: The upper layer store id for this log record
      * @param seq_num: Upper layer store seq_num
-     * @param data : Pointer to the data to be appended
-     * @param size : Size of the data. At this point it does not support size > Max_Atomic_Page_size of underlying
+     * @param data : Pointer to the data to be appended with its size
      * structure which could be 8K
      * @param cb_context Context to put upon a callback once append is. Upon completion the registered callback is
      * called.
      *
      * @return logid_t : log_idx of the log of the data.
      */
-    [[nodiscard]] logid_t append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, uint8_t* const data, const uint32_t size,
-                         void* const cb_context);
+    [[nodiscard]] logid_t append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num,
+                                       const sisl::io_blob& data, void* const cb_context);
 
     /**
      * @brief Read the log id from the device offset
@@ -676,9 +676,9 @@ private:
 private:
     boost::intrusive_ptr< HomeStoreBase > m_hb; // Back pointer to homestore
     std::unique_ptr< sisl::StreamTracker< log_record > >
-        m_log_records;                               // The container which stores all in-memory log records
-    std::atomic< logid_t > m_log_idx{0};             // Generator of log idx
-    std::atomic< int64_t > m_pending_flush_size{0};  // How much flushable logs are pending
+        m_log_records;                              // The container which stores all in-memory log records
+    std::atomic< logid_t > m_log_idx{0};            // Generator of log idx
+    std::atomic< int64_t > m_pending_flush_size{0}; // How much flushable logs are pending
     std::atomic< bool > m_is_flushing{false}; // Is LogDev currently flushing (so far supports one flusher at a time)
     bool m_stopped{false}; // Is Logdev stopped. We don't need lock here, because it is updated under flush lock
     std::map< logid_t, logstore_id_t > m_garbage_store_ids;

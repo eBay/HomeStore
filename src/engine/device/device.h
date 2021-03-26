@@ -163,6 +163,8 @@ struct super_block {
     hs_uuid_t system_uuid;         // homestore system uuid
 
     uint64_t get_magic() const { return magic; }
+    const char* get_product_name() const { return product_name; }
+    uint32_t get_version() const { return version; }
     hs_uuid_t get_sys_uuid() const { return system_uuid; }
 } __attribute((packed));
 

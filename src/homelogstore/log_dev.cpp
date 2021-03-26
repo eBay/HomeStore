@@ -157,11 +157,11 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
     m_hb->get_logdev_blkstore()->lseek(cursor); // Reset back
 }
 
-int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, uint8_t* const data,
-                             const uint32_t size, void* const cb_context) {
+int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, const sisl::io_blob& data,
+                             void* const cb_context) {
     const auto idx{m_log_idx.fetch_add(1, std::memory_order_acq_rel)};
-    m_log_records->create(idx, store_id, seq_num, data, size, cb_context);
-    flush_if_needed(size, idx);
+    m_log_records->create(idx, store_id, seq_num, data, cb_context);
+    flush_if_needed(data.size, idx);
     return idx;
 }
 

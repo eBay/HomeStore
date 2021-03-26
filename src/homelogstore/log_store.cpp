@@ -265,7 +265,7 @@ logdev_key HomeLogStoreMgr::do_device_truncate(const bool dry_run) {
         m_non_participating_stores.clear();
     }
     // Got the safest log id to truncate and actually truncate upto the safe log idx to the log device
-    if (!dry_run) { 
+    if (!dry_run) {
         const auto num_records_to_truncate{m_log_dev.truncate(min_safe_ld_key)};
         if (num_records_to_truncate == 0) min_safe_ld_key = logdev_key::out_of_bound_ld_key();
     }
@@ -355,8 +355,8 @@ void HomeLogStore::write_async(logstore_req* const req, const log_req_comp_cb_t&
     m_records.create(req->seq_num);
     COUNTER_INCREMENT(home_log_store_mgr.m_metrics, logstore_append_count, 1);
     HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logstore_record_size, req->data.size);
-    [[maybe_unused]] const auto logid{HomeLogStoreMgr::logdev().append_async(
-        m_store_id, req->seq_num, req->data.bytes, req->data.size, static_cast< void* >(req))};
+    [[maybe_unused]] const auto logid{
+        HomeLogStoreMgr::logdev().append_async(m_store_id, req->seq_num, req->data, static_cast< void* >(req))};
 }
 
 void HomeLogStore::write_async(const logstore_seq_num_t seq_num, const sisl::io_blob& b, void* const cookie,

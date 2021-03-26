@@ -49,6 +49,9 @@ struct var_node_header {
     // TODO:
     // We really dont require storing m_init_available_space in each node.
     // Instead add method in variant node to fetch config
+
+    uint16_t tail_offset() const { return m_tail_arena_offset; }
+    uint16_t available_space() const { return m_available_space; }
 } __attribute((packed));
 
 #define memrshift(ptr, size) (memmove(ptr, ptr + size, size))
@@ -549,13 +552,13 @@ public:
 private:
     uint32_t insert(int ind, const sisl::blob& key_blob, const sisl::blob& val_blob) {
         assert(ind <= (int)this->get_total_entries());
-        LOGTRACEMOD(btree_generics, "{}:{}:{}:{}", ind, get_var_node_header()->m_tail_arena_offset,
-                    get_arena_free_space(), get_var_node_header()->m_available_space);
+        LOGTRACEMOD(btree_generics, "{}:{}:{}:{}", ind, get_var_node_header()->tail_offset(), get_arena_free_space(),
+                    get_var_node_header()->available_space());
         uint16_t obj_size = key_blob.size + val_blob.size;
         uint16_t to_insert_size = obj_size + get_record_size();
-        if (to_insert_size > get_var_node_header()->m_available_space) {
+        if (to_insert_size > get_var_node_header()->available_space()) {
             LOGDEBUG("insert failed insert size {} available size {}", to_insert_size,
-                     get_var_node_header()->m_available_space);
+                     get_var_node_header()->available_space());
             return 0;
         }
 

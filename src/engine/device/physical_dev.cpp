@@ -33,8 +33,8 @@ static std::atomic< uint64_t > glob_phys_dev_offset(0);
 static std::atomic< uint32_t > glob_phys_dev_ids(0);
 
 PhysicalDev::~PhysicalDev() {
-    LOGINFO("device name {} superblock magic {} product name {} version {}", m_devname, m_super_blk->magic,
-            m_super_blk->product_name, m_super_blk->version);
+    LOGINFO("device name {} superblock magic {} product name {} version {}", m_devname, m_super_blk->get_magic(),
+            m_super_blk->get_product_name(), m_super_blk->get_version());
     iomanager.iobuf_free((uint8_t*)m_super_blk);
 }
 
@@ -66,9 +66,7 @@ void PhysicalDev::attach_superblock_chunk(PhysicalDevChunk* chunk) {
 
 PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags,
                          iomgr::iomgr_drive_type drive_type) :
-        m_mgr{mgr},
-        m_devname{devname},
-        m_metrics{devname} {
+        m_mgr{mgr}, m_devname{devname}, m_metrics{devname} {
 
     HS_LOG_ASSERT_LE(sizeof(super_block), SUPERBLOCK_SIZE, "Device {} Ondisk Superblock size not enough to hold in-mem",
                      devname);
@@ -82,10 +80,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
 PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, hs_uuid_t& system_uuid,
                          uint32_t dev_num, uint64_t dev_offset, iomgr::iomgr_drive_type drive_type, bool is_init,
                          uint64_t dm_info_size, bool* is_inited, bool is_restricted_mode) :
-        m_mgr{mgr},
-        m_devname{devname},
-        m_metrics{devname},
-        m_restricted_mode{is_restricted_mode} {
+        m_mgr{mgr}, m_devname{devname}, m_metrics{devname}, m_restricted_mode{is_restricted_mode} {
     /* super block should always be written atomically. */
     HS_LOG_ASSERT_LE(sizeof(super_block), SUPERBLOCK_SIZE, "Device {} Ondisk Superblock size not enough to hold in-mem",
                      devname);
@@ -185,8 +180,8 @@ bool PhysicalDev::load_super_block(hs_uuid_t& system_uuid) {
     bool is_omstore_dev = validate_device();
 
     if (!is_omstore_dev) {
-        LOGCRITICAL("invalid device name {} found magic {} product name {} version {}", m_devname, m_super_blk->magic,
-                    m_super_blk->product_name, m_super_blk->version);
+        LOGCRITICAL("invalid device name {} found magic {} product name {} version {}", m_devname,
+                    m_super_blk->get_magic(), m_super_blk->get_product_name(), m_super_blk->get_version());
         return false;
     }
 

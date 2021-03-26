@@ -108,9 +108,10 @@ int main(int argc, char* argv[]) {
     ld->register_append_cb(on_append_completion);
     ld->register_logfound_cb(on_log_found);
 
-    for (size_t i{0}; (i < std::min<size_t>(195, s.size()); ++i) {
+    for (
+        size_t i{0}; (i < std::min< size_t >(195, s.size()); ++i) {
         s[i] = std::to_string(i);
-        ld->append_async(0, 0, reinterpret_cast< const uint8_t* >(s[i].c_str()), s[i].size() + 1, nullptr);
+        ld->append_async(0, 0, {reinterpret_cast< const uint8_t* >(s[i].c_str()), s[i].size() + 1}, nullptr);
     }
 
     size_t i{0};
