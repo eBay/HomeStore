@@ -6,8 +6,11 @@
 #include <metrics/metrics.hpp>
 #include <iomgr/iomgr.hpp>
 
-const uint16_t init_crc_16 = 0x8005;
 typedef uint32_t crc32_t;
+typedef uint16_t csum_t;
+typedef int64_t seq_id_t;
+const csum_t init_crc_16 = 0x8005;
+
 static constexpr crc32_t init_crc32 = 0x12345678;
 static constexpr crc32_t INVALID_CRC32_VALUE = 0x0u;
 

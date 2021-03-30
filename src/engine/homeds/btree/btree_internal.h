@@ -37,6 +37,7 @@
 #include "engine/common/error.h"
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_header.hpp"
+#include "engine/homestore_base.hpp"
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed,
@@ -106,12 +107,12 @@ using bnodeid_t = uint64_t;
 static constexpr bnodeid_t empty_bnodeid = std::numeric_limits< bnodeid_t >::max();
 
 struct btree_cp_sb {
-    int64_t active_seqid = -1;
+    seq_id_t active_seqid = -1;
     int64_t cp_id = -1;
     int64_t blkalloc_cp_id = -1;
     int64_t btree_size = 0;
 
-    int64_t get_active_seqid() const { return active_seqid; }
+    seq_id_t get_active_seqid() const { return active_seqid; }
 
     /* we can add more statistics as well like number of interior nodes etc. */
     std::string to_string() const {
@@ -124,17 +125,16 @@ struct btree_cp : public boost::intrusive_ref_counter< btree_cp > {
     int64_t cp_id = -1;
     std::atomic< int > ref_cnt;
     std::atomic< int64_t > btree_size;
-    int64_t start_seqid = -1; // not inclusive
-    int64_t end_seqid = -1;   // inclusive
+    seq_id_t start_seqid = -1; // not inclusive
+    seq_id_t end_seqid = -1;   // inclusive
     cp_comp_callback cb;
     homestore::blkid_list_ptr free_blkid_list;
     btree_cp() : ref_cnt(1), btree_size(0){};
     ~btree_cp() {}
-    std::string to_string() {
-        std::stringstream ss;
-        ss << " cp_id " << cp_id << " start_seqid " << start_seqid << " end_seqid " << end_seqid
-           << " free_blkid_list size " << free_blkid_list->size();
-        return ss.str();
+
+    std::string to_string() const {
+        return fmt::format("cp_id={} start_seqid={} end_seqid={} free_blkid_list_size={}", cp_id, start_seqid,
+                           end_seqid, free_blkid_list->size());
     }
 };
 

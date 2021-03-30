@@ -92,13 +92,14 @@ private:
 #pragma pack()
 
 struct blk_cache_alloc_req {
-    blk_cache_alloc_req(const blk_count_t n, const blk_temp_t l, const bool contiguous, const slab_idx_t m = 0) :
-            nblks{n}, preferred_level{l}, is_contiguous(contiguous), min_slab_idx{m} {}
-
+    blk_cache_alloc_req(const blk_count_t n, const blk_temp_t l, const bool contiguous, const slab_idx_t mn = 0,
+                        const slab_idx_t mx = 8) :
+            nblks{n}, preferred_level{l}, is_contiguous(contiguous), min_slab_idx{mn}, max_slab_idx{mx} {}
     const blk_count_t nblks;
     const blk_temp_t preferred_level;
     const bool is_contiguous;
     const slab_idx_t min_slab_idx;
+    const slab_idx_t max_slab_idx;
 };
 
 struct blk_cache_alloc_resp {

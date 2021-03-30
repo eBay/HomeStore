@@ -57,7 +57,7 @@ template < typename KeyType >
 uint64_t compute_hash(const KeyType& key) {
     return compute_hash_imp< KeyType >(key, is_std_hashable< KeyType >{});
 }
-}
+} // namespace
 
 class HashNode : public boost::intrusive::slist_base_hook<> {};
 
@@ -261,7 +261,7 @@ public:
 
     ~IntrusiveHashSet() { delete[] m_buckets; }
 
-    uint64_t get_size() {
+    uint64_t get_size() const {
 #ifdef GLOBAL_HASHSET_LOCK
         std::lock_guard< std::mutex > lk(m);
 #endif
@@ -290,7 +290,7 @@ public:
         return inserted;
     }
 
-    bool get(const K& k, V** outv) {
+    bool get(const K& k, V** outv) const {
 #ifdef GLOBAL_HASHSET_LOCK
         std::lock_guard< std::mutex > lk(m);
 #endif
@@ -298,7 +298,7 @@ public:
         return (hb->get(k, outv));
     }
 
-    bool get(const K& k, V** outv, uint64_t hash_code) {
+    bool get(const K& k, V** outv, uint64_t hash_code) const {
 #ifdef GLOBAL_HASHSET_LOCK
         std::lock_guard< std::mutex > lk(m);
 #endif
@@ -347,9 +347,9 @@ public:
     }
 
 private:
-    HashBucket< K, V >* get_bucket(const K& k) { return &(m_buckets[compute_hash(k) % m_nbuckets]); }
+    HashBucket< K, V >* get_bucket(const K& k) const { return &(m_buckets[compute_hash(k) % m_nbuckets]); }
 
-    HashBucket< K, V >* get_bucket(uint64_t hash_code) { return &(m_buckets[hash_code % m_nbuckets]); }
+    HashBucket< K, V >* get_bucket(uint64_t hash_code) const { return &(m_buckets[hash_code % m_nbuckets]); }
 
 private:
     std::atomic< uint64_t > m_size;
@@ -357,7 +357,7 @@ private:
     HashBucket< K, V >* m_buckets;
 
 #ifdef GLOBAL_HASHSET_LOCK
-    std::mutex m;
+    mutable std::mutex m;
 #endif
 };
 

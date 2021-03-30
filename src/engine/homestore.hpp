@@ -74,9 +74,14 @@ public:
          * conservatively 4 entries in a node with avg size of 2 for each blk.
          * Note :- This restriction will go away once btree start supporinting higher size value.
          */
-        // hs_config.engine.max_blk_cnt = hs_config.drive_attr.atomic_phys_page_size / (4 * 2);
+        hs_config.engine.max_blks_in_blkentry = std::min(static_cast< uint32_t >(BlkId::max_blks_in_op()),
+                                                         hs_config.drive_attr.atomic_phys_page_size / (4 * 2));
         hs_config.engine.min_io_size =
             std::min(input.min_virtual_page_size, (uint32_t)hs_config.drive_attr.atomic_phys_page_size);
+        hs_config.engine.memvec_max_io_size = {static_cast< uint64_t >(
+            HS_STATIC_CONFIG(engine.min_io_size) * ((static_cast< uint64_t >(1) << MEMPIECE_ENCODE_MAX_BITS) - 1))};
+        hs_config.engine.max_vol_io_size = hs_config.engine.memvec_max_io_size;
+
         m_data_pagesz = input.min_virtual_page_size;
 
         LOGINFO("HomeStore starting with dynamic config version: {} static config: {}", HS_DYNAMIC_CONFIG(version),

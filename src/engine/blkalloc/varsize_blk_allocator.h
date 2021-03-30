@@ -60,7 +60,7 @@ public:
                              "Config does not have free blk slab distribution");
         const auto reuse_pct{HS_DYNAMIC_CONFIG(blkallocator.free_blk_reuse_pct)};
         const auto num_temp{HS_DYNAMIC_CONFIG(blkallocator.num_blk_temperatures)};
-        const auto num_temp_slab_pct{(100.0 - reuse_pct) / static_cast<double>(num_temp)};
+        const auto num_temp_slab_pct{(100.0 - reuse_pct) / static_cast< double >(num_temp)};
 
         m_slab_config.m_name = name;
         for (const auto& pct : HS_DYNAMIC_CONFIG(blkallocator.free_blk_slab_distribution)) {
@@ -85,9 +85,8 @@ public:
         // If after percentage calculation, if there are any remaining (possible if config doesn't add up to 100),
         // then put that in first slab.
         assert(cum_pct < 100.0 * (1.0 + std::numeric_limits< double >::epsilon()));
-        if (cum_slab_nblks < m_max_cache_blks)
-        {
-            m_slab_config.m_per_slab_cfg[0].max_entries += m_max_cache_blks - cum_slab_nblks;            
+        if (cum_slab_nblks < m_max_cache_blks) {
+            m_slab_config.m_per_slab_cfg[0].max_entries += m_max_cache_blks - cum_slab_nblks;
         }
     }
 
@@ -151,7 +150,8 @@ private:
     blk_num_t m_alloc_clock_hand;
 
 public:
-    BlkAllocSegment(const blk_cap_t nblks, const seg_num_t seg_num, const blk_num_t nportions, const std::string& seg_name) :
+    BlkAllocSegment(const blk_cap_t nblks, const seg_num_t seg_num, const blk_num_t nportions,
+                    const std::string& seg_name) :
             m_total_blks{nblks}, m_total_portions{nportions}, m_seg_num{seg_num}, m_alloc_clock_hand{0} {}
 
     BlkAllocSegment(const BlkAllocSegment&) = delete;

@@ -334,8 +334,8 @@ public:
             long long int bst = 0;
             bool is_invalid = false;
             if (kv.second.is_valid()) {
-                kv.second.get_array().get(0, ve, false);
-                bst = ve.get_blkId().get_blk_num() + ve.get_blk_offset();
+                ValueEntry* ve = kv.second.get_nth_entry(0);
+                bst = ve->get_base_blkid().get_blk_num() + ve->get_lba_offset();
             } else {
                 is_invalid = true;
             }
@@ -376,8 +376,7 @@ public:
 
         for (auto i = 0ul, j = lba; j < lba + nlbas; i++, j++)
             carr[i] = j % 65000;
-        ValueEntry ve(sid, bid, 0, nlbas, carr);
-        MappingValue value(ve);
+        MappingValue value(sid, bid, 0, nlbas, carr);
 #ifndef NDEBUG
         req->vol_uuid = uuid;
 #endif

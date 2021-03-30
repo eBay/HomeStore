@@ -102,14 +102,22 @@ ENUM(BlkAllocatorState, uint8_t, WAITING, SWEEP_SCHEDULED, SWEEPING, EXITING, DO
 /* Hints for various allocators */
 struct blk_alloc_hints {
     blk_alloc_hints() :
-            desired_temp{0}, dev_id_hint{-1}, can_look_for_other_dev{true}, is_contiguous{false}, multiplier{1} {}
+            desired_temp{0},
+            dev_id_hint{-1},
+            can_look_for_other_dev{true},
+            is_contiguous{false},
+            multiplier{1},
+            max_blks_per_entry{BlkId::max_blks_in_op()} {}
 
     blk_temp_t desired_temp;     // Temperature hint for the device
     int dev_id_hint;             // which physical device to pick (hint if any) -1 for don't care
     bool can_look_for_other_dev; // If alloc on device not available can I pick other device
     bool is_contiguous;
-    uint32_t multiplier; // blks allocated in a blkid should be a multiple of multiplier
+    uint32_t multiplier;         // blks allocated in a blkid should be a multiple of multiplier
+    uint32_t max_blks_per_entry; // Number of blks on every entry
 };
+
+static constexpr blk_temp_t default_temperature() { return 1; }
 
 class BlkAllocPortion {
 private:
@@ -181,7 +189,6 @@ public:
  */
 
 class BlkAllocator {
-
 public:
     BlkAllocator(const BlkAllocConfig& cfg, const uint32_t id = 0) : m_cfg{cfg}, m_chunk_id{(chunk_num_t)id} {
         m_blk_portions = std::make_unique< BlkAllocPortion[] >(cfg.get_total_portions());

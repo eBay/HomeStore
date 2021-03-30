@@ -802,7 +802,7 @@ public:
         }
         tcfg.max_io_size = params.max_io_size;
         /* TODO :- Rishabh: remove it */
-        tcfg.max_io_size = 128 * Ki;
+        // tcfg.max_io_size = 128 * Ki;
         outstanding_ios = 0;
 
         std::unique_lock< std::mutex > lk(m_mutex);
