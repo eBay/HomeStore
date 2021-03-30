@@ -47,21 +47,29 @@ namespace homestore {
 // the default values.
 
 struct cap_attrs {
-    uint64_t used_data_size{0};
-    uint64_t used_index_size{0};
-    uint64_t used_total_size{0};
-    uint64_t initial_total_size{0};
+    uint64_t used_data_size{0};     // access-mgr should use this for used data size;
+    uint64_t used_index_size{0};    // used size of index mgr store;
+    uint64_t used_log_size{0};      // used size of logstore;
+    uint64_t used_metablk_size{0};  // used size of meta blk store;
+    uint64_t used_total_size{0};    // used total size including data and metadata;
+    uint64_t initial_total_size{0}; // access-mgr uses this field to report to host for available user data capacity;
+    uint64_t initial_total_data_meta_size{0}; // total capacity including data and metadata;
     std::string to_string() {
         std::ostringstream ss{};
         ss << "used_data_size = " << used_data_size << ", used_index_size = " << used_index_size
-           << ", used_total_size = " << used_total_size << ", initial_total_size = " << initial_total_size;
+           << ", used_log_size = " << used_log_size << ", used_metablk_size = " << used_metablk_size
+           << ", used_total_size = " << used_total_size << ", initial_total_size = " << initial_total_size
+           << ", initial_total_data_meta_size = " << initial_total_data_meta_size;
         return ss.str();
     }
     void add(const cap_attrs& other) {
         used_data_size += other.used_data_size;
         used_index_size += other.used_index_size;
+        used_log_size += other.used_log_size;
+        used_metablk_size += other.used_metablk_size;
         used_total_size += other.used_total_size;
         initial_total_size += other.initial_total_size;
+        initial_total_data_meta_size += other.initial_total_data_meta_size;
     }
 };
 
@@ -107,8 +115,7 @@ public:
 };
 
 struct hs_engine_config {
-    size_t min_io_size{8192}; // minimum io size supported by
-    
+    size_t min_io_size{8192};        // minimum io size supported by
     uint64_t max_chunks{MAX_CHUNKS}; // These 3 parameters can be ONLY changed with upgrade/revert from device manager
     uint64_t max_vdevs{MAX_VDEVS};
     uint64_t max_pdevs{MAX_PDEVS};

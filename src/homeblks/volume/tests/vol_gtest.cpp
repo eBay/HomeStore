@@ -854,7 +854,7 @@ public:
     }
 
     void delete_volumes() {
-        uint64_t tot_cap = VolInterface::get_instance()->get_system_capacity().initial_total_size;
+        uint64_t tot_cap = VolInterface::get_instance()->get_system_capacity().initial_total_data_meta_size;
         uint64_t used_cap = VolInterface::get_instance()->get_system_capacity().used_total_size;
         HS_ASSERT_CMP(RELEASE, used_cap, <=, tot_cap);
         for (uint64_t i = 0; i < vol_info.size(); ++i) {

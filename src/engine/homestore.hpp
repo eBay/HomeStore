@@ -103,8 +103,12 @@ public:
         cap_attrs cap;
         cap.used_data_size = get_data_blkstore()->get_used_size();
         cap.used_index_size = get_index_blkstore()->get_used_size();
-        cap.used_total_size = cap.used_data_size + cap.used_index_size;
-        cap.initial_total_size = get_data_blkstore()->get_size() + get_index_blkstore()->get_size();
+        cap.used_log_size = get_logdev_blkstore()->get_used_size();
+        cap.used_metablk_size = get_meta_blkstore()->get_used_size();
+        cap.used_total_size = cap.used_data_size + cap.used_index_size + cap.used_log_size + cap.used_metablk_size;
+        cap.initial_total_size = get_data_blkstore()->get_size();
+        cap.initial_total_data_meta_size = get_data_blkstore()->get_size() + get_index_blkstore()->get_size() +
+            get_logdev_blkstore()->get_size() + get_meta_blkstore()->get_size();
         return cap;
     }
 
