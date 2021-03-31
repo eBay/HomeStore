@@ -31,7 +31,7 @@ void LogGroup::reset(const uint32_t max_records) {
 void LogGroup::create_overflow_buf(const uint32_t min_needed) {
     const auto new_len{sisl::round_up(std::max(min_needed, m_cur_buf_len * 2), log_record::dma_boundary())};
     auto new_buf{sisl::aligned_unique_ptr< uint8_t >::make_sized(log_record::dma_boundary(), new_len)};
-    std::memcpy(static_cast<void*>(new_buf.get()), static_cast<const void*>(m_cur_log_buf), m_cur_buf_len);
+    std::memcpy(static_cast< void* >(new_buf.get()), static_cast< const void* >(m_cur_log_buf), m_cur_buf_len);
 
     m_overflow_log_buf = std::move(new_buf);
     m_cur_log_buf = m_overflow_log_buf.get();

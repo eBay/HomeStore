@@ -286,9 +286,7 @@ public:
         LOGINFO("chunk id {}, end size {} actual size {}", get_chunk_id(), size, get_size());
         m_chunk_info->end_of_chunk_size = size;
     }
-    off_t get_end_of_chunk() {
-        return m_chunk_info->end_of_chunk_size;
-    }
+    off_t get_end_of_chunk() const { return m_chunk_info->end_of_chunk_size; }
 
     void recover(std::unique_ptr< sisl::Bitset > recovered_bm, meta_blk* mblk);
 

@@ -25,9 +25,8 @@ read_again:
         } while (m_cur_log_buf.size() < sizeof(log_group_header));
         min_needed = 0;
     }
-    HS_ASSERT_CMP(RELEASE, m_cur_log_buf.size(), !=, 0);
 
-    assert(m_cur_log_buf.size() >= log_record::dma_boundary());
+    HS_ASSERT_CMP(RELEASE, m_cur_log_buf.size(), >=, log_record::dma_boundary());
     const auto* const header{reinterpret_cast< log_group_header* >(m_cur_log_buf.bytes())};
     if (header->magic_word() != LOG_GROUP_HDR_MAGIC) {
         LOGINFOMOD(logstore, "Logdev data not seeing magic at pos {}, must have come to end of logdev",

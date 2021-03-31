@@ -42,7 +42,7 @@ void LogDev::start(const bool format) {
             m_store_found_cb(spair.first, spair.second);
         }
 
-        LOGINFOMOD(logstore, "get start offset {}", m_logdev_meta.get_start_dev_offset());
+        LOGINFOMOD(logstore, "get start vdev offset during recovery {}", m_logdev_meta.get_start_dev_offset());
 
         m_hb->get_logdev_blkstore()->update_data_start_offset(m_logdev_meta.get_start_dev_offset());
         do_load(m_logdev_meta.get_start_dev_offset());
@@ -344,7 +344,7 @@ void LogDev::do_flush(LogGroup* const lg) {
     HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logdev_flush_size_distribution, lg->actual_data_size());
     auto req = logdev_req::make_request();
     req->m_log_group = lg;
-    LOGTRACEMOD(logstore, "offset {} size {}", lg->m_log_dev_offset, lg->header()->total_size());
+    LOGTRACEMOD(logstore, "vdev offset {} log group total size {}", lg->m_log_dev_offset, lg->header()->total_size());
     store->pwritev(lg->iovecs().data(), static_cast< int >(lg->iovecs().size()), lg->m_log_dev_offset, req);
 }
 
