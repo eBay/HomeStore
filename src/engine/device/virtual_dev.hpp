@@ -899,7 +899,7 @@ public:
     /**
      * @brief :- it returns the vdev offset after nbytes from start offset
      */
-    off_t get_dev_offset(off_t nbytes) {
+    off_t get_dev_offset(off_t nbytes) const {
         off_t vdev_offset = data_start_offset();
         uint32_t dev_id = 0, chunk_id = 0;
         off_t offset_in_chunk = 0;
