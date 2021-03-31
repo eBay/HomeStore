@@ -32,7 +32,7 @@ struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvi
     std::vector< Free_Blk_Entry > m_free_list;   // list of pair(offset,size) to be freed when no ref left
     std::mutex m_mtx;                            // This mutex prevents multiple writers to free list
 
-    BlkEvictionRecord(BlkId& key) : m_key(key), m_refcount(0), m_can_free(false), m_free_list(0), m_mtx() {}
+    BlkEvictionRecord(const BlkId& key) : m_key(key), m_refcount(0), m_can_free(false), m_free_list(0), m_mtx() {}
 
     friend void intrusive_ptr_add_ref(BlkEvictionRecord* ber) { ber->m_refcount.increment(); }
 
@@ -42,7 +42,7 @@ struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvi
         if (cnt == 0) { ber->free_yourself(); }
     }
 
-    void add_to_free_list(Free_Blk_Entry& fbe) {
+    void add_to_free_list(const Free_Blk_Entry& fbe) {
         m_mtx.lock();
         m_free_list.push_back(fbe);
         m_mtx.unlock();
@@ -53,9 +53,9 @@ struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvi
     void free_yourself() { sisl::ObjectAllocator< BlkEvictionRecord >::deallocate(this); }
     void set_free_state() { m_can_free = true; }
     void reset_free_state() { m_can_free = false; }
-    bool can_free() { return (m_can_free); }
+    bool can_free() const { return (m_can_free); }
 
-    static BlkEvictionRecord* make_object(BlkId& bid) {
+    static BlkEvictionRecord* make_object(const BlkId& bid) {
         return sisl::ObjectAllocator< BlkEvictionRecord >::make_object(bid);
     }
 
@@ -90,21 +90,22 @@ public:
 class Blk_Read_Tracker {
     homeds::IntrusiveHashSet< BlkId, BlkEvictionRecord > m_pending_reads_map;
     BlkReadTrackerMetrics m_metrics;
-    typedef std::function< void(Free_Blk_Entry&) > blk_remove_cb;
+    typedef std::function< void(const Free_Blk_Entry&) > blk_remove_cb;
     blk_remove_cb m_remove_cb;
 
 public:
-    Blk_Read_Tracker(blk_remove_cb remove_cb) :
+    Blk_Read_Tracker(const blk_remove_cb& remove_cb) :
             m_pending_reads_map(1000), m_metrics("blk_read_tracker"), m_remove_cb(remove_cb) {}
 
-    void insert(Free_Blk_Entry& fbe);
+    void insert(const Free_Blk_Entry& fbe);
+
     /* after a read is finished, remove this blkid from the tracker */
-    void remove(Free_Blk_Entry& fbe);
+    void remove(const Free_Blk_Entry& fbe);
 
     /* safely free these blkids. If a blkid is already in a tracker then it wait for it to remove */
-    void safe_free_blks(Free_Blk_Entry& fbe);
+    void safe_free_blks(const Free_Blk_Entry& fbe);
 
-    uint64_t get_size() { return m_pending_reads_map.get_size(); }
+    uint64_t get_size() const { return m_pending_reads_map.get_size(); }
 };
 } // namespace homestore
 

@@ -73,7 +73,7 @@ struct volume_child_req : public blkstore_req< BlkBuffer > {
     bool is_read = false;
     std::vector< Free_Blk_Entry > blkIds_to_free;
     Clock::time_point op_start_time;
-    uint16_t checksum[MAX_NUM_LBA];
+    csum_t checksum[LbaId::max_lba_count_possible()];
     uint64_t read_buf_offset;
     uint64_t read_size;
     bool use_cache{true};
@@ -187,11 +187,7 @@ struct vol_sb_hdr {
     indx_mgr_sb indx_sb;
     vol_sb_hdr(const uint64_t& page_size, const uint64_t& size, const char* in_vol_name,
                const boost::uuids::uuid& uuid) :
-            version(VOL_SB_VERSION),
-            page_size(page_size),
-            size(size),
-            uuid(uuid),
-            vol_name("") {
+            version(VOL_SB_VERSION), page_size(page_size), size(size), uuid(uuid), vol_name("") {
         memcpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
     };
 
@@ -238,9 +234,9 @@ private:
     io_comp_callback m_comp_cb;
 
     std::atomic< vol_state > m_state;
-    std::atomic< int64_t > seq_Id;
+    std::atomic< int64_t > m_seq_id;
     std::atomic< uint64_t > m_err_cnt = 0;
-    sisl::atomic_counter< uint64_t > vol_ref_cnt = 0; // volume can not be destroy/shutdown until it is not zero
+    sisl::atomic_counter< uint64_t > m_vol_ref_cnt = 0; // volume can not be destroy/shutdown until it is not zero
 
     std::mutex m_sb_lock; // lock for updating vol's sb
     // sisl::aligned_unique_ptr< vol_sb_hdr > m_sb_buf;
@@ -253,6 +249,8 @@ private:
         uint64_t current_iovecs_offset{0};
         size_t iovecs_index{0};
     } IoVecTransversal;
+
+    blk_count_t m_blks_per_lba{1};
 
 private:
     /* static members */
@@ -271,8 +269,8 @@ private:
     void alloc_single_block_in_mem();
     bool check_and_complete_req(const volume_req_ptr& vreq, const std::error_condition& err);
 
-    volume_child_req_ptr create_vol_child_req(BlkId& bid, const volume_req_ptr& vreq, const uint64_t start_lba,
-                                              int nlbas);
+    volume_child_req_ptr create_vol_child_req(const BlkId& bid, const volume_req_ptr& vreq, const uint64_t start_lba,
+                                              const lba_count_t nlbas);
 
     template < typename... Args >
     void assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str, const Args&... args) {
@@ -429,16 +427,34 @@ public:
      */
     uint64_t get_page_size() const { return ((vol_sb_hdr*)m_sb_buf.bytes())->page_size; }
 
+    /* Given the io size returns the number of lbas
+     */
+    lba_count_t get_nlbas(const uint64_t io_size) const {
+        return static_cast< lba_count_t >(io_size / get_page_size());
+    }
+
+    /* Given the number of lbas, gets the io size
+     */
+    uint64_t get_io_size(const lba_count_t nlbas) const { return static_cast< uint64_t >(nlbas) * get_page_size(); }
+
+    /* Get the maximum io size supported by this volume
+     */
+    uint64_t get_max_io_size() const { return HS_STATIC_CONFIG(engine.max_vol_io_size); }
+
+    /* Get the maximum lbas in one io supported by this volume
+     */
+    lba_count_t get_max_io_nlbas() const { return get_nlbas(get_max_io_size()); }
+
     /* Get size of this volume.
      * @return :- size
      */
     uint64_t get_size() const { return ((vol_sb_hdr*)m_sb_buf.bytes())->size; }
-    cap_attrs get_used_size() { return m_indx_mgr->get_used_size(); }
+    cap_attrs get_used_size() const { return m_indx_mgr->get_used_size(); }
 
     /* Get uuid of this volume.
      * @return :- uuid
      */
-    boost::uuids::uuid get_uuid() { return ((vol_sb_hdr*)m_sb_buf.bytes())->uuid; }
+    boost::uuids::uuid get_uuid() const { return ((vol_sb_hdr*)m_sb_buf.bytes())->uuid; }
 
     /* Get state of this volume.
      * @return :- state
@@ -455,7 +471,7 @@ public:
     /* Check if volume is offline
      * @params :- return true if it is offline
      */
-    bool is_offline();
+    bool is_offline() const;
 
     size_t call_batch_completion_cbs();
 
@@ -465,14 +481,14 @@ public:
      */
     indx_cp_ptr attach_prepare_volume_cp(const indx_cp_ptr& icp, hs_cp* cur_hcp, hs_cp* new_hcp);
 
-    std::string to_string() {
-        std::stringstream ss;
-        ss << "Name :" << get_name() << ", UUID :" << boost::lexical_cast< std::string >(get_uuid())
-           << ", Size:" << get_size() << ((is_offline()) ? ", Offline" : ", Not Offline") << ", State :" << get_state();
-        return ss.str();
+    std::string to_string() const {
+        return fmt::format("Name={} UUID={} size={} {} state={}", get_name(),
+                           boost::lexical_cast< std::string >(get_uuid()), get_size(),
+                           (is_offline() ? "Offline" : "Online"), get_state());
     }
+
     uint64_t inc_and_get_seq_id() {
-        uint64_t id = seq_Id.fetch_add(1, std::memory_order_relaxed);
+        uint64_t id = m_seq_id.fetch_add(1, std::memory_order_relaxed);
         return (id + 1);
     }
 
@@ -484,7 +500,7 @@ public:
     void recovery_start_phase2();
     static void fake_reboot(){};
     std::shared_ptr< SnapMgr > get_indx_mgr_instance() { return m_indx_mgr; }
-    bool is_recovery_done() { return m_indx_mgr->is_recovery_done(); }
+    bool is_recovery_done() const { return m_indx_mgr->is_recovery_done(); }
 };
 
 /* Note :- Any member inside this structure is not lock protected. Its caller responsibility to call it under lock
@@ -494,8 +510,10 @@ typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 
 ENUM(volume_req_state, uint8_t, preparing, data_io, journal_io, completed);
 struct journal_key {
-    uint64_t lba;
-    uint32_t nlbas;
+    lba_t lba;
+    lba_count_t nlbas;
+
+    [[nodiscard]] lba_count_t num_lbas() const { return nlbas; }
 } __attribute__((__packed__));
 
 struct volume_req : indx_req {
@@ -524,21 +542,19 @@ struct volume_req : indx_req {
     std::vector< std::pair< MappingKey, MappingValue > > result_kv;
 
     /********** members used by indx_mgr and mapping **********/
-    int64_t lastCommited_seqid = INVALID_SEQ_ID;
-    int64_t seqid = INVALID_SEQ_ID;
+    seq_id_t lastCommited_seqid = INVALID_SEQ_ID;
+    seq_id_t seqid = INVALID_SEQ_ID;
 
     /********** Below entries are used for journal or to store checksum **********/
-    std::vector< uint16_t > csum_list;
-    void push_csum(uint16_t csum) { csum_list.push_back(csum); }
+    std::vector< csum_t > csum_list;
+    void push_csum(const csum_t csum) { csum_list.push_back(csum); }
     std::vector< BlkId > alloc_blkid_list;
-    void push_blkid(BlkId& bid) { alloc_blkid_list.push_back(bid); }
+    void push_blkid(const BlkId& bid) { alloc_blkid_list.push_back(bid); }
 
     /********** member functions **********/
-    virtual std::string to_string() const {
-        std::ostringstream ss{};
-        ss << "vol_interface_req: request_id=" << iface_req->request_id << " dir=" << (is_read_op() ? "R" : "W")
-           << " outstanding_io_cnt=" << outstanding_io_cnt.get();
-        return ss.str();
+    std::string to_string() const {
+        return fmt::format("vol_interface_req: req_id={} dir={} outstanding_io_cnt={}", iface_req->request_id,
+                           (is_read_op() ? "R" : "W"), outstanding_io_cnt.get());
     }
 
     static volume_req_ptr make(const vol_interface_req_ptr& iface_req) {
@@ -547,10 +563,10 @@ struct volume_req : indx_req {
 
     virtual ~volume_req() override = default;
 
-    Volume* vol() { return iface_req->vol_instance.get(); }
+    Volume* vol() const { return iface_req->vol_instance.get(); }
     bool is_read_op() const { return iface_req->is_read(); }
-    uint64_t lba() const { return iface_req->lba; }
-    uint32_t nlbas() const { return iface_req->nlbas; }
+    lba_t lba() const { return iface_req->lba; }
+    lba_count_t nlbas() const { return iface_req->nlbas; }
     bool is_sync() const { return iface_req->sync; }
     bool use_cache() const { return iface_req->cache; }
     std::error_condition& err() const { return iface_req->err; }
@@ -560,14 +576,14 @@ struct volume_req : indx_req {
 
     /***************** Virtual functions required by indx mgr *********************/
     virtual void free_yourself() override { sisl::ObjectAllocator< volume_req >::deallocate(this); }
-    virtual uint64_t get_seqid() override { return seqid; }
-    virtual uint32_t get_key_size() override { return (sizeof(journal_key)); }
-    virtual uint32_t get_val_size() override {
-        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
+    seq_id_t get_seqid() const override { return seqid; }
+    uint32_t get_key_size() const override { return (sizeof(journal_key)); }
+    uint32_t get_val_size() const override {
+        lba_count_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         return (sizeof(uint16_t) * active_nlbas_written);
     }
     virtual void fill_key(void* mem, uint32_t size) override {
-        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
+        lba_count_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         assert(size == sizeof(journal_key));
         journal_key* key = (journal_key*)mem;
         key->lba = lba();
@@ -575,21 +591,21 @@ struct volume_req : indx_req {
     }
 
     virtual void fill_val(void* mem, uint32_t size) override {
-        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
+        lba_count_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         /* we only populating check sum. Allocate blkids are already populated by indx mgr */
-        uint16_t* j_csum = (uint16_t*)mem;
+        csum_t* j_csum = (csum_t*)mem;
         assert(is_unmap() || active_nlbas_written == nlbas());
-        for (uint32_t i = 0; i < active_nlbas_written; ++i) {
+        for (lba_count_t i{0}; i < active_nlbas_written; ++i) {
             j_csum[i] = csum_list[i];
         }
     }
-    virtual uint32_t get_io_size() override {
-        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
-        return active_nlbas_written * vol()->get_page_size();
+    uint32_t get_io_size() const override {
+        lba_count_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
+        return vol()->get_io_size(active_nlbas_written);
     }
 
-    virtual bool is_io_completed() override {
-        uint64_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
+    bool is_io_completed() const override {
+        lba_count_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         return (active_nlbas_written == nlbas());
     }
 
@@ -597,16 +613,15 @@ private:
     /********** Constructor/Destructor **********/
     // volume_req() : csum_list(0), alloc_blkid_list(0), fbe_list(0){};
     volume_req(const vol_interface_req_ptr& vi_req) :
-            indx_req(vi_req->request_id, vi_req->op_type),
-            iface_req(vi_req),
-            io_start_time(Clock::now()) {
-        assert((vi_req->vol_instance->get_page_size() * vi_req->nlbas) <= VOL_MAX_IO_SIZE);
+            indx_req(vi_req->request_id, vi_req->op_type), iface_req(vi_req), io_start_time(Clock::now()) {
+        HS_DEBUG_ASSERT_LE(vi_req->vol_instance->get_io_size(vi_req->nlbas), HS_STATIC_CONFIG(engine.max_vol_io_size),
+                           "IO size exceeds max_vol_io_size supported");
         if (vi_req->iovecs.empty()) {
             // lifetime managed by HomeStore
             if (vi_req->is_write()) {
                 data.emplace< MemVecData >(new homeds::MemVector{
                     static_cast< uint8_t* >(vi_req->buffer),
-                    static_cast< uint32_t >(vi_req->vol_instance->get_page_size() * vi_req->nlbas), 0});
+                    static_cast< uint32_t >(vi_req->vol_instance->get_io_size(vi_req->nlbas)), 0});
             }
         } else {
             // used passed in iovecs
@@ -614,12 +629,11 @@ private:
         }
 
         /* Trying to reserve the max possible size so that memory allocation is efficient */
-        csum_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
-        indx_fbe_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
-        alloc_blkid_list.reserve(VOL_MAX_IO_SIZE / vi_req->vol_instance->get_page_size());
+        auto max_nlbas = vi_req->vol_instance->get_max_io_nlbas();
+        csum_list.reserve(max_nlbas);
+        indx_fbe_list.reserve(max_nlbas);
+        alloc_blkid_list.reserve(max_nlbas);
         if (vi_req->is_write() || vi_req->is_unmap()) { seqid = vi_req->vol_instance->inc_and_get_seq_id(); }
     }
 };
-
-#define NUM_BLKS_PER_THREAD_TO_QUERY 10000ull
 } // namespace homestore

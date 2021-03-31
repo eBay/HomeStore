@@ -16,34 +16,29 @@ class MapValue : public MappingValue, public ValueSpec {
 
 public:
     BlkId get_blkId() {
-        ValueEntry ve;
-        get_array().get(0, ve, false);
-        return ve.get_blkId();
+        ValueEntry* ve = get_nth_entry(0);
+        return ve->get_base_blkid();
     }
 
     uint64_t start() {
-        ValueEntry ve;
-        get_array().get(0, ve, false);
-        return ve.get_blkId().get_blk_num() + ve.get_blk_offset();
+        ValueEntry* ve = get_nth_entry(0);
+        return ve->get_base_blkid().get_blk_num() + ve->get_lba_offset();
     }
 
     // NOTE assuming data block size is same as lba-volume block size
     uint64_t end() {
-        ValueEntry ve;
-        get_array().get(0, ve, false);
-        return start() + ve.get_nlba() - 1;
+        ValueEntry* ve = get_nth_entry(0);
+        return start() + ve->get_num_lbas() - 1;
     }
 
     void addToId(uint64_t val) {
-        ValueEntry ve;
-        get_array().get(0, ve, false);
-        ve.get_blkId().set_blk_num(ve.get_blkId().get_blk_num() + val);
+        ValueEntry* ve = get_nth_entry(0);
+        ve->get_base_blkid().set_blk_num(ve->get_base_blkid().get_blk_num() + val);
     }
 
     void reset() {
-        ValueEntry ve;
-        get_array().get(0, ve, false);
-        ve.get_blkId().set_blk_num(0);
+        ValueEntry* ve = get_nth_entry(0);
+        ve->get_base_blkid().set_blk_num(0);
     }
 
     static std::shared_ptr< MapValue > gen_value(ValuePattern spec, MapValue* ref_value = nullptr) {
@@ -64,8 +59,8 @@ public:
                 std::shared_ptr< MapValue > temp = std::make_shared< MapValue >(value);
                 return temp;
             } else {
-                ValueEntry ve(INVALID_SEQ_ID, BlkId(1, 1, 0), 0, 1, &carr[0], 1);
-                std::shared_ptr< MapValue > temp = std::make_shared< MapValue >(ve);
+                std::shared_ptr< MapValue > temp =
+                    std::make_shared< MapValue >(MappingValue(INVALID_SEQ_ID, BlkId(1u, 1u, 0u), 0u, 1u, &carr[0]));
                 return temp;
             }
         }
@@ -84,9 +79,8 @@ public:
 
             auto sblk = distribution(generator);
 
-            ValueEntry ve(sid, BlkId(sblk, 1, 0), 0, 1, &carr[0], 1);
-
-            std::shared_ptr< MapValue > temp = std::make_shared< MapValue >(ve);
+            std::shared_ptr< MapValue > temp =
+                std::make_shared< MapValue >(MappingValue(sid, BlkId(sblk, 1u, 0u), 0u, 1u, &carr[0]));
             return temp;
         }
         default:
@@ -98,8 +92,8 @@ public:
     }
 
     MapValue() : MappingValue() {}
-    explicit MapValue(ValueEntry& ve) : MappingValue(ve) {}
-    explicit MapValue(MappingValue& value) : MappingValue(value) {}
+    // explicit MapValue(ValueEntry& ve) : MappingValue(ve) {}
+    explicit MapValue(const MappingValue& value) : MappingValue(value) {}
 
     MapValue& operator=(const MapValue& other) {
         copy_blob(other.get_blob());
@@ -112,13 +106,12 @@ public:
     //            }
     //
     virtual uint64_t get_hash_code() override {
-        ValueEntry ve;
-        get_array().get(0, ve, false);
-        auto seqid = ve.get_seqid();
-        ve.set_seqid(INVALID_SEQ_ID);
+        ValueEntry* ve = get_latest_entry();
+        auto seqid = ve->get_seqid();
+        ve->set_seq_id(INVALID_SEQ_ID);
         sisl::blob b = get_blob();
         auto hash = util::Hash64((const char*)b.bytes, (size_t)b.size);
-        ve.set_seqid(seqid);
+        ve->set_seq_id(seqid);
         return hash;
     }
 };

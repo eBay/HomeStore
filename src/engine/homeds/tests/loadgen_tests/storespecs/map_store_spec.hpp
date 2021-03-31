@@ -57,11 +57,10 @@ public:
         iface_req->vol_instance = m_vol;
         iface_req->op_type = Op_type::WRITE;
         auto req = volume_req::make(iface_req);
-        ValueEntry ve;
-        v->get_array().get(0, ve, false);
-        ve.set_seqid(req->seqid);
+        ValueEntry* ve = v->get_nth_entry(0);
+        req->seqid = ve->get_seqid();
         req->lastCommited_seqid = req->seqid; // keeping only latest version always
-        req->push_blkid(ve.get_blkId());
+        req->push_blkid(ve->get_base_blkid());
         send_io(k, *(v.get()), req);
         return true;
     }
@@ -116,13 +115,13 @@ public:
                 next_lba++;
                 continue;
             }
-            ValueEntry ve;
-            (kvs[j].second.get_array()).get(0, ve, false);
+            ValueEntry* ve = (kvs[j].second).get_nth_entry(0);
             int cnt = 0;
             while (next_lba <= kvs[j].first.end()) {
-                auto storeblk = ve.get_blkId().get_blk_num() + ve.get_blk_offset() + cnt;
-                ValueEntry ve(INVALID_SEQ_ID, BlkId(storeblk, 1, 0), 0, 1, &carr[0], 1);
-                result.push_back(std::make_pair(K(next_lba, 1), V(ve)));
+                auto storeblk = ve->get_base_blkid().get_blk_num() + ve->get_lba_offset() + cnt;
+
+                result.push_back(std::make_pair(
+                    K(next_lba, 1), V(MappingValue(INVALID_SEQ_ID, BlkId(storeblk, 1u, 0u), 0u, 1u, &carr[0]))));
                 next_lba++;
                 cnt++;
             }
@@ -162,8 +161,7 @@ public:
             carr[i] = 1;
 
         // NOTE assuming data block size is same as lba-volume block size
-        ValueEntry ve(req->seqid, BlkId(bid.get_blk_num(), bid.get_nblks(), 0), 0, bid.get_nblks(), &carr[0], 1);
-        MappingValue value(ve);
+        MappingValue value(req->seqid, BlkId(bid.get_blk_num(), bid.get_nblks(), 0), 0, bid.get_nblks(), &carr[0]);
         LOGDEBUG("Mapping range put:{} {} ", key.to_string(), value.to_string());
 
         send_io(key, value, req);

@@ -117,7 +117,7 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     LOGINFO("Initializing HomeBlks with Config {}", m_cfg.to_string());
     HomeStore< BLKSTORE_BUFFER_TYPE >::init((const hs_input_params&)cfg);
 
-    m_out_params.max_io_size = VOL_MAX_IO_SIZE;
+    m_out_params.max_io_size = HS_STATIC_CONFIG(engine.max_vol_io_size);
     superblock_init();
     sisl::MallocMetrics::enable();
 
@@ -831,7 +831,6 @@ void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
 }
 
 void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
-
     // HomeBlk layer expects to see one valid meta_blk record during reboot;
     HS_ASSERT(RELEASE, !m_meta_blk_found, "More than one HomeBlk SB is received, only expecting one!");
 

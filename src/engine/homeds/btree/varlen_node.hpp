@@ -244,6 +244,7 @@ public:
         }
     }
 
+#if 0
     std::string to_string() const {
         std::stringstream ss;
         ss << "###################" << endl;
@@ -272,6 +273,29 @@ public:
             ss << "\n";
         }
         return ss.str();
+    }
+#endif
+
+    std::string to_string() const {
+        auto str = fmt::format("id={} nEntries={} {} free_space={} ", this->get_node_id(), this->get_total_entries(),
+                               (this->is_leaf() ? "LEAF" : "INTERIOR"), get_var_node_header_const()->m_available_space);
+        if (this->is_leaf()) { fmt::format_to(std::back_inserter(str), "edge_id={} ", this->get_edge_id()); }
+        for (uint32_t i{0}; i < this->get_total_entries(); ++i) {
+            K key;
+            get_nth_key(i, &key, false);
+            fmt::format_to(std::back_inserter(str), "Entry{} [Key={}", i + 1, key.to_string());
+
+            if (this->is_leaf()) {
+                V val;
+                get(i, &val, false);
+                fmt::format_to(std::back_inserter(str), " Val={}]", val.to_string());
+            } else {
+                BtreeNodeInfo p;
+                get(i, &p, false);
+                fmt::format_to(std::back_inserter(str), " Val={}]", p.to_string());
+            }
+        }
+        return str;
     }
 
     uint32_t get_available_size(const BtreeConfig& cfg) const { return get_var_node_header_const()->m_available_space; }

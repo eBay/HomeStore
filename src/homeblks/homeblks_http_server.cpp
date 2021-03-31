@@ -4,10 +4,10 @@
 #include <sstream>
 #include <thread>
 
+#include <boost/algorithm/string.hpp>
 #include <nlohmann/json.hpp>
 
 #include "engine/common/homestore_config.hpp"
-
 #include "homeblks_config.hpp"
 #include "homeblks_http_server.hpp"
 #include "home_blks.hpp"
@@ -40,6 +40,9 @@ void HomeBlksHttpServer::start() {
             handler_info("/api/v1/getConfig", HomeBlksHttpServer::get_config, (void*)this),
             handler_info("/api/v1/reloadConfig", HomeBlksHttpServer::reload_dynamic_config, (void*)this),
             handler_info("/api/v1/getStatus", HomeBlksHttpServer::get_status, (void*)this),
+#ifdef _PRERELEASE
+            handler_info("/api/v1/crashSystem", HomeBlksHttpServer::crash_system, (void*)this),
+#endif
         }}));
     m_http_server->start();
 }
@@ -153,8 +156,9 @@ void HomeBlksHttpServer::reload_dynamic_config(sisl::HttpCallData cd) {
     }
 }
 
-bool HomeBlksHttpServer::verify_and_get_verbosity(const evhtp_request_t* req, std::string& failure_resp, int& verbosity_level) {
-    bool ret {true};
+bool HomeBlksHttpServer::verify_and_get_verbosity(const evhtp_request_t* req, std::string& failure_resp,
+                                                  int& verbosity_level) {
+    bool ret{true};
     auto verbosity_kv = evhtp_kvs_find_kv(req->uri->query, "verbosity");
     if (verbosity_kv) {
         try {
@@ -172,14 +176,14 @@ bool HomeBlksHttpServer::verify_and_get_verbosity(const evhtp_request_t* req, st
 void HomeBlksHttpServer::get_status(sisl::HttpCallData cd) {
     auto req = cd->request();
 
-    std::vector<std::string> modules;
+    std::vector< std::string > modules;
     auto modules_kv = evhtp_kvs_find_kv(req->uri->query, "module");
     if (modules_kv) {
         boost::algorithm::split(modules, modules_kv->val, boost::is_any_of(","), boost::token_compress_on);
     }
 
-    std::string failure_resp {""};
-    int verbosity_level {-1};
+    std::string failure_resp{""};
+    int verbosity_level{-1};
     if (!verify_and_get_verbosity(req, failure_resp, verbosity_level)) {
         pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_BADREQ, failure_resp);
         return;
@@ -189,5 +193,27 @@ void HomeBlksHttpServer::get_status(sisl::HttpCallData cd) {
     const auto status_json = status_mgr->get_status(modules, verbosity_level);
     pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, status_json.dump(2));
 }
+
+#ifdef _PRERELEASE
+void HomeBlksHttpServer::crash_system(sisl::HttpCallData cd) {
+    auto req{cd->request()};
+
+    const evhtp_kv_t* _crash_type{nullptr};
+    std::string crash_type;
+    _crash_type = evhtp_kvs_find_kv(req->uri->query, "type");
+    if (_crash_type) { crash_type = _crash_type->val; }
+
+    std::string resp = "";
+    if (crash_type.empty() || boost::iequals(crash_type, "assert")) {
+        HS_RELEASE_ASSERT(0, "Fake Assert in response to an http request");
+    } else if (boost::iequals(crash_type, "segv")) {
+        int* x{nullptr};
+        int y = *x; // Deliberately dereference a nullptr (simulate rather than sending segv signal)
+    } else {
+        resp = "crash type " + crash_type + " not supported yet";
+    }
+    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
+}
+#endif
 
 } // namespace homestore

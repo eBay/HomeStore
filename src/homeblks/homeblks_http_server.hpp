@@ -26,6 +26,9 @@ public:
     static void get_config(sisl::HttpCallData cd);
     static void reload_dynamic_config(sisl::HttpCallData cd);
     static void get_status(sisl::HttpCallData cd);
+#ifdef _PRERELEASE
+    static void crash_system(sisl::HttpCallData cd);
+#endif
 
 private:
     static HomeBlks* to_homeblks(sisl::HttpCallData cd);

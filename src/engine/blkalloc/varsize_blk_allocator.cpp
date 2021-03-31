@@ -39,7 +39,7 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const
 
     // NOTE: Number of blocks must be modulo word size so locks do not fall on same word
     HS_RELEASE_ASSERT_EQ(m_cfg.get_blks_per_portion() % m_bm->word_size(), 0,
-                 "Blocks per portion must be multiple of bitmpa word size.")
+                         "Blocks per portion must be multiple of bitmpa word size.")
 
     // Create segments with as many blk groups as configured.
     const blk_cap_t seg_nblks{cfg.get_total_blks() / cfg.get_total_segments()};
@@ -289,9 +289,9 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_all
     if (homestore_flip->test_flip("varsize_blkalloc_bypass_cache")) {
         blk_count_t num_alllocated{0};
         const auto status{alloc_blks_direct(nblks, hints, out_blkids, num_alllocated)};
-        if ((status == BlkAllocStatus::SUCCESS) || (status == BlkAllocStatus::PARTIAL)) {         
+        if ((status == BlkAllocStatus::SUCCESS) || (status == BlkAllocStatus::PARTIAL)) {
             incr_alloced_blk_count(num_alllocated);
-        } 
+        }
         return status;
     }
 #endif
@@ -299,7 +299,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_all
     // Allocate from blk cache
     static thread_local blk_cache_alloc_resp s_alloc_resp;
     const blk_cache_alloc_req alloc_req{nblks, hints.desired_temp, hints.is_contiguous,
-                                        FreeBlkCache::find_slab(hints.multiplier)};
+                                        FreeBlkCache::find_slab(hints.multiplier),
+                                        FreeBlkCache::find_slab(hints.max_blks_per_entry)};
 
     auto status{BlkAllocStatus::FAILED};
     COUNTER_INCREMENT(m_metrics, num_alloc, 1);
@@ -324,7 +325,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_all
     s_alloc_resp.reset();
     blk_count_t total_allocated{0};
     // retries must be at least two to allow slab refill logic to run
-    const uint32_t max_retries{std::max<uint32_t>(HS_DYNAMIC_CONFIG(blkallocator.max_varsize_blk_alloc_attempt), 2)};
+    const uint32_t max_retries{std::max< uint32_t >(HS_DYNAMIC_CONFIG(blkallocator.max_varsize_blk_alloc_attempt), 2)};
     for (uint32_t retry{0}; (retry < max_retries); ++retry) {
         status = m_fb_cache->try_alloc_blks(alloc_req, s_alloc_resp);
         if ((status == BlkAllocStatus::SUCCESS) || ((status == BlkAllocStatus::PARTIAL) && !hints.is_contiguous)) {
@@ -428,7 +429,7 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
                      excess_blks.size());
         free_on_bitmap(blk_cache_entry_to_blkid(e));
     }
-    
+
     decr_alloced_blk_count(b.get_nblks());
     BLKALLOC_LOG(TRACE, "Freed blk_num={}", blkid_to_blk_cache_entry(b).to_string());
 }
@@ -543,10 +544,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc_blks_direct(const blk_count_t nblks, c
                 // Get next reset bits and insert to cache and then reset those bits
                 const auto b{m_bm->get_next_contiguous_n_reset_bits(cur_blk_id, end_blk_id,
                                                                     std::min(min_blks, nblks_remain), nblks_remain)};
-                if (b.nbits == 0)
-                {
-                    break;
-                }
+                if (b.nbits == 0) { break; }
                 HS_DEBUG_ASSERT_GE(end_blk_id, b.start_bit, "Expected start bit to be greater than end bit");
                 HS_DEBUG_ASSERT_LE(b.nbits, nblks_remain);
                 HS_DEBUG_ASSERT_GE(b.nbits, std::min(min_blks, nblks_remain));

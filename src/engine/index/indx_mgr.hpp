@@ -182,22 +182,22 @@ struct hs_cp : cp_base {
 };
 
 struct indx_active_cp {
-    int64_t start_seqid = -1; // not inclusive
-    int64_t end_seqid = -1;   // inclusive
+    seq_id_t start_seqid = -1; // not inclusive
+    seq_id_t end_seqid = -1;   // inclusive
     btree_cp_ptr bcp;
-    indx_active_cp(int64_t start_seqid) : start_seqid(start_seqid) {}
+    indx_active_cp(const seq_id_t start_seqid) : start_seqid(start_seqid) {}
     std::string to_string() const {
-        return fmt::format("start_seqid={} end_seqid={} btree_cp_info=[{}]", start_seqid, end_seqid, bcp->to_string());
+        return fmt::format("start_seqid={} end_seqid={} btree_cp_info=[{}] ", start_seqid, end_seqid, bcp->to_string());
     }
 };
 
 struct indx_diff_cp {
-    int64_t start_seqid = -1; // not inclusive
-    int64_t end_seqid = -1;   // inclusive
+    seq_id_t start_seqid = -1; // not inclusive
+    seq_id_t end_seqid = -1;   // inclusive
     indx_tbl* diff_tbl = nullptr;
-    int64_t diff_snap_id = -1;
+    seq_id_t diff_snap_id = -1;
     btree_cp_ptr bcp;
-    indx_diff_cp(int64_t start_seqid) : start_seqid(start_seqid) {}
+    indx_diff_cp(const seq_id_t start_seqid) : start_seqid(start_seqid) {}
     std::string to_string() const {
         return fmt::format("start_seqid={} end_seqid={} diff_snap_id={} btree_cp_info=[{}]", start_seqid, end_seqid,
                            diff_snap_id, (bcp ? bcp->to_string() : ""));
@@ -208,7 +208,7 @@ struct indx_diff_cp {
 struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
     indx_mgr_ptr indx_mgr;
     int flags = cp_state::active_cp;
-    int64_t max_seqid = -1; // max seqid sent on this id
+    seq_id_t max_seqid = -1; // max seqid sent on this id
 
     /* metrics */
     int64_t cp_id;
@@ -223,8 +223,8 @@ struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
                                                         // to a cp.
     blkid_list_ptr io_free_blkid_list;                  // list of blk ids freed in a cp
 
-    indx_cp(int64_t cp_id, int64_t start_active_seqid, int64_t start_diff_seqid, indx_mgr_ptr indx_mgr,
-            blkid_list_ptr& io_free_blkid_list) :
+    indx_cp(const int64_t cp_id, const seq_id_t start_active_seqid, const seq_id_t start_diff_seqid,
+            indx_mgr_ptr indx_mgr, blkid_list_ptr& io_free_blkid_list) :
             indx_mgr(indx_mgr),
             cp_id(cp_id),
             indx_size(0),
@@ -233,13 +233,14 @@ struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
             io_free_blkid_list(io_free_blkid_list) {}
 
     int state() const { return flags; }
-    int64_t get_max_seqid() { return 0; }
-    void set_max_seqid(int64_t seqid){};
+    seq_id_t get_max_seqid() const { return 0; }
+    void set_max_seqid(const seq_id_t seqid){};
 
     std::string to_string() const {
         return fmt::format(
-            "flags={} indx_cp_id={} indx_size={} active_cp=[{}] diff_cp=[{}] size_freed={} user_size_freed={}", flags,
-            cp_id, indx_size, acp.to_string(), dcp.to_string(), io_free_blkid_list->size(),
+            "Flags={} indx_cp_id={} indx_size={} active_checkpoint=[{}] diff_checkpoint=[{}] size_freed={} "
+            "user_size_freed={}",
+            flags, cp_id, indx_size, acp.to_string(), dcp.to_string(), io_free_blkid_list->size(),
             user_free_blkid_list.size());
     }
 };
@@ -257,7 +258,7 @@ struct hs_cp_base_sb {
 } __attribute__((__packed__));
 
 struct hs_cp_unmap_sb : hs_cp_base_sb {
-    uint64_t seq_id;
+    seq_id_t seq_id;
     uint32_t key_size;
 } __attribute__((__packed__));
 
@@ -272,16 +273,16 @@ struct indx_cp_sb {
 
     /* active cp info */
     int64_t active_cp_id = -1;
-    int64_t active_data_seqid = -1;
+    seq_id_t active_data_seqid = -1;
 
     /* diff cp info */
     int64_t diff_cp_id = -1;
-    int64_t diff_data_seqid = -1;
-    int64_t diff_max_seqid = -1;
+    seq_id_t diff_data_seqid = -1;
+    seq_id_t diff_max_seqid = -1;
     int64_t diff_snap_id = -1;
     bool snap_cp = false;
 
-    int64_t get_active_data_seqid() const { return active_data_seqid; }
+    seq_id_t get_active_data_seqid() const { return active_data_seqid; }
 } __attribute__((__packed__));
 
 struct indx_cp_base_sb {
@@ -291,12 +292,10 @@ struct indx_cp_base_sb {
     btree_cp_sb dcp_sb; // diff cp_superblock
     indx_cp_base_sb(boost::uuids::uuid uuid) : uuid(uuid){};
     indx_cp_base_sb(){};
-    std::string to_string() {
-        std::stringstream ss;
-        ss << "active_cp_cnt " << icp_sb.active_cp_id << " active_data_seqid " << icp_sb.active_data_seqid
-           << " diff_cp_cnt " << icp_sb.diff_cp_id << " diff_Data_seqid " << icp_sb.diff_data_seqid
-           << " blkalloc cp cp " << icp_sb.blkalloc_cp_id;
-        return ss.str();
+    std::string to_string() const {
+        return fmt::format("active_cp_cnt={} active_data_seqid={} diff_cp_cnt={} diff_data_seqid={} blkalloc_cp_id={}",
+                           icp_sb.active_cp_id, icp_sb.active_data_seqid, icp_sb.diff_cp_id, icp_sb.diff_data_seqid,
+                           icp_sb.blkalloc_cp_id);
     }
 } __attribute__((__packed__));
 
@@ -346,13 +345,13 @@ public:
     virtual void cp_start(const btree_cp_ptr& bcp, cp_comp_callback cb) = 0;
     virtual btree_status_t recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr, const btree_cp_ptr& bcp) = 0;
     virtual void update_indx_alloc_blkids(const indx_req_ptr& ireq) = 0;
-    virtual uint64_t get_used_size() = 0;
+    virtual uint64_t get_used_size() const = 0;
     virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, homeds::btree::BtreeQueryCursor& cur,
                                             int64_t& size) = 0;
     virtual void get_btreequery_cur(const sisl::blob& b, homeds::btree::BtreeQueryCursor& cur) = 0;
-    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, uint64_t& seq_id, void* key,
+    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, const seq_id_t seq_id, void* key,
                                                         homeds::btree::BtreeQueryCursor& cur, const btree_cp_ptr& bcp,
-                                                        int64_t& size, bool force) = 0;
+                                                        int64_t& size, const bool force) = 0;
     virtual uint64_t get_btree_node_cnt() = 0;
 };
 
@@ -446,8 +445,8 @@ public:
     static uint64_t free_blk(hs_cp* hcp, sisl::ThreadVector< homestore::BlkId >* out_fblk_list, Free_Blk_Entry& fbe,
                              bool force);
 
-    static void add_read_tracker(Free_Blk_Entry& bid);
-    static void remove_read_tracker(Free_Blk_Entry& fbe);
+    static void add_read_tracker(const Free_Blk_Entry& bid);
+    static void remove_read_tracker(const Free_Blk_Entry& fbe);
     static void hs_cp_suspend();
     static void hs_cp_resume();
 
@@ -479,7 +478,7 @@ protected:
     /************************ static private functions **************/
     static void init();
     /* it frees the blks and insert it in cp free blk list. It is called when there is no read pending on this blk */
-    static void safe_to_free_blk(Free_Blk_Entry& fbe);
+    static void safe_to_free_blk(const Free_Blk_Entry& fbe);
 };
 
 class IndxMgrMetrics : public sisl::MetricsGroupWrapper {
@@ -568,12 +567,12 @@ public:
     void flush_free_blks(const indx_cp_ptr& icp, hs_cp* hcp);
 
     void update_cp_sb(indx_cp_ptr& icp, hs_cp* hcp, indx_cp_base_sb* sb);
-    int64_t get_max_seqid_found_in_recovery();
+    seq_id_t get_max_seqid_found_in_recovery() const;
     /* It is called when super block all indx tables are persisted by its consumer */
     void indx_create_done(indx_tbl* indx_tbl = nullptr);
     void indx_init(); // private api
-    std::string get_name();
-    cap_attrs get_used_size();
+    std::string get_name() const;
+    cap_attrs get_used_size() const;
     void attach_user_fblkid_list(blkid_list_ptr& free_blkid_list, const cp_done_cb& free_blks_cb, int64_t free_size,
                                  bool last_cp = false);
 
@@ -588,7 +587,7 @@ public:
     hs_cp* cp_io_enter();
     void cp_io_exit(hs_cp* cp);
     btree_cp_ptr get_btree_cp(hs_cp* hcp);
-    bool is_recovery_done();
+    bool is_recovery_done() const;
 
 protected:
     /*********************** virtual functions required to support snapshot  **********************/
@@ -601,7 +600,8 @@ protected:
         assert(0);
         return -1;
     }
-    virtual void snap_create_done(uint64_t snap_id, int64_t max_seqid, int64_t contiguous_seqid, int64_t end_cp_id) {
+    virtual void snap_create_done(const uint64_t snap_id, const seq_id_t max_seqid, const seq_id_t contiguous_seqid,
+                                  const int64_t end_cp_id) {
         assert(0);
     }
     virtual homeds::btree::btree_super_block snap_get_diff_tbl_sb() {
@@ -642,7 +642,7 @@ private:
     bool m_is_snap_started = false;
     void* m_destroy_meta_blk = nullptr;
     homeds::btree::BtreeQueryCursor m_destroy_btree_cur;
-    int64_t m_max_seqid_in_recovery = -1;
+    seq_id_t m_max_seqid_in_recovery = -1;
     std::atomic< bool > m_active_cp_suspend = false;
     IndxMgrMetrics m_metrics;
 
@@ -673,56 +673,58 @@ private:
     indx_cp_ptr create_new_indx_cp(const indx_cp_ptr& cur_icp);
     void resume_active_cp();
     void suspend_active_cp();
-    sisl::byte_view alloc_unmap_sb(const uint32_t key_size, const uint64_t seq_id,
+    sisl::byte_view alloc_unmap_sb(const uint32_t key_size, const seq_id_t seq_id,
                                    homeds::btree::BtreeQueryCursor& unmap_btree_cur);
     sisl::byte_view alloc_sb_bytes(uint64_t size_);
 #ifndef NDEBUG
     void dump_free_blk_list(const blkid_list_ptr& free_blk_list);
 #endif
     void unmap_indx_async(const indx_req_ptr& ireq);
-    void do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx, void* key, uint64_t seqid,
-                                     homeds::btree::BtreeQueryCursor& btree_cur);
+    void do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx, void* key,
+                                     const seq_id_t seqid, homeds::btree::BtreeQueryCursor& btree_cur);
     void do_remaining_unmap(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx);
     sisl::byte_view write_cp_unmap_sb(void* unmap_meta_blk_cntx, const indx_req_ptr& ireq);
-    sisl::byte_view write_cp_unmap_sb(void* unmap_meta_blk_cntx, const uint32_t key_size, const uint64_t seq_id,
+    sisl::byte_view write_cp_unmap_sb(void* unmap_meta_blk_cntx, const uint32_t key_size, const seq_id_t seq_id,
                                       const void* key, homeds::btree::BtreeQueryCursor& unmap_btree_cur);
 };
 
 /*************************************************** indx request ***********************************/
 
 struct Free_Blk_Entry {
-    BlkId m_blkId;
     /* These entries are needed only to invalidate cache. We store the actual blkid in journal */
-    blk_count_t m_blk_offset;
-    blk_count_t m_nblks_to_free;
+    BlkIdView m_blkid_view;
     hs_cp* m_hcp = nullptr;
 
     Free_Blk_Entry() {}
-    Free_Blk_Entry(const BlkId& blkId) : m_blkId(blkId), m_blk_offset(0), m_nblks_to_free(0) {}
-    Free_Blk_Entry(const BlkId& blkId, uint8_t blk_offset, uint8_t nblks_to_free) :
-            m_blkId(blkId), m_blk_offset(blk_offset), m_nblks_to_free(nblks_to_free) {
+    Free_Blk_Entry(const BlkId& blkid) : m_blkid_view{blkid, 0u, 0u} {}
+    Free_Blk_Entry(const BlkId& blkid, const blk_count_t blk_offset, const blk_count_t nblks_to_free) :
+            m_blkid_view{blkid, blk_offset, nblks_to_free} {
 #ifndef NDEBUG
-        assert(blk_offset + m_nblks_to_free <= m_blkId.get_nblks());
+        assert(blk_offset + nblks_to_free <= blkid.get_nblks());
 #endif
     }
 
-    BlkId blk_id() const { return m_blkId; }
-    uint8_t blk_offset() const { return m_blk_offset; }
-    uint8_t blks_to_free() const { return m_nblks_to_free; }
-    BlkId get_free_blkid() { return (m_blkId.get_blkid_at(m_blk_offset, m_nblks_to_free, 1)); }
+    BlkId get_base_blkid() const { return m_blkid_view.get_blkid(); }
+    uint8_t blk_offset() const { return m_blkid_view.get_view_offset(); }
+    uint8_t blks_to_free() const { return m_blkid_view.get_view_nblks(); }
+    BlkId get_free_blkid() const { return m_blkid_view.get_view_blkid(); }
+
+    std::string to_string() const {
+        return fmt::format("Base blkid={} view/free blkid={}", get_base_blkid(), get_free_blkid());
+    }
 };
 
 /* any consumer req should be derived from indx_mgr_req. Indx mgr use this as a context to call consumer APIs */
 struct indx_req {
 public:
-    virtual uint32_t get_key_size() = 0;
-    virtual uint32_t get_val_size() = 0;
+    virtual uint32_t get_key_size() const = 0;
+    virtual uint32_t get_val_size() const = 0;
     virtual void fill_key(void* mem, uint32_t size) = 0;
     virtual void fill_val(void* mem, uint32_t size) = 0;
-    virtual uint64_t get_seqid() = 0;
-    virtual uint32_t get_io_size() = 0;
+    virtual seq_id_t get_seqid() const = 0;
+    virtual uint32_t get_io_size() const = 0;
     virtual void free_yourself() = 0;
-    virtual bool is_io_completed() = 0;
+    virtual bool is_io_completed() const = 0;
 
 public:
     indx_req(uint64_t request_id, Op_type op_type_) : request_id(request_id), op_type(op_type_) {}
@@ -734,7 +736,7 @@ public:
 
     sisl::io_blob create_journal_entry() { return j_ent.create_journal_entry(this); }
 
-    void push_indx_alloc_blkid(BlkId& bid) { indx_alloc_blkid_list.push_back(bid); }
+    void push_indx_alloc_blkid(const BlkId& bid) { indx_alloc_blkid_list.push_back(bid); }
 
     /* it is used by mapping/consumer to push fbe to free list. These blkds will be freed when entry is completed */
     void indx_push_fbe(std::vector< Free_Blk_Entry >& in_fbe_list) {
@@ -748,9 +750,9 @@ public:
     void inc_ref() { intrusive_ptr_add_ref(this); }
 
     /* Op type getters */
-    bool is_read() { return op_type == Op_type::READ; }
-    bool is_write() { return op_type == Op_type::WRITE; }
-    bool is_unmap() { return op_type == Op_type::UNMAP; }
+    bool is_read() const { return op_type == Op_type::READ; }
+    bool is_write() const { return op_type == Op_type::WRITE; }
+    bool is_unmap() const { return op_type == Op_type::UNMAP; }
     void get_btree_cursor(homeds::btree::BtreeQueryCursor& unmap_btree_cur) {
         unmap_btree_cur.m_last_key = std::move(active_btree_cur.m_last_key);
         unmap_btree_cur.m_locked_nodes = std::move(active_btree_cur.m_locked_nodes);
