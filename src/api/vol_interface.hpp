@@ -72,6 +72,9 @@ struct _counter_generator {
 };
 #define counter_generator _counter_generator::instance()
 
+typedef uint64_t lba_t;       // Type refers to both lba in entry and in volume layer
+typedef uint32_t lba_count_t; // Type defining number of LBAs represented in volume layer
+
 struct volume_req;
 struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     std::shared_ptr< Volume > vol_instance;
@@ -82,8 +85,8 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     uint64_t request_id;
     sisl::atomic_counter< int > refcount;
     std::atomic< bool > is_fail_completed{false};
-    uint64_t lba;
-    uint32_t nlbas;
+    lba_t lba;
+    lba_count_t nlbas;
     Op_type op_type{Op_type::READ};
     bool sync{false};
     bool cache{true};

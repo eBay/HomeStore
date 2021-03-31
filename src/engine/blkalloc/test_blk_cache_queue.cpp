@@ -71,6 +71,7 @@ protected:
                 const auto nblks_added{m_fb_cache->try_fill_cache(fill_req, *fill_session)};
                 ASSERT_EQ(nblks_added, slab_cfg.slab_size)
                     << "Failure in filling cache for i = " << i << " slab=" << slab_cfg.slab_size;
+
                 blk_id += slab_cfg.slab_size;
             }
         }
@@ -127,7 +128,7 @@ TEST_F(BlkCacheQueueTest, rand_alloc_free_blks) {
     LOGINFO("Step 1: Allocating 1000 blocks from random slabs and expect all to succeed");
     std::vector< blk_cache_entry > alloced;
     for (size_t i{0}; i < 1000; ++i) {
-        const auto nblks{static_cast<blk_count_t>(1) << slab_gen(engine)};
+        const auto nblks{static_cast< blk_count_t >(1) << slab_gen(engine)};
         const blk_cache_alloc_req req(nblks, 0, false /* is_contiguous */);
         blk_cache_alloc_resp resp;
 
@@ -140,7 +141,7 @@ TEST_F(BlkCacheQueueTest, rand_alloc_free_blks) {
     LOGINFO("Step 2: Free all allocated blks and expect all free to succeed");
     for (auto& e : alloced) {
         const blk_count_t num_zombied{m_fb_cache->try_free_blks(e, excess_blks)};
-        ASSERT_EQ(num_zombied, static_cast<blk_count_t>(0))
+        ASSERT_EQ(num_zombied, static_cast< blk_count_t >(0))
             << "Failure in freeing the blks to cache for entry e = " << e.to_string();
     }
 
@@ -250,7 +251,7 @@ TEST_F(BlkCacheQueueTest, join_from_multiple_levels) {
     LOGINFO("Step 3: Put one block back on slab 1 and then repeat the allocation, it should fail since there are only "
             "partial available");
     const blk_cache_entry e{10000u, 2, 0};
-    ASSERT_EQ(m_fb_cache->try_free_blks(e, excess_blks), static_cast<blk_count_t>(0))
+    ASSERT_EQ(m_fb_cache->try_free_blks(e, excess_blks), static_cast< blk_count_t >(0))
         << "Expected to be able to put back an entry";
     // NOTE: This must be a contiguous request in order not to get a partial response
     validate_alloc_failure(2, true /* is_contiguous */, "Expected alloc failure with partial available");

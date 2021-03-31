@@ -41,7 +41,7 @@ FreeBlkCacheQueue::FreeBlkCacheQueue(const SlabCacheConfig& cfg, BlkAllocMetrics
 }
 
 BlkAllocStatus FreeBlkCacheQueue::try_alloc_blks(const blk_cache_alloc_req& req, blk_cache_alloc_resp& resp) {
-    const auto slab_idx{FreeBlkCache::find_slab(req.nblks)};
+    const auto slab_idx{std::min(FreeBlkCache::find_slab(req.nblks), req.max_slab_idx)};
 
     COUNTER_INCREMENT(slab_metrics(slab_idx), num_slab_alloc, 1);
     BlkAllocStatus status{try_alloc_in_slab(slab_idx, req, resp)};
@@ -179,10 +179,11 @@ BlkAllocStatus FreeBlkCacheQueue::try_alloc_in_slab(const slab_idx_t slab_idx, c
         // We allocated whats asked but a given entry may be bigger than whats needed, any trailing blocks need to be
         // freed
         if (resp.nblks_alloced > req.nblks) {
-            const blk_count_t residue_nblks{static_cast < blk_count_t>(resp.nblks_alloced - req.nblks)};
+            const blk_count_t residue_nblks{static_cast< blk_count_t >(resp.nblks_alloced - req.nblks)};
             HS_DEBUG_ASSERT_LT(residue_nblks, m_slab_queues[slab_idx]->slab_size(),
                                "Residue block count are not expected to exceed last entry");
-            const blk_count_t needed_blocks{static_cast<blk_count_t>(m_slab_queues[slab_idx]->slab_size() - residue_nblks)};
+            const blk_count_t needed_blocks{
+                static_cast< blk_count_t >(m_slab_queues[slab_idx]->slab_size() - residue_nblks)};
             resp.out_blks.back().set_nblks(needed_blocks);
             resp.nblks_alloced -= residue_nblks;
 

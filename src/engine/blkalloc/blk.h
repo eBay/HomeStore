@@ -155,7 +155,7 @@ public:
     [[nodiscard]] chunk_num_t get_chunk_num() const { return m_chunk_num; }
 
     /* A blkID represent a page size which is assigned to a blk allocator */
-    [[nodiscard]] uint64_t data_size(const uint32_t page_size) const { return (static_cast<uint64_t>(get_nblks()) * page_size); }
+    [[nodiscard]] uint32_t data_size(const uint32_t page_size) const { return (get_nblks() * page_size); }
 
     [[nodiscard]] std::string to_string() const {
         return is_valid() ? fmt::format("BlkNum={} nblks={} chunk={}", get_blk_num(), get_nblks(), get_chunk_num())
@@ -167,6 +167,50 @@ private:
     blk_count_serialized_t m_nblks; // Number of blocks+1 for this blkid, don't directly acccess this - use get_nblks()
     chunk_num_t m_chunk_num;        // Chunk number - which is unique for the entire application
 } __attribute__((__packed__));
+
+struct BlkIdView {
+private:
+    BlkId m_blkid;
+    blk_count_serialized_t m_view_offset{0}; // offset based on blk store not based on vol page size
+    blk_count_serialized_t m_view_nblks{0};  // Number of blkids within the
+
+public:
+    BlkIdView() = default;
+    BlkIdView(const BlkId& id, const blk_count_t offset, const blk_count_t nblks) {
+        set_blkid(id);
+        set_view_offset(offset);
+        set_view_nblks(nblks);
+    }
+
+    void set_blkid(const BlkId& blkid) { m_blkid = blkid; }
+    [[nodiscard]] const BlkId& get_blkid() const { return m_blkid; }
+
+    void set_view_offset(const blk_count_t offset) {
+        HS_DEBUG_ASSERT_LT(offset, BlkId::max_blks_in_op())
+        m_view_offset = static_cast< blk_count_serialized_t >(offset);
+    }
+    blk_count_t get_view_offset() const { return static_cast< blk_count_t >(m_view_offset); }
+
+    void set_view_nblks(const blk_count_t nblks) {
+        HS_DEBUG_ASSERT_LE(nblks, BlkId::max_blks_in_op());
+        HS_DEBUG_ASSERT_LE(get_view_offset() + nblks, m_blkid.get_nblks());
+        m_view_nblks = static_cast< blk_count_serialized_t >(nblks - 1);
+    }
+    [[nodiscard]] blk_count_t get_view_nblks() const { return static_cast< blk_count_t >(m_view_nblks) + 1; }
+
+    void add_to_view_offset(const blk_count_t offset) {
+        HS_DEBUG_ASSERT_LT(get_view_offset() + offset, BlkId::max_blks_in_op());
+        set_view_offset(get_view_offset() + offset);
+    }
+
+    BlkId get_view_blkid() const {
+        BlkId ret;
+        ret.set_blk_num(m_blkid.get_blk_num() + get_view_offset());
+        ret.set_nblks(get_view_nblks());
+        ret.set_chunk_num(m_blkid.get_chunk_num());
+        return ret;
+    }
+};
 
 [[nodiscard]] inline blk_num_t begin_of(const BlkId& bid) { return bid.get_blk_num(); }
 [[nodiscard]] inline blk_num_t end_of(const BlkId& bid) { return bid.get_blk_num() + bid.get_nblks(); }

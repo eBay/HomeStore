@@ -37,7 +37,6 @@ extern bool same_value_gen;
 
 namespace homestore {
 
-const uint64_t VOL_MAX_IO_SIZE{MEMVEC_MAX_IO_SIZE};
 constexpr uint8_t LBA_BITS{56};
 
 class MappingKey;

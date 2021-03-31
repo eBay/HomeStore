@@ -106,8 +106,9 @@ public:
         init_ptr(other.get_total_elements());
     }
 
+#if 0
     // creates temporary heap memory and copies element to it.
-    void set_element(ElementType& e) {
+    void set_element(const ElementType& e) {
         free_mem_if_needed();
         // calculate size of heap to allocate
         uint32_t size = e.get_blob().size + sizeof(record) + sizeof(header);
@@ -120,14 +121,32 @@ public:
         curr_rec->m_offset = 0;
         memcpy(get_data_ptr(0), (void*)e.get_blob().bytes, e.get_blob().size);
     }
+#endif
+
+    template < typename... Args >
+    ElementType* alloc_element(const uint32_t size, Args&&... args) {
+        free_mem_if_needed();
+
+        // calculate size of heap to allocate
+        uint32_t total_size = size + sizeof(record) + sizeof(header);
+        m_arr = allocate(total_size);
+        init_ptr(1);
+        m_header->m_total_elements = 1;
+
+        // copy element to heap
+        record* curr_rec = m_records;
+        curr_rec->m_size = size;
+        curr_rec->m_offset = 0;
+        return new ((void*)get_data_ptr(0)) ElementType(std::forward< Args >(args)...);
+    }
 
     // creates temporary heap memory and copies elements to it.
-    void set_elements(std::vector< ElementType >& elements) {
+    void set_elements(const std::vector< ElementType* >& elements) {
         free_mem_if_needed();
         // calculate size of heap to allocate
         uint32_t size = sizeof(record) * elements.size() + sizeof(header);
-        for (ElementType& e : elements) {
-            size += e.get_blob().size;
+        for (const ElementType* e : elements) {
+            size += e->get_blob().size;
         }
         m_arr = allocate(size);
         init_ptr(elements.size());
@@ -135,12 +154,12 @@ public:
         // copy all elements to heap
         uint16_t i = 0;
         uint16_t offset = 0;
-        for (ElementType& e : elements) {
+        for (const ElementType* e : elements) {
             record* curr_rec = get_record(i++);
-            curr_rec->m_size = e.get_blob().size;
+            curr_rec->m_size = e->get_blob().size;
             curr_rec->m_offset = offset;
-            memcpy(get_data_ptr(offset), (void*)e.get_blob().bytes, e.get_blob().size);
-            offset += e.get_blob().size;
+            memcpy(get_data_ptr(offset), (void*)e->get_blob().bytes, e->get_blob().size);
+            offset += e->get_blob().size;
         }
     }
 
@@ -176,19 +195,37 @@ public:
     }
 
     // access elements by index.Doesn't do bcopy
-    void get(uint32_t index, ElementType& element, bool copy) const {
+    ElementType* get(uint32_t index) const {
+        assert(index < m_header->m_total_elements);
+        assert(is_initialized);
+        record* curr_rec = get_record(index);
+
+        sisl::blob b;
+        b.size = curr_rec->m_size;
+        b.bytes = get_data_ptr(curr_rec->m_offset);
+
+        return (ElementType*)b.bytes;
+    }
+
+#if 0
+    ElementType get(uint32_t index, bool copy) const {
         assert(index < m_header->m_total_elements);
         assert(is_initialized);
         record* curr_rec = get_record(index);
         sisl::blob b;
         b.size = curr_rec->m_size;
         b.bytes = get_data_ptr(curr_rec->m_offset);
+
         if (copy) {
-            element.copy_blob(b);
+            ElementType e;
+            e.copy_blob(b);
+            return e;
         } else {
-            element.set_blob(b);
+            ElementType* e = (ElementType*)b.bytes;
+            return *e;
         }
     }
+#endif
 
     // returns total elements in array
     uint32_t get_total_elements() const {
@@ -196,14 +233,29 @@ public:
         return m_header->m_total_elements;
     }
 
-    void get_all(std::vector< ElementType >& vector, bool copy) const {
-        if (!is_initialized) return;
-        for (auto i = 0u; i < get_total_elements(); i++) {
-            ElementType e;
-            get(i, e, copy);
-            vector.emplace_back(e);
+    std::vector< ElementType* > get_all() const {
+        std::vector< ElementType* > v;
+        if (is_initialized) {
+            v.reserve(get_total_elements());
+            for (auto i = 0u; i < get_total_elements(); ++i) {
+                v.push_back(get(i));
+            }
         }
+        return v;
     }
+
+#if 0
+    std::vector< ElementType > get_all(bool copy) const {
+        std::vector< ElementType > v;
+        if (is_initialized) {
+            v.reserve(get_total_elements());
+            for (auto i = 0u; i < get_total_elements(); ++i) {
+                v.push_back(get(i, copy));
+            }
+        }
+        return v;
+    }
+#endif
 
     // in-place remove
     void remove(uint32_t index) {
@@ -241,13 +293,12 @@ public:
 
     std::string to_string() const {
         assert(is_initialized);
-        std::stringstream ss;
-        for (auto i = 0u; i < m_header->m_total_elements; i++) {
-            ElementType e;
-            get(i, e, false);
-            ss << e << ",";
+        std::string str = "[";
+        for (uint32_t i{0}; i < m_header->m_total_elements; ++i) {
+            fmt::format_to(std::back_inserter(str), "[{}] ", get(i)->to_string());
         }
-        return ss.str();
+        fmt::format_to(std::back_inserter(str), "{}", "]");
+        return str;
     }
 };
 } // namespace homeds

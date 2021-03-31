@@ -178,7 +178,7 @@ public:
         return bt;
     }
 
-    static btree_t* create_btree(btree_super_block& btree_sb, BtreeConfig& cfg, btree_cp_sb* cp_sb,
+    static btree_t* create_btree(const btree_super_block& btree_sb, BtreeConfig& cfg, btree_cp_sb* cp_sb,
                                  const split_key_callback& split_key_cb) {
         Btree* bt = new Btree(cfg);
         auto impl_ptr = btree_store_t::init_btree(bt, cfg);
@@ -215,7 +215,7 @@ public:
         return (create_root_node());
     }
 
-    void init_recovery(btree_super_block btree_sb, btree_cp_sb* cp_sb, const split_key_callback& split_key_cb) {
+    void init_recovery(const btree_super_block& btree_sb, btree_cp_sb* cp_sb, const split_key_callback& split_key_cb) {
         m_sb = btree_sb;
         m_split_key_cb = split_key_cb;
         if (cp_sb) { memcpy(&m_last_cp_sb, cp_sb, sizeof(m_last_cp_sb)); }
@@ -327,7 +327,7 @@ public:
         btree_store_t::flush_free_blks(m_btree_store.get(), bcp, ba_cp);
     }
 
-    uint64_t get_used_size() { return m_node_size * m_total_nodes.load(); }
+    uint64_t get_used_size() const { return m_node_size * m_total_nodes.load(); }
 
     btree_status_t range_put(btree_put_type put_type, BtreeUpdateRequest< K, V >& bur, const btree_cp_ptr& bcp) {
         K k; // these key/values are not used. It takes key/value from update request
@@ -2499,12 +2499,12 @@ private:
     }
 
 #if 0
-    btree_status_t merge_node_replay(btree_journal_entry* jentry, const btree_cp_ptr& bcp) {
-        BtreeNodePtr parent_node = (jentry->is_root) ? read_node(m_root_node) : read_node(jentry->parent_node.node_id);
+				btree_status_t merge_node_replay(btree_journal_entry* jentry, const btree_cp_ptr& bcp) {
+					BtreeNodePtr parent_node = (jentry->is_root) ? read_node(m_root_node) : read_node(jentry->parent_node.node_id);
 
-        // Parent already went ahead of the journal entry, return done
-        if (parent_node->get_gen() >= jentry->parent_node.node_gen) { return btree_status_t::replay_not_needed; }
-    }
+					// Parent already went ahead of the journal entry, return done
+					if (parent_node->get_gen() >= jentry->parent_node.node_gen) { return btree_status_t::replay_not_needed; }
+				}
 #endif
 
     void validate_sanity_child(const BtreeNodePtr& parent_node, uint32_t ind) {
@@ -2791,7 +2791,7 @@ private:
         auto time_spent = end_of_lock(node, type);
         observe_lock_time(node, type, time_spent);
 #if 0
-        if (release) { release_node(node); }
+					if (release) { release_node(node); }
 #endif
     }
 

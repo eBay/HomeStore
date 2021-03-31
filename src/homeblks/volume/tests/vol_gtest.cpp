@@ -806,7 +806,7 @@ public:
         }
         tcfg.max_io_size = params.max_io_size;
         /* TODO :- Rishabh: remove it */
-        tcfg.max_io_size = 128 * Ki;
+        // tcfg.max_io_size = 128 * Ki;
         outstanding_ios = 0;
 
         std::unique_lock< std::mutex > lk(m_mutex);
@@ -858,7 +858,7 @@ public:
     }
 
     void delete_volumes() {
-        uint64_t tot_cap = VolInterface::get_instance()->get_system_capacity().initial_total_size;
+        uint64_t tot_cap = VolInterface::get_instance()->get_system_capacity().initial_total_data_meta_size;
         uint64_t used_cap = VolInterface::get_instance()->get_system_capacity().used_total_size;
         HS_ASSERT_CMP(RELEASE, used_cap, <=, tot_cap);
         for (uint64_t i = 0; i < vol_info.size(); ++i) {

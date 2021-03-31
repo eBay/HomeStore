@@ -47,21 +47,29 @@ namespace homestore {
 // the default values.
 
 struct cap_attrs {
-    uint64_t used_data_size{0};
-    uint64_t used_index_size{0};
-    uint64_t used_total_size{0};
-    uint64_t initial_total_size{0};
+    uint64_t used_data_size{0};     // access-mgr should use this for used data size;
+    uint64_t used_index_size{0};    // used size of index mgr store;
+    uint64_t used_log_size{0};      // used size of logstore;
+    uint64_t used_metablk_size{0};  // used size of meta blk store;
+    uint64_t used_total_size{0};    // used total size including data and metadata;
+    uint64_t initial_total_size{0}; // access-mgr uses this field to report to host for available user data capacity;
+    uint64_t initial_total_data_meta_size{0}; // total capacity including data and metadata;
     std::string to_string() {
         std::ostringstream ss{};
         ss << "used_data_size = " << used_data_size << ", used_index_size = " << used_index_size
-           << ", used_total_size = " << used_total_size << ", initial_total_size = " << initial_total_size;
+           << ", used_log_size = " << used_log_size << ", used_metablk_size = " << used_metablk_size
+           << ", used_total_size = " << used_total_size << ", initial_total_size = " << initial_total_size
+           << ", initial_total_data_meta_size = " << initial_total_data_meta_size;
         return ss.str();
     }
     void add(const cap_attrs& other) {
         used_data_size += other.used_data_size;
         used_index_size += other.used_index_size;
+        used_log_size += other.used_log_size;
+        used_metablk_size += other.used_metablk_size;
         used_total_size += other.used_total_size;
         initial_total_size += other.initial_total_size;
+        initial_total_data_meta_size += other.initial_total_data_meta_size;
     }
 };
 
@@ -107,11 +115,13 @@ public:
 };
 
 struct hs_engine_config {
-    size_t min_io_size{8192}; // minimum io size supported by
-    
+    size_t min_io_size{8192};        // minimum io size supported by
     uint64_t max_chunks{MAX_CHUNKS}; // These 3 parameters can be ONLY changed with upgrade/revert from device manager
     uint64_t max_vdevs{MAX_VDEVS};
     uint64_t max_pdevs{MAX_PDEVS};
+    uint64_t memvec_max_io_size{min_io_size};
+    uint64_t max_vol_io_size{memvec_max_io_size};
+    uint32_t max_blks_in_blkentry{1}; // Max blks a represents in a single BlkId entry
 
     nlohmann::json to_json() const {
         nlohmann::json json;
@@ -119,6 +129,9 @@ struct hs_engine_config {
         json["max_chunks"] = max_chunks;
         json["max_vdevs"] = max_vdevs;
         json["max_pdevs"] = max_pdevs;
+        json["memvec_max_io_size"] = memvec_max_io_size;
+        json["max_vol_io_size"] = max_vol_io_size;
+        json["max_blks_in_blkentry"] = max_blks_in_blkentry;
         return json;
     }
 };
@@ -188,7 +201,6 @@ constexpr uint32_t NBLKS_BITS{8};
 constexpr uint32_t CHUNK_NUM_BITS{8};
 constexpr uint32_t BLKID_SIZE_BITS{BLK_NUM_BITS + NBLKS_BITS + CHUNK_NUM_BITS};
 constexpr uint32_t MEMPIECE_ENCODE_MAX_BITS{8};
-constexpr uint64_t MAX_NBLKS{((static_cast< uint64_t >(1) << NBLKS_BITS) - 1)};
 constexpr uint64_t MAX_CHUNK_ID{
     ((static_cast< uint64_t >(1) << CHUNK_NUM_BITS) - 2)}; // one less to indicate invalid chunks
 constexpr uint64_t BLKID_SIZE{(BLKID_SIZE_BITS / 8) + (((BLKID_SIZE_BITS % 8) != 0) ? 1 : 0)};
@@ -202,8 +214,6 @@ constexpr uint64_t MAX_BLK_NUM_BITS_PER_CHUNK{((static_cast< uint64_t >(1) << BL
 /* NOTE: it can give size less then size passed in argument to make it aligned */
 // #define ALIGN_SIZE_TO_LEFT(size, align) (((size % align) == 0) ? size : (size - (size % align)))
 
-const uint64_t MEMVEC_MAX_IO_SIZE{static_cast< uint64_t >(
-    HS_STATIC_CONFIG(engine.min_io_size) * ((static_cast< uint64_t >(1) << MEMPIECE_ENCODE_MAX_BITS) - 1))};
 const uint64_t MIN_CHUNK_SIZE{HS_STATIC_CONFIG(drive_attr.phys_page_size) * BLKS_PER_PORTION * TOTAL_SEGMENTS};
 const uint64_t MAX_CHUNK_SIZE{static_cast< uint64_t >(
     sisl::round_down((MAX_BLK_NUM_BITS_PER_CHUNK * HS_STATIC_CONFIG(engine.min_io_size)), MIN_CHUNK_SIZE))}; // 16 TB

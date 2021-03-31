@@ -263,7 +263,7 @@ IndxMgr::~IndxMgr() {
 void IndxMgr::create_first_cp() {
     auto icp_sb = &(m_last_cp_sb.icp_sb);
     int64_t cp_id = icp_sb->active_cp_id + 1;
-    int64_t seqid = icp_sb->active_data_seqid;
+    seq_id_t seqid = icp_sb->active_data_seqid;
     m_first_icp = indx_cp_ptr(new indx_cp(cp_id, seqid, icp_sb->diff_data_seqid, shared_from_this(),
                                           m_free_list[++m_free_list_cnt % MAX_CP_CNT]));
     m_first_icp->acp.bcp = m_active_tbl->attach_prepare_cp(nullptr, false, false);
@@ -341,12 +341,12 @@ void IndxMgr::recovery() {
         auto it = cp_sb_map.find(m_uuid);
         if (it != cp_sb_map.end()) { memcpy(&m_last_cp_sb, &(it->second), sizeof(m_last_cp_sb)); }
     }
-    // fall through
+        // fall through
     case indx_recovery_state::create_indx_tbl_st: {
         /* Now we have all the information to create mapping btree */
         m_active_tbl = m_recover_indx_tbl(m_immutable_sb.btree_sb, m_last_cp_sb.acp_sb);
     }
-    // fall through
+        // fall through
     case indx_recovery_state::create_first_cp_st: {
         create_first_cp();
         m_recovery_state = indx_recovery_state::io_replay_st;
@@ -355,13 +355,13 @@ void IndxMgr::recovery() {
     case indx_recovery_state::io_replay_st: {
         io_replay();
     }
-    // fall through
+        // fall through
     case indx_recovery_state::meta_ops_replay_st: {
         /* lets go through all index meta blks to see if anything needs to be done */
         recover_meta_ops();
         THIS_INDX_LOG(INFO, replay, , "recovery completed");
     }
-    // fall through
+        // fall through
     default: {
         m_recovery_mode = false;
     }
@@ -718,8 +718,9 @@ indx_cp_ptr IndxMgr::create_new_indx_cp(const indx_cp_ptr& cur_icp) {
     }
 
     /* get start sequence ID */
-    int64_t acp_start_seq_id = cur_icp->acp.end_seqid;
-    int64_t dcp_start_seq_id = cur_icp->flags & cp_state::diff_cp ? cur_icp->dcp.end_seqid : cur_icp->dcp.start_seqid;
+    const seq_id_t acp_start_seq_id = cur_icp->acp.end_seqid;
+    const seq_id_t dcp_start_seq_id =
+        cur_icp->flags & cp_state::diff_cp ? cur_icp->dcp.end_seqid : cur_icp->dcp.start_seqid;
 
     /* create new cp */
     int64_t cp_id = cur_icp->cp_id + 1;
@@ -895,7 +896,7 @@ btree_status_t IndxMgr::update_indx_tbl(const indx_req_ptr& ireq, bool is_active
 }
 
 void IndxMgr::do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx, void* key,
-                                          uint64_t seqid, homeds::btree::BtreeQueryCursor& btree_cur) {
+                                          const seq_id_t seqid, homeds::btree::BtreeQueryCursor& btree_cur) {
     /* enter into critical section */
     auto hcp = m_cp_mgr->cp_io_enter();
     auto cur_icp = get_indx_cp(hcp);
@@ -947,7 +948,7 @@ void IndxMgr::do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_
     m_cp_mgr->cp_io_exit(hcp);
 }
 
-sisl::byte_view IndxMgr::alloc_unmap_sb(const uint32_t key_size, const uint64_t seq_id,
+sisl::byte_view IndxMgr::alloc_unmap_sb(const uint32_t key_size, const seq_id_t seq_id,
                                         homeds::btree::BtreeQueryCursor& unmap_btree_cur) {
     const sisl::blob& cursor_blob = unmap_btree_cur.serialize();
     uint64_t size = cursor_blob.size + sizeof(hs_cp_unmap_sb) + key_size;
@@ -1267,7 +1268,7 @@ void IndxMgr::read_indx(const boost::intrusive_ptr< indx_req >& ireq) {
     }
 }
 
-cap_attrs IndxMgr::get_used_size() {
+cap_attrs IndxMgr::get_used_size() const {
     cap_attrs attrs;
     attrs.used_data_size = m_last_cp_sb.icp_sb.indx_size;
     attrs.used_index_size = m_active_tbl->get_used_size();
@@ -1277,8 +1278,8 @@ cap_attrs IndxMgr::get_used_size() {
     return attrs;
 }
 
-int64_t IndxMgr::get_max_seqid_found_in_recovery() { return m_max_seqid_in_recovery; }
-std::string IndxMgr::get_name() { return m_name; }
+seq_id_t IndxMgr::get_max_seqid_found_in_recovery() const { return m_max_seqid_in_recovery; }
+std::string IndxMgr::get_name() const { return m_name; }
 
 void IndxMgr::register_indx_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp) {
     add_prepare_cb_list(([this, cb, blkalloc_cp](const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp) mutable {
@@ -1295,7 +1296,7 @@ void IndxMgr::register_indx_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp) {
     }));
 }
 
-bool IndxMgr::is_recovery_done() {
+bool IndxMgr::is_recovery_done() const {
     /* this volume hasn't participated in a cp if first cp is not null. We can add more conditions in future */
     return (m_first_icp ? false : true);
 }
@@ -1540,19 +1541,19 @@ uint64_t StaticIndxMgr::free_blk(hs_cp* hcp, sisl::ThreadVector< homestore::BlkI
     }
 
     uint64_t free_blk_size = 0;
-    for (uint32_t i = 0; i < in_fbe_list.size(); ++i) {
-        free_blk_size += free_blk(hcp, out_fblk_list, in_fbe_list[i], true);
+    for (auto& fbe : in_fbe_list) {
+        free_blk_size += free_blk(hcp, out_fblk_list, fbe, true);
     }
     return free_blk_size;
 }
 
-void StaticIndxMgr::remove_read_tracker(Free_Blk_Entry& fbe) { m_read_blk_tracker->remove(fbe); }
+void StaticIndxMgr::remove_read_tracker(const Free_Blk_Entry& fbe) { m_read_blk_tracker->remove(fbe); }
 
-void StaticIndxMgr::add_read_tracker(Free_Blk_Entry& fbe) { m_read_blk_tracker->insert(fbe); }
+void StaticIndxMgr::add_read_tracker(const Free_Blk_Entry& fbe) { m_read_blk_tracker->insert(fbe); }
 void StaticIndxMgr::hs_cp_suspend() { m_cp_mgr->cp_suspend(); }
 void StaticIndxMgr::hs_cp_resume() { m_cp_mgr->cp_resume(); }
 
-void StaticIndxMgr::safe_to_free_blk(Free_Blk_Entry& fbe) {
+void StaticIndxMgr::safe_to_free_blk(const Free_Blk_Entry& fbe) {
     /* We don't allow cp to complete until all required blkids are freed. We increment the ref count in
      * update_indx_tbl by number of free blk entries.
      */
@@ -1560,8 +1561,8 @@ void StaticIndxMgr::safe_to_free_blk(Free_Blk_Entry& fbe) {
     assert(hcp);
     /* invalidate the cache */
     auto page_sz = m_hs->get_data_pagesz();
-    m_hs->get_data_blkstore()->free_blk(fbe.m_blkId, (fbe.m_blk_offset * page_sz), (fbe.m_nblks_to_free * page_sz),
-                                        true);
+    m_hs->get_data_blkstore()->free_blk(fbe.get_base_blkid(), (fbe.blk_offset() * page_sz),
+                                        (fbe.blks_to_free() * page_sz), true);
     m_cp_mgr->cp_io_exit(hcp);
     /* We have already free the blk after journal write is completed. We are just holding a cp for free to complete
      */
