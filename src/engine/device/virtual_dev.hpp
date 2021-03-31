@@ -1364,7 +1364,7 @@ private:
      *
      * @return : the physical device offset;
      */
-    uint64_t get_offset_in_dev(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) {
+    uint64_t get_offset_in_dev(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) const {
         return get_chunk_start_offset(dev_id, chunk_id) + offset_in_chunk;
     }
 
@@ -1376,7 +1376,7 @@ private:
      *
      * @return : the physical start offset of the chunk;
      */
-    uint64_t get_chunk_start_offset(uint32_t dev_id, uint32_t chunk_id) {
+    uint64_t get_chunk_start_offset(uint32_t dev_id, uint32_t chunk_id) const {
         return m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id]->get_start_offset();
     }
 
@@ -1588,7 +1588,7 @@ private:
      * @return : the unique offset after converion;
      */
     uint64_t logical_to_dev_offset(const off_t log_offset, uint32_t& dev_id, uint32_t& chunk_id,
-                                   off_t& offset_in_chunk) {
+                                   off_t& offset_in_chunk) const {
         dev_id = 0;
         chunk_id = 0;
         offset_in_chunk = 0;
