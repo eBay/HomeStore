@@ -318,7 +318,7 @@ public:
         if (gen_percentage(re) < static_cast< uint8_t >(10)) {
             // 10% of data is dma'ble aligned boundary
             const auto alloc_sz{
-                sisl::round_up(gen_data_size(re) + sizeof(test_log_data), HomeLogStore::dma_boundary())};
+                sisl::round_up(gen_data_size(re) + sizeof(test_log_data), HomeLogStore::flush_boundary())};
             raw_buf = iomanager.iobuf_alloc(dma_address_boundary, alloc_sz);
             sz = alloc_sz - sizeof(test_log_data);
             io_memory = true;

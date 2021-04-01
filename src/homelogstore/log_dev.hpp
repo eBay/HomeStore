@@ -93,13 +93,13 @@ struct log_record {
     [[nodiscard]] size_t serialized_size() const { return sizeof(serialized_log_record) + data.size; }
     [[nodiscard]] bool is_inlineable() const {
         // Need inlining if size is smaller or size/buffer is not in dma'ble boundary.
-        return (is_size_inlineable(data.size) || ((reinterpret_cast< uintptr_t >(data.bytes) % dma_boundary()) != 0) ||
-                !data.aligned);
+        return (is_size_inlineable(data.size) ||
+                ((reinterpret_cast< uintptr_t >(data.bytes) % flush_boundary()) != 0) || !data.aligned);
     }
 
-    [[nodiscard]] static size_t dma_boundary() { return HS_STATIC_CONFIG(drive_attr.phys_page_size); }
+    [[nodiscard]] static size_t flush_boundary() { return HS_STATIC_CONFIG(drive_attr.phys_page_size); }
     [[nodiscard]] static bool is_size_inlineable(const size_t sz) {
-        return ((sz < HS_DYNAMIC_CONFIG(logstore.optimal_inline_data_size)) || ((sz % dma_boundary()) != 0));
+        return ((sz < HS_DYNAMIC_CONFIG(logstore.optimal_inline_data_size)) || ((sz % flush_boundary()) != 0));
     }
 
     [[nodiscard]] static size_t serialized_size(const uint32_t sz) { return sizeof(serialized_log_record) + sz; }

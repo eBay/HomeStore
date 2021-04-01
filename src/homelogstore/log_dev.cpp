@@ -172,7 +172,7 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
     // First read the offset and read the log_group. Then locate the log_idx within that and get the actual data
     // Read about 4K of buffer
     if (!read_buf) {
-        read_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(log_record::dma_boundary(), initial_read_size);
+        read_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(log_record::flush_boundary(), initial_read_size);
     }
     auto* rbuf{read_buf.get()};
     auto* const store{m_hb->get_logdev_blkstore()};
