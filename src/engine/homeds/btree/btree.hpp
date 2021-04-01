@@ -845,23 +845,28 @@ public:
     }
 
     void print_tree() {
+        std::string buf;
         m_btree_lock.read_lock();
-        std::stringstream ss;
-        to_string(m_root_node, ss);
-        THIS_BT_LOG(INFO, base, , "Pre order traversal of tree : <{}>", ss.str());
+        to_string(m_root_node, buf);
         m_btree_lock.unlock();
+
+        THIS_BT_LOG(INFO, base, , "Pre order traversal of tree:\n<{}>", buf);
     }
 
     void print_node(const bnodeid_t& bnodeid) {
-        std::stringstream ss;
+        std::string buf;
         BtreeNodePtr node;
+
         m_btree_lock.read_lock();
         homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
-        if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) { return; }
-        ss << "[" << node->to_string() << "]";
+        if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) { goto done; }
+        buf = node->to_string(true /* print_friendly */);
         unlock_node(node, acq_lock);
-        THIS_BT_LOG(INFO, base, , "Node : <{}>", ss.str());
+
+    done:
         m_btree_lock.unlock();
+
+        THIS_BT_LOG(INFO, base, , "Node: <{}>", buf);
     }
 
     nlohmann::json get_metrics_in_json(bool updated = true) { return m_metrics.get_result_in_json(updated); }
@@ -981,23 +986,23 @@ private:
         return success;
     }
 
-    void to_string(bnodeid_t bnodeid, std::stringstream& ss) {
+    void to_string(bnodeid_t bnodeid, std::string& buf) {
         BtreeNodePtr node;
 
         homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
 
         if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) { return; }
-        ss << "[" << node->to_string() << "]";
+        fmt::format_to(std::back_inserter(buf), "{}\n", node->to_string(true /* print_friendly */));
 
         if (!node->is_leaf()) {
             uint32_t i = 0;
             while (i < node->get_total_entries()) {
                 BtreeNodeInfo p;
                 node->get(i, &p, false);
-                to_string(p.bnode_id(), ss);
+                to_string(p.bnode_id(), buf);
                 i++;
             }
-            if (node->has_valid_edge()) to_string(node->get_edge_id(), ss);
+            if (node->has_valid_edge()) { to_string(node->get_edge_id(), buf); }
         }
         unlock_node(node, acq_lock);
     }

@@ -276,14 +276,20 @@ public:
     }
 #endif
 
-    std::string to_string() const {
-        auto str = fmt::format("id={} nEntries={} {} free_space={} ", this->get_node_id(), this->get_total_entries(),
-                               (this->is_leaf() ? "LEAF" : "INTERIOR"), get_var_node_header_const()->m_available_space);
-        if (this->is_leaf()) { fmt::format_to(std::back_inserter(str), "edge_id={} ", this->get_edge_id()); }
+    std::string to_string(bool print_friendly = false) const {
+        auto str = fmt::format(
+            "{}id={} nEntries={} {} free_space={} ",
+            (print_friendly ? "---------------------------------------------------------------------\n" : ""),
+            this->get_node_id(), this->get_total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"),
+            get_var_node_header_const()->m_available_space);
+        if (!this->is_leaf() && (this->has_valid_edge())) {
+            fmt::format_to(std::back_inserter(str), "edge_id={} ", this->get_edge_id());
+        }
         for (uint32_t i{0}; i < this->get_total_entries(); ++i) {
             K key;
             get_nth_key(i, &key, false);
-            fmt::format_to(std::back_inserter(str), "Entry{} [Key={}", i + 1, key.to_string());
+            fmt::format_to(std::back_inserter(str), "{}Entry{} [Key={}", (print_friendly ? "\n\t" : " "), i + 1,
+                           key.to_string());
 
             if (this->is_leaf()) {
                 V val;

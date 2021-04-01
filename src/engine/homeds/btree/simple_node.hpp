@@ -85,34 +85,31 @@ public:
         return btree_status_t::success;
     }
 
-    std::string to_string() const {
-        std::stringstream ss;
-        ss << "###################" << endl;
-        ss << "-------------------------------" << endl;
-        ss << "id=" << this->get_node_id() << " nEntries=" << this->get_total_entries() << " leaf?=" << this->is_leaf();
-
-        if (!this->is_leaf()) { ss << " edge_id=" << this->get_edge_id(); }
-        ss << "\n-------------------------------" << endl;
-        for (uint32_t i = 0; i < this->get_total_entries(); i++) {
-            ss << "Key=";
+    std::string to_string(bool print_friendly = false) const {
+        auto str = fmt::format(
+            "{}id={} nEntries={} {} ",
+            (print_friendly ? "---------------------------------------------------------------------\n" : ""),
+            this->get_node_id(), this->get_total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
+        if (!this->is_leaf() && (this->has_valid_edge())) {
+            fmt::format_to(std::back_inserter(str), "edge_id={} ", this->get_edge_id());
+        }
+        for (uint32_t i{0}; i < this->get_total_entries(); ++i) {
             K key;
             get_nth_key(i, &key, false);
-            ss << key.to_string();
+            fmt::format_to(std::back_inserter(str), "{}Entry{} [Key={}", (print_friendly ? "\n\t" : " "), i + 1,
+                           key.to_string());
 
-            // TODO: Override the << in ostream for Value
-            ss << " Val=";
             if (this->is_leaf()) {
                 V val;
                 get(i, &val, false);
-                ss << val.to_string();
+                fmt::format_to(std::back_inserter(str), " Val={}]", val.to_string());
             } else {
-                BtreeNodeInfo bni;
-                get(i, &bni, false);
-                ss << bni;
+                BtreeNodeInfo p;
+                get(i, &p, false);
+                fmt::format_to(std::back_inserter(str), " Val={}]", p.to_string());
             }
-            ss << "\n";
         }
-        return ss.str();
+        return str;
     }
 
     void remove(int ind) { remove(ind, ind); }

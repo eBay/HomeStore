@@ -45,7 +45,7 @@ public:
     btree_status_t insert(int ind, const BtreeKey& key, const BtreeValue& val);
 
 #ifndef NDEBUG
-    std::string to_string() const;
+    std::string to_string(bool print_friendly = false) const;
 #endif
 
     void remove(int ind);
@@ -146,7 +146,7 @@ public:
     void remove(int ind_s, int ind_e);
     void update(int ind, const BtreeValue& val);
     void update(int ind, const BtreeKey& key, const BtreeValue& val);
-    std::string to_string() const;
+    std::string to_string(bool print_friendly = false) const;
 
     /* Provides the occupied data size within the node */
     bool is_leaf() const;
