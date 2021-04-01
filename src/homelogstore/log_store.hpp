@@ -477,7 +477,7 @@ public:
         return (log_record::is_size_inlineable(size) == false);
     }
 
-    [[nodiscard]] static size_t dma_boundary() { return (log_record::dma_boundary()); }
+    [[nodiscard]] static size_t flush_boundary() { return (log_record::flush_boundary()); }
 
 private:
     [[nodiscard]] const truncation_info& pre_device_truncation();
