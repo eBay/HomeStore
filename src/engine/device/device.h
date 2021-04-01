@@ -29,6 +29,7 @@
 #include "api/meta_interface.hpp"
 
 using namespace iomgr;
+SDS_LOGGING_DECL(device, DEVICE_MANAGER)
 
 namespace homestore {
 class BlkAllocator;
