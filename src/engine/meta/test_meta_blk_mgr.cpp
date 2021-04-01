@@ -138,7 +138,7 @@ public:
             std::random_device rd;
             std::default_random_engine g(rd());
             std::uniform_int_distribution< long unsigned > dist(gp.min_wrt_sz, gp.max_wrt_sz);
-            return sisl::round_up(dist(g), dma_boundary);
+            return sisl::round_up(dist(g), dma_address_boundary);
         } else {
             std::random_device rd;
             std::default_random_engine g(rd());

@@ -29,8 +29,8 @@ void LogGroup::reset(const uint32_t max_records) {
 }
 
 void LogGroup::create_overflow_buf(const uint32_t min_needed) {
-    const auto new_len{sisl::round_up(std::max(min_needed, m_cur_buf_len * 2), dma_boundary)};
-    auto new_buf{sisl::aligned_unique_ptr< uint8_t >::make_sized(dma_boundary, new_len)};
+    const auto new_len{sisl::round_up(std::max(min_needed, m_cur_buf_len * 2), log_record::flush_boundary())};
+    auto new_buf{sisl::aligned_unique_ptr< uint8_t >::make_sized(log_record::flush_boundary(), new_len)};
     std::memcpy(static_cast< void* >(new_buf.get()), static_cast< const void* >(m_cur_log_buf), m_cur_buf_len);
 
     m_overflow_log_buf = std::move(new_buf);
@@ -83,7 +83,7 @@ bool LogGroup::add_record(const log_record& record, const int64_t log_idx) {
 }
 
 const iovec_array& LogGroup::finish() {
-    m_iovecs[0].iov_len = sisl::round_up(m_iovecs[0].iov_len, dma_boundary);
+    m_iovecs[0].iov_len = sisl::round_up(m_iovecs[0].iov_len, log_record::flush_boundary());
 
     log_group_header* const hdr{header()};
     hdr->magic = LOG_GROUP_HDR_MAGIC;

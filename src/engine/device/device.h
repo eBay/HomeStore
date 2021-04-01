@@ -29,6 +29,7 @@
 #include "api/meta_interface.hpp"
 
 using namespace iomgr;
+SDS_LOGGING_DECL(device, DEVICE_MANAGER)
 
 namespace homestore {
 class BlkAllocator;
@@ -282,8 +283,11 @@ public:
         return ss.str();
     }
 
-    void update_end_of_chunk(const uint64_t size) { m_chunk_info->end_of_chunk_size = size; }
-    off_t get_end_of_chunk() { return m_chunk_info->end_of_chunk_size; }
+    void update_end_of_chunk(const uint64_t size) {
+        LOGINFOMOD(device, "chunk id {}, end size {} actual size {}", get_chunk_id(), size, get_size());
+        m_chunk_info->end_of_chunk_size = size;
+    }
+    off_t get_end_of_chunk() const { return m_chunk_info->end_of_chunk_size; }
 
     void recover(std::unique_ptr< sisl::Bitset > recovered_bm, meta_blk* mblk);
 

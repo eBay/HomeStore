@@ -18,7 +18,6 @@
 #include "engine/device/virtual_dev.hpp"
 #include "device.h"
 
-SDS_LOGGING_DECL(device, DEVICE_MANAGER)
 
 using namespace iomgr;
 namespace homestore {

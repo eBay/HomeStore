@@ -42,6 +42,8 @@ void LogDev::start(const bool format) {
             m_store_found_cb(spair.first, spair.second);
         }
 
+        LOGINFOMOD(logstore, "get start vdev offset during recovery {}", m_logdev_meta.get_start_dev_offset());
+
         m_hb->get_logdev_blkstore()->update_data_start_offset(m_logdev_meta.get_start_dev_offset());
         do_load(m_logdev_meta.get_start_dev_offset());
         m_log_records->reinit(m_log_idx);
@@ -93,12 +95,12 @@ void LogDev::stop() {
     LOGINFOMOD(logstore, "LogDev stopped successfully");
 }
 
-void LogDev::do_load(const uint64_t device_cursor) {
+void LogDev::do_load(const off_t device_cursor) {
     log_stream_reader lstream{device_cursor};
     logid_t loaded_from{-1};
 
+    off_t group_dev_offset;
     do {
-        uint64_t group_dev_offset;
         const auto buf{lstream.next_group(&group_dev_offset)};
         if (buf.size() == 0) {
             assert_next_pages(lstream);
@@ -124,6 +126,8 @@ void LogDev::do_load(const uint64_t device_cursor) {
             b.set_size(rec->size);
             if (m_last_truncate_idx == -1) { m_last_truncate_idx = header->start_idx() + i; }
             if (m_logfound_cb) {
+                LOGTRACEMOD(logstore, "seq num {}, log indx {}, group dev offset {} size {}", rec->store_seq_num,
+                            (header->start_idx() + i), group_dev_offset, rec->size);
                 m_logfound_cb(rec->store_id, rec->store_seq_num, {header->start_idx() + i, group_dev_offset}, b);
             }
             ++i;
@@ -135,15 +139,13 @@ void LogDev::do_load(const uint64_t device_cursor) {
     // Update the tail offset with where we finally end up loading, so that new append entries can be written from
     // here.
     auto store{m_hb->get_logdev_blkstore()};
-    store->update_tail_offset(store->seeked_pos());
+    store->update_tail_offset(group_dev_offset);
 }
 
 void LogDev::assert_next_pages(log_stream_reader& lstream) {
     LOGINFOMOD(logstore,
                "Logdev reached offset, which has invalid header, because of end of stream. Validating if it is "
                "indeed the case or there is any corruption");
-
-    const auto cursor{lstream.group_cursor()};
     for (uint32_t i{0}; i < HS_DYNAMIC_CONFIG(logstore->recovery_max_blks_read_for_additional_check); ++i) {
         const auto buf{lstream.group_in_next_page()};
         if (buf.size() != 0) {
@@ -154,7 +156,6 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
                           *header);
         }
     }
-    m_hb->get_logdev_blkstore()->lseek(cursor); // Reset back
 }
 
 int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, const sisl::io_blob& data,
@@ -170,7 +171,9 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
 
     // First read the offset and read the log_group. Then locate the log_idx within that and get the actual data
     // Read about 4K of buffer
-    if (!read_buf) { read_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(dma_boundary, initial_read_size); }
+    if (!read_buf) {
+        read_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(log_record::flush_boundary(), initial_read_size);
+    }
     auto* rbuf{read_buf.get()};
     auto* const store{m_hb->get_logdev_blkstore()};
     store->pread(static_cast< void* >(rbuf), initial_read_size, key.dev_offset);
@@ -341,6 +344,7 @@ void LogDev::do_flush(LogGroup* const lg) {
     HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logdev_flush_size_distribution, lg->actual_data_size());
     auto req = logdev_req::make_request();
     req->m_log_group = lg;
+    LOGTRACEMOD(logstore, "vdev offset {} log group total size {}", lg->m_log_dev_offset, lg->header()->total_size());
     store->pwritev(lg->iovecs().data(), static_cast< int >(lg->iovecs().size()), lg->m_log_dev_offset, req);
 }
 
@@ -563,7 +567,7 @@ logstore_meta& LogDevMetadata::mutable_store_meta(const logstore_id_t idx) {
     return smeta[idx];
 }
 
-void LogDevMetadata::update_start_dev_offset(const uint64_t offset, const bool persist_now) {
+void LogDevMetadata::update_start_dev_offset(const off_t offset, const bool persist_now) {
     m_sb->start_dev_offset = offset;
     if (persist_now) { persist(); }
 }

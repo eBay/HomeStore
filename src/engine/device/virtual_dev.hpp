@@ -572,7 +572,7 @@ public:
             auto next_chunk = get_next_chunk(dev_id, chunk_id);
             if (next_chunk != chunk) {
                 // Since we are re-using a new chunk, update this chunk's end as its original size;
-                m_mgr->update_end_of_chunk(chunk, m_chunk_size);
+                m_mgr->update_end_of_chunk(next_chunk, m_chunk_size);
             }
         } else {
             // across chunk boundary and no space left;
@@ -763,7 +763,7 @@ public:
                       "Invalid m_seek_cursor: {} which falls in beyond end of chunk: {}!", m_seek_cursor, end_of_chunk);
 
         // if read size is larger then what's left in this chunk
-        if (count > (chunk_size - offset_in_chunk)) {
+        if (count >= (chunk_size - offset_in_chunk)) {
             // truncate size to what is left;
             count = chunk_size - offset_in_chunk;
             across_chunk = true;
@@ -777,6 +777,7 @@ public:
                           "bytes_read returned: {} must be equal to requested size: {}!", bytes_read, count);
             m_seek_cursor += bytes_read;
             if (across_chunk) { m_seek_cursor += (m_chunk_size - end_of_chunk); }
+            m_seek_cursor = m_seek_cursor % get_size();
         }
 
         return bytes_read;
@@ -896,6 +897,33 @@ public:
     }
 
     /**
+     * @brief :- it returns the vdev offset after nbytes from start offset
+     */
+    off_t get_dev_offset(off_t nbytes) const {
+        off_t vdev_offset = data_start_offset();
+        uint32_t dev_id = 0, chunk_id = 0;
+        off_t offset_in_chunk = 0;
+        off_t cur_read_cur = 0;
+
+        while (cur_read_cur != nbytes) {
+            logical_to_dev_offset(vdev_offset, dev_id, chunk_id, offset_in_chunk);
+
+            auto chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
+            auto end_of_chunk = chunk->get_end_of_chunk();
+            auto chunk_size = std::min((uint64_t)end_of_chunk, m_chunk_size);
+            if ((nbytes - cur_read_cur) >= ((off_t)chunk_size - offset_in_chunk)) {
+                cur_read_cur += (chunk_size - offset_in_chunk);
+                vdev_offset += (m_chunk_size - offset_in_chunk);
+                vdev_offset = vdev_offset % get_size();
+            } else {
+                vdev_offset += (uint64_t)(nbytes - cur_read_cur);
+                cur_read_cur = nbytes;
+            }
+        }
+        return vdev_offset;
+    }
+
+    /**
      * @brief : this API can be replaced by lseek(0, SEEK_CUR);
      *
      * @return : current curosr offset
@@ -919,6 +947,7 @@ public:
         } else {
             m_write_sz_in_total.store(get_size() - start + tail, std::memory_order_relaxed);
         }
+        lseek(tail);
 
         HS_LOG(INFO, device, "m_write_sz_in_total updated to: {}", to_hex(m_write_sz_in_total.load()));
 
@@ -1335,7 +1364,7 @@ private:
      *
      * @return : the physical device offset;
      */
-    uint64_t get_offset_in_dev(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) {
+    uint64_t get_offset_in_dev(uint32_t dev_id, uint32_t chunk_id, uint64_t offset_in_chunk) const {
         return get_chunk_start_offset(dev_id, chunk_id) + offset_in_chunk;
     }
 
@@ -1347,7 +1376,7 @@ private:
      *
      * @return : the physical start offset of the chunk;
      */
-    uint64_t get_chunk_start_offset(uint32_t dev_id, uint32_t chunk_id) {
+    uint64_t get_chunk_start_offset(uint32_t dev_id, uint32_t chunk_id) const {
         return m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id]->get_start_offset();
     }
 
@@ -1559,7 +1588,7 @@ private:
      * @return : the unique offset after converion;
      */
     uint64_t logical_to_dev_offset(const off_t log_offset, uint32_t& dev_id, uint32_t& chunk_id,
-                                   off_t& offset_in_chunk) {
+                                   off_t& offset_in_chunk) const {
         dev_id = 0;
         chunk_id = 0;
         offset_in_chunk = 0;
