@@ -24,7 +24,7 @@ class HomestoreConan(ConanFile):
                         'fPIC=True',
                         'sanitize=True',
                         'malloc_impl=libc',
-                        'testing=spdk_mode',
+                        'testing=epoll_mode',
                         )
 
     build_requires = (
