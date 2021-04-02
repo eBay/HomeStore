@@ -2160,7 +2160,14 @@ int main(int argc, char* argv[]) {
     /* if --spdk is not set, check env variable if user want to run spdk */
     if (!_gcfg.is_spdk && std::getenv(SPDK_ENV_VAR_STRING.c_str())) { _gcfg.is_spdk = true; }
 
-    if (_gcfg.is_spdk) { _gcfg.num_threads = 2; } /* default to 2 to avoid high cpu usage with spdk */
+    if (_gcfg.is_spdk) {
+        _gcfg.read_iovec = true;
+        _gcfg.write_iovec = true;
+    }
+
+    if (_gcfg.is_spdk && _gcfg.num_threads > 2) {
+        _gcfg.num_threads = 2;
+    } /* default to 2 to avoid high cpu usage with spdk */
 
     LOGINFO("Testing with vol_gtest with gcfg spdk: {}, nthreads: {}", _gcfg.is_spdk, _gcfg.num_threads);
 

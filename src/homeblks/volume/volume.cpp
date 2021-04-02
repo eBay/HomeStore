@@ -547,7 +547,6 @@ void Volume::attach_completion_cb(const io_comp_callback& cb) { m_comp_cb = cb; 
 
 void Volume::verify_csum(const volume_req_ptr& vreq) {
     uint32_t csum_indx = 0;
-
     for (auto& info : vreq->read_buf()) {
         auto offset = info.offset;
         auto size = info.size;
@@ -559,7 +558,6 @@ void Volume::verify_csum(const volume_req_ptr& vreq) {
 
                 size -= get_page_size();
                 offset += get_page_size();
-
                 VOL_RELEASE_ASSERT_CMP(vreq->csum_list[csum_indx++], ==, csum, vreq, "Checksum mismatch");
             }
         }
