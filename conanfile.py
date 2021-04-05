@@ -4,7 +4,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "2.4.28"
+    version = "2.4.29"
 
     revision_mode = "scm"
     license = "Proprietary"
@@ -42,7 +42,7 @@ class HomestoreConan(ConanFile):
             "boost/1.73.0",
             "evhtp/1.2.18.2",
             "farmhash/1.0.0",
-            ("fmt/7.0.3", "override"),
+            ("fmt/7.1.3", "override"),
             "folly/2020.05.04.00",
             "isa-l/2.21.0",
             )
