@@ -1112,30 +1112,42 @@ private:
                 std::vector< std::pair< K, V > > match_kv;
                 auto cur_count = my_node->get_all(query_req.get_input_range(), query_req.get_batch_size() - count,
                                                   start_ind, end_ind, &match_kv);
-                if (cur_count == 0) { break; }
-
-                if (query_req.callback()) {
-                    K subrange_start_key, subrange_end_key;
-                    bool start_incl = false, end_incl = false;
-                    query_req.get_input_range().copy_start_end_blob(subrange_start_key, start_incl, subrange_end_key,
-                                                                    end_incl);
-                    BtreeSearchRange subrange(subrange_start_key, start_incl, subrange_end_key, end_incl);
-                    std::vector< std::pair< K, V > > result_kv;
-                    ret = query_req.callback()(match_kv, result_kv, query_req.get_cb_param(), subrange);
-                    auto ele_to_add = result_kv.size();
-                    if (count + ele_to_add > query_req.get_batch_size()) {
-                        ele_to_add = query_req.get_batch_size() - count;
+                if (cur_count == 0) {
+                    K key;
+                    my_node->get_last_key(&key);
+                    if (key.compare(query_req.get_input_range().get_end_key()) >= 0) {
+                        // we've covered all lba range, we are done now;
+                        break;
                     }
-                    if (ele_to_add > 0) {
-                        out_values.insert(out_values.end(), result_kv.begin(), result_kv.begin() + ele_to_add);
-                    }
-                    count += ele_to_add;
-
-                    BT_DEBUG_ASSERT_CMP(count, <=, query_req.get_batch_size(), my_node);
-                } else {
-                    out_values.insert(std::end(out_values), std::begin(match_kv), std::end(match_kv));
-                    count += cur_count;
                 }
+
+                // fall through to visit siblings if we haven't covered lba range yet;
+
+                if (cur_count) {
+                    if (query_req.callback()) {
+                        K subrange_start_key, subrange_end_key;
+                        bool start_incl = false, end_incl = false;
+                        query_req.get_input_range().copy_start_end_blob(subrange_start_key, start_incl,
+                                                                        subrange_end_key, end_incl);
+                        BtreeSearchRange subrange(subrange_start_key, start_incl, subrange_end_key, end_incl);
+                        std::vector< std::pair< K, V > > result_kv;
+                        ret = query_req.callback()(match_kv, result_kv, query_req.get_cb_param(), subrange);
+                        auto ele_to_add = result_kv.size();
+                        if (count + ele_to_add > query_req.get_batch_size()) {
+                            ele_to_add = query_req.get_batch_size() - count;
+                        }
+                        if (ele_to_add > 0) {
+                            out_values.insert(out_values.end(), result_kv.begin(), result_kv.begin() + ele_to_add);
+                        }
+                        count += ele_to_add;
+                        BT_DEBUG_ASSERT_CMP(count, <=, query_req.get_batch_size(), my_node);
+                    } else {
+                        out_values.insert(std::end(out_values), std::begin(match_kv), std::end(match_kv));
+                        count += cur_count;
+                    }
+                }
+
+                // if cur_count is 0, keep querying sibling nodes;
 
                 if (ret == btree_status_t::success && (count < query_req.get_batch_size())) {
                     if (my_node->get_next_bnode() == empty_bnodeid) { break; }
@@ -1379,8 +1391,8 @@ private:
         // The node was not changed by anyone else during upgrade.
         cur_lock = homeds::thread::LOCKTYPE_WRITE;
 
-        // If the node has been made invalid (probably by mergeNodes) ask caller to start over again, but before that
-        // cleanup or free this node if there is no one waiting.
+        // If the node has been made invalid (probably by mergeNodes) ask caller to start over again, but before
+        // that cleanup or free this node if there is no one waiting.
         if (!my_node->is_valid_node()) {
             unlock_node(my_node, homeds::thread::LOCKTYPE_WRITE);
             cur_lock = locktype::LOCKTYPE_NONE;
@@ -1651,7 +1663,8 @@ private:
     /* This function does the heavy lifiting of co-ordinating inserts. It is a recursive function which walks
      * down the tree.
      *
-     * NOTE: It expects the node it operates to be locked (either read or write) and also the node should not be full.
+     * NOTE: It expects the node it operates to be locked (either read or write) and also the node should not be
+     * full.
      *
      * Input:
      * myNode      = Node it operates on
@@ -1729,8 +1742,8 @@ private:
             K start_key, end_key;
             bool start_incl = false, end_incl = false;
             if (bur && child_node->is_leaf()) {
-                /* We get the subrange only for leaf because this is where we will be inserting keys. In interior nodes,
-                 * keys are always propogated from the lower nodes.
+                /* We get the subrange only for leaf because this is where we will be inserting keys. In interior
+                 * nodes, keys are always propogated from the lower nodes.
                  */
                 get_subrange(my_node, bur, curr_ind, start_key, end_key, start_incl, end_incl);
             }
@@ -1876,8 +1889,8 @@ private:
             if (end_ind > ind) {
                 // It is safe to unlock child without upgrade, because child node would not be deleted, since its
                 // parent (myNode) is being write locked by this thread. In fact upgrading would be a problem, since
-                // this child might be a middle child in the list of indices, which means we might have to lock one in
-                // left against the direction of intended locking (which could cause deadlock).
+                // this child might be a middle child in the list of indices, which means we might have to lock one
+                // in left against the direction of intended locking (which could cause deadlock).
                 unlock_node(child_node, child_cur_lock);
                 auto result = merge_nodes(my_node, ind, end_ind, bcp);
                 if (result != btree_status_t::success && result != btree_status_t::merge_not_required) {
@@ -2060,7 +2073,8 @@ private:
                 j_iob, (root_split ? bt_journal_node_op::creation : bt_journal_node_op::inplace_write), child_node1,
                 bcp, out_split_end_key.get_blob());
 
-            // For root split or split around the edge, we don't write the key, which will cause replay to insert edge
+            // For root split or split around the edge, we don't write the key, which will cause replay to insert
+            // edge
             if (edge_split) {
                 btree_store_t::append_node_to_journal(j_iob, bt_journal_node_op::creation, child_node2, bcp);
             } else {
@@ -2117,8 +2131,8 @@ public:
 
         BtreeNodePtr child_node1;
         if (jentry->is_root) {
-            // If root is not written yet, parent_node will be pointing child_node1, so create a new parent_node to be
-            // treated as root here on.
+            // If root is not written yet, parent_node will be pointing child_node1, so create a new parent_node to
+            // be treated as root here on.
             child_node1 = reserve_interior_node(BlkId(j_child_nodes[0]->node_id()));
             btree_store_t::swap_node(m_btree_store.get(), parent_node, child_node1);
 
