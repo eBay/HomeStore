@@ -411,8 +411,7 @@ TEST_F(LogStoreLoadTest, LogStoreTest) { this->execute(); }
 
 SDS_OPTION_GROUP(
     test_load, (num_io, "", "num_io", "num of io", ::cxxopts::value< uint64_t >()->default_value("1000"), "number"),
-    (run_time, "", "run_time", "time to run in seconds", ::cxxopts::value< uint64_t >()->default_value("300"),
-     "number"),
+    (run_time, "", "run_time", "time to run in seconds", ::cxxopts::value< uint64_t >()->default_value("60"), "number"),
     (num_keys, "", "num_keys", "num of keys", ::cxxopts::value< uint64_t >()->default_value("300"), "number"),
     (per_create, "", "per_create", "percentage of io that are creates",
      ::cxxopts::value< uint64_t >()->default_value("40"), "number"),

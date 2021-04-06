@@ -227,7 +227,7 @@ public:
     bool is_recovery_mode() { return !m_rdy; }
     bool is_shutdown() const { return (m_shutdown_start_time.load(std::memory_order_acquire) != 0); }
 
-    void init_done(std::error_condition err);
+    void init_done();
     void inc_sub_system_init_cnt();
     virtual void attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr >* cur_icp_map,
                                         std::map< boost::uuids::uuid, indx_cp_ptr >* new_icp_map, hs_cp* hcp,
@@ -314,6 +314,7 @@ private:
     std::unique_ptr< HomeBlksStatusMgr > m_hb_status_mgr;
 
     std::condition_variable m_cv;
+    std::condition_variable m_cv_init_cmplt;
     std::mutex m_cv_mtx;
     bool m_rdy = false;
 

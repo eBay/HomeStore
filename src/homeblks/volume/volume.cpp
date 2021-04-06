@@ -222,6 +222,8 @@ indx_tbl* Volume::recover_indx_tbl(btree_super_block& sb, btree_cp_sb& cp_info) 
 std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     std::vector< BlkId > bid;
     std::error_condition ret = no_error;
+    HS_DEBUG_ASSERT_LE(get_io_size(iface_req->nlbas), HS_STATIC_CONFIG(engine.max_vol_io_size),
+                       "IO size exceeds max_vol_io_size supported");
 
     auto vreq = volume_req::make(iface_req);
     THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}, cache={}", vreq->lba(), vreq->nlbas(),
