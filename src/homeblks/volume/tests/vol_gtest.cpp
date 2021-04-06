@@ -1018,17 +1018,18 @@ private:
     bool delete_volume(int vol_indx) {
         // std::move will release the ref_count in VolTest::vol and pass to HomeBlks::remove_volume
         boost::uuids::uuid uuid;
-        if (!vol_info[vol_indx]) { return false; }
-        auto vol = vol_info[vol_indx]->vol;
+        auto vinfo = vol_info[vol_indx];
+        if (!vinfo) { return false; }
+        auto vol = vinfo->vol;
         bool expected = false;
         bool desired = true;
-        if (vol_info[vol_indx]->vol_destroyed.compare_exchange_strong(expected, desired)) {
+        if (vinfo->vol_destroyed.compare_exchange_strong(expected, desired)) {
             HS_RELEASE_ASSERT_EQ(VolInterface::get_instance()->get_state(vol), vol_state::ONLINE);
-            uuid = VolInterface::get_instance()->get_uuid(vol_info[vol_indx]->vol);
+            uuid = VolInterface::get_instance()->get_uuid(vinfo->vol);
             /* initialize file hdr */
-            init_vol_file_hdr(vol_info[vol_indx]->fd);
+            init_vol_file_hdr(vinfo->fd);
             VolInterface::get_instance()->remove_volume(uuid);
-            vol_info[vol_indx]->ref_cnt.decrement_testz(1);
+            vinfo->ref_cnt.decrement_testz(1);
             output.vol_del_cnt++;
         }
         return true;

@@ -313,8 +313,7 @@ private:
     std::unique_ptr< HomeBlksHttpServer > m_hb_http_server;
     std::unique_ptr< HomeBlksStatusMgr > m_hb_status_mgr;
 
-    std::condition_variable m_cv;
-    std::condition_variable m_cv_init_cmplt;
+    std::condition_variable m_cv_init_cmplt; // wait for init to complete
     std::mutex m_cv_mtx;
     bool m_rdy = false;
 

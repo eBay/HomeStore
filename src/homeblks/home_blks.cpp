@@ -395,8 +395,6 @@ bool HomeBlks::vol_state_change(const VolumePtr& vol, vol_state new_state) {
 
 void HomeBlks::init_done() {
 
-    m_rdy = true;
-    data_recovery_done();
     cap_attrs used_size;
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
         if (it->second->get_state() == vol_state::ONLINE) { vol_mounted(it->second, it->second->get_state()); }
@@ -417,7 +415,6 @@ void HomeBlks::init_done() {
     m_out_params.first_time_boot = m_dev_mgr->is_first_time_boot();
     m_out_params.max_io_size = HS_STATIC_CONFIG(engine.max_vol_io_size);
     m_cfg.init_done_cb(no_error, m_out_params);
-    m_cv.notify_all();
 #ifndef NDEBUG
     /* It will trigger race conditions without generating any IO error */
     set_io_flip();
@@ -537,7 +534,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     //
     {
         std::unique_lock< std::mutex > lk(m_cv_mtx);
-        if (!m_init_finished.load()) { m_cv.wait(lk); }
+        if (!m_init_finished.load()) { m_cv_init_cmplt.wait(lk); }
     }
 
     auto elapsed_time_ms = get_time_since_epoch_ms() - m_shutdown_start_time.load();
@@ -819,6 +816,8 @@ void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
             }
         }
         LOGINFO("System CP taken upon init is completed successfully");
+        data_recovery_done();
+        m_rdy = true;
         std::unique_lock< std::mutex > lk{m_cv_mtx};
         m_init_finished = true;
         m_cv_init_cmplt.notify_all();
@@ -853,8 +852,7 @@ void HomeBlks::vol_recovery_start_phase2() {
 }
 
 /* * Snapshot APIs  * */
-SnapshotPtr HomeBlks::create_snapshot(const VolumePtr& vol) {
-        return nullptr; }
+SnapshotPtr HomeBlks::create_snapshot(const VolumePtr& vol) { return nullptr; }
 
 std::error_condition HomeBlks::remove_snapshot(const SnapshotPtr& snap) {
     std::error_condition ok;
