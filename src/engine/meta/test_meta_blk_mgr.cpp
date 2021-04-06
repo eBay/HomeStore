@@ -132,13 +132,13 @@ public:
         }
     }
 
-    // size between 512 ~ 8192, 512 aligned;
-    uint32_t rand_size(bool overflow) {
+    // 512 aligned if aligned is set; otherwise, return unaligned size
+    uint32_t rand_size(bool overflow, bool aligned = true) {
         if (overflow) {
             std::random_device rd;
             std::default_random_engine g(rd());
             std::uniform_int_distribution< long unsigned > dist(gp.min_wrt_sz, gp.max_wrt_sz);
-            return sisl::round_up(dist(g), dma_address_boundary);
+            return aligned ? sisl::round_up(dist(g), dma_address_boundary) : dist(g);
         } else {
             std::random_device rd;
             std::default_random_engine g(rd());
@@ -289,17 +289,36 @@ public:
         }
     }
 
-    void do_sb_update() {
+    void do_sb_update(bool aligned_buf_size) {
         m_update_cnt++;
         uint8_t* buf{nullptr};
-        const auto sz_to_wrt{rand_size(do_overflow())};
+        auto overflow = do_overflow();
+        if (!aligned_buf_size) { overflow = true; } // for unaligned buf size, let's generate overflow buf size;
+        auto sz_to_wrt{rand_size(overflow, aligned_buf_size)};
         void* cookie{nullptr};
+        bool unaligned_addr{false};
+        uint32_t unaligned_shift{0};
         {
             std::unique_lock< std::mutex > lg(m_mtx);
             auto it{m_write_sbs.begin()};
             std::advance(it, rand() % m_write_sbs.size());
-
-            buf = iomanager.iobuf_alloc(512, sz_to_wrt);
+            if (aligned_buf_size) {
+                buf = iomanager.iobuf_alloc(512, sz_to_wrt);
+            } else {
+                // do unaligned write;
+                buf = static_cast< uint8_t* >(malloc(sz_to_wrt));
+                // simulate some unaligned sz and unaligned buffer address;
+                if (reinterpret_cast< std::uintptr_t >(buf) % dma_address_boundary == 0 && (rand() % 2)) {
+                    unaligned_addr = true;
+                    std::random_device rd;
+                    std::default_random_engine g(rd());
+                    std::uniform_int_distribution< long unsigned > dist(1, dma_address_boundary - 1);
+                    unaligned_shift = dist(g);
+                    HS_DEBUG_ASSERT_GT(sz_to_wrt, unaligned_shift);
+                    buf += unaligned_shift; // simulate unaligned address;
+                    sz_to_wrt -= unaligned_shift;
+                }
+            }
 
             gen_rand_buf(buf, sz_to_wrt);
 
@@ -333,7 +352,15 @@ public:
                       m_mbm->get_used_size());
         }
 
-        iomanager.iobuf_free(buf);
+        if (aligned_buf_size) {
+            iomanager.iobuf_free(buf);
+        } else {
+            if (unaligned_addr) {
+                free(static_cast< void* >(buf - unaligned_shift));
+            } else {
+                free(static_cast< void* >(buf));
+            }
+        }
     }
 
     // compare m_cb_blks with m_write_sbs;
@@ -364,13 +391,15 @@ public:
                 do_sb_remove();
                 break;
             case meta_op_type::update:
-                do_sb_update();
+                do_sb_update(do_aligned());
                 break;
             default:
                 break;
             }
         }
     }
+
+    bool do_aligned() { return rand() % 2; }
 
     bool do_overflow() {
         if (gp.always_do_overflow) { return true; }

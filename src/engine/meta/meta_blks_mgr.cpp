@@ -371,21 +371,47 @@ void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const void* co
         m_sb_blk_store->write(ovf_hdr->h.bid, iov, iovcnt);
     } catch (std::exception& e) { throw e; }
 
+    uint8_t* context_data_aligned{nullptr};
+    const auto align_sz = HS_STATIC_CONFIG(drive_attr.align_size);
+    if (reinterpret_cast< std::uintptr_t >(context_data) %
+        align_sz) { // uintptr_t will not be defined if it is not wide enough to hold address;
+        LOGWARN("Unaligned address found for input context_data.");
+        context_data_aligned = hs_iobuf_alloc(sisl::round_up(sz, align_sz));
+        std::memset(context_data_aligned, 0, sisl::round_up(sz, align_sz));
+        std::memcpy(context_data_aligned, context_data, sz);
+    }
+
+    uint8_t* data_buf{nullptr}; // avoid copying entire context_data if sz is not aligned;
     // write data blk to disk;
     size_t size_written = 0;
     for (size_t i = 0; i < ovf_hdr->h.nbids; ++i) {
         struct iovec iovd[1];
         int iovcntd = 1;
         iovd[0].iov_base = (uint8_t*)context_data + offset + size_written;
-        iovd[0].iov_len = i < ovf_hdr->h.nbids - 1 ? ovf_hdr->data_bid[i].get_nblks() * get_page_size()
-                                                   : ovf_hdr->h.context_sz - size_written;
+        if (i < ovf_hdr->h.nbids - 1) {
+            iovd[0].iov_len = ovf_hdr->data_bid[i].get_nblks() * get_page_size();
+            size_written += iovd[0].iov_len;
+        } else {
+            auto remain_sz_to_write = ovf_hdr->h.context_sz - size_written;
+            auto round_sz = sisl::round_up(remain_sz_to_write, HS_STATIC_CONFIG(drive_attr.align_size));
+            iovd[0].iov_len = round_sz;
+            if (round_sz > remain_sz_to_write) {
+                LOGWARN("Unaligned input sz:{} found for input context_data.", sz);
+                data_buf = hs_iobuf_alloc(round_sz);
+                std::memset(data_buf, 0, round_sz);
+                std::memcpy(data_buf, (uint8_t*)context_data + offset + size_written, remain_sz_to_write);
+                iovd[0].iov_base = data_buf;
+            }
+            size_written += remain_sz_to_write;
+        }
 
         try {
             m_sb_blk_store->write(ovf_hdr->data_bid[i], iovd, iovcntd);
         } catch (std::exception& e) { throw e; }
-
-        size_written += iovd[0].iov_len;
     }
+
+    if (data_buf) { hs_iobuf_free(data_buf); }
+    if (context_data_aligned) { hs_iobuf_free(context_data_aligned); }
 
     HS_DEBUG_ASSERT_EQ(size_written, ovf_hdr->h.context_sz);
 }
@@ -587,10 +613,6 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* mblk, const void* context_dat
 
         memcpy(mblk->context_data, context_data, data_sz);
     } else {
-        HS_RELEASE_ASSERT_EQ(data_sz % HS_STATIC_CONFIG(drive_attr.align_size), 0,
-                             "{}, context_data sz: {} needs to be dma_boundary {} aligned. ", mblk->hdr.h.type, data_sz,
-                             HS_STATIC_CONFIG(drive_attr.align_size));
-
         // all context data will be in overflow buffer to avoid data copy and non dma_boundary aligned write;
         BlkId obid;
 
