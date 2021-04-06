@@ -73,7 +73,9 @@ DecBNodeType(uint32_t) get_all(const BtreeSearchRange& range, uint32_t max_count
     return call_physical_method(this, get_all, range, max_count, start_ind, end_ind, out_values);
 }
 
-DecBNodeType(std::string) to_string() const { return call_variant_method_const(this, to_string); }
+DecBNodeType(std::string) to_string(bool print_friendly) const {
+    return call_variant_method_const(this, to_string, print_friendly);
+}
 
 /* Provides the occupied data size within the node */
 DecBNodeType(bool) is_leaf() const { return m_common_header.is_leaf; }

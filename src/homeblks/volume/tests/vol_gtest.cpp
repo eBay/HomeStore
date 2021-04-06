@@ -1545,6 +1545,7 @@ protected:
 
                     LOGINFO("mismatch found lba {} nlbas {} total_size_read {}", req->lba, req->nlbas, total_size_read);
 #ifndef NDEBUG
+                    VolInterface::get_instance()->verify_tree(req->vol_info->vol);
                     VolInterface::get_instance()->print_tree(req->vol_info->vol);
 #endif
                     LOGINFO("lba {} {}", req->lba, req->nlbas);

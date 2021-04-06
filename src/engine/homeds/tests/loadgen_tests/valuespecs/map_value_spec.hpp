@@ -33,7 +33,9 @@ public:
 
     void addToId(uint64_t val) {
         ValueEntry* ve = get_nth_entry(0);
-        ve->get_base_blkid().set_blk_num(ve->get_base_blkid().get_blk_num() + val);
+        auto bid = ve->get_base_blkid();
+        bid.set_blk_num(ve->get_base_blkid().get_blk_num() + val);
+        ve->set_blkid(bid);
     }
 
     void reset() {
@@ -109,7 +111,7 @@ public:
         ValueEntry* ve = get_latest_entry();
         auto seqid = ve->get_seqid();
         ve->set_seq_id(INVALID_SEQ_ID);
-        sisl::blob b = get_blob();
+        sisl::blob b = ve->get_blob();
         auto hash = util::Hash64((const char*)b.bytes, (size_t)b.size);
         ve->set_seq_id(seqid);
         return hash;

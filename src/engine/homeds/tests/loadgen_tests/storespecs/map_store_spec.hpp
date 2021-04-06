@@ -53,15 +53,9 @@ public:
 
     /* Map put always appends if exists, no feature to force udpate/insert and return error */
     virtual bool update(K& k, std::shared_ptr< V > v) override {
-        auto iface_req = vol_interface_req_ptr(new vol_interface_req(nullptr, k.start(), k.get_n_lba()));
-        iface_req->vol_instance = m_vol;
-        iface_req->op_type = Op_type::WRITE;
-        auto req = volume_req::make(iface_req);
-        ValueEntry* ve = v->get_nth_entry(0);
-        req->seqid = ve->get_seqid();
-        req->lastCommited_seqid = req->seqid; // keeping only latest version always
-        req->push_blkid(ve->get_base_blkid());
-        send_io(k, *(v.get()), req);
+        std::vector< std::shared_ptr< V > > result;
+        result.push_back(v);
+        range_update(k, true, k, true, result);
         return true;
     }
 
@@ -144,11 +138,10 @@ public:
         iface_req->op_type = Op_type::WRITE;
         auto req = volume_req::make(iface_req);
 
-        req->lastCommited_seqid = req->seqid; // keeping only latest version always
         V& start_value = *(result[0].get());
         V& end_value = *(result.back());
 
-        req->lastCommited_seqid = INVALID_SEQ_ID; // keeping only latest version always
+        req->lastCommited_seqid = req->seqid;     // keeping only latest version always
 
         BlkId bid = start_value.get_blkId();
         bid.set_nblks(end_value.end() - start_value.start() + 1);
