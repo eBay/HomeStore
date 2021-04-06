@@ -92,15 +92,15 @@ struct meta_blk_hdr_s {
     uint32_t version;
     uint32_t magic; // magic
     crc32_t crc;
-    BlkId next_bid;          // next metablk
-    BlkId prev_bid;          // previous metablk
-    BlkId ovf_bid;           // overflow blk id;
-    BlkId bid;               // current blk id; might not be needd;
-    bool compressed;         // context data compression bit
-    uint64_t context_sz;     // total size of context data; if compressed is true, it is the round up of compressed size
-                             // that is written to disk;
-    uint64_t compressed_sz;  // compressed size before round up to align_size, used for decompress
-    uint64_t src_context_sz; // context_sz before compression, this field only valid when compressed is true;
+    BlkId next_bid;         // next metablk
+    BlkId prev_bid;         // previous metablk
+    BlkId ovf_bid;          // overflow blk id;
+    BlkId bid;              // current blk id; might not be needd;
+    bool compressed;        // context data compression bit
+    uint64_t context_sz;    // total size of context data; if compressed is true, it is the round up of compressed size
+                            // that is written to disk; if compressed is false, it is the original size of context data;
+    uint64_t compressed_sz; // compressed size before round up to align_size, used for decompress
+    uint64_t src_context_sz;        // context_sz before compression, this field only valid when compressed is true;
     char type[MAX_SUBSYS_TYPE_LEN]; // sub system type;
 } __attribute((packed));
 
