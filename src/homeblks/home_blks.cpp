@@ -117,14 +117,22 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     LOGINFO("Initializing HomeBlks with Config {}", m_cfg.to_string());
     HomeStore< BLKSTORE_BUFFER_TYPE >::init((const hs_input_params&)cfg);
 
-    m_out_params.max_io_size = HS_STATIC_CONFIG(engine.max_vol_io_size);
     superblock_init();
     sisl::MallocMetrics::enable();
 
     /* start thread */
     auto sthread = sisl::named_thread("hb_init", [this]() {
-        this->init_devices();
-        iomanager.run_io_loop(false, nullptr);
+        iomanager.run_io_loop(false, nullptr, [&](bool thread_started) {
+            if (thread_started) {
+                this->init_devices();
+                {
+                    std::unique_lock< std::mutex > lk{m_cv_mtx};
+                    /* wait for init to complete */
+                    m_cv_init_cmplt.wait(lk, [this]() { return (m_init_finished.load() == true); });
+                }
+                init_done();
+            }
+        });
     });
     sthread.detach();
     m_start_shutdown = false;
@@ -385,22 +393,8 @@ bool HomeBlks::vol_state_change(const VolumePtr& vol, vol_state new_state) {
     return true;
 }
 
-void HomeBlks::init_done(std::error_condition err) {
-    /* check for error */
-    bool expected = false;
-    bool desired = true;
+void HomeBlks::init_done() {
 
-    m_out_params.first_time_boot = m_dev_mgr->is_first_time_boot();
-
-    if (err != no_error && m_init_finished.compare_exchange_strong(expected, desired)) {
-        m_cfg.init_done_cb(err, m_out_params);
-        m_cv.notify_all();
-        return;
-    }
-
-    if (err == no_error) { m_rdy = true; }
-
-    data_recovery_done();
     cap_attrs used_size;
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
         if (it->second->get_state() == vol_state::ONLINE) { vol_mounted(it->second, it->second->get_state()); }
@@ -418,9 +412,9 @@ void HomeBlks::init_done(std::error_condition err) {
     /* TODO: we should remove this check later in release. It will increase the recovery time */
     HS_RELEASE_ASSERT((verify_vols()), "vol verify failed");
     LOGINFO("init done");
-    m_cfg.init_done_cb(err, m_out_params);
-    m_init_finished = true;
-    m_cv.notify_all();
+    m_out_params.first_time_boot = m_dev_mgr->is_first_time_boot();
+    m_out_params.max_io_size = HS_STATIC_CONFIG(engine.max_vol_io_size);
+    m_cfg.init_done_cb(no_error, m_out_params);
 #ifndef NDEBUG
     /* It will trigger race conditions without generating any IO error */
     set_io_flip();
@@ -540,7 +534,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     //
     {
         std::unique_lock< std::mutex > lk(m_cv_mtx);
-        if (!m_init_finished.load()) { m_cv.wait(lk); }
+        if (!m_init_finished.load()) { m_cv_init_cmplt.wait(lk); }
     }
 
     auto elapsed_time_ms = get_time_since_epoch_ms() - m_shutdown_start_time.load();
@@ -804,6 +798,7 @@ void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
     // trigger CP
     LOGINFO("Triggering system CP during initialization");
     Volume::trigger_homeblks_cp(([this, vol_mnt_cnt](bool success) {
+        HS_ASSERT(RELEASE, success, "trigger cp during init failed");
         {
             std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
             if (m_volume_map.size() != vol_mnt_cnt) {
@@ -820,13 +815,12 @@ void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
                 }
             }
         }
-        if (success) {
-            LOGINFO("System CP taken upon init is completed successfully");
-            init_done(no_error);
-        } else {
-            LOGERROR("{}", "System CP taken upon init is failed");
-            init_done(std::make_error_condition(std::errc::io_error));
-        }
+        LOGINFO("System CP taken upon init is completed successfully");
+        data_recovery_done();
+        m_rdy = true;
+        std::unique_lock< std::mutex > lk{m_cv_mtx};
+        m_init_finished = true;
+        m_cv_init_cmplt.notify_all();
     }));
 }
 

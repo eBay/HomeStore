@@ -77,7 +77,7 @@ public:
 
     void set_nlbas(const lba_count_t nlbas) {
         HS_DEBUG_ASSERT_LE(nlbas, LbaId::max_lba_count_possible());
-        HS_DEBUG_ASSERT_LE(m_lba_start + nlbas, LbaId::max_lba_possible());
+        HS_DEBUG_ASSERT_LE((m_lba_start + nlbas - 1), LbaId::max_lba_possible());
         m_n_lba = static_cast< lba_count_serialized_t >(nlbas - 1);
     }
     [[nodiscard]] lba_count_t get_nlbas() const { return static_cast< lba_count_t >(m_n_lba) + 1; }

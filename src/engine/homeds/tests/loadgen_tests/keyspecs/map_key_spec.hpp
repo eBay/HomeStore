@@ -49,7 +49,7 @@ public:
             return generate_random_key();
         }
         case KeyPattern::OUT_OF_BOUND:
-            return MapKey((uint64_t)-1, 1);
+            return MapKey(LbaId::max_lba_possible(), 1);
 
         default:
             // We do not support other gen spec yet
