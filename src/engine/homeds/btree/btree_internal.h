@@ -617,8 +617,8 @@ ENUM(BtreeQueryType, uint8_t,
 
 // Base class for range callback params
 class BRangeCBParam {
-public:
-    BRangeCBParam() {}
+protected:
+    uint8_t node_version;
 };
 
 template < typename K, typename V >

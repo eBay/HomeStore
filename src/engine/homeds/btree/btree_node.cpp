@@ -218,5 +218,7 @@ DecBNodeType(void) get_nth_element(int n, BtreeKey* out_key, BtreeValue* out_val
     if (out_val) { get_nth_value(n, out_val, is_copy); }
 }
 DecBNodeType(bool) has_valid_edge() const { return call_physical_method_const(this, has_valid_edge); }
+
+DecBNodeType(uint8_t) get_version() const { return call_physical_method_const(this, get_version); }
 } // namespace btree
 } // namespace homeds

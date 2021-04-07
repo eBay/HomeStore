@@ -32,8 +32,11 @@ namespace btree {
 
 #define EDGE_ENTRY_INDEX INVALID_POOL_NEXT
 
+static constexpr uint8_t BTREE_NODE_VERSION = 1;
+
 typedef struct __attribute__((__packed__)) {
     uint8_t magic;
+    uint8_t version{BTREE_NODE_VERSION};
     uint16_t checksum;
 
     bnodeid_t node_id;
@@ -46,12 +49,12 @@ typedef struct __attribute__((__packed__)) {
 
     uint64_t node_gen;
     bnodeid_t edge_entry;
+
     string to_string() const {
-        stringstream ss;
-        ss << "magic=" << magic << " checksum=" << checksum << " node_id=" << node_id << " nentries=" << nentries;
-        ss << " node_type=" << node_type << " leaf=" << leaf << " valid_node=" << valid_node;
-        ss << " node_gen=" << node_gen << " edge_entry=" << edge_entry;
-        return ss.str();
+        return fmt::format("magic={} version={} csum={} node_id={} next_node={} nentries={} node_type={} is_leaf={} "
+                           "valid_node={} node_gen={} edge_entry={}",
+                           magic, version, checksum, node_id, next_node, nentries, node_type, leaf, valid_node,
+                           node_gen, edge_entry);
     }
 } persistent_hdr_t;
 
@@ -98,6 +101,7 @@ public:
         } else {
             assert(get_node_id() == *id);
             assert(get_magic() == MAGICAL_VALUE);
+            assert(get_version() == BTREE_NODE_VERSION);
         }
     }
 
@@ -115,6 +119,7 @@ public:
         } else {
             assert(get_node_id() == id);
             assert(get_magic() == MAGICAL_VALUE);
+            assert(get_version() == BTREE_NODE_VERSION);
         }
     }
 
@@ -123,11 +128,10 @@ public:
     persistent_hdr_t* get_persistent_header() { return &m_pers_header; }
 
     uint8_t get_magic() const { return m_pers_header.magic; }
-
     void set_magic() { get_persistent_header()->magic = MAGICAL_VALUE; }
+    uint8_t get_version() const { return m_pers_header.version; }
 
     uint16_t get_checksum() const { return m_pers_header.checksum; }
-
     void init_checksum() { get_persistent_header()->checksum = 0; }
 
 #ifndef NO_CHECKSUM
