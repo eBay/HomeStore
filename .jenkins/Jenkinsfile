@@ -29,6 +29,7 @@ pipeline {
                     sh(script: "sed -Ei 's,version = .*\"([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1-${env.BUILD_NUMBER}\",' conanfile.py")
                     BUILD_MISSING = "--build cascade --build missing"
                     LAST_COMMITS = sh(script: "git log -n 2 --pretty=short", returnStdout: true)
+                    BUILD_TEST_MODE = ""
                 }
             }
         }
@@ -40,6 +41,18 @@ pipeline {
             steps {
                 script {
                     BUILD_MISSING = ""
+                    BUILD_TEST_MODE = ""
+                }
+            }
+        }
+        stage('Adjust build test level') {
+            when { allOf {
+               expression { (env.BRANCH_NAME == "${MASTER_BRANCH}") }
+               expression { (params.upstream_triggered == null) || ("${upstream_triggered}" == "") }
+            } }
+            steps {
+                script {
+                    BUILD_TEST_MODE = "-o homestore:testing=full"
                 }
             }
         }
@@ -159,7 +172,7 @@ pipeline {
                             expression { "${COVERAGE}" == 'False' }
                         }
                         steps {
-                            sh "conan create ${BUILD_MISSING} -o homestore:sanitize=${SANITIZE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
+                            sh "conan create ${BUILD_MISSING} -o homestore:sanitize=${SANITIZE} ${BUILD_TEST_MODE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
@@ -269,6 +282,29 @@ pipeline {
             } }
         
             stages {
+                stage('SCST Connector') {
+                    steps {
+                        script {
+                            built_chain = env.pkg_version
+                            def scst_res = build job: "SCST Connector/${MASTER_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
+                            built_chain = "${built_chain}" + ", " + "scst_res.buildVariables.pkg_version"
+                        }
+                    }
+                    post {
+                        failure { script { failed_pkg = "SCST Connector" } }
+                    }
+                }
+                stage('NuBlox Logstore') {
+                    steps {
+                        script {
+                            def nls_res = build job: "Nublox Logstore/${MASTER_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
+                            built_chain = "${built_chain}" + ", " + "nls_res.buildVariables.pkg_version"
+                        }
+                    }
+                    post {
+                        failure { script { failed_pkg = "Nublox Logstore" } }
+                    }
+                }
                 stage('Homestore BDev') {
                     steps {
                         script {
