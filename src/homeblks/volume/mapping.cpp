@@ -159,7 +159,7 @@ btree_status_t mapping::get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCu
     GetCBParam param(cntx);
     BtreeQueryRequest< MappingKey, MappingValue > qreq(search_range,
                                                        BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, UINT32_MAX,
-                                                       m_match_item_cb_get, (BRangeCBParam*)&param);
+                                                       m_match_item_cb_get, dynamic_cast< BRangeCBParam* >(&param));
 
     /* run query */
     auto ret = m_bt->query(qreq, result_kv);

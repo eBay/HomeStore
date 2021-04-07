@@ -1109,9 +1109,11 @@ private:
                 THIS_BT_LOG(TRACE, btree_nodes, my_node, "Query leaf node:\n {}", my_node->to_string());
 
                 int start_ind = 0, end_ind = 0;
-                std::vector< std::pair< K, V > > match_kv;
+                static thread_local std::vector< std::pair< K, V > > s_match_kv;
+
+                s_match_kv.clear();
                 auto cur_count = my_node->get_all(query_req.get_input_range(), query_req.get_batch_size() - count,
-                                                  start_ind, end_ind, &match_kv);
+                                                  start_ind, end_ind, &s_match_kv);
                 if (cur_count == 0) {
                     K key;
                     my_node->get_last_key(&key);
@@ -1129,20 +1131,25 @@ private:
                         bool start_incl = false, end_incl = false;
                         query_req.get_input_range().copy_start_end_blob(subrange_start_key, start_incl,
                                                                         subrange_end_key, end_incl);
+
                         BtreeSearchRange subrange(subrange_start_key, start_incl, subrange_end_key, end_incl);
-                        std::vector< std::pair< K, V > > result_kv;
-                        ret = query_req.callback()(match_kv, result_kv, query_req.get_cb_param(), subrange);
-                        auto ele_to_add = result_kv.size();
+                        static thread_local std::vector< std::pair< K, V > > s_result_kv;
+
+                        s_result_kv.clear();
+                        query_req.get_cb_param()->node_version = my_node->get_version();
+                        ret = query_req.callback()(s_match_kv, s_result_kv, query_req.get_cb_param(), subrange);
+
+                        auto ele_to_add = s_result_kv.size();
                         if (count + ele_to_add > query_req.get_batch_size()) {
                             ele_to_add = query_req.get_batch_size() - count;
                         }
                         if (ele_to_add > 0) {
-                            out_values.insert(out_values.end(), result_kv.begin(), result_kv.begin() + ele_to_add);
+                            out_values.insert(out_values.end(), s_result_kv.begin(), s_result_kv.begin() + ele_to_add);
                         }
                         count += ele_to_add;
                         BT_DEBUG_ASSERT_CMP(count, <=, query_req.get_batch_size(), my_node);
                     } else {
-                        out_values.insert(std::end(out_values), std::begin(match_kv), std::end(match_kv));
+                        out_values.insert(std::end(out_values), std::begin(s_match_kv), std::end(s_match_kv));
                         count += cur_count;
                     }
                 }
@@ -1189,25 +1196,32 @@ private:
             BT_LOG_ASSERT_CMP(query_req.get_batch_size(), >, 0, my_node);
 
             int start_ind = 0, end_ind = 0;
-            std::vector< std::pair< K, V > > match_kv;
+            static thread_local std::vector< std::pair< K, V > > s_match_kv;
+            s_match_kv.clear();
+
             auto cur_count =
                 my_node->get_all(query_req.get_input_range(), query_req.get_batch_size() - (uint32_t)out_values.size(),
-                                 start_ind, end_ind, &match_kv);
+                                 start_ind, end_ind, &s_match_kv);
 
             if (cur_count && query_req.callback()) {
-                std::vector< std::pair< K, V > > result_kv;
                 K subrange_start_key, subrange_end_key;
+                static thread_local std::vector< std::pair< K, V > > s_result_kv;
+                s_result_kv.clear();
+
                 bool start_incl = false, end_incl = false;
                 query_req.get_input_range().copy_start_end_blob(subrange_start_key, start_incl, subrange_end_key,
                                                                 end_incl);
+
                 BtreeSearchRange subrange(subrange_start_key, start_incl, subrange_end_key, end_incl);
-                ret = query_req.callback()(match_kv, result_kv, query_req.get_cb_param(), subrange);
-                auto ele_to_add = result_kv.size();
+                query_req.get_cb_param()->node_version = my_node->get_version();
+                ret = query_req.callback()(s_match_kv, s_result_kv, query_req.get_cb_param(), subrange);
+
+                auto ele_to_add = s_result_kv.size();
                 if (ele_to_add > 0) {
-                    out_values.insert(out_values.end(), result_kv.begin(), result_kv.begin() + ele_to_add);
+                    out_values.insert(out_values.end(), s_result_kv.begin(), s_result_kv.begin() + ele_to_add);
                 }
             }
-            out_values.insert(std::end(out_values), std::begin(match_kv), std::end(match_kv));
+            out_values.insert(std::end(out_values), std::begin(s_match_kv), std::end(s_match_kv));
 
             unlock_node(my_node, homeds::thread::locktype::LOCKTYPE_READ);
             if (ret != btree_status_t::success || out_values.size() >= query_req.get_batch_size()) {
@@ -1445,22 +1459,26 @@ private:
     btree_status_t update_leaf_node(const BtreeNodePtr& my_node, const BtreeKey& k, const BtreeValue& v,
                                     btree_put_type put_type, BtreeValue& existing_val, BtreeUpdateRequest< K, V >* bur,
                                     const btree_cp_ptr& bcp, BtreeSearchRange& subrange) {
-
         btree_status_t ret = btree_status_t::success;
         if (bur != nullptr) {
             // BT_DEBUG_ASSERT_CMP(bur->callback(), !=, nullptr, my_node); // TODO - range req without
             // callback implementation
-            std::vector< std::pair< K, V > > match;
+            static thread_local std::vector< std::pair< K, V > > s_match;
+            s_match.clear();
             int start_ind = 0, end_ind = 0;
-            my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind, &match);
+            my_node->get_all(bur->get_input_range(), UINT32_MAX, start_ind, end_ind, &s_match);
 
-            vector< pair< K, V > > replace_kv;
-            ret = bur->callback()(match, replace_kv, bur->get_cb_param(), subrange);
+            static thread_local std::vector< pair< K, V > > s_replace_kv;
+            s_replace_kv.clear();
+            bur->get_cb_param()->node_version = my_node->get_version();
+            ret = bur->callback()(s_match, s_replace_kv, bur->get_cb_param(), subrange);
             if (ret != btree_status_t::success) { return ret; }
+
             HS_ASSERT_CMP(DEBUG, start_ind, <=, end_ind);
-            if (match.size() > 0) { my_node->remove(start_ind, end_ind); }
-            BT_DEBUG_ASSERT_CMP(replace_kv.size(), >=, match.size(), my_node);
-            for (auto& pair : replace_kv) { // insert is based on compare() of BtreeKey
+            if (s_match.size() > 0) { my_node->remove(start_ind, end_ind); }
+            BT_DEBUG_ASSERT_CMP(s_replace_kv.size(), >=, s_match.size(), my_node);
+
+            for (const auto& pair : s_replace_kv) { // insert is based on compare() of BtreeKey
                 auto status = my_node->insert(pair.first, pair.second);
                 BT_RELEASE_ASSERT((status == btree_status_t::success), my_node, "unexpected insert failure");
             }
@@ -1477,12 +1495,11 @@ private:
                     my_node->get_nth_key(i, &curKey, false);
                     if (prevKey.compare(&curKey) >= 0) {
                         LOGINFO("my_node {}", my_node->to_string());
-                        for (uint32_t i = 0; i < match.size(); ++i) {
-                            LOGINFO("match key {} value {}", match[i].first.to_string(), match[i].second.to_string());
+                        for (const auto& [k, v] : s_match) {
+                            LOGINFO("match key {} value {}", k.to_string(), v.to_string());
                         }
-                        for (uint32_t i = 0; i < replace_kv.size(); ++i) {
-                            LOGINFO("replace key {} value {}", replace_kv[i].first.to_string(),
-                                    replace_kv[i].second.to_string());
+                        for (const auto& [k, v] : s_replace_kv) {
+                            LOGINFO("replace key {} value {}", k.to_string(), v.to_string());
                         }
                     }
                     BT_RELEASE_ASSERT_CMP(prevKey.compare(&curKey), <, 0, my_node);
@@ -2466,8 +2483,8 @@ private:
         write_node(parent_node, left_most_node, bcp);
 
 #ifndef NDEBUG
-        for (uint32_t i = 0; i < replace_nodes.size(); ++i) {
-            new_entries += replace_nodes[i]->get_total_entries();
+        for (const auto& n : replace_nodes) {
+            new_entries += n->get_total_entries();
         }
 
         new_entries += left_most_node->get_total_entries();
@@ -2487,11 +2504,11 @@ private:
         }
 #endif
         /* free nodes. It actually gets freed after cp is completed */
-        for (uint32_t i = 0; i < old_nodes.size(); ++i) {
-            free_node(old_nodes[i], (bcp ? bcp->free_blkid_list : nullptr));
+        for (const auto& n : old_nodes) {
+            free_node(n, (bcp ? bcp->free_blkid_list : nullptr));
         }
-        for (uint32_t i = 0; i < deleted_nodes.size(); ++i) {
-            free_node(deleted_nodes[i]);
+        for (const auto& n : deleted_nodes) {
+            free_node(n);
         }
         ret = btree_status_t::success;
     out:
@@ -2510,8 +2527,8 @@ private:
         unlock_node(child_nodes[0], locktype::LOCKTYPE_WRITE);
         if (ret != btree_status_t::success) {
             /* free the allocated nodes */
-            for (uint32_t i = 0; i < new_nodes.size(); i++) {
-                free_node(new_nodes[i]);
+            for (const auto& n : new_nodes) {
+                free_node(n);
             }
         }
         return ret;
