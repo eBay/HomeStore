@@ -2,34 +2,40 @@
 // Created by Kadayam, Hari on 06/11/17.
 //
 
+#include <cassert>
+#include <cstding>
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <string>
+#include <vector>
+
 #include <sds_logging/logging.h>
-#include "device/device.h"
-#include <fcntl.h>
+
 #include "blkstore.hpp"
+#include "device/device.h"
 #include "device/virtual_dev.hpp"
 
-using namespace std;
 using namespace homestore;
 
 SDS_INIT_LOGGING
 
-homestore::DeviceManager* dev_mgr = nullptr;
-homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >* blk_store;
-homestore::Cache< BlkId >* glob_cache = nullptr;
+static homestore::DeviceManager* dev_mgr{nullptr};
+static homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >* blk_store;
+static homestore::Cache< BlkId >* glob_cache{nullptr};
 
-#define MAX_CACHE_SIZE 2 * 1024 * 1024 * 1024
+static constexpr uint64_t MAX_CACHE_SIZE{static_cast<uint64_t>(2) * 1024 * 1024 * 1024};
 
-AbstractVirtualDev* new_vdev_found(homestore::vdev_info_block* vb) {
+AbstractVirtualDev* new_vdev_found(homestore::vdev_info_block* const vb) {
     LOGINFO("New virtual device found id = {} size = {}", vb->vdev_id, vb->size);
-    blk_store = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >(dev_mgr, glob_cache, vb,
-                                                                                  WRITETHRU_CACHE, 8192);
+    blk_store{new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >{
+        dev_mgr, glob_cache, vb, BlkStoreCacheType::WRITETHRU_CACHE, 8192}};
     return blk_store->get_vdev();
 }
 
 int main(int argc, char** argv) {
     std::vector< std::string > dev_names;
-    bool create = ((argc > 1) && (!strcmp(argv[1], "-c")));
+    const bool create{(argc > 1) && (!strcmp(argv[1], "-c"))};
 
     for (auto i : boost::irange(create ? 2 : 1, argc)) {
         dev_names.emplace_back(argv[i]);
@@ -52,9 +58,9 @@ int main(int argc, char** argv) {
     /* Create a blkstore */
     if (create) {
         LOGINFO("Creating BlkStore");
-        uint64_t size = 512 * 1024 * 1024;
+        const uint64_t size{static_cast<uint64_t>(512) * 1024 * 1024};
         blk_store = new homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy >(dev_mgr, glob_cache, size,
-                                                                                      WRITETHRU_CACHE, 1, 8192);
+                                                                                      BlkStoreCacheType::WRITETHRU_CACHE, 1, 8192);
     }
 
     homestore::BlkId bids[100];
@@ -63,17 +69,17 @@ int main(int argc, char** argv) {
     hints.dev_id_hint = -1;
 
     boost::intrusive_ptr< BlkBuffer > bbufs[100];
-    for (auto i = 0; i < 100; i++) {
-        uint8_t nblks = 1;
+    for (size_t i{0}; i < 100; ++i) {
+        const uint32_t nblks{1};
         // blk_store->alloc_blk(nblks * BLKSTORE_BLK_SIZE, hints, &bids[i]);
 
         bbufs[i] = blk_store->alloc_blk_cached(nblks * BLKSTORE_BLK_SIZE, hints, &bids[i]);
-        LOGINFO("Requested nblks: {} Allocation info: {}", (uint32_t)nblks, bids[i].to_string());
-        memset(bbufs[i]->at_offset(0).bytes, i, bbufs[i]->at_offset(0).size);
+        LOGINFO("Requested nblks: {} Allocation info: {}", nblks, bids[i].to_string());
+        std::memset(static_cast<void*>(bbufs[i]->at_offset(0).bytes), i, bbufs[i]->at_offset(0).size);
     }
 
     // char bufs[100][8192];
-    for (auto i = 0; i < 100; i++) {
+    for (size_t i{0}; i < 100; ++i) {
         // memset(bufs[i], i, 8192);
         // sisl::blob b = {(uint8_t *)&bufs[i], 8192};
 
@@ -82,13 +88,13 @@ int main(int argc, char** argv) {
         LOGINFO("Written on {} for 8192 bytes", bids[i].to_string());
     }
 
-    for (auto i = 0; i < 100; i++) {
+    for (size_t i{0}; i < 100; ++i) {
         LOGINFO("Read from {} for 8192 bytes", bids[i].to_string());
 
         boost::intrusive_ptr< BlkBuffer > bbuf = blk_store->read(bids[i], 0, 8192);
         omds::blob b = bbuf->at_offset(0);
         assert(b.size == 8192);
-        for (auto j = 0; j < b.size; j++) {
+        for (size_t j{0}; j < b.size; ++j) {
             assert(b.bytes[j] == i);
         }
     }

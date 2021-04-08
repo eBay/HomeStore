@@ -62,7 +62,7 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
         /* Note :- it is not thread safe. We only support it for testing */
         if (fake_reboot) {
             HomeStore::fake_reboot();
-            meta_blk_mgr->register_handler("HOMEBLK", HomeBlks::meta_blk_found_cb, HomeBlks::meta_blk_recovery_comp_cb);
+            MetaBlkMgrSI()->register_handler("HOMEBLK", HomeBlks::meta_blk_found_cb, HomeBlks::meta_blk_recovery_comp_cb);
             Volume::fake_reboot();
             m_meta_blk_found = false;
             instance = HomeBlksSafePtr(new HomeBlks(cfg));
@@ -329,7 +329,7 @@ homeblks_sb* HomeBlks::superblock_init() {
     HS_RELEASE_ASSERT_EQ(m_homeblks_sb_buf.bytes(), nullptr, "Reinit already initialized super block");
 
     /* build the homeblks super block */
-    m_homeblks_sb_buf = hs_create_byte_view(HOMEBLKS_SB_SIZE, meta_blk_mgr->is_aligned_buf_needed(HOMEBLKS_SB_SIZE));
+    m_homeblks_sb_buf = hs_create_byte_view(HOMEBLKS_SB_SIZE, MetaBlkMgrSI()->is_aligned_buf_needed(HOMEBLKS_SB_SIZE));
 
     auto sb = (homeblks_sb*)m_homeblks_sb_buf.bytes();
     sb->version = HOMEBLKS_SB_VERSION;
@@ -341,10 +341,10 @@ homeblks_sb* HomeBlks::superblock_init() {
 void HomeBlks::homeblks_sb_write() {
     if (m_sb_cookie == nullptr) {
         // add to MetaBlkMgr
-        meta_blk_mgr->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), m_sb_cookie);
+        MetaBlkMgrSI()->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), m_sb_cookie);
     } else {
         // update existing homeblks sb
-        meta_blk_mgr->update_sub_sb((void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), m_sb_cookie);
+        MetaBlkMgrSI()->update_sub_sb((void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), m_sb_cookie);
     }
 }
 
@@ -576,7 +576,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
 
     /* XXX: can we move it to indx mgr */
     home_log_store_mgr.stop();
-    meta_blk_mgr->stop();
+    MetaBlkMgrSI()->stop();
     this->close_devices();
 
     // stop io
@@ -690,7 +690,7 @@ void HomeBlks::migrate_sb() {
     migrate_logstore_sb();
     migrate_cp_sb();
 
-    meta_blk_mgr->set_migrated();
+    MetaBlkMgrSI()->set_migrated();
 }
 
 void HomeBlks::migrate_logstore_sb() {}
@@ -699,7 +699,7 @@ void HomeBlks::migrate_cp_sb() {}
 void HomeBlks::migrate_homeblk_sb() {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     void* cookie = nullptr;
-    meta_blk_mgr->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), cookie);
+    MetaBlkMgrSI()->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), cookie);
 }
 
 void HomeBlks::migrate_volume_sb() {

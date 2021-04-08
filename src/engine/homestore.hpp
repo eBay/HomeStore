@@ -175,7 +175,7 @@ protected:
         auto cnt = m_format_cnt.fetch_sub(1);
         if (cnt != 1) { return; }
         m_dev_mgr->init_done();
-        meta_blk_mgr->start(m_meta_blk_store.get(), m_meta_sb_blob, first_time_boot);
+        MetaBlkMgrSI()->start(m_meta_blk_store.get(), m_meta_sb_blob, first_time_boot);
         ResourceMgr::set_total_cap(m_dev_mgr->get_total_cap());
     }
 
@@ -215,11 +215,12 @@ protected:
             m_size_avail = size;
             LOGINFO("maximum capacity for data blocks is {}", m_size_avail);
             m_data_blk_store = std::make_unique< data_blkstore_t >(
-                m_dev_mgr.get(), m_cache.get(), size, WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob),
+                m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::WRITEBACK_CACHE, 0, (char*)&blob,
+                sizeof(blkstore_blob),
                 m_data_pagesz, "data", true, data_completion_cb());
         } else {
-            m_data_blk_store =
-                std::make_unique< data_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, WRITEBACK_CACHE, m_data_pagesz,
+            m_data_blk_store = std::make_unique< data_blkstore_t >(
+                m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::WRITEBACK_CACHE, m_data_pagesz,
                                                     "data", (vb->failed ? true : false), true, data_completion_cb());
             if (vb->failed) {
                 m_vdev_failed = true;
@@ -236,13 +237,14 @@ protected:
             uint64_t size = (2 * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
             m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
-                m_dev_mgr.get(), m_cache.get(), size, RD_MODIFY_WRITEBACK_CACHE, 0, (char*)&blob, sizeof(blkstore_blob),
+                m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE, 0, (char*)&blob,
+                sizeof(blkstore_blob),
                 HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "index", true);
             ++m_format_cnt;
             m_index_blk_store->format(([this](bool success) { init_done(true); }));
         } else {
             m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
-                m_dev_mgr.get(), m_cache.get(), vb, RD_MODIFY_WRITEBACK_CACHE,
+                m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE,
                 HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "index", (vb->failed ? true : false), true);
             if (vb->failed) {
                 m_vdev_failed = true;
@@ -261,7 +263,8 @@ protected:
             uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
             m_sb_blk_store = std::make_unique< sb_blkstore_t >(
-                m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, HS_STATIC_CONFIG(input.devices).size() - 1,
+                m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::PASS_THRU,
+                HS_STATIC_CONFIG(input.devices).size() - 1,
                 (char*)&blob, sizeof(sb_blkstore_blob), HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size),
                 "superblock", false);
 
@@ -274,7 +277,8 @@ protected:
             m_sb_blk_store->update_vb_context(sisl::blob((uint8_t*)&blob, (uint32_t)sizeof(sb_blkstore_blob)));
         } else {
             /* create a blkstore */
-            m_sb_blk_store = std::make_unique< sb_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU,
+            m_sb_blk_store = std::make_unique< sb_blkstore_t >(
+                m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::PASS_THRU,
                                                                HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size),
                                                                "superblock", false, false);
             if (vb->failed) {
@@ -305,13 +309,15 @@ protected:
             uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
             m_meta_blk_store = std::make_unique< meta_blkstore_t >(
-                m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
+                m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::PASS_THRU, 0, (char*)&blob,
+                sizeof(blkstore_blob),
                 HS_STATIC_CONFIG(drive_attr.phys_page_size), "meta", false);
             ++m_format_cnt;
             m_meta_blk_store->format(([this](bool success) { init_done(true); }));
 
         } else {
-            m_meta_blk_store = std::make_unique< meta_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU,
+            m_meta_blk_store = std::make_unique< meta_blkstore_t >(
+                m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::PASS_THRU,
                                                                    HS_STATIC_CONFIG(drive_attr.phys_page_size), "meta",
                                                                    (vb->failed ? true : false), false);
             if (vb->failed) {
@@ -337,14 +343,16 @@ protected:
             uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
             m_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
-                m_dev_mgr.get(), m_cache.get(), size, PASS_THRU, 0, (char*)&blob, sizeof(blkstore_blob),
+                m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::PASS_THRU, 0, (char*)&blob,
+                sizeof(blkstore_blob),
                 HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "logdev", false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::logdev(), std::placeholders::_1));
             ++m_format_cnt;
             m_logdev_blk_store->format(([this](bool success) { init_done(true); }));
         } else {
             m_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
-                m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU, HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size),
+                m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::PASS_THRU,
+                HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size),
                 "logdev", (vb->failed ? true : false), false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::logdev(), std::placeholders::_1));
             if (vb->failed) {
@@ -374,7 +382,7 @@ public:
     static void fake_reboot() {
         MetaBlkMgr::fake_reboot();
         IndxMgr::fake_reboot();
-        meta_blk_mgr->register_handler("LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr);
+        MetaBlkMgrSI()->register_handler("LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr);
     }
 
 #if 0

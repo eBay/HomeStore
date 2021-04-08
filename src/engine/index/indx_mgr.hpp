@@ -403,7 +403,7 @@ public:
 
     /* reinitialize indx mgr. It is used in fake reboot */
     static void fake_reboot() {
-        meta_blk_mgr->register_handler("INDX_MGR_CP", StaticIndxMgr::meta_blk_found_cb, nullptr);
+        MetaBlkMgrSI()->register_handler("INDX_MGR_CP", StaticIndxMgr::meta_blk_found_cb, nullptr);
     }
     static void cp_done(bool blkalloc_cp);
     /* It registers a callback which is triggered at the end of cp.

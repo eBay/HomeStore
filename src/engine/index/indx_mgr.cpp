@@ -937,7 +937,10 @@ void IndxMgr::do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_
                                 }
 #endif
                                 /* remove the meta blk which is used to track unmap progress */
-                                MetaBlkMgr::instance()->remove_sub_sb(unmap_meta_blk_cntx);
+                                const auto ret{MetaBlkMgrSI()->remove_sub_sb(unmap_meta_blk_cntx)};
+                                if (ret != no_error) {
+                                    HS_ASSERT(RELEASE, false, "failed to remove subsystem with status: {}", ret.message());
+                                }
                                 if (!m_recovery_mode) {
                                     /* we don't need to callback in a recovery mode */
                                     m_io_cb(ireq, ireq->indx_err);
@@ -1098,7 +1101,7 @@ indx_cp_ptr IndxMgr::get_indx_cp(hs_cp* hcp) {
 }
 
 sisl::byte_view IndxMgr::alloc_sb_bytes(uint64_t size) {
-    return hs_create_byte_view(size, meta_blk_mgr->is_aligned_buf_needed(size));
+    return hs_create_byte_view(size, MetaBlkMgrSI()->is_aligned_buf_needed(size));
 }
 
 /* Steps involved in indx destroy. Note that blkids is available to allocate as soon as it is set in blkalloc. So we
@@ -1192,7 +1195,13 @@ void IndxMgr::destroy_indx_tbl() {
                                 }
 #endif
                                 /* remove the meta blk which is used to track vol destroy progress */
-                                if (m_destroy_meta_blk) { MetaBlkMgr::instance()->remove_sub_sb(m_destroy_meta_blk); }
+                                if (m_destroy_meta_blk) { 
+                                    const auto ret{MetaBlkMgrSI()->remove_sub_sb(m_destroy_meta_blk)};
+                                    if (ret != no_error) {
+                                        HS_ASSERT(RELEASE, false, "failed to remove subsystem with status: {}",
+                                                  ret.message());
+                                    }
+                                }
                                 m_stop_cb(success);
                             }),
                             free_size, true);
@@ -1363,7 +1372,7 @@ void StaticIndxMgr::flush_hs_free_blks(hs_cp* hcp) {
 void StaticIndxMgr::write_hs_cp_sb(hs_cp* hcp) {
     uint64_t size = sizeof(indx_cp_base_sb) * hcp->indx_cp_list.size() + sizeof(hs_cp_sb);
 
-    sisl::byte_view b = hs_create_byte_view(size, meta_blk_mgr->is_aligned_buf_needed(size));
+    sisl::byte_view b = hs_create_byte_view(size, MetaBlkMgrSI()->is_aligned_buf_needed(size));
     hs_cp_sb* hdr = (hs_cp_sb*)b.bytes();
     hdr->version = INDX_MGR_VERSION;
     hdr->type = meta_hdr_type::INDX_CP;
@@ -1484,10 +1493,10 @@ void StaticIndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_
 
 void StaticIndxMgr::write_meta_blk(void*& write_mblk, sisl::byte_view buf) {
     if (write_mblk) {
-        MetaBlkMgr::instance()->update_sub_sb((void*)buf.bytes(), buf.size(), write_mblk);
+        MetaBlkMgrSI()->update_sub_sb((void*)buf.bytes(), buf.size(), write_mblk);
     } else {
         /* first time update */
-        MetaBlkMgr::instance()->add_sub_sb("INDX_MGR_CP", (void*)buf.bytes(), buf.size(), write_mblk);
+        MetaBlkMgrSI()->add_sub_sb("INDX_MGR_CP", (void*)buf.bytes(), buf.size(), write_mblk);
     }
 }
 

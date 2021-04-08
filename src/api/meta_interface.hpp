@@ -39,7 +39,7 @@ typedef std::string meta_sub_type;
 
 class MetablkMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit MetablkMetrics(const char* inst_name) : sisl::MetricsGroupWrapper("MetaBlkStore", inst_name) {
+    explicit MetablkMetrics(const char* const inst_name) : sisl::MetricsGroupWrapper{"MetaBlkStore", inst_name} {
         REGISTER_COUNTER(compress_success_cnt, "compression successful cnt");
         REGISTER_COUNTER(compress_backoff_memory_cnt, "compression back-off cnt because of exceending memory limit")
         REGISTER_COUNTER(compress_backoff_ratio_cnt, "compression back-off cnt because of exceeding ratio limit");
@@ -47,6 +47,11 @@ public:
         REGISTER_HISTOGRAM(compress_ratio_percent, "compression ration percentage");
         register_me_to_farm();
     }
+
+    MetablkMetrics(const MetablkMetrics&) = delete;
+    MetablkMetrics& operator=(const MetablkMetrics&) = delete;
+    MetablkMetrics(MetablkMetrics&&) noexcept = delete;
+    MetablkMetrics& operator=(MetablkMetrics&&) noexcept = delete;
 
     ~MetablkMetrics() { deregister_me_from_farm(); }
 };
@@ -67,7 +72,7 @@ private:
     MetablkMetrics m_metrics;
 
 public:
-    MetaBlkMgr(const char* name = "MetaBlkStore");
+    MetaBlkMgr(const char* const name = "MetaBlkStore");
     MetaBlkMgr(const MetaBlkMgr&) = delete;
     MetaBlkMgr(MetaBlkMgr&&) noexcept = delete;
     MetaBlkMgr& operator=(const MetaBlkMgr&) = delete;
@@ -83,7 +88,7 @@ public:
      * @param init : true of initialized, false if recovery
      * @return
      */
-    void start(blk_store_t* sb_blk_store, const sb_blkstore_blob* blob, const bool is_init);
+    void start(blk_store_t* const sb_blk_store, const sb_blkstore_blob* const blob, const bool is_init);
 
     void stop();
 
@@ -124,7 +129,7 @@ public:
      *                 Subsystem is supposed to use this cookie to do update and remove of the sb;
      *
      */
-    void add_sub_sb(const meta_sub_type type, const void* context_data, const uint64_t sz, void*& cookie);
+    void add_sub_sb(const meta_sub_type type, const void* const context_data, const uint64_t sz, void*& cookie);
 
     /**
      * @brief : remove subsystem sb based on cookie
@@ -133,7 +138,7 @@ public:
      *
      * @return : ok on success, not-ok on failure;
      */
-    std::error_condition remove_sub_sb(const void* cookie);
+    [[nodiscard]] std::error_condition remove_sub_sb(void* const cookie);
 
     /**
      * @brief : update metablk in-place
@@ -143,10 +148,10 @@ public:
      * @param sz : size of context_data
      * @param cookie : handle to address the unique subsytem sb that is being updated;
      */
-    void update_sub_sb(const void* context_data, const uint64_t sz, void*& cookie);
+    void update_sub_sb(const void* const context_data, const uint64_t sz, void*& cookie);
 
     // size_t read_sub_sb(const meta_sub_type type, sisl::byte_view& buf);
-    void read_sub_sb(const meta_sub_type type);
+    void read_sub_sb(const meta_sub_type type) const;
 
     /**
      * @brief :
@@ -169,15 +174,15 @@ public:
      */
     void scan_meta_blks();
 
-    uint64_t get_size() const;
+    [[nodiscard]] uint64_t get_size() const;
 
-    uint64_t get_used_size() const;
+    [[nodiscard]] uint64_t get_used_size() const;
 
-    bool is_aligned_buf_needed(const size_t size);
+    [[nodiscard]] bool is_aligned_buf_needed(const size_t size);
 
-    uint32_t get_page_size() const;
+    [[nodiscard]] uint32_t get_page_size() const;
 
-    uint64_t get_available_blks() const;
+    [[nodiscard]] uint64_t get_available_blks() const;
 
     /**
      * @brief : Return the total space used in bytes that was occupied by this meta blk;
@@ -187,11 +192,11 @@ public:
      *
      * @return : size of space occupied by this meta blk;
      */
-    uint64_t get_meta_size(const void* cookie);
+    [[nodiscard]] uint64_t get_meta_size(const void* const cookie) const;
 
-    uint64_t meta_blk_context_sz();
+    [[nodiscard]] uint64_t meta_blk_context_sz() const;
 
-    uint64_t ovf_blk_max_num_data_blk();
+    [[nodiscard]] uint64_t ovf_blk_max_num_data_blk() const;
 
 public:
     /*********************** static public function **********************/
@@ -209,7 +214,7 @@ private:
      *
      * @return
      */
-    bool is_sub_type_valid(const meta_sub_type type);
+    [[nodiscard]] bool is_sub_type_valid(const meta_sub_type type);
 
     /**
      * @brief : write in-memory copy of meta_blk to disk;
@@ -218,9 +223,9 @@ private:
      *
      * @return
      */
-    void write_meta_blk_to_disk(meta_blk* mblk);
+    void write_meta_blk_to_disk(meta_blk* const mblk);
 
-    void write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const void* context_data, const uint64_t sz,
+    void write_ovf_blk_to_disk(meta_blk_ovf_hdr* const ovf_hdr, const void* const context_data, const uint64_t sz,
                                const uint64_t offset);
 
     /**
@@ -228,7 +233,7 @@ private:
      *
      * @param bid : the blk id that belongs to meta ssb;
      */
-    void load_ssb(const sb_blkstore_blob* blob);
+    void load_ssb(const sb_blkstore_blob* const blob);
 
     /**
      * @brief : init super super block
@@ -247,10 +252,10 @@ private:
      *
      * @return : BlkId that is allcoated;
      */
-    std::error_condition alloc_meta_blk(BlkId& bid);
-    std::error_condition alloc_meta_blk(const uint64_t size, std::vector< BlkId >& bid);
+    [[nodiscard]] std::error_condition alloc_meta_blk(BlkId& bid);
+    [[nodiscard]] std::error_condition alloc_meta_blk(const uint64_t size, std::vector< BlkId >& bid);
 
-    void free_meta_blk(meta_blk* mblk);
+    void free_meta_blk(meta_blk* const mblk);
 
     /**
      * @brief : free the overflow blk chain
@@ -260,7 +265,7 @@ private:
      *  4. remove from ovf hdr map;
      * @param obid : the start ovf blk id in the chain;
      */
-    void free_ovf_blk_chain(BlkId& obid);
+    void free_ovf_blk_chain(const BlkId& obid);
 
     /**
      * @brief : Initialize meta blk
@@ -269,7 +274,8 @@ private:
      *
      * @return
      */
-    meta_blk* init_meta_blk(BlkId& bid, const meta_sub_type type, const void* context_data, const size_t sz);
+    [[nodiscard]] meta_blk* init_meta_blk(BlkId& bid, const meta_sub_type type, const void* const context_data,
+                                          const size_t sz);
 
     /**
      * @brief
@@ -279,7 +285,7 @@ private:
      * @param sz
      * @param offset
      */
-    void write_meta_blk_ovf(BlkId& bid, const void* context_data, const uint64_t sz);
+    void write_meta_blk_ovf(BlkId& bid, const void* const context_data, const uint64_t sz);
 
     /**
      * @brief : internal implementation of populating and writing a meta block;
@@ -288,7 +294,7 @@ private:
      * @param context_data
      * @param sz
      */
-    void write_meta_blk_internal(meta_blk* mblk, const void* context_data, const uint64_t sz);
+    void write_meta_blk_internal(meta_blk* const mblk, const void* context_data, const uint64_t sz);
 
     /**
      * @brief : sync read;
@@ -296,7 +302,7 @@ private:
      * @param bid
      * @param b
      */
-    void read(BlkId& bid, void* dest, size_t sz);
+    void read(const BlkId& bid, void* const dest, const size_t sz) const;
 
     void cache_clear();
 
@@ -306,26 +312,33 @@ private:
      * @param mblk
      * @param buf
      */
-    void read_sub_sb_internal(const meta_blk* mblk, sisl::byte_view& buf);
+    void read_sub_sb_internal(const meta_blk* const mblk, sisl::byte_view& buf) const;
 
     void free_compress_buf();
     void alloc_compress_buf(size_t size);
 
-    uint64_t get_min_compress_size();
-    uint64_t get_max_compress_memory_size();
-    uint64_t get_init_compress_memory_size();
-    uint32_t get_compress_ratio_limit();
-    bool compress_feature_on();
+    [[nodiscard]] uint64_t get_min_compress_size() const;
+    [[nodiscard]] uint64_t get_max_compress_memory_size() const;
+    [[nodiscard]] uint64_t get_init_compress_memory_size() const;
+    [[nodiscard]] uint32_t get_compress_ratio_limit() const;
+    [[nodiscard]] bool compress_feature_on() const;
 };
 
-#define meta_blk_mgr MetaBlkMgr::instance()
+static MetaBlkMgr* MetaBlkMgrSI() { return MetaBlkMgr::instance(); }
 
 class register_subsystem {
 public:
-    register_subsystem(meta_sub_type type, const meta_blk_found_cb_t& cb, const meta_blk_recover_comp_cb_t& comp_cb,
+    register_subsystem(const meta_sub_type type, const meta_blk_found_cb_t& cb, const meta_blk_recover_comp_cb_t& comp_cb,
                        const bool do_crc = true) {
-        meta_blk_mgr->register_handler(type, cb, comp_cb, do_crc);
+        MetaBlkMgrSI()->register_handler(type, cb, comp_cb, do_crc);
     }
+    register_subsystem(const register_subsystem&) = delete;
+    register_subsystem& operator=(const register_subsystem&) = delete;
+    register_subsystem(register_subsystem&&) noexcept = delete;
+    register_subsystem& operator=(register_subsystem&&) noexcept = delete;
+
+    ~register_subsystem() = default;
+
 };
 
 /* It provides alternate way to module to register itself to metablk at the very beginning of a program */

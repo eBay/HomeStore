@@ -256,7 +256,7 @@ def vdev_nightly():
 def meta_blk_store_nightly():
     print("meta blk store test started")
     subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.min_drive_size_test", stderr=subprocess.STDOUT, shell=True)
-    #subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.write_to_full_test", stderr=subprocess.STDOUT, shell=True)  // Turn on this once SDSTOR-3981 is resolved;
+    subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.write_to_full_test", stderr=subprocess.STDOUT, shell=True)
     subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.single_read_test", stderr=subprocess.STDOUT, shell=True)
     subprocess.check_call(dirpath + "test_meta_blk_mgr --run_time=7200 --num_io=1000000", stderr=subprocess.STDOUT, shell=True)
     subprocess.check_call(dirpath + "test_meta_blk_mgr --min_write_size=65536 --max_write_size=2097152 --run_time=14400 --num_io=1000000", stderr=subprocess.STDOUT, shell=True)

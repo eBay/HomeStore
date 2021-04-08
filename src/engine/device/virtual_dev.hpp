@@ -4,11 +4,27 @@
 #pragma once
 
 #include <array>
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <cstdint>
+#include <functional>
+#include <iterator>
+#include <limits>
 #include <memory>
 #include <map>
+#include <mutex>
+#include <string>
+#include <system_error>
 #include <vector>
 
-#include "boost/range/irange.hpp"
+#include <boost/range/irange.hpp>
+#include <fds/utils.hpp>
+#include <metrics/metrics.hpp>
+#include <sds_logging/logging.h>
+#include <utility/atomic_counter.hpp>
+
+#include "api/meta_interface.hpp"
 #include "device.h"
 #include "engine/blkalloc/blk_allocator.h"
 #include "engine/blkalloc/varsize_blk_allocator.h"
@@ -16,11 +32,6 @@
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_header.hpp"
-#include "api/meta_interface.hpp"
-#include "fds/utils.hpp"
-#include "metrics/metrics.hpp"
-#include "sds_logging/logging.h"
-#include "utility/atomic_counter.hpp"
 #include "engine/common/homestore_flip.hpp"
 
 SDS_LOGGING_DECL(device)
@@ -61,9 +72,9 @@ struct pdev_chunk_map {
 
 struct virtualdev_req;
 
-using vdev_comp_cb_t = std::function< void(const boost::intrusive_ptr< virtualdev_req >& req) >;
-using vdev_format_cb_t = std::function< void(bool success) >;
-using vdev_high_watermark_cb_t = std::function< void(void) >;
+typedef std::function< void(const boost::intrusive_ptr< virtualdev_req >& req) > vdev_comp_cb_t;
+typedef std::function< void(bool success) > vdev_format_cb_t;
+typedef std::function< void(void) > vdev_high_watermark_cb_t;
 
 #define to_vdev_req(req) boost::static_pointer_cast< virtualdev_req >(req)
 
@@ -171,9 +182,9 @@ public:
  * Allocator: The type of AllocatorPolicy to allocate blocks for writes.
  * DefaultDeviceSelector: Which device to select for allocation
  */
-const uint32_t VIRDEV_BLKSIZE = 512;
-const uint64_t CHUNK_EOF = 0xabcdabcd;
-const off_t INVALID_OFFSET = std::numeric_limits< unsigned long long >::max();
+static constexpr uint32_t VIRDEV_BLKSIZE{512};
+static constexpr uint64_t CHUNK_EOF{0xabcdabcd};
+static constexpr off_t INVALID_OFFSET{std::numeric_limits< off_t >::max()};
 
 static constexpr uint32_t vdev_high_watermark_per = 80;
 
@@ -968,13 +979,14 @@ public:
     BlkAllocStatus alloc_contiguous_blk(const blk_count_t nblks, const blk_alloc_hints& hints, BlkId* const out_blkid) {
         BlkAllocStatus ret;
         try {
-            std::vector< BlkId > blkid;
+            static thread_local std::vector< BlkId > blkid{};
+            blkid.clear();
             HS_ASSERT_CMP(DEBUG, hints.is_contiguous, ==, true);
             ret = alloc_blk(nblks, hints, blkid);
             if (ret == BlkAllocStatus::SUCCESS) {
                 HS_RELEASE_ASSERT_EQ(blkid.size(), 1, "out blkid more than 1 entries({}) will lead to blk leak!",
                                      blkid.size());
-                *out_blkid = blkid[0];
+                *out_blkid = std::move(blkid.front());
             } else {
                 HS_ASSERT_CMP(DEBUG, blkid.size(), ==, 0);
             }
@@ -989,7 +1001,7 @@ public:
         try {
             uint32_t dev_ind{0};
             uint32_t chunk_num, start_chunk_num;
-            BlkAllocStatus status = BlkAllocStatus::FAILED;
+            BlkAllocStatus status{BlkAllocStatus::FAILED};
 
             // First select a device to allocate from
             dev_ind = (hints.dev_id_hint == -1) ? m_selector->select(hints) : (uint32_t)hints.dev_id_hint;
@@ -997,27 +1009,32 @@ public:
             // Pick a physical chunk based on physDevId.
             // TODO: Right now there is only one primary chunk per device in a virtualdev. Need to support multiple
             // chunks. In that case just using physDevId as chunk number is not right strategy.
-            uint32_t start_dev_ind = dev_ind;
+            uint32_t start_dev_ind{dev_ind};
             do {
-                for (auto chunk : m_primary_pdev_chunks_list[dev_ind].chunks_in_pdev) {
+                for (auto& chunk : m_primary_pdev_chunks_list[dev_ind].chunks_in_pdev) {
 #ifdef _PRERELEASE
                     if (auto fake_status = homestore_flip->get_test_flip< uint32_t >("blk_allocation_flip", nblks,
                                                                                      chunk->get_vdev_id())) {
-                        return (BlkAllocStatus)fake_status.get();
+                        return static_cast<BlkAllocStatus>(fake_status.get());
                     }
 #endif
-                    status = chunk->get_blk_allocator()->alloc(nblks, hints, out_blkid);
+                    static thread_local std::vector< BlkId > chunk_blkid{};
+                    chunk_blkid.clear();
+                    status = chunk->get_blk_allocator()->alloc(nblks, hints, chunk_blkid);
                     if (status == BlkAllocStatus::PARTIAL) {
                         // free partial result
-                        chunk->get_blk_allocator()->free(out_blkid);
+                        chunk->get_blk_allocator()->free(chunk_blkid);
                         status = BlkAllocStatus::FAILED;
                     } else if (status == BlkAllocStatus::SUCCESS) {
+                        // append chunk blocks to out blocks
+                        out_blkid.insert(std::end(out_blkid), std::make_move_iterator(std::begin(chunk_blkid)),
+                                         std::make_move_iterator(std::end(chunk_blkid)));
                         break;
                     }
                 }
 
                 if ((status == BlkAllocStatus::SUCCESS) || !hints.can_look_for_other_dev) { break; }
-                dev_ind = (uint32_t)((dev_ind + 1) % m_primary_pdev_chunks_list.size());
+                dev_ind = static_cast<uint32_t>((dev_ind + 1) % m_primary_pdev_chunks_list.size());
             } while (dev_ind != start_dev_ind);
 
             if (status != BlkAllocStatus::SUCCESS) {

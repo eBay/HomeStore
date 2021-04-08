@@ -115,7 +115,7 @@ void Volume::init() {
     auto sb = (vol_sb_hdr*)m_sb_buf.bytes();
     if (!sb) {
         /* populate superblock */
-        m_sb_buf = hs_create_byte_view(sizeof(vol_sb_hdr), meta_blk_mgr->is_aligned_buf_needed(sizeof(vol_sb_hdr)));
+        m_sb_buf = hs_create_byte_view(sizeof(vol_sb_hdr), MetaBlkMgrSI()->is_aligned_buf_needed(sizeof(vol_sb_hdr)));
 
         /* populate superblock */
         sb = new (m_sb_buf.bytes())
@@ -220,8 +220,8 @@ indx_tbl* Volume::recover_indx_tbl(btree_super_block& sb, btree_cp_sb& cp_info) 
 }
 
 std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
-    std::vector< BlkId > bid;
-    std::error_condition ret = no_error;
+    static thread_local std::vector< BlkId > bid{};
+    std::error_condition ret{no_error};
     HS_DEBUG_ASSERT_LE(get_io_size(iface_req->nlbas), HS_STATIC_CONFIG(engine.max_vol_io_size),
                        "IO size exceeds max_vol_io_size supported");
 
@@ -242,6 +242,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     }
 
     // Allocate blkid
+    bid.clear();
     if ((ret = alloc_blk(vreq, bid)) != no_error) { goto done; }
 
     // Note: If we crash before we write this entry to a journal then there is a chance
@@ -838,19 +839,21 @@ void Volume::write_sb() {
 
     if (!m_sb_cookie) {
         // first time insert
-        MetaBlkMgr::instance()->add_sub_sb("VOLUME", (void*)m_sb_buf.bytes(), sizeof(vol_sb_hdr), m_sb_cookie);
+        MetaBlkMgrSI()->add_sub_sb("VOLUME", (void*)m_sb_buf.bytes(), sizeof(vol_sb_hdr), m_sb_cookie);
     } else {
-        MetaBlkMgr::instance()->update_sub_sb((void*)m_sb_buf.bytes(), sizeof(vol_sb_hdr), m_sb_cookie);
+        MetaBlkMgrSI()->update_sub_sb((void*)m_sb_buf.bytes(), sizeof(vol_sb_hdr), m_sb_cookie);
     }
 }
 
 void Volume::remove_sb() {
     // remove sb from MetaBlkMgr
-    MetaBlkMgr::instance()->remove_sub_sb(m_sb_cookie);
+    const auto ret{MetaBlkMgrSI()->remove_sub_sb(m_sb_cookie)};
+    if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to remove subsystem with status: {}", ret.message()); }
+
 }
 
 void Volume::migrate_sb() {
-    // auto inst = MetaBlkMgr::instance();
+    // auto inst = MetaBlkMgrSI();
     // inst->add_sub_sb(meta_sub_type::VOLUME, (void*)(m_sb->ondisk_sb),
     // sizeof(vol_ondisk_sb), &(m_sb->cookie));
 }

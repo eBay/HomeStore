@@ -463,7 +463,7 @@ void LogDev::update_store_meta(const logstore_id_t idx, const logstore_meta& met
 /////////////////////////////// LogDevMetadata Section ///////////////////////////////////////
 logdev_superblk* LogDevMetadata::create() {
     const auto req_sz{required_sb_size(0)};
-    m_raw_buf = hs_create_byte_view(req_sz, meta_blk_mgr->is_aligned_buf_needed(req_sz));
+    m_raw_buf = hs_create_byte_view(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz));
     m_sb = new (m_raw_buf.bytes()) logdev_superblk();
 
     logstore_meta* const smeta{m_sb->get_logstore_meta()};
@@ -514,9 +514,10 @@ std::vector< std::pair< logstore_id_t, logstore_meta > > LogDevMetadata::load() 
 
 void LogDevMetadata::persist() {
     if (m_meta_mgr_cookie) {
-        meta_blk_mgr->update_sub_sb(static_cast< const void* >(m_raw_buf.bytes()), m_raw_buf.size(), m_meta_mgr_cookie);
+        MetaBlkMgrSI()->update_sub_sb(static_cast< const void* >(m_raw_buf.bytes()), m_raw_buf.size(),
+                                              m_meta_mgr_cookie);
     } else {
-        meta_blk_mgr->add_sub_sb("LOG_DEV", static_cast< const void* >(m_raw_buf.bytes()), m_raw_buf.size(),
+        MetaBlkMgrSI()->add_sub_sb("LOG_DEV", static_cast< const void* >(m_raw_buf.bytes()), m_raw_buf.size(),
                                  m_meta_mgr_cookie);
     }
 }
@@ -577,7 +578,7 @@ bool LogDevMetadata::resize_if_needed() {
     if (req_sz != m_raw_buf.size()) {
         const auto old_buf{m_raw_buf};
 
-        auto m_raw_buf{hs_create_byte_view(req_sz, meta_blk_mgr->is_aligned_buf_needed(req_sz))};
+        auto m_raw_buf{hs_create_byte_view(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz))};
         m_sb = new (m_raw_buf.bytes()) logdev_superblk();
 
         logstore_meta* const smeta{m_sb->get_logstore_meta()};

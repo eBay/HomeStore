@@ -192,7 +192,7 @@ void HomeBlks::scan_volumes() {
 
 void HomeBlks::create_sb_blkstore(vdev_info_block* vb) {
     /* create a blkstore */
-    m_sb_blk_store = std::make_unique< sb_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, PASS_THRU,
+    m_sb_blk_store = std::make_unique< sb_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::PASS_THRU,
                                                        HomeStoreConfig::atomic_phys_page_size, "superblock", false);
     if (vb->failed) {
         m_vdev_failed = true;

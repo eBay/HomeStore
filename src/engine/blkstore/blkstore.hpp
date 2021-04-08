@@ -5,8 +5,12 @@
 #ifndef OMSTORE_BLKSTORE_HPP
 #define OMSTORE_BLKSTORE_HPP
 
+#include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cstdint>
+#include <iterator>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -30,7 +34,7 @@ namespace homestore {
 
 struct volume_child_req;
 
-enum BlkStoreCacheType { PASS_THRU = 0, WRITEBACK_CACHE = 1, WRITETHRU_CACHE = 2, RD_MODIFY_WRITEBACK_CACHE = 3 };
+VENUM(BlkStoreCacheType, uint8_t, PASS_THRU = 0, WRITEBACK_CACHE = 1, WRITETHRU_CACHE = 2, RD_MODIFY_WRITEBACK_CACHE = 3)
 
 /* Threshold of size upto when there is overlap in the cache entry, that it will discard instead of copying. Say
  * there is a buffer of size 64K, out of which first N bytes are freed, then remaining bytes 64K - N bytes could
@@ -55,15 +59,13 @@ struct bufferInfo {
     uint32_t offset;
     uint32_t size;
     uint8_t* ptr;
-    bufferInfo() : offset(0), size(0), ptr(nullptr){};
-    bufferInfo(uint32_t offset, uint32_t size, uint8_t* ptr) : offset(offset), size(size), ptr(ptr){};
+    bufferInfo(const uint32_t offset = 0, const uint32_t size = 0, uint8_t* const ptr = nullptr) :
+            offset{offset}, size{size}, ptr{ptr} {};
 };
-
-#define to_blkstore_req(req) boost::static_pointer_cast< blkstore_req< Buffer > >(req)
 
 template < typename Buffer = BlkBuffer >
 struct blkstore_req : public virtualdev_req {
-    int blkstore_magic = 12345;
+    uint16_t blkstore_magic{12345};
     boost::intrusive_ptr< Buffer > bbuf;
     BlkId bid;
     sisl::atomic_counter< int > blkstore_ref_cnt; /* It is used for reads to see how many
@@ -76,7 +78,12 @@ struct blkstore_req : public virtualdev_req {
     Clock::time_point blkstore_op_start_time;
 
 public:
-    virtual ~blkstore_req() {
+    blkstore_req(const blkstore_req&) = delete;
+    blkstore_req& operator=(const blkstore_req&) = delete;
+    blkstore_req(blkstore_req&&) noexcept = delete;
+    blkstore_req& operator=(blkstore_req&&) noexcept = delete;
+
+    virtual ~blkstore_req() override {
         HS_DEBUG_ASSERT_EQ(missing_pieces.size(), 0);
         if (!blkstore_ref_cnt.testz()) {
             LOGERROR("blkstore_ref_cnt is not 0, details of req: [{}]", to_string());
@@ -84,6 +91,8 @@ public:
                                to_string());
         }
     };
+
+    static auto to_blkstore_req(auto& req) { return boost::static_pointer_cast< blkstore_req< Buffer > >(req); }
 
     static boost::intrusive_ptr< blkstore_req< Buffer > > make_request() {
         return boost::intrusive_ptr< blkstore_req< Buffer > >(
@@ -114,12 +123,12 @@ public:
 
 protected:
     friend class sisl::ObjectAllocator< blkstore_req< Buffer > >;
-    blkstore_req() : bbuf(nullptr), blkstore_ref_cnt(0), missing_pieces(0), data_offset(0){};
+    blkstore_req() : bbuf{nullptr}, blkstore_ref_cnt{0}, missing_pieces{}, data_offset{0} {};
 };
 
 class BlkStoreMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit BlkStoreMetrics(const char* inst_name) : sisl::MetricsGroupWrapper("BlkStore", inst_name) {
+    explicit BlkStoreMetrics(const char* const inst_name) : sisl::MetricsGroupWrapper{"BlkStore", inst_name} {
         REGISTER_COUNTER(blkstore_read_op_count, "BlkStore total read ops", "blkstore_op_count", {"op", "read"});
         REGISTER_COUNTER(blkstore_write_op_count, "BlkStore total write ops", "blkstore_op_count", {"op", "write"});
         REGISTER_COUNTER(blkstore_read_data_size, "BlkStore number of bytes read");
@@ -142,6 +151,11 @@ public:
         register_me_to_farm();
     }
 
+    BlkStoreMetrics(const BlkStoreMetrics&) = delete;
+    BlkStoreMetrics& operator=(const BlkStoreMetrics&) = delete;
+    BlkStoreMetrics(BlkStoreMetrics&&) noexcept = delete;
+    BlkStoreMetrics& operator=(BlkStoreMetrics&&) noexcept = delete;
+
     ~BlkStoreMetrics() { deregister_me_from_farm(); }
 };
 
@@ -150,57 +164,76 @@ class BlkStore {
 public:
     typedef std::function< void(boost::intrusive_ptr< blkstore_req< Buffer > > req) > comp_callback;
 
-    BlkStore(DeviceManager* mgr,           // Device manager instance
-             Cache< BlkId >* cache,        // Cache Instance
-             uint64_t size,                // Size of the blk store device
-             BlkStoreCacheType cache_type, // Type of cache, writeback, writethru, none
-             uint32_t mirrors,             // Number of mirrors
-             char* blob,                   // Superblock blob for blkstore
-             uint64_t context_size,        // TODO: ???
-             uint64_t page_size,           // Block device page size
-             const char* name,             // Name for blkstore
-             bool auto_recovery,
-             comp_callback comp_cb = nullptr // Callback on completion. It can be attached later as well.
+    BlkStore(DeviceManager* const mgr,           // Device manager instance
+             Cache< BlkId >* const cache,        // Cache Instance
+             const uint64_t size,                // Size of the blk store device
+             const BlkStoreCacheType cache_type, // Type of cache, writeback, writethru, none
+             const uint32_t mirrors,             // Number of mirrors
+             char* const blob,                   // Superblock blob for blkstore
+             const uint64_t context_size,        // TODO: ???
+             const uint32_t page_size,           // Block device page size
+             const char* const name,             // Name for blkstore
+             const bool auto_recovery,
+             comp_callback comp_cb = comp_callback{} // Callback on completion. It can be attached later as well.
              ) :
-            m_pagesz(page_size),
-            m_cache(cache),
-            m_cache_type(cache_type),
-            m_vdev(mgr, name, context_size, mirrors, true, m_pagesz, mgr->get_all_devices(),
-                   (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)), blob, size, auto_recovery),
-            m_comp_cb(comp_cb),
-            m_metrics(name) {}
+            m_pagesz{page_size},
+            m_cache{cache},
+            m_cache_type{cache_type},
+            m_vdev{mgr,
+                   name,
+                   context_size,
+                   mirrors,
+                   true,
+                   m_pagesz,
+                   mgr->get_all_devices(),
+                   (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)),
+                   blob,
+                   size,
+                   auto_recovery},
+            m_comp_cb{std::move(comp_cb)},
+            m_metrics{name} {}
 
-    BlkStore(DeviceManager* mgr,           // Device manager instance
-             Cache< BlkId >* cache,        // Cache Instance
-             vdev_info_block* vb,          // Load vdev from this vdev_info_block
-             BlkStoreCacheType cache_type, // Type of cache, writeback, writethru, none
-             uint64_t page_size,           // Block device page size
-             const char* name,             // Name for blkstore
-             bool recovery_init,           // do we need to initialize blk allocator in recovery
-             bool auto_recovery,
-             comp_callback comp_cb = nullptr // Callback on completion. It can be attached later as well.
+    BlkStore(DeviceManager* const mgr,           // Device manager instance
+             Cache< BlkId >* const cache,        // Cache Instance
+             vdev_info_block* const vb,          // Load vdev from this vdev_info_block
+             const BlkStoreCacheType cache_type, // Type of cache, writeback, writethru, none
+             const uint32_t page_size,           // Block device page size
+             const char* const name,             // Name for blkstore
+             const bool recovery_init,           // do we need to initialize blk allocator in recovery
+             const bool auto_recovery,
+             comp_callback comp_cb = comp_callback{} // Callback on completion. It can be attached later as well.
              ) :
-            m_pagesz(page_size),
-            m_cache(cache),
-            m_cache_type(cache_type),
-            m_vdev(mgr, name, vb, (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)),
-                   recovery_init, auto_recovery),
-            m_comp_cb(comp_cb),
-            m_metrics(name) {}
+            m_pagesz{page_size},
+            m_cache{cache},
+            m_cache_type{cache_type},
+            m_vdev{mgr,
+                   name,
+                   vb,
+                   (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)),
+                   recovery_init,
+                   auto_recovery},
+            m_comp_cb{std::move(comp_cb)},
+            m_metrics{name} {}
+
+    BlkStore(const BlkStore&) = delete;
+    BlkStore& operator=(const BlkStore&) = delete;
+    BlkStore(BlkStore&&) noexcept = delete;
+    BlkStore& operator=(BlkStore&&) noexcept = delete;
 
     ~BlkStore() = default;
 
-    void attach_compl(comp_callback comp_cb) { m_comp_cb = comp_cb; }
+    void attach_compl(comp_callback comp_cb) { m_comp_cb = std::move(comp_cb); }
 
-    bool is_read_modify_cache() { return (m_cache_type == RD_MODIFY_WRITEBACK_CACHE); }
+    bool is_read_modify_cache() { return (m_cache_type == BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE); }
 
     void process_completions(boost::intrusive_ptr< virtualdev_req > v_req) {
-        auto req = to_blkstore_req(v_req);
+        HS_RELEASE_ASSERT_EQ(m_comp_cb.operator bool(), true);
+        auto req{blkstore_req< Buffer >::to_blkstore_req(v_req)};
 
         if (!req->is_read) {
 #ifdef _PRERELEASE
-            if (auto flip_ret = homestore_flip->get_test_flip< int >("delay_us_and_inject_error_on_completion",
-                                                                     v_req->request_id)) {
+            if (const auto flip_ret{homestore_flip->get_test_flip< int >("delay_us_and_inject_error_on_completion",
+                                                                         v_req->request_id)}) {
                 std::this_thread::sleep_for(std::chrono::microseconds{flip_ret.get()});
                 req->err = homestore_error::write_failed;
             }
@@ -221,8 +254,8 @@ public:
             update_cache(req);
         } else {
             /* TODO add error messages */
-            for (uint32_t i = 0; i < req->missing_pieces.size(); i++) {
-                iomanager.iobuf_free(req->missing_pieces[i].ptr);
+            for (const auto& missing_piece : req->missing_pieces) {
+                iomanager.iobuf_free(missing_piece.ptr);
             }
         }
 
@@ -230,48 +263,51 @@ public:
         req->missing_pieces.clear();
     }
 
-    uint32_t get_page_size() { return m_pagesz; }
+    [[nodiscard]] uint32_t get_page_size() const { return m_pagesz; }
 
     void update_cache(boost::intrusive_ptr< blkstore_req< Buffer > > req) {
         Clock::time_point start_time = Clock::now();
 
-        for (uint32_t i = 0; i < req->missing_pieces.size(); i++) {
-            boost::intrusive_ptr< Buffer > bbuf = req->bbuf;
+        for (const auto& missing_piece: req->missing_pieces) {
+            boost::intrusive_ptr< Buffer > bbuf{req->bbuf};
 
-            bool inserted = bbuf->update_missing_piece(req->missing_pieces[i].offset, req->missing_pieces[i].size,
-                                                       req->missing_pieces[i].ptr);
+            const bool inserted{
+                bbuf->update_missing_piece(missing_piece.offset, missing_piece.size, missing_piece.ptr)};
             if (!inserted) {
                 /* someone else has inserted it */
-                iomanager.iobuf_free(req->missing_pieces[i].ptr);
+                iomanager.iobuf_free(missing_piece.ptr);
             }
         }
         HISTOGRAM_OBSERVE(m_metrics, blkstore_cache_read_latency, get_elapsed_time_us(start_time));
     }
 
-    BlkAllocStatus alloc_contiguous_blk(uint32_t size, blk_alloc_hints& hints, BlkId* out_blkid) {
+    BlkAllocStatus alloc_contiguous_blk(const uint32_t size, blk_alloc_hints& hints, BlkId* const out_blkid) {
         // Allocate a block from the device manager
         assert(size % m_pagesz == 0);
-        auto nblks = size / m_pagesz;
+        const blk_count_t nblks{static_cast< blk_count_t >(size / m_pagesz)};
         hints.is_contiguous = true;
-        HS_ASSERT_CMP(DEBUG, nblks, <=, (uint32_t)BlkId::max_blks_in_op(), "nblks {} more than max blks {}", nblks,
-                      (uint32_t)BlkId::max_blks_in_op());
+        HS_ASSERT_CMP(DEBUG, nblks, <=, BlkId::max_blks_in_op(), "nblks {} more than max blks {}", nblks,
+                      BlkId::max_blks_in_op());
         return (m_vdev.alloc_contiguous_blk(nblks, hints, out_blkid));
     }
 
     /* Allocate a new block of the size based on the hints provided */
-    BlkAllocStatus alloc_blk(uint32_t size, blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
+    BlkAllocStatus alloc_blk(const uint32_t size, blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
         // Allocate a block from the device manager
         assert(size % m_pagesz == 0);
-        auto nblks = size / m_pagesz;
+        blk_count_t nblks{static_cast<blk_count_t>(size / m_pagesz)};
         if (nblks <= BlkId::max_blks_in_op()) {
             return (m_vdev.alloc_blk(nblks, hints, out_blkid));
         } else {
             while (nblks != 0) {
-                std::vector< BlkId > result_blkid;
-                auto ret = m_vdev.alloc_blk(std::min((uint32_t)BlkId::max_blks_in_op(), nblks), hints, result_blkid);
-                out_blkid.insert(out_blkid.end(), result_blkid.begin(), result_blkid.end());
+                static thread_local std::vector< BlkId > result_blkid{};
+                result_blkid.clear();
+                const blk_count_t nblks_op{std::min(static_cast< blk_count_t >(BlkId::max_blks_in_op()), nblks)};
+                const auto ret{m_vdev.alloc_blk(nblks_op, hints, result_blkid)};
                 if (ret != BlkAllocStatus::SUCCESS) { return ret; }
-                nblks -= std::min((uint32_t)BlkId::max_blks_in_op(), nblks);
+                out_blkid.insert(std::end(out_blkid), std::make_move_iterator(std::begin(result_blkid)),
+                                 std::make_move_iterator(std::end(result_blkid)));
+                nblks -= nblks_op;
             }
         }
         return BlkAllocStatus::SUCCESS;
@@ -280,11 +316,11 @@ public:
     /* Allocate a new block and add entry to the cache. This method allows the caller to create its own
      * buffer method, but the actual data is page aligned is created by this method and returns the smart pointer
      * of the buffer, along with blkid. */
-    boost::intrusive_ptr< Buffer > alloc_blk_cached(uint32_t size, blk_alloc_hints& hints, BlkId* out_blkid) {
+    boost::intrusive_ptr< Buffer > alloc_blk_cached(const uint32_t size, blk_alloc_hints& hints, BlkId* const out_blkid) {
         // Allocate a block from the device manager
         hints.is_contiguous = true;
         assert(size % m_pagesz == 0);
-        auto ret_blk = alloc_contiguous_blk(size, hints, out_blkid);
+        const auto ret_blk{alloc_contiguous_blk(size, hints, out_blkid)};
         if (ret_blk != BlkAllocStatus::SUCCESS) { return nullptr; }
 
         return init_blk_cached(*out_blkid);
@@ -327,8 +363,8 @@ public:
     /* Free the block previously allocated. Blkoffset refers to number of blks to skip in the BlkId and
      * nblks refer to the total blks from offset to free.
      */
-    void free_blk(const BlkId& bid, boost::optional< uint32_t > size_offset, boost::optional< uint32_t > size,
-                  bool cache_only = false) {
+    void free_blk(const BlkId& bid, boost::optional< uint32_t > size_offset, const boost::optional< uint32_t > size,
+                  const bool cache_only = false) {
 
         boost::intrusive_ptr< Buffer > erased_buf(nullptr);
 
@@ -358,19 +394,19 @@ public:
                        (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&erased_buf);
         if (cache_only) { return; }
 
-        uint32_t offset = size_offset.get_value_or(0);
-        BlkId tmp_bid(bid.get_blkid_at(offset, free_size, m_pagesz));
+        const uint32_t offset{size_offset.get_value_or(0)};
+        const BlkId tmp_bid{bid.get_blkid_at(offset, free_size, m_pagesz)};
         m_vdev.free_blk(tmp_bid);
         return;
     }
 
     void format(const vdev_format_cb_t& cb) { m_vdev.format(cb); }
-    void write(BlkId& bid, homeds::MemVector& mvec) { m_vdev.write(bid, mvec, nullptr, 0); }
+    void write(const BlkId& bid, homeds::MemVector& mvec) { m_vdev.write(bid, mvec, nullptr, 0); }
 
     //
     // sync write with iov;
     //
-    void write(BlkId& bid, const iovec* const iov, const int iovcnt) {
+    void write(const BlkId& bid, const iovec* const iov, const int iovcnt) {
         m_vdev.write(bid, const_cast< iovec* const >(iov), iovcnt);
     }
 
@@ -503,7 +539,7 @@ public:
 
         uint8_t* ptr;
         req->blkstore_ref_cnt.increment(1);
-        for (uint32_t i = 0; i < missing_mp.size(); i++) {
+        for (size_t i{0}; i < missing_mp.size(); ++i) {
             // Create a new block of memory for the missing piece
             uint8_t* ptr = hs_iobuf_alloc(missing_mp[i].second);
             HS_ASSERT_NOTNULL(RELEASE, ptr, "ptr is null");
@@ -581,14 +617,14 @@ public:
         }
     }
 
-    std::vector< boost::intrusive_ptr< BlkBuffer > > read_nmirror(BlkId& bid, int nmirrors) {
+    std::vector< boost::intrusive_ptr< BlkBuffer > > read_nmirror(BlkId& bid, const uint32_t nmirrors) {
         std::vector< boost::intrusive_ptr< BlkBuffer > > buf_list;
         std::vector< boost::intrusive_ptr< homeds::MemVector > > mp;
         uint8_t* mem_ptr = nullptr;
 
-        for (int i = 0; i < (nmirrors + 1); i++) {
+        for (uint32_t i{0}; i < (nmirrors + 1); ++i) {
             /* create the pointer */
-            uint8_t* mem_ptr = hs_iobuf_alloc(bid.data_size(m_pagesz));
+            uint8_t* const mem_ptr = hs_iobuf_alloc(bid.data_size(m_pagesz));
 
             /* set the memvec */
             boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
@@ -620,31 +656,31 @@ public:
 
     VirtualDev< BAllocator, RoundRobinDeviceSelector >* get_vdev() { return &m_vdev; };
 
-    ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req = nullptr) {
+    ssize_t pwrite(const void* const buf, const size_t count, const off_t offset, boost::intrusive_ptr< virtualdev_req > req = nullptr) {
         return m_vdev.pwrite(buf, count, offset, req);
     }
 
-    ssize_t pread(void* buf, size_t count, off_t offset) { return m_vdev.pread(buf, count, offset); }
+    ssize_t pread(void* const buf, const size_t count, const off_t offset) { return m_vdev.pread(buf, count, offset); }
 
-    off_t lseek(off_t offset, int whence = SEEK_SET) { return m_vdev.lseek(offset, whence); }
+    off_t lseek(const off_t offset, const int whence = SEEK_SET) { return m_vdev.lseek(offset, whence); }
 
     off_t get_dev_offset(off_t bytes_read) const { return m_vdev.get_dev_offset(bytes_read); }
     off_t seeked_pos() const { return m_vdev.seeked_pos(); }
 
-    ssize_t read(void* buf, size_t count) { return m_vdev.read(buf, count); }
+    ssize_t read(void* const buf, const size_t count) { return m_vdev.read(buf, count); }
 
-    ssize_t write(const void* buf, size_t count) { return m_vdev.write(buf, count); }
+    ssize_t write(const void* const buf, const size_t count) { return m_vdev.write(buf, count); }
 
-    ssize_t write(const void* buf, size_t count, boost::intrusive_ptr< virtualdev_req > req) {
+    ssize_t write(const void* const buf, const size_t count, boost::intrusive_ptr< virtualdev_req > req) {
         return m_vdev.write(buf, count, req);
     }
 
-    ssize_t preadv(const struct iovec* iov, int iovcnt, off_t offset,
+    ssize_t preadv(const struct iovec* const iov, const int iovcnt, const off_t offset,
                    boost::intrusive_ptr< virtualdev_req > req = nullptr) {
         return m_vdev.preadv(iov, iovcnt, offset, req);
     }
 
-    ssize_t pwritev(const struct iovec* iov, int iovcnt, off_t offset,
+    ssize_t pwritev(const struct iovec* const iov, const int iovcnt, const off_t offset,
                     boost::intrusive_ptr< virtualdev_req > req = nullptr) {
         return m_vdev.pwritev(iov, iovcnt, offset, req);
     }
@@ -655,9 +691,9 @@ public:
 
     off_t get_tail_offset() const { return m_vdev.get_tail_offset(); }
 
-    void read(const uint64_t offset, const uint64_t size, const void* buf) { m_vdev.read(offset, size, buf); }
+    void read(const uint64_t offset, const uint64_t size, const void* const buf) { m_vdev.read(offset, size, buf); }
 
-    void readv(const uint64_t offset, struct iovec* iov, int iovcnt) { m_vdev.readv(offset, iov, iovcnt); }
+    void readv(const uint64_t offset, struct iovec* const iov, const int iovcnt) { m_vdev.readv(offset, iov, iovcnt); }
 
     void update_data_start_offset(const off_t start) { m_vdev.update_data_start_offset(start); }
     void update_tail_offset(const off_t tail) { m_vdev.update_tail_offset(tail); }

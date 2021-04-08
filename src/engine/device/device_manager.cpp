@@ -41,9 +41,9 @@ void PhysicalDevChunk::recover() {
 void PhysicalDevChunk::cp_start(std::shared_ptr< blkalloc_cp > ba_cp) {
     auto bitmap_mem = get_blk_allocator()->cp_start(ba_cp);
     if (m_meta_blk_cookie) {
-        MetaBlkMgr::instance()->update_sub_sb(bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
+        MetaBlkMgrSI()->update_sub_sb(bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
     } else {
-        MetaBlkMgr::instance()->add_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
+        MetaBlkMgrSI()->add_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
     }
 }
 
@@ -375,7 +375,7 @@ void DeviceManager::inited() {
 }
 
 void DeviceManager::blk_alloc_meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
-    uint32_t align = meta_blk_mgr->is_aligned_buf_needed(size) ? HS_STATIC_CONFIG(drive_attr.align_size) : 0;
+    uint32_t align = MetaBlkMgrSI()->is_aligned_buf_needed(size) ? HS_STATIC_CONFIG(drive_attr.align_size) : 0;
 
     std::unique_ptr< sisl::Bitset > recovered_bm(new sisl::Bitset(buf.extract(align)));
     auto chunk = get_chunk(recovered_bm->get_id());
@@ -428,7 +428,7 @@ void DeviceManager::zero_pdev_sbs() {
 /* add constant */
 bool DeviceManager::add_devices(const std::vector< dev_info >& devices) {
     uint64_t max_dev_offset = 0;
-    MetaBlkMgr::instance()->register_handler(
+    MetaBlkMgrSI()->register_handler(
         "BLK_ALLOC",
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { blk_alloc_meta_blk_found_cb(mblk, buf, size); },
         nullptr, false /* do_crc */);

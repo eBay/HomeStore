@@ -8,9 +8,10 @@
 #include <sds_options/options.h>
 #include <utility/thread_buffer.hpp>
 
-#include "blk_cache_queue.h"
 #include "engine/common/homestore_header.hpp"
 #include "varsize_blk_allocator.h"
+
+#include "blk_cache_queue.h"
 
 #include <gtest/gtest.h>
 

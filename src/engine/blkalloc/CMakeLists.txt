@@ -20,6 +20,6 @@ if (${build_nonio_tests})
 
     set(TEST_BLK_CACHE_QUEUE_SOURCE_FILES test_blk_cache_queue.cpp)
     add_executable(test_blk_cache_queue ${TEST_BLK_CACHE_QUEUE_SOURCE_FILES} blk_cache_queue.cpp)
-    target_link_libraries(test_blk_cache_queue ${CONAN_LIBS})
+    target_link_libraries(test_blk_cache_queue homestore ${CONAN_LIBS})
     add_test(NAME BlkCacheQueue COMMAND test_blk_cache_queue)
 endif()

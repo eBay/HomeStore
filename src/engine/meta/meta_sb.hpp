@@ -1,26 +1,28 @@
 #pragma once
-#include <initializer_list>
-#include <cstdint>
-#include <cstddef>
+
 #include <array>
-#include <string>
+#include <cstddef>
+#include <cstdint>
+#include <initializer_list>
 #include <set>
+#include <string>
+
 #include "engine/blkalloc/blk.h"
 
 namespace homestore {
-static constexpr uint32_t META_BLK_HDR_MAX_SZ = 512; // max meta_blk_hdr size
-static constexpr uint32_t META_BLK_MAGIC = 0xCEEDBEED;
-static constexpr uint32_t META_BLK_OVF_MAGIC = 0xDEADBEEF;
-static constexpr uint32_t META_BLK_SB_MAGIC = 0xABCDCEED;
-static constexpr uint32_t META_BLK_SB_VERSION = 0x1;
-static constexpr uint32_t META_BLK_VERSION = 0x1;
-static constexpr uint32_t MAX_SUBSYS_TYPE_LEN = 64;
-static constexpr uint32_t CONTEXT_DATA_OFFSET_ALIGNMENT = 64;
+static constexpr uint32_t META_BLK_HDR_MAX_SZ{512}; // max meta_blk_hdr size
+static constexpr uint32_t META_BLK_MAGIC{0xCEEDBEED};
+static constexpr uint32_t META_BLK_OVF_MAGIC{0xDEADBEEF};
+static constexpr uint32_t META_BLK_SB_MAGIC{0xABCDCEED};
+static constexpr uint32_t META_BLK_SB_VERSION{0x1};
+static constexpr uint32_t META_BLK_VERSION{0x1};
+static constexpr uint32_t MAX_SUBSYS_TYPE_LEN{64};
+static constexpr uint32_t CONTEXT_DATA_OFFSET_ALIGNMENT{64};
 
 /**
  * Sub system types and their priorities
  */
-using crc32_t = uint32_t;
+typedef uint32_t crc32_t;
 
 // clang-format off
 /*
@@ -74,6 +76,7 @@ struct MetaSubRegInfo {
 };
 
 // meta blk super block put as 1st block in the block chain;
+#pragma pack(1)
 struct meta_blk_sb {
     uint32_t version;
     uint32_t magic; // ssb magic
@@ -82,12 +85,14 @@ struct meta_blk_sb {
     BlkId prev_bid; // previous metablk
     BlkId bid;
 };
+#pragma pack()
 
 //
 // 1. If overflow blkid is invalid, meaning context_sz is not larger than context_data_size(),
 //    context data is stored in context_data field;
 // 2. If overflow blkid is not invalid, all the context data is stored in overflow blks;
 //
+#pragma pack(1)
 struct meta_blk_hdr_s {
     uint32_t version;
     uint32_t magic; // magic
@@ -102,25 +107,35 @@ struct meta_blk_hdr_s {
     uint64_t compressed_sz; // compressed size before round up to align_size, used for decompress
     uint64_t src_context_sz;        // context_sz before compression, this field only valid when compressed is true;
     char type[MAX_SUBSYS_TYPE_LEN]; // sub system type;
-} __attribute((packed));
+};
+#pragma pack()
 
-static constexpr uint32_t META_BLK_HDR_RSVD_SZ =
-    (META_BLK_HDR_MAX_SZ - sizeof(meta_blk_hdr_s)); // reserved size for header
+static constexpr uint32_t META_BLK_HDR_RSVD_SZ{
+    (META_BLK_HDR_MAX_SZ - sizeof(meta_blk_hdr_s))}; // reserved size for header
 
+#pragma pack(1)
 struct meta_blk_hdr {
     meta_blk_hdr_s h;
     char padding[META_BLK_HDR_RSVD_SZ];
 };
+#pragma pack()
 
 static_assert(sizeof(meta_blk_hdr) == META_BLK_HDR_MAX_SZ);
 
 // meta block
+#pragma pack(1)
 struct meta_blk {
-    meta_blk_hdr hdr;        // meta record header
-    uint8_t context_data[0]; // Subsystem dependent context data
+    meta_blk_hdr hdr; // meta record header
+
+    // NOTE: The context_data area starts immediately after this structure as represented in the code below
+    // This was to replace a zero size array which is illegal in C++
+    const uint8_t* get_context_data() const { return reinterpret_cast< const uint8_t* >(this) + sizeof(meta_blk); }
+    uint8_t* get_context_data_mutable() { return reinterpret_cast< uint8_t* >(this) + sizeof(meta_blk); }
 };
+#pragma pack()
 
 // single list overflow block chain
+#pragma pack(1)
 struct meta_blk_ovf_hdr_s {
     uint32_t magic; // ovf magic
     BlkId next_bid; // next ovf blk id;
@@ -128,27 +143,40 @@ struct meta_blk_ovf_hdr_s {
     uint32_t nbids; // number of data blkids stored in data_bid;
     uint64_t context_sz;
 };
+#pragma pack()
 
-static constexpr uint32_t MAX_BLK_OVF_HDR_MAX_SZ = META_BLK_HDR_MAX_SZ;
+static constexpr uint32_t MAX_BLK_OVF_HDR_MAX_SZ{META_BLK_HDR_MAX_SZ};
 
 static_assert(sizeof(meta_blk_ovf_hdr_s) <= MAX_BLK_OVF_HDR_MAX_SZ);
 
-static constexpr uint32_t META_BLK_OVF_HDR_RSVD_SZ =
-    (MAX_BLK_OVF_HDR_MAX_SZ - sizeof(meta_blk_ovf_hdr_s)); // reserved size for ovf header
+static constexpr uint32_t META_BLK_OVF_HDR_RSVD_SZ{
+    (MAX_BLK_OVF_HDR_MAX_SZ - sizeof(meta_blk_ovf_hdr_s))}; // reserved size for ovf header
 
 // single list overflow block chain
+#pragma pack(1)
 struct meta_blk_ovf_hdr {
     meta_blk_ovf_hdr_s h;
     char padding[META_BLK_OVF_HDR_RSVD_SZ];
-    BlkId data_bid[0];
+    // NOTE: The size of this padding is crucial and adding fields to this header before or after without
+    // adjusting padding size will cause the assert at bottom of file to fail.
 
-    std::string to_string(bool include_data_bid = false) const {
-        std::string ovf_hdr_str =
+    // NOTE: The data_bid area starts immediately after this structure as represented in the code below
+    // This was to replace a zero size array which is illegal in C++
+    const BlkId* get_data_bid() const {
+        return reinterpret_cast< const BlkId* >(reinterpret_cast< const uint8_t* >(this) + sizeof(meta_blk_ovf_hdr));
+    }
+    BlkId* get_data_bid_mutable() {
+        return reinterpret_cast< BlkId* >(reinterpret_cast< uint8_t* >(this) + sizeof(meta_blk_ovf_hdr));
+    }
+
+    [[nodiscard]] std::string to_string(const bool include_data_bid = false) const {
+        std::string ovf_hdr_str{
             fmt::format("h: < magic=[{}] next_bid=[{}] self_bid=[{}] nbids=[{}] context_sz={} > data_bid: ", h.magic,
-                        h.next_bid, h.bid, h.nbids, h.context_sz);
+                        h.next_bid, h.bid, h.nbids, h.context_sz)};
 
         if (include_data_bid) {
-            for (uint32_t i = 0; i < h.nbids; ++i) {
+            const BlkId* const data_bid{get_data_bid()};
+            for (uint32_t i{0}; i < h.nbids; ++i) {
                 ovf_hdr_str += data_bid[i].to_string();
                 ovf_hdr_str += " ";
             }
@@ -157,9 +185,10 @@ struct meta_blk_ovf_hdr {
         return ovf_hdr_str;
     }
 };
+#pragma pack()
 
 // static assert to make sure no field to be between padding and data_bid.
-static_assert(offsetof(meta_blk_ovf_hdr, data_bid) == MAX_BLK_OVF_HDR_MAX_SZ);
+static_assert(sizeof(meta_blk_ovf_hdr) == MAX_BLK_OVF_HDR_MAX_SZ);
 static_assert(META_BLK_HDR_MAX_SZ % CONTEXT_DATA_OFFSET_ALIGNMENT == 0);
 static_assert(MAX_BLK_OVF_HDR_MAX_SZ % CONTEXT_DATA_OFFSET_ALIGNMENT == 0);
 } // namespace homestore
