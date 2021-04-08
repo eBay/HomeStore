@@ -52,7 +52,7 @@ pipeline {
             } }
             steps {
                 script {
-                    BUILD_TEST_MODE = "-o homestore:testing=full"
+                    BUILD_TEST_MODE = "-o homestore:testing=epoll_mode"
                 }
             }
         }
