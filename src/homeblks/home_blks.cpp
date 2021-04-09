@@ -814,9 +814,11 @@ void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
         data_recovery_done();
         m_rdy = true;
         iomanager.run_on(m_init_thread_id, ([this](io_thread_addr_t addr) { this->init_done(); }));
-        std::unique_lock< std::mutex > lk{m_cv_mtx};
-        m_init_finished = true;
-        m_cv_init_cmplt.notify_all();
+        {
+            std::unique_lock< std::mutex > lk{m_cv_mtx};
+            m_init_finished = true;
+            m_cv_init_cmplt.notify_all();
+        }
     }));
 }
 
