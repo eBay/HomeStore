@@ -325,6 +325,7 @@ private:
     bool m_vol_shutdown_cmpltd = false;
     HomeBlksMetrics m_metrics;
     std::atomic< bool > m_start_shutdown;
+    iomgr::io_thread_t m_init_thread_id;
     static bool m_meta_blk_found;
 
     static thread_local std::vector< std::shared_ptr< Volume > >* s_io_completed_volumes;
