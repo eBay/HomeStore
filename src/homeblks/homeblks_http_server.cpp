@@ -208,7 +208,7 @@ void HomeBlksHttpServer::crash_system(sisl::HttpCallData cd) {
         HS_RELEASE_ASSERT(0, "Fake Assert in response to an http request");
     } else if (boost::iequals(crash_type, "segv")) {
         int* x{nullptr};
-        int y = *x; // Deliberately dereference a nullptr (simulate rather than sending segv signal)
+        LOGINFO("Simulating a segv with dereferencing nullptr={}", *x);
     } else {
         resp = "crash type " + crash_type + " not supported yet";
     }
