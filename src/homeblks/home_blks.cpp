@@ -62,7 +62,8 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
         /* Note :- it is not thread safe. We only support it for testing */
         if (fake_reboot) {
             HomeStore::fake_reboot();
-            MetaBlkMgrSI()->register_handler("HOMEBLK", HomeBlks::meta_blk_found_cb, HomeBlks::meta_blk_recovery_comp_cb);
+            MetaBlkMgrSI()->register_handler("HOMEBLK", HomeBlks::meta_blk_found_cb,
+                                             HomeBlks::meta_blk_recovery_comp_cb);
             Volume::fake_reboot();
             m_meta_blk_found = false;
             instance = HomeBlksSafePtr(new HomeBlks(cfg));
@@ -534,9 +535,9 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
 
     auto elapsed_time_ms = get_time_since_epoch_ms() - m_shutdown_start_time.load();
     if (elapsed_time_ms > (HB_DYNAMIC_CONFIG(general_config->shutdown_timeout_secs) * 1000)) {
-        LOGERROR("Graceful shutdown of volumes took {} ms exceeds time limit {} seconds, attempting forceful shutdown",
-                 elapsed_time_ms, HB_DYNAMIC_CONFIG(general_config->shutdown_timeout_secs));
-        force = true;
+        HS_RELEASE_ASSERT(
+            false, "Graceful shutdown of volumes took {} ms exceeds time limit {} seconds, forcefully shutting down",
+            elapsed_time_ms, HB_DYNAMIC_CONFIG(general_config->shutdown_timeout_secs));
     }
 
     m_shutdown_done_cb = shutdown_done_cb;
