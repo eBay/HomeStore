@@ -124,13 +124,8 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     auto sthread = sisl::named_thread("hb_init", [this]() {
         iomanager.run_io_loop(false, nullptr, [&](bool thread_started) {
             if (thread_started) {
+                m_init_thread_id = iomanager.iothread_self();
                 this->init_devices();
-                {
-                    std::unique_lock< std::mutex > lk{m_cv_mtx};
-                    /* wait for init to complete */
-                    m_cv_init_cmplt.wait(lk, [this]() { return (m_init_finished.load() == true); });
-                }
-                init_done();
             }
         });
     });
@@ -818,9 +813,12 @@ void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
         LOGINFO("System CP taken upon init is completed successfully");
         data_recovery_done();
         m_rdy = true;
-        std::unique_lock< std::mutex > lk{m_cv_mtx};
-        m_init_finished = true;
-        m_cv_init_cmplt.notify_all();
+        iomanager.run_on(m_init_thread_id, ([this](io_thread_addr_t addr) { this->init_done(); }));
+        {
+            std::unique_lock< std::mutex > lk{m_cv_mtx};
+            m_init_finished = true;
+            m_cv_init_cmplt.notify_all();
+        }
     }));
 }
 
