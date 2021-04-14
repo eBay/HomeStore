@@ -27,7 +27,9 @@ namespace homestore {
 static constexpr uint32_t LOG_GROUP_HDR_MAGIC{0xDABAF00D};
 static constexpr uint32_t dma_address_boundary{512}; // Mininum size the dma/writes to be aligned with
 static constexpr uint32_t initial_read_size{4096};
-static constexpr uint32_t max_log_group{2};
+static constexpr uint32_t max_log_group{
+    2}; // logdev doesn't support concurrent writes. There can only be 2 active log groups.
+
 
 // clang-format off
 /*

@@ -166,6 +166,7 @@ public:
         REGISTER_COUNTER(vdev_truncate_count, "vdev total truncate cnt");
         REGISTER_COUNTER(vdev_high_watermark_count, "vdev total high watermark cnt");
         REGISTER_COUNTER(vdev_num_alloc_failure, "vdev blk alloc failure cnt");
+        REGISTER_COUNTER(unalign_writes, "unalign write cnt");
 
         register_me_to_farm();
     }
@@ -1432,6 +1433,10 @@ private:
         COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
 
         ssize_t bytes_written = 0;
+        auto align_sz = HS_STATIC_CONFIG(drive_attr.phys_page_size);
+        if (sisl_unlikely(!(offset_in_dev & static_cast< size_t >(align_sz - 1)))) {
+            COUNTER_INCREMENT(m_metrics, unalign_writes, 1);
+        }
 
         if (!req || req->isSyncCall) {
             auto start_time = Clock::now();
@@ -1472,6 +1477,11 @@ private:
     ssize_t do_pwrite_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const char* buf, const uint32_t len,
                                const uint64_t offset_in_dev, boost::intrusive_ptr< virtualdev_req > req) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
+
+        auto align_sz = HS_STATIC_CONFIG(drive_attr.phys_page_size);
+        if (sisl_unlikely(!(offset_in_dev & static_cast< size_t >(align_sz - 1)))) {
+            COUNTER_INCREMENT(m_metrics, unalign_writes, 1);
+        }
 
         ssize_t bytes_written = 0;
 
