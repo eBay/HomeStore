@@ -24,6 +24,9 @@ void LogDev::start(const bool format) {
     HS_ASSERT(LOGMSG, (m_store_found_cb != nullptr), "Expected Log store found callback to be registered");
     HS_ASSERT(LOGMSG, (m_logfound_cb != nullptr), "Expected Logs found callback to be registered");
 
+    for (uint32_t i = 0; i < max_log_group; ++i) {
+        m_log_group_pool[i].start();
+    }
     m_log_records = std::make_unique< sisl::StreamTracker< log_record > >();
     m_hb = HomeStoreBase::safe_instance();
     m_stopped = false;

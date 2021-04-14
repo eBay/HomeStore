@@ -27,6 +27,7 @@ namespace homestore {
 static constexpr uint32_t LOG_GROUP_HDR_MAGIC{0xDABAF00D};
 static constexpr uint32_t dma_address_boundary{512}; // Mininum size the dma/writes to be aligned with
 static constexpr uint32_t initial_read_size{4096};
+static constexpr uint32_t max_log_group{2};
 
 // clang-format off
 /*
@@ -214,6 +215,7 @@ public:
     LogGroup& operator=(LogGroup&&) noexcept = delete;
     ~LogGroup() = default;
 
+    void start();
     void reset(const uint32_t max_records);
     void create_overflow_buf(const uint32_t min_needed);
     [[nodiscard]] bool add_record(const log_record& record, const int64_t log_idx);
@@ -704,7 +706,7 @@ private:
     void* m_sb_cookie{nullptr};
 
     // Pool for creating log group
-    LogGroup m_log_group_pool[2];
+    LogGroup m_log_group_pool[max_log_group];
     uint32_t m_log_group_idx{1};
 }; // LogDev
 

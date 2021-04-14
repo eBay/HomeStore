@@ -6,7 +6,8 @@
 namespace homestore {
 SDS_LOGGING_DECL(logstore)
 
-LogGroup::LogGroup() {
+LogGroup::LogGroup() = default;
+void LogGroup::start() {
     m_iovecs.reserve(estimated_iovs);
     m_log_buf =
         sisl::aligned_unique_ptr< uint8_t >::make_sized(HS_STATIC_CONFIG(drive_attr.align_size), inline_log_buf_size);
