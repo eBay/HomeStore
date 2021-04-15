@@ -33,6 +33,7 @@
 #include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_flip.hpp"
+#include "engine/homestore_base.hpp"
 
 SDS_LOGGING_DECL(device)
 
@@ -651,7 +652,6 @@ public:
             return -1;
         }
 
-        COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
 
         if (m_reserved_sz != 0) {
             HS_LOG(ERROR, device, "write can't be served when m_reserved_sz:{} is not comsumed by pwrite yet.",
@@ -686,7 +686,6 @@ public:
         HS_ASSERT_CMP(RELEASE, count, <=, m_reserved_sz, "Write size:{} larger then reserved size: {} is not allowed!",
                       count, m_reserved_sz);
 
-        COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
 
         // update reserved size
         m_reserved_sz -= count;
@@ -714,7 +713,6 @@ public:
         uint32_t dev_id = 0, chunk_id = 0;
         auto len = get_len(iov, iovcnt);
 
-        COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
 
         // if len is smaller than reserved size, it means write will never be overlapping start offset;
         // it is guaranteed by alloc_next_append_blk api;
@@ -759,7 +757,6 @@ public:
         uint32_t dev_id = 0, chunk_id = 0;
         off_t offset_in_chunk = 0;
 
-        COUNTER_INCREMENT(m_metrics, vdev_read_count, 1);
 
         logical_to_dev_offset(m_seek_cursor, dev_id, chunk_id, offset_in_chunk);
 
@@ -809,7 +806,6 @@ public:
         uint32_t dev_id = 0, chunk_id = 0;
         off_t offset_in_chunk = 0;
 
-        COUNTER_INCREMENT(m_metrics, vdev_read_count, 1);
 
         uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
 
@@ -848,7 +844,6 @@ public:
             return 0;
         }
 
-        COUNTER_INCREMENT(m_metrics, vdev_read_count, 1);
 
         uint32_t dev_id = 0, chunk_id = 0;
         off_t offset_in_chunk = 0;
@@ -1434,7 +1429,8 @@ private:
 
         ssize_t bytes_written = 0;
         auto align_sz = HS_STATIC_CONFIG(drive_attr.phys_page_size);
-        if (sisl_unlikely(!(offset_in_dev & static_cast< size_t >(align_sz - 1)))) {
+        COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
+        if (sisl_unlikely(!hs_mod_aligned_sz(offset_in_dev, align_sz))) {
             COUNTER_INCREMENT(m_metrics, unalign_writes, 1);
         }
 
@@ -1479,7 +1475,8 @@ private:
         COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
 
         auto align_sz = HS_STATIC_CONFIG(drive_attr.phys_page_size);
-        if (sisl_unlikely(!(offset_in_dev & static_cast< size_t >(align_sz - 1)))) {
+        COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
+        if (sisl_unlikely(!hs_mod_aligned_sz(offset_in_dev, align_sz))) {
             COUNTER_INCREMENT(m_metrics, unalign_writes, 1);
         }
 
@@ -1512,6 +1509,7 @@ private:
     ssize_t do_read_internal(PhysicalDev* pdev, PhysicalDevChunk* primary_chunk, const uint64_t primary_dev_offset,
                              char* ptr, const uint64_t size, boost::intrusive_ptr< virtualdev_req > req) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_read_vector_count, 1);
+        COUNTER_INCREMENT(m_metrics, vdev_read_count, 1);
         ssize_t bytes_read = 0;
 
         if (!req || req->isSyncCall) {
@@ -1570,6 +1568,7 @@ private:
                                const struct iovec* iov, int iovcnt, uint64_t size,
                                boost::intrusive_ptr< virtualdev_req > req) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_read_vector_count, iovcnt);
+        COUNTER_INCREMENT(m_metrics, vdev_read_count, 1);
         ssize_t bytes_read = 0;
         if (!req || req->isSyncCall) {
             auto start = Clock::now();

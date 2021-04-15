@@ -83,6 +83,11 @@ static inline uint64_t hs_aligned_size(size_t size) {
     return sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.align_size));
 }
 
+static inline bool hs_mod_aligned_sz(size_t size_to_check, size_t align_sz) {
+    HS_DEBUG_ASSERT_EQ((align_sz & (align_sz - 1)), 0);
+    return !(size_to_check & static_cast< size_t >(align_sz - 1)); // return true if it is aligned.
+}
+
 static inline sisl::byte_view hs_create_byte_view(uint64_t size, bool is_aligned_needed) {
     return (is_aligned_needed)
         ? sisl::byte_view{(uint32_t)hs_aligned_size(size), HS_STATIC_CONFIG(drive_attr.align_size)}

@@ -369,6 +369,7 @@ public:
     void cp_start(const btree_cp_ptr& bcp) {
         static size_t thread_cnt{0};
         const size_t thread_index{static_cast< size_t >(thread_cnt++ % HS_DYNAMIC_CONFIG(generic.cache_flush_threads))};
+        CP_PERIODIC_LOG(DEBUG, bcp->cp_id, "sending message to cp start");
         iomanager.run_on(m_thread_ids[thread_index],
                          [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
     }
@@ -376,6 +377,7 @@ public:
     void flush_buffers(const btree_cp_ptr& bcp) {
         const size_t cp_id = bcp->cp_id % MAX_CP_CNT;
         if (m_dirty_buf_cnt[cp_id].testz()) {
+            CP_PERIODIC_LOG(DEBUG, bcp->cp_id, "no buffers to flush");
             m_cp_comp_cb(bcp);
             return; // nothing to flush
         }

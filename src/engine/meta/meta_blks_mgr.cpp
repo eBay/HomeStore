@@ -388,8 +388,7 @@ void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* const ovf_hdr, const vo
     const uint8_t* write_context_data{static_cast< const uint8_t* >(context_data) + offset};
     size_t write_size{ovf_hdr->h.context_sz};
     uint8_t* context_data_aligned{nullptr};
-    if ((reinterpret_cast< std::uintptr_t >(write_context_data) &
-        static_cast< std::uintptr_t >(align_sz - 1)) != 0x00) { // uintptr_t will not be defined if it is not wide enough to hold address
+    if (!hs_mod_aligned_sz(reinterpret_cast< size_t >(write_context_data), align_sz)) {
         LOGWARN("Unaligned address found for input context_data.");
         const size_t aligned_write_size{static_cast< size_t >(sisl::round_up(write_size, align_sz))};
         context_data_aligned = hs_iobuf_alloc(aligned_write_size);
@@ -414,7 +413,7 @@ void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* const ovf_hdr, const vo
             const size_t remain_sz_to_write{static_cast< size_t >(write_size - size_written)};
             iovd[0].iov_len = remain_sz_to_write;
             // pad last write to dma boundary size if needed
-            if ((remain_sz_to_write & static_cast< size_t >(align_sz - 1)) != 0x00) {
+            if (!hs_mod_aligned_sz(remain_sz_to_write, align_sz)) {
                 LOGWARN("Unaligned input sz:{} found for input context_data.", ovf_hdr->h.context_sz);
                 const size_t round_sz{static_cast< size_t >(sisl::round_up(remain_sz_to_write, align_sz))};
                 iovd[0].iov_len = round_sz;
