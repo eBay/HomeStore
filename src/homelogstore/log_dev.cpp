@@ -518,10 +518,10 @@ std::vector< std::pair< logstore_id_t, logstore_meta > > LogDevMetadata::load() 
 void LogDevMetadata::persist() {
     if (m_meta_mgr_cookie) {
         MetaBlkMgrSI()->update_sub_sb(static_cast< const void* >(m_raw_buf.bytes()), m_raw_buf.size(),
-                                              m_meta_mgr_cookie);
+                                      m_meta_mgr_cookie);
     } else {
         MetaBlkMgrSI()->add_sub_sb("LOG_DEV", static_cast< const void* >(m_raw_buf.bytes()), m_raw_buf.size(),
-                                 m_meta_mgr_cookie);
+                                   m_meta_mgr_cookie);
     }
 }
 

@@ -193,7 +193,11 @@ public:
 
     void try_cp_start(const btree_cp_ptr& bcp) {
         auto ref_cnt = bcp->ref_cnt.fetch_sub(1);
-        if (ref_cnt == 1) { m_wb_cache->cp_start(bcp); }
+        if (ref_cnt == 1) {
+            m_wb_cache->cp_start(bcp);
+        } else {
+            THIS_BT_CP_LOG(TRACE, bcp->cp_id, "exiting without triggering wb cp_start because ref_cnt: {}", ref_cnt);
+        }
     }
 
     static void flush_free_blks(SSDBtreeStore* store, const btree_cp_ptr& bcp,
@@ -461,12 +465,16 @@ private:
     void write_journal_entry_store(const btree_cp_ptr& bcp, sisl::io_blob& j_iob) {
         ++bcp->ref_cnt;
 
+        THIS_BT_CP_LOG(TRACE, bcp->cp_id, "writing to journal with ref_cnt: {}", bcp->ref_cnt);
+
         // Update the size to actual size for unaligned buffer. For aligned we have to write entire buffer (since it
         // will avoid a copy and write directly)
         if (!j_iob.aligned) j_iob.size = blob_to_entry(j_iob)->actual_size;
 
         [[maybe_unused]] const auto seq_num{m_journal->append_async(
             j_iob, nullptr, ([this, bcp](logstore_seq_num_t seq_num, sisl::io_blob& iob, bool status, void* cookie) {
+                THIS_BT_CP_LOG(TRACE, bcp->cp_id, "append_async callback received with ref_cnt: {}", bcp->ref_cnt);
+
                 btree_journal_entry* jentry = blob_to_entry(iob);
                 if (jentry->op != journal_op::BTREE_CREATE) {
                     /*

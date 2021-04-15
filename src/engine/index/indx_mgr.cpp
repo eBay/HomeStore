@@ -101,8 +101,9 @@ void HomeStoreCPMgr::shutdown() {
 void HomeStoreCPMgr::cp_start(hs_cp* hcp) {
     iomanager.run_on(IndxMgr::get_thread_id(), [this, hcp](io_thread_addr_t addr) {
         hcp->ref_cnt.increment(1);
-        HS_LOG(TRACE, cp, "Starting cp of type {}, number of indexes in cp={}",
-               (hcp->blkalloc_checkpoint ? "blkalloc" : "Index"), hcp->indx_cp_list.size());
+        HS_PERIODIC_LOG(TRACE, cp, "Starting cp of type {}, number of indexes in cp={}, hcp ref_cnt: {}",
+                        (hcp->blkalloc_checkpoint ? "blkalloc" : "Index"), hcp->indx_cp_list.size(),
+                        hcp->ref_cnt.get());
         for (auto it = hcp->indx_cp_list.begin(); it != hcp->indx_cp_list.end(); ++it) {
             if (it->second != nullptr && (it->second->state() != cp_state::suspend_cp)) {
                 ++hcp->snt_cnt;
@@ -118,15 +119,18 @@ void HomeStoreCPMgr::cp_start(hs_cp* hcp) {
                 }
             }
         }
-        HS_LOG(TRACE, cp, "number of indexes participated {}", hcp->snt_cnt);
+        HS_PERIODIC_LOG(TRACE, cp, "number of indexes participated {}", hcp->snt_cnt);
         indx_tbl_cp_done(hcp);
     });
 }
 
 void HomeStoreCPMgr::indx_tbl_cp_done(hs_cp* hcp) {
-    if (!hcp->ref_cnt.decrement_testz(1)) { return; }
+    if (!hcp->ref_cnt.decrement_testz(1)) {
+        HS_PERIODIC_LOG(TRACE, cp, "return because of hcp ref_cnt: {}", hcp->ref_cnt.get());
+        return;
+    }
 
-    HS_LOG(TRACE, cp, "Cp of type {} is completed", (hcp->blkalloc_checkpoint ? "blkalloc" : "Index"));
+    HS_PERIODIC_LOG(TRACE, cp, "Cp of type {} is completed", (hcp->blkalloc_checkpoint ? "blkalloc" : "Index"));
     if (hcp->indx_cp_list.size()) {
         if (hcp->blkalloc_checkpoint) {
             /* flush all the blks that are freed in this hcp */
@@ -156,7 +160,7 @@ void HomeStoreCPMgr::indx_tbl_cp_done(hs_cp* hcp) {
  * 6. call cp_end :- read comments over indxmgr::destroy().
  */
 void HomeStoreCPMgr::blkalloc_cp_start(hs_cp* hcp) {
-    HS_LOG(TRACE, cp, "Cp of type blkalloc, writing super block about cp");
+    HS_PERIODIC_LOG(TRACE, cp, "Cp of type blkalloc, writing super block about cp");
 
     /* persist blk alloc bit maps */
     m_hs->blkalloc_cp_start(hcp->ba_cp);
@@ -939,7 +943,8 @@ void IndxMgr::do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_
                                 /* remove the meta blk which is used to track unmap progress */
                                 const auto ret{MetaBlkMgrSI()->remove_sub_sb(unmap_meta_blk_cntx)};
                                 if (ret != no_error) {
-                                    HS_ASSERT(RELEASE, false, "failed to remove subsystem with status: {}", ret.message());
+                                    HS_ASSERT(RELEASE, false, "failed to remove subsystem with status: {}",
+                                              ret.message());
                                 }
                                 if (!m_recovery_mode) {
                                     /* we don't need to callback in a recovery mode */
@@ -1195,7 +1200,7 @@ void IndxMgr::destroy_indx_tbl() {
                                 }
 #endif
                                 /* remove the meta blk which is used to track vol destroy progress */
-                                if (m_destroy_meta_blk) { 
+                                if (m_destroy_meta_blk) {
                                     const auto ret{MetaBlkMgrSI()->remove_sub_sb(m_destroy_meta_blk)};
                                     if (ret != no_error) {
                                         HS_ASSERT(RELEASE, false, "failed to remove subsystem with status: {}",
