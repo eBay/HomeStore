@@ -112,6 +112,7 @@ sisl::byte_view log_stream_reader::read_next_bytes(const uint64_t nbytes) {
 
     const auto prev_pos{store->seeked_pos()};
     auto actual_read{store->read(static_cast< void* >(out_buf.bytes()), nbytes)};
+    HS_RELEASE_ASSERT_NE(actual_read, 0, "zero bytes are read");
     LOGINFOMOD(logstore, "LogStream read {} bytes from vdev offset {} and vdev cur offset {}", actual_read, prev_pos,
                store->seeked_pos());
     ret_buf.set_size(actual_read + m_cur_log_buf.size());

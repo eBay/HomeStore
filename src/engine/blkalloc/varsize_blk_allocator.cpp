@@ -283,7 +283,9 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_all
     BLKALLOC_LOG(TRACE, "nblks={}, hints multiplier={}", nblks, hints.multiplier);
 
 #ifdef _PRERELEASE
-    if (homestore_flip->test_flip("varsize_blkalloc_no_blks", nblks)) { return BlkAllocStatus::SPACE_FULL; }
+    if (hints.error_simulate && homestore_flip->test_flip("varsize_blkalloc_no_blks", nblks)) {
+        return BlkAllocStatus::SPACE_FULL;
+    }
 
     // NOTE: There is a small chance this can fail if all the blocks have already been allocated to slabs
     if (homestore_flip->test_flip("varsize_blkalloc_bypass_cache")) {

@@ -17,6 +17,16 @@
 
 using namespace homeds::btree;
 
+/*
+ * IO errors handling by homestore.
+ * Write error :- Reason :- Disk error, space full,btree node read fail
+ *                Handling :- Writeback cache,logdev and meta blk mgr doesn't handle any write errors.
+ *                            It panics the system for write errors.
+ * Read error :- Reason :- Disk error
+ *               Handling :- logdev doesn't support any read error. It panic for read errors.
+ * If HS see write error/read error during recovery then it panic the system.
+ */
+
 namespace homestore {
 typedef BlkStore< VdevVarSizeBlkAllocatorPolicy > sb_blkstore_t;
 
@@ -36,6 +46,7 @@ struct blkstore_blob {
 struct sb_blkstore_blob : blkstore_blob {
     BlkId blkid;
 };
+
 
 template < typename IndexBuffer >
 class HomeStore : public HomeStoreBase {
@@ -163,10 +174,10 @@ protected:
 
         /* create blkstore if it is a first time boot */
         if (first_time_boot) {
-            create_data_blkstore(nullptr);
-            create_index_blkstore(nullptr);
-            create_logdev_blkstore(nullptr);
             create_meta_blkstore(nullptr);
+            create_logdev_blkstore(nullptr);
+            create_index_blkstore(nullptr);
+            create_data_blkstore(nullptr);
         }
         init_done(first_time_boot);
     }
@@ -191,9 +202,6 @@ protected:
         case blkstore_type::INDEX_STORE:
             create_index_blkstore(vb);
             break;
-        case blkstore_type::SB_STORE: // deprecated
-            create_sb_blkstore(vb);
-            break;
         case blkstore_type::LOGDEV_STORE:
             create_logdev_blkstore(vb);
             break;
@@ -210,7 +218,7 @@ protected:
             /* change it to context */
             struct blkstore_blob blob {};
             blob.type = blkstore_type::DATA_STORE;
-            uint64_t size = (90 * m_dev_mgr->get_total_cap()) / 100;
+            uint64_t size = (data_blkstore_pct * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
             m_size_avail = size;
             LOGINFO("maximum capacity for data blocks is {}", m_size_avail);
@@ -234,7 +242,7 @@ protected:
         if (vb == nullptr) {
             struct blkstore_blob blob {};
             blob.type = blkstore_type::INDEX_STORE;
-            uint64_t size = (2 * m_dev_mgr->get_total_cap()) / 100;
+            uint64_t size = (indx_blkstore_pct * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
             m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
                 m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE, 0, (char*)&blob,
@@ -254,59 +262,11 @@ protected:
         }
     }
 
-    void create_sb_blkstore(vdev_info_block* vb) { // deprecated
-        if (vb == nullptr) {
-            /* create a blkstore */
-            struct sb_blkstore_blob blob {};
-            blob.type = blkstore_type::SB_STORE;
-            blob.blkid.invalidate();
-            uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
-            size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
-            m_sb_blk_store = std::make_unique< sb_blkstore_t >(
-                m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::PASS_THRU,
-                HS_STATIC_CONFIG(input.devices).size() - 1,
-                (char*)&blob, sizeof(sb_blkstore_blob), HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size),
-                "superblock", false);
-
-            /* allocate a new blk id */
-            BlkId bid = alloc_sb_blk(HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size));
-            blob.type = blkstore_type::SB_STORE;
-            blob.blkid.set(bid);
-
-            /* update the context info */
-            m_sb_blk_store->update_vb_context(sisl::blob((uint8_t*)&blob, (uint32_t)sizeof(sb_blkstore_blob)));
-        } else {
-            /* create a blkstore */
-            m_sb_blk_store = std::make_unique< sb_blkstore_t >(
-                m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::PASS_THRU,
-                                                               HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size),
-                                                               "superblock", false, false);
-            if (vb->failed) {
-                m_vdev_failed = true;
-                LOGINFO("super block store is in failed state");
-                throw std::runtime_error("vdev in failed state");
-            }
-
-            /* get the blkid of homestore super block */
-            sb_blkstore_blob* blob = (sb_blkstore_blob*)(&(vb->context_data));
-            if (!blob->blkid.is_valid()) {
-                LOGINFO("init was failed last time. Should retry it with init flag");
-                throw homestore::homestore_exception("init was failed last time. Should retry it with init",
-                                                     homestore_error::init_failed);
-            }
-
-            /* read and build the appln super block */
-            std::vector< blk_buf_t > bbuf =
-                m_sb_blk_store->read_nmirror(blob->blkid, HS_STATIC_CONFIG(input.devices).size() - 1);
-            //   superblock_load(bbuf, blob->blkid);
-        }
-    }
-
     void create_meta_blkstore(vdev_info_block* vb) {
         if (vb == nullptr) {
             struct blkstore_blob blob {};
             blob.type = blkstore_type::META_STORE;
-            uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
+            uint64_t size = (meta_blkstore_pct * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
             m_meta_blk_store = std::make_unique< meta_blkstore_t >(
                 m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::PASS_THRU, 0, (char*)&blob,
@@ -340,7 +300,7 @@ protected:
         if (vb == nullptr) {
             struct blkstore_blob blob {};
             blob.type = blkstore_type::LOGDEV_STORE;
-            uint64_t size = (1 * m_dev_mgr->get_total_cap()) / 100;
+            uint64_t size = (logdev_blkstore_pct * m_dev_mgr->get_total_cap()) / 100;
             size = sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.phys_page_size));
             m_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
                 m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::PASS_THRU, 0, (char*)&blob,
@@ -425,6 +385,10 @@ private:
     uint32_t m_data_pagesz = 0;
     std::atomic< uint32_t > m_format_cnt = 1;
     sb_blkstore_blob* m_meta_sb_blob = nullptr;
+    const uint64_t data_blkstore_pct = 84;
+    const uint64_t indx_blkstore_pct = 3;
+    const uint64_t logdev_blkstore_pct = 2;
+    const uint64_t meta_blkstore_pct = 1;
 };
 
 } // namespace homestore

@@ -594,7 +594,11 @@ struct volume_req : indx_req {
         lba_count_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         /* we only populating check sum. Allocate blkids are already populated by indx mgr */
         csum_t* j_csum = (csum_t*)mem;
-        assert(is_unmap() || active_nlbas_written == nlbas());
+
+        if (!is_unmap() && active_nlbas_written != nlbas()) {
+            VOL_ERROR_LOG(vol()->get_name(), "all lbas are not written. lba written {}, lba supposed to write{}",
+                          active_nlbas_written, nlbas());
+        }
         for (lba_count_t i{0}; i < active_nlbas_written; ++i) {
             j_csum[i] = csum_list[i];
         }

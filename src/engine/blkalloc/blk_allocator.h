@@ -115,6 +115,9 @@ struct blk_alloc_hints {
     bool is_contiguous;
     uint32_t multiplier;         // blks allocated in a blkid should be a multiple of multiplier
     uint32_t max_blks_per_entry; // Number of blks on every entry
+#ifdef _PRERELEASE
+    bool error_simulate = false; // can error simulate happen
+#endif
 };
 
 static constexpr blk_temp_t default_temperature() { return 1; }

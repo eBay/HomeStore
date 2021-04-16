@@ -132,6 +132,9 @@ table ResourceLimits {
 
     /* journal size used percentage */
     journal_size_percent: uint32 = 50;
+
+    /* We crash if volume is 95 percent filled and no disk space left */
+    vol_threshhold_used_size_p: uint32 = 95;
 }
 
 table MetaBlkStore {

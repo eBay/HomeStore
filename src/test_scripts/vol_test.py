@@ -71,12 +71,6 @@ def normal(num_secs="20000"):
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("normal test completed")
 
-def normal_flip():
-    print("normal test started with flip = 2")
-    cmd_opts = "--run_time=3600 --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0 --verify_type=3 --flip=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
-    print("normal test completed with flip =  2")
-
 ## @test load
 #  @brief Test using load generator
 def load():
@@ -194,20 +188,11 @@ def vol_offline_test():
 ## @test vol_io_fail_test
 #  @brief Set IO error and verify all volumes come online
 #           after reboot and data is verified.
-def vol_io_fail_test():
+def vol_io_fail_test(num_secs="3600"):
     print("vol io fail test started")
-    
-    process = Popen([dirpath + "test_volume", "--gtest_filter=VolTest.vol_io_fail_test", "--run_time=30", "--remove_file=0"])
-    p_status = process.wait()
-    if p_status != 0:
-        print("test failed")
-        sys.exit(-1)
-    print("vol io test test passed")
-    
-    print("vol io fail test recovery started")
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --verify_type=3"
+    cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --remove_file=0 --flip=2"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
-    print("vol io fail test recovery passed")
+    print("vol io fail test completed")
 
 ##  @test vol_create_del_test
 #   @brief Create and Delete Volume
@@ -394,10 +379,9 @@ def nightly():
     vol_mod_test("vdev", vdev_flip_list)
     sleep(5)
 
-    # normal IO test
-    #normal_flip()
-    #sleep(5)
-
+    vol_io_fail_test()
+    sleep(5)
+    
     #one_disk_replace()
     #sleep(5)
 
@@ -413,8 +397,6 @@ def nightly():
     #vol_offline_test()
     #sleep(5)
 
-  #  vol_io_fail_test()
-    sleep(5)
 
     #vol_create_del_test()
     #sleep(5)
@@ -465,9 +447,6 @@ if test_suits == "vol_io_fail_test":
 
 if test_suits == "vol_create_del_test":
     vol_create_del_test()
-
-if test_suits == "normal_flip":
-    normal_flip()
 
 if test_suits == "nightly":
     nightly()

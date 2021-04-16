@@ -64,7 +64,9 @@ BlkAllocStatus FixedBlkAllocator::alloc(const blk_count_t nblks, const blk_alloc
 
 BlkAllocStatus FixedBlkAllocator::alloc(BlkId& out_blkid) {
 #ifdef _PRERELEASE
-    if (homestore_flip->test_flip("fixed_blkalloc_no_blks")) { return BlkAllocStatus::SPACE_FULL; }
+    if (homestore_flip->test_flip("fixed_blkalloc_no_blks")) {
+        return BlkAllocStatus::SPACE_FULL;
+    }
 #endif
     return m_blk_q.read(out_blkid) ? BlkAllocStatus::SUCCESS : BlkAllocStatus::SPACE_FULL;
 }

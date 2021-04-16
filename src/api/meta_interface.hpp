@@ -250,10 +250,9 @@ private:
     /**
      * @brief : Allocate meta BlkId
      *
-     * @return : BlkId that is allcoated;
      */
-    [[nodiscard]] std::error_condition alloc_meta_blk(BlkId& bid);
-    [[nodiscard]] std::error_condition alloc_meta_blk(const uint64_t size, std::vector< BlkId >& bid);
+    void alloc_meta_blk(BlkId& bid);
+    void alloc_meta_blk(const uint64_t size, std::vector< BlkId >& bid);
 
     void free_meta_blk(meta_blk* const mblk);
 

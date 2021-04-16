@@ -25,7 +25,8 @@ lba_t mapping::get_next_start_lba(const lba_t start_lba, const lba_count_t nlba)
 
 lba_count_t mapping::get_nlbas_from_cursor(const lba_t start_lba, const BtreeQueryCursor& cur) {
     const auto mapping_key = (MappingKey*)(cur.m_last_key.get());
-    return get_nlbas(mapping_key->end(), start_lba);
+    if (mapping_key) { return get_nlbas(mapping_key->end(), start_lba); }
+    return 0;
 }
 
 lba_t mapping::get_end_key_from_cursor(const BtreeQueryCursor& cur) {
@@ -131,7 +132,6 @@ btree_status_t mapping::read_indx(const indx_req_ptr& ireq, const read_indx_comp
     } else {
         // callback to volume for this read failure;
         // could be here for both fast and slow path;
-        assert(0);
         read_cb(ireq, btree_read_failed);
     }
     return ret;
@@ -164,17 +164,16 @@ btree_status_t mapping::get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCu
     /* run query */
     auto ret = m_bt->query(qreq, result_kv);
 
+    if (ret != btree_status_t::success) {
+        HS_SUBMOD_LOG(INFO, volume, , "vol", m_unique_name, "GET : start_lba {} end lba {} ret {}", key.start(),
+                      end_lba, ret);
+    }
 #ifndef NDEBUG
     for (uint32_t i = 0; i < result_kv.size(); ++i) {
         HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "GET : start_lba {} end lba {} value {}",
                       result_kv[i].first.start(), result_kv[i].first.end(), result_kv[i].second.to_string());
     }
 #endif
-
-    HS_ASSERT(RELEASE,
-              (ret == btree_status_t::resource_full || ret == btree_status_t::fast_path_not_possible ||
-               ret == btree_status_t::success),
-              "ret {}", ret);
 
     HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "GET complete : end key from cursor {}", end_lba);
     return ret;
@@ -212,10 +211,11 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
         HS_ASSERT_CMP(RELEASE, get_next_start_key_from_cursor(cur), <=, (end_lba + 1));
     }
     /* we should not get resource full error */
-    HS_ASSERT(RELEASE,
-              (ret == btree_status_t::success || ret == btree_status_t::fast_path_not_possible ||
-               ret == btree_status_t::cp_mismatch),
-              "ret {}", ret);
+    if (ret != btree_status_t::success) {
+        HS_SUBMOD_LOG(INFO, volume, , "vol", m_unique_name, "PUT : start_lba {} end lba {} ret {}", key.start(),
+                      end_lba, ret);
+    }
+    HS_RELEASE_ASSERT_NE(ret, btree_status_t::resource_full, "Unexpected return");
 
     /* In range update, it can be written paritally. Find the first key in this range which is not updated */
     return ret;
@@ -806,8 +806,7 @@ void mapping::update_indx_alloc_blkids(const indx_req_ptr& ireq) {
     lba_count_t total_lbas = 0;
     auto vreq = static_cast< volume_req* >(ireq.get());
 
-    /* XXX: Can this assert be hit. it means nothing is written to active btree */
-    assert(vreq->active_btree_cur.m_last_key);
+    if (!vreq->active_btree_cur.m_last_key) { return; }
     const auto end_lba = get_end_key_from_cursor(vreq->active_btree_cur);
     const auto lbas_written = get_nlbas(end_lba, vreq->lba());
     const auto page_size = vreq->vol()->get_page_size();
@@ -964,8 +963,7 @@ btree_status_t mapping::destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_
     HS_SUBMOD_ASSERT(LOGMSG, (ret == btree_status_t::success), , "vol", m_unique_name,
                      "Error in destroying mapping btree ret={} ", ret);
     ret = m_bt->destroy(free_blkid_list, free_node_cnt);
-    HS_ASSERT_CMP(RELEASE, ret, ==, btree_status_t::success);
-    return btree_status_t::success;
+    return ret;
 }
 
 btree_status_t mapping::update_unmap_active_indx_tbl(blkid_list_ptr free_list, const seq_id_t seq_id, void* key,
@@ -992,7 +990,11 @@ btree_status_t mapping::update_unmap_active_indx_tbl(blkid_list_ptr free_list, c
         MappingValue value{seq_id, BlkId{}, 0u, nlbas_cur, nullptr /* csum ptr */};
 
         ret = put(cntx, key, value, bcp, cur);
-        if (ret != btree_status_t::success) { break; }
+        if (ret != btree_status_t::success) {
+            HS_SUBMOD_LOG(INFO, volume, , "vol", m_unique_name, "PUT : start_lba {} end lba {} ret {}", key.start(),
+                          end_lba, ret);
+            break;
+        }
         next_start_lba = (cur.m_last_key) ? get_next_start_key_from_cursor(cur) : j_key->lba;
         nlbas_rem -= nlbas_cur;
     }

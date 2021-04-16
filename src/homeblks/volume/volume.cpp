@@ -49,7 +49,7 @@ void Volume::set_error_flip() {
 
     /* error flips */
     freq.set_percent(1);
-    //    fc->inject_retval_flip("delay_us_and_inject_error_on_completion", { null_cond }, freq, 20);
+    fc->inject_retval_flip("vol_vchild_error", {null_cond}, freq, 20);
     fc->inject_noreturn_flip("varsize_blkalloc_no_blks", {null_cond}, freq);
 }
 
@@ -58,7 +58,7 @@ void Volume::set_io_flip() {
     FlipFrequency freq;
     FlipCondition cond1;
     freq.set_count(2000000000);
-    freq.set_percent(5);
+    freq.set_percent(2);
 
     FlipCondition null_cond;
     fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
@@ -67,10 +67,8 @@ void Volume::set_io_flip() {
     fc->inject_retval_flip("vol_delay_read_us", {null_cond}, freq, 20);
 
     fc->inject_retval_flip("cache_insert_race", {null_cond}, freq, 20);
-    //    fc->inject_retval_flip("io_write_iocb_empty_flip", {null_cond}, freq, 20);
+    fc->inject_retval_flip("io_write_iocb_empty_flip", {null_cond}, freq, 20);
     fc->inject_retval_flip("io_read_iocb_empty_flip", {null_cond}, freq, 20);
-
-    fc->inject_retval_flip("blkalloc_split_blk", {null_cond}, freq, 4);
 
 #if 0
     // Uncomment this line once the memory leak issue is fixed
@@ -421,6 +419,11 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
                  vreq->outstanding_io_cnt.get(), vreq->is_read_op(), vreq->state);
 
     if (err) {
+        if (vreq->err() == std::errc::no_space_on_device) {
+            uint64_t used_size_p = (get_used_size().used_data_size * 100) / get_size();
+            VOL_RELEASE_ASSERT_CMP(used_size_p, <, HS_DYNAMIC_CONFIG(resource_limits.vol_threshhold_used_size_p), vreq,
+                                   "this homestore instance is either over subscribed or there is data leak");
+        }
         if (vreq->iface_req->set_error(err)) {
             // Was not completed earlier, so complete the io
             COUNTER_INCREMENT_IF_ELSE(m_metrics, vreq->is_read_op(), volume_write_error_count, volume_read_error_count,
@@ -726,6 +729,9 @@ std::error_condition Volume::alloc_blk(const volume_req_ptr& vreq, std::vector< 
     hints.dev_id_hint = -1;
     hints.multiplier = m_blks_per_lba;
     hints.max_blks_per_entry = HS_STATIC_CONFIG(engine.max_blks_in_blkentry);
+#ifdef _PRERELEASE
+    hints.error_simulate = true;
+#endif
 
     try {
         BlkAllocStatus status = m_hb->get_data_blkstore()->alloc_blk(get_io_size(vreq->nlbas()), hints, bid);

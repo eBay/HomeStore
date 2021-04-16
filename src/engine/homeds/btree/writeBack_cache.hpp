@@ -432,6 +432,10 @@ public:
     }
 
     void writeBack_completion_internal(boost::intrusive_ptr< blkstore_req< wb_cache_buffer_t > >& bs_req) {
+        if (bs_req->err != no_error) {
+            HS_RELEASE_ASSERT(false, "error {} happen during cp {}", bs_req->err.message());
+        }
+
         auto wb_req = to_wb_req(bs_req);
         const size_t cp_id = wb_req->bcp->cp_id % MAX_CP_CNT;
         wb_req->state = homeds::btree::writeback_req_state::WB_REQ_COMPL;

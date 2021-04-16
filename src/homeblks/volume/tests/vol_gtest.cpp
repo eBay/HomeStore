@@ -1875,26 +1875,6 @@ TEST_F(VolTest, vol_offline_test) {
     this->shutdown();
 }
 
-TEST_F(VolTest, vol_io_fail_test) {
-    tcfg.expect_io_error = true;
-    this->start_homestore();
-
-    FlipClient fc(HomeStoreFlip::instance());
-    FlipCondition cond1;
-    FlipCondition cond2;
-    FlipFrequency freq;
-    fc.create_condition("setting error on file1", flip::Operator::EQUAL, tcfg.default_names[0], &cond1);
-    fc.create_condition("setting error on file2", flip::Operator::EQUAL, tcfg.default_names[1], &cond2);
-    freq.set_count(2000);
-    freq.set_percent(50);
-    fc.inject_noreturn_flip("io_write_comp_error_flip", {}, freq);
-    fc.inject_noreturn_flip("device_fail", {cond1, cond2}, freq);
-
-    auto job = this->start_io_job(wait_type_t::for_completion);
-    this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
-}
-
 /**
  * @brief :
  * Test Procedure:

@@ -51,6 +51,8 @@ if (${build_io_tests})
     
         add_test(NAME TestVolRecoveryCrash-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh --retry_log_mods "volume:trace,indx_mgr:trace,base:debug" ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery_crash --dirpath=${CMAKE_BINARY_DIR}/bin/ --)
         SET_TESTS_PROPERTIES(TestVolRecoveryCrash-Epoll PROPERTIES DEPENDS TestVolRecovery-Epoll)
+        add_test(NAME TestVolError-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh --retry_log_mods "volume:trace,indx_mgr:trace" ${CMAKE_BINARY_DIR}/bin/test_volume --flip=2)
+        SET_TESTS_PROPERTIES(TestVolError-Epoll PROPERTIES DEPENDS TestVolRecoveryCrash-Epoll)
     endif()
 
     can_build_spdk_io_tests(is_spdk)
@@ -73,5 +75,7 @@ if (${build_io_tests})
     
         add_test(NAME TestVolRecoveryCrash-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh --retry_log_mods "volume:trace,indx_mgr:trace,base:debug" ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery_crash --dirpath=${CMAKE_BINARY_DIR}/bin/ -- --spdk true)
         SET_TESTS_PROPERTIES(TestVolRecoveryCrash-Spdk PROPERTIES DEPENDS TestVolRecovery-Spdk)
+        add_test(NAME TestVolError-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh --retry_log_mods "volume:trace,indx_mgr:trace" ${CMAKE_BINARY_DIR}/bin/test_volume --flip=2)
+        SET_TESTS_PROPERTIES(TestVolError-Spdk PROPERTIES DEPENDS TestVolRecoveryCrash-Spdk)
     endif()
 endif ()

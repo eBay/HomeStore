@@ -116,7 +116,9 @@ void MetaBlkMgr::read(const BlkId& bid, void* const dest, const size_t sz) const
     std::vector< iovec > iov_vector{};
     iov_vector.push_back(std::move(iov));
 
-    m_sb_blk_store->read(bid, iov_vector, sz, req);
+    try {
+        m_sb_blk_store->read(bid, iov_vector, sz, req);
+    } catch (std::exception& e) { HS_ASSERT(RELEASE, 0, "Exception: {}", e.what()); }
     HS_DEBUG_ASSERT_LE(sz, bid.get_nblks() * get_page_size());
 }
 
@@ -149,11 +151,7 @@ bool MetaBlkMgr::migrated() {
 
 void MetaBlkMgr::init_ssb() {
     BlkId bid;
-    const auto ret{alloc_meta_blk(bid)};
-    if (no_error != ret) {
-        HS_ASSERT(RELEASE, 0, "alloc blk failed with status: {}", ret.message());
-        return;
-    }
+    alloc_meta_blk(bid);
     HS_LOG(INFO, metablk, "allocated ssb blk: {}", bid.to_string());
     sb_blkstore_blob blob;
     blob.type = blkstore_type::META_STORE;
@@ -187,7 +185,7 @@ void MetaBlkMgr::write_ssb() {
     // write current ovf blk to disk;
     try {
         m_sb_blk_store->write(m_ssb->bid, iov.data(), static_cast< int >(iov.size()));
-    } catch (std::exception& e) { throw e; }
+    } catch (std::exception& e) { HS_RELEASE_ASSERT(false, "exception happen during write {}", e.what()); }
 }
 
 void MetaBlkMgr::scan_meta_blks() {
@@ -336,7 +334,7 @@ void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* const context_
     HS_ASSERT(RELEASE, m_sub_info.find(type) != m_sub_info.end(), "type: {} not registered yet!", type);
 
     BlkId meta_bid;
-    const auto ret{alloc_meta_blk(meta_bid)};
+    alloc_meta_blk(meta_bid);
 
     // add meta_bid to in-memory for reverse mapping;
     m_sub_info[type].meta_bids.insert(meta_bid.to_integer());
@@ -348,10 +346,6 @@ void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* const context_
 
     HS_LOG(DEBUG, metablk, "{}, adding meta bid: {}, sz: {}, mstore used size: {}", type, meta_bid.to_string(), sz,
            m_sb_blk_store->get_used_size());
-    if (no_error != ret) {
-        HS_ASSERT(RELEASE, 0, "{}, alloc blk failed with status: {}", type, ret.message());
-        return;
-    }
 
     meta_blk* const mblk{init_meta_blk(meta_bid, type, context_data, sz)};
 
@@ -381,7 +375,7 @@ void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* const ovf_hdr, const vo
     // write current ovf blk to disk;
     try {
         m_sb_blk_store->write(ovf_hdr->h.bid, iov.data(), static_cast< int >(iov.size()));
-    } catch (std::exception& e) { throw e; }
+    } catch (std::exception& e) { HS_RELEASE_ASSERT(false, "exception happen during write {}", e.what()); }
 
     // NOTE: The start write pointer which is context data pointer plus offset must be dma boundary aligned
     const auto align_sz{HS_STATIC_CONFIG(drive_attr.align_size)};
@@ -428,7 +422,7 @@ void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* const ovf_hdr, const vo
 
         try {
             m_sb_blk_store->write(data_bid[i], iovd.data(), static_cast< int >(iovd.size()));
-        } catch (std::exception& e) { throw e; }
+        } catch (std::exception& e) { HS_RELEASE_ASSERT(false, "exception happen during write {}", e.what()); }
     }
 
     if (data_buf) { hs_iobuf_free(data_buf); }
@@ -445,7 +439,7 @@ void MetaBlkMgr::write_meta_blk_to_disk(meta_blk* const mblk) {
     // write current ovf blk to disk;
     try {
         m_sb_blk_store->write(mblk->hdr.h.bid, iov.data(), static_cast< int >(iov.size()));
-    } catch (std::exception& e) { throw e; }
+    } catch (std::exception& e) { HS_RELEASE_ASSERT(false, "exception happen during write {}", e.what()); }
 }
 
 //
@@ -520,15 +514,13 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& out_obid, const void* const context_d
     // allocate data blocks
     static thread_local std::vector< BlkId > context_data_blkids{};
     context_data_blkids.clear();
-    auto ret{alloc_meta_blk(sisl::round_up(sz, get_page_size()), context_data_blkids)};
-    if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to allocate blk with status: {}", ret.message()); }
+    alloc_meta_blk(sisl::round_up(sz, get_page_size()), context_data_blkids);
 
     HS_LOG(DEBUG, metablk, "Start to allocate nblks(data): {}, mstore used size: {}", context_data_blkids.size(),
            m_sb_blk_store->get_used_size());
 
     // return the 1st ovf header blk id to caller;
-    ret = alloc_meta_blk(out_obid);
-    if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to allocate blk with status: {}", ret.message()); }
+    alloc_meta_blk(out_obid);
     BlkId next_bid{out_obid};
     uint64_t offset_in_ctx{0};
     uint32_t data_blkid_indx{0};
@@ -542,8 +534,7 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& out_obid, const void* const context_d
         if ((context_data_blkids.size() - (data_blkid_indx + 1)) <= ovf_blk_max_num_data_blk()) {
             ovf_hdr->h.next_bid.invalidate();
         } else {
-            ret = alloc_meta_blk(ovf_hdr->h.next_bid);
-            if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to allocate blk with status: {}", ret.message()); }
+            alloc_meta_blk(ovf_hdr->h.next_bid);
         }
         next_bid = ovf_hdr->h.next_bid;
 
@@ -865,7 +856,7 @@ void MetaBlkMgr::free_meta_blk(meta_blk* const mblk) {
     iomanager.iobuf_free(reinterpret_cast< uint8_t* >(mblk));
 }
 
-std::error_condition MetaBlkMgr::alloc_meta_blk(const uint64_t size, std::vector< BlkId >& bid) {
+void MetaBlkMgr::alloc_meta_blk(const uint64_t size, std::vector< BlkId >& bid) {
     blk_alloc_hints hints;
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
@@ -873,10 +864,7 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(const uint64_t size, std::vector
 
     try {
         const auto ret{m_sb_blk_store->alloc_blk(size, hints, bid)};
-        if (ret != BlkAllocStatus::SUCCESS) {
-            HS_LOG(ERROR, metablk, "failing as it is out of disk space!");
-            return std::errc::no_space_on_device;
-        }
+        HS_RELEASE_ASSERT_EQ(ret, BlkAllocStatus::SUCCESS);
 #ifndef NDEBUG
         uint64_t debug_size{0};
         for (size_t i{0}; i < bid.size(); ++i) {
@@ -885,16 +873,13 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(const uint64_t size, std::vector
         HS_DEBUG_ASSERT_EQ(debug_size, size);
 #endif
 
-        HS_DEBUG_ASSERT_EQ(ret, BlkAllocStatus::SUCCESS);
     } catch (const std::exception& e) {
-        HS_ASSERT(RELEASE, 0, "{}", e.what());
-        return std::errc::device_or_resource_busy;
+        HS_RELEASE_ASSERT(0, "{}", e.what());
+        return;
     }
-
-    return no_error;
 }
 
-std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid) {
+void MetaBlkMgr::alloc_meta_blk(BlkId& bid) {
     blk_alloc_hints hints;
     hints.desired_temp = 0;
     hints.dev_id_hint = -1;
@@ -902,17 +887,8 @@ std::error_condition MetaBlkMgr::alloc_meta_blk(BlkId& bid) {
 
     try {
         const auto ret{m_sb_blk_store->alloc_contiguous_blk(get_page_size(), hints, &bid)};
-        if (ret != BlkAllocStatus::SUCCESS) {
-            HS_LOG(ERROR, metablk, "failing as it is out of disk space!");
-            return std::errc::no_space_on_device;
-        }
-        HS_DEBUG_ASSERT_EQ(ret, BlkAllocStatus::SUCCESS);
-    } catch (const std::exception& e) {
-        HS_ASSERT(RELEASE, 0, "{}", e.what());
-        return std::errc::device_or_resource_busy;
-    }
-
-    return no_error;
+        HS_RELEASE_ASSERT_EQ(ret, BlkAllocStatus::SUCCESS);
+    } catch (const std::exception& e) { HS_RELEASE_ASSERT(0, "{}", e.what()); }
 }
 
 void MetaBlkMgr::read_sub_sb_internal(const meta_blk* const mblk, sisl::byte_view& buf) const {

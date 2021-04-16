@@ -179,7 +179,8 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
     }
     auto* rbuf{read_buf.get()};
     auto* const store{m_hb->get_logdev_blkstore()};
-    store->pread(static_cast< void* >(rbuf), initial_read_size, key.dev_offset);
+    auto size = store->pread(static_cast< void* >(rbuf), initial_read_size, key.dev_offset);
+    HS_ASSERT_CMP(RELEASE, size, ==, initial_read_size, "it is not completely read");
 
     const auto* const header{reinterpret_cast< log_group_header* >(rbuf)};
     HS_ASSERT_CMP(RELEASE, header->magic_word(), ==, LOG_GROUP_HDR_MAGIC, "Log header corrupted with magic mismatch!");
@@ -283,6 +284,7 @@ LogGroup* LogDev::prepare_flush(const int32_t estimated_records) {
                        "log indx upto is smaller then log indx from");
     lg->m_log_dev_offset = m_hb->get_logdev_blkstore()->alloc_next_append_blk(lg->header()->group_size);
 
+    HS_RELEASE_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
     assert(lg->header()->oob_data_offset > 0);
     LOGDEBUGMOD(logstore, "Flushing upto log_idx={}", flushing_upto_idx);
     LOGDEBUGMOD(logstore, "Log Group: {}", *lg);
@@ -353,6 +355,9 @@ void LogDev::do_flush(LogGroup* const lg) {
 
 void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
     const auto req{to_logdev_req(bs_req)};
+    if (bs_req->err != no_error) {
+        HS_RELEASE_ASSERT(0, "error {} happen during op {}", bs_req->err.message(), req->is_read);
+    }
     if (req->is_read) {
         // update logdev read metrics;
     } else {

@@ -923,9 +923,8 @@ void IndxMgr::do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_
     }
 #endif
 
-    if (ret != btree_status_t::success) {
+    if (ret == btree_status_t::resource_full) {
         HS_ASSERT_CMP(RELEASE, m_recovery_mode, ==, false);
-        HS_ASSERT_CMP(DEBUG, ret, ==, btree_status_t::resource_full);
         THIS_INDX_LOG(TRACE, indx_mgr, , "unmap btree ret status resource_full");
         m_cp_mgr->attach_cb(hcp, ([this, ireq, unmap_meta_blk_cntx](bool success) mutable {
                                 /* persist superblock */
@@ -933,6 +932,7 @@ void IndxMgr::do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_
                                 do_remaining_unmap(ireq, unmap_meta_blk_cntx);
                             }));
     } else {
+        if (ret != btree_status_t::success) { ireq->indx_err = btree_write_failed; }
         m_cp_mgr->attach_cb(hcp, ([this, ireq, unmap_meta_blk_cntx](bool success) {
 #ifdef _PRERELEASE
                                 if (homestore_flip->test_flip("unmap_pre_sb_remove_abort")) {
@@ -1034,13 +1034,15 @@ void IndxMgr::update_indx_internal(const indx_req_ptr& ireq) {
         /* TODO : we don't allow partial failure for now. If we have to allow that we have to support undo */
         THIS_INDX_LOG(TRACE, indx_mgr, ireq, "updating active btree status {}", ret);
         if (ret != btree_status_t::success && ret != btree_status_t::fast_path_not_possible) {
-            HS_ASSERT(DEBUG, false, "return val unexpected: {}", ret);
+            THIS_INDX_LOG(INFO, indx_mgr, ireq, "return val unexpected: {}", ret);
         }
 
         if (ret == btree_status_t::fast_path_not_possible) { return; }
 
         /* fall through */
     case indx_req_state::diff_btree:
+
+        /* TODO :- We have to handle the case if a write is only partially written in active indx tbl */
         THIS_INDX_LOG(TRACE, indx_mgr, ireq, "updating diff btree");
         ireq->state = indx_req_state::diff_btree;
         /* update diff btree. */
@@ -1049,7 +1051,7 @@ void IndxMgr::update_indx_internal(const indx_req_ptr& ireq) {
             /* we call cp exit on both the CPs only when journal is written otherwise there could be blkid leak */
             if (ret == btree_status_t::cp_mismatch) { ret = retry_update_indx(ireq.get(), false); }
             if (ret != btree_status_t::success && ret != btree_status_t::fast_path_not_possible) {
-                HS_ASSERT(DEBUG, false, "return val unexpected: {}", ret);
+                THIS_INDX_LOG(INFO, indx_mgr, ireq, "return val unexpected: {}", ret);
             }
         }
 
@@ -1062,7 +1064,14 @@ void IndxMgr::update_indx_internal(const indx_req_ptr& ireq) {
         HS_ASSERT(RELEASE, false, "Unsupported ireq state: ", ireq->state);
     }
 
-    if (ret != btree_status_t::success) { ireq->indx_err = btree_write_failed; }
+    if (ret != btree_status_t::success) {
+        if (ret == btree_status_t::space_not_avail) {
+            THIS_INDX_LOG(INFO, indx_mgr, ireq, "no space available on device");
+            ireq->indx_err = std::errc::no_space_on_device;
+        } else {
+            ireq->indx_err = btree_write_failed;
+        }
+    }
 
     /* Update allocate blkids in indx req */
     m_active_tbl->update_indx_alloc_blkids(ireq);
@@ -1140,7 +1149,11 @@ void IndxMgr::destroy_indx_tbl() {
     int64_t free_size = 0;
     btree_status_t ret = m_active_tbl->free_user_blkids(free_list, m_destroy_btree_cur, free_size);
     if (ret != btree_status_t::success) {
-        HS_ASSERT_CMP(RELEASE, ret, ==, btree_status_t::resource_full);
+        if (ret != btree_status_t::resource_full) {
+            /* we try to destroy it during reboot */
+            m_stop_cb(false);
+            return;
+        }
         THIS_INDX_LOG(INFO, indx_mgr, , "free_user_blkids btree ret status resource_full cur {}",
                       m_destroy_btree_cur.to_string());
         const sisl::blob& cursor_blob = m_destroy_btree_cur.serialize();
@@ -1182,7 +1195,11 @@ void IndxMgr::destroy_indx_tbl() {
 
     THIS_INDX_LOG(INFO, indx_mgr, , "All user logs are collected");
     uint64_t free_node_cnt = 0;
-    m_active_tbl->destroy(free_list, free_node_cnt);
+    if (m_active_tbl->destroy(free_list, free_node_cnt) != btree_status_t::success) {
+        /* we try to destroy it during reboot */
+        m_stop_cb(false);
+        return;
+    }
 #ifdef _PRERELEASE
     if (homestore_flip->test_flip("indx_del_partial_free_indx_blks")) {
         LOGINFO("aborting because of flip");

@@ -154,11 +154,8 @@ public:
         FlipCondition null_cond;
         fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
 
-        fc->inject_noreturn_flip("btree_split_failure", {null_cond}, freq);
-        fc->inject_noreturn_flip("btree_write_comp_fail", {null_cond}, freq);
         fc->inject_noreturn_flip("btree_read_fail", {null_cond}, freq);
-        fc->inject_noreturn_flip("btree_write_fail", {null_cond}, freq);
-        fc->inject_noreturn_flip("btree_refresh_fail", {null_cond}, freq);
+        fc->inject_noreturn_flip("fixed_blkalloc_no_blks", {null_cond}, freq);
     }
 #endif
 
@@ -415,8 +412,9 @@ public:
 #ifndef NDEBUG
         check_lock_debug();
 #endif
-        if (ret != btree_status_t::success && ret != btree_status_t::fast_path_not_possible) {
-            THIS_BT_LOG(INFO, base, , "btree put failed {}", ret);
+        if (ret != btree_status_t::success && ret != btree_status_t::fast_path_not_possible &&
+            ret != btree_status_t::cp_mismatch) {
+            THIS_BT_LOG(ERROR, base, , "btree put failed {}", ret);
             COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
         }
 
@@ -513,6 +511,7 @@ public:
 #endif
         if (ret != btree_status_t::success && ret != btree_status_t::has_more &&
             ret != btree_status_t::fast_path_not_possible) {
+            THIS_BT_LOG(ERROR, base, , "btree get failed {}", ret);
             COUNTER_INCREMENT(m_metrics, query_err_cnt, 1);
         }
         if (reset_cur) { query_req.get_input_range().reset_cursor(); }
@@ -2052,14 +2051,9 @@ private:
         auto split_size = m_btree_cfg.get_split_size(child1_filled_size);
         uint32_t res = child_node1->move_out_to_right_by_size(m_btree_cfg, child_node2, split_size);
 
-        BT_DEBUG_ASSERT_CMP(res, >, 0, child_node1,
-                            "Unable to split entries in the child node"); // means cannot split entries
+        BT_RELEASE_ASSERT_CMP(res, >, 0, child_node1,
+                              "Unable to split entries in the child node"); // means cannot split entries
         BT_DEBUG_ASSERT_CMP(child_node1->get_total_entries(), >, 0, child_node1);
-        if (res == 0) {
-            /* it can not split the node. We should return error */
-            COUNTER_INCREMENT(m_metrics, split_failed, 1);
-            return btree_status_t::split_failed;
-        }
 
         // Update the existing parent node entry to point to second child ptr.
         bool edge_split = (parent_ind == parent_node->get_total_entries());
