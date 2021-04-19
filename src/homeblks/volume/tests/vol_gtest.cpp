@@ -2034,7 +2034,7 @@ SDS_OPTION_GROUP(
     (read_cache, "", "read_cache", "read cache", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
     (write_iovec, "", "write_iovec", "write iovec(s)", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (read_iovec, "", "read_iovec", "read iovec(s)", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
-    (batch_completion, "", "batch_completion", "batch completion", ::cxxopts::value< bool >()->default_value("false"),
+    (batch_completion, "", "batch_completion", "batch completion", ::cxxopts::value< bool >()->default_value("true"),
      "true or false"),
     (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
     (vol_create_del, "", "vol_create_del", "vol_create_del", ::cxxopts::value< bool >()->default_value("false"),
@@ -2145,6 +2145,7 @@ int main(int argc, char* argv[]) {
     if (_gcfg.is_spdk) {
         _gcfg.read_iovec = true;
         _gcfg.write_iovec = true;
+        _gcfg.batch_completion = false;
     }
 
     if (_gcfg.is_spdk && _gcfg.num_threads > 2) {

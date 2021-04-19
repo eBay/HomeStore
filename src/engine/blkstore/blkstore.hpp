@@ -656,33 +656,98 @@ public:
 
     VirtualDev< BAllocator, RoundRobinDeviceSelector >* get_vdev() { return &m_vdev; };
 
-    ssize_t pwrite(const void* const buf, const size_t count, const off_t offset, boost::intrusive_ptr< virtualdev_req > req = nullptr) {
-        return m_vdev.pwrite(buf, count, offset, req);
+    ssize_t pwrite(const void* const buf, const size_t count, const off_t offset,
+                   boost::intrusive_ptr< blkstore_req< Buffer > > req = nullptr) {
+        Clock::time_point blkstore_op_start_time;
+        if (req) {
+            req->start_time();
+        } else {
+            blkstore_op_start_time = Clock::now();
+        }
+
+        auto ret = m_vdev.pwrite(buf, count, offset, req);
+        if (!req) {
+            HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(blkstore_op_start_time));
+        }
+        return ret;
     }
 
-    ssize_t pread(void* const buf, const size_t count, const off_t offset) { return m_vdev.pread(buf, count, offset); }
+    ssize_t pread(void* const buf, const size_t count, const off_t offset) {
+        Clock::time_point blkstore_op_start_time;
+        blkstore_op_start_time = Clock::now();
+
+        auto ret = m_vdev.pread(buf, count, offset);
+
+        HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_read_latency, get_elapsed_time_us(blkstore_op_start_time));
+        return ret;
+    }
 
     off_t lseek(const off_t offset, const int whence = SEEK_SET) { return m_vdev.lseek(offset, whence); }
 
     off_t get_dev_offset(off_t bytes_read) const { return m_vdev.get_dev_offset(bytes_read); }
     off_t seeked_pos() const { return m_vdev.seeked_pos(); }
 
-    ssize_t read(void* const buf, const size_t count) { return m_vdev.read(buf, count); }
+    ssize_t read(void* const buf, const size_t count) {
+        Clock::time_point blkstore_op_start_time;
+        blkstore_op_start_time = Clock::now();
 
-    ssize_t write(const void* const buf, const size_t count) { return m_vdev.write(buf, count); }
+        auto ret = m_vdev.read(buf, count);
 
-    ssize_t write(const void* const buf, const size_t count, boost::intrusive_ptr< virtualdev_req > req) {
-        return m_vdev.write(buf, count, req);
+        HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_read_latency, get_elapsed_time_us(blkstore_op_start_time));
+        return ret;
+    }
+
+    ssize_t write(const void* const buf, const size_t count) {
+        Clock::time_point blkstore_op_start_time;
+        blkstore_op_start_time = Clock::now();
+
+        auto ret = m_vdev.write(buf, count);
+        HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(blkstore_op_start_time));
+        return ret;
+    }
+
+    ssize_t write(const void* const buf, const size_t count, boost::intrusive_ptr< blkstore_req< Buffer > > req) {
+        Clock::time_point blkstore_op_start_time;
+        if (req) {
+            req->start_time();
+        } else {
+            blkstore_op_start_time = Clock::now();
+        }
+        auto ret = m_vdev.write(buf, count, req);
+        if (!req) {
+            HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(blkstore_op_start_time));
+        }
+        return ret;
     }
 
     ssize_t preadv(const struct iovec* const iov, const int iovcnt, const off_t offset,
-                   boost::intrusive_ptr< virtualdev_req > req = nullptr) {
-        return m_vdev.preadv(iov, iovcnt, offset, req);
+                   boost::intrusive_ptr< blkstore_req< Buffer > > req = nullptr) {
+        Clock::time_point blkstore_op_start_time;
+        if (req) {
+            req->start_time();
+        } else {
+            blkstore_op_start_time = Clock::now();
+        }
+        auto ret = m_vdev.preadv(iov, iovcnt, offset, req);
+        if (!req) {
+            HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_read_latency, get_elapsed_time_us(blkstore_op_start_time));
+        }
+        return ret;
     }
 
     ssize_t pwritev(const struct iovec* const iov, const int iovcnt, const off_t offset,
-                    boost::intrusive_ptr< virtualdev_req > req = nullptr) {
-        return m_vdev.pwritev(iov, iovcnt, offset, req);
+                    boost::intrusive_ptr< blkstore_req< Buffer > > req = nullptr) {
+        Clock::time_point blkstore_op_start_time;
+        if (req) {
+            req->start_time();
+        } else {
+            blkstore_op_start_time = Clock::now();
+        }
+        auto ret = m_vdev.pwritev(iov, iovcnt, offset, req);
+        if (!req) {
+            HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(blkstore_op_start_time));
+        }
+        return ret;
     }
 
     uint64_t get_used_space() const { return m_vdev.get_used_space(); }

@@ -410,6 +410,7 @@ void HomeBlks::init_done() {
     LOGINFO("init done");
     m_out_params.first_time_boot = m_dev_mgr->is_first_time_boot();
     m_out_params.max_io_size = HS_STATIC_CONFIG(engine.max_vol_io_size);
+    if (m_cfg.end_of_batch_cb) { attach_end_of_batch_cb(m_cfg.end_of_batch_cb); }
     m_cfg.init_done_cb(no_error, m_out_params);
 #ifndef NDEBUG
     /* It will trigger race conditions without generating any IO error */
