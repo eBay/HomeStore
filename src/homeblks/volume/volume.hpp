@@ -624,6 +624,10 @@ private:
                 data.emplace< MemVecData >(new homeds::MemVector{
                     static_cast< uint8_t* >(vi_req->buffer),
                     static_cast< uint32_t >(vi_req->vol_instance->get_io_size(vi_req->nlbas)), 0});
+#ifdef _PRERELEASE
+                // COUNTER_INCREMENT(iomanager.metrics(), iomem_retained,
+                //                  vi_req->vol_instance->get_io_size(vi_req->nlbas));
+#endif
             }
         } else {
             // used passed in iovecs

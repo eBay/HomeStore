@@ -18,7 +18,6 @@
 #include "engine/device/virtual_dev.hpp"
 #include "device.h"
 
-
 using namespace iomgr;
 namespace homestore {
 
@@ -146,7 +145,7 @@ void DeviceManager::init_devices(const std::vector< dev_info >& devices) {
 }
 
 DeviceManager::~DeviceManager() {
-    iomanager.iobuf_free((uint8_t*)m_chunk_memory);
+    hs_iobuf_free((uint8_t*)m_chunk_memory);
     m_dm_info = nullptr;
     m_pdev_hdr = nullptr;
     m_chunk_hdr = nullptr;

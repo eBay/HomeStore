@@ -643,7 +643,7 @@ public:
         if (tcfg.init) {
             void* cookie{nullptr};
             MetaBlkMgrSI()->add_sub_sb(access_mgr_mtype, (void*)(boost::uuids::to_string(m_am_uuid).c_str()),
-                                     boost::uuids::to_string(m_am_uuid).size(), cookie);
+                                       boost::uuids::to_string(m_am_uuid).size(), cookie);
             m_am_sb_written = true;
         }
     }

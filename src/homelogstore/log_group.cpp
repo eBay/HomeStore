@@ -13,6 +13,11 @@ void LogGroup::start() {
         sisl::aligned_unique_ptr< uint8_t >::make_sized(HS_STATIC_CONFIG(drive_attr.align_size), inline_log_buf_size);
 }
 
+void LogGroup::stop() {
+    m_log_buf.reset();
+    m_overflow_log_buf.reset();
+}
+
 void LogGroup::reset(const uint32_t max_records) {
     m_cur_log_buf = m_log_buf.get();
     m_cur_buf_len = inline_log_buf_size;

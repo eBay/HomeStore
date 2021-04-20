@@ -7,8 +7,9 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 
-SDS_LOGGING_INIT(iomgr)
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS, flip, iomgr, spdk)
 SDS_OPTIONS_ENABLE(logging)
+
 THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 
@@ -87,7 +88,7 @@ TEST_F(IOMgrExecTest, TEST2) {
 
 int main(int argc, char* argv[]) {
     SDS_OPTIONS_LOAD(argc, argv, logging)
-   ::testing::InitGoogleTest(&argc, argv);
+    ::testing::InitGoogleTest(&argc, argv);
     sds_logging::SetLogger("test_iomgr_exec");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 

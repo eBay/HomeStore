@@ -21,8 +21,6 @@ SDS_OPTION_GROUP(home_blks,
                  (config_path, "", "config_path", "Path to dynamic config of app", cxxopts::value< std::string >(), ""))
 using namespace homestore;
 
-REGISTER_METABLK_SUBSYSTEM(homeblks, "HOMEBLK", HomeBlks::meta_blk_found_cb, HomeBlks::meta_blk_recovery_comp_cb)
-
 #ifndef DEBUG
 bool same_value_gen = false;
 #endif
@@ -74,8 +72,11 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
 #else
             LOGINFO("HomeBlks RELEASE version: {}", HomeBlks::version);
 #endif
+            MetaBlkMgrSI()->register_handler("HOMEBLK", HomeBlks::meta_blk_found_cb,
+                                             HomeBlks::meta_blk_recovery_comp_cb);
+            MetaBlkMgrSI()->register_handler("VOLUME", Volume::meta_blk_found_cb, nullptr);
             instance = HomeBlksSafePtr(new HomeBlks(cfg));
-            LOGINFO("HomeBlks Dynamic config verssion: {}", HB_DYNAMIC_CONFIG(version));
+            LOGINFO("HomeBlks Dynamic config version: {}", HB_DYNAMIC_CONFIG(version));
         });
         set_instance(boost::static_pointer_cast< homestore::HomeStoreBase >(instance));
         return static_cast< VolInterface* >(instance.get());

@@ -29,7 +29,8 @@ HomeLogStoreMgr& HomeLogStoreMgr::instance() {
 }
 
 HomeLogStoreMgr::HomeLogStoreMgr() {
-    REGISTER_METABLK_SUBSYSTEM(log_dev, "LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr)
+    // REGISTER_METABLK_SUBSYSTEM(log_dev, "LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr)
+    MetaBlkMgrSI()->register_handler("LOG_DEV", HomeLogStoreMgr::meta_blk_found_cb, nullptr);
 }
 
 void HomeLogStoreMgr::start(const bool format) {

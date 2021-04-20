@@ -35,7 +35,7 @@ static std::atomic< uint32_t > glob_phys_dev_ids(0);
 PhysicalDev::~PhysicalDev() {
     LOGINFO("device name {} superblock magic {} product name {} version {}", m_devname, m_super_blk->get_magic(),
             m_super_blk->get_product_name(), m_super_blk->get_version());
-    iomanager.iobuf_free((uint8_t*)m_super_blk);
+    hs_iobuf_free((uint8_t*)m_super_blk);
 }
 
 void PhysicalDev::update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id) {
@@ -104,7 +104,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
 #endif
     ) {
 
-        iomanager.iobuf_free((uint8_t*)m_super_blk);
+        hs_iobuf_free((uint8_t*)m_super_blk);
 
         HS_LOG(ERROR, device, "device open failed errno {} dev_name {}", errno, devname.c_str());
         throw std::system_error(errno, std::system_category(), "error while opening the device");
@@ -114,7 +114,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     try {
         m_devsize = drive_iface->get_size(m_iodev.get());
     } catch (std::exception& e) {
-        iomanager.iobuf_free((uint8_t*)m_super_blk);
+        hs_iobuf_free((uint8_t*)m_super_blk);
         throw(e);
     }
 
@@ -267,7 +267,7 @@ void PhysicalDev::zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_dr
     }
 
     // free super_blk
-    iomanager.iobuf_free((uint8_t*)super_blk);
+    hs_iobuf_free((uint8_t*)super_blk);
 }
 
 void PhysicalDev::zero_superblock() {

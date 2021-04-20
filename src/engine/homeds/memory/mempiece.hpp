@@ -5,7 +5,6 @@
 #ifndef OMSTORE_MEMPIECE_HPP
 #define OMSTORE_MEMPIECE_HPP
 
-
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -16,6 +15,7 @@
 #include "boost/optional.hpp"
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
+#include "engine/homestore_base.hpp"
 #include "fds/utils.hpp"
 #include "iomgr/iomgr.hpp"
 #include "tagged_ptr.hpp"
@@ -49,8 +49,7 @@ struct MemPiece : public sisl::ObjLifeCounter< MemPiece > {
     homeds::tagged_ptr< uint8_t > m_mem;
 
     MemPiece(uint8_t* mem, uint32_t size, uint32_t offset) :
-            ObjLifeCounter(),
-            m_mem(mem, (uint16_t)gen_new_tag(encode(size), encode(offset))) {}
+            ObjLifeCounter(), m_mem(mem, (uint16_t)gen_new_tag(encode(size), encode(offset))) {}
 
     MemPiece() : MemPiece(nullptr, 0, 0) {}
     MemPiece(const MemPiece& other) : ObjLifeCounter(), m_mem(other.m_mem) {}
@@ -145,10 +144,7 @@ public:
         assert(size || (ptr == nullptr));
     }
 
-    MemVector() : ObjLifeCounter(), m_refcnt(0)
-    {
-        m_list.reserve(1);
-    }
+    MemVector() : ObjLifeCounter(), m_refcnt(0) { m_list.reserve(1); }
     ~MemVector() {
         std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         m_list.clear();
@@ -165,7 +161,7 @@ public:
             std::unique_lock< std::recursive_mutex > mtx(mvec->m_mtx);
             for (size_t i{0}; i < mvec->m_list.size(); i++) {
                 if (mvec->m_list[i].ptr() != nullptr) {
-                    iomanager.iobuf_free(mvec->m_list[i].ptr());
+                    hs_iobuf_free(mvec->m_list[i].ptr());
                 } else {
                     assert(0);
                 }
@@ -174,8 +170,7 @@ public:
         delete (mvec);
     }
 
-    std::vector< MemPiece > get_m_list() const
-    {
+    std::vector< MemPiece > get_m_list() const {
         std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         return m_list;
     }
@@ -252,8 +247,7 @@ public:
         return added;
     }
 
-    void push_back(const MemPiece& piece)
-    {
+    void push_back(const MemPiece& piece) {
         std::unique_lock< std::recursive_mutex > mtx(m_mtx);
         m_list.push_back(piece);
     }

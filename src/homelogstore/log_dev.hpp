@@ -218,6 +218,7 @@ public:
     ~LogGroup() = default;
 
     void start();
+    void stop();
     void reset(const uint32_t max_records);
     void create_overflow_buf(const uint32_t min_needed);
     [[nodiscard]] bool add_record(const log_record& record, const int64_t log_idx);

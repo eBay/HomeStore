@@ -1338,8 +1338,6 @@ void IndxMgr::cp_io_exit(hs_cp* hcp) { m_cp_mgr->cp_io_exit(hcp); }
 
 /********************** Static Indx mgr functions *********************************/
 
-REGISTER_METABLK_SUBSYSTEM(indx_mgr, "INDX_MGR_CP", StaticIndxMgr::meta_blk_found_cb, nullptr)
-
 void StaticIndxMgr::init() {
     std::atomic< int64_t > thread_cnt = 0;
     int expected_thread_cnt = 0;

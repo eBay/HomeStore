@@ -27,7 +27,7 @@ bool vol_test_enable = false;
 
 SDS_LOGGING_DECL(volume)
 sisl::atomic_counter< uint64_t > Volume::home_blks_ref_cnt = 0;
-REGISTER_METABLK_SUBSYSTEM(volume, "VOLUME", Volume::meta_blk_found_cb, nullptr)
+// REGISTER_METABLK_SUBSYSTEM(volume, "VOLUME", Volume::meta_blk_found_cb, nullptr)
 
 namespace homestore {
 void intrusive_ptr_add_ref(homestore::BlkBuffer* buf) { intrusive_ptr_add_ref((homestore::CacheBuffer< BlkId >*)buf); }
@@ -855,7 +855,6 @@ void Volume::remove_sb() {
     // remove sb from MetaBlkMgr
     const auto ret{MetaBlkMgrSI()->remove_sub_sb(m_sb_cookie)};
     if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to remove subsystem with status: {}", ret.message()); }
-
 }
 
 void Volume::migrate_sb() {

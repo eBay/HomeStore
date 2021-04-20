@@ -93,6 +93,9 @@ void LogDev::stop() {
     if (m_block_flush_q != nullptr) {
         sisl::VectorPool< flush_blocked_callback >::free(m_block_flush_q, false /* no_cache */);
     }
+    for (size_t i{0}; i < max_log_group; ++i) {
+        m_log_group_pool[i].stop();
+    }
     m_hb = nullptr;
 
     LOGINFOMOD(logstore, "LogDev stopped successfully");
@@ -225,7 +228,7 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
                     static_cast< const void* >(rbuf + data_offset - rounded_data_offset), b.size());
 
         // Free the buffer in case we allocated above
-        if (rounded_size > initial_read_size) { iomanager.iobuf_free(rbuf); }
+        if (rounded_size > initial_read_size) { hs_iobuf_free(rbuf); }
     }
     return_record_header =
         serialized_log_record(record_header->size, record_header->offset, record_header->get_inlined(),

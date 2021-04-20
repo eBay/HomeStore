@@ -34,7 +34,8 @@ namespace homestore {
 
 struct volume_child_req;
 
-VENUM(BlkStoreCacheType, uint8_t, PASS_THRU = 0, WRITEBACK_CACHE = 1, WRITETHRU_CACHE = 2, RD_MODIFY_WRITEBACK_CACHE = 3)
+VENUM(BlkStoreCacheType, uint8_t, PASS_THRU = 0, WRITEBACK_CACHE = 1, WRITETHRU_CACHE = 2,
+      RD_MODIFY_WRITEBACK_CACHE = 3)
 
 /* Threshold of size upto when there is overlap in the cache entry, that it will discard instead of copying. Say
  * there is a buffer of size 64K, out of which first N bytes are freed, then remaining bytes 64K - N bytes could
@@ -255,7 +256,7 @@ public:
         } else {
             /* TODO add error messages */
             for (const auto& missing_piece : req->missing_pieces) {
-                iomanager.iobuf_free(missing_piece.ptr);
+                hs_iobuf_free(missing_piece.ptr);
             }
         }
 
@@ -268,14 +269,14 @@ public:
     void update_cache(boost::intrusive_ptr< blkstore_req< Buffer > > req) {
         Clock::time_point start_time = Clock::now();
 
-        for (const auto& missing_piece: req->missing_pieces) {
+        for (const auto& missing_piece : req->missing_pieces) {
             boost::intrusive_ptr< Buffer > bbuf{req->bbuf};
 
             const bool inserted{
                 bbuf->update_missing_piece(missing_piece.offset, missing_piece.size, missing_piece.ptr)};
             if (!inserted) {
                 /* someone else has inserted it */
-                iomanager.iobuf_free(missing_piece.ptr);
+                hs_iobuf_free(missing_piece.ptr);
             }
         }
         HISTOGRAM_OBSERVE(m_metrics, blkstore_cache_read_latency, get_elapsed_time_us(start_time));
@@ -295,7 +296,7 @@ public:
     BlkAllocStatus alloc_blk(const uint32_t size, blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
         // Allocate a block from the device manager
         assert(size % m_pagesz == 0);
-        blk_count_t nblks{static_cast<blk_count_t>(size / m_pagesz)};
+        blk_count_t nblks{static_cast< blk_count_t >(size / m_pagesz)};
         if (nblks <= BlkId::max_blks_in_op()) {
             return (m_vdev.alloc_blk(nblks, hints, out_blkid));
         } else {
@@ -316,7 +317,8 @@ public:
     /* Allocate a new block and add entry to the cache. This method allows the caller to create its own
      * buffer method, but the actual data is page aligned is created by this method and returns the smart pointer
      * of the buffer, along with blkid. */
-    boost::intrusive_ptr< Buffer > alloc_blk_cached(const uint32_t size, blk_alloc_hints& hints, BlkId* const out_blkid) {
+    boost::intrusive_ptr< Buffer > alloc_blk_cached(const uint32_t size, blk_alloc_hints& hints,
+                                                    BlkId* const out_blkid) {
         // Allocate a block from the device manager
         hints.is_contiguous = true;
         assert(size % m_pagesz == 0);
@@ -568,7 +570,7 @@ public:
                 bool inserted = bbuf->update_missing_piece(missing_mp[i].first, missing_mp[i].second, ptr);
                 if (!inserted) {
                     /* someone else has inserted it */
-                    iomanager.iobuf_free(ptr);
+                    hs_iobuf_free(ptr);
                 }
                 req->blkstore_ref_cnt.decrement(1);
             }

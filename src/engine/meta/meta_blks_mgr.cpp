@@ -65,7 +65,7 @@ MetaBlkMgr::~MetaBlkMgr() {
         std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
         m_sub_info.clear();
     }
-    iomanager.iobuf_free(reinterpret_cast< uint8_t* >(m_ssb));
+    hs_iobuf_free(reinterpret_cast< uint8_t* >(m_ssb));
     free_compress_buf();
 }
 
@@ -97,11 +97,11 @@ void MetaBlkMgr::stop() { del_instance(); }
 void MetaBlkMgr::cache_clear() {
     std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
     for (auto it{std::cbegin(m_meta_blks)}; it != std::cend(m_meta_blks); ++it) {
-        iomanager.iobuf_free(reinterpret_cast< uint8_t* >(it->second));
+        hs_iobuf_free(reinterpret_cast< uint8_t* >(it->second));
     }
 
     for (auto it{std::cbegin(m_ovf_blk_hdrs)}; it != std::cend(m_ovf_blk_hdrs); ++it) {
-        iomanager.iobuf_free(reinterpret_cast< uint8_t* >(it->second));
+        hs_iobuf_free(reinterpret_cast< uint8_t* >(it->second));
     }
 
     m_meta_blks.clear();
@@ -399,7 +399,7 @@ void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* const ovf_hdr, const vo
     auto* const data_bid{ovf_hdr->get_data_bid()};
     for (decltype(ovf_hdr->h.nbids) i{0}; i < ovf_hdr->h.nbids; ++i) {
         std::array< iovec, 1 > iovd;
-        iovd[0].iov_base = const_cast<uint8_t*>(write_context_data) + size_written;
+        iovd[0].iov_base = const_cast< uint8_t* >(write_context_data) + size_written;
         if (i < ovf_hdr->h.nbids - 1) {
             iovd[0].iov_len = data_bid[i].get_nblks() * get_page_size();
             size_written += iovd[0].iov_len;
@@ -833,7 +833,7 @@ void MetaBlkMgr::free_ovf_blk_chain(const BlkId& obid) {
             HS_ASSERT(RELEASE, false, "OVF block header not find {}", save_old.to_integer());
 
         // free the ovf header memory;
-        iomanager.iobuf_free(reinterpret_cast< uint8_t* >(it->second));
+        hs_iobuf_free(reinterpret_cast< uint8_t* >(it->second));
 
         // remove from ovf blk cache;
         m_ovf_blk_hdrs.erase(it);
@@ -853,7 +853,7 @@ void MetaBlkMgr::free_meta_blk(meta_blk* const mblk) {
         free_ovf_blk_chain(mblk->hdr.h.ovf_bid);
     }
 
-    iomanager.iobuf_free(reinterpret_cast< uint8_t* >(mblk));
+    hs_iobuf_free(reinterpret_cast< uint8_t* >(mblk));
 }
 
 void MetaBlkMgr::alloc_meta_blk(const uint64_t size, std::vector< BlkId >& bid) {
@@ -1112,7 +1112,7 @@ uint64_t MetaBlkMgr::get_meta_size(const void* const cookie) const {
 bool MetaBlkMgr::compress_feature_on() const { return HS_DYNAMIC_CONFIG(metablk.compress_feature_on); }
 
 uint64_t MetaBlkMgr::get_min_compress_size() const {
-    return HS_DYNAMIC_CONFIG(metablk.min_compress_size_mb) * static_cast<uint64_t>(1024) * 1024;
+    return HS_DYNAMIC_CONFIG(metablk.min_compress_size_mb) * static_cast< uint64_t >(1024) * 1024;
 }
 
 uint64_t MetaBlkMgr::get_max_compress_memory_size() const {
