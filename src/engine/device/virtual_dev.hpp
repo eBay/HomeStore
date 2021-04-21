@@ -550,7 +550,7 @@ public:
         }
 
 #ifdef _PRERELEASE
-        homestore_flip->test_and_abort("abort_before_update_eof_cur_chunk");
+        HomeStoreFlip::test_and_abort("abort_before_update_eof_cur_chunk");
 #endif
 
         off_t ds_off = data_start_offset();
@@ -579,7 +579,7 @@ public:
             m_mgr->update_end_of_chunk(chunk, offset_in_chunk);
 
 #ifdef _PRERELEASE
-            homestore_flip->test_and_abort("abort_after_update_eof_cur_chunk");
+            HomeStoreFlip::test_and_abort("abort_after_update_eof_cur_chunk");
 #endif
             // get next chunk handle
             auto next_chunk = get_next_chunk(dev_id, chunk_id);
@@ -604,7 +604,7 @@ public:
         high_watermark_check();
 
 #ifdef _PRERELEASE
-        homestore_flip->test_and_abort("abort_after_update_eof_next_chunk");
+        HomeStoreFlip::test_and_abort("abort_after_update_eof_next_chunk");
 #endif
         // assert that returnning logical offset is in good range;
         HS_ASSERT_CMP(DEBUG, (uint64_t)offset, <=, get_size());

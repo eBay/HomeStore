@@ -640,7 +640,7 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* const mblk, const void* conte
         mblk->hdr.h.ovf_bid = obid;
 
 #ifdef _PRERELEASE
-        homestore_flip->test_and_abort("write_with_ovf_abort");
+        HomeStoreFlip::test_and_abort("write_with_ovf_abort");
 #endif
     }
 
@@ -653,7 +653,7 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* const mblk, const void* conte
     write_meta_blk_to_disk(mblk);
 
 #ifdef _PRERELEASE
-    homestore_flip->test_and_abort("write_sb_abort");
+    HomeStoreFlip::test_and_abort("write_sb_abort");
 #endif
 }
 
@@ -686,7 +686,7 @@ void MetaBlkMgr::update_sub_sb(const void* const context_data, const uint64_t sz
     write_meta_blk_internal(mblk, context_data, sz);
 
 #ifdef _PRERELEASE
-    homestore_flip->test_and_abort("update_sb_abort");
+    HomeStoreFlip::test_and_abort("update_sb_abort");
 #endif
 
     // free the overflow bid if it is there
@@ -776,7 +776,7 @@ std::error_condition MetaBlkMgr::remove_sub_sb(void* const cookie) {
     free_meta_blk(rm_blk);
 
 #ifdef _PRERELEASE
-    homestore_flip->test_and_abort("remove_sb_abort");
+    HomeStoreFlip::test_and_abort("remove_sb_abort");
 #endif
 
     HS_LOG(DEBUG, metablk, "after remove, mstore used size: {}", m_sb_blk_store->get_used_size());

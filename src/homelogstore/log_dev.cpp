@@ -20,7 +20,8 @@ void LogDev::meta_blk_found(meta_blk* const mblk, const sisl::byte_view buf, con
 }
 
 void LogDev::start(const bool format) {
-    HS_ASSERT(LOGMSG, (m_append_comp_cb != nullptr), "Expected Append callback to be registered");
+    HS_ASSERT(LOGMSG, (m_append_comp_cb_with_flush_lock != nullptr), "Expected Append callback to be registered");
+    HS_ASSERT(LOGMSG, (m_append_comp_cb_with_flush_unlock != nullptr), "Expected Append callback to be registered");
     HS_ASSERT(LOGMSG, (m_store_found_cb != nullptr), "Expected Log store found callback to be registered");
     HS_ASSERT(LOGMSG, (m_logfound_cb != nullptr), "Expected Logs found callback to be registered");
 
@@ -374,15 +375,27 @@ void LogDev::on_flush_completion(LogGroup* const lg) {
     m_log_records->complete(lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
     m_last_flush_idx = lg->m_flush_log_idx_upto;
     const auto flush_ld_key{logdev_key{m_last_flush_idx, lg->m_log_dev_offset}};
-
-    for (auto idx = lg->m_flush_log_idx_from; idx <= lg->m_flush_log_idx_upto; ++idx) {
-        auto& record{m_log_records->at(idx)};
-        m_append_comp_cb(record.store_id, logdev_key{idx, lg->m_log_dev_offset}, flush_ld_key,
-                         lg->m_flush_log_idx_upto - idx, record.context);
-    }
-
     m_last_crc = lg->header()->cur_grp_crc;
-    unlock_flush();
+
+    auto from_indx = lg->m_flush_log_idx_from;
+    auto upto_indx = lg->m_flush_log_idx_upto;
+    auto dev_offset = lg->m_log_dev_offset;
+    for (auto idx = from_indx; idx <= upto_indx; ++idx) {
+        auto& record{m_log_records->at(idx)};
+        m_append_comp_cb_with_flush_lock(record.store_id, logdev_key{idx, dev_offset}, flush_ld_key, upto_indx - idx,
+                                         record.context);
+    }
+    {
+        std::unique_lock lk{m_comp_mutex}; // take a lock to prevent completions happening out of order
+        unlock_flush();
+        // Not safe to access log group here after unlock
+
+        for (auto idx = from_indx; idx <= upto_indx; ++idx) {
+            auto& record{m_log_records->at(idx)};
+            m_append_comp_cb_with_flush_unlock(record.store_id, logdev_key{idx, dev_offset}, flush_ld_key,
+                                               upto_indx - idx, record.context);
+        }
+    }
 }
 
 bool LogDev::try_lock_flush(const flush_blocked_callback& cb) {

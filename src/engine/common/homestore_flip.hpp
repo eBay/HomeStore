@@ -17,9 +17,13 @@ public:
 
 class HomeStoreFlip : public flip::Flip {
 public:
-    static HomeStoreFlip* instance() {
-        static HomeStoreFlip inst;
-        return &inst;
+    static flip::Flip* instance() {
+        static std::once_flag flag1;
+        std::call_once(flag1, []() {
+            flip::Flip::instance().override_timer(
+                (std::unique_ptr< flip::FlipTimerBase >(std::make_unique< homestore::FlipTimerIOMgr >())));
+        });
+        return &(flip::Flip::instance());
     }
 
     static flip::FlipClient* client_instance() {
@@ -27,17 +31,14 @@ public:
         return &fc;
     }
 
-    HomeStoreFlip() : flip::Flip() {
-        override_timer((std::unique_ptr< flip::FlipTimerBase >(std::make_unique< homestore::FlipTimerIOMgr >())));
-    }
-
     /**
-     * @brief : test flip and abort without core dump
+     * @brief : test flip and abort without core dump.
      *
      * @param flip_name :
      */
-    void test_and_abort(const std::string& flip_name) {
-        if (test_flip(flip_name.c_str())) {
+    /* TODO: add this function in flip */
+    static void test_and_abort(const std::string& flip_name) {
+        if (instance()->test_flip(flip_name.c_str())) {
             // abort without generating core dump
             raise(SIGKILL);
         }

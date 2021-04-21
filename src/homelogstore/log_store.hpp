@@ -217,8 +217,10 @@ private:
 
     [[nodiscard]] logdev_key do_device_truncate(const bool dry_run = false);
     void on_log_store_found(const logstore_id_t store_id, const logstore_meta& meta);
-    void on_io_completion(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_idx,
-                          const uint32_t nremaining_in_batch, void* const ctx);
+    void on_io_completion_with_flush_lock(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_idx,
+                                          const uint32_t nremaining_in_batch, void* const ctx);
+    void on_io_completion_with_flush_unlock(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_idx,
+                                            const uint32_t nremaining_in_batch, void* const ctx);
     void on_logfound(const logstore_id_t id, const logstore_seq_num_t seq_num, const logdev_key ld_key,
                      const log_buffer buf);
 
@@ -482,7 +484,8 @@ public:
 private:
     [[nodiscard]] const truncation_info& pre_device_truncation();
     void post_device_truncation(const logdev_key& trunc_upto_key);
-    void on_write_completion(logstore_req* const req, const logdev_key ld_key);
+    void on_write_completion_with_flush_lock(logstore_req* const req, const logdev_key ld_key);
+    void on_write_completion_with_flush_unlock(logstore_req* const req, const logdev_key ld_key);
     void on_read_completion(logstore_req* const req, const logdev_key ld_key);
     void on_log_found(const logstore_seq_num_t seq_num, const logdev_key ld_key, const log_buffer buf);
     void on_batch_completion(const logdev_key& flush_batch_ld_key);

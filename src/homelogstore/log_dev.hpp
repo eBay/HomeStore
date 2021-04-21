@@ -566,7 +566,12 @@ public:
      * offset)
      * b) Context: The context which was passed to append method.
      */
-    void register_append_cb(const log_append_comp_callback& cb) { m_append_comp_cb = cb; }
+    void register_append_cb_with_flush_lock(const log_append_comp_callback& cb) {
+        m_append_comp_cb_with_flush_lock = cb;
+    }
+    void register_append_cb_with_flush_unlock(const log_append_comp_callback& cb) {
+        m_append_comp_cb_with_flush_unlock = cb;
+    }
 
     /**
      * @brief Register the callback to receive new logs during recovery from the device.
@@ -692,7 +697,8 @@ private:
     logid_t m_last_truncate_idx{-1};
 
     crc32_t m_last_crc{INVALID_CRC32_VALUE};
-    log_append_comp_callback m_append_comp_cb{nullptr};
+    log_append_comp_callback m_append_comp_cb_with_flush_lock{nullptr};
+    log_append_comp_callback m_append_comp_cb_with_flush_unlock{nullptr};
     log_found_callback m_logfound_cb{nullptr};
     store_found_callback m_store_found_cb{nullptr};
 
@@ -702,6 +708,7 @@ private:
 
     // Block flush Q request Q
     std::mutex m_block_flush_q_mutex;
+    std::mutex m_comp_mutex;
     std::vector< flush_blocked_callback >* m_block_flush_q;
 
     // Timer handle

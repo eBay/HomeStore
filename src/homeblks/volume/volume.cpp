@@ -67,8 +67,14 @@ void Volume::set_io_flip() {
     fc->inject_retval_flip("vol_delay_read_us", {null_cond}, freq, 20);
 
     fc->inject_retval_flip("cache_insert_race", {null_cond}, freq, 20);
+
+    freq.set_count(10);
+    freq.set_percent(10);
     fc->inject_retval_flip("io_write_iocb_empty_flip", {null_cond}, freq, 20);
     fc->inject_retval_flip("io_read_iocb_empty_flip", {null_cond}, freq, 20);
+    fc->inject_retval_flip("read_write_resubmit_io", {null_cond}, freq, 1);
+    fc->inject_retval_flip("read_sync_resubmit_io", {null_cond}, freq, 1);
+    fc->inject_retval_flip("write_sync_resubmit_io", {null_cond}, freq, 1);
 
 #if 0
     // Uncomment this line once the memory leak issue is fixed

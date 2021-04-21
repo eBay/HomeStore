@@ -35,7 +35,8 @@ HomeLogStoreMgr::HomeLogStoreMgr() {
 
 void HomeLogStoreMgr::start(const bool format) {
     m_log_dev.register_store_found_cb(bind_this(HomeLogStoreMgr::on_log_store_found, 2));
-    m_log_dev.register_append_cb(bind_this(HomeLogStoreMgr::on_io_completion, 5));
+    m_log_dev.register_append_cb_with_flush_lock(bind_this(HomeLogStoreMgr::on_io_completion_with_flush_lock, 5));
+    m_log_dev.register_append_cb_with_flush_unlock(bind_this(HomeLogStoreMgr::on_io_completion_with_flush_unlock, 5));
     m_log_dev.register_logfound_cb(bind_this(HomeLogStoreMgr::on_logfound, 4));
 
     // Start the logdev
@@ -139,8 +140,18 @@ void HomeLogStoreMgr::on_log_store_found(const logstore_id_t store_id, const log
 
 static thread_local std::vector< HomeLogStore* > s_cur_flush_batch_stores;
 
-void HomeLogStoreMgr::on_io_completion(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_ld_key,
-                                       const uint32_t nremaining_in_batch, void* const ctx) {
+void HomeLogStoreMgr::on_io_completion_with_flush_unlock(const logstore_id_t id, const logdev_key ld_key,
+                                                         const logdev_key flush_ld_key,
+                                                         const uint32_t nremaining_in_batch, void* const ctx) {
+    auto* const req{static_cast< logstore_req* >(ctx)};
+    HomeLogStore* const log_store{req->log_store};
+
+    if (req->is_write) { log_store->on_write_completion_with_flush_unlock(req, ld_key); }
+}
+
+void HomeLogStoreMgr::on_io_completion_with_flush_lock(const logstore_id_t id, const logdev_key ld_key,
+                                                       const logdev_key flush_ld_key,
+                                                       const uint32_t nremaining_in_batch, void* const ctx) {
     auto* const req{static_cast< logstore_req* >(ctx)};
     HomeLogStore* const log_store{req->log_store};
 
@@ -153,7 +164,7 @@ void HomeLogStoreMgr::on_io_completion(const logstore_id_t id, const logdev_key 
         }
 
         HS_LOG_ASSERT_EQ(log_store->m_store_id, id, "Expecting store id in log store and io completion to match");
-        log_store->on_write_completion(req, ld_key);
+        log_store->on_write_completion_with_flush_lock(req, ld_key);
 
         if (nremaining_in_batch == 0) {
             // This batch is completed, call all log stores participated in this batch about the end of batch
@@ -416,7 +427,7 @@ void HomeLogStore::read_async(logstore_seq_num_t seq_num, void* cookie, const lo
 }
 #endif
 
-void HomeLogStore::on_write_completion(logstore_req* const req, const logdev_key ld_key) {
+void HomeLogStore::on_write_completion_with_flush_lock(logstore_req* const req, const logdev_key ld_key) {
     // Upon completion, create the mapping between seq_num and log dev key
     m_records.update(req->seq_num, [&](logstore_record& rec) -> bool {
         rec.m_dev_key = ld_key;
@@ -427,7 +438,9 @@ void HomeLogStore::on_write_completion(logstore_req* const req, const logdev_key
 
     // Update the maximum lsn we have seen for this batch for this store, it is needed to create truncation barrier
     m_flush_batch_max_lsn = std::max(m_flush_batch_max_lsn, req->seq_num);
+}
 
+void HomeLogStore::on_write_completion_with_flush_unlock(logstore_req* const req, const logdev_key ld_key) {
     HISTOGRAM_OBSERVE(home_log_store_mgr.m_metrics, logstore_append_latency, get_elapsed_time_us(req->start_time));
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 }
