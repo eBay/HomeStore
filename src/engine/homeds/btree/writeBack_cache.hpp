@@ -167,10 +167,12 @@ private:
 
     std::unique_ptr< sisl::ThreadVector< writeback_req_ptr > > m_req_list[MAX_CP_CNT];
     homestore::blkid_list_ptr m_free_list[MAX_CP_CNT];
+    homestore::blkid_list_ptr m_alloc_list[MAX_CP_CNT];
     sisl::atomic_counter< uint64_t > m_dirty_buf_cnt[MAX_CP_CNT];
     cp_comp_callback m_cp_comp_cb;
     trigger_cp_callback m_trigger_cp_cb;
     uint64_t m_free_list_cnt = 0;
+    uint64_t m_alloc_list_cnt = 0;
     static btree_blkstore_t* m_blkstore;
     static std::vector< iomgr::io_thread_t > m_thread_ids;
     static thread_local std::vector< flush_buffer_callback > flush_buffer_q;
@@ -182,6 +184,7 @@ public:
                    trigger_cp_callback trigger_cp_cb) {
         for (size_t i{0}; i < MAX_CP_CNT; ++i) {
             m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
+            m_alloc_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
             m_req_list[i] = std::make_unique< sisl::ThreadVector< writeback_req_ptr > >();
             m_dirty_buf_cnt[i].set(0);
         }
@@ -237,6 +240,7 @@ public:
             HS_ASSERT_CMP(DEBUG, m_dirty_buf_cnt[i].testz(), ==, true);
             HS_ASSERT_CMP(DEBUG, m_req_list[i]->size(), ==, 0);
             HS_ASSERT_CMP(DEBUG, m_free_list[i]->size(), ==, 0);
+            HS_ASSERT_CMP(DEBUG, m_alloc_list[i]->size(), ==, 0);
 #endif
         }
     }
@@ -247,15 +251,19 @@ public:
             HS_ASSERT_CMP(DEBUG, m_dirty_buf_cnt[cp_id].testz(), ==, true);
             // decrement it by all cache threads at the end after writing all pending requests
             HS_ASSERT_CMP(DEBUG, m_req_list[cp_id]->size(), ==, 0);
-            blkid_list_ptr free_list;
+            blkid_list_ptr free_list, alloc_list;
             if (blkalloc_checkpoint || !cur_bcp) {
                 free_list = m_free_list[++m_free_list_cnt % MAX_CP_CNT];
+                alloc_list = m_alloc_list[++m_alloc_list_cnt % MAX_CP_CNT];
                 HS_ASSERT_CMP(DEBUG, free_list->size(), ==, 0);
+                HS_ASSERT_CMP(DEBUG, alloc_list->size(), ==, 0);
             } else {
-                // we keep accumulating the free blks until blk checkpoint is not taken
+                // we keep accumulating the alloc and free blks until blk checkpoint is taken
                 free_list = cur_bcp->free_blkid_list;
+                alloc_list = cur_bcp->alloc_blkid_list;
             }
             new_bcp->free_blkid_list = free_list;
+            new_bcp->alloc_blkid_list = alloc_list;
         }
     }
 
@@ -358,6 +366,10 @@ public:
         // assign new memvec to buffer
         bn->set_memvec(mvec, 0, bn->get_cache_size());
         return btree_status_t::success;
+    }
+
+    void flush_alloc_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
+        ba_cp->alloc_blks(bcp->alloc_blkid_list);
     }
 
     // We free the block only upto the end seqid of this cp. We might have persisted the data of sequence id

@@ -732,6 +732,7 @@ public:
     void destroy_done() override;
     void update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_sb& btree_sb, bool is_blkalloc_cp) override;
     void flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) override;
+    void flush_alloc_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) override;
     /* it populats the allocated blkids in index req. It might not be the same as in volume req if entry is
      * partially written.
      */

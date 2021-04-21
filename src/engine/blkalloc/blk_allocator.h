@@ -387,13 +387,26 @@ private:
 struct blkalloc_cp {
 public:
     bool suspend = false;
-    std::vector< blkid_list_ptr > blkid_list_vector;
+    std::vector< blkid_list_ptr > free_blkid_list_vector;
+    std::vector< blkid_list_ptr > alloc_blkid_list_vector;
     HomeStoreBaseSafePtr m_hs{HomeStoreBase::safe_instance()};
 
 public:
     [[nodiscard]] bool is_suspend() const { return suspend; }
     void suspend_cp() { suspend = true; }
     void resume_cp() { suspend = false; }
+    void alloc_blks(const blkid_list_ptr& list) {
+        auto it = list->begin(true /* latest */);
+        BlkId* bid;
+        while ((bid = list->next(it)) != nullptr) {
+            auto chunk{m_hs->get_device_manager()->get_chunk(bid->get_chunk_num())};
+            auto ba{chunk->get_blk_allocator()};
+            ba->alloc_on_disk(*bid);
+        }
+
+        alloc_blkid_list_vector.push_back(list);
+    }
+
     void free_blks(const blkid_list_ptr& list) {
         auto it = list->begin(true /* latest */);
         BlkId* bid;
@@ -402,13 +415,19 @@ public:
             auto ba{chunk->get_blk_allocator()};
             ba->free_on_disk(*bid);
         }
-        blkid_list_vector.push_back(list);
+        free_blkid_list_vector.push_back(list);
     }
 
     blkalloc_cp() = default;
     ~blkalloc_cp() {
+        /* clear alloc blk list after blk cp is finished
+         * blk id is already alloced from cache before accumulated in cp, so cache is already updated */
+        for (auto& list : alloc_blkid_list_vector) {
+            list->clear();
+        }
+
         /* free all the blkids in the cache */
-        for (auto& list : blkid_list_vector) {
+        for (auto& list : free_blkid_list_vector) {
             BlkId* bid;
             auto it = list->begin(false /* latest */);
             while ((bid = list->next(it)) != nullptr) {

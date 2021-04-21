@@ -133,6 +133,12 @@ void HomeStoreCPMgr::indx_tbl_cp_done(hs_cp* hcp) {
     HS_PERIODIC_LOG(TRACE, cp, "Cp of type {} is completed", (hcp->blkalloc_checkpoint ? "blkalloc" : "Index"));
     if (hcp->indx_cp_list.size()) {
         if (hcp->blkalloc_checkpoint) {
+            /* 1. it is possible that blk is firstly added then freed, so need to flush alloc before free blk list;
+             * 2. it is impossible that blk can be freed, then alloced in a cp */
+
+            /* flush blks that are allocated in this hcp */
+            StaticIndxMgr::flush_hs_alloc_blks(hcp);
+
             /* flush all the blks that are freed in this hcp */
             StaticIndxMgr::flush_hs_free_blks(hcp);
 
@@ -218,6 +224,7 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io
     m_journal->register_req_comp_cb(m_journal_comp_cb);
     for (size_t i{0}; i < MAX_CP_CNT; ++i) {
         m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
+        m_alloc_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
     }
 }
 
@@ -252,6 +259,7 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io
         });
     for (size_t i{0}; i < MAX_CP_CNT; ++i) {
         m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
+        m_alloc_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
     }
 }
 
@@ -259,6 +267,7 @@ IndxMgr::~IndxMgr() {
     delete m_active_tbl;
     for (uint32_t i = 0; i < MAX_CP_CNT; ++i) {
         HS_ASSERT_CMP(RELEASE, m_free_list[i]->size(), ==, 0);
+        HS_ASSERT_CMP(RELEASE, m_alloc_list[i]->size(), ==, 0);
     }
 
     if (m_shutdown_started) { static std::once_flag flag1; }
@@ -269,7 +278,8 @@ void IndxMgr::create_first_cp() {
     int64_t cp_id = icp_sb->active_cp_id + 1;
     seq_id_t seqid = icp_sb->active_data_seqid;
     m_first_icp = indx_cp_ptr(new indx_cp(cp_id, seqid, icp_sb->diff_data_seqid, shared_from_this(),
-                                          m_free_list[++m_free_list_cnt % MAX_CP_CNT]));
+                                          m_free_list[++m_free_list_cnt % MAX_CP_CNT],
+                                          m_alloc_list[++m_alloc_list_cnt % MAX_CP_CNT]));
     m_first_icp->acp.bcp = m_active_tbl->attach_prepare_cp(nullptr, false, false);
     if (m_recovery_mode) {
         THIS_INDX_LOG(TRACE, indx_mgr, , "creating indx mgr in recovery mode");
@@ -435,7 +445,8 @@ void IndxMgr::io_replay() {
             for (uint32_t i = 0; i < alloc_pair.second; ++i) {
                 THIS_INDX_LOG(DEBUG, replay, , "alloc blk id {} sequence number {}", alloc_pair.first[i].to_string(),
                               seq_num);
-                m_hs->get_data_blkstore()->reserve_blk(alloc_pair.first[i]);
+                icp->io_alloc_blkid_list->push_back(alloc_pair.first[i]);
+
                 if (hdr->cp_id > m_last_cp_sb.icp_sb.active_cp_id) {
                     /* TODO: we update size in superblock with each checkpoint. Ideally it
                      * has to be updated only for blk alloc checkpoint.
@@ -558,6 +569,17 @@ void IndxMgr::dump_free_blk_list(const blkid_list_ptr& free_blk_list) {
     }
 }
 #endif
+
+void IndxMgr::flush_alloc_blks(const indx_cp_ptr& icp, hs_cp* hcp) {
+    THIS_INDX_CP_LOG(TRACE, icp->cp_id, "flush alloc blks size={}", icp->io_alloc_blkid_list->size());
+
+    /* alloc blks in a indx mgr */
+    hcp->ba_cp->alloc_blks(icp->io_alloc_blkid_list);
+
+    /* alloc blks in btree*/
+    m_active_tbl->flush_alloc_blks(icp->acp.bcp, hcp->ba_cp);
+    if (icp->flags & cp_state::diff_cp) { icp->dcp.diff_tbl->flush_alloc_blks(icp->dcp.bcp, hcp->ba_cp); }
+}
 
 void IndxMgr::flush_free_blks(const indx_cp_ptr& icp, hs_cp* hcp) {
     THIS_INDX_CP_LOG(TRACE, icp->cp_id, "flush free blks");
@@ -712,13 +734,16 @@ indx_cp_ptr IndxMgr::attach_prepare_indx_cp(const indx_cp_ptr& cur_icp, hs_cp* c
 
 indx_cp_ptr IndxMgr::create_new_indx_cp(const indx_cp_ptr& cur_icp) {
     /* get free list */
-    blkid_list_ptr free_list;
+    blkid_list_ptr free_list, alloc_list;
     if (cur_icp->flags & cp_state::ba_cp) {
         free_list = m_free_list[++m_free_list_cnt % MAX_CP_CNT];
+        alloc_list = m_alloc_list[++m_alloc_list_cnt % MAX_CP_CNT];
         HS_ASSERT_CMP(RELEASE, free_list->size(), ==, 0);
+        HS_ASSERT_CMP(RELEASE, alloc_list->size(), ==, 0);
     } else {
-        /* we keep accumulating the free blks until blk checkpoint is not taken */
+        /* we keep accumulating the free blks until blk checkpoint is taken */
         free_list = cur_icp->io_free_blkid_list;
+        alloc_list = cur_icp->io_alloc_blkid_list;
     }
 
     /* get start sequence ID */
@@ -728,7 +753,8 @@ indx_cp_ptr IndxMgr::create_new_indx_cp(const indx_cp_ptr& cur_icp) {
 
     /* create new cp */
     int64_t cp_id = cur_icp->cp_id + 1;
-    indx_cp_ptr new_icp(new indx_cp(cp_id, acp_start_seq_id, dcp_start_seq_id, cur_icp->indx_mgr, free_list));
+    indx_cp_ptr new_icp(
+        new indx_cp(cp_id, acp_start_seq_id, dcp_start_seq_id, cur_icp->indx_mgr, free_list, alloc_list));
     return new_icp;
 }
 
@@ -822,7 +848,8 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
          */
 
         for (uint32_t i = 0; i < ireq->indx_alloc_blkid_list.size(); ++i) {
-            m_hs->get_data_blkstore()->reserve_blk(ireq->indx_alloc_blkid_list[i]);
+            THIS_INDX_LOG(TRACE, indx_mgr, ireq, "accumulating bid: {}", ireq->indx_alloc_blkid_list[i].to_string());
+            ireq->icp->io_alloc_blkid_list->push_back(ireq->indx_alloc_blkid_list[i]);
             /* update size */
             ireq->icp->indx_size.fetch_add(ireq->indx_alloc_blkid_list[i].data_size(m_hs->get_data_pagesz()),
                                            std::memory_order_relaxed);
@@ -1376,6 +1403,17 @@ void StaticIndxMgr::init() {
 
     while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
     IndxMgr::m_inited.store(true, std::memory_order_release);
+}
+
+void StaticIndxMgr::flush_hs_alloc_blks(hs_cp* hcp) {
+    for (auto it = hcp->indx_cp_list.begin(); it != hcp->indx_cp_list.end(); ++it) {
+        if (it->second == nullptr || !(it->second->flags & cp_state::ba_cp)) {
+            /* nothing to alloc. */
+            continue;
+        }
+        /* alloc blks in a indx mgr */
+        it->second->indx_mgr->flush_alloc_blks(it->second, hcp);
+    }
 }
 
 void StaticIndxMgr::flush_hs_free_blks(hs_cp* hcp) {

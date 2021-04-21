@@ -129,12 +129,13 @@ struct btree_cp : public boost::intrusive_ref_counter< btree_cp > {
     seq_id_t end_seqid = -1;   // inclusive
     cp_comp_callback cb;
     homestore::blkid_list_ptr free_blkid_list;
+    homestore::blkid_list_ptr alloc_blkid_list;
     btree_cp() : ref_cnt(1), btree_size(0){};
     ~btree_cp() {}
 
     std::string to_string() const {
-        return fmt::format("cp_id={} start_seqid={} end_seqid={} free_blkid_list_size={}", cp_id, start_seqid,
-                           end_seqid, free_blkid_list->size());
+        return fmt::format("cp_id={} start_seqid={} end_seqid={} free_blkid_list_size={} alloc_blkid_list_size={}",
+                           cp_id, start_seqid, end_seqid, free_blkid_list->size(), alloc_blkid_list->size());
     }
 };
 

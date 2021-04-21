@@ -57,7 +57,8 @@ public:
     /* It is called when its consumer has successfully persisted its superblock. */
     void create_done_store(bnodeid_t m_root_node) {
         auto bid = BlkId(m_root_node);
-        m_blkstore->reserve_blk(bid);
+        THIS_BT_CP_LOG(TRACE, m_first_cp->cp_id, "accumulating root bid: {}", bid.to_string());
+        m_first_cp->alloc_blkid_list->push_back(bid);
     }
 
     void cp_done_store(const btree_cp_ptr& bcp) { bcp->cb(bcp); }
@@ -117,7 +118,8 @@ public:
             // reserve this blk unconditionally as root node never changes
             BlkId bid(sb.root_node);
             m_blkstore->reserve_blk(bid);
-            THIS_BT_CP_LOG(INFO, m_first_cp->cp_id, "btree_cp_info=[{}]", cp_sb->to_string());
+            THIS_BT_CP_LOG(INFO, m_first_cp->cp_id, "btree_cp_info=[{}], skipped root node:{}", cp_sb->to_string(),
+                           bid.to_string());
         } else {
             m_journal = HomeLogStoreMgr::instance().create_new_log_store(true /* append_mode */);
             sb.journal_id = get_journal_id_store();
@@ -148,17 +150,6 @@ public:
 
         THIS_BT_LOG(INFO, replay, , "blkalloc cp_id={} seqid={}", cp_sb.blkalloc_cp_id, seqnum);
         if (jentry->cp_id > cp_sb.blkalloc_cp_id) {
-            /* get all the free blks and allocated blks and set it in a bitmap. These entries are not persisted yet in a
-             * bitmap.
-             */
-            /* getting all the free blks */
-
-            jentry->foreach_node(
-                bt_journal_node_op::removal, ([this, is_replayed](bt_node_gen_pair node_info, sisl::blob key_blob) {
-                    get_wb_cache()->free_blk(node_info.node_id, m_first_cp->free_blkid_list, m_node_size);
-                    if (is_replayed) { m_first_cp->btree_size.fetch_sub(1); }
-                }));
-
             /* getting all the allocated blks */
             jentry->foreach_node(bt_journal_node_op::creation,
                                  ([this, is_replayed, seqnum](bt_node_gen_pair node_info, sisl::blob key_blob) {
@@ -167,6 +158,13 @@ public:
                                      m_blkstore->reserve_blk(bid);
                                      if (is_replayed) { m_first_cp->btree_size.fetch_add(1); }
                                  }));
+
+            // we should recover the btree bit map completely before we start replaying volume io
+            jentry->foreach_node(
+                bt_journal_node_op::removal, ([this, is_replayed](bt_node_gen_pair node_info, sisl::blob key_blob) {
+                    get_wb_cache()->free_blk(node_info.node_id, nullptr, m_node_size); // free on disk bitmap
+                    if (is_replayed) { m_first_cp->btree_size.fetch_sub(1); }
+                }));
         }
     }
 
@@ -198,6 +196,15 @@ public:
         } else {
             THIS_BT_CP_LOG(TRACE, bcp->cp_id, "exiting without triggering wb cp_start because ref_cnt: {}", ref_cnt);
         }
+    }
+
+    static void flush_alloc_blks(SSDBtreeStore* store, const btree_cp_ptr& bcp,
+                                 std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
+        store->flush_alloc_blks(bcp, ba_cp);
+    }
+
+    void flush_alloc_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
+        m_wb_cache->flush_alloc_blks(bcp, ba_cp);
     }
 
     static void flush_free_blks(SSDBtreeStore* store, const btree_cp_ptr& bcp,
@@ -483,8 +490,9 @@ private:
                      */
                     jentry->foreach_node(bt_journal_node_op::creation, [&](bt_node_gen_pair n, sisl::blob k) {
                         auto bid = BlkId(n.node_id);
-                        // LOGINFO("Allocating blk inside btree journal entry {}", bid.to_string());
-                        m_blkstore->reserve_blk(bid);
+                        THIS_BT_CP_LOG(TRACE, bcp->cp_id, "accumulating blk inside btree journal entry {}",
+                                       bid.to_string());
+                        bcp->alloc_blkid_list->push_back(bid);
                     });
                     // For root node, disk bitmap is later persisted with btree root node.
                 }

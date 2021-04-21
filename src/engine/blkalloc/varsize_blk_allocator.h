@@ -227,7 +227,7 @@ public:
     [[nodiscard]] nlohmann::json get_metrics_in_json();
 
 private:
-    std::unique_ptr< sisl::Bitset > m_bm;       // Bitset representing entire blks in this allocator
+    std::unique_ptr< sisl::Bitset > m_cache_bm; // Bitset representing entire blks in this allocator
     std::unique_ptr< FreeBlkCache > m_fb_cache; // Free Blks cache
 
     VarsizeBlkAllocConfig m_cfg;  // Config for Varsize

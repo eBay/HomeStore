@@ -430,7 +430,7 @@ bool DeviceManager::add_devices(const std::vector< dev_info >& devices) {
     MetaBlkMgrSI()->register_handler(
         "BLK_ALLOC",
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { blk_alloc_meta_blk_found_cb(mblk, buf, size); },
-        nullptr, false /* do_crc */);
+        nullptr, true /* do_crc */);
 
     HS_RELEASE_ASSERT(devices.size() > 0, "Expecting at least one device");
 

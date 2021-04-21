@@ -699,8 +699,8 @@ void MetaBlkMgr::update_sub_sb(const void* const context_data, const uint64_t sz
 #ifndef NDEBUG
     if (!(mblk->hdr.h.compressed) && it->second.do_crc) {
         HS_DEBUG_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
-                           "Input context data has been changed since received, crc mismatch: {}/{}", crc,
-                           static_cast< uint32_t >(mblk->hdr.h.crc));
+                           "{}: Input context data has been changed since received, crc mismatch: {}/{}",
+                           mblk->hdr.h.type, crc, static_cast< uint32_t >(mblk->hdr.h.crc));
     }
 #endif
 
