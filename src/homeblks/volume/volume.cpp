@@ -90,7 +90,8 @@ void Volume::set_io_flip() {
 #endif
 
 Volume::Volume(const vol_params& params) :
-        m_params(params), m_metrics(params.vol_name), m_comp_cb(params.io_comp_cb), m_indx_mgr_destroy_started(false) {
+        m_params(params), m_metrics(params.vol_name, this),
+        m_comp_cb(params.io_comp_cb), m_indx_mgr_destroy_started(false) {
 
     /* this counter is decremented later when this volume become part of a cp. until then shutdown is
      * not allowed.
@@ -105,7 +106,7 @@ Volume::Volume(const vol_params& params) :
 }
 
 Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
-        m_metrics(((vol_sb_hdr*)sb_buf.bytes())->vol_name),
+        m_metrics(((vol_sb_hdr*)sb_buf.bytes())->vol_name, this),
         m_indx_mgr_destroy_started(false),
         m_sb_cookie(mblk_cookie) {
     m_sb_buf = sb_buf;
@@ -914,4 +915,10 @@ std::vector< iovec > Volume::get_next_iovecs(IoVecTransversal& iovec_transversal
     assert(data_consumed == size);
     if (data_consumed != size) { throw std::runtime_error("Insufficient data iovecs"); }
     return iovecs;
+}
+
+void VolumeMetrics::on_gather() {
+    cap_attrs size{m_volume->get_used_size()};
+    GAUGE_UPDATE(*this, volume_data_used_size, size.used_data_size);
+    GAUGE_UPDATE(*this, volume_index_used_size, size.used_index_size);
 }
