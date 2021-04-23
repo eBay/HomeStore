@@ -1330,7 +1330,7 @@ cap_attrs IndxMgr::get_used_size() const {
     cap_attrs attrs;
     attrs.used_data_size = m_last_cp_sb.icp_sb.indx_size;
     attrs.used_index_size = m_active_tbl->get_used_size();
-    THIS_INDX_LOG(INFO, indx_mgr, , "tree used index size {} node cnt {}", attrs.used_index_size / 4096,
+    THIS_INDX_LOG(DEBUG, indx_mgr, , "tree used index size {} node cnt {}", attrs.used_index_size / 4096,
                   m_active_tbl->get_btree_node_cnt());
     attrs.used_total_size = attrs.used_data_size + attrs.used_index_size;
     return attrs;
