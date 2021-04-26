@@ -44,8 +44,8 @@ void Volume::set_error_flip() {
     FlipCondition null_cond;
     fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
 
-    freq.set_count(2000000000);
-    freq.set_percent(1);
+    freq.set_count(20);
+    freq.set_percent(10);
 
     /* error flips */
     freq.set_percent(1);
