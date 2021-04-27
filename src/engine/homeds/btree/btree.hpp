@@ -1983,6 +1983,7 @@ private:
         ret = split_node(root, child_node, root->get_total_entries(), &split_key, bcp, true);
         BT_DEBUG_ASSERT_CMP(m_root_node, ==, root->get_node_id(), root);
 
+        if (ret != btree_status_t::success) { btree_store_t::swap_node(m_btree_store.get(), child_node, root); }
         /* unlock child node */
         unlock_node(root, homeds::thread::LOCKTYPE_WRITE);
 
