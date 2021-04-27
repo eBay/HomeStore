@@ -429,6 +429,7 @@ public:
         /* clear alloc blk list after blk cp is finished
          * blk id is already alloced from cache before accumulated in cp, so cache is already updated */
         for (auto& list : alloc_blkid_list_vector) {
+            ResourceMgr::dec_alloc_blk(list->size());
             list->clear();
         }
 

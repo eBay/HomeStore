@@ -59,6 +59,7 @@ public:
         auto bid = BlkId(m_root_node);
         THIS_BT_CP_LOG(TRACE, m_first_cp->cp_id, "accumulating root bid: {}", bid.to_string());
         m_first_cp->alloc_blkid_list->push_back(bid);
+        ResourceMgr::inc_alloc_blk();
     }
 
     void cp_done_store(const btree_cp_ptr& bcp) { bcp->cb(bcp); }
@@ -493,6 +494,7 @@ private:
                         THIS_BT_CP_LOG(TRACE, bcp->cp_id, "accumulating blk inside btree journal entry {}",
                                        bid.to_string());
                         bcp->alloc_blkid_list->push_back(bid);
+                        ResourceMgr::inc_alloc_blk();
                     });
                     // For root node, disk bitmap is later persisted with btree root node.
                 }

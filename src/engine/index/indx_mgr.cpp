@@ -446,6 +446,7 @@ void IndxMgr::io_replay() {
                 THIS_INDX_LOG(DEBUG, replay, , "alloc blk id {} sequence number {}", alloc_pair.first[i].to_string(),
                               seq_num);
                 icp->io_alloc_blkid_list->push_back(alloc_pair.first[i]);
+                ResourceMgr::inc_alloc_blk();
 
                 if (hdr->cp_id > m_last_cp_sb.icp_sb.active_cp_id) {
                     /* TODO: we update size in superblock with each checkpoint. Ideally it
@@ -850,6 +851,8 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
         for (uint32_t i = 0; i < ireq->indx_alloc_blkid_list.size(); ++i) {
             THIS_INDX_LOG(TRACE, indx_mgr, ireq, "accumulating bid: {}", ireq->indx_alloc_blkid_list[i].to_string());
             ireq->icp->io_alloc_blkid_list->push_back(ireq->indx_alloc_blkid_list[i]);
+            ResourceMgr::inc_alloc_blk();
+
             /* update size */
             ireq->icp->indx_size.fetch_add(ireq->indx_alloc_blkid_list[i].data_size(m_hs->get_data_pagesz()),
                                            std::memory_order_relaxed);
@@ -1640,14 +1643,14 @@ std::atomic< bool > StaticIndxMgr::m_shutdown_started;
 iomgr::io_thread_t StaticIndxMgr::m_thread_id;
 iomgr::io_thread_t StaticIndxMgr::m_slow_path_thread_id;
 iomgr::timer_handle_t StaticIndxMgr::m_hs_cp_timer_hdl = iomgr::null_timer_handle;
-void* StaticIndxMgr::m_cp_meta_blk = nullptr;
+void* StaticIndxMgr::m_cp_meta_blk{nullptr};
 std::once_flag StaticIndxMgr::m_flag;
 sisl::aligned_unique_ptr< uint8_t > StaticIndxMgr::m_recovery_sb;
 std::map< boost::uuids::uuid, indx_cp_base_sb > StaticIndxMgr::cp_sb_map;
-size_t StaticIndxMgr::m_recovery_sb_size = 0;
+size_t StaticIndxMgr::m_recovery_sb_size{0};
 HomeStoreBaseSafePtr StaticIndxMgr::m_hs;
-uint64_t StaticIndxMgr::memory_used_in_recovery = 0;
-std::atomic< bool > StaticIndxMgr::m_inited = false;
+uint64_t StaticIndxMgr::memory_used_in_recovery{0};
+std::atomic< bool > StaticIndxMgr::m_inited{false};
 HomeStoreBaseSafePtr HomeStoreBase::s_instance;
 std::mutex StaticIndxMgr::cb_list_mtx;
 std::vector< cp_done_cb > StaticIndxMgr::indx_cp_done_cb_list;
@@ -1655,9 +1658,10 @@ std::vector< cp_done_cb > StaticIndxMgr::hs_cp_done_cb_list;
 sisl::atomic_counter< bool > StaticIndxMgr::try_blkalloc_checkpoint;
 std::map< boost::uuids::uuid, std::vector< std::pair< void*, sisl::byte_view > > > StaticIndxMgr::indx_meta_map;
 std::unique_ptr< Blk_Read_Tracker > StaticIndxMgr::m_read_blk_tracker;
-std::atomic< int64_t > ResourceMgr::m_hs_dirty_buf_cnt;
-std::atomic< int64_t > ResourceMgr::m_hs_fb_cnt;
-std::atomic< int64_t > ResourceMgr::m_hs_fb_size;
-std::atomic< int64_t > ResourceMgr::m_memory_used_in_recovery;
+std::atomic< int64_t > ResourceMgr::m_hs_dirty_buf_cnt{0};
+std::atomic< int64_t > ResourceMgr::m_hs_fb_cnt{0};
+std::atomic< int64_t > ResourceMgr::m_hs_fb_size{0};
+std::atomic< int64_t > ResourceMgr::m_hs_ab_cnt{0};
+std::atomic< int64_t > ResourceMgr::m_memory_used_in_recovery{0};
 uint64_t ResourceMgr::m_total_cap;
-bool indx_test_status::indx_create_suspend_cp_test = false;
+bool indx_test_status::indx_create_suspend_cp_test{false};

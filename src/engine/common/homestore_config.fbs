@@ -122,8 +122,10 @@ table ResourceLimits {
     
     /* it is going to use 2 times of this space because of two concurrent cps */
     free_blk_cnt: uint32 = 1000000 (hotswap);
-    free_blk_size: uint32 = 2 (hotswap);
+    free_blk_size_percent: uint32 = 2 (hotswap);
     
+    alloc_blk_cnt: uint32 = 1000000 (hotswap);
+
     /* Percentage of memory allocated for homestore cache */
     cache_size_percent: uint32 = 65; 
 
