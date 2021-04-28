@@ -641,7 +641,7 @@ private:
     blkid_list_ptr m_alloc_list[MAX_CP_CNT];
     indx_cp_base_sb m_last_cp_sb;
     std::map< logstore_seq_num_t, log_buffer > seq_buf_map; // used only in recovery
-    bool m_recovery_mode = false;
+    std::atomic< bool > m_recovery_mode = false;
     indx_recovery_state m_recovery_state = indx_recovery_state::create_sb_st;
     create_indx_tbl m_create_indx_tbl;
     recover_indx_tbl m_recover_indx_tbl;

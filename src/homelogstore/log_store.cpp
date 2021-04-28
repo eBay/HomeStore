@@ -79,17 +79,24 @@ void HomeLogStoreMgr::stop() {
 std::shared_ptr< HomeLogStore > HomeLogStoreMgr::create_new_log_store(const bool append_mode) {
     const auto store_id{m_log_dev.reserve_store_id()};
     std::shared_ptr< HomeLogStore > lstore;
-
     lstore = std::make_shared< HomeLogStore >(store_id, append_mode, 0);
-    m_id_logstore_map.wlock()->insert(std::make_pair<>(store_id, logstore_info_t{lstore, nullptr, append_mode}));
+
+    auto m{m_id_logstore_map.wlock()};
+    const auto it{m->find(store_id)};
+    HS_RELEASE_ASSERT((it == m->end()), "store_id {} already exists", store_id);
+
+    m->insert(std::make_pair<>(store_id, logstore_info_t{lstore, nullptr, append_mode}));
     COUNTER_INCREMENT(m_metrics, logstores_count, 1);
     return lstore;
 }
 
 void HomeLogStoreMgr::open_log_store(const logstore_id_t store_id, const bool append_mode,
                                      const log_store_opened_cb_t& on_open_cb) {
+    auto m{m_id_logstore_map.wlock()};
     COUNTER_INCREMENT(m_metrics, logstores_count, 1);
-    m_id_logstore_map.wlock()->insert(std::make_pair<>(store_id, logstore_info_t{nullptr, on_open_cb, append_mode}));
+    const auto it{m->find(store_id)};
+    HS_RELEASE_ASSERT((it == m->end()), "store_id {} already exists", store_id);
+    m->insert(std::make_pair<>(store_id, logstore_info_t{nullptr, on_open_cb, append_mode}));
 }
 
 void HomeLogStoreMgr::remove_log_store(const logstore_id_t store_id) {

@@ -222,6 +222,7 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io
     m_journal = HomeLogStoreMgr::instance().create_new_log_store(false /* append_mode */);
     m_journal_comp_cb = bind_this(IndxMgr::journal_comp_cb, 2);
     m_journal->register_req_comp_cb(m_journal_comp_cb);
+    THIS_INDX_LOG(INFO, indx_mgr, , "log_store id {}", m_journal->get_store_id());
     for (size_t i{0}; i < MAX_CP_CNT; ++i) {
         m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
         m_alloc_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
@@ -246,6 +247,7 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io
     m_prepare_cb_list->reserve(4);
 
     m_is_snap_enabled = sb.is_snap_enabled;
+    THIS_INDX_LOG(INFO, indx_mgr, , "opening journal id {}", (int)sb.journal_id);
     HomeLogStoreMgr::instance().open_log_store(
         sb.journal_id,
         false, // Append mode,
@@ -367,6 +369,7 @@ void IndxMgr::recovery() {
         break; // io replay happens after it is called again after btree replay
     }
     case indx_recovery_state::io_replay_st: {
+        HS_ASSERT_NOTNULL(RELEASE, m_journal.get());
         io_replay();
     }
         // fall through
@@ -1359,7 +1362,7 @@ void IndxMgr::register_indx_cp_done_cb(const cp_done_cb& cb, bool blkalloc_cp) {
 
 bool IndxMgr::is_recovery_done() const {
     /* this volume hasn't participated in a cp if first cp is not null. We can add more conditions in future */
-    return (m_first_icp ? false : true);
+    return (!m_recovery_mode && (m_first_icp ? false : true));
 }
 
 hs_cp* IndxMgr::cp_io_enter() { return (m_cp_mgr->cp_io_enter()); }

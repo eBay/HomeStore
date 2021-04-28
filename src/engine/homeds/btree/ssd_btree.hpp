@@ -108,6 +108,7 @@ public:
 
         if (is_recovery) {
             // add recovery code
+            THIS_BT_LOG(INFO, replay, , "opening journal id {}", (int)sb.journal_id);
             HomeLogStoreMgr::instance().open_log_store(
                 sb.journal_id, // My logstore id
                 true,          // Is Append Mode
@@ -123,7 +124,9 @@ public:
                            bid.to_string());
         } else {
             m_journal = HomeLogStoreMgr::instance().create_new_log_store(true /* append_mode */);
+
             sb.journal_id = get_journal_id_store();
+            THIS_BT_LOG(INFO, replay, , "journal id {}", (int)sb.journal_id);
         }
 
         m_wb_cache->prepare_cp(m_first_cp, nullptr, false);
@@ -171,6 +174,7 @@ public:
 
     void replay_done(std::shared_ptr< HomeLogStore > store, [[maybe_unused]] logstore_seq_num_t upto_lsn) {
         THIS_BT_LOG(INFO, replay, , "Replay of btree completed and replayed {} entries", m_replayed_count);
+        HS_ASSERT_NOTNULL(RELEASE, m_journal.get());
         m_is_recovering = false;
         auto& cp_sb = m_btree->get_last_cp_cb();
         if (cp_sb.cp_id == -1 && m_replayed_count == 0) {
@@ -186,6 +190,8 @@ public:
     }
 
     void cp_start_store(const btree_cp_ptr& bcp, cp_comp_callback cb) {
+        HS_ASSERT_NOTNULL(RELEASE, m_journal.get());
+        HS_RELEASE_ASSERT((m_is_recovering == false), "recovery is not completed");
         bcp->cb = cb;
         try_cp_start(bcp);
     }
