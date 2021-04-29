@@ -60,6 +60,7 @@ mapping::mapping(const uint64_t volsize, const uint32_t page_size, const std::st
     btree_cfg.trigger_cp_cb = trigger_cp_cb;
 
     m_bt = MappingBtreeDeclType::create_btree(btree_cfg);
+    if (!m_bt) { throw homestore::homestore_exception("btree creation failed", homestore_error::no_space_avail); }
 }
 
 mapping::mapping(const uint64_t volsize, const uint32_t page_size, const std::string& unique_name,

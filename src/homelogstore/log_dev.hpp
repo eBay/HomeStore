@@ -25,6 +25,7 @@
 namespace homestore {
 
 static constexpr uint32_t LOG_GROUP_HDR_MAGIC{0xDABAF00D};
+static constexpr uint32_t LOG_GROUP_FOOTER_MAGIC{0xDEADF00D};
 static constexpr uint32_t dma_address_boundary{512}; // Mininum size the dma/writes to be aligned with
 static constexpr uint32_t initial_read_size{4096};
 static constexpr uint32_t max_log_group{
@@ -118,6 +119,7 @@ struct log_group_header {
     uint32_t group_size;         // Total size of this group including this header
     uint32_t inline_data_offset; // Offset of inlined area of data
     uint32_t oob_data_offset;    // Offset of where the data which are not inlined starts
+    uint32_t footer_offset;      // offset of where footer starts
     crc32_t prev_grp_crc;        // Checksum of the previous group that was written
     crc32_t cur_grp_crc;         // Checksum of the current group record
 
@@ -165,6 +167,14 @@ struct log_group_header {
     [[nodiscard]] crc32_t this_group_crc() const { return cur_grp_crc; }
     [[nodiscard]] crc32_t prev_group_crc() const { return prev_grp_crc; }
     [[nodiscard]] uint32_t _inline_data_offset() const { return inline_data_offset; }
+};
+#pragma pack()
+
+#pragma pack(1)
+struct log_group_footer {
+    uint32_t magic;
+    logid_t start_log_idx;
+    uint8_t padding[20];
 };
 #pragma pack()
 
@@ -238,10 +248,12 @@ public:
 
 private:
     sisl::aligned_unique_ptr< uint8_t > m_log_buf;
+    sisl::aligned_unique_ptr< uint8_t > m_footer_buf;
     sisl::aligned_unique_ptr< uint8_t > m_overflow_log_buf;
 
     uint8_t* m_cur_log_buf;
     uint32_t m_cur_buf_len;
+    uint32_t m_footer_buf_len;
 
     serialized_log_record* m_record_slots;
     uint32_t m_inline_data_pos;
@@ -256,6 +268,10 @@ private:
     int64_t m_flush_log_idx_from;
     int64_t m_flush_log_idx_upto;
     off_t m_log_dev_offset;
+
+private:
+    log_group_footer* add_and_get_footer();
+    bool new_iovec_for_footer() const;
 };
 
 template < typename charT, typename traits >

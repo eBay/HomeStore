@@ -284,8 +284,14 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
                 "created are more then maximum capacity");
     }
     /* create new volume */
-    auto new_vol = Volume::make_volume(params);
-    create_volume(new_vol);
+    std::shared_ptr< Volume > new_vol;
+    try {
+        new_vol = Volume::make_volume(params);
+        create_volume(new_vol);
+    } catch (const std::exception& e) {
+        LOGERROR("volume creation failed exception: {}", e.what());
+        return nullptr;
+    }
 
     auto system_cap = get_system_capacity();
     LOGINFO("System capacity after vol create: {}", system_cap.to_string());

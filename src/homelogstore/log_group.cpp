@@ -9,18 +9,24 @@ SDS_LOGGING_DECL(logstore)
 LogGroup::LogGroup() = default;
 void LogGroup::start() {
     m_iovecs.reserve(estimated_iovs);
-    m_log_buf =
-        sisl::aligned_unique_ptr< uint8_t >::make_sized(HS_STATIC_CONFIG(drive_attr.align_size), inline_log_buf_size);
+
+    m_cur_buf_len = sisl::round_up(inline_log_buf_size, log_record::flush_boundary());
+    m_log_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(HS_STATIC_CONFIG(drive_attr.align_size), m_cur_buf_len);
+
+    m_footer_buf_len = sisl::round_up(sizeof(log_group_footer), log_record::flush_boundary());
+    m_footer_buf =
+        sisl::aligned_unique_ptr< uint8_t >::make_sized(HS_STATIC_CONFIG(drive_attr.align_size), m_footer_buf_len);
 }
 
 void LogGroup::stop() {
     m_log_buf.reset();
     m_overflow_log_buf.reset();
+    m_footer_buf.reset();
 }
 
 void LogGroup::reset(const uint32_t max_records) {
+    m_cur_buf_len = sisl::round_up(inline_log_buf_size, log_record::flush_boundary());
     m_cur_log_buf = m_log_buf.get();
-    m_cur_buf_len = inline_log_buf_size;
     m_record_slots = reinterpret_cast< serialized_log_record* >(m_cur_log_buf + sizeof(log_group_header));
     m_inline_data_pos = sizeof(log_group_header) + (sizeof(serialized_log_record) * max_records);
     m_oob_data_pos = 0;
@@ -88,7 +94,14 @@ bool LogGroup::add_record(const log_record& record, const int64_t log_idx) {
     return true;
 }
 
+bool LogGroup::new_iovec_for_footer() const {
+    return ((m_inline_data_pos + sizeof(log_group_footer)) >= m_cur_buf_len || m_oob_data_pos != 0);
+}
+
 const iovec_array& LogGroup::finish() {
+    // add footer
+    auto footer = add_and_get_footer();
+
     m_iovecs[0].iov_len = sisl::round_up(m_iovecs[0].iov_len, log_record::flush_boundary());
 
     log_group_header* const hdr{header()};
@@ -97,10 +110,42 @@ const iovec_array& LogGroup::finish() {
     hdr->prev_grp_crc = HomeLogStoreMgr::logdev().get_prev_crc();
     hdr->inline_data_offset = sizeof(log_group_header) + (m_max_records * sizeof(serialized_log_record));
     hdr->oob_data_offset = m_iovecs[0].iov_len;
-    hdr->group_size = hdr->oob_data_offset + m_oob_data_pos;
+    if (new_iovec_for_footer()) {
+        hdr->footer_offset = hdr->oob_data_offset + m_oob_data_pos;
+        hdr->group_size = hdr->footer_offset + m_footer_buf_len;
+    } else {
+        hdr->footer_offset = m_inline_data_pos;
+        hdr->group_size = hdr->oob_data_offset;
+    }
+    HS_DEBUG_ASSERT_LE((hdr->footer_offset + sizeof(log_group_footer)), hdr->group_size);
+
+#ifndef NDEBUG
+    uint64_t len = 0;
+    for (auto const& iv : m_iovecs) {
+        len += iv.iov_len;
+    }
+    HS_DEBUG_ASSERT_EQ(hdr->group_size, len, "length is not same");
+#endif
+
+    footer->magic = LOG_GROUP_FOOTER_MAGIC;
+    footer->start_log_idx = hdr->start_log_idx;
+
     hdr->cur_grp_crc = compute_crc();
 
     return m_iovecs;
+}
+
+log_group_footer* LogGroup::add_and_get_footer() {
+    log_group_footer* footer;
+    if (new_iovec_for_footer()) {
+        // allocate a new iovec if there are out of band buffers or inline buffer doesn't have enough space
+        m_iovecs.emplace_back(static_cast< void* >(m_footer_buf.get()), m_footer_buf_len);
+        footer = reinterpret_cast< log_group_footer* >(m_footer_buf.get());
+    } else {
+        footer = reinterpret_cast< log_group_footer* >((uintptr_t)m_iovecs[0].iov_base + m_inline_data_pos);
+        m_iovecs[0].iov_len += sizeof(log_group_footer);
+    }
+    return footer;
 }
 
 crc32_t LogGroup::compute_crc() {

@@ -32,11 +32,10 @@ read_again:
         LOGINFOMOD(logstore, "Logdev data not seeing magic at pos {}, must have come to end of logdev",
                    store->get_dev_offset(m_cur_read_bytes));
         *out_dev_offset = store->get_dev_offset(m_cur_read_bytes);
-        m_prev_crc = 0;
 
         // move it by dma boundary if header is not valid
+        m_prev_crc = 0;
         m_cur_read_bytes += log_record::flush_boundary();
-        m_cur_log_buf.move_forward(log_record::flush_boundary());
         return ret_buf;
     }
 
@@ -54,31 +53,47 @@ read_again:
                 header->total_size(), header->nrecords(), store->get_dev_offset(m_cur_read_bytes),
                 m_cur_log_buf.size());
 
+    // compare it with prev crc
+    if (m_prev_crc != 0 && m_prev_crc != header->prev_grp_crc) {
+        // we reached at the end
+        LOGINFOMOD(logstore, "we have reached the end. crc doesn't match with the prev crc {}",
+                   store->get_dev_offset(m_cur_read_bytes));
+        *out_dev_offset = store->get_dev_offset(m_cur_read_bytes);
+
+        // move it by dma boundary if header is not valid
+        m_prev_crc = 0;
+        m_cur_read_bytes += log_record::flush_boundary();
+        return ret_buf;
+    }
+
+    // At this point data seems to be valid. Lets see if a data is written completely by comparing the footer
+    const auto* const footer{
+        reinterpret_cast< log_group_footer* >((uint64_t)m_cur_log_buf.bytes() + header->footer_offset)};
+    if (footer->magic != LOG_GROUP_FOOTER_MAGIC || footer->start_log_idx != header->start_log_idx) {
+        LOGINFOMOD(logstore,
+                   "last write is not completely written. footer magic {} footer start_log_idx {} header log indx {}",
+                   footer->magic, footer->start_log_idx, header->start_log_idx);
+        *out_dev_offset = store->get_dev_offset(m_cur_read_bytes);
+
+        // move it by dma boundary if header is not valid
+        m_prev_crc = 0;
+        m_cur_read_bytes += log_record::flush_boundary();
+        return ret_buf;
+    }
+
     // verify crc with data
     const crc32_t cur_crc{
         crc32_ieee(init_crc32, static_cast< const unsigned char* >(m_cur_log_buf.bytes()) + sizeof(log_group_header),
                    (header->total_size() - sizeof(log_group_header)))};
     if (cur_crc != header->cur_grp_crc) {
+        /* This is a valid entry so crc should match */
+        HS_RELEASE_ASSERT(0, "data is corrupted");
         LOGINFOMOD(logstore, "crc doesn't match {}", store->get_dev_offset(m_cur_read_bytes));
         *out_dev_offset = store->get_dev_offset(m_cur_read_bytes);
-        m_prev_crc = 0;
-
-        // move it by dma boundary if header is not valid
-        m_cur_read_bytes += log_record::flush_boundary();
-        m_cur_log_buf.move_forward(log_record::flush_boundary());
-        return ret_buf;
-    }
-
-    // compare it with prev crc
-    if (m_prev_crc != 0 && m_prev_crc != header->prev_grp_crc) {
-        // we reached at the end
-        LOGINFOMOD(logstore, "crc doesn't match with the prev crc {}", store->get_dev_offset(m_cur_read_bytes));
-        *out_dev_offset = store->get_dev_offset(m_cur_read_bytes);
 
         // move it by dma boundary if header is not valid
         m_prev_crc = 0;
         m_cur_read_bytes += log_record::flush_boundary();
-        m_cur_log_buf.move_forward(log_record::flush_boundary());
         return ret_buf;
     }
 

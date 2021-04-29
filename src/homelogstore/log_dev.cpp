@@ -286,7 +286,7 @@ LogGroup* LogDev::prepare_flush(const int32_t estimated_records) {
     lg->m_flush_log_idx_upto = flushing_upto_idx;
     HS_DEBUG_ASSERT_GE(lg->m_flush_log_idx_upto, lg->m_flush_log_idx_from,
                        "log indx upto is smaller then log indx from");
-    lg->m_log_dev_offset = m_hb->get_logdev_blkstore()->alloc_next_append_blk(lg->header()->group_size);
+    lg->m_log_dev_offset = m_hb->get_logdev_blkstore()->alloc_next_append_blk(lg->header()->total_size());
 
     HS_RELEASE_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
     assert(lg->header()->oob_data_offset > 0);
