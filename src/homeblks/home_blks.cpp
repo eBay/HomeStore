@@ -414,6 +414,7 @@ void HomeBlks::init_done() {
     LOGINFO("verifying vols");
     /* TODO: we should remove this check later in release. It will increase the recovery time */
     HS_RELEASE_ASSERT((verify_vols()), "vol verify failed");
+    HS_RELEASE_ASSERT((verify_bitmap()), "bitmap verify failed");
     LOGINFO("init done");
     m_out_params.first_time_boot = m_dev_mgr->is_first_time_boot();
     m_out_params.max_io_size = HS_STATIC_CONFIG(engine.max_vol_io_size);
@@ -459,6 +460,34 @@ bool HomeBlks::verify_vols() {
         ++it;
     }
     return ret;
+}
+
+bool HomeBlks::verify_bitmap() {
+    /* Create the bitmap */
+    auto hb{HomeBlks::safe_instance()};
+    BlkAllocStatus status{hb->get_data_blkstore()->create_debug_bm()};
+    if (status != BlkAllocStatus::SUCCESS) {
+        LOGERROR("failing to create bitmap as it is out of disk space");
+        return false;
+    }
+
+    /* Update the bitmap */
+    std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
+    auto it{m_volume_map.begin()};
+    while (it != m_volume_map.end()) {
+        const VolumePtr& vol{it->second};
+        VOL_INFO_LOG(vol->get_uuid(), "Verifying the integrity of the bitmap");
+        vol->populate_debug_bm();
+        ++it;
+    }
+
+    /* Verify bitmap */
+    BlkAllocStatus ver_status{hb->get_data_blkstore()->verify_debug_bm()};
+    if (ver_status != BlkAllocStatus::SUCCESS) {
+        LOGERROR("failing to match debug bitmap with persisted bitmap");
+        return false;
+    }
+    return true;
 }
 
 void HomeBlks::print_node(const VolumePtr& vol, uint64_t blkid, bool chksum) {

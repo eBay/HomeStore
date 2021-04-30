@@ -1322,6 +1322,58 @@ private:
         return offset_in_dev;
     }
 
+    /* Create debug bitmap for all chunks */
+    BlkAllocStatus create_debug_bm() {
+        try {
+            for (auto& pdev_chunks : m_primary_pdev_chunks_list) {
+                auto chunk_list{pdev_chunks.chunks_in_pdev};
+                for (auto& chunk : chunk_list) {
+                    chunk->get_blk_allocator()->create_debug_bm();
+                }
+            }
+            return BlkAllocStatus::SUCCESS;
+
+        } catch (const std::exception& e) {
+            LOGERROR("exception happened {}", e.what());
+            return BlkAllocStatus::FAILED;
+        }
+    }
+
+    /* Update debug bitmap for a given BlkId */
+    BlkAllocStatus update_debug_bm(const BlkId& bid) {
+        try {
+            PhysicalDevChunk* chunk{};
+            uint64_t dev_offset = to_dev_offset(bid, &chunk);
+            chunk->get_blk_allocator()->update_debug_bm(bid);
+            return BlkAllocStatus::SUCCESS;
+
+        } catch (const std::exception& e) {
+            LOGERROR("Update debug bitmap hit exception {}", e.what());
+            return BlkAllocStatus::FAILED;
+        }
+    }
+
+    /* Verify debug bitmap for all chunks */
+    BlkAllocStatus verify_debug_bm(bool free_debug_bm = true) {
+        try {
+            for (auto& pdev_chunks : m_primary_pdev_chunks_list) {
+                auto chunk_list{pdev_chunks.chunks_in_pdev};
+                for (auto& chunk : chunk_list) {
+                    if (chunk->get_blk_allocator()->verify_debug_bm(free_debug_bm) == false) {
+                        LOGERROR("Verify bitmap failure for chunk {}", static_cast<void*>(chunk));
+                        return BlkAllocStatus::FAILED;
+                    } else {
+                        LOGDEBUG("Verify bitmap success for chunk {}", static_cast<void*>(chunk));
+                    }
+                }
+            }
+            return BlkAllocStatus::SUCCESS;
+        } catch (const std::exception& e) {
+            LOGERROR("exception happened {}", e.what());
+            return BlkAllocStatus::FAILED;
+        }
+    }
+
     //
     // split do_write from pwrite so that write could re-use this sub-routine
     //

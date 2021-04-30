@@ -40,6 +40,7 @@ void HomeBlksHttpServer::start() {
             handler_info("/api/v1/getConfig", HomeBlksHttpServer::get_config, (void*)this),
             handler_info("/api/v1/reloadConfig", HomeBlksHttpServer::reload_dynamic_config, (void*)this),
             handler_info("/api/v1/getStatus", HomeBlksHttpServer::get_status, (void*)this),
+            handler_info("/api/v1/verifyBitmap", HomeBlksHttpServer::verify_bitmap, (void*)this),
 #ifdef _PRERELEASE
             handler_info("/api/v1/crashSystem", HomeBlksHttpServer::crash_system, (void*)this),
 #endif
@@ -192,6 +193,12 @@ void HomeBlksHttpServer::get_status(sisl::HttpCallData cd) {
     const auto status_mgr = to_homeblks(cd)->get_status_mgr();
     const auto status_json = status_mgr->get_status(modules, verbosity_level);
     pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, status_json.dump(2));
+}
+
+void HomeBlksHttpServer::verify_bitmap(sisl::HttpCallData cd) {
+    auto hb = to_homeblks(cd);
+    hb->verify_bitmap();
+    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, std::string("HomeBlks bitmap verified"));
 }
 
 #ifdef _PRERELEASE

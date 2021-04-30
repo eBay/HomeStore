@@ -346,6 +346,25 @@ public:
         return &m_blk_portions[blknum_to_portion_num(blknum)];
     }
 
+    void create_debug_bm() {
+        m_debug_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), m_chunk_id,
+                                    HS_STATIC_CONFIG(drive_attr.align_size));
+        assert(m_cfg.get_blks_per_portion() % m_debug_bm->word_size() == 0);
+    }
+
+    void update_debug_bm(const BlkId& bid) {
+        get_debug_bm()->set_bits(bid.get_blk_num(), bid.get_nblks());
+    }
+
+    [[nodiscard]] bool verify_debug_bm(bool free_debug_bm) {
+        bool ret{*get_disk_bm() == *get_debug_bm()};
+        if (free_debug_bm) { m_debug_bm.reset(); }
+        return ret;
+    }
+
+private:
+    [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); }
+
 protected:
     BlkAllocConfig m_cfg;
     bool m_inited{false};
@@ -354,6 +373,7 @@ protected:
 private:
     std::unique_ptr< BlkAllocPortion[] > m_blk_portions;
     std::unique_ptr< sisl::Bitset > m_disk_bm{nullptr};
+    std::unique_ptr< sisl::Bitset > m_debug_bm{nullptr};
     std::atomic< int64_t > m_alloced_blk_count{0};
     bool m_auto_recovery{false};
 };

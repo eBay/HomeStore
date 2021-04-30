@@ -413,6 +413,9 @@ public:
     /* verify active indx */
     bool verify_tree();
 
+    /* populate debug bitmap */
+    void populate_debug_bm();
+
     /* Print the content of a blkid
      * @param blkid :- blkid of data to be read
      */
@@ -458,6 +461,10 @@ public:
      * @return :- size
      */
     uint64_t get_size() const { return ((vol_sb_hdr*)m_sb_buf.bytes())->size; }
+
+    /* Get used size
+     * @return :- cap attributes
+     */
     cap_attrs get_used_size() const { return m_indx_mgr->get_used_size(); }
 
     /* Get uuid of this volume.

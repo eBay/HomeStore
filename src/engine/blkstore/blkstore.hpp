@@ -771,6 +771,21 @@ public:
         return (m_vdev.attach_prepare_cp(cur_ba_cp));
     }
 
+    /* Create debug bitmap */
+    BlkAllocStatus create_debug_bm() {
+        return (m_vdev.create_debug_bm());
+    }
+
+    /* Update debug bitmap */
+    BlkAllocStatus update_debug_bm(const BlkId& bid) {
+        return (m_vdev.update_debug_bm(bid));
+    }
+
+    /* Verify debug bitmap */
+    BlkAllocStatus verify_debug_bm() {
+        return (m_vdev.verify_debug_bm());
+    }
+
 private:
     uint32_t m_pagesz;
     Cache< BlkId >* m_cache;

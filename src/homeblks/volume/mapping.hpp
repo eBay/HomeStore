@@ -656,6 +656,8 @@ public:
     virtual ~mapping();
     int sweep_alloc_blks(const lba_t start_lba, const lba_t end_lba);
     btree_status_t get(volume_req* req, std::vector< std::pair< MappingKey, MappingValue > >& values);
+    btree_status_t get(MappingKey& key, BtreeQueryCursor& cur,
+                       std::vector< std::pair< MappingKey, MappingValue > >& values);
     btree_status_t get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCursor& cur,
                        std::vector< std::pair< MappingKey, MappingValue > >& values);
     /* Note :- we should not write same IO in btree multiple times. When a key is updated , it update the free blk

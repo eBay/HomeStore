@@ -247,6 +247,7 @@ public:
     void meta_blk_recovery_comp(bool success);
 
     bool verify_vols();
+    bool verify_bitmap();
 
     HomeBlksStatusMgr* get_status_mgr();
 

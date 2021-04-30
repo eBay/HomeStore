@@ -728,6 +728,31 @@ volume_child_req_ptr Volume::create_vol_child_req(const BlkId& bid, const volume
 
 void Volume::print_tree() { get_active_indx()->print_tree(); }
 bool Volume::verify_tree() { return (get_active_indx()->verify_tree()); }
+
+void Volume::populate_debug_bm() {
+    unsigned int i{0};
+    unsigned int batch{BlkId::max_blks_in_op()};
+    uint64_t max_lba{get_last_lba()};
+    BtreeQueryCursor cur;
+    while (i <= max_lba) {
+        std::vector< std::pair< MappingKey, MappingValue > > kvs;
+        LOGDEBUG("Reading -> lba:{},nlbas:{}", i, batch);
+        MappingKey key(i, batch);
+        get_active_indx()->get(key, cur, kvs);
+
+        // Update the debug bitmap
+        for (auto& kv : kvs) {
+            if (!kv.second.is_valid()) { continue; }
+            ValueEntry* ve = kv.second.get_nth_entry(0);
+            const BlkId blkid{ve->get_offset_blkid(m_blks_per_lba)};
+            if (!blkid.is_valid()) { continue; }
+            THIS_VOL_LOG(TRACE, volume, , "Debug bitmap populate {}", blkid.to_string());
+            m_hb->get_data_blkstore()->update_debug_bm(blkid);
+        }
+        i += batch;
+    }
+}
+
 void Volume::print_node(uint64_t blkid) { get_active_indx()->print_node(blkid); }
 
 std::error_condition Volume::alloc_blk(const volume_req_ptr& vreq, std::vector< BlkId >& bid) {

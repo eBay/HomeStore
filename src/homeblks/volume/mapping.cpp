@@ -146,6 +146,14 @@ btree_status_t mapping::get(volume_req* req, std::vector< std::pair< MappingKey,
     return (get(cntx, key, req->read_cur, values));
 }
 
+btree_status_t mapping::get(MappingKey& key, BtreeQueryCursor& cur,
+                            std::vector< std::pair< MappingKey, MappingValue > >& values) {
+    mapping_op_cntx cntx;
+    cntx.op = READ_VAL_WITH_seqid;
+    cntx.vreq = nullptr;
+    return (get(cntx, key, cur, values));
+}
+
 btree_status_t mapping::get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCursor& cur,
                             std::vector< std::pair< MappingKey, MappingValue > >& result_kv) {
     /* initialize the search range */
