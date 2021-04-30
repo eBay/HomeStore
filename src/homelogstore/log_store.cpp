@@ -266,7 +266,9 @@ logdev_key HomeLogStoreMgr::do_device_truncate(const bool dry_run) {
     });
 
     if ((min_safe_ld_key == logdev_key::out_of_bound_ld_key()) || (min_safe_ld_key.idx < 0)) {
-        HS_PERIODIC_LOG(INFO, logstore, "No log store append on any log stores, skipping device truncation");
+        HS_PERIODIC_LOG(INFO, logstore,
+                        "No log store append on any log stores, skipping device truncation, all_logstore_info:<{}>",
+                        dbg_str);
         return min_safe_ld_key;
     } else {
         HS_PERIODIC_LOG(INFO, logstore, "LogDevice truncate, all_logstore_info:<{}> safe log dev key to truncate={}",
