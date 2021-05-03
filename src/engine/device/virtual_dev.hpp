@@ -652,7 +652,6 @@ public:
             return -1;
         }
 
-
         if (m_reserved_sz != 0) {
             HS_LOG(ERROR, device, "write can't be served when m_reserved_sz:{} is not comsumed by pwrite yet.",
                    m_reserved_sz);
@@ -664,7 +663,6 @@ public:
 
         return bytes_written;
     }
-
 
     ssize_t write(const void* buf, size_t count) { return write(buf, count, nullptr); }
 
@@ -685,7 +683,6 @@ public:
     ssize_t pwrite(const void* buf, size_t count, off_t offset, boost::intrusive_ptr< virtualdev_req > req = nullptr) {
         HS_ASSERT_CMP(RELEASE, count, <=, m_reserved_sz, "Write size:{} larger then reserved size: {} is not allowed!",
                       count, m_reserved_sz);
-
 
         // update reserved size
         m_reserved_sz -= count;
@@ -712,7 +709,6 @@ public:
                     const boost::intrusive_ptr< virtualdev_req >& req = nullptr) {
         uint32_t dev_id = 0, chunk_id = 0;
         auto len = get_len(iov, iovcnt);
-
 
         // if len is smaller than reserved size, it means write will never be overlapping start offset;
         // it is guaranteed by alloc_next_append_blk api;
@@ -756,7 +752,6 @@ public:
     ssize_t read(void* buf, size_t count) {
         uint32_t dev_id = 0, chunk_id = 0;
         off_t offset_in_chunk = 0;
-
 
         logical_to_dev_offset(m_seek_cursor, dev_id, chunk_id, offset_in_chunk);
 
@@ -806,7 +801,6 @@ public:
         uint32_t dev_id = 0, chunk_id = 0;
         off_t offset_in_chunk = 0;
 
-
         uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
 
         // if the read count is acrossing chunk, only return what's left in this chunk
@@ -843,7 +837,6 @@ public:
             HS_ASSERT(DEBUG, false, "Not implemented yet");
             return 0;
         }
-
 
         uint32_t dev_id = 0, chunk_id = 0;
         off_t offset_in_chunk = 0;
@@ -1011,7 +1004,7 @@ public:
 #ifdef _PRERELEASE
                     if (auto fake_status = homestore_flip->get_test_flip< uint32_t >("blk_allocation_flip", nblks,
                                                                                      chunk->get_vdev_id())) {
-                        return static_cast<BlkAllocStatus>(fake_status.get());
+                        return static_cast< BlkAllocStatus >(fake_status.get());
                     }
 #endif
                     static thread_local std::vector< BlkId > chunk_blkid{};
@@ -1030,7 +1023,7 @@ public:
                 }
 
                 if ((status == BlkAllocStatus::SUCCESS) || !hints.can_look_for_other_dev) { break; }
-                dev_ind = static_cast<uint32_t>((dev_ind + 1) % m_primary_pdev_chunks_list.size());
+                dev_ind = static_cast< uint32_t >((dev_ind + 1) % m_primary_pdev_chunks_list.size());
             } while (dev_ind != start_dev_ind);
 
             if (status != BlkAllocStatus::SUCCESS) {
@@ -1409,8 +1402,8 @@ private:
         ResourceMgr::check_journal_size_and_trigger_cp(get_used_space(), get_size());
         if (used_per >= ResourceMgr::get_journal_size_limit()) {
             COUNTER_INCREMENT(m_metrics, vdev_high_watermark_count, 1);
-            HS_LOG(WARN, device, "high watermark hit, used percentage: {}, high watermark percentage: {}", used_per,
-                   vdev_high_watermark_per)
+            HS_LOG_EVERY_N(WARN, device, 50, "high watermark hit, used percentage: {}, high watermark percentage: {}",
+                           used_per, vdev_high_watermark_per);
             if (m_hwm_cb && m_truncate_done) {
                 // don't send high watermark callback repeated until at least one truncate has been received;
                 HS_LOG(INFO, device, "Callback to client for high watermark warning.");

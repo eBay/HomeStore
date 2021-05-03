@@ -3,6 +3,10 @@
 #include <sds_logging/logging.h>
 #include <spdlog/fmt/fmt.h>
 #include <metrics/metrics.hpp>
+#include <fds/utils.hpp>
+#include <map>
+#include <string>
+#include <string_view>
 
 // clang-format off
 /***** HomeStore Logging Macro facility: Goal is to provide consistent logging capability
@@ -56,13 +60,14 @@
 #define HS_PERIODIC_DETAILED_LOG(level, mod, submod_name, submod_val, detail_name, detail_val, msg, ...)               \
     {                                                                                                                  \
         LOG##level##MOD_FMT_USING_LOGGER(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                               \
-                                         ([&](fmt::memory_buffer& buf, const char* __m, auto&&... args) {              \
+                                         ([&](fmt::memory_buffer& buf, const char* __m, auto&&... args) -> bool {      \
                                              fmt::format_to(buf, "[{}:{}] ", file_name(__FILE__), __LINE__);           \
                                              BOOST_PP_IF(BOOST_PP_IS_EMPTY(submod_name), ,                             \
                                                          fmt::format_to(buf, "[{}={}] ", submod_name, submod_val));    \
                                              BOOST_PP_IF(BOOST_PP_IS_EMPTY(detail_name), ,                             \
                                                          fmt::format_to(buf, "[{}={}] ", detail_name, detail_val));    \
                                              fmt::format_to(buf, __m, args...);                                        \
+                                             return true;                                                              \
                                          }),                                                                           \
                                          HomeStoreBase::periodic_logger(), msg, ##__VA_ARGS__);                        \
     }
@@ -71,7 +76,7 @@
 #define HS_DETAILED_LOG(level, mod, req, submod_name, submod_val, detail_name, detail_val, msg, ...)                   \
     {                                                                                                                  \
         LOG##level##MOD_FMT(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                                            \
-                            ([&](fmt::memory_buffer& buf, const char* __m, auto&&... args) {                           \
+                            ([&](fmt::memory_buffer& buf, const char* __m, auto&&... args) -> bool {                   \
                                 fmt::format_to(buf, "[{}:{}] ", file_name(__FILE__), __LINE__);                        \
                                 BOOST_PP_IF(BOOST_PP_IS_EMPTY(submod_name), ,                                          \
                                             fmt::format_to(buf, "[{}={}] ", submod_name, submod_val));                 \
@@ -80,9 +85,32 @@
                                 BOOST_PP_IF(BOOST_PP_IS_EMPTY(detail_name), ,                                          \
                                             fmt::format_to(buf, "[{}={}] ", detail_name, detail_val));                 \
                                 fmt::format_to(buf, __m, args...);                                                     \
+                                return true;                                                                           \
                             }),                                                                                        \
                             msg, ##__VA_ARGS__);                                                                       \
     }
+
+#define HS_DETAILED_LOG_EVERY_N(level, mod, freq, submod_name, submod_val, detail_name, detail_val, msg, ...)          \
+    {                                                                                                                  \
+        LOG##level##MOD_FMT(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                                            \
+                            ([&](fmt::memory_buffer& buf, const char* __m, auto&&... args) -> bool {                   \
+                                fmt::format_to(buf, "[{}:{}] ", file_name(__FILE__), __LINE__);                        \
+                                BOOST_PP_IF(BOOST_PP_IS_EMPTY(submod_name), ,                                          \
+                                            fmt::format_to(buf, "[{}={}] ", submod_name, submod_val));                 \
+                                BOOST_PP_IF(BOOST_PP_IS_EMPTY(detail_name), ,                                          \
+                                            fmt::format_to(buf, "[{}={}] ", detail_name, detail_val));                 \
+                                fmt::format_to(buf, __m, args...);                                                     \
+                                const auto count = check_logged_already(buf);                                          \
+                                if (count % freq == 0) {                                                               \
+                                    if (count) { fmt::format_to(buf, " ...Repeated {} times in this thread", freq); }  \
+                                    return true;                                                                       \
+                                }                                                                                      \
+                                return false;                                                                          \
+                            }),                                                                                        \
+                            msg, ##__VA_ARGS__);                                                                       \
+    }
+
+#define HS_LOG_EVERY_N(level, mod, freq, msg, ...) HS_DETAILED_LOG_EVERY_N(level, mod, freq, , , , , msg, ##__VA_ARGS__)
 
 #define HS_SUBMOD_LOG(level, mod, req, submod_name, submod_val, msg, ...)                                              \
     HS_DETAILED_LOG(level, mod, req, submod_name, submod_val, , , msg, ##__VA_ARGS__)
@@ -122,7 +150,7 @@
     {                                                                                                                  \
         assert_type##_ASSERT_FMT(                                                                                      \
             cond,                                                                                                      \
-            [&](fmt::memory_buffer& buf, const char* __m, auto&&... args) {                                            \
+            [&](fmt::memory_buffer& buf, const char* __m, auto&&... args) -> bool {                                    \
                 BOOST_PP_IF(BOOST_PP_IS_EMPTY(submod_name), ,                                                          \
                             fmt::format_to(buf, "\n[{}={}] ", submod_name, submod_val));                               \
                 BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), , fmt::format_to(buf, "\n[request={}] ", req->to_string()));       \
@@ -131,6 +159,7 @@
                 fmt::format_to(buf, "\n[Metrics = {}]\n",                                                              \
                                sisl::MetricsFarm::getInstance().get_result_in_json().dump(4));                         \
                 fmt::format_to(buf, __m, args...);                                                                     \
+                return true;                                                                                           \
             },                                                                                                         \
             msg, ##__VA_ARGS__);                                                                                       \
     }
@@ -144,7 +173,7 @@
     {                                                                                                                  \
         assert_type##_ASSERT_CMP(                                                                                      \
             val1, cmp, val2,                                                                                           \
-            [&](fmt::memory_buffer& buf, const char* __m, auto&&... args) {                                            \
+            [&](fmt::memory_buffer& buf, const char* __m, auto&&... args) -> bool {                                    \
                 fmt::format_to(buf, "[{}:{}] ", file_name(__FILE__), __LINE__);                                        \
                 sds_logging::default_cmp_assert_formatter(buf, __m, args...);                                          \
                 BOOST_PP_IF(BOOST_PP_IS_EMPTY(submod_name), ,                                                          \
@@ -154,6 +183,7 @@
                             fmt::format_to(buf, "\n[{}={}] ", detail_name, detail_val));                               \
                 fmt::format_to(buf, "\n[Metrics = {}]\n",                                                              \
                                sisl::MetricsFarm::getInstance().get_result_in_json().dump(4));                         \
+                return true;                                                                                           \
             },                                                                                                         \
             ##__VA_ARGS__);                                                                                            \
     }
@@ -202,3 +232,16 @@
 #define HS_RELEASE_ASSERT_LE(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, <=, val2, ##__VA_ARGS__)
 #define HS_RELEASE_ASSERT_GT(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, >, val2, ##__VA_ARGS__)
 #define HS_RELEASE_ASSERT_GE(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, >=, val2, ##__VA_ARGS__)
+
+static uint64_t check_logged_already(const fmt::memory_buffer& buf) {
+    static constexpr uint64_t COUNTER_RESET_SEC = 300; // Reset every 5 minutes
+    static thread_local std::map< std::string, std::pair< Clock::time_point, uint64_t >, std::less<> > log_map;
+
+    const std::string_view msg{buf.data()};
+    auto [it, happened] = log_map.emplace(msg, std::make_pair(Clock::now(), 0ul));
+    HS_RELEASE_ASSERT(it != log_map.end(), "Expected entry to be either present or new insertion to succeed");
+    auto& [tm, count] = it->second;
+    count = (get_elapsed_time_sec(tm) > COUNTER_RESET_SEC) ? 0ul : count + 1ul;
+    tm = Clock::now();
+    return count;
+}
