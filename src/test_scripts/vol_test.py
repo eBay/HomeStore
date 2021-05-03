@@ -273,7 +273,7 @@ def vol_create_delete_test():
     # abort during first cp create
     cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --indx_create_first_cp_abort=true --run_time=10000 --max_num_writes=1000000 --num_threads=1"
     subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --delete_volume=0 --run_time=600 --create_del_ops_interval=600"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --delete_volume=0 --run_time=600 --create_del_ops_interval=600 --verify_type=2 "
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
     print("homestore create first cp test completed")
 
