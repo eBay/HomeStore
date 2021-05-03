@@ -144,7 +144,7 @@ bool VarsizeBlkAllocator::is_blk_alloced(const BlkId& b, const bool use_lock) co
     } else {
         if (!bits_set()) return false;
     }
-    return (BlkAllocator::is_blk_alloced_on_disk(b, use_lock));
+    return true;
 }
 
 void VarsizeBlkAllocator::inited() {

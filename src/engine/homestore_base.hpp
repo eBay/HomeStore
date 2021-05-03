@@ -68,7 +68,9 @@ static inline HomeStoreBaseSafePtr HomeStorePtr() { return HomeStoreBase::safe_i
 static inline HomeStoreBase* HomeStoreRawPtr() { return HomeStoreBase::instance(); }
 
 static inline auto hs_iobuf_alloc(size_t size) {
-    return iomanager.iobuf_alloc(HS_STATIC_CONFIG(drive_attr.align_size), size);
+    auto buf = iomanager.iobuf_alloc(HS_STATIC_CONFIG(drive_attr.align_size), size);
+    HS_ASSERT_NOTNULL(RELEASE, buf, "io buf is null. probably going out of memory");
+    return buf;
 }
 
 using hs_uuid_t = time_t;

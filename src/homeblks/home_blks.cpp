@@ -412,9 +412,12 @@ void HomeBlks::init_done() {
 
     /* verifying volumes */
     LOGINFO("verifying vols");
-    /* TODO: we should remove this check later in release. It will increase the recovery time */
+
+#ifdef _PRERELEASE
     HS_RELEASE_ASSERT((verify_vols()), "vol verify failed");
     HS_RELEASE_ASSERT((verify_bitmap()), "bitmap verify failed");
+#endif
+
     LOGINFO("init done");
     m_out_params.first_time_boot = m_dev_mgr->is_first_time_boot();
     m_out_params.max_io_size = HS_STATIC_CONFIG(engine.max_vol_io_size);

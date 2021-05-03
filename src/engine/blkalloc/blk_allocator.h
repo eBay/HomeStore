@@ -244,11 +244,6 @@ public:
         if (!m_auto_recovery) {
             return true; // nothing to compare. So always return true
         }
-        return true;
-/* TODO: we don't reserve blks immediately after allocation. It is done at the end of CP. So
- * this check is not valid anymore. We need to find another way to enable this api.
- */
-#if 0
         auto bits_set{[this, &b]() {
             // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache
             // bm.
@@ -265,7 +260,6 @@ public:
         } else {
             return bits_set();
         }
-#endif
     }
 
     /* It is used during recovery in both mode :- auto recovery and manual recovery

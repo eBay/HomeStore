@@ -46,8 +46,7 @@ blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion* const portion, const 
 
 bool FixedBlkAllocator::is_blk_alloced(const BlkId& b, const bool use_lock) const {
     /* We need to take lock so we can check in non debug builds */
-    if (!m_inited) { return true; }
-    return (BlkAllocator::is_blk_alloced_on_disk(b, use_lock));
+    return true;
 }
 
 BlkAllocStatus FixedBlkAllocator::alloc(const blk_count_t nblks, const blk_alloc_hints& hints,
