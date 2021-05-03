@@ -90,8 +90,10 @@ void Volume::set_io_flip() {
 #endif
 
 Volume::Volume(const vol_params& params) :
-        m_params(params), m_metrics(params.vol_name, this),
-        m_comp_cb(params.io_comp_cb), m_indx_mgr_destroy_started(false) {
+        m_params(params),
+        m_metrics(params.vol_name, this),
+        m_comp_cb(params.io_comp_cb),
+        m_indx_mgr_destroy_started(false) {
 
     /* this counter is decremented later when this volume become part of a cp. until then shutdown is
      * not allowed.
@@ -869,6 +871,11 @@ bool Volume::is_offline() const {
     return (state != vol_state::ONLINE || m_hb->is_shutdown());
 }
 
+bool Volume::is_online() const {
+    auto state = get_state();
+    return (state == vol_state::ONLINE);
+}
+
 void Volume::write_sb() {
     std::unique_lock< std::mutex > lk(m_sb_lock);
     auto sb = (vol_sb_hdr*)m_sb_buf.bytes();
@@ -942,8 +949,16 @@ std::vector< iovec > Volume::get_next_iovecs(IoVecTransversal& iovec_transversal
     return iovecs;
 }
 
+// Note: Metrics scrapping can happen at any point after volume instance is created and registered with metrics farm;
 void VolumeMetrics::on_gather() {
-    cap_attrs size{m_volume->get_used_size()};
-    GAUGE_UPDATE(*this, volume_data_used_size, size.used_data_size);
-    GAUGE_UPDATE(*this, volume_index_used_size, size.used_index_size);
+    // is_online makes sure in first-time-boot indx mgr is created before metrics can go ahead to get used size
+    // through indx mgr;
+    if (m_volume->is_online() && m_volume->is_recovery_done()) {
+        cap_attrs size{m_volume->get_used_size()};
+        GAUGE_UPDATE(*this, volume_data_used_size, size.used_data_size);
+        GAUGE_UPDATE(*this, volume_index_used_size, size.used_index_size);
+    } else {
+        LOGWARN("gathering metrics before volume is ready: state: {}, recovery_done: {}, can not serve this request!",
+                m_volume->is_online() ? "Online" : "Offline", m_volume->is_recovery_done());
+    }
 }

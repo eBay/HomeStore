@@ -238,7 +238,7 @@ private:
     vol_params m_params;
     VolumeMetrics m_metrics;
     HomeBlksSafePtr m_hb; // Hold onto the homeblks to maintain reference
-    std::shared_ptr< SnapMgr > m_indx_mgr;
+    std::shared_ptr< SnapMgr > m_indx_mgr{nullptr};
     boost::intrusive_ptr< BlkBuffer > m_only_in_mem_buff;
     io_comp_callback m_comp_cb;
 
@@ -489,6 +489,11 @@ public:
      */
     bool is_offline() const;
 
+    /* Check if volume is online
+     * @params :- return true if it is online
+     */
+    bool is_online() const;
+
     size_t call_batch_completion_cbs();
 
     /* Update a new cp of this volume.
@@ -516,7 +521,11 @@ public:
     void recovery_start_phase2();
     static void fake_reboot(){};
     std::shared_ptr< SnapMgr > get_indx_mgr_instance() { return m_indx_mgr; }
-    bool is_recovery_done() const { return m_indx_mgr->is_recovery_done(); }
+    bool is_recovery_done() const {
+        // if we are here but m_indx_mgr is nullptr, it means volume instance is created but index recovery is not done
+        // yet;
+        return (m_indx_mgr != nullptr) && (m_indx_mgr->is_recovery_done());
+    }
 };
 
 /* Note :- Any member inside this structure is not lock protected. Its caller responsibility to call it under lock
