@@ -34,10 +34,10 @@ public:
     /* monitor free blk cnt */
     static void inc_free_blk(int size) {
         // trigger hs cp when either one of the limit is reached
-        if ((m_hs_fb_cnt.fetch_add(1, std::memory_order_relaxed) > get_free_blk_cnt_limit()) ||
-            (m_hs_fb_size.fetch_add(size, std::memory_order_relaxed) > get_free_blk_size_limit())) {
-            IndxMgr::trigger_hs_cp();
-        }
+        auto cnt = m_hs_fb_cnt.fetch_add(1, std::memory_order_relaxed);
+        auto sz = m_hs_fb_size.fetch_add(size, std::memory_order_relaxed);
+
+        if (cnt > get_free_blk_cnt_limit() || sz > get_free_blk_size_limit()) { IndxMgr::trigger_hs_cp(); }
     }
 
     static void dec_free_blk(int size) {
