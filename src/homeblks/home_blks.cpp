@@ -427,6 +427,13 @@ void HomeBlks::init_done() {
     /* It will trigger race conditions without generating any IO error */
     set_io_flip();
 #endif
+
+    register_status_cb();
+}
+
+void HomeBlks::register_status_cb() {
+    get_status_mgr()->register_status_cb("MetaBlkMgr",
+                                         std::bind(&MetaBlkMgr::get_status, MetaBlkMgrSI(), std::placeholders::_1));
 }
 
 data_blkstore_t::comp_callback HomeBlks::data_completion_cb() { return Volume::process_vol_data_completions; };
@@ -792,6 +799,8 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     } else {
         LOGINFO("Http server is not started by user! start_http = {}", m_cfg.start_http);
     }
+
+    m_hb_status_mgr = std::make_unique< HomeBlksStatusMgr >();
 
     /* We don't allow any cp to happen during phase1 */
     StaticIndxMgr::init();

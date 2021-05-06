@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <set>
+#include <sstream>
 #include <string>
 
 #include "engine/blkalloc/blk.h"
@@ -84,6 +85,14 @@ struct meta_blk_sb {
     BlkId next_bid; // next metablk
     BlkId prev_bid; // previous metablk
     BlkId bid;
+
+    std::string to_string() {
+        std::ostringstream ss{};
+        ss << "version: " << version << ", magic: " << magic << ", migrated: " << migrated
+           << ", next_bid: " << next_bid.to_string() << ", prev_bid: " << prev_bid.to_string()
+           << ", self-bid: " << bid.to_string();
+        return ss.str();
+    }
 };
 #pragma pack()
 

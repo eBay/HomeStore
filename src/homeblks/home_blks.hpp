@@ -235,6 +235,8 @@ public:
     void do_volume_shutdown(bool force);
     void create_volume(VolumePtr vol);
 
+    void register_status_cb();
+
     data_blkstore_t::comp_callback data_completion_cb() override;
 
     /**

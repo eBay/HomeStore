@@ -11,6 +11,7 @@
 
 #include <fds/utils.hpp>
 #include <metrics/metrics.hpp>
+#include <nlohmann/json.hpp>
 
 namespace homestore {
 
@@ -321,14 +322,16 @@ private:
     [[nodiscard]] uint64_t get_init_compress_memory_size() const;
     [[nodiscard]] uint32_t get_compress_ratio_limit() const;
     [[nodiscard]] bool compress_feature_on() const;
+
+    [[nodiscard]] nlohmann::json get_status(const int log_level) const;
 };
 
 static MetaBlkMgr* MetaBlkMgrSI() { return MetaBlkMgr::instance(); }
 
 class register_subsystem {
 public:
-    register_subsystem(const meta_sub_type type, const meta_blk_found_cb_t& cb, const meta_blk_recover_comp_cb_t& comp_cb,
-                       const bool do_crc = true) {
+    register_subsystem(const meta_sub_type type, const meta_blk_found_cb_t& cb,
+                       const meta_blk_recover_comp_cb_t& comp_cb, const bool do_crc = true) {
         MetaBlkMgrSI()->register_handler(type, cb, comp_cb, do_crc);
     }
     register_subsystem(const register_subsystem&) = delete;
@@ -337,7 +340,6 @@ public:
     register_subsystem& operator=(register_subsystem&&) noexcept = delete;
 
     ~register_subsystem() = default;
-
 };
 
 /* It provides alternate way to module to register itself to metablk at the very beginning of a program */

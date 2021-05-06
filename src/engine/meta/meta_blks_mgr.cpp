@@ -1135,4 +1135,32 @@ uint32_t MetaBlkMgr::get_page_size() const { return HS_STATIC_CONFIG(drive_attr.
 uint64_t MetaBlkMgr::get_available_blks() const { return m_sb_blk_store->get_available_blks(); }
 
 bool MetaBlkMgr::m_self_recover{false};
+
+nlohmann::json MetaBlkMgr::get_status(const int log_level) const {
+    nlohmann::json j;
+    j["ssb"] = m_ssb ? m_ssb->to_string() : "";
+    j["self_recovery"] = m_self_recover;
+
+    for (auto& x : m_sub_info) {
+        j[x.first]["type"] = x.first;
+        j[x.first]["do_crc"] = x.second.do_crc;
+        j[x.first]["cb"] = x.second.cb ? "registered valid cb" : "nullptr";
+        j[x.first]["comp_cb"] = x.second.comp_cb ? "registered valid cb" : "nullptr";
+        j[x.first]["num_meta_bids"] = x.second.meta_bids.size();
+        if (log_level >= 2) {
+            size_t bid_cnt{0};
+            for (const auto& y : x.second.meta_bids) {
+                BlkId bid(y);
+                j[x.first]["meta_bids"][std::to_string(bid_cnt++)] = bid.to_string();
+            }
+        }
+    }
+
+    j["last_mid"] = m_last_mblk_id->to_string();
+
+    j["compression"] = compress_feature_on() ? "On" : "Off";
+
+    return j;
+}
+
 } // namespace homestore
