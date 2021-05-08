@@ -96,15 +96,6 @@ table LogStore {
 }
 
 table Generic {
-    /* Percentage of memory to be filled by app before we ask underlying mem allocator to free it up */
-    soft_mem_release_threshold: uint32 = 85 (hotswap);
-
-    /* Percentage of memory to be filled by app before we force underlying mem allocator to free it up */
-    aggressive_mem_release_threshold: uint32 = 95 (hotswap);
-
-    /* Rate of memory release rate to the underlying mem allocator */
-    mem_release_rate: uint32 = 8;
-
     // blk alloc cp timer in us
     blkalloc_cp_timer_us: uint64 = 1000000 (hotswap);
 

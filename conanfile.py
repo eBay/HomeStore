@@ -16,14 +16,12 @@ class HomestoreConan(ConanFile):
                 "shared": ['True', 'False'],
                 "fPIC": ['True', 'False'],
                 "sanitize": ['True', 'False'],
-                'malloc_impl' : ['libc', 'jemalloc'],
                 'testing' : ['coverage', 'full', 'min', 'off', 'epoll_mode', 'spdk_mode'],
                 }
     default_options = (
                         'shared=False',
                         'fPIC=True',
                         'sanitize=True',
-                        'malloc_impl=libc',
                         'testing=epoll_mode',
                         )
 
@@ -52,16 +50,14 @@ class HomestoreConan(ConanFile):
     keep_imports = True
 
     def configure(self):
-        if not self.settings.build_type == "Debug":
+        if self.settings.build_type == "Debug":
+            if self.options.sanitize:
+                self.options['sisl'].malloc_impl = 'libc'
+        else:
             self.options.sanitize = False
 
     def imports(self):
         self.copy(root_package="flip", pattern="*.py", dst="bin/scripts", src="python/flip/", keep_path=True)
-
-    def requirements(self):
-        if not self.settings.build_type == "Debug":
-            self.requires("jemalloc/5.2.1")
-            self.options.malloc_impl = "jemalloc"
 
     def build(self):
         cmake = CMake(self)
@@ -81,8 +77,6 @@ class HomestoreConan(ConanFile):
         if self.settings.build_type == 'Debug':
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
         
-        definitions['MALLOC_IMPL'] = self.options.malloc_impl
-
         cmake.configure(defs=definitions)
         cmake.build()
         if not self.options.testing == 'off':
@@ -102,8 +96,6 @@ class HomestoreConan(ConanFile):
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
         self.cpp_info.cxxflags.append("-DBOOST_ALLOW_DEPRECATED_HEADERS")
-        if not self.settings.build_type == 'Debug':
-            self.cpp_info.cxxflags.append("-DUSE_JEMALLOC")
         if self.options.sanitize:
             self.cpp_info.sharedlinkflags.append("-fsanitize=address")
             self.cpp_info.exelinkflags.append("-fsanitize=address")

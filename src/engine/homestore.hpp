@@ -69,6 +69,9 @@ public:
 
         HomeStoreDynamicConfig::init_settings_default();
 
+        // Restrict iomanager to throttle upto the app mem size allocated for us
+        iomanager.set_io_memory_limit(HS_STATIC_CONFIG(input.app_mem_size));
+
         // Start a custom periodic logger
         static std::once_flag flag1;
         std::call_once(flag1, [this]() {
@@ -105,8 +108,6 @@ public:
 
         /* create cache */
         uint64_t cache_size = ResourceMgr::get_cache_size();
-        sisl::set_memory_release_rate(HS_DYNAMIC_CONFIG(generic.mem_release_rate));
-
         m_cache = std::make_unique< Cache< BlkId > >(cache_size, hs_config.drive_attr.atomic_phys_page_size);
 
         /* create device manager */
