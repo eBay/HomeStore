@@ -439,16 +439,17 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
                                       1);
             uint64_t cnt = m_err_cnt.fetch_add(1, std::memory_order_relaxed);
             THIS_VOL_LOG(ERROR, , vreq, "Vol operation error {}", err.message());
-            completed = true;
-            /* outstanding io cnt is not decremented. So it never going to do another completion callback if other
-             * child requests are completed successfully
-             */
+            /* we wait for all outstanding child req to be completed before we do completion upcall */
         } else {
             THIS_VOL_LOG(WARN, , vreq, "Receiving completion on already completed request id={}", vreq->request_id);
         }
-    } else if (vreq->state == volume_req_state::data_io) {
+    }
+
+    if (vreq->state == volume_req_state::data_io) {
         if (vreq->outstanding_io_cnt.decrement_testz(1)) {
-            if (vreq->is_read_op()) {
+            if (vreq->iface_req->get_status()) {
+                completed = true;
+            } else if (vreq->is_read_op()) {
                 /* verify checksum for read */
                 verify_csum(vreq);
                 completed = true;
@@ -465,47 +466,41 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
     }
 
     if (completed) {
-        if (vreq->state != volume_req_state::completed) {
-            vreq->state = volume_req_state::completed;
+        VOL_DEBUG_ASSERT_CMP(vreq->state, !=, volume_req_state::completed, vreq, "state should not be completed");
+        vreq->state = volume_req_state::completed;
 
-            /* update counters */
-            size = get_page_size() * vreq->nlbas();
-            auto latency_us = get_elapsed_time_us(vreq->io_start_time);
-            if (vreq->is_read_op()) {
-                COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
-                COUNTER_INCREMENT(m_metrics, volume_read_size_total, size);
-                HISTOGRAM_OBSERVE(m_metrics, volume_read_size_distribution, size);
-                HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_read, vreq->vc_req_cnt);
-                HISTOGRAM_OBSERVE(m_metrics, volume_read_latency, latency_us);
-            } else {
-                COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
-                COUNTER_INCREMENT(m_metrics, volume_write_size_total, size);
-                HISTOGRAM_OBSERVE(m_metrics, volume_write_size_distribution, size);
-                HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_write, vreq->vc_req_cnt);
-                HISTOGRAM_OBSERVE(m_metrics, volume_write_latency, latency_us);
-            }
-
-            if (latency_us > 5000000) { THIS_VOL_LOG(WARN, , vreq, "vol req took time {} us", latency_us); }
-
-            if (!vreq->is_sync()) {
-#ifdef _PRERELEASE
-                if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_comp_delay_us")) {
-                    LOGINFO("delaying completion in volume for {} us", flip_ret.get());
-                    std::this_thread::sleep_for(std::chrono::microseconds{flip_ret.get()});
-                }
-#endif
-                THIS_VOL_LOG(TRACE, volume, vreq, "IO DONE");
-                interface_req_done(vreq->iface_req);
-            }
+        /* update counters */
+        size = get_page_size() * vreq->nlbas();
+        const auto latency_us = get_elapsed_time_us(vreq->io_start_time);
+        if (vreq->is_read_op()) {
+            COUNTER_DECREMENT(m_metrics, volume_outstanding_data_read_count, 1);
+            COUNTER_INCREMENT(m_metrics, volume_read_size_total, size);
+            HISTOGRAM_OBSERVE(m_metrics, volume_read_size_distribution, size);
+            HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_read, vreq->vc_req_cnt);
+            HISTOGRAM_OBSERVE(m_metrics, volume_read_latency, latency_us);
         } else {
-            VOL_DEBUG_ASSERT_CMP(vreq->is_unmap(), ==, true, vreq, "this operation is allowed only for unmap");
+            COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
+            COUNTER_INCREMENT(m_metrics, volume_write_size_total, size);
+            HISTOGRAM_OBSERVE(m_metrics, volume_write_size_distribution, size);
+            HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_write, vreq->vc_req_cnt);
+            HISTOGRAM_OBSERVE(m_metrics, volume_write_latency, latency_us);
         }
 
-        if (err || !vreq->is_unmap() || vreq->is_io_completed()) {
-            /* we wait for unmap to complete before shutdown/destroy starts */
-            shutdown_if_needed();
+        if (latency_us > 5000000) { THIS_VOL_LOG(WARN, , vreq, "vol req took time {} us", latency_us); }
+
+        if (!vreq->is_sync()) {
+#ifdef _PRERELEASE
+            if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_comp_delay_us")) {
+                LOGINFO("delaying completion in volume for {} us", flip_ret.get());
+                std::this_thread::sleep_for(std::chrono::microseconds{flip_ret.get()});
+            }
+#endif
+            THIS_VOL_LOG(TRACE, volume, vreq, "IO DONE");
+            interface_req_done(vreq->iface_req);
         }
+        shutdown_if_needed();
     }
+
     return completed;
 }
 
@@ -827,6 +822,11 @@ void Volume::interface_req_done(const vol_interface_req_ptr& iface_req) {
                 HomeBlks::s_io_completed_volumes = sisl::VectorPool< std::shared_ptr< Volume > >::alloc();
             }
             HomeBlks::s_io_completed_volumes->push_back(shared_from_this());
+
+            /* we increment the ref count so that volume/homeblks doesn't shutdown before completion callback is done.
+             */
+            home_blks_ref_cnt.increment();
+            m_vol_ref_cnt.increment();
         }
         THIS_VOL_LOG(TRACE, volume, iface_req, "Added to completed req, its size now = {}", m_completed_reqs->size());
     } else if (std::holds_alternative< io_single_comp_callback >(m_comp_cb)) {
@@ -846,6 +846,7 @@ size_t Volume::call_batch_completion_cbs() {
             (std::get< io_batch_comp_callback >(m_comp_cb))(*comp_reqs);
             m_completed_reqs->drop(comp_reqs);
         }
+        shutdown_if_needed();
     }
     return count;
 }

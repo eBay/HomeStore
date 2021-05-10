@@ -379,7 +379,7 @@ public:
             free_size = bid.data_size(m_pagesz);
         }
 
-        /* We don't call safe erase as we depend on the consumer to free the blkid then no body
+        /* We don't call safe erase as we depend on the consumer to free the blkid when no body
          * is accessing it.
          */
 #if 0

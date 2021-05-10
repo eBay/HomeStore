@@ -1385,6 +1385,14 @@ void StaticIndxMgr::init() {
     m_cp_mgr = std::unique_ptr< HomeStoreCPMgr >(new HomeStoreCPMgr());
     m_read_blk_tracker = std::unique_ptr< Blk_Read_Tracker >(new Blk_Read_Tracker(IndxMgr::safe_to_free_blk));
     /* start the timer for blkalloc checkpoint */
+#ifdef NDEBUG
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.generic.blkalloc_cp_timer_us = 1000000; // setting to 1 sec for debug build
+    });
+    HS_SETTINGS_FACTORY().save();
+#endif
+
+    LOGINFO("blkalloc cp timer is set to {} usec", HS_DYNAMIC_CONFIG(generic.blkalloc_cp_timer_us));
     m_hs_cp_timer_hdl =
         iomanager.schedule_global_timer(HS_DYNAMIC_CONFIG(generic.blkalloc_cp_timer_us) * 1000, true, nullptr,
                                         iomgr::thread_regex::all_user, [](void* cookie) { trigger_hs_cp(); });
@@ -1639,7 +1647,7 @@ void StaticIndxMgr::safe_to_free_blk(const Free_Blk_Entry& fbe) {
     /* invalidate the cache */
     auto page_sz = m_hs->get_data_pagesz();
     m_hs->get_data_blkstore()->free_blk(fbe.get_base_blkid(), (fbe.blk_offset() * page_sz),
-                                        (fbe.blks_to_free() * page_sz), true);
+                                        (fbe.blks_to_free() * page_sz), true /* cache only */);
     m_cp_mgr->cp_io_exit(hcp);
     /* We have already free the blk after journal write is completed. We are just holding a cp for free to complete
      */

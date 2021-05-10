@@ -245,10 +245,7 @@ public:
             return true; // nothing to compare. So always return true
         }
         auto bits_set{[this, &b]() {
-            // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache
-            // bm.
             if (!m_disk_bm->is_bits_set(b.get_blk_num(), b.get_nblks())) {
-                BLKALLOC_ASSERT(RELEASE, 0, "Expected bits to set");
                 return false;
             }
             return true;
