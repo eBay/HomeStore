@@ -291,11 +291,11 @@ public:
                  * This assert is valid only post recovery.
                  */
                 if (!get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks())) {
-                    BLKALLOC_LOG(DEBUG, "bit not set {} nblks{} chunk number {}", b.get_blk_num(), b.get_nblks(),
+                    BLKALLOC_LOG(ERROR, "bit not set {} nblks{} chunk number {}", b.get_blk_num(), b.get_nblks(),
                                  m_chunk_id);
                     for (uint32_t i = 0; i < b.get_nblks(); ++i) {
                         if (!get_disk_bm()->is_bits_set(b.get_blk_num() + i, 1)) {
-                            BLKALLOC_LOG(DEBUG, "bit not set {}", b.get_blk_num() + i);
+                            BLKALLOC_LOG(ERROR, "bit not set {}", b.get_blk_num() + i);
                         }
                     }
                     BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks()),
@@ -339,13 +339,11 @@ public:
 
     void create_debug_bm() {
         m_debug_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), m_chunk_id,
-                                    HS_STATIC_CONFIG(drive_attr.align_size));
+                                                      HS_STATIC_CONFIG(drive_attr.align_size));
         assert(m_cfg.get_blks_per_portion() % m_debug_bm->word_size() == 0);
     }
 
-    void update_debug_bm(const BlkId& bid) {
-        get_debug_bm()->set_bits(bid.get_blk_num(), bid.get_nblks());
-    }
+    void update_debug_bm(const BlkId& bid) { get_debug_bm()->set_bits(bid.get_blk_num(), bid.get_nblks()); }
 
     [[nodiscard]] bool verify_debug_bm(bool free_debug_bm) {
         bool ret{*get_disk_bm() == *get_debug_bm()};
