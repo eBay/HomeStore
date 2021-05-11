@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <system_error>
 #include <type_traits>
 #include <vector>
@@ -15,6 +16,7 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <fds/sparse_vector.hpp>
+#include <fds/utils.hpp>
 #include <metrics/metrics.hpp>
 #include <settings/settings.hpp>
 #include <utility/atomic_counter.hpp>
@@ -99,14 +101,38 @@ public:
 typedef WriteBackCacheBuffer< MappingKey, MappingValue, btree_node_type::VAR_VALUE, btree_node_type::VAR_VALUE >
     BLKSTORE_BUFFER_TYPE;
 
+struct HomeBlksRecoveryStats {
+    Clock::time_point m_start;  // recovery start time
+    uint64_t m_phase0_ms{0};    // time spent in phase0: from init to receipt of meta_blk_recovery_comp_cb;
+    uint64_t m_phase1_ms{0};    // time spent in phase1: volume Phase 1
+    uint64_t m_phase2_ms{0};    // time spent in phase2: volume Phase 2
+    uint64_t m_log_store_ms{0}; // time spent in logstore recovery
+    uint64_t m_total_ms{0};     // total: from metablk notify homeblks of comp_cb to init_done;
+
+    void phase0_done() { m_phase0_ms = get_elapsed_time_ms(m_start); }
+
+    void start() { m_start = Clock::now(); }
+
+    void end() {
+        m_total_ms = get_elapsed_time_ms(m_start);
+        LOGINFO("{}", to_string());
+    }
+
+    std::string to_string() {
+        return fmt::format("Recovery Total (ms): {}, Recovery Total (ms): {},  Volume Phase-1 (ms): {}, Log Store "
+                           "Recovery (ms): {}, Volume Phase-2 (ms): {}",
+                           m_total_ms, m_phase0_ms, m_phase1_ms, m_log_store_ms, m_phase2_ms);
+    }
+};
+
 /**
  * @brief HomeBlks - Implementor of VolInterface.
  *
- * About HomeBlks life cycle: HomeBlks is a pseudo singleton class wherein it can be accessed as singelton, but using
- * that way is strongly discouraged. Upon the start of the application, the main routine or user of HomeBlks library,
- * need to initialize it by calling HomeBlks::init(). This sets the main homeblks object reference count to 2, one for
- * maintaning singleton status, 1 for the fact it is initialized and not shutdown. Whichever submodule, which needs to
- * access the homeblks should get the reference to the homeblks and store it locally by calling
+ * About HomeBlks life cycle: HomeBlks is a pseudo singleton class wherein it can be accessed as singelton, but
+ * using that way is strongly discouraged. Upon the start of the application, the main routine or user of HomeBlks
+ * library, need to initialize it by calling HomeBlks::init(). This sets the main homeblks object reference count to
+ * 2, one for maintaning singleton status, 1 for the fact it is initialized and not shutdown. Whichever submodule,
+ * which needs to access the homeblks should get the reference to the homeblks and store it locally by calling
  * HomeBlks::safe_instance(), to guarantee that homeblks are not shutdown underneath them.
  *
  * When the main routine calls, HomeBlks::shutdown(), it simply decrements the initial reference count and wait for
@@ -297,6 +323,7 @@ private:
     void vol_recovery_start_phase1();
     void vol_recovery_start_phase2();
     void trigger_cp_init(uint32_t vol_mount_cnt);
+    void start_home_log_store();
 
 private:
     init_params m_cfg;
@@ -329,6 +356,9 @@ private:
     HomeBlksMetrics m_metrics;
     std::atomic< bool > m_start_shutdown;
     iomgr::io_thread_t m_init_thread_id;
+
+    std::unique_ptr< HomeBlksRecoveryStats > m_recovery_stats{nullptr};
+
     static bool m_meta_blk_found;
 
     static thread_local std::vector< std::shared_ptr< Volume > >* s_io_completed_volumes;

@@ -122,6 +122,10 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     superblock_init();
     sisl::MallocMetrics::enable();
 
+    m_recovery_stats = std::make_unique< HomeBlksRecoveryStats >();
+
+    m_recovery_stats->start();
+
     /* start thread */
     auto sthread = sisl::named_thread("hb_init", [this]() {
         iomanager.run_io_loop(false, nullptr, [&](bool thread_started) {
@@ -429,6 +433,8 @@ void HomeBlks::init_done() {
 #endif
 
     register_status_cb();
+
+    m_recovery_stats->end();
 }
 
 void HomeBlks::register_status_cb() {
@@ -775,6 +781,8 @@ void HomeBlks::meta_blk_recovery_comp_cb(bool success) { instance()->meta_blk_re
 void HomeBlks::meta_blk_recovery_comp(bool success) {
     HS_ASSERT(RELEASE, success, "failed to recover HomeBlks SB.");
 
+    m_recovery_stats->phase0_done();
+
     auto sb = (homeblks_sb*)m_homeblks_sb_buf.bytes();
     /* check the status of last boot */
     if (sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
@@ -804,12 +812,11 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
 
     /* We don't allow any cp to happen during phase1 */
     StaticIndxMgr::init();
+
     /* phase 1 updates a btree superblock required for btree recovery during journal replay */
     vol_recovery_start_phase1();
 
-    // start log store recovery
-    LOGINFO("HomeLogStore recovery is started");
-    home_log_store_mgr.start(m_dev_mgr->is_first_time_boot());
+    start_home_log_store();
 
     StaticIndxMgr::hs_cp_resume(); // cp is suspended by default
 
@@ -886,17 +893,30 @@ void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) 
     m_homeblks_sb_buf = buf;
 }
 
+void HomeBlks::start_home_log_store() {
+    auto log_store_start = Clock::now();
+    // start log store recovery
+    LOGINFO("HomeLogStore recovery is started");
+    home_log_store_mgr.start(m_dev_mgr->is_first_time_boot());
+    m_recovery_stats->m_log_store_ms = get_elapsed_time_ms(log_store_start);
+}
+
 void HomeBlks::vol_recovery_start_phase1() {
+    auto phase1_start = Clock::now();
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
         it->second->recovery_start_phase1();
     }
+    m_recovery_stats->m_phase1_ms = get_elapsed_time_ms(phase1_start);
 }
 
 void HomeBlks::vol_recovery_start_phase2() {
+    auto phase2_start = Clock::now();
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
         HS_ASSERT(RELEASE, (it->second->verify_tree() == true), "true");
         it->second->recovery_start_phase2();
     }
+
+    m_recovery_stats->m_phase2_ms = get_elapsed_time_ms(phase2_start);
 }
 
 /* * Snapshot APIs  * */
