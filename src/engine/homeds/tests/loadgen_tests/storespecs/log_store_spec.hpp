@@ -20,8 +20,9 @@ class LogStoreSpec : public StoreSpec< LogStoreKey, LogStoreValue > {
 
 public:
     virtual void init_store(homeds::loadgen::Param& parameters) override {
-        home_log_store_mgr.start(true);
-        m_store = home_log_store_mgr.create_new_log_store(false /* append_mode */);
+        HomeLogStoreMgrSI().start(true);
+        m_store =
+            HomeLogStoreMgrSI().create_new_log_store(HomeLogStoreMgr::DATA_LOG_FAMILY_IDX, false /* append_mode */);
     }
 
     //

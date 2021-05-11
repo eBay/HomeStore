@@ -61,7 +61,8 @@ public:
     virtual std::shared_ptr< blkalloc_cp > blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp > cur_ba_cp) = 0;
     virtual uint32_t get_data_pagesz() const = 0;
     virtual DeviceManager* get_device_manager() = 0;
-    virtual logdev_blkstore_t* get_logdev_blkstore() const = 0;
+    virtual logdev_blkstore_t* get_data_logdev_blkstore() const = 0;
+    virtual logdev_blkstore_t* get_ctrl_logdev_blkstore() const = 0;
 };
 
 static inline HomeStoreBaseSafePtr HomeStorePtr() { return HomeStoreBase::safe_instance(); }

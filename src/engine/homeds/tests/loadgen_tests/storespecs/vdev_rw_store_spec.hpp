@@ -27,7 +27,7 @@ class VDevRWStoreSpec : public StoreSpec< SimpleNumberKey, VDevValue > {
 
 public:
     virtual void init_store(homeds::loadgen::Param& parameters) override {
-        m_store = HomeBlks::instance()->get_logdev_blkstore();
+        m_store = HomeBlks::instance()->get_data_logdev_blkstore();
     }
 
     virtual bool get(SimpleNumberKey& k, VDevValue* out_v) override { return read(k, out_v); }

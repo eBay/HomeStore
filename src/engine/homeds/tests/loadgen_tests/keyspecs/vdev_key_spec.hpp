@@ -30,7 +30,7 @@ public:
         auto alloc_size = get_rand_alloc_size();
         switch (spec) {
         case KeyPattern::UNI_RANDOM: {
-            auto store = HomeBlks::instance()->get_logdev_blkstore();
+            auto store = HomeBlks::instance()->get_data_logdev_blkstore();
 
             if (total_allocated_size + alloc_size > store->get_size()) { return VDevKey((uint64_t)-1, alloc_size); }
 

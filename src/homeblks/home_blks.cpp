@@ -624,7 +624,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     }
 
     /* XXX: can we move it to indx mgr */
-    home_log_store_mgr.stop();
+    HomeLogStoreMgrSI().stop();
     MetaBlkMgrSI()->stop();
     this->close_devices();
 
@@ -897,7 +897,7 @@ void HomeBlks::start_home_log_store() {
     auto log_store_start = Clock::now();
     // start log store recovery
     LOGINFO("HomeLogStore recovery is started");
-    home_log_store_mgr.start(m_dev_mgr->is_first_time_boot());
+    HomeLogStoreMgrSI().start(m_dev_mgr->is_first_time_boot());
     m_recovery_stats->m_log_store_ms = get_elapsed_time_ms(log_store_start);
 }
 

@@ -188,7 +188,7 @@ void HomeStoreCPMgr::blkalloc_cp_start(hs_cp* hcp) {
         }
         it->second->indx_mgr->truncate(it->second);
     }
-    home_log_store_mgr.device_truncate();
+    HomeLogStoreMgrSI().device_truncate();
 #ifdef _PRERELEASE
     if (homestore_flip->test_flip("indx_cp_logstore_truncate_abort")) {
         LOGINFO("aborting because of flip");
@@ -219,7 +219,7 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io
     m_prepare_cb_list->reserve(4);
     m_active_tbl = m_create_indx_tbl();
 
-    m_journal = HomeLogStoreMgr::instance().create_new_log_store(false /* append_mode */);
+    m_journal = HomeLogStoreMgrSI().create_new_log_store(HomeLogStoreMgr::DATA_LOG_FAMILY_IDX, false /* append_mode */);
     m_journal_comp_cb = bind_this(IndxMgr::journal_comp_cb, 2);
     m_journal->register_req_comp_cb(m_journal_comp_cb);
     THIS_INDX_LOG(INFO, indx_mgr, , "log_store id {}", m_journal->get_store_id());
@@ -248,8 +248,8 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io
 
     m_is_snap_enabled = sb.is_snap_enabled;
     THIS_INDX_LOG(INFO, indx_mgr, , "opening journal id {}", (int)sb.journal_id);
-    HomeLogStoreMgr::instance().open_log_store(
-        sb.journal_id,
+    HomeLogStoreMgrSI().open_log_store(
+        HomeLogStoreMgr::DATA_LOG_FAMILY_IDX, sb.journal_id,
         false, // Append mode,
         [this](std::shared_ptr< HomeLogStore > logstore) {
             m_journal = logstore;
@@ -1295,7 +1295,7 @@ void IndxMgr::resume_active_cp() {
 
 void IndxMgr::destroy_done() {
     m_active_tbl->destroy_done();
-    home_log_store_mgr.remove_log_store(m_journal->get_store_id());
+    HomeLogStoreMgrSI().remove_log_store(HomeLogStoreMgr::DATA_LOG_FAMILY_IDX, m_journal->get_store_id());
 }
 
 void IndxMgr::log_found(logstore_seq_num_t seqnum, log_buffer log_buf, void* mem) {

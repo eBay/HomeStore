@@ -120,7 +120,7 @@ public:
 
     void execute() {
         m_start_time = Clock::now();
-        m_store = HomeBlks::instance()->get_logdev_blkstore();
+        m_store = HomeBlks::instance()->get_data_logdev_blkstore();
         m_total_size = m_store->get_size();
 
         std::vector< ThreadPool::TaskFuture< void > > v;

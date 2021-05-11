@@ -304,14 +304,16 @@ struct indx_cp_base_sb {
 } __attribute__((__packed__));
 
 /* this superblock is never changed once indx manager is created */
+#pragma pack(1)
 struct indx_mgr_sb {
-    logstore_id_t journal_id = 0;
+    logstore_id_t journal_id{0};
     homeds::btree::btree_super_block btree_sb;
     bool is_snap_enabled = false;
     indx_mgr_sb(homeds::btree::btree_super_block btree_sb, logstore_id_t journal_id, bool is_snap_enabled) :
             journal_id(journal_id), btree_sb(btree_sb), is_snap_enabled(is_snap_enabled) {}
-    indx_mgr_sb() {}
-} __attribute__((__packed__));
+    indx_mgr_sb() = default;
+};
+#pragma pack()
 
 class HomeStoreCPMgr : public CPMgr< hs_cp > {
 public:

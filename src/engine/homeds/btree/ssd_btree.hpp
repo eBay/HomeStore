@@ -108,10 +108,10 @@ public:
 
         if (is_recovery) {
             // add recovery code
-            THIS_BT_LOG(INFO, replay, , "opening journal id {}", (int)sb.journal_id);
-            HomeLogStoreMgr::instance().open_log_store(
-                sb.journal_id, // My logstore id
-                true,          // Is Append Mode
+            THIS_BT_LOG(INFO, replay, , "opening journal id {}", sb.get_journal_id());
+            HomeLogStoreMgrSI().open_log_store(
+                HomeLogStoreMgr::DATA_LOG_FAMILY_IDX, sb.get_journal_id(), // My logstore id
+                true,                                                      // Is Append Mode
                 [this](std::shared_ptr< HomeLogStore > logstore) {
                     m_journal = logstore;
                     m_journal->register_log_found_cb(bind_this(SSDBtreeStore::log_found, 3));
@@ -123,10 +123,10 @@ public:
             THIS_BT_CP_LOG(INFO, m_first_cp->cp_id, "btree_cp_info=[{}], skipped root node:{}", cp_sb->to_string(),
                            bid.to_string());
         } else {
-            m_journal = HomeLogStoreMgr::instance().create_new_log_store(true /* append_mode */);
+            m_journal = HomeLogStoreMgrSI().create_new_log_store(HomeLogStoreMgr::DATA_LOG_FAMILY_IDX, true /*append*/);
 
             sb.journal_id = get_journal_id_store();
-            THIS_BT_LOG(INFO, replay, , "journal id {}", (int)sb.journal_id);
+            THIS_BT_LOG(INFO, replay, , "journal id {}", sb.get_journal_id());
         }
 
         m_wb_cache->prepare_cp(m_first_cp, nullptr, false);
@@ -232,7 +232,9 @@ public:
 
     static void destroy_done(SSDBtreeStore* store) { store->destroy_done_store(); }
 
-    void destroy_done_store() { home_log_store_mgr.remove_log_store(m_journal->get_store_id()); }
+    void destroy_done_store() {
+        HomeLogStoreMgrSI().remove_log_store(HomeLogStoreMgr::DATA_LOG_FAMILY_IDX, m_journal->get_store_id());
+    }
 
     static bool is_aligned_buf_needed(SSDBtreeStore* store, size_t size) {
         return HomeLogStore::is_aligned_buf_needed(size);

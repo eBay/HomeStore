@@ -33,15 +33,17 @@ typedef std::function< void(logstore_seq_num_t) > test_log_store_comp_cb_t;
 class SampleLogStoreClient {
 public:
     friend class SampleDB;
-    SampleLogStoreClient(std::shared_ptr< HomeLogStore > store, const uint64_t nentries,
-                         const test_log_store_comp_cb_t& cb) :
-            m_comp_cb{cb}, m_nentries{nentries} {
+    SampleLogStoreClient(std::shared_ptr< HomeLogStore > store, const logstore_family_id_t family_idx,
+                         const uint64_t nentries, const test_log_store_comp_cb_t& cb) :
+            m_comp_cb{cb}, m_nentries{nentries}, m_family{family_idx}, m_store_id{store->get_store_id()} {
         init(store);
         generate_rand_data(nentries);
     }
 
-    explicit SampleLogStoreClient(const uint64_t nentries, const test_log_store_comp_cb_t& cb) :
-            SampleLogStoreClient(home_log_store_mgr.create_new_log_store(false /* append_mode */), nentries, cb) {}
+    explicit SampleLogStoreClient(const uint64_t nentries, const logstore_family_id_t family_idx,
+                                  const test_log_store_comp_cb_t& cb) :
+            SampleLogStoreClient(HomeLogStoreMgrSI().create_new_log_store(family_idx, false /* append_mode */),
+                                 family_idx, nentries, cb) {}
 
     SampleLogStoreClient(const SampleLogStoreClient&) = delete;
     SampleLogStoreClient& operator=(const SampleLogStoreClient&) = delete;
@@ -51,8 +53,7 @@ public:
 
     void init(std::shared_ptr< HomeLogStore > store) {
         m_log_store = store;
-        m_log_store->register_log_found_cb(std::bind(&SampleLogStoreClient::on_log_found, this, std::placeholders::_1,
-                                                     std::placeholders::_2, std::placeholders::_3));
+        m_log_store->register_log_found_cb(bind_this(SampleLogStoreClient::on_log_found, 3));
         m_nth_entry.store(0);
     }
 
@@ -98,6 +99,8 @@ private:
     std::shared_ptr< HomeLogStore > m_log_store;
     std::atomic< uint64_t > m_nth_entry = 0;
     std::vector< std::string > m_data;
+    logstore_family_id_t m_family;
+    logstore_id_t m_store_id;
 };
 
 class SampleDB {
@@ -133,8 +136,9 @@ public:
 
         if (restart) {
             for (uint32_t i{0}; i < n_log_stores; ++i) {
-                home_log_store_mgr.open_log_store(
-                    i, false /* append_mode */,
+                SampleLogStoreClient* client = m_log_store_clients[i].get();
+                HomeLogStoreMgrSI().open_log_store(
+                    client->m_family, client->m_store_id, false /* append_mode */,
                     [i, this](std::shared_ptr< HomeLogStore > log_store) { m_log_store_clients[i]->init(log_store); });
             }
         }
@@ -169,8 +173,10 @@ public:
 
         if (!restart) {
             for (uint32_t i{0}; i < n_log_stores; ++i) {
+                auto family_idx =
+                    ((i % 2) == 0) ? HomeLogStoreMgr::DATA_LOG_FAMILY_IDX : HomeLogStoreMgr::CTRL_LOG_FAMILY_IDX;
                 m_log_store_clients.push_back(std::make_unique< SampleLogStoreClient >(
-                    n_entries, std::bind(&SampleDB::on_log_append_completion, this, std::placeholders::_1)));
+                    n_entries, family_idx, bind_this(SampleDB::on_log_append_completion, 1)));
             }
         }
     }

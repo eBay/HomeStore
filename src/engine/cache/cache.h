@@ -15,7 +15,6 @@
 #include <execinfo.h>
 
 #include <boost/intrusive_ptr.hpp>
-#include <fds/obj_allocator.hpp>
 #include <fds/utils.hpp>
 #include <metrics/metrics.hpp>
 #include <utility/atomic_counter.hpp>
@@ -25,6 +24,8 @@
 #include "engine/homeds/hash/intrusive_hashset.hpp"
 #include "eviction.hpp"
 #include "lru_eviction.hpp"
+
+#include <fds/obj_allocator.hpp>
 
 SDS_LOGGING_DECL(cache_vmod_evict, cache_vmod_read, cache_vmod_write)
 
@@ -90,7 +91,8 @@ class CacheBuffer;
 template < typename K, typename V >
 class IntrusiveCache {
 public:
-    static_assert(std::is_base_of< CacheBuffer<K>, V >::value, "IntrusiveCache Value must be derived from CacheBuffer<K>");
+    static_assert(std::is_base_of< CacheBuffer< K >, V >::value,
+                  "IntrusiveCache Value must be derived from CacheBuffer<K>");
 
     IntrusiveCache(uint64_t max_cache_size, uint32_t avg_size_per_entry);
     ~IntrusiveCache() {
@@ -197,7 +199,8 @@ public:
 #endif
 
     typedef CacheBuffer< K > CacheBufferType;
-    CacheBuffer() : CacheRecord{this},
+    CacheBuffer() :
+            CacheRecord{this},
             m_mem(nullptr),
             m_refcount(0),
             m_data_offset(-1),

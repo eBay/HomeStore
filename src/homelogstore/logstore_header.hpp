@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 
+#include <fmt/format.h>
 #include <fds/utils.hpp>
 
 namespace homestore {
@@ -12,10 +13,11 @@ class HomeLogStore;
 struct logdev_key;
 
 typedef int64_t logid_t;
-typedef uint32_t logstore_id_t;
 typedef int64_t logstore_seq_num_t;
 typedef std::function< void(logstore_req*, logdev_key) > log_req_comp_cb_t;
 typedef sisl::byte_view log_buffer;
+typedef uint32_t logstore_id_t;
+typedef uint8_t logstore_family_id_t;
 
 typedef std::function< void(logstore_req*, logdev_key) > log_req_comp_cb_t;
 typedef std::function< void(logstore_seq_num_t, sisl::io_blob&, logdev_key, void*) > log_write_comp_cb_t;

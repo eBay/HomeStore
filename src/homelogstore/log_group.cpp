@@ -98,7 +98,7 @@ bool LogGroup::new_iovec_for_footer() const {
     return ((m_inline_data_pos + sizeof(log_group_footer)) >= m_cur_buf_len || m_oob_data_pos != 0);
 }
 
-const iovec_array& LogGroup::finish() {
+const iovec_array& LogGroup::finish(const crc32_t prev_crc) {
     // add footer
     auto footer = add_and_get_footer();
 
@@ -107,7 +107,7 @@ const iovec_array& LogGroup::finish() {
     log_group_header* const hdr{header()};
     hdr->magic = LOG_GROUP_HDR_MAGIC;
     hdr->n_log_records = m_nrecords;
-    hdr->prev_grp_crc = HomeLogStoreMgr::logdev().get_prev_crc();
+    hdr->prev_grp_crc = prev_crc;
     hdr->inline_data_offset = sizeof(log_group_header) + (m_max_records * sizeof(serialized_log_record));
     hdr->oob_data_offset = m_iovecs[0].iov_len;
     if (new_iovec_for_footer()) {

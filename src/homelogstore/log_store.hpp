@@ -14,8 +14,8 @@
 #include <fds/utils.hpp>
 #include <folly/Synchronized.h>
 
-#include "homelogstore/logstore_header.hpp"
-#include "log_dev.hpp"
+#include "logstore_header.hpp"
+#include "log_store_family.hpp"
 
 namespace homestore {
 
@@ -98,12 +98,6 @@ struct truncation_info {
     bool active_writes_not_part_of_truncation{false};
 };
 
-struct logstore_info_t {
-    std::shared_ptr< HomeLogStore > m_log_store;
-    log_store_opened_cb_t m_on_log_store_opened;
-    bool append_mode;
-};
-
 class HomeLogStoreMgrMetrics : public sisl::MetricsGroup {
 public:
     HomeLogStoreMgrMetrics();
@@ -114,23 +108,29 @@ public:
 };
 
 class HomeLogStore;
+
 class HomeLogStoreMgr {
     friend class HomeLogStore;
+    friend class LogStoreFamily;
     friend class LogDev;
 
     HomeLogStoreMgr();
 
 public:
+    static constexpr logstore_family_id_t DATA_LOG_FAMILY_IDX{0};
+    static constexpr logstore_family_id_t CTRL_LOG_FAMILY_IDX{1};
+    static constexpr size_t num_log_families = CTRL_LOG_FAMILY_IDX + 1;
+    typedef std::function< void(const std::array< logdev_key, num_log_families >&) > device_truncate_cb_t;
+
     HomeLogStoreMgr(const HomeLogStoreMgr&) = delete;
     HomeLogStoreMgr(HomeLogStoreMgr&&) noexcept = delete;
     HomeLogStoreMgr& operator=(const HomeLogStoreMgr&) = delete;
     HomeLogStoreMgr& operator=(HomeLogStoreMgr&&) noexcept = delete;
 
     [[nodiscard]] static HomeLogStoreMgr& instance();
-    [[nodiscard]] static LogDev& logdev();
-    static void meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
-
-    typedef std::function< void(const logdev_key&) > device_truncate_cb_t;
+    static void data_meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
+    static void ctrl_meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
+    static void fake_reboot();
 
     /**
      * @brief Start the entire HomeLogStore set and does recover the existing logstores. Really this is the first
@@ -150,9 +150,15 @@ public:
      * @brief Create a brand new log store (both in-memory and on device) and returns its instance. It also book
      * keeps the created log store and user can get this instance of log store by using logstore_d
      *
+     * @param family_id: Logstores can be created on different log_devs. As of now we only support data log_dev and
+     * ctrl log dev. The idx indicates which log device it is from. Its a mandatory parameter
+     * @param append_mode: If the log store have to be in append mode, in that case, user can call append_async
+     * and do not need to maintain the log_idx. Else user is expected to keep track of the log idx. Default to false
+     *
      * @return std::shared_ptr< HomeLogStore >
      */
-    [[nodiscard]] std::shared_ptr< HomeLogStore > create_new_log_store(const bool append_mode = false);
+    [[nodiscard]] std::shared_ptr< HomeLogStore > create_new_log_store(const logstore_family_id_t family_id,
+                                                                       const bool append_mode = false);
 
     /**
      * @brief Open an existing log store and does a recovery. It then creates an instance of this logstore and
@@ -161,7 +167,8 @@ public:
      * @param store_id: Store ID of the log store to open
      * @return std::shared_ptr< HomeLogStore >
      */
-    void open_log_store(const logstore_id_t store_id, const bool append_mode, const log_store_opened_cb_t& on_open_cb);
+    void open_log_store(const logstore_family_id_t family_id, const logstore_id_t store_id, const bool append_mode,
+                        const log_store_opened_cb_t& on_open_cb);
 
     /**
      * @brief Close the log store instance and free-up the resources
@@ -169,7 +176,7 @@ public:
      * @param store_id: Store ID of the log store to close
      * @return true on success
      */
-    [[nodiscard]] bool close_log_store(const logstore_id_t store_id) {
+    [[nodiscard]] bool close_log_store(const logstore_family_id_t family_id, const logstore_id_t store_id) {
         // TODO: Implement this method
         return true;
     }
@@ -180,7 +187,7 @@ public:
      *
      * @param store_id
      */
-    void remove_log_store(const logstore_id_t store_id);
+    void remove_log_store(const logstore_family_id_t family_id, const logstore_id_t store_id);
 
     /**
      * @brief Schedule a truncate all the log stores physically on the device.
@@ -193,57 +200,42 @@ public:
     void device_truncate(const device_truncate_cb_t& cb = nullptr, const bool wait_till_done = false,
                          const bool dry_run = false);
 
-    /**
-     * @brief Register a callback upon opening a new log store during recovery. As soon as HomeLogStoreMgr::start is
-     * called without format, the recovery will start and will create log stores automatically. Without calling this
-     * method before calling start, consumer will not be able to get callback on data.
-     *
-     * @param cb
-     */
-    void register_log_store_opened_cb(const log_store_opened_cb_t& cb) { m_log_store_opened_cb = cb; }
-
     [[nodiscard]] nlohmann::json dump_log_store(const log_dump_req& dum_req);
 
+    LogStoreFamily* data_log_family() { return m_logstore_families[DATA_LOG_FAMILY_IDX].get(); }
+    LogStoreFamily* ctrl_log_family() { return m_logstore_families[CTRL_LOG_FAMILY_IDX].get(); }
+
+    static LogDev& data_logdev() { return HomeLogStoreMgr::instance().data_log_family()->logdev(); }
+    static LogDev& ctrl_logdev() { return HomeLogStoreMgr::instance().ctrl_log_family()->logdev(); }
+
 private:
-    struct truncate_req {
-        std::mutex mtx;
-        std::condition_variable cv;
-        bool wait_till_done{false};
-        bool dry_run{false};
-        device_truncate_cb_t cb;
-        bool trunc_done{false};
-    };
-    void device_truncate_in_user_reactor(const std::shared_ptr< truncate_req >& treq);
-
-    [[nodiscard]] logdev_key do_device_truncate(const bool dry_run = false);
-    void on_log_store_found(const logstore_id_t store_id, const logstore_meta& meta);
-    void on_io_completion_with_flush_lock(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_idx,
-                                          const uint32_t nremaining_in_batch, void* const ctx);
-    void on_io_completion_with_flush_unlock(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_idx,
-                                            const uint32_t nremaining_in_batch, void* const ctx);
-    void on_logfound(const logstore_id_t id, const logstore_seq_num_t seq_num, const logdev_key ld_key,
-                     const log_buffer buf);
-
-    void truncate_after_flush_lock(const logstore_id_t store_id, const logstore_id_t upto_seq_num);
     void start_truncate_thread();
 
 private:
-    folly::Synchronized< std::map< logstore_id_t, logstore_info_t > > m_id_logstore_map;
-    std::set< logstore_id_t > m_unopened_store_id;
-    std::unordered_map< logstore_id_t, logid_t > m_last_flush_info;
-    log_store_opened_cb_t m_log_store_opened_cb;
-    LogDev m_log_dev;
+    boost::intrusive_ptr< HomeStoreBase > m_hb; // Back pointer to homestore
+    std::array< std::unique_ptr< LogStoreFamily >, num_log_families > m_logstore_families;
     HomeLogStoreMgrMetrics m_metrics;
     iomgr::io_thread_t m_truncate_thread;
 };
 
-#define home_log_store_mgr HomeLogStoreMgr::instance()
+static HomeLogStoreMgr& HomeLogStoreMgrSI() { return HomeLogStoreMgr::instance(); }
+
+struct truncate_req {
+    std::mutex mtx;
+    std::condition_variable cv;
+    bool wait_till_done{false};
+    bool dry_run{false};
+    HomeLogStoreMgr::device_truncate_cb_t cb;
+    std::array< logdev_key, HomeLogStoreMgr::num_log_families > m_trunc_upto_result;
+    int trunc_outstanding{0};
+};
 
 class HomeLogStore : public std::enable_shared_from_this< HomeLogStore > {
 public:
     friend class HomeLogStoreMgr;
 
-    HomeLogStore(const logstore_id_t id, const bool append_mode, const logstore_seq_num_t start_lsn);
+    HomeLogStore(LogStoreFamily& family, const logstore_id_t id, const bool append_mode,
+                 const logstore_seq_num_t start_lsn);
     HomeLogStore(const HomeLogStore&) = delete;
     HomeLogStore(HomeLogStore&&) noexcept = delete;
     HomeLogStore& operator=(const HomeLogStore&) = delete;
@@ -473,6 +465,8 @@ public:
         return true;
     }
 
+    [[nodiscard]] LogStoreFamily& get_family() { return m_logstore_family; }
+
     [[nodiscard]] nlohmann::json dump_log_store(const log_dump_req& dump_req = log_dump_req());
 
     [[nodiscard]] static bool is_aligned_buf_needed(size_t size) {
@@ -494,12 +488,15 @@ private:
 
 private:
     logstore_id_t m_store_id;
+    LogStoreFamily& m_logstore_family;
+    LogDev& m_logdev;
     sisl::StreamTracker< logstore_record > m_records;
     bool m_append_mode{false};
     log_req_comp_cb_t m_comp_cb;
     log_found_cb_t m_found_cb;
     log_replay_done_cb_t m_replay_done_cb;
     std::atomic< logstore_seq_num_t > m_seq_num;
+    std::string m_fq_name;
 
     // seq_ld_key_pair m_flush_batch_max = {-1, {0, 0}}; // The maximum seqnum we have seen in the prev flushed
     // batch
@@ -510,18 +507,18 @@ private:
 };
 
 #pragma pack(1)
-struct logstore_meta {
-    logstore_meta(const logstore_seq_num_t seq_num = 0) : m_first_seq_num{seq_num} {}
-    logstore_meta(const logstore_meta&) = default;
-    logstore_meta(logstore_meta&&) noexcept = default;
-    logstore_meta& operator=(const logstore_meta&) = default;
-    logstore_meta& operator=(logstore_meta&&) noexcept = default;
-    ~logstore_meta() = default;
+struct logstore_superblk {
+    logstore_superblk(const logstore_seq_num_t seq_num = 0) : m_first_seq_num{seq_num} {}
+    logstore_superblk(const logstore_superblk&) = default;
+    logstore_superblk(logstore_superblk&&) noexcept = default;
+    logstore_superblk& operator=(const logstore_superblk&) = default;
+    logstore_superblk& operator=(logstore_superblk&&) noexcept = default;
+    ~logstore_superblk() = default;
 
-    [[nodiscard]] static logstore_meta default_value();
-    static void init(logstore_meta& m);
-    static void clear(logstore_meta& m);
-    [[nodiscard]] static bool is_valid(const logstore_meta& m);
+    [[nodiscard]] static logstore_superblk default_value();
+    static void init(logstore_superblk& m);
+    static void clear(logstore_superblk& m);
+    [[nodiscard]] static bool is_valid(const logstore_superblk& m);
 
     logstore_seq_num_t m_first_seq_num{0};
 };
