@@ -22,8 +22,7 @@
 #include "engine/common/generated/homestore_config_generated.h"
 #include "homestore_header.hpp"
 
-SETTINGS_INIT(homestorecfg::HomeStoreSettings, homestore_config,
-              SDS_OPTIONS.count("config_path") ? SDS_OPTIONS["config_path"].as< std::string >() : "");
+SETTINGS_INIT(homestorecfg::HomeStoreSettings, homestore_config);
 
 // DM info size depends on these three parameters. If below parameter changes then we have to add
 // the code for upgrade/revert.
