@@ -533,7 +533,7 @@ public:
  */
 typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 
-ENUM(volume_req_state, uint8_t, preparing, data_io, journal_io, completed);
+ENUM(volume_req_state, uint8_t, data_io, journal_io, completed);
 struct journal_key {
     lba_t lba;
     lba_count_t nlbas;
@@ -550,7 +550,7 @@ struct volume_req : indx_req {
     /********** generic counters **********/
     vol_interface_req_ptr iface_req; // Corresponding Interface API request which has all the details about requests
     sisl::atomic_counter< int > ref_count = 1;            // Initialize the count
-    volume_req_state state = volume_req_state::preparing; // State of the volume request
+    volume_req_state state = volume_req_state::data_io;   // State of the volume request
 
     /********** members used to write data blocks **********/
     Clock::time_point io_start_time;                                        // start time

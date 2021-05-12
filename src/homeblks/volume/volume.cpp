@@ -259,7 +259,6 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
         IoVecTransversal write_transversal{};
         uint64_t data_offset{0};
         uint64_t start_lba{vreq->lba()};
-        vreq->state = volume_req_state::data_io;
 
         for (size_t i{0}; i < bid.size(); ++i) {
             if (bid[i].get_nblks() == 0) {
@@ -362,7 +361,6 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
 
     try {
         /* add sanity checks */
-        vreq->state = volume_req_state::data_io;
         /* read indx */
         COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_read_count, 1);
         m_indx_mgr->read_indx(boost::static_pointer_cast< indx_req >(vreq));
@@ -394,7 +392,6 @@ std::error_condition Volume::unmap(const vol_interface_req_ptr& iface_req) {
     try {
         THIS_VOL_LOG(TRACE, volume, vreq, "unmap: not yet supported");
 
-        vreq->state = volume_req_state::data_io;
         BlkId bid_invalid;
 
         /* complete the request */
@@ -585,7 +582,6 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
 
     // if there is error or nothing to read anymore, complete this req;
     if (err != no_error) {
-        vreq->state = volume_req_state::data_io;
         ret = err;
         goto read_done;
     }
