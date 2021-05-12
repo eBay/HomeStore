@@ -490,9 +490,9 @@ bool HomeBlks::verify_bitmap() {
     /* Update the bitmap */
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
     auto it{m_volume_map.begin()};
+    LOGINFO("Verifying the integrity of the bitmap");
     while (it != m_volume_map.end()) {
         const VolumePtr& vol{it->second};
-        VOL_INFO_LOG(vol->get_uuid(), "Verifying the integrity of the bitmap");
         vol->populate_debug_bm();
         ++it;
     }
@@ -503,6 +503,7 @@ bool HomeBlks::verify_bitmap() {
         LOGERROR("failing to match debug bitmap with persisted bitmap");
         return false;
     }
+    LOGINFO("Verifying the integrity of the bitmap : DONE");
     return true;
 }
 

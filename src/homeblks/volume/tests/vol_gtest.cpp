@@ -497,8 +497,8 @@ protected:
 public:
     static thread_local uint32_t _n_completed_this_thread;
 
-    VolTest() : vol_info(tcfg.max_vols), device_info(0) {
-        vol_info.reserve(tcfg.max_vols);
+    VolTest() : vol_info(gcfg.max_vols), device_info(0) {
+        vol_info.reserve(gcfg.max_vols);
         tcfg = gcfg; // Reset the config from global config
 
         // cur_vol = 0;

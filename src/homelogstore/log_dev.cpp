@@ -602,11 +602,11 @@ void LogDevMetadata::update_start_dev_offset(const off_t offset, const bool pers
 }
 
 bool LogDevMetadata::resize_if_needed() {
-    const auto req_sz{required_sb_size((m_store_info.size() == 0) ? 0u : *m_store_info.rbegin())};
+    const auto req_sz{required_sb_size((m_store_info.size() == 0) ? 0u : *m_store_info.rbegin() + 1)};
     if (req_sz != m_raw_buf.size()) {
         const auto old_buf{m_raw_buf};
 
-        auto m_raw_buf{hs_create_byte_view(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz))};
+        m_raw_buf = hs_create_byte_view(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz));
         m_sb = new (m_raw_buf.bytes()) logdev_superblk();
 
         logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
