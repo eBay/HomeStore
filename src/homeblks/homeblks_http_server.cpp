@@ -10,6 +10,7 @@
 #include "engine/common/homestore_config.hpp"
 #include "homeblks_config.hpp"
 #include "homeblks_http_server.hpp"
+#include "engine/common/homestore_status_mgr.hpp"
 #include "home_blks.hpp"
 
 namespace homestore {
@@ -190,7 +191,7 @@ void HomeBlksHttpServer::get_status(sisl::HttpCallData cd) {
         return;
     }
 
-    const auto status_mgr = to_homeblks(cd)->get_status_mgr();
+    const auto status_mgr = to_homeblks(cd)->status_mgr();
     const auto status_json = status_mgr->get_status(modules, verbosity_level);
     pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, status_json.dump(2));
 }

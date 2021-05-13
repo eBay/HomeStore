@@ -19,6 +19,7 @@ set(HOMESTORE_OBJECTS
     $<TARGET_OBJECTS:hs_blkalloc>
     $<TARGET_OBJECTS:hs_metablk>
     $<TARGET_OBJECTS:indx_mgr>
+    homestore_base.cpp
     )
 
 add_library(hs_engine OBJECT ${HOMESTORE_OBJECTS})

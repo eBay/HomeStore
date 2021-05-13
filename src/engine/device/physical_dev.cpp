@@ -35,7 +35,7 @@ static std::atomic< uint32_t > glob_phys_dev_ids(0);
 PhysicalDev::~PhysicalDev() {
     LOGINFO("device name {} superblock magic {} product name {} version {}", m_devname, m_super_blk->get_magic(),
             m_super_blk->get_product_name(), m_super_blk->get_version());
-    hs_iobuf_free((uint8_t*)m_super_blk);
+    hs_utils::iobuf_free((uint8_t*)m_super_blk);
 }
 
 void PhysicalDev::update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id) {
@@ -70,7 +70,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
 
     HS_LOG_ASSERT_LE(sizeof(super_block), SUPERBLOCK_SIZE, "Device {} Ondisk Superblock size not enough to hold in-mem",
                      devname);
-    m_super_blk = (super_block*)hs_iobuf_alloc(SUPERBLOCK_SIZE);
+    m_super_blk = (super_block*)hs_utils::iobuf_alloc(SUPERBLOCK_SIZE);
     memset(m_super_blk, 0, SUPERBLOCK_SIZE);
 
     m_iodev = drive_iface->open_dev(devname.c_str(), drive_type, oflags);
@@ -84,7 +84,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     /* super block should always be written atomically. */
     HS_LOG_ASSERT_LE(sizeof(super_block), SUPERBLOCK_SIZE, "Device {} Ondisk Superblock size not enough to hold in-mem",
                      devname);
-    m_super_blk = (super_block*)hs_iobuf_alloc(SUPERBLOCK_SIZE);
+    m_super_blk = (super_block*)hs_utils::iobuf_alloc(SUPERBLOCK_SIZE);
     memset(m_super_blk, 0, SUPERBLOCK_SIZE);
 
     if (is_init) { m_super_blk->system_uuid = system_uuid; }
@@ -104,7 +104,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
 #endif
     ) {
 
-        hs_iobuf_free((uint8_t*)m_super_blk);
+        hs_utils::iobuf_free((uint8_t*)m_super_blk);
 
         HS_LOG(ERROR, device, "device open failed errno {} dev_name {}", errno, devname.c_str());
         throw std::system_error(errno, std::system_category(), "error while opening the device");
@@ -114,7 +114,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int con
     try {
         m_devsize = drive_iface->get_size(m_iodev.get());
     } catch (std::exception& e) {
-        hs_iobuf_free((uint8_t*)m_super_blk);
+        hs_utils::iobuf_free((uint8_t*)m_super_blk);
         throw(e);
     }
 
@@ -242,7 +242,7 @@ void PhysicalDev::write_super_block(uint64_t gen_cnt) {
 
 void PhysicalDev::zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, const int oflags) {
     // alloc re-usable super block
-    auto super_blk = (super_block*)hs_iobuf_alloc(SUPERBLOCK_SIZE);
+    auto super_blk = (super_block*)hs_utils::iobuf_alloc(SUPERBLOCK_SIZE);
 
     // zero in-memory super block
     memset(super_blk, 0, SUPERBLOCK_SIZE);
@@ -267,7 +267,7 @@ void PhysicalDev::zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_dr
     }
 
     // free super_blk
-    hs_iobuf_free((uint8_t*)super_blk);
+    hs_utils::iobuf_free((uint8_t*)super_blk);
 }
 
 void PhysicalDev::zero_superblock() {

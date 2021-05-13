@@ -58,6 +58,9 @@ public:
 
     LogDev& logdev() { return m_log_dev; }
 
+    nlohmann::json get_status(int verbosity) const;
+    std::string get_name() const { return m_metablk_name; }
+
 private:
     [[nodiscard]] logdev_key do_device_truncate(const bool dry_run = false);
 

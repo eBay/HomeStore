@@ -221,7 +221,7 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
             sisl::round_up(b.size() + data_offset - rounded_data_offset, HS_STATIC_CONFIG(drive_attr.align_size))};
 
         // Allocate a fresh aligned buffer, if size cannot fit standard size
-        if (rounded_size > initial_read_size) { rbuf = hs_iobuf_alloc(rounded_size); }
+        if (rounded_size > initial_read_size) { rbuf = hs_utils::iobuf_alloc(rounded_size); }
 
         THIS_LOGDEV_LOG(TRACE,
                         "Addln read as data resides outside initial_read_size={} key.idx={} key.group_dev_offset={} "
@@ -233,7 +233,7 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
                     static_cast< const void* >(rbuf + data_offset - rounded_data_offset), b.size());
 
         // Free the buffer in case we allocated above
-        if (rounded_size > initial_read_size) { hs_iobuf_free(rbuf); }
+        if (rounded_size > initial_read_size) { hs_utils::iobuf_free(rbuf); }
     }
     return_record_header =
         serialized_log_record(record_header->size, record_header->offset, record_header->get_inlined(),
@@ -485,12 +485,25 @@ void LogDev::update_store_superblk(const logstore_id_t idx, const logstore_super
     m_logdev_meta.update_store_superblk(idx, meta, persist_now);
 }
 
+void LogDev::get_status(const int verbosity, nlohmann::json& js) const {
+    js["current_log_idx"] = m_log_idx.load(std::memory_order_relaxed);
+    js["last_flush_log_idx"] = m_last_flush_idx;
+    js["last_truncate_log_idx"] = m_last_truncate_idx;
+    js["time_since_last_log_flush_ns"] = get_elapsed_time_ns(m_last_flush_time);
+    if (verbosity == 2) {
+        js["logdev_stopped?"] = m_stopped;
+        js["is_log_flushing_now?"] = m_is_flushing.load(std::memory_order_relaxed);
+        js["logdev_sb_start_offset"] = m_logdev_meta.get_start_dev_offset();
+        js["logdev_sb_num_stores_reserved"] = m_logdev_meta.m_sb->num_stores_reserved();
+    }
+}
+
 /////////////////////////////// LogDevMetadata Section ///////////////////////////////////////
 LogDevMetadata::LogDevMetadata(const std::string& metablk_name) : m_metablk_name{metablk_name} {}
 
 logdev_superblk* LogDevMetadata::create() {
     const auto req_sz{required_sb_size(0)};
-    m_raw_buf = hs_create_byte_view(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz));
+    m_raw_buf = hs_utils::create_byte_view(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz));
     m_sb = new (m_raw_buf.bytes()) logdev_superblk();
 
     logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
@@ -591,8 +604,13 @@ void LogDevMetadata::update_store_superblk(const logstore_id_t idx, const logsto
     if (persist_now) { persist(); }
 }
 
+const logstore_superblk& LogDevMetadata::store_superblk(const logstore_id_t idx) const {
+    const logstore_superblk* sb_area{m_sb->get_logstore_superblk()};
+    return sb_area[idx];
+}
+
 logstore_superblk& LogDevMetadata::mutable_store_superblk(const logstore_id_t idx) {
-    logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
+    logstore_superblk* sb_area{m_sb->get_logstore_superblk()};
     return sb_area[idx];
 }
 
@@ -606,7 +624,7 @@ bool LogDevMetadata::resize_if_needed() {
     if (req_sz != m_raw_buf.size()) {
         const auto old_buf{m_raw_buf};
 
-        m_raw_buf = hs_create_byte_view(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz));
+        m_raw_buf = hs_utils::create_byte_view(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz));
         m_sb = new (m_raw_buf.bytes()) logdev_superblk();
 
         logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};

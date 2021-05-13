@@ -30,8 +30,6 @@
 #include "engine/homeds/thread/threadpool/thread_pool.h"
 #include "engine/homestore.hpp"
 #include "homeblks_config.hpp"
-#include "homeblks_http_server.hpp"
-#include "homeblks_status_mgr.hpp"
 
 #ifndef DEBUG
 extern bool same_value_gen;
@@ -43,6 +41,7 @@ constexpr uint8_t LBA_BITS{56};
 
 class MappingKey;
 class MappingValue;
+class HomeBlksHttpServer;
 
 /* Note: below two structures should not be greater then ssd atomic page size. If it is
  * then we need to use double buffer.
@@ -171,7 +170,7 @@ public:
     static HomeBlksSafePtr safe_instance();
     static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, io_flag oflags);
 
-    virtual ~HomeBlks() override {}
+    virtual ~HomeBlks() override;
     virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req,
                                        bool part_of_batch = false) override;
     virtual std::error_condition read(const VolumePtr& vol, const vol_interface_req_ptr& req,
@@ -261,8 +260,6 @@ public:
     void do_volume_shutdown(bool force);
     void create_volume(VolumePtr vol);
 
-    void register_status_cb();
-
     data_blkstore_t::comp_callback data_completion_cb() override;
 
     /**
@@ -276,8 +273,6 @@ public:
 
     bool verify_vols();
     bool verify_bitmap();
-
-    HomeBlksStatusMgr* get_status_mgr();
 
 #ifdef _PRERELEASE
     void set_io_flip();
@@ -341,7 +336,6 @@ private:
 
     out_params m_out_params;
     std::unique_ptr< HomeBlksHttpServer > m_hb_http_server;
-    std::unique_ptr< HomeBlksStatusMgr > m_hb_status_mgr;
 
     std::condition_variable m_cv_init_cmplt; // wait for init to complete
     std::mutex m_cv_mtx;

@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <nlohmann/json.hpp>
 #include <fds/utils.hpp>
 #include <folly/Synchronized.h>
 
@@ -201,6 +202,7 @@ public:
                          const bool dry_run = false);
 
     [[nodiscard]] nlohmann::json dump_log_store(const log_dump_req& dum_req);
+    [[nodiscard]] nlohmann::json get_status(const int verbosity) const;
 
     LogStoreFamily* data_log_family() { return m_logstore_families[DATA_LOG_FAMILY_IDX].get(); }
     LogStoreFamily* ctrl_log_family() { return m_logstore_families[CTRL_LOG_FAMILY_IDX].get(); }
@@ -420,7 +422,7 @@ public:
      * @return logstore_seq_num_t Returns upto the seqnum upto which contiguous number is issued (inclusive). If it
      * is same as input `from`, then there are no more new contiguous issued.
      */
-    [[nodiscard]] logstore_seq_num_t get_contiguous_issued_seq_num(const logstore_seq_num_t from);
+    [[nodiscard]] logstore_seq_num_t get_contiguous_issued_seq_num(const logstore_seq_num_t from) const;
 
     /**
      * @brief Get the next contiguous seq num which are already completed from the given start seq number.
@@ -430,7 +432,7 @@ public:
      * @return logstore_seq_num_t Returns upto the seqnum upto which contiguous number is completed (inclusive). If
      * it is same as input `from`, then there are no more new contiguous completed.
      */
-    [[nodiscard]] logstore_seq_num_t get_contiguous_completed_seq_num(const logstore_seq_num_t from);
+    [[nodiscard]] logstore_seq_num_t get_contiguous_completed_seq_num(const logstore_seq_num_t from) const;
 
     /**
      * @brief Flush this log store (write/sync to disk) up to the sequence number
@@ -468,6 +470,8 @@ public:
     [[nodiscard]] LogStoreFamily& get_family() { return m_logstore_family; }
 
     [[nodiscard]] nlohmann::json dump_log_store(const log_dump_req& dump_req = log_dump_req());
+
+    [[nodiscard]] nlohmann::json get_status(const int verbosity) const;
 
     [[nodiscard]] static bool is_aligned_buf_needed(size_t size) {
         return (log_record::is_size_inlineable(size) == false);

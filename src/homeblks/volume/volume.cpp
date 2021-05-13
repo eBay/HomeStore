@@ -122,7 +122,8 @@ void Volume::init() {
     auto sb = (vol_sb_hdr*)m_sb_buf.bytes();
     if (!sb) {
         /* populate superblock */
-        m_sb_buf = hs_create_byte_view(sizeof(vol_sb_hdr), MetaBlkMgrSI()->is_aligned_buf_needed(sizeof(vol_sb_hdr)));
+        m_sb_buf =
+            hs_utils::create_byte_view(sizeof(vol_sb_hdr), MetaBlkMgrSI()->is_aligned_buf_needed(sizeof(vol_sb_hdr)));
 
         /* populate superblock */
         sb = new (m_sb_buf.bytes())
@@ -786,7 +787,7 @@ void Volume::alloc_single_block_in_mem() {
     // pointer to that
     uint8_t* ptr;
     uint32_t size = get_page_size();
-    ptr = hs_iobuf_alloc(size);
+    ptr = hs_utils::iobuf_alloc(size);
     memset(ptr, 0, size);
 
     boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());

@@ -61,6 +61,7 @@ public:
             throw std::invalid_argument("null device list");
         }
 
+        m_status_mgr = std::make_unique< HomeStoreStatusMgr >();
         MetaBlkMgrSI()->register_handler("INDX_MGR_CP", StaticIndxMgr::meta_blk_found_cb, nullptr);
 
         /* set the homestore static config parameters */
@@ -401,9 +402,6 @@ private:
     }
 
 protected:
-    bool m_vdev_failed = false;
-    bool m_print_checksum = true;
-
     std::unique_ptr< data_blkstore_t > m_data_blk_store;
     std::unique_ptr< index_blkstore_t< IndexBuffer > > m_index_blk_store;
     std::unique_ptr< sb_blkstore_t > m_sb_blk_store;
@@ -414,11 +412,6 @@ protected:
     std::unique_ptr< Cache< BlkId > > m_cache;
 
 private:
-    uint64_t m_size_avail = 0;
-    uint32_t m_data_pagesz = 0;
-    std::atomic< uint32_t > m_format_cnt = 1;
-    sb_blkstore_blob* m_meta_sb_blob = nullptr;
-
     static constexpr float data_blkstore_pct{84.0};
     static constexpr float indx_blkstore_pct{3.0};
     static constexpr float data_logdev_blkstore_pct{1.9};

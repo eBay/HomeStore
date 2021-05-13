@@ -6,11 +6,14 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <nlohmann/json.hpp>
+#include <sds_logging/logging.h>
 
 #include "engine/device/blkbuffer.hpp"
 #include "engine/device/device.h"
 #include "engine/device/virtual_dev.hpp"
 #include "homelogstore/log_store.hpp"
+#include "homeblks_http_server.hpp"
+#include "engine/common/homestore_status_mgr.hpp"
 #include "volume/volume.hpp"
 
 #include "home_blks.hpp"
@@ -85,6 +88,8 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
         return nullptr;
     }
 }
+
+HomeBlks::~HomeBlks() = default;
 
 void HomeBlks::zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, io_flag oflags) {
     auto& hs_config = HomeStoreStaticConfig::instance();
@@ -335,7 +340,8 @@ homeblks_sb* HomeBlks::superblock_init() {
     HS_RELEASE_ASSERT_EQ(m_homeblks_sb_buf.bytes(), nullptr, "Reinit already initialized super block");
 
     /* build the homeblks super block */
-    m_homeblks_sb_buf = hs_create_byte_view(HOMEBLKS_SB_SIZE, MetaBlkMgrSI()->is_aligned_buf_needed(HOMEBLKS_SB_SIZE));
+    m_homeblks_sb_buf =
+        hs_utils::create_byte_view(HOMEBLKS_SB_SIZE, MetaBlkMgrSI()->is_aligned_buf_needed(HOMEBLKS_SB_SIZE));
 
     auto sb = (homeblks_sb*)m_homeblks_sb_buf.bytes();
     sb->version = HOMEBLKS_SB_VERSION;
@@ -400,7 +406,6 @@ bool HomeBlks::vol_state_change(const VolumePtr& vol, vol_state new_state) {
 }
 
 void HomeBlks::init_done() {
-
     cap_attrs used_size;
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
         if (it->second->get_state() == vol_state::ONLINE) { vol_mounted(it->second, it->second->get_state()); }
@@ -431,14 +436,9 @@ void HomeBlks::init_done() {
     set_io_flip();
 #endif
 
-    register_status_cb();
-
+    status_mgr()->register_status_cb("MetaBlkMgr",
+                                     std::bind(&MetaBlkMgr::get_status, MetaBlkMgrSI(), std::placeholders::_1));
     m_recovery_stats->end();
-}
-
-void HomeBlks::register_status_cb() {
-    get_status_mgr()->register_status_cb("MetaBlkMgr",
-                                         std::bind(&MetaBlkMgr::get_status, MetaBlkMgrSI(), std::placeholders::_1));
 }
 
 data_blkstore_t::comp_callback HomeBlks::data_completion_cb() { return Volume::process_vol_data_completions; };
@@ -808,8 +808,6 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
         LOGINFO("Http server is not started by user! start_http = {}", m_cfg.start_http);
     }
 
-    m_hb_status_mgr = std::make_unique< HomeBlksStatusMgr >();
-
     /* We don't allow any cp to happen during phase1 */
     StaticIndxMgr::init();
 
@@ -939,5 +937,3 @@ void HomeBlks::list_snapshot(const VolumePtr&, std::vector< SnapshotPtr > snap_l
 void HomeBlks::read(const SnapshotPtr& snap, const snap_interface_req_ptr& req) {}
 
 bool HomeBlks::m_meta_blk_found = false;
-
-HomeBlksStatusMgr* HomeBlks::get_status_mgr() { return m_hb_status_mgr.get(); }

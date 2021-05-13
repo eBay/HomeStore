@@ -354,7 +354,7 @@ public:
         }
 
         // make a copy
-        auto mem{hs_iobuf_alloc(bn->get_cache_size())};
+        auto mem{hs_utils::iobuf_alloc(bn->get_cache_size())};
         sisl::blob outb;
         (bn->get_memvec()).get(&outb);
         ::memcpy(static_cast< void* >(mem), static_cast< const void* >(outb.bytes), outb.size);

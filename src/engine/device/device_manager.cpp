@@ -63,7 +63,7 @@ DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_s
 
     m_dm_info_size = sisl::round_up(DM_INFO_BLK_SIZE, HS_STATIC_CONFIG(drive_attr.phys_page_size));
 
-    m_chunk_memory = (char*)hs_iobuf_alloc(m_dm_info_size);
+    m_chunk_memory = (char*)hs_utils::iobuf_alloc(m_dm_info_size);
     bzero(m_chunk_memory, m_dm_info_size);
     m_dm_info = (dm_info*)m_chunk_memory;
 
@@ -115,7 +115,7 @@ void DeviceManager::init_devices(const std::vector< dev_info >& devices) {
     m_pdev_info = (pdev_info_block*)(m_chunk_memory + m_pdev_hdr->info_offset);
 
     // all devices will be inited with same system uuid;
-    auto sys_uuid = hs_gen_system_uuid();
+    auto sys_uuid = hs_utils::gen_system_uuid();
     size_t pdev_size = 0;
     for (auto& d : devices) {
         bool is_inited;
@@ -145,7 +145,7 @@ void DeviceManager::init_devices(const std::vector< dev_info >& devices) {
 }
 
 DeviceManager::~DeviceManager() {
-    hs_iobuf_free((uint8_t*)m_chunk_memory);
+    hs_utils::iobuf_free((uint8_t*)m_chunk_memory);
     m_dm_info = nullptr;
     m_pdev_hdr = nullptr;
     m_chunk_hdr = nullptr;

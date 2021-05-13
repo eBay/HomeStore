@@ -1353,10 +1353,10 @@ private:
                 auto chunk_list{pdev_chunks.chunks_in_pdev};
                 for (auto& chunk : chunk_list) {
                     if (chunk->get_blk_allocator()->verify_debug_bm(free_debug_bm) == false) {
-                        LOGERROR("Verify bitmap failure for chunk {}", static_cast<void*>(chunk));
+                        LOGERROR("Verify bitmap failure for chunk {}", static_cast< void* >(chunk));
                         return BlkAllocStatus::FAILED;
                     } else {
-                        LOGDEBUG("Verify bitmap success for chunk {}", static_cast<void*>(chunk));
+                        LOGDEBUG("Verify bitmap success for chunk {}", static_cast< void* >(chunk));
                     }
                 }
             }
@@ -1475,7 +1475,7 @@ private:
         ssize_t bytes_written = 0;
         auto align_sz = HS_STATIC_CONFIG(drive_attr.phys_page_size);
         COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
-        if (sisl_unlikely(!hs_mod_aligned_sz(offset_in_dev, align_sz))) {
+        if (sisl_unlikely(!hs_utils::mod_aligned_sz(offset_in_dev, align_sz))) {
             COUNTER_INCREMENT(m_metrics, unalign_writes, 1);
         }
 
@@ -1521,7 +1521,7 @@ private:
 
         auto align_sz = HS_STATIC_CONFIG(drive_attr.phys_page_size);
         COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
-        if (sisl_unlikely(!hs_mod_aligned_sz(offset_in_dev, align_sz))) {
+        if (sisl_unlikely(!hs_utils::mod_aligned_sz(offset_in_dev, align_sz))) {
             COUNTER_INCREMENT(m_metrics, unalign_writes, 1);
         }
 

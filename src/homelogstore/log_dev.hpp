@@ -354,6 +354,8 @@ struct logdev_key {
         dev_offset = std::numeric_limits< uint64_t >::max();
     }
 
+    std::string to_string() const { return fmt::format("Logid={} devoffset={}", idx, dev_offset); }
+
     static const logdev_key& out_of_bound_ld_key() {
         static constexpr logdev_key s_out_of_bound_ld_key{std::numeric_limits< logid_t >::max(), 0};
         return s_out_of_bound_ld_key;
@@ -418,6 +420,9 @@ struct logdev_superblk {
     // logstore_superblk meta[0];
 
     [[nodiscard]] uint32_t get_version() const { return version; }
+    [[nodiscard]] off_t start_offset() const { return start_dev_offset; }
+    [[nodiscard]] uint32_t num_stores_reserved() const { return num_stores; }
+
     [[nodiscard]] logstore_superblk* get_logstore_superblk() {
         return reinterpret_cast< logstore_superblk* >(reinterpret_cast< uint8_t* >(this) + sizeof(logdev_superblk));
     }
@@ -453,6 +458,7 @@ public:
     [[nodiscard]] const std::set< logstore_id_t >& reserved_store_ids() const { return m_store_info; }
 
     void update_store_superblk(const logstore_id_t idx, const logstore_superblk& meta, const bool persist_now);
+    [[nodiscard]] const logstore_superblk& store_superblk(const logstore_id_t idx) const;
     [[nodiscard]] logstore_superblk& mutable_store_superblk(const logstore_id_t idx);
 
 private:
@@ -678,6 +684,8 @@ public:
     void meta_blk_found(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
 
     void update_store_superblk(const logstore_id_t idx, const logstore_superblk& meta, const bool persist_now);
+
+    void get_status(const int verbosity, nlohmann::json& out_json) const;
 
 private:
     [[nodiscard]] LogGroup* make_log_group(const uint32_t estimated_records) {

@@ -44,6 +44,7 @@
 #include "engine/homestore_base.hpp"
 #include "engine/common/homestore_flip.hpp"
 #include "test_common/homestore_test_common.hpp"
+#include "engine/common/homestore_assert.hpp"
 #include "engine/common/mod_test_iface.hpp"
 
 using namespace homestore;

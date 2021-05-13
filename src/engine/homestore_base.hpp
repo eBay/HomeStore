@@ -1,10 +1,9 @@
 #pragma once
 #include <boost/intrusive_ptr.hpp>
-#include "common/homestore_header.hpp"
-#include "common/homestore_assert.hpp"
+//#include "common/homestore_header.hpp"
+//#include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
-#include <metrics/metrics.hpp>
-#include <iomgr/iomgr.hpp>
+//#include <metrics/metrics.hpp>
 
 typedef uint32_t crc32_t;
 typedef uint16_t csum_t;
@@ -13,6 +12,10 @@ const csum_t init_crc_16 = 0x8005;
 
 static constexpr crc32_t init_crc32 = 0x12345678;
 static constexpr crc32_t INVALID_CRC32_VALUE = 0x0u;
+
+namespace spdlog {
+class logger;
+} // namespace spdlog
 
 namespace homestore {
 
@@ -31,6 +34,9 @@ typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer
 class HomeStoreBase;
 typedef boost::intrusive_ptr< HomeStoreBase > HomeStoreBaseSafePtr;
 
+class HomeStoreStatusMgr;
+struct sb_blkstore_blob;
+
 /* This class is introduced only to avoid template in any of its subsystem. Subsystem can get any homestore info other
  * then indx blkstore from this base class.
  */
@@ -38,20 +44,30 @@ class HomeStoreBase {
 private:
     sisl::atomic_counter< uint64_t > m_usage_counter{0};
     std::shared_ptr< sds_logging::logger_t > m_periodic_logger;
+    std::unique_ptr< HomeStoreStatusMgr > m_status_mgr;
+
     static HomeStoreBaseSafePtr s_instance;
 
+protected:
+    bool m_vdev_failed{false};
+    bool m_print_checksum{true};
+    uint64_t m_size_avail{0};
+    uint32_t m_data_pagesz{0};
+    std::atomic< uint32_t > m_format_cnt{1};
+    sb_blkstore_blob* m_meta_sb_blob{nullptr};
+
 public:
-    virtual ~HomeStoreBase() = default;
+    virtual ~HomeStoreBase();
     friend void intrusive_ptr_add_ref(HomeStoreBase* hs) { hs->m_usage_counter.increment(1); }
     friend void intrusive_ptr_release(HomeStoreBase* hs) {
         if (hs->m_usage_counter.decrement_testz()) { delete hs; }
     }
 
-    static void set_instance(HomeStoreBaseSafePtr instance) { s_instance = instance; }
-    static void reset_instance() { s_instance.reset(); }
+    static void set_instance(HomeStoreBaseSafePtr instance);
+    static void reset_instance();
     static HomeStoreBase* instance() { return s_instance.get(); }
     static HomeStoreBaseSafePtr safe_instance() { return s_instance; }
-    static std::shared_ptr< spdlog::logger >& periodic_logger() { return instance()->m_periodic_logger; }
+    static std::shared_ptr< spdlog::logger >& periodic_logger();
 
     virtual data_blkstore_t* get_data_blkstore() const = 0;
     virtual void attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr >* cur_icp_map,
@@ -63,41 +79,24 @@ public:
     virtual DeviceManager* get_device_manager() = 0;
     virtual logdev_blkstore_t* get_data_logdev_blkstore() const = 0;
     virtual logdev_blkstore_t* get_ctrl_logdev_blkstore() const = 0;
+
+    HomeStoreStatusMgr* status_mgr();
 };
 
 static inline HomeStoreBaseSafePtr HomeStorePtr() { return HomeStoreBase::safe_instance(); }
 static inline HomeStoreBase* HomeStoreRawPtr() { return HomeStoreBase::instance(); }
 
-static inline auto hs_iobuf_alloc(size_t size) {
-    auto buf = iomanager.iobuf_alloc(HS_STATIC_CONFIG(drive_attr.align_size), size);
-    HS_ASSERT_NOTNULL(RELEASE, buf, "io buf is null. probably going out of memory");
-    return buf;
-}
-
 using hs_uuid_t = time_t;
-#define INVALID_SYSTEM_UUID 0
-static inline hs_uuid_t hs_gen_system_uuid() {
-    return std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-}
+static constexpr hs_uuid_t INVALID_SYSTEM_UUID{0};
 
-static inline void hs_iobuf_free(uint8_t* ptr) { iomanager.iobuf_free(ptr); }
+class hs_utils {
+    static uint8_t* iobuf_alloc(size_t size);
+    static void iobuf_free(uint8_t* ptr);
+    static uint64_t aligned_size(size_t size);
+    static bool mod_aligned_sz(size_t size_to_check, size_t align_sz);
+    static sisl::byte_view create_byte_view(uint64_t size, bool is_aligned_needed);
+    static sisl::io_blob create_io_blob(uint64_t size, bool is_aligned_needed);
+    static hs_uuid_t gen_system_uuid();
+};
 
-static inline uint64_t hs_aligned_size(size_t size) {
-    return sisl::round_up(size, HS_STATIC_CONFIG(drive_attr.align_size));
-}
-
-static inline bool hs_mod_aligned_sz(size_t size_to_check, size_t align_sz) {
-    HS_DEBUG_ASSERT_EQ((align_sz & (align_sz - 1)), 0);
-    return !(size_to_check & static_cast< size_t >(align_sz - 1)); // return true if it is aligned.
-}
-
-static inline sisl::byte_view hs_create_byte_view(uint64_t size, bool is_aligned_needed) {
-    return (is_aligned_needed)
-        ? sisl::byte_view{(uint32_t)hs_aligned_size(size), HS_STATIC_CONFIG(drive_attr.align_size)}
-        : sisl::byte_view{(uint32_t)size};
-}
-
-static inline sisl::io_blob hs_create_io_blob(uint64_t size, bool is_aligned_needed) {
-    return (is_aligned_needed) ? sisl::io_blob{size, HS_STATIC_CONFIG(drive_attr.align_size)} : sisl::io_blob{size, 0};
-}
 } // namespace homestore

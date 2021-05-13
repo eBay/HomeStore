@@ -256,7 +256,7 @@ public:
         } else {
             /* TODO add error messages */
             for (const auto& missing_piece : req->missing_pieces) {
-                hs_iobuf_free(missing_piece.ptr);
+                hs_utils::iobuf_free(missing_piece.ptr);
             }
         }
 
@@ -276,7 +276,7 @@ public:
                 bbuf->update_missing_piece(missing_piece.offset, missing_piece.size, missing_piece.ptr)};
             if (!inserted) {
                 /* someone else has inserted it */
-                hs_iobuf_free(missing_piece.ptr);
+                hs_utils::iobuf_free(missing_piece.ptr);
             }
         }
         HISTOGRAM_OBSERVE(m_metrics, blkstore_cache_read_latency, get_elapsed_time_us(start_time));
@@ -341,7 +341,7 @@ public:
 
         // Create a new block of memory for the blocks requested and set the memvec pointer to that
         auto size = blkid.data_size(m_pagesz);
-        uint8_t* ptr = hs_iobuf_alloc(size);
+        uint8_t* ptr = hs_utils::iobuf_alloc(size);
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector(), true);
         mvec->set(ptr, size, 0);
         buf->set_memvec(mvec, 0, size);
@@ -543,7 +543,7 @@ public:
         req->blkstore_ref_cnt.increment(1);
         for (size_t i{0}; i < missing_mp.size(); ++i) {
             // Create a new block of memory for the missing piece
-            uint8_t* ptr = hs_iobuf_alloc(missing_mp[i].second);
+            uint8_t* ptr = hs_utils::iobuf_alloc(missing_mp[i].second);
             HS_ASSERT_NOTNULL(RELEASE, ptr, "ptr is null");
 
             int64_t sz = (int64_t)missing_mp[i].second;
@@ -570,7 +570,7 @@ public:
                 bool inserted = bbuf->update_missing_piece(missing_mp[i].first, missing_mp[i].second, ptr);
                 if (!inserted) {
                     /* someone else has inserted it */
-                    hs_iobuf_free(ptr);
+                    hs_utils::iobuf_free(ptr);
                 }
                 req->blkstore_ref_cnt.decrement(1);
             }
@@ -626,7 +626,7 @@ public:
 
         for (uint32_t i{0}; i < (nmirrors + 1); ++i) {
             /* create the pointer */
-            uint8_t* const mem_ptr = hs_iobuf_alloc(bid.data_size(m_pagesz));
+            uint8_t* const mem_ptr = hs_utils::iobuf_alloc(bid.data_size(m_pagesz));
 
             /* set the memvec */
             boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
@@ -772,19 +772,13 @@ public:
     }
 
     /* Create debug bitmap */
-    BlkAllocStatus create_debug_bm() {
-        return (m_vdev.create_debug_bm());
-    }
+    BlkAllocStatus create_debug_bm() { return (m_vdev.create_debug_bm()); }
 
     /* Update debug bitmap */
-    BlkAllocStatus update_debug_bm(const BlkId& bid) {
-        return (m_vdev.update_debug_bm(bid));
-    }
+    BlkAllocStatus update_debug_bm(const BlkId& bid) { return (m_vdev.update_debug_bm(bid)); }
 
     /* Verify debug bitmap */
-    BlkAllocStatus verify_debug_bm() {
-        return (m_vdev.verify_debug_bm());
-    }
+    BlkAllocStatus verify_debug_bm() { return (m_vdev.verify_debug_bm()); }
 
 private:
     uint32_t m_pagesz;

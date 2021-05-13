@@ -442,8 +442,8 @@ public:
     /************************** Journal entry section **********************/
     static sisl::io_blob make_journal_entry(journal_op op, bool is_root, const btree_cp_ptr& bcp,
                                             bt_node_gen_pair pair = {empty_bnodeid, 0}) {
-        auto b = hs_create_io_blob(journal_entry_initial_size(),
-                                   HomeLogStore::is_aligned_buf_needed(journal_entry_initial_size()));
+        auto b = hs_utils::create_io_blob(journal_entry_initial_size(),
+                                          HomeLogStore::is_aligned_buf_needed(journal_entry_initial_size()));
         new (b.bytes) btree_journal_entry(op, is_root, pair, bcp->cp_id);
         return b;
     }

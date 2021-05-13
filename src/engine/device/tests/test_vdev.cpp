@@ -1,6 +1,7 @@
 //
 // Created by Yaming Kuang 1/15/2020
 //
+#include <random>
 #include "homeblks/home_blks.hpp"
 #include "../virtual_dev.hpp"
 #include <sds_logging/logging.h>

@@ -36,7 +36,7 @@ sisl::io_blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
     uint32_t size = sizeof(journal_hdr) + ireq->indx_alloc_blkid_list.size() * sizeof(BlkId) +
         ireq->indx_fbe_list.size() * sizeof(BlkId) + ireq->get_key_size() + ireq->get_val_size();
 
-    m_iob = hs_create_io_blob(size, HomeLogStore::is_aligned_buf_needed(size));
+    m_iob = hs_utils::create_io_blob(size, HomeLogStore::is_aligned_buf_needed(size));
 
     uint8_t* mem = m_iob.bytes;
 
@@ -1148,7 +1148,7 @@ indx_cp_ptr IndxMgr::get_indx_cp(hs_cp* hcp) {
 }
 
 sisl::byte_view IndxMgr::alloc_sb_bytes(uint64_t size) {
-    return hs_create_byte_view(size, MetaBlkMgrSI()->is_aligned_buf_needed(size));
+    return hs_utils::create_byte_view(size, MetaBlkMgrSI()->is_aligned_buf_needed(size));
 }
 
 /* Steps involved in indx destroy. Note that blkids is available to allocate as soon as it is set in blkalloc. So we
@@ -1448,7 +1448,7 @@ void StaticIndxMgr::flush_hs_free_blks(hs_cp* hcp) {
 void StaticIndxMgr::write_hs_cp_sb(hs_cp* hcp) {
     uint64_t size = sizeof(indx_cp_base_sb) * hcp->indx_cp_list.size() + sizeof(hs_cp_sb);
 
-    sisl::byte_view b = hs_create_byte_view(size, MetaBlkMgrSI()->is_aligned_buf_needed(size));
+    sisl::byte_view b = hs_utils::create_byte_view(size, MetaBlkMgrSI()->is_aligned_buf_needed(size));
     hs_cp_sb* hdr = (hs_cp_sb*)b.bytes();
     hdr->version = INDX_MGR_VERSION;
     hdr->type = meta_hdr_type::INDX_CP;

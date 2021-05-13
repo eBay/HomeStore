@@ -161,7 +161,7 @@ public:
             std::unique_lock< std::recursive_mutex > mtx(mvec->m_mtx);
             for (size_t i{0}; i < mvec->m_list.size(); i++) {
                 if (mvec->m_list[i].ptr() != nullptr) {
-                    hs_iobuf_free(mvec->m_list[i].ptr());
+                    hs_utils::iobuf_free(mvec->m_list[i].ptr());
                 } else {
                     assert(0);
                 }

@@ -265,4 +265,24 @@ nlohmann::json LogStoreFamily::dump_log_store(const log_dump_req& dump_req) {
     }
     return json_dump;
 }
+
+nlohmann::json LogStoreFamily::get_status(const int verbosity) const {
+    nlohmann::json js;
+    auto unopened = nlohmann::json::array();
+    for (const auto& l : m_unopened_store_id) {
+        unopened.push_back(l);
+    }
+    js["logstores_unopened"] = std::move(unopened);
+
+    // Logdev status
+    m_log_dev.get_status(verbosity, js);
+
+    // All logstores
+    m_id_logstore_map.withRLock([&](auto& id_logstore_map) {
+        for (const auto& [id, lstore] : id_logstore_map) {
+            js["logstore_id_" + std::to_string(id)] = lstore.m_log_store->get_status(verbosity);
+        }
+    });
+    return js;
+}
 } // namespace homestore
