@@ -411,7 +411,7 @@ public:
     void print_tree();
 
     /* verify active indx */
-    bool verify_tree();
+    bool verify_tree(bool update_debug_bm = false);
 
     /* populate debug bitmap */
     void populate_debug_bm();

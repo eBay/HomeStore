@@ -477,32 +477,69 @@ bool HomeBlks::verify_vols() {
     return ret;
 }
 
-bool HomeBlks::verify_bitmap() {
-    /* Create the bitmap */
+bool HomeBlks::verify_data_bm() {
+    /* Create the data bitmap */
     auto hb{HomeBlks::safe_instance()};
     BlkAllocStatus status{hb->get_data_blkstore()->create_debug_bm()};
     if (status != BlkAllocStatus::SUCCESS) {
-        LOGERROR("failing to create bitmap as it is out of disk space");
+        LOGERROR("failing to create data debug bitmap as it is out of disk space");
         return false;
     }
 
-    /* Update the bitmap */
+    /* Update the data bitmap */
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
     auto it{m_volume_map.begin()};
     LOGINFO("Verifying the integrity of the bitmap");
     while (it != m_volume_map.end()) {
         const VolumePtr& vol{it->second};
+        VOL_INFO_LOG(vol->get_uuid(), "Verifying the integrity of the data debug bitmap");
         vol->populate_debug_bm();
         ++it;
     }
 
-    /* Verify bitmap */
+    /* Verify data bitmap */
     BlkAllocStatus ver_status{hb->get_data_blkstore()->verify_debug_bm()};
     if (ver_status != BlkAllocStatus::SUCCESS) {
-        LOGERROR("failing to match debug bitmap with persisted bitmap");
+        LOGERROR("failing to match data debug bitmap with persisted bitmap");
         return false;
     }
     LOGINFO("Verifying the integrity of the bitmap : DONE");
+    return true;
+}
+
+bool HomeBlks::verify_index_bm() {
+    /* Create the index bitmap */
+    auto hb{HomeBlks::safe_instance()};
+    BlkAllocStatus status{hb->get_index_blkstore()->create_debug_bm()};
+    if (status != BlkAllocStatus::SUCCESS) {
+        LOGERROR("failing to create index debug bitmap as it is out of disk space");
+        return false;
+    }
+
+    /* Update the index bitmap */
+    std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
+    auto it{m_volume_map.begin()};
+    while (it != m_volume_map.end()) {
+        const VolumePtr& vol{it->second};
+        VOL_INFO_LOG(vol->get_uuid(), "Verifying the integrity of the index debug bitmap");
+        vol->verify_tree(true);
+        ++it;
+    }
+
+    /* Verify index bitmap */
+    BlkAllocStatus ver_status{hb->get_index_blkstore()->verify_debug_bm()};
+    if (ver_status != BlkAllocStatus::SUCCESS) {
+        LOGERROR("failing to match index debug bitmap with persisted bitmap");
+        return false;
+    }
+    return true;
+}
+
+bool HomeBlks::verify_bitmap() {
+#ifdef _PRERELEASE
+    HS_RELEASE_ASSERT(verify_data_bm(), "data debug bitmap verify failed");
+    HS_RELEASE_ASSERT(verify_index_bm(), "index debug bitmap verify failed");
+#endif
     return true;
 }
 

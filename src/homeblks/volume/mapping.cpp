@@ -243,7 +243,7 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
 
 uint64_t mapping::get_btree_node_cnt() { return m_bt->get_btree_node_cnt(); }
 void mapping::print_tree() { m_bt->print_tree(); }
-bool mapping::verify_tree() { return m_bt->verify_tree(); }
+bool mapping::verify_tree(bool update_debug_bm) { return m_bt->verify_tree(update_debug_bm); }
 
 /**
  * @brief : Fix a btree by :

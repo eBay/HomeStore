@@ -670,7 +670,7 @@ public:
     virtual uint64_t get_btree_node_cnt();
 
     void print_tree();
-    bool verify_tree();
+    bool verify_tree(bool update_debug_bm);
     /**
      * @brief : Fix a btree by :
      *      1. Create a new btree,

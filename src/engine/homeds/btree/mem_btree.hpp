@@ -217,6 +217,10 @@ public:
         return btree_status_t::success;
     }
 
+    static btree_status_t update_debug_bm(MemBtreeStore* store, boost::intrusive_ptr< MemBtreeNode > bn) {
+        return btree_status_t::success;
+    }
+
 private:
     mem_btree_t* m_btree;
     BtreeConfig m_cfg;

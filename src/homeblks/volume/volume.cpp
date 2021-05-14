@@ -721,7 +721,7 @@ volume_child_req_ptr Volume::create_vol_child_req(const BlkId& bid, const volume
 }
 
 void Volume::print_tree() { get_active_indx()->print_tree(); }
-bool Volume::verify_tree() { return (get_active_indx()->verify_tree()); }
+bool Volume::verify_tree(bool update_debug_bm) { return (get_active_indx()->verify_tree(update_debug_bm)); }
 
 void Volume::populate_debug_bm() {
     unsigned int i{0};

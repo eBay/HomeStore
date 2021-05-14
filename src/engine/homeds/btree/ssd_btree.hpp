@@ -409,6 +409,12 @@ public:
         return btree_status_t::success;
     }
 
+    static btree_status_t update_debug_bm(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > bn) {
+        homestore::BlkId blkid(bn->get_node_id());
+        return (m_blkstore->update_debug_bm(blkid) == BlkAllocStatus::SUCCESS) ?
+                                        btree_status_t::success : btree_status_t::update_debug_bm_failed;
+    }
+
     static btree_status_t refresh_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn,
                                        bool is_write_modifiable, const btree_cp_ptr& bcp) {
         /* add the latest request pending on this node */

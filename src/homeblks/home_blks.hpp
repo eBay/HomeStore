@@ -272,6 +272,8 @@ public:
     void meta_blk_recovery_comp(bool success);
 
     bool verify_vols();
+    bool verify_data_bm();
+    bool verify_index_bm();
     bool verify_bitmap();
 
 #ifdef _PRERELEASE

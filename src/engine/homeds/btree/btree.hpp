@@ -668,12 +668,14 @@ public:
     /**
      * @brief : verify btree is consistent and no corruption;
      *
+     * @param update_debug_bm : true or false;
+     *
      * @return : true if btree is not corrupted.
      *           false if btree is corrupted;
      */
-    bool verify_tree() {
+    bool verify_tree(bool update_debug_bm) {
         m_btree_lock.read_lock();
-        bool ret = verify_node(m_root_node, nullptr, -1);
+        bool ret = verify_node(m_root_node, nullptr, -1, update_debug_bm);
         m_btree_lock.unlock();
 
         return ret;
@@ -883,17 +885,24 @@ private:
      * @param bnodeid : node id
      * @param parent_node : parent node ptr
      * @param indx : index within thie node;
+     * @param update_debug_bm : true or false;
      *
      * @return : true if this node including all its children are not corrupted;
      *           false if not;
      */
-    bool verify_node(bnodeid_t bnodeid, BtreeNodePtr parent_node, uint32_t indx) {
+    bool verify_node(bnodeid_t bnodeid, BtreeNodePtr parent_node, uint32_t indx, bool update_debug_bm) {
         homeds::thread::locktype acq_lock = homeds::thread::locktype::LOCKTYPE_READ;
         BtreeNodePtr my_node;
         if (read_and_lock_node(bnodeid, my_node, acq_lock, acq_lock, nullptr) != btree_status_t::success) {
             LOGINFO("read node failed");
             return false;
         }
+        if (update_debug_bm &&
+                (btree_store_t::update_debug_bm(m_btree_store.get(), my_node) != btree_status_t::success)) {
+            LOGERROR("bitmap update failed for node {}", my_node->to_string());
+            return false;
+        }
+
         K prev_key;
         bool success = true;
         for (uint32_t i = 0; i < my_node->get_total_entries(); ++i) {
@@ -902,7 +911,7 @@ private:
             if (!my_node->is_leaf()) {
                 BtreeNodeInfo child;
                 my_node->get(i, &child, false);
-                success = verify_node(child.bnode_id(), my_node, i);
+                success = verify_node(child.bnode_id(), my_node, i, update_debug_bm);
                 if (!success) { goto exit_on_error; }
 
                 if (i > 0) {
@@ -980,7 +989,7 @@ private:
         }
 
         if (my_node->has_valid_edge()) {
-            success = verify_node(my_node->get_edge_id(), my_node, my_node->get_total_entries());
+            success = verify_node(my_node->get_edge_id(), my_node, my_node->get_total_entries(), update_debug_bm);
             if (!success) { goto exit_on_error; }
         }
 
