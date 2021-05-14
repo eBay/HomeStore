@@ -90,6 +90,7 @@ using hs_uuid_t = time_t;
 static constexpr hs_uuid_t INVALID_SYSTEM_UUID{0};
 
 class hs_utils {
+public:
     static uint8_t* iobuf_alloc(size_t size);
     static void iobuf_free(uint8_t* ptr);
     static uint64_t aligned_size(size_t size);
