@@ -295,7 +295,6 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
     std::shared_ptr< Volume > new_vol;
     try {
         new_vol = Volume::make_volume(params);
-        create_volume(new_vol);
     } catch (const std::exception& e) {
         LOGERROR("volume creation failed exception: {}", e.what());
         return nullptr;
@@ -431,10 +430,6 @@ void HomeBlks::init_done() {
     m_out_params.max_io_size = HS_STATIC_CONFIG(engine.max_vol_io_size);
     if (m_cfg.end_of_batch_cb) { attach_end_of_batch_cb(m_cfg.end_of_batch_cb); }
     m_cfg.init_done_cb(no_error, m_out_params);
-#ifndef NDEBUG
-    /* It will trigger race conditions without generating any IO error */
-    set_io_flip();
-#endif
 
     status_mgr()->register_status_cb("MetaBlkMgr",
                                      std::bind(&MetaBlkMgr::get_status, MetaBlkMgrSI(), std::placeholders::_1));

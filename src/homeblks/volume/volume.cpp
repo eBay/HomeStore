@@ -119,8 +119,11 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
 }
 
 void Volume::init() {
+    bool init = false;
     auto sb = (vol_sb_hdr*)m_sb_buf.bytes();
+    /* add this volume in home blks */
     if (!sb) {
+        init = true;
         /* populate superblock */
         m_sb_buf =
             hs_utils::create_byte_view(sizeof(vol_sb_hdr), MetaBlkMgrSI()->is_aligned_buf_needed(sizeof(vol_sb_hdr)));
@@ -142,10 +145,6 @@ void Volume::init() {
         /* it is called after superblock is persisted by volume */
         m_indx_mgr->indx_init();
 
-        SnapMgr::trigger_indx_cp_with_cb(([this](bool success) {
-            /* Now it is safe to do shutdown as this volume has become a part of CP */
-            if (home_blks_ref_cnt.decrement_testz(1) && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); }
-        }));
     } else {
         /* recovery */
         auto indx_sb = sb->indx_sb;
@@ -159,14 +158,18 @@ void Volume::init() {
     alloc_single_block_in_mem();
     m_blks_per_lba = get_page_size() / m_hb->get_data_pagesz();
     HS_RELEASE_ASSERT_EQ(get_page_size() % m_hb->get_data_pagesz(), 0);
+    m_hb->create_volume(shared_from_this());
+    if (init) {
+        SnapMgr::trigger_indx_cp_with_cb(([this](bool success) {
+            /* Now it is safe to do shutdown as this volume has become a part of CP */
+            if (home_blks_ref_cnt.decrement_testz(1) && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); }
+        }));
+    }
 }
 
 void Volume::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     HS_ASSERT_CMP(RELEASE, sizeof(vol_sb_hdr), ==, size);
-
-    auto new_vol = Volume::make_volume(mblk, buf);
-    /* add this volume in home blks */
-    HomeBlks::safe_instance()->create_volume(new_vol);
+    Volume::make_volume(mblk, buf);
 }
 
 /* This function can be called multiple times. Underline functions should be idempotent */
@@ -837,13 +840,14 @@ size_t Volume::call_batch_completion_cbs() {
     auto count = 0u;
     if (std::holds_alternative< io_batch_comp_callback >(m_comp_cb)) {
         count = m_completed_reqs->size();
+        assert(count > 0);
         if (count) {
             auto comp_reqs = m_completed_reqs->swap();
             THIS_VOL_LOG(TRACE, volume, , "Calling batch completion for {} reqs", comp_reqs->size());
             (std::get< io_batch_comp_callback >(m_comp_cb))(*comp_reqs);
             m_completed_reqs->drop(comp_reqs);
+            shutdown_if_needed();
         }
-        shutdown_if_needed();
     }
     return count;
 }

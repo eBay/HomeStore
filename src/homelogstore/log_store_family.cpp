@@ -174,7 +174,9 @@ void LogStoreFamily::on_io_completion_with_flush_lock(const logstore_id_t id, co
 
 void LogStoreFamily::on_logfound(const logstore_id_t id, const logstore_seq_num_t seq_num, const logdev_key ld_key,
                                  const log_buffer buf) {
-    auto it{m_id_logstore_map.rlock()->find(id)};
+    auto m{m_id_logstore_map.rlock()};
+    const auto it{m->find(id)};
+    if (it == m->end()) { return; }
     auto& log_store{it->second.m_log_store};
     if (it->second.m_log_store) { log_store->on_log_found(seq_num, ld_key, buf); }
 }
