@@ -227,7 +227,7 @@ private:
     void write_meta_blk_to_disk(meta_blk* const mblk);
 
     void write_ovf_blk_to_disk(meta_blk_ovf_hdr* const ovf_hdr, const void* const context_data, const uint64_t sz,
-                               const uint64_t offset);
+                               const uint64_t offset, const std::string& type);
 
     /**
      * @brief : load meta blk super super block into memory
@@ -285,7 +285,7 @@ private:
      * @param sz
      * @param offset
      */
-    void write_meta_blk_ovf(BlkId& bid, const void* const context_data, const uint64_t sz);
+    void write_meta_blk_ovf(BlkId& bid, const void* const context_data, const uint64_t sz, const std::string& type);
 
     /**
      * @brief : internal implementation of populating and writing a meta block;

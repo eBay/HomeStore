@@ -960,7 +960,9 @@ void VolumeMetrics::on_gather() {
         GAUGE_UPDATE(*this, volume_data_used_size, size.used_data_size);
         GAUGE_UPDATE(*this, volume_index_used_size, size.used_index_size);
     } else {
-        LOGWARN("gathering metrics before volume is ready: state: {}, recovery_done: {}, can not serve this request!",
-                m_volume->is_online() ? "Online" : "Offline", m_volume->is_recovery_done());
+        HS_LOG_EVERY_N(
+            WARN, base, 50,
+            "gathering metrics before volume is ready: state: {}, recovery_done: {}, can not serve this request!",
+            m_volume->is_online() ? "Online" : "Offline", m_volume->is_recovery_done());
     }
 }

@@ -19,6 +19,9 @@ table GeneralConfig {
 
     // Frequency with which we need to check the success of shutdown
     shutdown_status_check_freq_ms: uint64 = 2000;
+
+    // Consistency check on booting 
+    boot_consistency_check: bool = true;
 }
 
 table HomeBlksSettings {

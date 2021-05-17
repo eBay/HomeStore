@@ -421,8 +421,12 @@ void HomeBlks::init_done() {
     LOGINFO("verifying vols");
 
 #ifdef _PRERELEASE
-    HS_RELEASE_ASSERT((verify_vols()), "vol verify failed");
-    HS_RELEASE_ASSERT((verify_bitmap()), "bitmap verify failed");
+    if (HB_DYNAMIC_CONFIG(general_config->boot_consistency_check)) {
+        HS_RELEASE_ASSERT((verify_vols()), "vol verify failed");
+        HS_RELEASE_ASSERT((verify_bitmap()), "bitmap verify failed");
+    } else {
+        LOGINFO("Skip running verification (vols/bitmap).");
+    }
 #endif
 
     LOGINFO("init done");
@@ -461,6 +465,7 @@ bool HomeBlks::verify_tree(const VolumePtr& vol) {
 }
 
 bool HomeBlks::verify_vols() {
+    LOGINFO("Start verification for all volumes. ");
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
     auto it = m_volume_map.begin();
     bool ret = true;

@@ -145,6 +145,9 @@ table MetaBlkStore {
 
     // Percentage of compress ratio that allowed for compress to take place
     compress_ratio_limit: uint32 = 75 (hotswap);
+
+    // percentage of *free* root fs while dump to file for get_status;
+    percent_of_free_space: uint32 = 10 (hotswap);
 }
 
 table HomeStoreSettings {
