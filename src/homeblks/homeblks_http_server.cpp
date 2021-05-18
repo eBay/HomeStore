@@ -6,6 +6,7 @@
 
 #include <boost/algorithm/string.hpp>
 #include <nlohmann/json.hpp>
+#include <version.hpp>
 
 #include "engine/common/homestore_config.hpp"
 #include "homeblks_config.hpp"
@@ -52,7 +53,9 @@ void HomeBlksHttpServer::start() {
 void HomeBlksHttpServer::stop() { m_http_server->stop(); }
 
 void HomeBlksHttpServer::get_version(sisl::HttpCallData cd) {
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, std::string("HomeBlks: ") + HomeBlks::version);
+    const std::string ver_str{fmt::format("HomeBlks: {0}, IOMgr: {1}, SISL: {2}",
+            HomeBlks::version, iomgr::get_version(), sisl::get_version())};
+    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, ver_str);
 }
 
 void HomeBlksHttpServer::get_metrics(sisl::HttpCallData cd) {
