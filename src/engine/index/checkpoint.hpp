@@ -176,6 +176,7 @@ public:
         HS_PERIODIC_LOG(DEBUG, cp, ">>>>>>>>>>>> cp ID completed {}, notified {} callbacks", cp->to_string(),
                         cb_list.size());
         HISTOGRAM_OBSERVE(m_metrics, cp_latency, get_elapsed_time_ns(m_cp_start_time));
+        cp_reset(cp);
         delete (cp);
 
         for (uint32_t i = 0; i < cb_list.size(); ++i) {
@@ -257,5 +258,8 @@ public:
      * IOs have called cp_io_exit.
      */
     virtual void cp_start(cp_type* cp) = 0;
+
+    /* It is called when cp is completed */
+    virtual void cp_reset(cp_type* cp) = 0;
 };
 } // namespace homestore

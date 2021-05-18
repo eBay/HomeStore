@@ -417,10 +417,9 @@ void HomeBlks::init_done() {
     HS_RELEASE_ASSERT_EQ(system_cap.used_index_size, used_size.used_index_size,
                          "index used size mismatch. used size {}", used_size.to_string());
 
-    /* verifying volumes */
-    LOGINFO("verifying vols");
-
 #ifdef _PRERELEASE
+    HB_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.general_config.boot_consistency_check = true; });
+    HB_SETTINGS_FACTORY().save();
     if (HB_DYNAMIC_CONFIG(general_config->boot_consistency_check)) {
         HS_RELEASE_ASSERT((verify_vols()), "vol verify failed");
         HS_RELEASE_ASSERT((verify_bitmap()), "bitmap verify failed");
@@ -489,10 +488,9 @@ bool HomeBlks::verify_data_bm() {
     /* Update the data bitmap */
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
     auto it{m_volume_map.begin()};
-    LOGINFO("Verifying the integrity of the bitmap");
+    LOGINFO("Verifying the integrity of the data bitmap : START");
     while (it != m_volume_map.end()) {
         const VolumePtr& vol{it->second};
-        VOL_INFO_LOG(vol->get_uuid(), "Verifying the integrity of the data debug bitmap");
         vol->populate_debug_bm();
         ++it;
     }
@@ -503,7 +501,7 @@ bool HomeBlks::verify_data_bm() {
         LOGERROR("failing to match data debug bitmap with persisted bitmap");
         return false;
     }
-    LOGINFO("Verifying the integrity of the bitmap : DONE");
+    LOGINFO("Verifying the integrity of the data bitmap : DONE");
     return true;
 }
 
@@ -519,9 +517,9 @@ bool HomeBlks::verify_index_bm() {
     /* Update the index bitmap */
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
     auto it{m_volume_map.begin()};
+    LOGINFO("Verifying the integrity of the index bitmap : START");
     while (it != m_volume_map.end()) {
         const VolumePtr& vol{it->second};
-        VOL_INFO_LOG(vol->get_uuid(), "Verifying the integrity of the index debug bitmap");
         vol->verify_tree(true);
         ++it;
     }
@@ -532,6 +530,7 @@ bool HomeBlks::verify_index_bm() {
         LOGERROR("failing to match index debug bitmap with persisted bitmap");
         return false;
     }
+    LOGINFO("Verifying the integrity of the Index bitmap : DONE");
     return true;
 }
 

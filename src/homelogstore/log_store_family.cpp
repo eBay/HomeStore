@@ -31,6 +31,10 @@ void LogStoreFamily::start(const bool format, logdev_blkstore_t* blk_store) {
 
     // Start the logdev, which loads the device in case of recovery.
     m_log_dev.start(format, blk_store);
+    for (auto it{std::begin(m_unopened_store_io)}; it != std::end(m_unopened_store_io); ++it) {
+        LOGINFO("skip log entries for store id {}-{}, ios {}", m_family_id, it->first, it->second);
+    }
+    m_unopened_store_io.clear();
 
     // If there are any unopened storeids found, loop and check again if they are indeed open later. Unopened log store
     // could be possible if the ids are deleted, but it is delayed to remove from store id reserver. In that case,
@@ -121,6 +125,7 @@ void LogStoreFamily::on_log_store_found(const logstore_id_t store_id, const logs
     if (it == m->end()) {
         LOGERROR("Store Id {}-{} found but not opened yet, ignoring the store", m_family_id, store_id);
         m_unopened_store_id.insert(store_id);
+        m_unopened_store_io.insert(std::make_pair<>(store_id, 0));
         return;
     }
 
@@ -176,7 +181,14 @@ void LogStoreFamily::on_logfound(const logstore_id_t id, const logstore_seq_num_
                                  const log_buffer buf) {
     auto m{m_id_logstore_map.rlock()};
     const auto it{m->find(id)};
-    if (it == m->end()) { return; }
+    if (it == m->end()) {
+        auto [unopened_it, inserted] = m_unopened_store_io.insert(std::make_pair<>(id, 0));
+        if (inserted) {
+            // HS_RELEASE_ASSERT(0, "log id  {}-{} not found", m_family_id, id);
+        }
+        ++unopened_it->second;
+        return;
+    }
     auto& log_store{it->second.m_log_store};
     if (it->second.m_log_store) { log_store->on_log_found(seq_num, ld_key, buf); }
 }

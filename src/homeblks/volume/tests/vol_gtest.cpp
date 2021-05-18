@@ -144,6 +144,7 @@ struct TestCfg {
     bool delete_with_io;
     uint32_t create_del_ops_cnt;
     uint32_t create_del_ops_interval;
+    std::string flip_name;
 
     bool verify_csum() { return verify_type == verify_type_t::csum; }
     bool verify_data() { return verify_type == verify_type_t::data; }
@@ -1689,6 +1690,12 @@ TEST_F(VolTest, lifecycle_test) {
  */
 TEST_F(VolTest, init_io_test) {
     this->start_homestore();
+    FlipClient fc(HomeStoreFlip::instance());
+    FlipFrequency freq;
+    freq.set_count(10);
+    freq.set_percent(100);
+
+    fc.inject_retval_flip(tcfg.flip_name, {}, freq, 100);
 
     std::unique_ptr< VolCreateDeleteJob > cdjob;
     if (tcfg.create_del_with_io || tcfg.delete_with_io) {
@@ -2013,6 +2020,7 @@ SDS_OPTION_GROUP(
      "validate data before starting io"),
     (abort, "", "abort", "abort", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (flip, "", "flip", "flip", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (flip_name, "", "flip_name", "list of flips", ::cxxopts::value< std::string >()->default_value(""), "flip_name"),
     (delete_volume, "", "delete_volume", "delete_volume", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (atomic_phys_page_size, "", "atomic_phys_page_size", "atomic_phys_page_size",
      ::cxxopts::value< uint32_t >()->default_value("4096"), "atomic_phys_page_size"),
@@ -2035,7 +2043,7 @@ SDS_OPTION_GROUP(
     (read_cache, "", "read_cache", "read cache", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
     (write_iovec, "", "write_iovec", "write iovec(s)", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (read_iovec, "", "read_iovec", "read iovec(s)", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
-    (batch_completion, "", "batch_completion", "batch completion", ::cxxopts::value< bool >()->default_value("true"),
+    (batch_completion, "", "batch_completion", "batch completion", ::cxxopts::value< bool >()->default_value("false"),
      "true or false"),
     (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
     (vol_create_del, "", "vol_create_del", "vol_create_del", ::cxxopts::value< bool >()->default_value("false"),
@@ -2107,6 +2115,7 @@ int main(int argc, char* argv[]) {
     _gcfg.delete_with_io = SDS_OPTIONS["delete_with_io"].as< bool >();
     _gcfg.create_del_ops_cnt = SDS_OPTIONS["create_del_ops_cnt"].as< uint32_t >();
     _gcfg.create_del_ops_interval = SDS_OPTIONS["create_del_ops_interval"].as< uint32_t >();
+    _gcfg.flip_name = SDS_OPTIONS["flip_name"].as< std::string >();
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
@@ -2159,5 +2168,6 @@ int main(int argc, char* argv[]) {
         mod_init_funcs[i]();
     }
 
-    return RUN_ALL_TESTS();
+    auto ret = RUN_ALL_TESTS();
+    return ret;
 }

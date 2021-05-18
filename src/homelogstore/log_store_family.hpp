@@ -74,6 +74,7 @@ private:
 
 private:
     folly::Synchronized< std::unordered_map< logstore_id_t, logstore_info_t > > m_id_logstore_map;
+    std::unordered_map< logstore_id_t, uint64_t > m_unopened_store_io;
     std::unordered_set< logstore_id_t > m_unopened_store_id;
     std::unordered_map< logstore_id_t, logid_t > m_last_flush_info;
     logstore_family_id_t m_family_id;

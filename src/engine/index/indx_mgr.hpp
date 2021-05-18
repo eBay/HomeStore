@@ -162,7 +162,7 @@ struct indx_cp;
  * suspended then all cps are suspended.
  */
 
-enum cp_state {
+enum indx_cp_state {
     suspend_cp = 0x0, // cp is suspended
     active_cp = 0x1,  // Active CP
     diff_cp = 0x2,    // Diff CP.
@@ -170,11 +170,13 @@ enum cp_state {
 };
 
 ENUM(indx_req_state, uint32_t, active_btree, diff_btree);
+ENUM(hs_cp_state, uint32_t, init, preparing, flushing_indx_tbl, flushing_blkalloc, flushing_sb, notify_user, done);
 
 struct hs_cp : cp_base {
     /* This list is not lock protected. */
     std::map< boost::uuids::uuid, indx_cp_ptr > indx_cp_list;
     std::shared_ptr< blkalloc_cp > ba_cp;
+    hs_cp_state hs_state;
 
     sisl::atomic_counter< uint64_t > ref_cnt; // cnt of how many cps are triggered
     uint64_t snt_cnt;
@@ -207,7 +209,7 @@ struct indx_diff_cp {
 /* During prepare flush we decide to take a CP out of active, diff or snap or all 3 cps*/
 struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
     indx_mgr_ptr indx_mgr;
-    int flags = cp_state::active_cp;
+    int flags = indx_cp_state::active_cp;
     seq_id_t max_seqid = -1; // max seqid sent on this id
 
     /* metrics */
@@ -315,7 +317,26 @@ struct indx_mgr_sb {
 };
 #pragma pack()
 
+class CPWatchdog {
+public:
+    CPWatchdog();
+    void cp_reset();
+    void set_cp(hs_cp* cp);
+    void cp_watchdog_timer();
+    void stop();
+
+private:
+    /* watchdog CP stats */
+    std::shared_mutex m_cp_mtx;
+    hs_cp* m_cp;
+    hs_cp_state m_last_hs_state;
+    iomgr::timer_handle_t m_timer_hdl;
+    Clock::time_point last_state_ch_time;
+};
+
 class HomeStoreCPMgr : public CPMgr< hs_cp > {
+    CPWatchdog m_wd_cp;
+
 public:
     HomeStoreCPMgr();
     HomeStoreBaseSafePtr m_hs{HomeStoreBase::safe_instance()};
@@ -325,10 +346,12 @@ public:
     virtual void cp_attach_prepare(hs_cp* cur_hcp, hs_cp* new_hcp);
     virtual ~HomeStoreCPMgr();
     virtual void shutdown() override;
+    virtual void cp_reset(hs_cp* cp) override;
 
     void try_cp_start(hs_cp* hcp);
     void indx_tbl_cp_done(hs_cp* hcp);
     void blkalloc_cp_start(hs_cp* hcp);
+    void write_hs_cp_sb(hs_cp* hcp);
 };
 
 /************************************************ Indx table *****************************************/
