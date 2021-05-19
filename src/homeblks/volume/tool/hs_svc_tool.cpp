@@ -21,7 +21,6 @@ SDS_LOGGING_DECL(hs_svc_tool)
 SDS_OPTIONS_ENABLE(logging, hs_svc_tool)
 
 struct Param {
-    bool restricted_mode = 0;
     bool zero_boot_sb = 0;
     std::vector< std::string > dev_names;
 };
@@ -70,16 +69,12 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
     params.min_virtual_page_size = 4096;
     params.app_mem_size = app_mem_size;
     params.devices = device_info;
-    params.is_restricted_mode = gp.restricted_mode;
     params.init_done_cb = [&tl_start_mutex = start_mutex, &tl_cv = cv, &tl_inited = inited](std::error_condition err,
                                                                                             const out_params& params) {
         LOGINFO("HomeBlks Init completed");
         {
             std::unique_lock< std::mutex > lk{tl_start_mutex};
             tl_inited = true;
-#if 0
-            if (gp.restricted_mode && gp.zero_pdev_sb) { VolInterface::get_instance()->zero_pdev_sbs(); }
-#endif
         }
         tl_cv.notify_one();
     };
@@ -114,8 +109,6 @@ SDS_OPTION_GROUP(hs_svc_tool,
                   ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
                  (dev_size_gb, "", "dev_size_gb", "size of each device in GB",
                   ::cxxopts::value< uint64_t >()->default_value("10"), "number"),
-                 (restricted_mode, "", "restricted_mode", "boot homestore pdev in restricted_mode",
-                  ::cxxopts::value< bool >()->default_value("false"), "true or false"),
                  (zero_boot_sb, "", "zero_boot_sb", "mark homestore init state",
                   ::cxxopts::value< bool >()->default_value("false"), "true or false"),
                  (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
@@ -130,7 +123,6 @@ int main(int argc, char* argv[]) {
     sds_logging::SetLogger("hs_svc_tool");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
 
-    gp.restricted_mode = SDS_OPTIONS["restricted_mode"].as< bool >();
     gp.zero_boot_sb = SDS_OPTIONS["zero_boot_sb"].as< bool >();
 
     if (SDS_OPTIONS.count("device_list")) {

@@ -85,7 +85,6 @@ public:
                           static_cast< uint64_t >(1024)}; // memory available for the app (including cache)
     bool disk_init{false};                                // Deprecated. true if disk has to be initialized.
     bool is_read_only{false};                             // Is read only
-    bool is_restricted_mode{false};                       // boot in restricted mode
     bool start_http{true};
 
 #ifdef _PRERELEASE
