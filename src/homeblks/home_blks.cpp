@@ -421,7 +421,6 @@ void HomeBlks::init_done() {
     HB_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.general_config.boot_consistency_check = true; });
     HB_SETTINGS_FACTORY().save();
     if (HB_DYNAMIC_CONFIG(general_config->boot_consistency_check)) {
-        HS_RELEASE_ASSERT((verify_vols()), "vol verify failed");
         HS_RELEASE_ASSERT((verify_bitmap()), "bitmap verify failed");
     } else {
         LOGINFO("Skip running verification (vols/bitmap).");
@@ -536,8 +535,10 @@ bool HomeBlks::verify_index_bm() {
 
 bool HomeBlks::verify_bitmap() {
 #ifdef _PRERELEASE
+    StaticIndxMgr::hs_cp_suspend();
     HS_RELEASE_ASSERT(verify_data_bm(), "data debug bitmap verify failed");
     HS_RELEASE_ASSERT(verify_index_bm(), "index debug bitmap verify failed");
+    StaticIndxMgr::hs_cp_resume();
 #endif
     return true;
 }
