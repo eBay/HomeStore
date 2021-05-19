@@ -245,9 +245,7 @@ public:
             return true; // nothing to compare. So always return true
         }
         auto bits_set{[this, &b]() {
-            if (!m_disk_bm->is_bits_set(b.get_blk_num(), b.get_nblks())) {
-                return false;
-            }
+            if (!m_disk_bm->is_bits_set(b.get_blk_num(), b.get_nblks())) { return false; }
             return true;
         }};
         if (use_lock) {
@@ -311,7 +309,7 @@ public:
      * disk bitmap.
      */
     [[nodiscard]] sisl::byte_array cp_start([[maybe_unused]] const std::shared_ptr< blkalloc_cp >& id) {
-        return (m_disk_bm->serialize());
+        return (m_disk_bm->serialize(HS_STATIC_CONFIG(drive_attr.align_size)));
     }
 
     virtual BlkAllocStatus alloc(BlkId& bid) = 0;
