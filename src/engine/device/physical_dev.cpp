@@ -364,7 +364,7 @@ ssize_t PhysicalDev::sync_writev(const iovec* iov, int iovcnt, uint32_t size, ui
     }
 }
 
-void PhysicalDev::write_zero(uint32_t size, uint64_t offset, uint8_t* cookie) {
+void PhysicalDev::write_zero(uint64_t size, uint64_t offset, uint8_t* cookie) {
     drive_iface->write_zero(m_iodev.get(), size, offset, cookie);
 }
 
