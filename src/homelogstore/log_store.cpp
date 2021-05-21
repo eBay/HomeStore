@@ -108,7 +108,10 @@ logstore_seq_num_t HomeLogStore::append_async(const sisl::io_blob& b, void* cons
 log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
     const auto record{m_records.at(seq_num)};
     const logdev_key ld_key{record.m_dev_key};
-    if (ld_key.idx == -1) { return log_buffer(); }
+    if (!ld_key.is_valid()) {
+        THIS_LOGSTORE_LOG(ERROR, "ld_key not valid {}", seq_num);
+        throw std::out_of_range("key not valid");
+    }
 
     const auto start_time{Clock::now()};
     THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} mapped to logdev_key=[idx={} dev_offset={}]", m_store_id, seq_num,
