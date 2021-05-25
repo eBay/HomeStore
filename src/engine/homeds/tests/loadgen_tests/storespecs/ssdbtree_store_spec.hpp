@@ -2,6 +2,11 @@
 #ifndef HOMESTORE_SSD_BTREE_STORE_SPEC_HPP
 #define HOMESTORE_SSD_BTREE_STORE_SPEC_HPP
 
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <vector>
+
 #include "homeds/loadgen/spec/store_spec.hpp"
 #include "homeds/btree/btree.hpp"
 #include "homeds/btree/btree_internal.h"
@@ -12,14 +17,6 @@ using namespace homeds::btree;
 
 namespace homeds {
 namespace loadgen {
-
-#define TOTAL_ENTRIES 1000000
-
-//#define LoadGenSSDBtree  Btree<btree_store_type::SSD_BTREE, K, V, btree_node_type::VAR_VALUE,
-// btree_node_type::VAR_VALUE, NodeSize, writeback_req>
-
-#define LoadGenSSDBtree                                                                                                \
-    Btree< btree_store_type::SSD_BTREE, K, V, find_interior_node_type< K >(), find_leaf_node_type< K, V >() >
 
 struct ssd_loadgen_req;
 typedef boost::intrusive_ptr< ssd_loadgen_req > ssd_loadgen_req_ptr;
@@ -44,13 +41,41 @@ protected:
     friend class sisl::ObjectAllocator< ssd_loadgen_req >;
 };
 
-template < typename K, typename V, size_t NodeSize = 8192 >
+template < typename K, typename V, const size_t NodeSize = 8192 >
 class SSDBtreeStoreSpec : public StoreSpec< K, V > {
+private:
+    static constexpr uint64_t TOTAL_ENTRIES{1000000};
+
+    static constexpr btree_node_type find_leaf_node_type() {
+        if (K::is_fixed_size() && V::is_fixed_size()) {
+            return btree_node_type::SIMPLE;
+        } else if (K::is_fixed_size() && !V::is_fixed_size()) {
+            return btree_node_type::VAR_VALUE;
+        } else if (!K::is_fixed_size() && V::is_fixed_size()) {
+            return btree_node_type::VAR_KEY;
+        } else {
+            // return btree_node_type::VAR_OBJECT;
+            return btree_node_type::VAR_VALUE;
+        }
+    }
+
+    static constexpr btree_node_type find_interior_node_type() {
+        // return (K::is_fixed_size() ? btree_node_type::SIMPLE : btree_node_type::VAR_KEY);
+        return (K::is_fixed_size() ? btree_node_type::SIMPLE : btree_node_type::VAR_VALUE);
+    }
+
+    typedef Btree< btree_store_type::SSD_BTREE, K, V, find_interior_node_type(), find_leaf_node_type() >
+        LoadGenSSDBtree;
 
 public:
-    SSDBtreeStoreSpec() {}
+    SSDBtreeStoreSpec() = default;
+    SSDBtreeStoreSpec(const SSDBtreeStoreSpec&) = delete;
+    SSDBtreeStoreSpec& operator=(const SSDBtreeStoreSpec&) = delete;
+    SSDBtreeStoreSpec(SSDBtreeStoreSpec&&) noexcept = delete;
+    SSDBtreeStoreSpec& operator=(SSDBtreeStoreSpec&&) noexcept = delete;
+    virtual ~SSDBtreeStoreSpec() override = default;
 
-    virtual void init_store(homeds::loadgen::Param& parameters) override {
+    virtual void init_store(const homeds::loadgen::Param& parameters) override {
         homeds::btree::BtreeConfig btree_cfg(4096);
         btree_cfg.set_max_objs(TOTAL_ENTRIES);
         btree_cfg.set_max_key_size(K::get_max_size());
@@ -71,41 +96,44 @@ public:
         return true;
     }
 
-    virtual bool get(K& k, V* out_v) override {
-        auto status = m_bt->get(k, out_v);
-        return status == btree_status_t::success;
+    virtual bool get(const K& k, V* const out_v) const override {
+        const auto status{m_bt->get(k, out_v)};
+        return (status == btree_status_t::success);
     }
 
-    virtual bool remove(K& k, V* removed_v = nullptr) override {
-        auto status = m_bt->remove(k, removed_v);
-        return status == btree_status_t::success;
+    virtual bool remove(const K& k, V* const removed_v = nullptr) override {
+        const auto status{m_bt->remove(k, removed_v)};
+        return (status == btree_status_t::success);
     }
 
-    virtual bool remove_any(K& start_key, bool start_incl, K& end_key, bool end_incl, K* out_key, V* out_val) override {
-        BtreeSearchRange range(start_key, start_incl, end_key, end_incl);
-        auto status = m_bt->remove_any(range, out_key, out_val);
-        return status == btree_status_t::success;
+    virtual bool remove_any(const K& start_key, const bool start_incl, const K& end_key, const bool end_incl,
+                            K* out_key, V* const out_val) override {
+        BtreeSearchRange range{start_key, start_incl, end_key, end_incl};
+        const auto status{m_bt->remove_any(range, out_key, out_val)};
+        return (status == btree_status_t::success);
     }
 
-    virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl,
-                           std::vector< std::pair< K, V > >& result) override {
-#define MAX_BATCH_SIZE 20000000 // set it to big value so that everything is queried in one operation
-        auto search_range = BtreeSearchRange(start_key, start_incl, end_key, end_incl);
-        BtreeQueryRequest< K, V > qreq(search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
-                                       MAX_BATCH_SIZE);
+    virtual uint32_t query(const K& start_key, const bool start_incl, const K& end_key, const bool end_incl,
+                           std::vector< std::pair< K, V > >& result) const override {
+        constexpr uint32_t MAX_BATCH_SIZE{
+            20000000}; // set it to big value so that everything is queried in one operation
+        BtreeSearchRange search_range{start_key, start_incl, end_key, end_incl};
+        BtreeQueryRequest< K, V > qreq{search_range, BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
+                                       MAX_BATCH_SIZE};
 
-        auto result_count = 0U;
+        uint32_t result_count{0};
 
         std::vector< std::pair< K, V > > values;
 
-        bool has_more = false;
+        bool has_more{false};
         do {
-            auto status = m_bt->query(qreq, values);
+            const auto status{m_bt->query(qreq, values)};
 
             has_more = (status == btree_status_t::has_more);
-            auto is_success = (status == btree_status_t::has_more) || (status == btree_status_t::success);
+            const auto is_success{(status == btree_status_t::has_more) || (status == btree_status_t::success)};
 
-            result.insert(result.end(), values.begin(), values.end());
+            result.insert(std::end(result), std::move_iterator(std::begin(values)),
+                          std::move_iterator(std::end(values)));
 
             values.clear();
         } while (has_more);
@@ -114,10 +142,10 @@ public:
         return result_count;
     }
 
-    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl,
-                              std::vector< std::shared_ptr< V > >& result) {
-        assert(0); // not supported yet
-        return {};
+    virtual bool range_update(K& start_key, const bool start_incl, K& end_key, const bool end_incl,
+                              std::vector< std::shared_ptr< V > >& result) override {
+        assert(false); // not supported yet
+        return false;
     }
 
 private:

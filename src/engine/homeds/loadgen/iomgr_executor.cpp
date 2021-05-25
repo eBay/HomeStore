@@ -1,20 +1,21 @@
-#include "iomgr_executor.hpp"
-#include <iomgr/aio_drive_interface.hpp>
-#include <sds_logging/logging.h>
+#include <chrono>
+#include <thread>
+
+#ifdef __linux__
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
-#include <thread>
-#include <chrono>
+#endif
+
+#include <iomgr/aio_drive_interface.hpp>
+#include <sds_logging/logging.h>
+
+#include "iomgr_executor.hpp"
 
 namespace homeds {
 namespace loadgen {
-#define likely(x) __builtin_expect((x), 1)
-#define unlikely(x) __builtin_expect((x), 0)
 
-IOMgrExecutor::IOMgrExecutor(int num_threads, int num_priorities, uint32_t max_queue_size) : m_cq(max_queue_size) {
-    m_running.store(false, std::memory_order_relaxed);
-    m_read_cnt = 0;
-    m_write_cnt = 0;
+IOMgrExecutor::IOMgrExecutor(const size_t num_threads, const size_t num_priorities, const uint32_t max_queue_size) :
+        m_cq{max_queue_size}, m_running{false}, m_read_cnt{0}, m_write_cnt{0} {
     // m_ev_fd = eventfd(0, EFD_NONBLOCK);
 
     // exec start should be called before iomgr->start
@@ -34,13 +35,13 @@ IOMgrExecutor::~IOMgrExecutor() {
     iomanager.stop();
 }
 
-bool IOMgrExecutor::is_empty() { return m_cq.isEmpty(); }
+bool IOMgrExecutor::is_empty() const { return m_cq.isEmpty(); }
 
 bool IOMgrExecutor::is_running() const { return m_running.load(std::memory_order_relaxed); }
 
 void IOMgrExecutor::process_new_request() {
     m_read_cnt.fetch_add(1, std::memory_order_relaxed);
-    if (unlikely(!is_running())) {
+    if (!m_running.load(std::memory_order_relaxed)) {
         m_read_cnt.fetch_sub(1, std::memory_order_relaxed);
         LOGINFO("{}, not running, exit...", __FUNCTION__);
         return;
@@ -55,13 +56,13 @@ void IOMgrExecutor::process_new_request() {
 // 2. Wake up any I/O threads blocking on read
 //
 void IOMgrExecutor::stop(bool wait_io_complete) {
-    while (wait_io_complete && m_write_cnt > m_read_cnt && !m_cq.isEmpty()) {
+    while (wait_io_complete && (m_write_cnt > m_read_cnt) && !m_cq.isEmpty()) {
         // wait for I/O threads to finish consuming all the elements in queue;
         LOGDEBUG("wait... read:{} , write: {}", m_read_cnt, m_write_cnt);
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::this_thread::sleep_for(std::chrono::seconds{2});
     }
 
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+    std::this_thread::sleep_for(std::chrono::seconds{2});
     m_running.store(false, std::memory_order_relaxed);
 
 #if 0

@@ -4,8 +4,11 @@
 #include <cassert>
 #include <cstdint>
 #include <functional>
+#include <limits>
+#include <random>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include <fmt/ostream.h>
 
@@ -22,46 +25,62 @@ private:
     uint64_t m_num;
 
 public:
-    static VarBytesKey gen_key(KeyPattern spec, VarBytesKey* ref_key = nullptr) {
+    static VarBytesKey generate_random_key() {
+        /* Seed */
+        static thread_local std::random_device rd{};
+
+        /* Random number generator */
+        static thread_local std::default_random_engine generator{rd()};
+
+        /* Distribution on which to apply the generator */
+        std::uniform_int_distribution< uint64_t > distribution{0, KeySpec::MAX_KEYS};
+
+        const auto num{distribution(generator)};
+        return VarBytesKey{num};
+    }
+
+    static VarBytesKey gen_key(const KeyPattern spec, const VarBytesKey* const ref_key = nullptr) {
         switch (spec) {
         case KeyPattern::SEQUENTIAL:
-            return ref_key ? VarBytesKey(ref_key->to_integer() + 1) : VarBytesKey();
+            return ref_key ? VarBytesKey{ref_key->to_integer() + 1} : VarBytesKey{};
 
         case KeyPattern::UNI_RANDOM:
-            return VarBytesKey(rand());
+            return generate_random_key();
 
         case KeyPattern::OUT_OF_BOUND:
-            return VarBytesKey((uint64_t)-1);
-
+            return VarBytesKey{std::numeric_limits< uint64_t >::max()};
         default:
             // We do not support other gen spec yet
-            assert(0);
-            return VarBytesKey();
+            assert(false);
+            return VarBytesKey{};
         }
     }
 
     static constexpr bool is_fixed_size() { return false; }
     static constexpr uint32_t get_max_size() { return sizeof(uint64_t); }
 
-    explicit VarBytesKey(uint64_t num = 0) : m_num(num) {}
-    VarBytesKey(const VarBytesKey& other) = default;
-    VarBytesKey& operator=(const VarBytesKey& other) = default;
+    explicit VarBytesKey(const uint64_t num = 0) : m_num{num} {}
+
+    VarBytesKey(const VarBytesKey&) = default;
+    VarBytesKey& operator=(const VarBytesKey&) = default;
+    VarBytesKey(VarBytesKey&&) noexcept = default;
+    VarBytesKey& operator=(VarBytesKey&&) noexcept = default;
+
+    virtual ~VarBytesKey() override = default;
 
     static constexpr size_t get_fixed_size() { return sizeof(uint64_t); }
     uint64_t to_integer() const { return m_num; }
 
     virtual bool operator==(const KeySpec& other) const override {
-        // this is hokey down casting
 #ifdef NDEBUG
         const VarBytesKey& var_key{reinterpret_cast< const VarBytesKey& >(other)};
 #else
         const VarBytesKey& var_key{dynamic_cast< const VarBytesKey& >(other)};
 #endif
-        return (compare(static_cast<const BtreeKey*>(&var_key)) == 0);
+        return (compare(static_cast< const BtreeKey* >(&var_key)) == 0);
     }
 
-    int compare(const BtreeKey* o) const override {
-        // this is hokey down casting
+    int compare(const BtreeKey* const o) const override {
 #ifdef NDEBUG
         const VarBytesKey* other{reinterpret_cast< const VarBytesKey* >(o)};
 #else
@@ -77,35 +96,36 @@ public:
     }
 
     int compare_range(const homeds::btree::BtreeSearchRange& range) const override {
-        auto other_start = range.get_start_key();
-        auto other_end = range.get_end_key();
+        const auto other_start{range.get_start_key()};
+        const auto other_end{range.get_end_key()};
 
-        assert(0); // Do not support it yet
+        assert(false); // Do not support it yet
         return 0;
     }
 
     virtual sisl::blob get_blob() const {
         // this assumes endianess is same on systems
-        sisl::blob b{reinterpret_cast<uint8_t*>(const_cast<uint64_t*>(&m_num)), sizeof(uint64_t)};
+        sisl::blob b{reinterpret_cast< uint8_t* >(const_cast< uint64_t* >(&m_num)), sizeof(uint64_t)};
         return b;
     };
 
     virtual void set_blob(const sisl::blob& b) {
         // this assumes endianess is same on systems
-        const auto n{*reinterpret_cast<uint64_t*>(b.bytes)};
+        const auto n{*reinterpret_cast< uint64_t* >(b.bytes)};
         m_num = n;
     }
     virtual void copy_blob(const sisl::blob& b) { set_blob(b); }
 
     virtual uint32_t get_blob_size() const { return sizeof(uint64_t); }
-    virtual void set_blob_size(uint32_t size) {}
+    virtual void set_blob_size(const uint32_t size) {}
     virtual std::string to_string() const { return std::to_string(m_num); }
 
-    static void gen_keys_in_range(VarBytesKey& k1, uint32_t num_of_keys, std::vector< VarBytesKey > keys_inrange) {
-        assert(0);
+    static void gen_keys_in_range(const VarBytesKey& k1, const uint32_t num_of_keys,
+                                  std::vector< VarBytesKey >& keys_inrange) {
+        assert(false);
     }
 
-    virtual bool is_consecutive(KeySpec& k) override {
+    virtual bool is_consecutive(const KeySpec& k) const override {
         // this is hokey downcasting
 #ifdef NDEBUG
         const VarBytesKey& var_key{reinterpret_cast< const VarBytesKey& >(k)};

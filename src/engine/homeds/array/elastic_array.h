@@ -231,7 +231,7 @@ template < ArrayType >
 ElementType* Elastic_Array< ArrayTypeParams >::operator[](uint32_t pos) {
     std::lock_guard< std::recursive_mutex > lock(m_mutex);
     if (pos >= m_header->m_no_of_elements_filled || pos < 0)
-        assert(0);
+        assert(false);
     return (ElementType*)m_elements + pos;
 }
 
@@ -315,7 +315,7 @@ void Elastic_Array< ArrayTypeParams >::resize_array() {
 template < ArrayType >
 void Elastic_Array< ArrayTypeParams >::remove_shift(uint32_t spos, uint32_t epos) {
     if (spos >= m_header->m_no_of_elements_filled || spos < 0 || epos >= m_header->m_no_of_elements_filled || epos < 0)
-        assert(0);
+        assert(false);
     memmove(m_elements + spos, m_elements + epos + 1, sizeOfElement * (m_header->m_no_of_elements_filled - epos - 1));
     m_header->m_no_of_elements_filled -= (epos - spos + 1);
     LOGTRACE("remove_shift: {}:{}->{}", spos, epos, to_string());
@@ -324,7 +324,7 @@ void Elastic_Array< ArrayTypeParams >::remove_shift(uint32_t spos, uint32_t epos
 template < ArrayType >
 void Elastic_Array< ArrayTypeParams >::insert_shift(uint32_t pos, ElementType* element) {
     if (pos > m_header->m_no_of_elements_filled || pos < 0)
-        assert(0);
+        assert(false);
     assert(pos < m_max_grow_to);
     if (is_resize_required()) {
         resize_array();

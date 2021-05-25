@@ -279,7 +279,7 @@ public:
                 << "Recovered " << m_n_recovered_lsns << " valid lsns for store " << m_log_store->get_store_id()
                 << " Expected to have " << m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1
                 << " lsns: m_cur_lsn=" << m_cur_lsn.load() << " truncated_upto_lsn=" << m_truncated_upto_lsn;
-            assert(0);
+            assert(false);
         }
     }
 

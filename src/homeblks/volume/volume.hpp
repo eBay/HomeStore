@@ -92,7 +92,7 @@ public:
     volume_child_req& operator=(volume_child_req&&) noexcept = delete;
 
     static boost::intrusive_ptr< volume_child_req > make_request() {
-        return boost::intrusive_ptr< volume_child_req >(sisl::ObjectAllocator< volume_child_req >::make_object());
+        return boost::intrusive_ptr< volume_child_req >{sisl::ObjectAllocator< volume_child_req >::make_object()};
     }
 
     virtual void free_yourself() override { sisl::ObjectAllocator< volume_child_req >::deallocate(this); }

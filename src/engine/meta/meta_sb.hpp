@@ -86,7 +86,7 @@ struct meta_blk_sb {
     BlkId prev_bid; // previous metablk
     BlkId bid;
 
-    std::string to_string() {
+    std::string to_string() const {
         std::ostringstream ss{};
         ss << "version: " << version << ", magic: " << magic << ", migrated: " << migrated
            << ", next_bid: " << next_bid.to_string() << ", prev_bid: " << prev_bid.to_string()

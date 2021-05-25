@@ -5,99 +5,119 @@
 #ifndef HOMESTORE_BTREE_VAR_VALUE_SPEC_HPP
 #define HOMESTORE_BTREE_VAR_VALUE_SPEC_HPP
 
-#include "homeds/loadgen/loadgen_common.hpp"
-#include "homeds/btree/btree.hpp"
-#include "homeds/loadgen/spec/value_spec.hpp"
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <random>
+#include <sstream>
+#include <string>
+#include <vector>
+
 #include <farmhash.h>
+
+#include "homeds/btree/btree.hpp"
+#include "homeds/loadgen/loadgen_common.hpp"
+#include "homeds/loadgen/spec/value_spec.hpp"
 
 namespace homeds {
 namespace loadgen {
 
-template < size_t Max_Size >
+template < const size_t Max_Size >
 class VarBytesValue : public homeds::btree::BtreeValue, public ValueSpec {
 public:
-    static std::shared_ptr< VarBytesValue< Max_Size > > gen_value(ValuePattern spec,
-                                                                  VarBytesValue< Max_Size >* ref_value = nullptr) {
-        VarBytesValue val;
-        size_t size = 0;
-        while (size < 8) {
-            size = rand() % Max_Size;
-        }
+    static std::shared_ptr< VarBytesValue< Max_Size > > gen_value(const ValuePattern spec,
+                                                                  const VarBytesValue< Max_Size >* const ref_value = nullptr) {
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine re{rd()};
+        std::uniform_int_distribution< size_t > size_rand{9, Max_Size - 1};
+
+        std::shared_ptr< VarBytesValue< Max_Size > > temp{std::make_shared< VarBytesValue< Max_Size > >()};
         switch (spec) {
-        case ValuePattern::RANDOM_BYTES:
-            val.m_bytes.clear();
-            gen_random_string(val.m_bytes, size);
-            assert(val.m_bytes.size() == size);
+        case ValuePattern::RANDOM_BYTES: {
+            temp->m_bytes.clear();
+            const size_t size{size_rand(re)};
+            gen_random_string(temp->m_bytes, size);
+            assert(temp->m_bytes.size() == size);
             break;
+        }
         default:
             // We do not support other gen spec yet
-            assert(0);
+            assert(false);
         }
-        std::shared_ptr< VarBytesValue< Max_Size > > temp = std::make_shared< VarBytesValue< Max_Size > >(val);
         return temp;
     }
 
     static constexpr bool is_fixed_size() { return false; }
     static constexpr uint32_t get_max_size() { return Max_Size; }
 
-    VarBytesValue() : homeds::btree::BtreeValue() { m_bytes_ptr = &m_bytes[0]; }
+    VarBytesValue() : homeds::btree::BtreeValue{} {}
 
-    VarBytesValue(const char* bytes) : VarBytesValue() {
-        if (bytes) { memcpy((uint8_t*)&m_bytes[0], bytes, Max_Size); }
+    VarBytesValue(const char* const bytes) : VarBytesValue{} {
+        if (bytes) { std::copy(bytes, bytes + Max_Size, std::back_inserter< decltype(m_bytes) >(m_bytes)); }
     }
-    VarBytesValue(const VarBytesValue& other) { copy_blob(other.get_blob()); }
-    VarBytesValue& operator=(const VarBytesValue& other) {
-        copy_blob(other.get_blob());
+    VarBytesValue(const VarBytesValue& other) : VarBytesValue{} { copy_blob(other.get_blob()); }
+    VarBytesValue& operator=(const VarBytesValue& rhs) {
+        if (this != &rhs) { copy_blob(rhs.get_blob()); }
         return *this;
     }
+    VarBytesValue(VarBytesValue&&) noexcept = delete;
+    VarBytesValue& operator=(VarBytesValue&&) noexcept = delete;
+
+    virtual ~VarBytesValue() override = default;
 
     sisl::blob get_blob() const override {
         sisl::blob b;
-        b.bytes = (uint8_t*)&m_bytes[0];
+        b.bytes = const_cast< uint8_t* >(m_bytes.data());
         b.size = m_bytes.size();
         return b;
     }
 
     void set_blob(const sisl::blob& b) override { copy_blob(b); }
     void copy_blob(const sisl::blob& b) override {
-        // memcpy((uint8_t*)&m_bytes[0], b.bytes, b.size);
         m_bytes.clear();
-        for (size_t i = 0; i < b.size; i++) {
-            m_bytes.push_back(b.bytes[i]);
-        }
+        std::copy(b.bytes, b.bytes + b.size, std::back_inserter< decltype(m_bytes) >(m_bytes)); 
         assert(m_bytes.size() == b.size);
     }
     void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) override { copy_blob(new_val.get_blob()); }
     uint32_t get_blob_size() const override { return m_bytes.size(); }
-    void set_blob_size(uint32_t size) override { assert(size == sizeof(m_bytes.size())); }
+    void set_blob_size(const uint32_t size) override { assert(size == sizeof(m_bytes.size())); }
     uint32_t estimate_size_after_append(const BtreeValue& new_val) override { return m_bytes.size(); }
     static uint32_t get_fixed_size() {
-        assert(0);
+        assert(false);
         return 0;
     }
-    std::string to_string() const { return std::string((const char*)&m_bytes[0]); }
-
-    friend ostream& operator<<(ostream& os, const VarBytesValue& v) {
-        os << "val = " << (uint8_t*)&(v.m_bytes[0]);
-        return os;
+    std::string to_string() const {
+        return std::string{reinterpret_cast< const char* >(m_bytes.data()), m_bytes.size()};
     }
 
     // This is not mandatory overridden method for BtreeValue, but for testing comparision
-    bool operator==(const VarBytesValue& other) const {
-        return std::strcmp((char*)&m_bytes[0], (char*)other.get_blob().bytes) == 0;
+    bool operator==(const VarBytesValue& rhs) const {
+        return (m_bytes == rhs.m_bytes);
     }
 
-    virtual uint64_t get_hash_code() override {
-        sisl::blob b = get_blob();
-        return util::Hash64((const char*)b.bytes, (size_t)b.size);
+    virtual uint64_t get_hash_code() const override {
+        return util::Hash64(reinterpret_cast< const char* >(m_bytes.data()), m_bytes.size());
     }
-
-    void set_bytes_ptr() { m_bytes_ptr = &m_bytes[0]; }
 
 private:
-    uint8_t* m_bytes_ptr = nullptr;
     std::vector< uint8_t > m_bytes;
 };
+
+template < typename charT, typename traits, const size_t Size >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream,
+                                                const VarBytesValue< Size >& value) {
+    // copy the stream formatting
+    std::basic_ostringstream< charT, traits > outStringStream;
+    outStringStream.copyfmt(outStream);
+
+    // print the stream
+    outStringStream << "val = " << value.to_string();
+    outStream << outStringStream.str();
+
+    return outStream;
+}
+
 } // namespace loadgen
 } // namespace homeds
 

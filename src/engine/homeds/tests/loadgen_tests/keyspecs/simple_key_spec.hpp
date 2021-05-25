@@ -8,6 +8,8 @@
 #include <cassert>
 #include <cstdint>
 #include <functional>
+#include <limits>
+#include <random>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -25,30 +27,49 @@ private:
     uint64_t m_num;
 
 public:
-    static SimpleNumberKey gen_key(KeyPattern spec, SimpleNumberKey* ref_key = nullptr) {
+    static SimpleNumberKey generate_random_key() {
+        /* Seed */
+        static thread_local std::random_device rd{};
+
+        /* Random number generator */
+        static thread_local std::default_random_engine generator{rd()};
+
+        /* Distribution on which to apply the generator */
+        std::uniform_int_distribution< uint64_t > distribution{0, KeySpec::MAX_KEYS};
+
+        const auto num{distribution(generator)};
+        return SimpleNumberKey{num};
+    }
+
+    static SimpleNumberKey gen_key(const KeyPattern spec, const SimpleNumberKey* const ref_key = nullptr) {
         switch (spec) {
         case KeyPattern::SEQUENTIAL:
-            return ref_key ? SimpleNumberKey(ref_key->to_integer() + 1) : SimpleNumberKey();
+            return ref_key ? SimpleNumberKey{ref_key->to_integer() + 1} : SimpleNumberKey{};
 
         case KeyPattern::UNI_RANDOM:
-            return SimpleNumberKey(rand());
+            return generate_random_key();
 
         case KeyPattern::OUT_OF_BOUND:
-            return SimpleNumberKey((uint64_t)-1);
+            return SimpleNumberKey{std::numeric_limits< uint64_t >::max()};
 
         default:
             // We do not support other gen spec yet
-            assert(0);
-            return SimpleNumberKey();
+            assert(false);
+            return SimpleNumberKey{};
         }
     }
 
     static constexpr bool is_fixed_size() { return true; }
     static constexpr uint32_t get_max_size() { return sizeof(uint64_t); }
 
-    explicit SimpleNumberKey(uint64_t num = 0) : m_num(num) {}
+    explicit SimpleNumberKey(const uint64_t num = 0) : m_num{num} {}
+
     SimpleNumberKey(const SimpleNumberKey& other) = default;
-    SimpleNumberKey& operator=(const SimpleNumberKey& other) = default;
+    SimpleNumberKey& operator=(const SimpleNumberKey& rhs) = default;
+    SimpleNumberKey(SimpleNumberKey&& other) noexcept = default;
+    SimpleNumberKey& operator=(SimpleNumberKey&& rhs) noexcept = default;
+
+    virtual ~SimpleNumberKey() override = default;
 
     static constexpr size_t get_fixed_size() { return sizeof(uint64_t); }
     uint64_t to_integer() const { return m_num; }
@@ -59,10 +80,10 @@ public:
 #else
         const SimpleNumberKey& simple_key{dynamic_cast< const SimpleNumberKey& >(other)};
 #endif
-        return (compare(static_cast<const BtreeKey*>(&simple_key)) == 0);
+        return (compare(static_cast< const BtreeKey* >(&simple_key)) == 0);
     }
 
-    int compare(const BtreeKey* o) const override {
+    int compare(const BtreeKey* const o) const override {
 #ifdef NDEBUG
         const SimpleNumberKey* other{reinterpret_cast< const SimpleNumberKey* >(o)};
 #else
@@ -78,37 +99,36 @@ public:
     }
 
     int compare_range(const homeds::btree::BtreeSearchRange& range) const override {
-        // this is hokey down casting
-        auto other_start = range.get_start_key();
-        auto other_end = range.get_end_key();
+        const auto other_start{range.get_start_key()};
+        const auto other_end{range.get_end_key()};
 
-        assert(0); // Do not support it yet
+        assert(false); // Do not support it yet
         return 0;
     }
 
     virtual sisl::blob get_blob() const {
         // this assume that endian ordering is the same for all operations
-        sisl::blob b{reinterpret_cast<uint8_t*>(const_cast<uint64_t*>(&m_num)), sizeof(uint64_t)};
+        sisl::blob b{reinterpret_cast< uint8_t* >(const_cast< uint64_t* >(&m_num)), sizeof(uint64_t)};
         return b;
     };
 
     virtual void set_blob(const sisl::blob& b) {
         // this assume that endian ordering is the same for all operations
-        const auto n = *(reinterpret_cast<const uint64_t*>(b.bytes));
+        const auto n{*(reinterpret_cast< const uint64_t* >(b.bytes))};
         m_num = n;
     }
     virtual void copy_blob(const sisl::blob& b) { set_blob(b); }
 
     virtual uint32_t get_blob_size() const { return sizeof(uint64_t); }
-    virtual void set_blob_size(uint32_t size) {}
+    virtual void set_blob_size(const uint32_t size) {}
     virtual std::string to_string() const { return std::to_string(m_num); }
 
     static void gen_keys_in_range(SimpleNumberKey& k1, uint32_t num_of_keys,
                                   std::vector< SimpleNumberKey > keys_inrange) {
-        assert(0);
+        assert(false);
     }
 
-    virtual bool is_consecutive(KeySpec& k) override {
+    virtual bool is_consecutive(const KeySpec& k) const override {
 #ifdef NDEBUG
         const SimpleNumberKey& simple_key{reinterpret_cast< const SimpleNumberKey& >(k)};
 #else
@@ -141,99 +161,131 @@ private:
     static constexpr uint64_t s_rank_mask{(static_cast< uint64_t >(1) << 10) - 1};
     static constexpr uint64_t s_blk_num_mask{(static_cast< uint64_t >(1) << 38) - 1};
 
-    typedef struct __attribute__((packed)) {
+#pragma pack(1)
+    typedef struct {
         // if these did not add to 64 there would be issues with the use of blobs
         uint64_t m_count : 16;
         uint64_t m_rank : 10;
         uint64_t m_blk_num : 38;
     } attr_t;
+#pragma pack()
 
     attr_t* m_attr;
     attr_t m_inplace_attr;
 
 public:
-    static CompositeNumberKey gen_key(KeyPattern spec, CompositeNumberKey* ref_key = nullptr) {
+    static CompositeNumberKey generate_random_key() {
+        /* Seed */
+        static thread_local std::random_device rd{};
+
+        /* Random number generator */
+        static thread_local std::default_random_engine generator{rd()};
+
+        /* Distribution on which to apply the generator */
+        std::uniform_int_distribution< uint64_t > distribution{0, KeySpec::MAX_KEYS};
+
+        const auto num{distribution(generator)};
+        return CompositeNumberKey{num};
+    }
+
+    static CompositeNumberKey gen_key(const KeyPattern spec, const CompositeNumberKey* const ref_key = nullptr) {
         switch (spec) {
         case KeyPattern::SEQUENTIAL:
             assert(ref_key != nullptr);
-            return CompositeNumberKey(ref_key->to_integer() + 1);
+            return CompositeNumberKey{ref_key->to_integer() + 1};
 
         case KeyPattern::UNI_RANDOM:
-            return CompositeNumberKey(rand());
+            return generate_random_key();
 
         case KeyPattern::OUT_OF_BOUND:
-            return CompositeNumberKey((uint64_t)-1);
+            return CompositeNumberKey{std::numeric_limits< uint64_t >::max()};
 
         default:
             // We do not support other gen spec yet
-            assert(0);
-            return CompositeNumberKey();
+            assert(false);
+            return CompositeNumberKey{};
         }
     }
 
-    virtual bool is_consecutive(KeySpec& k) override {
+    virtual bool is_consecutive(const KeySpec& k) const override {
 #ifdef NDEBUG
         [[maybe_unused]] const CompositeNumberKey& composite_key{reinterpret_cast< const CompositeNumberKey& >(k)};
 #else
         [[maybe_unused]] const CompositeNumberKey& composite_key{dynamic_cast< const CompositeNumberKey& >(k)};
 #endif
-        assert(0); // to implement
+        assert(false); // to implement
         return false;
     }
 
     static constexpr bool is_fixed_size() { return true; }
     static constexpr uint32_t get_max_size() { return sizeof(attr_t); }
 
-    CompositeNumberKey(uint32_t count, uint16_t rank, uint64_t blk_num) {
+    CompositeNumberKey(const uint32_t count, const uint16_t rank, const uint64_t blk_num) {
         m_attr = &m_inplace_attr;
         set_count(count);
         set_rank(rank);
         set_blk_num(blk_num);
     }
 
-    CompositeNumberKey() : CompositeNumberKey(0, 0, 0) {}
+    CompositeNumberKey() : CompositeNumberKey{0, 0, 0} {}
 
     CompositeNumberKey(const CompositeNumberKey& other) :
-            CompositeNumberKey(other.get_count(), other.get_rank(), other.get_blk_num()) {}
+            CompositeNumberKey{other.get_count(), other.get_rank(), other.get_blk_num()} {}
 
-    CompositeNumberKey& operator=(const CompositeNumberKey& other) {
-        if (this != &other) {
-            m_inplace_attr.m_count = other.m_inplace_attr.m_count;
-            m_inplace_attr.m_rank = other.m_inplace_attr.m_rank;
-            m_inplace_attr.m_blk_num = other.m_inplace_attr.m_blk_num;
+    CompositeNumberKey& operator=(const CompositeNumberKey& rhs) {
+        if (this != &rhs) {
+            m_inplace_attr.m_count = rhs.m_inplace_attr.m_count;
+            m_inplace_attr.m_rank = rhs.m_inplace_attr.m_rank;
+            m_inplace_attr.m_blk_num = rhs.m_inplace_attr.m_blk_num;
             m_attr = &m_inplace_attr;
         }
         return *this;
     }
 
-    explicit CompositeNumberKey(uint64_t num) {
-        m_attr = &m_inplace_attr;
-        set_count(static_cast<uint32_t>(num & s_count_mask));
-        set_rank(static_cast< uint16_t >((num >> 16) & s_rank_mask));
-        set_blk_num((num >> (16+10)) & s_blk_num_mask);
+    CompositeNumberKey(CompositeNumberKey&& other) noexcept :
+            CompositeNumberKey{other.get_count(), other.get_rank(), other.get_blk_num()} {}
+
+    CompositeNumberKey& operator=(CompositeNumberKey&& rhs) noexcept {
+        if (this != &rhs) {
+            m_inplace_attr.m_count = rhs.m_inplace_attr.m_count;
+            m_inplace_attr.m_rank = rhs.m_inplace_attr.m_rank;
+            m_inplace_attr.m_blk_num = rhs.m_inplace_attr.m_blk_num;
+            m_attr = &m_inplace_attr;
+        }
+        return *this;
     }
+
+    explicit CompositeNumberKey(const uint64_t num) {
+        m_attr = &m_inplace_attr;
+        set_count(static_cast< uint32_t >(num & s_count_mask));
+        set_rank(static_cast< uint16_t >((num >> 16) & s_rank_mask));
+        set_blk_num((num >> (16 + 10)) & s_blk_num_mask);
+    }
+
+    virtual ~CompositeNumberKey() override = default;
 
     uint32_t get_count() const { return (m_attr->m_count); }
     uint16_t get_rank() const { return (m_attr->m_rank); }
     uint64_t get_blk_num() const { return (m_attr->m_blk_num); }
-    void set_count(uint32_t count) { m_attr->m_count = count; }
-    void set_rank(uint32_t rank) { m_attr->m_rank = rank; }
-    void set_blk_num(uint64_t blkNum) { m_attr->m_blk_num = blkNum; }
+    void set_count(const uint32_t count) { m_attr->m_count = count; }
+    void set_rank(const uint32_t rank) { m_attr->m_rank = rank; }
+    void set_blk_num(const uint64_t blkNum) { m_attr->m_blk_num = blkNum; }
     uint64_t to_integer() const {
-        const uint64_t val{m_inplace_attr.m_count | (m_inplace_attr.m_rank << 16) | (m_inplace_attr.m_blk_num << (16 + 10))};
+        const uint64_t val{m_inplace_attr.m_count | (m_inplace_attr.m_rank << 16) |
+                           (m_inplace_attr.m_blk_num << (16 + 10))};
         return val;
     }
 
     virtual bool operator==(const KeySpec& rhs) const override {
 #ifdef NDEBUG
-       const CompositeNumberKey& composite_key{reinterpret_cast< const CompositeNumberKey& >(rhs)};
+        const CompositeNumberKey& composite_key{reinterpret_cast< const CompositeNumberKey& >(rhs)};
 #else
-       const CompositeNumberKey& composite_key{dynamic_cast< const CompositeNumberKey& >(rhs)};
+        const CompositeNumberKey& composite_key{dynamic_cast< const CompositeNumberKey& >(rhs)};
 #endif
-        return (compare(static_cast<const BtreeKey*>(&composite_key)) == 0);
+        return (compare(static_cast< const BtreeKey* >(&composite_key)) == 0);
     }
 
-    int compare(const BtreeKey* o) const override {
+    int compare(const BtreeKey* const o) const override {
         // this is hokey down casting
 #ifdef NDEBUG
         const CompositeNumberKey* other{reinterpret_cast< const CompositeNumberKey* >(o)};
@@ -258,14 +310,15 @@ public:
     }
 
     int compare_range(const homeds::btree::BtreeSearchRange& range) const override {
-        auto other_start = range.get_start_key();
-        auto other_end = range.get_end_key();
+        const auto other_start{range.get_start_key()};
+        const auto other_end{range.get_end_key()};
 
-        assert(0); // Do not support it yet
+        assert(false); // Do not support it yet
         return 0;
     }
 
-    int is_in_range(uint64_t val, uint64_t start, bool start_incl, uint64_t end, bool end_incl) {
+    int is_in_range(const uint64_t val, const uint64_t start, const bool start_incl, const uint64_t end,
+                    const bool end_incl) const {
         if (val < start) {
             return 1;
         } else if ((val == start) && (!start_incl)) {
@@ -279,7 +332,7 @@ public:
         }
     }
 
-    int compare_range(BtreeKey* s, bool start_incl, BtreeKey* e, bool end_incl) {
+    int compare_range(const BtreeKey* const s, const bool start_incl, const BtreeKey* const e, const bool end_incl) {
         // this is hokey down casting
 #ifdef NDEBUG
         const CompositeNumberKey* start{reinterpret_cast< const CompositeNumberKey* >(s)};
@@ -289,7 +342,7 @@ public:
         const CompositeNumberKey* end{dynamic_cast< const CompositeNumberKey* >(e)};
 #endif
 
-        int ret = is_in_range(this->get_count(), start->get_count(), start_incl, end->get_count(), end_incl);
+        int ret{is_in_range(this->get_count(), start->get_count(), start_incl, end->get_count(), end_incl)};
         if (ret != 0) { return ret; }
 
         ret = is_in_range(this->get_rank(), start->get_rank(), start_incl, end->get_rank(), end_incl);
@@ -311,15 +364,14 @@ public:
         // this assumes same endianess on all operations
         m_inplace_attr = *reinterpret_cast< attr_t* >(b.bytes);
     }
-    virtual void copy_blob(const sisl::blob& b) override
-    {
+    virtual void copy_blob(const sisl::blob& b) override {
         // this assumes same endianess on all operations
         set_blob(b);
     }
     virtual uint32_t get_blob_size() const override { return (sizeof(attr_t)); }
 
     static uint32_t get_fixed_size() { return (sizeof(attr_t)); }
-    virtual void set_blob_size(uint32_t size) override {}
+    virtual void set_blob_size(const uint32_t size) override {}
 
     std::string to_string() const {
         std::ostringstream ss;

@@ -67,8 +67,8 @@ struct VarNodeSpecificImpl {
     static uint16_t get_nth_value_len(const VariantNodeType* node, int ind) { return 0; }
     static uint16_t get_record_size(const VariantNodeType* node) { return 0; }
 
-    static void set_nth_key_len(const VariantNodeType* node, uint8_t* rec_ptr, uint16_t key_len) { assert(0); }
-    static void set_nth_value_len(const VariantNodeType* node, uint8_t* rec_ptr, uint16_t value_len) { assert(0); }
+    static void set_nth_key_len(const VariantNodeType* node, uint8_t* rec_ptr, uint16_t key_len) { assert(false); }
+    static void set_nth_value_len(const VariantNodeType* node, uint8_t* rec_ptr, uint16_t value_len) { assert(false); }
 };
 
 /**
@@ -130,7 +130,7 @@ public:
             uint64_t kp = *(uint64_t*)key.get_blob().bytes;
             if (i > 0 && prevKey.compare(&key) > 0) {
                 LOGDEBUGMOD(btree_generics, "non sorted entry : {} -> {} ", kp, this->to_string());
-                assert(0);
+                assert(false);
             }
             prevKey = key;
             i++;

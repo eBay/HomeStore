@@ -5,83 +5,102 @@
 #ifndef HOMESTORE_CACHE_STORE_SPEC_HPP
 #define HOMESTORE_CACHE_STORE_SPEC_HPP
 
+#include <cassert>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <vector>
+
+#include <boost/uuid/uuid.hpp>
+
 #include "homeds/loadgen/spec/store_spec.hpp"
+
 #include "../valuespecs/cache_value_spec.hpp"
 
 namespace homeds {
 namespace loadgen {
 
-#define MAX_CACHE_SIZE 2 * 1024 * 1024 * 1024ul
-
-template < typename K, typename V, size_t NodeSize = 8192 >
+template < typename K, typename V, const size_t NodeSize = 8192 >
 class CacheStoreSpec : public StoreSpec< K, V > {
+    static constexpr uint64_t MAX_CACHE_SIZE{static_cast< uint64_t >(2) * 1024 * 1024 * 1024};
+
+    typedef homestore::Cache< CacheKey, homestore::CacheBuffer< CacheKey > > CacheType;
     typedef std::function< void(generator_op_error, const key_info< K, V >*, void*, const std::string&) >
         store_error_cb_t;
 
 public:
-    CacheStoreSpec() {}
+    CacheStoreSpec() = default;
+    CacheStoreSpec(const CacheStoreSpec&) = delete;
+    CacheStoreSpec& operator=(const CacheStoreSpec&) = delete;
+    CacheStoreSpec(CacheStoreSpec&&) noexcept = delete;
+    CacheStoreSpec& operator=(CacheStoreSpec&&) noexcept = delete;
+    virtual ~CacheStoreSpec() override = default;
 
     virtual bool insert(K& k, std::shared_ptr< V > v) override {
+        auto& bbuf{v->get_buf()};
+        bbuf->set_key(k);
 
-        auto ibuf = v->get_buf();
-        ibuf->set_key(k);
-
+        auto ibuf{boost::static_pointer_cast< CacheBuffer< CacheKey > >(bbuf)};
         boost::intrusive_ptr< CacheBuffer< CacheKey > > out_bbuf;
-
-        bool inserted = m_cache->insert(k, boost::static_pointer_cast< CacheBuffer< CacheKey > >(ibuf),
-                                        (boost::intrusive_ptr< CacheBuffer< CacheKey > >*)&out_bbuf);
+        const bool inserted{m_cache->insert(k, ibuf, &out_bbuf)};
         LOGDEBUG("Cache store inserted {}", *k.getBlkId());
 
         return inserted;
     }
 
     virtual bool upsert(K& k, std::shared_ptr< V > v) override {
-        assert(0);
-        return true;
+        assert(false);
+        return false;
     }
 
-    virtual void init_store(homeds::loadgen::Param& parameters) override {
-        m_cache = std::make_unique< homestore::Cache< CacheKey > >(MAX_CACHE_SIZE, CACHE_ENTRY_SIZE);
+    virtual void init_store(const homeds::loadgen::Param& parameters) override {
+        m_cache = std::make_unique< CacheType >(MAX_CACHE_SIZE, CacheValue::CACHE_ENTRY_SIZE);
     }
 
     virtual bool update(K& k, std::shared_ptr< V > v) override {
-        assert(0);
-        return true;
+        assert(false);
+        return false;
     }
 
-    virtual bool get(K& k, V* out_v) override {
-        boost::intrusive_ptr< CacheValueBuffer > bbuf;
-        auto ret = m_cache->get(k, (boost::intrusive_ptr< CacheBuffer< CacheKey > >*)&bbuf);
-        out_v->set_buf(bbuf);
+    virtual bool get(const K& k, V* const out_v) const override {
+        boost::intrusive_ptr< CacheBuffer< CacheKey > > out_bbuf;
+        const auto ret{m_cache->get(k, &out_bbuf)};
+        auto& obuf{out_v->get_buf()};
+#ifdef NDEBUG
+        obuf = boost::intrusive_ptr< CacheValueBuffer >(reinterpret_cast< CacheValueBuffer* >(out_bbuf.get()));
+#else
+        obuf = boost::dynamic_pointer_cast< CacheValueBuffer >(out_bbuf);
+#endif
         return ret;
     }
 
-    virtual bool remove(K& k, V* removed_v = nullptr) override {
-        m_cache->safe_erase(k, [this, &k, removed_v](boost::intrusive_ptr< CacheBuffer< CacheKey > > erased_buf) {
+    virtual bool remove(const K& k, V* const removed_v = nullptr) override {
+        m_cache->safe_erase(k, [this, &k, removed_v](const boost::intrusive_ptr< CacheBuffer< CacheKey > >& erased_buf) {
             LOGDEBUG("Cache store removed {}", *(k.getBlkId()));
         });
         return true;
     }
 
-    virtual bool remove_any(K& start_key, bool start_incl, K& end_key, bool end_incl, K* out_key, V* out_val) override {
-        assert(0);
-        return true;
+    virtual bool remove_any(const K& start_key, const bool start_incl, const K& end_key, const bool end_incl, K* const out_key,
+                            V* const out_val) override {
+        assert(false);
+        return false;
     }
 
-    virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl,
-                           std::vector< std::pair< K, V > >& result) override {
-        assert(0);
+    virtual uint32_t query(const K& start_key, const bool start_incl, const K& end_key, const bool end_incl,
+                           std::vector< std::pair< K, V > >& result) const override {
+        assert(false);
         return 0;
     }
 
-    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl,
-                              std::vector< std::shared_ptr< V > >& result) {
-        assert(0);
-        return true;
+    virtual bool range_update(K& start_key, const bool start_incl, K& end_key, const bool end_incl,
+                              std::vector< std::shared_ptr< V > >& result) override {
+        assert(false);
+        return false;
     }
 
 private:
-    std::unique_ptr< homestore::Cache< CacheKey > > m_cache;
+    std::unique_ptr< CacheType > m_cache;
     boost::uuids::uuid uuid;
 };
 

@@ -1,11 +1,18 @@
 #pragma once
 
+#include <cassert>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <string>
 #include <system_error>
 #include <vector>
-#include <fstream>
-#include <filesystem>
+
+#ifdef __linux__
+#include <fcntl.h>
+#include <sys/stat.h>
+#endif
 
 #include <boost/uuid/string_generator.hpp>
 #include <boost/uuid/uuid.hpp>
@@ -22,15 +29,24 @@ typedef std::function< void(std::error_condition err, const homestore::out_param
 
 template < typename Executor >
 class DiskInitializer {
+private:
     std::vector< homestore::dev_info > device_info;
+    std::string m_file_name{"file_load_gen"};
     // boost::uuids::uuid uuid;
 
 public:
-    ~DiskInitializer() {}
+    DiskInitializer() = default;
+    DiskInitializer(const DiskInitializer&) = delete;
+    DiskInitializer& operator=(const DiskInitializer&) = delete;
+    DiskInitializer(DiskInitializer&&) noexcept = delete;
+    DiskInitializer& operator=(DiskInitializer&&) noexcept = delete;
+
+    ~DiskInitializer() = default;
+
     void cleanup() {
-        auto success = homestore::VolInterface::shutdown();
+        const auto success{homestore::VolInterface::shutdown()};
         assert(success);
-        remove("file_load_gen");
+        std::filesystem::remove(m_file_name);
     }
     void init(Executor& executor, init_done_callback init_done_cb, size_t atomic_phys_page_size = 2048) {
         start_homestore(init_done_cb, atomic_phys_page_size);
@@ -41,10 +57,10 @@ public:
         /* create files */
 
         homestore::dev_info temp_info;
-        temp_info.dev_names = "file_load_gen";
+        temp_info.dev_names = m_file_name;
         device_info.push_back(temp_info);
-        std::ofstream ofs(temp_info.dev_names, std::ios::binary | std::ios::out);
-        std::filesystem::path p = temp_info.dev_names.c_str();
+        std::ofstream ofs{temp_info.dev_names, std::ios::binary | std::ios::out};
+        const std::filesystem::path p{temp_info.dev_names};
         std::filesystem::resize_file(p, DISK_MAX_SIZE); // set the file size
 
         //                iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
@@ -55,7 +71,7 @@ public:
         params.open_flags = homestore::io_flag::DIRECT_IO;
 #endif
         params.min_virtual_page_size = 4096;
-        params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
+        params.app_mem_size = static_cast< uint64_t >(5) * 1024 * 1024 * 1024;
         params.devices = device_info;
         params.init_done_cb = init_done_cb;
         params.drive_attr = iomgr::drive_attributes();
@@ -73,23 +89,23 @@ public:
         homestore::VolInterface::init(params);
     }
 
-    bool vol_found_cb(boost::uuids::uuid uuid) { return true; }
+    bool vol_found_cb(const boost::uuids::uuid uuid) const { return true; }
 
     void process_completions(const homestore::vol_interface_req_ptr& hb_req) {}
 
-    void vol_mounted_cb(const homestore::VolumePtr& vol_obj, homestore::vol_state state) {
+    void vol_mounted_cb(const homestore::VolumePtr& vol_obj, const homestore::vol_state state) {
         vol_init(vol_obj);
-        auto cb = [this](const homestore::vol_interface_req_ptr& vol_req) { process_completions(vol_req); };
+        auto cb{[this](const homestore::vol_interface_req_ptr& vol_req) { process_completions(vol_req); }};
         homestore::VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
     }
 
     void vol_init(const homestore::VolumePtr& vol_obj) {
-        open(homestore::VolInterface::get_instance()->get_name(vol_obj), O_RDWR);
+        ::open(homestore::VolInterface::get_instance()->get_name(vol_obj), O_RDWR);
     }
 
-    void vol_state_change_cb(const homestore::VolumePtr& vol, homestore::vol_state old_state,
-                             homestore::vol_state new_state) {
-        assert(0);
+    void vol_state_change_cb(const homestore::VolumePtr& vol, const homestore::vol_state old_state,
+                             const homestore::vol_state new_state) {
+        assert(false);
     }
 };
 } // namespace loadgen

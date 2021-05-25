@@ -8,12 +8,12 @@
 #include <nlohmann/json.hpp>
 #include <sds_logging/logging.h>
 
+#include "engine/common/homestore_status_mgr.hpp"
 #include "engine/device/blkbuffer.hpp"
 #include "engine/device/device.h"
 #include "engine/device/virtual_dev.hpp"
 #include "homelogstore/log_store.hpp"
 #include "homeblks_http_server.hpp"
-#include "engine/common/homestore_status_mgr.hpp"
 #include "volume/volume.hpp"
 
 #include "home_blks.hpp"
@@ -84,7 +84,7 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
         return static_cast< VolInterface* >(instance.get());
     } catch (const std::exception& e) {
         LOGERROR("{}", e.what());
-        assert(0);
+        assert(false);
         return nullptr;
     }
 }
@@ -202,7 +202,7 @@ vol_interface_req_ptr HomeBlks::create_vol_interface_req(std::vector< iovec > io
 std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_req_ptr& req, bool part_of_batch) {
     assert(m_rdy);
     if (!vol) {
-        assert(0);
+        assert(false);
         throw std::invalid_argument("null vol ptr");
     }
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
@@ -215,7 +215,7 @@ std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_r
 std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_req_ptr& req, bool part_of_batch) {
     assert(m_rdy);
     if (!vol) {
-        assert(0);
+        assert(false);
         throw std::invalid_argument("null vol ptr");
     }
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
@@ -228,7 +228,7 @@ std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_re
 std::error_condition HomeBlks::sync_read(const VolumePtr& vol, const vol_interface_req_ptr& req) {
     assert(m_rdy);
     if (!vol) {
-        assert(0);
+        assert(false);
         throw std::invalid_argument("null vol ptr");
     }
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
@@ -239,7 +239,7 @@ std::error_condition HomeBlks::sync_read(const VolumePtr& vol, const vol_interfa
 std::error_condition HomeBlks::unmap(const VolumePtr& vol, const vol_interface_req_ptr& req) {
     assert(m_rdy);
     if (!vol) {
-        assert(0);
+        assert(false);
         throw std::invalid_argument("null vol ptr");
     }
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
@@ -276,7 +276,7 @@ void HomeBlks::create_volume(VolumePtr vol) {
 
 VolumePtr HomeBlks::create_volume(const vol_params& params) {
     if (HS_STATIC_CONFIG(input.is_read_only)) {
-        assert(0);
+        assert(false);
         LOGERROR("can not create vol on read only boot");
         return nullptr;
     }
@@ -710,7 +710,7 @@ std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
 }
 std::error_condition HomeBlks::remove_volume_internal(const boost::uuids::uuid& uuid, bool force) {
     if (HS_STATIC_CONFIG(input.is_read_only)) {
-        assert(0);
+        assert(false);
         return std::make_error_condition(std::errc::device_or_resource_busy);
     }
 

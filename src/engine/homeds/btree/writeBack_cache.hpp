@@ -62,8 +62,8 @@ class WriteBackCache;
 //   ****************************************************
 //
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
-struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
-
+class WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
+public:
     //******************************************** writeback_req *********************************
     struct writeback_req : public homestore::blkstore_req< wb_cache_buffer_t > {
 
@@ -116,12 +116,17 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
     };
 
     //*************************************************** WriteBackCacheBuffer *******************************
-
+    typedef CacheBuffer< homestore::BlkId > CacheBufferType;
+    
     btree_cp_ptr bcp = nullptr;
     writeback_req_ptr req[WriteBackCache< K, V, InteriorNodeType, LeafNodeType >::MAX_CP_CNT];
+    
+    static wb_cache_buffer_t* make_object() {
+        // create derived object
+        return static_cast < wb_cache_buffer_t*>(sisl::ObjectAllocator< SSDBtreeNode >::make_object());
+    }
 
-    static wb_cache_buffer_t* make_object() { return sisl::ObjectAllocator< SSDBtreeNode >::make_object(); }
-    virtual void free_yourself() override {
+    void free_yourself() {
 #ifdef NDEBUG
         SSDBtreeNode* const SSDBtreeNode_ptr{reinterpret_cast< SSDBtreeNode* >(this)};
 #else
@@ -151,10 +156,12 @@ struct WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
     }
 
     friend void intrusive_ptr_add_ref(wb_cache_buffer_t* const buf) {
-        intrusive_ptr_add_ref(static_cast< CacheBuffer< homestore::BlkId >* >(buf));
+        // manage through base pointer
+        intrusive_ptr_add_ref(static_cast< CacheBufferType* >(buf));
     }
     friend void intrusive_ptr_release(wb_cache_buffer_t* const buf) {
-        intrusive_ptr_release(static_cast< CacheBuffer< homestore::BlkId >* >(buf));
+        // manage through base pointer
+        intrusive_ptr_release(static_cast< CacheBufferType* >(buf));
     }
 };
 
@@ -357,7 +364,7 @@ public:
         auto mem{hs_utils::iobuf_alloc(bn->get_cache_size())};
         sisl::blob outb;
         (bn->get_memvec()).get(&outb);
-        ::memcpy(static_cast< void* >(mem), static_cast< const void* >(outb.bytes), outb.size);
+        std::memcpy(static_cast< void* >(mem), static_cast< const void* >(outb.bytes), outb.size);
 
         // create a new mem vec
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());

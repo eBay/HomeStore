@@ -34,7 +34,7 @@ typedef blk_count_t lba_entry_count_t;                 // Type refers to num lba
 typedef blk_count_serialized_t lba_count_serialized_t; // Type refers to num lbas when
 
 #define LBA_MASK 0xFFFFFFFFFFFF
-#define CS_ARRAY_STACK_SIZE 256 // equals 2^N_LBA_BITS //TODO - put static assert
+constexpr size_t CS_ARRAY_STACK_SIZE{256}; // equals 2^N_LBA_BITS //TODO - put static assert
 namespace homestore {
 struct volume_req;
 
@@ -97,21 +97,20 @@ private:
 // MappingKey is fixed size
 class MappingKey : public homeds::btree::ExtentBtreeKey, public sisl::ObjLifeCounter< MappingKey > {
     LbaId m_lbaId;
-    LbaId* m_lbaId_ptr;
 
 public:
-    MappingKey() : ObjLifeCounter(), m_lbaId_ptr(&m_lbaId) {}
+    MappingKey() : ObjLifeCounter() {}
 
     MappingKey(const MappingKey& other) :
-            ExtentBtreeKey(), ObjLifeCounter(), m_lbaId(other.get_lbaId()), m_lbaId_ptr(&m_lbaId) {}
+            ExtentBtreeKey(), ObjLifeCounter(), m_lbaId(other.get_lbaId()) {}
 
     MappingKey(const lba_t lba_start, const lba_count_t n_lba) :
-            ObjLifeCounter(), m_lbaId{lba_start, n_lba}, m_lbaId_ptr{&m_lbaId} {}
+            ObjLifeCounter(), m_lbaId{lba_start, n_lba} {}
 
-    LbaId get_lbaId() const { return *m_lbaId_ptr; }
-    lba_t start() const { return m_lbaId_ptr->get_lba_start(); }
+    const LbaId& get_lbaId() const { return m_lbaId; }
+    lba_t start() const { return m_lbaId.get_lba_start(); }
     lba_t end() const { return start() + get_n_lba() - 1; }
-    lba_count_t get_n_lba() const { return m_lbaId_ptr->get_nlbas(); }
+    lba_count_t get_n_lba() const { return m_lbaId.get_nlbas(); }
 
     /* used by btree to compare the end key of input with end key
      * It return the result of
@@ -155,32 +154,28 @@ public:
         return false;
     }
 
-    sisl::blob get_blob() const override { return {(uint8_t*)m_lbaId_ptr, get_fixed_size()}; }
+    sisl::blob get_blob() const override { return {reinterpret_cast< uint8_t* >(const_cast< LbaId* >(&m_lbaId)), get_fixed_size()}; }
 
     void set_blob(const sisl::blob& b) override {
         assert(b.size == get_fixed_size());
-        m_lbaId_ptr = (LbaId*)b.bytes;
-    }
-
-    void copy_blob(const sisl::blob& b) override {
-        assert(b.size == get_fixed_size());
-        LbaId* other = (LbaId*)b.bytes;
+        const LbaId* const other{reinterpret_cast< const LbaId* >(b.bytes)};
         set(other->get_lba_start(), other->get_nlbas());
     }
 
+    void copy_blob(const sisl::blob& b) override { set_blob(b); }
+
     void copy_end_key_blob(const sisl::blob& b) override {
         assert(b.size == get_fixed_size());
-        LbaId* other = (LbaId*)b.bytes;
+        const LbaId* const other{reinterpret_cast< const LbaId* >(b.bytes)};
         set(other->end(), 1);
     }
 
     void set(const lba_t lba_start, const blk_count_t n_lba) {
         m_lbaId.set(lba_start, n_lba);
-        m_lbaId_ptr = &m_lbaId;
     }
 
     uint32_t get_blob_size() const override { return get_fixed_size(); }
-    void set_blob_size(uint32_t size) override { assert(0); }
+    void set_blob_size(uint32_t size) override { assert(false); }
 
     string to_string() const override { return fmt::format("[{}-{}]", start(), end()); }
 
@@ -268,10 +263,10 @@ public:
     }
 
 #if 0
-		// this allocates 2^NBLKS_BITS size array for checksum on stack, however actual memory used is less on bnode
-		// as we call get_blob_size which takes into account actual nlbas to determine exact size of checksum array
-		// TODO - can be replaced by thread local buffer in future
-		std::array< csum_t, BlkId::max_blks_in_op() > m_carr;
+        // this allocates 2^NBLKS_BITS size array for checksum on stack, however actual memory used is less on bnode
+        // as we call get_blob_size which takes into account actual nlbas to determine exact size of checksum array
+        // TODO - can be replaced by thread local buffer in future
+        std::array< csum_t, BlkId::max_blks_in_op() > m_carr;
 #endif
 
     void copy_blob(const sisl::blob& b) {
@@ -402,7 +397,7 @@ public:
 
     MappingValue(volume_req* req, const MappingValue& one, const blk_count_t one_offset, const MappingValue& second,
                  const blk_count_t second_offset) {
-        assert(0);
+        assert(false);
     }
 
     /******************* Entry Related Section ******************/
@@ -559,46 +554,46 @@ public:
         return b;
     }
     uint32_t get_blob_size() const override { return m_earr.get_size(); }
-    void set_blob_size(uint32_t size) override { assert(0); }
+    void set_blob_size(uint32_t size) override { assert(false); }
     uint32_t estimate_size_after_append(const BtreeValue& new_val) override {
-        assert(0);
+        assert(false);
         return 0;
     }
 
-    void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) override { assert(0); }
+    void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) override { assert(false); }
     std::string to_string() const override { return m_earr.to_string(); }
     // TODO: Do we really need to add sizeof(ValueEntry)
     uint32_t meta_size() const { return sizeof(ValueEntry) + m_earr.get_meta_size(); }
 
 #if 0
-		const Blob_Array< ValueEntry >& get_array_const() const { return m_earr; }
-		Blob_Array< ValueEntry >& get_array() { return m_earr; }
+        const Blob_Array< ValueEntry >& get_array_const() const { return m_earr; }
+        Blob_Array< ValueEntry >& get_array() { return m_earr; }
 
-		uint32_t meta_size() const { return sizeof(ValueEntryMeta) + m_earr.get_meta_size(); }
+        uint32_t meta_size() const { return sizeof(ValueEntryMeta) + m_earr.get_meta_size(); }
 #endif
 
 #if 0    
-		void truncate(volume_req* req) {
-			Blob_Array< ValueEntry >& e_varray = get_array();
+        void truncate(volume_req* req) {
+            Blob_Array< ValueEntry >& e_varray = get_array();
 
-			// iterate and remove all entries except latest one    
-			for (int i = e_varray.get_total_elements() - 1; i >= 0; i--) {
-				ValueEntry ve;
-				e_varray.get(i, ve, false);
-				uint32_t total = e_varray.get_total_elements();
-				if (req->lastCommited_seqid == INVALID_SEQ_ID ||
-					ve.get_seqid() < req->lastCommited_seqid) { // eligible for removal    
+            // iterate and remove all entries except latest one    
+            for (int i = e_varray.get_total_elements() - 1; i >= 0; i--) {
+                ValueEntry ve;
+                e_varray.get(i, ve, false);
+                uint32_t total = e_varray.get_total_elements();
+                if (req->lastCommited_seqid == INVALID_SEQ_ID ||
+                    ve.get_seqid() < req->lastCommited_seqid) { // eligible for removal    
 
-					LOGTRACE("Free entry:{} nlbas {}", ve.to_string(),
-						(m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * e_key->get_n_lba());
-					Free_Blk_Entry fbe(ve.get_blkId(), ve.get_lba_offset(),
-						(m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) *
-						e_key->get_n_lba());
-					param->m_req->blkIds_to_free.emplace_back(fbe);
-					e_varray.remove(i);
-				}
-			}
-		}
+                    LOGTRACE("Free entry:{} nlbas {}", ve.to_string(),
+                        (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * e_key->get_n_lba());
+                    Free_Blk_Entry fbe(ve.get_blkId(), ve.get_lba_offset(),
+                        (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) *
+                        e_key->get_n_lba());
+                    param->m_req->blkIds_to_free.emplace_back(fbe);
+                    e_varray.remove(i);
+                }
+            }
+        }
 #endif
 
     friend ostream& operator<<(ostream& os, const MappingValue& ve) {

@@ -102,12 +102,12 @@ public:
 
     void process_free_blk_comp_callback() {
         // remove this assert if someone is actually calling this funciton
-        assert(0);
+        assert(false);
     }
 
     void process_free_blk_callback(Free_Blk_Entry fbe) {
         // remove this assert if someone is actually calling this funciton
-        assert(0);
+        assert(false);
     }
 
     void process_metadata_completions(const volume_req_ptr& req) {
@@ -124,14 +124,14 @@ public:
             if (index == req->blkIds_to_free.size()) {
                 m_map->print_tree();
                 std::this_thread::sleep_for(std::chrono::seconds(5));
-                assert(0); // less blks freed than expected
+                assert(false); // less blks freed than expected
             }
             long long int bst =
                 req->blkIds_to_free[index].m_blkId.get_blk_num() + req->blkIds_to_free[index].m_blk_offset;
             long long int ben = bst + (int)(req->blkIds_to_free[index].m_nlbas_to_free) - 1;
             while (bst <= ben) {
-                if (st > et) assert(0);                 // more blks freeed than expected
-                if (m_blk_id_arr[st] != bst) assert(0); // blks mistmach
+                if (st > et) assert(false);                 // more blks freeed than expected
+                if (m_blk_id_arr[st] != bst) assert(false); // blks mistmach
                 bst++;
                 st++;
             }
@@ -206,7 +206,7 @@ public:
 
     void vol_init(const VolumePtr& vol_obj) { open(VolInterface::get_instance()->get_name(vol_obj), O_RDWR); }
 
-    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) { assert(0); }
+    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) { assert(false); }
 
     void init_done_cb(std::error_condition err, const out_params& params1) {
         /* create volume */
@@ -254,7 +254,7 @@ public:
     void generate_random_blkId(BlkId& blkId, uint64_t nlbas) {
         uint64_t retry = 0;
     start:
-        if (retry == MAX_BLK) assert(0); // cant allocated blk anymore
+        if (retry == MAX_BLK) assert(false); // cant allocated blk anymore
 
         /* we won't be writing more then 128 blocks in one io */
         uint64_t id = rand() % (MAX_BLK - MAX_NLBA);
@@ -279,7 +279,7 @@ public:
             LOGINFO("Outstanding:{},issued:{}", outstanding_ios.load(), issued_ios.load());
             LOGINFO("unreturned_lbas:{}", unreturned_lbas.load());
             std::this_thread::sleep_for(std::chrono::seconds(5));
-            assert(0); // cant allocated lba range anymore
+            assert(false); // cant allocated lba range anymore
         }
 
         lba = rand() % (MAX_LBA - MAX_NLBA);
@@ -344,7 +344,7 @@ public:
                     LOGINFO("lba st {}", st);
                     m_map->print_tree();
                     std::this_thread::sleep_for(std::chrono::seconds(5));
-                    assert(0);
+                    assert(false);
                 }
                 bst++;
                 st++;

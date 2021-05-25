@@ -111,13 +111,13 @@ int main(int argc, char* argv[]) {
         if (!is_file) {
             if (ioctl(fd, BLKGETSIZE64, &devsize) < 0) {
                 LOGINFO("couldn't get size");
-                assert(0);
+                assert(false);
                 abort();
             }
         } else {
             struct stat buf;
             if (fstat(fd, &buf) < 0) {
-                assert(0);
+                assert(false);
                 throw std::system_error(errno, std::system_category(), "error while getting size of the device");
             }
             devsize = buf.st_size;

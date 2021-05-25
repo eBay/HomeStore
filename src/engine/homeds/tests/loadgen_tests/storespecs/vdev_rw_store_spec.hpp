@@ -3,6 +3,14 @@
 //
 #pragma once
 
+#include <cassert>
+#include <chrono>
+#include <cstdint>
+#include <map>
+#include <mutex>
+#include <random>
+#include <vector>
+
 #include "homeds/loadgen/spec/store_spec.hpp"
 #include "homeds/tests/loadgen_tests/keyspecs/vdev_key_spec.hpp"
 #include "homeds/tests/loadgen_tests/valuespecs/vdev_value_spec.hpp"
@@ -26,50 +34,70 @@ class VDevRWStoreSpec : public StoreSpec< SimpleNumberKey, VDevValue > {
     };
 
 public:
-    virtual void init_store(homeds::loadgen::Param& parameters) override {
+    VDevRWStoreSpec() = default;
+    VDevRWStoreSpec(const VDevRWStoreSpec&) = delete;
+    VDevRWStoreSpec& operator=(const VDevRWStoreSpec&) = delete;
+    VDevRWStoreSpec(VDevRWStoreSpec&&) noexcept = delete;
+    VDevRWStoreSpec& operator=(VDevRWStoreSpec&&) noexcept = delete;
+    virtual ~VDevRWStoreSpec() override = default;
+
+    virtual void init_store(const homeds::loadgen::Param& parameters) override {
         m_store = HomeBlks::instance()->get_data_logdev_blkstore();
     }
 
-    virtual bool get(SimpleNumberKey& k, VDevValue* out_v) override { return read(k, out_v); }
+    virtual bool get(const SimpleNumberKey& k, VDevValue* const out_v) const override { return read(k, out_v); }
 
     //
     // 1. randomly pick up a offset that was priviously written by API `write` or `pwrite`
     // 2. lseek to this offset and do read
     // 3. Compare crc
     //
-    bool read(SimpleNumberKey& k, VDevValue* out_v) {
-        std::lock_guard< std::mutex > l(m_mtx);
-        auto index = rand() % m_off_arr.size();
-        auto off = m_off_arr[index];
+    bool read(const SimpleNumberKey& k, VDevValue* const out_v) const {
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine re{rd()};
 
-        auto count = m_off_to_info_map[off].size;
-        uint8_t* buf = iomanager.iobuf_alloc(512, count);
+        std::lock_guard< std::mutex > l{m_mtx};
+        std::uniform_int_distribution< size_t > index_rand{0, m_off_arr.size() - 1};
+        const auto index{index_rand(re)};
+        const auto off{m_off_arr[index]};
 
-        auto seeked_pos = m_store->lseek(off);
-        auto bytes_read = m_store->read((void*)buf, (size_t)count);
+        const auto itr{m_off_to_info_map.find(off)};
+        assert(itr != std::cend(m_off_to_info_map));
+        const auto count{itr->second.size};
+        uint8_t* const buf{iomanager.iobuf_alloc(512, count)};
+
+        const auto seeked_pos{m_store->lseek(off)};
+        const auto bytes_read{m_store->read(static_cast<void*>(buf), static_cast<size_t>(count))};
 
         // verify seek is working fine;
-        HS_ASSERT_CMP(DEBUG, (uint64_t)seeked_pos, ==, (uint64_t)off);
+        HS_ASSERT_CMP(DEBUG, static_cast< int64_t >(seeked_pos), ==, static_cast< int64_t >(off));
 
         // verify new seeked pos is good after read;
-        HS_ASSERT_CMP(DEBUG, (uint64_t)seeked_pos + bytes_read, ==, (uint64_t)m_store->seeked_pos());
+        HS_ASSERT_CMP(DEBUG, static_cast< int64_t >(seeked_pos + bytes_read), ==,
+                      static_cast< int64_t >(m_store->seeked_pos()));
 
         verify_read(bytes_read, buf, off, count);
 
         iomanager.iobuf_free(buf);
-        m_read_cnt++;
+        ++m_read_cnt;
         print_counter();
         return true;
     }
 
-    void verify_read(ssize_t bytes_read, uint8_t* buf, uint64_t off, uint64_t count) {
+    void verify_read(const ssize_t bytes_read, const uint8_t* const buf, const uint64_t off,
+                     const uint64_t count) const {
         if (bytes_read == -1) { HS_ASSERT(DEBUG, false, "bytes_read returned -1, errno: {}", errno); }
 
-        HS_ASSERT_CMP(DEBUG, (size_t)bytes_read, ==, count);
+        HS_ASSERT_CMP(DEBUG, static_cast< uint64_t >(bytes_read), ==, count);
 
-        auto crc = util::Hash64((const char*)buf, (size_t)bytes_read);
-        HS_ASSERT_CMP(DEBUG, crc, ==, m_off_to_info_map[off].crc, "CRC Mismatch: read out crc: {}, saved write: {}",
-                      crc, m_off_to_info_map[off].crc);
+        const auto crc{util::Hash64(reinterpret_cast< const char* >(buf), static_cast< size_t >(bytes_read))};
+        const auto itr{m_off_to_info_map.find(off)};
+        if (itr != std::cend(m_off_to_info_map)) {
+            HS_ASSERT_CMP(DEBUG, crc, ==, itr->second.crc, "CRC Mismatch: read out crc: {}, saved write: {}", crc,
+                          itr->second.crc);
+        } else {
+            HS_DEBUG_ASSERT(false, "CRC Mismatch: off: {} does not exist in map", off);
+        }
     }
 
     // write is just append;
@@ -79,13 +107,13 @@ public:
     // write advances the cursor
     //
     bool write(SimpleNumberKey& k, std::shared_ptr< VDevValue > v) {
-        std::lock_guard< std::mutex > l(m_mtx);
-        auto buf = v->get_buf();
-        auto count = v->get_size();
+        std::lock_guard< std::mutex > l{m_mtx};
+        const auto buf{v->get_buf()};
+        const auto count{v->get_size()};
 
         // get curent offset
-        auto off = m_store->lseek(0, SEEK_CUR);
-        auto cursor = m_store->seeked_pos();
+        const auto off{m_store->lseek(0, SEEK_CUR)};
+        const auto cursor{m_store->seeked_pos()};
 
         HS_ASSERT_CMP(DEBUG, cursor, ==, off);
 
@@ -95,19 +123,20 @@ public:
             return true;
         }
 
-        auto bytes_written = m_store->write(buf, count);
+        const auto bytes_written{m_store->write(static_cast< void* >(buf), static_cast< size_t >(count))};
 
-        auto cursor_after_write = m_store->seeked_pos();
+        const auto cursor_after_write{m_store->seeked_pos()};
 
         if (bytes_written == -1) { HS_ASSERT(DEBUG, false, "bytes_written returned -1, errno: {}", errno); }
 
-        HS_ASSERT_CMP(DEBUG, (size_t)bytes_written, ==, count);
+        HS_ASSERT_CMP(DEBUG, static_cast< std::decay_t< decltype(count) > >(bytes_written), ==, count);
 
-        HS_ASSERT_CMP(DEBUG, cursor_after_write, ==, off + bytes_written,
+        HS_ASSERT_CMP(DEBUG, static_cast< int64_t >(cursor_after_write), ==,
+                      static_cast< int64_t >(off + bytes_written),
                       "cursor: {} is not correct after write. write_cnt: {}, cursor before write: {}.",
                       cursor_after_write, bytes_written, off);
 
-        m_write_cnt++;
+        ++m_write_cnt;
         m_off_to_info_map[off].size = count;
         m_off_to_info_map[off].crc = v->get_hash_code();
         m_off_arr.push_back(off);
@@ -118,8 +147,8 @@ public:
     }
 
     virtual bool upsert(SimpleNumberKey& k, std::shared_ptr< VDevValue > v) override {
-        assert(0);
-        return true;
+        assert(false);
+        return false;
     }
 
     //
@@ -129,35 +158,36 @@ public:
     //
     virtual bool update(SimpleNumberKey& k, std::shared_ptr< VDevValue > v) override { return true; }
 
-    virtual bool remove(SimpleNumberKey& k, VDevValue* removed_v = nullptr) override {
-        assert(0);
-        return true;
+    virtual bool remove(const SimpleNumberKey& k, VDevValue* const removed_v = nullptr) override {
+        assert(false);
+        return false;
     }
 
-    virtual bool remove_any(SimpleNumberKey& start_key, bool start_incl, SimpleNumberKey& end_key, bool end_incl,
-                            SimpleNumberKey* out_key, VDevValue* out_val) override {
-        assert(0);
-        return true;
+    virtual bool remove_any(const SimpleNumberKey& start_key, const bool start_incl, const SimpleNumberKey& end_key,
+                            const bool end_incl, SimpleNumberKey* const out_key, VDevValue* const out_val) override {
+        assert(false);
+        return false;
     }
 
-    virtual uint32_t query(SimpleNumberKey& start_key, bool start_incl, SimpleNumberKey& end_key, bool end_incl,
-                           std::vector< std::pair< SimpleNumberKey, VDevValue > >& result) {
-        assert(0);
-        return 1;
+    virtual uint32_t query(const SimpleNumberKey& start_key, const bool start_incl, const SimpleNumberKey& end_key,
+                           const bool end_incl,
+                           std::vector< std::pair< SimpleNumberKey, VDevValue > >& result) const override {
+        assert(false);
+        return 0;
     }
 
-    virtual bool range_update(SimpleNumberKey& start_key, bool start_incl, SimpleNumberKey& end_key, bool end_incl,
-                              std::vector< std::shared_ptr< VDevValue > >& result) {
-        assert(0);
-        return true;
+    virtual bool range_update(SimpleNumberKey& start_key, const bool start_incl, SimpleNumberKey& end_key,
+                              const bool end_incl, std::vector< std::shared_ptr< VDevValue > >& result) override {
+        assert(false);
+        return false;
     }
 
 private:
-    void print_counter() {
-        static uint64_t pt = 30;
-        static Clock::time_point pt_start = Clock::now();
+    void print_counter() const {
+        static constexpr uint64_t pt{30};
+        static Clock::time_point pt_start{Clock::now()};
 
-        auto elapsed_time = get_elapsed_time(pt_start);
+        const auto elapsed_time{get_elapsed_time(pt_start)};
         if (elapsed_time > pt) {
             LOGINFO("write ios cmpled: {}", m_write_cnt);
             LOGINFO("read ios cmpled: {}", m_read_cnt);
@@ -165,19 +195,19 @@ private:
         }
     }
 
-    uint64_t get_elapsed_time(Clock::time_point start) {
-        std::chrono::seconds sec = std::chrono::duration_cast< std::chrono::seconds >(Clock::now() - start);
+    uint64_t get_elapsed_time(Clock::time_point start) const {
+        const std::chrono::seconds sec{std::chrono::duration_cast< std::chrono::seconds >(Clock::now() - start)};
         return sec.count();
     }
 
 private:
-    uint64_t m_write_cnt = 0;
-    uint64_t m_read_cnt = 0;
-    uint64_t m_write_sz = 0;
+    uint64_t m_write_cnt{0};
+    mutable uint64_t m_read_cnt{0};
+    uint64_t m_write_sz{0};
     homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* m_store;
     std::map< uint64_t, write_info > m_off_to_info_map; // off to write info
     std::vector< uint64_t > m_off_arr;                  // unique off write
-    std::mutex m_mtx;
+    mutable std::mutex m_mtx;
 };
 
 } // namespace loadgen

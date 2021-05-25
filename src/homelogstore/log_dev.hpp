@@ -299,7 +299,7 @@ typedef boost::intrusive_ptr< logdev_req > logdev_req_ptr;
 struct logdev_req : public blkstore_req< BlkBuffer > {
 public:
     [[nodiscard]] static boost::intrusive_ptr< logdev_req > make_request() {
-        return boost::intrusive_ptr< logdev_req >(sisl::ObjectAllocator< logdev_req >::make_object());
+        return boost::intrusive_ptr< logdev_req >{sisl::ObjectAllocator< logdev_req >::make_object()};
     }
 
     virtual void free_yourself() override { sisl::ObjectAllocator< logdev_req >::deallocate(this); }

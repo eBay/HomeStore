@@ -91,7 +91,7 @@ public:
         if (0 != rmdir(vol_loadgen_dir.c_str())) {
             LOGERROR("Deleting dir: {} failed, error no: {}, err msg: {}", vol_loadgen_dir, errno,
                      std::strerror(errno));
-            assert(0);
+            assert(false);
         }
     }
 
@@ -119,7 +119,7 @@ public:
         while (m_outstd_ios.load()) {
             if (get_elapsed_time(start) > 30) {
                 LOGERROR("Wait outstanding io timeout ...");
-                assert(0);
+                assert(false);
             }
             std::this_thread::sleep_for(std::chrono::seconds{2});
         }
@@ -132,7 +132,7 @@ public:
             auto elapsed_time = get_elapsed_time(start);
             if (elapsed_time > 300) {
                 LOGERROR("Wait shutdown callback timeout ...");
-                assert(0);
+                assert(false);
             }
             std::this_thread::sleep_for(std::chrono::seconds{2});
         }
@@ -152,13 +152,13 @@ public:
             std::bind(&VolumeManager::shutdown_callback, this, std::placeholders::_1));
     }
 
-    uint64_t max_vols() { return m_max_vols; }
+    uint64_t max_vols() const { return m_max_vols; }
 
     // get nblks based on volume size;
-    uint64_t max_vol_blks() { return m_max_vol_size / VOL_PAGE_SIZE; }
+    uint64_t max_vol_blks() const { return m_max_vol_size / VOL_PAGE_SIZE; }
 
     // get nblks in max io size;
-    uint64_t max_io_nblks() { return m_max_io_size / VOL_PAGE_SIZE; }
+    uint64_t max_io_nblks() const { return m_max_io_size / VOL_PAGE_SIZE; }
 
     static void del_instance();
 
@@ -176,9 +176,9 @@ public:
         }
     }
 
-    uint8_t* gen_value(uint64_t& nblks) {
-        uint64_t size = get_size(nblks);
-        uint8_t* bytes = iomanager.iobuf_alloc(512, size);
+    uint8_t* gen_value(const uint64_t nblks) const {
+        const uint64_t size{get_size(nblks)};
+        uint8_t* const bytes{iomanager.iobuf_alloc(512, size)};
 
         populate_buf(bytes, size);
         return bytes;
@@ -210,7 +210,7 @@ public:
 
             // key is same on write that is not ACK yet, keep finding other keys;
         }
-        assert(0);
+        assert(false);
     }
 
     std::error_condition read(uint64_t vol_id, uint64_t lba, uint64_t nblks, bool verify) {
@@ -235,7 +235,7 @@ public:
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->read(m_vols[vol_id], vreq);
         if (ret_io != no_error) {
-            assert(0);
+            assert(false);
             m_outstd_ios--;
             m_rd_err_cnt++;
             iomanager.iobuf_free(buf);
@@ -272,7 +272,7 @@ public:
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->write(m_vols[vol_id], vreq);
         if (ret_io != no_error) {
-            assert(0);
+            assert(false);
             m_outstd_ios--;
             m_wrt_err_cnt++;
             std::lock_guard< std::mutex > lk(m_vol_info[vol_id]->m_mtx);
@@ -318,7 +318,7 @@ private:
 
         if (m_logdev_data[read_offset].compare(ptr) != 0) {
             LOGERROR("Returned buf: {} is not same as stored buf: {}", ptr, m_logdev_data[read_offset]);
-            assert(0);
+            assert(false);
         } 
          
         free(iov);   
@@ -406,42 +406,42 @@ private:
     }
 
 #endif
-    uint64_t get_rand_vol() {
+    uint64_t get_rand_vol() const {
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine generator{rd()};
-        std::uniform_int_distribution< long long unsigned > dist(0, m_max_vols - 1);
+        std::uniform_int_distribution< uint64_t > dist{0, m_max_vols - 1};
         return dist(generator);
     }
 
-    uint64_t get_rand_lba() {
+    uint64_t get_rand_lba() const {
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine generator{rd()};
         // make sure the the lba doesn't write accross max vol size;
         // MAX_KEYS is initiated as max vol size;
         // lba: [0, max_vol_blks - max_io_nblks)
-        std::uniform_int_distribution< long long unsigned > dist(0, KeySpec::MAX_KEYS - max_io_nblks() - 1);
+        std::uniform_int_distribution< uint64_t > dist{0, KeySpec::MAX_KEYS - max_io_nblks() - 1};
         return dist(generator);
     }
 
-    uint64_t get_rand_nblks() {
+    uint64_t get_rand_nblks() const {
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine generator{rd()};
         // nblks: [1, max_io_nblks]
-        std::uniform_int_distribution< long long unsigned > dist(1, max_io_nblks());
+        std::uniform_int_distribution< uint64_t > dist{1, max_io_nblks()};
         return dist(generator);
     }
 
-    void populate_buf(uint8_t* buf, uint64_t size) {
+    void populate_buf(uint8_t* const buf, const uint64_t size) const {
         assert(size > 0);
         assert(size % sizeof(uint64_t) == 0);
 
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine generator{rd()};
-        std::uniform_int_distribution< long long unsigned > dist(std::numeric_limits< unsigned long long >::min(),
-                                                                 std::numeric_limits< unsigned long long >::max());
+        std::uniform_int_distribution< uint64_t > dist{std::numeric_limits< unsigned long long >::min(),
+                                                       std::numeric_limits< unsigned long long >::max()};
 
-        for (auto i = 0ull; i < size; i += sizeof(uint64_t)) {
-            *(uint64_t*)(buf + i) = dist(generator);
+        for (uint64_t i{0}; i < size; i += sizeof(uint64_t)) {
+            *reinterpret_cast<uint64_t*>(buf + i) = dist(generator);
         }
     }
 
@@ -541,17 +541,17 @@ private:
         m_vols.push_back(vol_obj);
     }
 
-    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) { assert(0); }
+    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) { assert(false); }
 
-    void print_io_counters() {
+    void print_io_counters() const {
         LOGINFO("write ios cmpled: {}", m_wrt_cnt);
         LOGINFO("read ios cmpled: {}", m_rd_cnt);
         LOGINFO("read/write err : {}/{}, read_verify_skip: {}, write_skip: {}", m_rd_err_cnt, m_wrt_err_cnt,
                 m_read_verify_skip, m_writes_skip);
     }
 
-    uint64_t get_elapsed_time(Clock::time_point start) {
-        std::chrono::seconds sec = std::chrono::duration_cast< std::chrono::seconds >(Clock::now() - start);
+    uint64_t get_elapsed_time(const Clock::time_point& start) const {
+        const std::chrono::seconds sec{std::chrono::duration_cast< std::chrono::seconds >(Clock::now() - start)};
         return sec.count();
     }
 
@@ -609,7 +609,7 @@ private:
                 if (req->verify && hash != stored_hash) {
                     LOGERROR("Verify Failed: Hash Code Mismatch: vol_id: {}, lba: {}, nblks {}, hash: {} : {}",
                              req->vol_id, req->lba, req->nblks, hash, stored_hash);
-                    assert(0);
+                    assert(false);
                 }
 
                 offset += VOL_PAGE_SIZE;
@@ -626,9 +626,9 @@ private:
         }
     }
 
-    uint64_t get_size(uint64_t n) { return n * VOL_PAGE_SIZE; }
+    uint64_t get_size(const uint64_t n) const { return n * VOL_PAGE_SIZE; }
 
-    uint64_t get_hash(uint8_t* bytes) { return util::Hash64((const char*)bytes, VOL_PAGE_SIZE); }
+    uint64_t get_hash(const uint8_t* const bytes) const { return util::Hash64(reinterpret_cast<const char*>(bytes), static_cast<size_t>(VOL_PAGE_SIZE)); }
 
 private:
     std::vector< dev_info > m_device_info;

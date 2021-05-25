@@ -257,7 +257,7 @@ public:
         LOGDEBUG("Writing {} {} ", lba, nlbas);
         auto ret_io = vol_interface->write(vinfo.vol_obj, req);
         if (ret_io != no_error) {
-            assert(0);
+            assert(false);
             iomanager.iobuf_free(buf);
             m_outstanding_ios.fetch_sub(1, std::memory_order_acq_rel);
             LOGINFO("write io failure");

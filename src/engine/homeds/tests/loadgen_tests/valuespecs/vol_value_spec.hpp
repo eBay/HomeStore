@@ -5,11 +5,18 @@
 #ifndef __HOMESTORE_VOLUME_VALUE_SPEC_HPP__
 #define __HOMESTORE_VOLUME_VALUE_SPEC_HPP__
 
-#include <climits>
-#include "homeds/loadgen/loadgen_common.hpp"
+#include <array>
+#include <cassert>
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <random>
+#include <string>
+
 #include "homeds/btree/btree.hpp"
-#include "homeds/loadgen/spec/value_spec.hpp"
 #include "homeds/loadgen/iomgr_executor.hpp"
+#include "homeds/loadgen/loadgen_common.hpp"
+#include "homeds/loadgen/spec/value_spec.hpp"
 #include "homeds/tests/loadgen_tests/vol_manager.hpp"
 
 namespace homeds {
@@ -18,16 +25,14 @@ namespace loadgen {
 class VolumeValue : public ValueSpec {
 
 public:
-    static std::shared_ptr< VolumeValue > gen_value(ValuePattern spec, VolumeValue* ref_value = nullptr) {
+    static std::shared_ptr< VolumeValue > gen_value(const ValuePattern spec, const VolumeValue* const ref_value = nullptr) {
         std::shared_ptr< VolumeValue > temp;
         switch (spec) {
         case ValuePattern::SEQUENTIAL_VAL:
             if (ref_value) {
-                VolumeValue v = VolumeValue(*ref_value);
-                temp = std::make_shared< VolumeValue >(v);
+                temp = std::make_shared< VolumeValue >(*ref_value);
             } else {
-                VolumeValue v = VolumeValue();
-                temp = std::make_shared< VolumeValue >(v);
+                temp = std::make_shared< VolumeValue >();
             }
             break;
         case ValuePattern::RANDOM_BYTES: {
@@ -35,110 +40,95 @@ public:
             // Generating dummy-unique value.
             // volume store to will generate the actual value;
             //
-            uint8_t bytes[4096];
-            auto size = 4096ull;
-#if 0
-                std::random_device rd;
-                std::default_random_engine generator(rd());
+            std::array< uint8_t, 4096 > bytes;
+            static thread_local std::random_device rd{};
+            static thread_local std::default_random_engine generator{rd()};
+            std::uniform_int_distribution< uint64_t > dist{std::numeric_limits< uint64_t >::min(),
+                                                           std::numeric_limits< uint64_t >::max()};
 
-                // TODO: populate uint64_t every time instead of uchar;
-                std::uniform_int_distribution<long long unsigned> dist(0, UCHAR_MAX); 
-                for (auto i = 0ull; i < size-1; i++) { 
-                    bytes[i] = dist(generator);
-                }
- 
-                bytes[size-1] = 0;
-#endif
-            std::random_device rd;
-            std::default_random_engine generator(rd());
-            std::uniform_int_distribution< long long unsigned > dist(std::numeric_limits< unsigned long long >::min(),
-                                                                     std::numeric_limits< unsigned long long >::max());
-
-            for (auto i = 0ull; i < size; i += sizeof(uint64_t)) {
-                *(uint64_t*)(bytes + i) = dist(generator);
+            for (size_t i{0} ; i < bytes.size(); i += sizeof(uint64_t)) {
+                *reinterpret_cast<uint64_t*>(bytes.data() + i) = dist(generator);
             }
 
-            VolumeValue v = VolumeValue(1, util::Hash64((const char*)&bytes[0], VOL_PAGE_SIZE));
-            temp = std::make_shared< VolumeValue >(v);
+            temp = std::make_shared< VolumeValue >(1, util::Hash64(reinterpret_cast<const char*>(bytes.data()), VOL_PAGE_SIZE));
             break;
         }
 
         default:
             // We do not support other gen spec yet
-            assert(0);
-            VolumeValue v = VolumeValue();
-            temp = std::make_shared< VolumeValue >(v);
+            assert(false);
+            temp = std::make_shared< VolumeValue >();
             break;
         }
 
         return temp;
     }
 
-    ~VolumeValue() {
+    virtual ~VolumeValue() override {
         // m_bytes will be freed by homestore I/O path;
     }
 
-    VolumeValue() {
-        m_nblks = 0;
-        m_crc = 0;
-        // m_bytes = nullptr;
-    }
+    VolumeValue() = default;
+    VolumeValue(const uint64_t nblks, const uint64_t crc) : m_nblks{nblks}, m_crc{crc} {}
 
-    VolumeValue(const VolumeValue& other) {
-        m_nblks = other.nblks();
-        m_crc = other.crc();
-        // m_bytes = other.get_bytes_ptr();
-    }
-
-    VolumeValue& operator=(const VolumeValue& other) {
-        assert(0);
+    VolumeValue(const VolumeValue& other) : m_nblks{other.nblks()}, m_crc{other.crc()} {}
+    VolumeValue& operator=(const VolumeValue& rhs) {
+        if (this != &rhs) {
+            m_nblks = rhs.nblks();
+            m_crc = rhs.crc();
+        }
         return *this;
     }
-
-    VolumeValue(uint64_t nblks, uint64_t crc) {
-        m_nblks = nblks;
-        m_crc = crc;
-        // m_bytes = bytes;
-    }
+    VolumeValue(VolumeValue&&) noexcept = delete;
+    VolumeValue& operator=(VolumeValue&&) noexcept = delete;
 
     uint64_t crc() const { return m_crc; }
 
     uint64_t nblks() const { return m_nblks; }
 
-    virtual uint64_t get_hash_code() override {
+    virtual uint64_t get_hash_code() const override {
         return m_crc;
         // return util::Hash64((const char *)m_bytes, get_size(m_nblks));
     }
 
-    int compare(ValueSpec& other) {
-        return to_string().compare(((const VolumeValue*)&(VolumeValue&)other)->to_string());
-#if 0
-        VolumeValue* vv = (VolumeValue*)&other;
-        int x = m_crc - vv->crc();
-        if (x == 0)
-            return 0;
-        else 
-            return x;
+    int compare(const ValueSpec& other) const {
+#ifdef NDEBUG
+        const VolumeValue& other_val{reinterpret_cast< const VolumeValue& >(other)};
+#else
+        const VolumeValue& other_val{dynamic_cast< const VolumeValue& >(other)};
 #endif
+
+        if (m_nblks < other_val.m_nblks)
+            return -1;
+        else if (m_nblks > other_val.m_nblks)
+            return 1;
+        else {
+            if (m_crc < other_val.m_crc)
+                return -1;
+            else if (m_crc > other_val.m_crc)
+                return 1;
+            return 0;
+        }
     }
 
-    bool operator==(const VolumeValue& other) const { return to_string().compare(other.to_string()) == 0; }
+    bool operator==(const VolumeValue& rhs) const { return ((m_nblks == rhs.m_nblks) && (m_crc == rhs.m_crc));
+    }
 
     std::string to_string() const { return std::to_string(m_nblks) + " " + std::to_string(m_crc); }
 
     sisl::blob get_blob() const {
         sisl::blob b;
         b.size = sizeof(uint64_t);
-        b.bytes = (uint8_t*)&m_crc;
+        b.bytes = reinterpret_cast< uint8_t* >(const_cast < uint64_t *>(& m_crc));
         return b;
     }
 
 private:
-    size_t get_size(uint64_t nblks) const { return nblks * VOL_PAGE_SIZE; }
+    size_t get_size(const uint64_t nblks) const { return nblks * VOL_PAGE_SIZE; }
 
 private:
-    uint64_t m_nblks;
-    uint64_t m_crc; // crc of the buffer
+    uint64_t m_nblks{0};
+    uint64_t m_crc{0}; // crc of the buffer
     // uint8_t*    m_bytes;      // memory will be released by homestore
 };
 } // namespace loadgen

@@ -35,8 +35,8 @@ namespace homestore {
 class Volume;
 class Snapshot;
 class BlkBuffer;
-void intrusive_ptr_add_ref(BlkBuffer* buf);
-void intrusive_ptr_release(BlkBuffer* buf);
+extern void intrusive_ptr_add_ref(BlkBuffer* const buf);
+extern void intrusive_ptr_release(BlkBuffer* const buf);
 
 class VolInterface;
 struct init_params;

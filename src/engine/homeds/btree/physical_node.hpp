@@ -422,7 +422,7 @@ public:
             (!result.found) ? (void)to_variant_node()->insert(result.end_of_search_index, key, val)
                             : append(result.end_of_search_index, key, val, existing_val);
         } else {
-            assert(0);
+            assert(false);
         }
         assert(get_magic() == MAGICAL_VALUE);
 
@@ -585,7 +585,7 @@ protected:
                     if (mid > max_ind_found) { max_ind_found = mid; }
                     start = mid;
                 } else {
-                    assert(0);
+                    assert(false);
                 }
             } else if (x > 0) {
                 end = mid;

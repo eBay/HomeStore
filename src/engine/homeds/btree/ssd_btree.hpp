@@ -240,9 +240,9 @@ public:
         return HomeLogStore::is_aligned_buf_needed(size);
     }
 
-    static uint8_t* get_physical(const SSDBtreeNode* bn) {
-        wb_cache_buffer_t* bbuf = (wb_cache_buffer_t*)(bn);
-        sisl::blob b = bbuf->at_offset(0);
+    static uint8_t* get_physical(const SSDBtreeNode* const bn) {
+        const wb_cache_buffer_t* const bbuf{static_cast<const wb_cache_buffer_t*>(bn)};
+        const sisl::blob b{bbuf->at_offset(0)};
         return b.bytes;
     }
 
@@ -289,7 +289,12 @@ public:
             bnodeid_t bid = blkid.to_integer();
             auto n = new (b.bytes) VariantNode< InteriorNodeType, K, V >(&bid, true, store->m_btree_cfg);
         }
-        boost::intrusive_ptr< SSDBtreeNode > new_node = boost::static_pointer_cast< SSDBtreeNode >(safe_buf);
+#ifdef NDEBUG
+        boost::intrusive_ptr< SSDBtreeNode > new_node =
+            boost::intrusive_ptr< SSDBtreeNode >(reinterpret_cast< SSDBtreeNode* >(safe_buf.get()));
+#else
+        boost::intrusive_ptr< SSDBtreeNode > new_node = boost::dynamic_pointer_cast< SSDBtreeNode >(safe_buf);
+#endif
 
         if (copy_from != nullptr) {
             copy_node(store, copy_from, new_node);
@@ -331,9 +336,13 @@ public:
                 HS_ASSERT_CMP(DEBUG, iomanager.am_i_tight_loop_reactor(), ==, true);
                 bnode = nullptr;
                 return btree_status_t::fast_path_not_possible;
-            }
+            } 
 
-            bnode = boost::static_pointer_cast< SSDBtreeNode >(safe_buf);
+#ifdef NDEBUG
+            bnode = boost::intrusive_ptr< SSDBtreeNode >(reinterpret_cast< SSDBtreeNode* >(safe_buf.get()));
+#else
+            bnode = boost::dynamic_pointer_cast< SSDBtreeNode >(safe_buf);
+#endif
         } catch (std::exception& e) {
             LOGERROR("{}", e.what());
             ret = btree_status_t::read_failed;
@@ -345,11 +354,9 @@ public:
 
     static void copy_node(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > copy_from,
                           boost::intrusive_ptr< SSDBtreeNode > copy_to) {
-        bnodeid_t original_to_id = copy_to->get_node_id();
-        boost::intrusive_ptr< wb_cache_buffer_t > to_buff = boost::dynamic_pointer_cast< wb_cache_buffer_t >(copy_to);
-        boost::intrusive_ptr< wb_cache_buffer_t > frm_buff =
-            boost::dynamic_pointer_cast< wb_cache_buffer_t >(copy_from);
-        to_buff->set_memvec(frm_buff->get_memvec_intrusive(), frm_buff->get_data_offset(), frm_buff->get_cache_size());
+        const bnodeid_t original_to_id{copy_to->get_node_id()};
+        copy_to->set_memvec(copy_from->get_memvec_intrusive(), copy_from->get_data_offset(),
+                            copy_from->get_cache_size());
         copy_to->set_node_id(original_to_id); // restore original copy_to id
         copy_to->init();
     }
@@ -420,12 +427,12 @@ public:
         /* add the latest request pending on this node */
         auto ret = store->get_wb_cache()->refresh_buf(bn, is_write_modifiable, bcp);
         if (ret != btree_status_t::success) { return ret; }
-        auto physical_node = (LeafPhysicalNode*)((boost::static_pointer_cast< SSDBtreeNode >(bn))->at_offset(0).bytes);
+        auto physical_node = (LeafPhysicalNode*)(bn->at_offset(0).bytes);
         verify_result vr;
         auto is_match = physical_node->verify_node(get_node_area_size(store), vr);
         if (!is_match) {
             LOGERROR("mismatch node: {} is it from cache", vr.to_string());
-            assert(0);
+            assert(false);
             abort();
         }
         return btree_status_t::success;
@@ -437,12 +444,15 @@ public:
         store->get_wb_cache()->free_blk(bn->get_node_id(), free_blkid_list, store->get_node_size());
     }
 
-    static void ref_node(SSDBtreeNode* bn) {
-        homestore::CacheBuffer< homestore::BlkId >::ref((homestore::CacheBuffer< homestore::BlkId >&)*bn);
+    static void ref_node(SSDBtreeNode* const bn) {
+        // ref base class
+        homestore::CacheBuffer< homestore::BlkId >::ref(static_cast < homestore::CacheBuffer< homestore::BlkId >&>(*bn));
     }
 
-    static void deref_node(SSDBtreeNode* bn) {
-        homestore::CacheBuffer< homestore::BlkId >::deref((homestore::CacheBuffer< homestore::BlkId >&)*bn);
+    static void deref_node(SSDBtreeNode* const bn) {
+        // deref base class
+        homestore::CacheBuffer< homestore::BlkId >::deref(
+            static_cast< homestore::CacheBuffer< homestore::BlkId >& >(*bn));
     }
 
     /************************** Journal entry section **********************/

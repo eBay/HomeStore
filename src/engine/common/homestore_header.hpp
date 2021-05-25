@@ -71,7 +71,5 @@ std::string to_hex(T i) {
     return fmt::format("{0:x}", i);
 }
 
-#define NULL_LAMBDA [](auto... x) {}
-
 } // namespace homestore
 #endif

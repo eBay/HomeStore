@@ -17,35 +17,37 @@
 #include <string>
 #include <thread>
 
+#ifdef __linux__
 #include <fcntl.h>
 #include <isa-l/crc.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/timeb.h>
 #include <unistd.h>
+#endif
 
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <fds/atomic_status_counter.hpp>
 #include <fds/bitset.hpp>
 #include <fds/utils.hpp>
-#include <fds/atomic_status_counter.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>
 #include <iomgr/spdk_drive_interface.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include <utility/thread_buffer.hpp>
+
 #include <gtest/gtest.h>
 
-#include "api/vol_interface.hpp"
 #include "api/meta_interface.hpp"
+#include "api/vol_interface.hpp"
+#include "engine/common/homestore_flip.hpp"
 #include "engine/common/homestore_header.hpp"
-#include "engine/common/homestore_flip.hpp"
-#include "engine/homestore_base.hpp"
-#include "engine/common/homestore_flip.hpp"
-#include "test_common/homestore_test_common.hpp"
-#include "engine/common/homestore_assert.hpp"
 #include "engine/common/mod_test_iface.hpp"
+#include "engine/device/blkbuffer.hpp"
+#include "engine/homestore_base.hpp"
+#include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
 using namespace flip;
@@ -868,7 +870,7 @@ public:
         }
         used_cap = VolInterface::get_instance()->get_system_capacity().used_total_size;
         if (used_cap != 0) {
-            // assert(0);
+            // assert(false);
         }
     }
 
@@ -1339,7 +1341,7 @@ protected:
             ret = run_io(bind_this(IOTestJob::same_lbas, 0), read_function);
             break;
         case load_type_t::sequential:
-            assert(0);
+            assert(false);
             break;
         }
         return ret;
@@ -1353,10 +1355,10 @@ protected:
             ret = run_io(bind_this(IOTestJob::unmappable_rand_lbas, 0), unmap_function);
             break;
         case load_type_t::same:
-            assert(0);
+            assert(false);
             break;
         case load_type_t::sequential:
-            assert(0);
+            assert(false);
             break;
         }
         return ret;

@@ -2547,12 +2547,12 @@ private:
     }
 
 #if 0
-				btree_status_t merge_node_replay(btree_journal_entry* jentry, const btree_cp_ptr& bcp) {
-					BtreeNodePtr parent_node = (jentry->is_root) ? read_node(m_root_node) : read_node(jentry->parent_node.node_id);
+                btree_status_t merge_node_replay(btree_journal_entry* jentry, const btree_cp_ptr& bcp) {
+                    BtreeNodePtr parent_node = (jentry->is_root) ? read_node(m_root_node) : read_node(jentry->parent_node.node_id);
 
-					// Parent already went ahead of the journal entry, return done
-					if (parent_node->get_gen() >= jentry->parent_node.node_gen) { return btree_status_t::replay_not_needed; }
-				}
+                    // Parent already went ahead of the journal entry, return done
+                    if (parent_node->get_gen() >= jentry->parent_node.node_gen) { return btree_status_t::replay_not_needed; }
+                }
 #endif
 
     void validate_sanity_child(const BtreeNodePtr& parent_node, uint32_t ind) {
@@ -2746,7 +2746,8 @@ private:
                                            thread::locktype leaf_lock_type, const btree_cp_ptr& bcp) {
 
         if (index == node->get_total_entries()) {
-            child_info.set_bnode_id(node->get_edge_id());
+            const auto& edge_id {node->get_edge_id()};
+            child_info.set_bnode_id(edge_id);
             // If bsearch points to last index, it means the search has not found entry unless it is an edge value.
             if (!child_info.has_valid_bnode_id()) {
                 BT_LOG_ASSERT(false, node, "Child index {} does not have valid bnode_id", index);
@@ -2839,7 +2840,7 @@ private:
         auto time_spent = end_of_lock(node, type);
         observe_lock_time(node, type, time_spent);
 #if 0
-					if (release) { release_node(node); }
+                    if (release) { release_node(node); }
 #endif
     }
 

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <fds/thread_vector.hpp>
+#include <fmt/format.h>
 #include <wisr/wisr_ds.hpp>
 #include <utility/enum.hpp>
 
@@ -626,19 +627,19 @@ protected:
     /*********************** virtual functions required to support snapshot  **********************/
     /* These functions are defined so that indx mgr can be used without snapmagr */
     virtual int64_t snap_create(indx_tbl* m_diff_tbl, int64_t start_cp_id) {
-        assert(0);
+        assert(false);
         return -1;
     }
     virtual int64_t snap_get_diff_id() {
-        assert(0);
+        assert(false);
         return -1;
     }
     virtual void snap_create_done(const uint64_t snap_id, const seq_id_t max_seqid, const seq_id_t contiguous_seqid,
                                   const int64_t end_cp_id) {
-        assert(0);
+        assert(false);
     }
     virtual homeds::btree::btree_super_block snap_get_diff_tbl_sb() {
-        assert(0);
+        assert(false);
         homeds::btree::btree_super_block sb;
         return sb;
     }

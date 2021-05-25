@@ -39,7 +39,7 @@ btree_device_info bt_dev_info;
 #if 0
 AbstractVirtualDev *new_vdev_found(homestore::DeviceManager *mgr, homestore::vdev_info_block *vb) {
     LOGINFO("New virtual device found id = {} size = {}", vb->vdev_id, vb->size);
-    assert(0); // This test at present does not support restoring the btree
+    assert(false); // This test at present does not support restoring the btree
     return nullptr;
 }
 
@@ -145,7 +145,7 @@ public:
         auto other_start = (TestSimpleKey*)range.get_start_key();
         auto other_end = (TestSimpleKey*)range.get_end_key();
 
-        assert(0); // Do not support it yet
+        assert(false); // Do not support it yet
         return 0;
     }
 
@@ -335,7 +335,7 @@ public:
         auto ret = m_bt->remove(*m_entries[i], &v);
         if (ret != btree_status_t::success) {
             m_bt->print_tree();
-            assert(0);
+            assert(false);
         }
         EXPECT_EQ(ret, btree_status_t::success);
         EXPECT_EQ(m_create_map.find(m_entries[i])->second, v);

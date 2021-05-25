@@ -1,8 +1,18 @@
+#include <cassert>
+#include <condition_variable>
+#include <cstdint>
+#include <functional>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <thread>
 
+#ifdef __linux__
+#include <fcntl.h>
 #include <linux/fs.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+#endif
 
 #include <metrics/metrics.hpp>
 #include <sds_logging/logging.h>
@@ -81,12 +91,28 @@ using namespace homeds::loadgen;
 
 #define G_LogStore_Test BtreeLoadGen< LogStoreKey, LogStoreValue, LogStoreSpec, IOMgrExecutor >
 
-static Param parameters;
-bool loadgen_verify_mode = false;
+namespace {
+Param parameters;
+bool loadgen_verify_mode{false};
+} // namespace
 
 struct BtreeTest : public ::testing::Test {
+public:
+    BtreeTest() = default;
+    BtreeTest(const BtreeTest&) = delete;
+    BtreeTest& operator=(const BtreeTest&) = delete;
+    BtreeTest(BtreeTest&&) noexcept = delete;
+    BtreeTest& operator=(BtreeTest&&) noexcept = delete;
+    virtual ~BtreeTest() override = default;
+
+protected:
+    virtual void SetUp() override{};
+    virtual void TearDown() override{};
+
+private:
     std::unique_ptr< G_SimpleKV_Mem > loadgen;
 
+protected:
     void execute() {
         loadgen = std::make_unique< G_SimpleKV_Mem >(parameters.NT);
         loadgen->initParam(parameters);
@@ -100,26 +126,43 @@ struct BtreeTest : public ::testing::Test {
 TEST_F(BtreeTest, SimpleKVMemTest) { this->execute(); }
 
 // TODO: combine the SimpleKVMem/SimpleKVSSD/VarKVSSD in one class
-struct SSDBtreeTest : public ::testing::Test {
+class SSDBtreeTest : public ::testing::Test {
+public:
+    SSDBtreeTest() = default;
+    SSDBtreeTest(const SSDBtreeTest&) = delete;
+    SSDBtreeTest& operator=(const SSDBtreeTest&) = delete;
+    SSDBtreeTest(SSDBtreeTest&&) noexcept = delete;
+    SSDBtreeTest& operator=(SSDBtreeTest&&) noexcept = delete;
+    virtual ~SSDBtreeTest() override = default;
+
+protected:
+    virtual void SetUp() override{};
+    virtual void TearDown() override{};
+
+private:
     std::unique_ptr< G_SimpleKV_SSD > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
     std::condition_variable m_cv;
-    bool is_complete = false;
+    bool is_complete{false};
 
     void join() {
-        std::unique_lock< std::mutex > lk(m_mtx);
+        std::unique_lock< std::mutex > lk{m_mtx};
         m_cv.wait(lk, [this] { return is_complete; });
     }
 
-    void init_done_cb(std::error_condition err, const homeds::out_params& params1) {
+    void init_done_cb(const std::error_condition err, const homeds::out_params& params1) {
         loadgen->initParam(parameters); // internally inits mapping
         LOGINFO("Regression Started");
         loadgen->regression(true, false, false, false);
-        is_complete = true;
+        {
+            std::unique_lock< std::mutex > lk{m_mtx};
+            is_complete = true;
+        }
         m_cv.notify_one();
     }
 
+protected:
     void execute() {
         loadgen = std::make_unique< G_SimpleKV_SSD >(parameters.NT); // starts iomgr
         di.init(loadgen->get_executor(),
@@ -131,26 +174,43 @@ struct SSDBtreeTest : public ::testing::Test {
 
 TEST_F(SSDBtreeTest, SimpleKVSSDTest) { this->execute(); }
 
-struct SSDBtreeVarKVTest : public ::testing::Test {
+class SSDBtreeVarKVTest : public ::testing::Test {
+public:
+    SSDBtreeVarKVTest() = default;
+    SSDBtreeVarKVTest(const SSDBtreeVarKVTest&) = delete;
+    SSDBtreeVarKVTest& operator=(const SSDBtreeVarKVTest&) = delete;
+    SSDBtreeVarKVTest(SSDBtreeVarKVTest&&) noexcept = delete;
+    SSDBtreeVarKVTest& operator=(SSDBtreeVarKVTest&&) noexcept = delete;
+    virtual ~SSDBtreeVarKVTest() override = default;
+
+protected:
+    virtual void SetUp() override{};
+    virtual void TearDown() override{};
+
+private:
     std::unique_ptr< G_VarKV_SSD > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
     std::condition_variable m_cv;
-    bool is_complete = false;
+    bool is_complete{false};
 
     void join() {
-        std::unique_lock< std::mutex > lk(m_mtx);
+        std::unique_lock< std::mutex > lk{m_mtx};
         m_cv.wait(lk, [this] { return is_complete; });
     }
 
-    void init_done_cb(std::error_condition err, const homeds::out_params& params1) {
+    void init_done_cb(const std::error_condition err, const homeds::out_params& params1) {
         loadgen->initParam(parameters); // internally inits mapping
         LOGINFO("Regression Started");
         loadgen->regression(true, false, false, false);
-        is_complete = true;
+        {
+            std::unique_lock< std::mutex > lk{m_mtx};
+            is_complete = true;
+        }
         m_cv.notify_one();
     }
 
+protected:
     void execute() {
         loadgen = std::make_unique< G_VarKV_SSD >(parameters.NT); // starts iomgr
         di.init(loadgen->get_executor(),
@@ -162,27 +222,44 @@ struct SSDBtreeVarKVTest : public ::testing::Test {
 
 TEST_F(SSDBtreeVarKVTest, VarKVSSDTest) { this->execute(); }
 
-struct MapTest : public ::testing::Test {
+class MapTest : public ::testing::Test {
+public:
+    MapTest() = default;
+    MapTest(const MapTest&) = delete;
+    MapTest& operator=(const MapTest&) = delete;
+    MapTest(MapTest&&) noexcept = delete;
+    MapTest& operator=(MapTest&&) noexcept = delete;
+    virtual ~MapTest() override = default;
+
+protected:
+    virtual void SetUp() override{};
+    virtual void TearDown() override{};
+
+private:
     DiskInitializer< IOMgrExecutor > di;
     std::unique_ptr< G_MapKV_SSD > loadgen;
     std::mutex m_mtx;
     std::condition_variable m_cv;
-    bool is_complete = false;
+    bool is_complete{false};
 
     void join() {
-        std::unique_lock< std::mutex > lk(m_mtx);
+        std::unique_lock< std::mutex > lk{m_mtx};
         m_cv.wait(lk, [this] { return is_complete; });
     }
 
-    void init_done_cb(std::error_condition err, const homeds::out_params& params1) {
+    void init_done_cb(const std::error_condition err, const homeds::out_params& params1) {
         loadgen->initParam(parameters); // internally inits mapping
         loadgen->specific_tests(SPECIFIC_TEST::MAP);
         LOGINFO("Regression Started");
         loadgen->regression(true, false, true, true);
-        is_complete = true;
+        {
+            std::unique_lock< std::mutex > lk{m_mtx};
+            is_complete = true;
+        }
         m_cv.notify_one();
     }
 
+protected:
     void execute() {
         loadgen = std::make_unique< G_MapKV_SSD >(parameters.NT); // starts iomgr
         di.init(loadgen->get_executor(),
@@ -194,42 +271,59 @@ struct MapTest : public ::testing::Test {
 
 TEST_F(MapTest, MapSSDTest) { this->execute(); }
 
-struct FileTest : public ::testing::Test {
+class FileTest : public ::testing::Test {
+public:
+    FileTest() = default;
+    FileTest(const FileTest&) = delete;
+    FileTest& operator=(const FileTest&) = delete;
+    FileTest(FileTest&&) noexcept = delete;
+    FileTest& operator=(FileTest&&) noexcept = delete;
+    virtual ~FileTest() override = default;
+
+protected:
+    virtual void SetUp() override{};
+    virtual void TearDown() override{};
+
+private:
     std::unique_ptr< G_FileKV > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
     std::condition_variable m_cv;
-    bool is_complete = false;
+    bool is_complete{false};
 
     void join() {
-        std::unique_lock< std::mutex > lk(m_mtx);
+        std::unique_lock< std::mutex > lk{m_mtx};
         m_cv.wait(lk, [this] { return is_complete; });
     }
 
-    void init_done_cb(std::error_condition err, const homeds::out_params& params1) {
+    void init_done_cb(const std::error_condition err, const homeds::out_params& params1) {
         loadgen->specific_tests(SPECIFIC_TEST::MAP);
         LOGINFO("Regression Started");
-        size_t size = 0;
-        for (uint32_t i = 0; i < parameters.file_names.size(); ++i) {
-            auto fd = open(parameters.file_names[i].c_str(), O_RDWR);
+        size_t size{0};
+        for (size_t i{0}; i < parameters.file_names.size(); ++i) {
+            const int fd{::open(parameters.file_names[i].c_str(), O_RDWR)};
             struct stat buf;
-            uint64_t devsize = 0;
-            if (fstat(fd, &buf) >= 0) {
+            uint64_t devsize{0};
+            if (::fstat(fd, &buf) >= 0) {
                 devsize = buf.st_size;
             } else {
-                ioctl(fd, BLKGETSIZE64, &devsize);
+                ::ioctl(fd, BLKGETSIZE64, &devsize);
             }
             assert(devsize > 0);
-            devsize = devsize - (devsize % MAX_SEGMENT_SIZE);
+            devsize = devsize - (devsize % FileStoreSpec::MAX_SEGMENT_SIZE);
             size += devsize;
         }
-        parameters.NK = size / BLK_SIZE;
+        parameters.NK = size / BlkValue::BLK_SIZE;
         loadgen->initParam(parameters); // internally inits mapping
         loadgen->regression(true, false, true, true);
-        is_complete = true;
+        {
+            std::unique_lock< std::mutex > lk{m_mtx};
+            is_complete = true;
+        }
         m_cv.notify_one();
     }
 
+protected:
     void execute() {
         loadgen = std::make_unique< G_FileKV >(parameters.NT); // starts iomgr
         di.init(loadgen->get_executor(),
@@ -241,26 +335,43 @@ struct FileTest : public ::testing::Test {
 
 TEST_F(FileTest, FileTest) { this->execute(); }
 
-struct VDevTest_RW : public ::testing::Test {
+class VDevTest_RW : public ::testing::Test {
+public:
+    VDevTest_RW() = default;
+    VDevTest_RW(const VDevTest_RW&) = delete;
+    VDevTest_RW& operator=(const VDevTest_RW&) = delete;
+    VDevTest_RW(VDevTest_RW&&) noexcept = delete;
+    VDevTest_RW& operator=(VDevTest_RW&&) noexcept = delete;
+    virtual ~VDevTest_RW() override = default;
+
+protected:
+    virtual void SetUp() override{};
+    virtual void TearDown() override{};
+
+private:
     std::unique_ptr< G_VDev_Test_RW > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
     std::condition_variable m_cv;
-    bool is_complete = false;
+    bool is_complete{false};
 
     void join() {
-        std::unique_lock< std::mutex > lk(m_mtx);
+        std::unique_lock< std::mutex > lk{m_mtx};
         m_cv.wait(lk, [this] { return is_complete; });
     }
 
-    void init_done_cb(std::error_condition err, const homeds::out_params& params1) {
+    void init_done_cb(const std::error_condition err, const homeds::out_params& params1) {
         loadgen->initParam(parameters);
         LOGINFO("Regression Started");
         loadgen->regression(true, false, false, false);
-        is_complete = true;
+        {
+            std::unique_lock< std::mutex > lk{m_mtx};
+            is_complete = true;
+        }
         m_cv.notify_one();
     }
 
+protected:
     void execute() {
         // disable verfication for vdev test
         parameters.NT = 1; // vdev APIs are not thread-safe;
@@ -274,26 +385,43 @@ struct VDevTest_RW : public ::testing::Test {
 
 TEST_F(VDevTest_RW, VDevTest_RW) { this->execute(); }
 
-struct VDevTest_PRW : public ::testing::Test {
+class VDevTest_PRW : public ::testing::Test {
+public:
+    VDevTest_PRW() = default;
+    VDevTest_PRW(const VDevTest_PRW&) = delete;
+    VDevTest_PRW& operator=(const VDevTest_PRW&) = delete;
+    VDevTest_PRW(VDevTest_PRW&&) noexcept = delete;
+    VDevTest_PRW& operator=(VDevTest_PRW&&) noexcept = delete;
+    virtual ~VDevTest_PRW() override = default;
+
+protected:
+    virtual void SetUp() override{};
+    virtual void TearDown() override{};
+
+private:
     std::unique_ptr< G_VDev_Test_PRW > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
     std::condition_variable m_cv;
-    bool is_complete = false;
+    bool is_complete{false};
 
     void join() {
-        std::unique_lock< std::mutex > lk(m_mtx);
+        std::unique_lock< std::mutex > lk{m_mtx};
         m_cv.wait(lk, [this] { return is_complete; });
     }
 
-    void init_done_cb(std::error_condition err, const homeds::out_params& params1) {
+    void init_done_cb(const std::error_condition err, const homeds::out_params& params1) {
         loadgen->initParam(parameters);
         LOGINFO("Regression Started");
         loadgen->regression(true, false, false, false);
-        is_complete = true;
+        {
+            std::unique_lock< std::mutex > lk{m_mtx};
+            is_complete = true;
+        }
         m_cv.notify_one();
     }
 
+protected:
     void execute() {
         // disable verfication for vdev test
         parameters.NT = 1; // vdev APIs are not thread-safe;
@@ -307,9 +435,23 @@ struct VDevTest_PRW : public ::testing::Test {
 
 TEST_F(VDevTest_PRW, VDevTest_PRW) { this->execute(); }
 
-struct CacheTest : public ::testing::Test {
+class CacheTest : public ::testing::Test {
+public:
+    CacheTest() = default;
+    CacheTest(const CacheTest&) = delete;
+    CacheTest& operator=(const CacheTest&) = delete;
+    CacheTest(CacheTest&&) noexcept = delete;
+    CacheTest& operator=(CacheTest&&) noexcept = delete;
+    virtual ~CacheTest() override = default;
+
+protected:
+    virtual void SetUp() override{};
+    virtual void TearDown() override{};
+
+private:
     std::unique_ptr< G_CacheKV > loadgen;
 
+protected:
     void execute() {
         loadgen = std::make_unique< G_CacheKV >(parameters.NT);
         loadgen->initParam(parameters);
@@ -321,15 +463,26 @@ struct CacheTest : public ::testing::Test {
 TEST_F(CacheTest, CacheMemTest) { this->execute(); }
 
 class VolumeLoadTest : public ::testing::Test {
+public:
+    VolumeLoadTest() = default;
+    VolumeLoadTest(const VolumeLoadTest&) = delete;
+    VolumeLoadTest& operator=(const VolumeLoadTest&) = delete;
+    VolumeLoadTest(VolumeLoadTest&&) noexcept = delete;
+    VolumeLoadTest& operator=(VolumeLoadTest&&) noexcept = delete;
+    virtual ~VolumeLoadTest() override = default;
+
+protected:
+    virtual void SetUp() override{};
+    virtual void TearDown() override{};
+
 private:
     std::unique_ptr< G_Volume_Test > m_loadgen;
     VolumeManager< IOMgrExecutor >* m_vol_mgr = nullptr;
     std::mutex m_mtx;
     std::condition_variable m_cv;
-    bool m_is_complete = false;
+    bool m_is_complete{false};
 
-private:
-    void init_done_cb(std::error_condition err) {
+    void init_done_cb(const std::error_condition err) {
         // internally call VolumeStoreSpec::init_store
         // Need to set NK so that we can generate lba no larger than max vol size;
         parameters.NK = m_vol_mgr->max_vol_blks();
@@ -337,16 +490,19 @@ private:
         LOGINFO("Starting I/O ...");
         m_loadgen->regression(true, false, false, false);
         LOGINFO("I/O Completed . ");
-        m_is_complete = true;
+        {
+            std::unique_lock< std::mutex > lk{m_mtx};
+            m_is_complete = true;
+        }
         m_cv.notify_one();
     }
 
     void join() {
-        std::unique_lock< std::mutex > lk(m_mtx);
+        std::unique_lock< std::mutex > lk{m_mtx};
         m_cv.wait(lk, [this] { return m_is_complete; });
     }
 
-public:
+protected:
     void execute() {
         // start iomgr
         // volume store handles verification by itself;
@@ -354,7 +510,7 @@ public:
 
         m_vol_mgr = VolumeManager< IOMgrExecutor >::instance();
 
-        uint64_t num_vols = SDS_OPTIONS["num_vols"].as< uint64_t >();
+        const uint64_t num_vols{SDS_OPTIONS["num_vols"].as< uint64_t >()};
         m_vol_mgr->set_max_vols(num_vols);
 
         // start vol manager which creates a bunch of volumes;
@@ -376,26 +532,43 @@ public:
 
 TEST_F(VolumeLoadTest, VolumeTest) { this->execute(); }
 
-struct LogStoreLoadTest : public ::testing::Test {
+class LogStoreLoadTest : public ::testing::Test {
+public:
+    LogStoreLoadTest() = default;
+    LogStoreLoadTest(const LogStoreLoadTest&) = delete;
+    LogStoreLoadTest& operator=(const LogStoreLoadTest&) = delete;
+    LogStoreLoadTest(LogStoreLoadTest&&) noexcept = delete;
+    LogStoreLoadTest& operator=(LogStoreLoadTest&&) noexcept = delete;
+    virtual ~LogStoreLoadTest() override = default;
+
+protected:
+    virtual void SetUp() override{};
+    virtual void TearDown() override{};
+
+private:
     std::unique_ptr< G_LogStore_Test > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
     std::condition_variable m_cv;
-    bool is_complete = false;
+    bool is_complete{false};
 
     void join() {
-        std::unique_lock< std::mutex > lk(m_mtx);
+        std::unique_lock< std::mutex > lk{m_mtx};
         m_cv.wait(lk, [this] { return is_complete; });
     }
 
-    void init_done_cb(std::error_condition err, const homeds::out_params& params1) {
+    void init_done_cb(const std::error_condition err, const homeds::out_params& params1) {
         loadgen->initParam(parameters);
         LOGINFO("Regression Started");
         loadgen->regression(true, false, false, false);
-        is_complete = true;
+        {
+            std::unique_lock< std::mutex > lk{m_mtx};
+            is_complete = true;
+        }
         m_cv.notify_one();
     }
 
+protected:
     void execute() {
         // disable verification because it is async write, similar as volume test load;
         // verification will be done by logstore spec;
@@ -478,7 +651,6 @@ int main(int argc, char* argv[]) {
     parameters.PD += parameters.PU;
     parameters.PRU += parameters.PD;
     parameters.PRQ = 100;
-    srand(time(0));
 #ifndef DEBUG
     same_value_gen = true;
 #endif
@@ -493,5 +665,6 @@ int main(int argc, char* argv[]) {
     assert(parameters.WARM_UP_KEYS <=
            parameters.NK); // this is required as we set MAX_KEYS in key spec as per value of NK
 
-    return RUN_ALL_TESTS();
+    const int result{RUN_ALL_TESTS()};
+    return result;
 }

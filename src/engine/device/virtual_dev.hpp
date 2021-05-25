@@ -16,6 +16,7 @@
 #include <mutex>
 #include <string>
 #include <system_error>
+#include <type_traits>
 #include <vector>
 
 #include <boost/range/irange.hpp>
@@ -77,8 +78,6 @@ typedef std::function< void(const boost::intrusive_ptr< virtualdev_req >& req) >
 typedef std::function< void(bool success) > vdev_format_cb_t;
 typedef std::function< void(void) > vdev_high_watermark_cb_t;
 
-#define to_vdev_req(req) boost::static_pointer_cast< virtualdev_req >(req)
-
 struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     uint64_t request_id = 0;
     uint64_t version;
@@ -106,6 +105,13 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
 
     void inc_ref() { intrusive_ptr_add_ref(this); }
     void dec_ref() { intrusive_ptr_release(this); }
+
+    template < typename RequestType,
+               typename =
+                   std::enable_if_t < std::is_base_of_v< virtualdev_req, std::decay_t<typename RequestType::element_type> > > >
+    static auto to_vdev_req(RequestType& req) {
+        return boost::static_pointer_cast< virtualdev_req >(req);
+    }
 
     // static boost::intrusive_ptr< virtualdev_req > make_request() {
     //    return boost::intrusive_ptr< virtualdev_req >(sisl::ObjectAllocator< virtualdev_req >::make_object());
@@ -612,7 +618,7 @@ public:
     }
 
     void format(const vdev_format_cb_t& cb) {
-        boost::intrusive_ptr< virtualdev_req > req = sisl::ObjectAllocator< virtualdev_req >::make_object();
+        boost::intrusive_ptr< virtualdev_req > req{sisl::ObjectAllocator< virtualdev_req >::make_object()};
         req->outstanding_cb = get_num_chunks() * (get_nmirrors() + 1);
         req->format = true;
         req->format_cb = cb;
@@ -1034,7 +1040,7 @@ public:
             return status;
         } catch (const std::exception& e) {
             LOGERROR("exception happened {}", e.what());
-            assert(0);
+            assert(false);
             return BlkAllocStatus::FAILED;
         }
     }

@@ -20,7 +20,6 @@
 #include <utility/atomic_counter.hpp>
 
 #include "engine/cache/cache.h"
-#include "engine/cache/cache.cpp" // this should be ipp or h since it is templates
 #include "engine/common/error.h"
 #include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_flip.hpp"
@@ -46,6 +45,13 @@ VENUM(BlkStoreCacheType, uint8_t, PASS_THRU = 0, WRITEBACK_CACHE = 1, WRITETHRU_
 
 class BlkStoreConfig {
 public:
+    BlkStoreConfig() = default;
+    BlkStoreConfig(const BlkStoreConfig&) = delete;
+    BlkStoreConfig& operator=(const BlkStoreConfig&) = delete;
+    BlkStoreConfig(BlkStoreConfig&&) noexcept = delete;
+    BlkStoreConfig& operator=(BlkStoreConfig&&) noexcept = delete;
+    ~BlkStoreConfig() = default;
+
     /* Total size of BlkStore inital, it could grow based on demand. */
     uint64_t m_initial_size;
 
@@ -62,6 +68,11 @@ struct bufferInfo {
     uint8_t* ptr;
     bufferInfo(const uint32_t offset = 0, const uint32_t size = 0, uint8_t* const ptr = nullptr) :
             offset{offset}, size{size}, ptr{ptr} {};
+    bufferInfo(const bufferInfo&) = default;
+    bufferInfo& operator=(const bufferInfo&) = default;
+    bufferInfo(bufferInfo&&) noexcept = default;
+    bufferInfo& operator=(bufferInfo&&) noexcept = default;
+    ~bufferInfo() = default;
 };
 
 template < typename Buffer = BlkBuffer >
@@ -100,9 +111,9 @@ public:
             sisl::ObjectAllocator< blkstore_req< Buffer > >::make_object());
     }
 
-    bool is_blk_from_cache(uint32_t offset) {
-        for (uint32_t i = 0; i < missing_pieces.size(); ++i) {
-            if (offset >= missing_pieces[i].offset && offset < missing_pieces[i].offset + size) { return true; }
+    bool is_blk_from_cache(const uint32_t offset) const {
+        for (const auto& missing_piece : missing_pieces) {
+            if ((offset >= missing_piece.offset) && (offset < missing_piece.offset + size)) { return true; }
         }
         return false;
     }
@@ -163,10 +174,11 @@ public:
 template < typename BAllocator, typename Buffer = BlkBuffer >
 class BlkStore {
 public:
+    typedef Cache< BlkId, CacheBuffer< BlkId > > CacheType;
     typedef std::function< void(boost::intrusive_ptr< blkstore_req< Buffer > > req) > comp_callback;
 
     BlkStore(DeviceManager* const mgr,           // Device manager instance
-             Cache< BlkId >* const cache,        // Cache Instance
+             CacheType* const cache,             // Cache Instance
              const uint64_t size,                // Size of the blk store device
              const BlkStoreCacheType cache_type, // Type of cache, writeback, writethru, none
              const uint32_t mirrors,             // Number of mirrors
@@ -195,7 +207,7 @@ public:
             m_metrics{name} {}
 
     BlkStore(DeviceManager* const mgr,           // Device manager instance
-             Cache< BlkId >* const cache,        // Cache Instance
+             CacheType* const cache,             // Cache Instance
              vdev_info_block* const vb,          // Load vdev from this vdev_info_block
              const BlkStoreCacheType cache_type, // Type of cache, writeback, writethru, none
              const uint32_t page_size,           // Block device page size
@@ -336,24 +348,23 @@ public:
 
     boost::intrusive_ptr< Buffer > init_blk_cached(const BlkId& blkid) {
         // Create an object for the buffer
-        auto buf = Buffer::make_object();
-        buf->set_key(blkid);
+        auto bbuf{boost::intrusive_ptr< Buffer >{Buffer::make_object()}};
+        bbuf->set_key(blkid);
 
         // Create a new block of memory for the blocks requested and set the memvec pointer to that
-        auto size = blkid.data_size(m_pagesz);
-        uint8_t* ptr = hs_utils::iobuf_alloc(size);
-        boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector(), true);
+        const auto size{blkid.data_size(m_pagesz)};
+        uint8_t* const ptr{hs_utils::iobuf_alloc(size)};
+        boost::intrusive_ptr< homeds::MemVector > mvec{new homeds::MemVector{}, true};
         mvec->set(ptr, size, 0);
-        buf->set_memvec(mvec, 0, size);
+        bbuf->set_memvec(mvec, 0, size);
 
         // Insert this buffer to the cache.
-        auto ibuf = boost::intrusive_ptr< Buffer >(buf);
-        boost::intrusive_ptr< Buffer > out_bbuf;
-        bool inserted = m_cache->insert(blkid, boost::static_pointer_cast< CacheBuffer< BlkId > >(ibuf),
-                                        (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&out_bbuf);
+        auto ibuf{boost::static_pointer_cast< CacheBuffer< BlkId > >(bbuf)};
+        boost::intrusive_ptr< CacheBuffer< BlkId > > out_bbuf;
+        const bool inserted{m_cache->insert(blkid, ibuf, &out_bbuf)};
         assert(inserted);
 
-        return ibuf;
+        return bbuf;
     }
 
     void cache_buf_erase_cb(boost::intrusive_ptr< Buffer > erased_buf, const BlkId bid) {
@@ -367,9 +378,6 @@ public:
      */
     void free_blk(const BlkId& bid, boost::optional< uint32_t > size_offset, const boost::optional< uint32_t > size,
                   const bool cache_only = false) {
-
-        boost::intrusive_ptr< Buffer > erased_buf(nullptr);
-
         assert(bid.data_size(m_pagesz) >= (size_offset.get_value_or(0) + size.get_value_or(0)));
 
         uint32_t free_size;
@@ -392,8 +400,8 @@ public:
             return;
         } else {
 #endif
-        m_cache->erase(bid, size_offset.get_value_or(0), free_size,
-                       (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&erased_buf);
+        boost::intrusive_ptr< CacheBuffer< BlkId > > erased_buf{};
+        m_cache->erase(bid, size_offset.get_value_or(0), free_size, &erased_buf);
         if (cache_only) { return; }
 
         const uint32_t offset{size_offset.get_value_or(0)};
@@ -432,10 +440,9 @@ public:
 
         if (in_cache) {
             /* TODO: add try and catch exception */
-            auto buf = Buffer::make_object();
-            buf->set_key(bid);
-            buf->set_memvec(mvec, data_offset, bid.data_size(m_pagesz));
-            auto ibuf = boost::intrusive_ptr< Buffer >(buf);
+            auto bbuf{boost::intrusive_ptr< Buffer >{Buffer::make_object()}};
+            bbuf->set_key(bid);
+            bbuf->set_memvec(mvec, data_offset, bid.data_size(m_pagesz));
             req->bid = bid;
 
             /*
@@ -446,20 +453,19 @@ public:
             uint8_t* ptr;
 
             // Insert this buffer to the cache.
-            boost::intrusive_ptr< Buffer > out_bbuf;
-
-            bool inserted = m_cache->insert(bid, boost::static_pointer_cast< CacheBuffer< BlkId > >(ibuf),
-                                            (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&out_bbuf);
+            auto ibuf{boost::static_pointer_cast< CacheBuffer< BlkId > >(bbuf)};
+            boost::intrusive_ptr< CacheBuffer< BlkId > > obuf;
+            const bool inserted{m_cache->insert(bid, ibuf, &obuf)};
             /* While writing, we should not insert a blkid which already exist in the cache */
-            assert(ibuf.get() == out_bbuf.get());
+            assert(ibuf.get() == obuf.get());
             assert(inserted);
             HISTOGRAM_OBSERVE(m_metrics, blkstore_cache_write_latency, get_elapsed_time_us(cache_start_time));
 
-            req->bbuf = ibuf;
+            req->bbuf = std::move(bbuf);
         }
 
         // Now write data to the device
-        m_vdev.write(bid, *(mvec.get()), to_vdev_req(req), data_offset);
+        m_vdev.write(bid, *(mvec.get()), virtualdev_req::to_vdev_req(req), data_offset);
         if (req->isSyncCall) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency,
                               get_elapsed_time_us(req->blkstore_op_start_time));
@@ -471,7 +477,7 @@ public:
                const boost::intrusive_ptr< blkstore_req< Buffer > >& req) {
         // Now write data to the device
         req->start_time();
-        m_vdev.write(bid, const_cast< iovec* >(iovecs.data()), iovecs.size(), to_vdev_req(req));
+        m_vdev.write(bid, const_cast< iovec* >(iovecs.data()), iovecs.size(), virtualdev_req::to_vdev_req(req));
         if (req->isSyncCall) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency,
                               get_elapsed_time_us(req->blkstore_op_start_time));
@@ -492,46 +498,54 @@ public:
 
         // Check if the entry exists in the cache.
         boost::intrusive_ptr< Buffer > bbuf;
-        bool cache_found = m_cache->get(bid, (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&bbuf);
-
-        if (!cache_found && cache_only) { return nullptr; }
-
-        if (!cache_found
+        boost::intrusive_ptr< CacheBuffer< BlkId > > cache_buf;
+        const bool cache_found{m_cache->get(bid, &cache_buf)};
+        if (cache_found
 #ifdef _PRERELEASE
-            || (cache_found && (homestore_flip->test_flip("cache_insert_race")))
+            && !(homestore_flip->test_flip("cache_insert_race"))
 #endif
         ) {
-            // Not found in cache, create a new block buf and prepare it for insert to dev and cache.
-            bbuf = Buffer::make_object();
+#ifdef NDEBUG
+            bbuf = boost::intrusive_ptr< Buffer >(reinterpret_cast< Buffer* >(cache_buf.get()));
+#else
+            bbuf = boost::dynamic_pointer_cast< Buffer >(cache_buf);
+#endif
+        } else {
+            if (cache_only) { return nullptr; }
 
+            // Not found in cache, create a new block buf and prepare it for insert to dev and cache.
             /* set the key */
+            bbuf.reset(Buffer::make_object());
             bbuf->set_key(bid);
 
             /* set the memvec */
-            boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
+            boost::intrusive_ptr< homeds::MemVector > mvec{new homeds::MemVector{}};
             bbuf->set_memvec(mvec, 0, 0);
 
             /* insert it into cache */
-            boost::intrusive_ptr< Buffer > new_bbuf;
-            bool inserted = m_cache->insert(bbuf->get_key(), boost::static_pointer_cast< CacheBuffer< BlkId > >(bbuf),
-                                            (boost::intrusive_ptr< CacheBuffer< BlkId > >*)&new_bbuf);
+            auto ibuf{boost::static_pointer_cast< CacheBuffer< BlkId > >(bbuf)};
+            boost::intrusive_ptr< CacheBuffer< BlkId > > new_bbuf;
+            const bool inserted{m_cache->insert(bbuf->get_key(), ibuf, &new_bbuf)};
             if (!inserted) {
                 /* Between get and insert, other thread tried the same thing and
                  * inserted into the cache. Lets use that entry in cache and
                  * free up the memory
                  */
-                bbuf = new_bbuf;
+#ifdef NDEBUG
+                bbuf = boost::intrusive_ptr< Buffer >(reinterpret_cast< Buffer* >(new_bbuf.get()));
+#else
+                bbuf = boost::dynamic_pointer_cast< Buffer >(new_bbuf);
+#endif
             }
         }
-
-        req->bbuf = bbuf;
+        req->bbuf = std::move(bbuf);
         req->is_read = true;
 
         /* first is offset and second is size in a pair */
         std::vector< std::pair< uint32_t, uint32_t > > missing_mp;
         assert(bid.data_size(m_pagesz) >= (offset + size));
-        bool ret = m_cache->insert_missing_pieces(bbuf, offset, size, missing_mp);
-        BlkId read_blkid(bid.get_blkid_at(offset, size, m_pagesz));
+        auto obuf{boost::static_pointer_cast< CacheBuffer< BlkId > >(req->bbuf)};
+        const bool ret{m_cache->insert_missing_pieces(obuf, offset, size, missing_mp)};
 
         if (missing_mp.size()) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_partial_cache_distribution, missing_mp.size());
@@ -541,33 +555,32 @@ public:
 
         uint8_t* ptr;
         req->blkstore_ref_cnt.increment(1);
-        for (size_t i{0}; i < missing_mp.size(); ++i) {
+        for (auto& missing : missing_mp) {
             // Create a new block of memory for the missing piece
-            uint8_t* ptr = hs_utils::iobuf_alloc(missing_mp[i].second);
+            uint8_t* const ptr{hs_utils::iobuf_alloc(missing.second)};
             HS_ASSERT_NOTNULL(RELEASE, ptr, "ptr is null");
 
-            int64_t sz = (int64_t)missing_mp[i].second;
-            COUNTER_INCREMENT(m_metrics, blkstore_cache_miss_size, sz);
+            COUNTER_INCREMENT(m_metrics, blkstore_cache_miss_size, missing.second);
 
             // Read the missing piece from the device
-            BlkId tmp_bid(bid.get_blkid_at(missing_mp[i].first, missing_mp[i].second, m_pagesz));
+            const BlkId tmp_bid{bid.get_blkid_at(missing.first, missing.second, m_pagesz)};
 
             req->blkstore_ref_cnt.increment(1);
-            homeds::MemPiece mp(ptr, missing_mp[i].second, 0);
+            homeds::MemPiece mp{ptr, missing.second, 0};
 
             if (!req->isSyncCall) {
-                bufferInfo missing_piece(missing_mp[i].first, missing_mp[i].second, ptr);
+                bufferInfo missing_piece{missing.first, missing.second, ptr};
                 /* insert it into cache after missing_piece is read */
-                req->missing_pieces.push_back(missing_piece);
+                req->missing_pieces.push_back(std::move(missing_piece));
             }
 
             /* This assert won't be valid for volume reads if user is doing overlap writes/reads because we set the blks
              * allocated only after journal write is completed.
              */
             HS_ASSERT_CMP(DEBUG, m_vdev.is_blk_alloced(tmp_bid), ==, true, "blk is not allocted");
-            m_vdev.read(tmp_bid, mp, to_vdev_req(req));
+            m_vdev.read(tmp_bid, mp, virtualdev_req::to_vdev_req(req));
             if (req->isSyncCall) {
-                bool inserted = bbuf->update_missing_piece(missing_mp[i].first, missing_mp[i].second, ptr);
+                const bool inserted{req->bbuf->update_missing_piece(missing.first, missing.second, ptr)};
                 if (!inserted) {
                     /* someone else has inserted it */
                     hs_utils::iobuf_free(ptr);
@@ -579,12 +592,12 @@ public:
         assert(req->err == no_error);
         if (!req->isSyncCall) {
             /* issue the completion */
-            process_completions(to_vdev_req(req));
+            process_completions(virtualdev_req::to_vdev_req(req));
         } else {
             req->blkstore_ref_cnt.decrement(1);
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_read_latency, get_elapsed_time_us(req->blkstore_op_start_time));
         }
-        return bbuf;
+        return req->bbuf;
     }
 
     // Read the data for given blk id and size. This method stores the read in the iovecs starting at the
@@ -606,13 +619,13 @@ public:
         HS_ASSERT_CMP(DEBUG, m_vdev.is_blk_alloced(const_cast< BlkId& >(bid)), ==, true, "blk is not allocted");
 
         req->blkstore_ref_cnt.increment(1);
-        m_vdev.read(bid, iovecs, size, to_vdev_req(req));
+        m_vdev.read(bid, iovecs, size, virtualdev_req::to_vdev_req(req));
         if (req->isSyncCall) { req->blkstore_ref_cnt.decrement(1); }
 
         assert(req->err == no_error);
         if (!req->isSyncCall) {
             /* issue the completion */
-            process_completions(to_vdev_req(req));
+            process_completions(virtualdev_req::to_vdev_req(req));
         } else {
             req->blkstore_ref_cnt.decrement(1);
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_read_latency, get_elapsed_time_us(req->blkstore_op_start_time));
@@ -622,22 +635,21 @@ public:
     std::vector< boost::intrusive_ptr< BlkBuffer > > read_nmirror(BlkId& bid, const uint32_t nmirrors) {
         std::vector< boost::intrusive_ptr< BlkBuffer > > buf_list;
         std::vector< boost::intrusive_ptr< homeds::MemVector > > mp;
-        uint8_t* mem_ptr = nullptr;
 
         for (uint32_t i{0}; i < (nmirrors + 1); ++i) {
             /* create the pointer */
-            uint8_t* const mem_ptr = hs_utils::iobuf_alloc(bid.data_size(m_pagesz));
+            uint8_t* const mem_ptr{hs_utils::iobuf_alloc(bid.data_size(m_pagesz))};
 
             /* set the memvec */
-            boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
+            boost::intrusive_ptr< homeds::MemVector > mvec{new homeds::MemVector{}};
             mvec->set(mem_ptr, bid.data_size(m_pagesz), 0);
 
             /* create the buffer */
-            auto bbuf = Buffer::make_object();
+            auto bbuf{boost::intrusive_ptr< BlkBuffer >{Buffer::make_object()}};
             bbuf->set_memvec(mvec, 0, bid.data_size(m_pagesz));
 
-            buf_list.push_back(bbuf);
-            mp.push_back(mvec);
+            buf_list.push_back(std::move(bbuf));
+            mp.push_back(std::move(mvec));
         }
         m_vdev.read_nmirror(bid, mp, bid.data_size(m_pagesz), nmirrors);
         return buf_list;
@@ -660,14 +672,12 @@ public:
 
     ssize_t pwrite(const void* const buf, const size_t count, const off_t offset,
                    boost::intrusive_ptr< blkstore_req< Buffer > > req = nullptr) {
-        Clock::time_point blkstore_op_start_time;
+        const Clock::time_point blkstore_op_start_time{Clock::now()};
         if (req) {
             req->start_time();
-        } else {
-            blkstore_op_start_time = Clock::now();
         }
 
-        auto ret = m_vdev.pwrite(buf, count, offset, req);
+        const auto ret{m_vdev.pwrite(buf, count, offset, req)};
         if (!req) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(blkstore_op_start_time));
         }
@@ -675,10 +685,9 @@ public:
     }
 
     ssize_t pread(void* const buf, const size_t count, const off_t offset) {
-        Clock::time_point blkstore_op_start_time;
-        blkstore_op_start_time = Clock::now();
+        const Clock::time_point blkstore_op_start_time{Clock::now()};
 
-        auto ret = m_vdev.pread(buf, count, offset);
+        const auto ret{m_vdev.pread(buf, count, offset)};
 
         HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_read_latency, get_elapsed_time_us(blkstore_op_start_time));
         return ret;
@@ -686,36 +695,32 @@ public:
 
     off_t lseek(const off_t offset, const int whence = SEEK_SET) { return m_vdev.lseek(offset, whence); }
 
-    off_t get_dev_offset(off_t bytes_read) const { return m_vdev.get_dev_offset(bytes_read); }
+    off_t get_dev_offset(const off_t bytes_read) const { return m_vdev.get_dev_offset(bytes_read); }
     off_t seeked_pos() const { return m_vdev.seeked_pos(); }
 
     ssize_t read(void* const buf, const size_t count) {
-        Clock::time_point blkstore_op_start_time;
-        blkstore_op_start_time = Clock::now();
+        const Clock::time_point blkstore_op_start_time{Clock::now()};
 
-        auto ret = m_vdev.read(buf, count);
+        const auto ret{m_vdev.read(buf, count)};
 
         HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_read_latency, get_elapsed_time_us(blkstore_op_start_time));
         return ret;
     }
 
     ssize_t write(const void* const buf, const size_t count) {
-        Clock::time_point blkstore_op_start_time;
-        blkstore_op_start_time = Clock::now();
+        const Clock::time_point blkstore_op_start_time{Clock::now()};
 
-        auto ret = m_vdev.write(buf, count);
+        const auto ret{m_vdev.write(buf, count)};
         HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(blkstore_op_start_time));
         return ret;
     }
 
     ssize_t write(const void* const buf, const size_t count, boost::intrusive_ptr< blkstore_req< Buffer > > req) {
-        Clock::time_point blkstore_op_start_time;
+        const Clock::time_point blkstore_op_start_time{Clock::now()};
         if (req) {
             req->start_time();
-        } else {
-            blkstore_op_start_time = Clock::now();
-        }
-        auto ret = m_vdev.write(buf, count, req);
+        } 
+        const auto ret{m_vdev.write(buf, count, req)};
         if (!req) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(blkstore_op_start_time));
         }
@@ -724,13 +729,11 @@ public:
 
     ssize_t preadv(const struct iovec* const iov, const int iovcnt, const off_t offset,
                    boost::intrusive_ptr< blkstore_req< Buffer > > req = nullptr) {
-        Clock::time_point blkstore_op_start_time;
+        const Clock::time_point blkstore_op_start_time{Clock::now()};
         if (req) {
             req->start_time();
-        } else {
-            blkstore_op_start_time = Clock::now();
-        }
-        auto ret = m_vdev.preadv(iov, iovcnt, offset, req);
+        } 
+        const auto ret{m_vdev.preadv(iov, iovcnt, offset, req)};
         if (!req) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_read_latency, get_elapsed_time_us(blkstore_op_start_time));
         }
@@ -739,13 +742,11 @@ public:
 
     ssize_t pwritev(const struct iovec* const iov, const int iovcnt, const off_t offset,
                     boost::intrusive_ptr< blkstore_req< Buffer > > req = nullptr) {
-        Clock::time_point blkstore_op_start_time;
+        const Clock::time_point blkstore_op_start_time{Clock::now()};
         if (req) {
             req->start_time();
-        } else {
-            blkstore_op_start_time = Clock::now();
         }
-        auto ret = m_vdev.pwritev(iov, iovcnt, offset, req);
+        const auto ret{m_vdev.pwritev(iov, iovcnt, offset, req)};
         if (!req) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(blkstore_op_start_time));
         }
@@ -782,7 +783,7 @@ public:
 
 private:
     uint32_t m_pagesz;
-    Cache< BlkId >* m_cache;
+    CacheType* m_cache;
     BlkStoreCacheType m_cache_type;
     VirtualDev< BAllocator, RoundRobinDeviceSelector > m_vdev;
     comp_callback m_comp_cb;

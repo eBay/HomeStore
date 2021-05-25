@@ -23,10 +23,10 @@ class CacheKey : public BlkId, public KeySpec {
 
     static CacheKey generate_random_key() {
         /* Seed */
-        std::random_device rd{};
+        static thread_local std::random_device rd{};
 
         /* Random number generator */
-        std::default_random_engine generator{rd()};
+        static thread_local std::default_random_engine generator{rd()};
 
         /* Distribution on which to apply the generator */
         std::uniform_int_distribution< blk_cap_t > distribution{0, std::numeric_limits< blk_cap_t >::max()};
@@ -39,10 +39,9 @@ public:
     static CacheKey gen_key(const KeyPattern spec, CacheKey* const ref_key = nullptr) {
         switch (spec) {
         case KeyPattern::SEQUENTIAL: {
-            uint64_t newblkId = 0;
             if (ref_key) {
-                newblkId = (ref_key->get_blk_num() + 1) % std::numeric_limits< blk_cap_t >::max();
-                return CacheKey(newblkId, 1, 0);
+                const blk_cap_t newblkId{(ref_key->get_blk_num() + 1) % std::numeric_limits< blk_cap_t >::max()};
+                return CacheKey{newblkId, 1, 0};
             } else {
                 return generate_random_key();
             }
@@ -55,29 +54,41 @@ public:
 
         default:
             // We do not support other gen spec yet
-            assert(0);
-            return CacheKey(0, 0);
+            assert(false);
+            return CacheKey{0, 0};
         }
     }
 
     explicit CacheKey() : BlkId{0, 0, 0} {}
     explicit CacheKey(const blk_num_t id, const blk_count_t nblks, const chunk_num_t chunk_num = 0) :
             BlkId{id, nblks, chunk_num} {}
-    CacheKey(const CacheKey& key) : BlkId{key} {}
 
-    virtual bool operator==(const KeySpec& other) const override {
-        // this is hokey down casting
+    CacheKey(const CacheKey& key) : BlkId{key} {}
+    CacheKey(CacheKey&& key) noexcept : BlkId{std::move(key)} {}
+    CacheKey& operator=(const CacheKey& rhs) {
+        if (this != &rhs) { *static_cast< BlkId* >(this) = static_cast< const BlkId& >(rhs); }
+        return *this;
+    }
+    CacheKey& operator=(CacheKey&& rhs) noexcept {
+        if (this != &rhs) { *(static_cast< BlkId* >(this)) = std::move(static_cast< BlkId& >(rhs)); }
+        return *this;
+    }
+
+    virtual ~CacheKey() override = default;
+
+    virtual bool operator==(const KeySpec& rhs) const override {
 #ifdef NDEBUG
-        const CacheKey& cache_key{reinterpret_cast< const CacheKey& >(other)};
+        const CacheKey& cache_key{reinterpret_cast< const CacheKey& >(rhs)};
 #else
-        const CacheKey& cache_key{dynamic_cast< const CacheKey& >(other)};
+        const CacheKey& cache_key{dynamic_cast< const CacheKey& >(rhs)};
 #endif
-        return compare(*this, cache_key);
+        return (compare(*this, cache_key) == 0);
     }
 
     BlkId* getBlkId() { return static_cast< BlkId* >(this); }
+    const BlkId* getBlkId() const { return static_cast< const BlkId* >(this); }
 
-    virtual bool is_consecutive(KeySpec& k) override {
+    virtual bool is_consecutive(const KeySpec& k) const override {
         // this is hokey down casting
 #ifdef NDEBUG
         const CacheKey& cache_key{reinterpret_cast< const CacheKey& >(k)};
@@ -90,7 +101,7 @@ public:
             return false;
     }
 
-    int compare(const CacheKey* other) const { return compare(*this, *other); }
+    int compare(const CacheKey* const other) const { return compare(*this, *other); }
 
     static int compare(const CacheKey& one, const CacheKey& two) {
         const BlkId& bid1{static_cast< BlkId >(one)};

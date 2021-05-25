@@ -7,7 +7,7 @@
 #include <cstdint>
 
 #include "homeds/loadgen/loadgen_common.hpp"
-#include <fmt/ostream.h>
+
 #include <farmhash.h>
 
 namespace homeds {
@@ -33,10 +33,19 @@ struct key_hash {
 
 class KeySpec {
 public:
+    KeySpec(const KeySpec&) = default;
+    KeySpec& operator=(const KeySpec&) = default;
+    KeySpec(KeySpec&&) noexcept = default;
+    KeySpec& operator=(KeySpec&&) noexcept = default;
+    virtual ~KeySpec() = default;
+
     static uint64_t MAX_KEYS;
     virtual bool operator==(const KeySpec& rhs) const = 0;
     virtual bool operator!=(const KeySpec& rhs) const { return !(operator==(rhs)); }
-    virtual bool is_consecutive(KeySpec& k) = 0;
+    virtual bool is_consecutive(const KeySpec& k) const = 0;
+
+protected:
+    KeySpec() = default;
 };
 
 uint64_t KeySpec::MAX_KEYS = 0;

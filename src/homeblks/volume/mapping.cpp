@@ -17,7 +17,7 @@ lba_count_t mapping::get_nlbas(const lba_t end_lba, const lba_t start_lba) {
 
 #if 0
 uint64_t mapping::get_blkid_offset(uint64_t lba_offset, uint64_t vol_page_size) {
-	return ((vol_page_size / HomeBlks::instance()->get_data_pagesz()) * lba_offset);
+    return ((vol_page_size / HomeBlks::instance()->get_data_pagesz()) * lba_offset);
 }
 #endif
 
@@ -229,15 +229,15 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
     /* In range update, it can be written paritally. Find the first key in this range which is not updated */
     return ret;
 #if 0
-	vector< pair< MappingKey, MappingValue > > values;
-	uint64_t temp;
-	if (req) {
-		auto temp = req->lastCommited_seqid;
-		req->lastCommited_seqid = req->seqid;
-	}
-	get(req, values);
-	if (req) { req->lastCommited_seqid = temp; }
-	validate_get_response(key.start(), key.get_n_lba(), values, &value, req);
+    vector< pair< MappingKey, MappingValue > > values;
+    uint64_t temp;
+    if (req) {
+        auto temp = req->lastCommited_seqid;
+        req->lastCommited_seqid = req->seqid;
+    }
+    get(req, values);
+    if (req) { req->lastCommited_seqid = temp; }
+    validate_get_response(key.start(), key.get_n_lba(), values, &value, req);
 #endif
 }
 
@@ -265,29 +265,29 @@ bool mapping::verify_tree(bool update_debug_bm) { return m_bt->verify_tree(updat
  */
 bool mapping::fix(const btree_cp_ptr& bcp, const lba_t start_lba, const lba_t end_lba, bool verify) {
 #if 0
-	if (start_lba >= end_lba) {
-		LOGERROR("Wrong input, start_lba: {}, should be smaller than end_lba: {}", start_lba, end_lba);
-		return false;
-	}
+    if (start_lba >= end_lba) {
+        LOGERROR("Wrong input, start_lba: {}, should be smaller than end_lba: {}", start_lba, end_lba);
+        return false;
+    }
 
-	LOGINFO("Fixing btree, start_lba: {}, end_lba: {}", start_lba, end_lba);
-	/* TODO : enable it later */
-	// create a new btree
-	auto btree_cfg = m_bt->get_btree_cfg();
-	auto new_bt = MappingBtreeDeclType::create_btree(btree_cfg);
+    LOGINFO("Fixing btree, start_lba: {}, end_lba: {}", start_lba, end_lba);
+    /* TODO : enable it later */
+    // create a new btree
+    auto btree_cfg = m_bt->get_btree_cfg();
+    auto new_bt = MappingBtreeDeclType::create_btree(btree_cfg);
 
-	m_fix_state = true;
-	m_outstanding_io = 0;
+    m_fix_state = true;
+    m_outstanding_io = 0;
 
-	uint64_t num_kv_recovered = 0;
-	auto start = start_lba, end = std::min(start_lba + lba_query_cnt, end_lba);
-	while (start <= end && end <= end_lba) {
-		// get all the KVs from existing btree;
-		volume_req* vreq = volume_req::make_request();
-		vreq->lba = start;
-		vreq->nlbas = num_lba(end, start);
-		vreq->seqid = INVALID_SEQ_ID;
-		vreq->lastCommited_seqid = INVALID_SEQ_ID;
+    uint64_t num_kv_recovered = 0;
+    auto start = start_lba, end = std::min(start_lba + lba_query_cnt, end_lba);
+    while (start <= end && end <= end_lba) {
+        // get all the KVs from existing btree;
+        volume_req* vreq = volume_req::make_request();
+        vreq->lba = start;
+        vreq->nlbas = num_lba(end, start);
+        vreq->seqid = INVALID_SEQ_ID;
+        vreq->lastCommited_seqid = INVALID_SEQ_ID;
 
         std::vector< std::pair< MappingKey, MappingValue > > kvs;
         auto ret = get(vreq, kvs, false /* fill_gaps */);
@@ -297,40 +297,40 @@ bool mapping::fix(const btree_cp_ptr& bcp, const lba_t start_lba, const lba_t en
             return false;
         }
 
-		// put every KV to new btree we have got from old btree;
-		for (auto& x : kvs) {
-			auto ret = put(nullptr, x.first, x.second, cp_id, new_bt);
-			if (ret != btree_status_t::success) {
-				LOGERROR("failed to put node with k/v: {}/{}", x.first.to_string(), x.second.to_string());
-				return false;
-			}
-			LOGINFO("Successfully inserted K:{}, \n V:{}.", x.first.to_string(), x.second.to_string());
-		}
+        // put every KV to new btree we have got from old btree;
+        for (auto& x : kvs) {
+            auto ret = put(nullptr, x.first, x.second, cp_id, new_bt);
+            if (ret != btree_status_t::success) {
+                LOGERROR("failed to put node with k/v: {}/{}", x.first.to_string(), x.second.to_string());
+                return false;
+            }
+            LOGINFO("Successfully inserted K:{}, \n V:{}.", x.first.to_string(), x.second.to_string());
+        }
 
-		num_kv_recovered += kvs.size();
-		start = end + 1;
-		end = std::min(start + lba_query_cnt, end_lba);
-	}
-	LOGINFO("Successfully recovered num: {} of K,V pairs from corrupted btree.", num_kv_recovered);
+        num_kv_recovered += kvs.size();
+        start = end + 1;
+        end = std::min(start + lba_query_cnt, end_lba);
+    }
+    LOGINFO("Successfully recovered num: {} of K,V pairs from corrupted btree.", num_kv_recovered);
 
-	if (verify) {
-		auto verify_status = verify_fixed_bt(start_lba, end_lba, m_bt, new_bt);
-		if (!verify_status) {
-			delete new_bt;
-			return false;
-		}
-	}
+    if (verify) {
+        auto verify_status = verify_fixed_bt(start_lba, end_lba, m_bt, new_bt);
+        if (!verify_status) {
+            delete new_bt;
+            return false;
+        }
+    }
 
-	auto old_bt = m_bt;
-	m_bt = new_bt;
-	delete old_bt;
+    auto old_bt = m_bt;
+    m_bt = new_bt;
+    delete old_bt;
 
     while (m_outstanding_io != 0) {
         std::this_thread::sleep_for(std::chrono::seconds{2});
     }
 
-	// reset fix state to false
-	m_fix_state = false;
+    // reset fix state to false
+    m_fix_state = false;
 #endif
     return true;
 }
@@ -349,47 +349,47 @@ bool mapping::fix(const btree_cp_ptr& bcp, const lba_t start_lba, const lba_t en
 bool mapping::verify_fixed_bt(const lba_t start_lba, const lba_t end_lba, MappingBtreeDeclType* old_bt,
                               MappingBtreeDeclType* new_bt) {
 #if 0
-	uint64_t num_kv_verified = 0;
-	auto start = start_lba, end = std::min(start_lba + lba_query_cnt, end_lba);
-	while (start <= end_lba) {
-		assert(start <= end);
-		std::vector< std::pair< MappingKey, MappingValue > > kvs_old;
-		std::vector< std::pair< MappingKey, MappingValue > > kvs_new;
+    uint64_t num_kv_verified = 0;
+    auto start = start_lba, end = std::min(start_lba + lba_query_cnt, end_lba);
+    while (start <= end_lba) {
+        assert(start <= end);
+        std::vector< std::pair< MappingKey, MappingValue > > kvs_old;
+        std::vector< std::pair< MappingKey, MappingValue > > kvs_new;
 
-		// now m_bt points to the new btree;
-		auto ret_old = get(nullptr, kvs_old, old_bt);
-		auto ret_new = get(nullptr, kvs_new, new_bt);
+        // now m_bt points to the new btree;
+        auto ret_old = get(nullptr, kvs_old, old_bt);
+        auto ret_new = get(nullptr, kvs_new, new_bt);
 
-		if (ret_old != no_error || ret_new != no_error) {
-			LOGERROR("btree_fix verify failed, reason: get from btree KVs failed.");
-			return false;
-		}
+        if (ret_old != no_error || ret_new != no_error) {
+            LOGERROR("btree_fix verify failed, reason: get from btree KVs failed.");
+            return false;
+        }
 
-		if (kvs_new.size() != kvs_old.size()) {
-			LOGERROR("btree_fix verify failed, reason: mismatch total number of KV old: {} new: {}", kvs_old.size(),
-				kvs_new.size());
+        if (kvs_new.size() != kvs_old.size()) {
+            LOGERROR("btree_fix verify failed, reason: mismatch total number of KV old: {} new: {}", kvs_old.size(),
+                kvs_new.size());
 
-			LOGINFO("Printing KVs for old and new btree tree for lba range: [{}, {}]", start, end);
-			print_kv(kvs_old);
-			print_kv(kvs_new);
-			return false;
-		}
+            LOGINFO("Printing KVs for old and new btree tree for lba range: [{}, {}]", start, end);
+            print_kv(kvs_old);
+            print_kv(kvs_new);
+            return false;
+        }
 
-		for (uint64_t i = 0; i < kvs_old.size(); i++) {
-			if (kvs_old[i].first.to_string().compare(kvs_new[i].first.to_string()) != 0 ||
-				kvs_old[i].second.to_string().compare(kvs_new[i].second.to_string()) != 0) {
-				LOGERROR("btree_fix verify failed, reason: mismatch KV pair old K: {}, V: {}, new K: {}, V: {}",
-					kvs_old[i].first.to_string(), kvs_new[i].first.to_string(), kvs_old[i].second.to_string(),
-					kvs_new[i].second.to_string());
-				return false;
-			}
-		}
-		num_kv_verified += kvs_new.size();
-		start = end + 1;
-		end = std::min(start + lba_query_cnt, end_lba);
-	}
+        for (uint64_t i = 0; i < kvs_old.size(); i++) {
+            if (kvs_old[i].first.to_string().compare(kvs_new[i].first.to_string()) != 0 ||
+                kvs_old[i].second.to_string().compare(kvs_new[i].second.to_string()) != 0) {
+                LOGERROR("btree_fix verify failed, reason: mismatch KV pair old K: {}, V: {}, new K: {}, V: {}",
+                    kvs_old[i].first.to_string(), kvs_new[i].first.to_string(), kvs_old[i].second.to_string(),
+                    kvs_new[i].second.to_string());
+                return false;
+            }
+        }
+        num_kv_verified += kvs_new.size();
+        start = end + 1;
+        end = std::min(start + lba_query_cnt, end_lba);
+    }
 
-	LOGINFO("Successfully verified recovered btree, total KV verified: {}", num_kv_verified);
+    LOGINFO("Successfully verified recovered btree, total KV verified: {}", num_kv_verified);
 #endif
     return true;
 }
@@ -458,7 +458,7 @@ btree_status_t mapping::match_item_cb_get(std::vector< std::pair< MappingKey, Ma
                     fbe_list.push_back(fbe);
                 }
             } else {
-                assert(0);
+                assert(false);
             }
         }
 
@@ -566,8 +566,8 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
 
         /* enable it when snapshot comes */
 #if 0
-		/* Truncate the existing value based on seq ID */
-		e_value->truncate(req);
+        /* Truncate the existing value based on seq ID */
+        e_value->truncate(req);
 #endif
         /* we need to split the existing key/value at the start */
         if (e_key->start() < start_lba) {
@@ -632,25 +632,25 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
                 continue;
             }
 #if 0
-			// check if replace entries dont overlap free entries
-			auto blk_start = curve.get_blkId().get_blk_num() + curve.get_blk_offset();
-			auto blk_end =
-				blk_start + (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * curve.get_nlba() - 1;
-			req->init_fbe_iterator();
-			while (auto fbe = req->get_next_fbe()) {
-				if (fbe->m_blkId.get_chunk_num() != curve.get_blkId().get_chunk_num()) { continue; }
-				auto fblk_start = fbe->m_blkId.get_blk_num() + fbe->m_blk_offset;
-				auto fblk_end = fblk_start + fbe->m_nblks_to_free - 1;
-				if (blk_end < fblk_start || fblk_end < blk_start) {
-				} // non overlapping
-				else {
-					ss << ",replace_kv:";
-					for (auto& ptr : replace_kv) {
-						ss << ptr.first.to_string() << "," << ptr.second.to_string();
-					}
-					HS_SUBMOD_ASSERT(DEBUG, 0, , "vol", m_unique_name, "Error::Put_CB:,{} ", ss.str());
-				}
-			}
+            // check if replace entries dont overlap free entries
+            auto blk_start = curve.get_blkId().get_blk_num() + curve.get_blk_offset();
+            auto blk_end =
+                blk_start + (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * curve.get_nlba() - 1;
+            req->init_fbe_iterator();
+            while (auto fbe = req->get_next_fbe()) {
+                if (fbe->m_blkId.get_chunk_num() != curve.get_blkId().get_chunk_num()) { continue; }
+                auto fblk_start = fbe->m_blkId.get_blk_num() + fbe->m_blk_offset;
+                auto fblk_end = fblk_start + fbe->m_nblks_to_free - 1;
+                if (blk_end < fblk_start || fblk_end < blk_start) {
+                } // non overlapping
+                else {
+                    ss << ",replace_kv:";
+                    for (auto& ptr : replace_kv) {
+                        ss << ptr.first.to_string() << "," << ptr.second.to_string();
+                    }
+                    HS_SUBMOD_ASSERT(DEBUG, 0, , "vol", m_unique_name, "Error::Put_CB:,{} ", ss.str());
+                }
+            }
 #endif
             ++i;
         }
@@ -759,7 +759,7 @@ void mapping::validate_get_response(const lba_t lba_start, const lba_count_t n_l
                 get(req, values);
                 req->lastCommited_seqid = temp;
             }
-            assert(0); // gaps found
+            assert(false); // gaps found
         }
 
         if (exp_value != nullptr) {
@@ -770,7 +770,7 @@ void mapping::validate_get_response(const lba_t lba_start, const lba_count_t n_l
                 ve->get_lba_offset() != last_lba_offset) {
                 m_bt->print_tree();
                 std::this_thread::sleep_for(std::chrono::seconds(10));
-                assert(0);
+                assert(false);
             }
             last_lba_offset += mk.get_n_lba();
         }

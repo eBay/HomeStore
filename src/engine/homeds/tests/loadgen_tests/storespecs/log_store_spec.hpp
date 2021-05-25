@@ -3,6 +3,12 @@
 //
 #pragma once
 
+#include <cassert>
+#include <cstdint>
+#include <iterator>
+#include <mutex>
+#include <unordered_map>
+
 #include "homeds/loadgen/spec/store_spec.hpp"
 #include "homeds/tests/loadgen_tests/keyspecs/logstore_key_spec.hpp"
 #include "homeds/tests/loadgen_tests/valuespecs/logstore_value_spec.hpp"
@@ -12,6 +18,12 @@ namespace homeds {
 namespace loadgen {
 
 class LogStoreSpec : public StoreSpec< LogStoreKey, LogStoreValue > {
+    LogStoreSpec() = default;
+    LogStoreSpec(const LogStoreSpec&) = delete;
+    LogStoreSpec& operator=(const LogStoreSpec&) = delete;
+    LogStoreSpec(LogStoreSpec&&) noexcept = delete;
+    LogStoreSpec& operator=(LogStoreSpec&&) noexcept = delete;
+    virtual ~LogStoreSpec() override = default;
 
     struct LogWriteInfo {
         bool completed;
@@ -19,7 +31,7 @@ class LogStoreSpec : public StoreSpec< LogStoreKey, LogStoreValue > {
     };
 
 public:
-    virtual void init_store(homeds::loadgen::Param& parameters) override {
+    virtual void init_store(const homeds::loadgen::Param& parameters) override {
         HomeLogStoreMgrSI().start(true);
         m_store =
             HomeLogStoreMgrSI().create_new_log_store(HomeLogStoreMgr::DATA_LOG_FAMILY_IDX, false /* append_mode */);
@@ -29,12 +41,12 @@ public:
     // Similar as volume, only verify read on seq that write has returned, for outstanding write, just skip
     // verification;
     //
-    virtual bool get(LogStoreKey& k, LogStoreValue* out_v) override {
-        logstore_seq_num_t seq = k.get_key();
+    virtual bool get(const LogStoreKey& k, LogStoreValue* const out_v) const override {
+        const logstore_seq_num_t seq{k.get_key()};
         {
-            std::lock_guard< std::mutex > lg(m_mtx);
-            auto it = m_wrt_map.find(seq);
-            assert(it != m_wrt_map.end());
+            std::lock_guard< std::mutex > lg{m_mtx};
+            const auto it{m_wrt_map.find(seq)};
+            assert(it != std::cend(m_wrt_map));
 
             if (it->second.completed == false) {
                 // write on this seq num is still outstanding, just return;
@@ -43,14 +55,20 @@ public:
         }
 
         // do a sync read;
-        auto log_read = m_store->read_sync(seq);
+        const auto log_read{m_store->read_sync(seq)};
 
         {
-            std::lock_guard< std::mutex > lg(m_mtx);
-            auto hash = util::Hash64((const char*)log_read.bytes(), log_read.size());
-            if (hash != m_wrt_map[seq].crc) {
-                LOGERROR("Crc Mismatch Failure! read crc: {}, write crc: {}", hash, m_wrt_map[seq].crc);
-                assert(0);
+            std::lock_guard< std::mutex > lg{m_mtx};
+            const auto hash{util::Hash64(reinterpret_cast<const char*>(log_read.bytes()), log_read.size())};
+            const auto itr{m_wrt_map.find(seq)};
+            if ((itr == std::end(m_wrt_map)) || (hash != itr->second.crc)) {
+                if (itr != std::cend(m_wrt_map)) {
+                    LOGERROR("Crc Mismatch Failure! read crc: {}, write crc: {}", hash, itr->second.crc);
+                } else 
+                {
+                    LOGERROR("Crc Mismatch Failure! read crc: {}, write crc not found for seq: {}", hash, seq);
+                }
+                assert(false);
             }
         }
 
@@ -59,19 +77,19 @@ public:
 
     // write is just append;
     virtual bool insert(LogStoreKey& k, std::shared_ptr< LogStoreValue > v) override {
-        logstore_seq_num_t seq = k.get_key();
+        const logstore_seq_num_t seq{k.get_key()};
         {
-            std::lock_guard< std::mutex > lg(m_mtx);
-            assert(m_wrt_map.find(seq) == m_wrt_map.end());
+            std::lock_guard< std::mutex > lg{m_mtx};
+            assert(m_wrt_map.find(seq) == std::end(m_wrt_map));
 
             m_wrt_map[seq].completed = false;
             m_wrt_map[seq].crc = v->get_hash_code();
         }
 
         // trigger the async write;
-        m_store->write_async(seq, sisl::io_blob(v->get_blob().bytes, v->get_blob().size, false), nullptr,
-                             [this](logstore_seq_num_t seq_num, sisl::blob& iob, bool success, void* ctx) {
-                                 std::lock_guard< std::mutex > lg(m_mtx);
+        m_store->write_async(seq, sisl::io_blob{v->get_blob().bytes, v->get_blob().size, false}, nullptr,
+                             [this](logstore_seq_num_t seq_num, sisl::blob& iob, bool success, void* const ctx) {
+                                 std::lock_guard< std::mutex > lg{m_mtx};
                                  LOGINFO("Completed write of seq {}", seq_num);
                                  m_wrt_map[seq_num].completed = true;
                              });
@@ -80,8 +98,8 @@ public:
     }
 
     virtual bool upsert(LogStoreKey& k, std::shared_ptr< LogStoreValue > v) override {
-        assert(0);
-        return true;
+        assert(false);
+        return false;
     }
 
     //
@@ -90,34 +108,34 @@ public:
     //
     virtual bool update(LogStoreKey& k, std::shared_ptr< LogStoreValue > v) override { return true; }
 
-    virtual bool remove(LogStoreKey& k, LogStoreValue* removed_v = nullptr) override {
-        assert(0);
-        return true;
+    virtual bool remove(const LogStoreKey& k, LogStoreValue* const removed_v = nullptr) override {
+        assert(false);
+        return false;
     }
 
-    virtual bool remove_any(LogStoreKey& start_key, bool start_incl, LogStoreKey& end_key, bool end_incl,
-                            LogStoreKey* out_key, LogStoreValue* out_val) override {
-        assert(0);
-        return true;
+    virtual bool remove_any(const LogStoreKey& start_key, const bool start_incl,const  LogStoreKey& end_key, const bool end_incl,
+                            LogStoreKey* const out_key, LogStoreValue* const out_val) override {
+        assert(false);
+        return false;
     }
 
-    virtual uint32_t query(LogStoreKey& start_key, bool start_incl, LogStoreKey& end_key, bool end_incl,
-                           std::vector< std::pair< LogStoreKey, LogStoreValue > >& result) {
-        assert(0);
-        return 1;
+    virtual uint32_t query(const LogStoreKey& start_key, const bool start_incl, const LogStoreKey& end_key, const bool end_incl,
+                           std::vector< std::pair< LogStoreKey, LogStoreValue > >& result) const {
+        assert(false);
+        return 0;
     }
 
-    virtual bool range_update(LogStoreKey& start_key, bool start_incl, LogStoreKey& end_key, bool end_incl,
-                              std::vector< std::shared_ptr< LogStoreValue > >& result) {
-        assert(0);
-        return true;
+    virtual bool range_update(LogStoreKey& start_key, const bool start_incl, LogStoreKey& end_key, const bool end_incl,
+                              std::vector< std::shared_ptr< LogStoreValue > >& result) override {
+        assert(false);
+        return false;
     }
 
 private:
     std::shared_ptr< HomeLogStore > m_store = nullptr;
     std::unordered_map< logstore_seq_num_t, LogWriteInfo >
         m_wrt_map; // seq to its written data crc map, used for verfication;
-    std::mutex m_mtx;
+    mutable std::mutex m_mtx;
 };
 
 } // namespace loadgen

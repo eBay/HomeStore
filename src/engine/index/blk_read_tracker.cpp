@@ -24,7 +24,7 @@ void Blk_Read_Tracker::insert(const Free_Blk_Entry& fbe) {
 
     // insert into pending read map and set ref of value to 2(one for hashmap and one for client)
     // If value already present , insert() will just increase ref count of value by 1.
-    bool inserted = m_pending_reads_map.insert(fbe.get_base_blkid(), *ber, &outber, hash_code, NULL_LAMBDA);
+    bool inserted = m_pending_reads_map.insert(fbe.get_base_blkid(), *ber, &outber, hash_code);
     if (inserted) {
         COUNTER_INCREMENT(m_metrics, blktrack_pending_blk_read_map_sz, 1);
     } else { // record exists already, some other read happened

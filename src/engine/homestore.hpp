@@ -1,21 +1,25 @@
 #pragma once
 
-#include <sds_logging/logging.h>
 #include <array>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
 
+#include <fds/malloc_helper.hpp>
+#include <fds/utils.hpp>
+#include <sds_logging/logging.h>
+
+#include "api/meta_interface.hpp"
 #include "engine/blkstore/blkstore.hpp"
 #include "engine/common/homestore_config.hpp"
 #include "engine/device/device.h"
 #include "engine/homeds/btree/btree.hpp"
 #include "engine/homeds/btree/ssd_btree.hpp"
-#include "api/meta_interface.hpp"
-#include "fds/malloc_helper.hpp"
-#include "fds/utils.hpp"
-#include "homelogstore/log_store.hpp"
-
-#include "homestore_base.hpp"
-#include "engine/common/homestore_config.hpp"
 #include "homeblks/homeblks_config.hpp"
+#include "homelogstore/log_store.hpp"
+#include "homestore_base.hpp"
 
 using namespace homeds::btree;
 
@@ -53,6 +57,8 @@ struct sb_blkstore_blob : blkstore_blob {
 template < typename IndexBuffer >
 class HomeStore : public HomeStoreBase {
 public:
+    typedef Cache< BlkId, CacheBuffer< BlkId > > CacheType;
+
     HomeStore() = default;
     virtual ~HomeStore() = default;
 
@@ -113,7 +119,7 @@ public:
 
         /* create cache */
         uint64_t cache_size = ResourceMgr::get_cache_size();
-        m_cache = std::make_unique< Cache< BlkId > >(cache_size, hs_config.drive_attr.atomic_phys_page_size);
+        m_cache = std::make_unique< CacheType >(cache_size, hs_config.drive_attr.atomic_phys_page_size);
 
         /* create device manager */
         m_dev_mgr = std::make_unique< DeviceManager >(
@@ -412,7 +418,7 @@ protected:
     std::unique_ptr< logdev_blkstore_t > m_ctrl_logdev_blk_store;
     std::unique_ptr< meta_blkstore_t > m_meta_blk_store;
     std::unique_ptr< DeviceManager > m_dev_mgr;
-    std::unique_ptr< Cache< BlkId > > m_cache;
+    std::unique_ptr< CacheType > m_cache;
 
 private:
     static constexpr float data_blkstore_pct{84.0};

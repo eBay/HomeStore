@@ -4,6 +4,12 @@
 #ifndef __VOLUME_STORE_SPEC_HPP__
 #define __VOLUME_STORE_SPEC_HPP__
 
+#include <atomic>
+#include <cassert>
+#include <cstdint>
+#include <mutex>
+#include <vector>
+
 #include "homeds/loadgen/spec/store_spec.hpp"
 #include "homeds/tests/loadgen_tests/vol_manager.hpp"
 #include "homeds/tests/loadgen_tests/keyspecs/vol_key_spec.hpp"
@@ -22,21 +28,32 @@ namespace loadgen {
 template < typename K, typename V >
 class VolumeStoreSpec : public StoreSpec< K, V > {
 public:
-    virtual void init_store(homeds::loadgen::Param& parameters) override {
+    VolumeStoreSpec() = default;
+    VolumeStoreSpec(const VolumeStoreSpec&) = delete;
+    VolumeStoreSpec& operator=(const VolumeStoreSpec&) = delete;
+    VolumeStoreSpec(VolumeStoreSpec&&) noexcept = delete;
+    VolumeStoreSpec& operator=(VolumeStoreSpec&&) noexcept = delete;
+    virtual ~VolumeStoreSpec() override = default;
+
+    virtual void init_store(const homeds::loadgen::Param& parameters) override {
         m_vol_mgr = VolumeManager< IOMgrExecutor >::instance();
     }
 
     // read
-    virtual bool get(K& k, V* out_v) override {
-        VolumeKey* vk = dynamic_cast< VolumeKey* >(&k);
+    virtual bool get(const K& k, V* const out_v) const override {
+#ifdef NDEBUG
+        const VolumeKey& vk{reinterpret_cast< const VolumeKey& >(k)};
+#else
+        const VolumeKey& vk{dynamic_cast< const VolumeKey& >(k)};
+#endif
 
-        uint64_t vol_id = vk->vol_id();
-        uint64_t lba = vk->lba();
-        uint64_t nblks = vk->nblks();
+        const uint64_t vol_id{vk.vol_id()};
+        const uint64_t lba{vk.lba()};
+        const uint64_t nblks{vk.nblks()};
 
-        auto verify = VolumeManager< IOMgrExecutor >::instance()->check_and_set_bm(vol_id, lba, nblks);
+        const auto verify{VolumeManager< IOMgrExecutor >::instance()->check_and_set_bm(vol_id, lba, nblks)};
 
-        auto ret_io = m_vol_mgr->read(vol_id, lba, nblks, verify);
+        const auto ret_io{m_vol_mgr->read(vol_id, lba, nblks, verify)};
         if (ret_io != no_error) { return false; }
 
         return true;
@@ -46,19 +63,23 @@ public:
     virtual bool insert(K& k, std::shared_ptr< V > v) override { return update_internal(k, v); }
 
     virtual bool upsert(K& k, std::shared_ptr< V > v) override {
-        assert(0);
-        return update_internal(k, v);
+        assert(false);
+        return false;
     }
 
     // over-write
     virtual bool update(K& k, std::shared_ptr< V > v) override {
-        VolumeKey* vk = dynamic_cast< VolumeKey* >(&k);
+#ifdef NDEBUG
+        const VolumeKey& vk{reinterpret_cast< const VolumeKey& >(k)};
+#else
+        const VolumeKey& vk{dynamic_cast< const VolumeKey& >(k)};
+#endif
 
-        uint64_t nblks = vk->nblks();
-        uint64_t lba = vk->lba();
-        uint64_t vol_id = vk->vol_id();
+        const uint64_t vol_id{vk.vol_id()};
+        const uint64_t lba{vk.lba()};
+        const uint64_t nblks{vk.nblks()};
 
-        auto ret = VolumeManager< IOMgrExecutor >::instance()->check_and_set_bm(vol_id, lba, nblks);
+        const auto ret{VolumeManager< IOMgrExecutor >::instance()->check_and_set_bm(vol_id, lba, nblks)};
         if (ret == false) {
             // we don't allow writes on same lba that read/write has not acked yet.
             m_write_skip++;
@@ -68,54 +89,58 @@ public:
         return update_internal(k, v);
     }
 
-    virtual bool remove(K& k, V* removed_v = nullptr) override {
-        assert(0);
-        return true;
+    virtual bool remove(const K& k, V* const removed_v = nullptr) override {
+        assert(false);
+        return false;
     }
 
-    virtual bool remove_any(K& start_key, bool start_incl, K& end_key, bool end_incl, K* out_key, V* out_val) override {
-        assert(0);
-        return true;
+    virtual bool remove_any(const K& start_key, const bool start_incl, const K& end_key, const bool end_incl, K* const out_key, V* const out_val) override {
+        assert(false);
+        return false;
     }
 
-    virtual uint32_t query(K& start_key, bool start_incl, K& end_key, bool end_incl,
-                           std::vector< std::pair< K, V > >& result) {
-        assert(0);
-        return 1;
+    virtual uint32_t query(const K& start_key, const bool start_incl, const K& end_key, const bool end_incl,
+                           std::vector< std::pair< K, V > >& result) const override {
+        assert(false);
+        return 0;
     }
 
-    virtual bool range_update(K& start_key, bool start_incl, K& end_key, bool end_incl,
-                              std::vector< std::shared_ptr< V > >& result) {
-        assert(0);
-        return true;
+    virtual bool range_update(K& start_key, const bool start_incl, K& end_key, const bool end_incl,
+                              std::vector< std::shared_ptr< V > >& result) override {
+        assert(false);
+        return false;
     }
 
 private:
     bool update_internal(K& k, std::shared_ptr< V > v) {
-        VolumeKey* vk = dynamic_cast< VolumeKey* >(&k);
+#ifdef NDEBUG
+        const VolumeKey& vk{reinterpret_cast< const VolumeKey& >(k)};
+#else
+        const VolumeKey& vk{dynamic_cast< const VolumeKey& >(k)};
+#endif
 
-        uint64_t nblks = vk->nblks();
-        uint8_t* buf = VolumeManager< IOMgrExecutor >::instance()->gen_value(nblks);
+        const uint64_t vol_id{vk.vol_id()};
+        const uint64_t lba{vk.lba()};
+        const uint64_t nblks{vk.nblks()};
 
-        uint64_t lba = vk->lba();
-        uint64_t vol_id = vk->vol_id();
-
+        uint8_t* const buf{VolumeManager< IOMgrExecutor >::instance()->gen_value(nblks)};
         assert(buf != nullptr);
 
-        auto ret_io = m_vol_mgr->write(vol_id, lba, buf, nblks);
+        // To Do: write should take a const buf
+        const auto ret_io{m_vol_mgr->write(vol_id, lba, buf, nblks)};
+        iomanager.iobuf_free(buf);
         if (ret_io != no_error) {
-            assert(0);
-            iomanager.iobuf_free(buf);
+            assert(false);
             return false;
         }
 
         return true;
     }
 
-    uint64_t get_size(uint64_t lba) { return lba * VOL_PAGE_SIZE; }
+    uint64_t get_size(const uint64_t lba) const { return lba * VOL_PAGE_SIZE; }
 
 private:
-    std::atomic< uint64_t > m_write_skip = 0;
+    std::atomic< uint64_t > m_write_skip{0};
     std::mutex m_mtx;
     VolumeManager< IOMgrExecutor >* m_vol_mgr = nullptr;
 };

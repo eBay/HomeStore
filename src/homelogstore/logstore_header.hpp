@@ -4,7 +4,6 @@
 #include <functional>
 #include <memory>
 
-#include <fmt/format.h>
 #include <fds/utils.hpp>
 
 namespace homestore {

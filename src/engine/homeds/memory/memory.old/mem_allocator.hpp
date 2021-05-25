@@ -101,7 +101,7 @@ public:
         if (pool) {
             return pool->free(mem);
         } else {
-            assert(0);
+            assert(false);
         }
     }
 
@@ -111,7 +111,7 @@ public:
         if (pool) {
             return pool->free(blk.rawptr);
         } else {
-            assert(0);
+            assert(false);
         }
     }
 

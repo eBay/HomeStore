@@ -320,7 +320,7 @@ public:
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->write(vol_info[cur]->vol, lba, buf, nlbas, vreq);
         if (ret_io != no_error) {
-            assert(0);
+            assert(false);
             iomanager.iobuf_free(buf);
             outstanding_ios--;
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
@@ -389,7 +389,7 @@ public:
         vreq->cookie = req;
         auto ret_io = VolInterface::get_instance()->write(vol_info[cur]->vol, lba, buf, nlbas, vreq);
         if (ret_io != no_error) {
-            assert(0);
+            assert(false);
             iomanager.iobuf_free(buf);
             outstanding_ios--;
             std::unique_lock< std::mutex > lk(vol_info[cur]->vol_mutex);
@@ -468,7 +468,7 @@ public:
         VolInterface::get_instance()->attach_vol_completion_cb(vol_obj, cb);
     }
 
-    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) { assert(0); }
+    void vol_state_change_cb(const VolumePtr& vol, vol_state old_state, vol_state new_state) { assert(false); }
 
     bool vol_found_cb(boost::uuids::uuid uuid) {
         assert(!init);

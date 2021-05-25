@@ -1,12 +1,17 @@
 #pragma once
 
+#include <chrono>
+#include <cstdint>
+#include <iterator>
+#include <map>
+#include <string>
+#include <string_view>
+
 #include <sds_logging/logging.h>
 #include <spdlog/fmt/fmt.h>
 #include <metrics/metrics.hpp>
 #include <fds/utils.hpp>
-#include <map>
-#include <string>
-#include <string_view>
+
 
 // clang-format off
 /***** HomeStore Logging Macro facility: Goal is to provide consistent logging capability
@@ -66,10 +71,10 @@
                                                          fmt::format_to(buf, "[{}={}] ", submod_name, submod_val));    \
                                              BOOST_PP_IF(BOOST_PP_IS_EMPTY(detail_name), ,                             \
                                                          fmt::format_to(buf, "[{}={}] ", detail_name, detail_val));    \
-                                             fmt::format_to(buf, __m, args...);                                        \
+                                             fmt::format_to(buf, __m, std::forward< decltype(args) >(args)...);        \
                                              return true;                                                              \
                                          }),                                                                           \
-                                         HomeStoreBase::periodic_logger(), msg, ##__VA_ARGS__);                        \
+                                         homestore::HomeStoreBase::periodic_logger(), msg, ##__VA_ARGS__);             \
     }
 #define HS_PERIODIC_LOG(level, mod, msg, ...) HS_PERIODIC_DETAILED_LOG(level, mod, , , , , msg, ##__VA_ARGS__)
 
@@ -84,7 +89,7 @@
                                             fmt::format_to(buf, "[req_id={}] ", req->request_id));                     \
                                 BOOST_PP_IF(BOOST_PP_IS_EMPTY(detail_name), ,                                          \
                                             fmt::format_to(buf, "[{}={}] ", detail_name, detail_val));                 \
-                                fmt::format_to(buf, __m, args...);                                                     \
+                                fmt::format_to(buf, __m, std::forward< decltype(args) >(args)...);                     \
                                 return true;                                                                           \
                             }),                                                                                        \
                             msg, ##__VA_ARGS__);                                                                       \
@@ -99,7 +104,7 @@
                                             fmt::format_to(buf, "[{}={}] ", submod_name, submod_val));                 \
                                 BOOST_PP_IF(BOOST_PP_IS_EMPTY(detail_name), ,                                          \
                                             fmt::format_to(buf, "[{}={}] ", detail_name, detail_val));                 \
-                                fmt::format_to(buf, __m, args...);                                                     \
+                                fmt::format_to(buf, __m, std::forward< decltype(args) >(args)...);                     \
                                 const auto count = check_logged_already(buf);                                          \
                                 if (count % freq == 0) {                                                               \
                                     if (count) { fmt::format_to(buf, " ...Repeated {} times in this thread", freq); }  \
@@ -158,7 +163,7 @@
                             fmt::format_to(buf, "\n[{}={}] ", detail_name, detail_val));                               \
                 fmt::format_to(buf, "\n[Metrics = {}]\n",                                                              \
                                sisl::MetricsFarm::getInstance().get_result_in_json().dump(4));                         \
-                fmt::format_to(buf, __m, args...);                                                                     \
+                fmt::format_to(buf, __m, std::forward< decltype(args) >(args)...);                                     \
                 return true;                                                                                           \
             },                                                                                                         \
             msg, ##__VA_ARGS__);                                                                                       \
@@ -175,7 +180,7 @@
             val1, cmp, val2,                                                                                           \
             [&](fmt::memory_buffer& buf, const char* __m, auto&&... args) -> bool {                                    \
                 fmt::format_to(buf, "[{}:{}] ", file_name(__FILE__), __LINE__);                                        \
-                sds_logging::default_cmp_assert_formatter(buf, __m, args...);                                          \
+                sds_logging::default_cmp_assert_formatter(buf, __m, std::forward< decltype(args) >(args)...);          \
                 BOOST_PP_IF(BOOST_PP_IS_EMPTY(submod_name), ,                                                          \
                             fmt::format_to(buf, " \n[{}={}] ", submod_name, submod_val));                              \
                 BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), , fmt::format_to(buf, "\n[request={}] ", req->to_string()));       \
@@ -234,12 +239,12 @@
 #define HS_RELEASE_ASSERT_GE(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, >=, val2, ##__VA_ARGS__)
 
 static uint64_t check_logged_already(const fmt::memory_buffer& buf) {
-    static constexpr uint64_t COUNTER_RESET_SEC = 300; // Reset every 5 minutes
+    static constexpr uint64_t COUNTER_RESET_SEC{300}; // Reset every 5 minutes
     static thread_local std::map< std::string, std::pair< Clock::time_point, uint64_t >, std::less<> > log_map;
 
     const std::string_view msg{buf.data()};
     auto [it, happened] = log_map.emplace(msg, std::make_pair(Clock::now(), 0ul));
-    HS_RELEASE_ASSERT(it != log_map.end(), "Expected entry to be either present or new insertion to succeed");
+    HS_RELEASE_ASSERT(it != std::end(log_map), "Expected entry to be either present or new insertion to succeed");
     auto& [tm, count] = it->second;
     count = (get_elapsed_time_sec(tm) > COUNTER_RESET_SEC) ? 0ul : count + 1ul;
     tm = Clock::now();

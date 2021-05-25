@@ -23,6 +23,7 @@ struct LRUEvictRecord : public boost::intrusive::list_base_hook<> {
     LRUEvictRecord(LRUEvictRecord&&) noexcept = delete;
     LRUEvictRecord& operator=(const LRUEvictRecord&) = default;
     LRUEvictRecord& operator=(LRUEvictRecord&&) noexcept = default;
+    ~LRUEvictRecord() = default;
 };
 
 class LRUEvictionPolicy {
@@ -36,35 +37,36 @@ public:
     LRUEvictionPolicy& operator=(LRUEvictionPolicy&&) noexcept = delete;
 
     ~LRUEvictionPolicy() {
-        std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
-        auto it = m_list.begin();
-        while (it != m_list.end()) {
+        std::lock_guard< decltype(m_list_guard) > guard{m_list_guard};
+        auto it{std::begin(m_list)};
+        while (it != std::end(m_list)) {
             it = m_list.erase(it);
         }
     }
 
     void add(LRUEvictRecord& rec) {
-        std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
+        std::lock_guard< decltype(m_list_guard) > guard{m_list_guard};
         m_list.push_back(rec);
     }
 
     void remove(LRUEvictRecord& rec) {
-        std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
-        auto it = m_list.iterator_to(rec);
+        std::lock_guard< decltype(m_list_guard) > guard{m_list_guard};
+        auto it{m_list.iterator_to(rec)};
         m_list.erase(it);
     }
 
-    void eject_next_candidate(const auto& cb) {
-        std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
+    template < typename CallbackType >
+    void eject_next_candidate(CallbackType&& cb) {
+        std::lock_guard< decltype(m_list_guard) > guard{m_list_guard};
 
-        auto count = 0U;
-        bool stop = false;
+        size_t count{0};
+        bool stop{false};
         auto it{std::begin(m_list)};
         while (it != std::end(m_list)) {
             LRUEvictRecord& rec{*it};
             /* return the next element */
             it = m_list.erase(it);
-            if (cb(rec, stop)) {
+            if (std::forward< CallbackType >(cb)(rec, stop)) {
                 if (stop) { return; }
             } else {
                 /* reinsert it at the same position */
@@ -85,13 +87,13 @@ public:
     }
 
     void upvote(LRUEvictRecord& rec) {
-        std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
+        std::lock_guard< decltype(m_list_guard) > guard{m_list_guard};
         m_list.erase(m_list.iterator_to(rec));
         m_list.push_back(rec);
     }
 
     void downvote(LRUEvictRecord& rec) {
-        std::lock_guard< decltype(m_list_guard) > guard(m_list_guard);
+        std::lock_guard< decltype(m_list_guard) > guard{m_list_guard};
         m_list.erase(m_list.iterator_to(rec));
         m_list.push_front(rec);
     }

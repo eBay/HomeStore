@@ -39,7 +39,7 @@ EvictRecord* Evictor< EvictionPolicy >::do_evict(uint64_t needed_size) {
 
     rec = m_evict_policy.remove_candidate_ofsize(needed_size);
     if (rec == nullptr) {
-        assert(0);
+        assert(false);
         // TODO: Throw no space available exception.
         return nullptr;
     }

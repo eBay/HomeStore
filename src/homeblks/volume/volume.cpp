@@ -13,10 +13,10 @@
 
 #include <fds/utils.hpp>
 
+#include "engine/common/homestore_flip.hpp"
 #include "homeblks/home_blks.hpp"
 
 #include "volume.hpp"
-#include "engine/common/homestore_flip.hpp"
 
 using namespace homestore;
 
@@ -28,12 +28,6 @@ bool vol_test_enable = false;
 SDS_LOGGING_DECL(volume)
 sisl::atomic_counter< uint64_t > Volume::home_blks_ref_cnt = 0;
 // REGISTER_METABLK_SUBSYSTEM(volume, "VOLUME", Volume::meta_blk_found_cb, nullptr)
-
-namespace homestore {
-void intrusive_ptr_add_ref(homestore::BlkBuffer* buf) { intrusive_ptr_add_ref((homestore::CacheBuffer< BlkId >*)buf); }
-
-void intrusive_ptr_release(homestore::BlkBuffer* buf) { intrusive_ptr_release((homestore::CacheBuffer< BlkId >*)buf); }
-} // namespace homestore
 
 #ifdef _PRERELEASE
 void Volume::set_error_flip() {
@@ -793,7 +787,7 @@ void Volume::alloc_single_block_in_mem() {
     ptr = hs_utils::iobuf_alloc(size);
     memset(ptr, 0, size);
 
-    boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
+    boost::intrusive_ptr< homeds::MemVector > mvec{new homeds::MemVector{}};
     mvec->set(ptr, size, 0);
     m_only_in_mem_buff->set_memvec(mvec, 0, size);
 }

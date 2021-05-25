@@ -5,36 +5,45 @@
 #ifndef OMSTORE_BLKBUFFER_HPP_HPP
 #define OMSTORE_BLKBUFFER_HPP_HPP
 
+#include <cstdint>
+
+#include <boost/intrusive_ptr.hpp>
+#include <fds/obj_allocator.hpp>
+#include <utility/atomic_counter.hpp>
+
 #include "engine/blkalloc/blk.h"
 #include "engine/cache/cache.h"
 
 namespace homestore {
 
-#if 0
-class BlkBuffer : private CacheBuffer< BlkId > {
-public:
-    /* Provides the offset gap between this and next offset available in cache */
-    uint32_t offset_gap(uint8_t ind) const {
-        auto b = get_key();
-        auto &mp = get_memvec().get_nth_piece(ind++);
-        auto prev_off = mp.offset() + mp.size();
-        if (ind == get_memvec().npieces()) {
-            return ((b.get_nblks() * BLKSTORE_BLK_SIZE) - prev_off);
-        } else {
-            mp = get_memvec().get_nth_piece(ind);
-            return (mp.offset() - prev_off);
-        }
-    }
-};
-#endif
-
 class BlkBuffer : public CacheBuffer< BlkId > {
 public:
-    static BlkBuffer* make_object() { return sisl::ObjectAllocator< BlkBuffer >::make_object(); }
+    typedef CacheBuffer< BlkId > CacheBufferType;
 
-    virtual void free_yourself() override { sisl::ObjectAllocator< BlkBuffer >::deallocate(this); }
+    BlkBuffer() = default;
+    BlkBuffer(const BlkBuffer&) = delete;
+    BlkBuffer& operator=(const BlkBuffer&) = delete;
+    BlkBuffer(BlkBuffer&&) noexcept = delete;
+    BlkBuffer& operator=(BlkBuffer&&) noexcept = delete;
+    virtual ~BlkBuffer() override = default;
+
+    virtual void init() override {};
+    
+    template <typename... Args>
+    static BlkBuffer* make_object(Args... args) { return sisl::ObjectAllocator< BlkBuffer >::make_object(std::forward<Args>(args)...); }
+
+    void free_yourself() { sisl::ObjectAllocator< BlkBuffer >::deallocate(this); }
 
     // virtual size_t get_your_size() const override { return sizeof(BlkBuffer); }
+
+    friend void intrusive_ptr_add_ref(BlkBuffer* const buf) {
+        // manage through base pointer
+        intrusive_ptr_add_ref(static_cast< CacheBufferType* >(buf));
+    }
+    friend void intrusive_ptr_release(BlkBuffer* const buf) {
+        // manage through base pointer
+        intrusive_ptr_release(static_cast< CacheBufferType* >(buf));
+    }
 };
 
 } // namespace homestore

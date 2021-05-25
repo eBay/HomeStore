@@ -5,8 +5,8 @@
 
 #include <fds/vector_pool.hpp>
 
-#include "engine/homestore_base.hpp"
 #include "engine/common/homestore_assert.hpp"
+#include "engine/homestore_base.hpp"
 #include "log_dev.hpp"
 #include "log_store.hpp"
 
