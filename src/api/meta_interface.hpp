@@ -199,6 +199,8 @@ public:
 
     [[nodiscard]] uint64_t ovf_blk_max_num_data_blk() const;
 
+    void cookie_sanity_check(const void* const cookie);
+
 public:
     /*********************** static public function **********************/
     static void set_self_recover() { m_self_recover = true; }

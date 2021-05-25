@@ -86,12 +86,9 @@ struct meta_blk_sb {
     BlkId prev_bid; // previous metablk
     BlkId bid;
 
-    std::string to_string() const {
-        std::ostringstream ss{};
-        ss << "version: " << version << ", magic: " << magic << ", migrated: " << migrated
-           << ", next_bid: " << next_bid.to_string() << ", prev_bid: " << prev_bid.to_string()
-           << ", self-bid: " << bid.to_string();
-        return ss.str();
+  std::string to_string() const {
+        return fmt::format("version: {}, magic: {}, migrated: {}, next_bid: {}, prev_bid: {}, self_bid: {}", version,
+                           next_bid.to_string(), prev_bid.to_string(), bid.to_string());
     }
 };
 #pragma pack()
@@ -116,6 +113,13 @@ struct meta_blk_hdr_s {
     uint64_t compressed_sz; // compressed size before round up to align_size, used for decompress
     uint64_t src_context_sz;        // context_sz before compression, this field only valid when compressed is true;
     char type[MAX_SUBSYS_TYPE_LEN]; // sub system type;
+
+    std::string to_string() const {
+        return fmt::format("type: {}, version: {}, magic: {}, crc: {}, next_bid: {}, prev_bid: {}, ovf_bid: {}, "
+                           "self_bid: {}, compressed: {}",
+                           type, version, magic, crc, next_bid.to_string(), prev_bid.to_string(), ovf_bid.to_string(),
+                           bid.to_string(), compressed);
+    }
 };
 #pragma pack()
 
@@ -126,6 +130,8 @@ static constexpr uint32_t META_BLK_HDR_RSVD_SZ{
 struct meta_blk_hdr {
     meta_blk_hdr_s h;
     char padding[META_BLK_HDR_RSVD_SZ];
+
+    std::string to_string() const { return h.to_string(); }
 };
 #pragma pack()
 
@@ -140,6 +146,7 @@ struct meta_blk {
     // This was to replace a zero size array which is illegal in C++
     const uint8_t* get_context_data() const { return reinterpret_cast< const uint8_t* >(this) + sizeof(meta_blk); }
     uint8_t* get_context_data_mutable() { return reinterpret_cast< uint8_t* >(this) + sizeof(meta_blk); }
+    std::string to_string() const { return hdr.to_string(); }
 };
 #pragma pack()
 

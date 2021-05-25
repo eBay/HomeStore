@@ -327,41 +327,47 @@ void MetaBlkMgr::register_handler(const meta_sub_type type, const meta_blk_found
 
 void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* const context_data, const uint64_t sz,
                             void*& cookie) {
-    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
-    HS_RELEASE_ASSERT_LT(type.length(), MAX_SUBSYS_TYPE_LEN, "type len: {} should not exceed len: {}", type.length(),
-                         MAX_SUBSYS_TYPE_LEN);
-    // not allowing add sub sb before registration
-    HS_ASSERT(RELEASE, m_sub_info.find(type) != m_sub_info.end(), "[type={}] not registered yet!", type);
+    {
+        std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
+        HS_RELEASE_ASSERT_LT(type.length(), MAX_SUBSYS_TYPE_LEN, "type len: {} should not exceed len: {}",
+                             type.length(), MAX_SUBSYS_TYPE_LEN);
+        // not allowing add sub sb before registration
+        HS_ASSERT(RELEASE, m_sub_info.find(type) != m_sub_info.end(), "[type={}] not registered yet!", type);
 
-    BlkId meta_bid;
-    alloc_meta_blk(meta_bid);
+        BlkId meta_bid;
+        alloc_meta_blk(meta_bid);
 
-    // add meta_bid to in-memory for reverse mapping;
-    m_sub_info[type].meta_bids.insert(meta_bid.to_integer());
+        // add meta_bid to in-memory for reverse mapping;
+        m_sub_info[type].meta_bids.insert(meta_bid.to_integer());
 
 #ifndef NDEBUG
-    uint32_t crc{0};
-    if (m_sub_info[type].do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
+        uint32_t crc{0};
+        if (m_sub_info[type].do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
 #endif
 
-    HS_LOG(DEBUG, metablk, "{}, adding meta bid: {}, sz: {}, mstore used size: {}", type, meta_bid.to_string(), sz,
-           m_sb_blk_store->get_used_size());
+        HS_LOG(DEBUG, metablk, "{}, adding meta bid: {}, sz: {}, mstore used size: {}", type, meta_bid.to_string(), sz,
+               m_sb_blk_store->get_used_size());
 
-    meta_blk* const mblk{init_meta_blk(meta_bid, type, context_data, sz)};
+        meta_blk* const mblk{init_meta_blk(meta_bid, type, context_data, sz)};
 
-    HS_LOG(DEBUG, metablk, "{}, Done adding bid: {}, prev: {}, next: {}, size: {}, crc: {}, mstore used size: {}", type,
-           mblk->hdr.h.bid, mblk->hdr.h.prev_bid, mblk->hdr.h.next_bid, static_cast< uint64_t >(mblk->hdr.h.context_sz),
-           static_cast< uint32_t >(mblk->hdr.h.crc), m_sb_blk_store->get_used_size());
+        HS_LOG(DEBUG, metablk, "{}, Done adding bid: {}, prev: {}, next: {}, size: {}, crc: {}, mstore used size: {}",
+               type, mblk->hdr.h.bid, mblk->hdr.h.prev_bid, mblk->hdr.h.next_bid,
+               static_cast< uint64_t >(mblk->hdr.h.context_sz), static_cast< uint32_t >(mblk->hdr.h.crc),
+               m_sb_blk_store->get_used_size());
 
 #ifndef NDEBUG
-    if (m_sub_info[type].do_crc && !(mblk->hdr.h.compressed)) {
-        HS_DEBUG_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
-                           "Input context data has been changed since received, crc mismatch: {}/{}", crc,
-                           static_cast< uint32_t >(mblk->hdr.h.crc));
+        if (m_sub_info[type].do_crc && !(mblk->hdr.h.compressed)) {
+            HS_DEBUG_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
+                               "Input context data has been changed since received, crc mismatch: {}/{}", crc,
+                               static_cast< uint32_t >(mblk->hdr.h.crc));
+        }
+#endif
+
+        cookie = static_cast< void* >(mblk);
     }
-#endif
 
-    cookie = static_cast< void* >(mblk);
+    // validate content of cookie
+    cookie_sanity_check(cookie);
 }
 
 void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* const ovf_hdr, const void* const context_data,
@@ -659,6 +665,37 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* const mblk, const void* conte
 #endif
 }
 
+void MetaBlkMgr::cookie_sanity_check(const void* const cookie) {
+#ifdef _PRERELEASE
+    std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+    auto mblk{static_cast< const meta_blk* >(cookie)};
+
+    HS_RELEASE_ASSERT_EQ(cookie != nullptr, true, "null cookie!");
+    HS_RELEASE_ASSERT_EQ(mblk->hdr.h.version == META_BLK_VERSION && mblk->hdr.h.magic == META_BLK_MAGIC, true,
+                         "Corrupted version/magic: {}", mblk->to_string());
+
+    HS_RELEASE_ASSERT_EQ(mblk->hdr.h.prev_bid.is_valid() && mblk->hdr.h.bid.is_valid(), true,
+                         "Invalid prev-bid or self-bid is not possible. Corrupted cookie: {}", mblk->to_string());
+
+    auto it_sub_info{m_sub_info.find(mblk->hdr.h.type)};
+    HS_RELEASE_ASSERT_EQ(it_sub_info != m_sub_info.end(), true, "[type={}] not registered yet!", mblk->hdr.h.type);
+
+    // self-bid must exist in m_sub_info meta_bids;
+    bool exist{false};
+    for (auto& x : it_sub_info->second.meta_bids) {
+        if (x == mblk->hdr.h.bid.to_integer()) {
+            auto it = m_meta_blks.find(x);
+            auto cached_mblk = it->second;
+            HS_RELEASE_ASSERT_EQ(cached_mblk == mblk, true, "Cookie received is not same as cached!");
+            exist = true;
+            break;
+        }
+    }
+
+    HS_RELEASE_ASSERT_EQ(exist, true, "self-bid not found in cache!");
+#endif
+}
+
 //
 // Do in-place update:
 // 1. allcate ovf_bid if needed
@@ -666,50 +703,57 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* const mblk, const void* conte
 // 3. free old ovf_bid if there is any
 //
 void MetaBlkMgr::update_sub_sb(const void* const context_data, const uint64_t sz, void*& cookie) {
-    std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx}; // TODO: see if this lock can be removed;
-    meta_blk* const mblk{static_cast< meta_blk* >(cookie)};
+    cookie_sanity_check(cookie);
+    {
+        std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+        meta_blk* const mblk{static_cast< meta_blk* >(cookie)};
 
-    HS_LOG(DEBUG, metablk, "[type={}], update_sub_sb old sb: context_sz: {}, ovf_bid: {}, mstore used size: {}",
-           mblk->hdr.h.type, (unsigned long)(mblk->hdr.h.context_sz), mblk->hdr.h.ovf_bid.to_string(),
-           m_sb_blk_store->get_used_size());
+        HS_LOG(DEBUG, metablk, "[type={}], update_sub_sb old sb: context_sz: {}, ovf_bid: {}, mstore used size: {}",
+               mblk->hdr.h.type, (unsigned long)(mblk->hdr.h.context_sz), mblk->hdr.h.ovf_bid.to_string(),
+               m_sb_blk_store->get_used_size());
 
-    const auto ovf_bid_to_free{mblk->hdr.h.ovf_bid};
+        const auto ovf_bid_to_free{mblk->hdr.h.ovf_bid};
 
 #ifndef NDEBUG
-    uint32_t crc{0};
-    const auto it{m_sub_info.find(mblk->hdr.h.type)};
-    HS_ASSERT(DEBUG, it != std::end(m_sub_info), "[type={}] not registered yet!", mblk->hdr.h.type);
-    if (it->second.do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
+        uint32_t crc{0};
+        const auto it{m_sub_info.find(mblk->hdr.h.type)};
+        HS_ASSERT(DEBUG, it != std::end(m_sub_info), "[type={}] not registered yet!", mblk->hdr.h.type);
+        if (it->second.do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
 #endif
 
-    mblk->hdr.h.ovf_bid.invalidate();
+        mblk->hdr.h.ovf_bid.invalidate();
 
-    // write this meta blk to disk
-    write_meta_blk_internal(mblk, context_data, sz);
+        // write this meta blk to disk
+        write_meta_blk_internal(mblk, context_data, sz);
 
 #ifdef _PRERELEASE
-    HomeStoreFlip::test_and_abort("update_sb_abort");
+        HomeStoreFlip::test_and_abort("update_sb_abort");
 #endif
 
-    // free the overflow bid if it is there
-    free_ovf_blk_chain(ovf_bid_to_free);
+        // free the overflow bid if it is there
+        free_ovf_blk_chain(ovf_bid_to_free);
 
-    HS_LOG(DEBUG, metablk, "[type={}], update_sub_sb new sb: context_sz: {}, ovf_bid: {}, mstore used size: {}",
-           mblk->hdr.h.type, static_cast< uint64_t >(mblk->hdr.h.context_sz), mblk->hdr.h.ovf_bid.to_string(),
-           m_sb_blk_store->get_used_size());
+        HS_LOG(DEBUG, metablk, "[type={}], update_sub_sb new sb: context_sz: {}, ovf_bid: {}, mstore used size: {}",
+               mblk->hdr.h.type, static_cast< uint64_t >(mblk->hdr.h.context_sz), mblk->hdr.h.ovf_bid.to_string(),
+               m_sb_blk_store->get_used_size());
 
 #ifndef NDEBUG
-    if (!(mblk->hdr.h.compressed) && it->second.do_crc) {
-        HS_DEBUG_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
-                           "[type={}]: Input context data has been changed since received, crc mismatch: {}/{}",
-                           mblk->hdr.h.type, crc, static_cast< uint32_t >(mblk->hdr.h.crc));
-    }
+        if (!(mblk->hdr.h.compressed) && it->second.do_crc) {
+            HS_DEBUG_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
+                               "[type={}]: Input context data has been changed since received, crc mismatch: {}/{}",
+                               mblk->hdr.h.type, crc, static_cast< uint32_t >(mblk->hdr.h.crc));
+        }
 #endif
 
-    // no need to update cookie and in-memory meta blk map
+        // no need to update cookie and in-memory meta blk map
+    }
+    // validate since update will change content of cookie
+    cookie_sanity_check(cookie);
 }
 
 std::error_condition MetaBlkMgr::remove_sub_sb(void* const cookie) {
+    cookie_sanity_check(cookie);
+
     std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
     meta_blk* const rm_blk{static_cast< meta_blk* >(cookie)};
     const BlkId rm_bid{rm_blk->hdr.h.bid};
