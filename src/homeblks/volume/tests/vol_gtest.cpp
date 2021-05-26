@@ -1071,7 +1071,6 @@ private:
 bool VolTest::m_am_sb_received = false;
 bool VolTest::m_am_sb_written = false;
 boost::uuids::uuid VolTest::m_am_uuid;
-REGISTER_METABLK_SUBSYSTEM(vol_gtest_am, access_mgr_mtype, VolTest::am_meta_blk_found_cb, VolTest::am_meta_blk_comp_cb)
 
 class VolCreateDeleteJob : public TestJob {
 public:
@@ -2169,6 +2168,9 @@ int main(int argc, char* argv[]) {
     for (size_t i = 0; i < mod_init_funcs.size(); ++i) {
         mod_init_funcs[i]();
     }
+
+    MetaBlkMgrSI()->register_handler(access_mgr_mtype, VolTest::am_meta_blk_found_cb, VolTest::am_meta_blk_comp_cb,
+                                     true);
 
     auto ret = RUN_ALL_TESTS();
     return ret;

@@ -194,9 +194,7 @@ static constexpr uint32_t VIRDEV_BLKSIZE{512};
 static constexpr uint64_t CHUNK_EOF{0xabcdabcd};
 static constexpr off_t INVALID_OFFSET{std::numeric_limits< off_t >::max()};
 
-static constexpr uint32_t vdev_high_watermark_per = 80;
-
-// REGISTER_METABLK_SUBSYSTEM(blk_alloc, meta_sub_type::BLK_ALLOC, blk_alloc_meta_blk_cb_found, nullptr)
+static constexpr uint32_t vdev_high_watermark_per{80};
 
 template < typename Allocator, typename DefaultDeviceSelector >
 class VirtualDev : public AbstractVirtualDev {

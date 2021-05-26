@@ -20,14 +20,16 @@
 
 using namespace homestore;
 
+SDS_LOGGING_DECL(volume)
+
+namespace {
 #ifndef NDEBUG
 /* only for testing */
-bool vol_test_enable = false;
+bool vol_test_enable{false};
 #endif
+}
 
-SDS_LOGGING_DECL(volume)
-sisl::atomic_counter< uint64_t > Volume::home_blks_ref_cnt = 0;
-// REGISTER_METABLK_SUBSYSTEM(volume, "VOLUME", Volume::meta_blk_found_cb, nullptr)
+sisl::atomic_counter< uint64_t > Volume::home_blks_ref_cnt{0};
 
 #ifdef _PRERELEASE
 void Volume::set_error_flip() {

@@ -330,20 +330,4 @@ private:
 
 static MetaBlkMgr* MetaBlkMgrSI() { return MetaBlkMgr::instance(); }
 
-class register_subsystem {
-public:
-    register_subsystem(const meta_sub_type type, const meta_blk_found_cb_t& cb,
-                       const meta_blk_recover_comp_cb_t& comp_cb, const bool do_crc = true) {
-        MetaBlkMgrSI()->register_handler(type, cb, comp_cb, do_crc);
-    }
-    register_subsystem(const register_subsystem&) = delete;
-    register_subsystem& operator=(const register_subsystem&) = delete;
-    register_subsystem(register_subsystem&&) noexcept = delete;
-    register_subsystem& operator=(register_subsystem&&) noexcept = delete;
-
-    ~register_subsystem() = default;
-};
-
-/* It provides alternate way to module to register itself to metablk at the very beginning of a program */
-#define REGISTER_METABLK_SUBSYSTEM(name, type, cb, comp_cb) homestore::register_subsystem name##sub(type, cb, comp_cb);
 } // namespace homestore
