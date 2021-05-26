@@ -4,8 +4,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-
-    version = "2.5.13"
+    version = "2.5.14"
 
     revision_mode = "scm"
     license = "Proprietary"
@@ -87,7 +86,7 @@ class HomestoreConan(ConanFile):
         self.copy("*.h", dst="include", src="src", keep_path=True)
         self.copy("*.hpp", dst="include", src="src", keep_path=True)
         self.copy("*/btree_node.cpp", dst="include", src="src", keep_path=True)
-        self.copy("*cache/cache.cpp", dst="include", src="src", keep_path=True)
+        self.copy("*cache/cache.ipp", dst="include", src="src", keep_path=True)
         self.copy("*homeblks.so", dst="lib", keep_path=False)
         self.copy("*homeblks.dll", dst="lib", keep_path=False)
         self.copy("*homeblks.dylib", dst="lib", keep_path=False)

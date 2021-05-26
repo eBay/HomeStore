@@ -1,6 +1,7 @@
 include (${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
 include_directories (BEFORE ..)
 set(DEVICE_SOURCE
+    blkbuffer.cpp
     physical_dev.cpp
     device_manager.cpp
     )

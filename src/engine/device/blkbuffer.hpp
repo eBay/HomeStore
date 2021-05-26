@@ -36,14 +36,8 @@ public:
 
     // virtual size_t get_your_size() const override { return sizeof(BlkBuffer); }
 
-    friend void intrusive_ptr_add_ref(BlkBuffer* const buf) {
-        // manage through base pointer
-        intrusive_ptr_add_ref(static_cast< CacheBufferType* >(buf));
-    }
-    friend void intrusive_ptr_release(BlkBuffer* const buf) {
-        // manage through base pointer
-        intrusive_ptr_release(static_cast< CacheBufferType* >(buf));
-    }
+    friend void intrusive_ptr_add_ref(BlkBuffer* const buf);
+    friend void intrusive_ptr_release(BlkBuffer* const buf);
 };
 
 } // namespace homestore
