@@ -252,7 +252,7 @@ def meta_blk_store_nightly():
 def logstore_nightly():
     print("log store test started")
     subprocess.check_call(
-        dirpath + "test_log_store --longevity_tests=24000", stderr=subprocess.STDOUT, shell=True)
+        dirpath + "test_log_store --iterations=240", stderr=subprocess.STDOUT, shell=True)
 
     print("log store test completed")
     
