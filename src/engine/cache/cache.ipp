@@ -23,7 +23,7 @@ uint64_t compute_hash_imp(const KeyType& key, std::true_type) {
 template < typename KeyType >
 uint64_t compute_hash_imp(const KeyType& key, std::false_type) {
     const auto b{KeyType::get_blob(key)};
-    const uint64_t hash_code{util::Hash64(reinterpret_cast<const char*>(b.bytes), static_cast<size_t>(b.size))};
+    const uint64_t hash_code{util::Hash64(reinterpret_cast< const char* >(b.bytes), static_cast< size_t >(b.size))};
     return hash_code;
 }
 
@@ -42,8 +42,7 @@ void invoke_callback(CallbackType&& callback, Args&&... args) {
         std::forward< CallbackType >(callback)(std::forward< Args >(args)...);
 }
 
-}
-
+} // namespace cache_detail
 
 ////////////////////////////////// Intrusive Cache Section /////////////////////////////////
 template < typename K, typename V >
@@ -177,13 +176,12 @@ bool IntrusiveCache< K, V >::is_safe_to_evict(const CurrentEvictor::EvictRecordT
             boost::intrusive_ptr< V > out_removed_buf;
             HS_ASSERT_CMP(LOGMSG, v->get_cache_state(), ==, cache_buf_state::CACHE_INSERTED);
             /* It remove the entry only if ref cnt is one */
-            const K* const pk { V::extract_key(*v) };
+            const K* const pk{V::extract_key(*v)};
             const uint64_t hash_code{cache_detail::compute_hash< K >(*pk)};
-            auto ret =
-                m_hash_set.check_and_remove(*pk, hash_code, [&out_removed_buf](V* const about_to_remove_ptr) {
-                    // Make a smart ptr of the buffer we are removing
+            auto ret = m_hash_set.check_and_remove(*pk, hash_code, [&out_removed_buf](V* const about_to_remove_ptr) {
+                // Make a smart ptr of the buffer we are removing
                 out_removed_buf = boost::intrusive_ptr< V >{about_to_remove_ptr};
-                });
+            });
             if (ret) {
                 v->on_cache_evict();
                 COUNTER_DECREMENT(m_metrics, cache_object_count, 1);
@@ -214,14 +212,14 @@ bool Cache< K, V >::upsert(const K& k, const sisl::blob& b, boost::intrusive_ptr
 }
 
 template < typename K, typename V >
-template< typename CallbackType, typename>
+template < typename CallbackType, typename >
 bool Cache< K, V >::insert(const K& k, const sisl::blob& b, const uint32_t value_offset,
                            boost::intrusive_ptr< V >* const out_smart_buf, CallbackType&& found_cb) {
     // Allocate a new Cachebuffer and set the blob address to it.
     V* const cbuf{sisl::ObjectAllocator< V >::make_object(k, b, this, value_offset)};
 
     V* out_buf{nullptr};
-    const bool inserted{IntrusiveCacheType::insert(*cbuf, &out_buf, std::forward<CallbackType>(found_cb))};
+    const bool inserted{IntrusiveCacheType::insert(*cbuf, &out_buf, std::forward< CallbackType >(found_cb))};
     if (out_buf != nullptr) { *out_smart_buf = boost::intrusive_ptr< V >{out_buf, false}; }
 
     (*out_smart_buf)->set_cache(this);
@@ -231,7 +229,7 @@ bool Cache< K, V >::insert(const K& k, const sisl::blob& b, const uint32_t value
 
 template < typename K, typename V >
 bool Cache< K, V >::insert(const K& k, const boost::intrusive_ptr< V >& in_buf,
-                        boost::intrusive_ptr< V >* const out_smart_buf) {
+                           boost::intrusive_ptr< V >* const out_smart_buf) {
     V* out_buf{nullptr};
     const bool inserted{IntrusiveCacheType::insert(*in_buf, &out_buf)};
     if (out_buf != nullptr) { *out_smart_buf = boost::intrusive_ptr< V >{out_buf, false}; }
@@ -242,8 +240,8 @@ bool Cache< K, V >::insert(const K& k, const boost::intrusive_ptr< V >& in_buf,
 
 template < typename K, typename V >
 bool Cache< K, V >::insert_missing_pieces(const boost::intrusive_ptr< V >& buf, const uint32_t offset,
-                                       const uint32_t size_to_read,
-                                       std::vector< std::pair< uint32_t, uint32_t > >& missing_mp) {
+                                          const uint32_t size_to_read,
+                                          std::vector< std::pair< uint32_t, uint32_t > >& missing_mp) {
     bool inserted{false};
     const auto size{buf->insert_missing_pieces(offset, size_to_read, missing_mp)};
     /* check if buffer is still part of cache or not */
@@ -259,8 +257,9 @@ bool Cache< K, V >::insert_missing_pieces(const boost::intrusive_ptr< V >& buf, 
 }
 
 template < typename K, typename V >
-typename Cache< K, V >::update_result Cache< K, V >::update(const K& k, const sisl::blob& b, const uint32_t value_offset,
-                        boost::intrusive_ptr< V >* const out_smart_buf) {
+typename Cache< K, V >::update_result Cache< K, V >::update(const K& k, const sisl::blob& b,
+                                                            const uint32_t value_offset,
+                                                            boost::intrusive_ptr< V >* const out_smart_buf) {
     update_result ret{false, false};
     bool appended{false};
 
@@ -312,7 +311,7 @@ bool Cache< K, V >::erase(const K& k, boost::intrusive_ptr< V >* const out_bbuf)
  */
 template < typename K, typename V >
 bool Cache< K, V >::erase(const K& k, const uint32_t offset, const uint32_t size,
-                       boost::intrusive_ptr< V >* const ret_removed_buf) {
+                          boost::intrusive_ptr< V >* const ret_removed_buf) {
     const uint64_t hash_code{cache_detail::compute_hash< K >(k)};
     boost::intrusive_ptr< V > out_removed_buf;
 
@@ -324,8 +323,7 @@ bool Cache< K, V >::erase(const K& k, const uint32_t offset, const uint32_t size
         out_removed_buf->lock();
         if (out_removed_buf->get_cache_state() == cache_buf_state::CACHE_INSERTED) {
             // We successfully removed the entry from hash set. So we can remove the record from eviction list as well.
-            COUNTER_DECREMENT(this->m_metrics, cache_size,
-                              V::get_size(&(out_removed_buf->get_evict_record_mutable())));
+            COUNTER_DECREMENT(this->m_metrics, cache_size, V::get_size(&(out_removed_buf->get_evict_record_mutable())));
             COUNTER_INCREMENT(this->m_metrics, cache_erase_count, 1);
             COUNTER_DECREMENT(this->m_metrics, cache_object_count, 1);
             this->m_evictors[hash_code % EVICTOR_PARTITIONS]->delete_record(
@@ -340,10 +338,10 @@ bool Cache< K, V >::erase(const K& k, const uint32_t offset, const uint32_t size
 };
 
 template < typename K, typename V >
-template < typename CallbackType, typename>
+template < typename CallbackType, typename >
 void Cache< K, V >::safe_erase(const boost::intrusive_ptr< V >& buf, CallbackType&& cb) {
     const K* const pk{V::extract_key(*buf)};
-    safe_erase(*pk, std::forward < CallbackType>(cb));
+    safe_erase(*pk, std::forward< CallbackType >(cb));
 }
 
 /* It remove the buffer only when ref_cnt becomes zero. If it is not zero, it set the state
@@ -356,7 +354,7 @@ template < typename CallbackType, typename >
 void Cache< K, V >::safe_erase(const K& k, CallbackType&& cb) {
     /* we don't support partial cache entry for safe_erase. */
     const uint64_t hash_code{cache_detail::compute_hash< K >(k)};
-    boost::intrusive_ptr< V> out_buf;
+    boost::intrusive_ptr< V > out_buf;
     bool can_remove{false};
 
     const bool found{this->m_hash_set.safe_remove(k, hash_code, can_remove, [&out_buf](V* const about_to_remove_ptr) {
@@ -371,8 +369,7 @@ void Cache< K, V >::safe_erase(const K& k, CallbackType&& cb) {
             if (out_buf->get_cache_state() == cache_buf_state::CACHE_INSERTED) {
                 COUNTER_INCREMENT(this->m_metrics, cache_erase_count, 1);
                 COUNTER_DECREMENT(this->m_metrics, cache_object_count, 1);
-                COUNTER_DECREMENT(this->m_metrics, cache_size,
-                                  V::get_size(&(out_buf->get_evict_record_mutable())));
+                COUNTER_DECREMENT(this->m_metrics, cache_size, V::get_size(&(out_buf->get_evict_record_mutable())));
                 this->m_evictors[hash_code % EVICTOR_PARTITIONS]->delete_record((out_buf)->get_evict_record_mutable());
                 out_buf->on_cache_evict();
             }
@@ -383,6 +380,6 @@ void Cache< K, V >::safe_erase(const K& k, CallbackType&& cb) {
         }
     } else {
         HS_ASSERT_CMP(DEBUG, can_remove, ==, false);
-        cache_detail::invoke_callback< erase_comp_cb >(std::forward<CallbackType>(cb), out_buf);
+        cache_detail::invoke_callback< erase_comp_cb >(std::forward< CallbackType >(cb), out_buf);
     }
 };

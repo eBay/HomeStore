@@ -292,8 +292,7 @@ public:
     uint32_t get_data_offset() const { return m_data_offset; }
 
     bool update_missing_piece(const uint32_t offset, const uint32_t size, uint8_t* const ptr) {
-        const bool inserted{get_memvec().update_missing_piece(m_data_offset + offset, size, ptr)};
-        if (inserted) { init(); }
+        const bool inserted{get_memvec().update_missing_piece(m_data_offset + offset, size, ptr, [this]() { init(); })};
         return inserted;
     }
 
@@ -355,10 +354,22 @@ public:
     }
 
     friend void intrusive_ptr_release(CacheBufferType* const buf) {
-        if (buf->m_refcount.decrement_testz()) {
+        const K k{*(extract_key(*buf))};
+        auto* const cache{buf->m_cache};
+        const bool can_free{buf->can_free()};
+        const bool one_left{buf->m_refcount.decrement_test_eq(1)};
+
+        // NOTE: The safe_erase is needed in order to reclaim memory because of not
+        // removing via erase so ref count will remain at 1 without it
+        if (one_left) {
+            if (can_free) {
+                assert(cache != nullptr);
+                cache->safe_erase(k);
+            }
+        } else if (buf->m_refcount.testz()) {
             // free the record
             buf->free_yourself();
-        }
+        }; 
     }
 
     virtual void init() {}

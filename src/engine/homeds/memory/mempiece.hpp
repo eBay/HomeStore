@@ -296,7 +296,7 @@ struct MemPiece : public sisl::ObjLifeCounter< MemPiece > {
 struct MemVector : public sisl::ObjLifeCounter< MemVector > {
 private:
     std::vector< MemPiece > m_list;
-    typedef std::mutex lock_type;
+    typedef std::recursive_mutex lock_type;
     mutable lock_type m_mtx;
     sisl::atomic_counter< uint16_t > m_refcnt; // Refcount
 
@@ -535,7 +535,8 @@ public:
         return inserted_size;
     }
 
-    bool update_missing_piece(const uint32_t offset, const size_t size, uint8_t* const ptr) {
+    template < typename InitCallbackType >
+    bool update_missing_piece(const uint32_t offset, const size_t size, uint8_t* const ptr, InitCallbackType&& init_callback) {
         std::lock_guard< lock_type > mtx{m_mtx};
         size_t new_ind{0};
         bool inserted{false};
@@ -545,6 +546,7 @@ public:
         if (mp.ptr() == nullptr) {
             mp.set_ptr(ptr);
             inserted = true;
+            std::forward< InitCallbackType >(init_callback)();
         }
         assert(size == mp.size());
         return inserted;
