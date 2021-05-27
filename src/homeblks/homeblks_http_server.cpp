@@ -53,8 +53,11 @@ void HomeBlksHttpServer::start() {
 void HomeBlksHttpServer::stop() { m_http_server->stop(); }
 
 void HomeBlksHttpServer::get_version(sisl::HttpCallData cd) {
-    const std::string ver_str{fmt::format("HomeBlks: {0}, IOMgr: {1}, SISL: {2}",
-            HomeBlks::version, iomgr::get_version(), sisl::get_version())};
+    auto vers{sisl::VersionMgr::getVersions()};
+    std::string ver_str{""};
+    for (auto v : vers) {
+        ver_str += fmt::format("{0}: {1}; ", v.first, v.second);
+    }
     pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, ver_str);
 }
 
