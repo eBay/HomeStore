@@ -21,6 +21,9 @@
 SDS_LOGGING_DECL(metablk)
 
 namespace homestore {
+
+MetaBlkMgr* MetaBlkMgrSI() { return MetaBlkMgr::instance(); }
+
 // define statics
 std::unique_ptr< MetaBlkMgr > MetaBlkMgr::s_instance{};
 

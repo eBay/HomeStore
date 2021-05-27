@@ -328,6 +328,6 @@ private:
     [[nodiscard]] nlohmann::json get_status(const int log_level) const;
 };
 
-static MetaBlkMgr* MetaBlkMgrSI() { return MetaBlkMgr::instance(); }
+extern MetaBlkMgr* MetaBlkMgrSI();
 
 } // namespace homestore
