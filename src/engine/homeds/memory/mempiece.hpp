@@ -184,6 +184,7 @@ struct MemPiece : public sisl::ObjLifeCounter< MemPiece > {
     uint8_t* ptr() const { return m_ptr; }
 
     uint32_t size() const { return decode(m_size); }
+    uint32_t buffer_size() const { return (iomanager.iobuf_size(ptr())); }
 
     uint32_t offset() const { return decode(m_offset); }
 
@@ -473,6 +474,15 @@ public:
         uint32_t s{0};
         for (const auto& entry : m_list) {
             s += entry.size();
+        }
+        return s;
+    }
+
+    uint32_t get_buffer_size() const {
+        std::lock_guard< lock_type > mtx{m_mtx};
+        uint32_t s{0};
+        for (const auto& entry : m_list) {
+            s += entry.buffer_size();
         }
         return s;
     }

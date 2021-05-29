@@ -243,13 +243,13 @@ bool Cache< K, V >::insert_missing_pieces(const boost::intrusive_ptr< V >& buf, 
                                           const uint32_t size_to_read,
                                           std::vector< std::pair< uint32_t, uint32_t > >& missing_mp) {
     bool inserted{false};
-    const auto size{buf->insert_missing_pieces(offset, size_to_read, missing_mp)};
-    /* check if buffer is still part of cache or not */
+    const auto cache_size{buf->insert_missing_pieces(offset, size_to_read, missing_mp)};
     {
         buf->lock();
+        /* check if buffer is still part of cache or not */
         if (buf->get_cache_state() == cache_buf_state::CACHE_INSERTED) {
-            inserted = IntrusiveCacheType::modify_size(*buf, size);
-            if (inserted) { buf->modify_cache_size(size); }
+            IntrusiveCacheType::modify_size(*buf, cache_size);
+            buf->modify_cache_size(cache_size);
         }
         buf->unlock();
     }

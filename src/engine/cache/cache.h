@@ -222,10 +222,11 @@ public:
     bool is_btree{false};
 #endif
 
-    CacheBuffer() : CacheRecord{this},
+    CacheBuffer() :
+            CacheRecord{this},
             m_mem{nullptr},
             m_refcount{0},
-            m_data_offset{std::numeric_limits<uint32_t>::max()},
+            m_data_offset{std::numeric_limits< uint32_t >::max()},
             m_cache_size{0},
             m_can_free{false},
             m_cache{nullptr},
@@ -316,7 +317,7 @@ public:
     void set_memvec(boost::intrusive_ptr< homeds::MemVector > vec, const uint32_t offset, const uint32_t size) {
         m_mem = std::move(vec);
         m_data_offset = offset;
-        m_cache_size = size;
+        m_cache_size = m_mem->get_buffer_size();
     }
 
     void modify_cache_size(const uint32_t size) { m_cache_size += size; }
@@ -404,7 +405,7 @@ public:
 
     static uint32_t get_size(const CurrentEvictor::EvictRecordType* const rec) {
         const CacheBufferType* cbuf{static_cast< CacheBufferType* >(rec->cache_buffer)};
-        return cbuf->m_cache_size;
+        return cbuf->get_cache_size();
     }
 };
 
