@@ -7,7 +7,7 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <nlohmann/json.hpp>
 #include <sds_logging/logging.h>
-#include <version.hpp>
+#include <sisl/version.hpp>
 
 #include "engine/common/homestore_status_mgr.hpp"
 #include "engine/device/blkbuffer.hpp"
@@ -75,7 +75,7 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
 #else
             LOGINFO("HomeBlks RELEASE version: {}", HomeBlks::version);
 #endif
-            sisl::VersionMgr::addVersion("HomeBlks", version::Semver200_version(PACKAGE_VERSION));
+            sisl::VersionMgr::addVersion(PACKAGE_NAME, version::Semver200_version(PACKAGE_VERSION));
             MetaBlkMgrSI()->register_handler("HOMEBLK", HomeBlks::meta_blk_found_cb,
                                              HomeBlks::meta_blk_recovery_comp_cb);
             MetaBlkMgrSI()->register_handler("VOLUME", Volume::meta_blk_found_cb, nullptr);
