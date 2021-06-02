@@ -27,7 +27,7 @@ pipeline {
             steps {
                 script {
                     sh(script: "sed -Ei 's,version = .*\"([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1-${env.BUILD_NUMBER}\",' conanfile.py")
-                    BUILD_MISSING = "--build cascade --build missing"
+                    BUILD_MISSING = "--build missing"
                     LAST_COMMITS = sh(script: "git log -n 2 --pretty=short", returnStdout: true)
                     BUILD_TEST_MODE = ""
                 }
