@@ -176,6 +176,7 @@ public:
         return (get_data_blkstore()->attach_prepare_cp(cur_ba_cp));
     }
 
+
 protected:
     virtual data_blkstore_t::comp_callback data_completion_cb() = 0;
     virtual void process_vdev_error(vdev_info_block* vb) = 0;

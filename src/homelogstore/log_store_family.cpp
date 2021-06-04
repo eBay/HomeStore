@@ -25,8 +25,7 @@ void LogStoreFamily::meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_vi
 
 void LogStoreFamily::start(const bool format, logdev_blkstore_t* blk_store) {
     m_log_dev.register_store_found_cb(bind_this(LogStoreFamily::on_log_store_found, 2));
-    m_log_dev.register_append_cb_with_flush_lock(bind_this(LogStoreFamily::on_io_completion_with_flush_lock, 5));
-    m_log_dev.register_append_cb_with_flush_unlock(bind_this(LogStoreFamily::on_io_completion_with_flush_unlock, 5));
+    m_log_dev.register_append_cb(bind_this(LogStoreFamily::on_io_completion, 5));
     m_log_dev.register_logfound_cb(bind_this(LogStoreFamily::on_logfound, 4));
 
     // Start the logdev, which loads the device in case of recovery.
@@ -136,20 +135,10 @@ void LogStoreFamily::on_log_store_found(const logstore_id_t store_id, const logs
     if (l_info.m_on_log_store_opened) l_info.m_on_log_store_opened(l_info.m_log_store);
 }
 
-static thread_local std::vector< HomeLogStore* > s_cur_flush_batch_stores;
+static thread_local std::vector< std::shared_ptr< HomeLogStore > > s_cur_flush_batch_stores;
 
-void LogStoreFamily::on_io_completion_with_flush_unlock(const logstore_id_t id, const logdev_key ld_key,
-                                                        const logdev_key flush_ld_key,
-                                                        const uint32_t nremaining_in_batch, void* const ctx) {
-    auto* const req{static_cast< logstore_req* >(ctx)};
-    HomeLogStore* const log_store{req->log_store};
-
-    if (req->is_write) { log_store->on_write_completion_with_flush_unlock(req, ld_key); }
-}
-
-void LogStoreFamily::on_io_completion_with_flush_lock(const logstore_id_t id, const logdev_key ld_key,
-                                                      const logdev_key flush_ld_key, const uint32_t nremaining_in_batch,
-                                                      void* const ctx) {
+void LogStoreFamily::on_io_completion(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_ld_key,
+                                      const uint32_t nremaining_in_batch, void* const ctx) {
     auto* const req{static_cast< logstore_req* >(ctx)};
     HomeLogStore* const log_store{req->log_store};
 
@@ -158,11 +147,11 @@ void LogStoreFamily::on_io_completion_with_flush_lock(const logstore_id_t id, co
         if ((it == std::end(m_last_flush_info)) || (it->second != flush_ld_key.idx)) {
             // first time completion in this batch for a given store_id
             m_last_flush_info.insert_or_assign(id, flush_ld_key.idx);
-            s_cur_flush_batch_stores.push_back(log_store);
+            s_cur_flush_batch_stores.push_back(log_store->shared_from_this());
         }
 
         HS_LOG_ASSERT_EQ(log_store->m_store_id, id, "Expecting store id in log store and io completion to match");
-        log_store->on_write_completion_with_flush_lock(req, ld_key);
+        log_store->on_write_completion(req, ld_key);
 
         if (nremaining_in_batch == 0) {
             // This batch is completed, call all log stores participated in this batch about the end of batch

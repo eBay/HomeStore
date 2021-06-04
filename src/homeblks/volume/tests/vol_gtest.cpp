@@ -233,8 +233,8 @@ public:
             mod_tests[i]->run_start();
         }
         try_run_one_iteration();
-        if (time_to_stop()) { notify_completions(); }
         VolInterface::get_instance()->submit_io_batch();
+        if (time_to_stop()) { notify_completions(); }
     }
 
     virtual void try_run_one_iteration() {
@@ -252,6 +252,7 @@ public:
     }
 
     void notify_completions() {
+        VolInterface::get_instance()->submit_io_batch();
         std::unique_lock< std::mutex > lk(m_mutex);
         LOGDEBUG("notifying completions");
         if (is_job_done()) {

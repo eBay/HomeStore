@@ -311,7 +311,7 @@ private:
     void do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
     blk_buf_t get_valid_buf(const std::vector< blk_buf_t >& bbuf, bool& rewrite);
 
-    void call_multi_vol_completions();
+    virtual void call_multi_completions() override;
     void migrate_sb();
     void migrate_homeblk_sb();
     void migrate_volume_sb();

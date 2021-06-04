@@ -144,7 +144,7 @@ void HomeLogStore::read_async(logstore_seq_num_t seq_num, void* cookie, const lo
 }
 #endif
 
-void HomeLogStore::on_write_completion_with_flush_lock(logstore_req* const req, const logdev_key ld_key) {
+void HomeLogStore::on_write_completion(logstore_req* const req, const logdev_key ld_key) {
     // Upon completion, create the mapping between seq_num and log dev key
     m_records.update(req->seq_num, [&](logstore_record& rec) -> bool {
         rec.m_dev_key = ld_key;
@@ -155,9 +155,6 @@ void HomeLogStore::on_write_completion_with_flush_lock(logstore_req* const req, 
 
     // Update the maximum lsn we have seen for this batch for this store, it is needed to create truncation barrier
     m_flush_batch_max_lsn = std::max(m_flush_batch_max_lsn, req->seq_num);
-}
-
-void HomeLogStore::on_write_completion_with_flush_unlock(logstore_req* const req, const logdev_key ld_key) {
     HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logstore_append_latency, get_elapsed_time_us(req->start_time));
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 }

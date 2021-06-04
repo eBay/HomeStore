@@ -96,7 +96,7 @@ void CPWatchdog::set_cp(hs_cp* cp) {
 }
 
 void CPWatchdog::stop() {
-    iomanager.cancel_timer(m_timer_hdl);
+    //    iomanager.cancel_timer(m_timer_hdl);
     m_timer_hdl = iomgr::null_timer_handle;
     {
         std::unique_lock< std::shared_mutex > lk(m_cp_mtx);
@@ -1463,7 +1463,7 @@ void StaticIndxMgr::init() {
     m_cp_mgr = std::unique_ptr< HomeStoreCPMgr >(new HomeStoreCPMgr());
     m_read_blk_tracker = std::unique_ptr< Blk_Read_Tracker >(new Blk_Read_Tracker(IndxMgr::safe_to_free_blk));
     /* start the timer for blkalloc checkpoint */
-#ifdef NDEBUG
+#ifndef NDEBUG
     HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
         s.generic.blkalloc_cp_timer_us = 1000000; // setting to 1 sec for debug build
     });

@@ -591,12 +591,7 @@ public:
      * offset)
      * b) Context: The context which was passed to append method.
      */
-    void register_append_cb_with_flush_lock(const log_append_comp_callback& cb) {
-        m_append_comp_cb_with_flush_lock = cb;
-    }
-    void register_append_cb_with_flush_unlock(const log_append_comp_callback& cb) {
-        m_append_comp_cb_with_flush_unlock = cb;
-    }
+    void register_append_cb(const log_append_comp_callback& cb) { m_append_comp_cb = cb; }
 
     /**
      * @brief Register the callback to receive new logs during recovery from the device.
@@ -686,6 +681,7 @@ public:
     void update_store_superblk(const logstore_id_t idx, const logstore_superblk& meta, const bool persist_now);
 
     void get_status(const int verbosity, nlohmann::json& out_json) const;
+    bool flush_if_needed();
 
 private:
     [[nodiscard]] LogGroup* make_log_group(const uint32_t estimated_records) {
@@ -696,7 +692,6 @@ private:
 
     [[nodiscard]] LogGroup* prepare_flush(const int32_t estimated_record);
     void do_flush(LogGroup* const lg);
-    void flush_if_needed(const uint32_t new_record_size = 0, logid_t new_idx = -1);
     void flush_by_size(const uint32_t min_threshold, const uint32_t new_record_size = 0, const logid_t new_idx = -1);
     void on_flush_completion(LogGroup* const lg);
     void do_load(const off_t offset);
@@ -718,6 +713,7 @@ private:
     bool m_stopped{false}; // Is Logdev stopped. We don't need lock here, because it is updated under flush lock
     logstore_family_id_t m_family_id; // The family id this logdev is part of
     logdev_blkstore_t* m_blkstore{nullptr};
+    boost::intrusive_ptr< HomeStoreBase > m_hb; // Back pointer to homestore
 
     std::map< logid_t, logstore_id_t > m_garbage_store_ids;
     Clock::time_point m_last_flush_time;
@@ -726,8 +722,7 @@ private:
     logid_t m_last_truncate_idx{-1};
 
     crc32_t m_last_crc{INVALID_CRC32_VALUE};
-    log_append_comp_callback m_append_comp_cb_with_flush_lock{nullptr};
-    log_append_comp_callback m_append_comp_cb_with_flush_unlock{nullptr};
+    log_append_comp_callback m_append_comp_cb{nullptr};
     log_found_callback m_logfound_cb{nullptr};
     store_found_callback m_store_found_cb{nullptr};
 
@@ -740,8 +735,6 @@ private:
     std::mutex m_comp_mutex;
     std::vector< flush_blocked_callback >* m_block_flush_q{nullptr};
 
-    // Timer handle
-    iomgr::timer_handle_t m_flush_timer_hdl;
     void* m_sb_cookie{nullptr};
 
     // Pool for creating log group

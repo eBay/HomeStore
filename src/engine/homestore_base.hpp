@@ -79,6 +79,7 @@ public:
     virtual DeviceManager* get_device_manager() = 0;
     virtual logdev_blkstore_t* get_data_logdev_blkstore() const = 0;
     virtual logdev_blkstore_t* get_ctrl_logdev_blkstore() const = 0;
+    virtual void call_multi_completions() = 0;
 
     HomeStoreStatusMgr* status_mgr();
 };

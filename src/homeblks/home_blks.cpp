@@ -329,7 +329,7 @@ SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
 
 void HomeBlks::submit_io_batch() {
     iomanager.default_drive_interface()->submit_batch();
-    call_multi_vol_completions();
+    call_multi_completions();
 }
 
 HomeBlks* HomeBlks::instance() { return static_cast< HomeBlks* >(HomeStoreBase::instance()); }
@@ -387,7 +387,7 @@ void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, const io_comp_call
 
 void HomeBlks::attach_end_of_batch_cb(const end_of_batch_callback& cb) {
     m_cfg.end_of_batch_cb = cb;
-    iomanager.default_drive_interface()->attach_end_of_batch_cb([this](int nevents) { call_multi_vol_completions(); });
+    iomanager.default_drive_interface()->attach_end_of_batch_cb([this](int nevents) { call_multi_completions(); });
 }
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
@@ -753,7 +753,7 @@ vol_state HomeBlks::get_state(VolumePtr vol) { return vol->get_state(); }
 
 bool HomeBlks::fix_tree(VolumePtr vol, bool verify) { return vol->fix_mapping_btree(verify); }
 
-void HomeBlks::call_multi_vol_completions() {
+void HomeBlks::call_multi_completions() {
     auto v_comp_events = 0;
 
     if (s_io_completed_volumes) {

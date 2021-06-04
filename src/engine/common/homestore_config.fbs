@@ -76,7 +76,7 @@ table Device {
 
 table LogStore {
     // Size it needs to group upto before it flushes
-    flush_threshold_size: uint64 = 512 (hotswap);
+    flush_threshold_size: uint64 = 64 (hotswap);
 
     // Time interval to wake up to check if flush is needed
     flush_timer_frequency_us: uint64 = 500 (hotswap);
@@ -93,6 +93,9 @@ table LogStore {
 
     // Max size upto which data will be inlined instead of creating a separate value
     optimal_inline_data_size: uint64 = 512 (hotswap);
+
+    // Max iteration flush thread run before yielding
+    try_flush_iteration: uint64 = 10240(hotswap);
 }
 
 table Generic {
@@ -104,14 +107,14 @@ table Generic {
 
     cp_watchdog_timer_sec : uint32 = 60; // it checks if cp stuck every 60 seconds
 
-    cache_max_throttle_cnt : uint64 = 10;
+    cache_max_throttle_cnt : uint64 = 512;
 
     cache_min_throttle_cnt : uint64 = 5;
 }
 
 table ResourceLimits {
     /* it is going to use 2 times of this space because of two concurrent cps */
-    dirty_buf_percent: uint32 = 5 (hotswap);
+    dirty_buf_percent: uint32 = 1 (hotswap);
     
     /* it is going to use 2 times of this space because of two concurrent cps */
     free_blk_cnt: uint32 = 1000000 (hotswap);

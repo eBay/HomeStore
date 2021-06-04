@@ -1488,7 +1488,6 @@ private:
 
             HS_ASSERT_CMP(DEBUG, start_ind, <=, end_ind);
             if (s_match.size() > 0) { my_node->remove(start_ind, end_ind); }
-            BT_DEBUG_ASSERT_CMP(s_replace_kv.size(), >=, s_match.size(), my_node);
 
             for (const auto& pair : s_replace_kv) { // insert is based on compare() of BtreeKey
                 auto status = my_node->insert(pair.first, pair.second);

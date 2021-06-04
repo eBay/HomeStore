@@ -39,7 +39,8 @@ struct logstore_record {
 };
 
 struct logstore_req {
-    HomeLogStore* log_store;    // Backpointer to the log store
+    HomeLogStore* log_store; // Backpointer to the log store. We are not storing shared_ptr as user should not destroy
+                             // it until all ios are not completed.
     logstore_seq_num_t seq_num; // Log store specific seq_num (which could be monotonically increaseing with logstore)
     sisl::io_blob data;         // Data blob containing data
     void* cookie;               // User generated cookie (considered as opaque)
@@ -200,6 +201,7 @@ public:
      */
     void device_truncate(const device_truncate_cb_t& cb = nullptr, const bool wait_till_done = false,
                          const bool dry_run = false);
+    void send_flush_msg();
 
     [[nodiscard]] nlohmann::json dump_log_store(const log_dump_req& dum_req);
     [[nodiscard]] nlohmann::json get_status(const int verbosity) const;
@@ -211,13 +213,22 @@ public:
     static LogDev& ctrl_logdev() { return HomeLogStoreMgr::instance().ctrl_log_family()->logdev(); }
 
 private:
-    void start_truncate_thread();
+    void start_threads();
+    void flush_if_needed();
+    void stop_flush_thread();
 
 private:
     boost::intrusive_ptr< HomeStoreBase > m_hb; // Back pointer to homestore
+    std::mutex m_mtx;                           // mutex to protect m_logstore_families pointer
     std::array< std::unique_ptr< LogStoreFamily >, num_log_families > m_logstore_families;
+    std::mutex m_cv_mtx;
+    std::condition_variable m_flush_thread_cv; // cv to wait for flush thread to stop
     HomeLogStoreMgrMetrics m_metrics;
     iomgr::io_thread_t m_truncate_thread;
+    iomgr::io_thread_t m_flush_thread;
+    // Timer handle
+    iomgr::timer_handle_t m_flush_timer_hdl;
+    bool m_flush_thread_stopped = false;
 };
 
 static HomeLogStoreMgr& HomeLogStoreMgrSI() { return HomeLogStoreMgr::instance(); }
@@ -482,8 +493,7 @@ public:
 private:
     [[nodiscard]] const truncation_info& pre_device_truncation();
     void post_device_truncation(const logdev_key& trunc_upto_key);
-    void on_write_completion_with_flush_lock(logstore_req* const req, const logdev_key ld_key);
-    void on_write_completion_with_flush_unlock(logstore_req* const req, const logdev_key ld_key);
+    void on_write_completion(logstore_req* const req, const logdev_key ld_key);
     void on_read_completion(logstore_req* const req, const logdev_key ld_key);
     void on_log_found(const logstore_seq_num_t seq_num, const logdev_key ld_key, const log_buffer buf);
     void on_batch_completion(const logdev_key& flush_batch_ld_key);

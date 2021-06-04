@@ -39,6 +39,7 @@ void HomeLogStoreMgr::ctrl_meta_blk_found_cb(meta_blk* const mblk, const sisl::b
 
 void HomeLogStoreMgr::start(const bool format) {
     m_hb = HomeStoreBase::safe_instance();
+    m_flush_thread_stopped = false;
     m_hb->status_mgr()->register_status_cb("LogStore", bind_this(HomeLogStoreMgr::get_status, 1));
 
     // Start the logstore families
@@ -46,10 +47,15 @@ void HomeLogStoreMgr::start(const bool format) {
     m_logstore_families[CTRL_LOG_FAMILY_IDX]->start(format, m_hb->get_ctrl_logdev_blkstore());
 
     // Create an truncate thread loop which handles truncation which does sync IO
-    start_truncate_thread();
+    start_threads();
 }
 
 void HomeLogStoreMgr::stop() {
+    stop_flush_thread();
+    {
+        std::unique_lock< std::mutex > lk{m_cv_mtx};
+        m_flush_thread_cv.wait(lk, [&] { return m_flush_thread_stopped; });
+    }
     for (auto& f : m_logstore_families) {
         f->stop();
     }
@@ -100,27 +106,75 @@ void HomeLogStoreMgr::device_truncate(const device_truncate_cb_t& cb, const bool
     }
 }
 
-void HomeLogStoreMgr::start_truncate_thread() {
+void HomeLogStoreMgr::stop_flush_thread() {
+    iomanager.run_on(m_flush_thread, [this]([[maybe_unused]] const io_thread_addr_t addr) {
+        iomanager.cancel_timer(m_flush_timer_hdl);
+        std::unique_lock< std::mutex > lk{m_cv_mtx};
+        m_flush_thread_stopped = true;
+        m_flush_thread_cv.notify_one();
+    });
+}
+
+void HomeLogStoreMgr::flush_if_needed() {
+    uint32_t reset_cnt = 0;
+    for (uint32_t i = 0; i < HS_DYNAMIC_CONFIG(logstore.try_flush_iteration); ++i) {
+        if (m_flush_thread_stopped) return;
+        for (auto& f : m_logstore_families) {
+            if (f->logdev().flush_if_needed() && reset_cnt < HS_DYNAMIC_CONFIG(logstore.try_flush_iteration) / 2) {
+                // reset the counter again
+                i = 0;
+                ++reset_cnt;
+            }
+        }
+    }
+}
+
+void HomeLogStoreMgr::send_flush_msg() {
+    iomanager.run_on(m_flush_thread, [this]([[maybe_unused]] const io_thread_addr_t addr) { flush_if_needed(); });
+}
+
+void HomeLogStoreMgr::start_threads() {
     // these should be thread local so that they stay in scope in the lambda in case function ends
     // before lambda completes
     static thread_local std::condition_variable cv;
     static thread_local std::mutex mtx;
+    int thread_cnt = 0;
 
     m_truncate_thread = nullptr;
-    auto sthread = sisl::named_thread("logstore_truncater", [this, &tl_cv = cv, &tl_mtx = mtx]() {
-        iomanager.run_io_loop(false, nullptr, ([this, &tl_cv, &tl_mtx](bool is_started) {
+    auto sthread = sisl::named_thread("logstore_truncater", [this, &tl_cv = cv, &tl_mtx = mtx, &thread_cnt]() {
+        iomanager.run_io_loop(false, nullptr, ([this, &tl_cv, &tl_mtx, &thread_cnt](bool is_started) {
                                   if (is_started) {
                                       std::unique_lock< std::mutex > lk{tl_mtx};
                                       m_truncate_thread = iomanager.iothread_self();
+                                      ++thread_cnt;
                                       tl_cv.notify_one();
                                   }
                               }));
     });
+    sthread.detach();
     {
         std::unique_lock< std::mutex > lk{mtx};
-        cv.wait(lk, [this] { return (m_truncate_thread != nullptr); });
+        cv.wait(lk, [&thread_cnt] { return (thread_cnt == 1); });
     }
+    thread_cnt = 0;
+    sthread = sisl::named_thread("flush_thread", [this, &tl_cv = cv, &tl_mtx = mtx, &thread_cnt]() {
+        iomanager.run_io_loop(false, nullptr, ([this, &tl_cv, &tl_mtx, &thread_cnt](bool is_started) {
+                                  if (is_started) {
+                                      std::unique_lock< std::mutex > lk{tl_mtx};
+                                      m_flush_thread = iomanager.iothread_self();
+                                      ++thread_cnt;
+                                      tl_cv.notify_one();
+                                      m_flush_timer_hdl = iomanager.schedule_thread_timer(
+                                          HS_DYNAMIC_CONFIG(logstore.flush_timer_frequency_us) * 1000,
+                                          true /* recurring */, nullptr, [this](void* cookie) { flush_if_needed(); });
+                                  }
+                              }));
+    });
     sthread.detach();
+    {
+        std::unique_lock< std::mutex > lk{mtx};
+        cv.wait(lk, [&thread_cnt] { return (thread_cnt == 1); });
+    }
 }
 
 nlohmann::json HomeLogStoreMgr::dump_log_store(const log_dump_req& dump_req) {
@@ -152,10 +206,10 @@ HomeLogStoreMgrMetrics::HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores
                      {"op", "write"});
     REGISTER_COUNTER(logstore_read_count, "Total number of read requests to log stores", "logstore_op_count",
                      {"op", "read"});
-    REGISTER_COUNTER(logdev_flush_by_size_count, "Total flushing attempted because of filled buffer");
-    REGISTER_COUNTER(logdev_flush_by_timer_count, "Total flushing attempted because of expired timer");
     REGISTER_COUNTER(logdev_back_to_back_flushing, "Number of attempts to do back to back flush prepare");
 
+    REGISTER_HISTOGRAM(logdev_flush_msg_time_ns, "logdev flush msg time in ns");
+    REGISTER_HISTOGRAM(completion_upcall_start_time_ns, "completion_upcall_start_time in ns");
     REGISTER_HISTOGRAM(logstore_append_latency, "Logstore append latency", "logstore_op_latency", {"op", "write"});
     REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"});
     REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size",

@@ -678,7 +678,7 @@ public:
         }
 
         const auto ret{m_vdev.pwrite(buf, count, offset, req)};
-        if (!req) {
+        if (!req || req->isSyncCall) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(blkstore_op_start_time));
         }
         return ret;
@@ -719,9 +719,11 @@ public:
         const Clock::time_point blkstore_op_start_time{Clock::now()};
         if (req) {
             req->start_time();
-        } 
+        } else {
+            blkstore_op_start_time = Clock::now();
+        }
         const auto ret{m_vdev.write(buf, count, req)};
-        if (!req) {
+        if (!req || req->isSyncCall) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(blkstore_op_start_time));
         }
         return ret;
@@ -732,9 +734,11 @@ public:
         const Clock::time_point blkstore_op_start_time{Clock::now()};
         if (req) {
             req->start_time();
-        } 
+        } else {
+            blkstore_op_start_time = Clock::now();
+        }
         const auto ret{m_vdev.preadv(iov, iovcnt, offset, req)};
-        if (!req) {
+        if (!req || req->isSyncCall) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_read_latency, get_elapsed_time_us(blkstore_op_start_time));
         }
         return ret;
@@ -747,7 +751,7 @@ public:
             req->start_time();
         }
         const auto ret{m_vdev.pwritev(iov, iovcnt, offset, req)};
-        if (!req) {
+        if (!req || req->isSyncCall) {
             HISTOGRAM_OBSERVE(m_metrics, blkstore_drive_write_latency, get_elapsed_time_us(blkstore_op_start_time));
         }
         return ret;

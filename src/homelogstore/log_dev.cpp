@@ -27,12 +27,12 @@ void LogDev::meta_blk_found(meta_blk* const mblk, const sisl::byte_view buf, con
 }
 
 void LogDev::start(const bool format, logdev_blkstore_t* blk_store) {
-    HS_ASSERT(LOGMSG, (m_append_comp_cb_with_flush_lock != nullptr), "Expected Append callback to be registered");
-    HS_ASSERT(LOGMSG, (m_append_comp_cb_with_flush_unlock != nullptr), "Expected Append callback to be registered");
+    HS_ASSERT(LOGMSG, (m_append_comp_cb != nullptr), "Expected Append callback to be registered");
     HS_ASSERT(LOGMSG, (m_store_found_cb != nullptr), "Expected Log store found callback to be registered");
     HS_ASSERT(LOGMSG, (m_logfound_cb != nullptr), "Expected Logs found callback to be registered");
 
     m_blkstore = blk_store;
+    m_hb = HomeStoreBase::safe_instance();
     for (uint32_t i = 0; i < max_log_group; ++i) {
         m_log_group_pool[i].start();
     }
@@ -60,11 +60,6 @@ void LogDev::start(const bool format, logdev_blkstore_t* blk_store) {
         m_log_records->reinit(m_log_idx);
         m_last_flush_idx = m_log_idx - 1;
     }
-
-    // Start a recurring timer which calls flush if pending
-    m_flush_timer_hdl = iomanager.schedule_global_timer(HS_DYNAMIC_CONFIG(logstore.flush_timer_frequency_us) * 1000,
-                                                        true /* recurring */, nullptr, iomgr::thread_regex::all_worker,
-                                                        [this](void* cookie) { flush_if_needed(); });
 }
 
 void LogDev::stop() {
@@ -89,7 +84,6 @@ void LogDev::stop() {
         cv.wait(lk, [&] { return m_stopped; });
     }
 
-    iomanager.cancel_timer(m_flush_timer_hdl);
     m_log_records = nullptr;
     m_logdev_meta.reset();
     m_log_idx.store(0);
@@ -106,6 +100,7 @@ void LogDev::stop() {
     }
 
     THIS_LOGDEV_LOG(INFO, "LogDev stopped successfully");
+    m_hb.reset();
 }
 
 void LogDev::do_load(const off_t device_cursor) {
@@ -172,9 +167,13 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
 
 int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, const sisl::io_blob& data,
                              void* const cb_context) {
+    auto prev_size = m_pending_flush_size.fetch_add(data.size, std::memory_order_relaxed);
     const auto idx{m_log_idx.fetch_add(1, std::memory_order_acq_rel)};
+    auto threshold_size = LogDev::flush_data_threshold_size();
     m_log_records->create(idx, store_id, seq_num, data, cb_context);
-    flush_if_needed(data.size, idx);
+    if (prev_size < threshold_size && (prev_size + data.size) >= threshold_size) {
+        HomeLogStoreMgrSI().send_flush_msg();
+    }
     return idx;
 }
 
@@ -302,50 +301,49 @@ LogGroup* LogDev::prepare_flush(const int32_t estimated_records) {
 // This method checks if in case we were to add a record of size provided, do we enter into a state which exceeds
 // our threshold. If so, it first flushes whats accumulated so far and then add the pending flush size counter with
 // the new record size
-void LogDev::flush_if_needed(const uint32_t new_record_size, logid_t new_idx) {
+bool LogDev::flush_if_needed() {
     // If after adding the record size, if we have enough to flush or if its been too much time before we actually
     // flushed, attempt to flush by setting the atomic bool variable.
-    const auto pending_sz{m_pending_flush_size.fetch_add(new_record_size, std::memory_order_relaxed) + new_record_size};
+    const auto pending_sz{m_pending_flush_size.load(std::memory_order_relaxed)};
     const bool flush_by_size{(pending_sz >= LogDev::flush_data_threshold_size())};
     const bool flush_by_time{
         !flush_by_size && pending_sz &&
         (get_elapsed_time_us(m_last_flush_time) > HS_DYNAMIC_CONFIG(logstore.max_time_between_flush_us))};
 
-    if ((iomanager.am_i_worker_reactor() || iomanager.am_i_tight_loop_reactor()) && (flush_by_size || flush_by_time)) {
+    if (flush_by_size || flush_by_time) {
         bool expected_flushing{false};
-        if (m_is_flushing.compare_exchange_strong(expected_flushing, true, std::memory_order_acq_rel)) {
-            THIS_LOGDEV_LOG(TRACE,
-                            "Flushing now because either pending_size={} is greater than data_threshold={} or "
-                            "elapsed time since last flush={} us is greater than max_time_between_flush={} us",
-                            pending_sz, LogDev::flush_data_threshold_size(), get_elapsed_time_us(m_last_flush_time),
-                            HS_DYNAMIC_CONFIG(logstore.max_time_between_flush_us));
-
-            m_last_flush_time = Clock::now();
-            // We were able to win the flushing competition and now we gather all the flush data and reserve a slot.
-            if (new_idx == -1) new_idx = m_log_idx.load(std::memory_order_relaxed) - 1;
-            if (m_last_flush_idx >= new_idx) {
-                THIS_LOGDEV_LOG(TRACE, "Log idx {} is just flushed", new_idx);
-                unlock_flush();
-                return;
-            }
-            auto* const lg{
-                prepare_flush(new_idx - m_last_flush_idx + 4)}; // Estimate 4 more extra in case of parallel writes
-            if (sisl_unlikely(!lg)) {
-                THIS_LOGDEV_LOG(TRACE, "Log idx {} last_flush_idx {} prepare flush failed", new_idx, m_last_flush_idx);
-                unlock_flush();
-                return;
-            }
-            m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
-
-            COUNTER_INCREMENT_IF_ELSE(HomeLogStoreMgrSI().m_metrics, flush_by_size, logdev_flush_by_size_count,
-                                      logdev_flush_by_timer_count, 1);
-            THIS_LOGDEV_LOG(TRACE, "Flush prepared, flushing data size={}", lg->actual_data_size());
-            do_flush(lg);
-        } else {
-            THIS_LOGDEV_LOG(TRACE,
-                            "Back to back flushing, will let the current flush to finish and perform this flush");
-            COUNTER_INCREMENT(HomeLogStoreMgrSI().m_metrics, logdev_back_to_back_flushing, 1);
+        if (!m_is_flushing.compare_exchange_strong(expected_flushing, true, std::memory_order_acq_rel)) {
+            return false;
         }
+        THIS_LOGDEV_LOG(TRACE,
+                        "Flushing now because either pending_size={} is greater than data_threshold={} or "
+                        "elapsed time since last flush={} us is greater than max_time_between_flush={} us",
+                        pending_sz, LogDev::flush_data_threshold_size(), get_elapsed_time_us(m_last_flush_time),
+                        HS_DYNAMIC_CONFIG(logstore.max_time_between_flush_us));
+
+        m_last_flush_time = Clock::now();
+        // We were able to win the flushing competition and now we gather all the flush data and reserve a slot.
+        auto new_idx = m_log_idx.load(std::memory_order_relaxed) - 1;
+        if (m_last_flush_idx >= new_idx) {
+            THIS_LOGDEV_LOG(TRACE, "Log idx {} is just flushed", new_idx);
+            unlock_flush();
+            return false;
+        }
+        auto* const lg{
+            prepare_flush(new_idx - m_last_flush_idx + 4)}; // Estimate 4 more extra in case of parallel writes
+        if (sisl_unlikely(!lg)) {
+            THIS_LOGDEV_LOG(TRACE, "Log idx {} last_flush_idx {} prepare flush failed", new_idx, m_last_flush_idx);
+            unlock_flush();
+            return false;
+        }
+        auto sz = m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
+        HS_RELEASE_ASSERT_GE((sz - lg->actual_data_size()), 0, "size {} lg size{}", sz, lg->actual_data_size());
+
+        THIS_LOGDEV_LOG(TRACE, "Flush prepared, flushing data size={}", lg->actual_data_size());
+        do_flush(lg);
+        return true;
+    } else {
+        return false;
     }
 }
 
@@ -356,8 +354,15 @@ void LogDev::do_flush(LogGroup* const lg) {
     HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logdev_flush_size_distribution, lg->actual_data_size());
     auto req = logdev_req::make_request();
     req->m_log_group = lg;
+    req->isSyncCall = true;
     THIS_LOGDEV_LOG(TRACE, "vdev offset {} log group total size {}", lg->m_log_dev_offset, lg->header()->total_size());
-    m_blkstore->pwritev(lg->iovecs().data(), static_cast< int >(lg->iovecs().size()), lg->m_log_dev_offset, req);
+    try {
+        m_blkstore->pwritev(lg->iovecs().data(), static_cast< int >(lg->iovecs().size()), lg->m_log_dev_offset, req);
+    } catch (std::exception& e) {
+        THIS_LOGDEV_LOG(ERROR, "Exception: {}", e.what());
+        req->err = std::make_error_condition(std::errc::io_error);
+    }
+    process_logdev_completions(req);
 }
 
 void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
@@ -374,31 +379,34 @@ void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req
 }
 
 void LogDev::on_flush_completion(LogGroup* const lg) {
-    THIS_LOGDEV_LOG(TRACE, "Flush completed for logid[{} - {}]", lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
-    m_log_records->complete(lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
-    m_last_flush_idx = lg->m_flush_log_idx_upto;
-    const auto flush_ld_key{logdev_key{m_last_flush_idx, lg->m_log_dev_offset}};
-    m_last_crc = lg->header()->cur_grp_crc;
+    auto flush_msg_send_time = Clock::now();
+    iomanager.run_on(
+        iomgr::thread_regex::least_busy_worker,
+        [this, lg, flush_msg_send_time]([[maybe_unused]] const io_thread_addr_t addr) {
+            HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logdev_flush_msg_time_ns,
+                              get_elapsed_time_ns(flush_msg_send_time));
+            THIS_LOGDEV_LOG(TRACE, "Flush completed for logid[{} - {}]", lg->m_flush_log_idx_from,
+                            lg->m_flush_log_idx_upto);
 
-    auto from_indx = lg->m_flush_log_idx_from;
-    auto upto_indx = lg->m_flush_log_idx_upto;
-    auto dev_offset = lg->m_log_dev_offset;
-    for (auto idx = from_indx; idx <= upto_indx; ++idx) {
-        auto& record{m_log_records->at(idx)};
-        m_append_comp_cb_with_flush_lock(record.store_id, logdev_key{idx, dev_offset}, flush_ld_key, upto_indx - idx,
-                                         record.context);
-    }
-    {
-        std::unique_lock lk{m_comp_mutex}; // take a lock to prevent completions happening out of order
-        unlock_flush();
-        // Not safe to access log group here after unlock
+            auto completion_upcall_start_time = Clock::now();
+            m_log_records->complete(lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
+            m_last_flush_idx = lg->m_flush_log_idx_upto;
+            const auto flush_ld_key{logdev_key{m_last_flush_idx, lg->m_log_dev_offset}};
+            m_last_crc = lg->header()->cur_grp_crc;
 
-        for (auto idx = from_indx; idx <= upto_indx; ++idx) {
-            auto& record{m_log_records->at(idx)};
-            m_append_comp_cb_with_flush_unlock(record.store_id, logdev_key{idx, dev_offset}, flush_ld_key,
-                                               upto_indx - idx, record.context);
-        }
-    }
+            auto from_indx = lg->m_flush_log_idx_from;
+            auto upto_indx = lg->m_flush_log_idx_upto;
+            auto dev_offset = lg->m_log_dev_offset;
+            for (auto idx = from_indx; idx <= upto_indx; ++idx) {
+                auto& record{m_log_records->at(idx)};
+                m_append_comp_cb(record.store_id, logdev_key{idx, dev_offset}, flush_ld_key, upto_indx - idx,
+                                 record.context);
+            }
+            unlock_flush();
+            HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, completion_upcall_start_time_ns,
+                              get_elapsed_time_ns(completion_upcall_start_time));
+            m_hb->call_multi_completions();
+        });
 }
 
 bool LogDev::try_lock_flush(const flush_blocked_callback& cb) {
@@ -445,7 +453,6 @@ void LogDev::unlock_flush() {
 
     // Try to do chain flush if its really needed.
     THIS_LOGDEV_LOG(TRACE, "Unlocked the flush, try doing chain flushing if needed");
-    flush_if_needed();
 }
 
 uint64_t LogDev::truncate(const logdev_key& key) {

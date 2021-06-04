@@ -241,7 +241,8 @@ public:
                             continue;
                         }
                     }
-                    LOGFATAL("Unexpected out_of_range exception for lsn={}:{}", m_log_store->get_store_id(), i);
+                    LOGFATAL("Unexpected out_of_range exception for lsn={}:{} upto {}", m_log_store->get_store_id(), i,
+                             upto);
                 }
             }
         }

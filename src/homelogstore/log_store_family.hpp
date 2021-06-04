@@ -65,10 +65,8 @@ private:
     [[nodiscard]] logdev_key do_device_truncate(const bool dry_run = false);
 
     void on_log_store_found(const logstore_id_t store_id, const logstore_superblk& meta);
-    void on_io_completion_with_flush_lock(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_idx,
-                                          const uint32_t nremaining_in_batch, void* const ctx);
-    void on_io_completion_with_flush_unlock(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_idx,
-                                            const uint32_t nremaining_in_batch, void* const ctx);
+    void on_io_completion(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_idx,
+                          const uint32_t nremaining_in_batch, void* const ctx);
     void on_logfound(const logstore_id_t id, const logstore_seq_num_t seq_num, const logdev_key ld_key,
                      const log_buffer buf);
 

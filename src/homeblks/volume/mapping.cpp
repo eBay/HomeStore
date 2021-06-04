@@ -702,12 +702,12 @@ void mapping::add_new_interval(const lba_t s_lba, const lba_t e_lba, const Mappi
 }
 
 /* result of overlap of k1/k2 is added to replace_kv */
-void mapping::compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, const lba_t s_lba, const lba_t e_lba,
-                                      const MappingValue& new_val, const lba_count_t new_val_offset,
-                                      MappingValue& e_val, const lba_count_t e_val_offset,
+void mapping::compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, lba_t s_lba, const lba_t e_lba,
+                                      const MappingValue& new_val, lba_count_t new_lba_offset, MappingValue& e_val,
+                                      const lba_count_t e_lba_offset,
                                       std::vector< std::pair< MappingKey, MappingValue > >& replace_kv,
                                       const seq_id_t new_seq_id) {
-    const auto nlba = get_nlbas(e_lba, s_lba);
+    auto nlba = get_nlbas(e_lba, s_lba);
 
     /* This code assumes that there is only one value entry */
     const ValueEntry* e_ve = e_val.get_latest_entry();
@@ -716,21 +716,29 @@ void mapping::compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, c
     if (new_seq_id > e_seq_id) {
         /* override */
         if (e_ve->get_base_blkid().is_valid()) {
-            Free_Blk_Entry fbe(e_ve->get_base_blkid(), nlbas_to_nblks(e_ve->get_lba_offset() + e_val_offset),
+            Free_Blk_Entry fbe(e_ve->get_base_blkid(), nlbas_to_nblks(e_ve->get_lba_offset() + e_lba_offset),
                                nlbas_to_nblks(nlba));
             fbe_list.push_back(fbe);
         }
+        auto& [mk, mv] = replace_kv.back();
+        if (replace_kv.size() > 0 && (mv.get_latest_entry()->get_seqid() == new_seq_id)) {
+            s_lba = mk.start();
+            nlba += mk.get_n_lba();
+            new_lba_offset = mv.get_latest_entry()->get_lba_offset();
+            replace_kv.pop_back();
+        }
         replace_kv.emplace_back(
-            std::make_pair(MappingKey(s_lba, nlba), MappingValue(*new_val.get_latest_entry(), new_val_offset, nlba)));
+            std::make_pair(MappingKey(s_lba, nlba), MappingValue(*new_val.get_latest_entry(), new_lba_offset, nlba)));
+
     } else {
         /* don't override. free new blks */
         const ValueEntry* new_ve = new_val.get_latest_entry();
         if (new_ve->get_base_blkid().is_valid()) {
-            fbe_list.emplace_back(new_ve->get_base_blkid(), nlbas_to_nblks(new_ve->get_lba_offset() + new_val_offset),
+            fbe_list.emplace_back(new_ve->get_base_blkid(), nlbas_to_nblks(new_ve->get_lba_offset() + new_lba_offset),
                                   nlbas_to_nblks(nlba));
         }
         replace_kv.emplace_back(
-            std::make_pair(MappingKey(s_lba, nlba), MappingValue(*e_val.get_latest_entry(), e_val_offset, nlba)));
+            std::make_pair(MappingKey(s_lba, nlba), MappingValue(*e_val.get_latest_entry(), e_lba_offset, nlba)));
     }
 }
 

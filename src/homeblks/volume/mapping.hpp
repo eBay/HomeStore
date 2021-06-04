@@ -809,8 +809,8 @@ private:
     std::pair< lba_t, lba_t > get_start_end_lba(BtreeSearchRange& subrange);
 
     /* result of overlap of k1/k2 is added to replace_kv */
-    void compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, const lba_t s_lba, const lba_t e_lba,
-                                 const MappingValue& new_val, const lba_count_t new_val_offset, MappingValue& e_val,
+    void compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, lba_t s_lba, const lba_t e_lba,
+                                 const MappingValue& new_val, lba_count_t new_val_offset, MappingValue& e_val,
                                  const lba_count_t e_val_offset,
                                  std::vector< std::pair< MappingKey, MappingValue > >& replace_kv, int64_t new_seq_id);
 
