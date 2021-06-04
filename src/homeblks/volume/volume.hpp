@@ -248,8 +248,7 @@ private:
     sisl::atomic_counter< uint64_t > m_vol_ref_cnt = 0; // volume can not be destroy/shutdown until it is not zero
 
     std::mutex m_sb_lock; // lock for updating vol's sb
-    // sisl::aligned_unique_ptr< vol_sb_hdr > m_sb_buf;
-    sisl::byte_view m_sb_buf;
+    sisl::byte_array m_sb_buf;
     indxmgr_stop_cb m_destroy_done_cb;
     std::atomic< bool > m_indx_mgr_destroy_started;
     void* m_sb_cookie = nullptr;
@@ -432,12 +431,12 @@ public:
     /* Get name of this volume.
      * @return :- name
      */
-    const char* get_name() const { return (((vol_sb_hdr*)m_sb_buf.bytes())->vol_name); }
+    const char* get_name() const { return (((vol_sb_hdr*)m_sb_buf->bytes)->vol_name); }
 
     /* Get page size of this volume.
      * @return :- page size
      */
-    uint64_t get_page_size() const { return ((vol_sb_hdr*)m_sb_buf.bytes())->page_size; }
+    uint64_t get_page_size() const { return ((vol_sb_hdr*)m_sb_buf->bytes)->page_size; }
 
     /* Given the io size returns the number of lbas
      */
@@ -460,7 +459,7 @@ public:
     /* Get size of this volume.
      * @return :- size
      */
-    uint64_t get_size() const { return ((vol_sb_hdr*)m_sb_buf.bytes())->size; }
+    uint64_t get_size() const { return ((vol_sb_hdr*)m_sb_buf->bytes)->size; }
 
     /* Get used size
      * @return :- cap attributes
@@ -470,7 +469,7 @@ public:
     /* Get uuid of this volume.
      * @return :- uuid
      */
-    boost::uuids::uuid get_uuid() const { return ((vol_sb_hdr*)m_sb_buf.bytes())->uuid; }
+    boost::uuids::uuid get_uuid() const { return ((vol_sb_hdr*)m_sb_buf->bytes)->uuid; }
 
     /* Get state of this volume.
      * @return :- state
@@ -549,8 +548,8 @@ struct volume_req : indx_req {
 
     /********** generic counters **********/
     vol_interface_req_ptr iface_req; // Corresponding Interface API request which has all the details about requests
-    sisl::atomic_counter< int > ref_count = 1;            // Initialize the count
-    volume_req_state state = volume_req_state::data_io;   // State of the volume request
+    sisl::atomic_counter< int > ref_count = 1;          // Initialize the count
+    volume_req_state state = volume_req_state::data_io; // State of the volume request
 
     /********** members used to write data blocks **********/
     Clock::time_point io_start_time;                                        // start time
@@ -649,10 +648,6 @@ private:
                 data.emplace< MemVecData >(new homeds::MemVector{
                     static_cast< uint8_t* >(vi_req->buffer),
                     static_cast< uint32_t >(vi_req->vol_instance->get_io_size(vi_req->nlbas)), 0});
-#ifdef _PRERELEASE
-                // COUNTER_INCREMENT(iomanager.metrics(), iomem_retained,
-                //                  vi_req->vol_instance->get_io_size(vi_req->nlbas));
-#endif
             }
         } else {
             // used passed in iovecs

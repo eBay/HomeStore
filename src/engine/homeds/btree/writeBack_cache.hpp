@@ -65,7 +65,7 @@ template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_
 class WriteBackCacheBuffer : public CacheBuffer< homestore::BlkId > {
 public:
     //******************************************** writeback_req *********************************
-    struct writeback_req : public homestore::blkstore_req< wb_cache_buffer_t > {
+    struct writeback_req : public homestore::blkstore_req< wb_cache_buffer_t >, sisl::ObjLifeCounter< writeback_req > {
 
         typedef std::function< void(const writeback_req_ptr& req, const std::error_condition status) >
             blkstore_callback;
@@ -125,7 +125,7 @@ public:
         // create derived object
         return static_cast < wb_cache_buffer_t*>(sisl::ObjectAllocator< SSDBtreeNode >::make_object());
     }
-
+    static sisl::buftag get_buf_tag() { return sisl::buftag::btree_node; }
     void free_yourself() {
 #ifdef NDEBUG
         SSDBtreeNode* const SSDBtreeNode_ptr{reinterpret_cast< SSDBtreeNode* >(this)};
@@ -361,7 +361,7 @@ public:
         }
 
         // make a copy
-        auto mem{hs_utils::iobuf_alloc(bn->get_cache_size())};
+        auto mem{hs_utils::iobuf_alloc(bn->get_cache_size(), sisl::buftag::btree_node)};
         sisl::blob outb;
         (bn->get_memvec()).get(&outb);
         std::memcpy(static_cast< void* >(mem), static_cast< const void* >(outb.bytes), outb.size);
@@ -369,6 +369,7 @@ public:
         // create a new mem vec
         boost::intrusive_ptr< homeds::MemVector > mvec(new homeds::MemVector());
         mvec->set(mem, bn->get_cache_size(), 0);
+        mvec->set_tag(sisl::buftag::btree_node);
 
         // assign new memvec to buffer
         bn->set_memvec(mvec, 0, bn->get_cache_size());
@@ -388,7 +389,9 @@ public:
     void cp_start(const btree_cp_ptr& bcp) {
         static size_t thread_cnt{0};
         const size_t thread_index{static_cast< size_t >(thread_cnt++ % HS_DYNAMIC_CONFIG(generic.cache_flush_threads))};
-        CP_PERIODIC_LOG(DEBUG, bcp->cp_id, "sending message to cp start");
+        const size_t cp_id = bcp->cp_id % MAX_CP_CNT;
+        CP_PERIODIC_LOG(INFO, cp_id, "Starting btree flush buffers dirty_buf_count={} wb_req_cnt={} flush_cb_size={}",
+                        m_dirty_buf_cnt[cp_id].get(), m_req_list[cp_id]->size(), flush_buffer_q.size());
         iomanager.run_on(m_thread_ids[thread_index],
                          [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
     }
@@ -402,9 +405,7 @@ public:
         }
 
         ++s_cbq_id;
-        CP_PERIODIC_LOG(DEBUG, bcp->cp_id,
-                        "[fcbq_id={}] Starting btree flush buffers dirty_buf_count={} wb_req_cnt={} flush_cb_size={}",
-                        s_cbq_id, m_dirty_buf_cnt[cp_id].get(), m_req_list[cp_id]->size(), flush_buffer_q.size());
+        CP_PERIODIC_LOG(DEBUG, bcp->cp_id, "[fcbq_id={}] Starting btree flush buffers", s_cbq_id);
 
         auto shared_this = this->shared_from_this();
         queue_flush_buffers([shared_this, cp_id, it = m_req_list[cp_id]->begin(true /* latest */),

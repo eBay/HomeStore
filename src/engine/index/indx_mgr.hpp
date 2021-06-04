@@ -24,7 +24,6 @@
 #include "homelogstore/logstore_header.hpp"
 
 namespace homestore {
-
 /***************************** forward declarations ************************/
 
 struct indx_req;
@@ -448,7 +447,7 @@ public:
     static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
     static void flush_hs_free_blks(hs_cp* hcp);
     static void flush_hs_alloc_blks(hs_cp* hcp);
-    static void write_meta_blk(void*& mblk, sisl::byte_view buf);
+    static void write_meta_blk(void*& mblk, const sisl::byte_array& buf);
 
     /* This api insert the free blkids in out_free_list.
      * 1. This api only make sure that  we are not accumulating more then the threshhold.
@@ -492,10 +491,8 @@ protected:
     static iomgr::timer_handle_t m_hs_cp_timer_hdl;
     static void* m_cp_meta_blk;
     static std::once_flag m_flag;
-    static sisl::aligned_unique_ptr< uint8_t > m_recovery_sb;
-    static size_t m_recovery_sb_size;
     static std::map< boost::uuids::uuid, indx_cp_base_sb > cp_sb_map;
-    static std::map< boost::uuids::uuid, std::vector< std::pair< void*, sisl::byte_view > > > indx_meta_map;
+    static std::map< boost::uuids::uuid, std::vector< std::pair< void*, sisl::byte_array > > > indx_meta_map;
     static HomeStoreBaseSafePtr m_hs; // Hold onto the home store to maintain reference
     static uint64_t memory_used_in_recovery;
     static std::atomic< bool > m_inited;
@@ -709,9 +706,8 @@ private:
     indx_cp_ptr create_new_indx_cp(const indx_cp_ptr& cur_icp);
     void resume_active_cp();
     void suspend_active_cp();
-    sisl::byte_view alloc_unmap_sb(const uint32_t key_size, const seq_id_t seq_id,
-                                   homeds::btree::BtreeQueryCursor& unmap_btree_cur);
-    sisl::byte_view alloc_sb_bytes(uint64_t size_);
+    sisl::byte_array alloc_unmap_sb(const uint32_t key_size, const seq_id_t seq_id,
+                                    homeds::btree::BtreeQueryCursor& unmap_btree_cur);
 #ifndef NDEBUG
     void dump_free_blk_list(const blkid_list_ptr& free_blk_list);
 #endif
@@ -719,9 +715,9 @@ private:
     void do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx, void* key,
                                      const seq_id_t seqid, homeds::btree::BtreeQueryCursor& btree_cur);
     void do_remaining_unmap(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx);
-    sisl::byte_view write_cp_unmap_sb(void* unmap_meta_blk_cntx, const indx_req_ptr& ireq);
-    sisl::byte_view write_cp_unmap_sb(void* unmap_meta_blk_cntx, const uint32_t key_size, const seq_id_t seq_id,
-                                      const void* key, homeds::btree::BtreeQueryCursor& unmap_btree_cur);
+    sisl::byte_array write_cp_unmap_sb(void* unmap_meta_blk_cntx, const indx_req_ptr& ireq);
+    sisl::byte_array write_cp_unmap_sb(void* unmap_meta_blk_cntx, const uint32_t key_size, const seq_id_t seq_id,
+                                       const void* key, homeds::btree::BtreeQueryCursor& unmap_btree_cur);
 };
 
 /*************************************************** indx request ***********************************/
@@ -751,7 +747,7 @@ struct Free_Blk_Entry {
 };
 
 /* any consumer req should be derived from indx_mgr_req. Indx mgr use this as a context to call consumer APIs */
-struct indx_req {
+struct indx_req : public sisl::ObjLifeCounter< indx_req > {
 public:
     virtual uint32_t get_key_size() const = 0;
     virtual uint32_t get_val_size() const = 0;

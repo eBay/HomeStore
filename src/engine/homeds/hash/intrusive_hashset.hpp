@@ -20,7 +20,7 @@
 #include <boost/intrusive/slist.hpp>
 #include <boost/optional.hpp>
 #include <farmhash.h>
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <folly/SharedMutex.h>
 
 #include "engine/common/homestore_header.hpp"

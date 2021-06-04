@@ -418,8 +418,8 @@ public:
 
     static btree_status_t update_debug_bm(SSDBtreeStore* store, boost::intrusive_ptr< SSDBtreeNode > bn) {
         homestore::BlkId blkid(bn->get_node_id());
-        return (m_blkstore->update_debug_bm(blkid) == BlkAllocStatus::SUCCESS) ?
-                                        btree_status_t::success : btree_status_t::update_debug_bm_failed;
+        return (m_blkstore->update_debug_bm(blkid) == BlkAllocStatus::SUCCESS) ? btree_status_t::success
+                                                                               : btree_status_t::update_debug_bm_failed;
     }
 
     static btree_status_t refresh_node(SSDBtreeStore* store, const boost::intrusive_ptr< SSDBtreeNode >& bn,
@@ -459,7 +459,8 @@ public:
     static sisl::io_blob make_journal_entry(journal_op op, bool is_root, const btree_cp_ptr& bcp,
                                             bt_node_gen_pair pair = {empty_bnodeid, 0}) {
         auto b = hs_utils::create_io_blob(journal_entry_initial_size(),
-                                          HomeLogStore::is_aligned_buf_needed(journal_entry_initial_size()));
+                                          HomeLogStore::is_aligned_buf_needed(journal_entry_initial_size()),
+                                          sisl::buftag::btree_journal);
         new (b.bytes) btree_journal_entry(op, is_root, pair, bcp->cp_id);
         return b;
     }
@@ -523,7 +524,7 @@ private:
                     // For root node, disk bitmap is later persisted with btree root node.
                 }
                 jentry->~btree_journal_entry();
-                iob.buf_free();
+                iob.buf_free(sisl::buftag::btree_journal);
 
                 try_cp_start(bcp);
             }))};

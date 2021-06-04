@@ -25,7 +25,7 @@
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
 
 #include <fds/obj_allocator.hpp>
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <fds/freelist_allocator.hpp>
 #include <metrics/metrics.hpp>
 #include <sds_logging/logging.h>
@@ -901,9 +901,9 @@ public:
         REGISTER_COUNTER(btree_num_pc_gen_mismatch, "Number of gen mismatches to recover");
 
         REGISTER_HISTOGRAM(btree_int_node_occupancy, "Interior node occupancy", "btree_node_occupancy",
-                           {"node_type", "interior"}, HistogramBucketsType(ExponentialOfTwoBuckets));
+                           {"node_type", "interior"}, HistogramBucketsType(LinearUpto128Buckets));
         REGISTER_HISTOGRAM(btree_leaf_node_occupancy, "Leaf node occupancy", "btree_node_occupancy",
-                           {"node_type", "leaf"}, HistogramBucketsType(ExponentialOfTwoBuckets));
+                           {"node_type", "leaf"}, HistogramBucketsType(LinearUpto128Buckets));
         REGISTER_COUNTER(btree_retry_count, "number of retries");
         REGISTER_COUNTER(write_err_cnt, "number of errors in write");
         REGISTER_COUNTER(split_failed, "split failed");

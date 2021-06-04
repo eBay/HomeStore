@@ -20,7 +20,7 @@
 #include <vector>
 
 #include <boost/range/irange.hpp>
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <metrics/metrics.hpp>
 #include <sds_logging/logging.h>
 #include <utility/atomic_counter.hpp>

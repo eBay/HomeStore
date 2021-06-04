@@ -39,11 +39,11 @@ MetaBlkMgr* MetaBlkMgr::instance() {
     return s_instance.get();
 }
 
-void MetaBlkMgr::free_compress_buf() { hs_utils::iobuf_free(m_compress_info.bytes); }
+void MetaBlkMgr::free_compress_buf() { hs_utils::iobuf_free(m_compress_info.bytes, sisl::buftag::compression); }
 
 void MetaBlkMgr::alloc_compress_buf(const size_t size) {
     m_compress_info.size = size;
-    m_compress_info.bytes = hs_utils::iobuf_alloc(size);
+    m_compress_info.bytes = hs_utils::iobuf_alloc(size, sisl::buftag::compression);
 
     HS_RELEASE_ASSERT_NE(m_compress_info.bytes, nullptr, "fail to allocate iobuf for compression of size: {}", size);
 }
@@ -68,7 +68,7 @@ MetaBlkMgr::~MetaBlkMgr() {
         std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
         m_sub_info.clear();
     }
-    hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(m_ssb));
+    hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(m_ssb), sisl::buftag::metablk);
     free_compress_buf();
 }
 
@@ -100,11 +100,11 @@ void MetaBlkMgr::stop() { del_instance(); }
 void MetaBlkMgr::cache_clear() {
     std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
     for (auto it{std::cbegin(m_meta_blks)}; it != std::cend(m_meta_blks); ++it) {
-        hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(it->second));
+        hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(it->second), sisl::buftag::metablk);
     }
 
     for (auto it{std::cbegin(m_ovf_blk_hdrs)}; it != std::cend(m_ovf_blk_hdrs); ++it) {
-        hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(it->second));
+        hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(it->second), sisl::buftag::metablk);
     }
 
     m_meta_blks.clear();
@@ -133,7 +133,7 @@ void MetaBlkMgr::load_ssb(const sb_blkstore_blob* const blob) {
     HS_RELEASE_ASSERT_EQ(blob->type, blkstore_type::META_STORE, "Invalid blkstore [type={}]", blob->type);
     HS_LOG(INFO, metablk, "Loading meta ssb blkid: {}", bid.to_string());
 
-    m_ssb = reinterpret_cast< meta_blk_sb* >(hs_utils::iobuf_alloc(get_page_size()));
+    m_ssb = reinterpret_cast< meta_blk_sb* >(hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::metablk));
     std::memset(static_cast< void* >(m_ssb), 0, get_page_size());
 
     read(bid, static_cast< void* >(m_ssb), get_page_size());
@@ -162,7 +162,7 @@ void MetaBlkMgr::init_ssb() {
     m_sb_blk_store->update_vb_context(
         sisl::blob{reinterpret_cast< uint8_t* >(&blob), static_cast< uint32_t >(sizeof(sb_blkstore_blob))});
 
-    m_ssb = reinterpret_cast< meta_blk_sb* >(hs_utils::iobuf_alloc(get_page_size()));
+    m_ssb = reinterpret_cast< meta_blk_sb* >(hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::metablk));
     std::memset(static_cast< void* >(m_ssb), 0, get_page_size());
 
     {
@@ -204,7 +204,7 @@ void MetaBlkMgr::scan_meta_blks() {
 
         // TODO: add a new API in blkstore read to by pass cache;
         // e.g. take caller's read buf to avoid this extra memory copy;
-        auto* const mblk{reinterpret_cast< meta_blk* >(hs_utils::iobuf_alloc(get_page_size()))};
+        auto* const mblk{reinterpret_cast< meta_blk* >(hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::metablk))};
         read(bid, mblk, get_page_size());
 
         // add meta blk to cache;
@@ -261,7 +261,8 @@ void MetaBlkMgr::scan_meta_blks() {
 
         while (obid.is_valid()) {
             // ovf blk header occupies whole blk;
-            auto* const ovf_hdr{reinterpret_cast< meta_blk_ovf_hdr* >(hs_utils::iobuf_alloc(get_page_size()))};
+            auto* const ovf_hdr{
+                reinterpret_cast< meta_blk_ovf_hdr* >(hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::metablk))};
             read(obid, ovf_hdr, get_page_size());
 
             // verify self bid
@@ -394,9 +395,10 @@ void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* const ovf_hdr, const vo
     if (!hs_utils::mod_aligned_sz(reinterpret_cast< size_t >(write_context_data), align_sz)) {
         HS_LOG_EVERY_N(WARN, metablk, 50, "[type={}] Unaligned address found for input context_data.", type);
         const size_t aligned_write_size{static_cast< size_t >(sisl::round_up(write_size, align_sz))};
-        context_data_aligned = hs_utils::iobuf_alloc(aligned_write_size);
+        context_data_aligned = hs_utils::iobuf_alloc(aligned_write_size, sisl::buftag::metablk);
         std::memcpy(context_data_aligned, write_context_data, write_size);
         std::memset(context_data_aligned + write_size, 0, aligned_write_size - write_size);
+
         // update to use new pointer and size
         write_context_data = context_data_aligned;
         write_size = aligned_write_size;
@@ -421,7 +423,7 @@ void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* const ovf_hdr, const vo
                                type, ovf_hdr->h.context_sz);
                 const size_t round_sz{static_cast< size_t >(sisl::round_up(remain_sz_to_write, align_sz))};
                 iovd[0].iov_len = round_sz;
-                data_buf = hs_utils::iobuf_alloc(round_sz);
+                data_buf = hs_utils::iobuf_alloc(round_sz, sisl::buftag::metablk);
                 std::memcpy(data_buf, iovd[0].iov_base, remain_sz_to_write);
                 std::memset(data_buf + remain_sz_to_write, 0, round_sz - remain_sz_to_write);
                 iovd[0].iov_base = data_buf;
@@ -435,8 +437,8 @@ void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* const ovf_hdr, const vo
         } catch (std::exception& e) { HS_RELEASE_ASSERT(false, "exception happen during write {}", e.what()); }
     }
 
-    if (data_buf) { hs_utils::iobuf_free(data_buf); }
-    if (context_data_aligned) { hs_utils::iobuf_free(context_data_aligned); }
+    if (data_buf) { hs_utils::iobuf_free(data_buf, sisl::buftag::metablk); }
+    if (context_data_aligned) { hs_utils::iobuf_free(context_data_aligned, sisl::buftag::metablk); }
 
     HS_DEBUG_ASSERT_EQ(size_written, ovf_hdr->h.context_sz);
 }
@@ -461,7 +463,7 @@ void MetaBlkMgr::write_meta_blk_to_disk(meta_blk* const mblk) {
 //
 meta_blk* MetaBlkMgr::init_meta_blk(BlkId& bid, const meta_sub_type type, const void* const context_data,
                                     const size_t sz) {
-    meta_blk* const mblk{reinterpret_cast< meta_blk* >(hs_utils::iobuf_alloc(get_page_size()))};
+    meta_blk* const mblk{reinterpret_cast< meta_blk* >(hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::metablk))};
     mblk->hdr.h.compressed = false;
     mblk->hdr.h.bid = bid;
     std::memset(static_cast< void* >(mblk->hdr.h.type), 0, MAX_SUBSYS_TYPE_LEN);
@@ -537,7 +539,8 @@ void MetaBlkMgr::write_meta_blk_ovf(BlkId& out_obid, const void* const context_d
     uint32_t data_blkid_indx{0};
 
     while (next_bid.is_valid()) {
-        meta_blk_ovf_hdr* const ovf_hdr{reinterpret_cast< meta_blk_ovf_hdr* >(hs_utils::iobuf_alloc(get_page_size()))};
+        meta_blk_ovf_hdr* const ovf_hdr{
+            reinterpret_cast< meta_blk_ovf_hdr* >(hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::metablk))};
         const BlkId cur_bid{next_bid};
         ovf_hdr->h.magic = META_BLK_OVF_MAGIC;
         ovf_hdr->h.bid = cur_bid;
@@ -882,7 +885,7 @@ void MetaBlkMgr::free_ovf_blk_chain(const BlkId& obid) {
             HS_ASSERT(RELEASE, false, "OVF block header not find {}", save_old.to_integer());
 
         // free the ovf header memory;
-        hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(it->second));
+        hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(it->second), sisl::buftag::metablk);
 
         // remove from ovf blk cache;
         m_ovf_blk_hdrs.erase(it);
@@ -902,7 +905,7 @@ void MetaBlkMgr::free_meta_blk(meta_blk* const mblk) {
         free_ovf_blk_chain(mblk->hdr.h.ovf_bid);
     }
 
-    hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(mblk));
+    hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(mblk), sisl::buftag::metablk);
 }
 
 void MetaBlkMgr::alloc_meta_blk(const uint64_t size, std::vector< BlkId >& bid) {
@@ -940,22 +943,22 @@ void MetaBlkMgr::alloc_meta_blk(BlkId& bid) {
     } catch (const std::exception& e) { HS_RELEASE_ASSERT(0, "{}", e.what()); }
 }
 
-void MetaBlkMgr::read_sub_sb_internal(const meta_blk* const mblk, sisl::byte_view& buf) const {
+sisl::byte_array MetaBlkMgr::read_sub_sb_internal(const meta_blk* const mblk) const {
+    sisl::byte_array buf;
     HS_DEBUG_ASSERT_EQ(mblk != nullptr, true);
     if (mblk->hdr.h.context_sz <= meta_blk_context_sz()) {
         // data can be compressed
-        buf = hs_utils::create_byte_view(mblk->hdr.h.context_sz, false /* aligned_byte_view */);
+        buf = hs_utils::make_byte_array(mblk->hdr.h.context_sz, false /* aligned */, sisl::buftag::metablk);
         HS_DEBUG_ASSERT_EQ(mblk->hdr.h.ovf_bid.is_valid(), false, "[type={}], unexpected ovf_bid: {}", mblk->hdr.h.type,
                            mblk->hdr.h.ovf_bid.to_string());
-        std::memcpy(static_cast< void* >(buf.bytes()), static_cast< const void* >(mblk->get_context_data()),
+        std::memcpy(static_cast< void* >(buf->bytes), static_cast< const void* >(mblk->get_context_data()),
                     mblk->hdr.h.context_sz);
     } else {
         //
         // read through the ovf blk chain to get the buffer;
         // all the context data was stored in ovf blk chain, nothing in meta blk context data portion;
         //
-        buf = hs_utils::create_byte_view(mblk->hdr.h.context_sz, true /* aligned byte_view */);
-
+        buf = hs_utils::make_byte_array(mblk->hdr.h.context_sz, true /* aligned */, sisl::buftag::metablk);
         const auto total_sz{mblk->hdr.h.context_sz};
         uint64_t read_offset{0}; // read offset in overall context data;
 
@@ -980,7 +983,7 @@ void MetaBlkMgr::read_sub_sb_internal(const meta_blk* const mblk, sisl::byte_vie
                     read_sz_per_db = ovf_hdr->h.context_sz - read_offset_in_this_ovf;
                 }
 
-                read(data_bid[i], buf.bytes() + read_offset,
+                read(data_bid[i], buf->bytes + read_offset,
                      sisl::round_up(read_sz_per_db, HS_STATIC_CONFIG(drive_attr.align_size)));
 
                 read_offset_in_this_ovf += read_sz_per_db;
@@ -999,6 +1002,7 @@ void MetaBlkMgr::read_sub_sb_internal(const meta_blk* const mblk, sisl::byte_vie
         HS_RELEASE_ASSERT_EQ(read_offset, total_sz, "[type={}], incorrect data read from disk: {}, total_sz: {}",
                              mblk->hdr.h.type, read_offset, total_sz);
     }
+    return buf;
 }
 
 // m_meta_mtx is used for concurrency between add/remove/update APIs and shutdown threads;
@@ -1010,9 +1014,7 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
     std::lock_guard< decltype(m_meta_mtx) > lg{m_shutdown_mtx};
     for (auto& m : m_meta_blks) {
         auto* const mblk{m.second};
-        sisl::byte_view buf;
-
-        read_sub_sb_internal(mblk, buf);
+        auto buf{read_sub_sb_internal(mblk)};
 
         // found a meta blk and callback to sub system;
         const auto itr{m_sub_info.find(mblk->hdr.h.type)};
@@ -1020,7 +1022,7 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
             // if subsystem registered crc protection, verify crc before sending to subsystem;
             if (itr->second.do_crc) {
                 const auto crc{
-                    crc32_ieee(init_crc32, static_cast< const uint8_t* >(buf.bytes()), mblk->hdr.h.context_sz)};
+                    crc32_ieee(init_crc32, static_cast< const uint8_t* >(buf->bytes), mblk->hdr.h.context_sz)};
 
                 HS_RELEASE_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
                                      "[type={}], CRC mismatch: {}/{}, on mblk bid: {}, context_sz: {}",
@@ -1036,11 +1038,11 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
                 // decompress if necessary
                 if (mblk->hdr.h.compressed) {
                     // HS_DEBUG_ASSERT_GE(mblk->hdr.h.context_sz, META_BLK_CONTEXT_SZ);
-                    sisl::byte_view decompressed_buf{
-                        hs_utils::create_byte_view(mblk->hdr.h.src_context_sz, true /* aligned byte_view */)};
+                    auto decompressed_buf{hs_utils::make_byte_array(mblk->hdr.h.src_context_sz, true /* aligned */,
+                                                                    sisl::buftag::compression)};
                     size_t decompressed_size{mblk->hdr.h.src_context_sz};
-                    const auto ret{sisl::Compress::decompress(reinterpret_cast< const char* >(buf.bytes()),
-                                                              reinterpret_cast< char* >(decompressed_buf.bytes()),
+                    const auto ret{sisl::Compress::decompress(reinterpret_cast< const char* >(buf->bytes),
+                                                              reinterpret_cast< char* >(decompressed_buf->bytes),
                                                               mblk->hdr.h.compressed_sz, &decompressed_size)};
                     if (ret != 0) {
                         LOGERROR("[type={}], negative result: {} from decompress trying to decompress the "
@@ -1103,8 +1105,7 @@ void MetaBlkMgr::read_sub_sb(const meta_sub_type type) const {
 
         HS_RELEASE_ASSERT_EQ(it != std::end(m_meta_blks), true);
         auto* const mblk{it->second};
-        sisl::byte_view buf;
-        read_sub_sb_internal(mblk, buf);
+        sisl::byte_array buf{read_sub_sb_internal(mblk)};
 
         // if consumer is reading its sbs with this api, the blk found cb should already be registered;
         HS_RELEASE_ASSERT_EQ(it_s->second.cb.operator bool(), true);
@@ -1203,31 +1204,30 @@ nlohmann::json MetaBlkMgr::get_status(const int log_level) const {
                     j[x.first]["meta_bids"][std::to_string(bid_cnt)] = bid.to_string();
                 } else if (can_dump_to_file) { // log_level >= 3 and can dump to file
                     // dump the whole data buffer to file
-                    sisl::byte_view buf;
                     auto it = m_meta_blks.find(y);
                     HS_DEBUG_ASSERT_EQ(it != m_meta_blks.end(), true,
                                        "Expecting meta_bid: {} to be found in meta blks cache. Corruption detected!",
                                        bid.to_string());
-                    read_sub_sb_internal(it->second, buf);
 
-                    if (free_space < buf.size()) {
+                    sisl::byte_array buf = read_sub_sb_internal(it->second);
+                    if (free_space < buf->size) {
                         j[x.first]["meta_bids"][std::to_string(bid_cnt)] =
                             "Not_able_to_dump_to_file_exceeding_allowed_space";
                         HS_LOG_EVERY_N(
                             WARN, metablk, 100,
                             "[type={}] Skip dumping to file, exceeding allowed space: {}, requested_size: {}, "
                             "total_free: {}, free_fs_percent: {}",
-                            x.first, free_space, buf.size(), total_free,
+                            x.first, free_space, buf->size, total_free,
                             HS_DYNAMIC_CONFIG(metablk.percent_of_free_space));
                         continue;
                     }
 
                     std::string file_path = fmt::format("{}/{}_{}", dump_dir, x.first, bid_cnt);
                     std::ofstream f(file_path);
-                    f.write(reinterpret_cast< const char* >(buf.bytes()), buf.size());
+                    f.write(reinterpret_cast< const char* >(buf->bytes), buf->size);
                     j[x.first]["meta_bids"][std::to_string(bid_cnt)] = file_path;
 
-                    free_space -= buf.size();
+                    free_space -= buf->size;
                 }
 
                 ++bid_cnt;

@@ -30,7 +30,7 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <fds/atomic_status_counter.hpp>
 #include <fds/bitset.hpp>
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>
 #include <iomgr/spdk_drive_interface.hpp>
@@ -1250,8 +1250,8 @@ protected:
     enum class lba_validate_t : uint8_t { dont_care, validate, invalidate };
 
     io_lba_range_t do_get_rand_lbas(const lbas_choice_t lba_choice, const lba_validate_t validate_choice) {
-        static thread_local random_device rd{};
-        static thread_local default_random_engine engine{rd()};
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine engine{rd()};
 
         io_lba_range_t ret;
         const auto vinfo{pick_vol_round_robin(ret)};

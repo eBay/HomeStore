@@ -16,7 +16,7 @@
 #include <vector>
 
 #include <boost/optional.hpp>
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <utility/atomic_counter.hpp>
 
 #include "engine/cache/cache.h"
@@ -268,7 +268,7 @@ public:
         } else {
             /* TODO add error messages */
             for (const auto& missing_piece : req->missing_pieces) {
-                hs_utils::iobuf_free(missing_piece.ptr);
+                hs_utils::iobuf_free(missing_piece.ptr, Buffer::get_buf_tag());
             }
         }
 
@@ -288,7 +288,7 @@ public:
                 bbuf->update_missing_piece(missing_piece.offset, missing_piece.size, missing_piece.ptr)};
             if (!inserted) {
                 /* someone else has inserted it */
-                hs_utils::iobuf_free(missing_piece.ptr);
+                hs_utils::iobuf_free(missing_piece.ptr, Buffer::get_buf_tag());
             }
         }
         HISTOGRAM_OBSERVE(m_metrics, blkstore_cache_read_latency, get_elapsed_time_us(start_time));
@@ -352,10 +352,11 @@ public:
         bbuf->set_key(blkid);
 
         // Create a new block of memory for the blocks requested and set the memvec pointer to that
-        const auto size{blkid.data_size(m_pagesz)};
-        uint8_t* const ptr{hs_utils::iobuf_alloc(size)};
-        boost::intrusive_ptr< homeds::MemVector > mvec{new homeds::MemVector{}, true};
+        const auto size{ blkid.data_size(m_pagesz) };
+        uint8_t* ptr{ hs_utils::iobuf_alloc(size, Buffer::get_buf_tag()) };
+        boost::intrusive_ptr< homeds::MemVector > mvec{ new homeds::MemVector(), true };
         mvec->set(ptr, size, 0);
+        mvec->set_tag(Buffer::get_buf_tag());
         bbuf->set_memvec(mvec, 0, size);
 
         // Insert this buffer to the cache.
@@ -521,6 +522,7 @@ public:
             /* set the memvec */
             boost::intrusive_ptr< homeds::MemVector > mvec{new homeds::MemVector{}};
             bbuf->set_memvec(mvec, 0, 0);
+            mvec->set_tag(Buffer::get_buf_tag());
 
             /* insert it into cache */
             auto ibuf{boost::static_pointer_cast< CacheBuffer< BlkId > >(bbuf)};
@@ -557,7 +559,7 @@ public:
         req->blkstore_ref_cnt.increment(1);
         for (auto& missing : missing_mp) {
             // Create a new block of memory for the missing piece
-            uint8_t* const ptr{hs_utils::iobuf_alloc(missing.second)};
+            uint8_t* ptr{ hs_utils::iobuf_alloc(missing.second, Buffer::get_buf_tag()) };
             HS_ASSERT_NOTNULL(RELEASE, ptr, "ptr is null");
 
             COUNTER_INCREMENT(m_metrics, blkstore_cache_miss_size, missing.second);
@@ -583,7 +585,7 @@ public:
                 const bool inserted{req->bbuf->update_missing_piece(missing.first, missing.second, ptr)};
                 if (!inserted) {
                     /* someone else has inserted it */
-                    hs_utils::iobuf_free(ptr);
+                    hs_utils::iobuf_free(ptr, Buffer::get_buf_tag());
                 }
                 req->blkstore_ref_cnt.decrement(1);
             }
@@ -638,11 +640,12 @@ public:
 
         for (uint32_t i{0}; i < (nmirrors + 1); ++i) {
             /* create the pointer */
-            uint8_t* const mem_ptr{hs_utils::iobuf_alloc(bid.data_size(m_pagesz))};
+            uint8_t* const mem_ptr{ hs_utils::iobuf_alloc(bid.data_size(m_pagesz), Buffer::get_buf_tag()) };
 
             /* set the memvec */
             boost::intrusive_ptr< homeds::MemVector > mvec{new homeds::MemVector{}};
             mvec->set(mem_ptr, bid.data_size(m_pagesz), 0);
+            mvec->set_tag(Buffer::get_buf_tag());
 
             /* create the buffer */
             auto bbuf{boost::intrusive_ptr< BlkBuffer >{Buffer::make_object()}};
@@ -716,8 +719,8 @@ public:
     }
 
     ssize_t write(const void* const buf, const size_t count, boost::intrusive_ptr< blkstore_req< Buffer > > req) {
-        const Clock::time_point blkstore_op_start_time{Clock::now()};
-        if (req) {
+        Clock::time_point blkstore_op_start_time;
+        if (req && !req->isSyncCall) {
             req->start_time();
         } else {
             blkstore_op_start_time = Clock::now();
@@ -731,8 +734,8 @@ public:
 
     ssize_t preadv(const struct iovec* const iov, const int iovcnt, const off_t offset,
                    boost::intrusive_ptr< blkstore_req< Buffer > > req = nullptr) {
-        const Clock::time_point blkstore_op_start_time{Clock::now()};
-        if (req) {
+        Clock::time_point blkstore_op_start_time;
+        if (req && !req->isSyncCall) {
             req->start_time();
         } else {
             blkstore_op_start_time = Clock::now();
@@ -746,8 +749,8 @@ public:
 
     ssize_t pwritev(const struct iovec* const iov, const int iovcnt, const off_t offset,
                     boost::intrusive_ptr< blkstore_req< Buffer > > req = nullptr) {
-        const Clock::time_point blkstore_op_start_time{Clock::now()};
-        if (req) {
+        Clock::time_point blkstore_op_start_time;
+        if (req && !req->isSyncCall) {
             req->start_time();
         }
         const auto ret{m_vdev.pwritev(iov, iovcnt, offset, req)};

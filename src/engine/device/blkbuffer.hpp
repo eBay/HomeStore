@@ -31,6 +31,7 @@ public:
     
     template <typename... Args>
     static BlkBuffer* make_object(Args... args) { return sisl::ObjectAllocator< BlkBuffer >::make_object(std::forward<Args>(args)...); }
+    static sisl::buftag get_buf_tag() { return sisl::buftag::common; }
 
     void free_yourself() { sisl::ObjectAllocator< BlkBuffer >::deallocate(this); }
 

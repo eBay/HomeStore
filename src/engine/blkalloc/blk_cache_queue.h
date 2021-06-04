@@ -9,7 +9,7 @@
 #include <optional>
 #include <vector>
 
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <folly/MPMCQueue.h>
 
 #include "blk_cache.h"

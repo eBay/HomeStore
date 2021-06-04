@@ -21,7 +21,7 @@
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
 #include <fds/sparse_vector.hpp>
 #include <boost/uuid/uuid_generators.hpp>
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <isa-l/crc.h>
 #include <iomgr/iomgr.hpp>
 #include <cstddef>

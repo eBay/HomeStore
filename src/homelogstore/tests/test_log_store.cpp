@@ -21,7 +21,7 @@
 #include <type_traits>
 #include <vector>
 
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <folly/Synchronized.h>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>

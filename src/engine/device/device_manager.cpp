@@ -9,16 +9,16 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include "boost/range.hpp"
+#include <boost/range.hpp>
+#include <fds/buffer.hpp>
+#include <iomgr/iomgr.hpp>
+
 #include "engine/blkalloc/blk_allocator.h"
 #include "engine/common/homestore_assert.hpp"
-#include "fds/utils.hpp"
-#include "iomgr/iomgr.hpp"
 #include "engine/common/homestore_flip.hpp"
 #include "engine/device/virtual_dev.hpp"
 #include "device.h"
 
-using namespace iomgr;
 namespace homestore {
 
 std::atomic< uint64_t > virtualdev_req::s_req_id{0u};
@@ -63,7 +63,7 @@ DeviceManager::DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_s
 
     m_dm_info_size = sisl::round_up(DM_INFO_BLK_SIZE, HS_STATIC_CONFIG(drive_attr.phys_page_size));
 
-    m_chunk_memory = (char*)hs_utils::iobuf_alloc(m_dm_info_size);
+    m_chunk_memory = (char*)hs_utils::iobuf_alloc(m_dm_info_size, sisl::buftag::superblk);
     bzero(m_chunk_memory, m_dm_info_size);
     m_dm_info = (dm_info*)m_chunk_memory;
 
@@ -145,7 +145,7 @@ void DeviceManager::init_devices(const std::vector< dev_info >& devices) {
 }
 
 DeviceManager::~DeviceManager() {
-    hs_utils::iobuf_free((uint8_t*)m_chunk_memory);
+    hs_utils::iobuf_free((uint8_t*)m_chunk_memory, sisl::buftag::superblk);
     m_dm_info = nullptr;
     m_pdev_hdr = nullptr;
     m_chunk_hdr = nullptr;
@@ -374,9 +374,8 @@ void DeviceManager::inited() {
 }
 
 void DeviceManager::blk_alloc_meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
-    uint32_t align = MetaBlkMgrSI()->is_aligned_buf_needed(size) ? HS_STATIC_CONFIG(drive_attr.align_size) : 0;
-
-    std::unique_ptr< sisl::Bitset > recovered_bm(new sisl::Bitset(buf.extract(align)));
+    std::unique_ptr< sisl::Bitset > recovered_bm(
+        new sisl::Bitset(hs_utils::extract_byte_array(buf, MetaBlkMgrSI()->is_aligned_buf_needed(size))));
     auto chunk = get_chunk(recovered_bm->get_id());
     LOGINFO("get id {}", recovered_bm->get_id());
     chunk->recover(std::move(recovered_bm), mblk);
@@ -427,10 +426,8 @@ void DeviceManager::zero_pdev_sbs() {
 /* add constant */
 bool DeviceManager::add_devices(const std::vector< dev_info >& devices) {
     uint64_t max_dev_offset = 0;
-    MetaBlkMgrSI()->register_handler(
-        "BLK_ALLOC",
-        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { blk_alloc_meta_blk_found_cb(mblk, buf, size); },
-        nullptr, true /* do_crc */);
+    MetaBlkMgrSI()->register_handler("BLK_ALLOC", bind_this(DeviceManager::blk_alloc_meta_blk_found_cb, 3), nullptr,
+                                     true /* do_crc */);
 
     HS_RELEASE_ASSERT(devices.size() > 0, "Expecting at least one device");
 

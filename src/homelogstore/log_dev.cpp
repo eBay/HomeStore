@@ -178,12 +178,13 @@ int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_nu
 }
 
 log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_record_header) {
-    static thread_local sisl::aligned_unique_ptr< uint8_t > read_buf;
+    static thread_local sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logread > read_buf;
 
     // First read the offset and read the log_group. Then locate the log_idx within that and get the actual data
     // Read about 4K of buffer
     if (!read_buf) {
-        read_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(log_record::flush_boundary(), initial_read_size);
+        read_buf = sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logread >::make_sized(log_record::flush_boundary(),
+                                                                                          initial_read_size);
     }
     auto* rbuf{read_buf.get()};
     auto size = m_blkstore->pread(static_cast< void* >(rbuf), initial_read_size, key.dev_offset);
@@ -220,7 +221,7 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
             sisl::round_up(b.size() + data_offset - rounded_data_offset, HS_STATIC_CONFIG(drive_attr.align_size))};
 
         // Allocate a fresh aligned buffer, if size cannot fit standard size
-        if (rounded_size > initial_read_size) { rbuf = hs_utils::iobuf_alloc(rounded_size); }
+        if (rounded_size > initial_read_size) { rbuf = hs_utils::iobuf_alloc(rounded_size, sisl::buftag::logread); }
 
         THIS_LOGDEV_LOG(TRACE,
                         "Addln read as data resides outside initial_read_size={} key.idx={} key.group_dev_offset={} "
@@ -232,7 +233,7 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
                     static_cast< const void* >(rbuf + data_offset - rounded_data_offset), b.size());
 
         // Free the buffer in case we allocated above
-        if (rounded_size > initial_read_size) { hs_utils::iobuf_free(rbuf); }
+        if (rounded_size > initial_read_size) { hs_utils::iobuf_free(rbuf, sisl::buftag::logread); }
     }
     return_record_header =
         serialized_log_record(record_header->size, record_header->offset, record_header->get_inlined(),
@@ -345,6 +346,7 @@ bool LogDev::flush_if_needed() {
     } else {
         return false;
     }
+    return true;
 }
 
 void LogDev::do_flush(LogGroup* const lg) {
@@ -379,34 +381,33 @@ void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req
 }
 
 void LogDev::on_flush_completion(LogGroup* const lg) {
-    auto flush_msg_send_time = Clock::now();
-    iomanager.run_on(
-        iomgr::thread_regex::least_busy_worker,
-        [this, lg, flush_msg_send_time]([[maybe_unused]] const io_thread_addr_t addr) {
-            HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logdev_flush_msg_time_ns,
-                              get_elapsed_time_ns(flush_msg_send_time));
-            THIS_LOGDEV_LOG(TRACE, "Flush completed for logid[{} - {}]", lg->m_flush_log_idx_from,
-                            lg->m_flush_log_idx_upto);
+    lg->m_flush_finish_time = Clock::now();
+    iomanager.run_on(iomgr::thread_regex::least_busy_worker, [this, lg]([[maybe_unused]] const io_thread_addr_t addr) {
+        lg->m_post_flush_msg_rcvd_time = Clock::now();
+        THIS_LOGDEV_LOG(TRACE, "Flush completed for logid[{} - {}]", lg->m_flush_log_idx_from,
+                        lg->m_flush_log_idx_upto);
 
-            auto completion_upcall_start_time = Clock::now();
-            m_log_records->complete(lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
-            m_last_flush_idx = lg->m_flush_log_idx_upto;
-            const auto flush_ld_key{logdev_key{m_last_flush_idx, lg->m_log_dev_offset}};
-            m_last_crc = lg->header()->cur_grp_crc;
+        m_log_records->complete(lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
+        m_last_flush_idx = lg->m_flush_log_idx_upto;
+        const auto flush_ld_key{logdev_key{m_last_flush_idx, lg->m_log_dev_offset}};
+        m_last_crc = lg->header()->cur_grp_crc;
 
-            auto from_indx = lg->m_flush_log_idx_from;
-            auto upto_indx = lg->m_flush_log_idx_upto;
-            auto dev_offset = lg->m_log_dev_offset;
-            for (auto idx = from_indx; idx <= upto_indx; ++idx) {
-                auto& record{m_log_records->at(idx)};
-                m_append_comp_cb(record.store_id, logdev_key{idx, dev_offset}, flush_ld_key, upto_indx - idx,
-                                 record.context);
-            }
-            unlock_flush();
-            HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, completion_upcall_start_time_ns,
-                              get_elapsed_time_ns(completion_upcall_start_time));
-            m_hb->call_multi_completions();
-        });
+        auto from_indx = lg->m_flush_log_idx_from;
+        auto upto_indx = lg->m_flush_log_idx_upto;
+        auto dev_offset = lg->m_log_dev_offset;
+        for (auto idx = from_indx; idx <= upto_indx; ++idx) {
+            auto& record{m_log_records->at(idx)};
+            m_append_comp_cb(record.store_id, logdev_key{idx, dev_offset}, flush_ld_key, upto_indx - idx,
+                             record.context);
+        }
+        lg->m_post_flush_process_done_time = Clock::now();
+        unlock_flush();
+        HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logdev_flush_done_msg_time_ns,
+                          get_elapsed_time_us(lg->m_flush_finish_time, lg->m_post_flush_msg_rcvd_time));
+        HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logdev_post_flush_processing_latency,
+                          get_elapsed_time_us(lg->m_post_flush_msg_rcvd_time, lg->m_post_flush_process_done_time));
+        m_hb->call_multi_completions();
+    });
 }
 
 bool LogDev::try_lock_flush(const flush_blocked_callback& cb) {
@@ -510,8 +511,8 @@ LogDevMetadata::LogDevMetadata(const std::string& metablk_name) : m_metablk_name
 
 logdev_superblk* LogDevMetadata::create() {
     const auto req_sz{required_sb_size(0)};
-    m_raw_buf = hs_utils::create_byte_view(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz));
-    m_sb = new (m_raw_buf.bytes()) logdev_superblk();
+    m_raw_buf = hs_utils::make_byte_array(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz), sisl::buftag::metablk);
+    m_sb = new (m_raw_buf->bytes) logdev_superblk();
 
     logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
     std::fill_n(sb_area, store_capacity(), logstore_superblk::default_value());
@@ -522,7 +523,7 @@ logdev_superblk* LogDevMetadata::create() {
 }
 
 void LogDevMetadata::reset() {
-    m_raw_buf = sisl::byte_view{};
+    m_raw_buf.reset();
     m_sb = nullptr;
     m_meta_mgr_cookie = nullptr;
     m_id_reserver.reset();
@@ -531,8 +532,8 @@ void LogDevMetadata::reset() {
 
 void LogDevMetadata::meta_buf_found(const sisl::byte_view& buf, void* const meta_cookie) {
     m_meta_mgr_cookie = meta_cookie;
-    m_raw_buf = buf;
-    m_sb = reinterpret_cast< logdev_superblk* >(m_raw_buf.bytes());
+    m_raw_buf = hs_utils::extract_byte_array(buf);
+    m_sb = reinterpret_cast< logdev_superblk* >(m_raw_buf->bytes);
 }
 
 std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::load() {
@@ -540,7 +541,7 @@ std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::loa
     ret_list.reserve(1024);
     m_id_reserver = std::make_unique< sisl::IDReserver >(store_capacity());
 
-    HS_RELEASE_ASSERT_NE(m_raw_buf.bytes(), nullptr, "Load called without getting metadata");
+    HS_RELEASE_ASSERT_NE(m_raw_buf->bytes, nullptr, "Load called without getting metadata");
     HS_RELEASE_ASSERT_LE(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Logdev super blk version mismatch");
 
     const logstore_superblk* const store_sb{m_sb->get_logstore_superblk()};
@@ -561,10 +562,9 @@ std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::loa
 
 void LogDevMetadata::persist() {
     if (m_meta_mgr_cookie) {
-        MetaBlkMgrSI()->update_sub_sb(static_cast< const void* >(m_raw_buf.bytes()), m_raw_buf.size(),
-                                      m_meta_mgr_cookie);
+        MetaBlkMgrSI()->update_sub_sb(static_cast< const void* >(m_raw_buf->bytes), m_raw_buf->size, m_meta_mgr_cookie);
     } else {
-        MetaBlkMgrSI()->add_sub_sb(m_metablk_name, static_cast< const void* >(m_raw_buf.bytes()), m_raw_buf.size(),
+        MetaBlkMgrSI()->add_sub_sb(m_metablk_name, static_cast< const void* >(m_raw_buf->bytes), m_raw_buf->size,
                                    m_meta_mgr_cookie);
     }
 }
@@ -628,17 +628,18 @@ void LogDevMetadata::update_start_dev_offset(const off_t offset, const bool pers
 
 bool LogDevMetadata::resize_if_needed() {
     const auto req_sz{required_sb_size((m_store_info.size() == 0) ? 0u : *m_store_info.rbegin() + 1)};
-    if (req_sz != m_raw_buf.size()) {
+    if (req_sz != m_raw_buf->size) {
         const auto old_buf{m_raw_buf};
 
-        m_raw_buf = hs_utils::create_byte_view(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz));
-        m_sb = new (m_raw_buf.bytes()) logdev_superblk();
+        m_raw_buf =
+            hs_utils::make_byte_array(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz), sisl::buftag::metablk);
+        m_sb = new (m_raw_buf->bytes) logdev_superblk();
 
         logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
         std::fill_n(sb_area, store_capacity(), logstore_superblk::default_value());
 
-        std::memcpy(static_cast< void* >(m_raw_buf.bytes()), static_cast< const void* >(old_buf.bytes()),
-                    std::min(old_buf.size(), m_raw_buf.size()));
+        std::memcpy(static_cast< void* >(m_raw_buf->bytes), static_cast< const void* >(old_buf->bytes),
+                    std::min(old_buf->size, m_raw_buf->size));
         return true;
     } else {
         return false;
@@ -646,6 +647,6 @@ bool LogDevMetadata::resize_if_needed() {
 }
 
 uint32_t LogDevMetadata::store_capacity() const {
-    return (m_raw_buf.size() - sizeof(logdev_superblk)) / sizeof(logstore_superblk);
+    return (m_raw_buf->size - sizeof(logdev_superblk)) / sizeof(logstore_superblk);
 }
 } // namespace homestore

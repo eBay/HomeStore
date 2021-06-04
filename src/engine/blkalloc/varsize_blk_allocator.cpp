@@ -9,10 +9,10 @@
 #include <random>
 #include <thread>
 
-#include <fds/utils.hpp>
 #include <fmt/format.h>
 #include <sds_logging/logging.h>
 #include <utility/thread_factory.hpp>
+#include <utility/thread_buffer.hpp>
 
 #include "blk_cache_queue.h"
 #include "engine/homeds/btree/mem_btree.hpp"

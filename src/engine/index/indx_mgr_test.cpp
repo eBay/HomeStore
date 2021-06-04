@@ -3,7 +3,7 @@
 #include <memory>
 #include <cstdint>
 #include <sys/timeb.h>
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 #include "engine/common/mod_test_iface.hpp"
@@ -70,9 +70,7 @@ class indx_test : public module_test {
         if (indx_cfg.indx_del_free_blks_completed) { indx_del_free_blks_completed(); }
         if (indx_cfg.unmap_post_sb_write_abort) { unmap_post_sb_write_abort(); }
         if (indx_cfg.unmap_pre_sb_remove_abort) { unmap_pre_sb_remove_abort(); }
-        if (indx_cfg.unmap_post_free_blks_abort_before_cp) { 
-            unmap_post_free_blks_abort_before_cp();
-        }
+        if (indx_cfg.unmap_post_free_blks_abort_before_cp) { unmap_post_free_blks_abort_before_cp(); }
         if (indx_cfg.unmap_pre_second_cp_abort) { unmap_pre_second_cp_abort(); }
 
         if (is_cp_abort_test()) { suspend_cp(); }
@@ -90,10 +88,8 @@ class indx_test : public module_test {
 
     void indx_cp_abort_test() {
         if (indx_cfg.cp_bitmap_abort) { set_flip_point("indx_cp_bitmap_abort"); }
-        if (indx_cfg.cp_wb_flush_abort) { set_flip_point("indx_cp_wb_flush_abort");  }
-        if (indx_cfg.cp_logstore_truncate_abort) {
-            set_flip_point("indx_cp_logstore_truncate_abort");
-        }
+        if (indx_cfg.cp_wb_flush_abort) { set_flip_point("indx_cp_wb_flush_abort"); }
+        if (indx_cfg.cp_logstore_truncate_abort) { set_flip_point("indx_cp_logstore_truncate_abort"); }
         IndxMgr::hs_cp_resume();
     }
 
@@ -134,29 +130,17 @@ class indx_test : public module_test {
         set_flip_point("indx_del_partial_free_data_blks_before_meta_write");
     }
 
-    void indx_del_partial_free_indx_blks() {
-        set_flip_point("indx_del_partial_free_indx_blks");
-    }
+    void indx_del_partial_free_indx_blks() { set_flip_point("indx_del_partial_free_indx_blks"); }
 
-    void indx_del_free_blks_completed() {
-        set_flip_point("indx_del_free_blks_completed");
-    }
+    void indx_del_free_blks_completed() { set_flip_point("indx_del_free_blks_completed"); }
 
-    void unmap_post_sb_write_abort() {
-        set_flip_point("unmap_post_sb_write_abort");
-    }
+    void unmap_post_sb_write_abort() { set_flip_point("unmap_post_sb_write_abort"); }
 
-    void unmap_pre_sb_remove_abort() {
-        set_flip_point("unmap_pre_sb_remove_abort");
-    }
+    void unmap_pre_sb_remove_abort() { set_flip_point("unmap_pre_sb_remove_abort"); }
 
-    void unmap_post_free_blks_abort_before_cp() {
-        set_flip_point("unmap_post_free_blks_abort_before_cp");
-    }
+    void unmap_post_free_blks_abort_before_cp() { set_flip_point("unmap_post_free_blks_abort_before_cp"); }
 
-    void unmap_pre_second_cp_abort() {
-        set_flip_point("unmap_pre_second_cp_abort");
-    }
+    void unmap_pre_second_cp_abort() { set_flip_point("unmap_pre_second_cp_abort"); }
 
 private:
     void set_flip_point(const std::string flip_name) {
@@ -200,13 +184,16 @@ SDS_OPTION_GROUP(
     (cp_logstore_truncate_abort, "", "cp_logstore_truncate_abort", "cp_logstore_truncate_abort",
      ::cxxopts::value< bool >()->default_value("0"), ""),
     (unmap_post_sb_write_abort, "", "unmap_post_sb_write_abort", "abort after unmap sb is written",
-    ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+     ::cxxopts::value< bool >()->default_value("false"), "true or false"),
     (unmap_pre_sb_remove_abort, "", "unmap_pre_sb_remove_abort", "abort after cp is complete and before sb is removed",
-    ::cxxopts::value< bool >()->default_value("false"), "true or false"),
-    (unmap_post_free_blks_abort_before_cp, "", "unmap_post_free_blks_abort_before_cp", "abort after unmap free blks collected and before cp",
-    ::cxxopts::value< bool >()->default_value("false"), "true or false"),
-    (unmap_pre_second_cp_abort, "", "unmap_pre_second_cp_abort", "abort after the first blk alloc CP with unmap is completed "
-    "and before the next blk alloc cp", ::cxxopts::value< bool >()->default_value("false"), "true or false"))
+     ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+    (unmap_post_free_blks_abort_before_cp, "", "unmap_post_free_blks_abort_before_cp",
+     "abort after unmap free blks collected and before cp", ::cxxopts::value< bool >()->default_value("false"),
+     "true or false"),
+    (unmap_pre_second_cp_abort, "", "unmap_pre_second_cp_abort",
+     "abort after the first blk alloc CP with unmap is completed "
+     "and before the next blk alloc cp",
+     ::cxxopts::value< bool >()->default_value("false"), "true or false"))
 
 void indx_mgr_test_main() {
     indx_cfg.indx_create_first_cp_abort = SDS_OPTIONS["indx_create_first_cp_abort"].as< bool >();
@@ -222,8 +209,7 @@ void indx_mgr_test_main() {
     indx_cfg.cp_logstore_truncate_abort = SDS_OPTIONS["cp_logstore_truncate_abort"].as< bool >();
     indx_cfg.unmap_post_sb_write_abort = SDS_OPTIONS["unmap_post_sb_write_abort"].as< bool >();
     indx_cfg.unmap_pre_sb_remove_abort = SDS_OPTIONS["unmap_pre_sb_remove_abort"].as< bool >();
-    indx_cfg.unmap_post_free_blks_abort_before_cp = 
-        SDS_OPTIONS["unmap_post_free_blks_abort_before_cp"].as< bool >();
+    indx_cfg.unmap_post_free_blks_abort_before_cp = SDS_OPTIONS["unmap_post_free_blks_abort_before_cp"].as< bool >();
     indx_cfg.unmap_pre_second_cp_abort = SDS_OPTIONS["unmap_pre_second_cp_abort"].as< bool >();
     if (indx_cfg.free_blk_cnt) {
         HS_SETTINGS_FACTORY().modifiable_settings(

@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <folly/Synchronized.h>
 #include <nlohmann/json.hpp>
 

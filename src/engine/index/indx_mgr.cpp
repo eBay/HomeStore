@@ -12,12 +12,13 @@ bool vol_test_run = false;
 }
 
 SDS_LOGGING_DECL(indx_mgr)
+
 /* Journal entry
  * --------------------------------------------------------------------
  * | Journal Hdr | alloc_blkid list | checksum list | free_blk_entry |
  * -------------------------------------------------------------------
  */
-indx_journal_entry::~indx_journal_entry() { m_iob.buf_free(); }
+indx_journal_entry::~indx_journal_entry() { m_iob.buf_free(sisl::buftag::data_journal); }
 
 uint32_t indx_journal_entry::size(indx_req* ireq) const {
     return (sizeof(journal_hdr) + ireq->indx_alloc_blkid_list.size() * sizeof(BlkId) +
@@ -36,7 +37,7 @@ sisl::io_blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
     uint32_t size = sizeof(journal_hdr) + ireq->indx_alloc_blkid_list.size() * sizeof(BlkId) +
         ireq->indx_fbe_list.size() * sizeof(BlkId) + ireq->get_key_size() + ireq->get_val_size();
 
-    m_iob = hs_utils::create_io_blob(size, HomeLogStore::is_aligned_buf_needed(size));
+    m_iob = hs_utils::create_io_blob(size, HomeLogStore::is_aligned_buf_needed(size), sisl::buftag::data_journal);
 
     uint8_t* mem = m_iob.bytes;
 
@@ -588,44 +589,41 @@ void IndxMgr::io_replay() {
 void IndxMgr::recover_meta_ops() {
     auto it = indx_meta_map.find(m_uuid);
     if (it == indx_meta_map.end()) { return; }
-    std::vector< std::pair< void*, sisl::byte_view > >& meta_blk_list = it->second;
-    for (uint32_t i = 0; i < meta_blk_list.size(); ++i) {
-        auto hdr = (hs_cp_base_sb*)(meta_blk_list[i].second.bytes());
+    std::vector< std::pair< void*, sisl::byte_array > >& meta_blk_list = it->second;
+
+    for (auto& [mblk, buf] : meta_blk_list) {
+        auto hdr = (hs_cp_base_sb*)(buf->bytes);
         THIS_INDX_LOG(INFO, replay, , "found meta ops {} in recovery", (uint64_t)hdr->type);
         switch (hdr->type) {
         case INDX_CP:
             HS_ASSERT(DEBUG, 0, "invalid op");
             break;
         case INDX_DESTROY: {
-            uint64_t cur_bytes = (uint64_t)(meta_blk_list[i].second.bytes()) + sizeof(hs_cp_base_sb);
-            HS_ASSERT_CMP(RELEASE, meta_blk_list[i].second.size(), >=, (uint32_t)hdr->size);
+            uint64_t cur_bytes = (uint64_t)(buf->bytes) + sizeof(hs_cp_base_sb);
+            HS_RELEASE_ASSERT_GE(buf->size, (uint32_t)hdr->size);
             uint64_t size = hdr->size - sizeof(hs_cp_base_sb);
             sisl::blob b((uint8_t*)cur_bytes, size);
             m_active_tbl->get_btreequery_cur(b, m_destroy_btree_cur);
-            m_destroy_meta_blk = meta_blk_list[i].first;
+            m_destroy_meta_blk = mblk;
             /* it will be destroyed when destroy is called from volume */
             break;
         }
         case INDX_UNMAP: {
-            sisl::byte_view buf = meta_blk_list[i].second;
-            auto unmap_hdr = (hs_cp_unmap_sb*)buf.bytes();
+            auto unmap_hdr = (hs_cp_unmap_sb*)buf->bytes;
 
             /* get key */
-            uint8_t* key = (uint8_t*)((uint64_t)(buf.bytes()) + sizeof(hs_cp_unmap_sb));
+            uint8_t* key = (uint8_t*)((uint64_t)(buf->bytes) + sizeof(hs_cp_unmap_sb));
 
             /* get cursor bytes and size */
             uint64_t cur_bytes = (uint64_t)(key) + unmap_hdr->key_size;
-            HS_ASSERT_CMP(RELEASE, buf.size(), >=, (uint32_t)hdr->size);
+            HS_RELEASE_ASSERT_GE(buf->size, (uint32_t)hdr->size);
             uint64_t size = hdr->size - sizeof(hs_cp_unmap_sb) - unmap_hdr->key_size;
             sisl::blob b((uint8_t*)cur_bytes, size);
 
             /* get cursor */
             homeds::btree::BtreeQueryCursor btree_cur;
             m_active_tbl->get_btreequery_cur(b, btree_cur);
-
-            auto unmap_meta_blk_cntx = meta_blk_list[i].first;
-
-            this->do_remaining_unmap_internal(nullptr, unmap_meta_blk_cntx, key, unmap_hdr->seq_id, btree_cur);
+            this->do_remaining_unmap_internal(nullptr, mblk, key, unmap_hdr->seq_id, btree_cur);
             break;
         }
         case SNAP_DESTROY:
@@ -1067,24 +1065,25 @@ void IndxMgr::do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_
     m_cp_mgr->cp_io_exit(hcp);
 }
 
-sisl::byte_view IndxMgr::alloc_unmap_sb(const uint32_t key_size, const seq_id_t seq_id,
-                                        homeds::btree::BtreeQueryCursor& unmap_btree_cur) {
+sisl::byte_array IndxMgr::alloc_unmap_sb(const uint32_t key_size, const seq_id_t seq_id,
+                                         homeds::btree::BtreeQueryCursor& unmap_btree_cur) {
     const sisl::blob& cursor_blob = unmap_btree_cur.serialize();
     uint64_t size = cursor_blob.size + sizeof(hs_cp_unmap_sb) + key_size;
-    sisl::byte_view b = alloc_sb_bytes(size);
-    hs_cp_unmap_sb* mhdr = (hs_cp_unmap_sb*)b.bytes();
+    sisl::byte_array b =
+        hs_utils::make_byte_array(size, MetaBlkMgrSI()->is_aligned_buf_needed(size), sisl::buftag::metablk);
+    hs_cp_unmap_sb* mhdr = (hs_cp_unmap_sb*)b->bytes;
     mhdr->uuid = m_uuid;
     mhdr->type = INDX_UNMAP;
     mhdr->seq_id = seq_id;
     mhdr->size = size;
     mhdr->key_size = key_size;
-    memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_unmap_sb)) + key_size, cursor_blob.bytes, cursor_blob.size);
+    memcpy((uint8_t*)((uint64_t)b->bytes + sizeof(hs_cp_unmap_sb)) + key_size, cursor_blob.bytes, cursor_blob.size);
     return b;
 }
 
-sisl::byte_view IndxMgr::write_cp_unmap_sb(void* unmap_meta_blk_cntx, const indx_req_ptr& ireq) {
+sisl::byte_array IndxMgr::write_cp_unmap_sb(void* unmap_meta_blk_cntx, const indx_req_ptr& ireq) {
     auto b = alloc_unmap_sb(ireq->get_key_size(), ireq->get_seqid(), ireq->active_btree_cur);
-    ireq->fill_key((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_unmap_sb)), ireq->get_key_size());
+    ireq->fill_key((uint8_t*)((uint64_t)b->bytes + sizeof(hs_cp_unmap_sb)), ireq->get_key_size());
     write_meta_blk(unmap_meta_blk_cntx, b);
     return b;
 }
@@ -1225,10 +1224,6 @@ indx_cp_ptr IndxMgr::get_indx_cp(hs_cp* hcp) {
     }
 }
 
-sisl::byte_view IndxMgr::alloc_sb_bytes(uint64_t size) {
-    return hs_utils::create_byte_view(size, MetaBlkMgrSI()->is_aligned_buf_needed(size));
-}
-
 /* Steps involved in indx destroy. Note that blkids is available to allocate as soon as it is set in blkalloc. So we
  * need to make sure that blkids of btree won't be resued until indx mgr is not destroy and until its data blkids
  * and btree blkids are not persisted. indx mgr destroye is different that IO because there is no journal entry of free
@@ -1275,13 +1270,13 @@ void IndxMgr::destroy_indx_tbl() {
                 const sisl::blob& cursor_blob = m_destroy_btree_cur.serialize();
                 if (cursor_blob.size) {
                     uint64_t size = cursor_blob.size + sizeof(hs_cp_base_sb);
-                    sisl::byte_view b = alloc_sb_bytes(size);
-                    hs_cp_base_sb* mhdr = (hs_cp_base_sb*)b.bytes();
+                    sisl::byte_array b = hs_utils::make_byte_array(size, MetaBlkMgrSI()->is_aligned_buf_needed(size),
+                                                                   sisl::buftag::metablk);
+                    hs_cp_base_sb* mhdr = (hs_cp_base_sb*)b->bytes;
                     mhdr->uuid = m_uuid;
                     mhdr->type = INDX_DESTROY;
                     mhdr->size = cursor_blob.size + sizeof(hs_cp_base_sb);
-                    memcpy((uint8_t*)((uint64_t)b.bytes() + sizeof(hs_cp_base_sb)), cursor_blob.bytes,
-                           cursor_blob.size);
+                    memcpy((uint8_t*)((uint64_t)b->bytes + sizeof(hs_cp_base_sb)), cursor_blob.bytes, cursor_blob.size);
 #ifdef _PRERELEASE
                     if (homestore_flip->test_flip("indx_del_partial_free_data_blks_before_meta_write")) {
                         LOGINFO("aborting because of flip");
@@ -1463,12 +1458,6 @@ void StaticIndxMgr::init() {
     m_cp_mgr = std::unique_ptr< HomeStoreCPMgr >(new HomeStoreCPMgr());
     m_read_blk_tracker = std::unique_ptr< Blk_Read_Tracker >(new Blk_Read_Tracker(IndxMgr::safe_to_free_blk));
     /* start the timer for blkalloc checkpoint */
-#ifndef NDEBUG
-    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
-        s.generic.blkalloc_cp_timer_us = 1000000; // setting to 1 sec for debug build
-    });
-    HS_SETTINGS_FACTORY().save();
-#endif
 
     LOGINFO("blkalloc cp timer is set to {} usec", HS_DYNAMIC_CONFIG(generic.blkalloc_cp_timer_us));
     m_hs_cp_timer_hdl =
@@ -1526,8 +1515,9 @@ void StaticIndxMgr::flush_hs_free_blks(hs_cp* hcp) {
 void StaticIndxMgr::write_hs_cp_sb(hs_cp* hcp) {
     uint64_t size = sizeof(indx_cp_base_sb) * hcp->indx_cp_list.size() + sizeof(hs_cp_sb);
 
-    sisl::byte_view b = hs_utils::create_byte_view(size, MetaBlkMgrSI()->is_aligned_buf_needed(size));
-    hs_cp_sb* hdr = (hs_cp_sb*)b.bytes();
+    sisl::byte_array b =
+        hs_utils::make_byte_array(size, MetaBlkMgrSI()->is_aligned_buf_needed(size), sisl::buftag::metablk);
+    hs_cp_sb* hdr = (hs_cp_sb*)b->bytes;
     hdr->version = INDX_MGR_VERSION;
     hdr->type = meta_hdr_type::INDX_CP;
     int indx_cnt = 0;
@@ -1638,20 +1628,20 @@ void StaticIndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_
         auto search = indx_meta_map.find(meta_hdr->uuid);
         if (search == indx_meta_map.end()) {
             bool happened = false;
-            std::vector< std::pair< void*, sisl::byte_view > > vec;
+            std::vector< std::pair< void*, sisl::byte_array > > vec;
             std::tie(search, happened) = indx_meta_map.emplace(std::make_pair(meta_hdr->uuid, vec));
             HS_ASSERT(RELEASE, happened, "happened is false");
         }
-        search->second.push_back(std::make_pair(mblk, buf));
+        search->second.push_back(std::make_pair(mblk, hs_utils::extract_byte_array(buf)));
     }
 }
 
-void StaticIndxMgr::write_meta_blk(void*& write_mblk, sisl::byte_view buf) {
+void StaticIndxMgr::write_meta_blk(void*& write_mblk, const sisl::byte_array& buf) {
     if (write_mblk) {
-        MetaBlkMgrSI()->update_sub_sb((void*)buf.bytes(), buf.size(), write_mblk);
+        MetaBlkMgrSI()->update_sub_sb((void*)buf->bytes, buf->size, write_mblk);
     } else {
         /* first time update */
-        MetaBlkMgrSI()->add_sub_sb("INDX_MGR_CP", (void*)buf.bytes(), buf.size(), write_mblk);
+        MetaBlkMgrSI()->add_sub_sb("INDX_MGR_CP", (void*)buf->bytes, buf->size, write_mblk);
     }
 }
 
@@ -1739,9 +1729,7 @@ iomgr::io_thread_t StaticIndxMgr::m_slow_path_thread_id;
 iomgr::timer_handle_t StaticIndxMgr::m_hs_cp_timer_hdl = iomgr::null_timer_handle;
 void* StaticIndxMgr::m_cp_meta_blk{nullptr};
 std::once_flag StaticIndxMgr::m_flag;
-sisl::aligned_unique_ptr< uint8_t > StaticIndxMgr::m_recovery_sb;
 std::map< boost::uuids::uuid, indx_cp_base_sb > StaticIndxMgr::cp_sb_map;
-size_t StaticIndxMgr::m_recovery_sb_size{0};
 HomeStoreBaseSafePtr StaticIndxMgr::m_hs;
 uint64_t StaticIndxMgr::memory_used_in_recovery{0};
 std::atomic< bool > StaticIndxMgr::m_inited{false};
@@ -1750,7 +1738,7 @@ std::mutex StaticIndxMgr::cb_list_mtx;
 std::vector< cp_done_cb > StaticIndxMgr::indx_cp_done_cb_list;
 std::vector< cp_done_cb > StaticIndxMgr::hs_cp_done_cb_list;
 sisl::atomic_counter< bool > StaticIndxMgr::try_blkalloc_checkpoint;
-std::map< boost::uuids::uuid, std::vector< std::pair< void*, sisl::byte_view > > > StaticIndxMgr::indx_meta_map;
+std::map< boost::uuids::uuid, std::vector< std::pair< void*, sisl::byte_array > > > StaticIndxMgr::indx_meta_map;
 std::unique_ptr< Blk_Read_Tracker > StaticIndxMgr::m_read_blk_tracker;
 std::atomic< int64_t > ResourceMgr::m_hs_dirty_buf_cnt{0};
 std::atomic< int64_t > ResourceMgr::m_hs_fb_cnt{0};

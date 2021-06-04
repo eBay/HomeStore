@@ -106,8 +106,7 @@ bool IntrusiveCache< K, V >::modify_size(V& v, const uint32_t size) {
     const uint64_t hash_code{cache_detail::compute_hash< K >(*pk)};
     const auto ret{m_evictors[hash_code % EVICTOR_PARTITIONS]->modify_size(size)};
 
-    if (ret) { COUNTER_INCREMENT(m_metrics, cache_size, size); }
-
+    COUNTER_INCREMENT(m_metrics, cache_size, size);
     return ret;
 }
 
@@ -248,7 +247,7 @@ bool Cache< K, V >::insert_missing_pieces(const boost::intrusive_ptr< V >& buf, 
         buf->lock();
         /* check if buffer is still part of cache or not */
         if (buf->get_cache_state() == cache_buf_state::CACHE_INSERTED) {
-            IntrusiveCacheType::modify_size(*buf, cache_size);
+            inserted = IntrusiveCacheType::modify_size(*buf, cache_size);
             buf->modify_cache_size(cache_size);
         }
         buf->unlock();

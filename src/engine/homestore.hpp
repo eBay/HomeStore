@@ -8,7 +8,7 @@
 #include <stdexcept>
 
 #include <fds/malloc_helper.hpp>
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <sds_logging/logging.h>
 
 #include "api/meta_interface.hpp"
@@ -67,6 +67,8 @@ public:
             LOGERROR("no devices given");
             throw std::invalid_argument("null device list");
         }
+
+        sisl::ObjCounterRegistry::enable_metrics_reporting();
 
         m_status_mgr = std::make_unique< HomeStoreStatusMgr >();
         MetaBlkMgrSI()->register_handler("INDX_MGR_CP", StaticIndxMgr::meta_blk_found_cb, nullptr);

@@ -14,7 +14,7 @@
 #include <boost/intrusive_ptr.hpp>
 #include <fds/id_reserver.hpp>
 #include <fds/stream_tracker.hpp>
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <fmt/format.h>
 #include <sds_logging/logging.h>
 
@@ -246,9 +246,9 @@ public:
     [[nodiscard]] uint32_t nrecords() const { return m_nrecords; }
 
 private:
-    sisl::aligned_unique_ptr< uint8_t > m_log_buf;
-    sisl::aligned_unique_ptr< uint8_t > m_footer_buf;
-    sisl::aligned_unique_ptr< uint8_t > m_overflow_log_buf;
+    sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logwrite > m_log_buf;
+    sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logwrite > m_footer_buf;
+    sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logwrite > m_overflow_log_buf;
 
     uint8_t* m_cur_log_buf;
     uint32_t m_cur_buf_len;
@@ -267,6 +267,10 @@ private:
     int64_t m_flush_log_idx_from;
     int64_t m_flush_log_idx_upto;
     off_t m_log_dev_offset;
+
+    Clock::time_point m_flush_finish_time;            // Time at which flush is completed
+    Clock::time_point m_post_flush_msg_rcvd_time;     // Time at which flush done message delivered
+    Clock::time_point m_post_flush_process_done_time; // Time at which entire log group cb is called
 
 private:
     log_group_footer* add_and_get_footer();
@@ -474,7 +478,7 @@ private:
 
     [[nodiscard]] uint32_t store_capacity() const;
 
-    sisl::byte_view m_raw_buf;
+    sisl::byte_array m_raw_buf;
     std::string m_metablk_name;
     logdev_superblk* m_sb{nullptr};
     void* m_meta_mgr_cookie{nullptr};

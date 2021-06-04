@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "api/vol_interface.hpp"
-#include "fds/utils.hpp"
+#include "fds/buffer.hpp"
 #include "folly/SharedMutex.h"
 #include "iomgr/aio_drive_interface.hpp"
 #include "iomgr/iomgr.hpp"

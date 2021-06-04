@@ -9,7 +9,7 @@
 #include <system_error>
 #include <vector>
 
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <metrics/metrics.hpp>
 #include <nlohmann/json.hpp>
 
@@ -314,7 +314,7 @@ private:
      * @param mblk
      * @param buf
      */
-    void read_sub_sb_internal(const meta_blk* const mblk, sisl::byte_view& buf) const;
+    sisl::byte_array read_sub_sb_internal(const meta_blk* const mblk) const;
 
     void free_compress_buf();
     void alloc_compress_buf(size_t size);

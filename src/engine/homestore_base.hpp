@@ -1,9 +1,7 @@
 #pragma once
 #include <boost/intrusive_ptr.hpp>
-//#include "common/homestore_header.hpp"
-//#include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
-//#include <metrics/metrics.hpp>
+#include <fds/buffer.hpp>
 
 typedef uint32_t crc32_t;
 typedef uint16_t csum_t;
@@ -92,12 +90,14 @@ static constexpr hs_uuid_t INVALID_SYSTEM_UUID{0};
 
 class hs_utils {
 public:
-    static uint8_t* iobuf_alloc(size_t size);
-    static void iobuf_free(uint8_t* ptr);
+    static uint8_t* iobuf_alloc(size_t size, const sisl::buftag tag);
+    static void iobuf_free(uint8_t* ptr, const sisl::buftag tag);
     static uint64_t aligned_size(size_t size);
     static bool mod_aligned_sz(size_t size_to_check, size_t align_sz);
-    static sisl::byte_view create_byte_view(uint64_t size, bool is_aligned_needed);
-    static sisl::io_blob create_io_blob(uint64_t size, bool is_aligned_needed);
+    static sisl::byte_view create_byte_view(uint64_t size, bool is_aligned_needed, const sisl::buftag tag);
+    static sisl::io_blob create_io_blob(uint64_t size, bool is_aligned_needed, const sisl::buftag tag);
+    static sisl::byte_array extract_byte_array(const sisl::byte_view& b, bool is_aligned_needed = true);
+    static sisl::byte_array make_byte_array(uint64_t size, bool is_aligned_needed, const sisl::buftag tag);
     static hs_uuid_t gen_system_uuid();
 };
 

@@ -18,7 +18,7 @@
 #include <vector>
 
 #include <boost/intrusive_ptr.hpp>
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <flip/flip.hpp>
 #include <fmt/ostream.h>
 #include <sds_logging/logging.h>
@@ -898,7 +898,7 @@ private:
             return false;
         }
         if (update_debug_bm &&
-                (btree_store_t::update_debug_bm(m_btree_store.get(), my_node) != btree_status_t::success)) {
+            (btree_store_t::update_debug_bm(m_btree_store.get(), my_node) != btree_status_t::success)) {
             LOGERROR("bitmap update failed for node {}", my_node->to_string());
             return false;
         }

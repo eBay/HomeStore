@@ -19,7 +19,7 @@
 
 #include <boost/intrusive_ptr.hpp>
 #include <fds/obj_allocator.hpp>
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <metrics/metrics.hpp>
 #include <utility/atomic_counter.hpp>
 #include <utility/enum.hpp>

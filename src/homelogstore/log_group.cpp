@@ -11,11 +11,12 @@ void LogGroup::start() {
     m_iovecs.reserve(estimated_iovs);
 
     m_cur_buf_len = sisl::round_up(inline_log_buf_size, log_record::flush_boundary());
-    m_log_buf = sisl::aligned_unique_ptr< uint8_t >::make_sized(HS_STATIC_CONFIG(drive_attr.align_size), m_cur_buf_len);
+    m_log_buf = sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logwrite >::make_sized(
+        HS_STATIC_CONFIG(drive_attr.align_size), m_cur_buf_len);
 
     m_footer_buf_len = sisl::round_up(sizeof(log_group_footer), log_record::flush_boundary());
-    m_footer_buf =
-        sisl::aligned_unique_ptr< uint8_t >::make_sized(HS_STATIC_CONFIG(drive_attr.align_size), m_footer_buf_len);
+    m_footer_buf = sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logwrite >::make_sized(
+        HS_STATIC_CONFIG(drive_attr.align_size), m_footer_buf_len);
 }
 
 void LogGroup::stop() {
@@ -42,7 +43,8 @@ void LogGroup::reset(const uint32_t max_records) {
 
 void LogGroup::create_overflow_buf(const uint32_t min_needed) {
     const auto new_len{sisl::round_up(std::max(min_needed, m_cur_buf_len * 2), log_record::flush_boundary())};
-    auto new_buf{sisl::aligned_unique_ptr< uint8_t >::make_sized(log_record::flush_boundary(), new_len)};
+    auto new_buf{
+        sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logwrite >::make_sized(log_record::flush_boundary(), new_len)};
     std::memcpy(static_cast< void* >(new_buf.get()), static_cast< const void* >(m_cur_log_buf), m_cur_buf_len);
 
     m_overflow_log_buf = std::move(new_buf);

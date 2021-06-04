@@ -206,10 +206,7 @@ HomeLogStoreMgrMetrics::HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores
                      {"op", "write"});
     REGISTER_COUNTER(logstore_read_count, "Total number of read requests to log stores", "logstore_op_count",
                      {"op", "read"});
-    REGISTER_COUNTER(logdev_back_to_back_flushing, "Number of attempts to do back to back flush prepare");
 
-    REGISTER_HISTOGRAM(logdev_flush_msg_time_ns, "logdev flush msg time in ns");
-    REGISTER_HISTOGRAM(completion_upcall_start_time_ns, "completion_upcall_start_time in ns");
     REGISTER_HISTOGRAM(logstore_append_latency, "Logstore append latency", "logstore_op_latency", {"op", "write"});
     REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"});
     REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size",
@@ -218,6 +215,9 @@ HomeLogStoreMgrMetrics::HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores
                        HistogramBucketsType(LinearUpto128Buckets));
     REGISTER_HISTOGRAM(logstore_record_size, "Distribution of log record size",
                        HistogramBucketsType(ExponentialOfTwoBuckets));
+    REGISTER_HISTOGRAM(logdev_flush_done_msg_time_ns, "Logdev flush completion msg time in ns");
+    REGISTER_HISTOGRAM(logdev_post_flush_processing_latency,
+                       "Logdev post flush processing (including callbacks) latency");
 
     register_me_to_farm();
 }

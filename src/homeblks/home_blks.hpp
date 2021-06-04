@@ -16,7 +16,7 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <fds/sparse_vector.hpp>
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <metrics/metrics.hpp>
 #include <settings/settings.hpp>
 #include <utility/atomic_counter.hpp>
@@ -244,7 +244,7 @@ public:
 public:
     /***************************** APIs exposed to homestore subsystem ***********************/
     uint64_t get_boot_cnt() const {
-        auto sb = (homeblks_sb*)m_homeblks_sb_buf.bytes();
+        auto sb = (homeblks_sb*)m_homeblks_sb_buf->bytes;
         assert(sb->boot_cnt < UINT16_MAX);
         return (uint16_t)sb->boot_cnt;
     }
@@ -324,8 +324,7 @@ private:
 
 private:
     init_params m_cfg;
-    sisl::byte_view m_homeblks_sb_buf;
-    // homeblks_sb*  m_homeblks_sb = nullptr; // the homestore super block
+    sisl::byte_array m_homeblks_sb_buf; // the homestore super block
     void* m_sb_cookie = nullptr;
 
     vol_map_t m_volume_map;

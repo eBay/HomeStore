@@ -19,7 +19,7 @@
 
 #include <fds/bitword.hpp>
 #include <fds/thread_vector.hpp>
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 
 #include "engine/common/homestore_config.hpp"
 #include "engine/homeds/array/flexarray.hpp"

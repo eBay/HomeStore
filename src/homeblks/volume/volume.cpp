@@ -11,7 +11,7 @@
 #include <iterator>
 #include <thread>
 
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 
 #include "engine/common/homestore_flip.hpp"
 #include "homeblks/home_blks.hpp"
@@ -107,8 +107,8 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
         m_metrics(((vol_sb_hdr*)sb_buf.bytes())->vol_name, this),
         m_indx_mgr_destroy_started(false),
         m_sb_cookie(mblk_cookie) {
-    m_sb_buf = sb_buf;
-    auto sb = (vol_sb_hdr*)m_sb_buf.bytes();
+    m_sb_buf = hs_utils::extract_byte_array(sb_buf);
+    auto sb = (vol_sb_hdr*)m_sb_buf->bytes;
     m_state = sb->state;
 
     m_hb = HomeBlks::safe_instance();
@@ -116,16 +116,17 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
 
 void Volume::init() {
     bool init = false;
-    auto sb = (vol_sb_hdr*)m_sb_buf.bytes();
+    vol_sb_hdr* sb{nullptr};
+
     /* add this volume in home blks */
-    if (!sb) {
+    if (m_sb_buf == nullptr) {
         init = true;
         /* populate superblock */
-        m_sb_buf =
-            hs_utils::create_byte_view(sizeof(vol_sb_hdr), MetaBlkMgrSI()->is_aligned_buf_needed(sizeof(vol_sb_hdr)));
+        m_sb_buf = hs_utils::make_byte_array(
+            sizeof(vol_sb_hdr), MetaBlkMgrSI()->is_aligned_buf_needed(sizeof(vol_sb_hdr)), sisl::buftag::metablk);
 
         /* populate superblock */
-        sb = new (m_sb_buf.bytes())
+        sb = new (m_sb_buf->bytes)
             vol_sb_hdr(m_params.page_size, m_params.size, (const char*)m_params.vol_name, m_params.uuid);
 
         /* create indx tbl */
@@ -143,6 +144,7 @@ void Volume::init() {
 
     } else {
         /* recovery */
+        sb = (vol_sb_hdr*)m_sb_buf->bytes;
         auto indx_sb = sb->indx_sb;
         m_indx_mgr = SnapMgr::make_SnapMgr(
             get_uuid(), std::string(get_name()),
@@ -786,7 +788,7 @@ void Volume::alloc_single_block_in_mem() {
     // pointer to that
     uint8_t* ptr;
     uint32_t size = get_page_size();
-    ptr = hs_utils::iobuf_alloc(size);
+    ptr = hs_utils::iobuf_alloc(size, sisl::buftag::common);
     memset(ptr, 0, size);
 
     boost::intrusive_ptr< homeds::MemVector > mvec{new homeds::MemVector{}};
@@ -876,15 +878,15 @@ bool Volume::is_online() const {
 
 void Volume::write_sb() {
     std::unique_lock< std::mutex > lk(m_sb_lock);
-    auto sb = (vol_sb_hdr*)m_sb_buf.bytes();
+    auto sb = (vol_sb_hdr*)m_sb_buf->bytes;
     /* update mutable params */
     sb->state = m_state.load(std::memory_order_release);
 
     if (!m_sb_cookie) {
         // first time insert
-        MetaBlkMgrSI()->add_sub_sb("VOLUME", (void*)m_sb_buf.bytes(), sizeof(vol_sb_hdr), m_sb_cookie);
+        MetaBlkMgrSI()->add_sub_sb("VOLUME", (void*)m_sb_buf->bytes, sizeof(vol_sb_hdr), m_sb_cookie);
     } else {
-        MetaBlkMgrSI()->update_sub_sb((void*)m_sb_buf.bytes(), sizeof(vol_sb_hdr), m_sb_cookie);
+        MetaBlkMgrSI()->update_sub_sb((void*)m_sb_buf->bytes, sizeof(vol_sb_hdr), m_sb_cookie);
     }
 }
 

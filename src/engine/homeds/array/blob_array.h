@@ -6,7 +6,7 @@
 #define Blob_Array_DS_H_
 
 #include <stdint.h>
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <vector>
 #include <malloc.h>
 #include "assert.h"

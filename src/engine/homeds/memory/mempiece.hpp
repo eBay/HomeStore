@@ -18,7 +18,7 @@
 #include <type_traits>
 #include <vector>
 
-#include <fds/utils.hpp>
+#include <fds/buffer.hpp>
 #include <iomgr/iomgr.hpp>
 #include <utility/atomic_counter.hpp>
 #include <utility/obj_life_counter.hpp>
@@ -27,6 +27,7 @@
 #include "engine/common/homestore_config.hpp"
 #include "engine/homestore_base.hpp"
 //#include "tagged_ptr.hpp"
+#include <metrics/metrics.hpp>
 
 namespace homeds {
 using namespace homestore; // NOTE: This needs to be removed as it pollutes namespace of all files where this header is
@@ -45,23 +46,44 @@ struct mempiece_tag {
 };
 #pragma pack()
 
+constexpr int SizeMultiplier = 4096;
+
+class MemPieceMetrics : public sisl::MetricsGroup {
+public:
+    static MemPieceMetrics& get() {
+        static MemPieceMetrics s_metrics;
+        return s_metrics;
+    }
+
+    MemPieceMetrics() : sisl::MetricsGroup{"Mempiece", "Singleton"} {
+        REGISTER_COUNTER(mempiece_overall_size, "Memory occupied by mempiece", sisl::_publish_as::publish_as_gauge);
+        register_me_to_farm();
+    }
+};
+
 struct MemPiece : public sisl::ObjLifeCounter< MemPiece > {
     homeds::tagged_ptr< uint8_t > m_mem;
 
-    MemPiece(uint8_t* const mem, const uint32_t size, const uint32_t offset) :
-            ObjLifeCounter{}, m_mem{mem, static_cast<uint16_t>(gen_new_tag(encode(size), encode(offset)))} {}
+    MemPiece(uint8_t* const mem, const uint32_t sz, const uint32_t offset) :
+            ObjLifeCounter{}, m_mem{mem, static_cast<uint16_t>(gen_new_tag(encode(sz), encode(offset)))} {
+        COUNTER_INCREMENT(MemPieceMetrics::get(), mempiece_overall_size, sz); 
+    }
 
     MemPiece() : MemPiece(nullptr, 0, 0) {}
-    MemPiece(const MemPiece& other) : ObjLifeCounter(), m_mem(other.m_mem) {}
-    ~MemPiece() {}
+    MemPiece(const MemPiece& other) : ObjLifeCounter(), m_mem(other.m_mem) {
+        COUNTER_INCREMENT(MemPieceMetrics::get(), mempiece_overall_size, size());
+    }
+    ~MemPiece() { COUNTER_DECREMENT(MemPieceMetrics::get(), mempiece_overall_size, size()); }
 
     void set_ptr(uint8_t* ptr) { m_mem.set_ptr(ptr); }
 
+#if 0
     void set_size(uint32_t size) {
         __mempiece_tag t = get_tag();
         t.m_size = encode(size);
         set_tag(t);
     }
+#endif
 
     void set_offset(uint32_t offset) {
         __mempiece_tag t = get_tag();
@@ -71,9 +93,10 @@ struct MemPiece : public sisl::ObjLifeCounter< MemPiece > {
 
     void reset() { set(nullptr, 0, 0); }
 
-    void set(uint8_t* ptr, uint32_t size, uint32_t offset) {
+    void set(uint8_t* ptr, uint32_t sz, uint32_t offset) {
+        COUNTER_INCREMENT(MemPieceMetrics::get(), mempiece_overall_size, sz - size());
         __mempiece_tag t;
-        t.m_size = encode(size);
+        t.m_size = encode(sz);
         t.m_offset = encode(offset);
         m_mem.set(ptr, t.to_integer());
     }
@@ -300,6 +323,7 @@ private:
     typedef std::recursive_mutex lock_type;
     mutable lock_type m_mtx;
     sisl::atomic_counter< uint16_t > m_refcnt; // Refcount
+    sisl::buftag m_tag{ sisl::buftag::common };
 
 public:
     MemVector(uint8_t* const ptr, const uint32_t size, const uint32_t offset) : ObjLifeCounter{}, m_refcnt{0} {
@@ -318,7 +342,7 @@ public:
         std::lock_guard< lock_type > mtx{m_mtx};
         for (const auto& entry : m_list) {
             if (entry.ptr() != nullptr) {
-                hs_utils::iobuf_free(entry.ptr());
+                hs_utils::iobuf_free(entry.ptr(), get_tag());
             } else {
                 assert(false);
             }
@@ -364,6 +388,8 @@ public:
     }
 
     void set(const sisl::blob& b, const uint32_t offset = 0) { set(b.bytes, b.size, offset); }
+    void set_tag(const sisl::buftag tag) { m_tag = tag; }
+    sisl::buftag get_tag() const { return m_tag; }
 
     void get(sisl::blob* const outb, const uint32_t offset = 0) const {
         std::lock_guard< lock_type > mtx{m_mtx};

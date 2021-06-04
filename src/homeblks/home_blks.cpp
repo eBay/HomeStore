@@ -338,13 +338,13 @@ HomeBlksSafePtr HomeBlks::safe_instance() {
 }
 
 homeblks_sb* HomeBlks::superblock_init() {
-    HS_RELEASE_ASSERT_EQ(m_homeblks_sb_buf.bytes(), nullptr, "Reinit already initialized super block");
+    HS_RELEASE_ASSERT_EQ(m_homeblks_sb_buf, nullptr, "Reinit already initialized super block");
 
     /* build the homeblks super block */
-    m_homeblks_sb_buf =
-        hs_utils::create_byte_view(HOMEBLKS_SB_SIZE, MetaBlkMgrSI()->is_aligned_buf_needed(HOMEBLKS_SB_SIZE));
+    m_homeblks_sb_buf = hs_utils::make_byte_array(
+        HOMEBLKS_SB_SIZE, MetaBlkMgrSI()->is_aligned_buf_needed(HOMEBLKS_SB_SIZE), sisl::buftag::metablk);
 
-    auto sb = (homeblks_sb*)m_homeblks_sb_buf.bytes();
+    auto sb = (homeblks_sb*)m_homeblks_sb_buf->bytes;
     sb->version = HOMEBLKS_SB_VERSION;
     sb->boot_cnt = 0;
     sb->init_flag(0);
@@ -354,10 +354,10 @@ homeblks_sb* HomeBlks::superblock_init() {
 void HomeBlks::homeblks_sb_write() {
     if (m_sb_cookie == nullptr) {
         // add to MetaBlkMgr
-        MetaBlkMgrSI()->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), m_sb_cookie);
+        MetaBlkMgrSI()->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb_buf->bytes, sizeof(homeblks_sb), m_sb_cookie);
     } else {
         // update existing homeblks sb
-        MetaBlkMgrSI()->update_sub_sb((void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), m_sb_cookie);
+        MetaBlkMgrSI()->update_sub_sb((void*)m_homeblks_sb_buf->bytes, sizeof(homeblks_sb), m_sb_cookie);
     }
 }
 
@@ -387,7 +387,7 @@ void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, const io_comp_call
 
 void HomeBlks::attach_end_of_batch_cb(const end_of_batch_callback& cb) {
     m_cfg.end_of_batch_cb = cb;
-    iomanager.default_drive_interface()->attach_end_of_batch_cb([this](int nevents) { call_multi_completions(); });
+    iomanager.generic_interface()->attach_listen_sentinel_cb([this]() { call_multi_completions(); }, nullptr);
 }
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
@@ -649,7 +649,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
      * we don't replay journal on boot and assume that everything is correct.
      */
     if (!m_force_shutdown) {
-        ((homeblks_sb*)m_homeblks_sb_buf.bytes())->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
+        ((homeblks_sb*)m_homeblks_sb_buf->bytes)->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
         if (!m_cfg.is_read_only) { homeblks_sb_write(); }
     }
 
@@ -668,13 +668,11 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     this->close_devices();
 
     // stop io
-    iomanager.default_drive_interface()->detach_end_of_batch_cb();
-    iomanager.stop_io_loop();
-
-    auto cb = m_shutdown_done_cb;
-
-    if (cb) cb(true);
-    return;
+    iomanager.generic_interface()->detach_listen_sentinel_cb(
+        [cb = std::move(m_shutdown_done_cb)]([[maybe_unused]] iomgr::io_thread_addr_t addr) {
+            iomanager.stop_io_loop();
+            if (cb) cb(true);
+        });
 }
 
 void HomeBlks::do_volume_shutdown(bool force) {
@@ -756,7 +754,7 @@ bool HomeBlks::fix_tree(VolumePtr vol, bool verify) { return vol->fix_mapping_bt
 void HomeBlks::call_multi_completions() {
     auto v_comp_events = 0;
 
-    if (s_io_completed_volumes) {
+    while (s_io_completed_volumes) {
         auto comp_vols = s_io_completed_volumes;
         s_io_completed_volumes = nullptr;
 
@@ -787,7 +785,7 @@ void HomeBlks::migrate_cp_sb() {}
 void HomeBlks::migrate_homeblk_sb() {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     void* cookie = nullptr;
-    MetaBlkMgrSI()->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb_buf.bytes(), sizeof(homeblks_sb), cookie);
+    MetaBlkMgrSI()->add_sub_sb("HOMEBLK", (void*)m_homeblks_sb_buf->bytes, sizeof(homeblks_sb), cookie);
 }
 
 void HomeBlks::migrate_volume_sb() {
@@ -822,7 +820,7 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
 
     m_recovery_stats->phase0_done();
 
-    auto sb = (homeblks_sb*)m_homeblks_sb_buf.bytes();
+    auto sb = (homeblks_sb*)m_homeblks_sb_buf->bytes;
     /* check the status of last boot */
     if (sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
         LOGDEBUG("System was shutdown cleanly.");
@@ -927,7 +925,7 @@ void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) 
     m_sb_cookie = (void*)mblk;
 
     // recover from meta_blk;
-    m_homeblks_sb_buf = buf;
+    m_homeblks_sb_buf = hs_utils::extract_byte_array(buf);
 }
 
 void HomeBlks::start_home_log_store() {
