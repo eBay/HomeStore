@@ -152,7 +152,7 @@ public:
     void update_sub_sb(const void* const context_data, const uint64_t sz, void*& cookie);
 
     // size_t read_sub_sb(const meta_sub_type type, sisl::byte_view& buf);
-    void read_sub_sb(const meta_sub_type type) const;
+    void read_sub_sb(const meta_sub_type type);
 
     /**
      * @brief :
@@ -199,6 +199,12 @@ public:
 
     [[nodiscard]] uint64_t ovf_blk_max_num_data_blk() const;
 
+    /**
+     * @brief : called by client or by metablkmgr to check the sanity of cookie being sent back to client or received
+     * from client;
+     *
+     * @param cookie
+     */
     void cookie_sanity_check(const void* const cookie);
 
 public:
@@ -325,7 +331,24 @@ private:
     [[nodiscard]] uint32_t get_compress_ratio_limit() const;
     [[nodiscard]] bool compress_feature_on() const;
 
-    [[nodiscard]] nlohmann::json get_status(const int log_level) const;
+    [[nodiscard]] nlohmann::json get_status(const int log_level);
+
+    /**
+     * @brief : check the field in this cookie whether they are correct and consistent;
+     *
+     * @param cookie
+     */
+    void _cookie_sanity_check(const void* const cookie) const;
+
+    /**
+     * @brief :  On-disk sanity check by walking through meta blk chain for sanity check;
+     *
+     * @param check_ovf_chain:
+     * if set to true, also walk through ovf chain for each meta blk if there is any;
+     * if false, skip ovf chain sanity check;
+     */
+    bool sanity_check(const bool check_ovf_chain = false);
+    [[nodiscard]] bool ssb_sanity_check() const;
 };
 
 extern MetaBlkMgr* MetaBlkMgrSI();

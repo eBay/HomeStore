@@ -79,16 +79,15 @@ struct MetaSubRegInfo {
 // meta blk super block put as 1st block in the block chain;
 #pragma pack(1)
 struct meta_blk_sb {
-    uint32_t version;
     uint32_t magic; // ssb magic
+    uint32_t version;
     bool migrated;
     BlkId next_bid; // next metablk
-    BlkId prev_bid; // previous metablk
     BlkId bid;
 
-  std::string to_string() const {
-        return fmt::format("version: {}, magic: {}, migrated: {}, next_bid: {}, prev_bid: {}, self_bid: {}", version,
-                           next_bid.to_string(), prev_bid.to_string(), bid.to_string());
+    std::string to_string() const {
+        return fmt::format("magic: {}, version: {}, next_bid: {}, self_bid: {}", magic, version, next_bid.to_string(),
+                           bid.to_string());
     }
 };
 #pragma pack()
@@ -100,8 +99,9 @@ struct meta_blk_sb {
 //
 #pragma pack(1)
 struct meta_blk_hdr_s {
-    uint32_t version;
     uint32_t magic; // magic
+    uint32_t version;
+    uint32_t gen_cnt; // generation count, bump on every update
     crc32_t crc;
     BlkId next_bid;         // next metablk
     BlkId prev_bid;         // previous metablk

@@ -107,8 +107,8 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     void dec_ref() { intrusive_ptr_release(this); }
 
     template < typename RequestType,
-               typename =
-                   std::enable_if_t < std::is_base_of_v< virtualdev_req, std::decay_t<typename RequestType::element_type> > > >
+               typename = std::enable_if_t<
+                   std::is_base_of_v< virtualdev_req, std::decay_t< typename RequestType::element_type > > > >
     static auto to_vdev_req(RequestType& req) {
         return boost::static_pointer_cast< virtualdev_req >(req);
     }
@@ -627,11 +627,15 @@ public:
             for (auto pchunk : m_primary_pdev_chunks_list[dev_ind].chunks_in_pdev) {
                 auto pdev = pchunk->get_physical_dev_mutable();
                 req->inc_ref();
+                LOGINFO("writing zero for chunk: {}, size: {}, offset: {}", pchunk->get_chunk_id(), pchunk->get_size(),
+                        pchunk->get_start_offset());
                 pdev->write_zero(pchunk->get_size(), pchunk->get_start_offset(), (uint8_t*)req.get());
                 auto mchunks_list = m_mirror_chunks[pchunk];
                 for (auto& mchunk : mchunks_list) {
                     auto m_pdev = mchunk->get_physical_dev_mutable();
                     req->inc_ref();
+                    LOGINFO("writing zero for mirror chunk: {}, size: {}, offset: {}", mchunk->get_chunk_id(),
+                            mchunk->get_size(), mchunk->get_start_offset());
                     m_pdev->write_zero(mchunk->get_size(), mchunk->get_start_offset(), (uint8_t*)req.get());
                 }
             }

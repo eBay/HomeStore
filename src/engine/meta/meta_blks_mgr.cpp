@@ -169,7 +169,6 @@ void MetaBlkMgr::init_ssb() {
         std::lock_guard< decltype(m_meta_mtx) > lk{m_meta_mtx};
         m_last_mblk_id->invalidate();
         m_ssb->next_bid.invalidate();
-        m_ssb->prev_bid.invalidate();
         m_ssb->magic = META_BLK_SB_MAGIC;
         m_ssb->version = META_BLK_SB_VERSION;
         m_ssb->migrated = false;
@@ -331,47 +330,44 @@ void MetaBlkMgr::register_handler(const meta_sub_type type, const meta_blk_found
 
 void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* const context_data, const uint64_t sz,
                             void*& cookie) {
-    {
-        std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
-        HS_RELEASE_ASSERT_LT(type.length(), MAX_SUBSYS_TYPE_LEN, "type len: {} should not exceed len: {}",
-                             type.length(), MAX_SUBSYS_TYPE_LEN);
-        // not allowing add sub sb before registration
-        HS_ASSERT(RELEASE, m_sub_info.find(type) != m_sub_info.end(), "[type={}] not registered yet!", type);
+    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
+    HS_RELEASE_ASSERT_LT(type.length(), MAX_SUBSYS_TYPE_LEN, "type len: {} should not exceed len: {}", type.length(),
+                         MAX_SUBSYS_TYPE_LEN);
+    // not allowing add sub sb before registration
+    HS_ASSERT(RELEASE, m_sub_info.find(type) != m_sub_info.end(), "[type={}] not registered yet!", type);
 
-        BlkId meta_bid;
-        alloc_meta_blk(meta_bid);
+    BlkId meta_bid;
+    alloc_meta_blk(meta_bid);
 
-        // add meta_bid to in-memory for reverse mapping;
-        m_sub_info[type].meta_bids.insert(meta_bid.to_integer());
-
-#ifndef NDEBUG
-        uint32_t crc{0};
-        if (m_sub_info[type].do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
-#endif
-
-        HS_LOG(DEBUG, metablk, "{}, adding meta bid: {}, sz: {}, mstore used size: {}", type, meta_bid.to_string(), sz,
-               m_sb_blk_store->get_used_size());
-
-        meta_blk* const mblk{init_meta_blk(meta_bid, type, context_data, sz)};
-
-        HS_LOG(DEBUG, metablk, "{}, Done adding bid: {}, prev: {}, next: {}, size: {}, crc: {}, mstore used size: {}",
-               type, mblk->hdr.h.bid, mblk->hdr.h.prev_bid, mblk->hdr.h.next_bid,
-               static_cast< uint64_t >(mblk->hdr.h.context_sz), static_cast< uint32_t >(mblk->hdr.h.crc),
-               m_sb_blk_store->get_used_size());
+    // add meta_bid to in-memory for reverse mapping;
+    m_sub_info[type].meta_bids.insert(meta_bid.to_integer());
 
 #ifndef NDEBUG
-        if (m_sub_info[type].do_crc && !(mblk->hdr.h.compressed)) {
-            HS_DEBUG_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
-                               "Input context data has been changed since received, crc mismatch: {}/{}", crc,
-                               static_cast< uint32_t >(mblk->hdr.h.crc));
-        }
+    uint32_t crc{0};
+    if (m_sub_info[type].do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
 #endif
 
-        cookie = static_cast< void* >(mblk);
+    HS_LOG(DEBUG, metablk, "{}, adding meta bid: {}, sz: {}, mstore used size: {}", type, meta_bid.to_string(), sz,
+           m_sb_blk_store->get_used_size());
+
+    meta_blk* const mblk{init_meta_blk(meta_bid, type, context_data, sz)};
+
+    HS_LOG(DEBUG, metablk, "{}, Done adding bid: {}, prev: {}, next: {}, size: {}, crc: {}, mstore used size: {}", type,
+           mblk->hdr.h.bid, mblk->hdr.h.prev_bid, mblk->hdr.h.next_bid, static_cast< uint64_t >(mblk->hdr.h.context_sz),
+           static_cast< uint32_t >(mblk->hdr.h.crc), m_sb_blk_store->get_used_size());
+
+#ifndef NDEBUG
+    if (m_sub_info[type].do_crc && !(mblk->hdr.h.compressed)) {
+        HS_DEBUG_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
+                           "Input context data has been changed since received, crc mismatch: {}/{}", crc,
+                           static_cast< uint32_t >(mblk->hdr.h.crc));
     }
+#endif
+
+    cookie = static_cast< void* >(mblk);
 
     // validate content of cookie
-    cookie_sanity_check(cookie);
+    _cookie_sanity_check(cookie);
 }
 
 void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* const ovf_hdr, const void* const context_data,
@@ -471,6 +467,7 @@ meta_blk* MetaBlkMgr::init_meta_blk(BlkId& bid, const meta_sub_type type, const 
 
     mblk->hdr.h.magic = META_BLK_MAGIC;
     mblk->hdr.h.version = META_BLK_VERSION;
+    mblk->hdr.h.gen_cnt = 0;
 
     // handle prev/next pointer linkage;
     if (m_last_mblk_id->is_valid()) {
@@ -672,8 +669,16 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* const mblk, const void* conte
 }
 
 void MetaBlkMgr::cookie_sanity_check(const void* const cookie) {
-#ifdef _PRERELEASE
     std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+    _cookie_sanity_check(cookie);
+}
+
+//
+// the input cookie being checked could the the one received from client doing add/update/remove or
+// a meta blk read from disk;
+//
+void MetaBlkMgr::_cookie_sanity_check(const void* const cookie) const {
+#ifdef _PRERELEASE
     auto mblk{static_cast< const meta_blk* >(cookie)};
 
     HS_RELEASE_ASSERT_EQ(cookie != nullptr, true, "null cookie!");
@@ -692,7 +697,13 @@ void MetaBlkMgr::cookie_sanity_check(const void* const cookie) {
         if (x == mblk->hdr.h.bid.to_integer()) {
             auto it = m_meta_blks.find(x);
             auto cached_mblk = it->second;
-            HS_RELEASE_ASSERT_EQ(cached_mblk == mblk, true, "Cookie received is not same as cached!");
+            if (cached_mblk != mblk) {
+                // input cookie could be read from disk, so it is not same address as cached_mblk;
+                HS_RELEASE_ASSERT_EQ(cached_mblk->hdr.h.bid.to_integer(), mblk->hdr.h.bid.to_integer());
+                HS_RELEASE_ASSERT_EQ(cached_mblk->hdr.h.gen_cnt, mblk->hdr.h.gen_cnt);
+                HS_RELEASE_ASSERT_EQ(cached_mblk->hdr.h.next_bid.to_integer(), mblk->hdr.h.next_bid.to_integer());
+                HS_RELEASE_ASSERT_EQ(cached_mblk->hdr.h.prev_bid.to_integer(), mblk->hdr.h.prev_bid.to_integer());
+            }
             exist = true;
             break;
         }
@@ -709,52 +720,62 @@ void MetaBlkMgr::cookie_sanity_check(const void* const cookie) {
 // 3. free old ovf_bid if there is any
 //
 void MetaBlkMgr::update_sub_sb(const void* const context_data, const uint64_t sz, void*& cookie) {
-    cookie_sanity_check(cookie);
-    {
-        std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
-        meta_blk* const mblk{static_cast< meta_blk* >(cookie)};
-
-        HS_LOG(DEBUG, metablk, "[type={}], update_sub_sb old sb: context_sz: {}, ovf_bid: {}, mstore used size: {}",
-               mblk->hdr.h.type, (unsigned long)(mblk->hdr.h.context_sz), mblk->hdr.h.ovf_bid.to_string(),
-               m_sb_blk_store->get_used_size());
-
-        const auto ovf_bid_to_free{mblk->hdr.h.ovf_bid};
-
-#ifndef NDEBUG
-        uint32_t crc{0};
-        const auto it{m_sub_info.find(mblk->hdr.h.type)};
-        HS_ASSERT(DEBUG, it != std::end(m_sub_info), "[type={}] not registered yet!", mblk->hdr.h.type);
-        if (it->second.do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
+#ifdef _PRERELEASE
+    if (HS_DYNAMIC_CONFIG(generic.sanity_check_level)) {
+        static std::atomic< uint32_t > skip_cnt = 0;
+        if (skip_cnt++ >= HS_DYNAMIC_CONFIG(metablk.sanity_check_interval)) {
+            skip_cnt = 0;
+            sanity_check(true /* check_ovf_chain */);
+        }
+    }
 #endif
 
-        mblk->hdr.h.ovf_bid.invalidate();
+    std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+    _cookie_sanity_check(cookie);
+    meta_blk* const mblk{static_cast< meta_blk* >(cookie)};
 
-        // write this meta blk to disk
-        write_meta_blk_internal(mblk, context_data, sz);
+    HS_LOG(DEBUG, metablk, "[type={}], update_sub_sb old sb: context_sz: {}, ovf_bid: {}, mstore used size: {}",
+           mblk->hdr.h.type, (unsigned long)(mblk->hdr.h.context_sz), mblk->hdr.h.ovf_bid.to_string(),
+           m_sb_blk_store->get_used_size());
+
+    const auto ovf_bid_to_free{mblk->hdr.h.ovf_bid};
+
+#ifndef NDEBUG
+    uint32_t crc{0};
+    const auto it{m_sub_info.find(mblk->hdr.h.type)};
+    HS_ASSERT(DEBUG, it != std::end(m_sub_info), "[type={}] not registered yet!", mblk->hdr.h.type);
+    if (it->second.do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
+#endif
+
+    mblk->hdr.h.ovf_bid.invalidate();
+    mblk->hdr.h.gen_cnt += 1;
+
+    // write this meta blk to disk
+    write_meta_blk_internal(mblk, context_data, sz);
 
 #ifdef _PRERELEASE
-        HomeStoreFlip::test_and_abort("update_sb_abort");
+    HomeStoreFlip::test_and_abort("update_sb_abort");
 #endif
 
-        // free the overflow bid if it is there
-        free_ovf_blk_chain(ovf_bid_to_free);
+    // free the overflow bid if it is there
+    free_ovf_blk_chain(ovf_bid_to_free);
 
-        HS_LOG(DEBUG, metablk, "[type={}], update_sub_sb new sb: context_sz: {}, ovf_bid: {}, mstore used size: {}",
-               mblk->hdr.h.type, static_cast< uint64_t >(mblk->hdr.h.context_sz), mblk->hdr.h.ovf_bid.to_string(),
-               m_sb_blk_store->get_used_size());
+    HS_LOG(DEBUG, metablk, "[type={}], update_sub_sb new sb: context_sz: {}, ovf_bid: {}, mstore used size: {}",
+           mblk->hdr.h.type, static_cast< uint64_t >(mblk->hdr.h.context_sz), mblk->hdr.h.ovf_bid.to_string(),
+           m_sb_blk_store->get_used_size());
 
 #ifndef NDEBUG
-        if (!(mblk->hdr.h.compressed) && it->second.do_crc) {
-            HS_DEBUG_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
-                               "[type={}]: Input context data has been changed since received, crc mismatch: {}/{}",
-                               mblk->hdr.h.type, crc, static_cast< uint32_t >(mblk->hdr.h.crc));
-        }
+    if (!(mblk->hdr.h.compressed) && it->second.do_crc) {
+        HS_DEBUG_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
+                           "[type={}]: Input context data has been changed since received, crc mismatch: {}/{}",
+                           mblk->hdr.h.type, crc, static_cast< uint32_t >(mblk->hdr.h.crc));
+    }
 #endif
 
-        // no need to update cookie and in-memory meta blk map
-    }
+    // no need to update cookie and in-memory meta blk map
+
     // validate since update will change content of cookie
-    cookie_sanity_check(cookie);
+    _cookie_sanity_check(cookie);
 }
 
 std::error_condition MetaBlkMgr::remove_sub_sb(void* const cookie) {
@@ -1094,7 +1115,12 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
     }
 }
 
-void MetaBlkMgr::read_sub_sb(const meta_sub_type type) const {
+//
+// Acquire lock in read is to avoid same client issue update/remove/read on same cookie concurrently (though it should
+// not happen in normal case).
+//
+void MetaBlkMgr::read_sub_sb(const meta_sub_type type) {
+    std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
     const auto it_s{m_sub_info.find(type)};
     HS_RELEASE_ASSERT_EQ(it_s != std::end(m_sub_info), true,
                          "Unregistered client [type={}], need to register fistly before read", type);
@@ -1154,14 +1180,110 @@ uint64_t MetaBlkMgr::get_size() const { return m_sb_blk_store->get_size(); }
 
 uint64_t MetaBlkMgr::get_used_size() const { return m_sb_blk_store->get_used_size(); }
 
-// uint32_t MetaBlkMgr::get_page_size() const { return m_sb_blk_store->get_page_size(); }
 uint32_t MetaBlkMgr::get_page_size() const { return HS_STATIC_CONFIG(drive_attr.phys_page_size); }
 
 uint64_t MetaBlkMgr::get_available_blks() const { return m_sb_blk_store->get_available_blks(); }
 
 bool MetaBlkMgr::m_self_recover{false};
 
-nlohmann::json MetaBlkMgr::get_status(const int log_level) const {
+// do sanity check on meta ssb;
+bool MetaBlkMgr::ssb_sanity_check() const {
+    // TODO: cross check with blkid written to blkstore's vb_context: m_sb_blk_store->get_vb_context;
+    HS_RELEASE_ASSERT_EQ(m_ssb->bid.is_valid(), true);
+
+    auto ssb_blk = reinterpret_cast< meta_blk_sb* >(hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::metablk));
+    std::memset(static_cast< void* >(ssb_blk), 0, get_page_size());
+    read(m_ssb->bid, static_cast< void* >(ssb_blk), get_page_size());
+
+    HS_RELEASE_ASSERT_EQ(ssb_blk->magic, META_BLK_SB_MAGIC);
+    HS_RELEASE_ASSERT_EQ(ssb_blk->version, META_BLK_SB_VERSION);
+    HS_RELEASE_ASSERT_EQ(ssb_blk->bid.to_integer(), m_ssb->bid.to_integer());
+
+    hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(ssb_blk), sisl::buftag::metablk);
+    return true;
+}
+
+// sanity check will block every operation into meta blk mgr as it takes the gloable lock;
+bool MetaBlkMgr::sanity_check(const bool check_ovf_chain) {
+    HS_PERIODIC_LOG(INFO, metablk, "Sanity check started...");
+    std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+    // start from meta ssb;
+    if (!ssb_sanity_check()) { return false; }
+
+    // get total meta blks from cache, then compare it from the disk;
+    uint32_t num_meta_blks_cached{0};
+    for (auto& m : m_sub_info) {
+        num_meta_blks_cached += m.second.meta_bids.size();
+    }
+
+    auto bid = m_ssb->next_bid;
+    auto prev_bid = m_ssb->bid;
+    uint32_t num_meta_blks_disk{0};
+    std::unordered_set< std::string > clients;
+    auto mblk = reinterpret_cast< meta_blk* >(hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::metablk));
+    while (bid.is_valid()) {
+        std::memset(static_cast< void* >(mblk), 0, get_page_size());
+
+        ++num_meta_blks_disk;
+        read(bid, static_cast< void* >(mblk), get_page_size());
+
+        _cookie_sanity_check(static_cast< void* >(mblk));
+
+        auto it = clients.find(mblk->hdr.h.type);
+        if (it == clients.end()) { clients.insert(mblk->hdr.h.type); }
+
+        // self-bid verify
+        HS_RELEASE_ASSERT_EQ(mblk->hdr.h.bid.to_integer(), bid.to_integer());
+        // prev_bid verify
+        HS_RELEASE_ASSERT_EQ(mblk->hdr.h.prev_bid.to_integer(), prev_bid.to_integer());
+
+        if (mblk->hdr.h.context_sz <= meta_blk_context_sz()) {
+            HS_RELEASE_ASSERT_EQ(mblk->hdr.h.ovf_bid.is_valid(), false);
+        } else {
+            // verify overflow blk
+            auto obid = mblk->hdr.h.ovf_bid;
+            HS_RELEASE_ASSERT_EQ(obid.is_valid(), true);
+
+            if (check_ovf_chain) {
+                auto* const ovf_hdr{reinterpret_cast< meta_blk_ovf_hdr* >(
+                    hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::metablk))};
+                while (obid.is_valid()) {
+                    std::memset(static_cast< void* >(ovf_hdr), 0, get_page_size());
+                    // read it out from disk;
+                    read(obid, ovf_hdr, get_page_size());
+                    // verify self bid
+                    HS_RELEASE_ASSERT_EQ(ovf_hdr->h.bid.to_integer(), obid.to_integer());
+                    // verify magic
+                    HS_RELEASE_ASSERT_EQ(ovf_hdr->h.magic, META_BLK_OVF_MAGIC);
+                    HS_RELEASE_ASSERT_NE(ovf_hdr->h.nbids, 0);
+                    obid = ovf_hdr->h.next_bid;
+                }
+
+                hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(ovf_hdr), sisl::buftag::metablk);
+            }
+        }
+
+        prev_bid = bid;
+        bid = mblk->hdr.h.next_bid;
+    }
+
+    HS_RELEASE_ASSERT_EQ(num_meta_blks_cached, num_meta_blks_disk, "Either memory is corrupted or disk is corrupted.");
+
+    // some clients might registered but not written any meta blk to disk, which is okay;
+    // one case is create a volume, then delete a volume, then client: VOLUME will don't have any meta blk on disk;
+    HS_RELEASE_ASSERT_LE(clients.size(), m_sub_info.size());
+
+    hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(mblk), sisl::buftag::metablk);
+
+    HS_PERIODIC_LOG(
+        INFO, metablk,
+        "Successfully passed sanity check. Total metablks scaned: {}, total clients on disk: {}, total registered "
+        "clients: {}",
+        num_meta_blks_disk, clients.size(), m_sub_info.size());
+    return true;
+}
+
+nlohmann::json MetaBlkMgr::get_status(const int log_level) {
     std::string dump_dir = "/tmp/dump_meta";
     bool can_dump_to_file = false;
     const uint64_t total_free = 0;
@@ -1195,7 +1317,7 @@ nlohmann::json MetaBlkMgr::get_status(const int log_level) const {
         j[x.first]["cb"] = x.second.cb ? "registered valid cb" : "nullptr";
         j[x.first]["comp_cb"] = x.second.comp_cb ? "registered valid cb" : "nullptr";
         j[x.first]["num_meta_bids"] = x.second.meta_bids.size();
-        if (log_level >= 2) {
+        if (log_level >= 2 && log_level <= 3) {
             size_t bid_cnt{0};
             for (const auto& y : x.second.meta_bids) {
                 BlkId bid(y);
@@ -1232,6 +1354,9 @@ nlohmann::json MetaBlkMgr::get_status(const int log_level) const {
 
                 ++bid_cnt;
             }
+        } else if (log_level == 4) {
+            auto ret = sanity_check(true /* check_ovf_chain */);
+            j["sanity_check"] = (ret == true ? "Passed" : "Failed");
         }
     }
 

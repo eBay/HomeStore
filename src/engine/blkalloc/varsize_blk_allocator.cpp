@@ -404,7 +404,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_all
 
     if ((status == BlkAllocStatus::SUCCESS) || (status == BlkAllocStatus::PARTIAL)) {
         incr_alloced_blk_count(total_allocated);
-#ifndef NDEBUG
+#ifdef _PRERELEASE
         alloc_sanity_check(total_allocated, hints, out_blkids);
 #endif
     }
@@ -459,7 +459,7 @@ void VarsizeBlkAllocator::free_on_bitmap(const BlkId& b) {
                  blknum_to_portion_num(b.get_blk_num()), b.to_string(), get_alloced_blk_count());
 }
 
-#ifndef NDEBUG
+#ifdef _PRERELEASE
 bool VarsizeBlkAllocator::is_set_on_bitmap(const BlkId& b) const {
     const BlkAllocPortion* const portion{blknum_to_portion_const(b.get_blk_num())};
     {
@@ -471,23 +471,25 @@ bool VarsizeBlkAllocator::is_set_on_bitmap(const BlkId& b) const {
 
 void VarsizeBlkAllocator::alloc_sanity_check(const blk_count_t nblks, const blk_alloc_hints& hints,
                                              const std::vector< BlkId >& out_blkids) const {
-    blk_count_t alloced_nblks{0};
-    for (const auto& b : out_blkids) {
-        const BlkAllocPortion* const portion{blknum_to_portion_const(b.get_blk_num())};
-        auto lock{portion->portion_auto_lock()};
+    if (HS_DYNAMIC_CONFIG(generic.sanity_check_level)) {
+        blk_count_t alloced_nblks{0};
+        for (const auto& b : out_blkids) {
+            const BlkAllocPortion* const portion{blknum_to_portion_const(b.get_blk_num())};
+            auto lock{portion->portion_auto_lock()};
 
-        BLKALLOC_ASSERT(DEBUG, m_cache_bm->is_bits_set(b.get_blk_num(), b.get_nblks()),
-                        "Expected blkid={} to be already set in cache bitmap", b.to_string());
-        if (get_disk_bm_const()) {
-            BLKALLOC_ASSERT(DEBUG, !is_blk_alloced_on_disk(b), "Expected blkid={} to be already free in disk bitmap",
-                            b.to_string());
+            BLKALLOC_ASSERT(RELEASE, m_cache_bm->is_bits_set(b.get_blk_num(), b.get_nblks()),
+                            "Expected blkid={} to be already set in cache bitmap", b.to_string());
+            if (get_disk_bm_const()) {
+                BLKALLOC_ASSERT(RELEASE, !is_blk_alloced_on_disk(b),
+                                "Expected blkid={} to be already free in disk bitmap", b.to_string());
+            }
+            alloced_nblks += b.get_nblks();
         }
-        alloced_nblks += b.get_nblks();
+        BLKALLOC_ASSERT(RELEASE, (nblks == alloced_nblks), "Requested blks={} alloced_blks={} num_pieces={}", nblks,
+                        alloced_nblks, out_blkids.size());
+        BLKALLOC_ASSERT(RELEASE, (!hints.is_contiguous || (out_blkids.size() == 1)),
+                        "Multiple blkids allocated for contiguous request");
     }
-    BLKALLOC_ASSERT(DEBUG, (nblks == alloced_nblks), "Requested blks={} alloced_blks={} num_pieces={}", nblks,
-                    alloced_nblks, out_blkids.size());
-    BLKALLOC_ASSERT(DEBUG, (!hints.is_contiguous || (out_blkids.size() == 1)),
-                    "Multiple blkids allocated for contiguous request");
 }
 #endif
 

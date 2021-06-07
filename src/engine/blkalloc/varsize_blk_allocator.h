@@ -247,7 +247,7 @@ private:
 private:
     void allocator_state_machine();
 
-#ifndef NDEBUG
+#ifdef _PRERELEASE
     [[nodiscard]] bool is_set_on_bitmap(const BlkId& b) const;
     void alloc_sanity_check(const blk_count_t nblks, const blk_alloc_hints& hints,
                             const std::vector< BlkId >& out_blkids) const;

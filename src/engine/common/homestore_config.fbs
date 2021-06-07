@@ -110,6 +110,9 @@ table Generic {
     cache_max_throttle_cnt : uint64 = 512;
 
     cache_min_throttle_cnt : uint64 = 5;
+
+    // if this value is set to 0, no sanity check will be run;
+    sanity_check_level: uint32 = 1 (hotswap);
 }
 
 table ResourceLimits {
@@ -153,6 +156,9 @@ table MetaBlkStore {
 
     // percentage of *free* root fs while dump to file for get_status;
     percent_of_free_space: uint32 = 10 (hotswap);
+
+    // meta sanity check interval 
+    sanity_check_interval: uint32 = 10 (hotswap);
 }
 
 table HomeStoreSettings {
