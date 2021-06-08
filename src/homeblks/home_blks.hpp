@@ -271,10 +271,13 @@ public:
     void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
     void meta_blk_recovery_comp(bool success);
 
-    bool verify_vols();
-    bool verify_data_bm();
-    bool verify_index_bm();
-    bool verify_bitmap();
+    [[nodiscard]] bool verify_vols();
+    [[nodiscard]] bool verify_data_bm();
+    [[nodiscard]] bool verify_index_bm();
+    [[nodiscard]] bool verify_bitmap();
+
+    [[nodiscard]] std::error_condition mark_vol_offline(const boost::uuids::uuid& uuid);
+    [[nodiscard]] std::error_condition mark_vol_online(const boost::uuids::uuid& uuid);
 
 #ifdef _PRERELEASE
     void set_io_flip();

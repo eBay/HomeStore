@@ -150,6 +150,7 @@ public:
 
         REGISTER_GAUGE(volume_data_used_size, "Total Volume data used size");
         REGISTER_GAUGE(volume_index_used_size, "Total Volume index used size");
+        REGISTER_GAUGE(volume_state, "Volume state");
 
         REGISTER_HISTOGRAM(volume_read_latency, "Volume overall read latency", "volume_op_latency", {"op", "read"});
         REGISTER_HISTOGRAM(volume_write_latency, "Volume overall write latency", "volume_op_latency", {"op", "write"});
@@ -328,6 +329,8 @@ private:
 
     std::vector< iovec > get_next_iovecs(IoVecTransversal& iovec_transversal, const std::vector< iovec >& data_iovecs,
                                          const uint64_t size);
+
+    void fault_containment();
 
 public:
     /******************** static functions exposed to home_blks *******************/

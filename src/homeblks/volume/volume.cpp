@@ -27,7 +27,7 @@ namespace {
 /* only for testing */
 bool vol_test_enable{false};
 #endif
-}
+} // namespace
 
 sisl::atomic_counter< uint64_t > Volume::home_blks_ref_cnt{0};
 
@@ -246,7 +246,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     // sync write is not supported
     VOL_DEBUG_ASSERT_CMP(vreq->is_sync(), ==, false, vreq, "sync not supported");
     if (is_offline()) {
-        ret = std::make_error_condition(std::errc::no_such_device);
+        ret = std::make_error_condition(std::errc::resource_unavailable_try_again);
         goto done;
     }
 
@@ -357,7 +357,7 @@ std::error_condition Volume::read(const vol_interface_req_ptr& iface_req) {
     home_blks_ref_cnt.increment();
     m_vol_ref_cnt.increment();
     if (is_offline()) {
-        ret = std::make_error_condition(std::errc::no_such_device);
+        ret = std::make_error_condition(std::errc::resource_unavailable_try_again);
         goto done;
     }
 
@@ -387,7 +387,7 @@ std::error_condition Volume::unmap(const vol_interface_req_ptr& iface_req) {
     m_vol_ref_cnt.increment();
 
     if (is_offline()) {
-        ret = std::make_error_condition(std::errc::no_such_device);
+        ret = std::make_error_condition(std::errc::resource_unavailable_try_again);
         goto done;
     }
 
@@ -554,6 +554,16 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 
 void Volume::attach_completion_cb(const io_comp_callback& cb) { m_comp_cb = cb; }
 
+void Volume::fault_containment() {
+    // set state to offline
+    set_state(vol_state::OFFLINE);
+
+    // send state_change_callback to AM
+    m_hb->vol_state_change(shared_from_this(), vol_state::OFFLINE);
+
+    // I/O completion cb will be suppressed automatcially since after state change cb, scst connection should be donwn;
+}
+
 void Volume::verify_csum(const volume_req_ptr& vreq) {
     uint32_t csum_indx = 0;
     for (auto& info : vreq->read_buf()) {
@@ -567,7 +577,13 @@ void Volume::verify_csum(const volume_req_ptr& vreq) {
 
                 size -= get_page_size();
                 offset += get_page_size();
-                VOL_RELEASE_ASSERT_CMP(vreq->csum_list[csum_indx++], ==, csum, vreq, "Checksum mismatch");
+                if (vreq->csum_list[csum_indx] != csum) {
+                    THIS_VOL_LOG(ERROR, volume, vreq, "crc mismatch at offset: {}, vreq->crc: {}, csum: {}", offset,
+                                 vreq->csum_list[csum_indx], csum);
+                    fault_containment();
+                } else {
+                    csum_indx++;
+                }
             }
         }
     }
@@ -858,11 +874,13 @@ vol_state Volume::set_state(vol_state state, bool persist) {
     THIS_VOL_LOG(INFO, base, , "volume state changed from {} to {}", m_state, state);
     auto prev_state = m_state.exchange(state, std::memory_order_acquire);
     if (prev_state == state) { return prev_state; }
+
     if (persist) {
         VOL_ASSERT(DEBUG, (state == vol_state::DESTROYING || state == vol_state::ONLINE || state == vol_state::OFFLINE),
                    , "state is {}", state);
         write_sb();
     }
+
     return prev_state;
 }
 
@@ -957,6 +975,7 @@ void VolumeMetrics::on_gather() {
         cap_attrs size{m_volume->get_used_size()};
         GAUGE_UPDATE(*this, volume_data_used_size, size.used_data_size);
         GAUGE_UPDATE(*this, volume_index_used_size, size.used_index_size);
+        GAUGE_UPDATE(*this, volume_state, static_cast< int64_t >(m_volume->get_state()));
     } else {
         HS_LOG_EVERY_N(
             WARN, base, 50,

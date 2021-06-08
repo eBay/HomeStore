@@ -45,6 +45,8 @@ void HomeBlksHttpServer::start() {
             handler_info("/api/v1/verifyBitmap", HomeBlksHttpServer::verify_bitmap, (void*)this),
 #ifdef _PRERELEASE
             handler_info("/api/v1/crashSystem", HomeBlksHttpServer::crash_system, (void*)this),
+            handler_info("/api/v1/moveVolOffline", HomeBlksHttpServer::move_vol_offline, (void*)this),
+            handler_info("/api/v1/moveVolOnline", HomeBlksHttpServer::move_vol_online, (void*)this),
 #endif
         }}));
     m_http_server->start();
@@ -141,8 +143,10 @@ void HomeBlksHttpServer::get_malloc_stats(sisl::HttpCallData cd) {
 
 void HomeBlksHttpServer::verify_hs(sisl::HttpCallData cd) {
     auto hb = to_homeblks(cd);
-    hb->verify_vols();
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, std::string("HomeBlks verified"));
+    auto ret = hb->verify_vols();
+    std::string resp{"HomeBlks verified "};
+    resp += ret ? "successfully" : "failed";
+    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
 void HomeBlksHttpServer::get_config(sisl::HttpCallData cd) {
@@ -204,8 +208,10 @@ void HomeBlksHttpServer::get_status(sisl::HttpCallData cd) {
 
 void HomeBlksHttpServer::verify_bitmap(sisl::HttpCallData cd) {
     auto hb = to_homeblks(cd);
-    hb->verify_bitmap();
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, std::string("HomeBlks bitmap verified"));
+    auto ret = hb->verify_bitmap();
+    std::string resp{"HomeBlks bitmap verified "};
+    resp += ret ? "successfully" : "failed";
+    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
 #ifdef _PRERELEASE
@@ -226,6 +232,52 @@ void HomeBlksHttpServer::crash_system(sisl::HttpCallData cd) {
     } else {
         resp = "crash type " + crash_type + " not supported yet";
     }
+    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
+}
+
+void HomeBlksHttpServer::move_vol_online(sisl::HttpCallData cd) {
+    auto req = cd->request();
+
+    std::string vol_uuid;
+    const evhtp_kv_t* _vol_uuid = evhtp_kvs_find_kv(req->uri->query, "uuid");
+    if (_vol_uuid) { vol_uuid = _vol_uuid->val; }
+
+    if (vol_uuid.length() == 0) {
+        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_BADREQ, std::string("empty vol_uuid!"));
+        return;
+    }
+
+    boost::uuids::string_generator gen;
+    boost::uuids::uuid uuid = gen(vol_uuid);
+    auto hb = to_homeblks(cd);
+    auto res = hb->mark_vol_online(uuid);
+    std::string resp{"Vol: " + vol_uuid + " moved to online state "};
+
+    resp += (res == no_error ? "successfully" : "failed");
+    if (res != no_error) { resp += ("error: " + res.message()); }
+    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
+}
+
+void HomeBlksHttpServer::move_vol_offline(sisl::HttpCallData cd) {
+    auto req = cd->request();
+
+    std::string vol_uuid;
+    const evhtp_kv_t* _vol_uuid = evhtp_kvs_find_kv(req->uri->query, "uuid");
+    if (_vol_uuid) { vol_uuid = _vol_uuid->val; }
+
+    if (vol_uuid.length() == 0) {
+        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_BADREQ, std::string("empty vol_uuid!"));
+        return;
+    }
+
+    boost::uuids::string_generator gen;
+    boost::uuids::uuid uuid = gen(vol_uuid);
+    auto hb = to_homeblks(cd);
+    auto res = hb->mark_vol_offline(uuid);
+    std::string resp{"Vol: " + vol_uuid + " moved to offline state "};
+
+    resp += (res == no_error ? "successfully" : "failed");
+    if (res != no_error) { resp += ("error: " + res.message()); }
     pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 #endif

@@ -969,6 +969,24 @@ std::error_condition HomeBlks::restore_snapshot(const SnapshotPtr& snap) {
     return ok;
 }
 
+std::error_condition HomeBlks::mark_vol_online(const boost::uuids::uuid& uuid) {
+    auto vol_ptr = lookup_volume(uuid);
+    if (!vol_ptr) { return std::make_error_condition(std::errc::invalid_argument); }
+
+    // move volume back online;
+    vol_state_change(vol_ptr, vol_state::ONLINE);
+    return no_error;
+}
+
+std::error_condition HomeBlks::mark_vol_offline(const boost::uuids::uuid& uuid) {
+    auto vol_ptr = lookup_volume(uuid);
+    if (!vol_ptr) { return std::make_error_condition(std::errc::invalid_argument); }
+
+    // mark volume offline and trigger FC
+    vol_ptr->fault_containment();
+    return no_error;
+}
+
 void HomeBlks::list_snapshot(const VolumePtr&, std::vector< SnapshotPtr > snap_list) {}
 
 void HomeBlks::read(const SnapshotPtr& snap, const snap_interface_req_ptr& req) {}

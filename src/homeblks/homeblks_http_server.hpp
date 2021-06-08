@@ -29,6 +29,8 @@ public:
     static void verify_bitmap(sisl::HttpCallData cd);
 #ifdef _PRERELEASE
     static void crash_system(sisl::HttpCallData cd);
+    static void move_vol_offline(sisl::HttpCallData cd);
+    static void move_vol_online(sisl::HttpCallData cd);
 #endif
 
 private:
