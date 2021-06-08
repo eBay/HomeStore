@@ -16,6 +16,7 @@
 #include <random>
 #include <string>
 #include <thread>
+#include <random>
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -123,6 +124,7 @@ struct TestCfg {
     bool pre_init_verify = true;
     bool is_abort = false;
     bool vol_create_del = false;
+    bool overlapping_allowed = false;
 
     verify_type_t verify_type = verify_type_t::csum;
     load_type_t load_type = load_type_t::random;
@@ -1249,7 +1251,8 @@ protected:
     enum class lbas_choice_t : uint8_t { dont_care, atleast_one_valid, all_valid };
     enum class lba_validate_t : uint8_t { dont_care, validate, invalidate };
 
-    io_lba_range_t do_get_rand_lbas(const lbas_choice_t lba_choice, const lba_validate_t validate_choice) {
+    io_lba_range_t do_get_rand_lbas(const lbas_choice_t lba_choice, const lba_validate_t validate_choice,
+                                    const bool overlapping_allowed) {
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine engine{rd()};
 
@@ -1287,14 +1290,17 @@ protected:
                 }
             }
 
-            // check if someone is already doing writes/reads
-            if (ret.num_lbas && vinfo->is_lbas_free(ret.lba, ret.num_lbas)) {
+                // check if someone is already doing writes/reads
+            if (!overlapping_allowed && (ret.num_lbas && vinfo->is_lbas_free(ret.lba, ret.num_lbas))) {
                 vinfo->mark_lbas_busy(ret.lba, ret.num_lbas);
                 if (validate_choice == lba_validate_t::validate) {
                     vinfo->validate_lbas(ret.lba, ret.num_lbas);
                 } else if (validate_choice == lba_validate_t::invalidate) {
                     vinfo->invalidate_lbas(ret.lba, ret.num_lbas);
                 }
+                ret.valid_io = true;
+                break;
+            } else if (ret.num_lbas && overlapping_allowed) {
                 ret.valid_io = true;
                 break;
             }
@@ -1304,13 +1310,13 @@ protected:
     }
 
     io_lba_range_t readable_rand_lbas() {
-        return do_get_rand_lbas(lbas_choice_t::atleast_one_valid, lba_validate_t::dont_care);
+        return do_get_rand_lbas(lbas_choice_t::atleast_one_valid, lba_validate_t::dont_care, tcfg.overlapping_allowed);
     }
     io_lba_range_t writeable_rand_lbas() {
-        return do_get_rand_lbas(lbas_choice_t::dont_care, lba_validate_t::validate);
+        return do_get_rand_lbas(lbas_choice_t::dont_care, lba_validate_t::validate, tcfg.overlapping_allowed);
     }
     io_lba_range_t unmappable_rand_lbas() {
-        return do_get_rand_lbas(lbas_choice_t::atleast_one_valid, lba_validate_t::invalidate);
+        return do_get_rand_lbas(lbas_choice_t::atleast_one_valid, lba_validate_t::invalidate, tcfg.overlapping_allowed);
     }
 
     bool write_io() {
@@ -1996,7 +2002,9 @@ SDS_OPTION_GROUP(
     test_volume,
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("30"), "seconds"),
     (load_type, "", "load_type", "load_type", ::cxxopts::value< uint32_t >()->default_value("0"),
-     "random_write_read:0, same_write_read:1, overlap_write=2"),
+     "random_write_read:0, same_write_read:1, seq_write:2"),
+    (overlapping_allowed, "", "overlapping_allowed", "overlapping_allowed",
+     ::cxxopts::value< bool >()->default_value("false"), "true or false"),
     (num_threads, "", "num_threads", "num_threads - default 2 for spdk and 8 for non-spdk",
      ::cxxopts::value< uint32_t >()->default_value("8"), "number"),
     (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
@@ -2041,8 +2049,8 @@ SDS_OPTION_GROUP(
      "0 or 1"),
     (p_volume_size, "", "p_volume_size", "p_volume_size", ::cxxopts::value< uint32_t >()->default_value("60"),
      "0 to 200"),
-    (write_cache, "", "write_cache", "write cache", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
-    (read_cache, "", "read_cache", "read cache", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (write_cache, "", "write_cache", "write cache", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
+    (read_cache, "", "read_cache", "read cache", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
     (write_iovec, "", "write_iovec", "write iovec(s)", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (read_iovec, "", "read_iovec", "read iovec(s)", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (batch_completion, "", "batch_completion", "batch completion", ::cxxopts::value< bool >()->default_value("false"),
@@ -2118,6 +2126,7 @@ int main(int argc, char* argv[]) {
     _gcfg.create_del_ops_cnt = SDS_OPTIONS["create_del_ops_cnt"].as< uint32_t >();
     _gcfg.create_del_ops_interval = SDS_OPTIONS["create_del_ops_interval"].as< uint32_t >();
     _gcfg.flip_name = SDS_OPTIONS["flip_name"].as< std::string >();
+    _gcfg.overlapping_allowed = SDS_OPTIONS["overlapping_allowed"].as< bool >();
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
@@ -2145,6 +2154,7 @@ int main(int argc, char* argv[]) {
     }
 
     if (_gcfg.load_type == load_type_t::sequential) { _gcfg.verify_type = verify_type_t::null; }
+    if (_gcfg.overlapping_allowed) { _gcfg.verify_type = verify_type_t::header; }
 
     if (_gcfg.enable_crash_handler) { sds_logging::install_crash_handler(); }
 

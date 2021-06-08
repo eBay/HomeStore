@@ -106,24 +106,28 @@ void CPWatchdog::stop() {
 }
 
 void CPWatchdog::cp_watchdog_timer() {
-    std::unique_lock< std::shared_mutex > lk(m_cp_mtx);
+    {
+        std::unique_lock< std::shared_mutex > lk(m_cp_mtx);
 
-    // check if any cp to track
-    if (!m_cp || m_cp->hs_state == hs_cp_state::init || m_cp->hs_state == hs_cp_state::done) { return; }
+        // check if any cp to track
+        if (!m_cp || m_cp->hs_state == hs_cp_state::init || m_cp->hs_state == hs_cp_state::done) { return; }
 
-    // state is changed. Return;
-    if (m_last_hs_state != m_cp->hs_state) {
-        m_last_hs_state = m_cp->hs_state;
-        last_state_ch_time = Clock::now();
-        return;
+        // state is changed. Return;
+        if (m_last_hs_state != m_cp->hs_state) {
+            m_last_hs_state = m_cp->hs_state;
+            last_state_ch_time = Clock::now();
+            return;
+        }
+
+        // check if enough time passed since last state change
+        if (get_elapsed_time_ms(last_state_ch_time) < 2 * HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec) * 1000) {
+            return;
+        }
+
+        LOGERROR("cp seems to be stuck. current state is {} total time elapsed {}", m_last_hs_state,
+                 get_elapsed_time_ms(last_state_ch_time));
     }
 
-    // check if enough time passed since last state change
-    if (get_elapsed_time_ms(last_state_ch_time) < 2 * HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec) * 1000) {
-        return;
-    }
-
-    LOGINFO("cp seems to be stuck. current state is {}", m_last_hs_state);
     HS_RELEASE_ASSERT(0, "current state is {}", m_last_hs_state);
 }
 
@@ -678,7 +682,7 @@ void IndxMgr::flush_free_blks(const indx_cp_ptr& icp, hs_cp* hcp) {
 
 void IndxMgr::update_cp_sb(indx_cp_ptr& icp, hs_cp* hcp, indx_cp_base_sb* sb) {
     /* copy the last superblock and then override the change values */
-    THIS_INDX_CP_LOG(INFO, icp->cp_id, "updating cp superblock. CP info {}", icp->to_string());
+    THIS_INDX_CP_LOG(TRACE, icp->cp_id, "updating cp superblock. CP info {}", icp->to_string());
     memcpy(sb, &m_last_cp_sb, sizeof(m_last_cp_sb));
 
     if (icp->flags == indx_cp_state::suspend_cp) {
@@ -716,7 +720,7 @@ void IndxMgr::update_cp_sb(indx_cp_ptr& icp, hs_cp* hcp, indx_cp_base_sb* sb) {
         icp->dcp.diff_tbl->update_btree_cp_sb(icp->dcp.bcp, sb->dcp_sb, (icp->flags & indx_cp_state::ba_cp));
     }
     memcpy(&m_last_cp_sb, sb, sizeof(m_last_cp_sb));
-    THIS_INDX_CP_LOG(TRACE, icp->cp_id, "updating cp superblock. CP superblock info {}", m_last_cp_sb.to_string());
+    THIS_INDX_CP_LOG(INFO, icp->cp_id, "updating cp superblock. CP superblock info {}", m_last_cp_sb.to_string());
 }
 
 /* It attaches the new CP and prepare for cur cp flush */
@@ -1458,6 +1462,12 @@ void StaticIndxMgr::init() {
     m_cp_mgr = std::unique_ptr< HomeStoreCPMgr >(new HomeStoreCPMgr());
     m_read_blk_tracker = std::unique_ptr< Blk_Read_Tracker >(new Blk_Read_Tracker(IndxMgr::safe_to_free_blk));
     /* start the timer for blkalloc checkpoint */
+#ifndef NDEBUG
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.generic.blkalloc_cp_timer_us = 1000000; // setting to 1 sec for debug build
+    });
+    HS_SETTINGS_FACTORY().save();
+#endif
 
     LOGINFO("blkalloc cp timer is set to {} usec", HS_DYNAMIC_CONFIG(generic.blkalloc_cp_timer_us));
     m_hs_cp_timer_hdl =
@@ -1746,4 +1756,5 @@ std::atomic< int64_t > ResourceMgr::m_hs_fb_size{0};
 std::atomic< int64_t > ResourceMgr::m_hs_ab_cnt{0};
 std::atomic< int64_t > ResourceMgr::m_memory_used_in_recovery{0};
 uint64_t ResourceMgr::m_total_cap;
+RsrcMgrMetrics ResourceMgr::m_metrics;
 bool indx_test_status::indx_create_suspend_cp_test{false};

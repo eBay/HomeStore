@@ -7,7 +7,10 @@ const char* homstore_err_category::name() const noexcept { return "homestore"; }
 
 std::string homstore_err_category::message(int ev) const {
     switch (ev) {
-    case homestore_error::lba_not_exist: return "lba not exist in mapping table";
+    case homestore_error::lba_not_exist:
+        return "lba not exist in mapping table";
+    case homestore_error::cache_full:
+        return "cache full";
     }
     return "unknown error";
 }

@@ -3,6 +3,25 @@
 #include "indx_mgr.hpp"
 
 namespace homestore {
+class RsrcMgrMetrics : public sisl::MetricsGroupWrapper {
+    explicit RsrcMgrMetrics() : sisl::MetricsGroupWrapper("resource_mgr", "resource_mgr") {
+        REGISTER_COUNTER(dirty_buf_cnt, "Total wb cache dirty buffer cnt", sisl::_publish_as::publish_as_gauge);
+        REGISTER_COUNTER(free_blk_size_in_cp, "Total free blks size accumulated in a cp",
+                         sisl::_publish_as::publish_as_gauge);
+        REGISTER_COUNTER(free_blk_cnt_in_cp, "Total free blks cnt accumulated in a cp",
+                         sisl::_publish_as::publish_as_gauge);
+        REGISTER_COUNTER(alloc_blk_cnt_in_cp, "Total alloc blks cnt accumulated in a cp",
+                         sisl::_publish_as::publish_as_gauge);
+        register_me_to_farm();
+    }
+
+    RsrcMgrMetrics(const RsrcMgrMetrics&) = delete;
+    RsrcMgrMetrics(RsrcMgrMetrics&&) noexcept = delete;
+    RsrcMgrMetrics& operator=(const RsrcMgrMetrics&) = delete;
+    RsrcMgrMetrics& operator=(const RsrcMgrMetrics&&) noexcept = delete;
+    ~RsrcMgrMetrics() { deregister_me_from_farm(); }
+};
+
 class ResourceMgr {
 public:
     static void set_total_cap(uint64_t total_cap) { m_total_cap = total_cap; }
@@ -10,10 +29,12 @@ public:
     /* monitor dirty buffer count */
     static void inc_dirty_buf_cnt() {
         auto dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_add(1, std::memory_order_relaxed);
+        COUNTER_INCREMENT(m_metrics, dirty_buf_cnt, 1);
         if (dirty_buf_cnt > get_dirty_buf_limit()) { IndxMgr::trigger_indx_cp(); };
     }
     static void dec_dirty_buf_cnt() {
         int64_t dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_sub(1, std::memory_order_relaxed);
+        COUNTER_DECREMENT(m_metrics, dirty_buf_cnt, 1);
         HS_ASSERT_CMP(RELEASE, dirty_buf_cnt, >=, 0);
     }
 
@@ -22,11 +43,13 @@ public:
         if (m_hs_ab_cnt.fetch_add(1, std::memory_order_relaxed) > get_alloc_blk_cnt_limit()) {
             IndxMgr::trigger_hs_cp();
         }
+        COUNTER_INCREMENT(m_metrics, alloc_blk_cnt_in_cp, 1);
     }
 
     static void dec_alloc_blk(int cnt) {
         auto dirty_ab_cnt = m_hs_ab_cnt.fetch_sub(cnt, std::memory_order_relaxed);
         HS_ASSERT_CMP(RELEASE, dirty_ab_cnt, >=, 0);
+        COUNTER_DECREMENT(m_metrics, alloc_blk_cnt_in_cp, 1);
     }
 
     static int64_t get_alloc_blk_cnt_limit() { return ((HS_DYNAMIC_CONFIG(resource_limits.alloc_blk_cnt))); }
@@ -36,6 +59,8 @@ public:
         // trigger hs cp when either one of the limit is reached
         auto cnt = m_hs_fb_cnt.fetch_add(1, std::memory_order_relaxed);
         auto sz = m_hs_fb_size.fetch_add(size, std::memory_order_relaxed);
+        COUNTER_INCREMENT(m_metrics, free_blk_size_in_cp, size);
+        COUNTER_INCREMENT(m_metrics, free_blk_cnt_in_cp, 1);
 
         if (cnt > get_free_blk_cnt_limit() || sz > get_free_blk_size_limit()) { IndxMgr::trigger_hs_cp(); }
     }
@@ -45,6 +70,8 @@ public:
         HS_ASSERT_CMP(RELEASE, dirty_fb_cnt, >=, 0);
         auto dirty_fb_size = m_hs_fb_size.fetch_sub(size, std::memory_order_relaxed);
         HS_ASSERT_CMP(RELEASE, dirty_fb_size, >=, 0);
+        COUNTER_DECREMENT(m_metrics, free_blk_size_in_cp, size);
+        COUNTER_DECREMENT(m_metrics, free_blk_cnt_in_cp, 1);
     }
 
     static bool can_add_free_blk(int cnt) {
@@ -116,5 +143,6 @@ private:
     static std::atomic< int64_t > m_hs_ab_cnt;  // alloc count
     static std::atomic< int64_t > m_memory_used_in_recovery;
     static uint64_t m_total_cap;
+    static RsrcMgrMetrics m_metrics;
 };
 } // namespace homestore

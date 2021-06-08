@@ -405,7 +405,9 @@ public:
         }
 
         ++s_cbq_id;
-        CP_PERIODIC_LOG(DEBUG, bcp->cp_id, "[fcbq_id={}] Starting btree flush buffers", s_cbq_id);
+        CP_PERIODIC_LOG(INFO, bcp->cp_id,
+                        "[fcbq_id={}] Starting btree flush buffers dirty_buf_count={} wb_req_cnt={} flush_cb_size={}",
+                        s_cbq_id, m_dirty_buf_cnt[cp_id].get(), m_req_list[cp_id]->size(), flush_buffer_q.size());
 
         auto shared_this = this->shared_from_this();
         queue_flush_buffers([shared_this, cp_id, it = m_req_list[cp_id]->begin(true /* latest */),

@@ -113,6 +113,8 @@ table Generic {
 
     // if this value is set to 0, no sanity check will be run;
     sanity_check_level: uint32 = 1 (hotswap);
+
+    write_cache_enabled: bool = false;
 }
 
 table ResourceLimits {

@@ -242,6 +242,7 @@ private:
     std::shared_ptr< SnapMgr > m_indx_mgr{nullptr};
     boost::intrusive_ptr< BlkBuffer > m_only_in_mem_buff;
     io_comp_callback m_comp_cb;
+    uint64_t m_max_vol_io_size;
 
     std::atomic< vol_state > m_state;
     std::atomic< int64_t > m_seq_id;
@@ -260,6 +261,7 @@ private:
     } IoVecTransversal;
 
     blk_count_t m_blks_per_lba{1};
+    bool m_write_cache_enabled = false;
 
 private:
     /* static members */

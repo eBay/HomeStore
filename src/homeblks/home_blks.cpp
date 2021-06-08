@@ -414,10 +414,6 @@ void HomeBlks::init_done() {
     }
     auto system_cap = get_system_capacity();
     LOGINFO("system_cap: {}, used_size: {}", system_cap.to_string(), used_size.to_string());
-    HS_RELEASE_ASSERT_EQ(system_cap.used_data_size, used_size.used_data_size,
-                         "vol data used size mismatch. used size {}", used_size.to_string());
-    HS_RELEASE_ASSERT_EQ(system_cap.used_index_size, used_size.used_index_size,
-                         "index used size mismatch. used size {}", used_size.to_string());
 
 #ifdef _PRERELEASE
     HB_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.general_config.boot_consistency_check = true; });
@@ -428,6 +424,10 @@ void HomeBlks::init_done() {
         LOGINFO("Skip running verification (vols/bitmap).");
     }
 #endif
+    HS_RELEASE_ASSERT_EQ(system_cap.used_data_size, used_size.used_data_size,
+                         "vol data used size mismatch. used size {}", used_size.to_string());
+    HS_RELEASE_ASSERT_EQ(system_cap.used_index_size, used_size.used_index_size,
+                         "index used size mismatch. used size {}", used_size.to_string());
 
     LOGINFO("init done");
     m_out_params.first_time_boot = m_dev_mgr->is_first_time_boot();

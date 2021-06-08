@@ -117,6 +117,8 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
 void Volume::init() {
     bool init = false;
     vol_sb_hdr* sb{nullptr};
+    m_max_vol_io_size = HS_STATIC_CONFIG(engine.max_vol_io_size);
+    m_write_cache_enabled = HS_DYNAMIC_CONFIG(generic.write_cache_enabled);
 
     /* add this volume in home blks */
     if (m_sb_buf == nullptr) {
@@ -231,8 +233,7 @@ indx_tbl* Volume::recover_indx_tbl(btree_super_block& sb, btree_cp_sb& cp_info) 
 std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     static thread_local std::vector< BlkId > bid{};
     std::error_condition ret{no_error};
-    HS_DEBUG_ASSERT_LE(get_io_size(iface_req->nlbas), HS_STATIC_CONFIG(engine.max_vol_io_size),
-                       "IO size exceeds max_vol_io_size supported");
+    HS_RELEASE_ASSERT_LE(get_io_size(iface_req->nlbas), m_max_vol_io_size, "IO size exceeds max_vol_io_size supported");
 
     auto vreq = volume_req::make(iface_req);
     THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}, cache={}", vreq->lba(), vreq->nlbas(),
@@ -283,7 +284,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
                 const auto& mem_vec{std::get< volume_req::MemVecData >(vreq->data)};
                 boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->write(
                     vc_req->bid, mem_vec, data_offset, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req),
-                    vreq->use_cache());
+                    m_write_cache_enabled /* use cache */);
 
                 // update checksums which must be done in page size increments
                 sisl::blob outb{};

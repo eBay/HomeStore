@@ -363,7 +363,11 @@ public:
         auto ibuf{boost::static_pointer_cast< CacheBuffer< BlkId > >(bbuf)};
         boost::intrusive_ptr< CacheBuffer< BlkId > > out_bbuf;
         const bool inserted{m_cache->insert(blkid, ibuf, &out_bbuf)};
-        assert(inserted);
+        if (!inserted) {
+            free_blk(blkid, boost::none, boost::none);
+            HS_DEBUG_ASSERT(0, "cache is full. failing blk allocation");
+            return nullptr;
+        }
 
         return bbuf;
     }
@@ -533,6 +537,7 @@ public:
                  * inserted into the cache. Lets use that entry in cache and
                  * free up the memory
                  */
+                if (!new_bbuf) { throw homestore_exception("cache full", homestore_error::cache_full); }
 #ifdef NDEBUG
                 bbuf = boost::intrusive_ptr< Buffer >(reinterpret_cast< Buffer* >(new_bbuf.get()));
 #else

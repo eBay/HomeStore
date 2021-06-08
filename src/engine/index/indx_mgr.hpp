@@ -299,9 +299,10 @@ struct indx_cp_base_sb {
     indx_cp_base_sb(boost::uuids::uuid uuid) : uuid(uuid){};
     indx_cp_base_sb(){};
     std::string to_string() const {
-        return fmt::format("active_cp_cnt={} active_data_seqid={} diff_cp_cnt={} diff_data_seqid={} blkalloc_cp_id={}",
+        return fmt::format("active_cp_cnt={} active_data_seqid={} diff_cp_cnt={} diff_data_seqid={} blkalloc_cp_id={} "
+                           "indx_size={} btree acp={}",
                            icp_sb.active_cp_id, icp_sb.active_data_seqid, icp_sb.diff_cp_id, icp_sb.diff_data_seqid,
-                           icp_sb.blkalloc_cp_id);
+                           icp_sb.blkalloc_cp_id, icp_sb.indx_size, acp_sb.to_string());
     }
 } __attribute__((__packed__));
 
