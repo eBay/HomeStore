@@ -382,7 +382,7 @@ void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req
 
 void LogDev::on_flush_completion(LogGroup* const lg) {
     lg->m_flush_finish_time = Clock::now();
-    iomanager.run_on(iomgr::thread_regex::least_busy_worker, [this, lg]([[maybe_unused]] const io_thread_addr_t addr) {
+    iomanager.run_on(iomgr::thread_regex::random_worker, [this, lg]([[maybe_unused]] const io_thread_addr_t addr) {
         lg->m_post_flush_msg_rcvd_time = Clock::now();
         THIS_LOGDEV_LOG(TRACE, "Flush completed for logid[{} - {}]", lg->m_flush_log_idx_from,
                         lg->m_flush_log_idx_upto);
