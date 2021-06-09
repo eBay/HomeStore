@@ -503,7 +503,7 @@ protected:
     static std::vector< cp_done_cb > indx_cp_done_cb_list;
     /* it is  called after every homestore cp */
     static std::vector< cp_done_cb > hs_cp_done_cb_list;
-    static sisl::atomic_counter< bool > try_blkalloc_checkpoint; // set to true if next checkpoint should be blkalloc
+    static std::atomic< bool > try_blkalloc_checkpoint; // set to true if next checkpoint should be blkalloc
     static std::unique_ptr< Blk_Read_Tracker > m_read_blk_tracker;
 
     /************************ static private functions **************/

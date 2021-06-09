@@ -112,7 +112,7 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
      * false: if request is already completed
      */
     bool set_error(const std::error_condition& ec) {
-        bool expected_val = false;
+        bool expected_val{false};
         if (is_fail_completed.compare_exchange_strong(expected_val, true, std::memory_order_acq_rel)) {
             err = ec;
             return true;

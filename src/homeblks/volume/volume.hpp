@@ -538,12 +538,15 @@ public:
 typedef boost::intrusive_ptr< volume_req > volume_req_ptr;
 
 ENUM(volume_req_state, uint8_t, data_io, journal_io, completed);
+
+#pragma pack(1)
 struct journal_key {
     lba_t lba;
     lba_count_t nlbas;
 
     [[nodiscard]] lba_count_t num_lbas() const { return nlbas; }
-} __attribute__((__packed__));
+};
+#pragma pack()
 
 struct volume_req : indx_req {
     volume_req(const volume_req&) = delete;

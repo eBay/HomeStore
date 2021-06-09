@@ -58,7 +58,7 @@ uint64_t compute_hash(const KeyType& key) {
     return compute_hash_imp< KeyType >(key, is_std_hashable< KeyType >{});
 }
 
-template < typename FunctionType, typename CallbackType, typename... Args>
+template < typename FunctionType, typename CallbackType, typename... Args >
 void invoke_callback(CallbackType&& callback, Args&&... args) {
     if constexpr (std::is_same_v< std::decay_t< CallbackType >, FunctionType >) {
         if (std::forward< CallbackType >(callback))
@@ -220,9 +220,10 @@ public:
                      */
                     V::set_free_state(*it);
                     ret = true;
-                    if (V::test_le(*it, 1)) {
+                    if (V::test_eq(*it, 1)) {
                         can_remove = true;
-                        instrusive_hashset_detail::invoke_callback< found_callback_t >(std::forward<CallbackType>(found_cb), &*it);
+                        instrusive_hashset_detail::invoke_callback< found_callback_t >(
+                            std::forward< CallbackType >(found_cb), &*it);
                         V* const val_ptr{&(*it)};
                         m_list.erase(it);
                         V::reset_free_state(*val_ptr);
@@ -257,7 +258,7 @@ public:
             const int x{K::compare(*(V::extract_key(*it)), k)};
             if (x == 0) {
                 if (dec_ref) { V::deref(*it); }
-                if (V::test_le(*it, 1)) {
+                if (V::test_eq(*it, 1)) {
                     instrusive_hashset_detail::invoke_callback< found_callback_t >(
                         std::forward< CallbackType >(found_cb), &*it);
                     V* const val_ptr{&(*it)};

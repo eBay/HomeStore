@@ -68,9 +68,9 @@ struct BlkEvictionRecord : public homeds::HashNode, sisl::ObjLifeCounter< BlkEvi
 
     static void deref(BlkEvictionRecord& b) { intrusive_ptr_release(&b); }
 
-    static bool test_le(BlkEvictionRecord& b, int32_t check) { return b.m_refcount.test_le(check); }
+    static bool test_le(const BlkEvictionRecord& b, const int32_t check) { return b.m_refcount.test_le(check); }
 
-    static bool test_le(const BlkEvictionRecord& b, int32_t check) { return b.m_refcount.test_le(check); }
+    static bool test_eq(const BlkEvictionRecord& b, const int32_t check) { return b.m_refcount.test_eq(check); }
 
     static const BlkId* extract_key(const BlkEvictionRecord& b) { return &(b.m_key); }
 };

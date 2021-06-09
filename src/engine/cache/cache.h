@@ -139,7 +139,7 @@ protected:
 
 template < typename K, typename V >
 class Cache : protected IntrusiveCache< K, V > {
-    typedef IntrusiveCache< K, V > IntrusiveCacheType; 
+    typedef IntrusiveCache< K, V > IntrusiveCacheType;
     typedef std::function< void(const boost::intrusive_ptr< V >& bbuf) > erase_comp_cb;
     typedef std::function< void(V* const bbuf) > found_cb_type;
 
@@ -150,10 +150,9 @@ public:
      * the smart pointer of CacheBuffer. Upsert flag of false indicates if the data already exists, do not insert */
     template < typename CallbackType = found_cb_type,
                typename = std::enable_if_t< std::is_convertible_v< CallbackType, found_cb_type > > >
-    bool insert(const K& k, const sisl::blob& b, const uint32_t value_offset, boost::intrusive_ptr< V >* const out_smart_buf,
-                CallbackType&& found_cb = CallbackType{});
-    bool insert(const K& k, const boost::intrusive_ptr< V >& in_buf,
-                boost::intrusive_ptr< V >* const out_smart_buf);
+    bool insert(const K& k, const sisl::blob& b, const uint32_t value_offset,
+                boost::intrusive_ptr< V >* const out_smart_buf, CallbackType&& found_cb = CallbackType{});
+    bool insert(const K& k, const boost::intrusive_ptr< V >& in_buf, boost::intrusive_ptr< V >* const out_smart_buf);
 
     /* Update is a special operation, where, it searches for the key and
      *  If found, appends the blob to the existing cached memory, new memory at specified offset.
@@ -167,20 +166,21 @@ public:
     } update_result;
 
     update_result update(const K& k, const sisl::blob& b, const uint32_t value_offset,
-                boost::intrusive_ptr< V >* const out_smart_buf);
+                         boost::intrusive_ptr< V >* const out_smart_buf);
     bool upsert(const K& k, const sisl::blob& b, boost::intrusive_ptr< V >* const out_smart_buf);
     bool get(const K& k, boost::intrusive_ptr< V >* const out_smart_buf);
     bool erase(const boost::intrusive_ptr< V >& buf);
     bool erase(const K& k, boost::intrusive_ptr< V >* const out_bbuf);
-    bool erase(const K& k, const uint32_t offset, const uint32_t size, boost::intrusive_ptr< V >* const ret_removed_buf);
+    bool erase(const K& k, const uint32_t offset, const uint32_t size,
+               boost::intrusive_ptr< V >* const ret_removed_buf);
     template < typename CallbackType = erase_comp_cb,
                typename = std::enable_if_t< std::is_convertible_v< CallbackType, erase_comp_cb > > >
     void safe_erase(const boost::intrusive_ptr< V >& buf, CallbackType&& cb = CallbackType{});
     template < typename CallbackType = erase_comp_cb,
                typename = std::enable_if_t< std::is_convertible_v< CallbackType, erase_comp_cb > > >
     void safe_erase(const K& k, CallbackType&& cb = CallbackType{});
-    bool insert_missing_pieces(const boost::intrusive_ptr< V >& buf, const uint32_t offset,
-                               const uint32_t size_to_read, std::vector< std::pair< uint32_t, uint32_t > >& missing_mp);
+    bool insert_missing_pieces(const boost::intrusive_ptr< V >& buf, const uint32_t offset, const uint32_t size_to_read,
+                               std::vector< std::pair< uint32_t, uint32_t > >& missing_mp);
 };
 
 VENUM(cache_buf_state, uint8_t, CACHE_NOT_INSERTED = 1, CACHE_INSERTED = 2, CACHE_EVICTED = 3)
@@ -233,12 +233,10 @@ public:
             m_state {
         cache_buf_state::CACHE_NOT_INSERTED
     }
-
 #ifndef NDEBUG
-            , m_indx { -1 }
+    , m_indx { static_cast< int64_t >(-1) }
 #endif
-    {
-    }
+    {}
 
     CacheBuffer(const K& key, const sisl::blob& blob, CacheType* const cache, const uint32_t offset = 0) :
             CacheRecord{this},
@@ -252,7 +250,7 @@ public:
         cache_buf_state::CACHE_NOT_INSERTED
     }
 #ifndef NDEBUG
-            , m_indx { -1 }
+    , m_indx { static_cast< int64_t >(-1) }
 #endif
     {
         boost::intrusive_ptr< homeds::MemVector > mvec{new homeds::MemVector{}, true};
@@ -358,19 +356,22 @@ public:
         const K k{*(extract_key(*buf))};
         auto* const cache{buf->m_cache};
         const bool can_free{buf->can_free()};
-        const bool one_left{buf->m_refcount.decrement_test_eq(1)};
+        const auto [happened, count]{buf->m_refcount.decrement_test_le_with_count(1)};
 
         // NOTE: The safe_erase is needed in order to reclaim memory because of not
         // removing via erase so ref count will remain at 1 without it
-        if (one_left) {
-            if (can_free) {
-                assert(cache != nullptr);
-                cache->safe_erase(k);
+        if (happened) {
+            HS_DEBUG_ASSERT_LE(count, 1, "Invalid count in buf refcount");
+            if (count == 1) {
+                if (can_free) {
+                    HS_DEBUG_ASSERT(cache != nullptr, "Expected cache to be non null");
+                    cache->safe_erase(k);
+                }
+            } else if (count == 0) {
+                // free the record
+                buf->free_yourself();
             }
-        } else if (buf->m_refcount.testz()) {
-            // free the record
-            buf->free_yourself();
-        }; 
+        }
     }
 
     virtual void init() {}
@@ -398,6 +399,8 @@ public:
     static void reset_free_state(CacheBufferType& b) { b.reset_free_state(); }
 
     static void deref(CacheBufferType& b) { intrusive_ptr_release(&b); }
+
+    static bool test_eq(const CacheBufferType& b, const uint32_t check) { return b.m_refcount.test_eq(check); }
 
     static bool test_le(const CacheBufferType& b, const uint32_t check) { return b.m_refcount.test_le(check); }
 
