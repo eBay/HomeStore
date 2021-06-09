@@ -105,7 +105,7 @@ table Generic {
     // writeback cache flush threads
     cache_flush_threads : int32 = 2;
 
-    cp_watchdog_timer_sec : uint32 = 60; // it checks if cp stuck every 60 seconds
+    cp_watchdog_timer_sec : uint32 = 10; // it checks if cp stuck every 10 seconds
 
     cache_max_throttle_cnt : uint64 = 512;
 

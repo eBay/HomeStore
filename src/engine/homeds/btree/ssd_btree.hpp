@@ -205,6 +205,11 @@ public:
         }
     }
 
+    static std::string get_cp_flush_status(SSDBtreeStore* store, const btree_cp_ptr& bcp) {
+        return store->get_cp_flush_status_store(bcp);
+    }
+    std::string get_cp_flush_status_store(const btree_cp_ptr& bcp) { return m_wb_cache->get_cp_flush_status(bcp); }
+
     static void flush_alloc_blks(SSDBtreeStore* store, const btree_cp_ptr& bcp,
                                  std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
         store->flush_alloc_blks(bcp, ba_cp);

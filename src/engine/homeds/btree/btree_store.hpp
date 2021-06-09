@@ -41,6 +41,7 @@ public:
     static btree_cp_ptr attach_prepare_cp(btree_store_t* store, const btree_cp_ptr& cur_bcp, bool is_last_cp,
                                           bool blkalloc_checkpoint);
     static void cp_start(btree_store_t* store, const btree_cp_ptr& bcp, cp_comp_callback cb);
+    static std::string get_cp_flush_status(btree_store_t* store, const btree_cp_ptr& bcp);
     static void truncate(btree_store_t* store, const btree_cp_ptr& bcp);
     static void destroy_done(btree_store_t* store);
     static void flush_free_blks(btree_store_t* store, const btree_cp_ptr& bcp,

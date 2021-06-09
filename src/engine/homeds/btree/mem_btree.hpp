@@ -192,6 +192,7 @@ public:
     }
 
     static void cp_start(MemBtreeStore* store, const btree_cp_ptr& bcp, cp_comp_callback cb) {}
+    static std::string get_cp_flush_status(MemBtreeStore* store, const btree_cp_ptr& bcp) { return fmt::format(""); }
     static void truncate(MemBtreeStore* store, const btree_cp_ptr& bcp) {}
     static void destroy_done(MemBtreeStore* store) {}
     static void flush_free_blks(MemBtreeStore* store, const btree_cp_ptr& bcp,

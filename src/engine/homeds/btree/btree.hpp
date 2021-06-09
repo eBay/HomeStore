@@ -305,6 +305,10 @@ public:
         btree_store_t::cp_start(m_btree_store.get(), bcp, cb);
     }
 
+    std::string get_cp_flush_status(const btree_cp_ptr& bcp) {
+        return (btree_store_t::get_cp_flush_status(m_btree_store.get(), bcp));
+    }
+
     void truncate(const btree_cp_ptr& bcp) { btree_store_t::truncate(m_btree_store.get(), bcp); }
 
     void destroy_done() { btree_store_t::destroy_done(m_btree_store.get()); }

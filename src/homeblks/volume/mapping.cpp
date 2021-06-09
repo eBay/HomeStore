@@ -110,6 +110,8 @@ void mapping::split_key_recovery(const MappingKey& key, const MappingValue& val,
     add_new_interval(start_lba, end_lba, val, offset, replace_kv);
 }
 
+std::string mapping::get_cp_flush_status(const btree_cp_ptr& bcp) { return (m_bt->get_cp_flush_status(bcp)); }
+
 btree_status_t mapping::read_indx(const indx_req_ptr& ireq, const read_indx_comp_cb_t& read_cb) {
     auto vreq = static_cast< volume_req* >(ireq.get());
     std::vector< std::pair< MappingKey, MappingValue > > values;

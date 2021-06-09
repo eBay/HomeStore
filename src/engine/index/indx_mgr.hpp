@@ -384,6 +384,7 @@ public:
                                                         homeds::btree::BtreeQueryCursor& cur, const btree_cp_ptr& bcp,
                                                         int64_t& size, const bool force) = 0;
     virtual uint64_t get_btree_node_cnt() = 0;
+    virtual std::string get_cp_flush_status(const btree_cp_ptr& bcp) = 0;
 };
 
 typedef std::function< void(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) > io_done_cb;
@@ -620,6 +621,7 @@ public:
     void cp_io_exit(hs_cp* cp);
     btree_cp_ptr get_btree_cp(hs_cp* hcp);
     bool is_recovery_done() const;
+    std::string get_cp_flush_status(const indx_cp_ptr& icp);
 
 protected:
     /*********************** virtual functions required to support snapshot  **********************/

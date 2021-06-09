@@ -119,8 +119,19 @@ void CPWatchdog::cp_watchdog_timer() {
             return;
         }
 
+        std::string s;
+        for (auto& icp_uuid : m_cp->indx_cp_list) {
+            auto& icp = icp_uuid.second;
+            s += icp->indx_mgr->get_cp_flush_status(icp);
+        }
+
+        if (get_elapsed_time_ms(last_state_ch_time) >= HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec * 1000)) {
+            LOGINFO("cp state {} is not changed. time elapsed {} Printing cp state {} ", m_last_hs_state,
+                    get_elapsed_time_ms(last_state_ch_time), s);
+        }
+
         // check if enough time passed since last state change
-        if (get_elapsed_time_ms(last_state_ch_time) < 2 * HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec) * 1000) {
+        if (get_elapsed_time_ms(last_state_ch_time) < 12 * HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec) * 1000) {
             return;
         }
 
@@ -396,6 +407,11 @@ void IndxMgr::create_first_cp() {
         /* create new diff table */
         create_new_diff_tbl(m_first_icp);
     }
+}
+
+std::string IndxMgr::get_cp_flush_status(const indx_cp_ptr& icp) {
+    return fmt::format("[ [{}] - [{}] - [{}] ]", get_name(), icp->to_string(),
+                       m_active_tbl->get_cp_flush_status(icp->acp.bcp));
 }
 
 void IndxMgr::indx_create_done(indx_tbl* indx_tbl) { indx_tbl->create_done(); }

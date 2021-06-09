@@ -173,8 +173,8 @@ public:
         HS_ASSERT(DEBUG, in_cp_phase, "in_cp_phase");
         HS_ASSERT_CMP(DEBUG, cp->cp_status, ==, cp_status_t::cp_start);
         auto cb_list = cp->cb_list;
-        HS_PERIODIC_LOG(DEBUG, cp, ">>>>>>>>>>>> cp ID completed {}, notified {} callbacks", cp->to_string(),
-                        cb_list.size());
+        HS_PERIODIC_LOG(INFO, cp, ">>>>>>>>>>>> cp ID completed {}, notified {} callbacks time taken {}",
+                        cp->to_string(), cb_list.size(), get_elapsed_time_ns(m_cp_start_time));
         HISTOGRAM_OBSERVE(m_metrics, cp_latency, get_elapsed_time_ns(m_cp_start_time));
         cp_reset(cp);
         delete (cp);

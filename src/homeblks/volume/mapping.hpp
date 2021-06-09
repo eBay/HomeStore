@@ -745,6 +745,7 @@ public:
     btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, const int64_t seq_id, void* key,
                                                 BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size,
                                                 const bool force) override;
+    std::string get_cp_flush_status(const btree_cp_ptr& bcp) override;
 
 public:
     /* static functions */

@@ -207,14 +207,15 @@ public:
     enum class job_status_t { not_started = 0, running = 1, stopped = 2, completed = 3 };
 
     TestJob(VolTest* test) : m_voltest(test), m_start_time(Clock::now()) {
-        iomanager.schedule_global_timer(5 * 1000ul * 1000ul * 1000ul, true, nullptr, iomgr::thread_regex::all_worker,
-                                        [this](void* cookie) { try_run_one_iteration(); });
+        m_timer_hdl = iomanager.schedule_global_timer(5 * 1000ul * 1000ul * 1000ul, true, nullptr,
+                                                      iomgr::thread_regex::all_worker,
+                                                      [this](void* cookie) { try_run_one_iteration(); });
     }
 
     TestJob(VolTest* test, uint32_t interval_ops_sec) : m_voltest(test), m_start_time(Clock::now()) {
-        iomanager.schedule_global_timer(interval_ops_sec * 1000ul * 1000ul * 1000ul, true, nullptr,
-                                        iomgr::thread_regex::all_worker,
-                                        [this](void* cookie) { try_run_one_iteration(); });
+        m_timer_hdl = iomanager.schedule_global_timer(interval_ops_sec * 1000ul * 1000ul * 1000ul, true, nullptr,
+                                                      iomgr::thread_regex::all_worker,
+                                                      [this](void* cookie) { try_run_one_iteration(); });
     }
     virtual ~TestJob() = default;
     TestJob(const TestJob&) = delete;
@@ -235,7 +236,6 @@ public:
             mod_tests[i]->run_start();
         }
         try_run_one_iteration();
-        VolInterface::get_instance()->submit_io_batch();
         if (time_to_stop()) { notify_completions(); }
     }
 
@@ -247,6 +247,7 @@ public:
                 mod_tests[i]->try_run_one_iteration();
             }
             run_one_iteration();
+            VolInterface::get_instance()->submit_io_batch();
             is_this_thread_running_io = false;
             m_status_threads_executing.decrement_testz_and_test_status(job_status_t::stopped);
         }
@@ -254,7 +255,6 @@ public:
     }
 
     void notify_completions() {
-        VolInterface::get_instance()->submit_io_batch();
         std::unique_lock< std::mutex > lk(m_mutex);
         LOGDEBUG("notifying completions");
         if (is_job_done()) {
@@ -277,6 +277,10 @@ public:
             m_execution_cv.wait(lk, [this] {
                 auto status = m_status_threads_executing.get_status();
                 LOGINFO("status {}", status);
+                if (m_timer_hdl != iomgr::null_timer_handle) {
+                    iomanager.cancel_timer(m_timer_hdl);
+                    m_timer_hdl = iomgr::null_timer_handle;
+                }
                 return (((status == job_status_t::stopped) || (status == job_status_t::completed)) &&
                         (m_status_threads_executing.count() == 0));
             });
@@ -288,6 +292,10 @@ public:
         std::unique_lock< std::mutex > lk(m_mutex);
         if (!m_notify_job_done) {
             m_completion_cv.wait(lk, [this] {
+                if (m_timer_hdl != iomgr::null_timer_handle) {
+                    iomanager.cancel_timer(m_timer_hdl);
+                    m_timer_hdl = iomgr::null_timer_handle;
+                }
                 return ((m_status_threads_executing.get_status() == job_status_t::completed) &&
                         (m_status_threads_executing.count() == 0));
             });
@@ -305,6 +313,7 @@ protected:
     // std::atomic< job_status_t > m_status = job_status_t::not_started;
     // std::atomic< int32_t > m_threads_executing = 0;
     sisl::atomic_status_counter< job_status_t, job_status_t::not_started > m_status_threads_executing;
+    iomgr::timer_handle_t m_timer_hdl = iomgr::null_timer_handle;
 };
 thread_local bool TestJob::is_this_thread_running_io = false;
 
