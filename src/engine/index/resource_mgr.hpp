@@ -49,7 +49,7 @@ public:
     static void dec_alloc_blk(int cnt) {
         auto dirty_ab_cnt = m_hs_ab_cnt.fetch_sub(cnt, std::memory_order_relaxed);
         HS_ASSERT_CMP(RELEASE, dirty_ab_cnt, >=, 0);
-        COUNTER_DECREMENT(m_metrics, alloc_blk_cnt_in_cp, 1);
+        COUNTER_DECREMENT(m_metrics, alloc_blk_cnt_in_cp, cnt);
     }
 
     static int64_t get_alloc_blk_cnt_limit() { return ((HS_DYNAMIC_CONFIG(resource_limits.alloc_blk_cnt))); }

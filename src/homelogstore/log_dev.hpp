@@ -707,6 +707,8 @@ private:
 
     void _persist_info_block();
     void assert_next_pages(log_stream_reader& lstream);
+    void set_flush_status(bool flush_status);
+    bool get_flush_status();
 
 private:
     std::unique_ptr< sisl::StreamTracker< log_record > >
@@ -744,6 +746,7 @@ private:
     // Pool for creating log group
     LogGroup m_log_group_pool[max_log_group];
     uint32_t m_log_group_idx{1};
+    std::atomic< bool > m_flush_status = false;
 }; // LogDev
 
 } // namespace homestore

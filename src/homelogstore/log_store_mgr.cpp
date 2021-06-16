@@ -109,22 +109,36 @@ void HomeLogStoreMgr::device_truncate(const device_truncate_cb_t& cb, const bool
 void HomeLogStoreMgr::stop_flush_thread() {
     iomanager.run_on(m_flush_thread, [this]([[maybe_unused]] const io_thread_addr_t addr) {
         iomanager.cancel_timer(m_flush_timer_hdl);
-        std::unique_lock< std::mutex > lk{m_cv_mtx};
-        m_flush_thread_stopped = true;
-        m_flush_thread_cv.notify_one();
+        iomanager.this_reactor()->set_poll_interval(-1);
+        {
+            std::unique_lock< std::mutex > lk{m_cv_mtx};
+            m_flush_thread_stopped = true;
+            m_flush_thread_cv.notify_one();
+        }
     });
 }
 
 void HomeLogStoreMgr::flush_if_needed() {
-    uint32_t reset_cnt = 0;
-    for (uint32_t i = 0; i < HS_DYNAMIC_CONFIG(logstore.try_flush_iteration); ++i) {
-        if (m_flush_thread_stopped) return;
+    static uint32_t spin_cnt{0};
+    if (!spin_cnt) {
         for (auto& f : m_logstore_families) {
-            if (f->logdev().flush_if_needed() && reset_cnt < HS_DYNAMIC_CONFIG(logstore.try_flush_iteration) / 2) {
-                // reset the counter again
-                i = 0;
-                ++reset_cnt;
-            }
+            f->logdev().set_flush_status(true);
+        }
+    }
+
+    ++spin_cnt;
+    for (auto& f : m_logstore_families) {
+        f->logdev().flush_if_needed();
+    }
+    if (!m_flush_thread_stopped && spin_cnt < HS_DYNAMIC_CONFIG(logstore.try_flush_iteration)) {
+        iomanager.this_reactor()->set_poll_interval(0);
+    } else {
+        spin_cnt = 0;
+        iomanager.this_reactor()->set_poll_interval(-1);
+        for (auto& f : m_logstore_families) {
+            f->logdev().set_flush_status(false);
+            // call it one last after setting its status to false
+            f->logdev().flush_if_needed();
         }
     }
 }
@@ -160,6 +174,8 @@ void HomeLogStoreMgr::start_threads() {
     sthread = sisl::named_thread("flush_thread", [this, &tl_cv = cv, &tl_mtx = mtx, &thread_cnt]() {
         iomanager.run_io_loop(false, nullptr, ([this, &tl_cv, &tl_mtx, &thread_cnt](bool is_started) {
                                   if (is_started) {
+                                      iomanager.this_reactor()->register_poll_interval_cb(
+                                          bind_this(HomeLogStoreMgr::flush_if_needed, 0));
                                       std::unique_lock< std::mutex > lk{tl_mtx};
                                       m_flush_thread = iomanager.iothread_self();
                                       ++thread_cnt;

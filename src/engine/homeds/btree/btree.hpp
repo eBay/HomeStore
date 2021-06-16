@@ -1504,10 +1504,12 @@ private:
 
             HS_ASSERT_CMP(DEBUG, start_ind, <=, end_ind);
             if (s_match.size() > 0) { my_node->remove(start_ind, end_ind); }
+            COUNTER_DECREMENT(m_metrics, btree_obj_count, s_match.size());
 
             for (const auto& pair : s_replace_kv) { // insert is based on compare() of BtreeKey
                 auto status = my_node->insert(pair.first, pair.second);
                 BT_RELEASE_ASSERT((status == btree_status_t::success), my_node, "unexpected insert failure");
+                COUNTER_INCREMENT(m_metrics, btree_obj_count, 1);
             }
 
             /* update cursor in input range */
@@ -1534,10 +1536,10 @@ private:
             }
         } else {
             if (!my_node->put(k, v, put_type, existing_val)) { ret = btree_status_t::put_failed; }
+            COUNTER_INCREMENT(m_metrics, btree_obj_count, 1);
         }
 
         write_node(my_node, bcp);
-        COUNTER_INCREMENT(m_metrics, btree_obj_count, 1);
         return ret;
     }
 

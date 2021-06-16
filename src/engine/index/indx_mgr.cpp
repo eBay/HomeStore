@@ -77,9 +77,9 @@ sisl::io_blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
 
 /****************************************** cp watchdog class ***********************************/
 CPWatchdog::CPWatchdog() {
-    m_timer_hdl =
-        iomanager.schedule_global_timer(HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec) * 1000 * 1000, true, nullptr,
-                                        iomgr::thread_regex::all_user, [this](void* cookie) { cp_watchdog_timer(); });
+    m_timer_hdl = iomanager.schedule_global_timer(HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec) * 1000 * 1000 * 1000,
+                                                  true, nullptr, iomgr::thread_regex::all_user,
+                                                  [this](void* cookie) { cp_watchdog_timer(); });
     cp_reset();
 }
 

@@ -19,7 +19,9 @@ SDS_LOGGING_DECL(logstore)
     HS_PERIODIC_DETAILED_LOG(level, logstore, "logdev", m_family_id, , , msg, __VA_ARGS__)
 
 LogDev::LogDev(const logstore_family_id_t f_id, const std::string& metablk_name) :
-        m_family_id{f_id}, m_logdev_meta{metablk_name} {}
+        m_family_id{f_id}, m_logdev_meta{metablk_name} {
+    set_flush_status(false);
+}
 LogDev::~LogDev() = default;
 
 void LogDev::meta_blk_found(meta_blk* const mblk, const sisl::byte_view buf, const size_t size) {
@@ -165,13 +167,18 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
     }
 }
 
+/* it should be single threaded */
+void LogDev::set_flush_status(bool status) { m_flush_status.store(status, std::memory_order_relaxed); }
+
+bool LogDev::get_flush_status() { return (m_flush_status.load(std::memory_order_relaxed)); }
+
 int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, const sisl::io_blob& data,
                              void* const cb_context) {
     auto prev_size = m_pending_flush_size.fetch_add(data.size, std::memory_order_relaxed);
     const auto idx{m_log_idx.fetch_add(1, std::memory_order_acq_rel)};
     auto threshold_size = LogDev::flush_data_threshold_size();
     m_log_records->create(idx, store_id, seq_num, data, cb_context);
-    if (prev_size < threshold_size && (prev_size + data.size) >= threshold_size) {
+    if (prev_size < threshold_size && ((prev_size + data.size) >= threshold_size) && !get_flush_status()) {
         HomeLogStoreMgrSI().send_flush_msg();
     }
     return idx;

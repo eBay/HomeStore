@@ -389,7 +389,7 @@ public:
 
     static CacheBufferType* make_object() { return sisl::ObjectAllocator< CacheBufferType >::make_object(); }
 
-    void free_yourself() { sisl::ObjectAllocator< CacheBufferType >::deallocate(this); }
+    virtual void free_yourself() { sisl::ObjectAllocator< CacheBufferType >::deallocate(this); }
 
     //////////// Mandatory IntrusiveHashSet definitions ////////////////
     static void ref(CacheBufferType& b) { intrusive_ptr_add_ref(&b); }
