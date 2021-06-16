@@ -793,6 +793,13 @@ public:
     /* Verify debug bitmap */
     BlkAllocStatus verify_debug_bm() { return (m_vdev.verify_debug_bm()); }
 
+    /* Get status */
+    nlohmann::json get_status(const int log_level) {
+        nlohmann::json j;
+        j.update(m_vdev.get_status(log_level));
+        return j;
+    }
+
 private:
     uint32_t m_pagesz;
     CacheType* m_cache;

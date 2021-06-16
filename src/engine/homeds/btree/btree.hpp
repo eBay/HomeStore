@@ -685,6 +685,18 @@ public:
         return ret;
     }
 
+    /**
+     * @brief : get the status of this btree;
+     *
+     * @param log_level : verbosity level;
+     *
+     * @return : status in json form;
+     */
+    nlohmann::json get_status(const int log_level) {
+        nlohmann::json j;
+        return j;
+    }
+
     void diff(Btree* other, uint32_t param, vector< pair< K, V > >* diff_kv) {
         std::vector< pair< K, V > > my_kvs, other_kvs;
 

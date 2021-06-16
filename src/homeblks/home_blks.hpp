@@ -275,6 +275,7 @@ public:
     [[nodiscard]] bool verify_data_bm();
     [[nodiscard]] bool verify_index_bm();
     [[nodiscard]] bool verify_bitmap();
+    [[nodiscard]] nlohmann::json get_status(const int log_level);
 
     [[nodiscard]] std::error_condition mark_vol_offline(const boost::uuids::uuid& uuid);
     [[nodiscard]] std::error_condition mark_vol_online(const boost::uuids::uuid& uuid);

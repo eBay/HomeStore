@@ -666,6 +666,8 @@ public:
 
     void print_tree();
     bool verify_tree(bool update_debug_bm);
+    nlohmann::json get_status(const int log_level);
+
     /**
      * @brief : Fix a btree by :
      *      1. Create a new btree,

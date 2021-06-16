@@ -202,7 +202,9 @@ void HomeBlksHttpServer::get_status(sisl::HttpCallData cd) {
     }
 
     const auto status_mgr = to_homeblks(cd)->status_mgr();
-    const auto status_json = status_mgr->get_status(modules, verbosity_level);
+    auto status_json = status_mgr->get_status(modules, verbosity_level);
+    const auto vol_status_json = to_homeblks(cd)->get_status(verbosity_level);
+    status_json.update(vol_status_json);
     pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, status_json.dump(2));
 }
 

@@ -417,6 +417,9 @@ public:
     /* verify active indx */
     bool verify_tree(bool update_debug_bm = false);
 
+    /* get status */
+    nlohmann::json get_status(const int log_level);
+
     /* populate debug bitmap */
     void populate_debug_bm();
 

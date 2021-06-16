@@ -535,6 +535,24 @@ bool HomeBlks::verify_index_bm() {
     return true;
 }
 
+nlohmann::json HomeBlks::get_status(const int log_level) {
+    nlohmann::json j;
+    /* Update per volume status */
+    std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
+    auto it{m_volume_map.begin()};
+    LOGINFO("Print status of all volumes");
+    while (it != m_volume_map.end()) {
+        const VolumePtr& vol{it->second};
+        j.update(vol->get_status(log_level));
+        ++it;
+    }
+    /* Get status from index blkstore */
+    auto hb{HomeBlks::safe_instance()};
+    j.update(hb->get_index_blkstore()->get_status(log_level));
+
+    return j;
+}
+
 bool HomeBlks::verify_bitmap() {
 #ifdef _PRERELEASE
     StaticIndxMgr::hs_cp_suspend();

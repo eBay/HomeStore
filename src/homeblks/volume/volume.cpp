@@ -159,6 +159,7 @@ void Volume::init() {
     m_blks_per_lba = get_page_size() / m_hb->get_data_pagesz();
     HS_RELEASE_ASSERT_EQ(get_page_size() % m_hb->get_data_pagesz(), 0);
     m_hb->create_volume(shared_from_this());
+
     if (init) {
         SnapMgr::trigger_indx_cp_with_cb(([this](bool success) {
             /* Now it is safe to do shutdown as this volume has become a part of CP */
@@ -740,6 +741,12 @@ volume_child_req_ptr Volume::create_vol_child_req(const BlkId& bid, const volume
 
 void Volume::print_tree() { get_active_indx()->print_tree(); }
 bool Volume::verify_tree(bool update_debug_bm) { return (get_active_indx()->verify_tree(update_debug_bm)); }
+
+nlohmann::json Volume::get_status(const int log_level) {
+    nlohmann::json j;
+    j.update(get_active_indx()->get_status(log_level));
+    return j;
+}
 
 void Volume::populate_debug_bm() {
     unsigned int i{0};

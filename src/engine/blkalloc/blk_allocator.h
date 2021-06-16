@@ -349,6 +349,12 @@ public:
         return ret;
     }
 
+    /* Get status */
+    nlohmann::json get_status(const int log_level) {
+        nlohmann::json j;
+        return j;
+    }
+
 private:
     [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); }
 

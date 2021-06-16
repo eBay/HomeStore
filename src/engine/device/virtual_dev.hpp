@@ -1375,6 +1375,22 @@ private:
         }
     }
 
+    /* Get status for all chunks */
+    nlohmann::json get_status(const int log_level) {
+        nlohmann::json j;
+        try {
+            for (auto& pdev_chunks : m_primary_pdev_chunks_list) {
+                auto chunk_list{pdev_chunks.chunks_in_pdev};
+                for (auto& chunk : chunk_list) {
+                    j.update(chunk->get_blk_allocator()->get_status(log_level));
+                }
+            }
+        } catch (const std::exception& e) {
+            LOGERROR("exception happened {}", e.what());
+        }
+        return j;
+    }
+
     //
     // split do_write from pwrite so that write could re-use this sub-routine
     //
