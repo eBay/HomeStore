@@ -115,6 +115,14 @@ def recovery_nightly(num_iteration=10):
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery with 300GB single volume passed")
 
+    # run same LBA work load for 2 hours;
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=14400 --max_num_writes=5000000 --load_type=1 --verify_type=3 --enable_crash_handler=1 --remove_file=0"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=300 --enable_crash_handler=1 --remove_file=1 --delete_volume=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    print("recovery with writing to same LBA workload passed")
+
 def recovery_nightly_with_create_del(num_iteration=10):
     print("recovery test started")
     i = 1

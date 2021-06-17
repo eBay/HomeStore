@@ -226,17 +226,14 @@ struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
 
     blkid_list_ptr io_free_blkid_list; // list of blk ids freed in a cp
 
-    blkid_list_ptr io_alloc_blkid_list; // list of blk ids reserved in a cp
-
     indx_cp(const int64_t cp_id, const seq_id_t start_active_seqid, const seq_id_t start_diff_seqid,
-            indx_mgr_ptr indx_mgr, blkid_list_ptr& io_free_blkid_list, blkid_list_ptr& io_alloc_blkid_list) :
+            indx_mgr_ptr indx_mgr, blkid_list_ptr& io_free_blkid_list) :
             indx_mgr(indx_mgr),
             cp_id(cp_id),
             indx_size(0),
             acp(start_active_seqid),
             dcp(start_diff_seqid),
-            io_free_blkid_list(io_free_blkid_list),
-            io_alloc_blkid_list(io_alloc_blkid_list) {}
+            io_free_blkid_list(io_free_blkid_list) {}
 
     int state() const { return flags; }
     seq_id_t get_max_seqid() const { return 0; }
@@ -245,9 +242,9 @@ struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
     std::string to_string() const {
         return fmt::format(
             "Flags={} indx_cp_id={} indx_size={} active_checkpoint=[{}] diff_checkpoint=[{}] size_freed={} "
-            "user_size_freed={}, size_alloced={}",
+            "user_size_freed={}",
             flags, cp_id, indx_size, acp.to_string(), dcp.to_string(), io_free_blkid_list->size(),
-            user_free_blkid_list.size(), io_alloc_blkid_list->size());
+            user_free_blkid_list.size());
     }
 };
 
@@ -368,7 +365,6 @@ public:
     virtual btree_status_t update_diff_indx_tbl(const indx_req_ptr& ireq, const btree_cp_ptr& bcp) = 0;
     virtual btree_cp_ptr attach_prepare_cp(const btree_cp_ptr& cur_bcp, bool is_last_cp, bool blkalloc_checkpoint) = 0;
     virtual void flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< blkalloc_cp >& ba_cp) = 0;
-    virtual void flush_alloc_blks(const btree_cp_ptr& bcp, std::shared_ptr< blkalloc_cp >& ba_cp) = 0;
     virtual void update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_sb& btree_sb, bool is_blkalloc_cp) = 0;
     virtual void truncate(const btree_cp_ptr& bcp) = 0;
     virtual btree_status_t destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_node_cnt) = 0;
@@ -448,7 +444,6 @@ public:
     static const iomgr::io_thread_t& get_thread_id() { return m_thread_id; }
     static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
     static void flush_hs_free_blks(hs_cp* hcp);
-    static void flush_hs_alloc_blks(hs_cp* hcp);
     static void write_meta_blk(void*& mblk, const sisl::byte_array& buf);
 
     /* This api insert the free blkids in out_free_list.
@@ -596,8 +591,6 @@ public:
 
     /* it flushes free blks to blk allocator */
     void flush_free_blks(const indx_cp_ptr& icp, hs_cp* hcp);
-    /* it flushes free blks to blk allocator */
-    void flush_alloc_blks(const indx_cp_ptr& icp, hs_cp* hcp);
 
     void update_cp_sb(indx_cp_ptr& icp, hs_cp* hcp, indx_cp_base_sb* sb);
     seq_id_t get_max_seqid_found_in_recovery() const;
@@ -664,7 +657,6 @@ private:
     std::shared_mutex m_prepare_cb_mtx;
     std::unique_ptr< std::vector< prepare_cb > > m_prepare_cb_list;
     blkid_list_ptr m_free_list[MAX_CP_CNT];
-    blkid_list_ptr m_alloc_list[MAX_CP_CNT];
     indx_cp_base_sb m_last_cp_sb;
     std::map< logstore_seq_num_t, log_buffer > seq_buf_map; // used only in recovery
     std::atomic< bool > m_recovery_mode = false;
@@ -673,7 +665,6 @@ private:
     recover_indx_tbl m_recover_indx_tbl;
     indx_mgr_sb m_immutable_sb;
     uint64_t m_free_list_cnt = 0;
-    uint64_t m_alloc_list_cnt = 0;
     bool m_is_snap_enabled = false;
     bool m_is_snap_started = false;
     void* m_destroy_meta_blk = nullptr;

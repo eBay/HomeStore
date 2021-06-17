@@ -38,22 +38,6 @@ public:
         HS_ASSERT_CMP(RELEASE, dirty_buf_cnt, >=, 0);
     }
 
-    // moniro alloc blk cnt
-    static void inc_alloc_blk() {
-        if (m_hs_ab_cnt.fetch_add(1, std::memory_order_relaxed) > get_alloc_blk_cnt_limit()) {
-            IndxMgr::trigger_hs_cp();
-        }
-        COUNTER_INCREMENT(m_metrics, alloc_blk_cnt_in_cp, 1);
-    }
-
-    static void dec_alloc_blk(int cnt) {
-        auto dirty_ab_cnt = m_hs_ab_cnt.fetch_sub(cnt, std::memory_order_relaxed);
-        HS_ASSERT_CMP(RELEASE, dirty_ab_cnt, >=, 0);
-        COUNTER_DECREMENT(m_metrics, alloc_blk_cnt_in_cp, cnt);
-    }
-
-    static int64_t get_alloc_blk_cnt_limit() { return ((HS_DYNAMIC_CONFIG(resource_limits.alloc_blk_cnt))); }
-
     /* monitor free blk cnt */
     static void inc_free_blk(int size) {
         // trigger hs cp when either one of the limit is reached

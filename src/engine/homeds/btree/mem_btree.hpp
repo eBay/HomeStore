@@ -198,9 +198,6 @@ public:
     static void flush_free_blks(MemBtreeStore* store, const btree_cp_ptr& bcp,
                                 std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {}
 
-    static void flush_alloc_blks(MemBtreeStore* store, const btree_cp_ptr& bcp,
-                                 std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {}
-
     static sisl::io_blob make_journal_entry(journal_op op, bool is_root, const btree_cp_ptr& bcp,
                                             bt_node_gen_pair pair = {}) {
         return sisl::io_blob();

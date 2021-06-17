@@ -323,10 +323,6 @@ public:
         memcpy(&m_last_cp_sb, &btree_sb, sizeof(m_last_cp_sb));
     }
 
-    void flush_alloc_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
-        btree_store_t::flush_alloc_blks(m_btree_store.get(), bcp, ba_cp);
-    }
-
     void flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
         btree_store_t::flush_free_blks(m_btree_store.get(), bcp, ba_cp);
     }
@@ -2762,7 +2758,7 @@ private:
                                            thread::locktype leaf_lock_type, const btree_cp_ptr& bcp) {
 
         if (index == node->get_total_entries()) {
-            const auto& edge_id {node->get_edge_id()};
+            const auto& edge_id{node->get_edge_id()};
             child_info.set_bnode_id(edge_id);
             // If bsearch points to last index, it means the search has not found entry unless it is an edge value.
             if (!child_info.has_valid_bnode_id()) {

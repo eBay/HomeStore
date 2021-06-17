@@ -21,6 +21,7 @@
 #include <fds/bitset.hpp>
 #include <folly/MPMCQueue.h>
 #include <utility/enum.hpp>
+#include <utility/urcu_helper.hpp>
 
 #include "blk.h"
 #include "engine/device/device.h"
@@ -261,20 +262,30 @@ public:
      * It is also used in normal IO during auto recovery mode.
      */
     BlkAllocStatus alloc_on_disk(const BlkId& in_bid) {
-        /* enable this assert later when reboot is supported */
-        // assert(m_auto_recovery || !m_inited);
         if (!m_auto_recovery && m_inited) { return BlkAllocStatus::FAILED; }
-        BlkAllocPortion* const portion{blknum_to_portion(in_bid.get_blk_num())};
-        {
-            auto lock{portion->portion_auto_lock()};
-            if (m_inited) {
-                BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_reset(in_bid.get_blk_num(), in_bid.get_nblks()),
-                                "Expected disk blks to reset");
+
+        rcu_read_lock();
+        auto list = get_alloc_blk_list();
+        if (list) {
+            // cp has started, accumulating to the list
+            list->push_back(in_bid);
+        } else {
+            // cp is not started or already done, allocate on disk bm directly;
+            /* enable this assert later when reboot is supported */
+            // assert(m_auto_recovery || !m_inited);
+            BlkAllocPortion* const portion{blknum_to_portion(in_bid.get_blk_num())};
+            {
+                auto lock{portion->portion_auto_lock()};
+                if (m_inited) {
+                    BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_reset(in_bid.get_blk_num(), in_bid.get_nblks()),
+                                    "Expected disk blks to reset");
+                }
+                get_disk_bm()->set_bits(in_bid.get_blk_num(), in_bid.get_nblks());
+                portion->decrease_available_blocks(in_bid.get_nblks());
+                BLKALLOC_LOG(DEBUG, "blks allocated {} chunk number {}", in_bid.to_string(), m_chunk_id);
             }
-            get_disk_bm()->set_bits(in_bid.get_blk_num(), in_bid.get_nblks());
-            portion->decrease_available_blocks(in_bid.get_nblks());
-            BLKALLOC_LOG(DEBUG, "blks allocated {} chunk number {}", in_bid.to_string(), m_chunk_id);
         }
+        rcu_read_unlock();
         return BlkAllocStatus::SUCCESS;
     };
 
@@ -309,7 +320,33 @@ public:
      * disk bitmap.
      */
     [[nodiscard]] sisl::byte_array cp_start([[maybe_unused]] const std::shared_ptr< blkalloc_cp >& id) {
+        // prepare a valid blk alloc list;
+        auto alloc_list_ptr = new sisl::ThreadVector< BlkId >();
+        // set to valid pointer, blk alloc will be acummulated;
+        auto old_alloc_list_ptr = rcu_xchg_pointer(&m_alloc_blkid_list, alloc_list_ptr);
+        // wait for all I/Os that are still in critical section (allocating on disk bm) to complete and exit;
+        synchronize_rcu();
+
+        BLKALLOC_ASSERT(RELEASE, old_alloc_list_ptr == nullptr, "Expecting alloc list to be nullptr");
         return (m_disk_bm->serialize(HS_STATIC_CONFIG(drive_attr.align_size)));
+    }
+
+    void cp_done() {
+        // set to nullptr, so that alloc will go to disk bm directly
+        auto old_alloc_list_ptr = rcu_xchg_pointer(&m_alloc_blkid_list, nullptr);
+        // wait for all I/Os in critical section (still accumulating bids) to complete and exit;
+        synchronize_rcu();
+
+        // at this point, no I/O will be pushing back to the list (old_alloc_list_ptr);
+        auto it = old_alloc_list_ptr->begin(true /* latest */);
+        BlkId* bid{nullptr};
+        while ((bid = old_alloc_list_ptr->next(it)) != nullptr) {
+            alloc_on_disk(*bid);
+        }
+        old_alloc_list_ptr->clear();
+
+        delete (old_alloc_list_ptr);
+        // another cp flush won't start until this flush is completed, so no cp_start won't be called in parallel;
     }
 
     virtual BlkAllocStatus alloc(BlkId& bid) = 0;
@@ -358,12 +395,18 @@ public:
 private:
     [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); }
 
+    sisl::ThreadVector< BlkId >* get_alloc_blk_list() {
+        auto p = rcu_dereference(m_alloc_blkid_list);
+        return p;
+    }
+
 protected:
     BlkAllocConfig m_cfg;
     bool m_inited{false};
     chunk_num_t m_chunk_id;
 
 private:
+    sisl::ThreadVector< BlkId >* m_alloc_blkid_list{nullptr};
     std::unique_ptr< BlkAllocPortion[] > m_blk_portions;
     std::unique_ptr< sisl::Bitset > m_disk_bm{nullptr};
     std::unique_ptr< sisl::Bitset > m_debug_bm{nullptr};
@@ -407,24 +450,12 @@ struct blkalloc_cp {
 public:
     bool suspend = false;
     std::vector< blkid_list_ptr > free_blkid_list_vector;
-    std::vector< blkid_list_ptr > alloc_blkid_list_vector;
     HomeStoreBaseSafePtr m_hs{HomeStoreBase::safe_instance()};
 
 public:
     [[nodiscard]] bool is_suspend() const { return suspend; }
     void suspend_cp() { suspend = true; }
     void resume_cp() { suspend = false; }
-    void alloc_blks(const blkid_list_ptr& list) {
-        auto it = list->begin(true /* latest */);
-        BlkId* bid;
-        while ((bid = list->next(it)) != nullptr) {
-            auto chunk{m_hs->get_device_manager()->get_chunk(bid->get_chunk_num())};
-            auto ba{chunk->get_blk_allocator()};
-            ba->alloc_on_disk(*bid);
-        }
-
-        alloc_blkid_list_vector.push_back(list);
-    }
 
     void free_blks(const blkid_list_ptr& list) {
         auto it = list->begin(true /* latest */);
@@ -439,13 +470,6 @@ public:
 
     blkalloc_cp() = default;
     ~blkalloc_cp() {
-        /* clear alloc blk list after blk cp is finished
-         * blk id is already alloced from cache before accumulated in cp, so cache is already updated */
-        for (auto& list : alloc_blkid_list_vector) {
-            ResourceMgr::dec_alloc_blk(list->size());
-            list->clear();
-        }
-
         /* free all the blkids in the cache */
         for (auto& list : free_blkid_list_vector) {
             BlkId* bid;

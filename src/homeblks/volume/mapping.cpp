@@ -810,10 +810,6 @@ void mapping::truncate(const btree_cp_ptr& bcp) { m_bt->truncate(bcp); }
 
 void mapping::destroy_done() { m_bt->destroy_done(); }
 
-void mapping::flush_alloc_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
-    m_bt->flush_alloc_blks(bcp, ba_cp);
-}
-
 void mapping::flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
     m_bt->flush_free_blks(bcp, ba_cp);
 }

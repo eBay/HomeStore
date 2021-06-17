@@ -44,6 +44,8 @@ void PhysicalDevChunk::cp_start(std::shared_ptr< blkalloc_cp > ba_cp) {
     } else {
         MetaBlkMgrSI()->add_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
     }
+
+    get_blk_allocator()->cp_done();
 }
 
 std::shared_ptr< blkalloc_cp > PhysicalDevChunk::attach_prepare_cp(std::shared_ptr< blkalloc_cp > cur_ba_cp) {

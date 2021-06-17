@@ -101,11 +101,9 @@ class MappingKey : public homeds::btree::ExtentBtreeKey, public sisl::ObjLifeCou
 public:
     MappingKey() : ObjLifeCounter() {}
 
-    MappingKey(const MappingKey& other) :
-            ExtentBtreeKey(), ObjLifeCounter(), m_lbaId(other.get_lbaId()) {}
+    MappingKey(const MappingKey& other) : ExtentBtreeKey(), ObjLifeCounter(), m_lbaId(other.get_lbaId()) {}
 
-    MappingKey(const lba_t lba_start, const lba_count_t n_lba) :
-            ObjLifeCounter(), m_lbaId{lba_start, n_lba} {}
+    MappingKey(const lba_t lba_start, const lba_count_t n_lba) : ObjLifeCounter(), m_lbaId{lba_start, n_lba} {}
 
     const LbaId& get_lbaId() const { return m_lbaId; }
     lba_t start() const { return m_lbaId.get_lba_start(); }
@@ -154,7 +152,9 @@ public:
         return false;
     }
 
-    sisl::blob get_blob() const override { return {reinterpret_cast< uint8_t* >(const_cast< LbaId* >(&m_lbaId)), get_fixed_size()}; }
+    sisl::blob get_blob() const override {
+        return {reinterpret_cast< uint8_t* >(const_cast< LbaId* >(&m_lbaId)), get_fixed_size()};
+    }
 
     void set_blob(const sisl::blob& b) override {
         assert(b.size == get_fixed_size());
@@ -170,9 +170,7 @@ public:
         set(other->end(), 1);
     }
 
-    void set(const lba_t lba_start, const blk_count_t n_lba) {
-        m_lbaId.set(lba_start, n_lba);
-    }
+    void set(const lba_t lba_start, const blk_count_t n_lba) { m_lbaId.set(lba_start, n_lba); }
 
     uint32_t get_blob_size() const override { return get_fixed_size(); }
     void set_blob_size(uint32_t size) override { assert(false); }
@@ -731,7 +729,6 @@ public:
     void destroy_done() override;
     void update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_sb& btree_sb, bool is_blkalloc_cp) override;
     void flush_free_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) override;
-    void flush_alloc_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) override;
     /* it populats the allocated blkids in index req. It might not be the same as in volume req if entry is
      * partially written.
      */

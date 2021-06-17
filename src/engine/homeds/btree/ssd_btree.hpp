@@ -58,8 +58,8 @@ public:
     void create_done_store(bnodeid_t m_root_node) {
         auto bid = BlkId(m_root_node);
         THIS_BT_CP_LOG(TRACE, m_first_cp->cp_id, "accumulating root bid: {}", bid.to_string());
-        m_first_cp->alloc_blkid_list->push_back(bid);
-        ResourceMgr::inc_alloc_blk();
+
+        m_blkstore->reserve_blk(bid);
     }
 
     void cp_done_store(const btree_cp_ptr& bcp) { bcp->cb(bcp); }
@@ -210,15 +210,6 @@ public:
     }
     std::string get_cp_flush_status_store(const btree_cp_ptr& bcp) { return m_wb_cache->get_cp_flush_status(bcp); }
 
-    static void flush_alloc_blks(SSDBtreeStore* store, const btree_cp_ptr& bcp,
-                                 std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
-        store->flush_alloc_blks(bcp, ba_cp);
-    }
-
-    void flush_alloc_blks(const btree_cp_ptr& bcp, std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
-        m_wb_cache->flush_alloc_blks(bcp, ba_cp);
-    }
-
     static void flush_free_blks(SSDBtreeStore* store, const btree_cp_ptr& bcp,
                                 std::shared_ptr< homestore::blkalloc_cp >& ba_cp) {
         store->flush_free_blks(bcp, ba_cp);
@@ -246,7 +237,7 @@ public:
     }
 
     static uint8_t* get_physical(const SSDBtreeNode* const bn) {
-        const wb_cache_buffer_t* const bbuf{static_cast<const wb_cache_buffer_t*>(bn)};
+        const wb_cache_buffer_t* const bbuf{static_cast< const wb_cache_buffer_t* >(bn)};
         const sisl::blob b{bbuf->at_offset(0)};
         return b.bytes;
     }
@@ -341,7 +332,7 @@ public:
                 HS_ASSERT_CMP(DEBUG, iomanager.am_i_tight_loop_reactor(), ==, true);
                 bnode = nullptr;
                 return btree_status_t::fast_path_not_possible;
-            } 
+            }
 
 #ifdef NDEBUG
             bnode = boost::intrusive_ptr< SSDBtreeNode >(reinterpret_cast< SSDBtreeNode* >(safe_buf.get()));
@@ -451,7 +442,8 @@ public:
 
     static void ref_node(SSDBtreeNode* const bn) {
         // ref base class
-        homestore::CacheBuffer< homestore::BlkId >::ref(static_cast < homestore::CacheBuffer< homestore::BlkId >&>(*bn));
+        homestore::CacheBuffer< homestore::BlkId >::ref(
+            static_cast< homestore::CacheBuffer< homestore::BlkId >& >(*bn));
     }
 
     static void deref_node(SSDBtreeNode* const bn) {
@@ -521,10 +513,9 @@ private:
                      */
                     jentry->foreach_node(bt_journal_node_op::creation, [&](bt_node_gen_pair n, sisl::blob k) {
                         auto bid = BlkId(n.node_id);
-                        THIS_BT_CP_LOG(TRACE, bcp->cp_id, "accumulating blk inside btree journal entry {}",
+                        THIS_BT_CP_LOG(TRACE, bcp->cp_id, "allocating blk inside btree journal entry {}",
                                        bid.to_string());
-                        bcp->alloc_blkid_list->push_back(bid);
-                        ResourceMgr::inc_alloc_blk();
+                        m_blkstore->reserve_blk(bid);
                     });
                     // For root node, disk bitmap is later persisted with btree root node.
                 }
