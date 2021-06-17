@@ -728,6 +728,12 @@ void IndxMgr::update_cp_sb(indx_cp_ptr& icp, hs_cp* hcp, indx_cp_base_sb* sb) {
 
     m_active_tbl->update_btree_cp_sb(icp->acp.bcp, sb->acp_sb, (icp->flags & indx_cp_state::ba_cp));
 
+    /* XXX: we might remove it after diff cp comes */
+    HS_RELEASE_ASSERT_EQ((int64_t)(sb->icp_sb.active_cp_id), (int64_t)(sb->acp_sb.cp_id), "indx name {} cp info {}",
+                         get_name(), m_last_cp_sb.to_string());
+    HS_RELEASE_ASSERT_EQ((int64_t)(sb->icp_sb.blkalloc_cp_id), (int64_t)(sb->acp_sb.blkalloc_cp_id),
+                         "indx name {} cp info {}", get_name(), m_last_cp_sb.to_string());
+
     if (icp->flags & indx_cp_state::diff_cp) {
         icp->dcp.diff_tbl->update_btree_cp_sb(icp->dcp.bcp, sb->dcp_sb, (icp->flags & indx_cp_state::ba_cp));
     }

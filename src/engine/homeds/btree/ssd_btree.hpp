@@ -120,8 +120,8 @@ public:
             // reserve this blk unconditionally as root node never changes
             BlkId bid(sb.root_node);
             m_blkstore->reserve_blk(bid);
-            THIS_BT_CP_LOG(INFO, m_first_cp->cp_id, "btree_cp_info=[{}], skipped root node:{}", cp_sb->to_string(),
-                           bid.to_string());
+            THIS_BT_LOG(INFO, replay, , "btree_cp_info=[{}], skipped root node:{}", cp_sb->to_string(),
+                        bid.to_string());
         } else {
             m_journal = HomeLogStoreMgrSI().create_new_log_store(HomeLogStoreMgr::DATA_LOG_FAMILY_IDX, true /*append*/);
 

@@ -757,6 +757,8 @@ public:
         Clock::time_point blkstore_op_start_time;
         if (req && !req->isSyncCall) {
             req->start_time();
+        } else {
+            blkstore_op_start_time = Clock::now();
         }
         const auto ret{m_vdev.pwritev(iov, iovcnt, offset, req)};
         if (!req || req->isSyncCall) {

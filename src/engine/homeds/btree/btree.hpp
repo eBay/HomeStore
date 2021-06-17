@@ -316,11 +316,10 @@ public:
     /* It is called before superblock is persisted for each CP */
     void update_btree_cp_sb(const btree_cp_ptr& bcp, btree_cp_sb& btree_sb, bool is_blkalloc_cp) {
         btree_sb.active_seqid = bcp->end_seqid;
-        btree_sb.blkalloc_cp_id = is_blkalloc_cp ? bcp->cp_id : m_last_cp_sb.cp_id;
+        btree_sb.blkalloc_cp_id = is_blkalloc_cp ? bcp->cp_id : m_last_cp_sb.blkalloc_cp_id;
         btree_sb.btree_size = bcp->btree_size.load() + m_last_cp_sb.btree_size;
         btree_sb.cp_id = bcp->cp_id;
         HS_ASSERT_CMP(DEBUG, (int64_t)m_last_cp_sb.cp_id, ==, (int64_t)bcp->cp_id - 1);
-        // THIS_BT_LOG(INFO, base, , "btree cp size {}", bcp->btree_size.load());
         memcpy(&m_last_cp_sb, &btree_sb, sizeof(m_last_cp_sb));
     }
 
