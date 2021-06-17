@@ -320,8 +320,7 @@ public:
         std::uniform_int_distribution< uint32_t > gen_data_size{0, max_data_size - 1};
         if (gen_percentage(re) < static_cast< uint8_t >(10)) {
             // 10% of data is dma'ble aligned boundary
-            const auto alloc_sz{
-                sisl::round_up(gen_data_size(re) + sizeof(test_log_data), HomeLogStore::flush_boundary())};
+            const auto alloc_sz{sisl::round_up(gen_data_size(re) + sizeof(test_log_data), s_max_flush_multiple)};
             raw_buf = iomanager.iobuf_alloc(dma_address_boundary, alloc_sz);
             sz = alloc_sz - sizeof(test_log_data);
             io_memory = true;
@@ -354,6 +353,9 @@ private:
     friend class LogStoreTest;
 
 private:
+    static constexpr uint32_t max_data_size = 1024;
+    static uint64_t s_max_flush_multiple;
+
     logstore_id_t m_store_id;
     test_log_store_comp_cb_t m_comp_cb;
     std::atomic< logstore_seq_num_t > m_truncated_upto_lsn = -1;
@@ -362,9 +364,10 @@ private:
     folly::Synchronized< std::map< logstore_seq_num_t, bool > > m_hole_lsns;
     int64_t m_n_recovered_lsns = 0;
     int64_t m_n_recovered_truncated_lsns = 0;
-    static constexpr uint32_t max_data_size = 1024;
     logstore_family_id_t m_family;
 };
+
+uint64_t SampleLogStoreClient::s_max_flush_multiple = 0;
 
 class SampleDB {
 private:
@@ -457,6 +460,9 @@ public:
                 m_log_store_clients.push_back(std::make_unique< SampleLogStoreClient >(
                     family_idx, bind_this(SampleDB::on_log_insert_completion, 3)));
             }
+            SampleLogStoreClient::s_max_flush_multiple =
+                std::max(HomeLogStoreMgr::data_logdev().get_flush_size_multiple(),
+                         HomeLogStoreMgr::ctrl_logdev().get_flush_size_multiple());
         }
     }
 

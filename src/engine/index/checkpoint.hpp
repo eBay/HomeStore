@@ -175,7 +175,7 @@ public:
         auto cb_list = cp->cb_list;
         HS_PERIODIC_LOG(INFO, cp, ">>>>>>>>>>>> cp ID completed {}, notified {} callbacks time taken {} us",
                         cp->to_string(), cb_list.size(), get_elapsed_time_us(m_cp_start_time));
-        HISTOGRAM_OBSERVE(m_metrics, cp_latency, get_elapsed_time_ns(m_cp_start_time));
+        HISTOGRAM_OBSERVE(m_metrics, cp_latency, get_elapsed_time_us(m_cp_start_time));
         cp_reset(cp);
         delete (cp);
 

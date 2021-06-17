@@ -96,6 +96,10 @@ table LogStore {
 
     // Max iteration flush thread run before yielding
     try_flush_iteration: uint64 = 10240(hotswap);
+
+    // Logdev flushes in multiples of this size, setting to 0 will make it use default device optimal size
+    flush_size_multiple_data_logdev: uint64 = 0;
+    flush_size_multiple_ctrl_logdev: uint64 = 512;
 }
 
 table Generic {

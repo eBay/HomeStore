@@ -5,15 +5,19 @@
 namespace homestore {
 SDS_LOGGING_DECL(logstore)
 
-log_stream_reader::log_stream_reader(const off_t device_cursor, logdev_blkstore_t* store) :
-        m_hb{HomeStoreBase::safe_instance()}, m_blkstore{store}, m_first_group_cursor{device_cursor} {
+log_stream_reader::log_stream_reader(const off_t device_cursor, logdev_blkstore_t* store,
+                                     const uint64_t read_size_multiple) :
+        m_hb{HomeStoreBase::safe_instance()},
+        m_blkstore{store},
+        m_first_group_cursor{device_cursor},
+        m_read_size_multiple{read_size_multiple} {
     m_blkstore->lseek(m_first_group_cursor);
 }
 
 sisl::byte_view log_stream_reader::next_group(off_t* const out_dev_offset) {
-    const uint64_t bulk_read_size{static_cast< uint64_t >(
-        sisl::round_up(HS_DYNAMIC_CONFIG(logstore.bulk_read_size), log_record::flush_boundary()))};
-    uint64_t min_needed{log_record::flush_boundary()};
+    const uint64_t bulk_read_size{
+        static_cast< uint64_t >(sisl::round_up(HS_DYNAMIC_CONFIG(logstore.bulk_read_size), m_read_size_multiple))};
+    uint64_t min_needed{m_read_size_multiple};
     sisl::byte_view ret_buf;
 
 read_again:
@@ -24,7 +28,7 @@ read_again:
         min_needed = 0;
     }
 
-    HS_ASSERT_CMP(RELEASE, m_cur_log_buf.size(), >=, log_record::flush_boundary());
+    HS_RELEASE_ASSERT_GE(m_cur_log_buf.size(), m_read_size_multiple);
     const auto* const header{reinterpret_cast< log_group_header* >(m_cur_log_buf.bytes())};
     if (header->magic_word() != LOG_GROUP_HDR_MAGIC) {
         LOGINFOMOD(logstore, "Logdev data not seeing magic at pos {}, must have come to end of logdev",
@@ -33,7 +37,7 @@ read_again:
 
         // move it by dma boundary if header is not valid
         m_prev_crc = 0;
-        m_cur_read_bytes += log_record::flush_boundary();
+        m_cur_read_bytes += m_read_size_multiple;
         return ret_buf;
     }
 
@@ -41,7 +45,7 @@ read_again:
         LOGINFOMOD(logstore, "Logstream group size {} is more than available buffer size {}, reading from store",
                    header->total_size(), m_cur_log_buf.size());
         // Bigger group size than needed bytes, read again
-        min_needed = sisl::round_up(header->total_size(), log_record::flush_boundary());
+        min_needed = sisl::round_up(header->total_size(), m_read_size_multiple);
         goto read_again;
     }
 
@@ -60,7 +64,7 @@ read_again:
 
         // move it by dma boundary if header is not valid
         m_prev_crc = 0;
-        m_cur_read_bytes += log_record::flush_boundary();
+        m_cur_read_bytes += m_read_size_multiple;
         return ret_buf;
     }
 
@@ -75,7 +79,7 @@ read_again:
 
         // move it by dma boundary if header is not valid
         m_prev_crc = 0;
-        m_cur_read_bytes += log_record::flush_boundary();
+        m_cur_read_bytes += m_read_size_multiple;
         return ret_buf;
     }
 
@@ -91,7 +95,7 @@ read_again:
 
         // move it by dma boundary if header is not valid
         m_prev_crc = 0;
-        m_cur_read_bytes += log_record::flush_boundary();
+        m_cur_read_bytes += m_read_size_multiple;
         return ret_buf;
     }
 
@@ -108,9 +112,7 @@ read_again:
 
 sisl::byte_view log_stream_reader::group_in_next_page() {
     off_t dev_offset;
-    if (m_cur_log_buf.size() > log_record::flush_boundary()) {
-        m_cur_log_buf.move_forward(log_record::flush_boundary());
-    }
+    if (m_cur_log_buf.size() > m_read_size_multiple) { m_cur_log_buf.move_forward(m_read_size_multiple); }
     return next_group(&dev_offset);
 }
 

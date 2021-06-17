@@ -484,12 +484,6 @@ public:
 
     [[nodiscard]] nlohmann::json get_status(const int verbosity) const;
 
-    [[nodiscard]] static bool is_aligned_buf_needed(size_t size) {
-        return (log_record::is_size_inlineable(size) == false);
-    }
-
-    [[nodiscard]] static size_t flush_boundary() { return (log_record::flush_boundary()); }
-
 private:
     [[nodiscard]] const truncation_info& pre_device_truncation();
     void post_device_truncation(const logdev_key& trunc_upto_key);

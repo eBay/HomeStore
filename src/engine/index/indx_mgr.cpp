@@ -37,7 +37,8 @@ sisl::io_blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
     uint32_t size = sizeof(journal_hdr) + ireq->indx_alloc_blkid_list.size() * sizeof(BlkId) +
         ireq->indx_fbe_list.size() * sizeof(BlkId) + ireq->get_key_size() + ireq->get_val_size();
 
-    m_iob = hs_utils::create_io_blob(size, HomeLogStore::is_aligned_buf_needed(size), sisl::buftag::data_journal);
+    m_iob = hs_utils::create_io_blob(size, HomeLogStoreMgr::data_logdev().is_aligned_buf_needed(size),
+                                     sisl::buftag::data_journal);
 
     uint8_t* mem = m_iob.bytes;
 

@@ -20,8 +20,17 @@ SDS_LOGGING_DECL(logstore)
 
 LogDev::LogDev(const logstore_family_id_t f_id, const std::string& metablk_name) :
         m_family_id{f_id}, m_logdev_meta{metablk_name} {
+    m_flush_size_multiple = 0;
+    if (f_id == HomeLogStoreMgr::DATA_LOG_FAMILY_IDX) {
+        m_flush_size_multiple = HS_DYNAMIC_CONFIG(logstore->flush_size_multiple_data_logdev);
+    } else if (f_id == HomeLogStoreMgr::CTRL_LOG_FAMILY_IDX) {
+        m_flush_size_multiple = HS_DYNAMIC_CONFIG(logstore->flush_size_multiple_ctrl_logdev);
+    }
+    if (m_flush_size_multiple == 0) { m_flush_size_multiple = HS_STATIC_CONFIG(drive_attr.phys_page_size); }
+    THIS_LOGDEV_LOG(INFO, "Initializing logdev with flush size multiple={}", m_flush_size_multiple);
     set_flush_status(false);
 }
+
 LogDev::~LogDev() = default;
 
 void LogDev::meta_blk_found(meta_blk* const mblk, const sisl::byte_view buf, const size_t size) {
@@ -36,7 +45,7 @@ void LogDev::start(const bool format, logdev_blkstore_t* blk_store) {
     m_blkstore = blk_store;
     m_hb = HomeStoreBase::safe_instance();
     for (uint32_t i = 0; i < max_log_group; ++i) {
-        m_log_group_pool[i].start();
+        m_log_group_pool[i].start(m_flush_size_multiple);
     }
     m_log_records = std::make_unique< sisl::StreamTracker< log_record > >();
     m_stopped = false;
@@ -106,7 +115,7 @@ void LogDev::stop() {
 }
 
 void LogDev::do_load(const off_t device_cursor) {
-    log_stream_reader lstream{device_cursor, m_blkstore};
+    log_stream_reader lstream{device_cursor, m_blkstore, m_flush_size_multiple};
     logid_t loaded_from{-1};
 
     off_t group_dev_offset;
@@ -190,7 +199,7 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
     // First read the offset and read the log_group. Then locate the log_idx within that and get the actual data
     // Read about 4K of buffer
     if (!read_buf) {
-        read_buf = sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logread >::make_sized(log_record::flush_boundary(),
+        read_buf = sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logread >::make_sized(m_flush_size_multiple,
                                                                                           initial_read_size);
     }
     auto* rbuf{read_buf.get()};

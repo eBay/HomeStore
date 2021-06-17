@@ -90,19 +90,15 @@ struct log_record {
     log_record& operator=(log_record&&) noexcept = delete;
     ~log_record() = default;
 
-    [[nodiscard]] size_t inlined_size() const {
-        return sizeof(serialized_log_record) + (is_inlineable() ? data.size : 0);
-    }
     [[nodiscard]] size_t serialized_size() const { return sizeof(serialized_log_record) + data.size; }
-    [[nodiscard]] bool is_inlineable() const {
+    [[nodiscard]] bool is_inlineable(const uint64_t flush_size_multiple) const {
         // Need inlining if size is smaller or size/buffer is not in dma'ble boundary.
-        return (is_size_inlineable(data.size) ||
-                ((reinterpret_cast< uintptr_t >(data.bytes) % flush_boundary()) != 0) || !data.aligned);
+        return (is_size_inlineable(data.size, flush_size_multiple) ||
+                ((reinterpret_cast< uintptr_t >(data.bytes) % flush_size_multiple) != 0) || !data.aligned);
     }
 
-    [[nodiscard]] static size_t flush_boundary() { return HS_STATIC_CONFIG(drive_attr.phys_page_size); }
-    [[nodiscard]] static bool is_size_inlineable(const size_t sz) {
-        return ((sz < HS_DYNAMIC_CONFIG(logstore.optimal_inline_data_size)) || ((sz % flush_boundary()) != 0));
+    [[nodiscard]] static bool is_size_inlineable(const size_t sz, const uint64_t flush_size_multiple) {
+        return ((sz < HS_DYNAMIC_CONFIG(logstore.optimal_inline_data_size)) || ((sz % flush_size_multiple) != 0));
     }
 
     [[nodiscard]] static size_t serialized_size(const uint32_t sz) { return sizeof(serialized_log_record) + sz; }
@@ -226,7 +222,7 @@ public:
     LogGroup& operator=(LogGroup&&) noexcept = delete;
     ~LogGroup() = default;
 
-    void start();
+    void start(const uint64_t flush_size_multiple);
     void stop();
     void reset(const uint32_t max_records);
     void create_overflow_buf(const uint32_t min_needed);
@@ -268,6 +264,7 @@ private:
     int64_t m_flush_log_idx_upto;
     off_t m_log_dev_offset;
 
+    uint64_t m_flush_multiple_size{0};
     Clock::time_point m_flush_finish_time;            // Time at which flush is completed
     Clock::time_point m_post_flush_msg_rcvd_time;     // Time at which flush done message delivered
     Clock::time_point m_post_flush_process_done_time; // Time at which entire log group cb is called
@@ -488,7 +485,7 @@ private:
 
 class log_stream_reader {
 public:
-    log_stream_reader(const off_t device_cursor, logdev_blkstore_t* store);
+    log_stream_reader(const off_t device_cursor, logdev_blkstore_t* store, const uint64_t min_read_size);
     log_stream_reader(const log_stream_reader&) = delete;
     log_stream_reader& operator=(const log_stream_reader&) = delete;
     log_stream_reader(log_stream_reader&&) noexcept = delete;
@@ -508,6 +505,7 @@ private:
     off_t m_first_group_cursor;
     off_t m_cur_read_bytes{0};
     crc32_t m_prev_crc{0};
+    uint64_t m_read_size_multiple;
 };
 
 enum log_dump_verbosity : uint8_t { CONTENT, HEADER };
@@ -687,6 +685,12 @@ public:
     void get_status(const int verbosity, nlohmann::json& out_json) const;
     bool flush_if_needed();
 
+    [[nodiscard]] bool is_aligned_buf_needed(const size_t size) const {
+        return (log_record::is_size_inlineable(size, m_flush_size_multiple) == false);
+    }
+
+    uint64_t get_flush_size_multiple() const { return m_flush_size_multiple; }
+
 private:
     [[nodiscard]] LogGroup* make_log_group(const uint32_t estimated_records) {
         m_log_group_idx = !m_log_group_idx;
@@ -742,6 +746,7 @@ private:
     std::vector< flush_blocked_callback >* m_block_flush_q{nullptr};
 
     void* m_sb_cookie{nullptr};
+    uint64_t m_flush_size_multiple{0};
 
     // Pool for creating log group
     LogGroup m_log_group_pool[max_log_group];
