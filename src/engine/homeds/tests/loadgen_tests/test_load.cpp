@@ -655,6 +655,9 @@ int main(int argc, char* argv[]) {
     same_value_gen = true;
 #endif
 
+    /* disable the watch dog timer for this testing */
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.generic.cp_watchdog_timer_sec = 50000; });
+    HS_SETTINGS_FACTORY().save();
     if (SDS_OPTIONS.count("input-files")) {
         for (auto const& path : SDS_OPTIONS["input-files"].as< std::vector< std::string > >()) {
             parameters.file_names.push_back(path);
