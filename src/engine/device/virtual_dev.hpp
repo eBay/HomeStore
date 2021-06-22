@@ -1079,6 +1079,7 @@ public:
 
         HS_LOG(TRACE, device, "Writing in device: {}, offset = {}", pdev->get_dev_id(), dev_offset);
 
+        // return bytes written already verified to be equal to size by lower level;
         do_pwritev_internal(pdev, chunk, iov, iovcnt, size, dev_offset, req);
     }
 
@@ -1385,9 +1386,7 @@ private:
                     j.update(chunk->get_blk_allocator()->get_status(log_level));
                 }
             }
-        } catch (const std::exception& e) {
-            LOGERROR("exception happened {}", e.what());
-        }
+        } catch (const std::exception& e) { LOGERROR("exception happened {}", e.what()); }
         return j;
     }
 

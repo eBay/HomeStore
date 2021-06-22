@@ -71,6 +71,7 @@ private:
     meta_blk_sb* m_ssb{nullptr};                          // meta super super blk;
     sisl::blob m_compress_info;
     MetablkMetrics m_metrics;
+    bool m_inited{false};
 
 public:
     MetaBlkMgr(const char* const name = "MetaBlkStore");

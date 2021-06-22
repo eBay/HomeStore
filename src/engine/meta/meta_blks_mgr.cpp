@@ -50,7 +50,10 @@ void MetaBlkMgr::alloc_compress_buf(const size_t size) {
 
 void MetaBlkMgr::fake_reboot() { s_instance = std::make_unique< MetaBlkMgr >(); }
 
-void MetaBlkMgr::del_instance() { s_instance.reset(); }
+void MetaBlkMgr::del_instance() {
+    LOGINFO("Deleting meta blk mgr instance. ");
+    s_instance.reset();
+}
 
 uint64_t MetaBlkMgr::meta_blk_context_sz() const { return get_page_size() - META_BLK_HDR_MAX_SZ; }
 
@@ -68,6 +71,7 @@ MetaBlkMgr::~MetaBlkMgr() {
         std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
         m_sub_info.clear();
     }
+    LOGINFO("Deleting m_ssb instance. ");
     hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(m_ssb), sisl::buftag::metablk);
     free_compress_buf();
 }
@@ -138,8 +142,13 @@ void MetaBlkMgr::load_ssb(const sb_blkstore_blob* const blob) {
 
     read(bid, static_cast< void* >(m_ssb), get_page_size());
 
-    // verify magic
-    HS_DEBUG_ASSERT_EQ(m_ssb->magic, META_BLK_SB_MAGIC);
+    LOGINFO("Successfully loaded meta ssb from disk: {}", m_ssb->to_string());
+
+    HS_RELEASE_ASSERT_EQ(m_ssb->magic, META_BLK_SB_MAGIC);
+    HS_RELEASE_ASSERT_EQ(m_ssb->bid.is_valid(), true);
+    HS_RELEASE_ASSERT_EQ(m_ssb->bid.to_integer(), bid.to_integer());
+    HS_RELEASE_ASSERT_EQ(m_ssb->next_bid.is_valid(), true);
+    m_inited = true;
 }
 
 void MetaBlkMgr::set_migrated() {
@@ -153,6 +162,7 @@ bool MetaBlkMgr::migrated() {
 }
 
 void MetaBlkMgr::init_ssb() {
+    std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     BlkId bid;
     alloc_meta_blk(bid);
     HS_LOG(INFO, metablk, "allocated ssb blk: {}", bid.to_string());
@@ -165,17 +175,15 @@ void MetaBlkMgr::init_ssb() {
     m_ssb = reinterpret_cast< meta_blk_sb* >(hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::metablk));
     std::memset(static_cast< void* >(m_ssb), 0, get_page_size());
 
-    {
-        std::lock_guard< decltype(m_meta_mtx) > lk{m_meta_mtx};
-        m_last_mblk_id->invalidate();
-        m_ssb->next_bid.invalidate();
-        m_ssb->magic = META_BLK_SB_MAGIC;
-        m_ssb->version = META_BLK_SB_VERSION;
-        m_ssb->migrated = false;
-        m_ssb->bid = bid;
+    m_last_mblk_id->invalidate();
+    m_ssb->next_bid.invalidate();
+    m_ssb->magic = META_BLK_SB_MAGIC;
+    m_ssb->version = META_BLK_SB_VERSION;
+    m_ssb->migrated = false;
+    m_ssb->bid = bid;
 
-        write_ssb();
-    }
+    write_ssb();
+    m_inited = true;
 }
 
 // m_meta_lock should be while calling this function;
@@ -188,6 +196,12 @@ void MetaBlkMgr::write_ssb() {
     try {
         m_sb_blk_store->write(m_ssb->bid, iov.data(), static_cast< int >(iov.size()));
     } catch (std::exception& e) { HS_RELEASE_ASSERT(false, "exception happen during write {}", e.what()); }
+
+    LOGINFO("Successfully write m_ssb to disk: {}", m_ssb->to_string());
+
+    HS_RELEASE_ASSERT_EQ(m_ssb->magic, META_BLK_SB_MAGIC);
+    HS_RELEASE_ASSERT_EQ(m_ssb->version, META_BLK_SB_VERSION);
+    HS_RELEASE_ASSERT_EQ(m_ssb->bid.is_valid(), true);
 }
 
 void MetaBlkMgr::scan_meta_blks() {
@@ -331,6 +345,7 @@ void MetaBlkMgr::register_handler(const meta_sub_type type, const meta_blk_found
 void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* const context_data, const uint64_t sz,
                             void*& cookie) {
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
+    HS_RELEASE_ASSERT_EQ(m_inited, true, "accessing metablk store before init is not allowed.");
     HS_RELEASE_ASSERT_LT(type.length(), MAX_SUBSYS_TYPE_LEN, "type len: {} should not exceed len: {}", type.length(),
                          MAX_SUBSYS_TYPE_LEN);
     // not allowing add sub sb before registration
@@ -720,9 +735,14 @@ void MetaBlkMgr::_cookie_sanity_check(const void* const cookie) const {
 // 3. free old ovf_bid if there is any
 //
 void MetaBlkMgr::update_sub_sb(const void* const context_data, const uint64_t sz, void*& cookie) {
+    {
+        std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+        HS_RELEASE_ASSERT_EQ(m_inited, true, "accessing metablk store before init is not allowed.");
+    }
+
 #ifdef _PRERELEASE
     if (HS_DYNAMIC_CONFIG(generic.sanity_check_level)) {
-        static std::atomic< uint32_t > skip_cnt = 0;
+        static std::atomic< uint32_t > skip_cnt{0};
         if (skip_cnt++ >= HS_DYNAMIC_CONFIG(metablk.sanity_check_interval)) {
             skip_cnt = 0;
             sanity_check(true /* check_ovf_chain */);
@@ -782,6 +802,7 @@ std::error_condition MetaBlkMgr::remove_sub_sb(void* const cookie) {
     cookie_sanity_check(cookie);
 
     std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+    HS_RELEASE_ASSERT_EQ(m_inited, true, "accessing metablk store before init is not allowed.");
     meta_blk* const rm_blk{static_cast< meta_blk* >(cookie)};
     const BlkId rm_bid{rm_blk->hdr.h.bid};
     const auto type{rm_blk->hdr.h.type};
@@ -1121,6 +1142,7 @@ void MetaBlkMgr::recover(const bool do_comp_cb) {
 //
 void MetaBlkMgr::read_sub_sb(const meta_sub_type type) {
     std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+    HS_RELEASE_ASSERT_EQ(m_inited, true, "accessing metablk store before init is not allowed.");
     const auto it_s{m_sub_info.find(type)};
     HS_RELEASE_ASSERT_EQ(it_s != std::end(m_sub_info), true,
                          "Unregistered client [type={}], need to register fistly before read", type);
@@ -1188,8 +1210,10 @@ bool MetaBlkMgr::m_self_recover{false};
 
 // do sanity check on meta ssb;
 bool MetaBlkMgr::ssb_sanity_check() const {
-    // TODO: cross check with blkid written to blkstore's vb_context: m_sb_blk_store->get_vb_context;
-    HS_RELEASE_ASSERT_EQ(m_ssb->bid.is_valid(), true);
+    if (m_ssb->bid.is_valid() == false) {
+        LOGINFO("Detected corrupted meta ssb: {}", m_ssb->to_string());
+        HS_RELEASE_ASSERT_EQ(m_ssb->bid.is_valid(), true);
+    }
 
     auto ssb_blk = reinterpret_cast< meta_blk_sb* >(hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::metablk));
     std::memset(static_cast< void* >(ssb_blk), 0, get_page_size());
@@ -1200,6 +1224,7 @@ bool MetaBlkMgr::ssb_sanity_check() const {
     HS_RELEASE_ASSERT_EQ(ssb_blk->bid.to_integer(), m_ssb->bid.to_integer());
 
     hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(ssb_blk), sisl::buftag::metablk);
+
     return true;
 }
 
@@ -1284,6 +1309,7 @@ bool MetaBlkMgr::sanity_check(const bool check_ovf_chain) {
 }
 
 nlohmann::json MetaBlkMgr::get_status(const int log_level) {
+    LOGINFO("Gettting status with log_level: {}", log_level);
     std::string dump_dir = "/tmp/dump_meta";
     bool can_dump_to_file = false;
     const uint64_t total_free = 0;
