@@ -118,7 +118,6 @@ void Volume::init() {
     bool init = false;
     vol_sb_hdr* sb{nullptr};
     m_max_vol_io_size = HS_STATIC_CONFIG(engine.max_vol_io_size);
-    m_write_cache_enabled = HS_DYNAMIC_CONFIG(generic.write_cache_enabled);
 
     /* add this volume in home blks */
     if (m_sb_buf == nullptr) {
@@ -280,12 +279,12 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
             // Issue child request
             // store blkid which is used later to create journal entry
             vreq->push_blkid(bid[i]);
-            if (std::holds_alternative< volume_req::MemVecData >(vreq->data)) {
+            if (vreq->use_cache()) {
                 // managed memory write
                 const auto& mem_vec{std::get< volume_req::MemVecData >(vreq->data)};
                 boost::intrusive_ptr< BlkBuffer > bbuf = m_hb->get_data_blkstore()->write(
                     vc_req->bid, mem_vec, data_offset, boost::static_pointer_cast< blkstore_req< BlkBuffer > >(vc_req),
-                    m_write_cache_enabled /* use cache */);
+                    true /* use cache */);
 
                 // update checksums which must be done in page size increments
                 sisl::blob outb{};
@@ -568,24 +567,40 @@ void Volume::fault_containment() {
 
 void Volume::verify_csum(const volume_req_ptr& vreq) {
     uint32_t csum_indx = 0;
-    for (auto& info : vreq->read_buf()) {
-        auto offset = info.offset;
-        auto size = info.size;
-        auto buf = info.buf;
-        while (size != 0) {
-            sisl::blob b = VolInterface::get_instance()->at_offset(buf, offset);
-            for (uint32_t size_read = 0; size_read < b.size && size != 0; size_read += get_page_size()) {
-                uint16_t csum = crc16_t10dif(init_crc_16, b.bytes + size_read, get_page_size());
+    if (vreq->use_cache()) {
+        for (const auto& info : vreq->read_buf()) {
+            auto offset = info.offset;
+            auto size = info.size;
+            auto buf = info.buf;
+            while (size != 0) {
+                const sisl::blob b = VolInterface::get_instance()->at_offset(buf, offset);
+                for (uint32_t size_read{0}; size_read < b.size && size != 0; size_read += get_page_size()) {
+                    const uint16_t csum = crc16_t10dif(init_crc_16, b.bytes + size_read, get_page_size());
 
-                size -= get_page_size();
-                offset += get_page_size();
+                    size -= get_page_size();
+                    offset += get_page_size();
+                    if (vreq->csum_list[csum_indx] != csum) {
+                        THIS_VOL_LOG(ERROR, volume, vreq, "crc mismatch at offset: {}, vreq->crc: {}, csum: {}", offset,
+                                     vreq->csum_list[csum_indx], csum);
+                        fault_containment();
+                    }
+                    ++csum_indx;
+                }
+            }
+        }
+    } else {
+        const std::vector< iovec >& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
+        for (const auto& iov : iovecs) {
+            const uint64_t size{static_cast< uint64_t >(iov.iov_len)};
+            for (uint32_t size_read{0}; size_read < size; size_read += get_page_size()) {
+                const uint16_t csum =
+                    crc16_t10dif(init_crc_16, static_cast< uint8_t* >(iov.iov_base) + size_read, get_page_size());
                 if (vreq->csum_list[csum_indx] != csum) {
-                    THIS_VOL_LOG(ERROR, volume, vreq, "crc mismatch at offset: {}, vreq->crc: {}, csum: {}", offset,
+                    THIS_VOL_LOG(ERROR, volume, vreq, "crc mismatch at offset: {}, vreq->crc: {}, csum: {}", size_read,
                                  vreq->csum_list[csum_indx], csum);
                     fault_containment();
-                } else {
-                    csum_indx++;
                 }
+                ++csum_indx;
             }
         }
     }
@@ -642,7 +657,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
 
             while (next_start_lba < start_lba) {
                 const auto blob{m_only_in_mem_buff->at_offset(0)};
-                if (!std::holds_alternative< volume_req::IoVecData >(vreq->data)) {
+                if (vreq->use_cache()) {
                     vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
                 } else {
                     // scatter/gather read
@@ -664,7 +679,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
 
             // Read data
             const auto sz{get_page_size() * mk.get_n_lba()};
-            if (std::holds_alternative< volume_req::IoVecData >(vreq->data)) {
+            if (!vreq->use_cache()) {
                 // scatter/gather read
                 const BlkId read_blkid{ve->get_offset_blkid(m_blks_per_lba)};
                 auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
@@ -687,7 +702,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
         const lba_t req_end_lba = mapping::get_end_lba(vreq->lba(), vreq->nlbas());
         while (next_start_lba <= req_end_lba) {
             const auto blob{m_only_in_mem_buff->at_offset(0)};
-            if (!std::holds_alternative< volume_req::IoVecData >(vreq->data)) {
+            if (vreq->use_cache()) {
                 vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
             } else {
                 // scatter/gather read

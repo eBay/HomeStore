@@ -75,7 +75,7 @@ def normal(num_secs="20000"):
 #  @brief Test using load generator
 def load():
     print("load test started")
-    cmd_opts = "--num_io=100000000000 --num_keys=1000000 --run_time=21600 --gtest_filter=Map*"
+    cmd_opts = "--num_io=100000000000 --num_keys=1000000 --run_time=600 --gtest_filter=Map*"
     subprocess.check_call(dirpath + "test_load " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("load test completed")
 

@@ -261,7 +261,6 @@ private:
     } IoVecTransversal;
 
     blk_count_t m_blks_per_lba{1};
-    bool m_write_cache_enabled = false;
 
 private:
     /* static members */
@@ -653,7 +652,8 @@ private:
     // volume_req() : csum_list(0), alloc_blkid_list(0), fbe_list(0){};
     volume_req(const vol_interface_req_ptr& vi_req) :
             indx_req(vi_req->request_id, vi_req->op_type), iface_req(vi_req), io_start_time(Clock::now()) {
-        if (vi_req->iovecs.empty()) {
+        if (vi_req->use_cache()) {
+            HS_DEBUG_ASSERT(vi_req->iovecs.empty(), "condition not empty");
             // lifetime managed by HomeStore
             if (vi_req->is_write()) {
                 data.emplace< MemVecData >(new homeds::MemVector{
@@ -662,6 +662,10 @@ private:
             }
         } else {
             // used passed in iovecs
+            if (vi_req->iovecs.empty()) {
+                iovec iov = {vi_req->buffer, vol()->get_io_size(nlbas())};
+                vi_req->iovecs.emplace_back(std::move(iov));
+            }
             data.emplace< IoVecData >(vi_req->iovecs);
         }
 

@@ -431,6 +431,7 @@ struct io_req_t : public vol_interface_req {
     virtual ~io_req_t() override {
         iomanager.iobuf_free(validate_buffer);
         const auto req_ptr{static_cast< vol_interface_req* >(this)};
+        if (use_cache()) { return; }
         for (auto& iov : req_ptr->iovecs) {
             iomanager.iobuf_free(static_cast< uint8_t* >(iov.iov_base));
         }
@@ -1393,7 +1394,7 @@ protected:
         const uint64_t page_size{VolInterface::get_instance()->get_page_size(vol)};
         const uint64_t size{nlbas * page_size};
         boost::intrusive_ptr< io_req_t > vreq{};
-        if (!tcfg.write_iovec) {
+        if (tcfg.write_cache) {
             uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
             HS_ASSERT_NOTNULL(RELEASE, wbuf);
 
@@ -1402,18 +1403,29 @@ protected:
             vreq = boost::intrusive_ptr< io_req_t >(
                 new io_req_t(vinfo, Op_type::WRITE, wbuf, lba, nlbas, tcfg.verify_csum(), tcfg.write_cache));
         } else {
+            static bool send_iovec = true;
             std::vector< iovec > iovecs{};
-            for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
-                uint8_t* const wbuf{iomanager.iobuf_alloc(512, page_size)};
+            if (send_iovec) {
+                for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
+                    uint8_t* const wbuf{iomanager.iobuf_alloc(512, page_size)};
+                    HS_ASSERT_NOTNULL(RELEASE, wbuf);
+                    iovec iov{static_cast< void* >(wbuf), static_cast< size_t >(page_size)};
+                    iovecs.emplace_back(std::move(iov));
+
+                    populate_buf(wbuf, page_size, lba + lba_num, vinfo.get());
+                }
+
+                vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, Op_type::WRITE, std::move(iovecs), lba,
+                                                                     nlbas, tcfg.verify_csum(), tcfg.write_cache));
+            } else {
+                uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
+                populate_buf(wbuf, size, lba, vinfo.get());
                 HS_ASSERT_NOTNULL(RELEASE, wbuf);
-                iovec iov{static_cast< void* >(wbuf), static_cast< size_t >(page_size)};
-                iovecs.emplace_back(std::move(iov));
 
-                populate_buf(wbuf, page_size, lba + lba_num, vinfo.get());
+                vreq = boost::intrusive_ptr< io_req_t >(
+                    new io_req_t(vinfo, Op_type::WRITE, wbuf, lba, nlbas, tcfg.verify_csum(), tcfg.write_cache));
             }
-
-            vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, Op_type::WRITE, std::move(iovecs), lba, nlbas,
-                                                                 tcfg.verify_csum(), tcfg.write_cache));
+            send_iovec = !send_iovec;
         }
         vreq->cookie = static_cast< void* >(this);
 
@@ -1459,20 +1471,28 @@ protected:
                                                        const bool sync = false) {
         const uint64_t page_size{VolInterface::get_instance()->get_page_size(vol)};
         boost::intrusive_ptr< io_req_t > vreq{};
-        if (!tcfg.read_iovec) {
+        if (tcfg.read_cache) {
             vreq = boost::intrusive_ptr< io_req_t >(
                 new io_req_t{vinfo, Op_type::READ, nullptr, lba, nlbas, tcfg.verify_csum(), tcfg.read_cache, sync});
         } else {
-            std::vector< iovec > iovecs{};
-            for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
-                uint8_t* const rbuf{iomanager.iobuf_alloc(512, page_size)};
-                HS_ASSERT_NOTNULL(RELEASE, rbuf);
-                iovec iov{static_cast< void* >(rbuf), static_cast< size_t >(page_size)};
-                iovecs.emplace_back(std::move(iov));
-            }
+            static bool send_iovec{true};
+            if (send_iovec) {
+                std::vector< iovec > iovecs{};
+                for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
+                    uint8_t* const rbuf{iomanager.iobuf_alloc(512, page_size)};
+                    HS_ASSERT_NOTNULL(RELEASE, rbuf);
+                    iovec iov{static_cast< void* >(rbuf), static_cast< size_t >(page_size)};
+                    iovecs.emplace_back(std::move(iov));
+                }
 
-            vreq = boost::intrusive_ptr< io_req_t >(new io_req_t{vinfo, Op_type::READ, std::move(iovecs), lba, nlbas,
-                                                                 tcfg.verify_csum(), tcfg.read_cache, sync});
+                vreq = boost::intrusive_ptr< io_req_t >(new io_req_t{vinfo, Op_type::READ, std::move(iovecs), lba,
+                                                                     nlbas, tcfg.verify_csum(), tcfg.read_cache, sync});
+            } else {
+                uint8_t* const rbuf{iomanager.iobuf_alloc(512, nlbas * page_size)};
+                vreq = boost::intrusive_ptr< io_req_t >(
+                    new io_req_t{vinfo, Op_type::READ, rbuf, lba, nlbas, tcfg.verify_csum(), tcfg.read_cache, sync});
+            }
+            send_iovec = !send_iovec;
         }
         vreq->cookie = static_cast< void* >(this);
 
@@ -1582,7 +1602,7 @@ protected:
         uint64_t total_size_read{0};
         uint64_t total_size_read_csum{0};
         const uint32_t size_read{tcfg.vol_page_size};
-        if (!tcfg.read_iovec) {
+        if (tcfg.read_cache) {
             for (auto& info : vol_req->read_buf_list) {
                 uint32_t offset{static_cast< uint32_t >(info.offset)};
                 uint64_t size{info.size};
@@ -2058,8 +2078,8 @@ SDS_OPTION_GROUP(
      "0 or 1"),
     (p_volume_size, "", "p_volume_size", "p_volume_size", ::cxxopts::value< uint32_t >()->default_value("60"),
      "0 to 200"),
-    (write_cache, "", "write_cache", "write cache", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
-    (read_cache, "", "read_cache", "read cache", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
+    (write_cache, "", "write_cache", "write cache", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+    (read_cache, "", "read_cache", "read cache", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (write_iovec, "", "write_iovec", "write iovec(s)", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (read_iovec, "", "read_iovec", "read iovec(s)", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (batch_completion, "", "batch_completion", "batch completion", ::cxxopts::value< bool >()->default_value("false"),
