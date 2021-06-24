@@ -235,6 +235,10 @@ public:
      */
     virtual vol_state get_state(VolumePtr vol) override;
 
+    virtual void
+    register_status_cb(const std::string& module,
+                       const std::function< nlohmann::json(const int verbosity_level) > get_status_cb) override;
+
     virtual void print_tree(const VolumePtr& vol, bool chksum = true) override;
     virtual bool verify_tree(const VolumePtr& vol) override;
     virtual void print_node(const VolumePtr& vol, uint64_t blkid, bool chksum = true) override;

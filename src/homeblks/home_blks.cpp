@@ -767,6 +767,11 @@ std::error_condition HomeBlks::remove_volume_internal(const boost::uuids::uuid& 
 
 vol_state HomeBlks::get_state(VolumePtr vol) { return vol->get_state(); }
 
+void HomeBlks::register_status_cb(const std::string& module,
+                                  const std::function< nlohmann::json(const int verbosity_level) > get_status_cb) {
+    status_mgr()->register_status_cb(module, get_status_cb);
+}
+
 bool HomeBlks::fix_tree(VolumePtr vol, bool verify) { return vol->fix_mapping_btree(verify); }
 
 void HomeBlks::call_multi_completions() {
