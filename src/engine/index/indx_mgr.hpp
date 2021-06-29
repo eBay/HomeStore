@@ -712,6 +712,10 @@ private:
     sisl::byte_array write_cp_unmap_sb(void* unmap_meta_blk_cntx, const indx_req_ptr& ireq);
     sisl::byte_array write_cp_unmap_sb(void* unmap_meta_blk_cntx, const uint32_t key_size, const seq_id_t seq_id,
                                        const void* key, homeds::btree::BtreeQueryCursor& unmap_btree_cur);
+
+    void alloc_on_realtime(const std::vector< BlkId >& blkid_list, const indx_req_ptr& ireq);
+    void free_on_realtime(const std::vector< Free_Blk_Entry >& fbe_list, const indx_req_ptr& ireq);
+    bool free_on_realtime(const BlkId& bid) const;
 };
 
 /*************************************************** indx request ***********************************/
@@ -783,6 +787,8 @@ public:
         unmap_btree_cur.m_last_key = std::move(active_btree_cur.m_last_key);
         unmap_btree_cur.m_locked_nodes = std::move(active_btree_cur.m_locked_nodes);
     }
+
+    virtual std::string to_string() const = 0;
 
 public:
     bool resource_full_check = false; // we don't return error for all ios. we set it for trim,

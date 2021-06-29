@@ -521,6 +521,10 @@ void IndxMgr::io_replay() {
                 auto size = free_blk(nullptr, icp->io_free_blkid_list, fbe, true);
                 HS_ASSERT_CMP(DEBUG, size, >, 0);
 
+                // release on realtime bitmap;
+                auto ret = free_on_realtime(fbe.get_free_blkid());
+                HS_RELEASE_ASSERT(ret, "fail to free on realtime bm");
+
                 if (hdr->cp_id > m_last_cp_sb.icp_sb.active_cp_id) {
                     /* TODO: we update size in superblock with each checkpoint. Ideally it
                      * has to be updated only for blk alloc checkpoint.
@@ -904,6 +908,18 @@ void IndxMgr::truncate(const indx_cp_ptr& icp) {
 
 indx_tbl* IndxMgr::get_active_indx() { return m_active_tbl; }
 
+bool IndxMgr::free_on_realtime(const BlkId& bid) const { return m_hs->get_data_blkstore()->free_on_realtime(bid); }
+
+void IndxMgr::free_on_realtime(const std::vector< Free_Blk_Entry >& fbe_list, const indx_req_ptr& ireq) {
+    for (auto& fbe : fbe_list) {
+        auto ret = free_on_realtime(fbe.get_free_blkid());
+        if (!ret) {
+            LOGERROR("io: {}", ireq->to_string());
+            HS_RELEASE_ASSERT(false, "free failed on realtime bitmap.");
+        }
+    }
+}
+
 void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
     HS_ASSERT(DEBUG, ld_key.is_valid(), "key is invalid");
     auto ireq = indx_req_ptr((indx_req*)lreq->cookie, false); // Turn it back to smart ptr before doing callback.
@@ -923,6 +939,9 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
          * partial writes. We are not freeing it in cache right away. There is no reason to not do it. We are not
          * setting it in disk bitmap so in next reboot it will be available to use.
          */
+
+        /* free blkids in real time bm */
+        free_on_realtime(ireq->indx_fbe_list, ireq);
 
         for (uint32_t i = 0; i < ireq->indx_alloc_blkid_list.size(); ++i) {
             m_hs->get_data_blkstore()->reserve_blk(ireq->indx_alloc_blkid_list[i]);

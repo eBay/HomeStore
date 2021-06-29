@@ -54,14 +54,17 @@ private:
     blk_cap_t m_capacity;
     blk_cap_t m_blks_per_portion;
     std::string m_unique_name;
-    bool m_auto_recovery = false;
+    bool m_auto_recovery{false};
+    bool m_realtime_bm_on{true}; // only specifically turn off in BlkAlloc Test;
 
 public:
-    BlkAllocConfig(const uint32_t blk_size, const uint64_t size, const std::string& name = "") :
+    BlkAllocConfig(const uint32_t blk_size, const uint64_t size, const std::string& name = "",
+                   const bool realtime_bm_on = true) :
             m_blk_size{blk_size},
             m_capacity{static_cast< blk_cap_t >(size / blk_size)},
             m_blks_per_portion{std::min(HS_DYNAMIC_CONFIG(blkallocator.num_blks_per_portion), m_capacity)},
-            m_unique_name{name} {}
+            m_unique_name{name},
+            m_realtime_bm_on{realtime_bm_on} {}
 
     BlkAllocConfig(const BlkAllocConfig&) = default;
     BlkAllocConfig(BlkAllocConfig&&) noexcept = delete;
@@ -202,6 +205,13 @@ public:
         }
         m_auto_recovery = cfg.get_auto_recovery();
         m_disk_bm = std::make_unique< sisl::Bitset >(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
+
+        if (!HS_DYNAMIC_CONFIG(generic.sanity_check_level_non_hotswap)) { m_cfg.m_realtime_bm_on = false; }
+
+        if (realtime_bm_on()) {
+            m_realtime_bm =
+                std::make_unique< sisl::Bitset >(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
+        }
         // NOTE:  Blocks per portion must be modulo word size so locks do not fall on same word
         assert(m_cfg.get_blks_per_portion() % m_disk_bm->word_size() == 0);
     }
@@ -214,6 +224,8 @@ public:
 
     [[nodiscard]] sisl::Bitset* get_disk_bm() { return m_disk_bm.get(); }
     [[nodiscard]] const sisl::Bitset* get_disk_bm_const() const { return m_disk_bm.get(); };
+    [[nodiscard]] sisl::Bitset* get_realtime_bm() { return m_realtime_bm.get(); }
+    [[nodiscard]] const sisl::Bitset* get_realtime_bm() const { return m_realtime_bm.get(); }
 
     void set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm) {
         BLKALLOC_LOG(INFO, "Persistent bitmap of size={} recovered", recovered_bm->size());
@@ -286,8 +298,70 @@ public:
             }
         }
         rcu_read_unlock();
+
         return BlkAllocStatus::SUCCESS;
-    };
+    }
+
+    BlkAllocStatus alloc_on_realtime(const BlkId& b) {
+        if (!realtime_bm_on()) { return BlkAllocStatus::SUCCESS; }
+
+        if (!m_auto_recovery && m_inited) { return BlkAllocStatus::FAILED; }
+        BlkAllocPortion* const portion{blknum_to_portion(b.get_blk_num())};
+        {
+            auto lock{portion->portion_auto_lock()};
+            if (m_inited) {
+                if (!get_realtime_bm()->is_bits_reset(b.get_blk_num(), b.get_nblks())) {
+                    BLKALLOC_LOG(ERROR, "bit not reset {} nblks {} chunk number {}", b.get_blk_num(), b.get_nblks(),
+                                 m_chunk_id);
+                    for (uint32_t i = 0; i < b.get_nblks(); ++i) {
+                        if (!get_disk_bm()->is_bits_reset(b.get_blk_num() + i, 1)) {
+                            BLKALLOC_LOG(ERROR, "bit not reset {}", b.get_blk_num() + i);
+                        }
+                    }
+                    BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_reset(b.get_blk_num(), b.get_nblks()),
+                                    "Expected disk bits to reset blk num {} num blks {}", b.get_blk_num(),
+                                    b.get_nblks());
+                }
+            }
+            get_realtime_bm()->set_bits(b.get_blk_num(), b.get_nblks());
+            BLKALLOC_LOG(DEBUG, "realtime blks allocated {} chunk number {}", b.to_string(), m_chunk_id);
+        }
+
+        return BlkAllocStatus::SUCCESS;
+    }
+
+    //
+    // Caller should consume the return value and print context when return false;
+    //
+    [[nodiscard]] bool free_on_realtime(const BlkId& b) {
+        if (!realtime_bm_on()) { return true; }
+
+        /* this api should be called only when auto recovery is enabled */
+        assert(m_auto_recovery);
+        BlkAllocPortion* const portion{blknum_to_portion(b.get_blk_num())};
+        {
+            auto lock{portion->portion_auto_lock()};
+            if (m_inited) {
+                /* During recovery we might try to free the entry which is already freed while replaying the journal,
+                 * This assert is valid only post recovery.
+                 */
+                if (!get_realtime_bm()->is_bits_set(b.get_blk_num(), b.get_nblks())) {
+                    BLKALLOC_LOG(ERROR, "{}, bit not set {} nblks{} chunk number {}", b.to_string(), b.get_blk_num(),
+                                 b.get_nblks(), m_chunk_id);
+                    for (uint32_t i = 0; i < b.get_nblks(); ++i) {
+                        if (!get_realtime_bm()->is_bits_set(b.get_blk_num() + i, 1)) {
+                            BLKALLOC_LOG(ERROR, "bit not set {}", b.get_blk_num() + i);
+                        }
+                    }
+                    return false;
+                }
+            }
+
+            BLKALLOC_LOG(DEBUG, "realtime: free bid: {}", b.to_string());
+            get_realtime_bm()->reset_bits(b.get_blk_num(), b.get_nblks());
+            return true;
+        }
+    }
 
     void free_on_disk(const BlkId& b) {
         /* this api should be called only when auto recovery is enabled */
@@ -300,7 +374,7 @@ public:
                  * This assert is valid only post recovery.
                  */
                 if (!get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks())) {
-                    BLKALLOC_LOG(ERROR, "bit not set {} nblks{} chunk number {}", b.get_blk_num(), b.get_nblks(),
+                    BLKALLOC_LOG(ERROR, "bit not set {} nblks {} chunk number {}", b.get_blk_num(), b.get_nblks(),
                                  m_chunk_id);
                     for (uint32_t i = 0; i < b.get_nblks(); ++i) {
                         if (!get_disk_bm()->is_bits_set(b.get_blk_num() + i, 1)) {
@@ -392,6 +466,8 @@ public:
         return j;
     }
 
+    [[nodiscard]] bool realtime_bm_on() { return m_cfg.m_realtime_bm_on; }
+
 private:
     [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); }
 
@@ -410,6 +486,7 @@ private:
     std::unique_ptr< BlkAllocPortion[] > m_blk_portions;
     std::unique_ptr< sisl::Bitset > m_disk_bm{nullptr};
     std::unique_ptr< sisl::Bitset > m_debug_bm{nullptr};
+    std::unique_ptr< sisl::Bitset > m_realtime_bm{nullptr};
     std::atomic< int64_t > m_alloced_blk_count{0};
     bool m_auto_recovery{false};
 };
@@ -456,7 +533,6 @@ public:
     [[nodiscard]] bool is_suspend() const { return suspend; }
     void suspend_cp() { suspend = true; }
     void resume_cp() { suspend = false; }
-
     void free_blks(const blkid_list_ptr& list) {
         auto it = list->begin(true /* latest */);
         BlkId* bid;

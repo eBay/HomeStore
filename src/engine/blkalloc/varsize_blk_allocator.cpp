@@ -149,6 +149,7 @@ bool VarsizeBlkAllocator::is_blk_alloced(const BlkId& b, const bool use_lock) co
 
 void VarsizeBlkAllocator::inited() {
     m_cache_bm->copy(*(get_disk_bm()));
+    if (realtime_bm_on()) { m_realtime_bm->copy(*(get_disk_bm())); }
     BlkAllocator::inited();
 
     BLKALLOC_LOG(INFO, "VarSizeBlkAllocator initialized loading bitmap of size={} used blks={} from persistent storage",
@@ -275,7 +276,11 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(BlkId& out_blkid) {
     s_ids.clear();
 
     const auto status{alloc(1, blk_alloc_hints{}, s_ids)};
-    if (status == BlkAllocStatus::SUCCESS) { out_blkid = s_ids[0]; }
+    if (status == BlkAllocStatus::SUCCESS) {
+        out_blkid = s_ids[0];
+        // we don't update realtime here;
+        // it is already updated at vector version of alloc;
+    }
     return status;
 }
 
@@ -404,6 +409,12 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_all
 
     if ((status == BlkAllocStatus::SUCCESS) || (status == BlkAllocStatus::PARTIAL)) {
         incr_alloced_blk_count(total_allocated);
+
+        // update real time bitmap
+        for (const auto& b : out_blkids) {
+            alloc_on_realtime(b);
+        }
+
 #ifdef _PRERELEASE
         alloc_sanity_check(total_allocated, hints, out_blkids);
 #endif

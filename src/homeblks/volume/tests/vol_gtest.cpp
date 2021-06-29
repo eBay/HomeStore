@@ -128,6 +128,7 @@ struct TestCfg {
 
     verify_type_t verify_type = verify_type_t::csum;
     load_type_t load_type = load_type_t::random;
+    uint32_t nblks = 100;
     uint32_t flip_set = 0;                 // TODO: change this to enum
     io_flag io_flags = io_flag::DIRECT_IO; // 2: READ_ONLY 1: DIRECT_IO, 0: BUFFERED_IO;
 
@@ -1230,7 +1231,7 @@ protected:
     };
     typedef std::function< io_lba_range_t(void) > LbaGeneratorType;
 
-    io_lba_range_t same_lbas() { return io_lba_range_t{true, 0u, 1u, 100u}; }
+    io_lba_range_t same_lbas() { return io_lba_range_t{true, 0u, 1u, tcfg.nblks}; }
 
     std::shared_ptr< vol_info_t > pick_vol_round_robin(io_lba_range_t& r) {
         r.vol_idx = ++m_cur_vol % tcfg.max_vols;
@@ -1300,7 +1301,7 @@ protected:
                 }
             }
 
-                // check if someone is already doing writes/reads
+            // check if someone is already doing writes/reads
             if (!overlapping_allowed && (ret.num_lbas && vinfo->is_lbas_free(ret.lba, ret.num_lbas))) {
                 vinfo->mark_lbas_busy(ret.lba, ret.num_lbas);
                 if (validate_choice == lba_validate_t::validate) {
@@ -2032,6 +2033,8 @@ SDS_OPTION_GROUP(
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("30"), "seconds"),
     (load_type, "", "load_type", "load_type", ::cxxopts::value< uint32_t >()->default_value("0"),
      "random_write_read:0, same_write_read:1, seq_write:2"),
+    (nblks, "", "nblks", "nblks", ::cxxopts::value< uint32_t >()->default_value("100"),
+     "number of blks to write when load_type is same"),
     (overlapping_allowed, "", "overlapping_allowed", "overlapping_allowed",
      ::cxxopts::value< bool >()->default_value("false"), "true or false"),
     (num_threads, "", "num_threads", "num_threads - default 2 for spdk and 8 for non-spdk",
@@ -2182,7 +2185,11 @@ int main(int argc, char* argv[]) {
         if (mod_init_funcs.size() > 1) { LOGWARN("User want more than one module enabled for testing!"); }
     }
 
-    if (_gcfg.load_type == load_type_t::sequential) { _gcfg.verify_type = verify_type_t::null; }
+    if (_gcfg.load_type == load_type_t::sequential || _gcfg.load_type == load_type_t::same) {
+        _gcfg.verify_type = verify_type_t::null;
+        if (_gcfg.load_type == load_type_t::same) { _gcfg.nblks = SDS_OPTIONS["nblks"].as< uint32_t >(); }
+    }
+
     if (_gcfg.overlapping_allowed) { _gcfg.verify_type = verify_type_t::header; }
 
     if (_gcfg.enable_crash_handler) { sds_logging::install_crash_handler(); }

@@ -587,8 +587,15 @@ struct volume_req : indx_req {
 
     /********** member functions **********/
     std::string to_string() const {
-        return fmt::format("vol_interface_req: req_id={} dir={} outstanding_io_cnt={}", iface_req->request_id,
-                           (is_read_op() ? "R" : "W"), outstanding_io_cnt.get());
+        // get lba and nlbas
+        auto key = j_ent.get_key(j_ent.m_iob.bytes);
+        auto j_key = (journal_key*)(key.first);
+        bool two_cp = (first_hcp) ? true : false;
+
+        return fmt::format("vol_interface_req: req_id={} dir={} outstanding_io_cnt={}, {}, {}, {}, {}, {}, {}, {}",
+                           iface_req->request_id, (is_read_op() ? "R" : "W"), outstanding_io_cnt.get(),
+                           icp->to_string(), request_id, get_seqid(), op_type, static_cast< lba_t >(j_key->lba),
+                           static_cast< lba_count_t >(j_key->nlbas), two_cp);
     }
 
     static volume_req_ptr make(const vol_interface_req_ptr& iface_req) {

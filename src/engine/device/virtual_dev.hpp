@@ -970,6 +970,7 @@ public:
 
     BlkAllocStatus reserve_blk(const BlkId& blkid) {
         PhysicalDevChunk* primary_chunk = m_mgr->get_chunk(blkid.get_chunk_num());
+        HS_LOG(DEBUG, device, "alloc_on_disk: bid {}", blkid.to_string());
         return primary_chunk->get_blk_allocator()->alloc_on_disk(blkid);
     }
 
@@ -1045,6 +1046,11 @@ public:
             assert(false);
             return BlkAllocStatus::FAILED;
         }
+    }
+
+    bool free_on_realtime(const BlkId& b) {
+        PhysicalDevChunk* chunk = m_mgr->get_chunk(b.get_chunk_num());
+        return chunk->get_blk_allocator()->free_on_realtime(b);
     }
 
     void free_blk(const BlkId& b) {

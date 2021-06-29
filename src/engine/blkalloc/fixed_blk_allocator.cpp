@@ -44,9 +44,7 @@ blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion* const portion, const 
     return blk_num;
 }
 
-bool FixedBlkAllocator::is_blk_alloced(const BlkId& b, const bool use_lock) const {
-    return true;
-}
+bool FixedBlkAllocator::is_blk_alloced(const BlkId& b, const bool use_lock) const { return true; }
 
 BlkAllocStatus FixedBlkAllocator::alloc(const blk_count_t nblks, const blk_alloc_hints& hints,
                                         std::vector< BlkId >& out_blkid) {
@@ -56,17 +54,25 @@ BlkAllocStatus FixedBlkAllocator::alloc(const blk_count_t nblks, const blk_alloc
 
     BlkId bid;
     const auto status{alloc(bid)};
-    if (status == BlkAllocStatus::SUCCESS) { out_blkid.push_back(bid); }
+    if (status == BlkAllocStatus::SUCCESS) {
+        out_blkid.push_back(bid);
+        // no need to update real time bm as it is already updated in alloc of single blkid api;
+    }
     return status;
 }
 
 BlkAllocStatus FixedBlkAllocator::alloc(BlkId& out_blkid) {
 #ifdef _PRERELEASE
-    if (homestore_flip->test_flip("fixed_blkalloc_no_blks")) {
+    if (homestore_flip->test_flip("fixed_blkalloc_no_blks")) { return BlkAllocStatus::SPACE_FULL; }
+#endif
+    auto ret = m_blk_q.read(out_blkid);
+    if (ret) {
+        // update real time bitmap;
+        alloc_on_realtime(out_blkid);
+        return BlkAllocStatus::SUCCESS;
+    } else {
         return BlkAllocStatus::SPACE_FULL;
     }
-#endif
-    return m_blk_q.read(out_blkid) ? BlkAllocStatus::SUCCESS : BlkAllocStatus::SPACE_FULL;
 }
 
 void FixedBlkAllocator::free(const std::vector< BlkId >& blk_ids) {

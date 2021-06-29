@@ -352,9 +352,9 @@ public:
         bbuf->set_key(blkid);
 
         // Create a new block of memory for the blocks requested and set the memvec pointer to that
-        const auto size{ blkid.data_size(m_pagesz) };
-        uint8_t* ptr{ hs_utils::iobuf_alloc(size, Buffer::get_buf_tag()) };
-        boost::intrusive_ptr< homeds::MemVector > mvec{ new homeds::MemVector(), true };
+        const auto size{blkid.data_size(m_pagesz)};
+        uint8_t* ptr{hs_utils::iobuf_alloc(size, Buffer::get_buf_tag())};
+        boost::intrusive_ptr< homeds::MemVector > mvec{new homeds::MemVector(), true};
         mvec->set(ptr, size, 0);
         mvec->set_tag(Buffer::get_buf_tag());
         bbuf->set_memvec(mvec, 0, size);
@@ -377,6 +377,8 @@ public:
         m_vdev.free_blk(bid);
         return;
     }
+
+    bool free_on_realtime(const BlkId& b) { return m_vdev.free_on_realtime(b); }
 
     /* Free the block previously allocated. Blkoffset refers to number of blks to skip in the BlkId and
      * nblks refer to the total blks from offset to free.
@@ -564,7 +566,7 @@ public:
         req->blkstore_ref_cnt.increment(1);
         for (auto& missing : missing_mp) {
             // Create a new block of memory for the missing piece
-            uint8_t* ptr{ hs_utils::iobuf_alloc(missing.second, Buffer::get_buf_tag()) };
+            uint8_t* ptr{hs_utils::iobuf_alloc(missing.second, Buffer::get_buf_tag())};
             HS_ASSERT_NOTNULL(RELEASE, ptr, "ptr is null");
 
             COUNTER_INCREMENT(m_metrics, blkstore_cache_miss_size, missing.second);
@@ -645,7 +647,7 @@ public:
 
         for (uint32_t i{0}; i < (nmirrors + 1); ++i) {
             /* create the pointer */
-            uint8_t* const mem_ptr{ hs_utils::iobuf_alloc(bid.data_size(m_pagesz), Buffer::get_buf_tag()) };
+            uint8_t* const mem_ptr{hs_utils::iobuf_alloc(bid.data_size(m_pagesz), Buffer::get_buf_tag())};
 
             /* set the memvec */
             boost::intrusive_ptr< homeds::MemVector > mvec{new homeds::MemVector{}};
@@ -681,9 +683,7 @@ public:
     ssize_t pwrite(const void* const buf, const size_t count, const off_t offset,
                    boost::intrusive_ptr< blkstore_req< Buffer > > req = nullptr) {
         const Clock::time_point blkstore_op_start_time{Clock::now()};
-        if (req) {
-            req->start_time();
-        }
+        if (req) { req->start_time(); }
 
         const auto ret{m_vdev.pwrite(buf, count, offset, req)};
         if (!req || req->isSyncCall) {

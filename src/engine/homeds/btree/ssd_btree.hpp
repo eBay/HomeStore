@@ -58,7 +58,6 @@ public:
     void create_done_store(bnodeid_t m_root_node) {
         auto bid = BlkId(m_root_node);
         THIS_BT_CP_LOG(TRACE, m_first_cp->cp_id, "accumulating root bid: {}", bid.to_string());
-
         m_blkstore->reserve_blk(bid);
     }
 

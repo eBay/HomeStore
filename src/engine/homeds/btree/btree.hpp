@@ -2820,7 +2820,7 @@ private:
             return ret;
         }
 
-        start_of_lock(node, type);
+        _start_of_lock(node, type, fname, line);
         return btree_status_t::success;
     }
 
@@ -2840,7 +2840,7 @@ private:
         }
 
         observe_lock_time(node, LOCKTYPE_READ, time_spent);
-        start_of_lock(node, LOCKTYPE_WRITE);
+        _start_of_lock(node, LOCKTYPE_WRITE, fname, line);
         return btree_status_t::success;
     }
 

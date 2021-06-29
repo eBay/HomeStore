@@ -360,8 +360,9 @@ protected:
 
 public:
     FixedBlkAllocatorTest() : BlkAllocatorTest() {
-        BlkAllocConfig fixed_cfg(4096, static_cast< uint64_t >(m_total_count) * 4096, "");
+        BlkAllocConfig fixed_cfg(4096, static_cast< uint64_t >(m_total_count) * 4096, "", false);
         m_allocator = std::make_unique< FixedBlkAllocator >(fixed_cfg, true, 0);
+        HS_RELEASE_ASSERT_EQ(m_allocator->realtime_bm_on(), false);
     }
     FixedBlkAllocatorTest(const FixedBlkAllocatorTest&) = delete;
     FixedBlkAllocatorTest(FixedBlkAllocatorTest&&) noexcept = delete;
@@ -412,10 +413,11 @@ protected:
 public:
     VarsizeBlkAllocatorTest() : BlkAllocatorTest() {
         HomeStoreDynamicConfig::init_settings_default();
-        VarsizeBlkAllocConfig cfg{4096u, static_cast< uint64_t >(m_total_count) * 4096, ""};
+        VarsizeBlkAllocConfig cfg{4096u, static_cast< uint64_t >(m_total_count) * 4096, "", false};
         cfg.set_phys_page_size(4096);
         cfg.set_auto_recovery(true);
         m_allocator = std::make_unique< VarsizeBlkAllocator >(cfg, true, 0);
+        HS_RELEASE_ASSERT_EQ(m_allocator->realtime_bm_on(), false);
     }
     VarsizeBlkAllocatorTest(const VarsizeBlkAllocatorTest&) = delete;
     VarsizeBlkAllocatorTest(VarsizeBlkAllocatorTest&&) noexcept = delete;
