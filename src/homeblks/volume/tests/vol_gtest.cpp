@@ -232,7 +232,8 @@ public:
     virtual std::string job_name() const = 0;
 
     virtual void start_in_this_thread() {
-        m_status_threads_executing.set_status(job_status_t::running);
+        m_status_threads_executing.xchng_status(job_status_t::not_started, job_status_t::running);
+        if (m_status_threads_executing.get_status() != job_status_t::running) { return; }
         for (uint32_t i = 0; i < mod_tests.size(); ++i) {
             mod_tests[i]->run_start();
         }
@@ -278,12 +279,13 @@ public:
             m_execution_cv.wait(lk, [this] {
                 auto status = m_status_threads_executing.get_status();
                 LOGINFO("status {}", status);
-                if (m_timer_hdl != iomgr::null_timer_handle) {
+                bool cv_status = (((status == job_status_t::stopped) || (status == job_status_t::completed)) &&
+                                  (m_status_threads_executing.count() == 0));
+                if (cv_status && m_timer_hdl != iomgr::null_timer_handle) {
                     iomanager.cancel_timer(m_timer_hdl);
                     m_timer_hdl = iomgr::null_timer_handle;
                 }
-                return (((status == job_status_t::stopped) || (status == job_status_t::completed)) &&
-                        (m_status_threads_executing.count() == 0));
+                return cv_status;
             });
         }
         LOGINFO("Job {} is done executing", job_name());
@@ -293,12 +295,13 @@ public:
         std::unique_lock< std::mutex > lk(m_mutex);
         if (!m_notify_job_done) {
             m_completion_cv.wait(lk, [this] {
-                if (m_timer_hdl != iomgr::null_timer_handle) {
+                bool cv_status = ((m_status_threads_executing.get_status() == job_status_t::completed) &&
+                                  (m_status_threads_executing.count() == 0));
+                if (cv_status && m_timer_hdl != iomgr::null_timer_handle) {
                     iomanager.cancel_timer(m_timer_hdl);
                     m_timer_hdl = iomgr::null_timer_handle;
                 }
-                return ((m_status_threads_executing.get_status() == job_status_t::completed) &&
-                        (m_status_threads_executing.count() == 0));
+                return cv_status;
             });
         }
         LOGINFO("Job {} is completed", job_name());
@@ -1758,16 +1761,20 @@ TEST_F(VolTest, recovery_io_test) {
     tcfg.init = false;
     this->start_homestore();
 
+    LOGINFO("recovery verify started");
     std::unique_ptr< VolVerifyJob > verify_job;
     if (tcfg.pre_init_verify || tcfg.verify_only) {
         verify_job = std::make_unique< VolVerifyJob >(this);
         this->start_job(verify_job.get(), wait_type_t::for_completion);
+        LOGINFO("recovery verify done");
+    } else {
+        LOGINFO("bypassing recovery verify");
     }
 
     std::unique_ptr< VolCreateDeleteJob > cdjob;
     if (tcfg.create_del_with_io || tcfg.delete_with_io) {
         cdjob = std::make_unique< VolCreateDeleteJob >(this);
-        this->start_job(cdjob.get(), wait_type_t::for_execution);
+        this->start_job(cdjob.get(), wait_type_t::no_wait);
     }
 
     this->start_io_job();

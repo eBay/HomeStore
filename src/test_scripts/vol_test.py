@@ -128,17 +128,17 @@ def recovery_nightly_with_create_del(num_iteration=10):
     i = 1
     while i < num_iteration:
         
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --verify_type=3 --abort=1 --flip=1 --remove_file=0 --create_del_with_io=true"
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --verify_type=3 --abort=1 --flip=1 --remove_file=0 --create_del_with_io=true --expect_io_error=1"
         subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
         
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --verify_type=3 --abort=0 --flip=1 --remove_file=0 --create_del_with_io=true"
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --verify_type=3 --abort=0 --flip=1 --remove_file=0 --create_del_with_io=true --expect_io_error=1"
         subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
 
         s = "recovery test with create delete iteration" + repr(i) + "passed" 
         print(s)
         i += 1
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=600 --remove_file=1 --delete_volume=1 --verify_type=2 --create_del_with_io=true --create_del_ops_interval=600"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=600 --remove_file=1 --delete_volume=1 --verify_type=2 --create_del_with_io=true --create_del_ops_interval=600 --expect_io_error=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery test with create delete completed")
 
@@ -279,51 +279,51 @@ def hs_svc_tool():
 
 def vol_create_delete_test():
     # abort during first cp create
-    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --indx_create_first_cp_abort=true --run_time=10000 --max_num_writes=1000000 --num_threads=1"
+    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --indx_create_first_cp_abort=true --run_time=10000 --max_num_writes=1000000 --num_threads=1 --expect_io_error=1"
     subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --delete_volume=0 --run_time=600 --create_del_ops_interval=600 --verify_type=2 "
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --delete_volume=0 --run_time=600 --create_del_ops_interval=600 --verify_type=2 --expect_io_error=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
     print("homestore create first cp test completed")
 
     # abort during vol delete before writing meta blk
-    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_before_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=300 --max_volume=3 --num_threads=1 --verify_type=3"
+    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_before_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=300 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1"
     subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=600 --verify_type=3"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=600 --verify_type=3 --expect_io_error=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
     print("abort during vol delete before writing meta blk test compeleted")
     
     # abort during vol delete after writing meta blk
-    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_after_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=300 --max_volume=3 --num_threads=1 --verify_type=3"
+    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_after_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=300 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1"
     subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=600 --verify_type=3"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=600 --verify_type=3 --expect_io_error=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
     print("abort during vol delete after writing meta blk test compeleted")
     
     # abort during vol delete after freeing data blks
-    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_indx_blks=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=300 --max_volume=3 --num_threads=1 --verify_type=3"
+    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_indx_blks=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=300 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1"
     subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=600 --verify_type=3"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=600 --verify_type=3 --expect_io_error=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
     print("abort during vol delete after freeing data blks")
 
     # abort during vol delete after freeing btree blks
-    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_free_blks_completed=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=300 --max_volume=3 --num_threads=1 --verify_type=3"
+    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_free_blks_completed=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=300 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1"
     subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=600 --verify_type=3"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=600 --verify_type=3 --expect_io_error=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
     print("abort during vol delete after freeing btree blks")
 
     # double crash after vol delete
-    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_before_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=300 --max_volume=3 --num_threads=1 --verify_type=3"
+    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_before_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=300 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1"
     subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.recovery_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_before_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=300 --max_volume=3 --num_threads=1 --verify_type=3"
+    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.recovery_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_before_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=300 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1"
     subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=600 --verify_type=3"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=600 --verify_type=3 --expect_io_error=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
     print("double crash of volume delete compelted")
 
     # run vol delete with for an hour
-    cmd_opts = "--gtest_filter=VolTest.init_io_test --create_del_with_io=true --remove_file=0 --run_time=1200 --create_del_ops_interval=600"
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --create_del_with_io=true --remove_file=0 --run_time=1200 --create_del_ops_interval=600 --expect_io_error=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
     print("init completed")
 
