@@ -441,7 +441,7 @@ private:
                                                        std::numeric_limits< unsigned long long >::max()};
 
         for (uint64_t i{0}; i < size; i += sizeof(uint64_t)) {
-            *reinterpret_cast<uint64_t*>(buf + i) = dist(generator);
+            *reinterpret_cast< uint64_t* >(buf + i) = dist(generator);
         }
     }
 
@@ -628,7 +628,9 @@ private:
 
     uint64_t get_size(const uint64_t n) const { return n * VOL_PAGE_SIZE; }
 
-    uint64_t get_hash(const uint8_t* const bytes) const { return util::Hash64(reinterpret_cast<const char*>(bytes), static_cast<size_t>(VOL_PAGE_SIZE)); }
+    uint64_t get_hash(const uint8_t* const bytes) const {
+        return util::Hash64(reinterpret_cast< const char* >(bytes), static_cast< size_t >(VOL_PAGE_SIZE));
+    }
 
 private:
     std::vector< dev_info > m_device_info;

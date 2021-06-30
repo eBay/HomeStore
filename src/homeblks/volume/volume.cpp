@@ -233,6 +233,7 @@ indx_tbl* Volume::recover_indx_tbl(btree_super_block& sb, btree_cp_sb& cp_info) 
 std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     static thread_local std::vector< BlkId > bid{};
     std::error_condition ret{no_error};
+
     HS_RELEASE_ASSERT_LE(get_io_size(iface_req->nlbas), m_max_vol_io_size, "IO size exceeds max_vol_io_size supported");
 
     auto vreq = volume_req::make(iface_req);
@@ -246,6 +247,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
 
     // sync write is not supported
     VOL_DEBUG_ASSERT_CMP(vreq->is_sync(), ==, false, vreq, "sync not supported");
+
     if (is_offline()) {
         ret = std::make_error_condition(std::errc::resource_unavailable_try_again);
         goto done;
@@ -454,6 +456,8 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
                 verify_csum(vreq);
                 completed = true;
             } else {
+                // set seq id before we write to btree/journal;
+                vreq->set_seq_id();
                 vreq->state = volume_req_state::journal_io;
                 vreq->indx_start_time = Clock::now();
                 auto ireq = boost::static_pointer_cast< indx_req >(vreq);

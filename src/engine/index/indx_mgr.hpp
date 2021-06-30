@@ -63,12 +63,15 @@ struct indx_test_status {
  * | Journal Hdr | alloc_blkid list | free_blk_entry | key | value |
  * ------------------------------------------------------------------
  */
+ENUM(io_state, uint8_t, success, fail);
+
 struct journal_hdr {
     uint32_t alloc_blkid_list_size; // numer of entries
     uint32_t free_blk_entry_size;   // number of entries
     uint32_t key_size;              // actual size in bytes
     uint32_t val_size;              // actual size in bytes
     int64_t cp_id;
+    io_state state; // io state (failed or successed), place holder for future use;
 };
 
 class indx_journal_entry {

@@ -160,7 +160,9 @@ public:
 
         const V& start_value{*(result[0].get())};
         const V& end_value{*(result.back())};
-
+        // update seq id since load test relies on seq id to be set before sending IO, because it use seqid as key to
+        // get hash value;
+        req->set_seq_id();
         req->lastCommited_seqid = req->seqid; // keeping only latest version always
 
         BlkId bid{start_value.get_blkId()};

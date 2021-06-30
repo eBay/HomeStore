@@ -623,6 +623,7 @@ struct volume_req : indx_req {
         lba_count_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         return (sizeof(uint16_t) * active_nlbas_written);
     }
+
     virtual void fill_key(void* mem, uint32_t size) override {
         lba_count_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         assert(size == sizeof(journal_key));
@@ -644,6 +645,7 @@ struct volume_req : indx_req {
             j_csum[i] = csum_list[i];
         }
     }
+
     uint32_t get_io_size() const override {
         lba_count_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         return vol()->get_io_size(active_nlbas_written);
@@ -652,6 +654,11 @@ struct volume_req : indx_req {
     bool is_io_completed() const override {
         lba_count_t active_nlbas_written = mapping::get_nlbas_from_cursor(lba(), active_btree_cur);
         return (active_nlbas_written == nlbas());
+    }
+
+    void set_seq_id() {
+        HS_RELEASE_ASSERT(iface_req->is_write() || iface_req->is_unmap(), "Only expect write/unmap to assign seq id");
+        seqid = iface_req->vol_instance->inc_and_get_seq_id();
     }
 
 private:
@@ -681,7 +688,6 @@ private:
         csum_list.reserve(max_nlbas);
         indx_fbe_list.reserve(max_nlbas);
         alloc_blkid_list.reserve(max_nlbas);
-        if (vi_req->is_write() || vi_req->is_unmap()) { seqid = vi_req->vol_instance->inc_and_get_seq_id(); }
     }
 };
 } // namespace homestore
