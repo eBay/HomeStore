@@ -1055,7 +1055,11 @@ void IndxMgr::do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_
                                 do_remaining_unmap(ireq, unmap_meta_blk_cntx);
                             }));
     } else {
-        if (ret != btree_status_t::success) { ireq->indx_err = btree_write_failed; }
+        if (ret != btree_status_t::success) {
+            ireq->indx_err = (ret == btree_status_t::crc_mismatch ? homestore_error::btree_crc_mismatch
+                                                                  : homestore_error::btree_write_failed);
+        }
+
         m_cp_mgr->attach_cb(hcp, ([this, ireq, unmap_meta_blk_cntx](bool success) {
 #ifdef _PRERELEASE
                                 if (homestore_flip->test_flip("unmap_pre_sb_remove_abort")) {
@@ -1192,10 +1196,14 @@ void IndxMgr::update_indx_internal(const indx_req_ptr& ireq) {
         if (ret == btree_status_t::space_not_avail) {
             THIS_INDX_LOG(INFO, indx_mgr, ireq, "no space available on device");
             ireq->indx_err = std::errc::no_space_on_device;
+        } else if (ret == btree_status_t::crc_mismatch) {
+            ireq->indx_err = homestore_error::btree_crc_mismatch;
         } else {
-            ireq->indx_err = btree_write_failed;
+            ireq->indx_err = homestore_error::btree_write_failed;
         }
     }
+
+    /* XXX: should we skip updating journal in error path ? */
 
     /* Update allocate blkids in indx req */
     m_active_tbl->update_indx_alloc_blkids(ireq);

@@ -125,6 +125,7 @@ struct TestCfg {
     bool is_abort = false;
     bool vol_create_del = false;
     bool overlapping_allowed = false;
+    bool expect_vol_offline{false};
 
     verify_type_t verify_type = verify_type_t::csum;
     load_type_t load_type = load_type_t::random;
@@ -1045,7 +1046,9 @@ private:
         bool expected = false;
         bool desired = true;
         if (vinfo->vol_destroyed.compare_exchange_strong(expected, desired)) {
-            HS_RELEASE_ASSERT_EQ(VolInterface::get_instance()->get_state(vol), vol_state::ONLINE);
+            if (!tcfg.expect_io_error) {
+                HS_RELEASE_ASSERT_EQ(VolInterface::get_instance()->get_state(vol), vol_state::ONLINE);
+            }
             uuid = VolInterface::get_instance()->get_uuid(vinfo->vol);
             /* initialize file hdr */
             init_vol_file_hdr(vinfo->fd);
@@ -1722,6 +1725,30 @@ TEST_F(VolTest, lifecycle_test) {
 
     LOGINFO("Shutdown of homestore is completed, removing files");
     if (tcfg.remove_file) { this->remove_files(); }
+}
+
+TEST_F(VolTest, vol_crc_mismatch_test) {
+    FlipClient* fc = HomeStoreFlip::client_instance();
+    FlipFrequency freq;
+    FlipCondition null_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
+    freq.set_count(20);
+    freq.set_percent(100);
+    fc->inject_noreturn_flip("vol_crc_mismatch", {null_cond}, freq);
+
+    this->start_homestore();
+    this->start_io_job();
+    tcfg.expect_vol_offline = true;
+    output.print("vol_crc_mismatch_test");
+
+    this->delete_volumes();
+
+    LOGINFO("All volumes are deleted, do a shutdown of homestore");
+    this->shutdown();
+
+    LOGINFO("Shutdown of homestore is completed, removing files");
+    if (tcfg.remove_file) { this->remove_files(); }
+    tcfg.expect_vol_offline = false;
 }
 
 /*!

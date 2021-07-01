@@ -202,6 +202,12 @@ def vol_io_fail_test(num_secs="3600"):
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("vol io fail test completed")
 
+def vol_crc_mismatch_test(num_secs="30"):
+    print("vol crc mismatch test started")
+    cmd_opts = "--run_time=" + num_secs + " --gtest_filter=VolTest.vol_crc_mismatch_test --remove_file=0 --expect_io_error=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    print("vol crc mismatch test completed")
+
 ##  @test vol_create_del_test
 #   @brief Create and Delete Volume
 def vol_create_del_test():
@@ -382,6 +388,9 @@ def nightly():
     vol_io_fail_test()
     sleep(5)
     
+    vol_crc_mismatch_test()
+    sleep(5)
+
     #one_disk_replace()
     #sleep(5)
 
@@ -443,6 +452,9 @@ if test_suits == "vol_offline_test":
 
 if test_suits == "vol_io_fail_test":
     vol_io_fail_test()
+
+if test_suits == "vol_crc_mismatch_test":
+    vol_crc_mismatch_test()
 
 if test_suits == "vol_create_del_test":
     vol_create_del_test()

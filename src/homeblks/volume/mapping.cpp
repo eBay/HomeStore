@@ -135,8 +135,12 @@ btree_status_t mapping::read_indx(const indx_req_ptr& ireq, const read_indx_comp
     } else {
         // callback to volume for this read failure;
         // could be here for both fast and slow path;
-        read_cb(ireq, btree_read_failed);
+        auto hs_ret = (ret == btree_status_t::crc_mismatch) ? homestore_error::btree_crc_mismatch
+                                                            : homestore_error::btree_read_failed;
+
+        read_cb(ireq, hs_ret);
     }
+
     return ret;
 }
 
@@ -226,6 +230,7 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
         HS_SUBMOD_LOG(INFO, volume, , "vol", m_unique_name, "PUT : start_lba {} end lba {} ret {}", key.start(),
                       end_lba, ret);
     }
+
     HS_RELEASE_ASSERT_NE(ret, btree_status_t::resource_full, "Unexpected return");
 
     /* In range update, it can be written paritally. Find the first key in this range which is not updated */

@@ -35,7 +35,6 @@ sisl::atomic_counter< uint64_t > Volume::home_blks_ref_cnt{0};
 void Volume::set_error_flip() {
     FlipClient* fc = HomeStoreFlip::client_instance();
     FlipFrequency freq;
-    FlipCondition cond1;
 
     FlipCondition null_cond;
     fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
@@ -44,7 +43,6 @@ void Volume::set_error_flip() {
     freq.set_percent(10);
 
     /* error flips */
-    freq.set_percent(1);
     fc->inject_retval_flip("vol_vchild_error", {null_cond}, freq, 20);
     fc->inject_noreturn_flip("varsize_blkalloc_no_blks", {null_cond}, freq);
 }
@@ -430,6 +428,14 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
                  vreq->outstanding_io_cnt.get(), vreq->is_read_op(), vreq->state);
 
     if (err) {
+        if (err == homestore_error::btree_crc_mismatch) {
+            // only expecting receiving crc mismatch in this state;
+            LOGERROR("crc mismatch received: outstanding_io_cnt={}, read={}, state={}", vreq->outstanding_io_cnt.get(),
+                     vreq->is_read_op(), vreq->state);
+
+            fault_containment();
+        }
+
         if (vreq->err() == std::errc::no_space_on_device) {
             uint64_t used_size_p = (get_used_size().used_data_size * 100) / get_size();
             VOL_RELEASE_ASSERT_CMP(used_size_p, <, HS_DYNAMIC_CONFIG(resource_limits.vol_threshhold_used_size_p), vreq,
@@ -440,7 +446,12 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
             COUNTER_INCREMENT_IF_ELSE(m_metrics, vreq->is_read_op(), volume_write_error_count, volume_read_error_count,
                                       1);
             uint64_t cnt = m_err_cnt.fetch_add(1, std::memory_order_relaxed);
-            THIS_VOL_LOG(ERROR, , vreq, "Vol operation error {}", err.message());
+            if (get_state() != vol_state::OFFLINE) {
+                THIS_VOL_LOG(ERROR, , vreq, "Vol operation error {}", err.message());
+            } else {
+                // supperss error message when state is offline;
+                HS_LOG_EVERY_N(ERROR, base, 50, "Vol {} operation error {}", get_name(), err.message());
+            }
             /* we wait for all outstanding child req to be completed before we do completion upcall */
         } else {
             THIS_VOL_LOG(WARN, , vreq, "Receiving completion on already completed request id={}", vreq->request_id);
@@ -583,7 +594,11 @@ void Volume::verify_csum(const volume_req_ptr& vreq) {
 
                     size -= get_page_size();
                     offset += get_page_size();
-                    if (vreq->csum_list[csum_indx] != csum) {
+                    bool crc_mismatch = (vreq->csum_list[csum_indx] != csum);
+#ifdef _PRERELEASE
+                    crc_mismatch |= homestore_flip->test_flip("vol_crc_mismatch");
+#endif
+                    if (crc_mismatch) {
                         THIS_VOL_LOG(ERROR, volume, vreq, "crc mismatch at offset: {}, vreq->crc: {}, csum: {}", offset,
                                      vreq->csum_list[csum_indx], csum);
                         fault_containment();
@@ -599,7 +614,11 @@ void Volume::verify_csum(const volume_req_ptr& vreq) {
             for (uint32_t size_read{0}; size_read < size; size_read += get_page_size()) {
                 const uint16_t csum =
                     crc16_t10dif(init_crc_16, static_cast< uint8_t* >(iov.iov_base) + size_read, get_page_size());
-                if (vreq->csum_list[csum_indx] != csum) {
+                bool crc_mismatch = (vreq->csum_list[csum_indx] != csum);
+#ifdef _PRERELEASE
+                crc_mismatch |= homestore_flip->test_flip("vol_crc_mismatch");
+#endif
+                if (crc_mismatch) {
                     THIS_VOL_LOG(ERROR, volume, vreq, "crc mismatch at offset: {}, vreq->crc: {}, csum: {}", size_read,
                                  vreq->csum_list[csum_indx], csum);
                     fault_containment();

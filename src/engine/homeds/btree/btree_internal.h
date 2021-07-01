@@ -42,7 +42,7 @@
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed,
      cp_mismatch, merge_not_required, merge_failed, replay_not_needed, fast_path_not_possible, resource_full,
-     update_debug_bm_failed);
+     update_debug_bm_failed, crc_mismatch);
 
 typedef enum {
     READ_NONE = 0,

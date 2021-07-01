@@ -20,7 +20,7 @@ run_cmd() {
     sleep_cnt=0
     while   [ -d /proc/$my_pid ] 
     do
-        if [[ "$sleep_cnt" -gt 200 ]]; then  # set timeout to be 10 mins
+        if [[ "$sleep_cnt" -gt 300 ]]; then  # set timeout to be 15 mins
             curl http://localhost:5000/api/v1/dumpStackTrace
             sleep 10 # sleep for a while for dump stack trace log to finish flushing;
             echo Killing $my_pid $bin_name because of timeout

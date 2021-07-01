@@ -423,13 +423,17 @@ public:
         auto ret = store->get_wb_cache()->refresh_buf(bn, is_write_modifiable, bcp);
         if (ret != btree_status_t::success) { return ret; }
         auto physical_node = (LeafPhysicalNode*)(bn->at_offset(0).bytes);
+#ifndef NO_CHECKSUM
         verify_result vr;
-        auto is_match = physical_node->verify_node(get_node_area_size(store), vr);
-        if (!is_match) {
+        auto crc_mismatch = !physical_node->verify_node(get_node_area_size(store), vr);
+#ifdef _PRERELEASE
+        crc_mismatch |= homestore_flip->test_flip("btree_crc_mismatch");
+#endif
+        if (crc_mismatch) {
             LOGERROR("mismatch node: {} is it from cache", vr.to_string());
-            assert(false);
-            abort();
+            return btree_status_t::crc_mismatch;
         }
+#endif
         return btree_status_t::success;
     }
 

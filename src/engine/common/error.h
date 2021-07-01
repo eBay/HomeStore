@@ -26,7 +26,8 @@ enum homestore_error {
     space_not_avail = 15,
     flip_comp_error = 16,
     invalid_chunk_size = 17,
-    cache_full = 18
+    cache_full = 18,
+    btree_crc_mismatch = 19
 };
 
 class homstore_err_category : public std::error_category {
