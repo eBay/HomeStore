@@ -90,6 +90,10 @@ pipeline {
                         values 'debug', 'test'
                     }
                     axis {
+                        name 'PRERELEASE'
+                        values 'False', 'True'
+                    }
+                    axis {
                         name 'SANITIZE'
                         values 'False', 'True'
                     }
@@ -101,12 +105,28 @@ pipeline {
                 excludes {
                     exclude {
                         axis {
+                            name 'SANITIZE'
+                            values 'True'
+                        }
+                        axis {
+                            name 'COVERAGE'
+                            values 'True'
+                        }
+                    }
+                    exclude {
+                        axis {
                             name 'BUILD_TYPE'
                             values 'test'
                         }
                         axis {
                             name 'SANITIZE'
                             values 'True'
+                        }
+                    }
+                    exclude {
+                        axis {
+                            name 'BUILD_TYPE'
+                            values 'test'
                         }
                         axis {
                             name 'COVERAGE'
@@ -119,40 +139,8 @@ pipeline {
                             values 'debug'
                         }
                         axis {
-                            name 'SANITIZE'
-                            values 'True'
-                        }
-                        axis {
-                            name 'COVERAGE'
-                            values 'True'
-                        }
-                    }
-                    exclude {
-                        axis {
-                            name 'BUILD_TYPE'
-                            values 'test'
-                        }
-                        axis {
-                            name 'SANITIZE'
-                            values 'True'
-                        }
-                        axis {
-                            name 'COVERAGE'
+                            name 'PRERELEASE'
                             values 'False'
-                        }
-                    }
-                    exclude {
-                        axis {
-                            name 'BUILD_TYPE'
-                            values 'test'
-                        }
-                        axis {
-                            name 'SANITIZE'
-                            values 'False'
-                        }
-                        axis {
-                            name 'COVERAGE'
-                            values 'True'
                         }
                     }
                 }
@@ -172,7 +160,7 @@ pipeline {
                             expression { "${COVERAGE}" == 'False' }
                         }
                         steps {
-                            sh "conan create ${BUILD_MISSING} -o homestore:sanitize=${SANITIZE} ${BUILD_TEST_MODE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
+                            sh "conan create ${BUILD_MISSING} -o homestore:prerelease=${PRERELEASE} -o homestore:sanitize=${SANITIZE} ${BUILD_TEST_MODE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"

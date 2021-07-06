@@ -7,6 +7,7 @@ set(BLKALLOC_SOURCE
         blk_cache_queue.cpp
        )
 add_library(hs_blkalloc OBJECT ${BLKALLOC_SOURCE})
+add_dependencies(hs_blkalloc hs_common)
 
 can_build_nonio_tests(build_nonio_tests)
 if (${build_nonio_tests})

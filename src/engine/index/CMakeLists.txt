@@ -7,4 +7,4 @@ set(INDXMGR_SOURCE_FILES
     indx_mgr_test.cpp
     )
 add_library(indx_mgr OBJECT ${INDXMGR_SOURCE_FILES})
-
+add_dependencies(indx_mgr hs_homeblks)
