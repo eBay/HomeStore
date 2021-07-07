@@ -65,7 +65,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(BlkId& out_blkid) {
 #ifdef _PRERELEASE
     if (homestore_flip->test_flip("fixed_blkalloc_no_blks")) { return BlkAllocStatus::SPACE_FULL; }
 #endif
-    auto ret = m_blk_q.read(out_blkid);
+    const auto ret{m_blk_q.read(out_blkid)};
     if (ret) {
         // update real time bitmap;
         alloc_on_realtime(out_blkid);

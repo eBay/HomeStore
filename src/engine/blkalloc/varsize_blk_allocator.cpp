@@ -295,14 +295,22 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_all
         return BlkAllocStatus::SPACE_FULL;
     }
 
-    // NOTE: There is a small chance this can fail if all the blocks have already been allocated to slabs
     if (homestore_flip->test_flip("varsize_blkalloc_bypass_cache")) {
         blk_count_t num_alllocated{0};
         const auto status{alloc_blks_direct(nblks, hints, out_blkids, num_alllocated)};
-        if ((status == BlkAllocStatus::SUCCESS) || (status == BlkAllocStatus::PARTIAL)) {
+        if (status == BlkAllocStatus::SUCCESS) {
             incr_alloced_blk_count(num_alllocated);
+            return status;
+        } else {
+            // NOTE: There is a small chance this can fail if all the blocks have already been allocated
+            // to slabs. So clear any partial and fall through to normal routine below
+            if (status == BlkAllocStatus::PARTIAL) { 
+                for (const auto& blk_id : out_blkids) {
+                    free_on_bitmap(blk_id);
+                }
+                out_blkids.clear();
+            }
         }
-        return status;
     }
 #endif
 
@@ -594,11 +602,11 @@ BlkAllocStatus VarsizeBlkAllocator::alloc_blks_direct(const blk_count_t nblks, c
         if (++portion_num == m_cfg.get_total_portions()) { portion_num = 0; }
         BLKALLOC_LOG(TRACE, "alloc direct unable to find in prev portion, searching in portion={}, start_portion={}",
                      portion_num, start_portion_num);
-    } while (nblks_remain && (portion_num != start_portion_num) && !hints.is_contiguous);
+    } while ((nblks_remain > 0) && (portion_num != start_portion_num) && !hints.is_contiguous);
 
     COUNTER_INCREMENT(m_metrics, num_blks_alloc_direct, 1);
     num_allocated = nblks - nblks_remain;
-    if (nblks_remain) {
+    if (nblks_remain > 0) {
         if (nblks_remain == nblks) {
             // allocated no blocks. NOTE: if contiguous we may or may not be full. Don't really know without
             // searching for a single free block
@@ -615,7 +623,11 @@ BlkAllocStatus VarsizeBlkAllocator::alloc_blks_direct(const blk_count_t nblks, c
 void VarsizeBlkAllocator::prepare_sweep(BlkAllocSegment* const seg, const bool fill_entire_cache) {
     m_sweep_segment = seg;
     m_cur_fill_session = m_fb_cache->create_cache_fill_session(fill_entire_cache);
-    m_state = BlkAllocatorState::SWEEP_SCHEDULED;
+    if (!(m_cur_fill_session->slab_requirements.empty())) { 
+        m_state = BlkAllocatorState::SWEEP_SCHEDULED;
+    } else {
+        BLKALLOC_LOG(TRACE, "no slabs need filling");
+    }
 }
 
 void VarsizeBlkAllocator::blk_cache_entries_to_blkids(const std::vector< blk_cache_entry >& entries,

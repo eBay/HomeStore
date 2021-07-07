@@ -563,29 +563,43 @@ protected:
 
     void do_insert() {
         // Randomly pick a store client and write journal entry batch.
-        while ((m_nrecords_waiting_to_issue.load() > 0) && (m_nrecords_waiting_to_complete.load() < m_q_depth)) {
-            m_nrecords_waiting_to_issue.fetch_sub(m_batch_size);
-            m_nrecords_waiting_to_complete.fetch_add(m_batch_size);
-            pick_log_store()->insert_next_batch(m_batch_size, std::min(m_batch_size, m_holes_per_batch));
+        for (;;) {
+            uint32_t batch_size{0};
+            {
+                std::unique_lock< std::mutex > lock{m_pending_mtx};
+                const bool insert{(m_nrecords_waiting_to_issue > 0) && (m_nrecords_waiting_to_complete < m_q_depth)};
+                if (insert) {
+                    batch_size = std::min<uint32_t>(m_batch_size, m_nrecords_waiting_to_issue);
+                    m_nrecords_waiting_to_issue -= batch_size;
+                    m_nrecords_waiting_to_complete += batch_size;
+                } else {
+                    break;
+                }
+            }
+            pick_log_store()->insert_next_batch(batch_size, std::min(batch_size, m_holes_per_batch));
         }
     }
 
     void on_insert_completion([[maybe_unused]] const logstore_family_id_t fid, const logstore_seq_num_t lsn,
                               const logdev_key ld_key) {
-        const auto waiting_to_issue{m_nrecords_waiting_to_issue.load()};
-        if ((m_nrecords_waiting_to_complete.fetch_sub(1) == 1) && (waiting_to_issue == 0)) {
+        bool notify{false};
+        uint64_t waiting_to_issue{0};
+        {
+            std::unique_lock< std::mutex > lock{m_pending_mtx};
+            waiting_to_issue = m_nrecords_waiting_to_issue;
+            if ((--m_nrecords_waiting_to_complete == 0) && (waiting_to_issue == 0)) { notify = true; }
+        }
+        if (notify) {
             m_pending_cv.notify_all();
-        } else if (waiting_to_issue != 0) {
+        } else if (waiting_to_issue > 0) {
             do_insert();
         }
     }
 
     void wait_for_inserts() {
-        {
-            std::unique_lock< std::mutex > lk{m_pending_mtx};
-            m_pending_cv.wait(
-                lk, [&] { return (m_nrecords_waiting_to_issue <= 0) && (m_nrecords_waiting_to_complete <= 0); });
-        }
+        std::unique_lock< std::mutex > lk{m_pending_mtx};
+        m_pending_cv.wait(lk,
+                          [&] { return (m_nrecords_waiting_to_issue == 0) && (m_nrecords_waiting_to_complete == 0); });
     }
 
     void read_validate(const bool expect_all_completed = false) {
@@ -819,8 +833,8 @@ private:
     }
 
 protected:
-    std::atomic< int64_t > m_nrecords_waiting_to_issue = 0;
-    std::atomic< int64_t > m_nrecords_waiting_to_complete = 0;
+    uint64_t m_nrecords_waiting_to_issue{0};
+    uint64_t m_nrecords_waiting_to_complete{0};
     std::mutex m_pending_mtx;
     std::condition_variable m_pending_cv;
     std::array< std::atomic< logid_t >, HomeLogStoreMgr::num_log_families > m_truncate_log_idx = {-1, -1};
@@ -882,14 +896,21 @@ TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
 
         uint16_t trunc_attempt{0};
         LOGINFO("Step 3: In parallel to writes issue truncation upto completion");
+        uint64_t nrecords_waiting_to_complete{0};
+        uint64_t nrecords_waiting_to_issue{0};
         do {
             std::this_thread::sleep_for(std::chrono::microseconds(1000));
             this->truncate_validate(true /* is_parallel_to_write */);
             ++trunc_attempt;
             ASSERT_LT(trunc_attempt, static_cast< uint16_t >(30));
-            LOGINFO("Still pending completions = {}, pending issued = {}", this->m_nrecords_waiting_to_complete.load(),
-                    m_nrecords_waiting_to_issue.load());
-        } while (((this->m_nrecords_waiting_to_complete != 0) || (m_nrecords_waiting_to_issue != 0)));
+            {
+                std::unique_lock< std::mutex > lock { m_pending_mtx };
+                nrecords_waiting_to_complete = this->m_nrecords_waiting_to_complete;
+                nrecords_waiting_to_issue = this->m_nrecords_waiting_to_issue;
+            }
+            LOGINFO("Still pending completions = {}, pending issued = {}", nrecords_waiting_to_complete,
+                    nrecords_waiting_to_issue);
+        } while (((nrecords_waiting_to_complete > 0) || (nrecords_waiting_to_issue > 0)));
         LOGINFO("Truncation has been issued and validated for {} times before all records are completely truncated",
                 trunc_attempt);
 

@@ -251,7 +251,7 @@ std::shared_ptr< blk_cache_fill_session > FreeBlkCacheQueue::create_cache_fill_s
     const auto ptr{std::make_shared< blk_cache_fill_session >(m_slab_queues.size(), fill_entire_cache)};
     for (auto& sq : m_slab_queues) {
         const auto needed_count{sq->open_session(ptr->session_id, fill_entire_cache)};
-        ptr->slab_requirements.push_back(blk_cache_refill_status{needed_count, 0});
+        if (needed_count > 0) { ptr->slab_requirements.push_back(blk_cache_refill_status{needed_count, 0}); }
     }
     return ptr;
 }
@@ -347,8 +347,8 @@ blk_cap_t SlabCacheQueue::open_session(const uint64_t session_id, const bool fil
         // If no running session, calculate how much we need to fill in this slab and try to start this session
         const auto nentries{entry_count()};
         if (fill_entire_cache || (nentries < m_refill_threshold_limits)) {
-            count = nentries > m_total_capacity ? 0 : m_total_capacity - nentries;
-            if (!m_refill_session.get().compare_exchange_strong(id, session_id, std::memory_order_acq_rel)) {
+            count = (nentries > m_total_capacity) ? 0 : (m_total_capacity - nentries);
+            if (!m_refill_session.compare_exchange_strong(id, session_id, std::memory_order_acq_rel)) {
                 count = 0;
             }
         }
@@ -358,7 +358,7 @@ blk_cap_t SlabCacheQueue::open_session(const uint64_t session_id, const bool fil
 
 void SlabCacheQueue::close_session(const uint64_t session_id) {
     uint64_t expected_session_id{session_id};
-    m_refill_session.get().compare_exchange_strong(expected_session_id, 0, std::memory_order_acq_rel);
+    m_refill_session.compare_exchange_strong(expected_session_id, 0, std::memory_order_acq_rel);
 }
 
 SlabMetrics::SlabMetrics(const blk_count_t slab_size, SlabCacheQueue* const slab_queue, BlkAllocMetrics* const parent) :
