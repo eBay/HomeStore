@@ -107,9 +107,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
             } else if (m_state == BlkAllocatorState::EXITING) {
                 BLKALLOC_LOG(TRACE, "TODO: Handle exiting message more periodically");
                 break;
-            } else {
-                BLKALLOC_ASSERT(DEBUG, 0, "Allocator thread is woken on unexpected state = {}", m_state);
-            }
+            } 
         }
 
         if (sweep) {
