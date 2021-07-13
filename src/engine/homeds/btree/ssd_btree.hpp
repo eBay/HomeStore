@@ -315,13 +315,9 @@ public:
             homestore::BlkId blkid(id);
             auto cache_only = iomanager.am_i_tight_loop_reactor();
 
-#ifndef NDEBUG
-            /* testing slow path */
 #ifdef _PRERELEASE
+            /* testing slow path */
             if (iomanager.am_i_tight_loop_reactor() && homestore_flip->test_flip("btree_read_fast_path_not_possible")) {
-#else
-            if (iomanager.am_i_tight_loop_reactor()) {
-#endif
                 bnode = nullptr;
                 LOGINFO("Trigger slow path intentionally.");
                 return btree_status_t::fast_path_not_possible;
