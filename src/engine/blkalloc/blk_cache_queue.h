@@ -62,7 +62,7 @@ public:
 private:
     blk_count_t m_slab_size; // Slab size in-terms of number of pages
     std::vector< std::unique_ptr< folly::MPMCQueue< blk_cache_entry > > > m_level_queues;
-    sisl::atomwrapper< uint64_t > m_refill_session{0}; // Is a refill pending for this slab
+    std::atomic< uint64_t > m_refill_session{0}; // Is a refill pending for this slab
     blk_cap_t m_total_capacity{0};
     blk_cap_t m_refill_threshold_limits; // For every level whats their threshold limit size
     SlabMetrics m_metrics;

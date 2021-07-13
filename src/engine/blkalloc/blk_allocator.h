@@ -313,7 +313,7 @@ public:
                 if (!get_realtime_bm()->is_bits_reset(b.get_blk_num(), b.get_nblks())) {
                     BLKALLOC_LOG(ERROR, "bit not reset {} nblks {} chunk number {}", b.get_blk_num(), b.get_nblks(),
                                  m_chunk_id);
-                    for (uint32_t i = 0; i < b.get_nblks(); ++i) {
+                    for (blk_count_t i{0}; i < b.get_nblks(); ++i) {
                         if (!get_disk_bm()->is_bits_reset(b.get_blk_num() + i, 1)) {
                             BLKALLOC_LOG(ERROR, "bit not reset {}", b.get_blk_num() + i);
                         }
@@ -348,7 +348,7 @@ public:
                 if (!get_realtime_bm()->is_bits_set(b.get_blk_num(), b.get_nblks())) {
                     BLKALLOC_LOG(ERROR, "{}, bit not set {} nblks{} chunk number {}", b.to_string(), b.get_blk_num(),
                                  b.get_nblks(), m_chunk_id);
-                    for (uint32_t i = 0; i < b.get_nblks(); ++i) {
+                    for (blk_count_t i{0}; i < b.get_nblks(); ++i) {
                         if (!get_realtime_bm()->is_bits_set(b.get_blk_num() + i, 1)) {
                             BLKALLOC_LOG(ERROR, "bit not set {}", b.get_blk_num() + i);
                         }
@@ -376,7 +376,7 @@ public:
                 if (!get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks())) {
                     BLKALLOC_LOG(ERROR, "bit not set {} nblks {} chunk number {}", b.get_blk_num(), b.get_nblks(),
                                  m_chunk_id);
-                    for (uint32_t i = 0; i < b.get_nblks(); ++i) {
+                    for (blk_count_t i{0}; i < b.get_nblks(); ++i) {
                         if (!get_disk_bm()->is_bits_set(b.get_blk_num() + i, 1)) {
                             BLKALLOC_LOG(ERROR, "bit not set {}", b.get_blk_num() + i);
                         }
@@ -395,9 +395,9 @@ public:
      */
     [[nodiscard]] sisl::byte_array cp_start([[maybe_unused]] const std::shared_ptr< blkalloc_cp >& id) {
         // prepare a valid blk alloc list;
-        auto alloc_list_ptr = new sisl::ThreadVector< BlkId >();
+        auto alloc_list_ptr{new sisl::ThreadVector< BlkId >()};
         // set to valid pointer, blk alloc will be acummulated;
-        auto old_alloc_list_ptr = rcu_xchg_pointer(&m_alloc_blkid_list, alloc_list_ptr);
+        auto old_alloc_list_ptr{rcu_xchg_pointer(&m_alloc_blkid_list, alloc_list_ptr)};
         // wait for all I/Os that are still in critical section (allocating on disk bm) to complete and exit;
         synchronize_rcu();
 
@@ -407,13 +407,13 @@ public:
 
     void cp_done() {
         // set to nullptr, so that alloc will go to disk bm directly
-        auto old_alloc_list_ptr = rcu_xchg_pointer(&m_alloc_blkid_list, nullptr);
+        auto old_alloc_list_ptr{rcu_xchg_pointer(&m_alloc_blkid_list, nullptr)};
         // wait for all I/Os in critical section (still accumulating bids) to complete and exit;
         synchronize_rcu();
 
         // at this point, no I/O will be pushing back to the list (old_alloc_list_ptr);
-        auto it = old_alloc_list_ptr->begin(true /* latest */);
-        BlkId* bid{nullptr};
+        auto it{old_alloc_list_ptr->begin(true /* latest */)};
+        const BlkId* bid{nullptr};
         while ((bid = old_alloc_list_ptr->next(it)) != nullptr) {
             alloc_on_disk(*bid);
         }
@@ -466,7 +466,7 @@ public:
         return j;
     }
 
-    [[nodiscard]] bool realtime_bm_on() { return m_cfg.m_realtime_bm_on; }
+    [[nodiscard]] bool realtime_bm_on() const { return m_cfg.m_realtime_bm_on; }
 
 private:
     [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); }
@@ -535,7 +535,7 @@ public:
     void resume_cp() { suspend = false; }
     void free_blks(const blkid_list_ptr& list) {
         auto it = list->begin(true /* latest */);
-        BlkId* bid;
+        const BlkId* bid;
         while ((bid = list->next(it)) != nullptr) {
             auto chunk{m_hs->get_device_manager()->get_chunk(bid->get_chunk_num())};
             auto ba{chunk->get_blk_allocator()};
@@ -548,8 +548,8 @@ public:
     ~blkalloc_cp() {
         /* free all the blkids in the cache */
         for (auto& list : free_blkid_list_vector) {
-            BlkId* bid;
-            auto it = list->begin(false /* latest */);
+            const BlkId* bid;
+            auto it{list->begin(false /* latest */)};
             while ((bid = list->next(it)) != nullptr) {
                 auto chunk{m_hs->get_device_manager()->get_chunk(bid->get_chunk_num())};
                 chunk->get_blk_allocator()->free(*bid);

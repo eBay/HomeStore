@@ -39,7 +39,7 @@ public:
     VarsizeBlkAllocConfig(const std::string& name) : VarsizeBlkAllocConfig(0, 0, name) {}
 
     VarsizeBlkAllocConfig(const uint32_t blk_size, const uint64_t size, const std::string& name,
-                          bool realtime_bm_on = true) :
+                          const bool realtime_bm_on = true) :
             BlkAllocConfig{blk_size, size, name, realtime_bm_on},
             m_phys_page_size{HS_STATIC_CONFIG(drive_attr.phys_page_size)},
             m_nsegments{HS_DYNAMIC_CONFIG(blkallocator.max_segments)},

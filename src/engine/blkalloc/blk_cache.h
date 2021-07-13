@@ -153,7 +153,13 @@ struct blk_cache_fill_session {
 
     [[nodiscard]] static uint64_t gen_session_id() {
         static std::atomic< uint64_t > s_session_id{1};
-        return s_session_id.fetch_add(1, std::memory_order_relaxed);
+        auto id{s_session_id.fetch_add(1, std::memory_order_relaxed)};
+        if (id == 0) { 
+            // NOTE: 0 is no session so id cannot be zero after rollover
+            std::atomic_thread_fence(std::memory_order_acquire);
+            id = s_session_id.fetch_add(1, std::memory_order_relaxed);
+        }
+        return id;
     }
 
     blk_cache_fill_session(const size_t num_slabs, const bool fill_entire_cache) : session_id{gen_session_id()} {
@@ -165,7 +171,7 @@ struct blk_cache_fill_session {
     }
 
     [[nodiscard]] bool need_notify() const {
-        const auto urgent_count = urgent_refill_blks_count.load(std::memory_order_acquire);
+        const auto urgent_count{urgent_refill_blks_count.load(std::memory_order_acquire)};
         return ((urgent_count > 0) && ((overall_refilled_num_blks >= urgent_count) || overall_refill_done));
     }
 
