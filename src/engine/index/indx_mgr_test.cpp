@@ -12,7 +12,9 @@
 #include "engine/index/indx_mgr.hpp"
 
 using namespace homestore;
+#ifdef _PRERELEASE
 using namespace flip;
+#endif
 
 // TODO: make it under mode_test namespace
 
@@ -41,6 +43,7 @@ const uint64_t abort_time_sec = 10;
 
 enum flip_state { FLIP_NOT_SET = 0, FLIP_SET = 1, SYSTEM_PANIC = 2 };
 
+#ifdef _PRERELEASE
 class indx_test : public module_test {
     indx_test() : m_fc(HomeStoreFlip::instance()) {}
     virtual void run_start() override {}
@@ -51,7 +54,6 @@ class indx_test : public module_test {
         }
         return false;
     }
-
     virtual void try_run_last_iteration() override {
         std::unique_lock< std::mutex > lk{m_mutex};
         if (is_cp_abort_test()) { indx_cp_abort_test(); }
@@ -162,6 +164,8 @@ protected:
 };
 
 indx_test test;
+#endif
+
 /************************* CLI options ***************************/
 SDS_OPTION_GROUP(
     test_indx_mgr,
@@ -216,7 +220,8 @@ void indx_mgr_test_main() {
             [](auto& s) { s.resource_limits.free_blk_cnt = indx_cfg.free_blk_cnt; });
         HS_SETTINGS_FACTORY().save();
     }
-
+#ifdef _PRERELEASE
     mod_tests.push_back(&test);
+#endif
     return;
 }
