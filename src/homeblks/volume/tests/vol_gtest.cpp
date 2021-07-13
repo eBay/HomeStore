@@ -51,7 +51,9 @@
 #include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
+#ifdef _PRERELEASE
 using namespace flip;
+#endif
 
 THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
@@ -1081,6 +1083,7 @@ private:
         }
     }
 
+public:
     void force_reinit(const std::vector< dev_info >& devices, iomgr::iomgr_drive_type drive_type, io_flag oflags) {
         iomanager.start(1);
         VolInterface::get_instance()->zero_boot_sbs(devices, drive_type, oflags);
@@ -1711,13 +1714,14 @@ TEST_F(VolTest, lifecycle_test) {
     this->start_homestore();
     this->start_io_job();
     output.print("lifecycle_test");
-
+#ifdef _PRERELEASE
     FlipClient fc(HomeStoreFlip::instance());
     FlipFrequency freq;
     freq.set_count(10);
     freq.set_percent(100);
 
     fc.inject_retval_flip("vol_comp_delay_us", {}, freq, 100);
+#endif
     this->delete_volumes();
 
     LOGINFO("All volumes are deleted, do a shutdown of homestore");
@@ -1728,6 +1732,7 @@ TEST_F(VolTest, lifecycle_test) {
 }
 
 TEST_F(VolTest, vol_crc_mismatch_test) {
+#ifdef _PRERELEASE
     FlipClient* fc = HomeStoreFlip::client_instance();
     FlipFrequency freq;
     FlipCondition null_cond;
@@ -1735,7 +1740,7 @@ TEST_F(VolTest, vol_crc_mismatch_test) {
     freq.set_count(20);
     freq.set_percent(100);
     fc->inject_noreturn_flip("vol_crc_mismatch", {null_cond}, freq);
-
+#endif
     this->start_homestore();
     this->start_io_job();
     tcfg.expect_vol_offline = true;
@@ -1758,13 +1763,14 @@ TEST_F(VolTest, vol_crc_mismatch_test) {
  */
 TEST_F(VolTest, init_io_test) {
     this->start_homestore();
+#ifdef _PRERELEASE
     FlipClient fc(HomeStoreFlip::instance());
     FlipFrequency freq;
     freq.set_count(10);
     freq.set_percent(100);
 
     fc.inject_retval_flip(tcfg.flip_name, {}, freq, 100);
-
+#endif
     std::unique_ptr< VolCreateDeleteJob > cdjob;
     if (tcfg.create_del_with_io || tcfg.delete_with_io) {
         cdjob = std::make_unique< VolCreateDeleteJob >(this);
@@ -1898,13 +1904,13 @@ TEST_F(VolTest, one_disk_replace_abort_test) {
     tcfg.disk_replace_cnt = 1;
     tcfg.expected_init_fail = true;
     tcfg.expected_vol_state = homestore::vol_state::DEGRADED;
-
+#ifdef _PRERELEASE
     FlipClient fc(HomeStoreFlip::instance());
     FlipFrequency freq;
     freq.set_count(100);
     freq.set_percent(100);
     fc.inject_noreturn_flip("reboot_abort", {}, freq);
-
+#endif
     this->start_homestore();
     output.print("one_disk_replace_abort_test");
     this->shutdown();
@@ -1925,6 +1931,7 @@ TEST_F(VolTest, two_disk_replace_test) {
 }
 
 TEST_F(VolTest, one_disk_fail_test) {
+#ifdef _PRERELEASE
     FlipClient fc(HomeStoreFlip::instance());
     FlipFrequency freq;
     FlipCondition cond1;
@@ -1933,7 +1940,7 @@ TEST_F(VolTest, one_disk_fail_test) {
     freq.set_percent(100);
     fc.create_condition("setting error on file1", flip::Operator::EQUAL, tcfg.default_names[0], &cond1);
     fc.inject_noreturn_flip("device_boot_fail", {cond1}, freq);
-
+#endif
     tcfg.init = false;
     tcfg.expected_init_fail = true;
     this->start_homestore();
@@ -1974,6 +1981,7 @@ TEST_F(VolTest, btree_fix_read_failure_test) {
     output.print("btree_fix_read_failure_test");
 
     this->move_vol_to_offline();
+#ifdef _PRERELEASE
     FlipClient* fc = homestore::HomeStoreFlip::client_instance();
     FlipFrequency freq;
     freq.set_count(2000000000);
@@ -1983,6 +1991,7 @@ TEST_F(VolTest, btree_fix_read_failure_test) {
     fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
 
     fc->inject_noreturn_flip("btree_read_fail", {null_cond}, freq);
+#endif
     auto ret = this->fix_vol_mapping_btree();
     EXPECT_EQ(ret, false);
 

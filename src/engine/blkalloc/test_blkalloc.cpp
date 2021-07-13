@@ -737,12 +737,13 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_scatter_unirandsize) {
 
 TEST_F(VarsizeBlkAllocatorTest, alloc_var_scatter_direct_unirandsize) {
     LOGINFO("Step 1: Set the flip to force directly bypassing freeblk cache");
+#ifdef _PRERELEASE
     FlipClient* const fc{HomeStoreFlip::client_instance()};
     FlipFrequency freq;
     freq.set_count(static_cast< uint32_t >(m_total_count) * 1000);
     freq.set_percent(100);
     fc->inject_noreturn_flip("varsize_blkalloc_bypass_cache", {}, freq);
-
+#endif
     const uint8_t prealloc_pct{90};
     const uint64_t preload_amount{static_cast< uint64_t >(m_total_count) * prealloc_pct / 100};
     const auto nthreads{

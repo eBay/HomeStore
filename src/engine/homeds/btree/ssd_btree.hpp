@@ -317,7 +317,11 @@ public:
 
 #ifndef NDEBUG
             /* testing slow path */
+#ifdef _PRERELEASE
             if (iomanager.am_i_tight_loop_reactor() && homestore_flip->test_flip("btree_read_fast_path_not_possible")) {
+#else
+            if (iomanager.am_i_tight_loop_reactor()) {
+#endif
                 bnode = nullptr;
                 LOGINFO("Trigger slow path intentionally.");
                 return btree_status_t::fast_path_not_possible;

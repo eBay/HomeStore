@@ -74,6 +74,7 @@ struct cp_base {
 };
 
 class CPMgrMetrics : public sisl::MetricsGroupWrapper {
+public:
     explicit CPMgrMetrics() : sisl::MetricsGroupWrapper("CPMgr") {
         REGISTER_COUNTER(back_to_back_cps, "back to back cp");
         REGISTER_COUNTER(cp_cnt, "cp cnt");

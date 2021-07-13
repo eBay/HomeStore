@@ -11,7 +11,9 @@
 #include <random>
 #include <thread>
 
+#ifdef _PRERELEASE
 #include <flip/flip.hpp>
+#endif
 
 #include "homeds/loadgen/loadgen_common.hpp"
 
@@ -150,13 +152,13 @@ struct BtreeLoadGen {
         stored_keys += kc;
         assert(kvg->get_keys_count() == kc);
         kvg->reset_pattern(KeyPattern::SEQUENTIAL, 0);
-
+#ifdef _PRERELEASE
         flip::FlipClient fc(HomeStoreFlip::instance());
         flip::FlipFrequency freq;
         freq.set_count(1);
         freq.set_percent(100);
         fc.inject_noreturn_flip("btree_leaf_node_split", {}, freq);
-
+#endif
         kvg->run_parallel([&]() {
             // single range update over entire tree
             for (uint32_t i{0}; i < kc; i += UPDATE_RANGE_BATCH_SIZE) {

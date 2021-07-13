@@ -511,6 +511,7 @@ protected:
 };
 
 class IndxMgrMetrics : public sisl::MetricsGroupWrapper {
+public:
     explicit IndxMgrMetrics(const char* indx_name) : sisl::MetricsGroupWrapper("Index", indx_name) {
         register_me_to_farm();
     }
