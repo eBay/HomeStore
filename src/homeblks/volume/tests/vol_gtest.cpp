@@ -1820,7 +1820,6 @@ TEST_F(VolTest, recovery_io_test) {
     if (tcfg.remove_file) { this->remove_files(); }
 }
 
-#ifdef _PRERELEASE
 /*
  * @test    hs_force_reinit_test only works in PRERELEASE mode;
  * @brief   This test cases works with force_reinit field in input_params which is only valid in PRERELEASE mode;
@@ -1841,35 +1840,6 @@ TEST_F(VolTest, hs_force_reinit_test) {
     this->shutdown();
     if (tcfg.remove_file) { this->remove_files(); }
 }
-#else
-
-/*!
-    @test   hs_force_reinit_test works as always (not depend on force_reinit field)
-    @brief  Tests force reinit to boot as first time boot;
-    This test case is supposed to be called after init_io_test.
-    It can also be run standalone.
-    The expected result is it will always boot as first time boot;
- */
-TEST_F(VolTest, hs_force_reinit_test) {
-    output.print("hs_force_reinit_test");
-
-    // 1. first calling init_done to zero sb on physical device_boot_fail
-    std::vector< dev_info > tmp_dev_info;
-    get_dev_info(tmp_dev_info);
-    HS_RELEASE_ASSERT_GT(tmp_dev_info.size(), 0);
-
-    this->force_reinit(tmp_dev_info, iomgr::iomgr_drive_type::unknown, homestore::io_flag::DIRECT_IO);
-
-    // 2. boot homestore which should be first-time-boot
-    this->start_homestore();
-
-    // 3. verify it is first time boot which is done in init_done_cb;
-
-    if (tcfg.can_delete_volume) { this->delete_volumes(); }
-    this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
-}
-#endif
 
 /*!
     @test   vol_create_del_test
