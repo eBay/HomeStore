@@ -1841,8 +1841,9 @@ TEST_F(VolTest, hs_force_reinit_test) {
     this->shutdown();
     if (tcfg.remove_file) { this->remove_files(); }
 }
-#else
+#endif
 
+#if 0
 /*!
     @test   hs_force_reinit_test works as always (not depend on force_reinit field)
     @brief  Tests force reinit to boot as first time boot;
