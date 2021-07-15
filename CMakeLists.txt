@@ -95,11 +95,6 @@ else()
     endif()
 endif()
 
-if(${PRERELEASE_ON})
-  message(STATUS "=== === PRE_RELEASE BUILD ENABLED === ===")
-  add_flags("-D_PRERELEASE=1")
-endif()
-
 add_subdirectory(src)
 
 # build info

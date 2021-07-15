@@ -66,15 +66,11 @@ class HomestoreConan(ConanFile):
 
         definitions = {'CONAN_TEST_TARGET': 'off',
                        'CMAKE_EXPORT_COMPILE_COMMANDS': 'ON',
-                       'MEMORY_SANITIZER_ON': 'OFF',
-                       'PRERELEASE_ON': 'ON'}
+                       'MEMORY_SANITIZER_ON': 'OFF'}
         test_target = None
 
         if self.options.sanitize:
             definitions['MEMORY_SANITIZER_ON'] = 'ON'
-
-        if not self.options.prerelease:
-            definitions['PRERELEASE_ON'] = 'OFF'
 
         definitions['CONAN_TEST_TARGET'] = self.options.testing
         if self.options.testing == 'coverage':
@@ -101,9 +97,6 @@ class HomestoreConan(ConanFile):
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
-        self.cpp_info.cxxflags.append("-DBOOST_ALLOW_DEPRECATED_HEADERS")
-        if self.options.prerelease:
-            self.cpp_info.cxxflags.append("-D_PRERELEASE=1")
         if self.options.sanitize:
             self.cpp_info.sharedlinkflags.append("-fsanitize=address")
             self.cpp_info.exelinkflags.append("-fsanitize=address")
