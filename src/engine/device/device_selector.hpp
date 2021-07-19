@@ -3,8 +3,12 @@
 //
 #pragma once
 
-#include "virtual_dev.hpp"
+#include <cstdint>
+#include <vector>
+
 #include <folly/ThreadLocal.h>
+
+#include "virtual_dev.hpp"
 
 namespace homestore {
 
@@ -12,13 +16,20 @@ class RoundRobinDeviceSelector {
 public:
     explicit RoundRobinDeviceSelector() { *m_last_dev_ind = 0; }
 
-    void add_pdev(const PhysicalDev* pdev) { m_pdevs.push_back(pdev); }
+    RoundRobinDeviceSelector(const RoundRobinDeviceSelector&) = delete;
+    RoundRobinDeviceSelector(RoundRobinDeviceSelector&&) noexcept = delete;
+    RoundRobinDeviceSelector& operator=(const RoundRobinDeviceSelector&) = delete;
+    RoundRobinDeviceSelector& operator=(RoundRobinDeviceSelector&&) noexcept = delete;
+
+    ~RoundRobinDeviceSelector() = default;
+
+    void add_pdev(const PhysicalDev* const pdev) { m_pdevs.push_back(pdev); }
 
     uint32_t select(const blk_alloc_hints& hints) {
         if (*m_last_dev_ind == (m_pdevs.size() - 1)) {
             *m_last_dev_ind = 0;
         } else {
-            (*m_last_dev_ind)++;
+            ++(*m_last_dev_ind);
         }
 
         return *m_last_dev_ind;

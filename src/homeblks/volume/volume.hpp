@@ -186,19 +186,23 @@ private:
     Volume* m_volume;
 };
 
-#define VOL_SB_VERSION 0x2
+static constexpr uint64_t vol_sb_version = 0x1;
+static constexpr uint64_t vol_sb_magic = 0xb01dface;
 struct vol_sb_hdr {
     /* Immutable members */
-    const uint64_t version;
+    const uint64_t magic{vol_sb_magic};
+    const uint32_t version{vol_sb_version};
+    uint8_t padding[4];
     const uint64_t page_size;
     const uint64_t size;
     const boost::uuids::uuid uuid;
-    const char vol_name[VOL_NAME_SIZE];
+    char vol_name[VOL_NAME_SIZE];
     indx_mgr_sb indx_sb;
     vol_sb_hdr(const uint64_t& page_size, const uint64_t& size, const char* in_vol_name,
                const boost::uuids::uuid& uuid) :
-            version(VOL_SB_VERSION), page_size(page_size), size(size), uuid(uuid), vol_name("") {
-        memcpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
+            page_size(page_size), size(size), uuid(uuid) {
+        std::strncpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
+        vol_name[VOL_NAME_SIZE - 1] = '\0';
     };
 
     vol_sb_hdr(const vol_sb_hdr&) = delete;

@@ -24,12 +24,12 @@
 
 namespace homestore {
 
-static constexpr uint32_t LOG_GROUP_HDR_MAGIC{0xDABAF00D};
-static constexpr uint32_t LOG_GROUP_FOOTER_MAGIC{0xDEADF00D};
+static constexpr uint32_t LOG_GROUP_HDR_MAGIC{0xF00D1E};
+static constexpr uint32_t LOG_GROUP_FOOTER_MAGIC{0xB00D1E};
 static constexpr uint32_t dma_address_boundary{512}; // Mininum size the dma/writes to be aligned with
 static constexpr uint32_t initial_read_size{4096};
-static constexpr uint32_t max_log_group{
-    2}; // logdev doesn't support concurrent writes. There can only be 2 active log groups.
+// logdev doesn't support concurrent writes. There can only be 2 active log groups.
+static constexpr uint32_t max_log_group{2};
 
 // clang-format off
 /*
@@ -108,7 +108,10 @@ struct log_record {
 /* This structure represents a group commit log header */
 #pragma pack(1)
 struct log_group_header {
+    static constexpr uint8_t header_version{0};
+
     uint32_t magic;
+    uint32_t version;
     uint32_t n_log_records;      // Total number of log records
     logid_t start_log_idx;       // log id of the first log record
     uint32_t group_size;         // Total size of this group including this header
@@ -118,7 +121,7 @@ struct log_group_header {
     crc32_t prev_grp_crc;        // Checksum of the previous group that was written
     crc32_t cur_grp_crc;         // Checksum of the current group record
 
-    log_group_header() = default;
+    log_group_header() : magic{LOG_GROUP_HDR_MAGIC}, version{header_version} {}
     log_group_header(const log_group_header&) = delete;
     log_group_header& operator=(const log_group_header&) = delete;
     log_group_header(log_group_header&&) noexcept = delete;
@@ -156,6 +159,7 @@ struct log_group_header {
     }
 
     [[nodiscard]] uint32_t magic_word() const { return magic; }
+    [[nodiscard]] uint8_t get_version() const { return static_cast< uint8_t >(version); }
     [[nodiscard]] logid_t start_idx() const { return start_log_idx; }
     [[nodiscard]] uint32_t nrecords() const { return n_log_records; }
     [[nodiscard]] uint32_t total_size() const { return group_size; }
@@ -167,9 +171,13 @@ struct log_group_header {
 
 #pragma pack(1)
 struct log_group_footer {
-    uint32_t magic;
+    static constexpr uint8_t footer_version{0};
+
+    log_group_footer() : magic{LOG_GROUP_FOOTER_MAGIC}, version{footer_version} {}
+    uint32_t magic : 24;
+    uint32_t version : 8;
     logid_t start_log_idx;
-    uint8_t padding[20];
+    uint8_t padding[12];
 };
 #pragma pack()
 
@@ -181,11 +189,11 @@ std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, trait
     out_string_stream.copyfmt(out_stream);
 
     // print the stream
-    const auto s{fmt::format("magic = {} n_log_records = {} start_log_idx = {} group_size = {} inline_data_offset = {} "
-                             "oob_data_offset = {} prev_grp_crc = {} cur_grp_crc = {}",
-                             header.magic, header.n_log_records, header.start_log_idx, header.group_size,
-                             header.inline_data_offset, header.oob_data_offset, header.prev_grp_crc,
-                             header.cur_grp_crc)};
+    const auto s{fmt::format(
+        "magic = {} version={} n_log_records = {} start_log_idx = {} group_size = {} inline_data_offset = {} "
+        "oob_data_offset = {} prev_grp_crc = {} cur_grp_crc = {}",
+        header.magic, header.version, header.n_log_records, header.start_log_idx, header.group_size,
+        header.inline_data_offset, header.oob_data_offset, header.prev_grp_crc, header.cur_grp_crc)};
     out_string_stream << s;
     out_stream << out_string_stream.str();
 
@@ -411,18 +419,24 @@ struct logstore_superblk;
 
 #pragma pack(1)
 struct logdev_superblk {
+    static constexpr uint32_t LOGDEV_SB_MAGIC{0xDABAF00D};
     static constexpr uint32_t LOGDEV_SB_VERSION{1};
 
+    uint32_t magic{LOGDEV_SB_MAGIC};
     uint32_t version{LOGDEV_SB_VERSION};
     uint32_t num_stores{0};
-    off_t start_dev_offset{0};
+    uint64_t start_dev_offset{0};
+    logid_t key_idx{0};
     // The meta data starts immediately after the super block
     // Equivalent of:
     // logstore_superblk meta[0];
 
+    [[nodiscard]] uint32_t get_magic() const { return magic; }
     [[nodiscard]] uint32_t get_version() const { return version; }
-    [[nodiscard]] off_t start_offset() const { return start_dev_offset; }
+    [[nodiscard]] off_t start_offset() const { return static_cast< off_t >(start_dev_offset); }
     [[nodiscard]] uint32_t num_stores_reserved() const { return num_stores; }
+
+    void set_start_offset(const off_t offset) { start_dev_offset = static_cast< uint64_t >(offset); }
 
     [[nodiscard]] logstore_superblk* get_logstore_superblk() {
         return reinterpret_cast< logstore_superblk* >(reinterpret_cast< uint8_t* >(this) + sizeof(logdev_superblk));
@@ -451,8 +465,10 @@ public:
     void persist();
 
     [[nodiscard]] bool is_empty() const { return (m_sb == nullptr); }
-    [[nodiscard]] inline off_t get_start_dev_offset() const { return (m_sb->start_dev_offset); }
-    void update_start_dev_offset(const off_t offset, const bool persist_now);
+
+    [[nodiscard]] inline off_t get_start_dev_offset() const { return (m_sb->start_offset()); }
+    void set_start_dev_offset(const off_t offset, const logid_t key_idx, const bool persist_now);
+    logid_t get_start_log_idx() const;
 
     [[nodiscard]] logstore_id_t reserve_store(const bool persist_now);
     void unreserve_store(const logstore_id_t idx, const bool persist_now);
@@ -515,7 +531,8 @@ public:
     // NOTE: Possibly change these in future to include constant correctness
     typedef std::function< void(logstore_id_t, logdev_key, logdev_key, uint32_t nremaining_in_batch, void*) >
         log_append_comp_callback;
-    typedef std::function< void(logstore_id_t, logstore_seq_num_t, logdev_key, log_buffer) > log_found_callback;
+    typedef std::function< void(logstore_id_t, logstore_seq_num_t, logdev_key, logdev_key, log_buffer, uint32_t) >
+        log_found_callback;
     typedef std::function< void(logstore_id_t, const logstore_superblk&) > store_found_callback;
     typedef std::function< void(void) > flush_blocked_callback;
 

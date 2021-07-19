@@ -147,7 +147,6 @@ bool VarsizeBlkAllocator::is_blk_alloced(const BlkId& b, const bool use_lock) co
 
 void VarsizeBlkAllocator::inited() {
     m_cache_bm->copy(*(get_disk_bm()));
-    if (realtime_bm_on()) { m_realtime_bm->copy(*(get_disk_bm())); }
     BlkAllocator::inited();
 
     BLKALLOC_LOG(INFO, "VarSizeBlkAllocator initialized loading bitmap of size={} used blks={} from persistent storage",

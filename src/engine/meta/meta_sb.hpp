@@ -69,8 +69,9 @@ typedef uint32_t crc32_t;
  * */
 // clang-format on
 
+// in-memory only data structure
 struct MetaSubRegInfo {
-    bool do_crc{true};              // crc check for this client
+    uint8_t do_crc{1};              // crc check for this client
     std::set< uint64_t > meta_bids; // meta blk id
     meta_blk_found_cb_t cb{nullptr};
     meta_blk_recover_comp_cb_t comp_cb{nullptr};
@@ -81,10 +82,10 @@ struct MetaSubRegInfo {
 struct meta_blk_sb {
     uint32_t magic; // ssb magic
     uint32_t version;
-    bool migrated;
-    BlkId next_bid; // next metablk
-    BlkId bid;
-
+    BlkId8_t next_bid; // next metablk
+    BlkId8_t bid;
+    uint8_t migrated;
+    uint8_t pad[7];
     std::string to_string() const {
         return fmt::format("magic: {}, version: {}, next_bid: {}, self_bid: {}", magic, version, next_bid.to_string(),
                            bid.to_string());
@@ -103,16 +104,17 @@ struct meta_blk_hdr_s {
     uint32_t version;
     uint32_t gen_cnt; // generation count, bump on every update
     crc32_t crc;
-    BlkId next_bid;         // next metablk
-    BlkId prev_bid;         // previous metablk
-    BlkId ovf_bid;          // overflow blk id;
-    BlkId bid;              // current blk id; might not be needd;
-    bool compressed;        // context data compression bit
+    BlkId8_t next_bid;      // next metablk
+    BlkId8_t prev_bid;      // previous metablk
+    BlkId8_t ovf_bid;       // overflow blk id;
+    BlkId8_t bid;           // current blk id; might not be needd;
     uint64_t context_sz;    // total size of context data; if compressed is true, it is the round up of compressed size
                             // that is written to disk; if compressed is false, it is the original size of context data;
     uint64_t compressed_sz; // compressed size before round up to align_size, used for decompress
     uint64_t src_context_sz;        // context_sz before compression, this field only valid when compressed is true;
     char type[MAX_SUBSYS_TYPE_LEN]; // sub system type;
+    uint8_t compressed;             // context data compression bitword
+    uint8_t pad[7];
 
     std::string to_string() const {
         return fmt::format("type: {}, version: {}, magic: {}, crc: {}, next_bid: {}, prev_bid: {}, ovf_bid: {}, "
@@ -153,10 +155,10 @@ struct meta_blk {
 // single list overflow block chain
 #pragma pack(1)
 struct meta_blk_ovf_hdr_s {
-    uint32_t magic; // ovf magic
-    BlkId next_bid; // next ovf blk id;
-    BlkId bid;      // self blkid
-    uint32_t nbids; // number of data blkids stored in data_bid;
+    uint32_t magic;    // ovf magic
+    uint32_t nbids;    // number of data blkids stored in data_bid;
+    BlkId8_t next_bid; // next ovf blk id;
+    BlkId8_t bid;      // self blkid
     uint64_t context_sz;
 };
 #pragma pack()

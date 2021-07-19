@@ -327,6 +327,9 @@ public:
         if (free_blkid_list) {
             ResourceMgr::inc_free_blk(size);
             free_blkid_list->push_back(bid);
+            // release on realtime bitmap;
+            const auto ret = m_blkstore->free_on_realtime(bid);
+            HS_RELEASE_ASSERT(ret, "fail to free on realtime bm");
         }
     }
 

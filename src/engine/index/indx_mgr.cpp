@@ -330,7 +330,8 @@ IndxMgr::IndxMgr(boost::uuids::uuid uuid, std::string name, const io_done_cb& io
     m_prepare_cb_list = std::make_unique< std::vector< prepare_cb > >();
     m_prepare_cb_list->reserve(4);
 
-    m_is_snap_enabled = sb.is_snap_enabled;
+    HS_RELEASE_ASSERT_EQ(m_immutable_sb.version, indx_sb_version);
+    m_is_snap_enabled = sb.is_snap_enabled ? true : false;
     THIS_INDX_LOG(INFO, indx_mgr, , "opening journal id {}", (int)sb.journal_id);
     HomeLogStoreMgrSI().open_log_store(
         HomeLogStoreMgr::DATA_LOG_FAMILY_IDX, sb.journal_id,
@@ -521,9 +522,6 @@ void IndxMgr::io_replay() {
                 auto size = free_blk(nullptr, icp->io_free_blkid_list, fbe, true);
                 HS_ASSERT_CMP(DEBUG, size, >, 0);
 
-                // release on realtime bitmap;
-                auto ret = free_on_realtime(fbe.get_free_blkid());
-                HS_RELEASE_ASSERT(ret, "fail to free on realtime bm");
 
                 if (hdr->cp_id > m_last_cp_sb.icp_sb.active_cp_id) {
                     /* TODO: we update size in superblock with each checkpoint. Ideally it
@@ -605,10 +603,10 @@ void IndxMgr::recover_meta_ops() {
         auto hdr = (hs_cp_base_sb*)(buf->bytes);
         THIS_INDX_LOG(INFO, replay, , "found meta ops {} in recovery", (uint64_t)hdr->type);
         switch (hdr->type) {
-        case INDX_CP:
+        case meta_hdr_type::indx_cp:
             HS_ASSERT(DEBUG, 0, "invalid op");
             break;
-        case INDX_DESTROY: {
+        case meta_hdr_type::indx_destroy: {
             uint64_t cur_bytes = (uint64_t)(buf->bytes) + sizeof(hs_cp_base_sb);
             HS_RELEASE_ASSERT_GE(buf->size, (uint32_t)hdr->size);
             uint64_t size = hdr->size - sizeof(hs_cp_base_sb);
@@ -618,7 +616,7 @@ void IndxMgr::recover_meta_ops() {
             /* it will be destroyed when destroy is called from volume */
             break;
         }
-        case INDX_UNMAP: {
+        case meta_hdr_type::indx_unmap: {
             auto unmap_hdr = (hs_cp_unmap_sb*)buf->bytes;
 
             /* get key */
@@ -636,7 +634,7 @@ void IndxMgr::recover_meta_ops() {
             this->do_remaining_unmap_internal(nullptr, mblk, key, unmap_hdr->seq_id, btree_cur);
             break;
         }
-        case SNAP_DESTROY:
+        case meta_hdr_type::snap_destroy:
             HS_ASSERT(DEBUG, 0, "invalid op");
             break;
         default:
@@ -706,7 +704,7 @@ void IndxMgr::update_cp_sb(indx_cp_ptr& icp, hs_cp* hcp, indx_cp_base_sb* sb) {
         sb->icp_sb.diff_data_seqid = icp->dcp.end_seqid;
         sb->icp_sb.diff_max_seqid = icp->get_max_seqid();
         sb->icp_sb.diff_snap_id = icp->dcp.diff_snap_id;
-        sb->icp_sb.snap_cp = m_is_snap_started;
+        sb->icp_sb.snap_cp = m_is_snap_started ? 1 : 0;
     }
 
     m_active_tbl->update_btree_cp_sb(icp->acp.bcp, sb->acp_sb, (icp->flags & indx_cp_state::ba_cp));
@@ -908,17 +906,6 @@ void IndxMgr::truncate(const indx_cp_ptr& icp) {
 
 indx_tbl* IndxMgr::get_active_indx() { return m_active_tbl; }
 
-bool IndxMgr::free_on_realtime(const BlkId& bid) const { return m_hs->get_data_blkstore()->free_on_realtime(bid); }
-
-void IndxMgr::free_on_realtime(const std::vector< Free_Blk_Entry >& fbe_list, const indx_req_ptr& ireq) {
-    for (auto& fbe : fbe_list) {
-        auto ret = free_on_realtime(fbe.get_free_blkid());
-        if (!ret) {
-            LOGERROR("io: {}", ireq->to_string());
-            HS_RELEASE_ASSERT(false, "free failed on realtime bitmap.");
-        }
-    }
-}
 
 void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
     HS_ASSERT(DEBUG, ld_key.is_valid(), "key is invalid");
@@ -940,9 +927,6 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
          * setting it in disk bitmap so in next reboot it will be available to use.
          */
 
-        /* free blkids in real time bm */
-        free_on_realtime(ireq->indx_fbe_list, ireq);
-
         for (uint32_t i = 0; i < ireq->indx_alloc_blkid_list.size(); ++i) {
             m_hs->get_data_blkstore()->reserve_blk(ireq->indx_alloc_blkid_list[i]);
 
@@ -952,7 +936,8 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
         }
 
         /* free the blkids */
-        auto free_size = free_blk(ireq->hcp, ireq->icp->io_free_blkid_list, ireq->indx_fbe_list, true);
+        const auto free_size =
+            free_blk(ireq->hcp, ireq->icp->io_free_blkid_list, ireq->indx_fbe_list, true, ireq.get());
         HS_ASSERT(DEBUG, (ireq->indx_fbe_list.size() == 0 || free_size > 0),
                   " ireq->indx_fbe_list.size {}, free_size{}, ireq->indx_fbe_list.size", free_size);
         ireq->icp->indx_size.fetch_sub(free_size, std::memory_order_relaxed);
@@ -1089,9 +1074,9 @@ sisl::byte_array IndxMgr::alloc_unmap_sb(const uint32_t key_size, const seq_id_t
     uint64_t size = cursor_blob.size + sizeof(hs_cp_unmap_sb) + key_size;
     sisl::byte_array b =
         hs_utils::make_byte_array(size, MetaBlkMgrSI()->is_aligned_buf_needed(size), sisl::buftag::metablk);
-    hs_cp_unmap_sb* mhdr = (hs_cp_unmap_sb*)b->bytes;
+    hs_cp_unmap_sb* mhdr = new (b->bytes) hs_cp_unmap_sb();
     mhdr->uuid = m_uuid;
-    mhdr->type = INDX_UNMAP;
+    mhdr->type = meta_hdr_type::indx_unmap;
     mhdr->seq_id = seq_id;
     mhdr->size = size;
     mhdr->key_size = key_size;
@@ -1294,11 +1279,11 @@ void IndxMgr::destroy_indx_tbl() {
                     uint64_t size = cursor_blob.size + sizeof(hs_cp_base_sb);
                     sisl::byte_array b = hs_utils::make_byte_array(size, MetaBlkMgrSI()->is_aligned_buf_needed(size),
                                                                    sisl::buftag::metablk);
-                    hs_cp_base_sb* mhdr = (hs_cp_base_sb*)b->bytes;
+                    hs_cp_base_sb* mhdr = new (b->bytes) hs_cp_base_sb();
                     mhdr->uuid = m_uuid;
-                    mhdr->type = INDX_DESTROY;
+                    mhdr->type = meta_hdr_type::indx_destroy;
                     mhdr->size = cursor_blob.size + sizeof(hs_cp_base_sb);
-                    memcpy((uint8_t*)((uint64_t)b->bytes + sizeof(hs_cp_base_sb)), cursor_blob.bytes, cursor_blob.size);
+                    memcpy(static_cast< void* >(b->bytes + sizeof(hs_cp_base_sb)), cursor_blob.bytes, cursor_blob.size);
 #ifdef _PRERELEASE
                     if (homestore_flip->test_flip("indx_del_partial_free_data_blks_before_meta_write")) {
                         LOGINFO("aborting because of flip");
@@ -1528,9 +1513,8 @@ void StaticIndxMgr::write_hs_cp_sb(hs_cp* hcp) {
 
     sisl::byte_array b =
         hs_utils::make_byte_array(size, MetaBlkMgrSI()->is_aligned_buf_needed(size), sisl::buftag::metablk);
-    hs_cp_sb* hdr = (hs_cp_sb*)b->bytes;
-    hdr->version = INDX_MGR_VERSION;
-    hdr->type = meta_hdr_type::INDX_CP;
+    hs_cp_sb* hdr = new (b->bytes) hs_cp_sb();
+    hdr->type = meta_hdr_type::indx_cp;
     int indx_cnt = 0;
     indx_cp_base_sb* indx_cp_base_sb_list = (indx_cp_base_sb*)((uint64_t)hdr + sizeof(hs_cp_sb));
     for (auto it = hcp->indx_cp_list.begin(); it != hcp->indx_cp_list.end(); ++it) {
@@ -1617,10 +1601,11 @@ void StaticIndxMgr::shutdown(indxmgr_stop_cb cb) {
 
 void StaticIndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     auto meta_hdr = (hs_cp_base_sb*)buf.bytes();
-    if (meta_hdr->type == INDX_CP) {
+    HS_RELEASE_ASSERT_EQ(meta_hdr->version, hcp_version);
+    HS_RELEASE_ASSERT_EQ(meta_hdr->magic, hcp_magic);
+    if (meta_hdr->type == meta_hdr_type::indx_cp) {
         m_cp_meta_blk = mblk;
         hs_cp_sb* cp_hdr = (hs_cp_sb*)buf.bytes();
-        HS_ASSERT_CMP(RELEASE, (int)(cp_hdr->version), ==, INDX_MGR_VERSION);
         indx_cp_base_sb* cp_sb = (indx_cp_base_sb*)((uint64_t)buf.bytes() + sizeof(hs_cp_sb));
 
 #ifndef NDEBUG
@@ -1665,12 +1650,13 @@ void StaticIndxMgr::register_hs_cp_done_cb(const cp_done_cb& cb, bool is_blkallo
     }
 }
 
-uint64_t StaticIndxMgr::free_blk(hs_cp* hcp, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force) {
+uint64_t StaticIndxMgr::free_blk(hs_cp* hcp, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force,
+                                 const indx_req* ireq) {
     return free_blk(hcp, out_fblk_list.get(), fbe, force);
 }
 
 uint64_t StaticIndxMgr::free_blk(hs_cp* hcp, sisl::ThreadVector< homestore::BlkId >* out_fblk_list, Free_Blk_Entry& fbe,
-                                 bool force) {
+                                 bool force, const indx_req* ireq) {
     if (!force && !ResourceMgr::can_add_free_blk(1)) {
         /* caller will trigger homestore cp */
         return 0;
@@ -1688,18 +1674,25 @@ uint64_t StaticIndxMgr::free_blk(hs_cp* hcp, sisl::ThreadVector< homestore::BlkI
     fbe.m_hcp = hcp;
     out_fblk_list->push_back(fbe.get_free_blkid());
     m_read_blk_tracker->safe_free_blks(fbe);
-
     HS_ASSERT_CMP(RELEASE, free_blk_size, >, 0);
+
+    // release on realtime bitmap;
+    const auto ret = m_hs->get_data_blkstore()->free_on_realtime(fbe.get_free_blkid());
+    if (ireq) {
+        HS_RELEASE_ASSERT(ret, "fail to free on realtime bm ireq {}", ireq->to_string());
+    } else {
+        HS_RELEASE_ASSERT(ret, "free failed on realtime bitmap.");
+    }
     return free_blk_size;
 }
 
 uint64_t StaticIndxMgr::free_blk(hs_cp* hcp, blkid_list_ptr& out_fblk_list, std::vector< Free_Blk_Entry >& in_fbe_list,
-                                 bool force) {
+                                 bool force, const indx_req* ireq) {
     return (free_blk(hcp, out_fblk_list.get(), in_fbe_list, force));
 }
 
 uint64_t StaticIndxMgr::free_blk(hs_cp* hcp, sisl::ThreadVector< homestore::BlkId >* out_fblk_list,
-                                 std::vector< Free_Blk_Entry >& in_fbe_list, bool force) {
+                                 std::vector< Free_Blk_Entry >& in_fbe_list, bool force, const indx_req* ireq) {
     if (!force && !ResourceMgr::can_add_free_blk(in_fbe_list.size())) {
         /* caller will trigger homestore cp */
         return 0;

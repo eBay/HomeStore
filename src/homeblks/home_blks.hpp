@@ -48,23 +48,26 @@ class HomeBlksHttpServer;
  */
 
 const uint32_t HOMEBLKS_SB_SIZE{HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size)};
-constexpr uint32_t HOMEBLKS_SB_MAGIC{0xCEEDDEEB};
-constexpr uint16_t HOMEBLKS_SB_VERSION{0x2};
+constexpr uint64_t hb_sb_magic{0xCEEDDEEB};
+constexpr uint32_t hb_sb_version{0x1};
 
 typedef uint32_t homeblks_sb_flag_t;
 
 const uint32_t HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN{0x00000001};
+#pragma pack(1)
 struct homeblks_sb {
-    uint64_t version;
+    uint64_t magic = hb_sb_magic;
+    uint32_t version = hb_sb_version;
+    homeblks_sb_flag_t flags;
 
     uint64_t boot_cnt;
-    homeblks_sb_flag_t flags;
 
     void init_flag(homeblks_sb_flag_t f) { flags = f; }
     void set_flag(homeblks_sb_flag_t bit) { flags |= bit; }
     void clear_flag(homeblks_sb_flag_t bit) { flags &= ~bit; }
     bool test_flag(homeblks_sb_flag_t bit) { return flags & bit; }
-} __attribute((packed));
+};
+#pragma pack()
 
 // static_assert(std::is_trivially_copyable< homeblks_sb >::value, "Expecting homeblks_sb to be trivally copyable");
 static_assert(std::is_trivially_copyable< BlkId >::value, "Expecting BlkId to be trivally copyable");

@@ -489,7 +489,8 @@ private:
     void post_device_truncation(const logdev_key& trunc_upto_key);
     void on_write_completion(logstore_req* const req, const logdev_key ld_key);
     void on_read_completion(logstore_req* const req, const logdev_key ld_key);
-    void on_log_found(const logstore_seq_num_t seq_num, const logdev_key ld_key, const log_buffer buf);
+    void on_log_found(const logstore_seq_num_t seq_num, const logdev_key ld_key, const logdev_key flush_ld_key,
+                      const log_buffer buf);
     void on_batch_completion(const logdev_key& flush_batch_ld_key);
     void do_truncate(const logstore_seq_num_t upto_seq_num);
     [[nodiscard]] int search_max_le(const logstore_seq_num_t input_sn);

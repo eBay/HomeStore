@@ -26,7 +26,7 @@ void LogStoreFamily::meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_vi
 void LogStoreFamily::start(const bool format, logdev_blkstore_t* blk_store) {
     m_log_dev.register_store_found_cb(bind_this(LogStoreFamily::on_log_store_found, 2));
     m_log_dev.register_append_cb(bind_this(LogStoreFamily::on_io_completion, 5));
-    m_log_dev.register_logfound_cb(bind_this(LogStoreFamily::on_logfound, 4));
+    m_log_dev.register_logfound_cb(bind_this(LogStoreFamily::on_logfound, 6));
 
     // Start the logdev, which loads the device in case of recovery.
     m_log_dev.start(format, blk_store);
@@ -55,6 +55,7 @@ void LogStoreFamily::start(const bool format, logdev_blkstore_t* blk_store) {
                 auto& lstore{p.second.m_log_store};
                 if (lstore && lstore->m_replay_done_cb) {
                     lstore->m_replay_done_cb(lstore, lstore->m_seq_num.load(std::memory_order_acquire) - 1);
+                    lstore->truncate(lstore->m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire));
                 }
             }
         }
@@ -100,7 +101,7 @@ void LogStoreFamily::device_truncate_in_user_reactor(const std::shared_ptr< trun
                 HomeLogStoreMgrSI().m_truncate_thread,
                 [this, treq]([[maybe_unused]] io_thread_addr_t addr) { device_truncate_in_user_reactor(treq); });
         } else {
-            const logdev_key trunc_upto{do_device_truncate(treq->dry_run)};
+            const logdev_key trunc_upto = do_device_truncate(treq->dry_run);
             bool done{false};
             if (treq->cb || treq->wait_till_done) {
                 {
@@ -122,7 +123,7 @@ void LogStoreFamily::on_log_store_found(const logstore_id_t store_id, const logs
     auto m{m_id_logstore_map.rlock()};
     const auto it{m->find(store_id)};
     if (it == m->end()) {
-        LOGERROR("Store Id {}-{} found but not opened yet, ignoring the store", m_family_id, store_id);
+        LOGERROR("Store Id {}-{} found but not opened yet.", m_family_id, store_id);
         m_unopened_store_id.insert(store_id);
         m_unopened_store_io.insert(std::make_pair<>(store_id, 0));
         return;
@@ -143,31 +144,17 @@ void LogStoreFamily::on_io_completion(const logstore_id_t id, const logdev_key l
     HomeLogStore* const log_store{req->log_store};
 
     if (req->is_write) {
-        const auto it{m_last_flush_info.find(id)};
-        if ((it == std::end(m_last_flush_info)) || (it->second != flush_ld_key.idx)) {
-            // first time completion in this batch for a given store_id
-            m_last_flush_info.insert_or_assign(id, flush_ld_key.idx);
-            s_cur_flush_batch_stores.push_back(log_store->shared_from_this());
-        }
-
         HS_LOG_ASSERT_EQ(log_store->m_store_id, id, "Expecting store id in log store and io completion to match");
         log_store->on_write_completion(req, ld_key);
-
-        if (nremaining_in_batch == 0) {
-            // This batch is completed, call all log stores participated in this batch about the end of batch
-            HS_LOG_ASSERT_GT(s_cur_flush_batch_stores.size(), 0U, "Expecting one store to be flushed in batch");
-            for (auto& l : s_cur_flush_batch_stores) {
-                l->on_batch_completion(flush_ld_key);
-            }
-            s_cur_flush_batch_stores.clear();
-        }
+        on_batch_completion(log_store, nremaining_in_batch, flush_ld_key);
     } else {
         log_store->on_read_completion(req, ld_key);
     }
 }
 
 void LogStoreFamily::on_logfound(const logstore_id_t id, const logstore_seq_num_t seq_num, const logdev_key ld_key,
-                                 const log_buffer buf) {
+                                 const logdev_key flush_ld_key, const log_buffer buf,
+                                 const uint32_t nremaining_in_batch) {
     auto m{m_id_logstore_map.rlock()};
     const auto it{m->find(id)};
     if (it == m->end()) {
@@ -179,7 +166,32 @@ void LogStoreFamily::on_logfound(const logstore_id_t id, const logstore_seq_num_
         return;
     }
     auto& log_store{it->second.m_log_store};
-    if (it->second.m_log_store) { log_store->on_log_found(seq_num, ld_key, buf); }
+    if (!log_store) { return; }
+    log_store->on_log_found(seq_num, ld_key, flush_ld_key, buf);
+    on_batch_completion(log_store.get(), nremaining_in_batch, flush_ld_key);
+}
+
+void LogStoreFamily::on_batch_completion(HomeLogStore* log_store, const uint32_t nremaining_in_batch,
+                                         const logdev_key flush_ld_key) {
+
+    /* check if it is a first update on this log store */
+    auto id = log_store->get_store_id();
+    const auto it{m_last_flush_info.find(id)};
+    if ((it == std::end(m_last_flush_info)) || (it->second != flush_ld_key.idx)) {
+        // first time completion in this batch for a given store_id
+        m_last_flush_info.insert_or_assign(id, flush_ld_key.idx);
+        s_cur_flush_batch_stores.push_back(log_store->shared_from_this());
+    }
+
+    if (nremaining_in_batch == 0) {
+        // This batch is completed, call all log stores participated in this batch about the end of batch
+        HS_LOG_ASSERT_GT(s_cur_flush_batch_stores.size(), 0U, "Expecting one store to be flushed in batch");
+        for (auto& l : s_cur_flush_batch_stores) {
+            l->on_batch_completion(flush_ld_key);
+        }
+        s_cur_flush_batch_stores.clear();
+        m_last_flush_info.clear();
+    }
 }
 
 logdev_key LogStoreFamily::do_device_truncate(const bool dry_run) {
@@ -224,27 +236,25 @@ logdev_key LogStoreFamily::do_device_truncate(const bool dry_run) {
             "[Family={}] No log store append on any log stores, skipping device truncation, all_logstore_info:<{}>",
             m_family_id, dbg_str);
         return min_safe_ld_key;
-    } else {
-        HS_PERIODIC_LOG(INFO, logstore,
-                        "[Family={}] LogDevice truncate, all_logstore_info:<{}> safe log dev key to truncate={}",
-                        m_family_id, dbg_str, min_safe_ld_key);
+    }
 
-        // We call post device truncation only to the log stores whose prepared truncation points are fully
-        // truncated or to stores which didn't particpate in this device truncation.
-        for (auto& store_ptr : m_min_trunc_stores) {
-            store_ptr->post_device_truncation(min_safe_ld_key);
-        }
-        for (auto& store_ptr : m_non_participating_stores) {
-            store_ptr->post_device_truncation(min_safe_ld_key);
-        }
-        m_min_trunc_stores.clear(); // Not clearing here, would cause a shared_ptr ref holding.
-        m_non_participating_stores.clear();
-    }
     // Got the safest log id to truncate and actually truncate upto the safe log idx to the log device
-    if (!dry_run) {
-        const auto num_records_to_truncate{m_log_dev.truncate(min_safe_ld_key)};
-        if (num_records_to_truncate == 0) min_safe_ld_key = logdev_key::out_of_bound_ld_key();
+    if (!dry_run) { [[maybe_unused]] auto num = m_log_dev.truncate(min_safe_ld_key); }
+    HS_PERIODIC_LOG(INFO, logstore,
+                    "[Family={}] LogDevice truncate, all_logstore_info:<{}> safe log dev key to truncate={}",
+                    m_family_id, dbg_str, min_safe_ld_key);
+
+    // We call post device truncation only to the log stores whose prepared truncation points are fully
+    // truncated or to stores which didn't particpate in this device truncation.
+    for (auto& store_ptr : m_min_trunc_stores) {
+        store_ptr->post_device_truncation(min_safe_ld_key);
     }
+    for (auto& store_ptr : m_non_participating_stores) {
+        store_ptr->post_device_truncation(min_safe_ld_key);
+    }
+    m_min_trunc_stores.clear(); // Not clearing here, would cause a shared_ptr ref holding.
+    m_non_participating_stores.clear();
+
     return min_safe_ld_key;
 }
 

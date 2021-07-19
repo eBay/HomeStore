@@ -689,12 +689,24 @@ protected:
     }
 
     void truncate_validate(const bool is_parallel_to_write = false) {
+        int skip_truncation = 0;
         for (size_t i{0}; i < SampleDB::instance().m_log_store_clients.size(); ++i) {
             const auto& lsc{SampleDB::instance().m_log_store_clients[i]};
 
             // lsc->truncate(lsc->m_cur_lsn.load() - 1);
+            const auto t_seq_num = lsc->m_log_store->truncated_upto();
+            const auto c_seq_num = lsc->m_log_store->get_contiguous_completed_seq_num(0);
+            if (t_seq_num == c_seq_num) {
+                ++skip_truncation;
+                continue;
+            }
             lsc->truncate(lsc->m_log_store->get_contiguous_completed_seq_num(0));
             lsc->read_validate();
+        }
+
+        if (skip_truncation) {
+            /* not needed to call device truncate as one log store is not truncated */
+            return;
         }
 
         bool failed{false};
@@ -901,8 +913,6 @@ TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
         do {
             std::this_thread::sleep_for(std::chrono::microseconds(1000));
             this->truncate_validate(true /* is_parallel_to_write */);
-            ++trunc_attempt;
-            ASSERT_LT(trunc_attempt, static_cast< uint16_t >(30));
             {
                 std::unique_lock< std::mutex > lock { m_pending_mtx };
                 nrecords_waiting_to_complete = this->m_nrecords_waiting_to_complete;

@@ -64,9 +64,11 @@ void LogDev::start(const bool format, logdev_blkstore_t* blk_store) {
             m_store_found_cb(spair.first, spair.second);
         }
 
-        THIS_LOGDEV_LOG(INFO, "get start vdev offset during recovery {}", m_logdev_meta.get_start_dev_offset());
+        THIS_LOGDEV_LOG(INFO, "get start vdev offset during recovery {} log indx {} ",
+                        m_logdev_meta.get_start_dev_offset(), m_logdev_meta.get_start_log_idx());
 
         m_blkstore->update_data_start_offset(m_logdev_meta.get_start_dev_offset());
+        m_log_idx = m_logdev_meta.get_start_log_idx();
         do_load(m_logdev_meta.get_start_dev_offset());
         m_log_records->reinit(m_log_idx);
         m_last_flush_idx = m_log_idx - 1;
@@ -128,13 +130,22 @@ void LogDev::do_load(const off_t device_cursor) {
         }
 
         const log_group_header* const header{reinterpret_cast< log_group_header* >(buf.bytes())};
-        if (loaded_from != -1) {
-            HS_ASSERT_CMP(RELEASE, header->start_idx(), ==, m_log_idx, "log indx is not the expected one");
+
+        if (loaded_from == -1 && header->start_idx() < m_log_idx) {
+            // log dev is truncated completely
+            assert_next_pages(lstream);
+            THIS_LOGDEV_LOG(INFO, "LogDev loaded log_idx in range of [{} - {}]", loaded_from, m_log_idx - 1);
+            break;
         }
+
+        HS_ASSERT_CMP(RELEASE, header->start_idx(), ==, m_log_idx, "log indx is not the expected one");
         if (loaded_from == -1) { loaded_from = header->start_idx(); }
 
         // Loop through each record within the log group and do a callback
         decltype(header->nrecords()) i{0};
+        HS_RELEASE_ASSERT_GT(header->nrecords(), 0, "nrecords greater then zero");
+        const auto flush_ld_key{
+            logdev_key{header->start_idx() + header->nrecords() - 1, group_dev_offset + header->total_size()}};
         while (i < header->nrecords()) {
             const auto* const rec{header->nth_record(i)};
             const uint32_t data_offset{(rec->offset + (rec->get_inlined() ? 0 : header->oob_data_offset))};
@@ -147,7 +158,8 @@ void LogDev::do_load(const off_t device_cursor) {
             if (m_logfound_cb) {
                 THIS_LOGDEV_LOG(TRACE, "seq num {}, log indx {}, group dev offset {} size {}", rec->store_seq_num,
                                 (header->start_idx() + i), group_dev_offset, rec->size);
-                m_logfound_cb(rec->store_id, rec->store_seq_num, {header->start_idx() + i, group_dev_offset}, b);
+                m_logfound_cb(rec->store_id, rec->store_seq_num, {header->start_idx() + i, group_dev_offset},
+                              flush_ld_key, b, (header->nrecords() - (i + 1)));
             }
             ++i;
         }
@@ -184,7 +196,7 @@ bool LogDev::get_flush_status() { return (m_flush_status.load(std::memory_order_
 int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, const sisl::io_blob& data,
                              void* const cb_context) {
     auto prev_size = m_pending_flush_size.fetch_add(data.size, std::memory_order_relaxed);
-    const auto idx{m_log_idx.fetch_add(1, std::memory_order_acq_rel)};
+    const auto idx = m_log_idx.fetch_add(1, std::memory_order_acq_rel);
     auto threshold_size = LogDev::flush_data_threshold_size();
     m_log_records->create(idx, store_id, seq_num, data, cb_context);
     if (prev_size < threshold_size && ((prev_size + data.size) >= threshold_size) && !get_flush_status()) {
@@ -207,12 +219,12 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
     HS_ASSERT_CMP(RELEASE, size, ==, initial_read_size, "it is not completely read");
 
     const auto* const header{reinterpret_cast< log_group_header* >(rbuf)};
-    HS_ASSERT_CMP(RELEASE, header->magic_word(), ==, LOG_GROUP_HDR_MAGIC, "Log header corrupted with magic mismatch!");
-    HS_ASSERT_CMP(RELEASE, header->start_idx(), <=, key.idx, "log key offset does not match with log_idx");
-    HS_ASSERT_CMP(RELEASE, (header->start_idx() + header->nrecords()), >, key.idx,
-                  "log key offset does not match with log_idx");
-    HS_ASSERT_CMP(LOGMSG, header->total_size(), >=, header->_inline_data_offset(),
-                  "Inconsistent size data in log group");
+    HS_RELEASE_ASSERT_EQ(header->magic_word(), LOG_GROUP_HDR_MAGIC, "Log header corrupted with magic mismatch!");
+    HS_RELEASE_ASSERT_EQ(header->get_version(), log_group_header::header_version, "Log header version mismatch!");
+    HS_RELEASE_ASSERT_LE(header->start_idx(), key.idx, "log key offset does not match with log_idx");
+    HS_RELEASE_ASSERT_GT((header->start_idx() + header->nrecords()), key.idx,
+                         "log key offset does not match with log_idx");
+    HS_LOG_ASSERT_GE(header->total_size(), header->_inline_data_offset(), "Inconsistent size data in log group");
 
     // We can only do crc match in read if we have read all the blocks. We don't want to aggressively read more data
     // than we need to just to compare CRC for read operation. It can be done during recovery.
@@ -405,7 +417,7 @@ void LogDev::on_flush_completion(LogGroup* const lg) {
 
         m_log_records->complete(lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
         m_last_flush_idx = lg->m_flush_log_idx_upto;
-        const auto flush_ld_key{logdev_key{m_last_flush_idx, lg->m_log_dev_offset}};
+        const auto flush_ld_key{logdev_key{m_last_flush_idx, lg->m_log_dev_offset + lg->header()->total_size()}};
         m_last_crc = lg->header()->cur_grp_crc;
 
         auto from_indx = lg->m_flush_log_idx_from;
@@ -486,7 +498,7 @@ uint64_t LogDev::truncate(const logdev_key& key) {
             std::unique_lock< std::mutex > lk{m_meta_mutex};
 
             // Update the start offset to be read upon restart
-            m_logdev_meta.update_start_dev_offset(key.dev_offset, false /* persist_now */);
+            m_logdev_meta.set_start_dev_offset(key.dev_offset, key.idx + 1, false /* persist_now */);
 
             // Now that store is truncated, we can reclaim the store ids which are garbaged (if any) earlier
             for (auto it{std::cbegin(m_garbage_store_ids)}; it != std::cend(m_garbage_store_ids);) {
@@ -550,6 +562,9 @@ void LogDevMetadata::meta_buf_found(const sisl::byte_view& buf, void* const meta
     m_meta_mgr_cookie = meta_cookie;
     m_raw_buf = hs_utils::extract_byte_array(buf);
     m_sb = reinterpret_cast< logdev_superblk* >(m_raw_buf->bytes);
+
+    HS_RELEASE_ASSERT_EQ(m_sb->get_magic(), logdev_superblk::LOGDEV_SB_MAGIC, "Invalid logdev metablk, magic mismatch");
+    HS_RELEASE_ASSERT_EQ(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Invalid version of logdev metablk");
 }
 
 std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::load() {
@@ -637,10 +652,13 @@ logstore_superblk& LogDevMetadata::mutable_store_superblk(const logstore_id_t id
     return sb_area[idx];
 }
 
-void LogDevMetadata::update_start_dev_offset(const off_t offset, const bool persist_now) {
-    m_sb->start_dev_offset = offset;
+void LogDevMetadata::set_start_dev_offset(const off_t offset, const logid_t key_idx, const bool persist_now) {
+    m_sb->set_start_offset(offset);
+    m_sb->key_idx = key_idx;
     if (persist_now) { persist(); }
 }
+
+logid_t LogDevMetadata::get_start_log_idx() const { return m_sb->key_idx; }
 
 bool LogDevMetadata::resize_if_needed() {
     const auto req_sz{required_sb_size((m_store_info.size() == 0) ? 0u : *m_store_info.rbegin() + 1)};

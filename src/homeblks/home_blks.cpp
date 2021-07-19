@@ -344,8 +344,9 @@ homeblks_sb* HomeBlks::superblock_init() {
     m_homeblks_sb_buf = hs_utils::make_byte_array(
         HOMEBLKS_SB_SIZE, MetaBlkMgrSI()->is_aligned_buf_needed(HOMEBLKS_SB_SIZE), sisl::buftag::metablk);
 
-    auto sb = (homeblks_sb*)m_homeblks_sb_buf->bytes;
-    sb->version = HOMEBLKS_SB_VERSION;
+    auto* sb = new (m_homeblks_sb_buf->bytes) homeblks_sb();
+    sb->version = hb_sb_version;
+    sb->magic = hb_sb_magic;
     sb->boot_cnt = 0;
     sb->init_flag(0);
     return sb;
@@ -949,6 +950,9 @@ void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) 
 
     // recover from meta_blk;
     m_homeblks_sb_buf = hs_utils::extract_byte_array(buf);
+    auto* sb = new (m_homeblks_sb_buf->bytes) homeblks_sb();
+    HS_RELEASE_ASSERT_EQ(sb->version, hb_sb_version, "version does not match");
+    HS_RELEASE_ASSERT_EQ(sb->magic, hb_sb_magic, "magic does not match");
 }
 
 void HomeBlks::start_home_log_store() {

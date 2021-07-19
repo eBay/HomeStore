@@ -82,6 +82,7 @@ read_again:
         m_cur_read_bytes += m_read_size_multiple;
         return ret_buf;
     }
+    HS_DEBUG_ASSERT_EQ(footer->version, log_group_footer::footer_version, "Log footer version mismatch");
 
     // verify crc with data
     const crc32_t cur_crc{

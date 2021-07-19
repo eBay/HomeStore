@@ -107,13 +107,13 @@ table Generic {
     blkalloc_cp_timer_us: uint64 = 60000000 (hotswap);
 
     // writeback cache flush threads
-    cache_flush_threads : int32 = 2;
+    cache_flush_threads : int32 = 1;
 
     cp_watchdog_timer_sec : uint32 = 10; // it checks if cp stuck every 10 seconds
 
-    cache_max_throttle_cnt : uint64 = 512;
+    cache_max_throttle_cnt : uint64 = 4; // writeback cache max q depth
 
-    cache_min_throttle_cnt : uint64 = 5;
+    cache_min_throttle_cnt : uint64 = 4; // writeback cache min q deoth
 
     // if this value is set to 0, no sanity check will be run;
     sanity_check_level: uint32 = 1 (hotswap);
