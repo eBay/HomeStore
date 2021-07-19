@@ -178,7 +178,6 @@ public:
         return (get_data_blkstore()->attach_prepare_cp(cur_ba_cp));
     }
 
-
 protected:
     virtual data_blkstore_t::comp_callback data_completion_cb() = 0;
     virtual void process_vdev_error(vdev_info_block* vb) = 0;
@@ -214,7 +213,7 @@ protected:
 
     void new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb) {
         /* create blkstore */
-        blkstore_blob* blob = (blkstore_blob*)vb->context_data;
+        blkstore_blob* const blob{reinterpret_cast< blkstore_blob* >(vb->context_data)};
         switch (blob->type) {
         case blkstore_type::DATA_STORE:
             create_data_blkstore(vb);
@@ -250,8 +249,8 @@ protected:
         } else {
             m_data_blk_store = std::make_unique< data_blkstore_t >(
                 m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::WRITEBACK_CACHE, m_data_pagesz, "data",
-                (vb->failed ? true : false), true, data_completion_cb());
-            if (vb->failed) {
+                vb->is_failed(), true, data_completion_cb());
+            if (vb->is_failed()) {
                 m_vdev_failed = true;
                 LOGINFO("data block store is in failed state");
                 throw std::runtime_error("vdev in failed state");
@@ -272,8 +271,8 @@ protected:
         } else {
             m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
                 m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE,
-                HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "index", (vb->failed ? true : false), true);
-            if (vb->failed) {
+                HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "index", vb->is_failed(), true);
+            if (vb->is_failed()) {
                 m_vdev_failed = true;
                 LOGINFO("index block store is in failed state");
                 throw std::runtime_error("vdev in failed state");
@@ -295,8 +294,8 @@ protected:
         } else {
             m_meta_blk_store = std::make_unique< meta_blkstore_t >(
                 m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::PASS_THRU,
-                HS_STATIC_CONFIG(drive_attr.phys_page_size), "meta", (vb->failed ? true : false), false);
-            if (vb->failed) {
+                HS_STATIC_CONFIG(drive_attr.phys_page_size), "meta", vb->is_failed(), false);
+            if (vb->is_failed()) {
                 m_vdev_failed = true;
                 LOGINFO("meta block store is in failed state");
                 throw std::runtime_error("vdev in failed state");
@@ -326,10 +325,9 @@ protected:
         } else {
             m_data_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
                 m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::PASS_THRU,
-                HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "data_logdev", (vb->failed ? true : false), false,
+                HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "data_logdev", vb->is_failed(), false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::data_logdev(), std::placeholders::_1));
-
-            if (vb->failed) {
+            if (vb->is_failed()) {
                 m_vdev_failed = true;
                 LOGINFO("data logdev block store is in failed state");
                 throw std::runtime_error("vdev in failed state");
@@ -351,10 +349,9 @@ protected:
         } else {
             m_ctrl_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
                 m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::PASS_THRU,
-                HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "ctrl_logdev", (vb->failed ? true : false), false,
+                HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "ctrl_logdev", vb->is_failed(), false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::ctrl_logdev(), std::placeholders::_1));
-
-            if (vb->failed) {
+            if (vb->is_failed()) {
                 m_vdev_failed = true;
                 LOGINFO("ctrl logdev block store is in failed state");
                 throw std::runtime_error("vdev in failed state");
@@ -426,9 +423,10 @@ protected:
 private:
     static constexpr float data_blkstore_pct{84.0};
     static constexpr float indx_blkstore_pct{3.0};
-    static constexpr float data_logdev_blkstore_pct{1.9};
-    static constexpr float ctrl_logdev_blkstore_pct{0.1};
-    static constexpr float meta_blkstore_pct{1.0};
+
+    static constexpr float data_logdev_blkstore_pct{1.8};
+    static constexpr float ctrl_logdev_blkstore_pct{0.2};
+    static constexpr float meta_blkstore_pct{0.5};
 };
 
 } // namespace homestore

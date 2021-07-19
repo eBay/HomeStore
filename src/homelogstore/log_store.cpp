@@ -163,21 +163,20 @@ void HomeLogStore::on_read_completion(logstore_req* const req, const logdev_key 
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 }
 
-void HomeLogStore::on_log_found(const logstore_seq_num_t seq_num, const logdev_key ld_key, const log_buffer buf) {
+void HomeLogStore::on_log_found(const logstore_seq_num_t seq_num, const logdev_key ld_key,
+                                const logdev_key flush_ld_key, const log_buffer buf) {
     THIS_LOGSTORE_LOG(DEBUG, "Found a log lsn={} logdev_key={}", seq_num, ld_key);
-
-    if (seq_num <= m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire)) {
-        THIS_LOGSTORE_LOG(TRACE, "Log lsn={} is already truncated on per device, ignoring", seq_num);
-        return;
-    }
 
     // Create the mapping between seq_num and log dev key
     m_records.create_and_complete(seq_num, ld_key);
     atomic_update_max(m_seq_num, seq_num + 1, std::memory_order_acq_rel);
     m_flush_batch_max_lsn = std::max(m_flush_batch_max_lsn, seq_num);
 
+    if (seq_num <= m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire)) {
+        THIS_LOGSTORE_LOG(TRACE, "Log lsn={} is already truncated on per device, ignoring", seq_num);
+        return;
+    }
     if (m_found_cb != nullptr) m_found_cb(seq_num, buf, nullptr);
-    on_batch_completion(ld_key); // Log replay will always be on non-batch mode, so call batch completion everytime.
 }
 
 void HomeLogStore::on_batch_completion(const logdev_key& flush_batch_ld_key) {

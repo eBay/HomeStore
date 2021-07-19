@@ -9,23 +9,39 @@
 
 #define BOOST_UUID_RANDOM_PROVIDER_FORCE_POSIX 1
 
-#include <boost/intrusive/list.hpp>
+#include <array>
+#include <algorithm>
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#ifdef __linux__
+#include <fcntl.h>
 #include <sys/uio.h>
 #include <unistd.h>
-#include <exception>
-#include <string>
-#include <sds_logging/logging.h>
-#include <fcntl.h>
+#endif
+
+#include <boost/intrusive/list.hpp>
 #include <boost/uuid/uuid.hpp>            // uuid class
 #include <boost/uuid/uuid_generators.hpp> // generators
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
-#include <fds/sparse_vector.hpp>
-#include <boost/uuid/uuid_generators.hpp>
 #include <fds/buffer.hpp>
-#include <isa-l/crc.h>
+#include <fds/sparse_vector.hpp>
+#include <fds/utils.hpp>
 #include <iomgr/iomgr.hpp>
-#include <cstddef>
+#include <isa-l/crc.h>
+#include <sds_logging/logging.h>
+
 #include <engine/homestore_base.hpp>
+
 #include "api/meta_interface.hpp"
 
 using namespace iomgr;
@@ -35,13 +51,13 @@ namespace homestore {
 class BlkAllocator;
 struct blkalloc_cp;
 
-#define MAGIC 0xCEEDDEEB
+static constexpr uint32_t MAGIC{0xCEEDDEEB};
 #define PRODUCT_NAME "OmStore"
 
 /************* Super Block definition ******************/
 
-#define CURRENT_SUPERBLOCK_VERSION 1
-#define CURRENT_DM_INFO_VERSION 1
+static constexpr uint32_t CURRENT_SUPERBLOCK_VERSION{1};
+static constexpr uint32_t CURRENT_DM_INFO_VERSION{1};
 
 /*******************************************************************************************************
  *  _______________________             _________________________________________________________      *
@@ -53,92 +69,114 @@ struct blkalloc_cp;
 
 /************* Physical Device Info Block definition ******************/
 
+#pragma pack(1)
 struct pdevs_block {
-    uint64_t magic;         // Header magic expected to be at the top of block
-    uint32_t num_phys_devs; // Total number of physical devices in the entire system
-    uint32_t max_phys_devs;
-    uint64_t info_offset;
+    uint64_t magic{0};         // Header magic expected to be at the top of block
+    uint32_t num_phys_devs{0}; // Total number of physical devices in the entire system
+    uint32_t max_phys_devs{0};
+    uint64_t info_offset{0};
 
     uint64_t get_magic() const { return magic; }
     uint32_t get_num_phys_devs() const { return num_phys_devs; }
-} __attribute((packed));
+};
+#pragma pack()
 
+#pragma pack(1)
 struct pdev_info_block {
-    uint32_t dev_num;        // Device ID for this store instance.
-    uint32_t first_chunk_id; // First chunk id for this physical device
-    uint64_t dev_offset;     // Start offset of the device in global offset
+    uint32_t dev_num{0};        // Device ID for this store instance.
+    uint32_t first_chunk_id{0}; // First chunk id for this physical device
+    uint64_t dev_offset{0};     // Start offset of the device in global offset
 
     uint32_t get_dev_num() const { return dev_num; }
     uint32_t get_first_chunk_id() const { return first_chunk_id; }
     uint64_t get_dev_offset() const { return dev_offset; }
-} __attribute((packed));
+};
+#pragma pack()
 
 /************* chunk Info Block definition ******************/
 
+#pragma pack(1)
 struct chunks_block {
-    uint64_t magic;      // Header magic expected to be at the top of block
-    uint32_t num_chunks; // Number of physical chunks for this block
-    uint32_t max_num_chunks;
-    uint64_t info_offset;
+    uint64_t magic{0};      // Header magic expected to be at the top of block
+    uint32_t num_chunks{0}; // Number of physical chunks for this block
+    uint32_t max_num_chunks{0};
+    uint64_t info_offset{0};
 
     uint64_t get_magic() const { return magic; }
     uint32_t get_num_chunks() const { return num_chunks; }
-} __attribute((packed));
+};
+#pragma pack()
 
+#pragma pack(1)
 struct chunk_info_block {
-    uint64_t chunk_start_offset; // Start offset of the chunk within a pdev
-    uint64_t chunk_size;         // Chunk size
-    uint32_t chunk_id;           // Chunk id in global scope. It is the index in the array of chunk_info_blks
-    uint32_t pdev_id;            // Physical device id this chunk is hosted on
-    uint32_t vdev_id;            // Virtual device id this chunk hosts. UINT32_MAX if chunk is free
-    uint32_t prev_chunk_id;      // Prev pointer in the chunk
-    uint32_t next_chunk_id;      // Next pointer in the chunk
-    uint32_t primary_chunk_id;   // Valid chunk id if this is a mirror of some chunk
-    bool slot_allocated;         // Is this slot allocated for any chunks.
-    bool is_sb_chunk;            // This chunk is not assigned to any vdev but super block
-    off_t end_of_chunk_size;     // The offset indicates end of chunk.
+    uint64_t chunk_start_offset{0}; // Start offset of the chunk within a pdev
+    uint64_t chunk_size{0};         // Chunk size
+    uint32_t chunk_id{0};           // Chunk id in global scope. It is the index in the array of chunk_info_blks
+    uint32_t pdev_id{0};            // Physical device id this chunk is hosted on
+    uint32_t vdev_id{0};            // Virtual device id this chunk hosts. UINT32_MAX if chunk is free
+    uint32_t prev_chunk_id{0};      // Prev pointer in the chunk
+    uint32_t next_chunk_id{0};      // Next pointer in the chunk
+    uint32_t primary_chunk_id{0};   // Valid chunk id if this is a mirror of some chunk
+    int64_t end_of_chunk_size{0};   // The offset indicates end of chunk. off_t is ambiguous size
+    uint8_t slot_allocated{0};      // Is this slot allocated for any chunks.
+    uint8_t sb_chunk{0};            // This chunk is not assigned to any vdev but super block
+    uint8_t pad[6]{};               // pad to 8 byte total alignment
 
     uint64_t get_chunk_size() const { return chunk_size; }
     uint32_t get_chunk_id() const { return chunk_id; }
-    bool is_slot_allocated() const { return slot_allocated; }
-} __attribute((packed));
+    void set_slot_allocated(const bool allocated) { slot_allocated = static_cast< uint8_t >(allocated ? 0x01 : 0x00); };
+    bool is_slot_allocated() const { return (slot_allocated == 0x01); }
+    void set_sb_chunk(const bool chunk) { sb_chunk = static_cast< uint8_t >(chunk ? 0x01 : 0x00); }
+    bool is_sb_chunk() const { return (sb_chunk == 0x01); }
+};
+#pragma pack()
 
 /************* Vdev Info Block definition ******************/
+#pragma pack(1)
 struct vdevs_block {
-    uint64_t magic;     // Header magic expected to be at the top of block
-    uint32_t num_vdevs; // Number of virtual devices
-    uint32_t max_num_vdevs;
-    uint32_t first_vdev_id; // First vdev id / Head of the vdev list;
-    uint64_t info_offset;
-    uint32_t context_data_size;
+    uint64_t magic{0};         // Header magic expected to be at the top of block
+    uint32_t num_vdevs{0};     // Number of virtual devices
+    uint32_t max_num_vdevs{0};
+    uint32_t first_vdev_id{0}; // First vdev id / Head of the vdev list;
+    uint32_t context_data_size{0};
+    uint64_t info_offset{0};
 
     uint32_t get_num_vdevs() const { return num_vdevs; }
     uint64_t get_magic() const { return magic; }
     uint32_t get_first_vdev_id() const { return first_vdev_id; }
-} __attribute((packed));
+};
+#pragma pack()
 
-#define MAX_VDEV_INFO_BLOCK_SZ 4096
-#define MAX_VDEV_INFO_BLOCK_HDR_SZ 512
-#define MAX_CONTEXT_DATA_SZ (MAX_VDEV_INFO_BLOCK_SZ - MAX_VDEV_INFO_BLOCK_HDR_SZ)
+static constexpr size_t MAX_VDEV_INFO_BLOCK_SZ{4096};
+static constexpr size_t MAX_VDEV_INFO_BLOCK_HDR_SZ{512};
+static constexpr size_t MAX_CONTEXT_DATA_SZ{MAX_VDEV_INFO_BLOCK_SZ - MAX_VDEV_INFO_BLOCK_HDR_SZ};
 
+#pragma pack(1)
 struct vdev_info_block {
-    uint32_t vdev_id;            // 0: Id for this vdev. It is a index in the array of vdev_info_blk
-    uint64_t size;               // 4: Size of the vdev
-    uint32_t num_mirrors;        // 12: Total number of mirrors
-    uint32_t page_size;          // 16: IO block size for this vdev
-    uint32_t prev_vdev_id;       // 20: Prev pointer of vdevice list
-    uint32_t next_vdev_id;       // 24: Next pointer of vdevice list
-    bool slot_allocated;         // 28: Is this current slot allocated
-    bool failed;                 // 29: set to true if disk is replaced
-    uint32_t num_primary_chunks; // 30: number of primary chunks
-    uint8_t padding[MAX_VDEV_INFO_BLOCK_HDR_SZ - 34]; // Ugly hardcode will be removed after moving to superblk blkstore
-    char context_data[MAX_CONTEXT_DATA_SZ];
+    uint64_t size{0};               // 0: Size of the vdev
+    uint32_t vdev_id{0};            // 8: Id for this vdev. It is a index in the array of vdev_info_blk
+    uint32_t num_mirrors{0};        // 12: Total number of mirrors
+    uint32_t page_size{0};          // 16: IO block size for this vdev
+    uint32_t prev_vdev_id{0};       // 20: Prev pointer of vdevice list
+    uint32_t next_vdev_id{0};       // 24: Next pointer of vdevice list
+    uint32_t num_primary_chunks{0}; // 28: number of primary chunks
+    uint8_t slot_allocated{0};      // 32: Is this current slot allocated
+    uint8_t failed{0};              // 33: set to true if disk is replaced
+
+    uint8_t padding[MAX_VDEV_INFO_BLOCK_HDR_SZ - 34]{}; // Ugly hardcode will be removed after moving to superblk blkstore
+    uint8_t context_data[MAX_CONTEXT_DATA_SZ]{};
 
     uint32_t get_vdev_id() const { return vdev_id; }
     uint64_t get_size() const { return size; }
 
-    static constexpr uint32_t max_context_size() { return MAX_CONTEXT_DATA_SZ; }
-} __attribute((packed));
+    void set_slot_allocated(const bool allocated) { slot_allocated = static_cast< uint8_t >(allocated ? 0x01 : 0x00); };
+    bool is_slot_allocated() const { return (slot_allocated == 0x01); }
+    void set_failed(const bool failed_state) { failed = static_cast< uint8_t >(failed_state ? 0x01 : 0x00); };
+    bool is_failed() const { return (failed == 0x01); }
+
+    static constexpr size_t max_context_size() { return MAX_CONTEXT_DATA_SZ; }
+};
+#pragma pack()
 
 // This assert is trying catch mistakes of overlaping the header to context_data portion.
 static_assert(offsetof(vdev_info_block, context_data) == MAX_VDEV_INFO_BLOCK_HDR_SZ,
@@ -149,56 +187,84 @@ static_assert(sizeof(vdev_info_block) == MAX_VDEV_INFO_BLOCK_SZ, "vdev info bloc
 /*******************Super Block Definition*******************/
 
 /* This header should be atomically written to the disks. It should always be smaller then ssd atomic page size */
-#define SUPERBLOCK_PAYLOAD_OFFSET 4096
+static constexpr size_t SUPERBLOCK_PAYLOAD_OFFSET{4096};
 
+#pragma pack(1)
 struct super_block {
-    char empty_buf[SUPERBLOCK_PAYLOAD_OFFSET]; // don't write anything to first 4096 bytes.
-    uint64_t magic;                            // Header magic expected to be at the top of block
-    uint32_t version;                          // Version Id of this structure
-    uint64_t gen_cnt;
-    char product_name[64]; // Product name
-    int cur_indx;
-    bool init_done;                // homestore init completed flag
-    pdev_info_block this_dev_info; // Info about this device itself
-    chunk_info_block dm_chunk[2];  // chunk info blocks
-    hs_uuid_t system_uuid;         // homestore system uuid
+    static constexpr size_t s_num_dm_chunks{2};
+    static_assert((s_num_dm_chunks & (s_num_dm_chunks - 1)) == 0,
+                  "Size must be power of 2 for optimizations of & vs modulo");
+    uint8_t empty_buf[SUPERBLOCK_PAYLOAD_OFFSET]{}; // don't write anything to first 4096 bytes.
+    uint64_t magic{0};                              // Header magic expected to be at the top of block
+    uint64_t gen_cnt{0};
+    uint32_t version{0};                            // Version Id of this structure
+    int32_t cur_indx{0};
+    static constexpr size_t s_product_name_size{64};
+    char product_name[s_product_name_size]{}; // Product name
+    uint8_t init_done{0};             // homestore init completed flag
+    uint8_t pad[7]{};                 // pad to 64 bit
+    pdev_info_block this_dev_info{0}; // Info about this device itself
+    chunk_info_block dm_chunk[s_num_dm_chunks]{}; // chunk info blocks
+    uint64_t system_uuid{0};                    // homestore system uuid.  hs_uuid_t(time_t) is an ambiguous type
+
+    void set_init_done(const bool done) { init_done = static_cast< uint8_t >(done ? 0x01 : 0x00); }
+    bool is_init_done() const { return (init_done == 0x01); }
 
     uint64_t get_magic() const { return magic; }
     const char* get_product_name() const { return product_name; }
     uint32_t get_version() const { return version; }
-    hs_uuid_t get_sys_uuid() const { return system_uuid; }
-} __attribute((packed));
+    void set_system_uuid(const hs_uuid_t uuid) { system_uuid = static_cast< uint64_t >(uuid); }
+    hs_uuid_t get_system_uuid() const { return static_cast< hs_uuid_t >(system_uuid); }
+};
+#pragma pack()
 
-#define SUPERBLOCK_SIZE (HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size) + SUPERBLOCK_PAYLOAD_OFFSET)
+static const size_t SUPERBLOCK_SIZE{sisl::round_up(std::max(sizeof(super_block), HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size) + SUPERBLOCK_PAYLOAD_OFFSET), HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size))};
 
+#pragma pack(1)
+// NOTE: After this structure in memory follows pdev_info_block followed by chunk_info_block array
+// followed by vdev_info_block array
 struct dm_info {
     /* header of pdev, chunk and vdev */
-    uint64_t magic;    // Header magic expected to be at the top of block
-    uint16_t checksum; // Payload Checksum
-    uint32_t version;
-    uint64_t size;
-    pdevs_block pdev_hdr;
-    chunks_block chunk_hdr;
-    vdevs_block vdev_hdr;
+    uint64_t magic{0};    // Header magic expected to be at the top of block
+    uint16_t checksum{0}; // Payload Checksum
+    uint8_t pad[2]{};     // pad to 4 byte alignment
+    uint32_t version{0};
+    uint64_t size{0};
+
+    pdevs_block pdev_hdr{};
+    chunks_block chunk_hdr{};
+    vdevs_block vdev_hdr{};
 
     uint64_t get_magic() const { return magic; }
     uint64_t get_size() const { return size; }
     uint32_t get_version() const { return version; }
     uint16_t get_checksum() const { return checksum; }
-} __attribute((packed));
+    
+    static const size_t s_pdev_info_blocks_size;
+    static const size_t s_chunk_info_blocks_size;
+    static const size_t s_vdev_info_blocks_size;
+    static const size_t dm_info_block_size;
 
-#define PDEV_INFO_BLK_OFFSET sizeof(dm_info)
-#define CHUNK_INFO_BLK_OFFSET (PDEV_INFO_BLK_OFFSET + (sizeof(pdev_info_block) * HS_STATIC_CONFIG(engine.max_pdevs)))
-#define VDEV_INFO_BLK_OFFSET (CHUNK_INFO_BLK_OFFSET + sizeof(chunk_info_block) * HS_STATIC_CONFIG(engine.max_chunks))
+    pdev_info_block* get_pdev_info_blocks() {
+        return reinterpret_cast< pdev_info_block* >(reinterpret_cast< uint8_t* >(this) + sizeof(dm_info));
+    }
+    chunk_info_block* get_chunk_info_blocks() {
+        return reinterpret_cast< chunk_info_block* >(reinterpret_cast< uint8_t* >(this) + sizeof(dm_info) +
+                                                     s_pdev_info_blocks_size);
+    }
+    vdev_info_block* get_vdev_info_blocks() {
+        return reinterpret_cast< vdev_info_block* >(reinterpret_cast< uint8_t* >(this) + sizeof(dm_info) +
+                                                    s_pdev_info_blocks_size + s_chunk_info_blocks_size);
+    }
 
-#define DM_INFO_BLK_SIZE (VDEV_INFO_BLK_OFFSET + HS_STATIC_CONFIG(engine.max_vdevs) * sizeof(vdev_info_block))
+   	static constexpr size_t s_dm_payload_offset{12};  // offset to version entry of dm_info
+};
+#pragma pack()
 
-#define DM_PAYLOAD_OFFSET 10
-
-#define INVALID_PDEV_ID UINT32_MAX
-#define INVALID_VDEV_ID UINT32_MAX
-#define INVALID_CHUNK_ID UINT32_MAX
-#define INVALID_DEV_ID UINT32_MAX
+static constexpr uint32_t INVALID_PDEV_ID{std::numeric_limits< uint32_t >::max()};
+static constexpr uint32_t INVALID_VDEV_ID{std::numeric_limits< uint32_t >::max()};
+static constexpr uint32_t INVALID_CHUNK_ID{std::numeric_limits< uint32_t >::max()};
+static constexpr uint32_t INVALID_DEV_ID{std::numeric_limits< uint32_t >::max()};
 
 class PhysicalDev;
 
@@ -209,87 +275,106 @@ class PhysicalDevChunk {
 public:
     friend class DeviceManager;
 
-    PhysicalDevChunk(PhysicalDev* pdev, chunk_info_block* cinfo);
-    PhysicalDevChunk(PhysicalDev* pdev, uint32_t chunk_id, uint64_t start_offset, uint64_t size,
-                     chunk_info_block* cinfo);
+    PhysicalDevChunk(PhysicalDev* const pdev, chunk_info_block* const cinfo);
+    PhysicalDevChunk(PhysicalDev* const pdev, const uint32_t chunk_id, const uint64_t start_offset, const uint64_t size,
+                     chunk_info_block* const cinfo);
+
+    PhysicalDevChunk(const PhysicalDevChunk&) = delete;
+    PhysicalDevChunk(PhysicalDevChunk&&) noexcept = delete;
+    PhysicalDevChunk& operator=(const PhysicalDevChunk&) = delete;
+    PhysicalDevChunk& operator=(PhysicalDevChunk&&) noexcept = delete;
+    ~PhysicalDevChunk();
 
     const PhysicalDev* get_physical_dev() const { return m_pdev; }
 
-    DeviceManager* device_manager() const;
-
     PhysicalDev* get_physical_dev_mutable() { return m_pdev; };
+
+    const DeviceManager* device_manager() const;
+
+    DeviceManager* device_manager_mutable();
 
     void set_blk_allocator(std::shared_ptr< homestore::BlkAllocator > alloc) { m_allocator = alloc; }
 
-    std::shared_ptr< BlkAllocator > get_blk_allocator() { return m_allocator; }
+    std::shared_ptr< const BlkAllocator > get_blk_allocator() const { return m_allocator; }
 
-    void set_sb_chunk() { m_chunk_info->is_sb_chunk = true; }
-    void set_start_offset(uint64_t offset) { m_chunk_info->chunk_start_offset = offset; }
+    std::shared_ptr< BlkAllocator > get_blk_allocator_mutable() { return m_allocator; }
+
+    void set_sb_chunk() { m_chunk_info->set_sb_chunk(true); }
+    void set_start_offset(const uint64_t offset) { m_chunk_info->chunk_start_offset = offset; }
 
     uint64_t get_start_offset() const { return m_chunk_info->chunk_start_offset; }
 
-    void set_size(uint64_t size) { m_chunk_info->chunk_size = size; }
+    void set_size(const uint64_t size) { m_chunk_info->chunk_size = size; }
 
     uint64_t get_size() const { return m_chunk_info->chunk_size; }
 
-    bool is_busy() const { return (m_chunk_info->vdev_id != INVALID_VDEV_ID || m_chunk_info->is_sb_chunk); }
+    bool is_busy() const { return (m_chunk_info->vdev_id != INVALID_VDEV_ID || m_chunk_info->is_sb_chunk()); }
 
     void set_free() {
         set_vdev_id(INVALID_VDEV_ID);
         m_chunk_info->primary_chunk_id = INVALID_CHUNK_ID;
-        m_chunk_info->is_sb_chunk = false;
+        m_chunk_info->set_sb_chunk(false);
     }
 
     uint32_t get_vdev_id() const { return m_chunk_info->vdev_id; }
 
-    void set_vdev_id(uint32_t vdev_id) { m_chunk_info->vdev_id = vdev_id; }
+    void set_vdev_id(const uint32_t vdev_id) { m_chunk_info->vdev_id = vdev_id; }
 
-    void set_next_chunk_id(uint32_t next_chunk_id) { m_chunk_info->next_chunk_id = next_chunk_id; }
+    void set_next_chunk_id(const uint32_t next_chunk_id) { m_chunk_info->next_chunk_id = next_chunk_id; }
 
-    void set_next_chunk(PhysicalDevChunk* next_chunk) {
+    void set_next_chunk(PhysicalDevChunk* const next_chunk) {
         set_next_chunk_id(next_chunk ? next_chunk->get_chunk_id() : INVALID_CHUNK_ID);
     }
 
     uint32_t get_next_chunk_id() const { return m_chunk_info->next_chunk_id; }
 
-    PhysicalDevChunk* get_next_chunk() const;
+    const PhysicalDevChunk* get_next_chunk() const;
 
-    void set_prev_chunk_id(uint32_t prev_chunk_id) { m_chunk_info->prev_chunk_id = prev_chunk_id; }
+    PhysicalDevChunk* get_next_chunk_mutable();
 
-    void set_prev_chunk(PhysicalDevChunk* prev_chunk) {
+    void set_prev_chunk_id(const uint32_t prev_chunk_id) { m_chunk_info->prev_chunk_id = prev_chunk_id; }
+
+    void set_prev_chunk(PhysicalDevChunk* const prev_chunk) {
         set_prev_chunk_id(prev_chunk ? prev_chunk->get_chunk_id() : INVALID_CHUNK_ID);
     }
 
     uint32_t get_prev_chunk_id() const { return m_chunk_info->prev_chunk_id; }
 
-    PhysicalDevChunk* get_prev_chunk() const;
+    const PhysicalDevChunk* get_prev_chunk() const;
 
-    chunk_info_block* get_chunk_info() { return m_chunk_info; }
-    uint16_t get_chunk_id() const { return (uint16_t)m_chunk_info->chunk_id; }
+    PhysicalDevChunk* get_prev_chunk_mutable();
 
-    void free_slot() { m_chunk_info->slot_allocated = false; }
+    const chunk_info_block* get_chunk_info() const { return m_chunk_info; }
 
-    PhysicalDevChunk* get_primary_chunk() const;
+    chunk_info_block* get_chunk_info_mutbale() { return m_chunk_info; }
 
-    void set_primary_chunk_id(uint32_t primary_id) { m_chunk_info->primary_chunk_id = primary_id; }
+    uint16_t get_chunk_id() const { return static_cast< uint16_t >(m_chunk_info->chunk_id); }
 
-    std::string to_string() {
-        std::stringstream ss;
+    void free_slot() { m_chunk_info->set_slot_allocated(false); }
+
+    const PhysicalDevChunk* get_primary_chunk() const;
+
+    PhysicalDevChunk* get_primary_chunk_mutable();
+
+    void set_primary_chunk_id(const uint32_t primary_id) { m_chunk_info->primary_chunk_id = primary_id; }
+
+    std::string to_string() const {
+        std::ostringstream ss;
         ss << "chunk_id = " << get_chunk_id() << " pdev_id = " << m_chunk_info->pdev_id
            << " vdev_id = " << m_chunk_info->vdev_id << " start_offset = " << m_chunk_info->chunk_start_offset
            << " size = " << m_chunk_info->chunk_size << " prev_chunk_id = " << m_chunk_info->prev_chunk_id
            << " next_chunk_id = " << m_chunk_info->next_chunk_id << " busy? = " << is_busy()
-           << " slot_allocated? = " << m_chunk_info->slot_allocated;
+           << " slot_allocated? = " << m_chunk_info->is_slot_allocated();
         return ss.str();
     }
 
     void update_end_of_chunk(const uint64_t size) {
         LOGINFOMOD(device, "chunk id {}, end size {} actual size {}", get_chunk_id(), size, get_size());
-        m_chunk_info->end_of_chunk_size = size;
+        m_chunk_info->end_of_chunk_size = static_cast<int64_t>(size);
     }
-    off_t get_end_of_chunk() const { return m_chunk_info->end_of_chunk_size; }
+    off_t get_end_of_chunk() const { return static_cast< off_t >(m_chunk_info->end_of_chunk_size); }
 
-    void recover(std::unique_ptr< sisl::Bitset > recovered_bm, meta_blk* mblk);
+    void recover(std::unique_ptr< sisl::Bitset > recovered_bm, meta_blk* const mblk);
 
     void recover();
 
@@ -297,7 +382,7 @@ public:
 
     static std::shared_ptr< blkalloc_cp > attach_prepare_cp(std::shared_ptr< blkalloc_cp > cur_ba_cp);
 
-    void cp_done(std::shared_ptr< blkalloc_cp > ba_cp);
+    // void cp_done(std::shared_ptr< blkalloc_cp > ba_cp);
 
 private:
     chunk_info_block* m_chunk_info;
@@ -310,7 +395,7 @@ private:
 
 class PhysicalDevMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit PhysicalDevMetrics(const std::string& devname) : sisl::MetricsGroupWrapper("PhysicalDev", devname) {
+    explicit PhysicalDevMetrics(const std::string& devname) : sisl::MetricsGroupWrapper{"PhysicalDev", devname} {
         REGISTER_COUNTER(drive_sync_write_count, "Drive sync write count");
         REGISTER_COUNTER(drive_sync_read_count, "Drive sync read count");
         REGISTER_COUNTER(drive_async_write_count, "Drive async write count");
@@ -331,6 +416,11 @@ public:
 
         register_me_to_farm();
     }
+
+    PhysicalDevMetrics(const PhysicalDevMetrics&) = delete;
+    PhysicalDevMetrics(PhysicalDevMetrics&&) noexcept = delete;
+    PhysicalDevMetrics& operator=(const PhysicalDevMetrics&) = delete;
+    PhysicalDevMetrics& operator=(PhysicalDevMetrics&&) noexcept = delete;
 
     ~PhysicalDevMetrics() { deregister_me_from_farm(); }
 };
@@ -359,59 +449,66 @@ public:
      *  if this is set to false in a recovery boot, it is expected.
      *  this field will not be changed if is_init is set to true(first-time-boot)
      */
-    PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, hs_uuid_t& uuid, uint32_t dev_num,
-                uint64_t dev_offset, iomgr::iomgr_drive_type drive_type, bool is_init, uint64_t dm_info_size,
-                bool* is_inited, bool is_restricted_mode);
+    PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags, const hs_uuid_t& uuid, const uint32_t dev_num,
+                const uint64_t dev_offset, const iomgr::iomgr_drive_type drive_type, const bool is_init, const uint64_t dm_info_size,
+                bool* const is_inited, const bool is_restricted_mode);
 
-    PhysicalDev(DeviceManager* mgr, const std::string& devname, int const oflags, iomgr::iomgr_drive_type drive_type);
+    PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags, const iomgr::iomgr_drive_type drive_type);
+
+    PhysicalDev(const PhysicalDev&) = delete;
+    PhysicalDev(PhysicalDev&&) noexcept = delete;
+    PhysicalDev& operator=(const PhysicalDev&) = delete;
+    PhysicalDev& operator=(PhysicalDev&&) noexcept = delete;
     ~PhysicalDev();
 
-    void update(uint32_t dev_num, uint64_t dev_offset, uint32_t first_chunk_id);
-    void attach_superblock_chunk(PhysicalDevChunk* chunk);
+    void update(const uint32_t dev_num, const uint64_t dev_offset, const uint32_t first_chunk_id);
+    void attach_superblock_chunk(PhysicalDevChunk* const chunk);
     uint64_t sb_gen_cnt();
     size_t get_total_cap();
 
-    std::string get_devname() const { return m_devname; }
+    const std::string& get_devname() const { return m_devname; }
     uint64_t get_size() const { return m_devsize; }
     uint32_t get_first_chunk_id() const { return m_info_blk.first_chunk_id; }
     uint64_t get_dev_offset() const { return m_info_blk.dev_offset; }
     uint32_t get_dev_id() const { return m_info_blk.dev_num; }
     PhysicalDevMetrics& get_metrics() { return m_metrics; }
 
-    void set_dev_offset(uint64_t offset) { m_info_blk.dev_offset = offset; }
-    void set_dev_id(uint32_t id) { m_info_blk.dev_num = id; }
+    void set_dev_offset(const uint64_t offset) { m_info_blk.dev_offset = offset; }
+    void set_dev_id(const uint32_t id) { m_info_blk.dev_num = id; }
 
-    DeviceManager* device_manager() const { return m_mgr; }
+    const DeviceManager* device_manager() const { return m_mgr; }
+
+    DeviceManager* device_manager_mutable() { return m_mgr; }
 
     std::string to_string();
     /* Attach the given chunk to the list of chunks in the physical device. Parameter after provides the position
      * it needs to attach after. If null, attach to the end */
-    void attach_chunk(PhysicalDevChunk* chunk, PhysicalDevChunk* after);
+    void attach_chunk(PhysicalDevChunk* const chunk, PhysicalDevChunk* const after);
 
     /* Merge previous and next chunk from the chunk, if either one or both of them free. Returns the array of
      * chunk id which were merged and can be freed if needed */
-    std::array< uint32_t, 2 > merge_free_chunks(PhysicalDevChunk* chunk);
+    std::array< uint32_t, 2 > merge_free_chunks(PhysicalDevChunk* const chunk);
 
     /* Find a free chunk which closestly match for the required size */
-    PhysicalDevChunk* find_free_chunk(uint64_t req_size);
+    PhysicalDevChunk* find_free_chunk(const uint64_t req_size);
 
-    void write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch = false);
-    void writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
-                bool part_of_batch = false);
-    void write_zero(uint64_t size, uint64_t offset, uint8_t* cookie);
+    void write(const char* const data, const uint32_t size, const uint64_t offset, uint8_t* const cookie, const bool part_of_batch = false);
+    void writev(const iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
+                const bool part_of_batch = false);
+    void write_zero(const uint64_t size, const uint64_t offset, uint8_t* const cookie);
 
-    void read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch = false);
-    void readv(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
-               bool part_of_batch = false);
+    void read(char* const data, const uint32_t size, const uint64_t offset, uint8_t* const cookie, const bool part_of_batch = false);
+    void readv(iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
+               const bool part_of_batch = false);
 
-    ssize_t sync_write(const char* data, uint32_t size, uint64_t offset);
-    ssize_t sync_writev(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
+    ssize_t sync_write(const char* const data, const uint32_t size, const uint64_t offset);
+    ssize_t sync_writev(const iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset);
 
-    ssize_t sync_read(char* data, uint32_t size, uint64_t offset);
-    ssize_t sync_readv(const struct iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
+    ssize_t sync_read(char* const data, const uint32_t size, const uint64_t offset);
+    ssize_t sync_readv(iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset);
     pdev_info_block get_info_blk();
-    void read_dm_chunk(char* mem, uint64_t size);
-    void write_dm_chunk(uint64_t gen_cnt, char* mem, uint64_t size);
+    void read_dm_chunk(char* const mem, const uint64_t size);
+    void write_dm_chunk(const uint64_t gen_cnt, const char* const mem, const uint64_t size);
     uint64_t inc_error_cnt() { return (m_error_cnt.increment(1)); }
 
     /**
@@ -430,24 +527,24 @@ public:
 
     void close_device();
 
-    hs_uuid_t get_sys_uuid() { return m_super_blk->get_sys_uuid(); }
+    hs_uuid_t get_sys_uuid() { return m_super_blk->get_system_uuid(); }
 
 public:
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, const int oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type, const int oflags);
 
 private:
     inline void write_superblock();
     inline void read_superblock();
 
-    bool is_init_done() const { return m_super_blk->init_done; }
+    bool is_init_done() const { return m_super_blk->is_init_done(); }
 
     /* Load the physical device info from persistent storage. If its not a valid device, it will throw
      * std::system_exception. Returns true if the device has already formatted for Omstore, false otherwise. */
-    bool load_super_block(hs_uuid_t& system_uuid);
+    bool load_super_block(const hs_uuid_t& system_uuid);
 
     /* Format the physical device info. Intended to use first time or anytime we need to reformat the drives. Throws
      * std::system_exception if there is any write errors */
-    void write_super_block(uint64_t gen_cnt);
+    void write_super_block(const uint64_t gen_cnt);
 
     /* Validate if this device is a homestore validated device. If there is any corrupted device, then it
      * throws std::system_exception */
@@ -458,11 +555,12 @@ private:
     io_device_ptr m_iodev;
     std::string m_devname;
     super_block* m_super_blk{nullptr}; // Persisent header block
-    uint64_t m_devsize{0ul};
+    uint64_t m_devsize{0};
     struct pdev_info_block m_info_blk;
-    PhysicalDevChunk* m_dm_chunk[2];
+    std::array< PhysicalDevChunk*, super_block::s_num_dm_chunks > m_dm_chunk;
+    static constexpr size_t s_dm_chunk_mask{super_block::s_num_dm_chunks - 1};
     PhysicalDevMetrics m_metrics; // Metrics instance per physical device
-    int m_cur_indx{0};
+    int32_t m_cur_indx{0};
     bool m_superblock_valid{false};
     sisl::atomic_counter< uint64_t > m_error_cnt{0};
     bool m_restricted_mode{false}; // only allow special operations in this mode;
@@ -477,7 +575,7 @@ public:
     AbstractVirtualDev& operator=(AbstractVirtualDev&&) noexcept = delete;
     virtual ~AbstractVirtualDev() = default;
 
-    virtual void add_chunk(PhysicalDevChunk* chunk) = 0;
+    virtual void add_chunk(PhysicalDevChunk* const chunk) = 0;
 };
 
 class DeviceManager {
@@ -489,10 +587,14 @@ class DeviceManager {
     friend class PhysicalDevChunk;
 
 public:
-    DeviceManager(NewVDevCallback vcb, uint32_t const vdev_metadata_size,
-                  const iomgr::io_interface_comp_cb_t& io_comp_cb, iomgr::iomgr_drive_type drive_type,
-                  const vdev_error_callback& vdev_error_cb, bool is_restricted_mode);
+    DeviceManager(NewVDevCallback vcb, const uint32_t vdev_metadata_size,
+                  const iomgr::io_interface_comp_cb_t& io_comp_cb, const iomgr::iomgr_drive_type drive_type,
+                  const vdev_error_callback& vdev_error_cb, const bool is_restricted_mode);
 
+    DeviceManager(const DeviceManager& other) = delete;
+    DeviceManager& operator=(const DeviceManager& other) = delete;
+    DeviceManager(DeviceManager&&) noexcept = delete;
+    DeviceManager& operator=(DeviceManager&&) noexcept = delete;
     ~DeviceManager();
 
     /**
@@ -504,8 +606,8 @@ public:
      *  false if it is recovery reboot, meaning there is valid sb found on device
      */
     bool add_devices(const std::vector< dev_info >& devices);
-    size_t get_total_cap(void);
-    void handle_error(PhysicalDev* pdev);
+    size_t get_total_cap() const;
+    void handle_error(PhysicalDev* const pdev);
 
     /* This is not very efficient implementation of get_all_devices(), however, this is expected to be called during
      * the start of the devices and for that purpose its efficient enough */
@@ -522,59 +624,59 @@ public:
 
     /* Allocate a chunk for required size on the given physical dev and associate the chunk to provide virtual device.
      * Returns the allocated PhysicalDevChunk */
-    PhysicalDevChunk* alloc_chunk(PhysicalDev* pdev, uint32_t vdev_id, uint64_t req_size, uint32_t primary_id);
+    PhysicalDevChunk* alloc_chunk(PhysicalDev* const pdev, const uint32_t vdev_id, const uint64_t req_size, const uint32_t primary_id);
 
     /* Free the chunk for later user */
-    void free_chunk(PhysicalDevChunk* chunk);
+    void free_chunk(PhysicalDevChunk* const chunk);
 
     /* Allocate a new vdev for required size */
-    vdev_info_block* alloc_vdev(uint32_t req_size, uint32_t nmirrors, uint32_t blk_size, uint32_t nchunks, char* blob,
-                                uint64_t size);
+    vdev_info_block* alloc_vdev(const uint32_t req_size, const uint32_t nmirrors, const uint32_t blk_size, const uint32_t nchunks, char* const blob,
+                                const uint64_t size);
 
     /* Free up the vdev_id */
-    void free_vdev(vdev_info_block* vb);
+    void free_vdev(vdev_info_block* const vb);
 
     /* Given an ID, get the chunk */
-    PhysicalDevChunk* get_chunk(uint32_t chunk_id) const {
+    const PhysicalDevChunk* get_chunk(const uint32_t chunk_id) const {
         return (chunk_id == INVALID_CHUNK_ID) ? nullptr : m_chunks[chunk_id].get();
     }
 
-    PhysicalDevChunk* get_chunk_mutable(uint32_t chunk_id) {
+    PhysicalDevChunk* get_chunk_mutable(const uint32_t chunk_id) {
         return (chunk_id == INVALID_CHUNK_ID) ? nullptr : m_chunks[chunk_id].get();
     }
 
-    PhysicalDev* get_pdev(uint32_t pdev_id) const {
+    PhysicalDev* get_pdev(const uint32_t pdev_id) {
         return (pdev_id == INVALID_PDEV_ID) ? nullptr : m_pdevs[pdev_id].get();
     }
 
-    void add_chunks(uint32_t vid, chunk_add_callback cb);
+    void add_chunks(const uint32_t vid, const chunk_add_callback& cb);
     void inited();
     void write_info_blocks();
-    void update_vb_context(uint32_t vdev_id, const sisl::blob& ctx_data);
-    void get_vb_context(uint32_t vdev_id, const sisl::blob& ctx_data);
-    void update_end_of_chunk(PhysicalDevChunk* chunk, off_t offset);
+    void update_vb_context(const uint32_t vdev_id, const sisl::blob& ctx_data);
+    void get_vb_context(const uint32_t vdev_id, const sisl::blob& ctx_data);
+    void update_end_of_chunk(PhysicalDevChunk* const chunk, const off_t offset);
     void init_done();
     void close_devices();
     bool is_first_time_boot() const { return m_first_time_boot; }
     // void zero_pdev_sbs();
 
 public:
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, io_flag oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type, const io_flag oflags);
 
 private:
-    void load_and_repair_devices(const std::vector< dev_info >& devices, hs_uuid_t& system_uuid);
+    void load_and_repair_devices(const std::vector< dev_info >& devices, const hs_uuid_t& system_uuid);
     void init_devices(const std::vector< dev_info >& devices);
-    void read_info_blocks(uint32_t dev_id);
+    void read_info_blocks(const uint32_t dev_id);
 
-    chunk_info_block* alloc_new_chunk_slot(uint32_t* pslot_num);
+    chunk_info_block* alloc_new_chunk_slot(uint32_t* const pslot_num);
     vdev_info_block* alloc_new_vdev_slot();
 
-    PhysicalDevChunk* create_new_chunk(PhysicalDev* pdev, uint64_t start_offset, uint64_t size,
-                                       PhysicalDevChunk* prev_chunk);
-    void remove_chunk(uint32_t chunk_id);
-    void blk_alloc_meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
+    PhysicalDevChunk* create_new_chunk(PhysicalDev* const pdev, const uint64_t start_offset, const uint64_t size,
+                                       PhysicalDevChunk* const prev_chunk);
+    void remove_chunk(const uint32_t chunk_id);
+    void blk_alloc_meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
 
-    static int get_open_flags(io_flag oflags);
+    static int get_open_flags(const io_flag oflags);
 
 private:
     int m_open_flags;

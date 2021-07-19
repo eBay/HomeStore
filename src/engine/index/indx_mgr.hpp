@@ -63,8 +63,9 @@ struct indx_test_status {
  * | Journal Hdr | alloc_blkid list | free_blk_entry | key | value |
  * ------------------------------------------------------------------
  */
-ENUM(io_state, uint8_t, success, fail);
+ENUM(io_state, uint32_t, success, fail);
 
+#pragma pack(1)
 struct journal_hdr {
     uint32_t alloc_blkid_list_size; // numer of entries
     uint32_t free_blk_entry_size;   // number of entries
@@ -72,7 +73,9 @@ struct journal_hdr {
     uint32_t val_size;              // actual size in bytes
     int64_t cp_id;
     io_state state; // io state (failed or successed), place holder for future use;
+    uint8_t padding[4];
 };
+#pragma pack(0)
 
 class indx_journal_entry {
 public:
@@ -255,23 +258,31 @@ struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
 
 /* super bcp persisted for each CP */
 /* it contains the seqid from which journal has to be replayed. */
-#define INDX_MGR_VERSION 0x101
-enum meta_hdr_type { INDX_CP, INDX_DESTROY, INDX_UNMAP, SNAP_DESTROY };
+static constexpr uint32_t hcp_version = 0x1;
+static constexpr uint64_t hcp_magic = 0xbedabb1e;
+static constexpr uint32_t indx_sb_version = 0x1;
+ENUM(meta_hdr_type, uint32_t, indx_cp, indx_destroy, indx_unmap, snap_destroy);
+
+#pragma pack(1)
 struct hs_cp_base_sb {
+    uint64_t magic{hcp_magic};
+    uint32_t version{hcp_version};
+    uint32_t size;
     boost::uuids::uuid uuid; // Don't populate if it is hs indx meta blk
     meta_hdr_type type;
-    uint32_t size;
-} __attribute__((__packed__));
+    uint8_t padding[4];
+};
 
 struct hs_cp_unmap_sb : hs_cp_base_sb {
     seq_id_t seq_id;
     uint32_t key_size;
-} __attribute__((__packed__));
+    uint8_t padding[4];
+};
 
 struct hs_cp_sb : hs_cp_base_sb {
-    int version;
     uint32_t indx_cnt;
-} __attribute__((__packed__));
+    uint8_t padding[4];
+};
 
 struct indx_cp_sb {
     int64_t blkalloc_cp_id = -1; // cp cnt of last blkalloc checkpoint taken
@@ -286,10 +297,11 @@ struct indx_cp_sb {
     seq_id_t diff_data_seqid = -1;
     seq_id_t diff_max_seqid = -1;
     int64_t diff_snap_id = -1;
-    bool snap_cp = false;
+    uint32_t snap_cp{0};
+    uint8_t padding[4];
 
     seq_id_t get_active_data_seqid() const { return active_data_seqid; }
-} __attribute__((__packed__));
+};
 
 struct indx_cp_base_sb {
     boost::uuids::uuid uuid;
@@ -304,16 +316,16 @@ struct indx_cp_base_sb {
                            icp_sb.active_cp_id, icp_sb.active_data_seqid, icp_sb.diff_cp_id, icp_sb.diff_data_seqid,
                            icp_sb.blkalloc_cp_id, icp_sb.indx_size, acp_sb.to_string());
     }
-} __attribute__((__packed__));
+};
 
 /* this superblock is never changed once indx manager is created */
-#pragma pack(1)
 struct indx_mgr_sb {
+    uint32_t version{indx_sb_version};
     logstore_id_t journal_id{0};
     homeds::btree::btree_super_block btree_sb;
-    bool is_snap_enabled = false;
+    uint32_t is_snap_enabled{0};
     indx_mgr_sb(homeds::btree::btree_super_block btree_sb, logstore_id_t journal_id, bool is_snap_enabled) :
-            journal_id(journal_id), btree_sb(btree_sb), is_snap_enabled(is_snap_enabled) {}
+            journal_id(journal_id), btree_sb(btree_sb), is_snap_enabled(is_snap_enabled ? 1 : 0) {}
     indx_mgr_sb() = default;
 };
 #pragma pack()
@@ -469,12 +481,13 @@ public:
      * @return :- return number of blks freed. return -1 if it can not add more
      */
     static uint64_t free_blk(hs_cp* hcp, blkid_list_ptr& out_fblk_list, std::vector< Free_Blk_Entry >& in_fbe_list,
-                             bool force);
+                             bool force, const indx_req* ireq = nullptr);
     static uint64_t free_blk(hs_cp* hcp, sisl::ThreadVector< homestore::BlkId >* out_fblk_list,
-                             std::vector< Free_Blk_Entry >& in_fbe_list, bool force);
-    static uint64_t free_blk(hs_cp* hcp, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force);
+                             std::vector< Free_Blk_Entry >& in_fbe_list, bool force, const indx_req* ireq = nullptr);
+    static uint64_t free_blk(hs_cp* hcp, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, bool force,
+                             const indx_req* ireq = nullptr);
     static uint64_t free_blk(hs_cp* hcp, sisl::ThreadVector< homestore::BlkId >* out_fblk_list, Free_Blk_Entry& fbe,
-                             bool force);
+                             bool force, const indx_req* ireq = nullptr);
 
     static void add_read_tracker(const Free_Blk_Entry& bid);
     static void remove_read_tracker(const Free_Blk_Entry& fbe);
@@ -717,8 +730,6 @@ private:
                                        const void* key, homeds::btree::BtreeQueryCursor& unmap_btree_cur);
 
     void alloc_on_realtime(const std::vector< BlkId >& blkid_list, const indx_req_ptr& ireq);
-    void free_on_realtime(const std::vector< Free_Blk_Entry >& fbe_list, const indx_req_ptr& ireq);
-    bool free_on_realtime(const BlkId& bid) const;
 };
 
 /*************************************************** indx request ***********************************/

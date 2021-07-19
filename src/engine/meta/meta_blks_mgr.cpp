@@ -338,7 +338,7 @@ void MetaBlkMgr::register_handler(const meta_sub_type type, const meta_blk_found
 
     m_sub_info[type].cb = cb;
     m_sub_info[type].comp_cb = comp_cb;
-    m_sub_info[type].do_crc = do_crc;
+    m_sub_info[type].do_crc = do_crc ? 1 : 0;
     HS_LOG(DEBUG, metablk, "[type={}] registered with do_crc: {}", type, do_crc);
 }
 
@@ -475,7 +475,7 @@ void MetaBlkMgr::write_meta_blk_to_disk(meta_blk* const mblk) {
 meta_blk* MetaBlkMgr::init_meta_blk(BlkId& bid, const meta_sub_type type, const void* const context_data,
                                     const size_t sz) {
     meta_blk* const mblk{reinterpret_cast< meta_blk* >(hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::metablk))};
-    mblk->hdr.h.compressed = false;
+    mblk->hdr.h.compressed = 0;
     mblk->hdr.h.bid = bid;
     std::memset(static_cast< void* >(mblk->hdr.h.type), 0, MAX_SUBSYS_TYPE_LEN);
     std::memcpy(static_cast< void* >(mblk->hdr.h.type), static_cast< const void* >(type.c_str()), type.length());
@@ -615,7 +615,7 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* const mblk, const void* conte
             if (ratio_percent <= get_compress_ratio_limit()) {
                 COUNTER_INCREMENT(m_metrics, compress_success_cnt, 1);
                 HISTOGRAM_OBSERVE(m_metrics, compress_ratio_percent, ratio_percent);
-                mblk->hdr.h.compressed = true;
+                mblk->hdr.h.compressed = 1;
                 mblk->hdr.h.src_context_sz = sz;
                 mblk->hdr.h.context_sz = sisl::round_up(compressed_size, HS_STATIC_CONFIG(drive_attr.align_size));
                 mblk->hdr.h.compressed_sz = compressed_size;

@@ -168,6 +168,19 @@ private:
     chunk_num_t m_chunk_num;        // Chunk number - which is unique for the entire application
 } __attribute__((__packed__));
 
+static_assert(sizeof(BlkId) < 8);
+#pragma pack(1)
+struct BlkId8_t : public BlkId {
+    uint8_t pad[8 - sizeof(BlkId)]{};
+
+    BlkId8_t& operator=(const BlkId& rhs) {
+        BlkId::operator=(rhs);
+        return *this;
+    }
+};
+#pragma pack()
+static_assert(sizeof(BlkId8_t) == 8);
+
 struct BlkIdView {
 private:
     BlkId m_blkid;

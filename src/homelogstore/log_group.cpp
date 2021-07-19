@@ -107,8 +107,7 @@ const iovec_array& LogGroup::finish(const crc32_t prev_crc) {
 
     m_iovecs[0].iov_len = sisl::round_up(m_iovecs[0].iov_len, m_flush_multiple_size);
 
-    log_group_header* const hdr{header()};
-    hdr->magic = LOG_GROUP_HDR_MAGIC;
+    log_group_header* hdr{new (header()) log_group_header{}};
     hdr->n_log_records = m_nrecords;
     hdr->prev_grp_crc = prev_crc;
     hdr->inline_data_offset = sizeof(log_group_header) + (m_max_records * sizeof(serialized_log_record));
@@ -130,9 +129,7 @@ const iovec_array& LogGroup::finish(const crc32_t prev_crc) {
     HS_DEBUG_ASSERT_EQ(hdr->group_size, len, "length is not same");
 #endif
 
-    footer->magic = LOG_GROUP_FOOTER_MAGIC;
     footer->start_log_idx = hdr->start_log_idx;
-
     hdr->cur_grp_crc = compute_crc();
 
     return m_iovecs;
@@ -143,9 +140,9 @@ log_group_footer* LogGroup::add_and_get_footer() {
     if (new_iovec_for_footer()) {
         // allocate a new iovec if there are out of band buffers or inline buffer doesn't have enough space
         m_iovecs.emplace_back(static_cast< void* >(m_footer_buf.get()), m_footer_buf_len);
-        footer = reinterpret_cast< log_group_footer* >(m_footer_buf.get());
+        footer = new (m_footer_buf.get()) log_group_footer();
     } else {
-        footer = reinterpret_cast< log_group_footer* >((uintptr_t)m_iovecs[0].iov_base + m_inline_data_pos);
+        footer = new ((void*)((uint8_t*)m_iovecs[0].iov_base + m_inline_data_pos)) log_group_footer();
         m_iovecs[0].iov_len += sizeof(log_group_footer);
     }
     return footer;

@@ -109,6 +109,8 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
     auto sb = (vol_sb_hdr*)m_sb_buf->bytes;
     m_state = sb->state;
 
+    HS_RELEASE_ASSERT_EQ(sb->version, vol_sb_version, "version mismatch");
+    HS_RELEASE_ASSERT_EQ(sb->magic, vol_sb_magic, "magic mismatch");
     m_hb = HomeBlks::safe_instance();
 }
 
@@ -125,8 +127,7 @@ void Volume::init() {
             sizeof(vol_sb_hdr), MetaBlkMgrSI()->is_aligned_buf_needed(sizeof(vol_sb_hdr)), sisl::buftag::metablk);
 
         /* populate superblock */
-        sb = new (m_sb_buf->bytes)
-            vol_sb_hdr(m_params.page_size, m_params.size, (const char*)m_params.vol_name, m_params.uuid);
+        sb = new (m_sb_buf->bytes) vol_sb_hdr(m_params.page_size, m_params.size, m_params.vol_name, m_params.uuid);
 
         /* create indx tbl */
         m_indx_mgr = SnapMgr::make_SnapMgr(

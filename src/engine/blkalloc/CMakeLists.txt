@@ -16,7 +16,7 @@ if (${build_nonio_tests})
     set_source_files_properties(test_blkalloc.cpp PROPERTIES COMPILE_OPTIONS "-Wno-sign-compare" )
     add_executable(test_blkalloc ${TEST_BLKALLOC_SOURCE_FILES} $<TARGET_OBJECTS:hs_blkalloc>)
     target_link_libraries(test_blkalloc homestore ${CONAN_LIBS})
-    add_test(NAME BlkAlloc COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh --retry_log_mods "blkalloc:trace,base:trace" ${CMAKE_BINARY_DIR}/bin/test_blkalloc)
+    add_test(NAME BlkAlloc COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_blkalloc)
 
     set(TEST_BLK_CACHE_QUEUE_SOURCE_FILES test_blk_cache_queue.cpp)
     add_executable(test_blk_cache_queue ${TEST_BLK_CACHE_QUEUE_SOURCE_FILES} blk_cache_queue.cpp)

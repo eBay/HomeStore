@@ -68,7 +68,9 @@ private:
     void on_io_completion(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_idx,
                           const uint32_t nremaining_in_batch, void* const ctx);
     void on_logfound(const logstore_id_t id, const logstore_seq_num_t seq_num, const logdev_key ld_key,
-                     const log_buffer buf);
+                     const logdev_key flush_ld_key, const log_buffer buf, const uint32_t nremaining_in_batch);
+    void on_batch_completion(HomeLogStore* log_store, const uint32_t nremaining_in_batch,
+                             const logdev_key flush_ld_key);
 
 private:
     folly::Synchronized< std::unordered_map< logstore_id_t, logstore_info_t > > m_id_logstore_map;

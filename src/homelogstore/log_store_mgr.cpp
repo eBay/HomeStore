@@ -51,6 +51,7 @@ void HomeLogStoreMgr::start(const bool format) {
 }
 
 void HomeLogStoreMgr::stop() {
+    device_truncate(nullptr, true, false);
     stop_flush_thread();
     {
         std::unique_lock< std::mutex > lk{m_cv_mtx};

@@ -242,6 +242,7 @@ public:
             m_alloced_blk_count.fetch_add(m_disk_bm->get_set_count(), std::memory_order_relaxed);
             if (!m_auto_recovery) { m_disk_bm.reset(); }
             m_inited = true;
+            if (realtime_bm_on()) { m_realtime_bm->copy(*(get_disk_bm())); }
         }
     }
 
@@ -318,7 +319,7 @@ public:
                             BLKALLOC_LOG(ERROR, "bit not reset {}", b.get_blk_num() + i);
                         }
                     }
-                    BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_reset(b.get_blk_num(), b.get_nblks()),
+                    BLKALLOC_ASSERT(RELEASE, get_realtime_bm()->is_bits_reset(b.get_blk_num(), b.get_nblks()),
                                     "Expected disk bits to reset blk num {} num blks {}", b.get_blk_num(),
                                     b.get_nblks());
                 }
@@ -393,7 +394,7 @@ public:
     /* CP start is called when all its consumers have purged their free lists and now want to persist the
      * disk bitmap.
      */
-    [[nodiscard]] sisl::byte_array cp_start([[maybe_unused]] const std::shared_ptr< blkalloc_cp >& id) {
+    [[nodiscard]] sisl::byte_array cp_start([[maybe_unused]] std::shared_ptr< blkalloc_cp > id) {
         // prepare a valid blk alloc list;
         auto alloc_list_ptr{new sisl::ThreadVector< BlkId >()};
         // set to valid pointer, blk alloc will be acummulated;
@@ -454,19 +455,19 @@ public:
 
     void update_debug_bm(const BlkId& bid) { get_debug_bm()->set_bits(bid.get_blk_num(), bid.get_nblks()); }
 
-    [[nodiscard]] bool verify_debug_bm(bool free_debug_bm) {
-        bool ret{*get_disk_bm() == *get_debug_bm()};
+    [[nodiscard]] bool verify_debug_bm(const bool free_debug_bm) {
+        const bool ret{*get_disk_bm() == *get_debug_bm()};
         if (free_debug_bm) { m_debug_bm.reset(); }
         return ret;
     }
 
     /* Get status */
-    nlohmann::json get_status(const int log_level) {
+    nlohmann::json get_status(const int log_level) const {
         nlohmann::json j;
         return j;
     }
 
-    [[nodiscard]] bool realtime_bm_on() const { return m_cfg.m_realtime_bm_on; }
+    [[nodiscard]] bool realtime_bm_on() const { return (m_cfg.m_realtime_bm_on && m_auto_recovery); }
 
 private:
     [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); }
@@ -534,11 +535,11 @@ public:
     void suspend_cp() { suspend = true; }
     void resume_cp() { suspend = false; }
     void free_blks(const blkid_list_ptr& list) {
-        auto it = list->begin(true /* latest */);
+        auto it{list->begin(true /* latest */)};
         const BlkId* bid;
         while ((bid = list->next(it)) != nullptr) {
-            auto chunk{m_hs->get_device_manager()->get_chunk(bid->get_chunk_num())};
-            auto ba{chunk->get_blk_allocator()};
+            auto* const chunk{m_hs->get_device_manager()->get_chunk_mutable(bid->get_chunk_num())};
+            auto ba{chunk->get_blk_allocator_mutable()};
             ba->free_on_disk(*bid);
         }
         free_blkid_list_vector.push_back(list);
@@ -551,9 +552,9 @@ public:
             const BlkId* bid;
             auto it{list->begin(false /* latest */)};
             while ((bid = list->next(it)) != nullptr) {
-                auto chunk{m_hs->get_device_manager()->get_chunk(bid->get_chunk_num())};
-                chunk->get_blk_allocator()->free(*bid);
-                auto page_size{chunk->get_blk_allocator()->get_config().get_blk_size()};
+                auto* const chunk{m_hs->get_device_manager()->get_chunk_mutable(bid->get_chunk_num())};
+                chunk->get_blk_allocator_mutable()->free(*bid);
+                const auto page_size{chunk->get_blk_allocator()->get_config().get_blk_size()};
                 ResourceMgr::dec_free_blk(bid->data_size(page_size));
             }
             list->clear();
