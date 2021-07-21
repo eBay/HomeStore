@@ -366,7 +366,7 @@ def nightly():
     recovery_nightly()
     sleep(5)
     
-    load()
+    #load()
     sleep(5)
 
     vol_create_delete_test()
