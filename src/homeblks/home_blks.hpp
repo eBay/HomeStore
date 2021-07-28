@@ -356,9 +356,9 @@ private:
     std::atomic< uint64_t > m_shutdown_start_time = 0;
     iomgr::timer_handle_t m_shutdown_timer_hdl = iomgr::null_timer_handle;
     shutdown_comp_callback m_shutdown_done_cb;
-    bool m_force_shutdown = false;
-    bool m_init_error = false;
-    bool m_vol_shutdown_cmpltd = false;
+    bool m_force_shutdown{false};
+    bool m_init_error{false};
+    bool m_vol_shutdown_cmpltd{false};
     HomeBlksMetrics m_metrics;
     std::atomic< bool > m_start_shutdown;
     iomgr::io_thread_t m_init_thread_id;

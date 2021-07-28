@@ -506,3 +506,6 @@ if test_suits == "meta_mod_abort":
 
 if test_suits == "vdev_mod_abort":
     vol_mod_test("vdev", vdev_flip_list)
+
+if test_suits == "vol_create_delete_test":
+    vol_create_delete_test()

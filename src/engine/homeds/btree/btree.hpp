@@ -185,7 +185,7 @@ public:
         auto impl_ptr = btree_store_t::init_btree(bt, cfg);
         bt->m_btree_store = std::move(impl_ptr);
         bt->init_recovery(btree_sb, cp_sb, split_key_cb);
-        LOGINFO("btree recovered and created {} node size {}", cfg.get_name(), cfg.get_node_size());
+        LOGINFO("btree recovered and created {}, node size {}", cfg.get_name(), cfg.get_node_size());
         return bt;
     }
 
@@ -234,31 +234,41 @@ public:
         }
 
         uint64_t free_node_cnt;
-        if (!m_destroy) { destroy(nullptr, free_node_cnt, true); }
+        auto ret = destroy(nullptr, free_node_cnt, true);
+
+        HS_DEBUG_ASSERT_EQ(ret, btree_status_t::success, "btree destroy failed");
+        LOGWARN("Destroy in-memory btree nodes failed.");
     }
 
     /* It is called when its btree consumer has successfully stored the btree superblock */
     void create_done() { btree_store_t::create_done(m_btree_store.get(), m_root_node); }
 
     btree_status_t destroy(blkid_list_ptr free_blkid_list, uint64_t& free_node_cnt, bool in_mem = false) {
+        btree_status_t ret{btree_status_t::success};
         m_btree_lock.write_lock();
-        BtreeNodePtr root;
-        homeds::thread::locktype acq_lock = LOCKTYPE_WRITE;
+        if (!m_destroy) { // if previous destroy is successful, do not destroy again;
+            BtreeNodePtr root;
+            homeds::thread::locktype acq_lock = LOCKTYPE_WRITE;
 
-        auto ret = read_and_lock_root(m_root_node, root, acq_lock, acq_lock, nullptr);
-        if (ret != btree_status_t::success) {
-            m_btree_lock.unlock();
-            return ret;
+            ret = read_and_lock_root(m_root_node, root, acq_lock, acq_lock, nullptr);
+            if (ret != btree_status_t::success) {
+                m_btree_lock.unlock();
+                return ret;
+            }
+
+            free_node_cnt = 0;
+            ret = free(root, free_blkid_list, in_mem, free_node_cnt);
+
+            unlock_node(root, acq_lock);
+
+            if (ret == btree_status_t::success) {
+                THIS_BT_LOG(DEBUG, base, , "btree(root: {})  nodes destroyed successfully", m_root_node);
+                m_destroy = true;
+            } else {
+                THIS_BT_LOG(ERROR, base, , "btree(root: {}) nodes destroyed failed, ret: {}", m_root_node, ret);
+            }
         }
-
-        free_node_cnt = 0;
-        ret = free(root, free_blkid_list, in_mem, free_node_cnt);
-
-        unlock_node(root, acq_lock);
         m_btree_lock.unlock();
-        THIS_BT_LOG(DEBUG, base, , "btree nodes destroyed");
-
-        if (ret == btree_status_t::success) { m_destroy = true; }
         return ret;
     }
 
@@ -2684,10 +2694,16 @@ private:
         THIS_BT_LOG(DEBUG, btree_generics, node, "Freeing node");
 
         COUNTER_DECREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_count, btree_int_node_count, 1);
-        BT_LOG_ASSERT_CMP(node->is_valid_node(), ==, true, node);
-        node->set_valid_node(false);
-        m_total_nodes--;
-        btree_store_t::free_node(m_btree_store.get(), node, free_blkid_list, in_mem);
+        if (node->is_valid_node() == false) {
+            // a node could be marked as invalid during previous destroy and hit crash before destroy completes;
+            // and upon boot volume continues to destroy this btree;
+            THIS_BT_LOG(INFO, btree_generics, node,
+                        "Freeing a node already freed because of crash during destroy btree.");
+        } else {
+            node->set_valid_node(false);
+            m_total_nodes--;
+            btree_store_t::free_node(m_btree_store.get(), node, free_blkid_list, in_mem);
+        }
     }
 
     /* Recovery process is different for root node, child node and sibling node depending on how the node
@@ -2716,7 +2732,6 @@ private:
         auto acq_lock = is_leaf ? leaf_lock_type : int_lock_type;
         ret = lock_and_refresh_node(child_node, acq_lock, bcp);
 
-        BT_DEBUG_ASSERT_CMP(child_node->is_valid_node(), ==, true, child_node);
         BT_DEBUG_ASSERT_CMP(is_leaf, ==, child_node->is_leaf(), child_node);
 
         return ret;

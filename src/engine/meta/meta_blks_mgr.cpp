@@ -318,7 +318,12 @@ void MetaBlkMgr::deregister_handler(const meta_sub_type type) {
     std::lock_guard< decltype(m_meta_mtx) > lk{m_meta_mtx};
 
     const auto it{m_sub_info.find(type)};
-    if (it != std::end(m_sub_info)) { m_sub_info.erase(it); }
+    if (it != std::end(m_sub_info)) {
+        m_sub_info.erase(it);
+        HS_LOG(INFO, metablk, "[type={}] deregistered Successfully", type);
+    } else {
+        HS_LOG(INFO, metablk, "[type={}] not found in registered list, no-op", type);
+    }
 }
 
 void MetaBlkMgr::register_handler(const meta_sub_type type, const meta_blk_found_cb_t& cb,
@@ -339,7 +344,7 @@ void MetaBlkMgr::register_handler(const meta_sub_type type, const meta_blk_found
     m_sub_info[type].cb = cb;
     m_sub_info[type].comp_cb = comp_cb;
     m_sub_info[type].do_crc = do_crc ? 1 : 0;
-    HS_LOG(DEBUG, metablk, "[type={}] registered with do_crc: {}", type, do_crc);
+    HS_LOG(INFO, metablk, "[type={}] registered with do_crc: {}", type, do_crc);
 }
 
 void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* const context_data, const uint64_t sz,
@@ -362,8 +367,7 @@ void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* const context_
     if (m_sub_info[type].do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
 #endif
 
-    HS_LOG(DEBUG, metablk, "{}, adding meta bid: {}, sz: {}, mstore used size: {}", type, meta_bid.to_string(), sz,
-           m_sb_blk_store->get_used_size());
+    HS_LOG(INFO, metablk, "[type={}], adding meta bid: {}, sz: {}", type, meta_bid.to_string(), sz);
 
     meta_blk* const mblk{init_meta_blk(meta_bid, type, context_data, sz)};
 
@@ -818,8 +822,8 @@ std::error_condition MetaBlkMgr::remove_sub_sb(void* const cookie) {
     auto prev_bid{rm_blk_in_cache->hdr.h.prev_bid};
     auto next_bid{rm_blk_in_cache->hdr.h.next_bid};
 
-    HS_LOG(DEBUG, metablk, "{}, remove_sub_sb meta blk id: {}, prev_bid: {}, next_bid: {}, mstore used size: {}", type,
-           rm_bid.to_string(), prev_bid.to_string(), next_bid.to_string(), m_sb_blk_store->get_used_size());
+    HS_LOG(INFO, metablk, "[type={}], remove_sub_sb meta blk id: {}, prev_bid: {}, next_bid: {}, mstore used size: {}",
+           type, rm_bid.to_string(), prev_bid.to_string(), next_bid.to_string(), m_sb_blk_store->get_used_size());
 
     // validate bid/prev/next with cache data;
     if (rm_blk != rm_blk_in_cache) {
