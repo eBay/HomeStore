@@ -25,7 +25,7 @@ enum class SPECIFIC_TEST : uint8_t {
 template < typename K, typename V, typename Store, typename Executor >
 struct BtreeLoadGen {
     std::unique_ptr< KVGenerator< K, V, Store, Executor > > kvg;
-    std::atomic< uint64_t > stored_keys{0}, outstanding_create{0}, outstanding_others{0};
+    uint64_t stored_keys{0}, outstanding_create{0}, outstanding_others{0};
     uint32_t CHECKPOINT_RANGE_BATCH_SIZE{50};
     uint32_t UPDATE_RANGE_BATCH_SIZE{64};
     uint32_t QUERY_RANGE_BATCH_SIZE{32};
@@ -149,7 +149,10 @@ struct BtreeLoadGen {
         // also add flips to simulate split while in fanout
         const uint64_t kc{get_warmup_key_count(100)};
         kvg->preload(KeyPattern::SEQUENTIAL, ValuePattern::SEQUENTIAL_VAL, kc);
-        stored_keys += kc;
+        {
+            std::unique_lock< std::mutex > lk{m_mtx};
+            stored_keys += kc;
+        }
         assert(kvg->get_keys_count() == kc);
         kvg->reset_pattern(KeyPattern::SEQUENTIAL, 0);
 #ifdef _PRERELEASE
@@ -167,7 +170,7 @@ struct BtreeLoadGen {
             }
         });
     }
-    void specific_tests(SPECIFIC_TEST st) {
+    void specific_tests(const SPECIFIC_TEST st) {
         if (st == SPECIFIC_TEST::MAP) { do_sub_range_test(); }
     }
     void warmup(const bool update_allowed, const bool remove_allowed, const bool range_update_allowed, const bool range_query_allowed) {
@@ -179,15 +182,16 @@ struct BtreeLoadGen {
 
     void join() {
         std::unique_lock< std::mutex > lk{m_mtx};
-        m_cv.wait(lk, [this] { return (outstanding_create + outstanding_others == 0); });
+        m_cv.wait(lk, [this] { return m_loadgen_verify_mode || ((outstanding_create == 0) && (outstanding_others == 0)); });
     }
 
     void insert_success_cb(const int op = 1) {
         {
             std::unique_lock< std::mutex > lk{m_mtx};
-            stored_keys += op;
-            const auto prev_outstanding{outstanding_create.fetch_sub(static_cast< uint64_t >(op))};
-            assert(prev_outstanding >= static_cast< uint64_t >(op));
+            assert(op >= 1);
+            stored_keys += static_cast< uint64_t >(op);
+            assert(outstanding_create >= static_cast< uint64_t >(op));                            
+            outstanding_create -= static_cast< uint64_t >(op);
         }
         m_cv.notify_one();
     }
@@ -195,10 +199,11 @@ struct BtreeLoadGen {
     void remove_success_cb(const int op = 1) {
         {
             std::unique_lock< std::mutex > lk{m_mtx};
-            const auto prev_stored{stored_keys.fetch_sub(static_cast< uint64_t >(op))};
-            assert(prev_stored >= static_cast< uint64_t >(op));
-            const auto prev_outstanding{outstanding_others.fetch_sub(static_cast< uint64_t >(op))};
-            assert(prev_outstanding >= static_cast< uint64_t >(op));
+            assert(op >= 1);
+            assert(stored_keys >= static_cast< uint64_t >(op));
+            stored_keys -= static_cast< uint64_t >(op);
+            assert(outstanding_others >= static_cast<uint64_t>(op));
+            outstanding_others -= static_cast< uint64_t >(op);
         }
         m_cv.notify_one();
     }
@@ -206,18 +211,22 @@ struct BtreeLoadGen {
     void read_update_success_cb(const int op = 1) {
         {
             std::unique_lock< std::mutex > lk{m_mtx};
-            if (op == 0) {
+            switch (op) {
+            case 0: 
                 // range update succes cb
-                const auto prev{outstanding_others.fetch_sub(UPDATE_RANGE_BATCH_SIZE)};
-                assert(prev >= UPDATE_RANGE_BATCH_SIZE);
-            }
-            if (op == -1) {
+                assert(outstanding_others >= UPDATE_RANGE_BATCH_SIZE);
+                outstanding_others -= UPDATE_RANGE_BATCH_SIZE;
+                break;
+            case -1: 
                 // range query succes cb
-                const auto prev{outstanding_others.fetch_sub(QUERY_RANGE_BATCH_SIZE)};
-                assert(prev >= QUERY_RANGE_BATCH_SIZE);
-            } else {
-                const auto prev{outstanding_others.fetch_sub(static_cast< uint64_t >(op))};
-                assert(prev >= static_cast< uint64_t >(op));
+                assert(outstanding_others >= QUERY_RANGE_BATCH_SIZE);
+                outstanding_others -= QUERY_RANGE_BATCH_SIZE;
+                break;
+            default: 
+                assert(op >= 1);
+                assert(outstanding_others >= static_cast< uint64_t >(op));
+                outstanding_others -= static_cast< uint64_t >(op);
+                break;
             }
         }
         m_cv.notify_one();
@@ -237,14 +246,14 @@ struct BtreeLoadGen {
 
     bool increment_other(const int op = 1) {
         std::unique_lock< std::mutex > lk{m_mtx};
-        if ((outstanding_others > stored_keys) || (stored_keys - outstanding_others < static_cast<uint64_t>(op))) return false; // cannot accomodate more
+        if ((outstanding_others >= stored_keys) || (stored_keys - outstanding_others < static_cast<uint64_t>(op))) return false; // cannot accomodate more
         outstanding_others += op;
         return true;
     }
 
     bool is_storedkey_watermark_reached(const uint64_t watermark) const {
         std::unique_lock< std::mutex > lk{m_mtx};
-        return (stored_keys + outstanding_create > watermark);
+        return (stored_keys + outstanding_create >= watermark);
     }
 
     uint64_t get_issued_ios() const {
@@ -291,10 +300,10 @@ struct BtreeLoadGen {
     }
 
     void try_range_update() {
-        if (!is_storedkey_watermark_reached(UPDATE_RANGE_BATCH_SIZE * 2)) return;
-
         while (!increment_other(UPDATE_RANGE_BATCH_SIZE)) {
-            std::this_thread::sleep_for(std::chrono::seconds{1});
+            if (!is_storedkey_watermark_reached(UPDATE_RANGE_BATCH_SIZE * 2)) return;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds{100});
             // if cannot accomodate, halt issue of any new ios and wait for pending ios to finish
         }
         kvg->range_update(KeyPattern::UNI_RANDOM, ValuePattern::RANDOM_BYTES, UPDATE_RANGE_BATCH_SIZE, true, true, true,
@@ -306,10 +315,10 @@ struct BtreeLoadGen {
     }
 
     void try_range_query() {
-        if (!is_storedkey_watermark_reached(QUERY_RANGE_BATCH_SIZE * 2)) return;
-
         while (!increment_other(QUERY_RANGE_BATCH_SIZE)) {
-            std::this_thread::sleep_for(std::chrono::seconds{1});
+            if (!is_storedkey_watermark_reached(QUERY_RANGE_BATCH_SIZE * 2)) return;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds{100});
             // if cannot accomodate, halt issue of any new ios and wait for pending ios to finish
         }
         kvg->range_query(KeyPattern::UNI_RANDOM, QUERY_RANGE_BATCH_SIZE, true, true, true,
@@ -340,13 +349,21 @@ struct BtreeLoadGen {
     }
 
     void try_print() {
+        uint64_t keys_stored{0}, create_outstanding{0}, others_outstanding{0};
+        {
+            std::unique_lock< std::mutex > lk{m_mtx};
+            keys_stored = stored_keys;
+            create_outstanding = outstanding_create;
+            others_outstanding = outstanding_others;
+        }
+
         if (get_elapsed_time(p.print_startTime) > p.PRINT_INTERVAL) {
             p.print_startTime = Clock::now();
 
             LOGINFO("stored_keys:{}, outstanding_create:{},"
                     " outstanding_others:{}, creates:{}, reads:{}, updates:{}, deletes:{}, "
                     "rangeupdate:{}, rangequery:{}, total_io:{}, verify_io:{}",
-                    stored_keys, outstanding_create, outstanding_others, C_NC, C_NR, C_NU, C_ND,
+                    keys_stored, create_outstanding, others_outstanding, C_NC, C_NR, C_NU, C_ND,
                     C_NRU / UPDATE_RANGE_BATCH_SIZE, C_NRQ / QUERY_RANGE_BATCH_SIZE, get_issued_ios(), C_NV);
         }
     }
@@ -357,28 +374,32 @@ struct BtreeLoadGen {
                 const auto op{select_io()};
 
                 if (m_loadgen_verify_mode) {
-
                     if (!range_query_allowed || try_verify_all()) { break; }
                     continue;
                 }
-                if (op == 1)
+                switch (op) {
+                case 1: 
                     try_create();
-                else if (op == 2)
+                    break;
+                case 2: 
                     try_read();
-                else if (op == 3) {
-                    if (!update_allowed) continue;
-                    try_update();
-                } else if (op == 4) {
-                    if (!remove_allowed) continue;
-                    try_delete();
-                } else if (op == 5) {
-                    if (!range_update_allowed) continue;
-                    try_range_update();
-                } else if (op == 6) {
-                    if (!range_query_allowed) continue;
-                    try_range_query();
-                } else
+                    break;
+                case 3:
+                    if (update_allowed) { try_update(); }
+                    break;
+                case 4: 
+                    if (remove_allowed) { try_delete(); }
+                    break;
+                case 5: 
+                    if (range_update_allowed) { try_range_update(); }
+                    break;
+                case 6:
+                    if (range_query_allowed) { try_range_query(); }
+                    break;
+                default:
                     assert(false);
+                    break;
+                }
 
                 if ((get_issued_ios() > p.NIO) || (get_elapsed_time(p.startTime) > p.NRT)) break;
             }
@@ -386,11 +407,14 @@ struct BtreeLoadGen {
 
         if (remove_allowed) kvg->remove_all_keys();
         join();
-        LOGINFO("stored_keys:{}, outstanding_create:{},"
-                " outstanding_others:{}, creates:{}, reads:{}, updates:{}, deletes:{}, "
-                "rangeupdate:{}, rangequery:{}, total_io:{}, verify_io:{}",
-                stored_keys, outstanding_create, outstanding_others, C_NC, C_NR, C_NU, C_ND,
-                C_NRU / UPDATE_RANGE_BATCH_SIZE, C_NRQ / QUERY_RANGE_BATCH_SIZE, get_issued_ios(), C_NV);
+        {
+            std::unique_lock< std::mutex > lk{m_mtx};
+            LOGINFO("stored_keys:{}, outstanding_create:{},"
+                    " outstanding_others:{}, creates:{}, reads:{}, updates:{}, deletes:{}, "
+                    "rangeupdate:{}, rangequery:{}, total_io:{}, verify_io:{}",
+                    stored_keys, outstanding_create, outstanding_others, C_NC, C_NR, C_NU, C_ND,
+                    C_NRU / UPDATE_RANGE_BATCH_SIZE, C_NRQ / QUERY_RANGE_BATCH_SIZE, get_issued_ios(), C_NV);
+        }
     }
 
     int select_io() {

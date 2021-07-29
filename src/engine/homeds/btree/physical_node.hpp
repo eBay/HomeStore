@@ -138,6 +138,7 @@ public:
     void set_checksum(size_t size) { get_persistent_header()->checksum = crc16_t10dif(init_crc_16, m_node_area, size); }
 
     bool verify_node(size_t size, verify_result& vr) {
+        HS_DEBUG_ASSERT_EQ(is_valid_node(), true, "verifying invalide node {}!", m_pers_header.to_string());
         vr.act_magic = get_magic();
         vr.exp_magic = MAGICAL_VALUE;
         vr.act_checksum = get_checksum();
