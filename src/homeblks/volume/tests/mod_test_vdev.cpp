@@ -10,7 +10,9 @@
 #include "engine/common/homestore_config.hpp"
 
 using namespace homestore;
+#ifdef _PRERELEASE
 using namespace flip;
+#endif
 
 // TODO: make it under mode_test namespace
 
@@ -25,6 +27,7 @@ mod_test_vdev_cfg vdev_cfg;
 static constexpr uint64_t run_time_sec = 10;
 static constexpr uint64_t abort_time_sec = 10;
 
+#ifdef _PRERELEASE
 class mod_test_vdev : public module_test {
     mod_test_vdev() : m_fc(HomeStoreFlip::instance()) {}
 
@@ -62,6 +65,7 @@ protected:
 };
 
 mod_test_vdev vdev_test;
+#endif
 
 /************************* CLI options ***************************/
 SDS_OPTION_GROUP(test_vdev_mod,
@@ -76,8 +80,8 @@ void vdev_mod_test_main() {
     vdev_cfg.abort_before_update_eof_cur_chunk = SDS_OPTIONS["abort_before_update_eof_cur_chunk"].as< bool >();
     vdev_cfg.abort_after_update_eof_cur_chunk = SDS_OPTIONS["abort_after_update_eof_cur_chunk"].as< bool >();
     vdev_cfg.abort_after_update_eof_next_chunk = SDS_OPTIONS["abort_after_update_eof_next_chunk"].as< bool >();
-
+#ifdef _PRERELEASE
     mod_tests.push_back(&vdev_test);
-
+#endif
     return;
 }

@@ -315,7 +315,7 @@ public:
             homestore::BlkId blkid(id);
             auto cache_only = iomanager.am_i_tight_loop_reactor();
 
-#ifndef NDEBUG
+#ifdef _PRERELEASE
             /* testing slow path */
             if (iomanager.am_i_tight_loop_reactor() && homestore_flip->test_flip("btree_read_fast_path_not_possible")) {
                 bnode = nullptr;

@@ -12,7 +12,9 @@
 #include "api/meta_interface.hpp"
 
 using namespace homestore;
+#ifdef _PRERELEASE
 using namespace flip;
+#endif
 
 // TODO: make it under mode_test namespace
 
@@ -32,6 +34,7 @@ static constexpr uint64_t abort_time_sec = 10;
 
 // #define GET_VARIABLE_NAME(Variable) (#Variable)
 
+#ifdef _PRERELEASE
 class mod_test_meta : public module_test {
     mod_test_meta() : m_fc(HomeStoreFlip::instance()) {}
 
@@ -79,6 +82,7 @@ protected:
 };
 
 mod_test_meta meta_test;
+#endif
 
 /************************* CLI options ***************************/
 SDS_OPTION_GROUP(test_meta_mod,
@@ -102,8 +106,8 @@ void meta_mod_test_main() {
     meta_cfg.update_sb_abort = SDS_OPTIONS["update_sb_abort"].as< bool >();
     meta_cfg.abort_before_recover_cb_sent = SDS_OPTIONS["abort_before_recover_cb_sent"].as< bool >();
     meta_cfg.abort_after_recover_cb_sent = SDS_OPTIONS["abort_after_recover_cb_sent"].as< bool >();
-
+#ifdef _PRERELEASE
     mod_tests.push_back(&meta_test);
-
+#endif
     return;
 }
