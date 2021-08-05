@@ -17,12 +17,14 @@ class HomestoreConan(ConanFile):
                 "fPIC": ['True', 'False'],
                 "sanitize": ['True', 'False'],
                 'testing' : ['coverage', 'full', 'min', 'off', 'epoll_mode', 'spdk_mode'],
+                'prerelease' : ['True', 'False'],
                 }
     default_options = (
                         'shared=False',
                         'fPIC=True',
                         'sanitize=True',
                         'testing=epoll_mode',
+                        'prerelease=True',
                         )
 
     build_requires = (
@@ -95,7 +97,6 @@ class HomestoreConan(ConanFile):
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
-        self.cpp_info.cxxflags.append("-DBOOST_ALLOW_DEPRECATED_HEADERS")
         if self.options.sanitize:
             self.cpp_info.sharedlinkflags.append("-fsanitize=address")
             self.cpp_info.exelinkflags.append("-fsanitize=address")
