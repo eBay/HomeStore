@@ -6,7 +6,7 @@ pipeline {
         ECR_URL = 'ecr.vip.ebayc3.com'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         CONAN_USER = 'sds'
-        MASTER_BRANCH = 'master'
+        MASTER_BRANCH = 'develop'
         TESTING_BRANCH = 'testing/v*'
         STABLE_BRANCH = 'stable/v*'
         LAST_COMMITS = ''
