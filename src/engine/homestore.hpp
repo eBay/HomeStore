@@ -111,9 +111,11 @@ public:
 
         m_data_pagesz = input.min_virtual_page_size;
 
-        LOGINFO("HomeStore starting with dynamic config version: {} static config: {}, restricted_mode: {}",
-                HS_DYNAMIC_CONFIG(version), hs_config.to_json().dump(4),
-                HB_DYNAMIC_CONFIG(general_config->boot_restricted_mode));
+        LOGINFO("HomeStore starting with dynamic config version: {} static config: {}, restricted_mode: {}, safe_mode: {}",
+                HS_DYNAMIC_CONFIG(version),
+                hs_config.to_json().dump(4),
+                HB_DYNAMIC_CONFIG(general_config->boot_restricted_mode),
+                HB_DYNAMIC_CONFIG(general_config->boot_safe_mode));
 
 #ifndef NDEBUG
         hs_config.validate();

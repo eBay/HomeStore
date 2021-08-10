@@ -22,8 +22,9 @@ table GeneralConfig {
     // Consistency check on booting 
     boot_consistency_check: bool = true;
 
-    // This field should only be changed by agent through workflow
+    // These fields should only be changed by agent through workflow
     boot_restricted_mode: bool = false;
+    boot_safe_mode: bool = false;
 }
 
 table HomeBlksSettings {
