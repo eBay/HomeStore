@@ -617,27 +617,21 @@ void IndxMgr::recover_meta_ops() {
             break;
         }
         case meta_hdr_type::indx_unmap: {
-            HS_RELEASE_ASSERT_GE(buf->size, (uint32_t)hdr->size);
             auto unmap_hdr = (hs_cp_unmap_sb*)buf->bytes;
 
-            uintptr_t cur_bytes = (uintptr_t)unmap_hdr + sizeof(hs_cp_unmap_sb);
             /* get key */
-            uint8_t* key = (uint8_t*)malloc(unmap_hdr->key_size);
-            memcpy(key, (void*)cur_bytes, unmap_hdr->key_size);
+            uint8_t* key = (uint8_t*)((uint64_t)(buf->bytes) + sizeof(hs_cp_unmap_sb));
 
             /* get cursor bytes and size */
-            cur_bytes = cur_bytes + unmap_hdr->key_size;
-            uint64_t cursor_size = hdr->size - sizeof(hs_cp_unmap_sb) - unmap_hdr->key_size;
+            uint64_t cur_bytes = (uint64_t)(key) + unmap_hdr->key_size;
+            HS_RELEASE_ASSERT_GE(buf->size, (uint32_t)hdr->size);
+            uint64_t size = hdr->size - sizeof(hs_cp_unmap_sb) - unmap_hdr->key_size;
+            sisl::blob b((uint8_t*)cur_bytes, size);
 
             /* get cursor */
-            std::shared_ptr< homeds::btree::BtreeQueryCursor > unmap_btree_cur(new homeds::btree::BtreeQueryCursor());
-            if (cursor_size != 0) {
-                sisl::blob b((uint8_t*)cur_bytes, cursor_size);
-                m_active_tbl->get_btreequery_cur(b, *(unmap_btree_cur.get()));
-            }
-
-            m_hs->inc_hs_ref_cnt(m_uuid);
-            this->do_remaining_unmap(mblk, key, unmap_hdr->key_size, unmap_hdr->seq_id, unmap_btree_cur);
+            homeds::btree::BtreeQueryCursor btree_cur;
+            m_active_tbl->get_btreequery_cur(b, btree_cur);
+            this->do_remaining_unmap_internal(nullptr, mblk, key, unmap_hdr->seq_id, btree_cur);
             break;
         }
         case meta_hdr_type::snap_destroy:
@@ -647,7 +641,6 @@ void IndxMgr::recover_meta_ops() {
             HS_ASSERT(DEBUG, 0, "invalid op");
         }
     }
-    indx_meta_map.erase(m_uuid);
 }
 
 indx_mgr_sb IndxMgr::get_immutable_sb() {
@@ -923,10 +916,8 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
 
     if (ireq->is_unmap() && !ireq->is_io_completed()) {
         /* write information to superblock, start unmap, and then call m_io_cb */
-        /* XXX: should we call it in different thread as it write a metablock which is a sync write ? */
-        this->unmap_indx_async(ireq);
+        iomanager.run_on(m_thread_id, [this, ireq](io_thread_addr_t addr) { this->unmap_indx_async(ireq); });
     } else {
-
         /* blk id is alloceted in disk bitmap only after it is writing to journal. check
          * blk_alloctor base class for further explanations. It should be done in cp critical section.
          * Otherwise bitmap won't reflect all the blks allocated in a cp.
@@ -943,27 +934,25 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
             ireq->icp->indx_size.fetch_add(ireq->indx_alloc_blkid_list[i].data_size(m_hs->get_data_pagesz()),
                                            std::memory_order_relaxed);
         }
+
+        /* free the blkids */
+        const auto free_size =
+            free_blk(ireq->hcp, ireq->icp->io_free_blkid_list, ireq->indx_fbe_list, true, ireq.get());
+        HS_ASSERT(DEBUG, (ireq->indx_fbe_list.size() == 0 || free_size > 0),
+                  " ireq->indx_fbe_list.size {}, free_size{}, ireq->indx_fbe_list.size", free_size);
+        ireq->icp->indx_size.fetch_sub(free_size, std::memory_order_relaxed);
+
+        /* End of critical section */
+        if (ireq->first_hcp) { m_cp_mgr->cp_io_exit(ireq->first_hcp); }
+        m_cp_mgr->cp_io_exit(ireq->hcp);
+
+        /* XXX: should we do completion before ending the critical section. We might get some better latency in doing
+         * that but my worry is that we might end up in deadlock if we pick new IOs in completion and those IOs need to
+         * take cp to free some resources.
+         */
+        m_io_cb(ireq, ireq->indx_err);
     }
-    free_blkid_and_send_completion(ireq);
     logstore_req::free(lreq);
-}
-
-void IndxMgr::free_blkid_and_send_completion(indx_req_ptr& ireq) {
-    /* free the blkids */
-    const auto free_size = free_blk(ireq->hcp, ireq->icp->io_free_blkid_list, ireq->indx_fbe_list, true, ireq.get());
-    HS_ASSERT(DEBUG, (ireq->indx_fbe_list.size() == 0 || free_size > 0),
-              " ireq->indx_fbe_list.size {}, free_size{}, ireq->indx_fbe_list.size", free_size);
-    ireq->icp->indx_size.fetch_sub(free_size, std::memory_order_relaxed);
-
-    /* End of critical section */
-    if (ireq->first_hcp) { m_cp_mgr->cp_io_exit(ireq->first_hcp); }
-    m_cp_mgr->cp_io_exit(ireq->hcp);
-
-    /* XXX: should we do completion before ending the critical section. We might get some better latency in doing
-     * that but my worry is that we might end up in deadlock if we pick new IOs in completion and those IOs need to
-     * take cp to free some resources.
-     */
-    m_io_cb(ireq, ireq->indx_err);
 }
 
 void IndxMgr::journal_write(const indx_req_ptr& ireq) {
@@ -1018,9 +1007,8 @@ btree_status_t IndxMgr::update_indx_tbl(const indx_req_ptr& ireq, bool is_active
     }
 }
 
-void IndxMgr::do_remaining_unmap_internal(void* unmap_meta_blk_cntx, uint8_t* key, const uint32_t key_size,
-                                          const seq_id_t seqid,
-                                          std::shared_ptr< homeds::btree::BtreeQueryCursor > btree_cur) {
+void IndxMgr::do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx, void* key,
+                                          const seq_id_t seqid, homeds::btree::BtreeQueryCursor& btree_cur) {
     /* enter into critical section */
     auto hcp = m_cp_mgr->cp_io_enter();
     auto cur_icp = get_indx_cp(hcp);
@@ -1029,8 +1017,9 @@ void IndxMgr::do_remaining_unmap_internal(void* unmap_meta_blk_cntx, uint8_t* ke
     /* collect all the free blkids */
     blkid_list_ptr free_list = std::make_shared< sisl::ThreadVector< BlkId > >();
     int64_t free_size = 0;
-    btree_status_t ret = m_active_tbl->update_oob_unmap_active_indx_tbl(
-        free_list, seqid, key, *(btree_cur.get()), btree_id, free_size, m_recovery_mode ? true : false /* force */);
+    btree_status_t ret = m_active_tbl->update_unmap_active_indx_tbl(
+        free_list, seqid, key, btree_cur, btree_id, free_size, m_recovery_mode ? true : false /* force */);
+    /* TODO :- change diff btree at this point */
 
     cur_icp->user_free_blkid_list.push_back(free_list);
     cur_icp->indx_size.fetch_sub(free_size, std::memory_order_relaxed);
@@ -1045,21 +1034,18 @@ void IndxMgr::do_remaining_unmap_internal(void* unmap_meta_blk_cntx, uint8_t* ke
     if (ret == btree_status_t::resource_full) {
         HS_ASSERT_CMP(RELEASE, m_recovery_mode, ==, false);
         THIS_INDX_LOG(TRACE, indx_mgr, , "unmap btree ret status resource_full");
-        m_cp_mgr->attach_cb(hcp, ([this, key, key_size, btree_cur, unmap_meta_blk_cntx, seqid](bool success) mutable {
-                                this->do_remaining_unmap(unmap_meta_blk_cntx, key, key_size, seqid, btree_cur);
+        m_cp_mgr->attach_cb(hcp, ([this, ireq, unmap_meta_blk_cntx](bool success) mutable {
+                                /* persist superblock */
+                                auto b = write_cp_unmap_sb(unmap_meta_blk_cntx, ireq);
+                                do_remaining_unmap(ireq, unmap_meta_blk_cntx);
                             }));
     } else {
-        if (ret == btree_status_t::crc_mismatch) {
-            // move volume to offline mode and don't do anything
-            THIS_INDX_LOG(ERROR, indx_mgr, , "hit crc mismatch error. Discontinuing unmap");
-            m_hs->fault_containment(m_uuid);
-            goto out;
-        } else if (ret != btree_status_t::success) {
-            THIS_INDX_LOG(ERROR, indx_mgr, , "hit {} error while doing unmap", ret);
-            goto out;
+        if (ret != btree_status_t::success) {
+            ireq->indx_err = (ret == btree_status_t::crc_mismatch ? homestore_error::btree_crc_mismatch
+                                                                  : homestore_error::btree_write_failed);
         }
 
-        m_cp_mgr->attach_cb(hcp, ([this, key, unmap_meta_blk_cntx](bool success) {
+        m_cp_mgr->attach_cb(hcp, ([this, ireq, unmap_meta_blk_cntx](bool success) {
 #ifdef _PRERELEASE
                                 if (homestore_flip->test_flip("unmap_pre_sb_remove_abort")) {
                                     LOGINFO("aborting because of flip");
@@ -1072,12 +1058,13 @@ void IndxMgr::do_remaining_unmap_internal(void* unmap_meta_blk_cntx, uint8_t* ke
                                     HS_ASSERT(RELEASE, false, "failed to remove subsystem with status: {}",
                                               ret.message());
                                 }
-                                free(key);
-                                m_hs->dec_hs_ref_cnt(m_uuid);
+                                if (!m_recovery_mode) {
+                                    /* we don't need to callback in a recovery mode */
+                                    m_io_cb(ireq, ireq->indx_err);
+                                }
                             }));
     }
 
-out:
     m_cp_mgr->cp_io_exit(hcp);
 }
 
@@ -1093,48 +1080,45 @@ sisl::byte_array IndxMgr::alloc_unmap_sb(const uint32_t key_size, const seq_id_t
     mhdr->seq_id = seq_id;
     mhdr->size = size;
     mhdr->key_size = key_size;
-    if (cursor_blob.size) {
-        memcpy((uint8_t*)((uint64_t)b->bytes + sizeof(hs_cp_unmap_sb)) + key_size, cursor_blob.bytes, cursor_blob.size);
-    }
+    memcpy((uint8_t*)((uint64_t)b->bytes + sizeof(hs_cp_unmap_sb)) + key_size, cursor_blob.bytes, cursor_blob.size);
     return b;
 }
 
-void IndxMgr::write_cp_unmap_sb(void*& unmap_meta_blk_cntx, const uint32_t key_size, const seq_id_t seq_id,
-                                homeds::btree::BtreeQueryCursor& unmap_btree_cur, const uint8_t* key) {
-    auto b = alloc_unmap_sb(key_size, seq_id, unmap_btree_cur);
-    memcpy((uint8_t*)((uint64_t)b->bytes + sizeof(hs_cp_unmap_sb)), key, key_size);
+sisl::byte_array IndxMgr::write_cp_unmap_sb(void* unmap_meta_blk_cntx, const indx_req_ptr& ireq) {
+    auto b = alloc_unmap_sb(ireq->get_key_size(), ireq->get_seqid(), ireq->active_btree_cur);
+    ireq->fill_key((uint8_t*)((uint64_t)b->bytes + sizeof(hs_cp_unmap_sb)), ireq->get_key_size());
     write_meta_blk(unmap_meta_blk_cntx, b);
+    return b;
 }
 
 void IndxMgr::unmap_indx_async(const indx_req_ptr& ireq) {
-
-    uint8_t* key = (uint8_t*)malloc(ireq->get_key_size());
-    std::shared_ptr< homeds::btree::BtreeQueryCursor > unmap_btree_cur(new homeds::btree::BtreeQueryCursor());
-
-    ireq->fill_key(key, ireq->get_key_size());
-    ireq->get_btree_cursor(*(unmap_btree_cur.get()));
-
-    // do remaining unmap
-    m_hs->inc_hs_ref_cnt(m_uuid);
-    do_remaining_unmap(nullptr, key, ireq->get_key_size(), ireq->get_seqid(), unmap_btree_cur);
-}
-
-void IndxMgr::do_remaining_unmap(void* unmap_meta_blk_cntx, uint8_t* key, const uint32_t key_size, const seq_id_t seqid,
-                                 std::shared_ptr< homeds::btree::BtreeQueryCursor > btree_cur) {
     /* persist superblock */
-    write_cp_unmap_sb(unmap_meta_blk_cntx, key_size, seqid, *(btree_cur.get()), key);
+    void* unmap_meta_blk_cntx = nullptr;
+
+    auto b = write_cp_unmap_sb(unmap_meta_blk_cntx, ireq);
+
 #ifdef _PRERELEASE
     if (homestore_flip->test_flip("unmap_post_sb_write_abort")) {
         LOGINFO("aborting because of flip");
         raise(SIGKILL);
     }
 #endif
-    add_prepare_cb_list([this, key, key_size, btree_cur, unmap_meta_blk_cntx,
-                         seqid](const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp) mutable {
+
+    /* call completion cb */
+    m_io_cb(ireq, ireq->indx_err);
+
+    /* start unmap */
+    do_remaining_unmap(ireq, unmap_meta_blk_cntx);
+}
+
+void IndxMgr::do_remaining_unmap(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx) {
+    add_prepare_cb_list([this, ireq, unmap_meta_blk_cntx](const indx_cp_ptr& cur_icp, hs_cp* cur_hcp,
+                                                          hs_cp* new_hcp) mutable {
         if (cur_icp->flags & indx_cp_state::ba_cp) {
-            do_remaining_unmap_internal(unmap_meta_blk_cntx, key, key_size, seqid, btree_cur);
+            do_remaining_unmap_internal(ireq, unmap_meta_blk_cntx, ireq->j_ent.get_key(ireq->j_ent.m_iob.bytes).first,
+                                        ireq->get_seqid(), ireq->active_btree_cur);
         } else {
-            do_remaining_unmap(unmap_meta_blk_cntx, key, key_size, seqid, btree_cur);
+            do_remaining_unmap(ireq, unmap_meta_blk_cntx);
         }
     });
 }

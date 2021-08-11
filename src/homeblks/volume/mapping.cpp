@@ -231,6 +231,8 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
                       end_lba, ret);
     }
 
+    HS_RELEASE_ASSERT_NE(ret, btree_status_t::resource_full, "Unexpected return");
+
     /* In range update, it can be written paritally. Find the first key in this range which is not updated */
     return ret;
 #if 0
@@ -570,9 +572,7 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
 
         if (e_key->start() > start_lba) {
             /* add missing interval */
-            if (new_ve->get_base_blkid().is_valid()) { // not a unmap operation
-                add_new_interval(start_lba, e_key->start() - 1, new_val, new_val_offset, replace_kv);
-            }
+            add_new_interval(start_lba, e_key->start() - 1, new_val, new_val_offset, replace_kv);
             new_val_offset += e_key->start() - start_lba;
             start_lba = e_key->start();
         }
@@ -608,14 +608,14 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
         }
     }
 
-    if (start_lba <= end_lba && new_ve->get_base_blkid().is_valid()) { // add new range
+    if (start_lba <= end_lba) { // add new range
         add_new_interval(start_lba, end_lba, new_val, new_val_offset, replace_kv);
     }
 
     btree_status_t ret = btree_status_t::success;
     if (cntx->op == op_type::UPDATE_VAL_AND_FREE_BLKS) {
         req->indx_push_fbe(fbe_list);
-    } else if (cntx->op == op_type::UPDATE_OOB_UNMAP) {
+    } else if (cntx->op == op_type::UPDATE_UNMAP) {
         if (fbe_list.size() > 0) {
             uint64_t size = IndxMgr::free_blk(nullptr, cntx->free_list, fbe_list, cntx->force);
             cntx->free_blk_size += size;
@@ -742,6 +742,7 @@ void mapping::compute_and_add_overlap(std::vector< Free_Blk_Entry >& fbe_list, l
         }
         replace_kv.emplace_back(
             std::make_pair(MappingKey(s_lba, nlba), MappingValue(*new_val.get_latest_entry(), new_lba_offset, nlba)));
+
     } else {
         /* don't override. free new blks */
         const ValueEntry* new_ve = new_val.get_latest_entry();
@@ -937,20 +938,13 @@ btree_status_t mapping::update_indx_tbl(const indx_req_ptr& ireq, const btree_cp
 }
 
 btree_status_t mapping::recovery_update(const logstore_seq_num_t seqnum, journal_hdr* hdr, const btree_cp_ptr& bcp) {
-
-    BlkId* bid = indx_journal_entry::get_alloc_bid_list(hdr).first;
-    uint32_t nbid = indx_journal_entry::get_alloc_bid_list(hdr).second;
-    if (!nbid) {
-        // it is unmap
-        auto ret = unmap_recovery_update(seqnum, hdr, bcp);
-        return ret;
-    }
-
     /* get all the values from journal entry */
     const auto key = (journal_key*)indx_journal_entry::get_key(hdr).first;
     HS_ASSERT_CMP(RELEASE, indx_journal_entry::get_key(hdr).second, ==, sizeof(journal_key));
 
     lba_t lba = key->lba;
+    BlkId* bid = indx_journal_entry::get_alloc_bid_list(hdr).first;
+    uint32_t nbid = indx_journal_entry::get_alloc_bid_list(hdr).second;
     csum_t* csum = (csum_t*)indx_journal_entry::get_val(hdr).first;
     lba_count_t ncsum = indx_journal_entry::get_val(hdr).second / sizeof(csum_t);
     HS_RELEASE_ASSERT_EQ(ncsum, key->num_lbas());
@@ -959,12 +953,7 @@ btree_status_t mapping::recovery_update(const logstore_seq_num_t seqnum, journal
     uint32_t csum_indx = 0;
     btree_status_t ret = btree_status_t::success;
     for (uint32_t i = 0; i < nbid; ++i) {
-        lba_count_t nlbas = 0;
-        if (bid[i].is_valid()) {
-            nlbas = nblks_to_nlbas(bid[i].get_nblks());
-        } else {
-            nlbas = key->num_lbas();
-        }
+        const lba_count_t nlbas = nblks_to_nlbas(bid[i].get_nblks());
         MappingKey key{lba, nlbas};
         MappingValue value{seqnum, bid[i], 0, nlbas, &csum[csum_indx]};
 
@@ -977,25 +966,7 @@ btree_status_t mapping::recovery_update(const logstore_seq_num_t seqnum, journal
         lba += nlbas;
         csum_indx += nlbas;
     }
-    HS_RELEASE_ASSERT_EQ(lba, key->lba + key->num_lbas());
-    return ret;
-}
-
-btree_status_t mapping::unmap_recovery_update(const logstore_seq_num_t seqnum, journal_hdr* hdr,
-                                              const btree_cp_ptr& bcp) {
-    const auto j_key = (journal_key*)indx_journal_entry::get_key(hdr).first;
-    HS_ASSERT_CMP(RELEASE, indx_journal_entry::get_key(hdr).second, ==, sizeof(journal_key));
-    lba_t lba = j_key->lba;
-    lba_count_t nlbas = j_key->num_lbas();
-    MappingKey key{lba, nlbas};
-    BlkId bid;
-    HS_DEBUG_ASSERT(!bid.is_valid(), "blkid is valid");
-    MappingValue value{seqnum, bid, 0, nlbas, nullptr};
-    mapping_op_cntx cntx;
-    cntx.op = UPDATE_VAL_ONLY;
-    BtreeQueryCursor cur;
-    auto ret = put(cntx, key, value, bcp, cur);
-    HS_RELEASE_ASSERT_EQ(ret, btree_status_t::success);
+    HS_RELEASE_ASSERT_EQ(lba, key->lba + key->nlbas);
     return ret;
 }
 
@@ -1026,19 +997,19 @@ btree_status_t mapping::destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_
     return ret;
 }
 
-btree_status_t mapping::update_oob_unmap_active_indx_tbl(blkid_list_ptr free_list, const seq_id_t seq_id, void* key,
-                                                         BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size,
-                                                         const bool force) {
+btree_status_t mapping::update_unmap_active_indx_tbl(blkid_list_ptr free_list, const seq_id_t seq_id, void* key,
+                                                     BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size,
+                                                     const bool force) {
     journal_key* j_key = (journal_key*)key;
     lba_count_t nlbas_rem;
     lba_t next_start_lba;
     const lba_t start_lba = j_key->lba;
-    const lba_t end_lba = get_end_lba(start_lba, j_key->user_io_nlbas);
+    const lba_t end_lba = get_end_lba(start_lba, j_key->nlbas);
 
     btree_status_t ret = btree_status_t::success;
 
     mapping_op_cntx cntx;
-    cntx.op = UPDATE_OOB_UNMAP;
+    cntx.op = UPDATE_UNMAP;
     cntx.free_list = free_list.get();
     cntx.force = force;
 
@@ -1046,7 +1017,7 @@ btree_status_t mapping::update_oob_unmap_active_indx_tbl(blkid_list_ptr free_lis
     nlbas_rem = get_nlbas(end_lba, next_start_lba);
     while (nlbas_rem > 0) {
         const lba_count_t nlbas_cur = (nlbas_rem > BlkId::max_blks_in_op()) ? BlkId::max_blks_in_op() : nlbas_rem;
-        MappingKey key{next_start_lba, nlbas_cur};
+        MappingKey key{start_lba, nlbas_cur};
         MappingValue value{seq_id, BlkId{}, 0u, nlbas_cur, nullptr /* csum ptr */};
 
         ret = put(cntx, key, value, bcp, cur);

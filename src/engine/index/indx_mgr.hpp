@@ -391,10 +391,9 @@ public:
     virtual btree_status_t free_user_blkids(blkid_list_ptr free_list, homeds::btree::BtreeQueryCursor& cur,
                                             int64_t& size) = 0;
     virtual void get_btreequery_cur(const sisl::blob& b, homeds::btree::BtreeQueryCursor& cur) = 0;
-    virtual btree_status_t update_oob_unmap_active_indx_tbl(blkid_list_ptr free_list, const seq_id_t seq_id, void* key,
-                                                            homeds::btree::BtreeQueryCursor& cur,
-                                                            const btree_cp_ptr& bcp, int64_t& size,
-                                                            const bool force) = 0;
+    virtual btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, const seq_id_t seq_id, void* key,
+                                                        homeds::btree::BtreeQueryCursor& cur, const btree_cp_ptr& bcp,
+                                                        int64_t& size, const bool force) = 0;
     virtual uint64_t get_btree_node_cnt() = 0;
     virtual std::string get_cp_flush_status(const btree_cp_ptr& bcp) = 0;
 };
@@ -724,16 +723,14 @@ private:
     void dump_free_blk_list(const blkid_list_ptr& free_blk_list);
 #endif
     void unmap_indx_async(const indx_req_ptr& ireq);
-    void do_remaining_unmap_internal(void* unmap_meta_blk_cntx, uint8_t* key, const uint32_t key_size,
-                                     const seq_id_t seqid,
-                                     std::shared_ptr< homeds::btree::BtreeQueryCursor > btree_cur);
-    void do_remaining_unmap(void* unmap_meta_blk_cntx, uint8_t* key, const uint32_t key_size, const seq_id_t seqid,
-                            std::shared_ptr< homeds::btree::BtreeQueryCursor > btree_cur);
-    void write_cp_unmap_sb(void*& unmap_meta_blk_cntx, const uint32_t key_size, const seq_id_t seq_id,
-                           homeds::btree::BtreeQueryCursor& unmap_btree_cur, const uint8_t* key);
+    void do_remaining_unmap_internal(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx, void* key,
+                                     const seq_id_t seqid, homeds::btree::BtreeQueryCursor& btree_cur);
+    void do_remaining_unmap(const indx_req_ptr& ireq, void* unmap_meta_blk_cntx);
+    sisl::byte_array write_cp_unmap_sb(void* unmap_meta_blk_cntx, const indx_req_ptr& ireq);
+    sisl::byte_array write_cp_unmap_sb(void* unmap_meta_blk_cntx, const uint32_t key_size, const seq_id_t seq_id,
+                                       const void* key, homeds::btree::BtreeQueryCursor& unmap_btree_cur);
 
     void alloc_on_realtime(const std::vector< BlkId >& blkid_list, const indx_req_ptr& ireq);
-    void free_blkid_and_send_completion(indx_req_ptr& ireq);
 };
 
 /*************************************************** indx request ***********************************/

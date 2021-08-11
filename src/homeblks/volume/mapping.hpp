@@ -44,7 +44,7 @@ enum op_type {
     READ_VAL_WITH_seqid,
     FREE_ALL_USER_BLKID,
     READ_VAL,
-    UPDATE_OOB_UNMAP
+    UPDATE_UNMAP
 };
 
 // std::variant
@@ -218,7 +218,7 @@ private:
             m_seqid{seqid}, m_blkid{blkid} {
         set_lba_offset(lba_offset);
         set_num_lbas(nlbas);
-        if (carr && m_blkid.is_valid()) { ::memcpy(&m_carr[0], &carr[0], (nlbas * sizeof(csum_t))); }
+        if (carr) { ::memcpy(&m_carr[0], &carr[0], (nlbas * sizeof(csum_t))); }
     }
     ValueEntry(const ValueEntry& ve) { copy_from(ve); }
     ValueEntry(const ValueEntry& ve, const lba_count_t lba_offset, const lba_count_t nlbas) {
@@ -227,7 +227,6 @@ private:
 
 public:
     static uint32_t size(const lba_count_t nlbas) { return (sizeof(ValueEntry) + (sizeof(csum_t) * nlbas)); }
-    static uint32_t invalid_blkid_size(const lba_count_t nlbas) { return (sizeof(ValueEntry)); }
 
     [[nodiscard]] uint32_t size() const { return size(get_num_lbas()); }
     [[nodiscard]] uint32_t get_blob_size() const { return size(); }
@@ -254,7 +253,9 @@ public:
         // HS_DEBUG_ASSERT_EQ(get_blkid().is_valid(), true);
         m_nlbas = static_cast< blk_count_serialized_t >(nlbas - 1);
     }
-    lba_count_t get_num_lbas() const { return static_cast< lba_count_t >(m_nlbas) + 1; }
+    lba_count_t get_num_lbas() const {
+        return get_base_blkid().is_valid() ? static_cast< lba_count_t >(m_nlbas) + 1 : 0;
+    }
     blk_count_t get_num_blks(const uint32_t blks_per_lba) const {
         return static_cast< blk_count_t >(get_num_lbas() * blks_per_lba);
     }
@@ -275,7 +276,7 @@ public:
         // move checksum array elements to start from offset position
         // assert(lba_offset < get_num_lbas());
         HS_DEBUG_ASSERT_LT(get_lba_offset() + lba_offset, BlkId::max_blks_in_op());
-        if (m_blkid.is_valid()) { ::memmove((void*)&m_carr[0], (void*)&m_carr[lba_offset], (nlbas * sizeof(csum_t))); }
+        ::memmove((void*)&m_carr[0], (void*)&m_carr[lba_offset], (nlbas * sizeof(csum_t)));
         set_num_lbas(nlbas);
         set_lba_offset(get_lba_offset() + lba_offset);
     }
@@ -306,7 +307,6 @@ public:
 
     std::string get_checksums_string() const {
         std::string str;
-        if (!m_blkid.is_valid()) { return str; }
         for (lba_count_t i{0}; i < get_num_lbas(); ++i) {
             fmt::format_to(std::back_inserter(str), "{},", get_checksum_at(i));
         }
@@ -341,9 +341,7 @@ private:
         m_blkid = other.m_blkid;
         set_lba_offset(lba_offset);
         set_num_lbas(nlbas);
-        if (m_blkid.is_valid()) {
-            ::memcpy((void*)&m_carr[0], (void*)&other.m_carr[lba_offset], (nlbas * sizeof(csum_t)));
-        }
+        ::memcpy((void*)&m_carr[0], (void*)&other.m_carr[lba_offset], (nlbas * sizeof(csum_t)));
     }
 
 #pragma GCC diagnostic push
@@ -368,11 +366,7 @@ public:
     MappingValue(const seq_id_t seqid, const BlkId& blkid, const lba_count_t lba_offset, const lba_count_t nlbas,
                  const csum_t* carr) :
             ObjLifeCounter() {
-        if (blkid.is_valid()) {
-            m_earr.alloc_element(ValueEntry::size(nlbas), seqid, blkid, lba_offset, nlbas, carr);
-        } else {
-            m_earr.alloc_element(ValueEntry::invalid_blkid_size(nlbas), seqid, blkid, lba_offset, nlbas, carr);
-        }
+        m_earr.alloc_element(ValueEntry::size(nlbas), seqid, blkid, lba_offset, nlbas, carr);
     }
 
     // Creates one entry but without any offset information.
@@ -747,9 +741,9 @@ public:
     void get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) override;
     btree_status_t destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_node_cnt) override;
     btree_status_t read_indx(const indx_req_ptr& ireq, const read_indx_comp_cb_t& read_cb) override;
-    btree_status_t update_oob_unmap_active_indx_tbl(blkid_list_ptr free_list, const int64_t seq_id, void* key,
-                                                    BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size,
-                                                    const bool force) override;
+    btree_status_t update_unmap_active_indx_tbl(blkid_list_ptr free_list, const int64_t seq_id, void* key,
+                                                BtreeQueryCursor& cur, const btree_cp_ptr& bcp, int64_t& size,
+                                                const bool force) override;
     std::string get_cp_flush_status(const btree_cp_ptr& bcp) override;
 
 public:
@@ -823,7 +817,6 @@ private:
     /* add missing interval to replace kv */
     void add_new_interval(const lba_t s_lba, const lba_t e_lba, const MappingValue& val, const lba_count_t lba_offset,
                           std::vector< std::pair< MappingKey, MappingValue > >& replace_kv);
-    btree_status_t unmap_recovery_update(logstore_seq_num_t seqnum, journal_hdr* hdr, const btree_cp_ptr& bcp);
 
 #ifndef NDEBUG
     void validate_get_response(const lba_t lba_start, const lba_count_t n_lba,

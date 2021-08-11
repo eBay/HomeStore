@@ -520,11 +520,6 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
     return completed;
 }
 
-void Volume::inc_ref_cnt() {
-    m_vol_ref_cnt.increment();
-    home_blks_ref_cnt.increment();
-}
-
 void Volume::shutdown_if_needed() {
     if (m_vol_ref_cnt.decrement_testz(1) && m_state.load(std::memory_order_acquire) == vol_state::DESTROYING) {
         destroy_internal();

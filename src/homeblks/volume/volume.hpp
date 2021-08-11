@@ -536,8 +536,6 @@ public:
         // yet;
         return (m_indx_mgr != nullptr) && (m_indx_mgr->is_recovery_done());
     }
-
-    void inc_ref_cnt();
 };
 
 /* Note :- Any member inside this structure is not lock protected. Its caller responsibility to call it under lock
@@ -550,9 +548,7 @@ ENUM(volume_req_state, uint8_t, data_io, journal_io, completed);
 #pragma pack(1)
 struct journal_key {
     lba_t lba;
-    lba_count_t nlbas;         // nlbas written
-    lba_count_t user_io_nlbas; // nlbas passed by the user
-    char padding[4];
+    lba_count_t nlbas;
 
     [[nodiscard]] lba_count_t num_lbas() const { return nlbas; }
 };
@@ -638,7 +634,6 @@ struct volume_req : indx_req {
         journal_key* key = (journal_key*)mem;
         key->lba = lba();
         key->nlbas = active_nlbas_written;
-        key->user_io_nlbas = nlbas();
     }
 
     virtual void fill_val(void* mem, uint32_t size) override {
@@ -650,7 +645,7 @@ struct volume_req : indx_req {
             VOL_ERROR_LOG(vol()->get_name(), "all lbas are not written. lba written {}, lba supposed to write{}",
                           active_nlbas_written, nlbas());
         }
-        for (lba_count_t i{0}; !is_unmap() && i < active_nlbas_written; ++i) {
+        for (lba_count_t i{0}; i < active_nlbas_written; ++i) {
             j_csum[i] = csum_list[i];
         }
     }
