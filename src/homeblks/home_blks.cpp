@@ -314,6 +314,28 @@ VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
     if (m_volume_map.end() != it) { return it->second; }
     return nullptr;
 }
+
+bool HomeBlks::inc_hs_ref_cnt(boost::uuids::uuid& uuid) {
+    auto vol = lookup_volume(uuid);
+    if (!vol) return false;
+    vol->inc_ref_cnt();
+    return true;
+}
+
+bool HomeBlks::dec_hs_ref_cnt(boost::uuids::uuid& uuid) {
+    auto vol = lookup_volume(uuid);
+    if (!vol) return false;
+    vol->shutdown_if_needed();
+    return true;
+}
+
+bool HomeBlks::fault_containment(boost::uuids::uuid& uuid) {
+    auto vol = lookup_volume(uuid);
+    if (!vol) return false;
+    vol->fault_containment();
+    return true;
+}
+
 #if 0
 SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
     if (!m_rdy || is_shutdown()) {
