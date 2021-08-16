@@ -227,8 +227,10 @@ pipeline {
                         }
                     }
                     stage("Image") {
-                        when {
+                        when { allOf { 
                             expression { "${COVERAGE}" == 'False' }
+                            expression { !(("${BUILD_TYPE}" == 'test') && ("${PRERELEASE}" == 'False')) }
+                            }
                         }
                         steps {
                             retry(3) {
@@ -245,6 +247,7 @@ pipeline {
                                 branch "master"
                               }
                               expression { "${COVERAGE}" == 'False' }
+                              expression { !(("${BUILD_TYPE}" == 'test') && ("${PRERELEASE}" == 'False')) }
                             } }
                         steps {
                             retry(3) {

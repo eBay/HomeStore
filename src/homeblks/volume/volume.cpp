@@ -783,7 +783,8 @@ bool Volume::verify_tree(bool update_debug_bm) { return (get_active_indx()->veri
 
 nlohmann::json Volume::get_status(const int log_level) {
     nlohmann::json j;
-    j.update(get_active_indx()->get_status(log_level));
+    auto active_indx_json = get_active_indx()->get_status(log_level);
+    if (!active_indx_json.empty()) { j.update(active_indx_json); }
     return j;
 }
 

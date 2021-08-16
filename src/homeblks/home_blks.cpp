@@ -441,6 +441,8 @@ void HomeBlks::init_done() {
 
     status_mgr()->register_status_cb("MetaBlkMgr",
                                      std::bind(&MetaBlkMgr::get_status, MetaBlkMgrSI(), std::placeholders::_1));
+    status_mgr()->register_status_cb("Volumes", std::bind(&HomeBlks::get_status, this, std::placeholders::_1));
+
     m_recovery_stats->end();
 }
 
@@ -547,12 +549,14 @@ nlohmann::json HomeBlks::get_status(const int log_level) {
     LOGINFO("Print status of all volumes");
     while (it != m_volume_map.end()) {
         const VolumePtr& vol{it->second};
-        j.update(vol->get_status(log_level));
+        auto vol_json = vol->get_status(log_level);
+        if (!vol_json.empty()) { j.update(vol_json); }
         ++it;
     }
     /* Get status from index blkstore */
     auto hb{HomeBlks::safe_instance()};
-    j.update(hb->get_index_blkstore()->get_status(log_level));
+    auto index_blkstore_json = hb->get_index_blkstore()->get_status(log_level);
+    if (!index_blkstore_json.empty()) { j.update(index_blkstore_json); }
 
     return j;
 }
