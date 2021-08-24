@@ -453,7 +453,11 @@ public:
         assert(m_cfg.get_blks_per_portion() % m_debug_bm->word_size() == 0);
     }
 
-    void update_debug_bm(const BlkId& bid) { get_debug_bm()->set_bits(bid.get_blk_num(), bid.get_nblks()); }
+    void update_debug_bm(const BlkId& bid) {
+        BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(bid.get_blk_num(), bid.get_nblks()),
+                        "Expected disk bits to set blk num {} num blks {}", bid.get_blk_num(), bid.get_nblks());
+        get_debug_bm()->set_bits(bid.get_blk_num(), bid.get_nblks());
+    }
 
     [[nodiscard]] bool verify_debug_bm(const bool free_debug_bm) {
         const bool ret{*get_disk_bm() == *get_debug_bm()};
