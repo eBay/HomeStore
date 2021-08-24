@@ -45,6 +45,8 @@ void HomeBlksHttpServer::start() {
             handler_info("/api/v1/reloadConfig", HomeBlksHttpServer::reload_dynamic_config, (void*)this),
             handler_info("/api/v1/getStatus", HomeBlksHttpServer::get_status, (void*)this),
             handler_info("/api/v1/verifyBitmap", HomeBlksHttpServer::verify_bitmap, (void*)this),
+            handler_info("/api/v1/dumpDiskMetaBlks", HomeBlksHttpServer::dump_disk_metablks, (void*)this),
+            handler_info("/api/v1/verifyMetaBlkStore", HomeBlksHttpServer::verify_metablk_store, (void*)this),
             handler_info("/api/v1/wakeupInit", HomeBlksHttpServer::wakeup_init, (void*)this),
 #ifdef _PRERELEASE
             handler_info("/api/v1/crashSystem", HomeBlksHttpServer::crash_system, (void*)this),
@@ -220,6 +222,46 @@ bool HomeBlksHttpServer::verify_and_get_verbosity(const evhtp_request_t* req, st
         verbosity_level = 0; // default verbosity level
     }
     return ret;
+}
+
+void HomeBlksHttpServer::verify_metablk_store(sisl::HttpCallData cd) {
+    auto req = cd->request();
+
+    const auto hb = to_homeblks(cd);
+    if (hb->is_safe_mode()) {
+        const auto ret = hb->verify_metablk_store();
+        pThis(cd)->m_http_server->respond_OK(
+            cd, EVHTP_RES_OK, fmt::format("Disk sanity of MetaBlkStore result: {}", ret ? "Passed" : "Failed"));
+    } else {
+        pThis(cd)->m_http_server->respond_NOTOK(
+            cd, EVHTP_RES_BADREQ, fmt::format("HomeBlks not in safe mode, not allowed to serve this request"));
+    }
+}
+
+void HomeBlksHttpServer::dump_disk_metablks(sisl::HttpCallData cd) {
+    auto req = cd->request();
+
+    std::vector< std::string > clients;
+    auto modules_kv = evhtp_kvs_find_kv(req->uri->query, "client");
+    if (modules_kv) {
+        boost::algorithm::split(clients, modules_kv->val, boost::is_any_of(","), boost::token_compress_on);
+    }
+
+    if (clients.size() != 1) {
+        pThis(cd)->m_http_server->respond_NOTOK(
+            cd, EVHTP_RES_BADREQ,
+            fmt::format("Can serve only one client per request. Number clients received: {}\n", clients.size()));
+        return;
+    }
+
+    const auto hb = to_homeblks(cd);
+    if (hb->is_safe_mode()) {
+        const auto j = to_homeblks(cd)->dump_disk_metablks(clients[0]);
+        pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, j.dump(2));
+    } else {
+        pThis(cd)->m_http_server->respond_NOTOK(
+            cd, EVHTP_RES_BADREQ, fmt::format("HomeBlks not in safe mode, not allowed to serve this request"));
+    }
 }
 
 void HomeBlksHttpServer::get_status(sisl::HttpCallData cd) {

@@ -287,10 +287,16 @@ public:
     [[nodiscard]] bool verify_data_bm();
     [[nodiscard]] bool verify_index_bm();
     [[nodiscard]] bool verify_bitmap();
+    [[nodiscard]] bool verify_metablk_store();
+
     [[nodiscard]] nlohmann::json get_status(const int log_level);
+
+    [[nodiscard]] bool is_safe_mode();
 
     [[nodiscard]] std::error_condition mark_vol_offline(const boost::uuids::uuid& uuid);
     [[nodiscard]] std::error_condition mark_vol_online(const boost::uuids::uuid& uuid);
+
+    [[nodiscard]] nlohmann::json dump_disk_metablks(const std::string& client);
 
 #ifdef _PRERELEASE
     void set_io_flip();
@@ -357,11 +363,10 @@ private:
     out_params m_out_params;
     std::unique_ptr< HomeBlksHttpServer > m_hb_http_server;
 
-    std::condition_variable m_cv_init_cmplt; // wait for init to complete
+    std::condition_variable m_cv_init_cmplt;  // wait for init to complete
     std::condition_variable m_cv_wakeup_init; // wait for init to complete
     std::mutex m_cv_mtx;
     bool m_rdy = false;
-    std::atomic< bool > m_safe_mode = false;
 
     std::atomic< uint64_t > m_shutdown_start_time = 0;
     iomgr::timer_handle_t m_shutdown_timer_hdl = iomgr::null_timer_handle;

@@ -32,11 +32,12 @@ typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer
 // NOTE: look at this prototype some other time for const correctness and efficiency
 typedef std::function< void(meta_blk* mblk, sisl::byte_view buf,
                             size_t size) >
-    meta_blk_found_cb_t;                                                // new blk found subsystem callback
+    meta_blk_found_cb_t; // new blk found subsystem callback
+typedef std::string meta_sub_type;
 typedef std::function< void(bool success) > meta_blk_recover_comp_cb_t; // recover complete subsystem callbacks;
 typedef std::map< uint64_t, meta_blk* > meta_blk_map_t;                 // blkid to meta_blk map;
 typedef std::map< uint64_t, meta_blk_ovf_hdr* > ovf_hdr_map_t;          // ovf_blkid to ovf_blk_hdr map;
-typedef std::string meta_sub_type;
+typedef std::map< meta_sub_type, MetaSubRegInfo > client_info_map_t;    // client information map;
 
 class MetablkMetrics : public sisl::MetricsGroupWrapper {
 public:
@@ -61,14 +62,14 @@ class MetaBlkMgr {
 private:
     static std::unique_ptr< MetaBlkMgr > s_instance;
     static bool m_self_recover;
-    blk_store_t* m_sb_blk_store{nullptr}; // super blockstore
-    std::mutex m_meta_mtx;                // mutex to access to meta_map;
-    std::mutex m_shutdown_mtx;            // protects concurrent operations between recover and shutdown;
-    meta_blk_map_t m_meta_blks;           // subsystem type to meta blk map;
-    ovf_hdr_map_t m_ovf_blk_hdrs;         // ovf blk map;
-    std::map< meta_sub_type, MetaSubRegInfo > m_sub_info; // map of callbacks
-    std::unique_ptr< BlkId > m_last_mblk_id;              // last meta blk;
-    meta_blk_sb* m_ssb{nullptr};                          // meta super super blk;
+    blk_store_t* m_sb_blk_store{nullptr};    // super blockstore
+    std::mutex m_meta_mtx;                   // mutex to access to meta_map;
+    std::mutex m_shutdown_mtx;               // protects concurrent operations between recover and shutdown;
+    meta_blk_map_t m_meta_blks;              // subsystem type to meta blk map;
+    ovf_hdr_map_t m_ovf_blk_hdrs;            // ovf blk map;
+    client_info_map_t m_sub_info;            // map of callbacks
+    std::unique_ptr< BlkId > m_last_mblk_id; // last meta blk;
+    meta_blk_sb* m_ssb{nullptr};             // meta super super blk;
     sisl::blob m_compress_info;
     MetablkMetrics m_metrics;
     bool m_inited{false};
@@ -174,6 +175,7 @@ public:
     /**
      * @brief : scan the blkstore to load meta blks into memory
      */
+
     void scan_meta_blks();
 
     [[nodiscard]] uint64_t get_size() const;
@@ -199,14 +201,6 @@ public:
     [[nodiscard]] uint64_t meta_blk_context_sz() const;
 
     [[nodiscard]] uint64_t ovf_blk_max_num_data_blk() const;
-
-    /**
-     * @brief : called by client or by metablkmgr to check the sanity of cookie being sent back to client or received
-     * from client;
-     *
-     * @param cookie
-     */
-    void cookie_sanity_check(const void* const cookie);
 
 public:
     /*********************** static public function **********************/
@@ -349,7 +343,18 @@ private:
      * if false, skip ovf chain sanity check;
      */
     bool sanity_check(const bool check_ovf_chain = false);
+
     [[nodiscard]] bool ssb_sanity_check() const;
+
+    [[nodiscard]] bool scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_map_t& ovf_blk_hdrs,
+                                               BlkId* last_mblk_id, client_info_map_t& sub_info);
+
+    [[nodiscard]] bool verify_metablk_store();
+
+    [[nodiscard]] nlohmann::json dump_disk_metablks(const std::string& client);
+    nlohmann::json populate_json(const int log_level, meta_blk_map_t& meta_blks, ovf_hdr_map_t& ovf_blk_hdrs,
+                                 BlkId* last_mblk_id, client_info_map_t& sub_info, const bool self_recover,
+                                 const std::string& client);
 };
 
 extern MetaBlkMgr* MetaBlkMgrSI();

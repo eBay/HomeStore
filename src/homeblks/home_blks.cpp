@@ -139,17 +139,14 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
     m_recovery_stats = std::make_unique< HomeBlksRecoveryStats >();
 
     m_recovery_stats->start();
-    if (HB_DYNAMIC_CONFIG(general_config->boot_safe_mode)) {
-        m_safe_mode = true;
-        LOGINFO("HomeBlks booting into safe_mode");
-    }
+    if (HB_DYNAMIC_CONFIG(general_config->boot_safe_mode)) { LOGINFO("HomeBlks booting into safe_mode"); }
 
     /* start thread */
     auto sthread = sisl::named_thread("hb_init", [this]() {
         iomanager.run_io_loop(false, nullptr, [&](bool thread_started) {
             if (thread_started) {
                 m_init_thread_id = iomanager.iothread_self();
-                if (m_safe_mode) {
+                if (is_safe_mode()) {
                     std::unique_lock< std::mutex > lk(m_cv_mtx);
                     /* we wait for gdb to attach in safe mode */
                     LOGINFO("Going to sleep. Waiting for user to send http command to wake up");
@@ -446,7 +443,7 @@ void HomeBlks::init_done() {
     HB_SETTINGS_FACTORY().save();
 #endif
 
-    if (m_safe_mode || HB_DYNAMIC_CONFIG(general_config->boot_consistency_check)) {
+    if (is_safe_mode() || HB_DYNAMIC_CONFIG(general_config->boot_consistency_check)) {
         HS_RELEASE_ASSERT((verify_bitmap()), "bitmap verify failed");
     } else {
         LOGINFO("Skip running verification (vols/bitmap).");
@@ -460,15 +457,14 @@ void HomeBlks::init_done() {
     m_out_params.first_time_boot = m_dev_mgr->is_first_time_boot();
     m_out_params.max_io_size = HS_STATIC_CONFIG(engine.max_vol_io_size);
     if (m_cfg.end_of_batch_cb) { attach_end_of_batch_cb(m_cfg.end_of_batch_cb); }
+
     status_mgr()->register_status_cb("MetaBlkMgr",
                                      std::bind(&MetaBlkMgr::get_status, MetaBlkMgrSI(), std::placeholders::_1));
     status_mgr()->register_status_cb("Volumes", std::bind(&HomeBlks::get_status, this, std::placeholders::_1));
 
     m_recovery_stats->end();
 
-    if (!m_safe_mode) {
-        m_cfg.init_done_cb(no_error, m_out_params);
-    }
+    if (!is_safe_mode()) { m_cfg.init_done_cb(no_error, m_out_params); }
     // Don't do any callback if it is running in safe mode
 }
 
@@ -877,7 +873,7 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
 
     auto sb = (homeblks_sb*)m_homeblks_sb_buf->bytes;
     if (sb->test_flag(HOMEBLKS_SB_FLAGS_RESTRICTED)) {
-        HS_RELEASE_ASSERT(m_safe_mode, "should be boot in safe mode");
+        HS_RELEASE_ASSERT(is_safe_mode(), "should be boot in safe mode");
         sb->clear_flag(HOMEBLKS_SB_FLAGS_RESTRICTED);
     }
     /* check the status of last boot */
@@ -897,7 +893,6 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     // the flag should be set again;
     sb->clear_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
     ++sb->boot_cnt;
-
 
     /* We don't allow any cp to happen during phase1 */
     StaticIndxMgr::init();
@@ -927,6 +922,7 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
             if (!m_cfg.vol_found_cb(it->second->get_uuid())) {
                 remove_volume_internal(it->second->get_uuid(), true);
             } else {
+                HS_RELEASE_ASSERT_NE(it->second->get_state(), vol_state::DESTROYING, "volume state is destroyed");
                 ++vol_mnt_cnt;
             }
         }
@@ -1043,6 +1039,14 @@ std::error_condition HomeBlks::mark_vol_offline(const boost::uuids::uuid& uuid) 
     vol_ptr->fault_containment();
     return no_error;
 }
+
+nlohmann::json HomeBlks::dump_disk_metablks(const std::string& client) {
+    return MetaBlkMgrSI()->dump_disk_metablks(client);
+}
+
+bool HomeBlks::verify_metablk_store() { return MetaBlkMgrSI()->verify_metablk_store(); }
+
+bool HomeBlks::is_safe_mode() { return HB_DYNAMIC_CONFIG(general_config->boot_safe_mode); }
 
 void HomeBlks::list_snapshot(const VolumePtr&, std::vector< SnapshotPtr > snap_list) {}
 
