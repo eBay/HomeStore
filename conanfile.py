@@ -52,6 +52,7 @@ class HomestoreConan(ConanFile):
     keep_imports = True
 
     def configure(self):
+        self.options['iomgr'].prerelease = self.options.prerelease
         if self.settings.build_type == "Debug":
             if self.options.sanitize:
                 self.options['sisl'].malloc_impl = 'libc'
