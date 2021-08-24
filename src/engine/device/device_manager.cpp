@@ -68,12 +68,11 @@ std::shared_ptr< blkalloc_cp > PhysicalDevChunk::attach_prepare_cp([[maybe_unuse
 
 DeviceManager::DeviceManager(NewVDevCallback vcb, const uint32_t vdev_metadata_size,
                              const iomgr::io_interface_comp_cb_t& io_comp_cb, const iomgr::iomgr_drive_type drive_type,
-                             const vdev_error_callback& vdev_error_cb, const bool is_restricted_mode) :
+                             const vdev_error_callback& vdev_error_cb) :
         m_new_vdev_cb{std::move(vcb)},
         m_drive_type{drive_type},
         m_vdev_metadata_size{vdev_metadata_size},
-        m_vdev_error_cb{vdev_error_cb},
-        m_restricted_mode{is_restricted_mode} {
+        m_vdev_error_cb{vdev_error_cb} {
 
     m_open_flags = get_open_flags(HS_STATIC_CONFIG(input.open_flags));
 
@@ -149,7 +148,7 @@ void DeviceManager::init_devices(const std::vector< dev_info >& devices) {
         bool is_inited;
         std::unique_ptr< PhysicalDev > pdev =
             std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, sys_uuid, m_pdev_id++, max_dev_offset,
-                                            m_drive_type, true, m_dm_info_size, &is_inited, m_restricted_mode);
+                                            m_drive_type, true, m_dm_info_size, &is_inited);
 
         LOGINFO("Initializing device name: {}, type: {} with system uuid: {}.", d.dev_names, m_drive_type,
                 std::ctime(&sys_uuid));
@@ -213,9 +212,9 @@ void DeviceManager::load_and_repair_devices(const std::vector< dev_info >& devic
     size_t pdev_size{0};
     for (auto& d : devices) {
         bool is_inited;
-        std::unique_ptr< PhysicalDev > pdev {
-            std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, sys_uuid, INVALID_DEV_ID, 0, m_drive_type,
-                                            false, m_dm_info_size, &is_inited, m_restricted_mode)};
+        std::unique_ptr< PhysicalDev > pdev{std::make_unique< PhysicalDev >(this, d.dev_names, m_open_flags, sys_uuid,
+                                                                            INVALID_DEV_ID, 0, m_drive_type, false,
+                                                                            m_dm_info_size, &is_inited)};
         if (!is_inited) {
             // Super block is not present, possibly a new device, will format the device later
             HS_LOG(CRITICAL, device,

@@ -490,8 +490,10 @@ private:
     sisl::ThreadVector< BlkId >* m_alloc_blkid_list{nullptr};
     std::unique_ptr< BlkAllocPortion[] > m_blk_portions;
     std::unique_ptr< sisl::Bitset > m_disk_bm{nullptr};
-    std::unique_ptr< sisl::Bitset > m_debug_bm{nullptr};
-    std::unique_ptr< sisl::Bitset > m_realtime_bm{nullptr};
+    std::unique_ptr< sisl::Bitset > m_debug_bm{
+        nullptr}; // it is used only for debugging during boot or when HS is in restricted mode
+    std::unique_ptr< sisl::Bitset > m_realtime_bm{
+        nullptr}; // it is used only for debugging to keep track of allocated/free blkids in real time
     std::atomic< int64_t > m_alloced_blk_count{0};
     bool m_auto_recovery{false};
 };

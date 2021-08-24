@@ -54,6 +54,7 @@ constexpr uint32_t hb_sb_version{0x1};
 typedef uint32_t homeblks_sb_flag_t;
 
 const uint32_t HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN{0x00000001};
+const uint32_t HOMEBLKS_SB_FLAGS_RESTRICTED{0x00000002};
 #pragma pack(1)
 struct homeblks_sb {
     uint64_t magic = hb_sb_magic;
@@ -90,12 +91,15 @@ class HomeBlksMetrics : public sisl::MetricsGroupWrapper {
 public:
     explicit HomeBlksMetrics(const char* homeblks_name) : sisl::MetricsGroupWrapper("HomeBlks", homeblks_name) {
         REGISTER_HISTOGRAM(scan_volumes_latency, "Scan Volumes latency");
+        REGISTER_COUNTER(boot_cnt, "boot cnt", sisl::_publish_as::publish_as_gauge);
+        REGISTER_GAUGE(unclean_shutdown, "unclean shutdown");
         register_me_to_farm();
     }
     HomeBlksMetrics(const HomeBlksMetrics&) = delete;
     HomeBlksMetrics(HomeBlksMetrics&&) noexcept = delete;
     HomeBlksMetrics& operator=(const HomeBlksMetrics&) = delete;
     HomeBlksMetrics& operator=(HomeBlksMetrics&&) noexcept = delete;
+    void on_gather();
 
     ~HomeBlksMetrics() { deregister_me_from_farm(); }
 };
@@ -266,6 +270,7 @@ public:
                                         hs_cp* new_hcp) override;
     void do_volume_shutdown(bool force);
     void create_volume(VolumePtr vol);
+    void move_to_restricted_state();
 
     data_blkstore_t::comp_callback data_completion_cb() override;
 
@@ -297,6 +302,9 @@ public:
     friend void intrusive_ptr_release(HomeBlks* hs) {
         intrusive_ptr_release(static_cast< homestore::HomeStoreBase* >(hs));
     }
+    void wakeup_init();
+    bool is_unclean_shutdown() const;
+    void reset_unclean_shutdown();
 
 public:
     // Other static functions
@@ -350,8 +358,10 @@ private:
     std::unique_ptr< HomeBlksHttpServer > m_hb_http_server;
 
     std::condition_variable m_cv_init_cmplt; // wait for init to complete
+    std::condition_variable m_cv_wakeup_init; // wait for init to complete
     std::mutex m_cv_mtx;
     bool m_rdy = false;
+    std::atomic< bool > m_safe_mode = false;
 
     std::atomic< uint64_t > m_shutdown_start_time = 0;
     iomgr::timer_handle_t m_shutdown_timer_hdl = iomgr::null_timer_handle;
@@ -361,6 +371,7 @@ private:
     bool m_vol_shutdown_cmpltd{false};
     HomeBlksMetrics m_metrics;
     std::atomic< bool > m_start_shutdown;
+    std::atomic< bool > m_unclean_shutdown = false;
     iomgr::io_thread_t m_init_thread_id;
 
     std::unique_ptr< HomeBlksRecoveryStats > m_recovery_stats{nullptr};

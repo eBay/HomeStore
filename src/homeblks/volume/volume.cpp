@@ -572,11 +572,15 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
 void Volume::attach_completion_cb(const io_comp_callback& cb) { m_comp_cb = cb; }
 
 void Volume::fault_containment() {
+    m_hb->move_to_restricted_state();
+    VOL_RELEASE_ASSERT(0, , "hit checksum mismatch");
+#if 0
     // set state to offline
     set_state(vol_state::OFFLINE);
 
     // send state_change_callback to AM
     m_hb->vol_state_change(shared_from_this(), vol_state::OFFLINE);
+#endif
 
     // I/O completion cb will be suppressed automatcially since after state change cb, scst connection should be donwn;
 }

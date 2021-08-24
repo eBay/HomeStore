@@ -45,6 +45,7 @@ void HomeBlksHttpServer::start() {
             handler_info("/api/v1/reloadConfig", HomeBlksHttpServer::reload_dynamic_config, (void*)this),
             handler_info("/api/v1/getStatus", HomeBlksHttpServer::get_status, (void*)this),
             handler_info("/api/v1/verifyBitmap", HomeBlksHttpServer::verify_bitmap, (void*)this),
+            handler_info("/api/v1/wakeupInit", HomeBlksHttpServer::wakeup_init, (void*)this),
 #ifdef _PRERELEASE
             handler_info("/api/v1/crashSystem", HomeBlksHttpServer::crash_system, (void*)this),
             handler_info("/api/v1/moveVolOffline", HomeBlksHttpServer::move_vol_offline, (void*)this),
@@ -252,6 +253,13 @@ void HomeBlksHttpServer::verify_bitmap(sisl::HttpCallData cd) {
     auto ret = hb->verify_bitmap();
     std::string resp{"HomeBlks bitmap verified "};
     resp += ret ? "successfully" : "failed";
+    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
+}
+
+void HomeBlksHttpServer::wakeup_init(sisl::HttpCallData cd) {
+    auto hb = to_homeblks(cd);
+    hb->wakeup_init();
+    std::string resp{"completed"};
     pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 

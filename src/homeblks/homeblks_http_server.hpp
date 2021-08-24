@@ -30,6 +30,7 @@ public:
     static void reload_dynamic_config(sisl::HttpCallData cd);
     static void get_status(sisl::HttpCallData cd);
     static void verify_bitmap(sisl::HttpCallData cd);
+    static void wakeup_init(sisl::HttpCallData cd);
 #ifdef _PRERELEASE
     static void crash_system(sisl::HttpCallData cd);
     static void move_vol_offline(sisl::HttpCallData cd);

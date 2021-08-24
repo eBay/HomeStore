@@ -112,10 +112,10 @@ public:
 
         m_data_pagesz = input.min_virtual_page_size;
 
-        LOGINFO(
-            "HomeStore starting with dynamic config version: {} static config: {}, restricted_mode: {}, safe_mode: {}",
-            HS_DYNAMIC_CONFIG(version), hs_config.to_json().dump(4),
-            HB_DYNAMIC_CONFIG(general_config->boot_restricted_mode), HB_DYNAMIC_CONFIG(general_config->boot_safe_mode));
+        LOGINFO("HomeStore starting with dynamic config version: {} static config: {}, safe_mode: {}",
+                HS_DYNAMIC_CONFIG(version), hs_config.to_json().dump(4),
+                HB_DYNAMIC_CONFIG(general_config->boot_safe_mode));
+
 
 #ifndef NDEBUG
         hs_config.validate();
@@ -129,8 +129,7 @@ public:
         m_dev_mgr = std::make_unique< DeviceManager >(
             std::bind(&HomeStore::new_vdev_found, this, std::placeholders::_1, std::placeholders::_2),
             sizeof(sb_blkstore_blob), virtual_dev_process_completions, input.device_type,
-            std::bind(&HomeStore::process_vdev_error, this, std::placeholders::_1),
-            HB_DYNAMIC_CONFIG(general_config->boot_restricted_mode));
+            std::bind(&HomeStore::process_vdev_error, this, std::placeholders::_1));
     }
 
     cap_attrs get_system_capacity() {
