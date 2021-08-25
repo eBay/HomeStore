@@ -798,7 +798,8 @@ public:
     /* Get status */
     nlohmann::json get_status(const int log_level) {
         nlohmann::json j;
-        j.update(m_vdev.get_status(log_level));
+        auto vdev_json = m_vdev.get_status(log_level);
+        if (!vdev_json.empty()) { j.update(vdev_json); }
         return j;
     }
 

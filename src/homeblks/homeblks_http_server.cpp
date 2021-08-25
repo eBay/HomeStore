@@ -15,6 +15,8 @@
 #include "home_blks.hpp"
 
 namespace homestore {
+
+std::vector< std::string > HomeBlksHttpServer::m_iface_list;
 HomeBlksHttpServer* HomeBlksHttpServer::pThis(sisl::HttpCallData cd) { return (HomeBlksHttpServer*)cd->cookie(); }
 HomeBlks* HomeBlksHttpServer::to_homeblks(sisl::HttpCallData cd) { return pThis(cd)->m_hb; }
 
@@ -43,6 +45,9 @@ void HomeBlksHttpServer::start() {
             handler_info("/api/v1/reloadConfig", HomeBlksHttpServer::reload_dynamic_config, (void*)this),
             handler_info("/api/v1/getStatus", HomeBlksHttpServer::get_status, (void*)this),
             handler_info("/api/v1/verifyBitmap", HomeBlksHttpServer::verify_bitmap, (void*)this),
+            handler_info("/api/v1/dumpDiskMetaBlks", HomeBlksHttpServer::dump_disk_metablks, (void*)this),
+            handler_info("/api/v1/verifyMetaBlkStore", HomeBlksHttpServer::verify_metablk_store, (void*)this),
+            handler_info("/api/v1/wakeupInit", HomeBlksHttpServer::wakeup_init, (void*)this),
 #ifdef _PRERELEASE
             handler_info("/api/v1/crashSystem", HomeBlksHttpServer::crash_system, (void*)this),
             handler_info("/api/v1/moveVolOffline", HomeBlksHttpServer::move_vol_offline, (void*)this),
@@ -50,9 +55,28 @@ void HomeBlksHttpServer::start() {
 #endif
         }}));
     m_http_server->start();
+
+    // get sock interfaces and store ips
+    struct ifaddrs* interfaces = nullptr;
+    struct ifaddrs* temp_addr = nullptr;
+    auto error = getifaddrs(&interfaces);
+    if (error != 0) { LOGWARN("getifaddrs returned non zero code: {}", error); }
+    temp_addr = interfaces;
+    while (temp_addr != nullptr) {
+        if (temp_addr->ifa_addr->sa_family == AF_INET) {
+            m_iface_list.emplace_back(inet_ntoa(((struct sockaddr_in*)temp_addr->ifa_addr)->sin_addr));
+        }
+        temp_addr = temp_addr->ifa_next;
+    }
+    freeifaddrs(interfaces);
 }
 
 void HomeBlksHttpServer::stop() { m_http_server->stop(); }
+
+bool HomeBlksHttpServer::is_local_addr(struct sockaddr* addr) {
+    std::string client_ip = inet_ntoa(((struct sockaddr_in*)addr)->sin_addr);
+    return (std::find(m_iface_list.begin(), m_iface_list.end(), client_ip) != m_iface_list.end());
+}
 
 void HomeBlksHttpServer::get_version(sisl::HttpCallData cd) {
     auto vers{sisl::VersionMgr::getVersions()};
@@ -133,6 +157,11 @@ void HomeBlksHttpServer::get_log_level(sisl::HttpCallData cd) {
 }
 
 void HomeBlksHttpServer::dump_stack_trace(sisl::HttpCallData cd) {
+    if (!is_local_addr(cd->request()->conn->saddr)) {
+        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN, "Access not allowed from external host");
+        return;
+    }
+
     sds_logging::log_stack_trace(true);
     pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, "Look for stack trace in the log file");
 }
@@ -142,6 +171,11 @@ void HomeBlksHttpServer::get_malloc_stats(sisl::HttpCallData cd) {
 }
 
 void HomeBlksHttpServer::verify_hs(sisl::HttpCallData cd) {
+    if (!is_local_addr(cd->request()->conn->saddr)) {
+        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN, "Access not allowed from external host");
+        return;
+    }
+
     auto hb = to_homeblks(cd);
     auto ret = hb->verify_vols();
     std::string resp{"HomeBlks verified "};
@@ -157,6 +191,11 @@ void HomeBlksHttpServer::get_config(sisl::HttpCallData cd) {
 }
 
 void HomeBlksHttpServer::reload_dynamic_config(sisl::HttpCallData cd) {
+    if (!is_local_addr(cd->request()->conn->saddr)) {
+        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN, "Access not allowed from external host");
+        return;
+    }
+
     bool restart_needed = sisl::SettingsFactoryRegistry::instance().reload_all();
     pThis(cd)->m_http_server->respond_OK(
         cd, EVHTP_RES_OK,
@@ -185,6 +224,46 @@ bool HomeBlksHttpServer::verify_and_get_verbosity(const evhtp_request_t* req, st
     return ret;
 }
 
+void HomeBlksHttpServer::verify_metablk_store(sisl::HttpCallData cd) {
+    auto req = cd->request();
+
+    const auto hb = to_homeblks(cd);
+    if (hb->is_safe_mode()) {
+        const auto ret = hb->verify_metablk_store();
+        pThis(cd)->m_http_server->respond_OK(
+            cd, EVHTP_RES_OK, fmt::format("Disk sanity of MetaBlkStore result: {}", ret ? "Passed" : "Failed"));
+    } else {
+        pThis(cd)->m_http_server->respond_NOTOK(
+            cd, EVHTP_RES_BADREQ, fmt::format("HomeBlks not in safe mode, not allowed to serve this request"));
+    }
+}
+
+void HomeBlksHttpServer::dump_disk_metablks(sisl::HttpCallData cd) {
+    auto req = cd->request();
+
+    std::vector< std::string > clients;
+    auto modules_kv = evhtp_kvs_find_kv(req->uri->query, "client");
+    if (modules_kv) {
+        boost::algorithm::split(clients, modules_kv->val, boost::is_any_of(","), boost::token_compress_on);
+    }
+
+    if (clients.size() != 1) {
+        pThis(cd)->m_http_server->respond_NOTOK(
+            cd, EVHTP_RES_BADREQ,
+            fmt::format("Can serve only one client per request. Number clients received: {}\n", clients.size()));
+        return;
+    }
+
+    const auto hb = to_homeblks(cd);
+    if (hb->is_safe_mode()) {
+        const auto j = to_homeblks(cd)->dump_disk_metablks(clients[0]);
+        pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, j.dump(2));
+    } else {
+        pThis(cd)->m_http_server->respond_NOTOK(
+            cd, EVHTP_RES_BADREQ, fmt::format("HomeBlks not in safe mode, not allowed to serve this request"));
+    }
+}
+
 void HomeBlksHttpServer::get_status(sisl::HttpCallData cd) {
     auto req = cd->request();
 
@@ -203,16 +282,26 @@ void HomeBlksHttpServer::get_status(sisl::HttpCallData cd) {
 
     const auto status_mgr = to_homeblks(cd)->status_mgr();
     auto status_json = status_mgr->get_status(modules, verbosity_level);
-    const auto vol_status_json = to_homeblks(cd)->get_status(verbosity_level);
-    status_json.update(vol_status_json);
     pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, status_json.dump(2));
 }
 
 void HomeBlksHttpServer::verify_bitmap(sisl::HttpCallData cd) {
+    if (!is_local_addr(cd->request()->conn->saddr)) {
+        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN, "Access not allowed from external host");
+        return;
+    }
+
     auto hb = to_homeblks(cd);
     auto ret = hb->verify_bitmap();
     std::string resp{"HomeBlks bitmap verified "};
     resp += ret ? "successfully" : "failed";
+    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
+}
+
+void HomeBlksHttpServer::wakeup_init(sisl::HttpCallData cd) {
+    auto hb = to_homeblks(cd);
+    hb->wakeup_init();
+    std::string resp{"completed"};
     pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 

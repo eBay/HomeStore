@@ -449,9 +449,9 @@ public:
      *  if this is set to false in a recovery boot, it is expected.
      *  this field will not be changed if is_init is set to true(first-time-boot)
      */
-    PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags, const hs_uuid_t& uuid, const uint32_t dev_num,
-                const uint64_t dev_offset, const iomgr::iomgr_drive_type drive_type, const bool is_init, const uint64_t dm_info_size,
-                bool* const is_inited, const bool is_restricted_mode);
+    PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags, const hs_uuid_t& uuid,
+                const uint32_t dev_num, const uint64_t dev_offset, const iomgr::iomgr_drive_type drive_type,
+                const bool is_init, const uint64_t dm_info_size, bool* const is_inited);
 
     PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags, const iomgr::iomgr_drive_type drive_type);
 
@@ -563,7 +563,6 @@ private:
     int32_t m_cur_indx{0};
     bool m_superblock_valid{false};
     sisl::atomic_counter< uint64_t > m_error_cnt{0};
-    bool m_restricted_mode{false}; // only allow special operations in this mode;
 };
 
 class AbstractVirtualDev {
@@ -589,7 +588,7 @@ class DeviceManager {
 public:
     DeviceManager(NewVDevCallback vcb, const uint32_t vdev_metadata_size,
                   const iomgr::io_interface_comp_cb_t& io_comp_cb, const iomgr::iomgr_drive_type drive_type,
-                  const vdev_error_callback& vdev_error_cb, const bool is_restricted_mode);
+                  const vdev_error_callback& vdev_error_cb);
 
     DeviceManager(const DeviceManager& other) = delete;
     DeviceManager& operator=(const DeviceManager& other) = delete;
@@ -709,7 +708,6 @@ private:
     uint64_t m_dm_info_size{0};
     vdev_error_callback m_vdev_error_cb;
     bool m_first_time_boot{true};
-    bool m_restricted_mode;
 }; // class DeviceManager
 
 } // namespace homestore

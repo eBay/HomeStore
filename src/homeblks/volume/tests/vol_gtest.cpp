@@ -285,7 +285,7 @@ public:
                 bool cv_status = (((status == job_status_t::stopped) || (status == job_status_t::completed)) &&
                                   (m_status_threads_executing.count() == 0));
                 if (cv_status && m_timer_hdl != iomgr::null_timer_handle) {
-                    iomanager.cancel_timer(m_timer_hdl);
+                    iomanager.cancel_timer(m_timer_hdl, false /* wait */);
                     m_timer_hdl = iomgr::null_timer_handle;
                 }
                 return cv_status;
