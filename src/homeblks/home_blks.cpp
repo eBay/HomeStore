@@ -314,6 +314,28 @@ VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
     if (m_volume_map.end() != it) { return it->second; }
     return nullptr;
 }
+
+bool HomeBlks::inc_hs_ref_cnt(const boost::uuids::uuid& uuid) {
+    auto vol = lookup_volume(uuid);
+    if (!vol) return false;
+    vol->inc_ref_cnt();
+    return true;
+}
+
+bool HomeBlks::dec_hs_ref_cnt(const boost::uuids::uuid& uuid) {
+    auto vol = lookup_volume(uuid);
+    if (!vol) return false;
+    vol->shutdown_if_needed();
+    return true;
+}
+
+bool HomeBlks::fault_containment(const boost::uuids::uuid& uuid) {
+    auto vol = lookup_volume(uuid);
+    if (!vol) return false;
+    vol->fault_containment();
+    return true;
+}
+
 #if 0
 SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
     if (!m_rdy || is_shutdown()) {
@@ -435,7 +457,7 @@ void HomeBlks::init_done() {
     m_out_params.max_io_size = HS_STATIC_CONFIG(engine.max_vol_io_size);
     if (m_cfg.end_of_batch_cb) { attach_end_of_batch_cb(m_cfg.end_of_batch_cb); }
     if (!HB_DYNAMIC_CONFIG(general_config->boot_safe_mode)) {
-        LOGINFO("HomeBlks booting into safe_mode");
+        LOGINFO("HomeBlks not booting into safe_mode");
         m_cfg.init_done_cb(no_error, m_out_params);
     }
 
