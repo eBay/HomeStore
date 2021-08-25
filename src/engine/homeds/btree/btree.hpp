@@ -2695,11 +2695,10 @@ private:
             // and upon boot volume continues to destroy this btree;
             THIS_BT_LOG(INFO, btree_generics, node,
                         "Freeing a node already freed because of crash during destroy btree.");
-        } else {
-            node->set_valid_node(false);
-            m_total_nodes--;
-            btree_store_t::free_node(m_btree_store.get(), node, free_blkid_list, in_mem);
         }
+        node->set_valid_node(false);
+        m_total_nodes--;
+        btree_store_t::free_node(m_btree_store.get(), node, free_blkid_list, in_mem);
     }
 
     /* Recovery process is different for root node, child node and sibling node depending on how the node
