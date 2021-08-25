@@ -453,7 +453,11 @@ public:
         assert(m_cfg.get_blks_per_portion() % m_debug_bm->word_size() == 0);
     }
 
-    void update_debug_bm(const BlkId& bid) { get_debug_bm()->set_bits(bid.get_blk_num(), bid.get_nblks()); }
+    void update_debug_bm(const BlkId& bid) {
+        BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(bid.get_blk_num(), bid.get_nblks()),
+                        "Expected disk bits to set blk num {} num blks {}", bid.get_blk_num(), bid.get_nblks());
+        get_debug_bm()->set_bits(bid.get_blk_num(), bid.get_nblks());
+    }
 
     [[nodiscard]] bool verify_debug_bm(const bool free_debug_bm) {
         const bool ret{*get_disk_bm() == *get_debug_bm()};
@@ -486,8 +490,10 @@ private:
     sisl::ThreadVector< BlkId >* m_alloc_blkid_list{nullptr};
     std::unique_ptr< BlkAllocPortion[] > m_blk_portions;
     std::unique_ptr< sisl::Bitset > m_disk_bm{nullptr};
-    std::unique_ptr< sisl::Bitset > m_debug_bm{nullptr};
-    std::unique_ptr< sisl::Bitset > m_realtime_bm{nullptr};
+    std::unique_ptr< sisl::Bitset > m_debug_bm{
+        nullptr}; // it is used only for debugging during boot or when HS is in restricted mode
+    std::unique_ptr< sisl::Bitset > m_realtime_bm{
+        nullptr}; // it is used only for debugging to keep track of allocated/free blkids in real time
     std::atomic< int64_t > m_alloced_blk_count{0};
     bool m_auto_recovery{false};
 };

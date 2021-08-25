@@ -34,11 +34,15 @@ if (${build_io_tests})
     set(HS_SVC_TOOL_SOURCE_FILES tool/hs_svc_tool.cpp)
     add_executable(hs_svc_tool ${HS_SVC_TOOL_SOURCE_FILES})
     target_link_libraries(hs_svc_tool homeblks ${CONAN_LIBS})
+
+    # disable the test for now
+    #add_test(NAME TestHttpSanity COMMAND ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=http_sanity_test --dirpath=${CMAKE_BINARY_DIR}/bin/)
     
     can_build_epoll_io_tests(is_epoll)
     if (${is_epoll})
         add_test(NAME TestHSSvcTool-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=hs_svc_tool --dirpath=${CMAKE_BINARY_DIR}/bin/ --)
         add_test(NAME TestVol-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_volume)
+        #SET_TESTS_PROPERTIES(TestVol-Epoll PROPERTIES DEPENDS TestHttpSanity)
         
         #add_test(NAME TestMapBtreeFix COMMAND test_volume --gtest_filter=*btree_fix_rerun_io* --max_num_writes=1000 --max_volume=10)
         #SET_TESTS_PROPERTIES(TestMapBtreeFix PROPERTIES DEPENDS TestVol)

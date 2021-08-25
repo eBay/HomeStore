@@ -160,7 +160,7 @@ pipeline {
                             expression { "${COVERAGE}" == 'False' }
                         }
                         steps {
-                            sh "conan create ${BUILD_MISSING} -o sds_logging:prerelease=${PRERELEASE} -o homestore:sanitize=${SANITIZE} ${BUILD_TEST_MODE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
+                            sh "conan create ${BUILD_MISSING} -o ${PROJECT}:prerelease=${PRERELEASE} -o homestore:sanitize=${SANITIZE} ${BUILD_TEST_MODE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
@@ -227,8 +227,10 @@ pipeline {
                         }
                     }
                     stage("Image") {
-                        when {
+                        when { allOf { 
                             expression { "${COVERAGE}" == 'False' }
+                            expression { !(("${BUILD_TYPE}" == 'test') && ("${PRERELEASE}" == 'False')) }
+                            }
                         }
                         steps {
                             retry(3) {
@@ -245,6 +247,7 @@ pipeline {
                                 branch "master"
                               }
                               expression { "${COVERAGE}" == 'False' }
+                              expression { !(("${BUILD_TYPE}" == 'test') && ("${PRERELEASE}" == 'False')) }
                             } }
                         steps {
                             retry(3) {

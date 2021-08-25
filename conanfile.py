@@ -4,7 +4,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "2.7.17"
+    version = "2.7.22"
 
     revision_mode = "scm"
     license = "Proprietary"
@@ -52,6 +52,7 @@ class HomestoreConan(ConanFile):
     keep_imports = True
 
     def configure(self):
+        self.options['iomgr'].prerelease = self.options.prerelease
         if self.settings.build_type == "Debug":
             if self.options.sanitize:
                 self.options['sisl'].malloc_impl = 'libc'

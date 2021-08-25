@@ -9,6 +9,8 @@ import sys
 from multiprocessing import Process
 sys.stdout.flush()
 from time import sleep
+import requests
+from threading import Thread
 
 opts,args = getopt.getopt(sys.argv[1:], 'td:', ['test_suits=', 'dirpath=']) 
 test_suits = ""
@@ -222,7 +224,7 @@ def seq_load_start():
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("seq workload test completed")
     
-def seq_vol_load():
+def seq_workload():
     p = Process(target = seq_load_start())
     p.start()
     p.join()
@@ -352,6 +354,52 @@ def vol_io_flip_test():
     cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
 
+def meta_mod_abort():
+    vol_mod_test("meta", meta_flip_list)
+
+def vdev_mod_abort():
+    vol_mod_test("vdev", vdev_flip_list)
+
+def http_sanity_routine(success):
+    sleep(20)
+    get_api_list = ['version', 'getObjLife', 'getLogLevel', 'verifyHS', 'mallocStats', 'getConfig', 'getStatus'""", 'verifyBitmap'"""]
+    endpoint = "127.0.0.1:12345"
+    # homestore takes variable time to init. Retry brfore failing.
+    retry_limit = 10
+    for api in get_api_list:
+        url = f"http://{endpoint}/api/v1/{api}"
+        response = None
+        while retry_limit > 0:
+            try:
+                response = requests.post(url)
+                break
+            except requests.exceptions.RequestException as e:
+                retry_limit = retry_limit - 1
+                sleep(1)
+        if not response:
+            print(f"error: max retries exceeded for url {url}")
+            success.append(False)
+            return
+        if not response.ok:
+            print(f"error: url {url} failed, what: {response.text}")
+            success.append(False)
+            return
+        sleep(1)
+    success.append(True)
+
+def http_sanity_test():
+    print("http_sanity_test test started")
+    cmd_opts = "--run_time=45 --max_volume=1 --num_threads=1 --gtest_filter=VolTest.vol_create_del_test --hb_stats_port=12345"
+    success = []
+    thread = Thread(target=http_sanity_routine, args=[success,])
+    thread.start()
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    thread.join()
+    if (not success) or (not success[0]) :
+        print("http_sanity_test FAILED")
+        sys.exit(1)
+    print("http_sanity_test test completed")
+
 # It is subset of nightly which should be completed in an hour
 def hourly():
     normal("10 * 60")
@@ -423,89 +471,6 @@ def nightly():
     
     #vdev_nightly()
     #sleep(5)
-if test_suits == "normal":
-    normal()
     
-if test_suits == "recovery":
-    recovery()
-
-if test_suits == "recovery_crash":
-    recovery_crash()
-    
-if test_suits == "mapping":
-    mapping()
-
-if test_suits == "one_disk_replace":
-    one_disk_replace()
-
-if test_suits == "one_disk_replace_abort":
-    one_disk_replace_abort()
-
-if test_suits == "both_disk_replace":
-    both_disk_replace()
-
-if test_suits == "one_disk_fail":
-    one_disk_fail()
-
-if test_suits == "vol_offline_test":
-    vol_offline_test()
-
-if test_suits == "vol_io_fail_test":
-    vol_io_fail_test()
-
-if test_suits == "vol_crc_mismatch_test":
-    vol_crc_mismatch_test()
-
-if test_suits == "vol_create_del_test":
-    vol_create_del_test()
-
-if test_suits == "nightly":
-    nightly()
-
-if test_suits == "hourly":
-    hourly()
-
-if test_suits == "recovery_nightly":
-    recovery_nightly()
-
-if test_suits == "load":
-    load()
- 
-if test_suits == "load_volume":
-    load_volume()
-
-if test_suits == "btree_fix":
-    btree_fix()
-
-if test_suits == "btree_fix_rerun_io":
-    btree_fix_rerun_io()
-
-if test_suits == "btree_fix_on_read_failure":
-    btree_fix_on_read_failure()
-
-if test_suits == "seq_workload":
-    seq_vol_load()
-
-if test_suits == "vdev_nightly":
-    vdev_nightly()
-
-if test_suits == "meta_blk_store_nightly":
-    meta_blk_store_nightly()
-
-if test_suits == "logstore_nightly":
-    logstore_nightly()
-
-if test_suits == "force_reinit":
-    force_reinit()
-
-if test_suits == "hs_svc_tool":
-    hs_svc_tool()
-
-if test_suits == "meta_mod_abort":
-    vol_mod_test("meta", meta_flip_list)
-
-if test_suits == "vdev_mod_abort":
-    vol_mod_test("vdev", vdev_flip_list)
-
-if test_suits == "vol_create_delete_test":
-    vol_create_delete_test()
+# The name of the method to be called is the var test_suits
+eval(f"{test_suits}()")
