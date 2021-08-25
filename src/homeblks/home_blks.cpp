@@ -920,6 +920,10 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
         std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
         for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
             if (!m_cfg.vol_found_cb(it->second->get_uuid())) {
+                LOGINFO("volume {} is not valid for AM", it->second->get_name());
+                remove_volume_internal(it->second->get_uuid(), true);
+            } else if (it->second->get_state() == vol_state::DESTROYING) {
+                LOGERROR("volume {} is valid by AM but its state is set to destroying", it->second->get_name());
                 remove_volume_internal(it->second->get_uuid(), true);
             } else {
                 HS_RELEASE_ASSERT_NE(it->second->get_state(), vol_state::DESTROYING, "volume state is destroyed");
