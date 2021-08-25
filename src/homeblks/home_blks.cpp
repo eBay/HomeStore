@@ -388,7 +388,7 @@ void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, const io_comp_call
 
 void HomeBlks::attach_end_of_batch_cb(const end_of_batch_callback& cb) {
     m_cfg.end_of_batch_cb = cb;
-    iomanager.generic_interface()->attach_listen_sentinel_cb([this]() { call_multi_completions(); }, nullptr);
+    iomanager.generic_interface()->attach_listen_sentinel_cb([this]() { call_multi_completions(); });
 }
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
@@ -690,11 +690,9 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     this->close_devices();
 
     // stop io
-    iomanager.generic_interface()->detach_listen_sentinel_cb(
-        [cb = std::move(m_shutdown_done_cb)]([[maybe_unused]] iomgr::io_thread_addr_t addr) {
-            iomanager.stop_io_loop();
-            if (cb) cb(true);
-        });
+    iomanager.generic_interface()->detach_listen_sentinel_cb(iomgr::wait_type_t::spin);
+    iomanager.stop_io_loop();
+    if (m_shutdown_done_cb) { m_shutdown_done_cb(true); }
 }
 
 void HomeBlks::do_volume_shutdown(bool force) {
