@@ -553,7 +553,6 @@ struct journal_key {
     lba_t lba;
     lba_count_t nlbas;         // nlbas written
     lba_count_t user_io_nlbas; // nlbas passed by the user
-    char padding[4];
 
     [[nodiscard]] lba_count_t num_lbas() const { return nlbas; }
 };
