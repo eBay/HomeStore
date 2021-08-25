@@ -85,10 +85,11 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
     read_superblock();
 }
 
-PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags, const hs_uuid_t& system_uuid,
-                         const uint32_t dev_num, const uint64_t dev_offset, const iomgr::iomgr_drive_type drive_type, const bool is_init,
-                         const uint64_t dm_info_size, bool* const is_inited, const bool is_restricted_mode) :
-        m_mgr{mgr}, m_devname{devname}, m_metrics{devname}, m_restricted_mode{is_restricted_mode} {
+PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags,
+                         const hs_uuid_t& system_uuid, const uint32_t dev_num, const uint64_t dev_offset,
+                         const iomgr::iomgr_drive_type drive_type, const bool is_init, const uint64_t dm_info_size,
+                         bool* const is_inited) :
+        m_mgr{mgr}, m_devname{devname}, m_metrics{devname} {
     /* super block should always be written atomically. */
     HS_LOG_ASSERT_LE(sizeof(super_block), SUPERBLOCK_SIZE, "Device {} Ondisk Superblock size not enough to hold in-mem",
                      devname);
@@ -285,15 +286,6 @@ void PhysicalDev::zero_boot_sbs(const std::vector< dev_info >& devices, const io
 
     // free super_blk
     hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(super_blk), sisl::buftag::superblk);
-}
-
-void PhysicalDev::zero_superblock() {
-    if (m_restricted_mode) {
-        std::memset(static_cast< void* >(m_super_blk), 0, SUPERBLOCK_SIZE);
-        write_superblock();
-    } else {
-        LOGINFO("zero operation is not allowed in non-restricted mode.");
-    }
 }
 
 bool PhysicalDev::has_valid_superblock(hs_uuid_t& out_uuid) {

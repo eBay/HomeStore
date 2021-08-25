@@ -87,7 +87,8 @@ public:
         // Start a custom periodic logger
         static std::once_flag flag1;
         std::call_once(flag1, [this]() {
-            m_periodic_logger = sds_logging::CreateCustomLogger("homestore", "_periodic", false /* tee_to_stdout */);
+            m_periodic_logger =
+                sds_logging::CreateCustomLogger("homestore", "_periodic", false, true /* tee_to_stdout_stderr */);
         });
         sds_logging::SetLogPattern("[%D %T.%f] [%^%L%$] [%t] %v", m_periodic_logger);
 
@@ -111,10 +112,8 @@ public:
 
         m_data_pagesz = input.min_virtual_page_size;
 
-        LOGINFO("HomeStore starting with dynamic config version: {} static config: {}, restricted_mode: {}, safe_mode: {}",
-                HS_DYNAMIC_CONFIG(version),
-                hs_config.to_json().dump(4),
-                HB_DYNAMIC_CONFIG(general_config->boot_restricted_mode),
+        LOGINFO("HomeStore starting with dynamic config version: {} static config: {}, safe_mode: {}",
+                HS_DYNAMIC_CONFIG(version), hs_config.to_json().dump(4),
                 HB_DYNAMIC_CONFIG(general_config->boot_safe_mode));
 
 #ifndef NDEBUG
@@ -129,8 +128,7 @@ public:
         m_dev_mgr = std::make_unique< DeviceManager >(
             std::bind(&HomeStore::new_vdev_found, this, std::placeholders::_1, std::placeholders::_2),
             sizeof(sb_blkstore_blob), virtual_dev_process_completions, input.device_type,
-            std::bind(&HomeStore::process_vdev_error, this, std::placeholders::_1),
-            HB_DYNAMIC_CONFIG(general_config->boot_restricted_mode));
+            std::bind(&HomeStore::process_vdev_error, this, std::placeholders::_1));
     }
 
     cap_attrs get_system_capacity() {
@@ -249,9 +247,9 @@ protected:
                 m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::WRITEBACK_CACHE, 0, (char*)&blob,
                 sizeof(blkstore_blob), m_data_pagesz, "data", true, data_completion_cb());
         } else {
-            m_data_blk_store = std::make_unique< data_blkstore_t >(
-                m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::WRITEBACK_CACHE, m_data_pagesz, "data",
-                vb->is_failed(), true, data_completion_cb());
+            m_data_blk_store = std::make_unique< data_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb,
+                                                                   BlkStoreCacheType::WRITEBACK_CACHE, m_data_pagesz,
+                                                                   "data", vb->is_failed(), true, data_completion_cb());
             if (vb->is_failed()) {
                 m_vdev_failed = true;
                 LOGINFO("data block store is in failed state");

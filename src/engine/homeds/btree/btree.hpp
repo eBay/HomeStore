@@ -156,10 +156,6 @@ public:
 
         fc->inject_noreturn_flip("btree_read_fail", {null_cond}, freq);
         fc->inject_noreturn_flip("fixed_blkalloc_no_blks", {null_cond}, freq);
-
-        freq.set_count(5);
-        freq.set_percent(10);
-        fc->inject_noreturn_flip("btree_crc_mismatch", {null_cond}, freq);
     }
 #endif
 

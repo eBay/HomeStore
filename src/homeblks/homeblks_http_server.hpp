@@ -4,6 +4,7 @@
 #include <string>
 
 #include <async_http/http_server.hpp>
+#include <ifaddrs.h>
 
 namespace homestore {
 class HomeBlks;
@@ -13,6 +14,8 @@ public:
     HomeBlksHttpServer(HomeBlks* hb);
     void start();
     void stop();
+
+    static bool is_local_addr(struct sockaddr* addr);
 
     static void get_version(sisl::HttpCallData cd);
     static void get_metrics(sisl::HttpCallData cd);
@@ -27,7 +30,12 @@ public:
     static void reload_dynamic_config(sisl::HttpCallData cd);
     static void get_status(sisl::HttpCallData cd);
     static void verify_bitmap(sisl::HttpCallData cd);
+    static void dump_disk_metablks(sisl::HttpCallData cd);
+    static void verify_metablk_store(sisl::HttpCallData cd);
+    static void wakeup_init(sisl::HttpCallData cd);
 #ifdef _PRERELEASE
+    static void set_safe_mode(sisl::HttpCallData cd);
+    static void unset_safe_mode(sisl::HttpCallData cd);
     static void crash_system(sisl::HttpCallData cd);
     static void move_vol_offline(sisl::HttpCallData cd);
     static void move_vol_online(sisl::HttpCallData cd);
@@ -41,6 +49,7 @@ private:
 private:
     HomeBlks* m_hb;
     std::unique_ptr< sisl::HttpServer > m_http_server;
+    static std::vector< std::string > m_iface_list;
 };
 
 }; // namespace homestore

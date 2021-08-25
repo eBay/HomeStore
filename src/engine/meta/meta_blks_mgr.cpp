@@ -14,7 +14,7 @@
 #include "engine/blkalloc/blk_allocator.h"
 #include "engine/blkstore/blkstore.hpp"
 #include "engine/common/homestore_flip.hpp"
-
+#include "homeblks/home_blks.hpp"
 #include "homestore.hpp"
 #include "meta_sb.hpp"
 
@@ -206,14 +206,20 @@ void MetaBlkMgr::write_ssb() {
 
 void MetaBlkMgr::scan_meta_blks() {
     cache_clear();
+    const auto self_recover = scan_and_load_meta_blks(m_meta_blks, m_ovf_blk_hdrs, m_last_mblk_id.get(), m_sub_info);
+    if (self_recover) { set_self_recover(); }
+}
 
+bool MetaBlkMgr::scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_map_t& ovf_blk_hdrs, BlkId* last_mblk_id,
+                                         client_info_map_t& sub_info) {
     // take a look so that before scan is complete, no add/remove/update operations will be allowed;
     std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
     auto bid{m_ssb->next_bid};
     auto prev_meta_bid{m_ssb->bid};
+    auto self_recover{false};
 
     while (bid.is_valid()) {
-        m_last_mblk_id->set(bid);
+        last_mblk_id->set(bid);
 
         // TODO: add a new API in blkstore read to by pass cache;
         // e.g. take caller's read buf to avoid this extra memory copy;
@@ -221,10 +227,10 @@ void MetaBlkMgr::scan_meta_blks() {
         read(bid, mblk, get_page_size());
 
         // add meta blk to cache;
-        m_meta_blks[bid.to_integer()] = mblk;
+        meta_blks[bid.to_integer()] = mblk;
 
         // add meta blk id to reverse mapping for each client (for read api);
-        m_sub_info[mblk->hdr.h.type].meta_bids.insert(mblk->hdr.h.bid.to_integer());
+        sub_info[mblk->hdr.h.type].meta_bids.insert(mblk->hdr.h.bid.to_integer());
 
         HS_DEBUG_ASSERT_EQ(mblk->hdr.h.bid.to_integer(), bid.to_integer(), "{}, bid mismatch: {} : {} ",
                            mblk->hdr.h.type, mblk->hdr.h.bid.to_string(), bid.to_string());
@@ -233,7 +239,7 @@ void MetaBlkMgr::scan_meta_blks() {
             // recover from previous crash during remove_sub_sb;
             HS_LOG(INFO, metablk, "[type={}], Recovering fromp previous crash. Fixing prev linkage.", mblk->hdr.h.type);
             mblk->hdr.h.prev_bid = prev_meta_bid;
-            set_self_recover();
+            self_recover = true;
             // persist updated mblk to disk
             write_meta_blk_to_disk(mblk);
         }
@@ -288,7 +294,7 @@ void MetaBlkMgr::scan_meta_blks() {
             read_sz += ovf_hdr->h.context_sz;
 
             // add to ovf blk cache
-            m_ovf_blk_hdrs[obid.to_integer()] = ovf_hdr;
+            ovf_blk_hdrs[obid.to_integer()] = ovf_hdr;
 
             // allocate overflow bid;
             m_sb_blk_store->reserve_blk(obid);
@@ -310,6 +316,8 @@ void MetaBlkMgr::scan_meta_blks() {
         // move on to next meta blk;
         bid = mblk->hdr.h.next_bid;
     }
+
+    return self_recover;
 }
 
 bool MetaBlkMgr::is_sub_type_valid(const meta_sub_type type) { return m_sub_info.find(type) != m_sub_info.end(); }
@@ -386,7 +394,9 @@ void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* const context_
     cookie = static_cast< void* >(mblk);
 
     // validate content of cookie
+#ifdef _PRERELEASE
     _cookie_sanity_check(cookie);
+#endif
 }
 
 void MetaBlkMgr::write_ovf_blk_to_disk(meta_blk_ovf_hdr* const ovf_hdr, const void* const context_data,
@@ -687,17 +697,11 @@ void MetaBlkMgr::write_meta_blk_internal(meta_blk* const mblk, const void* conte
 #endif
 }
 
-void MetaBlkMgr::cookie_sanity_check(const void* const cookie) {
-    std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
-    _cookie_sanity_check(cookie);
-}
-
 //
 // the input cookie being checked could the the one received from client doing add/update/remove or
 // a meta blk read from disk;
 //
 void MetaBlkMgr::_cookie_sanity_check(const void* const cookie) const {
-#ifdef _PRERELEASE
     auto mblk{static_cast< const meta_blk* >(cookie)};
 
     HS_RELEASE_ASSERT_EQ(cookie != nullptr, true, "null cookie!");
@@ -729,7 +733,6 @@ void MetaBlkMgr::_cookie_sanity_check(const void* const cookie) const {
     }
 
     HS_RELEASE_ASSERT_EQ(exist, true, "self-bid not found in cache!");
-#endif
 }
 
 //
@@ -744,18 +747,10 @@ void MetaBlkMgr::update_sub_sb(const void* const context_data, const uint64_t sz
         HS_RELEASE_ASSERT_EQ(m_inited, true, "accessing metablk store before init is not allowed.");
     }
 
-#ifdef _PRERELEASE
-    if (HS_DYNAMIC_CONFIG(generic.sanity_check_level)) {
-        static std::atomic< uint32_t > skip_cnt{0};
-        if (skip_cnt++ >= HS_DYNAMIC_CONFIG(metablk.sanity_check_interval)) {
-            skip_cnt = 0;
-            sanity_check(true /* check_ovf_chain */);
-        }
-    }
-#endif
-
     std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+#ifdef _PRERELEASE
     _cookie_sanity_check(cookie);
+#endif
     meta_blk* const mblk{static_cast< meta_blk* >(cookie)};
 
     HS_LOG(DEBUG, metablk, "[type={}], update_sub_sb old sb: context_sz: {}, ovf_bid: {}, mstore used size: {}",
@@ -798,14 +793,17 @@ void MetaBlkMgr::update_sub_sb(const void* const context_data, const uint64_t sz
 
     // no need to update cookie and in-memory meta blk map
 
+#ifdef _PRERELEASE
     // validate since update will change content of cookie
     _cookie_sanity_check(cookie);
+#endif
 }
 
 std::error_condition MetaBlkMgr::remove_sub_sb(void* const cookie) {
-    cookie_sanity_check(cookie);
-
     std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+#ifdef _PRERELEASE
+    _cookie_sanity_check(cookie);
+#endif
     HS_RELEASE_ASSERT_EQ(m_inited, true, "accessing metablk store before init is not allowed.");
     meta_blk* const rm_blk{static_cast< meta_blk* >(cookie)};
     const BlkId rm_bid{rm_blk->hdr.h.bid};
@@ -1157,6 +1155,11 @@ void MetaBlkMgr::read_sub_sb(const meta_sub_type type) {
 
         HS_RELEASE_ASSERT_EQ(it != std::end(m_meta_blks), true);
         auto* const mblk{it->second};
+        //
+        // No client writes compressed data with reads it back with read_sub_sb for now;
+        // This assert can be removed if any client writes compressed data who calls read_sub_sb to read it back;
+        //
+        HS_RELEASE_ASSERT_EQ(mblk->hdr.h.compressed, false);
         sisl::byte_array buf{read_sub_sb_internal(mblk)};
 
         // if consumer is reading its sbs with this api, the blk found cb should already be registered;
@@ -1212,30 +1215,45 @@ uint64_t MetaBlkMgr::get_available_blks() const { return m_sb_blk_store->get_ava
 
 bool MetaBlkMgr::m_self_recover{false};
 
-// do sanity check on meta ssb;
+//
+// 1. Do sanity check on meta ssb on disk;
+// 2. Can be called in both debug and release build;
+//
 bool MetaBlkMgr::ssb_sanity_check() const {
-    if (m_ssb->bid.is_valid() == false) {
-        LOGINFO("Detected corrupted meta ssb: {}", m_ssb->to_string());
-        HS_RELEASE_ASSERT_EQ(m_ssb->bid.is_valid(), true);
+    if (!m_ssb || m_ssb->bid.is_valid() == false) {
+        LOGERROR("Detected corrupted in-memory meta ssb: {}", m_ssb->to_string());
+        HS_DEBUG_ASSERT_EQ(m_ssb->bid.is_valid(), true);
+        return false;
     }
 
+    auto ret{true};
     auto ssb_blk = reinterpret_cast< meta_blk_sb* >(hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::metablk));
     std::memset(static_cast< void* >(ssb_blk), 0, get_page_size());
     read(m_ssb->bid, static_cast< void* >(ssb_blk), get_page_size());
 
-    HS_RELEASE_ASSERT_EQ(ssb_blk->magic, META_BLK_SB_MAGIC);
-    HS_RELEASE_ASSERT_EQ(ssb_blk->version, META_BLK_SB_VERSION);
-    HS_RELEASE_ASSERT_EQ(ssb_blk->bid.to_integer(), m_ssb->bid.to_integer());
+    HS_LOG_ASSERT_EQ(ssb_blk->magic, META_BLK_SB_MAGIC, "magic verify failed");
+    HS_LOG_ASSERT_EQ(ssb_blk->version, META_BLK_SB_VERSION, "version verify failed");
+    HS_LOG_ASSERT_EQ(ssb_blk->bid.to_integer(), m_ssb->bid.to_integer(), "self-bid verify failed");
+
+    // in release build, log message and return failure to caller;
+    if ((ssb_blk->magic != META_BLK_SB_MAGIC) || (ssb_blk->version != META_BLK_SB_VERSION) ||
+        (ssb_blk->bid.to_integer() != m_ssb->bid.to_integer())) {
+        ret = false;
+    }
 
     hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(ssb_blk), sisl::buftag::metablk);
-
-    return true;
+    return ret;
 }
 
+//
 // sanity check will block every operation into meta blk mgr as it takes the gloable lock;
+//
+// Can only be called in safe_mode, should not do release assert, but return failure to caller;
+//
 bool MetaBlkMgr::sanity_check(const bool check_ovf_chain) {
     HS_PERIODIC_LOG(INFO, metablk, "Sanity check started...");
     std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+    bool ret{true};
     // start from meta ssb;
     if (!ssb_sanity_check()) { return false; }
 
@@ -1251,6 +1269,7 @@ bool MetaBlkMgr::sanity_check(const bool check_ovf_chain) {
     std::unordered_set< std::string > clients;
     auto mblk = reinterpret_cast< meta_blk* >(hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::metablk));
     while (bid.is_valid()) {
+        // reuse mblk for next;
         std::memset(static_cast< void* >(mblk), 0, get_page_size());
 
         ++num_meta_blks_disk;
@@ -1262,16 +1281,29 @@ bool MetaBlkMgr::sanity_check(const bool check_ovf_chain) {
         if (it == clients.end()) { clients.insert(mblk->hdr.h.type); }
 
         // self-bid verify
-        HS_RELEASE_ASSERT_EQ(mblk->hdr.h.bid.to_integer(), bid.to_integer());
+        HS_LOG_ASSERT_EQ(mblk->hdr.h.bid.to_integer(), bid.to_integer(), "self-bid verify failed");
         // prev_bid verify
-        HS_RELEASE_ASSERT_EQ(mblk->hdr.h.prev_bid.to_integer(), prev_bid.to_integer());
+        HS_LOG_ASSERT_EQ(mblk->hdr.h.prev_bid.to_integer(), prev_bid.to_integer(), "prev_bid verify failed");
+        if (mblk->hdr.h.bid.to_integer() != bid.to_integer() ||
+            mblk->hdr.h.prev_bid.to_integer() != prev_bid.to_integer()) {
+            ret = false;
+            goto exit;
+        }
 
         if (mblk->hdr.h.context_sz <= meta_blk_context_sz()) {
-            HS_RELEASE_ASSERT_EQ(mblk->hdr.h.ovf_bid.is_valid(), false);
+            HS_LOG_ASSERT_EQ(mblk->hdr.h.ovf_bid.is_valid(), false, "ovf_bid verify failed");
+            if (mblk->hdr.h.ovf_bid.is_valid()) {
+                ret = false;
+                goto exit;
+            }
         } else {
             // verify overflow blk
             auto obid = mblk->hdr.h.ovf_bid;
-            HS_RELEASE_ASSERT_EQ(obid.is_valid(), true);
+            HS_LOG_ASSERT_EQ(obid.is_valid(), true, "ovf_bid verify failed");
+            if (obid.is_valid() == false) {
+                ret = false;
+                goto exit;
+            }
 
             if (check_ovf_chain) {
                 auto* const ovf_hdr{reinterpret_cast< meta_blk_ovf_hdr* >(
@@ -1280,11 +1312,20 @@ bool MetaBlkMgr::sanity_check(const bool check_ovf_chain) {
                     std::memset(static_cast< void* >(ovf_hdr), 0, get_page_size());
                     // read it out from disk;
                     read(obid, ovf_hdr, get_page_size());
+
                     // verify self bid
-                    HS_RELEASE_ASSERT_EQ(ovf_hdr->h.bid.to_integer(), obid.to_integer());
+                    HS_LOG_ASSERT_EQ(ovf_hdr->h.bid.to_integer(), obid.to_integer(), "ovf self-bid verify failed");
                     // verify magic
-                    HS_RELEASE_ASSERT_EQ(ovf_hdr->h.magic, META_BLK_OVF_MAGIC);
-                    HS_RELEASE_ASSERT_NE(ovf_hdr->h.nbids, 0);
+                    HS_LOG_ASSERT_EQ(ovf_hdr->h.magic, META_BLK_OVF_MAGIC, "magic verify failed");
+                    HS_LOG_ASSERT_NE(ovf_hdr->h.nbids, 0, "nbids verify failed");
+
+                    if (ovf_hdr->h.bid.to_integer() != obid.to_integer() || ovf_hdr->h.magic != META_BLK_OVF_MAGIC ||
+                        ovf_hdr->h.nbids == 0) {
+                        hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(ovf_hdr), sisl::buftag::metablk);
+                        ret = false;
+                        goto exit;
+                    }
+
                     obid = ovf_hdr->h.next_bid;
                 }
 
@@ -1296,24 +1337,54 @@ bool MetaBlkMgr::sanity_check(const bool check_ovf_chain) {
         bid = mblk->hdr.h.next_bid;
     }
 
-    HS_RELEASE_ASSERT_EQ(num_meta_blks_cached, num_meta_blks_disk, "Either memory is corrupted or disk is corrupted.");
+    HS_LOG_ASSERT_EQ(num_meta_blks_cached, num_meta_blks_disk, "Either memory is corrupted or disk is corrupted.");
+    if (num_meta_blks_cached != num_meta_blks_disk) {
+        ret = false;
+        goto exit;
+    }
 
+    //
     // some clients might registered but not written any meta blk to disk, which is okay;
     // one case is create a volume, then delete a volume, then client: VOLUME will don't have any meta blk on disk;
-    HS_RELEASE_ASSERT_LE(clients.size(), m_sub_info.size());
+    //
+    HS_LOG_ASSERT_LE(clients.size(), m_sub_info.size(),
+                     "client size on disk: {} is larger than registered: {}, which is not possible!", clients.size(),
+                     m_sub_info.size());
+    if (clients.size() > m_sub_info.size()) {
+        ret = false;
+        goto exit;
+    }
 
+exit:
     hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(mblk), sisl::buftag::metablk);
 
-    HS_PERIODIC_LOG(
-        INFO, metablk,
-        "Successfully passed sanity check. Total metablks scaned: {}, total clients on disk: {}, total registered "
-        "clients: {}",
-        num_meta_blks_disk, clients.size(), m_sub_info.size());
-    return true;
+    if (ret) {
+        HS_PERIODIC_LOG(
+            INFO, metablk,
+            "Successfully passed sanity check. Total metablks scaned: {}, total clients on disk: {}, total registered "
+            "clients: {}",
+            num_meta_blks_disk, clients.size(), m_sub_info.size());
+    }
+
+    return ret;
 }
 
+//
+// dump meta blks from cache;
+//
+// Note: get_status can be called in release build, should never hit any release assert failure, instead should print
+// error log and return to caller with error message
+//
 nlohmann::json MetaBlkMgr::get_status(const int log_level) {
     LOGINFO("Gettting status with log_level: {}", log_level);
+    std::string dummy_client;
+    return populate_json(log_level, m_meta_blks, m_ovf_blk_hdrs, m_last_mblk_id.get(), m_sub_info, m_self_recover,
+                         dummy_client);
+}
+
+nlohmann::json MetaBlkMgr::populate_json(const int log_level, meta_blk_map_t& meta_blks, ovf_hdr_map_t& ovf_blk_hdrs,
+                                         BlkId* last_mblk_id, client_info_map_t& sub_info, const bool self_recover,
+                                         const std::string& client) {
     std::string dump_dir = "/tmp/dump_meta";
     bool can_dump_to_file = false;
     const uint64_t total_free = 0;
@@ -1321,7 +1392,10 @@ nlohmann::json MetaBlkMgr::get_status(const int log_level) {
     if (log_level >= 3) {
         // clear dump directory if it is already there;
         std::filesystem::path dump_path = dump_dir;
-        if (std::filesystem::exists(dump_path)) { std::filesystem::remove_all(dump_path); }
+        if (std::filesystem::exists(dump_path)) {
+            LOGINFO("Removing old dump dir: {}", dump_dir);
+            std::filesystem::remove_all(dump_path);
+        }
         std::filesystem::create_directory(dump_path);
 
         // check remaining space on root fs;
@@ -1338,61 +1412,131 @@ nlohmann::json MetaBlkMgr::get_status(const int log_level) {
     }
 
     nlohmann::json j;
-    j["ssb"] = m_ssb ? m_ssb->to_string() : "";
-    j["self_recovery"] = m_self_recover;
 
-    for (auto& x : m_sub_info) {
-        j[x.first]["type"] = x.first;
-        j[x.first]["do_crc"] = x.second.do_crc;
-        j[x.first]["cb"] = x.second.cb ? "registered valid cb" : "nullptr";
-        j[x.first]["comp_cb"] = x.second.comp_cb ? "registered valid cb" : "nullptr";
-        j[x.first]["num_meta_bids"] = x.second.meta_bids.size();
-        if (log_level >= 2 && log_level <= 3) {
-            size_t bid_cnt{0};
-            for (const auto& y : x.second.meta_bids) {
-                BlkId bid(y);
-                if (log_level == 2) {
-                    // dump bid if log level is 2 or dump to file is not possible;
-                    j[x.first]["meta_bids"][std::to_string(bid_cnt)] = bid.to_string();
-                } else if (can_dump_to_file) { // log_level >= 3 and can dump to file
-                    // dump the whole data buffer to file
-                    auto it = m_meta_blks.find(y);
-                    HS_DEBUG_ASSERT_EQ(it != m_meta_blks.end(), true,
-                                       "Expecting meta_bid: {} to be found in meta blks cache. Corruption detected!",
-                                       bid.to_string());
+    {
+        std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+        j["ssb"] = m_ssb ? m_ssb->to_string() : "";
+        j["self_recovery"] = self_recover;
 
-                    sisl::byte_array buf = read_sub_sb_internal(it->second);
-                    if (free_space < buf->size) {
-                        j[x.first]["meta_bids"][std::to_string(bid_cnt)] =
-                            "Not_able_to_dump_to_file_exceeding_allowed_space";
-                        HS_LOG_EVERY_N(
-                            WARN, metablk, 100,
-                            "[type={}] Skip dumping to file, exceeding allowed space: {}, requested_size: {}, "
-                            "total_free: {}, free_fs_percent: {}",
-                            x.first, free_space, buf->size, total_free,
-                            HS_DYNAMIC_CONFIG(metablk.percent_of_free_space));
-                        continue;
+        for (auto& x : sub_info) {
+            // if client is empty, will dump all the clients;
+            // if client is not empty, only dump this client;
+            if (!client.empty() && client.compare(x.first)) { continue; }
+
+            j[x.first]["type"] = x.first;
+            j[x.first]["do_crc"] = x.second.do_crc;
+            j[x.first]["cb"] = x.second.cb ? "registered valid cb" : "nullptr";
+            j[x.first]["comp_cb"] = x.second.comp_cb ? "registered valid cb" : "nullptr";
+            j[x.first]["num_meta_bids"] = x.second.meta_bids.size();
+            if (log_level >= 2 && log_level <= 3) {
+                size_t bid_cnt{0};
+                for (const auto& y : x.second.meta_bids) {
+                    BlkId bid(y);
+                    if (log_level == 2) {
+                        // dump bid if log level is 2 or dump to file is not possible;
+                        j[x.first]["meta_bids"][std::to_string(bid_cnt)] = bid.to_string();
+                    } else if (can_dump_to_file) { // log_level >= 3 and can dump to file
+                        // dump the whole data buffer to file
+                        auto it = meta_blks.find(y);
+
+                        HS_DEBUG_ASSERT_EQ(
+                            it != meta_blks.end(), true,
+                            "Expecting meta_bid: {} to be found in meta blks cache. Corruption detected!",
+                            bid.to_string());
+
+                        // in release build, print error and continue to next;
+                        if (it == meta_blks.end()) {
+                            LOGERROR("bid: {} not found in meta blk cache, corruption detected!", y);
+                            continue;
+                        }
+
+                        sisl::byte_array buf = read_sub_sb_internal(it->second);
+                        if (free_space < buf->size) {
+                            j[x.first]["meta_bids"][std::to_string(bid_cnt)] =
+                                "Not_able_to_dump_to_file_exceeding_allowed_space";
+                            HS_LOG_EVERY_N(
+                                WARN, metablk, 100,
+                                "[type={}] Skip dumping to file, exceeding allowed space: {}, requested_size: {}, "
+                                "total_free: {}, free_fs_percent: {}",
+                                x.first, free_space, buf->size, total_free,
+                                HS_DYNAMIC_CONFIG(metablk.percent_of_free_space));
+                            continue;
+                        }
+
+                        std::string file_path = fmt::format("{}/{}_{}", dump_dir, x.first, bid_cnt);
+                        std::ofstream f(file_path);
+                        f.write(reinterpret_cast< const char* >(buf->bytes), buf->size);
+                        j[x.first]["meta_bids"][std::to_string(bid_cnt)] = file_path;
+
+                        free_space -= buf->size;
                     }
 
-                    std::string file_path = fmt::format("{}/{}_{}", dump_dir, x.first, bid_cnt);
-                    std::ofstream f(file_path);
-                    f.write(reinterpret_cast< const char* >(buf->bytes), buf->size);
-                    j[x.first]["meta_bids"][std::to_string(bid_cnt)] = file_path;
-
-                    free_space -= buf->size;
+                    ++bid_cnt;
                 }
-
-                ++bid_cnt;
             }
-        } else if (log_level == 4) {
-            auto ret = sanity_check(true /* check_ovf_chain */);
-            j["sanity_check"] = (ret == true ? "Passed" : "Failed");
+        }
+
+        j["last_mid"] = last_mblk_id->to_string();
+
+        j["compression"] = compress_feature_on() ? "On" : "Off";
+    }
+
+    return j;
+}
+
+// sanity_check can only be called in PRERELEASE mode, which can hit release assert;
+bool MetaBlkMgr::verify_metablk_store() { return sanity_check(true /* check_ovf_chain */); }
+
+//
+// Precondidtion:
+// 1. m_ssb should be ready
+// 2. m_blkstore should be ready to serve I/O;
+//
+// Requirement:
+// 1. Leave the existing in-memory copy unchanged;
+// 2. Can be called in release build, should never hit any release assert failure, instead should print
+// error log and return to caller with error message
+//
+nlohmann::json MetaBlkMgr::dump_disk_metablks(const std::string& client) {
+    // 0. verify m_ssb;
+    {
+        std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+        nlohmann::json j;
+        if (!m_ssb) {
+            LOGERROR("Can't serve this request, meta ssb is nullptr.");
+            return j;
+        }
+
+        if ((m_ssb->magic != META_BLK_SB_MAGIC) || (m_ssb->version != META_BLK_SB_VERSION) ||
+            (m_ssb->bid.is_valid() == false)) {
+            LOGERROR("Can't serve this request, in-memory meta ssb is not valid, : magic: {}, version: {}, "
+                     "self_bid: {}",
+                     m_ssb->magic, m_ssb->version, m_ssb->bid.to_integer());
+            return j;
         }
     }
 
-    j["last_mid"] = m_last_mblk_id->to_string();
+    // 1. scan and load from disk to memory;
+    auto last_bid = std::make_unique< BlkId >();
+    meta_blk_map_t meta_blks;
+    ovf_hdr_map_t ovf_blk_hdrs;
+    std::map< meta_sub_type, MetaSubRegInfo > sub_info;
 
-    j["compression"] = compress_feature_on() ? "On" : "Off";
+    const auto self_recover = scan_and_load_meta_blks(meta_blks, ovf_blk_hdrs, last_bid.get(), sub_info);
+
+    const auto j = populate_json(3, meta_blks, ovf_blk_hdrs, last_bid.get(), sub_info, self_recover, client);
+
+    for (auto it{std::cbegin(meta_blks)}; it != std::cend(meta_blks); ++it) {
+        hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(it->second), sisl::buftag::metablk);
+    }
+
+    for (auto it{std::cbegin(ovf_blk_hdrs)}; it != std::cend(ovf_blk_hdrs); ++it) {
+        hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(it->second), sisl::buftag::metablk);
+    }
+
+    meta_blks.clear();
+    ovf_blk_hdrs.clear();
+    sub_info.clear();
 
     return j;
 }

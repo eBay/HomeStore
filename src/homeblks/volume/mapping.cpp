@@ -252,7 +252,8 @@ bool mapping::verify_tree(bool update_debug_bm) { return m_bt->verify_tree(updat
 
 nlohmann::json mapping::get_status(const int log_level) {
     nlohmann::json j;
-    j.update(m_bt->get_status(log_level));
+    auto bt_json = m_bt->get_status(log_level);
+    if (!bt_json.empty()) { j.update(bt_json); }
     return j;
 }
 

@@ -549,6 +549,7 @@ ENUM(volume_req_state, uint8_t, data_io, journal_io, completed);
 
 #pragma pack(1)
 struct journal_key {
+    uint32_t version = 0x1;
     lba_t lba;
     lba_count_t nlbas;         // nlbas written
     lba_count_t user_io_nlbas; // nlbas passed by the user
