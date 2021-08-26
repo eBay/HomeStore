@@ -261,7 +261,7 @@ struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
 static constexpr uint32_t hcp_version = 0x1;
 static constexpr uint64_t hcp_magic = 0xbedabb1e;
 static constexpr uint32_t indx_sb_version = 0x1;
-ENUM(meta_hdr_type, uint32_t, indx_cp, indx_destroy, indx_unmap, snap_destroy);
+ENUM(indx_meta_hdr_type, uint32_t, cp, destroy, unmap, snap_destroy);
 
 #pragma pack(1)
 struct hs_cp_base_sb {
@@ -269,7 +269,7 @@ struct hs_cp_base_sb {
     uint32_t version{hcp_version};
     uint32_t size;
     boost::uuids::uuid uuid; // Don't populate if it is hs indx meta blk
-    meta_hdr_type type;
+    indx_meta_hdr_type type;
     uint8_t padding[4];
 };
 

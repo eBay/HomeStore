@@ -603,10 +603,10 @@ void IndxMgr::recover_meta_ops() {
         auto hdr = (hs_cp_base_sb*)(buf->bytes);
         THIS_INDX_LOG(INFO, replay, , "found meta ops {} in recovery", (uint64_t)hdr->type);
         switch (hdr->type) {
-        case meta_hdr_type::indx_cp:
+        case indx_meta_hdr_type::cp:
             HS_ASSERT(DEBUG, 0, "invalid op");
             break;
-        case meta_hdr_type::indx_destroy: {
+        case indx_meta_hdr_type::destroy: {
             uint64_t cur_bytes = (uint64_t)(buf->bytes) + sizeof(hs_cp_base_sb);
             HS_RELEASE_ASSERT_GE(buf->size, (uint32_t)hdr->size);
             uint64_t size = hdr->size - sizeof(hs_cp_base_sb);
@@ -616,7 +616,7 @@ void IndxMgr::recover_meta_ops() {
             /* it will be destroyed when destroy is called from volume */
             break;
         }
-        case meta_hdr_type::indx_unmap: {
+        case indx_meta_hdr_type::unmap: {
             HS_RELEASE_ASSERT_GE(buf->size, (uint32_t)hdr->size);
             auto unmap_hdr = (hs_cp_unmap_sb*)buf->bytes;
 
@@ -640,7 +640,7 @@ void IndxMgr::recover_meta_ops() {
             this->do_remaining_unmap(mblk, key, unmap_hdr->key_size, unmap_hdr->seq_id, unmap_btree_cur);
             break;
         }
-        case meta_hdr_type::snap_destroy:
+        case indx_meta_hdr_type::snap_destroy:
             HS_ASSERT(DEBUG, 0, "invalid op");
             break;
         default:
@@ -924,7 +924,10 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
     if (ireq->is_unmap() && !ireq->is_io_completed()) {
         /* write information to superblock, start unmap, and then call m_io_cb */
         /* XXX: should we call it in different thread as it write a metablock which is a sync write ? */
-        this->unmap_indx_async(ireq);
+        iomanager.run_on(m_thread_id, [this, ireq](io_thread_addr_t addr) {
+            this->unmap_indx_async(ireq);
+            free_blkid_and_send_completion(ireq);
+        }
     } else {
 
         /* blk id is alloceted in disk bitmap only after it is writing to journal. check
@@ -943,8 +946,8 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
             ireq->icp->indx_size.fetch_add(ireq->indx_alloc_blkid_list[i].data_size(m_hs->get_data_pagesz()),
                                            std::memory_order_relaxed);
         }
+        free_blkid_and_send_completion(ireq);
     }
-    free_blkid_and_send_completion(ireq);
     logstore_req::free(lreq);
 }
 
@@ -1089,7 +1092,7 @@ sisl::byte_array IndxMgr::alloc_unmap_sb(const uint32_t key_size, const seq_id_t
         hs_utils::make_byte_array(size, MetaBlkMgrSI()->is_aligned_buf_needed(size), sisl::buftag::metablk);
     hs_cp_unmap_sb* mhdr = new (b->bytes) hs_cp_unmap_sb();
     mhdr->uuid = m_uuid;
-    mhdr->type = meta_hdr_type::indx_unmap;
+    mhdr->type = indx_meta_hdr_type::unmap;
     mhdr->seq_id = seq_id;
     mhdr->size = size;
     mhdr->key_size = key_size;
@@ -1297,7 +1300,7 @@ void IndxMgr::destroy_indx_tbl() {
                                                                    sisl::buftag::metablk);
                     hs_cp_base_sb* mhdr = new (b->bytes) hs_cp_base_sb();
                     mhdr->uuid = m_uuid;
-                    mhdr->type = meta_hdr_type::indx_destroy;
+                    mhdr->type = indx_meta_hdr_type::destroy;
                     mhdr->size = cursor_blob.size + sizeof(hs_cp_base_sb);
                     memcpy(static_cast< void* >(b->bytes + sizeof(hs_cp_base_sb)), cursor_blob.bytes, cursor_blob.size);
 #ifdef _PRERELEASE
@@ -1530,7 +1533,7 @@ void StaticIndxMgr::write_hs_cp_sb(hs_cp* hcp) {
     sisl::byte_array b =
         hs_utils::make_byte_array(size, MetaBlkMgrSI()->is_aligned_buf_needed(size), sisl::buftag::metablk);
     hs_cp_sb* hdr = new (b->bytes) hs_cp_sb();
-    hdr->type = meta_hdr_type::indx_cp;
+    hdr->type = indx_meta_hdr_type::cp;
     int indx_cnt = 0;
     indx_cp_base_sb* indx_cp_base_sb_list = (indx_cp_base_sb*)((uint64_t)hdr + sizeof(hs_cp_sb));
     for (auto it = hcp->indx_cp_list.begin(); it != hcp->indx_cp_list.end(); ++it) {
@@ -1619,7 +1622,7 @@ void StaticIndxMgr::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_
     auto meta_hdr = (hs_cp_base_sb*)buf.bytes();
     HS_RELEASE_ASSERT_EQ(meta_hdr->version, hcp_version);
     HS_RELEASE_ASSERT_EQ(meta_hdr->magic, hcp_magic);
-    if (meta_hdr->type == meta_hdr_type::indx_cp) {
+    if (meta_hdr->type == indx_meta_hdr_type::cp) {
         m_cp_meta_blk = mblk;
         hs_cp_sb* cp_hdr = (hs_cp_sb*)buf.bytes();
         indx_cp_base_sb* cp_sb = (indx_cp_base_sb*)((uint64_t)buf.bytes() + sizeof(hs_cp_sb));
