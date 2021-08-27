@@ -622,8 +622,8 @@ void IndxMgr::recover_meta_ops() {
 
             uintptr_t cur_bytes = (uintptr_t)unmap_hdr + sizeof(hs_cp_unmap_sb);
             /* get key */
-            uint8_t* key = (uint8_t*)malloc(unmap_hdr->key_size);
-            memcpy(key, (void*)cur_bytes, unmap_hdr->key_size);
+            auto key = hs_utils::make_byte_array(unmap_hdr->key_size, false /* aligned */, sisl::buftag::common);
+            memcpy(key->bytes, (void*)cur_bytes, unmap_hdr->key_size);
 
             /* get cursor bytes and size */
             cur_bytes = cur_bytes + unmap_hdr->key_size;
@@ -637,7 +637,7 @@ void IndxMgr::recover_meta_ops() {
             }
 
             m_hs->inc_hs_ref_cnt(m_uuid);
-            this->do_remaining_unmap(mblk, key, unmap_hdr->key_size, unmap_hdr->seq_id, unmap_btree_cur);
+            this->do_remaining_unmap(mblk, key, unmap_hdr->seq_id, unmap_btree_cur);
             break;
         }
         case indx_meta_hdr_type::snap_destroy:
@@ -1021,9 +1021,8 @@ btree_status_t IndxMgr::update_indx_tbl(const indx_req_ptr& ireq, bool is_active
     }
 }
 
-void IndxMgr::do_remaining_unmap_internal(void* unmap_meta_blk_cntx, uint8_t* key, const uint32_t key_size,
-                                          const seq_id_t seqid,
-                                          std::shared_ptr< homeds::btree::BtreeQueryCursor > btree_cur) {
+void IndxMgr::do_remaining_unmap_internal(void* unmap_meta_blk_cntx, const sisl::byte_array& key, const seq_id_t seqid,
+                                          const std::shared_ptr< homeds::btree::BtreeQueryCursor >& btree_cur) {
     /* enter into critical section */
     auto hcp = m_cp_mgr->cp_io_enter();
     auto cur_icp = get_indx_cp(hcp);
@@ -1032,8 +1031,9 @@ void IndxMgr::do_remaining_unmap_internal(void* unmap_meta_blk_cntx, uint8_t* ke
     /* collect all the free blkids */
     blkid_list_ptr free_list = std::make_shared< sisl::ThreadVector< BlkId > >();
     int64_t free_size = 0;
-    btree_status_t ret = m_active_tbl->update_oob_unmap_active_indx_tbl(
-        free_list, seqid, key, *(btree_cur.get()), btree_id, free_size, m_recovery_mode ? true : false /* force */);
+    btree_status_t ret =
+        m_active_tbl->update_oob_unmap_active_indx_tbl(free_list, seqid, key->bytes, *(btree_cur.get()), btree_id,
+                                                       free_size, m_recovery_mode ? true : false /* force */);
 
     cur_icp->user_free_blkid_list.push_back(free_list);
     cur_icp->indx_size.fetch_sub(free_size, std::memory_order_relaxed);
@@ -1048,8 +1048,8 @@ void IndxMgr::do_remaining_unmap_internal(void* unmap_meta_blk_cntx, uint8_t* ke
     if (ret == btree_status_t::resource_full) {
         HS_ASSERT_CMP(RELEASE, m_recovery_mode, ==, false);
         THIS_INDX_LOG(TRACE, indx_mgr, , "unmap btree ret status resource_full");
-        m_cp_mgr->attach_cb(hcp, ([this, key, key_size, btree_cur, unmap_meta_blk_cntx, seqid](bool success) mutable {
-                                this->do_remaining_unmap(unmap_meta_blk_cntx, key, key_size, seqid, btree_cur);
+        m_cp_mgr->attach_cb(hcp, ([this, key, btree_cur, unmap_meta_blk_cntx, seqid](bool success) mutable {
+                                this->do_remaining_unmap(unmap_meta_blk_cntx, key, seqid, btree_cur);
                             }));
     } else {
         if (ret == btree_status_t::crc_mismatch) {
@@ -1075,7 +1075,6 @@ void IndxMgr::do_remaining_unmap_internal(void* unmap_meta_blk_cntx, uint8_t* ke
                                     HS_ASSERT(RELEASE, false, "failed to remove subsystem with status: {}",
                                               ret.message());
                                 }
-                                free(key);
                                 m_hs->dec_hs_ref_cnt(m_uuid);
                             }));
     }
@@ -1111,33 +1110,33 @@ void IndxMgr::write_cp_unmap_sb(void*& unmap_meta_blk_cntx, const uint32_t key_s
 
 void IndxMgr::unmap_indx_async(const indx_req_ptr& ireq) {
 
-    uint8_t* key = (uint8_t*)malloc(ireq->get_key_size());
+    auto key = hs_utils::make_byte_array(ireq->get_key_size(), false /* aligned */, sisl::buftag::common);
     std::shared_ptr< homeds::btree::BtreeQueryCursor > unmap_btree_cur(new homeds::btree::BtreeQueryCursor());
 
-    ireq->fill_key(key, ireq->get_key_size());
+    ireq->fill_key(key->bytes, ireq->get_key_size());
     ireq->get_btree_cursor(*(unmap_btree_cur.get()));
 
     // do remaining unmap
     m_hs->inc_hs_ref_cnt(m_uuid);
-    do_remaining_unmap(nullptr, key, ireq->get_key_size(), ireq->get_seqid(), unmap_btree_cur);
+    do_remaining_unmap(nullptr, key, ireq->get_seqid(), unmap_btree_cur);
 }
 
-void IndxMgr::do_remaining_unmap(void* unmap_meta_blk_cntx, uint8_t* key, const uint32_t key_size, const seq_id_t seqid,
-                                 std::shared_ptr< homeds::btree::BtreeQueryCursor > btree_cur) {
+void IndxMgr::do_remaining_unmap(void* unmap_meta_blk_cntx, const sisl::byte_array& key, const seq_id_t seqid,
+                                 const std::shared_ptr< homeds::btree::BtreeQueryCursor >& btree_cur) {
     /* persist superblock */
-    write_cp_unmap_sb(unmap_meta_blk_cntx, key_size, seqid, *(btree_cur.get()), key);
+    write_cp_unmap_sb(unmap_meta_blk_cntx, key->size, seqid, *(btree_cur.get()), key->bytes);
 #ifdef _PRERELEASE
     if (homestore_flip->test_flip("unmap_post_sb_write_abort")) {
         LOGINFO("aborting because of flip");
         raise(SIGKILL);
     }
 #endif
-    add_prepare_cb_list([this, key, key_size, btree_cur, unmap_meta_blk_cntx,
-                         seqid](const indx_cp_ptr& cur_icp, hs_cp* cur_hcp, hs_cp* new_hcp) mutable {
+    add_prepare_cb_list([this, key, btree_cur, unmap_meta_blk_cntx, seqid](const indx_cp_ptr& cur_icp, hs_cp* cur_hcp,
+                                                                           hs_cp* new_hcp) mutable {
         if (cur_icp->flags & indx_cp_state::ba_cp) {
-            do_remaining_unmap_internal(unmap_meta_blk_cntx, key, key_size, seqid, btree_cur);
+            do_remaining_unmap_internal(unmap_meta_blk_cntx, key, seqid, btree_cur);
         } else {
-            do_remaining_unmap(unmap_meta_blk_cntx, key, key_size, seqid, btree_cur);
+            do_remaining_unmap(unmap_meta_blk_cntx, key, seqid, btree_cur);
         }
     });
 }

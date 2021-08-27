@@ -724,11 +724,10 @@ private:
     void dump_free_blk_list(const blkid_list_ptr& free_blk_list);
 #endif
     void unmap_indx_async(const indx_req_ptr& ireq);
-    void do_remaining_unmap_internal(void* unmap_meta_blk_cntx, uint8_t* key, const uint32_t key_size,
-                                     const seq_id_t seqid,
-                                     std::shared_ptr< homeds::btree::BtreeQueryCursor > btree_cur);
-    void do_remaining_unmap(void* unmap_meta_blk_cntx, uint8_t* key, const uint32_t key_size, const seq_id_t seqid,
-                            std::shared_ptr< homeds::btree::BtreeQueryCursor > btree_cur);
+    void do_remaining_unmap_internal(void* unmap_meta_blk_cntx, const sisl::byte_array& key, const seq_id_t seqid,
+                                     const std::shared_ptr< homeds::btree::BtreeQueryCursor >& btree_cur);
+    void do_remaining_unmap(void* unmap_meta_blk_cntx, const sisl::byte_array& key, const seq_id_t seqid,
+                            const std::shared_ptr< homeds::btree::BtreeQueryCursor >& btree_cur);
     void write_cp_unmap_sb(void*& unmap_meta_blk_cntx, const uint32_t key_size, const seq_id_t seq_id,
                            homeds::btree::BtreeQueryCursor& unmap_btree_cur, const uint8_t* key);
 
