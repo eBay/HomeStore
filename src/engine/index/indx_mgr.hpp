@@ -733,7 +733,7 @@ private:
                            homeds::btree::BtreeQueryCursor& unmap_btree_cur, const uint8_t* key);
 
     void alloc_on_realtime(const std::vector< BlkId >& blkid_list, const indx_req_ptr& ireq);
-    void free_blkid_and_send_completion(indx_req_ptr& ireq);
+    void free_blkid_and_send_completion(const indx_req_ptr& ireq);
 };
 
 /*************************************************** indx request ***********************************/

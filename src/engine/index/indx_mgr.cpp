@@ -927,7 +927,7 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
         iomanager.run_on(m_thread_id, [this, ireq](io_thread_addr_t addr) {
             this->unmap_indx_async(ireq);
             free_blkid_and_send_completion(ireq);
-        }
+        });
     } else {
 
         /* blk id is alloceted in disk bitmap only after it is writing to journal. check
@@ -951,7 +951,7 @@ void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
     logstore_req::free(lreq);
 }
 
-void IndxMgr::free_blkid_and_send_completion(indx_req_ptr& ireq) {
+void IndxMgr::free_blkid_and_send_completion(const indx_req_ptr& ireq) {
     /* free the blkids */
     const auto free_size = free_blk(ireq->hcp, ireq->icp->io_free_blkid_list, ireq->indx_fbe_list, true, ireq.get());
     HS_ASSERT(DEBUG, (ireq->indx_fbe_list.size() == 0 || free_size > 0),
