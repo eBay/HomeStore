@@ -268,6 +268,9 @@ public:
     virtual void attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr >* cur_icp_map,
                                         std::map< boost::uuids::uuid, indx_cp_ptr >* new_icp_map, hs_cp* hcp,
                                         hs_cp* new_hcp) override;
+    virtual bool inc_hs_ref_cnt(const boost::uuids::uuid& uuid) override;
+    virtual bool dec_hs_ref_cnt(const boost::uuids::uuid& uuid) override;
+    virtual bool fault_containment(const boost::uuids::uuid& uuid) override;
     void do_volume_shutdown(bool force);
     void create_volume(VolumePtr vol);
     void move_to_restricted_state();
