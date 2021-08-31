@@ -23,7 +23,7 @@ class HomestoreConan(ConanFile):
                         'shared=False',
                         'fPIC=True',
                         'sanitize=True',
-                        'testing=epoll_mode',
+                        'testing=spdk_mode',
                         'prerelease=True',
                         )
 

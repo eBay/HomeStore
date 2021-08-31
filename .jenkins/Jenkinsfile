@@ -52,7 +52,7 @@ pipeline {
             } }
             steps {
                 script {
-                    BUILD_TEST_MODE = "-o homestore:testing=epoll_mode"
+                    BUILD_TEST_MODE = "-o homestore:testing=spdk_mode"
                 }
             }
         }
@@ -141,6 +141,16 @@ pipeline {
                         axis {
                             name 'PRERELEASE'
                             values 'False'
+                        }
+                    }
+                    exclude {
+                        axis {
+                            name 'BUILD_TYPE'
+                            values 'debug'
+                        }
+                        axis {
+                            name 'SANITIZE'
+                            values 'True'
                         }
                     }
                 }
