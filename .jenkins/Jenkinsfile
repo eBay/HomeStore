@@ -283,18 +283,6 @@ pipeline {
             } }
         
             stages {
-                stage('SCST Connector') {
-                    steps {
-                        script {
-                            built_chain = env.pkg_version
-                            def scst_res = build job: "SCST Connector/${MASTER_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
-                            built_chain = "${built_chain}" + ", " + "scst_res.buildVariables.pkg_version"
-                        }
-                    }
-                    post {
-                        failure { script { failed_pkg = "SCST Connector" } }
-                    }
-                }
                 stage('NuBlox Logstore') {
                     steps {
                         script {
