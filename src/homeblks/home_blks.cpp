@@ -458,7 +458,7 @@ void HomeBlks::init_done() {
         used_size.add(it->second->get_used_size());
     }
     auto system_cap = get_system_capacity();
-    LOGINFO("system_cap: {}, used_size: {}", system_cap.to_string(), used_size.to_string());
+    LOGINFO("system_cap from blkstore: {}, system cap from volume: {}", system_cap.to_string(), used_size.to_string());
 
 #ifdef _PRERELEASE
     HB_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.general_config.boot_consistency_check = true; });
