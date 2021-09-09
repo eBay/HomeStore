@@ -15,11 +15,11 @@
 
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <fds/sparse_vector.hpp>
-#include <fds/buffer.hpp>
-#include <metrics/metrics.hpp>
-#include <settings/settings.hpp>
-#include <utility/atomic_counter.hpp>
+#include <sisl/fds/sparse_vector.hpp>
+#include <sisl/fds/buffer.hpp>
+#include <sisl/metrics/metrics.hpp>
+#include <sisl/settings/settings.hpp>
+#include <sisl/utility/atomic_counter.hpp>
 
 #include "api/meta_interface.hpp"
 #include "api/vol_interface.hpp"

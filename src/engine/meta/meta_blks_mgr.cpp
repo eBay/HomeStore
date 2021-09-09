@@ -7,7 +7,7 @@
 #include <mutex>
 #include <system_error>
 
-#include <fds/compress.hpp>
+#include <sisl/fds/compress.hpp>
 
 #include "api/meta_interface.hpp"
 #include "blkstore/blkstore.hpp"

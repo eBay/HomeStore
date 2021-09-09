@@ -20,7 +20,6 @@
 #include "cache.h"
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 
 struct blk_id {
@@ -67,7 +66,7 @@ static constexpr size_t NTHREADS{1};
 
 struct CacheTest : public ::testing::Test {
 protected:
-    typedef homestore::Cache< blk_id, homestore::CacheBuffer<blk_id> > CacheType; 
+    typedef homestore::Cache< blk_id, homestore::CacheBuffer< blk_id > > CacheType;
     std::unique_ptr< CacheType > m_cache;
 
 public:
@@ -87,7 +86,7 @@ public:
         boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
         const size_t num_entries{size / sizeof(uint64_t)};
         // this must be a std::malloc since the pointer is managed by the cache and later erased with std::free
-        uint64_t* const raw_buf{static_cast<uint64_t*>(std::malloc(sizeof(uint64_t) * num_entries))};
+        uint64_t* const raw_buf{static_cast< uint64_t* >(std::malloc(sizeof(uint64_t) * num_entries))};
         for (size_t b{0}; b < num_entries; ++b) {
             raw_buf[b] = id;
         }
@@ -127,9 +126,7 @@ public:
 
     void fixed_insert_and_get(const uint64_t start, const uint32_t count, const uint32_t size) {
         for (auto i{start}; i < start + count; ++i) {
-            if (insert_one(i, size)) {
-                [[maybe_unused]] const bool result{read_one(i, size)};
-            }
+            if (insert_one(i, size)) { [[maybe_unused]] const bool result{read_one(i, size)}; }
         }
 
         for (auto i{start}; i < start + count; ++i) {
@@ -146,7 +143,7 @@ static void insert_and_get_thread(CacheTest* const ctest, const uint32_t tnum) {
 }
 
 TEST_F(CacheTest, InsertGet) {
-    std::vector< std::thread> thrs;
+    std::vector< std::thread > thrs;
     for (size_t i{0}; i < NTHREADS; ++i) {
         thrs.emplace_back(insert_and_get_thread, this, i);
     }

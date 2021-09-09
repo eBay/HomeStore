@@ -16,7 +16,7 @@
 #include "engine/homeds/memory/composite_allocator.hpp"
 #include "engine/homeds/memory/chunk_allocator.hpp"
 #include "engine/homeds/memory/sys_allocator.hpp"
-#include <utility/atomic_counter.hpp>
+#include <sisl/utility/atomic_counter.hpp>
 #include <sds_logging/logging.h>
 #include "btree_store.hpp"
 #include "btree_node.h"

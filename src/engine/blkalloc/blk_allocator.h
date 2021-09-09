@@ -18,10 +18,10 @@
 #include <vector>
 
 #include <boost/range/irange.hpp>
-#include <fds/bitset.hpp>
+#include <sisl/fds/bitset.hpp>
 #include <folly/MPMCQueue.h>
-#include <utility/enum.hpp>
-#include <utility/urcu_helper.hpp>
+#include <sisl/utility/enum.hpp>
+#include <sisl/utility/urcu_helper.hpp>
 
 #include "blk.h"
 #include "engine/device/device.h"

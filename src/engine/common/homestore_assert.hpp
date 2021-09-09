@@ -9,9 +9,8 @@
 
 #include <sds_logging/logging.h>
 #include <spdlog/fmt/fmt.h>
-#include <metrics/metrics.hpp>
-#include <fds/utils.hpp>
-
+#include <sisl/metrics/metrics.hpp>
+#include <sisl/fds/utils.hpp>
 
 // clang-format off
 /***** HomeStore Logging Macro facility: Goal is to provide consistent logging capability

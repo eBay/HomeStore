@@ -12,7 +12,7 @@
 #include <vector>
 
 #include <boost/dynamic_bitset.hpp>
-#include <fds/bitword.hpp>
+#include <sisl/fds/bitword.hpp>
 #include <folly/ConcurrentSkipList.h>
 #include <folly/concurrency/ConcurrentHashMap.h>
 #include <sds_logging/logging.h>
@@ -27,7 +27,6 @@
 #include <gtest/gtest.h>
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT
 
 using namespace homestore;
 

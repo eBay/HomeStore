@@ -21,7 +21,7 @@
 #include <boost/utility.hpp>
 #include <folly/Exception.h>
 #include <iomgr/iomgr.hpp>
-#include <utility/thread_factory.hpp>
+#include <sisl/utility/thread_factory.hpp>
 
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_flip.hpp"
@@ -40,7 +40,7 @@ static std::atomic< uint32_t > glob_phys_dev_ids{0};
 PhysicalDev::~PhysicalDev() {
     LOGINFO("device name {} superblock magic {} product name {} version {}", m_devname, m_super_blk->get_magic(),
             m_super_blk->get_product_name(), m_super_blk->get_version());
-    hs_utils::iobuf_free(reinterpret_cast<uint8_t*>(m_super_blk), sisl::buftag::superblk);
+    hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(m_super_blk), sisl::buftag::superblk);
 }
 
 void PhysicalDev::update(const uint32_t dev_num, const uint64_t dev_offset, const uint32_t first_chunk_id) {
@@ -257,7 +257,8 @@ void PhysicalDev::write_super_block(const uint64_t gen_cnt) {
     m_superblock_valid = true;
 }
 
-void PhysicalDev::zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type, const int oflags) {
+void PhysicalDev::zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type,
+                                const int oflags) {
     // alloc re-usable super block
     auto* const membuf{hs_utils::iobuf_alloc(SUPERBLOCK_SIZE, sisl::buftag::superblk)};
     super_block* const super_blk{new (membuf) super_block{}};
@@ -311,7 +312,8 @@ inline bool PhysicalDev::validate_device() {
 }
 
 inline void PhysicalDev::write_superblock() {
-    const auto bytes{drive_iface->sync_write(m_iodev.get(), reinterpret_cast< const char* >(m_super_blk), static_cast<uint32_t>(SUPERBLOCK_SIZE), 0)};
+    const auto bytes{drive_iface->sync_write(m_iodev.get(), reinterpret_cast< const char* >(m_super_blk),
+                                             static_cast< uint32_t >(SUPERBLOCK_SIZE), 0)};
     if (sisl_unlikely((bytes < 0) || (static_cast< size_t >(bytes) != SUPERBLOCK_SIZE))) {
         throw std::system_error(errno, std::system_category(), "error while writing a superblock" + get_devname());
     }
@@ -319,30 +321,33 @@ inline void PhysicalDev::write_superblock() {
 
 inline void PhysicalDev::read_superblock() {
     // std::memset(static_cast< void* >(m_super_blk), 0, SUPERBLOCK_SIZE);
-    const auto bytes{drive_iface->sync_read(m_iodev.get(), reinterpret_cast< char* >(m_super_blk), static_cast<uint32_t>(SUPERBLOCK_SIZE), 0)};
+    const auto bytes{drive_iface->sync_read(m_iodev.get(), reinterpret_cast< char* >(m_super_blk),
+                                            static_cast< uint32_t >(SUPERBLOCK_SIZE), 0)};
     if (sisl_unlikely((bytes < 0) || (static_cast< size_t >(bytes) != SUPERBLOCK_SIZE))) {
         throw std::system_error(errno, std::system_category(), "error while reading a superblock" + get_devname());
     }
 }
 
-void PhysicalDev::write(const char* const data, const uint32_t size, const uint64_t offset, uint8_t* const cookie, const bool part_of_batch) {
+void PhysicalDev::write(const char* const data, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
+                        const bool part_of_batch) {
     HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
     drive_iface->async_write(m_iodev.get(), data, size, offset, cookie, part_of_batch);
 }
 
-void PhysicalDev::writev(const iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
-                         const bool part_of_batch) {
+void PhysicalDev::writev(const iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset,
+                         uint8_t* const cookie, const bool part_of_batch) {
     HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
     drive_iface->async_writev(m_iodev.get(), iov, iovcnt, size, offset, cookie, part_of_batch);
 }
 
-void PhysicalDev::read(char* const data, const uint32_t size, const uint64_t offset, uint8_t* const cookie, const bool part_of_batch) {
+void PhysicalDev::read(char* const data, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
+                       const bool part_of_batch) {
     HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
     drive_iface->async_read(m_iodev.get(), data, size, offset, cookie, part_of_batch);
 }
 
-void PhysicalDev::readv(iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
-                        const bool part_of_batch) {
+void PhysicalDev::readv(iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset,
+                        uint8_t* const cookie, const bool part_of_batch) {
     HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
     drive_iface->async_readv(m_iodev.get(), iov, iovcnt, size, offset, cookie, part_of_batch);
 }
@@ -505,8 +510,8 @@ PhysicalDevChunk::PhysicalDevChunk(PhysicalDev* const pdev, chunk_info_block* co
 #endif
 }
 
-PhysicalDevChunk::PhysicalDevChunk(PhysicalDev* const pdev, const uint32_t chunk_id, const uint64_t start_offset, const uint64_t size,
-                                   chunk_info_block* const cinfo) {
+PhysicalDevChunk::PhysicalDevChunk(PhysicalDev* const pdev, const uint32_t chunk_id, const uint64_t start_offset,
+                                   const uint64_t size, chunk_info_block* const cinfo) {
     m_chunk_info = cinfo;
     // Fill in with new chunk info
     m_chunk_info->chunk_id = chunk_id;

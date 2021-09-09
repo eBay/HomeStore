@@ -29,15 +29,15 @@
 
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <fds/atomic_status_counter.hpp>
-#include <fds/bitset.hpp>
-#include <fds/buffer.hpp>
+#include <sisl/fds/atomic_status_counter.hpp>
+#include <sisl/fds/bitset.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>
 #include <iomgr/spdk_drive_interface.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <utility/thread_buffer.hpp>
+#include <sisl/utility/thread_buffer.hpp>
 
 #include <gtest/gtest.h>
 
@@ -55,7 +55,6 @@ using namespace homestore;
 using namespace flip;
 #endif
 
-THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 
 /************************** GLOBAL VARIABLES ***********************/

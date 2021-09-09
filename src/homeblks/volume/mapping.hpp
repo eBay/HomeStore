@@ -10,7 +10,7 @@
 #include <vector>
 
 #include <sds_logging/logging.h>
-#include <utility/obj_life_counter.hpp>
+#include <sisl/utility/obj_life_counter.hpp>
 
 #include "engine/blkalloc/blk.h"
 #include "engine/common/error.h"

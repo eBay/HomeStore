@@ -1,7 +1,7 @@
 #pragma once
 #include <boost/intrusive_ptr.hpp>
 #include "common/homestore_config.hpp"
-#include <fds/buffer.hpp>
+#include <sisl/fds/buffer.hpp>
 
 typedef uint32_t crc32_t;
 typedef uint16_t csum_t;

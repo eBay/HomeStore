@@ -13,7 +13,6 @@
 #include <engine/common/homestore_header.hpp>
 #include <iomgr/iomgr.hpp>
 
-THREAD_BUFFER_INIT;
 
 SDS_OPTION_GROUP(test_hs_vol,
 	(capacity, "", "capacity", "Size of volume", cxxopts::value<uint32_t>()->default_value("2"), "GiB"),

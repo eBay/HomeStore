@@ -1,6 +1,6 @@
 #include "indx_mgr.hpp"
 #include "blk_read_tracker.hpp"
-#include <utility/thread_factory.hpp>
+#include <sisl/utility/thread_factory.hpp>
 #include <shared_mutex>
 #include "homelogstore/log_store.hpp"
 #include "engine/index/resource_mgr.hpp"
@@ -522,7 +522,6 @@ void IndxMgr::io_replay() {
                 auto size = free_blk(nullptr, icp->io_free_blkid_list, fbe, true);
                 HS_ASSERT_CMP(DEBUG, size, >, 0);
 
-
                 if (hdr->cp_id > m_last_cp_sb.icp_sb.active_cp_id) {
                     /* TODO: we update size in superblock with each checkpoint. Ideally it
                      * has to be updated only for blk alloc checkpoint.
@@ -912,7 +911,6 @@ void IndxMgr::truncate(const indx_cp_ptr& icp) {
 }
 
 indx_tbl* IndxMgr::get_active_indx() { return m_active_tbl; }
-
 
 void IndxMgr::journal_comp_cb(logstore_req* lreq, logdev_key ld_key) {
     HS_ASSERT(DEBUG, ld_key.is_valid(), "key is invalid");

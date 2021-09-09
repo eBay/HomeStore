@@ -11,7 +11,7 @@
 #include <iterator>
 #include <thread>
 
-#include <fds/buffer.hpp>
+#include <sisl/fds/buffer.hpp>
 
 #include "engine/common/homestore_flip.hpp"
 #include "homeblks/home_blks.hpp"

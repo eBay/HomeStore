@@ -7,8 +7,8 @@
 #include <mutex>
 #include <stdexcept>
 
-#include <fds/malloc_helper.hpp>
-#include <fds/buffer.hpp>
+#include <sisl/fds/malloc_helper.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <sds_logging/logging.h>
 
 #include "api/meta_interface.hpp"

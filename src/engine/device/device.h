@@ -33,9 +33,9 @@
 #include <boost/uuid/uuid.hpp>            // uuid class
 #include <boost/uuid/uuid_generators.hpp> // generators
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
-#include <fds/buffer.hpp>
-#include <fds/sparse_vector.hpp>
-#include <fds/utils.hpp>
+#include <sisl/fds/buffer.hpp>
+#include <sisl/fds/sparse_vector.hpp>
+#include <sisl/fds/utils.hpp>
 #include <iomgr/iomgr.hpp>
 #include <isa-l/crc.h>
 #include <sds_logging/logging.h>
@@ -134,8 +134,8 @@ struct chunk_info_block {
 /************* Vdev Info Block definition ******************/
 #pragma pack(1)
 struct vdevs_block {
-    uint64_t magic{0};         // Header magic expected to be at the top of block
-    uint32_t num_vdevs{0};     // Number of virtual devices
+    uint64_t magic{0};     // Header magic expected to be at the top of block
+    uint32_t num_vdevs{0}; // Number of virtual devices
     uint32_t max_num_vdevs{0};
     uint32_t first_vdev_id{0}; // First vdev id / Head of the vdev list;
     uint32_t context_data_size{0};
@@ -163,7 +163,8 @@ struct vdev_info_block {
     uint8_t slot_allocated{0};      // 32: Is this current slot allocated
     uint8_t failed{0};              // 33: set to true if disk is replaced
 
-    uint8_t padding[MAX_VDEV_INFO_BLOCK_HDR_SZ - 34]{}; // Ugly hardcode will be removed after moving to superblk blkstore
+    uint8_t
+        padding[MAX_VDEV_INFO_BLOCK_HDR_SZ - 34]{}; // Ugly hardcode will be removed after moving to superblk blkstore
     uint8_t context_data[MAX_CONTEXT_DATA_SZ]{};
 
     uint32_t get_vdev_id() const { return vdev_id; }
@@ -197,15 +198,15 @@ struct super_block {
     uint8_t empty_buf[SUPERBLOCK_PAYLOAD_OFFSET]{}; // don't write anything to first 4096 bytes.
     uint64_t magic{0};                              // Header magic expected to be at the top of block
     uint64_t gen_cnt{0};
-    uint32_t version{0};                            // Version Id of this structure
+    uint32_t version{0}; // Version Id of this structure
     int32_t cur_indx{0};
     static constexpr size_t s_product_name_size{64};
-    char product_name[s_product_name_size]{}; // Product name
-    uint8_t init_done{0};             // homestore init completed flag
-    uint8_t pad[7]{};                 // pad to 64 bit
-    pdev_info_block this_dev_info{0}; // Info about this device itself
+    char product_name[s_product_name_size]{};     // Product name
+    uint8_t init_done{0};                         // homestore init completed flag
+    uint8_t pad[7]{};                             // pad to 64 bit
+    pdev_info_block this_dev_info{0};             // Info about this device itself
     chunk_info_block dm_chunk[s_num_dm_chunks]{}; // chunk info blocks
-    uint64_t system_uuid{0};                    // homestore system uuid.  hs_uuid_t(time_t) is an ambiguous type
+    uint64_t system_uuid{0};                      // homestore system uuid.  hs_uuid_t(time_t) is an ambiguous type
 
     void set_init_done(const bool done) { init_done = static_cast< uint8_t >(done ? 0x01 : 0x00); }
     bool is_init_done() const { return (init_done == 0x01); }
@@ -218,7 +219,9 @@ struct super_block {
 };
 #pragma pack()
 
-static const size_t SUPERBLOCK_SIZE{sisl::round_up(std::max(sizeof(super_block), HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size) + SUPERBLOCK_PAYLOAD_OFFSET), HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size))};
+static const size_t SUPERBLOCK_SIZE{sisl::round_up(
+    std::max(sizeof(super_block), HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size) + SUPERBLOCK_PAYLOAD_OFFSET),
+    HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size))};
 
 #pragma pack(1)
 // NOTE: After this structure in memory follows pdev_info_block followed by chunk_info_block array
@@ -239,7 +242,7 @@ struct dm_info {
     uint64_t get_size() const { return size; }
     uint32_t get_version() const { return version; }
     uint16_t get_checksum() const { return checksum; }
-    
+
     static const size_t s_pdev_info_blocks_size;
     static const size_t s_chunk_info_blocks_size;
     static const size_t s_vdev_info_blocks_size;
@@ -257,7 +260,7 @@ struct dm_info {
                                                     s_pdev_info_blocks_size + s_chunk_info_blocks_size);
     }
 
-   	static constexpr size_t s_dm_payload_offset{12};  // offset to version entry of dm_info
+    static constexpr size_t s_dm_payload_offset{12}; // offset to version entry of dm_info
 };
 #pragma pack()
 
@@ -370,7 +373,7 @@ public:
 
     void update_end_of_chunk(const uint64_t size) {
         LOGINFOMOD(device, "chunk id {}, end size {} actual size {}", get_chunk_id(), size, get_size());
-        m_chunk_info->end_of_chunk_size = static_cast<int64_t>(size);
+        m_chunk_info->end_of_chunk_size = static_cast< int64_t >(size);
     }
     off_t get_end_of_chunk() const { return static_cast< off_t >(m_chunk_info->end_of_chunk_size); }
 
@@ -453,7 +456,8 @@ public:
                 const uint32_t dev_num, const uint64_t dev_offset, const iomgr::iomgr_drive_type drive_type,
                 const bool is_init, const uint64_t dm_info_size, bool* const is_inited);
 
-    PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags, const iomgr::iomgr_drive_type drive_type);
+    PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags,
+                const iomgr::iomgr_drive_type drive_type);
 
     PhysicalDev(const PhysicalDev&) = delete;
     PhysicalDev(PhysicalDev&&) noexcept = delete;
@@ -492,12 +496,14 @@ public:
     /* Find a free chunk which closestly match for the required size */
     PhysicalDevChunk* find_free_chunk(const uint64_t req_size);
 
-    void write(const char* const data, const uint32_t size, const uint64_t offset, uint8_t* const cookie, const bool part_of_batch = false);
-    void writev(const iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
-                const bool part_of_batch = false);
+    void write(const char* const data, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
+               const bool part_of_batch = false);
+    void writev(const iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset,
+                uint8_t* const cookie, const bool part_of_batch = false);
     void write_zero(const uint64_t size, const uint64_t offset, uint8_t* const cookie);
 
-    void read(char* const data, const uint32_t size, const uint64_t offset, uint8_t* const cookie, const bool part_of_batch = false);
+    void read(char* const data, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
+              const bool part_of_batch = false);
     void readv(iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
                const bool part_of_batch = false);
 
@@ -530,7 +536,8 @@ public:
     hs_uuid_t get_sys_uuid() { return m_super_blk->get_system_uuid(); }
 
 public:
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type, const int oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type,
+                              const int oflags);
 
 private:
     inline void write_superblock();
@@ -623,14 +630,15 @@ public:
 
     /* Allocate a chunk for required size on the given physical dev and associate the chunk to provide virtual device.
      * Returns the allocated PhysicalDevChunk */
-    PhysicalDevChunk* alloc_chunk(PhysicalDev* const pdev, const uint32_t vdev_id, const uint64_t req_size, const uint32_t primary_id);
+    PhysicalDevChunk* alloc_chunk(PhysicalDev* const pdev, const uint32_t vdev_id, const uint64_t req_size,
+                                  const uint32_t primary_id);
 
     /* Free the chunk for later user */
     void free_chunk(PhysicalDevChunk* const chunk);
 
     /* Allocate a new vdev for required size */
-    vdev_info_block* alloc_vdev(const uint32_t req_size, const uint32_t nmirrors, const uint32_t blk_size, const uint32_t nchunks, char* const blob,
-                                const uint64_t size);
+    vdev_info_block* alloc_vdev(const uint32_t req_size, const uint32_t nmirrors, const uint32_t blk_size,
+                                const uint32_t nchunks, char* const blob, const uint64_t size);
 
     /* Free up the vdev_id */
     void free_vdev(vdev_info_block* const vb);
@@ -660,7 +668,8 @@ public:
     // void zero_pdev_sbs();
 
 public:
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type, const io_flag oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type,
+                              const io_flag oflags);
 
 private:
     void load_and_repair_devices(const std::vector< dev_info >& devices, const hs_uuid_t& system_uuid);
