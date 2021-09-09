@@ -232,9 +232,9 @@ private:
 
     static uint8_t encode(const uint32_t size) {
         HS_DEBUG_ASSERT_EQ((size % multiplier()), 0, "size {} multiplier{}", size,
-                           multiplier); // assure modulo of multiplier
+                           multiplier()); // assure modulo of multiplier
         HS_DEBUG_ASSERT_EQ(((size / multiplier()) >> 8), 0, "size {} multuplier{}", size,
-                           multiplier);                                                // assure fits in uint8_t
+                           multiplier());                                              // assure fits in uint8_t
         return static_cast< uint8_t >((size > 0) ? (size - 1) / multiplier() + 1 : 0); // round to multiplier
     }
 };
