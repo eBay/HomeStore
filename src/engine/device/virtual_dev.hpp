@@ -293,12 +293,42 @@ public:
             m_name{name}, m_metrics{name} {
         init(mgr, nullptr, std::move(cb), page_size, auto_recovery, std::move(hwm_cb));
 
+        // Prepare primary chunks in a physical device for future inserts.
+        const auto* const drive_interface{iomgr::IOManager::instance().default_drive_interface()};
+        m_primary_pdev_chunks_list.reserve(pdev_list.size());
+
+        const auto& pdev_device_name{pdev_list.empty() ? "" : pdev_list.front()->get_devname()};
+        const auto pdev_drive_type{pdev_list.empty() ? iomgr::iomgr_drive_type::unknown
+                                                     : drive_interface->get_drive_type(pdev_device_name)};
+        for (const auto& pdev : pdev_list) {
+            pdev_chunk_map mp;
+            mp.pdev = pdev;
+            mp.chunks_in_pdev.reserve(1);
+
+            // ensure that all physical devices have same type
+            bool add_device{true};
+            const auto& new_pdev_device_name{pdev->get_devname()};
+            if (pdev_device_name != new_pdev_device_name) {
+                const auto new_pdev_drive_type{drive_interface->get_drive_type(new_pdev_device_name)};
+                if (pdev_drive_type != new_pdev_drive_type) {
+                    HS_LOG(ERROR, device, "Vdev={} - dev={} type={} does not match type dev={} type={}", m_name,
+                           pdev_device_name, pdev_drive_type, new_pdev_device_name, new_pdev_drive_type);
+                    add_device = false;
+                }
+            }
+
+            if (add_device) { m_primary_pdev_chunks_list.push_back(std::move(mp)); }
+        }
+        // check that all pdevs valid and of same type
+        HS_DEBUG_ASSERT_EQ(m_primary_pdev_chunks_list.size(), pdev_list.size());
+
         auto size{size_in};
         // Now its time to allocate chunks as needed
-        HS_ASSERT_CMP(LOGMSG, nmirror, <, pdev_list.size()); // Mirrors should be at least one less than device list.
+        HS_ASSERT_CMP(LOGMSG, nmirror, <,
+                      m_primary_pdev_chunks_list.size()); // Mirrors should be at least one less than device list.
 
         if (is_stripe) {
-            m_num_chunks = static_cast< uint32_t >(pdev_list.size());
+            m_num_chunks = static_cast< uint32_t >(m_primary_pdev_chunks_list.size());
             uint32_t cnt{1};
 
             do {
@@ -327,18 +357,8 @@ public:
         // Create a new vdev in persistent area and get the block of it
         m_vb = mgr->alloc_vdev(context_size, nmirror, page_size, m_num_chunks, blob, size);
 
-        // Prepare primary chunks in a physical device for future inserts.
-        m_primary_pdev_chunks_list.reserve(pdev_list.size());
-        for (const auto& pdev : pdev_list) {
-            pdev_chunk_map mp;
-            mp.pdev = pdev;
-            mp.chunks_in_pdev.reserve(1);
-
-            m_primary_pdev_chunks_list.push_back(std::move(mp));
-        }
-
         for (auto i : boost::irange< uint32_t >(0, m_num_chunks)) {
-            const auto pdev_ind{i % pdev_list.size()};
+            const auto pdev_ind{i % m_primary_pdev_chunks_list.size()};
 
             // Create a chunk on selected physical device and add it to chunks in physdev list
             auto* const chunk{create_dev_chunk(pdev_ind, nullptr, INVALID_CHUNK_ID)};
@@ -364,8 +384,8 @@ public:
             }
         }
 
-        for (const auto& pdev : pdev_list) {
-            m_selector->add_pdev(pdev);
+        for (const auto& pdev_chunk : m_primary_pdev_chunks_list) {
+            m_selector->add_pdev(pdev_chunk.pdev);
         }
     }
 
