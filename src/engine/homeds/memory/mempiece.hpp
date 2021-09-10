@@ -231,9 +231,9 @@ private:
     static uint32_t decode(const uint8_t encoded_size) { return (encoded_size * multiplier()); }
 
     static uint8_t encode(const uint32_t size) {
-        HS_DEBUG_ASSERT_EQ((size % multiplier()), 0, "size {} multiplier{}", size,
+        HS_DEBUG_ASSERT_EQ((size % multiplier()), 0, "size: {}, multiplier: {}", size,
                            multiplier()); // assure modulo of multiplier
-        HS_DEBUG_ASSERT_EQ(((size / multiplier()) >> 8), 0, "size {} multuplier{}", size,
+        HS_DEBUG_ASSERT_EQ(((size / multiplier()) >> 8), 0, "size: {}, multuplier: {}", size,
                            multiplier());                                              // assure fits in uint8_t
         return static_cast< uint8_t >((size > 0) ? (size - 1) / multiplier() + 1 : 0); // round to multiplier
     }
@@ -325,11 +325,11 @@ private:
     typedef std::recursive_mutex lock_type;
     mutable lock_type m_mtx;
     sisl::atomic_counter< uint16_t > m_refcnt; // Refcount
-    sisl::buftag m_tag{ sisl::buftag::common };
+    sisl::buftag m_tag{sisl::buftag::common};
 
 public:
     MemVector(uint8_t* const ptr, const uint32_t size, const uint32_t offset) : ObjLifeCounter{}, m_refcnt{0} {
-        assert((size > 0) || !ptr);
+        HS_DEBUG_ASSERT_EQ((size > 0) || !ptr, true, "size: {}", size);
         m_list.reserve(1);
         if (ptr) { m_list.emplace_back(ptr, size, offset); }
     }
@@ -346,7 +346,7 @@ public:
             if (entry.ptr() != nullptr) {
                 hs_utils::iobuf_free(entry.ptr(), get_tag());
             } else {
-                assert(false);
+                HS_DEBUG_ASSERT(false, "assert fail");
             }
         }
         m_list.clear();
@@ -354,7 +354,7 @@ public:
 
     friend void intrusive_ptr_add_ref(MemVector* const mvec) {
         const uint32_t cnt{mvec->m_refcnt.increment()};
-        HS_ASSERT_CMP(RELEASE, cnt, <=, static_cast<uint32_t>(std::numeric_limits<uint16_t>::max()));
+        HS_ASSERT_CMP(RELEASE, cnt, <=, static_cast< uint32_t >(std::numeric_limits< uint16_t >::max()));
     }
 
     friend void intrusive_ptr_release(MemVector* const mvec) {
@@ -371,9 +371,9 @@ public:
 
     // perform deep copy
     void copy(const MemVector& other) {
-        if (this != & other) {
+        if (this != &other) {
             std::lock_guard< lock_type > mtx{m_mtx};
-            assert(other.m_refcnt.get() > 0);
+            HS_DEBUG_ASSERT_GT(other.m_refcnt.get(), 0);
             m_list = other.get_m_list();
         }
     }
@@ -399,25 +399,25 @@ public:
         if (bsearch(offset, 0, &ind)) {
             const auto& entry{m_list[ind]};
             const auto piece_offset{entry.offset()};
-            assert(piece_offset <= offset);
+            HS_DEBUG_ASSERT_LE(piece_offset, offset);
             const uint32_t delta{static_cast< uint32_t >(offset - piece_offset)};
-            assert(delta < entry.size());
+            HS_DEBUG_ASSERT_LT(delta, entry.size());
             outb->bytes = entry.ptr() + delta;
             outb->size = entry.size() - delta;
         } else {
-            assert(false);
+            HS_DEBUG_ASSERT(false, "assert fail");
         }
     }
 
     const MemPiece& get_nth_piece(const size_t nth) const {
         std::lock_guard< lock_type > mtx{m_mtx};
-        assert(nth < m_list.size());
+        HS_DEBUG_ASSERT_LT(nth, m_list.size());
         return m_list[nth];
     }
 
     MemPiece& get_nth_piece(const size_t nth) {
         std::lock_guard< lock_type > mtx{m_mtx};
-        assert(nth < m_list.size());
+        HS_DEBUG_ASSERT_LT(nth, m_list.size());
         return m_list[nth];
     }
 
@@ -456,8 +456,8 @@ public:
                typename = std::enable_if_t< std::is_convertible_v< std::decay_t< InputType >, MemPiece > > >
     MemPiece& insert_at(const size_t ind, InputType&& piece) {
         std::lock_guard< lock_type > mtx{m_mtx};
-        assert(ind <= m_list.size());
-        const auto it{ m_list.insert(std::next(std::begin(m_list), ind), std::forward<InputType>(piece))};
+        HS_DEBUG_ASSERT_LE(ind, m_list.size());
+        const auto it{m_list.insert(std::next(std::begin(m_list), ind), std::forward< InputType >(piece))};
         return *it;
     }
 
@@ -485,7 +485,7 @@ public:
                 continue;
             }
 
-            assert(start);
+            HS_DEBUG_ASSERT(start, "assert fail");
 
             if ((offset_read + entry.size()) >= (offset + size)) {
                 if (offset_read >= (offset + size)) { break; }
@@ -568,25 +568,26 @@ public:
             old_ind = new_ind;
         }
 #ifndef NDEBUG
-        assert(offset == (temp_offset + temp_size));
+        HS_DEBUG_ASSERT_EQ(offset, temp_offset + temp_size);
 #endif
         return inserted_size;
     }
 
     template < typename InitCallbackType >
-    bool update_missing_piece(const uint32_t offset, const size_t size, uint8_t* const ptr, InitCallbackType&& init_callback) {
+    bool update_missing_piece(const uint32_t offset, const size_t size, uint8_t* const ptr,
+                              InitCallbackType&& init_callback) {
         std::lock_guard< lock_type > mtx{m_mtx};
         size_t new_ind{0};
         bool inserted{false};
         const bool found{find_index(offset, 0, &new_ind)};
-        assert(found);
+        HS_DEBUG_ASSERT(found, "found not true");
         auto& mp{m_list[new_ind]};
         if (mp.ptr() == nullptr) {
             mp.set_ptr(ptr);
             inserted = true;
             std::forward< InitCallbackType >(init_callback)();
         }
-        assert(size == mp.size());
+        HS_DEBUG_ASSERT_EQ(size, mp.size());
         return inserted;
     }
 
@@ -647,7 +648,7 @@ private:
                 *out_ind = mid;
                 return true;
             default:
-                assert(false);
+                HS_DEBUG_ASSERT(false, "assert fail");
             }
         }
         *out_ind = end;

@@ -315,6 +315,8 @@ public:
     void set_memvec(boost::intrusive_ptr< homeds::MemVector > vec, const uint32_t offset, const uint32_t size) {
         m_mem = std::move(vec);
         m_data_offset = offset;
+        HS_DEBUG_ASSERT_EQ(m_mem->get_buffer_size() % HS_STATIC_CONFIG(engine.min_io_size), 0,
+                           "size: {}, min_io_size: {}", m_mem->get_buffer_size(), HS_STATIC_CONFIG(engine.min_io_size));
         m_cache_size = m_mem->get_buffer_size();
     }
 
