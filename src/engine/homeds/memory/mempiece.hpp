@@ -231,8 +231,10 @@ private:
     static uint32_t decode(const uint8_t encoded_size) { return (encoded_size * multiplier()); }
 
     static uint8_t encode(const uint32_t size) {
-        assert((size % multiplier()) == 0);                                            // assure modulo of multiplier
-        assert(((size / multiplier()) >> 8) == 0);                                     // assure fits in uint8_t
+        HS_DEBUG_ASSERT_EQ((size % multiplier()), 0, "size {} multiplier{}", size,
+                           multiplier()); // assure modulo of multiplier
+        HS_DEBUG_ASSERT_EQ(((size / multiplier()) >> 8), 0, "size {} multuplier{}", size,
+                           multiplier());                                              // assure fits in uint8_t
         return static_cast< uint8_t >((size > 0) ? (size - 1) / multiplier() + 1 : 0); // round to multiplier
     }
 };
