@@ -29,15 +29,15 @@
 
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <fds/atomic_status_counter.hpp>
-#include <fds/bitset.hpp>
-#include <fds/buffer.hpp>
+#include <sisl/fds/atomic_status_counter.hpp>
+#include <sisl/fds/bitset.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>
 #include <iomgr/spdk_drive_interface.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <utility/thread_buffer.hpp>
+#include <sisl/utility/thread_buffer.hpp>
 
 #include <gtest/gtest.h>
 
@@ -55,7 +55,6 @@ using namespace homestore;
 using namespace flip;
 #endif
 
-THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 
 /************************** GLOBAL VARIABLES ***********************/
@@ -105,7 +104,7 @@ struct TestCfg {
     uint64_t max_num_writes = 100000;
     uint64_t run_time = 60;
     uint64_t num_threads = 8;
-    uint64_t unmap_frequency = 1000;
+    uint64_t unmap_frequency = 100;
 
     uint64_t max_io_size = 1 * Mi;
     uint64_t max_outstanding_ios = 32u;
@@ -285,7 +284,7 @@ public:
                 bool cv_status = (((status == job_status_t::stopped) || (status == job_status_t::completed)) &&
                                   (m_status_threads_executing.count() == 0));
                 if (cv_status && m_timer_hdl != iomgr::null_timer_handle) {
-                    iomanager.cancel_timer(m_timer_hdl);
+                    iomanager.cancel_timer(m_timer_hdl, false /* wait */);
                     m_timer_hdl = iomgr::null_timer_handle;
                 }
                 return cv_status;
@@ -421,7 +420,7 @@ struct io_req_t : public vol_interface_req {
             vol_info{vinfo} {
         init(lba, nlbas, is_csum);
 
-        if (op == Op_type::WRITE || op == Op_type::UNMAP) {
+        if (op == Op_type::WRITE) {
             // make copy of buffer so validation works properly
             if (is_csum) {
                 populate_csum_buf(reinterpret_cast< uint16_t* >(validate_buffer), buffer, original_size, vinfo.get());
@@ -466,6 +465,7 @@ private:
     // compute checksum and store in a buf which will be used for verification
     void populate_csum_buf(uint16_t* const csum_buf, const uint8_t* const buf, const uint64_t size,
                            const vol_info_t* const vinfo) {
+        if (!buf) return;
         const uint64_t pg_size{VolInterface::get_instance()->get_page_size(vinfo->vol)};
         size_t checksum_num{0};
         for (uint64_t buf_offset{0}; buf_offset < size; buf_offset += pg_size, ++checksum_num) {
@@ -1339,6 +1339,25 @@ protected:
         return do_get_rand_lbas(lbas_choice_t::atleast_one_valid, lba_validate_t::invalidate, tcfg.overlapping_allowed);
     }
 
+    io_lba_range_t large_unmappable_rand_lbas() {
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine engine{rd()};
+        io_lba_range_t ret;
+
+        // select volume
+        const auto vinfo{pick_vol_round_robin(ret)};
+
+        // select lba
+        std::uniform_int_distribution< uint64_t > lba_random{0, vinfo->max_vol_blks - 512};
+        ret.lba = lba_random(engine);
+
+        // select nlbas
+        std::uniform_int_distribution< uint32_t > nlbas_random{512, (uint32_t)(vinfo->max_vol_blks - ret.lba)};
+        ret.num_lbas = nlbas_random(engine);
+        ret.valid_io = true;
+        return ret;
+    }
+
     bool write_io() {
         bool ret = false;
         const IoFuncType write_function{bind_this(IOTestJob::write_vol, 3)};
@@ -1379,6 +1398,7 @@ protected:
         switch (m_load_type) {
         case load_type_t::random:
             ret = run_io(bind_this(IOTestJob::unmappable_rand_lbas, 0), unmap_function);
+            if (ret) { ret = run_io(bind_this(IOTestJob::large_unmappable_rand_lbas, 0), unmap_function); }
             break;
         case load_type_t::same:
             assert(false);
@@ -1526,22 +1546,19 @@ protected:
         const auto vol{vinfo->vol};
         if (vol == nullptr) { return false; }
 
-        const uint64_t size{nlbas * VolInterface::get_instance()->get_page_size(vol)};
-        uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
-        bzero(wbuf, size);
-
         const auto vreq{boost::intrusive_ptr< io_req_t >(
-            new io_req_t(vinfo, Op_type::UNMAP, wbuf, lba, nlbas, tcfg.verify_csum()))};
+            new io_req_t(vinfo, Op_type::UNMAP, nullptr, lba, nlbas, tcfg.verify_csum()))};
 
         vreq->cookie = static_cast< void* >(this);
 
         ++m_voltest->output.unmap_cnt;
         ++m_outstanding_ios;
+        vinfo->ref_cnt.increment(1);
         const auto ret_io{VolInterface::get_instance()->unmap(vol, vreq)};
         LOGDEBUG("Unmapped lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
                  (tcfg.write_cache != 0 ? true : false));
-        iomanager.iobuf_free(wbuf); // this buffer is not used in unmap
         if (ret_io != no_error) { return false; }
+
         return true;
     }
 

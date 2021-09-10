@@ -18,12 +18,12 @@
 #include <vector>
 
 #include <boost/intrusive_ptr.hpp>
-#include <fds/obj_allocator.hpp>
-#include <fds/buffer.hpp>
-#include <metrics/metrics.hpp>
-#include <utility/atomic_counter.hpp>
-#include <utility/enum.hpp>
-#include <utility/obj_life_counter.hpp>
+#include <sisl/fds/obj_allocator.hpp>
+#include <sisl/fds/buffer.hpp>
+#include <sisl/metrics/metrics.hpp>
+#include <sisl/utility/atomic_counter.hpp>
+#include <sisl/utility/enum.hpp>
+#include <sisl/utility/obj_life_counter.hpp>
 
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"

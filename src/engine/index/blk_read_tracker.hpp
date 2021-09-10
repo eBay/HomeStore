@@ -11,9 +11,9 @@
 
 #include <boost/intrusive_ptr.hpp>
 #include <boost/lexical_cast.hpp>
-#include <fds/obj_allocator.hpp>
-#include <metrics/metrics.hpp>
-#include <utility/obj_life_counter.hpp>
+#include <sisl/fds/obj_allocator.hpp>
+#include <sisl/metrics/metrics.hpp>
+#include <sisl/utility/obj_life_counter.hpp>
 
 #include "engine/blkalloc/blk.h"
 #include "engine/homeds/hash/intrusive_hashset.hpp"

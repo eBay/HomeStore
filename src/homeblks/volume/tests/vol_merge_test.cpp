@@ -10,7 +10,7 @@
 #include <engine/homeds/bitmap/bitset.hpp>
 #include <atomic>
 #include <string>
-#include <utility/thread_buffer.hpp>
+#include <sisl/utility/thread_buffer.hpp>
 #include <iomgr/iomgr.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <chrono>
@@ -26,7 +26,6 @@ struct dev_info {
     std::string dev_names;
 };
 #endif
-THREAD_BUFFER_INIT
 
 std::array< std::string, 4 > names = {"/var/tmp/min1", "/var/tmp/min2", "/var/tmp/min3", "/var/tmp/min4"};
 uint64_t max_vols = 2;

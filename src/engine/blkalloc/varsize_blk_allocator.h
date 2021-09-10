@@ -15,7 +15,7 @@
 #include <vector>
 
 #include <flip/flip.hpp>
-#include <metrics/metrics.hpp>
+#include <sisl/metrics/metrics.hpp>
 #include <sds_logging/logging.h>
 
 #include "blk.h"

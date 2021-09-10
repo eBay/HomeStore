@@ -17,9 +17,9 @@
 #include <memory>
 #include <sstream>
 
-#include <fds/bitword.hpp>
-#include <fds/thread_vector.hpp>
-#include <fds/buffer.hpp>
+#include <sisl/fds/bitword.hpp>
+#include <sisl/fds/thread_vector.hpp>
+#include <sisl/fds/buffer.hpp>
 
 #include "engine/common/homestore_config.hpp"
 #include "engine/homeds/array/flexarray.hpp"

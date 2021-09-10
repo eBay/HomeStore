@@ -18,16 +18,16 @@
 #include <type_traits>
 #include <vector>
 
-#include <fds/buffer.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <iomgr/iomgr.hpp>
-#include <utility/atomic_counter.hpp>
-#include <utility/obj_life_counter.hpp>
+#include <sisl/utility/atomic_counter.hpp>
+#include <sisl/utility/obj_life_counter.hpp>
 
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
 #include "engine/homestore_base.hpp"
 //#include "tagged_ptr.hpp"
-#include <metrics/metrics.hpp>
+#include <sisl/metrics/metrics.hpp>
 
 namespace homeds {
 using namespace homestore; // NOTE: This needs to be removed as it pollutes namespace of all files where this header is
@@ -325,7 +325,7 @@ private:
     typedef std::recursive_mutex lock_type;
     mutable lock_type m_mtx;
     sisl::atomic_counter< uint16_t > m_refcnt; // Refcount
-    sisl::buftag m_tag{ sisl::buftag::common };
+    sisl::buftag m_tag{sisl::buftag::common};
 
 public:
     MemVector(uint8_t* const ptr, const uint32_t size, const uint32_t offset) : ObjLifeCounter{}, m_refcnt{0} {
@@ -354,7 +354,7 @@ public:
 
     friend void intrusive_ptr_add_ref(MemVector* const mvec) {
         const uint32_t cnt{mvec->m_refcnt.increment()};
-        HS_ASSERT_CMP(RELEASE, cnt, <=, static_cast<uint32_t>(std::numeric_limits<uint16_t>::max()));
+        HS_ASSERT_CMP(RELEASE, cnt, <=, static_cast< uint32_t >(std::numeric_limits< uint16_t >::max()));
     }
 
     friend void intrusive_ptr_release(MemVector* const mvec) {
@@ -371,7 +371,7 @@ public:
 
     // perform deep copy
     void copy(const MemVector& other) {
-        if (this != & other) {
+        if (this != &other) {
             std::lock_guard< lock_type > mtx{m_mtx};
             assert(other.m_refcnt.get() > 0);
             m_list = other.get_m_list();
@@ -457,7 +457,7 @@ public:
     MemPiece& insert_at(const size_t ind, InputType&& piece) {
         std::lock_guard< lock_type > mtx{m_mtx};
         assert(ind <= m_list.size());
-        const auto it{ m_list.insert(std::next(std::begin(m_list), ind), std::forward<InputType>(piece))};
+        const auto it{m_list.insert(std::next(std::begin(m_list), ind), std::forward< InputType >(piece))};
         return *it;
     }
 
@@ -574,7 +574,8 @@ public:
     }
 
     template < typename InitCallbackType >
-    bool update_missing_piece(const uint32_t offset, const size_t size, uint8_t* const ptr, InitCallbackType&& init_callback) {
+    bool update_missing_piece(const uint32_t offset, const size_t size, uint8_t* const ptr,
+                              InitCallbackType&& init_callback) {
         std::lock_guard< lock_type > mtx{m_mtx};
         size_t new_ind{0};
         bool inserted{false};

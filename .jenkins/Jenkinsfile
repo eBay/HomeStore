@@ -6,7 +6,7 @@ pipeline {
         ECR_URL = 'ecr.vip.ebayc3.com'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         CONAN_USER = 'sds'
-        MASTER_BRANCH = 'master'
+        MASTER_BRANCH = 'develop'
         TESTING_BRANCH = 'testing/v*'
         STABLE_BRANCH = 'stable/v*'
         LAST_COMMITS = ''
@@ -52,7 +52,7 @@ pipeline {
             } }
             steps {
                 script {
-                    BUILD_TEST_MODE = "-o homestore:testing=epoll_mode"
+                    BUILD_TEST_MODE = "-o homestore:testing=spdk_mode"
                 }
             }
         }
@@ -141,6 +141,16 @@ pipeline {
                         axis {
                             name 'PRERELEASE'
                             values 'False'
+                        }
+                    }
+                    exclude {
+                        axis {
+                            name 'BUILD_TYPE'
+                            values 'debug'
+                        }
+                        axis {
+                            name 'SANITIZE'
+                            values 'True'
                         }
                     }
                 }
@@ -273,18 +283,6 @@ pipeline {
             } }
         
             stages {
-                stage('SCST Connector') {
-                    steps {
-                        script {
-                            built_chain = env.pkg_version
-                            def scst_res = build job: "SCST Connector/${MASTER_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
-                            built_chain = "${built_chain}" + ", " + "scst_res.buildVariables.pkg_version"
-                        }
-                    }
-                    post {
-                        failure { script { failed_pkg = "SCST Connector" } }
-                    }
-                }
                 stage('NuBlox Logstore') {
                     steps {
                         script {

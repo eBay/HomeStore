@@ -17,8 +17,8 @@
 #include <metrics/metrics.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <utility/obj_life_counter.hpp>
-#include <utility/thread_buffer.hpp>
+#include <sisl/utility/obj_life_counter.hpp>
+#include <sisl/utility/thread_buffer.hpp>
 
 #include <gtest/gtest.h>
 
@@ -54,13 +54,11 @@
 #include "valuespecs/vdev_value_spec.hpp"
 #include "valuespecs/vol_value_spec.hpp"
 
-
 #ifndef DEBUG
 extern bool same_value_gen;
 #endif
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 
 using namespace homeds::loadgen;

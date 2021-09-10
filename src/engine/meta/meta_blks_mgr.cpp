@@ -7,7 +7,7 @@
 #include <mutex>
 #include <system_error>
 
-#include <fds/compress.hpp>
+#include <sisl/fds/compress.hpp>
 
 #include "api/meta_interface.hpp"
 #include "blkstore/blkstore.hpp"
@@ -71,7 +71,6 @@ MetaBlkMgr::~MetaBlkMgr() {
         std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
         m_sub_info.clear();
     }
-    LOGINFO("Deleting m_ssb instance. ");
     hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(m_ssb), sisl::buftag::metablk);
     free_compress_buf();
 }

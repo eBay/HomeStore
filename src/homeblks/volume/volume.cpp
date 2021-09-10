@@ -11,7 +11,7 @@
 #include <iterator>
 #include <thread>
 
-#include <fds/buffer.hpp>
+#include <sisl/fds/buffer.hpp>
 
 #include "engine/common/homestore_flip.hpp"
 #include "homeblks/home_blks.hpp"
@@ -518,6 +518,11 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
     }
 
     return completed;
+}
+
+void Volume::inc_ref_cnt() {
+    m_vol_ref_cnt.increment();
+    home_blks_ref_cnt.increment();
 }
 
 void Volume::shutdown_if_needed() {
