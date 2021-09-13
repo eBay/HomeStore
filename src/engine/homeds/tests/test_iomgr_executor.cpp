@@ -9,8 +9,6 @@
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS, flip, iomgr, spdk)
 SDS_OPTIONS_ENABLE(logging)
-
-THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 
 using namespace homeds::loadgen;

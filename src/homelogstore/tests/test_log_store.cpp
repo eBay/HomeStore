@@ -21,7 +21,7 @@
 #include <type_traits>
 #include <vector>
 
-#include <fds/buffer.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <folly/Synchronized.h>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>
@@ -36,7 +36,6 @@
 #include <gtest/gtest.h>
 
 using namespace homestore;
-THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
@@ -569,7 +568,7 @@ protected:
                 std::unique_lock< std::mutex > lock{m_pending_mtx};
                 const bool insert{(m_nrecords_waiting_to_issue > 0) && (m_nrecords_waiting_to_complete < m_q_depth)};
                 if (insert) {
-                    batch_size = std::min<uint32_t>(m_batch_size, m_nrecords_waiting_to_issue);
+                    batch_size = std::min< uint32_t >(m_batch_size, m_nrecords_waiting_to_issue);
                     m_nrecords_waiting_to_issue -= batch_size;
                     m_nrecords_waiting_to_complete += batch_size;
                 } else {
@@ -914,7 +913,7 @@ TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
             std::this_thread::sleep_for(std::chrono::microseconds(1000));
             this->truncate_validate(true /* is_parallel_to_write */);
             {
-                std::unique_lock< std::mutex > lock { m_pending_mtx };
+                std::unique_lock< std::mutex > lock{m_pending_mtx};
                 nrecords_waiting_to_complete = this->m_nrecords_waiting_to_complete;
                 nrecords_waiting_to_issue = this->m_nrecords_waiting_to_issue;
             }

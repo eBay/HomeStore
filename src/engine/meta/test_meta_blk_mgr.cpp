@@ -32,7 +32,6 @@
 
 using namespace homestore;
 
-THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
@@ -123,7 +122,7 @@ public:
     VMetaBlkMgrTest& operator=(const VMetaBlkMgrTest&) = delete;
     VMetaBlkMgrTest(VMetaBlkMgrTest&&) noexcept = delete;
     VMetaBlkMgrTest& operator=(VMetaBlkMgrTest&) noexcept = delete;
-    
+
     virtual ~VMetaBlkMgrTest() override = default;
 
 protected:
@@ -168,7 +167,7 @@ protected:
     // size between 512 ~ 8192, 512 aligned;
     [[nodiscard]] uint32_t rand_size(const bool overflow, const bool aligned = true) {
         static thread_local std::random_device rd;
-        static thread_local std::default_random_engine re {rd()};
+        static thread_local std::default_random_engine re{rd()};
         if (overflow) {
             std::uniform_int_distribution< long unsigned > dist{gp.min_wrt_sz, gp.max_wrt_sz};
             return aligned ? sisl::round_up(dist(re), dma_address_boundary) : dist(re);
@@ -233,7 +232,7 @@ protected:
 
             // verify context_sz
             HS_ASSERT(DEBUG, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
-                      static_cast<uint64_t>(mblk->hdr.h.context_sz), sz_to_wrt);
+                      static_cast< uint64_t >(mblk->hdr.h.context_sz), sz_to_wrt);
         }
 
         {
@@ -244,7 +243,7 @@ protected:
 
             // save to cache
             m_write_sbs[bid].cookie = cookie;
-            m_write_sbs[bid].str = std::string(reinterpret_cast<const char*>(buf), sz_to_wrt);
+            m_write_sbs[bid].str = std::string(reinterpret_cast< const char* >(buf), sz_to_wrt);
 
             ret_size_written = total_size_written(cookie);
             m_total_wrt_sz += ret_size_written;
@@ -257,8 +256,8 @@ protected:
             done_read = true;
             m_mbm->read_sub_sb(mtype);
             const auto read_buf_str{m_cb_blks[mblk->hdr.h.bid.to_integer()]};
-            const std::string write_buf_str{reinterpret_cast<char*>(buf), sz_to_wrt};
-                const auto ret{read_buf_str.compare(write_buf_str)};
+            const std::string write_buf_str{reinterpret_cast< char* >(buf), sz_to_wrt};
+            const auto ret{read_buf_str.compare(write_buf_str)};
             if (mblk->hdr.h.compressed == false) {
                 HS_ASSERT(DEBUG, ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
             }
@@ -324,7 +323,7 @@ protected:
         }
     }
 
-    void do_sb_update(const bool aligned_buf_size){
+    void do_sb_update(const bool aligned_buf_size) {
         ++m_update_cnt;
         uint8_t* buf{nullptr};
         auto overflow = do_overflow();
@@ -346,8 +345,9 @@ protected:
                 // do unaligned write
                 buf = new uint8_t[sz_to_wrt];
                 // simulate some unaligned sz and unaligned buffer address
-                if (((reinterpret_cast< std::uintptr_t >(buf) & static_cast<std::uintptr_t>(dma_address_boundary - 1)) == 0x00)
-                    && !do_aligned()) {
+                if (((reinterpret_cast< std::uintptr_t >(buf) &
+                      static_cast< std::uintptr_t >(dma_address_boundary - 1)) == 0x00) &&
+                    !do_aligned()) {
                     unaligned_addr = true;
                     std::uniform_int_distribution< long unsigned > dist{1, dma_address_boundary - 1};
                     unaligned_shift = dist(re);
@@ -377,10 +377,10 @@ protected:
             m_write_sbs[bid].str = std::string{reinterpret_cast< const char* >(buf), sz_to_wrt};
 
             // verify context_sz
-            const meta_blk* const mblk{static_cast<const meta_blk*>(cookie)};
+            const meta_blk* const mblk{static_cast< const meta_blk* >(cookie)};
             if (mblk->hdr.h.compressed == false) {
                 HS_ASSERT(DEBUG, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
-                          static_cast<uint64_t>(mblk->hdr.h.context_sz), sz_to_wrt);
+                          static_cast< uint64_t >(mblk->hdr.h.context_sz), sz_to_wrt);
             }
 
             // update total size, add size of metablk back
@@ -393,9 +393,9 @@ protected:
             iomanager.iobuf_free(buf);
         } else {
             if (unaligned_addr) {
-                delete [] (buf - unaligned_shift);
+                delete[](buf - unaligned_shift);
             } else {
-                delete [] buf;
+                delete[] buf;
             }
         }
     }
@@ -421,11 +421,9 @@ protected:
     void do_rand_load() {
         while (keep_running()) {
             switch (get_op()) {
-            case meta_op_type::write: 
-            {
+            case meta_op_type::write: {
                 [[maybe_unused]] const auto write_result{do_sb_write(do_overflow())};
-            } 
-            break;
+            } break;
             case meta_op_type::remove:
                 do_sb_remove();
                 break;
@@ -577,7 +575,7 @@ TEST_F(VMetaBlkMgrTest, min_drive_size_test) {
     mtype = "Test_Min_Drive_Size";
     this->register_client();
 
-    EXPECT_GT(this->do_sb_write(false), static_cast<uint64_t>(0));
+    EXPECT_GT(this->do_sb_write(false), static_cast< uint64_t >(0));
 
     this->do_single_sb_read();
 
@@ -605,7 +603,7 @@ TEST_F(VMetaBlkMgrTest, single_read_test) {
     m_start_time = Clock::now();
     this->register_client();
 
-    EXPECT_GT(this->do_sb_write(false), static_cast<uint64_t>(0));
+    EXPECT_GT(this->do_sb_write(false), static_cast< uint64_t >(0));
 
     this->do_single_sb_read();
 

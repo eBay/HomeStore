@@ -16,7 +16,6 @@ extern "C" {
 }
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT
 
 using namespace std;
 using namespace homestore;

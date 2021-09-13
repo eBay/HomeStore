@@ -9,10 +9,10 @@
 #include <string>
 #include <vector>
 
-#include <fds/bitword.hpp>
+#include <sisl/fds/bitword.hpp>
 #include <fmt/format.h>
 #include <fmt/ostream.h>
-#include <utility/enum.hpp>
+#include <sisl/utility/enum.hpp>
 
 #include "blk.h"
 
@@ -154,7 +154,7 @@ struct blk_cache_fill_session {
     [[nodiscard]] static uint64_t gen_session_id() {
         static std::atomic< uint64_t > s_session_id{1};
         auto id{s_session_id.fetch_add(1, std::memory_order_relaxed)};
-        if (id == 0) { 
+        if (id == 0) {
             // NOTE: 0 is no session so id cannot be zero after rollover
             std::atomic_thread_fence(std::memory_order_acquire);
             id = s_session_id.fetch_add(1, std::memory_order_relaxed);

@@ -6,13 +6,13 @@
 #define Blob_Array_DS_H_
 
 #include <stdint.h>
-#include <fds/buffer.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <vector>
 #include <malloc.h>
 #include "assert.h"
 #include <iostream>
 #include <sstream>
-#include <utility/obj_life_counter.hpp>
+#include <sisl/utility/obj_life_counter.hpp>
 
 namespace homeds {
 /**

@@ -24,14 +24,14 @@
 #include <boost/preprocessor/stringize.hpp>
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
 
-#include <fds/obj_allocator.hpp>
-#include <fds/buffer.hpp>
-#include <fds/freelist_allocator.hpp>
-#include <metrics/metrics.hpp>
+#include <sisl/fds/obj_allocator.hpp>
+#include <sisl/fds/buffer.hpp>
+#include <sisl/fds/freelist_allocator.hpp>
+#include <sisl/metrics/metrics.hpp>
 #include <sds_logging/logging.h>
-#include <utility/atomic_counter.hpp>
-#include <utility/enum.hpp>
-#include <utility/obj_life_counter.hpp>
+#include <sisl/utility/atomic_counter.hpp>
+#include <sisl/utility/enum.hpp>
+#include <sisl/utility/obj_life_counter.hpp>
 
 #include "engine/blkalloc/blk.h"
 #include "engine/common/error.h"

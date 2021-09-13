@@ -23,13 +23,12 @@
 #include "cache.h"
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 
 static constexpr size_t TEST_COUNT{100000};
 static constexpr size_t ITERATIONS{10}; // doing more than one iteration will free memory that was freed before
 static constexpr size_t THREADS{4};
-static constexpr uint64_t MAX_CACHE_SIZE{static_cast<uint64_t>(2) * 1024 * 1024};
+static constexpr uint64_t MAX_CACHE_SIZE{static_cast< uint64_t >(2) * 1024 * 1024};
 
 struct blk_id {
     [[nodiscard]] static int compare(const blk_id& one, const blk_id& two) {
@@ -70,9 +69,9 @@ struct hash< blk_id > {
 };
 } // namespace std
 
-typedef homestore::Cache<blk_id, homestore::CacheBuffer<blk_id>> CacheType;
+typedef homestore::Cache< blk_id, homestore::CacheBuffer< blk_id > > CacheType;
 static CacheType* glob_cache;
-static char** glob_bufs1, **glob_bufs2;
+static char **glob_bufs1, **glob_bufs2;
 static blk_id** glob_ids;
 
 void setup(const uint64_t count) {
@@ -84,7 +83,7 @@ void setup(const uint64_t count) {
     for (const auto i : boost::irange< uint64_t >(0, count)) {
         glob_ids[i] = new blk_id{i};
         // this must be a std::malloc since the pointer is managed by the cache and later erased with std::free
-        glob_bufs1[i] = static_cast<char*>(std::malloc(8192));
+        glob_bufs1[i] = static_cast< char* >(std::malloc(8192));
         glob_bufs2[i] = static_cast< char* >(std::malloc(8192));
         std::snprintf(glob_bufs1[i], 8192, "Content for blk id = %" PRIu64 "\n", i);
         std::snprintf(glob_bufs2[i], 8192, "Update Content for blk id = %" PRIu64 "\n", i);
@@ -94,7 +93,7 @@ void setup(const uint64_t count) {
 void teardown(const uint64_t count) {
     for (const auto i : boost::irange< uint64_t >(0, count)) {
         // glob_bufs are cleaned up during erase of cache entry
-        //delete[] glob_bufs[i];
+        // delete[] glob_bufs[i];
         delete glob_ids[i];
     }
 
@@ -110,12 +109,12 @@ void test_insert(benchmark::State& state) {
     // Actual test
     size_t iteration{0};
     for (auto cs : state) { // Loops upto iteration count
-        const size_t index{static_cast<size_t>(state.thread_index)};
-        //LOG(INFO) << "Will insert " << index << " - " << state.range(0) << " entries in this thread";
+        const size_t index{static_cast< size_t >(state.thread_index)};
+        // LOG(INFO) << "Will insert " << index << " - " << state.range(0) << " entries in this thread";
         for (auto i{index + iteration * state.range(0)}; i < (iteration + 1) * state.range(0);
              i += state.threads) { // Loops for provided ranges
-            boost::intrusive_ptr< homestore::CacheBuffer<blk_id> > cbuf;
-            glob_cache->insert(*glob_ids[i], {reinterpret_cast<uint8_t*>(glob_bufs1[i]), 8192}, 0, &cbuf);
+            boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
+            glob_cache->insert(*glob_ids[i], {reinterpret_cast< uint8_t* >(glob_bufs1[i]), 8192}, 0, &cbuf);
             // LOG(INFO) << "Completed insert of index i = " << i;
         }
         ++iteration;
@@ -129,7 +128,7 @@ void test_reads(benchmark::State& state) {
         const size_t index{static_cast< size_t >(state.thread_index)};
         for (auto i{index + iteration * state.range(0)}; i < (iteration + 1) * state.range(0);
              i += state.threads) { // Loops for provided ranges
-            boost::intrusive_ptr< homestore::CacheBuffer<blk_id>> cbuf;
+            boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
             [[maybe_unused]] const bool found{glob_cache->get(*glob_ids[i], &cbuf)};
 #if 0
 #ifndef NDEBUG
@@ -155,7 +154,7 @@ void test_updates(benchmark::State& state) {
         for (auto i{index + iteration * state.range(0)}; i < (iteration + 1) * state.range(0);
              i += state.threads) { // Loops for provided ranges
             boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
-            glob_cache->update(*glob_ids[i], {reinterpret_cast<uint8_t*>(glob_bufs2[i]), 8192}, 16384, &cbuf);
+            glob_cache->update(*glob_ids[i], {reinterpret_cast< uint8_t* >(glob_bufs2[i]), 8192}, 16384, &cbuf);
         }
         ++iteration;
     }

@@ -12,9 +12,9 @@
 #include <vector>
 
 #include <boost/intrusive_ptr.hpp>
-#include <fds/id_reserver.hpp>
-#include <fds/stream_tracker.hpp>
-#include <fds/buffer.hpp>
+#include <sisl/fds/id_reserver.hpp>
+#include <sisl/fds/stream_tracker.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <fmt/format.h>
 #include <sds_logging/logging.h>
 

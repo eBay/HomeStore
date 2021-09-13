@@ -15,7 +15,7 @@
 #include <folly/SharedMutex.h>
 #include "engine/homeds/thread/lock.hpp"
 #include <isa-l/crc.h>
-#include <utility/atomic_counter.hpp>
+#include <sisl/utility/atomic_counter.hpp>
 #include "engine/homestore_base.hpp"
 #include "engine/common/homestore_flip.hpp"
 

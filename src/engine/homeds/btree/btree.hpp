@@ -18,7 +18,7 @@
 #include <vector>
 
 #include <boost/intrusive_ptr.hpp>
-#include <fds/buffer.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <flip/flip.hpp>
 #include <fmt/ostream.h>
 #include <sds_logging/logging.h>

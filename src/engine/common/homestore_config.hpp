@@ -16,7 +16,7 @@
 #include <iomgr/iomgr.hpp>
 #include <nlohmann/json.hpp>
 #include <sds_options/options.h>
-#include <settings/settings.hpp>
+#include <sisl/settings/settings.hpp>
 
 #include "engine/common/error.h"
 #include "engine/common/generated/homestore_config_generated.h"

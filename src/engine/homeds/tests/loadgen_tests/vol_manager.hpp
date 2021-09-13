@@ -18,7 +18,7 @@
 #include <thread>
 #include <vector>
 
-#include <fds/bitset.hpp>
+#include <sisl/fds/bitset.hpp>
 
 #include "engine/common/homestore_config.hpp"
 #include "homelogstore/log_dev.hpp"

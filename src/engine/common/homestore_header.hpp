@@ -3,7 +3,7 @@
 
 #include <boost/uuid/uuid.hpp>
 #include <string>
-#include <utility/enum.hpp>
+#include <sisl/utility/enum.hpp>
 
 #ifdef _PRERELEASE
 #include <flip/flip.hpp>

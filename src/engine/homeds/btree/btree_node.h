@@ -7,8 +7,8 @@
 #include "physical_node.hpp"
 #include "btree_internal.h"
 #include "btree_store.hpp"
-#include <utility/atomic_counter.hpp>
-#include <utility/obj_life_counter.hpp>
+#include <sisl/utility/atomic_counter.hpp>
+#include <sisl/utility/obj_life_counter.hpp>
 #include <cstdint>
 
 namespace homeds {

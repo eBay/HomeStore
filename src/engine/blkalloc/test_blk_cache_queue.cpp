@@ -6,7 +6,7 @@
 
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <utility/thread_buffer.hpp>
+#include <sisl/utility/thread_buffer.hpp>
 
 #include "engine/common/homestore_header.hpp"
 #include "varsize_blk_allocator.h"
@@ -16,7 +16,6 @@
 #include <gtest/gtest.h>
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT
 
 using namespace homestore;
 
@@ -274,5 +273,6 @@ int main(int argc, char* argv[]) {
 
     g_metrics = std::make_unique< BlkAllocMetrics >("BlkCacheQueueTest");
     const int result{RUN_ALL_TESTS()};
+    g_metrics.reset();
     return result;
 }
