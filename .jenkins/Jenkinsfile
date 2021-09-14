@@ -255,6 +255,7 @@ pipeline {
                               anyOf {
                                 branch "testing/v*"
                                 branch "master"
+                                branch "develop"
                               }
                               expression { "${COVERAGE}" == 'False' }
                               expression { !(("${BUILD_TYPE}" == 'test') && ("${PRERELEASE}" == 'False')) }
