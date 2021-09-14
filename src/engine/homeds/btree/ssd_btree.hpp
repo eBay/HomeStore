@@ -73,13 +73,13 @@ public:
         /* start with ref cnt = 1. We dec it when trigger is called */
         if (cur_bcp) {
             cur_bcp->end_seqid = m_journal->get_contiguous_issued_seq_num(cur_bcp->start_seqid);
-            assert(cur_bcp->end_seqid >= cur_bcp->start_seqid);
+            HS_DEBUG_ASSERT_GE(cur_bcp->end_seqid, cur_bcp->start_seqid);
         }
         if (cur_bcp == m_first_cp) { m_first_cp = nullptr; }
         if (!cur_bcp) {
             /* it can not be last cp if this volume hasn't participated yet in a cp */
-            assert(!is_last_cp);
-            assert(m_first_cp);
+            HS_DEBUG_ASSERT(!is_last_cp, "is_last_cp: {}", is_last_cp);
+            HS_DEBUG_ASSERT(m_first_cp, "m_first_cp: {}", m_first_cp);
             return m_first_cp;
         }
 
@@ -156,7 +156,7 @@ public:
             /* getting all the allocated blks */
             jentry->foreach_node(bt_journal_node_op::creation,
                                  ([this, is_replayed, seqnum](bt_node_gen_pair node_info, sisl::blob key_blob) {
-                                     assert(node_info.node_id != empty_bnodeid);
+                                     HS_DEBUG_ASSERT_NE(node_info.node_id, empty_bnodeid);
                                      BlkId bid(node_info.node_id);
                                      m_blkstore->reserve_blk(bid);
                                      if (is_replayed) { m_first_cp->btree_size.fetch_add(1); }
@@ -276,7 +276,7 @@ public:
                const boost::intrusive_ptr< SSDBtreeNode >& copy_from = nullptr) {
         // Access the physical node buffer and initialize it
         sisl::blob b = safe_buf->at_offset(0);
-        assert(b.size == store->get_node_size());
+        HS_DEBUG_ASSERT_EQ(b.size, store->get_node_size());
         if (is_leaf) {
             bnodeid_t bid = blkid.to_integer();
             auto n = new (b.bytes) VariantNode< LeafNodeType, K, V >(&bid, true, store->m_btree_cfg);
@@ -365,8 +365,8 @@ public:
         auto mvec1 = node1->get_memvec_intrusive();
         auto mvec2 = node2->get_memvec_intrusive();
 
-        assert(node1->get_data_offset() == node2->get_data_offset());
-        assert(node1->get_cache_size() == node2->get_cache_size());
+        HS_DEBUG_ASSERT_EQ(node1->get_data_offset(), node2->get_data_offset());
+        HS_DEBUG_ASSERT_EQ(node1->get_cache_size(), node2->get_cache_size());
         /* move the underneath memory */
         node1->set_memvec(mvec2, node1->get_data_offset(), node1->get_cache_size());
         node2->set_memvec(mvec1, node2->get_data_offset(), node2->get_cache_size());
@@ -537,7 +537,7 @@ private:
 
     static btree_journal_entry* realloc_if_needed(sisl::io_blob& b, uint16_t append_size) {
         auto entry = blob_to_entry(b);
-        assert(b.size > entry->actual_size);
+        HS_DEBUG_ASSERT_GT(b.size, static_cast< uint32_t >(entry->actual_size));
         uint16_t avail_size = b.size - entry->actual_size;
         if (avail_size < append_size) {
             auto new_size = sisl::round_up(entry->actual_size + append_size, journal_entry_alloc_increment);

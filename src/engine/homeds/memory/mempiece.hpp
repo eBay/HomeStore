@@ -154,8 +154,12 @@ private:
 #pragma pack(1)
 struct MemPiece : public sisl::ObjLifeCounter< MemPiece > {
     uint8_t* m_ptr;
-    uint8_t m_size;   // Size shrinked by s_size_multiplier
-    uint8_t m_offset; // Offset shrinked by s_size_multiplier
+#if 0 /* disable encode/decode for spdk iobuf_size issue; */
+    uint8_t m_size;
+    uint8_t m_offset;
+#endif
+    uint16_t m_size;
+    uint16_t m_offset;
 
     MemPiece(uint8_t* const mem, const uint32_t size, const uint32_t offset) :
             ObjLifeCounter{}, m_ptr{mem}, m_size{encode(size)}, m_offset{encode(offset)} {}
@@ -228,14 +232,24 @@ struct MemPiece : public sisl::ObjLifeCounter< MemPiece > {
 private:
     static uint32_t multiplier() { return HS_STATIC_CONFIG(engine.min_io_size); }
 
-    static uint32_t decode(const uint8_t encoded_size) { return (encoded_size * multiplier()); }
+    // disable encode/decode for the reason that iobuf_size for spdk allocated memory returns 4288 when 4096 is
+    // originally allocated for btree node;
+    static uint32_t decode(const uint16_t encoded_size) {
+#if 0
+        return (encoded_size * multiplier());
+#endif
+        return encoded_size;
+    }
 
-    static uint8_t encode(const uint32_t size) {
+    static uint16_t encode(const uint32_t size) {
+#if 0
         HS_DEBUG_ASSERT_EQ((size % multiplier()), 0, "size: {}, multiplier: {}", size,
                            multiplier()); // assure modulo of multiplier
         HS_DEBUG_ASSERT_EQ(((size / multiplier()) >> 8), 0, "size: {}, multuplier: {}", size,
-                           multiplier());                                              // assure fits in uint8_t
-        return static_cast< uint8_t >((size > 0) ? (size - 1) / multiplier() + 1 : 0); // round to multiplier
+                           multiplier()); // assure fits in uint8_t
+#endif
+        HS_DEBUG_ASSERT_LE(size, UINT16_MAX);
+        return size;
     }
 };
 #pragma pack()
