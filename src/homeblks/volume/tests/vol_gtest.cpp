@@ -1731,6 +1731,9 @@ TEST_F(VolTest, lifecycle_test) {
     if (tcfg.remove_file) { this->remove_files(); }
 }
 
+/*
+ * NOTE: This test case only works when fault_containment goes into offline, instead of assert fail;
+ * */
 TEST_F(VolTest, vol_crc_mismatch_test) {
 #ifdef _PRERELEASE
     FlipClient* fc = HomeStoreFlip::client_instance();
