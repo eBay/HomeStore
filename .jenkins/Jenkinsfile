@@ -288,7 +288,7 @@ pipeline {
                     steps {
                         script {
                             def nls_res = build job: "Nublox Logstore/${MASTER_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
-                            built_chain = "${built_chain}" + ", " + "nls_res.buildVariables.pkg_version"
+                            built_chain = "${built_chain}" + ", " + "$nls_res.buildVariables.pkg_version"
                         }
                     }
                     post {
