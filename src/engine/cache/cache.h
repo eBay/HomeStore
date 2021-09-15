@@ -316,7 +316,10 @@ public:
         HS_DEBUG_ASSERT_LE(size, UINT16_MAX);
         m_mem = std::move(vec);
         m_data_offset = offset;
-        m_cache_size = m_mem->get_buffer_size();
+        m_cache_size = size;
+
+        // TODO: turn back on after correct size can be returned based on ptr;
+        // m_cache_size = m_mem->get_buffer_size();
     }
 
     void modify_cache_size(const uint32_t size) { m_cache_size += size; }
