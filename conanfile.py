@@ -34,7 +34,7 @@ class HomestoreConan(ConanFile):
     requires = (
             "flip/[~=2, include_prerelease=True]@sds/master",
             "iomgr/[~=6, include_prerelease=True]@sds/develop",
-            "sds_logging/[~=10, include_prerelease=True]@sds/master",
+            "sds_logging/11.0.1-1@sds/develop",
             "sds_options/[~=1, include_prerelease=True]@sds/master",
             "sisl/[~=5, include_prerelease=True]@sisl/develop",
 
@@ -42,7 +42,7 @@ class HomestoreConan(ConanFile):
             "boost/1.73.0",
             "evhtp/1.2.18.2",
             "farmhash/1.0.0",
-            ("fmt/7.1.3", "override"),
+            ("fmt/8.0.1", "override"),
             "folly/2020.05.04.00",
             "isa-l/2.21.0",
             )
@@ -102,6 +102,8 @@ class HomestoreConan(ConanFile):
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
+        # Need this until we fix all fmt::format_to(...) calls
+        self.cpp_info.cppflags.append("-Wno-deprecated-declarations")
         if self.options.sanitize:
             self.cpp_info.sharedlinkflags.append("-fsanitize=address")
             self.cpp_info.exelinkflags.append("-fsanitize=address")

@@ -99,6 +99,9 @@ else()
     endif()
 endif()
 
+# FIXME : This is to make the `fmt::format_to(...)` which is deprecated work for now with fmt 8.0.1
+add_flags("-Wno-deprecated-declarations")
+
 add_subdirectory(src)
 
 # build info
