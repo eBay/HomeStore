@@ -90,6 +90,7 @@ public:
 #ifdef _PRERELEASE
     bool force_reinit{false};
 #endif
+    bool is_hdd{false};
 
     /* optional parameters - if provided will override the startup config */
     boost::optional< iomgr::drive_attributes > drive_attr;

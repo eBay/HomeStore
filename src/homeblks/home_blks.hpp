@@ -349,6 +349,7 @@ private:
     void vol_recovery_start_phase2();
     void trigger_cp_init(uint32_t vol_mount_cnt);
     void start_home_log_store();
+    uint32_t next_available_hdd_thread_idx();
 
 private:
     init_params m_cfg;
@@ -387,6 +388,10 @@ private:
     static bool m_meta_blk_found;
 
     static thread_local std::vector< std::shared_ptr< Volume > >* s_io_completed_volumes;
+
+    /* hdd custom threads */
+    std::vector< iomgr::io_thread_t > m_custom_hdd_threads;
+    std::mutex m_hdd_threads_mtx;
 };
 
 static inline HomeBlksSafePtr HomeBlksPtr() { return HomeBlks::safe_instance(); }

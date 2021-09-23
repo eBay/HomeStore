@@ -77,7 +77,7 @@ def normal_unmap(num_secs="20000"):
     print("normal test started")
     cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0 --flip=1 --verify_type=2 --unmap_enable=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
-    print("normal test completed")
+    print("normal unmap test completed")
 
 ## @test load
 #  @brief Test using load generator

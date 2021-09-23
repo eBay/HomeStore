@@ -149,6 +149,7 @@ struct TestCfg {
     bool batch_completion{false};
     bool create_del_with_io{false};
     bool delete_with_io;
+    bool is_hdd{false};
     uint32_t create_del_ops_cnt;
     uint32_t create_del_ops_interval;
     std::string flip_name;
@@ -653,6 +654,7 @@ public:
         params.drive_attr->phys_page_size = tcfg.phy_page_size;
         params.drive_attr->align_size = 512;
         params.drive_attr->atomic_phys_page_size = tcfg.atomic_phys_page_size;
+        params.is_hdd = tcfg.is_hdd;
 
         boost::uuids::string_generator gen;
         m_am_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
@@ -2158,7 +2160,8 @@ SDS_OPTION_GROUP(
     (create_del_ops_cnt, "", "create_del_ops_cnt", "create_del_ops_cnt",
      ::cxxopts::value< uint32_t >()->default_value("100"), "number of ops"),
     (create_del_ops_interval, "", "create_del_ops_interval", "create_del_ops_interval",
-     ::cxxopts::value< uint32_t >()->default_value("10"), "interval between create del in seconds"))
+     ::cxxopts::value< uint32_t >()->default_value("10"), "interval between create del in seconds"),
+    (is_hdd, "", "is_hdd", "is_hdd", ::cxxopts::value< bool >()->default_value("false"), "run in hdd mode"))
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr, test_meta_mod, test_vdev_mod, config
 
@@ -2220,6 +2223,7 @@ int main(int argc, char* argv[]) {
     _gcfg.create_del_ops_interval = SDS_OPTIONS["create_del_ops_interval"].as< uint32_t >();
     _gcfg.flip_name = SDS_OPTIONS["flip_name"].as< std::string >();
     _gcfg.overlapping_allowed = SDS_OPTIONS["overlapping_allowed"].as< bool >();
+    _gcfg.is_hdd = SDS_OPTIONS["is_hdd"].as< bool >();
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
