@@ -99,11 +99,11 @@ private:
     std::atomic< bool > in_cp_phase = false;
     std::mutex trigger_cp_mtx;
     std::atomic< bool > m_cp_suspend = true;
-    CPMgrMetrics m_metrics;
+    std::unique_ptr< CPMgrMetrics > m_metrics;
     Clock::time_point m_cp_start_time;
 
 public:
-    CPMgr() {
+    CPMgr() : m_metrics{std::make_unique< CPMgrMetrics >()} {
         m_cur_cp = new cp_type();
         m_cur_cp->cp_status = cp_status_t::cp_io_ready;
     }
@@ -114,6 +114,7 @@ public:
         auto cp = get_cur_cp();
         delete (cp);
         rcu_xchg_pointer(&m_cur_cp, nullptr);
+        m_metrics.reset();
     }
 
     /* Get current CP */
@@ -176,7 +177,7 @@ public:
         auto cb_list = cp->cb_list;
         HS_PERIODIC_LOG(INFO, cp, ">>>>>>>>>>>> cp ID completed {}, notified {} callbacks time taken {} us",
                         cp->to_string(), cb_list.size(), get_elapsed_time_us(m_cp_start_time));
-        HISTOGRAM_OBSERVE(m_metrics, cp_latency, get_elapsed_time_us(m_cp_start_time));
+        HISTOGRAM_OBSERVE(*m_metrics, cp_latency, get_elapsed_time_us(m_cp_start_time));
         cp_reset(cp);
         delete (cp);
 
@@ -189,7 +190,7 @@ public:
         if (!cur_cp) { return; }
         if (cur_cp->cp_trigger_waiting) {
             HS_PERIODIC_LOG(INFO, cp, "Triggering back to back CP");
-            COUNTER_INCREMENT(m_metrics, back_to_back_cps, 1);
+            COUNTER_INCREMENT(*m_metrics, back_to_back_cps, 1);
             trigger_cp();
         }
         cp_io_exit(cur_cp);
@@ -222,7 +223,7 @@ public:
         auto prev_cp = cp_io_enter();
         prev_cp->cp_status = cp_status_t::cp_trigger;
         HS_PERIODIC_LOG(INFO, cp, "<<<<<<<<<<< Triggering new CP {}", prev_cp->to_string());
-        COUNTER_INCREMENT(m_metrics, cp_cnt, 1);
+        COUNTER_INCREMENT(*m_metrics, cp_cnt, 1);
         m_cp_start_time = Clock::now();
 
         /* allocate a new cp */
