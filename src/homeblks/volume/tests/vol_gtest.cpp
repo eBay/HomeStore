@@ -182,18 +182,40 @@ struct TestOutput {
 
     void print(const char* work_type, bool metrics_dump = false) const {
         uint64_t v;
-        fmt::memory_buffer buf;
-        if ((v = write_cnt.load())) fmt::format_to(buf, "write_cnt={} ", v);
-        if ((v = read_cnt.load())) fmt::format_to(buf, "read_cnt={} ", v);
-        if ((v = unmap_cnt.load())) fmt::format_to(buf, "unmap_cnt={} ", v);
-        if ((v = read_err_cnt.load())) fmt::format_to(buf, "read_err_cnt={} ", v);
-        if ((v = data_match_cnt.load())) fmt::format_to(buf, "data_match_cnt={} ", v);
-        if ((v = csum_match_cnt.load())) fmt::format_to(buf, "csum_match_cnt={} ", v);
-        if ((v = hdr_only_match_cnt.load())) fmt::format_to(buf, "hdr_only_match_cnt={} ", v);
-        if ((v = vol_create_cnt.load())) fmt::format_to(buf, "vol_create_cnt={} ", v);
-        if ((v = vol_del_cnt.load())) fmt::format_to(buf, "vol_del_cnt={} ", v);
-        if ((v = vol_mounted_cnt.load())) fmt::format_to(buf, "vol_mounted_cnt={} ", v);
-        if ((v = vol_indx.load())) fmt::format_to(buf, "vol_indx={} ", v);
+        fmt::memory_buffer buf{};
+        if ((v = write_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"write_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = read_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"read_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = unmap_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"unmap_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = read_err_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"read_err_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = data_match_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"data_match_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = csum_match_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"csum_match_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = hdr_only_match_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"hdr_only_match_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = vol_create_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"vol_create_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = vol_del_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"vol_del_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = vol_mounted_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"vol_mounted_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = vol_indx.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"vol_indx={} "}, fmt::make_format_args(v));
+        }
 
         LOGINFO("{} Output: [{}]", work_type, buf.data());
         if (metrics_dump) LOGINFO("Metrics: {}", sisl::MetricsFarm::getInstance().get_result_in_json().dump(2));

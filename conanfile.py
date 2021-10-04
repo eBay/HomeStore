@@ -42,7 +42,6 @@ class HomestoreConan(ConanFile):
             "boost/1.73.0",
             "evhtp/1.2.18.2",
             "farmhash/1.0.0",
-            ("fmt/8.0.1", "override"),
             "folly/2020.05.04.00",
             "isa-l/2.21.0",
             )

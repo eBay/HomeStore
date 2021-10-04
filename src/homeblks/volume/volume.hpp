@@ -288,9 +288,14 @@ private:
 
     template < typename... Args >
     void assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str, const Args&... args) {
-        fmt::format_to(buf, "\n[vol={}]", boost::lexical_cast< std::string >(get_uuid()));
-        if (req_str.size()) { fmt::format_to(buf, "\n[request={}]", req_str); }
-        fmt::format_to(buf, "\nMetrics = {}\n", sisl::MetricsFarm::getInstance().get_result_in_json_string());
+        fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[vol={}]"},
+                        fmt::make_format_args(boost::lexical_cast< std::string >(get_uuid()))); 
+        if (req_str.size()) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[request={}]"},
+                            fmt::make_format_args(boost::lexical_cast< std::string >(req_str))); 
+        }
+        fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\nMetrics = {}\n"},
+                        fmt::make_format_args(sisl::MetricsFarm::getInstance().get_result_in_json_string())); 
     }
 
     template < typename... Args >
