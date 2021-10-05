@@ -101,8 +101,6 @@ class HomestoreConan(ConanFile):
 
     def package_info(self):
         self.cpp_info.libs = tools.collect_libs(self)
-        # Need this until we fix all fmt::format_to(...) calls
-        self.cpp_info.cppflags.append("-Wno-deprecated-declarations")
         if self.options.sanitize:
             self.cpp_info.sharedlinkflags.append("-fsanitize=address")
             self.cpp_info.exelinkflags.append("-fsanitize=address")
