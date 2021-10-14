@@ -11,8 +11,8 @@
 
 #include <fmt/format.h>
 #include <sds_logging/logging.h>
-#include <utility/thread_factory.hpp>
-#include <utility/thread_buffer.hpp>
+#include <sisl/utility/thread_factory.hpp>
+#include <sisl/utility/thread_buffer.hpp>
 
 #include "blk_cache_queue.h"
 #include "engine/homeds/btree/mem_btree.hpp"
@@ -107,7 +107,7 @@ void VarsizeBlkAllocator::allocator_state_machine() {
             } else if (m_state == BlkAllocatorState::EXITING) {
                 BLKALLOC_LOG(TRACE, "TODO: Handle exiting message more periodically");
                 break;
-            } 
+            }
         }
 
         if (sweep) {
@@ -301,7 +301,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_all
         } else {
             // NOTE: There is a small chance this can fail if all the blocks have already been allocated
             // to slabs. So clear any partial and fall through to normal routine below
-            if (status == BlkAllocStatus::PARTIAL) { 
+            if (status == BlkAllocStatus::PARTIAL) {
                 for (const auto& blk_id : out_blkids) {
                     free_on_bitmap(blk_id);
                 }
@@ -620,7 +620,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc_blks_direct(const blk_count_t nblks, c
 void VarsizeBlkAllocator::prepare_sweep(BlkAllocSegment* const seg, const bool fill_entire_cache) {
     m_sweep_segment = seg;
     m_cur_fill_session = m_fb_cache->create_cache_fill_session(fill_entire_cache);
-    if (!(m_cur_fill_session->slab_requirements.empty())) { 
+    if (!(m_cur_fill_session->slab_requirements.empty())) {
         m_state = BlkAllocatorState::SWEEP_SCHEDULED;
     } else {
         BLKALLOC_LOG(TRACE, "no slabs need filling");

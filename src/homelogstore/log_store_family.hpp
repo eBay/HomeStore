@@ -12,7 +12,7 @@
 #include <vector>
 #include <string>
 
-#include <fds/buffer.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <folly/Synchronized.h>
 
 #include "logstore_header.hpp"

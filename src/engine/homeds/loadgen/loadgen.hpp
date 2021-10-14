@@ -20,8 +20,8 @@
 #include <folly/Synchronized.h>
 #include <folly/synchronization/Baton.h>
 #include <spdlog/fmt/fmt.h>
-#include <utility/atomic_counter.hpp>
-#include <utility/enum.hpp>
+#include <sisl/utility/atomic_counter.hpp>
+#include <sisl/utility/enum.hpp>
 
 //#include "iomgr_executor.hpp"
 #include "keyset.hpp"
@@ -51,8 +51,8 @@ public:
         store_error_cb_t;
     typedef std::function< void(int op) > loadgen_success_cb_t;
 
-    static void handle_generic_error(const generator_op_error err, const key_info< K, V >* const ki, void* const store_error,
-                                     const std::string& err_text = "") {
+    static void handle_generic_error(const generator_op_error err, const key_info< K, V >* const ki,
+                                     void* const store_error, const std::string& err_text = "") {
         LOGDFATAL("Store reported error {}, error_text = {}", err, err_text);
     }
 
@@ -65,25 +65,30 @@ public:
         });
     }
 
-    void reset_pattern(const KeyPattern key_pattern, const int32_t index = 0) { reset_pattern_impl(key_pattern, index); }
-    void insert_new(const KeyPattern key_pattern, const ValuePattern value_pattern, loadgen_success_cb_t success_cb = nullptr,
-                    const bool expected_success = true, store_error_cb_t error_cb = handle_generic_error) {
+    void reset_pattern(const KeyPattern key_pattern, const int32_t index = 0) {
+        reset_pattern_impl(key_pattern, index);
+    }
+    void insert_new(const KeyPattern key_pattern, const ValuePattern value_pattern,
+                    loadgen_success_cb_t success_cb = nullptr, const bool expected_success = true,
+                    store_error_cb_t error_cb = handle_generic_error) {
         insert(key_pattern, value_pattern, std::move(error_cb), expected_success, true, std::move(success_cb));
     }
 
     void insert_existing(const KeyPattern key_pattern, const ValuePattern value_pattern, const bool expected_success,
                          loadgen_success_cb_t success_cb = nullptr) {
-        insert(key_pattern, value_pattern, handle_generic_error, expected_success, false /* new_key */, std::move(success_cb));
+        insert(key_pattern, value_pattern, handle_generic_error, expected_success, false /* new_key */,
+               std::move(success_cb));
     }
 
     void insert_existing(const KeyPattern key_pattern, const ValuePattern value_pattern,
                          store_error_cb_t error_cb = handle_generic_error, const bool expected_success = false,
                          loadgen_success_cb_t success_cb = nullptr) {
-        insert(key_pattern, value_pattern, std::move(error_cb), expected_success, false /* new_key */, std::move(success_cb));
+        insert(key_pattern, value_pattern, std::move(error_cb), expected_success, false /* new_key */,
+               std::move(success_cb));
     }
 
-    void insert(const KeyPattern key_pattern, const ValuePattern value_pattern, store_error_cb_t error_cb, const bool expected_success,
-                const bool new_key, loadgen_success_cb_t success_cb = nullptr) {
+    void insert(const KeyPattern key_pattern, const ValuePattern value_pattern, store_error_cb_t error_cb,
+                const bool expected_success, const bool new_key, loadgen_success_cb_t success_cb = nullptr) {
         this->op_start();
         m_executor.add([this, key_pattern, value_pattern, error_cb = std::move(error_cb), expected_success, new_key,
                         success_cb = std::move(success_cb)] {
@@ -93,36 +98,37 @@ public:
     }
 
     void update(const KeyPattern key_pattern, const ValuePattern value_pattern, const bool exclusive_access = true,
-                const bool expected_success = true, const bool valid_key = true, loadgen_success_cb_t success_cb = nullptr,
-                store_error_cb_t error_cb = handle_generic_error) {
+                const bool expected_success = true, const bool valid_key = true,
+                loadgen_success_cb_t success_cb = nullptr, store_error_cb_t error_cb = handle_generic_error) {
         this->op_start();
-        m_executor.add(
-            [this, key_pattern, value_pattern, exclusive_access, expected_success, valid_key, success_cb = std::move(success_cb), error_cb = std::move(error_cb)
-                        ] {
-            this->update_impl(key_pattern, exclusive_access, value_pattern, std::move(error_cb), expected_success, valid_key);
+        m_executor.add([this, key_pattern, value_pattern, exclusive_access, expected_success, valid_key,
+                        success_cb = std::move(success_cb), error_cb = std::move(error_cb)] {
+            this->update_impl(key_pattern, exclusive_access, value_pattern, std::move(error_cb), expected_success,
+                              valid_key);
             this->op_done(std::move(success_cb));
         });
     }
 
-    void range_update(const KeyPattern pattern, const ValuePattern value_pattern, const uint32_t num_keys_in_range, const bool exclusive_access,
-                      const bool start_incl, const bool end_incl, loadgen_success_cb_t success_cb = nullptr,
-                      store_error_cb_t error_cb = handle_generic_error) {
+    void range_update(const KeyPattern pattern, const ValuePattern value_pattern, const uint32_t num_keys_in_range,
+                      const bool exclusive_access, const bool start_incl, const bool end_incl,
+                      loadgen_success_cb_t success_cb = nullptr, store_error_cb_t error_cb = handle_generic_error) {
         this->op_start();
         m_executor.add([this, pattern, value_pattern, num_keys_in_range, exclusive_access, start_incl, end_incl,
                         success_cb = std::move(success_cb), error_cb = std::move(error_cb)] {
-            this->range_update_impl(pattern, value_pattern, num_keys_in_range, true, exclusive_access, start_incl, end_incl,
-                                std::move(error_cb));
+            this->range_update_impl(pattern, value_pattern, num_keys_in_range, true, exclusive_access, start_incl,
+                                    end_incl, std::move(error_cb));
             this->op_done(std::move(success_cb), 0);
         });
     }
 
-    void range_query(const KeyPattern pattern, const uint32_t num_keys_in_range, const bool exclusive_access, const bool start_incl,
-                     const bool end_incl, loadgen_success_cb_t success_cb = nullptr,
+    void range_query(const KeyPattern pattern, const uint32_t num_keys_in_range, const bool exclusive_access,
+                     const bool start_incl, const bool end_incl, loadgen_success_cb_t success_cb = nullptr,
                      store_error_cb_t error_cb = handle_generic_error) {
         this->op_start();
-        m_executor.add([this, pattern, num_keys_in_range, exclusive_access, start_incl , end_incl,
+        m_executor.add([this, pattern, num_keys_in_range, exclusive_access, start_incl, end_incl,
                         success_cb = std::move(success_cb), error_cb = std::move(error_cb)] {
-            this->range_query_impl(pattern, num_keys_in_range, true, exclusive_access, start_incl, end_incl, std::move(error_cb));
+            this->range_query_impl(pattern, num_keys_in_range, true, exclusive_access, start_incl, end_incl,
+                                   std::move(error_cb));
             this->op_done(std::move(success_cb), -1);
         });
     }
@@ -141,8 +147,9 @@ public:
         get(KeyPattern::SEQUENTIAL, true, std::move(error_cb), expected_success, false /* valid_key */);
     }
 
-    void get(const KeyPattern pattern, const bool exclusive_access = true, const bool expected_success = true, const bool valid_key = true,
-             loadgen_success_cb_t success_cb = nullptr, store_error_cb_t error_cb = handle_generic_error) {
+    void get(const KeyPattern pattern, const bool exclusive_access = true, const bool expected_success = true,
+             const bool valid_key = true, loadgen_success_cb_t success_cb = nullptr,
+             store_error_cb_t error_cb = handle_generic_error) {
         this->op_start();
         m_executor.add([this, pattern, exclusive_access, expected_success, valid_key,
                         success_cb = std::move(success_cb), error_cb = std::move(error_cb)] {
@@ -206,11 +213,11 @@ private:
 
     uint64_t get_keys_count_impl() const { return m_key_registry.get_keys_count(); }
 
-    void insert_impl(const KeyPattern key_pattern, const ValuePattern value_pattern, store_error_cb_t error_cb, const bool expected_success,
-                 const bool new_key, const bool new_value = true) {
+    void insert_impl(const KeyPattern key_pattern, const ValuePattern value_pattern, store_error_cb_t error_cb,
+                     const bool expected_success, const bool new_key, const bool new_value = true) {
         // Generate or read existing a new key from keyset.
         auto kip{(new_key) ? m_key_registry.generate_and_put_key(key_pattern)
-                                 : m_key_registry.get_key(key_pattern, true, false)};
+                           : m_key_registry.get_key(key_pattern, true, false)};
 
         // Generate a new value.
         // TODO: Instead of passing nullptr, save the value in lock protected entity and pass them as ref for gen_value
@@ -236,8 +243,8 @@ private:
         LOGTRACE("Insert {}", *kip);
     }
 
-    void get_impl(const KeyPattern pattern, const bool exclusive_access, store_error_cb_t error_cb, const bool expected_success,
-              const bool valid_key) {
+    void get_impl(const KeyPattern pattern, const bool exclusive_access, store_error_cb_t error_cb,
+                  const bool expected_success, const bool valid_key) {
         // Generate a new key from keyset.
         const auto kip{valid_key ? m_key_registry.get_key(pattern, false /* for_mutate */, exclusive_access)
                                  : m_key_registry.generate_invalid_key()};
@@ -277,11 +284,11 @@ private:
         LOGERROR("{}", ss.str());
     }
 
-    void remove_impl(const KeyPattern pattern, const bool exclusive_access, store_error_cb_t error_cb, const bool expected_success,
-                 const bool valid_key) {
+    void remove_impl(const KeyPattern pattern, const bool exclusive_access, store_error_cb_t error_cb,
+                     const bool expected_success, const bool valid_key) {
         // Generate a new key from keyset.
         auto kip{valid_key ? m_key_registry.get_key(pattern, true /* for_mutate */, exclusive_access)
-                                 : m_key_registry.generate_invalid_key()};
+                           : m_key_registry.generate_invalid_key()};
         assert(kip.m_ki->m_free_pending == false);
         V value; // preassigning so as can be successful by default
 
@@ -308,8 +315,9 @@ private:
         LOGTRACE("Remove {}", *kip);
     }
 
-    void update_impl(const KeyPattern key_pattern, const bool exclusive_access, const ValuePattern value_pattern, store_error_cb_t error_cb,
-                 const bool expected_success, const bool valid_key, const bool new_value = true) {
+    void update_impl(const KeyPattern key_pattern, const bool exclusive_access, const ValuePattern value_pattern,
+                     store_error_cb_t error_cb, const bool expected_success, const bool valid_key,
+                     const bool new_value = true) {
         // Generate a new key from keyset.
         auto kip{valid_key ? m_key_registry.get_key(key_pattern, true /* is_mutate */, exclusive_access)
                            : m_key_registry.generate_invalid_key()};
@@ -360,8 +368,9 @@ private:
         }
     }
 
-    void range_query_impl(const KeyPattern pattern, const uint32_t num_keys_in_range, const bool valid_query, const bool exclusive_access,
-                      const bool start_incl, const bool end_incl, store_error_cb_t error_cb) {
+    void range_query_impl(const KeyPattern pattern, const uint32_t num_keys_in_range, const bool valid_query,
+                          const bool exclusive_access, const bool start_incl, const bool end_incl,
+                          store_error_cb_t error_cb) {
         std::vector< key_info_ptr< K, V > > kis;
         std::vector< std::pair< K, V > > kvs;
 
@@ -400,8 +409,9 @@ private:
         }
     }
 
-    void range_update_impl(const KeyPattern pattern, const ValuePattern valuePattern, const uint32_t num_keys_in_range, const bool valid_query,
-                       const bool exclusive_access, const bool start_incl, const bool end_incl, store_error_cb_t error_cb) {
+    void range_update_impl(const KeyPattern pattern, const ValuePattern valuePattern, const uint32_t num_keys_in_range,
+                           const bool valid_query, const bool exclusive_access, const bool start_incl,
+                           const bool end_incl, store_error_cb_t error_cb) {
         assert(valid_query); // TODO support invalid queries in future
         assert(start_incl);  // TODO
         assert(end_incl);    // TODO
@@ -429,7 +439,9 @@ private:
         }
     }
 
-    void reset_pattern_impl(const KeyPattern key_pattern, const int32_t index = 0) { m_key_registry.reset_pattern(key_pattern, index); }
+    void reset_pattern_impl(const KeyPattern key_pattern, const int32_t index = 0) {
+        m_key_registry.reset_pattern(key_pattern, index);
+    }
 
 private:
     KeyRegistry< K, V > m_key_registry;

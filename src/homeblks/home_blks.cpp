@@ -157,6 +157,28 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
         });
     });
     sthread.detach();
+
+    /* start custom io threads for hdd */
+    if (m_cfg.is_hdd) {
+        m_custom_hdd_threads.reserve(HS_DYNAMIC_CONFIG(generic.hdd_io_threads));
+        std::atomic< uint32_t > thread_cnt{0};
+        uint32_t expected_thread_cnt{0};
+        for (auto i = 0u; i < HS_DYNAMIC_CONFIG(generic.hdd_io_threads); i++) {
+            auto sthread1 = sisl::named_thread("custom_hdd_thrd", [this, &thread_cnt]() mutable {
+                iomanager.run_io_loop(false, nullptr, [this, &thread_cnt](bool is_started) {
+                    if (is_started) {
+                        thread_cnt++;
+                        const std::lock_guard< std::mutex > lock(m_hdd_threads_mtx);
+                        m_custom_hdd_threads.push_back(iomanager.iothread_self());
+                    }
+                });
+            });
+            sthread1.detach();
+            expected_thread_cnt++;
+        }
+        while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
+    }
+
     m_start_shutdown = false;
 }
 
@@ -228,6 +250,11 @@ std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_r
     req->vol_instance = vol;
     req->part_of_batch = part_of_batch;
     req->op_type = Op_type::WRITE;
+    if (m_cfg.is_hdd) {
+        iomanager.run_on(m_custom_hdd_threads[next_available_hdd_thread_idx()],
+                         [vol, req](io_thread_addr_t addr) { vol->write(req); });
+        return std::error_condition();
+    }
     return (vol->write(req));
 }
 
@@ -241,6 +268,11 @@ std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_re
     req->vol_instance = vol;
     req->part_of_batch = part_of_batch;
     req->op_type = Op_type::READ;
+    if (m_cfg.is_hdd) {
+        iomanager.run_on(m_custom_hdd_threads[next_available_hdd_thread_idx()],
+                         [vol, req](io_thread_addr_t addr) { vol->read(req); });
+        return std::error_condition();
+    }
     return (vol->read(req));
 }
 
@@ -264,6 +296,11 @@ std::error_condition HomeBlks::unmap(const VolumePtr& vol, const vol_interface_r
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     req->vol_instance = vol;
     req->op_type = Op_type::UNMAP;
+    if (m_cfg.is_hdd) {
+        iomanager.run_on(m_custom_hdd_threads[next_available_hdd_thread_idx()],
+                         [vol, req](io_thread_addr_t addr) { vol->unmap(req); });
+        return std::error_condition();
+    }
     return (vol->unmap(req));
 }
 
@@ -331,6 +368,28 @@ VolumePtr HomeBlks::lookup_volume(const boost::uuids::uuid& uuid) {
     if (m_volume_map.end() != it) { return it->second; }
     return nullptr;
 }
+
+bool HomeBlks::inc_hs_ref_cnt(const boost::uuids::uuid& uuid) {
+    auto vol = lookup_volume(uuid);
+    if (!vol) return false;
+    vol->inc_ref_cnt();
+    return true;
+}
+
+bool HomeBlks::dec_hs_ref_cnt(const boost::uuids::uuid& uuid) {
+    auto vol = lookup_volume(uuid);
+    if (!vol) return false;
+    vol->shutdown_if_needed();
+    return true;
+}
+
+bool HomeBlks::fault_containment(const boost::uuids::uuid& uuid) {
+    auto vol = lookup_volume(uuid);
+    if (!vol) return false;
+    vol->fault_containment();
+    return true;
+}
+
 #if 0
 SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
     if (!m_rdy || is_shutdown()) {
@@ -410,7 +469,7 @@ void HomeBlks::attach_vol_completion_cb(const VolumePtr& vol, const io_comp_call
 
 void HomeBlks::attach_end_of_batch_cb(const end_of_batch_callback& cb) {
     m_cfg.end_of_batch_cb = cb;
-    iomanager.generic_interface()->attach_listen_sentinel_cb([this]() { call_multi_completions(); }, nullptr);
+    iomanager.generic_interface()->attach_listen_sentinel_cb([this]() { call_multi_completions(); });
 }
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
@@ -714,11 +773,9 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     this->close_devices();
 
     // stop io
-    iomanager.generic_interface()->detach_listen_sentinel_cb(
-        [cb = std::move(m_shutdown_done_cb)]([[maybe_unused]] iomgr::io_thread_addr_t addr) {
-            iomanager.stop_io_loop();
-            if (cb) cb(true);
-        });
+    iomanager.generic_interface()->detach_listen_sentinel_cb(iomgr::wait_type_t::spin);
+    iomanager.stop_io_loop();
+    if (m_shutdown_done_cb) { m_shutdown_done_cb(true); }
 }
 
 void HomeBlks::do_volume_shutdown(bool force) {
@@ -1073,6 +1130,13 @@ void HomeBlksMetrics::on_gather() {
     } else {
         GAUGE_UPDATE(*this, unclean_shutdown, 1);
     }
+}
+
+uint32_t HomeBlks::next_available_hdd_thread_idx() {
+    static thread_local uint32_t current_index{0};
+    uint32_t ret = current_index;
+    current_index = (current_index + 1) % m_custom_hdd_threads.size();
+    return ret;
 }
 
 bool HomeBlks::m_meta_blk_found = false;

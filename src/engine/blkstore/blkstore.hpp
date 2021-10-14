@@ -16,8 +16,8 @@
 #include <vector>
 
 #include <boost/optional.hpp>
-#include <fds/buffer.hpp>
-#include <utility/atomic_counter.hpp>
+#include <sisl/fds/buffer.hpp>
+#include <sisl/utility/atomic_counter.hpp>
 
 #include "engine/cache/cache.h"
 #include "engine/common/error.h"

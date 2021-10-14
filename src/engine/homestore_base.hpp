@@ -1,7 +1,7 @@
 #pragma once
 #include <boost/intrusive_ptr.hpp>
 #include "common/homestore_config.hpp"
-#include <fds/buffer.hpp>
+#include <sisl/fds/buffer.hpp>
 
 typedef uint32_t crc32_t;
 typedef uint16_t csum_t;
@@ -78,6 +78,9 @@ public:
     virtual logdev_blkstore_t* get_data_logdev_blkstore() const = 0;
     virtual logdev_blkstore_t* get_ctrl_logdev_blkstore() const = 0;
     virtual void call_multi_completions() = 0;
+    virtual bool inc_hs_ref_cnt(const boost::uuids::uuid& uuid) = 0;
+    virtual bool dec_hs_ref_cnt(const boost::uuids::uuid& uuid) = 0;
+    virtual bool fault_containment(const boost::uuids::uuid& uuid) = 0;
 
     HomeStoreStatusMgr* status_mgr();
 };

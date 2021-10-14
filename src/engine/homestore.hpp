@@ -7,8 +7,8 @@
 #include <mutex>
 #include <stdexcept>
 
-#include <fds/malloc_helper.hpp>
-#include <fds/buffer.hpp>
+#include <sisl/fds/malloc_helper.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <sds_logging/logging.h>
 
 #include "api/meta_interface.hpp"
@@ -115,7 +115,6 @@ public:
         LOGINFO("HomeStore starting with dynamic config version: {} static config: {}, safe_mode: {}",
                 HS_DYNAMIC_CONFIG(version), hs_config.to_json().dump(4),
                 HB_DYNAMIC_CONFIG(general_config->boot_safe_mode));
-
 
 #ifndef NDEBUG
         hs_config.validate();

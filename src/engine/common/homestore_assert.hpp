@@ -3,15 +3,18 @@
 #include <chrono>
 #include <cstdint>
 #include <iterator>
-#include <map>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
+#include <boost/preprocessor/control/if.hpp>
+#include <boost/preprocessor/facilities/empty.hpp>
+#include <boost/preprocessor/facilities/identity.hpp>
+#include <boost/vmd/is_empty.hpp>
+#include <sisl/fds/utils.hpp>
+#include <sisl/metrics/metrics.hpp>
 #include <sds_logging/logging.h>
 #include <spdlog/fmt/fmt.h>
-#include <metrics/metrics.hpp>
-#include <fds/utils.hpp>
-
 
 // clang-format off
 /***** HomeStore Logging Macro facility: Goal is to provide consistent logging capability
@@ -62,52 +65,82 @@
  * 9) msg_params [optional]: Paramters for the above message if any.
  */
 // clang-format on
-#define HS_PERIODIC_DETAILED_LOG(level, mod, submod_name, submod_val, detail_name, detail_val, msg, ...)               \
-    {                                                                                                                  \
-        LOG##level##MOD_FMT_USING_LOGGER(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                               \
-                                         ([&](fmt::memory_buffer& buf, const char* __m, auto&&... args) -> bool {      \
-                                             fmt::format_to(buf, "[{}:{}] ", file_name(__FILE__), __LINE__);           \
-                                             BOOST_PP_IF(BOOST_PP_IS_EMPTY(submod_name), ,                             \
-                                                         fmt::format_to(buf, "[{}={}] ", submod_name, submod_val));    \
-                                             BOOST_PP_IF(BOOST_PP_IS_EMPTY(detail_name), ,                             \
-                                                         fmt::format_to(buf, "[{}={}] ", detail_name, detail_val));    \
-                                             fmt::format_to(buf, __m, std::forward< decltype(args) >(args)...);        \
-                                             return true;                                                              \
-                                         }),                                                                           \
-                                         homestore::HomeStoreBase::periodic_logger(), msg, ##__VA_ARGS__);             \
+#define HS_PERIODIC_DETAILED_LOG(level, mod, submod_name, submod_val, detail_name, detail_val, msg, ...)                          \
+    {                                                                                                                             \
+        LOG##level##MOD_FMT_USING_LOGGER(BOOST_PP_IF(BOOST_VMD_IS_EMPTY(mod), base, mod),                                         \
+                                         ([&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {         \
+                                            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}] "},                     \
+                                            fmt::make_format_args(file_name(__FILE__), __LINE__));                                \
+                                            BOOST_PP_IF(BOOST_VMD_IS_EMPTY(submod_name), BOOST_PP_EMPTY,                          \
+                                                        BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf},                     \
+                                                                                          fmt::string_view{"[{}={}] "},           \
+                                                                                          fmt::make_format_args(submod_name,      \
+                                                                                                                submod_val))))(); \
+                                            BOOST_PP_IF(BOOST_VMD_IS_EMPTY(detail_name), BOOST_PP_EMPTY,                          \
+                                                        BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf},                     \
+                                                                                          fmt::string_view{"[{}={}] "},           \
+                                                                                          fmt::make_format_args(detail_name,      \
+                                                                                                                detail_val))))(); \
+                                            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb},                          \
+                                                            fmt::make_format_args(std::forward< decltype(args) >(args)...));      \
+                                            return true;                                                                          \
+                                         }),                                                                                      \
+                                         homestore::HomeStoreBase::periodic_logger(), msg, ##__VA_ARGS__);                        \
     }
 #define HS_PERIODIC_LOG(level, mod, msg, ...) HS_PERIODIC_DETAILED_LOG(level, mod, , , , , msg, ##__VA_ARGS__)
 
-#define HS_DETAILED_LOG(level, mod, req, submod_name, submod_val, detail_name, detail_val, msg, ...)                   \
-    {                                                                                                                  \
-        LOG##level##MOD_FMT(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                                            \
-                            ([&](fmt::memory_buffer& buf, const char* __m, auto&&... args) -> bool {                   \
-                                fmt::format_to(buf, "[{}:{}] ", file_name(__FILE__), __LINE__);                        \
-                                BOOST_PP_IF(BOOST_PP_IS_EMPTY(submod_name), ,                                          \
-                                            fmt::format_to(buf, "[{}={}] ", submod_name, submod_val));                 \
-                                BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), ,                                                  \
-                                            fmt::format_to(buf, "[req_id={}] ", req->request_id));                     \
-                                BOOST_PP_IF(BOOST_PP_IS_EMPTY(detail_name), ,                                          \
-                                            fmt::format_to(buf, "[{}={}] ", detail_name, detail_val));                 \
-                                fmt::format_to(buf, __m, std::forward< decltype(args) >(args)...);                     \
-                                return true;                                                                           \
-                            }),                                                                                        \
-                            msg, ##__VA_ARGS__);                                                                       \
+#define HS_DETAILED_LOG(level, mod, req, submod_name, submod_val, detail_name, detail_val, msg, ...)                       \
+    {                                                                                                                      \
+        LOG##level##MOD_FMT(BOOST_PP_IF(BOOST_VMD_IS_EMPTY(mod), base, mod),                                               \
+                            ([&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {               \
+                                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}] "},                          \
+                                                fmt::make_format_args(file_name(__FILE__), __LINE__));                     \
+                                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(submod_name), BOOST_PP_EMPTY,                               \
+                                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf},                          \
+                                                                              fmt::string_view{"[{}={}] "},                \
+                                                                              fmt::make_format_args(submod_name,           \
+                                                                                                    submod_val))))();      \
+                                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(req), BOOST_PP_EMPTY,                                       \
+                                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf},                          \
+                                                                              fmt::string_view{"[req_id={}] "},            \
+                                                                              fmt::make_format_args(req->request_id))))(); \
+                                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(detail_name), BOOST_PP_EMPTY,                               \
+                                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf},                          \
+                                                                              fmt::string_view{"[{}={}] "},                \
+                                                                              fmt::make_format_args(detail_name,           \
+                                                                                                    detail_val))))();      \
+                                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb},                               \
+                                                fmt::make_format_args(std::forward< decltype(args) >(args)...));           \
+                                return true;                                                                               \
+                            }),                                                                                            \
+                            msg, ##__VA_ARGS__);                                                                           \
     }
 
 #define HS_DETAILED_LOG_EVERY_N(level, mod, freq, submod_name, submod_val, detail_name, detail_val, msg, ...)          \
     {                                                                                                                  \
-        LOG##level##MOD_FMT(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod),                                            \
-                            ([&](fmt::memory_buffer& buf, const char* __m, auto&&... args) -> bool {                   \
-                                fmt::format_to(buf, "[{}:{}] ", file_name(__FILE__), __LINE__);                        \
-                                BOOST_PP_IF(BOOST_PP_IS_EMPTY(submod_name), ,                                          \
-                                            fmt::format_to(buf, "[{}={}] ", submod_name, submod_val));                 \
-                                BOOST_PP_IF(BOOST_PP_IS_EMPTY(detail_name), ,                                          \
-                                            fmt::format_to(buf, "[{}={}] ", detail_name, detail_val));                 \
-                                fmt::format_to(buf, __m, std::forward< decltype(args) >(args)...);                     \
-                                const auto count = check_logged_already(buf);                                          \
+        LOG##level##MOD_FMT(BOOST_PP_IF(BOOST_VMD_IS_EMPTY(mod), base, mod),                                           \
+                            ([&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {           \
+                                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}] "},                      \
+                                                fmt::make_format_args(file_name(__FILE__), __LINE__));                 \
+                                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(submod_name), BOOST_PP_EMPTY,                           \
+                                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf},                      \
+                                                                              fmt::string_view{"[{}={}] "},            \
+                                                                              fmt::make_format_args(submod_name,       \
+                                                                                                    submod_val))))();  \
+                                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(detail_name), BOOST_PP_EMPTY,                           \
+                                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf},                      \
+                                                                              fmt::string_view{"[{}={}] "},            \
+                                                                              fmt::make_format_args(detail_name,       \
+                                                                                                    detail_val))))();  \
+                                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb},                           \
+                                                fmt::make_format_args(std::forward< decltype(args) >(args)...));       \
+                                const auto count{check_logged_already(buf)};                                           \
                                 if (count % freq == 0) {                                                               \
-                                    if (count) { fmt::format_to(buf, " ...Repeated {} times in this thread", freq); }  \
+                                    if (count) {                                                                       \
+                                        fmt::vformat_to(fmt::appender{buf},                                            \
+                                                        fmt::string_view{" ...Repeated {} times in this thread"},      \
+                                                        fmt::make_format_args(freq));                                  \
+                                    }                                                                                  \
                                     return true;                                                                       \
                                 }                                                                                      \
                                 return false;                                                                          \
@@ -155,19 +188,25 @@
     {                                                                                                                  \
         assert_type##_ASSERT_FMT(                                                                                      \
             cond,                                                                                                      \
-            [&](fmt::memory_buffer& buf, const char* __m, auto&&... args) -> bool {                                    \
-                BOOST_PP_IF(BOOST_PP_IS_EMPTY(submod_name), ,                                                          \
-                            fmt::format_to(buf, "\n[{}={}] ", submod_name, submod_val));                               \
-                BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), , fmt::format_to(buf, "\n[request={}] ", req->to_string()));       \
-                BOOST_PP_IF(BOOST_PP_IS_EMPTY(detail_name), ,                                                          \
-                            fmt::format_to(buf, "\n[{}={}] ", detail_name, detail_val));                               \
-                fmt::format_to(buf, "\n[Metrics = {}]\n",                                                              \
-                               sisl::MetricsFarm::getInstance().get_result_in_json().dump(4));                         \
-                fmt::format_to(buf, __m, std::forward< decltype(args) >(args)...);                                     \
+            ([&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {                           \
+                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(submod_name), BOOST_PP_EMPTY,                                           \
+                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[{}={}] "},      \
+                                              fmt::make_format_args(submod_name, submod_val))))();                     \
+                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(req), BOOST_PP_EMPTY,                                                   \
+                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[request={}] "}, \
+                                                              fmt::make_format_args(req->to_string()))))();            \
+                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(detail_name), BOOST_PP_EMPTY,                                           \
+                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[{}={}] "},      \
+                                                              fmt::make_format_args(detail_name, detail_val))))();     \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[Metrics = {}]\n"},                            \
+                                fmt::make_format_args(sisl::MetricsFarm::getInstance().get_result_in_json().dump(4))); \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb},                                           \
+                                fmt::make_format_args(std::forward< decltype(args) >(args)...));                       \
                 return true;                                                                                           \
-            },                                                                                                         \
+            }),                                                                                                        \
             msg, ##__VA_ARGS__);                                                                                       \
     }
+
 #define HS_SUBMOD_ASSERT(assert_type, cond, req, submod_name, submod_val, msg, ...)                                    \
     HS_DETAILED_ASSERT(assert_type, cond, req, submod_name, submod_val, , , msg, ##__VA_ARGS__)
 #define HS_REQ_ASSERT(assert_type, cond, req, msg, ...) HS_SUBMOD_ASSERT(assert_type, cond, req, , , msg, ##__VA_ARGS__)
@@ -178,16 +217,21 @@
     {                                                                                                                  \
         assert_type##_ASSERT_CMP(                                                                                      \
             val1, cmp, val2,                                                                                           \
-            [&](fmt::memory_buffer& buf, const char* __m, auto&&... args) -> bool {                                    \
-                fmt::format_to(buf, "[{}:{}] ", file_name(__FILE__), __LINE__);                                        \
-                sds_logging::default_cmp_assert_formatter(buf, __m, std::forward< decltype(args) >(args)...);          \
-                BOOST_PP_IF(BOOST_PP_IS_EMPTY(submod_name), ,                                                          \
-                            fmt::format_to(buf, " \n[{}={}] ", submod_name, submod_val));                              \
-                BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), , fmt::format_to(buf, "\n[request={}] ", req->to_string()));       \
-                BOOST_PP_IF(BOOST_PP_IS_EMPTY(detail_name), ,                                                          \
-                            fmt::format_to(buf, "\n[{}={}] ", detail_name, detail_val));                               \
-                fmt::format_to(buf, "\n[Metrics = {}]\n",                                                              \
-                               sisl::MetricsFarm::getInstance().get_result_in_json().dump(4));                         \
+            [&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {                            \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}] "},                                      \
+                                fmt::make_format_args(file_name(__FILE__), __LINE__));                                 \
+                sds_logging::default_cmp_assert_formatter(buf, msgcb, std::forward< decltype(args) >(args)...);        \
+                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(submod_name), BOOST_PP_EMPTY,                                           \
+                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{" \n[{}={}] "},     \
+                                                              fmt::make_format_args(submod_name, submod_val))))();     \
+                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(req), BOOST_PP_EMPTY,                                                   \
+                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[request={}] "}, \
+                                                              fmt::make_format_args(req->to_string()))))();            \
+                BOOST_PP_IF(BOOST_VMD_IS_EMPTY(detail_name), BOOST_PP_EMPTY,                                           \
+                            BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[{}={}] "},      \
+                                                              fmt::make_format_args(detail_name, detail_val))))();     \
+                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[Metrics = {}]\n"},                            \
+                                fmt::make_format_args(sisl::MetricsFarm::getInstance().get_result_in_json().dump(4))); \
                 return true;                                                                                           \
             },                                                                                                         \
             ##__VA_ARGS__);                                                                                            \
@@ -202,17 +246,19 @@
 
 /* Not null assert */
 #define HS_REQ_ASSERT_NOTNULL(assert_type, val1, req, ...)                                                             \
-    HS_REQ_ASSERT_CMP(assert_type, (void*)val1, !=, (void*)nullptr, req, ##__VA_ARGS__)
+    HS_REQ_ASSERT_CMP(assert_type, static_cast< const void* >(val1), !=, nullptr, req, ##__VA_ARGS__)
 #define HS_ASSERT_NOTNULL(assert_type, val1, ...) HS_REQ_ASSERT_NOTNULL(assert_type, val1, , ##__VA_ARGS__)
 #define HS_SUBMOD_ASSERT_NOTNULL(assert_type, val1, req, submod_name, submod_val, ...)                                 \
-    HS_SUBMOD_ASSERT_CMP(assert_type, (void*)val1, !=, (void*)nullptr, req, submod_name, submod_val, ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT_CMP(assert_type, static_cast< const void* >(val1) !=, nullptr, req, submod_name,           \
+                         submod_val, ##__VA_ARGS__)
 
 /* Null assert */
 #define HS_REQ_ASSERT_NULL(assert_type, val1, req, ...)                                                                \
-    HS_REQ_ASSERT_CMP(assert_type, (void*)val1, ==, (void*)nullptr, req, ##__VA_ARGS__)
+    HS_REQ_ASSERT_CMP(assert_type, static_cast< const void* >(val1), ==, nullptr, req, ##__VA_ARGS__)
 #define HS_ASSERT_NULL(assert_type, val1, ...) HS_REQ_ASSERT_NULL(assert_type, val1, , ##__VA_ARGS__)
 #define HS_SUBMOD_ASSERT_NULL(assert_type, val1, req, submod_name, submod_val, ...)                                    \
-    HS_SUBMOD_ASSERT_CMP(assert_type, (void*)val1, ==, (void*)nullptr, req, submod_name, submod_val, ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT_CMP(assert_type, static_cast< const void* >(val1), ==, nullptr, req, submod_name,          \
+                         submod_val, ##__VA_ARGS__)
 
 #define HS_DEBUG_ASSERT(cond, ...) HS_ASSERT(DEBUG, cond, ##__VA_ARGS__)
 #define HS_DEBUG_ASSERT_EQ(val1, val2, ...) HS_ASSERT_CMP(DEBUG, val1, ==, val2, ##__VA_ARGS__)
@@ -240,13 +286,13 @@
 
 static uint64_t check_logged_already(const fmt::memory_buffer& buf) {
     static constexpr uint64_t COUNTER_RESET_SEC{300}; // Reset every 5 minutes
-    static thread_local std::map< std::string, std::pair< Clock::time_point, uint64_t >, std::less<> > log_map;
+    static thread_local std::unordered_map< std::string, std::pair< Clock::time_point, uint64_t > > log_map{};
 
     const std::string_view msg{buf.data()};
-    auto [it, happened] = log_map.emplace(msg, std::make_pair(Clock::now(), 0ul));
-    HS_RELEASE_ASSERT(it != std::end(log_map), "Expected entry to be either present or new insertion to succeed");
-    auto& [tm, count] = it->second;
-    count = (get_elapsed_time_sec(tm) > COUNTER_RESET_SEC) ? 0ul : count + 1ul;
+    auto [it, happened]{log_map.emplace(msg, std::make_pair(Clock::now(), 0))};
+    HS_RELEASE_ASSERT(it != std::cend(log_map), "Expected entry to be either present or new insertion to succeed");
+    auto& [tm, count]{it->second};
+    count = (get_elapsed_time_sec(tm) > COUNTER_RESET_SEC) ? static_cast< decltype(count) >(0) : count + 1;
     tm = Clock::now();
     return count;
 }

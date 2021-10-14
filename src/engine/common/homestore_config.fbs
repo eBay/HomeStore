@@ -120,6 +120,9 @@ table Generic {
 
     // if this value is set to 0, no sanity check will be run;
     sanity_check_level_non_hotswap: uint32 = 1;
+
+    // number of threads for doing hdd io
+    hdd_io_threads: uint32 = 8;
 }
 
 table ResourceLimits {

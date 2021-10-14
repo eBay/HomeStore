@@ -4,7 +4,7 @@
 #include <functional>
 #include <memory>
 
-#include <fds/buffer.hpp>
+#include <sisl/fds/buffer.hpp>
 
 namespace homestore {
 class logstore_req;

@@ -13,7 +13,6 @@ using namespace homestore;
 
 std::vector< std::shared_ptr< Volume > > vol_list;
 
-THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SDS_LOGGING_DECL(hs_svc_tool)

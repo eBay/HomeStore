@@ -1,6 +1,6 @@
 
 #pragma once
-#include <metrics/metrics.hpp>
+#include <sisl/metrics/metrics.hpp>
 #include <sds_logging/logging.h>
 
 SDS_LOGGING_DECL(cache, cache_vmod_evict, cache_vmod_read, cache_vmod_write)

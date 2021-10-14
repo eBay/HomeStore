@@ -13,7 +13,6 @@
 #include "../log_dev.hpp"
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 
 static constexpr size_t ITERATIONS{100000};

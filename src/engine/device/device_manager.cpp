@@ -15,8 +15,8 @@
 #endif
 
 #include <boost/range.hpp>
-#include <fds/bitset.hpp>
-#include <fds/buffer.hpp>
+#include <sisl/fds/bitset.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <iomgr/iomgr.hpp>
 
 #include "engine/blkalloc/blk_allocator.h"
@@ -62,7 +62,8 @@ void PhysicalDevChunk::cp_start(std::shared_ptr< blkalloc_cp > ba_cp) {
     get_blk_allocator_mutable()->cp_done();
 }
 
-std::shared_ptr< blkalloc_cp > PhysicalDevChunk::attach_prepare_cp([[maybe_unused]] std::shared_ptr< blkalloc_cp > cur_ba_cp) {
+std::shared_ptr< blkalloc_cp >
+PhysicalDevChunk::attach_prepare_cp([[maybe_unused]] std::shared_ptr< blkalloc_cp > cur_ba_cp) {
     return std::make_shared< blkalloc_cp >();
 }
 
@@ -184,7 +185,7 @@ DeviceManager::~DeviceManager() {
 
 void DeviceManager::update_end_of_chunk(PhysicalDevChunk* const chunk, const off_t offset) {
     std::lock_guard< decltype(m_dev_mutex) > lock{m_dev_mutex};
-    chunk->update_end_of_chunk(static_cast<uint64_t>(offset));
+    chunk->update_end_of_chunk(static_cast< uint64_t >(offset));
     write_info_blocks();
 }
 
@@ -297,7 +298,7 @@ void DeviceManager::load_and_repair_devices(const std::vector< dev_info >& devic
             for (uint32_t i{0}; i < HS_STATIC_CONFIG(engine.max_chunks); ++i) {
                 if (m_chunk_info[i].pdev_id == dev_id && m_chunk_info[i].is_slot_allocated() &&
                     m_chunk_info[i].vdev_id != INVALID_VDEV_ID) {
-                    const auto vdev_id { m_chunk_info[i].vdev_id };
+                    const auto vdev_id{m_chunk_info[i].vdev_id};
                     HS_LOG_ASSERT_EQ(m_vdev_info[vdev_id].get_vdev_id(), vdev_id);
                     /* mark this vdev failed */
                     m_vdev_info[vdev_id].set_failed(true);
@@ -442,7 +443,8 @@ int DeviceManager::get_open_flags(const io_flag oflags) {
     return open_flags;
 }
 
-void DeviceManager::zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type, const io_flag oflags) {
+void DeviceManager::zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type,
+                                  const io_flag oflags) {
     return PhysicalDev::zero_boot_sbs(devices, drive_type, get_open_flags(oflags));
 }
 #if 0
@@ -491,7 +493,8 @@ void DeviceManager::read_info_blocks(const uint32_t dev_id) {
     auto* const dm{reinterpret_cast< dm_info* >(m_chunk_memory)};
     HS_DEBUG_ASSERT_EQ(dm->get_magic(), MAGIC);
 #ifndef NO_CHECKSUM
-    const auto crc{crc16_t10dif(init_crc_16,reinterpret_cast< const unsigned char* >(m_chunk_memory + dm_info::s_dm_payload_offset),
+    const auto crc{crc16_t10dif(init_crc_16,
+                                reinterpret_cast< const unsigned char* >(m_chunk_memory + dm_info::s_dm_payload_offset),
                                 m_dm_info_size - dm_info::s_dm_payload_offset)};
     HS_DEBUG_ASSERT_EQ(dm->get_checksum(), crc);
 #endif
@@ -500,9 +503,9 @@ void DeviceManager::read_info_blocks(const uint32_t dev_id) {
     HS_DEBUG_ASSERT_EQ(m_chunk_hdr->get_magic(), MAGIC);
     HS_DEBUG_ASSERT_EQ(m_pdev_hdr->get_magic(), MAGIC);
 
-    m_vdev_info = reinterpret_cast < vdev_info_block* >(m_chunk_memory + m_vdev_hdr->info_offset);
-    m_chunk_info = reinterpret_cast < chunk_info_block* >(m_chunk_memory + m_chunk_hdr->info_offset);
-    m_pdev_info = reinterpret_cast < pdev_info_block* >(m_chunk_memory + m_pdev_hdr->info_offset);
+    m_vdev_info = reinterpret_cast< vdev_info_block* >(m_chunk_memory + m_vdev_hdr->info_offset);
+    m_chunk_info = reinterpret_cast< chunk_info_block* >(m_chunk_memory + m_chunk_hdr->info_offset);
+    m_pdev_info = reinterpret_cast< pdev_info_block* >(m_chunk_memory + m_pdev_hdr->info_offset);
 }
 
 /* Note: Whosoever is calling this function should take the mutex. We don't allow multiple writes */
@@ -567,8 +570,8 @@ void DeviceManager::free_chunk(PhysicalDevChunk* const chunk) {
     write_info_blocks();
 }
 
-vdev_info_block* DeviceManager::alloc_vdev(const uint32_t req_size, const uint32_t nmirrors, const uint32_t page_size, const uint32_t nchunks,
-                                           char* const blob, const uint64_t size) {
+vdev_info_block* DeviceManager::alloc_vdev(const uint32_t req_size, const uint32_t nmirrors, const uint32_t page_size,
+                                           const uint32_t nchunks, char* const blob, const uint64_t size) {
     std::lock_guard< decltype(m_dev_mutex) > lock{m_dev_mutex};
 
     vdev_info_block* const vb{alloc_new_vdev_slot()};
@@ -624,8 +627,8 @@ void DeviceManager::free_vdev(vdev_info_block* const vb) {
 
 /* This method creates a new chunk for a given physical device and attaches the chunk to the physical device
  * after previous chunk (if non-null) or last if null */
-PhysicalDevChunk* DeviceManager::create_new_chunk(PhysicalDev* const pdev, const uint64_t start_offset, const uint64_t size,
-                                                  PhysicalDevChunk* const prev_chunk) {
+PhysicalDevChunk* DeviceManager::create_new_chunk(PhysicalDev* const pdev, const uint64_t start_offset,
+                                                  const uint64_t size, PhysicalDevChunk* const prev_chunk) {
     uint32_t slot;
 
     // Allocate a slot for the new chunk (which becomes new chunk id) and create a new PhysicalDevChunk instance

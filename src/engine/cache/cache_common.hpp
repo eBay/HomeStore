@@ -7,7 +7,7 @@
 #include <vector>
 
 #include <sds_logging/logging.h>
-#include <utility/enum.hpp>
+#include <sisl/utility/enum.hpp>
 
 #include "homeds/utility/stats.hpp"
 

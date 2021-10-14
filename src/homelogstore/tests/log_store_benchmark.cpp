@@ -22,7 +22,6 @@
 #include "../log_store.hpp"
 
 using namespace homestore;
-THREAD_BUFFER_INIT
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 static constexpr size_t ITERATIONS{100000};

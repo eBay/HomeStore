@@ -18,7 +18,7 @@
 #include <vector>
 
 #include <boost/intrusive_ptr.hpp>
-#include <fds/buffer.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <flip/flip.hpp>
 #include <fmt/ostream.h>
 #include <sds_logging/logging.h>
@@ -372,6 +372,9 @@ public:
         btree_status_t ret = btree_status_t::success;
     retry:
 
+#ifndef NDEBUG
+        check_lock_debug();
+#endif
         BT_LOG_ASSERT_CMP(rd_locked_nodes.size(), ==, 0, );
         BT_LOG_ASSERT_CMP(wr_locked_nodes.size(), ==, 0, );
 
