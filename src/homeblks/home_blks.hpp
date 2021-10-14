@@ -15,11 +15,11 @@
 
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <fds/sparse_vector.hpp>
-#include <fds/buffer.hpp>
-#include <metrics/metrics.hpp>
-#include <settings/settings.hpp>
-#include <utility/atomic_counter.hpp>
+#include <sisl/fds/sparse_vector.hpp>
+#include <sisl/fds/buffer.hpp>
+#include <sisl/metrics/metrics.hpp>
+#include <sisl/settings/settings.hpp>
+#include <sisl/utility/atomic_counter.hpp>
 
 #include "api/meta_interface.hpp"
 #include "api/vol_interface.hpp"
@@ -268,6 +268,9 @@ public:
     virtual void attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr >* cur_icp_map,
                                         std::map< boost::uuids::uuid, indx_cp_ptr >* new_icp_map, hs_cp* hcp,
                                         hs_cp* new_hcp) override;
+    virtual bool inc_hs_ref_cnt(const boost::uuids::uuid& uuid) override;
+    virtual bool dec_hs_ref_cnt(const boost::uuids::uuid& uuid) override;
+    virtual bool fault_containment(const boost::uuids::uuid& uuid) override;
     void do_volume_shutdown(bool force);
     void create_volume(VolumePtr vol);
     void move_to_restricted_state();
@@ -346,6 +349,7 @@ private:
     void vol_recovery_start_phase2();
     void trigger_cp_init(uint32_t vol_mount_cnt);
     void start_home_log_store();
+    uint32_t next_available_hdd_thread_idx();
 
 private:
     init_params m_cfg;
@@ -384,6 +388,10 @@ private:
     static bool m_meta_blk_found;
 
     static thread_local std::vector< std::shared_ptr< Volume > >* s_io_completed_volumes;
+
+    /* hdd custom threads */
+    std::vector< iomgr::io_thread_t > m_custom_hdd_threads;
+    std::mutex m_hdd_threads_mtx;
 };
 
 static inline HomeBlksSafePtr HomeBlksPtr() { return HomeBlks::safe_instance(); }

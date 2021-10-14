@@ -1,9 +1,13 @@
 #ifndef _HOMESTORE_HEADER_HPP_
 #define _HOMESTORE_HEADER_HPP_
 
+#include <boost/preprocessor/control/if.hpp>
+#include <boost/preprocessor/facilities/empty.hpp>
+#include <boost/preprocessor/facilities/identity.hpp>
 #include <boost/uuid/uuid.hpp>
+#include <boost/vmd/is_empty.hpp>
 #include <string>
-#include <utility/enum.hpp>
+#include <sisl/utility/enum.hpp>
 
 #ifdef _PRERELEASE
 #include <flip/flip.hpp>
@@ -56,10 +60,12 @@ struct dev_info {
 
 #if 0
 #define HS_LOG(buf, level, mod, req, f, ...)                                                                           \
-    BOOST_PP_IF(BOOST_PP_IS_EMPTY(req), , fmt::format_to(_log_buf, "[req_id={}] ", req->request_id));                  \
-    fmt::format_to(_log_buf, f, ##__VA_ARGS__);                                                                        \
-    fmt::format_to(_log_buf, "{}", (char)0);                                                                           \
-    LOG##level##MOD(BOOST_PP_IF(BOOST_PP_IS_EMPTY(mod), base, mod), "{}", _log_buf.data());
+    BOOST_PP_IF(BOOST_VMD_IS_EMPTY(req), BOOST_PP_EMPTY,                                                               \
+                BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[req_id={}] "},                \
+                                                   fmt::make_format_args(req->request_id))))();,                       \
+    fmt::vformat_to(fmt::appender{buf}, fmt::string_view{f}, fmt::make_format_args(##__VA_ARGS__);                     \
+    fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"{}"}, fmt::make_format_args('\0'));                          \                                                                         \
+    LOG##level##MOD(BOOST_PP_IF(BOOST_VMD_IS_EMPTY(mod), base, mod)(), "{}", buf.data());                              
 #endif
 
 #define HOMESTORE_LOG_MODS                                                                                             \

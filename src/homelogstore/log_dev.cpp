@@ -3,7 +3,7 @@
 #include <cstring>
 #include <iterator>
 
-#include <fds/vector_pool.hpp>
+#include <sisl/fds/vector_pool.hpp>
 
 #include "engine/common/homestore_assert.hpp"
 #include "engine/homestore_base.hpp"

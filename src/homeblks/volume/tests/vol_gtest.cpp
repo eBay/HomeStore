@@ -29,15 +29,15 @@
 
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <fds/atomic_status_counter.hpp>
-#include <fds/bitset.hpp>
-#include <fds/buffer.hpp>
+#include <sisl/fds/atomic_status_counter.hpp>
+#include <sisl/fds/bitset.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>
 #include <iomgr/spdk_drive_interface.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <utility/thread_buffer.hpp>
+#include <sisl/utility/thread_buffer.hpp>
 
 #include <gtest/gtest.h>
 
@@ -55,7 +55,6 @@ using namespace homestore;
 using namespace flip;
 #endif
 
-THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 
 /************************** GLOBAL VARIABLES ***********************/
@@ -105,7 +104,7 @@ struct TestCfg {
     uint64_t max_num_writes = 100000;
     uint64_t run_time = 60;
     uint64_t num_threads = 8;
-    uint64_t unmap_frequency = 1000;
+    uint64_t unmap_frequency = 100;
 
     uint64_t max_io_size = 1 * Mi;
     uint64_t max_outstanding_ios = 32u;
@@ -150,6 +149,7 @@ struct TestCfg {
     bool batch_completion{false};
     bool create_del_with_io{false};
     bool delete_with_io;
+    bool is_hdd{false};
     uint32_t create_del_ops_cnt;
     uint32_t create_del_ops_interval;
     std::string flip_name;
@@ -182,18 +182,40 @@ struct TestOutput {
 
     void print(const char* work_type, bool metrics_dump = false) const {
         uint64_t v;
-        fmt::memory_buffer buf;
-        if ((v = write_cnt.load())) fmt::format_to(buf, "write_cnt={} ", v);
-        if ((v = read_cnt.load())) fmt::format_to(buf, "read_cnt={} ", v);
-        if ((v = unmap_cnt.load())) fmt::format_to(buf, "unmap_cnt={} ", v);
-        if ((v = read_err_cnt.load())) fmt::format_to(buf, "read_err_cnt={} ", v);
-        if ((v = data_match_cnt.load())) fmt::format_to(buf, "data_match_cnt={} ", v);
-        if ((v = csum_match_cnt.load())) fmt::format_to(buf, "csum_match_cnt={} ", v);
-        if ((v = hdr_only_match_cnt.load())) fmt::format_to(buf, "hdr_only_match_cnt={} ", v);
-        if ((v = vol_create_cnt.load())) fmt::format_to(buf, "vol_create_cnt={} ", v);
-        if ((v = vol_del_cnt.load())) fmt::format_to(buf, "vol_del_cnt={} ", v);
-        if ((v = vol_mounted_cnt.load())) fmt::format_to(buf, "vol_mounted_cnt={} ", v);
-        if ((v = vol_indx.load())) fmt::format_to(buf, "vol_indx={} ", v);
+        fmt::memory_buffer buf{};
+        if ((v = write_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"write_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = read_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"read_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = unmap_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"unmap_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = read_err_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"read_err_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = data_match_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"data_match_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = csum_match_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"csum_match_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = hdr_only_match_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"hdr_only_match_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = vol_create_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"vol_create_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = vol_del_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"vol_del_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = vol_mounted_cnt.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"vol_mounted_cnt={} "}, fmt::make_format_args(v));
+        }
+        if ((v = vol_indx.load())) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"vol_indx={} "}, fmt::make_format_args(v));
+        }
 
         LOGINFO("{} Output: [{}]", work_type, buf.data());
         if (metrics_dump) LOGINFO("Metrics: {}", sisl::MetricsFarm::getInstance().get_result_in_json().dump(2));
@@ -285,7 +307,7 @@ public:
                 bool cv_status = (((status == job_status_t::stopped) || (status == job_status_t::completed)) &&
                                   (m_status_threads_executing.count() == 0));
                 if (cv_status && m_timer_hdl != iomgr::null_timer_handle) {
-                    iomanager.cancel_timer(m_timer_hdl);
+                    iomanager.cancel_timer(m_timer_hdl, false /* wait */);
                     m_timer_hdl = iomgr::null_timer_handle;
                 }
                 return cv_status;
@@ -421,7 +443,7 @@ struct io_req_t : public vol_interface_req {
             vol_info{vinfo} {
         init(lba, nlbas, is_csum);
 
-        if (op == Op_type::WRITE || op == Op_type::UNMAP) {
+        if (op == Op_type::WRITE) {
             // make copy of buffer so validation works properly
             if (is_csum) {
                 populate_csum_buf(reinterpret_cast< uint16_t* >(validate_buffer), buffer, original_size, vinfo.get());
@@ -466,6 +488,7 @@ private:
     // compute checksum and store in a buf which will be used for verification
     void populate_csum_buf(uint16_t* const csum_buf, const uint8_t* const buf, const uint64_t size,
                            const vol_info_t* const vinfo) {
+        if (!buf) return;
         const uint64_t pg_size{VolInterface::get_instance()->get_page_size(vinfo->vol)};
         size_t checksum_num{0};
         for (uint64_t buf_offset{0}; buf_offset < size; buf_offset += pg_size, ++checksum_num) {
@@ -653,6 +676,7 @@ public:
         params.drive_attr->phys_page_size = tcfg.phy_page_size;
         params.drive_attr->align_size = 512;
         params.drive_attr->atomic_phys_page_size = tcfg.atomic_phys_page_size;
+        params.is_hdd = tcfg.is_hdd;
 
         boost::uuids::string_generator gen;
         m_am_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
@@ -1339,6 +1363,25 @@ protected:
         return do_get_rand_lbas(lbas_choice_t::atleast_one_valid, lba_validate_t::invalidate, tcfg.overlapping_allowed);
     }
 
+    io_lba_range_t large_unmappable_rand_lbas() {
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine engine{rd()};
+        io_lba_range_t ret;
+
+        // select volume
+        const auto vinfo{pick_vol_round_robin(ret)};
+
+        // select lba
+        std::uniform_int_distribution< uint64_t > lba_random{0, vinfo->max_vol_blks - 512};
+        ret.lba = lba_random(engine);
+
+        // select nlbas
+        std::uniform_int_distribution< uint32_t > nlbas_random{512, (uint32_t)(vinfo->max_vol_blks - ret.lba)};
+        ret.num_lbas = nlbas_random(engine);
+        ret.valid_io = true;
+        return ret;
+    }
+
     bool write_io() {
         bool ret = false;
         const IoFuncType write_function{bind_this(IOTestJob::write_vol, 3)};
@@ -1379,6 +1422,7 @@ protected:
         switch (m_load_type) {
         case load_type_t::random:
             ret = run_io(bind_this(IOTestJob::unmappable_rand_lbas, 0), unmap_function);
+            if (ret) { ret = run_io(bind_this(IOTestJob::large_unmappable_rand_lbas, 0), unmap_function); }
             break;
         case load_type_t::same:
             assert(false);
@@ -1526,22 +1570,19 @@ protected:
         const auto vol{vinfo->vol};
         if (vol == nullptr) { return false; }
 
-        const uint64_t size{nlbas * VolInterface::get_instance()->get_page_size(vol)};
-        uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
-        bzero(wbuf, size);
-
         const auto vreq{boost::intrusive_ptr< io_req_t >(
-            new io_req_t(vinfo, Op_type::UNMAP, wbuf, lba, nlbas, tcfg.verify_csum()))};
+            new io_req_t(vinfo, Op_type::UNMAP, nullptr, lba, nlbas, tcfg.verify_csum()))};
 
         vreq->cookie = static_cast< void* >(this);
 
         ++m_voltest->output.unmap_cnt;
         ++m_outstanding_ios;
+        vinfo->ref_cnt.increment(1);
         const auto ret_io{VolInterface::get_instance()->unmap(vol, vreq)};
         LOGDEBUG("Unmapped lba: {}, nlbas: {} outstanding_ios={}, cache={}", lba, nlbas, m_outstanding_ios.load(),
                  (tcfg.write_cache != 0 ? true : false));
-        iomanager.iobuf_free(wbuf); // this buffer is not used in unmap
         if (ret_io != no_error) { return false; }
+
         return true;
     }
 
@@ -2144,7 +2185,8 @@ SDS_OPTION_GROUP(
     (create_del_ops_cnt, "", "create_del_ops_cnt", "create_del_ops_cnt",
      ::cxxopts::value< uint32_t >()->default_value("100"), "number of ops"),
     (create_del_ops_interval, "", "create_del_ops_interval", "create_del_ops_interval",
-     ::cxxopts::value< uint32_t >()->default_value("10"), "interval between create del in seconds"))
+     ::cxxopts::value< uint32_t >()->default_value("10"), "interval between create del in seconds"),
+    (is_hdd, "", "is_hdd", "is_hdd", ::cxxopts::value< bool >()->default_value("false"), "run in hdd mode"))
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr, test_meta_mod, test_vdev_mod, config
 
@@ -2206,6 +2248,7 @@ int main(int argc, char* argv[]) {
     _gcfg.create_del_ops_interval = SDS_OPTIONS["create_del_ops_interval"].as< uint32_t >();
     _gcfg.flip_name = SDS_OPTIONS["flip_name"].as< std::string >();
     _gcfg.overlapping_allowed = SDS_OPTIONS["overlapping_allowed"].as< bool >();
+    _gcfg.is_hdd = SDS_OPTIONS["is_hdd"].as< bool >();
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();

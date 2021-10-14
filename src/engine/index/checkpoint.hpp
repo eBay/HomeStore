@@ -1,10 +1,10 @@
 #pragma once
-#include <fds/malloc_helper.hpp>
+#include <sisl/fds/malloc_helper.hpp>
 #include <urcu-call-rcu.h>
 #include <urcu.h>
-#include <utility/urcu_helper.hpp>
+#include <sisl/utility/urcu_helper.hpp>
 #include <atomic>
-#include <utility/atomic_counter.hpp>
+#include <sisl/utility/atomic_counter.hpp>
 #include <cassert>
 #include <memory>
 #include <sds_logging/logging.h>
@@ -73,9 +73,9 @@ struct cp_base {
     }
 };
 
-class CPMgrMetrics : public sisl::MetricsGroupWrapper {
+class CPMgrMetrics : public sisl::MetricsGroup {
 public:
-    explicit CPMgrMetrics() : sisl::MetricsGroupWrapper("CPMgr") {
+    explicit CPMgrMetrics() : sisl::MetricsGroup("CPMgr") {
         REGISTER_COUNTER(back_to_back_cps, "back to back cp");
         REGISTER_COUNTER(cp_cnt, "cp cnt");
         REGISTER_HISTOGRAM(cp_latency, "cp latency (in us)");

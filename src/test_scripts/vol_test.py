@@ -73,6 +73,12 @@ def normal(num_secs="20000"):
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("normal test completed")
 
+def normal_unmap(num_secs="20000"):
+    print("normal test started")
+    cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0 --flip=1 --verify_type=2 --unmap_enable=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    print("normal unmap test completed")
+
 ## @test load
 #  @brief Test using load generator
 def load():
@@ -346,6 +352,26 @@ def vol_io_flip_test():
     subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
     cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_post_sb_write_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_pre_sb_remove_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_post_free_blks_abort_before_cp=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_pre_second_cp_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
 
 def meta_mod_abort():
     vol_mod_test("meta", meta_flip_list)
@@ -404,6 +430,9 @@ def nightly():
     normal()
     sleep(5)
 
+    normal_unmap()
+    sleep(5)
+
     recovery_nightly()
     sleep(5)
     
@@ -431,6 +460,9 @@ def nightly():
     
     #vol_crc_mismatch_test()   # turn back on if fault_containment doesn't do assert failure;
     #sleep(5)
+
+    vol_io_flip_test()
+    sleep(5)
 
     #one_disk_replace()
     #sleep(5)

@@ -12,15 +12,14 @@
 #include <boost/range/irange.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <utility/atomic_counter.hpp>
-#include <utility/thread_buffer.hpp>
+#include <sisl/utility/atomic_counter.hpp>
+#include <sisl/utility/thread_buffer.hpp>
 
 #include <benchmark/benchmark.h>
 
 #include "homeds/hash/intrusive_hashset.hpp"
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 
 static constexpr size_t TEST_COUNT{10000};
@@ -31,7 +30,7 @@ static constexpr size_t ENTRIES_PER_BUCKET{4};
 struct blk_id {
     static sisl::blob get_blob(const blk_id& id) {
         sisl::blob b;
-        b.bytes = reinterpret_cast<uint8_t*>(const_cast<uint64_t*>(&id.m_id));
+        b.bytes = reinterpret_cast< uint8_t* >(const_cast< uint64_t* >(&id.m_id));
         b.size = sizeof(uint64_t);
 
         return b;
@@ -48,7 +47,7 @@ struct blk_id {
     }
 
     blk_id(const uint64_t id) : m_id{id} {}
-    blk_id() : blk_id{std::numeric_limits<uint64_t>::max()} {}
+    blk_id() : blk_id{std::numeric_limits< uint64_t >::max()} {}
 
     blk_id(const blk_id&) = delete;
     blk_id& operator=(const blk_id&) = delete;
@@ -64,8 +63,8 @@ class blk_entry : public homeds::HashNode {
 public:
     blk_entry() : m_blk_id{} { m_blk_contents.fill('0'); }
 
-    blk_entry(const uint64_t id, const char* const contents) : m_blk_id{id} { 
-        std::strncpy(m_blk_contents.data(), contents, m_blk_contents.size()); 
+    blk_entry(const uint64_t id, const char* const contents) : m_blk_id{id} {
+        std::strncpy(m_blk_contents.data(), contents, m_blk_contents.size());
         m_blk_contents[m_blk_contents.size() - 1] = '0';
     }
 
@@ -78,7 +77,7 @@ public:
 
     void set(const uint64_t id, const char* contents) {
         m_blk_id.m_id = id;
-        std::strncpy(m_blk_contents.data(), contents, m_blk_contents.size()); 
+        std::strncpy(m_blk_contents.data(), contents, m_blk_contents.size());
         m_blk_contents[m_blk_contents.size() - 1] = '0';
     }
 
@@ -105,20 +104,20 @@ static blk_entry** glob_entries;
 static const blk_id** glob_ids;
 
 void setup(const size_t count) {
-    glob_set = new homeds::IntrusiveHashSet< blk_id, blk_entry >{static_cast<uint32_t>(count / ENTRIES_PER_BUCKET)};
+    glob_set = new homeds::IntrusiveHashSet< blk_id, blk_entry >{static_cast< uint32_t >(count / ENTRIES_PER_BUCKET)};
     glob_entries = new blk_entry*[count];
     glob_ids = new const blk_id*[count];
 
-    std::array<char, 40> contents;
-    for (auto i : boost::irange<size_t>(0, count)) {
+    std::array< char, 40 > contents;
+    for (auto i : boost::irange< size_t >(0, count)) {
         std::snprintf(contents.data(), contents.size(), "Contents for Blk %zu", i);
-        glob_entries[i] = new blk_entry(static_cast<uint64_t>(i), contents.data());
+        glob_entries[i] = new blk_entry(static_cast< uint64_t >(i), contents.data());
         glob_ids[i] = blk_entry::extract_key(*glob_entries[i]);
     }
 }
 
 void teardown(const size_t count) {
-    for (auto i : boost::irange<size_t>(0, count)) {
+    for (auto i : boost::irange< size_t >(0, count)) {
         delete glob_entries[i];
     }
 
@@ -169,7 +168,6 @@ void test_removes(benchmark::State& state) {
         ++iteration;
     }
 }
-
 
 BENCHMARK(test_insert)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
 BENCHMARK(test_reads)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);

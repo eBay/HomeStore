@@ -16,12 +16,12 @@
 #include <boost/uuid/string_generator.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <fds/bitset.hpp>
+#include <sisl/fds/bitset.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <utility/thread_buffer.hpp>
+#include <sisl/utility/thread_buffer.hpp>
 
 #include "api/vol_interface.hpp"
 #include "homeblks/volume/volume.hpp"
@@ -32,7 +32,6 @@ std::vector< std::shared_ptr< Volume > > vol_list;
 #define VOL_PREFIX "/tmp/vol"
 #define STAGING_VOL_PREFIX "staging"
 
-THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)

@@ -21,17 +21,20 @@
 #include <boost/intrusive_ptr.hpp>
 #include <boost/preprocessor/cat.hpp>
 #include <boost/preprocessor/control/if.hpp>
+#include <boost/preprocessor/facilities/empty.hpp>
+#include <boost/preprocessor/facilities/identity.hpp>
 #include <boost/preprocessor/stringize.hpp>
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
+#include <boost/vmd/is_empty.hpp>
 
-#include <fds/obj_allocator.hpp>
-#include <fds/buffer.hpp>
-#include <fds/freelist_allocator.hpp>
-#include <metrics/metrics.hpp>
+#include <sisl/fds/obj_allocator.hpp>
+#include <sisl/fds/buffer.hpp>
+#include <sisl/fds/freelist_allocator.hpp>
+#include <sisl/metrics/metrics.hpp>
 #include <sds_logging/logging.h>
-#include <utility/atomic_counter.hpp>
-#include <utility/enum.hpp>
-#include <utility/obj_life_counter.hpp>
+#include <sisl/utility/atomic_counter.hpp>
+#include <sisl/utility/enum.hpp>
+#include <sisl/utility/obj_life_counter.hpp>
 
 #include "engine/blkalloc/blk.h"
 #include "engine/common/error.h"
@@ -66,7 +69,8 @@ struct blkalloc_cp_id;
 #endif
 
 #define THIS_BT_LOG(level, mod, node, msg, ...)                                                                        \
-    HS_DETAILED_LOG(level, mod, , "btree", m_btree_cfg.get_name(), BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), , "node"),     \
+    HS_DETAILED_LOG(level, mod, , "btree", m_btree_cfg.get_name(),                                                     \
+                    BOOST_PP_IF(BOOST_VMD_IS_EMPTY(node), BOOST_PP_EMPTY, BOOST_PP_IDENTITY("node"))(),                \
                     node->to_string(), msg, ##__VA_ARGS__)
 
 #define THIS_BT_CP_LOG(level, cp_id, msg, ...)                                                                         \
@@ -74,10 +78,13 @@ struct blkalloc_cp_id;
 
 #define BT_ASSERT(assert_type, cond, node, ...)                                                                        \
     HS_DETAILED_ASSERT(assert_type, cond, , "btree", m_btree_cfg.get_name(),                                           \
-                       BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), , "node"), node->to_string(), ##__VA_ARGS__)
+                       BOOST_PP_IF(BOOST_VMD_IS_EMPTY(node), BOOST_PP_EMPTY, BOOST_PP_IDENTITY("node"))(),             \
+                       node->to_string(), ##__VA_ARGS__)
 #define BT_ASSERT_CMP(assert_type, val1, cmp, val2, node, ...)                                                         \
-    HS_DETAILED_ASSERT_CMP(assert_type, val1, cmp, val2, , "btree", m_btree_cfg.get_name(),                            \
-                           BOOST_PP_IF(BOOST_PP_IS_EMPTY(node), , "node"), node->to_string(), ##__VA_ARGS__)
+    HS_DETAILED_ASSERT_CMP(assert_type, val1, cmp, val2, , "btree",                                                    \
+                           m_btree_cfg.get_name(),                                                                     \
+                           BOOST_PP_IF(BOOST_VMD_IS_EMPTY(node), BOOST_PP_EMPTY, BOOST_PP_IDENTITY("node"))(),         \
+                           node->to_string(), ##__VA_ARGS__)
 
 #define BT_DEBUG_ASSERT(...) BT_ASSERT(DEBUG, __VA_ARGS__)
 #define BT_RELEASE_ASSERT(...) BT_ASSERT(RELEASE, __VA_ARGS__)

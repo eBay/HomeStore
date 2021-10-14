@@ -14,14 +14,14 @@
 #include <fcntl.h>
 #include <sys/uio.h>
 
-#include <fds/obj_allocator.hpp>
-#include <fds/vector_pool.hpp>
-#include <metrics/metrics.hpp>
+#include <sisl/fds/obj_allocator.hpp>
+#include <sisl/fds/vector_pool.hpp>
+#include <sisl/metrics/metrics.hpp>
 #include <sds_logging/logging.h>
 #include <spdlog/fmt/fmt.h>
-#include <utility/atomic_counter.hpp>
-#include <utility/enum.hpp>
-#include <utility/obj_life_counter.hpp>
+#include <sisl/utility/atomic_counter.hpp>
+#include <sisl/utility/enum.hpp>
+#include <sisl/utility/obj_life_counter.hpp>
 
 #include "engine/blkstore/blkstore.hpp"
 #include "engine/cache/cache.h"
@@ -288,9 +288,14 @@ private:
 
     template < typename... Args >
     void assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str, const Args&... args) {
-        fmt::format_to(buf, "\n[vol={}]", boost::lexical_cast< std::string >(get_uuid()));
-        if (req_str.size()) { fmt::format_to(buf, "\n[request={}]", req_str); }
-        fmt::format_to(buf, "\nMetrics = {}\n", sisl::MetricsFarm::getInstance().get_result_in_json_string());
+        fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[vol={}]"},
+                        fmt::make_format_args(boost::lexical_cast< std::string >(get_uuid()))); 
+        if (req_str.size()) {
+            fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[request={}]"},
+                            fmt::make_format_args(boost::lexical_cast< std::string >(req_str))); 
+        }
+        fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\nMetrics = {}\n"},
+                        fmt::make_format_args(sisl::MetricsFarm::getInstance().get_result_in_json_string())); 
     }
 
     template < typename... Args >
@@ -536,6 +541,8 @@ public:
         // yet;
         return (m_indx_mgr != nullptr) && (m_indx_mgr->is_recovery_done());
     }
+
+    void inc_ref_cnt();
 };
 
 /* Note :- Any member inside this structure is not lock protected. Its caller responsibility to call it under lock
@@ -636,6 +643,7 @@ struct volume_req : indx_req {
         journal_key* key = (journal_key*)mem;
         key->lba = lba();
         key->nlbas = active_nlbas_written;
+        key->user_io_nlbas = nlbas();
     }
 
     virtual void fill_val(void* mem, uint32_t size) override {
@@ -647,7 +655,7 @@ struct volume_req : indx_req {
             VOL_ERROR_LOG(vol()->get_name(), "all lbas are not written. lba written {}, lba supposed to write{}",
                           active_nlbas_written, nlbas());
         }
-        for (lba_count_t i{0}; i < active_nlbas_written; ++i) {
+        for (lba_count_t i{0}; !is_unmap() && i < active_nlbas_written; ++i) {
             j_csum[i] = csum_list[i];
         }
     }

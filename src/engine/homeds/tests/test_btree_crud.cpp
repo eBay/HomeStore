@@ -8,17 +8,16 @@
 #include <memory>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <utility/thread_buffer.hpp>
-#include <utility/obj_life_counter.hpp>
+#include <sisl/utility/thread_buffer.hpp>
+#include <sisl/utility/obj_life_counter.hpp>
 
 #include "blkstore/blkstore.hpp"
 #include "device/virtual_dev.hpp"
 #include "homeds/btree/mem_btree.hpp"
-#include <metrics/metrics.hpp>
+#include <sisl/metrics/metrics.hpp>
 #include "common/homestore_header.hpp"
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
-THREAD_BUFFER_INIT
 RCU_REGISTER_INIT
 
 #define MAX_CACHE_SIZE 2 * 1024 * 1024 * 1024

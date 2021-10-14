@@ -9,8 +9,8 @@
 #include <system_error>
 #include <vector>
 
-#include <fds/buffer.hpp>
-#include <metrics/metrics.hpp>
+#include <sisl/fds/buffer.hpp>
+#include <sisl/metrics/metrics.hpp>
 #include <nlohmann/json.hpp>
 
 namespace homestore {

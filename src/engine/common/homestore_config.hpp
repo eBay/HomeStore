@@ -16,7 +16,7 @@
 #include <iomgr/iomgr.hpp>
 #include <nlohmann/json.hpp>
 #include <sds_options/options.h>
-#include <settings/settings.hpp>
+#include <sisl/settings/settings.hpp>
 
 #include "engine/common/error.h"
 #include "engine/common/generated/homestore_config_generated.h"
@@ -90,6 +90,7 @@ public:
 #ifdef _PRERELEASE
     bool force_reinit{false};
 #endif
+    bool is_hdd{false};
 
     /* optional parameters - if provided will override the startup config */
     boost::optional< iomgr::drive_attributes > drive_attr;

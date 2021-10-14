@@ -18,12 +18,12 @@
 #include <vector>
 
 #include <boost/intrusive_ptr.hpp>
-#include <fds/obj_allocator.hpp>
-#include <fds/buffer.hpp>
-#include <metrics/metrics.hpp>
-#include <utility/atomic_counter.hpp>
-#include <utility/enum.hpp>
-#include <utility/obj_life_counter.hpp>
+#include <sisl/fds/obj_allocator.hpp>
+#include <sisl/fds/buffer.hpp>
+#include <sisl/metrics/metrics.hpp>
+#include <sisl/utility/atomic_counter.hpp>
+#include <sisl/utility/enum.hpp>
+#include <sisl/utility/obj_life_counter.hpp>
 
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
@@ -313,11 +313,13 @@ public:
     const erase_comp_cb& get_cb() const { return m_cb; }
 
     void set_memvec(boost::intrusive_ptr< homeds::MemVector > vec, const uint32_t offset, const uint32_t size) {
+        HS_DEBUG_ASSERT_LE(size, UINT16_MAX);
         m_mem = std::move(vec);
         m_data_offset = offset;
-        HS_DEBUG_ASSERT_EQ(m_mem->get_buffer_size() % HS_STATIC_CONFIG(engine.min_io_size), 0,
-                           "size: {}, min_io_size: {}", m_mem->get_buffer_size(), HS_STATIC_CONFIG(engine.min_io_size));
-        m_cache_size = m_mem->get_buffer_size();
+        m_cache_size = size;
+
+        // TODO: turn back on after correct size can be returned based on ptr;
+        // m_cache_size = m_mem->get_buffer_size();
     }
 
     void modify_cache_size(const uint32_t size) { m_cache_size += size; }

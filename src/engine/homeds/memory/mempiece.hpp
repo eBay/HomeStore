@@ -18,16 +18,16 @@
 #include <type_traits>
 #include <vector>
 
-#include <fds/buffer.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <iomgr/iomgr.hpp>
-#include <utility/atomic_counter.hpp>
-#include <utility/obj_life_counter.hpp>
+#include <sisl/utility/atomic_counter.hpp>
+#include <sisl/utility/obj_life_counter.hpp>
 
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
 #include "engine/homestore_base.hpp"
 //#include "tagged_ptr.hpp"
-#include <metrics/metrics.hpp>
+#include <sisl/metrics/metrics.hpp>
 
 namespace homeds {
 using namespace homestore; // NOTE: This needs to be removed as it pollutes namespace of all files where this header is
@@ -154,8 +154,8 @@ private:
 #pragma pack(1)
 struct MemPiece : public sisl::ObjLifeCounter< MemPiece > {
     uint8_t* m_ptr;
-    uint8_t m_size;   // Size shrinked by s_size_multiplier
-    uint8_t m_offset; // Offset shrinked by s_size_multiplier
+    uint8_t m_size;
+    uint8_t m_offset;
 
     MemPiece(uint8_t* const mem, const uint32_t size, const uint32_t offset) :
             ObjLifeCounter{}, m_ptr{mem}, m_size{encode(size)}, m_offset{encode(offset)} {}
