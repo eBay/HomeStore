@@ -4,7 +4,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "2.7.32"
+    version = "3.0.1"
 
     revision_mode = "scm"
     license = "Proprietary"
@@ -32,11 +32,11 @@ class HomestoreConan(ConanFile):
             "gtest/1.10.0",
             )
     requires = (
-            "flip/[~=2, include_prerelease=True]@sds/develop",
-            "iomgr/[~=7, include_prerelease=True]@sds/develop",
-            "sds_logging/[~=11, include_prerelease=True]@sds/develop",
+            "flip/[~=3, include_prerelease=True]@sds/master",
+            "iomgr/[~=6, include_prerelease=True]@sds/master",
+            "sds_logging/[~=11, include_prerelease=True]@sds/master",
             "sds_options/[~=1, include_prerelease=True]@sds/master",
-            "sisl/[~=5, include_prerelease=True]@sisl/develop",
+            "sisl/[~=6, include_prerelease=True]@sisl/master",
 
             # FOSS, rarely updated
             "boost/1.73.0",

@@ -641,7 +641,7 @@ SDS_OPTION_GROUP(
      ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (fixed_write_size, "", "fixed_write_size", "fixed write size", ::cxxopts::value< uint32_t >()->default_value("512"),
      "number"),
-    (dev_size_gb, "", "dev_size_gb", "size of each device in GB", ::cxxopts::value< uint64_t >()->default_value("10"),
+    (dev_size_gb, "", "dev_size_gb", "size of each device in GB", ::cxxopts::value< uint64_t >()->default_value("5"),
      "number"),
     (run_time, "", "run_time", "running time in seconds", ::cxxopts::value< uint64_t >()->default_value("30"),
      "number"),

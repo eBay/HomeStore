@@ -458,8 +458,8 @@ def nightly():
     vol_io_fail_test()
     sleep(5)
     
-    vol_crc_mismatch_test()
-    sleep(5)
+    #vol_crc_mismatch_test()   # turn back on if fault_containment doesn't do assert failure;
+    #sleep(5)
 
     vol_io_flip_test()
     sleep(5)
