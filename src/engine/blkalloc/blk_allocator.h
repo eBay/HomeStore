@@ -281,6 +281,7 @@ public:
         auto list = get_alloc_blk_list();
         if (list) {
             // cp has started, accumulating to the list
+            BLKALLOC_LOG(DEBUG, "accumulating blks allocated {} chunk number {}", in_bid.to_string(), m_chunk_id);
             list->push_back(in_bid);
         } else {
             // cp is not started or already done, allocate on disk bm directly;
@@ -314,6 +315,13 @@ public:
                 if (!get_realtime_bm()->is_bits_reset(b.get_blk_num(), b.get_nblks())) {
                     BLKALLOC_LOG(ERROR, "bit not reset {} nblks {} chunk number {}", b.get_blk_num(), b.get_nblks(),
                                  m_chunk_id);
+
+                    for (blk_count_t i{0}; i < b.get_nblks(); ++i) {
+                        if (!get_realtime_bm()->is_bits_reset(b.get_blk_num() + i, 1)) {
+                            BLKALLOC_LOG(ERROR, "bit not reset {}", b.get_blk_num() + i);
+                        }
+                    }
+                    // cross compare with disk bm
                     for (blk_count_t i{0}; i < b.get_nblks(); ++i) {
                         if (!get_disk_bm()->is_bits_reset(b.get_blk_num() + i, 1)) {
                             BLKALLOC_LOG(ERROR, "bit not reset {}", b.get_blk_num() + i);
@@ -358,7 +366,7 @@ public:
                 }
             }
 
-            BLKALLOC_LOG(DEBUG, "realtime: free bid: {}", b.to_string());
+            BLKALLOC_LOG(DEBUG, "realtime: free bid: {}, chunk number: {}", b.to_string(), m_chunk_id);
             get_realtime_bm()->reset_bits(b.get_blk_num(), b.get_nblks());
             return true;
         }
@@ -386,6 +394,8 @@ public:
                                     "Expected disk bits to set blk num {} num blks {}", b.get_blk_num(), b.get_nblks());
                 }
             }
+
+            BLKALLOC_LOG(DEBUG, "free_on_disk: free bid: {}, chunk number: {}", b.to_string(), m_chunk_id);
             get_disk_bm()->reset_bits(b.get_blk_num(), b.get_nblks());
             portion->increase_available_blocks(b.get_nblks());
         }

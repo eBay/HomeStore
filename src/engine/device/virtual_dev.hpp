@@ -1065,8 +1065,13 @@ public:
                     chunk_blkid.clear();
                     status = chunk->get_blk_allocator_mutable()->alloc(nblks, hints, chunk_blkid);
                     if (status == BlkAllocStatus::PARTIAL) {
-                        // free partial result
+                        // free partial result on cache bitmap
                         chunk->get_blk_allocator_mutable()->free(chunk_blkid);
+                        // free on realtime bitmap
+                        for (const auto b : chunk_blkid) {
+                            const auto ret = chunk->get_blk_allocator_mutable()->free_on_realtime(b);
+                            HS_ASSERT(RELEASE, ret, "failed to free on realtime");
+                        }
                         status = BlkAllocStatus::FAILED;
                     } else if (status == BlkAllocStatus::SUCCESS) {
                         // append chunk blocks to out blocks
@@ -1100,6 +1105,7 @@ public:
 
     void free_blk(const BlkId& b) {
         PhysicalDevChunk* const chunk{m_mgr->get_chunk_mutable(b.get_chunk_num())};
+        // free on cache bitmap
         chunk->get_blk_allocator_mutable()->free(b);
     }
 
