@@ -1,16 +1,25 @@
 //
 // Created by Yaming Kuang 1/15/2020
 //
+
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <random>
-#include "homeblks/home_blks.hpp"
-#include "../virtual_dev.hpp"
+
+#include <gtest/gtest.h>
+#include <iomgr/aio_drive_interface.hpp>
+#include <iomgr/iomgr.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <gtest/gtest.h>
-#include <iomgr/iomgr.hpp>
-#include <iomgr/aio_drive_interface.hpp>
-#include <fstream>
-#include <cstdint>
+
+#include "homeblks/home_blks.hpp"
+#include "../virtual_dev.hpp"
 
 using namespace homestore;
 
@@ -43,13 +52,11 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
 
     inited = false;
     LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
-    for (uint32_t i = 0; i < ndevices; i++) {
-        std::string fpath = "/tmp/test_vdev_" + std::to_string(i + 1);
-        std::ofstream ofs(fpath, std::ios::binary | std::ios::out);
-        ofs.seekp(dev_size - 1);
-        ofs.write("", 1);
-        ofs.close();
-        device_info.push_back({fpath});
+    for (uint32_t i{0}; i < ndevices; ++i) {
+        const std::filesystem::path fpath{"/tmp/test_vdev_" + std::to_string(i + 1)};
+        std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
+        std::filesystem::resize_file(fpath, dev_size); // set the file size
+        device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
     }
 
     LOGINFO("Starting iomgr with {} threads", nthreads);
@@ -60,10 +67,10 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
 
     boost::uuids::string_generator gen;
     init_params params;
-    params.open_flags = homestore::io_flag::DIRECT_IO;
+    params.data_open_flags = homestore::io_flag::DIRECT_IO;
     params.min_virtual_page_size = 4096;
     params.app_mem_size = app_mem_size;
-    params.devices = device_info;
+    params.data_devices = device_info;
     params.init_done_cb = [&tl_start_mutex = start_mutex, &tl_cv = cv, &tl_inited = inited](std::error_condition err,
                                                                                             const out_params& params) {
         LOGINFO("HomeBlks Init completed");
@@ -143,10 +150,10 @@ public:
     off_t get_rand_truncate_offset() {
         auto used_space = m_store->get_used_space();
 
-        std::random_device rd;
-        std::default_random_engine generator(rd());
-        std::uniform_int_distribution< long long unsigned > dist(m_start_off + used_space / 5,
-                                                                 m_start_off + (used_space * 4) / 5);
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine generator{rd()};
+        std::uniform_int_distribution< long long unsigned > dist{m_start_off + used_space / 5,
+                                                                 m_start_off + (used_space * 4) / 5};
 
         auto rand_off = dist(generator);
         auto off = sisl::round_up(rand_off, dma_alignment);
@@ -328,9 +335,9 @@ public:
     uint32_t rand_size() {
         if (gp.fixed_wrt_sz_enabled) { return gp.fixed_wrt_sz; }
 
-        std::random_device rd;
-        std::default_random_engine generator(rd());
-        std::uniform_int_distribution< long unsigned > dist(gp.min_wrt_sz, gp.max_wrt_sz);
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine generator{rd()};
+        std::uniform_int_distribution< long unsigned > dist{gp.min_wrt_sz, gp.max_wrt_sz};
         return sisl::round_up(dist(generator), dma_alignment);
     }
 

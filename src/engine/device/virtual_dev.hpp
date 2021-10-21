@@ -45,10 +45,10 @@ namespace homestore {
 
 class VdevFixedBlkAllocatorPolicy {
 public:
-    static std::shared_ptr< FixedBlkAllocator > create_allocator(const uint64_t size, const uint32_t vpage_size,
+    static std::shared_ptr< FixedBlkAllocator > create_allocator(const PhysicalDevGroup pdev_group, const uint64_t size, const uint32_t vpage_size,
                                                                  const bool is_auto_recovery, const uint32_t unique_id,
                                                                  const bool init) {
-        BlkAllocConfig cfg{vpage_size, size, std::string("fixed_chunk_") + std::to_string(unique_id)};
+        BlkAllocConfig cfg{pdev_group, vpage_size, size, std::string{"fixed_chunk_"} + std::to_string(unique_id)};
         cfg.set_auto_recovery(is_auto_recovery);
         return std::make_shared< FixedBlkAllocator >(cfg, init, unique_id);
     }
@@ -56,12 +56,13 @@ public:
 
 class VdevVarSizeBlkAllocatorPolicy {
 public:
-    static std::shared_ptr< VarsizeBlkAllocator > create_allocator(const uint64_t size, const uint32_t vpage_size,
+    static std::shared_ptr< VarsizeBlkAllocator > create_allocator(const PhysicalDevGroup pdev_group, const uint64_t size,
+                                                                   const uint32_t vpage_size,
                                                                    const bool is_auto_recovery,
                                                                    const uint32_t unique_id, const bool is_init) {
-        VarsizeBlkAllocConfig cfg{vpage_size, size, std::string("varsize_chunk_") + std::to_string(unique_id)};
-        HS_DEBUG_ASSERT_EQ((size % MIN_CHUNK_SIZE), 0);
-        cfg.set_phys_page_size(HS_STATIC_CONFIG(drive_attr.phys_page_size));
+        VarsizeBlkAllocConfig cfg{pdev_group, vpage_size, size, std::string("varsize_chunk_") + std::to_string(unique_id)};
+        HS_DEBUG_ASSERT_EQ((size % (pdev_group == PhysicalDevGroup::DATA ? MIN_DATA_CHUNK_SIZE() : MIN_FAST_CHUNK_SIZE())), 0);
+        cfg.set_phys_page_size(pdev_group == PhysicalDevGroup::DATA ? HS_STATIC_CONFIG(data_drive_attr.phys_page_size) : HS_STATIC_CONFIG(fast_drive_attr.phys_page_size));
         cfg.set_auto_recovery(is_auto_recovery);
         return std::make_shared< VarsizeBlkAllocator >(cfg, is_init, unique_id);
     }
@@ -230,6 +231,7 @@ private:
 
     // List of physical devices this virtual device uses and its corresponding chunks for the physdev
     std::vector< pdev_chunk_map > m_primary_pdev_chunks_list;
+    PhysicalDevGroup m_pdev_group;
 
     // For each of the primary chunk we created, this is the list of mirrored chunks. The physical devices
     // for the mirrored chunk always follows the next device pattern.
@@ -272,13 +274,14 @@ public:
     }
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
-    VirtualDev(DeviceManager* const mgr, const char* const name, vdev_info_block* const vb, vdev_comp_cb_t cb,
-               const bool recovery_init, const bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
-            m_name{name}, m_metrics{name} {
+    VirtualDev(DeviceManager* const mgr, const char* const name, vdev_info_block* const vb,
+               const PhysicalDevGroup pdev_group, vdev_comp_cb_t cb, const bool recovery_init,
+               const bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
+            m_name{name}, m_pdev_group{pdev_group}, m_metrics{name} {
         init(mgr, vb, std::move(cb), vb->page_size, auto_recovery, std::move(hwm_cb));
 
         m_recovery_init = recovery_init;
-        m_mgr->add_chunks(vb->vdev_id, [this](PhysicalDevChunk* const chunk) { add_chunk(chunk); });
+        m_mgr->add_chunks(vb->vdev_id, pdev_group, [this](PhysicalDevChunk* const chunk) { add_chunk(chunk); });
 
         HS_ASSERT_CMP(LOGMSG, vb->num_primary_chunks * (vb->num_mirrors + 1), ==,
                       m_num_chunks); // Mirrors should be at least one less than device list.
@@ -286,11 +289,11 @@ public:
     }
 
     /* Create a new virtual dev for these parameters */
-    VirtualDev(DeviceManager* const mgr, const char* const name, const uint64_t context_size, const uint32_t nmirror,
-               const bool is_stripe, const uint32_t page_size, const std::vector< PhysicalDev* >& pdev_list,
-               vdev_comp_cb_t cb, char* const blob, const uint64_t size_in, const bool auto_recovery = false,
-               vdev_high_watermark_cb_t hwm_cb = nullptr) :
-            m_name{name}, m_metrics{name} {
+    VirtualDev(DeviceManager* const mgr, const char* const name, const PhysicalDevGroup pdev_group,
+               const uint64_t context_size, const uint32_t nmirror, const bool is_stripe, const uint32_t page_size,
+               const std::vector< PhysicalDev* >& pdev_list, vdev_comp_cb_t cb, char* const blob,
+               const uint64_t size_in, const bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
+            m_name{name}, m_pdev_group{pdev_group}, m_metrics{name} {
         init(mgr, nullptr, std::move(cb), page_size, auto_recovery, std::move(hwm_cb));
 
         // Prepare primary chunks in a physical device for future inserts.
@@ -307,12 +310,17 @@ public:
 
             // ensure that all physical devices have same type
             bool add_device{true};
+            const auto new_pdev_group{pdev_list.front()->m_pdev_group};
             const auto& new_pdev_device_name{pdev->get_devname()};
             if (pdev_device_name != new_pdev_device_name) {
                 const auto new_pdev_drive_type{drive_interface->get_drive_type(new_pdev_device_name)};
                 if (pdev_drive_type != new_pdev_drive_type) {
                     HS_LOG(ERROR, device, "Vdev={} - dev={} type={} does not match type dev={} type={}", m_name,
                            pdev_device_name, pdev_drive_type, new_pdev_device_name, new_pdev_drive_type);
+                    add_device = false;
+                } else if (new_pdev_group != pdev_group) {
+                    HS_LOG(ERROR, device, "Vdev={} - dev={} group={} does not match type dev={} group={}", m_name,
+                           pdev_device_name, pdev_group, new_pdev_device_name, new_pdev_group);
                     add_device = false;
                 }
             }
@@ -327,6 +335,8 @@ public:
         HS_ASSERT_CMP(LOGMSG, nmirror, <,
                       m_primary_pdev_chunks_list.size()); // Mirrors should be at least one less than device list.
 
+        const auto max_chunk_size{pdev_group == PhysicalDevGroup ::DATA ? MAX_DATA_CHUNK_SIZE() : MAX_FAST_CHUNK_SIZE()};
+        const auto min_chunk_size{pdev_group == PhysicalDevGroup ::DATA ? MIN_DATA_CHUNK_SIZE() : MIN_FAST_CHUNK_SIZE()};
         if (is_stripe) {
             m_num_chunks = static_cast< uint32_t >(m_primary_pdev_chunks_list.size());
             uint32_t cnt{1};
@@ -335,19 +345,19 @@ public:
                 m_num_chunks = cnt * m_num_chunks;
                 m_chunk_size = size / m_num_chunks;
                 ++cnt;
-            } while (m_chunk_size > MAX_CHUNK_SIZE);
+            } while (m_chunk_size > max_chunk_size);
         } else {
             m_chunk_size = size;
             m_num_chunks = 1;
         }
 
-        if (m_chunk_size % MIN_CHUNK_SIZE > 0) {
-            m_chunk_size = sisl::round_up(m_chunk_size, MIN_CHUNK_SIZE);
+        if (m_chunk_size % min_chunk_size > 0) {
+            m_chunk_size = sisl::round_up(m_chunk_size, min_chunk_size);
             HS_LOG(INFO, device, "size of a chunk is resized to {}", m_chunk_size);
         }
 
         LOGINFO("size of a chunk is {} is_stripe {} num chunks {}", m_chunk_size, is_stripe, m_num_chunks);
-        if (m_chunk_size > MAX_CHUNK_SIZE) {
+        if (m_chunk_size > max_chunk_size) {
             throw homestore::homestore_exception("invalid chunk size in init", homestore_error::invalid_chunk_size);
         }
 
@@ -355,14 +365,14 @@ public:
         size = m_chunk_size * m_num_chunks;
 
         // Create a new vdev in persistent area and get the block of it
-        m_vb = mgr->alloc_vdev(context_size, nmirror, page_size, m_num_chunks, blob, size);
+        m_vb = mgr->alloc_vdev(pdev_group, context_size, nmirror, page_size, m_num_chunks, blob, size);
 
         for (auto i : boost::irange< uint32_t >(0, m_num_chunks)) {
             const auto pdev_ind{i % m_primary_pdev_chunks_list.size()};
 
             // Create a chunk on selected physical device and add it to chunks in physdev list
             auto* const chunk{create_dev_chunk(pdev_ind, nullptr, INVALID_CHUNK_ID)};
-            std::shared_ptr< BlkAllocator > ba{Allocator::create_allocator(
+            std::shared_ptr< BlkAllocator > ba{Allocator::create_allocator(m_pdev_group,
                 m_chunk_size, get_page_size(), m_auto_recovery, chunk->get_chunk_id(), true /* init */)};
             // set initial value of "end of chunk offset";
             chunk->update_end_of_chunk(m_chunk_size);
@@ -397,7 +407,7 @@ public:
 
     void reset_failed_state() {
         m_vb->set_failed(false);
-        m_mgr->write_info_blocks();
+        m_mgr->write_info_blocks(m_pdev_group);
     }
 
     void process_completions(const boost::intrusive_ptr< virtualdev_req >& req) {
@@ -617,7 +627,7 @@ public:
 
             // If across chunk boudary, update the chunk super-block of the chunk size
             auto* const chunk{m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id]};
-            m_mgr->update_end_of_chunk(chunk, offset_in_chunk);
+            m_mgr->update_end_of_chunk(m_pdev_group, chunk, offset_in_chunk);
 
 #ifdef _PRERELEASE
             HomeStoreFlip::test_and_abort("abort_after_update_eof_cur_chunk");
@@ -626,7 +636,7 @@ public:
             auto* const next_chunk{get_next_chunk(dev_id, chunk_id)};
             if (next_chunk != chunk) {
                 // Since we are re-using a new chunk, update this chunk's end as its original size;
-                m_mgr->update_end_of_chunk(next_chunk, m_chunk_size);
+                m_mgr->update_end_of_chunk(m_pdev_group, next_chunk, m_chunk_size);
             }
         } else {
             // across chunk boundary and no space left;
@@ -867,7 +877,7 @@ public:
     }
 
     std::shared_ptr< blkalloc_cp > attach_prepare_cp(std::shared_ptr< blkalloc_cp >& cur_ba_cp) {
-        return (PhysicalDevChunk::attach_prepare_cp(cur_ba_cp));
+        return (PhysicalDevChunk::attach_prepare_cp(m_pdev_group, cur_ba_cp));
     }
 
     /**
@@ -1008,12 +1018,13 @@ public:
     }
 
     bool is_blk_alloced(const BlkId& blkid) const {
-        const PhysicalDevChunk* const primary_chunk{m_mgr->get_chunk(blkid.get_chunk_num())};
+
+        const PhysicalDevChunk* const primary_chunk{m_mgr->get_chunk(blkid.get_chunk_num(), m_pdev_group)};
         return (primary_chunk->get_blk_allocator()->is_blk_alloced(blkid));
     }
 
     BlkAllocStatus reserve_blk(const BlkId& blkid) {
-        PhysicalDevChunk* const primary_chunk{m_mgr->get_chunk_mutable(blkid.get_chunk_num())};
+        PhysicalDevChunk* const primary_chunk{m_mgr->get_chunk_mutable(blkid.get_chunk_num(), m_pdev_group)};
         HS_LOG(DEBUG, device, "alloc_on_disk: bid {}", blkid.to_string());
         return primary_chunk->get_blk_allocator_mutable()->alloc_on_disk(blkid);
     }
@@ -1094,12 +1105,12 @@ public:
     }
 
     bool free_on_realtime(const BlkId& b) {
-        PhysicalDevChunk* const chunk{m_mgr->get_chunk_mutable(b.get_chunk_num())};
+        PhysicalDevChunk* const chunk{m_mgr->get_chunk_mutable(b.get_chunk_num(), m_pdev_group)};
         return chunk->get_blk_allocator_mutable()->free_on_realtime(b);
     }
 
     void free_blk(const BlkId& b) {
-        PhysicalDevChunk* const chunk{m_mgr->get_chunk_mutable(b.get_chunk_num())};
+        PhysicalDevChunk* const chunk{m_mgr->get_chunk_mutable(b.get_chunk_num(), m_pdev_group)};
         chunk->get_blk_allocator_mutable()->free(b);
     }
 
@@ -1279,9 +1290,13 @@ public:
         do_preadv_internal(pdev, primary_chunk, primary_dev_offset, iov.data(), iovcnt, size, req);
     }
 
-    void get_vb_context(const sisl::blob& ctx_data) const { m_mgr->get_vb_context(m_vb->vdev_id, ctx_data); }
+    void get_vb_context(const PhysicalDevGroup pdev_group, const sisl::blob& ctx_data) const {
+        m_mgr->get_vb_context(pdev_group, m_vb->vdev_id, ctx_data);
+    }
 
-    void update_vb_context(const sisl::blob& ctx_data) { m_mgr->update_vb_context(m_vb->vdev_id, ctx_data); }
+    void update_vb_context(const PhysicalDevGroup pdev_group, const sisl::blob& ctx_data) {
+        m_mgr->update_vb_context(pdev_group, m_vb->vdev_id, ctx_data);
+    }
     uint64_t get_size() const { return m_vb->size; }
 
     uint64_t get_available_blks() const {
@@ -1314,17 +1329,17 @@ public:
     void rm_device() {
         for (auto& pcm : m_primary_pdev_chunks_list) {
             for (auto& c : pcm.chunks_in_pdev) {
-                m_mgr->free_chunk(c);
+                m_mgr->free_chunk(m_pdev_group, c);
             }
         }
 
         for (auto& v : m_mirror_chunks) {
             for (auto& c : v.second) {
-                m_mgr->free_chunk(c);
+                m_mgr->free_chunk(m_pdev_group, c);
             }
         }
 
-        m_mgr->free_vdev(m_vb);
+        m_mgr->free_vdev(m_pdev_group, m_vb);
     }
 
     std::string to_string() const { return std::string{}; }
@@ -1558,7 +1573,9 @@ private:
         COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
 
         ssize_t bytes_written{0};
-        auto align_sz = HS_STATIC_CONFIG(drive_attr.phys_page_size);
+        const auto align_sz{pdev->m_pdev_group == PhysicalDevGroup::DATA
+                                ? HS_STATIC_CONFIG(data_drive_attr.phys_page_size)
+                                : HS_STATIC_CONFIG(fast_drive_attr.phys_page_size)};
         COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
         if (sisl_unlikely(!hs_utils::mod_aligned_sz(offset_in_dev, align_sz))) {
             COUNTER_INCREMENT(m_metrics, unalign_writes, 1);
@@ -1605,7 +1622,9 @@ private:
                                const boost::intrusive_ptr< virtualdev_req >& req = nullptr) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
 
-        const auto align_sz{HS_STATIC_CONFIG(drive_attr.phys_page_size)};
+    const auto align_sz{pdev->m_pdev_group == PhysicalDevGroup::DATA
+                                ? HS_STATIC_CONFIG(data_drive_attr.phys_page_size)
+                                : HS_STATIC_CONFIG(fast_drive_attr.phys_page_size)};
         COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
         if (sisl_unlikely(!hs_utils::mod_aligned_sz(offset_in_dev, align_sz))) {
             COUNTER_INCREMENT(m_metrics, unalign_writes, 1);
@@ -1800,8 +1819,9 @@ private:
             m_primary_pdev_chunks_list.push_back(pcm);
             m_selector->add_pdev(pcm.pdev);
         }
-        HS_ASSERT_CMP(DEBUG, m_chunk_size, <=, MAX_CHUNK_SIZE);
-        std::shared_ptr< BlkAllocator > ba{Allocator::create_allocator(m_chunk_size, get_page_size(), m_auto_recovery,
+        const auto max_chunk_size{m_pdev_group == PhysicalDevGroup ::DATA ? MAX_DATA_CHUNK_SIZE() : MAX_FAST_CHUNK_SIZE()};
+        HS_ASSERT_CMP(DEBUG, m_chunk_size, <=, max_chunk_size);
+        std::shared_ptr< BlkAllocator > ba{Allocator::create_allocator(m_pdev_group, m_chunk_size, get_page_size(), m_auto_recovery,
                                                                        chunk->get_chunk_id(), m_recovery_init)};
         chunk->set_blk_allocator(ba);
         if (!m_recovery_init) { chunk->recover(); }
@@ -1865,7 +1885,7 @@ private:
     }
 
     uint64_t to_dev_offset(const BlkId& glob_uniq_id, PhysicalDevChunk** const chunk) const {
-        *chunk = m_mgr->get_chunk_mutable(glob_uniq_id.get_chunk_num());
+        *chunk = m_mgr->get_chunk_mutable(glob_uniq_id.get_chunk_num(), m_pdev_group);
 
         const uint64_t dev_offset{static_cast< uint64_t >(glob_uniq_id.get_blk_num()) * get_page_size() +
                                   static_cast< uint64_t >((*chunk)->get_start_offset())};

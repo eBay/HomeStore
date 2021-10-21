@@ -56,15 +56,17 @@ private:
     std::string m_unique_name;
     bool m_auto_recovery{false};
     bool m_realtime_bm_on{true}; // only specifically turn off in BlkAlloc Test;
+    PhysicalDevGroup m_pdev_group;
 
 public:
-    BlkAllocConfig(const uint32_t blk_size, const uint64_t size, const std::string& name = "",
+    BlkAllocConfig(const PhysicalDevGroup pdev_group, const uint32_t blk_size, const uint64_t size, const std::string& name = "",
                    const bool realtime_bm_on = true) :
             m_blk_size{blk_size},
             m_capacity{static_cast< blk_cap_t >(size / blk_size)},
             m_blks_per_portion{std::min(HS_DYNAMIC_CONFIG(blkallocator.num_blks_per_portion), m_capacity)},
             m_unique_name{name},
-            m_realtime_bm_on{realtime_bm_on} {}
+            m_realtime_bm_on{realtime_bm_on},
+            m_pdev_group{pdev_group} {}
 
     BlkAllocConfig(const BlkAllocConfig&) = default;
     BlkAllocConfig(BlkAllocConfig&&) noexcept = delete;
@@ -92,6 +94,8 @@ public:
         return fmt::format("BlkSize={} TotalBlks={} BlksPerPortion={} auto_recovery={}", get_blk_size(),
                            get_total_blks(), get_blks_per_portion(), get_auto_recovery());
     }
+
+    [[nodiscard]] PhysicalDevGroup get_pdev_group() const { return m_pdev_group; }
 };
 
 VENUM(BlkOpStatus, uint8_t,
@@ -197,20 +201,25 @@ public:
 
 class BlkAllocator {
 public:
-    BlkAllocator(const BlkAllocConfig& cfg, const uint32_t id = 0) : m_cfg{cfg}, m_chunk_id{(chunk_num_t)id} {
+    BlkAllocator(const BlkAllocConfig& cfg, const chunk_num_t id = 0) :
+            m_cfg{cfg}, m_chunk_id{id} {
         m_blk_portions = std::make_unique< BlkAllocPortion[] >(cfg.get_total_portions());
         for (blk_num_t index{0}; index < cfg.get_total_portions(); ++index) {
             m_blk_portions[index].set_portion_num(index);
             m_blk_portions[index].set_available_blocks(m_cfg.get_blks_per_portion());
         }
         m_auto_recovery = cfg.get_auto_recovery();
-        m_disk_bm = std::make_unique< sisl::Bitset >(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
+        const auto align_size{m_cfg.get_pdev_group() == PhysicalDevGroup::DATA
+                                  ? HS_STATIC_CONFIG(data_drive_attr.align_size)
+                                  : HS_STATIC_CONFIG(fast_drive_attr.align_size)};
+        const auto bitmap_id{encode_pdev_group_and_chunk_id(m_cfg.get_pdev_group(), id)};
+        m_disk_bm =
+            std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), bitmap_id, align_size);
 
         if (!HS_DYNAMIC_CONFIG(generic.sanity_check_level_non_hotswap)) { m_cfg.m_realtime_bm_on = false; }
 
         if (realtime_bm_on()) {
-            m_realtime_bm =
-                std::make_unique< sisl::Bitset >(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
+            m_realtime_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), bitmap_id, align_size);
         }
         // NOTE:  Blocks per portion must be modulo word size so locks do not fall on same word
         assert(m_cfg.get_blks_per_portion() % m_disk_bm->word_size() == 0);
@@ -403,7 +412,9 @@ public:
         synchronize_rcu();
 
         BLKALLOC_ASSERT(RELEASE, old_alloc_list_ptr == nullptr, "Expecting alloc list to be nullptr");
-        return (m_disk_bm->serialize(HS_STATIC_CONFIG(drive_attr.align_size)));
+        return (m_disk_bm->serialize(m_cfg.get_pdev_group() == PhysicalDevGroup::DATA
+                                          ? HS_STATIC_CONFIG(data_drive_attr.align_size)
+                                          : HS_STATIC_CONFIG(fast_drive_attr.align_size)));
     }
 
     void cp_done() {
@@ -449,7 +460,9 @@ public:
 
     void create_debug_bm() {
         m_debug_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), m_chunk_id,
-                                                      HS_STATIC_CONFIG(drive_attr.align_size));
+                                                      (m_cfg.get_pdev_group() == PhysicalDevGroup::DATA
+                                                          ? HS_STATIC_CONFIG(data_drive_attr.align_size)
+                                                          : HS_STATIC_CONFIG(fast_drive_attr.align_size)));
         assert(m_cfg.get_blks_per_portion() % m_debug_bm->word_size() == 0);
     }
 
@@ -472,6 +485,20 @@ public:
     }
 
     [[nodiscard]] bool realtime_bm_on() const { return (m_cfg.m_realtime_bm_on && m_auto_recovery); }
+
+    static uint64_t encode_pdev_group_and_chunk_id(const PhysicalDevGroup pdev_group, chunk_num_t chunk_id)
+    {
+        return static_cast< uint64_t >(chunk_id & 0xFFFFFFFF) |
+            ((static_cast< uint64_t >(pdev_group) & 0xFFFFFFFF) << 32);        
+    }
+
+    static std::pair< PhysicalDevGroup, chunk_num_t > get_pdev_group_and_chunk_id(const uint64_t id)
+    {
+        const chunk_num_t chunk_id{static_cast< chunk_num_t >(id & 0xFFFFFFFF)};
+        const auto pdev_id{static_cast< std::underlying_type_t< PhysicalDevGroup > >((id >> 32) & 0xFFFFFFFF)};
+        const auto pdev_group{static_cast< PhysicalDevGroup >(pdev_id)};
+        return {pdev_group, chunk_id};
+    }
 
 private:
     [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); }
@@ -532,7 +559,8 @@ private:
 
 struct blkalloc_cp {
 public:
-    bool suspend = false;
+    explicit blkalloc_cp() {}
+    bool suspend{false};
     std::vector< blkid_list_ptr > free_blkid_list_vector;
     HomeStoreBaseSafePtr m_hs{HomeStoreBase::safe_instance()};
 
@@ -542,26 +570,27 @@ public:
     void resume_cp() { suspend = false; }
     void free_blks(const blkid_list_ptr& list) {
         auto it{list->begin(true /* latest */)};
-        const BlkId* bid;
-        while ((bid = list->next(it)) != nullptr) {
-            auto* const chunk{m_hs->get_device_manager()->get_chunk_mutable(bid->get_chunk_num())};
+        const std::pair<BlkId, PhysicalDevGroup>* bid_pair;
+        while ((bid_pair = list->next(it)) != nullptr) {
+            const auto chunk_num{bid_pair->first.get_chunk_num()};
+            auto* const chunk{m_hs->get_device_manager()->get_chunk_mutable(
+                chunk_num, bid_pair->second)};
             auto ba{chunk->get_blk_allocator_mutable()};
-            ba->free_on_disk(*bid);
+            ba->free_on_disk(bid_pair->first);
         }
         free_blkid_list_vector.push_back(list);
     }
-
-    blkalloc_cp() = default;
     ~blkalloc_cp() {
         /* free all the blkids in the cache */
         for (auto& list : free_blkid_list_vector) {
-            const BlkId* bid;
+            const std::pair< BlkId, PhysicalDevGroup >* bid_pair;
             auto it{list->begin(false /* latest */)};
-            while ((bid = list->next(it)) != nullptr) {
-                auto* const chunk{m_hs->get_device_manager()->get_chunk_mutable(bid->get_chunk_num())};
-                chunk->get_blk_allocator_mutable()->free(*bid);
+            while ((bid_pair = list->next(it)) != nullptr) {
+                const auto chunk_num{bid_pair->first.get_chunk_num()};
+                auto* const chunk{m_hs->get_device_manager()->get_chunk_mutable(chunk_num, bid_pair->second)};
+                chunk->get_blk_allocator_mutable()->free(bid_pair->first);
                 const auto page_size{chunk->get_blk_allocator()->get_config().get_blk_size()};
-                ResourceMgr::dec_free_blk(bid->data_size(page_size));
+                ResourceMgr::dec_free_blk(bid_pair->first.data_size(page_size));
             }
             list->clear();
         }

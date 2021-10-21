@@ -37,11 +37,10 @@ static void init_homestore(std::string const& device_address) {
 	static bool init_done;
 
 	init_done = false;
-	homestore::dev_info dev;
-	dev.dev_names = device_address;
+	homestore::dev_info dev{ "device_address" };
 
 	homestore::init_params params;
-	params.devices.push_back(dev);
+	params.data_devices.push_back(std::move(dev));
 	params.min_virtual_page_size = 4 * Ki;
 	params.app_mem_size = 2 * Gi;
 	params.init_done_cb = [&tl_init_lock = init_lock, &tl_wait_cv = wait_cv, &tl_init_done = init_done](std::error_condition,

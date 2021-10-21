@@ -184,6 +184,8 @@ public:
 
     [[nodiscard]] bool is_aligned_buf_needed(const size_t size);
 
+    [[nodiscard]] uint32_t get_blockstore_page_size() const;
+
     [[nodiscard]] uint32_t get_page_size() const;
 
     [[nodiscard]] uint64_t get_available_blks() const;

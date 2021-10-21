@@ -482,7 +482,8 @@ private:
     [[nodiscard]] bool resize_if_needed();
 
     [[nodiscard]] uint32_t required_sb_size(const uint32_t nstores) const {
-        return sisl::round_up(size_needed(nstores), HS_STATIC_CONFIG(drive_attr.phys_page_size));
+        // TO DO: Might need to differentiate based on data or fast type
+        return sisl::round_up(size_needed(nstores), HS_STATIC_CONFIG(data_drive_attr.phys_page_size));
     }
 
     [[nodiscard]] uint32_t size_needed(const uint32_t nstores) const {

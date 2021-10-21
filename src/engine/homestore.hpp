@@ -63,8 +63,8 @@ public:
     virtual ~HomeStore() = default;
 
     void init(const hs_input_params& input) {
-        if (input.devices.size() == 0) {
-            LOGERROR("no devices given");
+        if (input.data_devices.empty()) {
+            LOGERROR("no data devices given");
             throw std::invalid_argument("null device list");
         }
 
@@ -76,8 +76,17 @@ public:
         /* set the homestore static config parameters */
         auto& hs_config = HomeStoreStaticConfig::instance();
         hs_config.input = input;
-        hs_config.drive_attr =
-            (input.drive_attr) ? *input.drive_attr : get_drive_attrs(input.devices, input.device_type);
+        hs_config.data_drive_attr = (input.data_drive_attr)
+            ? *input.data_drive_attr
+            : get_drive_attrs(input.data_devices, input.data_device_type);
+        if (input.fast_devices_present()) {
+            hs_config.fast_drive_present = true;
+            hs_config.fast_drive_attr = (input.fast_drive_attr)
+                ? *input.fast_drive_attr
+                : get_drive_attrs(input.fast_devices, input.fast_device_type);
+        } else {
+            hs_config.fast_drive_present = false;
+        }
 
         HomeStoreDynamicConfig::init_settings_default();
 
@@ -103,9 +112,9 @@ public:
          * Note :- This restriction will go away once btree start supporinting higher size value.
          */
         hs_config.engine.max_blks_in_blkentry = std::min(static_cast< uint32_t >(BlkId::max_blks_in_op()),
-                                                         hs_config.drive_attr.atomic_phys_page_size / (4 * 2));
+                                                         hs_config.data_drive_attr.atomic_phys_page_size / (4 * 2));
         hs_config.engine.min_io_size =
-            std::min(input.min_virtual_page_size, (uint32_t)hs_config.drive_attr.atomic_phys_page_size);
+            std::min(input.min_virtual_page_size, (uint32_t)hs_config.data_drive_attr.atomic_phys_page_size);
         hs_config.engine.memvec_max_io_size = {static_cast< uint64_t >(
             HS_STATIC_CONFIG(engine.min_io_size) * ((static_cast< uint64_t >(1) << MEMPIECE_ENCODE_MAX_BITS) - 1))};
         hs_config.engine.max_vol_io_size = hs_config.engine.memvec_max_io_size;
@@ -122,13 +131,14 @@ public:
 
         /* create cache */
         uint64_t cache_size = ResourceMgr::get_cache_size();
-        m_cache = std::make_unique< CacheType >(cache_size, hs_config.drive_attr.atomic_phys_page_size);
+        // TO DO: Might need to differentiate based on data or fast type
+        m_cache = std::make_unique< CacheType >(cache_size, hs_config.data_drive_attr.atomic_phys_page_size);
 
         /* create device manager */
         m_dev_mgr = std::make_unique< DeviceManager >(
             std::bind(&HomeStore::new_vdev_found, this, std::placeholders::_1, std::placeholders::_2),
-            sizeof(sb_blkstore_blob), virtual_dev_process_completions, input.device_type,
-            std::bind(&HomeStore::process_vdev_error, this, std::placeholders::_1));
+            sizeof(sb_blkstore_blob), virtual_dev_process_completions, input.data_device_type,
+            input.fast_device_type, std::bind(&HomeStore::process_vdev_error, this, std::placeholders::_1));
     }
 
     cap_attrs get_system_capacity() {
@@ -186,9 +196,15 @@ protected:
         auto& hs_config = HomeStoreStaticConfig::instance();
 
         /* attach physical devices */
-        bool first_time_boot = m_dev_mgr->add_devices(hs_config.input.devices);
-        HS_ASSERT_CMP(LOGMSG, m_dev_mgr->get_total_cap() / hs_config.input.devices.size(), >, MIN_DISK_CAP_SUPPORTED);
-        HS_ASSERT_CMP(LOGMSG, m_dev_mgr->get_total_cap(), <, MAX_SUPPORTED_CAP);
+        const bool first_time_boot{m_dev_mgr->add_devices(hs_config.input.data_devices, hs_config.input.fast_devices)};
+        HS_ASSERT_CMP(LOGMSG, m_dev_mgr->get_total_cap(PhysicalDevGroup::DATA) / hs_config.input.data_devices.size(), >, MIN_DATA_DISK_CAP_SUPPORTED());
+        HS_ASSERT_CMP(LOGMSG, m_dev_mgr->get_total_cap(PhysicalDevGroup::DATA), <, MAX_DATA_SUPPORTED_CAP());
+        if (!hs_config.input.fast_devices.empty()) {
+            HS_ASSERT_CMP(LOGMSG,
+                          m_dev_mgr->get_total_cap(PhysicalDevGroup::FAST) / hs_config.input.fast_devices.size(), >,
+                          MIN_FAST_DISK_CAP_SUPPORTED());
+            HS_ASSERT_CMP(LOGMSG, m_dev_mgr->get_total_cap(PhysicalDevGroup::FAST), <, MAX_FAST_SUPPORTED_CAP());
+        }
 
         /* create blkstore if it is a first time boot */
         if (first_time_boot) {
@@ -235,7 +251,8 @@ protected:
         }
     }
 
-    void create_data_blkstore(vdev_info_block* vb) {
+    void create_data_blkstore(vdev_info_block* const vb) {
+        const PhysicalDevGroup pdev_group{PhysicalDevGroup::DATA};
         if (vb == nullptr) {
             /* change it to context */
             struct blkstore_blob blob {};
@@ -244,10 +261,10 @@ protected:
             m_size_avail = size;
             LOGINFO("maximum capacity for data blocks is {}", m_size_avail);
             m_data_blk_store = std::make_unique< data_blkstore_t >(
-                m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::WRITEBACK_CACHE, 0, (char*)&blob,
-                sizeof(blkstore_blob), m_data_pagesz, "data", true, data_completion_cb());
+                m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::WRITEBACK_CACHE, 0,
+                (char*)&blob, sizeof(blkstore_blob), m_data_pagesz, "data", true, data_completion_cb());
         } else {
-            m_data_blk_store = std::make_unique< data_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb,
+            m_data_blk_store = std::make_unique< data_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, pdev_group,
                                                                    BlkStoreCacheType::WRITEBACK_CACHE, m_data_pagesz,
                                                                    "data", vb->is_failed(), true, data_completion_cb());
             if (vb->is_failed()) {
@@ -258,20 +275,26 @@ protected:
         }
     }
 
-    void create_index_blkstore(vdev_info_block* vb) {
+    void create_index_blkstore(vdev_info_block* const vb) {
+        const PhysicalDevGroup pdev_group{m_dev_mgr->fast_devices_present() ? PhysicalDevGroup::FAST
+                                                                            : PhysicalDevGroup::DATA};
+        const auto atomic_phys_page_size{pdev_group == PhysicalDevGroup::DATA
+                                              ? HS_STATIC_CONFIG(data_drive_attr.atomic_phys_page_size)
+                                              : HS_STATIC_CONFIG(fast_drive_attr.atomic_phys_page_size)};
         if (vb == nullptr) {
             struct blkstore_blob blob {};
             blob.type = blkstore_type::INDEX_STORE;
             const uint64_t size{pct_to_size(indx_blkstore_pct)};
             m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
-                m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE, 0, (char*)&blob,
-                sizeof(blkstore_blob), HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "index", true);
+                m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE, 0,
+                (char*)&blob, sizeof(blkstore_blob), atomic_phys_page_size, "index",
+                true);
             ++m_format_cnt;
             m_index_blk_store->format(([this](bool success) { init_done(true); }));
         } else {
             m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
-                m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE,
-                HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "index", vb->is_failed(), true);
+                m_dev_mgr.get(), m_cache.get(), vb, pdev_group, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE,
+                atomic_phys_page_size, "index", vb->is_failed(), true);
             if (vb->is_failed()) {
                 m_vdev_failed = true;
                 LOGINFO("index block store is in failed state");
@@ -280,21 +303,25 @@ protected:
         }
     }
 
-    void create_meta_blkstore(vdev_info_block* vb) {
+    void create_meta_blkstore(vdev_info_block* const vb) {
+        const PhysicalDevGroup pdev_group{PhysicalDevGroup::DATA};
+        const auto phys_page_size{pdev_group == PhysicalDevGroup::DATA
+                                      ? HS_STATIC_CONFIG(data_drive_attr.phys_page_size)
+                                      : HS_STATIC_CONFIG(fast_drive_attr.phys_page_size)};
         if (vb == nullptr) {
             struct blkstore_blob blob {};
             blob.type = blkstore_type::META_STORE;
             const uint64_t size{pct_to_size(meta_blkstore_pct)};
             m_meta_blk_store = std::make_unique< meta_blkstore_t >(
-                m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::PASS_THRU, 0, (char*)&blob,
-                sizeof(blkstore_blob), HS_STATIC_CONFIG(drive_attr.phys_page_size), "meta", false);
+                m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::PASS_THRU, 0, (char*)&blob,
+                sizeof(blkstore_blob), phys_page_size, "meta", false);
             ++m_format_cnt;
             m_meta_blk_store->format(([this](bool success) { init_done(true); }));
 
         } else {
             m_meta_blk_store = std::make_unique< meta_blkstore_t >(
-                m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::PASS_THRU,
-                HS_STATIC_CONFIG(drive_attr.phys_page_size), "meta", vb->is_failed(), false);
+                m_dev_mgr.get(), m_cache.get(), vb, pdev_group, BlkStoreCacheType::PASS_THRU, phys_page_size,
+                                                                   "meta", vb->is_failed(), false);
             if (vb->is_failed()) {
                 m_vdev_failed = true;
                 LOGINFO("meta block store is in failed state");
@@ -311,21 +338,27 @@ protected:
         }
     }
 
-    void create_data_logdev_blkstore(vdev_info_block* vb) {
+    void create_data_logdev_blkstore(vdev_info_block* const vb) {
+        const PhysicalDevGroup pdev_group{m_dev_mgr->fast_devices_present() ? PhysicalDevGroup::FAST
+                                                                            : PhysicalDevGroup::DATA};
+        const auto atomic_phys_page_size{pdev_group == PhysicalDevGroup::DATA
+                                             ? HS_STATIC_CONFIG(data_drive_attr.atomic_phys_page_size)
+                                             : HS_STATIC_CONFIG(fast_drive_attr.atomic_phys_page_size)};
         if (vb == nullptr) {
             struct blkstore_blob blob {};
             blob.type = blkstore_type::DATA_LOGDEV_STORE;
             const uint64_t size{pct_to_size(data_logdev_blkstore_pct)};
             m_data_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
-                m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::PASS_THRU, 0, (char*)&blob,
-                sizeof(blkstore_blob), HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "data_logdev", false,
+                m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::PASS_THRU, 0, (char*)&blob,
+                sizeof(blkstore_blob), atomic_phys_page_size,
+                "data_logdev", false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::data_logdev(), std::placeholders::_1));
             ++m_format_cnt;
             m_data_logdev_blk_store->format(([this](bool success) { init_done(true); }));
         } else {
             m_data_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
-                m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::PASS_THRU,
-                HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "data_logdev", vb->is_failed(), false,
+                m_dev_mgr.get(), m_cache.get(), vb, pdev_group, BlkStoreCacheType::PASS_THRU, atomic_phys_page_size,
+                "data_logdev", vb->is_failed(), false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::data_logdev(), std::placeholders::_1));
             if (vb->is_failed()) {
                 m_vdev_failed = true;
@@ -335,21 +368,27 @@ protected:
         }
     }
 
-    void create_ctrl_logdev_blkstore(vdev_info_block* vb) {
+    void create_ctrl_logdev_blkstore(vdev_info_block* const vb) {
+        const PhysicalDevGroup pdev_group{m_dev_mgr->fast_devices_present() ? PhysicalDevGroup::FAST
+                                                                            : PhysicalDevGroup::DATA};
+        const auto atomic_phys_page_size{pdev_group == PhysicalDevGroup::DATA
+                                             ? HS_STATIC_CONFIG(data_drive_attr.atomic_phys_page_size)
+                                             : HS_STATIC_CONFIG(fast_drive_attr.atomic_phys_page_size)};
         if (vb == nullptr) {
             struct blkstore_blob blob {};
             blob.type = blkstore_type::CTRL_LOGDEV_STORE;
             const uint64_t size{pct_to_size(ctrl_logdev_blkstore_pct)};
             m_ctrl_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
-                m_dev_mgr.get(), m_cache.get(), size, BlkStoreCacheType::PASS_THRU, 0, (char*)&blob,
-                sizeof(blkstore_blob), HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "ctrl_logdev", false,
+                m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::PASS_THRU, 0, (char*)&blob,
+                sizeof(blkstore_blob), atomic_phys_page_size,
+                "ctrl_logdev", false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::ctrl_logdev(), std::placeholders::_1));
             ++m_format_cnt;
             m_ctrl_logdev_blk_store->format(([this](bool success) { init_done(true); }));
         } else {
             m_ctrl_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
-                m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::PASS_THRU,
-                HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "ctrl_logdev", vb->is_failed(), false,
+                m_dev_mgr.get(), m_cache.get(), vb, pdev_group, BlkStoreCacheType::PASS_THRU, atomic_phys_page_size,
+                "ctrl_logdev", vb->is_failed(), false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::ctrl_logdev(), std::placeholders::_1));
             if (vb->is_failed()) {
                 m_vdev_failed = true;
@@ -405,9 +444,12 @@ private:
     }
 
 private:
-    uint64_t pct_to_size(const float pct) const {
-        uint64_t sz{static_cast< uint64_t >((pct * static_cast< double >(m_dev_mgr->get_total_cap())) / 100)};
-        return sisl::round_up(sz, HS_STATIC_CONFIG(drive_attr.phys_page_size));
+    uint64_t pct_to_size(const float pct, const PhysicalDevGroup pdev_group = PhysicalDevGroup::DATA) const {
+        uint64_t sz{static_cast< uint64_t >((pct * static_cast< double >(m_dev_mgr->get_total_cap(pdev_group))) / 100)};
+        // TO DO: Add something for fast_drive_attr
+        return sisl::round_up(sz,
+                              pdev_group == PhysicalDevGroup::DATA ? HS_STATIC_CONFIG(data_drive_attr.phys_page_size)
+                                                                   : HS_STATIC_CONFIG(fast_drive_attr.phys_page_size));
     }
 
 protected:

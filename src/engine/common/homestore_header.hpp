@@ -33,7 +33,10 @@ ENUM(io_flag, uint8_t,
 ENUM(Op_type, uint8_t, READ, WRITE, UNMAP);
 
 struct dev_info {
+    typedef enum class Type : uint8_t { Data, Fast } Type;
+    explicit dev_info(std::string name, const Type type = Type::Data) : dev_names{std::move(name)}, dev_type{type} {}
     std::string dev_names;
+    Type dev_type;
 };
 
 #define METRICS_DUMP_MSG sisl::MetricsFarm::getInstance().get_result_in_json_string()

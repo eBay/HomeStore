@@ -36,7 +36,10 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const
 
     // TODO: Raise exception when blk_size > page_size or total blks is less than some number etc...
     m_cache_bm =
-        std::make_unique< sisl::Bitset >(cfg.get_total_blks(), chunk_id, HS_STATIC_CONFIG(drive_attr.align_size));
+        std::make_unique< sisl::Bitset >(cfg.get_total_blks(), chunk_id,
+                                         cfg.get_pdev_group() == PhysicalDevGroup::DATA
+                                             ? HS_STATIC_CONFIG(data_drive_attr.align_size)
+                                             : HS_STATIC_CONFIG(fast_drive_attr.align_size));
 
     // NOTE: Number of blocks must be modulo word size so locks do not fall on same word
     HS_RELEASE_ASSERT_EQ(m_cfg.get_blks_per_portion() % m_cache_bm->word_size(), 0,

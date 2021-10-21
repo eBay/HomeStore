@@ -180,6 +180,7 @@ public:
     BlkStore(DeviceManager* const mgr,           // Device manager instance
              CacheType* const cache,             // Cache Instance
              const uint64_t size,                // Size of the blk store device
+             const PhysicalDevGroup pdev_group,
              const BlkStoreCacheType cache_type, // Type of cache, writeback, writethru, none
              const uint32_t mirrors,             // Number of mirrors
              char* const blob,                   // Superblock blob for blkstore
@@ -192,23 +193,28 @@ public:
             m_pagesz{page_size},
             m_cache{cache},
             m_cache_type{cache_type},
+            m_pdev_group{pdev_group},
             m_vdev{mgr,
                    name,
+                   pdev_group,
                    context_size,
                    mirrors,
                    true,
                    m_pagesz,
-                   mgr->get_all_devices(),
+                   mgr->get_all_devices(pdev_group),
                    (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)),
                    blob,
                    size,
                    auto_recovery},
             m_comp_cb{std::move(comp_cb)},
-            m_metrics{name} {}
+            m_metrics{name},
+            m_alignment{m_pdev_group == PhysicalDevGroup::DATA ? HS_STATIC_CONFIG(data_drive_attr.align_size)
+                                                               : HS_STATIC_CONFIG(fast_drive_attr.align_size)} {}
 
     BlkStore(DeviceManager* const mgr,           // Device manager instance
              CacheType* const cache,             // Cache Instance
              vdev_info_block* const vb,          // Load vdev from this vdev_info_block
+             const PhysicalDevGroup pdev_group,
              const BlkStoreCacheType cache_type, // Type of cache, writeback, writethru, none
              const uint32_t page_size,           // Block device page size
              const char* const name,             // Name for blkstore
@@ -219,14 +225,18 @@ public:
             m_pagesz{page_size},
             m_cache{cache},
             m_cache_type{cache_type},
+            m_pdev_group{pdev_group},
             m_vdev{mgr,
                    name,
                    vb,
+                   pdev_group,
                    (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)),
                    recovery_init,
                    auto_recovery},
             m_comp_cb{std::move(comp_cb)},
-            m_metrics{name} {}
+            m_metrics{name},
+            m_alignment{m_pdev_group == PhysicalDevGroup::DATA ? HS_STATIC_CONFIG(data_drive_attr.align_size)
+                                                               : HS_STATIC_CONFIG(fast_drive_attr.align_size)} {}
 
     BlkStore(const BlkStore&) = delete;
     BlkStore& operator=(const BlkStore&) = delete;
@@ -353,7 +363,7 @@ public:
 
         // Create a new block of memory for the blocks requested and set the memvec pointer to that
         const auto size{blkid.data_size(m_pagesz)};
-        uint8_t* ptr{hs_utils::iobuf_alloc(size, Buffer::get_buf_tag())};
+        uint8_t* ptr{hs_utils::iobuf_alloc(size, Buffer::get_buf_tag(), m_alignment)};
         boost::intrusive_ptr< homeds::MemVector > mvec{new homeds::MemVector(), true};
         mvec->set(ptr, size, 0);
         mvec->set_tag(Buffer::get_buf_tag());
@@ -566,7 +576,9 @@ public:
         req->blkstore_ref_cnt.increment(1);
         for (auto& missing : missing_mp) {
             // Create a new block of memory for the missing piece
-            uint8_t* ptr{hs_utils::iobuf_alloc(missing.second, Buffer::get_buf_tag())};
+            uint8_t* ptr{hs_utils::iobuf_alloc(missing.second, Buffer::get_buf_tag(), m_pdev_group == PhysicalDevGroup::DATA
+                                                 ? HS_STATIC_CONFIG(data_drive_attr.align_size)
+                                                 : HS_STATIC_CONFIG(fast_drive_attr.align_size))};
             HS_ASSERT_NOTNULL(RELEASE, ptr, "ptr is null");
 
             COUNTER_INCREMENT(m_metrics, blkstore_cache_miss_size, missing.second);
@@ -647,7 +659,9 @@ public:
 
         for (uint32_t i{0}; i < (nmirrors + 1); ++i) {
             /* create the pointer */
-            uint8_t* const mem_ptr{hs_utils::iobuf_alloc(bid.data_size(m_pagesz), Buffer::get_buf_tag())};
+            uint8_t* const mem_ptr{hs_utils::iobuf_alloc(bid.data_size(m_pagesz), Buffer::get_buf_tag(), m_pdev_group == PhysicalDevGroup::DATA
+                                                 ? HS_STATIC_CONFIG(data_drive_attr.align_size)
+                                                 : HS_STATIC_CONFIG(fast_drive_attr.align_size))};
 
             /* set the memvec */
             boost::intrusive_ptr< homeds::MemVector > mvec{new homeds::MemVector{}};
@@ -666,7 +680,7 @@ public:
     }
 
     void blkalloc_cp_start(std::shared_ptr< blkalloc_cp > id) { m_vdev.blkalloc_cp_start(id); }
-    void reset_vdev_failed_state() { m_vdev.reset_failed_state(); }
+    void reset_vdev_failed_state() { m_vdev.reset_failed_state(m_pdev_group); }
 
     uint64_t get_size() const { return m_vdev.get_size(); }
 
@@ -674,9 +688,9 @@ public:
     uint64_t get_used_size() const { return m_vdev.get_used_size(); }
     uint64_t get_available_blks() const { return m_vdev.get_available_blks(); }
 
-    void update_vb_context(const sisl::blob& ctx_data) { m_vdev.update_vb_context(ctx_data); }
+    void update_vb_context(const sisl::blob& ctx_data) { m_vdev.update_vb_context(m_pdev_group, ctx_data); }
 
-    void get_vb_context(const sisl::blob& ctx_data) const { m_vdev.get_vb_context(ctx_data); }
+    void get_vb_context(const sisl::blob& ctx_data) const { m_vdev.get_vb_context(m_pdev_group, ctx_data); }
 
     VirtualDev< BAllocator, RoundRobinDeviceSelector >* get_vdev() { return &m_vdev; };
 
@@ -803,13 +817,17 @@ public:
         return j;
     }
 
+    PhysicalDevGroup get_pdev_group() const { return m_pdev_group; }
+
 private:
     uint32_t m_pagesz;
     CacheType* m_cache;
     BlkStoreCacheType m_cache_type;
+    PhysicalDevGroup m_pdev_group;
     VirtualDev< BAllocator, RoundRobinDeviceSelector > m_vdev;
     comp_callback m_comp_cb;
     BlkStoreMetrics m_metrics;
+    uint32_t m_alignment;
 };
 } // namespace homestore
 #endif // OMSTORE_BLKSTORE_HPP

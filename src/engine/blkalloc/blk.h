@@ -22,10 +22,9 @@
 #include <sisl/fds/buffer.hpp>
 
 #include "engine/common/homestore_config.hpp"
+#include "engine/device/device.h"
 #include "engine/homeds/array/flexarray.hpp"
 #include "engine/homeds/memory/mempiece.hpp"
-
-//#include "device/device.h"
 
 namespace homestore {
 
@@ -241,7 +240,7 @@ std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, trait
     return outStream;
 }
 
-using blkid_list_ptr = std::shared_ptr< sisl::ThreadVector< BlkId > >;
+using blkid_list_ptr = std::shared_ptr< sisl::ThreadVector< std::pair<BlkId, PhysicalDevGroup> > >;
 
 VENUM(BlkAllocStatus, uint32_t,
       BLK_ALLOC_NONE = 0,     // No Action taken

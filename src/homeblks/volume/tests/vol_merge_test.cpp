@@ -4,6 +4,7 @@
 //#include <homeblks/home_blks.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -18,8 +19,8 @@
 
 #include <mapping/mapping.hpp>
 
-#define MAX_DEVICES 2
-#define VOL_PREFIX "/var/tmp/vol/"
+static constexpr size_t MAX_DEVICES{2};
+static const std::string VOL_PREFIX{"/var/tmp/vol/"};
 
 #if 0
 struct dev_info {
@@ -195,16 +196,13 @@ public:
     }
 
     void init_homestore(void) {
-        for (int i = 0; i < MAX_DEVICES; i++) {
-            dev_info temp_info;
-            temp_info.dev_names = names[i];
-            device_info.push_back(temp_info);
+        for (size_t i{0}; i < MAX_DEVICES; ++i) {
+            const std::filesystem::path fpath{names[i]};
             if (init) {
-                std::ofstream ofs(names[i], std::ios::binary | std::ios::out);
-                ofs.seekp(max_disk_capacity - 1);
-                ofs.write("", 1);
-                ofs.close();
+                std::ofstream ofs{path.string(), std::ios::binary | std::ios::out};
+                std::filesystem::resize_file(fpath, max_disk_capacity);
             }
+            device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
             max_capacity += max_disk_capacity;
         }
 

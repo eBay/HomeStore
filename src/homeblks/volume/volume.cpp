@@ -105,6 +105,7 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
         m_metrics(((vol_sb_hdr*)sb_buf.bytes())->vol_name, this),
         m_indx_mgr_destroy_started(false),
         m_sb_cookie(mblk_cookie) {
+    // TO DO: Might need to address alignment based on data or fast type
     m_sb_buf = hs_utils::extract_byte_array(sb_buf);
     auto sb = (vol_sb_hdr*)m_sb_buf->bytes;
     m_state = sb->state;
@@ -123,6 +124,7 @@ void Volume::init() {
     if (m_sb_buf == nullptr) {
         init = true;
         /* populate superblock */
+        // TO DO: Might need to address alignment based on data or fast type
         m_sb_buf = hs_utils::make_byte_array(
             sizeof(vol_sb_hdr), MetaBlkMgrSI()->is_aligned_buf_needed(sizeof(vol_sb_hdr)), sisl::buftag::metablk);
 

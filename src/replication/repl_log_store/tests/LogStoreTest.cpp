@@ -218,14 +218,13 @@ public:
         LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
 
         for (uint32_t i{0}; i < ndevices; ++i) {
-            const std::string fpath{TEST_FILE_PATHS_PREFIX + m_test_type + std::to_string(i + 1)};
+            const std::filesystem::path fpath {TEST_FILE_PATHS_PREFIX + m_test_type + std::to_string(i + 1)};
             if (!restart)
             {
-                std::ofstream ofs{fpath, std::ios::binary | std::ios::out | std::ios::trunc};
-                ofs.close();
+                std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out | std::ios::trunc};
                 std::filesystem::resize_file(fpath, dev_size);
             }
-            device_info.push_back({std::filesystem::canonical(std::filesystem::path{fpath}).string()});
+            device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
         }
 
         const bool is_spdk{SDS_OPTIONS["spdk"].as< bool >()};

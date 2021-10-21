@@ -21,15 +21,17 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/optional.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <engine/common/error.h>
-#include <engine/common/homestore_config.hpp>
-#include <engine/common/homestore_header.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <iomgr/iomgr.hpp>
 #include <sds_logging/logging.h>
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/enum.hpp>
 #include <sisl/utility/obj_life_counter.hpp>
+
+#include <engine/common/error.h>
+#include <engine/common/homestore_config.hpp>
+#include <engine/common/homestore_header.hpp>
+#include <engine/device/device.h>
 
 namespace homestore {
 class Volume;
@@ -197,14 +199,30 @@ public:
     std::string to_string() const {
         std::ostringstream oss;
         oss << "min_virtual_page_size=" << min_virtual_page_size << ",app_mem_size=" << app_mem_size
-            << ",dev_type=" << enum_name(device_type) << ",open_flags =" << open_flags << ", start_http=" << start_http
-            << ",number of devices =" << devices.size();
-        oss << "device names = ";
-        for (size_t i{0}; i < devices.size(); ++i) {
-            oss << devices[i].dev_names;
+            << ",data_dev_type=" << enum_name(data_device_type) << ",number of data devices =" << data_devices.size()
+            << ",data_open_flags =" << data_open_flags;
+        
+        if (fast_devices_present()) {
+            oss << ",fast_dev_type=" << enum_name(fast_device_type)
+                << ",number of fast devices =" << fast_devices.size()
+                << ",fast_open_flags =" << fast_open_flags;
+        }
+        oss << ", start_http=" << start_http;
+           
+        oss << ",data device names = [";
+        for (size_t i{0}; i < data_devices.size(); ++i) {
+            oss << data_devices[i].dev_names;
             oss << ",";
         }
         oss << "]";
+        if (fast_devices_present()) {
+            oss << ",fast device names = [";
+            for (size_t i{0}; i < fast_devices.size(); ++i) {
+                oss << fast_devices[i].dev_names;
+                oss << ",";
+            }
+            oss << "]";
+        }
         return oss.str();
     }
     init_params() = default;
@@ -313,7 +331,7 @@ public:
 
     virtual const char* get_name(const VolumePtr& vol) = 0;
     virtual uint64_t get_size(const VolumePtr& vol) = 0;
-    virtual uint32_t get_align_size() = 0;
+    virtual uint32_t get_align_size(const PhysicalDevGroup pdev_group) = 0;
     virtual uint64_t get_page_size(const VolumePtr& vol) = 0;
     virtual boost::uuids::uuid get_uuid(std::shared_ptr< Volume > vol) = 0;
     virtual sisl::blob at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;

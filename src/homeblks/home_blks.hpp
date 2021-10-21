@@ -47,7 +47,7 @@ class HomeBlksHttpServer;
  * then we need to use double buffer.
  */
 
-const uint32_t HOMEBLKS_SB_SIZE{HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size)};
+const uint32_t HOMEBLKS_SB_SIZE{HS_STATIC_CONFIG(data_drive_attr.atomic_phys_page_size)};
 constexpr uint64_t hb_sb_magic{0xCEEDDEEB};
 constexpr uint32_t hb_sb_version{0x1};
 
@@ -175,7 +175,8 @@ public:
      */
     static HomeBlks* instance();
     static HomeBlksSafePtr safe_instance();
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, io_flag oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type,
+                              const io_flag oflags);
 
     virtual ~HomeBlks() override;
     virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req,
@@ -207,7 +208,7 @@ public:
     // virtual SnapDiffPtr diff_snapshot(const SnapshotPtr& snap1, const SnapshotPtr& snap2);
 
     virtual const char* get_name(const VolumePtr& vol) override;
-    virtual uint32_t get_align_size() override;
+    virtual uint32_t get_align_size(const PhysicalDevGroup pdev_group = PhysicalDevGroup::DATA) override;
     virtual uint64_t get_page_size(const VolumePtr& vol) override;
     virtual uint64_t get_size(const VolumePtr& vol) override;
     virtual boost::uuids::uuid get_uuid(VolumePtr vol) override;

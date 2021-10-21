@@ -1,19 +1,30 @@
-#include <gtest/gtest.h>
+#include <cassert>
+#include <condition_variable>
+#include <cstdint>
+#include <atomic>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <mutex>
 #include <thread>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
-#include "mapping.hpp"
-#include <iomgr/iomgr.hpp>
-#include <iomgr/aio_drive_interface.hpp>
+#include <vector>
 
-extern "C" {
+#ifdef __linux__
 #include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/timeb.h>
-}
+#endif
+
+#include <iomgr/aio_drive_interface.hpp>
+#include <iomgr/iomgr.hpp>
+#include <sds_logging/logging.h>
+#include <sds_options/options.h>
+
+#include <gtest/gtest.h>
+
+#include "mapping.hpp"
 
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
@@ -64,6 +75,7 @@ private:
 struct MapTest : public ::testing::Test {
 protected:
     std::condition_variable m_cv;
+    bool m_completed{false};
     std::mutex m_cv_mtx;
     std::mutex mutex;
     homeds::Bitset* m_lba_bm;
@@ -165,12 +177,10 @@ public:
         /* start homestore */
         /* create files */
 
-        dev_info temp_info;
-        temp_info.dev_names = "file101";
-        device_info.push_back(temp_info);
-        std::ofstream ofs(temp_info.dev_names, std::ios::binary | std::ios::out);
-        ofs.seekp(MAX_SIZE - 1);
-        ofs.write("", 1);
+        const std::filesystem::path fpath{"file101"};
+        std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
+        std::filesystem::resize_file(fpath, MAX_SIZE); // set the file size
+        device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
 
         iomanager.start(num_threads);
         m_tgt.init();
@@ -393,13 +403,21 @@ public:
         write_lba(lba, nlbas, bid);
     }
 
-    void remove_files() { remove("file101"); }
+    void remove_files() { 
+        const std::filesystem::path path{"file101"};
+        if (std::filesystem::exists(path) && std::filesystem::is_regular_file(path)) { std::filesystem::remove("file101"); }
+    }
 
-    void notify_cmpl() { m_cv.notify_all(); }
+    void notify_cmpl() {
+        {
+            std::unique_lock< std::mutex > lk{m_cv_mtx};
+            m_completed = true;
+        }
+        m_cv.notify_all(); }
 
     void wait_cmpl() {
-        std::unique_lock< std::mutex > lk(m_cv_mtx);
-        m_cv.wait(lk);
+        std::unique_lock< std::mutex > lk{m_cv_mtx};
+        m_cv.wait(lk, [] { return m_completed; });
     }
 };
 

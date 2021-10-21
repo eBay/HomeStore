@@ -51,7 +51,7 @@ enum op_type {
 struct mapping_op_cntx {
     op_type op = UPDATE_VAL_ONLY;
     volume_req* vreq;
-    sisl::ThreadVector< BlkId >* free_list;
+    sisl::ThreadVector< std::pair< BlkId, PhysicalDevGroup > >* free_list;
     int64_t seqid = INVALID_SEQ_ID;
     uint64_t free_blk_size = 0;
     bool force = false;

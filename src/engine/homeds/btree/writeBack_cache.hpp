@@ -179,7 +179,7 @@ private:
     trigger_cp_callback m_trigger_cp_cb;
     uint64_t m_free_list_cnt = 0;
     uint64_t m_alloc_list_cnt = 0;
-    static btree_blkstore_t* m_blkstore;
+    btree_blkstore_t* m_blkstore;
     static std::vector< iomgr::io_thread_t > m_thread_ids;
     static thread_local std::vector< flush_buffer_callback > flush_buffer_q;
     static thread_local uint64_t wb_cache_outstanding_cnt;
@@ -189,7 +189,7 @@ public:
     WriteBackCache(void* const blkstore, const uint64_t align_size, cp_comp_callback cb,
                    trigger_cp_callback trigger_cp_cb) {
         for (size_t i{0}; i < MAX_CP_CNT; ++i) {
-            m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
+            m_free_list[i] = std::make_shared< sisl::ThreadVector< std::pair< BlkId, PhysicalDevGroup > > >();
             m_req_list[i] = std::make_unique< sisl::ThreadVector< writeback_req_ptr > >();
             m_dirty_buf_cnt[i].set(0);
         }
@@ -326,7 +326,7 @@ public:
         m_blkstore->free_blk(bid, boost::none, boost::none, free_blkid_list ? true : false);
         if (free_blkid_list) {
             ResourceMgr::inc_free_blk(size);
-            free_blkid_list->push_back(bid);
+            free_blkid_list->push_back(std::make_pair(bid, m_blkstore->get_pdev_group()));
             // release on realtime bitmap;
             const auto ret = m_blkstore->free_on_realtime(bid);
             HS_RELEASE_ASSERT(ret, "fail to free on realtime bm");
@@ -357,6 +357,7 @@ public:
         }
 
         // make a copy
+        // TO DO: Possible alignment
         auto mem{hs_utils::iobuf_alloc(bn->get_cache_size(), sisl::buftag::btree_node)};
         sisl::blob outb;
         (bn->get_memvec()).get(&outb);
@@ -536,8 +537,6 @@ public:
     }
 };
 
-template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
-btree_blkstore_t* wb_cache_t::m_blkstore;
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 std::vector< iomgr::io_thread_t > wb_cache_t::m_thread_ids;
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >

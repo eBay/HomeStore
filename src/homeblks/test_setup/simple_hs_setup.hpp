@@ -2,6 +2,7 @@
 
 #include <condition_variable>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -90,7 +91,9 @@ private:
 
     std::mutex m_mutex;
     std::condition_variable m_init_done_cv;
+    bool m_init_done{false};
     std::condition_variable m_io_done_cv;
+    bool m_io_done{false};
 
     std::vector< vol_info > m_vol_infos;
     std::atomic< size_t > m_outstanding_ios = 0;
@@ -142,10 +145,10 @@ public:
         setup_init_params();
 
         /* Create devices as files */
-        for (auto& di : m_dev_infos) {
-            std::ofstream ofs(di.dev_names, std::ios::binary | std::ios::out);
-            ofs.seekp(m_cfg.m_dev_size - 1);
-            ofs.write("", 1);
+        for (const auto& di : m_dev_infos) {
+            const std::filesystem::path fpath{di.dev_names};
+            std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
+            std::filesystem::resize_file(fpath, m_cfg.m_dev_size); // set the file size
         }
 
         /* Start IOManager and a test target to enable doing IO */
@@ -156,8 +159,8 @@ public:
     }
 
     void wait_homestore_init_done() {
-        std::unique_lock< std::mutex > lk(m_mutex);
-        m_init_done_cv.wait(lk);
+        std::unique_lock< std::mutex > lk{m_mutex};
+        m_init_done_cv.wait(lk, [this]() { return m_init_done; });
     }
 
     void kickstart_io() {
@@ -165,8 +168,8 @@ public:
     }
 
     void wait_for_io_done() {
-        std::unique_lock< std::mutex > lk(m_mutex);
-        m_io_done_cv.wait(lk);
+        std::unique_lock< std::mutex > lk{m_mutex};
+        m_io_done_cv.wait(lk, [this]() { retun m_io_done; });
     }
 
     void shutdown() {
@@ -179,6 +182,11 @@ public:
 
     virtual void init_done_cb(std::error_condition err, const out_params& params) {
         if (err) {
+            { 
+                std::unique_lock< std::mutex > lk{m_mutex};  
+                m_init_done = true;
+                m_io_done = true;
+            }
             m_init_done_cv.notify_all();
             m_io_done_cv.notify_all();
             return;
@@ -188,6 +196,10 @@ public:
             create_volume(v);
         }
 
+        {
+            std::unique_lock< std::mutex > lk{m_mutex};
+            m_init_done = true;
+        }
         m_init_done_cv.notify_all(); /* notify who is waiting for init to be completed */
         m_start_time = Clock::now();
         return;
@@ -329,6 +341,10 @@ public:
         m_outstanding_ios.fetch_sub(1, std::memory_order_acq_rel);
 
         if (get_elapsed_time_ms(m_start_time) > m_cfg.m_run_time_ms) {
+            {
+                std::unique_lock< std::mutex > lk{m_mutex};
+                m_io_done = true;
+            }
             m_io_done_cv.notify_all();
         } else {
             process_new_request();

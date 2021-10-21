@@ -458,6 +458,7 @@ public:
     /************************** Journal entry section **********************/
     static sisl::io_blob make_journal_entry(journal_op op, bool is_root, const btree_cp_ptr& bcp,
                                             bt_node_gen_pair pair = {empty_bnodeid, 0}) {
+        // TO DO: Might need to address alignment based on data or fast type
         auto b =
             hs_utils::create_io_blob(journal_entry_initial_size(),
                                      HomeLogStoreMgr::data_logdev().is_aligned_buf_needed(journal_entry_initial_size()),
@@ -541,9 +542,10 @@ private:
         uint16_t avail_size = b.size - entry->actual_size;
         if (avail_size < append_size) {
             auto new_size = sisl::round_up(entry->actual_size + append_size, journal_entry_alloc_increment);
+            // TO DO: Might need to differentiate based on data or fast type
             b.buf_realloc(new_size,
                           HomeLogStoreMgr::data_logdev().is_aligned_buf_needed(new_size)
-                              ? HS_STATIC_CONFIG(drive_attr.align_size)
+                              ? HS_STATIC_CONFIG(data_drive_attr.align_size)
                               : 0);
         }
         return blob_to_entry(b); // Get the revised entry from blob before returning

@@ -26,7 +26,8 @@ LogDev::LogDev(const logstore_family_id_t f_id, const std::string& metablk_name)
     } else if (f_id == HomeLogStoreMgr::CTRL_LOG_FAMILY_IDX) {
         m_flush_size_multiple = HS_DYNAMIC_CONFIG(logstore->flush_size_multiple_ctrl_logdev);
     }
-    if (m_flush_size_multiple == 0) { m_flush_size_multiple = HS_STATIC_CONFIG(drive_attr.phys_page_size); }
+    // TO DO: Might need to differentiate based on data or fast type
+    if (m_flush_size_multiple == 0) { m_flush_size_multiple = HS_STATIC_CONFIG(data_drive_attr.phys_page_size); }
     THIS_LOGDEV_LOG(INFO, "Initializing logdev with flush size multiple={}", m_flush_size_multiple);
     set_flush_status(false);
 }
@@ -244,9 +245,10 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
     } else {
         // Round them data offset to dma boundary in-order to make sure pread on direct io succeed. We need to skip
         // the rounded portion while copying to user buffer
-        const auto rounded_data_offset{sisl::round_down(data_offset, HS_STATIC_CONFIG(drive_attr.align_size))};
+        // TO DO: Might need to differentiate based on data or fast type
+        const auto rounded_data_offset{sisl::round_down(data_offset, HS_STATIC_CONFIG(data_drive_attr.align_size))};
         const auto rounded_size{
-            sisl::round_up(b.size() + data_offset - rounded_data_offset, HS_STATIC_CONFIG(drive_attr.align_size))};
+            sisl::round_up(b.size() + data_offset - rounded_data_offset, HS_STATIC_CONFIG(data_drive_attr.align_size))};
 
         // Allocate a fresh aligned buffer, if size cannot fit standard size
         if (rounded_size > initial_read_size) { rbuf = hs_utils::iobuf_alloc(rounded_size, sisl::buftag::logread); }
@@ -539,6 +541,7 @@ LogDevMetadata::LogDevMetadata(const std::string& metablk_name) : m_metablk_name
 
 logdev_superblk* LogDevMetadata::create() {
     const auto req_sz{required_sb_size(0)};
+    // TO DO: Might need to address alignment based on data or fast type
     m_raw_buf = hs_utils::make_byte_array(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz), sisl::buftag::metablk);
     m_sb = new (m_raw_buf->bytes) logdev_superblk();
 
@@ -560,6 +563,7 @@ void LogDevMetadata::reset() {
 
 void LogDevMetadata::meta_buf_found(const sisl::byte_view& buf, void* const meta_cookie) {
     m_meta_mgr_cookie = meta_cookie;
+    // TO DO: Might need to address alignment based on data or fast type
     m_raw_buf = hs_utils::extract_byte_array(buf);
     m_sb = reinterpret_cast< logdev_superblk* >(m_raw_buf->bytes);
 
@@ -664,7 +668,7 @@ bool LogDevMetadata::resize_if_needed() {
     const auto req_sz{required_sb_size((m_store_info.size() == 0) ? 0u : *m_store_info.rbegin() + 1)};
     if (req_sz != m_raw_buf->size) {
         const auto old_buf{m_raw_buf};
-
+        // TO DO: Might need to address alignment based on data or fast type
         m_raw_buf =
             hs_utils::make_byte_array(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz), sisl::buftag::metablk);
         m_sb = new (m_raw_buf->bytes) logdev_superblk();

@@ -1,4 +1,5 @@
-﻿#include <fstream>
+﻿#include <algorithm>
+#include <fstream>
 #include <iterator>
 #include <iostream>
 #include <stdexcept>
@@ -38,7 +39,9 @@ void VolInterfaceImpl::zero_boot_sbs(const std::vector< dev_info >& devices, iom
 
 VolInterface* VolInterfaceImpl::init(const init_params& cfg, bool fake_reboot) {
 #ifdef _PRERELEASE
-    if (cfg.force_reinit) { zero_boot_sbs(cfg.devices, cfg.device_type, cfg.open_flags); }
+    if (cfg.force_reinit) { 
+        zero_boot_sbs(cfg.fast_devices, cfg.fast_device_type, cfg.fast_open_flags); 
+        zero_boot_sbs(cfg.data_devices, cfg.data_device_type, cfg.data_open_flags); }
 #endif
 
     return (HomeBlks::init(cfg, fake_reboot));
@@ -93,9 +96,26 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
 
 HomeBlks::~HomeBlks() = default;
 
-void HomeBlks::zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, io_flag oflags) {
+void HomeBlks::zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type,
+                             const io_flag oflags) {
+    if (devices.empty()) return;
     auto& hs_config = HomeStoreStaticConfig::instance();
-    hs_config.drive_attr = get_drive_attrs(devices, drive_type);
+
+    // ensure devices are all the same type
+    const auto dev_type{devices.front().dev_type};
+    for (size_t device_num{1}; device_num < devices.size(); ++device_num) {
+        if (devices[device_num].dev_type != dev_type) {
+            HS_LOG(ERROR, device, "dev={} type={} does not match type dev={} type={}", devices[device_num].dev_names,
+                   devices[device_num].dev_type, devices.front().dev_names, dev_type);
+            HS_DEBUG_ASSERT(false, "Mixed zero_boot_sbs device types");
+        }
+    }
+    if (dev_type == dev_info::Type::Data) {
+        hs_config.data_drive_attr = get_drive_attrs(devices, drive_type);
+    }
+    else {
+        hs_config.fast_drive_attr = get_drive_attrs(devices, drive_type);
+    }
     return DeviceManager::zero_boot_sbs(devices, drive_type, oflags);
 }
 
@@ -305,7 +325,11 @@ std::error_condition HomeBlks::unmap(const VolumePtr& vol, const vol_interface_r
 }
 
 const char* HomeBlks::get_name(const VolumePtr& vol) { return vol->get_name(); }
-uint32_t HomeBlks::get_align_size() { return HS_STATIC_CONFIG(drive_attr.align_size); }
+// TO DO: Might need to differentiate based on data or fast type
+uint32_t HomeBlks::get_align_size(const PhysicalDevGroup pdev_group) {
+    return pdev_group == PhysicalDevGroup::DATA ? HS_STATIC_CONFIG(data_drive_attr.align_size)
+                                                : HS_STATIC_CONFIG(fast_drive_attr.align_size);
+}
 uint64_t HomeBlks::get_page_size(const VolumePtr& vol) { return vol->get_page_size(); }
 uint64_t HomeBlks::get_size(const VolumePtr& vol) { return vol->get_size(); }
 boost::uuids::uuid HomeBlks::get_uuid(VolumePtr vol) { return vol->get_uuid(); }
@@ -417,6 +441,7 @@ homeblks_sb* HomeBlks::superblock_init() {
     HS_RELEASE_ASSERT_EQ(m_homeblks_sb_buf, nullptr, "Reinit already initialized super block");
 
     /* build the homeblks super block */
+    // TO DO: Might need to address alignment based on data or fast type
     m_homeblks_sb_buf = hs_utils::make_byte_array(
         HOMEBLKS_SB_SIZE, MetaBlkMgrSI()->is_aligned_buf_needed(HOMEBLKS_SB_SIZE), sisl::buftag::metablk);
 
@@ -567,7 +592,8 @@ bool HomeBlks::verify_vols() {
 bool HomeBlks::verify_data_bm() {
     /* Create the data bitmap */
     auto hb{HomeBlks::safe_instance()};
-    BlkAllocStatus status{hb->get_data_blkstore()->create_debug_bm()};
+    auto* const data_blkstore_ptr{hb->get_data_blkstore()};
+    BlkAllocStatus status{data_blkstore_ptr->create_debug_bm()};
     if (status != BlkAllocStatus::SUCCESS) {
         LOGERROR("failing to create data debug bitmap as it is out of disk space");
         return false;
@@ -596,7 +622,8 @@ bool HomeBlks::verify_data_bm() {
 bool HomeBlks::verify_index_bm() {
     /* Create the index bitmap */
     auto hb{HomeBlks::safe_instance()};
-    BlkAllocStatus status{hb->get_index_blkstore()->create_debug_bm()};
+    auto* const index_blockstore_ptr{hb->get_index_blkstore()};
+    BlkAllocStatus status{index_blockstore_ptr->create_debug_bm()};
     if (status != BlkAllocStatus::SUCCESS) {
         LOGERROR("failing to create index debug bitmap as it is out of disk space");
         return false;
@@ -1036,6 +1063,7 @@ void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) 
     m_sb_cookie = (void*)mblk;
 
     // recover from meta_blk;
+    // TO DO: Might need to address alignment based on data or fast type
     m_homeblks_sb_buf = hs_utils::extract_byte_array(buf);
     auto* sb = (homeblks_sb*)(m_homeblks_sb_buf->bytes);
     HS_RELEASE_ASSERT_EQ(sb->version, hb_sb_version, "version does not match");
