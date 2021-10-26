@@ -77,6 +77,7 @@ struct volume_child_req : public blkstore_req< BlkBuffer > {
     uint64_t read_buf_offset;
     uint64_t read_size;
     bool use_cache{true};
+    uint64_t unique_id{0};
 
     volume_req_ptr parent_req = nullptr;
     BlkId blkId; // used only for debugging purpose
@@ -112,9 +113,8 @@ public:
     friend class Volume;
 
     std::string to_string() const {
-        std::ostringstream ss;
-        ss << ((is_read) ? "READ" : "WRITE") << ": lba=" << lba << " nlbas=" << nlbas;
-        return ss.str();
+        return fmt::format("{}: request_id={}, lba={}, nlbas={}, unique_id={}", is_read ? "READ" : "WRITE", request_id,
+                           lba, nlbas, unique_id);
     }
 
 protected:
@@ -238,6 +238,32 @@ private:
     std::vector< vol_interface_req_ptr >* m_cur = nullptr;
 };
 
+class VolumeIOWatchDog {
+public:
+    VolumeIOWatchDog();
+    ~VolumeIOWatchDog();
+
+    void add_io(const volume_child_req_ptr& vc_req);
+    void complete_io(const volume_child_req_ptr& vc_req);
+
+    void io_timer();
+
+    bool is_on();
+
+    VolumeIOWatchDog(const VolumeIOWatchDog&) = delete;
+    VolumeIOWatchDog(VolumeIOWatchDog&&) noexcept = delete;
+    VolumeIOWatchDog& operator=(const VolumeIOWatchDog&) = delete;
+    VolumeIOWatchDog& operator=(VolumeIOWatchDog&&) noexcept = delete;
+
+private:
+    bool m_wd_on{false};
+    iomgr::timer_handle_t m_timer_hdl;
+    std::mutex m_mtx;
+    std::map< uint64_t, volume_child_req_ptr > m_outstanding_ios;
+    uint64_t m_wd_pass_cnt{0}; // total watchdog check passed count
+    uint64_t m_unique_id{0};   // valid unique id starts from 1;
+};
+
 class Volume : public std::enable_shared_from_this< Volume > {
 private:
     vol_params m_params;
@@ -289,13 +315,13 @@ private:
     template < typename... Args >
     void assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str, const Args&... args) {
         fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[vol={}]"},
-                        fmt::make_format_args(boost::lexical_cast< std::string >(get_uuid()))); 
+                        fmt::make_format_args(boost::lexical_cast< std::string >(get_uuid())));
         if (req_str.size()) {
             fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[request={}]"},
-                            fmt::make_format_args(boost::lexical_cast< std::string >(req_str))); 
+                            fmt::make_format_args(boost::lexical_cast< std::string >(req_str)));
         }
         fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\nMetrics = {}\n"},
-                        fmt::make_format_args(sisl::MetricsFarm::getInstance().get_result_in_json_string())); 
+                        fmt::make_format_args(sisl::MetricsFarm::getInstance().get_result_in_json_string()));
     }
 
     template < typename... Args >

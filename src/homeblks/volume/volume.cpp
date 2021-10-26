@@ -21,6 +21,7 @@
 using namespace homestore;
 
 SDS_LOGGING_DECL(volume)
+SDS_LOGGING_DECL(vol_io_wd)
 
 namespace {
 #ifndef NDEBUG
@@ -30,6 +31,77 @@ bool vol_test_enable{false};
 } // namespace
 
 sisl::atomic_counter< uint64_t > Volume::home_blks_ref_cnt{0};
+
+VolumeIOWatchDog::VolumeIOWatchDog() {
+#ifdef _PRERELEASE
+    m_wd_on = HB_DYNAMIC_CONFIG(volume.io_watchdog_timer_on);
+#endif
+
+    // release mode will be turned off;
+
+    if (m_wd_on) {
+        m_timer_hdl = iomanager.schedule_global_timer(
+            HB_DYNAMIC_CONFIG(volume.io_watchdog_timer_sec) * 1000ul * 1000ul * 1000ul, true, nullptr,
+            iomgr::thread_regex::all_worker, [this](void* cookie) { io_timer(); });
+    }
+
+    LOGINFO("volume io watchdog turned {}.", m_wd_on ? "ON" : "OFF");
+}
+
+VolumeIOWatchDog::~VolumeIOWatchDog() { m_outstanding_ios.clear(); }
+
+void VolumeIOWatchDog::add_io(const volume_child_req_ptr& vc_req) {
+    {
+        std::unique_lock< std::mutex > lk(m_mtx);
+        vc_req->unique_id = ++m_unique_id;
+
+        const auto result = m_outstanding_ios.insert_or_assign(vc_req->unique_id, vc_req);
+        HS_LOG(TRACE, vol_io_wd, "add_io: {}, {}", vc_req->unique_id, vc_req->to_string());
+        HS_RELEASE_ASSERT_EQ(result.second, true, "expecting to insert instead of update");
+    }
+}
+
+void VolumeIOWatchDog::complete_io(const volume_child_req_ptr& vc_req) {
+    {
+        std::unique_lock< std::mutex > lk(m_mtx);
+        const auto result = m_outstanding_ios.erase(vc_req->unique_id);
+        HS_LOG(TRACE, vol_io_wd, "complete_io: {}, {}", vc_req->unique_id, vc_req->to_string());
+        HS_RELEASE_ASSERT_EQ(result, 1, "expecting to erase 1 element");
+    }
+}
+
+bool VolumeIOWatchDog::is_on() { return m_wd_on; }
+
+void VolumeIOWatchDog::io_timer() {
+    {
+        std::unique_lock< std::mutex > lk(m_mtx);
+        std::vector< volume_child_req_ptr > timeout_reqs;
+        // the 1st io iteratred in map will be the oldeset one, because we add io
+        // to map when vol_child_req is being created, e.g. op_start_time is from oldeset to latest;
+        for (const auto& io : m_outstanding_ios) {
+            const auto this_io_dur_us = get_elapsed_time_us(io.second->op_start_time);
+            if (this_io_dur_us >= HB_DYNAMIC_CONFIG(volume.io_timeout_limit_sec) * 1000ul * 1000ul) {
+                // coolect all timeout requests
+                timeout_reqs.push_back(io.second);
+            } else {
+                // no need to search for newer requests stored in the map;
+                break;
+            }
+        }
+
+        if (timeout_reqs.size()) {
+            LOGERROR("Total num timeout requests: {}, the oldest io req that timeout duration is: {},  vc_req: {}",
+                     timeout_reqs.size(), get_elapsed_time_us(timeout_reqs[0]->op_start_time),
+                     timeout_reqs[0]->to_string());
+
+            HS_ASSERT(RELEASE, false, "Volume IO watchdog timeout! timeout_limit: {}, watchdog_timer: {}",
+                      HB_DYNAMIC_CONFIG(volume.io_timeout_limit_sec), HB_DYNAMIC_CONFIG(volume.io_watchdog_timer_sec));
+        } else {
+            HS_PERIODIC_LOG(DEBUG, vol_io_wd, "io_timer passed {}, no timee out IO found. Total outstanding_io_cnt: {}",
+                            ++m_wd_pass_cnt, m_outstanding_ios.size());
+        }
+    }
+}
 
 #ifdef _PRERELEASE
 void Volume::set_error_flip() {
@@ -564,6 +636,9 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
     }
 #endif
 
+    // mark complete in watchdog;
+    if (m_hb->get_vol_io_wd()->is_on()) { m_hb->get_vol_io_wd()->complete_io(vc_req); }
+
     HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, vreq->is_read_op(), volume_data_read_latency, volume_data_write_latency,
                               get_elapsed_time_us(vc_req->op_start_time));
 
@@ -784,6 +859,10 @@ volume_child_req_ptr Volume::create_vol_child_req(const BlkId& bid, const volume
     ++vreq->vc_req_cnt;
     THIS_VOL_LOG(TRACE, volume, vc_req->parent_req, "Blks to io: bid: {}, offset: {}, nlbas: {}", bid.to_string(),
                  bid.data_size(HomeBlks::instance()->get_data_pagesz()), vc_req->nlbas);
+
+    // add to watch dog
+    if (m_hb->get_vol_io_wd()->is_on()) { m_hb->get_vol_io_wd()->add_io(vc_req); }
+
     return vc_req;
 }
 

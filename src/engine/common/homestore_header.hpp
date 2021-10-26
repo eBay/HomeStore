@@ -59,18 +59,19 @@ struct dev_info {
 #endif
 
 #if 0
-#define HS_LOG(buf, level, mod, req, f, ...)                                                                           \
-    BOOST_PP_IF(BOOST_VMD_IS_EMPTY(req), BOOST_PP_EMPTY,                                                               \
-                BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[req_id={}] "},                \
-                                                   fmt::make_format_args(req->request_id))))();,                       \
+#define HS_LOG(buf, level, mod, req, f, ...)                                                                             \
+    BOOST_PP_IF(BOOST_VMD_IS_EMPTY(req), BOOST_PP_EMPTY,                                                                 \
+                BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[req_id={}] "},                  \
+                                                  fmt::make_format_args(req->request_id))))                              \
+    ();,                       \
     fmt::vformat_to(fmt::appender{buf}, fmt::string_view{f}, fmt::make_format_args(##__VA_ARGS__);                     \
     fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"{}"}, fmt::make_format_args('\0'));                          \                                                                         \
-    LOG##level##MOD(BOOST_PP_IF(BOOST_VMD_IS_EMPTY(mod), base, mod)(), "{}", buf.data());                              
+    LOG##level##MOD(BOOST_PP_IF(BOOST_VMD_IS_EMPTY(mod), base, mod)(), "{}", buf.data());
 #endif
 
 #define HOMESTORE_LOG_MODS                                                                                             \
-    btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, blkalloc, volume, flip, cp,         \
-        metablk, indx_mgr, logstore, replay, transient, IOMGR_LOG_MODS
+    btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, blkalloc, vol_io_wd, volume, flip,  \
+        cp, metablk, indx_mgr, logstore, replay, transient, IOMGR_LOG_MODS
 
 template < typename T >
 std::string to_hex(T i) {

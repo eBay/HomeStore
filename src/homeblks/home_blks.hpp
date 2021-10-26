@@ -131,6 +131,8 @@ struct HomeBlksRecoveryStats {
     }
 };
 
+class VolumeIOWatchDog;
+
 /**
  * @brief HomeBlks - Implementor of VolInterface.
  *
@@ -350,6 +352,7 @@ private:
     void trigger_cp_init(uint32_t vol_mount_cnt);
     void start_home_log_store();
     uint32_t next_available_hdd_thread_idx();
+    VolumeIOWatchDog* get_vol_io_wd() const { return m_io_wd.get(); };
 
 private:
     init_params m_cfg;
@@ -392,6 +395,7 @@ private:
     /* hdd custom threads */
     std::vector< iomgr::io_thread_t > m_custom_hdd_threads;
     std::mutex m_hdd_threads_mtx;
+    std::unique_ptr< VolumeIOWatchDog > m_io_wd{nullptr};
 };
 
 static inline HomeBlksSafePtr HomeBlksPtr() { return HomeBlks::safe_instance(); }
