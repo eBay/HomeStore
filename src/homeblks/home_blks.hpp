@@ -251,6 +251,7 @@ public:
     virtual void print_tree(const VolumePtr& vol, bool chksum = true) override;
     virtual bool verify_tree(const VolumePtr& vol) override;
     virtual void print_node(const VolumePtr& vol, uint64_t blkid, bool chksum = true) override;
+    virtual void set_indx_btree_start_destroying(const boost::uuids::uuid& uuid) override;
 #if 0
     virtual void zero_pdev_sbs() override { HomeStore< BLKSTORE_BUFFER_TYPE >::zero_pdev_sbs(); }
 #endif
@@ -351,6 +352,7 @@ private:
     void vol_recovery_start_phase2();
     void trigger_cp_init(uint32_t vol_mount_cnt);
     void start_home_log_store();
+    void recover_volumes();
     uint32_t next_available_hdd_thread_idx();
     VolumeIOWatchDog* get_vol_io_wd() const { return m_io_wd.get(); };
 

@@ -670,7 +670,7 @@ private:
     boost::uuids::uuid m_uuid;
     std::string m_name;
     indx_mgr_state m_state = indx_mgr_state::ONLINE;
-    indxmgr_stop_cb m_stop_cb;
+    indxmgr_stop_cb m_destroy_done_cb;
     bool m_last_cp = false;
     std::shared_mutex m_prepare_cb_mtx;
     std::unique_ptr< std::vector< prepare_cb > > m_prepare_cb_list;

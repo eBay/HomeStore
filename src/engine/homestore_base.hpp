@@ -81,6 +81,7 @@ public:
     virtual bool inc_hs_ref_cnt(const boost::uuids::uuid& uuid) = 0;
     virtual bool dec_hs_ref_cnt(const boost::uuids::uuid& uuid) = 0;
     virtual bool fault_containment(const boost::uuids::uuid& uuid) = 0;
+    virtual void set_indx_btree_start_destroying(const boost::uuids::uuid& uuid) = 0;
 
     HomeStoreStatusMgr* status_mgr();
 };
