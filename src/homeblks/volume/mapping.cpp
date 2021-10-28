@@ -992,9 +992,9 @@ void mapping::get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) {
 
 btree_status_t mapping::destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_node_cnt) {
     auto ret = btree_status_t::success;
+    ret = m_bt->destroy(free_blkid_list, free_node_cnt);
     HS_SUBMOD_ASSERT(LOGMSG, (ret == btree_status_t::success), , "vol", m_unique_name,
                      "Error in destroying mapping btree ret={} ", ret);
-    ret = m_bt->destroy(free_blkid_list, free_node_cnt);
     return ret;
 }
 

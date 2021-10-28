@@ -171,7 +171,6 @@ void Volume::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size)
     Volume::make_volume(mblk, buf);
 }
 
-/* This function can be called multiple times. Underline functions should be idempotent */
 void Volume::destroy(indxmgr_stop_cb cb) {
     /* we don't allow shutdown and destroy in parallel */
     home_blks_ref_cnt.increment();
@@ -180,10 +179,13 @@ void Volume::destroy(indxmgr_stop_cb cb) {
     }
 
     m_vol_ref_cnt.increment(1);
-    auto prev_state = set_state(vol_state::DESTROYING);
-    if (!m_hb->is_recovery_mode() && prev_state == vol_state::DESTROYING) {
-        shutdown_if_needed();
-        return;
+    if (!m_hb->is_recovery_mode() || get_state() != vol_state::START_INDX_TREE_DESTROYING) {
+        auto prev_state = set_state(vol_state::DESTROYING);
+        HS_RELEASE_ASSERT_NE(prev_state, vol_state::START_INDX_TREE_DESTROYING, "prev state {}", prev_state);
+        if (!m_hb->is_recovery_mode() && prev_state == vol_state::DESTROYING) {
+            shutdown_if_needed();
+            return;
+        }
     }
     m_destroy_done_cb = cb;
     if (m_vol_ref_cnt.decrement_testz(1)) { destroy_internal(); }
@@ -196,6 +198,7 @@ void Volume::destroy_internal() {
         /* destroy is already triggered. so ignore this request */
         return;
     }
+
     m_indx_mgr->destroy(([this](bool success) {
         HS_RELEASE_ASSERT_NE(get_state(), vol_state::DESTROYED, "Volume {} is already in destroyed state",
                              m_params.vol_name);
@@ -928,8 +931,6 @@ vol_state Volume::set_state(vol_state state, bool persist) {
     if (prev_state == state) { return prev_state; }
 
     if (persist) {
-        VOL_ASSERT(DEBUG, (state == vol_state::DESTROYING || state == vol_state::ONLINE || state == vol_state::OFFLINE),
-                   , "state is {}", state);
         write_sb();
     }
 

@@ -216,7 +216,8 @@ public:
                                                       [this](void* cookie) { try_run_one_iteration(); });
     }
 
-    TestJob(VolTest* test, uint32_t interval_ops_sec) : m_voltest(test), m_start_time(Clock::now()) {
+    TestJob(VolTest* test, uint32_t interval_ops_sec) :
+            m_voltest(test), m_start_time(Clock::now()), m_interval_ops_sec(interval_ops_sec) {
         m_timer_hdl = iomanager.schedule_global_timer(interval_ops_sec * 1000ul * 1000ul * 1000ul, true, nullptr,
                                                       iomgr::thread_regex::all_worker,
                                                       [this](void* cookie) { try_run_one_iteration(); });
@@ -245,6 +246,7 @@ public:
     }
 
     virtual void try_run_one_iteration() {
+        if (get_elapsed_time_sec(m_start_time) < m_interval_ops_sec) { return; }
         if (!time_to_stop() && !is_this_thread_running_io &&
             m_status_threads_executing.increment_if_status(job_status_t::running)) {
             is_this_thread_running_io = true;
@@ -321,6 +323,7 @@ protected:
     // std::atomic< int32_t > m_threads_executing = 0;
     sisl::atomic_status_counter< job_status_t, job_status_t::not_started > m_status_threads_executing;
     iomgr::timer_handle_t m_timer_hdl = iomgr::null_timer_handle;
+    uint32_t m_interval_ops_sec = 0;
 };
 thread_local bool TestJob::is_this_thread_running_io = false;
 
@@ -1766,14 +1769,6 @@ TEST_F(VolTest, vol_crc_mismatch_test) {
  */
 TEST_F(VolTest, init_io_test) {
     this->start_homestore();
-#ifdef _PRERELEASE
-    FlipClient fc(HomeStoreFlip::instance());
-    FlipFrequency freq;
-    freq.set_count(10);
-    freq.set_percent(100);
-
-    fc.inject_retval_flip(tcfg.flip_name, {}, freq, 100);
-#endif
     std::unique_ptr< VolCreateDeleteJob > cdjob;
     if (tcfg.create_del_with_io || tcfg.delete_with_io) {
         cdjob = std::make_unique< VolCreateDeleteJob >(this);
