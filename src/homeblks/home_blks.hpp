@@ -347,6 +347,7 @@ private:
     void vol_recovery_start_phase2();
     void trigger_cp_init(uint32_t vol_mount_cnt);
     void start_home_log_store();
+    void recover_volumes();
 
 private:
     init_params m_cfg;
