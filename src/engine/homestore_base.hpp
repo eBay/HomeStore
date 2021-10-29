@@ -78,6 +78,7 @@ public:
     virtual logdev_blkstore_t* get_data_logdev_blkstore() const = 0;
     virtual logdev_blkstore_t* get_ctrl_logdev_blkstore() const = 0;
     virtual void call_multi_completions() = 0;
+    virtual void set_indx_btree_start_destroying(const boost::uuids::uuid& uuid) = 0;
 
     HomeStoreStatusMgr* status_mgr();
 };
