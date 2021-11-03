@@ -33,11 +33,7 @@ bool vol_test_enable{false};
 sisl::atomic_counter< uint64_t > Volume::home_blks_ref_cnt{0};
 
 VolumeIOWatchDog::VolumeIOWatchDog() {
-#ifdef _PRERELEASE
     m_wd_on = HB_DYNAMIC_CONFIG(volume.io_watchdog_timer_on);
-#endif
-
-    // release mode will be turned off;
 
     if (m_wd_on) {
         m_timer_hdl = iomanager.schedule_global_timer(
@@ -90,9 +86,9 @@ void VolumeIOWatchDog::io_timer() {
         }
 
         if (timeout_reqs.size()) {
-            LOGERROR("Total num timeout requests: {}, the oldest io req that timeout duration is: {},  vc_req: {}",
-                     timeout_reqs.size(), get_elapsed_time_us(timeout_reqs[0]->op_start_time),
-                     timeout_reqs[0]->to_string());
+            LOGCRITICAL("Total num timeout requests: {}, the oldest io req that timeout duration is: {},  vc_req: {}",
+                        timeout_reqs.size(), get_elapsed_time_us(timeout_reqs[0]->op_start_time),
+                        timeout_reqs[0]->to_string());
 
             HS_ASSERT(RELEASE, false, "Volume IO watchdog timeout! timeout_limit: {}, watchdog_timer: {}",
                       HB_DYNAMIC_CONFIG(volume.io_timeout_limit_sec), HB_DYNAMIC_CONFIG(volume.io_watchdog_timer_sec));
@@ -1014,9 +1010,7 @@ vol_state Volume::set_state(vol_state state, bool persist) {
     auto prev_state = m_state.exchange(state, std::memory_order_acquire);
     if (prev_state == state) { return prev_state; }
 
-    if (persist) {
-        write_sb();
-    }
+    if (persist) { write_sb(); }
 
     return prev_state;
 }

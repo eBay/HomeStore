@@ -636,7 +636,7 @@ public:
         return max_capacity;
     }
 
-    void start_homestore(const bool wait_for_init_done = true, const bool force_reinit = false) {
+    void start_homestore(const bool force_reinit = true, const bool wait_for_init_done = true) {
         uint64_t max_capacity = 0;
 
         /* start homestore */
@@ -663,6 +663,7 @@ public:
         params.min_virtual_page_size = tcfg.vol_page_size;
         params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
         params.devices = device_info;
+
 #ifdef _PRERELEASE
         params.force_reinit = force_reinit;
 #endif
@@ -1831,7 +1832,7 @@ TEST_F(VolTest, init_io_test) {
  */
 TEST_F(VolTest, recovery_io_test) {
     tcfg.init = false;
-    this->start_homestore();
+    this->start_homestore(false /* force_reinit */);
 
     LOGINFO("recovery verify started");
     std::unique_ptr< VolVerifyJob > verify_job;
@@ -1872,7 +1873,7 @@ TEST_F(VolTest, hs_force_reinit_test) {
 
     // 1. set input params with force_reinit;
     // 2. boot homestore which should be first-time-boot
-    this->start_homestore(true /* wait_for_init_complete */, true /* force_reinit */);
+    this->start_homestore();
 
     // 3. verify it is first time boot which is done in init_done_cb
 
@@ -2247,6 +2248,11 @@ int main(int argc, char* argv[]) {
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
+        std::string dev_list_str;
+        for (const auto& d : _gcfg.dev_names) {
+            dev_list_str += d;
+        }
+        LOGINFO("Taking input dev_list: {}", dev_list_str);
     }
 
     if (SDS_OPTIONS.count("mod_list")) {

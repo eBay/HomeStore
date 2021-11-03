@@ -13,7 +13,7 @@ table Volume {
     blks_scan_query_batch_size: uint64 = 10000 (hotswap);
 
     // io watchdog on/off
-    io_watchdog_timer_on: bool = true;
+    io_watchdog_timer_on: bool = false;
  
     // io watchdog check outstanding I/O hang periodically
     io_watchdog_timer_sec: uint64 = 300 (hotswap);

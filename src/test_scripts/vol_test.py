@@ -12,9 +12,10 @@ from time import sleep
 import requests
 from threading import Thread
 
-opts,args = getopt.getopt(sys.argv[1:], 'td:', ['test_suits=', 'dirpath=']) 
+opts,args = getopt.getopt(sys.argv[1:], 'tdl:', ['test_suits=', 'dirpath=', 'dev_list='] ) 
 test_suits = ""
 dirpath = "./"
+dev_list = ""
 
 for opt,arg in opts:
     if opt in ('-t', '--test_suits'):
@@ -23,9 +24,19 @@ for opt,arg in opts:
     if opt in ('-d', '--dirpath'):
         dirpath = arg
         print(("dir path (%s)") % (arg))
+    if opt in ('-l', '--dev_list'):
+        dev_list = arg
+        print(("device list (%s)") % (arg))
 
 addln_opts = ' '
+
+if bool(dev_list and dev_list.strip()):
+    addln_opts += ' --device_list '
+    addln_opts += dev_list
+
 addln_opts += ' '.join(map(str, args)) 
+
+print("addln_opts: " + addln_opts)
 
 meta_flip_list = ["write_sb_abort", "write_with_ovf_abort", "remove_sb_abort", "update_sb_abort", "abort_before_recover_cb_sent", "abort_after_recover_cb_sent"]
 vdev_flip_list = ["abort_before_update_eof_cur_chunk", "abort_after_update_eof_cur_chunk", "abort_after_update_eof_next_chunk"]
