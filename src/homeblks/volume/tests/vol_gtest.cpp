@@ -152,12 +152,14 @@ struct TestCfg {
     bool is_hdd{false};
     uint32_t create_del_ops_cnt;
     uint32_t create_del_ops_interval;
+    uint32_t p_vol_files_space;
     std::string flip_name;
 
     bool verify_csum() { return verify_type == verify_type_t::csum; }
     bool verify_data() { return verify_type == verify_type_t::data; }
     bool verify_hdr() { return verify_type == verify_type_t::header; }
     bool verify_type_set() { return verify_type != verify_type_t::null; }
+    bool create_vol_file() { return verify_type_set() && !verify_hdr(); }
 };
 
 struct TestOutput {
@@ -758,7 +760,7 @@ public:
         std::shared_ptr< vol_info_t > info = std::make_shared< vol_info_t >();
         info->vol = vol_obj;
         info->uuid = VolInterface::get_instance()->get_uuid(vol_obj);
-        info->fd = open(file_name.c_str(), O_RDWR);
+        if (tcfg.create_vol_file()) { info->fd = open(file_name.c_str(), O_RDWR); }
         info->max_vol_blks =
             VolInterface::get_instance()->get_size(vol_obj) / VolInterface::get_instance()->get_page_size(vol_obj);
 
@@ -767,8 +769,6 @@ public:
         info->invalidate_lbas(0, info->max_vol_blks); // Punch hole for all.
         info->cur_checkpoint = 0;
         info->ref_cnt.increment(1);
-
-        assert(info->fd > 0);
 
         vol_info[indx] = info;
     }
@@ -798,15 +798,33 @@ public:
             return false;
         }
         HS_RELEASE_ASSERT_EQ(VolInterface::get_instance()->lookup_volume(params.uuid), vol_obj);
-        /* create file for verification */
-        std::ofstream ofs{name, std::ios::binary | std::ios::out | std::ios::trunc};
-        ofs.seekp(tcfg.verify_csum() ? max_vol_size_csum + RESERVE_FILE_BYTE : max_vol_size + RESERVE_FILE_BYTE);
-        ofs.write("", 1);
-        ofs.close();
 
-        auto fd = open(name.c_str(), O_RDWR);
-        init_vol_files(fd, params.uuid);
-        close(fd);
+        if (tcfg.create_vol_file()) {
+            // we don't use vol file for header verification
+            // check remaining space on root fs;
+            std::error_code ec;
+            uint64_t free_space{0};
+            const std::filesystem::space_info si = std::filesystem::space(std::filesystem::current_path(), ec);
+            if (ec.value()) {
+                HS_RELEASE_ASSERT(false, "Error getting space for dir={}, error={}", name, ec.message());
+            } else {
+                // Don't use more than 30% of free space of root fs;
+                free_space = static_cast< uint64_t >(std::min(si.free, si.available) * tcfg.p_vol_files_space / 100);
+            }
+            uint64_t offset_to_seek{tcfg.verify_csum() ? max_vol_size_csum + RESERVE_FILE_BYTE
+                                                       : max_vol_size + RESERVE_FILE_BYTE};
+            HS_RELEASE_ASSERT_GT(free_space, offset_to_seek);
+
+            // create file for verification
+            std::ofstream ofs{name, std::ios::binary | std::ios::out | std::ios::trunc};
+            ofs.seekp(offset_to_seek);
+            ofs.write("", 1);
+            ofs.close();
+
+            auto fd = open(name.c_str(), O_RDWR);
+            init_vol_files(fd, params.uuid);
+            close(fd);
+        }
 
         LOGINFO("Created volume {} of size: {}", name, tcfg.verify_csum() ? max_vol_size_csum : max_vol_size);
         ++output.vol_create_cnt;
@@ -1008,6 +1026,7 @@ private:
             *reinterpret_cast< uint16_t* >(init_csum_buf) = csum_zero;
         }
         const uint64_t offset_increment{tcfg.verify_csum() ? sizeof(uint16_t) : tcfg.max_io_size};
+
         const uint64_t max_offset{tcfg.verify_csum() ? max_vol_size_csum : max_vol_size};
 
         for (uint64_t offset{0}; offset < max_offset; offset += offset_increment) {
@@ -1020,8 +1039,10 @@ private:
 
             write_vol_file(fd, static_cast< void* >(tcfg.verify_csum() ? init_csum_buf : init_buf), write_size,
                            static_cast< off_t >(offset));
-        };
-        if (init_csum_buf) iomanager.iobuf_free(init_csum_buf);
+        }
+
+        if (init_csum_buf) { iomanager.iobuf_free(init_csum_buf); }
+
         set_vol_file_hdr(fd, uuid);
     }
 
@@ -1081,7 +1102,7 @@ private:
             }
             uuid = VolInterface::get_instance()->get_uuid(vinfo->vol);
             /* initialize file hdr */
-            init_vol_file_hdr(vinfo->fd);
+            if (tcfg.create_vol_file()) { init_vol_file_hdr(vinfo->fd); }
             VolInterface::get_instance()->remove_volume(uuid);
             vinfo->ref_cnt.decrement_testz(1);
             output.vol_del_cnt++;
@@ -1195,7 +1216,7 @@ public:
                                              req->verify_offset);
                 }
                 verify(req);
-            } else if (!req->is_read()) {
+            } else if (!req->is_read() && (tcfg.verify_type_set())) {
                 /* write to a file */
                 if (!tcfg.verify_hdr()) {
                     /* no need to write to a file to verify hdr */
@@ -1610,7 +1631,7 @@ protected:
             } else if (tcfg.verify_data()) {
                 error = ::memcmp(static_cast< const void* >(data_buffer), static_cast< const void* >(validate_buffer),
                                  data_size) != 0;
-                if (!error) ++m_voltest->output.data_match_cnt;
+                if (!error) { ++m_voltest->output.data_match_cnt; }
             } else {
                 // we will only verify the header. We write lba number in the header
                 const uint64_t validate_lba = req->lba + total_size_read / data_size;
@@ -1624,7 +1645,8 @@ protected:
                             data_lba);
                     error = true;
                 }
-                if (!error) ++m_voltest->output.hdr_only_match_cnt;
+
+                if (!error) { ++m_voltest->output.hdr_only_match_cnt; }
             }
 
             if (error) {
@@ -2163,8 +2185,8 @@ SDS_OPTION_GROUP(
      ::cxxopts::value< uint32_t >()->default_value("8192"), "mem_btree_page_size"),
     (expect_io_error, "", "expect_io_error", "expect_io_error", ::cxxopts::value< uint32_t >()->default_value("0"),
      "0 or 1"),
-    (p_volume_size, "", "p_volume_size", "p_volume_size", ::cxxopts::value< uint32_t >()->default_value("60"),
-     "0 to 200"),
+    (p_volume_size, "", "p_volume_size", "percentage of volume size that should take from maximum disk capacity",
+     ::cxxopts::value< uint32_t >()->default_value("60"), "0 to 200"),
     (write_cache, "", "write_cache", "write cache", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (read_cache, "", "read_cache", "read cache", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (write_iovec, "", "write_iovec", "write iovec(s)", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
@@ -2182,7 +2204,10 @@ SDS_OPTION_GROUP(
      ::cxxopts::value< uint32_t >()->default_value("100"), "number of ops"),
     (create_del_ops_interval, "", "create_del_ops_interval", "create_del_ops_interval",
      ::cxxopts::value< uint32_t >()->default_value("10"), "interval between create del in seconds"),
-    (is_hdd, "", "is_hdd", "is_hdd", ::cxxopts::value< bool >()->default_value("false"), "run in hdd mode"))
+    (is_hdd, "", "is_hdd", "is_hdd", ::cxxopts::value< bool >()->default_value("false"), "run in hdd mode"),
+    (p_vol_files_space, "", "p_vol_files_space",
+     "percentage of volume verficiation files of available free space on hosting file system",
+     ::cxxopts::value< uint32_t >()->default_value("30"), "0 to 100"))
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr, test_meta_mod, test_vdev_mod, config
 
@@ -2245,6 +2270,7 @@ int main(int argc, char* argv[]) {
     _gcfg.flip_name = SDS_OPTIONS["flip_name"].as< std::string >();
     _gcfg.overlapping_allowed = SDS_OPTIONS["overlapping_allowed"].as< bool >();
     _gcfg.is_hdd = SDS_OPTIONS["is_hdd"].as< bool >();
+    _gcfg.p_vol_files_space = SDS_OPTIONS["p_vol_files_space"].as< uint32_t >();
 
     if (SDS_OPTIONS.count("device_list")) {
         _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();

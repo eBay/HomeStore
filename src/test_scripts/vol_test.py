@@ -12,10 +12,11 @@ from time import sleep
 import requests
 from threading import Thread
 
-opts,args = getopt.getopt(sys.argv[1:], 'tdl:', ['test_suits=', 'dirpath=', 'dev_list='] ) 
+opts,args = getopt.getopt(sys.argv[1:], 'tdlm:', ['test_suits=', 'dirpath=', 'dev_list=', 'log_mods='] ) 
 test_suits = ""
 dirpath = "./"
 dev_list = ""
+log_mods = ""
 
 for opt,arg in opts:
     if opt in ('-t', '--test_suits'):
@@ -27,12 +28,19 @@ for opt,arg in opts:
     if opt in ('-l', '--dev_list'):
         dev_list = arg
         print(("device list (%s)") % (arg))
+    if opt in ('-m', '--log_mods'):
+        log_mods = arg
+        print(("log_mods (%s)") % (arg))
 
 addln_opts = ' '
 
 if bool(dev_list and dev_list.strip()):
     addln_opts += ' --device_list '
     addln_opts += dev_list
+
+if bool(log_mods and log_mods.strip()):
+    addln_opts += ' --log_mods '
+    addln_opts += log_mods 
 
 addln_opts += ' '.join(map(str, args)) 
 
@@ -80,12 +88,12 @@ def vol_mod_test(mod_name, flip_list):
 #  @brief Normal IO test
 def normal(num_secs="20000"):
     print("normal test started")
-    cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0 --flip=1 --log_mods volume:trace,iomgr:debug"
+    cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0 --flip=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("normal test completed")
 
 def normal_unmap(num_secs="20000"):
-    print("normal test started")
+    print("normal unmap test started")
     cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0 --flip=1 --verify_type=2 --unmap_enable=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("normal unmap test completed")
