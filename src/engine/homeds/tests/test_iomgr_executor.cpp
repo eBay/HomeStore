@@ -7,7 +7,7 @@
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
 
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS, flip, iomgr, spdk)
+SDS_LOGGING_INIT(HOMESTORE_LOG_MODS, flip, IOMGR_LOG_MODS)
 SDS_OPTIONS_ENABLE(logging)
 RCU_REGISTER_INIT
 
