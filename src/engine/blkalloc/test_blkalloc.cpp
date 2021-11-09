@@ -359,7 +359,8 @@ protected:
 
 public:
     FixedBlkAllocatorTest() : BlkAllocatorTest() {
-        BlkAllocConfig fixed_cfg{PhysicalDevGroup::DATA, 4096, static_cast< uint64_t >(m_total_count) * 4096, "", false};
+        BlkAllocConfig fixed_cfg{PhysicalDevGroup::DATA, 4096, static_cast< uint64_t >(m_total_count) * 4096, "",
+                                 false};
         m_allocator = std::make_unique< FixedBlkAllocator >(fixed_cfg, true, 0);
         HS_RELEASE_ASSERT_EQ(m_allocator->realtime_bm_on(), false);
     }
@@ -410,14 +411,7 @@ protected:
     std::unique_ptr< VarsizeBlkAllocator > m_allocator;
 
 public:
-    VarsizeBlkAllocatorTest() : BlkAllocatorTest() {
-        HomeStoreDynamicConfig::init_settings_default();
-        VarsizeBlkAllocConfig cfg{PhysicalDevGroup::DATA, 4096u, static_cast< uint64_t >(m_total_count) * 4096, "", false};
-        cfg.set_phys_page_size(4096);
-        cfg.set_auto_recovery(true);
-        m_allocator = std::make_unique< VarsizeBlkAllocator >(cfg, true, 0);
-        HS_RELEASE_ASSERT_EQ(m_allocator->realtime_bm_on(), false);
-    }
+    VarsizeBlkAllocatorTest() : BlkAllocatorTest() { HomeStoreDynamicConfig::init_settings_default(); }
     VarsizeBlkAllocatorTest(const VarsizeBlkAllocatorTest&) = delete;
     VarsizeBlkAllocatorTest(VarsizeBlkAllocatorTest&&) noexcept = delete;
     VarsizeBlkAllocatorTest& operator=(const VarsizeBlkAllocatorTest&) = delete;
@@ -427,6 +421,16 @@ public:
 protected:
     virtual void SetUp() override{};
     virtual void TearDown() override{};
+
+    void create_allocator(const bool use_slabs = true) {
+        VarsizeBlkAllocConfig cfg{PhysicalDevGroup::DATA, 4096u, static_cast< uint64_t >(m_total_count) * 4096, "",
+                                  false};
+        cfg.set_phys_page_size(4096);
+        cfg.set_auto_recovery(true);
+        cfg.set_use_slabs(use_slabs);
+        m_allocator = std::make_unique< VarsizeBlkAllocator >(cfg, true, 0);
+        HS_RELEASE_ASSERT_EQ(m_allocator->realtime_bm_on(), false);
+    }
 
     [[nodiscard]] bool alloc_rand_blk(const BlkAllocStatus exp_status, const bool is_contiguous,
                                       const blk_count_t reqd_size, const bool track_block_group) {
@@ -603,55 +607,86 @@ TEST_F(FixedBlkAllocatorTest, alloc_free_fixed_size) {
     validate_count();
 }
 
-TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_unirandsize) {
+namespace {
+void alloc_free_var_contiguous_unirandsize(VarsizeBlkAllocatorTest* const block_test_pointer) {
     const auto nthreads{
         std::clamp< uint32_t >(std::thread::hardware_concurrency(), 2, SDS_OPTIONS["num_threads"].as< uint32_t >())};
     const uint8_t prealloc_pct{5};
     LOGINFO("Step 1: Pre allocate {}% of total blks which is {} blks in {} threads", prealloc_pct,
-            m_total_count * prealloc_pct / 100, nthreads);
-    [[maybe_unused]] const auto preload_alloced{preload(m_total_count * prealloc_pct / 100, true /* is_contiguous */,
-                                                        BlkAllocatorTest::uniform_rand_size, true)};
+            block_test_pointer->m_total_count * prealloc_pct / 100, nthreads);
+    [[maybe_unused]] const auto preload_alloced{
+        block_test_pointer->preload(block_test_pointer->m_total_count * prealloc_pct / 100, true /* is_contiguous */,
+                                    BlkAllocatorTest::uniform_rand_size, true)};
 
     auto num_iters{SDS_OPTIONS["iters"].as< uint64_t >()};
     const uint64_t divisor{1024};
-    if (num_iters > m_total_count / divisor) {
+    if (num_iters > block_test_pointer->m_total_count / divisor) {
         LOGINFO("For contiguous_unirandsize test, iters={} cannot be more than 1/{}th of total count={}. Adjusting",
-                num_iters, divisor, m_total_count);
-        num_iters = m_total_count / divisor;
+                num_iters, divisor, block_test_pointer->m_total_count);
+        num_iters = block_test_pointer->m_total_count / divisor;
     }
     const uint8_t runtime_pct{10};
     LOGINFO("Step 2: Do alloc/free contiguous blks with completely random size ratio_range=[{}-{}] threads={} iters={}",
             prealloc_pct, runtime_pct, nthreads, num_iters);
-    const auto result{do_alloc_free(num_iters, true /* is_contiguous */, BlkAllocatorTest::uniform_rand_size,
-                                    runtime_pct, false /* round_blks */, true)};
+    const auto result{block_test_pointer->do_alloc_free(num_iters, true /* is_contiguous */,
+                                                        BlkAllocatorTest::uniform_rand_size, runtime_pct,
+                                                        false /* round_blks */, true)};
+}
+} // namespace
+
+TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_unirandsize_with_slabs) {
+    // test with slabs
+    create_allocator();
+    alloc_free_var_contiguous_unirandsize(this);
 }
 
-TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_roundrandsize) {
+TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_unirandsize_without_slabs) {
+    // test without slabs
+    create_allocator(false);
+    alloc_free_var_contiguous_unirandsize(this);
+}
+
+namespace {
+void alloc_free_var_contiguous_roundrandsize(VarsizeBlkAllocatorTest* const block_test_pointer) {
     const auto nthreads{
         std::clamp< uint32_t >(std::thread::hardware_concurrency(), 2, SDS_OPTIONS["num_threads"].as< uint32_t >())};
     const uint8_t prealloc_pct{5};
-    const uint64_t preload_amount{static_cast< uint64_t >(m_total_count * prealloc_pct / 100)};
+    const uint64_t preload_amount{static_cast< uint64_t >(block_test_pointer->m_total_count * prealloc_pct / 100)};
     LOGINFO("Step 1: Pre allocate {}% of total blks which is {} blks in {} threads", prealloc_pct, preload_amount,
             nthreads);
     [[maybe_unused]] const auto preload_alloced{
-        preload(preload_amount, true /* is_contiguous */, BlkAllocatorTest::round_rand_size, true)};
+        block_test_pointer->preload(preload_amount, true /* is_contiguous */, BlkAllocatorTest::round_rand_size, true)};
 
     auto num_iters{SDS_OPTIONS["iters"].as< uint64_t >()};
     const uint64_t divisor{512};
-    if (num_iters > m_total_count / divisor) {
+    if (num_iters > block_test_pointer->m_total_count / divisor) {
         LOGINFO("For contiguous_unirandsize test, iters={} cannot be more than 1/{}th of total count={}. Adjusting",
-                num_iters, divisor, m_total_count);
-        num_iters = m_total_count / divisor;
+                num_iters, divisor, block_test_pointer->m_total_count);
+        num_iters = block_test_pointer->m_total_count / divisor;
     }
     const uint8_t runtime_pct{10};
     LOGINFO("Step 2: Do alloc/free contiguous blks with completely random size ratio_range=[{}-{}] threads={} iters={}",
             prealloc_pct, runtime_pct, nthreads, num_iters);
-    [[maybe_unused]] const auto result{do_alloc_free(num_iters, true /* is_contiguous */,
-                                                     BlkAllocatorTest::round_rand_size, runtime_pct,
-                                                     true /* round_blks */, true)};
+    [[maybe_unused]] const auto result{block_test_pointer->do_alloc_free(num_iters, true /* is_contiguous */,
+                                                                         BlkAllocatorTest::round_rand_size, runtime_pct,
+                                                                         true /* round_blks */, true)};
+}
+} // namespace
+
+TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_roundrandsize_with_slabs) {
+    // test with slabs
+    create_allocator();
+    alloc_free_var_contiguous_roundrandsize(this);
+}
+
+TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_roundrandsize_without_slabs) {
+    // test without slabs
+    create_allocator(false);
+    alloc_free_var_contiguous_roundrandsize(this);
 }
 
 TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_slabrandsize) {
+    create_allocator();
     start_track_slabs();
 
     const auto nthreads{
@@ -679,86 +714,131 @@ TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_slabrandsize) {
                                                      false /* round_blks */, true)};
 }
 
-TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_onesize) {
+namespace {
+void alloc_free_var_contiguous_onesize(VarsizeBlkAllocatorTest* const block_test_pointer) {
     const auto nthreads{
         std::clamp< uint32_t >(std::thread::hardware_concurrency(), 2, SDS_OPTIONS["num_threads"].as< uint32_t >())};
 
-    const uint64_t preload_amount{static_cast< uint64_t >(m_total_count) / 2};
+    const uint64_t preload_amount{static_cast< uint64_t >(block_test_pointer->m_total_count) / 2};
     LOGINFO("Step 1: Pre allocate 50% of total blks which is {} blks in {} threads", preload_amount, nthreads);
     const auto preload_alloced{
-        preload(preload_amount, true /* is_contiguous */, BlkAllocatorTest::single_blk_size, true)};
+        block_test_pointer->preload(preload_amount, true /* is_contiguous */, BlkAllocatorTest::single_blk_size, true)};
 
     const auto num_iters{SDS_OPTIONS["iters"].as< uint64_t >()};
     LOGINFO("Step 2: Do alloc/free contiguous blks with completely random size for blks span={}, threads={} iters={}",
-            m_total_count, nthreads, num_iters);
-    const auto result{do_alloc_free(num_iters, true /* is_contiguous */, BlkAllocatorTest::single_blk_size, 90,
-                                    true /* round_blks */, true)};
+            block_test_pointer->m_total_count, nthreads, num_iters);
+    const auto result{block_test_pointer->do_alloc_free(
+        num_iters, true /* is_contiguous */, BlkAllocatorTest::single_blk_size, 90, true /* round_blks */, true)};
 
-    const uint64_t calculated_remaining{static_cast< uint64_t >(m_total_count) - preload_alloced + result.second -
-                                        result.first};
-    const uint64_t remaining{m_allocator->get_available_blks()};
+    const uint64_t calculated_remaining{static_cast< uint64_t >(block_test_pointer->m_total_count) - preload_alloced +
+                                        result.second - result.first};
+    const uint64_t remaining{block_test_pointer->m_allocator->get_available_blks()};
     LOGINFO("Step 3: Reallocate to alloc all remaining count {} calculated remaining {}", remaining,
             calculated_remaining);
     [[maybe_unused]] const auto preload_alloced2{
-        preload(remaining, true /* is_contiguous */, BlkAllocatorTest::single_blk_size, true)};
+        block_test_pointer->preload(remaining, true /* is_contiguous */, BlkAllocatorTest::single_blk_size, true)};
 
-    ASSERT_EQ(m_allocator->get_available_blks(), 0u) << "Expected no blocks to be free";
+    ASSERT_EQ(block_test_pointer->m_allocator->get_available_blks(), 0u) << "Expected no blocks to be free";
+}
+}; // namespace
+
+TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_onesize_with_slabs) {
+    // test with slabs
+    create_allocator();
+    alloc_free_var_contiguous_onesize(this);
 }
 
-TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_scatter_unirandsize) {
+TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_onesize_without_slabs) {
+    // test with slabs
+    create_allocator(false);
+    alloc_free_var_contiguous_onesize(this);
+}
+
+namespace {
+void alloc_free_var_scatter_unirandsize(VarsizeBlkAllocatorTest* const block_test_pointer) {
     const auto nthreads{
         std::clamp< uint32_t >(std::thread::hardware_concurrency(), 2, SDS_OPTIONS["num_threads"].as< uint32_t >())};
     const uint8_t prealloc_pct{50};
 
-    const uint64_t preload_amount{static_cast< uint64_t >(m_total_count) * prealloc_pct / 100};
+    const uint64_t preload_amount{static_cast< uint64_t >(block_test_pointer->m_total_count) * prealloc_pct / 100};
     LOGINFO("Step 1: Pre allocate {}% of total blks which is {} blks in {} threads", prealloc_pct, preload_amount,
             nthreads);
-    const auto preload_alloced{
-        preload(preload_amount, false /* is_contiguous */, BlkAllocatorTest::uniform_rand_size, true)};
-    const uint64_t remaining_after_preload{m_total_count - preload_alloced};
-    ASSERT_EQ(m_allocator->get_available_blks(), remaining_after_preload) << "Expected available to match";
+    const auto preload_alloced{block_test_pointer->preload(preload_amount, false /* is_contiguous */,
+                                                           BlkAllocatorTest::uniform_rand_size, true)};
+    const uint64_t remaining_after_preload{block_test_pointer->m_total_count - preload_alloced};
+    ASSERT_EQ(block_test_pointer->m_allocator->get_available_blks(), remaining_after_preload)
+        << "Expected available to match";
 
     const auto num_iters{SDS_OPTIONS["iters"].as< uint64_t >()};
     const uint8_t runtime_pct{75};
-    LOGINFO("Step 2: Do alloc/free contiguous blks with completely random size ratio_range=[{}-{}] threads={} iters={}",
+    LOGINFO("Step 2: Do alloc/free contiguous blks with completely random size ratio_range=[{}-{}] threads={} "
+            "iters={}",
             prealloc_pct, runtime_pct, nthreads, num_iters);
-    const auto result{do_alloc_free(num_iters, false /* is_contiguous */, BlkAllocatorTest::uniform_rand_size,
-                                    runtime_pct, false /* round_blks */, true)};
+    const auto result{block_test_pointer->do_alloc_free(num_iters, false /* is_contiguous */,
+                                                        BlkAllocatorTest::uniform_rand_size, runtime_pct,
+                                                        false /* round_blks */, true)};
     // wait for any sweeping to complete.
     const uint64_t calculated_remaining{remaining_after_preload + result.second - result.first};
-    const uint64_t remaining{m_allocator->get_available_blks()};
+    const uint64_t remaining{block_test_pointer->m_allocator->get_available_blks()};
     LOGINFO("Step 3: Reallocate to alloc all remaining count {} calculated remaining {}", remaining,
             calculated_remaining);
     [[maybe_unused]] const auto preload_alloced2{
-        preload(remaining, false /* is_contiguous */, BlkAllocatorTest::single_blk_size, true)};
-    ASSERT_EQ(m_allocator->get_available_blks(), 0u) << "Expected no blocks to be free";
+        block_test_pointer->preload(remaining, false /* is_contiguous */, BlkAllocatorTest::single_blk_size, true)};
+    ASSERT_EQ(block_test_pointer->m_allocator->get_available_blks(), 0u) << "Expected no blocks to be free";
+}
+} // namespace
+
+TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_scatter_unirandsize_with_slabs) {
+    // test with slabs
+    create_allocator();
+    alloc_free_var_scatter_unirandsize(this);
 }
 
-TEST_F(VarsizeBlkAllocatorTest, alloc_var_scatter_direct_unirandsize) {
+TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_scatter_unirandsize_without_slabs) {
+    // test without slabs
+    create_allocator(false);
+    alloc_free_var_scatter_unirandsize(this);
+}
+
+namespace {
+void alloc_var_scatter_direct_unirandsize(VarsizeBlkAllocatorTest* const block_test_pointer) {
     LOGINFO("Step 1: Set the flip to force directly bypassing freeblk cache");
 #ifdef _PRERELEASE
     FlipClient* const fc{HomeStoreFlip::client_instance()};
     FlipFrequency freq;
-    freq.set_count(static_cast< uint32_t >(m_total_count) * 1000);
+    freq.set_count(static_cast< uint32_t >(block_test_pointer->m_total_count) * 1000);
     freq.set_percent(100);
     fc->inject_noreturn_flip("varsize_blkalloc_bypass_cache", {}, freq);
 #endif
     const uint8_t prealloc_pct{90};
-    const uint64_t preload_amount{static_cast< uint64_t >(m_total_count) * prealloc_pct / 100};
+    const uint64_t preload_amount{static_cast< uint64_t >(block_test_pointer->m_total_count) * prealloc_pct / 100};
     const auto nthreads{
         std::clamp< uint32_t >(std::thread::hardware_concurrency(), 2, SDS_OPTIONS["num_threads"].as< uint32_t >())};
     LOGINFO("Step 2: Alloc upto {}% of space which is {} blks in {} threads as scattered blks", prealloc_pct,
             preload_amount, nthreads);
-    const auto preload_alloced{
-        preload(preload_amount, false /* is_contiguous */, BlkAllocatorTest::uniform_rand_size, true)};
+    const auto preload_alloced{block_test_pointer->preload(preload_amount, false /* is_contiguous */,
+                                                           BlkAllocatorTest::uniform_rand_size, true)};
 
-    const uint64_t remaining{m_allocator->get_available_blks()};
-    const uint64_t calculated_remaining{m_total_count - preload_alloced};
+    const uint64_t remaining{block_test_pointer->m_allocator->get_available_blks()};
+    const uint64_t calculated_remaining{block_test_pointer->m_total_count - preload_alloced};
     LOGINFO("Step 3: Reallocate to alloc all remaining count {} calculated remaining {}", remaining,
             calculated_remaining);
     [[maybe_unused]] const auto preload_alloced2{
-        preload(remaining, false /* is_contiguous */, BlkAllocatorTest::single_blk_size, true)};
-    ASSERT_EQ(m_allocator->get_available_blks(), 0u) << "Expected no blocks to be free";
+        block_test_pointer->preload(remaining, false /* is_contiguous */, BlkAllocatorTest::single_blk_size, true)};
+    ASSERT_EQ(block_test_pointer->m_allocator->get_available_blks(), 0u) << "Expected no blocks to be free";
+}
+} // namespace
+
+TEST_F(VarsizeBlkAllocatorTest, alloc_var_scatter_direct_unirandsize_with_slabs) {
+    // test with slabs
+    create_allocator();
+    alloc_var_scatter_direct_unirandsize(this);
+}
+
+TEST_F(VarsizeBlkAllocatorTest, alloc_var_scatter_direct_unirandsize_without_slabs) {
+    // test without slabs
+    create_allocator(false);
+    alloc_var_scatter_direct_unirandsize(this);
 }
 
 template < typename T >

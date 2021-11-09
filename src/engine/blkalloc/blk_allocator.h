@@ -105,7 +105,7 @@ VENUM(BlkOpStatus, uint8_t,
       SPACEFULL = 1u << 2, // Space full failure
       PARTIAL_FAILED = 1u << 3);
 
-ENUM(BlkAllocatorState, uint8_t, WAITING, SWEEP_SCHEDULED, SWEEPING, EXITING, DONE);
+ENUM(BlkAllocatorState, uint8_t, INIT, WAITING, SWEEP_SCHEDULED, SWEEPING, EXITING, DONE);
 
 /* Hints for various allocators */
 struct blk_alloc_hints {
