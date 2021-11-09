@@ -5,6 +5,7 @@
 #include "homelogstore/log_store.hpp"
 #include "engine/index/resource_mgr.hpp"
 #include <engine/homeds/btree/btree.hpp>
+#include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
 namespace homestore {
@@ -78,9 +79,17 @@ sisl::io_blob indx_journal_entry::create_journal_entry(indx_req* ireq) {
 
 /****************************************** cp watchdog class ***********************************/
 CPWatchdog::CPWatchdog() {
-    m_timer_hdl = iomanager.schedule_global_timer(HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec) * 1000 * 1000 * 1000,
-                                                  true, nullptr, iomgr::thread_regex::all_user,
-                                                  [this](void* cookie) { cp_watchdog_timer(); });
+    m_timer_sec = HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec);
+
+#ifdef _PRERELEASE
+    const auto timer_sec_ptr = std::getenv(CP_WATCHDOG_TIMER_SEC.c_str());
+    if (timer_sec_ptr) { m_timer_sec = std::stoi(std::getenv(CP_WATCHDOG_TIMER_SEC.c_str())); }
+#endif
+
+    LOGINFO("CP watchdog timer setting t : {} seconds", m_timer_sec);
+    m_timer_hdl =
+        iomanager.schedule_global_timer(m_timer_sec * 1000 * 1000 * 1000, true, nullptr, iomgr::thread_regex::all_user,
+                                        [this](void* cookie) { cp_watchdog_timer(); });
     cp_reset();
 }
 
@@ -125,15 +134,13 @@ void CPWatchdog::cp_watchdog_timer() {
         s += icp->indx_mgr->get_cp_flush_status(icp);
     }
 
-    if (get_elapsed_time_ms(last_state_ch_time) >= HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec * 1000)) {
+    if (get_elapsed_time_ms(last_state_ch_time) >= m_timer_sec * 1000) {
         LOGINFO("cp state {} is not changed. time elapsed {} Printing cp state {} ", m_last_hs_state,
                 get_elapsed_time_ms(last_state_ch_time), s);
     }
 
     // check if enough time passed since last state change
-    if (get_elapsed_time_ms(last_state_ch_time) < 12 * HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec) * 1000) {
-        return;
-    }
+    if (get_elapsed_time_ms(last_state_ch_time) < 12 * m_timer_sec * 1000) { return; }
 
     HS_RELEASE_ASSERT(0, "cp seems to be stuck. current state is {} total time elapsed {}", m_last_hs_state,
                       get_elapsed_time_ms(last_state_ch_time));

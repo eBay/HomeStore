@@ -345,6 +345,7 @@ private:
     hs_cp_state m_last_hs_state;
     iomgr::timer_handle_t m_timer_hdl;
     Clock::time_point last_state_ch_time;
+    uint64_t m_timer_sec{0};
 };
 
 class HomeStoreCPMgr : public CPMgr< hs_cp > {
