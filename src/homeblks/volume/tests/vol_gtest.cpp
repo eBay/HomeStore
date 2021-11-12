@@ -467,7 +467,12 @@ struct io_req_t : public vol_interface_req {
         const auto req_ptr{static_cast< vol_interface_req* >(this)};
         if (use_cache()) { return; }
         for (auto& iov : req_ptr->iovecs) {
-            iomanager.iobuf_free(static_cast< uint8_t* >(iov.iov_base));
+            if (iov.iov_base) {
+                iomanager.iobuf_free(static_cast< uint8_t* >(iov.iov_base));
+            } else {
+                // remove this assert if there is other op that could also have null iovs;
+                HS_RELEASE_ASSERT_EQ(op_type, Op_type::UNMAP, "unexpected op_type: {}, other than unmap", op_type);
+            }
         }
     }
 
