@@ -463,7 +463,13 @@ struct io_req_t : public vol_interface_req {
     bool is_unmap() const { return op_type == Op_type::UNMAP; }
 
     virtual ~io_req_t() override {
-        iomanager.iobuf_free(validate_buffer);
+        if (validate_buffer) {
+            iomanager.iobuf_free(validate_buffer);
+        } else {
+            // right now we only have unmap that doesn't create validate_buffer;
+            HS_RELEASE_ASSERT_EQ(op_type, Op_type::UNMAP);
+        }
+
         const auto req_ptr{static_cast< vol_interface_req* >(this)};
         if (use_cache()) { return; }
         for (auto& iov : req_ptr->iovecs) {
@@ -491,8 +497,10 @@ private:
         fd = vol_info->fd;
         cur_vol = vol_info->vol_idx;
 
-        validate_buffer = iomanager.iobuf_alloc(512, verify_size);
-        HS_ASSERT_NOTNULL(RELEASE, validate_buffer);
+        if (op_type != Op_type::UNMAP) {
+            validate_buffer = iomanager.iobuf_alloc(512, verify_size);
+            HS_ASSERT_NOTNULL(RELEASE, validate_buffer);
+        }
     }
 
     // compute checksum and store in a buf which will be used for verification
