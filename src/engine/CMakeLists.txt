@@ -16,6 +16,7 @@ include_directories (BEFORE ${CMAKE_CURRENT_BINARY_DIR})
 set(HOMESTORE_OBJECTS
     $<TARGET_OBJECTS:hs_common>
     $<TARGET_OBJECTS:hs_device>
+    $<TARGET_OBJECTS:hs_blkstore>
     $<TARGET_OBJECTS:hs_blkalloc>
     $<TARGET_OBJECTS:hs_metablk>
     $<TARGET_OBJECTS:indx_mgr>

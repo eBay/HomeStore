@@ -22,6 +22,7 @@ struct blob {
 } // namespace homeds
 
 namespace homestore {
+using hs_uuid_t = time_t;
 
 ENUM(io_flag, uint8_t,
      BUFFERED_IO, // should be set if file system doesn't support direct IOs and we are working on a file as a
@@ -31,6 +32,8 @@ ENUM(io_flag, uint8_t,
 );
 
 ENUM(Op_type, uint8_t, READ, WRITE, UNMAP);
+
+VENUM(PhysicalDevGroup, uint8_t, DATA = 0, FAST = 1);
 
 struct dev_info {
     typedef enum class Type : uint8_t { Data, Fast } Type;
@@ -62,13 +65,14 @@ struct dev_info {
 #endif
 
 #if 0
-#define HS_LOG(buf, level, mod, req, f, ...)                                                                           \
-    BOOST_PP_IF(BOOST_VMD_IS_EMPTY(req), BOOST_PP_EMPTY,                                                               \
-                BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[req_id={}] "},                \
-                                                   fmt::make_format_args(req->request_id))))();,                       \
+#define HS_LOG(buf, level, mod, req, f, ...)                                                                             \
+    BOOST_PP_IF(BOOST_VMD_IS_EMPTY(req), BOOST_PP_EMPTY,                                                                 \
+                BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[req_id={}] "},                  \
+                                                  fmt::make_format_args(req->request_id))))                              \
+    ();,                       \
     fmt::vformat_to(fmt::appender{buf}, fmt::string_view{f}, fmt::make_format_args(##__VA_ARGS__);                     \
     fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"{}"}, fmt::make_format_args('\0'));                          \                                                                         \
-    LOG##level##MOD(BOOST_PP_IF(BOOST_VMD_IS_EMPTY(mod), base, mod)(), "{}", buf.data());                              
+    LOG##level##MOD(BOOST_PP_IF(BOOST_VMD_IS_EMPTY(mod), base, mod)(), "{}", buf.data());
 #endif
 
 #define HOMESTORE_LOG_MODS                                                                                             \
@@ -80,5 +84,12 @@ std::string to_hex(T i) {
     return fmt::format("{0:x}", i);
 }
 
+typedef uint32_t crc32_t;
+typedef uint16_t csum_t;
+typedef int64_t seq_id_t;
+const csum_t init_crc_16 = 0x8005;
+
+static constexpr crc32_t init_crc32 = 0x12345678;
+static constexpr crc32_t INVALID_CRC32_VALUE = 0x0u;
 } // namespace homestore
 #endif

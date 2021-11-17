@@ -15,11 +15,14 @@
 #include "engine/blkstore/blkstore.hpp"
 #include "engine/common/homestore_config.hpp"
 #include "engine/device/device.h"
+#include "engine/device/virtual_dev.hpp"
 #include "engine/homeds/btree/btree.hpp"
 #include "engine/homeds/btree/ssd_btree.hpp"
 #include "homeblks/homeblks_config.hpp"
 #include "homelogstore/log_store.hpp"
 #include "homestore_base.hpp"
+#include "engine/common/resource_mgr.hpp"
+#include "engine/index/indx_mgr.hpp"
 
 using namespace homeds::btree;
 
@@ -34,25 +37,6 @@ using namespace homeds::btree;
  */
 
 namespace homestore {
-typedef BlkStore< VdevVarSizeBlkAllocatorPolicy > sb_blkstore_t;
-
-template < typename IndexBuffer >
-using index_blkstore_t = BlkStore< VdevFixedBlkAllocatorPolicy, IndexBuffer >;
-
-typedef BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy > meta_blkstore_t;
-
-typedef boost::intrusive_ptr< BlkBuffer > blk_buf_t;
-
-VENUM(blkstore_type, uint32_t, DATA_STORE = 1, INDEX_STORE = 2, SB_STORE = 3, DATA_LOGDEV_STORE = 4,
-      CTRL_LOGDEV_STORE = 5, META_STORE = 6);
-
-struct blkstore_blob {
-    enum blkstore_type type;
-};
-
-struct sb_blkstore_blob : blkstore_blob {
-    BlkId blkid;
-};
 
 template < typename IndexBuffer >
 class HomeStore : public HomeStoreBase {
@@ -69,24 +53,13 @@ public:
         }
 
         sisl::ObjCounterRegistry::enable_metrics_reporting();
-
         m_status_mgr = std::make_unique< HomeStoreStatusMgr >();
         MetaBlkMgrSI()->register_handler("INDX_MGR_CP", StaticIndxMgr::meta_blk_found_cb, nullptr);
 
         /* set the homestore static config parameters */
         auto& hs_config = HomeStoreStaticConfig::instance();
         hs_config.input = input;
-        hs_config.data_drive_attr = (input.data_drive_attr)
-            ? *input.data_drive_attr
-            : get_drive_attrs(input.data_devices, input.data_device_type);
-        if (input.fast_devices_present()) {
-            hs_config.fast_drive_present = true;
-            hs_config.fast_drive_attr = (input.fast_drive_attr)
-                ? *input.fast_drive_attr
-                : get_drive_attrs(input.fast_devices, input.fast_device_type);
-        } else {
-            hs_config.fast_drive_present = false;
-        }
+        hs_config.fast_drive_present = input.fast_devices_present();
 
         HomeStoreDynamicConfig::init_settings_default();
 
@@ -130,15 +103,16 @@ public:
 #endif
 
         /* create cache */
-        uint64_t cache_size = ResourceMgr::get_cache_size();
+        uint64_t cache_size = ResourceMgrSI().get_cache_size();
         // TO DO: Might need to differentiate based on data or fast type
         m_cache = std::make_unique< CacheType >(cache_size, hs_config.data_drive_attr.atomic_phys_page_size);
 
         /* create device manager */
-        m_dev_mgr = std::make_unique< DeviceManager >(
-            std::bind(&HomeStore::new_vdev_found, this, std::placeholders::_1, std::placeholders::_2),
-            sizeof(sb_blkstore_blob), virtual_dev_process_completions, input.data_device_type,
-            input.fast_device_type, std::bind(&HomeStore::process_vdev_error, this, std::placeholders::_1));
+        m_dev_mgr = std::make_unique< DeviceManager >(hs_config.input.data_devices, hs_config.input.fast_devices,
+                                                      bind_this(HomeStore::new_vdev_found, 2), sizeof(sb_blkstore_blob),
+                                                      VirtualDev::static_process_completions,
+                                                      bind_this(HomeStore::process_vdev_error, 1));
+        m_dev_mgr->init();
     }
 
     cap_attrs get_system_capacity() {
@@ -155,12 +129,12 @@ public:
         return cap;
     }
 
-    virtual data_blkstore_t* get_data_blkstore() const override { return m_data_blk_store.get(); }
-    index_blkstore_t< IndexBuffer >* get_index_blkstore() const { return m_index_blk_store.get(); }
-    sb_blkstore_t* get_sb_blkstore() const { return m_sb_blk_store.get(); }
-    logdev_blkstore_t* get_data_logdev_blkstore() const override { return m_data_logdev_blk_store.get(); }
-    logdev_blkstore_t* get_ctrl_logdev_blkstore() const override { return m_ctrl_logdev_blk_store.get(); }
-    meta_blkstore_t* get_meta_blkstore() const { return m_meta_blk_store.get(); }
+    virtual BlkStore< BlkBuffer >* get_data_blkstore() const override { return m_data_blk_store.get(); }
+    BlkStore< IndexBuffer >* get_index_blkstore() const { return m_index_blk_store.get(); }
+    BlkStore<>* get_sb_blkstore() const { return m_sb_blk_store.get(); }
+    BlkStore<>* get_meta_blkstore() const { return m_meta_blk_store.get(); }
+    JournalVirtualDev* get_data_logdev_blkstore() const override { return m_data_logdev_blk_store.get(); }
+    JournalVirtualDev* get_ctrl_logdev_blkstore() const override { return m_ctrl_logdev_blk_store.get(); }
 
     uint32_t get_data_pagesz() const { return m_data_pagesz; }
     bool print_checksum() const { return m_print_checksum; }
@@ -184,20 +158,21 @@ public:
         get_index_blkstore()->blkalloc_cp_start(ba_cp);
     }
 
-    std::shared_ptr< blkalloc_cp > blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp > cur_ba_cp) {
+    std::shared_ptr< blkalloc_cp > blkalloc_attach_prepare_cp(const std::shared_ptr< blkalloc_cp >& cur_ba_cp) {
         return (get_data_blkstore()->attach_prepare_cp(cur_ba_cp));
     }
 
 protected:
-    virtual data_blkstore_t::comp_callback data_completion_cb() = 0;
+    virtual BlkStore< BlkBuffer >::comp_callback data_completion_cb() = 0;
     virtual void process_vdev_error(vdev_info_block* vb) = 0;
 
     void init_devices() {
         auto& hs_config = HomeStoreStaticConfig::instance();
 
         /* attach physical devices */
-        const bool first_time_boot{m_dev_mgr->add_devices(hs_config.input.data_devices, hs_config.input.fast_devices)};
-        HS_ASSERT_CMP(LOGMSG, m_dev_mgr->get_total_cap(PhysicalDevGroup::DATA) / hs_config.input.data_devices.size(), >, MIN_DATA_DISK_CAP_SUPPORTED());
+        const bool first_time_boot = m_dev_mgr->is_first_time_boot();
+        HS_ASSERT_CMP(LOGMSG, m_dev_mgr->get_total_cap(PhysicalDevGroup::DATA) / hs_config.input.data_devices.size(), >,
+                      MIN_DATA_DISK_CAP_SUPPORTED());
         HS_ASSERT_CMP(LOGMSG, m_dev_mgr->get_total_cap(PhysicalDevGroup::DATA), <, MAX_DATA_SUPPORTED_CAP());
         if (!hs_config.input.fast_devices.empty()) {
             HS_ASSERT_CMP(LOGMSG,
@@ -222,7 +197,7 @@ protected:
         if (cnt != 1) { return; }
         m_dev_mgr->init_done();
         MetaBlkMgrSI()->start(m_meta_blk_store.get(), m_meta_sb_blob, first_time_boot);
-        ResourceMgr::set_total_cap(m_dev_mgr->get_total_cap());
+        ResourceMgrSI().set_total_cap(m_dev_mgr->get_total_cap());
     }
 
     void close_devices() { m_dev_mgr->close_devices(); }
@@ -260,13 +235,14 @@ protected:
             const uint64_t size{pct_to_size(data_blkstore_pct)};
             m_size_avail = size;
             LOGINFO("maximum capacity for data blocks is {}", m_size_avail);
-            m_data_blk_store = std::make_unique< data_blkstore_t >(
-                m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::WRITEBACK_CACHE, 0,
-                (char*)&blob, sizeof(blkstore_blob), m_data_pagesz, "data", true, data_completion_cb());
+            m_data_blk_store = std::make_unique< BlkStore< BlkBuffer > >(
+                m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::WRITEBACK_CACHE,
+                blk_allocator_type_t::varsize, 0, (char*)&blob, sizeof(blkstore_blob), m_data_pagesz, "data", true,
+                data_completion_cb());
         } else {
-            m_data_blk_store = std::make_unique< data_blkstore_t >(m_dev_mgr.get(), m_cache.get(), vb, pdev_group,
-                                                                   BlkStoreCacheType::WRITEBACK_CACHE, m_data_pagesz,
-                                                                   "data", vb->is_failed(), true, data_completion_cb());
+            m_data_blk_store = std::make_unique< BlkStore< BlkBuffer > >(
+                m_dev_mgr.get(), m_cache.get(), vb, pdev_group, BlkStoreCacheType::WRITEBACK_CACHE,
+                blk_allocator_type_t::varsize, m_data_pagesz, "data", vb->is_failed(), true, data_completion_cb());
             if (vb->is_failed()) {
                 m_vdev_failed = true;
                 LOGINFO("data block store is in failed state");
@@ -279,22 +255,22 @@ protected:
         const PhysicalDevGroup pdev_group{m_dev_mgr->fast_devices_present() ? PhysicalDevGroup::FAST
                                                                             : PhysicalDevGroup::DATA};
         const auto atomic_phys_page_size{pdev_group == PhysicalDevGroup::DATA
-                                              ? HS_STATIC_CONFIG(data_drive_attr.atomic_phys_page_size)
-                                              : HS_STATIC_CONFIG(fast_drive_attr.atomic_phys_page_size)};
+                                             ? HS_STATIC_CONFIG(data_drive_attr.atomic_phys_page_size)
+                                             : HS_STATIC_CONFIG(fast_drive_attr.atomic_phys_page_size)};
         if (vb == nullptr) {
             struct blkstore_blob blob {};
             blob.type = blkstore_type::INDEX_STORE;
             const uint64_t size{pct_to_size(indx_blkstore_pct)};
-            m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
-                m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE, 0,
-                (char*)&blob, sizeof(blkstore_blob), atomic_phys_page_size, "index",
+            m_index_blk_store = std::make_unique< BlkStore< IndexBuffer > >(
+                m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE,
+                blk_allocator_type_t::fixed, 0, (char*)&blob, sizeof(blkstore_blob), atomic_phys_page_size, "index",
                 true);
             ++m_format_cnt;
             m_index_blk_store->format(([this](bool success) { init_done(true); }));
         } else {
-            m_index_blk_store = std::make_unique< index_blkstore_t< IndexBuffer > >(
+            m_index_blk_store = std::make_unique< BlkStore< IndexBuffer > >(
                 m_dev_mgr.get(), m_cache.get(), vb, pdev_group, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE,
-                atomic_phys_page_size, "index", vb->is_failed(), true);
+                blk_allocator_type_t::fixed, atomic_phys_page_size, "index", vb->is_failed(), true);
             if (vb->is_failed()) {
                 m_vdev_failed = true;
                 LOGINFO("index block store is in failed state");
@@ -312,16 +288,16 @@ protected:
             struct blkstore_blob blob {};
             blob.type = blkstore_type::META_STORE;
             const uint64_t size{pct_to_size(meta_blkstore_pct)};
-            m_meta_blk_store = std::make_unique< meta_blkstore_t >(
-                m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::PASS_THRU, 0, (char*)&blob,
-                sizeof(blkstore_blob), phys_page_size, "meta", false);
+            m_meta_blk_store = std::make_unique< BlkStore<> >(
+                m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::PASS_THRU,
+                blk_allocator_type_t::varsize, 0, (char*)&blob, sizeof(blkstore_blob), phys_page_size, "meta", false);
             ++m_format_cnt;
             m_meta_blk_store->format(([this](bool success) { init_done(true); }));
 
         } else {
-            m_meta_blk_store = std::make_unique< meta_blkstore_t >(
-                m_dev_mgr.get(), m_cache.get(), vb, pdev_group, BlkStoreCacheType::PASS_THRU, phys_page_size,
-                                                                   "meta", vb->is_failed(), false);
+            m_meta_blk_store = std::make_unique< BlkStore<> >(
+                m_dev_mgr.get(), m_cache.get(), vb, pdev_group, BlkStoreCacheType::PASS_THRU,
+                blk_allocator_type_t::varsize, phys_page_size, "meta", vb->is_failed(), false);
             if (vb->is_failed()) {
                 m_vdev_failed = true;
                 LOGINFO("meta block store is in failed state");
@@ -348,18 +324,21 @@ protected:
             struct blkstore_blob blob {};
             blob.type = blkstore_type::DATA_LOGDEV_STORE;
             const uint64_t size{pct_to_size(data_logdev_blkstore_pct)};
-            m_data_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
-                m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::PASS_THRU, 0, (char*)&blob,
-                sizeof(blkstore_blob), atomic_phys_page_size,
-                "data_logdev", false,
-                std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::data_logdev(), std::placeholders::_1));
+
+            m_data_logdev_blk_store = std::make_unique< JournalVirtualDev >(
+                m_dev_mgr.get(), "data_logdev", pdev_group, sizeof(blkstore_blob), 0, true, atomic_phys_page_size,
+                m_dev_mgr->get_all_devices(pdev_group),
+                std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::data_logdev(), std::placeholders::_1),
+                (char*)&blob, size, false);
+
             ++m_format_cnt;
             m_data_logdev_blk_store->format(([this](bool success) { init_done(true); }));
         } else {
-            m_data_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
-                m_dev_mgr.get(), m_cache.get(), vb, pdev_group, BlkStoreCacheType::PASS_THRU, atomic_phys_page_size,
-                "data_logdev", vb->is_failed(), false,
-                std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::data_logdev(), std::placeholders::_1));
+            m_data_logdev_blk_store = std::make_unique< JournalVirtualDev >(
+                m_dev_mgr.get(), "data_logdev", vb, pdev_group,
+                std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::data_logdev(), std::placeholders::_1),
+                vb->is_failed(), false);
+
             if (vb->is_failed()) {
                 m_vdev_failed = true;
                 LOGINFO("data logdev block store is in failed state");
@@ -378,18 +357,21 @@ protected:
             struct blkstore_blob blob {};
             blob.type = blkstore_type::CTRL_LOGDEV_STORE;
             const uint64_t size{pct_to_size(ctrl_logdev_blkstore_pct)};
-            m_ctrl_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
-                m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::PASS_THRU, 0, (char*)&blob,
-                sizeof(blkstore_blob), atomic_phys_page_size,
-                "ctrl_logdev", false,
-                std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::ctrl_logdev(), std::placeholders::_1));
+
+            m_ctrl_logdev_blk_store = std::make_unique< JournalVirtualDev >(
+                m_dev_mgr.get(), "ctrl_logdev", pdev_group, sizeof(blkstore_blob), 0, true, atomic_phys_page_size,
+                m_dev_mgr->get_all_devices(pdev_group),
+                std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::ctrl_logdev(), std::placeholders::_1),
+                (char*)&blob, size, false);
+
             ++m_format_cnt;
             m_ctrl_logdev_blk_store->format(([this](bool success) { init_done(true); }));
         } else {
-            m_ctrl_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
-                m_dev_mgr.get(), m_cache.get(), vb, pdev_group, BlkStoreCacheType::PASS_THRU, atomic_phys_page_size,
-                "ctrl_logdev", vb->is_failed(), false,
-                std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::ctrl_logdev(), std::placeholders::_1));
+            m_ctrl_logdev_blk_store = std::make_unique< JournalVirtualDev >(
+                m_dev_mgr.get(), "ctrl_logdev", vb, pdev_group,
+                std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::ctrl_logdev(), std::placeholders::_1),
+                vb->is_failed(), false);
+
             if (vb->is_failed()) {
                 m_vdev_failed = true;
                 LOGINFO("ctrl logdev block store is in failed state");
@@ -425,25 +407,6 @@ public:
 #endif
 
 private:
-    static iomgr::drive_attributes get_drive_attrs(const std::vector< dev_info >& devices,
-                                                   const iomgr_drive_type drive_type) {
-        auto drive_iface = iomgr::IOManager::instance().default_drive_interface();
-        iomgr::drive_attributes attr = drive_iface->get_attributes(devices[0].dev_names, drive_type);
-#ifndef NDEBUG
-        for (auto i{1u}; i < devices.size(); ++i) {
-            auto observed_attr = drive_iface->get_attributes(devices[i].dev_names, drive_type);
-            if (attr != observed_attr) {
-                HS_ASSERT(DEBUG, 0,
-                          "Expected all phys dev have same attributes, prev device attr={}, this device attr={}",
-                          attr.to_json().dump(4), observed_attr.to_json().dump(4));
-            }
-        }
-#endif
-
-        return attr;
-    }
-
-private:
     uint64_t pct_to_size(const float pct, const PhysicalDevGroup pdev_group = PhysicalDevGroup::DATA) const {
         uint64_t sz{static_cast< uint64_t >((pct * static_cast< double >(m_dev_mgr->get_total_cap(pdev_group))) / 100)};
         // TO DO: Add something for fast_drive_attr
@@ -453,12 +416,12 @@ private:
     }
 
 protected:
-    std::unique_ptr< data_blkstore_t > m_data_blk_store;
-    std::unique_ptr< index_blkstore_t< IndexBuffer > > m_index_blk_store;
-    std::unique_ptr< sb_blkstore_t > m_sb_blk_store;
-    std::unique_ptr< logdev_blkstore_t > m_data_logdev_blk_store;
-    std::unique_ptr< logdev_blkstore_t > m_ctrl_logdev_blk_store;
-    std::unique_ptr< meta_blkstore_t > m_meta_blk_store;
+    std::unique_ptr< BlkStore< BlkBuffer > > m_data_blk_store;
+    std::unique_ptr< BlkStore< IndexBuffer > > m_index_blk_store;
+    std::unique_ptr< BlkStore<> > m_sb_blk_store;
+    std::unique_ptr< BlkStore<> > m_meta_blk_store;
+    std::unique_ptr< JournalVirtualDev > m_data_logdev_blk_store;
+    std::unique_ptr< JournalVirtualDev > m_ctrl_logdev_blk_store;
     std::unique_ptr< DeviceManager > m_dev_mgr;
     std::unique_ptr< CacheType > m_cache;
 

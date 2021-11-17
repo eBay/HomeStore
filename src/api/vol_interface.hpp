@@ -48,8 +48,7 @@ public:
     static bool shutdown(const bool force = false);
     static boost::intrusive_ptr< VolInterface > safe_instance();
     static VolInterface* raw_instance();
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr::iomgr_drive_type drive_type,
-                              io_flag oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, io_flag oflags);
 };
 
 struct buf_info {
@@ -199,12 +198,10 @@ public:
     std::string to_string() const {
         std::ostringstream oss;
         oss << "min_virtual_page_size=" << min_virtual_page_size << ",app_mem_size=" << app_mem_size
-            << ",data_dev_type=" << enum_name(data_device_type) << ",number of data devices =" << data_devices.size()
-            << ",data_open_flags =" << data_open_flags;
+            << ",number of data devices =" << data_devices.size()  << ",data_open_flags =" << data_open_flags;
         
         if (fast_devices_present()) {
-            oss << ",fast_dev_type=" << enum_name(fast_device_type)
-                << ",number of fast devices =" << fast_devices.size()
+            oss << ",number of fast devices =" << fast_devices.size()
                 << ",fast_open_flags =" << fast_open_flags;
         }
         oss << ", start_http=" << start_http;
@@ -239,9 +236,8 @@ public:
 
     static VolInterface* get_instance() { return VolInterfaceImpl::raw_instance(); }
 
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr::iomgr_drive_type drive_type,
-                              io_flag oflags) {
-        return VolInterfaceImpl::zero_boot_sbs(devices, drive_type, oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, io_flag oflags) {
+        return VolInterfaceImpl::zero_boot_sbs(devices, oflags);
     }
 
     virtual ~VolInterface() {}

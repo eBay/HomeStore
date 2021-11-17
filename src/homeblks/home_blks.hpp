@@ -175,8 +175,7 @@ public:
      */
     static HomeBlks* instance();
     static HomeBlksSafePtr safe_instance();
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type,
-                              const io_flag oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, const io_flag oflags);
 
     virtual ~HomeBlks() override;
     virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req,
@@ -276,7 +275,7 @@ public:
     void create_volume(VolumePtr vol);
     void move_to_restricted_state();
 
-    data_blkstore_t::comp_callback data_completion_cb() override;
+    BlkStore< BlkBuffer >::comp_callback data_completion_cb() override;
 
     /**
      * @brief
@@ -393,6 +392,7 @@ private:
     /* hdd custom threads */
     std::vector< iomgr::io_thread_t > m_custom_hdd_threads;
     std::mutex m_hdd_threads_mtx;
+    std::condition_variable m_hdd_threads_cv;
 };
 
 static inline HomeBlksSafePtr HomeBlksPtr() { return HomeBlks::safe_instance(); }

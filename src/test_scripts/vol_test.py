@@ -12,9 +12,10 @@ from time import sleep
 import requests
 from threading import Thread
 
-opts,args = getopt.getopt(sys.argv[1:], 'td:', ['test_suits=', 'dirpath=']) 
+opts,args = getopt.getopt(sys.argv[1:], 'td:g', ['test_suits=', 'dirpath=', 'gdb=']) 
 test_suits = ""
 dirpath = "./"
+is_gdb = False
 
 for opt,arg in opts:
     if opt in ('-t', '--test_suits'):
@@ -23,6 +24,12 @@ for opt,arg in opts:
     if opt in ('-d', '--dirpath'):
         dirpath = arg
         print(("dir path (%s)") % (arg))
+    if opt in ('-g', '--gdb'):
+        is_gdb = True 
+        print(("All binaries will be gdb atached"))
+
+if is_gdb:
+    dirpath = "gdb --args " + dirpath
 
 addln_opts = ' '
 addln_opts += ' '.join(map(str, args)) 

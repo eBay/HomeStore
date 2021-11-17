@@ -14,7 +14,6 @@
 #include <sys/types.h>
 #endif
 
-#include <boost/range.hpp>
 #include <sisl/fds/bitset.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <iomgr/iomgr.hpp>
@@ -22,9 +21,12 @@
 #include "engine/blkalloc/blk_allocator.h"
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_flip.hpp"
+#include "engine/common/homestore_utils.hpp"
+#include "engine/common/homestore_header.hpp"
 #include "engine/device/virtual_dev.hpp"
-
+#include "engine/blkalloc/blkalloc_cp.hpp"
 #include "device.h"
+#include "api/meta_interface.hpp"
 
 namespace homestore {
 
@@ -47,11 +49,10 @@ void PhysicalDevChunk::recover(std::unique_ptr< sisl::Bitset > recovered_bm, met
 }
 
 void PhysicalDevChunk::recover() {
-    assert(m_allocator != nullptr);
-    if (m_recovered_bm != nullptr) { m_allocator->set_disk_bm(std::move(m_recovered_bm)); }
+    if (m_allocator && m_recovered_bm) { m_allocator->set_disk_bm(std::move(m_recovered_bm)); }
 }
 
-void PhysicalDevChunk::cp_start(std::shared_ptr< blkalloc_cp > ba_cp) {
+void PhysicalDevChunk::cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp) {
     auto bitmap_mem = get_blk_allocator_mutable()->cp_start(std::move(ba_cp));
     if (m_meta_blk_cookie) {
         MetaBlkMgrSI()->update_sub_sb(bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
@@ -64,47 +65,58 @@ void PhysicalDevChunk::cp_start(std::shared_ptr< blkalloc_cp > ba_cp) {
 
 std::shared_ptr< blkalloc_cp >
 PhysicalDevChunk::attach_prepare_cp(const PhysicalDevGroup pdev_group,
-                                    [[maybe_unused]] std::shared_ptr< blkalloc_cp > cur_ba_cp) {
+                                    [[maybe_unused]] const std::shared_ptr< blkalloc_cp >& cur_ba_cp) {
     return std::make_shared< blkalloc_cp >();
 }
 
-DeviceManager::DeviceManager(NewVDevCallback vcb, const uint32_t vdev_metadata_size,
+DeviceManager::DeviceManager(const std::vector< dev_info >& data_devices, const std::vector< dev_info >& fast_devices,
+                             NewVDevCallback vcb, const uint32_t vdev_metadata_size,
                              const iomgr::io_interface_comp_cb_t& io_comp_cb,
-                             const iomgr::iomgr_drive_type data_drive_type,
-                             const iomgr::iomgr_drive_type fast_drive_type, const vdev_error_callback& vdev_error_cb) :
+                             const vdev_error_callback& vdev_error_cb) :
         m_new_vdev_cb{std::move(vcb)},
-        m_data_drive_type{data_drive_type},
-        m_fast_drive_type{fast_drive_type},
+        m_io_comp_cb{io_comp_cb},
+        m_data_devices{data_devices},
+        m_fast_devices{fast_devices},
         m_vdev_metadata_size{vdev_metadata_size},
         m_vdev_error_cb{vdev_error_cb} {
+    HS_RELEASE_ASSERT_GT(data_devices.size(), 0, "Expecting at least one data device");
+
+    // Setup the device flags
+    auto& hs_static_cfg = HomeStoreStaticConfig::instance();
+    hs_static_cfg.data_drive_attr = get_drive_attrs(data_devices);
+    hs_static_cfg.data_drive_type = get_drive_type(data_devices);
+    if (!fast_devices.empty()) {
+        hs_static_cfg.fast_drive_attr = get_drive_attrs(fast_devices);
+        hs_static_cfg.fast_drive_type = get_drive_type(fast_devices);
+    }
 
     m_data_open_flags = get_open_flags(HS_STATIC_CONFIG(input.data_open_flags));
     m_fast_open_flags = get_open_flags(HS_STATIC_CONFIG(input.fast_open_flags));
 
     // initialize memory structures in chunk memory
-    const auto initialize_memory_structures{[](uint8_t** chunk_memory, auto& dm_derived, const auto page_size,
-                                               const auto alignment) {
-        dm_derived.info_size = sisl::round_up(dm_info::dm_info_block_size, page_size);
-        *chunk_memory = hs_utils::iobuf_alloc(dm_derived.info_size, sisl::buftag::superblk, alignment);
-        dm_derived.info = new (*chunk_memory) dm_info{};
-        std::uninitialized_default_construct(dm_derived.info->get_pdev_info_blocks(),
-                                             dm_derived.info->get_pdev_info_blocks() +
-                                                 HS_STATIC_CONFIG(engine.max_pdevs));
-        std::uninitialized_default_construct(dm_derived.info->get_chunk_info_blocks(),
-                                             dm_derived.info->get_chunk_info_blocks() +
-                                                 HS_STATIC_CONFIG(engine.max_chunks));
-        std::uninitialized_default_construct(dm_derived.info->get_vdev_info_blocks(),
-                                             dm_derived.info->get_vdev_info_blocks() +
-                                                 HS_STATIC_CONFIG(engine.max_vdevs));
-        if (dm_info::dm_info_block_size < dm_derived.info_size) {
-            std::memset(*chunk_memory + dm_info::dm_info_block_size, 0,
-                        dm_derived.info_size - dm_info::dm_info_block_size);
-        }
+    const auto initialize_memory_structures{
+        [](uint8_t** chunk_memory, auto& dm_derived, const auto page_size, const auto alignment) {
+            dm_derived.info_size = sisl::round_up(dm_info::dm_info_block_size, page_size);
+            *chunk_memory = hs_utils::iobuf_alloc(dm_derived.info_size, sisl::buftag::superblk, alignment);
+            dm_derived.info = new (*chunk_memory) dm_info{};
+            std::uninitialized_default_construct(dm_derived.info->get_pdev_info_blocks(),
+                                                 dm_derived.info->get_pdev_info_blocks() +
+                                                     HS_STATIC_CONFIG(engine.max_pdevs));
+            std::uninitialized_default_construct(dm_derived.info->get_chunk_info_blocks(),
+                                                 dm_derived.info->get_chunk_info_blocks() +
+                                                     HS_STATIC_CONFIG(engine.max_chunks));
+            std::uninitialized_default_construct(dm_derived.info->get_vdev_info_blocks(),
+                                                 dm_derived.info->get_vdev_info_blocks() +
+                                                     HS_STATIC_CONFIG(engine.max_vdevs));
+            if (dm_info::dm_info_block_size < dm_derived.info_size) {
+                std::memset(*chunk_memory + dm_info::dm_info_block_size, 0,
+                            dm_derived.info_size - dm_info::dm_info_block_size);
+            }
 
-        dm_derived.pdev_hdr = &dm_derived.info->pdev_hdr;
-        dm_derived.chunk_hdr = &dm_derived.info->chunk_hdr;
-        dm_derived.vdev_hdr = &dm_derived.info->vdev_hdr;
-    }};
+            dm_derived.pdev_hdr = &dm_derived.info->pdev_hdr;
+            dm_derived.chunk_hdr = &dm_derived.info->chunk_hdr;
+            dm_derived.vdev_hdr = &dm_derived.info->vdev_hdr;
+        }};
 
     initialize_memory_structures(&m_data_chunk_memory, m_data_dm_derived,
                                  HS_STATIC_CONFIG(data_drive_attr.phys_page_size),
@@ -115,10 +127,46 @@ DeviceManager::DeviceManager(NewVDevCallback vcb, const uint32_t vdev_metadata_s
                                                          : HS_STATIC_CONFIG(data_drive_attr.align_size));
     m_scan_cmpltd = false;
 
-    // Attach completions to the drive end point this DeviceManager is going to use
-    iomanager.default_drive_interface()->attach_completion_cb(io_comp_cb);
-
     HS_LOG_ASSERT_LE(m_vdev_metadata_size, MAX_CONTEXT_DATA_SZ);
+}
+
+bool DeviceManager::init() {
+    uint64_t max_dev_offset{0};
+    MetaBlkMgrSI()->register_handler("BLK_ALLOC", bind_this(DeviceManager::blk_alloc_meta_blk_found_cb, 3), nullptr,
+                                     true /* do_crc */);
+
+    hs_uuid_t data_system_uuid{INVALID_SYSTEM_UUID};
+    hs_uuid_t fast_system_uuid{INVALID_SYSTEM_UUID};
+
+    const auto verify_superblock{
+        [this](const PhysicalDevGroup pdev_group, auto& devices, const auto& open_flags, hs_uuid_t& system_uuid) {
+            for (auto& d : devices) {
+                auto pdev{std::make_unique< PhysicalDev >(this, pdev_group, d.dev_names, open_flags, m_io_comp_cb)};
+                if (pdev->has_valid_superblock(system_uuid)) { return true; }
+            }
+            return false;
+        }};
+    const bool valid_data_block{
+        verify_superblock(PhysicalDevGroup::DATA, m_data_devices, m_data_open_flags, data_system_uuid)};
+    bool valid_fast_block{true};
+    if (!m_fast_devices.empty()) {
+        valid_fast_block =
+            verify_superblock(PhysicalDevGroup::FAST, m_fast_devices, m_fast_open_flags, fast_system_uuid);
+    }
+
+    if (valid_data_block && valid_fast_block) { m_first_time_boot = false; }
+
+    if (!m_first_time_boot) {
+        HS_DEBUG_ASSERT_NE(data_system_uuid, INVALID_SYSTEM_UUID);
+        if (!m_fast_devices.empty()) { HS_DEBUG_ASSERT_NE(fast_system_uuid, INVALID_SYSTEM_UUID); }
+        load_and_repair_devices(data_system_uuid);
+    } else {
+        HS_DEBUG_ASSERT_EQ(data_system_uuid, INVALID_SYSTEM_UUID);
+        if (!m_fast_devices.empty()) { HS_DEBUG_ASSERT_EQ(fast_system_uuid, INVALID_SYSTEM_UUID); }
+        init_devices();
+    }
+
+    return m_first_time_boot;
 }
 
 /* It returns total capacity availble to use by virtual dev. */
@@ -131,13 +179,12 @@ size_t DeviceManager::get_total_cap(const PhysicalDevGroup pdev_group) const {
     }
 }
 
-void DeviceManager::init_devices(const std::vector< dev_info >& data_devices,
-                                 const std::vector< dev_info >& fast_devices) {
+void DeviceManager::init_devices() {
     // all devices will be inited with same system uuid;
     const auto sys_uuid{hs_utils::gen_system_uuid()};
 
     const auto init_dm_derived{[this, &sys_uuid](const PhysicalDevGroup pdev_group, auto& devices,
-                                                 const auto& open_flags, const auto& drive_type, auto& pdevs) {
+                                                 const auto& open_flags, auto& pdevs) {
         const auto pdev_start_id{m_pdev_id};
         auto* const chunk_memory{get_chunk_memory(pdev_group)};
         auto& dm_derived{get_dm_derived(pdev_group)};
@@ -179,10 +226,10 @@ void DeviceManager::init_devices(const std::vector< dev_info >& data_devices,
 
             std::unique_ptr< PhysicalDev > pdev{
                 std::make_unique< PhysicalDev >(this, pdev_group, d.dev_names, open_flags, sys_uuid, m_pdev_id++,
-                                                max_dev_offset, drive_type, true, dm_derived.info_size, &is_inited)};
+                                                max_dev_offset, true, dm_derived.info_size, m_io_comp_cb, &is_inited)};
 
-            LOGINFO("Initializing {} device name: {}, type: {} with system uuid: {}.", pdev_group, d.dev_names,
-                    drive_type, std::ctime(&sys_uuid));
+            LOGINFO("Initializing {} device name: {}, with system uuid: {}.", pdev_group, d.dev_names,
+                    std::ctime(&sys_uuid));
 
             max_dev_offset += pdev->get_size();
             if (!pdev_size) {
@@ -201,15 +248,15 @@ void DeviceManager::init_devices(const std::vector< dev_info >& data_devices,
 
         if (pdev_group == PhysicalDevGroup::DATA) { m_last_data_pdev_id = m_pdev_id - 1; }
     }};
-    init_dm_derived(PhysicalDevGroup::DATA, data_devices, m_data_open_flags, m_data_drive_type, m_data_pdevs);
-    if (!fast_devices.empty()) {
-        init_dm_derived(PhysicalDevGroup::FAST, fast_devices, m_fast_open_flags, m_fast_drive_type, m_fast_pdevs);
+    init_dm_derived(PhysicalDevGroup::DATA, m_data_devices, m_data_open_flags, m_data_pdevs);
+    if (!m_fast_devices.empty()) {
+        init_dm_derived(PhysicalDevGroup::FAST, m_fast_devices, m_fast_open_flags, m_fast_pdevs);
     }
 
     m_scan_cmpltd = true;
 
     write_info_blocks(PhysicalDevGroup::DATA);
-    if (!fast_devices.empty()) { write_info_blocks(PhysicalDevGroup::FAST); }
+    if (!m_fast_devices.empty()) { write_info_blocks(PhysicalDevGroup::FAST); }
 }
 
 DeviceManager::~DeviceManager() {
@@ -252,18 +299,18 @@ void DeviceManager::update_vb_context(const PhysicalDevGroup pdev_group, const u
     std::lock_guard< decltype(m_dev_mutex) > lock{m_dev_mutex};
     HS_LOG_ASSERT_LE(ctx_data.size, vdev_info_block::max_context_size());
     assert(ctx_data.size <= vdev_info_block::max_context_size());
+
     auto& dm_derived{get_dm_derived(pdev_group)};
     std::memcpy(dm_derived.vdev_info[vdev_id].context_data, ctx_data.bytes, ctx_data.size);
     write_info_blocks(pdev_group);
 }
 
-void DeviceManager::load_and_repair_devices(const std::vector< dev_info >& data_devices,
-                                            const std::vector< dev_info >& fast_devices, const hs_uuid_t& sys_uuid) {
+void DeviceManager::load_and_repair_devices(const hs_uuid_t& sys_uuid) {
 
     bool data_rewrite{false}, fast_rewrite{false};
 
     const auto load_devices{[this, &sys_uuid](const PhysicalDevGroup pdev_group, auto& devices, const auto& open_flags,
-                                              const auto& drive_type, auto& pdevs, auto& chunks, bool& rewrite) {
+                                              auto& pdevs, auto& chunks, bool& rewrite) {
         uint32_t device_id{INVALID_DEV_ID};
         std::vector< std::unique_ptr< PhysicalDev > > uninit_devs;
         uninit_devs.reserve(devices.size());
@@ -276,11 +323,12 @@ void DeviceManager::load_and_repair_devices(const std::vector< dev_info >& data_
             bool is_inited;
             std::unique_ptr< PhysicalDev > pdev{
                 std::make_unique< PhysicalDev >(this, pdev_group, d.dev_names, open_flags, sys_uuid, INVALID_DEV_ID, 0,
-                                                drive_type, false, dm_derived.info_size, &is_inited)};
+                                                false, dm_derived.info_size, m_io_comp_cb, &is_inited)};
             if (!is_inited) {
                 // Super block is not present, possibly a new device, will format the device later
                 HS_LOG(CRITICAL, device,
-                       "{} device {} appears to be not formatted. Will format it and replace it with the failed disks."
+                       "{} device {} appears to be not formatted. Will format it and replace it with the "
+                       "failed disks."
                        "Replacing it with the failed disks can cause data loss",
                        pdev_group, d.dev_names);
                 uninit_devs.push_back(std::move(pdev));
@@ -290,8 +338,7 @@ void DeviceManager::load_and_repair_devices(const std::vector< dev_info >& data_
                 continue;
             }
 
-            LOGINFO("Loaded {} device: {}, type: {} with system uuid: {}", pdev_group, d.dev_names, m_data_drive_type,
-                    std::ctime(&sys_uuid));
+            LOGINFO("Loaded {} device: {}, with system uuid: {}", pdev_group, d.dev_names, std::ctime(&sys_uuid));
 
             if (!pdev_size) { pdev_size = pdev->get_size(); }
             HS_LOG_ASSERT_EQ(pdev_size, pdev->get_size(), "Not all physical devices are of equal size");
@@ -330,7 +377,8 @@ void DeviceManager::load_and_repair_devices(const std::vector< dev_info >& data_
         // load the info blocks
         read_info_blocks(pdev_group, device_id);
 
-        // TODO : If it is different then existing chunk in pdev superblock has to be deleted and new has to be created
+        // TODO : If it is different then existing chunk in pdev superblock has to be deleted and new
+        // has to be created
         HS_LOG_ASSERT_EQ(dm_derived.info_size, dm_derived.info->get_size());
         HS_LOG_ASSERT_EQ(dm_derived.info->get_version(), CURRENT_DM_INFO_VERSION);
 
@@ -403,13 +451,12 @@ void DeviceManager::load_and_repair_devices(const std::vector< dev_info >& data_
         HS_LOG_ASSERT_EQ(num_chunks, dm_derived.chunk_hdr->get_num_chunks());
     }};
     // load data devices
-    load_devices(PhysicalDevGroup::DATA, data_devices, m_data_open_flags, m_data_drive_type, m_data_pdevs,
-                 m_data_chunks, data_rewrite);
+    load_devices(PhysicalDevGroup::DATA, m_data_devices, m_data_open_flags, m_data_pdevs, m_data_chunks, data_rewrite);
 
-    if (!fast_devices.empty()) {
+    if (!m_fast_devices.empty()) {
         // load fast devices
-        load_devices(PhysicalDevGroup::FAST, fast_devices, m_fast_open_flags, m_fast_drive_type, m_fast_pdevs,
-                     m_fast_chunks, fast_rewrite);
+        load_devices(PhysicalDevGroup::FAST, m_fast_devices, m_fast_open_flags, m_fast_pdevs, m_fast_chunks,
+                     fast_rewrite);
     }
     m_scan_cmpltd = true;
 
@@ -437,7 +484,7 @@ void DeviceManager::load_and_repair_devices(const std::vector< dev_info >& data_
 
     // create data vdevs
     create_vdevs(PhysicalDevGroup::DATA, data_rewrite);
-    if (!fast_devices.empty()) {
+    if (!m_fast_devices.empty()) {
         // create fast vdevs
         create_vdevs(PhysicalDevGroup::FAST, fast_rewrite);
     }
@@ -567,9 +614,8 @@ int DeviceManager::get_open_flags(const io_flag oflags) {
     return open_flags;
 }
 
-void DeviceManager::zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type,
-                                  const io_flag oflags) {
-    return PhysicalDev::zero_boot_sbs(devices, drive_type, get_open_flags(oflags));
+void DeviceManager::zero_boot_sbs(const std::vector< dev_info >& devices, const io_flag oflags) {
+    return PhysicalDev::zero_boot_sbs(devices, get_open_flags(oflags));
 }
 #if 0
 void DeviceManager::zero_pdev_sbs() {
@@ -578,50 +624,6 @@ void DeviceManager::zero_pdev_sbs() {
     }
 }
 #endif
-/* add constant */
-bool DeviceManager::add_devices(const std::vector< dev_info >& data_devices,
-                                const std::vector< dev_info >& fast_devices) {
-    uint64_t max_dev_offset{0};
-    MetaBlkMgrSI()->register_handler("BLK_ALLOC", bind_this(DeviceManager::blk_alloc_meta_blk_found_cb, 3), nullptr,
-                                     true /* do_crc */);
-
-    HS_RELEASE_ASSERT(data_devices.size() > 0, "Expecting at least one data device");
-
-    hs_uuid_t data_system_uuid{INVALID_SYSTEM_UUID};
-    hs_uuid_t fast_system_uuid{INVALID_SYSTEM_UUID};
-
-    const auto verify_superblock{[this](const PhysicalDevGroup pdev_group, auto& devices, const auto& open_flags,
-                                        const auto& drive_type, hs_uuid_t& system_uuid) {
-        for (auto& d : devices) {
-            std::unique_ptr< PhysicalDev > pdev{
-                std::make_unique< PhysicalDev >(this, pdev_group, d.dev_names, open_flags, drive_type)};
-
-            if (pdev->has_valid_superblock(system_uuid)) { return true; }
-        }
-        return false;
-    }};
-    const bool valid_data_block{verify_superblock(PhysicalDevGroup::DATA, data_devices, m_data_open_flags,
-                                                  m_data_drive_type, data_system_uuid)};
-    bool valid_fast_block{true};
-    if (!fast_devices.empty()) {
-        valid_fast_block = verify_superblock(PhysicalDevGroup::FAST, fast_devices, m_fast_open_flags, m_fast_drive_type,
-                                             fast_system_uuid);
-    }
-
-    if (valid_data_block && valid_fast_block) { m_first_time_boot = false; }
-
-    if (!m_first_time_boot) {
-        HS_DEBUG_ASSERT_NE(data_system_uuid, INVALID_SYSTEM_UUID);
-        if (!fast_devices.empty()) { HS_DEBUG_ASSERT_NE(fast_system_uuid, INVALID_SYSTEM_UUID); }
-        load_and_repair_devices(data_devices, fast_devices, data_system_uuid);
-    } else {
-        HS_DEBUG_ASSERT_EQ(data_system_uuid, INVALID_SYSTEM_UUID);
-        if (!fast_devices.empty()) { HS_DEBUG_ASSERT_EQ(fast_system_uuid, INVALID_SYSTEM_UUID); }
-        init_devices(data_devices, fast_devices);
-    }
-
-    return m_first_time_boot;
-}
 
 /* Note: Whosoever is calling this function should take the mutex. We don't allow multiple reads */
 void DeviceManager::read_info_blocks(const PhysicalDevGroup pdev_group, const uint32_t dev_id) {
@@ -676,7 +678,7 @@ void DeviceManager::write_info_blocks(const PhysicalDevGroup pdev_group) {
     HS_DEBUG_ASSERT_EQ(dm_derived.pdev_hdr->get_magic(), MAGIC);
 }
 
-PhysicalDevChunk* DeviceManager::alloc_chunk(PhysicalDev* const pdev, const uint32_t vdev_id, const uint64_t req_size,
+PhysicalDevChunk* DeviceManager::alloc_chunk(PhysicalDev* pdev, const uint32_t vdev_id, const uint64_t req_size,
                                              const uint32_t primary_id) {
     std::lock_guard< decltype(m_dev_mutex) > lock{m_dev_mutex};
 
@@ -685,7 +687,7 @@ PhysicalDevChunk* DeviceManager::alloc_chunk(PhysicalDev* const pdev, const uint
                                 ? HS_STATIC_CONFIG(data_drive_attr.phys_page_size)
                                 : HS_STATIC_CONFIG(fast_drive_attr.phys_page_size)),
                        0);
-    PhysicalDevChunk* const chunk{pdev->find_free_chunk(req_size)};
+    PhysicalDevChunk* chunk{pdev->find_free_chunk(req_size)};
     if (chunk == nullptr) {
         std::ostringstream ss;
         ss << "No space available for chunk size = " << req_size << " in pdev id = " << pdev->get_dev_id();
@@ -778,14 +780,14 @@ void DeviceManager::free_vdev(const PhysicalDevGroup pdev_group, vdev_info_block
     write_info_blocks(pdev_group);
 }
 
-/* This method creates a new chunk for a given physical device and attaches the chunk to the physical device
- * after previous chunk (if non-null) or last if null */
+/* This method creates a new chunk for a given physical device and attaches the chunk to the physical
+ * device after previous chunk (if non-null) or last if null */
 PhysicalDevChunk* DeviceManager::create_new_chunk(PhysicalDev* const pdev, const uint64_t start_offset,
                                                   const uint64_t size, PhysicalDevChunk* const prev_chunk) {
     uint32_t slot;
 
-    // Allocate a slot for the new chunk (which becomes new chunk id) and create a new PhysicalDevChunk instance
-    // and attach it to a physical device
+    // Allocate a slot for the new chunk (which becomes new chunk id) and create a new PhysicalDevChunk
+    // instance and attach it to a physical device
     chunk_info_block* const c{alloc_new_chunk_slot(pdev->m_pdev_group, &slot)};
     if (c == nullptr) {
         std::ostringstream ss;
@@ -847,5 +849,33 @@ vdev_info_block* DeviceManager::alloc_new_vdev_slot(const PhysicalDevGroup pdev_
     }
 
     return nullptr;
+}
+
+iomgr::drive_attributes DeviceManager::get_drive_attrs(const std::vector< dev_info >& devices) {
+    iomgr::drive_attributes attr = iomgr::DriveInterface::get_attributes(devices[0].dev_names);
+#ifndef NDEBUG
+    for (auto i{1u}; i < devices.size(); ++i) {
+        auto observed_attr = iomgr::DriveInterface::get_attributes(devices[i].dev_names);
+        if (attr != observed_attr) {
+            HS_ASSERT(DEBUG, 0, "Expected all phys dev have same attributes, prev device attr={}, this device attr={}",
+                      attr.to_json().dump(4), observed_attr.to_json().dump(4));
+        }
+    }
+#endif
+
+    return attr;
+}
+
+iomgr::drive_type DeviceManager::get_drive_type(const std::vector< dev_info >& devices) {
+    iomgr::drive_type dtype = iomgr::DriveInterface::get_drive_type(devices[0].dev_names);
+#ifndef NDEBUG
+    for (auto i{1u}; i < devices.size(); ++i) {
+        auto observed_dtype = iomgr::DriveInterface::get_drive_type(devices[i].dev_names);
+        HS_DEBUG_ASSERT_EQ(enum_name(dtype), enum_name(observed_dtype),
+                           "Expected all phys dev have same drive_type, mismatched dev={}", devices[i].dev_names);
+    }
+#endif
+
+    return dtype;
 }
 } // namespace homestore

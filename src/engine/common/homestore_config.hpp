@@ -74,13 +74,11 @@ struct cap_attrs {
 
 struct hs_input_params {
 public:
-    std::vector< dev_info > data_devices;                                       // name of the data devices.
-    iomgr::iomgr_drive_type data_device_type{iomgr::iomgr_drive_type::unknown}; // Type of the data device
-    std::vector< dev_info > fast_devices;                                       // name of fast devices
-    iomgr::iomgr_drive_type fast_device_type{iomgr::iomgr_drive_type::unknown}; // Type of the fast device
-    bool is_file{false};                                                        // Are the devices a file or raw device
-    boost::uuids::uuid system_uuid;                                             // Deprecated. UUID assigned to the system
-    
+    std::vector< dev_info > data_devices; // name of the data devices.
+    std::vector< dev_info > fast_devices; // name of fast devices
+    bool is_file{false};                  // Are the devices a file or raw device
+    boost::uuids::uuid system_uuid;       // Deprecated. UUID assigned to the system
+
     io_flag data_open_flags{io_flag::DIRECT_IO};
     io_flag fast_open_flags{io_flag::DIRECT_IO};
 
@@ -94,11 +92,6 @@ public:
 #ifdef _PRERELEASE
     bool force_reinit{false};
 #endif
-    bool is_hdd{false};
-
-    /* optional parameters - if provided will override the startup config */
-    boost::optional< iomgr::drive_attributes > data_drive_attr;
-    boost::optional< iomgr::drive_attributes > fast_drive_attr;
 
     bool fast_devices_present() const { return !fast_devices.empty(); }
 
@@ -109,14 +102,12 @@ public:
         for (const auto& d : data_devices) {
             json["data_devices"].push_back(d.dev_names);
         }
-        json["data_device_type"] = enum_name(data_device_type);
         json["data_open_flags"] = data_open_flags;
         if (fast_devices_present()) {
             json["fast_devices"] = nlohmann::json::array();
             for (const auto& d : fast_devices) {
                 json["fast_devices"].push_back(d.dev_names);
             }
-            json["fast_device_type"] = enum_name(fast_device_type);
             json["fast_open_flags"] = fast_open_flags;
         }
         json["is_read_only"] = is_read_only;
@@ -159,13 +150,20 @@ struct HomeStoreStaticConfig {
     iomgr::drive_attributes data_drive_attr;
     bool fast_drive_present;
     iomgr::drive_attributes fast_drive_attr;
+    iomgr::drive_type data_drive_type{iomgr::drive_type::unknown};
+    iomgr::drive_type fast_drive_type{iomgr::drive_type::unknown};
     hs_engine_config engine;
     hs_input_params input;
 
     nlohmann::json to_json() const {
         nlohmann::json json;
         json["DataDriveAttributes"] = data_drive_attr.to_json();
-        if (fast_drive_present) { json["FastDriveAttributes"] = fast_drive_attr.to_json(); }
+        json["DataDriveType"] = enum_name(data_drive_type);
+        if (fast_drive_present) {
+            json["FastDriveAttributes"] = fast_drive_attr.to_json();
+            json["FastDriveType"] = enum_name(fast_drive_type);
+        }
+
         json["GenericConfig"] = engine.to_json();
         json["InputParameters"] = input.to_json();
         return json;
@@ -182,6 +180,11 @@ struct HomeStoreStaticConfig {
     }
 #endif
 };
+
+static bool is_data_drive_hdd() {
+    auto data_drive_type = HomeStoreStaticConfig::instance().data_drive_type;
+    return ((data_drive_type == iomgr::drive_type::file_on_hdd) || (data_drive_type == iomgr::drive_type::block_hdd));
+}
 
 class HomeStoreDynamicConfig {
 public:

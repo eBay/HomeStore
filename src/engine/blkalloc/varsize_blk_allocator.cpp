@@ -16,7 +16,6 @@
 #include <sisl/utility/thread_buffer.hpp>
 
 #include "blk_cache_queue.h"
-#include "engine/homeds/btree/mem_btree.hpp"
 #include "engine/common/homestore_flip.hpp"
 
 #include "varsize_blk_allocator.h"

@@ -25,7 +25,8 @@
 
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
-#include "engine/homestore_base.hpp"
+#include "engine/common/homestore_utils.hpp"
+//#include "engine/homestore_base.hpp"
 //#include "tagged_ptr.hpp"
 #include <sisl/metrics/metrics.hpp>
 

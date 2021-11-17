@@ -19,7 +19,6 @@
 #include <limits>
 #include <memory>
 #include <mutex>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -40,10 +39,7 @@
 #include <sisl/fds/sparse_vector.hpp>
 #include <sisl/fds/utils.hpp>
 #include <sisl/utility/enum.hpp>
-
-#include <engine/homestore_base.hpp>
-
-#include "api/meta_interface.hpp"
+#include "engine/common/homestore_header.hpp"
 
 using namespace iomgr;
 SDS_LOGGING_DECL(device, DEVICE_MANAGER)
@@ -220,13 +216,6 @@ struct super_block {
 };
 #pragma pack()
 
-static const size_t DATA_SUPERBLOCK_SIZE{sisl::round_up(
-    std::max(sizeof(super_block), HS_STATIC_CONFIG(data_drive_attr.atomic_phys_page_size) + SUPERBLOCK_PAYLOAD_OFFSET),
-    HS_STATIC_CONFIG(data_drive_attr.atomic_phys_page_size))};
-static const size_t FAST_SUPERBLOCK_SIZE{sisl::round_up(
-    std::max(sizeof(super_block), HS_STATIC_CONFIG(fast_drive_attr.atomic_phys_page_size) + SUPERBLOCK_PAYLOAD_OFFSET),
-    HS_STATIC_CONFIG(fast_drive_attr.atomic_phys_page_size))};
-
 #pragma pack(1)
 // NOTE: After this structure in memory follows pdev_info_block followed by chunk_info_block array
 // followed by vdev_info_block array
@@ -273,20 +262,19 @@ static constexpr uint32_t INVALID_VDEV_ID{std::numeric_limits< uint32_t >::max()
 static constexpr uint32_t INVALID_CHUNK_ID{std::numeric_limits< uint32_t >::max()};
 static constexpr uint32_t INVALID_DEV_ID{std::numeric_limits< uint32_t >::max()};
 
-VENUM(PhysicalDevGroup, uint8_t, DATA = 0, FAST = 1);
-
 class PhysicalDev;
-
+class meta_blk;
 class DeviceManager;
+class VirtualDev;
 typedef std::function< void(int status, uint8_t* cookie) > comp_callback;
 
 class PhysicalDevChunk {
 public:
     friend class DeviceManager;
 
-    PhysicalDevChunk(PhysicalDev* const pdev, chunk_info_block* const cinfo);
-    PhysicalDevChunk(PhysicalDev* const pdev, const uint32_t chunk_id, const uint64_t start_offset, const uint64_t size,
-                     chunk_info_block* const cinfo);
+    PhysicalDevChunk(PhysicalDev* pdev, chunk_info_block* cinfo);
+    PhysicalDevChunk(PhysicalDev* pdev, const uint32_t chunk_id, const uint64_t start_offset, const uint64_t size,
+                     chunk_info_block* cinfo);
 
     PhysicalDevChunk(const PhysicalDevChunk&) = delete;
     PhysicalDevChunk(PhysicalDevChunk&&) noexcept = delete;
@@ -295,9 +283,7 @@ public:
     ~PhysicalDevChunk();
 
     const PhysicalDev* get_physical_dev() const { return m_pdev; }
-
     PhysicalDev* get_physical_dev_mutable() { return m_pdev; };
-
     const DeviceManager* device_manager() const;
 
     DeviceManager* device_manager_mutable();
@@ -367,15 +353,8 @@ public:
 
     void set_primary_chunk_id(const uint32_t primary_id) { m_chunk_info->primary_chunk_id = primary_id; }
 
-    std::string to_string() const {
-        std::ostringstream ss;
-        ss << "chunk_id = " << get_chunk_id() << " pdev_id = " << m_chunk_info->pdev_id
-           << " vdev_id = " << m_chunk_info->vdev_id << " start_offset = " << m_chunk_info->chunk_start_offset
-           << " size = " << m_chunk_info->chunk_size << " prev_chunk_id = " << m_chunk_info->prev_chunk_id
-           << " next_chunk_id = " << m_chunk_info->next_chunk_id << " busy? = " << is_busy()
-           << " slot_allocated? = " << m_chunk_info->is_slot_allocated();
-        return ss.str();
-    }
+    std::string to_string() const;
+    nlohmann::json get_status([[maybe_unused]] const int log_level) const;
 
     void update_end_of_chunk(const uint64_t size) {
         LOGINFOMOD(device, "chunk id {}, end size {} actual size {}", get_chunk_id(), size, get_size());
@@ -387,10 +366,10 @@ public:
 
     void recover();
 
-    void cp_start(std::shared_ptr< blkalloc_cp > ba_cp);
+    void cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp);
 
     static std::shared_ptr< blkalloc_cp > attach_prepare_cp(const PhysicalDevGroup dev_group,
-                                                            std::shared_ptr< blkalloc_cp > cur_ba_cp);
+                                                            const std::shared_ptr< blkalloc_cp >& cur_ba_cp);
 
     // void cp_done(std::shared_ptr< blkalloc_cp > ba_cp);
 
@@ -440,6 +419,9 @@ class PhysicalDev {
     friend class DeviceManager;
 
 public:
+    PhysicalDev(DeviceManager* const mgr, const PhysicalDevGroup pdev_group, const std::string& devname,
+                const int oflags, const iomgr::io_interface_comp_cb_t& io_comp_cb);
+
     /**
      * @brief
      *
@@ -451,7 +433,6 @@ public:
      *  if is_init is set to false, this uuid will be used to for varification with this pdev's stored system uuid;
      * @param dev_num
      * @param dev_offset
-     * @param drive_type
      * @param is_init :  true if this is a first time boot, false if this is not a first time boot
      * @param dm_info_size
      * @param is_inited :
@@ -461,11 +442,8 @@ public:
      */
     PhysicalDev(DeviceManager* const mgr, const PhysicalDevGroup pdev_group, const std::string& devname,
                 const int oflags, const hs_uuid_t& uuid, const uint32_t dev_num, const uint64_t dev_offset,
-                const iomgr::iomgr_drive_type drive_type, const bool is_init, const uint64_t dm_info_size,
+                const bool is_init, const uint64_t dm_info_size, const iomgr::io_interface_comp_cb_t& io_comp_cb,
                 bool* const is_inited);
-
-    PhysicalDev(DeviceManager* const mgr, const PhysicalDevGroup pdev_group, const std::string& devname,
-                const int oflags, const iomgr::iomgr_drive_type drive_type);
 
     PhysicalDev(const PhysicalDev&) = delete;
     PhysicalDev(PhysicalDev&&) noexcept = delete;
@@ -484,6 +462,7 @@ public:
     uint64_t get_dev_offset() const { return m_info_blk.dev_offset; }
     uint32_t get_dev_id() const { return m_info_blk.dev_num; }
     PhysicalDevMetrics& get_metrics() { return m_metrics; }
+    iomgr::DriveInterface* drive_iface() const { return m_drive_iface; }
 
     void set_dev_offset(const uint64_t offset) { m_info_blk.dev_offset = offset; }
     void set_dev_id(const uint32_t id) { m_info_blk.dev_num = id; }
@@ -544,9 +523,7 @@ public:
     hs_uuid_t get_sys_uuid() { return m_super_blk->get_system_uuid(); }
 
 public:
-    static void zero_boot_sbs(const std::vector< dev_info >& devices,
-                              const iomgr_drive_type drive_type,
-                              const int oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, const int oflags);
 
 private:
     void write_superblock();
@@ -569,7 +546,8 @@ private:
 private:
     DeviceManager* m_mgr; // Back pointer to physical device
     PhysicalDevGroup m_pdev_group;
-    io_device_ptr m_iodev;
+    iomgr::io_device_ptr m_iodev;
+    iomgr::DriveInterface* m_drive_iface; // Interface to do IO
     std::string m_devname;
     super_block* m_super_blk{nullptr}; // Persisent header block
     uint64_t m_devsize{0};
@@ -580,18 +558,6 @@ private:
     int32_t m_cur_indx{0};
     bool m_superblock_valid{false};
     sisl::atomic_counter< uint64_t > m_error_cnt{0};
-};
-
-class AbstractVirtualDev {
-public:
-    AbstractVirtualDev() = default;
-    AbstractVirtualDev(const AbstractVirtualDev& other) = delete;
-    AbstractVirtualDev& operator=(const AbstractVirtualDev& other) = delete;
-    AbstractVirtualDev(AbstractVirtualDev&&) noexcept = delete;
-    AbstractVirtualDev& operator=(AbstractVirtualDev&&) noexcept = delete;
-    virtual ~AbstractVirtualDev() = default;
-
-    virtual void add_chunk(PhysicalDevChunk* const chunk) = 0;
 };
 
 class DeviceManager {
@@ -608,9 +574,9 @@ class DeviceManager {
     friend class PhysicalDevChunk;
 
 public:
-    DeviceManager(NewVDevCallback vcb, const uint32_t vdev_metadata_size,
-                  const iomgr::io_interface_comp_cb_t& io_comp_cb, const iomgr::iomgr_drive_type data_drive_type,
-                  const iomgr::iomgr_drive_type fast_drive_type, const vdev_error_callback& vdev_error_cb);
+    DeviceManager(const std::vector< dev_info >& data_devices, const std::vector< dev_info >& fast_devices,
+                  NewVDevCallback vcb, const uint32_t vdev_metadata_size,
+                  const iomgr::io_interface_comp_cb_t& io_comp_cb, const vdev_error_callback& vdev_error_cb);
 
     DeviceManager(const DeviceManager& other) = delete;
     DeviceManager& operator=(const DeviceManager& other) = delete;
@@ -628,8 +594,7 @@ public:
      *  true if it is first time boot, meaning there is no valid sb on device
      *  false if it is recovery reboot, meaning there is valid sb found on device
      */
-    bool add_devices(const std::vector< dev_info >& data_devices,
-                     const std::vector< dev_info >& fast_devices = std::vector< dev_info >{});
+    bool init();
     size_t get_total_cap(const PhysicalDevGroup pdev_group = PhysicalDevGroup::DATA) const;
     void handle_error(PhysicalDev* const pdev);
 
@@ -658,7 +623,7 @@ public:
 
     /* Allocate a chunk for required size on the given physical dev and associate the chunk to provide virtual device.
      * Returns the allocated PhysicalDevChunk */
-    PhysicalDevChunk* alloc_chunk(PhysicalDev* const pdev, const uint32_t vdev_id, const uint64_t req_size,
+    PhysicalDevChunk* alloc_chunk(PhysicalDev* pdev, const uint32_t vdev_id, const uint64_t req_size,
                                   const uint32_t primary_id);
 
     /* Free the chunk for later user */
@@ -723,13 +688,13 @@ public:
     // void zero_pdev_sbs();
 
 public:
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, const iomgr_drive_type drive_type,
-                              const io_flag oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices, const io_flag oflags);
+    static iomgr::drive_attributes get_drive_attrs(const std::vector< dev_info >& devices);
+    static iomgr::drive_type get_drive_type(const std::vector< dev_info >& devices);
 
 private:
-    void load_and_repair_devices(const std::vector< dev_info >& data_devices,
-                                 const std::vector< dev_info >& fast_devices, const hs_uuid_t& system_uuid);
-    void init_devices(const std::vector< dev_info >& data_devices, const std::vector< dev_info >& fast_devices);
+    void load_and_repair_devices(const hs_uuid_t& system_uuid);
+    void init_devices();
     void read_info_blocks(const PhysicalDevGroup pdev_group, const uint32_t dev_id);
 
     chunk_info_block* alloc_new_chunk_slot(const PhysicalDevGroup pdev_group, uint32_t* const pslot_num);
@@ -746,16 +711,16 @@ private:
     int m_data_open_flags;
     int m_fast_open_flags;
     NewVDevCallback m_new_vdev_cb;
+    iomgr::io_interface_comp_cb_t m_io_comp_cb;
     std::atomic< uint64_t > m_data_gen_cnt{0};
     std::atomic< uint64_t > m_fast_gen_cnt{0};
-    iomgr::iomgr_drive_type m_data_drive_type;
-    iomgr::iomgr_drive_type m_fast_drive_type;
-
     uint8_t* m_data_chunk_memory{nullptr};
     uint8_t* m_fast_chunk_memory{nullptr};
+    const std::vector< dev_info > m_data_devices;
+    const std::vector< dev_info > m_fast_devices;
 
-    /* This memory is carved out of chunk memory. Any changes in any of the block should end up writing all the blocks
-     * on disk.
+    /* This memory is carved out of chunk memory. Any changes in any of the block should end up writing all the
+     * blocks on disk.
      */
     uint64_t m_data_dm_info_size{0};
     typedef struct dm_derived_type {
@@ -777,7 +742,7 @@ private:
     sisl::sparse_vector< std::unique_ptr< PhysicalDevChunk > > m_data_chunks;
     sisl::sparse_vector< std::unique_ptr< PhysicalDev > > m_fast_pdevs;
     sisl::sparse_vector< std::unique_ptr< PhysicalDevChunk > > m_fast_chunks;
-    sisl::sparse_vector< AbstractVirtualDev* > m_vdevs;
+    sisl::sparse_vector< VirtualDev* > m_vdevs;
     uint32_t m_last_data_vdev_id{INVALID_VDEV_ID};
     uint32_t m_last_fast_vdev_id{INVALID_VDEV_ID};
     uint32_t m_vdev_metadata_size; // Appln metadata size for vdev

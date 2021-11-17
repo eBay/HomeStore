@@ -170,7 +170,7 @@ private:
     uint64_t m_write_cnt{0};
     mutable uint64_t m_read_cnt{0};
     uint64_t m_write_sz{0};
-    homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* m_store;
+    JournalVirtualDev* m_store;
     std::map< uint64_t, write_info > m_off_to_info_map; // off to write info
     std::vector< uint64_t > m_off_arr;                  // unique off write
     mutable std::mutex m_mtx;

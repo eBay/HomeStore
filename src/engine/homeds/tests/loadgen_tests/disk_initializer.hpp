@@ -72,10 +72,10 @@ public:
         params.app_mem_size = static_cast< uint64_t >(5) * 1024 * 1024 * 1024;
         params.data_devices = device_info;
         params.init_done_cb = init_done_cb;
-        params.data_drive_attr = iomgr::drive_attributes();
+        /*params.data_drive_attr = iomgr::drive_attributes();
         params.data_drive_attr->phys_page_size = 4096;
         params.data_drive_attr->align_size = 512;
-        params.data_drive_attr->atomic_phys_page_size = atomic_phys_page_size;
+        params.data_drive_attr->atomic_phys_page_size = atomic_phys_page_size; */
         params.vol_mounted_cb =
             std::bind(&DiskInitializer::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_state_change_cb = std::bind(&DiskInitializer::vol_state_change_cb, this, std::placeholders::_1,

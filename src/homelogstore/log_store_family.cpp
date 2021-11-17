@@ -5,6 +5,7 @@
 #include <iomgr/iomgr.hpp>
 #include <sisl/utility/thread_factory.hpp>
 
+#include "engine/homestore_base.hpp"
 #include "engine/common/homestore_assert.hpp"
 
 #include "log_store_family.hpp"
@@ -23,7 +24,7 @@ void LogStoreFamily::meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_vi
     m_log_dev.meta_blk_found(mblk, buf, size);
 }
 
-void LogStoreFamily::start(const bool format, logdev_blkstore_t* blk_store) {
+void LogStoreFamily::start(const bool format, JournalVirtualDev* blk_store) {
     m_log_dev.register_store_found_cb(bind_this(LogStoreFamily::on_log_store_found, 2));
     m_log_dev.register_append_cb(bind_this(LogStoreFamily::on_io_completion, 5));
     m_log_dev.register_logfound_cb(bind_this(LogStoreFamily::on_logfound, 6));

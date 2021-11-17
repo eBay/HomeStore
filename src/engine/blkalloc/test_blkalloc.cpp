@@ -22,6 +22,7 @@
 #include "blk_cache.h"
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
+#include "engine/common/homestore_flip.hpp"
 #include "varsize_blk_allocator.h"
 
 #include <gtest/gtest.h>
@@ -804,8 +805,8 @@ namespace {
 void alloc_var_scatter_direct_unirandsize(VarsizeBlkAllocatorTest* const block_test_pointer) {
     LOGINFO("Step 1: Set the flip to force directly bypassing freeblk cache");
 #ifdef _PRERELEASE
-    FlipClient* const fc{HomeStoreFlip::client_instance()};
-    FlipFrequency freq;
+    flip::FlipClient* const fc{HomeStoreFlip::client_instance()};
+    flip::FlipFrequency freq;
     freq.set_count(static_cast< uint32_t >(block_test_pointer->m_total_count) * 1000);
     freq.set_percent(100);
     fc->inject_noreturn_flip("varsize_blkalloc_bypass_cache", {}, freq);

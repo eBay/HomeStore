@@ -26,7 +26,7 @@
 #include "engine/blkstore/blkstore.hpp"
 #include "engine/cache/cache.h"
 #include "engine/common/homestore_assert.hpp"
-#include "engine/device/blkbuffer.hpp"
+#include "engine/blkstore/blkbuffer.hpp"
 #include "engine/device/device.h"
 #include "engine/homeds/thread/threadpool/thread_pool.h"
 #include "engine/index/snap_mgr.hpp"
@@ -289,13 +289,13 @@ private:
     template < typename... Args >
     void assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str, const Args&... args) {
         fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[vol={}]"},
-                        fmt::make_format_args(boost::lexical_cast< std::string >(get_uuid()))); 
+                        fmt::make_format_args(boost::lexical_cast< std::string >(get_uuid())));
         if (req_str.size()) {
             fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[request={}]"},
-                            fmt::make_format_args(boost::lexical_cast< std::string >(req_str))); 
+                            fmt::make_format_args(boost::lexical_cast< std::string >(req_str)));
         }
         fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\nMetrics = {}\n"},
-                        fmt::make_format_args(sisl::MetricsFarm::getInstance().get_result_in_json_string())); 
+                        fmt::make_format_args(sisl::MetricsFarm::getInstance().get_result_in_json_string()));
     }
 
     template < typename... Args >

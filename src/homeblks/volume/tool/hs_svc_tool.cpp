@@ -92,15 +92,6 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
     }
 }
 
-#if 0
-static iomgr::drive_attributes get_drive_attrs(const std::vector< dev_info >& devices,
-                                               const iomgr::iomgr_drive_type drive_type) {
-    auto drive_iface = iomgr::IOManager::instance().default_drive_interface();
-    iomgr::drive_attributes attr = drive_iface->get_attributes(devices[0].dev_names, drive_type);
-    return attr;
-}
-#endif
-
 /************************* CLI options ***************************/
 
 SDS_OPTION_GROUP(hs_svc_tool,
@@ -153,11 +144,7 @@ int main(int argc, char* argv[]) {
 
     HS_DEBUG_ASSERT_EQ(device_info.size() > 0, true);
 
-    auto drive_type = iomgr::iomgr_drive_type::unknown;
-
-    if (gp.zero_boot_sb) {
-        VolInterface::get_instance()->zero_boot_sbs(device_info, drive_type, homestore::io_flag::DIRECT_IO);
-    }
+    if (gp.zero_boot_sb) { VolInterface::get_instance()->zero_boot_sbs(device_info, homestore::io_flag::DIRECT_IO); }
 
     iomanager.stop();
 

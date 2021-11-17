@@ -6,11 +6,12 @@
 #include <sisl/utility/thread_factory.hpp>
 
 #include <engine/homeds/btree/btree.hpp>
-#include <engine/index/resource_mgr.hpp>
 #include <homelogstore/log_store.hpp>
 
 #include "blk_read_tracker.hpp"
 #include "indx_mgr.hpp"
+#include "engine/common/resource_mgr.hpp"
+#include "engine/homestore.hpp"
 
 using namespace homestore;
 namespace homestore {
@@ -511,7 +512,7 @@ void IndxMgr::io_replay() {
             /* do sync read */
             ++read_sync_cnt;
             buf = m_journal->read_sync(seq_num);
-            ResourceMgr::inc_mem_used_in_recovery(buf.size());
+            ResourceMgrSI().inc_mem_used_in_recovery(buf.size());
         }
         auto* const hdr{indx_journal_entry::get_journal_hdr(buf.bytes())};
         HS_ASSERT_NOTNULL(RELEASE, hdr);
@@ -587,7 +588,7 @@ void IndxMgr::io_replay() {
             ++diff_replay_cnt;
         }
     next:
-        ResourceMgr::dec_mem_used_in_recovery(buf.size());
+        ResourceMgrSI().dec_mem_used_in_recovery(buf.size());
         it = seq_buf_map.erase(it);
     }
 
@@ -981,7 +982,7 @@ void IndxMgr::free_blkid_and_send_completion(const indx_req_ptr& ireq) {
 void IndxMgr::journal_write(const indx_req_ptr& ireq) {
     /* Journal write is async call. So incrementing the ref on indx req */
     ireq->inc_ref();
-    auto b{ ireq->create_journal_entry()};
+    auto b{ireq->create_journal_entry()};
     auto* const lreq{logstore_req::make(m_journal.get(), ireq->get_seqid(), b)};
     lreq->cookie = ireq.get();
     m_journal->write_async(lreq);
@@ -1411,9 +1412,9 @@ void IndxMgr::destroy_done() {
 void IndxMgr::log_found(const logstore_seq_num_t seqnum, const log_buffer log_buf, void* const mem) {
     std::map< logstore_seq_num_t, log_buffer >::iterator it;
     bool happened;
-    if (ResourceMgr::can_add_mem_in_recovery(log_buf.size())) {
+    if (ResourceMgrSI().can_add_mem_in_recovery(log_buf.size())) {
         std::tie(it, happened) = seq_buf_map.emplace(std::make_pair(seqnum, log_buf));
-        ResourceMgr::inc_mem_used_in_recovery(log_buf.size());
+        ResourceMgrSI().inc_mem_used_in_recovery(log_buf.size());
     } else {
         log_buffer nullbuf;
         std::tie(it, happened) = seq_buf_map.emplace(std::make_pair(seqnum, nullbuf));
@@ -1494,6 +1495,14 @@ void StaticIndxMgr::init() {
     m_shutdown_started.store(false);
     try_blkalloc_checkpoint.store(false);
 
+    ResourceMgrSI().register_dirty_buf_exceed_cb(
+        []([[maybe_unused]] int64_t dirty_buf_count) { IndxMgr::trigger_indx_cp(); });
+
+    ResourceMgrSI().register_free_blks_exceed_cb(
+        []([[maybe_unused]] int64_t free_blks_count) { IndxMgr::trigger_hs_cp(); });
+
+    ResourceMgrSI().register_journal_exceed_cb([]([[maybe_unused]] int64_t journal_size) { IndxMgr::trigger_hs_cp(); });
+
     m_cp_mgr = std::unique_ptr< HomeStoreCPMgr >(new HomeStoreCPMgr{});
     m_read_blk_tracker = std::unique_ptr< Blk_Read_Tracker >(new Blk_Read_Tracker{IndxMgr::safe_to_free_blk});
     /* start the timer for blkalloc checkpoint */
@@ -1562,9 +1571,10 @@ void StaticIndxMgr::write_hs_cp_sb(hs_cp* const hcp) {
 void StaticIndxMgr::attach_prepare_indx_cp_list(std::map< boost::uuids::uuid, indx_cp_ptr >* const cur_icp,
                                                 std::map< boost::uuids::uuid, indx_cp_ptr >* const new_icp,
                                                 hs_cp* const cur_hcp, hs_cp* const new_hcp) {
-    if (try_blkalloc_checkpoint.load()) {
+    if (try_blkalloc_checkpoint.load() || cur_hcp->ba_cp == nullptr) {
         new_hcp->ba_cp = m_hs->blkalloc_attach_prepare_cp(cur_hcp ? cur_hcp->ba_cp : nullptr);
-        if (cur_hcp) {
+        new_hcp->ba_cp->notify_size_on_done([](const uint64_t size) { ResourceMgrSI().dec_free_blk(size); });
+        if (cur_hcp && cur_hcp->ba_cp) {
             cur_hcp->blkalloc_checkpoint = true;
             try_blkalloc_checkpoint.store(false);
         }
@@ -1693,7 +1703,7 @@ uint64_t
 StaticIndxMgr::free_blk(hs_cp* hcp,
                         sisl::ThreadVector< std::pair< homestore::BlkId, PhysicalDevGroup > >* const out_fblk_list,
                         Free_Blk_Entry& fbe, const bool force, const indx_req* const ireq) {
-    if (!force && !ResourceMgr::can_add_free_blk(1)) {
+    if (!force && !ResourceMgrSI().can_add_free_blk(1)) {
         /* caller will trigger homestore cp */
         return 0;
     }
@@ -1707,7 +1717,7 @@ StaticIndxMgr::free_blk(hs_cp* hcp,
 
     auto* const data_blkstore_ptr{m_hs->get_data_blkstore()};
     const uint64_t free_blk_size{fbe.blks_to_free() * m_hs->get_data_pagesz()};
-    ResourceMgr::inc_free_blk(free_blk_size);
+    ResourceMgrSI().inc_free_blk(free_blk_size);
     fbe.m_hcp = hcp;
     out_fblk_list->push_back(std::make_pair(fbe.get_free_blkid(), data_blkstore_ptr->get_pdev_group()));
     m_read_blk_tracker->safe_free_blks(fbe);
@@ -1733,7 +1743,7 @@ uint64_t
 StaticIndxMgr::free_blk(hs_cp* const hcp,
                         sisl::ThreadVector< std::pair< homestore::BlkId, PhysicalDevGroup > >* const out_fblk_list,
                         std::vector< Free_Blk_Entry >& in_fbe_list, const bool force, const indx_req* const ireq) {
-    if (!force && !ResourceMgr::can_add_free_blk(in_fbe_list.size())) {
+    if (!force && !ResourceMgrSI().can_add_free_blk(in_fbe_list.size())) {
         /* caller will trigger homestore cp */
         return 0;
     }
@@ -1784,11 +1794,5 @@ std::vector< cp_done_cb > StaticIndxMgr::hs_cp_done_cb_list;
 std::atomic< bool > StaticIndxMgr::try_blkalloc_checkpoint;
 std::map< boost::uuids::uuid, std::vector< std::pair< void*, sisl::byte_array > > > StaticIndxMgr::indx_meta_map;
 std::unique_ptr< Blk_Read_Tracker > StaticIndxMgr::m_read_blk_tracker;
-std::atomic< int64_t > ResourceMgr::m_hs_dirty_buf_cnt{0};
-std::atomic< int64_t > ResourceMgr::m_hs_fb_cnt{0};
-std::atomic< int64_t > ResourceMgr::m_hs_fb_size{0};
-std::atomic< int64_t > ResourceMgr::m_hs_ab_cnt{0};
-std::atomic< int64_t > ResourceMgr::m_memory_used_in_recovery{0};
-uint64_t ResourceMgr::m_total_cap;
-RsrcMgrMetrics ResourceMgr::m_metrics;
+
 bool indx_test_status::indx_create_suspend_cp_test{false};

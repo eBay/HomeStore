@@ -5,7 +5,7 @@
 namespace homestore {
 SDS_LOGGING_DECL(logstore)
 
-log_stream_reader::log_stream_reader(const off_t device_cursor, logdev_blkstore_t* store,
+log_stream_reader::log_stream_reader(const off_t device_cursor, JournalVirtualDev* store,
                                      const uint64_t read_size_multiple) :
         m_hb{HomeStoreBase::safe_instance()},
         m_blkstore{store},

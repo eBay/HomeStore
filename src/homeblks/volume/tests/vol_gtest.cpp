@@ -47,7 +47,7 @@
 #include "engine/common/homestore_flip.hpp"
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/mod_test_iface.hpp"
-#include "engine/device/blkbuffer.hpp"
+#include "engine/blkstore/blkbuffer.hpp"
 #include "engine/homestore_base.hpp"
 #include "test_common/homestore_test_common.hpp"
 
@@ -501,7 +501,7 @@ private:
     }
 };
 
-TestCfg tcfg;         // Config for each VolTest
+TestCfg tcfg;          // Config for each VolTest
 const TestCfg g_cfg{}; // Config for global for all tests
 const std::string access_mgr_mtype{"ACCESS_MGR"};
 
@@ -527,8 +527,8 @@ protected:
 
     // uint64_t cur_vol;
     // Clock::time_point startTime;
-    std::vector< dev_info > device_info;
-    std::vector< dev_info > fast_device_info;
+    std::vector< dev_info > m_device_info;
+    std::vector< dev_info > m_fast_device_info;
     uint64_t max_vol_size;
     uint64_t max_vol_size_csum;
     std::shared_ptr< IOTestJob > m_io_job;
@@ -549,7 +549,7 @@ protected:
 public:
     static thread_local uint32_t _n_completed_this_thread;
 
-    VolTest() : vol_info(g_cfg.max_vols), device_info{} {
+    VolTest() : vol_info(g_cfg.max_vols), m_device_info{} {
         tcfg = g_cfg; // Reset the config from global config
 
         // cur_vol = 0;
@@ -621,6 +621,7 @@ public:
 
     uint64_t get_dev_info(std::vector< dev_info >& device_info) {
         uint64_t max_capacity{0};
+
         /* create files */
         if (tcfg.dev_names.size() != 0) {
             for (uint32_t i{0}; i < tcfg.dev_names.size(); ++i) {
@@ -635,7 +636,7 @@ public:
                 if (tcfg.init || tcfg.disk_replace_cnt > 0) {
                     if (!tcfg.init) {
                         if (std::filesystem::exists(fpath) && std::filesystem::is_regular_file(fpath)) {
-                            std::filesystem::remove(fpath); 
+                            std::filesystem::remove(fpath);
                         }
                     }
                     std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
@@ -645,6 +646,19 @@ public:
                 device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
                 max_capacity += tcfg.max_disk_capacity;
             }
+        }
+
+        auto data_attrs = iomgr::drive_attributes();
+        data_attrs.phys_page_size = tcfg.phy_page_size;
+        data_attrs.align_size = 512;
+        data_attrs.atomic_phys_page_size = tcfg.atomic_phys_page_size;
+        for (auto& dinfo : device_info) {
+            if (tcfg.is_hdd) {
+                iomgr::DriveInterface::emulate_drive_type(dinfo.dev_names,
+                                                          tcfg.dev_names.empty() ? iomgr::drive_type::file_on_hdd
+                                                                                 : iomgr::drive_type::block_hdd);
+            }
+            iomgr::DriveInterface::emulate_drive_attributes(dinfo.dev_names, data_attrs);
         }
 
         return max_capacity;
@@ -658,6 +672,12 @@ public:
                 std::filesystem::resize_file(fpath, tcfg.max_fast_disk_capacity);
             }
             device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Fast);
+
+            auto data_attrs = iomgr::drive_attributes();
+            data_attrs.phys_page_size = tcfg.phy_page_size;
+            data_attrs.align_size = 512;
+            data_attrs.atomic_phys_page_size = tcfg.atomic_phys_page_size;
+            iomgr::DriveInterface::emulate_drive_attributes(std::filesystem::canonical(fpath).string(), data_attrs);
         }
     }
 
@@ -673,7 +693,10 @@ public:
         std::filesystem::create_directory("test_files");
         std::filesystem::permissions("test_files", std::filesystem::perms::owner_all);
 
-        max_capacity = get_dev_info(device_info);
+        iomanager.start(tcfg.num_threads, tcfg.is_spdk);
+
+        max_capacity = get_dev_info(m_device_info);
+        if (tcfg.use_fast_drive) { get_dev_fast_info(m_fast_device_info); }
 
         /* Don't populate the whole disks. Only 60 % of it */
         if (tcfg.max_vols) {
@@ -681,16 +704,12 @@ public:
             max_vol_size_csum = (sizeof(uint16_t) * max_vol_size) / tcfg.vol_page_size;
         }
 
-        if (tcfg.use_fast_drive) { get_dev_fast_info(fast_device_info); }
-
-        iomanager.start(tcfg.num_threads, tcfg.is_spdk);
-
         init_params params;
         params.data_open_flags = tcfg.io_flags;
         params.min_virtual_page_size = tcfg.vol_page_size;
         params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
-        params.data_devices = device_info;
-        params.fast_devices = fast_device_info;
+        params.data_devices = m_device_info;
+        params.fast_devices = m_fast_device_info;
 #ifdef _PRERELEASE
         params.force_reinit = force_reinit;
 #endif
@@ -702,18 +721,6 @@ public:
         params.vol_state_change_cb = bind_this(VolTest::vol_state_change_cb, 3);
         params.vol_found_cb = bind_this(VolTest::vol_found_cb, 1);
         params.end_of_batch_cb = bind_this(VolTest::process_end_of_batch, 1);
-
-        params.data_drive_attr = iomgr::drive_attributes();
-        params.data_drive_attr->phys_page_size = tcfg.phy_page_size;
-        params.data_drive_attr->align_size = 512;
-        params.data_drive_attr->atomic_phys_page_size = tcfg.atomic_phys_page_size;
-        if (tcfg.use_fast_drive) {
-            params.fast_drive_attr = iomgr::drive_attributes();
-            params.fast_drive_attr->phys_page_size = tcfg.phy_page_size;
-            params.fast_drive_attr->align_size = 512;
-            params.fast_drive_attr->atomic_phys_page_size = tcfg.atomic_phys_page_size;
-        }
-        params.is_hdd = tcfg.is_hdd;
 
         boost::uuids::string_generator gen;
         m_am_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
@@ -1151,12 +1158,11 @@ private:
     }
 
 public:
-    void force_reinit(const std::vector< dev_info >& data_devices, const iomgr::iomgr_drive_type data_drive_type,
-                      const io_flag data_oflags, const std::vector< dev_info >& fast_devices,
-                      const iomgr::iomgr_drive_type fast_drive_type, const io_flag fast_oflags) {
+    void force_reinit(const std::vector< dev_info >& data_devices, const io_flag data_oflags,
+                      const std::vector< dev_info >& fast_devices, const io_flag fast_oflags) {
         iomanager.start(1);
-        VolInterface::get_instance()->zero_boot_sbs(fast_devices, fast_drive_type, fast_oflags);
-        VolInterface::get_instance()->zero_boot_sbs(data_devices, data_drive_type, data_oflags);
+        VolInterface::get_instance()->zero_boot_sbs(fast_devices, fast_oflags);
+        VolInterface::get_instance()->zero_boot_sbs(data_devices, data_oflags);
         iomanager.stop();
     }
 };
@@ -1658,8 +1664,8 @@ protected:
                 const uint64_t validate_lba{req->lba + total_size_read / data_size};
                 const uint64_t data_lba{*reinterpret_cast< const uint64_t* >(data_buffer)};
                 if ((data_lba == 0) || (validate_lba == data_lba)) {
-                    // const auto ret{pwrite(req->fd, data_buffer, data_size, total_size_read + req->original_offset)};
-                    // assert(static_cast<uint64_t>(ret) == data_size);
+                    // const auto ret{pwrite(req->fd, data_buffer, data_size, total_size_read +
+                    // req->original_offset)}; assert(static_cast<uint64_t>(ret) == data_size);
                 } else {
                     LOGINFO("header mismatch operation {} volume {} lba {} header1 {} header2 {}",
                             (req->op_type == Op_type::READ ? "read" : "write"), req->cur_vol, req->lba, validate_lba,
@@ -1951,8 +1957,8 @@ TEST_F(VolTest, hs_force_reinit_test) {
     HS_RELEASE_ASSERT_GT(tmp_dev_info.size(), 0);
     if (tcfg.use_fast_drive) { get_dev_fast_info(tmp_fast_dev_info); }
 
-    this->force_reinit(tmp_dev_info, iomgr::iomgr_drive_type::unknown, homestore::io_flag::DIRECT_IO,
-                       tmp_fast_dev_info, iomgr::iomgr_drive_type::unknown, homestore::io_flag::DIRECT_IO);
+    this->force_reinit(tmp_dev_info, homestore::io_flag::DIRECT_IO,
+                       tmp_fast_dev_info, homestore::io_flag::DIRECT_IO);
 
     // 2. boot homestore which should be first-time-boot
     this->start_homestore();

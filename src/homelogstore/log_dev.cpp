@@ -5,6 +5,7 @@
 
 #include <sisl/fds/vector_pool.hpp>
 
+#include "api/meta_interface.hpp"
 #include "engine/common/homestore_assert.hpp"
 #include "engine/homestore_base.hpp"
 #include "log_dev.hpp"
@@ -38,7 +39,7 @@ void LogDev::meta_blk_found(meta_blk* const mblk, const sisl::byte_view buf, con
     m_logdev_meta.meta_buf_found(buf, static_cast< void* >(mblk));
 }
 
-void LogDev::start(const bool format, logdev_blkstore_t* blk_store) {
+void LogDev::start(const bool format, JournalVirtualDev* blk_store) {
     HS_ASSERT(LOGMSG, (m_append_comp_cb != nullptr), "Expected Append callback to be registered");
     HS_ASSERT(LOGMSG, (m_store_found_cb != nullptr), "Expected Log store found callback to be registered");
     HS_ASSERT(LOGMSG, (m_logfound_cb != nullptr), "Expected Logs found callback to be registered");
@@ -397,10 +398,10 @@ void LogDev::do_flush(LogGroup* const lg) {
     process_logdev_completions(req);
 }
 
-void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
-    const auto req{to_logdev_req(bs_req)};
-    if (bs_req->err != no_error) {
-        HS_RELEASE_ASSERT(0, "error {} happen during op {}", bs_req->err.message(), req->is_read);
+void LogDev::process_logdev_completions(const boost::intrusive_ptr< virtualdev_req >& vd_req) {
+    const auto req{to_logdev_req(vd_req)};
+    if (vd_req->err != no_error) {
+        HS_RELEASE_ASSERT(0, "error {} happen during op {}", vd_req->err.message(), req->is_read);
     }
     if (req->is_read) {
         // update logdev read metrics;

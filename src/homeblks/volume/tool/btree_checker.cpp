@@ -134,10 +134,11 @@ void start_homestore() {
     }
     params.min_virtual_page_size = config["min_virtual_page_size"];
     params.app_mem_size = config["app_mem_size"];
-    params.data_drive_attr = iomgr::drive_attributes();
+    // TODO: Call iomgr emulate drive attrs before starting homestore
+    /*params.data_drive_attr = iomgr::drive_attributes();
     params.data_drive_attr->phys_page_size = config["phys_page_size"];
     params.data_drive_attr->align_size = config["align_size"];
-    params.data_drive_attr->atomic_phys_page_size = config["atomic_phys_page_size"];
+    params.data_drive_attr->atomic_phys_page_size = config["atomic_phys_page_size"]; */
     params.init_done_cb = std::bind(init_done_cb, std::placeholders::_1, std::placeholders::_2);
     params.vol_mounted_cb = std::bind(vol_mounted_cb, std::placeholders::_1, std::placeholders::_2);
     params.vol_state_change_cb =

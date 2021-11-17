@@ -2,9 +2,11 @@ include (${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
 include_directories (BEFORE ..)
 
 set(BLKALLOC_SOURCE
+        blk_allocator.cpp
         fixed_blk_allocator.cpp
         varsize_blk_allocator.cpp
         blk_cache_queue.cpp
+        blkalloc_cp.cpp
        )
 add_library(hs_blkalloc OBJECT ${BLKALLOC_SOURCE})
 add_dependencies(hs_blkalloc hs_common)

@@ -23,16 +23,16 @@ SDS_INIT_LOGGING
 
 namespace {
 std::unique_ptr< homestore::DeviceManager > dev_mgr{};
-std::unique_ptr< homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy > > blk_store{};
+std::unique_ptr< homestore::BlkStore<> > blk_store{};
 std::unique_ptr< homestore::Cache< BlkId > > glob_cache{};
 } // namespace
 
-static constexpr uint64_t MAX_CACHE_SIZE{static_cast<uint64_t>(2) * 1024 * 1024 * 1024};
+static constexpr uint64_t MAX_CACHE_SIZE{static_cast< uint64_t >(2) * 1024 * 1024 * 1024};
 
-AbstractVirtualDev* new_vdev_found(homestore::vdev_info_block* const vb) {
+VirtualDev* new_vdev_found(homestore::vdev_info_block* const vb) {
     LOGINFO("New virtual device found id = {} size = {}", vb->vdev_id, vb->size);
-    blk_store = std::make_unique< homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy > >(
-        dev_mgr.get(), glob_cache.get(), vb, BlkStoreCacheType::WRITETHRU_CACHE, 8192);
+    blk_store = std::make_unique< homestore::BlkStore<> >(dev_mgr.get(), glob_cache.get(), vb,
+                                                          BlkStoreCacheType::WRITETHRU_CACHE, 8192);
     return blk_store->get_vdev();
 }
 
@@ -61,9 +61,9 @@ int main(int argc, char** argv) {
     /* Create a blkstore */
     if (create) {
         LOGINFO("Creating BlkStore");
-        const uint64_t size{static_cast<uint64_t>(512) * 1024 * 1024};
-        blk_store = std::make_unique< homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy > >(dev_mgr, glob_cache, size,
-                                                                                      BlkStoreCacheType::WRITETHRU_CACHE, 1, 8192);
+        const uint64_t size{static_cast< uint64_t >(512) * 1024 * 1024};
+        blk_store = std::make_unique< homestore::BlkStore<> >(dev_mgr, glob_cache, size,
+                                                              BlkStoreCacheType::WRITETHRU_CACHE, 1, 8192);
     }
 
     homestore::BlkId bids[100];
@@ -78,7 +78,7 @@ int main(int argc, char** argv) {
 
         bbufs[i] = blk_store->alloc_blk_cached(nblks * BLKSTORE_BLK_SIZE, hints, &bids[i]);
         LOGINFO("Requested nblks: {} Allocation info: {}", nblks, bids[i].to_string());
-        std::memset(static_cast<void*>(bbufs[i]->at_offset(0).bytes), i, bbufs[i]->at_offset(0).size);
+        std::memset(static_cast< void* >(bbufs[i]->at_offset(0).bytes), i, bbufs[i]->at_offset(0).size);
     }
 
     // char bufs[100][8192];

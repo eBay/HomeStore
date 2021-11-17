@@ -43,6 +43,7 @@ struct Param {
 SDS_LOGGING_DECL(test_vdev)
 static Param gp;
 
+#if 0
 static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads) {
     std::vector< dev_info > device_info;
     // these should be static so that they stay in scope in the lambda in case function ends before lambda completes
@@ -90,9 +91,49 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
         cv.wait(lk, [] { return inited; });
     }
 }
+#endif
 
 // trigger truncate when used space ratio reaches more than 80%
 constexpr uint32_t dma_alignment = 512;
+
+#if 0
+class VDevIOTest : public ::testing::Test {
+public:
+    virtual void SetUp() override {
+        const auto ndevices = SDS_OPTIONS["num_devs"].as< uint32_t >();
+        const auto dev_size = SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
+        const auto nthreads = SDS_OPTIONS["num_threads"].as< uint32_t >();
+
+        std::vector< dev_info > device_info;
+        LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
+        for (uint32_t i{0}; i < ndevices; ++i) {
+            const std::filesystem::path fpath{"/tmp/test_vdev_" + std::to_string(i + 1)};
+            std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
+            std::filesystem::resize_file(fpath, dev_size); // set the file size
+            device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+        }
+        std::vector< dev_info > empty_info;
+
+        LOGINFO("Starting iomgr with {} threads", nthreads);
+        iomanager.start(nthreads);
+
+        m_dmgr = std::make_unique< DeviceManager >(device_info, empty_info, nullptr, 0, nullptr, nullptr);
+        m_vdev = std::make_unique< JournalVirtualDev >(m_dmgr.get(), "test_vdev", PhysicalDevGroup::DATA, 0, 0, true,
+                                                       dma_alignment, m_dmgr->get_all_devices(PhysicalDevGroup::DATA),
+                                                       nullptr, nullptr, (dev_size * ndevices * 60) / 100);
+    }
+
+    virtual void TearDown() override {
+        m_vdev.reset();
+        m_dmgr.reset();
+        iomanager.stop();
+    }
+
+protected:
+    std::unique_ptr< DeviceManager > m_dmgr;
+    std::unique_ptr< JournalVirtualDev > m_vdev;
+};
+#endif
 
 class VDevIOTest : public ::testing::Test {
     struct write_info {
@@ -101,6 +142,37 @@ class VDevIOTest : public ::testing::Test {
     };
 
 public:
+    virtual void SetUp() override {
+        const auto ndevices = SDS_OPTIONS["num_devs"].as< uint32_t >();
+        const auto dev_size = SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
+        const auto nthreads = SDS_OPTIONS["num_threads"].as< uint32_t >();
+
+        std::vector< dev_info > device_info;
+        LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
+        for (uint32_t i{0}; i < ndevices; ++i) {
+            const std::filesystem::path fpath{"/tmp/test_vdev_" + std::to_string(i + 1)};
+            std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
+            std::filesystem::resize_file(fpath, dev_size); // set the file size
+            device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+        }
+        std::vector< dev_info > empty_info;
+
+        LOGINFO("Starting iomgr with {} threads", nthreads);
+        iomanager.start(nthreads);
+
+        m_dmgr = std::make_unique< DeviceManager >(device_info, empty_info, nullptr, 0, nullptr, nullptr);
+        m_dmgr->init();
+        m_vdev = std::make_unique< JournalVirtualDev >(m_dmgr.get(), "test_vdev", PhysicalDevGroup::DATA, 0, 0, true,
+                                                       dma_alignment, m_dmgr->get_all_devices(PhysicalDevGroup::DATA),
+                                                       nullptr, nullptr, (dev_size * ndevices * 60) / 100);
+    }
+
+    virtual void TearDown() override {
+        m_vdev.reset();
+        m_dmgr.reset();
+        iomanager.stop();
+    }
+
     uint64_t get_elapsed_time(Clock::time_point start) {
         std::chrono::seconds sec = std::chrono::duration_cast< std::chrono::seconds >(Clock::now() - start);
         return sec.count();
@@ -127,8 +199,8 @@ public:
 
     void execute() {
         m_start_time = Clock::now();
-        m_store = HomeBlks::instance()->get_data_logdev_blkstore();
-        m_total_size = m_store->get_size();
+        // m_store = HomeBlks::instance()->get_data_logdev_blkstore();
+        m_total_size = m_vdev->get_size();
 
         std::vector< ThreadPool::TaskFuture< void > > v;
 
@@ -148,7 +220,7 @@ public:
     // get random truncate offset between [m_start_off + used_space*20%, m_start_off + used_space*80%], rounded up to
     // 512 bytes;
     off_t get_rand_truncate_offset() {
-        auto used_space = m_store->get_used_space();
+        auto used_space = m_vdev->get_used_size();
 
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine generator{rd()};
@@ -164,16 +236,16 @@ public:
 
     void truncate(off_t off_to_truncate) {
         LOGINFO("truncating to offset: 0x{}, start: 0x{}, tail: 0x{}", to_hex(off_to_truncate),
-                to_hex(m_store->get_start_offset()), to_hex(m_store->get_tail_offset()));
+                to_hex(m_vdev->data_start_offset()), to_hex(m_vdev->get_tail_offset()));
 
         validate_truncate_offset(off_to_truncate);
 
-        auto tail_before = m_store->get_tail_offset();
-        m_store->truncate(off_to_truncate);
-        auto tail_after = m_store->get_tail_offset();
+        auto tail_before = m_vdev->get_tail_offset();
+        m_vdev->truncate(off_to_truncate);
+        auto tail_after = m_vdev->get_tail_offset();
 
         HS_ASSERT_CMP(DEBUG, tail_before, ==, tail_after);
-        HS_ASSERT_CMP(DEBUG, off_to_truncate, ==, m_store->get_start_offset());
+        HS_ASSERT_CMP(DEBUG, off_to_truncate, ==, m_vdev->data_start_offset());
 
         if (off_to_truncate > m_start_off) {
             // remove the offsets before truncate offset, since they are not valid for read anymore;
@@ -218,8 +290,8 @@ public:
     }
 
     void space_usage_asserts() {
-        auto used_space = m_store->get_used_space();
-        auto start_off = m_store->get_start_offset();
+        auto used_space = m_vdev->get_used_size();
+        auto start_off = m_vdev->data_start_offset();
 
         HS_ASSERT_CMP(DEBUG, m_total_size, >, 0);
         HS_ASSERT_CMP(DEBUG, used_space, <, m_total_size);
@@ -227,7 +299,7 @@ public:
     }
 
     bool time_to_truncate() {
-        auto used_space = m_store->get_used_space();
+        auto used_space = m_vdev->get_used_size();
 
         if (gp.truncate_watermark_percentage <= (100 * used_space / m_total_size)) { return true; }
         return false;
@@ -240,12 +312,12 @@ public:
     }
 
     void validate_write_offset(off_t off, uint64_t sz) {
-        auto tail_offset = m_store->get_tail_offset();
-        auto start_offset = m_store->get_start_offset();
+        auto tail_offset = m_vdev->get_tail_offset();
+        auto start_offset = m_vdev->data_start_offset();
 
-        HS_ASSERT_CMP(DEBUG, off + sz, <=, m_store->get_size());
+        HS_ASSERT_CMP(DEBUG, off + sz, <=, m_vdev->get_size());
 
-        if ((off + sz) == m_store->get_size()) {
+        if ((off + sz) == m_vdev->get_size()) {
             HS_ASSERT_CMP(DEBUG, (uint64_t)0, ==, (uint64_t)tail_offset);
         } else {
             HS_ASSERT_CMP(DEBUG, (uint64_t)(off + sz), ==, (uint64_t)tail_offset);
@@ -253,8 +325,8 @@ public:
     }
 
     void validate_read_offset(off_t off) {
-        auto tail_offset = m_store->get_tail_offset();
-        auto start_offset = m_store->get_start_offset();
+        auto tail_offset = m_vdev->get_tail_offset();
+        auto start_offset = m_vdev->data_start_offset();
 
         HS_ASSERT_CMP(DEBUG, m_start_off, ==, start_offset);
         if (start_offset < tail_offset) {
@@ -272,12 +344,12 @@ public:
         auto off_to_read = it->first;
 
         LOGDEBUG("reading on offset: 0x{}, size: {}, start: 0x{}, tail: 0x{}", to_hex(off_to_read), it->second.size,
-                 to_hex(m_start_off), to_hex(m_store->get_tail_offset()));
+                 to_hex(m_start_off), to_hex(m_vdev->get_tail_offset()));
 
         // validate_read_offset(off_to_read);
 
         auto buf = iomanager.iobuf_alloc(512, it->second.size);
-        auto bytes_read = m_store->pread((void*)buf, (size_t)it->second.size, (off_t)off_to_read);
+        auto bytes_read = m_vdev->pread((void*)buf, (size_t)it->second.size, (off_t)off_to_read);
 
         if (bytes_read == -1) { HS_ASSERT(DEBUG, false, "bytes_read returned -1, errno: {}", errno); }
 
@@ -292,7 +364,7 @@ public:
 
     void random_write() {
         auto sz_to_wrt = rand_size();
-        auto off_to_wrt = m_store->alloc_next_append_blk(sz_to_wrt);
+        auto off_to_wrt = m_vdev->alloc_next_append_blk(sz_to_wrt);
 
         auto it = m_off_to_info_map.find(off_to_wrt);
         if (it != m_off_to_info_map.end()) {
@@ -305,12 +377,12 @@ public:
         validate_write_offset(off_to_wrt, sz_to_wrt);
 
         LOGDEBUG("writing to offset: 0x{}, size: {}, start: 0x{}, tail: 0x{}", to_hex(off_to_wrt), sz_to_wrt,
-                 to_hex(m_start_off), to_hex(m_store->get_tail_offset()));
+                 to_hex(m_start_off), to_hex(m_vdev->get_tail_offset()));
 
         auto buf = iomanager.iobuf_alloc(512, sz_to_wrt);
         gen_rand_buf(buf, sz_to_wrt);
 
-        auto bytes_written = m_store->pwrite(buf, sz_to_wrt, off_to_wrt);
+        auto bytes_written = m_vdev->pwrite(buf, sz_to_wrt, off_to_wrt);
 
         HS_ASSERT_CMP(DEBUG, bytes_written, !=, -1, "bytes_written returned -1, errno: {}", errno);
         HS_ASSERT_CMP(DEBUG, (size_t)bytes_written, ==, (size_t)sz_to_wrt);
@@ -350,7 +422,8 @@ private:
     uint64_t m_total_size = 0;
     std::map< off_t, write_info > m_off_to_info_map;
     Clock::time_point m_start_time;
-    homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* m_store;
+    std::unique_ptr< DeviceManager > m_dmgr;
+    std::unique_ptr< JournalVirtualDev > m_vdev;
 };
 
 TEST_F(VDevIOTest, VDevIOTest) { this->execute(); }
@@ -388,8 +461,9 @@ int main(int argc, char* argv[]) {
     sds_logging::SetLogger("test_vdev");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(), SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
-                    SDS_OPTIONS["num_threads"].as< uint32_t >());
+    // start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(), SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 *
+    // 1024,
+    //                SDS_OPTIONS["num_threads"].as< uint32_t >());
     gp.num_io = SDS_OPTIONS["num_io"].as< uint64_t >();
     gp.run_time = SDS_OPTIONS["run_time"].as< uint64_t >();
     gp.per_read = SDS_OPTIONS["per_read"].as< uint32_t >();
@@ -420,8 +494,8 @@ int main(int argc, char* argv[]) {
     }
 
     auto res = RUN_ALL_TESTS();
-    VolInterface::shutdown();
-    iomanager.stop();
+    // VolInterface::shutdown();
+    // iomanager.stop();
 
     return res;
 }

@@ -562,11 +562,11 @@ private:
     uint64_t m_replayed_count = 0;
 
 private:
-    static homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, wb_cache_buffer_t >* m_blkstore;
+    static homestore::BlkStore< wb_cache_buffer_t >* m_blkstore;
 };
 
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
-homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, wb_cache_buffer_t >* SSDBtreeStore::m_blkstore;
+homestore::BlkStore< wb_cache_buffer_t >* SSDBtreeStore::m_blkstore;
 
 } // namespace btree
 } // namespace homeds
