@@ -24,7 +24,7 @@ table Volume {
 
 table GeneralConfig {
     // Timeout we wait before we do force shutdown
-    shutdown_timeout_secs: uint32 = 300;
+    shutdown_timeout_secs: uint32 = 1800;
 
     // Frequency with which we need to check the success of shutdown
     shutdown_status_check_freq_ms: uint64 = 2000;
