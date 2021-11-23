@@ -240,12 +240,14 @@ public:
                                                       [this](void* cookie) { try_run_one_iteration(); });
     }
 
-    TestJob(VolTest* test, uint32_t interval_ops_sec) :
+    TestJob(VolTest* test, uint32_t interval_ops_sec, bool run_in_worker_thread) :
             m_voltest(test), m_start_time(Clock::now()), m_interval_ops_sec(interval_ops_sec) {
         m_timer_hdl = iomanager.schedule_global_timer(interval_ops_sec * 1000ul * 1000ul * 1000ul, true, nullptr,
-                                                      iomgr::thread_regex::all_worker,
+                                                      run_in_worker_thread ? iomgr::thread_regex::all_worker
+                                                                           : iomgr::thread_regex::all_user,
                                                       [this](void* cookie) { try_run_one_iteration(); });
     }
+
     virtual ~TestJob() = default;
     TestJob(const TestJob&) = delete;
     TestJob(TestJob&&) noexcept = delete;
@@ -1159,7 +1161,8 @@ boost::uuids::uuid VolTest::m_am_uuid;
 
 class VolCreateDeleteJob : public TestJob {
 public:
-    VolCreateDeleteJob(VolTest* test) : TestJob(test, tcfg.create_del_ops_interval) {}
+    // create and delete operation can'be done in worker thread, as it will trigger sync io;
+    VolCreateDeleteJob(VolTest* test) : TestJob(test, tcfg.create_del_ops_interval, false /* run_in_worker_thread */) {}
     virtual ~VolCreateDeleteJob() override = default;
     VolCreateDeleteJob(const VolCreateDeleteJob&) = delete;
     VolCreateDeleteJob(VolCreateDeleteJob&&) noexcept = delete;
@@ -1167,7 +1170,6 @@ public:
     VolCreateDeleteJob& operator=(VolCreateDeleteJob&&) noexcept = delete;
 
     void run_one_iteration() override {
-
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine engine{rd()};
         static thread_local std::uniform_int_distribution< uint64_t > dist{0, RAND_MAX};
