@@ -1292,7 +1292,7 @@ indx_cp_ptr IndxMgr::get_indx_cp(hs_cp* const hcp) {
 void IndxMgr::destroy(const indxmgr_stop_cb& cb) {
     /* we can assume that there is no io going on this indx mgr now */
     THIS_INDX_LOG(INFO, indx_mgr, , "Destroying Indx Manager");
-    m_stop_cb = cb;
+    m_destroy_done_cb = cb;
     iomanager.run_on(m_thread_id, [this](const io_thread_addr_t addr) { this->destroy_indx_tbl(); });
 }
 
@@ -1304,7 +1304,7 @@ void IndxMgr::destroy_indx_tbl() {
     if (ret != btree_status_t::success) {
         if (ret != btree_status_t::resource_full) {
             /* we try to destroy it during reboot */
-            m_stop_cb(false);
+            m_destroy_done_cb(false);
             return;
         }
         THIS_INDX_LOG(INFO, indx_mgr, , "free_user_blkids btree ret status resource_full cur {}",
@@ -1350,21 +1350,7 @@ void IndxMgr::destroy_indx_tbl() {
 
     THIS_INDX_LOG(INFO, indx_mgr, , "All user logs are collected");
 
-    uint64_t free_node_cnt{0};
-    if (m_active_tbl->destroy(free_list, free_node_cnt) != btree_status_t::success) {
-        /* we try to destroy it during reboot */
-        m_stop_cb(false);
-        return;
-    }
-#ifdef _PRERELEASE
-    if (homestore_flip->test_flip("indx_del_partial_free_indx_blks")) {
-        LOGINFO("aborting because of flip");
-        raise(SIGKILL);
-    }
-#endif
-
-    THIS_INDX_LOG(INFO, indx_mgr, , "Collected all the btree blocks {}", free_node_cnt);
-
+    // make sure that all free blks are persisted before we start destroying btree */
     attach_user_fblkid_list(free_list, ([this](bool success) {
                                 blkid_list_ptr free_list = std::make_shared< sisl::ThreadVector< BlkId > >();
                                 uint64_t free_node_cnt = 0;
@@ -1374,7 +1360,7 @@ void IndxMgr::destroy_indx_tbl() {
                                 StaticIndxMgr::m_hs->set_indx_btree_start_destroying(m_uuid);
                                 if (m_active_tbl->destroy(free_list, free_node_cnt) != btree_status_t::success) {
                                     /* we try to destroy it during reboot */
-                                    m_stop_cb(false);
+                                    m_destroy_done_cb(false);
                                     return;
                                 }
 #ifdef _PRERELEASE
@@ -1402,7 +1388,7 @@ void IndxMgr::destroy_indx_tbl() {
                                                           ret.message());
                                             }
                                         }
-                                        m_stop_cb(success);
+                                        m_destroy_done_cb(success);
                                     }),
                                     0, true);
                             }),
