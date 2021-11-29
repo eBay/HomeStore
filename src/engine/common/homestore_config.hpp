@@ -28,8 +28,13 @@ SETTINGS_INIT(homestorecfg::HomeStoreSettings, homestore_config);
 // the code for upgrade/revert.
 
 constexpr uint32_t MAX_CHUNKS{128};
+constexpr uint32_t HDD_MAX_CHUNKS{254};
 constexpr uint32_t MAX_VDEVS{16};
 constexpr uint32_t MAX_PDEVS{8};
+static constexpr uint32_t INVALID_PDEV_ID{std::numeric_limits< uint32_t >::max()};
+static constexpr uint32_t INVALID_VDEV_ID{std::numeric_limits< uint32_t >::max()};
+static constexpr uint32_t INVALID_CHUNK_ID{std::numeric_limits< uint32_t >::max()};
+static constexpr uint32_t INVALID_DEV_ID{std::numeric_limits< uint32_t >::max()};
 
 namespace homestore {
 #define HS_DYNAMIC_CONFIG_WITH(...) SETTINGS(homestore_config, __VA_ARGS__)
@@ -75,12 +80,11 @@ struct cap_attrs {
 struct hs_input_params {
 public:
     std::vector< dev_info > data_devices; // name of the data devices.
-    std::vector< dev_info > fast_devices; // name of fast devices
     bool is_file{false};                  // Are the devices a file or raw device
     boost::uuids::uuid system_uuid;       // Deprecated. UUID assigned to the system
 
-    io_flag data_open_flags{io_flag::DIRECT_IO};
-    io_flag fast_open_flags{io_flag::DIRECT_IO};
+    io_flag data_open_flags{io_flag::DIRECT_IO}; // hdd
+    io_flag fast_open_flags{io_flag::DIRECT_IO}; // ssd
 
     uint32_t min_virtual_page_size{4096}; // minimum page size supported. Ideally it should be 4k.
     uint64_t app_mem_size{static_cast< uint64_t >(1024) * static_cast< uint64_t >(1024) *
@@ -93,8 +97,6 @@ public:
     bool force_reinit{false};
 #endif
 
-    bool fast_devices_present() const { return !fast_devices.empty(); }
-
     nlohmann::json to_json() const {
         nlohmann::json json;
         json["system_uuid"] = boost::uuids::to_string(system_uuid);
@@ -103,13 +105,7 @@ public:
             json["data_devices"].push_back(d.dev_names);
         }
         json["data_open_flags"] = data_open_flags;
-        if (fast_devices_present()) {
-            json["fast_devices"] = nlohmann::json::array();
-            for (const auto& d : fast_devices) {
-                json["fast_devices"].push_back(d.dev_names);
-            }
-            json["fast_open_flags"] = fast_open_flags;
-        }
+        json["fast_open_flags"] = fast_open_flags;
         json["is_read_only"] = is_read_only;
 
         json["min_virtual_page_size"] = min_virtual_page_size;
@@ -147,43 +143,20 @@ struct HomeStoreStaticConfig {
         return s_inst;
     }
 
-    iomgr::drive_attributes data_drive_attr;
-    bool fast_drive_present;
-    iomgr::drive_attributes fast_drive_attr;
-    iomgr::drive_type data_drive_type{iomgr::drive_type::unknown};
-    iomgr::drive_type fast_drive_type{iomgr::drive_type::unknown};
     hs_engine_config engine;
     hs_input_params input;
+    bool hdd_drive_present;
 
     nlohmann::json to_json() const {
         nlohmann::json json;
-        json["DataDriveAttributes"] = data_drive_attr.to_json();
-        json["DataDriveType"] = enum_name(data_drive_type);
-        if (fast_drive_present) {
-            json["FastDriveAttributes"] = fast_drive_attr.to_json();
-            json["FastDriveType"] = enum_name(fast_drive_type);
-        }
-
         json["GenericConfig"] = engine.to_json();
         json["InputParameters"] = input.to_json();
         return json;
     }
-
-#ifndef NDEBUG
-    void validate() {
-        assert(data_drive_attr.phys_page_size >= data_drive_attr.atomic_phys_page_size);
-        assert(data_drive_attr.phys_page_size >= engine.min_io_size);
-        if (fast_drive_present) {
-            assert(fast_drive_attr.phys_page_size >= fast_drive_attr.atomic_phys_page_size);
-            assert(fast_drive_attr.phys_page_size >= engine.min_io_size);
-        }
-    }
-#endif
 };
 
 static bool is_data_drive_hdd() {
-    auto data_drive_type = HomeStoreStaticConfig::instance().data_drive_type;
-    return ((data_drive_type == iomgr::drive_type::file_on_hdd) || (data_drive_type == iomgr::drive_type::block_hdd));
+    return HomeStoreStaticConfig::instance().hdd_drive_present;
 }
 
 class HomeStoreDynamicConfig {
@@ -241,37 +214,14 @@ constexpr uint64_t MAX_BLK_NUM_BITS_PER_CHUNK{((static_cast< uint64_t >(1) << BL
 /* NOTE: it can give size less then size passed in argument to make it aligned */
 // #define ALIGN_SIZE_TO_LEFT(size, align) (((size % align) == 0) ? size : (size - (size % align)))
 
-inline uint64_t MIN_DATA_CHUNK_SIZE() {
-    return HS_STATIC_CONFIG(data_drive_attr.phys_page_size) * BLKS_PER_PORTION * TOTAL_SEGMENTS;
-}
-inline uint64_t MAX_DATA_CHUNK_SIZE() {
+inline uint64_t MIN_DATA_CHUNK_SIZE(const uint32_t page_size) { return page_size * BLKS_PER_PORTION * TOTAL_SEGMENTS; }
+inline uint64_t MAX_DATA_CHUNK_SIZE(const uint32_t page_size) {
     return static_cast< uint64_t >(
-        sisl::round_down((MAX_BLK_NUM_BITS_PER_CHUNK * HS_STATIC_CONFIG(engine.min_io_size)), MIN_DATA_CHUNK_SIZE()));
+        sisl::round_down((MAX_BLK_NUM_BITS_PER_CHUNK * page_size), MIN_DATA_CHUNK_SIZE(page_size)));
 } // 16 TB
-inline uint64_t MIN_FAST_CHUNK_SIZE() {
-    return HS_STATIC_CONFIG(fast_drive_present)
-        ? HS_STATIC_CONFIG(fast_drive_attr.phys_page_size) * BLKS_PER_PORTION * TOTAL_SEGMENTS
-        : 0;
-}
-inline uint64_t MAX_FAST_CHUNK_SIZE() {
-    return (MIN_FAST_CHUNK_SIZE() > 0)
-        ? static_cast< uint64_t >(sisl::round_down((MAX_BLK_NUM_BITS_PER_CHUNK * HS_STATIC_CONFIG(engine.min_io_size)),
-                                                   MIN_FAST_CHUNK_SIZE()))
-        : 0;
-}
-
-// TODO: we store global unique ID in blkid. Instead it we only store chunk offset then
-// max cacapity will increase from MAX_CHUNK_SIZE to MAX_CHUNKS * MAX_CHUNK_SIZE.
-inline uint64_t MAX_DATA_SUPPORTED_CAP() { return MAX_CHUNKS * MAX_DATA_CHUNK_SIZE(); }
-inline uint64_t MAX_FAST_SUPPORTED_CAP() { return MAX_CHUNKS * MAX_FAST_CHUNK_SIZE(); }
 
 constexpr uint16_t MAX_UUID_LEN{128};
 
-// 1 % of disk space is reserved for volume sb chunks. With 8k page it
-// will come out to be around 7 GB.
-inline uint64_t MIN_DATA_DISK_CAP_SUPPORTED() { return MIN_DATA_CHUNK_SIZE() * 100 / 99 + MIN_DATA_CHUNK_SIZE(); }
-// TODO: address proper caclulation here
-inline uint64_t MIN_FAST_DISK_CAP_SUPPORTED() { return MIN_FAST_CHUNK_SIZE() * 100 / 99 + MIN_FAST_CHUNK_SIZE(); }
 } // namespace homestore
 
 #endif

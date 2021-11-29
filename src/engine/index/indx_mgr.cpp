@@ -46,7 +46,7 @@ sisl::io_blob indx_journal_entry::create_journal_entry(indx_req* const ireq) {
         ireq->indx_fbe_list.size() * sizeof(BlkId) + ireq->get_key_size() + ireq->get_val_size())};
     // TO DO: Might need to address alignment based on data or fast type
     m_iob = hs_utils::create_io_blob(size, HomeLogStoreMgr::data_logdev().is_aligned_buf_needed(size),
-                                     sisl::buftag::data_journal);
+                                     sisl::buftag::data_journal, HomeLogStoreMgr::data_logdev().get_align_size());
 
     uint8_t* mem = m_iob.bytes;
 
@@ -317,7 +317,7 @@ IndxMgr::IndxMgr(const boost::uuids::uuid uuid, std::string name, const io_done_
     m_journal->register_req_comp_cb(m_journal_comp_cb);
     THIS_INDX_LOG(INFO, indx_mgr, , "log_store id {}", m_journal->get_store_id());
     for (size_t i{0}; i < MAX_CP_CNT; ++i) {
-        m_free_list[i] = std::make_shared< sisl::ThreadVector< std::pair< BlkId, PhysicalDevGroup > > >();
+        m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
     }
 }
 
@@ -354,7 +354,7 @@ IndxMgr::IndxMgr(const boost::uuids::uuid uuid, std::string name, const io_done_
             m_journal->register_log_replay_done_cb(bind_this(IndxMgr::on_replay_done, 2));
         });
     for (size_t i{0}; i < MAX_CP_CNT; ++i) {
-        m_free_list[i] = std::make_shared< sisl::ThreadVector< std::pair< BlkId, PhysicalDevGroup > > >();
+        m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
     }
 }
 
@@ -631,7 +631,8 @@ void IndxMgr::recover_meta_ops() {
             uint8_t* cur_bytes{reinterpret_cast< uint8_t* >(unmap_hdr) + sizeof(hs_cp_unmap_sb)};
             /* get key */
             // TO DO: Might need to address alignment based on data or fast type
-            auto key{hs_utils::make_byte_array(unmap_hdr->key_size, false /* aligned */, sisl::buftag::common)};
+            auto key{hs_utils::make_byte_array(unmap_hdr->key_size, false /* aligned */, sisl::buftag::common,
+                                               MetaBlkMgrSI()->get_align_size())};
             std::memcpy(key->bytes, (void*)cur_bytes, unmap_hdr->key_size);
 
             /* get cursor bytes and size */
@@ -667,9 +668,9 @@ indx_mgr_sb IndxMgr::get_immutable_sb() {
 #ifndef NDEBUG
 void IndxMgr::dump_free_blk_list(const blkid_list_ptr& free_blk_list) {
     auto it = free_blk_list->begin(false /* latest */);
-    std::pair< BlkId, PhysicalDevGroup >* bid_pair;
-    while ((bid_pair = free_blk_list->next(it)) != nullptr) {
-        THIS_INDX_LOG(DEBUG, indx_mgr, , "Freeing blk [{}]", bid_pair->first.to_string());
+    BlkId* bid;
+    while ((bid = free_blk_list->next(it)) != nullptr) {
+        THIS_INDX_LOG(DEBUG, indx_mgr, , "Freeing blk [{}]", bid->to_string());
     }
 }
 #endif
@@ -1040,7 +1041,7 @@ void IndxMgr::do_remaining_unmap_internal(void* const unmap_meta_blk_cntx, const
     auto btree_id{get_indx_cp(hcp)->acp.bcp};
 
     /* collect all the free blkids */
-    blkid_list_ptr free_list{std::make_shared< sisl::ThreadVector< std::pair< BlkId, PhysicalDevGroup > > >()};
+    blkid_list_ptr free_list{std::make_shared< sisl::ThreadVector< BlkId > >()};
     int64_t free_size{0};
     const btree_status_t ret{
         m_active_tbl->update_oob_unmap_active_indx_tbl(free_list, seqid, key->bytes, *(btree_cur.get()), btree_id,
@@ -1099,8 +1100,8 @@ sisl::byte_array IndxMgr::alloc_unmap_sb(const uint32_t key_size, const seq_id_t
     const sisl::blob& cursor_blob = unmap_btree_cur.serialize();
     const uint64_t size{cursor_blob.size + sizeof(hs_cp_unmap_sb) + key_size};
     // TO DO: Might need to address alignment based on data or fast type
-    sisl::byte_array b{
-        hs_utils::make_byte_array(size, MetaBlkMgrSI()->is_aligned_buf_needed(size), sisl::buftag::metablk)};
+    sisl::byte_array b{hs_utils::make_byte_array(size, MetaBlkMgrSI()->is_aligned_buf_needed(size),
+                                                 sisl::buftag::metablk, MetaBlkMgrSI()->get_align_size())};
     hs_cp_unmap_sb* const mhdr{new (b->bytes) hs_cp_unmap_sb()};
     mhdr->uuid = m_uuid;
     mhdr->type = indx_meta_hdr_type::unmap;
@@ -1122,7 +1123,8 @@ void IndxMgr::write_cp_unmap_sb(void*& unmap_meta_blk_cntx, const uint32_t key_s
 
 void IndxMgr::unmap_indx_async(const indx_req_ptr& ireq) {
     // TO DO: Might need to address alignment based on data or fast type
-    auto key{hs_utils::make_byte_array(ireq->get_key_size(), false /* aligned */, sisl::buftag::common)};
+    auto key{hs_utils::make_byte_array(ireq->get_key_size(), false /* aligned */, sisl::buftag::common,
+                                       MetaBlkMgrSI()->get_align_size())};
     std::shared_ptr< homeds::btree::BtreeQueryCursor > unmap_btree_cur(new homeds::btree::BtreeQueryCursor());
 
     ireq->fill_key(key->bytes, ireq->get_key_size());
@@ -1288,7 +1290,7 @@ void IndxMgr::destroy(const indxmgr_stop_cb& cb) {
 
 void IndxMgr::destroy_indx_tbl() {
     /* free all blkids of btree in memory */
-    blkid_list_ptr free_list{std::make_shared< sisl::ThreadVector< std::pair< BlkId, PhysicalDevGroup > > >()};
+    blkid_list_ptr free_list{std::make_shared< sisl::ThreadVector< BlkId > >()};
     int64_t free_size{0};
     const btree_status_t ret{m_active_tbl->free_user_blkids(free_list, m_destroy_btree_cur, free_size)};
     if (ret != btree_status_t::success) {
@@ -1309,7 +1311,8 @@ void IndxMgr::destroy_indx_tbl() {
                     const uint64_t size{cursor_blob.size + sizeof(hs_cp_base_sb)};
                     // TO DO: Might need to address alignment based on data or fast type
                     sisl::byte_array b{hs_utils::make_byte_array(size, MetaBlkMgrSI()->is_aligned_buf_needed(size),
-                                                                 sisl::buftag::metablk)};
+                                                                 sisl::buftag::metablk,
+                                                                 MetaBlkMgrSI()->get_align_size())};
                     hs_cp_base_sb* const mhdr{new (b->bytes) hs_cp_base_sb()};
                     mhdr->uuid = m_uuid;
                     mhdr->type = indx_meta_hdr_type::destroy;
@@ -1552,8 +1555,8 @@ void StaticIndxMgr::flush_hs_free_blks(hs_cp* const hcp) {
 void StaticIndxMgr::write_hs_cp_sb(hs_cp* const hcp) {
     const uint64_t size{sizeof(indx_cp_base_sb) * hcp->indx_cp_list.size() + sizeof(hs_cp_sb)};
     // TO DO: Might need to address alignment based on data or fast type
-    sisl::byte_array b{
-        hs_utils::make_byte_array(size, MetaBlkMgrSI()->is_aligned_buf_needed(size), sisl::buftag::metablk)};
+    sisl::byte_array b{hs_utils::make_byte_array(size, MetaBlkMgrSI()->is_aligned_buf_needed(size),
+                                                 sisl::buftag::metablk, MetaBlkMgrSI()->get_align_size())};
     hs_cp_sb* const hdr{new (b->bytes) hs_cp_sb()};
     hdr->type = indx_meta_hdr_type::cp;
     int indx_cnt{0};
@@ -1672,7 +1675,8 @@ void StaticIndxMgr::meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_vie
             HS_ASSERT(RELEASE, happened, "happened is false");
         }
         // TO DO: Might need to address alignment based on data or fast type
-        search->second.push_back(std::make_pair(mblk, hs_utils::extract_byte_array(buf)));
+        search->second.push_back(
+            std::make_pair(mblk, hs_utils::extract_byte_array(buf, true, MetaBlkMgrSI()->get_align_size())));
     }
 }
 
@@ -1699,10 +1703,8 @@ uint64_t StaticIndxMgr::free_blk(hs_cp* const hcp, blkid_list_ptr& out_fblk_list
     return free_blk(hcp, out_fblk_list.get(), fbe, force);
 }
 
-uint64_t
-StaticIndxMgr::free_blk(hs_cp* hcp,
-                        sisl::ThreadVector< std::pair< homestore::BlkId, PhysicalDevGroup > >* const out_fblk_list,
-                        Free_Blk_Entry& fbe, const bool force, const indx_req* const ireq) {
+uint64_t StaticIndxMgr::free_blk(hs_cp* hcp, sisl::ThreadVector< homestore::BlkId >* const out_fblk_list,
+                                 Free_Blk_Entry& fbe, const bool force, const indx_req* const ireq) {
     if (!force && !ResourceMgrSI().can_add_free_blk(1)) {
         /* caller will trigger homestore cp */
         return 0;
@@ -1719,7 +1721,7 @@ StaticIndxMgr::free_blk(hs_cp* hcp,
     const uint64_t free_blk_size{fbe.blks_to_free() * m_hs->get_data_pagesz()};
     ResourceMgrSI().inc_free_blk(free_blk_size);
     fbe.m_hcp = hcp;
-    out_fblk_list->push_back(std::make_pair(fbe.get_free_blkid(), data_blkstore_ptr->get_pdev_group()));
+    out_fblk_list->push_back(fbe.get_free_blkid());
     m_read_blk_tracker->safe_free_blks(fbe);
     HS_ASSERT_CMP(RELEASE, free_blk_size, >, 0);
 
@@ -1739,10 +1741,9 @@ uint64_t StaticIndxMgr::free_blk(hs_cp* const hcp, blkid_list_ptr& out_fblk_list
     return (free_blk(hcp, out_fblk_list.get(), in_fbe_list, force));
 }
 
-uint64_t
-StaticIndxMgr::free_blk(hs_cp* const hcp,
-                        sisl::ThreadVector< std::pair< homestore::BlkId, PhysicalDevGroup > >* const out_fblk_list,
-                        std::vector< Free_Blk_Entry >& in_fbe_list, const bool force, const indx_req* const ireq) {
+uint64_t StaticIndxMgr::free_blk(hs_cp* const hcp, sisl::ThreadVector< homestore::BlkId >* const out_fblk_list,
+                                 std::vector< Free_Blk_Entry >& in_fbe_list, const bool force,
+                                 const indx_req* const ireq) {
     if (!force && !ResourceMgrSI().can_add_free_blk(in_fbe_list.size())) {
         /* caller will trigger homestore cp */
         return 0;

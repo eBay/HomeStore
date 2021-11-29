@@ -98,7 +98,6 @@ struct TestCfg {
 
     std::array< std::string, 4 > default_names{"test_files/vol_file1", "test_files/vol_file2", "test_files/vol_file3",
                                                "test_files/vol_file4"};
-    std::array< std::string, 1 > default_fast_names{"test_files/vol_fast_file"};
     std::vector< std::string > dev_names;
     std::vector< std::string > mod_list;
     uint64_t max_vols{50};
@@ -110,7 +109,6 @@ struct TestCfg {
     uint64_t max_io_size{1 * Mi};
     uint64_t max_outstanding_ios{32};
     uint64_t max_disk_capacity{10 * Gi};
-    uint64_t max_fast_disk_capacity{4 * Gi};
 
     uint32_t atomic_phys_page_size{512};
     uint32_t vol_page_size{4096};
@@ -139,7 +137,6 @@ struct TestCfg {
     homestore::vol_state expected_vol_state{homestore::vol_state::ONLINE}; // TODO: Move to separate job config section
     bool init{true};
     bool expected_init_fail{false};
-    int disk_replace_cnt{0};
     bool precreate_volume{true};
     bool expect_io_error{false};
     uint32_t p_volume_size{60};
@@ -151,8 +148,7 @@ struct TestCfg {
     bool batch_completion{false};
     bool create_del_with_io{false};
     bool delete_with_io;
-    bool use_fast_drive;
-    bool is_hdd{false};
+    uint32_t emulate_hdd_cnt{0};
     uint32_t create_del_ops_cnt;
     uint32_t create_del_ops_interval;
     std::string flip_name;
@@ -528,7 +524,6 @@ protected:
     // uint64_t cur_vol;
     // Clock::time_point startTime;
     std::vector< dev_info > m_device_info;
-    std::vector< dev_info > m_fast_device_info;
     uint64_t max_vol_size;
     uint64_t max_vol_size_csum;
     std::shared_ptr< IOTestJob > m_io_job;
@@ -592,13 +587,6 @@ public:
                 std::filesystem::remove(fpath);
             }
         }
-
-        for (const auto& n : tcfg.default_fast_names) {
-            const std::filesystem::path fpath{n};
-            if (std::filesystem::exists(fpath) && std::filesystem::is_regular_file(fpath)) {
-                std::filesystem::remove(fpath);
-            }
-        }
     }
 
     static void am_meta_blk_comp_cb(bool success) {
@@ -633,30 +621,31 @@ public:
         } else {
             for (uint32_t i{0}; i < MAX_DEVICES; ++i) {
                 const std::filesystem::path fpath{tcfg.default_names[i]};
-                if (tcfg.init || tcfg.disk_replace_cnt > 0) {
-                    if (!tcfg.init) {
-                        if (std::filesystem::exists(fpath) && std::filesystem::is_regular_file(fpath)) {
-                            std::filesystem::remove(fpath);
-                        }
-                    }
+                if (tcfg.init) {
                     std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
                     std::filesystem::resize_file(fpath, tcfg.max_disk_capacity);
-                    --tcfg.disk_replace_cnt;
                 }
                 device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
                 max_capacity += tcfg.max_disk_capacity;
             }
         }
 
-        auto data_attrs = iomgr::drive_attributes();
-        data_attrs.phys_page_size = tcfg.phy_page_size;
-        data_attrs.align_size = 512;
-        data_attrs.atomic_phys_page_size = tcfg.atomic_phys_page_size;
+        uint32_t hdd_cnt = tcfg.emulate_hdd_cnt;
         for (auto& dinfo : device_info) {
-            if (tcfg.is_hdd) {
+
+            auto data_attrs = iomgr::drive_attributes();
+            data_attrs.phys_page_size = tcfg.phy_page_size;
+            data_attrs.align_size = 512;
+            data_attrs.atomic_phys_page_size = tcfg.atomic_phys_page_size;
+
+            if (hdd_cnt != 0) {
                 iomgr::DriveInterface::emulate_drive_type(dinfo.dev_names,
                                                           tcfg.dev_names.empty() ? iomgr::drive_type::file_on_hdd
                                                                                  : iomgr::drive_type::block_hdd);
+                data_attrs.align_size = 2 * data_attrs.align_size;
+                data_attrs.phys_page_size = 2 * tcfg.phy_page_size;
+                data_attrs.atomic_phys_page_size = 2 * tcfg.atomic_phys_page_size;
+                --hdd_cnt;
             }
             iomgr::DriveInterface::emulate_drive_attributes(dinfo.dev_names, data_attrs);
         }
@@ -664,25 +653,7 @@ public:
         return max_capacity;
     }
 
-    void get_dev_fast_info(std::vector< dev_info >& device_info) {
-        for (uint32_t i{0}; i < tcfg.default_fast_names.size(); ++i) {
-            const std::filesystem::path fpath{tcfg.default_fast_names[i]};
-            if (tcfg.init) {
-                std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
-                std::filesystem::resize_file(fpath, tcfg.max_fast_disk_capacity);
-            }
-            device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Fast);
-
-            auto data_attrs = iomgr::drive_attributes();
-            data_attrs.phys_page_size = tcfg.phy_page_size;
-            data_attrs.align_size = 512;
-            data_attrs.atomic_phys_page_size = tcfg.atomic_phys_page_size;
-            iomgr::DriveInterface::emulate_drive_attributes(std::filesystem::canonical(fpath).string(), data_attrs);
-        }
-    }
-
     void start_homestore(const bool wait_for_init_done = true, const bool force_reinit = false) {
-        uint64_t max_capacity{0};
 
         /* start homestore */
         /* create files */
@@ -695,21 +666,13 @@ public:
 
         iomanager.start(tcfg.num_threads, tcfg.is_spdk);
 
-        max_capacity = get_dev_info(m_device_info);
-        if (tcfg.use_fast_drive) { get_dev_fast_info(m_fast_device_info); }
-
-        /* Don't populate the whole disks. Only 60 % of it */
-        if (tcfg.max_vols) {
-            max_vol_size = (tcfg.p_volume_size * max_capacity) / (100 * tcfg.max_vols);
-            max_vol_size_csum = (sizeof(uint16_t) * max_vol_size) / tcfg.vol_page_size;
-        }
-
+        get_dev_info(m_device_info);
         init_params params;
         params.data_open_flags = tcfg.io_flags;
+        params.fast_open_flags = tcfg.io_flags;
         params.min_virtual_page_size = tcfg.vol_page_size;
         params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
         params.data_devices = m_device_info;
-        params.fast_devices = m_fast_device_info;
 #ifdef _PRERELEASE
         params.force_reinit = force_reinit;
 #endif
@@ -1159,10 +1122,9 @@ private:
 
 public:
     void force_reinit(const std::vector< dev_info >& data_devices, const io_flag data_oflags,
-                      const std::vector< dev_info >& fast_devices, const io_flag fast_oflags) {
+                      const io_flag fast_oflags) {
         iomanager.start(1);
-        VolInterface::get_instance()->zero_boot_sbs(fast_devices, fast_oflags);
-        VolInterface::get_instance()->zero_boot_sbs(data_devices, data_oflags);
+        VolInterface::get_instance()->zero_boot_sbs(data_devices);
         iomanager.stop();
     }
 };
@@ -1233,7 +1195,7 @@ public:
         static thread_local std::uniform_int_distribution< uint64_t > dist{0, RAND_MAX};
 
         if (req->err != no_error) {
-            assert((req->err == std::errc::no_such_device) || tcfg.expect_io_error);
+            assert((req->err == std::errc::resource_unavailable_try_again) || tcfg.expect_io_error);
         } else {
             if (req->is_read() && (tcfg.verify_type_set())) {
                 /* read from the file and verify it */
@@ -1955,7 +1917,6 @@ TEST_F(VolTest, hs_force_reinit_test) {
     std::vector< dev_info > tmp_data_dev_info, tmp_fast_dev_info;
     get_dev_info(tmp_dev_info);
     HS_RELEASE_ASSERT_GT(tmp_dev_info.size(), 0);
-    if (tcfg.use_fast_drive) { get_dev_fast_info(tmp_fast_dev_info); }
 
     this->force_reinit(tmp_dev_info, homestore::io_flag::DIRECT_IO,
                        tmp_fast_dev_info, homestore::io_flag::DIRECT_IO);
@@ -1987,48 +1948,6 @@ TEST_F(VolTest, vol_create_del_test) {
 }
 
 /************ Below tests check the workflows ***********/
-
-TEST_F(VolTest, one_disk_replace_test) {
-    tcfg.init = false;
-    tcfg.disk_replace_cnt = 1;
-    tcfg.expected_vol_state = homestore::vol_state::DEGRADED;
-    this->start_homestore();
-
-    output.print("one_disk_replace_test");
-    this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
-}
-
-TEST_F(VolTest, one_disk_replace_abort_test) {
-    tcfg.init = false;
-    tcfg.disk_replace_cnt = 1;
-    tcfg.expected_init_fail = true;
-    tcfg.expected_vol_state = homestore::vol_state::DEGRADED;
-#ifdef _PRERELEASE
-    FlipClient fc{HomeStoreFlip::instance()};
-    FlipFrequency freq;
-    freq.set_count(100);
-    freq.set_percent(100);
-    fc.inject_noreturn_flip("reboot_abort", {}, freq);
-#endif
-    this->start_homestore();
-    output.print("one_disk_replace_abort_test");
-    this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
-}
-
-TEST_F(VolTest, two_disk_replace_test) {
-    tcfg.init = false;
-    tcfg.disk_replace_cnt = 2;
-    tcfg.expected_init_fail = true;
-
-    this->start_homestore();
-    this->start_io_job();
-
-    output.print("two_disk_replace_test");
-    this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
-}
 
 TEST_F(VolTest, one_disk_fail_test) {
 #ifdef _PRERELEASE
@@ -2241,9 +2160,8 @@ SDS_OPTION_GROUP(
      ::cxxopts::value< uint32_t >()->default_value("100"), "number of ops"),
     (create_del_ops_interval, "", "create_del_ops_interval", "create_del_ops_interval",
      ::cxxopts::value< uint32_t >()->default_value("10"), "interval between create del in seconds"),
-    (use_fast_drive, "", "use_fast_drive", "use_fast_drive", ::cxxopts::value< bool >()->default_value("false"),
-     "true or false"),
-    (is_hdd, "", "is_hdd", "is_hdd", ::cxxopts::value< bool >()->default_value("false"), "run in hdd mode"))
+    (emulate_hdd_cnt, "", "emulate_hdd_cnt", "emulate_hdd_cnt", ::cxxopts::value< uint32_t >()->default_value("1"),
+     "number of files or drives to be emulated as hdd"))
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr, test_meta_mod, test_vdev_mod, config
 
@@ -2305,8 +2223,7 @@ int main(int argc, char* argv[]) {
     gcfg.create_del_ops_interval = SDS_OPTIONS["create_del_ops_interval"].as< uint32_t >();
     gcfg.flip_name = SDS_OPTIONS["flip_name"].as< std::string >();
     gcfg.overlapping_allowed = SDS_OPTIONS["overlapping_allowed"].as< bool >();
-    gcfg.use_fast_drive = SDS_OPTIONS["use_fast_drive"].as< bool >();
-    gcfg.is_hdd = SDS_OPTIONS["is_hdd"].as< bool >();
+    gcfg.emulate_hdd_cnt = SDS_OPTIONS["emulate_hdd_cnt"].as< uint32_t >();
 
     if (SDS_OPTIONS.count("device_list")) {
         gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();

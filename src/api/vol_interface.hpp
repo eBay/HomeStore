@@ -48,7 +48,7 @@ public:
     static bool shutdown(const bool force = false);
     static boost::intrusive_ptr< VolInterface > safe_instance();
     static VolInterface* raw_instance();
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, io_flag oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices);
 };
 
 struct buf_info {
@@ -200,10 +200,6 @@ public:
         oss << "min_virtual_page_size=" << min_virtual_page_size << ",app_mem_size=" << app_mem_size
             << ",number of data devices =" << data_devices.size()  << ",data_open_flags =" << data_open_flags;
         
-        if (fast_devices_present()) {
-            oss << ",number of fast devices =" << fast_devices.size()
-                << ",fast_open_flags =" << fast_open_flags;
-        }
         oss << ", start_http=" << start_http;
            
         oss << ",data device names = [";
@@ -212,14 +208,6 @@ public:
             oss << ",";
         }
         oss << "]";
-        if (fast_devices_present()) {
-            oss << ",fast device names = [";
-            for (size_t i{0}; i < fast_devices.size(); ++i) {
-                oss << fast_devices[i].dev_names;
-                oss << ",";
-            }
-            oss << "]";
-        }
         return oss.str();
     }
     init_params() = default;
@@ -236,8 +224,8 @@ public:
 
     static VolInterface* get_instance() { return VolInterfaceImpl::raw_instance(); }
 
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, io_flag oflags) {
-        return VolInterfaceImpl::zero_boot_sbs(devices, oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices) {
+        return VolInterfaceImpl::zero_boot_sbs(devices);
     }
 
     virtual ~VolInterface() {}
@@ -327,7 +315,6 @@ public:
 
     virtual const char* get_name(const VolumePtr& vol) = 0;
     virtual uint64_t get_size(const VolumePtr& vol) = 0;
-    virtual uint32_t get_align_size(const PhysicalDevGroup pdev_group) = 0;
     virtual uint64_t get_page_size(const VolumePtr& vol) = 0;
     virtual boost::uuids::uuid get_uuid(std::shared_ptr< Volume > vol) = 0;
     virtual sisl::blob at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;

@@ -222,7 +222,7 @@ protected:
 
         if (mblk->hdr.h.compressed == false) {
             if (overflow) {
-                HS_DEBUG_ASSERT_GE(sz_to_wrt, m_mbm->get_blockstore_page_size());
+                HS_DEBUG_ASSERT_GE(sz_to_wrt, m_mbm->get_page_size());
                 HS_DEBUG_ASSERT(mblk->hdr.h.ovf_bid.is_valid(), "Expected valid ovf meta blkid");
             } else {
                 HS_DEBUG_ASSERT_LE(sz_to_wrt, m_mbm->meta_blk_context_sz());
@@ -541,7 +541,7 @@ protected:
         m_mbm = MetaBlkMgrSI();
         m_total_wrt_sz = m_mbm->get_used_size();
 
-        HS_RELEASE_ASSERT_EQ(m_mbm->get_size() - m_total_wrt_sz, m_mbm->get_available_blks() * m_mbm->get_blockstore_page_size());
+        HS_RELEASE_ASSERT_EQ(m_mbm->get_size() - m_total_wrt_sz, m_mbm->get_available_blks() * m_mbm->get_page_size());
 
         m_mbm->deregister_handler(mtype);
         m_mbm->register_handler(

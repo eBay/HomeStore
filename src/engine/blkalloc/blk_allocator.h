@@ -47,22 +47,22 @@ class BlkAllocConfig {
 
 private:
     uint32_t m_blk_size;
+    uint32_t m_align_size;
     blk_cap_t m_capacity;
     blk_cap_t m_blks_per_portion;
     std::string m_unique_name;
     bool m_auto_recovery{false};
     bool m_realtime_bm_on{true}; // only specifically turn off in BlkAlloc Test;
-    PhysicalDevGroup m_pdev_group;
 
 public:
-    BlkAllocConfig(const PhysicalDevGroup pdev_group, const uint32_t blk_size, const uint64_t size,
+    BlkAllocConfig(const uint32_t blk_size, const uint32_t align_size, const uint64_t size,
                    const std::string& name = "", const bool realtime_bm_on = true) :
             m_blk_size{blk_size},
+            m_align_size{align_size},
             m_capacity{static_cast< blk_cap_t >(size / blk_size)},
             m_blks_per_portion{std::min(HS_DYNAMIC_CONFIG(blkallocator.num_blks_per_portion), m_capacity)},
             m_unique_name{name},
-            m_realtime_bm_on{realtime_bm_on},
-            m_pdev_group{pdev_group} {}
+            m_realtime_bm_on{realtime_bm_on} {}
 
     BlkAllocConfig(const BlkAllocConfig&) = default;
     BlkAllocConfig(BlkAllocConfig&&) noexcept = delete;
@@ -72,6 +72,8 @@ public:
 
     void set_blk_size(const uint32_t blk_size) { m_blk_size = blk_size; }
     [[nodiscard]] uint32_t get_blk_size() const { return m_blk_size; }
+
+    [[nodiscard]] uint32_t get_align_size() const { return m_align_size; }
 
     void set_total_blks(const blk_cap_t cap) { m_capacity = cap; }
     [[nodiscard]] blk_cap_t get_total_blks() const { return m_capacity; }
@@ -90,8 +92,6 @@ public:
         return fmt::format("BlkSize={} TotalBlks={} BlksPerPortion={} auto_recovery={}", get_blk_size(),
                            get_total_blks(), get_blks_per_portion(), get_auto_recovery());
     }
-
-    [[nodiscard]] PhysicalDevGroup get_pdev_group() const { return m_pdev_group; }
 };
 
 VENUM(BlkOpStatus, uint8_t,
@@ -107,18 +107,20 @@ ENUM(BlkAllocatorState, uint8_t, INIT, WAITING, SWEEP_SCHEDULED, SWEEPING, EXITI
 struct blk_alloc_hints {
     blk_alloc_hints() :
             desired_temp{0},
-            dev_id_hint{-1},
+            dev_id_hint{INVALID_DEV_ID},
             can_look_for_other_dev{true},
             is_contiguous{false},
             multiplier{1},
-            max_blks_per_entry{BlkId::max_blks_in_op()} {}
+            max_blks_per_entry{BlkId::max_blks_in_op()},
+            stream_ptr{(uintptr_t) nullptr} {}
 
     blk_temp_t desired_temp;     // Temperature hint for the device
-    int dev_id_hint;             // which physical device to pick (hint if any) -1 for don't care
+    uint32_t dev_id_hint;        // which physical device to pick (hint if any) -1 for don't care
     bool can_look_for_other_dev; // If alloc on device not available can I pick other device
     bool is_contiguous;
     uint32_t multiplier;         // blks allocated in a blkid should be a multiple of multiplier
     uint32_t max_blks_per_entry; // Number of blks on every entry
+    uintptr_t stream_ptr;
 #ifdef _PRERELEASE
     bool error_simulate = false; // can error simulate happen
 #endif
@@ -280,9 +282,6 @@ public:
     nlohmann::json get_status(const int log_level) const;
 
     [[nodiscard]] bool realtime_bm_on() const { return (m_cfg.m_realtime_bm_on && m_auto_recovery); }
-
-    static uint64_t encode_pdev_group_and_chunk_id(const PhysicalDevGroup pdev_group, chunk_num_t chunk_id);
-    static std::pair< PhysicalDevGroup, chunk_num_t > get_pdev_group_and_chunk_id(const uint64_t id);
 
 private:
     [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); }

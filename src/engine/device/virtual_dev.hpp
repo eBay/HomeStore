@@ -113,6 +113,8 @@ public:
         REGISTER_COUNTER(vdev_high_watermark_count, "vdev total high watermark cnt");
         REGISTER_COUNTER(vdev_num_alloc_failure, "vdev blk alloc failure cnt");
         REGISTER_COUNTER(unalign_writes, "unalign write cnt");
+        REGISTER_COUNTER(non_preferred_chunk_allocation_cnt,
+                         "number of times blks are not allocated from preferred chunk");
 
         register_me_to_farm();
     }
@@ -147,7 +149,6 @@ protected:
 
     // List of physical devices this virtual device uses and its corresponding chunks for the physdev
     std::vector< pdev_chunk_map > m_primary_pdev_chunks_list;
-    PhysicalDevGroup m_pdev_group;
 
     // For each of the primary chunk we created, this is the list of mirrored chunks. The physical devices
     // for the mirrored chunk always follows the next device pattern.
@@ -164,6 +165,8 @@ protected:
     vdev_high_watermark_cb_t m_hwm_cb{nullptr};
     iomgr::DriveInterface* m_drive_iface{nullptr};
     VirtualDevMetrics m_metrics;
+    std::vector< PhysicalDevChunk* > m_free_streams;
+    std::mutex m_free_streams_lk;
 
 public:
     static constexpr size_t context_data_size() { return MAX_CONTEXT_DATA_SZ; }
@@ -175,9 +178,8 @@ public:
     /* Create a new virtual dev for these parameters */
     VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGroup pdev_group,
                const blk_allocator_type_t allocator_type, const uint64_t context_size, const uint32_t nmirror,
-               const bool is_stripe, const uint32_t page_size, const std::vector< PhysicalDev* >& pdev_list,
-               vdev_comp_cb_t cb, char* blob, const uint64_t size_in, const bool auto_recovery = false,
-               vdev_high_watermark_cb_t hwm_cb = nullptr);
+               const bool is_stripe, const uint32_t page_size, vdev_comp_cb_t cb, char* blob, const uint64_t size_in,
+               const bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr);
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
     VirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, const PhysicalDevGroup pdev_group,
@@ -238,15 +240,15 @@ public:
 
     void submit_batch();
 
-    void get_vb_context(const PhysicalDevGroup pdev_group, const sisl::blob& ctx_data) const;
-    void update_vb_context(const PhysicalDevGroup pdev_group, const sisl::blob& ctx_data);
+    void get_vb_context(const sisl::blob& ctx_data) const;
+    void update_vb_context(const sisl::blob& ctx_data);
     virtual void recovery_done();
 
     std::shared_ptr< blkalloc_cp > attach_prepare_cp(const std::shared_ptr< blkalloc_cp >& cur_ba_cp);
     void blkalloc_cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp);
 
     virtual uint64_t get_available_blks() const;
-    virtual uint64_t get_size() const { return m_vb->size; }
+    virtual uint64_t get_size() const { return (get_num_chunks() * get_chunk_size()); }
     virtual uint64_t get_used_size() const;
     virtual uint64_t get_num_chunks() const { return m_num_chunks; }
     virtual uint64_t get_chunk_size() const { return m_chunk_size; }
@@ -270,6 +272,12 @@ public:
 
     /* Verify debug bitmap for all chunks */
     virtual BlkAllocStatus verify_debug_bm(const bool free_debug_bm = true);
+    uintptr_t reserve_stream(const uint32_t id);
+    std::pair< uint32_t, uintptr_t > alloc_stream();
+    void free_stream(const uintptr_t ptr);
+    uint32_t get_align_size() const;
+    uint32_t get_phys_page_size() const;
+    uint32_t get_atomic_page_size() const;
 
 protected:
     /**
@@ -325,6 +333,9 @@ protected:
                                const int iovcnt, const uint64_t size,
                                const boost::intrusive_ptr< virtualdev_req >& req = nullptr);
 
+    uint32_t get_num_streams() const;
+    uint64_t get_stream_size() const;
+
 private:
     void write_nmirror(const char* buf, const uint32_t size, PhysicalDevChunk* chunk, const uint64_t dev_offset_in);
     void writev_nmirror(const iovec* iov, const int iovcnt, const uint32_t size, PhysicalDevChunk* chunk,
@@ -336,8 +347,10 @@ private:
     void add_primary_chunk(PhysicalDevChunk* chunk);
     void add_mirror_chunk(PhysicalDevChunk* chunk);
     PhysicalDevChunk* create_dev_chunk(const uint32_t pdev_ind, const std::shared_ptr< BlkAllocator >& ba,
-                                       const uint32_t primary_id);
+                                       const uint32_t primary_id, const bool is_stream_aligned);
     uint64_t to_dev_offset(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const;
+    BlkAllocStatus alloc_blk_from_chunk(const blk_count_t nblks, const blk_alloc_hints& hints,
+                                        std::vector< BlkId >& out_blkid, PhysicalDevChunk* const chunk);
 };
 
 } // namespace homestore

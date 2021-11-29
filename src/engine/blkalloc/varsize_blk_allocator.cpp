@@ -45,10 +45,7 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const
     BLKALLOC_LOG(INFO, "Creating VarsizeBlkAllocator with config: {}", cfg.to_string());
 
     // TODO: Raise exception when blk_size > page_size or total blks is less than some number etc...
-    m_cache_bm = std::make_unique< sisl::Bitset >(cfg.get_total_blks(), chunk_id,
-                                                  cfg.get_pdev_group() == PhysicalDevGroup::DATA
-                                                      ? HS_STATIC_CONFIG(data_drive_attr.align_size)
-                                                      : HS_STATIC_CONFIG(fast_drive_attr.align_size));
+    m_cache_bm = std::make_unique< sisl::Bitset >(cfg.get_total_blks(), chunk_id, cfg.get_align_size());
 
     // NOTE: Number of blocks must be modulo word size so locks do not fall on same word
     HS_RELEASE_ASSERT_EQ(m_cfg.get_blks_per_portion() % m_cache_bm->word_size(), 0,
@@ -529,7 +526,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_all
         break;
     case BlkAllocStatus::PARTIAL:
         COUNTER_INCREMENT(m_metrics, num_alloc_partial, 1);
-        BLKALLOC_LOG(INFO, "nblks={} allocated={} partial allocation", nblks, total_allocated);
+        BLKALLOC_LOG(DEBUG, "nblks={} allocated={} partial allocation", nblks, total_allocated);
         break;
     case BlkAllocStatus::SUCCESS:
         break;
@@ -604,7 +601,7 @@ void VarsizeBlkAllocator::free_on_bitmap(const BlkId& b) {
         m_cache_bm->reset_bits(b.get_blk_num(), b.get_nblks());
         portion->increase_available_blocks(b.get_nblks());
     }
-    BLKALLOC_LOG(DEBUG, "Freeing directly to portion={} blkid={} set_bits_count={}",
+    BLKALLOC_LOG(TRACE, "Freeing directly to portion={} blkid={} set_bits_count={}",
                  blknum_to_portion_num(b.get_blk_num()), b.to_string(), get_alloced_blk_count());
 }
 

@@ -35,16 +35,20 @@ public:
     void set_total_cap(uint64_t total_cap) { m_total_cap = total_cap; }
 
     /* monitor dirty buffer count */
-    void inc_dirty_buf_cnt() {
-        auto dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_add(1, std::memory_order_relaxed);
-        COUNTER_INCREMENT(m_metrics, dirty_buf_cnt, 1);
-        if (m_dirty_buf_exceed_cb && (dirty_buf_cnt > get_dirty_buf_limit())) { m_dirty_buf_exceed_cb(dirty_buf_cnt); }
+    void inc_dirty_buf_cnt(const uint32_t size) {
+        HS_RELEASE_ASSERT_GT(size, 0);
+        const auto dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_add(size, std::memory_order_relaxed);
+        COUNTER_INCREMENT(m_metrics, dirty_buf_cnt, size);
+        if (m_dirty_buf_exceed_cb && ((dirty_buf_cnt + size) > get_dirty_buf_limit())) {
+            m_dirty_buf_exceed_cb(dirty_buf_cnt + size);
+        }
     }
 
-    void dec_dirty_buf_cnt() {
-        int64_t dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_sub(1, std::memory_order_relaxed);
-        COUNTER_DECREMENT(m_metrics, dirty_buf_cnt, 1);
-        HS_RELEASE_ASSERT_GE(dirty_buf_cnt, 0);
+    void dec_dirty_buf_cnt(const uint32_t size) {
+        HS_RELEASE_ASSERT_GT(size, 0);
+        const int64_t dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_sub(size, std::memory_order_relaxed);
+        COUNTER_DECREMENT(m_metrics, dirty_buf_cnt, size);
+        HS_RELEASE_ASSERT_GE(dirty_buf_cnt, size);
     }
 
     void register_dirty_buf_exceed_cb(exceed_limit_cb_t cb) { m_dirty_buf_exceed_cb = std::move(cb); }
@@ -114,9 +118,9 @@ public:
     }
 
     /* monitor journal size */
-    bool check_journal_size(uint64_t used_size, uint64_t total_size) {
+    bool check_journal_size(const uint64_t used_size, const uint64_t total_size) {
         if (m_journal_exceed_cb) {
-            uint32_t used_pct = (100 * used_size / total_size);
+            const uint32_t used_pct = (100 * used_size / total_size);
             if (used_pct >= HS_DYNAMIC_CONFIG(resource_limits.journal_size_percent)) {
                 m_journal_exceed_cb(used_size);
                 HS_LOG_EVERY_N(WARN, device, 50,
@@ -136,9 +140,8 @@ public:
 
 private:
     int64_t get_dirty_buf_limit() const {
-        return (int64_t)((HS_DYNAMIC_CONFIG(resource_limits.dirty_buf_percent) * HS_STATIC_CONFIG(input.app_mem_size) /
-                          100) /
-                         HS_STATIC_CONFIG(data_drive_attr.atomic_phys_page_size));
+        return (int64_t)(
+            (HS_DYNAMIC_CONFIG(resource_limits.dirty_buf_percent) * HS_STATIC_CONFIG(input.app_mem_size) / 100));
     }
 
     std::atomic< int64_t > m_hs_dirty_buf_cnt;

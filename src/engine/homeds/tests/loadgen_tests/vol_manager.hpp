@@ -39,8 +39,9 @@ namespace loadgen {
 constexpr uint64_t APP_MEM_SIZE = (5 * 1024 * 1024 * 1024ul);
 constexpr uint32_t VOL_PAGE_SIZE = 4096;
 constexpr uint32_t MAX_CRC_DEPTH = 3;
-const uint64_t LOGDEV_DATA_BUF_SIZE = HS_STATIC_CONFIG(data_drive_attr.align_size) * 1024;
-const uint64_t LOGDEV_FAST_BUF_SIZE = HS_STATIC_CONFIG(fast_drive_attr.align_size) * 1024;
+constexpr uint32_t ALIGN_SIZE = 512;
+const uint64_t LOGDEV_DATA_BUF_SIZE = ALIGN_SIZE * 1024;
+const uint64_t LOGDEV_FAST_BUF_SIZE = ALIGN_SIZE * 1024;
 
 class VolReq {
 public:
@@ -300,7 +301,7 @@ private:
         auto read_offset = m_logdev_offset.front();
 
         char* ptr = nullptr;
-        int  ret = posix_memalign((void**)&ptr, HS_STATIC_CONFIG(drive_attr.align_size), LOGDEV_BUF_SIZE);
+        int  ret = posix_memalign((void**)&ptr, HS_STATIC_CONFIG(drive_attr.align_size, LOGDEV_BUF_SIZE);
         if (ret != 0) {
             throw std::bad_alloc();
         }

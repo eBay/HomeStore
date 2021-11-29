@@ -34,13 +34,12 @@ public:
     /* Create a new virtual dev for these parameters */
     JournalVirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGroup pdev_group,
                       const uint64_t context_size, const uint32_t nmirror, const bool is_stripe,
-                      const uint32_t page_size, const std::vector< PhysicalDev* >& pdev_list, vdev_comp_cb_t cb,
-                      char* blob, const uint64_t size_in, const bool auto_recovery = false,
-                      vdev_high_watermark_cb_t hwm_cb = nullptr) :
-            VirtualDev{mgr,           name,          pdev_group, blk_allocator_type_t::none,
-                       context_size,  nmirror,       is_stripe,  page_size,
-                       pdev_list,     std::move(cb), blob,       size_in,
-                       auto_recovery, hwm_cb} {}
+                      const uint32_t page_size, vdev_comp_cb_t cb, char* blob, const uint64_t size_in,
+                      const bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
+            VirtualDev{mgr,           name,    pdev_group, blk_allocator_type_t::none,
+                       context_size,  nmirror, is_stripe,  page_size,
+                       std::move(cb), blob,    size_in,    auto_recovery,
+                       hwm_cb} {}
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
     JournalVirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, const PhysicalDevGroup pdev_group,

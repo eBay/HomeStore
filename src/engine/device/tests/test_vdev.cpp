@@ -160,11 +160,11 @@ public:
         LOGINFO("Starting iomgr with {} threads", nthreads);
         iomanager.start(nthreads);
 
-        m_dmgr = std::make_unique< DeviceManager >(device_info, empty_info, nullptr, 0, nullptr, nullptr);
+        m_dmgr = std::make_unique< DeviceManager >(device_info, nullptr, 0, nullptr, nullptr);
         m_dmgr->init();
-        m_vdev = std::make_unique< JournalVirtualDev >(m_dmgr.get(), "test_vdev", PhysicalDevGroup::DATA, 0, 0, true,
-                                                       dma_alignment, m_dmgr->get_all_devices(PhysicalDevGroup::DATA),
-                                                       nullptr, nullptr, (dev_size * ndevices * 60) / 100);
+        m_vdev =
+            std::make_unique< JournalVirtualDev >(m_dmgr.get(), "test_vdev", PhysicalDevGroup::DATA, 0, 0, true,
+                                                  dma_alignment, nullptr, nullptr, (dev_size * ndevices * 60) / 100);
     }
 
     virtual void TearDown() override {

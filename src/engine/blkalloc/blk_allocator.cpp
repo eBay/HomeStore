@@ -9,10 +9,8 @@ BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, const chunk_num_t id) : m_
         m_blk_portions[index].set_available_blocks(m_cfg.get_blks_per_portion());
     }
     m_auto_recovery = cfg.get_auto_recovery();
-    const auto align_size{m_cfg.get_pdev_group() == PhysicalDevGroup::DATA
-                              ? HS_STATIC_CONFIG(data_drive_attr.align_size)
-                              : HS_STATIC_CONFIG(fast_drive_attr.align_size)};
-    const auto bitmap_id{encode_pdev_group_and_chunk_id(m_cfg.get_pdev_group(), id)};
+    const auto align_size{m_cfg.get_align_size()};
+    const auto bitmap_id{id};
     m_disk_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), bitmap_id, align_size);
 
     if (!HS_DYNAMIC_CONFIG(generic.sanity_check_level_non_hotswap)) { m_cfg.m_realtime_bm_on = false; }
@@ -183,9 +181,7 @@ sisl::byte_array BlkAllocator::cp_start([[maybe_unused]] const std::shared_ptr< 
     synchronize_rcu();
 
     BLKALLOC_ASSERT(RELEASE, old_alloc_list_ptr == nullptr, "Expecting alloc list to be nullptr");
-    return (m_disk_bm->serialize(m_cfg.get_pdev_group() == PhysicalDevGroup::DATA
-                                     ? HS_STATIC_CONFIG(data_drive_attr.align_size)
-                                     : HS_STATIC_CONFIG(fast_drive_attr.align_size)));
+    return (m_disk_bm->serialize(m_cfg.get_align_size()));
 }
 
 void BlkAllocator::cp_done() {
@@ -207,10 +203,7 @@ void BlkAllocator::cp_done() {
 }
 
 void BlkAllocator::create_debug_bm() {
-    m_debug_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), m_chunk_id,
-                                                  (m_cfg.get_pdev_group() == PhysicalDevGroup::DATA
-                                                       ? HS_STATIC_CONFIG(data_drive_attr.align_size)
-                                                       : HS_STATIC_CONFIG(fast_drive_attr.align_size)));
+    m_debug_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), m_chunk_id, m_cfg.get_align_size());
     assert(m_cfg.get_blks_per_portion() % m_debug_bm->word_size() == 0);
 }
 
@@ -230,17 +223,6 @@ bool BlkAllocator::verify_debug_bm(const bool free_debug_bm) {
 nlohmann::json BlkAllocator::get_status(const int log_level) const {
     nlohmann::json j;
     return j;
-}
-
-uint64_t BlkAllocator::encode_pdev_group_and_chunk_id(const PhysicalDevGroup pdev_group, chunk_num_t chunk_id) {
-    return static_cast< uint64_t >(chunk_id & 0xFFFFFFFF) | ((static_cast< uint64_t >(pdev_group) & 0xFFFFFFFF) << 32);
-}
-
-std::pair< PhysicalDevGroup, chunk_num_t > BlkAllocator::get_pdev_group_and_chunk_id(const uint64_t id) {
-    const chunk_num_t chunk_id{static_cast< chunk_num_t >(id & 0xFFFFFFFF)};
-    const auto pdev_id{static_cast< std::underlying_type_t< PhysicalDevGroup > >((id >> 32) & 0xFFFFFFFF)};
-    const auto pdev_group{static_cast< PhysicalDevGroup >(pdev_id)};
-    return {pdev_group, chunk_id};
 }
 
 sisl::ThreadVector< BlkId >* BlkAllocator::get_alloc_blk_list() {

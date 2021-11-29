@@ -45,7 +45,7 @@ public:
     }
 
     BtreeStore(ssd_btree_t* btree, BtreeConfig& cfg) : m_btree(btree), m_btree_cfg(cfg) {
-        m_wb_cache = std::make_shared< wb_cache_t >(cfg.blkstore, cfg.align_size,
+        m_wb_cache = std::make_shared< wb_cache_t >(cfg.blkstore, cfg.get_node_size(),
                                                     bind_this(SSDBtreeStore::cp_done_store, 1), cfg.trigger_cp_cb);
         m_node_size = cfg.get_node_size();
         m_btree_cfg.set_node_area_size(m_node_size - sizeof(LeafPhysicalNode));
@@ -462,7 +462,7 @@ public:
         auto b =
             hs_utils::create_io_blob(journal_entry_initial_size(),
                                      HomeLogStoreMgr::data_logdev().is_aligned_buf_needed(journal_entry_initial_size()),
-                                     sisl::buftag::btree_journal);
+                                     sisl::buftag::btree_journal, HomeLogStoreMgr::data_logdev().get_align_size());
         new (b.bytes) btree_journal_entry(op, is_root, pair, bcp->cp_id);
         return b;
     }
@@ -545,7 +545,7 @@ private:
             // TO DO: Might need to differentiate based on data or fast type
             b.buf_realloc(new_size,
                           HomeLogStoreMgr::data_logdev().is_aligned_buf_needed(new_size)
-                              ? HS_STATIC_CONFIG(data_drive_attr.align_size)
+                              ? m_blkstore->get_vdev()->get_align_size()
                               : 0);
         }
         return blob_to_entry(b); // Get the revised entry from blob before returning

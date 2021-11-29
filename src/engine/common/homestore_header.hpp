@@ -33,7 +33,7 @@ ENUM(io_flag, uint8_t,
 
 ENUM(Op_type, uint8_t, READ, WRITE, UNMAP);
 
-VENUM(PhysicalDevGroup, uint8_t, DATA = 0, FAST = 1);
+VENUM(PhysicalDevGroup, uint8_t, DATA = 0, FAST = 1, META = 2);
 
 struct dev_info {
     typedef enum class Type : uint8_t { Data, Fast } Type;

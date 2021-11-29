@@ -181,16 +181,18 @@ private:
     uint64_t m_free_list_cnt = 0;
     uint64_t m_alloc_list_cnt = 0;
     btree_blkstore_t* m_blkstore;
+    uint32_t m_node_size;
     static std::vector< iomgr::io_thread_t > m_thread_ids;
     static thread_local std::vector< flush_buffer_callback > flush_buffer_q;
     static thread_local uint64_t wb_cache_outstanding_cnt;
     static thread_local uint64_t s_cbq_id;
 
 public:
-    WriteBackCache(void* const blkstore, const uint64_t align_size, cp_comp_callback cb,
-                   trigger_cp_callback trigger_cp_cb) {
+    WriteBackCache(void* const blkstore, const uint32_t node_size, cp_comp_callback cb,
+                   trigger_cp_callback trigger_cp_cb) :
+            m_node_size(node_size) {
         for (size_t i{0}; i < MAX_CP_CNT; ++i) {
-            m_free_list[i] = std::make_shared< sisl::ThreadVector< std::pair< BlkId, PhysicalDevGroup > > >();
+            m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
             m_req_list[i] = std::make_unique< sisl::ThreadVector< writeback_req_ptr > >();
             m_dirty_buf_cnt[i].set(0);
         }
@@ -296,7 +298,7 @@ public:
 
             /* check for dirty buffers cnt */
             m_dirty_buf_cnt[cp_id].increment(1);
-            ResourceMgrSI().inc_dirty_buf_cnt();
+            ResourceMgrSI().inc_dirty_buf_cnt(m_node_size);
         } else {
             HS_ASSERT_CMP(DEBUG, bn->req[cp_id]->bid.to_integer(), ==, bn->get_node_id());
             if (bn->req[cp_id]->m_mem != bn->get_memvec_intrusive()) {
@@ -327,7 +329,7 @@ public:
         m_blkstore->free_blk(bid, boost::none, boost::none, free_blkid_list ? true : false);
         if (free_blkid_list) {
             ResourceMgrSI().inc_free_blk(size);
-            free_blkid_list->push_back(std::make_pair(bid, m_blkstore->get_pdev_group()));
+            free_blkid_list->push_back(bid);
             // release on realtime bitmap;
             const auto ret = m_blkstore->free_on_realtime(bid);
             HS_RELEASE_ASSERT(ret, "fail to free on realtime bm");
@@ -359,7 +361,8 @@ public:
 
         // make a copy
         // TO DO: Possible alignment
-        auto mem{hs_utils::iobuf_alloc(bn->get_cache_size(), sisl::buftag::btree_node)};
+        auto mem{hs_utils::iobuf_alloc(bn->get_cache_size(), sisl::buftag::btree_node,
+                                       m_blkstore->get_vdev()->get_align_size())};
         sisl::blob outb;
         (bn->get_memvec()).get(&outb);
         std::memcpy(static_cast< void* >(mem), static_cast< const void* >(outb.bytes), outb.size);
@@ -519,7 +522,7 @@ public:
             queue_flush_buffers(nullptr);
         }
         wb_req->bn->req[cp_id] = nullptr;
-        ResourceMgrSI().dec_dirty_buf_cnt();
+        ResourceMgrSI().dec_dirty_buf_cnt(m_node_size);
 
         if (m_dirty_buf_cnt[cp_id].decrement_testz(1)) { m_cp_comp_cb(wb_req->bcp); };
     }

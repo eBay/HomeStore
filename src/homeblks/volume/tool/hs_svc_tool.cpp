@@ -144,7 +144,7 @@ int main(int argc, char* argv[]) {
 
     HS_DEBUG_ASSERT_EQ(device_info.size() > 0, true);
 
-    if (gp.zero_boot_sb) { VolInterface::get_instance()->zero_boot_sbs(device_info, homestore::io_flag::DIRECT_IO); }
+    if (gp.zero_boot_sb) { VolInterface::get_instance()->zero_boot_sbs(device_info); }
 
     iomanager.stop();
 

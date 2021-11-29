@@ -38,13 +38,14 @@ private:
     bool m_use_slabs{true}; // use sweeping thread pool with slabs in variable size block allocator
 
 public:
-    VarsizeBlkAllocConfig() : VarsizeBlkAllocConfig{PhysicalDevGroup::DATA, 0, 0, ""} {}
-    VarsizeBlkAllocConfig(const std::string& name) : VarsizeBlkAllocConfig{PhysicalDevGroup::DATA, 0, 0, name} {}
+    VarsizeBlkAllocConfig() : VarsizeBlkAllocConfig{0, 0, 0, 0, ""} {}
+    VarsizeBlkAllocConfig(const std::string& name) : VarsizeBlkAllocConfig{0, 0, 0, 0, name} {}
 
-    VarsizeBlkAllocConfig(const PhysicalDevGroup pdev_group, const uint32_t blk_size, const uint64_t size, const std::string& name,
-                          const bool realtime_bm_on = true, const bool use_slabs = true) :
-            BlkAllocConfig{pdev_group, blk_size, size, name, realtime_bm_on},
-            m_phys_page_size{pdev_group == PhysicalDevGroup::DATA ? HS_STATIC_CONFIG(data_drive_attr.phys_page_size) : HS_STATIC_CONFIG(fast_drive_attr.phys_page_size)},
+    VarsizeBlkAllocConfig(const uint32_t blk_size, const uint32_t ppage_sz, const uint32_t align_sz,
+                          const uint64_t size, const std::string& name, const bool realtime_bm_on = true,
+                          const bool use_slabs = true) :
+            BlkAllocConfig{blk_size, align_sz, size, name, realtime_bm_on},
+            m_phys_page_size{ppage_sz},
             m_nsegments{HS_DYNAMIC_CONFIG(blkallocator.max_segments)},
             m_blks_per_temp_group{get_total_blks() / HS_DYNAMIC_CONFIG(blkallocator.num_blk_temperatures)},
             m_use_slabs{use_slabs} {

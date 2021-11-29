@@ -119,7 +119,8 @@ sisl::byte_view log_stream_reader::group_in_next_page() {
 
 sisl::byte_view log_stream_reader::read_next_bytes(const uint64_t nbytes) {
     // TO DO: Might need to address alignment based on data or fast type
-    auto out_buf{hs_utils::create_byte_view(nbytes + m_cur_log_buf.size(), true, sisl::buftag::logread)};
+    auto out_buf{hs_utils::create_byte_view(nbytes + m_cur_log_buf.size(), true, sisl::buftag::logread,
+                                            m_blkstore->get_align_size())};
     auto ret_buf = out_buf;
     if (m_cur_log_buf.size()) {
         memcpy(out_buf.bytes(), m_cur_log_buf.bytes(), m_cur_log_buf.size());

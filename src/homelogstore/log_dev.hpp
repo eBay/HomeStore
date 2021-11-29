@@ -230,7 +230,7 @@ public:
     LogGroup& operator=(LogGroup&&) noexcept = delete;
     ~LogGroup() = default;
 
-    void start(const uint64_t flush_size_multiple);
+    void start(const uint64_t flush_size_multiple, const uint32_t align_size);
     void stop();
     void reset(const uint32_t max_records);
     void create_overflow_buf(const uint32_t min_needed);
@@ -483,7 +483,7 @@ private:
 
     [[nodiscard]] uint32_t required_sb_size(const uint32_t nstores) const {
         // TO DO: Might need to differentiate based on data or fast type
-        return sisl::round_up(size_needed(nstores), HS_STATIC_CONFIG(data_drive_attr.phys_page_size));
+        return size_needed(nstores);
     }
 
     [[nodiscard]] uint32_t size_needed(const uint32_t nstores) const {
@@ -709,6 +709,7 @@ public:
     }
 
     uint64_t get_flush_size_multiple() const { return m_flush_size_multiple; }
+    uint32_t get_align_size() const;
 
 private:
     [[nodiscard]] LogGroup* make_log_group(const uint32_t estimated_records) {

@@ -490,14 +490,12 @@ public:
     static uint64_t free_blk(hs_cp* const hcp, blkid_list_ptr& out_fblk_list,
                              std::vector< Free_Blk_Entry >& in_fbe_list, const bool force,
                              const indx_req* const ireq = nullptr);
-    static uint64_t free_blk(hs_cp* const hcp,
-                             sisl::ThreadVector< std::pair< homestore::BlkId, PhysicalDevGroup > >* const out_fblk_list,
+    static uint64_t free_blk(hs_cp* const hcp, sisl::ThreadVector< homestore::BlkId >* const out_fblk_list,
                              std::vector< Free_Blk_Entry >& in_fbe_list, const bool force,
                              const indx_req* const ireq = nullptr);
     static uint64_t free_blk(hs_cp* const hcp, blkid_list_ptr& out_fblk_list, Free_Blk_Entry& fbe, const bool force,
                              const indx_req* const ireq = nullptr);
-    static uint64_t free_blk(hs_cp* const hcp,
-                             sisl::ThreadVector< std::pair< homestore::BlkId, PhysicalDevGroup > >* const out_fblk_list,
+    static uint64_t free_blk(hs_cp* const hcp, sisl::ThreadVector< homestore::BlkId >* const out_fblk_list,
                              Free_Blk_Entry& fbe, const bool force, const indx_req* const ireq = nullptr);
 
     static void add_read_tracker(const Free_Blk_Entry& bid);
@@ -742,7 +740,6 @@ private:
     void write_cp_unmap_sb(void*& unmap_meta_blk_cntx, const uint32_t key_size, const seq_id_t seq_id,
                            homeds::btree::BtreeQueryCursor& unmap_btree_cur, const uint8_t* const key);
 
-    void alloc_on_realtime(const std::vector< BlkId >& blkid_list, const indx_req_ptr& ireq);
     void free_blkid_and_send_completion(const indx_req_ptr& ireq);
 };
 

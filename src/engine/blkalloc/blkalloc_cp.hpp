@@ -9,7 +9,7 @@ class HomeStoreBase;
 
 typedef boost::intrusive_ptr< HomeStoreBase > HomeStoreBaseSafePtr;
 
-using blkid_list_ptr = std::shared_ptr< sisl::ThreadVector< std::pair< BlkId, PhysicalDevGroup > > >;
+using blkid_list_ptr = std::shared_ptr< sisl::ThreadVector< BlkId > >;
 typedef std::function< void(uint64_t) > notify_size_freed_cb_t;
 
 struct blkalloc_cp {

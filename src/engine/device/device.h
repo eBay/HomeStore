@@ -40,6 +40,8 @@
 #include <sisl/fds/utils.hpp>
 #include <sisl/utility/enum.hpp>
 #include "engine/common/homestore_header.hpp"
+#include "engine/common/homestore_assert.hpp"
+#include "engine/common/homestore_config.hpp"
 
 using namespace iomgr;
 SDS_LOGGING_DECL(device, DEVICE_MANAGER)
@@ -125,6 +127,12 @@ struct chunk_info_block {
     bool is_slot_allocated() const { return (slot_allocated == 0x01); }
     void set_sb_chunk(const bool chunk) { sb_chunk = static_cast< uint8_t >(chunk ? 0x01 : 0x00); }
     bool is_sb_chunk() const { return (sb_chunk == 0x01); }
+    void update_start_offset(const uint64_t offset) {
+        HS_RELEASE_ASSERT_GE(offset, chunk_start_offset);
+        chunk_size -= (offset - chunk_start_offset);
+        HS_RELEASE_ASSERT_GT(chunk_size, 0);
+        chunk_start_offset = offset;
+    }
 };
 #pragma pack()
 
@@ -214,9 +222,11 @@ struct super_block {
     void set_system_uuid(const hs_uuid_t uuid) { system_uuid = static_cast< uint64_t >(uuid); }
     hs_uuid_t get_system_uuid() const { return static_cast< hs_uuid_t >(system_uuid); }
 };
-#pragma pack()
 
-#pragma pack(1)
+inline size_t SUPERBLOCK_SIZE(const uint32_t atomic_page_sz) {
+    return sisl::round_up(std::max(sizeof(super_block), atomic_page_sz + SUPERBLOCK_PAYLOAD_OFFSET), atomic_page_sz);
+}
+
 // NOTE: After this structure in memory follows pdev_info_block followed by chunk_info_block array
 // followed by vdev_info_block array
 struct dm_info {
@@ -257,10 +267,6 @@ struct dm_info {
 };
 #pragma pack()
 
-static constexpr uint32_t INVALID_PDEV_ID{std::numeric_limits< uint32_t >::max()};
-static constexpr uint32_t INVALID_VDEV_ID{std::numeric_limits< uint32_t >::max()};
-static constexpr uint32_t INVALID_CHUNK_ID{std::numeric_limits< uint32_t >::max()};
-static constexpr uint32_t INVALID_DEV_ID{std::numeric_limits< uint32_t >::max()};
 
 class PhysicalDev;
 class meta_blk;
@@ -368,8 +374,17 @@ public:
 
     void cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp);
 
-    static std::shared_ptr< blkalloc_cp > attach_prepare_cp(const PhysicalDevGroup dev_group,
-                                                            const std::shared_ptr< blkalloc_cp >& cur_ba_cp);
+    static std::shared_ptr< blkalloc_cp > attach_prepare_cp(const std::shared_ptr< blkalloc_cp >& cur_ba_cp);
+    void update_start_offset(const uint64_t start_offset) { m_chunk_info->update_start_offset(start_offset); }
+    uint64_t get_aligned_size(const uint64_t align_offset, const uint64_t page_size) {
+        const uint64_t offset = sisl::round_up(get_start_offset(), std::lcm(align_offset, page_size));
+        if (offset - get_start_offset() <= get_size()) {
+            const uint64_t size = get_size() - (offset - get_start_offset());
+            return size;
+        } else {
+            return 0;
+        }
+    }
 
     // void cp_done(std::shared_ptr< blkalloc_cp > ba_cp);
 
@@ -419,8 +434,8 @@ class PhysicalDev {
     friend class DeviceManager;
 
 public:
-    PhysicalDev(DeviceManager* const mgr, const PhysicalDevGroup pdev_group, const std::string& devname,
-                const int oflags, const iomgr::io_interface_comp_cb_t& io_comp_cb);
+    PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags,
+                const iomgr::io_interface_comp_cb_t& io_comp_cb);
 
     /**
      * @brief
@@ -440,10 +455,9 @@ public:
      *  if this is set to false in a recovery boot, it is expected.
      *  this field will not be changed if is_init is set to true(first-time-boot)
      */
-    PhysicalDev(DeviceManager* const mgr, const PhysicalDevGroup pdev_group, const std::string& devname,
-                const int oflags, const hs_uuid_t& uuid, const uint32_t dev_num, const uint64_t dev_offset,
-                const bool is_init, const uint64_t dm_info_size, const iomgr::io_interface_comp_cb_t& io_comp_cb,
-                bool* const is_inited);
+    PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags, const hs_uuid_t& uuid,
+                const uint32_t dev_num, const uint64_t dev_offset, const bool is_init, const uint64_t dm_info_size,
+                const iomgr::io_interface_comp_cb_t& io_comp_cb, bool* const is_inited);
 
     PhysicalDev(const PhysicalDev&) = delete;
     PhysicalDev(PhysicalDev&&) noexcept = delete;
@@ -481,7 +495,7 @@ public:
     std::array< uint32_t, 2 > merge_free_chunks(PhysicalDevChunk* const chunk);
 
     /* Find a free chunk which closestly match for the required size */
-    PhysicalDevChunk* find_free_chunk(const uint64_t req_size);
+    PhysicalDevChunk* find_free_chunk(const uint64_t req_size, const bool is_stream_aligned);
 
     void write(const char* const data, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
                const bool part_of_batch = false);
@@ -521,6 +535,15 @@ public:
     void close_device();
 
     hs_uuid_t get_sys_uuid() { return m_super_blk->get_system_uuid(); }
+    uint64_t get_stream_size() const;
+    uint64_t get_stream_aligned_offset() const;
+    uint32_t get_page_size() const { return (get_page_size(m_devname)); }
+    uint32_t get_atomic_page_size() const { return (get_atomic_page_size(m_devname)); }
+    uint32_t get_align_size() const { return (get_align_size(m_devname)); }
+
+    static uint32_t get_page_size(const std::string& devname);
+    static uint32_t get_atomic_page_size(const std::string& devname);
+    static uint32_t get_align_size(const std::string& devname);
 
 public:
     static void zero_boot_sbs(const std::vector< dev_info >& devices, const int oflags);
@@ -542,10 +565,10 @@ private:
     /* Validate if this device is a homestore validated device. If there is any corrupted device, then it
      * throws std::system_exception */
     bool validate_device();
+    bool is_hdd() const;
 
 private:
     DeviceManager* m_mgr; // Back pointer to physical device
-    PhysicalDevGroup m_pdev_group;
     iomgr::io_device_ptr m_iodev;
     iomgr::DriveInterface* m_drive_iface; // Interface to do IO
     std::string m_devname;
@@ -574,8 +597,7 @@ class DeviceManager {
     friend class PhysicalDevChunk;
 
 public:
-    DeviceManager(const std::vector< dev_info >& data_devices, const std::vector< dev_info >& fast_devices,
-                  NewVDevCallback vcb, const uint32_t vdev_metadata_size,
+    DeviceManager(const std::vector< dev_info >& data_devices, NewVDevCallback vcb, const uint32_t vdev_metadata_size,
                   const iomgr::io_interface_comp_cb_t& io_comp_cb, const vdev_error_callback& vdev_error_cb);
 
     DeviceManager(const DeviceManager& other) = delete;
@@ -583,8 +605,6 @@ public:
     DeviceManager(DeviceManager&&) noexcept = delete;
     DeviceManager& operator=(DeviceManager&&) noexcept = delete;
     ~DeviceManager();
-
-    bool fast_devices_present() const { return !m_fast_pdevs.empty(); }
 
     /**
      * @brief : Initial routine to call upon bootup or everytime new physical devices to be added dynamically
@@ -595,27 +615,23 @@ public:
      *  false if it is recovery reboot, meaning there is valid sb found on device
      */
     bool init();
-    size_t get_total_cap(const PhysicalDevGroup pdev_group = PhysicalDevGroup::DATA) const;
+    size_t get_total_cap() const;
+    size_t get_total_cap(const PhysicalDevGroup pdev_group) const;
+    uint32_t get_phys_page_size(const PhysicalDevGroup pdev_group) const;
+    uint32_t get_atomic_page_size(const PhysicalDevGroup pdev_group) const;
     void handle_error(PhysicalDev* const pdev);
 
     /* This is not very efficient implementation of get_all_devices(), however, this is expected to be called during
      * the start of the devices and for that purpose its efficient enough */
     // TO DO: Possibly make two functions or return std::pair if not sufficient
-    std::vector< PhysicalDev* > get_all_devices(const PhysicalDevGroup pdev_group) {
+    std::vector< PhysicalDev* > get_all_devices() {
         std::vector< PhysicalDev* > vec;
         {
             std::lock_guard< decltype(m_dev_mutex) > lock{m_dev_mutex};
 
-            if (pdev_group == PhysicalDevGroup::DATA) {
-                vec.reserve(m_data_pdevs.size());
-                for (auto& pdev : m_data_pdevs) {
-                    if (pdev) vec.push_back(pdev.get());
-                }
-            } else {
-                vec.reserve(m_fast_pdevs.size());
-                for (auto& pdev : m_fast_pdevs) {
-                    if (pdev) vec.push_back(pdev.get());
-                }
+            vec.reserve(m_data_pdevs.size());
+            for (auto& pdev : m_data_pdevs) {
+                if (pdev) vec.push_back(pdev.get());
             }
         }
         return vec;
@@ -624,100 +640,84 @@ public:
     /* Allocate a chunk for required size on the given physical dev and associate the chunk to provide virtual device.
      * Returns the allocated PhysicalDevChunk */
     PhysicalDevChunk* alloc_chunk(PhysicalDev* pdev, const uint32_t vdev_id, const uint64_t req_size,
-                                  const uint32_t primary_id);
+                                  const uint32_t primary_id, const bool is_stream_aligned = false);
 
     /* Free the chunk for later user */
-    void free_chunk(const PhysicalDevGroup pdev_group, PhysicalDevChunk* const chunk);
+    void free_chunk(PhysicalDevChunk* const chunk);
 
     /* Allocate a new vdev for required size */
-    vdev_info_block* alloc_vdev(const PhysicalDevGroup pdev_group, const uint32_t req_size, const uint32_t nmirrors,
-                                const uint32_t blk_size, const uint32_t nchunks, char* const blob, const uint64_t size);
+    vdev_info_block* alloc_vdev(const uint32_t req_size, const uint32_t nmirrors, const uint32_t blk_size,
+                                const uint32_t nchunks, char* const blob, const uint64_t size);
 
     /* Free up the vdev_id */
-    void free_vdev(const PhysicalDevGroup pdev_group, vdev_info_block* const vb);
+    void free_vdev(vdev_info_block* const vb);
 
     /* Given an ID, get the chunk */
 
-    const PhysicalDevChunk* get_chunk(const uint32_t chunk_id, const PhysicalDevGroup pdev_group) const {
-        return (chunk_id == INVALID_CHUNK_ID)
-            ? nullptr
-            : ((pdev_group == PhysicalDevGroup::DATA) ? m_data_chunks[chunk_id].get() : m_fast_chunks[chunk_id].get());
+    const PhysicalDevChunk* get_chunk(const uint32_t chunk_id) const {
+        return (chunk_id == INVALID_CHUNK_ID) ? nullptr : m_data_chunks[chunk_id].get();
     }
 
-    PhysicalDevChunk* get_chunk_mutable(const uint32_t chunk_id, const PhysicalDevGroup pdev_group) {
-        return (chunk_id == INVALID_CHUNK_ID)
-            ? nullptr
-            : ((pdev_group == PhysicalDevGroup::DATA) ? m_data_chunks[chunk_id].get() : m_fast_chunks[chunk_id].get());
+    PhysicalDevChunk* get_chunk_mutable(const uint32_t chunk_id) {
+        return (chunk_id == INVALID_CHUNK_ID) ? nullptr : m_data_chunks[chunk_id].get();
     }
 
     PhysicalDev* get_pdev(const uint32_t pdev_id) {
-        return (pdev_id == INVALID_PDEV_ID)
-            ? nullptr
-            : ((pdev_id <= m_last_data_pdev_id) ? m_data_pdevs[pdev_id].get() : m_fast_pdevs[pdev_id].get());
+        return (pdev_id == INVALID_PDEV_ID) ? nullptr : m_data_pdevs[pdev_id].get();
     }
 
-    dm_derived_type& get_dm_derived(const PhysicalDevGroup pdev_group) {
-        return ((pdev_group == PhysicalDevGroup::DATA) ? m_data_dm_derived : m_fast_dm_derived);
-    }
+    dm_derived_type& get_dm_derived() { return m_data_dm_derived; }
 
-    auto& get_last_vdev_id(const PhysicalDevGroup pdev_group) {
-        return ((pdev_group == PhysicalDevGroup::DATA) ? m_last_data_vdev_id : m_last_fast_vdev_id);
-    }
+    auto& get_last_vdev_id() { return m_last_data_vdev_id; }
 
-    uint32_t get_pdev_id_start(const PhysicalDevGroup pdev_group) const {
-        return ((pdev_group == PhysicalDevGroup::DATA) ? 0 : m_last_data_pdev_id + 1);
-    }
+    uint8_t* get_chunk_memory() { return m_data_chunk_memory; }
 
-    uint8_t* get_chunk_memory(const PhysicalDevGroup pdev_group) {
-        return ((pdev_group == PhysicalDevGroup::DATA) ? m_data_chunk_memory : m_fast_chunk_memory);
-    }
+    auto& get_gen_count() { return m_data_gen_cnt; }
 
-    auto& get_gen_count(const PhysicalDevGroup pdev_group) {
-        return ((pdev_group == PhysicalDevGroup::DATA) ? m_data_gen_cnt : m_fast_gen_cnt);
-    }
-
-    void add_chunks(const uint32_t vid, const PhysicalDevGroup pdev_group, const chunk_add_callback& cb);
+    void add_chunks(const uint32_t vid, const chunk_add_callback& cb);
     void inited();
-    void write_info_blocks(const PhysicalDevGroup pdev_group);
-    void update_vb_context(const PhysicalDevGroup pdev_group, const uint32_t vdev_id, const sisl::blob& ctx_data);
-    void get_vb_context(const PhysicalDevGroup pdev_group, const uint32_t vdev_id, const sisl::blob& ctx_data);
-    void update_end_of_chunk(const PhysicalDevGroup pdev_group, PhysicalDevChunk* const chunk, const off_t offset);
+    void write_info_blocks();
+    void update_vb_context(const uint32_t vdev_id, const sisl::blob& ctx_data);
+    void get_vb_context(const uint32_t vdev_id, const sisl::blob& ctx_data);
+    void update_end_of_chunk(PhysicalDevChunk* const chunk, const off_t offset);
     void init_done();
     void close_devices();
     bool is_first_time_boot() const { return m_first_time_boot; }
+    std::vector< PhysicalDev* > get_devices(const PhysicalDevGroup pdev_group) const;
     // void zero_pdev_sbs();
 
 public:
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, const io_flag oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices);
     static iomgr::drive_attributes get_drive_attrs(const std::vector< dev_info >& devices);
     static iomgr::drive_type get_drive_type(const std::vector< dev_info >& devices);
+    static bool is_hdd(const std::string& devname);
 
 private:
     void load_and_repair_devices(const hs_uuid_t& system_uuid);
     void init_devices();
-    void read_info_blocks(const PhysicalDevGroup pdev_group, const uint32_t dev_id);
+    void read_info_blocks(const uint32_t dev_id);
 
-    chunk_info_block* alloc_new_chunk_slot(const PhysicalDevGroup pdev_group, uint32_t* const pslot_num);
-    vdev_info_block* alloc_new_vdev_slot(const PhysicalDevGroup pdev_group);
+    chunk_info_block* alloc_new_chunk_slot(uint32_t* const pslot_num);
+    vdev_info_block* alloc_new_vdev_slot();
 
     PhysicalDevChunk* create_new_chunk(PhysicalDev* const pdev, const uint64_t start_offset, const uint64_t size,
                                        PhysicalDevChunk* const prev_chunk);
-    void remove_chunk(const PhysicalDevGroup pdev_group, const uint32_t chunk_id);
+    void remove_chunk(const uint32_t chunk_id);
     void blk_alloc_meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
+    uint32_t get_common_phys_page_sz();
+    uint32_t get_common_align_sz();
+    int get_device_open_flags(const std::string& devname);
 
     static int get_open_flags(const io_flag oflags);
 
 private:
-    int m_data_open_flags;
-    int m_fast_open_flags;
+    int m_hdd_open_flags;
+    int m_ssd_open_flags;
     NewVDevCallback m_new_vdev_cb;
     iomgr::io_interface_comp_cb_t m_io_comp_cb;
     std::atomic< uint64_t > m_data_gen_cnt{0};
-    std::atomic< uint64_t > m_fast_gen_cnt{0};
     uint8_t* m_data_chunk_memory{nullptr};
-    uint8_t* m_fast_chunk_memory{nullptr};
     const std::vector< dev_info > m_data_devices;
-    const std::vector< dev_info > m_fast_devices;
 
     /* This memory is carved out of chunk memory. Any changes in any of the block should end up writing all the
      * blocks on disk.
@@ -734,17 +734,13 @@ private:
         vdev_info_block* vdev_info{nullptr};
     } dm_derived_type;
     dm_derived_type m_data_dm_derived;
-    dm_derived_type m_fast_dm_derived;
 
     std::mutex m_dev_mutex;
 
     sisl::sparse_vector< std::unique_ptr< PhysicalDev > > m_data_pdevs;
     sisl::sparse_vector< std::unique_ptr< PhysicalDevChunk > > m_data_chunks;
-    sisl::sparse_vector< std::unique_ptr< PhysicalDev > > m_fast_pdevs;
-    sisl::sparse_vector< std::unique_ptr< PhysicalDevChunk > > m_fast_chunks;
     sisl::sparse_vector< VirtualDev* > m_vdevs;
     uint32_t m_last_data_vdev_id{INVALID_VDEV_ID};
-    uint32_t m_last_fast_vdev_id{INVALID_VDEV_ID};
     uint32_t m_vdev_metadata_size; // Appln metadata size for vdev
     uint32_t m_pdev_id{0};
     uint32_t m_last_data_pdev_id{0}; // pdev_id's above this value are fast pdevs
