@@ -694,7 +694,7 @@ public:
         params.min_virtual_page_size = tcfg.vol_page_size;
         params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
 
-        params.data_devices = device_info;
+        params.data_devices = m_device_info;
 
 #ifdef _PRERELEASE
         params.force_reinit = force_reinit;
@@ -2272,12 +2272,12 @@ int main(int argc, char* argv[]) {
     gcfg.overlapping_allowed = SDS_OPTIONS["overlapping_allowed"].as< bool >();
     gcfg.emulate_hdd_cnt = SDS_OPTIONS["emulate_hdd_cnt"].as< uint32_t >();
 
-    _gcfg.p_vol_files_space = SDS_OPTIONS["p_vol_files_space"].as< uint32_t >();
+    gcfg.p_vol_files_space = SDS_OPTIONS["p_vol_files_space"].as< uint32_t >();
 
     if (SDS_OPTIONS.count("device_list")) {
-        _gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
+        gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
         std::string dev_list_str;
-        for (const auto& d : _gcfg.dev_names) {
+        for (const auto& d : gcfg.dev_names) {
             dev_list_str += d;
         }
         LOGINFO("Taking input dev_list: {}", dev_list_str);

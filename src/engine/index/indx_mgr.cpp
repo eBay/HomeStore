@@ -13,7 +13,7 @@
 #include "indx_mgr.hpp"
 #include "engine/common/resource_mgr.hpp"
 #include "engine/homestore.hpp"
-
+#include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
 namespace homestore {
@@ -1304,7 +1304,7 @@ void IndxMgr::destroy_indx_tbl() {
     if (ret != btree_status_t::success) {
         if (ret != btree_status_t::resource_full) {
             /* we try to destroy it during reboot */
-            m_destroy_done_cb(false);
+            m_stop_cb(false);
             return;
         }
         THIS_INDX_LOG(INFO, indx_mgr, , "free_user_blkids btree ret status resource_full cur {}",
@@ -1374,7 +1374,7 @@ void IndxMgr::destroy_indx_tbl() {
                                 StaticIndxMgr::m_hs->set_indx_btree_start_destroying(m_uuid);
                                 if (m_active_tbl->destroy(free_list, free_node_cnt) != btree_status_t::success) {
                                     /* we try to destroy it during reboot */
-                                    m_destroy_done_cb(false);
+                                    m_stop_cb(false);
                                     return;
                                 }
 #ifdef _PRERELEASE
@@ -1402,7 +1402,7 @@ void IndxMgr::destroy_indx_tbl() {
                                                           ret.message());
                                             }
                                         }
-                                        m_destroy_done_cb(success);
+                                        m_stop_cb(success);
                                     }),
                                     0, true);
                             }),
