@@ -349,6 +349,7 @@ private:
     hs_cp_state m_last_hs_state;
     iomgr::timer_handle_t m_timer_hdl;
     Clock::time_point last_state_ch_time;
+    uint64_t m_timer_sec{0};
 };
 
 class HomeStoreCPMgr : public CPMgr< hs_cp > {
@@ -681,6 +682,7 @@ private:
     indx_mgr_state m_state{indx_mgr_state::ONLINE};
     indxmgr_stop_cb m_stop_cb;
     bool m_last_cp{false};
+
     std::shared_mutex m_prepare_cb_mtx;
     std::unique_ptr< std::vector< prepare_cb > > m_prepare_cb_list;
     blkid_list_ptr m_free_list[MAX_CP_CNT];

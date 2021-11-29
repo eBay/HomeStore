@@ -6,12 +6,14 @@
 #include <sisl/utility/thread_factory.hpp>
 
 #include <engine/homeds/btree/btree.hpp>
+
 #include <homelogstore/log_store.hpp>
 
 #include "blk_read_tracker.hpp"
 #include "indx_mgr.hpp"
 #include "engine/common/resource_mgr.hpp"
 #include "engine/homestore.hpp"
+
 
 using namespace homestore;
 namespace homestore {
@@ -86,9 +88,17 @@ sisl::io_blob indx_journal_entry::create_journal_entry(indx_req* const ireq) {
 
 /****************************************** cp watchdog class ***********************************/
 CPWatchdog::CPWatchdog() {
-    m_timer_hdl = iomanager.schedule_global_timer(HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec) * 1000 * 1000 * 1000,
-                                                  true, nullptr, iomgr::thread_regex::all_user,
-                                                  [this](void* cookie) { cp_watchdog_timer(); });
+    m_timer_sec = HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec);
+
+#ifdef _PRERELEASE
+    const auto timer_sec_ptr = std::getenv(CP_WATCHDOG_TIMER_SEC.c_str());
+    if (timer_sec_ptr) { m_timer_sec = std::stoi(std::getenv(CP_WATCHDOG_TIMER_SEC.c_str())); }
+#endif
+
+    LOGINFO("CP watchdog timer setting t : {} seconds", m_timer_sec);
+    m_timer_hdl =
+        iomanager.schedule_global_timer(m_timer_sec * 1000 * 1000 * 1000, true, nullptr, iomgr::thread_regex::all_user,
+                                        [this](void* cookie) { cp_watchdog_timer(); });
     cp_reset();
 }
 
@@ -133,15 +143,13 @@ void CPWatchdog::cp_watchdog_timer() {
         s += icp->indx_mgr->get_cp_flush_status(icp);
     }
 
-    if (get_elapsed_time_ms(last_state_ch_time) >= HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec * 1000)) {
+    if (get_elapsed_time_ms(last_state_ch_time) >= m_timer_sec * 1000) {
         LOGINFO("cp state {} is not changed. time elapsed {} Printing cp state {} ", m_last_hs_state,
                 get_elapsed_time_ms(last_state_ch_time), s);
     }
 
     // check if enough time passed since last state change
-    if (get_elapsed_time_ms(last_state_ch_time) < 12 * HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec) * 1000) {
-        return;
-    }
+    if (get_elapsed_time_ms(last_state_ch_time) < 12 * m_timer_sec * 1000) { return; }
 
     HS_RELEASE_ASSERT(0, "cp seems to be stuck. current state is {} total time elapsed {}", m_last_hs_state,
                       get_elapsed_time_ms(last_state_ch_time));
@@ -1296,7 +1304,7 @@ void IndxMgr::destroy_indx_tbl() {
     if (ret != btree_status_t::success) {
         if (ret != btree_status_t::resource_full) {
             /* we try to destroy it during reboot */
-            m_stop_cb(false);
+            m_destroy_done_cb(false);
             return;
         }
         THIS_INDX_LOG(INFO, indx_mgr, , "free_user_blkids btree ret status resource_full cur {}",
@@ -1341,6 +1349,7 @@ void IndxMgr::destroy_indx_tbl() {
     }
 
     THIS_INDX_LOG(INFO, indx_mgr, , "All user logs are collected");
+
     uint64_t free_node_cnt{0};
     if (m_active_tbl->destroy(free_list, free_node_cnt) != btree_status_t::success) {
         /* we try to destroy it during reboot */
@@ -1355,25 +1364,49 @@ void IndxMgr::destroy_indx_tbl() {
 #endif
 
     THIS_INDX_LOG(INFO, indx_mgr, , "Collected all the btree blocks {}", free_node_cnt);
-    attach_user_fblkid_list(free_list, ([this](bool success) {
 
+    attach_user_fblkid_list(free_list, ([this](bool success) {
+                                blkid_list_ptr free_list = std::make_shared< sisl::ThreadVector< BlkId > >();
+                                uint64_t free_node_cnt = 0;
+
+                                // set the state in the consumer so that it destroyes this volume before marking
+                                // recovery of btree completed.
+                                StaticIndxMgr::m_hs->set_indx_btree_start_destroying(m_uuid);
+                                if (m_active_tbl->destroy(free_list, free_node_cnt) != btree_status_t::success) {
+                                    /* we try to destroy it during reboot */
+                                    m_destroy_done_cb(false);
+                                    return;
+                                }
 #ifdef _PRERELEASE
-                                if (homestore_flip->test_flip("indx_del_free_blks_completed")) {
+                                if (homestore_flip->test_flip("indx_del_partial_free_indx_blks")) {
                                     LOGINFO("aborting because of flip");
                                     std::raise(SIGKILL);
                                 }
 #endif
-                                /* remove the meta blk which is used to track vol destroy progress */
-                                if (m_destroy_meta_blk) {
-                                    const auto ret{MetaBlkMgrSI()->remove_sub_sb(m_destroy_meta_blk)};
-                                    if (ret != no_error) {
-                                        HS_ASSERT(RELEASE, false, "failed to remove subsystem with status: {}",
-                                                  ret.message());
-                                    }
-                                }
-                                m_stop_cb(success);
+
+                                THIS_INDX_LOG(INFO, indx_mgr, , "Collected all the btree blocks {}", free_node_cnt);
+                                attach_user_fblkid_list(
+                                    free_list, ([this](bool success) {
+
+#ifdef _PRERELEASE
+                                        if (homestore_flip->test_flip("indx_del_free_blks_completed")) {
+                                            LOGINFO("aborting because of flip");
+                                            raise(SIGKILL);
+                                        }
+#endif
+                                        /* remove the meta blk which is used to track vol destroy progress */
+                                        if (m_destroy_meta_blk) {
+                                            const auto ret{MetaBlkMgrSI()->remove_sub_sb(m_destroy_meta_blk)};
+                                            if (ret != no_error) {
+                                                HS_ASSERT(RELEASE, false, "failed to remove subsystem with status: {}",
+                                                          ret.message());
+                                            }
+                                        }
+                                        m_destroy_done_cb(success);
+                                    }),
+                                    0, true);
                             }),
-                            free_size, true);
+                            free_size);
 }
 
 void IndxMgr::attach_user_fblkid_list(blkid_list_ptr& free_blkid_list, const cp_done_cb& free_blks_cb,

@@ -376,7 +376,7 @@ void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* context_data, 
     // add meta_bid to in-memory for reverse mapping;
     m_sub_info[type].meta_bids.insert(meta_bid.to_integer());
 
-#ifndef NDEBUG
+#ifdef _PRERELEASE
     uint32_t crc{0};
     if (m_sub_info[type].do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
 #endif
@@ -389,11 +389,11 @@ void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* context_data, 
            mblk->hdr.h.bid, mblk->hdr.h.prev_bid, mblk->hdr.h.next_bid, static_cast< uint64_t >(mblk->hdr.h.context_sz),
            static_cast< uint32_t >(mblk->hdr.h.crc), m_sb_blk_store->get_used_size());
 
-#ifndef NDEBUG
+#ifdef _PRERELEASE
     if (m_sub_info[type].do_crc && !(mblk->hdr.h.compressed)) {
-        HS_DEBUG_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
-                           "Input context data has been changed since received, crc mismatch: {}/{}", crc,
-                           static_cast< uint32_t >(mblk->hdr.h.crc));
+        HS_RELEASE_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
+                             "Input context data has been changed since received, crc mismatch: {}/{}", crc,
+                             static_cast< uint32_t >(mblk->hdr.h.crc));
     }
 #endif
 
@@ -767,7 +767,7 @@ void MetaBlkMgr::update_sub_sb(const void* context_data, const uint64_t sz, void
 
     const auto ovf_bid_to_free{mblk->hdr.h.ovf_bid};
 
-#ifndef NDEBUG
+#ifdef _PRERELEASE
     uint32_t crc{0};
     const auto it{m_sub_info.find(mblk->hdr.h.type)};
     HS_ASSERT(DEBUG, it != std::end(m_sub_info), "[type={}] not registered yet!", mblk->hdr.h.type);
@@ -791,11 +791,11 @@ void MetaBlkMgr::update_sub_sb(const void* context_data, const uint64_t sz, void
            mblk->hdr.h.type, static_cast< uint64_t >(mblk->hdr.h.context_sz), mblk->hdr.h.ovf_bid.to_string(),
            m_sb_blk_store->get_used_size());
 
-#ifndef NDEBUG
+#ifdef _PRERELEASE
     if (!(mblk->hdr.h.compressed) && it->second.do_crc) {
-        HS_DEBUG_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
-                           "[type={}]: Input context data has been changed since received, crc mismatch: {}/{}",
-                           mblk->hdr.h.type, crc, static_cast< uint32_t >(mblk->hdr.h.crc));
+        HS_RELEASE_ASSERT_EQ(crc, static_cast< uint32_t >(mblk->hdr.h.crc),
+                             "[type={}]: Input context data has been changed since received, crc mismatch: {}/{}",
+                             mblk->hdr.h.type, crc, static_cast< uint32_t >(mblk->hdr.h.crc));
     }
 #endif
 

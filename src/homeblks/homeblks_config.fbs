@@ -11,11 +11,20 @@ table Volume {
     estimated_pending_blk_reads: uint32 = 128;
 
     blks_scan_query_batch_size: uint64 = 10000 (hotswap);
+
+    // io watchdog on/off
+    io_watchdog_timer_on: bool = false;
+ 
+    // io watchdog check outstanding I/O hang periodically
+    io_watchdog_timer_sec: uint64 = 300 (hotswap);
+    
+    // io timeout limit in seconds
+    io_timeout_limit_sec: uint64 = 60 (hotswap);
 }
 
 table GeneralConfig {
     // Timeout we wait before we do force shutdown
-    shutdown_timeout_secs: uint32 = 300;
+    shutdown_timeout_secs: uint32 = 1800;
 
     // Frequency with which we need to check the success of shutdown
     shutdown_status_check_freq_ms: uint64 = 2000;
