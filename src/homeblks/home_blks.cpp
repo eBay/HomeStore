@@ -242,7 +242,10 @@ void HomeBlks::attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr 
             if (!happened) { throw std::runtime_error("Unknown bug"); }
         } else {
             /* this volume doesn't want to participate now */
-            assert(vol->get_state() == vol_state::DESTROYING);
+            HS_ASSERT(RELEASE,
+                      (vol->get_state() == vol_state::DESTROYING ||
+                       vol->get_state() == vol_state::START_INDX_TREE_DESTROYING),
+                      "state {}", vol->get_state());
         }
     }
 }
@@ -497,7 +500,6 @@ void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
 }
 
 bool HomeBlks::vol_state_change(const VolumePtr& vol, vol_state new_state) {
-    assert(new_state == vol_state::OFFLINE || new_state == vol_state::ONLINE);
     try {
         vol->set_state(new_state);
     } catch (std::exception& e) {
@@ -565,7 +567,10 @@ void HomeBlks::init_done() {
         while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
     }
 
-    if (!is_safe_mode()) { m_cfg.init_done_cb(no_error, m_out_params); }
+    if (!is_safe_mode()) {
+      m_io_wd = std::make_unique< VolumeIOWatchDog >();
+      m_cfg.init_done_cb(no_error, m_out_params); }
+
     // Don't do any callback if it is running in safe mode
 }
 
@@ -1007,35 +1012,63 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
 
     StaticIndxMgr::hs_cp_resume(); // cp is suspended by default
 
-    /* indx would have recovered by now */
-    indx_recovery_done();
-
-    // start volume data recovery
-    LOGINFO("All volumes recovery is started");
-    vol_recovery_start_phase2();
-
-    LOGINFO("Writing homeblks super block during init");
-    homeblks_sb_write();
-
-    uint32_t vol_mnt_cnt = 0;
-    /* scan all the volumes and check if it needs to be mounted */
     {
+        // free all the pending destroy
         std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
         for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
-            if (!m_cfg.vol_found_cb(it->second->get_uuid())) {
-                LOGINFO("volume {} is not valid for AM", it->second->get_name());
-                remove_volume_internal(it->second->get_uuid(), true);
-            } else if (it->second->get_state() == vol_state::DESTROYING) {
+            if (it->second->get_state() == vol_state::START_INDX_TREE_DESTROYING) {
                 LOGERROR("volume {} is valid by AM but its state is set to destroying", it->second->get_name());
+                // do recovery and delete this volume
+                it->second->recovery_start_phase2();
                 remove_volume_internal(it->second->get_uuid(), true);
-            } else {
-                HS_RELEASE_ASSERT_NE(it->second->get_state(), vol_state::DESTROYING, "volume state is destroyed");
-                ++vol_mnt_cnt;
             }
         }
     }
+    recover_volumes();
+}
 
-    trigger_cp_init(vol_mnt_cnt);
+void HomeBlks::recover_volumes() {
+
+    /* trigger CP to free the blocks of pending btree destroy */
+    Volume::trigger_homeblks_cp(([this](bool success) {
+        // check there is no pending destroy
+        {
+            std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
+            for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
+                if (it->second->get_state() == vol_state::START_INDX_TREE_DESTROYING) {
+                    recover_volumes();
+                    return;
+                }
+            }
+        }
+        /* indx would have recovered by now */
+        indx_recovery_done();
+
+        // start volume data recovery
+        LOGINFO("All volumes recovery is started");
+        vol_recovery_start_phase2();
+
+        LOGINFO("Writing homeblks super block during init");
+        homeblks_sb_write();
+
+        uint32_t vol_mnt_cnt = 0;
+        /* scan all the volumes and check if it needs to be mounted */
+        {
+            std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
+            for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
+                if (!m_cfg.vol_found_cb(it->second->get_uuid())) {
+                    LOGINFO("volume {} is not valid for AM", it->second->get_name());
+                    remove_volume_internal(it->second->get_uuid(), true);
+                } else if (it->second->get_state() == vol_state::DESTROYING) {
+                    LOGERROR("volume {} is valid by AM but its state is set to destroying", it->second->get_name());
+                    remove_volume_internal(it->second->get_uuid(), true);
+                } else {
+                    ++vol_mnt_cnt;
+                }
+            }
+        }
+        trigger_cp_init(vol_mnt_cnt);
+    }));
 }
 
 void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
@@ -1137,6 +1170,11 @@ std::error_condition HomeBlks::mark_vol_online(const boost::uuids::uuid& uuid) {
     // move volume back online;
     vol_state_change(vol_ptr, vol_state::ONLINE);
     return no_error;
+}
+
+void HomeBlks::set_indx_btree_start_destroying(const boost::uuids::uuid& uuid) {
+    auto vol_ptr = lookup_volume(uuid);
+    vol_state_change(vol_ptr, vol_state::START_INDX_TREE_DESTROYING);
 }
 
 std::error_condition HomeBlks::mark_vol_offline(const boost::uuids::uuid& uuid) {

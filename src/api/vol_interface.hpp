@@ -146,7 +146,8 @@ ENUM(vol_state, uint32_t,
      MOUNTING,   // Process of mounting
      DESTROYING, // Marked to this state, while actual volume is deleted
      UNINITED,   // Initial state when volume is brought up
-     DESTROYED   // destroyed
+     START_INDX_TREE_DESTROYING, // indx tree start destroying
+     DESTROYED                   // destroyed
 );
 
 typedef std::function< void(const vol_interface_req_ptr& req) > io_single_comp_callback;

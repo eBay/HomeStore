@@ -243,17 +243,19 @@ public:
     /* It is used during recovery in both mode :- auto recovery and manual recovery
      * It is also used in normal IO during auto recovery mode.
      */
+
     BlkAllocStatus alloc_on_disk(const BlkId& in_bid);
 
     BlkAllocStatus alloc_on_realtime(const BlkId& b);
-
+   
     //
     // Caller should consume the return value and print context when return false;
     //
+
     [[nodiscard]] bool free_on_realtime(const BlkId& b);
 
     void free_on_disk(const BlkId& b);
-
+ 
     /* CP start is called when all its consumers have purged their free lists and now want to persist the
      * disk bitmap.
      */
