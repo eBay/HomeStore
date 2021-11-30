@@ -651,7 +651,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
     }
 #endif
 
-    // mark complete in watchdog;
+    // mark complete in watchdog
     if (m_hb->get_vol_io_wd()->is_on()) { m_hb->get_vol_io_wd()->complete_io(vc_req); }
 
     HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, vreq->is_read_op(), volume_data_read_latency, volume_data_write_latency,

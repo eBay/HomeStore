@@ -566,10 +566,13 @@ void HomeBlks::init_done() {
         }
         while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
     }
+  
 
-    if (!is_safe_mode()) {
-      m_io_wd = std::make_unique< VolumeIOWatchDog >();
-      m_cfg.init_done_cb(no_error, m_out_params); }
+    // start the io watchdog;
+    m_io_wd = std::make_unique< VolumeIOWatchDog >();
+
+    if (!is_safe_mode()) { m_cfg.init_done_cb(no_error, m_out_params); }
+
 
     // Don't do any callback if it is running in safe mode
 }
