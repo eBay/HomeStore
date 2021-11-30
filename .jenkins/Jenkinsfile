@@ -6,7 +6,7 @@ pipeline {
         ECR_URL = 'ecr.vip.ebayc3.com'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         CONAN_USER = 'sds'
-        TARGET_BRANCH = 'develop'
+        TARGET_BRANCH = 'master'
         TESTING_BRANCH = 'testing/v*'
         STABLE_BRANCH = 'stable/v*'
         LAST_COMMITS = ''
@@ -204,7 +204,7 @@ pipeline {
                                     branch "${TESTING_BRANCH}"
                                 } } }
                                 steps {
-                                    sh "echo \"sonar.branch.target=develop\" >> sonar-project.properties"
+                                    sh "echo \"sonar.branch.target=master\" >> sonar-project.properties"
                                 }
                             }
                             stage("Code Coverage") {
@@ -255,7 +255,6 @@ pipeline {
                               anyOf {
                                 branch "testing/v*"
                                 branch "master"
-                                branch "develop"
                               }
                               expression { "${COVERAGE}" == 'False' }
                               expression { !(("${BUILD_TYPE}" == 'test') && ("${PRERELEASE}" == 'False')) }
