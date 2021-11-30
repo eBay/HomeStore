@@ -180,7 +180,7 @@ public:
         const std::filesystem::path fpath{"file101"};
         std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
         std::filesystem::resize_file(fpath, MAX_SIZE); // set the file size
-        device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+        device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
 
         iomanager.start(num_threads);
         m_tgt.init();
@@ -403,9 +403,11 @@ public:
         write_lba(lba, nlbas, bid);
     }
 
-    void remove_files() { 
+    void remove_files() {
         const std::filesystem::path path{"file101"};
-        if (std::filesystem::exists(path) && std::filesystem::is_regular_file(path)) { std::filesystem::remove("file101"); }
+        if (std::filesystem::exists(path) && std::filesystem::is_regular_file(path)) {
+            std::filesystem::remove("file101");
+        }
     }
 
     void notify_cmpl() {
@@ -413,7 +415,8 @@ public:
             std::unique_lock< std::mutex > lk{m_cv_mtx};
             m_completed = true;
         }
-        m_cv.notify_all(); }
+        m_cv.notify_all();
+    }
 
     void wait_cmpl() {
         std::unique_lock< std::mutex > lk{m_cv_mtx};

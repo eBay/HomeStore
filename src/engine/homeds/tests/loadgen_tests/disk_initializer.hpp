@@ -59,7 +59,7 @@ public:
         const std::filesystem::path fpath{m_file_name};
         std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
         std::filesystem::resize_file(fpath, DISK_MAX_SIZE); // set the file size
-        device_info.emplace_back(std::filesystem::canonical(fpath).string(), homestore::dev_info::Type::Data);
+        device_info.emplace_back(std::filesystem::canonical(fpath).string(), homestore::HSDevType::Data);
 
         //                iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
         homestore::init_params params;

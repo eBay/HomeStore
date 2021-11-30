@@ -202,7 +202,7 @@ public:
                 std::ofstream ofs{path.string(), std::ios::binary | std::ios::out};
                 std::filesystem::resize_file(fpath, max_disk_capacity);
             }
-            device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+            device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
             max_capacity += max_disk_capacity;
         }
 

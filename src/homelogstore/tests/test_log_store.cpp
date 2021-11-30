@@ -404,7 +404,7 @@ public:
         if (!restart) init_files(ndevices, dev_size);
         for (uint32_t i{0}; i < ndevices; ++i) {
             const std::filesystem::path fpath{s_fpath_root + std::to_string(i + 1)};
-            device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+            device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
         }
 
         bool is_spdk{SDS_OPTIONS["spdk"].as< bool >()};

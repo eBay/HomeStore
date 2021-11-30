@@ -84,7 +84,7 @@ int main(int argc, char* argv[]) {
                 std::ofstream ofs(fpath.string(), std::ios::binary | std::ios::out);
                 std::filesystem::resize_file(fpath, 10 * Gi);
             }
-            dev_names.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+            dev_names.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
         }
     }
 #endif

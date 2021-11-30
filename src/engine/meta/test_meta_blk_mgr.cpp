@@ -71,7 +71,7 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
         const std::filesystem::path fpath{"/tmp/test_meta_blk_mgr_" + std::to_string(i + 1)};
         std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
         std::filesystem::resize_file(fpath, dev_size); // set the file size
-        device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+        device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
     }
 
     LOGINFO("Starting iomgr with {} threads", nthreads);
