@@ -988,7 +988,12 @@ private:
             const auto ret{pread(fd, buf, sizeof(file_hdr), 0)};
             close(fd);
             file_hdr hdr = *reinterpret_cast< file_hdr* >(buf);
-            if (hdr.is_deleted) { continue; }
+            if (hdr.is_deleted) {
+                if (hdr.uuid == uuid) {
+                    LOGINFO("Bypassing deleted file hdr vol:{} with SAME uuid: {}", name, hdr.uuid);
+                }
+                continue;
+            }
             if (hdr.uuid == uuid) {
                 found = true;
                 break;
@@ -1008,7 +1013,12 @@ private:
             const auto ret{pread(fd, buf, sizeof(file_hdr), 0)};
             close(fd);
             file_hdr hdr = *reinterpret_cast< file_hdr* >(buf);
-            if (hdr.is_deleted) { continue; }
+            if (hdr.is_deleted) {
+                LOGINFO("Found deleted vol:{}, uuid: {} ", name, hdr.uuid);
+                continue;
+            }
+
+            LOGINFO("Found mounted vol:{}, uuid: {} ", name, hdr.uuid);
             ++mounted_vols;
         }
 
