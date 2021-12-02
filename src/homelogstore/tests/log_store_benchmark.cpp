@@ -129,7 +129,7 @@ public:
         m_q_depth = qdepth;
         const std::filesystem::path fpath{devname};
         LOGINFO("opening {} device of size {} ", fpath.string());
-        device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+        device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
 
         LOGINFO("Starting iomgr with {} threads", nthreads);
         iomanager.start(nthreads);

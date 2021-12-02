@@ -35,11 +35,15 @@ ENUM(Op_type, uint8_t, READ, WRITE, UNMAP);
 
 VENUM(PhysicalDevGroup, uint8_t, DATA = 0, FAST = 1, META = 2);
 
+ENUM(HSDevType, uint8_t, Data, Fast);
+
 struct dev_info {
-    typedef enum class Type : uint8_t { Data, Fast } Type;
-    explicit dev_info(std::string name, const Type type = Type::Data) : dev_names{std::move(name)}, dev_type{type} {}
+    explicit dev_info(std::string name, const HSDevType type = HSDevType::Data) :
+            dev_names{std::move(name)}, dev_type{type} {}
+    std::string to_string() const { return fmt::format("{} - {}", dev_names, enum_name(dev_type)); }
+
     std::string dev_names;
-    Type dev_type;
+    HSDevType dev_type;
 };
 
 #define METRICS_DUMP_MSG sisl::MetricsFarm::getInstance().get_result_in_json_string()

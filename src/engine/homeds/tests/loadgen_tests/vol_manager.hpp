@@ -464,7 +464,7 @@ private:
             const std::filesystem::path fpath{m_file_names[i]};
             std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
             std::filesystem::resize_file(fpath, m_max_disk_cap); // set the file size
-            m_device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+            m_device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
             m_max_cap += m_max_disk_cap;
         }
 

@@ -57,7 +57,7 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
         const std::filesystem::path fpath{"/tmp/test_vdev_" + std::to_string(i + 1)};
         std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
         std::filesystem::resize_file(fpath, dev_size); // set the file size
-        device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+        device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
     }
 
     LOGINFO("Starting iomgr with {} threads", nthreads);
@@ -110,7 +110,7 @@ public:
             const std::filesystem::path fpath{"/tmp/test_vdev_" + std::to_string(i + 1)};
             std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
             std::filesystem::resize_file(fpath, dev_size); // set the file size
-            device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+            device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
         }
         std::vector< dev_info > empty_info;
 
@@ -153,7 +153,7 @@ public:
             const std::filesystem::path fpath{"/tmp/test_vdev_" + std::to_string(i + 1)};
             std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
             std::filesystem::resize_file(fpath, dev_size); // set the file size
-            device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+            device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
         }
         std::vector< dev_info > empty_info;
 

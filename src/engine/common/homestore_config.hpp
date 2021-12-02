@@ -80,16 +80,14 @@ struct cap_attrs {
 struct hs_input_params {
 public:
     std::vector< dev_info > data_devices; // name of the data devices.
-    bool is_file{false};                  // Are the devices a file or raw device
     boost::uuids::uuid system_uuid;       // Deprecated. UUID assigned to the system
 
-    io_flag data_open_flags{io_flag::DIRECT_IO}; // hdd
-    io_flag fast_open_flags{io_flag::DIRECT_IO}; // ssd
+    io_flag data_open_flags{io_flag::DIRECT_IO}; // All data drives open flags
+    io_flag fast_open_flags{io_flag::DIRECT_IO}; // All index drives open flags
 
     uint32_t min_virtual_page_size{4096}; // minimum page size supported. Ideally it should be 4k.
     uint64_t app_mem_size{static_cast< uint64_t >(1024) * static_cast< uint64_t >(1024) *
                           static_cast< uint64_t >(1024)}; // memory available for the app (including cache)
-    bool disk_init{false};                                // Deprecated. true if disk has to be initialized.
     bool is_read_only{false};                             // Is read only
     bool start_http{true};
 
@@ -100,9 +98,9 @@ public:
     nlohmann::json to_json() const {
         nlohmann::json json;
         json["system_uuid"] = boost::uuids::to_string(system_uuid);
-        json["data_devices"] = nlohmann::json::array();
+        json["devices"] = nlohmann::json::array();
         for (const auto& d : data_devices) {
-            json["data_devices"].push_back(d.dev_names);
+            json["devices"].push_back(d.to_string());
         }
         json["data_open_flags"] = data_open_flags;
         json["fast_open_flags"] = fast_open_flags;
@@ -155,9 +153,7 @@ struct HomeStoreStaticConfig {
     }
 };
 
-static bool is_data_drive_hdd() {
-    return HomeStoreStaticConfig::instance().hdd_drive_present;
-}
+[[maybe_unused]] static bool is_data_drive_hdd() { return HomeStoreStaticConfig::instance().hdd_drive_present; }
 
 class HomeStoreDynamicConfig {
 public:

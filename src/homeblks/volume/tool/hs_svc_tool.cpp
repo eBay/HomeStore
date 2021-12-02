@@ -42,7 +42,7 @@ static void gen_device_info(std::vector< dev_info >& device_info, uint32_t ndevi
             const std::filesystem::path fpath{"/tmp/hs_svc_tool_" + std::to_string(i + 1)};
             std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
             std::filesystem::resize_file(fpath, dev_size);
-            device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+            device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
         }
     }
 }

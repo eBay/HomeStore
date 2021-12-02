@@ -636,7 +636,7 @@ public:
                 const std::filesystem::path fpath{tcfg.dev_names[i]};
                 /* we use this capacity to calculate volume size */
                 max_capacity += tcfg.max_disk_capacity;
-                device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+                device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
             }
         } else {
             for (uint32_t i{0}; i < MAX_DEVICES; ++i) {
@@ -645,7 +645,7 @@ public:
                     std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
                     std::filesystem::resize_file(fpath, tcfg.max_disk_capacity);
                 }
-                device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+                device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
                 max_capacity += tcfg.max_disk_capacity;
             }
         }
@@ -2282,7 +2282,6 @@ int main(int argc, char* argv[]) {
         }
         LOGINFO("Taking input dev_list: {}", dev_list_str);
     }
-    
 
     if (SDS_OPTIONS.count("mod_list")) {
         // currently we should only have use-case for one module enabled concurrently,

@@ -45,7 +45,7 @@ static void on_log_found(const logdev_key lkey, const log_buffer buf) {
         const std::filesystem::path fpath{"/tmp/" + std::to_string(i + 1)};
         std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
         std::filesystem::resize_file(fpath, dev_size);
-        device_info.emplace_back(std::filesystem::canonical(fpath).string(), dev_info::Type::Data);
+        device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
     }
 
     LOGINFO("Creating iomgr with {} threads", nthreads);
