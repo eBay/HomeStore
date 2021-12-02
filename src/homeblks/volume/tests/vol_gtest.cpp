@@ -992,17 +992,23 @@ private:
         iomanager.iobuf_free(buf);
     }
 
-    bool is_valid_vol_file(const boost::uuids::uuid& uuid) const {
-        auto* const buf{iomanager.iobuf_alloc(512, sizeof(file_hdr))};
-        bool found{false};
-        for (uint32_t i{0}; i < tcfg.max_vols; ++i) {
-            const std::string name{VOL_PREFIX + std::to_string(i)};
-            auto fd{::open(name.c_str(), O_RDWR)};
-            const auto ret{::pread(fd, buf, sizeof(file_hdr), 0)};
-            ::close(fd);
-            const file_hdr* const hdr{reinterpret_cast< file_hdr* >(buf)};
-            if (hdr->is_deleted) { continue; }
-            if (hdr->uuid == uuid) {
+
+    bool is_valid_vol_file(const boost::uuids::uuid& uuid) {
+        auto buf = iomanager.iobuf_alloc(512, sizeof(file_hdr));
+        bool found = false;
+        for (uint32_t i = 0; i < tcfg.max_vols; ++i) {
+            const std::string name = VOL_PREFIX + std::to_string(i);
+            auto fd = open(name.c_str(), O_RDWR);
+            const auto ret{pread(fd, buf, sizeof(file_hdr), 0)};
+            close(fd);
+            file_hdr hdr = *reinterpret_cast< file_hdr* >(buf);
+            if (hdr.is_deleted) {
+                if (hdr.uuid == uuid) {
+                    LOGINFO("Bypassing deleted file hdr vol:{} with SAME uuid: {}", name, hdr.uuid);
+                }
+                continue;
+            }
+            if (hdr.uuid == uuid) {
                 found = true;
                 break;
             }
@@ -1012,16 +1018,22 @@ private:
         return found;
     }
 
-    uint64_t get_mounted_vols() const {
-        auto* const buf{iomanager.iobuf_alloc(512, sizeof(file_hdr))};
-        uint64_t mounted_vols{0};
-        for (uint32_t i{0}; i < tcfg.max_vols; ++i) {
-            const std::string name{VOL_PREFIX + std::to_string(i)};
-            auto fd{::open(name.c_str(), O_RDWR)};
-            const auto ret{::pread(fd, buf, sizeof(file_hdr), 0)};
-            ::close(fd);
-            const file_hdr* const hdr{reinterpret_cast< file_hdr* >(buf)};
-            if (hdr->is_deleted) { continue; }
+
+    uint64_t get_mounted_vols() {
+        auto buf = iomanager.iobuf_alloc(512, sizeof(file_hdr));
+        uint64_t mounted_vols = 0;
+        for (uint32_t i = 0; i < tcfg.max_vols; ++i) {
+            const std::string name = VOL_PREFIX + std::to_string(i);
+            auto fd = open(name.c_str(), O_RDWR);
+            const auto ret{pread(fd, buf, sizeof(file_hdr), 0)};
+            close(fd);
+            file_hdr hdr = *reinterpret_cast< file_hdr* >(buf);
+            if (hdr.is_deleted) {
+                LOGINFO("Found deleted vol:{}, uuid: {} ", name, hdr.uuid);
+                continue;
+            }
+
+            LOGINFO("Found mounted vol:{}, uuid: {} ", name, hdr.uuid);
             ++mounted_vols;
         }
 
