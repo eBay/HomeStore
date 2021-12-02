@@ -33,7 +33,7 @@ class HomestoreConan(ConanFile):
             )
     requires = (
             "flip/[~=3, include_prerelease=True]@sds/master",
-            "iomgr/[~=8, include_prerelease=True]@sds/develop",
+            "iomgr/[~=8, include_prerelease=True]@sds/master",
 
             "sds_logging/[~=11, include_prerelease=True]@sds/master",
             "sds_options/[~=1, include_prerelease=True]@sds/master",
