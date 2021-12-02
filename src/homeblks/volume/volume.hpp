@@ -26,7 +26,7 @@
 #include "engine/blkstore/blkstore.hpp"
 #include "engine/cache/cache.h"
 #include "engine/common/homestore_assert.hpp"
-#include "engine/device/blkbuffer.hpp"
+#include "engine/blkstore/blkbuffer.hpp"
 #include "engine/device/device.h"
 #include "engine/homeds/thread/threadpool/thread_pool.h"
 #include "engine/index/snap_mgr.hpp"
@@ -192,7 +192,8 @@ struct vol_sb_hdr {
     /* Immutable members */
     const uint64_t magic{vol_sb_magic};
     const uint32_t version{vol_sb_version};
-    uint8_t padding[4];
+    //    uint8_t padding[4]; deprecated
+    uint32_t stream_id;
     const uint64_t page_size;
     const uint64_t size;
     const boost::uuids::uuid uuid;
@@ -291,6 +292,7 @@ private:
     } IoVecTransversal;
 
     blk_count_t m_blks_per_lba{1};
+    uintptr_t m_stream_ptr = (uintptr_t) nullptr;
 
 private:
     /* static members */

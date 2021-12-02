@@ -41,6 +41,7 @@
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_header.hpp"
 #include "engine/homestore_base.hpp"
+#include "engine/blkalloc/blkalloc_cp.hpp"
 
 ENUM(btree_status_t, uint32_t, success, not_found, item_found, closest_found, closest_removed, retry, has_more,
      read_failed, write_failed, stale_buf, refresh_failed, put_failed, space_not_avail, split_failed, insert_failed,
@@ -81,8 +82,7 @@ struct blkalloc_cp_id;
                        BOOST_PP_IF(BOOST_VMD_IS_EMPTY(node), BOOST_PP_EMPTY, BOOST_PP_IDENTITY("node"))(),             \
                        node->to_string(), ##__VA_ARGS__)
 #define BT_ASSERT_CMP(assert_type, val1, cmp, val2, node, ...)                                                         \
-    HS_DETAILED_ASSERT_CMP(assert_type, val1, cmp, val2, , "btree",                                                    \
-                           m_btree_cfg.get_name(),                                                                     \
+    HS_DETAILED_ASSERT_CMP(assert_type, val1, cmp, val2, , "btree", m_btree_cfg.get_name(),                            \
                            BOOST_PP_IF(BOOST_VMD_IS_EMPTY(node), BOOST_PP_EMPTY, BOOST_PP_IDENTITY("node"))(),         \
                            node->to_string(), ##__VA_ARGS__)
 
@@ -114,6 +114,7 @@ using cp_comp_callback = std::function< void(const btree_cp_ptr& bcp) >;
 using bnodeid_t = uint64_t;
 static constexpr bnodeid_t empty_bnodeid = std::numeric_limits< bnodeid_t >::max();
 
+using namespace homestore;
 struct btree_cp_sb {
     seq_id_t active_seqid = -1;
     int64_t cp_id = -1;

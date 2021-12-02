@@ -56,28 +56,26 @@ public:
         /* start homestore */
         /* create files */
 
-        homestore::dev_info temp_info;
-        temp_info.dev_names = m_file_name;
-        device_info.push_back(temp_info);
-        std::ofstream ofs{temp_info.dev_names, std::ios::binary | std::ios::out};
-        const std::filesystem::path p{temp_info.dev_names};
-        std::filesystem::resize_file(p, DISK_MAX_SIZE); // set the file size
+        const std::filesystem::path fpath{m_file_name};
+        std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
+        std::filesystem::resize_file(fpath, DISK_MAX_SIZE); // set the file size
+        device_info.emplace_back(std::filesystem::canonical(fpath).string(), homestore::HSDevType::Data);
 
         //                iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
         homestore::init_params params;
 #ifndef NDEBUG
-        params.open_flags = homestore::io_flag::BUFFERED_IO;
+        params.data_open_flags = homestore::io_flag::BUFFERED_IO;
 #else
-        params.open_flags = homestore::io_flag::DIRECT_IO;
+        params.data_open_flags = homestore::io_flag::DIRECT_IO;
 #endif
         params.min_virtual_page_size = 4096;
         params.app_mem_size = static_cast< uint64_t >(5) * 1024 * 1024 * 1024;
-        params.devices = device_info;
+        params.data_devices = device_info;
         params.init_done_cb = init_done_cb;
-        params.drive_attr = iomgr::drive_attributes();
-        params.drive_attr->phys_page_size = 4096;
-        params.drive_attr->align_size = 512;
-        params.drive_attr->atomic_phys_page_size = atomic_phys_page_size;
+        /*params.data_drive_attr = iomgr::drive_attributes();
+        params.data_drive_attr->phys_page_size = 4096;
+        params.data_drive_attr->align_size = 512;
+        params.data_drive_attr->atomic_phys_page_size = atomic_phys_page_size; */
         params.vol_mounted_cb =
             std::bind(&DiskInitializer::vol_mounted_cb, this, std::placeholders::_1, std::placeholders::_2);
         params.vol_state_change_cb = std::bind(&DiskInitializer::vol_state_change_cb, this, std::placeholders::_1,

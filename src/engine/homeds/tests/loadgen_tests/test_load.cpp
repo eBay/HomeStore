@@ -105,7 +105,7 @@ public:
 
 protected:
     virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void TearDown() override { loadgen.reset(); };
 
 private:
     std::unique_ptr< G_SimpleKV_Mem > loadgen;
@@ -135,7 +135,7 @@ public:
 
 protected:
     virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void TearDown() override { loadgen.reset(); };
 
 private:
     std::unique_ptr< G_SimpleKV_SSD > loadgen;
@@ -183,7 +183,7 @@ public:
 
 protected:
     virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void TearDown() override { loadgen.reset(); };
 
 private:
     std::unique_ptr< G_VarKV_SSD > loadgen;
@@ -231,7 +231,7 @@ public:
 
 protected:
     virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void TearDown() override { loadgen.reset(); };
 
 private:
     DiskInitializer< IOMgrExecutor > di;
@@ -280,7 +280,7 @@ public:
 
 protected:
     virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void TearDown() override { loadgen.reset(); };
 
 private:
     std::unique_ptr< G_FileKV > loadgen;
@@ -344,7 +344,7 @@ public:
 
 protected:
     virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void TearDown() override { loadgen.reset(); };
 
 private:
     std::unique_ptr< G_VDev_Test_RW > loadgen;
@@ -394,7 +394,7 @@ public:
 
 protected:
     virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void TearDown() override { loadgen.reset(); };
 
 private:
     std::unique_ptr< G_VDev_Test_PRW > loadgen;
@@ -444,7 +444,7 @@ public:
 
 protected:
     virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void TearDown() override { loadgen.reset(); };
 
 private:
     std::unique_ptr< G_CacheKV > loadgen;
@@ -541,7 +541,7 @@ public:
 
 protected:
     virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void TearDown() override { loadgen.reset(); };
 
 private:
     std::unique_ptr< G_LogStore_Test > loadgen;

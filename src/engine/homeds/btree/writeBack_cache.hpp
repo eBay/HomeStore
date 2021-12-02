@@ -18,7 +18,8 @@
 #include "engine/common/error.h"
 #include "engine/homeds/btree/btree_internal.h"
 #include "engine/homestore.hpp"
-#include "engine/index/resource_mgr.hpp"
+#include "engine/common/resource_mgr.hpp"
+#include "api/meta_interface.hpp"
 
 namespace homeds {
 namespace btree {
@@ -30,7 +31,7 @@ namespace btree {
 #define wb_cache_t WriteBackCache< K, V, InteriorNodeType, LeafNodeType >
 typedef std::function< bool() > flush_buffer_callback;
 #define SSDBtreeNode BtreeNode< btree_store_type::SSD_BTREE, K, V, InteriorNodeType, LeafNodeType >
-#define btree_blkstore_t homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, wb_cache_buffer_t >
+#define btree_blkstore_t homestore::BlkStore< wb_cache_buffer_t >
 
 enum class writeback_req_state : uint8_t {
     WB_REQ_INIT = 0, // init
@@ -179,15 +180,17 @@ private:
     trigger_cp_callback m_trigger_cp_cb;
     uint64_t m_free_list_cnt = 0;
     uint64_t m_alloc_list_cnt = 0;
-    static btree_blkstore_t* m_blkstore;
+    btree_blkstore_t* m_blkstore;
+    uint32_t m_node_size;
     static std::vector< iomgr::io_thread_t > m_thread_ids;
     static thread_local std::vector< flush_buffer_callback > flush_buffer_q;
     static thread_local uint64_t wb_cache_outstanding_cnt;
     static thread_local uint64_t s_cbq_id;
 
 public:
-    WriteBackCache(void* const blkstore, const uint64_t align_size, cp_comp_callback cb,
-                   trigger_cp_callback trigger_cp_cb) {
+    WriteBackCache(void* const blkstore, const uint32_t node_size, cp_comp_callback cb,
+                   trigger_cp_callback trigger_cp_cb) :
+            m_node_size(node_size) {
         for (size_t i{0}; i < MAX_CP_CNT; ++i) {
             m_free_list[i] = std::make_shared< sisl::ThreadVector< BlkId > >();
             m_req_list[i] = std::make_unique< sisl::ThreadVector< writeback_req_ptr > >();
@@ -295,7 +298,7 @@ public:
 
             /* check for dirty buffers cnt */
             m_dirty_buf_cnt[cp_id].increment(1);
-            ResourceMgr::inc_dirty_buf_cnt();
+            ResourceMgrSI().inc_dirty_buf_cnt(m_node_size);
         } else {
             HS_ASSERT_CMP(DEBUG, bn->req[cp_id]->bid.to_integer(), ==, bn->get_node_id());
             if (bn->req[cp_id]->m_mem != bn->get_memvec_intrusive()) {
@@ -325,7 +328,7 @@ public:
         //  if bcp is null then free it only from the cache.
         m_blkstore->free_blk(bid, boost::none, boost::none, free_blkid_list ? true : false);
         if (free_blkid_list) {
-            ResourceMgr::inc_free_blk(size);
+            ResourceMgrSI().inc_free_blk(size);
             free_blkid_list->push_back(bid);
             // release on realtime bitmap;
             const auto ret = m_blkstore->free_on_realtime(bid);
@@ -357,7 +360,9 @@ public:
         }
 
         // make a copy
-        auto mem{hs_utils::iobuf_alloc(bn->get_cache_size(), sisl::buftag::btree_node)};
+        // TO DO: Possible alignment
+        auto mem{hs_utils::iobuf_alloc(bn->get_cache_size(), sisl::buftag::btree_node,
+                                       m_blkstore->get_vdev()->get_align_size())};
         sisl::blob outb;
         (bn->get_memvec()).get(&outb);
         std::memcpy(static_cast< void* >(mem), static_cast< const void* >(outb.bytes), outb.size);
@@ -427,7 +432,7 @@ public:
                             DEBUG, bt_cp_id,
                             "[fcbq_id={}] Flush throttled: flushed_cnt={} outstanding_io_cnt={} dep_wait_cnt={}",
                             cbq_id, write_count, wb_cache_outstanding_cnt, dep_wait_count);
-                        if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
+                        if (write_count > 0) { shared_this->m_blkstore->submit_batch(); }
                         return false;
                     }
                 } else {
@@ -440,7 +445,7 @@ public:
                             "[fcbq_id={}] Flush finish: flushed_cnt={} outstanding_io_cnt={} dep_wait_cnt={}", cbq_id,
                             write_count, wb_cache_outstanding_cnt, dep_wait_count);
 
-            if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
+            if (write_count > 0) { shared_this->m_blkstore->submit_batch(); }
             return true;
         });
     }
@@ -495,7 +500,7 @@ public:
                                             "remain_depq_cnt={} outstanding_io_cnt={} dep_wait_cnt={}",
                                             cbq_id, wb_req->request_id, write_count, wb_req->req_q.size(),
                                             wb_cache_outstanding_cnt, dep_wait_count);
-                            if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
+                            if (write_count > 0) { shared_this->m_blkstore->submit_batch(); }
                             return false;
                         }
                     } else {
@@ -507,7 +512,7 @@ public:
                                 "[fcbq_id={}] [wbreq_id={}] dependentq flushed: flushed_cnt={} outstanding_io_cnt={} "
                                 "dep_wait_cnt={}",
                                 cbq_id, wb_req->request_id, write_count, wb_cache_outstanding_cnt, dep_wait_count);
-                if (write_count > 0) { iomanager.default_drive_interface()->submit_batch(); }
+                if (write_count > 0) { shared_this->m_blkstore->submit_batch(); }
                 return true;
             });
         } else if (wb_cache_outstanding_cnt < HS_DYNAMIC_CONFIG(generic.cache_min_throttle_cnt)) {
@@ -517,7 +522,7 @@ public:
             queue_flush_buffers(nullptr);
         }
         wb_req->bn->req[cp_id] = nullptr;
-        ResourceMgr::dec_dirty_buf_cnt();
+        ResourceMgrSI().dec_dirty_buf_cnt(m_node_size);
 
         if (m_dirty_buf_cnt[cp_id].decrement_testz(1)) { m_cp_comp_cb(wb_req->bcp); };
     }
@@ -536,8 +541,6 @@ public:
     }
 };
 
-template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
-btree_blkstore_t* wb_cache_t::m_blkstore;
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 std::vector< iomgr::io_thread_t > wb_cache_t::m_thread_ids;
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >

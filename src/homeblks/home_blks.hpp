@@ -47,7 +47,6 @@ class HomeBlksHttpServer;
  * then we need to use double buffer.
  */
 
-const uint32_t HOMEBLKS_SB_SIZE{HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size)};
 constexpr uint64_t hb_sb_magic{0xCEEDDEEB};
 constexpr uint32_t hb_sb_version{0x1};
 
@@ -177,7 +176,7 @@ public:
      */
     static HomeBlks* instance();
     static HomeBlksSafePtr safe_instance();
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, io_flag oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices);
 
     virtual ~HomeBlks() override;
     virtual std::error_condition write(const VolumePtr& vol, const vol_interface_req_ptr& req,
@@ -209,7 +208,6 @@ public:
     // virtual SnapDiffPtr diff_snapshot(const SnapshotPtr& snap1, const SnapshotPtr& snap2);
 
     virtual const char* get_name(const VolumePtr& vol) override;
-    virtual uint32_t get_align_size() override;
     virtual uint64_t get_page_size(const VolumePtr& vol) override;
     virtual uint64_t get_size(const VolumePtr& vol) override;
     virtual boost::uuids::uuid get_uuid(VolumePtr vol) override;
@@ -278,7 +276,7 @@ public:
     void create_volume(VolumePtr vol);
     void move_to_restricted_state();
 
-    data_blkstore_t::comp_callback data_completion_cb() override;
+    BlkStore< BlkBuffer >::comp_callback data_completion_cb() override;
 
     /**
      * @brief
@@ -383,7 +381,7 @@ private:
     bool m_force_shutdown{false};
     bool m_init_error{false};
     bool m_vol_shutdown_cmpltd{false};
-    HomeBlksMetrics m_metrics;
+    std::unique_ptr< HomeBlksMetrics > m_metrics;
     std::atomic< bool > m_start_shutdown;
     std::atomic< bool > m_unclean_shutdown = false;
     iomgr::io_thread_t m_init_thread_id;
@@ -397,6 +395,7 @@ private:
     /* hdd custom threads */
     std::vector< iomgr::io_thread_t > m_custom_hdd_threads;
     std::mutex m_hdd_threads_mtx;
+    std::condition_variable m_hdd_threads_cv;
     std::unique_ptr< VolumeIOWatchDog > m_io_wd{nullptr};
 };
 

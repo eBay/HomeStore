@@ -28,8 +28,13 @@ SETTINGS_INIT(homestorecfg::HomeStoreSettings, homestore_config);
 // the code for upgrade/revert.
 
 constexpr uint32_t MAX_CHUNKS{128};
+constexpr uint32_t HDD_MAX_CHUNKS{254};
 constexpr uint32_t MAX_VDEVS{16};
 constexpr uint32_t MAX_PDEVS{8};
+static constexpr uint32_t INVALID_PDEV_ID{std::numeric_limits< uint32_t >::max()};
+static constexpr uint32_t INVALID_VDEV_ID{std::numeric_limits< uint32_t >::max()};
+static constexpr uint32_t INVALID_CHUNK_ID{std::numeric_limits< uint32_t >::max()};
+static constexpr uint32_t INVALID_DEV_ID{std::numeric_limits< uint32_t >::max()};
 
 namespace homestore {
 #define HS_DYNAMIC_CONFIG_WITH(...) SETTINGS(homestore_config, __VA_ARGS__)
@@ -74,36 +79,31 @@ struct cap_attrs {
 
 struct hs_input_params {
 public:
-    std::vector< dev_info > devices;                                       // name of the devices.
-    iomgr::iomgr_drive_type device_type{iomgr::iomgr_drive_type::unknown}; // Type of the device
-    bool is_file{false};                                                   // Is the devices a file or raw device
-    boost::uuids::uuid system_uuid;                                        // Deprecated. UUID assigned to the system
-    io_flag open_flags{io_flag::DIRECT_IO};
+    std::vector< dev_info > data_devices; // name of the data devices.
+    boost::uuids::uuid system_uuid;       // Deprecated. UUID assigned to the system
+
+    io_flag data_open_flags{io_flag::DIRECT_IO}; // All data drives open flags
+    io_flag fast_open_flags{io_flag::DIRECT_IO}; // All index drives open flags
 
     uint32_t min_virtual_page_size{4096}; // minimum page size supported. Ideally it should be 4k.
     uint64_t app_mem_size{static_cast< uint64_t >(1024) * static_cast< uint64_t >(1024) *
                           static_cast< uint64_t >(1024)}; // memory available for the app (including cache)
-    bool disk_init{false};                                // Deprecated. true if disk has to be initialized.
     bool is_read_only{false};                             // Is read only
     bool start_http{true};
 
 #ifdef _PRERELEASE
     bool force_reinit{false};
 #endif
-    bool is_hdd{false};
-
-    /* optional parameters - if provided will override the startup config */
-    boost::optional< iomgr::drive_attributes > drive_attr;
 
     nlohmann::json to_json() const {
         nlohmann::json json;
         json["system_uuid"] = boost::uuids::to_string(system_uuid);
         json["devices"] = nlohmann::json::array();
-        for (auto& d : devices) {
-            json["devices"].push_back(d.dev_names);
+        for (const auto& d : data_devices) {
+            json["devices"].push_back(d.to_string());
         }
-        json["open_flags"] = open_flags;
-        json["device_type"] = enum_name(device_type);
+        json["data_open_flags"] = data_open_flags;
+        json["fast_open_flags"] = fast_open_flags;
         json["is_read_only"] = is_read_only;
 
         json["min_virtual_page_size"] = min_virtual_page_size;
@@ -141,25 +141,19 @@ struct HomeStoreStaticConfig {
         return s_inst;
     }
 
-    iomgr::drive_attributes drive_attr;
     hs_engine_config engine;
     hs_input_params input;
+    bool hdd_drive_present;
 
     nlohmann::json to_json() const {
         nlohmann::json json;
-        json["DriveAttributes"] = drive_attr.to_json();
         json["GenericConfig"] = engine.to_json();
         json["InputParameters"] = input.to_json();
         return json;
     }
-
-#ifndef NDEBUG
-    void validate() {
-        assert(drive_attr.phys_page_size >= drive_attr.atomic_phys_page_size);
-        assert(drive_attr.phys_page_size >= engine.min_io_size);
-    }
-#endif
 };
+
+[[maybe_unused]] static bool is_data_drive_hdd() { return HomeStoreStaticConfig::instance().hdd_drive_present; }
 
 class HomeStoreDynamicConfig {
 public:
@@ -216,19 +210,14 @@ constexpr uint64_t MAX_BLK_NUM_BITS_PER_CHUNK{((static_cast< uint64_t >(1) << BL
 /* NOTE: it can give size less then size passed in argument to make it aligned */
 // #define ALIGN_SIZE_TO_LEFT(size, align) (((size % align) == 0) ? size : (size - (size % align)))
 
-const uint64_t MIN_CHUNK_SIZE{HS_STATIC_CONFIG(drive_attr.phys_page_size) * BLKS_PER_PORTION * TOTAL_SEGMENTS};
-const uint64_t MAX_CHUNK_SIZE{static_cast< uint64_t >(
-    sisl::round_down((MAX_BLK_NUM_BITS_PER_CHUNK * HS_STATIC_CONFIG(engine.min_io_size)), MIN_CHUNK_SIZE))}; // 16 TB
-
-// TODO: we store global unique ID in blkid. Instead it we only store chunk offset then
-// max cacapity will increase from MAX_CHUNK_SIZE to MAX_CHUNKS * MAX_CHUNK_SIZE.
-const uint64_t MAX_SUPPORTED_CAP{MAX_CHUNKS * MAX_CHUNK_SIZE};
+inline uint64_t MIN_DATA_CHUNK_SIZE(const uint32_t page_size) { return page_size * BLKS_PER_PORTION * TOTAL_SEGMENTS; }
+inline uint64_t MAX_DATA_CHUNK_SIZE(const uint32_t page_size) {
+    return static_cast< uint64_t >(
+        sisl::round_down((MAX_BLK_NUM_BITS_PER_CHUNK * page_size), MIN_DATA_CHUNK_SIZE(page_size)));
+} // 16 TB
 
 constexpr uint16_t MAX_UUID_LEN{128};
 
-// 1 % of disk space is reserved for volume sb chunks. With 8k page it
-// will come out to be around 7 GB.
-const uint64_t MIN_DISK_CAP_SUPPORTED{MIN_CHUNK_SIZE * 100 / 99 + MIN_CHUNK_SIZE};
 } // namespace homestore
 
 #endif

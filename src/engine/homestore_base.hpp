@@ -1,15 +1,8 @@
 #pragma once
 #include <boost/intrusive_ptr.hpp>
-#include "common/homestore_config.hpp"
 #include <sisl/fds/buffer.hpp>
-
-typedef uint32_t crc32_t;
-typedef uint16_t csum_t;
-typedef int64_t seq_id_t;
-const csum_t init_crc_16 = 0x8005;
-
-static constexpr crc32_t init_crc32 = 0x12345678;
-static constexpr crc32_t INVALID_CRC32_VALUE = 0x0u;
+#include "engine/blkalloc/blk.h"
+#include "common/homestore_config.hpp"
 
 namespace spdlog {
 class logger;
@@ -23,17 +16,31 @@ using indx_cp_ptr = boost::intrusive_ptr< homestore::indx_cp >;
 struct hs_cp;
 struct DeviceManager;
 class BlkBuffer;
-template < typename BAllocator, typename Buffer >
+class JournalVirtualDev;
+
+template < typename Buffer >
 class BlkStore;
-class VdevVarSizeBlkAllocatorPolicy;
-typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer > data_blkstore_t;
-typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer > logdev_blkstore_t;
 
 class HomeStoreBase;
 typedef boost::intrusive_ptr< HomeStoreBase > HomeStoreBaseSafePtr;
 
 class HomeStoreStatusMgr;
 struct sb_blkstore_blob;
+
+typedef BlkStore< BlkBuffer > meta_blkstore_t;
+
+typedef boost::intrusive_ptr< BlkBuffer > blk_buf_t;
+
+VENUM(blkstore_type, uint32_t, DATA_STORE = 1, INDEX_STORE = 2, SB_STORE = 3, DATA_LOGDEV_STORE = 4,
+      CTRL_LOGDEV_STORE = 5, META_STORE = 6);
+
+struct blkstore_blob {
+    enum blkstore_type type;
+};
+
+struct sb_blkstore_blob : blkstore_blob {
+    BlkId blkid;
+};
 
 /* This class is introduced only to avoid template in any of its subsystem. Subsystem can get any homestore info other
  * then indx blkstore from this base class.
@@ -67,16 +74,17 @@ public:
     static HomeStoreBaseSafePtr safe_instance() { return s_instance; }
     static std::shared_ptr< spdlog::logger >& periodic_logger();
 
-    virtual data_blkstore_t* get_data_blkstore() const = 0;
+    virtual BlkStore< BlkBuffer >* get_data_blkstore() const = 0;
     virtual void attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr >* cur_icp_map,
                                         std::map< boost::uuids::uuid, indx_cp_ptr >* new_icp_map, hs_cp* cur_hcp,
                                         hs_cp* new_hcp) = 0;
     virtual void blkalloc_cp_start(std::shared_ptr< blkalloc_cp > cp) = 0;
-    virtual std::shared_ptr< blkalloc_cp > blkalloc_attach_prepare_cp(std::shared_ptr< blkalloc_cp > cur_ba_cp) = 0;
+    virtual std::shared_ptr< blkalloc_cp >
+    blkalloc_attach_prepare_cp(const std::shared_ptr< blkalloc_cp >& cur_ba_cp) = 0;
     virtual uint32_t get_data_pagesz() const = 0;
     virtual DeviceManager* get_device_manager() = 0;
-    virtual logdev_blkstore_t* get_data_logdev_blkstore() const = 0;
-    virtual logdev_blkstore_t* get_ctrl_logdev_blkstore() const = 0;
+    virtual JournalVirtualDev* get_data_logdev_blkstore() const = 0;
+    virtual JournalVirtualDev* get_ctrl_logdev_blkstore() const = 0;
     virtual void call_multi_completions() = 0;
     virtual bool inc_hs_ref_cnt(const boost::uuids::uuid& uuid) = 0;
     virtual bool dec_hs_ref_cnt(const boost::uuids::uuid& uuid) = 0;
@@ -88,21 +96,5 @@ public:
 
 static inline HomeStoreBaseSafePtr HomeStorePtr() { return HomeStoreBase::safe_instance(); }
 static inline HomeStoreBase* HomeStoreRawPtr() { return HomeStoreBase::instance(); }
-
-using hs_uuid_t = time_t;
-static constexpr hs_uuid_t INVALID_SYSTEM_UUID{0};
-
-class hs_utils {
-public:
-    static uint8_t* iobuf_alloc(size_t size, const sisl::buftag tag);
-    static void iobuf_free(uint8_t* ptr, const sisl::buftag tag);
-    static uint64_t aligned_size(size_t size);
-    static bool mod_aligned_sz(size_t size_to_check, size_t align_sz);
-    static sisl::byte_view create_byte_view(uint64_t size, bool is_aligned_needed, const sisl::buftag tag);
-    static sisl::io_blob create_io_blob(uint64_t size, bool is_aligned_needed, const sisl::buftag tag);
-    static sisl::byte_array extract_byte_array(const sisl::byte_view& b, bool is_aligned_needed = true);
-    static sisl::byte_array make_byte_array(uint64_t size, bool is_aligned_needed, const sisl::buftag tag);
-    static hs_uuid_t gen_system_uuid();
-};
 
 } // namespace homestore

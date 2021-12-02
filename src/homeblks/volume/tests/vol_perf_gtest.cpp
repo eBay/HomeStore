@@ -1,4 +1,5 @@
 #include <atomic>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -77,14 +78,13 @@ int main(int argc, char* argv[]) {
 
     if (dev_names.size() == 0) {
         LOGINFO("creating files");
-        for (uint32_t i = 0; i < MAX_DEVICES; i++) {
+        for (uint32_t i{0}; i < MAX_DEVICES; ++i) {
+            const std::filesystem::path fpath{names[i]};
             if (disk_init) {
-                std::ofstream ofs(names[i], std::ios::binary | std::ios::out);
-                ofs.seekp(10 * Gi - 1);
-                ofs.write("", 1);
-                ofs.close();
+                std::ofstream ofs(fpath.string(), std::ios::binary | std::ios::out);
+                std::filesystem::resize_file(fpath, 10 * Gi);
             }
-            dev_names.push_back(names[i]);
+            dev_names.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
         }
     }
 #endif

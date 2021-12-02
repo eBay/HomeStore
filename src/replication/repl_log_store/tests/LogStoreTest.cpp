@@ -76,11 +76,9 @@ struct TestCfg {
 
 static void clearTestFiles(const std::string& prefix) {
     for (const auto& dir_entry : std::filesystem::directory_iterator{"."}) {
-        if (dir_entry.is_regular_file()) { 
+        if (dir_entry.is_regular_file()) {
             const auto filename{dir_entry.path().filename()};
-            if (filename.string().find(prefix) != std::string::npos) { 
-                std::filesystem::remove(filename);
-            }
+            if (filename.string().find(prefix) != std::string::npos) { std::filesystem::remove(filename); }
         }
     }
 }
@@ -167,7 +165,7 @@ public:
         return id;
     }
 
-   bool start_vol_interface(const std::vector< homestore::dev_info >& device_info, const bool restart = false,
+    bool start_vol_interface(const std::vector< homestore::dev_info >& device_info, const bool restart = false,
                              const uint32_t ndevices = 2, const uint64_t dev_size_mb = 10240) {
         const uint64_t dev_size{dev_size_mb * 1024 * 1024};
 
@@ -218,14 +216,12 @@ public:
         LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
 
         for (uint32_t i{0}; i < ndevices; ++i) {
-            const std::string fpath{TEST_FILE_PATHS_PREFIX + m_test_type + std::to_string(i + 1)};
-            if (!restart)
-            {
-                std::ofstream ofs{fpath, std::ios::binary | std::ios::out | std::ios::trunc};
-                ofs.close();
+            const std::filesystem::path fpath{TEST_FILE_PATHS_PREFIX + m_test_type + std::to_string(i + 1)};
+            if (!restart) {
+                std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out | std::ios::trunc};
                 std::filesystem::resize_file(fpath, dev_size);
             }
-            device_info.push_back({std::filesystem::canonical(std::filesystem::path{fpath}).string()});
+            device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
         }
 
         const bool is_spdk{SDS_OPTIONS["spdk"].as< bool >()};
@@ -289,7 +285,7 @@ public:
             store_logstore_id(ls->getLogstoreId());
 
             // At the beginning, next slot and start index should be 1.
-            EXPECT_EQ(static_cast<decltype(ls->next_slot())>(1), ls->next_slot());
+            EXPECT_EQ(static_cast< decltype(ls->next_slot()) >(1), ls->next_slot());
             EXPECT_EQ(static_cast< decltype(ls->start_index()) >(1), ls->start_index());
             le_ret = ls->last_entry();
             EXPECT_NE(nullptr, le_ret);
@@ -334,7 +330,7 @@ public:
                     EXPECT_EQ(ii, val_ret);
                 } else {
                     // ii == 5, special case.
-                    EXPECT_EQ(static_cast<uint64_t>(12345), val_ret);
+                    EXPECT_EQ(static_cast< uint64_t >(12345), val_ret);
                 }
 
                 const uint64_t term_ret{le_ret->get_term()};
@@ -357,7 +353,7 @@ public:
                 if (ii != 5) {
                     EXPECT_EQ(ii, val_ret);
                 } else {
-                    EXPECT_EQ(static_cast<uint64_t>(12345), val_ret);
+                    EXPECT_EQ(static_cast< uint64_t >(12345), val_ret);
                 }
 
                 const uint64_t term_ret{le_ret->get_term()};

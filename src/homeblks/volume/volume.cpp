@@ -173,7 +173,8 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
         m_metrics(((vol_sb_hdr*)sb_buf.bytes())->vol_name, this),
         m_indx_mgr_destroy_started(false),
         m_sb_cookie(mblk_cookie) {
-    m_sb_buf = hs_utils::extract_byte_array(sb_buf);
+    // TO DO: Might need to address alignment based on data or fast type
+    m_sb_buf = hs_utils::extract_byte_array(sb_buf, true, MetaBlkMgrSI()->get_align_size());
     auto sb = (vol_sb_hdr*)m_sb_buf->bytes;
     m_state = sb->state;
 
@@ -191,8 +192,10 @@ void Volume::init() {
     if (m_sb_buf == nullptr) {
         init = true;
         /* populate superblock */
-        m_sb_buf = hs_utils::make_byte_array(
-            sizeof(vol_sb_hdr), MetaBlkMgrSI()->is_aligned_buf_needed(sizeof(vol_sb_hdr)), sisl::buftag::metablk);
+        // TO DO: Might need to address alignment based on data or fast type
+        m_sb_buf =
+            hs_utils::make_byte_array(sizeof(vol_sb_hdr), MetaBlkMgrSI()->is_aligned_buf_needed(sizeof(vol_sb_hdr)),
+                                      sisl::buftag::metablk, MetaBlkMgrSI()->get_align_size());
 
         /* populate superblock */
         sb = new (m_sb_buf->bytes) vol_sb_hdr(m_params.page_size, m_params.size, m_params.vol_name, m_params.uuid);
@@ -205,6 +208,13 @@ void Volume::init() {
             std::bind(&Volume::create_indx_tbl, this), false);
 
         sb->indx_sb = m_indx_mgr->get_immutable_sb();
+
+        // allocate stream for this volume
+        if (is_data_drive_hdd()) {
+            auto info = m_hb->get_data_blkstore()->get_vdev()->alloc_stream();
+            sb->stream_id = info.first;
+            m_stream_ptr = info.second;
+        }
         set_state(vol_state::ONLINE, true);
         m_seq_id = m_indx_mgr->get_max_seqid_found_in_recovery();
         /* it is called after superblock is persisted by volume */
@@ -220,6 +230,11 @@ void Volume::init() {
             std::bind(&Volume::process_read_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::create_indx_tbl, this),
             std::bind(&Volume::recover_indx_tbl, this, std::placeholders::_1, std::placeholders::_2), indx_sb);
+
+        // reserve stream if it is hard drive
+        if (is_data_drive_hdd()) {
+            m_stream_ptr = m_hb->get_data_blkstore()->get_vdev()->reserve_stream(sb->stream_id);
+        }
     }
     alloc_single_block_in_mem();
     m_blks_per_lba = get_page_size() / m_hb->get_data_pagesz();
@@ -279,6 +294,7 @@ void Volume::destroy_internal() {
         auto vol_ptr = shared_from_this();
         m_destroy_done_cb(success);
         m_destroy_done_cb = nullptr;
+        m_hb->get_data_blkstore()->get_vdev()->free_stream(m_stream_ptr);
         if (home_blks_ref_cnt.decrement_testz(1) && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); };
     }));
 }
@@ -907,6 +923,7 @@ std::error_condition Volume::alloc_blk(const volume_req_ptr& vreq, std::vector< 
     hints.dev_id_hint = -1;
     hints.multiplier = m_blks_per_lba;
     hints.max_blks_per_entry = HS_STATIC_CONFIG(engine.max_blks_in_blkentry);
+    hints.stream_ptr = m_stream_ptr;
 #ifdef _PRERELEASE
     hints.error_simulate = true;
 #endif
@@ -939,7 +956,7 @@ void Volume::alloc_single_block_in_mem() {
     // pointer to that
     uint8_t* ptr;
     uint32_t size = get_page_size();
-    ptr = hs_utils::iobuf_alloc(size, sisl::buftag::common);
+    ptr = hs_utils::iobuf_alloc(size, sisl::buftag::common, m_hb->get_data_blkstore()->get_vdev()->get_align_size());
     memset(ptr, 0, size);
 
     boost::intrusive_ptr< homeds::MemVector > mvec{new homeds::MemVector{}};

@@ -7,10 +7,12 @@
 #include <thread>
 #include <vector>
 
+#ifdef __linux__
 #include <fcntl.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/timeb.h>
+#endif
 
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/string_generator.hpp>
@@ -29,8 +31,8 @@
 using namespace homestore;
 
 std::vector< std::shared_ptr< Volume > > vol_list;
-#define VOL_PREFIX "/tmp/vol"
-#define STAGING_VOL_PREFIX "staging"
+static const std::string VOL_PREFIX{"/tmp/vol"};
+static const std::string STAGING_VOL_PREFIX{"staging"};
 
 RCU_REGISTER_INIT
 using log_level = spdlog::level::level_enum;
@@ -124,18 +126,19 @@ void start_homestore() {
 
     // set params
     if (fix_tree) {
-        params.open_flags = homestore::io_flag::DIRECT_IO;
+        params.data_open_flags = homestore::io_flag::DIRECT_IO;
         params.is_read_only = false;
     } else {
-        params.open_flags = homestore::io_flag::READ_ONLY;
+        params.data_open_flags = homestore::io_flag::READ_ONLY;
         params.is_read_only = true;
     }
     params.min_virtual_page_size = config["min_virtual_page_size"];
     params.app_mem_size = config["app_mem_size"];
-    params.drive_attr = iomgr::drive_attributes();
-    params.drive_attr->phys_page_size = config["phys_page_size"];
-    params.drive_attr->align_size = config["align_size"];
-    params.drive_attr->atomic_phys_page_size = config["atomic_phys_page_size"];
+    // TODO: Call iomgr emulate drive attrs before starting homestore
+    /*params.data_drive_attr = iomgr::drive_attributes();
+    params.data_drive_attr->phys_page_size = config["phys_page_size"];
+    params.data_drive_attr->align_size = config["align_size"];
+    params.data_drive_attr->atomic_phys_page_size = config["atomic_phys_page_size"]; */
     params.init_done_cb = std::bind(init_done_cb, std::placeholders::_1, std::placeholders::_2);
     params.vol_mounted_cb = std::bind(vol_mounted_cb, std::placeholders::_1, std::placeholders::_2);
     params.vol_state_change_cb =
@@ -143,7 +146,7 @@ void start_homestore() {
     params.vol_found_cb = std::bind(vol_found_cb, std::placeholders::_1);
 
     // dump params
-    std::cout << "Configuration\nio_flag = " << params.open_flags << std::endl;
+    std::cout << "Configuration\nio_flag = " << params.data_open_flags << std::endl;
     std::cout << "min page size=" << config["min_virtual_page_size"] << std::endl;
     std::cout << "cache size=" << config["app_mem_size"] << std::endl;
     std::cout << "phys page size=" << config["phys_page_size"] << std::endl;
@@ -152,7 +155,7 @@ void start_homestore() {
     std::cout << "device(s): ";
     for (auto& device : config["devices"]) {
         std::cout << device << " | ";
-        params.devices.emplace_back(dev_info{device});
+        params.data_devices.emplace_back(dev_info{device});
     }
     if (params.is_read_only) { std::cout << "\nRead only flag set" << std::endl; }
     std::cout << "\nsystem uuid=" << config["system_uuid"] << std::endl;

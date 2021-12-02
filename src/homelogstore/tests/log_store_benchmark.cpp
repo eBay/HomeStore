@@ -127,8 +127,9 @@ public:
 
         inited = false;
         m_q_depth = qdepth;
-        LOGINFO("opening {} device of size {} ", devname);
-        device_info.push_back({devname});
+        const std::filesystem::path fpath{devname};
+        LOGINFO("opening {} device of size {} ", fpath.string());
+        device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
 
         LOGINFO("Starting iomgr with {} threads", nthreads);
         iomanager.start(nthreads);
@@ -147,10 +148,10 @@ public:
 
         boost::uuids::string_generator gen;
         init_params params;
-        params.open_flags = homestore::io_flag::DIRECT_IO;
+        params.data_open_flags = homestore::io_flag::DIRECT_IO;
         params.min_virtual_page_size = 4096;
         params.app_mem_size = app_mem_size;
-        params.devices = device_info;
+        params.data_devices = device_info;
         params.init_done_cb = [&tl_start_mutex = start_mutex, &tl_cv = cv,
                                &tl_inited = inited](std::error_condition err, const out_params& params) {
             LOGINFO("HomeBlks Init completed");

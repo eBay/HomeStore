@@ -10,8 +10,10 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include <flip/flip.hpp>
@@ -33,17 +35,20 @@ private:
     const blk_cap_t m_blks_per_temp_group;
     blk_cap_t m_max_cache_blks;
     SlabCacheConfig m_slab_config;
+    bool m_use_slabs{true}; // use sweeping thread pool with slabs in variable size block allocator
 
 public:
-    VarsizeBlkAllocConfig() : VarsizeBlkAllocConfig(0, 0, "") {}
-    VarsizeBlkAllocConfig(const std::string& name) : VarsizeBlkAllocConfig(0, 0, name) {}
+    VarsizeBlkAllocConfig() : VarsizeBlkAllocConfig{0, 0, 0, 0, ""} {}
+    VarsizeBlkAllocConfig(const std::string& name) : VarsizeBlkAllocConfig{0, 0, 0, 0, name} {}
 
-    VarsizeBlkAllocConfig(const uint32_t blk_size, const uint64_t size, const std::string& name,
-                          const bool realtime_bm_on = true) :
-            BlkAllocConfig{blk_size, size, name, realtime_bm_on},
-            m_phys_page_size{HS_STATIC_CONFIG(drive_attr.phys_page_size)},
+    VarsizeBlkAllocConfig(const uint32_t blk_size, const uint32_t ppage_sz, const uint32_t align_sz,
+                          const uint64_t size, const std::string& name, const bool realtime_bm_on = true,
+                          const bool use_slabs = true) :
+            BlkAllocConfig{blk_size, align_sz, size, name, realtime_bm_on},
+            m_phys_page_size{ppage_sz},
             m_nsegments{HS_DYNAMIC_CONFIG(blkallocator.max_segments)},
-            m_blks_per_temp_group{get_total_blks() / HS_DYNAMIC_CONFIG(blkallocator.num_blk_temperatures)} {
+            m_blks_per_temp_group{get_total_blks() / HS_DYNAMIC_CONFIG(blkallocator.num_blk_temperatures)},
+            m_use_slabs{use_slabs} {
         // Initialize the max cache blks as minimum dictated by the number of blks or memory limits whichever is lower
         const blk_cap_t size_by_count{static_cast< blk_cap_t >(std::trunc(
             HS_DYNAMIC_CONFIG(blkallocator.free_blk_cache_count_by_vdev_percent) * get_total_blks() / 100.0))};
@@ -135,6 +140,8 @@ public:
         const slab_idx_t index{get_slab_cnt()};
         return (index > 0) ? m_slab_config.m_per_slab_cfg[index - 1].slab_size : 0;
     }
+    void set_use_slabs(const bool use_slabs) { m_use_slabs = use_slabs; }
+    [[nodiscard]] bool get_use_slabs() const { return m_use_slabs; }
 
     [[nodiscard]] std::string to_string() const override {
         return fmt::format("{} Pagesize={} Totalsegments={} BlksPerPortion={} MaxCacheBlks={} Slabconfig=[{}]",
@@ -228,14 +235,25 @@ public:
     [[nodiscard]] nlohmann::json get_metrics_in_json();
 
 private:
+    // global block allocator sweep threads
+    static std::mutex s_sweeper_create_delete_mutex;           // sweeper threads create/destroy mutex
+    static std::atomic<size_t> s_sweeper_thread_references;    // num active sweeper threads
+    static std::vector<std::thread> s_sweeper_threads;         // Sweeper threads
+    static std::atomic<bool> s_sweeper_threads_stop;           // atomic flag to stop sweeper threads             
+    static std::mutex s_sweeper_mutex;                         // Sweeper threads mutex
+    static std::condition_variable s_sweeper_cv;               // sweeper threads cv
+    static std::queue< VarsizeBlkAllocator* > s_sweeper_queue; // Sweeper threads queue
+    static std::unordered_set< VarsizeBlkAllocator* > s_block_allocators; // block allocators to be swept
+
+    // per class sweeping logic
+    std::mutex m_mutex;                                        // Mutex to protect regionstate & cb
+    std::condition_variable m_cv;                              // CV to signal thread
+    BlkAllocatorState m_state;                                 // Current state of the blkallocator
+
     std::unique_ptr< sisl::Bitset > m_cache_bm; // Bitset representing entire blks in this allocator
     std::unique_ptr< FreeBlkCache > m_fb_cache; // Free Blks cache
 
     VarsizeBlkAllocConfig m_cfg;  // Config for Varsize
-    std::thread m_thread_id;      // Sweeper thread
-    std::mutex m_mutex;           // Mutex to protect regionstate & cb
-    std::condition_variable m_cv; // CV to signal thread
-    BlkAllocatorState m_state;    // Current state of the blkallocator
 
     std::vector< std::unique_ptr< BlkAllocSegment > > m_segments; // Lookup map for segment id - segment
 
@@ -246,7 +264,8 @@ private:
     BlkAllocMetrics m_metrics;
 
 private:
-    void allocator_state_machine();
+    static void sweeper_thread(const size_t thread_num);
+    bool allocator_state_machine();
 
 #ifdef _PRERELEASE
     [[nodiscard]] bool is_set_on_bitmap(const BlkId& b) const;
@@ -258,9 +277,10 @@ private:
     [[nodiscard]] blk_num_t get_portions_per_segment() const;
 
     // Sweep and cache related functions
-    void prepare_sweep(BlkAllocSegment* const seg, const bool fill_entire_cache);
+    bool prepare_sweep(BlkAllocSegment* const seg, const bool fill_entire_cache);
     void request_more_blks(BlkAllocSegment* const seg, const bool fill_entire_cache);
     void request_more_blks_wait(BlkAllocSegment* const seg, const blk_count_t wait_for_blks_count);
+
     void fill_cache(BlkAllocSegment* const seg, blk_cache_fill_session& fill_session);
     void fill_cache_in_portion(const blk_num_t portion_num, blk_cache_fill_session& fill_session);
 

@@ -21,15 +21,17 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/optional.hpp>
 #include <boost/uuid/uuid_io.hpp>
-#include <engine/common/error.h>
-#include <engine/common/homestore_config.hpp>
-#include <engine/common/homestore_header.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <iomgr/iomgr.hpp>
 #include <sds_logging/logging.h>
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/enum.hpp>
 #include <sisl/utility/obj_life_counter.hpp>
+
+#include <engine/common/error.h>
+#include <engine/common/homestore_config.hpp>
+#include <engine/common/homestore_header.hpp>
+#include <engine/device/device.h>
 
 namespace homestore {
 class Volume;
@@ -46,8 +48,7 @@ public:
     static bool shutdown(const bool force = false);
     static boost::intrusive_ptr< VolInterface > safe_instance();
     static VolInterface* raw_instance();
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr::iomgr_drive_type drive_type,
-                              io_flag oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices);
 };
 
 struct buf_info {
@@ -198,11 +199,13 @@ public:
     std::string to_string() const {
         std::ostringstream oss;
         oss << "min_virtual_page_size=" << min_virtual_page_size << ",app_mem_size=" << app_mem_size
-            << ",dev_type=" << enum_name(device_type) << ",open_flags =" << open_flags << ", start_http=" << start_http
-            << ",number of devices =" << devices.size();
-        oss << "device names = ";
-        for (size_t i{0}; i < devices.size(); ++i) {
-            oss << devices[i].dev_names;
+            << ",number of data devices =" << data_devices.size()  << ",data_open_flags =" << data_open_flags;
+        
+        oss << ", start_http=" << start_http;
+           
+        oss << ",data device names = [";
+        for (size_t i{0}; i < data_devices.size(); ++i) {
+            oss << data_devices[i].dev_names;
             oss << ",";
         }
         oss << "]";
@@ -222,9 +225,8 @@ public:
 
     static VolInterface* get_instance() { return VolInterfaceImpl::raw_instance(); }
 
-    static void zero_boot_sbs(const std::vector< dev_info >& devices, iomgr::iomgr_drive_type drive_type,
-                              io_flag oflags) {
-        return VolInterfaceImpl::zero_boot_sbs(devices, drive_type, oflags);
+    static void zero_boot_sbs(const std::vector< dev_info >& devices) {
+        return VolInterfaceImpl::zero_boot_sbs(devices);
     }
 
     virtual ~VolInterface() {}
@@ -314,7 +316,6 @@ public:
 
     virtual const char* get_name(const VolumePtr& vol) = 0;
     virtual uint64_t get_size(const VolumePtr& vol) = 0;
-    virtual uint32_t get_align_size() = 0;
     virtual uint64_t get_page_size(const VolumePtr& vol) = 0;
     virtual boost::uuids::uuid get_uuid(std::shared_ptr< Volume > vol) = 0;
     virtual sisl::blob at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;

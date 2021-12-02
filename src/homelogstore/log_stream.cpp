@@ -5,7 +5,7 @@
 namespace homestore {
 SDS_LOGGING_DECL(logstore)
 
-log_stream_reader::log_stream_reader(const off_t device_cursor, logdev_blkstore_t* store,
+log_stream_reader::log_stream_reader(const off_t device_cursor, JournalVirtualDev* store,
                                      const uint64_t read_size_multiple) :
         m_hb{HomeStoreBase::safe_instance()},
         m_blkstore{store},
@@ -118,7 +118,9 @@ sisl::byte_view log_stream_reader::group_in_next_page() {
 }
 
 sisl::byte_view log_stream_reader::read_next_bytes(const uint64_t nbytes) {
-    auto out_buf{hs_utils::create_byte_view(nbytes + m_cur_log_buf.size(), true, sisl::buftag::logread)};
+    // TO DO: Might need to address alignment based on data or fast type
+    auto out_buf{hs_utils::create_byte_view(nbytes + m_cur_log_buf.size(), true, sisl::buftag::logread,
+                                            m_blkstore->get_align_size())};
     auto ret_buf = out_buf;
     if (m_cur_log_buf.size()) {
         memcpy(out_buf.bytes(), m_cur_log_buf.bytes(), m_cur_log_buf.size());

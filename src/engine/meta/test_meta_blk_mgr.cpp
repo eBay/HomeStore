@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -67,12 +68,10 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
     inited = false;
     LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
     for (uint32_t i{0}; i < ndevices; ++i) {
-        const std::string fpath{"/tmp/test_meta_blk_mgr_" + std::to_string(i + 1)};
-        std::ofstream ofs(fpath, std::ios::binary | std::ios::out);
-        ofs.seekp(dev_size - 1);
-        ofs.write("", 1);
-        ofs.close();
-        device_info.push_back({fpath});
+        const std::filesystem::path fpath{"/tmp/test_meta_blk_mgr_" + std::to_string(i + 1)};
+        std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
+        std::filesystem::resize_file(fpath, dev_size); // set the file size
+        device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
     }
 
     LOGINFO("Starting iomgr with {} threads", nthreads);
@@ -83,10 +82,10 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
 
     boost::uuids::string_generator gen;
     init_params params;
-    params.open_flags = homestore::io_flag::DIRECT_IO;
+    params.data_open_flags = homestore::io_flag::DIRECT_IO;
     params.min_virtual_page_size = 4096;
     params.app_mem_size = app_mem_size;
-    params.devices = device_info;
+    params.data_devices = device_info;
     params.init_done_cb = [&tl_start_mutex = start_mutex, &tl_cv = cv, &tl_inited = inited](std::error_condition err,
                                                                                             const out_params& params) {
         LOGINFO("HomeBlks Init completed");

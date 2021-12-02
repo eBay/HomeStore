@@ -52,7 +52,9 @@ mapping::mapping(const uint64_t volsize, const uint32_t page_size, const std::st
     m_get_size_needed = bind_this(mapping::get_size_needed, 2);
 
     // create btree
-    homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), unique_name.c_str());
+    // TO DO: Might need to differentiate based on data or fast type
+    homeds::btree::BtreeConfig btree_cfg(m_hb->get_index_blkstore()->get_vdev()->get_atomic_page_size(),
+                                         unique_name.c_str());
     btree_cfg.set_max_objs(volsize / page_size);
     btree_cfg.set_max_key_size(sizeof(uint32_t));
     btree_cfg.set_max_value_size(page_size);
@@ -77,7 +79,9 @@ mapping::mapping(const uint64_t volsize, const uint32_t page_size, const std::st
     m_get_size_needed = bind_this(mapping::get_size_needed, 2);
 
     // create btree
-    homeds::btree::BtreeConfig btree_cfg(HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), unique_name.c_str());
+    // TO DO: Might need to differentiate based on data or fast type
+    homeds::btree::BtreeConfig btree_cfg(m_hb->get_index_blkstore()->get_vdev()->get_atomic_page_size(),
+                                         unique_name.c_str());
     btree_cfg.set_max_objs(volsize / page_size);
     btree_cfg.set_max_key_size(sizeof(uint32_t));
     btree_cfg.set_max_value_size(page_size);

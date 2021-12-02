@@ -40,7 +40,7 @@ public:
     LogStoreFamily& operator=(LogStoreFamily&&) noexcept = delete;
 
     void meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
-    void start(const bool format, logdev_blkstore_t* blk_store);
+    void start(const bool format, JournalVirtualDev* blk_store);
     void stop();
 
     [[nodiscard]] std::shared_ptr< HomeLogStore > create_new_log_store(const bool append_mode = false);

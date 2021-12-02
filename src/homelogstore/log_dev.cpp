@@ -5,6 +5,7 @@
 
 #include <sisl/fds/vector_pool.hpp>
 
+#include "api/meta_interface.hpp"
 #include "engine/common/homestore_assert.hpp"
 #include "engine/homestore_base.hpp"
 #include "log_dev.hpp"
@@ -26,8 +27,7 @@ LogDev::LogDev(const logstore_family_id_t f_id, const std::string& metablk_name)
     } else if (f_id == HomeLogStoreMgr::CTRL_LOG_FAMILY_IDX) {
         m_flush_size_multiple = HS_DYNAMIC_CONFIG(logstore->flush_size_multiple_ctrl_logdev);
     }
-    if (m_flush_size_multiple == 0) { m_flush_size_multiple = HS_STATIC_CONFIG(drive_attr.phys_page_size); }
-    THIS_LOGDEV_LOG(INFO, "Initializing logdev with flush size multiple={}", m_flush_size_multiple);
+    // TO DO: Might need to differentiate based on data or fast type
     set_flush_status(false);
 }
 
@@ -37,15 +37,20 @@ void LogDev::meta_blk_found(meta_blk* const mblk, const sisl::byte_view buf, con
     m_logdev_meta.meta_buf_found(buf, static_cast< void* >(mblk));
 }
 
-void LogDev::start(const bool format, logdev_blkstore_t* blk_store) {
+uint32_t LogDev::get_align_size() const { return m_blkstore->get_align_size(); }
+
+void LogDev::start(const bool format, JournalVirtualDev* blk_store) {
     HS_ASSERT(LOGMSG, (m_append_comp_cb != nullptr), "Expected Append callback to be registered");
     HS_ASSERT(LOGMSG, (m_store_found_cb != nullptr), "Expected Log store found callback to be registered");
     HS_ASSERT(LOGMSG, (m_logfound_cb != nullptr), "Expected Logs found callback to be registered");
 
     m_blkstore = blk_store;
     m_hb = HomeStoreBase::safe_instance();
+    if (m_flush_size_multiple == 0) { m_flush_size_multiple = m_blkstore->get_phys_page_size(); }
+    THIS_LOGDEV_LOG(INFO, "Initializing logdev with flush size multiple={}", m_flush_size_multiple);
+
     for (uint32_t i = 0; i < max_log_group; ++i) {
-        m_log_group_pool[i].start(m_flush_size_multiple);
+        m_log_group_pool[i].start(m_flush_size_multiple, m_blkstore->get_align_size());
     }
     m_log_records = std::make_unique< sisl::StreamTracker< log_record > >();
     m_stopped = false;
@@ -244,12 +249,15 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
     } else {
         // Round them data offset to dma boundary in-order to make sure pread on direct io succeed. We need to skip
         // the rounded portion while copying to user buffer
-        const auto rounded_data_offset{sisl::round_down(data_offset, HS_STATIC_CONFIG(drive_attr.align_size))};
+        // TO DO: Might need to differentiate based on data or fast type
+        const auto rounded_data_offset{sisl::round_down(data_offset, m_blkstore->get_align_size())};
         const auto rounded_size{
-            sisl::round_up(b.size() + data_offset - rounded_data_offset, HS_STATIC_CONFIG(drive_attr.align_size))};
+            sisl::round_up(b.size() + data_offset - rounded_data_offset, m_blkstore->get_align_size())};
 
         // Allocate a fresh aligned buffer, if size cannot fit standard size
-        if (rounded_size > initial_read_size) { rbuf = hs_utils::iobuf_alloc(rounded_size, sisl::buftag::logread); }
+        if (rounded_size > initial_read_size) {
+            rbuf = hs_utils::iobuf_alloc(rounded_size, sisl::buftag::logread, m_blkstore->get_align_size());
+        }
 
         THIS_LOGDEV_LOG(TRACE,
                         "Addln read as data resides outside initial_read_size={} key.idx={} key.group_dev_offset={} "
@@ -395,10 +403,10 @@ void LogDev::do_flush(LogGroup* const lg) {
     process_logdev_completions(req);
 }
 
-void LogDev::process_logdev_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
-    const auto req{to_logdev_req(bs_req)};
-    if (bs_req->err != no_error) {
-        HS_RELEASE_ASSERT(0, "error {} happen during op {}", bs_req->err.message(), req->is_read);
+void LogDev::process_logdev_completions(const boost::intrusive_ptr< virtualdev_req >& vd_req) {
+    const auto req{to_logdev_req(vd_req)};
+    if (vd_req->err != no_error) {
+        HS_RELEASE_ASSERT(0, "error {} happen during op {}", vd_req->err.message(), req->is_read);
     }
     if (req->is_read) {
         // update logdev read metrics;
@@ -539,13 +547,15 @@ LogDevMetadata::LogDevMetadata(const std::string& metablk_name) : m_metablk_name
 
 logdev_superblk* LogDevMetadata::create() {
     const auto req_sz{required_sb_size(0)};
-    m_raw_buf = hs_utils::make_byte_array(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz), sisl::buftag::metablk);
+    // TO DO: Might need to address alignment based on data or fast type
+    m_raw_buf = hs_utils::make_byte_array(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz), sisl::buftag::metablk,
+                                          MetaBlkMgrSI()->get_align_size());
     m_sb = new (m_raw_buf->bytes) logdev_superblk();
 
     logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
     std::fill_n(sb_area, store_capacity(), logstore_superblk::default_value());
 
-    m_id_reserver = std::make_unique< sisl::IDReserver >(store_capacity());
+    m_id_reserver = std::make_unique< sisl::IDReserver >();
     persist();
     return m_sb;
 }
@@ -560,7 +570,7 @@ void LogDevMetadata::reset() {
 
 void LogDevMetadata::meta_buf_found(const sisl::byte_view& buf, void* const meta_cookie) {
     m_meta_mgr_cookie = meta_cookie;
-    m_raw_buf = hs_utils::extract_byte_array(buf);
+    m_raw_buf = hs_utils::extract_byte_array(buf, true, MetaBlkMgrSI()->get_align_size());
     m_sb = reinterpret_cast< logdev_superblk* >(m_raw_buf->bytes);
 
     HS_RELEASE_ASSERT_EQ(m_sb->get_magic(), logdev_superblk::LOGDEV_SB_MAGIC, "Invalid logdev metablk, magic mismatch");
@@ -664,9 +674,9 @@ bool LogDevMetadata::resize_if_needed() {
     const auto req_sz{required_sb_size((m_store_info.size() == 0) ? 0u : *m_store_info.rbegin() + 1)};
     if (req_sz != m_raw_buf->size) {
         const auto old_buf{m_raw_buf};
-
-        m_raw_buf =
-            hs_utils::make_byte_array(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz), sisl::buftag::metablk);
+        // TO DO: Might need to address alignment based on data or fast type
+        m_raw_buf = hs_utils::make_byte_array(req_sz, MetaBlkMgrSI()->is_aligned_buf_needed(req_sz),
+                                              sisl::buftag::metablk, MetaBlkMgrSI()->get_align_size());
         m_sb = new (m_raw_buf->bytes) logdev_superblk();
 
         logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};

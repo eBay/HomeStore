@@ -1,4 +1,5 @@
-﻿#include <fstream>
+﻿#include <algorithm>
+#include <fstream>
 #include <iterator>
 #include <iostream>
 #include <stdexcept>
@@ -10,7 +11,7 @@
 #include <sisl/version.hpp>
 
 #include "engine/common/homestore_status_mgr.hpp"
-#include "engine/device/blkbuffer.hpp"
+#include "engine/blkstore/blkbuffer.hpp"
 #include "engine/device/device.h"
 #include "engine/device/virtual_dev.hpp"
 #include "homelogstore/log_store.hpp"
@@ -31,14 +32,13 @@ bool same_value_gen = false;
 std::string HomeBlks::version = PACKAGE_VERSION;
 thread_local std::vector< std::shared_ptr< Volume > >* HomeBlks::s_io_completed_volumes = nullptr;
 
-void VolInterfaceImpl::zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type,
-                                     io_flag oflags) {
-    return (HomeBlks::zero_boot_sbs(devices, drive_type, oflags));
+void VolInterfaceImpl::zero_boot_sbs(const std::vector< dev_info >& devices) {
+    return (HomeBlks::zero_boot_sbs(devices));
 }
 
 VolInterface* VolInterfaceImpl::init(const init_params& cfg, bool fake_reboot) {
 #ifdef _PRERELEASE
-    if (cfg.force_reinit) { zero_boot_sbs(cfg.devices, cfg.device_type, cfg.open_flags); }
+    if (cfg.force_reinit) { zero_boot_sbs(cfg.data_devices); }
 #endif
 
     return (HomeBlks::init(cfg, fake_reboot));
@@ -56,6 +56,7 @@ VolInterface* VolInterfaceImpl::raw_instance() { return HomeBlks::instance(); }
 VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
     fLI::FLAGS_minloglevel = 3;
     HomeBlksSafePtr instance;
+    VolInterface* ret{nullptr};
 
     static std::once_flag flag1;
     try {
@@ -83,20 +84,76 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
             LOGINFO("HomeBlks Dynamic config version: {}", HB_DYNAMIC_CONFIG(version));
         });
         set_instance(boost::static_pointer_cast< homestore::HomeStoreBase >(instance));
-        return static_cast< VolInterface* >(instance.get());
+        ret = static_cast< VolInterface* >(instance.get());
     } catch (const std::exception& e) {
         LOGERROR("{}", e.what());
-        assert(false);
-        return nullptr;
+        HS_DEBUG_ASSERT(false, "Exception during homeblks start");
+        return ret;
     }
+
+    /* start thread */
+    auto sthread = sisl::named_thread("hb_init", [instance]() {
+        iomanager.run_io_loop(false, nullptr, [instance](bool thread_started) {
+            if (thread_started) {
+                instance->m_init_thread_id = iomanager.iothread_self();
+                if (instance->is_safe_mode()) {
+                    std::unique_lock< std::mutex > lk(instance->m_cv_mtx);
+                    /* we wait for gdb to attach in safe mode */
+                    LOGINFO("Going to sleep. Waiting for user to send http command to wake up");
+                    instance->m_cv_wakeup_init.wait(lk);
+                }
+                instance->init_devices();
+            }
+        });
+    });
+    sthread.detach();
+
+    /* start custom io threads for hdd */
+    if (is_data_drive_hdd()) {
+        const uint32_t hdd_thread_count{HS_DYNAMIC_CONFIG(generic.hdd_io_threads)};
+        instance->m_custom_hdd_threads.reserve(hdd_thread_count);
+
+        for (auto i = 0u; i < hdd_thread_count; ++i) {
+            auto sthread1 = sisl::named_thread("custom_hdd", [&instance, hdd_thread_count]() {
+                iomanager.run_io_loop(false, nullptr, [&](bool is_started) {
+                    if (is_started) {
+                        std::lock_guard< std::mutex > lock(instance->m_hdd_threads_mtx);
+                        instance->m_custom_hdd_threads.emplace_back(iomanager.iothread_self());
+                        if (instance->m_custom_hdd_threads.size() == hdd_thread_count) {
+                            instance->m_hdd_threads_cv.notify_one();
+                        }
+                    }
+                });
+            });
+            sthread1.detach();
+        }
+
+        {
+            auto lg = std::unique_lock< std::mutex >(instance->m_hdd_threads_mtx);
+            instance->m_hdd_threads_cv.wait(lg, [&instance, hdd_thread_count]() {
+                return (instance->m_custom_hdd_threads.size() == hdd_thread_count);
+            });
+        }
+    }
+    return ret;
 }
 
 HomeBlks::~HomeBlks() = default;
 
-void HomeBlks::zero_boot_sbs(const std::vector< dev_info >& devices, iomgr_drive_type drive_type, io_flag oflags) {
+void HomeBlks::zero_boot_sbs(const std::vector< dev_info >& devices) {
+    if (devices.empty()) return;
     auto& hs_config = HomeStoreStaticConfig::instance();
-    hs_config.drive_attr = get_drive_attrs(devices, drive_type);
-    return DeviceManager::zero_boot_sbs(devices, drive_type, oflags);
+
+    // ensure devices are all the same type
+    const auto dev_type{devices.front().dev_type};
+    for (size_t device_num{1}; device_num < devices.size(); ++device_num) {
+        if (devices[device_num].dev_type != dev_type) {
+            HS_LOG(ERROR, device, "dev={} type={} does not match type dev={} type={}", devices[device_num].dev_names,
+                   devices[device_num].dev_type, devices.front().dev_names, dev_type);
+            HS_DEBUG_ASSERT(false, "Mixed zero_boot_sbs device types");
+        }
+    }
+    return DeviceManager::zero_boot_sbs(devices);
 }
 
 vol_interface_req::vol_interface_req(void* const buf, const uint64_t lba, const uint32_t nlbas, const bool is_sync,
@@ -121,7 +178,8 @@ vol_interface_req::vol_interface_req(std::vector< iovec > iovecs, const uint64_t
 
 vol_interface_req::~vol_interface_req() = default;
 
-HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
+HomeBlks::HomeBlks(const init_params& cfg) :
+        m_cfg(cfg), m_metrics(new HomeBlksMetrics("HomeBlks")), m_start_shutdown{false} {
     LOGINFO("Initializing HomeBlks with Config {}", m_cfg.to_string());
 
     if (m_cfg.start_http) {
@@ -133,53 +191,12 @@ HomeBlks::HomeBlks(const init_params& cfg) : m_cfg(cfg), m_metrics("HomeBlks") {
 
     HomeStore< BLKSTORE_BUFFER_TYPE >::init((const hs_input_params&)cfg);
 
-    superblock_init();
     sisl::MallocMetrics::enable();
 
     m_recovery_stats = std::make_unique< HomeBlksRecoveryStats >();
-
     m_recovery_stats->start();
+
     if (HB_DYNAMIC_CONFIG(general_config->boot_safe_mode)) { LOGINFO("HomeBlks booting into safe_mode"); }
-
-    /* start thread */
-    auto sthread = sisl::named_thread("hb_init", [this]() {
-        iomanager.run_io_loop(false, nullptr, [&](bool thread_started) {
-            if (thread_started) {
-                m_init_thread_id = iomanager.iothread_self();
-                if (is_safe_mode()) {
-                    std::unique_lock< std::mutex > lk(m_cv_mtx);
-                    /* we wait for gdb to attach in safe mode */
-                    LOGINFO("Going to sleep. Waiting for user to send http command to wake up");
-                    m_cv_wakeup_init.wait(lk);
-                }
-                this->init_devices();
-            }
-        });
-    });
-    sthread.detach();
-
-    /* start custom io threads for hdd */
-    if (m_cfg.is_hdd) {
-        m_custom_hdd_threads.reserve(HS_DYNAMIC_CONFIG(generic.hdd_io_threads));
-        std::atomic< uint32_t > thread_cnt{0};
-        uint32_t expected_thread_cnt{0};
-        for (auto i = 0u; i < HS_DYNAMIC_CONFIG(generic.hdd_io_threads); i++) {
-            auto sthread1 = sisl::named_thread("custom_hdd_thrd", [this, &thread_cnt]() mutable {
-                iomanager.run_io_loop(false, nullptr, [this, &thread_cnt](bool is_started) {
-                    if (is_started) {
-                        thread_cnt++;
-                        const std::lock_guard< std::mutex > lock(m_hdd_threads_mtx);
-                        m_custom_hdd_threads.push_back(iomanager.iothread_self());
-                    }
-                });
-            });
-            sthread1.detach();
-            expected_thread_cnt++;
-        }
-        while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
-    }
-
-    m_start_shutdown = false;
 }
 
 void HomeBlks::wakeup_init() { m_cv_wakeup_init.notify_one(); }
@@ -253,7 +270,7 @@ std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_r
     req->vol_instance = vol;
     req->part_of_batch = part_of_batch;
     req->op_type = Op_type::WRITE;
-    if (m_cfg.is_hdd) {
+    if (is_data_drive_hdd()) {
         iomanager.run_on(m_custom_hdd_threads[next_available_hdd_thread_idx()],
                          [vol, req](io_thread_addr_t addr) { vol->write(req); });
         return std::error_condition();
@@ -271,7 +288,7 @@ std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_re
     req->vol_instance = vol;
     req->part_of_batch = part_of_batch;
     req->op_type = Op_type::READ;
-    if (m_cfg.is_hdd) {
+    if (is_data_drive_hdd()) {
         iomanager.run_on(m_custom_hdd_threads[next_available_hdd_thread_idx()],
                          [vol, req](io_thread_addr_t addr) { vol->read(req); });
         return std::error_condition();
@@ -299,7 +316,7 @@ std::error_condition HomeBlks::unmap(const VolumePtr& vol, const vol_interface_r
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     req->vol_instance = vol;
     req->op_type = Op_type::UNMAP;
-    if (m_cfg.is_hdd) {
+    if (is_data_drive_hdd()) {
         iomanager.run_on(m_custom_hdd_threads[next_available_hdd_thread_idx()],
                          [vol, req](io_thread_addr_t addr) { vol->unmap(req); });
         return std::error_condition();
@@ -308,7 +325,6 @@ std::error_condition HomeBlks::unmap(const VolumePtr& vol, const vol_interface_r
 }
 
 const char* HomeBlks::get_name(const VolumePtr& vol) { return vol->get_name(); }
-uint32_t HomeBlks::get_align_size() { return HS_STATIC_CONFIG(drive_attr.align_size); }
 uint64_t HomeBlks::get_page_size(const VolumePtr& vol) { return vol->get_page_size(); }
 uint64_t HomeBlks::get_size(const VolumePtr& vol) { return vol->get_size(); }
 boost::uuids::uuid HomeBlks::get_uuid(VolumePtr vol) { return vol->get_uuid(); }
@@ -407,7 +423,7 @@ SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
 #endif
 
 void HomeBlks::submit_io_batch() {
-    iomanager.default_drive_interface()->submit_batch();
+    // iomanager.default_drive_interface()->submit_batch();
     call_multi_completions();
 }
 
@@ -420,8 +436,11 @@ homeblks_sb* HomeBlks::superblock_init() {
     HS_RELEASE_ASSERT_EQ(m_homeblks_sb_buf, nullptr, "Reinit already initialized super block");
 
     /* build the homeblks super block */
-    m_homeblks_sb_buf = hs_utils::make_byte_array(
-        HOMEBLKS_SB_SIZE, MetaBlkMgrSI()->is_aligned_buf_needed(HOMEBLKS_SB_SIZE), sisl::buftag::metablk);
+    // TO DO: Might need to address alignment based on data or fast type
+    const uint64_t hb_sb_size =
+        get_meta_blkstore()->get_vdev()->get_atomic_page_size(); // it is not really required. Kept it for compatibility
+    m_homeblks_sb_buf = hs_utils::make_byte_array(hb_sb_size, MetaBlkMgrSI()->is_aligned_buf_needed(hb_sb_size),
+                                                  sisl::buftag::metablk, MetaBlkMgrSI()->get_align_size());
 
     auto* sb = new (m_homeblks_sb_buf->bytes) homeblks_sb();
     sb->version = hb_sb_version;
@@ -498,6 +517,7 @@ void HomeBlks::init_done() {
     }
     auto system_cap = get_system_capacity();
     LOGINFO("system_cap from blkstore: {}, system cap from volume: {}", system_cap.to_string(), used_size.to_string());
+    LOGINFO("number of streams {}, stream size {}", get_num_streams(), get_stream_size());
 
 #ifdef _PRERELEASE
     HB_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.general_config.boot_consistency_check = true; });
@@ -525,15 +545,39 @@ void HomeBlks::init_done() {
 
     m_recovery_stats->end();
 
+    /* start custom io threads for hdd */
+    if (is_data_drive_hdd()) {
+        m_custom_hdd_threads.reserve(HS_DYNAMIC_CONFIG(generic.hdd_io_threads));
+        std::atomic< uint32_t > thread_cnt{0};
+        uint32_t expected_thread_cnt{HS_DYNAMIC_CONFIG(generic.hdd_io_threads)};
+        for (auto i = 0u; i < expected_thread_cnt; ++i) {
+            auto sthread1 = sisl::named_thread("custom_hdd_thrd", [this, &thread_cnt]() mutable {
+                iomanager.run_io_loop(false, nullptr, [this, &thread_cnt](bool is_started) {
+                    if (is_started) {
+                        ++thread_cnt;
+                        const std::lock_guard< std::mutex > lock(m_hdd_threads_mtx);
+                        m_custom_hdd_threads.push_back(iomanager.iothread_self());
+                    } else {
+                        // it is called during shutdown
+                    }
+                });
+            });
+            sthread1.detach();
+        }
+        while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
+    }
+  
+
     // start the io watchdog;
     m_io_wd = std::make_unique< VolumeIOWatchDog >();
 
     if (!is_safe_mode()) { m_cfg.init_done_cb(no_error, m_out_params); }
 
+
     // Don't do any callback if it is running in safe mode
 }
 
-data_blkstore_t::comp_callback HomeBlks::data_completion_cb() { return Volume::process_vol_data_completions; };
+BlkStore< BlkBuffer >::comp_callback HomeBlks::data_completion_cb() { return Volume::process_vol_data_completions; };
 
 #ifdef _PRERELEASE
 void HomeBlks::set_io_flip() {
@@ -573,7 +617,8 @@ bool HomeBlks::verify_vols() {
 bool HomeBlks::verify_data_bm() {
     /* Create the data bitmap */
     auto hb{HomeBlks::safe_instance()};
-    BlkAllocStatus status{hb->get_data_blkstore()->create_debug_bm()};
+    auto* const data_blkstore_ptr{hb->get_data_blkstore()};
+    BlkAllocStatus status{data_blkstore_ptr->create_debug_bm()};
     if (status != BlkAllocStatus::SUCCESS) {
         LOGERROR("failing to create data debug bitmap as it is out of disk space");
         return false;
@@ -602,7 +647,8 @@ bool HomeBlks::verify_data_bm() {
 bool HomeBlks::verify_index_bm() {
     /* Create the index bitmap */
     auto hb{HomeBlks::safe_instance()};
-    BlkAllocStatus status{hb->get_index_blkstore()->create_debug_bm()};
+    auto* const index_blockstore_ptr{hb->get_index_blkstore()};
+    BlkAllocStatus status{index_blockstore_ptr->create_debug_bm()};
     if (status != BlkAllocStatus::SUCCESS) {
         LOGERROR("failing to create index debug bitmap as it is out of disk space");
         return false;
@@ -781,6 +827,7 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     // stop io
     iomanager.generic_interface()->detach_listen_sentinel_cb(iomgr::wait_type_t::spin);
     iomanager.stop_io_loop();
+    m_metrics.reset();
     if (m_shutdown_done_cb) { m_shutdown_done_cb(true); }
 }
 
@@ -834,8 +881,8 @@ std::error_condition HomeBlks::remove_volume_internal(const boost::uuids::uuid& 
             cur_vol = it->second;
         }
 
-        /* Taking a reference on volume only to make sure that it won't get dereference while destroy is going on. One
-         * possible scenario if shutdown is called while remove is happening.
+        /* Taking a reference on volume only to make sure that it won't get dereference while destroy is going on.
+         * One possible scenario if shutdown is called while remove is happening.
          */
         cur_vol->destroy(([this, uuid, cur_vol](bool success) {
             if (success) {
@@ -933,6 +980,7 @@ void HomeBlks::meta_blk_recovery_comp(bool success) {
     HS_ASSERT(RELEASE, success, "failed to recover HomeBlks SB.");
 
     m_recovery_stats->phase0_done();
+    if (m_dev_mgr->is_first_time_boot()) { superblock_init(); }
 
     auto sb = (homeblks_sb*)m_homeblks_sb_buf->bytes;
     if (sb->test_flag(HOMEBLKS_SB_FLAGS_RESTRICTED)) {
@@ -1070,7 +1118,8 @@ void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) 
     m_sb_cookie = (void*)mblk;
 
     // recover from meta_blk;
-    m_homeblks_sb_buf = hs_utils::extract_byte_array(buf);
+    // TO DO: Might need to address alignment based on data or fast type
+    m_homeblks_sb_buf = hs_utils::extract_byte_array(buf, true, MetaBlkMgrSI()->get_align_size());
     auto* sb = (homeblks_sb*)(m_homeblks_sb_buf->bytes);
     HS_RELEASE_ASSERT_EQ(sb->version, hb_sb_version, "version does not match");
     HS_RELEASE_ASSERT_EQ(sb->magic, hb_sb_magic, "magic does not match");
@@ -1159,7 +1208,8 @@ bool HomeBlks::is_unclean_shutdown() const {
 
 void HomeBlks::reset_unclean_shutdown() { m_unclean_shutdown = false; }
 
-// Note: Metrics scrapping can happen at any point after volume instance is created and registered with metrics farm;
+// Note: Metrics scrapping can happen at any point after volume instance is created and registered with metrics
+// farm;
 void HomeBlksMetrics::on_gather() {
     auto hb = HomeBlks::instance();
     GAUGE_UPDATE(*this, boot_cnt, hb->get_boot_cnt());

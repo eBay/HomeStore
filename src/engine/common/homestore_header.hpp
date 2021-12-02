@@ -22,6 +22,7 @@ struct blob {
 } // namespace homeds
 
 namespace homestore {
+using hs_uuid_t = time_t;
 
 ENUM(io_flag, uint8_t,
      BUFFERED_IO, // should be set if file system doesn't support direct IOs and we are working on a file as a
@@ -32,8 +33,17 @@ ENUM(io_flag, uint8_t,
 
 ENUM(Op_type, uint8_t, READ, WRITE, UNMAP);
 
+VENUM(PhysicalDevGroup, uint8_t, DATA = 0, FAST = 1, META = 2);
+
+ENUM(HSDevType, uint8_t, Data, Fast);
+
 struct dev_info {
+    explicit dev_info(std::string name, const HSDevType type = HSDevType::Data) :
+            dev_names{std::move(name)}, dev_type{type} {}
+    std::string to_string() const { return fmt::format("{} - {}", dev_names, enum_name(dev_type)); }
+
     std::string dev_names;
+    HSDevType dev_type;
 };
 
 #define METRICS_DUMP_MSG sisl::MetricsFarm::getInstance().get_result_in_json_string()
@@ -78,5 +88,12 @@ std::string to_hex(T i) {
     return fmt::format("{0:x}", i);
 }
 
+typedef uint32_t crc32_t;
+typedef uint16_t csum_t;
+typedef int64_t seq_id_t;
+const csum_t init_crc_16 = 0x8005;
+
+static constexpr crc32_t init_crc32 = 0x12345678;
+static constexpr crc32_t INVALID_CRC32_VALUE = 0x0u;
 } // namespace homestore
 #endif

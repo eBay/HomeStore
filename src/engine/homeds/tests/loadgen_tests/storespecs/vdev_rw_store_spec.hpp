@@ -67,7 +67,7 @@ public:
         uint8_t* const buf{iomanager.iobuf_alloc(512, count)};
 
         const auto seeked_pos{m_store->lseek(off)};
-        const auto bytes_read{m_store->read(static_cast<void*>(buf), static_cast<size_t>(count))};
+        const auto bytes_read{m_store->read(static_cast< void* >(buf), static_cast< size_t >(count))};
 
         // verify seek is working fine;
         HS_ASSERT_CMP(DEBUG, static_cast< int64_t >(seeked_pos), ==, static_cast< int64_t >(off));
@@ -204,7 +204,7 @@ private:
     uint64_t m_write_cnt{0};
     mutable uint64_t m_read_cnt{0};
     uint64_t m_write_sz{0};
-    homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy >* m_store;
+    JournalVirtualDev* m_store;
     std::map< uint64_t, write_info > m_off_to_info_map; // off to write info
     std::vector< uint64_t > m_off_arr;                  // unique off write
     mutable std::mutex m_mtx;

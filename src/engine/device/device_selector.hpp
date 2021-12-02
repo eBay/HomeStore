@@ -3,14 +3,12 @@
 //
 #pragma once
 
-#include <cstdint>
 #include <vector>
-
 #include <folly/ThreadLocal.h>
-
-#include "virtual_dev.hpp"
+#include "engine/blkalloc/blk_allocator.h"
 
 namespace homestore {
+class PhysicalDev;
 
 class RoundRobinDeviceSelector {
 public:

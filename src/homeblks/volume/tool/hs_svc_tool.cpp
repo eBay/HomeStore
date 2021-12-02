@@ -1,11 +1,17 @@
-#include <fstream>
+#include <condition_variable>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
 
+#include <gtest/gtest.h>
+#include <iomgr/aio_drive_interface.hpp>
+#include <iomgr/iomgr.hpp>
 #include <sds_logging/logging.h>
 #include <sds_options/options.h>
-#include <gtest/gtest.h>
-#include <iomgr/iomgr.hpp>
-#include <iomgr/aio_drive_interface.hpp>
 
 #include "homeblks/home_blks.hpp"
 
@@ -32,13 +38,11 @@ static void gen_device_info(std::vector< dev_info >& device_info, uint32_t ndevi
             device_info.push_back(dev_info{gp.dev_names[i]});
         }
     } else {
-        for (uint32_t i = 0; i < ndevices; i++) {
-            std::string fpath = "/tmp/hs_svc_tool_" + std::to_string(i + 1);
-            std::ofstream ofs(fpath, std::ios::binary | std::ios::out);
-            ofs.seekp(dev_size - 1);
-            ofs.write("", 1);
-            ofs.close();
-            device_info.push_back({fpath});
+        for (uint32_t i{0}; i < ndevices; ++i) {
+            const std::filesystem::path fpath{"/tmp/hs_svc_tool_" + std::to_string(i + 1)};
+            std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
+            std::filesystem::resize_file(fpath, dev_size);
+            device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
         }
     }
 }
@@ -64,10 +68,10 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
 
     boost::uuids::string_generator gen;
     init_params params;
-    params.open_flags = homestore::io_flag::DIRECT_IO;
+    params.data_open_flags = homestore::io_flag::DIRECT_IO;
     params.min_virtual_page_size = 4096;
     params.app_mem_size = app_mem_size;
-    params.devices = device_info;
+    params.data_devices = device_info;
     params.init_done_cb = [&tl_start_mutex = start_mutex, &tl_cv = cv, &tl_inited = inited](std::error_condition err,
                                                                                             const out_params& params) {
         LOGINFO("HomeBlks Init completed");
@@ -87,15 +91,6 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
         cv.wait(lk, [] { return inited; });
     }
 }
-
-#if 0
-static iomgr::drive_attributes get_drive_attrs(const std::vector< dev_info >& devices,
-                                               const iomgr::iomgr_drive_type drive_type) {
-    auto drive_iface = iomgr::IOManager::instance().default_drive_interface();
-    iomgr::drive_attributes attr = drive_iface->get_attributes(devices[0].dev_names, drive_type);
-    return attr;
-}
-#endif
 
 /************************* CLI options ***************************/
 
@@ -149,11 +144,7 @@ int main(int argc, char* argv[]) {
 
     HS_DEBUG_ASSERT_EQ(device_info.size() > 0, true);
 
-    auto drive_type = iomgr::iomgr_drive_type::unknown;
-
-    if (gp.zero_boot_sb) {
-        VolInterface::get_instance()->zero_boot_sbs(device_info, drive_type, homestore::io_flag::DIRECT_IO);
-    }
+    if (gp.zero_boot_sb) { VolInterface::get_instance()->zero_boot_sbs(device_info); }
 
     iomanager.stop();
 

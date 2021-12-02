@@ -23,16 +23,15 @@ struct sb_blkstore_blob;
 struct MetaSubRegInfo;
 struct BlkId;
 class BlkBuffer;
-template < typename BAllocator, typename Buffer >
+template < typename Buffer >
 class BlkStore;
-class VdevVarSizeBlkAllocatorPolicy;
 
-typedef homestore::BlkStore< homestore::VdevVarSizeBlkAllocatorPolicy, BlkBuffer > blk_store_t;
+typedef homestore::BlkStore< BlkBuffer > blk_store_t;
+
 // each subsystem could receive callbacks multiple times
 // NOTE: look at this prototype some other time for const correctness and efficiency
-typedef std::function< void(meta_blk* mblk, sisl::byte_view buf,
-                            size_t size) >
-    meta_blk_found_cb_t; // new blk found subsystem callback
+// new blk found subsystem callback
+typedef std::function< void(meta_blk* mblk, sisl::byte_view buf, size_t size) > meta_blk_found_cb_t;
 typedef std::string meta_sub_type;
 typedef std::function< void(bool success) > meta_blk_recover_comp_cb_t; // recover complete subsystem callbacks;
 typedef std::map< uint64_t, meta_blk* > meta_blk_map_t;                 // blkid to meta_blk map;
@@ -41,7 +40,7 @@ typedef std::map< meta_sub_type, MetaSubRegInfo > client_info_map_t;    // clien
 
 class MetablkMetrics : public sisl::MetricsGroupWrapper {
 public:
-    explicit MetablkMetrics(const char* const inst_name) : sisl::MetricsGroupWrapper{"MetaBlkStore", inst_name} {
+    explicit MetablkMetrics(const char* inst_name) : sisl::MetricsGroupWrapper{"MetaBlkStore", inst_name} {
         REGISTER_COUNTER(compress_success_cnt, "compression successful cnt");
         REGISTER_COUNTER(compress_backoff_memory_cnt, "compression back-off cnt because of exceending memory limit")
         REGISTER_COUNTER(compress_backoff_ratio_cnt, "compression back-off cnt because of exceeding ratio limit");
@@ -91,7 +90,7 @@ public:
      * @param init : true of initialized, false if recovery
      * @return
      */
-    void start(blk_store_t* const sb_blk_store, const sb_blkstore_blob* const blob, const bool is_init);
+    void start(blk_store_t* sb_blk_store, const sb_blkstore_blob* blob, const bool is_init);
 
     void stop();
 
@@ -132,7 +131,7 @@ public:
      *                 Subsystem is supposed to use this cookie to do update and remove of the sb;
      *
      */
-    void add_sub_sb(const meta_sub_type type, const void* const context_data, const uint64_t sz, void*& cookie);
+    void add_sub_sb(const meta_sub_type type, const void* context_data, const uint64_t sz, void*& cookie);
 
     /**
      * @brief : remove subsystem sb based on cookie
@@ -141,7 +140,7 @@ public:
      *
      * @return : ok on success, not-ok on failure;
      */
-    [[nodiscard]] std::error_condition remove_sub_sb(void* const cookie);
+    [[nodiscard]] std::error_condition remove_sub_sb(void* cookie);
 
     /**
      * @brief : update metablk in-place
@@ -151,7 +150,7 @@ public:
      * @param sz : size of context_data
      * @param cookie : handle to address the unique subsytem sb that is being updated;
      */
-    void update_sub_sb(const void* const context_data, const uint64_t sz, void*& cookie);
+    void update_sub_sb(const void* context_data, const uint64_t sz, void*& cookie);
 
     // size_t read_sub_sb(const meta_sub_type type, sisl::byte_view& buf);
     void read_sub_sb(const meta_sub_type type);
@@ -196,11 +195,12 @@ public:
      *
      * @return : size of space occupied by this meta blk;
      */
-    [[nodiscard]] uint64_t get_meta_size(const void* const cookie) const;
+    [[nodiscard]] uint64_t get_meta_size(const void* cookie) const;
 
     [[nodiscard]] uint64_t meta_blk_context_sz() const;
 
     [[nodiscard]] uint64_t ovf_blk_max_num_data_blk() const;
+    [[nodiscard]] uint32_t get_align_size() const;
 
 public:
     /*********************** static public function **********************/
@@ -227,9 +227,9 @@ private:
      *
      * @return
      */
-    void write_meta_blk_to_disk(meta_blk* const mblk);
+    void write_meta_blk_to_disk(meta_blk* mblk);
 
-    void write_ovf_blk_to_disk(meta_blk_ovf_hdr* const ovf_hdr, const void* const context_data, const uint64_t sz,
+    void write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const void* context_data, const uint64_t sz,
                                const uint64_t offset, const std::string& type);
 
     /**
@@ -237,7 +237,7 @@ private:
      *
      * @param bid : the blk id that belongs to meta ssb;
      */
-    void load_ssb(const sb_blkstore_blob* const blob);
+    void load_ssb(const sb_blkstore_blob* blob);
 
     /**
      * @brief : init super super block
@@ -258,7 +258,7 @@ private:
     void alloc_meta_blk(BlkId& bid);
     void alloc_meta_blk(const uint64_t size, std::vector< BlkId >& bid);
 
-    void free_meta_blk(meta_blk* const mblk);
+    void free_meta_blk(meta_blk* mblk);
 
     /**
      * @brief : free the overflow blk chain
@@ -277,7 +277,7 @@ private:
      *
      * @return
      */
-    [[nodiscard]] meta_blk* init_meta_blk(BlkId& bid, const meta_sub_type type, const void* const context_data,
+    [[nodiscard]] meta_blk* init_meta_blk(BlkId& bid, const meta_sub_type type, const void* context_data,
                                           const size_t sz);
 
     /**
@@ -288,7 +288,7 @@ private:
      * @param sz
      * @param offset
      */
-    void write_meta_blk_ovf(BlkId& bid, const void* const context_data, const uint64_t sz, const std::string& type);
+    void write_meta_blk_ovf(BlkId& bid, const void* context_data, const uint64_t sz, const std::string& type);
 
     /**
      * @brief : internal implementation of populating and writing a meta block;
@@ -297,7 +297,7 @@ private:
      * @param context_data
      * @param sz
      */
-    void write_meta_blk_internal(meta_blk* const mblk, const void* context_data, const uint64_t sz);
+    void write_meta_blk_internal(meta_blk* mblk, const void* context_data, const uint64_t sz);
 
     /**
      * @brief : sync read;
@@ -305,7 +305,7 @@ private:
      * @param bid
      * @param b
      */
-    void read(const BlkId& bid, void* const dest, const size_t sz) const;
+    void read(const BlkId& bid, void* dest, const size_t sz) const;
 
     void cache_clear();
 
@@ -315,7 +315,7 @@ private:
      * @param mblk
      * @param buf
      */
-    sisl::byte_array read_sub_sb_internal(const meta_blk* const mblk) const;
+    sisl::byte_array read_sub_sb_internal(const meta_blk* mblk) const;
 
     void free_compress_buf();
     void alloc_compress_buf(size_t size);
@@ -333,7 +333,7 @@ private:
      *
      * @param cookie
      */
-    void _cookie_sanity_check(const void* const cookie) const;
+    void _cookie_sanity_check(const void* cookie) const;
 
     /**
      * @brief :  On-disk sanity check by walking through meta blk chain for sanity check;

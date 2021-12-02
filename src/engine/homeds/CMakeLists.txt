@@ -64,6 +64,7 @@ if (${non_io_tests})
     add_test(NAME BTreeCRUD COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_btree_crud)
     add_test(NAME Hash COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_hash)
     add_test(NAME Avector COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_avector)
+    # TODO: NEED TO BE FIXED SOON. Disabling this temporarily till we make api changes and fix this one
     add_test(NAME TestLoad COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*SimpleKVMemTest*)
     add_test(NAME TestLoadCache COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*Cache*)
     add_test(NAME TestLoadVDev_RW COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_load --gtest_filter=*VDevTest_RW*)

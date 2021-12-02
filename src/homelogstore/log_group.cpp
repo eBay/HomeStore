@@ -7,17 +7,17 @@ namespace homestore {
 SDS_LOGGING_DECL(logstore)
 
 LogGroup::LogGroup() = default;
-void LogGroup::start(const uint64_t flush_multiple_size) {
+void LogGroup::start(const uint64_t flush_multiple_size, const uint32_t align_size) {
     m_iovecs.reserve(estimated_iovs);
     m_flush_multiple_size = flush_multiple_size;
 
+    // TO DO: Might need to differentiate based on data or fast type
     m_cur_buf_len = sisl::round_up(inline_log_buf_size, flush_multiple_size);
-    m_log_buf = sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logwrite >::make_sized(
-        HS_STATIC_CONFIG(drive_attr.align_size), m_cur_buf_len);
+    m_log_buf = sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logwrite >::make_sized(align_size, m_cur_buf_len);
 
     m_footer_buf_len = sisl::round_up(sizeof(log_group_footer), flush_multiple_size);
-    m_footer_buf = sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logwrite >::make_sized(
-        HS_STATIC_CONFIG(drive_attr.align_size), m_footer_buf_len);
+    m_footer_buf =
+        sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logwrite >::make_sized(align_size, m_footer_buf_len);
 }
 
 void LogGroup::stop() {

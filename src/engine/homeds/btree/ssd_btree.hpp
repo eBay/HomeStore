@@ -45,7 +45,7 @@ public:
     }
 
     BtreeStore(ssd_btree_t* btree, BtreeConfig& cfg) : m_btree(btree), m_btree_cfg(cfg) {
-        m_wb_cache = std::make_shared< wb_cache_t >(cfg.blkstore, cfg.align_size,
+        m_wb_cache = std::make_shared< wb_cache_t >(cfg.blkstore, cfg.get_node_size(),
                                                     bind_this(SSDBtreeStore::cp_done_store, 1), cfg.trigger_cp_cb);
         m_node_size = cfg.get_node_size();
         m_btree_cfg.set_node_area_size(m_node_size - sizeof(LeafPhysicalNode));
@@ -458,10 +458,11 @@ public:
     /************************** Journal entry section **********************/
     static sisl::io_blob make_journal_entry(journal_op op, bool is_root, const btree_cp_ptr& bcp,
                                             bt_node_gen_pair pair = {empty_bnodeid, 0}) {
+        // TO DO: Might need to address alignment based on data or fast type
         auto b =
             hs_utils::create_io_blob(journal_entry_initial_size(),
                                      HomeLogStoreMgr::data_logdev().is_aligned_buf_needed(journal_entry_initial_size()),
-                                     sisl::buftag::btree_journal);
+                                     sisl::buftag::btree_journal, HomeLogStoreMgr::data_logdev().get_align_size());
         new (b.bytes) btree_journal_entry(op, is_root, pair, bcp->cp_id);
         return b;
     }
@@ -541,9 +542,10 @@ private:
         uint16_t avail_size = b.size - entry->actual_size;
         if (avail_size < append_size) {
             auto new_size = sisl::round_up(entry->actual_size + append_size, journal_entry_alloc_increment);
+            // TO DO: Might need to differentiate based on data or fast type
             b.buf_realloc(new_size,
                           HomeLogStoreMgr::data_logdev().is_aligned_buf_needed(new_size)
-                              ? HS_STATIC_CONFIG(drive_attr.align_size)
+                              ? m_blkstore->get_vdev()->get_align_size()
                               : 0);
         }
         return blob_to_entry(b); // Get the revised entry from blob before returning
@@ -560,11 +562,11 @@ private:
     uint64_t m_replayed_count = 0;
 
 private:
-    static homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, wb_cache_buffer_t >* m_blkstore;
+    static homestore::BlkStore< wb_cache_buffer_t >* m_blkstore;
 };
 
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
-homestore::BlkStore< homestore::VdevFixedBlkAllocatorPolicy, wb_cache_buffer_t >* SSDBtreeStore::m_blkstore;
+homestore::BlkStore< wb_cache_buffer_t >* SSDBtreeStore::m_blkstore;
 
 } // namespace btree
 } // namespace homeds

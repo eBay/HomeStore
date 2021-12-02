@@ -45,6 +45,9 @@ table BlkAllocator {
      * specified in ms. Default to 5 minutes. Having this value too low will cause more CPU usage in scanning
      * the bitmap, setting too high will cause run-out-of-slabs during allocation and thus cause increased write latency */
     free_blk_cache_refill_frequency_ms: uint64 =  300000;
+
+    /* Number of global variable block size allocator sweeping threads */
+    num_slab_sweeper_threads: uint32 = 2;
 }
 
 table Btree {

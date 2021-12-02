@@ -5,9 +5,10 @@
 #include <iomgr/iomgr.hpp>
 #include <sisl/utility/thread_factory.hpp>
 
+#include "api/meta_interface.hpp"
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_status_mgr.hpp"
-
+#include "engine/homestore_base.hpp"
 #include "log_dev.hpp"
 #include "log_store.hpp"
 

@@ -18,8 +18,8 @@
 #include <fmt/format.h>
 #include <sds_logging/logging.h>
 
-#include "engine/blkstore/blkstore.hpp"
-#include "engine/homestore_base.hpp"
+#include "engine/device/journal_vdev.hpp"
+#include "engine/common/homestore_config.hpp"
 #include "homelogstore/logstore_header.hpp"
 
 namespace homestore {
@@ -230,7 +230,7 @@ public:
     LogGroup& operator=(LogGroup&&) noexcept = delete;
     ~LogGroup() = default;
 
-    void start(const uint64_t flush_size_multiple);
+    void start(const uint64_t flush_size_multiple, const uint32_t align_size);
     void stop();
     void reset(const uint32_t max_records);
     void create_overflow_buf(const uint32_t min_needed);
@@ -305,7 +305,7 @@ struct logdev_req;
 #define to_logdev_req(req) boost::static_pointer_cast< logdev_req >(req)
 typedef boost::intrusive_ptr< logdev_req > logdev_req_ptr;
 
-struct logdev_req : public blkstore_req< BlkBuffer > {
+struct logdev_req : public virtualdev_req {
 public:
     [[nodiscard]] static boost::intrusive_ptr< logdev_req > make_request() {
         return boost::intrusive_ptr< logdev_req >{sisl::ObjectAllocator< logdev_req >::make_object()};
@@ -321,8 +321,8 @@ public:
 
     // virtual size_t get_your_size() const override { return sizeof(ssd_loadgen_req); }
 
-    [[nodiscard]] static logdev_req_ptr cast(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req) {
-        return boost::static_pointer_cast< logdev_req >(bs_req);
+    [[nodiscard]] static logdev_req_ptr cast(const boost::intrusive_ptr< virtualdev_req >& vd_req) {
+        return boost::static_pointer_cast< logdev_req >(vd_req);
     }
 
     LogGroup* m_log_group;
@@ -482,7 +482,8 @@ private:
     [[nodiscard]] bool resize_if_needed();
 
     [[nodiscard]] uint32_t required_sb_size(const uint32_t nstores) const {
-        return sisl::round_up(size_needed(nstores), HS_STATIC_CONFIG(drive_attr.phys_page_size));
+        // TO DO: Might need to differentiate based on data or fast type
+        return size_needed(nstores);
     }
 
     [[nodiscard]] uint32_t size_needed(const uint32_t nstores) const {
@@ -499,9 +500,10 @@ private:
     std::set< logstore_id_t > m_store_info;
 };
 
+class HomeStoreBase;
 class log_stream_reader {
 public:
-    log_stream_reader(const off_t device_cursor, logdev_blkstore_t* store, const uint64_t min_read_size);
+    log_stream_reader(const off_t device_cursor, JournalVirtualDev* store, const uint64_t min_read_size);
     log_stream_reader(const log_stream_reader&) = delete;
     log_stream_reader& operator=(const log_stream_reader&) = delete;
     log_stream_reader(log_stream_reader&&) noexcept = delete;
@@ -516,7 +518,7 @@ private:
 
 private:
     boost::intrusive_ptr< HomeStoreBase > m_hb;
-    logdev_blkstore_t* m_blkstore;
+    JournalVirtualDev* m_blkstore;
     sisl::byte_view m_cur_log_buf;
     off_t m_first_group_cursor;
     off_t m_cur_read_bytes{0};
@@ -554,7 +556,7 @@ public:
      * @param format: Do we need to format the logdev or not.
      * @param blk_store: The blk_store associated to this logdev
      */
-    void start(const bool format, logdev_blkstore_t* blk_store);
+    void start(const bool format, JournalVirtualDev* blk_store);
 
     /**
      * @brief Stop the logdev. It resets all the parameters it is using and thus can be started later
@@ -633,7 +635,7 @@ public:
     void register_store_found_cb(const store_found_callback& cb) { m_store_found_cb = cb; }
 
     // callback from blkstore, registered at blkstore creation;
-    void process_logdev_completions(const boost::intrusive_ptr< blkstore_req< BlkBuffer > >& bs_req);
+    void process_logdev_completions(const boost::intrusive_ptr< virtualdev_req >& vd_req);
 
     /**
      * @brief Reserve logstore id and persist if needed. It persists the entire map about the logstore id inside the
@@ -707,6 +709,7 @@ public:
     }
 
     uint64_t get_flush_size_multiple() const { return m_flush_size_multiple; }
+    uint32_t get_align_size() const;
 
 private:
     [[nodiscard]] LogGroup* make_log_group(const uint32_t estimated_records) {
@@ -739,7 +742,7 @@ private:
     std::atomic< bool > m_is_flushing{false}; // Is LogDev currently flushing (so far supports one flusher at a time)
     bool m_stopped{false}; // Is Logdev stopped. We don't need lock here, because it is updated under flush lock
     logstore_family_id_t m_family_id; // The family id this logdev is part of
-    logdev_blkstore_t* m_blkstore{nullptr};
+    JournalVirtualDev* m_blkstore{nullptr};
     boost::intrusive_ptr< HomeStoreBase > m_hb; // Back pointer to homestore
 
     std::map< logid_t, logstore_id_t > m_garbage_store_ids;

@@ -12,6 +12,7 @@ from time import sleep
 import requests
 from threading import Thread
 
+
 opts,args = getopt.getopt(sys.argv[1:], 'tdlm:', ['test_suits=', 'dirpath=', 'dev_list=', 'log_mods='] ) 
 test_suits = ""
 dirpath = "./"
@@ -50,10 +51,10 @@ meta_flip_list = ["write_sb_abort", "write_with_ovf_abort", "remove_sb_abort", "
 vdev_flip_list = ["abort_before_update_eof_cur_chunk", "abort_after_update_eof_cur_chunk", "abort_after_update_eof_next_chunk"]
 
 def recovery():
-    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file=0"
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file=0 --emulate_hdd_cnt=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 --remove_file=1 --delete_volume=1"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 --remove_file=1 --delete_volume=1 --emulate_hdd_cnt=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery passed")
 

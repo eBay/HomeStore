@@ -1,3 +1,10 @@
+include (${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
+include_directories (BEFORE ..)
+set(BLKSTORE_SOURCE
+    blkbuffer.cpp
+    )
+add_library(hs_blkstore OBJECT ${BLKSTORE_SOURCE})
+
 message(INFO "BlkStore test disabled due to interface change.")
 # XXX: Out of date with BlkStore interface
 #set(TEST_BLKSTORE_SOURCE_FILES

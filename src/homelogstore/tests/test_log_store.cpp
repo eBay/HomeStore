@@ -403,8 +403,8 @@ public:
         LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
         if (!restart) init_files(ndevices, dev_size);
         for (uint32_t i{0}; i < ndevices; ++i) {
-            const std::string fpath{s_fpath_root + std::to_string(i + 1)};
-            device_info.push_back({fpath});
+            const std::filesystem::path fpath{s_fpath_root + std::to_string(i + 1)};
+            device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
         }
 
         bool is_spdk{SDS_OPTIONS["spdk"].as< bool >()};
@@ -429,10 +429,10 @@ public:
 
         boost::uuids::string_generator gen;
         init_params params;
-        params.open_flags = homestore::io_flag::DIRECT_IO;
+        params.data_open_flags = homestore::io_flag::DIRECT_IO;
         params.min_virtual_page_size = 4096;
         params.app_mem_size = app_mem_size;
-        params.devices = device_info;
+        params.data_devices = device_info;
         params.init_done_cb = [&tl_cv = cv, &tl_start_mutex = start_mutex,
                                &tl_inited = inited](std::error_condition err, const out_params& params) {
             LOGINFO("HomeBlks Init completed");
@@ -481,7 +481,6 @@ public:
             const std::string fpath{s_fpath_root + std::to_string(i + 1)};
             std::ofstream ofs{fpath, std::ios::binary | std::ios::out | std::ios::trunc};
             std::filesystem::resize_file(fpath, dev_size);
-            ofs.close();
         }
     }
 
