@@ -496,7 +496,7 @@ void HomeBlks::attach_end_of_batch_cb(const end_of_batch_callback& cb) {
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
     m_cfg.vol_mounted_cb(vol, state);
-    VOL_INFO_LOG(vol->get_uuid(), " Mounted the volume in state {}", state);
+    VOL_INFO_LOG(vol->get_uuid(), " Mounted the volume:{} in state {}", vol->get_name(), state);
 }
 
 bool HomeBlks::vol_state_change(const VolumePtr& vol, vol_state new_state) {
