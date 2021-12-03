@@ -40,9 +40,9 @@ void LogDev::meta_blk_found(meta_blk* const mblk, const sisl::byte_view buf, con
 uint32_t LogDev::get_align_size() const { return m_blkstore->get_align_size(); }
 
 void LogDev::start(const bool format, JournalVirtualDev* blk_store) {
-    HS_ASSERT(LOGMSG, (m_append_comp_cb != nullptr), "Expected Append callback to be registered");
-    HS_ASSERT(LOGMSG, (m_store_found_cb != nullptr), "Expected Log store found callback to be registered");
-    HS_ASSERT(LOGMSG, (m_logfound_cb != nullptr), "Expected Logs found callback to be registered");
+    HS_LOG_ASSERT((m_append_comp_cb != nullptr), "Expected Append callback to be registered");
+    HS_LOG_ASSERT((m_store_found_cb != nullptr), "Expected Log store found callback to be registered");
+    HS_LOG_ASSERT((m_logfound_cb != nullptr), "Expected Logs found callback to be registered");
 
     m_blkstore = blk_store;
     m_hb = HomeStoreBase::safe_instance();
@@ -57,11 +57,11 @@ void LogDev::start(const bool format, JournalVirtualDev* blk_store) {
 
     // First read the info block
     if (format) {
-        HS_ASSERT(LOGMSG, m_logdev_meta.is_empty(), "Expected meta to be not present");
+        HS_LOG_ASSERT(m_logdev_meta.is_empty(), "Expected meta to be not present");
         [[maybe_unused]] auto* const superblock{m_logdev_meta.create()};
         m_blkstore->update_data_start_offset(0);
     } else {
-        HS_ASSERT(LOGMSG, !m_logdev_meta.is_empty(), "Expected meta data to be read already before loading");
+        HS_LOG_ASSERT(!m_logdev_meta.is_empty(), "Expected meta data to be read already before loading");
         const auto store_list{m_logdev_meta.load()};
 
         // Notify to the caller that a new log store was reserved earlier and it is being loaded, with its meta info
@@ -84,8 +84,7 @@ void LogDev::stop() {
     // this should be static so that it stays in scope in the lambda in case function ends before lambda completes
     static thread_local std::condition_variable cv;
 
-    HS_ASSERT(LOGMSG, (m_pending_flush_size == 0),
-              "LogDev stop attempted while writes to logdev are pending completion");
+    HS_LOG_ASSERT((m_pending_flush_size == 0), "LogDev stop attempted while writes to logdev are pending completion");
     const bool locked_now{try_lock_flush([this, &tl_cv = cv]() {
         {
             std::unique_lock< std::mutex > lk{m_block_flush_q_mutex};
@@ -143,12 +142,12 @@ void LogDev::do_load(const off_t device_cursor) {
             break;
         }
 
-        HS_ASSERT_CMP(RELEASE, header->start_idx(), ==, m_log_idx, "log indx is not the expected one");
+        HS_REL_ASSERT_EQ(header->start_idx(), m_log_idx, "log indx is not the expected one");
         if (loaded_from == -1) { loaded_from = header->start_idx(); }
 
         // Loop through each record within the log group and do a callback
         decltype(header->nrecords()) i{0};
-        HS_RELEASE_ASSERT_GT(header->nrecords(), 0, "nrecords greater then zero");
+        HS_REL_ASSERT_GT(header->nrecords(), 0, "nrecords greater then zero");
         const auto flush_ld_key{
             logdev_key{header->start_idx() + header->nrecords() - 1, group_dev_offset + header->total_size()}};
         while (i < header->nrecords()) {
@@ -185,10 +184,10 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
         const auto buf{lstream.group_in_next_page()};
         if (buf.size() != 0) {
             const log_group_header* const header{reinterpret_cast< log_group_header* >(buf.bytes())};
-            HS_ASSERT_CMP(RELEASE, m_log_idx.load(std::memory_order_acquire), >, header->start_idx(),
-                          "Found a header with future log_idx after reaching end of log. Hence rbuf which was read "
-                          "must have been corrupted, Header: {}",
-                          *header);
+            HS_REL_ASSERT_GT(m_log_idx.load(std::memory_order_acquire), header->start_idx(),
+                             "Found a header with future log_idx after reaching end of log. Hence rbuf which was read "
+                             "must have been corrupted, Header: {}",
+                             *header);
         }
     }
 }
@@ -221,14 +220,13 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
     }
     auto* rbuf{read_buf.get()};
     auto size = m_blkstore->pread(static_cast< void* >(rbuf), initial_read_size, key.dev_offset);
-    HS_ASSERT_CMP(RELEASE, size, ==, initial_read_size, "it is not completely read");
+    HS_REL_ASSERT_EQ(size, initial_read_size, "it is not completely read");
 
     const auto* const header{reinterpret_cast< log_group_header* >(rbuf)};
-    HS_RELEASE_ASSERT_EQ(header->magic_word(), LOG_GROUP_HDR_MAGIC, "Log header corrupted with magic mismatch!");
-    HS_RELEASE_ASSERT_EQ(header->get_version(), log_group_header::header_version, "Log header version mismatch!");
-    HS_RELEASE_ASSERT_LE(header->start_idx(), key.idx, "log key offset does not match with log_idx");
-    HS_RELEASE_ASSERT_GT((header->start_idx() + header->nrecords()), key.idx,
-                         "log key offset does not match with log_idx");
+    HS_REL_ASSERT_EQ(header->magic_word(), LOG_GROUP_HDR_MAGIC, "Log header corrupted with magic mismatch!");
+    HS_REL_ASSERT_EQ(header->get_version(), log_group_header::header_version, "Log header version mismatch!");
+    HS_REL_ASSERT_LE(header->start_idx(), key.idx, "log key offset does not match with log_idx");
+    HS_REL_ASSERT_GT((header->start_idx() + header->nrecords()), key.idx, "log key offset does not match with log_idx");
     HS_LOG_ASSERT_GE(header->total_size(), header->_inline_data_offset(), "Inconsistent size data in log group");
 
     // We can only do crc match in read if we have read all the blocks. We don't want to aggressively read more data
@@ -236,7 +234,7 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
     if (header->total_size() <= initial_read_size) {
         const crc32_t crc{crc32_ieee(init_crc32, reinterpret_cast< const uint8_t* >(rbuf) + sizeof(log_group_header),
                                      header->total_size() - sizeof(log_group_header))};
-        HS_ASSERT_CMP(RELEASE, header->this_group_crc(), ==, crc, "CRC mismatch on read data");
+        HS_REL_ASSERT_EQ(header->this_group_crc(), crc, "CRC mismatch on read data");
     }
 
     const serialized_log_record* const record_header{header->nth_record(key.idx - header->start_log_idx)};
@@ -324,11 +322,10 @@ LogGroup* LogDev::prepare_flush(const int32_t estimated_records) {
     if (sisl_unlikely(flushing_upto_idx == -1)) { return nullptr; }
     lg->m_flush_log_idx_from = m_last_flush_idx + 1;
     lg->m_flush_log_idx_upto = flushing_upto_idx;
-    HS_DEBUG_ASSERT_GE(lg->m_flush_log_idx_upto, lg->m_flush_log_idx_from,
-                       "log indx upto is smaller then log indx from");
+    HS_DBG_ASSERT_GE(lg->m_flush_log_idx_upto, lg->m_flush_log_idx_from, "log indx upto is smaller then log indx from");
     lg->m_log_dev_offset = m_blkstore->alloc_next_append_blk(lg->header()->total_size());
 
-    HS_RELEASE_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
+    HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
     assert(lg->header()->oob_data_offset > 0);
     THIS_LOGDEV_LOG(DEBUG, "Flushing upto log_idx={}", flushing_upto_idx);
     THIS_LOGDEV_LOG(DEBUG, "Log Group: {}", *lg);
@@ -374,7 +371,7 @@ bool LogDev::flush_if_needed() {
             return false;
         }
         auto sz = m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
-        HS_RELEASE_ASSERT_GE((sz - lg->actual_data_size()), 0, "size {} lg size{}", sz, lg->actual_data_size());
+        HS_REL_ASSERT_GE((sz - lg->actual_data_size()), 0, "size {} lg size{}", sz, lg->actual_data_size());
 
         THIS_LOGDEV_LOG(TRACE, "Flush prepared, flushing data size={}", lg->actual_data_size());
         do_flush(lg);
@@ -406,7 +403,7 @@ void LogDev::do_flush(LogGroup* const lg) {
 void LogDev::process_logdev_completions(const boost::intrusive_ptr< virtualdev_req >& vd_req) {
     const auto req{to_logdev_req(vd_req)};
     if (vd_req->err != no_error) {
-        HS_RELEASE_ASSERT(0, "error {} happen during op {}", vd_req->err.message(), req->is_read);
+        HS_REL_ASSERT(0, "error {} happen during op {}", vd_req->err.message(), req->is_read);
     }
     if (req->is_read) {
         // update logdev read metrics;
@@ -573,8 +570,8 @@ void LogDevMetadata::meta_buf_found(const sisl::byte_view& buf, void* const meta
     m_raw_buf = hs_utils::extract_byte_array(buf, true, MetaBlkMgrSI()->get_align_size());
     m_sb = reinterpret_cast< logdev_superblk* >(m_raw_buf->bytes);
 
-    HS_RELEASE_ASSERT_EQ(m_sb->get_magic(), logdev_superblk::LOGDEV_SB_MAGIC, "Invalid logdev metablk, magic mismatch");
-    HS_RELEASE_ASSERT_EQ(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Invalid version of logdev metablk");
+    HS_REL_ASSERT_EQ(m_sb->get_magic(), logdev_superblk::LOGDEV_SB_MAGIC, "Invalid logdev metablk, magic mismatch");
+    HS_REL_ASSERT_EQ(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Invalid version of logdev metablk");
 }
 
 std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::load() {
@@ -582,8 +579,8 @@ std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::loa
     ret_list.reserve(1024);
     m_id_reserver = std::make_unique< sisl::IDReserver >(store_capacity());
 
-    HS_RELEASE_ASSERT_NE(m_raw_buf->bytes, nullptr, "Load called without getting metadata");
-    HS_RELEASE_ASSERT_LE(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Logdev super blk version mismatch");
+    HS_REL_ASSERT_NE(m_raw_buf->bytes, nullptr, "Load called without getting metadata");
+    HS_REL_ASSERT_LE(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Logdev super blk version mismatch");
 
     const logstore_superblk* const store_sb{m_sb->get_logstore_superblk()};
     logstore_id_t idx{0};

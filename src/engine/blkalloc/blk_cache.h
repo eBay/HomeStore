@@ -72,7 +72,7 @@ public:
     [[nodiscard]] blk_num_t get_blk_num() const { return m_blk_num; }
 
     void set_nblks(const blk_count_t nblks) {
-        HS_DEBUG_ASSERT_LE(nblks, BlkId::max_blks_in_op());
+        HS_DBG_ASSERT_LE(nblks, BlkId::max_blks_in_op());
         m_nblks = static_cast< blk_count_serialized_t >(nblks - 1);
     }
     [[nodiscard]] blk_count_t get_nblks() const { return static_cast< blk_count_t >(m_nblks) + 1; }

@@ -316,7 +316,7 @@ void HomeBlksHttpServer::crash_system(sisl::HttpCallData cd) {
 
     std::string resp = "";
     if (crash_type.empty() || boost::iequals(crash_type, "assert")) {
-        HS_RELEASE_ASSERT(0, "Fake Assert in response to an http request");
+        HS_REL_ASSERT(0, "Fake Assert in response to an http request");
     } else if (boost::iequals(crash_type, "segv")) {
         int* x{nullptr};
         LOGINFO("Simulating a segv with dereferencing nullptr={}", *x);

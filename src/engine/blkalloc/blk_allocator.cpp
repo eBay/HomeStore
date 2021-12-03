@@ -69,8 +69,8 @@ BlkAllocStatus BlkAllocator::alloc_on_disk(const BlkId& in_bid) {
         {
             auto lock{portion->portion_auto_lock()};
             if (m_inited) {
-                BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_reset(in_bid.get_blk_num(), in_bid.get_nblks()),
-                                "Expected disk blks to reset");
+                BLKALLOC_REL_ASSERT(get_disk_bm()->is_bits_reset(in_bid.get_blk_num(), in_bid.get_nblks()),
+                                    "Expected disk blks to reset");
             }
             get_disk_bm()->set_bits(in_bid.get_blk_num(), in_bid.get_nblks());
             portion->decrease_available_blocks(in_bid.get_nblks());
@@ -98,8 +98,9 @@ BlkAllocStatus BlkAllocator::alloc_on_realtime(const BlkId& b) {
                         BLKALLOC_LOG(ERROR, "bit not reset {}", b.get_blk_num() + i);
                     }
                 }
-                BLKALLOC_ASSERT(RELEASE, get_realtime_bm()->is_bits_reset(b.get_blk_num(), b.get_nblks()),
-                                "Expected disk bits to reset blk num {} num blks {}", b.get_blk_num(), b.get_nblks());
+                BLKALLOC_REL_ASSERT(get_realtime_bm()->is_bits_reset(b.get_blk_num(), b.get_nblks()),
+                                    "Expected disk bits to reset blk num {} num blks {}", b.get_blk_num(),
+                                    b.get_nblks());
             }
         }
         get_realtime_bm()->set_bits(b.get_blk_num(), b.get_nblks());
@@ -160,8 +161,8 @@ void BlkAllocator::free_on_disk(const BlkId& b) {
                         BLKALLOC_LOG(ERROR, "bit not set {}", b.get_blk_num() + i);
                     }
                 }
-                BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks()),
-                                "Expected disk bits to set blk num {} num blks {}", b.get_blk_num(), b.get_nblks());
+                BLKALLOC_REL_ASSERT(get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks()),
+                                    "Expected disk bits to set blk num {} num blks {}", b.get_blk_num(), b.get_nblks());
             }
         }
         get_disk_bm()->reset_bits(b.get_blk_num(), b.get_nblks());
@@ -180,7 +181,7 @@ sisl::byte_array BlkAllocator::cp_start([[maybe_unused]] const std::shared_ptr< 
     // wait for all I/Os that are still in critical section (allocating on disk bm) to complete and exit;
     synchronize_rcu();
 
-    BLKALLOC_ASSERT(RELEASE, old_alloc_list_ptr == nullptr, "Expecting alloc list to be nullptr");
+    BLKALLOC_REL_ASSERT(old_alloc_list_ptr == nullptr, "Expecting alloc list to be nullptr");
     return (m_disk_bm->serialize(m_cfg.get_align_size()));
 }
 
@@ -208,8 +209,8 @@ void BlkAllocator::create_debug_bm() {
 }
 
 void BlkAllocator::update_debug_bm(const BlkId& bid) {
-    BLKALLOC_ASSERT(RELEASE, get_disk_bm()->is_bits_set(bid.get_blk_num(), bid.get_nblks()),
-                    "Expected disk bits to set blk num {} num blks {}", bid.get_blk_num(), bid.get_nblks());
+    BLKALLOC_REL_ASSERT(get_disk_bm()->is_bits_set(bid.get_blk_num(), bid.get_nblks()),
+                        "Expected disk bits to set blk num {} num blks {}", bid.get_blk_num(), bid.get_nblks());
     get_debug_bm()->set_bits(bid.get_blk_num(), bid.get_nblks());
 }
 

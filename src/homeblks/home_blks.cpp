@@ -87,7 +87,7 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
         ret = static_cast< VolInterface* >(instance.get());
     } catch (const std::exception& e) {
         LOGERROR("{}", e.what());
-        HS_DEBUG_ASSERT(false, "Exception during homeblks start");
+        HS_DBG_ASSERT(false, "Exception during homeblks start");
         return ret;
     }
 
@@ -150,7 +150,7 @@ void HomeBlks::zero_boot_sbs(const std::vector< dev_info >& devices) {
         if (devices[device_num].dev_type != dev_type) {
             HS_LOG(ERROR, device, "dev={} type={} does not match type dev={} type={}", devices[device_num].dev_names,
                    devices[device_num].dev_type, devices.front().dev_names, dev_type);
-            HS_DEBUG_ASSERT(false, "Mixed zero_boot_sbs device types");
+            HS_DBG_ASSERT(false, "Mixed zero_boot_sbs device types");
         }
     }
     return DeviceManager::zero_boot_sbs(devices);
@@ -242,10 +242,9 @@ void HomeBlks::attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr 
             if (!happened) { throw std::runtime_error("Unknown bug"); }
         } else {
             /* this volume doesn't want to participate now */
-            HS_ASSERT(RELEASE,
-                      (vol->get_state() == vol_state::DESTROYING ||
-                       vol->get_state() == vol_state::START_INDX_TREE_DESTROYING),
-                      "state {}", vol->get_state());
+            HS_REL_ASSERT((vol->get_state() == vol_state::DESTROYING ||
+                           vol->get_state() == vol_state::START_INDX_TREE_DESTROYING),
+                          "state {}", vol->get_state());
         }
     }
 }
@@ -338,7 +337,7 @@ void HomeBlks::create_volume(VolumePtr vol) {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     bool happened{false};
     std::tie(it, happened) = m_volume_map.emplace(std::make_pair(vol->get_uuid(), nullptr));
-    HS_ASSERT(RELEASE, happened, "volume already exists");
+    HS_REL_ASSERT(happened, "volume already exists");
 
     // Okay, this is a new volume so let's create it
     it->second = vol;
@@ -433,7 +432,7 @@ HomeBlksSafePtr HomeBlks::safe_instance() {
 }
 
 homeblks_sb* HomeBlks::superblock_init() {
-    HS_RELEASE_ASSERT_EQ(m_homeblks_sb_buf, nullptr, "Reinit already initialized super block");
+    HS_REL_ASSERT_EQ(m_homeblks_sb_buf, nullptr, "Reinit already initialized super block");
 
     /* build the homeblks super block */
     // TO DO: Might need to address alignment based on data or fast type
@@ -525,14 +524,14 @@ void HomeBlks::init_done() {
 #endif
 
     if (is_safe_mode() || HB_DYNAMIC_CONFIG(general_config->boot_consistency_check)) {
-        HS_RELEASE_ASSERT((verify_bitmap()), "bitmap verify failed");
+        HS_REL_ASSERT((verify_bitmap()), "bitmap verify failed");
     } else {
         LOGINFO("Skip running verification (vols/bitmap).");
     }
-    HS_RELEASE_ASSERT_EQ(system_cap.used_data_size, used_size.used_data_size,
-                         "vol data used size mismatch. used size {}", used_size.to_string());
-    HS_RELEASE_ASSERT_EQ(system_cap.used_index_size, used_size.used_index_size,
-                         "index used size mismatch. used size {}", used_size.to_string());
+    HS_REL_ASSERT_EQ(system_cap.used_data_size, used_size.used_data_size, "vol data used size mismatch. used size {}",
+                     used_size.to_string());
+    HS_REL_ASSERT_EQ(system_cap.used_index_size, used_size.used_index_size, "index used size mismatch. used size {}",
+                     used_size.to_string());
 
     LOGINFO("init done");
     m_out_params.first_time_boot = m_dev_mgr->is_first_time_boot();
@@ -566,13 +565,11 @@ void HomeBlks::init_done() {
         }
         while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
     }
-  
 
     // start the io watchdog;
     m_io_wd = std::make_unique< VolumeIOWatchDog >();
 
     if (!is_safe_mode()) { m_cfg.init_done_cb(no_error, m_out_params); }
-
 
     // Don't do any callback if it is running in safe mode
 }
@@ -696,8 +693,8 @@ nlohmann::json HomeBlks::get_status(const int log_level) {
 
 bool HomeBlks::verify_bitmap() {
     StaticIndxMgr::hs_cp_suspend();
-    HS_RELEASE_ASSERT(verify_data_bm(), "data debug bitmap verify failed");
-    HS_RELEASE_ASSERT(verify_index_bm(), "index debug bitmap verify failed");
+    HS_REL_ASSERT(verify_data_bm(), "data debug bitmap verify failed");
+    HS_REL_ASSERT(verify_index_bm(), "index debug bitmap verify failed");
     StaticIndxMgr::hs_cp_resume();
     return true;
 }
@@ -784,9 +781,9 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
 
     auto elapsed_time_ms = get_time_since_epoch_ms() - m_shutdown_start_time.load();
     if (elapsed_time_ms > (HB_DYNAMIC_CONFIG(general_config->shutdown_timeout_secs) * 1000)) {
-        HS_RELEASE_ASSERT(
-            false, "Graceful shutdown of volumes took {} ms exceeds time limit {} seconds, forcefully shutting down",
-            elapsed_time_ms, HB_DYNAMIC_CONFIG(general_config->shutdown_timeout_secs));
+        HS_REL_ASSERT(false,
+                      "Graceful shutdown of volumes took {} ms exceeds time limit {} seconds, forcefully shutting down",
+                      elapsed_time_ms, HB_DYNAMIC_CONFIG(general_config->shutdown_timeout_secs));
     }
 
     m_shutdown_done_cb = shutdown_done_cb;
@@ -977,27 +974,27 @@ void HomeBlks::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t siz
 void HomeBlks::meta_blk_recovery_comp_cb(bool success) { instance()->meta_blk_recovery_comp(success); }
 
 void HomeBlks::meta_blk_recovery_comp(bool success) {
-    HS_ASSERT(RELEASE, success, "failed to recover HomeBlks SB.");
+    HS_REL_ASSERT(success, "failed to recover HomeBlks SB.");
 
     m_recovery_stats->phase0_done();
     if (m_dev_mgr->is_first_time_boot()) { superblock_init(); }
 
     auto sb = (homeblks_sb*)m_homeblks_sb_buf->bytes;
     if (sb->test_flag(HOMEBLKS_SB_FLAGS_RESTRICTED)) {
-        HS_RELEASE_ASSERT(is_safe_mode(), "should be boot in safe mode");
+        HS_REL_ASSERT(is_safe_mode(), "should be boot in safe mode");
         sb->clear_flag(HOMEBLKS_SB_FLAGS_RESTRICTED);
     }
     /* check the status of last boot */
     if (sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
         LOGDEBUG("System was shutdown cleanly.");
-        HS_ASSERT_CMP(DEBUG, MetaBlkMgr::is_self_recovered(), ==, false);
+        HS_DBG_ASSERT_EQ(MetaBlkMgr::is_self_recovered(), false);
     } else if (!m_dev_mgr->is_first_time_boot()) {
         m_unclean_shutdown = true;
         LOGCRITICAL("System experienced sudden panic since last boot!");
     } else {
-        HS_ASSERT(RELEASE, m_dev_mgr->is_first_time_boot(), "not the first boot");
+        HS_REL_ASSERT(m_dev_mgr->is_first_time_boot(), "not the first boot");
         LOGINFO("System is booting up first time");
-        HS_ASSERT_CMP(DEBUG, MetaBlkMgr::is_self_recovered(), ==, false);
+        HS_DBG_ASSERT_EQ(MetaBlkMgr::is_self_recovered(), false);
     }
 
     // clear the flag and persist to disk, if we received a new shutdown and completed successfully,
@@ -1078,7 +1075,7 @@ void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
     // trigger CP
     LOGINFO("Triggering system CP during initialization");
     Volume::trigger_homeblks_cp(([this, vol_mnt_cnt](bool success) {
-        HS_ASSERT(RELEASE, success, "trigger cp during init failed");
+        HS_REL_ASSERT(success, "trigger cp during init failed");
         {
             std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
             if (m_volume_map.size() != vol_mnt_cnt) {
@@ -1109,11 +1106,11 @@ void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
 
 void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     // HomeBlk layer expects to see one valid meta_blk record during reboot;
-    HS_ASSERT(RELEASE, !m_meta_blk_found, "More than one HomeBlk SB is received, only expecting one!");
+    HS_REL_ASSERT(!m_meta_blk_found, "More than one HomeBlk SB is received, only expecting one!");
 
     m_meta_blk_found = true;
 
-    HS_ASSERT(RELEASE, mblk != nullptr, "null meta blk received in meta_blk_found_callback.");
+    HS_REL_ASSERT(mblk != nullptr, "null meta blk received in meta_blk_found_callback.");
 
     m_sb_cookie = (void*)mblk;
 
@@ -1121,8 +1118,8 @@ void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) 
     // TO DO: Might need to address alignment based on data or fast type
     m_homeblks_sb_buf = hs_utils::extract_byte_array(buf, true, MetaBlkMgrSI()->get_align_size());
     auto* sb = (homeblks_sb*)(m_homeblks_sb_buf->bytes);
-    HS_RELEASE_ASSERT_EQ(sb->version, hb_sb_version, "version does not match");
-    HS_RELEASE_ASSERT_EQ(sb->magic, hb_sb_magic, "magic does not match");
+    HS_REL_ASSERT_EQ(sb->version, hb_sb_version, "version does not match");
+    HS_REL_ASSERT_EQ(sb->magic, hb_sb_magic, "magic does not match");
 }
 
 void HomeBlks::start_home_log_store() {
@@ -1144,7 +1141,7 @@ void HomeBlks::vol_recovery_start_phase1() {
 void HomeBlks::vol_recovery_start_phase2() {
     auto phase2_start = Clock::now();
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
-        HS_ASSERT(RELEASE, (it->second->verify_tree() == true), "true");
+        HS_REL_ASSERT((it->second->verify_tree() == true), "true");
         it->second->recovery_start_phase2();
     }
 

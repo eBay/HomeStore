@@ -263,7 +263,7 @@ private:
                 if (idx == start_idx) { break; }
             }
         } while (n_blks == 0);
-        HS_RELEASE_ASSERT_GE(n_blks, 1);
+        HS_REL_ASSERT_GE(n_blks, 1);
 
         // try to erase up to perf_blks contiguous blocks
         if (!track_block_group) {
@@ -362,7 +362,7 @@ public:
     FixedBlkAllocatorTest() : BlkAllocatorTest() {
         BlkAllocConfig fixed_cfg{4096, 4096, static_cast< uint64_t >(m_total_count) * 4096, "", false};
         m_allocator = std::make_unique< FixedBlkAllocator >(fixed_cfg, true, 0);
-        HS_RELEASE_ASSERT_EQ(m_allocator->realtime_bm_on(), false);
+        HS_REL_ASSERT_EQ(m_allocator->realtime_bm_on(), false);
     }
     FixedBlkAllocatorTest(const FixedBlkAllocatorTest&) = delete;
     FixedBlkAllocatorTest(FixedBlkAllocatorTest&&) noexcept = delete;
@@ -428,7 +428,7 @@ protected:
         cfg.set_auto_recovery(true);
         cfg.set_use_slabs(use_slabs);
         m_allocator = std::make_unique< VarsizeBlkAllocator >(cfg, true, 0);
-        HS_RELEASE_ASSERT_EQ(m_allocator->realtime_bm_on(), false);
+        HS_REL_ASSERT_EQ(m_allocator->realtime_bm_on(), false);
     }
 
     [[nodiscard]] bool alloc_rand_blk(const BlkAllocStatus exp_status, const bool is_contiguous,

@@ -191,7 +191,7 @@ public:
         const auto cp_id{m_indx_mgr->get_btree_cp(hs_cp)};
         const auto ret{m_map->put(cntx, key, value, cp_id, cur)};
         m_indx_mgr->cp_io_exit(hs_cp);
-        HS_ASSERT_CMP(RELEASE, ret, ==, btree_status_t::success);
+        HS_REL_ASSERT_EQ(ret, btree_status_t::success);
         return ret;
     }
 

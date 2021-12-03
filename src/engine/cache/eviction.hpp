@@ -92,9 +92,9 @@ public:
     void delete_record(EvictRecordType& rec) {
         m_evict_policy.remove(rec);
         const auto rec_size{m_get_size_cb(&rec)};
-        HS_ASSERT_CMP(LOGMSG, rec_size, >=, 0);
+        HS_LOG_ASSERT_GE(rec_size, 0);
         const int64_t size{m_cur_size.fetch_sub(rec_size, std::memory_order_acq_rel)};
-        HS_ASSERT_CMP(LOGMSG, size, >=, 0);
+        HS_LOG_ASSERT_GE(size, 0);
     }
 
 private:
@@ -122,7 +122,7 @@ private:
 
         if (dealloc_size > 0) {
             const int64_t size{m_cur_size.fetch_sub(dealloc_size, std::memory_order_acq_rel)};
-            HS_ASSERT_CMP(LOGMSG, size, >=, 0);
+            HS_LOG_ASSERT_GE(size, 0);
             if (dealloc_size < needed_size) {
                 HS_LOG(DEBUG, cache, "Unable to evict enough entries to meet needed size - needed {} evicted {}",
                        needed_size, dealloc_size);

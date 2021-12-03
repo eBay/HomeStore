@@ -62,8 +62,8 @@ public:
         uint64_t cum_slab_nblks{0};
         double cum_pct{0.0};
 
-        HS_RELEASE_ASSERT_GT(HS_DYNAMIC_CONFIG(blkallocator.free_blk_slab_distribution).size(), 0,
-                             "Config does not have free blk slab distribution");
+        HS_REL_ASSERT_GT(HS_DYNAMIC_CONFIG(blkallocator.free_blk_slab_distribution).size(), 0,
+                         "Config does not have free blk slab distribution");
         const auto reuse_pct{HS_DYNAMIC_CONFIG(blkallocator.free_blk_reuse_pct)};
         const auto num_temp{HS_DYNAMIC_CONFIG(blkallocator.num_blk_temperatures)};
         const auto num_temp_slab_pct{(100.0 - reuse_pct) / static_cast< double >(num_temp)};
@@ -236,24 +236,24 @@ public:
 
 private:
     // global block allocator sweep threads
-    static std::mutex s_sweeper_create_delete_mutex;           // sweeper threads create/destroy mutex
-    static std::atomic<size_t> s_sweeper_thread_references;    // num active sweeper threads
-    static std::vector<std::thread> s_sweeper_threads;         // Sweeper threads
-    static std::atomic<bool> s_sweeper_threads_stop;           // atomic flag to stop sweeper threads             
-    static std::mutex s_sweeper_mutex;                         // Sweeper threads mutex
-    static std::condition_variable s_sweeper_cv;               // sweeper threads cv
-    static std::queue< VarsizeBlkAllocator* > s_sweeper_queue; // Sweeper threads queue
+    static std::mutex s_sweeper_create_delete_mutex;                      // sweeper threads create/destroy mutex
+    static std::atomic< size_t > s_sweeper_thread_references;             // num active sweeper threads
+    static std::vector< std::thread > s_sweeper_threads;                  // Sweeper threads
+    static std::atomic< bool > s_sweeper_threads_stop;                    // atomic flag to stop sweeper threads
+    static std::mutex s_sweeper_mutex;                                    // Sweeper threads mutex
+    static std::condition_variable s_sweeper_cv;                          // sweeper threads cv
+    static std::queue< VarsizeBlkAllocator* > s_sweeper_queue;            // Sweeper threads queue
     static std::unordered_set< VarsizeBlkAllocator* > s_block_allocators; // block allocators to be swept
 
     // per class sweeping logic
-    std::mutex m_mutex;                                        // Mutex to protect regionstate & cb
-    std::condition_variable m_cv;                              // CV to signal thread
-    BlkAllocatorState m_state;                                 // Current state of the blkallocator
+    std::mutex m_mutex;           // Mutex to protect regionstate & cb
+    std::condition_variable m_cv; // CV to signal thread
+    BlkAllocatorState m_state;    // Current state of the blkallocator
 
     std::unique_ptr< sisl::Bitset > m_cache_bm; // Bitset representing entire blks in this allocator
     std::unique_ptr< FreeBlkCache > m_fb_cache; // Free Blks cache
 
-    VarsizeBlkAllocConfig m_cfg;  // Config for Varsize
+    VarsizeBlkAllocConfig m_cfg; // Config for Varsize
 
     std::vector< std::unique_ptr< BlkAllocSegment > > m_segments; // Lookup map for segment id - segment
 

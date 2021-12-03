@@ -73,20 +73,20 @@ void HomeLogStoreMgr::fake_reboot() {
 
 std::shared_ptr< HomeLogStore > HomeLogStoreMgr::create_new_log_store(const logstore_family_id_t family_id,
                                                                       const bool append_mode) {
-    HS_RELEASE_ASSERT_LT(family_id, num_log_families);
+    HS_REL_ASSERT_LT(family_id, num_log_families);
     COUNTER_INCREMENT(HomeLogStoreMgrSI().m_metrics, logstores_count, 1);
     return m_logstore_families[family_id]->create_new_log_store(append_mode);
 }
 
 void HomeLogStoreMgr::open_log_store(const logstore_family_id_t family_id, const logstore_id_t store_id,
                                      const bool append_mode, const log_store_opened_cb_t& on_open_cb) {
-    HS_RELEASE_ASSERT_LT(family_id, num_log_families);
+    HS_REL_ASSERT_LT(family_id, num_log_families);
     COUNTER_INCREMENT(m_metrics, logstores_count, 1);
     return m_logstore_families[family_id]->open_log_store(store_id, append_mode, on_open_cb);
 }
 
 void HomeLogStoreMgr::remove_log_store(const logstore_family_id_t family_id, const logstore_id_t store_id) {
-    HS_RELEASE_ASSERT_LT(family_id, num_log_families);
+    HS_REL_ASSERT_LT(family_id, num_log_families);
     m_logstore_families[family_id]->remove_log_store(store_id);
     COUNTER_DECREMENT(m_metrics, logstores_count, 1);
 }

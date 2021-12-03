@@ -182,7 +182,7 @@
 // clang-format on
 #define HS_DETAILED_ASSERT(assert_type, cond, req, submod_name, submod_val, detail_name, detail_val, msg, ...)         \
     {                                                                                                                  \
-        assert_type##_ASSERT_FMT(                                                                                      \
+        assert_type(                                                                                                   \
             cond, ([&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {                     \
                 BOOST_PP_IF(BOOST_VMD_IS_EMPTY(submod_name), BOOST_PP_EMPTY,                                           \
                             BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[{}={}] "},      \
@@ -213,7 +213,7 @@
 #define HS_DETAILED_ASSERT_CMP(assert_type, val1, cmp, val2, req, submod_name, submod_val, detail_name, detail_val,    \
                                ...)                                                                                    \
     {                                                                                                                  \
-        assert_type##_ASSERT_CMP(                                                                                      \
+        assert_type(                                                                                                   \
             val1, cmp, val2,                                                                                           \
             [&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {                            \
                 fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}] "},                                      \
@@ -261,38 +261,44 @@
     HS_SUBMOD_ASSERT_CMP(assert_type, static_cast< const void* >(val1), ==, nullptr, req, submod_name, submod_val,     \
                          ##__VA_ARGS__)
 
-#define HS_DEBUG_ASSERT(cond, ...) HS_ASSERT(DEBUG, cond, ##__VA_ARGS__)
-#define HS_DEBUG_ASSERT_EQ(val1, val2, ...) HS_ASSERT_CMP(DEBUG, val1, ==, val2, ##__VA_ARGS__)
-#define HS_DEBUG_ASSERT_NE(val1, val2, ...) HS_ASSERT_CMP(DEBUG, val1, !=, val2, ##__VA_ARGS__)
-#define HS_DEBUG_ASSERT_LT(val1, val2, ...) HS_ASSERT_CMP(DEBUG, val1, <, val2, ##__VA_ARGS__)
-#define HS_DEBUG_ASSERT_LE(val1, val2, ...) HS_ASSERT_CMP(DEBUG, val1, <=, val2, ##__VA_ARGS__)
-#define HS_DEBUG_ASSERT_GT(val1, val2, ...) HS_ASSERT_CMP(DEBUG, val1, >, val2, ##__VA_ARGS__)
-#define HS_DEBUG_ASSERT_GE(val1, val2, ...) HS_ASSERT_CMP(DEBUG, val1, >=, val2, ##__VA_ARGS__)
+#define HS_DBG_ASSERT(cond, ...) HS_ASSERT(DEBUG_ASSERT_FMT, cond, ##__VA_ARGS__)
+#define HS_DBG_ASSERT_EQ(val1, val2, ...) HS_ASSERT_CMP(DEBUG_ASSERT_CMP, val1, ==, val2, ##__VA_ARGS__)
+#define HS_DBG_ASSERT_NE(val1, val2, ...) HS_ASSERT_CMP(DEBUG_ASSERT_CMP, val1, !=, val2, ##__VA_ARGS__)
+#define HS_DBG_ASSERT_LT(val1, val2, ...) HS_ASSERT_CMP(DEBUG_ASSERT_CMP, val1, <, val2, ##__VA_ARGS__)
+#define HS_DBG_ASSERT_LE(val1, val2, ...) HS_ASSERT_CMP(DEBUG_ASSERT_CMP, val1, <=, val2, ##__VA_ARGS__)
+#define HS_DBG_ASSERT_GT(val1, val2, ...) HS_ASSERT_CMP(DEBUG_ASSERT_CMP, val1, >, val2, ##__VA_ARGS__)
+#define HS_DBG_ASSERT_GE(val1, val2, ...) HS_ASSERT_CMP(DEBUG_ASSERT_CMP, val1, >=, val2, ##__VA_ARGS__)
+#define HS_DBG_ASSERT_NULL(val, ...) HS_ASSERT_NULL(DEBUG_ASSERT_CMP, val, ##__VA_ARGS__)
+#define HS_DBG_ASSERT_NOTNULL(val, ...) HS_ASSERT_NOTNULL(DEBUG_ASSERT_CMP, val, ##__VA_ARGS__)
 
-#define HS_LOG_ASSERT(cond, ...) HS_ASSERT(LOGMSG, cond, ##__VA_ARGS__)
-#define HS_LOG_ASSERT_EQ(val1, val2, ...) HS_ASSERT_CMP(LOGMSG, val1, ==, val2, ##__VA_ARGS__)
-#define HS_LOG_ASSERT_NE(val1, val2, ...) HS_ASSERT_CMP(LOGMSG, val1, !=, val2, ##__VA_ARGS__)
-#define HS_LOG_ASSERT_LT(val1, val2, ...) HS_ASSERT_CMP(LOGMSG, val1, <, val2, ##__VA_ARGS__)
-#define HS_LOG_ASSERT_LE(val1, val2, ...) HS_ASSERT_CMP(LOGMSG, val1, <=, val2, ##__VA_ARGS__)
-#define HS_LOG_ASSERT_GT(val1, val2, ...) HS_ASSERT_CMP(LOGMSG, val1, >, val2, ##__VA_ARGS__)
-#define HS_LOG_ASSERT_GE(val1, val2, ...) HS_ASSERT_CMP(LOGMSG, val1, >=, val2, ##__VA_ARGS__)
+#define HS_LOG_ASSERT(cond, ...) HS_ASSERT(LOGMSG_ASSERT_FMT, cond, ##__VA_ARGS__)
+#define HS_LOG_ASSERT_EQ(val1, val2, ...) HS_ASSERT_CMP(LOGMSG_ASSERT_CMP, val1, ==, val2, ##__VA_ARGS__)
+#define HS_LOG_ASSERT_NE(val1, val2, ...) HS_ASSERT_CMP(LOGMSG_ASSERT_CMP, val1, !=, val2, ##__VA_ARGS__)
+#define HS_LOG_ASSERT_LT(val1, val2, ...) HS_ASSERT_CMP(LOGMSG_ASSERT_CMP, val1, <, val2, ##__VA_ARGS__)
+#define HS_LOG_ASSERT_LE(val1, val2, ...) HS_ASSERT_CMP(LOGMSG_ASSERT_CMP, val1, <=, val2, ##__VA_ARGS__)
+#define HS_LOG_ASSERT_GT(val1, val2, ...) HS_ASSERT_CMP(LOGMSG_ASSERT_CMP, val1, >, val2, ##__VA_ARGS__)
+#define HS_LOG_ASSERT_GE(val1, val2, ...) HS_ASSERT_CMP(LOGMSG_ASSERT_CMP, val1, >=, val2, ##__VA_ARGS__)
+#define HS_LOG_ASSERT_NULL(val, ...) HS_ASSERT_NULL(LOGMSG_ASSERT_CMP, val, ##__VA_ARGS__)
+#define HS_LOG_ASSERT_NOTNULL(val, ...) HS_ASSERT_NOTNULL(LOGMSG_ASSERT_CMP, val, ##__VA_ARGS__)
 
-#define HS_RELEASE_ASSERT(cond, ...) HS_ASSERT(RELEASE, cond, ##__VA_ARGS__)
-#define HS_RELEASE_ASSERT_EQ(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, ==, val2, ##__VA_ARGS__)
-#define HS_RELEASE_ASSERT_NE(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, !=, val2, ##__VA_ARGS__)
-#define HS_RELEASE_ASSERT_LT(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, <, val2, ##__VA_ARGS__)
-#define HS_RELEASE_ASSERT_LE(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, <=, val2, ##__VA_ARGS__)
-#define HS_RELEASE_ASSERT_GT(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, >, val2, ##__VA_ARGS__)
-#define HS_RELEASE_ASSERT_GE(val1, val2, ...) HS_ASSERT_CMP(RELEASE, val1, >=, val2, ##__VA_ARGS__)
+#define HS_REL_ASSERT(cond, ...) HS_ASSERT(RELEASE_ASSERT_FMT, cond, ##__VA_ARGS__)
+#define HS_REL_ASSERT_EQ(val1, val2, ...) HS_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, ==, val2, ##__VA_ARGS__)
+#define HS_REL_ASSERT_NE(val1, val2, ...) HS_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, !=, val2, ##__VA_ARGS__)
+#define HS_REL_ASSERT_LT(val1, val2, ...) HS_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, <, val2, ##__VA_ARGS__)
+#define HS_REL_ASSERT_LE(val1, val2, ...) HS_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, <=, val2, ##__VA_ARGS__)
+#define HS_REL_ASSERT_GT(val1, val2, ...) HS_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, >, val2, ##__VA_ARGS__)
+#define HS_REL_ASSERT_GE(val1, val2, ...) HS_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, >=, val2, ##__VA_ARGS__)
+#define HS_REL_ASSERT_NULL(val, ...) HS_ASSERT_NULL(RELEASE_ASSERT_CMP, val, ##__VA_ARGS__)
+#define HS_REL_ASSERT_NOTNULL(val, ...) HS_ASSERT_NOTNULL(RELEASE_ASSERT_CMP, val, ##__VA_ARGS__)
 
 [[maybe_unused]] static uint64_t check_logged_already(const fmt::memory_buffer& buf) {
     static constexpr uint64_t COUNTER_RESET_SEC{300}; // Reset every 5 minutes
     static thread_local std::unordered_map< std::string, std::pair< Clock::time_point, uint64_t > > log_map{};
 
     const std::string_view msg{buf.data()};
-    auto [it, happened]{log_map.emplace(msg, std::make_pair(Clock::now(), 0))};
-    HS_RELEASE_ASSERT(it != std::cend(log_map), "Expected entry to be either present or new insertion to succeed");
-    auto& [tm, count]{it->second};
+    auto [it, happened] = log_map.emplace(msg, std::make_pair(Clock::now(), 0));
+    HS_REL_ASSERT(it != std::cend(log_map), "Expected entry to be either present or new insertion to succeed");
+    auto& [tm, count] = it->second;
     count = (get_elapsed_time_sec(tm) > COUNTER_RESET_SEC) ? static_cast< decltype(count) >(0) : count + 1;
     tm = Clock::now();
     return count;

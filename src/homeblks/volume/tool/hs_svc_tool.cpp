@@ -142,7 +142,7 @@ int main(int argc, char* argv[]) {
     auto dev_size = SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024;
     gen_device_info(device_info, ndevices, dev_size);
 
-    HS_DEBUG_ASSERT_EQ(device_info.size() > 0, true);
+    HS_DBG_ASSERT_EQ(device_info.size() > 0, true);
 
     if (gp.zero_boot_sb) { VolInterface::get_instance()->zero_boot_sbs(device_info); }
 

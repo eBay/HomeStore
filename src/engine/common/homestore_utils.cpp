@@ -4,7 +4,7 @@
 namespace homestore {
 uint8_t* hs_utils::iobuf_alloc(const size_t size, const sisl::buftag tag, const size_t alignment) {
     auto buf = iomanager.iobuf_alloc(alignment, size, tag);
-    HS_ASSERT_NOTNULL(RELEASE, buf, "io buf is null. probably going out of memory");
+    HS_REL_ASSERT_NOTNULL(buf, "io buf is null. probably going out of memory");
     return buf;
 }
 
@@ -15,7 +15,7 @@ void hs_utils::iobuf_free(uint8_t* const ptr, const sisl::buftag tag) { iomanage
 uint64_t hs_utils::aligned_size(const size_t size, const size_t alignment) { return sisl::round_up(size, alignment); }
 
 bool hs_utils::mod_aligned_sz(size_t size_to_check, size_t align_sz) {
-    HS_DEBUG_ASSERT_EQ((align_sz & (align_sz - 1)), 0);
+    HS_DBG_ASSERT_EQ((align_sz & (align_sz - 1)), 0);
     return !(size_to_check & static_cast< size_t >(align_sz - 1)); // return true if it is aligned.
 }
 

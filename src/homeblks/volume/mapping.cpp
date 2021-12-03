@@ -11,7 +11,7 @@ using namespace homestore;
 lba_t mapping::get_end_lba(const lba_t start_lba, const lba_count_t nlba) { return (start_lba + nlba - 1); }
 
 lba_count_t mapping::get_nlbas(const lba_t end_lba, const lba_t start_lba) {
-    HS_ASSERT_CMP(RELEASE, end_lba, >=, start_lba);
+    HS_REL_ASSERT_GE(end_lba, start_lba);
     return (end_lba - start_lba + 1);
 }
 
@@ -97,9 +97,9 @@ mapping::~mapping() { delete m_bt; }
 
 void mapping::split_key_recovery(const MappingKey& key, const MappingValue& val, const MappingKey& split_key,
                                  std::vector< std::pair< MappingKey, MappingValue > >& replace_kv) {
-    HS_ASSERT_CMP(RELEASE, split_key.start(), ==, split_key.end());
-    HS_ASSERT_CMP(RELEASE, key.start(), <=, split_key.start());
-    HS_ASSERT_CMP(RELEASE, key.end(), >, split_key.end());
+    HS_REL_ASSERT_EQ(split_key.start(), split_key.end());
+    HS_REL_ASSERT_LE(key.start(), split_key.start());
+    HS_REL_ASSERT_GT(key.end(), split_key.end());
     auto start_lba = key.start();
     auto end_lba = split_key.end();
     uint16_t offset = 0;
@@ -129,7 +129,7 @@ btree_status_t mapping::read_indx(const indx_req_ptr& ireq, const read_indx_comp
     }
 
     // don't expect to see "has_more" return value in read path;
-    HS_ASSERT_CMP(DEBUG, ret, !=, btree_status_t::has_more);
+    HS_DBG_ASSERT_NE(ret, btree_status_t::has_more);
 
     if (ret == btree_status_t::success) {
         // otherwise send callbacks to client for each K/V;
@@ -205,7 +205,7 @@ btree_status_t mapping::get(mapping_op_cntx& cntx, MappingKey& key, BtreeQueryCu
  */
 btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue& value, const btree_cp_ptr& bcp,
                             BtreeQueryCursor& cur) {
-    HS_ASSERT_CMP(DEBUG, value.get_total_entries(), ==, 1);
+    HS_DBG_ASSERT_EQ(value.get_total_entries(), 1);
 
     HS_SUBMOD_LOG(DEBUG, volume, , "vol", m_unique_name, "PUT : start_lba {} end lba {} value {}", key.start(),
                   key.end(), value.to_string());
@@ -226,8 +226,8 @@ btree_status_t mapping::put(mapping_op_cntx& cntx, MappingKey& key, MappingValue
     auto ret = m_bt->range_put(btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT, ureq, bcp);
 
     if (cur.m_last_key != nullptr) {
-        HS_ASSERT_CMP(RELEASE, get_next_start_key_from_cursor(cur), >=, start_lba);
-        HS_ASSERT_CMP(RELEASE, get_next_start_key_from_cursor(cur), <=, (end_lba + 1));
+        HS_REL_ASSERT_GE(get_next_start_key_from_cursor(cur), start_lba);
+        HS_REL_ASSERT_LE(get_next_start_key_from_cursor(cur), (end_lba + 1));
     }
     /* we should not get resource full error */
     if (ret != btree_status_t::success) {
@@ -590,7 +590,7 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
         /* we need to split the existing key/value at the start */
         if (e_key->start() < start_lba) {
             /* It will always be the first entry */
-            HS_ASSERT_CMP(RELEASE, new_val_offset, ==, initial_val_offset);
+            HS_REL_ASSERT_EQ(new_val_offset, initial_val_offset);
             // split existing key at the start and add new interval
             add_new_interval(e_key->start(), start_lba - 1, *e_value, existing_val_offset, replace_kv);
             existing_val_offset += start_lba - e_key->start();
@@ -607,7 +607,7 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
         start_lba += nlbas;
 
         if (e_key->end() > end_lba) {
-            HS_ASSERT_CMP(DEBUG, start_lba, ==, (end_lba + 1));
+            HS_DBG_ASSERT_EQ(start_lba, (end_lba + 1));
             // split existing key at the end and add new interval
             add_new_interval(start_lba, e_key->end(), *e_value, existing_val_offset, replace_kv);
         }
@@ -637,9 +637,9 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
             const ValueEntry* cur_ve = mv.get_nth_entry(i);
             if (i != 0) { // sorted ve check
                 const ValueEntry* prev_ve = mv.get_nth_entry(i - 1);
-                HS_DEBUG_ASSERT_GT(prev_ve->compare(cur_ve), 0);
+                HS_DBG_ASSERT_GT(prev_ve->compare(cur_ve), 0);
             }
-            HS_DEBUG_ASSERT_EQ(cur_ve->get_num_lbas(), mk.get_n_lba());
+            HS_DBG_ASSERT_EQ(cur_ve->get_num_lbas(), mk.get_n_lba());
             if (same_value_gen) {
                 // same values can be generated for different keys in some test cases
                 ++i;
@@ -666,7 +666,7 @@ btree_status_t mapping::match_item_cb_put(std::vector< std::pair< MappingKey, Ma
                     for (auto& ptr : replace_kv) {
                         ss << ptr.first.to_string() << "," << ptr.second.to_string();
                     }
-                    HS_SUBMOD_ASSERT(DEBUG, 0, , "vol", m_unique_name, "Error::Put_CB:,{} ", ss.str());
+                    VOL_DBG_ASSERT(0, , "vol", m_unique_name, "Error::Put_CB:,{} ", ss.str());
                 }
             }
 #endif
@@ -697,12 +697,12 @@ std::pair< lba_t, lba_t > mapping::get_start_end_lba(BtreeSearchRange& subrange)
     lba_t start_lba, end_lba;
 
     MappingKey* s_subrange = (MappingKey*)subrange.get_start_key();
-    HS_ASSERT_CMP(DEBUG, s_subrange->start(), ==, s_subrange->end());
+    HS_DBG_ASSERT_EQ(s_subrange->start(), s_subrange->end());
     start_lba = s_subrange->start();
     if (!subrange.is_start_inclusive()) { start_lba = s_subrange->start() + 1; }
 
     MappingKey* e_subrange = (MappingKey*)subrange.get_end_key();
-    HS_ASSERT_CMP(DEBUG, e_subrange->start(), ==, e_subrange->end());
+    HS_DBG_ASSERT_EQ(e_subrange->start(), e_subrange->end());
     end_lba = e_subrange->end();
     if (!subrange.is_end_inclusive()) { end_lba = e_subrange->end() - 1; }
 
@@ -713,7 +713,7 @@ std::pair< lba_t, lba_t > mapping::get_start_end_lba(BtreeSearchRange& subrange)
 void mapping::add_new_interval(const lba_t s_lba, const lba_t e_lba, const MappingValue& val,
                                const lba_count_t lba_offset,
                                std::vector< std::pair< MappingKey, MappingValue > >& replace_kv) {
-    HS_DEBUG_ASSERT_LE(lba_offset, BlkId::max_blks_in_op());
+    HS_DBG_ASSERT_LE(lba_offset, BlkId::max_blks_in_op());
     const auto nlba = get_nlbas(e_lba, s_lba);
     replace_kv.emplace_back(
         std::make_pair(MappingKey(s_lba, nlba), MappingValue(*val.get_latest_entry(), lba_offset, nlba)));
@@ -788,7 +788,7 @@ void mapping::validate_get_response(const lba_t lba_start, const lba_count_t n_l
         }
 
         if (exp_value != nullptr) {
-            HS_DEBUG_ASSERT_EQ(mv.get_total_entries(), 1);
+            HS_DBG_ASSERT_EQ(mv.get_total_entries(), 1);
             const ValueEntry* ve = mv.get_latest_entry();
 
             if (!mv.is_valid() || ve->get_base_blkid().get_blk_num() != expBid.get_blk_num() ||
@@ -801,7 +801,7 @@ void mapping::validate_get_response(const lba_t lba_start, const lba_count_t n_l
         }
         last_slba = mk.end() + 1;
     }
-    HS_DEBUG_ASSERT_EQ(last_slba, lba_start + n_lba);
+    HS_DBG_ASSERT_EQ(last_slba, lba_start + n_lba);
 }
 #endif
 
@@ -877,12 +877,12 @@ btree_status_t mapping::update_indx_tbl(const indx_req_ptr& ireq, const btree_cp
         /* XXX: Can this assert be hit. it means nothing is written to active btree */
         assert(vreq->active_btree_cur.m_last_key);
         end_lba = get_end_key_from_cursor(vreq->active_btree_cur);
-        HS_DEBUG_ASSERT_GE(end_lba, start_lba);
+        HS_DBG_ASSERT_GE(end_lba, start_lba);
     }
 
     /* we will start from the same place where it is left last time */
     if (btree_cur_ptr->m_last_key) { next_start_lba = get_next_start_key_from_cursor(*btree_cur_ptr); }
-    HS_DEBUG_ASSERT_LE(end_lba, get_end_lba(start_lba, vreq->nlbas()));
+    HS_DBG_ASSERT_LE(end_lba, get_end_lba(start_lba, vreq->nlbas()));
 
     btree_status_t ret = btree_status_t::success;
 
@@ -933,11 +933,11 @@ btree_status_t mapping::update_indx_tbl(const indx_req_ptr& ireq, const btree_cp
         start_lba += nlbas;
         csum_indx += nlbas;
         if (ret != btree_status_t::success || start_lba > end_lba) { break; }
-        HS_ASSERT_CMP(DEBUG, start_lba, ==, (get_end_key_from_cursor(*btree_cur_ptr) + 1));
+        HS_DBG_ASSERT_EQ(start_lba, (get_end_key_from_cursor(*btree_cur_ptr) + 1));
     }
 
-    HS_ASSERT(DEBUG, (ret != btree_status_t::success || (start_lba == (end_lba + 1))), "ret {} start_lba {} end_lba {}",
-              ret, start_lba, end_lba);
+    HS_DBG_ASSERT((ret != btree_status_t::success || (start_lba == (end_lba + 1))), "ret {} start_lba {} end_lba {}",
+                  ret, start_lba, end_lba);
     return ret;
 }
 
@@ -953,12 +953,12 @@ btree_status_t mapping::recovery_update(const logstore_seq_num_t seqnum, journal
 
     /* get all the values from journal entry */
     const auto key = (journal_key*)indx_journal_entry::get_key(hdr).first;
-    HS_ASSERT_CMP(RELEASE, indx_journal_entry::get_key(hdr).second, ==, sizeof(journal_key));
+    HS_REL_ASSERT_EQ(indx_journal_entry::get_key(hdr).second, sizeof(journal_key));
 
     lba_t lba = key->lba;
     csum_t* csum = (csum_t*)indx_journal_entry::get_val(hdr).first;
     lba_count_t ncsum = indx_journal_entry::get_val(hdr).second / sizeof(csum_t);
-    HS_RELEASE_ASSERT_EQ(ncsum, key->num_lbas());
+    HS_REL_ASSERT_EQ(ncsum, key->num_lbas());
 
     /* update btree */
     uint32_t csum_indx = 0;
@@ -978,29 +978,29 @@ btree_status_t mapping::recovery_update(const logstore_seq_num_t seqnum, journal
 
         BtreeQueryCursor cur;
         ret = put(cntx, key, value, bcp, cur);
-        HS_RELEASE_ASSERT_EQ(ret, btree_status_t::success);
+        HS_REL_ASSERT_EQ(ret, btree_status_t::success);
         lba += nlbas;
         csum_indx += nlbas;
     }
-    HS_RELEASE_ASSERT_EQ(lba, key->lba + key->num_lbas());
+    HS_REL_ASSERT_EQ(lba, key->lba + key->num_lbas());
     return ret;
 }
 
 btree_status_t mapping::unmap_recovery_update(const logstore_seq_num_t seqnum, journal_hdr* hdr,
                                               const btree_cp_ptr& bcp) {
     const auto j_key = (journal_key*)indx_journal_entry::get_key(hdr).first;
-    HS_ASSERT_CMP(RELEASE, indx_journal_entry::get_key(hdr).second, ==, sizeof(journal_key));
+    HS_REL_ASSERT_EQ(indx_journal_entry::get_key(hdr).second, sizeof(journal_key));
     lba_t lba = j_key->lba;
     lba_count_t nlbas = j_key->num_lbas();
     MappingKey key{lba, nlbas};
     BlkId bid;
-    HS_DEBUG_ASSERT(!bid.is_valid(), "blkid is valid");
+    HS_DBG_ASSERT(!bid.is_valid(), "blkid is valid");
     MappingValue value{seqnum, bid, 0, nlbas, nullptr};
     mapping_op_cntx cntx;
     cntx.op = UPDATE_VAL_ONLY;
     BtreeQueryCursor cur;
     auto ret = put(cntx, key, value, bcp, cur);
-    HS_RELEASE_ASSERT_EQ(ret, btree_status_t::success);
+    HS_REL_ASSERT_EQ(ret, btree_status_t::success);
     return ret;
 }
 
@@ -1026,8 +1026,7 @@ void mapping::get_btreequery_cur(const sisl::blob& b, BtreeQueryCursor& cur) {
 btree_status_t mapping::destroy(blkid_list_ptr& free_blkid_list, uint64_t& free_node_cnt) {
     auto ret = btree_status_t::success;
     ret = m_bt->destroy(free_blkid_list, free_node_cnt);
-    HS_SUBMOD_ASSERT(LOGMSG, (ret == btree_status_t::success), , "vol", m_unique_name,
-                     "Error in destroying mapping btree ret={} ", ret);
+    VOL_LOG_ASSERT_CMP(ret, ==, btree_status_t::success, , "Error in destroying mapping btree");
     return ret;
 }
 

@@ -128,9 +128,9 @@ struct chunk_info_block {
     void set_sb_chunk(const bool chunk) { sb_chunk = static_cast< uint8_t >(chunk ? 0x01 : 0x00); }
     bool is_sb_chunk() const { return (sb_chunk == 0x01); }
     void update_start_offset(const uint64_t offset) {
-        HS_RELEASE_ASSERT_GE(offset, chunk_start_offset);
+        HS_REL_ASSERT_GE(offset, chunk_start_offset);
         chunk_size -= (offset - chunk_start_offset);
-        HS_RELEASE_ASSERT_GT(chunk_size, 0);
+        HS_REL_ASSERT_GT(chunk_size, 0);
         chunk_start_offset = offset;
     }
 };
@@ -266,7 +266,6 @@ struct dm_info {
     static constexpr size_t s_dm_payload_offset{12}; // offset to version entry of dm_info
 };
 #pragma pack()
-
 
 class PhysicalDev;
 class meta_blk;

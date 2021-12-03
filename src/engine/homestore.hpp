@@ -233,7 +233,7 @@ protected:
             create_meta_blkstore(vb);
             break;
         default:
-            HS_ASSERT(LOGMSG, 0, "Unknown blkstore_type {}", blob->type);
+            HS_LOG_ASSERT(0, "Unknown blkstore_type {}", blob->type);
         }
     }
 

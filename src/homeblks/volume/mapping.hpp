@@ -70,14 +70,14 @@ public:
     }
 
     void set_lba_start(const lba_t lba) {
-        HS_DEBUG_ASSERT_LE(lba, max_lba_possible());
+        HS_DBG_ASSERT_LE(lba, max_lba_possible());
         m_lba_start = lba;
     }
     [[nodiscard]] lba_t get_lba_start() const { return m_lba_start; }
 
     void set_nlbas(const lba_count_t nlbas) {
-        HS_DEBUG_ASSERT_LE(nlbas, LbaId::max_lba_count_possible());
-        HS_DEBUG_ASSERT_LE((m_lba_start + nlbas - 1), LbaId::max_lba_possible());
+        HS_DBG_ASSERT_LE(nlbas, LbaId::max_lba_count_possible());
+        HS_DBG_ASSERT_LE((m_lba_start + nlbas - 1), LbaId::max_lba_possible());
         m_n_lba = static_cast< lba_count_serialized_t >(nlbas - 1);
     }
     [[nodiscard]] lba_count_t get_nlbas() const { return static_cast< lba_count_t >(m_n_lba) + 1; }
@@ -241,7 +241,7 @@ public:
     BlkId get_base_blkid() const { return m_blkid; }
 
     void set_lba_offset(const lba_count_t offset) {
-        HS_DEBUG_ASSERT_LT(offset, BlkId::max_blks_in_op());
+        HS_DBG_ASSERT_LT(offset, BlkId::max_blks_in_op());
         m_lba_offset = static_cast< blk_count_serialized_t >(offset);
     }
     lba_count_t get_lba_offset() const { return static_cast< lba_count_t >(m_lba_offset); }
@@ -250,8 +250,8 @@ public:
     }
 
     void set_num_lbas(const lba_count_t nlbas) {
-        HS_DEBUG_ASSERT_LE(nlbas, BlkId::max_blks_in_op());
-        // HS_DEBUG_ASSERT_EQ(get_blkid().is_valid(), true);
+        HS_DBG_ASSERT_LE(nlbas, BlkId::max_blks_in_op());
+        // HS_DBG_ASSERT_EQ(get_blkid().is_valid(), true);
         m_nlbas = static_cast< blk_count_serialized_t >(nlbas - 1);
     }
     lba_count_t get_num_lbas() const { return static_cast< lba_count_t >(m_nlbas) + 1; }
@@ -274,7 +274,7 @@ public:
     void add_offset(const lba_count_t lba_offset, const lba_count_t nlbas) {
         // move checksum array elements to start from offset position
         // assert(lba_offset < get_num_lbas());
-        HS_DEBUG_ASSERT_LT(get_lba_offset() + lba_offset, BlkId::max_blks_in_op());
+        HS_DBG_ASSERT_LT(get_lba_offset() + lba_offset, BlkId::max_blks_in_op());
         if (m_blkid.is_valid()) { ::memmove((void*)&m_carr[0], (void*)&m_carr[lba_offset], (nlbas * sizeof(csum_t))); }
         set_num_lbas(nlbas);
         set_lba_offset(get_lba_offset() + lba_offset);
@@ -333,9 +333,9 @@ private:
     }
 
     void copy_from_with_offset(const ValueEntry& other, const lba_count_t lba_offset, const lba_count_t nlbas) {
-        HS_DEBUG_ASSERT_LE(nlbas, BlkId::max_blks_in_op());
-        HS_DEBUG_ASSERT_LE(nlbas, other.get_num_lbas());
-        HS_DEBUG_ASSERT_LT(lba_offset, other.get_num_lbas());
+        HS_DBG_ASSERT_LE(nlbas, BlkId::max_blks_in_op());
+        HS_DBG_ASSERT_LE(nlbas, other.get_num_lbas());
+        HS_DBG_ASSERT_LT(lba_offset, other.get_num_lbas());
 
         m_seqid = other.m_seqid;
         m_blkid = other.m_blkid;
@@ -387,8 +387,8 @@ public:
     MappingValue(const ValueEntry& ve, const lba_count_t offset, const lba_count_t nlbas) :
             MappingValue(ve.get_seqid(), ve.get_base_blkid(), ve.get_lba_offset() + offset, nlbas,
                          ve.get_checksum_array_from_const(offset)) {
-        HS_DEBUG_ASSERT_LT(offset, ve.get_num_lbas());
-        HS_DEBUG_ASSERT_LE(offset + nlbas, ve.get_num_lbas());
+        HS_DBG_ASSERT_LT(offset, ve.get_num_lbas());
+        HS_DBG_ASSERT_LE(offset + nlbas, ve.get_num_lbas());
     }
 
     // performs deep copy from other - on heap
@@ -413,7 +413,7 @@ public:
 
     ValueEntry* get_nth_entry(const lba_count_t idx) const { return m_earr.get(idx); }
     ValueEntry* get_latest_entry() const {
-        HS_DEBUG_ASSERT_EQ(get_total_entries(), 1, "Number of value entries is expected to be 1");
+        HS_DBG_ASSERT_EQ(get_total_entries(), 1, "Number of value entries is expected to be 1");
         return get_nth_entry(0);
     }
     bool is_valid() const { return (m_earr.get_total_elements() != 0); }
@@ -830,5 +830,7 @@ private:
                                std::vector< std::pair< MappingKey, MappingValue > >& values,
                                MappingValue* exp_value = nullptr, volume_req* req = nullptr);
 #endif
+
+    std::string get_name() const { return m_unique_name; }
 };
 } // namespace homestore

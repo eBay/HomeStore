@@ -54,18 +54,20 @@ constexpr uint64_t BOOT_CNT_MASK{0x0000ffffffffffff};
 #define VOL_ERROR_LOG(volname, msg, ...) HS_SUBMOD_LOG(ERROR, base, , "vol", volname, msg, ##__VA_ARGS__)
 #define THIS_VOL_LOG(level, mod, req, msg, ...)                                                                        \
     HS_SUBMOD_LOG(level, mod, req, "vol", this->get_name(), msg, ##__VA_ARGS__)
-#define VOL_ASSERT(assert_type, cond, req, ...)                                                                        \
-    HS_SUBMOD_ASSERT(assert_type, cond, req, "vol", this->get_name(), ##__VA_ARGS__)
-#define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)                                                         \
-    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol", this->get_name(), ##__VA_ARGS__)
 
-#define VOL_DEBUG_ASSERT(...) VOL_ASSERT(DEBUG, __VA_ARGS__)
-#define VOL_RELEASE_ASSERT(...) VOL_ASSERT(RELEASE, __VA_ARGS__)
-#define VOL_LOG_ASSERT(...) VOL_ASSERT(LOGMSG, __VA_ARGS__)
+#define VOL_DBG_ASSERT(cond, req, ...)                                                                                 \
+    HS_SUBMOD_ASSERT(DEBUG_ASSERT_FMT, cond, req, "vol", this->get_name(), ##__VA_ARGS__)
+#define VOL_LOG_ASSERT(cond, req, ...)                                                                                 \
+    HS_SUBMOD_ASSERT(LOGMSG_ASSERT_FMT, cond, req, "vol", this->get_name(), ##__VA_ARGS__)
+#define VOL_REL_ASSERT(cond, req, ...)                                                                                 \
+    HS_SUBMOD_ASSERT(RELEASE_ASSERT_FMT, cond, req, "vol", this->get_name(), ##__VA_ARGS__)
 
-#define VOL_DEBUG_ASSERT_CMP(...) VOL_ASSERT_CMP(DEBUG, ##__VA_ARGS__)
-#define VOL_RELEASE_ASSERT_CMP(...) VOL_ASSERT_CMP(RELEASE, ##__VA_ARGS__)
-#define VOL_LOG_ASSERT_CMP(...) VOL_ASSERT_CMP(LOGMSG, ##__VA_ARGS__)
+#define VOL_DBG_ASSERT_CMP(val1, cmp, val2, req, ...)                                                                  \
+    HS_SUBMOD_ASSERT_CMP(DEBUG_ASSERT_CMP, val1, cmp, val2, req, "vol", this->get_name(), ##__VA_ARGS__)
+#define VOL_LOG_ASSERT_CMP(val1, cmp, val2, req, ...)                                                                  \
+    HS_SUBMOD_ASSERT_CMP(LOGMSG_ASSERT_CMP, val1, cmp, val2, req, "vol", this->get_name(), ##__VA_ARGS__)
+#define VOL_REL_ASSERT_CMP(val1, cmp, val2, req, ...)                                                                  \
+    HS_SUBMOD_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, cmp, val2, req, "vol", this->get_name(), ##__VA_ARGS__)
 
 struct volume_child_req : public blkstore_req< BlkBuffer > {
     uint64_t lba;
@@ -699,7 +701,7 @@ struct volume_req : indx_req {
     }
 
     void set_seq_id() {
-        HS_RELEASE_ASSERT(iface_req->is_write() || iface_req->is_unmap(), "Only expect write/unmap to assign seq id");
+        HS_REL_ASSERT(iface_req->is_write() || iface_req->is_unmap(), "Only expect write/unmap to assign seq id");
         seqid = iface_req->vol_instance->inc_and_get_seq_id();
     }
 
@@ -709,7 +711,7 @@ private:
     volume_req(const vol_interface_req_ptr& vi_req) :
             indx_req(vi_req->request_id, vi_req->op_type), iface_req(vi_req), io_start_time(Clock::now()) {
         if (vi_req->use_cache()) {
-            HS_DEBUG_ASSERT(vi_req->iovecs.empty(), "condition not empty");
+            HS_DBG_ASSERT(vi_req->iovecs.empty(), "condition not empty");
             // lifetime managed by HomeStore
             if (vi_req->is_write()) {
                 data.emplace< MemVecData >(new homeds::MemVector{

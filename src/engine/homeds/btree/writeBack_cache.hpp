@@ -96,8 +96,8 @@ public:
         virtual void free_yourself() override { sisl::ObjectAllocator< writeback_req >::deallocate(this); }
 
         virtual ~writeback_req() override {
-            HS_ASSERT(DEBUG, (state == writeback_req_state::WB_REQ_COMPL || state == writeback_req_state::WB_REQ_INIT),
-                      "state {}", state);
+            HS_DBG_ASSERT((state == writeback_req_state::WB_REQ_COMPL || state == writeback_req_state::WB_REQ_INIT),
+                          "state {}", state);
         }
 
         writeback_req(const writeback_req&) = delete;
@@ -245,9 +245,9 @@ public:
     ~WriteBackCache() {
         for (size_t i{0}; i < MAX_CP_CNT; ++i) {
 #ifndef NDEBUG
-            HS_ASSERT_CMP(DEBUG, m_dirty_buf_cnt[i].testz(), ==, true);
-            HS_ASSERT_CMP(DEBUG, m_req_list[i]->size(), ==, 0);
-            HS_ASSERT_CMP(DEBUG, m_free_list[i]->size(), ==, 0);
+            HS_DBG_ASSERT_EQ(m_dirty_buf_cnt[i].testz(), true);
+            HS_DBG_ASSERT_EQ(m_req_list[i]->size(), 0);
+            HS_DBG_ASSERT_EQ(m_free_list[i]->size(), 0);
 #endif
         }
     }
@@ -255,13 +255,13 @@ public:
     void prepare_cp(const btree_cp_ptr& new_bcp, const btree_cp_ptr& cur_bcp, const bool blkalloc_checkpoint) {
         if (new_bcp) {
             const size_t cp_id{(new_bcp->cp_id) % MAX_CP_CNT};
-            HS_ASSERT_CMP(DEBUG, m_dirty_buf_cnt[cp_id].testz(), ==, true);
+            HS_DBG_ASSERT_EQ(m_dirty_buf_cnt[cp_id].testz(), true);
             // decrement it by all cache threads at the end after writing all pending requests
-            HS_ASSERT_CMP(DEBUG, m_req_list[cp_id]->size(), ==, 0);
+            HS_DBG_ASSERT_EQ(m_req_list[cp_id]->size(), 0);
             blkid_list_ptr free_list, alloc_list;
             if (blkalloc_checkpoint || !cur_bcp) {
                 free_list = m_free_list[++m_free_list_cnt % MAX_CP_CNT];
-                HS_ASSERT_CMP(DEBUG, free_list->size(), ==, 0);
+                HS_DBG_ASSERT_EQ(free_list->size(), 0);
             } else {
                 // we keep accumulating the alloc and free blks until blk checkpoint is taken
                 free_list = cur_bcp->free_blkid_list;
@@ -273,7 +273,7 @@ public:
     void write(const boost::intrusive_ptr< SSDBtreeNode >& bn, const boost::intrusive_ptr< SSDBtreeNode >& dependent_bn,
                const btree_cp_ptr& bcp) {
         const size_t cp_id{bcp->cp_id % MAX_CP_CNT};
-        HS_ASSERT(RELEASE, (!dependent_bn || dependent_bn->req[cp_id] != nullptr), "");
+        HS_REL_ASSERT((!dependent_bn || dependent_bn->req[cp_id] != nullptr), "");
         writeback_req_ptr wbd_req = dependent_bn ? dependent_bn->req[cp_id] : nullptr;
         if (!bn->req[cp_id]) {
             // create wb request
@@ -286,7 +286,7 @@ public:
             wb_req->part_of_batch = true;
             // we can assume that btree is not destroyed until cp is not completed
             wb_req->wb_cache = this;
-            HS_ASSERT_CMP(DEBUG, wb_req->state, ==, writeback_req_state::WB_REQ_INIT);
+            HS_DBG_ASSERT_EQ(wb_req->state, writeback_req_state::WB_REQ_INIT);
             wb_req->state = writeback_req_state::WB_REQ_WAITING;
 
             // update buffer
@@ -300,15 +300,15 @@ public:
             m_dirty_buf_cnt[cp_id].increment(1);
             ResourceMgrSI().inc_dirty_buf_cnt(m_node_size);
         } else {
-            HS_ASSERT_CMP(DEBUG, bn->req[cp_id]->bid.to_integer(), ==, bn->get_node_id());
+            HS_DBG_ASSERT_EQ(bn->req[cp_id]->bid.to_integer(), bn->get_node_id());
             if (bn->req[cp_id]->m_mem != bn->get_memvec_intrusive()) {
                 bn->req[cp_id]->m_mem = bn->get_memvec_intrusive();
-                HS_ASSERT_NOTNULL(DEBUG, bn->req[cp_id]->m_mem.get());
+                HS_DBG_ASSERT_NOTNULL(bn->req[cp_id]->m_mem.get());
             }
         }
 
         auto wb_req{bn->req[cp_id]};
-        HS_ASSERT_CMP(DEBUG, wb_req->state, ==, writeback_req_state::WB_REQ_WAITING);
+        HS_DBG_ASSERT_EQ(wb_req->state, writeback_req_state::WB_REQ_WAITING);
 
         if (wbd_req) {
             {
@@ -322,7 +322,7 @@ public:
     // We don't want to free the blocks until cp is persisted. Because we use these blocks
     // to recover btree.
     void free_blk(const bnodeid_t node_id, const blkid_list_ptr& free_blkid_list, const uint64_t size) {
-        HS_ASSERT_CMP(DEBUG, node_id, !=, empty_bnodeid);
+        HS_DBG_ASSERT_NE(node_id, empty_bnodeid);
         BlkId bid(node_id);
 
         //  if bcp is null then free it only from the cache.
@@ -332,7 +332,7 @@ public:
             free_blkid_list->push_back(bid);
             // release on realtime bitmap;
             const auto ret = m_blkstore->free_on_realtime(bid);
-            HS_RELEASE_ASSERT(ret, "fail to free on realtime bm");
+            HS_REL_ASSERT(ret, "fail to free on realtime bm");
         }
     }
 
@@ -457,9 +457,7 @@ public:
     }
 
     void writeBack_completion_internal(boost::intrusive_ptr< blkstore_req< wb_cache_buffer_t > >& bs_req) {
-        if (bs_req->err != no_error) {
-            HS_RELEASE_ASSERT(false, "error {} happen during cp {}", bs_req->err.message());
-        }
+        if (bs_req->err != no_error) { HS_REL_ASSERT(false, "error {} happen during cp {}", bs_req->err.message()); }
 
         auto wb_req = to_wb_req(bs_req);
         const size_t cp_id = wb_req->bcp->cp_id % MAX_CP_CNT;

@@ -68,7 +68,7 @@ struct cp_base {
 
     void push_cb(const cp_done_cb& cb) {
         std::unique_lock< std::mutex > lk(cb_list_mtx);
-        HS_ASSERT_CMP(DEBUG, cp_status, !=, cp_status_t::cp_prepare);
+        HS_DBG_ASSERT_NE(cp_status, cp_status_t::cp_prepare);
         cb_list.push_back(std::move(cb));
     }
 };
@@ -108,7 +108,7 @@ public:
         m_cur_cp->cp_status = cp_status_t::cp_io_ready;
     }
 
-    virtual ~CPMgr() { HS_ASSERT(RELEASE, !m_cur_cp, "cur cp is not null"); }
+    virtual ~CPMgr() { HS_REL_ASSERT(!m_cur_cp, "cur cp is not null"); }
 
     virtual void shutdown() {
         auto cp = get_cur_cp();
@@ -136,10 +136,9 @@ public:
             return nullptr;
         }
         auto cnt = cp->enter_cnt.fetch_add(1);
-        HS_ASSERT(DEBUG,
-                  (cp->cp_status == cp_status_t::cp_io_ready || cp->cp_status == cp_status_t::cp_trigger ||
-                   cp->cp_status == cp_status_t::cp_prepare),
-                  "cp status {}", cp->cp_status);
+        HS_DBG_ASSERT((cp->cp_status == cp_status_t::cp_io_ready || cp->cp_status == cp_status_t::cp_trigger ||
+                       cp->cp_status == cp_status_t::cp_prepare),
+                      "cp status {}", cp->cp_status);
 
         rcu_read_unlock();
 
@@ -150,7 +149,7 @@ public:
      * phase before calling cp_inc_ref.
      */
     void cp_inc_ref(cp_type* cp, int ref_cnt) {
-        HS_ASSERT_CMP(DEBUG, cp->enter_cnt, >, 0);
+        HS_DBG_ASSERT_GT(cp->enter_cnt, 0);
         auto cnt = cp->enter_cnt.fetch_add(ref_cnt);
     }
 
@@ -159,7 +158,7 @@ public:
      * cp :- cp returned in cp_enter()
      */
     void cp_io_exit(cp_type* cp) {
-        HS_ASSERT_CMP(DEBUG, cp->cp_status, !=, cp_status_t::cp_start);
+        HS_DBG_ASSERT_NE(cp->cp_status, cp_status_t::cp_start);
         auto cnt = cp->enter_cnt.fetch_sub(1);
         if (cnt == 1 && cp->cp_status == cp_status_t::cp_prepare) {
             cp->cp_status = cp_status_t::cp_start;
@@ -172,8 +171,8 @@ public:
      * thread and only once.
      */
     void cp_end(cp_type* cp) {
-        HS_ASSERT(DEBUG, in_cp_phase, "in_cp_phase");
-        HS_ASSERT_CMP(DEBUG, cp->cp_status, ==, cp_status_t::cp_start);
+        HS_DBG_ASSERT(in_cp_phase, "in_cp_phase");
+        HS_DBG_ASSERT_EQ(cp->cp_status, cp_status_t::cp_start);
         auto cb_list = cp->cb_list;
         HS_PERIODIC_LOG(INFO, cp, ">>>>>>>>>>>> cp ID completed {}, notified {} callbacks time taken {} us",
                         cp->to_string(), cb_list.size(), get_elapsed_time_us(m_cp_start_time));
@@ -212,7 +211,7 @@ public:
             if (cb || force) {
                 std::unique_lock< std::mutex > lk(trigger_cp_mtx);
                 auto cp = cp_io_enter();
-                HS_ASSERT_CMP(DEBUG, cp->cp_status, !=, cp_status_t::cp_prepare);
+                HS_DBG_ASSERT_NE(cp->cp_status, cp_status_t::cp_prepare);
                 if (cb) { cp->push_cb(std::move(cb)); }
                 cp->cp_trigger_waiting = true;
                 cp_io_exit(cp);

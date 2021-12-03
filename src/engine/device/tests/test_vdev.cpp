@@ -244,8 +244,8 @@ public:
         m_vdev->truncate(off_to_truncate);
         auto tail_after = m_vdev->get_tail_offset();
 
-        HS_ASSERT_CMP(DEBUG, tail_before, ==, tail_after);
-        HS_ASSERT_CMP(DEBUG, off_to_truncate, ==, m_vdev->data_start_offset());
+        HS_DBG_ASSERT_EQ(tail_before, tail_after);
+        HS_DBG_ASSERT_EQ(off_to_truncate, m_vdev->data_start_offset());
 
         if (off_to_truncate > m_start_off) {
             // remove the offsets before truncate offset, since they are not valid for read anymore;
@@ -293,9 +293,9 @@ public:
         auto used_space = m_vdev->get_used_size();
         auto start_off = m_vdev->data_start_offset();
 
-        HS_ASSERT_CMP(DEBUG, m_total_size, >, 0);
-        HS_ASSERT_CMP(DEBUG, used_space, <, m_total_size);
-        HS_ASSERT_CMP(DEBUG, start_off, ==, m_start_off);
+        HS_DBG_ASSERT_GT(m_total_size, 0);
+        HS_DBG_ASSERT_LT(used_space, m_total_size);
+        HS_DBG_ASSERT_EQ(start_off, m_start_off);
     }
 
     bool time_to_truncate() {
@@ -306,7 +306,7 @@ public:
     }
 
     void validate_truncate_offset(off_t off) {
-        HS_ASSERT_CMP(DEBUG, (uint64_t)off, <=, m_total_size);
+        HS_DBG_ASSERT_LE((uint64_t)off, m_total_size);
 
         validate_read_offset(off);
     }
@@ -315,12 +315,12 @@ public:
         auto tail_offset = m_vdev->get_tail_offset();
         auto start_offset = m_vdev->data_start_offset();
 
-        HS_ASSERT_CMP(DEBUG, off + sz, <=, m_vdev->get_size());
+        HS_DBG_ASSERT_LE(off + sz, m_vdev->get_size());
 
         if ((off + sz) == m_vdev->get_size()) {
-            HS_ASSERT_CMP(DEBUG, (uint64_t)0, ==, (uint64_t)tail_offset);
+            HS_DBG_ASSERT_EQ((uint64_t)0, (uint64_t)tail_offset);
         } else {
-            HS_ASSERT_CMP(DEBUG, (uint64_t)(off + sz), ==, (uint64_t)tail_offset);
+            HS_DBG_ASSERT_EQ((uint64_t)(off + sz), (uint64_t)tail_offset);
         }
     }
 
@@ -328,13 +328,13 @@ public:
         auto tail_offset = m_vdev->get_tail_offset();
         auto start_offset = m_vdev->data_start_offset();
 
-        HS_ASSERT_CMP(DEBUG, m_start_off, ==, start_offset);
+        HS_DBG_ASSERT_EQ(m_start_off, start_offset);
         if (start_offset < tail_offset) {
-            HS_ASSERT_CMP(DEBUG, off, >=, start_offset, "Wrong offset: {}, start_off: {}", off, start_offset);
-            HS_ASSERT_CMP(DEBUG, off, <, tail_offset, "Wrong offset: {}, tail_offset: {}", off, tail_offset);
+            HS_DBG_ASSERT_GE(off, start_offset, "Wrong offset: {}, start_off: {}", off, start_offset);
+            HS_DBG_ASSERT_LT(off, tail_offset, "Wrong offset: {}, tail_offset: {}", off, tail_offset);
         } else {
-            HS_ASSERT(DEBUG, off < tail_offset || off >= start_offset, "Wrong offset: {}, start: {}, tail: {}", off,
-                      start_offset, tail_offset);
+            HS_DBG_ASSERT(off < tail_offset || off >= start_offset, "Wrong offset: {}, start: {}, tail: {}", off,
+                          start_offset, tail_offset);
         }
     }
 
@@ -351,13 +351,12 @@ public:
         auto buf = iomanager.iobuf_alloc(512, it->second.size);
         auto bytes_read = m_vdev->pread((void*)buf, (size_t)it->second.size, (off_t)off_to_read);
 
-        if (bytes_read == -1) { HS_ASSERT(DEBUG, false, "bytes_read returned -1, errno: {}", errno); }
+        if (bytes_read == -1) { HS_DBG_ASSERT(false, "bytes_read returned -1, errno: {}", errno); }
 
-        HS_ASSERT_CMP(DEBUG, (size_t)bytes_read, ==, (size_t)(it->second.size));
+        HS_DBG_ASSERT_EQ((size_t)bytes_read, (size_t)(it->second.size));
 
         auto crc = util::Hash64((const char*)buf, (size_t)bytes_read);
-        HS_ASSERT_CMP(DEBUG, crc, ==, it->second.crc, "CRC Mismatch: read out crc: {}, saved write: {}", crc,
-                      it->second.crc);
+        HS_DBG_ASSERT_EQ(crc, it->second.crc, "CRC Mismatch: read out crc: {}, saved write: {}", crc, it->second.crc);
         iomanager.iobuf_free(buf);
         m_read_cnt++;
     }
@@ -370,8 +369,8 @@ public:
         if (it != m_off_to_info_map.end()) {
             LOGERROR("write offset already exists, off: 0x{}, size: {}, crc: 0x{}", to_hex(it->first), it->second.size,
                      to_hex(it->second.crc));
-            HS_ASSERT(DEBUG, it == m_off_to_info_map.end(),
-                      "assert failure writing to some offset: {} that's already in the map!", off_to_wrt);
+            HS_DBG_ASSERT(it == m_off_to_info_map.end(),
+                          "assert failure writing to some offset: {} that's already in the map!", off_to_wrt);
         }
 
         validate_write_offset(off_to_wrt, sz_to_wrt);
@@ -384,9 +383,9 @@ public:
 
         auto bytes_written = m_vdev->pwrite(buf, sz_to_wrt, off_to_wrt);
 
-        HS_ASSERT_CMP(DEBUG, bytes_written, !=, -1, "bytes_written returned -1, errno: {}", errno);
-        HS_ASSERT_CMP(DEBUG, (size_t)bytes_written, ==, (size_t)sz_to_wrt);
-        HS_ASSERT_CMP(DEBUG, (size_t)off_to_wrt, <, (size_t)m_total_size);
+        HS_DBG_ASSERT_NE(bytes_written, -1, "bytes_written returned -1, errno: {}", errno);
+        HS_DBG_ASSERT_EQ((size_t)bytes_written, (size_t)sz_to_wrt);
+        HS_DBG_ASSERT_LT((size_t)off_to_wrt, (size_t)m_total_size);
 
         m_wrt_cnt++;
         m_off_to_info_map[off_to_wrt].size = sz_to_wrt;

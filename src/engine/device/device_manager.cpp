@@ -63,8 +63,8 @@ void PhysicalDevChunk::cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp) {
     get_blk_allocator_mutable()->cp_done();
 }
 
-std::shared_ptr< blkalloc_cp > PhysicalDevChunk::attach_prepare_cp([
-    [maybe_unused]] const std::shared_ptr< blkalloc_cp >& cur_ba_cp) {
+std::shared_ptr< blkalloc_cp >
+PhysicalDevChunk::attach_prepare_cp([[maybe_unused]] const std::shared_ptr< blkalloc_cp >& cur_ba_cp) {
     return std::make_shared< blkalloc_cp >();
 }
 
@@ -76,7 +76,7 @@ DeviceManager::DeviceManager(const std::vector< dev_info >& data_devices, NewVDe
         m_data_devices{data_devices},
         m_vdev_metadata_size{vdev_metadata_size},
         m_vdev_error_cb{vdev_error_cb} {
-    HS_RELEASE_ASSERT_GT(data_devices.size(), 0, "Expecting at least one data device");
+    HS_REL_ASSERT_GT(data_devices.size(), 0, "Expecting at least one data device");
 
     m_hdd_open_flags = get_open_flags(HS_STATIC_CONFIG(input.data_open_flags));
     m_ssd_open_flags = get_open_flags(HS_STATIC_CONFIG(input.fast_open_flags));
@@ -126,10 +126,10 @@ bool DeviceManager::init() {
     }
 
     if (!m_first_time_boot) {
-        HS_DEBUG_ASSERT_NE(data_system_uuid, INVALID_SYSTEM_UUID);
+        HS_DBG_ASSERT_NE(data_system_uuid, INVALID_SYSTEM_UUID);
         load_and_repair_devices(data_system_uuid);
     } else {
-        HS_DEBUG_ASSERT_EQ(data_system_uuid, INVALID_SYSTEM_UUID);
+        HS_DBG_ASSERT_EQ(data_system_uuid, INVALID_SYSTEM_UUID);
         init_devices();
     }
 
@@ -268,7 +268,7 @@ void DeviceManager::load_and_repair_devices(const hs_uuid_t& sys_uuid) {
                    "Replacing it with the failed disks can cause data loss",
                    d.dev_names);
 
-            HS_RELEASE_ASSERT(false, "hot plug-in device not supported!");
+            HS_REL_ASSERT(false, "hot plug-in device not supported!");
         }
 
         LOGINFO("Loaded device: {}, with system uuid: {}", d.dev_names, std::ctime(&sys_uuid));
@@ -281,9 +281,9 @@ void DeviceManager::load_and_repair_devices(const hs_uuid_t& sys_uuid) {
         static auto sys_uuid = pdev->get_sys_uuid();
 
         // sanity check that all devices should have same homestore system uuid;
-        HS_RELEASE_ASSERT_EQ(sys_uuid, pdev->get_sys_uuid(), "homestore system uuid mismatch found on devices {}, {}",
-                             sys_uuid, pdev->get_sys_uuid());
-        HS_ASSERT_NULL(LOGMSG, m_data_pdevs[pdev->get_dev_id()].get());
+        HS_REL_ASSERT_EQ(sys_uuid, pdev->get_sys_uuid(), "homestore system uuid mismatch found on devices {}, {}",
+                         sys_uuid, pdev->get_sys_uuid());
+        HS_LOG_ASSERT_NULL(m_data_pdevs[pdev->get_dev_id()].get());
 
         if (pdev->is_hdd()) { HomeStoreStaticConfig::instance().hdd_drive_present = true; }
         m_data_pdevs[pdev->get_dev_id()] = std::move(pdev);
@@ -292,9 +292,7 @@ void DeviceManager::load_and_repair_devices(const hs_uuid_t& sys_uuid) {
     m_last_data_pdev_id = m_data_devices.size() - 1;
     m_pdev_id = dm_derived.pdev_hdr->num_phys_devs;
 
-    if (gen_count.load() == 0) {
-        HS_RELEASE_ASSERT(false, "no valid device found");
-    }
+    if (gen_count.load() == 0) { HS_REL_ASSERT(false, "no valid device found"); }
 
     // load the info blocks
     read_info_blocks(device_id);
@@ -311,7 +309,7 @@ void DeviceManager::load_and_repair_devices(const hs_uuid_t& sys_uuid) {
         uint32_t cid{pdev->get_first_chunk_id()};
         while (cid != INVALID_CHUNK_ID) {
             auto* const chunk{get_chunk_mutable(cid)};
-            HS_ASSERT_NULL(LOGMSG, chunk);
+            HS_LOG_ASSERT_NULL(chunk);
             HS_LOG_ASSERT_LT(cid, HS_STATIC_CONFIG(engine.max_chunks));
             m_data_chunks[cid] = std::make_unique< PhysicalDevChunk >(
                 m_data_pdevs[dm_derived.chunk_info[cid].pdev_id].get(), &dm_derived.chunk_info[cid]);
@@ -387,7 +385,7 @@ void DeviceManager::add_chunks(const uint32_t vid, const chunk_add_callback& cb)
         uint32_t cid{pdev->get_first_chunk_id()};
         while (cid != INVALID_CHUNK_ID) {
             auto* const chunk{get_chunk_mutable(cid)};
-            HS_ASSERT_NOTNULL(DEBUG, chunk);
+            HS_DBG_ASSERT_NOTNULL(chunk);
             if (chunk->get_vdev_id() == vid) { cb(chunk); }
             cid = chunk->get_next_chunk_id();
         }
@@ -407,7 +405,7 @@ void DeviceManager::inited() {
                     cid = chunk->get_next_chunk_id();
                     continue;
                 }
-                HS_ASSERT_NOTNULL(DEBUG, chunk->get_blk_allocator().get());
+                HS_DBG_ASSERT_NOTNULL(chunk->get_blk_allocator().get());
                 chunk->get_blk_allocator_mutable()->inited();
                 cid = chunk->get_next_chunk_id();
             }
@@ -500,17 +498,17 @@ void DeviceManager::read_info_blocks(const uint32_t dev_id) {
     pdev->read_dm_chunk(reinterpret_cast< char* >(chunk_memory), dm_derived.info_size);
 
     auto* const dm{reinterpret_cast< dm_info* >(chunk_memory)};
-    HS_DEBUG_ASSERT_EQ(dm->get_magic(), MAGIC);
+    HS_DBG_ASSERT_EQ(dm->get_magic(), MAGIC);
 #ifndef NO_CHECKSUM
     const auto crc{crc16_t10dif(init_crc_16,
                                 reinterpret_cast< const unsigned char* >(chunk_memory + dm_info::s_dm_payload_offset),
                                 dm_derived.info_size - dm_info::s_dm_payload_offset)};
-    HS_DEBUG_ASSERT_EQ(dm->get_checksum(), crc);
+    HS_DBG_ASSERT_EQ(dm->get_checksum(), crc);
 #endif
 
-    HS_DEBUG_ASSERT_EQ(dm_derived.vdev_hdr->get_magic(), MAGIC);
-    HS_DEBUG_ASSERT_EQ(dm_derived.chunk_hdr->get_magic(), MAGIC);
-    HS_DEBUG_ASSERT_EQ(dm_derived.pdev_hdr->get_magic(), MAGIC);
+    HS_DBG_ASSERT_EQ(dm_derived.vdev_hdr->get_magic(), MAGIC);
+    HS_DBG_ASSERT_EQ(dm_derived.chunk_hdr->get_magic(), MAGIC);
+    HS_DBG_ASSERT_EQ(dm_derived.pdev_hdr->get_magic(), MAGIC);
 
     dm_derived.vdev_info = reinterpret_cast< vdev_info_block* >(chunk_memory + dm_derived.vdev_hdr->info_offset);
     dm_derived.chunk_info = reinterpret_cast< chunk_info_block* >(chunk_memory + dm_derived.chunk_hdr->info_offset);
@@ -539,22 +537,22 @@ void DeviceManager::write_info_blocks() {
         pdev->write_dm_chunk(gen_count, reinterpret_cast< const char* >(chunk_memory), dm_derived.info_size);
     }
 
-    HS_DEBUG_ASSERT_EQ(dm_derived.vdev_hdr->get_magic(), MAGIC);
-    HS_DEBUG_ASSERT_EQ(dm_derived.chunk_hdr->get_magic(), MAGIC);
-    HS_DEBUG_ASSERT_EQ(dm_derived.pdev_hdr->get_magic(), MAGIC);
+    HS_DBG_ASSERT_EQ(dm_derived.vdev_hdr->get_magic(), MAGIC);
+    HS_DBG_ASSERT_EQ(dm_derived.chunk_hdr->get_magic(), MAGIC);
+    HS_DBG_ASSERT_EQ(dm_derived.pdev_hdr->get_magic(), MAGIC);
 }
 
 PhysicalDevChunk* DeviceManager::alloc_chunk(PhysicalDev* pdev, const uint32_t vdev_id, const uint64_t req_size,
                                              const uint32_t primary_id, const bool is_stream_aligned) {
     std::lock_guard< decltype(m_dev_mutex) > lock{m_dev_mutex};
 
-    HS_DEBUG_ASSERT_EQ(req_size % pdev->get_page_size(), 0);
+    HS_DBG_ASSERT_EQ(req_size % pdev->get_page_size(), 0);
     PhysicalDevChunk* chunk{pdev->find_free_chunk(req_size, is_stream_aligned)};
     if (chunk == nullptr) {
         LOGERROR("No space available for chunk size {} in pdev id {} ", req_size, pdev->get_dev_id());
         return nullptr;
     }
-    HS_DEBUG_ASSERT_GE(chunk->get_size(), req_size);
+    HS_DBG_ASSERT_GE(chunk->get_size(), req_size);
     chunk->set_vdev_id(vdev_id); // Set the chunk as busy or engaged to a vdev
     chunk->set_primary_chunk_id(primary_id);
     chunk->update_end_of_chunk(req_size);
@@ -616,7 +614,7 @@ vdev_info_block* DeviceManager::alloc_vdev(const uint32_t req_size, const uint32
     auto& dm_derived{get_dm_derived()};
     if (last_vdev_id == INVALID_VDEV_ID) {
         // This is the first vdev being created.
-        HS_DEBUG_ASSERT_EQ(dm_derived.vdev_hdr->get_first_vdev_id(), INVALID_VDEV_ID);
+        HS_DBG_ASSERT_EQ(dm_derived.vdev_hdr->get_first_vdev_id(), INVALID_VDEV_ID);
         dm_derived.vdev_hdr->first_vdev_id = vb->vdev_id;
     } else {
         auto* const prev_vb{&dm_derived.vdev_info[last_vdev_id]};
@@ -680,7 +678,7 @@ PhysicalDevChunk* DeviceManager::create_new_chunk(PhysicalDev* const pdev, const
 
 void DeviceManager::remove_chunk(const uint32_t chunk_id) {
     auto& dm_derived{get_dm_derived()};
-    HS_DEBUG_ASSERT_EQ(dm_derived.chunk_info[chunk_id].is_slot_allocated(), true);
+    HS_DBG_ASSERT_EQ(dm_derived.chunk_info[chunk_id].is_slot_allocated(), true);
     dm_derived.chunk_info[chunk_id].set_slot_allocated(false); // Free up the slot for future allocations
     --(dm_derived.chunk_hdr->num_chunks);
 }
@@ -723,8 +721,8 @@ iomgr::drive_attributes DeviceManager::get_drive_attrs(const std::vector< dev_in
     for (auto i{1u}; i < devices.size(); ++i) {
         auto observed_attr = iomgr::DriveInterface::get_attributes(devices[i].dev_names);
         if (attr != observed_attr) {
-            HS_ASSERT(DEBUG, 0, "Expected all phys dev have same attributes, prev device attr={}, this device attr={}",
-                      attr.to_json().dump(4), observed_attr.to_json().dump(4));
+            HS_DBG_ASSERT(0, "Expected all phys dev have same attributes, prev device attr={}, this device attr={}",
+                          attr.to_json().dump(4), observed_attr.to_json().dump(4));
         }
     }
 #endif
@@ -737,8 +735,8 @@ iomgr::drive_type DeviceManager::get_drive_type(const std::vector< dev_info >& d
 #ifndef NDEBUG
     for (auto i{1u}; i < devices.size(); ++i) {
         auto observed_dtype = iomgr::DriveInterface::get_drive_type(devices[i].dev_names);
-        HS_DEBUG_ASSERT_EQ(enum_name(dtype), enum_name(observed_dtype),
-                           "Expected all phys dev have same drive_type, mismatched dev={}", devices[i].dev_names);
+        HS_DBG_ASSERT_EQ(enum_name(dtype), enum_name(observed_dtype),
+                         "Expected all phys dev have same drive_type, mismatched dev={}", devices[i].dev_names);
     }
 #endif
 
@@ -769,7 +767,7 @@ std::vector< PhysicalDev* > DeviceManager::get_devices(const PhysicalDevGroup pd
             vec.push_back(pdev.get());
         }
     }
-    HS_RELEASE_ASSERT_GT(vec.size(), 0);
+    HS_REL_ASSERT_GT(vec.size(), 0);
     return vec;
 }
 
@@ -808,7 +806,7 @@ uint32_t DeviceManager::get_common_phys_page_sz() {
         const auto pdev_attr = iomgr::DriveInterface::get_attributes(dev_info.dev_names);
         const uint32_t page_size = pdev_attr.phys_page_size;
         if (page_size == 0 || (page_size & (page_size - 1)) != 0) {
-            HS_RELEASE_ASSERT(0, "very odd page size {}", page_size);
+            HS_REL_ASSERT(0, "very odd page size {}", page_size);
         }
         max_page_size = std::max(max_page_size, page_size);
     }
@@ -821,7 +819,7 @@ uint32_t DeviceManager::get_common_align_sz() {
         const auto pdev_attr = iomgr::DriveInterface::get_attributes(dev_info.dev_names);
         const uint32_t align_size = pdev_attr.align_size;
         if (align_size == 0 || (align_size & (align_size - 1)) != 0) {
-            HS_RELEASE_ASSERT(0, "very odd align size {}", align_size);
+            HS_REL_ASSERT(0, "very odd align size {}", align_size);
         }
         max_align_size = std::max(max_align_size, align_size);
     }

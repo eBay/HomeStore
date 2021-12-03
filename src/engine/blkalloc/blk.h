@@ -127,26 +127,26 @@ public:
     void set(const BlkId& bid) { set(bid.get_blk_num(), bid.get_nblks(), bid.get_chunk_num()); }
 
     void set(const uint64_t id_int) {
-        HS_DEBUG_ASSERT_LE(id_int, max_id_int());
+        HS_DBG_ASSERT_LE(id_int, max_id_int());
         m_blk_num = (id_int & s_blk_num_mask);
         m_nblks = static_cast< blk_count_t >((id_int >> BLK_NUM_BITS) & s_nblks_mask);
         m_chunk_num = static_cast< chunk_num_t >((id_int >> (BLK_NUM_BITS + NBLKS_BITS)) & s_chunk_num_mask);
     }
 
     void set_blk_num(const blk_num_t blk_num) {
-        HS_DEBUG_ASSERT_LE(blk_num, s_blk_num_mask);
+        HS_DBG_ASSERT_LE(blk_num, s_blk_num_mask);
         m_blk_num = blk_num;
     }
     [[nodiscard]] blk_num_t get_blk_num() const { return m_blk_num; }
 
     void set_nblks(const blk_count_t nblks) {
-        HS_DEBUG_ASSERT_LE(nblks, max_blks_in_op());
+        HS_DBG_ASSERT_LE(nblks, max_blks_in_op());
         m_nblks = static_cast< blk_count_serialized_t >(nblks - 1);
     }
     [[nodiscard]] blk_count_t get_nblks() const { return static_cast< blk_count_t >(m_nblks) + 1; }
 
     void set_chunk_num(const chunk_num_t chunk_num) {
-        HS_DEBUG_ASSERT_LE(chunk_num, s_chunk_num_mask);
+        HS_DBG_ASSERT_LE(chunk_num, s_chunk_num_mask);
         m_chunk_num = chunk_num;
     }
     [[nodiscard]] chunk_num_t get_chunk_num() const { return m_chunk_num; }
@@ -196,20 +196,20 @@ public:
     [[nodiscard]] const BlkId& get_blkid() const { return m_blkid; }
 
     void set_view_offset(const blk_count_t offset) {
-        HS_DEBUG_ASSERT_LT(offset, BlkId::max_blks_in_op())
+        HS_DBG_ASSERT_LT(offset, BlkId::max_blks_in_op())
         m_view_offset = static_cast< blk_count_serialized_t >(offset);
     }
     blk_count_t get_view_offset() const { return static_cast< blk_count_t >(m_view_offset); }
 
     void set_view_nblks(const blk_count_t nblks) {
-        HS_DEBUG_ASSERT_LE(nblks, BlkId::max_blks_in_op());
-        HS_DEBUG_ASSERT_LE(get_view_offset() + nblks, m_blkid.get_nblks());
+        HS_DBG_ASSERT_LE(nblks, BlkId::max_blks_in_op());
+        HS_DBG_ASSERT_LE(get_view_offset() + nblks, m_blkid.get_nblks());
         m_view_nblks = static_cast< blk_count_serialized_t >(nblks - 1);
     }
     [[nodiscard]] blk_count_t get_view_nblks() const { return static_cast< blk_count_t >(m_view_nblks) + 1; }
 
     void add_to_view_offset(const blk_count_t offset) {
-        HS_DEBUG_ASSERT_LT(get_view_offset() + offset, BlkId::max_blks_in_op());
+        HS_DBG_ASSERT_LT(get_view_offset() + offset, BlkId::max_blks_in_op());
         set_view_offset(get_view_offset() + offset);
     }
 

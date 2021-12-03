@@ -96,11 +96,10 @@ public:
     blkstore_req& operator=(blkstore_req&&) noexcept = delete;
 
     virtual ~blkstore_req() override {
-        HS_DEBUG_ASSERT_EQ(missing_pieces.size(), 0);
+        HS_DBG_ASSERT_EQ(missing_pieces.size(), 0);
         if (!blkstore_ref_cnt.testz()) {
             LOGERROR("blkstore_ref_cnt is not 0, details of req: [{}]", to_string());
-            HS_DEBUG_ASSERT_EQ(blkstore_ref_cnt.get(), 0, "blkstore_ref_cnt is not 0, details of req: [{}]",
-                               to_string());
+            HS_DBG_ASSERT_EQ(blkstore_ref_cnt.get(), 0, "blkstore_ref_cnt is not 0, details of req: [{}]", to_string());
         }
     };
 
@@ -243,7 +242,7 @@ public:
     bool is_read_modify_cache() { return (m_cache_type == BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE); }
 
     void process_completions(const boost::intrusive_ptr< virtualdev_req >& v_req) {
-        HS_RELEASE_ASSERT_EQ(m_comp_cb.operator bool(), true);
+        HS_REL_ASSERT_EQ(m_comp_cb.operator bool(), true);
         auto req{blkstore_req< Buffer >::to_blkstore_req(v_req)};
 
         if (!req->is_read) {
@@ -302,8 +301,8 @@ public:
         assert(size % m_pagesz == 0);
         const blk_count_t nblks{static_cast< blk_count_t >(size / m_pagesz)};
         hints.is_contiguous = true;
-        HS_ASSERT_CMP(DEBUG, nblks, <=, BlkId::max_blks_in_op(), "nblks {} more than max blks {}", nblks,
-                      BlkId::max_blks_in_op());
+        HS_DBG_ASSERT_LE(nblks, BlkId::max_blks_in_op(), "nblks {} more than max blks {}", nblks,
+                         BlkId::max_blks_in_op());
         return (m_vdev.alloc_contiguous_blk(nblks, hints, out_blkid));
     }
 
@@ -364,7 +363,7 @@ public:
         const bool inserted{m_cache->insert(blkid, ibuf, &out_bbuf)};
         if (!inserted) {
             free_blk(blkid, boost::none, boost::none);
-            HS_DEBUG_ASSERT(0, "cache is full. failing blk allocation");
+            HS_DBG_ASSERT(0, "cache is full. failing blk allocation");
             return nullptr;
         }
 
@@ -566,7 +565,7 @@ public:
         for (auto& missing : missing_mp) {
             // Create a new block of memory for the missing piece
             uint8_t* ptr{hs_utils::iobuf_alloc(missing.second, Buffer::get_buf_tag(), m_vdev.get_align_size())};
-            HS_ASSERT_NOTNULL(RELEASE, ptr, "ptr is null");
+            HS_REL_ASSERT_NOTNULL(ptr, "ptr is null");
 
             COUNTER_INCREMENT(m_metrics, blkstore_cache_miss_size, missing.second);
 
@@ -585,7 +584,7 @@ public:
             /* This assert won't be valid for volume reads if user is doing overlap writes/reads because we set the blks
              * allocated only after journal write is completed.
              */
-            HS_ASSERT_CMP(DEBUG, m_vdev.is_blk_alloced(tmp_bid), ==, true, "blk is not allocted");
+            HS_DBG_ASSERT_EQ(m_vdev.is_blk_alloced(tmp_bid), true, "blk is not allocted");
             m_vdev.read(tmp_bid, mp, virtualdev_req::to_vdev_req(req));
             if (req->isSyncCall) {
                 const bool inserted{req->bbuf->update_missing_piece(missing.first, missing.second, ptr)};
@@ -624,7 +623,7 @@ public:
         // This assert won't be valid for volume reads if user is doing overlap writes/reads because we set the blks
         // allocated only after journal write is completed.
         ///
-        HS_ASSERT_CMP(DEBUG, m_vdev.is_blk_alloced(const_cast< BlkId& >(bid)), ==, true, "blk is not allocted");
+        HS_DBG_ASSERT_EQ(m_vdev.is_blk_alloced(const_cast< BlkId& >(bid)), true, "blk is not allocted");
 
         req->blkstore_ref_cnt.increment(1);
         m_vdev.read(bid, iovecs, size, virtualdev_req::to_vdev_req(req));

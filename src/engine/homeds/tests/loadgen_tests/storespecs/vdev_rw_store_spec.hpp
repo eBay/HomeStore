@@ -70,11 +70,11 @@ public:
         const auto bytes_read{m_store->read(static_cast< void* >(buf), static_cast< size_t >(count))};
 
         // verify seek is working fine;
-        HS_ASSERT_CMP(DEBUG, static_cast< int64_t >(seeked_pos), ==, static_cast< int64_t >(off));
+        HS_DBG_ASSERT_EQ(static_cast< int64_t >(seeked_pos), static_cast< int64_t >(off));
 
         // verify new seeked pos is good after read;
-        HS_ASSERT_CMP(DEBUG, static_cast< int64_t >(seeked_pos + bytes_read), ==,
-                      static_cast< int64_t >(m_store->seeked_pos()));
+        HS_DBG_ASSERT_EQ(static_cast< int64_t >(seeked_pos + bytes_read),
+                         static_cast< int64_t >(m_store->seeked_pos()));
 
         verify_read(bytes_read, buf, off, count);
 
@@ -86,17 +86,17 @@ public:
 
     void verify_read(const ssize_t bytes_read, const uint8_t* const buf, const uint64_t off,
                      const uint64_t count) const {
-        if (bytes_read == -1) { HS_ASSERT(DEBUG, false, "bytes_read returned -1, errno: {}", errno); }
+        if (bytes_read == -1) { HS_DBG_ASSERT(false, "bytes_read returned -1, errno: {}", errno); }
 
-        HS_ASSERT_CMP(DEBUG, static_cast< uint64_t >(bytes_read), ==, count);
+        HS_DBG_ASSERT_EQ(static_cast< uint64_t >(bytes_read), count);
 
         const auto crc{util::Hash64(reinterpret_cast< const char* >(buf), static_cast< size_t >(bytes_read))};
         const auto itr{m_off_to_info_map.find(off)};
         if (itr != std::cend(m_off_to_info_map)) {
-            HS_ASSERT_CMP(DEBUG, crc, ==, itr->second.crc, "CRC Mismatch: read out crc: {}, saved write: {}", crc,
-                          itr->second.crc);
+            HS_DBG_ASSERT_EQ(crc, itr->second.crc, "CRC Mismatch: read out crc: {}, saved write: {}", crc,
+                             itr->second.crc);
         } else {
-            HS_DEBUG_ASSERT(false, "CRC Mismatch: off: {} does not exist in map", off);
+            HS_DBG_ASSERT(false, "CRC Mismatch: off: {} does not exist in map", off);
         }
     }
 
@@ -115,7 +115,7 @@ public:
         const auto off{m_store->lseek(0, SEEK_CUR)};
         const auto cursor{m_store->seeked_pos()};
 
-        HS_ASSERT_CMP(DEBUG, cursor, ==, off);
+        HS_DBG_ASSERT_EQ(cursor, off);
 
         if (m_write_sz + count > m_store->get_size()) {
             LOGWARN("Expected out of space: write size {} : {} will exceed blkstore maximum size: {}", m_write_sz,
@@ -127,14 +127,13 @@ public:
 
         const auto cursor_after_write{m_store->seeked_pos()};
 
-        if (bytes_written == -1) { HS_ASSERT(DEBUG, false, "bytes_written returned -1, errno: {}", errno); }
+        if (bytes_written == -1) { HS_DBG_ASSERT(false, "bytes_written returned -1, errno: {}", errno); }
 
-        HS_ASSERT_CMP(DEBUG, static_cast< std::decay_t< decltype(count) > >(bytes_written), ==, count);
+        HS_DBG_ASSERT_EQ(static_cast< std::decay_t< decltype(count) > >(bytes_written), count);
 
-        HS_ASSERT_CMP(DEBUG, static_cast< int64_t >(cursor_after_write), ==,
-                      static_cast< int64_t >(off + bytes_written),
-                      "cursor: {} is not correct after write. write_cnt: {}, cursor before write: {}.",
-                      cursor_after_write, bytes_written, off);
+        HS_DBG_ASSERT_EQ(static_cast< int64_t >(cursor_after_write), static_cast< int64_t >(off + bytes_written),
+                         "cursor: {} is not correct after write. write_cnt: {}, cursor before write: {}.",
+                         cursor_after_write, bytes_written, off);
 
         ++m_write_cnt;
         m_off_to_info_map[off].size = count;

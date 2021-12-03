@@ -36,7 +36,7 @@ public:
 
     /* monitor dirty buffer count */
     void inc_dirty_buf_cnt(const uint32_t size) {
-        HS_RELEASE_ASSERT_GT(size, 0);
+        HS_REL_ASSERT_GT(size, 0);
         const auto dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_add(size, std::memory_order_relaxed);
         COUNTER_INCREMENT(m_metrics, dirty_buf_cnt, size);
         if (m_dirty_buf_exceed_cb && ((dirty_buf_cnt + size) > get_dirty_buf_limit())) {
@@ -45,10 +45,10 @@ public:
     }
 
     void dec_dirty_buf_cnt(const uint32_t size) {
-        HS_RELEASE_ASSERT_GT(size, 0);
+        HS_REL_ASSERT_GT(size, 0);
         const int64_t dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_sub(size, std::memory_order_relaxed);
         COUNTER_DECREMENT(m_metrics, dirty_buf_cnt, size);
-        HS_RELEASE_ASSERT_GE(dirty_buf_cnt, size);
+        HS_REL_ASSERT_GE(dirty_buf_cnt, size);
     }
 
     void register_dirty_buf_exceed_cb(exceed_limit_cb_t cb) { m_dirty_buf_exceed_cb = std::move(cb); }
@@ -68,9 +68,9 @@ public:
 
     void dec_free_blk(int size) {
         auto dirty_fb_cnt = m_hs_fb_cnt.fetch_sub(1, std::memory_order_relaxed);
-        HS_ASSERT_CMP(RELEASE, dirty_fb_cnt, >=, 0);
+        HS_REL_ASSERT_GE(dirty_fb_cnt, 0);
         auto dirty_fb_size = m_hs_fb_size.fetch_sub(size, std::memory_order_relaxed);
-        HS_ASSERT_CMP(RELEASE, dirty_fb_size, >=, 0);
+        HS_REL_ASSERT_GE(dirty_fb_size, 0);
         COUNTER_DECREMENT(m_metrics, free_blk_size_in_cp, size);
         COUNTER_DECREMENT(m_metrics, free_blk_cnt_in_cp, 1);
     }
@@ -140,8 +140,8 @@ public:
 
 private:
     int64_t get_dirty_buf_limit() const {
-        return (int64_t)(
-            (HS_DYNAMIC_CONFIG(resource_limits.dirty_buf_percent) * HS_STATIC_CONFIG(input.app_mem_size) / 100));
+        return (int64_t)((HS_DYNAMIC_CONFIG(resource_limits.dirty_buf_percent) * HS_STATIC_CONFIG(input.app_mem_size) /
+                          100));
     }
 
     std::atomic< int64_t > m_hs_dirty_buf_cnt;

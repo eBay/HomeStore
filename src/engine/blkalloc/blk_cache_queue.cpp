@@ -19,7 +19,7 @@ FreeBlkCacheQueue::FreeBlkCacheQueue(const SlabCacheConfig& cfg, BlkAllocMetrics
         std::vector< blk_cap_t > level_limits;
         level_limits.reserve(slab_cfg.m_level_distribution_pct.size());
 #ifndef NDEBUG
-        HS_DEBUG_ASSERT_EQ(slab_cfg.slab_size, slab_size, "Slab config size is not contiguous power of 2");
+        HS_DBG_ASSERT_EQ(slab_cfg.slab_size, slab_size, "Slab config size is not contiguous power of 2");
         slab_size *= 2;
 #endif
 
@@ -29,7 +29,7 @@ FreeBlkCacheQueue::FreeBlkCacheQueue(const SlabCacheConfig& cfg, BlkAllocMetrics
             sum += limit;
             level_limits.push_back(limit);
         }
-        HS_DEBUG_ASSERT_GE(slab_cfg.max_entries, sum, "Slab config distribution does not add to 100%");
+        HS_DBG_ASSERT_GE(slab_cfg.max_entries, sum, "Slab config distribution does not add to 100%");
         if (sum < slab_cfg.max_entries) {
             level_limits[0] += slab_cfg.max_entries - sum; // Put the remaining to the first priority
         }
@@ -180,8 +180,8 @@ BlkAllocStatus FreeBlkCacheQueue::try_alloc_in_slab(const slab_idx_t slab_idx, c
         // freed
         if (resp.nblks_alloced > req.nblks) {
             const blk_count_t residue_nblks{static_cast< blk_count_t >(resp.nblks_alloced - req.nblks)};
-            HS_DEBUG_ASSERT_LT(residue_nblks, m_slab_queues[slab_idx]->slab_size(),
-                               "Residue block count are not expected to exceed last entry");
+            HS_DBG_ASSERT_LT(residue_nblks, m_slab_queues[slab_idx]->slab_size(),
+                             "Residue block count are not expected to exceed last entry");
             const blk_count_t needed_blocks{
                 static_cast< blk_count_t >(m_slab_queues[slab_idx]->slab_size() - residue_nblks)};
             resp.out_blks.back().set_nblks(needed_blocks);
@@ -348,9 +348,7 @@ blk_cap_t SlabCacheQueue::open_session(const uint64_t session_id, const bool fil
         const auto nentries{entry_count()};
         if (fill_entire_cache || (nentries < m_refill_threshold_limits)) {
             count = (nentries > m_total_capacity) ? 0 : (m_total_capacity - nentries);
-            if (!m_refill_session.compare_exchange_strong(id, session_id, std::memory_order_acq_rel)) {
-                count = 0;
-            }
+            if (!m_refill_session.compare_exchange_strong(id, session_id, std::memory_order_acq_rel)) { count = 0; }
         }
     }
     return count;

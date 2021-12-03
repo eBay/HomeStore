@@ -135,8 +135,8 @@ protected:
     }
 
     [[nodiscard]] bool keep_running() {
-        HS_ASSERT(DEBUG, m_mbm->get_size() >= m_mbm->get_used_size(), "total size:{} less than used size: {}",
-                  m_mbm->get_size(), m_mbm->get_used_size());
+        HS_DBG_ASSERT(m_mbm->get_size() >= m_mbm->get_used_size(), "total size:{} less than used size: {}",
+                      m_mbm->get_size(), m_mbm->get_used_size());
         const auto free_size{m_mbm->get_size() - m_mbm->get_used_size()};
         if (free_size < gp.max_wrt_sz) { return false; }
         if ((get_elapsed_time(m_start_time) >= gp.run_time) || (io_cnt() >= gp.num_io)) { return false; }
@@ -181,8 +181,8 @@ protected:
     void do_write_to_full() {
         ssize_t free_size{static_cast< ssize_t >(m_mbm->get_size() - m_mbm->get_used_size())};
 
-        HS_RELEASE_ASSERT_GT(free_size, 0);
-        HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(free_size), m_mbm->get_available_blks() * m_mbm->get_page_size());
+        HS_REL_ASSERT_GT(free_size, 0);
+        HS_REL_ASSERT_EQ(static_cast< uint64_t >(free_size), m_mbm->get_available_blks() * m_mbm->get_page_size());
 
         uint64_t size_written{0};
         while (free_size > 0) {
@@ -190,19 +190,18 @@ protected:
                 size_written = do_sb_write(do_overflow());
             } else {
                 size_written = do_sb_write(false, m_mbm->meta_blk_context_sz());
-                HS_RELEASE_ASSERT_EQ(size_written, m_mbm->get_page_size());
+                HS_REL_ASSERT_EQ(size_written, m_mbm->get_page_size());
             }
 
             // size_written should be at least one page;
-            HS_RELEASE_ASSERT_GE(size_written, m_mbm->get_page_size());
+            HS_REL_ASSERT_GE(size_written, m_mbm->get_page_size());
 
             free_size -= size_written;
 
-            HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(free_size),
-                                 m_mbm->get_available_blks() * m_mbm->get_page_size());
+            HS_REL_ASSERT_EQ(static_cast< uint64_t >(free_size), m_mbm->get_available_blks() * m_mbm->get_page_size());
         }
 
-        HS_RELEASE_ASSERT_EQ(free_size, 0);
+        HS_REL_ASSERT_EQ(free_size, 0);
     }
 
     [[nodiscard]] uint64_t do_sb_write(const bool overflow, size_t sz_to_wrt = 0) {
@@ -214,7 +213,7 @@ protected:
 
         void* cookie{nullptr};
         m_mbm->add_sub_sb(mtype, buf, sz_to_wrt, cookie);
-        HS_ASSERT_CMP(DEBUG, cookie, !=, nullptr);
+        HS_DBG_ASSERT_NE(cookie, nullptr);
 
         // LOGINFO("buf written: size: {}, data: {}", sz_to_wrt, (char*)buf);
         meta_blk* const mblk{static_cast< meta_blk* >(cookie)};
@@ -222,23 +221,23 @@ protected:
 
         if (mblk->hdr.h.compressed == false) {
             if (overflow) {
-                HS_DEBUG_ASSERT_GE(sz_to_wrt, m_mbm->get_page_size());
-                HS_DEBUG_ASSERT(mblk->hdr.h.ovf_bid.is_valid(), "Expected valid ovf meta blkid");
+                HS_DBG_ASSERT_GE(sz_to_wrt, m_mbm->get_page_size());
+                HS_DBG_ASSERT(mblk->hdr.h.ovf_bid.is_valid(), "Expected valid ovf meta blkid");
             } else {
-                HS_DEBUG_ASSERT_LE(sz_to_wrt, m_mbm->meta_blk_context_sz());
-                HS_DEBUG_ASSERT(!mblk->hdr.h.ovf_bid.is_valid(), "Expected invalid ovf meta blkid");
+                HS_DBG_ASSERT_LE(sz_to_wrt, m_mbm->meta_blk_context_sz());
+                HS_DBG_ASSERT(!mblk->hdr.h.ovf_bid.is_valid(), "Expected invalid ovf meta blkid");
             }
 
             // verify context_sz
-            HS_ASSERT(DEBUG, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
-                      static_cast< uint64_t >(mblk->hdr.h.context_sz), sz_to_wrt);
+            HS_DBG_ASSERT(mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
+                          static_cast< uint64_t >(mblk->hdr.h.context_sz), sz_to_wrt);
         }
 
         {
             // save cookie;
             std::unique_lock< std::mutex > lg{m_mtx};
             const auto bid{mblk->hdr.h.bid.to_integer()};
-            HS_ASSERT(DEBUG, m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
+            HS_DBG_ASSERT(m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
 
             // save to cache
             m_write_sbs[bid].cookie = cookie;
@@ -246,8 +245,8 @@ protected:
 
             ret_size_written = total_size_written(cookie);
             m_total_wrt_sz += ret_size_written;
-            HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
-                      m_mbm->get_used_size());
+            HS_DBG_ASSERT(m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                          m_mbm->get_used_size());
         }
 
         static bool done_read{false};
@@ -258,7 +257,7 @@ protected:
             const std::string write_buf_str{reinterpret_cast< char* >(buf), sz_to_wrt};
             const auto ret{read_buf_str.compare(write_buf_str)};
             if (mblk->hdr.h.compressed == false) {
-                HS_ASSERT(DEBUG, ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
+                HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
             }
         }
 
@@ -286,15 +285,15 @@ protected:
         }
 
         const auto ret{m_mbm->remove_sub_sb(cookie)};
-        if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to remove subsystem with status: {}", ret.message()); }
+        if (ret != no_error) { HS_REL_ASSERT(false, "failed to remove subsystem with status: {}", ret.message()); }
 
         {
             std::unique_lock< std::mutex > lg{m_mtx};
             m_write_sbs.erase(it);
-            HS_ASSERT_CMP(RELEASE, sz, ==, m_write_sbs.size() + 1); // release assert to make compiler happy on sz;
+            HS_REL_ASSERT_EQ(sz, m_write_sbs.size() + 1); // release assert to make compiler happy on sz;
 
-            HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
-                      m_mbm->get_used_size());
+            HS_DBG_ASSERT(m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                          m_mbm->get_used_size());
         }
     }
 
@@ -305,7 +304,7 @@ protected:
             std::unique_lock< std::mutex > lg{m_mtx};
             const auto it{m_write_sbs.begin()};
 
-            HS_DEBUG_ASSERT_EQ(it != m_write_sbs.end(), true);
+            HS_DBG_ASSERT_EQ(it != m_write_sbs.end(), true);
             str = it->second.str;
             mblk = static_cast< meta_blk* >(it->second.cookie);
         }
@@ -318,7 +317,7 @@ protected:
             const auto read_buf_str{m_cb_blks[mblk->hdr.h.bid.to_integer()]};
             const std::string write_buf_str{str};
             const auto ret{read_buf_str.compare(write_buf_str)};
-            HS_ASSERT(DEBUG, ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
+            HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
         }
     }
 
@@ -350,7 +349,7 @@ protected:
                     unaligned_addr = true;
                     std::uniform_int_distribution< long unsigned > dist{1, dma_address_boundary - 1};
                     unaligned_shift = dist(re);
-                    HS_DEBUG_ASSERT_GT(sz_to_wrt, unaligned_shift);
+                    HS_DBG_ASSERT_GT(sz_to_wrt, unaligned_shift);
                     buf += unaligned_shift; // simulate unaligned address
                     sz_to_wrt -= unaligned_shift;
                 }
@@ -371,21 +370,21 @@ protected:
         {
             std::unique_lock< std::mutex > lg{m_mtx};
             const auto bid{static_cast< const meta_blk* >(cookie)->hdr.h.bid.to_integer()};
-            HS_ASSERT(DEBUG, m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
+            HS_DBG_ASSERT(m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
             m_write_sbs[bid].cookie = cookie;
             m_write_sbs[bid].str = std::string{reinterpret_cast< const char* >(buf), sz_to_wrt};
 
             // verify context_sz
             const meta_blk* const mblk{static_cast< const meta_blk* >(cookie)};
             if (mblk->hdr.h.compressed == false) {
-                HS_ASSERT(DEBUG, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
-                          static_cast< uint64_t >(mblk->hdr.h.context_sz), sz_to_wrt);
+                HS_DBG_ASSERT(mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
+                              static_cast< uint64_t >(mblk->hdr.h.context_sz), sz_to_wrt);
             }
 
             // update total size, add size of metablk back
             m_total_wrt_sz += total_size_written(cookie);
-            HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
-                      m_mbm->get_used_size());
+            HS_DBG_ASSERT(m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                          m_mbm->get_used_size());
         }
 
         if (aligned_buf_size) {
@@ -402,18 +401,17 @@ protected:
     // compare m_cb_blks with m_write_sbs;
     void verify_cb_blks() {
         std::unique_lock< std::mutex > lg{m_mtx};
-        HS_ASSERT_CMP(DEBUG, m_cb_blks.size(), ==, m_write_sbs.size());
+        HS_DBG_ASSERT_EQ(m_cb_blks.size(), m_write_sbs.size());
 
         for (auto it{std::cbegin(m_write_sbs)}; it != std::cend(m_write_sbs); ++it) {
             const auto bid{it->first};
             auto it_cb{m_cb_blks.find(bid)};
 
-            HS_ASSERT(DEBUG, it_cb != std::cend(m_cb_blks), "Saved bid during write not found in recover callback.");
+            HS_DBG_ASSERT(it_cb != std::cend(m_cb_blks), "Saved bid during write not found in recover callback.");
 
             // the saved buf should be equal to the buf received in the recover callback;
             const int ret{it->second.str.compare(it_cb->second)};
-            HS_ASSERT(DEBUG, ret == 0, "Context data mismatch: Saved: {}, callback: {}.", it->second.str,
-                      it_cb->second);
+            HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, callback: {}.", it->second.str, it_cb->second);
         }
     }
 
@@ -541,7 +539,7 @@ protected:
         m_mbm = MetaBlkMgrSI();
         m_total_wrt_sz = m_mbm->get_used_size();
 
-        HS_RELEASE_ASSERT_EQ(m_mbm->get_size() - m_total_wrt_sz, m_mbm->get_available_blks() * m_mbm->get_page_size());
+        HS_REL_ASSERT_EQ(m_mbm->get_size() - m_total_wrt_sz, m_mbm->get_available_blks() * m_mbm->get_page_size());
 
         m_mbm->deregister_handler(mtype);
         m_mbm->register_handler(
@@ -553,7 +551,7 @@ protected:
                         std::string{reinterpret_cast< const char* >(buf.bytes()), size};
                 }
             },
-            [this](bool success) { HS_ASSERT_CMP(DEBUG, success, ==, true); });
+            [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
     }
 
 private:
