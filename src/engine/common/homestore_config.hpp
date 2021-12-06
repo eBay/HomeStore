@@ -30,6 +30,9 @@ SETTINGS_INIT(homestorecfg::HomeStoreSettings, homestore_config);
 constexpr uint32_t MAX_CHUNKS{128};
 constexpr uint32_t MAX_VDEVS{16};
 constexpr uint32_t MAX_PDEVS{8};
+constexpr uint64_t Ki = 1024ull;
+constexpr uint64_t Mi = Ki * Ki;
+constexpr uint64_t Gi = Ki * Mi;
 
 namespace homestore {
 #define HS_DYNAMIC_CONFIG_WITH(...) SETTINGS(homestore_config, __VA_ARGS__)
