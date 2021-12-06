@@ -68,9 +68,6 @@ RCU_REGISTER_INIT
 namespace homestore {
 extern bool vol_test_run;
 }
-constexpr uint64_t Ki{1024};
-constexpr uint64_t Mi{Ki * Ki};
-constexpr uint64_t Gi{Ki * Mi};
 
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)

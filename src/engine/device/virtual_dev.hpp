@@ -652,7 +652,7 @@ public:
     }
 
     void format(const vdev_format_cb_t& cb) {
-        static const uint64_t format_max_size = 1 * Gi;
+        static constexpr uint64_t format_max_size = 1 * Gi;
         boost::intrusive_ptr< virtualdev_req > req{sisl::ObjectAllocator< virtualdev_req >::make_object()};
         req->outstanding_cb.set(get_num_chunks() * (get_nmirrors() + 1));
         req->outstanding_cbs = true;
@@ -673,8 +673,8 @@ public:
                     auto* const m_pdev{mchunk->get_physical_dev_mutable()};
                     auto remaining_size = mchunk->get_size();
                     while (remaining_size != 0) {
-                        uint64_t size_sent = std::min(format_max_size, remaining_size);
-                        uint64_t offset = mchunk->get_start_offset() + (mchunk->get_size() - remaining_size);
+                        const uint64_t size_sent = std::min(format_max_size, remaining_size);
+                        const uint64_t offset = mchunk->get_start_offset() + (mchunk->get_size() - remaining_size);
                         req->inc_ref();
                         LOGINFO("writing zero for mirror chunk: {}, size: {}, offset: {}", mchunk->get_chunk_id(),
                                 mchunk->get_size(), mchunk->get_start_offset());
