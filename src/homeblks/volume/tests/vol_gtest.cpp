@@ -74,20 +74,20 @@ constexpr uint64_t Gi{Ki * Mi};
 using log_level = spdlog::level::level_enum;
 SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-enum class load_type_t : uint8_t { random = 0, same = 1, sequential = 2 };
+ENUM(load_type_t, uint8_t, random = 0, same = 1, sequential = 2);
+ENUM(verify_type_t, uint8_t, csum = 0, data = 1, header = 2, null = 3);
 
-enum class verify_type_t : uint8_t {
-    csum = 0,
-    data = 1,
-    header = 2,
-    null = 3,
-};
+ENUM(vol_cd_state_t, uint8_t, UNINITED = 0, CREATED = 1, DELETED = 2);
 
-struct file_hdr {
-    bool is_deleted;
+struct vol_file_hdr {
+    vol_cd_state_t state;
     boost::uuids::uuid uuid;
 };
-#define RESERVE_FILE_BYTE sizeof(struct file_hdr)
+
+#define VOL_FILE_HDR_SZ sizeof(struct vol_file_hdr)
+
+#define VOL_HDR_ONLY_FILE_SIZE 4096
+static_assert(VOL_HDR_ONLY_FILE_SIZE >= VOL_FILE_HDR_SZ);
 
 struct TestCfg {
     TestCfg() = default;
@@ -158,7 +158,10 @@ struct TestCfg {
     bool verify_data() { return verify_type == verify_type_t::data; }
     bool verify_hdr() { return verify_type == verify_type_t::header; }
     bool verify_type_set() { return verify_type != verify_type_t::null; }
-    bool create_vol_file() { return verify_type_set() && !verify_hdr(); }
+    bool create_vol_file() {
+        // return true for all verify types for now, as we rely on vol file hdr for all recovery cases;
+        return true;
+    }
 };
 
 struct TestOutput {
@@ -225,7 +228,7 @@ struct TestOutput {
 
 class VolTest;
 struct io_req_t;
-enum class wait_type : uint8_t { no_wait = 0, for_execution = 1, for_completion = 2 };
+ENUM(wait_type, uint8_t, no_wait = 0, for_execution = 1, for_completion = 2);
 
 class TestJob {
     static thread_local bool is_this_thread_running_io;
@@ -636,7 +639,8 @@ public:
                 const std::filesystem::path fpath{tcfg.dev_names[i]};
                 /* we use this capacity to calculate volume size */
                 max_capacity += tcfg.max_disk_capacity;
-                device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
+                // device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
+                device_info.emplace_back(tcfg.dev_names[i], HSDevType::Data);
             }
         } else {
             for (uint32_t i{0}; i < MAX_DEVICES; ++i) {
@@ -648,26 +652,26 @@ public:
                 device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
                 max_capacity += tcfg.max_disk_capacity;
             }
-        }
 
-        uint32_t hdd_cnt = tcfg.emulate_hdd_cnt;
-        for (auto& dinfo : device_info) {
+            uint32_t hdd_cnt = tcfg.emulate_hdd_cnt;
+            for (auto& dinfo : device_info) {
 
-            auto data_attrs = iomgr::drive_attributes();
-            data_attrs.phys_page_size = tcfg.phy_page_size;
-            data_attrs.align_size = 512;
-            data_attrs.atomic_phys_page_size = tcfg.atomic_phys_page_size;
+                auto data_attrs = iomgr::drive_attributes();
+                data_attrs.phys_page_size = tcfg.phy_page_size;
+                data_attrs.align_size = 512;
+                data_attrs.atomic_phys_page_size = tcfg.atomic_phys_page_size;
 
-            if (hdd_cnt != 0) {
-                iomgr::DriveInterface::emulate_drive_type(dinfo.dev_names,
-                                                          tcfg.dev_names.empty() ? iomgr::drive_type::file_on_hdd
-                                                                                 : iomgr::drive_type::block_hdd);
-                data_attrs.align_size = 2 * data_attrs.align_size;
-                data_attrs.phys_page_size = 2 * tcfg.phy_page_size;
-                data_attrs.atomic_phys_page_size = 2 * tcfg.atomic_phys_page_size;
-                --hdd_cnt;
+                if (hdd_cnt != 0) {
+                    iomgr::DriveInterface::emulate_drive_type(dinfo.dev_names,
+                                                              tcfg.dev_names.empty() ? iomgr::drive_type::file_on_hdd
+                                                                                     : iomgr::drive_type::block_hdd);
+                    data_attrs.align_size = 2 * data_attrs.align_size;
+                    data_attrs.phys_page_size = 2 * tcfg.phy_page_size;
+                    data_attrs.atomic_phys_page_size = 2 * tcfg.atomic_phys_page_size;
+                    --hdd_cnt;
+                }
+                iomgr::DriveInterface::emulate_drive_attributes(dinfo.dev_names, data_attrs);
             }
-            iomgr::DriveInterface::emulate_drive_attributes(dinfo.dev_names, data_attrs);
         }
 
         return max_capacity;
@@ -824,7 +828,6 @@ public:
         HS_REL_ASSERT_EQ(VolInterface::get_instance()->lookup_volume(params.uuid), vol_obj);
 
         if (tcfg.create_vol_file()) {
-            // we don't use vol file for header verification
             // check remaining space on root fs;
             std::error_code ec;
             uint64_t free_space{0};
@@ -835,15 +838,31 @@ public:
                 // Don't use more than 30% of free space of root fs;
                 free_space = static_cast< uint64_t >(std::min(si.free, si.available) * tcfg.p_vol_files_space / 100);
             }
-            uint64_t offset_to_seek{tcfg.verify_csum() ? max_vol_size_csum + RESERVE_FILE_BYTE
-                                                       : max_vol_size + RESERVE_FILE_BYTE};
+
+            uint64_t offset_to_seek{0};
+            if (tcfg.verify_csum()) {
+                offset_to_seek = max_vol_size_csum + VOL_FILE_HDR_SZ;
+            } else if (tcfg.verify_data()) {
+                offset_to_seek = max_vol_size + VOL_FILE_HDR_SZ;
+            } else {
+                // we still create vol file with small size for just vol hdr for recovery relies on vol hdr to count
+                // mounted vols;
+                HS_REL_ASSERT(tcfg.verify_hdr() || !tcfg.verify_type_set(), "Unrecognized verify_type: {} ",
+                              tcfg.verify_type);
+                offset_to_seek = VOL_HDR_ONLY_FILE_SIZE;
+            }
+
             HS_REL_ASSERT_GT(free_space, offset_to_seek);
 
             // create file for verification
-            std::ofstream ofs{name, std::ios::binary | std::ios::out | std::ios::trunc};
-            ofs.seekp(offset_to_seek);
-            ofs.write("", 1);
-            ofs.close();
+            auto vol_file_path = std::filesystem::current_path().string() + name;
+            if (std::filesystem::exists(vol_file_path) == false) {
+                // only create file and initialize it when file is not there;
+                std::ofstream ofs{name, std::ios::binary | std::ios::out | std::ios::trunc};
+                ofs.seekp(offset_to_seek);
+                ofs.write("", 1);
+                ofs.close();
+            }
 
             auto fd = open(name.c_str(), O_RDWR);
             init_vol_files(fd, params.uuid);
@@ -971,43 +990,43 @@ public:
 private:
     void init_vol_file_hdr(const int fd) {
         /* set first bit to 0 */
-        file_hdr hdr;
-        hdr.is_deleted = true;
-        auto buf = iomanager.iobuf_alloc(512, sizeof(file_hdr));
-        *reinterpret_cast< file_hdr* >(buf) = hdr;
-        const auto ret{pwrite(fd, buf, sizeof(file_hdr), 0)};
-        HS_REL_ASSERT_EQ(static_cast< uint64_t >(ret), sizeof(file_hdr));
+        vol_file_hdr hdr;
+        hdr.state = vol_cd_state_t::DELETED;
+        auto buf = iomanager.iobuf_alloc(512, sizeof(vol_file_hdr));
+        *reinterpret_cast< vol_file_hdr* >(buf) = hdr;
+        const auto ret{pwrite(fd, buf, sizeof(vol_file_hdr), 0)};
+        HS_REL_ASSERT_EQ(static_cast< uint64_t >(ret), sizeof(vol_file_hdr));
         iomanager.iobuf_free(buf);
     }
 
     void set_vol_file_hdr(const int fd, const boost::uuids::uuid uuid) {
         /* set first bit to 1 */
-        file_hdr hdr;
-        hdr.is_deleted = false;
+        vol_file_hdr hdr;
+        hdr.state = vol_cd_state_t::CREATED;
         hdr.uuid = uuid;
-        auto* const buf{iomanager.iobuf_alloc(512, sizeof(file_hdr))};
-        *reinterpret_cast< file_hdr* >(buf) = hdr;
-        const auto ret{::pwrite(fd, buf, sizeof(file_hdr), 0)};
-        HS_REL_ASSERT_EQ(static_cast< uint64_t >(ret), sizeof(file_hdr));
+        auto* const buf{iomanager.iobuf_alloc(512, sizeof(vol_file_hdr))};
+        *reinterpret_cast< vol_file_hdr* >(buf) = hdr;
+        const auto ret{::pwrite(fd, buf, sizeof(vol_file_hdr), 0)};
+        HS_REL_ASSERT_EQ(static_cast< uint64_t >(ret), sizeof(vol_file_hdr));
         iomanager.iobuf_free(buf);
     }
 
-
     bool is_valid_vol_file(const boost::uuids::uuid& uuid) {
-        auto buf = iomanager.iobuf_alloc(512, sizeof(file_hdr));
+        auto buf = iomanager.iobuf_alloc(512, sizeof(vol_file_hdr));
         bool found = false;
         for (uint32_t i = 0; i < tcfg.max_vols; ++i) {
             const std::string name = VOL_PREFIX + std::to_string(i);
             auto fd = open(name.c_str(), O_RDWR);
-            const auto ret{pread(fd, buf, sizeof(file_hdr), 0)};
+            const auto ret{pread(fd, buf, sizeof(vol_file_hdr), 0)};
             close(fd);
-            file_hdr hdr = *reinterpret_cast< file_hdr* >(buf);
-            if (hdr.is_deleted) {
+            vol_file_hdr hdr = *reinterpret_cast< vol_file_hdr* >(buf);
+            if (hdr.state == vol_cd_state_t::DELETED) {
                 if (hdr.uuid == uuid) {
                     LOGINFO("Bypassing deleted file hdr vol:{} with SAME uuid: {}", name, hdr.uuid);
                 }
                 continue;
             }
+
             if (hdr.uuid == uuid) {
                 found = true;
                 break;
@@ -1018,23 +1037,32 @@ private:
         return found;
     }
 
-
     uint64_t get_mounted_vols() {
-        auto buf = iomanager.iobuf_alloc(512, sizeof(file_hdr));
+        auto buf = iomanager.iobuf_alloc(512, sizeof(vol_file_hdr));
         uint64_t mounted_vols = 0;
         for (uint32_t i = 0; i < tcfg.max_vols; ++i) {
             const std::string name = VOL_PREFIX + std::to_string(i);
             auto fd = open(name.c_str(), O_RDWR);
-            const auto ret{pread(fd, buf, sizeof(file_hdr), 0)};
+            const auto ret{pread(fd, buf, sizeof(vol_file_hdr), 0)};
             close(fd);
-            file_hdr hdr = *reinterpret_cast< file_hdr* >(buf);
-            if (hdr.is_deleted) {
+            vol_file_hdr hdr = *reinterpret_cast< vol_file_hdr* >(buf);
+            if (hdr.state == vol_cd_state_t::DELETED) {
                 LOGINFO("Found deleted vol:{}, uuid: {} ", name, hdr.uuid);
                 continue;
+            } else if (hdr.state == vol_cd_state_t::CREATED) {
+                LOGINFO("Found mounted vol:{}, uuid: {} ", name, hdr.uuid);
+                ++mounted_vols;
+            } else {
+                // we will not come here in existing case, but it is a possible path that program do
+                // intentional/random abort after file creation before init file hdr;
+                //
+                // This volume will be discarded by vol_gtest if it has been created insternally by homestore which is a
+                // fine case;
+                LOGINFO(
+                    "Found uninitialized vol: {} on disk and ignoring it, this is because the file is created but not "
+                    "inited yet. ",
+                    name);
             }
-
-            LOGINFO("Found mounted vol:{}, uuid: {} ", name, hdr.uuid);
-            ++mounted_vols;
         }
 
         iomanager.iobuf_free(buf);
@@ -1042,12 +1070,12 @@ private:
     }
 
     void write_vol_file(const int fd, void* const buf, const uint64_t write_size, const off_t offset) {
-        const auto ret(::pwrite(fd, buf, write_size, offset + RESERVE_FILE_BYTE));
+        const auto ret(::pwrite(fd, buf, write_size, offset + VOL_FILE_HDR_SZ));
         HS_REL_ASSERT_EQ(static_cast< uint64_t >(ret), write_size);
     }
 
     void read_vol_file(const int fd, void* const buf, const uint64_t read_size, const off_t offset) {
-        const auto ret(::pread(fd, buf, read_size, offset + RESERVE_FILE_BYTE));
+        const auto ret(::pread(fd, buf, read_size, offset + VOL_FILE_HDR_SZ));
         HS_REL_ASSERT_EQ(static_cast< uint64_t >(ret), read_size);
     }
 
@@ -1057,32 +1085,38 @@ private:
     }
 
     void init_vol_files(const int fd, const boost::uuids::uuid uuid) {
-        // initialize the file
-        uint8_t* init_csum_buf{nullptr};
-        const uint16_t csum_zero{
-            crc16_t10dif(init_crc_16, static_cast< const uint8_t* >(init_buf), tcfg.vol_page_size)};
-        if (tcfg.verify_csum()) {
-            init_csum_buf = iomanager.iobuf_alloc(512, sizeof(uint16_t));
-            *reinterpret_cast< uint16_t* >(init_csum_buf) = csum_zero;
-        }
-        const uint64_t offset_increment{tcfg.verify_csum() ? sizeof(uint16_t) : tcfg.max_io_size};
+        if (tcfg.verify_csum() || tcfg.verify_data()) {
+            // 1. we only write vol file content for csum and data verify;
+            // 2. skip for hdr and null verify type;
+            //
+            // initialize the file only for non-header case;
+            uint8_t* init_csum_buf{nullptr};
+            const uint16_t csum_zero{
+                crc16_t10dif(init_crc_16, static_cast< const uint8_t* >(init_buf), tcfg.vol_page_size)};
+            if (tcfg.verify_csum()) {
+                init_csum_buf = iomanager.iobuf_alloc(512, sizeof(uint16_t));
+                *reinterpret_cast< uint16_t* >(init_csum_buf) = csum_zero;
+            }
+            const uint64_t offset_increment{tcfg.verify_csum() ? sizeof(uint16_t) : tcfg.max_io_size};
 
-        const uint64_t max_offset{tcfg.verify_csum() ? max_vol_size_csum : max_vol_size};
+            const uint64_t max_offset{tcfg.verify_csum() ? max_vol_size_csum : max_vol_size};
 
-        for (uint64_t offset{0}; offset < max_offset; offset += offset_increment) {
-            uint64_t write_size;
-            if (offset + offset_increment > max_offset) {
-                write_size = max_offset - offset;
-            } else {
-                write_size = offset_increment;
+            for (uint64_t offset{0}; offset < max_offset; offset += offset_increment) {
+                uint64_t write_size;
+                if (offset + offset_increment > max_offset) {
+                    write_size = max_offset - offset;
+                } else {
+                    write_size = offset_increment;
+                }
+
+                write_vol_file(fd, static_cast< void* >(tcfg.verify_csum() ? init_csum_buf : init_buf), write_size,
+                               static_cast< off_t >(offset));
             }
 
-            write_vol_file(fd, static_cast< void* >(tcfg.verify_csum() ? init_csum_buf : init_buf), write_size,
-                           static_cast< off_t >(offset));
+            if (init_csum_buf) { iomanager.iobuf_free(init_csum_buf); }
         }
 
-        if (init_csum_buf) { iomanager.iobuf_free(init_csum_buf); }
-
+        // we write header in the last, so if it crashes before header written, vol will be discarded;
         set_vol_file_hdr(fd, uuid);
     }
 
