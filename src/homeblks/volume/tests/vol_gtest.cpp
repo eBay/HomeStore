@@ -74,6 +74,10 @@ SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 enum class load_type_t : uint8_t { random = 0, same = 1, sequential = 2 };
 
+constexpr uint64_t Ki{1024};
+constexpr uint64_t Mi{Ki * Ki};
+constexpr uint64_t Gi{Ki * Mi};
+
 enum class verify_type_t : uint8_t {
     csum = 0,
     data = 1,

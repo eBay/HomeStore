@@ -652,7 +652,7 @@ public:
     }
 
     void format(const vdev_format_cb_t& cb) {
-        static constexpr uint64_t format_max_size = 1 * Gi;
+        static constexpr uint64_t format_max_size = 1 * 1024 * 1024 * 1024;
         boost::intrusive_ptr< virtualdev_req > req{sisl::ObjectAllocator< virtualdev_req >::make_object()};
         req->outstanding_cb.set(get_num_chunks() * (get_nmirrors() + 1));
         req->outstanding_cbs = true;
