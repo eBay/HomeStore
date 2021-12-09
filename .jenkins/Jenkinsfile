@@ -40,7 +40,7 @@ pipeline {
             } }
             steps {
                 script {
-                    BUILD_MISSING = ""
+                    BUILD_MISSING = "--build missing"
                     BUILD_TEST_MODE = ""
                 }
             }
