@@ -179,10 +179,12 @@ protected:
     [[nodiscard]] uint64_t total_size_written(const void* const cookie) { return m_mbm->get_meta_size(cookie); }
 
     void do_write_to_full() {
-        ssize_t free_size{static_cast< ssize_t >(m_mbm->get_size() - m_mbm->get_used_size())};
+        static constexpr uint64_t blkstore_overhead = 2 * 1024ul * 1024ul; // 2MB
+        ssize_t free_size{static_cast< ssize_t >(m_mbm->get_size() - m_mbm->get_used_size() - blkstore_overhead)};
 
         HS_REL_ASSERT_GT(free_size, 0);
-        HS_REL_ASSERT_EQ(static_cast< uint64_t >(free_size), m_mbm->get_available_blks() * m_mbm->get_page_size());
+        HS_REL_ASSERT_EQ(static_cast< uint64_t >(free_size),
+                         m_mbm->get_available_blks() * m_mbm->get_page_size() - blkstore_overhead);
 
         uint64_t size_written{0};
         while (free_size > 0) {
@@ -198,7 +200,8 @@ protected:
 
             free_size -= size_written;
 
-            HS_REL_ASSERT_EQ(static_cast< uint64_t >(free_size), m_mbm->get_available_blks() * m_mbm->get_page_size());
+            HS_REL_ASSERT_EQ(static_cast< uint64_t >(free_size),
+                             m_mbm->get_available_blks() * m_mbm->get_page_size() - blkstore_overhead);
         }
 
         HS_REL_ASSERT_EQ(free_size, 0);
@@ -207,7 +210,7 @@ protected:
     [[nodiscard]] uint64_t do_sb_write(const bool overflow, size_t sz_to_wrt = 0) {
         ++m_wrt_cnt;
         if (!sz_to_wrt) { sz_to_wrt = rand_size(overflow); }
-        uint64_t ret_size_written{0};
+        int64_t ret_size_written{0};
         uint8_t* const buf{iomanager.iobuf_alloc(512, sz_to_wrt)};
         gen_rand_buf(buf, sz_to_wrt);
 

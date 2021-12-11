@@ -95,7 +95,7 @@ CPWatchdog::CPWatchdog() {
     if (timer_sec_ptr) { m_timer_sec = std::stoi(std::getenv(CP_WATCHDOG_TIMER_SEC.c_str())); }
 #endif
 
-    LOGINFO("CP watchdog timer setting t : {} seconds", m_timer_sec);
+    LOGINFO("CP watchdog timer setting to : {} seconds", m_timer_sec);
     m_timer_hdl =
         iomanager.schedule_global_timer(m_timer_sec * 1000 * 1000 * 1000, true, nullptr, iomgr::thread_regex::all_user,
                                         [this](void* cookie) { cp_watchdog_timer(); });
