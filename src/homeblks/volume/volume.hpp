@@ -188,22 +188,23 @@ private:
     Volume* m_volume;
 };
 
-static constexpr uint64_t vol_sb_version = 0x1;
+static constexpr uint64_t vol_sb_version_1_2 = 0x1; // vol sb version for 1.2
+static constexpr uint64_t vol_sb_version = 0x2;
 static constexpr uint64_t vol_sb_magic = 0xb01dface;
 struct vol_sb_hdr {
     /* Immutable members */
     const uint64_t magic{vol_sb_magic};
-    const uint32_t version{vol_sb_version};
+    uint32_t version{vol_sb_version};
     //    uint8_t padding[4]; deprecated
-    uint32_t stream_id;
+    uint32_t num_streams;
     const uint64_t page_size;
     const uint64_t size;
     const boost::uuids::uuid uuid;
     char vol_name[VOL_NAME_SIZE];
     indx_mgr_sb indx_sb;
-    vol_sb_hdr(const uint64_t& page_size, const uint64_t& size, const char* in_vol_name,
-               const boost::uuids::uuid& uuid) :
-            page_size(page_size), size(size), uuid(uuid) {
+    vol_sb_hdr(const uint64_t& page_size, const uint64_t& size, const char* in_vol_name, const boost::uuids::uuid& uuid,
+               const uint32_t& num_streams) :
+            num_streams{num_streams}, page_size{page_size}, size{size}, uuid{uuid} {
         std::strncpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
         vol_name[VOL_NAME_SIZE - 1] = '\0';
     };
@@ -294,7 +295,7 @@ private:
     } IoVecTransversal;
 
     blk_count_t m_blks_per_lba{1};
-    uintptr_t m_stream_ptr = (uintptr_t) nullptr;
+    stream_info_t m_stream_info;
 
 private:
     /* static members */

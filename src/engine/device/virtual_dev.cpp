@@ -114,7 +114,7 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
                        const blk_allocator_type_t allocator_type, const uint64_t context_size, const uint32_t nmirror,
                        const bool is_stripe, const uint32_t page_size, vdev_comp_cb_t cb, char* blob,
                        const uint64_t size_in, const bool auto_recovery, vdev_high_watermark_cb_t hwm_cb) :
-        m_name{name}, m_allocator_type{allocator_type}, m_metrics{name} {
+        m_name{name}, m_allocator_type{allocator_type}, m_metrics{name}, m_pdev_group{pdev_group} {
     init(mgr, nullptr, std::move(cb), page_size, auto_recovery, std::move(hwm_cb));
 
     const auto pdev_list = m_mgr->get_devices(pdev_group);
@@ -200,6 +200,9 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
             m_num_chunks = i;
             break;
         }
+
+        // set the default chunk. It is used for HDD when volume can not allocate blkid from its stream
+        if (!m_default_chunk || (m_default_chunk->get_chunk_id() > chunk->get_chunk_id())) { m_default_chunk = chunk; }
         LOGINFO("vdev name {} , chunk id {} chunk start offset {}, chunk size {}", m_name, chunk->get_chunk_id(),
                 chunk->get_start_offset(), chunk->get_size());
         m_free_streams.push_back(chunk);
@@ -230,13 +233,14 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
     for (const auto& pdev_chunk : m_primary_pdev_chunks_list) {
         m_selector->add_pdev(pdev_chunk.pdev);
     }
+    reserve_stream(m_default_chunk->get_chunk_id());
 }
 
 /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
 VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, const PhysicalDevGroup pdev_group,
                        const blk_allocator_type_t allocator_type, vdev_comp_cb_t cb, const bool recovery_init,
                        const bool auto_recovery, vdev_high_watermark_cb_t hwm_cb) :
-        m_name{name}, m_allocator_type{allocator_type}, m_metrics{name} {
+        m_name{name}, m_allocator_type{allocator_type}, m_metrics{name}, m_pdev_group{pdev_group} {
     init(mgr, vb, std::move(cb), vb->page_size, auto_recovery, std::move(hwm_cb));
 
     m_recovery_init = recovery_init;
@@ -248,6 +252,7 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb
     HS_LOG_ASSERT_EQ(vb->num_primary_chunks * (vb->num_mirrors + 1),
                      m_num_chunks); // Mirrors should be at least one less than device list.
     HS_LOG_ASSERT_EQ(vb->get_size(), vb->num_primary_chunks * m_chunk_size);
+    reserve_stream(m_default_chunk->get_chunk_id());
 }
 
 void VirtualDev::reset_failed_state() {
@@ -346,34 +351,59 @@ void VirtualDev::format(const vdev_format_cb_t& cb) {
     }
 }
 
-std::pair< uint32_t, uintptr_t > VirtualDev::alloc_stream() {
+stream_info_t VirtualDev::alloc_stream(uint64_t size) {
     std::unique_lock< std::mutex > lk(m_free_streams_lk);
-    if (!m_free_streams.empty()) {
-        auto chunk = m_free_streams.back();
+    stream_info_t stream_info;
+    while (!m_free_streams.empty() && (size > 0)) {
+        auto* const chunk = m_free_streams.back();
         m_free_streams.pop_back();
-        return std::make_pair(chunk->get_chunk_id(), (uintptr_t)chunk);
-    } else {
-        return std::make_pair(INVALID_CHUNK_ID, (uintptr_t) nullptr);
+        ++stream_info.num_streams;
+        stream_info.chunk_list.push_back(chunk);
+        stream_info.stream_id.push_back(chunk->get_chunk_id());
+        size -= (get_stream_size() > size ? get_stream_size() : size);
+    }
+    return stream_info;
+}
+
+void VirtualDev::free_stream(const stream_info_t& stream_info) {
+    std::unique_lock< std::mutex > lk(m_free_streams_lk);
+    for (auto* chunk_ptr : stream_info.chunk_list) {
+        m_free_streams.push_back(chunk_ptr);
     }
 }
 
-void VirtualDev::free_stream(const uintptr_t ptr) {
+stream_info_t VirtualDev::reserve_stream(const vdev_stream_id_t* id_list, const uint32_t num_streams) {
+    stream_info_t stream_info;
+    if (num_streams == 0) { return stream_info; }
     std::unique_lock< std::mutex > lk(m_free_streams_lk);
-    if (ptr == (uintptr_t)(nullptr)) { return; }
-    m_free_streams.push_back((PhysicalDevChunk*)ptr);
-}
-
-uintptr_t VirtualDev::reserve_stream(const uint32_t id) {
-    if (id == INVALID_CHUNK_ID) { return (uintptr_t) nullptr; }
-    std::unique_lock< std::mutex > lk(m_free_streams_lk);
-    for (auto it = m_free_streams.begin(); it != m_free_streams.end(); ++it) {
-        if ((*it)->get_chunk_id() == id) {
-            m_free_streams.erase(it);
-            return (uintptr_t)(*it);
+    for (uint32_t i{0}; i < num_streams; ++i) {
+        const auto id = id_list[i];
+        for (auto it = std::begin(m_free_streams); it != std::end(m_free_streams);) {
+            if ((*it)->get_chunk_id() == id) {
+                ++stream_info.num_streams;
+                stream_info.stream_id.push_back(id);
+                stream_info.chunk_list.push_back(*it);
+                it = m_free_streams.erase(it);
+                break;
+            } else {
+                ++it;
+            }
         }
     }
-    HS_REL_ASSERT(false, "could not find stream with this id");
-    return (uintptr_t) nullptr;
+
+    HS_REL_ASSERT_EQ(num_streams, stream_info.stream_id.size(), "could not find stream with this id");
+    return stream_info;
+}
+
+void VirtualDev::reserve_stream(const vdev_stream_id_t id) {
+    for (auto it = m_free_streams.begin(); it != m_free_streams.end();) {
+        if ((*it)->get_chunk_id() == id) {
+            it = m_free_streams.erase(it);
+            break;
+        } else {
+            ++it;
+        }
+    }
 }
 
 uint32_t VirtualDev::get_num_streams() const { return get_num_chunks(); }
@@ -419,18 +449,34 @@ BlkAllocStatus VirtualDev::alloc_contiguous_blk(const blk_count_t nblks, const b
 BlkAllocStatus VirtualDev::alloc_blk(const blk_count_t nblks, const blk_alloc_hints& hints,
                                      std::vector< BlkId >& out_blkid) {
     try {
-        PhysicalDevChunk* const preferred_chunk = (PhysicalDevChunk*)(hints.stream_ptr);
+        PhysicalDevChunk* preferred_chunk = nullptr;
+        auto* const stream_info = (stream_info_t*)(hints.stream_info);
+        uint32_t try_streams = 0;
+        if (stream_info && (stream_info->num_streams != 0)) { try_streams = stream_info->num_streams; }
+
         BlkAllocStatus status{BlkAllocStatus::FAILED};
 
-        if (preferred_chunk) {
-            // try to allocate from the preferred chunk
-            status = alloc_blk_from_chunk(nblks, hints, out_blkid, preferred_chunk);
+        while (try_streams != 0) {
+            preferred_chunk = stream_info->chunk_list[stream_info->stream_cur];
+            if (preferred_chunk) {
+                // try to allocate from the preferred chunk
+                status = alloc_blk_from_chunk(nblks, hints, out_blkid, preferred_chunk);
+                if (status == BlkAllocStatus::SUCCESS) { return status; };
+            }
+            stream_info->stream_cur = (stream_info->stream_cur + 1) % stream_info->num_streams;
+            --try_streams;
+        }
+
+        if (stream_info) {
+            // try to allocate from the default chunk
+            status = alloc_blk_from_chunk(nblks, hints, out_blkid, m_default_chunk);
             if (status == BlkAllocStatus::SUCCESS) {
+                COUNTER_INCREMENT(m_metrics, default_chunk_allocation_cnt, 1);
                 return status;
-            } else {
-                COUNTER_INCREMENT(m_metrics, non_preferred_chunk_allocation_cnt, 1);
             }
         }
+
+        if (m_pdev_group == PhysicalDevGroup::DATA) { COUNTER_INCREMENT(m_metrics, random_chunk_allocation_cnt, 1); }
 
         // try to allocate from the other chunks now
         // First select a device to allocate from
@@ -973,6 +1019,8 @@ void VirtualDev::add_primary_chunk(PhysicalDevChunk* chunk) {
     } else {
         HS_DBG_ASSERT_EQ(m_chunk_size, chunk->get_size());
     }
+
+    if (!m_default_chunk || (m_default_chunk->get_chunk_id() > chunk->get_chunk_id())) { m_default_chunk = chunk; }
 
     {
         std::unique_lock< std::mutex > lk(m_free_streams_lk);

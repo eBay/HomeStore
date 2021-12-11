@@ -179,7 +179,7 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
     auto sb = (vol_sb_hdr*)m_sb_buf->bytes;
     m_state = sb->state;
 
-    HS_REL_ASSERT_EQ(sb->version, vol_sb_version, "version mismatch");
+    HS_REL_ASSERT_LE(sb->version, vol_sb_version, "version mismatch");
     HS_REL_ASSERT_EQ(sb->magic, vol_sb_magic, "magic mismatch");
     m_hb = HomeBlks::safe_instance();
 }
@@ -192,14 +192,17 @@ void Volume::init() {
     /* add this volume in home blks */
     if (m_sb_buf == nullptr) {
         init = true;
-        /* populate superblock */
-        // TO DO: Might need to address alignment based on data or fast type
+        // allocate stream for this volume
+        if (is_data_drive_hdd()) { m_stream_info = m_hb->get_data_blkstore()->get_vdev()->alloc_stream(m_params.size); }
+
         m_sb_buf =
-            hs_utils::make_byte_array(sizeof(vol_sb_hdr), MetaBlkMgrSI()->is_aligned_buf_needed(sizeof(vol_sb_hdr)),
-                                      sisl::buftag::metablk, MetaBlkMgrSI()->get_align_size());
+            hs_utils::make_byte_array(sizeof(vol_sb_hdr) + (m_stream_info.num_streams * sizeof(vdev_stream_id_t)),
+                                      MetaBlkMgrSI()->is_aligned_buf_needed(sizeof(vol_sb_hdr)), sisl::buftag::metablk,
+                                      MetaBlkMgrSI()->get_align_size());
 
         /* populate superblock */
-        sb = new (m_sb_buf->bytes) vol_sb_hdr(m_params.page_size, m_params.size, m_params.vol_name, m_params.uuid);
+        sb = new (m_sb_buf->bytes)
+            vol_sb_hdr(m_params.page_size, m_params.size, m_params.vol_name, m_params.uuid, m_stream_info.num_streams);
 
         /* create indx tbl */
         m_indx_mgr = SnapMgr::make_SnapMgr(
@@ -209,13 +212,11 @@ void Volume::init() {
             std::bind(&Volume::create_indx_tbl, this), false);
 
         sb->indx_sb = m_indx_mgr->get_immutable_sb();
-
-        // allocate stream for this volume
-        if (is_data_drive_hdd()) {
-            auto info = m_hb->get_data_blkstore()->get_vdev()->alloc_stream();
-            sb->stream_id = info.first;
-            m_stream_ptr = info.second;
+        vdev_stream_id_t* const id = (vdev_stream_id_t*)(m_sb_buf->bytes + sizeof(vol_sb_hdr));
+        for (uint32_t i{0}; i < sb->num_streams; ++i) {
+            id[i] = m_stream_info.stream_id[i];
         }
+
         set_state(vol_state::ONLINE, true);
         m_seq_id = m_indx_mgr->get_max_seqid_found_in_recovery();
         /* it is called after superblock is persisted by volume */
@@ -224,6 +225,12 @@ void Volume::init() {
     } else {
         /* recovery */
         sb = (vol_sb_hdr*)m_sb_buf->bytes;
+        if (sb->version == vol_sb_version_1_2) {
+            // upgrade it to the new version
+            sb->version = vol_sb_version;
+            sb->num_streams = 0;
+            write_sb();
+        }
         auto indx_sb = sb->indx_sb;
         m_indx_mgr = SnapMgr::make_SnapMgr(
             get_uuid(), std::string(get_name()),
@@ -234,7 +241,8 @@ void Volume::init() {
 
         // reserve stream if it is hard drive
         if (is_data_drive_hdd()) {
-            m_stream_ptr = m_hb->get_data_blkstore()->get_vdev()->reserve_stream(sb->stream_id);
+            m_stream_info = m_hb->get_data_blkstore()->get_vdev()->reserve_stream(
+                (vdev_stream_id_t*)(m_sb_buf->bytes + sizeof(vol_sb_hdr)), sb->num_streams);
         }
     }
     alloc_single_block_in_mem();
@@ -251,7 +259,7 @@ void Volume::init() {
 }
 
 void Volume::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
-    HS_REL_ASSERT_EQ(sizeof(vol_sb_hdr), size);
+    HS_REL_ASSERT_GE(size, sizeof(vol_sb_hdr));
     Volume::make_volume(mblk, buf);
 }
 
@@ -295,7 +303,7 @@ void Volume::destroy_internal() {
         auto vol_ptr = shared_from_this();
         m_destroy_done_cb(success);
         m_destroy_done_cb = nullptr;
-        m_hb->get_data_blkstore()->get_vdev()->free_stream(m_stream_ptr);
+        m_hb->get_data_blkstore()->get_vdev()->free_stream(m_stream_info);
         if (home_blks_ref_cnt.decrement_testz(1) && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); };
     }));
 }
@@ -924,7 +932,7 @@ std::error_condition Volume::alloc_blk(const volume_req_ptr& vreq, std::vector< 
     hints.dev_id_hint = -1;
     hints.multiplier = m_blks_per_lba;
     hints.max_blks_per_entry = HS_STATIC_CONFIG(engine.max_blks_in_blkentry);
-    hints.stream_ptr = m_stream_ptr;
+    hints.stream_info = (uintptr_t)&m_stream_info;
 #ifdef _PRERELEASE
     hints.error_simulate = true;
 #endif
@@ -1051,9 +1059,9 @@ void Volume::write_sb() {
 
     if (!m_sb_cookie) {
         // first time insert
-        MetaBlkMgrSI()->add_sub_sb("VOLUME", (void*)m_sb_buf->bytes, sizeof(vol_sb_hdr), m_sb_cookie);
+        MetaBlkMgrSI()->add_sub_sb("VOLUME", (void*)m_sb_buf->bytes, m_sb_buf->size, m_sb_cookie);
     } else {
-        MetaBlkMgrSI()->update_sub_sb((void*)m_sb_buf->bytes, sizeof(vol_sb_hdr), m_sb_cookie);
+        MetaBlkMgrSI()->update_sub_sb((void*)m_sb_buf->bytes, m_sb_buf->size, m_sb_cookie);
     }
 }
 

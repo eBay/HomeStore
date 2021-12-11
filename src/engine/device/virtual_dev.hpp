@@ -113,9 +113,9 @@ public:
         REGISTER_COUNTER(vdev_high_watermark_count, "vdev total high watermark cnt");
         REGISTER_COUNTER(vdev_num_alloc_failure, "vdev blk alloc failure cnt");
         REGISTER_COUNTER(unalign_writes, "unalign write cnt");
-        REGISTER_COUNTER(non_preferred_chunk_allocation_cnt,
-                         "number of times blks are not allocated from preferred chunk");
-
+        REGISTER_COUNTER(default_chunk_allocation_cnt, "default chunk allocation count");
+        REGISTER_COUNTER(random_chunk_allocation_cnt,
+                         "random chunk allocation count"); // ideally it should be zero for hdd
         register_me_to_farm();
     }
 
@@ -138,6 +138,13 @@ static constexpr uint64_t CHUNK_EOF{0xabcdabcd};
 static constexpr off_t INVALID_OFFSET{std::numeric_limits< off_t >::max()};
 
 struct blkalloc_cp;
+typedef uint32_t vdev_stream_id_t;
+struct stream_info_t {
+    uint32_t num_streams = 0;
+    uint64_t stream_cur = 0;
+    std::vector< vdev_stream_id_t > stream_id;
+    std::vector< PhysicalDevChunk* > chunk_list;
+};
 
 class VirtualDev {
 protected:
@@ -167,6 +174,8 @@ protected:
     VirtualDevMetrics m_metrics;
     std::vector< PhysicalDevChunk* > m_free_streams;
     std::mutex m_free_streams_lk;
+    PhysicalDevChunk* m_default_chunk = nullptr;
+    PhysicalDevGroup m_pdev_group;
 
 public:
     static constexpr size_t context_data_size() { return MAX_CONTEXT_DATA_SZ; }
@@ -272,9 +281,9 @@ public:
 
     /* Verify debug bitmap for all chunks */
     virtual BlkAllocStatus verify_debug_bm(const bool free_debug_bm = true);
-    uintptr_t reserve_stream(const uint32_t id);
-    std::pair< uint32_t, uintptr_t > alloc_stream();
-    void free_stream(const uintptr_t ptr);
+    stream_info_t reserve_stream(const vdev_stream_id_t* id_list, const uint32_t num_streams);
+    stream_info_t alloc_stream(uint64_t size);
+    void free_stream(const stream_info_t& stream_info);
     uint32_t get_align_size() const;
     uint32_t get_phys_page_size() const;
     uint32_t get_atomic_page_size() const;
@@ -351,6 +360,7 @@ private:
     uint64_t to_dev_offset(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const;
     BlkAllocStatus alloc_blk_from_chunk(const blk_count_t nblks, const blk_alloc_hints& hints,
                                         std::vector< BlkId >& out_blkid, PhysicalDevChunk* const chunk);
+    void reserve_stream(const vdev_stream_id_t id);
 };
 
 } // namespace homestore
