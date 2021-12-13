@@ -42,6 +42,7 @@
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
+#include "engine/common/homestore_utils.hpp"
 
 using namespace iomgr;
 SDS_LOGGING_DECL(device, DEVICE_MANAGER)
@@ -55,7 +56,9 @@ static constexpr uint32_t MAGIC{0xCEEDDEEB};
 
 /************* Super Block definition ******************/
 
-static constexpr uint32_t CURRENT_SUPERBLOCK_VERSION{1};
+static constexpr uint32_t SUPERBLOCK_VERSION_1_2{1}; // XXX: we need a cooler name
+static constexpr uint32_t SUPERBLOCK_VERSION_1_3{2};
+static constexpr uint32_t CURRENT_SUPERBLOCK_VERSION{2};
 static constexpr uint32_t CURRENT_DM_INFO_VERSION{1};
 
 /*******************************************************************************************************
@@ -196,7 +199,41 @@ static_assert(sizeof(vdev_info_block) == MAX_VDEV_INFO_BLOCK_SZ, "vdev info bloc
 static constexpr size_t SUPERBLOCK_PAYLOAD_OFFSET{4096};
 
 #pragma pack(1)
+
+struct disk_attr {
+    // all fields in this structure are a copy from iomgr::drive_attributes;
+    uint32_t phys_page_size{0};        // Physical page size of flash ssd/nvme. This is optimal size to do IO
+    uint32_t align_size{0};            // size alignment supported by drives/kernel
+    uint32_t atomic_phys_page_size{0}; // atomic page size of the drive_sync_write_count
+    uint8_t pad[4]{};
+
+    bool is_zeroed() const {
+        return (phys_page_size == 0) && (align_size == 0) && (atomic_phys_page_size == 0) && (pad[0] == 0) &&
+            (pad[1] == 0) && (pad[2] == 0) && (pad[3] == 0);
+    }
+
+    bool is_valid() const {
+        return is_page_valid(phys_page_size) && is_page_valid(align_size) && is_page_valid(atomic_phys_page_size);
+    }
+
+    bool is_page_valid(uint32_t page_size) const {
+        if (page_size == 0 || (page_size & (page_size - 1)) != 0) {
+            return false;
+        } else {
+            return true;
+        }
+    }
+
+    std::string to_string() const {
+        return fmt::format("disk_attr: hys_page_size: {}, align_size: {}, atomic_phys_page_size: {}", phys_page_size,
+                           align_size, atomic_phys_page_size);
+    }
+};
+
 struct super_block {
+    static constexpr uint32_t s_min_sb_size{SUPERBLOCK_PAYLOAD_OFFSET +
+                                            512}; // only needed for first time read of super block; increase 512 to
+                                                  // actual size if in the future super_block can be larger;
     static constexpr size_t s_num_dm_chunks{2};
     static_assert((s_num_dm_chunks & (s_num_dm_chunks - 1)) == 0,
                   "Size must be power of 2 for optimizations of & vs modulo");
@@ -211,7 +248,8 @@ struct super_block {
     uint8_t pad[7]{};                             // pad to 64 bit
     pdev_info_block this_dev_info{0};             // Info about this device itself
     chunk_info_block dm_chunk[s_num_dm_chunks]{}; // chunk info blocks
-    uint64_t system_uuid{0};                      // homestore system uuid.  hs_uuid_t(time_t) is an ambiguous type
+    uint64_t system_uuid{0};                      // homestore system uuid.  hs_uuid_t(time_t) is an ambiguous typedef
+    disk_attr dev_attr;                           // device attributes (from iomgr);
 
     void set_init_done(const bool done) { init_done = static_cast< uint8_t >(done ? 0x01 : 0x00); }
     bool is_init_done() const { return (init_done == 0x01); }
@@ -223,6 +261,7 @@ struct super_block {
     hs_uuid_t get_system_uuid() const { return static_cast< hs_uuid_t >(system_uuid); }
 };
 
+static_assert(sizeof(super_block) <= super_block::s_min_sb_size);
 inline size_t SUPERBLOCK_SIZE(const uint32_t atomic_page_sz) {
     return sisl::round_up(std::max(sizeof(super_block), atomic_page_sz + SUPERBLOCK_PAYLOAD_OFFSET), atomic_page_sz);
 }
@@ -433,8 +472,7 @@ class PhysicalDev {
     friend class DeviceManager;
 
 public:
-    PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags,
-                const iomgr::io_interface_comp_cb_t& io_comp_cb);
+    PhysicalDev(const std::string& devname, const int oflags);
 
     /**
      * @brief
@@ -536,6 +574,10 @@ public:
     hs_uuid_t get_sys_uuid() { return m_super_blk->get_system_uuid(); }
     uint64_t get_stream_size() const;
     uint64_t get_stream_aligned_offset() const;
+    uint32_t get_page_size() const;
+    uint32_t get_atomic_page_size() const;
+    uint32_t get_align_size() const;
+#if 0
     uint32_t get_page_size() const { return (get_page_size(m_devname)); }
     uint32_t get_atomic_page_size() const { return (get_atomic_page_size(m_devname)); }
     uint32_t get_align_size() const { return (get_align_size(m_devname)); }
@@ -543,6 +585,7 @@ public:
     static uint32_t get_page_size(const std::string& devname);
     static uint32_t get_atomic_page_size(const std::string& devname);
     static uint32_t get_align_size(const std::string& devname);
+#endif
 
 public:
     static void zero_boot_sbs(const std::vector< dev_info >& devices, const int oflags);
@@ -550,6 +593,12 @@ public:
 private:
     void write_superblock();
     void read_superblock();
+    void read_and_fill_superblock(const int oflags);
+
+    void alloc_superblock(const uint32_t sb_size, const uint32_t align_sz);
+    void free_superblock();
+
+    bool resize_superblock_if_needed(const uint32_t atomic_page_sz, const uint32_t align_sz);
 
     bool is_init_done() const { return m_super_blk->is_init_done(); }
 
@@ -563,8 +612,14 @@ private:
 
     /* Validate if this device is a homestore validated device. If there is any corrupted device, then it
      * throws std::system_exception */
-    bool validate_device();
+    bool validate_device() const;
     bool is_hdd() const;
+
+    /*
+     * return true if we are upgrading from some version that is supported for upgrade;
+     * return false if not;
+     * */
+    bool is_from_upgradable_version() const;
 
 private:
     DeviceManager* m_mgr; // Back pointer to physical device
@@ -687,7 +742,6 @@ public:
 
 public:
     static void zero_boot_sbs(const std::vector< dev_info >& devices);
-    static iomgr::drive_attributes get_drive_attrs(const std::vector< dev_info >& devices);
     static iomgr::drive_type get_drive_type(const std::vector< dev_info >& devices);
     static bool is_hdd(const std::string& devname);
 
@@ -746,6 +800,7 @@ private:
     bool m_scan_cmpltd{false};
     vdev_error_callback m_vdev_error_cb;
     bool m_first_time_boot{true};
+    hs_uuid_t m_data_system_uuid{INVALID_SYSTEM_UUID};
 }; // class DeviceManager
 
 } // namespace homestore

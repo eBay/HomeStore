@@ -19,10 +19,7 @@
 #include <iomgr/iomgr.hpp>
 
 #include "engine/blkalloc/blk_allocator.h"
-#include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_flip.hpp"
-#include "engine/common/homestore_utils.hpp"
-#include "engine/common/homestore_header.hpp"
 #include "engine/device/virtual_dev.hpp"
 #include "engine/blkalloc/blkalloc_cp.hpp"
 #include "device.h"
@@ -63,8 +60,8 @@ void PhysicalDevChunk::cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp) {
     get_blk_allocator_mutable()->cp_done();
 }
 
-std::shared_ptr< blkalloc_cp >
-PhysicalDevChunk::attach_prepare_cp([[maybe_unused]] const std::shared_ptr< blkalloc_cp >& cur_ba_cp) {
+std::shared_ptr< blkalloc_cp > PhysicalDevChunk::attach_prepare_cp([
+    [maybe_unused]] const std::shared_ptr< blkalloc_cp >& cur_ba_cp) {
     return std::make_shared< blkalloc_cp >();
 }
 
@@ -106,8 +103,17 @@ DeviceManager::DeviceManager(const std::vector< dev_info >& data_devices, NewVDe
             dm_derived.vdev_hdr = &dm_derived.info->vdev_hdr;
         }};
 
-    initialize_memory_structures(&m_data_chunk_memory, m_data_dm_derived, get_common_phys_page_sz(),
-                                 get_common_align_sz());
+    uint32_t max_phys_page_size{0}, max_align_size{0};
+    for (const auto& d : m_data_devices) {
+        auto pdev{std::make_unique< PhysicalDev >(d.dev_names, get_device_open_flags(d.dev_names))};
+        if (pdev->has_valid_superblock(m_data_system_uuid)) { m_first_time_boot = false; }
+        const auto page_size = pdev->get_page_size();
+        const auto align_size = pdev->get_align_size();
+        max_align_size = std::max(max_align_size, align_size);
+        max_phys_page_size = std::max(max_phys_page_size, page_size);
+    }
+
+    initialize_memory_structures(&m_data_chunk_memory, m_data_dm_derived, max_phys_page_size, max_align_size);
     m_scan_cmpltd = false;
 
     HS_LOG_ASSERT_LE(m_vdev_metadata_size, MAX_CONTEXT_DATA_SZ);
@@ -118,18 +124,11 @@ bool DeviceManager::init() {
     MetaBlkMgrSI()->register_handler("BLK_ALLOC", bind_this(DeviceManager::blk_alloc_meta_blk_found_cb, 3), nullptr,
                                      true /* do_crc */);
 
-    hs_uuid_t data_system_uuid{INVALID_SYSTEM_UUID};
-
-    for (const auto& d : m_data_devices) {
-        auto pdev{std::make_unique< PhysicalDev >(this, d.dev_names, get_device_open_flags(d.dev_names), m_io_comp_cb)};
-        if (pdev->has_valid_superblock(data_system_uuid)) { m_first_time_boot = false; }
-    }
-
     if (!m_first_time_boot) {
-        HS_DBG_ASSERT_NE(data_system_uuid, INVALID_SYSTEM_UUID);
-        load_and_repair_devices(data_system_uuid);
+        HS_DBG_ASSERT_NE(m_data_system_uuid, INVALID_SYSTEM_UUID);
+        load_and_repair_devices(m_data_system_uuid);
     } else {
-        HS_DBG_ASSERT_EQ(data_system_uuid, INVALID_SYSTEM_UUID);
+        HS_DBG_ASSERT_EQ(m_data_system_uuid, INVALID_SYSTEM_UUID);
         init_devices();
     }
 
@@ -278,11 +277,15 @@ void DeviceManager::load_and_repair_devices(const hs_uuid_t& sys_uuid) {
             device_id = pdev->get_dev_id();
             data_rewrite = HS_STATIC_CONFIG(input.is_read_only) ? false : true;
         }
+
+        // system uuid check is already done in pdev layer;
+#if 0
         static auto sys_uuid = pdev->get_sys_uuid();
 
         // sanity check that all devices should have same homestore system uuid;
         HS_REL_ASSERT_EQ(sys_uuid, pdev->get_sys_uuid(), "homestore system uuid mismatch found on devices {}, {}",
                          sys_uuid, pdev->get_sys_uuid());
+#endif
         HS_LOG_ASSERT_NULL(m_data_pdevs[pdev->get_dev_id()].get());
 
         if (pdev->is_hdd()) { HomeStoreStaticConfig::instance().hdd_drive_present = true; }
@@ -715,21 +718,6 @@ vdev_info_block* DeviceManager::alloc_new_vdev_slot() {
     return nullptr;
 }
 
-iomgr::drive_attributes DeviceManager::get_drive_attrs(const std::vector< dev_info >& devices) {
-    iomgr::drive_attributes attr = iomgr::DriveInterface::get_attributes(devices[0].dev_names);
-#ifndef NDEBUG
-    for (auto i{1u}; i < devices.size(); ++i) {
-        auto observed_attr = iomgr::DriveInterface::get_attributes(devices[i].dev_names);
-        if (attr != observed_attr) {
-            HS_DBG_ASSERT(0, "Expected all phys dev have same attributes, prev device attr={}, this device attr={}",
-                          attr.to_json().dump(4), observed_attr.to_json().dump(4));
-        }
-    }
-#endif
-
-    return attr;
-}
-
 iomgr::drive_type DeviceManager::get_drive_type(const std::vector< dev_info >& devices) {
     iomgr::drive_type dtype = iomgr::DriveInterface::get_drive_type(devices[0].dev_names);
 #ifndef NDEBUG
@@ -801,28 +789,30 @@ uint32_t DeviceManager::get_atomic_page_size(const PhysicalDevGroup pdev_group) 
 }
 
 uint32_t DeviceManager::get_common_phys_page_sz() {
-    uint32_t max_page_size = 0;
-    for (const auto& dev_info : m_data_devices) {
-        const auto pdev_attr = iomgr::DriveInterface::get_attributes(dev_info.dev_names);
-        const uint32_t page_size = pdev_attr.phys_page_size;
+    uint32_t max_page_size{0};
+
+    for (const auto& pdev : m_data_pdevs) {
+        const auto page_size = pdev->get_page_size();
         if (page_size == 0 || (page_size & (page_size - 1)) != 0) {
             HS_REL_ASSERT(0, "very odd page size {}", page_size);
         }
         max_page_size = std::max(max_page_size, page_size);
     }
+
     return max_page_size;
 }
 
 uint32_t DeviceManager::get_common_align_sz() {
-    uint32_t max_align_size = 0;
-    for (const auto& dev_info : m_data_devices) {
-        const auto pdev_attr = iomgr::DriveInterface::get_attributes(dev_info.dev_names);
-        const uint32_t align_size = pdev_attr.align_size;
+    uint32_t max_align_size{0};
+    for (const auto& pdev : m_data_pdevs) {
+        const auto align_size = pdev->get_align_size();
         if (align_size == 0 || (align_size & (align_size - 1)) != 0) {
             HS_REL_ASSERT(0, "very odd align size {}", align_size);
         }
+
         max_align_size = std::max(max_align_size, align_size);
     }
+
     return max_align_size;
 }
 
