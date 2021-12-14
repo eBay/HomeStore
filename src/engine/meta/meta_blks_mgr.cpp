@@ -381,7 +381,7 @@ void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* context_data, 
     if (m_sub_info[type].do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
 #endif
 
-    HS_LOG(INFO, metablk, "[type={}], adding meta bid: {}, sz: {}", type, meta_bid.to_string(), sz);
+    HS_LOG(DEBUG, metablk, "[type={}], adding meta bid: {}, sz: {}", type, meta_bid.to_string(), sz);
 
     meta_blk* mblk{init_meta_blk(meta_bid, type, context_data, sz)};
 
@@ -865,7 +865,7 @@ std::error_condition MetaBlkMgr::remove_sub_sb(void* cookie) {
         // if we are removing the last meta blk, update last to its previous blk;
         HS_DBG_ASSERT_EQ(m_last_mblk_id->to_integer(), rm_bid.to_integer());
 
-        HS_LOG(INFO, metablk, "removing last mblk, change m_last_mblk to bid: {}, [type={}]", prev_bid.to_string(),
+        HS_LOG(DEBUG, metablk, "removing last mblk, change m_last_mblk to bid: {}, [type={}]", prev_bid.to_string(),
                m_meta_blks[prev_bid.to_integer()]->hdr.h.type);
         m_last_mblk_id->set(prev_bid);
     }

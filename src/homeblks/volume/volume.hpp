@@ -216,6 +216,11 @@ struct vol_sb_hdr {
 
     /* these variables are mutable. Always update these values before writing the superblock */
     vol_state state;
+
+    std::string to_string() {
+        return fmt::format("magic:{}, ver:{}, num_streams:{}, page_size: {}, size:{}, uuid: {}, vol_name: {}, state:{}",
+                           magic, version, num_streams, page_size, size, uuid, vol_name, state);
+    }
 };
 
 /* A simple self contained wrapper for completion list, which uses vector pool to avoid additional allocations */

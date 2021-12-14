@@ -23,13 +23,6 @@ using namespace homestore;
 SDS_LOGGING_DECL(volume)
 SDS_LOGGING_DECL(vol_io_wd)
 
-namespace {
-#ifndef NDEBUG
-/* only for testing */
-bool vol_test_enable{false};
-#endif
-} // namespace
-
 sisl::atomic_counter< uint64_t > Volume::home_blks_ref_cnt{0};
 
 VolumeIOWatchDog::VolumeIOWatchDog() {
@@ -179,6 +172,7 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
     auto sb = (vol_sb_hdr*)m_sb_buf->bytes;
     m_state = sb->state;
 
+    THIS_VOL_LOG(INFO, volume, , "Found volume: {}", sb->to_string());
     HS_REL_ASSERT_LE(sb->version, vol_sb_version, "version mismatch");
     HS_REL_ASSERT_EQ(sb->magic, vol_sb_magic, "magic mismatch");
     m_hb = HomeBlks::safe_instance();
