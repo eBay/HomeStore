@@ -13,7 +13,7 @@
 #include <boost/vmd/is_empty.hpp>
 #include <sisl/fds/utils.hpp>
 #include <sisl/metrics/metrics.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <spdlog/fmt/fmt.h>
 
 // clang-format off
@@ -218,7 +218,7 @@
             [&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {                            \
                 fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}] "},                                      \
                                 fmt::make_format_args(file_name(__FILE__), __LINE__));                                 \
-                sds_logging::default_cmp_assert_formatter(buf, msgcb, std::forward< decltype(args) >(args)...);        \
+                sisl::logging::default_cmp_assert_formatter(buf, msgcb, std::forward< decltype(args) >(args)...);      \
                 BOOST_PP_IF(BOOST_VMD_IS_EMPTY(submod_name), BOOST_PP_EMPTY,                                           \
                             BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{" \n[{}={}] "},     \
                                                               fmt::make_format_args(submod_name, submod_val))))        \

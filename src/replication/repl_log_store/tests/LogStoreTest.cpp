@@ -117,9 +117,9 @@ public:
     virtual void SetUp() override {
         clearTestFiles(TEST_FILE_PATHS_PREFIX);
         m_log_store_id = load_logstore_id();
-        cleanup = SDS_OPTIONS["cleanup"].as< bool >();
-        m_test_type = SDS_OPTIONS["test_type"].as< std::string >();
-        tcfg.num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
+        cleanup = SISL_OPTIONS["cleanup"].as< bool >();
+        m_test_type = SISL_OPTIONS["test_type"].as< std::string >();
+        tcfg.num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
     }
 
     virtual void TearDown() override {
@@ -224,7 +224,7 @@ public:
             device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
         }
 
-        const bool is_spdk{SDS_OPTIONS["spdk"].as< bool >()};
+        const bool is_spdk{SISL_OPTIONS["spdk"].as< bool >()};
         LOGINFO("Starting iomgr with {} threads, spdk: {}", tcfg.num_threads, is_spdk);
         iomanager.start(is_spdk ? 2 : tcfg.num_threads, is_spdk);
     }

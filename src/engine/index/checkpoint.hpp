@@ -7,7 +7,7 @@
 #include <sisl/utility/atomic_counter.hpp>
 #include <cassert>
 #include <memory>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_assert.hpp"
@@ -34,7 +34,7 @@
  */
 typedef std::function< void(bool success) > cp_done_cb;
 namespace homestore {
-SDS_LOGGING_DECL(cp, replay)
+SISL_LOGGING_DECL(cp, replay)
 
 #define CP_PERIODIC_LOG(level, cp_id, msg, ...)                                                                        \
     HS_PERIODIC_DETAILED_LOG(level, cp, "cp_id", cp_id, , , msg, ##__VA_ARGS__)

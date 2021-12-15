@@ -32,7 +32,7 @@
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_utils.hpp"
 
-SDS_LOGGING_DECL(device)
+SISL_LOGGING_DECL(device)
 
 namespace homestore {
 

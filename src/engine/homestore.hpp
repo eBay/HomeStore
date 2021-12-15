@@ -9,7 +9,7 @@
 
 #include <sisl/fds/malloc_helper.hpp>
 #include <sisl/fds/buffer.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 
 #include "api/meta_interface.hpp"
 #include "engine/blkstore/blkstore.hpp"
@@ -78,9 +78,9 @@ public:
         static std::once_flag flag1;
         std::call_once(flag1, [this]() {
             m_periodic_logger =
-                sds_logging::CreateCustomLogger("homestore", "_periodic", false, true /* tee_to_stdout_stderr */);
+                sisl::logging::CreateCustomLogger("homestore", "_periodic", false, true /* tee_to_stdout_stderr */);
         });
-        sds_logging::SetLogPattern("[%D %T.%f] [%^%L%$] [%t] %v", m_periodic_logger);
+        sisl::logging::SetLogPattern("[%D %T.%f] [%^%L%$] [%t] %v", m_periodic_logger);
 
 #ifndef NDEBUG
         flip::Flip::instance().start_rpc_server();

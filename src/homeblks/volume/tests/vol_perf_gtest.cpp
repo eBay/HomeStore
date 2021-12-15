@@ -16,8 +16,8 @@
 #include <sisl/fds/bitset.hpp>
 #include <iomgr/iomgr.hpp>
 #include <sisl/metrics/metrics.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 #include <sisl/utility/thread_buffer.hpp>
 
 #include <gtest/gtest.h>
@@ -27,32 +27,32 @@
 
 using namespace homestore;
 
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 /************************* CLI options ***************************/
 
-SDS_OPTION_GROUP(perf_test_volume,
-                 (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("30"),
-                  "seconds"),
-                 (num_threads, "", "num_threads", "num threads for io",
-                  ::cxxopts::value< uint32_t >()->default_value("8"), "number"),
-                 (queue_depth, "", "queue_depth", "io queue depth per thread",
-                  ::cxxopts::value< uint32_t >()->default_value("1024"), "number"),
-                 (read_percent, "", "read_percent", "read in percentage",
-                  ::cxxopts::value< uint32_t >()->default_value("50"), "percentage"),
-                 (device_list, "", "device_list", "List of device paths",
-                  ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
-                 (io_size, "", "io_size", "size of io in KB", ::cxxopts::value< uint32_t >()->default_value("64"),
-                  "size of io in KB"),
-                 (app_mem_size, "", "app_mem_size", "size of app mem (including cache) in GB",
-                  ::cxxopts::value< uint32_t >()->default_value("4"), "size of app mem (incl cache) in GB"),
-                 (init, "", "init", "init", ::cxxopts::value< uint32_t >()->default_value("1"), "init"),
-                 (preload_writes, "", "preload_writes", "preload_writes",
-                  ::cxxopts::value< uint32_t >()->default_value("100000000"), "preload_writes"),
-                 (ref_cnt, "", "ref_count", "display object life counters",
-                  ::cxxopts::value< uint32_t >()->default_value("0"), "display object life counters"))
+SISL_OPTION_GROUP(perf_test_volume,
+                  (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("30"),
+                   "seconds"),
+                  (num_threads, "", "num_threads", "num threads for io",
+                   ::cxxopts::value< uint32_t >()->default_value("8"), "number"),
+                  (queue_depth, "", "queue_depth", "io queue depth per thread",
+                   ::cxxopts::value< uint32_t >()->default_value("1024"), "number"),
+                  (read_percent, "", "read_percent", "read in percentage",
+                   ::cxxopts::value< uint32_t >()->default_value("50"), "percentage"),
+                  (device_list, "", "device_list", "List of device paths",
+                   ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
+                  (io_size, "", "io_size", "size of io in KB", ::cxxopts::value< uint32_t >()->default_value("64"),
+                   "size of io in KB"),
+                  (app_mem_size, "", "app_mem_size", "size of app mem (including cache) in GB",
+                   ::cxxopts::value< uint32_t >()->default_value("4"), "size of app mem (incl cache) in GB"),
+                  (init, "", "init", "init", ::cxxopts::value< uint32_t >()->default_value("1"), "init"),
+                  (preload_writes, "", "preload_writes", "preload_writes",
+                   ::cxxopts::value< uint32_t >()->default_value("100000000"), "preload_writes"),
+                  (ref_cnt, "", "ref_count", "display object life counters",
+                   ::cxxopts::value< uint32_t >()->default_value("0"), "display object life counters"))
 #define ENABLED_OPTIONS logging, home_blks, perf_test_volume
-SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
+SISL_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
 /* it will go away once shutdown is implemented correctly */
 
@@ -69,12 +69,12 @@ int main(int argc, char* argv[]) {
     srand(time(0));
     //::testing::GTEST_FLAG(filter) = "*normal_random*";
     //::testing::InitGoogleTest(&argc, argv);
-    SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
-    sds_logging::SetLogger("perf_test_volume");
+    SISL_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
+    sisl::logging::SetLogger("perf_test_volume");
     spdlog::set_pattern("[%D %T.%f%z] [%^%l%$] [%t] %v");
 
 #if 0
-    disk_init = SDS_OPTIONS["init"].as< uint32_t >() ? true : false;
+    disk_init = SISL_OPTIONS["init"].as< uint32_t >() ? true : false;
 
     if (dev_names.size() == 0) {
         LOGINFO("creating files");
@@ -89,14 +89,14 @@ int main(int argc, char* argv[]) {
     }
 #endif
     simple_store_cfg cfg;
-    cfg.m_run_time_ms = SDS_OPTIONS["run_time"].as< uint32_t >() * 1000;
-    cfg.m_nthreads = SDS_OPTIONS["num_threads"].as< uint32_t >();
-    cfg.m_qdepth = SDS_OPTIONS["queue_depth"].as< uint32_t >();
-    cfg.m_read_pct = SDS_OPTIONS["read_percent"].as< uint32_t >();
-    if (SDS_OPTIONS.count("device_list")) {
-        cfg.m_devs = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
+    cfg.m_run_time_ms = SISL_OPTIONS["run_time"].as< uint32_t >() * 1000;
+    cfg.m_nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
+    cfg.m_qdepth = SISL_OPTIONS["queue_depth"].as< uint32_t >();
+    cfg.m_read_pct = SISL_OPTIONS["read_percent"].as< uint32_t >();
+    if (SISL_OPTIONS.count("device_list")) {
+        cfg.m_devs = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
     }
-    cfg.m_app_mem_size = SDS_OPTIONS["app_mem_size"].as< uint32_t >() * 1024 * 1024 * 1024;
+    cfg.m_app_mem_size = SISL_OPTIONS["app_mem_size"].as< uint32_t >() * 1024 * 1024 * 1024;
 
     SimpleTestStore test_store(cfg);
     test_store.start_homestore();

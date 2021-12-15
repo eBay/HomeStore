@@ -1,8 +1,8 @@
 #include "homeds/memory/obj_allocator.hpp"
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 RCU_REGISTER_INIT
 
 using namespace homeds;

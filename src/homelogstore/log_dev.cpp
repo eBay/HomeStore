@@ -13,7 +13,7 @@
 
 namespace homestore {
 
-SDS_LOGGING_DECL(logstore)
+SISL_LOGGING_DECL(logstore)
 
 #define THIS_LOGDEV_LOG(level, msg, ...) HS_SUBMOD_LOG(level, logstore, , "logdev", m_family_id, msg, __VA_ARGS__)
 #define THIS_LOGDEV_PERIODIC_LOG(level, msg, ...)                                                                      \

@@ -26,8 +26,8 @@
 #include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_header.hpp"
 
-SDS_LOGGING_DECL(blkalloc)
-SDS_LOGGING_DECL(transient)
+SISL_LOGGING_DECL(blkalloc)
+SISL_LOGGING_DECL(transient)
 
 namespace homestore {
 #define BLKALLOC_LOG(level, msg, ...) HS_SUBMOD_LOG(level, blkalloc, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)

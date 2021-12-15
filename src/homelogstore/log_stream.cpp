@@ -3,7 +3,7 @@
 #include "log_dev.hpp"
 
 namespace homestore {
-SDS_LOGGING_DECL(logstore)
+SISL_LOGGING_DECL(logstore)
 
 log_stream_reader::log_stream_reader(const off_t device_cursor, JournalVirtualDev* store,
                                      const uint64_t read_size_multiple) :

@@ -4,11 +4,11 @@
 #include <thread>
 #include <chrono>
 #include <unordered_map>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS, flip, IOMGR_LOG_MODS)
-SDS_OPTIONS_ENABLE(logging)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS, flip, IOMGR_LOG_MODS)
+SISL_OPTIONS_ENABLE(logging)
 RCU_REGISTER_INIT
 
 using namespace homeds::loadgen;
@@ -85,9 +85,9 @@ TEST_F(IOMgrExecTest, TEST2) {
 }
 
 int main(int argc, char* argv[]) {
-    SDS_OPTIONS_LOAD(argc, argv, logging)
+    SISL_OPTIONS_LOAD(argc, argv, logging)
     ::testing::InitGoogleTest(&argc, argv);
-    sds_logging::SetLogger("test_iomgr_exec");
+    sisl::logging::SetLogger("test_iomgr_exec");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
     return RUN_ALL_TESTS();

@@ -13,7 +13,7 @@
 #include "log_store.hpp"
 
 namespace homestore {
-SDS_LOGGING_DECL(logstore)
+SISL_LOGGING_DECL(logstore)
 
 /////////////////////////////////////// HomeLogStoreMgr Section ///////////////////////////////////////
 HomeLogStoreMgr& HomeLogStoreMgr::instance() {

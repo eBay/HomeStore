@@ -21,7 +21,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <flip/flip.hpp>
 #include <fmt/ostream.h>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 
 #include "engine/common/error.h"
 #include "engine/common/homestore_config.hpp"
@@ -43,7 +43,7 @@ using namespace flip;
 #define MAX_BTREE_DEPTH 100
 #endif
 
-SDS_LOGGING_DECL(btree_structures, btree_nodes, btree_generics)
+SISL_LOGGING_DECL(btree_structures, btree_nodes, btree_generics)
 namespace homestore {
 extern bool vol_test_run;
 }

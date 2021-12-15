@@ -34,7 +34,7 @@
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
 #include <iomgr/iomgr.hpp>
 #include <isa-l/crc.h>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/fds/buffer.hpp>
 #include <sisl/fds/sparse_vector.hpp>
 #include <sisl/fds/utils.hpp>
@@ -45,7 +45,7 @@
 #include "engine/common/homestore_utils.hpp"
 
 using namespace iomgr;
-SDS_LOGGING_DECL(device, DEVICE_MANAGER)
+SISL_LOGGING_DECL(device, DEVICE_MANAGER)
 
 namespace homestore {
 class BlkAllocator;

@@ -14,15 +14,15 @@
 #include <benchmark/benchmark.h>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 
 #include "engine/common/homestore_header.hpp"
 
 #include "../log_store.hpp"
 
 using namespace homestore;
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 static constexpr size_t ITERATIONS{100000};
 static constexpr size_t THREADS{64};
@@ -257,43 +257,43 @@ static void test_append(benchmark::State& state) {
 }
 
 static void setup() {
-    sample_db.start_homestore(SDS_OPTIONS["dev_name"].as< std::string >(),   // devname
-                              SDS_OPTIONS["num_threads"].as< uint32_t >(),   // num threads
-                              SDS_OPTIONS["num_logstores"].as< uint32_t >(), // num log stores
-                              SDS_OPTIONS["num_entries"].as< uint64_t >(),   // num entries
-                              SDS_OPTIONS["qdepth"].as< uint32_t >(),        // qdepth
-                              false                                          // restart
+    sample_db.start_homestore(SISL_OPTIONS["dev_name"].as< std::string >(),   // devname
+                              SISL_OPTIONS["num_threads"].as< uint32_t >(),   // num threads
+                              SISL_OPTIONS["num_logstores"].as< uint32_t >(), // num log stores
+                              SISL_OPTIONS["num_entries"].as< uint64_t >(),   // num entries
+                              SISL_OPTIONS["qdepth"].as< uint32_t >(),        // qdepth
+                              false                                           // restart
     );
 }
 static void teardown() { sample_db.shutdown(); }
 
-SDS_OPTIONS_ENABLE(logging, log_store_benchmark)
-SDS_OPTION_GROUP(log_store_benchmark,
-                 (num_threads, "", "num_threads", "number of threads",
-                  ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-                 (dev_name, "", "dev_name", "name of homeblks device",
-                  ::cxxopts::value< std::string >()->default_value("/tmp/hb_dev1"), "string"),
-                 (num_logstores, "", "num_logstores", "number of log stores",
-                  ::cxxopts::value< uint32_t >()->default_value("1"), "number"),
-                 (num_entries, "", "num_entries", "number of log records",
-                  ::cxxopts::value< uint64_t >()->default_value("10000"), "number"),
-                 (qdepth, "", "qdepth", "qdepth per thread", ::cxxopts::value< uint32_t >()->default_value("32"),
-                  "number"),
-                 (max_record_size, "", "max_record_size", "max record size",
-                  ::cxxopts::value< uint32_t >()->default_value("1024"), "number"),
-                 (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-                  cxxopts::value< int32_t >()->default_value("5000"), "port"));
+SISL_OPTIONS_ENABLE(logging, log_store_benchmark)
+SISL_OPTION_GROUP(log_store_benchmark,
+                  (num_threads, "", "num_threads", "number of threads",
+                   ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
+                  (dev_name, "", "dev_name", "name of homeblks device",
+                   ::cxxopts::value< std::string >()->default_value("/tmp/hb_dev1"), "string"),
+                  (num_logstores, "", "num_logstores", "number of log stores",
+                   ::cxxopts::value< uint32_t >()->default_value("1"), "number"),
+                  (num_entries, "", "num_entries", "number of log records",
+                   ::cxxopts::value< uint64_t >()->default_value("10000"), "number"),
+                  (qdepth, "", "qdepth", "qdepth per thread", ::cxxopts::value< uint32_t >()->default_value("32"),
+                   "number"),
+                  (max_record_size, "", "max_record_size", "max record size",
+                   ::cxxopts::value< uint32_t >()->default_value("1024"), "number"),
+                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
+                   cxxopts::value< int32_t >()->default_value("5000"), "port"));
 
-// BENCHMARK(test_append)->Iterations(10)->Threads(SDS_OPTIONS["num_threads"].as< uint32_t >());
+// BENCHMARK(test_append)->Iterations(10)->Threads(SISL_OPTIONS["num_threads"].as< uint32_t >());
 BENCHMARK(test_append)->Iterations(1);
 
 uint32_t SampleLogStoreClient::max_data_size{1024};
 int main(int argc, char** argv) {
-    SDS_OPTIONS_LOAD(argc, argv, logging, log_store_benchmark)
-    sds_logging::SetLogger("log_store_benchmark");
+    SISL_OPTIONS_LOAD(argc, argv, logging, log_store_benchmark)
+    sisl::logging::SetLogger("log_store_benchmark");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    SampleLogStoreClient::max_data_size = SDS_OPTIONS["max_record_size"].as< uint32_t >();
+    SampleLogStoreClient::max_data_size = SISL_OPTIONS["max_record_size"].as< uint32_t >();
     setup();
     ::benchmark::Initialize(&argc, argv);
     ::benchmark::RunSpecifiedBenchmarks();

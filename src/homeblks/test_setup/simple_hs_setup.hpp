@@ -12,7 +12,7 @@
 #include "folly/SharedMutex.h"
 #include "iomgr/aio_drive_interface.hpp"
 #include "iomgr/iomgr.hpp"
-#include "sds_logging/logging.h"
+#include "sisl/logging/logging.h"
 
 namespace homestore {
 #define vol_interface VolInterface::get_instance()
@@ -182,8 +182,8 @@ public:
 
     virtual void init_done_cb(std::error_condition err, const out_params& params) {
         if (err) {
-            { 
-                std::unique_lock< std::mutex > lk{m_mutex};  
+            {
+                std::unique_lock< std::mutex > lk{m_mutex};
                 m_init_done = true;
                 m_io_done = true;
             }

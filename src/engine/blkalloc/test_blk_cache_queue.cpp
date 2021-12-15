@@ -4,8 +4,8 @@
 #include <random>
 #include <vector>
 
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 #include <sisl/utility/thread_buffer.hpp>
 
 #include "engine/common/homestore_header.hpp"
@@ -15,7 +15,7 @@
 
 #include <gtest/gtest.h>
 
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 using namespace homestore;
 
@@ -264,11 +264,11 @@ TEST_F(BlkCacheQueueTest, join_from_multiple_levels) {
     validate_alloc(1 /* count */, 0 /* slab */, last_blk_num_at_slab(0), 1);
 }
 
-SDS_OPTIONS_ENABLE(logging)
+SISL_OPTIONS_ENABLE(logging)
 int main(int argc, char* argv[]) {
     ::testing::InitGoogleTest(&argc, argv);
-    SDS_OPTIONS_LOAD(argc, argv, logging)
-    sds_logging::SetLogger("test_blkalloc");
+    SISL_OPTIONS_LOAD(argc, argv, logging)
+    sisl::logging::SetLogger("test_blkalloc");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
     g_metrics = std::make_unique< BlkAllocMetrics >("BlkCacheQueueTest");

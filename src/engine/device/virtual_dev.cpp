@@ -19,7 +19,7 @@
 #include <boost/range/irange.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <sisl/metrics/metrics.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/utility/atomic_counter.hpp>
 #include <iomgr/drive_interface.hpp>
 
@@ -36,7 +36,7 @@
 #include "engine/homestore_base.hpp"
 #include "virtual_dev.hpp"
 
-SDS_LOGGING_DECL(device)
+SISL_LOGGING_DECL(device)
 
 namespace homestore {
 

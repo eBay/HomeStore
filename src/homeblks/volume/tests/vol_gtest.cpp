@@ -36,8 +36,8 @@
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>
 #include <iomgr/spdk_drive_interface.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 #include <sisl/utility/thread_buffer.hpp>
 
 #include <gtest/gtest.h>
@@ -72,7 +72,7 @@ constexpr uint64_t Mi{Ki * Ki};
 constexpr uint64_t Gi{Ki * Mi};
 
 using log_level = spdlog::level::level_enum;
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 ENUM(load_type_t, uint8_t, random = 0, same = 1, sequential = 2);
 ENUM(verify_type_t, uint8_t, csum = 0, data = 1, header = 2, null = 3);
@@ -2180,7 +2180,7 @@ std::vector< std::function< void() > > mod_init_funcs;
 
 /************************* CLI options ***************************/
 
-SDS_OPTION_GROUP(
+SISL_OPTION_GROUP(
     test_volume,
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("30"), "seconds"),
     (load_type, "", "load_type", "load_type", ::cxxopts::value< uint32_t >()->default_value("0"),
@@ -2258,7 +2258,7 @@ SDS_OPTION_GROUP(
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr, test_meta_mod, test_vdev_mod, config
 
-SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
+SISL_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
 /************************** MAIN ********************************/
 
@@ -2272,56 +2272,56 @@ SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 int main(int argc, char* argv[]) {
     ::testing::GTEST_FLAG(filter) = "*lifecycle_test*";
     ::testing::InitGoogleTest(&argc, argv);
-    SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
-    sds_logging::SetLogger("test_volume");
+    SISL_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
+    sisl::logging::SetLogger("test_volume");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
     homestore::vol_test_run = true;
 
     TestCfg& gcfg{const_cast< TestCfg& >(g_cfg)};
-    gcfg.run_time = SDS_OPTIONS["run_time"].as< uint32_t >();
-    gcfg.num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
-    gcfg.read_enable = SDS_OPTIONS["read_enable"].as< uint32_t >();
-    gcfg.unmap_enable = SDS_OPTIONS["unmap_enable"].as< uint32_t >();
-    gcfg.max_disk_capacity = ((SDS_OPTIONS["max_disk_capacity"].as< uint64_t >()) * (1ul << 30));
-    gcfg.max_vols = SDS_OPTIONS["max_volume"].as< uint64_t >();
-    gcfg.max_num_writes = SDS_OPTIONS["max_num_writes"].as< uint64_t >();
-    gcfg.enable_crash_handler = SDS_OPTIONS["enable_crash_handler"].as< uint32_t >();
-    gcfg.verify_type = static_cast< verify_type_t >(SDS_OPTIONS["verify_type"].as< uint32_t >());
-    gcfg.pre_init_verify = SDS_OPTIONS["pre_init_verify"].as< bool >();
-    gcfg.read_verify = SDS_OPTIONS["read_verify"].as< uint64_t >() ? true : false;
-    gcfg.load_type = static_cast< load_type_t >(SDS_OPTIONS["load_type"].as< uint32_t >());
-    gcfg.remove_file = SDS_OPTIONS["remove_file"].as< uint32_t >();
-    gcfg.expected_vol_state = static_cast< homestore::vol_state >(SDS_OPTIONS["expected_vol_state"].as< uint32_t >());
-    gcfg.verify_only = SDS_OPTIONS["verify_only"].as< uint32_t >();
-    gcfg.is_abort = SDS_OPTIONS["abort"].as< uint32_t >();
-    gcfg.flip_set = SDS_OPTIONS["flip"].as< uint32_t >();
-    gcfg.can_delete_volume = SDS_OPTIONS["delete_volume"].as< uint32_t >() ? true : false;
-    gcfg.atomic_phys_page_size = SDS_OPTIONS["atomic_phys_page_size"].as< uint32_t >();
-    gcfg.vol_page_size = SDS_OPTIONS["vol_page_size"].as< uint32_t >();
-    gcfg.phy_page_size = SDS_OPTIONS["phy_page_size"].as< uint32_t >();
-    gcfg.mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as< uint32_t >();
-    gcfg.io_flags = static_cast< io_flag >(SDS_OPTIONS["io_flags"].as< uint32_t >());
-    gcfg.expect_io_error = SDS_OPTIONS["expect_io_error"].as< uint32_t >() ? true : false;
-    gcfg.p_volume_size = SDS_OPTIONS["p_volume_size"].as< uint32_t >();
-    gcfg.is_spdk = SDS_OPTIONS["spdk"].as< bool >();
-    gcfg.read_cache = SDS_OPTIONS["read_cache"].as< uint32_t >() != 0 ? true : false;
-    gcfg.write_cache = SDS_OPTIONS["write_cache"].as< uint32_t >() != 0 ? true : false;
-    gcfg.read_iovec = SDS_OPTIONS["read_iovec"].as< uint32_t >() != 0 ? true : false;
-    gcfg.write_iovec = SDS_OPTIONS["write_iovec"].as< uint32_t >() != 0 ? true : false;
-    gcfg.batch_completion = SDS_OPTIONS["batch_completion"].as< bool >();
-    gcfg.vol_create_del = SDS_OPTIONS["vol_create_del"].as< bool >();
-    gcfg.create_del_with_io = SDS_OPTIONS["create_del_with_io"].as< bool >();
-    gcfg.delete_with_io = SDS_OPTIONS["delete_with_io"].as< bool >();
-    gcfg.create_del_ops_cnt = SDS_OPTIONS["create_del_ops_cnt"].as< uint32_t >();
-    gcfg.create_del_ops_interval = SDS_OPTIONS["create_del_ops_interval"].as< uint32_t >();
-    gcfg.flip_name = SDS_OPTIONS["flip_name"].as< std::string >();
-    gcfg.overlapping_allowed = SDS_OPTIONS["overlapping_allowed"].as< bool >();
-    gcfg.emulate_hdd_cnt = SDS_OPTIONS["emulate_hdd_cnt"].as< uint32_t >();
+    gcfg.run_time = SISL_OPTIONS["run_time"].as< uint32_t >();
+    gcfg.num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
+    gcfg.read_enable = SISL_OPTIONS["read_enable"].as< uint32_t >();
+    gcfg.unmap_enable = SISL_OPTIONS["unmap_enable"].as< uint32_t >();
+    gcfg.max_disk_capacity = ((SISL_OPTIONS["max_disk_capacity"].as< uint64_t >()) * (1ul << 30));
+    gcfg.max_vols = SISL_OPTIONS["max_volume"].as< uint64_t >();
+    gcfg.max_num_writes = SISL_OPTIONS["max_num_writes"].as< uint64_t >();
+    gcfg.enable_crash_handler = SISL_OPTIONS["enable_crash_handler"].as< uint32_t >();
+    gcfg.verify_type = static_cast< verify_type_t >(SISL_OPTIONS["verify_type"].as< uint32_t >());
+    gcfg.pre_init_verify = SISL_OPTIONS["pre_init_verify"].as< bool >();
+    gcfg.read_verify = SISL_OPTIONS["read_verify"].as< uint64_t >() ? true : false;
+    gcfg.load_type = static_cast< load_type_t >(SISL_OPTIONS["load_type"].as< uint32_t >());
+    gcfg.remove_file = SISL_OPTIONS["remove_file"].as< uint32_t >();
+    gcfg.expected_vol_state = static_cast< homestore::vol_state >(SISL_OPTIONS["expected_vol_state"].as< uint32_t >());
+    gcfg.verify_only = SISL_OPTIONS["verify_only"].as< uint32_t >();
+    gcfg.is_abort = SISL_OPTIONS["abort"].as< uint32_t >();
+    gcfg.flip_set = SISL_OPTIONS["flip"].as< uint32_t >();
+    gcfg.can_delete_volume = SISL_OPTIONS["delete_volume"].as< uint32_t >() ? true : false;
+    gcfg.atomic_phys_page_size = SISL_OPTIONS["atomic_phys_page_size"].as< uint32_t >();
+    gcfg.vol_page_size = SISL_OPTIONS["vol_page_size"].as< uint32_t >();
+    gcfg.phy_page_size = SISL_OPTIONS["phy_page_size"].as< uint32_t >();
+    gcfg.mem_btree_page_size = SISL_OPTIONS["mem_btree_page_size"].as< uint32_t >();
+    gcfg.io_flags = static_cast< io_flag >(SISL_OPTIONS["io_flags"].as< uint32_t >());
+    gcfg.expect_io_error = SISL_OPTIONS["expect_io_error"].as< uint32_t >() ? true : false;
+    gcfg.p_volume_size = SISL_OPTIONS["p_volume_size"].as< uint32_t >();
+    gcfg.is_spdk = SISL_OPTIONS["spdk"].as< bool >();
+    gcfg.read_cache = SISL_OPTIONS["read_cache"].as< uint32_t >() != 0 ? true : false;
+    gcfg.write_cache = SISL_OPTIONS["write_cache"].as< uint32_t >() != 0 ? true : false;
+    gcfg.read_iovec = SISL_OPTIONS["read_iovec"].as< uint32_t >() != 0 ? true : false;
+    gcfg.write_iovec = SISL_OPTIONS["write_iovec"].as< uint32_t >() != 0 ? true : false;
+    gcfg.batch_completion = SISL_OPTIONS["batch_completion"].as< bool >();
+    gcfg.vol_create_del = SISL_OPTIONS["vol_create_del"].as< bool >();
+    gcfg.create_del_with_io = SISL_OPTIONS["create_del_with_io"].as< bool >();
+    gcfg.delete_with_io = SISL_OPTIONS["delete_with_io"].as< bool >();
+    gcfg.create_del_ops_cnt = SISL_OPTIONS["create_del_ops_cnt"].as< uint32_t >();
+    gcfg.create_del_ops_interval = SISL_OPTIONS["create_del_ops_interval"].as< uint32_t >();
+    gcfg.flip_name = SISL_OPTIONS["flip_name"].as< std::string >();
+    gcfg.overlapping_allowed = SISL_OPTIONS["overlapping_allowed"].as< bool >();
+    gcfg.emulate_hdd_cnt = SISL_OPTIONS["emulate_hdd_cnt"].as< uint32_t >();
 
-    gcfg.p_vol_files_space = SDS_OPTIONS["p_vol_files_space"].as< uint32_t >();
+    gcfg.p_vol_files_space = SISL_OPTIONS["p_vol_files_space"].as< uint32_t >();
 
-    if (SDS_OPTIONS.count("device_list")) {
-        gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
+    if (SISL_OPTIONS.count("device_list")) {
+        gcfg.dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
         std::string dev_list_str;
         for (const auto& d : gcfg.dev_names) {
             dev_list_str += d;
@@ -2329,10 +2329,10 @@ int main(int argc, char* argv[]) {
         LOGINFO("Taking input dev_list: {}", dev_list_str);
     }
 
-    if (SDS_OPTIONS.count("mod_list")) {
+    if (SISL_OPTIONS.count("mod_list")) {
         // currently we should only have use-case for one module enabled concurrently,
         // but this framework allows user to enable multiple;
-        gcfg.mod_list = SDS_OPTIONS["mod_list"].as< std::vector< std::string > >();
+        gcfg.mod_list = SISL_OPTIONS["mod_list"].as< std::vector< std::string > >();
         for (size_t i{0}; i < gcfg.mod_list.size(); ++i) {
             if (gcfg.mod_list[i] == "meta") {
                 mod_init_funcs.push_back(meta_mod_test_main);
@@ -2352,15 +2352,15 @@ int main(int argc, char* argv[]) {
 
     if ((gcfg.load_type == load_type_t::sequential) || (gcfg.load_type == load_type_t::same)) {
         gcfg.verify_type = verify_type_t::null;
-        if (gcfg.load_type == load_type_t::same) { gcfg.nblks = SDS_OPTIONS["nblks"].as< uint32_t >(); }
+        if (gcfg.load_type == load_type_t::same) { gcfg.nblks = SISL_OPTIONS["nblks"].as< uint32_t >(); }
     }
 
     if (gcfg.overlapping_allowed) { gcfg.verify_type = verify_type_t::header; }
 
-    if (gcfg.enable_crash_handler) { sds_logging::install_crash_handler(); }
+    if (gcfg.enable_crash_handler) { sisl::logging::install_crash_handler(); }
 
     // TODO: Remove this once we found the root cause of the problem.
-    sds_logging::SetModuleLogLevel("transient", spdlog::level::debug);
+    sisl::logging::SetModuleLogLevel("transient", spdlog::level::debug);
 
     /* if --spdk is not set, check env variable if user want to run spdk */
     if (!gcfg.is_spdk && std::getenv(SPDK_ENV_VAR_STRING.c_str())) { gcfg.is_spdk = true; }

@@ -12,7 +12,7 @@
 #include "log_store.hpp"
 
 namespace homestore {
-SDS_LOGGING_DECL(logstore)
+SISL_LOGGING_DECL(logstore)
 
 #define THIS_LOGSTORE_LOG(level, msg, ...) HS_SUBMOD_LOG(level, logstore, , "store", m_fq_name, msg, __VA_ARGS__)
 #define THIS_LOGSTORE_PERIODIC_LOG(level, msg, ...)                                                                    \

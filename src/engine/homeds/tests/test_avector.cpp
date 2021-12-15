@@ -3,13 +3,13 @@
 //
 
 #include <iostream>
-#include <sds_options/options.h>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 #include "homeds/array/sparse_vector.hpp"
 #include <sisl/utility/thread_buffer.hpp>
 
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 RCU_REGISTER_INIT
 
 void func(const homeds::sparse_vector< int >& cvec) {
@@ -20,10 +20,10 @@ void func(const homeds::sparse_vector< int >& cvec) {
     LOGINFO("vec[6] = {} Vector size = {}", cvec[6], cvec.size());
 }
 
-SDS_OPTIONS_ENABLE(logging)
+SISL_OPTIONS_ENABLE(logging)
 int main(int argc, char* argv[]) {
-    SDS_OPTIONS_LOAD(argc, argv, logging)
-    sds_logging::SetLogger("test_avector");
+    SISL_OPTIONS_LOAD(argc, argv, logging)
+    sisl::logging::SetLogger("test_avector");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
     homeds::sparse_vector< int > vec;

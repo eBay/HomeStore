@@ -8,14 +8,14 @@
 #include <string>
 #include <vector>
 
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 
 #include "../log_dev.hpp"
 
 using namespace homestore;
 RCU_REGISTER_INIT
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 std::vector< logdev_key > s_logdev_keys;
 static uint64_t first_offset{~static_cast< uint64_t >(0)};
@@ -83,23 +83,23 @@ static void on_log_found(const logdev_key lkey, const log_buffer buf) {
     return iomgr_obj;
 }
 
-SDS_OPTIONS_ENABLE(logging, test_log_dev)
-SDS_OPTION_GROUP(test_log_dev,
-                 (num_threads, "", "num_threads", "number of threads",
-                  ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-                 (num_devs, "", "num_devs", "number of devices to create",
-                  ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-                 (dev_size_mb, "", "dev_size_mb", "size of each device in MB",
-                  ::cxxopts::value< uint64_t >()->default_value("5120"), "number"));
+SISL_OPTIONS_ENABLE(logging, test_log_dev)
+SISL_OPTION_GROUP(test_log_dev,
+                  (num_threads, "", "num_threads", "number of threads",
+                   ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
+                  (num_devs, "", "num_devs", "number of devices to create",
+                   ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
+                  (dev_size_mb, "", "dev_size_mb", "size of each device in MB",
+                   ::cxxopts::value< uint64_t >()->default_value("5120"), "number"));
 
 int main(int argc, char* argv[]) {
-    SDS_OPTIONS_LOAD(argc, argv, logging, test_log_dev);
-    sds_logging::SetLogger("test_log_dev");
+    SISL_OPTIONS_LOAD(argc, argv, logging, test_log_dev);
+    sisl::logging::SetLogger("test_log_dev");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    auto iomgr_obj{start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                                   SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
-                                   SDS_OPTIONS["num_threads"].as< uint32_t >())};
+    auto iomgr_obj{start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
+                                   SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
+                                   SISL_OPTIONS["num_threads"].as< uint32_t >())};
 
     std::array< std::string, 1024 > s;
     auto ld{LogDev::instance()};

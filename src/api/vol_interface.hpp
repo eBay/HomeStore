@@ -23,7 +23,7 @@
 #include <boost/uuid/uuid_io.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <iomgr/iomgr.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/enum.hpp>
 #include <sisl/utility/obj_life_counter.hpp>
@@ -199,10 +199,10 @@ public:
     std::string to_string() const {
         std::ostringstream oss;
         oss << "min_virtual_page_size=" << min_virtual_page_size << ",app_mem_size=" << app_mem_size
-            << ",number of data devices =" << data_devices.size()  << ",data_open_flags =" << data_open_flags;
-        
+            << ",number of data devices =" << data_devices.size() << ",data_open_flags =" << data_open_flags;
+
         oss << ", start_http=" << start_http;
-           
+
         oss << ",data device names = [";
         for (size_t i{0}; i < data_devices.size(); ++i) {
             oss << data_devices[i].dev_names;

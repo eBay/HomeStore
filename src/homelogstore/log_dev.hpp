@@ -16,7 +16,7 @@
 #include <sisl/fds/stream_tracker.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <fmt/format.h>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 
 #include "engine/device/journal_vdev.hpp"
 #include "engine/common/homestore_config.hpp"

@@ -15,7 +15,7 @@
 #include "engine/common/homestore_config.hpp"
 #include "engine/homeds/memory/mempiece.hpp"
 
-SDS_LOGGING_DECL(cache)
+SISL_LOGGING_DECL(cache)
 
 namespace homestore {
 

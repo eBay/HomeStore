@@ -31,7 +31,7 @@
 #include "eviction.hpp"
 #include "lru_eviction.hpp"
 
-SDS_LOGGING_DECL(cache, cache_vmod_evict, cache_vmod_read, cache_vmod_write)
+SISL_LOGGING_DECL(cache, cache_vmod_evict, cache_vmod_read, cache_vmod_write)
 
 namespace homestore {
 

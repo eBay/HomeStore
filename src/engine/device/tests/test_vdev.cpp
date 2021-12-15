@@ -15,8 +15,8 @@
 #include <gtest/gtest.h>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 
 #include "homeblks/home_blks.hpp"
 #include "../virtual_dev.hpp"
@@ -24,9 +24,9 @@
 using namespace homestore;
 
 RCU_REGISTER_INIT
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-SDS_OPTIONS_ENABLE(logging, test_vdev)
+SISL_OPTIONS_ENABLE(logging, test_vdev)
 
 struct Param {
     uint64_t num_io;
@@ -40,7 +40,7 @@ struct Param {
     uint32_t max_wrt_sz;
     uint32_t truncate_watermark_percentage;
 };
-SDS_LOGGING_DECL(test_vdev)
+SISL_LOGGING_DECL(test_vdev)
 static Param gp;
 
 #if 0
@@ -100,9 +100,9 @@ constexpr uint32_t dma_alignment = 512;
 class VDevIOTest : public ::testing::Test {
 public:
     virtual void SetUp() override {
-        const auto ndevices = SDS_OPTIONS["num_devs"].as< uint32_t >();
-        const auto dev_size = SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-        const auto nthreads = SDS_OPTIONS["num_threads"].as< uint32_t >();
+        const auto ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
+        const auto dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
+        const auto nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
 
         std::vector< dev_info > device_info;
         LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
@@ -143,9 +143,9 @@ class VDevIOTest : public ::testing::Test {
 
 public:
     virtual void SetUp() override {
-        const auto ndevices = SDS_OPTIONS["num_devs"].as< uint32_t >();
-        const auto dev_size = SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-        const auto nthreads = SDS_OPTIONS["num_threads"].as< uint32_t >();
+        const auto ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
+        const auto dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
+        const auto nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
 
         std::vector< dev_info > device_info;
         LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
@@ -427,7 +427,7 @@ private:
 
 TEST_F(VDevIOTest, VDevIOTest) { this->execute(); }
 
-SDS_OPTION_GROUP(
+SISL_OPTION_GROUP(
     test_vdev,
     (truncate_watermark_percentage, "", "truncate_watermark_percentage",
      "percentage of space usage to trigger truncate", ::cxxopts::value< uint32_t >()->default_value("80"), "number"),
@@ -455,23 +455,23 @@ SDS_OPTION_GROUP(
      cxxopts::value< int32_t >()->default_value("5003"), "port"));
 
 int main(int argc, char* argv[]) {
-    SDS_OPTIONS_LOAD(argc, argv, logging, test_vdev);
+    SISL_OPTIONS_LOAD(argc, argv, logging, test_vdev);
     ::testing::InitGoogleTest(&argc, argv);
-    sds_logging::SetLogger("test_vdev");
+    sisl::logging::SetLogger("test_vdev");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    // start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(), SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 *
+    // start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(), SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 *
     // 1024,
-    //                SDS_OPTIONS["num_threads"].as< uint32_t >());
-    gp.num_io = SDS_OPTIONS["num_io"].as< uint64_t >();
-    gp.run_time = SDS_OPTIONS["run_time"].as< uint64_t >();
-    gp.per_read = SDS_OPTIONS["per_read"].as< uint32_t >();
-    gp.per_write = SDS_OPTIONS["per_write"].as< uint32_t >();
-    gp.fixed_wrt_sz_enabled = SDS_OPTIONS["fixed_write_size_enabled"].as< uint32_t >();
-    gp.fixed_wrt_sz = SDS_OPTIONS["fixed_write_size"].as< uint32_t >();
-    gp.min_wrt_sz = SDS_OPTIONS["min_write_size"].as< uint32_t >();
-    gp.max_wrt_sz = SDS_OPTIONS["max_write_size"].as< uint32_t >();
-    gp.truncate_watermark_percentage = SDS_OPTIONS["truncate_watermark_percentage"].as< uint32_t >();
+    //                SISL_OPTIONS["num_threads"].as< uint32_t >());
+    gp.num_io = SISL_OPTIONS["num_io"].as< uint64_t >();
+    gp.run_time = SISL_OPTIONS["run_time"].as< uint64_t >();
+    gp.per_read = SISL_OPTIONS["per_read"].as< uint32_t >();
+    gp.per_write = SISL_OPTIONS["per_write"].as< uint32_t >();
+    gp.fixed_wrt_sz_enabled = SISL_OPTIONS["fixed_write_size_enabled"].as< uint32_t >();
+    gp.fixed_wrt_sz = SISL_OPTIONS["fixed_write_size"].as< uint32_t >();
+    gp.min_wrt_sz = SISL_OPTIONS["min_write_size"].as< uint32_t >();
+    gp.max_wrt_sz = SISL_OPTIONS["max_write_size"].as< uint32_t >();
+    gp.truncate_watermark_percentage = SISL_OPTIONS["truncate_watermark_percentage"].as< uint32_t >();
 
     if (gp.per_read == 0 || gp.per_write == 0 || (gp.per_read + gp.per_write != 100)) {
         gp.per_read = 20;

@@ -20,8 +20,8 @@
 
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 
 #include <gtest/gtest.h>
 
@@ -34,11 +34,11 @@
 using namespace homestore;
 
 RCU_REGISTER_INIT
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-SDS_OPTIONS_ENABLE(logging, test_meta_blk_mgr)
+SISL_OPTIONS_ENABLE(logging, test_meta_blk_mgr)
 
-SDS_LOGGING_DECL(test_meta_blk_mgr)
+SISL_LOGGING_DECL(test_meta_blk_mgr)
 
 struct Param {
     uint64_t num_io;
@@ -583,8 +583,8 @@ TEST_F(VMetaBlkMgrTest, min_drive_size_test) {
 }
 
 TEST_F(VMetaBlkMgrTest, write_to_full_test) {
-    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                    SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
+    start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
+                    SISL_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
     mtype = "Test_Write_to_Full";
     reset_counters();
     m_start_time = Clock::now();
@@ -596,8 +596,8 @@ TEST_F(VMetaBlkMgrTest, write_to_full_test) {
 }
 
 TEST_F(VMetaBlkMgrTest, single_read_test) {
-    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                    SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
+    start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
+                    SISL_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
     mtype = "Test_Read";
     reset_counters();
     m_start_time = Clock::now();
@@ -613,8 +613,8 @@ TEST_F(VMetaBlkMgrTest, single_read_test) {
 // 1. randome write, update, remove;
 // 2. recovery test and verify callback context data matches;
 TEST_F(VMetaBlkMgrTest, random_load_test) {
-    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                    SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
+    start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
+                    SISL_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
     mtype = "Test_Rand_Load";
     reset_counters();
     m_start_time = Clock::now();
@@ -632,7 +632,7 @@ TEST_F(VMetaBlkMgrTest, random_load_test) {
     this->shutdown();
 }
 
-SDS_OPTION_GROUP(
+SISL_OPTION_GROUP(
     test_meta_blk_mgr,
     (num_threads, "", "num_threads", "number of threads", ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
     (num_devs, "", "num_devs", "number of devices to create", ::cxxopts::value< uint32_t >()->default_value("2"),
@@ -662,22 +662,22 @@ SDS_OPTION_GROUP(
 int main(int argc, char* argv[]) {
     ::testing::GTEST_FLAG(filter) = "*random_load_test*";
     ::testing::InitGoogleTest(&argc, argv);
-    SDS_OPTIONS_LOAD(argc, argv, logging, test_meta_blk_mgr);
-    sds_logging::SetLogger("test_meta_blk_mgr");
+    SISL_OPTIONS_LOAD(argc, argv, logging, test_meta_blk_mgr);
+    sisl::logging::SetLogger("test_meta_blk_mgr");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    gp.num_io = SDS_OPTIONS["num_io"].as< uint64_t >();
-    gp.num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
-    gp.run_time = SDS_OPTIONS["run_time"].as< uint64_t >();
-    gp.per_update = SDS_OPTIONS["per_update"].as< uint32_t >();
-    gp.per_write = SDS_OPTIONS["per_write"].as< uint32_t >();
-    gp.fixed_wrt_sz_enabled = SDS_OPTIONS["fixed_write_size_enabled"].as< uint32_t >();
-    gp.fixed_wrt_sz = SDS_OPTIONS["fixed_write_size"].as< uint32_t >();
-    gp.min_wrt_sz = SDS_OPTIONS["min_write_size"].as< uint32_t >();
-    gp.max_wrt_sz = SDS_OPTIONS["max_write_size"].as< uint32_t >();
-    gp.always_do_overflow = SDS_OPTIONS["overflow"].as< uint32_t >();
-    gp.is_spdk = SDS_OPTIONS["spdk"].as< bool >();
-    gp.is_bitmap = SDS_OPTIONS["bitmap"].as< bool >();
+    gp.num_io = SISL_OPTIONS["num_io"].as< uint64_t >();
+    gp.num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
+    gp.run_time = SISL_OPTIONS["run_time"].as< uint64_t >();
+    gp.per_update = SISL_OPTIONS["per_update"].as< uint32_t >();
+    gp.per_write = SISL_OPTIONS["per_write"].as< uint32_t >();
+    gp.fixed_wrt_sz_enabled = SISL_OPTIONS["fixed_write_size_enabled"].as< uint32_t >();
+    gp.fixed_wrt_sz = SISL_OPTIONS["fixed_write_size"].as< uint32_t >();
+    gp.min_wrt_sz = SISL_OPTIONS["min_write_size"].as< uint32_t >();
+    gp.max_wrt_sz = SISL_OPTIONS["max_write_size"].as< uint32_t >();
+    gp.always_do_overflow = SISL_OPTIONS["overflow"].as< uint32_t >();
+    gp.is_spdk = SISL_OPTIONS["spdk"].as< bool >();
+    gp.is_bitmap = SISL_OPTIONS["bitmap"].as< bool >();
 
     if ((gp.per_update == 0) || (gp.per_write == 0) || (gp.per_update + gp.per_write + gp.per_remove != 100)) {
         gp.per_update = 20;

@@ -15,8 +15,8 @@
 #endif
 
 #include <metrics/metrics.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 #include <sisl/utility/obj_life_counter.hpp>
 #include <sisl/utility/thread_buffer.hpp>
 
@@ -57,7 +57,7 @@
 #ifndef DEBUG
 extern bool same_value_gen;
 #endif
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 RCU_REGISTER_INIT
 
@@ -508,7 +508,7 @@ protected:
 
         m_vol_mgr = VolumeManager< IOMgrExecutor >::instance();
 
-        const uint64_t num_vols{SDS_OPTIONS["num_vols"].as< uint64_t >()};
+        const uint64_t num_vols{SISL_OPTIONS["num_vols"].as< uint64_t >()};
         m_vol_mgr->set_max_vols(num_vols);
 
         // start vol manager which creates a bunch of volumes;
@@ -580,7 +580,7 @@ protected:
 
 TEST_F(LogStoreLoadTest, LogStoreTest) { this->execute(); }
 
-SDS_OPTION_GROUP(
+SISL_OPTION_GROUP(
     test_load, (num_io, "", "num_io", "num of io", ::cxxopts::value< uint64_t >()->default_value("1000"), "number"),
     (run_time, "", "run_time", "time to run in seconds", ::cxxopts::value< uint64_t >()->default_value("60"), "number"),
     (num_keys, "", "num_keys", "num of keys", ::cxxopts::value< uint64_t >()->default_value("300"), "number"),
@@ -612,7 +612,7 @@ SDS_OPTION_GROUP(
     (num_vols, "", "num_vols", "number of vols to create", ::cxxopts::value< uint64_t >()->default_value("50"),
      "number"))
 
-SDS_OPTIONS_ENABLE(logging, test_load)
+SISL_OPTIONS_ENABLE(logging, test_load)
 
 // TODO: VolumeTest couldn't be started after MapSSDTest. Seems because of the http server can't be started because of
 // bing to the same port 5001
@@ -620,25 +620,25 @@ int main(int argc, char* argv[]) {
     ::testing::GTEST_FLAG(filter) = "*Map*:*Cache*";
     ::testing::InitGoogleTest(&argc, argv);
 
-    SDS_OPTIONS_LOAD(argc, argv, logging, test_load)
-    sds_logging::SetLogger("test_load");
+    SISL_OPTIONS_LOAD(argc, argv, logging, test_load)
+    sisl::logging::SetLogger("test_load");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    parameters.NIO = SDS_OPTIONS["num_io"].as< uint64_t >();
-    parameters.NK = SDS_OPTIONS["num_keys"].as< uint64_t >();
-    parameters.PC = SDS_OPTIONS["per_create"].as< uint64_t >();
-    parameters.PR = SDS_OPTIONS["per_read"].as< uint64_t >();
-    parameters.PU = SDS_OPTIONS["per_update"].as< uint64_t >();
-    parameters.PD = SDS_OPTIONS["per_delete"].as< uint64_t >();
-    parameters.NRT = SDS_OPTIONS["run_time"].as< uint64_t >();
-    parameters.WST = SDS_OPTIONS["workload_shift_time"].as< uint64_t >();
+    parameters.NIO = SISL_OPTIONS["num_io"].as< uint64_t >();
+    parameters.NK = SISL_OPTIONS["num_keys"].as< uint64_t >();
+    parameters.PC = SISL_OPTIONS["per_create"].as< uint64_t >();
+    parameters.PR = SISL_OPTIONS["per_read"].as< uint64_t >();
+    parameters.PU = SISL_OPTIONS["per_update"].as< uint64_t >();
+    parameters.PD = SISL_OPTIONS["per_delete"].as< uint64_t >();
+    parameters.NRT = SISL_OPTIONS["run_time"].as< uint64_t >();
+    parameters.WST = SISL_OPTIONS["workload_shift_time"].as< uint64_t >();
 
-    parameters.PRU = SDS_OPTIONS["per_range_update"].as< uint64_t >();
-    parameters.PRQ = SDS_OPTIONS["per_range_query"].as< uint64_t >();
-    parameters.PRINT_INTERVAL = SDS_OPTIONS["print_interval"].as< uint64_t >();
-    parameters.WARM_UP_KEYS = SDS_OPTIONS["warm_up_keys"].as< uint64_t >();
-    parameters.NT = SDS_OPTIONS["num_threads"].as< uint8_t >();
-    parameters.enable_write_log = SDS_OPTIONS["enable_write_log"].as< uint8_t >();
+    parameters.PRU = SISL_OPTIONS["per_range_update"].as< uint64_t >();
+    parameters.PRQ = SISL_OPTIONS["per_range_query"].as< uint64_t >();
+    parameters.PRINT_INTERVAL = SISL_OPTIONS["print_interval"].as< uint64_t >();
+    parameters.WARM_UP_KEYS = SISL_OPTIONS["warm_up_keys"].as< uint64_t >();
+    parameters.NT = SISL_OPTIONS["num_threads"].as< uint8_t >();
+    parameters.enable_write_log = SISL_OPTIONS["enable_write_log"].as< uint8_t >();
 
     if (parameters.PC + parameters.PR + parameters.PU + parameters.PD + parameters.PRU + parameters.PRQ != 100) {
         LOGERROR("percent should total to 100");
@@ -656,8 +656,8 @@ int main(int argc, char* argv[]) {
     /* disable the watch dog timer for this testing */
     HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.generic.cp_watchdog_timer_sec = 50000; });
     HS_SETTINGS_FACTORY().save();
-    if (SDS_OPTIONS.count("input-files")) {
-        for (auto const& path : SDS_OPTIONS["input-files"].as< std::vector< std::string > >()) {
+    if (SISL_OPTIONS.count("input-files")) {
+        for (auto const& path : SISL_OPTIONS["input-files"].as< std::vector< std::string > >()) {
             parameters.file_names.push_back(path);
         }
         /* We don't support more then one file */

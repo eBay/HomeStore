@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/utility/obj_life_counter.hpp>
 
 #include "engine/blkalloc/blk.h"
@@ -20,7 +20,7 @@
 #include "engine/index/indx_mgr.hpp"
 #include "homeblks/home_blks.hpp"
 
-SDS_LOGGING_DECL(volume)
+SISL_LOGGING_DECL(volume)
 
 using namespace homeds;
 using namespace homeds::btree;

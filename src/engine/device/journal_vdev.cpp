@@ -16,7 +16,7 @@
 
 #include <sisl/fds/buffer.hpp>
 #include <sisl/metrics/metrics.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/utility/atomic_counter.hpp>
 
 #include "api/meta_interface.hpp"

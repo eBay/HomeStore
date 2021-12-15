@@ -8,12 +8,12 @@
 #include <vector>
 
 #include <benchmark/benchmark.h>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 
 #include "../log_dev.hpp"
 
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 RCU_REGISTER_INIT
 
 static constexpr size_t ITERATIONS{100000};
@@ -96,29 +96,29 @@ static void on_log_found(const logdev_key lkey, const log_buffer buf) {
 }
 
 static void setup() {
-    auto iomgr_obj = start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                                     SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
-                                     SDS_OPTIONS["num_threads"].as< uint32_t >());
+    auto iomgr_obj = start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
+                                     SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
+                                     SISL_OPTIONS["num_threads"].as< uint32_t >());
 
     LogDev::instance()->register_append_cb(on_append_completion);
     LogDev::instance()->register_logfound_cb(on_log_found);
 }
 
-SDS_OPTIONS_ENABLE(logging, log_dev_benchmark)
-SDS_OPTION_GROUP(log_dev_benchmark,
-                 (num_threads, "", "num_threads", "number of threads",
-                  ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-                 (num_devs, "", "num_devs", "number of devices to create",
-                  ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-                 (dev_size_mb, "", "dev_size_mb", "size of each device in MB",
-                  ::cxxopts::value< uint64_t >()->default_value("5120"), "number"));
+SISL_OPTIONS_ENABLE(logging, log_dev_benchmark)
+SISL_OPTION_GROUP(log_dev_benchmark,
+                  (num_threads, "", "num_threads", "number of threads",
+                   ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
+                  (num_devs, "", "num_devs", "number of devices to create",
+                   ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
+                  (dev_size_mb, "", "dev_size_mb", "size of each device in MB",
+                   ::cxxopts::value< uint64_t >()->default_value("5120"), "number"));
 
 BENCHMARK(test_append)->Iterations(ITERATIONS)->Threads(THREADS);
 
-SDS_OPTIONS_ENABLE(logging)
+SISL_OPTIONS_ENABLE(logging)
 int main(int argc, char** argv) {
-    SDS_OPTIONS_LOAD(argc, argv, logging, log_dev_benchmark)
-    sds_logging::SetLogger("log_dev_benchmark");
+    SISL_OPTIONS_LOAD(argc, argv, logging, log_dev_benchmark)
+    sisl::logging::SetLogger("log_dev_benchmark");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
     setup();

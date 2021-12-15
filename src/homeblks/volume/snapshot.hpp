@@ -3,7 +3,7 @@
  */
 
 #pragma once
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 
 namespace homestore {
 

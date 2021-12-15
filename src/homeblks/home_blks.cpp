@@ -7,7 +7,7 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <nlohmann/json.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/version.hpp>
 
 #include "engine/common/homestore_status_mgr.hpp"
@@ -20,9 +20,9 @@
 
 #include "home_blks.hpp"
 
-SDS_OPTION_GROUP(home_blks,
-                 (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-                  cxxopts::value< int32_t >()->default_value("5000"), "port"))
+SISL_OPTION_GROUP(home_blks,
+                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
+                   cxxopts::value< int32_t >()->default_value("5000"), "port"))
 using namespace homestore;
 
 #ifndef DEBUG

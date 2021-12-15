@@ -11,7 +11,7 @@
 #include <thread>
 
 #include <fmt/format.h>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/utility/thread_factory.hpp>
 #include <sisl/utility/thread_buffer.hpp>
 
@@ -20,7 +20,7 @@
 
 #include "varsize_blk_allocator.h"
 
-SDS_LOGGING_DECL(blkalloc)
+SISL_LOGGING_DECL(blkalloc)
 
 namespace homestore {
 

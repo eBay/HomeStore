@@ -11,9 +11,9 @@
 #include "physical_node.hpp"
 #include <cassert>
 #include "boost/range/irange.hpp"
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 
-SDS_LOGGING_DECL(btree_generics)
+SISL_LOGGING_DECL(btree_generics)
 
 namespace homeds {
 namespace btree {

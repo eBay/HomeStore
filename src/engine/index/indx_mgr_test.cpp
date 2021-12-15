@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <sys/timeb.h>
 #include <sisl/fds/buffer.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 #include "engine/common/mod_test_iface.hpp"
 #include "engine/common/homestore_flip.hpp"
 #include "engine/common/homestore_config.hpp"
@@ -167,7 +167,7 @@ indx_test test;
 #endif
 
 /************************* CLI options ***************************/
-SDS_OPTION_GROUP(
+SISL_OPTION_GROUP(
     test_indx_mgr,
     (indx_create_first_cp_abort, "", "indx_create_first_cp_abort", "indx_create_first_cp_abort",
      ::cxxopts::value< bool >()->default_value("false"), "true or false"),
@@ -200,21 +200,21 @@ SDS_OPTION_GROUP(
      ::cxxopts::value< bool >()->default_value("false"), "true or false"))
 
 void indx_mgr_test_main() {
-    indx_cfg.indx_create_first_cp_abort = SDS_OPTIONS["indx_create_first_cp_abort"].as< bool >();
-    indx_cfg.indx_del_free_blks_completed = SDS_OPTIONS["indx_del_free_blks_completed"].as< bool >();
-    indx_cfg.indx_del_partial_free_indx_blks = SDS_OPTIONS["indx_del_partial_free_indx_blks"].as< bool >();
+    indx_cfg.indx_create_first_cp_abort = SISL_OPTIONS["indx_create_first_cp_abort"].as< bool >();
+    indx_cfg.indx_del_free_blks_completed = SISL_OPTIONS["indx_del_free_blks_completed"].as< bool >();
+    indx_cfg.indx_del_partial_free_indx_blks = SISL_OPTIONS["indx_del_partial_free_indx_blks"].as< bool >();
     indx_cfg.indx_del_partial_free_data_blks_after_meta_write =
-        SDS_OPTIONS["indx_del_partial_free_data_blks_after_meta_write"].as< bool >();
+        SISL_OPTIONS["indx_del_partial_free_data_blks_after_meta_write"].as< bool >();
     indx_cfg.indx_del_partial_free_data_blks_before_meta_write =
-        SDS_OPTIONS["indx_del_partial_free_data_blks_before_meta_write"].as< bool >();
-    indx_cfg.free_blk_cnt = SDS_OPTIONS["free_blk_cnt"].as< uint32_t >();
-    indx_cfg.cp_bitmap_abort = SDS_OPTIONS["cp_bitmap_abort"].as< bool >();
-    indx_cfg.cp_wb_flush_abort = SDS_OPTIONS["cp_wb_flush_abort"].as< bool >();
-    indx_cfg.cp_logstore_truncate_abort = SDS_OPTIONS["cp_logstore_truncate_abort"].as< bool >();
-    indx_cfg.unmap_post_sb_write_abort = SDS_OPTIONS["unmap_post_sb_write_abort"].as< bool >();
-    indx_cfg.unmap_pre_sb_remove_abort = SDS_OPTIONS["unmap_pre_sb_remove_abort"].as< bool >();
-    indx_cfg.unmap_post_free_blks_abort_before_cp = SDS_OPTIONS["unmap_post_free_blks_abort_before_cp"].as< bool >();
-    indx_cfg.unmap_pre_second_cp_abort = SDS_OPTIONS["unmap_pre_second_cp_abort"].as< bool >();
+        SISL_OPTIONS["indx_del_partial_free_data_blks_before_meta_write"].as< bool >();
+    indx_cfg.free_blk_cnt = SISL_OPTIONS["free_blk_cnt"].as< uint32_t >();
+    indx_cfg.cp_bitmap_abort = SISL_OPTIONS["cp_bitmap_abort"].as< bool >();
+    indx_cfg.cp_wb_flush_abort = SISL_OPTIONS["cp_wb_flush_abort"].as< bool >();
+    indx_cfg.cp_logstore_truncate_abort = SISL_OPTIONS["cp_logstore_truncate_abort"].as< bool >();
+    indx_cfg.unmap_post_sb_write_abort = SISL_OPTIONS["unmap_post_sb_write_abort"].as< bool >();
+    indx_cfg.unmap_pre_sb_remove_abort = SISL_OPTIONS["unmap_pre_sb_remove_abort"].as< bool >();
+    indx_cfg.unmap_post_free_blks_abort_before_cp = SISL_OPTIONS["unmap_post_free_blks_abort_before_cp"].as< bool >();
+    indx_cfg.unmap_pre_second_cp_abort = SISL_OPTIONS["unmap_pre_second_cp_abort"].as< bool >();
     if (indx_cfg.free_blk_cnt) {
         HS_SETTINGS_FACTORY().modifiable_settings(
             [](auto& s) { s.resource_limits.free_blk_cnt = indx_cfg.free_blk_cnt; });

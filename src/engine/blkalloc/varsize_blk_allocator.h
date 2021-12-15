@@ -18,7 +18,7 @@
 
 #include <flip/flip.hpp>
 #include <sisl/metrics/metrics.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 
 #include "blk.h"
 #include "blk_allocator.h"

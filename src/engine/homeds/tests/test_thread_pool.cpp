@@ -10,20 +10,20 @@
 #include <vector>
 
 #include <flip/flip.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 #include <sisl/utility/thread_buffer.hpp>
 
 #include <gtest/gtest.h>
 
 #include "homeds/thread/threadpool/thread_pool.h"
 
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 using homestore::submit_job;
 using homestore::ThreadPool;
 
-SDS_OPTIONS_ENABLE(logging)
+SISL_OPTIONS_ENABLE(logging)
 
 TEST(THREAD_POOL, TEST1) {
     const std::uint32_t num_seconds_expected_to_run = 3;
@@ -47,9 +47,9 @@ TEST(THREAD_POOL, TEST1) {
 }
 
 int main(int argc, char* argv[]) {
-    SDS_OPTIONS_LOAD(argc, argv, logging)
+    SISL_OPTIONS_LOAD(argc, argv, logging)
     ::testing::InitGoogleTest(&argc, argv);
-    sds_logging::SetLogger("test_threadpool");
+    sisl::logging::SetLogger("test_threadpool");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
     return RUN_ALL_TESTS();

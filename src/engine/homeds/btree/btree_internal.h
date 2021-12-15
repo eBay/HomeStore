@@ -31,7 +31,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <sisl/fds/freelist_allocator.hpp>
 #include <sisl/metrics/metrics.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/enum.hpp>
 #include <sisl/utility/obj_life_counter.hpp>

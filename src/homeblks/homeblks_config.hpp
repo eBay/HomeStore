@@ -1,6 +1,6 @@
 #pragma once
 #include <sisl/settings/settings.hpp>
-#include <sds_options/options.h>
+#include <sisl/options/options.h>
 #include "homeblks/generated/homeblks_config_generated.h"
 
 SETTINGS_INIT(homeblkscfg::HomeBlksSettings, homeblks_config);

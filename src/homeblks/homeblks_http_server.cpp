@@ -26,7 +26,7 @@ void HomeBlksHttpServer::start() {
     sisl::HttpServerConfig cfg;
     cfg.is_tls_enabled = false;
     cfg.bind_address = "0.0.0.0";
-    cfg.server_port = SDS_OPTIONS["hb_stats_port"].as< int32_t >();
+    cfg.server_port = SISL_OPTIONS["hb_stats_port"].as< int32_t >();
     cfg.read_write_timeout_secs = 10;
 
     m_http_server = std::unique_ptr< sisl::HttpServer >(new sisl::HttpServer(
@@ -127,12 +127,12 @@ void HomeBlksHttpServer::set_log_level(sisl::HttpCallData cd) {
 
     std::string resp = "";
     if (logmodule == nullptr) {
-        sds_logging::SetAllModuleLogLevel(spdlog::level::from_str(new_log_level));
-        resp = sds_logging::GetAllModuleLogLevel().dump(2);
+        sisl::logging::SetAllModuleLogLevel(spdlog::level::from_str(new_log_level));
+        resp = sisl::logging::GetAllModuleLogLevel().dump(2);
     } else {
-        sds_logging::SetModuleLogLevel(logmodule, spdlog::level::from_str(new_log_level));
+        sisl::logging::SetModuleLogLevel(logmodule, spdlog::level::from_str(new_log_level));
         resp = std::string("logmodule ") + logmodule + " level set to " +
-            spdlog::level::to_string_view(sds_logging::GetModuleLogLevel(logmodule)).data();
+            spdlog::level::to_string_view(sisl::logging::GetModuleLogLevel(logmodule)).data();
     }
 
     pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
@@ -148,10 +148,10 @@ void HomeBlksHttpServer::get_log_level(sisl::HttpCallData cd) {
 
     std::string resp = "";
     if (logmodule == nullptr) {
-        resp = sds_logging::GetAllModuleLogLevel().dump(2);
+        resp = sisl::logging::GetAllModuleLogLevel().dump(2);
     } else {
         resp = std::string("logmodule ") + logmodule +
-            " level = " + spdlog::level::to_string_view(sds_logging::GetModuleLogLevel(logmodule)).data();
+            " level = " + spdlog::level::to_string_view(sisl::logging::GetModuleLogLevel(logmodule)).data();
     }
     pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
 }
@@ -162,7 +162,7 @@ void HomeBlksHttpServer::dump_stack_trace(sisl::HttpCallData cd) {
         return;
     }
 
-    sds_logging::log_stack_trace(true);
+    sisl::logging::log_stack_trace(true);
     pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, "Look for stack trace in the log file");
 }
 

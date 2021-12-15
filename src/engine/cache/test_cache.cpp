@@ -12,14 +12,14 @@
 #include <vector>
 
 #include <boost/intrusive_ptr.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 
 #include <gtest/gtest.h>
 
 #include "cache.h"
 
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 RCU_REGISTER_INIT
 
 struct blk_id {
@@ -153,13 +153,13 @@ TEST_F(CacheTest, InsertGet) {
     }
 }
 
-SDS_OPTIONS_ENABLE(logging)
+SISL_OPTIONS_ENABLE(logging)
 
 int main(int argc, char* argv[]) {
-    SDS_OPTIONS_LOAD(argc, argv, logging)
+    SISL_OPTIONS_LOAD(argc, argv, logging)
     ::testing::InitGoogleTest(&argc, argv);
-    sds_logging::SetLogger("test_cache");
-    sds_logging::install_crash_handler();
+    sisl::logging::SetLogger("test_cache");
+    sisl::logging::install_crash_handler();
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
     const int result{RUN_ALL_TESTS()};
     return result;

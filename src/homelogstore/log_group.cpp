@@ -4,7 +4,7 @@
 #include "log_store.hpp"
 
 namespace homestore {
-SDS_LOGGING_DECL(logstore)
+SISL_LOGGING_DECL(logstore)
 
 LogGroup::LogGroup() = default;
 void LogGroup::start(const uint64_t flush_multiple_size, const uint32_t align_size) {

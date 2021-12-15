@@ -25,8 +25,8 @@
 #include <folly/Synchronized.h>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 
 #include "api/vol_interface.hpp"
 #include "test_common/homestore_test_common.hpp"
@@ -37,7 +37,7 @@
 
 using namespace homestore;
 RCU_REGISTER_INIT
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 struct test_log_data {
     test_log_data() = default;
@@ -407,7 +407,7 @@ public:
             device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
         }
 
-        bool is_spdk{SDS_OPTIONS["spdk"].as< bool >()};
+        bool is_spdk{SISL_OPTIONS["spdk"].as< bool >()};
         /* if --spdk is not set, check env variable if user want to run spdk */
         if (!is_spdk && std::getenv(SPDK_ENV_VAR_STRING.c_str())) { is_spdk = true; }
         if (is_spdk) { nthreads = 2; }
@@ -857,8 +857,8 @@ protected:
 };
 
 TEST_F(LogStoreTest, BurstRandInsertThenTruncate) {
-    const auto num_records{SDS_OPTIONS["num_records"].as< uint32_t >()};
-    const auto iterations{SDS_OPTIONS["iterations"].as< uint32_t >()};
+    const auto num_records{SISL_OPTIONS["num_records"].as< uint32_t >()};
+    const auto iterations{SISL_OPTIONS["iterations"].as< uint32_t >()};
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
@@ -893,8 +893,8 @@ TEST_F(LogStoreTest, BurstRandInsertThenTruncate) {
 }
 
 TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
-    const auto num_records{SDS_OPTIONS["num_records"].as< uint32_t >()};
-    const auto iterations{SDS_OPTIONS["iterations"].as< uint32_t >()};
+    const auto num_records{SISL_OPTIONS["num_records"].as< uint32_t >()};
+    const auto iterations{SISL_OPTIONS["iterations"].as< uint32_t >()};
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
@@ -931,8 +931,8 @@ TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
 }
 
 TEST_F(LogStoreTest, RandInsertsWithHoles) {
-    const auto num_records{SDS_OPTIONS["num_records"].as< uint32_t >()};
-    const auto iterations{SDS_OPTIONS["iterations"].as< uint32_t >()};
+    const auto num_records{SISL_OPTIONS["num_records"].as< uint32_t >()};
+    const auto iterations{SISL_OPTIONS["iterations"].as< uint32_t >()};
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
@@ -960,8 +960,8 @@ TEST_F(LogStoreTest, RandInsertsWithHoles) {
 }
 
 TEST_F(LogStoreTest, VarRateInsertThenTruncate) {
-    const auto nrecords{SDS_OPTIONS["num_records"].as< uint32_t >()};
-    const auto iterations{SDS_OPTIONS["iterations"].as< uint32_t >()};
+    const auto nrecords{SISL_OPTIONS["num_records"].as< uint32_t >()};
+    const auto iterations{SISL_OPTIONS["iterations"].as< uint32_t >()};
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
@@ -1024,13 +1024,13 @@ TEST_F(LogStoreTest, VarRateInsertThenTruncate) {
 }
 
 TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
-    const auto num_devs{SDS_OPTIONS["num_devs"].as< uint32_t >()}; // num devices
-    const auto dev_size_bytes{SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024};
-    const auto num_records{SDS_OPTIONS["num_records"].as< uint32_t >()};
-    const auto num_threads{SDS_OPTIONS["num_threads"].as< uint32_t >()};
-    const auto num_logstores{SDS_OPTIONS["num_logstores"].as< uint32_t >()};
+    const auto num_devs{SISL_OPTIONS["num_devs"].as< uint32_t >()}; // num devices
+    const auto dev_size_bytes{SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024};
+    const auto num_records{SISL_OPTIONS["num_records"].as< uint32_t >()};
+    const auto num_threads{SISL_OPTIONS["num_threads"].as< uint32_t >()};
+    const auto num_logstores{SISL_OPTIONS["num_logstores"].as< uint32_t >()};
     // somewhere between 4-15 iterations depending on if run with other tests or not this will fail
-    const auto iterations = SDS_OPTIONS["iterations"].as< uint32_t >();
+    const auto iterations = SISL_OPTIONS["iterations"].as< uint32_t >();
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
@@ -1082,7 +1082,7 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
 }
 
 TEST_F(LogStoreTest, DeleteMultipleLogStores) {
-    const auto nrecords{(SDS_OPTIONS["num_records"].as< uint32_t >() * 5) / 100};
+    const auto nrecords{(SISL_OPTIONS["num_records"].as< uint32_t >() * 5) / 100};
 
     LOGINFO("Step 1: Reinit the {} to start sequential write test", nrecords);
     this->init(nrecords);
@@ -1119,7 +1119,7 @@ TEST_F(LogStoreTest, DeleteMultipleLogStores) {
 }
 
 TEST_F(LogStoreTest, WriteSyncThenRead) {
-    const auto iterations{SDS_OPTIONS["iterations"].as< uint32_t >()};
+    const auto iterations{SISL_OPTIONS["iterations"].as< uint32_t >()};
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
@@ -1157,31 +1157,31 @@ TEST_F(LogStoreTest, WriteSyncThenRead) {
     }
 }
 
-SDS_OPTIONS_ENABLE(logging, test_log_store)
-SDS_OPTION_GROUP(test_log_store,
-                 (num_threads, "", "num_threads", "number of threads",
-                  ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-                 (num_devs, "", "num_devs", "number of devices to create",
-                  ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-                 (dev_size_mb, "", "dev_size_mb", "size of each device in MB",
-                  ::cxxopts::value< uint64_t >()->default_value("10240"), "number"),
-                 (dev_names, "", "dev_names", "Device List instead of default created",
-                  ::cxxopts::value< std::string >(), "/dev/nvme5n1,/dev/nvme5n2"),
-                 (num_logstores, "", "num_logstores", "number of log stores",
-                  ::cxxopts::value< uint32_t >()->default_value("4"), "number"),
-                 (num_records, "", "num_records", "number of record to test",
-                  ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
-                 (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-                  cxxopts::value< int32_t >()->default_value("5002"), "port"),
-                 (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
-                 (iterations, "", "iterations", "Iterations", ::cxxopts::value< uint32_t >()->default_value("1"),
-                  "the number of iterations to run each test"));
+SISL_OPTIONS_ENABLE(logging, test_log_store)
+SISL_OPTION_GROUP(test_log_store,
+                  (num_threads, "", "num_threads", "number of threads",
+                   ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
+                  (num_devs, "", "num_devs", "number of devices to create",
+                   ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
+                  (dev_size_mb, "", "dev_size_mb", "size of each device in MB",
+                   ::cxxopts::value< uint64_t >()->default_value("10240"), "number"),
+                  (dev_names, "", "dev_names", "Device List instead of default created",
+                   ::cxxopts::value< std::string >(), "/dev/nvme5n1,/dev/nvme5n2"),
+                  (num_logstores, "", "num_logstores", "number of log stores",
+                   ::cxxopts::value< uint32_t >()->default_value("4"), "number"),
+                  (num_records, "", "num_records", "number of record to test",
+                   ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
+                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
+                   cxxopts::value< int32_t >()->default_value("5002"), "port"),
+                  (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+                  (iterations, "", "iterations", "Iterations", ::cxxopts::value< uint32_t >()->default_value("1"),
+                   "the number of iterations to run each test"));
 
 #if 0
 void parse() {
-    if (SDS_OPTIONS.count("log_mods")) {
+    if (SISL_OPTIONS.count("log_mods")) {
         std::regex re("[\\s,]+");
-        auto s = SDS_OPTIONS["log_mods"].as< std::string >();
+        auto s = SISL_OPTIONS["log_mods"].as< std::string >();
         std::sregex_token_iterator it(s.begin(), s.end(), re, -1);
         std::sregex_token_iterator reg_end;
         for (; it != reg_end; ++it) {
@@ -1209,20 +1209,20 @@ void parse() {
 int main(int argc, char* argv[]) {
     int parsed_argc{argc};
     ::testing::InitGoogleTest(&parsed_argc, argv);
-    SDS_OPTIONS_LOAD(parsed_argc, argv, logging, test_log_store);
-    sds_logging::SetLogger("test_log_store");
+    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_log_store);
+    sisl::logging::SetLogger("test_log_store");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
 
-    auto n_log_stores{SDS_OPTIONS["num_logstores"].as< uint32_t >()};
+    auto n_log_stores{SISL_OPTIONS["num_logstores"].as< uint32_t >()};
     if (n_log_stores < 4u) {
         LOGINFO("Log store test needs minimum 4 log stores for testing, setting them to 4");
         n_log_stores = 4u;
     }
 
-    SampleDB::instance().start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                                         SDS_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
-                                         SDS_OPTIONS["num_threads"].as< uint32_t >(), n_log_stores);
+    SampleDB::instance().start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
+                                         SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
+                                         SISL_OPTIONS["num_threads"].as< uint32_t >(), n_log_stores);
     const int ret{RUN_ALL_TESTS()};
-    SampleDB::instance().shutdown(SDS_OPTIONS["num_devs"].as< uint32_t >());
+    SampleDB::instance().shutdown(SISL_OPTIONS["num_devs"].as< uint32_t >());
     return ret;
 }

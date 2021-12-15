@@ -18,7 +18,7 @@
 #include "engine/homestore_base.hpp"
 #include "meta_sb.hpp"
 
-SDS_LOGGING_DECL(metablk)
+SISL_LOGGING_DECL(metablk)
 
 namespace homestore {
 

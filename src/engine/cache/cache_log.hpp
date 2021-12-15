@@ -1,9 +1,9 @@
 
 #pragma once
 #include <sisl/metrics/metrics.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 
-SDS_LOGGING_DECL(cache, cache_vmod_evict, cache_vmod_read, cache_vmod_write)
+SISL_LOGGING_DECL(cache, cache_vmod_evict, cache_vmod_read, cache_vmod_write)
 
 namespace homestore {
 
@@ -17,7 +17,7 @@ namespace homestore {
     "\nMetrics = {}\n"                                                                                                 \
     "{}"                                                                                                               \
     "\n**********************************************************\n",                                                  \
-        asserttype##_METRICS_DUMP_MSG, sds_logging::format_log_msg(__VA_ARGS__)
+        asserttype##_METRICS_DUMP_MSG, sisl::logging::format_log_msg(__VA_ARGS__)
 
 #define CACHE_ASSERT(asserttype, cond, fmt, ...)                                                                       \
     asserttype##_ASSERT(cond, _CACHE_ASSERT_MSG(asserttype, fmt, ##__VA_ARGS__))

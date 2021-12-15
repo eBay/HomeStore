@@ -13,7 +13,7 @@
 #include "log_store.hpp"
 
 namespace homestore {
-SDS_LOGGING_DECL(logstore)
+SISL_LOGGING_DECL(logstore)
 
 LogStoreFamily::LogStoreFamily(const logstore_family_id_t f_id) :
         m_family_id{f_id},

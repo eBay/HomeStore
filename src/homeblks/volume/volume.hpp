@@ -17,7 +17,7 @@
 #include <sisl/fds/obj_allocator.hpp>
 #include <sisl/fds/vector_pool.hpp>
 #include <sisl/metrics/metrics.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <spdlog/fmt/fmt.h>
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/enum.hpp>
@@ -337,7 +337,7 @@ private:
     template < typename... Args >
     void cmp_assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str,
                               const Args&... args) {
-        sds_logging::default_cmp_assert_formatter(buf, msg, args...);
+        sisl::logging::default_cmp_assert_formatter(buf, msg, args...);
         assert_formatter(buf, msg, req_str, args...);
     }
 

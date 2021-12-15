@@ -15,7 +15,7 @@
 #include <vector>
 
 #include <sisl/metrics/metrics.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/utility/obj_life_counter.hpp>
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/enum.hpp>

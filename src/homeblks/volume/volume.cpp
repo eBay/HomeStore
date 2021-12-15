@@ -20,8 +20,8 @@
 
 using namespace homestore;
 
-SDS_LOGGING_DECL(volume)
-SDS_LOGGING_DECL(vol_io_wd)
+SISL_LOGGING_DECL(volume)
+SISL_LOGGING_DECL(vol_io_wd)
 
 sisl::atomic_counter< uint64_t > Volume::home_blks_ref_cnt{0};
 
