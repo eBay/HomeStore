@@ -1145,6 +1145,7 @@ void IndxMgr::unmap_indx_async(const indx_req_ptr& ireq) {
 void IndxMgr::do_remaining_unmap(void* unmap_meta_blk_cntx, const sisl::byte_array& key, const seq_id_t seqid,
                                  const std::shared_ptr< homeds::btree::BtreeQueryCursor >& btree_cur) {
     /* persist superblock */
+    COUNTER_INCREMENT(m_metrics, indx_unmap_async_count, 1);
     write_cp_unmap_sb(unmap_meta_blk_cntx, key->size, seqid, *(btree_cur.get()), key->bytes);
 #ifdef _PRERELEASE
     if (homestore_flip->test_flip("unmap_post_sb_write_abort")) {

@@ -474,6 +474,7 @@ std::error_condition Volume::unmap(const vol_interface_req_ptr& iface_req) {
     auto vreq = volume_req::make(iface_req);
     THIS_VOL_LOG(TRACE, volume, vreq, "unmap: lba={}, nlbas={}", vreq->lba(), vreq->nlbas());
 
+    COUNTER_INCREMENT(m_metrics, volume_unmap_count, 1);
     /* Sanity checks */
     home_blks_ref_cnt.increment();
     m_vol_ref_cnt.increment();
@@ -584,12 +585,16 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
             HISTOGRAM_OBSERVE(m_metrics, volume_read_size_distribution, size);
             HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_read, vreq->vc_req_cnt);
             HISTOGRAM_OBSERVE(m_metrics, volume_read_latency, latency_us);
-        } else {
+        } else if (vreq->is_write()) {
             COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
             COUNTER_INCREMENT(m_metrics, volume_write_size_total, size);
             HISTOGRAM_OBSERVE(m_metrics, volume_write_size_distribution, size);
             HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_write, vreq->vc_req_cnt);
             HISTOGRAM_OBSERVE(m_metrics, volume_write_latency, latency_us);
+        } else if (vreq->is_unmap()) {
+            HISTOGRAM_OBSERVE(m_metrics, volume_unmap_latency, latency_us);
+            COUNTER_INCREMENT(m_metrics, volume_unmap_size_total, size);
+            HISTOGRAM_OBSERVE(m_metrics, volume_unmap_size_distribution, size);
         }
 
         if (latency_us > 5000000) { THIS_VOL_LOG(WARN, , vreq, "vol req took time {} us", latency_us); }

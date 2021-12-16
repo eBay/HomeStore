@@ -1047,6 +1047,8 @@ btree_status_t mapping::update_oob_unmap_active_indx_tbl(blkid_list_ptr free_lis
     cntx.force = force;
 
     next_start_lba = (cur.m_last_key) ? get_next_start_key_from_cursor(cur) : j_key->lba;
+    const uint32_t max_iterations{static_cast< uint32_t >(HS_DYNAMIC_CONFIG(generic.max_unmap_iterations))};
+    uint32_t num_iterations = 0;
     nlbas_rem = get_nlbas(end_lba, next_start_lba);
     while (nlbas_rem > 0) {
         const lba_count_t nlbas_cur = (nlbas_rem > BlkId::max_blks_in_op()) ? BlkId::max_blks_in_op() : nlbas_rem;
@@ -1061,6 +1063,11 @@ btree_status_t mapping::update_oob_unmap_active_indx_tbl(blkid_list_ptr free_lis
         }
         next_start_lba = (cur.m_last_key) ? get_next_start_key_from_cursor(cur) : j_key->lba;
         nlbas_rem -= nlbas_cur;
+        ++num_iterations;
+        if (num_iterations == max_iterations) {
+            ret = btree_status_t::resource_full;
+            break;
+        }
     }
     size = cntx.free_blk_size;
     return ret;

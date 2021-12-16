@@ -134,6 +134,7 @@ public:
             sisl::MetricsGroupWrapper("Volume", vol_name), m_volume(vol) {
         REGISTER_COUNTER(volume_read_count, "Total Volume read operations", "volume_op_count", {"op", "read"});
         REGISTER_COUNTER(volume_write_count, "Total Volume write operations", "volume_op_count", {"op", "write"});
+        REGISTER_COUNTER(volume_unmap_count, "Total Volume unmap operations", "volume_op_count", {"op", "unmap"});
         REGISTER_COUNTER(volume_outstanding_data_read_count, "Total Volume data outstanding read cnt",
                          sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(volume_outstanding_data_write_count, "Total Volume data outstanding write cnt",
@@ -149,6 +150,8 @@ public:
         REGISTER_COUNTER(volume_write_size_total, "Total Volume data size written", "volume_data_size",
                          {"op", "write"});
         REGISTER_COUNTER(volume_read_size_total, "Total Volume data size read", "volume_data_size", {"op", "read"});
+        REGISTER_COUNTER(volume_unmap_size_total, "Total Volume unmap size written", "volume_unmap_size",
+                         {"op", "unmap"});
 
         REGISTER_GAUGE(volume_data_used_size, "Total Volume data used size");
         REGISTER_GAUGE(volume_index_used_size, "Total Volume index used size");
@@ -156,6 +159,7 @@ public:
 
         REGISTER_HISTOGRAM(volume_read_latency, "Volume overall read latency", "volume_op_latency", {"op", "read"});
         REGISTER_HISTOGRAM(volume_write_latency, "Volume overall write latency", "volume_op_latency", {"op", "write"});
+        REGISTER_HISTOGRAM(volume_unmap_latency, "Volume overall unmap latency", "volume_op_latency", {"op", "unmap"});
         REGISTER_HISTOGRAM(volume_data_read_latency, "Volume data blocks read latency", "volume_data_op_latency",
                            {"op", "read"});
         REGISTER_HISTOGRAM(volume_data_write_latency, "Volume data blocks write latency", "volume_data_op_latency",
@@ -170,6 +174,8 @@ public:
         REGISTER_HISTOGRAM(volume_pieces_per_read, "Number of individual pieces per write",
                            HistogramBucketsType(LinearUpto64Buckets));
         REGISTER_HISTOGRAM(volume_write_size_distribution, "Distribution of volume write sizes",
+                           HistogramBucketsType(ExponentialOfTwoBuckets));
+        REGISTER_HISTOGRAM(volume_unmap_size_distribution, "Distribution of volume unmap sizes",
                            HistogramBucketsType(ExponentialOfTwoBuckets));
         REGISTER_HISTOGRAM(volume_read_size_distribution, "Distribution of volume read sizes",
                            HistogramBucketsType(ExponentialOfTwoBuckets));
