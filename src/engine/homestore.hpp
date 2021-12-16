@@ -116,7 +116,6 @@ public:
                 HS_DYNAMIC_CONFIG(version), hs_config.to_json().dump(4),
                 HB_DYNAMIC_CONFIG(general_config->boot_safe_mode));
 
-
 #ifndef NDEBUG
         hs_config.validate();
 #endif
@@ -204,7 +203,12 @@ protected:
 
     void init_done(bool first_time_boot) {
         auto cnt = m_format_cnt.fetch_sub(1);
-        if (cnt != 1) { return; }
+        if (cnt != 1) {
+            LOGINFO("Waiting for other blkstores format to be completed: cnt: {}. ", cnt);
+            return;
+        }
+
+        LOGINFO("Format of blkstores completed successfully. ");
         m_dev_mgr->init_done();
         MetaBlkMgrSI()->start(m_meta_blk_store.get(), m_meta_sb_blob, first_time_boot);
         ResourceMgr::set_total_cap(m_dev_mgr->get_total_cap());
@@ -318,7 +322,10 @@ protected:
                 sizeof(blkstore_blob), HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "data_logdev", false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::data_logdev(), std::placeholders::_1));
             ++m_format_cnt;
-            m_data_logdev_blk_store->format(([this](bool success) { init_done(true); }));
+            m_data_logdev_blk_store->format(([this](bool success) {
+                HS_RELEASE_ASSERT(success, "failed to format logstore.");
+                init_done(true);
+            }));
         } else {
             m_data_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
                 m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::PASS_THRU,
@@ -342,7 +349,10 @@ protected:
                 sizeof(blkstore_blob), HS_STATIC_CONFIG(drive_attr.atomic_phys_page_size), "ctrl_logdev", false,
                 std::bind(&LogDev::process_logdev_completions, &HomeLogStoreMgr::ctrl_logdev(), std::placeholders::_1));
             ++m_format_cnt;
-            m_ctrl_logdev_blk_store->format(([this](bool success) { init_done(true); }));
+            m_ctrl_logdev_blk_store->format(([this](bool success) {
+                HS_RELEASE_ASSERT(success, "failed to format logstore.");
+                init_done(true);
+            }));
         } else {
             m_ctrl_logdev_blk_store = std::make_unique< BlkStore< VdevVarSizeBlkAllocatorPolicy > >(
                 m_dev_mgr.get(), m_cache.get(), vb, BlkStoreCacheType::PASS_THRU,

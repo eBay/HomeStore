@@ -216,7 +216,7 @@ class VirtualDev : public AbstractVirtualDev {
     // NOTE:  Usage of this needs to avoid punning which is now illegal in C++ 11 and up
     typedef union {
         struct Chunk_EOF_t eof;
-        std::array < unsigned char, VIRDEV_BLKSIZE > padding;
+        std::array< unsigned char, VIRDEV_BLKSIZE > padding;
     } Chunk_EOF;
 
     static_assert(sizeof(Chunk_EOF) == VIRDEV_BLKSIZE, "LogDevRecordHeader must be VIRDEV_SIZE bytes");
@@ -255,8 +255,8 @@ private:
 public:
     static constexpr size_t context_data_size() { return MAX_CONTEXT_DATA_SZ; }
 
-    void init(DeviceManager* const mgr, vdev_info_block* const vb, vdev_comp_cb_t cb, const uint32_t page_size, const bool auto_recovery,
-              vdev_high_watermark_cb_t hwm_cb) {
+    void init(DeviceManager* const mgr, vdev_info_block* const vb, vdev_comp_cb_t cb, const uint32_t page_size,
+              const bool auto_recovery, vdev_high_watermark_cb_t hwm_cb) {
         m_mgr = mgr;
         m_vb = vb;
         m_comp_cb = std::move(cb);
@@ -272,8 +272,8 @@ public:
     }
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
-    VirtualDev(DeviceManager* const mgr, const char* const name, vdev_info_block* const vb, vdev_comp_cb_t cb, const bool recovery_init,
-               const bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
+    VirtualDev(DeviceManager* const mgr, const char* const name, vdev_info_block* const vb, vdev_comp_cb_t cb,
+               const bool recovery_init, const bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
             m_name{name}, m_metrics{name} {
         init(mgr, vb, std::move(cb), vb->page_size, auto_recovery, std::move(hwm_cb));
 
@@ -286,9 +286,10 @@ public:
     }
 
     /* Create a new virtual dev for these parameters */
-    VirtualDev(DeviceManager* const mgr, const char* const name, const uint64_t context_size, const uint32_t nmirror, const bool is_stripe,
-               const uint32_t page_size, const std::vector< PhysicalDev* >& pdev_list, vdev_comp_cb_t cb, char* const blob,
-               const uint64_t size_in, const bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
+    VirtualDev(DeviceManager* const mgr, const char* const name, const uint64_t context_size, const uint32_t nmirror,
+               const bool is_stripe, const uint32_t page_size, const std::vector< PhysicalDev* >& pdev_list,
+               vdev_comp_cb_t cb, char* const blob, const uint64_t size_in, const bool auto_recovery = false,
+               vdev_high_watermark_cb_t hwm_cb = nullptr) :
             m_name{name}, m_metrics{name} {
         init(mgr, nullptr, std::move(cb), page_size, auto_recovery, std::move(hwm_cb));
 
@@ -425,7 +426,8 @@ public:
                     // call completion
                     m_comp_cb(req);
                 } else {
-                    req->format_cb(req->err ? false : true);
+                    HS_LOG(INFO, device, "Completed format request, err: {}.", req->err.message());
+                    req->format_cb(req->err == no_error ? true : false);
                 }
             }
         }
@@ -474,9 +476,9 @@ public:
      * @return : the logical tail offset;
      */
     off_t get_tail_offset(const bool reserve_space_include = true) const {
-        off_t tail{static_cast<off_t>(data_start_offset() + m_write_sz_in_total.load(std::memory_order_relaxed))};
+        off_t tail{static_cast< off_t >(data_start_offset() + m_write_sz_in_total.load(std::memory_order_relaxed))};
         if (reserve_space_include) { tail += m_reserved_sz; }
-        if (static_cast<uint64_t>(tail) >= get_size()) { tail -= get_size(); }
+        if (static_cast< uint64_t >(tail) >= get_size()) { tail -= get_size(); }
 
         return tail;
     }
@@ -653,7 +655,7 @@ public:
 
     void format(const vdev_format_cb_t& cb) {
         boost::intrusive_ptr< virtualdev_req > req{sisl::ObjectAllocator< virtualdev_req >::make_object()};
-        req->outstanding_cb.set(get_num_chunks() * (get_nmirrors() + 1));
+        req->outstanding_cb.set(1); // set initial to 1 to make sure completion happens only after all reqs are sent;
         req->outstanding_cbs = true;
         req->format = true;
         req->format_cb = cb;
@@ -672,6 +674,12 @@ public:
                 }
             }
         }
+
+        // if somehow the last write zero completes before we arrive here, send the completion back to caller;
+        if (req->outstanding_cb.decrement_testz(1)) {
+            HS_LOG(INFO, device, "Completed format request, err: {}.", req->err.message());
+            req->format_cb(req->err == no_error ? true : false);
+        }
     }
 
     void format_chunk(PhysicalDevChunk* chunk, boost::intrusive_ptr< virtualdev_req >& req) {
@@ -682,6 +690,7 @@ public:
             const uint64_t size_sent = std::min(format_max_size, remaining_size);
             const uint64_t offset = chunk->get_start_offset() + (chunk->get_size() - remaining_size);
             req->inc_ref();
+            req->outstanding_cb.increment();
             pdev->write_zero(size_sent, offset, reinterpret_cast< uint8_t* >(req.get()));
             remaining_size -= size_sent;
         }
@@ -733,7 +742,8 @@ public:
      *
      * @return : On success, the number of bytes read or written is returned, or -1 on error.
      */
-    ssize_t pwrite(const void* const buf, const size_t count, const off_t offset, boost::intrusive_ptr< virtualdev_req > req = nullptr) {
+    ssize_t pwrite(const void* const buf, const size_t count, const off_t offset,
+                   boost::intrusive_ptr< virtualdev_req > req = nullptr) {
         HS_ASSERT_CMP(RELEASE, count, <=, m_reserved_sz, "Write size:{} larger then reserved size: {} is not allowed!",
                       count, m_reserved_sz);
 
@@ -811,7 +821,7 @@ public:
 
         auto* const chunk{m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id]};
         const auto end_of_chunk{chunk->get_end_of_chunk()};
-        const auto chunk_size{std::min<uint64_t>(end_of_chunk, m_chunk_size)};
+        const auto chunk_size{std::min< uint64_t >(end_of_chunk, m_chunk_size)};
 
         bool across_chunk{false};
 
@@ -1050,7 +1060,8 @@ public:
             BlkAllocStatus status{BlkAllocStatus::FAILED};
 
             // First select a device to allocate from
-            dev_ind = (hints.dev_id_hint == -1) ? m_selector->select(hints) : static_cast<uint32_t>(hints.dev_id_hint);
+            dev_ind =
+                (hints.dev_id_hint == -1) ? m_selector->select(hints) : static_cast< uint32_t >(hints.dev_id_hint);
 
             // Pick a physical chunk based on physDevId.
             // TODO: Right now there is only one primary chunk per device in a virtualdev. Need to support multiple
@@ -1118,7 +1129,8 @@ public:
         }
     }
 
-    void write(const BlkId& bid, const iovec* const iov, const int iovcnt, boost::intrusive_ptr< virtualdev_req > req = nullptr) {
+    void write(const BlkId& bid, const iovec* const iov, const int iovcnt,
+               boost::intrusive_ptr< virtualdev_req > req = nullptr) {
         PhysicalDevChunk* chunk;
         const auto size{get_len(iov, iovcnt)};
         const uint64_t dev_offset{to_dev_offset(bid, &chunk)};
@@ -1142,7 +1154,7 @@ public:
         BlkOpStatus ret_status{BlkOpStatus::SUCCESS};
         uint32_t data_offset{data_offset_in};
         const uint32_t size{bid.get_nblks() * get_page_size()};
-        std::array < iovec, BlkId::max_blks_in_op() > iov;
+        std::array< iovec, BlkId::max_blks_in_op() > iov;
         int iovcnt{0};
 
         const uint32_t end_offset{data_offset + bid.data_size(m_pagesz)};
@@ -1164,8 +1176,9 @@ public:
         write(bid, iov.data(), iovcnt, req);
     }
 
-    void write_nmirror(const char* const buf, const uint32_t size, PhysicalDevChunk* const chunk, const uint64_t dev_offset_in) {
-        uint64_t dev_offset { dev_offset_in };
+    void write_nmirror(const char* const buf, const uint32_t size, PhysicalDevChunk* const chunk,
+                       const uint64_t dev_offset_in) {
+        uint64_t dev_offset{dev_offset_in};
         const uint64_t primary_chunk_offset{dev_offset - chunk->get_start_offset()};
 
         // Write to the mirror as well
@@ -1184,7 +1197,8 @@ public:
         }
     }
 
-    void writev_nmirror(const iovec* const iov, const int iovcnt, const uint32_t size, PhysicalDevChunk* const chunk, const uint64_t dev_offset_in) {
+    void writev_nmirror(const iovec* const iov, const int iovcnt, const uint32_t size, PhysicalDevChunk* const chunk,
+                        const uint64_t dev_offset_in) {
         uint64_t dev_offset{dev_offset_in};
         const uint64_t primary_chunk_offset{dev_offset - chunk->get_start_offset()};
 
@@ -1204,8 +1218,8 @@ public:
         }
     }
 
-    void read_nmirror(const BlkId& bid, std::vector< boost::intrusive_ptr< homeds::MemVector > > mp, const uint64_t size,
-                      const uint32_t nmirror) {
+    void read_nmirror(const BlkId& bid, std::vector< boost::intrusive_ptr< homeds::MemVector > > mp,
+                      const uint64_t size, const uint32_t nmirror) {
         HS_ASSERT_CMP(DEBUG, nmirror, <=, get_nmirrors());
         uint32_t cnt{0};
         PhysicalDevChunk* primary_chunk;
@@ -1215,7 +1229,8 @@ public:
         sisl::blob b;
         mp[cnt]->get(&b, 0);
         HS_ASSERT_CMP(DEBUG, b.size, ==, bid.data_size(m_pagesz));
-        primary_chunk->get_physical_dev_mutable()->sync_read(reinterpret_cast< char* >(b.bytes), b.size, primary_dev_offset);
+        primary_chunk->get_physical_dev_mutable()->sync_read(reinterpret_cast< char* >(b.bytes), b.size,
+                                                             primary_dev_offset);
         if (cnt == nmirror) { return; }
         ++cnt;
         for (auto* const mchunk : m_mirror_chunks.find(primary_chunk)->second) {
@@ -1240,8 +1255,8 @@ public:
 
         const uint64_t primary_dev_offset{to_dev_offset(bid, &primary_chunk)};
 
-        do_read_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset, reinterpret_cast< char* >(mp.ptr()),
-                         mp.size(), req);
+        do_read_internal(primary_chunk->get_physical_dev_mutable(), primary_chunk, primary_dev_offset,
+                         reinterpret_cast< char* >(mp.ptr()), mp.size(), req);
     }
 
     void read(const BlkId& bid, std::vector< iovec >& iovecs, const uint64_t size,
@@ -1255,7 +1270,7 @@ public:
 
     void readv(const BlkId& bid, const homeds::MemVector& buf, boost::intrusive_ptr< virtualdev_req > req) {
         // Convert the input memory to iovector
-        std::array < iovec, BlkId::max_blks_in_op()> iov;
+        std::array< iovec, BlkId::max_blks_in_op() > iov;
         int iovcnt{0};
         const uint32_t size{buf.size()};
 
@@ -1333,8 +1348,7 @@ public:
 
     void blkalloc_cp_start(std::shared_ptr< blkalloc_cp >& ba_cp) {
         for (size_t i{0}; i < m_primary_pdev_chunks_list.size(); ++i) {
-            for (size_t chunk_indx{0}; chunk_indx < m_primary_pdev_chunks_list[i].chunks_in_pdev.size();
-                 ++chunk_indx) {
+            for (size_t chunk_indx{0}; chunk_indx < m_primary_pdev_chunks_list[i].chunks_in_pdev.size(); ++chunk_indx) {
                 auto* const chunk{m_primary_pdev_chunks_list[i].chunks_in_pdev[chunk_indx]};
                 chunk->cp_start(ba_cp);
             }
@@ -1357,8 +1371,8 @@ private:
                                 const boost::intrusive_ptr< virtualdev_req >& req = nullptr) {
         off_t offset_in_chunk{0};
 
-        if (req) { 
-            req->outstanding_cb.set(1); 
+        if (req) {
+            req->outstanding_cb.set(1);
             req->outstanding_cbs = true;
         }
 
@@ -1452,7 +1466,8 @@ private:
     //
     // split do_write from pwrite so that write could re-use this sub-routine
     //
-    ssize_t do_pwrite(const void* const buf, const size_t count, const off_t offset, const boost::intrusive_ptr< virtualdev_req >& req = nullptr) {
+    ssize_t do_pwrite(const void* const buf, const size_t count, const off_t offset,
+                      const boost::intrusive_ptr< virtualdev_req >& req = nullptr) {
         uint32_t dev_id{0}, chunk_id{0};
 
         const auto offset_in_dev{process_pwrite_offset(count, offset, dev_id, chunk_id, req)};
@@ -1465,11 +1480,13 @@ private:
 
             HS_LOG(TRACE, device, "Writing in device: {}, offset: {}", dev_id, offset_in_dev);
 
-            bytes_written = do_pwrite_internal(pdev, chunk, reinterpret_cast< const char* >(buf), count, offset_in_dev, req);
+            bytes_written =
+                do_pwrite_internal(pdev, chunk, reinterpret_cast< const char* >(buf), count, offset_in_dev, req);
 
             // bytes written should always equal to requested write size, since alloc_next_append_blk handles offset
             // which will never across chunk boundary;
-            HS_ASSERT_CMP(DEBUG, static_cast< size_t >(bytes_written), ==, count, "Bytes written not equal to input len!");
+            HS_ASSERT_CMP(DEBUG, static_cast< size_t >(bytes_written), ==, count,
+                          "Bytes written not equal to input len!");
 
         } catch (const std::exception& e) { HS_ASSERT(DEBUG, 0, "{}", e.what()); }
 
@@ -1480,7 +1497,7 @@ private:
      * @brief
      */
     void high_watermark_check() {
-        const uint32_t used_per{static_cast<uint32_t>(100 * get_used_space() / get_size())};
+        const uint32_t used_per{static_cast< uint32_t >(100 * get_used_space() / get_size())};
         ResourceMgr::check_journal_size_and_trigger_cp(get_used_space(), get_size());
         if (used_per >= ResourceMgr::get_journal_size_limit()) {
             COUNTER_INCREMENT(m_metrics, vdev_high_watermark_count, 1);
@@ -1549,8 +1566,8 @@ private:
      *
      * @return : size that has been written;
      */
-    ssize_t do_pwritev_internal(PhysicalDev* const pdev, PhysicalDevChunk* const pchunk, const iovec* const iov, const int iovcnt,
-                                const uint64_t len, const uint64_t offset_in_dev,
+    ssize_t do_pwritev_internal(PhysicalDev* const pdev, PhysicalDevChunk* const pchunk, const iovec* const iov,
+                                const int iovcnt, const uint64_t len, const uint64_t offset_in_dev,
                                 const boost::intrusive_ptr< virtualdev_req >& req = nullptr) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
 
@@ -1597,8 +1614,9 @@ private:
      *
      * @return : bytes written;
      */
-    ssize_t do_pwrite_internal(PhysicalDev* const pdev, PhysicalDevChunk* const pchunk, const char* const buf, const uint32_t len,
-                               const uint64_t offset_in_dev, const boost::intrusive_ptr< virtualdev_req >& req = nullptr) {
+    ssize_t do_pwrite_internal(PhysicalDev* const pdev, PhysicalDevChunk* const pchunk, const char* const buf,
+                               const uint32_t len, const uint64_t offset_in_dev,
+                               const boost::intrusive_ptr< virtualdev_req >& req = nullptr) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_write_vector_count, 1);
 
         const auto align_sz{HS_STATIC_CONFIG(drive_attr.phys_page_size)};
@@ -1633,8 +1651,9 @@ private:
         return bytes_written;
     }
 
-    ssize_t do_read_internal(PhysicalDev* const pdev, PhysicalDevChunk* const primary_chunk, const uint64_t primary_dev_offset,
-                             char* const ptr, const uint64_t size, const boost::intrusive_ptr< virtualdev_req >& req = nullptr) {
+    ssize_t do_read_internal(PhysicalDev* const pdev, PhysicalDevChunk* const primary_chunk,
+                             const uint64_t primary_dev_offset, char* const ptr, const uint64_t size,
+                             const boost::intrusive_ptr< virtualdev_req >& req = nullptr) {
         COUNTER_INCREMENT(pdev->get_metrics(), drive_read_vector_count, 1);
         COUNTER_INCREMENT(m_metrics, vdev_read_count, 1);
         ssize_t bytes_read{0};
@@ -1721,8 +1740,8 @@ private:
             for (auto mchunk : m_mirror_chunks.find(pchunk)->second) {
                 const uint64_t dev_offset_m{mchunk->get_start_offset() + primary_chunk_offset};
                 req->inc_ref();
-                mchunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, dev_offset_m, reinterpret_cast< uint8_t* >(req.get()),
-                                                          req->part_of_batch);
+                mchunk->get_physical_dev_mutable()->readv(iov, iovcnt, size, dev_offset_m,
+                                                          reinterpret_cast< uint8_t* >(req.get()), req->part_of_batch);
             }
         }
 
@@ -1746,7 +1765,7 @@ private:
         chunk_id = 0;
         offset_in_chunk = 0;
 
-        uint64_t off_l{static_cast<uint64_t>(log_offset)};
+        uint64_t off_l{static_cast< uint64_t >(log_offset)};
         for (size_t d{0}; d < m_primary_pdev_chunks_list.size(); ++d) {
             for (size_t c{0}; c < m_primary_pdev_chunks_list[d].chunks_in_pdev.size(); ++c) {
                 if (off_l >= m_chunk_size) {
@@ -1848,7 +1867,8 @@ private:
     }
 #endif
 
-    PhysicalDevChunk* create_dev_chunk(const uint32_t pdev_ind, const std::shared_ptr< BlkAllocator >& ba, const uint32_t primary_id) {
+    PhysicalDevChunk* create_dev_chunk(const uint32_t pdev_ind, const std::shared_ptr< BlkAllocator >& ba,
+                                       const uint32_t primary_id) {
         auto* const pdev{m_primary_pdev_chunks_list[pdev_ind].pdev};
         PhysicalDevChunk* const chunk{m_mgr->alloc_chunk(pdev, m_vb->vdev_id, m_chunk_size, primary_id)};
         HS_LOG(DEBUG, device, "Allocating new chunk for vdev_id = {} pdev_id = {} chunk: {}", m_vb->get_vdev_id(),
