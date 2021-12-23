@@ -56,8 +56,8 @@ void VirtualDev::static_process_completions(const int64_t res, uint8_t* cookie) 
     if (homestore_flip->test_flip("io_read_comp_error_flip")) { vd_req->err = read_failed; }
 #endif
 
-    if (!vd_req->format) {
-        auto* pdev{vd_req->chunk->get_physical_dev_mutable()};
+    if (!vd_req->format && vd_req->chunk) {
+        auto* const pdev{vd_req->chunk->get_physical_dev_mutable()};
         if (vd_req->err) {
             COUNTER_INCREMENT_IF_ELSE(pdev->get_metrics(), vd_req->is_read, drive_read_errors, drive_write_errors, 1);
             pdev->device_manager_mutable()->handle_error(pdev);
@@ -67,7 +67,8 @@ void VirtualDev::static_process_completions(const int64_t res, uint8_t* cookie) 
         }
     }
 
-    vd_req->cb(vd_req);
+    if (vd_req->cb) vd_req->cb(vd_req);
+
     // NOTE: Beyond this point vd_req could be freed by the callback. So once callback is made,
     // DO NOT ACCESS vd_req beyond this point.
 }
@@ -648,6 +649,24 @@ void VirtualDev::readv(const BlkId& bid, const homeds::MemVector& buf,
     auto* pdev{primary_chunk->get_physical_dev_mutable()};
 
     do_preadv_internal(pdev, primary_chunk, primary_dev_offset, iov.data(), iovcnt, size, req);
+}
+
+void VirtualDev::fsync_pdevs(vdev_comp_cb_t cb, uint8_t* const cookie) {
+    auto req{virtualdev_req::make_request()};
+    req->version = 0xDEAD;
+    req->cb = std::move(cb);
+    req->outstanding_cbs = true;
+    assert(m_primary_pdev_chunks_list.size() <=
+           static_cast< size_t >(std::numeric_limits< decltype(req->outstanding_cb.get()) >::max()));
+    req->outstanding_cb.set(static_cast< decltype(req->outstanding_cb.get()) >(m_primary_pdev_chunks_list.size()));
+    req->cookie = cookie;
+
+    assert(!m_primary_pdev_chunks_list.empty());
+    for (auto& pdev_chunk : m_primary_pdev_chunks_list) {
+        auto* const pdev{pdev_chunk.pdev};
+        HS_LOG(TRACE, device, "Flushing pdev {}", pdev->get_devname());
+        pdev->fsync(reinterpret_cast< uint8_t* >(req.get()));
+    }
 }
 
 void VirtualDev::submit_batch() { m_drive_iface->submit_batch(); }

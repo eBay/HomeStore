@@ -235,6 +235,7 @@ HomeLogStoreMgrMetrics::HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores
     REGISTER_HISTOGRAM(logdev_flush_done_msg_time_ns, "Logdev flush completion msg time in ns");
     REGISTER_HISTOGRAM(logdev_post_flush_processing_latency,
                        "Logdev post flush processing (including callbacks) latency");
+    REGISTER_HISTOGRAM(logdev_fsync_time_us, "Logdev fsync completion time in us");
 
     register_me_to_farm();
 }

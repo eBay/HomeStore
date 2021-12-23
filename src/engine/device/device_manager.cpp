@@ -60,8 +60,8 @@ void PhysicalDevChunk::cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp) {
     get_blk_allocator_mutable()->cp_done();
 }
 
-std::shared_ptr< blkalloc_cp > PhysicalDevChunk::attach_prepare_cp([
-    [maybe_unused]] const std::shared_ptr< blkalloc_cp >& cur_ba_cp) {
+std::shared_ptr< blkalloc_cp >
+PhysicalDevChunk::attach_prepare_cp([[maybe_unused]] const std::shared_ptr< blkalloc_cp >& cur_ba_cp) {
     return std::make_shared< blkalloc_cp >();
 }
 
@@ -76,6 +76,10 @@ DeviceManager::DeviceManager(const std::vector< dev_info >& data_devices, NewVDe
     HS_REL_ASSERT_GT(data_devices.size(), 0, "Expecting at least one data device");
 
     m_hdd_open_flags = get_open_flags(HS_STATIC_CONFIG(input.data_open_flags));
+    if (is_data_drive_hdd() && (HS_STATIC_CONFIG(input.data_open_flags) == io_flag::DIRECT_IO)) {
+        // override direct i/o for HDD's
+        m_hdd_open_flags = get_open_flags(io_flag::BUFFERED_IO);
+    }
     m_ssd_open_flags = get_open_flags(HS_STATIC_CONFIG(input.fast_open_flags));
 
     // initialize memory structures in chunk memory

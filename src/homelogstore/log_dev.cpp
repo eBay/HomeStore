@@ -6,6 +6,7 @@
 #include <sisl/fds/vector_pool.hpp>
 
 #include "api/meta_interface.hpp"
+#include "engine/blkstore/blkstore.hpp"
 #include "engine/common/homestore_assert.hpp"
 #include "engine/homestore_base.hpp"
 #include "log_dev.hpp"
@@ -382,29 +383,44 @@ bool LogDev::flush_if_needed() {
     return true;
 }
 
-void LogDev::do_flush(LogGroup* const lg) {
-    // auto offset = m_blkstore->reserve(lg->data_size() + sizeof(log_group_header));
-
+void LogDev::do_write_logs(LogGroup* const lg) {
     HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logdev_flush_records_distribution, lg->nrecords());
     HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logdev_flush_size_distribution, lg->actual_data_size());
-    auto req = logdev_req::make_request();
+    THIS_LOGDEV_LOG(TRACE, "vdev offset {} log group total size {}", lg->m_log_dev_offset, lg->header()->total_size());
+    auto req{logdev_req::make_request()};
     req->m_log_group = lg;
     req->isSyncCall = true;
-    THIS_LOGDEV_LOG(TRACE, "vdev offset {} log group total size {}", lg->m_log_dev_offset, lg->header()->total_size());
     try {
-        m_blkstore->pwritev(lg->iovecs().data(), static_cast< int >(lg->iovecs().size()), lg->m_log_dev_offset, req);
+        // write log
+        m_blkstore->pwritev(lg->iovecs().data(), static_cast< int >(lg->iovecs().size()), lg->m_log_dev_offset,
+                            boost::static_pointer_cast< virtualdev_req >(req));
     } catch (std::exception& e) {
         THIS_LOGDEV_LOG(ERROR, "Exception: {}", e.what());
         req->err = std::make_error_condition(std::errc::io_error);
     }
-    process_logdev_completions(req);
+    process_logdev_completions(boost::static_pointer_cast< virtualdev_req >(req));
+}
+
+void LogDev::do_flush(LogGroup* const lg) {
+    if (is_data_drive_hdd()) {
+        auto* data_blkstore{m_hb->get_data_blkstore()};
+        data_blkstore->get_vdev()->fsync_pdevs(
+            std::bind(&LogDev::process_fsync_completions, this, std::placeholders::_1),
+            reinterpret_cast< uint8_t* >(lg));
+    } else {
+        do_write_logs(lg);
+    }
+}
+
+void LogDev::process_fsync_completions(const boost::intrusive_ptr< virtualdev_req >& vd_req) {
+    if (vd_req->err != no_error) { HS_REL_ASSERT(0, "error {} happened during fsync", vd_req->err.message()); }
+    HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logdev_fsync_time_us, get_elapsed_time_us(vd_req->io_start_time));
+    do_write_logs(reinterpret_cast< LogGroup* >(vd_req->cookie));
 }
 
 void LogDev::process_logdev_completions(const boost::intrusive_ptr< virtualdev_req >& vd_req) {
-    const auto req{to_logdev_req(vd_req)};
-    if (vd_req->err != no_error) {
-        HS_REL_ASSERT(0, "error {} happen during op {}", vd_req->err.message(), req->is_read);
-    }
+    const auto req{logdev_req::to_logdev_req(vd_req)};
+    if (req->err != no_error) { HS_REL_ASSERT(0, "error {} happened during op {}", req->err.message(), req->is_read); }
     if (req->is_read) {
         // update logdev read metrics;
     } else {

@@ -544,6 +544,7 @@ public:
               const bool part_of_batch = false);
     void readv(iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
                const bool part_of_batch = false);
+    void fsync(uint8_t* const cookie);
 
     ssize_t sync_write(const char* const data, const uint32_t size, const uint64_t offset);
     ssize_t sync_writev(const iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset);

@@ -302,7 +302,6 @@ std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, trait
 
 /************************************* LogDev Request to BlkStore Section ************************************/
 struct logdev_req;
-#define to_logdev_req(req) boost::static_pointer_cast< logdev_req >(req)
 typedef boost::intrusive_ptr< logdev_req > logdev_req_ptr;
 
 struct logdev_req : public virtualdev_req {
@@ -321,8 +320,12 @@ public:
 
     // virtual size_t get_your_size() const override { return sizeof(ssd_loadgen_req); }
 
-    [[nodiscard]] static logdev_req_ptr cast(const boost::intrusive_ptr< virtualdev_req >& vd_req) {
-        return boost::static_pointer_cast< logdev_req >(vd_req);
+    [[nodiscard]] static logdev_req_ptr to_logdev_req(const boost::intrusive_ptr< virtualdev_req >& vd_req) {
+#ifdef NDEBUG
+        return boost::intrusive_ptr< logdev_req >(reinterpret_cast< logdev_req* >(vd_req.get()));
+#else
+        return boost::dynamic_pointer_cast< logdev_req >(vd_req);
+#endif
     }
 
     LogGroup* m_log_group;
@@ -634,6 +637,8 @@ public:
      */
     void register_store_found_cb(const store_found_callback& cb) { m_store_found_cb = cb; }
 
+    void process_fsync_completions(const boost::intrusive_ptr< virtualdev_req >& vd_req);
+
     // callback from blkstore, registered at blkstore creation;
     void process_logdev_completions(const boost::intrusive_ptr< virtualdev_req >& vd_req);
 
@@ -719,6 +724,7 @@ private:
     }
 
     [[nodiscard]] LogGroup* prepare_flush(const int32_t estimated_record);
+    void do_write_logs(LogGroup* const lg);
     void do_flush(LogGroup* const lg);
     void flush_by_size(const uint32_t min_threshold, const uint32_t new_record_size = 0, const logid_t new_idx = -1);
     void on_flush_completion(LogGroup* const lg);

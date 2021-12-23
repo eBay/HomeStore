@@ -22,9 +22,9 @@
 
 #include "device.h"
 #include "device_selector.hpp"
-#include "engine/homeds/memory/mempiece.hpp"
 #include "engine/blkalloc/blk_allocator.h"
 #include "engine/blkalloc/varsize_blk_allocator.h"
+#include "engine/homeds/memory/mempiece.hpp"
 
 namespace iomgr {
 class DriveInterface;
@@ -53,11 +53,12 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     bool is_read{false};
     bool isSyncCall{false};
     sisl::atomic_counter< int > refcount;
-    PhysicalDevChunk* chunk;
+    PhysicalDevChunk* chunk{nullptr};
     Clock::time_point io_start_time;
     bool part_of_batch{false};
     bool format{false};
     vdev_format_cb_t format_cb; // callback stored for format operation.
+    uint8_t* cookie;
 
 #ifndef NDEBUG
     uint64_t dev_offset;
@@ -80,9 +81,9 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
         return boost::static_pointer_cast< virtualdev_req >(req);
     }
 
-    // static boost::intrusive_ptr< virtualdev_req > make_request() {
-    //    return boost::intrusive_ptr< virtualdev_req >(sisl::ObjectAllocator< virtualdev_req >::make_object());
-    //}
+    static boost::intrusive_ptr< virtualdev_req > make_request() {
+        return boost::intrusive_ptr< virtualdev_req >(sisl::ObjectAllocator< virtualdev_req >::make_object());
+    }
     virtual void free_yourself() { sisl::ObjectAllocator< virtualdev_req >::deallocate(this); }
     friend void intrusive_ptr_add_ref(virtualdev_req* const req) { req->refcount.increment(1); }
     friend void intrusive_ptr_release(virtualdev_req* const req) {
@@ -246,6 +247,9 @@ public:
     void read(const BlkId& bid, std::vector< iovec >& iovecs, const uint64_t size,
               const boost::intrusive_ptr< virtualdev_req >& req);
     void readv(const BlkId& bid, const homeds::MemVector& buf, const boost::intrusive_ptr< virtualdev_req >& req);
+
+    // Issue fsync to all physical devices and call cb on completion
+    void fsync_pdevs(vdev_comp_cb_t cb, uint8_t* const cookie = nullptr);
 
     void submit_batch();
 

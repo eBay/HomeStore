@@ -453,6 +453,8 @@ void PhysicalDev::readv(iovec* const iov, const int iovcnt, const uint32_t size,
     m_drive_iface->async_readv(m_iodev.get(), iov, iovcnt, size, offset, cookie, part_of_batch);
 }
 
+void PhysicalDev::fsync(uint8_t* const cookie) { m_drive_iface->fsync(m_iodev.get(), cookie); }
+
 ssize_t PhysicalDev::sync_write(const char* const data, const uint32_t size, const uint64_t offset) {
     try {
         HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
