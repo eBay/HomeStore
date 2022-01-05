@@ -194,7 +194,8 @@ public:
                                                            const bool cache = false) override;
 
     virtual VolumePtr create_volume(const vol_params& params) override;
-    virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) override;
+    virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid,
+                                               const hs_comp_callback& remove_cb = nullptr) override;
     virtual VolumePtr lookup_volume(const boost::uuids::uuid& uuid) override;
 
     virtual SnapshotPtr create_snapshot(const VolumePtr& vol);
@@ -218,8 +219,7 @@ public:
     virtual void attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) override;
     virtual void attach_end_of_batch_cb(const end_of_batch_callback& cb) override;
 
-    virtual bool trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb = nullptr,
-                                  bool force = false) override;
+    virtual bool trigger_shutdown(const hs_comp_callback& shutdown_done_cb = nullptr, bool force = false) override;
     virtual cap_attrs get_system_capacity() override {
         return HomeStore< BLKSTORE_BUFFER_TYPE >::get_system_capacity();
     }
@@ -331,13 +331,14 @@ private:
     void homeblks_sb_write();
     homeblks_sb* superblock_init();
 
-    std::error_condition remove_volume_internal(const boost::uuids::uuid& uuid, bool force);
+    std::error_condition remove_volume_internal(const boost::uuids::uuid& uuid, bool force,
+                                                const hs_comp_callback& remove_cb = nullptr);
     void vol_mounted(const VolumePtr& vol, vol_state state);
     void vol_state_change(const VolumePtr& vol, vol_state old_state, vol_state new_state);
     void scan_volumes();
 
     void init_thread();
-    void do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force);
+    void do_shutdown(const hs_comp_callback& shutdown_done_cb, bool force);
     blk_buf_t get_valid_buf(const std::vector< blk_buf_t >& bbuf, bool& rewrite);
 
     virtual void call_multi_completions() override;
@@ -377,7 +378,7 @@ private:
 
     std::atomic< uint64_t > m_shutdown_start_time = 0;
     iomgr::timer_handle_t m_shutdown_timer_hdl = iomgr::null_timer_handle;
-    shutdown_comp_callback m_shutdown_done_cb;
+    hs_comp_callback m_shutdown_done_cb;
     bool m_force_shutdown{false};
     bool m_init_error{false};
     bool m_vol_shutdown_cmpltd{false};

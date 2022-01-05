@@ -152,7 +152,7 @@ ENUM(vol_state, uint32_t,
 
 typedef std::function< void(const vol_interface_req_ptr& req) > io_single_comp_callback;
 typedef std::function< void(const std::vector< vol_interface_req_ptr >& reqs) > io_batch_comp_callback;
-typedef std::function< void(bool success) > shutdown_comp_callback;
+typedef std::function< void(bool success) > hs_comp_callback;
 typedef std::function< void(int n_completions) > end_of_batch_callback;
 typedef std::variant< io_single_comp_callback, io_batch_comp_callback > io_comp_callback;
 
@@ -320,7 +320,8 @@ public:
     virtual boost::uuids::uuid get_uuid(std::shared_ptr< Volume > vol) = 0;
     virtual sisl::blob at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;
     virtual VolumePtr create_volume(const vol_params& params) = 0;
-    virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid) = 0;
+    virtual std::error_condition remove_volume(const boost::uuids::uuid& uuid,
+                                               const hs_comp_callback& shutdown_done_cb = nullptr) = 0;
     virtual VolumePtr lookup_volume(const boost::uuids::uuid& uuid) = 0;
 
     /** Snapshot APIs **/
@@ -339,7 +340,7 @@ public:
     virtual void attach_vol_completion_cb(const VolumePtr& vol, const io_comp_callback& cb) = 0;
     virtual void attach_end_of_batch_cb(const end_of_batch_callback& cb) = 0;
 
-    virtual bool trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force = false) = 0;
+    virtual bool trigger_shutdown(const hs_comp_callback& shutdown_done_cb, bool force = false) = 0;
     virtual cap_attrs get_system_capacity() = 0;
     virtual bool vol_state_change(const VolumePtr& vol, vol_state new_state) = 0;
 

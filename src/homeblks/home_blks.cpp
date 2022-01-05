@@ -740,7 +740,7 @@ bool HomeBlks::shutdown(bool force) {
 // 1. Set persistent state of shutdown
 // 2. Start a thread to do shutdown routines;
 //
-bool HomeBlks::trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force) {
+bool HomeBlks::trigger_shutdown(const hs_comp_callback& shutdown_done_cb, bool force) {
     uint64_t expected = 0;
     if (!m_shutdown_start_time.compare_exchange_strong(expected, get_time_since_epoch_ms())) {
         // shutdown thread should be only started once;
@@ -766,7 +766,7 @@ bool HomeBlks::trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb, 
     return true;
 }
 
-void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force) {
+void HomeBlks::do_shutdown(const hs_comp_callback& shutdown_done_cb, bool force) {
     //
     // Need to wait m_init_finished to be true before we create shutdown thread because:
     // 1. if init thread is running slower than shutdown thread,
@@ -858,10 +858,11 @@ void HomeBlks::do_volume_shutdown(bool force) {
 // in IOTest before this function so it will be same use_count both with production or test.
 //
 
-std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
-    return (remove_volume_internal(uuid, false));
+std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid, const hs_comp_callback& remove_cb) {
+    return (remove_volume_internal(uuid, false, remove_cb));
 }
-std::error_condition HomeBlks::remove_volume_internal(const boost::uuids::uuid& uuid, bool force) {
+std::error_condition HomeBlks::remove_volume_internal(const boost::uuids::uuid& uuid, bool force,
+                                                      const hs_comp_callback& remove_cb) {
     if (HS_STATIC_CONFIG(input.is_read_only)) {
         assert(false);
         return std::make_error_condition(std::errc::device_or_resource_busy);
@@ -881,11 +882,12 @@ std::error_condition HomeBlks::remove_volume_internal(const boost::uuids::uuid& 
         /* Taking a reference on volume only to make sure that it won't get dereference while destroy is going on.
          * One possible scenario if shutdown is called while remove is happening.
          */
-        cur_vol->destroy(([this, uuid, cur_vol](bool success) {
+        cur_vol->destroy(([this, uuid, remove_cb](bool success) {
             if (success) {
                 std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
                 m_volume_map.erase(uuid);
             }
+            if (remove_cb) { remove_cb(success); }
         }));
 
         // volume destructor will be called since the user_count of share_ptr
