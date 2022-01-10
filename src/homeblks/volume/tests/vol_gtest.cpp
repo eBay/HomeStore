@@ -633,7 +633,6 @@ public:
     uint64_t get_dev_info(std::vector< dev_info >& device_info) {
         uint64_t max_capacity{0};
 
-        /* create files */
         if (tcfg.dev_names.size() != 0) {
             for (uint32_t i{0}; i < tcfg.dev_names.size(); ++i) {
                 const std::filesystem::path fpath{tcfg.dev_names[i]};
@@ -643,6 +642,7 @@ public:
                 device_info.emplace_back(tcfg.dev_names[i], HSDevType::Data);
             }
         } else {
+            /* create files */
             for (uint32_t i{0}; i < MAX_DEVICES; ++i) {
                 const std::filesystem::path fpath{tcfg.default_names[i]};
                 if (tcfg.init) {
@@ -668,6 +668,7 @@ public:
                     data_attrs.align_size = 2 * data_attrs.align_size;
                     data_attrs.phys_page_size = 2 * tcfg.phy_page_size;
                     data_attrs.atomic_phys_page_size = 2 * tcfg.atomic_phys_page_size;
+                    data_attrs.num_streams = 10;
                     --hdd_cnt;
                 }
                 iomgr::DriveInterface::emulate_drive_attributes(dinfo.dev_names, data_attrs);

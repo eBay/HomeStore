@@ -57,8 +57,8 @@ static constexpr uint32_t MAGIC{0xCEEDDEEB};
 /************* Super Block definition ******************/
 
 static constexpr uint32_t SUPERBLOCK_VERSION_1_2{1}; // XXX: we need a cooler name
-static constexpr uint32_t SUPERBLOCK_VERSION_1_3{2};
-static constexpr uint32_t CURRENT_SUPERBLOCK_VERSION{2};
+static constexpr uint32_t SUPERBLOCK_VERSION_1_3{3}; // we bumped the version twice in 1.3
+static constexpr uint32_t CURRENT_SUPERBLOCK_VERSION{3};
 static constexpr uint32_t CURRENT_DM_INFO_VERSION{1};
 
 /*******************************************************************************************************
@@ -205,12 +205,7 @@ struct disk_attr {
     uint32_t phys_page_size{0};        // Physical page size of flash ssd/nvme. This is optimal size to do IO
     uint32_t align_size{0};            // size alignment supported by drives/kernel
     uint32_t atomic_phys_page_size{0}; // atomic page size of the drive_sync_write_count
-    uint8_t pad[4]{};
-
-    bool is_zeroed() const {
-        return (phys_page_size == 0) && (align_size == 0) && (atomic_phys_page_size == 0) && (pad[0] == 0) &&
-            (pad[1] == 0) && (pad[2] == 0) && (pad[3] == 0);
-    }
+    uint32_t num_streams{0};
 
     bool is_valid() const {
         return is_page_valid(phys_page_size) && is_page_valid(align_size) && is_page_valid(atomic_phys_page_size);
@@ -262,9 +257,7 @@ struct super_block {
 };
 
 static_assert(sizeof(super_block) <= super_block::s_min_sb_size);
-inline size_t SUPERBLOCK_SIZE(const uint32_t atomic_page_sz) {
-    return sisl::round_up(std::max(sizeof(super_block), atomic_page_sz + SUPERBLOCK_PAYLOAD_OFFSET), atomic_page_sz);
-}
+inline size_t SUPERBLOCK_SIZE(const uint32_t phys_page_sz) { return sisl::round_up(sizeof(super_block), phys_page_sz); }
 
 // NOTE: After this structure in memory follows pdev_info_block followed by chunk_info_block array
 // followed by vdev_info_block array
@@ -578,6 +571,7 @@ public:
     uint32_t get_page_size() const;
     uint32_t get_atomic_page_size() const;
     uint32_t get_align_size() const;
+    uint32_t get_num_streams() const;
 #if 0
     uint32_t get_page_size() const { return (get_page_size(m_devname)); }
     uint32_t get_atomic_page_size() const { return (get_atomic_page_size(m_devname)); }

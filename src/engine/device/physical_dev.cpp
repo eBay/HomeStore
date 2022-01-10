@@ -83,8 +83,8 @@ void PhysicalDev::alloc_superblock(const uint32_t sb_size, const uint32_t align_
     if (sizeof(super_block) < sb_size) { std::memset(membuf + sizeof(super_block), 0, sb_size - sizeof(super_block)); }
 }
 
-bool PhysicalDev::resize_superblock_if_needed(const uint32_t atomic_page_sz, const uint32_t align_size) {
-    const auto sb_size{SUPERBLOCK_SIZE(atomic_page_sz)};
+bool PhysicalDev::resize_superblock_if_needed(const uint32_t phys_page_sz, const uint32_t align_size) {
+    const auto sb_size{SUPERBLOCK_SIZE(phys_page_sz)};
 
     // it is fine atomic page size + pyaload size is larger than super_block size;
     HS_REL_ASSERT_LE(super_block::s_min_sb_size, sb_size);
@@ -118,51 +118,42 @@ void PhysicalDev::read_and_fill_superblock(const int oflags) {
         throw std::system_error(errno, std::system_category(), "error while reading a superblock" + get_devname());
     }
 
-    if (validate_device() && is_init_done() && is_from_upgradable_version()) {
-        LOGINFO("Detected supported upgrading path from {} to current release: {}", m_super_blk->version,
-                CURRENT_SUPERBLOCK_VERSION);
+    bool is_init_required = false;
+    const auto iomgr_attr = iomgr::DriveInterface::get_attributes(m_devname);
+
+    if (validate_device()) {
+        if (!is_from_upgradable_version()) {
+            // Now we know that superblock is valid. So resize it by reading it from the superblock.
+            resize_superblock_if_needed(get_page_size(), get_align_size());
+            return;
+        }
+    } else {
+        is_init_required = true;
     }
 
-    auto saved_attr = m_super_blk->dev_attr;
-    bool is_zeroed = m_super_blk->dev_attr.is_zeroed();
-    if (is_zeroed) {
-        //
-        // we are here because:
-        // 1. this is first time boot in currently release;
-        // 2. this is recovery boot, but we are upgrading from old release, dev_attr field is garunteened to be zeroed
-        // from old version;
-        //
-        const auto iomgr_attr = iomgr::DriveInterface::get_attributes(m_devname);
-        saved_attr.align_size = iomgr_attr.align_size;
-        saved_attr.phys_page_size = iomgr_attr.phys_page_size;
-        saved_attr.atomic_phys_page_size = iomgr_attr.atomic_phys_page_size;
-    }
+    /* It require either upgrade or initialization */
+    resize_superblock_if_needed(iomgr_attr.phys_page_size, iomgr_attr.align_size);
 
-    bool is_resized = resize_superblock_if_needed(saved_attr.atomic_phys_page_size, saved_attr.align_size);
-
-    if (is_zeroed || is_resized) {
-        const auto superblock_size{SUPERBLOCK_SIZE(saved_attr.atomic_phys_page_size)};
-        // write back updated or saved attributes only when it is zerored or resized;
-        m_super_blk->dev_attr.phys_page_size = saved_attr.phys_page_size;
-        m_super_blk->dev_attr.align_size = saved_attr.align_size;
-        m_super_blk->dev_attr.atomic_phys_page_size = saved_attr.atomic_phys_page_size;
-
+    if (is_init_required) {
         m_super_blk->magic = MAGIC;
-        m_super_blk->version = CURRENT_SUPERBLOCK_VERSION;
         std::strncpy(m_super_blk->product_name, PRODUCT_NAME, super_block::s_product_name_size);
         m_super_blk->product_name[super_block::s_product_name_size - 1] = 0;
-
-        HS_REL_ASSERT(m_super_blk->dev_attr.is_valid(), "invalid device attributes: {}",
-                      m_super_blk->dev_attr.to_string());
-
-        // now perisit the attr to disk;
-        const auto bytes_written{
-            m_iodev->drive_interface()->sync_write(m_iodev.get(), (const char*)m_super_blk, superblock_size, 0)};
-        if (sisl_unlikely((bytes_written < 0) || (static_cast< size_t >(bytes_written) != superblock_size))) {
-            LOGINFO("Failed to zeroed superblock of device: {}, errno: {}", m_devname, errno);
-            throw std::system_error(errno, std::system_category(), "error while writing a superblock" + m_devname);
-        }
     }
+
+    // write back updated or saved attributes only when it is zerored or resized;
+
+    // It is a new fields added in superblock in 1.3
+    m_super_blk->dev_attr.phys_page_size = iomgr_attr.phys_page_size;
+    m_super_blk->dev_attr.align_size = iomgr_attr.align_size;
+    m_super_blk->dev_attr.atomic_phys_page_size = iomgr_attr.atomic_phys_page_size;
+    m_super_blk->dev_attr.num_streams = iomgr_attr.num_streams;
+
+    m_super_blk->version = CURRENT_SUPERBLOCK_VERSION;
+
+    HS_REL_ASSERT(m_super_blk->dev_attr.is_valid(), "invalid device attributes: {}", m_super_blk->dev_attr.to_string());
+
+    // now perisit the attr to disk;
+    write_superblock();
 }
 
 //
@@ -229,7 +220,7 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
     m_dm_chunk[0] = m_dm_chunk[1] = nullptr;
     if (is_init) {
         /* create a chunk */
-        const uint64_t sb_size{SUPERBLOCK_SIZE(get_atomic_page_size())};
+        const uint64_t sb_size{SUPERBLOCK_SIZE(get_page_size())};
         HS_LOG_ASSERT_EQ((get_size() % get_page_size()), 0,
                          "Expected drive size to be aligned with physical page size");
         m_mgr->create_new_chunk(this, sb_size, get_size() - sb_size, nullptr);
@@ -266,8 +257,7 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
 }
 
 size_t PhysicalDev::get_total_cap() {
-    return (m_devsize -
-            (SUPERBLOCK_SIZE(get_atomic_page_size()) + m_dm_chunk[0]->get_size() + m_dm_chunk[1]->get_size()));
+    return (m_devsize - (SUPERBLOCK_SIZE(get_page_size()) + m_dm_chunk[0]->get_size() + m_dm_chunk[1]->get_size()));
 }
 
 bool PhysicalDev::load_super_block(const hs_uuid_t& system_uuid) {
@@ -389,7 +379,7 @@ void PhysicalDev::init_done() {
 
 // this function needs to be updated for new releases;
 inline bool PhysicalDev::is_from_upgradable_version() const {
-    if (m_super_blk->version == SUPERBLOCK_VERSION_1_2) {
+    if (m_super_blk->version < SUPERBLOCK_VERSION_1_3) {
         // we only support 1.2 to 1.3 upgrade;
         return CURRENT_SUPERBLOCK_VERSION == SUPERBLOCK_VERSION_1_3;
     } else {
@@ -411,7 +401,7 @@ inline bool PhysicalDev::validate_device() const {
 }
 
 inline void PhysicalDev::write_superblock() {
-    const auto superblock_size{SUPERBLOCK_SIZE(get_atomic_page_size())};
+    const auto superblock_size{SUPERBLOCK_SIZE(get_page_size())};
     const auto bytes{m_drive_iface->sync_write(m_iodev.get(), reinterpret_cast< const char* >(m_super_blk),
                                                static_cast< uint32_t >(superblock_size), 0)};
     if (sisl_unlikely((bytes < 0) || (static_cast< size_t >(bytes) != superblock_size))) {
@@ -421,7 +411,7 @@ inline void PhysicalDev::write_superblock() {
 }
 
 inline void PhysicalDev::read_superblock() {
-    const auto superblock_size{SUPERBLOCK_SIZE(get_atomic_page_size())};
+    const auto superblock_size{SUPERBLOCK_SIZE(get_page_size())};
     const auto bytes{m_drive_iface->sync_read(m_iodev.get(), reinterpret_cast< char* >(m_super_blk),
                                               static_cast< uint32_t >(superblock_size), 0)};
     if (sisl_unlikely((bytes < 0) || (static_cast< size_t >(bytes) != superblock_size))) {
@@ -603,7 +593,7 @@ uint64_t PhysicalDev::get_stream_size() const {
     const auto page_size = get_page_size();
 
     // TODO: replace 10 with iomgr api
-    return sisl::round_down((get_size() / 10), page_size);
+    return sisl::round_down((get_size() / get_num_streams()), page_size);
 }
 
 uint64_t PhysicalDev::get_stream_aligned_offset() const { return (get_size() / 10); }
@@ -612,6 +602,7 @@ uint32_t PhysicalDev::get_align_size() const { return m_super_blk->dev_attr.alig
 uint32_t PhysicalDev::get_page_size() const { return m_super_blk->dev_attr.phys_page_size; }
 
 uint32_t PhysicalDev::get_atomic_page_size() const { return m_super_blk->dev_attr.atomic_phys_page_size; }
+uint32_t PhysicalDev::get_num_streams() const { return m_super_blk->dev_attr.num_streams; }
 
 #if 0
 uint64_t PhysicalDev::get_stream_offset_multiple() {
