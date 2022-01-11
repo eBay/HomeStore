@@ -511,6 +511,8 @@ protected:
     static bool m_shutdown_cmplt;
     static iomgr::io_thread_t m_thread_id;
     static iomgr::io_thread_t m_slow_path_thread_id;
+    static std::vector< iomgr::io_thread_t > m_btree_write_thread_ids; // user thread for btree write;
+    static std::atomic< uint32_t > m_btree_write_thrd_idx;
     static iomgr::timer_handle_t m_hs_cp_timer_hdl;
     static void* m_cp_meta_blk;
     static std::once_flag m_flag;
@@ -529,6 +531,8 @@ protected:
 
     /************************ static private functions **************/
     static void init();
+    static void start_threads();
+    static bool new_thread_model_on();
     /* it frees the blks and insert it in cp free blk list. It is called when there is no read pending on this blk */
     static void safe_to_free_blk(const Free_Blk_Entry& fbe);
 };
@@ -708,6 +712,7 @@ private:
     void journal_write(const indx_req_ptr& ireq);
     void journal_comp_cb(logstore_req* const req, const logdev_key ld_key);
     btree_status_t update_indx_tbl(const indx_req_ptr& ireq, const bool is_active);
+    btree_status_t update_indx_tbl_new(const indx_req_ptr& ireq, const bool is_active);
     indx_cp_ptr get_indx_cp(hs_cp* const hcp);
     void destroy_indx_tbl();
     void add_prepare_cb_list(const prepare_cb& cb);
@@ -744,6 +749,8 @@ private:
                            homeds::btree::BtreeQueryCursor& unmap_btree_cur, const uint8_t* const key);
 
     void free_blkid_and_send_completion(const indx_req_ptr& ireq);
+
+    iomgr::io_thread_t get_next_btree_write_thread();
 };
 
 /*************************************************** indx request ***********************************/

@@ -187,6 +187,7 @@ void LogStoreFamily::on_batch_completion(HomeLogStore* log_store, const uint32_t
     if (nremaining_in_batch == 0) {
         // This batch is completed, call all log stores participated in this batch about the end of batch
         HS_LOG_ASSERT_GT(s_cur_flush_batch_stores.size(), 0U, "Expecting one store to be flushed in batch");
+
         for (auto& l : s_cur_flush_batch_stores) {
             l->on_batch_completion(flush_ld_key);
         }

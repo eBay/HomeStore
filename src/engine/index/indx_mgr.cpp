@@ -1165,13 +1165,29 @@ void IndxMgr::do_remaining_unmap(void* unmap_meta_blk_cntx, const sisl::byte_arr
 
 void IndxMgr::unmap(const indx_req_ptr& ireq) { update_indx(ireq); }
 
-void IndxMgr::update_indx(const indx_req_ptr& ireq) {
-    /* Entered into critical section. CP is not triggered in this critical section */
-    ireq->hcp = m_cp_mgr->cp_io_enter();
-    ireq->icp = get_indx_cp(ireq->hcp);
+// round robin
+iomgr::io_thread_t IndxMgr::get_next_btree_write_thread() {
+    // it is okay if m_btree_write_thrd_idx overflows;
+    return m_btree_write_thread_ids[m_btree_write_thrd_idx++ % HS_DYNAMIC_CONFIG(generic.num_btree_write_threads)];
+}
 
-    ireq->state = indx_req_state::active_btree;
-    update_indx_internal(ireq);
+void IndxMgr::update_indx(const indx_req_ptr& ireq) {
+    if (new_thread_model_on()) {
+        /* do btree write in user thread */
+        iomanager.run_on(get_next_btree_write_thread(), [this, ireq](const io_thread_addr_t addr) mutable {
+            /* Entered into critical section. CP is not triggered in this critical section */
+            ireq->hcp = m_cp_mgr->cp_io_enter();
+            ireq->icp = get_indx_cp(ireq->hcp);
+            ireq->state = indx_req_state::active_btree;
+            update_indx_internal(ireq);
+        });
+    } else {
+        /* Entered into critical section. CP is not triggered in this critical section */
+        ireq->hcp = m_cp_mgr->cp_io_enter();
+        ireq->icp = get_indx_cp(ireq->hcp);
+        ireq->state = indx_req_state::active_btree;
+        update_indx_internal(ireq);
+    }
 }
 
 /* * this function can be called either in fast path or slow path * */
@@ -1511,8 +1527,6 @@ void IndxMgr::cp_io_exit(hs_cp* const hcp) { m_cp_mgr->cp_io_exit(hcp); }
 /********************** Static Indx mgr functions *********************************/
 
 void StaticIndxMgr::init() {
-    std::atomic< int64_t > thread_cnt{0};
-    int expected_thread_cnt{0};
     m_hs = HomeStoreBase::safe_instance();
     m_shutdown_started.store(false);
     try_blkalloc_checkpoint.store(false);
@@ -1527,8 +1541,17 @@ void StaticIndxMgr::init() {
 
     m_cp_mgr = std::unique_ptr< HomeStoreCPMgr >(new HomeStoreCPMgr{});
     m_read_blk_tracker = std::unique_ptr< Blk_Read_Tracker >(new Blk_Read_Tracker{IndxMgr::safe_to_free_blk});
-    /* start the timer for blkalloc checkpoint */
 
+    start_threads();
+
+    IndxMgr::m_inited.store(true, std::memory_order_release);
+}
+
+void StaticIndxMgr::start_threads() {
+    std::atomic< int64_t > thread_cnt{0};
+    int expected_thread_cnt{0};
+
+    /* start the timer for blkalloc checkpoint */
     LOGINFO("blkalloc cp timer is set to {} usec", HS_DYNAMIC_CONFIG(generic.blkalloc_cp_timer_us));
     m_hs_cp_timer_hdl =
         iomanager.schedule_global_timer(HS_DYNAMIC_CONFIG(generic.blkalloc_cp_timer_us) * 1000, true, nullptr,
@@ -1544,7 +1567,8 @@ void StaticIndxMgr::init() {
     sthread.detach();
     expected_thread_cnt++;
 
-    auto sthread2 = sisl::named_thread("indx_mgr_btree_slow", [&thread_cnt]() {
+    /* start btree slow path thread */
+    sthread = sisl::named_thread("indx_mgr_btree_slow", [&thread_cnt]() {
         iomanager.run_io_loop(false, nullptr, [&thread_cnt](bool is_started) {
             if (is_started) {
                 IndxMgr::m_slow_path_thread_id = iomanager.iothread_self();
@@ -1553,12 +1577,32 @@ void StaticIndxMgr::init() {
         });
     });
 
-    sthread2.detach();
+    sthread.detach();
     ++expected_thread_cnt;
 
+    if (new_thread_model_on()) {
+        const auto nthreads = HS_DYNAMIC_CONFIG(generic.num_btree_write_threads);
+        IndxMgr::m_btree_write_thread_ids.reserve(nthreads);
+        for (uint32_t i = 0; i < nthreads; ++i) {
+            /* start user thread for btree write operations */
+            sthread = sisl::named_thread("indx_mgr_btree_write_" + std::to_string(i), [&thread_cnt]() {
+                iomanager.run_io_loop(false, nullptr, [&thread_cnt](bool is_started) {
+                    if (is_started) {
+                        IndxMgr::m_btree_write_thread_ids.push_back(iomanager.iothread_self());
+                        ++thread_cnt;
+                    }
+                });
+            });
+
+            sthread.detach();
+            ++expected_thread_cnt;
+        }
+    }
+
     while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
-    IndxMgr::m_inited.store(true, std::memory_order_release);
 }
+
+bool StaticIndxMgr::new_thread_model_on() { return HS_DYNAMIC_CONFIG(generic.new_thread_model_on); }
 
 void StaticIndxMgr::flush_hs_free_blks(hs_cp* const hcp) {
     for (auto it{std::begin(hcp->indx_cp_list)}; it != std::end(hcp->indx_cp_list); ++it) {
@@ -1800,6 +1844,8 @@ std::unique_ptr< HomeStoreCPMgr > StaticIndxMgr::m_cp_mgr;
 std::atomic< bool > StaticIndxMgr::m_shutdown_started;
 iomgr::io_thread_t StaticIndxMgr::m_thread_id;
 iomgr::io_thread_t StaticIndxMgr::m_slow_path_thread_id;
+std::vector< iomgr::io_thread_t > StaticIndxMgr::m_btree_write_thread_ids;
+std::atomic< uint32_t > StaticIndxMgr::m_btree_write_thrd_idx{0};
 iomgr::timer_handle_t StaticIndxMgr::m_hs_cp_timer_hdl = iomgr::null_timer_handle;
 void* StaticIndxMgr::m_cp_meta_blk{nullptr};
 std::once_flag StaticIndxMgr::m_flag;

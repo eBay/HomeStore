@@ -204,8 +204,13 @@ int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_nu
     const auto idx = m_log_idx.fetch_add(1, std::memory_order_acq_rel);
     auto threshold_size = LogDev::flush_data_threshold_size();
     m_log_records->create(idx, store_id, seq_num, data, cb_context);
-    if (prev_size < threshold_size && ((prev_size + data.size) >= threshold_size) && !get_flush_status()) {
-        HomeLogStoreMgrSI().send_flush_msg();
+
+    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
+        flush_if_needed();
+    } else {
+        if (prev_size < threshold_size && ((prev_size + data.size) >= threshold_size) && !get_flush_status()) {
+            HomeLogStoreMgrSI().send_flush_msg();
+        }
     }
     return idx;
 }
@@ -327,7 +332,8 @@ LogGroup* LogDev::prepare_flush(const int32_t estimated_records) {
     lg->m_log_dev_offset = m_blkstore->alloc_next_append_blk(lg->header()->total_size());
 
     HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
-    assert(lg->header()->oob_data_offset > 0);
+    HS_DBG_ASSERT_GT(lg->header()->oob_data_offset, 0);
+
     THIS_LOGDEV_LOG(DEBUG, "Flushing upto log_idx={}", flushing_upto_idx);
     THIS_LOGDEV_LOG(DEBUG, "Log Group: {}", *lg);
     return lg;
@@ -362,6 +368,7 @@ bool LogDev::flush_if_needed() {
         if (m_last_flush_idx >= new_idx) {
             THIS_LOGDEV_LOG(TRACE, "Log idx {} is just flushed", new_idx);
             unlock_flush();
+
             return false;
         }
         auto* const lg{
@@ -369,6 +376,7 @@ bool LogDev::flush_if_needed() {
         if (sisl_unlikely(!lg)) {
             THIS_LOGDEV_LOG(TRACE, "Log idx {} last_flush_idx {} prepare flush failed", new_idx, m_last_flush_idx);
             unlock_flush();
+
             return false;
         }
         auto sz = m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
@@ -389,7 +397,15 @@ void LogDev::do_write_logs(LogGroup* const lg) {
     THIS_LOGDEV_LOG(TRACE, "vdev offset {} log group total size {}", lg->m_log_dev_offset, lg->header()->total_size());
     auto req{logdev_req::make_request()};
     req->m_log_group = lg;
-    req->isSyncCall = true;
+
+    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
+        /* do async call for new threading model since we will be calling write logs in spdk thread */
+        req->isSyncCall = false;
+    } else {
+        /* old thread model do sync IO since write logs in flush thread which is user thread */
+        req->isSyncCall = true;
+    }
+
     try {
         // write log
         m_blkstore->pwritev(lg->iovecs().data(), static_cast< int >(lg->iovecs().size()), lg->m_log_dev_offset,
@@ -398,10 +414,11 @@ void LogDev::do_write_logs(LogGroup* const lg) {
         THIS_LOGDEV_LOG(ERROR, "Exception: {}", e.what());
         req->err = std::make_error_condition(std::errc::io_error);
     }
-    process_logdev_completions(boost::static_pointer_cast< virtualdev_req >(req));
+
+    if (req->isSyncCall) { process_logdev_completions(boost::static_pointer_cast< virtualdev_req >(req)); }
 }
 
-void LogDev::do_flush(LogGroup* const lg) {
+void LogDev::do_flush_internal(LogGroup* const lg) {
     if (is_data_drive_hdd()) {
         auto* data_blkstore{m_hb->get_data_blkstore()};
         data_blkstore->get_vdev()->fsync_pdevs(
@@ -409,6 +426,21 @@ void LogDev::do_flush(LogGroup* const lg) {
             reinterpret_cast< uint8_t* >(lg));
     } else {
         do_write_logs(lg);
+    }
+}
+
+void LogDev::do_flush(LogGroup* const lg) {
+    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
+        if (iomanager.am_i_tight_loop_reactor() == false) {
+            /* send message to worker thread to issue the io if we are in user thread */
+            iomanager.run_on(iomgr::thread_regex::random_worker,
+                             [this, lg]([[maybe_unused]] const io_thread_addr_t addr) { do_flush_internal(lg); });
+        } else {
+            /* go ahead send the io if we are already in worker thread */
+            do_flush_internal(lg);
+        }
+    } else {
+        do_flush_internal(lg);
     }
 }
 
@@ -429,34 +461,41 @@ void LogDev::process_logdev_completions(const boost::intrusive_ptr< virtualdev_r
     }
 }
 
-void LogDev::on_flush_completion(LogGroup* const lg) {
+void LogDev::on_flush_completion_internal(LogGroup* const lg) {
     lg->m_flush_finish_time = Clock::now();
-    iomanager.run_on(iomgr::thread_regex::random_worker, [this, lg]([[maybe_unused]] const io_thread_addr_t addr) {
-        lg->m_post_flush_msg_rcvd_time = Clock::now();
-        THIS_LOGDEV_LOG(TRACE, "Flush completed for logid[{} - {}]", lg->m_flush_log_idx_from,
-                        lg->m_flush_log_idx_upto);
+    lg->m_post_flush_msg_rcvd_time = Clock::now();
+    THIS_LOGDEV_LOG(TRACE, "Flush completed for logid[{} - {}]", lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
 
-        m_log_records->complete(lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
-        m_last_flush_idx = lg->m_flush_log_idx_upto;
-        const auto flush_ld_key{logdev_key{m_last_flush_idx, lg->m_log_dev_offset + lg->header()->total_size()}};
-        m_last_crc = lg->header()->cur_grp_crc;
+    m_log_records->complete(lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
+    m_last_flush_idx = lg->m_flush_log_idx_upto;
+    const auto flush_ld_key{logdev_key{m_last_flush_idx, lg->m_log_dev_offset + lg->header()->total_size()}};
+    m_last_crc = lg->header()->cur_grp_crc;
 
-        auto from_indx = lg->m_flush_log_idx_from;
-        auto upto_indx = lg->m_flush_log_idx_upto;
-        auto dev_offset = lg->m_log_dev_offset;
-        for (auto idx = from_indx; idx <= upto_indx; ++idx) {
-            auto& record{m_log_records->at(idx)};
-            m_append_comp_cb(record.store_id, logdev_key{idx, dev_offset}, flush_ld_key, upto_indx - idx,
-                             record.context);
-        }
-        lg->m_post_flush_process_done_time = Clock::now();
-        unlock_flush();
-        HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logdev_flush_done_msg_time_ns,
-                          get_elapsed_time_us(lg->m_flush_finish_time, lg->m_post_flush_msg_rcvd_time));
-        HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logdev_post_flush_processing_latency,
-                          get_elapsed_time_us(lg->m_post_flush_msg_rcvd_time, lg->m_post_flush_process_done_time));
-        m_hb->call_multi_completions();
-    });
+    auto from_indx = lg->m_flush_log_idx_from;
+    auto upto_indx = lg->m_flush_log_idx_upto;
+    auto dev_offset = lg->m_log_dev_offset;
+    for (auto idx = from_indx; idx <= upto_indx; ++idx) {
+        auto& record{m_log_records->at(idx)};
+        m_append_comp_cb(record.store_id, logdev_key{idx, dev_offset}, flush_ld_key, upto_indx - idx, record.context);
+    }
+    lg->m_post_flush_process_done_time = Clock::now();
+    unlock_flush();
+    HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logdev_flush_done_msg_time_ns,
+                      get_elapsed_time_us(lg->m_flush_finish_time, lg->m_post_flush_msg_rcvd_time));
+    HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logdev_post_flush_processing_latency,
+                      get_elapsed_time_us(lg->m_post_flush_msg_rcvd_time, lg->m_post_flush_process_done_time));
+    m_hb->call_multi_completions();
+}
+
+void LogDev::on_flush_completion(LogGroup* const lg) {
+    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
+        /* no need to send message to worker in new thread model */
+        on_flush_completion_internal(lg);
+    } else {
+        iomanager.run_on(iomgr::thread_regex::random_worker, [this, lg]([[maybe_unused]] const io_thread_addr_t addr) {
+            on_flush_completion_internal(lg);
+        });
+    }
 }
 
 bool LogDev::try_lock_flush(const flush_blocked_callback& cb) {
@@ -503,10 +542,12 @@ void LogDev::unlock_flush() {
 
     // Try to do chain flush if its really needed.
     THIS_LOGDEV_LOG(TRACE, "Unlocked the flush, try doing chain flushing if needed");
+
+    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) { flush_if_needed(); }
 }
 
 uint64_t LogDev::truncate(const logdev_key& key) {
-    assert(key.idx >= m_last_truncate_idx);
+    HS_DBG_ASSERT_GE(key.idx, m_last_truncate_idx);
     const uint64_t num_records_to_truncate{static_cast< uint64_t >(key.idx - m_last_truncate_idx)};
     if (num_records_to_truncate > 0) {
         HS_PERIODIC_LOG(INFO, logstore, "Truncating log device upto log_id={} vdev_offset={} truncated {} log records",

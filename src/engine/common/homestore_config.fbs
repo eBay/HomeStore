@@ -129,6 +129,12 @@ table Generic {
 
     // max iteration of unmap done in a cp
     max_unmap_iterations : uint32 = 64;
+
+    // new thread model feature 
+    new_thread_model_on : bool = true;
+
+    // number of threads for btree writes;
+    num_btree_write_threads : uint32 = 2;
 }
 
 table ResourceLimits {

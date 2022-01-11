@@ -726,8 +726,10 @@ private:
     [[nodiscard]] LogGroup* prepare_flush(const int32_t estimated_record);
     void do_write_logs(LogGroup* const lg);
     void do_flush(LogGroup* const lg);
+    void do_flush_internal(LogGroup* const lg);
     void flush_by_size(const uint32_t min_threshold, const uint32_t new_record_size = 0, const logid_t new_idx = -1);
     void on_flush_completion(LogGroup* const lg);
+    void on_flush_completion_internal(LogGroup* const lg);
     void do_load(const off_t offset);
 
 #if 0

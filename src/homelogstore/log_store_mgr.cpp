@@ -120,6 +120,14 @@ void HomeLogStoreMgr::stop_flush_thread() {
     });
 }
 
+uint64_t HomeLogStoreMgr::num_try_flush_iteration() {
+    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
+        return 0;
+    } else {
+        return HS_DYNAMIC_CONFIG(logstore.try_flush_iteration);
+    }
+}
+
 void HomeLogStoreMgr::flush_if_needed() {
     static uint32_t spin_cnt{0};
     if (!spin_cnt) {
@@ -132,7 +140,8 @@ void HomeLogStoreMgr::flush_if_needed() {
     for (auto& f : m_logstore_families) {
         f->logdev().flush_if_needed();
     }
-    if (!m_flush_thread_stopped && spin_cnt < HS_DYNAMIC_CONFIG(logstore.try_flush_iteration)) {
+
+    if (!m_flush_thread_stopped && spin_cnt < num_try_flush_iteration()) {
         iomanager.this_reactor()->set_poll_interval(0);
     } else {
         spin_cnt = 0;
