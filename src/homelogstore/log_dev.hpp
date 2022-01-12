@@ -693,7 +693,7 @@ public:
      * @brief Unblock the flush. While unblocking if there are other requests to block or any flush pending it first
      * executes them before unblocking
      */
-    void unlock_flush();
+    void unlock_flush(bool do_flush = true);
 
     /**
      * @brief : truncate up to input log id;

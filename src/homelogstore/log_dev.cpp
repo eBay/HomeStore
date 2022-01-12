@@ -367,16 +367,14 @@ bool LogDev::flush_if_needed() {
         auto new_idx = m_log_idx.load(std::memory_order_relaxed) - 1;
         if (m_last_flush_idx >= new_idx) {
             THIS_LOGDEV_LOG(TRACE, "Log idx {} is just flushed", new_idx);
-            unlock_flush();
-
+            unlock_flush(false);
             return false;
         }
         auto* const lg{
             prepare_flush(new_idx - m_last_flush_idx + 4)}; // Estimate 4 more extra in case of parallel writes
         if (sisl_unlikely(!lg)) {
             THIS_LOGDEV_LOG(TRACE, "Log idx {} last_flush_idx {} prepare flush failed", new_idx, m_last_flush_idx);
-            unlock_flush();
-
+            unlock_flush(false);
             return false;
         }
         auto sz = m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
@@ -519,7 +517,7 @@ bool LogDev::try_lock_flush(const flush_blocked_callback& cb) {
     return true;
 }
 
-void LogDev::unlock_flush() {
+void LogDev::unlock_flush(bool do_flush) {
     std::vector< flush_blocked_callback >* flush_q{nullptr};
 
     if (m_block_flush_q != nullptr) {
@@ -543,7 +541,7 @@ void LogDev::unlock_flush() {
     // Try to do chain flush if its really needed.
     THIS_LOGDEV_LOG(TRACE, "Unlocked the flush, try doing chain flushing if needed");
 
-    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) { flush_if_needed(); }
+    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on) && do_flush) { flush_if_needed(); }
 }
 
 uint64_t LogDev::truncate(const logdev_key& key) {
