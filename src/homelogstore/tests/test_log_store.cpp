@@ -400,11 +400,28 @@ public:
         static bool inited;
 
         inited = false;
-        LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
-        if (!restart) init_files(ndevices, dev_size);
-        for (uint32_t i{0}; i < ndevices; ++i) {
-            const std::filesystem::path fpath{s_fpath_root + std::to_string(i + 1)};
-            device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
+
+        if (SISL_OPTIONS.count("device_list")) {
+            m_dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
+            std::string dev_list_str;
+            for (const auto& d : m_dev_names) {
+                dev_list_str += d;
+            }
+            LOGINFO("Taking input dev_list: {}", dev_list_str);
+
+            /* if user customized file/disk names */
+            for (uint32_t i{0}; i < m_dev_names.size(); ++i) {
+                const std::filesystem::path fpath{m_dev_names[i]};
+                device_info.emplace_back(m_dev_names[i], HSDevType::Data);
+            }
+        } else {
+            /* create files */
+            LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
+            if (!restart) init_files(ndevices, dev_size);
+            for (uint32_t i{0}; i < ndevices; ++i) {
+                const std::filesystem::path fpath{s_fpath_root + std::to_string(i + 1)};
+                device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
+            }
         }
 
         bool is_spdk{SISL_OPTIONS["spdk"].as< bool >()};
@@ -516,6 +533,7 @@ public:
 
 private:
     const static std::string s_fpath_root;
+    std::vector< std::string > m_dev_names;
     std::function< void() > m_on_schedule_io_cb;
     test_log_store_comp_cb_t m_io_closure;
     std::vector< std::unique_ptr< SampleLogStoreClient > > m_log_store_clients;
@@ -1165,7 +1183,7 @@ SISL_OPTION_GROUP(test_log_store,
                    ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
                   (dev_size_mb, "", "dev_size_mb", "size of each device in MB",
                    ::cxxopts::value< uint64_t >()->default_value("10240"), "number"),
-                  (dev_names, "", "dev_names", "Device List instead of default created",
+                  (device_list, "", "device_list", "Device List instead of default created",
                    ::cxxopts::value< std::string >(), "/dev/nvme5n1,/dev/nvme5n2"),
                   (num_logstores, "", "num_logstores", "number of log stores",
                    ::cxxopts::value< uint32_t >()->default_value("4"), "number"),

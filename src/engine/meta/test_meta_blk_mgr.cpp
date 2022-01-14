@@ -54,9 +54,12 @@ struct Param {
     bool always_do_overflow;
     bool is_spdk;
     bool is_bitmap;
+    std::vector< std::string > dev_names;
 };
 
 static Param gp;
+
+static const std::string META_FILE_PREFIX{"/tmp/test_meta_blk_mgr_"};
 
 static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, const uint32_t nthreads) {
     std::vector< dev_info > device_info;
@@ -66,14 +69,23 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
     static bool inited;
 
     inited = false;
-    LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
-    for (uint32_t i{0}; i < ndevices; ++i) {
-        const std::filesystem::path fpath{"/tmp/test_meta_blk_mgr_" + std::to_string(i + 1)};
-        std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
-        std::filesystem::resize_file(fpath, dev_size); // set the file size
-        device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
-    }
 
+    if (gp.dev_names.size()) {
+        /* if user customized file/disk names */
+        for (uint32_t i{0}; i < gp.dev_names.size(); ++i) {
+            const std::filesystem::path fpath{gp.dev_names[i]};
+            device_info.emplace_back(gp.dev_names[i], HSDevType::Data);
+        }
+    } else {
+        /* create files */
+        LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
+        for (uint32_t i{0}; i < ndevices; ++i) {
+            const std::filesystem::path fpath{META_FILE_PREFIX + std::to_string(i + 1)};
+            std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
+            std::filesystem::resize_file(fpath, dev_size); // set the file size
+            device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
+        }
+    }
     LOGINFO("Starting iomgr with {} threads", nthreads);
     iomanager.start(nthreads, gp.is_spdk);
 
@@ -179,7 +191,7 @@ protected:
     [[nodiscard]] uint64_t total_size_written(const void* const cookie) { return m_mbm->get_meta_size(cookie); }
 
     void do_write_to_full() {
-        static constexpr uint64_t blkstore_overhead = 2 * 1024ul * 1024ul; // 2MB
+        static constexpr uint64_t blkstore_overhead = 4 * 1024ul * 1024ul; // 4MB
         ssize_t free_size{static_cast< ssize_t >(m_mbm->get_size() - m_mbm->get_used_size() - blkstore_overhead)};
 
         HS_REL_ASSERT_GT(free_size, 0);
@@ -518,8 +530,22 @@ protected:
         return false;
     }
 
+    void remove_files() {
+        /* no need to delete the user created file/disk */
+        if (gp.dev_names.size() == 0) {
+            auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
+            for (uint32_t i{0}; i < ndevices; ++i) {
+                const std::filesystem::path fpath{META_FILE_PREFIX + std::to_string(i + 1)};
+                if (std::filesystem::exists(fpath) && std::filesystem::is_regular_file(fpath)) {
+                    std::filesystem::remove(fpath);
+                }
+            }
+        }
+    }
+
     void shutdown() {
         LOGINFO("shutting down homeblks");
+        remove_files();
         VolInterface::shutdown();
         {
             std::unique_lock< std::mutex > lk(m_mtx);
@@ -637,6 +663,8 @@ SISL_OPTION_GROUP(
     (num_threads, "", "num_threads", "number of threads", ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
     (num_devs, "", "num_devs", "number of devices to create", ::cxxopts::value< uint32_t >()->default_value("2"),
      "number"),
+    (device_list, "", "device_list", "List of device paths", ::cxxopts::value< std::vector< std::string > >(),
+     "path [...]"),
     (fixed_write_size_enabled, "", "fixed_write_size_enabled", "fixed write size enabled 0 or 1",
      ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (fixed_write_size, "", "fixed_write_size", "fixed write size", ::cxxopts::value< uint32_t >()->default_value("512"),
@@ -678,6 +706,15 @@ int main(int argc, char* argv[]) {
     gp.always_do_overflow = SISL_OPTIONS["overflow"].as< uint32_t >();
     gp.is_spdk = SISL_OPTIONS["spdk"].as< bool >();
     gp.is_bitmap = SISL_OPTIONS["bitmap"].as< bool >();
+
+    if (SISL_OPTIONS.count("device_list")) {
+        gp.dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
+        std::string dev_list_str;
+        for (const auto& d : gp.dev_names) {
+            dev_list_str += d;
+        }
+        LOGINFO("Taking input dev_list: {}", dev_list_str);
+    }
 
     if ((gp.per_update == 0) || (gp.per_write == 0) || (gp.per_update + gp.per_write + gp.per_remove != 100)) {
         gp.per_update = 20;
