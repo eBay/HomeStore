@@ -724,6 +724,7 @@ private:
     }
 
     [[nodiscard]] LogGroup* prepare_flush(const int32_t estimated_record);
+
     void do_write_logs(LogGroup* const lg);
     void do_flush(LogGroup* const lg);
     void do_flush_internal(LogGroup* const lg);

@@ -33,10 +33,17 @@
 #include "engine/common/resource_mgr.hpp"
 
 namespace homestore {
+bool JournalVirtualDev::is_alloc_accross_chunk(const size_t size) {
+    off_t offset_in_chunk{0};
+    const off_t end_offset{get_tail_offset()};
+    uint32_t dev_id{0}, chunk_id{0};
 
-off_t JournalVirtualDev::alloc_next_append_blk(const size_t size, const bool chunk_overlap_ok) {
-    HS_DBG_ASSERT_EQ(chunk_overlap_ok, false);
+    logical_to_dev_offset(end_offset, dev_id, chunk_id, offset_in_chunk);
 
+    return (offset_in_chunk + size > m_chunk_size);
+}
+
+off_t JournalVirtualDev::alloc_next_append_blk_internal(const size_t size) {
     if (get_used_size() + size > get_size()) {
         // not enough space left;
         HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}", m_write_sz_in_total.load(),
@@ -104,6 +111,26 @@ off_t JournalVirtualDev::alloc_next_append_blk(const size_t size, const bool chu
     // assert that returnning logical offset is in good range;
     HS_DBG_ASSERT_LE(static_cast< uint64_t >(offset), get_size());
     return offset;
+}
+
+void JournalVirtualDev::alloc_next_append_blk_async(const size_t size, const alloc_next_blk_cb_t& cb) {
+    if (sisl_unlikely(is_alloc_accross_chunk(size))) {
+        // send message to user thread to do the sync io
+        iomanager.run_on(iomgr::thread_regex::least_busy_user,
+                         [this, size, cb]([[maybe_unused]] const io_thread_addr_t addr) {
+                             /* send callback to caller */
+                             cb(alloc_next_append_blk_internal(size));
+                         });
+    } else {
+        /* if we are going to alloc within a chunk, no sync write will happen, so just return it in caller's thread */
+        cb(alloc_next_append_blk_internal(size));
+    }
+}
+
+off_t JournalVirtualDev::alloc_next_append_blk(const size_t size, const bool chunk_overlap_ok) {
+    HS_DBG_ASSERT_EQ(chunk_overlap_ok, false);
+
+    return alloc_next_append_blk_internal(size);
 }
 
 ssize_t JournalVirtualDev::write(const void* buf, const size_t count,

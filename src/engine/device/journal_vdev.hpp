@@ -8,6 +8,7 @@
 #include "virtual_dev.hpp"
 
 namespace homestore {
+typedef std::function< void(const off_t ret_off) > alloc_next_blk_cb_t;
 
 class JournalVirtualDev : public VirtualDev {
     struct Chunk_EOF_t {
@@ -69,6 +70,7 @@ public:
      * write_at_offset(offset_1);
      */
     off_t alloc_next_append_blk(const size_t size, const bool chunk_overlap_ok = false);
+    void alloc_next_append_blk_async(const size_t size, const alloc_next_blk_cb_t& cb);
 
     /**
      * @brief : writes up to count bytes from the buffer starting at buf.
@@ -362,6 +364,10 @@ private:
                                    off_t& offset_in_chunk) const;
 
     void high_watermark_check();
+
+    off_t alloc_next_append_blk_internal(const size_t size);
+
+    bool is_alloc_accross_chunk(const size_t size);
 };
 
 } // namespace homestore

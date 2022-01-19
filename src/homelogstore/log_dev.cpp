@@ -329,9 +329,12 @@ LogGroup* LogDev::prepare_flush(const int32_t estimated_records) {
     lg->m_flush_log_idx_from = m_last_flush_idx + 1;
     lg->m_flush_log_idx_upto = flushing_upto_idx;
     HS_DBG_ASSERT_GE(lg->m_flush_log_idx_upto, lg->m_flush_log_idx_from, "log indx upto is smaller then log indx from");
-    lg->m_log_dev_offset = m_blkstore->alloc_next_append_blk(lg->header()->total_size());
 
-    HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
+    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on) == false) {
+        lg->m_log_dev_offset = m_blkstore->alloc_next_append_blk(lg->header()->total_size());
+        HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
+    }
+
     HS_DBG_ASSERT_GT(lg->header()->oob_data_offset, 0);
 
     THIS_LOGDEV_LOG(DEBUG, "Flushing upto log_idx={}", flushing_upto_idx);
@@ -370,6 +373,7 @@ bool LogDev::flush_if_needed() {
             unlock_flush(false);
             return false;
         }
+
         auto* const lg{
             prepare_flush(new_idx - m_last_flush_idx + 4)}; // Estimate 4 more extra in case of parallel writes
         if (sisl_unlikely(!lg)) {
@@ -381,11 +385,24 @@ bool LogDev::flush_if_needed() {
         HS_REL_ASSERT_GE((sz - lg->actual_data_size()), 0, "size {} lg size{}", sz, lg->actual_data_size());
 
         THIS_LOGDEV_LOG(TRACE, "Flush prepared, flushing data size={}", lg->actual_data_size());
-        do_flush(lg);
-        return true;
+
+        if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
+            /* new thread model */
+            m_blkstore->alloc_next_append_blk_async(lg->header()->total_size(), [this, lg](off_t ret) {
+                lg->m_log_dev_offset = ret;
+                HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
+                do_flush(lg);
+            });
+            return true;
+        } else {
+            /* old thread model */
+            do_flush(lg);
+            return true;
+        }
     } else {
         return false;
     }
+
     return true;
 }
 
