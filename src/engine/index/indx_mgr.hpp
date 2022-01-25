@@ -370,6 +370,9 @@ public:
     void indx_tbl_cp_done(hs_cp* const hcp);
     void blkalloc_cp_start(hs_cp* const hcp);
     void write_hs_cp_sb(hs_cp* const hcp);
+
+private:
+    void indx_tbl_cp_done_internal(hs_cp* const hcp);
 };
 
 /************************************************ Indx table *****************************************/

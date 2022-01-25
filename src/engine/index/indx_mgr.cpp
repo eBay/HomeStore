@@ -213,6 +213,15 @@ void HomeStoreCPMgr::indx_tbl_cp_done(hs_cp* const hcp) {
         return;
     }
 
+    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
+        iomanager.run_on(IndxMgr::get_thread_id(),
+                         ([this, hcp](const io_thread_addr_t addr) { indx_tbl_cp_done_internal(hcp); }));
+    } else {
+        indx_tbl_cp_done_internal(hcp);
+    }
+}
+
+void HomeStoreCPMgr::indx_tbl_cp_done_internal(hs_cp* const hcp) {
     HS_PERIODIC_LOG(TRACE, cp, "Cp of type {} is completed", (hcp->blkalloc_checkpoint ? "blkalloc" : "Index"));
     if (hcp->indx_cp_list.size()) {
         if (hcp->blkalloc_checkpoint) {
@@ -233,12 +242,12 @@ void HomeStoreCPMgr::indx_tbl_cp_done(hs_cp* const hcp) {
     /* notify all the subsystems. */
     IndxMgr::cp_done(is_blkalloc_cp);
 #ifdef _PRERELEASE
-    if (homestore_flip->test_flip("simulate_cp_hung")) {
-        LOGINFO("flip set for cp hung");
-        return;
-    }
+                             if (homestore_flip->test_flip("simulate_cp_hung")) {
+                                 LOGINFO("flip set for cp hung");
+                                 return;
+                             }
 #endif
-    cp_end(hcp);
+                             cp_end(hcp);
 }
 
 /* This function calls

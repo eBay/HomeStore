@@ -389,8 +389,13 @@ public:
         const size_t cp_id = bcp->cp_id % MAX_CP_CNT;
         CP_PERIODIC_LOG(INFO, cp_id, "Starting btree flush buffers dirty_buf_count={} wb_req_cnt={} flush_cb_size={}",
                         m_dirty_buf_cnt[cp_id].get(), m_req_list[cp_id]->size(), flush_buffer_q.size());
-        iomanager.run_on(m_thread_ids[thread_index],
-                         [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
+        if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
+            iomanager.run_on(iomgr::thread_regex::random_worker,
+                             [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
+        } else {
+            iomanager.run_on(m_thread_ids[thread_index],
+                             [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
+        }
     }
 
     std::string get_cp_flush_status(const btree_cp_ptr& bcp) {
