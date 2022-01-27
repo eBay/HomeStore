@@ -652,27 +652,27 @@ public:
                 device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
                 max_capacity += tcfg.max_disk_capacity;
             }
+        }
 
-            uint32_t hdd_cnt = tcfg.emulate_hdd_cnt;
-            for (auto& dinfo : device_info) {
+        uint32_t hdd_cnt = tcfg.emulate_hdd_cnt;
+        for (auto& dinfo : device_info) {
 
-                auto data_attrs = iomgr::drive_attributes();
-                data_attrs.phys_page_size = tcfg.phy_page_size;
-                data_attrs.align_size = 512;
-                data_attrs.atomic_phys_page_size = tcfg.atomic_phys_page_size;
+            auto data_attrs = iomgr::drive_attributes();
+            data_attrs.phys_page_size = tcfg.phy_page_size;
+            data_attrs.align_size = 512;
+            data_attrs.atomic_phys_page_size = tcfg.atomic_phys_page_size;
 
-                if (hdd_cnt != 0) {
-                    iomgr::DriveInterface::emulate_drive_type(dinfo.dev_names,
-                                                              tcfg.dev_names.empty() ? iomgr::drive_type::file_on_hdd
-                                                                                     : iomgr::drive_type::block_hdd);
-                    data_attrs.align_size = 2 * data_attrs.align_size;
-                    data_attrs.phys_page_size = 2 * tcfg.phy_page_size;
-                    data_attrs.atomic_phys_page_size = 2 * tcfg.atomic_phys_page_size;
-                    data_attrs.num_streams = 10;
-                    --hdd_cnt;
-                }
-                iomgr::DriveInterface::emulate_drive_attributes(dinfo.dev_names, data_attrs);
+            if (hdd_cnt != 0) {
+                iomgr::DriveInterface::emulate_drive_type(dinfo.dev_names,
+                                                          tcfg.dev_names.empty() ? iomgr::drive_type::file_on_hdd
+                                                                                 : iomgr::drive_type::block_hdd);
+                data_attrs.align_size = 2 * data_attrs.align_size;
+                data_attrs.phys_page_size = 2 * tcfg.phy_page_size;
+                data_attrs.atomic_phys_page_size = 2 * tcfg.atomic_phys_page_size;
+                data_attrs.num_streams = 10;
+                --hdd_cnt;
             }
+            iomgr::DriveInterface::emulate_drive_attributes(dinfo.dev_names, data_attrs);
         }
 
         return max_capacity;

@@ -177,7 +177,6 @@ void DeviceManager::init_devices() {
     dm_derived.pdev_hdr->info_offset = static_cast< uint64_t >(reinterpret_cast< uint8_t* >(dm_derived.pdev_info) -
                                                                reinterpret_cast< uint8_t* >(dm_derived.info));
 
-    uint64_t pdev_size{0};
     uint64_t max_dev_offset{0};
     for (const auto& d : m_data_devices) {
         bool is_inited;
@@ -186,18 +185,10 @@ void DeviceManager::init_devices() {
             this, d.dev_names, get_device_open_flags(d.dev_names), sys_uuid, m_pdev_id++, max_dev_offset, true,
             dm_derived.info_size, m_io_comp_cb, &is_inited)};
 
-        LOGINFO("Initializing device name: {}, with system uuid: {}.", d.dev_names, std::ctime(&sys_uuid));
+        LOGINFO("Initializing device name: {}, with system uuid: {} size {}", d.dev_names, std::ctime(&sys_uuid),
+                pdev->get_size());
 
         max_dev_offset += pdev->get_size();
-        if (!pdev_size) {
-            pdev_size = pdev->get_size();
-        } else if (pdev_size != pdev->get_size()) {
-            std::ostringstream ss;
-            ss << "heterogenous disks expected size = " << pdev_size << " found size " << pdev->get_size()
-               << "disk name: " << pdev->get_devname();
-            const std::string s{ss.str()};
-            throw homestore::homestore_exception(s, homestore_error::hetrogenous_disks);
-        }
         const auto id{pdev->get_dev_id()};
         m_data_pdevs[id] = std::move(pdev);
         dm_derived.pdev_info[id] = m_data_pdevs[id]->get_info_blk();
