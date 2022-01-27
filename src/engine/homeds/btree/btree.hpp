@@ -29,6 +29,7 @@
 #include "engine/common/homestore_header.hpp"
 #include "engine/homeds/array/reserve_vector.hpp"
 #include "engine/homeds/thread/lock.hpp"
+#include "test_common/homestore_test_common.hpp"
 
 #include "btree_internal.h"
 #include "btree_node.cpp"
@@ -128,12 +129,12 @@ public:
         FlipCondition null_cond;
         fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &null_cond);
 
-        fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 0, &cond1);
-        fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 1, &cond2);
+        fc->create_condition("number of entries in a node", flip::Operator::EQUAL, 0, &cond1);
+        fc->create_condition("number of entries in a node", flip::Operator::EQUAL, 1, &cond2);
         fc->inject_noreturn_flip("btree_upgrade_node_fail", {cond1, cond2}, freq);
 
-        fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 4, &cond1);
-        fc->create_condition("nuber of entries in a node", flip::Operator::EQUAL, 2, &cond2);
+        fc->create_condition("number of entries in a node", flip::Operator::EQUAL, 4, &cond1);
+        fc->create_condition("number of entries in a node", flip::Operator::EQUAL, 2, &cond2);
 
         fc->inject_retval_flip("btree_delay_and_split", {cond1, cond2}, freq, 20);
         fc->inject_retval_flip("btree_delay_and_split_leaf", {cond1, cond2}, freq, 20);
@@ -141,7 +142,15 @@ public:
         fc->inject_noreturn_flip("btree_leaf_node_split", {null_cond}, freq);
         fc->inject_retval_flip("btree_upgrade_delay", {null_cond}, freq, 20);
         fc->inject_retval_flip("writeBack_completion_req_delay_us", {null_cond}, freq, 20);
-        fc->inject_noreturn_flip("btree_read_fast_path_not_possible", {null_cond}, freq);
+
+        FlipFrequency freq2;
+        auto evnth = 1000000ul;
+
+        const auto flip_every_nth_ptr = std::getenv(FLIP_SLOW_PATH_EVERY_NTH.c_str());
+        if (flip_every_nth_ptr) { evnth = std::stoi(flip_every_nth_ptr); }
+        LOGINFO("Trigger btree slow path read node for every nth: {}", evnth);
+        freq2.set_every_nth(evnth);
+        fc->inject_noreturn_flip("btree_read_fast_path_not_possible", {null_cond}, freq2);
     }
 
     static void set_error_flip() {
