@@ -362,7 +362,7 @@ public:
 
     virtual void register_status_cb(const std::string& module,
                                     const std::function< nlohmann::json(const int verbosity_level) > get_status_cb) = 0;
-
+    virtual iomgr::drive_type data_drive_type() = 0;
 #ifdef _PRERELEASE
     virtual void set_io_flip() = 0;
     virtual void set_error_flip() = 0;

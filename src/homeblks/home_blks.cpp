@@ -1227,4 +1227,12 @@ uint32_t HomeBlks::next_available_hdd_thread_idx() {
     return ret;
 }
 
+iomgr::drive_type HomeBlks::data_drive_type() {
+    if (is_data_drive_hdd()) {
+        return iomgr::drive_type::block_hdd;
+    } else {
+        return iomgr::drive_type::block_nvme;
+    }
+}
+
 bool HomeBlks::m_meta_blk_found = false;
