@@ -170,7 +170,9 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
                          const hs_uuid_t& system_uuid, const uint32_t dev_num, const uint64_t dev_offset,
                          const bool is_init, const uint64_t dm_info_size,
                          const iomgr::io_interface_comp_cb_t& io_comp_cb, bool* const is_inited) :
-        m_mgr{mgr}, m_devname{devname}, m_metrics{devname} {
+        m_mgr{mgr},
+        m_devname{devname},
+        m_metrics{devname} {
     read_and_fill_superblock(oflags);
 
     if (is_init) { m_super_blk->set_system_uuid(system_uuid); }
@@ -596,7 +598,7 @@ uint64_t PhysicalDev::get_stream_size() const {
     return sisl::round_down((get_size() / get_num_streams()), page_size);
 }
 
-uint64_t PhysicalDev::get_stream_aligned_offset() const { return (get_size() / 10); }
+uint64_t PhysicalDev::get_stream_aligned_offset() const { return (get_size() / get_num_streams()); }
 uint32_t PhysicalDev::get_align_size() const { return m_super_blk->dev_attr.align_size; }
 
 uint32_t PhysicalDev::get_page_size() const { return m_super_blk->dev_attr.phys_page_size; }
