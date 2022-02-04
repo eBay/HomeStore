@@ -34,7 +34,7 @@ for opt,arg in opts:
         log_mods = arg
         print(("log_mods (%s)") % (arg))
     if opt in ('-e', '--emulate_hdd'):
-        emulate_hdd = "--emulate_hdd_cnt " + arg 
+        emulate_hdd = " --emulate_hdd_cnt " + arg 
         print(("log_mods (%s)") % (arg))
 
 addln_opts = ' '
