@@ -149,7 +149,14 @@ void CPWatchdog::cp_watchdog_timer() {
     }
 
     // check if enough time passed since last state change
-    if (get_elapsed_time_ms(last_state_ch_time) < 12 * m_timer_sec * 1000) { return; }
+    uint32_t max_time_multiplier = 12;
+    if (get_elapsed_time_ms(last_state_ch_time) < max_time_multiplier * m_timer_sec * 1000) {
+        if (m_last_hs_state == hs_cp_state::flushing_indx_tbl) {
+            // try to increase queue depth to increase cp speed
+            ResourceMgrSI().increase_dirty_buf_qd();
+        }
+        return;
+    }
 
     HS_REL_ASSERT(0, "cp seems to be stuck. current state is {} total time elapsed {}", m_last_hs_state,
                   get_elapsed_time_ms(last_state_ch_time));
@@ -182,6 +189,17 @@ void HomeStoreCPMgr::shutdown() {
 
 void HomeStoreCPMgr::cp_start(hs_cp* const hcp) {
     hcp->hs_state = hs_cp_state::flushing_indx_tbl;
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("simulate_slow_dirty_buffer")) {
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine engine{rd()};
+        static thread_local std::uniform_int_distribution< uint32_t > dist{0, max_qd_multiplier};
+        auto qd = dist(engine);
+        for (uint32_t i = 0; i < qd; ++i) {
+            ResourceMgrSI().increase_dirty_buf_qd();
+        }
+    }
+#endif
     iomanager.run_on(IndxMgr::get_thread_id(), [this, hcp](const io_thread_addr_t addr) {
         hcp->ref_cnt.increment(1);
         HS_PERIODIC_LOG(TRACE, cp, "Starting cp of type {}, number of indexes in cp={}, hcp ref_cnt: {}",
@@ -213,12 +231,8 @@ void HomeStoreCPMgr::indx_tbl_cp_done(hs_cp* const hcp) {
         return;
     }
 
-    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
-        iomanager.run_on(IndxMgr::get_thread_id(),
-                         ([this, hcp](const io_thread_addr_t addr) { indx_tbl_cp_done_internal(hcp); }));
-    } else {
-        indx_tbl_cp_done_internal(hcp);
-    }
+    iomanager.run_on(IndxMgr::get_thread_id(),
+                     ([this, hcp](const io_thread_addr_t addr) { indx_tbl_cp_done_internal(hcp); }));
 }
 
 void HomeStoreCPMgr::indx_tbl_cp_done_internal(hs_cp* const hcp) {
@@ -1181,22 +1195,14 @@ iomgr::io_thread_t IndxMgr::get_next_btree_write_thread() {
 }
 
 void IndxMgr::update_indx(const indx_req_ptr& ireq) {
-    if (new_thread_model_on()) {
-        /* do btree write in user thread */
-        iomanager.run_on(get_next_btree_write_thread(), [this, ireq](const io_thread_addr_t addr) mutable {
-            /* Entered into critical section. CP is not triggered in this critical section */
-            ireq->hcp = m_cp_mgr->cp_io_enter();
-            ireq->icp = get_indx_cp(ireq->hcp);
-            ireq->state = indx_req_state::active_btree;
-            update_indx_internal(ireq);
-        });
-    } else {
+    /* do btree write in user thread */
+    iomanager.run_on(get_next_btree_write_thread(), [this, ireq](const io_thread_addr_t addr) mutable {
         /* Entered into critical section. CP is not triggered in this critical section */
         ireq->hcp = m_cp_mgr->cp_io_enter();
         ireq->icp = get_indx_cp(ireq->hcp);
         ireq->state = indx_req_state::active_btree;
         update_indx_internal(ireq);
-    }
+    });
 }
 
 /* * this function can be called either in fast path or slow path * */
@@ -1589,29 +1595,25 @@ void StaticIndxMgr::start_threads() {
     sthread.detach();
     ++expected_thread_cnt;
 
-    if (new_thread_model_on()) {
-        const auto nthreads = HS_DYNAMIC_CONFIG(generic.num_btree_write_threads);
-        IndxMgr::m_btree_write_thread_ids.reserve(nthreads);
-        for (uint32_t i = 0; i < nthreads; ++i) {
-            /* start user thread for btree write operations */
-            sthread = sisl::named_thread("indx_mgr_btree_write_" + std::to_string(i), [&thread_cnt]() {
-                iomanager.run_io_loop(false, nullptr, [&thread_cnt](bool is_started) {
-                    if (is_started) {
-                        IndxMgr::m_btree_write_thread_ids.push_back(iomanager.iothread_self());
-                        ++thread_cnt;
-                    }
-                });
+    const auto nthreads = HS_DYNAMIC_CONFIG(generic.num_btree_write_threads);
+    IndxMgr::m_btree_write_thread_ids.reserve(nthreads);
+    for (uint32_t i = 0; i < nthreads; ++i) {
+        /* start user thread for btree write operations */
+        sthread = sisl::named_thread("indx_mgr_btree_write_" + std::to_string(i), [&thread_cnt]() {
+            iomanager.run_io_loop(false, nullptr, [&thread_cnt](bool is_started) {
+                if (is_started) {
+                    IndxMgr::m_btree_write_thread_ids.push_back(iomanager.iothread_self());
+                    ++thread_cnt;
+                }
             });
+        });
 
-            sthread.detach();
-            ++expected_thread_cnt;
-        }
+        sthread.detach();
+        ++expected_thread_cnt;
     }
 
     while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
 }
-
-bool StaticIndxMgr::new_thread_model_on() { return HS_DYNAMIC_CONFIG(generic.new_thread_model_on); }
 
 void StaticIndxMgr::flush_hs_free_blks(hs_cp* const hcp) {
     for (auto it{std::begin(hcp->indx_cp_list)}; it != std::end(hcp->indx_cp_list); ++it) {

@@ -600,7 +600,7 @@ SISL_OPTION_GROUP(
      ::cxxopts::value< uint64_t >()->default_value("10"), "number"),
     (warm_up_keys, "", "warm_up_keys", "num of warm up keys", ::cxxopts::value< uint64_t >()->default_value("200"),
      "number"),
-    (num_threads, "", "num_threads", "num of threads", ::cxxopts::value< uint8_t >()->default_value("8"), "number"),
+    (num_threads, "", "num_threads", "num of threads", ::cxxopts::value< uint8_t >()->default_value("2"), "number"),
     (enable_write_log, "", "enable_write_log", "enable write log persistence",
      ::cxxopts::value< uint8_t >()->default_value("0"), "number"),
     (workload_shift_time, "", "workload_shift_time", "time in sec to shift workload",

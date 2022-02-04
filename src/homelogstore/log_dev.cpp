@@ -28,8 +28,6 @@ LogDev::LogDev(const logstore_family_id_t f_id, const std::string& metablk_name)
     } else if (f_id == HomeLogStoreMgr::CTRL_LOG_FAMILY_IDX) {
         m_flush_size_multiple = HS_DYNAMIC_CONFIG(logstore->flush_size_multiple_ctrl_logdev);
     }
-    // TO DO: Might need to differentiate based on data or fast type
-    set_flush_status(false);
 }
 
 LogDev::~LogDev() = default;
@@ -79,6 +77,13 @@ void LogDev::start(const bool format, JournalVirtualDev* blk_store) {
         m_log_records->reinit(m_log_idx);
         m_last_flush_idx = m_log_idx - 1;
     }
+    m_flush_timer_hdl = iomanager.schedule_global_timer(
+        HS_DYNAMIC_CONFIG(logstore.flush_timer_frequency_us) * 1000, true, nullptr, iomgr::thread_regex::all_worker,
+        [this](void* cookie) {
+            if (m_pending_flush_size.load() && !m_is_flushing.load(std::memory_order_relaxed)) {
+                HomeLogStoreMgrSI().send_flush_msg();
+            }
+        });
 }
 
 void LogDev::stop() {
@@ -118,6 +123,8 @@ void LogDev::stop() {
     }
 
     THIS_LOGDEV_LOG(INFO, "LogDev stopped successfully");
+    // cancel the timer
+    iomanager.cancel_timer(m_flush_timer_hdl);
     m_hb.reset();
 }
 
@@ -193,11 +200,6 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
     }
 }
 
-/* it should be single threaded */
-void LogDev::set_flush_status(bool status) { m_flush_status.store(status, std::memory_order_relaxed); }
-
-bool LogDev::get_flush_status() { return (m_flush_status.load(std::memory_order_relaxed)); }
-
 int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, const sisl::io_blob& data,
                              void* const cb_context) {
     auto prev_size = m_pending_flush_size.fetch_add(data.size, std::memory_order_relaxed);
@@ -205,12 +207,9 @@ int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_nu
     auto threshold_size = LogDev::flush_data_threshold_size();
     m_log_records->create(idx, store_id, seq_num, data, cb_context);
 
-    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
-        flush_if_needed();
-    } else {
-        if (prev_size < threshold_size && ((prev_size + data.size) >= threshold_size) && !get_flush_status()) {
-            HomeLogStoreMgrSI().send_flush_msg();
-        }
+    if (prev_size < threshold_size && ((prev_size + data.size) >= threshold_size) &&
+        !m_is_flushing.load(std::memory_order_relaxed)) {
+        HomeLogStoreMgrSI().send_flush_msg();
     }
     return idx;
 }
@@ -330,11 +329,6 @@ LogGroup* LogDev::prepare_flush(const int32_t estimated_records) {
     lg->m_flush_log_idx_upto = flushing_upto_idx;
     HS_DBG_ASSERT_GE(lg->m_flush_log_idx_upto, lg->m_flush_log_idx_from, "log indx upto is smaller then log indx from");
 
-    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on) == false) {
-        lg->m_log_dev_offset = m_blkstore->alloc_next_append_blk(lg->header()->total_size());
-        HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
-    }
-
     HS_DBG_ASSERT_GT(lg->header()->oob_data_offset, 0);
 
     THIS_LOGDEV_LOG(DEBUG, "Flushing upto log_idx={}", flushing_upto_idx);
@@ -386,19 +380,12 @@ bool LogDev::flush_if_needed() {
 
         THIS_LOGDEV_LOG(TRACE, "Flush prepared, flushing data size={}", lg->actual_data_size());
 
-        if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
-            /* new thread model */
-            m_blkstore->alloc_next_append_blk_async(lg->header()->total_size(), [this, lg](off_t ret) {
-                lg->m_log_dev_offset = ret;
-                HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
-                do_flush(lg);
-            });
-            return true;
-        } else {
-            /* old thread model */
+        m_blkstore->alloc_next_append_blk_async(lg->header()->total_size(), [this, lg](off_t ret) {
+            lg->m_log_dev_offset = ret;
+            HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
             do_flush(lg);
-            return true;
-        }
+        });
+        return true;
     } else {
         return false;
     }
@@ -413,13 +400,8 @@ void LogDev::do_write_logs(LogGroup* const lg) {
     auto req{logdev_req::make_request()};
     req->m_log_group = lg;
 
-    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
-        /* do async call for new threading model since we will be calling write logs in spdk thread */
-        req->isSyncCall = false;
-    } else {
-        /* old thread model do sync IO since write logs in flush thread which is user thread */
-        req->isSyncCall = true;
-    }
+    /* do async call for new threading model since we will be calling write logs in spdk thread */
+    req->isSyncCall = false;
 
     try {
         // write log
@@ -445,16 +427,12 @@ void LogDev::do_flush_internal(LogGroup* const lg) {
 }
 
 void LogDev::do_flush(LogGroup* const lg) {
-    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
-        if (iomanager.am_i_tight_loop_reactor() == false) {
-            /* send message to worker thread to issue the io if we are in user thread */
-            iomanager.run_on(iomgr::thread_regex::random_worker,
-                             [this, lg]([[maybe_unused]] const io_thread_addr_t addr) { do_flush_internal(lg); });
-        } else {
-            /* go ahead send the io if we are already in worker thread */
-            do_flush_internal(lg);
-        }
+    if (iomanager.am_i_tight_loop_reactor() == false) {
+        /* send message to worker thread to issue the io if we are in user thread */
+        iomanager.run_on(iomgr::thread_regex::random_worker,
+                         [this, lg]([[maybe_unused]] const io_thread_addr_t addr) { do_flush_internal(lg); });
     } else {
+        /* go ahead send the io if we are already in worker thread */
         do_flush_internal(lg);
     }
 }
@@ -503,14 +481,7 @@ void LogDev::on_flush_completion_internal(LogGroup* const lg) {
 }
 
 void LogDev::on_flush_completion(LogGroup* const lg) {
-    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
-        /* no need to send message to worker in new thread model */
-        on_flush_completion_internal(lg);
-    } else {
-        iomanager.run_on(iomgr::thread_regex::random_worker, [this, lg]([[maybe_unused]] const io_thread_addr_t addr) {
-            on_flush_completion_internal(lg);
-        });
-    }
+    on_flush_completion_internal(lg);
 }
 
 bool LogDev::try_lock_flush(const flush_blocked_callback& cb) {
@@ -557,8 +528,8 @@ void LogDev::unlock_flush(bool do_flush) {
 
     // Try to do chain flush if its really needed.
     THIS_LOGDEV_LOG(TRACE, "Unlocked the flush, try doing chain flushing if needed");
-
-    if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on) && do_flush) { flush_if_needed(); }
+    // send a message to see if a new flush can be triggered
+    if (do_flush) { HomeLogStoreMgrSI().send_flush_msg(); }
 }
 
 uint64_t LogDev::truncate(const logdev_key& key) {

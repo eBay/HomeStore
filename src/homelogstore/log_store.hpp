@@ -227,8 +227,6 @@ private:
     HomeLogStoreMgrMetrics m_metrics;
     iomgr::io_thread_t m_truncate_thread;
     iomgr::io_thread_t m_flush_thread;
-    // Timer handle
-    iomgr::timer_handle_t m_flush_timer_hdl;
     bool m_flush_thread_stopped = false;
 };
 

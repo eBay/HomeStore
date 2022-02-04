@@ -24,6 +24,7 @@ class RsrcMgrMetrics : public sisl::MetricsGroup {
 };
 
 typedef std::function< void(int64_t) > exceed_limit_cb_t;
+const uint32_t max_qd_multiplier = 32;
 
 class ResourceMgr {
 public:
@@ -138,6 +139,18 @@ public:
     /* monitor chunk size */
     void check_chunk_free_size_and_trigger_cp(uint64_t free_size, uint64_t alloc_size);
 
+    uint32_t get_dirty_buf_qd() const { return m_flush_dirty_buf_q_depth; }
+
+    void increase_dirty_buf_qd() {
+        auto qd = m_flush_dirty_buf_q_depth.load();
+        if (qd < max_qd_multiplier * HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt)) {
+            m_flush_dirty_buf_q_depth.fetch_add(2 * qd);
+            HS_PERIODIC_LOG(INFO, device, "q depth increased to {}", m_flush_dirty_buf_q_depth);
+        }
+    }
+
+    void reset_dirty_buf_qd() { m_flush_dirty_buf_q_depth = HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt); }
+
 private:
     int64_t get_dirty_buf_limit() const {
         return (int64_t)((HS_DYNAMIC_CONFIG(resource_limits.dirty_buf_percent) * HS_STATIC_CONFIG(input.app_mem_size) /
@@ -149,6 +162,7 @@ private:
     std::atomic< int64_t > m_hs_fb_size; // free size
     std::atomic< int64_t > m_hs_ab_cnt;  // alloc count
     std::atomic< int64_t > m_memory_used_in_recovery;
+    std::atomic< uint32_t > m_flush_dirty_buf_q_depth;
     uint64_t m_total_cap;
     exceed_limit_cb_t m_dirty_buf_exceed_cb;
     exceed_limit_cb_t m_free_blks_exceed_cb;

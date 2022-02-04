@@ -126,6 +126,7 @@ void Volume::set_io_flip() {
 
     freq.set_count(10);
     freq.set_percent(10);
+    fc->inject_noreturn_flip("simulate_slow_dirty_buffer", {null_cond}, freq);
     fc->inject_retval_flip("io_write_iocb_empty_flip", {null_cond}, freq, 20);
     fc->inject_retval_flip("io_read_iocb_empty_flip", {null_cond}, freq, 20);
     fc->inject_retval_flip("read_write_resubmit_io", {null_cond}, freq, 1);

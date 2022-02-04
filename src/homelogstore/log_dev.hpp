@@ -781,6 +781,8 @@ private:
     LogGroup m_log_group_pool[max_log_group];
     uint32_t m_log_group_idx{1};
     std::atomic< bool > m_flush_status = false;
+    // Timer handle
+    iomgr::timer_handle_t m_flush_timer_hdl;
 }; // LogDev
 
 } // namespace homestore

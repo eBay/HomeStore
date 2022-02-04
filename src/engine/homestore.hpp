@@ -86,11 +86,49 @@ public:
         flip::Flip::instance().start_rpc_server();
 #endif
 
+        start_flush_threads();
+
         /* create device manager */
         m_dev_mgr = std::make_unique< DeviceManager >(input.data_devices, bind_this(HomeStore::new_vdev_found, 2),
                                                       sizeof(sb_blkstore_blob), VirtualDev::static_process_completions,
                                                       bind_this(HomeStore::process_vdev_error, 1));
         m_dev_mgr->init();
+    }
+
+    void start_flush_threads() {
+        /* create local flush thread */
+        static std::mutex cv_mtx;
+        static std::condition_variable flush_thread_cv;
+        uint32_t thread_cnt = 0;
+        uint32_t max_thread_cnt = HS_DYNAMIC_CONFIG(generic.num_flush_threads);
+
+        for (uint32_t i = 0; i < max_thread_cnt; ++i) {
+            auto sthread = sisl::named_thread(
+                "hs_flush_thread", [this, &tl_cv = flush_thread_cv, &tl_mtx = cv_mtx, &thread_cnt]() {
+                    iomanager.run_io_loop(true, nullptr, ([this, &tl_cv, &tl_mtx, &thread_cnt](bool is_started) {
+                                              if (is_started) {
+                                                  std::unique_lock< std::mutex > lk{tl_mtx};
+                                                  ++thread_cnt;
+                                                  m_flush_threads.push_back(iomanager.iothread_self());
+                                                  tl_cv.notify_one();
+                                              }
+                                          }));
+                });
+            sthread.detach();
+        }
+        {
+            std::unique_lock< std::mutex > lk{cv_mtx};
+            flush_thread_cv.wait(lk, [&thread_cnt, max_thread_cnt] { return (thread_cnt == max_thread_cnt); });
+        }
+    }
+
+    iomgr::io_thread_t get_hs_flush_thread() const {
+        /* XXX: Does it need to be atomic variable ? Worse case each thread uses it local cache value which shouldn't be
+         * bad.
+         */
+        static int next_thread = 0;
+        next_thread = (next_thread + 1) % m_flush_threads.size();
+        return m_flush_threads[next_thread];
     }
 
     uint32_t get_indx_mgr_page_size() const { return (m_dev_mgr->get_atomic_page_size(PhysicalDevGroup::FAST)); }
@@ -431,6 +469,7 @@ protected:
     std::unique_ptr< CacheType > m_cache;
 
 private:
+    std::vector< iomgr::io_thread_t > m_flush_threads;
     static constexpr float data_blkstore_pct{84.0};
     static constexpr float indx_blkstore_pct{3.0};
 

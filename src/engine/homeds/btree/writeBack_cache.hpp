@@ -11,6 +11,8 @@
 #include <mutex>
 #include <system_error>
 #include <vector>
+#include <chrono>
+#include <thread>
 
 #include <sisl/utility/thread_factory.hpp>
 
@@ -20,6 +22,7 @@
 #include "engine/homestore.hpp"
 #include "engine/common/resource_mgr.hpp"
 #include "api/meta_interface.hpp"
+#include "engine/homestore_base.hpp"
 
 namespace homeds {
 namespace btree {
@@ -389,13 +392,9 @@ public:
         const size_t cp_id = bcp->cp_id % MAX_CP_CNT;
         CP_PERIODIC_LOG(INFO, cp_id, "Starting btree flush buffers dirty_buf_count={} wb_req_cnt={} flush_cb_size={}",
                         m_dirty_buf_cnt[cp_id].get(), m_req_list[cp_id]->size(), flush_buffer_q.size());
-        if (HS_DYNAMIC_CONFIG(generic.new_thread_model_on)) {
-            iomanager.run_on(iomgr::thread_regex::random_worker,
-                             [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
-        } else {
-            iomanager.run_on(m_thread_ids[thread_index],
-                             [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
-        }
+        ResourceMgrSI().reset_dirty_buf_qd();
+        iomanager.run_on(HomeStoreBase::instance()->get_hs_flush_thread(),
+                         [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
     }
 
     std::string get_cp_flush_status(const btree_cp_ptr& bcp) {
@@ -432,7 +431,7 @@ public:
                     ++wb_cache_outstanding_cnt;
                     shared_this->m_blkstore->write(wb_req->bid, wb_req->m_mem, 0, wb_req, false);
                     ++write_count;
-                    if (wb_cache_outstanding_cnt > HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt)) {
+                    if (wb_cache_outstanding_cnt > ResourceMgrSI().get_dirty_buf_qd()) {
                         CP_PERIODIC_LOG(
                             DEBUG, bt_cp_id,
                             "[fcbq_id={}] Flush throttled: flushed_cnt={} outstanding_io_cnt={} dep_wait_cnt={}",
