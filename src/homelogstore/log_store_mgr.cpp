@@ -123,7 +123,7 @@ void HomeLogStoreMgr::start_threads() {
 
     m_truncate_thread = nullptr;
     auto sthread = sisl::named_thread("logstore_truncater", [this, &tl_cv = cv, &tl_mtx = mtx, &thread_cnt]() {
-        iomanager.run_io_loop(false, nullptr, ([this, &tl_cv, &tl_mtx, &thread_cnt](bool is_started) {
+        iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, ([this, &tl_cv, &tl_mtx, &thread_cnt](bool is_started) {
                                   if (is_started) {
                                       std::unique_lock< std::mutex > lk{tl_mtx};
                                       m_truncate_thread = iomanager.iothread_self();

@@ -93,7 +93,7 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
 
     /* start thread */
     auto sthread = sisl::named_thread("hb_init", [instance]() {
-        iomanager.run_io_loop(false, nullptr, [instance](bool thread_started) {
+        iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, [instance](bool thread_started) {
             if (thread_started) {
                 instance->m_init_thread_id = iomanager.iothread_self();
                 if (instance->is_safe_mode()) {
@@ -115,7 +115,7 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
 
         for (auto i = 0u; i < hdd_thread_count; ++i) {
             auto sthread1 = sisl::named_thread("custom_hdd", [&instance, hdd_thread_count]() {
-                iomanager.run_io_loop(false, nullptr, [&](bool is_started) {
+                iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, [&](bool is_started) {
                     if (is_started) {
                         std::lock_guard< std::mutex > lock(instance->m_hdd_threads_mtx);
                         instance->m_custom_hdd_threads.emplace_back(iomanager.iothread_self());
@@ -551,7 +551,7 @@ void HomeBlks::init_done() {
         uint32_t expected_thread_cnt{HS_DYNAMIC_CONFIG(generic.hdd_io_threads)};
         for (auto i = 0u; i < expected_thread_cnt; ++i) {
             auto sthread1 = sisl::named_thread("custom_hdd_thrd", [this, &thread_cnt]() mutable {
-                iomanager.run_io_loop(false, nullptr, [this, &thread_cnt](bool is_started) {
+                iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, [this, &thread_cnt](bool is_started) {
                     if (is_started) {
                         ++thread_cnt;
                         const std::lock_guard< std::mutex > lock(m_hdd_threads_mtx);
@@ -758,7 +758,7 @@ bool HomeBlks::trigger_shutdown(const hs_comp_callback& shutdown_done_cb, bool f
 
     // Execute the shutdown on the io thread, because clean shutdown will do IO (albeit sync io)
     auto sthread = sisl::named_thread("hb_shutdown", [this, shutdown_done_cb, force]() {
-        iomanager.run_io_loop(false, nullptr, [&](bool thread_started) {
+        iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, [&](bool thread_started) {
             if (thread_started) { do_shutdown(shutdown_done_cb, force); }
         });
     });

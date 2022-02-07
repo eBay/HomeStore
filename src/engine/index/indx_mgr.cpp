@@ -256,12 +256,12 @@ void HomeStoreCPMgr::indx_tbl_cp_done_internal(hs_cp* const hcp) {
     /* notify all the subsystems. */
     IndxMgr::cp_done(is_blkalloc_cp);
 #ifdef _PRERELEASE
-                             if (homestore_flip->test_flip("simulate_cp_hung")) {
-                                 LOGINFO("flip set for cp hung");
-                                 return;
-                             }
+    if (homestore_flip->test_flip("simulate_cp_hung")) {
+        LOGINFO("flip set for cp hung");
+        return;
+    }
 #endif
-                             cp_end(hcp);
+    cp_end(hcp);
 }
 
 /* This function calls
@@ -1572,7 +1572,7 @@ void StaticIndxMgr::start_threads() {
         iomanager.schedule_global_timer(HS_DYNAMIC_CONFIG(generic.blkalloc_cp_timer_us) * 1000, true, nullptr,
                                         iomgr::thread_regex::all_user, [](void* cookie) { trigger_hs_cp(); });
     auto sthread = sisl::named_thread("indx_mgr", [&thread_cnt]() mutable {
-        iomanager.run_io_loop(false, nullptr, [&thread_cnt](bool is_started) {
+        iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, [&thread_cnt](bool is_started) {
             if (is_started) {
                 IndxMgr::m_thread_id = iomanager.iothread_self();
                 ++thread_cnt;
@@ -1584,7 +1584,7 @@ void StaticIndxMgr::start_threads() {
 
     /* start btree slow path thread */
     sthread = sisl::named_thread("indx_mgr_btree_slow", [&thread_cnt]() {
-        iomanager.run_io_loop(false, nullptr, [&thread_cnt](bool is_started) {
+        iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, [&thread_cnt](bool is_started) {
             if (is_started) {
                 IndxMgr::m_slow_path_thread_id = iomanager.iothread_self();
                 ++thread_cnt;
@@ -1600,7 +1600,7 @@ void StaticIndxMgr::start_threads() {
     for (uint32_t i = 0; i < nthreads; ++i) {
         /* start user thread for btree write operations */
         sthread = sisl::named_thread("indx_mgr_btree_write_" + std::to_string(i), [&thread_cnt]() {
-            iomanager.run_io_loop(false, nullptr, [&thread_cnt](bool is_started) {
+            iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, [&thread_cnt](bool is_started) {
                 if (is_started) {
                     IndxMgr::m_btree_write_thread_ids.push_back(iomanager.iothread_self());
                     ++thread_cnt;
