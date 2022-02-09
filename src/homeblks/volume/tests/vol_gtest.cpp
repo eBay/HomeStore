@@ -2251,7 +2251,7 @@ SISL_OPTION_GROUP(
      ::cxxopts::value< uint32_t >()->default_value("100"), "number of ops"),
     (create_del_ops_interval, "", "create_del_ops_interval", "create_del_ops_interval",
      ::cxxopts::value< uint32_t >()->default_value("10"), "interval between create del in seconds"),
-    (emulate_hdd_cnt, "", "emulate_hdd_cnt", "emulate_hdd_cnt", ::cxxopts::value< uint32_t >()->default_value("1"),
+    (emulate_hdd_cnt, "", "emulate_hdd_cnt", "emulate_hdd_cnt", ::cxxopts::value< uint32_t >()->default_value("0"),
      "number of files or drives to be emulated as hdd"),
     (p_vol_files_space, "", "p_vol_files_space",
      "percentage of volume verficiation files of available free space on hosting file system",

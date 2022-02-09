@@ -171,7 +171,8 @@ public:
         REGISTER_HISTOGRAM(volume_blkalloc_latency, "Volume block allocation latency (in ns)");
         REGISTER_HISTOGRAM(volume_pieces_per_write, "Number of individual pieces per write",
                            HistogramBucketsType(LinearUpto64Buckets));
-        REGISTER_HISTOGRAM(volume_pieces_per_read, "Number of individual pieces per write",
+        REGISTER_COUNTER(volume_read_on_hole, "Number of reads from empty lba");
+        REGISTER_HISTOGRAM(volume_pieces_per_read, "Number of individual pieces per read",
                            HistogramBucketsType(LinearUpto64Buckets));
         REGISTER_HISTOGRAM(volume_write_size_distribution, "Distribution of volume write sizes",
                            HistogramBucketsType(ExponentialOfTwoBuckets));

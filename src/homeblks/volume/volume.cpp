@@ -789,6 +789,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
 
             while (next_start_lba < start_lba) {
                 const auto blob{m_only_in_mem_buff->at_offset(0)};
+                COUNTER_INCREMENT(m_metrics, volume_read_on_hole, get_page_size());
                 if (vreq->use_cache()) {
                     vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
                 } else {
@@ -833,6 +834,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
         // check if there are any holes at the end
         const lba_t req_end_lba = mapping::get_end_lba(vreq->lba(), vreq->nlbas());
         while (next_start_lba <= req_end_lba) {
+            COUNTER_INCREMENT(m_metrics, volume_read_on_hole, get_page_size());
             const auto blob{m_only_in_mem_buff->at_offset(0)};
             if (vreq->use_cache()) {
                 vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
