@@ -181,9 +181,8 @@ void LogStoreFamily::on_batch_completion(HomeLogStore* log_store, const uint32_t
     if ((it == std::end(m_last_flush_info)) || (it->second != flush_ld_key.idx)) {
         // first time completion in this batch for a given store_id
         m_last_flush_info.insert_or_assign(id, flush_ld_key.idx);
-        s_cur_flush_batch_stores.push_back(log_store->shared_from_this());
+        if (it == std::end(m_last_flush_info)) { s_cur_flush_batch_stores.push_back(log_store->shared_from_this()); }
     }
-
     if (nremaining_in_batch == 0) {
         // This batch is completed, call all log stores participated in this batch about the end of batch
         HS_LOG_ASSERT_GT(s_cur_flush_batch_stores.size(), 0U, "Expecting one store to be flushed in batch");

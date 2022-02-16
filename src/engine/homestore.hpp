@@ -326,6 +326,8 @@ protected:
                 throw std::runtime_error("vdev in failed state");
             }
         }
+        iomanager.create_mempool(atomic_phys_page_size, (ResourceMgrSI().get_cache_size() / atomic_phys_page_size));
+        hs_utils::set_btree_mempool_size(atomic_phys_page_size);
     }
 
     void create_meta_blkstore(vdev_info_block* const vb) {

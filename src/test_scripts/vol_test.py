@@ -376,6 +376,13 @@ def vol_create_delete_test():
     # run few iteration of vol create delete with recovery
     recovery_nightly_with_create_del()
 
+    # create 1000 volume and panic after logdev truncation id unreserve
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --create_del_with_io=true --remove_file=0 --run_time=36000 --create_del_ops_interval=30 --expect_io_error=1 --max_volume=800 --flip_name=logdev_abort_after_garbage"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=800"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+
+
 def vol_io_flip_test():
     cmd_opts = "--gtest_filter=VolTest.init_io_test --mod_list=\"index\" --remove_file=0 --run_time=600 --cp_bitmap_abort=true --max_volume=3 --max_num_writes=1000000"
     subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)

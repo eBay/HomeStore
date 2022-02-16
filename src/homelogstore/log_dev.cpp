@@ -549,6 +549,9 @@ uint64_t LogDev::truncate(const logdev_key& key) {
             m_logdev_meta.set_start_dev_offset(key.dev_offset, key.idx + 1, false /* persist_now */);
 
             // Now that store is truncated, we can reclaim the store ids which are garbaged (if any) earlier
+#ifdef _PRERELEASE
+            bool garbage_collect = false;
+#endif
             for (auto it{std::cbegin(m_garbage_store_ids)}; it != std::cend(m_garbage_store_ids);) {
                 if (it->first > key.idx) break;
 
@@ -556,9 +559,18 @@ uint64_t LogDev::truncate(const logdev_key& key) {
                                 it->first);
                 m_logdev_meta.unreserve_store(it->second, false /* persist_now */);
                 it = m_garbage_store_ids.erase(it);
+#ifdef _PRERELEASE
+                garbage_collect = true;
+#endif
             }
 
             m_logdev_meta.persist();
+#ifdef _PRERELEASE
+            if (garbage_collect && homestore_flip->test_flip("logdev_abort_after_garbage")) {
+                LOGINFO("logdev aborting after unreserving garbage ids");
+                raise(SIGKILL);
+            }
+#endif
         }
     }
     return num_records_to_truncate;
@@ -655,8 +667,7 @@ logstore_id_t LogDevMetadata::reserve_store(const bool persist_now) {
     m_store_info.insert(idx);
 
     // Write the meta inforation on-disk meta
-    [[maybe_unused]] const bool resize_result{
-        resize_if_needed()}; // In case the idx falls out of the alloc boundary, resize them
+    resize_if_needed(); // In case the idx falls out of the alloc boundary, resize them
     logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
     logstore_superblk::init(sb_area[idx]);
     ++m_sb->num_stores;
@@ -669,8 +680,8 @@ void LogDevMetadata::unreserve_store(const logstore_id_t idx, const bool persist
     m_id_reserver->unreserve(idx);
     m_store_info.erase(idx);
 
-    const bool shrunk{resize_if_needed()}; // In case the idx unregistered falls out of boundary, we can shrink them
-    if (!shrunk) {
+    resize_if_needed();
+    if (idx < *m_store_info.rbegin()) {
         // We have not shrunk the store info, so we need to explicitly clear the store meta in on-disk meta
         logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
         logstore_superblk::clear(sb_area[idx]);
@@ -685,7 +696,7 @@ void LogDevMetadata::update_store_superblk(const logstore_id_t idx, const logsto
     m_store_info.insert(idx);
 
     // Update the on-disk copy
-    [[maybe_unused]] const bool resize_result{resize_if_needed()};
+    resize_if_needed();
     logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
     sb_area[idx] = sb;
 
@@ -711,7 +722,10 @@ void LogDevMetadata::set_start_dev_offset(const off_t offset, const logid_t key_
 logid_t LogDevMetadata::get_start_log_idx() const { return m_sb->key_idx; }
 
 bool LogDevMetadata::resize_if_needed() {
-    const auto req_sz{required_sb_size((m_store_info.size() == 0) ? 0u : *m_store_info.rbegin() + 1)};
+    auto req_sz{required_sb_size((m_store_info.size() == 0) ? 0u : *m_store_info.rbegin() + 1)};
+    if (MetaBlkMgrSI()->is_aligned_buf_needed(req_sz)) {
+        req_sz = sisl::round_up(req_sz, MetaBlkMgrSI()->get_align_size());
+    }
     if (req_sz != m_raw_buf->size) {
         const auto old_buf{m_raw_buf};
         // TO DO: Might need to address alignment based on data or fast type

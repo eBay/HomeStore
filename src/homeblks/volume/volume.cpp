@@ -539,12 +539,7 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
             COUNTER_INCREMENT_IF_ELSE(m_metrics, vreq->is_read_op(), volume_write_error_count, volume_read_error_count,
                                       1);
             uint64_t cnt = m_err_cnt.fetch_add(1, std::memory_order_relaxed);
-            if (get_state() != vol_state::OFFLINE) {
-                THIS_VOL_LOG(ERROR, , vreq, "Vol operation error {}", err.message());
-            } else {
-                // supperss error message when state is offline;
-                HS_LOG_EVERY_N(ERROR, base, 50, "Vol {} operation error {}", get_name(), err.message());
-            }
+            HS_LOG_EVERY_N(ERROR, base, 50, "Vol {} operation error {}", get_name(), err.message());
             /* we wait for all outstanding child req to be completed before we do completion upcall */
         } else {
             THIS_VOL_LOG(WARN, , vreq, "Receiving completion on already completed request id={}", vreq->request_id);

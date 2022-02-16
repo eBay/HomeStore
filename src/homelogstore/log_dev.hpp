@@ -482,7 +482,7 @@ public:
     [[nodiscard]] logstore_superblk& mutable_store_superblk(const logstore_id_t idx);
 
 private:
-    [[nodiscard]] bool resize_if_needed();
+    bool resize_if_needed();
 
     [[nodiscard]] uint32_t required_sb_size(const uint32_t nstores) const {
         // TO DO: Might need to differentiate based on data or fast type
@@ -754,7 +754,7 @@ private:
     JournalVirtualDev* m_blkstore{nullptr};
     boost::intrusive_ptr< HomeStoreBase > m_hb; // Back pointer to homestore
 
-    std::map< logid_t, logstore_id_t > m_garbage_store_ids;
+    std::multimap< logid_t, logstore_id_t > m_garbage_store_ids;
     Clock::time_point m_last_flush_time;
 
     logid_t m_last_flush_idx{-1}; // Track last flushed and truncated log idx

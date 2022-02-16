@@ -3,6 +3,12 @@
 
 namespace homestore {
 uint8_t* hs_utils::iobuf_alloc(const size_t size, const sisl::buftag tag, const size_t alignment) {
+    if (tag == sisl::buftag::btree_node) {
+        HS_DBG_ASSERT_EQ(size, m_btree_mempool_size);
+        auto buf = iomanager.iobuf_pool_alloc(alignment, size, tag);
+        HS_REL_ASSERT_NOTNULL(buf, "io buf is null. probably going out of memory");
+        return buf;
+    }
     auto buf = iomanager.iobuf_alloc(alignment, size, tag);
     HS_REL_ASSERT_NOTNULL(buf, "io buf is null. probably going out of memory");
     return buf;
@@ -10,7 +16,15 @@ uint8_t* hs_utils::iobuf_alloc(const size_t size, const sisl::buftag tag, const 
 
 hs_uuid_t hs_utils::gen_system_uuid() { return std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()); }
 
-void hs_utils::iobuf_free(uint8_t* const ptr, const sisl::buftag tag) { iomanager.iobuf_free(ptr, tag); }
+void hs_utils::iobuf_free(uint8_t* const ptr, const sisl::buftag tag) {
+    if (tag == sisl::buftag::btree_node) {
+        iomanager.iobuf_pool_free(ptr, m_btree_mempool_size, tag);
+    } else {
+        iomanager.iobuf_free(ptr, tag);
+    }
+}
+
+void hs_utils::set_btree_mempool_size(const size_t size) { m_btree_mempool_size = size; }
 
 uint64_t hs_utils::aligned_size(const size_t size, const size_t alignment) { return sisl::round_up(size, alignment); }
 
@@ -43,4 +57,6 @@ sisl::byte_array hs_utils::extract_byte_array(const sisl::byte_view& b, const bo
                                               const size_t alignment) {
     return (is_aligned_needed) ? b.extract(alignment) : b.extract(0);
 };
+
+size_t hs_utils::m_btree_mempool_size;
 } // namespace homestore
