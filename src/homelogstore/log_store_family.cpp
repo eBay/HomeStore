@@ -75,9 +75,11 @@ std::shared_ptr< HomeLogStore > LogStoreFamily::create_new_log_store(const bool 
 
     auto m{m_id_logstore_map.wlock()};
     const auto it{m->find(store_id)};
-    HS_REL_ASSERT((it == m->end()), "store_id {} already exists", store_id);
+    HS_REL_ASSERT((it == m->end()), "store_id {}-{} already exists", m_family_id, store_id);
 
     m->insert(std::make_pair<>(store_id, logstore_info_t{lstore, nullptr, append_mode}));
+
+    LOGINFO("Created log store id {}-{}", m_family_id, store_id);
     return lstore;
 }
 
@@ -86,6 +88,8 @@ void LogStoreFamily::open_log_store(const logstore_id_t store_id, const bool app
     auto m{m_id_logstore_map.wlock()};
     const auto it{m->find(store_id)};
     HS_REL_ASSERT((it == m->end()), "store_id {}-{} already exists", m_family_id, store_id);
+
+    LOGINFO("Opening log store id {}-{}", m_family_id, store_id);
     m->insert(std::make_pair<>(store_id, logstore_info_t{nullptr, on_open_cb, append_mode}));
 }
 

@@ -343,6 +343,7 @@ IndxMgr::IndxMgr(const boost::uuids::uuid uuid, std::string name, const io_done_
     m_prepare_cb_list->reserve(4);
     m_active_tbl = m_create_indx_tbl();
 
+    THIS_INDX_LOG(INFO, indx_mgr, , "Creating new log store for name: {}", name);
     m_journal = HomeLogStoreMgrSI().create_new_log_store(HomeLogStoreMgr::DATA_LOG_FAMILY_IDX, false /* append_mode */);
     m_journal_comp_cb = bind_this(IndxMgr::journal_comp_cb, 2);
     m_journal->register_req_comp_cb(m_journal_comp_cb);
@@ -506,9 +507,7 @@ void IndxMgr::recovery() {
         THIS_INDX_LOG(INFO, replay, , "recovery completed");
     }
         // fall through
-    default: {
-        m_recovery_mode = false;
-    }
+    default: { m_recovery_mode = false; }
     }
 }
 

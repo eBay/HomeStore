@@ -479,7 +479,8 @@ def nightly():
     recovery_nightly()
     sleep(5)
     
-    normal_unmap()
+    # disable for now 
+    #normal_unmap()
     sleep(5)
 
     #load()

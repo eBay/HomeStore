@@ -21,7 +21,8 @@ SISL_LOGGING_DECL(logstore)
     HS_PERIODIC_DETAILED_LOG(level, logstore, "logdev", m_family_id, , , msg, __VA_ARGS__)
 
 LogDev::LogDev(const logstore_family_id_t f_id, const std::string& metablk_name) :
-        m_family_id{f_id}, m_logdev_meta{metablk_name} {
+        m_family_id{f_id},
+        m_logdev_meta{metablk_name} {
     m_flush_size_multiple = 0;
     if (f_id == HomeLogStoreMgr::DATA_LOG_FAMILY_IDX) {
         m_flush_size_multiple = HS_DYNAMIC_CONFIG(logstore->flush_size_multiple_data_logdev);
@@ -480,9 +481,7 @@ void LogDev::on_flush_completion_internal(LogGroup* const lg) {
     m_hb->call_multi_completions();
 }
 
-void LogDev::on_flush_completion(LogGroup* const lg) {
-    on_flush_completion_internal(lg);
-}
+void LogDev::on_flush_completion(LogGroup* const lg) { on_flush_completion_internal(lg); }
 
 bool LogDev::try_lock_flush(const flush_blocked_callback& cb) {
     {
@@ -632,7 +631,12 @@ void LogDevMetadata::meta_buf_found(const sisl::byte_view& buf, void* const meta
 std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::load() {
     std::vector< std::pair< logstore_id_t, logstore_superblk > > ret_list;
     ret_list.reserve(1024);
-    m_id_reserver = std::make_unique< sisl::IDReserver >(store_capacity());
+    if (store_capacity()) {
+        m_id_reserver = std::make_unique< sisl::IDReserver >(store_capacity());
+    } else {
+        // use default value (1024) if store_capacity is zero
+        m_id_reserver = std::make_unique< sisl::IDReserver >();
+    }
 
     HS_REL_ASSERT_NE(m_raw_buf->bytes, nullptr, "Load called without getting metadata");
     HS_REL_ASSERT_LE(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Logdev super blk version mismatch");
@@ -668,6 +672,7 @@ logstore_id_t LogDevMetadata::reserve_store(const bool persist_now) {
 
     // Write the meta inforation on-disk meta
     resize_if_needed(); // In case the idx falls out of the alloc boundary, resize them
+
     logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
     logstore_superblk::init(sb_area[idx]);
     ++m_sb->num_stores;
@@ -697,6 +702,7 @@ void LogDevMetadata::update_store_superblk(const logstore_id_t idx, const logsto
 
     // Update the on-disk copy
     resize_if_needed();
+  
     logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
     sb_area[idx] = sb;
 
