@@ -24,8 +24,7 @@ public:
 #define WAIT_DELTA_MS 10
 
     std::size_t get_thread_id() noexcept {
-        thread_local std::size_t id = thread_idx;
-        thread_idx++;
+        static thread_local std::size_t id{thread_idx++};
         return id;
     }
 

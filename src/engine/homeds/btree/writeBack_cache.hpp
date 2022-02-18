@@ -548,9 +548,9 @@ std::vector< iomgr::io_thread_t > wb_cache_t::m_thread_ids;
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 thread_local std::vector< flush_buffer_callback > wb_cache_t::flush_buffer_q;
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
-thread_local uint64_t wb_cache_t::wb_cache_outstanding_cnt;
+thread_local uint64_t wb_cache_t::wb_cache_outstanding_cnt{};
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
-thread_local uint64_t wb_cache_t::s_cbq_id;
+thread_local uint64_t wb_cache_t::s_cbq_id{};
 } // namespace btree
 } // namespace homeds
 

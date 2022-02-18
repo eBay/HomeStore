@@ -115,27 +115,30 @@ void HomeLogStoreMgr::send_flush_msg() {
 }
 
 void HomeLogStoreMgr::start_threads() {
-    // these should be thread local so that they stay in scope in the lambda in case function ends
-    // before lambda completes
-    static thread_local std::condition_variable cv;
-    static thread_local std::mutex mtx;
-    int thread_cnt = 0;
+    struct Context {
+        std::condition_variable cv;
+        std::mutex mtx;
+        size_t thread_cnt{0};
+    };
+    auto ctx{std::make_shared< Context >()};
 
     m_truncate_thread = nullptr;
-    auto sthread = sisl::named_thread("logstore_truncater", [this, &tl_cv = cv, &tl_mtx = mtx, &thread_cnt]() {
-        iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, ([this, &tl_cv, &tl_mtx, &thread_cnt](bool is_started) {
+    auto sthread = sisl::named_thread("logstore_truncater", [this, ctx]() {
+        iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, ([this, &ctx](bool is_started) {
                                   if (is_started) {
-                                      std::unique_lock< std::mutex > lk{tl_mtx};
                                       m_truncate_thread = iomanager.iothread_self();
-                                      ++thread_cnt;
-                                      tl_cv.notify_one();
+                                      {
+                                          std::unique_lock< std::mutex > lk{ctx->mtx};
+                                          ++(ctx->thread_cnt);
+                                      }
+                                      ctx->cv.notify_one();
                                   }
                               }));
     });
     sthread.detach();
     {
-        std::unique_lock< std::mutex > lk{mtx};
-        cv.wait(lk, [&thread_cnt] { return (thread_cnt == 1); });
+        std::unique_lock< std::mutex > lk{ctx->mtx};
+        ctx->cv.wait(lk, [&ctx] { return (ctx->thread_cnt == 1); });
     }
 }
 

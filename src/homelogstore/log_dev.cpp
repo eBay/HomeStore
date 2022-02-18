@@ -21,8 +21,7 @@ SISL_LOGGING_DECL(logstore)
     HS_PERIODIC_DETAILED_LOG(level, logstore, "logdev", m_family_id, , , msg, __VA_ARGS__)
 
 LogDev::LogDev(const logstore_family_id_t f_id, const std::string& metablk_name) :
-        m_family_id{f_id},
-        m_logdev_meta{metablk_name} {
+        m_family_id{f_id}, m_logdev_meta{metablk_name} {
     m_flush_size_multiple = 0;
     if (f_id == HomeLogStoreMgr::DATA_LOG_FAMILY_IDX) {
         m_flush_size_multiple = HS_DYNAMIC_CONFIG(logstore->flush_size_multiple_data_logdev);
@@ -88,16 +87,13 @@ void LogDev::start(const bool format, JournalVirtualDev* blk_store) {
 }
 
 void LogDev::stop() {
-    // this should be static so that it stays in scope in the lambda in case function ends before lambda completes
-    static thread_local std::condition_variable cv;
-
     HS_LOG_ASSERT((m_pending_flush_size == 0), "LogDev stop attempted while writes to logdev are pending completion");
-    const bool locked_now{try_lock_flush([this, &tl_cv = cv]() {
+    const bool locked_now{try_lock_flush([this]() {
         {
             std::unique_lock< std::mutex > lk{m_block_flush_q_mutex};
             m_stopped = true;
         }
-        tl_cv.notify_one();
+        m_block_flush_q_cv.notify_one();
     })};
 
     if (!locked_now) { THIS_LOGDEV_LOG(INFO, "LogDev stop is queued because of pending flush or truncation ongoing"); }
@@ -105,7 +101,7 @@ void LogDev::stop() {
     {
         // Wait for the stopped to be completed
         std::unique_lock< std::mutex > lk{m_block_flush_q_mutex};
-        cv.wait(lk, [&] { return m_stopped; });
+        m_block_flush_q_cv.wait(lk, [&] { return m_stopped; });
     }
 
     m_log_records = nullptr;
@@ -702,7 +698,7 @@ void LogDevMetadata::update_store_superblk(const logstore_id_t idx, const logsto
 
     // Update the on-disk copy
     resize_if_needed();
-  
+
     logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
     sb_area[idx] = sb;
 

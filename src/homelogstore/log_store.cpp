@@ -35,33 +35,32 @@ bool HomeLogStore::write_sync(const logstore_seq_num_t seq_num, const sisl::io_b
     HS_LOG_ASSERT((!iomanager.am_i_worker_reactor()), "Sync can not be done in worker reactor thread");
 
     // these should be static so that they stay in scope in the lambda in case function ends before lambda completes
-    static thread_local std::mutex write_mutex;
-    static thread_local std::condition_variable write_cv;
-    static thread_local bool write_done;
-    static thread_local bool ret;
-
-    write_done = false;
-    ret = false;
+    struct Context {
+        std::mutex write_mutex;
+        std::condition_variable write_cv;
+        bool write_done{false};
+        bool ret{false};
+    };
+    auto ctx{std::make_shared< Context >()};
     this->write_async(seq_num, b, nullptr,
-                      [seq_num, this, &tl_write_mutex = write_mutex, &tl_write_cv = write_cv,
-                       &tl_write_done = write_done, &tl_ret = ret](homestore::logstore_seq_num_t seq_num_cb,
-                                                                   const sisl::io_blob& b, homestore::logdev_key ld_key,
-                                                                   void* ctx) {
+                      [seq_num, this, ctx](homestore::logstore_seq_num_t seq_num_cb,
+                                           [[maybe_unused]] const sisl::io_blob& b, homestore::logdev_key ld_key,
+                                           [[maybe_unused]] void* cb_ctx) {
                           HS_DBG_ASSERT((ld_key && seq_num == seq_num_cb), "Write_Async failed or corrupted");
                           {
-                              std::unique_lock< std::mutex > lk{tl_write_mutex};
-                              tl_write_done = true;
-                              tl_ret = true;
+                              std::unique_lock< std::mutex > lk{ctx->write_mutex};
+                              ctx->write_done = true;
+                              ctx->ret = true;
                           }
-                          tl_write_cv.notify_one();
+                          ctx->write_cv.notify_one();
                       });
 
     {
-        std::unique_lock< std::mutex > lk{write_mutex};
-        write_cv.wait(lk, [] { return write_done; });
+        std::unique_lock< std::mutex > lk{ctx->write_mutex};
+        ctx->write_cv.wait(lk, [&ctx] { return ctx->write_done; });
     }
 
-    return ret;
+    return ctx->ret;
 }
 
 void HomeLogStore::write_async(logstore_req* const req, const log_req_comp_cb_t& cb) {

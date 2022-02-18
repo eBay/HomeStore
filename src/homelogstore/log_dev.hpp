@@ -771,6 +771,7 @@ private:
 
     // Block flush Q request Q
     std::mutex m_block_flush_q_mutex;
+    std::condition_variable m_block_flush_q_cv;
     std::mutex m_comp_mutex;
     std::vector< flush_blocked_callback >* m_block_flush_q{nullptr};
 
