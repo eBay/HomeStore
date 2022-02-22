@@ -570,7 +570,13 @@ void LogDevMetadata::meta_buf_found(const sisl::byte_view& buf, void* const meta
 std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::load() {
     std::vector< std::pair< logstore_id_t, logstore_superblk > > ret_list;
     ret_list.reserve(1024);
-    m_id_reserver = std::make_unique< sisl::IDReserver >(store_capacity());
+
+    if (store_capacity()) {
+        m_id_reserver = std::make_unique< sisl::IDReserver >(store_capacity());
+    } else {
+        // use default value (1024) if store_capacity is zero
+        m_id_reserver = std::make_unique< sisl::IDReserver >();
+    }
 
     HS_RELEASE_ASSERT_NE(m_raw_buf->bytes, nullptr, "Load called without getting metadata");
     HS_RELEASE_ASSERT_LE(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Logdev super blk version mismatch");
@@ -605,8 +611,7 @@ logstore_id_t LogDevMetadata::reserve_store(const bool persist_now) {
     m_store_info.insert(idx);
 
     // Write the meta inforation on-disk meta
-    [[maybe_unused]] const bool resize_result{
-        resize_if_needed()}; // In case the idx falls out of the alloc boundary, resize them
+    resize_if_needed(); // In case the idx falls out of the alloc boundary, resize them
     logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
     logstore_superblk::init(sb_area[idx]);
     ++m_sb->num_stores;
@@ -619,8 +624,8 @@ void LogDevMetadata::unreserve_store(const logstore_id_t idx, const bool persist
     m_id_reserver->unreserve(idx);
     m_store_info.erase(idx);
 
-    const bool shrunk{resize_if_needed()}; // In case the idx unregistered falls out of boundary, we can shrink them
-    if (!shrunk) {
+    resize_if_needed(); // In case the idx unregistered falls out of boundary, we can shrink them
+    if (idx < *m_store_info.rbegin()) {
         // We have not shrunk the store info, so we need to explicitly clear the store meta in on-disk meta
         logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
         logstore_superblk::clear(sb_area[idx]);
@@ -635,7 +640,7 @@ void LogDevMetadata::update_store_superblk(const logstore_id_t idx, const logsto
     m_store_info.insert(idx);
 
     // Update the on-disk copy
-    [[maybe_unused]] const bool resize_result{resize_if_needed()};
+    resize_if_needed();
     logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
     sb_area[idx] = sb;
 
@@ -661,7 +666,10 @@ void LogDevMetadata::set_start_dev_offset(const off_t offset, const logid_t key_
 logid_t LogDevMetadata::get_start_log_idx() const { return m_sb->key_idx; }
 
 bool LogDevMetadata::resize_if_needed() {
-    const auto req_sz{required_sb_size((m_store_info.size() == 0) ? 0u : *m_store_info.rbegin() + 1)};
+    auto req_sz{required_sb_size((m_store_info.size() == 0) ? 0u : *m_store_info.rbegin() + 1)};
+    if (MetaBlkMgrSI()->is_aligned_buf_needed(req_sz)) {
+        req_sz = sisl::round_up(req_sz, HS_STATIC_CONFIG(drive_attr.align_size));
+    }
     if (req_sz != m_raw_buf->size) {
         const auto old_buf{m_raw_buf};
 
