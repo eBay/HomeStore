@@ -276,9 +276,9 @@ public:
     void write(const boost::intrusive_ptr< SSDBtreeNode >& bn, const boost::intrusive_ptr< SSDBtreeNode >& dependent_bn,
                const btree_cp_ptr& bcp) {
         const size_t cp_id{bcp->cp_id % MAX_CP_CNT};
-        HS_REL_ASSERT((!dependent_bn || dependent_bn->req[cp_id] != nullptr), "");
+        HS_REL_ASSERT((!dependent_bn || dependent_bn->bcp == bcp), "dependent request is modifided by other CP");
         writeback_req_ptr wbd_req = dependent_bn ? dependent_bn->req[cp_id] : nullptr;
-        if (!bn->req[cp_id]) {
+        if (bn->bcp != bcp) {
             // create wb request
             auto wb_req = writeback_req_t::make_request();
             wb_req->bcp = bcp;
@@ -523,7 +523,6 @@ public:
                             wb_req->request_id, wb_cache_outstanding_cnt);
             queue_flush_buffers(nullptr);
         }
-        wb_req->bn->req[cp_id] = nullptr;
         ResourceMgrSI().dec_dirty_buf_cnt(m_node_size);
 
         if (m_dirty_buf_cnt[cp_id].decrement_testz(1)) { m_cp_comp_cb(wb_req->bcp); };

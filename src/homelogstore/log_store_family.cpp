@@ -95,7 +95,8 @@ void LogStoreFamily::open_log_store(const logstore_id_t store_id, const bool app
 
 void LogStoreFamily::remove_log_store(const logstore_id_t store_id) {
     LOGINFO("Removing log store id {}-{}", m_family_id, store_id);
-    m_id_logstore_map.wlock()->erase(store_id);
+    auto ret = m_id_logstore_map.wlock()->erase(store_id);
+    HS_REL_ASSERT((ret == 1), "try to remove invalid store_id {}-{}", m_family_id, store_id);
     m_log_dev.unreserve_store_id(store_id);
 }
 

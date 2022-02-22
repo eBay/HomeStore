@@ -683,6 +683,8 @@ void LogDevMetadata::unreserve_store(const logstore_id_t idx, const bool persist
 
     resize_if_needed();
     if (idx < *m_store_info.rbegin()) {
+        HS_LOG(DEBUG, logstore, "logdev meta not shrunk log_idx={} highest indx {}", idx, *m_store_info.rbegin(),
+               m_sb->num_stores);
         // We have not shrunk the store info, so we need to explicitly clear the store meta in on-disk meta
         logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
         logstore_superblk::clear(sb_area[idx]);
