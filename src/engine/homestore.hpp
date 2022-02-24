@@ -103,19 +103,15 @@ public:
         uint32_t max_thread_cnt = HS_DYNAMIC_CONFIG(generic.num_flush_threads);
 
         for (uint32_t i = 0; i < max_thread_cnt; ++i) {
-            auto sthread = sisl::named_thread(
-                "hs_flush_thread", [this, &tl_cv = flush_thread_cv, &tl_mtx = cv_mtx, &thread_cnt]() {
-                    iomanager.run_io_loop(TIGHT_LOOP | ADAPTIVE_LOOP, nullptr,
-                                          ([this, &tl_cv, &tl_mtx, &thread_cnt](bool is_started) {
-                                              if (is_started) {
-                                                  std::unique_lock< std::mutex > lk{tl_mtx};
-                                                  ++thread_cnt;
-                                                  m_flush_threads.push_back(iomanager.iothread_self());
-                                                  tl_cv.notify_one();
-                                              }
-                                          }));
-                });
-            sthread.detach();
+            iomanager.create_reactor("hs_flush_thread", TIGHT_LOOP | ADAPTIVE_LOOP,
+                                     [this, &tl_cv = flush_thread_cv, &tl_mtx = cv_mtx, &thread_cnt](bool is_started) {
+                                         if (is_started) {
+                                             std::unique_lock< std::mutex > lk{tl_mtx};
+                                             ++thread_cnt;
+                                             m_flush_threads.push_back(iomanager.iothread_self());
+                                             tl_cv.notify_one();
+                                         }
+                                     });
         }
         {
             std::unique_lock< std::mutex > lk{cv_mtx};

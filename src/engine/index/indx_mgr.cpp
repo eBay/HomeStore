@@ -1570,44 +1570,35 @@ void StaticIndxMgr::start_threads() {
     m_hs_cp_timer_hdl =
         iomanager.schedule_global_timer(HS_DYNAMIC_CONFIG(generic.blkalloc_cp_timer_us) * 1000, true, nullptr,
                                         iomgr::thread_regex::all_user, [](void* cookie) { trigger_hs_cp(); });
-    auto sthread = sisl::named_thread("indx_mgr", [&thread_cnt]() mutable {
-        iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, [&thread_cnt](bool is_started) {
-            if (is_started) {
-                IndxMgr::m_thread_id = iomanager.iothread_self();
-                ++thread_cnt;
-            }
-        });
+    iomanager.create_reactor("indx_mgr", INTERRUPT_LOOP, [&thread_cnt](bool is_started) {
+        if (is_started) {
+            IndxMgr::m_thread_id = iomanager.iothread_self();
+            ++thread_cnt;
+        }
     });
-    sthread.detach();
+
     expected_thread_cnt++;
 
     /* start btree slow path thread */
-    sthread = sisl::named_thread("indx_mgr_btree_slow", [&thread_cnt]() {
-        iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, [&thread_cnt](bool is_started) {
-            if (is_started) {
-                IndxMgr::m_slow_path_thread_id = iomanager.iothread_self();
-                ++thread_cnt;
-            }
-        });
+    iomanager.create_reactor("indx_mgr_btree_slow", INTERRUPT_LOOP, [&thread_cnt](bool is_started) {
+        if (is_started) {
+            IndxMgr::m_slow_path_thread_id = iomanager.iothread_self();
+            ++thread_cnt;
+        }
     });
-
-    sthread.detach();
     ++expected_thread_cnt;
 
     const auto nthreads = HS_DYNAMIC_CONFIG(generic.num_btree_write_threads);
     IndxMgr::m_btree_write_thread_ids.reserve(nthreads);
     for (uint32_t i = 0; i < nthreads; ++i) {
         /* start user thread for btree write operations */
-        sthread = sisl::named_thread("indx_mgr_btree_write_" + std::to_string(i), [&thread_cnt]() {
-            iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, [&thread_cnt](bool is_started) {
-                if (is_started) {
-                    IndxMgr::m_btree_write_thread_ids.push_back(iomanager.iothread_self());
-                    ++thread_cnt;
-                }
-            });
-        });
-
-        sthread.detach();
+        iomanager.create_reactor("indx_mgr_btree_write_" + std::to_string(i), INTERRUPT_LOOP,
+                                 [&thread_cnt](bool is_started) {
+                                     if (is_started) {
+                                         IndxMgr::m_btree_write_thread_ids.push_back(iomanager.iothread_self());
+                                         ++thread_cnt;
+                                     }
+                                 });
         ++expected_thread_cnt;
     }
 

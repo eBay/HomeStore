@@ -216,27 +216,23 @@ public:
                 auto cv_itr{std::begin(cvs)};
                 auto cv_m_itr{std::begin(cvs_m)};
                 for (size_t i{0}; i < flush_threads; ++i, ++initialized_itr, ++cv_itr, ++cv_m_itr) {
-                    // XXX : there can be race condition when message is sent before run_io_loop is called
-                    auto sthread{sisl::named_thread(
-                        "wbcache_flusher",
-                        [i, &tl_cv = *cv_itr, &tl_cv_m = *cv_m_itr, &tl_thread_initialized = *initialized_itr]() {
-                            iomanager.run_io_loop(false, nullptr,
-                                                  ([i, &tl_cv, &tl_cv_m, &tl_thread_initialized](bool is_started) {
-                                                      if (is_started) {
-                                                          wb_cache_t::m_thread_ids.push_back(iomanager.iothread_self());
-                                                          {
-                                                              std::unique_lock< std::mutex > lk{tl_cv_m};
-                                                              tl_thread_initialized = 0x01;
-                                                          }
-                                                          tl_cv.notify_one();
-                                                      }
-                                                  }));
-                        })};
+                    iomanager.create_reactor("wbcache_flusher", INTERRUPT_LOOP,
+                                             [&tl_cv = *cv_itr, &tl_cv_m = *cv_m_itr,
+                                              &tl_thread_initialized = *initialized_itr](bool is_started) {
+                                                 if (is_started) {
+                                                     wb_cache_t::m_thread_ids.push_back(iomanager.iothread_self());
+                                                     {
+                                                         std::unique_lock< std::mutex > lk{tl_cv_m};
+                                                         tl_thread_initialized = 0x01;
+                                                     }
+                                                     tl_cv.notify_one();
+                                                 }
+                                             });
+
                     {
                         std::unique_lock< std::mutex > lk{*cv_m_itr};
                         cv_itr->wait(lk, [&initialized_itr]() { return *initialized_itr == 0x01; });
                     }
-                    sthread.detach();
                 }
             }));
     }

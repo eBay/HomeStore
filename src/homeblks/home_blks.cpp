@@ -92,21 +92,18 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
     }
 
     /* start thread */
-    auto sthread = sisl::named_thread("hb_init", [instance]() {
-        iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, [instance](bool thread_started) {
-            if (thread_started) {
-                instance->m_init_thread_id = iomanager.iothread_self();
-                if (instance->is_safe_mode()) {
-                    std::unique_lock< std::mutex > lk(instance->m_cv_mtx);
-                    /* we wait for gdb to attach in safe mode */
-                    LOGINFO("Going to sleep. Waiting for user to send http command to wake up");
-                    instance->m_cv_wakeup_init.wait(lk);
-                }
-                instance->init_devices();
+    iomanager.create_reactor("hb_init", INTERRUPT_LOOP, [instance](bool thread_started) {
+        if (thread_started) {
+            instance->m_init_thread_id = iomanager.iothread_self();
+            if (instance->is_safe_mode()) {
+                std::unique_lock< std::mutex > lk(instance->m_cv_mtx);
+                /* we wait for gdb to attach in safe mode */
+                LOGINFO("Going to sleep. Waiting for user to send http command to wake up");
+                instance->m_cv_wakeup_init.wait(lk);
             }
-        });
+            instance->init_devices();
+        }
     });
-    sthread.detach();
 
     /* start custom io threads for hdd */
     if (is_data_drive_hdd()) {
@@ -114,18 +111,15 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
         instance->m_custom_hdd_threads.reserve(hdd_thread_count);
 
         for (auto i = 0u; i < hdd_thread_count; ++i) {
-            auto sthread1 = sisl::named_thread("custom_hdd", [&instance, hdd_thread_count]() {
-                iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, [&](bool is_started) {
-                    if (is_started) {
-                        std::lock_guard< std::mutex > lock(instance->m_hdd_threads_mtx);
-                        instance->m_custom_hdd_threads.emplace_back(iomanager.iothread_self());
-                        if (instance->m_custom_hdd_threads.size() == hdd_thread_count) {
-                            instance->m_hdd_threads_cv.notify_one();
-                        }
+            iomanager.create_reactor("custom_hdd", INTERRUPT_LOOP, [&instance, hdd_thread_count](bool is_started) {
+                if (is_started) {
+                    std::lock_guard< std::mutex > lock(instance->m_hdd_threads_mtx);
+                    instance->m_custom_hdd_threads.emplace_back(iomanager.iothread_self());
+                    if (instance->m_custom_hdd_threads.size() == hdd_thread_count) {
+                        instance->m_hdd_threads_cv.notify_one();
                     }
-                });
+                }
             });
-            sthread1.detach();
         }
 
         {
@@ -550,18 +544,15 @@ void HomeBlks::init_done() {
         std::atomic< uint32_t > thread_cnt{0};
         uint32_t expected_thread_cnt{HS_DYNAMIC_CONFIG(generic.hdd_io_threads)};
         for (auto i = 0u; i < expected_thread_cnt; ++i) {
-            auto sthread1 = sisl::named_thread("custom_hdd_thrd", [this, &thread_cnt]() mutable {
-                iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, [this, &thread_cnt](bool is_started) {
-                    if (is_started) {
-                        ++thread_cnt;
-                        const std::lock_guard< std::mutex > lock(m_hdd_threads_mtx);
-                        m_custom_hdd_threads.push_back(iomanager.iothread_self());
-                    } else {
-                        // it is called during shutdown
-                    }
-                });
+            iomanager.create_reactor("custom_hdd_thrd", INTERRUPT_LOOP, [this, &thread_cnt](bool is_started) {
+                if (is_started) {
+                    ++thread_cnt;
+                    const std::lock_guard< std::mutex > lock(m_hdd_threads_mtx);
+                    m_custom_hdd_threads.push_back(iomanager.iothread_self());
+                } else {
+                    // it is called during shutdown
+                }
             });
-            sthread1.detach();
         }
         while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
     }
@@ -757,12 +748,10 @@ bool HomeBlks::trigger_shutdown(const hs_comp_callback& shutdown_done_cb, bool f
     }
 
     // Execute the shutdown on the io thread, because clean shutdown will do IO (albeit sync io)
-    auto sthread = sisl::named_thread("hb_shutdown", [this, shutdown_done_cb, force]() {
-        iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, [&](bool thread_started) {
-            if (thread_started) { do_shutdown(shutdown_done_cb, force); }
-        });
+    iomanager.create_reactor("hb_shutdown", INTERRUPT_LOOP, [this, shutdown_done_cb, force](bool thread_started) {
+        if (thread_started) { do_shutdown(shutdown_done_cb, force); }
     });
-    sthread.detach();
+
     return true;
 }
 

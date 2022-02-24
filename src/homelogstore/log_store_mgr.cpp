@@ -123,19 +123,16 @@ void HomeLogStoreMgr::start_threads() {
     auto ctx{std::make_shared< Context >()};
 
     m_truncate_thread = nullptr;
-    auto sthread = sisl::named_thread("logstore_truncater", [this, ctx]() {
-        iomanager.run_io_loop(INTERRUPT_LOOP, nullptr, ([this, &ctx](bool is_started) {
-                                  if (is_started) {
-                                      m_truncate_thread = iomanager.iothread_self();
-                                      {
-                                          std::unique_lock< std::mutex > lk{ctx->mtx};
-                                          ++(ctx->thread_cnt);
-                                      }
-                                      ctx->cv.notify_one();
-                                  }
-                              }));
+    iomanager.create_reactor("logstore_truncater", INTERRUPT_LOOP, [this, &ctx](bool is_started) {
+        if (is_started) {
+            m_truncate_thread = iomanager.iothread_self();
+            {
+                std::unique_lock< std::mutex > lk{ctx->mtx};
+                ++(ctx->thread_cnt);
+            }
+            ctx->cv.notify_one();
+        }
     });
-    sthread.detach();
     {
         std::unique_lock< std::mutex > lk{ctx->mtx};
         ctx->cv.wait(lk, [&ctx] { return (ctx->thread_cnt == 1); });
