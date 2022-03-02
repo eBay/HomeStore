@@ -26,6 +26,8 @@
 #include <sys/eventfd.h>
 #include <sys/timeb.h>
 #include <unistd.h>
+#include <errno.h>
+
 #endif
 
 #include <boost/uuid/uuid_generators.hpp>
@@ -243,7 +245,9 @@ public:
     }
 
     TestJob(VolTest* test, uint32_t interval_ops_sec, bool run_in_worker_thread) :
-            m_voltest(test), m_start_time(Clock::now()), m_interval_ops_sec(interval_ops_sec) {
+            m_voltest(test),
+            m_start_time(Clock::now()),
+            m_interval_ops_sec(interval_ops_sec) {
         m_timer_hdl = iomanager.schedule_global_timer(interval_ops_sec * 1000ul * 1000ul * 1000ul, true, nullptr,
                                                       run_in_worker_thread ? iomgr::thread_regex::all_worker
                                                                            : iomgr::thread_regex::all_user,
@@ -1039,11 +1043,24 @@ private:
     }
 
     uint64_t get_mounted_vols() {
-        auto buf = iomanager.iobuf_alloc(512, sizeof(vol_file_hdr));
+        auto buf = iomanager.iobuf_alloc(512 /* alignment */, sizeof(vol_file_hdr));
         uint64_t mounted_vols = 0;
         for (uint32_t i = 0; i < tcfg.max_vols; ++i) {
             const std::string name = VOL_PREFIX + std::to_string(i);
             auto fd = open(name.c_str(), O_RDWR);
+
+            if (fd < 0) {
+                // there is assert if mounted vols counter doesn't match;
+                LOGINFO(
+                    "Error opening fd: {}, error: {}, possible volume: {} is not yet created if this is intentional "
+                    "crash test.",
+                    fd, errno, name);
+                continue;
+            }
+
+            std::memset(buf, 0, sizeof(vol_file_hdr));
+
+            // read file content if file exists;
             const auto ret{pread(fd, buf, sizeof(vol_file_hdr), 0)};
             close(fd);
             vol_file_hdr hdr = *reinterpret_cast< vol_file_hdr* >(buf);
@@ -1358,7 +1375,10 @@ protected:
     struct io_lba_range_t {
         io_lba_range_t() {}
         io_lba_range_t(bool valid, uint64_t vidx, uint64_t l, uint32_t n) :
-                valid_io{valid}, vol_idx{vidx}, lba{l}, num_lbas{n} {}
+                valid_io{valid},
+                vol_idx{vidx},
+                lba{l},
+                num_lbas{n} {}
         bool valid_io{false};
         uint64_t vol_idx{0};
         uint64_t lba{0};
