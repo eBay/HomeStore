@@ -322,7 +322,11 @@ protected:
                 throw std::runtime_error("vdev in failed state");
             }
         }
-        iomanager.create_mempool(atomic_phys_page_size, (ResourceMgrSI().get_cache_size() / atomic_phys_page_size));
+
+        uint64_t mempool_size =
+            (HS_DYNAMIC_CONFIG(generic.indx_mempool_percent) * ResourceMgrSI().get_cache_size()) / 100;
+        LOGINFO("indx mempool size {}", mempool_size);
+        iomanager.create_mempool(atomic_phys_page_size, mempool_size / atomic_phys_page_size);
         hs_utils::set_btree_mempool_size(atomic_phys_page_size);
     }
 

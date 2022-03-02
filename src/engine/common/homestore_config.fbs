@@ -135,6 +135,10 @@ table Generic {
 
     // nunmber of flush threads
     num_flush_threads : uint32 = 1;
+
+    // percentage of cache used to create indx mempool. It should be more than 100 to 
+    // take into account some floating buffers in writeback cache.
+    indx_mempool_percent : uint32 = 110;
 }
 
 table ResourceLimits {

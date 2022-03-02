@@ -701,7 +701,8 @@ public:
         params.data_open_flags = tcfg.io_flags;
         params.fast_open_flags = tcfg.io_flags;
         params.min_virtual_page_size = tcfg.vol_page_size;
-        params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
+        // params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
+        params.app_mem_size = 1 * 1024 * 1024 * 1024ul; // create 1GB in test for mempool
 
         params.data_devices = m_device_info;
 
