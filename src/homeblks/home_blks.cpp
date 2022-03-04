@@ -173,7 +173,9 @@ vol_interface_req::vol_interface_req(std::vector< iovec > iovecs, const uint64_t
 vol_interface_req::~vol_interface_req() = default;
 
 HomeBlks::HomeBlks(const init_params& cfg) :
-        m_cfg(cfg), m_metrics(new HomeBlksMetrics("HomeBlks")), m_start_shutdown{false} {
+        m_cfg(cfg),
+        m_metrics(new HomeBlksMetrics("HomeBlks")),
+        m_start_shutdown{false} {
     LOGINFO("Initializing HomeBlks with Config {}", m_cfg.to_string());
 
     if (m_cfg.start_http) {
@@ -799,7 +801,6 @@ void HomeBlks::do_shutdown(const hs_comp_callback& shutdown_done_cb, bool force)
     // Waiting for http server thread to join
     if (m_cfg.start_http) {
         m_hb_http_server->stop();
-        m_hb_http_server.reset();
         LOGINFO("http server stopped");
     } else {
         LOGINFO("Skip stopping http server since it was not started before.");
