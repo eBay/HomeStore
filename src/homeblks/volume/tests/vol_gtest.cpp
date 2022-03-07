@@ -111,6 +111,7 @@ struct TestCfg {
     uint64_t max_io_size{1 * Mi};
     uint64_t max_outstanding_ios{32};
     uint64_t max_disk_capacity{10 * Gi};
+    uint64_t app_mem_size_in_gb{1};
 
     uint32_t atomic_phys_page_size{512};
     uint32_t vol_page_size{4096};
@@ -701,8 +702,7 @@ public:
         params.data_open_flags = tcfg.io_flags;
         params.fast_open_flags = tcfg.io_flags;
         params.min_virtual_page_size = tcfg.vol_page_size;
-        // params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
-        params.app_mem_size = 1 * 1024 * 1024 * 1024ul; // create 1GB in test for mempool
+        params.app_mem_size = tcfg.app_mem_size_in_gb * 1024 * 1024 * 1024ul;
 
         params.data_devices = m_device_info;
 
@@ -2276,7 +2276,9 @@ SISL_OPTION_GROUP(
      "number of files or drives to be emulated as hdd"),
     (p_vol_files_space, "", "p_vol_files_space",
      "percentage of volume verficiation files of available free space on hosting file system",
-     ::cxxopts::value< uint32_t >()->default_value("30"), "0 to 100"))
+     ::cxxopts::value< uint32_t >()->default_value("30"), "0 to 100"),
+    (app_mem_size_in_gb, "", "app_mem_size_in_gb", "cache size in gb",
+     ::cxxopts::value< uint32_t >()->default_value("1"), "1 to 5"))
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr, test_meta_mod, test_vdev_mod, config
 
@@ -2339,8 +2341,8 @@ int main(int argc, char* argv[]) {
     gcfg.flip_name = SISL_OPTIONS["flip_name"].as< std::string >();
     gcfg.overlapping_allowed = SISL_OPTIONS["overlapping_allowed"].as< bool >();
     gcfg.emulate_hdd_cnt = SISL_OPTIONS["emulate_hdd_cnt"].as< uint32_t >();
-
     gcfg.p_vol_files_space = SISL_OPTIONS["p_vol_files_space"].as< uint32_t >();
+    gcfg.app_mem_size_in_gb = SISL_OPTIONS["app_mem_size_in_gb"].as< uint32_t >();
 
     if (SISL_OPTIONS.count("device_list")) {
         gcfg.dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();

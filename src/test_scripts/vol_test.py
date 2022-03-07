@@ -19,10 +19,13 @@ dirpath = "./"
 dev_list = ""
 log_mods = ""
 emulate_hdd=""
+app_mem_size_in_gb=""
 
 for opt,arg in opts:
     if opt in ('-t', '--test_suits'):
         test_suits = arg
+        if test_suits == "nightly":
+            app_mem_size_in_gb = ' --app_mem_size_in_gb=5' # 5 GB for nightly, this option only valid for volume test
         print(("testing suits (%s)") % (arg))
     if opt in ('-d', '--dirpath'):
         dirpath = arg
@@ -48,7 +51,7 @@ if bool(log_mods and log_mods.strip()):
     addln_opts += log_mods 
 
 addln_opts += ' '.join(map(str, args))
-vol_addln_opts = addln_opts + emulate_hdd
+vol_addln_opts = addln_opts + emulate_hdd + app_mem_size_in_gb
 
 print("addln_opts: " + addln_opts)
 print("vol_addln_opts: " + vol_addln_opts)
