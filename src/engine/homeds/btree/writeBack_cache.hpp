@@ -520,6 +520,8 @@ public:
             queue_flush_buffers(nullptr);
         }
         ResourceMgrSI().dec_dirty_buf_cnt(m_node_size);
+        /* req and btree node are pointing to each other which is preventing neither of them to be freed */
+        wb_req->bn = nullptr;
 
         if (m_dirty_buf_cnt[cp_id].decrement_testz(1)) { m_cp_comp_cb(wb_req->bcp); };
     }
