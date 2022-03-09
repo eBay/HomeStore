@@ -392,7 +392,7 @@ def vol_io_flip_test():
     cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file=0 --run_time=600 --delete_volume = 0 --cp_wb_flush_abort=true --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file=0 --run_time=600 --delete_volume=0 --cp_wb_flush_abort=true --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
     subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
