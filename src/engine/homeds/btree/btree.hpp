@@ -379,6 +379,7 @@ public:
         m_btree_lock.read_lock();
 
         btree_status_t ret = btree_status_t::success;
+        Clock::time_point start_time = Clock::now();
     retry:
 
 #ifndef NDEBUG
@@ -441,8 +442,10 @@ public:
             ret != btree_status_t::cp_mismatch) {
             THIS_BT_LOG(ERROR, base, , "btree put failed {}", ret);
             COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
+        } else {
+            auto time_spent = get_elapsed_time_ns(start_time);
+            HISTOGRAM_OBSERVE(m_metrics, btree_write_time, time_spent);
         }
-
         return ret;
     }
 
@@ -479,6 +482,8 @@ public:
 
         btree_status_t ret = btree_status_t::success;
         if (query_req.get_batch_size() == 0) { return ret; }
+
+        Clock::time_point start_time = Clock::now();
 
         /* set cursor if it is invalid. User is not interested in the cursor but we need it for internal logic */
         BtreeQueryCursor cur;
@@ -538,6 +543,9 @@ public:
             ret != btree_status_t::fast_path_not_possible) {
             THIS_BT_LOG(ERROR, base, , "btree get failed {}", ret);
             COUNTER_INCREMENT(m_metrics, query_err_cnt, 1);
+        } else {
+            auto time_spent = get_elapsed_time_ns(start_time);
+            HISTOGRAM_OBSERVE(m_metrics, btree_read_query_time, time_spent);
         }
         if (reset_cur) { query_req.get_input_range().reset_cursor(); }
         return ret;
@@ -2829,7 +2837,18 @@ private:
     btree_status_t _lock_and_refresh_node(const BtreeNodePtr& node, homeds::thread::locktype type,
                                           const btree_cp_ptr& bcp, const char* fname, int line) {
         bool is_write_modifiable;
+        Clock::time_point start_time = Clock::now();
         node->lock(type);
+        auto time_spent = get_elapsed_time_ns(start_time);
+
+        if (type == LOCKTYPE_READ) {
+            HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, node->is_leaf(), btree_read_lock_time_in_leaf_node,
+                                      btree_read_lock_time_in_int_node, time_spent);
+        } else {
+            HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, node->is_leaf(), btree_write_lock_time_in_leaf_node,
+                                      btree_write_lock_time_in_int_node, time_spent);
+        }
+
         if (type == homeds::thread::LOCKTYPE_WRITE) {
             is_write_modifiable = true;
 #ifndef NDEBUG

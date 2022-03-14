@@ -930,6 +930,16 @@ public:
                            "btree_inclusive_time_in_node", {"node_type", "interior"});
         REGISTER_HISTOGRAM(btree_inclusive_time_in_leaf_node, "Inclusive time spent (Read locked) on leaf node (ns)",
                            "btree_inclusive_time_in_node", {"node_type", "leaf"});
+        REGISTER_HISTOGRAM(btree_write_time, "time spent in write (ns)", "btree_write_time");
+        REGISTER_HISTOGRAM(btree_read_query_time, "time spent in read (ns)", "btree_read_query_time");
+        REGISTER_HISTOGRAM(btree_read_lock_time_in_leaf_node, "time spent in read lock contention on leaf node",
+                           "btree_read_lock_time_in_leaf_node");
+        REGISTER_HISTOGRAM(btree_read_lock_time_in_int_node, "time spent in read lock contention on interior node",
+                           "btree_read_lock_time_in_int_node");
+        REGISTER_HISTOGRAM(btree_write_lock_time_in_leaf_node, "time spent in write lock contention on leaf node",
+                           "btree_write_lock_time_in_leaf_node");
+        REGISTER_HISTOGRAM(btree_write_lock_time_in_int_node, "time spent in write lock contention on interior node",
+                           "btree_write_lock_time_in_int_node");
 
         register_me_to_farm();
     }

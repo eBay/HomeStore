@@ -1195,8 +1195,12 @@ iomgr::io_thread_t IndxMgr::get_next_btree_write_thread() {
 
 void IndxMgr::update_indx(const indx_req_ptr& ireq) {
     /* do btree write in user thread */
-    iomanager.run_on(get_next_btree_write_thread(), [this, ireq](const io_thread_addr_t addr) mutable {
+    Clock::time_point start_time = Clock::now();
+
+    iomanager.run_on(get_next_btree_write_thread(), [this, ireq, start_time](const io_thread_addr_t addr) mutable {
         /* Entered into critical section. CP is not triggered in this critical section */
+        auto time_spent = get_elapsed_time_ns(start_time);
+        HISTOGRAM_OBSERVE(m_metrics, btree_msg_time, time_spent);
         ireq->hcp = m_cp_mgr->cp_io_enter();
         ireq->icp = get_indx_cp(ireq->hcp);
         ireq->state = indx_req_state::active_btree;
