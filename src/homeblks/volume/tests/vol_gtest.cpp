@@ -123,7 +123,8 @@ struct TestCfg {
     bool unmap_enable{false};
     bool enable_crash_handler{true};
     bool read_verify{false};
-    bool remove_file{true};
+    bool remove_file_on_shutdown{true};
+    bool remove_file_on_start{false};
     bool verify_only{false};
     bool pre_init_verify{true};
     bool is_abort{false};
@@ -862,12 +863,21 @@ public:
 
             // create file for verification
             auto vol_file_path = std::filesystem::current_path().string() + name;
+            if (std::filesystem::exists(vol_file_path) && tcfg.remove_file_on_start) {
+                LOGINFO("remove old file: {}, because remove_file_on_start is set to {}", vol_file_path,
+                        tcfg.remove_file_on_start);
+                std::filesystem::remove(vol_file_path);
+            }
+
             if (std::filesystem::exists(vol_file_path) == false) {
                 // only create file and initialize it when file is not there;
                 std::ofstream ofs{name, std::ios::binary | std::ios::out | std::ios::trunc};
                 ofs.seekp(offset_to_seek);
                 ofs.write("", 1);
                 ofs.close();
+            } else {
+                LOGINFO("Reusing old file: {}, because remove_file_on_start is set to {}", vol_file_path,
+                        tcfg.remove_file_on_start);
             }
 
             auto fd = open(name.c_str(), O_RDWR);
@@ -1764,7 +1774,8 @@ protected:
                     VolInterface::get_instance()->print_tree(req->vol_info->vol);
 #endif
                     LOGINFO("lba {} {}", req->lba, req->nlbas);
-                    std::this_thread::sleep_for(std::chrono::seconds{30});
+                    // verify is done io is done completion thread which is SPDK thread and can't do sleep
+                    // std::this_thread::sleep_for(std::chrono::seconds{30});
                     HS_REL_ASSERT(0, "");
                 }
                 // need to return false
@@ -1894,7 +1905,7 @@ TEST_F(VolTest, lifecycle_test) {
     this->shutdown();
 
     LOGINFO("Shutdown of homestore is completed, removing files");
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 /*
@@ -1921,7 +1932,7 @@ TEST_F(VolTest, vol_crc_mismatch_test) {
     this->shutdown();
 
     LOGINFO("Shutdown of homestore is completed, removing files");
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
     tcfg.expect_vol_offline = false;
 }
 
@@ -1954,7 +1965,7 @@ TEST_F(VolTest, init_io_test) {
     if (tcfg.create_del_with_io || tcfg.delete_with_io) { cdjob->wait_for_completion(); }
 
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 /*!
@@ -1988,7 +1999,7 @@ TEST_F(VolTest, recovery_io_test) {
 
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 #ifdef _PRERELEASE
@@ -2010,7 +2021,7 @@ TEST_F(VolTest, hs_force_reinit_test) {
 
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 #endif
 
@@ -2040,7 +2051,7 @@ TEST_F(VolTest, hs_force_reinit_test) {
 
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 #endif
 
@@ -2056,7 +2067,7 @@ TEST_F(VolTest, vol_create_del_test) {
     this->start_job(cdjob.get(), wait_type::for_completion);
     output.print("vol_create_del_test");
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 /************ Below tests check the workflows ***********/
@@ -2079,7 +2090,7 @@ TEST_F(VolTest, one_disk_fail_test) {
 
     output.print("one_disk_fail_test");
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 TEST_F(VolTest, vol_offline_test) {
@@ -2128,7 +2139,7 @@ TEST_F(VolTest, btree_fix_read_failure_test) {
 
     this->delete_volumes();
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 /**
@@ -2155,7 +2166,7 @@ TEST_F(VolTest, btree_fix_test) {
 
     this->delete_volumes();
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 /**
@@ -2191,7 +2202,7 @@ TEST_F(VolTest, btree_fix_rerun_io_test) {
 
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 std::vector< module_test* > mod_tests;
@@ -2227,8 +2238,12 @@ SISL_OPTION_GROUP(
      ::cxxopts::value< uint64_t >()->default_value("0"), "0 or 1"),
     (enable_crash_handler, "", "enable_crash_handler", "enable crash handler 0 or 1",
      ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
-    (remove_file, "", "remove_file", "remove file at the end of test 0 or 1",
-     ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
+    (remove_file_on_shutdown, "", "remove_file_on_shutdown", "remove file at the end of test 0 or 1",
+     ::cxxopts::value< uint32_t >()->default_value("1"), "flag"), // remove file on shutdown
+    (remove_file_on_start, "", "remove_file_on_start", "remove file at the start of test 0 or 1",
+     ::cxxopts::value< uint32_t >()->default_value("0"),
+     "flag"), // by default (0) we keep the file on disk unless the test specifically ask to remove, some tests rely on
+              // previously generated vol files to run;
     (expected_vol_state, "", "expected_vol_state", "volume state expected during boot",
      ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (verify_only, "", "verify_only", "verify only boot", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
@@ -2314,7 +2329,8 @@ int main(int argc, char* argv[]) {
     gcfg.pre_init_verify = SISL_OPTIONS["pre_init_verify"].as< bool >();
     gcfg.read_verify = SISL_OPTIONS["read_verify"].as< uint64_t >() ? true : false;
     gcfg.load_type = static_cast< load_type_t >(SISL_OPTIONS["load_type"].as< uint32_t >());
-    gcfg.remove_file = SISL_OPTIONS["remove_file"].as< uint32_t >();
+    gcfg.remove_file_on_shutdown = SISL_OPTIONS["remove_file_on_shutdown"].as< uint32_t >();
+    gcfg.remove_file_on_start = SISL_OPTIONS["remove_file_on_start"].as< uint32_t >();
     gcfg.expected_vol_state = static_cast< homestore::vol_state >(SISL_OPTIONS["expected_vol_state"].as< uint32_t >());
     gcfg.verify_only = SISL_OPTIONS["verify_only"].as< uint32_t >();
     gcfg.is_abort = SISL_OPTIONS["abort"].as< uint32_t >();
