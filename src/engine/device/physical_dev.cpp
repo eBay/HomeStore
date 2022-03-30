@@ -154,6 +154,9 @@ void PhysicalDev::read_and_fill_superblock(const int oflags) {
 
     // now perisit the attr to disk;
     write_superblock();
+
+    LOGINFO("Stored dev_attr from iomgr: {} for device id: {}", m_super_blk->dev_attr.to_string(),
+            m_super_blk->this_dev_info.dev_num);
 }
 
 //
@@ -551,12 +554,26 @@ PhysicalDevChunk* PhysicalDev::find_free_chunk(const uint64_t req_size, const bo
     while (chunk) {
         const auto size = is_stream_aligned ? chunk->get_aligned_size(get_stream_aligned_offset(), get_page_size())
                                             : chunk->get_size();
+        if (is_stream_aligned) {
+            LOGDEBUG("Finding free chunk for size: {}, this chunk_id: {}, start_offset: {}", size,
+                     chunk->get_chunk_id(), chunk->get_start_offset());
+        }
+
         if (!chunk->is_busy() && size >= req_size) {
             if ((closest_chunk == nullptr) || (chunk->get_size() < closest_chunk->get_size())) {
                 closest_chunk = chunk;
             }
         }
+
         chunk = device_manager_mutable()->get_chunk_mutable(chunk->get_next_chunk_id());
+    }
+
+    if (closest_chunk == nullptr) {
+        LOGWARN("No available chunk found for req_size: {}, this dev's size: {}, num_streams: {}, id: {}, "
+                "page_size: {}",
+                req_size, get_size(), get_num_streams(), get_dev_id(), get_page_size());
+    } else {
+        LOGINFO("Found free chunk for req_size: {}, in dev id: {}", req_size, get_dev_id());
     }
 
     return closest_chunk;

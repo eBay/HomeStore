@@ -675,7 +675,7 @@ public:
                 data_attrs.align_size = 2 * data_attrs.align_size;
                 data_attrs.phys_page_size = 2 * tcfg.phy_page_size;
                 data_attrs.atomic_phys_page_size = 2 * tcfg.atomic_phys_page_size;
-                data_attrs.num_streams = 10;
+                data_attrs.num_streams = 20;
                 --hdd_cnt;
             }
             iomgr::DriveInterface::emulate_drive_attributes(dinfo.dev_names, data_attrs);

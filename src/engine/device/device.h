@@ -220,8 +220,8 @@ struct disk_attr {
     }
 
     std::string to_string() const {
-        return fmt::format("disk_attr: hys_page_size: {}, align_size: {}, atomic_phys_page_size: {}", phys_page_size,
-                           align_size, atomic_phys_page_size);
+        return fmt::format("disk_attr: hys_page_size: {}, align_size: {}, atomic_phys_page_size: {}, num_streams: {}",
+                           phys_page_size, align_size, atomic_phys_page_size, num_streams);
     }
 };
 
@@ -408,7 +408,7 @@ public:
     static std::shared_ptr< blkalloc_cp > attach_prepare_cp(const std::shared_ptr< blkalloc_cp >& cur_ba_cp);
     void update_start_offset(const uint64_t start_offset) { m_chunk_info->update_start_offset(start_offset); }
     uint64_t get_aligned_size(const uint64_t align_offset, const uint64_t page_size) {
-        const uint64_t offset = sisl::round_up(get_start_offset(), std::lcm(align_offset, page_size));
+        const uint64_t offset = sisl::round_up(get_start_offset(), sisl::round_up(align_offset, page_size));
         if (offset - get_start_offset() <= get_size()) {
             const uint64_t size = get_size() - (offset - get_start_offset());
             return size;

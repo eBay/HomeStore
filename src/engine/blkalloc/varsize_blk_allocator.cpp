@@ -62,7 +62,11 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const
     }
 
     // Create free blk Cache of type Queue
-    if (m_cfg.get_use_slabs()) { m_fb_cache = std::make_unique< FreeBlkCacheQueue >(cfg.m_slab_config, &m_metrics); }
+    if (m_cfg.get_use_slabs()) {
+        m_fb_cache = std::make_unique< FreeBlkCacheQueue >(cfg.m_slab_config, &m_metrics);
+
+        LOGINFO("m_fb_cache total free blks: {}", m_fb_cache->total_free_blks());
+    }
 
     // Start a thread which will do sweeping job of free segments
     if (init) { inited(); }
@@ -564,8 +568,9 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
         static thread_local std::vector< blk_cache_entry > excess_blks;
         excess_blks.clear();
 
-        [[maybe_unused]] const blk_count_t num_zombied{
-            m_fb_cache->try_free_blks(blkid_to_blk_cache_entry(b, 2), excess_blks)};
+        [[maybe_unused]] const blk_count_t num_zombied {
+            m_fb_cache->try_free_blks(blkid_to_blk_cache_entry(b, 2), excess_blks)
+        };
 
         for (const auto& e : excess_blks) {
             BLKALLOC_LOG(TRACE, "Freeing in bitmap of entry={} - excess of free_blks size={}", e.to_string(),

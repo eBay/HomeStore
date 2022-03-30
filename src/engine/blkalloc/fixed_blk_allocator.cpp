@@ -13,7 +13,9 @@
 
 namespace homestore {
 FixedBlkAllocator::FixedBlkAllocator(const BlkAllocConfig& cfg, const bool init, const chunk_num_t chunk_id) :
-        BlkAllocator(cfg, chunk_id), m_blk_q{cfg.get_total_blks()} {
+        BlkAllocator(cfg, chunk_id),
+        m_blk_q{cfg.get_total_blks()} {
+    LOGINFO("total blks: {}", cfg.get_total_blks());
     if (init) { inited(); }
 }
 

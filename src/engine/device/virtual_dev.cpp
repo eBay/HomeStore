@@ -115,7 +115,10 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
                        const blk_allocator_type_t allocator_type, const uint64_t context_size, const uint32_t nmirror,
                        const bool is_stripe, const uint32_t page_size, vdev_comp_cb_t cb, char* blob,
                        const uint64_t size_in, const bool auto_recovery, vdev_high_watermark_cb_t hwm_cb) :
-        m_name{name}, m_allocator_type{allocator_type}, m_metrics{name}, m_pdev_group{pdev_group} {
+        m_name{name},
+        m_allocator_type{allocator_type},
+        m_metrics{name},
+        m_pdev_group{pdev_group} {
     init(mgr, nullptr, std::move(cb), page_size, auto_recovery, std::move(hwm_cb));
 
     const auto pdev_list = m_mgr->get_devices(pdev_group);
@@ -137,13 +140,18 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
 
     // check that all pdevs valid and of same type
     HS_DBG_ASSERT_EQ(m_primary_pdev_chunks_list.size(), pdev_list.size());
-
     auto size{size_in};
     // Now its time to allocate chunks as needed
     HS_LOG_ASSERT_LT(nmirror, m_primary_pdev_chunks_list.size()); // Mirrors should be at least 1 less than device list
 
     const auto max_chunk_size{MAX_DATA_CHUNK_SIZE(m_pagesz)};
-    const auto aligned_chunk_size{MIN_DATA_CHUNK_SIZE(m_pagesz)};
+    const auto aligned_chunk_size{
+        MIN_DATA_CHUNK_SIZE(std::max(m_pagesz, m_primary_pdev_chunks_list[0].pdev->get_page_size()))};
+
+    // stream size is (device_size / num_streams)
+    LOGINFO("stream_size: {}, aligned_chunk_size: {}, max_chunk_size: {}, is_hdd: {}, pdev_group: {}", stream_size,
+            aligned_chunk_size, max_chunk_size, is_hdd, pdev_group);
+
     bool is_stream_aligned = false;
     if (pdev_group == PhysicalDevGroup::DATA && is_hdd) {
         m_chunk_size = stream_size;
@@ -204,13 +212,16 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
 
         // set the default chunk. It is used for HDD when volume can not allocate blkid from its stream
         if (!m_default_chunk || (m_default_chunk->get_chunk_id() > chunk->get_chunk_id())) { m_default_chunk = chunk; }
-        LOGINFO("vdev name {} , chunk id {} chunk start offset {}, chunk size {}", m_name, chunk->get_chunk_id(),
-                chunk->get_start_offset(), chunk->get_size());
+
+        LOGINFO("vdev name {}, chunk id {} chunk start offset {}, chunk size {}, pdev_ind: {} ", m_name,
+                chunk->get_chunk_id(), chunk->get_start_offset(), chunk->get_size(), pdev_ind);
+
         m_free_streams.push_back(chunk);
         std::shared_ptr< BlkAllocator > ba{
             create_blk_allocator(allocator_type, get_page_size(), m_primary_pdev_chunks_list[0].pdev->get_page_size(),
                                  m_primary_pdev_chunks_list[0].pdev->get_align_size(), m_chunk_size, m_auto_recovery,
                                  chunk->get_chunk_id(), true /* init */)};
+
         // set initial value of "end of chunk offset";
         chunk->update_end_of_chunk(m_chunk_size);
 
@@ -241,7 +252,10 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
 VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, const PhysicalDevGroup pdev_group,
                        const blk_allocator_type_t allocator_type, vdev_comp_cb_t cb, const bool recovery_init,
                        const bool auto_recovery, vdev_high_watermark_cb_t hwm_cb) :
-        m_name{name}, m_allocator_type{allocator_type}, m_metrics{name}, m_pdev_group{pdev_group} {
+        m_name{name},
+        m_allocator_type{allocator_type},
+        m_metrics{name},
+        m_pdev_group{pdev_group} {
     init(mgr, vb, std::move(cb), vb->page_size, auto_recovery, std::move(hwm_cb));
 
     m_recovery_init = recovery_init;
@@ -264,14 +278,13 @@ void VirtualDev::reset_failed_state() {
 void VirtualDev::process_completions(const boost::intrusive_ptr< virtualdev_req >& req) {
 #ifdef _PRERELEASE
     if (!req->delay_induced &&
-        homestore_flip->delay_flip(
-            "simulate_vdev_delay",
-            [req, this]() {
-                HS_LOG(DEBUG, device, "[Vdev={},req={},is_read={}] - Calling delayed completion", m_name,
-                       req->request_id, req->is_read);
-                process_completions(req);
-            },
-            m_name, req->is_read)) {
+        homestore_flip->delay_flip("simulate_vdev_delay",
+                                   [req, this]() {
+                                       HS_LOG(DEBUG, device, "[Vdev={},req={},is_read={}] - Calling delayed completion",
+                                              m_name, req->request_id, req->is_read);
+                                       process_completions(req);
+                                   },
+                                   m_name, req->is_read)) {
         req->delay_induced = true;
         HS_LOG(DEBUG, device, "[Vdev={},req={},is_read={}] - Delaying completion", m_name, req->request_id,
                req->is_read);
@@ -1128,7 +1141,11 @@ uint64_t VirtualDev::to_dev_offset(const BlkId& glob_uniq_id, PhysicalDevChunk**
 }
 
 uint32_t VirtualDev::get_align_size() const { return m_primary_pdev_chunks_list.front().pdev->get_align_size(); }
-uint32_t VirtualDev::get_phys_page_size() const { return m_primary_pdev_chunks_list.front().pdev->get_page_size(); }
+uint32_t VirtualDev::get_phys_page_size() const {
+    // return m_pagesz;
+    return m_primary_pdev_chunks_list.front().pdev->get_page_size();
+}
+
 uint32_t VirtualDev::get_atomic_page_size() const {
     return m_primary_pdev_chunks_list.front().pdev->get_atomic_page_size();
 }
