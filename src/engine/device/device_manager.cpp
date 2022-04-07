@@ -558,8 +558,8 @@ PhysicalDevChunk* DeviceManager::alloc_chunk(PhysicalDev* pdev, const uint32_t v
     // if it is not stream aligned. Create a new chunk at the beginning.
     if (is_stream_aligned && (chunk->get_start_offset() % pdev->get_stream_aligned_offset() != 0)) {
         const auto old_start_offset = chunk->get_start_offset();
-        const auto new_start_offset =
-            sisl::round_up(chunk->get_start_offset(), sisl::round_up(pdev->get_stream_size(), pdev->get_page_size()));
+        const auto new_start_offset = sisl::round_up(
+            chunk->get_start_offset(), sisl::round_up(pdev->get_raw_stream_size(), pdev->get_page_size()));
         if (new_start_offset > old_start_offset) {
             chunk->update_start_offset(new_start_offset);
             create_new_chunk(pdev, old_start_offset, new_start_offset - old_start_offset, chunk);

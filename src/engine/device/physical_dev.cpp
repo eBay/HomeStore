@@ -607,7 +607,7 @@ bool PhysicalDev::is_hdd() const {
     return false;
 }
 
-uint64_t PhysicalDev::get_stream_size() const {
+uint64_t PhysicalDev::get_raw_stream_size() const {
     if (!is_hdd()) { return get_size(); }
     const auto page_size = get_page_size();
 

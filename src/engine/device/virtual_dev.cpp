@@ -40,6 +40,8 @@ SISL_LOGGING_DECL(device)
 
 namespace homestore {
 
+uint32_t VirtualDev::s_num_chunks_created{0};
+
 void VirtualDev::static_process_completions(const int64_t res, uint8_t* cookie) {
     boost::intrusive_ptr< virtualdev_req > vd_req{reinterpret_cast< virtualdev_req* >(cookie), false};
     HS_DBG_ASSERT_EQ(vd_req->version, 0xDEAD);
@@ -125,7 +127,7 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
     // Prepare primary chunks in a physical device for future inserts.
     m_primary_pdev_chunks_list.reserve(pdev_list.size());
     uint32_t num_streams_available = 0;
-    uint64_t stream_size = 0;
+    uint64_t mapped_stream_size = 0;
     const bool is_hdd = pdev_list.front()->is_hdd();
     m_drive_iface = pdev_list.front()->drive_iface();
     for (const auto& pdev : pdev_list) {
@@ -133,31 +135,47 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
         mp.pdev = pdev;
         mp.chunks_in_pdev.reserve(1);
         m_primary_pdev_chunks_list.push_back(std::move(mp));
-        HS_REL_ASSERT((stream_size == 0 || stream_size == pdev->get_stream_size()), "stream size {}",
-                      pdev->get_stream_size());
-        stream_size = pdev->get_stream_size();
+        // homestore doesn't support heterogeneous devices in same device group;
+        HS_REL_ASSERT((mapped_stream_size == 0 || mapped_stream_size == pdev->get_raw_stream_size()), "stream size {}",
+                      pdev->get_raw_stream_size());
+        mapped_stream_size = pdev->get_raw_stream_size();
     }
 
     // check that all pdevs valid and of same type
     HS_DBG_ASSERT_EQ(m_primary_pdev_chunks_list.size(), pdev_list.size());
     auto size{size_in};
+    const auto num_pdevs = m_primary_pdev_chunks_list.size();
     // Now its time to allocate chunks as needed
-    HS_LOG_ASSERT_LT(nmirror, m_primary_pdev_chunks_list.size()); // Mirrors should be at least 1 less than device list
+    HS_LOG_ASSERT_LT(nmirror, num_pdevs); // Mirrors should be at least 1 less than device list
 
-    const auto max_chunk_size{MAX_DATA_CHUNK_SIZE(m_pagesz)};
-    const auto aligned_chunk_size{
-        MIN_DATA_CHUNK_SIZE(std::max(m_pagesz, m_primary_pdev_chunks_list[0].pdev->get_page_size()))};
+    const auto max_chunk_size = MAX_DATA_CHUNK_SIZE(m_pagesz);
+    const auto aligned_chunk_size =
+        MIN_DATA_CHUNK_SIZE(std::max(m_pagesz, m_primary_pdev_chunks_list[0].pdev->get_page_size()));
 
     // stream size is (device_size / num_streams)
-    LOGINFO("stream_size: {}, aligned_chunk_size: {}, max_chunk_size: {}, is_hdd: {}, pdev_group: {}", stream_size,
-            aligned_chunk_size, max_chunk_size, is_hdd, pdev_group);
+    LOGINFO("mapped_stream_size: {}, aligned_chunk_size: {}, max_chunk_size: {}, is_hdd: {}, pdev_group: {}",
+            mapped_stream_size, aligned_chunk_size, max_chunk_size, is_hdd, pdev_group);
 
     bool is_stream_aligned = false;
+    const auto max_num_chunks = BlkId::max_num_chunks();
+    // TODO: should we reserve any chunk number as buffer?
     if (pdev_group == PhysicalDevGroup::DATA && is_hdd) {
-        m_chunk_size = stream_size;
-        m_chunk_size = sisl::round_down(m_chunk_size, aligned_chunk_size);
+        const auto remaining_num_chunks = max_num_chunks - s_num_chunks_created;
+        const auto raw_stream_size = m_primary_pdev_chunks_list[0].pdev->get_raw_stream_size();
+
+        // if remaining num chunks is not enough for creating chunk per stream, map chunk to multiple physical stream
+        if (remaining_num_chunks < num_pdevs * m_primary_pdev_chunks_list[0].pdev->get_num_streams()) {
+            const auto num_streams_per_pdev =
+                remaining_num_chunks / num_pdevs + (remaining_num_chunks % num_pdevs > 0); // get the ceiling of
+            mapped_stream_size =
+                sisl::round_up(m_primary_pdev_chunks_list[0].pdev->get_size() / num_streams_per_pdev, raw_stream_size);
+            LOGINFO("stream size is resized to {}, each mapped stream maps to {} physical stream", mapped_stream_size,
+                    mapped_stream_size / raw_stream_size);
+        }
+
+        m_chunk_size = sisl::round_down(mapped_stream_size, aligned_chunk_size);
         HS_REL_ASSERT_LE(m_chunk_size, max_chunk_size);
-        const auto chunks_multiple = is_stripe ? static_cast< uint32_t >(m_primary_pdev_chunks_list.size()) : 1;
+        const auto chunks_multiple = is_stripe ? static_cast< uint32_t >(num_pdevs) : 1;
         uint32_t cnt{1};
         uint64_t total_size{0};
         do {
@@ -165,10 +183,15 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
             total_size = m_num_chunks * m_chunk_size;
             ++cnt;
         } while (total_size < size);
+
         is_stream_aligned = true;
+        s_num_chunks_created += m_num_chunks;
     } else {
+        // keep track of how many chunks has been created by non-HDD blkstore;
+        ++s_num_chunks_created;
+
         if (is_stripe) {
-            m_num_chunks = static_cast< uint32_t >(m_primary_pdev_chunks_list.size());
+            m_num_chunks = static_cast< uint32_t >(num_pdevs);
             uint32_t cnt{1};
 
             do {
@@ -180,11 +203,14 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
             m_chunk_size = size;
             m_num_chunks = 1;
         }
+
         if (m_chunk_size % aligned_chunk_size > 0) {
             m_chunk_size = sisl::round_up(m_chunk_size, aligned_chunk_size);
             HS_LOG(INFO, device, "size of a chunk is resized to {}", m_chunk_size);
         }
     }
+
+    HS_REL_ASSERT_LE(s_num_chunks_created, max_num_chunks, "num chunks should not exceed maximum supported!");
 
     LOGINFO("size of a chunk is {} is_stripe {} num chunks {}", m_chunk_size, is_stripe, m_num_chunks);
     if (m_chunk_size > max_chunk_size) {
@@ -197,7 +223,7 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
     m_vb = mgr->alloc_vdev(context_size, nmirror, page_size, m_num_chunks, blob, size);
 
     for (auto i : boost::irange< uint32_t >(0, m_num_chunks)) {
-        const auto pdev_ind{i % m_primary_pdev_chunks_list.size()};
+        const auto pdev_ind{i % num_pdevs};
 
         // Create a chunk on selected physical device and add it to chunks in physdev list
         auto* chunk{create_dev_chunk(pdev_ind, nullptr, INVALID_CHUNK_ID, is_stream_aligned)};
@@ -234,7 +260,7 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
             std::vector< PhysicalDevChunk* > vec;
             vec.reserve(nmirror);
             for (auto j : boost::irange< uint32_t >(0, nmirror)) {
-                if ((++next_ind) == m_primary_pdev_chunks_list.size()) { next_ind = 0; }
+                if ((++next_ind) == num_pdevs) { next_ind = 0; }
                 auto* const mchunk{create_dev_chunk(next_ind, ba, chunk->get_chunk_id(), is_stream_aligned)};
                 vec.push_back(mchunk);
             }

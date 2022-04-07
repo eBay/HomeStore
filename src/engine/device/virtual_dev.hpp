@@ -175,8 +175,11 @@ protected:
     VirtualDevMetrics m_metrics;
     std::vector< PhysicalDevChunk* > m_free_streams;
     std::mutex m_free_streams_lk;
-    PhysicalDevChunk* m_default_chunk = nullptr;
+    PhysicalDevChunk* m_default_chunk{nullptr};
     PhysicalDevGroup m_pdev_group;
+
+private:
+    static uint32_t s_num_chunks_created; // vdev will not be created in parallel threads;
 
 public:
     static constexpr size_t context_data_size() { return MAX_CONTEXT_DATA_SZ; }

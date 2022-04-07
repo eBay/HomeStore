@@ -566,7 +566,14 @@ public:
     void close_device();
 
     hs_uuid_t get_sys_uuid() { return m_super_blk->get_system_uuid(); }
-    uint64_t get_stream_size() const;
+
+    /**
+     * @brief : Get the stream size reported by iomgr;
+     *
+     * @return : return stream size reported by iomgr of this device;
+     */
+    uint64_t get_raw_stream_size() const;
+
     uint64_t get_stream_aligned_offset() const;
     uint32_t get_page_size() const;
     uint32_t get_atomic_page_size() const;

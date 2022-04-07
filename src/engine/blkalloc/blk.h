@@ -82,7 +82,9 @@ public:
         return val;
     }
 
-    explicit BlkId(const uint64_t id_int) { set(id_int); }
+    explicit BlkId(const uint64_t id_int) {
+        set(id_int);
+    }
     BlkId(const blk_num_t blk_num, const blk_count_t nblks, const chunk_num_t chunk_num = 0) {
         set(blk_num, nblks, chunk_num);
     }
@@ -97,7 +99,7 @@ public:
 
     [[nodiscard]] bool is_valid() const { return (m_chunk_num != s_chunk_num_mask); }
 
-    [[nodiscard]] BlkId get_blkid_at(const uint32_t offset, const uint32_t pagesz) const {
+        [[nodiscard]] BlkId get_blkid_at(const uint32_t offset, const uint32_t pagesz) const {
         assert(offset % pagesz == 0);
         const uint32_t remaining_size{((get_nblks() - (offset / pagesz)) * pagesz)};
         return (get_blkid_at(offset, remaining_size, pagesz));
@@ -151,12 +153,19 @@ public:
     }
     [[nodiscard]] chunk_num_t get_chunk_num() const { return m_chunk_num; }
 
-    /* A blkID represent a page size which is assigned to a blk allocator */
-    [[nodiscard]] uint32_t data_size(const uint32_t page_size) const { return (get_nblks() * page_size); }
+        /* A blkID represent a page size which is assigned to a blk allocator */
+        [[nodiscard]] uint32_t data_size(const uint32_t page_size) const {
+        return (get_nblks() * page_size);
+    }
 
     [[nodiscard]] std::string to_string() const {
         return is_valid() ? fmt::format("BlkNum={} nblks={} chunk={}", get_blk_num(), get_nblks(), get_chunk_num())
                           : "Invalid_Blkid";
+    }
+
+    /* maximum number of chunks that can be addressed by BlkId */
+    static uint64_t max_num_chunks() {
+        return s_chunk_num_mask;
     }
 
 private:
