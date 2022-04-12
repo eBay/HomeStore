@@ -36,6 +36,7 @@ pipeline {
                     TAG = "${VER}@${CONAN_USER}/${CONAN_CHANNEL}"
                     env.pkg_version = "${PROJECT}/${TAG}"
                     failed_pkg = ""
+                    failed_stage = ""
                 }
             }
         }
