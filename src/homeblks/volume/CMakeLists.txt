@@ -73,7 +73,8 @@ if (${build_io_tests})
         add_test(NAME TestVol-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_volume --spdk true --emulate_hdd_cnt=1)
         if (${is_epoll})
             SET_TESTS_PROPERTIES(TestHSSvcTool-Spdk PROPERTIES DEPENDS TestMetaBlkMgr-Spdk)
-            SET_TESTS_PROPERTIES(TestVol-Spdk PROPERTIES DEPENDS TestHSSvcTool-Spdk)
+            # TestVol-Spdk depends on the last binary run in epoll mode because epoll tests and test_volume rely on binding to 5000 port.
+            SET_TESTS_PROPERTIES(TestVol-Spdk PROPERTIES DEPENDS TestVolUnmap-Epoll)
         endif()
 
         #add_test(NAME TestMapBtreeFix COMMAND test_volume --gtest_filter=*btree_fix_rerun_io* --max_num_writes=1000 --max_volume=10 --emulate_hdd_cnt=1)
