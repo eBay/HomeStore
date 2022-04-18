@@ -862,7 +862,7 @@ public:
             HS_REL_ASSERT_GT(free_space, offset_to_seek);
 
             // create file for verification
-            auto vol_file_path = std::filesystem::current_path().string() + name;
+            auto vol_file_path = std::filesystem::current_path().string() + "/" + name;
             if (std::filesystem::exists(vol_file_path) && tcfg.remove_file_on_start) {
                 LOGINFO("remove old file: {}, because remove_file_on_start is set to {}", vol_file_path,
                         tcfg.remove_file_on_start);

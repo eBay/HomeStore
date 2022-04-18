@@ -383,7 +383,7 @@ def vol_create_delete_test():
     cmd_opts = "--gtest_filter=VolTest.init_io_test --create_del_with_io=true --remove_file_on_shutdown=0 --remove_file_on_start=1 --run_time=36000 --create_del_ops_interval=30 --expect_io_error=1 --max_volume=800 --verify_type=3 --flip_name=logdev_abort_after_garbage"
     subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=800 --verify_type=3"
-    #subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    #subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True) # OOM Kill by kernel
 
 
 def vol_io_flip_test():
