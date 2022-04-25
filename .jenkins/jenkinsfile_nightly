@@ -10,10 +10,8 @@ pipeline {
         ECR_URL = 'ecr.vip.ebayc3.com'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         CONAN_USER = 'sds'
-        TARGET_BRANCH = 'master'
         LAST_COMMITS = ''
         built_chain = ''
-        failed_pkg = ""
         failed_stage = ""
     }
     stages {
@@ -32,17 +30,17 @@ pipeline {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     VER = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
+                    NIGHTLY_TAG = "-nightly-debug"
+                    CONAN_CHANNEL = "${CONAN_CHANNEL}${NIGHTLY_TAG}"
                     ECR_PATH = "${ECR_URL}/${ORG}/${PROJECT}"
                     TAG = "${VER}@${CONAN_USER}/${CONAN_CHANNEL}"
                     env.pkg_version = "${PROJECT}/${TAG}"
-                    failed_pkg = ""
                     failed_stage = ""
                 }
             }
         }
         stage('Build') {
             failFast true
-            when { expression { (env.BRANCH_NAME == "${TARGET_BRANCH}") }}
             stages {
                 stage('Adjust Tag for Master') {
                     steps {
@@ -77,7 +75,7 @@ pipeline {
                     when { expression { ("${failed_stage}" == "") }}
                     steps {
                         sh "echo \"sonar.branch.name=${BRANCH_NAME}\" >> sonar-project.properties"
-                        sh "GIT_COMMIT=${GIT_COMMIT} conan install -pr debug ${BUILD_MISSING} -o ${PROJECT}:testing=coverage -o ${PROJECT}:sanitize=False . "
+                        sh "GIT_COMMIT=${GIT_COMMIT} conan install -pr debug ${BUILD_MISSING} -o homestore:testing=full -o ${PROJECT}:testing=coverage -o ${PROJECT}:sanitize=False . "
                         sh "GIT_COMMIT=${GIT_COMMIT} VERBOSE=1 build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ."
                         sh "gcovr --sonarqube coverage.xml -r ."
                         withSonarQubeEnv('sds-sonar')  {
@@ -94,7 +92,7 @@ pipeline {
                     steps {
                         retry(3) {
                             sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
-                            sh "conan upload ${PROJECT}/${TAG}_nightly -c --all -r ebay-local"
+                            sh "conan upload ${PROJECT}/${TAG} -c --all -r ebay-local"
                         }
                     }
                      post {
@@ -106,7 +104,7 @@ pipeline {
                     steps {
                         retry(3) {
                             withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
-                                sh "docker build -t ${ECR_PATH}:${CONAN_CHANNEL}-nightly-debug .jenkins/"
+                                sh "docker build -t ${ECR_PATH}:${CONAN_CHANNEL} .jenkins/"
                             }
                         }
                     }
@@ -119,7 +117,7 @@ pipeline {
                     steps {
                         retry(3) {
                             withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
-                              sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-nightly-debug"
+                              sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}"
                            }
                         }
                     }
@@ -130,58 +128,12 @@ pipeline {
             }
         }
 
-
-        stage("Downstream Build") {
-            when { expression { ("${failed_stage}" == "") }}
-
-            stages {
-                stage('NuBlox Logstore') {
-                    steps {
-                        script {
-                            built_chain = env.pkg_version
-                            def nls_res = build job: "Nublox Logstore/${TARGET_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
-                            built_chain = "${built_chain}" + ", " + "$nls_res.buildVariables.pkg_version"
-                        }
-                    }
-                    post {
-                        failure { script { failed_pkg = "Nublox Logstore" } }
-                    }
-                }
-                stage('Homestore BDev') {
-                    steps {
-                        script {
-                            built_chain = env.pkg_version
-                            def hsbdev_res = build job: "Homestore Bdev/${TARGET_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
-                            built_chain = "${built_chain}" + ", " + "$hsbdev_res.buildVariables.pkg_version"
-                        }
-                    }
-                    post {
-                        failure { script { failed_pkg = "Homestore BDev" } }
-                    }
-                }
-                stage('SPDK Connector') {
-                    steps {
-                        script {
-                            def spdk_res = build job: "SPDK Connector/${TARGET_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
-                            built_chain = "${built_chain}" + ", " + "$spdk_res.buildVariables.pkg_version"
-                        }
-                    }
-                    post {
-                        failure { script { failed_pkg = "SPDK Connector" } }
-                    }
-                }
-            }
-        }
     }
 
    post {
         failure {
             script {
-                if ("${failed_pkg}" != "") {
-                        slackSend color: '#E43237', channel: '#homestore-build', message: "@here [Nightly] HomeStore downstream pkg - *${failed_pkg}* build failed.\n*URL:* ${BUILD_URL}\n*Last 2 commits:* ```${LAST_COMMITS}```\nIf result not expected, revert (aka `conan remove -r ebay-local`) these pkgs: ```${built_chain}```"
-                    } else {
-                        slackSend color: '#E43237', channel: '#homestore-build', message: "@here [Nightly] HomeStore build *${PROJECT}/${TAG}* has had a failure in the stage ${failed_stage}: ${BUILD_URL}"
-                    }
+                     slackSend color: '#E43237', channel: '#homestore-build', message: "@here [Nightly] HomeStore build *${PROJECT}/${TAG}* has had a failure in the stage ${failed_stage}: ${BUILD_URL}"
             }
         }
    }
