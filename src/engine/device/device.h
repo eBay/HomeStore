@@ -279,9 +279,9 @@ struct dm_info {
     uint16_t get_checksum() const { return checksum; }
 
     static const size_t s_pdev_info_blocks_size;
-    static const size_t s_chunk_info_blocks_size;
+    static size_t s_chunk_info_blocks_size;
     static const size_t s_vdev_info_blocks_size;
-    static const size_t dm_info_block_size;
+    static size_t s_dm_info_block_size;
 
     pdev_info_block* get_pdev_info_blocks() {
         return reinterpret_cast< pdev_info_block* >(reinterpret_cast< uint8_t* >(this) + sizeof(dm_info));
@@ -742,10 +742,11 @@ public:
     std::vector< PhysicalDev* > get_devices(const PhysicalDevGroup pdev_group) const;
     // void zero_pdev_sbs();
 
+    bool is_hdd(const std::string& devname);
+
 public:
     static void zero_boot_sbs(const std::vector< dev_info >& devices);
     static iomgr::drive_type get_drive_type(const std::vector< dev_info >& devices);
-    static bool is_hdd(const std::string& devname);
 
 private:
     void load_and_repair_devices(const hs_uuid_t& system_uuid);

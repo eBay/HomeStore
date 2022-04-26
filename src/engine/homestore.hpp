@@ -62,15 +62,6 @@ public:
 
         HomeStoreDynamicConfig::init_settings_default();
 
-        // check if any of the drive is hard drive
-        for (const auto& dev_info : input.data_devices) {
-            if (DeviceManager::is_hdd(dev_info.dev_names)) {
-                HomeStoreStaticConfig::instance().hdd_drive_present = true;
-                HomeStoreStaticConfig::instance().engine.max_chunks = HDD_MAX_CHUNKS;
-                break;
-            }
-        }
-
         // Restrict iomanager to throttle upto the app mem size allocated for us
         iomanager.set_io_memory_limit(HS_STATIC_CONFIG(input.app_mem_size));
 

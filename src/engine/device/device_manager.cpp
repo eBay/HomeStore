@@ -29,10 +29,10 @@ namespace homestore {
 
 /********************************************** dm_info ***************************************************/
 const size_t dm_info::s_pdev_info_blocks_size{sizeof(pdev_info_block) * HS_STATIC_CONFIG(engine.max_pdevs)};
-const size_t dm_info::s_chunk_info_blocks_size{sizeof(chunk_info_block) * HS_STATIC_CONFIG(engine.max_chunks)};
 const size_t dm_info::s_vdev_info_blocks_size{sizeof(vdev_info_block) * HS_STATIC_CONFIG(engine.max_vdevs)};
-const size_t dm_info::dm_info_block_size{sizeof(dm_info) + s_pdev_info_blocks_size + s_chunk_info_blocks_size +
-                                         s_vdev_info_blocks_size};
+size_t dm_info::s_chunk_info_blocks_size{sizeof(chunk_info_block) * HS_STATIC_CONFIG(engine.max_chunks)};
+size_t dm_info::s_dm_info_block_size{sizeof(dm_info) + s_pdev_info_blocks_size + s_chunk_info_blocks_size +
+                                     s_vdev_info_blocks_size};
 
 std::atomic< uint64_t > virtualdev_req::s_req_id{0};
 
@@ -75,17 +75,38 @@ DeviceManager::DeviceManager(const std::vector< dev_info >& data_devices, NewVDe
         m_vdev_error_cb{vdev_error_cb} {
     HS_REL_ASSERT_GT(data_devices.size(), 0, "Expecting at least one data device");
 
+    // check if any of the drive is hard drive
+    bool found_hdd_dev{false};
+    for (const auto& dev_info : data_devices) {
+        if (is_hdd(dev_info.dev_names)) {
+            HomeStoreStaticConfig::instance().hdd_drive_present = true;
+            HomeStoreStaticConfig::instance().engine.max_chunks = HDD_MAX_CHUNKS;
+            found_hdd_dev = true;
+            break;
+        }
+    }
+
+    if (found_hdd_dev) {
+        LOGINFO("found hdd device: {}, engine.max_chunks is set to {}", found_hdd_dev,
+                HomeStoreStaticConfig::instance().engine.max_chunks);
+
+        dm_info::s_chunk_info_blocks_size = sizeof(chunk_info_block) * HS_STATIC_CONFIG(engine.max_chunks);
+        dm_info::s_dm_info_block_size = sizeof(dm_info) + dm_info::s_pdev_info_blocks_size +
+            dm_info::s_chunk_info_blocks_size + dm_info::s_vdev_info_blocks_size;
+    }
+
     m_hdd_open_flags = get_open_flags(HS_STATIC_CONFIG(input.data_open_flags));
     if (is_data_drive_hdd() && (HS_STATIC_CONFIG(input.data_open_flags) == io_flag::DIRECT_IO)) {
         // override direct i/o for HDD's
         m_hdd_open_flags = get_open_flags(io_flag::BUFFERED_IO);
     }
+
     m_ssd_open_flags = get_open_flags(HS_STATIC_CONFIG(input.fast_open_flags));
 
     // initialize memory structures in chunk memory
     const auto initialize_memory_structures{
         [](uint8_t** chunk_memory, auto& dm_derived, const auto page_size, const auto alignment) {
-            dm_derived.info_size = sisl::round_up(dm_info::dm_info_block_size, page_size);
+            dm_derived.info_size = sisl::round_up(dm_info::s_dm_info_block_size, page_size);
             *chunk_memory = hs_utils::iobuf_alloc(dm_derived.info_size, sisl::buftag::superblk, alignment);
             dm_derived.info = new (*chunk_memory) dm_info{};
             std::uninitialized_default_construct(dm_derived.info->get_pdev_info_blocks(),
@@ -97,9 +118,9 @@ DeviceManager::DeviceManager(const std::vector< dev_info >& data_devices, NewVDe
             std::uninitialized_default_construct(dm_derived.info->get_vdev_info_blocks(),
                                                  dm_derived.info->get_vdev_info_blocks() +
                                                      HS_STATIC_CONFIG(engine.max_vdevs));
-            if (dm_info::dm_info_block_size < dm_derived.info_size) {
-                std::memset(*chunk_memory + dm_info::dm_info_block_size, 0,
-                            dm_derived.info_size - dm_info::dm_info_block_size);
+            if (dm_info::s_dm_info_block_size < dm_derived.info_size) {
+                std::memset(*chunk_memory + dm_info::s_dm_info_block_size, 0,
+                            dm_derived.info_size - dm_info::s_dm_info_block_size);
             }
 
             dm_derived.pdev_hdr = &dm_derived.info->pdev_hdr;

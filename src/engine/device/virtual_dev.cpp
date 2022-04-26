@@ -34,6 +34,7 @@
 #include "engine/common/homestore_flip.hpp"
 #include "engine/blkalloc/blkalloc_cp.hpp"
 #include "engine/homestore_base.hpp"
+#include "test_common/homestore_test_common.hpp"
 #include "virtual_dev.hpp"
 
 SISL_LOGGING_DECL(device)
@@ -44,6 +45,7 @@ uint32_t VirtualDev::s_num_chunks_created{0};
 
 void VirtualDev::static_process_completions(const int64_t res, uint8_t* cookie) {
     boost::intrusive_ptr< virtualdev_req > vd_req{reinterpret_cast< virtualdev_req* >(cookie), false};
+
     HS_DBG_ASSERT_EQ(vd_req->version, 0xDEAD);
 
     if ((vd_req->err == no_error) && (res != 0)) {
@@ -69,7 +71,7 @@ void VirtualDev::static_process_completions(const int64_t res, uint8_t* cookie) 
         }
     }
 
-    if (vd_req->cb) vd_req->cb(vd_req);
+    if (vd_req->cb) { vd_req->cb(vd_req); }
 
     // NOTE: Beyond this point vd_req could be freed by the callback. So once callback is made,
     // DO NOT ACCESS vd_req beyond this point.
@@ -157,9 +159,10 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
             mapped_stream_size, aligned_chunk_size, max_chunk_size, is_hdd, pdev_group);
 
     bool is_stream_aligned = false;
-    const auto max_num_chunks = BlkId::max_num_chunks();
-    // TODO: should we reserve any chunk number as buffer?
+    const auto max_num_chunks = HDD_MAX_CHUNKS;
     if (pdev_group == PhysicalDevGroup::DATA && is_hdd) {
+        // Only Data blkstore will come here, and it will use up all the remaining chunks if device's reported stream
+        // number is larger than system supported maximm;
         const auto remaining_num_chunks = max_num_chunks - s_num_chunks_created;
         const auto raw_stream_size = m_primary_pdev_chunks_list[0].pdev->get_raw_stream_size();
 
@@ -185,11 +188,7 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
         } while (total_size < size);
 
         is_stream_aligned = true;
-        s_num_chunks_created += m_num_chunks;
     } else {
-        // keep track of how many chunks has been created by non-HDD blkstore;
-        ++s_num_chunks_created;
-
         if (is_stripe) {
             m_num_chunks = static_cast< uint32_t >(num_pdevs);
             uint32_t cnt{1};
@@ -209,6 +208,9 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
             HS_LOG(INFO, device, "size of a chunk is resized to {}", m_chunk_size);
         }
     }
+
+    // keep track of how many chunks has been created by non-HDD blkstore;
+    s_num_chunks_created += m_num_chunks;
 
     HS_REL_ASSERT_LE(s_num_chunks_created, max_num_chunks, "num chunks should not exceed maximum supported!");
 
@@ -363,6 +365,13 @@ PhysicalDevChunk* VirtualDev::get_next_chunk(uint32_t dev_id, uint32_t chunk_id)
 }
 
 void VirtualDev::format(const vdev_format_cb_t& cb) {
+#ifndef NDEBUG
+    if (std::getenv(BLKSTORE_FORMAT_OFF.c_str())) {
+        cb(true /* success */);
+        return;
+    }
+#endif
+
     boost::intrusive_ptr< virtualdev_req > req{sisl::ObjectAllocator< virtualdev_req >::make_object()};
     req->outstanding_cb.set(get_num_chunks() * (get_nmirrors() + 1));
     req->outstanding_cbs = true;
@@ -691,7 +700,8 @@ void VirtualDev::readv(const BlkId& bid, const homeds::MemVector& buf,
 }
 
 void VirtualDev::fsync_pdevs(vdev_comp_cb_t cb, uint8_t* const cookie) {
-    auto req{virtualdev_req::make_request()};
+    // auto req{virtualdev_req::make_request()};
+    boost::intrusive_ptr< virtualdev_req > req{sisl::ObjectAllocator< virtualdev_req >::make_object()};
     req->version = 0xDEAD;
     req->cb = std::move(cb);
     req->outstanding_cbs = true;

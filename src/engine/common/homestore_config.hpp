@@ -29,6 +29,7 @@ SETTINGS_INIT(homestorecfg::HomeStoreSettings, homestore_config);
 
 constexpr uint32_t MAX_CHUNKS{128};
 constexpr uint32_t HDD_MAX_CHUNKS{254};
+constexpr uint32_t HS_MAX_CHUNKS{HDD_MAX_CHUNKS};
 constexpr uint32_t MAX_VDEVS{16};
 constexpr uint32_t MAX_PDEVS{8};
 static constexpr uint32_t INVALID_PDEV_ID{std::numeric_limits< uint32_t >::max()};

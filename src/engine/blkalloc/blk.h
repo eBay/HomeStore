@@ -163,12 +163,6 @@ public:
                           : "Invalid_Blkid";
     }
 
-    /* maximum number of chunks that can be addressed by BlkId */
-    static uint64_t max_num_chunks() {
-        return s_chunk_num_mask;
-    }
-
-private:
     blk_num_t m_blk_num;            // Block number which is unique within the chunk
     blk_count_serialized_t m_nblks; // Number of blocks+1 for this blkid, don't directly acccess this - use get_nblks()
     chunk_num_t m_chunk_num;        // Chunk number - which is unique for the entire application
