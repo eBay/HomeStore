@@ -72,6 +72,7 @@ extern bool vol_test_run;
 constexpr uint64_t Ki{1024};
 constexpr uint64_t Mi{Ki * Ki};
 constexpr uint64_t Gi{Ki * Mi};
+namespace fs = std::filesystem;
 
 using log_level = spdlog::level::level_enum;
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
@@ -603,18 +604,14 @@ public:
         /* no need to delete the user created file/disk */
         if (tcfg.dev_names.size() == 0) {
             for (const auto& n : tcfg.default_names) {
-                const std::filesystem::path fpath{n};
-                if (std::filesystem::exists(fpath) && std::filesystem::is_regular_file(fpath)) {
-                    std::filesystem::remove(fpath);
-                }
+                const fs::path fpath{n};
+                if (fs::exists(fpath) && fs::is_regular_file(fpath)) { fs::remove(fpath); }
             }
         }
 
         for (uint32_t i{0}; i < tcfg.max_vols; ++i) {
-            const std::filesystem::path fpath{VOL_PREFIX + std::to_string(i)};
-            if (std::filesystem::exists(fpath) && std::filesystem::is_regular_file(fpath)) {
-                std::filesystem::remove(fpath);
-            }
+            const fs::path fpath{VOL_PREFIX + std::to_string(i)};
+            if (fs::exists(fpath) && fs::is_regular_file(fpath)) { fs::remove(fpath); }
         }
     }
 
@@ -641,21 +638,22 @@ public:
 
         if (tcfg.dev_names.size() != 0) {
             for (uint32_t i{0}; i < tcfg.dev_names.size(); ++i) {
-                const std::filesystem::path fpath{tcfg.dev_names[i]};
+                const fs::path fpath{tcfg.dev_names[i]};
                 /* we use this capacity to calculate volume size */
                 max_capacity += tcfg.max_disk_capacity;
-                // device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
+                // device_info.emplace_back(fs::canonical(fpath).string(), HSDevType::Data);
                 device_info.emplace_back(tcfg.dev_names[i], HSDevType::Data);
             }
         } else {
             /* create files */
             for (uint32_t i{0}; i < MAX_DEVICES; ++i) {
-                const std::filesystem::path fpath{tcfg.default_names[i]};
+                const fs::path fpath{tcfg.default_names[i]};
                 if (tcfg.init) {
                     std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
-                    std::filesystem::resize_file(fpath, tcfg.max_disk_capacity);
+                    fs::resize_file(fpath, tcfg.max_disk_capacity);
                 }
-                device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
+
+                device_info.emplace_back(fs::canonical(fpath).string(), HSDevType::Data);
                 max_capacity += tcfg.max_disk_capacity;
             }
         }
@@ -693,8 +691,20 @@ public:
         struct stat st;
         if (stat("test_files", &st) == -1) { mkdir("test_files", 0700); }
 #endif
-        std::filesystem::create_directory("test_files");
-        std::filesystem::permissions("test_files", std::filesystem::perms::owner_all);
+
+        if (tcfg.remove_file_on_start) {
+            // clean all files under test_files/ dir
+            const fs::path fpath{"test_files"};
+            if (fs::is_directory(fpath)) {
+                auto nfiles = fs::remove_all(fs::canonical(fpath));
+                LOGINFO("Removed {} files in dir: {}", nfiles, fpath.string());
+            } else {
+                LOGINFO("{} is not a directory", fpath.string());
+            }
+        }
+
+        fs::create_directory("test_files");
+        fs::permissions("test_files", fs::perms::owner_all);
 
         iomanager.start(tcfg.num_threads, tcfg.is_spdk);
 
@@ -838,7 +848,7 @@ public:
             // check remaining space on root fs;
             std::error_code ec;
             uint64_t free_space{0};
-            const std::filesystem::space_info si = std::filesystem::space(std::filesystem::current_path(), ec);
+            const fs::space_info si = fs::space(fs::current_path(), ec);
             if (ec.value()) {
                 HS_REL_ASSERT(false, "Error getting space for dir={}, error={}", name, ec.message());
             } else {
@@ -862,20 +872,15 @@ public:
             HS_REL_ASSERT_GT(free_space, offset_to_seek);
 
             // create file for verification
-            auto vol_file_path = std::filesystem::current_path().string() + "/" + name;
-            if (std::filesystem::exists(vol_file_path) && tcfg.remove_file_on_start) {
-                LOGINFO("remove old file: {}, because remove_file_on_start is set to {}", vol_file_path,
-                        tcfg.remove_file_on_start);
-                std::filesystem::remove(vol_file_path);
-            }
-
-            if (std::filesystem::exists(vol_file_path) == false) {
+            auto vol_file_path = fs::current_path().string() + "/" + name;
+            if (fs::exists(vol_file_path) == false) {
                 // only create file and initialize it when file is not there;
                 std::ofstream ofs{name, std::ios::binary | std::ios::out | std::ios::trunc};
                 ofs.seekp(offset_to_seek);
                 ofs.write("", 1);
                 ofs.close();
             } else {
+                HS_REL_ASSERT_EQ(tcfg.remove_file_on_start, 0);
                 LOGINFO("Reusing old file: {}, because remove_file_on_start is set to {}", vol_file_path,
                         tcfg.remove_file_on_start);
             }
@@ -1228,9 +1233,9 @@ private:
     void remove_journal_files() {
         // Remove journal folders
         for (size_t i{0}; i < vol_info.size(); ++i) {
-            const std::filesystem::path name{boost::lexical_cast< std::string >(vol_info[i]->uuid)};
-            if (std::filesystem::exists(name) && std::filesystem::is_directory(name)) {
-                std::filesystem::remove_all(name);
+            const fs::path name{boost::lexical_cast< std::string >(vol_info[i]->uuid)};
+            if (fs::exists(name) && fs::is_directory(name)) {
+                fs::remove_all(name);
                 LOGINFO("Removed journal dir: {}", name);
             }
         }
