@@ -879,10 +879,6 @@ public:
                 ofs.seekp(offset_to_seek);
                 ofs.write("", 1);
                 ofs.close();
-            } else {
-                HS_REL_ASSERT_EQ(tcfg.remove_file_on_start, 0);
-                LOGINFO("Reusing old file: {}, because remove_file_on_start is set to {}", vol_file_path,
-                        tcfg.remove_file_on_start);
             }
 
             auto fd = open(name.c_str(), O_RDWR);
