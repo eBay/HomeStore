@@ -58,6 +58,8 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     bool part_of_batch{false};
     bool format{false};
     vdev_format_cb_t format_cb; // callback stored for format operation.
+    bool fsync{false};
+    vdev_comp_cb_t fsync_cb; // callback stored for fsync operation;
     uint8_t* cookie;
 
 #ifndef NDEBUG

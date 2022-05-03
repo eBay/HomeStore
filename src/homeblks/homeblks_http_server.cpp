@@ -28,6 +28,7 @@ void HomeBlksHttpServer::start() {
     cfg.bind_address = "0.0.0.0";
     cfg.server_port = SISL_OPTIONS["hb_stats_port"].as< int32_t >();
     cfg.read_write_timeout_secs = 10;
+    cfg.is_auth_enabled = false;
 
     m_http_server = std::unique_ptr< sisl::HttpServer >(new sisl::HttpServer(
         cfg,

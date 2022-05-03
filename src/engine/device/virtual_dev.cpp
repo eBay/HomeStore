@@ -324,11 +324,13 @@ void VirtualDev::process_completions(const boost::intrusive_ptr< virtualdev_req 
         m_comp_cb(req);
     } else {
         if (req->outstanding_cb.decrement_testz(1)) {
-            if (!(req->format)) {
+            if (!(req->format) && !(req->fsync)) {
                 // call completion
                 m_comp_cb(req);
-            } else {
+            } else if (req->format) {
                 req->format_cb(req->err ? false : true);
+            } else if (req->fsync) {
+                req->fsync_cb(req);
             }
         }
     }
@@ -703,8 +705,10 @@ void VirtualDev::fsync_pdevs(vdev_comp_cb_t cb, uint8_t* const cookie) {
     // auto req{virtualdev_req::make_request()};
     boost::intrusive_ptr< virtualdev_req > req{sisl::ObjectAllocator< virtualdev_req >::make_object()};
     req->version = 0xDEAD;
-    req->cb = std::move(cb);
+    req->fsync = true;
+    req->fsync_cb = std::move(cb);
     req->outstanding_cbs = true;
+    req->cb = std::bind(&VirtualDev::process_completions, this, std::placeholders::_1);
     assert(m_primary_pdev_chunks_list.size() <=
            static_cast< size_t >(std::numeric_limits< decltype(req->outstanding_cb.get()) >::max()));
     req->outstanding_cb.set(static_cast< decltype(req->outstanding_cb.get()) >(m_primary_pdev_chunks_list.size()));
@@ -713,6 +717,7 @@ void VirtualDev::fsync_pdevs(vdev_comp_cb_t cb, uint8_t* const cookie) {
     assert(!m_primary_pdev_chunks_list.empty());
     for (auto& pdev_chunk : m_primary_pdev_chunks_list) {
         auto* const pdev{pdev_chunk.pdev};
+        req->inc_ref();
         HS_LOG(TRACE, device, "Flushing pdev {}", pdev->get_devname());
         pdev->fsync(reinterpret_cast< uint8_t* >(req.get()));
     }
