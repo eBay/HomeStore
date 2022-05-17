@@ -180,10 +180,7 @@ public:
                 slab_pct_dist.insert(slab_pct_dist.begin(), std::cbegin(d), std::cend(d));
                 is_modified = true;
             }
-#ifndef NDEBUG
-            s.generic.blkalloc_cp_timer_us = 1000000; // setting to 1 sec for debug build
-            is_modified = true;
-#endif
+
             // Any more default overrides or set non-scalar entries come here
         });
 
