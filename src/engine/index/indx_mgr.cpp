@@ -188,7 +188,6 @@ void HomeStoreCPMgr::shutdown() {
 }
 
 void HomeStoreCPMgr::cp_start(hs_cp* const hcp) {
-    hcp->hs_state = hs_cp_state::flushing_indx_tbl;
 #ifdef _PRERELEASE
     if (homestore_flip->test_flip("simulate_slow_dirty_buffer")) {
         static thread_local std::random_device rd{};
@@ -201,6 +200,14 @@ void HomeStoreCPMgr::cp_start(hs_cp* const hcp) {
     }
 #endif
     iomanager.run_on(IndxMgr::get_thread_id(), [this, hcp](const io_thread_addr_t addr) {
+        /* persist bit map first */
+        if (hcp->indx_cp_list.size()) {
+            if (hcp->blkalloc_checkpoint) {
+                /* persist alloc blkalloc. It is a sync call */
+                blkalloc_cp_start(hcp);
+            }
+        }
+        hcp->hs_state = hs_cp_state::flushing_indx_tbl;
         hcp->ref_cnt.increment(1);
         HS_PERIODIC_LOG(TRACE, cp, "Starting cp of type {}, number of indexes in cp={}, hcp ref_cnt: {}",
                         (hcp->blkalloc_checkpoint ? "blkalloc" : "Index"), hcp->indx_cp_list.size(),
@@ -239,11 +246,8 @@ void HomeStoreCPMgr::indx_tbl_cp_done_internal(hs_cp* const hcp) {
     HS_PERIODIC_LOG(TRACE, cp, "Cp of type {} is completed", (hcp->blkalloc_checkpoint ? "blkalloc" : "Index"));
     if (hcp->indx_cp_list.size()) {
         if (hcp->blkalloc_checkpoint) {
-            /* flush all the blks that are freed in this hcp */
-            StaticIndxMgr::flush_hs_free_blks(hcp);
-
             /* persist alloc blkalloc. It is a sync call */
-            blkalloc_cp_start(hcp);
+            blkalloc_cp_done(hcp);
         } else {
             /* All dirty buffers are flushed. Write super block */
             write_hs_cp_sb(hcp);
@@ -264,17 +268,12 @@ void HomeStoreCPMgr::indx_tbl_cp_done_internal(hs_cp* const hcp) {
     cp_end(hcp);
 }
 
-/* This function calls
- * 1. persist blkalloc superblock
- * 2. write superblock
- * 3. truncate  :- it truncate upto the seq number persisted in this hcp.
- * 4. call cb_list
- * 5. notify blk alloc that cp hcp done
- * 6. call cp_end :- read comments over indxmgr::destroy().
- */
 void HomeStoreCPMgr::blkalloc_cp_start(hs_cp* const hcp) {
-    HS_PERIODIC_LOG(TRACE, cp, "Cp of type blkalloc, writing super block about cp");
-    hcp->hs_state = hs_cp_state::flushing_blkalloc;
+    HS_PERIODIC_LOG(TRACE, cp, "Cp of type blkalloc, writing bitmap");
+    hcp->hs_state = hs_cp_state::flushing_bitmap;
+
+    /* flush all the blks that are freed in this hcp */
+    StaticIndxMgr::flush_hs_free_blks(hcp);
 
     /* persist blk alloc bit maps */
     m_hs->blkalloc_cp_start(hcp->ba_cp);
@@ -284,9 +283,22 @@ void HomeStoreCPMgr::blkalloc_cp_start(hs_cp* const hcp) {
         std::raise(SIGKILL);
     }
 #endif
+}
 
+/* This function calls
+ * 1. persist blkalloc superblock
+ * 2. write superblock
+ * 3. truncate  :- it truncate upto the seq number persisted in this hcp.
+ * 4. call cb_list
+ * 5. notify blk alloc that cp hcp done
+ * 6. call cp_end :- read comments over indxmgr::destroy().
+ */
+void HomeStoreCPMgr::blkalloc_cp_done(hs_cp* const hcp) {
+
+    HS_PERIODIC_LOG(TRACE, cp, "Cp of type blkalloc, writing super block about cp");
     /* All dirty buffers are flushed. Write super block */
-    if (hcp->indx_cp_list.size()) { write_hs_cp_sb(hcp); }
+    hcp->hs_state = hs_cp_state::flushing_sb;
+    write_hs_cp_sb(hcp);
 
     /* Now it is safe to truncate as blkalloc bitsmaps are persisted */
     for (auto it{std::begin(hcp->indx_cp_list)}; it != std::end(hcp->indx_cp_list); ++it) {
@@ -314,6 +326,7 @@ void HomeStoreCPMgr::write_hs_cp_sb(hs_cp* const hcp) {
 void HomeStoreCPMgr::cp_attach_prepare(hs_cp* const cur_cp, hs_cp* const new_cp) {
     cur_cp->hs_state = hs_cp_state::preparing;
     new_cp->hs_state = hs_cp_state::init;
+    cur_cp->cp_prepare_start_time = Clock::now();
     IndxMgr::attach_prepare_indx_cp_list(&cur_cp->indx_cp_list, &new_cp->indx_cp_list, cur_cp, new_cp);
 }
 
@@ -409,6 +422,9 @@ void IndxMgr::create_first_cp() {
     if (m_recovery_mode) {
         THIS_INDX_LOG(TRACE, indx_mgr, , "creating indx mgr in recovery mode");
         suspend_active_cp();
+
+        // It will only from blk alloc CP because of unmap recovery.
+        m_first_icp->blkalloc_cp_only = true;
         if (!m_is_snap_enabled) { return; }
 
         /* recover diff table */
@@ -504,11 +520,13 @@ void IndxMgr::recovery() {
     case indx_recovery_state::meta_ops_replay_st: {
         /* lets go through all index meta blks to see if anything needs to be done */
         recover_meta_ops();
+        resume_active_cp();
         THIS_INDX_LOG(INFO, replay, , "recovery completed");
     }
         // fall through
     default: { m_recovery_mode = false; }
     }
+
 }
 
 void IndxMgr::io_replay() {
@@ -628,7 +646,6 @@ void IndxMgr::io_replay() {
                   "read_sync_cnt {}",
                   blk_alloc_replay_cnt, active_replay_cnt, diff_replay_cnt, gaps_found_cnt, (next_replay_seq_num - 1),
                   read_sync_cnt);
-    resume_active_cp();
     m_cp_mgr->cp_io_exit(hcp);
 }
 
@@ -676,8 +693,7 @@ void IndxMgr::recover_meta_ops() {
                 m_active_tbl->get_btreequery_cur(b, *(unmap_btree_cur.get()));
             }
 
-            m_hs->inc_hs_ref_cnt(m_uuid);
-            this->do_remaining_unmap(mblk, key, unmap_hdr->seq_id, unmap_btree_cur);
+            do_remaining_unmap_internal(mblk, key, unmap_hdr->seq_id, unmap_btree_cur);
             break;
         }
         case indx_meta_hdr_type::snap_destroy:
@@ -899,13 +915,14 @@ void IndxMgr::set_indx_cp_state(const indx_cp_ptr& cur_icp, hs_cp* const cur_hcp
     }
 #endif
 
-    if (m_active_cp_suspend.load()) {
+    const bool is_ba_cp{cur_hcp->blkalloc_checkpoint};
+    if (m_active_cp_suspend.load() || (cur_icp->blkalloc_cp_only && !is_ba_cp)) {
         cur_icp->flags = indx_cp_state::suspend_cp;
         return;
     }
+
     cur_icp->flags = indx_cp_state::active_cp;
 
-    const bool is_ba_cp{cur_hcp->blkalloc_checkpoint};
     if (is_ba_cp) {
         cur_icp->flags |= indx_cp_state::ba_cp;
         if (m_is_snap_enabled) { cur_icp->flags |= indx_cp_state::diff_cp; }
@@ -1062,6 +1079,8 @@ btree_status_t IndxMgr::update_indx_tbl(const indx_req_ptr& ireq, const bool is_
     }
 }
 
+bool IndxMgr::is_destroying() { return (m_state == indx_mgr_state::DESTROYING); }
+
 void IndxMgr::do_remaining_unmap_internal(void* const unmap_meta_blk_cntx, const sisl::byte_array& key,
                                           const seq_id_t seqid,
                                           const std::shared_ptr< homeds::btree::BtreeQueryCursor >& btree_cur) {
@@ -1073,9 +1092,13 @@ void IndxMgr::do_remaining_unmap_internal(void* const unmap_meta_blk_cntx, const
     /* collect all the free blkids */
     blkid_list_ptr free_list{std::make_shared< sisl::ThreadVector< BlkId > >()};
     int64_t free_size{0};
-    const btree_status_t ret{
-        m_active_tbl->update_oob_unmap_active_indx_tbl(free_list, seqid, key->bytes, *(btree_cur.get()), btree_id,
-                                                       free_size, m_recovery_mode ? true : false /* force */)};
+    btree_status_t ret = btree_status_t::success;
+    do {
+        ret = m_active_tbl->update_oob_unmap_active_indx_tbl(free_list, seqid, key->bytes, *(btree_cur.get()), btree_id,
+                                                             free_size, m_recovery_mode ? true : false /* force */);
+    } while (
+        (ret == btree_status_t::resource_full) &&
+        (get_elapsed_time_ms(hcp->cp_prepare_start_time) < HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec) * 1000));
 
     cur_icp->user_free_blkid_list.push_back(free_list);
     cur_icp->indx_size.fetch_sub(free_size, std::memory_order_relaxed);
@@ -1087,23 +1110,19 @@ void IndxMgr::do_remaining_unmap_internal(void* const unmap_meta_blk_cntx, const
     }
 #endif
 
-    if (ret == btree_status_t::resource_full) {
+    if (ret == btree_status_t::crc_mismatch) {
+        // move volume to offline mode and don't do anything
+        THIS_INDX_LOG(ERROR, indx_mgr, , "hit crc mismatch error. Discontinuing unmap");
+        m_hs->fault_containment(m_uuid);
+        goto out;
+    } else if (ret != btree_status_t::success) {
         HS_REL_ASSERT_EQ(m_recovery_mode, false);
         THIS_INDX_LOG(TRACE, indx_mgr, , "unmap btree ret status resource_full");
         m_cp_mgr->attach_cb(hcp, ([this, key, btree_cur, unmap_meta_blk_cntx, seqid](bool success) mutable {
+                                // update the meta blk and requeue it
                                 this->do_remaining_unmap(unmap_meta_blk_cntx, key, seqid, btree_cur);
                             }));
     } else {
-        if (ret == btree_status_t::crc_mismatch) {
-            // move volume to offline mode and don't do anything
-            THIS_INDX_LOG(ERROR, indx_mgr, , "hit crc mismatch error. Discontinuing unmap");
-            m_hs->fault_containment(m_uuid);
-            goto out;
-        } else if (ret != btree_status_t::success) {
-            THIS_INDX_LOG(ERROR, indx_mgr, , "hit {} error while doing unmap", ret);
-            goto out;
-        }
-
         m_cp_mgr->attach_cb(hcp, ([this, key, unmap_meta_blk_cntx](bool success) {
 #ifdef _PRERELEASE
                                 if (homestore_flip->test_flip("unmap_pre_sb_remove_abort")) {
@@ -1116,7 +1135,6 @@ void IndxMgr::do_remaining_unmap_internal(void* const unmap_meta_blk_cntx, const
                                 if (ret != no_error) {
                                     HS_REL_ASSERT(false, "failed to remove subsystem with status: {}", ret.message());
                                 }
-                                m_hs->dec_hs_ref_cnt(m_uuid);
                             }));
     }
 
@@ -1160,7 +1178,6 @@ void IndxMgr::unmap_indx_async(const indx_req_ptr& ireq) {
     ireq->get_btree_cursor(*(unmap_btree_cur.get()));
 
     // do remaining unmap
-    m_hs->inc_hs_ref_cnt(m_uuid);
     do_remaining_unmap(nullptr, key, ireq->get_seqid(), unmap_btree_cur);
 }
 
@@ -1177,6 +1194,10 @@ void IndxMgr::do_remaining_unmap(void* unmap_meta_blk_cntx, const sisl::byte_arr
 #endif
     add_prepare_cb_list([this, key, btree_cur, unmap_meta_blk_cntx,
                          seqid](const indx_cp_ptr& cur_icp, hs_cp* const cur_hcp, hs_cp* const new_hcp) mutable {
+        if (is_destroying()) {
+            THIS_INDX_LOG(TRACE, indx_mgr, , "skipping map because it is in destroying state");
+            return;
+        }
         if (cur_icp->flags & indx_cp_state::ba_cp) {
             do_remaining_unmap_internal(unmap_meta_blk_cntx, key, seqid, btree_cur);
         } else {
@@ -1327,7 +1348,12 @@ void IndxMgr::destroy(const indxmgr_stop_cb& cb) {
     /* we can assume that there is no io going on this indx mgr now */
     THIS_INDX_LOG(INFO, indx_mgr, , "Destroying Indx Manager");
     m_destroy_done_cb = cb;
-    iomanager.run_on(m_thread_id, [this](const io_thread_addr_t addr) { this->destroy_indx_tbl(); });
+    m_state = indx_mgr_state::DESTROYING;
+
+    // wait for the current cp to complete to make sure that no unmap is in process
+    register_indx_cp_done_cb(([this](bool success) {
+        iomanager.run_on(m_thread_id, [this](const io_thread_addr_t addr) { this->destroy_indx_tbl(); });
+    }));
 }
 
 void IndxMgr::destroy_indx_tbl() {

@@ -481,10 +481,6 @@ def nightly():
 
     recovery_nightly()
     sleep(5)
-    
-    # disable for now 
-    #normal_unmap()
-    sleep(5)
 
     #load()
     sleep(5)
@@ -514,6 +510,9 @@ def nightly():
     meta_blk_store_nightly()
     sleep(5)
 
+    normal_unmap()
+    sleep(5)
+    
     #one_disk_replace()
     #sleep(5)
 

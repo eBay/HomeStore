@@ -1064,7 +1064,7 @@ btree_status_t mapping::update_oob_unmap_active_indx_tbl(blkid_list_ptr free_lis
         next_start_lba = (cur.m_last_key) ? get_next_start_key_from_cursor(cur) : j_key->lba;
         nlbas_rem -= nlbas_cur;
         ++num_iterations;
-        if (nlbas_rem > 0 && num_iterations == max_iterations) {
+        if (nlbas_rem > 0 && num_iterations == max_iterations && !force) {
             ret = btree_status_t::resource_full;
             break;
         }

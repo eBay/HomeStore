@@ -177,7 +177,7 @@ enum indx_cp_state : int {
 };
 
 ENUM(indx_req_state, uint32_t, active_btree, diff_btree);
-ENUM(hs_cp_state, uint32_t, init, preparing, flushing_indx_tbl, flushing_blkalloc, flushing_sb, notify_user, done);
+ENUM(hs_cp_state, uint32_t, init, preparing, flushing_indx_tbl, flushing_bitmap, flushing_sb, notify_user, done);
 
 struct hs_cp : cp_base {
     /* This list is not lock protected. */
@@ -188,6 +188,7 @@ struct hs_cp : cp_base {
     sisl::atomic_counter< uint64_t > ref_cnt; // cnt of how many cps are triggered
     uint64_t snt_cnt;
     bool blkalloc_checkpoint = false; // it is set to true in prepare flush stage
+    Clock::time_point cp_prepare_start_time;
 };
 
 struct indx_active_cp {
@@ -218,6 +219,7 @@ struct indx_cp : public boost::intrusive_ref_counter< indx_cp > {
     indx_mgr_ptr indx_mgr;
     int flags{indx_cp_state::active_cp};
     seq_id_t max_seqid{-1}; // max seqid sent on this id
+    bool blkalloc_cp_only = false;
 
     /* metrics */
     int64_t cp_id;
@@ -369,6 +371,7 @@ public:
     void try_cp_start(hs_cp* const hcp);
     void indx_tbl_cp_done(hs_cp* const hcp);
     void blkalloc_cp_start(hs_cp* const hcp);
+    void blkalloc_cp_done(hs_cp* const hcp);
     void write_hs_cp_sb(hs_cp* const hcp);
 
 private:
@@ -688,7 +691,7 @@ private:
     indx_cp_ptr m_first_icp;
     boost::uuids::uuid m_uuid;
     std::string m_name;
-    indx_mgr_state m_state{indx_mgr_state::ONLINE};
+    std::atomic< indx_mgr_state > m_state{indx_mgr_state::ONLINE};
     indxmgr_stop_cb m_destroy_done_cb;
     bool m_last_cp{false};
 
@@ -712,6 +715,7 @@ private:
     IndxMgrMetrics m_metrics;
 
     /*************************************** private functions ************************/
+    bool is_destroying();
     void update_indx_internal(const indx_req_ptr& ireq);
     void journal_write(const indx_req_ptr& ireq);
     void journal_comp_cb(logstore_req* const req, const logdev_key ld_key);
