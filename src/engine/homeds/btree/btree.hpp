@@ -103,6 +103,8 @@ private:
 
     static thread_local homeds::reserve_vector< btree_locked_node_info, 5 > wr_locked_nodes;
     static thread_local homeds::reserve_vector< btree_locked_node_info, 5 > rd_locked_nodes;
+    size_t rd_size() { return rd_locked_nodes.size(); }
+    size_t wr_size() { return wr_locked_nodes.size(); }
 
     ////////////////// Implementation /////////////////////////
 public:
@@ -385,8 +387,8 @@ public:
 #ifndef NDEBUG
         check_lock_debug();
 #endif
-        BT_LOG_ASSERT_CMP(rd_locked_nodes.size(), ==, 0, );
-        BT_LOG_ASSERT_CMP(wr_locked_nodes.size(), ==, 0, );
+        BT_LOG_ASSERT_CMP(rd_size(), ==, 0, );
+        BT_LOG_ASSERT_CMP(wr_size(), ==, 0, );
 
         BtreeNodePtr root;
         ret = read_and_lock_root(m_root_node, root, acq_lock, acq_lock, bcp);
@@ -398,8 +400,8 @@ public:
             unlock_node(root, acq_lock);
             m_btree_lock.unlock();
             ret = check_split_root(k, v, put_type, bur, bcp);
-            BT_LOG_ASSERT_CMP(rd_locked_nodes.size(), ==, 0, );
-            BT_LOG_ASSERT_CMP(wr_locked_nodes.size(), ==, 0, );
+            BT_LOG_ASSERT_CMP(rd_size(), ==, 0, );
+            BT_LOG_ASSERT_CMP(wr_size(), ==, 0, );
 
             // We must have gotten a new root, need to start from scratch.
             m_btree_lock.read_lock();
@@ -427,8 +429,8 @@ public:
                 // Need to start from top down again, since there is a race between 2 inserts or deletes.
                 acq_lock = homeds::thread::LOCKTYPE_READ;
                 THIS_BT_LOG(TRACE, btree_generics, , "retrying put operation");
-                BT_LOG_ASSERT_CMP(rd_locked_nodes.size(), ==, 0, );
-                BT_LOG_ASSERT_CMP(wr_locked_nodes.size(), ==, 0, );
+                BT_LOG_ASSERT_CMP(rd_size(), ==, 0, );
+                BT_LOG_ASSERT_CMP(wr_size(), ==, 0, );
                 goto retry;
             }
         }

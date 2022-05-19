@@ -28,10 +28,9 @@ include_directories(BEFORE ..)
 
 can_build_nonio_tests(non_io_tests)
 if (${non_io_tests})
-    # This test is disabled for now that code coverage can pass
-#    set(TEST_BTREE_CRUD_SOURCE_FILES tests/test_btree_crud.cpp)
-#    add_executable(test_btree_crud ${TEST_BTREE_CRUD_SOURCE_FILES})
-#    target_link_libraries(test_btree_crud homestore ${CONAN_LIBS})
+    set(TEST_BTREE_CRUD_SOURCE_FILES tests/test_btree_crud.cpp)
+    add_executable(test_btree_crud ${TEST_BTREE_CRUD_SOURCE_FILES})
+    target_link_libraries(test_btree_crud homestore ${CONAN_LIBS})
 
     set(TEST_HASH_SOURCE_FILES tests/test_hashset.cpp)
     add_executable(test_hash ${TEST_HASH_SOURCE_FILES})
@@ -61,8 +60,7 @@ if (${non_io_tests})
         add_executable(test_threadpool ${TEST_THREAD_POOL_SOURCE_FILES})
         target_link_libraries(test_threadpool ${CONAN_LIBS})
     endif()
-    # This test is disabled for now that code coverage can pass
-#    add_test(NAME BTreeCRUD COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_btree_crud)
+    add_test(NAME BTreeCRUD COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_btree_crud)
     add_test(NAME Hash COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_hash)
     add_test(NAME Avector COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_avector)
     # TODO: NEED TO BE FIXED SOON. Disabling this temporarily till we make api changes and fix this one
