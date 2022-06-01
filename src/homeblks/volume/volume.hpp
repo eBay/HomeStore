@@ -80,6 +80,9 @@ struct volume_child_req : public blkstore_req< BlkBuffer > {
     uint64_t read_size;
     bool use_cache{true};
     uint64_t unique_id{0};
+#ifndef NDEBUG
+    std::vector< iovec > read_iovs;
+#endif
 
     volume_req_ptr parent_req = nullptr;
     BlkId blkId; // used only for debugging purpose
@@ -131,7 +134,8 @@ protected:
 class VolumeMetrics : public sisl::MetricsGroupWrapper {
 public:
     explicit VolumeMetrics(const char* vol_name, Volume* vol) :
-            sisl::MetricsGroupWrapper("Volume", vol_name), m_volume(vol) {
+            sisl::MetricsGroupWrapper("Volume", vol_name),
+            m_volume(vol) {
         REGISTER_COUNTER(volume_read_count, "Total Volume read operations", "volume_op_count", {"op", "read"});
         REGISTER_COUNTER(volume_write_count, "Total Volume write operations", "volume_op_count", {"op", "write"});
         REGISTER_COUNTER(volume_unmap_count, "Total Volume unmap operations", "volume_op_count", {"op", "unmap"});
@@ -211,7 +215,10 @@ struct vol_sb_hdr {
     indx_mgr_sb indx_sb;
     vol_sb_hdr(const uint64_t& page_size, const uint64_t& size, const char* in_vol_name, const boost::uuids::uuid& uuid,
                const uint32_t& num_streams) :
-            num_streams{num_streams}, page_size{page_size}, size{size}, uuid{uuid} {
+            num_streams{num_streams},
+            page_size{page_size},
+            size{size},
+            uuid{uuid} {
         std::strncpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
         vol_name[VOL_NAME_SIZE - 1] = '\0';
     };
@@ -722,7 +729,9 @@ private:
     /********** Constructor/Destructor **********/
     // volume_req() : csum_list(0), alloc_blkid_list(0), fbe_list(0){};
     volume_req(const vol_interface_req_ptr& vi_req) :
-            indx_req(vi_req->request_id, vi_req->op_type), iface_req(vi_req), io_start_time(Clock::now()) {
+            indx_req(vi_req->request_id, vi_req->op_type),
+            iface_req(vi_req),
+            io_start_time(Clock::now()) {
         if (vi_req->use_cache()) {
             HS_DBG_ASSERT(vi_req->iovecs.empty(), "condition not empty");
             // lifetime managed by HomeStore

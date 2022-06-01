@@ -921,6 +921,8 @@ public:
         }
 
         tcfg.max_io_size = params.max_io_size;
+        if (SISL_OPTIONS.count("max_io_size")) { tcfg.max_io_size = SISL_OPTIONS["max_io_size"].as< uint64_t >(); }
+
         const uint64_t init_buf_size{tcfg.verify_csum() ? tcfg.vol_page_size : tcfg.max_io_size};
 
         init_buf = iomanager.iobuf_alloc(512, init_buf_size);
@@ -935,9 +937,10 @@ public:
             // verify_done = true;
             // startTime = Clock::now();
         }
-        tcfg.max_io_size = params.max_io_size;
+
+        // tcfg.max_io_size = params.max_io_size;
         /* TODO :- Rishabh: remove it */
-        // tcfg.max_io_size = 128 * Ki;
+
         outstanding_ios = 0;
 
         {
@@ -1668,6 +1671,8 @@ protected:
                 std::vector< iovec > iovecs{};
                 for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
                     uint8_t* const rbuf{iomanager.iobuf_alloc(512, page_size)};
+                    std::memset(static_cast< void* >(rbuf), 0, page_size);
+
                     HS_REL_ASSERT_NOTNULL(rbuf);
                     iovec iov{static_cast< void* >(rbuf), static_cast< size_t >(page_size)};
                     iovecs.emplace_back(std::move(iov));
@@ -1677,6 +1682,7 @@ protected:
                                                                      nlbas, tcfg.verify_csum(), tcfg.read_cache, sync}};
             } else {
                 uint8_t* const rbuf{iomanager.iobuf_alloc(512, nlbas * page_size)};
+                std::memset(static_cast< void* >(rbuf), 0, nlbas * page_size);
                 vreq = boost::intrusive_ptr< io_req_t >{
                     new io_req_t{vinfo, Op_type::READ, rbuf, lba, nlbas, tcfg.verify_csum(), tcfg.read_cache, sync}};
             }
@@ -2294,7 +2300,9 @@ SISL_OPTION_GROUP(
      "percentage of volume verficiation files of available free space on hosting file system",
      ::cxxopts::value< uint32_t >()->default_value("30"), "0 to 100"),
     (app_mem_size_in_gb, "", "app_mem_size_in_gb", "cache size in gb",
-     ::cxxopts::value< uint32_t >()->default_value("1"), "1 to 5"))
+     ::cxxopts::value< uint32_t >()->default_value("1"), "1 to 5"),
+    (max_io_size, "", "max_io_size", "max io size", ::cxxopts::value< uint64_t >()->default_value("4096"),
+     "max_io_size"))
 
 #define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr, test_meta_mod, test_vdev_mod, config
 

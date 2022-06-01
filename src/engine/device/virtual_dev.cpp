@@ -411,7 +411,8 @@ stream_info_t VirtualDev::alloc_stream(uint64_t size) {
         ++stream_info.num_streams;
         stream_info.chunk_list.push_back(chunk);
         stream_info.stream_id.push_back(chunk->get_chunk_id());
-        size -= (get_stream_size() > size ? get_stream_size() : size);
+        // either size becomes 0 or keep finding next chunk to get enough space;
+        size -= std::min(size, get_stream_size());
     }
     return stream_info;
 }
