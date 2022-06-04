@@ -407,15 +407,6 @@ public:
 
     static std::shared_ptr< blkalloc_cp > attach_prepare_cp(const std::shared_ptr< blkalloc_cp >& cur_ba_cp);
     void update_start_offset(const uint64_t start_offset) { m_chunk_info->update_start_offset(start_offset); }
-    uint64_t get_aligned_size(const uint64_t align_offset, const uint64_t page_size) {
-        const uint64_t offset = sisl::round_up(get_start_offset(), sisl::round_up(align_offset, page_size));
-        if (offset - get_start_offset() <= get_size()) {
-            const uint64_t size = get_size() - (offset - get_start_offset());
-            return size;
-        } else {
-            return 0;
-        }
-    }
 
     // void cp_done(std::shared_ptr< blkalloc_cp > ba_cp);
 
@@ -525,7 +516,7 @@ public:
     std::array< uint32_t, 2 > merge_free_chunks(PhysicalDevChunk* const chunk);
 
     /* Find a free chunk which closestly match for the required size */
-    PhysicalDevChunk* find_free_chunk(const uint64_t req_size, const bool is_stream_aligned);
+    PhysicalDevChunk* find_free_chunk(const uint64_t req_size);
 
     void write(const char* const data, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
                const bool part_of_batch = false);
@@ -696,7 +687,7 @@ public:
     /* Allocate a chunk for required size on the given physical dev and associate the chunk to provide virtual device.
      * Returns the allocated PhysicalDevChunk */
     PhysicalDevChunk* alloc_chunk(PhysicalDev* pdev, const uint32_t vdev_id, const uint64_t req_size,
-                                  const uint32_t primary_id, const bool is_stream_aligned = false);
+                                  const uint32_t primary_id);
 
     /* Free the chunk for later user */
     void free_chunk(PhysicalDevChunk* const chunk);

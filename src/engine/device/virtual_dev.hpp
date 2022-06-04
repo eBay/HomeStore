@@ -365,7 +365,7 @@ private:
     void add_primary_chunk(PhysicalDevChunk* chunk);
     void add_mirror_chunk(PhysicalDevChunk* chunk);
     PhysicalDevChunk* create_dev_chunk(const uint32_t pdev_ind, const std::shared_ptr< BlkAllocator >& ba,
-                                       const uint32_t primary_id, const bool is_stream_aligned);
+                                       const uint32_t primary_id);
     uint64_t to_dev_offset(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const;
     BlkAllocStatus alloc_blk_from_chunk(const blk_count_t nblks, const blk_alloc_hints& hints,
                                         std::vector< BlkId >& out_blkid, PhysicalDevChunk* const chunk);

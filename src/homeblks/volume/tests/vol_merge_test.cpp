@@ -40,7 +40,7 @@ constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
 uint64_t max_io_size = 1 * Mi;
 uint64_t max_outstanding_ios = 8u;
-uint64_t max_disk_capacity = 10 * Gi;
+uint64_t max_disk_capacity = 20 * Gi;
 uint64_t match_cnt = 0;
 uint64_t max_capacity;
 using log_level = spdlog::level::level_enum;
@@ -57,7 +57,7 @@ SISL_OPTION_GROUP(
      "number"),
     (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
     (max_disk_capacity, "", "max_disk_capacity", "max disk capacity",
-     ::cxxopts::value< uint64_t >()->default_value("5"), "GB"),
+     ::cxxopts::value< uint64_t >()->default_value("20"), "GB"),
     (max_volume, "", "max_volume", "max volume", ::cxxopts::value< uint64_t >()->default_value("2"), "number"),
     (max_num_writes, "", "max_num_writes", "max num of writes", ::cxxopts::value< uint64_t >()->default_value("8"),
      "number"),

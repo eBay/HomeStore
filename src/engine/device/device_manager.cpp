@@ -562,11 +562,11 @@ void DeviceManager::write_info_blocks() {
 }
 
 PhysicalDevChunk* DeviceManager::alloc_chunk(PhysicalDev* pdev, const uint32_t vdev_id, const uint64_t req_size,
-                                             const uint32_t primary_id, const bool is_stream_aligned) {
+                                             const uint32_t primary_id) {
     std::lock_guard< decltype(m_dev_mutex) > lock{m_dev_mutex};
 
     HS_DBG_ASSERT_EQ(req_size % pdev->get_page_size(), 0);
-    PhysicalDevChunk* chunk{pdev->find_free_chunk(req_size, is_stream_aligned)};
+    PhysicalDevChunk* chunk{pdev->find_free_chunk(req_size)};
     if (chunk == nullptr) {
         LOGERROR("No space available for chunk size {} in pdev id {} ", req_size, pdev->get_dev_id());
         return nullptr;
@@ -575,17 +575,6 @@ PhysicalDevChunk* DeviceManager::alloc_chunk(PhysicalDev* pdev, const uint32_t v
     chunk->set_vdev_id(vdev_id); // Set the chunk as busy or engaged to a vdev
     chunk->set_primary_chunk_id(primary_id);
     chunk->update_end_of_chunk(req_size);
-
-    // if it is not stream aligned. Create a new chunk at the beginning.
-    if (is_stream_aligned && (chunk->get_start_offset() % pdev->get_stream_aligned_offset() != 0)) {
-        const auto old_start_offset = chunk->get_start_offset();
-        const auto new_start_offset = sisl::round_up(
-            chunk->get_start_offset(), sisl::round_up(pdev->get_raw_stream_size(), pdev->get_page_size()));
-        if (new_start_offset > old_start_offset) {
-            chunk->update_start_offset(new_start_offset);
-            create_new_chunk(pdev, old_start_offset, new_start_offset - old_start_offset, chunk);
-        }
-    }
 
     // if it is more then the requested size than trim chunk from the end.
     if (chunk->get_size() > req_size) {

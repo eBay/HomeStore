@@ -549,19 +549,13 @@ std::array< uint32_t, 2 > PhysicalDev::merge_free_chunks(PhysicalDevChunk* chunk
 
 pdev_info_block PhysicalDev::get_info_blk() { return m_info_blk; }
 
-PhysicalDevChunk* PhysicalDev::find_free_chunk(const uint64_t req_size, const bool is_stream_aligned) {
+PhysicalDevChunk* PhysicalDev::find_free_chunk(const uint64_t req_size) {
     // Get the slot with closest size;
     PhysicalDevChunk* closest_chunk{nullptr};
 
     PhysicalDevChunk* chunk{device_manager_mutable()->get_chunk_mutable(m_info_blk.first_chunk_id)};
     while (chunk) {
-        const auto size = is_stream_aligned ? chunk->get_aligned_size(get_stream_aligned_offset(), get_page_size())
-                                            : chunk->get_size();
-        if (is_stream_aligned) {
-            LOGDEBUG("Finding free chunk for size: {}, this chunk_id: {}, start_offset: {}", size,
-                     chunk->get_chunk_id(), chunk->get_start_offset());
-        }
-
+        const auto size =  chunk->get_size();
         if (!chunk->is_busy() && size >= req_size) {
             if ((closest_chunk == nullptr) || (chunk->get_size() < closest_chunk->get_size())) {
                 closest_chunk = chunk;
@@ -612,10 +606,7 @@ bool PhysicalDev::is_hdd() const {
 
 uint64_t PhysicalDev::get_raw_stream_size() const {
     if (!is_hdd()) { return get_size(); }
-    const auto page_size = get_page_size();
-
-    // TODO: replace 10 with iomgr api
-    return sisl::round_down((get_size() / get_num_streams()), page_size);
+    return get_size() / get_num_streams();
 }
 
 uint64_t PhysicalDev::get_stream_aligned_offset() const { return (get_size() / get_num_streams()); }

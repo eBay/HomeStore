@@ -44,7 +44,7 @@ struct TestCfg {
 
     uint64_t max_io_size{1 * Mi};
     uint64_t max_outstanding_ios{64};
-    uint64_t max_disk_capacity{10 * Gi};
+    uint64_t max_disk_capacity{20 * Gi};
 
     uint32_t atomic_phys_page_size{512};
     uint32_t vol_page_size{4096};

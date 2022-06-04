@@ -111,7 +111,7 @@ struct TestCfg {
 
     uint64_t max_io_size{1 * Mi};
     uint64_t max_outstanding_ios{32};
-    uint64_t max_disk_capacity{10 * Gi};
+    uint64_t max_disk_capacity{20 * Gi};
     uint64_t app_mem_size_in_gb{1};
 
     uint32_t atomic_phys_page_size{512};
@@ -2235,7 +2235,7 @@ SISL_OPTION_GROUP(
     (unmap_enable, "", "unmap_enable", "unmap enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("0"),
      "flag"),
     (max_disk_capacity, "", "max_disk_capacity", "max disk capacity",
-     ::cxxopts::value< uint64_t >()->default_value("5"), "GB"),
+     ::cxxopts::value< uint64_t >()->default_value("20"), "GB"),
     (max_volume, "", "max_volume", "max volume", ::cxxopts::value< uint64_t >()->default_value("50"), "number"),
     (max_num_writes, "", "max_num_writes", "max num of writes", ::cxxopts::value< uint64_t >()->default_value("100000"),
      "number"),
