@@ -40,6 +40,9 @@ for opt,arg in opts:
         emulate_hdd = " --emulate_hdd_cnt " + arg 
         print(("emulate_hdd (%s)") % (arg))
 
+if ((test_suits == "nightly") and (emulate_hdd)) : 
+    app_mem_size_in_gb = ' --app_mem_size_in_gb=15' # increase to 15GB for HDD long hour running;
+
 addln_opts = ' '
 
 if bool(dev_list and dev_list.strip()):

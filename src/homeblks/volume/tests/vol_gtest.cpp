@@ -925,7 +925,7 @@ public:
 
         const uint64_t init_buf_size{tcfg.verify_csum() ? tcfg.vol_page_size : tcfg.max_io_size};
 
-        init_buf = iomanager.iobuf_alloc(512, init_buf_size);
+        init_buf = iomanager.iobuf_alloc(512 /* alignment */, init_buf_size);
         std::memset(static_cast< void* >(init_buf), 0, init_buf_size);
         HS_REL_ASSERT_EQ(tcfg.expected_init_fail, false);
         if (tcfg.init) {
@@ -1122,15 +1122,20 @@ private:
             // 1. we only write vol file content for csum and data verify;
             // 2. skip for hdr and null verify type;
             //
+            // for csum, write csum (sizeof(uint64_t)) for every 4k data;
             // initialize the file only for non-header case;
             uint8_t* init_csum_buf{nullptr};
+            const uint32_t num_csums_write{1024};
             const uint16_t csum_zero{
                 crc16_t10dif(init_crc_16, static_cast< const uint8_t* >(init_buf), tcfg.vol_page_size)};
             if (tcfg.verify_csum()) {
-                init_csum_buf = iomanager.iobuf_alloc(512, sizeof(uint16_t));
-                *reinterpret_cast< uint16_t* >(init_csum_buf) = csum_zero;
+                init_csum_buf = iomanager.iobuf_alloc(512, num_csums_write * sizeof(uint16_t));
+                for (size_t i = 0; i < num_csums_write; ++i) {
+                    *(reinterpret_cast< uint16_t* >(init_csum_buf) + i) = csum_zero;
+                }
             }
-            const uint64_t offset_increment{tcfg.verify_csum() ? sizeof(uint16_t) : tcfg.max_io_size};
+            const uint64_t offset_increment{tcfg.verify_csum() ? (sizeof(uint16_t) * num_csums_write)
+                                                               : tcfg.max_io_size};
 
             const uint64_t max_offset{tcfg.verify_csum() ? max_vol_size_csum : max_vol_size};
 
