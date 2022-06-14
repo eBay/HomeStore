@@ -20,6 +20,7 @@ dev_list = ""
 log_mods = ""
 emulate_hdd=""
 app_mem_size_in_gb=""
+skip_vol_verify_recovery=""
 
 for opt,arg in opts:
     if opt in ('-t', '--test_suits'):
@@ -42,6 +43,7 @@ for opt,arg in opts:
 
 if ((test_suits == "nightly") and (emulate_hdd)) : 
     app_mem_size_in_gb = ' --app_mem_size_in_gb=15' # increase to 15GB for HDD long hour running;
+    skip_vol_verify_recovery = ' --pre_init_verify=false' # skip preinit vol verify during recovery in nightly hdd long hour (which takes 14 hours for one single test);
 
 addln_opts = ' '
 
@@ -54,7 +56,7 @@ if bool(log_mods and log_mods.strip()):
     addln_opts += log_mods 
 
 addln_opts += ' '.join(map(str, args))
-vol_addln_opts = addln_opts + emulate_hdd + app_mem_size_in_gb
+vol_addln_opts = addln_opts + emulate_hdd + app_mem_size_in_gb + skip_vol_verify_recovery
 
 print("addln_opts: " + addln_opts)
 print("vol_addln_opts: " + vol_addln_opts)
@@ -144,15 +146,15 @@ def recovery_nightly(num_iteration=10):
         print(s)
         i += 1
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --remove_file_on_shutdown=0 --delete_volume=0 --verify_type=2"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --remove_file_on_shutdown=0 --delete_volume=0 --verify_type=2" 
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery test completed")
 
     # run same LBA work load for 2 hours;
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=3600 --max_num_writes=5000000 --load_type=1 --verify_type=2 --enable_crash_handler=1 --remove_file_on_shutdown=0"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=3600 --max_num_writes=5000000 --load_type=1 --verify_type=2 --enable_crash_handler=1 --remove_file_on_shutdown=0" 
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=2 --run_time=300 --enable_crash_handler=1 --remove_file_on_shutdown=1 --delete_volume=1"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=2 --run_time=300 --enable_crash_handler=1 --remove_file_on_shutdown=1 --delete_volume=1" 
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery with writing to same LBA workload passed")
 
