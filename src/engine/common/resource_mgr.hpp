@@ -115,7 +115,7 @@ public:
 
     /* get cache size */
     uint64_t get_cache_size() const {
-        return ((HS_STATIC_CONFIG(input.app_mem_size) * HS_DYNAMIC_CONFIG(resource_limits.cache_size_percent)) / 100);
+        return ((HS_STATIC_CONFIG(input.io_mem_size()) * HS_DYNAMIC_CONFIG(resource_limits.cache_size_percent)) / 100);
     }
 
     /* monitor journal size */
@@ -153,8 +153,8 @@ public:
 
 private:
     int64_t get_dirty_buf_limit() const {
-        return (int64_t)((HS_DYNAMIC_CONFIG(resource_limits.dirty_buf_percent) * HS_STATIC_CONFIG(input.app_mem_size) /
-                          100));
+        return int64_cast(
+            (HS_DYNAMIC_CONFIG(resource_limits.dirty_buf_percent) * HS_STATIC_CONFIG(input.io_mem_size())) / 100);
     }
 
     std::atomic< int64_t > m_hs_dirty_buf_cnt;

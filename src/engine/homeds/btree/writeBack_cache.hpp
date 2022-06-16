@@ -393,9 +393,8 @@ public:
                          [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
     }
 
-    std::string get_cp_flush_status(const btree_cp_ptr& bcp) {
+    std::string get_cp_flush_status(const btree_cp_ptr& bcp) const {
         const size_t cp_id = bcp->cp_id % MAX_CP_CNT;
-
         return fmt::format("dirty buffers cnt {}", m_dirty_buf_cnt[cp_id].get());
     }
 

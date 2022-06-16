@@ -80,8 +80,7 @@ void HomeLogStore::write_async(logstore_req* const req, const log_req_comp_cb_t&
     m_records.create(req->seq_num);
     COUNTER_INCREMENT(HomeLogStoreMgrSI().m_metrics, logstore_append_count, 1);
     HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logstore_record_size, req->data.size);
-    [[maybe_unused]] const auto logid{
-        m_logdev.append_async(m_store_id, req->seq_num, req->data, static_cast< void* >(req))};
+    m_logdev.append_async(m_store_id, req->seq_num, req->data, static_cast< void* >(req));
 }
 
 void HomeLogStore::write_async(const logstore_seq_num_t seq_num, const sisl::io_blob& b, void* const cookie,

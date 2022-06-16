@@ -198,7 +198,7 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
 }
 
 int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, const sisl::io_blob& data,
-                             void* const cb_context) {
+                             void* cb_context) {
     auto prev_size = m_pending_flush_size.fetch_add(data.size, std::memory_order_relaxed);
     const auto idx = m_log_idx.fetch_add(1, std::memory_order_acq_rel);
     auto threshold_size = LogDev::flush_data_threshold_size();

@@ -580,8 +580,8 @@ public:
      *
      * @return logid_t : log_idx of the log of the data.
      */
-    [[nodiscard]] logid_t append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num,
-                                       const sisl::io_blob& data, void* const cb_context);
+    logid_t append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, const sisl::io_blob& data,
+                         void* cb_context);
 
     /**
      * @brief Read the log id from the device offset

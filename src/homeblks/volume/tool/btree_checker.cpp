@@ -134,6 +134,7 @@ void start_homestore() {
     }
     params.min_virtual_page_size = config["min_virtual_page_size"];
     params.app_mem_size = config["app_mem_size"];
+
     // TODO: Call iomgr emulate drive attrs before starting homestore
     /*params.data_drive_attr = iomgr::drive_attributes();
     params.data_drive_attr->phys_page_size = config["phys_page_size"];

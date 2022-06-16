@@ -196,21 +196,6 @@ public:
     end_of_batch_callback end_of_batch_cb;
 
 public:
-    std::string to_string() const {
-        std::ostringstream oss;
-        oss << "min_virtual_page_size=" << min_virtual_page_size << ",app_mem_size=" << app_mem_size
-            << ",number of data devices =" << data_devices.size() << ",data_open_flags =" << data_open_flags;
-
-        oss << ", start_http=" << start_http;
-
-        oss << ",data device names = [";
-        for (size_t i{0}; i < data_devices.size(); ++i) {
-            oss << data_devices[i].dev_names;
-            oss << ",";
-        }
-        oss << "]";
-        return oss.str();
-    }
     init_params() = default;
 };
 

@@ -89,6 +89,7 @@ public:
     uint32_t min_virtual_page_size{4096}; // minimum page size supported. Ideally it should be 4k.
     uint64_t app_mem_size{static_cast< uint64_t >(1024) * static_cast< uint64_t >(1024) *
                           static_cast< uint64_t >(1024)}; // memory available for the app (including cache)
+    uint64_t hugepage_size{0};                            // memory available for the hugepage
     bool is_read_only{false};                             // Is read only
     bool start_http{true};
 
@@ -109,9 +110,11 @@ public:
 
         json["min_virtual_page_size"] = min_virtual_page_size;
         json["app_mem_size"] = app_mem_size;
-
+        json["hugepage_size"] = hugepage_size;
         return json;
     }
+    std::string to_string() const { return to_json().dump(4); }
+    uint64_t io_mem_size() const { return (hugepage_size != 0) ? hugepage_size : app_mem_size; }
 };
 
 struct hs_engine_config {

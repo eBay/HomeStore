@@ -63,7 +63,7 @@ public:
         HomeStoreDynamicConfig::init_settings_default();
 
         // Restrict iomanager to throttle upto the app mem size allocated for us
-        iomanager.set_io_memory_limit(HS_STATIC_CONFIG(input.app_mem_size));
+        iomanager.set_io_memory_limit(HS_STATIC_CONFIG(input.io_mem_size()));
 
         // Start a custom periodic logger
         static std::once_flag flag1;
