@@ -313,6 +313,12 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
         LOGINFO("there is a possibility of running out of space as total size of the volumes"
                 "created are more then maximum capacity");
     }
+
+    if (lookup_volume(params.uuid) != nullptr) {
+        LOGERROR("volume of uuid: {} is already created!", params.uuid);
+        return nullptr;
+    }
+
     /* create new volume */
     std::shared_ptr< Volume > new_vol;
     try {
