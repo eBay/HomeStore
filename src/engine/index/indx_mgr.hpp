@@ -523,19 +523,6 @@ protected:
     static void safe_to_free_blk(const Free_Blk_Entry& fbe);
 };
 
-class IndxMgrMetrics : public sisl::MetricsGroupWrapper {
-public:
-    explicit IndxMgrMetrics(const char* indx_name) : sisl::MetricsGroupWrapper("Index", indx_name) {
-        register_me_to_farm();
-    }
-
-    IndxMgrMetrics(const IndxMgrMetrics&) = delete;
-    IndxMgrMetrics(IndxMgrMetrics&&) noexcept = delete;
-    IndxMgrMetrics& operator=(const IndxMgrMetrics&) = delete;
-    IndxMgrMetrics& operator=(const IndxMgrMetrics&&) noexcept = delete;
-    ~IndxMgrMetrics() { deregister_me_from_farm(); }
-};
-
 /************************************************* Indx Mgr *************************************/
 class IndxMgr : public StaticIndxMgr, public std::enable_shared_from_this< IndxMgr > {
 
@@ -688,7 +675,6 @@ private:
     homeds::btree::BtreeQueryCursor m_destroy_btree_cur;
     seq_id_t m_max_seqid_in_recovery = -1;
     std::atomic< bool > m_active_cp_suspend = false;
-    IndxMgrMetrics m_metrics;
 
     /*************************************** private functions ************************/
     void update_indx_internal(const indx_req_ptr& ireq);

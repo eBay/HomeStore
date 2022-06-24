@@ -164,9 +164,9 @@ public:
                            {"op", "write"});
         REGISTER_HISTOGRAM(volume_blkalloc_latency, "Volume block allocation latency (in ns)");
         REGISTER_HISTOGRAM(volume_pieces_per_write, "Number of individual pieces per write",
-                           HistogramBucketsType(LinearUpto64Buckets));
+                           HistogramBucketsType(LinearUpto20Buckets));
         REGISTER_HISTOGRAM(volume_pieces_per_read, "Number of individual pieces per write",
-                           HistogramBucketsType(LinearUpto64Buckets));
+                           HistogramBucketsType(LinearUpto20Buckets));
         REGISTER_HISTOGRAM(volume_write_size_distribution, "Distribution of volume write sizes",
                            HistogramBucketsType(ExponentialOfTwoBuckets));
         REGISTER_HISTOGRAM(volume_read_size_distribution, "Distribution of volume read sizes",

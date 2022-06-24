@@ -152,8 +152,10 @@ public:
         REGISTER_COUNTER(blkstore_outstanding_writes, "Outstanding Write IOs at a given point",
                          sisl::_publish_as::publish_as_gauge);
 
-        REGISTER_HISTOGRAM(blkstore_partial_cache_distribution, "Partial cache hit ops distribution",
-                           HistogramBucketsType(LinearUpto64Buckets))
+        // Commenting out the histogram below, since current version will not have any partial cache hits
+        // REGISTER_HISTOGRAM(blkstore_partial_cache_distribution, "Partial cache hit ops distribution",
+        //                   HistogramBucketsType(LinearUpto64Buckets));
+
         REGISTER_HISTOGRAM(blkstore_cache_read_latency, "BlkStore cache read latency");
         REGISTER_HISTOGRAM(blkstore_cache_write_latency, "BlkStore cache write latency");
         REGISTER_HISTOGRAM(blkstore_drive_write_latency, "BlkStore drive write latency");
@@ -557,7 +559,7 @@ public:
         const bool ret{m_cache->insert_missing_pieces(obuf, offset, size, missing_mp)};
 
         if (missing_mp.size()) {
-            HISTOGRAM_OBSERVE(m_metrics, blkstore_partial_cache_distribution, missing_mp.size());
+            // HISTOGRAM_OBSERVE(m_metrics, blkstore_partial_cache_distribution, missing_mp.size());
             COUNTER_INCREMENT(m_metrics, blkstore_drive_read_count, missing_mp.size());
             if (cache_only) { return nullptr; }
         }

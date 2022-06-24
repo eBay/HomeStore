@@ -228,7 +228,7 @@ HomeLogStoreMgrMetrics::HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores
     REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size",
                        HistogramBucketsType(ExponentialOfTwoBuckets));
     REGISTER_HISTOGRAM(logdev_flush_records_distribution, "Distribution of num records to flush",
-                       HistogramBucketsType(LinearUpto128Buckets));
+                       HistogramBucketsType(LinearUpto64Buckets));
     REGISTER_HISTOGRAM(logstore_record_size, "Distribution of log record size",
                        HistogramBucketsType(ExponentialOfTwoBuckets));
     REGISTER_HISTOGRAM(logdev_flush_done_msg_time_ns, "Logdev flush completion msg time in ns");

@@ -900,11 +900,6 @@ public:
         REGISTER_COUNTER(btree_leaf_node_writes, "Total number of btree leaf node writes", "btree_node_writes",
                          {"node_type", "leaf"});
         REGISTER_COUNTER(btree_num_pc_gen_mismatch, "Number of gen mismatches to recover");
-
-        REGISTER_HISTOGRAM(btree_int_node_occupancy, "Interior node occupancy", "btree_node_occupancy",
-                           {"node_type", "interior"}, HistogramBucketsType(LinearUpto128Buckets));
-        REGISTER_HISTOGRAM(btree_leaf_node_occupancy, "Leaf node occupancy", "btree_node_occupancy",
-                           {"node_type", "leaf"}, HistogramBucketsType(LinearUpto128Buckets));
         REGISTER_COUNTER(btree_retry_count, "number of retries");
         REGISTER_COUNTER(write_err_cnt, "number of errors in write");
         REGISTER_COUNTER(split_failed, "split failed");
@@ -914,6 +909,11 @@ public:
         REGISTER_COUNTER(btree_write_ops_count, "number of btree operations");
         REGISTER_COUNTER(btree_query_ops_count, "number of btree operations");
         REGISTER_COUNTER(btree_remove_ops_count, "number of btree operations");
+
+        REGISTER_HISTOGRAM(btree_int_node_occupancy, "Interior node occupancy", "btree_node_occupancy",
+                           {"node_type", "interior"}, HistogramBucketsType(PercentageBuckets));
+        REGISTER_HISTOGRAM(btree_leaf_node_occupancy, "Leaf node occupancy", "btree_node_occupancy",
+                           {"node_type", "leaf"}, HistogramBucketsType(PercentageBuckets));
         REGISTER_HISTOGRAM(btree_exclusive_time_in_int_node,
                            "Exclusive time spent (Write locked) on interior node (ns)", "btree_exclusive_time_in_node",
                            {"node_type", "interior"});
