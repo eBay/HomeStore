@@ -1053,12 +1053,18 @@ vol_state Volume::set_state(vol_state state, bool persist) {
 }
 
 bool Volume::is_offline() const {
-    auto state = get_state();
+    const auto state = get_state();
     return (state != vol_state::ONLINE || m_hb->is_shutdown());
 }
 
+bool Volume::is_destroying() const {
+    const auto state = get_state();
+    return (state == vol_state::DESTROYING || state == vol_state::START_INDX_TREE_DESTROYING ||
+            state == vol_state::DESTROYED);
+}
+
 bool Volume::is_online() const {
-    auto state = get_state();
+    const auto state = get_state();
     return (state == vol_state::ONLINE);
 }
 

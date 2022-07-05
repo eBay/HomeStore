@@ -559,6 +559,12 @@ public:
      */
     bool is_online() const;
 
+    /*
+     *  volume destroy is called but in progress (e.g. vol ptr is not removed by home_blks yet);
+     *  @params :- return true if destroy is in progress, false if otherwise;
+     * */
+    bool is_destroying() const;
+
     size_t call_batch_completion_cbs();
 
     /* Update a new cp of this volume.

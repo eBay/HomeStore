@@ -824,8 +824,27 @@ public:
 
     /* Note: It assumes that create volume is not happening in parallel */
     bool create_volume(const int indx) {
+        if ((vol_info.size() != 0) && vol_info[indx]) {
+            if (vol_info[indx]->ref_cnt.get()) {
+                // this volume is still active;
+                return false;
+            } else {
+                // remove volume has been issued on this volume;
+                const auto vol = VolInterface::get_instance()->lookup_volume(vol_info[indx]->uuid);
+                if (vol) {
+                    // async deletion of this volume is still in progress;
+                    // otherwise, vol will not be found by homeblks;
+                    const auto state = VolInterface::get_instance()->get_state(vol);
+                    HS_REL_ASSERT_EQ(state == vol_state::DESTROYING || state == vol_state::START_INDX_TREE_DESTROYING ||
+                                         state == vol_state::DESTROYED,
+                                     true, "unexpected vol state: {}", state);
+                    return false;
+                }
 
-        if ((vol_info.size() != 0) && vol_info[indx] && vol_info[indx]->ref_cnt.get()) { return false; }
+                // volume has already been removed, we can safely fall through to create another volume on same index;
+            }
+        }
+
         /* Create a volume */
         vol_params params;
         params.page_size = tcfg.vol_page_size;
