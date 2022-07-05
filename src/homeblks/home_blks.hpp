@@ -353,7 +353,6 @@ private:
     void trigger_cp_init(uint32_t vol_mount_cnt);
     void start_home_log_store();
     void recover_volumes();
-    uint32_t next_available_hdd_thread_idx();
     VolumeIOWatchDog* get_vol_io_wd() const { return m_io_wd.get(); };
 
 private:
@@ -395,9 +394,6 @@ private:
     static thread_local std::vector< std::shared_ptr< Volume > >* s_io_completed_volumes;
 
     /* hdd custom threads */
-    std::vector< iomgr::io_thread_t > m_custom_hdd_threads;
-    std::mutex m_hdd_threads_mtx;
-    std::condition_variable m_hdd_threads_cv;
     std::unique_ptr< VolumeIOWatchDog > m_io_wd{nullptr};
 };
 

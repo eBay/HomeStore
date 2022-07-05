@@ -530,9 +530,11 @@ BlkAllocStatus VirtualDev::alloc_blk(const blk_count_t nblks, const blk_alloc_hi
         do {
             for (auto& chunk : m_primary_pdev_chunks_list[dev_ind].chunks_in_pdev) {
                 status = alloc_blk_from_chunk(nblks, hints, out_blkid, chunk);
-                if ((status == BlkAllocStatus::SUCCESS) || !hints.can_look_for_other_dev) { break; }
-                dev_ind = static_cast< uint32_t >((dev_ind + 1) % m_primary_pdev_chunks_list.size());
+                if (status == BlkAllocStatus::SUCCESS || !hints.can_look_for_other_chunk) { break; }
             }
+
+            if (status == BlkAllocStatus::SUCCESS || !hints.can_look_for_other_chunk) { break; }
+            dev_ind = static_cast< uint32_t >((dev_ind + 1) % m_primary_pdev_chunks_list.size());
         } while (dev_ind != start_dev_ind);
 
         if (status != BlkAllocStatus::SUCCESS) {

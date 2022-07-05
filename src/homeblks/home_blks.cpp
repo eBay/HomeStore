@@ -104,31 +104,6 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
             instance->init_devices();
         }
     });
-
-    /* start custom io threads for hdd */
-    if (is_data_drive_hdd()) {
-        const uint32_t hdd_thread_count{HS_DYNAMIC_CONFIG(generic.hdd_io_threads)};
-        instance->m_custom_hdd_threads.reserve(hdd_thread_count);
-
-        for (auto i = 0u; i < hdd_thread_count; ++i) {
-            iomanager.create_reactor("custom_hdd", INTERRUPT_LOOP, [&instance, hdd_thread_count](bool is_started) {
-                if (is_started) {
-                    std::lock_guard< std::mutex > lock(instance->m_hdd_threads_mtx);
-                    instance->m_custom_hdd_threads.emplace_back(iomanager.iothread_self());
-                    if (instance->m_custom_hdd_threads.size() == hdd_thread_count) {
-                        instance->m_hdd_threads_cv.notify_one();
-                    }
-                }
-            });
-        }
-
-        {
-            auto lg = std::unique_lock< std::mutex >(instance->m_hdd_threads_mtx);
-            instance->m_hdd_threads_cv.wait(lg, [&instance, hdd_thread_count]() {
-                return (instance->m_custom_hdd_threads.size() == hdd_thread_count);
-            });
-        }
-    }
     return ret;
 }
 
@@ -265,11 +240,6 @@ std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_r
     req->vol_instance = vol;
     req->part_of_batch = part_of_batch;
     req->op_type = Op_type::WRITE;
-    if (is_data_drive_hdd()) {
-        iomanager.run_on(m_custom_hdd_threads[next_available_hdd_thread_idx()],
-                         [vol, req](io_thread_addr_t addr) { vol->write(req); });
-        return std::error_condition();
-    }
     return (vol->write(req));
 }
 
@@ -283,11 +253,6 @@ std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_re
     req->vol_instance = vol;
     req->part_of_batch = part_of_batch;
     req->op_type = Op_type::READ;
-    if (is_data_drive_hdd()) {
-        iomanager.run_on(m_custom_hdd_threads[next_available_hdd_thread_idx()],
-                         [vol, req](io_thread_addr_t addr) { vol->read(req); });
-        return std::error_condition();
-    }
     return (vol->read(req));
 }
 
@@ -311,11 +276,6 @@ std::error_condition HomeBlks::unmap(const VolumePtr& vol, const vol_interface_r
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     req->vol_instance = vol;
     req->op_type = Op_type::UNMAP;
-    if (is_data_drive_hdd()) {
-        iomanager.run_on(m_custom_hdd_threads[next_available_hdd_thread_idx()],
-                         [vol, req](io_thread_addr_t addr) { vol->unmap(req); });
-        return std::error_condition();
-    }
     return (vol->unmap(req));
 }
 
@@ -539,25 +499,6 @@ void HomeBlks::init_done() {
     status_mgr()->register_status_cb("Volumes", std::bind(&HomeBlks::get_status, this, std::placeholders::_1));
 
     m_recovery_stats->end();
-
-    /* start custom io threads for hdd */
-    if (is_data_drive_hdd()) {
-        m_custom_hdd_threads.reserve(HS_DYNAMIC_CONFIG(generic.hdd_io_threads));
-        std::atomic< uint32_t > thread_cnt{0};
-        uint32_t expected_thread_cnt{HS_DYNAMIC_CONFIG(generic.hdd_io_threads)};
-        for (auto i = 0u; i < expected_thread_cnt; ++i) {
-            iomanager.create_reactor("custom_hdd_thrd", INTERRUPT_LOOP, [this, &thread_cnt](bool is_started) {
-                if (is_started) {
-                    ++thread_cnt;
-                    const std::lock_guard< std::mutex > lock(m_hdd_threads_mtx);
-                    m_custom_hdd_threads.push_back(iomanager.iothread_self());
-                } else {
-                    // it is called during shutdown
-                }
-            });
-        }
-        while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
-    }
 
     // start the io watchdog;
     m_io_wd = std::make_unique< VolumeIOWatchDog >();
@@ -1208,13 +1149,6 @@ void HomeBlksMetrics::on_gather() {
     } else {
         GAUGE_UPDATE(*this, unclean_shutdown, 1);
     }
-}
-
-uint32_t HomeBlks::next_available_hdd_thread_idx() {
-    static thread_local uint32_t current_index{0};
-    uint32_t ret = current_index;
-    current_index = (current_index + 1) % m_custom_hdd_threads.size();
-    return ret;
 }
 
 iomgr::drive_type HomeBlks::data_drive_type() {

@@ -68,10 +68,10 @@ meta_flip_list = ["write_sb_abort", "write_with_ovf_abort", "remove_sb_abort", "
 vdev_flip_list = ["abort_before_update_eof_cur_chunk", "abort_after_update_eof_cur_chunk", "abort_after_update_eof_next_chunk"]
 
 def recovery():
-    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file_on_shutdown=0 --remove_file_on_start=1 --emulate_hdd_cnt=1"
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file_on_shutdown=0 --remove_file_on_start=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 --remove_file_on_shutdown=1 --delete_volume=1 --emulate_hdd_cnt=1"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 --remove_file_on_shutdown=1 --delete_volume=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery passed")
 
@@ -415,8 +415,9 @@ def vol_io_flip_test():
     cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_pre_sb_remove_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    # will be re-enabled later
+    # cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_pre_sb_remove_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
+    # subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
 
