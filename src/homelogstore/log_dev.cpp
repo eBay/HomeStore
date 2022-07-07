@@ -442,6 +442,8 @@ void LogDev::process_fsync_completions(const boost::intrusive_ptr< virtualdev_re
 
 void LogDev::process_logdev_completions(const boost::intrusive_ptr< virtualdev_req >& vd_req) {
     const auto req{logdev_req::to_logdev_req(vd_req)};
+    RELEASE_ASSERT_EQ(req->is_completed, false, "Expected to be false.");
+    req->is_completed = true;
     if (req->err != no_error) { HS_REL_ASSERT(0, "error {} happened during op {}", req->err.message(), req->is_read); }
     if (req->is_read) {
         // update logdev read metrics;

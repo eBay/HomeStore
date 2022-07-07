@@ -52,6 +52,7 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     std::error_condition err{no_error};
     bool is_read{false};
     bool isSyncCall{false};
+    bool is_completed{false};
     sisl::atomic_counter< int > refcount;
     PhysicalDevChunk* chunk{nullptr};
     Clock::time_point io_start_time;

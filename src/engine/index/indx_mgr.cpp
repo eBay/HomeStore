@@ -1734,6 +1734,8 @@ void StaticIndxMgr::shutdown(indxmgr_stop_cb cb) {
                       if (m_cp_mgr) { m_cp_mgr->shutdown(); }
                       m_read_blk_tracker = nullptr;
                       m_hs.reset();
+                      IndxMgr::m_btree_write_thread_ids.clear();
+                      IndxMgr::m_btree_write_thread_ids.shrink_to_fit();
                       cb(success);
                   }),
                   true, true);
