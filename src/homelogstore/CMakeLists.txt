@@ -22,11 +22,10 @@ if (${io_tests})
 
     can_build_spdk_io_tests(spdk_tests)
     if(${spdk_tests})
-        #SDSTOR-6954
-        #add_test(NAME TestLogStore-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_log_store -- --spdk true)
-        #if(${epoll_tests})
-        #    SET_TESTS_PROPERTIES(TestLogStore-Spdk PROPERTIES DEPENDS TestVolError-Epoll)
-        #endif()
+        add_test(NAME TestLogStore-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_log_store -- --spdk true)
+        if(${epoll_tests})
+            SET_TESTS_PROPERTIES(TestLogStore-Spdk PROPERTIES DEPENDS TestVolError-Epoll)
+        endif()
     endif()
 endif()
 
