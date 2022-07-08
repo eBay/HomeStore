@@ -254,6 +254,13 @@ struct super_block {
     uint32_t get_version() const { return version; }
     void set_system_uuid(const hs_uuid_t uuid) { system_uuid = static_cast< uint64_t >(uuid); }
     hs_uuid_t get_system_uuid() const { return static_cast< hs_uuid_t >(system_uuid); }
+    std::string to_string() {
+        auto str = fmt::format("magic {}, gen_cnt {}, version {}, cur_indx {}, product_name {}, init_done {}, "
+                               "system_uuid {}, dev_attr {}",
+                               get_magic(), gen_cnt, get_version(), cur_indx, get_product_name(), init_done,
+                               get_system_uuid(), dev_attr.to_string());
+        return str;
+    }
 };
 
 static_assert(sizeof(super_block) <= super_block::s_min_sb_size);

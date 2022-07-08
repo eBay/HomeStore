@@ -120,6 +120,7 @@ void PhysicalDev::read_and_fill_superblock(const int oflags) {
 
     bool is_init_required = false;
     const auto iomgr_attr = iomgr::DriveInterface::get_attributes(m_devname);
+    LOGINFO("device sb {}", m_super_blk->to_string());
 
     if (validate_device()) {
         if (!is_from_upgradable_version()) {
