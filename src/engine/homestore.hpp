@@ -301,8 +301,6 @@ protected:
                 m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE,
                 blk_allocator_type_t::fixed, 0, (char*)&blob, sizeof(blkstore_blob), atomic_phys_page_size, "index",
                 true);
-            ++m_format_cnt;
-            m_index_blk_store->format(([this](bool success) { init_done(true); }));
         } else {
             m_index_blk_store = std::make_unique< BlkStore< IndexBuffer > >(
                 m_dev_mgr.get(), m_cache.get(), vb, pdev_group, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE,
@@ -332,9 +330,6 @@ protected:
             m_meta_blk_store = std::make_unique< BlkStore<> >(
                 m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::PASS_THRU,
                 blk_allocator_type_t::varsize, 0, (char*)&blob, sizeof(blkstore_blob), phys_page_size, "meta", false);
-            ++m_format_cnt;
-            m_meta_blk_store->format(([this](bool success) { init_done(true); }));
-
         } else {
             m_meta_blk_store = std::make_unique< BlkStore<> >(
                 m_dev_mgr.get(), m_cache.get(), vb, pdev_group, BlkStoreCacheType::PASS_THRU,
