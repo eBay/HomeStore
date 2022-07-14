@@ -378,7 +378,7 @@ SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
 #endif
 
 void HomeBlks::submit_io_batch() {
-    // iomanager.default_drive_interface()->submit_batch();
+    iomanager.drive_interface_submit_batch();
     call_multi_completions();
 }
 
