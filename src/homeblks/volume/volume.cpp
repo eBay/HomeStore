@@ -644,15 +644,6 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
     auto vc_req = volume_child_req::cast(bs_req);
     auto& vreq = vc_req->parent_req;
 
-#ifndef NDEBUG
-    if (vc_req->is_read) {
-        for (const auto& iov : vc_req->read_iovs) {
-            const uint64_t* data_buf = static_cast< uint64_t* >(iov.iov_base);
-            if (vc_req->lba != 0 && vc_req->blkId.is_valid()) { RELEASE_ASSERT_NE(*data_buf, 0, "expect to be equal"); }
-        }
-    }
-#endif
-
     assert(vreq != nullptr);
     VOL_DBG_ASSERT_CMP(vreq->is_sync(), ==, false, vreq, "sync op not allowed");
 
