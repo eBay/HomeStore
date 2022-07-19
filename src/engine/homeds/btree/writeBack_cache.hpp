@@ -203,39 +203,30 @@ public:
         m_blkstore = static_cast< btree_blkstore_t* >(blkstore);
         m_blkstore->attach_compl(wb_cache_t::writeBack_completion);
         m_trigger_cp_cb = std::move(trigger_cp_cb);
+        int expected_thread_cnt{0};
+        std::atomic< int64_t > thread_cnt{0};
         static std::once_flag flag1;
         std::call_once(
-            flag1, ([]() {
-                // these should be static so that they stay in scope in the lambda in case function ends before lambda
-                // completes
+            flag1, ([&thread_cnt, &expected_thread_cnt]() {
                 const size_t flush_threads{static_cast< size_t >(HS_DYNAMIC_CONFIG(generic.cache_flush_threads))};
-                static std::vector< uint8_t > threads_initialized(flush_threads, 0x00);
-                static std::vector< std::condition_variable > cvs(flush_threads);
-                static std::vector< std::mutex > cvs_m(flush_threads);
-                auto initialized_itr{std::begin(threads_initialized)};
-                auto cv_itr{std::begin(cvs)};
-                auto cv_m_itr{std::begin(cvs_m)};
-                for (size_t i{0}; i < flush_threads; ++i, ++initialized_itr, ++cv_itr, ++cv_m_itr) {
-                    iomanager.create_reactor("wbcache_flusher", INTERRUPT_LOOP,
-                                             [&tl_cv = *cv_itr, &tl_cv_m = *cv_m_itr,
-                                              &tl_thread_initialized = *initialized_itr](bool is_started) {
-                                                 if (is_started) {
-                                                     wb_cache_t::m_thread_ids.push_back(iomanager.iothread_self());
-                                                     {
-                                                         std::unique_lock< std::mutex > lk{tl_cv_m};
-                                                         tl_thread_initialized = 0x01;
-                                                     }
-                                                     tl_cv.notify_one();
-                                                 }
-                                             });
-
-                    {
-                        std::unique_lock< std::mutex > lk{*cv_m_itr};
-                        cv_itr->wait(lk, [&initialized_itr]() { return *initialized_itr == 0x01; });
-                    }
+                std::mutex mtx; // mutex to lock all threads from pushing back thread ids;
+                for (size_t i{0}; i < flush_threads; ++i) {
+                    iomanager.create_reactor("wbcache_flusher", INTERRUPT_LOOP, [&thread_cnt, &mtx](bool is_started) {
+                        if (is_started) {
+                            {
+                                std::unique_lock< std::mutex > lk{mtx};
+                                wb_cache_t::m_thread_ids.push_back(iomanager.iothread_self());
+                            }
+                            ++thread_cnt;
+                        }
+                    });
+                    ++expected_thread_cnt;
                 }
             }));
+
+        while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
     }
+
     WriteBackCache(const WriteBackCache&) = delete;
     WriteBackCache(WriteBackCache&&) noexcept = delete;
     WriteBackCache& operator=(const WriteBackCache&) = delete;

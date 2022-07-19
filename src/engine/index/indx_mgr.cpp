@@ -526,7 +526,6 @@ void IndxMgr::recovery() {
         // fall through
     default: { m_recovery_mode = false; }
     }
-
 }
 
 void IndxMgr::io_replay() {
@@ -1620,12 +1619,16 @@ void StaticIndxMgr::start_threads() {
 
     const auto nthreads = HS_DYNAMIC_CONFIG(generic.num_btree_write_threads);
     IndxMgr::m_btree_write_thread_ids.reserve(nthreads);
+    std::mutex mtx;
     for (uint32_t i = 0; i < nthreads; ++i) {
         /* start user thread for btree write operations */
         iomanager.create_reactor("indx_mgr_btree_write_" + std::to_string(i), INTERRUPT_LOOP,
-                                 [&thread_cnt](bool is_started) {
+                                 [&thread_cnt, &mtx](bool is_started) {
                                      if (is_started) {
-                                         IndxMgr::m_btree_write_thread_ids.push_back(iomanager.iothread_self());
+                                         {
+                                             std::unique_lock< std::mutex > lk{mtx};
+                                             IndxMgr::m_btree_write_thread_ids.push_back(iomanager.iothread_self());
+                                         }
                                          ++thread_cnt;
                                      }
                                  });
