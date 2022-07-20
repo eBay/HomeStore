@@ -19,7 +19,7 @@
 #include <vector>
 
 #include <iomgr/aio_drive_interface.hpp>
-#include <iomgr/iomgr.hpp>
+#include <iomgr/io_environment.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
@@ -87,7 +87,7 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
         }
     }
     LOGINFO("Starting iomgr with {} threads", nthreads);
-    iomanager.start(nthreads, gp.is_spdk);
+    ioenvironment.with_iomgr(nthreads, gp.is_spdk);
 
     const uint64_t app_mem_size{((ndevices * dev_size) * 15) / 100};
     LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", app_mem_size);
@@ -110,6 +110,8 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
     params.vol_mounted_cb = [](const VolumePtr& vol_obj, vol_state state) {};
     params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
     params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
+
+    test_common::set_random_http_port();
     VolInterface::init(params);
 
     {
@@ -682,8 +684,6 @@ SISL_OPTION_GROUP(
     (per_update, "", "per_update", "update percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
     (per_write, "", "per_write", "write percentage", ::cxxopts::value< uint32_t >()->default_value("60"), "number"),
     (per_remove, "", "per_remove", "remove percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
-    (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-     cxxopts::value< int32_t >()->default_value("5004"), "port"),
     (bitmap, "", "bitmap", "bitmap test", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
     (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 

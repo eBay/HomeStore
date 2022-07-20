@@ -36,7 +36,7 @@
 #include <sisl/fds/bitset.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <iomgr/aio_drive_interface.hpp>
-#include <iomgr/iomgr.hpp>
+#include <iomgr/io_environment.hpp>
 #include <iomgr/spdk_drive_interface.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
@@ -706,7 +706,7 @@ public:
         fs::create_directory("test_files");
         fs::permissions("test_files", fs::perms::owner_all);
 
-        iomanager.start(tcfg.num_threads, tcfg.is_spdk);
+        ioenvironment.with_iomgr(tcfg.num_threads, tcfg.is_spdk);
 
         get_dev_info(m_device_info);
         init_params params;
@@ -735,6 +735,8 @@ public:
         for (uint32_t i{0}; i < mod_tests.size(); ++i) {
             mod_tests[i]->try_init_iteration();
         }
+
+        test_common::set_random_http_port();
         VolInterface::init(params);
 
         if (wait_for_init_done) { wait_homestore_init_done(); }
@@ -1267,7 +1269,7 @@ private:
 public:
     void force_reinit(const std::vector< dev_info >& data_devices, const io_flag data_oflags,
                       const io_flag fast_oflags) {
-        iomanager.start(1);
+        ioenvironment.with_iomgr(1);
         VolInterface::get_instance()->zero_boot_sbs(data_devices);
         iomanager.stop();
     }
@@ -2328,7 +2330,7 @@ SISL_OPTION_GROUP(
     (max_io_size, "", "max_io_size", "max io size", ::cxxopts::value< uint64_t >()->default_value("4096"),
      "max_io_size"))
 
-#define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr, test_meta_mod, test_vdev_mod, config
+#define ENABLED_OPTIONS logging, test_volume, iomgr, test_indx_mgr, test_meta_mod, test_vdev_mod, config
 
 SISL_OPTIONS_ENABLE(ENABLED_OPTIONS)
 

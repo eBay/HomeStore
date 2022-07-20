@@ -12,6 +12,7 @@
 #include <sisl/options/options.h>
 
 #include "../log_dev.hpp"
+#include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
 RCU_REGISTER_INIT
@@ -74,6 +75,8 @@ static void on_log_found(const logdev_key lkey, const log_buffer buf) {
     params.vol_mounted_cb = [](const VolumePtr& vol_obj, vol_state state) {};
     params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
     params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
+
+    test_common::set_random_http_port();
     VolInterface::init(params);
 
     {

@@ -437,7 +437,7 @@ def meta_mod_abort():
 def vdev_mod_abort():
     vol_mod_test("vdev", vdev_flip_list)
 
-def http_sanity_routine(success):
+def http_sanity_routine():
     sleep(20)
     get_api_list = ['version', 'getObjLife', 'getLogLevel', 'verifyHS', 'mallocStats', 'getConfig', 'getStatus'""", 'verifyBitmap'"""]
     endpoint = "127.0.0.1:12345"
@@ -455,24 +455,21 @@ def http_sanity_routine(success):
                 sleep(1)
         if not response:
             print(f"error: max retries exceeded for url {url}")
-            success.append(False)
-            return
+            return False
         if not response.ok:
             print(f"error: url {url} failed, what: {response.text}")
-            success.append(False)
-            return
+            return False
         sleep(1)
-    success.append(True)
+    return True
 
 def http_sanity_test():
     print("http_sanity_test test started")
-    cmd_opts = "--run_time=45 --max_volume=1 --num_threads=1 --gtest_filter=VolTest.vol_create_del_test --hb_stats_port=12345"
-    success = []
-    thread = Thread(target=http_sanity_routine, args=[success,])
-    thread.start()
+    cmd_opts = "--run_time=45 --max_volume=1 --num_threads=1 --set_hs_init_flag=hs_init_flag --gtest_filter=VolTest.vol_create_del_test"
+    #thread = Thread(target=http_sanity_routine, args=[success,])
+    #thread.start()
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
-    thread.join()
-    if (not success) or (not success[0]) :
+    #thread.join()
+    if not http_sanity_routine():
         print("http_sanity_test FAILED")
         sys.exit(1)
     print("http_sanity_test test completed")

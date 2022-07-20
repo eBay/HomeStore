@@ -20,9 +20,6 @@
 
 #include "home_blks.hpp"
 
-SISL_OPTION_GROUP(home_blks,
-                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-                   cxxopts::value< int32_t >()->default_value("5000"), "port"))
 using namespace homestore;
 
 #ifndef DEBUG
@@ -737,14 +734,6 @@ void HomeBlks::do_shutdown(const hs_comp_callback& shutdown_done_cb, bool force)
     if (!m_force_shutdown) {
         ((homeblks_sb*)m_homeblks_sb_buf->bytes)->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
         if (!m_cfg.is_read_only) { homeblks_sb_write(); }
-    }
-
-    // Waiting for http server thread to join
-    if (m_cfg.start_http) {
-        m_hb_http_server->stop();
-        LOGINFO("http server stopped");
-    } else {
-        LOGINFO("Skip stopping http server since it was not started before.");
     }
 
     /* XXX: can we move it to indx mgr */

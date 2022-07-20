@@ -24,7 +24,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <folly/Synchronized.h>
 #include <iomgr/aio_drive_interface.hpp>
-#include <iomgr/iomgr.hpp>
+#include <iomgr/io_environment.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
@@ -430,7 +430,7 @@ public:
         if (is_spdk) { nthreads = 2; }
 
         LOGINFO("Starting iomgr with {} threads, spdk: {}", nthreads, is_spdk);
-        iomanager.start(nthreads, is_spdk);
+        ioenvironment.with_iomgr(nthreads, is_spdk);
 
         if (restart) {
             for (uint32_t i{0}; i < n_log_stores; ++i) {
@@ -462,6 +462,8 @@ public:
         params.vol_mounted_cb = [](const VolumePtr& vol_obj, vol_state state) {};
         params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
         params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
+
+        test_common::set_random_http_port();
         VolInterface::init(params, restart);
 
         {
@@ -1189,8 +1191,6 @@ SISL_OPTION_GROUP(test_log_store,
                    ::cxxopts::value< uint32_t >()->default_value("4"), "number"),
                   (num_records, "", "num_records", "number of record to test",
                    ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
-                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-                   cxxopts::value< int32_t >()->default_value("5002"), "port"),
                   (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
                   (iterations, "", "iterations", "Iterations", ::cxxopts::value< uint32_t >()->default_value("1"),
                    "the number of iterations to run each test"));

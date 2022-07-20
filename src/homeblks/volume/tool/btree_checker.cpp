@@ -21,6 +21,7 @@
 #include <sisl/fds/bitset.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>
+#include <iomgr/iomgr_config.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 #include <sisl/utility/thread_buffer.hpp>
@@ -182,7 +183,7 @@ SISL_OPTION_GROUP(
      "flag"), // vol_state
     (fix_tree, "", "fix_tree", "fix state", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"))
 
-#define ENABLED_OPTIONS logging, home_blks, check_btree
+#define ENABLED_OPTIONS logging, check_btree
 SISL_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
 /************************** MAIN ********************************/

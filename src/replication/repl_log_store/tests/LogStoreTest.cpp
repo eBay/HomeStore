@@ -16,12 +16,12 @@
 
 #include <api/vol_interface.hpp>
 #include <iomgr/aio_drive_interface.hpp>
-#include <iomgr/iomgr.hpp>
-
+#include <iomgr/io_environment.hpp>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include "hs_log_store.h"
+#include "test_common/homestore_test_common.hpp"
 
 static constexpr uint64_t Ki{1024};
 static constexpr uint64_t Mi{Ki * Ki};
@@ -196,6 +196,7 @@ public:
                                         homestore::vol_state new_state) {};
         params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
 
+        test_common::set_random_http_port();
         homestore::VolInterface::init(params, restart);
         LOGINFO("Entering lock");
         bool wait_result;
@@ -226,7 +227,7 @@ public:
 
         const bool is_spdk{SISL_OPTIONS["spdk"].as< bool >()};
         LOGINFO("Starting iomgr with {} threads, spdk: {}", tcfg.num_threads, is_spdk);
-        iomanager.start(is_spdk ? 2 : tcfg.num_threads, is_spdk);
+        ioenvironment.with_iomgr(is_spdk ? 2 : tcfg.num_threads, is_spdk);
     }
 
     void start_homestore(const bool restart = false, const uint32_t ndevices = 2, const uint64_t dev_size_mb = 10240) {

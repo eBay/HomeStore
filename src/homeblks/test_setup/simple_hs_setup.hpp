@@ -11,7 +11,7 @@
 #include <sisl/fds/buffer.hpp>
 #include "folly/SharedMutex.h"
 #include "iomgr/aio_drive_interface.hpp"
-#include "iomgr/iomgr.hpp"
+#include "iomgr/io_environment.hpp"
 #include "sisl/logging/logging.h"
 
 namespace homestore {
@@ -152,7 +152,7 @@ public:
         }
 
         /* Start IOManager and a test target to enable doing IO */
-        iomanager.start(m_cfg.m_nthreads);
+        ioenvironment.with_iomgr(m_cfg.m_nthreads);
 
         VolInterface::init(m_init_params);
         if (wait_to_start) { wait_homestore_init_done(); }

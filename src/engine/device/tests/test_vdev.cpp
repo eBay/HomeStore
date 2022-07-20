@@ -14,7 +14,7 @@
 
 #include <gtest/gtest.h>
 #include <iomgr/aio_drive_interface.hpp>
-#include <iomgr/iomgr.hpp>
+#include <iomgr/io_environment.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
@@ -61,7 +61,7 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
     }
 
     LOGINFO("Starting iomgr with {} threads", nthreads);
-    iomanager.start(nthreads);
+    ioenvironment.with_iomgr(nthreads);
 
     uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
     LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", app_mem_size);
@@ -115,7 +115,7 @@ public:
         std::vector< dev_info > empty_info;
 
         LOGINFO("Starting iomgr with {} threads", nthreads);
-        iomanager.start(nthreads);
+        ioenvironment.with_iomgr(nthreads);
 
         m_dmgr = std::make_unique< DeviceManager >(device_info, empty_info, nullptr, 0, nullptr, nullptr);
         m_vdev = std::make_unique< JournalVirtualDev >(m_dmgr.get(), "test_vdev", PhysicalDevGroup::DATA, 0, 0, true,
@@ -158,7 +158,7 @@ public:
         std::vector< dev_info > empty_info;
 
         LOGINFO("Starting iomgr with {} threads", nthreads);
-        iomanager.start(nthreads);
+        ioenvironment.with_iomgr(nthreads);
 
         m_dmgr = std::make_unique< DeviceManager >(device_info, nullptr, 0, nullptr, nullptr);
         m_dmgr->init();
@@ -450,9 +450,7 @@ SISL_OPTION_GROUP(
     (per_read, "", "per_read", "read percentage of io that are reads",
      ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
     (per_write, "", "per_write", "write percentage of io that are writes",
-     ::cxxopts::value< uint32_t >()->default_value("80"), "number"),
-    (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-     cxxopts::value< int32_t >()->default_value("5003"), "port"));
+     ::cxxopts::value< uint32_t >()->default_value("80"), "number"));
 
 int main(int argc, char* argv[]) {
     SISL_OPTIONS_LOAD(argc, argv, logging, test_vdev);

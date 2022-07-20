@@ -23,9 +23,7 @@ SISL_OPTION_GROUP(
      cxxopts::value< std::string >()->default_value("basic"), ""),
     (stats_port, "", "stats_port", "Port to expose stats on", cxxopts::value< int32_t >()->default_value("5000"), ""),
     (cleanup, "", "cleanup", "whether to cleanup after test", cxxopts::value< bool >()->default_value("true"), ""),
-    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
-    (hb_stats_port, "", "hb_stats_port", "HS Port to expose stats on",
-     cxxopts::value< int32_t >()->default_value("6000"), ""))
+    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"))
 
 SISL_OPTIONS_ENABLE(logging, server)
 SISL_LOGGING_INIT(nublox_logstore, nuraft, HOMESTORE_LOG_MODS)

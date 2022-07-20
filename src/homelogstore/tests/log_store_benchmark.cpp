@@ -13,7 +13,7 @@
 #include <api/vol_interface.hpp>
 #include <benchmark/benchmark.h>
 #include <iomgr/aio_drive_interface.hpp>
-#include <iomgr/iomgr.hpp>
+#include <iomgr/io_environment.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
@@ -132,7 +132,7 @@ public:
         device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
 
         LOGINFO("Starting iomgr with {} threads", nthreads);
-        iomanager.start(nthreads);
+        ioenvironment.with_iomgr(nthreads);
 
         if (restart) {
             for (uint32_t i{0}; i < n_log_stores; ++i) {
@@ -280,9 +280,7 @@ SISL_OPTION_GROUP(log_store_benchmark,
                   (qdepth, "", "qdepth", "qdepth per thread", ::cxxopts::value< uint32_t >()->default_value("32"),
                    "number"),
                   (max_record_size, "", "max_record_size", "max record size",
-                   ::cxxopts::value< uint32_t >()->default_value("1024"), "number"),
-                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-                   cxxopts::value< int32_t >()->default_value("5000"), "port"));
+                   ::cxxopts::value< uint32_t >()->default_value("1024"), "number"));
 
 // BENCHMARK(test_append)->Iterations(10)->Threads(SISL_OPTIONS["num_threads"].as< uint32_t >());
 BENCHMARK(test_append)->Iterations(1);

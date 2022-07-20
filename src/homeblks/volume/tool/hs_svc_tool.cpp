@@ -9,7 +9,7 @@
 
 #include <gtest/gtest.h>
 #include <iomgr/aio_drive_interface.hpp>
-#include <iomgr/iomgr.hpp>
+#include <iomgr/io_environment.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
@@ -61,7 +61,7 @@ static void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthre
     gen_device_info(device_info, ndevices, dev_size);
 
     LOGINFO("Starting iomgr with {} threads", nthreads);
-    iomanager.start(nthreads);
+    ioenvironment.with_iomgr(nthreads);
 
     uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
     LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", app_mem_size);
@@ -105,9 +105,7 @@ SISL_OPTION_GROUP(hs_svc_tool,
                    ::cxxopts::value< uint64_t >()->default_value("10"), "number"),
                   (zero_boot_sb, "", "zero_boot_sb", "mark homestore init state",
                    ::cxxopts::value< bool >()->default_value("false"), "true or false"),
-                  (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
-                  (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-                   cxxopts::value< int32_t >()->default_value("5004"), "port"));
+                  (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 /************************** MAIN ********************************/
 
@@ -134,7 +132,7 @@ int main(int argc, char* argv[]) {
     bool is_spdk = SISL_OPTIONS["spdk"].as< bool >();
     uint32_t nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
     if (is_spdk) { nthreads = 2; }
-    iomanager.start(nthreads, is_spdk);
+    ioenvironment.with_iomgr(nthreads, is_spdk);
 
     auto ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
     std::vector< dev_info > device_info;

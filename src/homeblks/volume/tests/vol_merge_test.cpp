@@ -12,7 +12,7 @@
 #include <atomic>
 #include <string>
 #include <sisl/utility/thread_buffer.hpp>
-#include <iomgr/iomgr.hpp>
+#include <iomgr/io_environment.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <chrono>
 #include <thread>
@@ -64,7 +64,7 @@ SISL_OPTION_GROUP(
     (enable_crash_handler, "", "enable_crash_handler", "enable crash handler 0 or 1",
      ::cxxopts::value< uint32_t >()->default_value("1"), "flag"))
 
-#define ENABLED_OPTIONS logging, home_blks, test_volume
+#define ENABLED_OPTIONS logging, test_volume
 SISL_OPTIONS_ENABLE(ENABLED_OPTIONS)
 /*** ***/
 
@@ -206,7 +206,7 @@ public:
             max_capacity += max_disk_capacity;
         }
 
-        iomanager.start(num_threads);
+        ioenvironment.with_iomgr(num_threads);
 
         m_ev_fd = eventfd(0, EFD_NONBLOCK);
         m_ev_fdinfo = iomanager.add_fd(iomanager.default_drive_interface(), m_ev_fd,

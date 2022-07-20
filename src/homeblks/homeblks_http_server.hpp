@@ -3,7 +3,7 @@
 #include <memory>
 #include <string>
 
-#include <sisl/async_http/http_server.hpp>
+#include <iomgr/io_environment.hpp>
 #include <ifaddrs.h>
 
 namespace homestore {
@@ -13,7 +13,6 @@ class HomeBlksHttpServer {
 public:
     HomeBlksHttpServer(HomeBlks* hb);
     void start();
-    void stop();
 
     static bool is_local_addr(struct sockaddr* addr);
 
@@ -48,7 +47,6 @@ private:
 
 private:
     HomeBlks* m_hb;
-    std::unique_ptr< sisl::HttpServer > m_http_server;
     static std::vector< std::string > m_iface_list;
 };
 

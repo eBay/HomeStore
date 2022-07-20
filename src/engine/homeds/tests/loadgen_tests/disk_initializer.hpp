@@ -19,6 +19,7 @@
 
 #include "api/vol_interface.hpp"
 #include "homeds/loadgen/loadgen_common.hpp"
+#include "test_common/homestore_test_common.hpp"
 
 namespace homeds {
 namespace loadgen {
@@ -89,6 +90,8 @@ public:
         boost::uuids::string_generator gen;
         // params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
         // uuid = params.system_uuid;
+
+        test_common::set_random_http_port();
         homestore::VolInterface::init(params);
     }
 

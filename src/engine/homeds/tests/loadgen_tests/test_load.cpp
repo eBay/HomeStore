@@ -605,8 +605,6 @@ SISL_OPTION_GROUP(
      ::cxxopts::value< uint8_t >()->default_value("0"), "number"),
     (workload_shift_time, "", "workload_shift_time", "time in sec to shift workload",
      ::cxxopts::value< uint64_t >()->default_value("3600"), "number"),
-    (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-     cxxopts::value< int32_t >()->default_value("5001"), "port"),
     (files, "", "input-files", "Do IO on a set of files", cxxopts::value< std::vector< std::string > >(),
      "path,[path,...]"),
     (num_vols, "", "num_vols", "number of vols to create", ::cxxopts::value< uint64_t >()->default_value("50"),

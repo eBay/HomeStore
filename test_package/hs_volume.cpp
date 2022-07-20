@@ -11,8 +11,7 @@
 /* IOPath */
 #include <api/vol_interface.hpp>
 #include <engine/common/homestore_header.hpp>
-#include <iomgr/iomgr.hpp>
-
+#include <iomgr/io_environment.hpp>
 
 SISL_OPTION_GROUP(test_hs_vol,
 	(capacity, "", "capacity", "Size of volume", cxxopts::value<uint32_t>()->default_value("2"), "GiB"),
@@ -20,7 +19,7 @@ SISL_OPTION_GROUP(test_hs_vol,
 	(name, "", "name", "Volume name", cxxopts::value<std::string>()->default_value("volume"), ""),
 	(addr, "", "addr", "Do IO on a PCIe address", cxxopts::value<std::string>(), "0000:02:00.0"))
 
-#define ENABLED_OPTIONS logging, iomgr, home_blks, test_hs_vol, config
+#define ENABLED_OPTIONS logging, iomgr, test_hs_vol, config
 #define SPDK_LOG_MODS HOMESTORE_LOG_MODS
 
 	SISL_OPTIONS_ENABLE(ENABLED_OPTIONS)
@@ -86,7 +85,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	// Start the IOManager
-	iomanager.start(SISL_OPTIONS["io_threads"].as<uint32_t>(), true);
+	ioenvironment.with_iomgr(SISL_OPTIONS["io_threads"].as<uint32_t>(), true);
 
 	// Init HomeStore
 	init_homestore(device_address);

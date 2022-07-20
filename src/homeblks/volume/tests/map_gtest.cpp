@@ -18,7 +18,7 @@
 #endif
 
 #include <iomgr/aio_drive_interface.hpp>
-#include <iomgr/iomgr.hpp>
+#include <iomgr/io_environment.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
@@ -182,7 +182,7 @@ public:
         std::filesystem::resize_file(fpath, MAX_SIZE); // set the file size
         device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
 
-        iomanager.start(num_threads);
+        ioenvironment.with_iomgr(num_threads);
         m_tgt.init();
 
         init_params params;

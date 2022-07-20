@@ -5,7 +5,7 @@
 #include <functional>
 
 #include <folly/MPMCQueue.h>
-#include <iomgr/iomgr.hpp>
+#include <iomgr/io_environment.hpp>
 
 namespace homeds {
 namespace loadgen {
