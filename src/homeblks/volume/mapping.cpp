@@ -1069,6 +1069,6 @@ btree_status_t mapping::update_oob_unmap_active_indx_tbl(blkid_list_ptr free_lis
             break;
         }
     }
-    size = cntx.free_blk_size;
+    size += cntx.free_blk_size;
     return ret;
 }

@@ -4,7 +4,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "3.4.1"
+    version = "3.4.2"
 
     revision_mode = "scm"
     license = "Proprietary"
