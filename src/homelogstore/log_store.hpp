@@ -216,6 +216,7 @@ private:
     void start_threads();
     void flush_if_needed();
     void stop_flush_thread();
+    uint64_t num_try_flush_iteration();
 
 private:
     boost::intrusive_ptr< HomeStoreBase > m_hb; // Back pointer to homestore
@@ -226,8 +227,6 @@ private:
     HomeLogStoreMgrMetrics m_metrics;
     iomgr::io_thread_t m_truncate_thread;
     iomgr::io_thread_t m_flush_thread;
-    // Timer handle
-    iomgr::timer_handle_t m_flush_timer_hdl;
     bool m_flush_thread_stopped = false;
 };
 

@@ -11,15 +11,13 @@
 #include <string>
 #include <vector>
 
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 
 #include "blkstore.hpp"
 #include "device/device.h"
 #include "device/virtual_dev.hpp"
 
 using namespace homestore;
-
-SDS_INIT_LOGGING
 
 namespace {
 std::unique_ptr< homestore::DeviceManager > dev_mgr{};

@@ -1,4 +1,4 @@
 #pragma once
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 
-SDS_LOGGING_DECL(nublox_logstore)
+SISL_LOGGING_DECL(nublox_logstore)

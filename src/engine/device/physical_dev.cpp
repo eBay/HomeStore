@@ -32,7 +32,7 @@
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_utils.hpp"
 
-SDS_LOGGING_DECL(device)
+SISL_LOGGING_DECL(device)
 
 namespace homestore {
 
@@ -42,12 +42,12 @@ static std::atomic< uint32_t > glob_phys_dev_ids{0};
 PhysicalDev::~PhysicalDev() {
     LOGINFO("device name {} superblock magic {} product name {} version {}", m_devname, m_super_blk->get_magic(),
             m_super_blk->get_product_name(), m_super_blk->get_version());
-    hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(m_super_blk), sisl::buftag::superblk);
+    free_superblock();
 }
 
 void PhysicalDev::update(const uint32_t dev_num, const uint64_t dev_offset, const uint32_t first_chunk_id) {
-    HS_DEBUG_ASSERT_EQ(m_info_blk.get_dev_num(), INVALID_DEV_ID);
-    HS_DEBUG_ASSERT_EQ(m_info_blk.get_first_chunk_id(), INVALID_CHUNK_ID);
+    HS_DBG_ASSERT_EQ(m_info_blk.get_dev_num(), INVALID_DEV_ID);
+    HS_DBG_ASSERT_EQ(m_info_blk.get_first_chunk_id(), INVALID_CHUNK_ID);
 
     m_info_blk.dev_num = dev_num;
     m_info_blk.dev_offset = dev_offset;
@@ -56,59 +56,128 @@ void PhysicalDev::update(const uint32_t dev_num, const uint64_t dev_offset, cons
 
 void PhysicalDev::attach_superblock_chunk(PhysicalDevChunk* const chunk) {
     if (!m_superblock_valid) {
-        HS_ASSERT_NULL(DEBUG, m_dm_chunk[m_cur_indx]);
-        HS_DEBUG_ASSERT_LT(m_cur_indx, 2);
+        HS_DBG_ASSERT_NULL(m_dm_chunk[m_cur_indx]);
+        HS_DBG_ASSERT_LT(m_cur_indx, 2);
         m_dm_chunk[m_cur_indx++] = chunk;
         return;
     }
     if (chunk->get_chunk_id() == m_super_blk->dm_chunk[0].chunk_id) {
-        HS_ASSERT_NULL(DEBUG, m_dm_chunk[0]);
+        HS_DBG_ASSERT_NULL(m_dm_chunk[0]);
         m_dm_chunk[0] = chunk;
     } else {
-        HS_DEBUG_ASSERT_EQ(chunk->get_chunk_id(), m_super_blk->dm_chunk[1].get_chunk_id());
-        HS_ASSERT_NULL(DEBUG, m_dm_chunk[1]);
+        HS_DBG_ASSERT_EQ(chunk->get_chunk_id(), m_super_blk->dm_chunk[1].get_chunk_id());
+        HS_DBG_ASSERT_NULL(m_dm_chunk[1]);
         m_dm_chunk[1] = chunk;
     }
 }
 
-PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags,
-                         const iomgr::io_interface_comp_cb_t& io_comp_cb) :
-        m_mgr{mgr}, m_devname{devname}, m_metrics{devname} {
-
-    HS_RELEASE_ASSERT_LE(sizeof(super_block), SUPERBLOCK_SIZE(get_atomic_page_size(m_devname)),
-                         "Device {} Ondisk Superblock size not enough to hold in-mem", devname);
-
-    const auto superblock_size{SUPERBLOCK_SIZE(get_atomic_page_size(m_devname))};
-    auto* const membuf{hs_utils::iobuf_alloc(SUPERBLOCK_SIZE(get_atomic_page_size(m_devname)), sisl::buftag::superblk,
-                                             get_align_size(m_devname))};
-    m_super_blk = new (membuf) super_block{};
-    if (sizeof(super_block) < superblock_size) {
-        std::memset(membuf + sizeof(super_block), 0, superblock_size - sizeof(super_block));
-    }
-
-    m_iodev = iomgr::DriveInterface::open_dev(devname, oflags);
-    m_drive_iface = m_iodev->drive_interface();
-    m_drive_iface->attach_completion_cb(io_comp_cb);
-    read_superblock();
+void PhysicalDev::free_superblock() {
+    hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(m_super_blk), sisl::buftag::superblk);
 }
 
+void PhysicalDev::alloc_superblock(const uint32_t sb_size, const uint32_t align_sz) {
+    auto* const membuf{
+        hs_utils::iobuf_alloc(sb_size, sisl::buftag::superblk, align_sz)}; // align_sz for sync_read should not matter;
+
+    m_super_blk = new (membuf) super_block{};
+    if (sizeof(super_block) < sb_size) { std::memset(membuf + sizeof(super_block), 0, sb_size - sizeof(super_block)); }
+}
+
+bool PhysicalDev::resize_superblock_if_needed(const uint32_t phys_page_sz, const uint32_t align_size) {
+    const auto sb_size{SUPERBLOCK_SIZE(phys_page_sz)};
+
+    // it is fine atomic page size + pyaload size is larger than super_block size;
+    HS_REL_ASSERT_LE(super_block::s_min_sb_size, sb_size);
+    const auto saved_sb_ptr = m_super_blk;
+    if (super_block::s_min_sb_size < sb_size) {
+        // need to resize the superblock_size
+        alloc_superblock(sb_size, align_size);
+        // copy old sb content to new one;
+        std::memcpy(reinterpret_cast< char* >(m_super_blk), reinterpret_cast< char* >(saved_sb_ptr),
+                    super_block::s_min_sb_size);
+        // free the old superblock;
+        hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(saved_sb_ptr), sisl::buftag::superblk);
+
+        return true;
+    }
+
+    return false;
+}
+
+void PhysicalDev::read_and_fill_superblock(const int oflags) {
+    // allocate minimal size of superblock for read;
+    const auto minimal_sb_size{super_block::s_min_sb_size};
+    alloc_superblock(minimal_sb_size, 512);
+
+    m_iodev = iomgr::DriveInterface::open_dev(m_devname, oflags);
+    m_drive_iface = m_iodev->drive_interface();
+
+    const auto bytes_read{m_drive_iface->sync_read(m_iodev.get(), reinterpret_cast< char* >(m_super_blk),
+                                                   static_cast< uint32_t >(minimal_sb_size), 0)};
+    if (sisl_unlikely((bytes_read < 0) || (static_cast< size_t >(bytes_read) != minimal_sb_size))) {
+        throw std::system_error(errno, std::system_category(), "error while reading a superblock" + get_devname());
+    }
+
+    bool is_init_required = false;
+    const auto iomgr_attr = iomgr::DriveInterface::get_attributes(m_devname);
+    LOGINFO("device sb {}", m_super_blk->to_string());
+
+    if (validate_device()) {
+        if (!is_from_upgradable_version()) {
+            // Now we know that superblock is valid. So resize it by reading it from the superblock.
+            resize_superblock_if_needed(get_page_size(), get_align_size());
+            return;
+        }
+    } else {
+        is_init_required = true;
+    }
+
+    /* It require either upgrade or initialization */
+    resize_superblock_if_needed(iomgr_attr.phys_page_size, iomgr_attr.align_size);
+
+    if (is_init_required) {
+        m_super_blk->magic = MAGIC;
+        std::strncpy(m_super_blk->product_name, PRODUCT_NAME, super_block::s_product_name_size);
+        m_super_blk->product_name[super_block::s_product_name_size - 1] = 0;
+    }
+
+    // write back updated or saved attributes only when it is zerored or resized;
+
+    // It is a new fields added in superblock in 1.3
+    m_super_blk->dev_attr.phys_page_size = iomgr_attr.phys_page_size;
+    m_super_blk->dev_attr.align_size = iomgr_attr.align_size;
+    m_super_blk->dev_attr.atomic_phys_page_size = iomgr_attr.atomic_phys_page_size;
+    m_super_blk->dev_attr.num_streams = iomgr_attr.num_streams;
+
+    m_super_blk->version = CURRENT_SUPERBLOCK_VERSION;
+
+    HS_REL_ASSERT(m_super_blk->dev_attr.is_valid(), "invalid device attributes: {}", m_super_blk->dev_attr.to_string());
+
+    // now perisit the attr to disk;
+    write_superblock();
+
+    LOGINFO("Stored dev_attr from iomgr: {} for device id: {}", m_super_blk->dev_attr.to_string(),
+            m_super_blk->this_dev_info.dev_num);
+}
+
+//
+// this constructor is to read superblock to determine whether it is first time boot;
+//
+PhysicalDev::PhysicalDev(const std::string& devname, const int oflags) : m_devname{devname}, m_metrics{devname} {
+    read_and_fill_superblock(oflags);
+}
+
+//
+// first time and recovery boot constructor goes here;
+//
 PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags,
                          const hs_uuid_t& system_uuid, const uint32_t dev_num, const uint64_t dev_offset,
                          const bool is_init, const uint64_t dm_info_size,
                          const iomgr::io_interface_comp_cb_t& io_comp_cb, bool* const is_inited) :
-        m_mgr{mgr}, m_devname{devname}, m_metrics{devname} {
-
-    /* super block should always be written atomically. */
-    HS_RELEASE_ASSERT_LE(sizeof(super_block), SUPERBLOCK_SIZE(get_atomic_page_size(m_devname)),
-                         "Device {} Ondisk Superblock size not enough to hold in-mem", devname);
-    const auto superblock_size{SUPERBLOCK_SIZE(get_atomic_page_size(m_devname))};
-
-    auto* const membuf{hs_utils::iobuf_alloc(SUPERBLOCK_SIZE(get_atomic_page_size(m_devname)), sisl::buftag::superblk,
-                                             get_align_size(m_devname))};
-    m_super_blk = new (membuf) super_block{};
-    if (sizeof(super_block) < superblock_size) {
-        std::memset(membuf + sizeof(super_block), 0, superblock_size - sizeof(super_block));
-    }
+        m_mgr{mgr},
+        m_devname{devname},
+        m_metrics{devname} {
+    read_and_fill_superblock(oflags);
 
     if (is_init) { m_super_blk->set_system_uuid(system_uuid); }
     m_info_blk.dev_num = dev_num;
@@ -116,10 +185,13 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
     m_info_blk.first_chunk_id = INVALID_CHUNK_ID;
 
     int oflags_used{oflags};
-    if (devname.find("/tmp") == 0) {
+    if (devname.find("/tmp") == 0 || m_drive_iface->interface_type() == drive_interface_type::uring) {
         // tmp directory in general does not allow Direct I/O
+        LOGINFO("Trying to remove O_DIRECT bit from open flags: before: {}, after: {}", oflags_used,
+                oflags & (~O_DIRECT));
         oflags_used &= ~O_DIRECT;
     }
+
     m_iodev = iomgr::DriveInterface::open_dev(devname, oflags_used);
     if (m_iodev == nullptr
 #ifdef _PRERELEASE
@@ -127,8 +199,7 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
 #endif
     ) {
 
-        hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(m_super_blk), sisl::buftag::superblk);
-
+        free_superblock();
         HS_LOG(ERROR, device, "device open failed errno {} dev_name {}", errno, devname.c_str());
         throw std::system_error(errno, std::system_category(), "error while opening the device");
     }
@@ -139,18 +210,18 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
     try {
         m_devsize = m_drive_iface->get_size(m_iodev.get());
     } catch (std::exception& e) {
-        hs_utils::iobuf_free(reinterpret_cast< uint8_t* >(m_super_blk), sisl::buftag::superblk);
+        free_superblock();
         throw(e);
     }
 
     if (m_devsize == 0) {
         const auto s{fmt::format("Device {} size={} is too small", devname, m_devsize)};
-        HS_ASSERT(LOGMSG, 0, s.c_str());
+        HS_LOG_ASSERT(0, s.c_str());
         throw homestore::homestore_exception(s, homestore_error::min_size_not_avail);
     }
 
     const auto current_size{m_devsize};
-    m_devsize = sisl::round_down(m_devsize, get_page_size(m_devname));
+    m_devsize = sisl::round_down(m_devsize, get_page_size());
     if (m_devsize != current_size) {
         LOGWARN("device size is not the multiple of physical page size old size {}", current_size);
     }
@@ -158,8 +229,8 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
     m_dm_chunk[0] = m_dm_chunk[1] = nullptr;
     if (is_init) {
         /* create a chunk */
-        const uint64_t sb_size{SUPERBLOCK_SIZE(get_atomic_page_size(m_devname))};
-        HS_LOG_ASSERT_EQ((get_size() % get_page_size(m_devname)), 0,
+        const uint64_t sb_size{SUPERBLOCK_SIZE(get_page_size())};
+        HS_LOG_ASSERT_EQ((get_size() % get_page_size()), 0,
                          "Expected drive size to be aligned with physical page size");
         m_mgr->create_new_chunk(this, sb_size, get_size() - sb_size, nullptr);
 
@@ -167,7 +238,7 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
         const uint64_t min_size{sb_size + 2 * dm_info_size};
         if (m_devsize <= min_size) {
             const auto s{fmt::format("Device {} size={} is too small min_size={}", m_devname, m_devsize, min_size)};
-            HS_ASSERT(LOGMSG, 0, s.c_str());
+            HS_LOG_ASSERT(0, s.c_str());
             throw homestore::homestore_exception(s, homestore_error::min_size_not_avail);
         }
 
@@ -175,7 +246,7 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
          * so at any given point only one SB chunk is valid.
          */
         for (size_t i{0}; i < 2; ++i) {
-            HS_LOG_ASSERT_EQ((dm_info_size % get_page_size(m_devname)), 0, "dm size is not aligned {}", dm_info_size);
+            HS_LOG_ASSERT_EQ((dm_info_size % get_page_size()), 0, "dm size is not aligned {}", dm_info_size);
             m_dm_chunk[i] = m_mgr->alloc_chunk(this, INVALID_VDEV_ID, dm_info_size, INVALID_CHUNK_ID);
             m_dm_chunk[i]->set_sb_chunk();
         }
@@ -195,12 +266,11 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
 }
 
 size_t PhysicalDev::get_total_cap() {
-    return (m_devsize -
-            (SUPERBLOCK_SIZE(get_atomic_page_size(m_devname)) + m_dm_chunk[0]->get_size() + m_dm_chunk[1]->get_size()));
+    return (m_devsize - (SUPERBLOCK_SIZE(get_page_size()) + m_dm_chunk[0]->get_size() + m_dm_chunk[1]->get_size()));
 }
 
 bool PhysicalDev::load_super_block(const hs_uuid_t& system_uuid) {
-    read_superblock();
+    // read_superblock();
 
     // Validate if its homestore formatted device
 
@@ -230,7 +300,7 @@ bool PhysicalDev::load_super_block(const hs_uuid_t& system_uuid) {
 }
 
 void PhysicalDev::read_dm_chunk(char* const mem, const uint64_t size) {
-    HS_DEBUG_ASSERT_EQ(m_super_blk->dm_chunk[m_cur_indx & s_dm_chunk_mask].get_chunk_size(), size);
+    HS_DBG_ASSERT_EQ(m_super_blk->dm_chunk[m_cur_indx & s_dm_chunk_mask].get_chunk_size(), size);
     const auto offset{m_super_blk->dm_chunk[m_cur_indx & s_dm_chunk_mask].chunk_start_offset};
     m_drive_iface->sync_read(m_iodev.get(), mem, size, offset);
 }
@@ -245,13 +315,8 @@ uint64_t PhysicalDev::sb_gen_cnt() { return m_super_blk->gen_cnt; }
 
 void PhysicalDev::write_super_block(const uint64_t gen_cnt) {
     // Format the super block and this device info structure
-    m_super_blk->magic = MAGIC;
-    std::strncpy(m_super_blk->product_name, PRODUCT_NAME, super_block::s_product_name_size);
-    m_super_blk->product_name[super_block::s_product_name_size - 1] = 0;
-    m_super_blk->version = CURRENT_SUPERBLOCK_VERSION;
-
-    HS_DEBUG_ASSERT_NE(m_info_blk.get_dev_num(), INVALID_DEV_ID);
-    HS_DEBUG_ASSERT_NE(m_info_blk.get_first_chunk_id(), INVALID_CHUNK_ID);
+    HS_DBG_ASSERT_NE(m_info_blk.get_dev_num(), INVALID_DEV_ID);
+    HS_DBG_ASSERT_NE(m_info_blk.get_first_chunk_id(), INVALID_CHUNK_ID);
 
     m_super_blk->this_dev_info.dev_num = m_info_blk.dev_num;
     m_super_blk->this_dev_info.first_chunk_id = m_info_blk.first_chunk_id;
@@ -270,15 +335,14 @@ void PhysicalDev::write_super_block(const uint64_t gen_cnt) {
 }
 
 void PhysicalDev::zero_boot_sbs(const std::vector< dev_info >& devices, const int oflags) {
-    if (devices.empty()) return;
+    if (devices.empty()) { return; }
 
     for (const auto& dev : devices) {
-
         // alloc re-usable super block
         const auto dev_type{dev.dev_type};
         const std::string& dev_str{dev.dev_names};
-        const auto superblock_size{SUPERBLOCK_SIZE(get_atomic_page_size(dev_str))};
-        auto* const membuf{hs_utils::iobuf_alloc(superblock_size, sisl::buftag::superblk, get_align_size(dev_str))};
+        const auto superblock_size{super_block::s_min_sb_size};
+        auto* const membuf{hs_utils::iobuf_alloc(superblock_size, sisl::buftag::superblk, 512)};
         super_block* const super_blk{new (membuf) super_block{}};
         if (sizeof(super_block) < superblock_size) {
             std::memset(membuf + sizeof(super_block), 0, superblock_size - sizeof(super_block));
@@ -306,7 +370,7 @@ void PhysicalDev::zero_boot_sbs(const std::vector< dev_info >& devices, const in
 }
 
 bool PhysicalDev::has_valid_superblock(hs_uuid_t& out_uuid) {
-    read_superblock();
+    // read_superblock();
 
     // Validate if its homestore formatted device
     const bool ret{(validate_device() && is_init_done())};
@@ -322,13 +386,31 @@ void PhysicalDev::init_done() {
     write_superblock();
 }
 
-inline bool PhysicalDev::validate_device() {
-    return ((m_super_blk->magic == MAGIC) && (std::strcmp(m_super_blk->product_name, PRODUCT_NAME) == 0) &&
-            (m_super_blk->version == CURRENT_SUPERBLOCK_VERSION));
+// this function needs to be updated for new releases;
+inline bool PhysicalDev::is_from_upgradable_version() const {
+    if (m_super_blk->version < SUPERBLOCK_VERSION_1_3) {
+        // we only support 1.2 to 1.3 upgrade;
+        return CURRENT_SUPERBLOCK_VERSION == SUPERBLOCK_VERSION_1_3;
+    } else {
+        if (m_super_blk->version != CURRENT_SUPERBLOCK_VERSION) {
+            LOGCRITICAL("Trying to upgrade from unrecogonized old release: {} to current release: {}",
+                        m_super_blk->version, CURRENT_SUPERBLOCK_VERSION);
+            HS_REL_ASSERT(false, "Unsupported upgrade path {} to {}", m_super_blk->version, CURRENT_SUPERBLOCK_VERSION);
+        }
+
+        // we are just doing a normal reboot
+        return false;
+    }
+}
+
+inline bool PhysicalDev::validate_device() const {
+    return (m_super_blk->magic == MAGIC) && (std::strcmp(m_super_blk->product_name, PRODUCT_NAME) == 0) &&
+        (m_super_blk->version == CURRENT_SUPERBLOCK_VERSION ||
+         is_from_upgradable_version()); // version can be current or from an upgradable old version;
 }
 
 inline void PhysicalDev::write_superblock() {
-    const auto superblock_size{SUPERBLOCK_SIZE(get_atomic_page_size(m_devname))};
+    const auto superblock_size{SUPERBLOCK_SIZE(get_page_size())};
     const auto bytes{m_drive_iface->sync_write(m_iodev.get(), reinterpret_cast< const char* >(m_super_blk),
                                                static_cast< uint32_t >(superblock_size), 0)};
     if (sisl_unlikely((bytes < 0) || (static_cast< size_t >(bytes) != superblock_size))) {
@@ -338,8 +420,7 @@ inline void PhysicalDev::write_superblock() {
 }
 
 inline void PhysicalDev::read_superblock() {
-    const auto superblock_size{SUPERBLOCK_SIZE(get_atomic_page_size(m_devname))};
-    // std::memset(static_cast< void* >(m_super_blk), 0, SUPERBLOCK_SIZE(get_atomic_page_size(m_devname)));
+    const auto superblock_size{SUPERBLOCK_SIZE(get_page_size())};
     const auto bytes{m_drive_iface->sync_read(m_iodev.get(), reinterpret_cast< char* >(m_super_blk),
                                               static_cast< uint32_t >(superblock_size), 0)};
     if (sisl_unlikely((bytes < 0) || (static_cast< size_t >(bytes) != superblock_size))) {
@@ -370,6 +451,8 @@ void PhysicalDev::readv(iovec* const iov, const int iovcnt, const uint32_t size,
     HISTOGRAM_OBSERVE(m_metrics, read_io_sizes, (((size - 1) / 1024) + 1));
     m_drive_iface->async_readv(m_iodev.get(), iov, iovcnt, size, offset, cookie, part_of_batch);
 }
+
+void PhysicalDev::fsync(uint8_t* const cookie) { m_drive_iface->fsync(m_iodev.get(), cookie); }
 
 ssize_t PhysicalDev::sync_write(const char* const data, const uint32_t size, const uint64_t offset) {
     try {
@@ -426,7 +509,7 @@ void PhysicalDev::attach_chunk(PhysicalDevChunk* const chunk, PhysicalDevChunk* 
         if (next) next->set_prev_chunk(chunk);
         after->set_next_chunk(chunk);
     } else {
-        HS_DEBUG_ASSERT_EQ(m_info_blk.get_first_chunk_id(), INVALID_CHUNK_ID);
+        HS_DBG_ASSERT_EQ(m_info_blk.get_first_chunk_id(), INVALID_CHUNK_ID);
         m_info_blk.first_chunk_id = chunk->get_chunk_id();
     }
 }
@@ -467,21 +550,28 @@ std::array< uint32_t, 2 > PhysicalDev::merge_free_chunks(PhysicalDevChunk* chunk
 
 pdev_info_block PhysicalDev::get_info_blk() { return m_info_blk; }
 
-PhysicalDevChunk* PhysicalDev::find_free_chunk(const uint64_t req_size, const bool is_stream_aligned) {
+PhysicalDevChunk* PhysicalDev::find_free_chunk(const uint64_t req_size) {
     // Get the slot with closest size;
     PhysicalDevChunk* closest_chunk{nullptr};
 
     PhysicalDevChunk* chunk{device_manager_mutable()->get_chunk_mutable(m_info_blk.first_chunk_id)};
     while (chunk) {
-        const auto size = is_stream_aligned
-            ? chunk->get_aligned_size(get_stream_aligned_offset(), get_page_size(m_devname))
-            : chunk->get_size();
+        const auto size =  chunk->get_size();
         if (!chunk->is_busy() && size >= req_size) {
             if ((closest_chunk == nullptr) || (chunk->get_size() < closest_chunk->get_size())) {
                 closest_chunk = chunk;
             }
         }
+
         chunk = device_manager_mutable()->get_chunk_mutable(chunk->get_next_chunk_id());
+    }
+
+    if (closest_chunk == nullptr) {
+        LOGWARN("No available chunk found for req_size: {}, this dev's size: {}, num_streams: {}, id: {}, "
+                "page_size: {}",
+                req_size, get_size(), get_num_streams(), get_dev_id(), get_page_size());
+    } else {
+        LOGINFO("Found free chunk for req_size: {}, in dev id: {}", req_size, get_dev_id());
     }
 
     return closest_chunk;
@@ -515,29 +605,18 @@ bool PhysicalDev::is_hdd() const {
     return false;
 }
 
-uint64_t PhysicalDev::get_stream_size() const {
+uint64_t PhysicalDev::get_raw_stream_size() const {
     if (!is_hdd()) { return get_size(); }
-    const auto page_size = get_page_size(m_devname);
-
-    // TODO: replace 10 with iomgr api
-    return sisl::round_down((get_size() / 10), page_size);
+    return get_size() / get_num_streams();
 }
 
-uint64_t PhysicalDev::get_stream_aligned_offset() const { return (get_size() / 10); }
-uint32_t PhysicalDev::get_align_size(const std::string& devname) {
-    const auto observed_attr = iomgr::DriveInterface::get_attributes(devname);
-    return observed_attr.align_size;
-}
+uint64_t PhysicalDev::get_stream_aligned_offset() const { return (get_size() / get_num_streams()); }
+uint32_t PhysicalDev::get_align_size() const { return m_super_blk->dev_attr.align_size; }
 
-uint32_t PhysicalDev::get_page_size(const std::string& devname) {
-    const auto observed_attr = iomgr::DriveInterface::get_attributes(devname);
-    return observed_attr.phys_page_size;
-}
+uint32_t PhysicalDev::get_page_size() const { return m_super_blk->dev_attr.phys_page_size; }
 
-uint32_t PhysicalDev::get_atomic_page_size(const std::string& devname) {
-    const auto observed_attr = iomgr::DriveInterface::get_attributes(devname);
-    return observed_attr.atomic_phys_page_size;
-}
+uint32_t PhysicalDev::get_atomic_page_size() const { return m_super_blk->dev_attr.atomic_phys_page_size; }
+uint32_t PhysicalDev::get_num_streams() const { return m_super_blk->dev_attr.num_streams; }
 
 #if 0
 uint64_t PhysicalDev::get_stream_offset_multiple() {

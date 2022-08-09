@@ -6,12 +6,12 @@
 #include <cstdint>
 #include <vector>
 
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/utility/enum.hpp>
 
 #include "homeds/utility/stats.hpp"
 
-SDS_LOGGING_DECL(cache_vmod_evict, cache_vmod_read, cache_vmod_write)
+SISL_LOGGING_DECL(cache_vmod_evict, cache_vmod_read, cache_vmod_write)
 
 namespace homestore {
 #define CVALUES                                                                                                        \

@@ -31,7 +31,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <sisl/fds/freelist_allocator.hpp>
 #include <sisl/metrics/metrics.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/enum.hpp>
 #include <sisl/utility/obj_life_counter.hpp>
@@ -86,14 +86,13 @@ struct blkalloc_cp_id;
                            BOOST_PP_IF(BOOST_VMD_IS_EMPTY(node), BOOST_PP_EMPTY, BOOST_PP_IDENTITY("node"))(),         \
                            node->to_string(), ##__VA_ARGS__)
 
-#define BT_DEBUG_ASSERT(...) BT_ASSERT(DEBUG, __VA_ARGS__)
-#define BT_RELEASE_ASSERT(...) BT_ASSERT(RELEASE, __VA_ARGS__)
-#define BT_LOG_ASSERT(...) BT_ASSERT(LOGMSG, __VA_ARGS__)
+#define BT_DBG_ASSERT(...) BT_ASSERT(DEBUG_ASSERT_FMT, __VA_ARGS__)
+#define BT_REL_ASSERT(...) BT_ASSERT(RELEASE_ASSERT_FMT, __VA_ARGS__)
+#define BT_LOG_ASSERT(...) BT_ASSERT(LOGMSG_ASSERT_FMT, __VA_ARGS__)
 
-#define BT_DEBUG_ASSERT_CMP(...) BT_ASSERT_CMP(DEBUG, ##__VA_ARGS__)
-#define BT_RELEASE_ASSERT_CMP(...) BT_ASSERT_CMP(RELEASE, ##__VA_ARGS__)
-
-#define BT_LOG_ASSERT_CMP(...) BT_ASSERT_CMP(RELEASE, ##__VA_ARGS__)
+#define BT_DBG_ASSERT_CMP(...) BT_ASSERT_CMP(DEBUG_ASSERT_CMP, ##__VA_ARGS__)
+#define BT_REL_ASSERT_CMP(...) BT_ASSERT_CMP(RELEASE_ASSERT_CMP, ##__VA_ARGS__)
+#define BT_LOG_ASSERT_CMP(...) BT_ASSERT_CMP(RELEASE_ASSERT_CMP, ##__VA_ARGS__)
 //#define BT_LOG_ASSERT_CMP(...) BT_ASSERT_CMP(LOGMSG, ##__VA_ARGS__)
 
 #define MAX_ADJANCENT_INDEX 3
@@ -931,6 +930,16 @@ public:
                            "btree_inclusive_time_in_node", {"node_type", "interior"});
         REGISTER_HISTOGRAM(btree_inclusive_time_in_leaf_node, "Inclusive time spent (Read locked) on leaf node (ns)",
                            "btree_inclusive_time_in_node", {"node_type", "leaf"});
+        REGISTER_HISTOGRAM(btree_write_time, "time spent in write (ns)", "btree_write_time");
+        REGISTER_HISTOGRAM(btree_read_query_time, "time spent in read (ns)", "btree_read_query_time");
+        REGISTER_HISTOGRAM(btree_read_lock_time_in_leaf_node, "time spent in read lock contention on leaf node",
+                           "btree_read_lock_time_in_leaf_node");
+        REGISTER_HISTOGRAM(btree_read_lock_time_in_int_node, "time spent in read lock contention on interior node",
+                           "btree_read_lock_time_in_int_node");
+        REGISTER_HISTOGRAM(btree_write_lock_time_in_leaf_node, "time spent in write lock contention on leaf node",
+                           "btree_write_lock_time_in_leaf_node");
+        REGISTER_HISTOGRAM(btree_write_lock_time_in_int_node, "time spent in write lock contention on interior node",
+                           "btree_write_lock_time_in_int_node");
 
         register_me_to_farm();
     }

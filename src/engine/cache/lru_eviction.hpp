@@ -11,7 +11,7 @@
 
 #include "engine/common/homestore_assert.hpp"
 
-SDS_LOGGING_DECL(cache)
+SISL_LOGGING_DECL(cache)
 
 namespace homestore {
 

@@ -17,7 +17,7 @@
 #include <sisl/fds/obj_allocator.hpp>
 #include <sisl/fds/vector_pool.hpp>
 #include <sisl/metrics/metrics.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <spdlog/fmt/fmt.h>
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/enum.hpp>
@@ -54,18 +54,20 @@ constexpr uint64_t BOOT_CNT_MASK{0x0000ffffffffffff};
 #define VOL_ERROR_LOG(volname, msg, ...) HS_SUBMOD_LOG(ERROR, base, , "vol", volname, msg, ##__VA_ARGS__)
 #define THIS_VOL_LOG(level, mod, req, msg, ...)                                                                        \
     HS_SUBMOD_LOG(level, mod, req, "vol", this->get_name(), msg, ##__VA_ARGS__)
-#define VOL_ASSERT(assert_type, cond, req, ...)                                                                        \
-    HS_SUBMOD_ASSERT(assert_type, cond, req, "vol", this->get_name(), ##__VA_ARGS__)
-#define VOL_ASSERT_CMP(assert_type, val1, cmp, val2, req, ...)                                                         \
-    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, req, "vol", this->get_name(), ##__VA_ARGS__)
 
-#define VOL_DEBUG_ASSERT(...) VOL_ASSERT(DEBUG, __VA_ARGS__)
-#define VOL_RELEASE_ASSERT(...) VOL_ASSERT(RELEASE, __VA_ARGS__)
-#define VOL_LOG_ASSERT(...) VOL_ASSERT(LOGMSG, __VA_ARGS__)
+#define VOL_DBG_ASSERT(cond, req, ...)                                                                                 \
+    HS_SUBMOD_ASSERT(DEBUG_ASSERT_FMT, cond, req, "vol", this->get_name(), ##__VA_ARGS__)
+#define VOL_LOG_ASSERT(cond, req, ...)                                                                                 \
+    HS_SUBMOD_ASSERT(LOGMSG_ASSERT_FMT, cond, req, "vol", this->get_name(), ##__VA_ARGS__)
+#define VOL_REL_ASSERT(cond, req, ...)                                                                                 \
+    HS_SUBMOD_ASSERT(RELEASE_ASSERT_FMT, cond, req, "vol", this->get_name(), ##__VA_ARGS__)
 
-#define VOL_DEBUG_ASSERT_CMP(...) VOL_ASSERT_CMP(DEBUG, ##__VA_ARGS__)
-#define VOL_RELEASE_ASSERT_CMP(...) VOL_ASSERT_CMP(RELEASE, ##__VA_ARGS__)
-#define VOL_LOG_ASSERT_CMP(...) VOL_ASSERT_CMP(LOGMSG, ##__VA_ARGS__)
+#define VOL_DBG_ASSERT_CMP(val1, cmp, val2, req, ...)                                                                  \
+    HS_SUBMOD_ASSERT_CMP(DEBUG_ASSERT_CMP, val1, cmp, val2, req, "vol", this->get_name(), ##__VA_ARGS__)
+#define VOL_LOG_ASSERT_CMP(val1, cmp, val2, req, ...)                                                                  \
+    HS_SUBMOD_ASSERT_CMP(LOGMSG_ASSERT_CMP, val1, cmp, val2, req, "vol", this->get_name(), ##__VA_ARGS__)
+#define VOL_REL_ASSERT_CMP(val1, cmp, val2, req, ...)                                                                  \
+    HS_SUBMOD_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, cmp, val2, req, "vol", this->get_name(), ##__VA_ARGS__)
 
 struct volume_child_req : public blkstore_req< BlkBuffer > {
     uint64_t lba;
@@ -78,6 +80,9 @@ struct volume_child_req : public blkstore_req< BlkBuffer > {
     uint64_t read_size;
     bool use_cache{true};
     uint64_t unique_id{0};
+#ifndef NDEBUG
+    std::vector< iovec > read_iovs;
+#endif
 
     volume_req_ptr parent_req = nullptr;
     BlkId blkId; // used only for debugging purpose
@@ -129,9 +134,11 @@ protected:
 class VolumeMetrics : public sisl::MetricsGroupWrapper {
 public:
     explicit VolumeMetrics(const char* vol_name, Volume* vol) :
-            sisl::MetricsGroupWrapper("Volume", vol_name), m_volume(vol) {
+            sisl::MetricsGroupWrapper("Volume", vol_name),
+            m_volume(vol) {
         REGISTER_COUNTER(volume_read_count, "Total Volume read operations", "volume_op_count", {"op", "read"});
         REGISTER_COUNTER(volume_write_count, "Total Volume write operations", "volume_op_count", {"op", "write"});
+        REGISTER_COUNTER(volume_unmap_count, "Total Volume unmap operations", "volume_op_count", {"op", "unmap"});
         REGISTER_COUNTER(volume_outstanding_data_read_count, "Total Volume data outstanding read cnt",
                          sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(volume_outstanding_data_write_count, "Total Volume data outstanding write cnt",
@@ -147,6 +154,8 @@ public:
         REGISTER_COUNTER(volume_write_size_total, "Total Volume data size written", "volume_data_size",
                          {"op", "write"});
         REGISTER_COUNTER(volume_read_size_total, "Total Volume data size read", "volume_data_size", {"op", "read"});
+        REGISTER_COUNTER(volume_unmap_size_total, "Total Volume unmap size written", "volume_unmap_size",
+                         {"op", "unmap"});
 
         REGISTER_GAUGE(volume_data_used_size, "Total Volume data used size");
         REGISTER_GAUGE(volume_index_used_size, "Total Volume index used size");
@@ -154,6 +163,7 @@ public:
 
         REGISTER_HISTOGRAM(volume_read_latency, "Volume overall read latency", "volume_op_latency", {"op", "read"});
         REGISTER_HISTOGRAM(volume_write_latency, "Volume overall write latency", "volume_op_latency", {"op", "write"});
+        REGISTER_HISTOGRAM(volume_unmap_latency, "Volume overall unmap latency", "volume_op_latency", {"op", "unmap"});
         REGISTER_HISTOGRAM(volume_data_read_latency, "Volume data blocks read latency", "volume_data_op_latency",
                            {"op", "read"});
         REGISTER_HISTOGRAM(volume_data_write_latency, "Volume data blocks write latency", "volume_data_op_latency",
@@ -165,9 +175,12 @@ public:
         REGISTER_HISTOGRAM(volume_blkalloc_latency, "Volume block allocation latency (in ns)");
         REGISTER_HISTOGRAM(volume_pieces_per_write, "Number of individual pieces per write",
                            HistogramBucketsType(LinearUpto64Buckets));
-        REGISTER_HISTOGRAM(volume_pieces_per_read, "Number of individual pieces per write",
+        REGISTER_COUNTER(volume_read_on_hole, "Number of reads from empty lba");
+        REGISTER_HISTOGRAM(volume_pieces_per_read, "Number of individual pieces per read",
                            HistogramBucketsType(LinearUpto64Buckets));
         REGISTER_HISTOGRAM(volume_write_size_distribution, "Distribution of volume write sizes",
+                           HistogramBucketsType(ExponentialOfTwoBuckets));
+        REGISTER_HISTOGRAM(volume_unmap_size_distribution, "Distribution of volume unmap sizes",
                            HistogramBucketsType(ExponentialOfTwoBuckets));
         REGISTER_HISTOGRAM(volume_read_size_distribution, "Distribution of volume read sizes",
                            HistogramBucketsType(ExponentialOfTwoBuckets));
@@ -186,22 +199,26 @@ private:
     Volume* m_volume;
 };
 
-static constexpr uint64_t vol_sb_version = 0x1;
+static constexpr uint64_t vol_sb_version_1_2 = 0x1; // vol sb version for 1.2
+static constexpr uint64_t vol_sb_version = 0x2;
 static constexpr uint64_t vol_sb_magic = 0xb01dface;
 struct vol_sb_hdr {
     /* Immutable members */
     const uint64_t magic{vol_sb_magic};
-    const uint32_t version{vol_sb_version};
+    uint32_t version{vol_sb_version};
     //    uint8_t padding[4]; deprecated
-    uint32_t stream_id;
+    uint32_t num_streams;
     const uint64_t page_size;
     const uint64_t size;
     const boost::uuids::uuid uuid;
     char vol_name[VOL_NAME_SIZE];
     indx_mgr_sb indx_sb;
-    vol_sb_hdr(const uint64_t& page_size, const uint64_t& size, const char* in_vol_name,
-               const boost::uuids::uuid& uuid) :
-            page_size(page_size), size(size), uuid(uuid) {
+    vol_sb_hdr(const uint64_t& page_size, const uint64_t& size, const char* in_vol_name, const boost::uuids::uuid& uuid,
+               const uint32_t& num_streams) :
+            num_streams{num_streams},
+            page_size{page_size},
+            size{size},
+            uuid{uuid} {
         std::strncpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
         vol_name[VOL_NAME_SIZE - 1] = '\0';
     };
@@ -213,6 +230,11 @@ struct vol_sb_hdr {
 
     /* these variables are mutable. Always update these values before writing the superblock */
     vol_state state;
+
+    std::string to_string() {
+        return fmt::format("magic:{}, ver:{}, num_streams:{}, page_size: {}, size:{}, uuid: {}, vol_name: {}, state:{}",
+                           magic, version, num_streams, page_size, size, uuid, vol_name, state);
+    }
 };
 
 /* A simple self contained wrapper for completion list, which uses vector pool to avoid additional allocations */
@@ -292,7 +314,7 @@ private:
     } IoVecTransversal;
 
     blk_count_t m_blks_per_lba{1};
-    uintptr_t m_stream_ptr = (uintptr_t) nullptr;
+    stream_info_t m_stream_info;
 
 private:
     /* static members */
@@ -329,7 +351,7 @@ private:
     template < typename... Args >
     void cmp_assert_formatter(fmt::memory_buffer& buf, const char* msg, const std::string& req_str,
                               const Args&... args) {
-        sds_logging::default_cmp_assert_formatter(buf, msg, args...);
+        sisl::logging::default_cmp_assert_formatter(buf, msg, args...);
         assert_formatter(buf, msg, req_str, args...);
     }
 
@@ -537,6 +559,12 @@ public:
      */
     bool is_online() const;
 
+    /*
+     *  volume destroy is called but in progress (e.g. vol ptr is not removed by home_blks yet);
+     *  @params :- return true if destroy is in progress, false if otherwise;
+     * */
+    bool is_destroying() const;
+
     size_t call_batch_completion_cbs();
 
     /* Update a new cp of this volume.
@@ -699,7 +727,7 @@ struct volume_req : indx_req {
     }
 
     void set_seq_id() {
-        HS_RELEASE_ASSERT(iface_req->is_write() || iface_req->is_unmap(), "Only expect write/unmap to assign seq id");
+        HS_REL_ASSERT(iface_req->is_write() || iface_req->is_unmap(), "Only expect write/unmap to assign seq id");
         seqid = iface_req->vol_instance->inc_and_get_seq_id();
     }
 
@@ -707,9 +735,11 @@ private:
     /********** Constructor/Destructor **********/
     // volume_req() : csum_list(0), alloc_blkid_list(0), fbe_list(0){};
     volume_req(const vol_interface_req_ptr& vi_req) :
-            indx_req(vi_req->request_id, vi_req->op_type), iface_req(vi_req), io_start_time(Clock::now()) {
+            indx_req(vi_req->request_id, vi_req->op_type),
+            iface_req(vi_req),
+            io_start_time(Clock::now()) {
         if (vi_req->use_cache()) {
-            HS_DEBUG_ASSERT(vi_req->iovecs.empty(), "condition not empty");
+            HS_DBG_ASSERT(vi_req->iovecs.empty(), "condition not empty");
             // lifetime managed by HomeStore
             if (vi_req->is_write()) {
                 data.emplace< MemVecData >(new homeds::MemVector{

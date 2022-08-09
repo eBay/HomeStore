@@ -13,7 +13,9 @@
 
 namespace homestore {
 FixedBlkAllocator::FixedBlkAllocator(const BlkAllocConfig& cfg, const bool init, const chunk_num_t chunk_id) :
-        BlkAllocator(cfg, chunk_id), m_blk_q{cfg.get_total_blks()} {
+        BlkAllocator(cfg, chunk_id),
+        m_blk_q{cfg.get_total_blks()} {
+    LOGINFO("total blks: {}", cfg.get_total_blks());
     if (init) { inited(); }
 }
 
@@ -36,7 +38,7 @@ blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion* const portion, const 
 
         if (!get_disk_bm()->is_bits_set(blk_num, 1)) {
             const auto pushed = m_blk_q.write(BlkId{blk_num, 1, m_chunk_id});
-            HS_DEBUG_ASSERT_EQ(pushed, true, "Expected to be able to push the blk on fixed capacity Q");
+            HS_DBG_ASSERT_EQ(pushed, true, "Expected to be able to push the blk on fixed capacity Q");
         }
         ++blk_num;
     }
@@ -50,7 +52,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(const blk_count_t nblks, const blk_alloc
                                         std::vector< BlkId >& out_blkid) {
     /* TODO:If it is more then 1 then we need to make sure that we never allocate across the portions. As of now
      * we don't support the vector of blkids in fixed blk allocator */
-    HS_DEBUG_ASSERT_EQ(nblks, 1, "FixedBlkAllocator does not support multiple blk allocation yet");
+    HS_DBG_ASSERT_EQ(nblks, 1, "FixedBlkAllocator does not support multiple blk allocation yet");
 
     BlkId bid;
     const auto status{alloc(bid)};
@@ -82,12 +84,12 @@ void FixedBlkAllocator::free(const std::vector< BlkId >& blk_ids) {
 }
 
 void FixedBlkAllocator::free(const BlkId& b) {
-    HS_DEBUG_ASSERT_EQ(b.get_nblks(), 1, "Multiple blk free for FixedBlkAllocator? allocated by different allocator?");
+    HS_DBG_ASSERT_EQ(b.get_nblks(), 1, "Multiple blk free for FixedBlkAllocator? allocated by different allocator?");
 
     // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache bm.
     if (m_inited) {
         const auto pushed = m_blk_q.write(b);
-        HS_DEBUG_ASSERT_EQ(pushed, true, "Expected to be able to push the blk on fixed capacity Q");
+        HS_DBG_ASSERT_EQ(pushed, true, "Expected to be able to push the blk on fixed capacity Q");
     }
 }
 

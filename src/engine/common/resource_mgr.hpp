@@ -24,6 +24,7 @@ class RsrcMgrMetrics : public sisl::MetricsGroup {
 };
 
 typedef std::function< void(int64_t) > exceed_limit_cb_t;
+const uint32_t max_qd_multiplier = 32;
 
 class ResourceMgr {
 public:
@@ -36,7 +37,7 @@ public:
 
     /* monitor dirty buffer count */
     void inc_dirty_buf_cnt(const uint32_t size) {
-        HS_RELEASE_ASSERT_GT(size, 0);
+        HS_REL_ASSERT_GT(size, 0);
         const auto dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_add(size, std::memory_order_relaxed);
         COUNTER_INCREMENT(m_metrics, dirty_buf_cnt, size);
         if (m_dirty_buf_exceed_cb && ((dirty_buf_cnt + size) > get_dirty_buf_limit())) {
@@ -45,10 +46,10 @@ public:
     }
 
     void dec_dirty_buf_cnt(const uint32_t size) {
-        HS_RELEASE_ASSERT_GT(size, 0);
+        HS_REL_ASSERT_GT(size, 0);
         const int64_t dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_sub(size, std::memory_order_relaxed);
         COUNTER_DECREMENT(m_metrics, dirty_buf_cnt, size);
-        HS_RELEASE_ASSERT_GE(dirty_buf_cnt, size);
+        HS_REL_ASSERT_GE(dirty_buf_cnt, size);
     }
 
     void register_dirty_buf_exceed_cb(exceed_limit_cb_t cb) { m_dirty_buf_exceed_cb = std::move(cb); }
@@ -68,9 +69,9 @@ public:
 
     void dec_free_blk(int size) {
         auto dirty_fb_cnt = m_hs_fb_cnt.fetch_sub(1, std::memory_order_relaxed);
-        HS_ASSERT_CMP(RELEASE, dirty_fb_cnt, >=, 0);
+        HS_REL_ASSERT_GE(dirty_fb_cnt, 0);
         auto dirty_fb_size = m_hs_fb_size.fetch_sub(size, std::memory_order_relaxed);
-        HS_ASSERT_CMP(RELEASE, dirty_fb_size, >=, 0);
+        HS_REL_ASSERT_GE(dirty_fb_size, 0);
         COUNTER_DECREMENT(m_metrics, free_blk_size_in_cp, size);
         COUNTER_DECREMENT(m_metrics, free_blk_cnt_in_cp, 1);
     }
@@ -114,7 +115,7 @@ public:
 
     /* get cache size */
     uint64_t get_cache_size() const {
-        return ((HS_STATIC_CONFIG(input.app_mem_size) * HS_DYNAMIC_CONFIG(resource_limits.cache_size_percent)) / 100);
+        return ((HS_STATIC_CONFIG(input.io_mem_size()) * HS_DYNAMIC_CONFIG(resource_limits.cache_size_percent)) / 100);
     }
 
     /* monitor journal size */
@@ -138,10 +139,22 @@ public:
     /* monitor chunk size */
     void check_chunk_free_size_and_trigger_cp(uint64_t free_size, uint64_t alloc_size);
 
+    uint32_t get_dirty_buf_qd() const { return m_flush_dirty_buf_q_depth; }
+
+    void increase_dirty_buf_qd() {
+        auto qd = m_flush_dirty_buf_q_depth.load();
+        if (qd < max_qd_multiplier * HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt)) {
+            m_flush_dirty_buf_q_depth.fetch_add(2 * qd);
+            HS_PERIODIC_LOG(INFO, device, "q depth increased to {}", m_flush_dirty_buf_q_depth);
+        }
+    }
+
+    void reset_dirty_buf_qd() { m_flush_dirty_buf_q_depth = HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt); }
+
 private:
     int64_t get_dirty_buf_limit() const {
-        return (int64_t)(
-            (HS_DYNAMIC_CONFIG(resource_limits.dirty_buf_percent) * HS_STATIC_CONFIG(input.app_mem_size) / 100));
+        return int64_cast(
+            (HS_DYNAMIC_CONFIG(resource_limits.dirty_buf_percent) * HS_STATIC_CONFIG(input.io_mem_size())) / 100);
     }
 
     std::atomic< int64_t > m_hs_dirty_buf_cnt;
@@ -149,6 +162,7 @@ private:
     std::atomic< int64_t > m_hs_fb_size; // free size
     std::atomic< int64_t > m_hs_ab_cnt;  // alloc count
     std::atomic< int64_t > m_memory_used_in_recovery;
+    std::atomic< uint32_t > m_flush_dirty_buf_q_depth;
     uint64_t m_total_cap;
     exceed_limit_cb_t m_dirty_buf_exceed_cb;
     exceed_limit_cb_t m_free_blks_exceed_cb;

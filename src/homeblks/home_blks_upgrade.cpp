@@ -68,7 +68,7 @@ blk_buf_t HomeBlks::get_valid_buf(const std::vector< blk_buf_t >& bbuf, bool& re
         }
 
         /* It is not possible to get two valid super blocks with different uuid. */
-        HS_ASSERT_CMP(RELEASE, uuid, ==, hdr->uuid)
+        HS_REL_ASSERT_EQ(uuid, hdr->uuid)
 
         if (hdr->gen_cnt > gen_cnt) {
             if (valid_buf != nullptr) {

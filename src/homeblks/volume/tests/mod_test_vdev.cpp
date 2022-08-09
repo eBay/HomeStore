@@ -3,8 +3,8 @@
 #include <memory>
 #include <cstdint>
 #include <sys/timeb.h>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 #include "engine/common/mod_test_iface.hpp"
 #include "engine/common/homestore_flip.hpp"
 #include "engine/common/homestore_config.hpp"
@@ -68,18 +68,20 @@ mod_test_vdev vdev_test;
 #endif
 
 /************************* CLI options ***************************/
-SDS_OPTION_GROUP(test_vdev_mod,
-                 (abort_before_update_eof_cur_chunk, "", "abort_before_update_eof_cur_chunk",
-                  "abort_before_update_eof_cur_chunk", ::cxxopts::value< bool >()->default_value("0"), "true or false"),
-                 (abort_after_update_eof_cur_chunk, "", "abort_after_update_eof_cur_chunk",
-                  "abort_after_update_eof_cur_chunk", ::cxxopts::value< bool >()->default_value("0"), "true or false"),
-                 (abort_after_update_eof_next_chunk, "", "abort_after_update_eof_next_chunk",
-                  "abort_after_update_eof_next_chunk", ::cxxopts::value< bool >()->default_value("0"), "true or false"))
+SISL_OPTION_GROUP(test_vdev_mod,
+                  (abort_before_update_eof_cur_chunk, "", "abort_before_update_eof_cur_chunk",
+                   "abort_before_update_eof_cur_chunk", ::cxxopts::value< bool >()->default_value("0"),
+                   "true or false"),
+                  (abort_after_update_eof_cur_chunk, "", "abort_after_update_eof_cur_chunk",
+                   "abort_after_update_eof_cur_chunk", ::cxxopts::value< bool >()->default_value("0"), "true or false"),
+                  (abort_after_update_eof_next_chunk, "", "abort_after_update_eof_next_chunk",
+                   "abort_after_update_eof_next_chunk", ::cxxopts::value< bool >()->default_value("0"),
+                   "true or false"))
 
 void vdev_mod_test_main() {
-    vdev_cfg.abort_before_update_eof_cur_chunk = SDS_OPTIONS["abort_before_update_eof_cur_chunk"].as< bool >();
-    vdev_cfg.abort_after_update_eof_cur_chunk = SDS_OPTIONS["abort_after_update_eof_cur_chunk"].as< bool >();
-    vdev_cfg.abort_after_update_eof_next_chunk = SDS_OPTIONS["abort_after_update_eof_next_chunk"].as< bool >();
+    vdev_cfg.abort_before_update_eof_cur_chunk = SISL_OPTIONS["abort_before_update_eof_cur_chunk"].as< bool >();
+    vdev_cfg.abort_after_update_eof_cur_chunk = SISL_OPTIONS["abort_after_update_eof_cur_chunk"].as< bool >();
+    vdev_cfg.abort_after_update_eof_next_chunk = SISL_OPTIONS["abort_after_update_eof_next_chunk"].as< bool >();
 #ifdef _PRERELEASE
     mod_tests.push_back(&vdev_test);
 #endif

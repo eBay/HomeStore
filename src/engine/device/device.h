@@ -34,7 +34,7 @@
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
 #include <iomgr/iomgr.hpp>
 #include <isa-l/crc.h>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/fds/buffer.hpp>
 #include <sisl/fds/sparse_vector.hpp>
 #include <sisl/fds/utils.hpp>
@@ -42,9 +42,10 @@
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
+#include "engine/common/homestore_utils.hpp"
 
 using namespace iomgr;
-SDS_LOGGING_DECL(device, DEVICE_MANAGER)
+SISL_LOGGING_DECL(device, DEVICE_MANAGER)
 
 namespace homestore {
 class BlkAllocator;
@@ -55,7 +56,9 @@ static constexpr uint32_t MAGIC{0xCEEDDEEB};
 
 /************* Super Block definition ******************/
 
-static constexpr uint32_t CURRENT_SUPERBLOCK_VERSION{1};
+static constexpr uint32_t SUPERBLOCK_VERSION_1_2{1}; // XXX: we need a cooler name
+static constexpr uint32_t SUPERBLOCK_VERSION_1_3{3}; // we bumped the version twice in 1.3
+static constexpr uint32_t CURRENT_SUPERBLOCK_VERSION{3};
 static constexpr uint32_t CURRENT_DM_INFO_VERSION{1};
 
 /*******************************************************************************************************
@@ -128,9 +131,9 @@ struct chunk_info_block {
     void set_sb_chunk(const bool chunk) { sb_chunk = static_cast< uint8_t >(chunk ? 0x01 : 0x00); }
     bool is_sb_chunk() const { return (sb_chunk == 0x01); }
     void update_start_offset(const uint64_t offset) {
-        HS_RELEASE_ASSERT_GE(offset, chunk_start_offset);
+        HS_REL_ASSERT_GE(offset, chunk_start_offset);
         chunk_size -= (offset - chunk_start_offset);
-        HS_RELEASE_ASSERT_GT(chunk_size, 0);
+        HS_REL_ASSERT_GT(chunk_size, 0);
         chunk_start_offset = offset;
     }
 };
@@ -196,7 +199,36 @@ static_assert(sizeof(vdev_info_block) == MAX_VDEV_INFO_BLOCK_SZ, "vdev info bloc
 static constexpr size_t SUPERBLOCK_PAYLOAD_OFFSET{4096};
 
 #pragma pack(1)
+
+struct disk_attr {
+    // all fields in this structure are a copy from iomgr::drive_attributes;
+    uint32_t phys_page_size{0};        // Physical page size of flash ssd/nvme. This is optimal size to do IO
+    uint32_t align_size{0};            // size alignment supported by drives/kernel
+    uint32_t atomic_phys_page_size{0}; // atomic page size of the drive_sync_write_count
+    uint32_t num_streams{0};
+
+    bool is_valid() const {
+        return is_page_valid(phys_page_size) && is_page_valid(align_size) && is_page_valid(atomic_phys_page_size);
+    }
+
+    bool is_page_valid(uint32_t page_size) const {
+        if (page_size == 0 || (page_size & (page_size - 1)) != 0) {
+            return false;
+        } else {
+            return true;
+        }
+    }
+
+    std::string to_string() const {
+        return fmt::format("disk_attr: hys_page_size: {}, align_size: {}, atomic_phys_page_size: {}, num_streams: {}",
+                           phys_page_size, align_size, atomic_phys_page_size, num_streams);
+    }
+};
+
 struct super_block {
+    static constexpr uint32_t s_min_sb_size{SUPERBLOCK_PAYLOAD_OFFSET +
+                                            512}; // only needed for first time read of super block; increase 512 to
+                                                  // actual size if in the future super_block can be larger;
     static constexpr size_t s_num_dm_chunks{2};
     static_assert((s_num_dm_chunks & (s_num_dm_chunks - 1)) == 0,
                   "Size must be power of 2 for optimizations of & vs modulo");
@@ -211,7 +243,8 @@ struct super_block {
     uint8_t pad[7]{};                             // pad to 64 bit
     pdev_info_block this_dev_info{0};             // Info about this device itself
     chunk_info_block dm_chunk[s_num_dm_chunks]{}; // chunk info blocks
-    uint64_t system_uuid{0};                      // homestore system uuid.  hs_uuid_t(time_t) is an ambiguous type
+    uint64_t system_uuid{0};                      // homestore system uuid.  hs_uuid_t(time_t) is an ambiguous typedef
+    disk_attr dev_attr;                           // device attributes (from iomgr);
 
     void set_init_done(const bool done) { init_done = static_cast< uint8_t >(done ? 0x01 : 0x00); }
     bool is_init_done() const { return (init_done == 0x01); }
@@ -221,11 +254,17 @@ struct super_block {
     uint32_t get_version() const { return version; }
     void set_system_uuid(const hs_uuid_t uuid) { system_uuid = static_cast< uint64_t >(uuid); }
     hs_uuid_t get_system_uuid() const { return static_cast< hs_uuid_t >(system_uuid); }
+    std::string to_string() {
+        auto str = fmt::format("magic {}, gen_cnt {}, version {}, cur_indx {}, product_name {}, init_done {}, "
+                               "system_uuid {}, dev_attr {}",
+                               get_magic(), gen_cnt, get_version(), cur_indx, get_product_name(), init_done,
+                               get_system_uuid(), dev_attr.to_string());
+        return str;
+    }
 };
 
-inline size_t SUPERBLOCK_SIZE(const uint32_t atomic_page_sz) {
-    return sisl::round_up(std::max(sizeof(super_block), atomic_page_sz + SUPERBLOCK_PAYLOAD_OFFSET), atomic_page_sz);
-}
+static_assert(sizeof(super_block) <= super_block::s_min_sb_size);
+inline size_t SUPERBLOCK_SIZE(const uint32_t phys_page_sz) { return sisl::round_up(sizeof(super_block), phys_page_sz); }
 
 // NOTE: After this structure in memory follows pdev_info_block followed by chunk_info_block array
 // followed by vdev_info_block array
@@ -247,9 +286,9 @@ struct dm_info {
     uint16_t get_checksum() const { return checksum; }
 
     static const size_t s_pdev_info_blocks_size;
-    static const size_t s_chunk_info_blocks_size;
+    static size_t s_chunk_info_blocks_size;
     static const size_t s_vdev_info_blocks_size;
-    static const size_t dm_info_block_size;
+    static size_t s_dm_info_block_size;
 
     pdev_info_block* get_pdev_info_blocks() {
         return reinterpret_cast< pdev_info_block* >(reinterpret_cast< uint8_t* >(this) + sizeof(dm_info));
@@ -266,7 +305,6 @@ struct dm_info {
     static constexpr size_t s_dm_payload_offset{12}; // offset to version entry of dm_info
 };
 #pragma pack()
-
 
 class PhysicalDev;
 class meta_blk;
@@ -376,15 +414,6 @@ public:
 
     static std::shared_ptr< blkalloc_cp > attach_prepare_cp(const std::shared_ptr< blkalloc_cp >& cur_ba_cp);
     void update_start_offset(const uint64_t start_offset) { m_chunk_info->update_start_offset(start_offset); }
-    uint64_t get_aligned_size(const uint64_t align_offset, const uint64_t page_size) {
-        const uint64_t offset = sisl::round_up(get_start_offset(), std::lcm(align_offset, page_size));
-        if (offset - get_start_offset() <= get_size()) {
-            const uint64_t size = get_size() - (offset - get_start_offset());
-            return size;
-        } else {
-            return 0;
-        }
-    }
 
     // void cp_done(std::shared_ptr< blkalloc_cp > ba_cp);
 
@@ -434,8 +463,7 @@ class PhysicalDev {
     friend class DeviceManager;
 
 public:
-    PhysicalDev(DeviceManager* const mgr, const std::string& devname, const int oflags,
-                const iomgr::io_interface_comp_cb_t& io_comp_cb);
+    PhysicalDev(const std::string& devname, const int oflags);
 
     /**
      * @brief
@@ -495,7 +523,7 @@ public:
     std::array< uint32_t, 2 > merge_free_chunks(PhysicalDevChunk* const chunk);
 
     /* Find a free chunk which closestly match for the required size */
-    PhysicalDevChunk* find_free_chunk(const uint64_t req_size, const bool is_stream_aligned);
+    PhysicalDevChunk* find_free_chunk(const uint64_t req_size);
 
     void write(const char* const data, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
                const bool part_of_batch = false);
@@ -507,6 +535,7 @@ public:
               const bool part_of_batch = false);
     void readv(iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset, uint8_t* const cookie,
                const bool part_of_batch = false);
+    void fsync(uint8_t* const cookie);
 
     ssize_t sync_write(const char* const data, const uint32_t size, const uint64_t offset);
     ssize_t sync_writev(const iovec* const iov, const int iovcnt, const uint32_t size, const uint64_t offset);
@@ -535,8 +564,20 @@ public:
     void close_device();
 
     hs_uuid_t get_sys_uuid() { return m_super_blk->get_system_uuid(); }
-    uint64_t get_stream_size() const;
+
+    /**
+     * @brief : Get the stream size reported by iomgr;
+     *
+     * @return : return stream size reported by iomgr of this device;
+     */
+    uint64_t get_raw_stream_size() const;
+
     uint64_t get_stream_aligned_offset() const;
+    uint32_t get_page_size() const;
+    uint32_t get_atomic_page_size() const;
+    uint32_t get_align_size() const;
+    uint32_t get_num_streams() const;
+#if 0
     uint32_t get_page_size() const { return (get_page_size(m_devname)); }
     uint32_t get_atomic_page_size() const { return (get_atomic_page_size(m_devname)); }
     uint32_t get_align_size() const { return (get_align_size(m_devname)); }
@@ -544,6 +585,7 @@ public:
     static uint32_t get_page_size(const std::string& devname);
     static uint32_t get_atomic_page_size(const std::string& devname);
     static uint32_t get_align_size(const std::string& devname);
+#endif
 
 public:
     static void zero_boot_sbs(const std::vector< dev_info >& devices, const int oflags);
@@ -551,6 +593,12 @@ public:
 private:
     void write_superblock();
     void read_superblock();
+    void read_and_fill_superblock(const int oflags);
+
+    void alloc_superblock(const uint32_t sb_size, const uint32_t align_sz);
+    void free_superblock();
+
+    bool resize_superblock_if_needed(const uint32_t atomic_page_sz, const uint32_t align_sz);
 
     bool is_init_done() const { return m_super_blk->is_init_done(); }
 
@@ -564,8 +612,14 @@ private:
 
     /* Validate if this device is a homestore validated device. If there is any corrupted device, then it
      * throws std::system_exception */
-    bool validate_device();
+    bool validate_device() const;
     bool is_hdd() const;
+
+    /*
+     * return true if we are upgrading from some version that is supported for upgrade;
+     * return false if not;
+     * */
+    bool is_from_upgradable_version() const;
 
 private:
     DeviceManager* m_mgr; // Back pointer to physical device
@@ -640,7 +694,7 @@ public:
     /* Allocate a chunk for required size on the given physical dev and associate the chunk to provide virtual device.
      * Returns the allocated PhysicalDevChunk */
     PhysicalDevChunk* alloc_chunk(PhysicalDev* pdev, const uint32_t vdev_id, const uint64_t req_size,
-                                  const uint32_t primary_id, const bool is_stream_aligned = false);
+                                  const uint32_t primary_id);
 
     /* Free the chunk for later user */
     void free_chunk(PhysicalDevChunk* const chunk);
@@ -686,11 +740,11 @@ public:
     std::vector< PhysicalDev* > get_devices(const PhysicalDevGroup pdev_group) const;
     // void zero_pdev_sbs();
 
+    bool is_hdd(const std::string& devname);
+
 public:
     static void zero_boot_sbs(const std::vector< dev_info >& devices);
-    static iomgr::drive_attributes get_drive_attrs(const std::vector< dev_info >& devices);
     static iomgr::drive_type get_drive_type(const std::vector< dev_info >& devices);
-    static bool is_hdd(const std::string& devname);
 
 private:
     void load_and_repair_devices(const hs_uuid_t& system_uuid);
@@ -747,6 +801,7 @@ private:
     bool m_scan_cmpltd{false};
     vdev_error_callback m_vdev_error_cb;
     bool m_first_time_boot{true};
+    hs_uuid_t m_data_system_uuid{INVALID_SYSTEM_UUID};
 }; // class DeviceManager
 
 } // namespace homestore

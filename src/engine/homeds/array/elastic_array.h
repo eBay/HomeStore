@@ -15,7 +15,7 @@
 #include <assert.h>
 #include <sstream>
 #include <mutex>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 
 namespace homeds {
 
@@ -230,8 +230,7 @@ bool Elastic_Array< ArrayTypeParams >::removeIfPresent(ElementType* element) {
 template < ArrayType >
 ElementType* Elastic_Array< ArrayTypeParams >::operator[](uint32_t pos) {
     std::lock_guard< std::recursive_mutex > lock(m_mutex);
-    if (pos >= m_header->m_no_of_elements_filled || pos < 0)
-        assert(false);
+    if (pos >= m_header->m_no_of_elements_filled || pos < 0) assert(false);
     return (ElementType*)m_elements + pos;
 }
 
@@ -323,12 +322,9 @@ void Elastic_Array< ArrayTypeParams >::remove_shift(uint32_t spos, uint32_t epos
 
 template < ArrayType >
 void Elastic_Array< ArrayTypeParams >::insert_shift(uint32_t pos, ElementType* element) {
-    if (pos > m_header->m_no_of_elements_filled || pos < 0)
-        assert(false);
+    if (pos > m_header->m_no_of_elements_filled || pos < 0) assert(false);
     assert(pos < m_max_grow_to);
-    if (is_resize_required()) {
-        resize_array();
-    }
+    if (is_resize_required()) { resize_array(); }
     memmove(m_elements + pos + 1, m_elements + pos, sizeOfElement * (m_header->m_no_of_elements_filled - pos));
     m_header->m_no_of_elements_filled++;
 

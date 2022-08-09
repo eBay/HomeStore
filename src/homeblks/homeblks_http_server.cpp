@@ -17,45 +17,11 @@
 namespace homestore {
 
 std::vector< std::string > HomeBlksHttpServer::m_iface_list;
+
 HomeBlksHttpServer* HomeBlksHttpServer::pThis(sisl::HttpCallData cd) { return (HomeBlksHttpServer*)cd->cookie(); }
 HomeBlks* HomeBlksHttpServer::to_homeblks(sisl::HttpCallData cd) { return pThis(cd)->m_hb; }
 
-HomeBlksHttpServer::HomeBlksHttpServer(HomeBlks* hb) : m_hb(hb) {}
-
-void HomeBlksHttpServer::start() {
-    sisl::HttpServerConfig cfg;
-    cfg.is_tls_enabled = false;
-    cfg.bind_address = "0.0.0.0";
-    cfg.server_port = SDS_OPTIONS["hb_stats_port"].as< int32_t >();
-    cfg.read_write_timeout_secs = 10;
-
-    m_http_server = std::unique_ptr< sisl::HttpServer >(new sisl::HttpServer(
-        cfg,
-        {{
-            handler_info("/api/v1/version", HomeBlksHttpServer::get_version, (void*)this),
-            handler_info("/api/v1/getMetrics", HomeBlksHttpServer::get_metrics, (void*)this),
-            handler_info("/api/v1/getObjLife", HomeBlksHttpServer::get_obj_life, (void*)this),
-            handler_info("/metrics", HomeBlksHttpServer::get_prometheus_metrics, (void*)this),
-            handler_info("/api/v1/getLogLevel", HomeBlksHttpServer::get_log_level, (void*)this),
-            handler_info("/api/v1/setLogLevel", HomeBlksHttpServer::set_log_level, (void*)this),
-            handler_info("/api/v1/dumpStackTrace", HomeBlksHttpServer::dump_stack_trace, (void*)this),
-            handler_info("/api/v1/verifyHS", HomeBlksHttpServer::verify_hs, (void*)this),
-            handler_info("/api/v1/mallocStats", HomeBlksHttpServer::get_malloc_stats, (void*)this),
-            handler_info("/api/v1/getConfig", HomeBlksHttpServer::get_config, (void*)this),
-            handler_info("/api/v1/reloadConfig", HomeBlksHttpServer::reload_dynamic_config, (void*)this),
-            handler_info("/api/v1/getStatus", HomeBlksHttpServer::get_status, (void*)this),
-            handler_info("/api/v1/verifyBitmap", HomeBlksHttpServer::verify_bitmap, (void*)this),
-            handler_info("/api/v1/dumpDiskMetaBlks", HomeBlksHttpServer::dump_disk_metablks, (void*)this),
-            handler_info("/api/v1/verifyMetaBlkStore", HomeBlksHttpServer::verify_metablk_store, (void*)this),
-            handler_info("/api/v1/wakeupInit", HomeBlksHttpServer::wakeup_init, (void*)this),
-#ifdef _PRERELEASE
-            handler_info("/api/v1/crashSystem", HomeBlksHttpServer::crash_system, (void*)this),
-            handler_info("/api/v1/moveVolOffline", HomeBlksHttpServer::move_vol_offline, (void*)this),
-            handler_info("/api/v1/moveVolOnline", HomeBlksHttpServer::move_vol_online, (void*)this),
-#endif
-        }}));
-    m_http_server->start();
-
+HomeBlksHttpServer::HomeBlksHttpServer(HomeBlks* hb) : m_hb(hb) {
     // get sock interfaces and store ips
     struct ifaddrs* interfaces = nullptr;
     struct ifaddrs* temp_addr = nullptr;
@@ -71,7 +37,50 @@ void HomeBlksHttpServer::start() {
     freeifaddrs(interfaces);
 }
 
-void HomeBlksHttpServer::stop() { m_http_server->stop(); }
+void HomeBlksHttpServer::start() {
+    auto http_server_ptr = ioenvironment.with_http_server().get_http_server();
+
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/version", HomeBlksHttpServer::get_version, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/getMetrics", HomeBlksHttpServer::get_metrics, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/getObjLife", HomeBlksHttpServer::get_obj_life, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/metrics", HomeBlksHttpServer::get_prometheus_metrics, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/getLogLevel", HomeBlksHttpServer::get_log_level, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/setLogLevel", HomeBlksHttpServer::set_log_level, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/dumpStackTrace", HomeBlksHttpServer::dump_stack_trace, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/verifyHS", HomeBlksHttpServer::verify_hs, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/mallocStats", HomeBlksHttpServer::get_malloc_stats, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/getConfig", HomeBlksHttpServer::get_config, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/reloadConfig", HomeBlksHttpServer::reload_dynamic_config, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/getStatus", HomeBlksHttpServer::get_status, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/verifyBitmap", HomeBlksHttpServer::verify_bitmap, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/dumpDiskMetaBlks", HomeBlksHttpServer::dump_disk_metablks, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/verifyMetaBlkStore", HomeBlksHttpServer::verify_metablk_store, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/wakeupInit", HomeBlksHttpServer::wakeup_init, (void*)this));
+#ifdef _PRERELEASE
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/crashSystem", HomeBlksHttpServer::crash_system, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/moveVolOffline", HomeBlksHttpServer::move_vol_offline, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/moveVolOnline", HomeBlksHttpServer::move_vol_online, (void*)this));
+#endif
+}
 
 bool HomeBlksHttpServer::is_local_addr(struct sockaddr* addr) {
     std::string client_ip = inet_ntoa(((struct sockaddr_in*)addr)->sin_addr);
@@ -84,17 +93,17 @@ void HomeBlksHttpServer::get_version(sisl::HttpCallData cd) {
     for (auto v : vers) {
         ver_str += fmt::format("{0}: {1}; ", v.first, v.second);
     }
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, ver_str);
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, ver_str);
 }
 
 void HomeBlksHttpServer::get_metrics(sisl::HttpCallData cd) {
     std::string msg = sisl::MetricsFarm::getInstance().get_result_in_json_string();
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, msg);
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, msg);
 }
 
 void HomeBlksHttpServer::get_prometheus_metrics(sisl::HttpCallData cd) {
     std::string msg = sisl::MetricsFarm::getInstance().report(sisl::ReportFormat::kTextFormat);
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, msg);
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, msg);
 }
 
 void HomeBlksHttpServer::get_obj_life(sisl::HttpCallData cd) {
@@ -104,7 +113,7 @@ void HomeBlksHttpServer::get_obj_life(sisl::HttpCallData cd) {
         ss << "created=" << created << " alive=" << alive;
         j[name] = ss.str();
     });
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, j.dump());
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, j.dump());
 }
 
 void HomeBlksHttpServer::set_log_level(sisl::HttpCallData cd) {
@@ -120,22 +129,22 @@ void HomeBlksHttpServer::set_log_level(sisl::HttpCallData cd) {
 
     _new_log_level = evhtp_kvs_find_kv(req->uri->query, "loglevel");
     if (!_new_log_level) {
-        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_BADREQ, "Invalid loglevel param!");
+        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_BADREQ, "Invalid loglevel param!");
         return;
     }
     auto new_log_level = _new_log_level->val;
 
     std::string resp = "";
     if (logmodule == nullptr) {
-        sds_logging::SetAllModuleLogLevel(spdlog::level::from_str(new_log_level));
-        resp = sds_logging::GetAllModuleLogLevel().dump(2);
+        sisl::logging::SetAllModuleLogLevel(spdlog::level::from_str(new_log_level));
+        resp = sisl::logging::GetAllModuleLogLevel().dump(2);
     } else {
-        sds_logging::SetModuleLogLevel(logmodule, spdlog::level::from_str(new_log_level));
+        sisl::logging::SetModuleLogLevel(logmodule, spdlog::level::from_str(new_log_level));
         resp = std::string("logmodule ") + logmodule + " level set to " +
-            spdlog::level::to_string_view(sds_logging::GetModuleLogLevel(logmodule)).data();
+            spdlog::level::to_string_view(sisl::logging::GetModuleLogLevel(logmodule)).data();
     }
 
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
 void HomeBlksHttpServer::get_log_level(sisl::HttpCallData cd) {
@@ -148,31 +157,33 @@ void HomeBlksHttpServer::get_log_level(sisl::HttpCallData cd) {
 
     std::string resp = "";
     if (logmodule == nullptr) {
-        resp = sds_logging::GetAllModuleLogLevel().dump(2);
+        resp = sisl::logging::GetAllModuleLogLevel().dump(2);
     } else {
         resp = std::string("logmodule ") + logmodule +
-            " level = " + spdlog::level::to_string_view(sds_logging::GetModuleLogLevel(logmodule)).data();
+            " level = " + spdlog::level::to_string_view(sisl::logging::GetModuleLogLevel(logmodule)).data();
     }
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
 void HomeBlksHttpServer::dump_stack_trace(sisl::HttpCallData cd) {
     if (!is_local_addr(cd->request()->conn->saddr)) {
-        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN, "Access not allowed from external host");
+        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
+                                                       "Access not allowed from external host");
         return;
     }
 
-    sds_logging::log_stack_trace(true);
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, "Look for stack trace in the log file");
+    sisl::logging::log_stack_trace(true);
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, "Look for stack trace in the log file");
 }
 
 void HomeBlksHttpServer::get_malloc_stats(sisl::HttpCallData cd) {
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, sisl::get_malloc_stats_detailed().dump(2));
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, sisl::get_malloc_stats_detailed().dump(2));
 }
 
 void HomeBlksHttpServer::verify_hs(sisl::HttpCallData cd) {
     if (!is_local_addr(cd->request()->conn->saddr)) {
-        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN, "Access not allowed from external host");
+        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
+                                                       "Access not allowed from external host");
         return;
     }
 
@@ -180,24 +191,25 @@ void HomeBlksHttpServer::verify_hs(sisl::HttpCallData cd) {
     auto ret = hb->verify_vols();
     std::string resp{"HomeBlks verified "};
     resp += ret ? "successfully" : "failed";
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
 void HomeBlksHttpServer::get_config(sisl::HttpCallData cd) {
     nlohmann::json j;
     j = sisl::SettingsFactoryRegistry::instance().get_json();
     j["static"] = homestore::HomeStoreStaticConfig::instance().to_json();
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, j.dump(2));
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, j.dump(2));
 }
 
 void HomeBlksHttpServer::reload_dynamic_config(sisl::HttpCallData cd) {
     if (!is_local_addr(cd->request()->conn->saddr)) {
-        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN, "Access not allowed from external host");
+        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
+                                                       "Access not allowed from external host");
         return;
     }
 
     bool restart_needed = sisl::SettingsFactoryRegistry::instance().reload_all();
-    pThis(cd)->m_http_server->respond_OK(
+    ioenvironment.get_http_server()->respond_OK(
         cd, EVHTP_RES_OK,
         fmt::format("All config reloaded, is app restarted {}\n", (restart_needed ? "true" : "false")));
     if (restart_needed) {
@@ -230,10 +242,10 @@ void HomeBlksHttpServer::verify_metablk_store(sisl::HttpCallData cd) {
     const auto hb = to_homeblks(cd);
     if (hb->is_safe_mode()) {
         const auto ret = hb->verify_metablk_store();
-        pThis(cd)->m_http_server->respond_OK(
+        ioenvironment.get_http_server()->respond_OK(
             cd, EVHTP_RES_OK, fmt::format("Disk sanity of MetaBlkStore result: {}", ret ? "Passed" : "Failed"));
     } else {
-        pThis(cd)->m_http_server->respond_NOTOK(
+        ioenvironment.get_http_server()->respond_NOTOK(
             cd, EVHTP_RES_BADREQ, fmt::format("HomeBlks not in safe mode, not allowed to serve this request"));
     }
 }
@@ -248,7 +260,7 @@ void HomeBlksHttpServer::dump_disk_metablks(sisl::HttpCallData cd) {
     }
 
     if (clients.size() != 1) {
-        pThis(cd)->m_http_server->respond_NOTOK(
+        ioenvironment.get_http_server()->respond_NOTOK(
             cd, EVHTP_RES_BADREQ,
             fmt::format("Can serve only one client per request. Number clients received: {}\n", clients.size()));
         return;
@@ -257,9 +269,9 @@ void HomeBlksHttpServer::dump_disk_metablks(sisl::HttpCallData cd) {
     const auto hb = to_homeblks(cd);
     if (hb->is_safe_mode()) {
         const auto j = to_homeblks(cd)->dump_disk_metablks(clients[0]);
-        pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, j.dump(2));
+        ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, j.dump(2));
     } else {
-        pThis(cd)->m_http_server->respond_NOTOK(
+        ioenvironment.get_http_server()->respond_NOTOK(
             cd, EVHTP_RES_BADREQ, fmt::format("HomeBlks not in safe mode, not allowed to serve this request"));
     }
 }
@@ -276,18 +288,19 @@ void HomeBlksHttpServer::get_status(sisl::HttpCallData cd) {
     std::string failure_resp{""};
     int verbosity_level{-1};
     if (!verify_and_get_verbosity(req, failure_resp, verbosity_level)) {
-        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_BADREQ, failure_resp);
+        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_BADREQ, failure_resp);
         return;
     }
 
     const auto status_mgr = to_homeblks(cd)->status_mgr();
     auto status_json = status_mgr->get_status(modules, verbosity_level);
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, status_json.dump(2));
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, status_json.dump(2));
 }
 
 void HomeBlksHttpServer::verify_bitmap(sisl::HttpCallData cd) {
     if (!is_local_addr(cd->request()->conn->saddr)) {
-        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN, "Access not allowed from external host");
+        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
+                                                       "Access not allowed from external host");
         return;
     }
 
@@ -295,14 +308,14 @@ void HomeBlksHttpServer::verify_bitmap(sisl::HttpCallData cd) {
     auto ret = hb->verify_bitmap();
     std::string resp{"HomeBlks bitmap verified "};
     resp += ret ? "successfully" : "failed";
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
 void HomeBlksHttpServer::wakeup_init(sisl::HttpCallData cd) {
     auto hb = to_homeblks(cd);
     hb->wakeup_init();
     std::string resp{"completed"};
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
 #ifdef _PRERELEASE
@@ -316,14 +329,14 @@ void HomeBlksHttpServer::crash_system(sisl::HttpCallData cd) {
 
     std::string resp = "";
     if (crash_type.empty() || boost::iequals(crash_type, "assert")) {
-        HS_RELEASE_ASSERT(0, "Fake Assert in response to an http request");
+        HS_REL_ASSERT(0, "Fake Assert in response to an http request");
     } else if (boost::iequals(crash_type, "segv")) {
         int* x{nullptr};
         LOGINFO("Simulating a segv with dereferencing nullptr={}", *x);
     } else {
         resp = "crash type " + crash_type + " not supported yet";
     }
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
 void HomeBlksHttpServer::move_vol_online(sisl::HttpCallData cd) {
@@ -334,7 +347,7 @@ void HomeBlksHttpServer::move_vol_online(sisl::HttpCallData cd) {
     if (_vol_uuid) { vol_uuid = _vol_uuid->val; }
 
     if (vol_uuid.length() == 0) {
-        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_BADREQ, std::string("empty vol_uuid!"));
+        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_BADREQ, std::string("empty vol_uuid!"));
         return;
     }
 
@@ -346,7 +359,7 @@ void HomeBlksHttpServer::move_vol_online(sisl::HttpCallData cd) {
 
     resp += (res == no_error ? "successfully" : "failed");
     if (res != no_error) { resp += ("error: " + res.message()); }
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
 void HomeBlksHttpServer::move_vol_offline(sisl::HttpCallData cd) {
@@ -357,7 +370,7 @@ void HomeBlksHttpServer::move_vol_offline(sisl::HttpCallData cd) {
     if (_vol_uuid) { vol_uuid = _vol_uuid->val; }
 
     if (vol_uuid.length() == 0) {
-        pThis(cd)->m_http_server->respond_NOTOK(cd, EVHTP_RES_BADREQ, std::string("empty vol_uuid!"));
+        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_BADREQ, std::string("empty vol_uuid!"));
         return;
     }
 
@@ -369,7 +382,7 @@ void HomeBlksHttpServer::move_vol_offline(sisl::HttpCallData cd) {
 
     resp += (res == no_error ? "successfully" : "failed");
     if (res != no_error) { resp += ("error: " + res.message()); }
-    pThis(cd)->m_http_server->respond_OK(cd, EVHTP_RES_OK, resp);
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 #endif
 

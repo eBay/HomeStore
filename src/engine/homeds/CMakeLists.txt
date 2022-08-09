@@ -60,7 +60,6 @@ if (${non_io_tests})
         add_executable(test_threadpool ${TEST_THREAD_POOL_SOURCE_FILES})
         target_link_libraries(test_threadpool ${CONAN_LIBS})
     endif()
-
     add_test(NAME BTreeCRUD COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_btree_crud)
     add_test(NAME Hash COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_hash)
     add_test(NAME Avector COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_avector)

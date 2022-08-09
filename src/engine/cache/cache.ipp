@@ -113,7 +113,7 @@ bool IntrusiveCache< K, V >::modify_size(V& v, const uint32_t size) {
 template < typename K, typename V >
 bool IntrusiveCache< K, V >::upsert(const V& v, bool* const out_key_exists) {
     // Not supported yet
-    HS_ASSERT(DEBUG, 0, "Not Supported yet!");
+    HS_DBG_ASSERT(0, "Not Supported yet!");
     return false;
 }
 
@@ -173,7 +173,7 @@ bool IntrusiveCache< K, V >::is_safe_to_evict(const CurrentEvictor::EvictRecordT
          */
         if (v->try_lock()) {
             boost::intrusive_ptr< V > out_removed_buf;
-            HS_ASSERT_CMP(LOGMSG, v->get_cache_state(), ==, cache_buf_state::CACHE_INSERTED);
+            HS_LOG_ASSERT_EQ(v->get_cache_state(), cache_buf_state::CACHE_INSERTED);
             /* It remove the entry only if ref cnt is one */
             const K* const pk{V::extract_key(*v)};
             const uint64_t hash_code{cache_detail::compute_hash< K >(*pk)};
@@ -206,7 +206,7 @@ Cache< K, V >::~Cache() = default;
 template < typename K, typename V >
 bool Cache< K, V >::upsert(const K& k, const sisl::blob& b, boost::intrusive_ptr< V >* const out_smart_buf) {
     // TODO: Not supported yet
-    HS_ASSERT(DEBUG, 0, "Not Supported yet!");
+    HS_DBG_ASSERT(0, "Not Supported yet!");
     return false;
 }
 
@@ -378,7 +378,7 @@ void Cache< K, V >::safe_erase(const K& k, CallbackType&& cb) {
             if (ocb) { ocb(out_buf); }
         }
     } else {
-        HS_ASSERT_CMP(DEBUG, can_remove, ==, false);
+        HS_DBG_ASSERT_EQ(can_remove, false);
         cache_detail::invoke_callback< erase_comp_cb >(std::forward< CallbackType >(cb), out_buf);
     }
 };

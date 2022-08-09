@@ -10,8 +10,8 @@
 #include <limits>
 
 #include <boost/range/irange.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/thread_buffer.hpp>
 
@@ -19,7 +19,7 @@
 
 #include "homeds/hash/intrusive_hashset.hpp"
 
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 RCU_REGISTER_INIT
 
 static constexpr size_t TEST_COUNT{10000};
@@ -173,10 +173,10 @@ BENCHMARK(test_insert)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->T
 BENCHMARK(test_reads)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
 BENCHMARK(test_removes)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
 
-SDS_OPTIONS_ENABLE(logging)
+SISL_OPTIONS_ENABLE(logging)
 int main(int argc, char** argv) {
-    SDS_OPTIONS_LOAD(argc, argv, logging)
-    sds_logging::SetLogger("test_hashset");
+    SISL_OPTIONS_LOAD(argc, argv, logging)
+    sisl::logging::SetLogger("test_hashset");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
     setup(TEST_COUNT * ITERATIONS);
     ::benchmark::Initialize(&argc, argv);

@@ -26,6 +26,8 @@
 #include <sys/eventfd.h>
 #include <sys/timeb.h>
 #include <unistd.h>
+#include <errno.h>
+
 #endif
 
 #include <boost/uuid/uuid_generators.hpp>
@@ -34,10 +36,10 @@
 #include <sisl/fds/bitset.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <iomgr/aio_drive_interface.hpp>
-#include <iomgr/iomgr.hpp>
+#include <iomgr/io_environment.hpp>
 #include <iomgr/spdk_drive_interface.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 #include <sisl/utility/thread_buffer.hpp>
 
 #include <gtest/gtest.h>
@@ -70,24 +72,25 @@ extern bool vol_test_run;
 constexpr uint64_t Ki{1024};
 constexpr uint64_t Mi{Ki * Ki};
 constexpr uint64_t Gi{Ki * Mi};
+namespace fs = std::filesystem;
 
 using log_level = spdlog::level::level_enum;
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-enum class load_type_t : uint8_t { random = 0, same = 1, sequential = 2 };
+ENUM(load_type_t, uint8_t, random = 0, same = 1, sequential = 2);
+ENUM(verify_type_t, uint8_t, csum = 0, data = 1, header = 2, null = 3);
 
-enum class verify_type_t : uint8_t {
-    csum = 0,
-    data = 1,
-    header = 2,
-    null = 3,
-};
+ENUM(vol_cd_state_t, uint8_t, UNINITED = 0, CREATED = 1, DELETED = 2);
 
-struct file_hdr {
-    bool is_deleted;
+struct vol_file_hdr {
+    vol_cd_state_t state;
     boost::uuids::uuid uuid;
 };
-#define RESERVE_FILE_BYTE sizeof(struct file_hdr)
+
+#define VOL_FILE_HDR_SZ sizeof(struct vol_file_hdr)
+
+#define VOL_HDR_ONLY_FILE_SIZE 4096
+static_assert(VOL_HDR_ONLY_FILE_SIZE >= VOL_FILE_HDR_SZ);
 
 struct TestCfg {
     TestCfg() = default;
@@ -108,7 +111,8 @@ struct TestCfg {
 
     uint64_t max_io_size{1 * Mi};
     uint64_t max_outstanding_ios{32};
-    uint64_t max_disk_capacity{10 * Gi};
+    uint64_t max_disk_capacity{20 * Gi};
+    uint64_t app_mem_size_in_gb{1};
 
     uint32_t atomic_phys_page_size{512};
     uint32_t vol_page_size{4096};
@@ -120,7 +124,8 @@ struct TestCfg {
     bool unmap_enable{false};
     bool enable_crash_handler{true};
     bool read_verify{false};
-    bool remove_file{true};
+    bool remove_file_on_shutdown{true};
+    bool remove_file_on_start{false};
     bool verify_only{false};
     bool pre_init_verify{true};
     bool is_abort{false};
@@ -158,7 +163,10 @@ struct TestCfg {
     bool verify_data() { return verify_type == verify_type_t::data; }
     bool verify_hdr() { return verify_type == verify_type_t::header; }
     bool verify_type_set() { return verify_type != verify_type_t::null; }
-    bool create_vol_file() { return verify_type_set() && !verify_hdr(); }
+    bool create_vol_file() {
+        // return true for all verify types for now, as we rely on vol file hdr for all recovery cases;
+        return true;
+    }
 };
 
 struct TestOutput {
@@ -225,7 +233,7 @@ struct TestOutput {
 
 class VolTest;
 struct io_req_t;
-enum class wait_type : uint8_t { no_wait = 0, for_execution = 1, for_completion = 2 };
+ENUM(wait_type, uint8_t, no_wait = 0, for_execution = 1, for_completion = 2);
 
 class TestJob {
     static thread_local bool is_this_thread_running_io;
@@ -240,7 +248,9 @@ public:
     }
 
     TestJob(VolTest* test, uint32_t interval_ops_sec, bool run_in_worker_thread) :
-            m_voltest(test), m_start_time(Clock::now()), m_interval_ops_sec(interval_ops_sec) {
+            m_voltest(test),
+            m_start_time(Clock::now()),
+            m_interval_ops_sec(interval_ops_sec) {
         m_timer_hdl = iomanager.schedule_global_timer(interval_ops_sec * 1000ul * 1000ul * 1000ul, true, nullptr,
                                                       run_in_worker_thread ? iomgr::thread_regex::all_worker
                                                                            : iomgr::thread_regex::all_user,
@@ -425,7 +435,7 @@ struct io_req_t : public vol_interface_req {
                 uint8_t* validate_ptr{validate_buffer};
                 const uint64_t pg_size{VolInterface::get_instance()->get_page_size(vinfo->vol)};
                 for (const auto& iov : req_ptr->iovecs) {
-                    HS_RELEASE_ASSERT_EQ(iov.iov_len % pg_size, 0);
+                    HS_REL_ASSERT_EQ(iov.iov_len % pg_size, 0);
                     populate_csum_buf(reinterpret_cast< uint16_t* >(validate_ptr),
                                       static_cast< const uint8_t* >(iov.iov_base), iov.iov_len, vinfo.get());
                     validate_ptr += (iov.iov_len / pg_size) * sizeof(uint16_t);
@@ -468,7 +478,7 @@ struct io_req_t : public vol_interface_req {
             iomanager.iobuf_free(validate_buffer);
         } else {
             // right now we only have unmap that doesn't create validate_buffer;
-            HS_RELEASE_ASSERT_EQ(op_type, Op_type::UNMAP);
+            HS_REL_ASSERT_EQ(op_type, Op_type::UNMAP);
         }
 
         const auto req_ptr{static_cast< vol_interface_req* >(this)};
@@ -478,7 +488,7 @@ struct io_req_t : public vol_interface_req {
                 iomanager.iobuf_free(static_cast< uint8_t* >(iov.iov_base));
             } else {
                 // remove this assert if there is other op that could also have null iovs;
-                HS_RELEASE_ASSERT_EQ(op_type, Op_type::UNMAP, "unexpected op_type: {}, other than unmap", op_type);
+                HS_REL_ASSERT_EQ(op_type, Op_type::UNMAP, "unexpected op_type: {}, other than unmap", op_type);
             }
         }
     }
@@ -500,7 +510,7 @@ private:
 
         if (op_type != Op_type::UNMAP) {
             validate_buffer = iomanager.iobuf_alloc(512, verify_size);
-            HS_ASSERT_NOTNULL(RELEASE, validate_buffer);
+            HS_REL_ASSERT_NOTNULL(validate_buffer);
         }
     }
 
@@ -594,58 +604,56 @@ public:
         /* no need to delete the user created file/disk */
         if (tcfg.dev_names.size() == 0) {
             for (const auto& n : tcfg.default_names) {
-                const std::filesystem::path fpath{n};
-                if (std::filesystem::exists(fpath) && std::filesystem::is_regular_file(fpath)) {
-                    std::filesystem::remove(fpath);
-                }
+                const fs::path fpath{n};
+                if (fs::exists(fpath) && fs::is_regular_file(fpath)) { fs::remove(fpath); }
             }
         }
 
         for (uint32_t i{0}; i < tcfg.max_vols; ++i) {
-            const std::filesystem::path fpath{VOL_PREFIX + std::to_string(i)};
-            if (std::filesystem::exists(fpath) && std::filesystem::is_regular_file(fpath)) {
-                std::filesystem::remove(fpath);
-            }
+            const fs::path fpath{VOL_PREFIX + std::to_string(i)};
+            if (fs::exists(fpath) && fs::is_regular_file(fpath)) { fs::remove(fpath); }
         }
     }
 
     static void am_meta_blk_comp_cb(bool success) {
-        HS_RELEASE_ASSERT_EQ(success, true);
+        HS_REL_ASSERT_EQ(success, true);
         // it is possible that abort (intentional test) can happen before am got chance to be written;
         if (!tcfg.init && m_am_sb_written) {
             // should have received am sb callback from MetaBlkStore;
-            HS_RELEASE_ASSERT_EQ(m_am_sb_received, true);
+            HS_REL_ASSERT_EQ(m_am_sb_received, true);
         }
     }
 
     static void am_meta_blk_found_cb([[maybe_unused]] meta_blk* const mblk, const sisl::byte_view& buf,
                                      const size_t size) {
         // should be called only once in recovery mode;
-        HS_RELEASE_ASSERT_EQ(m_am_sb_received, false);
+        HS_REL_ASSERT_EQ(m_am_sb_received, false);
         m_am_sb_received = true;
         const std::string str{reinterpret_cast< const char* >(buf.bytes()), size};
-        HS_RELEASE_ASSERT_EQ(str.compare(boost::uuids::to_string(m_am_uuid)), 0);
+        HS_REL_ASSERT_EQ(str.compare(boost::uuids::to_string(m_am_uuid)), 0);
     }
 
     uint64_t get_dev_info(std::vector< dev_info >& device_info) {
         uint64_t max_capacity{0};
 
-        /* create files */
         if (tcfg.dev_names.size() != 0) {
             for (uint32_t i{0}; i < tcfg.dev_names.size(); ++i) {
-                const std::filesystem::path fpath{tcfg.dev_names[i]};
+                const fs::path fpath{tcfg.dev_names[i]};
                 /* we use this capacity to calculate volume size */
                 max_capacity += tcfg.max_disk_capacity;
-                device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
+                // device_info.emplace_back(fs::canonical(fpath).string(), HSDevType::Data);
+                device_info.emplace_back(tcfg.dev_names[i], HSDevType::Data);
             }
         } else {
+            /* create files */
             for (uint32_t i{0}; i < MAX_DEVICES; ++i) {
-                const std::filesystem::path fpath{tcfg.default_names[i]};
+                const fs::path fpath{tcfg.default_names[i]};
                 if (tcfg.init) {
                     std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
-                    std::filesystem::resize_file(fpath, tcfg.max_disk_capacity);
+                    fs::resize_file(fpath, tcfg.max_disk_capacity);
                 }
-                device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
+
+                device_info.emplace_back(fs::canonical(fpath).string(), HSDevType::Data);
                 max_capacity += tcfg.max_disk_capacity;
             }
         }
@@ -665,6 +673,7 @@ public:
                 data_attrs.align_size = 2 * data_attrs.align_size;
                 data_attrs.phys_page_size = 2 * tcfg.phy_page_size;
                 data_attrs.atomic_phys_page_size = 2 * tcfg.atomic_phys_page_size;
+                data_attrs.num_streams = 20;
                 --hdd_cnt;
             }
             iomgr::DriveInterface::emulate_drive_attributes(dinfo.dev_names, data_attrs);
@@ -682,17 +691,29 @@ public:
         struct stat st;
         if (stat("test_files", &st) == -1) { mkdir("test_files", 0700); }
 #endif
-        std::filesystem::create_directory("test_files");
-        std::filesystem::permissions("test_files", std::filesystem::perms::owner_all);
 
-        iomanager.start(tcfg.num_threads, tcfg.is_spdk);
+        if (tcfg.remove_file_on_start) {
+            // clean all files under test_files/ dir
+            const fs::path fpath{"test_files"};
+            if (fs::is_directory(fpath)) {
+                auto nfiles = fs::remove_all(fs::canonical(fpath));
+                LOGINFO("Removed {} files in dir: {}", nfiles, fpath.string());
+            } else {
+                LOGINFO("{} is not a directory", fpath.string());
+            }
+        }
+
+        fs::create_directory("test_files");
+        fs::permissions("test_files", fs::perms::owner_all);
+
+        ioenvironment.with_iomgr(tcfg.num_threads, tcfg.is_spdk);
 
         get_dev_info(m_device_info);
         init_params params;
         params.data_open_flags = tcfg.io_flags;
         params.fast_open_flags = tcfg.io_flags;
         params.min_virtual_page_size = tcfg.vol_page_size;
-        params.app_mem_size = 5 * 1024 * 1024 * 1024ul;
+        params.app_mem_size = tcfg.app_mem_size_in_gb * 1024 * 1024 * 1024ul;
 
         params.data_devices = m_device_info;
 
@@ -714,6 +735,8 @@ public:
         for (uint32_t i{0}; i < mod_tests.size(); ++i) {
             mod_tests[i]->try_init_iteration();
         }
+
+        test_common::set_random_http_port();
         VolInterface::init(params);
 
         if (wait_for_init_done) { wait_homestore_init_done(); }
@@ -754,12 +777,12 @@ public:
     }
 
     bool vol_found_cb(const boost::uuids::uuid uuid) {
-        HS_RELEASE_ASSERT_EQ(tcfg.init, false);
+        HS_REL_ASSERT_EQ(tcfg.init, false);
         return (is_valid_vol_file(uuid));
     }
 
     void vol_mounted_cb(const VolumePtr& vol_obj, const vol_state state) {
-        HS_RELEASE_ASSERT_EQ(tcfg.init, false);
+        HS_REL_ASSERT_EQ(tcfg.init, false);
         const auto cnt{output.vol_mounted_cnt.fetch_add(1, std::memory_order_relaxed)};
         vol_init(vol_obj);
 
@@ -770,7 +793,7 @@ public:
         } else {
             viface->attach_vol_completion_cb(vol_obj, bind_this(VolTest::process_single_completion, 1));
         }
-        HS_RELEASE_ASSERT_EQ(state, tcfg.expected_vol_state);
+        HS_REL_ASSERT_EQ(state, tcfg.expected_vol_state);
         if (tcfg.expected_vol_state == homestore::vol_state::DEGRADED ||
             tcfg.expected_vol_state == homestore::vol_state::OFFLINE) {
             VolInterface::get_instance()->vol_state_change(vol_obj, vol_state::ONLINE);
@@ -798,13 +821,32 @@ public:
     }
 
     void vol_state_change_cb(const VolumePtr& vol, const vol_state old_state, const vol_state new_state) {
-        HS_RELEASE_ASSERT_EQ(new_state, homestore::vol_state::FAILED);
+        HS_REL_ASSERT_EQ(new_state, homestore::vol_state::FAILED);
     }
 
     /* Note: It assumes that create volume is not happening in parallel */
     bool create_volume(const int indx) {
+        if ((vol_info.size() != 0) && vol_info[indx]) {
+            if (vol_info[indx]->ref_cnt.get()) {
+                // this volume is still active;
+                return false;
+            } else {
+                // remove volume has been issued on this volume;
+                const auto vol = VolInterface::get_instance()->lookup_volume(vol_info[indx]->uuid);
+                if (vol) {
+                    // async deletion of this volume is still in progress;
+                    // otherwise, vol will not be found by homeblks;
+                    const auto state = VolInterface::get_instance()->get_state(vol);
+                    HS_REL_ASSERT_EQ(state == vol_state::DESTROYING || state == vol_state::START_INDX_TREE_DESTROYING ||
+                                         state == vol_state::DESTROYED,
+                                     true, "unexpected vol state: {}", state);
+                    return false;
+                }
 
-        if ((vol_info.size() != 0) && vol_info[indx] && vol_info[indx]->ref_cnt.get()) { return false; }
+                // volume has already been removed, we can safely fall through to create another volume on same index;
+            }
+        }
+
         /* Create a volume */
         vol_params params;
         params.page_size = tcfg.vol_page_size;
@@ -821,29 +863,44 @@ public:
             LOGINFO("creation failed");
             return false;
         }
-        HS_RELEASE_ASSERT_EQ(VolInterface::get_instance()->lookup_volume(params.uuid), vol_obj);
+        HS_REL_ASSERT_EQ(VolInterface::get_instance()->lookup_volume(params.uuid), vol_obj);
 
         if (tcfg.create_vol_file()) {
-            // we don't use vol file for header verification
             // check remaining space on root fs;
             std::error_code ec;
             uint64_t free_space{0};
-            const std::filesystem::space_info si = std::filesystem::space(std::filesystem::current_path(), ec);
+            const fs::space_info si = fs::space(fs::current_path(), ec);
             if (ec.value()) {
-                HS_RELEASE_ASSERT(false, "Error getting space for dir={}, error={}", name, ec.message());
+                HS_REL_ASSERT(false, "Error getting space for dir={}, error={}", name, ec.message());
             } else {
                 // Don't use more than 30% of free space of root fs;
                 free_space = static_cast< uint64_t >(std::min(si.free, si.available) * tcfg.p_vol_files_space / 100);
             }
-            uint64_t offset_to_seek{tcfg.verify_csum() ? max_vol_size_csum + RESERVE_FILE_BYTE
-                                                       : max_vol_size + RESERVE_FILE_BYTE};
-            HS_RELEASE_ASSERT_GT(free_space, offset_to_seek);
+
+            uint64_t offset_to_seek{0};
+            if (tcfg.verify_csum()) {
+                offset_to_seek = max_vol_size_csum + VOL_FILE_HDR_SZ;
+            } else if (tcfg.verify_data()) {
+                offset_to_seek = max_vol_size + VOL_FILE_HDR_SZ;
+            } else {
+                // we still create vol file with small size for just vol hdr for recovery relies on vol hdr to count
+                // mounted vols;
+                HS_REL_ASSERT(tcfg.verify_hdr() || !tcfg.verify_type_set(), "Unrecognized verify_type: {} ",
+                              tcfg.verify_type);
+                offset_to_seek = VOL_HDR_ONLY_FILE_SIZE;
+            }
+
+            HS_REL_ASSERT_GT(free_space, offset_to_seek);
 
             // create file for verification
-            std::ofstream ofs{name, std::ios::binary | std::ios::out | std::ios::trunc};
-            ofs.seekp(offset_to_seek);
-            ofs.write("", 1);
-            ofs.close();
+            auto vol_file_path = fs::current_path().string() + "/" + name;
+            if (fs::exists(vol_file_path) == false) {
+                // only create file and initialize it when file is not there;
+                std::ofstream ofs{name, std::ios::binary | std::ios::out | std::ios::trunc};
+                ofs.seekp(offset_to_seek);
+                ofs.write("", 1);
+                ofs.close();
+            }
 
             auto fd = open(name.c_str(), O_RDWR);
             init_vol_files(fd, params.uuid);
@@ -861,7 +918,7 @@ public:
     void init_done_cb(const std::error_condition err, const out_params& params) {
         /* create volume */
         if (err) {
-            HS_RELEASE_ASSERT_EQ(tcfg.expected_init_fail, true);
+            HS_REL_ASSERT_EQ(tcfg.expected_init_fail, true);
             {
                 std::unique_lock< std::mutex > lk{m_mutex};
                 m_init_done = true;
@@ -878,18 +935,20 @@ public:
         }
 
         if (tcfg.init) {
-            HS_RELEASE_ASSERT_EQ(params.first_time_boot, true);
+            HS_REL_ASSERT_EQ(params.first_time_boot, true);
         } else {
-            HS_RELEASE_ASSERT_EQ(output.vol_mounted_cnt, get_mounted_vols());
-            HS_RELEASE_ASSERT_EQ(params.first_time_boot, false);
+            HS_REL_ASSERT_EQ(output.vol_mounted_cnt, get_mounted_vols());
+            HS_REL_ASSERT_EQ(params.first_time_boot, false);
         }
 
         tcfg.max_io_size = params.max_io_size;
+        if (SISL_OPTIONS.count("max_io_size")) { tcfg.max_io_size = SISL_OPTIONS["max_io_size"].as< uint64_t >(); }
+
         const uint64_t init_buf_size{tcfg.verify_csum() ? tcfg.vol_page_size : tcfg.max_io_size};
 
-        init_buf = iomanager.iobuf_alloc(512, init_buf_size);
+        init_buf = iomanager.iobuf_alloc(512 /* alignment */, init_buf_size);
         std::memset(static_cast< void* >(init_buf), 0, init_buf_size);
-        HS_RELEASE_ASSERT_EQ(tcfg.expected_init_fail, false);
+        HS_REL_ASSERT_EQ(tcfg.expected_init_fail, false);
         if (tcfg.init) {
             if (tcfg.precreate_volume) {
                 for (uint64_t i{0}; i < tcfg.max_vols; ++i) {
@@ -899,9 +958,10 @@ public:
             // verify_done = true;
             // startTime = Clock::now();
         }
-        tcfg.max_io_size = params.max_io_size;
+
+        // tcfg.max_io_size = params.max_io_size;
         /* TODO :- Rishabh: remove it */
-        // tcfg.max_io_size = 128 * Ki;
+
         outstanding_ios = 0;
 
         {
@@ -958,7 +1018,7 @@ public:
     void delete_volumes() {
         const uint64_t tot_cap{VolInterface::get_instance()->get_system_capacity().initial_total_data_meta_size};
         uint64_t used_cap{VolInterface::get_instance()->get_system_capacity().used_total_size};
-        HS_ASSERT_CMP(RELEASE, used_cap, <=, tot_cap);
+        HS_REL_ASSERT_LE(used_cap, tot_cap);
         for (uint64_t i{0}; i < vol_info.size(); ++i) {
             delete_volume(i);
         }
@@ -971,38 +1031,44 @@ public:
 private:
     void init_vol_file_hdr(const int fd) {
         /* set first bit to 0 */
-        file_hdr hdr;
-        hdr.is_deleted = true;
-        auto buf = iomanager.iobuf_alloc(512, sizeof(file_hdr));
-        *reinterpret_cast< file_hdr* >(buf) = hdr;
-        const auto ret{pwrite(fd, buf, sizeof(file_hdr), 0)};
-        HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(ret), sizeof(file_hdr));
+        vol_file_hdr hdr;
+        hdr.state = vol_cd_state_t::DELETED;
+        auto buf = iomanager.iobuf_alloc(512, sizeof(vol_file_hdr));
+        *reinterpret_cast< vol_file_hdr* >(buf) = hdr;
+        const auto ret{pwrite(fd, buf, sizeof(vol_file_hdr), 0)};
+        HS_REL_ASSERT_EQ(static_cast< uint64_t >(ret), sizeof(vol_file_hdr));
         iomanager.iobuf_free(buf);
     }
 
     void set_vol_file_hdr(const int fd, const boost::uuids::uuid uuid) {
         /* set first bit to 1 */
-        file_hdr hdr;
-        hdr.is_deleted = false;
+        vol_file_hdr hdr;
+        hdr.state = vol_cd_state_t::CREATED;
         hdr.uuid = uuid;
-        auto* const buf{iomanager.iobuf_alloc(512, sizeof(file_hdr))};
-        *reinterpret_cast< file_hdr* >(buf) = hdr;
-        const auto ret{::pwrite(fd, buf, sizeof(file_hdr), 0)};
-        HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(ret), sizeof(file_hdr));
+        auto* const buf{iomanager.iobuf_alloc(512, sizeof(vol_file_hdr))};
+        *reinterpret_cast< vol_file_hdr* >(buf) = hdr;
+        const auto ret{::pwrite(fd, buf, sizeof(vol_file_hdr), 0)};
+        HS_REL_ASSERT_EQ(static_cast< uint64_t >(ret), sizeof(vol_file_hdr));
         iomanager.iobuf_free(buf);
     }
 
-    bool is_valid_vol_file(const boost::uuids::uuid& uuid) const {
-        auto* const buf{iomanager.iobuf_alloc(512, sizeof(file_hdr))};
-        bool found{false};
-        for (uint32_t i{0}; i < tcfg.max_vols; ++i) {
-            const std::string name{VOL_PREFIX + std::to_string(i)};
-            auto fd{::open(name.c_str(), O_RDWR)};
-            const auto ret{::pread(fd, buf, sizeof(file_hdr), 0)};
-            ::close(fd);
-            const file_hdr* const hdr{reinterpret_cast< file_hdr* >(buf)};
-            if (hdr->is_deleted) { continue; }
-            if (hdr->uuid == uuid) {
+    bool is_valid_vol_file(const boost::uuids::uuid& uuid) {
+        auto buf = iomanager.iobuf_alloc(512, sizeof(vol_file_hdr));
+        bool found = false;
+        for (uint32_t i = 0; i < tcfg.max_vols; ++i) {
+            const std::string name = VOL_PREFIX + std::to_string(i);
+            auto fd = open(name.c_str(), O_RDWR);
+            const auto ret{pread(fd, buf, sizeof(vol_file_hdr), 0)};
+            close(fd);
+            vol_file_hdr hdr = *reinterpret_cast< vol_file_hdr* >(buf);
+            if (hdr.state == vol_cd_state_t::DELETED) {
+                if (hdr.uuid == uuid) {
+                    LOGINFO("Bypassing deleted file hdr vol:{} with SAME uuid: {}", name, hdr.uuid);
+                }
+                continue;
+            }
+
+            if (hdr.uuid == uuid) {
                 found = true;
                 break;
             }
@@ -1012,17 +1078,45 @@ private:
         return found;
     }
 
-    uint64_t get_mounted_vols() const {
-        auto* const buf{iomanager.iobuf_alloc(512, sizeof(file_hdr))};
-        uint64_t mounted_vols{0};
-        for (uint32_t i{0}; i < tcfg.max_vols; ++i) {
-            const std::string name{VOL_PREFIX + std::to_string(i)};
-            auto fd{::open(name.c_str(), O_RDWR)};
-            const auto ret{::pread(fd, buf, sizeof(file_hdr), 0)};
-            ::close(fd);
-            const file_hdr* const hdr{reinterpret_cast< file_hdr* >(buf)};
-            if (hdr->is_deleted) { continue; }
-            ++mounted_vols;
+    uint64_t get_mounted_vols() {
+        auto buf = iomanager.iobuf_alloc(512 /* alignment */, sizeof(vol_file_hdr));
+        uint64_t mounted_vols = 0;
+        for (uint32_t i = 0; i < tcfg.max_vols; ++i) {
+            const std::string name = VOL_PREFIX + std::to_string(i);
+            auto fd = open(name.c_str(), O_RDWR);
+
+            if (fd < 0) {
+                // there is assert if mounted vols counter doesn't match;
+                LOGINFO(
+                    "Error opening fd: {}, error: {}, possible volume: {} is not yet created if this is intentional "
+                    "crash test.",
+                    fd, errno, name);
+                continue;
+            }
+
+            std::memset(buf, 0, sizeof(vol_file_hdr));
+
+            // read file content if file exists;
+            const auto ret{pread(fd, buf, sizeof(vol_file_hdr), 0)};
+            close(fd);
+            vol_file_hdr hdr = *reinterpret_cast< vol_file_hdr* >(buf);
+            if (hdr.state == vol_cd_state_t::DELETED) {
+                LOGINFO("Found deleted vol:{}, uuid: {} ", name, hdr.uuid);
+                continue;
+            } else if (hdr.state == vol_cd_state_t::CREATED) {
+                LOGINFO("Found mounted vol:{}, uuid: {} ", name, hdr.uuid);
+                ++mounted_vols;
+            } else {
+                // we will not come here in existing case, but it is a possible path that program do
+                // intentional/random abort after file creation before init file hdr;
+                //
+                // This volume will be discarded by vol_gtest if it has been created insternally by homestore which is a
+                // fine case;
+                LOGINFO(
+                    "Found uninitialized vol: {} on disk and ignoring it, this is because the file is created but not "
+                    "inited yet. ",
+                    name);
+            }
         }
 
         iomanager.iobuf_free(buf);
@@ -1030,13 +1124,13 @@ private:
     }
 
     void write_vol_file(const int fd, void* const buf, const uint64_t write_size, const off_t offset) {
-        const auto ret(::pwrite(fd, buf, write_size, offset + RESERVE_FILE_BYTE));
-        HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(ret), write_size);
+        const auto ret(::pwrite(fd, buf, write_size, offset + VOL_FILE_HDR_SZ));
+        HS_REL_ASSERT_EQ(static_cast< uint64_t >(ret), write_size);
     }
 
     void read_vol_file(const int fd, void* const buf, const uint64_t read_size, const off_t offset) {
-        const auto ret(::pread(fd, buf, read_size, offset + RESERVE_FILE_BYTE));
-        HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(ret), read_size);
+        const auto ret(::pread(fd, buf, read_size, offset + VOL_FILE_HDR_SZ));
+        HS_REL_ASSERT_EQ(static_cast< uint64_t >(ret), read_size);
     }
 
     int get_vol_indx(const std::string& file_name) {
@@ -1045,32 +1139,43 @@ private:
     }
 
     void init_vol_files(const int fd, const boost::uuids::uuid uuid) {
-        // initialize the file
-        uint8_t* init_csum_buf{nullptr};
-        const uint16_t csum_zero{
-            crc16_t10dif(init_crc_16, static_cast< const uint8_t* >(init_buf), tcfg.vol_page_size)};
-        if (tcfg.verify_csum()) {
-            init_csum_buf = iomanager.iobuf_alloc(512, sizeof(uint16_t));
-            *reinterpret_cast< uint16_t* >(init_csum_buf) = csum_zero;
-        }
-        const uint64_t offset_increment{tcfg.verify_csum() ? sizeof(uint16_t) : tcfg.max_io_size};
+        if (tcfg.verify_csum() || tcfg.verify_data()) {
+            // 1. we only write vol file content for csum and data verify;
+            // 2. skip for hdr and null verify type;
+            //
+            // for csum, write csum (sizeof(uint64_t)) for every 4k data;
+            // initialize the file only for non-header case;
+            uint8_t* init_csum_buf{nullptr};
+            const uint32_t num_csums_write{1024};
+            const uint16_t csum_zero{
+                crc16_t10dif(init_crc_16, static_cast< const uint8_t* >(init_buf), tcfg.vol_page_size)};
+            if (tcfg.verify_csum()) {
+                init_csum_buf = iomanager.iobuf_alloc(512, num_csums_write * sizeof(uint16_t));
+                for (size_t i = 0; i < num_csums_write; ++i) {
+                    *(reinterpret_cast< uint16_t* >(init_csum_buf) + i) = csum_zero;
+                }
+            }
+            const uint64_t offset_increment{tcfg.verify_csum() ? (sizeof(uint16_t) * num_csums_write)
+                                                               : tcfg.max_io_size};
 
-        const uint64_t max_offset{tcfg.verify_csum() ? max_vol_size_csum : max_vol_size};
+            const uint64_t max_offset{tcfg.verify_csum() ? max_vol_size_csum : max_vol_size};
 
-        for (uint64_t offset{0}; offset < max_offset; offset += offset_increment) {
-            uint64_t write_size;
-            if (offset + offset_increment > max_offset) {
-                write_size = max_offset - offset;
-            } else {
-                write_size = offset_increment;
+            for (uint64_t offset{0}; offset < max_offset; offset += offset_increment) {
+                uint64_t write_size;
+                if (offset + offset_increment > max_offset) {
+                    write_size = max_offset - offset;
+                } else {
+                    write_size = offset_increment;
+                }
+
+                write_vol_file(fd, static_cast< void* >(tcfg.verify_csum() ? init_csum_buf : init_buf), write_size,
+                               static_cast< off_t >(offset));
             }
 
-            write_vol_file(fd, static_cast< void* >(tcfg.verify_csum() ? init_csum_buf : init_buf), write_size,
-                           static_cast< off_t >(offset));
+            if (init_csum_buf) { iomanager.iobuf_free(init_csum_buf); }
         }
 
-        if (init_csum_buf) { iomanager.iobuf_free(init_csum_buf); }
-
+        // we write header in the last, so if it crashes before header written, vol will be discarded;
         set_vol_file_hdr(fd, uuid);
     }
 
@@ -1104,7 +1209,7 @@ private:
         }
 
         // Second iteration gives the job a chance to refill the work if it is not time to stop
-        HS_RELEASE_ASSERT_EQ(completed_reqs_this_thread.empty(), false);
+        HS_REL_ASSERT_EQ(completed_reqs_this_thread.empty(), false);
         while (!completed_reqs_this_thread.empty()) {
             auto vol_req{std::move(completed_reqs_this_thread.front())};
             completed_reqs_this_thread.pop_front();
@@ -1126,7 +1231,7 @@ private:
         bool desired{true};
         if (vinfo->vol_destroyed.compare_exchange_strong(expected, desired)) {
             if (!tcfg.expect_io_error) {
-                HS_RELEASE_ASSERT_EQ(VolInterface::get_instance()->get_state(vol), vol_state::ONLINE);
+                HS_REL_ASSERT_EQ(VolInterface::get_instance()->get_state(vol), vol_state::ONLINE);
             }
             uuid = VolInterface::get_instance()->get_uuid(vinfo->vol);
             /* initialize file hdr */
@@ -1153,9 +1258,9 @@ private:
     void remove_journal_files() {
         // Remove journal folders
         for (size_t i{0}; i < vol_info.size(); ++i) {
-            const std::filesystem::path name{boost::lexical_cast< std::string >(vol_info[i]->uuid)};
-            if (std::filesystem::exists(name) && std::filesystem::is_directory(name)) {
-                std::filesystem::remove_all(name);
+            const fs::path name{boost::lexical_cast< std::string >(vol_info[i]->uuid)};
+            if (fs::exists(name) && fs::is_directory(name)) {
+                fs::remove_all(name);
                 LOGINFO("Removed journal dir: {}", name);
             }
         }
@@ -1164,7 +1269,7 @@ private:
 public:
     void force_reinit(const std::vector< dev_info >& data_devices, const io_flag data_oflags,
                       const io_flag fast_oflags) {
-        iomanager.start(1);
+        ioenvironment.with_iomgr(1);
         VolInterface::get_instance()->zero_boot_sbs(data_devices);
         iomanager.stop();
     }
@@ -1219,7 +1324,7 @@ public:
     virtual void run_one_iteration() override {
         static thread_local uint64_t num_rw_without_unmap{tcfg.unmap_frequency};
         uint64_t cnt{0};
-        HS_ASSERT_CMP(RELEASE, tcfg.max_outstanding_ios, >=, tcfg.num_threads);
+        HS_REL_ASSERT_GE(tcfg.max_outstanding_ios, tcfg.num_threads);
         while ((cnt++ < 1) && (m_outstanding_ios < tcfg.max_outstanding_ios)) {
             write_io();
             if (tcfg.read_enable) { read_io(); }
@@ -1311,7 +1416,10 @@ protected:
     struct io_lba_range_t {
         io_lba_range_t() {}
         io_lba_range_t(bool valid, uint64_t vidx, uint64_t l, uint32_t n) :
-                valid_io{valid}, vol_idx{vidx}, lba{l}, num_lbas{n} {}
+                valid_io{valid},
+                vol_idx{vidx},
+                lba{l},
+                num_lbas{n} {}
         bool valid_io{false};
         uint64_t vol_idx{0};
         uint64_t lba{0};
@@ -1505,7 +1613,7 @@ protected:
         boost::intrusive_ptr< io_req_t > vreq{};
         if (tcfg.write_cache) {
             uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
-            HS_ASSERT_NOTNULL(RELEASE, wbuf);
+            HS_REL_ASSERT_NOTNULL(wbuf);
 
             populate_buf(wbuf, size, lba, vinfo.get());
 
@@ -1517,7 +1625,7 @@ protected:
             if (send_iovec) {
                 for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
                     uint8_t* const wbuf{iomanager.iobuf_alloc(512, page_size)};
-                    HS_ASSERT_NOTNULL(RELEASE, wbuf);
+                    HS_REL_ASSERT_NOTNULL(wbuf);
                     iovec iov{static_cast< void* >(wbuf), static_cast< size_t >(page_size)};
                     iovecs.emplace_back(std::move(iov));
 
@@ -1529,7 +1637,7 @@ protected:
             } else {
                 uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
                 populate_buf(wbuf, size, lba, vinfo.get());
-                HS_ASSERT_NOTNULL(RELEASE, wbuf);
+                HS_REL_ASSERT_NOTNULL(wbuf);
 
                 vreq = boost::intrusive_ptr< io_req_t >{
                     new io_req_t(vinfo, Op_type::WRITE, wbuf, lba, nlbas, tcfg.verify_csum(), tcfg.write_cache)};
@@ -1589,7 +1697,9 @@ protected:
                 std::vector< iovec > iovecs{};
                 for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
                     uint8_t* const rbuf{iomanager.iobuf_alloc(512, page_size)};
-                    HS_ASSERT_NOTNULL(RELEASE, rbuf);
+                    std::memset(static_cast< void* >(rbuf), 0, page_size);
+
+                    HS_REL_ASSERT_NOTNULL(rbuf);
                     iovec iov{static_cast< void* >(rbuf), static_cast< size_t >(page_size)};
                     iovecs.emplace_back(std::move(iov));
                 }
@@ -1598,6 +1708,7 @@ protected:
                                                                      nlbas, tcfg.verify_csum(), tcfg.read_cache, sync}};
             } else {
                 uint8_t* const rbuf{iomanager.iobuf_alloc(512, nlbas * page_size)};
+                std::memset(static_cast< void* >(rbuf), 0, nlbas * page_size);
                 vreq = boost::intrusive_ptr< io_req_t >{
                     new io_req_t{vinfo, Op_type::READ, rbuf, lba, nlbas, tcfg.verify_csum(), tcfg.read_cache, sync}};
             }
@@ -1696,8 +1807,9 @@ protected:
                     VolInterface::get_instance()->print_tree(req->vol_info->vol);
 #endif
                     LOGINFO("lba {} {}", req->lba, req->nlbas);
-                    std::this_thread::sleep_for(std::chrono::seconds{30});
-                    HS_RELEASE_ASSERT(0, "");
+                    // verify is done io is done completion thread which is SPDK thread and can't do sleep
+                    // std::this_thread::sleep_for(std::chrono::seconds{30});
+                    HS_REL_ASSERT(0, "");
                 }
                 // need to return false
                 return false;
@@ -1713,7 +1825,7 @@ protected:
             for (auto& info : vol_req->read_buf_list) {
                 uint32_t offset{static_cast< uint32_t >(info.offset)};
                 uint64_t size{info.size};
-                HS_RELEASE_ASSERT_EQ(size % size_read, 0);
+                HS_REL_ASSERT_EQ(size % size_read, 0);
                 const auto buf{info.buf};
                 while (size != 0) {
                     const sisl::blob b{VolInterface::get_instance()->at_offset(buf, offset)};
@@ -1730,7 +1842,7 @@ protected:
             for (const auto& iov : vol_req->iovecs) {
                 uint64_t size{static_cast< uint64_t >(iov.iov_len)};
                 uint32_t offset{0};
-                HS_RELEASE_ASSERT_EQ(size % size_read, 0);
+                HS_REL_ASSERT_EQ(size % size_read, 0);
                 while (size != 0) {
                     const uint8_t* const buffer{static_cast< uint8_t* >(iov.iov_base) + offset};
                     const uint8_t* const validate_buffer{req->validate_buffer +
@@ -1743,8 +1855,8 @@ protected:
                 }
             }
         }
-        tcfg.verify_csum() ? (HS_RELEASE_ASSERT_EQ(total_size_read_csum, req->verify_size))
-                           : (HS_RELEASE_ASSERT_EQ(total_size_read, req->original_size));
+        tcfg.verify_csum() ? (HS_REL_ASSERT_EQ(total_size_read_csum, req->verify_size))
+                           : (HS_REL_ASSERT_EQ(total_size_read, req->original_size));
         return true;
     }
 };
@@ -1826,7 +1938,7 @@ TEST_F(VolTest, lifecycle_test) {
     this->shutdown();
 
     LOGINFO("Shutdown of homestore is completed, removing files");
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 /*
@@ -1853,7 +1965,7 @@ TEST_F(VolTest, vol_crc_mismatch_test) {
     this->shutdown();
 
     LOGINFO("Shutdown of homestore is completed, removing files");
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
     tcfg.expect_vol_offline = false;
 }
 
@@ -1886,7 +1998,7 @@ TEST_F(VolTest, init_io_test) {
     if (tcfg.create_del_with_io || tcfg.delete_with_io) { cdjob->wait_for_completion(); }
 
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 /*!
@@ -1920,7 +2032,7 @@ TEST_F(VolTest, recovery_io_test) {
 
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 #ifdef _PRERELEASE
@@ -1942,7 +2054,7 @@ TEST_F(VolTest, hs_force_reinit_test) {
 
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 #endif
 
@@ -1960,7 +2072,7 @@ TEST_F(VolTest, hs_force_reinit_test) {
     // 1. first calling init_done to zero sb on physical device_boot_fail
     std::vector< dev_info > tmp_data_dev_info, tmp_fast_dev_info;
     get_dev_info(tmp_dev_info);
-    HS_RELEASE_ASSERT_GT(tmp_dev_info.size(), 0);
+    HS_REL_ASSERT_GT(tmp_dev_info.size(), 0);
 
     this->force_reinit(tmp_dev_info, homestore::io_flag::DIRECT_IO,
                        tmp_fast_dev_info, homestore::io_flag::DIRECT_IO);
@@ -1972,7 +2084,7 @@ TEST_F(VolTest, hs_force_reinit_test) {
 
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 #endif
 
@@ -1988,7 +2100,7 @@ TEST_F(VolTest, vol_create_del_test) {
     this->start_job(cdjob.get(), wait_type::for_completion);
     output.print("vol_create_del_test");
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 /************ Below tests check the workflows ***********/
@@ -2011,7 +2123,7 @@ TEST_F(VolTest, one_disk_fail_test) {
 
     output.print("one_disk_fail_test");
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 TEST_F(VolTest, vol_offline_test) {
@@ -2060,7 +2172,7 @@ TEST_F(VolTest, btree_fix_read_failure_test) {
 
     this->delete_volumes();
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 /**
@@ -2087,7 +2199,7 @@ TEST_F(VolTest, btree_fix_test) {
 
     this->delete_volumes();
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 /**
@@ -2123,7 +2235,7 @@ TEST_F(VolTest, btree_fix_rerun_io_test) {
 
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();
-    if (tcfg.remove_file) { this->remove_files(); }
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 std::vector< module_test* > mod_tests;
@@ -2134,7 +2246,7 @@ std::vector< std::function< void() > > mod_init_funcs;
 
 /************************* CLI options ***************************/
 
-SDS_OPTION_GROUP(
+SISL_OPTION_GROUP(
     test_volume,
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("30"), "seconds"),
     (load_type, "", "load_type", "load_type", ::cxxopts::value< uint32_t >()->default_value("0"),
@@ -2149,7 +2261,7 @@ SDS_OPTION_GROUP(
     (unmap_enable, "", "unmap_enable", "unmap enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("0"),
      "flag"),
     (max_disk_capacity, "", "max_disk_capacity", "max disk capacity",
-     ::cxxopts::value< uint64_t >()->default_value("5"), "GB"),
+     ::cxxopts::value< uint64_t >()->default_value("20"), "GB"),
     (max_volume, "", "max_volume", "max volume", ::cxxopts::value< uint64_t >()->default_value("50"), "number"),
     (max_num_writes, "", "max_num_writes", "max num of writes", ::cxxopts::value< uint64_t >()->default_value("100000"),
      "number"),
@@ -2159,8 +2271,12 @@ SDS_OPTION_GROUP(
      ::cxxopts::value< uint64_t >()->default_value("0"), "0 or 1"),
     (enable_crash_handler, "", "enable_crash_handler", "enable crash handler 0 or 1",
      ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
-    (remove_file, "", "remove_file", "remove file at the end of test 0 or 1",
-     ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
+    (remove_file_on_shutdown, "", "remove_file_on_shutdown", "remove file at the end of test 0 or 1",
+     ::cxxopts::value< uint32_t >()->default_value("1"), "flag"), // remove file on shutdown
+    (remove_file_on_start, "", "remove_file_on_start", "remove file at the start of test 0 or 1",
+     ::cxxopts::value< uint32_t >()->default_value("0"),
+     "flag"), // by default (0) we keep the file on disk unless the test specifically ask to remove, some tests rely on
+              // previously generated vol files to run;
     (expected_vol_state, "", "expected_vol_state", "volume state expected during boot",
      ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (verify_only, "", "verify_only", "verify only boot", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
@@ -2204,15 +2320,19 @@ SDS_OPTION_GROUP(
      ::cxxopts::value< uint32_t >()->default_value("100"), "number of ops"),
     (create_del_ops_interval, "", "create_del_ops_interval", "create_del_ops_interval",
      ::cxxopts::value< uint32_t >()->default_value("10"), "interval between create del in seconds"),
-    (emulate_hdd_cnt, "", "emulate_hdd_cnt", "emulate_hdd_cnt", ::cxxopts::value< uint32_t >()->default_value("1"),
+    (emulate_hdd_cnt, "", "emulate_hdd_cnt", "emulate_hdd_cnt", ::cxxopts::value< uint32_t >()->default_value("0"),
      "number of files or drives to be emulated as hdd"),
     (p_vol_files_space, "", "p_vol_files_space",
      "percentage of volume verficiation files of available free space on hosting file system",
-     ::cxxopts::value< uint32_t >()->default_value("30"), "0 to 100"))
+     ::cxxopts::value< uint32_t >()->default_value("30"), "0 to 100"),
+    (app_mem_size_in_gb, "", "app_mem_size_in_gb", "cache size in gb",
+     ::cxxopts::value< uint32_t >()->default_value("1"), "1 to 5"),
+    (max_io_size, "", "max_io_size", "max io size", ::cxxopts::value< uint64_t >()->default_value("4096"),
+     "max_io_size"))
 
-#define ENABLED_OPTIONS logging, home_blks, test_volume, iomgr, test_indx_mgr, test_meta_mod, test_vdev_mod, config
+#define ENABLED_OPTIONS logging, test_volume, iomgr, test_indx_mgr, test_meta_mod, test_vdev_mod, config
 
-SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
+SISL_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
 /************************** MAIN ********************************/
 
@@ -2226,56 +2346,57 @@ SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
 int main(int argc, char* argv[]) {
     ::testing::GTEST_FLAG(filter) = "*lifecycle_test*";
     ::testing::InitGoogleTest(&argc, argv);
-    SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
-    sds_logging::SetLogger("test_volume");
+    SISL_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
+    sisl::logging::SetLogger("test_volume");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
     homestore::vol_test_run = true;
 
     TestCfg& gcfg{const_cast< TestCfg& >(g_cfg)};
-    gcfg.run_time = SDS_OPTIONS["run_time"].as< uint32_t >();
-    gcfg.num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
-    gcfg.read_enable = SDS_OPTIONS["read_enable"].as< uint32_t >();
-    gcfg.unmap_enable = SDS_OPTIONS["unmap_enable"].as< uint32_t >();
-    gcfg.max_disk_capacity = ((SDS_OPTIONS["max_disk_capacity"].as< uint64_t >()) * (1ul << 30));
-    gcfg.max_vols = SDS_OPTIONS["max_volume"].as< uint64_t >();
-    gcfg.max_num_writes = SDS_OPTIONS["max_num_writes"].as< uint64_t >();
-    gcfg.enable_crash_handler = SDS_OPTIONS["enable_crash_handler"].as< uint32_t >();
-    gcfg.verify_type = static_cast< verify_type_t >(SDS_OPTIONS["verify_type"].as< uint32_t >());
-    gcfg.pre_init_verify = SDS_OPTIONS["pre_init_verify"].as< bool >();
-    gcfg.read_verify = SDS_OPTIONS["read_verify"].as< uint64_t >() ? true : false;
-    gcfg.load_type = static_cast< load_type_t >(SDS_OPTIONS["load_type"].as< uint32_t >());
-    gcfg.remove_file = SDS_OPTIONS["remove_file"].as< uint32_t >();
-    gcfg.expected_vol_state = static_cast< homestore::vol_state >(SDS_OPTIONS["expected_vol_state"].as< uint32_t >());
-    gcfg.verify_only = SDS_OPTIONS["verify_only"].as< uint32_t >();
-    gcfg.is_abort = SDS_OPTIONS["abort"].as< uint32_t >();
-    gcfg.flip_set = SDS_OPTIONS["flip"].as< uint32_t >();
-    gcfg.can_delete_volume = SDS_OPTIONS["delete_volume"].as< uint32_t >() ? true : false;
-    gcfg.atomic_phys_page_size = SDS_OPTIONS["atomic_phys_page_size"].as< uint32_t >();
-    gcfg.vol_page_size = SDS_OPTIONS["vol_page_size"].as< uint32_t >();
-    gcfg.phy_page_size = SDS_OPTIONS["phy_page_size"].as< uint32_t >();
-    gcfg.mem_btree_page_size = SDS_OPTIONS["mem_btree_page_size"].as< uint32_t >();
-    gcfg.io_flags = static_cast< io_flag >(SDS_OPTIONS["io_flags"].as< uint32_t >());
-    gcfg.expect_io_error = SDS_OPTIONS["expect_io_error"].as< uint32_t >() ? true : false;
-    gcfg.p_volume_size = SDS_OPTIONS["p_volume_size"].as< uint32_t >();
-    gcfg.is_spdk = SDS_OPTIONS["spdk"].as< bool >();
-    gcfg.read_cache = SDS_OPTIONS["read_cache"].as< uint32_t >() != 0 ? true : false;
-    gcfg.write_cache = SDS_OPTIONS["write_cache"].as< uint32_t >() != 0 ? true : false;
-    gcfg.read_iovec = SDS_OPTIONS["read_iovec"].as< uint32_t >() != 0 ? true : false;
-    gcfg.write_iovec = SDS_OPTIONS["write_iovec"].as< uint32_t >() != 0 ? true : false;
-    gcfg.batch_completion = SDS_OPTIONS["batch_completion"].as< bool >();
-    gcfg.vol_create_del = SDS_OPTIONS["vol_create_del"].as< bool >();
-    gcfg.create_del_with_io = SDS_OPTIONS["create_del_with_io"].as< bool >();
-    gcfg.delete_with_io = SDS_OPTIONS["delete_with_io"].as< bool >();
-    gcfg.create_del_ops_cnt = SDS_OPTIONS["create_del_ops_cnt"].as< uint32_t >();
-    gcfg.create_del_ops_interval = SDS_OPTIONS["create_del_ops_interval"].as< uint32_t >();
-    gcfg.flip_name = SDS_OPTIONS["flip_name"].as< std::string >();
-    gcfg.overlapping_allowed = SDS_OPTIONS["overlapping_allowed"].as< bool >();
-    gcfg.emulate_hdd_cnt = SDS_OPTIONS["emulate_hdd_cnt"].as< uint32_t >();
+    gcfg.run_time = SISL_OPTIONS["run_time"].as< uint32_t >();
+    gcfg.num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
+    gcfg.read_enable = SISL_OPTIONS["read_enable"].as< uint32_t >();
+    gcfg.unmap_enable = SISL_OPTIONS["unmap_enable"].as< uint32_t >();
+    gcfg.max_disk_capacity = ((SISL_OPTIONS["max_disk_capacity"].as< uint64_t >()) * (1ul << 30));
+    gcfg.max_vols = SISL_OPTIONS["max_volume"].as< uint64_t >();
+    gcfg.max_num_writes = SISL_OPTIONS["max_num_writes"].as< uint64_t >();
+    gcfg.enable_crash_handler = SISL_OPTIONS["enable_crash_handler"].as< uint32_t >();
+    gcfg.verify_type = static_cast< verify_type_t >(SISL_OPTIONS["verify_type"].as< uint32_t >());
+    gcfg.pre_init_verify = SISL_OPTIONS["pre_init_verify"].as< bool >();
+    gcfg.read_verify = SISL_OPTIONS["read_verify"].as< uint64_t >() ? true : false;
+    gcfg.load_type = static_cast< load_type_t >(SISL_OPTIONS["load_type"].as< uint32_t >());
+    gcfg.remove_file_on_shutdown = SISL_OPTIONS["remove_file_on_shutdown"].as< uint32_t >();
+    gcfg.remove_file_on_start = SISL_OPTIONS["remove_file_on_start"].as< uint32_t >();
+    gcfg.expected_vol_state = static_cast< homestore::vol_state >(SISL_OPTIONS["expected_vol_state"].as< uint32_t >());
+    gcfg.verify_only = SISL_OPTIONS["verify_only"].as< uint32_t >();
+    gcfg.is_abort = SISL_OPTIONS["abort"].as< uint32_t >();
+    gcfg.flip_set = SISL_OPTIONS["flip"].as< uint32_t >();
+    gcfg.can_delete_volume = SISL_OPTIONS["delete_volume"].as< uint32_t >() ? true : false;
+    gcfg.atomic_phys_page_size = SISL_OPTIONS["atomic_phys_page_size"].as< uint32_t >();
+    gcfg.vol_page_size = SISL_OPTIONS["vol_page_size"].as< uint32_t >();
+    gcfg.phy_page_size = SISL_OPTIONS["phy_page_size"].as< uint32_t >();
+    gcfg.mem_btree_page_size = SISL_OPTIONS["mem_btree_page_size"].as< uint32_t >();
+    gcfg.io_flags = static_cast< io_flag >(SISL_OPTIONS["io_flags"].as< uint32_t >());
+    gcfg.expect_io_error = SISL_OPTIONS["expect_io_error"].as< uint32_t >() ? true : false;
+    gcfg.p_volume_size = SISL_OPTIONS["p_volume_size"].as< uint32_t >();
+    gcfg.is_spdk = SISL_OPTIONS["spdk"].as< bool >();
+    gcfg.read_cache = SISL_OPTIONS["read_cache"].as< uint32_t >() != 0 ? true : false;
+    gcfg.write_cache = SISL_OPTIONS["write_cache"].as< uint32_t >() != 0 ? true : false;
+    gcfg.read_iovec = SISL_OPTIONS["read_iovec"].as< uint32_t >() != 0 ? true : false;
+    gcfg.write_iovec = SISL_OPTIONS["write_iovec"].as< uint32_t >() != 0 ? true : false;
+    gcfg.batch_completion = SISL_OPTIONS["batch_completion"].as< bool >();
+    gcfg.vol_create_del = SISL_OPTIONS["vol_create_del"].as< bool >();
+    gcfg.create_del_with_io = SISL_OPTIONS["create_del_with_io"].as< bool >();
+    gcfg.delete_with_io = SISL_OPTIONS["delete_with_io"].as< bool >();
+    gcfg.create_del_ops_cnt = SISL_OPTIONS["create_del_ops_cnt"].as< uint32_t >();
+    gcfg.create_del_ops_interval = SISL_OPTIONS["create_del_ops_interval"].as< uint32_t >();
+    gcfg.flip_name = SISL_OPTIONS["flip_name"].as< std::string >();
+    gcfg.overlapping_allowed = SISL_OPTIONS["overlapping_allowed"].as< bool >();
+    gcfg.emulate_hdd_cnt = SISL_OPTIONS["emulate_hdd_cnt"].as< uint32_t >();
+    gcfg.p_vol_files_space = SISL_OPTIONS["p_vol_files_space"].as< uint32_t >();
+    gcfg.app_mem_size_in_gb = SISL_OPTIONS["app_mem_size_in_gb"].as< uint32_t >();
 
-    gcfg.p_vol_files_space = SDS_OPTIONS["p_vol_files_space"].as< uint32_t >();
-
-    if (SDS_OPTIONS.count("device_list")) {
-        gcfg.dev_names = SDS_OPTIONS["device_list"].as< std::vector< std::string > >();
+    if (SISL_OPTIONS.count("device_list")) {
+        gcfg.dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
         std::string dev_list_str;
         for (const auto& d : gcfg.dev_names) {
             dev_list_str += d;
@@ -2283,10 +2404,10 @@ int main(int argc, char* argv[]) {
         LOGINFO("Taking input dev_list: {}", dev_list_str);
     }
 
-    if (SDS_OPTIONS.count("mod_list")) {
+    if (SISL_OPTIONS.count("mod_list")) {
         // currently we should only have use-case for one module enabled concurrently,
         // but this framework allows user to enable multiple;
-        gcfg.mod_list = SDS_OPTIONS["mod_list"].as< std::vector< std::string > >();
+        gcfg.mod_list = SISL_OPTIONS["mod_list"].as< std::vector< std::string > >();
         for (size_t i{0}; i < gcfg.mod_list.size(); ++i) {
             if (gcfg.mod_list[i] == "meta") {
                 mod_init_funcs.push_back(meta_mod_test_main);
@@ -2306,15 +2427,15 @@ int main(int argc, char* argv[]) {
 
     if ((gcfg.load_type == load_type_t::sequential) || (gcfg.load_type == load_type_t::same)) {
         gcfg.verify_type = verify_type_t::null;
-        if (gcfg.load_type == load_type_t::same) { gcfg.nblks = SDS_OPTIONS["nblks"].as< uint32_t >(); }
+        if (gcfg.load_type == load_type_t::same) { gcfg.nblks = SISL_OPTIONS["nblks"].as< uint32_t >(); }
     }
 
     if (gcfg.overlapping_allowed) { gcfg.verify_type = verify_type_t::header; }
 
-    if (gcfg.enable_crash_handler) { sds_logging::install_crash_handler(); }
+    if (gcfg.enable_crash_handler) { sisl::logging::install_crash_handler(); }
 
     // TODO: Remove this once we found the root cause of the problem.
-    sds_logging::SetModuleLogLevel("transient", spdlog::level::debug);
+    sisl::logging::SetModuleLogLevel("transient", spdlog::level::debug);
 
     /* if --spdk is not set, check env variable if user want to run spdk */
     if (!gcfg.is_spdk && std::getenv(SPDK_ENV_VAR_STRING.c_str())) { gcfg.is_spdk = true; }

@@ -20,15 +20,8 @@
 
 using namespace homestore;
 
-SDS_LOGGING_DECL(volume)
-SDS_LOGGING_DECL(vol_io_wd)
-
-namespace {
-#ifndef NDEBUG
-/* only for testing */
-bool vol_test_enable{false};
-#endif
-} // namespace
+SISL_LOGGING_DECL(volume)
+SISL_LOGGING_DECL(vol_io_wd)
 
 sisl::atomic_counter< uint64_t > Volume::home_blks_ref_cnt{0};
 
@@ -53,7 +46,7 @@ void VolumeIOWatchDog::add_io(const volume_child_req_ptr& vc_req) {
 
         const auto result = m_outstanding_ios.insert_or_assign(vc_req->unique_id, vc_req);
         HS_LOG(TRACE, vol_io_wd, "add_io: {}, {}", vc_req->unique_id, vc_req->to_string());
-        HS_RELEASE_ASSERT_EQ(result.second, true, "expecting to insert instead of update");
+        HS_REL_ASSERT_EQ(result.second, true, "expecting to insert instead of update");
     }
 }
 
@@ -62,7 +55,7 @@ void VolumeIOWatchDog::complete_io(const volume_child_req_ptr& vc_req) {
         std::unique_lock< std::mutex > lk(m_mtx);
         const auto result = m_outstanding_ios.erase(vc_req->unique_id);
         HS_LOG(TRACE, vol_io_wd, "complete_io: {}, {}", vc_req->unique_id, vc_req->to_string());
-        HS_RELEASE_ASSERT_EQ(result, 1, "expecting to erase 1 element");
+        HS_REL_ASSERT_EQ(result, 1, "expecting to erase 1 element");
     }
 }
 
@@ -90,8 +83,9 @@ void VolumeIOWatchDog::io_timer() {
                         timeout_reqs.size(), get_elapsed_time_us(timeout_reqs[0]->op_start_time),
                         timeout_reqs[0]->to_string());
 
-            HS_ASSERT(RELEASE, false, "Volume IO watchdog timeout! timeout_limit: {}, watchdog_timer: {}",
-                      HB_DYNAMIC_CONFIG(volume.io_timeout_limit_sec), HB_DYNAMIC_CONFIG(volume.io_watchdog_timer_sec));
+            HS_REL_ASSERT(false, "Volume IO watchdog timeout! timeout_limit: {}, watchdog_timer: {}",
+                          HB_DYNAMIC_CONFIG(volume.io_timeout_limit_sec),
+                          HB_DYNAMIC_CONFIG(volume.io_watchdog_timer_sec));
         } else {
             HS_PERIODIC_LOG(DEBUG, vol_io_wd, "io_timer passed {}, no timee out IO found. Total outstanding_io_cnt: {}",
                             ++m_wd_pass_cnt, m_outstanding_ios.size());
@@ -132,6 +126,7 @@ void Volume::set_io_flip() {
 
     freq.set_count(10);
     freq.set_percent(10);
+    fc->inject_noreturn_flip("simulate_slow_dirty_buffer", {null_cond}, freq);
     fc->inject_retval_flip("io_write_iocb_empty_flip", {null_cond}, freq, 20);
     fc->inject_retval_flip("io_read_iocb_empty_flip", {null_cond}, freq, 20);
     fc->inject_retval_flip("read_write_resubmit_io", {null_cond}, freq, 1);
@@ -178,8 +173,9 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
     auto sb = (vol_sb_hdr*)m_sb_buf->bytes;
     m_state = sb->state;
 
-    HS_RELEASE_ASSERT_EQ(sb->version, vol_sb_version, "version mismatch");
-    HS_RELEASE_ASSERT_EQ(sb->magic, vol_sb_magic, "magic mismatch");
+    THIS_VOL_LOG(INFO, volume, , "Found volume: {}", sb->to_string());
+    HS_REL_ASSERT_LE(sb->version, vol_sb_version, "version mismatch");
+    HS_REL_ASSERT_EQ(sb->magic, vol_sb_magic, "magic mismatch");
     m_hb = HomeBlks::safe_instance();
 }
 
@@ -191,14 +187,17 @@ void Volume::init() {
     /* add this volume in home blks */
     if (m_sb_buf == nullptr) {
         init = true;
-        /* populate superblock */
-        // TO DO: Might need to address alignment based on data or fast type
+        // allocate stream for this volume
+        if (is_data_drive_hdd()) { m_stream_info = m_hb->get_data_blkstore()->get_vdev()->alloc_stream(m_params.size); }
+
         m_sb_buf =
-            hs_utils::make_byte_array(sizeof(vol_sb_hdr), MetaBlkMgrSI()->is_aligned_buf_needed(sizeof(vol_sb_hdr)),
-                                      sisl::buftag::metablk, MetaBlkMgrSI()->get_align_size());
+            hs_utils::make_byte_array(sizeof(vol_sb_hdr) + (m_stream_info.num_streams * sizeof(vdev_stream_id_t)),
+                                      MetaBlkMgrSI()->is_aligned_buf_needed(sizeof(vol_sb_hdr)), sisl::buftag::metablk,
+                                      MetaBlkMgrSI()->get_align_size());
 
         /* populate superblock */
-        sb = new (m_sb_buf->bytes) vol_sb_hdr(m_params.page_size, m_params.size, m_params.vol_name, m_params.uuid);
+        sb = new (m_sb_buf->bytes)
+            vol_sb_hdr(m_params.page_size, m_params.size, m_params.vol_name, m_params.uuid, m_stream_info.num_streams);
 
         /* create indx tbl */
         m_indx_mgr = SnapMgr::make_SnapMgr(
@@ -208,13 +207,11 @@ void Volume::init() {
             std::bind(&Volume::create_indx_tbl, this), false);
 
         sb->indx_sb = m_indx_mgr->get_immutable_sb();
-
-        // allocate stream for this volume
-        if (is_data_drive_hdd()) {
-            auto info = m_hb->get_data_blkstore()->get_vdev()->alloc_stream();
-            sb->stream_id = info.first;
-            m_stream_ptr = info.second;
+        vdev_stream_id_t* const id = (vdev_stream_id_t*)(m_sb_buf->bytes + sizeof(vol_sb_hdr));
+        for (uint32_t i{0}; i < sb->num_streams; ++i) {
+            id[i] = m_stream_info.stream_id[i];
         }
+
         set_state(vol_state::ONLINE, true);
         m_seq_id = m_indx_mgr->get_max_seqid_found_in_recovery();
         /* it is called after superblock is persisted by volume */
@@ -223,6 +220,12 @@ void Volume::init() {
     } else {
         /* recovery */
         sb = (vol_sb_hdr*)m_sb_buf->bytes;
+        if (sb->version == vol_sb_version_1_2) {
+            // upgrade it to the new version
+            sb->version = vol_sb_version;
+            sb->num_streams = 0;
+            write_sb();
+        }
         auto indx_sb = sb->indx_sb;
         m_indx_mgr = SnapMgr::make_SnapMgr(
             get_uuid(), std::string(get_name()),
@@ -233,12 +236,13 @@ void Volume::init() {
 
         // reserve stream if it is hard drive
         if (is_data_drive_hdd()) {
-            m_stream_ptr = m_hb->get_data_blkstore()->get_vdev()->reserve_stream(sb->stream_id);
+            m_stream_info = m_hb->get_data_blkstore()->get_vdev()->reserve_stream(
+                (vdev_stream_id_t*)(m_sb_buf->bytes + sizeof(vol_sb_hdr)), sb->num_streams);
         }
     }
     alloc_single_block_in_mem();
     m_blks_per_lba = get_page_size() / m_hb->get_data_pagesz();
-    HS_RELEASE_ASSERT_EQ(get_page_size() % m_hb->get_data_pagesz(), 0);
+    HS_REL_ASSERT_EQ(get_page_size() % m_hb->get_data_pagesz(), 0);
     m_hb->create_volume(shared_from_this());
 
     if (init) {
@@ -250,7 +254,7 @@ void Volume::init() {
 }
 
 void Volume::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
-    HS_ASSERT_CMP(RELEASE, sizeof(vol_sb_hdr), ==, size);
+    HS_REL_ASSERT_GE(size, sizeof(vol_sb_hdr));
     Volume::make_volume(mblk, buf);
 }
 
@@ -264,7 +268,7 @@ void Volume::destroy(indxmgr_stop_cb cb) {
     m_vol_ref_cnt.increment(1);
     if (!m_hb->is_recovery_mode() || get_state() != vol_state::START_INDX_TREE_DESTROYING) {
         auto prev_state = set_state(vol_state::DESTROYING);
-        HS_RELEASE_ASSERT_NE(prev_state, vol_state::START_INDX_TREE_DESTROYING, "prev state {}", prev_state);
+        HS_REL_ASSERT_NE(prev_state, vol_state::START_INDX_TREE_DESTROYING, "prev state {}", prev_state);
         if (!m_hb->is_recovery_mode() && prev_state == vol_state::DESTROYING) {
             shutdown_if_needed();
             return;
@@ -283,8 +287,8 @@ void Volume::destroy_internal() {
     }
 
     m_indx_mgr->destroy(([this](bool success) {
-        HS_RELEASE_ASSERT_NE(get_state(), vol_state::DESTROYED, "Volume {} is already in destroyed state",
-                             m_params.vol_name);
+        HS_REL_ASSERT_NE(get_state(), vol_state::DESTROYED, "Volume {} is already in destroyed state",
+                         m_params.vol_name);
         if (success) {
             THIS_VOL_LOG(INFO, base, , "volume destroyed");
             remove_sb();
@@ -294,7 +298,7 @@ void Volume::destroy_internal() {
         auto vol_ptr = shared_from_this();
         m_destroy_done_cb(success);
         m_destroy_done_cb = nullptr;
-        m_hb->get_data_blkstore()->get_vdev()->free_stream(m_stream_ptr);
+        m_hb->get_data_blkstore()->get_vdev()->free_stream(m_stream_info);
         if (home_blks_ref_cnt.decrement_testz(1) && m_hb->is_shutdown()) { m_hb->do_volume_shutdown(true); };
     }));
 }
@@ -320,7 +324,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     static thread_local std::vector< BlkId > bid{};
     std::error_condition ret{no_error};
 
-    HS_RELEASE_ASSERT_LE(get_io_size(iface_req->nlbas), m_max_vol_io_size, "IO size exceeds max_vol_io_size supported");
+    HS_REL_ASSERT_LE(get_io_size(iface_req->nlbas), m_max_vol_io_size, "IO size exceeds max_vol_io_size supported");
 
     auto vreq = volume_req::make(iface_req);
     THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}, cache={}", vreq->lba(), vreq->nlbas(),
@@ -332,7 +336,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     m_vol_ref_cnt.increment();
 
     // sync write is not supported
-    VOL_DEBUG_ASSERT_CMP(vreq->is_sync(), ==, false, vreq, "sync not supported");
+    VOL_DBG_ASSERT_CMP(vreq->is_sync(), ==, false, vreq, "sync not supported");
 
     if (is_offline()) {
         ret = std::make_error_condition(std::errc::resource_unavailable_try_again);
@@ -420,7 +424,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
 
             data_offset += data_size;
         }
-        VOL_DEBUG_ASSERT_CMP((start_lba - vreq->lba()), ==, vreq->nlbas(), vreq, "lba don't match");
+        VOL_DBG_ASSERT_CMP((start_lba - vreq->lba()), ==, vreq->nlbas(), vreq, "lba don't match");
 
         // complete the request
         ret = no_error;
@@ -471,6 +475,7 @@ std::error_condition Volume::unmap(const vol_interface_req_ptr& iface_req) {
     auto vreq = volume_req::make(iface_req);
     THIS_VOL_LOG(TRACE, volume, vreq, "unmap: lba={}, nlbas={}", vreq->lba(), vreq->nlbas());
 
+    COUNTER_INCREMENT(m_metrics, volume_unmap_count, 1);
     /* Sanity checks */
     home_blks_ref_cnt.increment();
     m_vol_ref_cnt.increment();
@@ -526,20 +531,15 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
 
         if (vreq->err() == std::errc::no_space_on_device) {
             uint64_t used_size_p = (get_used_size().used_data_size * 100) / get_size();
-            VOL_RELEASE_ASSERT_CMP(used_size_p, <, HS_DYNAMIC_CONFIG(resource_limits.vol_threshhold_used_size_p), vreq,
-                                   "this homestore instance is either over subscribed or there is data leak");
+            VOL_REL_ASSERT_CMP(used_size_p, <, HS_DYNAMIC_CONFIG(resource_limits.vol_threshhold_used_size_p), vreq,
+                               "this homestore instance is either over subscribed or there is data leak");
         }
         if (vreq->iface_req->set_error(err)) {
             // Was not completed earlier, so complete the io
             COUNTER_INCREMENT_IF_ELSE(m_metrics, vreq->is_read_op(), volume_write_error_count, volume_read_error_count,
                                       1);
             uint64_t cnt = m_err_cnt.fetch_add(1, std::memory_order_relaxed);
-            if (get_state() != vol_state::OFFLINE) {
-                THIS_VOL_LOG(ERROR, , vreq, "Vol operation error {}", err.message());
-            } else {
-                // supperss error message when state is offline;
-                HS_LOG_EVERY_N(ERROR, base, 50, "Vol {} operation error {}", get_name(), err.message());
-            }
+            HS_LOG_EVERY_N(ERROR, base, 50, "Vol {} operation error {}", get_name(), err.message());
             /* we wait for all outstanding child req to be completed before we do completion upcall */
         } else {
             THIS_VOL_LOG(WARN, , vreq, "Receiving completion on already completed request id={}", vreq->request_id);
@@ -569,7 +569,7 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
     }
 
     if (completed) {
-        VOL_DEBUG_ASSERT_CMP(vreq->state, !=, volume_req_state::completed, vreq, "state should not be completed");
+        VOL_DBG_ASSERT_CMP(vreq->state, !=, volume_req_state::completed, vreq, "state should not be completed");
         vreq->state = volume_req_state::completed;
 
         /* update counters */
@@ -581,12 +581,16 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
             HISTOGRAM_OBSERVE(m_metrics, volume_read_size_distribution, size);
             HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_read, vreq->vc_req_cnt);
             HISTOGRAM_OBSERVE(m_metrics, volume_read_latency, latency_us);
-        } else {
+        } else if (vreq->is_write()) {
             COUNTER_DECREMENT(m_metrics, volume_outstanding_data_write_count, 1);
             COUNTER_INCREMENT(m_metrics, volume_write_size_total, size);
             HISTOGRAM_OBSERVE(m_metrics, volume_write_size_distribution, size);
             HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_write, vreq->vc_req_cnt);
             HISTOGRAM_OBSERVE(m_metrics, volume_write_latency, latency_us);
+        } else if (vreq->is_unmap()) {
+            HISTOGRAM_OBSERVE(m_metrics, volume_unmap_latency, latency_us);
+            COUNTER_INCREMENT(m_metrics, volume_unmap_size_total, size);
+            HISTOGRAM_OBSERVE(m_metrics, volume_unmap_size_distribution, size);
         }
 
         if (latency_us > 5000000) { THIS_VOL_LOG(WARN, , vreq, "vol req took time {} us", latency_us); }
@@ -621,8 +625,8 @@ void Volume::shutdown_if_needed() {
 
 void Volume::process_indx_completions(const indx_req_ptr& ireq, std::error_condition err) {
     auto vreq = boost::static_pointer_cast< volume_req >(ireq);
-    VOL_DEBUG_ASSERT_CMP(vreq->is_read_op(), !=, true, vreq, "read operation not allowed");
-    VOL_DEBUG_ASSERT_CMP(vreq->is_sync(), !=, true, vreq, "sync op not allowed");
+    VOL_DBG_ASSERT_CMP(vreq->is_read_op(), !=, true, vreq, "read operation not allowed");
+    VOL_DBG_ASSERT_CMP(vreq->is_sync(), !=, true, vreq, "sync op not allowed");
 
     COUNTER_DECREMENT(m_metrics, volume_outstanding_metadata_write_count, 1);
 
@@ -641,7 +645,7 @@ void Volume::process_data_completions(const boost::intrusive_ptr< blkstore_req< 
     auto& vreq = vc_req->parent_req;
 
     assert(vreq != nullptr);
-    VOL_DEBUG_ASSERT_CMP(vreq->is_sync(), ==, false, vreq, "sync op not allowed");
+    VOL_DBG_ASSERT_CMP(vreq->is_sync(), ==, false, vreq, "sync op not allowed");
 
     THIS_VOL_LOG(TRACE, volume, vreq, "data op complete: status={}", vreq->err().message());
 
@@ -668,7 +672,7 @@ void Volume::attach_completion_cb(const io_comp_callback& cb) { m_comp_cb = cb; 
 
 void Volume::fault_containment() {
     m_hb->move_to_restricted_state();
-    VOL_RELEASE_ASSERT(0, , "hit checksum mismatch");
+    VOL_REL_ASSERT(0, , "hit checksum mismatch");
 #if 0
     // set state to offline
     set_state(vol_state::OFFLINE);
@@ -759,8 +763,8 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
                 if (data_remaining == static_cast< uint64_t >(0)) break;
             }
             assert(data_remaining == static_cast< uint64_t >(0));
-            VOL_RELEASE_ASSERT_CMP(data_remaining, ==, static_cast< uint64_t >(0), vreq,
-                                   "Insufficient iovec storage space");
+            VOL_REL_ASSERT_CMP(data_remaining, ==, static_cast< uint64_t >(0), vreq,
+                               "Insufficient iovec storage space");
         }};
 
         // we populate the entire LBA range asked even if it is not populated by the user
@@ -769,9 +773,9 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             /* create child req and read buffers */
             const lba_t start_lba = mk.start();
             const lba_t end_lba = mk.end();
-            VOL_RELEASE_ASSERT_CMP(next_start_lba, <=, start_lba, vreq, "mismatch start lba and next start lba");
-            VOL_RELEASE_ASSERT_CMP(mapping::get_end_lba(vreq->lba(), vreq->nlbas()), >=, end_lba, vreq,
-                                   "mismatch end lba and end lba in req");
+            VOL_REL_ASSERT_CMP(next_start_lba, <=, start_lba, vreq, "mismatch start lba and next start lba");
+            VOL_REL_ASSERT_CMP(mapping::get_end_lba(vreq->lba(), vreq->nlbas()), >=, end_lba, vreq,
+                               "mismatch end lba and end lba in req");
 
             // check if there are any holes in the beginning or in the middle
             const ValueEntry* ve = mv.get_latest_entry();
@@ -780,6 +784,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
 
             while (next_start_lba < start_lba) {
                 const auto blob{m_only_in_mem_buff->at_offset(0)};
+                COUNTER_INCREMENT(m_metrics, volume_read_on_hole, get_page_size());
                 if (vreq->use_cache()) {
                     vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
                 } else {
@@ -808,6 +813,11 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
                 auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
                 auto read_iovecs{get_next_iovecs(read_transversal, iovecs, sz)};
 
+                vc_req->blkId = read_blkid;
+#ifndef NDEBUG
+                vc_req->read_iovs = read_iovecs;
+#endif
+
                 // TO DO: Add option to read from cache if read cache option true
 
                 // read from disk
@@ -824,6 +834,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
         // check if there are any holes at the end
         const lba_t req_end_lba = mapping::get_end_lba(vreq->lba(), vreq->nlbas());
         while (next_start_lba <= req_end_lba) {
+            COUNTER_INCREMENT(m_metrics, volume_read_on_hole, get_page_size());
             const auto blob{m_only_in_mem_buff->at_offset(0)};
             if (vreq->use_cache()) {
                 vreq->read_buf().emplace_back(get_page_size(), 0, m_only_in_mem_buff);
@@ -837,7 +848,7 @@ void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req 
             ++next_start_lba;
         }
         // This will never be false, so why check - commenting out
-        // VOL_RELEASE_ASSERT_CMP(next_start_lba, ==, mapping::get_end_lba(vreq->lba(), vreq->nlbas()) + 1, vreq,
+        // VOL_REL_ASSERT_CMP(next_start_lba, ==, mapping::get_end_lba(vreq->lba(), vreq->nlbas()) + 1, vreq,
         //                       "mismatch start lba and next start lba");
     } catch (const std::exception& e) {
         VOL_LOG_ASSERT(0, vreq, "Exception: {}", e.what())
@@ -868,7 +879,7 @@ volume_child_req_ptr Volume::create_vol_child_req(const BlkId& bid, const volume
     assert((bid.data_size(HomeBlks::instance()->get_data_pagesz()) % get_page_size()) == 0);
     vc_req->nlbas = nlbas;
 
-    VOL_DEBUG_ASSERT_CMP(vc_req->nlbas, >, 0, vreq, "nlbas are zero");
+    VOL_DBG_ASSERT_CMP(vc_req->nlbas, >, 0, vreq, "nlbas are zero");
 
     if (!vreq->is_sync()) { vreq->outstanding_io_cnt.increment(1); }
     ++vreq->vc_req_cnt;
@@ -923,7 +934,7 @@ std::error_condition Volume::alloc_blk(const volume_req_ptr& vreq, std::vector< 
     hints.dev_id_hint = -1;
     hints.multiplier = m_blks_per_lba;
     hints.max_blks_per_entry = HS_STATIC_CONFIG(engine.max_blks_in_blkentry);
-    hints.stream_ptr = m_stream_ptr;
+    hints.stream_info = (uintptr_t)&m_stream_info;
 #ifdef _PRERELEASE
     hints.error_simulate = true;
 #endif
@@ -998,7 +1009,7 @@ void Volume::interface_req_done(const vol_interface_req_ptr& iface_req) {
     } else if (std::holds_alternative< io_single_comp_callback >(m_comp_cb)) {
         (std::get< io_single_comp_callback >(m_comp_cb))(iface_req);
     } else {
-        VOL_ASSERT(DEBUG, 0, , "invalid operation");
+        VOL_DBG_ASSERT(0, , "invalid operation");
     }
 }
 
@@ -1033,12 +1044,18 @@ vol_state Volume::set_state(vol_state state, bool persist) {
 }
 
 bool Volume::is_offline() const {
-    auto state = get_state();
+    const auto state = get_state();
     return (state != vol_state::ONLINE || m_hb->is_shutdown());
 }
 
+bool Volume::is_destroying() const {
+    const auto state = get_state();
+    return (state == vol_state::DESTROYING || state == vol_state::START_INDX_TREE_DESTROYING ||
+            state == vol_state::DESTROYED);
+}
+
 bool Volume::is_online() const {
-    auto state = get_state();
+    const auto state = get_state();
     return (state == vol_state::ONLINE);
 }
 
@@ -1050,16 +1067,16 @@ void Volume::write_sb() {
 
     if (!m_sb_cookie) {
         // first time insert
-        MetaBlkMgrSI()->add_sub_sb("VOLUME", (void*)m_sb_buf->bytes, sizeof(vol_sb_hdr), m_sb_cookie);
+        MetaBlkMgrSI()->add_sub_sb("VOLUME", (void*)m_sb_buf->bytes, m_sb_buf->size, m_sb_cookie);
     } else {
-        MetaBlkMgrSI()->update_sub_sb((void*)m_sb_buf->bytes, sizeof(vol_sb_hdr), m_sb_cookie);
+        MetaBlkMgrSI()->update_sub_sb((void*)m_sb_buf->bytes, m_sb_buf->size, m_sb_cookie);
     }
 }
 
 void Volume::remove_sb() {
     // remove sb from MetaBlkMgr
     const auto ret{MetaBlkMgrSI()->remove_sub_sb(m_sb_cookie)};
-    if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to remove subsystem with status: {}", ret.message()); }
+    if (ret != no_error) { HS_REL_ASSERT(false, "failed to remove subsystem with status: {}", ret.message()); }
 }
 
 void Volume::migrate_sb() {

@@ -7,7 +7,7 @@
 #endif
 
 #include <iomgr/aio_drive_interface.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 
 #include "iomgr_executor.hpp"
 
@@ -20,7 +20,7 @@ IOMgrExecutor::IOMgrExecutor(const size_t num_threads, const size_t num_prioriti
 
     // exec start should be called before iomgr->start
     start();
-    iomanager.start(num_threads);
+    ioenvironment.with_iomgr(num_threads);
 }
 
 // It is called everytime a loadgen test case finishes;

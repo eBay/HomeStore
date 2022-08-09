@@ -6,14 +6,14 @@
 #include <cstdint>
 #include <thread>
 
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 
 #include "engine/common/homestore_flip.hpp"
 
 #include "blk_read_tracker.hpp"
 #include "indx_mgr.hpp"
 
-SDS_LOGGING_DECL(indx_mgr)
+SISL_LOGGING_DECL(indx_mgr)
 
 namespace homestore {
 
@@ -37,8 +37,7 @@ void Blk_Read_Tracker::remove(const Free_Blk_Entry& fbe) {
     const uint64_t hash_code{static_cast< uint64_t >(std::hash< BlkId >()(fbe.get_base_blkid()))};
 
 #ifdef _PRERELEASE
-    if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_delay_read_us"))
-    {
+    if (auto flip_ret = homestore_flip->get_test_flip< int >("vol_delay_read_us")) {
         std::this_thread::sleep_for(std::chrono::microseconds{flip_ret.get()});
     }
 #endif

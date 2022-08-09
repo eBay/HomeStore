@@ -12,7 +12,7 @@
 #include "log_store.hpp"
 
 namespace homestore {
-SDS_LOGGING_DECL(logstore)
+SISL_LOGGING_DECL(logstore)
 
 #define THIS_LOGSTORE_LOG(level, msg, ...) HS_SUBMOD_LOG(level, logstore, , "store", m_fq_name, msg, __VA_ARGS__)
 #define THIS_LOGSTORE_PERIODIC_LOG(level, msg, ...)                                                                    \
@@ -32,40 +32,39 @@ HomeLogStore::HomeLogStore(LogStoreFamily& family, const logstore_id_t id, const
 }
 
 bool HomeLogStore::write_sync(const logstore_seq_num_t seq_num, const sisl::io_blob& b) {
-    HS_ASSERT(LOGMSG, (!iomanager.am_i_worker_reactor()), "Sync can not be done in worker reactor thread");
+    HS_LOG_ASSERT((!iomanager.am_i_worker_reactor()), "Sync can not be done in worker reactor thread");
 
     // these should be static so that they stay in scope in the lambda in case function ends before lambda completes
-    static thread_local std::mutex write_mutex;
-    static thread_local std::condition_variable write_cv;
-    static thread_local bool write_done;
-    static thread_local bool ret;
-
-    write_done = false;
-    ret = false;
+    struct Context {
+        std::mutex write_mutex;
+        std::condition_variable write_cv;
+        bool write_done{false};
+        bool ret{false};
+    };
+    auto ctx{std::make_shared< Context >()};
     this->write_async(seq_num, b, nullptr,
-                      [seq_num, this, &tl_write_mutex = write_mutex, &tl_write_cv = write_cv,
-                       &tl_write_done = write_done, &tl_ret = ret](homestore::logstore_seq_num_t seq_num_cb,
-                                                                   const sisl::io_blob& b, homestore::logdev_key ld_key,
-                                                                   void* ctx) {
-                          HS_DEBUG_ASSERT((ld_key && seq_num == seq_num_cb), "Write_Async failed or corrupted");
+                      [seq_num, this, ctx](homestore::logstore_seq_num_t seq_num_cb,
+                                           [[maybe_unused]] const sisl::io_blob& b, homestore::logdev_key ld_key,
+                                           [[maybe_unused]] void* cb_ctx) {
+                          HS_DBG_ASSERT((ld_key && seq_num == seq_num_cb), "Write_Async failed or corrupted");
                           {
-                              std::unique_lock< std::mutex > lk{tl_write_mutex};
-                              tl_write_done = true;
-                              tl_ret = true;
+                              std::unique_lock< std::mutex > lk{ctx->write_mutex};
+                              ctx->write_done = true;
+                              ctx->ret = true;
                           }
-                          tl_write_cv.notify_one();
+                          ctx->write_cv.notify_one();
                       });
 
     {
-        std::unique_lock< std::mutex > lk{write_mutex};
-        write_cv.wait(lk, [] { return write_done; });
+        std::unique_lock< std::mutex > lk{ctx->write_mutex};
+        ctx->write_cv.wait(lk, [&ctx] { return ctx->write_done; });
     }
 
-    return ret;
+    return ctx->ret;
 }
 
 void HomeLogStore::write_async(logstore_req* const req, const log_req_comp_cb_t& cb) {
-    HS_ASSERT(LOGMSG, (cb || m_comp_cb), "Expected either cb is not null or default cb registered");
+    HS_LOG_ASSERT((cb || m_comp_cb), "Expected either cb is not null or default cb registered");
     req->cb = (cb ? cb : m_comp_cb);
     req->start_time = Clock::now();
 
@@ -74,15 +73,14 @@ void HomeLogStore::write_async(logstore_req* const req, const log_req_comp_cb_t&
     if (req->seq_num <= trunc_upto_lsn) {
         THIS_LOGSTORE_LOG(ERROR, "Assert: Appending lsn={} lesser than or equal to truncated_upto_lsn={}", req->seq_num,
                           trunc_upto_lsn);
-        HS_DEBUG_ASSERT(0, "Assertion");
+        HS_DBG_ASSERT(0, "Assertion");
     }
 #endif
 
     m_records.create(req->seq_num);
     COUNTER_INCREMENT(HomeLogStoreMgrSI().m_metrics, logstore_append_count, 1);
     HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logstore_record_size, req->data.size);
-    [[maybe_unused]] const auto logid{
-        m_logdev.append_async(m_store_id, req->seq_num, req->data, static_cast< void* >(req))};
+    m_logdev.append_async(m_store_id, req->seq_num, req->data, static_cast< void* >(req));
 }
 
 void HomeLogStore::write_async(const logstore_seq_num_t seq_num, const sisl::io_blob& b, void* const cookie,
@@ -99,7 +97,7 @@ void HomeLogStore::write_async(const logstore_seq_num_t seq_num, const sisl::io_
 
 logstore_seq_num_t HomeLogStore::append_async(const sisl::io_blob& b, void* const cookie,
                                               const log_write_comp_cb_t& cb) {
-    HS_DEBUG_ASSERT_EQ(m_append_mode, true, "append_async can be called only on append only mode");
+    HS_DBG_ASSERT_EQ(m_append_mode, true, "append_async can be called only on append only mode");
     const auto seq_num{m_seq_num.fetch_add(1, std::memory_order_acq_rel)};
     write_async(seq_num, b, cookie, cb);
     return seq_num;
@@ -124,7 +122,7 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
 }
 #if 0
 void HomeLogStore::read_async(logstore_req* req, const log_found_cb_t& cb) {
-    HS_ASSERT(LOGMSG, ((cb != nullptr) || (m_comp_cb != nullptr)),
+    HS_LOG_ASSERT( ((cb != nullptr) || (m_comp_cb != nullptr)),
               "Expected either cb is not null or default cb registered");
     auto record = m_records.at(req->seq_num);
     logdev_key ld_key = record.m_dev_key;
@@ -204,8 +202,8 @@ void HomeLogStore::truncate(const logstore_seq_num_t upto_seq_num, const bool in
     // Don't check this if we don't know our truncation boundary. The call is made to inform us about
     // correct truncation point.
     if (s != -1) {
-        HS_DEBUG_ASSERT_LE(upto_seq_num, get_contiguous_completed_seq_num(s),
-                           "Logstore {} expects truncation to be contiguously completed", m_store_id);
+        HS_DBG_ASSERT_LE(upto_seq_num, get_contiguous_completed_seq_num(s),
+                         "Logstore {} expects truncation to be contiguously completed", m_store_id);
     }
 #endif
 
@@ -263,15 +261,15 @@ void HomeLogStore::post_device_truncation(const logdev_key& trunc_upto_loc) {
         m_safe_truncation_boundary.pending_dev_truncation = false;
         m_safe_truncation_boundary.ld_key = trunc_upto_loc;
     } else {
-        HS_RELEASE_ASSERT(0,
-                          "We expect post_device_truncation to be called only for logstores which has min of all "
-                          "truncation boundaries");
+        HS_REL_ASSERT(0,
+                      "We expect post_device_truncation to be called only for logstores which has min of all "
+                      "truncation boundaries");
     }
 }
 
 void HomeLogStore::fill_gap(const logstore_seq_num_t seq_num) {
-    HS_DEBUG_ASSERT_EQ(m_records.status(seq_num).is_hole, true, "Attempted to fill gap lsn={} which has valid data",
-                       seq_num);
+    HS_DBG_ASSERT_EQ(m_records.status(seq_num).is_hole, true, "Attempted to fill gap lsn={} which has valid data",
+                     seq_num);
 
     logdev_key empty_ld_key;
     m_records.create_and_complete(seq_num, empty_ld_key);

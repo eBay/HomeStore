@@ -31,7 +31,7 @@
 #include "eviction.hpp"
 #include "lru_eviction.hpp"
 
-SDS_LOGGING_DECL(cache, cache_vmod_evict, cache_vmod_read, cache_vmod_write)
+SISL_LOGGING_DECL(cache, cache_vmod_evict, cache_vmod_read, cache_vmod_write)
 
 namespace homestore {
 
@@ -313,7 +313,7 @@ public:
     const erase_comp_cb& get_cb() const { return m_cb; }
 
     void set_memvec(boost::intrusive_ptr< homeds::MemVector > vec, const uint32_t offset, const uint32_t size) {
-        HS_DEBUG_ASSERT_LE(size, UINT16_MAX);
+        HS_DBG_ASSERT_LE(size, UINT16_MAX);
         m_mem = std::move(vec);
         m_data_offset = offset;
         m_cache_size = size;
@@ -365,10 +365,10 @@ public:
         // NOTE: The safe_erase is needed in order to reclaim memory because of not
         // removing via erase so ref count will remain at 1 without it
         if (happened) {
-            HS_DEBUG_ASSERT_LE(count, 1, "Invalid count in buf refcount");
+            HS_DBG_ASSERT_LE(count, 1, "Invalid count in buf refcount");
             if (count == 1) {
                 if (can_free) {
-                    HS_DEBUG_ASSERT(cache != nullptr, "Expected cache to be non null");
+                    HS_DBG_ASSERT(cache != nullptr, "Expected cache to be non null");
                     cache->safe_erase(k);
                 }
             } else if (count == 0) {

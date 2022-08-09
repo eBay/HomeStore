@@ -16,12 +16,12 @@
 
 #include <api/vol_interface.hpp>
 #include <iomgr/aio_drive_interface.hpp>
-#include <iomgr/iomgr.hpp>
-
+#include <iomgr/io_environment.hpp>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include "hs_log_store.h"
+#include "test_common/homestore_test_common.hpp"
 
 static constexpr uint64_t Ki{1024};
 static constexpr uint64_t Mi{Ki * Ki};
@@ -44,7 +44,7 @@ struct TestCfg {
 
     uint64_t max_io_size{1 * Mi};
     uint64_t max_outstanding_ios{64};
-    uint64_t max_disk_capacity{10 * Gi};
+    uint64_t max_disk_capacity{20 * Gi};
 
     uint32_t atomic_phys_page_size{512};
     uint32_t vol_page_size{4096};
@@ -117,9 +117,9 @@ public:
     virtual void SetUp() override {
         clearTestFiles(TEST_FILE_PATHS_PREFIX);
         m_log_store_id = load_logstore_id();
-        cleanup = SDS_OPTIONS["cleanup"].as< bool >();
-        m_test_type = SDS_OPTIONS["test_type"].as< std::string >();
-        tcfg.num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
+        cleanup = SISL_OPTIONS["cleanup"].as< bool >();
+        m_test_type = SISL_OPTIONS["test_type"].as< std::string >();
+        tcfg.num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
     }
 
     virtual void TearDown() override {
@@ -196,6 +196,7 @@ public:
                                         homestore::vol_state new_state) {};
         params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
 
+        test_common::set_random_http_port();
         homestore::VolInterface::init(params, restart);
         LOGINFO("Entering lock");
         bool wait_result;
@@ -224,9 +225,9 @@ public:
             device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
         }
 
-        const bool is_spdk{SDS_OPTIONS["spdk"].as< bool >()};
+        const bool is_spdk{SISL_OPTIONS["spdk"].as< bool >()};
         LOGINFO("Starting iomgr with {} threads, spdk: {}", tcfg.num_threads, is_spdk);
-        iomanager.start(is_spdk ? 2 : tcfg.num_threads, is_spdk);
+        ioenvironment.with_iomgr(is_spdk ? 2 : tcfg.num_threads, is_spdk);
     }
 
     void start_homestore(const bool restart = false, const uint32_t ndevices = 2, const uint64_t dev_size_mb = 10240) {

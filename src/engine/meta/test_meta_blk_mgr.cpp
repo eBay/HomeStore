@@ -19,9 +19,9 @@
 #include <vector>
 
 #include <iomgr/aio_drive_interface.hpp>
-#include <iomgr/iomgr.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <iomgr/io_environment.hpp>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 
 #include <gtest/gtest.h>
 
@@ -34,11 +34,11 @@
 using namespace homestore;
 
 RCU_REGISTER_INIT
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-SDS_OPTIONS_ENABLE(logging, test_meta_blk_mgr)
+SISL_OPTIONS_ENABLE(logging, test_meta_blk_mgr)
 
-SDS_LOGGING_DECL(test_meta_blk_mgr)
+SISL_LOGGING_DECL(test_meta_blk_mgr)
 
 struct Param {
     uint64_t num_io;
@@ -54,9 +54,12 @@ struct Param {
     bool always_do_overflow;
     bool is_spdk;
     bool is_bitmap;
+    std::vector< std::string > dev_names;
 };
 
 static Param gp;
+
+static const std::string META_FILE_PREFIX{"/tmp/test_meta_blk_mgr_"};
 
 static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, const uint32_t nthreads) {
     std::vector< dev_info > device_info;
@@ -66,16 +69,25 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
     static bool inited;
 
     inited = false;
-    LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
-    for (uint32_t i{0}; i < ndevices; ++i) {
-        const std::filesystem::path fpath{"/tmp/test_meta_blk_mgr_" + std::to_string(i + 1)};
-        std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
-        std::filesystem::resize_file(fpath, dev_size); // set the file size
-        device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
-    }
 
+    if (gp.dev_names.size()) {
+        /* if user customized file/disk names */
+        for (uint32_t i{0}; i < gp.dev_names.size(); ++i) {
+            const std::filesystem::path fpath{gp.dev_names[i]};
+            device_info.emplace_back(gp.dev_names[i], HSDevType::Data);
+        }
+    } else {
+        /* create files */
+        LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
+        for (uint32_t i{0}; i < ndevices; ++i) {
+            const std::filesystem::path fpath{META_FILE_PREFIX + std::to_string(i + 1)};
+            std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
+            std::filesystem::resize_file(fpath, dev_size); // set the file size
+            device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
+        }
+    }
     LOGINFO("Starting iomgr with {} threads", nthreads);
-    iomanager.start(nthreads, gp.is_spdk);
+    ioenvironment.with_iomgr(nthreads, gp.is_spdk);
 
     const uint64_t app_mem_size{((ndevices * dev_size) * 15) / 100};
     LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", app_mem_size);
@@ -98,6 +110,8 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
     params.vol_mounted_cb = [](const VolumePtr& vol_obj, vol_state state) {};
     params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
     params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
+
+    test_common::set_random_http_port();
     VolInterface::init(params);
 
     {
@@ -135,8 +149,8 @@ protected:
     }
 
     [[nodiscard]] bool keep_running() {
-        HS_ASSERT(DEBUG, m_mbm->get_size() >= m_mbm->get_used_size(), "total size:{} less than used size: {}",
-                  m_mbm->get_size(), m_mbm->get_used_size());
+        HS_DBG_ASSERT(m_mbm->get_size() >= m_mbm->get_used_size(), "total size:{} less than used size: {}",
+                      m_mbm->get_size(), m_mbm->get_used_size());
         const auto free_size{m_mbm->get_size() - m_mbm->get_used_size()};
         if (free_size < gp.max_wrt_sz) { return false; }
         if ((get_elapsed_time(m_start_time) >= gp.run_time) || (io_cnt() >= gp.num_io)) { return false; }
@@ -179,10 +193,12 @@ protected:
     [[nodiscard]] uint64_t total_size_written(const void* const cookie) { return m_mbm->get_meta_size(cookie); }
 
     void do_write_to_full() {
-        ssize_t free_size{static_cast< ssize_t >(m_mbm->get_size() - m_mbm->get_used_size())};
+        static constexpr uint64_t blkstore_overhead = 4 * 1024ul * 1024ul; // 4MB
+        ssize_t free_size{static_cast< ssize_t >(m_mbm->get_size() - m_mbm->get_used_size() - blkstore_overhead)};
 
-        HS_RELEASE_ASSERT_GT(free_size, 0);
-        HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(free_size), m_mbm->get_available_blks() * m_mbm->get_page_size());
+        HS_REL_ASSERT_GT(free_size, 0);
+        HS_REL_ASSERT_EQ(static_cast< uint64_t >(free_size),
+                         m_mbm->get_available_blks() * m_mbm->get_page_size() - blkstore_overhead);
 
         uint64_t size_written{0};
         while (free_size > 0) {
@@ -190,31 +206,31 @@ protected:
                 size_written = do_sb_write(do_overflow());
             } else {
                 size_written = do_sb_write(false, m_mbm->meta_blk_context_sz());
-                HS_RELEASE_ASSERT_EQ(size_written, m_mbm->get_page_size());
+                HS_REL_ASSERT_EQ(size_written, m_mbm->get_page_size());
             }
 
             // size_written should be at least one page;
-            HS_RELEASE_ASSERT_GE(size_written, m_mbm->get_page_size());
+            HS_REL_ASSERT_GE(size_written, m_mbm->get_page_size());
 
             free_size -= size_written;
 
-            HS_RELEASE_ASSERT_EQ(static_cast< uint64_t >(free_size),
-                                 m_mbm->get_available_blks() * m_mbm->get_page_size());
+            HS_REL_ASSERT_EQ(static_cast< uint64_t >(free_size),
+                             m_mbm->get_available_blks() * m_mbm->get_page_size() - blkstore_overhead);
         }
 
-        HS_RELEASE_ASSERT_EQ(free_size, 0);
+        HS_REL_ASSERT_EQ(free_size, 0);
     }
 
     [[nodiscard]] uint64_t do_sb_write(const bool overflow, size_t sz_to_wrt = 0) {
         ++m_wrt_cnt;
         if (!sz_to_wrt) { sz_to_wrt = rand_size(overflow); }
-        uint64_t ret_size_written{0};
+        int64_t ret_size_written{0};
         uint8_t* const buf{iomanager.iobuf_alloc(512, sz_to_wrt)};
         gen_rand_buf(buf, sz_to_wrt);
 
         void* cookie{nullptr};
         m_mbm->add_sub_sb(mtype, buf, sz_to_wrt, cookie);
-        HS_ASSERT_CMP(DEBUG, cookie, !=, nullptr);
+        HS_DBG_ASSERT_NE(cookie, nullptr);
 
         // LOGINFO("buf written: size: {}, data: {}", sz_to_wrt, (char*)buf);
         meta_blk* const mblk{static_cast< meta_blk* >(cookie)};
@@ -222,23 +238,23 @@ protected:
 
         if (mblk->hdr.h.compressed == false) {
             if (overflow) {
-                HS_DEBUG_ASSERT_GE(sz_to_wrt, m_mbm->get_page_size());
-                HS_DEBUG_ASSERT(mblk->hdr.h.ovf_bid.is_valid(), "Expected valid ovf meta blkid");
+                HS_DBG_ASSERT_GE(sz_to_wrt, m_mbm->get_page_size());
+                HS_DBG_ASSERT(mblk->hdr.h.ovf_bid.is_valid(), "Expected valid ovf meta blkid");
             } else {
-                HS_DEBUG_ASSERT_LE(sz_to_wrt, m_mbm->meta_blk_context_sz());
-                HS_DEBUG_ASSERT(!mblk->hdr.h.ovf_bid.is_valid(), "Expected invalid ovf meta blkid");
+                HS_DBG_ASSERT_LE(sz_to_wrt, m_mbm->meta_blk_context_sz());
+                HS_DBG_ASSERT(!mblk->hdr.h.ovf_bid.is_valid(), "Expected invalid ovf meta blkid");
             }
 
             // verify context_sz
-            HS_ASSERT(DEBUG, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
-                      static_cast< uint64_t >(mblk->hdr.h.context_sz), sz_to_wrt);
+            HS_DBG_ASSERT(mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
+                          static_cast< uint64_t >(mblk->hdr.h.context_sz), sz_to_wrt);
         }
 
         {
             // save cookie;
             std::unique_lock< std::mutex > lg{m_mtx};
             const auto bid{mblk->hdr.h.bid.to_integer()};
-            HS_ASSERT(DEBUG, m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
+            HS_DBG_ASSERT(m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
 
             // save to cache
             m_write_sbs[bid].cookie = cookie;
@@ -246,8 +262,8 @@ protected:
 
             ret_size_written = total_size_written(cookie);
             m_total_wrt_sz += ret_size_written;
-            HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
-                      m_mbm->get_used_size());
+            HS_DBG_ASSERT(m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                          m_mbm->get_used_size());
         }
 
         static bool done_read{false};
@@ -258,7 +274,7 @@ protected:
             const std::string write_buf_str{reinterpret_cast< char* >(buf), sz_to_wrt};
             const auto ret{read_buf_str.compare(write_buf_str)};
             if (mblk->hdr.h.compressed == false) {
-                HS_ASSERT(DEBUG, ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
+                HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
             }
         }
 
@@ -286,15 +302,15 @@ protected:
         }
 
         const auto ret{m_mbm->remove_sub_sb(cookie)};
-        if (ret != no_error) { HS_ASSERT(RELEASE, false, "failed to remove subsystem with status: {}", ret.message()); }
+        if (ret != no_error) { HS_REL_ASSERT(false, "failed to remove subsystem with status: {}", ret.message()); }
 
         {
             std::unique_lock< std::mutex > lg{m_mtx};
             m_write_sbs.erase(it);
-            HS_ASSERT_CMP(RELEASE, sz, ==, m_write_sbs.size() + 1); // release assert to make compiler happy on sz;
+            HS_REL_ASSERT_EQ(sz, m_write_sbs.size() + 1); // release assert to make compiler happy on sz;
 
-            HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
-                      m_mbm->get_used_size());
+            HS_DBG_ASSERT(m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                          m_mbm->get_used_size());
         }
     }
 
@@ -305,7 +321,7 @@ protected:
             std::unique_lock< std::mutex > lg{m_mtx};
             const auto it{m_write_sbs.begin()};
 
-            HS_DEBUG_ASSERT_EQ(it != m_write_sbs.end(), true);
+            HS_DBG_ASSERT_EQ(it != m_write_sbs.end(), true);
             str = it->second.str;
             mblk = static_cast< meta_blk* >(it->second.cookie);
         }
@@ -318,7 +334,7 @@ protected:
             const auto read_buf_str{m_cb_blks[mblk->hdr.h.bid.to_integer()]};
             const std::string write_buf_str{str};
             const auto ret{read_buf_str.compare(write_buf_str)};
-            HS_ASSERT(DEBUG, ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
+            HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
         }
     }
 
@@ -350,7 +366,7 @@ protected:
                     unaligned_addr = true;
                     std::uniform_int_distribution< long unsigned > dist{1, dma_address_boundary - 1};
                     unaligned_shift = dist(re);
-                    HS_DEBUG_ASSERT_GT(sz_to_wrt, unaligned_shift);
+                    HS_DBG_ASSERT_GT(sz_to_wrt, unaligned_shift);
                     buf += unaligned_shift; // simulate unaligned address
                     sz_to_wrt -= unaligned_shift;
                 }
@@ -371,21 +387,21 @@ protected:
         {
             std::unique_lock< std::mutex > lg{m_mtx};
             const auto bid{static_cast< const meta_blk* >(cookie)->hdr.h.bid.to_integer()};
-            HS_ASSERT(DEBUG, m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
+            HS_DBG_ASSERT(m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
             m_write_sbs[bid].cookie = cookie;
             m_write_sbs[bid].str = std::string{reinterpret_cast< const char* >(buf), sz_to_wrt};
 
             // verify context_sz
             const meta_blk* const mblk{static_cast< const meta_blk* >(cookie)};
             if (mblk->hdr.h.compressed == false) {
-                HS_ASSERT(DEBUG, mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
-                          static_cast< uint64_t >(mblk->hdr.h.context_sz), sz_to_wrt);
+                HS_DBG_ASSERT(mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
+                              static_cast< uint64_t >(mblk->hdr.h.context_sz), sz_to_wrt);
             }
 
             // update total size, add size of metablk back
             m_total_wrt_sz += total_size_written(cookie);
-            HS_ASSERT(DEBUG, m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
-                      m_mbm->get_used_size());
+            HS_DBG_ASSERT(m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                          m_mbm->get_used_size());
         }
 
         if (aligned_buf_size) {
@@ -402,18 +418,17 @@ protected:
     // compare m_cb_blks with m_write_sbs;
     void verify_cb_blks() {
         std::unique_lock< std::mutex > lg{m_mtx};
-        HS_ASSERT_CMP(DEBUG, m_cb_blks.size(), ==, m_write_sbs.size());
+        HS_DBG_ASSERT_EQ(m_cb_blks.size(), m_write_sbs.size());
 
         for (auto it{std::cbegin(m_write_sbs)}; it != std::cend(m_write_sbs); ++it) {
             const auto bid{it->first};
             auto it_cb{m_cb_blks.find(bid)};
 
-            HS_ASSERT(DEBUG, it_cb != std::cend(m_cb_blks), "Saved bid during write not found in recover callback.");
+            HS_DBG_ASSERT(it_cb != std::cend(m_cb_blks), "Saved bid during write not found in recover callback.");
 
             // the saved buf should be equal to the buf received in the recover callback;
             const int ret{it->second.str.compare(it_cb->second)};
-            HS_ASSERT(DEBUG, ret == 0, "Context data mismatch: Saved: {}, callback: {}.", it->second.str,
-                      it_cb->second);
+            HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, callback: {}.", it->second.str, it_cb->second);
         }
     }
 
@@ -517,8 +532,22 @@ protected:
         return false;
     }
 
+    void remove_files() {
+        /* no need to delete the user created file/disk */
+        if (gp.dev_names.size() == 0) {
+            auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
+            for (uint32_t i{0}; i < ndevices; ++i) {
+                const std::filesystem::path fpath{META_FILE_PREFIX + std::to_string(i + 1)};
+                if (std::filesystem::exists(fpath) && std::filesystem::is_regular_file(fpath)) {
+                    std::filesystem::remove(fpath);
+                }
+            }
+        }
+    }
+
     void shutdown() {
         LOGINFO("shutting down homeblks");
+        remove_files();
         VolInterface::shutdown();
         {
             std::unique_lock< std::mutex > lk(m_mtx);
@@ -541,7 +570,7 @@ protected:
         m_mbm = MetaBlkMgrSI();
         m_total_wrt_sz = m_mbm->get_used_size();
 
-        HS_RELEASE_ASSERT_EQ(m_mbm->get_size() - m_total_wrt_sz, m_mbm->get_available_blks() * m_mbm->get_page_size());
+        HS_REL_ASSERT_EQ(m_mbm->get_size() - m_total_wrt_sz, m_mbm->get_available_blks() * m_mbm->get_page_size());
 
         m_mbm->deregister_handler(mtype);
         m_mbm->register_handler(
@@ -553,7 +582,7 @@ protected:
                         std::string{reinterpret_cast< const char* >(buf.bytes()), size};
                 }
             },
-            [this](bool success) { HS_ASSERT_CMP(DEBUG, success, ==, true); });
+            [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
     }
 
 private:
@@ -582,8 +611,8 @@ TEST_F(VMetaBlkMgrTest, min_drive_size_test) {
 }
 
 TEST_F(VMetaBlkMgrTest, write_to_full_test) {
-    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                    SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
+    start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
+                    SISL_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
     mtype = "Test_Write_to_Full";
     reset_counters();
     m_start_time = Clock::now();
@@ -595,8 +624,8 @@ TEST_F(VMetaBlkMgrTest, write_to_full_test) {
 }
 
 TEST_F(VMetaBlkMgrTest, single_read_test) {
-    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                    SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
+    start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
+                    SISL_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
     mtype = "Test_Read";
     reset_counters();
     m_start_time = Clock::now();
@@ -612,8 +641,8 @@ TEST_F(VMetaBlkMgrTest, single_read_test) {
 // 1. randome write, update, remove;
 // 2. recovery test and verify callback context data matches;
 TEST_F(VMetaBlkMgrTest, random_load_test) {
-    start_homestore(SDS_OPTIONS["num_devs"].as< uint32_t >(),
-                    SDS_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
+    start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
+                    SISL_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
     mtype = "Test_Rand_Load";
     reset_counters();
     m_start_time = Clock::now();
@@ -631,11 +660,13 @@ TEST_F(VMetaBlkMgrTest, random_load_test) {
     this->shutdown();
 }
 
-SDS_OPTION_GROUP(
+SISL_OPTION_GROUP(
     test_meta_blk_mgr,
     (num_threads, "", "num_threads", "number of threads", ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
     (num_devs, "", "num_devs", "number of devices to create", ::cxxopts::value< uint32_t >()->default_value("2"),
      "number"),
+    (device_list, "", "device_list", "List of device paths", ::cxxopts::value< std::vector< std::string > >(),
+     "path [...]"),
     (fixed_write_size_enabled, "", "fixed_write_size_enabled", "fixed write size enabled 0 or 1",
      ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (fixed_write_size, "", "fixed_write_size", "fixed write size", ::cxxopts::value< uint32_t >()->default_value("512"),
@@ -653,30 +684,37 @@ SDS_OPTION_GROUP(
     (per_update, "", "per_update", "update percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
     (per_write, "", "per_write", "write percentage", ::cxxopts::value< uint32_t >()->default_value("60"), "number"),
     (per_remove, "", "per_remove", "remove percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
-    (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-     cxxopts::value< int32_t >()->default_value("5004"), "port"),
     (bitmap, "", "bitmap", "bitmap test", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
     (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 int main(int argc, char* argv[]) {
     ::testing::GTEST_FLAG(filter) = "*random_load_test*";
     ::testing::InitGoogleTest(&argc, argv);
-    SDS_OPTIONS_LOAD(argc, argv, logging, test_meta_blk_mgr);
-    sds_logging::SetLogger("test_meta_blk_mgr");
+    SISL_OPTIONS_LOAD(argc, argv, logging, test_meta_blk_mgr);
+    sisl::logging::SetLogger("test_meta_blk_mgr");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    gp.num_io = SDS_OPTIONS["num_io"].as< uint64_t >();
-    gp.num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
-    gp.run_time = SDS_OPTIONS["run_time"].as< uint64_t >();
-    gp.per_update = SDS_OPTIONS["per_update"].as< uint32_t >();
-    gp.per_write = SDS_OPTIONS["per_write"].as< uint32_t >();
-    gp.fixed_wrt_sz_enabled = SDS_OPTIONS["fixed_write_size_enabled"].as< uint32_t >();
-    gp.fixed_wrt_sz = SDS_OPTIONS["fixed_write_size"].as< uint32_t >();
-    gp.min_wrt_sz = SDS_OPTIONS["min_write_size"].as< uint32_t >();
-    gp.max_wrt_sz = SDS_OPTIONS["max_write_size"].as< uint32_t >();
-    gp.always_do_overflow = SDS_OPTIONS["overflow"].as< uint32_t >();
-    gp.is_spdk = SDS_OPTIONS["spdk"].as< bool >();
-    gp.is_bitmap = SDS_OPTIONS["bitmap"].as< bool >();
+    gp.num_io = SISL_OPTIONS["num_io"].as< uint64_t >();
+    gp.num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
+    gp.run_time = SISL_OPTIONS["run_time"].as< uint64_t >();
+    gp.per_update = SISL_OPTIONS["per_update"].as< uint32_t >();
+    gp.per_write = SISL_OPTIONS["per_write"].as< uint32_t >();
+    gp.fixed_wrt_sz_enabled = SISL_OPTIONS["fixed_write_size_enabled"].as< uint32_t >();
+    gp.fixed_wrt_sz = SISL_OPTIONS["fixed_write_size"].as< uint32_t >();
+    gp.min_wrt_sz = SISL_OPTIONS["min_write_size"].as< uint32_t >();
+    gp.max_wrt_sz = SISL_OPTIONS["max_write_size"].as< uint32_t >();
+    gp.always_do_overflow = SISL_OPTIONS["overflow"].as< uint32_t >();
+    gp.is_spdk = SISL_OPTIONS["spdk"].as< bool >();
+    gp.is_bitmap = SISL_OPTIONS["bitmap"].as< bool >();
+
+    if (SISL_OPTIONS.count("device_list")) {
+        gp.dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
+        std::string dev_list_str;
+        for (const auto& d : gp.dev_names) {
+            dev_list_str += d;
+        }
+        LOGINFO("Taking input dev_list: {}", dev_list_str);
+    }
 
     if ((gp.per_update == 0) || (gp.per_write == 0) || (gp.per_update + gp.per_write + gp.per_remove != 100)) {
         gp.per_update = 20;

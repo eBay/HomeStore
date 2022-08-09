@@ -368,7 +368,7 @@ private:
                 if (bret) {
                     LOGINFO("offset: {}", offset_2);
                 } else {
-                    HS_ASSERT(DEBUG, 0, "Unexpected Failure! ");
+                    HS_DBG_ASSERT(0, "Unexpected Failure! ");
                 }
 
             } else {
@@ -398,7 +398,7 @@ private:
             if (bret) {
                 LOGINFO("offset: {}", offset_1);
             } else {
-                HS_ASSERT(DEBUG, 0, "Unexpected Failure! ");
+                HS_DBG_ASSERT(0, "Unexpected Failure! ");
             }
         } else {
             LOGERROR("Expected failure becuase of no space left. "); 

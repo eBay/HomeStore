@@ -13,11 +13,14 @@ import requests
 from threading import Thread
 
 
-opts,args = getopt.getopt(sys.argv[1:], 'tdlm:', ['test_suits=', 'dirpath=', 'dev_list=', 'log_mods='] ) 
+opts,args = getopt.getopt(sys.argv[1:], 'tdlme:', ['test_suits=', 'dirpath=', 'dev_list=', 'log_mods=', 'emulate_hdd='] ) 
 test_suits = ""
 dirpath = "./"
 dev_list = ""
 log_mods = ""
+emulate_hdd=""
+app_mem_size_in_gb=""
+skip_vol_verify_recovery=""
 
 for opt,arg in opts:
     if opt in ('-t', '--test_suits'):
@@ -32,6 +35,14 @@ for opt,arg in opts:
     if opt in ('-m', '--log_mods'):
         log_mods = arg
         print(("log_mods (%s)") % (arg))
+    if opt in ('-e', '--emulate_hdd'):
+        emulate_hdd = " --emulate_hdd_cnt " + arg 
+        print(("emulate_hdd (%s)") % (arg))
+
+if test_suits == "nightly":
+    app_mem_size_in_gb = ' --app_mem_size_in_gb=14' # default 14 GB for nightly (HDD and epoll mode), this option only valid for volume test
+    if (emulate_hdd) : 
+        skip_vol_verify_recovery = ' --pre_init_verify=false' # skip preinit vol verify during recovery in nightly hdd long hour (which takes 14 hours for one single test);
 
 addln_opts = ' '
 
@@ -43,44 +54,50 @@ if bool(log_mods and log_mods.strip()):
     addln_opts += ' --log_mods '
     addln_opts += log_mods 
 
-addln_opts += ' '.join(map(str, args)) 
+addln_opts += ' '.join(map(str, args))
+if (test_suits == "nightly") :
+    if (os.environ.get('USER_WANT_SPDK')) or ("--spdk" in addln_opts):
+        app_mem_size_in_gb = ' --app_mem_size_in_gb=5' # set to 5GB for spdk mode;
+
+vol_addln_opts = addln_opts + emulate_hdd + app_mem_size_in_gb + skip_vol_verify_recovery
 
 print("addln_opts: " + addln_opts)
+print("vol_addln_opts: " + vol_addln_opts)
 
 meta_flip_list = ["write_sb_abort", "write_with_ovf_abort", "remove_sb_abort", "update_sb_abort", "abort_before_recover_cb_sent", "abort_after_recover_cb_sent"]
 vdev_flip_list = ["abort_before_update_eof_cur_chunk", "abort_after_update_eof_cur_chunk", "abort_after_update_eof_next_chunk"]
 
 def recovery():
-    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file=0 --emulate_hdd_cnt=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file_on_shutdown=0 --remove_file_on_start=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 --remove_file=1 --delete_volume=1 --emulate_hdd_cnt=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 --remove_file_on_shutdown=1 --delete_volume=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery passed")
 
 def recovery_crash():
     try:
-        cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file=0 --abort=1"
-        subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+        cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file_on_shutdown=0 --remove_file_on_start=1 --abort=1"
+        subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     except:
         print("recovery_crash test aborted")
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 --remove_file=1 --delete_volume=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --enable_crash_handler=1 --remove_file_on_shutdown=1 --delete_volume=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery crash passed")
 
 def vol_mod_test(mod_name, flip_list):
     for flip in flip_list: 
         print("testing flip point: " + flip);
         try:
-            cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --max_volume=5 --enable_crash_handler=1 --remove_file=0 --mod_list=" + mod_name + " " + "--" + flip + "=1"
-            print(dirpath + "test_volume " + cmd_opts + addln_opts);
-            subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+            cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --max_volume=5 --enable_crash_handler=1 --remove_file_on_shutdown=0 --remove_file_on_start=1 --mod_list=" + mod_name + " " + "--" + flip + "=1"
+            print(dirpath + "test_volume " + cmd_opts + vol_addln_opts);
+            subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
         except:
             print("vol_mod_test aborted: " + flip)
     
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --max_volume=5 --enable_crash_handler=1 --remove_file=1 --delete_volume=1"
-        subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=3 --run_time=30 --max_volume=5 --enable_crash_handler=1 --remove_file_on_shutdown=1 --delete_volume=1"
+        subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
         print("vol_mod_test passed: " + flip)
 
     print("All vol_mod_test passed with mod_name: " + mod_name)
@@ -89,14 +106,23 @@ def vol_mod_test(mod_name, flip_list):
 #  @brief Normal IO test
 def normal(num_secs="20000"):
     print("normal test started")
-    cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0 --flip=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file_on_shutdown=0 --remove_file_on_start=1 --flip=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("normal test completed")
 
-def normal_unmap(num_secs="20000"):
+def normal_unmap(num_secs="1500"):
     print("normal unmap test started")
-    cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0 --flip=1 --verify_type=2 --unmap_enable=1 --remove_file=1 --delete_volume=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    i = 1
+    while i < 5:
+        cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file_on_shutdown=0 --remove_file_on_start=1 --flip=1 --verify_type=2 --unmap_enable=1 --remove_file_on_shutdown=1 --delete_volume=1"
+        subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
+    
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --pre_init_verify=false --abort=0 --flip=1 --remove_file_on_shutdown=0 --verify_type=2"
+        subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+        s = "normal unmap iteration" + repr(i) + "passed"
+        print(s)
+        i += 1
+
     print("normal unmap test completed")
 
 ## @test load
@@ -122,26 +148,26 @@ def recovery_nightly(num_iteration=10):
     i = 1
     while i < num_iteration:
         
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --pre_init_verify=false --abort=1 --flip=1 --remove_file=0 --verify_type=2"
-        subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --pre_init_verify=false --abort=1 --flip=1 --remove_file_on_shutdown=0 --verify_type=2"
+        subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
         
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --pre_init_verify=false --abort=0 --flip=1 --remove_file=0 --verify_type=2"
-        subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --pre_init_verify=false --abort=0 --flip=1 --remove_file_on_shutdown=0 --verify_type=2"
+        subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
 
         s = "recovery test iteration" + repr(i) + "passed" 
         print(s)
         i += 1
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --remove_file=0 --delete_volume=0 --verify_type=2"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --remove_file_on_shutdown=0 --delete_volume=0 --verify_type=2" 
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery test completed")
 
     # run same LBA work load for 2 hours;
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=3600 --max_num_writes=5000000 --load_type=1 --verify_type=2 --enable_crash_handler=1 --remove_file=0"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=3600 --max_num_writes=5000000 --load_type=1 --verify_type=2 --enable_crash_handler=1 --remove_file_on_shutdown=0" 
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=2 --run_time=300 --enable_crash_handler=1 --remove_file=1 --delete_volume=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=2 --run_time=300 --enable_crash_handler=1 --remove_file_on_shutdown=1 --delete_volume=1" 
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery with writing to same LBA workload passed")
 
 def recovery_nightly_with_create_del(num_iteration=10):
@@ -149,37 +175,37 @@ def recovery_nightly_with_create_del(num_iteration=10):
     i = 1
     while i < num_iteration:
         
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --verify_type=3 --abort=1 --flip=1 --remove_file=0 --create_del_with_io=true --expect_io_error=1"
-        subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --verify_type=3 --abort=1 --flip=1 --remove_file_on_shutdown=0 --create_del_with_io=true --expect_io_error=1"
+        subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
         
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --verify_type=3 --abort=0 --flip=1 --remove_file=0 --create_del_with_io=true --expect_io_error=1"
-        subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --verify_type=3 --abort=0 --flip=1 --remove_file_on_shutdown=0 --create_del_with_io=true --expect_io_error=1"
+        subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
 
         s = "recovery test with create delete iteration" + repr(i) + "passed" 
         print(s)
         i += 1
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=600 --remove_file=1 --delete_volume=1 --verify_type=2 --create_del_with_io=true --create_del_ops_interval=600 --expect_io_error=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=600 --remove_file_on_shutdown=1 --delete_volume=1 --verify_type=2 --create_del_with_io=true --create_del_ops_interval=600 --expect_io_error=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery test with create delete completed")
 
 ## @test one_disk_replace
 #  @brief One disk is replaced during boot time
 def one_disk_replace():
     print("one disk replace test started")
-    cmd_opts = "--gtest_filter=VolTest.one_disk_replace_test --run_time=300 --remove_file=0 --verify_type=3"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.one_disk_replace_test --run_time=300 --remove_file_on_shutdown=0 --verify_type=3"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery test with one disk replace passed")
 
 ## @test one_disk_replace_abort
 #  @brief Homestore crashed during recovery with one disk replace
 def one_disk_replace_abort():
     print("recovery abort with one disk replace started")
-    cmd_opts = "--gtest_filter=VolTest.one_disk_replace_abort_test --run_time=300 --remove_file=0 --verify_type=3 --enable_crash_handler=0"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.one_disk_replace_abort_test --run_time=300 --remove_file_on_shutdown=0 --verify_type=3 --enable_crash_handler=0"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
 
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --remove_file=0 --verify_type=3 --expected_vol_state=2"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=300 --remove_file_on_shutdown=0 --verify_type=3 --expected_vol_state=2"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery abort with one disk replace passed")
 
 ## @test both_disk_replace
@@ -187,10 +213,10 @@ def one_disk_replace_abort():
 def both_disk_replace():
     print("Both disk replace started")
     cmd_opts = "--gtest_filter=VolTest.two_disk_replace_test --run_time=300"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
 
-    cmd_opts = "--run_time=300 --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--run_time=300 --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file_on_shutdown=0 --remove_file_on_start=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("Both disk replace passed")
 
 ## @test one_disk_fail
@@ -198,7 +224,8 @@ def both_disk_replace():
 def one_disk_fail():
     print("one disk fail test started")
     cmd_opts = "--gtest_filter=VolTest.one_disk_fail_test --run_time=300"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
+
     print("one disk fail test passed")
 
 ## @test vol_offline_test
@@ -206,12 +233,12 @@ def one_disk_fail():
 def vol_offline_test():
     print("vol offline test started")
     cmd_opts = "--gtest_filter=VolTest.vol_offline_test --run_time=300"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("vol offline test passed")
     
     print("vol offline test recovery started")
     cmd_opts = "--gtest_filter = VolTest.recovery_io_test --run_time=300 --expected_vol_state=1"
-    status = subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    status = subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("vol offline test recovery passed")
 
 ## @test vol_io_fail_test
@@ -219,14 +246,14 @@ def vol_offline_test():
 #           after reboot and data is verified.
 def vol_io_fail_test(num_secs="3600"):
     print("vol io fail test started")
-    cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --remove_file=0 --flip=2"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --remove_file_on_shutdown=0 --flip=2"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("vol io fail test completed")
 
 def vol_crc_mismatch_test(num_secs="30"):
     print("vol crc mismatch test started")
-    cmd_opts = "--run_time=" + num_secs + " --gtest_filter=VolTest.vol_crc_mismatch_test --remove_file=0 --expect_io_error=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--run_time=" + num_secs + " --gtest_filter=VolTest.vol_crc_mismatch_test --remove_file_on_shutdown=0 --expect_io_error=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("vol crc mismatch test completed")
 
 ##  @test vol_create_del_test
@@ -234,13 +261,13 @@ def vol_crc_mismatch_test(num_secs="30"):
 def vol_create_del_test():
     print("create del vol test started")
     cmd_opts = "--gtest_filter=VolTest.vol_create_del_test --max_volume=1000"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("create del vol test passed")
 
 def seq_load_start():
     print("seq workload started")
-    cmd_opts = "--run_time=24000 --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file=0 --flip=1 --load_type=2"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--run_time=24000 --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file_on_shutdown=0 --remove_file_on_start=1 --flip=1 --load_type=2"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("seq workload test completed")
     
 def seq_workload():
@@ -251,19 +278,19 @@ def seq_workload():
 def btree_fix_on_read_failure():
     print("btree fix failure test started")
     cmd_opts = "--run_time=100 --max_num_writes=1000 --gtest_filter=VolTest.btree_fix_read_failure_test"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("btree fix failure test completed")
  
 def btree_fix():
     print("btree fix started")
     cmd_opts = "--run_time=1000 --max_num_writes=100000 --gtest_filter=VolTest.btree_fix_test"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("btree fix test completed")
 
 def btree_fix_rerun_io():
     print("btree fix rerun io started")
     cmd_opts = "--run_time=1000 --max_num_writes=100000 --gtest_filter=VolTest.btree_fix_rerun_io_test"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("btree fix rerun io test completed")
    
 def vdev_nightly():
@@ -275,29 +302,41 @@ def vdev_nightly():
 
 def meta_blk_store_nightly():
     print("meta blk store test started")
-    subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.min_drive_size_test", stderr=subprocess.STDOUT, shell=True)
-    subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.write_to_full_test", stderr=subprocess.STDOUT, shell=True)
-    subprocess.check_call(dirpath + "test_meta_blk_mgr --gtest_filter=VMetaBlkMgrTest.single_read_test", stderr=subprocess.STDOUT, shell=True)
-    subprocess.check_call(dirpath + "test_meta_blk_mgr --run_time=7200 --num_io=1000000", stderr=subprocess.STDOUT, shell=True)
-    subprocess.check_call(dirpath + "test_meta_blk_mgr --min_write_size=65536 --max_write_size=2097152 --run_time=14400 --num_io=1000000", stderr=subprocess.STDOUT, shell=True)
-    subprocess.check_call(dirpath + "test_meta_blk_mgr --min_write_size=10485760 --max_write_size=104857600 --bitmap=1", stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--gtest_filter=VMetaBlkMgrTest.min_drive_size_test"
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
 
+    cmd_opts = "--gtest_filter=VMetaBlkMgrTest.write_to_full_test"
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    
+    cmd_opts = "--gtest_filter=VMetaBlkMgrTest.single_read_test"
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    
+    cmd_opts = "--run_time=7200 --num_io=1000000"
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    
+    cmd_opts = "--min_write_size=65536 --max_write_size=2097152 --run_time=14400 --num_io=1000000"
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    
+    cmd_opts = "--min_write_size=10485760 --max_write_size=104857600 --bitmap=1"
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    
     print("meta blk store test completed")
 
 def logstore_nightly():
     print("log store test started")
-    subprocess.check_call(
-        dirpath + "test_log_store --iterations=10", stderr=subprocess.STDOUT, shell=True)
+
+    cmd_opts = "--iterations=10"
+    subprocess.check_call(dirpath + "test_log_store " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
 
     print("log store test completed")
     
 def force_reinit():
     # test force reinit with recovery (e.g.  with complete homestore shutdown);
-    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=1 --enable_crash_handler=0 --remove_file=0"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=1 --remove_file_on_start=1 --enable_crash_handler=0 --remove_file_on_shutdown=0"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
 
-    cmd_opts = "--gtest_filter=VolTest.hs_force_reinit_test --run_time=1 --enable_crash_handler=1 --remove_file=1 --delete_volume=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.hs_force_reinit_test --run_time=1 --enable_crash_handler=1 --remove_file_on_shutdown=1 --delete_volume=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("Homestore Force Reinit passed")
 
 def hs_svc_tool():
@@ -306,92 +345,100 @@ def hs_svc_tool():
 
 def vol_create_delete_test():
     # abort during first cp create
-    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --indx_create_first_cp_abort=true --run_time=10000 --max_num_writes=1000000 --num_threads=1 --expect_io_error=1 --remove_file=0"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --delete_volume=0 --run_time=600 --create_del_ops_interval=30 --verify_type=2 --expect_io_error=1 --remove_file=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --indx_create_first_cp_abort=true --run_time=10000 --max_num_writes=1000000 --num_threads=1 --expect_io_error=1 --remove_file_on_shutdown=0 --remove_file_on_start=1"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --delete_volume=0 --run_time=600 --create_del_ops_interval=30 --verify_type=2 --expect_io_error=1 --remove_file_on_shutdown=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     print("homestore create first cp test completed")
 
     # abort during vol delete before writing meta blk
-    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_before_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=30 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1 --remove_file=0"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=30 --verify_type=3 --expect_io_error=1 --remove_file=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_before_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=30 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1 --remove_file_on_shutdown=0 --remove_file_on_start=1"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=30 --verify_type=3 --expect_io_error=1 --remove_file_on_shutdown=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     print("abort during vol delete before writing meta blk test compeleted")
     
     # abort during vol delete after writing meta blk
-    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_after_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=30 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1 --remove_file=0"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=30 --verify_type=3 --expect_io_error=1 --remove_file=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_after_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=30 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1 --remove_file_on_shutdown=0 --remove_file_on_start=1"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=30 --verify_type=3 --expect_io_error=1 --remove_file_on_shutdown=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     print("abort during vol delete after writing meta blk test compeleted")
     
     # abort during vol delete after freeing data blks
-    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_indx_blks=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=30 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1 --remove_file=0"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=30 --verify_type=3 --expect_io_error=1 --remove_file=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_indx_blks=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=30 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1 --remove_file_on_shutdown=0 --remove_file_on_start=1"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=30 --verify_type=3 --expect_io_error=1 --remove_file_on_shutdown=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     print("abort during vol delete after freeing data blks")
 
     # abort during vol delete after freeing btree blks
-    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_free_blks_completed=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=30 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1 --remove_file=0"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=30 --verify_type=3 --expect_io_error=1 --remove_file=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_free_blks_completed=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=30 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1 --remove_file_on_shutdown=0 --remove_file_on_start=1"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=30 --verify_type=3 --expect_io_error=1 --remove_file_on_shutdown=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     print("abort during vol delete after freeing btree blks")
 
     # double crash after vol delete
-    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_before_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=30 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1 --remove_file=0"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.recovery_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_before_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=30 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1 --remove_file=0"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=30 --verify_type=3 --expect_io_error=1 --remove_file=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.init_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_before_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=30 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1 --remove_file_on_shutdown=0 --remove_file_on_start=1"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--mod_list=\"index\" --create_del_with_io=true --gtest_filter=VolTest.recovery_io_test --free_blk_cnt=50 --indx_del_partial_free_data_blks_before_meta_write=true --run_time=10000 --max_num_writes=1000000 --create_del_ops_interval=30 --max_volume=3 --num_threads=1 --verify_type=3 --expect_io_error=1 --remove_file_on_shutdown=0"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=3 --run_time=600 --create_del_ops_interval=30 --verify_type=3 --expect_io_error=1 --remove_file_on_shutdown=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     print("double crash of volume delete compelted")
 
     # run vol delete with for an hour
-    cmd_opts = "--gtest_filter=VolTest.init_io_test --create_del_with_io=true --remove_file=0 --run_time=1200 --create_del_ops_interval=30 --expect_io_error=1"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --create_del_with_io=true --remove_file_on_shutdown=0 --remove_file_on_start=1 --run_time=1200 --create_del_ops_interval=30 --expect_io_error=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     print("init completed")
 
     # run few iteration of vol create delete with recovery
     recovery_nightly_with_create_del()
 
+    # create 1000 volume and panic after logdev truncation id unreserve
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --create_del_with_io=true --remove_file_on_shutdown=0 --remove_file_on_start=1 --run_time=36000 --create_del_ops_interval=30 --expect_io_error=1 --max_volume=800 --verify_type=3 --flip_name=logdev_abort_after_garbage"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --create_del_with_io=true --max_volume=800 --verify_type=3"
+    #subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True) # OOM Kill by kernel
+
+
 def vol_io_flip_test():
-    cmd_opts = "--gtest_filter=VolTest.init_io_test --mod_list=\"index\" --remove_file=0 --run_time=600 --cp_bitmap_abort=true --max_volume=3 --max_num_writes=1000000"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.init_io_test --mod_list=\"index\" --remove_file_on_shutdown=0 --remove_file_on_start=1 --run_time=600 --cp_bitmap_abort=true --max_volume=3 --max_num_writes=1000000"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --max_volume=3"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file=0 --run_time=600 --delete_volume = 0 --cp_wb_flush_abort=true --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --cp_wb_flush_abort=true --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --max_volume=3"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file=0 --run_time=600 --delete_volume=0 --cp_logstore_truncate_abort=true --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --cp_logstore_truncate_abort=true --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --max_volume=3"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_post_sb_write_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_post_sb_write_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_pre_sb_remove_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    # will be re-enabled later
+    # cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_pre_sb_remove_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
+    # subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
 
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_post_free_blks_abort_before_cp=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_post_free_blks_abort_before_cp=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
 
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_pre_second_cp_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
-    subprocess.call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_pre_second_cp_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
 
 def meta_mod_abort():
     vol_mod_test("meta", meta_flip_list)
@@ -399,7 +446,7 @@ def meta_mod_abort():
 def vdev_mod_abort():
     vol_mod_test("vdev", vdev_flip_list)
 
-def http_sanity_routine(success):
+def http_sanity_routine():
     sleep(20)
     get_api_list = ['version', 'getObjLife', 'getLogLevel', 'verifyHS', 'mallocStats', 'getConfig', 'getStatus'""", 'verifyBitmap'"""]
     endpoint = "127.0.0.1:12345"
@@ -417,24 +464,21 @@ def http_sanity_routine(success):
                 sleep(1)
         if not response:
             print(f"error: max retries exceeded for url {url}")
-            success.append(False)
-            return
+            return False
         if not response.ok:
             print(f"error: url {url} failed, what: {response.text}")
-            success.append(False)
-            return
+            return False
         sleep(1)
-    success.append(True)
+    return True
 
 def http_sanity_test():
     print("http_sanity_test test started")
-    cmd_opts = "--run_time=45 --max_volume=1 --num_threads=1 --gtest_filter=VolTest.vol_create_del_test --hb_stats_port=12345"
-    success = []
-    thread = Thread(target=http_sanity_routine, args=[success,])
-    thread.start()
-    subprocess.check_call(dirpath + "test_volume " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
-    thread.join()
-    if (not success) or (not success[0]) :
+    cmd_opts = "--run_time=45 --max_volume=1 --num_threads=1 --set_hs_init_flag=hs_init_flag --gtest_filter=VolTest.vol_create_del_test"
+    #thread = Thread(target=http_sanity_routine, args=[success,])
+    #thread.start()
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
+    #thread.join()
+    if not http_sanity_routine():
         print("http_sanity_test FAILED")
         sys.exit(1)
     print("http_sanity_test test completed")
@@ -452,21 +496,11 @@ def nightly():
 
     recovery_nightly()
     sleep(5)
-    
-    normal_unmap()
-    sleep(5)
 
     #load()
     sleep(5)
 
     vol_create_delete_test()
-    sleep(5)
-    
-    # metablkstore IO test
-    meta_blk_store_nightly()
-    sleep(5)
-    
-    logstore_nightly()
     sleep(5)
     
     vol_mod_test("meta", meta_flip_list)
@@ -481,9 +515,19 @@ def nightly():
     #vol_crc_mismatch_test()   # turn back on if fault_containment doesn't do assert failure;
     #sleep(5)
 
-    vol_io_flip_test()
+    logstore_nightly()
     sleep(5)
 
+    # metablkstore IO test
+    meta_blk_store_nightly()
+    sleep(5)
+
+    normal_unmap()
+    sleep(5)
+    
+    vol_io_flip_test()
+    sleep(5)
+    
     #one_disk_replace()
     #sleep(5)
 

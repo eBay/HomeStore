@@ -15,7 +15,7 @@
 
 #include <iomgr/iomgr.hpp>
 #include <nlohmann/json.hpp>
-#include <sds_options/options.h>
+#include <sisl/options/options.h>
 #include <sisl/settings/settings.hpp>
 
 #include "engine/common/error.h"
@@ -29,6 +29,7 @@ SETTINGS_INIT(homestorecfg::HomeStoreSettings, homestore_config);
 
 constexpr uint32_t MAX_CHUNKS{128};
 constexpr uint32_t HDD_MAX_CHUNKS{254};
+constexpr uint32_t HS_MAX_CHUNKS{HDD_MAX_CHUNKS};
 constexpr uint32_t MAX_VDEVS{16};
 constexpr uint32_t MAX_PDEVS{8};
 static constexpr uint32_t INVALID_PDEV_ID{std::numeric_limits< uint32_t >::max()};
@@ -88,6 +89,7 @@ public:
     uint32_t min_virtual_page_size{4096}; // minimum page size supported. Ideally it should be 4k.
     uint64_t app_mem_size{static_cast< uint64_t >(1024) * static_cast< uint64_t >(1024) *
                           static_cast< uint64_t >(1024)}; // memory available for the app (including cache)
+    uint64_t hugepage_size{0};                            // memory available for the hugepage
     bool is_read_only{false};                             // Is read only
     bool start_http{true};
 
@@ -108,9 +110,11 @@ public:
 
         json["min_virtual_page_size"] = min_virtual_page_size;
         json["app_mem_size"] = app_mem_size;
-
+        json["hugepage_size"] = hugepage_size;
         return json;
     }
+    std::string to_string() const { return to_json().dump(4); }
+    uint64_t io_mem_size() const { return (hugepage_size != 0) ? hugepage_size : app_mem_size; }
 };
 
 struct hs_engine_config {
@@ -179,10 +183,7 @@ public:
                 slab_pct_dist.insert(slab_pct_dist.begin(), std::cbegin(d), std::cend(d));
                 is_modified = true;
             }
-#ifndef NDEBUG
-            s.generic.blkalloc_cp_timer_us = 1000000; // setting to 1 sec for debug build
-            is_modified = true;
-#endif
+
             // Any more default overrides or set non-scalar entries come here
         });
 

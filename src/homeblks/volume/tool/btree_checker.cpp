@@ -21,8 +21,9 @@
 #include <sisl/fds/bitset.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/iomgr.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <iomgr/iomgr_config.hpp>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 #include <sisl/utility/thread_buffer.hpp>
 
 #include "api/vol_interface.hpp"
@@ -36,7 +37,7 @@ static const std::string STAGING_VOL_PREFIX{"staging"};
 
 RCU_REGISTER_INIT
 using log_level = spdlog::level::level_enum;
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 std::string vol_uuid;
 
@@ -134,6 +135,7 @@ void start_homestore() {
     }
     params.min_virtual_page_size = config["min_virtual_page_size"];
     params.app_mem_size = config["app_mem_size"];
+
     // TODO: Call iomgr emulate drive attrs before starting homestore
     /*params.data_drive_attr = iomgr::drive_attributes();
     params.data_drive_attr->phys_page_size = config["phys_page_size"];
@@ -171,7 +173,7 @@ void shutdown() {
 
 /************************* CLI options ***************************/
 
-SDS_OPTION_GROUP(
+SISL_OPTION_GROUP(
     check_btree,
     (vol_uuid, "", "vol_uuid", "volume uuid", ::cxxopts::value< std::string >()->default_value(""), "string"),
     (blkid, "", "blkid", "block id", ::cxxopts::value< uint64_t >()->default_value("0"), "number"),
@@ -181,20 +183,20 @@ SDS_OPTION_GROUP(
      "flag"), // vol_state
     (fix_tree, "", "fix_tree", "fix state", ::cxxopts::value< uint32_t >()->default_value("0"), "flag"))
 
-#define ENABLED_OPTIONS logging, home_blks, check_btree
-SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
+#define ENABLED_OPTIONS logging, check_btree
+SISL_OPTIONS_ENABLE(ENABLED_OPTIONS)
 
 /************************** MAIN ********************************/
 
 int main(int argc, char* argv[]) {
-    SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
-    sds_logging::SetLogger("check_btree");
+    SISL_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
+    sisl::logging::SetLogger("check_btree");
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
-    vol_uuid = SDS_OPTIONS["vol_uuid"].as< std::string >();
-    blkid = SDS_OPTIONS["blkid"].as< uint64_t >();
-    print_tree = SDS_OPTIONS["print_tree"].as< uint32_t >();
-    verify_tree = SDS_OPTIONS["verify_tree"].as< uint32_t >();
-    mark_vol_state = SDS_OPTIONS["mark_vol_state"].as< uint32_t >();
+    vol_uuid = SISL_OPTIONS["vol_uuid"].as< std::string >();
+    blkid = SISL_OPTIONS["blkid"].as< uint64_t >();
+    print_tree = SISL_OPTIONS["print_tree"].as< uint32_t >();
+    verify_tree = SISL_OPTIONS["verify_tree"].as< uint32_t >();
+    mark_vol_state = SISL_OPTIONS["mark_vol_state"].as< uint32_t >();
 
     start_homestore();
     wait_cmpl();

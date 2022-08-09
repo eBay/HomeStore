@@ -4,8 +4,8 @@
 #include <memory>
 #include <sys/timeb.h>
 #include <sisl/fds/buffer.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 #include "engine/common/mod_test_iface.hpp"
 #include "engine/common/homestore_flip.hpp"
 #include "engine/common/homestore_config.hpp"
@@ -85,27 +85,27 @@ mod_test_meta meta_test;
 #endif
 
 /************************* CLI options ***************************/
-SDS_OPTION_GROUP(test_meta_mod,
-                 (write_sb_abort, "", "write_sb_abort", "write_sb_abort",
-                  ::cxxopts::value< bool >()->default_value("0"), "true or false"),
-                 (write_with_ovf_abort, "", "write_with_ovf_abort", "write_with_ovf_abort",
-                  ::cxxopts::value< bool >()->default_value("0"), "true or false"),
-                 (update_sb_abort, "", "update_sb_abort", "update_sb_abort",
-                  ::cxxopts::value< bool >()->default_value("0"), "true or false"),
-                 (remove_sb_abort, "", "remove_sb_abort", "remove_sb_abort",
-                  ::cxxopts::value< bool >()->default_value("0"), "true or false"),
-                 (abort_before_recover_cb_sent, "", "abort_before_recover_cb_sent", "abort_before_recover_cb_sent",
-                  ::cxxopts::value< bool >()->default_value("0"), "true or false"),
-                 (abort_after_recover_cb_sent, "", "abort_after_recover_cb_sent", "abort_after_recover_cb_sent",
-                  ::cxxopts::value< bool >()->default_value("0"), "true or false"))
+SISL_OPTION_GROUP(test_meta_mod,
+                  (write_sb_abort, "", "write_sb_abort", "write_sb_abort",
+                   ::cxxopts::value< bool >()->default_value("0"), "true or false"),
+                  (write_with_ovf_abort, "", "write_with_ovf_abort", "write_with_ovf_abort",
+                   ::cxxopts::value< bool >()->default_value("0"), "true or false"),
+                  (update_sb_abort, "", "update_sb_abort", "update_sb_abort",
+                   ::cxxopts::value< bool >()->default_value("0"), "true or false"),
+                  (remove_sb_abort, "", "remove_sb_abort", "remove_sb_abort",
+                   ::cxxopts::value< bool >()->default_value("0"), "true or false"),
+                  (abort_before_recover_cb_sent, "", "abort_before_recover_cb_sent", "abort_before_recover_cb_sent",
+                   ::cxxopts::value< bool >()->default_value("0"), "true or false"),
+                  (abort_after_recover_cb_sent, "", "abort_after_recover_cb_sent", "abort_after_recover_cb_sent",
+                   ::cxxopts::value< bool >()->default_value("0"), "true or false"))
 
 void meta_mod_test_main() {
-    meta_cfg.write_sb_abort = SDS_OPTIONS["write_sb_abort"].as< bool >();
-    meta_cfg.write_with_ovf_abort = SDS_OPTIONS["write_with_ovf_abort"].as< bool >();
-    meta_cfg.remove_sb_abort = SDS_OPTIONS["remove_sb_abort"].as< bool >();
-    meta_cfg.update_sb_abort = SDS_OPTIONS["update_sb_abort"].as< bool >();
-    meta_cfg.abort_before_recover_cb_sent = SDS_OPTIONS["abort_before_recover_cb_sent"].as< bool >();
-    meta_cfg.abort_after_recover_cb_sent = SDS_OPTIONS["abort_after_recover_cb_sent"].as< bool >();
+    meta_cfg.write_sb_abort = SISL_OPTIONS["write_sb_abort"].as< bool >();
+    meta_cfg.write_with_ovf_abort = SISL_OPTIONS["write_with_ovf_abort"].as< bool >();
+    meta_cfg.remove_sb_abort = SISL_OPTIONS["remove_sb_abort"].as< bool >();
+    meta_cfg.update_sb_abort = SISL_OPTIONS["update_sb_abort"].as< bool >();
+    meta_cfg.abort_before_recover_cb_sent = SISL_OPTIONS["abort_before_recover_cb_sent"].as< bool >();
+    meta_cfg.abort_after_recover_cb_sent = SISL_OPTIONS["abort_after_recover_cb_sent"].as< bool >();
 #ifdef _PRERELEASE
     mod_tests.push_back(&meta_test);
 #endif

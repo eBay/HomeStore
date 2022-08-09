@@ -3,7 +3,7 @@
 #include "log_dev.hpp"
 
 namespace homestore {
-SDS_LOGGING_DECL(logstore)
+SISL_LOGGING_DECL(logstore)
 
 log_stream_reader::log_stream_reader(const off_t device_cursor, JournalVirtualDev* store,
                                      const uint64_t read_size_multiple) :
@@ -28,7 +28,7 @@ read_again:
         min_needed = 0;
     }
 
-    HS_RELEASE_ASSERT_GE(m_cur_log_buf.size(), m_read_size_multiple);
+    HS_REL_ASSERT_GE(m_cur_log_buf.size(), m_read_size_multiple);
     const auto* const header{reinterpret_cast< log_group_header* >(m_cur_log_buf.bytes())};
     if (header->magic_word() != LOG_GROUP_HDR_MAGIC) {
         LOGINFOMOD(logstore, "Logdev data not seeing magic at pos {}, must have come to end of logdev",
@@ -82,7 +82,7 @@ read_again:
         m_cur_read_bytes += m_read_size_multiple;
         return ret_buf;
     }
-    HS_DEBUG_ASSERT_EQ(footer->version, log_group_footer::footer_version, "Log footer version mismatch");
+    HS_DBG_ASSERT_EQ(footer->version, log_group_footer::footer_version, "Log footer version mismatch");
 
     // verify crc with data
     const crc32_t cur_crc{
@@ -90,7 +90,7 @@ read_again:
                    (header->total_size() - sizeof(log_group_header)))};
     if (cur_crc != header->cur_grp_crc) {
         /* This is a valid entry so crc should match */
-        HS_RELEASE_ASSERT(0, "data is corrupted");
+        HS_REL_ASSERT(0, "data is corrupted");
         LOGINFOMOD(logstore, "crc doesn't match {}", m_blkstore->get_dev_offset(m_cur_read_bytes));
         *out_dev_offset = m_blkstore->get_dev_offset(m_cur_read_bytes);
 
@@ -129,7 +129,7 @@ sisl::byte_view log_stream_reader::read_next_bytes(const uint64_t nbytes) {
 
     const auto prev_pos{m_blkstore->seeked_pos()};
     auto actual_read{m_blkstore->read(static_cast< void* >(out_buf.bytes()), nbytes)};
-    HS_RELEASE_ASSERT_NE(actual_read, 0, "zero bytes are read");
+    HS_REL_ASSERT_NE(actual_read, 0, "zero bytes are read");
     LOGINFOMOD(logstore, "LogStream read {} bytes from vdev offset {} and vdev cur offset {}", actual_read, prev_pos,
                m_blkstore->seeked_pos());
     ret_buf.set_size(actual_read + m_cur_log_buf.size());

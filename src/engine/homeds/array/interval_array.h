@@ -7,7 +7,7 @@
 
 #include "elastic_array.h"
 #include <blkalloc/blk.h>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <map>
 
 using namespace std;
@@ -22,8 +22,7 @@ struct Interval {
     Interval() : m_interval_start(0), m_interval_length(0), m_value(Value()) {}
 
     Interval(uint64_t m_interval_start, uint64_t m_interval_length) :
-            m_interval_start(m_interval_start),
-            m_interval_length(m_interval_length) {}
+            m_interval_start(m_interval_start), m_interval_length(m_interval_length) {}
 
     uint64_t end() { return m_interval_start + m_interval_length - 1; }
 
@@ -166,8 +165,7 @@ void Interval_Array< ArrayTypeParams >::addInterval(
     }
 
     bool is_completely_disjoint = false; // indicates no overlaps whatsoever
-    if (existingIntervalOverlaps.size() == 0)
-        is_completely_disjoint = true;
+    if (existingIntervalOverlaps.size() == 0) is_completely_disjoint = true;
 
     LOGTRACE("Post overlap phase:{} -> {}", startIndex, endIndex);
 
@@ -181,8 +179,7 @@ void Interval_Array< ArrayTypeParams >::addInterval(
         currentInterval = (*this)[startIndex - 1];
         currentInterval->merge_compare(currentInterval, newInterval, merged_interval, is_intervals_mergable);
         if (is_intervals_mergable) {
-            if (is_completely_disjoint && startIndex == endIndex)
-                endIndex--;
+            if (is_completely_disjoint && startIndex == endIndex) endIndex--;
             newInterval = merged_interval.get();
             startIndex--;
             merged = true;
@@ -208,8 +205,7 @@ void Interval_Array< ArrayTypeParams >::addInterval(
     if (merged || !is_completely_disjoint) {
         // either merger or overlap happened
         // when right end of new range crosses over all existing ranges
-        if (endIndex == this->get_no_of_elements_filled())
-            endIndex--;
+        if (endIndex == this->get_no_of_elements_filled()) endIndex--;
         assert(startIndex <= endIndex);
         remove = true;
     } else {
@@ -252,9 +248,7 @@ void Interval_Array< ArrayTypeParams >::optimized_cud(std::shared_ptr< ElementTy
         startIndex++;
     }
 
-    if (remove && startIndex <= endIndex) {
-        this->remove_shift(startIndex, endIndex);
-    }
+    if (remove && startIndex <= endIndex) { this->remove_shift(startIndex, endIndex); }
 }
 
 template < ArrayType >
@@ -271,14 +265,12 @@ template < ArrayType >
 void Interval_Array< ArrayTypeParams >::getIntervals(ElementType* search,
                                                      std::vector< std::shared_ptr< ElementType > >& existing,
                                                      uint16_t& si, uint16_t& ei) {
-    if (this->get_no_of_elements_filled() == 0)
-        return;
+    if (this->get_no_of_elements_filled() == 0) return;
     int st = this->binary_search(search);
 
     if (st < 0) {
-        st = (-st - 1); // insertion point
-        if (st > 0)
-            st--; // consider one more on left as could be partial overlap
+        st = (-st - 1);   // insertion point
+        if (st > 0) st--; // consider one more on left as could be partial overlap
     }
     uint16_t ci = (uint16_t)st;
     si = ei = ci;
@@ -317,9 +309,7 @@ void Interval_Array< ArrayTypeParams >::getIntervals(ElementType* search,
 
         ci++;
     }
-    if (ci == this->get_no_of_elements_filled() && !siFound) {
-        si = ei = ci;
-    }
+    if (ci == this->get_no_of_elements_filled() && !siFound) { si = ei = ci; }
 
     /* At this point,
      if there is left overlap, startIndex will point to it. If not, it will point to insertion index

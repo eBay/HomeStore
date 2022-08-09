@@ -26,19 +26,24 @@
 #include "engine/common/homestore_config.hpp"
 #include "engine/common/homestore_header.hpp"
 
-SDS_LOGGING_DECL(blkalloc)
-SDS_LOGGING_DECL(transient)
+SISL_LOGGING_DECL(blkalloc)
+SISL_LOGGING_DECL(transient)
 
 namespace homestore {
 #define BLKALLOC_LOG(level, msg, ...) HS_SUBMOD_LOG(level, blkalloc, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
-#define BLKALLOC_ASSERT(assert_type, cond, msg, ...)                                                                   \
-    HS_SUBMOD_ASSERT(assert_type, cond, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
-#define BLKALLOC_ASSERT_CMP(assert_type, val1, cmp, val2, ...)                                                         \
-    HS_SUBMOD_ASSERT_CMP(assert_type, val1, cmp, val2, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
-#define BLKALLOC_ASSERT_NOTNULL(assert_type, val, ...)                                                                 \
-    HS_SUBMOD_ASSERT_NOTNULL(assert_type, val, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
-#define BLKALLOC_ASSERT_NULL(assert_type, val, ...)                                                                    \
-    HS_SUBMOD_ASSERT_NULL(assert_type, val, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
+#define BLKALLOC_DBG_ASSERT(cond, msg, ...)                                                                            \
+    HS_SUBMOD_ASSERT(DEBUG_ASSERT_FMT, cond, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
+#define BLKALLOC_REL_ASSERT(cond, msg, ...)                                                                            \
+    HS_SUBMOD_ASSERT(RELEASE_ASSERT_FMT, cond, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
+#define BLKALLOC_LOG_ASSERT(cond, msg, ...)                                                                            \
+    HS_SUBMOD_ASSERT(LOGMSG_ASSERT_FMT, cond, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
+
+#define BLKALLOC_REL_ASSERT_CMP(val1, cmp, val2, ...)                                                                  \
+    HS_SUBMOD_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, cmp, val2, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
+#define BLKALLOC_DBG_ASSERT_CMP(val1, cmp, val2, ...)                                                                  \
+    HS_SUBMOD_ASSERT_CMP(DEBUG_ASSERT_CMP, val1, cmp, val2, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
+#define BLKALLOC_LOG_ASSERT_CMP(val1, cmp, val2, ...)                                                                  \
+    HS_SUBMOD_ASSERT_CMP(LOGMSG_ASSERT_CMP, val1, cmp, val2, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
 
 struct blkalloc_cp;
 
@@ -108,19 +113,19 @@ struct blk_alloc_hints {
     blk_alloc_hints() :
             desired_temp{0},
             dev_id_hint{INVALID_DEV_ID},
-            can_look_for_other_dev{true},
+            can_look_for_other_chunk{true},
             is_contiguous{false},
             multiplier{1},
             max_blks_per_entry{BlkId::max_blks_in_op()},
-            stream_ptr{(uintptr_t) nullptr} {}
+            stream_info{(uintptr_t) nullptr} {}
 
     blk_temp_t desired_temp;     // Temperature hint for the device
     uint32_t dev_id_hint;        // which physical device to pick (hint if any) -1 for don't care
-    bool can_look_for_other_dev; // If alloc on device not available can I pick other device
+    bool can_look_for_other_chunk; // If alloc on device not available can I pick other device
     bool is_contiguous;
     uint32_t multiplier;         // blks allocated in a blkid should be a multiple of multiplier
     uint32_t max_blks_per_entry; // Number of blks on every entry
-    uintptr_t stream_ptr;
+    uintptr_t stream_info;
 #ifdef _PRERELEASE
     bool error_simulate = false; // can error simulate happen
 #endif
@@ -224,7 +229,7 @@ public:
     void set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm);
 
     [[nodiscard]] BlkAllocPortion* get_blk_portion(const blk_num_t portion_num) {
-        HS_DEBUG_ASSERT_LT(portion_num, m_cfg.get_total_portions(), "Portion num is not in range");
+        HS_DBG_ASSERT_LT(portion_num, m_cfg.get_total_portions(), "Portion num is not in range");
         return &m_blk_portions[portion_num];
     }
 
@@ -247,7 +252,7 @@ public:
     BlkAllocStatus alloc_on_disk(const BlkId& in_bid);
 
     BlkAllocStatus alloc_on_realtime(const BlkId& b);
-   
+
     //
     // Caller should consume the return value and print context when return false;
     //
@@ -255,7 +260,7 @@ public:
     [[nodiscard]] bool free_on_realtime(const BlkId& b);
 
     void free_on_disk(const BlkId& b);
- 
+
     /* CP start is called when all its consumers have purged their free lists and now want to persist the
      * disk bitmap.
      */

@@ -11,6 +11,8 @@
 #include <mutex>
 #include <system_error>
 #include <vector>
+#include <chrono>
+#include <thread>
 
 #include <sisl/utility/thread_factory.hpp>
 
@@ -20,6 +22,7 @@
 #include "engine/homestore.hpp"
 #include "engine/common/resource_mgr.hpp"
 #include "api/meta_interface.hpp"
+#include "engine/homestore_base.hpp"
 
 namespace homeds {
 namespace btree {
@@ -96,8 +99,8 @@ public:
         virtual void free_yourself() override { sisl::ObjectAllocator< writeback_req >::deallocate(this); }
 
         virtual ~writeback_req() override {
-            HS_ASSERT(DEBUG, (state == writeback_req_state::WB_REQ_COMPL || state == writeback_req_state::WB_REQ_INIT),
-                      "state {}", state);
+            HS_DBG_ASSERT((state == writeback_req_state::WB_REQ_COMPL || state == writeback_req_state::WB_REQ_INIT),
+                          "state {}", state);
         }
 
         writeback_req(const writeback_req&) = delete;
@@ -200,43 +203,30 @@ public:
         m_blkstore = static_cast< btree_blkstore_t* >(blkstore);
         m_blkstore->attach_compl(wb_cache_t::writeBack_completion);
         m_trigger_cp_cb = std::move(trigger_cp_cb);
+        int expected_thread_cnt{0};
+        std::atomic< int64_t > thread_cnt{0};
         static std::once_flag flag1;
         std::call_once(
-            flag1, ([]() {
-                // these should be static so that they stay in scope in the lambda in case function ends before lambda
-                // completes
+            flag1, ([&thread_cnt, &expected_thread_cnt]() {
                 const size_t flush_threads{static_cast< size_t >(HS_DYNAMIC_CONFIG(generic.cache_flush_threads))};
-                static std::vector< uint8_t > threads_initialized(flush_threads, 0x00);
-                static std::vector< std::condition_variable > cvs(flush_threads);
-                static std::vector< std::mutex > cvs_m(flush_threads);
-                auto initialized_itr{std::begin(threads_initialized)};
-                auto cv_itr{std::begin(cvs)};
-                auto cv_m_itr{std::begin(cvs_m)};
-                for (size_t i{0}; i < flush_threads; ++i, ++initialized_itr, ++cv_itr, ++cv_m_itr) {
-                    // XXX : there can be race condition when message is sent before run_io_loop is called
-                    auto sthread{sisl::named_thread(
-                        "wbcache_flusher",
-                        [i, &tl_cv = *cv_itr, &tl_cv_m = *cv_m_itr, &tl_thread_initialized = *initialized_itr]() {
-                            iomanager.run_io_loop(false, nullptr,
-                                                  ([i, &tl_cv, &tl_cv_m, &tl_thread_initialized](bool is_started) {
-                                                      if (is_started) {
-                                                          wb_cache_t::m_thread_ids.push_back(iomanager.iothread_self());
-                                                          {
-                                                              std::unique_lock< std::mutex > lk{tl_cv_m};
-                                                              tl_thread_initialized = 0x01;
-                                                          }
-                                                          tl_cv.notify_one();
-                                                      }
-                                                  }));
-                        })};
-                    {
-                        std::unique_lock< std::mutex > lk{*cv_m_itr};
-                        cv_itr->wait(lk, [&initialized_itr]() { return *initialized_itr == 0x01; });
-                    }
-                    sthread.detach();
+                std::mutex mtx; // mutex to lock all threads from pushing back thread ids;
+                for (size_t i{0}; i < flush_threads; ++i) {
+                    iomanager.create_reactor("wbcache_flusher", INTERRUPT_LOOP, [&thread_cnt, &mtx](bool is_started) {
+                        if (is_started) {
+                            {
+                                std::unique_lock< std::mutex > lk{mtx};
+                                wb_cache_t::m_thread_ids.push_back(iomanager.iothread_self());
+                            }
+                            ++thread_cnt;
+                        }
+                    });
+                    ++expected_thread_cnt;
                 }
             }));
+
+        while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
     }
+
     WriteBackCache(const WriteBackCache&) = delete;
     WriteBackCache(WriteBackCache&&) noexcept = delete;
     WriteBackCache& operator=(const WriteBackCache&) = delete;
@@ -245,9 +235,9 @@ public:
     ~WriteBackCache() {
         for (size_t i{0}; i < MAX_CP_CNT; ++i) {
 #ifndef NDEBUG
-            HS_ASSERT_CMP(DEBUG, m_dirty_buf_cnt[i].testz(), ==, true);
-            HS_ASSERT_CMP(DEBUG, m_req_list[i]->size(), ==, 0);
-            HS_ASSERT_CMP(DEBUG, m_free_list[i]->size(), ==, 0);
+            HS_DBG_ASSERT_EQ(m_dirty_buf_cnt[i].testz(), true);
+            HS_DBG_ASSERT_EQ(m_req_list[i]->size(), 0);
+            HS_DBG_ASSERT_EQ(m_free_list[i]->size(), 0);
 #endif
         }
     }
@@ -255,13 +245,13 @@ public:
     void prepare_cp(const btree_cp_ptr& new_bcp, const btree_cp_ptr& cur_bcp, const bool blkalloc_checkpoint) {
         if (new_bcp) {
             const size_t cp_id{(new_bcp->cp_id) % MAX_CP_CNT};
-            HS_ASSERT_CMP(DEBUG, m_dirty_buf_cnt[cp_id].testz(), ==, true);
+            HS_DBG_ASSERT_EQ(m_dirty_buf_cnt[cp_id].testz(), true);
             // decrement it by all cache threads at the end after writing all pending requests
-            HS_ASSERT_CMP(DEBUG, m_req_list[cp_id]->size(), ==, 0);
+            HS_DBG_ASSERT_EQ(m_req_list[cp_id]->size(), 0);
             blkid_list_ptr free_list, alloc_list;
             if (blkalloc_checkpoint || !cur_bcp) {
                 free_list = m_free_list[++m_free_list_cnt % MAX_CP_CNT];
-                HS_ASSERT_CMP(DEBUG, free_list->size(), ==, 0);
+                HS_DBG_ASSERT_EQ(free_list->size(), 0);
             } else {
                 // we keep accumulating the alloc and free blks until blk checkpoint is taken
                 free_list = cur_bcp->free_blkid_list;
@@ -273,9 +263,9 @@ public:
     void write(const boost::intrusive_ptr< SSDBtreeNode >& bn, const boost::intrusive_ptr< SSDBtreeNode >& dependent_bn,
                const btree_cp_ptr& bcp) {
         const size_t cp_id{bcp->cp_id % MAX_CP_CNT};
-        HS_ASSERT(RELEASE, (!dependent_bn || dependent_bn->req[cp_id] != nullptr), "");
+        HS_REL_ASSERT((!dependent_bn || dependent_bn->bcp == bcp), "dependent request is modifided by other CP");
         writeback_req_ptr wbd_req = dependent_bn ? dependent_bn->req[cp_id] : nullptr;
-        if (!bn->req[cp_id]) {
+        if (bn->bcp != bcp) {
             // create wb request
             auto wb_req = writeback_req_t::make_request();
             wb_req->bcp = bcp;
@@ -286,7 +276,7 @@ public:
             wb_req->part_of_batch = true;
             // we can assume that btree is not destroyed until cp is not completed
             wb_req->wb_cache = this;
-            HS_ASSERT_CMP(DEBUG, wb_req->state, ==, writeback_req_state::WB_REQ_INIT);
+            HS_DBG_ASSERT_EQ(wb_req->state, writeback_req_state::WB_REQ_INIT);
             wb_req->state = writeback_req_state::WB_REQ_WAITING;
 
             // update buffer
@@ -300,15 +290,15 @@ public:
             m_dirty_buf_cnt[cp_id].increment(1);
             ResourceMgrSI().inc_dirty_buf_cnt(m_node_size);
         } else {
-            HS_ASSERT_CMP(DEBUG, bn->req[cp_id]->bid.to_integer(), ==, bn->get_node_id());
+            HS_DBG_ASSERT_EQ(bn->req[cp_id]->bid.to_integer(), bn->get_node_id());
             if (bn->req[cp_id]->m_mem != bn->get_memvec_intrusive()) {
                 bn->req[cp_id]->m_mem = bn->get_memvec_intrusive();
-                HS_ASSERT_NOTNULL(DEBUG, bn->req[cp_id]->m_mem.get());
+                HS_DBG_ASSERT_NOTNULL(bn->req[cp_id]->m_mem.get());
             }
         }
 
         auto wb_req{bn->req[cp_id]};
-        HS_ASSERT_CMP(DEBUG, wb_req->state, ==, writeback_req_state::WB_REQ_WAITING);
+        HS_DBG_ASSERT_EQ(wb_req->state, writeback_req_state::WB_REQ_WAITING);
 
         if (wbd_req) {
             {
@@ -322,7 +312,7 @@ public:
     // We don't want to free the blocks until cp is persisted. Because we use these blocks
     // to recover btree.
     void free_blk(const bnodeid_t node_id, const blkid_list_ptr& free_blkid_list, const uint64_t size) {
-        HS_ASSERT_CMP(DEBUG, node_id, !=, empty_bnodeid);
+        HS_DBG_ASSERT_NE(node_id, empty_bnodeid);
         BlkId bid(node_id);
 
         //  if bcp is null then free it only from the cache.
@@ -332,7 +322,7 @@ public:
             free_blkid_list->push_back(bid);
             // release on realtime bitmap;
             const auto ret = m_blkstore->free_on_realtime(bid);
-            HS_RELEASE_ASSERT(ret, "fail to free on realtime bm");
+            HS_REL_ASSERT(ret, "fail to free on realtime bm");
         }
     }
 
@@ -389,13 +379,13 @@ public:
         const size_t cp_id = bcp->cp_id % MAX_CP_CNT;
         CP_PERIODIC_LOG(INFO, cp_id, "Starting btree flush buffers dirty_buf_count={} wb_req_cnt={} flush_cb_size={}",
                         m_dirty_buf_cnt[cp_id].get(), m_req_list[cp_id]->size(), flush_buffer_q.size());
-        iomanager.run_on(m_thread_ids[thread_index],
+        ResourceMgrSI().reset_dirty_buf_qd();
+        iomanager.run_on(HomeStoreBase::instance()->get_hs_flush_thread(),
                          [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
     }
 
-    std::string get_cp_flush_status(const btree_cp_ptr& bcp) {
+    std::string get_cp_flush_status(const btree_cp_ptr& bcp) const {
         const size_t cp_id = bcp->cp_id % MAX_CP_CNT;
-
         return fmt::format("dirty buffers cnt {}", m_dirty_buf_cnt[cp_id].get());
     }
 
@@ -427,7 +417,7 @@ public:
                     ++wb_cache_outstanding_cnt;
                     shared_this->m_blkstore->write(wb_req->bid, wb_req->m_mem, 0, wb_req, false);
                     ++write_count;
-                    if (wb_cache_outstanding_cnt > HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt)) {
+                    if (wb_cache_outstanding_cnt > ResourceMgrSI().get_dirty_buf_qd()) {
                         CP_PERIODIC_LOG(
                             DEBUG, bt_cp_id,
                             "[fcbq_id={}] Flush throttled: flushed_cnt={} outstanding_io_cnt={} dep_wait_cnt={}",
@@ -457,9 +447,7 @@ public:
     }
 
     void writeBack_completion_internal(boost::intrusive_ptr< blkstore_req< wb_cache_buffer_t > >& bs_req) {
-        if (bs_req->err != no_error) {
-            HS_RELEASE_ASSERT(false, "error {} happen during cp {}", bs_req->err.message());
-        }
+        if (bs_req->err != no_error) { HS_REL_ASSERT(false, "error {} happen during cp {}", bs_req->err.message()); }
 
         auto wb_req = to_wb_req(bs_req);
         const size_t cp_id = wb_req->bcp->cp_id % MAX_CP_CNT;
@@ -521,8 +509,9 @@ public:
                             wb_req->request_id, wb_cache_outstanding_cnt);
             queue_flush_buffers(nullptr);
         }
-        wb_req->bn->req[cp_id] = nullptr;
         ResourceMgrSI().dec_dirty_buf_cnt(m_node_size);
+        /* req and btree node are pointing to each other which is preventing neither of them to be freed */
+        wb_req->bn = nullptr;
 
         if (m_dirty_buf_cnt[cp_id].decrement_testz(1)) { m_cp_comp_cb(wb_req->bcp); };
     }
@@ -546,9 +535,9 @@ std::vector< iomgr::io_thread_t > wb_cache_t::m_thread_ids;
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
 thread_local std::vector< flush_buffer_callback > wb_cache_t::flush_buffer_q;
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
-thread_local uint64_t wb_cache_t::wb_cache_outstanding_cnt;
+thread_local uint64_t wb_cache_t::wb_cache_outstanding_cnt{};
 template < typename K, typename V, btree_node_type InteriorNodeType, btree_node_type LeafNodeType >
-thread_local uint64_t wb_cache_t::s_cbq_id;
+thread_local uint64_t wb_cache_t::s_cbq_id{};
 } // namespace btree
 } // namespace homeds
 

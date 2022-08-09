@@ -17,12 +17,12 @@
 #include <benchmark/benchmark.h>
 #include <boost/intrusive_ptr.hpp>
 #include <boost/range/irange.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 
 #include "cache.h"
 
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 RCU_REGISTER_INIT
 
 static constexpr size_t TEST_COUNT{100000};
@@ -179,12 +179,12 @@ BENCHMARK(test_reads)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Th
 BENCHMARK(test_updates)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
 BENCHMARK(test_erase)->Range(TEST_COUNT, TEST_COUNT)->Iterations(ITERATIONS)->Threads(THREADS);
 
-SDS_OPTIONS_ENABLE(logging)
+SISL_OPTIONS_ENABLE(logging)
 
 int main(int argc, char** argv) {
-    SDS_OPTIONS_LOAD(argc, argv, logging)
-    sds_logging::SetLogger("perf_cache");
-    sds_logging::install_crash_handler();
+    SISL_OPTIONS_LOAD(argc, argv, logging)
+    sisl::logging::SetLogger("perf_cache");
+    sisl::logging::install_crash_handler();
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
     setup(TEST_COUNT * ITERATIONS);
     ::benchmark::Initialize(&argc, argv);

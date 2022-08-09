@@ -198,23 +198,13 @@ pipeline {
                             expression { "${COVERAGE}" == 'False' }
                         }}}
                         stages {
-                            stage("Adjust Sonar Branch") {
-                                when { not { anyOf {
-                                    branch "${TARGET_BRANCH}"
-                                    branch "${TESTING_BRANCH}"
-                                } } }
-                                steps {
-                                    sh "echo \"sonar.branch.target=master\" >> sonar-project.properties"
-                                }
-                            }
                             stage("Code Coverage") {
                                 steps {
                                     slackSend channel: '#sds-ci', message: "*${PROJECT}:${TAG}* is undergoing Code Coverage."
                                     sh "echo \"sonar.branch.name=${BRANCH_NAME}\" >> sonar-project.properties"
-                                    sh "conan install -pr ${BUILD_TYPE} ${BUILD_MISSING} -o ${PROJECT}:testing=coverage -o ${PROJECT}:sanitize=False ."
-                                    sh "build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ."
-                                    sh "find . -name \"*.cpp\" -exec gcov {} \\;"
-
+                                    sh "GIT_COMMIT=${GIT_COMMIT} conan install -pr ${BUILD_TYPE} ${BUILD_MISSING} -o ${PROJECT}:testing=coverage -o ${PROJECT}:sanitize=False . "
+                                    sh "GIT_COMMIT=${GIT_COMMIT} VERBOSE=1 build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ."
+                                    sh "gcovr --sonarqube coverage.xml -r ."
                                     withSonarQubeEnv('sds-sonar')  {
                                         sh "sonar-scanner -Dsonar.projectBaseDir=. -Dsonar.projectVersion=\"${VER}\""
                                     }

@@ -16,7 +16,7 @@
 #include <sisl/fds/stream_tracker.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <fmt/format.h>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 
 #include "engine/device/journal_vdev.hpp"
 #include "engine/common/homestore_config.hpp"
@@ -302,7 +302,6 @@ std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, trait
 
 /************************************* LogDev Request to BlkStore Section ************************************/
 struct logdev_req;
-#define to_logdev_req(req) boost::static_pointer_cast< logdev_req >(req)
 typedef boost::intrusive_ptr< logdev_req > logdev_req_ptr;
 
 struct logdev_req : public virtualdev_req {
@@ -321,8 +320,12 @@ public:
 
     // virtual size_t get_your_size() const override { return sizeof(ssd_loadgen_req); }
 
-    [[nodiscard]] static logdev_req_ptr cast(const boost::intrusive_ptr< virtualdev_req >& vd_req) {
-        return boost::static_pointer_cast< logdev_req >(vd_req);
+    [[nodiscard]] static logdev_req_ptr to_logdev_req(const boost::intrusive_ptr< virtualdev_req >& vd_req) {
+#ifdef NDEBUG
+        return boost::intrusive_ptr< logdev_req >(reinterpret_cast< logdev_req* >(vd_req.get()));
+#else
+        return boost::dynamic_pointer_cast< logdev_req >(vd_req);
+#endif
     }
 
     LogGroup* m_log_group;
@@ -479,7 +482,7 @@ public:
     [[nodiscard]] logstore_superblk& mutable_store_superblk(const logstore_id_t idx);
 
 private:
-    [[nodiscard]] bool resize_if_needed();
+    bool resize_if_needed();
 
     [[nodiscard]] uint32_t required_sb_size(const uint32_t nstores) const {
         // TO DO: Might need to differentiate based on data or fast type
@@ -577,8 +580,8 @@ public:
      *
      * @return logid_t : log_idx of the log of the data.
      */
-    [[nodiscard]] logid_t append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num,
-                                       const sisl::io_blob& data, void* const cb_context);
+    logid_t append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, const sisl::io_blob& data,
+                         void* cb_context);
 
     /**
      * @brief Read the log id from the device offset
@@ -634,6 +637,8 @@ public:
      */
     void register_store_found_cb(const store_found_callback& cb) { m_store_found_cb = cb; }
 
+    void process_fsync_completions(const boost::intrusive_ptr< virtualdev_req >& vd_req);
+
     // callback from blkstore, registered at blkstore creation;
     void process_logdev_completions(const boost::intrusive_ptr< virtualdev_req >& vd_req);
 
@@ -688,7 +693,7 @@ public:
      * @brief Unblock the flush. While unblocking if there are other requests to block or any flush pending it first
      * executes them before unblocking
      */
-    void unlock_flush();
+    void unlock_flush(bool do_flush = true);
 
     /**
      * @brief : truncate up to input log id;
@@ -719,9 +724,13 @@ private:
     }
 
     [[nodiscard]] LogGroup* prepare_flush(const int32_t estimated_record);
+
+    void do_write_logs(LogGroup* const lg);
     void do_flush(LogGroup* const lg);
+    void do_flush_internal(LogGroup* const lg);
     void flush_by_size(const uint32_t min_threshold, const uint32_t new_record_size = 0, const logid_t new_idx = -1);
     void on_flush_completion(LogGroup* const lg);
+    void on_flush_completion_internal(LogGroup* const lg);
     void do_load(const off_t offset);
 
 #if 0
@@ -745,7 +754,7 @@ private:
     JournalVirtualDev* m_blkstore{nullptr};
     boost::intrusive_ptr< HomeStoreBase > m_hb; // Back pointer to homestore
 
-    std::map< logid_t, logstore_id_t > m_garbage_store_ids;
+    std::multimap< logid_t, logstore_id_t > m_garbage_store_ids;
     Clock::time_point m_last_flush_time;
 
     logid_t m_last_flush_idx{-1}; // Track last flushed and truncated log idx
@@ -762,6 +771,7 @@ private:
 
     // Block flush Q request Q
     std::mutex m_block_flush_q_mutex;
+    std::condition_variable m_block_flush_q_cv;
     std::mutex m_comp_mutex;
     std::vector< flush_blocked_callback >* m_block_flush_q{nullptr};
 
@@ -772,6 +782,8 @@ private:
     LogGroup m_log_group_pool[max_log_group];
     uint32_t m_log_group_idx{1};
     std::atomic< bool > m_flush_status = false;
+    // Timer handle
+    iomgr::timer_handle_t m_flush_timer_hdl;
 }; // LogDev
 
 } // namespace homestore

@@ -73,13 +73,13 @@ public:
         /* start with ref cnt = 1. We dec it when trigger is called */
         if (cur_bcp) {
             cur_bcp->end_seqid = m_journal->get_contiguous_issued_seq_num(cur_bcp->start_seqid);
-            HS_DEBUG_ASSERT_GE(cur_bcp->end_seqid, cur_bcp->start_seqid);
+            HS_DBG_ASSERT_GE(cur_bcp->end_seqid, cur_bcp->start_seqid);
         }
         if (cur_bcp == m_first_cp) { m_first_cp = nullptr; }
         if (!cur_bcp) {
             /* it can not be last cp if this volume hasn't participated yet in a cp */
-            HS_DEBUG_ASSERT(!is_last_cp, "is_last_cp: {}", is_last_cp);
-            HS_DEBUG_ASSERT(m_first_cp, "m_first_cp: {}", m_first_cp);
+            HS_DBG_ASSERT(!is_last_cp, "is_last_cp: {}", is_last_cp);
+            HS_DBG_ASSERT(m_first_cp, "m_first_cp: {}", m_first_cp);
             return m_first_cp;
         }
 
@@ -156,7 +156,7 @@ public:
             /* getting all the allocated blks */
             jentry->foreach_node(bt_journal_node_op::creation,
                                  ([this, is_replayed, seqnum](bt_node_gen_pair node_info, sisl::blob key_blob) {
-                                     HS_DEBUG_ASSERT_NE(node_info.node_id, empty_bnodeid);
+                                     HS_DBG_ASSERT_NE(node_info.node_id, empty_bnodeid);
                                      BlkId bid(node_info.node_id);
                                      m_blkstore->reserve_blk(bid);
                                      if (is_replayed) { m_first_cp->btree_size.fetch_add(1); }
@@ -173,7 +173,7 @@ public:
 
     void replay_done(std::shared_ptr< HomeLogStore > store, [[maybe_unused]] logstore_seq_num_t upto_lsn) {
         THIS_BT_LOG(INFO, replay, , "Replay of btree completed and replayed {} entries", m_replayed_count);
-        HS_ASSERT_NOTNULL(RELEASE, m_journal.get());
+        HS_REL_ASSERT_NOTNULL(m_journal.get());
         m_is_recovering = false;
         auto& cp_sb = m_btree->get_last_cp_cb();
         if (cp_sb.cp_id == -1 && m_replayed_count == 0) {
@@ -189,8 +189,8 @@ public:
     }
 
     void cp_start_store(const btree_cp_ptr& bcp, cp_comp_callback cb) {
-        HS_ASSERT_NOTNULL(RELEASE, m_journal.get());
-        HS_RELEASE_ASSERT((m_is_recovering == false), "recovery is not completed");
+        HS_REL_ASSERT_NOTNULL(m_journal.get());
+        HS_REL_ASSERT((m_is_recovering == false), "recovery is not completed");
         bcp->cb = cb;
         try_cp_start(bcp);
     }
@@ -276,7 +276,7 @@ public:
                const boost::intrusive_ptr< SSDBtreeNode >& copy_from = nullptr) {
         // Access the physical node buffer and initialize it
         sisl::blob b = safe_buf->at_offset(0);
-        HS_DEBUG_ASSERT_EQ(b.size, store->get_node_size());
+        HS_DBG_ASSERT_EQ(b.size, store->get_node_size());
         if (is_leaf) {
             bnodeid_t bid = blkid.to_integer();
             auto n = new (b.bytes) VariantNode< LeafNodeType, K, V >(&bid, true, store->m_btree_cfg);
@@ -328,7 +328,7 @@ public:
 
             if (safe_buf == nullptr) {
                 // only expect to see null buf when we are in spdk reactor;
-                HS_ASSERT_CMP(DEBUG, iomanager.am_i_tight_loop_reactor(), ==, true);
+                HS_DBG_ASSERT_EQ(iomanager.am_i_tight_loop_reactor(), true);
                 bnode = nullptr;
                 return btree_status_t::fast_path_not_possible;
             }
@@ -365,8 +365,8 @@ public:
         auto mvec1 = node1->get_memvec_intrusive();
         auto mvec2 = node2->get_memvec_intrusive();
 
-        HS_DEBUG_ASSERT_EQ(node1->get_data_offset(), node2->get_data_offset());
-        HS_DEBUG_ASSERT_EQ(node1->get_cache_size(), node2->get_cache_size());
+        HS_DBG_ASSERT_EQ(node1->get_data_offset(), node2->get_data_offset());
+        HS_DBG_ASSERT_EQ(node1->get_cache_size(), node2->get_cache_size());
         /* move the underneath memory */
         node1->set_memvec(mvec2, node1->get_data_offset(), node1->get_cache_size());
         node2->set_memvec(mvec1, node2->get_data_offset(), node2->get_cache_size());
@@ -538,7 +538,7 @@ private:
 
     static btree_journal_entry* realloc_if_needed(sisl::io_blob& b, uint16_t append_size) {
         auto entry = blob_to_entry(b);
-        HS_DEBUG_ASSERT_GT(b.size, static_cast< uint32_t >(entry->actual_size));
+        HS_DBG_ASSERT_GT(b.size, static_cast< uint32_t >(entry->actual_size));
         uint16_t avail_size = b.size - entry->actual_size;
         if (avail_size < append_size) {
             auto new_size = sisl::round_up(entry->actual_size + append_size, journal_entry_alloc_increment);

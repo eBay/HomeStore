@@ -11,7 +11,7 @@
 #include <thread>
 
 #include <fmt/format.h>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/utility/thread_factory.hpp>
 #include <sisl/utility/thread_buffer.hpp>
 
@@ -20,7 +20,7 @@
 
 #include "varsize_blk_allocator.h"
 
-SDS_LOGGING_DECL(blkalloc)
+SISL_LOGGING_DECL(blkalloc)
 
 namespace homestore {
 
@@ -48,8 +48,8 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const
     m_cache_bm = std::make_unique< sisl::Bitset >(cfg.get_total_blks(), chunk_id, cfg.get_align_size());
 
     // NOTE: Number of blocks must be modulo word size so locks do not fall on same word
-    HS_RELEASE_ASSERT_EQ(m_cfg.get_blks_per_portion() % m_cache_bm->word_size(), 0,
-                         "Blocks per portion must be multiple of bitmpa word size.")
+    HS_REL_ASSERT_EQ(m_cfg.get_blks_per_portion() % m_cache_bm->word_size(), 0,
+                     "Blocks per portion must be multiple of bitmpa word size.")
 
     // Create segments with as many blk groups as configured.
     const blk_cap_t seg_nblks{cfg.get_total_blks() / cfg.get_total_segments()};
@@ -62,14 +62,18 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const
     }
 
     // Create free blk Cache of type Queue
-    if (m_cfg.get_use_slabs()) { m_fb_cache = std::make_unique< FreeBlkCacheQueue >(cfg.m_slab_config, &m_metrics); }
+    if (m_cfg.get_use_slabs()) {
+        m_fb_cache = std::make_unique< FreeBlkCacheQueue >(cfg.m_slab_config, &m_metrics);
+
+        LOGINFO("m_fb_cache total free blks: {}", m_fb_cache->total_free_blks());
+    }
 
     // Start a thread which will do sweeping job of free segments
     if (init) { inited(); }
 }
 
 VarsizeBlkAllocator::~VarsizeBlkAllocator() {
-    // remove from queue of 
+    // remove from queue of
     if (m_cfg.get_use_slabs()) {
         bool in_sweep_list{false};
         {
@@ -178,9 +182,7 @@ void VarsizeBlkAllocator::sweeper_thread(const size_t thread_num) {
                 std::unique_lock< std::mutex > lock{s_sweeper_mutex};
                 size_t pos{thread_num};
                 for (auto itr{std::cbegin(s_block_allocators)}; itr != std::cend(s_block_allocators); ++itr, ++pos) {
-                    if ((pos % num_sweeper_threads) == 0) {
-                        s_sweeper_queue.emplace(*itr);
-                    }
+                    if ((pos % num_sweeper_threads) == 0) { s_sweeper_queue.emplace(*itr); }
                 }
             }
             s_sweeper_cv.notify_all();
@@ -220,7 +222,7 @@ bool VarsizeBlkAllocator::is_blk_alloced(const BlkId& b, const bool use_lock) co
         // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache
         // bm.
         if (!m_cache_bm->is_bits_set(b.get_blk_num(), b.get_nblks())) {
-            BLKALLOC_ASSERT(RELEASE, 0, "Expected bits to set");
+            BLKALLOC_REL_ASSERT(0, "Expected bits to set");
             return false;
         }
         return true;
@@ -311,7 +313,7 @@ void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* const in_seg, blk_cache_fi
     auto portion_num{start_portion_num};
 
     do {
-        BLKALLOC_ASSERT_CMP(LOGMSG, portion_num, <, m_cfg.get_total_portions());
+        BLKALLOC_LOG_ASSERT_CMP(portion_num, <, m_cfg.get_total_portions());
         fill_cache_in_portion(portion_num, fill_session);
 
         // We have fully satisifed this session requirements
@@ -353,9 +355,9 @@ void VarsizeBlkAllocator::fill_cache_in_portion(const blk_num_t portion_num, blk
             // If there are no free blocks within the assigned portion
             if (b.nbits == 0) { break; }
 
-            HS_DEBUG_ASSERT_GE(end_blk_id, b.start_bit, "Expected start bit to be smaller than portion end bit");
-            HS_DEBUG_ASSERT_GE(end_blk_id, (b.start_bit + b.nbits - 1),
-                               "Expected end bit to be smaller than portion end bit");
+            HS_DBG_ASSERT_GE(end_blk_id, b.start_bit, "Expected start bit to be smaller than portion end bit");
+            HS_DBG_ASSERT_GE(end_blk_id, (b.start_bit + b.nbits - 1),
+                             "Expected end bit to be smaller than portion end bit");
             HISTOGRAM_OBSERVE(m_metrics, frag_pct_distribution, 100 / (static_cast< double >(b.nbits)));
 
             // Fill the blk cache and keep accounting of number of blks added
@@ -364,7 +366,7 @@ void VarsizeBlkAllocator::fill_cache_in_portion(const blk_num_t portion_num, blk
             fill_req.preferred_level = portion.temperature();
             const auto nblks_added{m_fb_cache->try_fill_cache(fill_req, fill_session)};
 
-            HS_DEBUG_ASSERT_LE(nblks_added, b.nbits);
+            HS_DBG_ASSERT_LE(nblks_added, b.nbits);
 
             BLKALLOC_LOG(DEBUG, "Sweep session={} portion_num={}, setting bit={} nblks={} set_bits_count={}",
                          fill_session.session_id, portion_num, b.start_bit, nblks_added, get_alloced_blk_count());
@@ -402,8 +404,8 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(BlkId& out_blkid) {
 
 BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_alloc_hints& hints,
                                           std::vector< BlkId >& out_blkids) {
-    BLKALLOC_ASSERT(LOGMSG, m_inited, "Alloc before initialized");
-    BLKALLOC_ASSERT_CMP(LOGMSG, nblks % hints.multiplier, ==, 0);
+    BLKALLOC_LOG_ASSERT(m_inited, "Alloc before initialized");
+    BLKALLOC_LOG_ASSERT_CMP(nblks % hints.multiplier, ==, 0);
     BLKALLOC_LOG(TRACE, "nblks={}, hints multiplier={}", nblks, hints.multiplier);
 
 #ifdef _PRERELEASE
@@ -566,17 +568,16 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
         static thread_local std::vector< blk_cache_entry > excess_blks;
         excess_blks.clear();
 
-        [[maybe_unused]] const blk_count_t num_zombied{
-            m_fb_cache->try_free_blks(blkid_to_blk_cache_entry(b, 2), excess_blks)};
+        [[maybe_unused]] const blk_count_t num_zombied {
+            m_fb_cache->try_free_blks(blkid_to_blk_cache_entry(b, 2), excess_blks)
+        };
 
         for (const auto& e : excess_blks) {
             BLKALLOC_LOG(TRACE, "Freeing in bitmap of entry={} - excess of free_blks size={}", e.to_string(),
                          excess_blks.size());
             free_on_bitmap(blk_cache_entry_to_blkid(e));
         }
-    }
-    else
-    {
+    } else {
         // free directly on bitmap
         free_on_bitmap(b);
     }
@@ -594,10 +595,10 @@ void VarsizeBlkAllocator::free_on_bitmap(const BlkId& b) {
         const auto start_blk_id{portion->get_portion_num() * m_cfg.get_blks_per_portion()};
         const auto end_blk_id{start_blk_id + m_cfg.get_blks_per_portion() - 1};
         auto lock{portion->portion_auto_lock()};
-        HS_DEBUG_ASSERT_LE(start_blk_id, b.get_blk_num(), "Expected start bit to be greater than portion start bit");
-        HS_DEBUG_ASSERT_GE(end_blk_id, (b.get_blk_num() + b.get_nblks() - 1),
-                           "Expected end bit to be smaller than portion end bit");
-        BLKALLOC_ASSERT(RELEASE, m_cache_bm->is_bits_set(b.get_blk_num(), b.get_nblks()), "Expected bits to be set");
+        HS_DBG_ASSERT_LE(start_blk_id, b.get_blk_num(), "Expected start bit to be greater than portion start bit");
+        HS_DBG_ASSERT_GE(end_blk_id, (b.get_blk_num() + b.get_nblks() - 1),
+                         "Expected end bit to be smaller than portion end bit");
+        BLKALLOC_REL_ASSERT(m_cache_bm->is_bits_set(b.get_blk_num(), b.get_nblks()), "Expected bits to be set");
         m_cache_bm->reset_bits(b.get_blk_num(), b.get_nblks());
         portion->increase_available_blocks(b.get_nblks());
     }
@@ -623,18 +624,18 @@ void VarsizeBlkAllocator::alloc_sanity_check(const blk_count_t nblks, const blk_
             const BlkAllocPortion* const portion{blknum_to_portion_const(b.get_blk_num())};
             auto lock{portion->portion_auto_lock()};
 
-            BLKALLOC_ASSERT(RELEASE, m_cache_bm->is_bits_set(b.get_blk_num(), b.get_nblks()),
-                            "Expected blkid={} to be already set in cache bitmap", b.to_string());
+            BLKALLOC_REL_ASSERT(m_cache_bm->is_bits_set(b.get_blk_num(), b.get_nblks()),
+                                "Expected blkid={} to be already set in cache bitmap", b.to_string());
             if (get_disk_bm_const()) {
-                BLKALLOC_ASSERT(RELEASE, !is_blk_alloced_on_disk(b),
-                                "Expected blkid={} to be already free in disk bitmap", b.to_string());
+                BLKALLOC_REL_ASSERT(!is_blk_alloced_on_disk(b), "Expected blkid={} to be already free in disk bitmap",
+                                    b.to_string());
             }
             alloced_nblks += b.get_nblks();
         }
-        BLKALLOC_ASSERT(RELEASE, (nblks == alloced_nblks), "Requested blks={} alloced_blks={} num_pieces={}", nblks,
-                        alloced_nblks, out_blkids.size());
-        BLKALLOC_ASSERT(RELEASE, (!hints.is_contiguous || (out_blkids.size() == 1)),
-                        "Multiple blkids allocated for contiguous request");
+        BLKALLOC_REL_ASSERT((nblks == alloced_nblks), "Requested blks={} alloced_blks={} num_pieces={}", nblks,
+                            alloced_nblks, out_blkids.size());
+        BLKALLOC_REL_ASSERT((!hints.is_contiguous || (out_blkids.size() == 1)),
+                            "Multiple blkids allocated for contiguous request");
     }
 }
 #endif
@@ -708,11 +709,11 @@ BlkAllocStatus VarsizeBlkAllocator::alloc_blks_direct(const blk_count_t nblks, c
                 const auto b{m_cache_bm->get_next_contiguous_n_reset_bits(
                     cur_blk_id, end_blk_id, std::min(min_blks, nblks_remain), nblks_remain)};
                 if (b.nbits == 0) { break; }
-                HS_DEBUG_ASSERT_GE(end_blk_id, b.start_bit, "Expected start bit to be smaller than end bit");
-                HS_DEBUG_ASSERT_LE(b.nbits, nblks_remain);
-                HS_DEBUG_ASSERT_GE(b.nbits, std::min(min_blks, nblks_remain));
-                HS_DEBUG_ASSERT_GE(end_blk_id, (b.start_bit + b.nbits - 1),
-                                   "Expected end bit to be smaller than portion end bit");
+                HS_DBG_ASSERT_GE(end_blk_id, b.start_bit, "Expected start bit to be smaller than end bit");
+                HS_DBG_ASSERT_LE(b.nbits, nblks_remain);
+                HS_DBG_ASSERT_GE(b.nbits, std::min(min_blks, nblks_remain));
+                HS_DBG_ASSERT_GE(end_blk_id, (b.start_bit + b.nbits - 1),
+                                 "Expected end bit to be smaller than portion end bit");
 
                 nblks_remain -= b.nbits;
                 out_blkids.emplace_back(b.start_bit, b.nbits, m_chunk_id);

@@ -114,9 +114,9 @@ table Generic {
 
     cp_watchdog_timer_sec : uint32 = 10; // it checks if cp stuck every 10 seconds
 
-    cache_max_throttle_cnt : uint64 = 4; // writeback cache max q depth
+    cache_max_throttle_cnt : uint32 = 4; // writeback cache max q depth
 
-    cache_min_throttle_cnt : uint64 = 4; // writeback cache min q deoth
+    cache_min_throttle_cnt : uint32 = 4; // writeback cache min q deoth
 
     // if this value is set to 0, no sanity check will be run;
     sanity_check_level: uint32 = 1 (hotswap);
@@ -124,8 +124,18 @@ table Generic {
     // if this value is set to 0, no sanity check will be run;
     sanity_check_level_non_hotswap: uint32 = 1;
 
-    // number of threads for doing hdd io
-    hdd_io_threads: uint32 = 8;
+    // max iteration of unmap done in a cp
+    max_unmap_iterations : uint32 = 64;
+
+    // number of threads for btree writes;
+    num_btree_write_threads : uint32 = 2;
+
+    // nunmber of flush threads
+    num_flush_threads : uint32 = 1;
+
+    // percentage of cache used to create indx mempool. It should be more than 100 to 
+    // take into account some floating buffers in writeback cache.
+    indx_mempool_percent : uint32 = 110;
 }
 
 table ResourceLimits {

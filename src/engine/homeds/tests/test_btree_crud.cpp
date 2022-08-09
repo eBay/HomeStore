@@ -6,8 +6,8 @@
 #include "homeds/btree/btree.hpp"
 #include <thread>
 #include <memory>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 #include <sisl/utility/thread_buffer.hpp>
 #include <sisl/utility/obj_life_counter.hpp>
 
@@ -17,7 +17,7 @@
 #include <sisl/metrics/metrics.hpp>
 #include "common/homestore_header.hpp"
 
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 RCU_REGISTER_INIT
 
 #define MAX_CACHE_SIZE 2 * 1024 * 1024 * 1024
@@ -440,11 +440,11 @@ TEST_F(BtreeCrudTest, SimpleQuery) {
     run_in_parallel(NTHREADS, query_thread, 0, TOTAL_ENTRIES, BtreeQueryType::TREE_TRAVERSAL_QUERY, 1000);
 }
 
-SDS_OPTIONS_ENABLE(logging)
+SISL_OPTIONS_ENABLE(logging)
 
 int main(int argc, char* argv[]) {
-    SDS_OPTIONS_LOAD(argc, argv, logging)
-    sds_logging::SetLogger("test_btree_crud");
+    SISL_OPTIONS_LOAD(argc, argv, logging)
+    sisl::logging::SetLogger("test_btree_crud");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
     // setup_devices(2);

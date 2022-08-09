@@ -18,15 +18,15 @@
 #endif
 
 #include <iomgr/aio_drive_interface.hpp>
-#include <iomgr/iomgr.hpp>
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <iomgr/io_environment.hpp>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 
 #include <gtest/gtest.h>
 
 #include "mapping.hpp"
 
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 using namespace std;
 using namespace homestore;
@@ -182,7 +182,7 @@ public:
         std::filesystem::resize_file(fpath, MAX_SIZE); // set the file size
         device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
 
-        iomanager.start(num_threads);
+        ioenvironment.with_iomgr(num_threads);
         m_tgt.init();
 
         init_params params;
@@ -437,20 +437,20 @@ TEST_F(MapTest, RandomTest) {
     this->remove_files();
 }
 
-SDS_OPTION_GROUP(test_mapping,
-                 (num_ios, "", "num_ios", "number of ios", ::cxxopts::value< uint64_t >()->default_value("30000"),
-                  "number"),
-                 (num_threads, "", "num_threads", "num threads for io",
-                  ::cxxopts::value< uint64_t >()->default_value("8"), "number"))
-SDS_OPTIONS_ENABLE(logging, test_mapping)
+SISL_OPTION_GROUP(test_mapping,
+                  (num_ios, "", "num_ios", "number of ios", ::cxxopts::value< uint64_t >()->default_value("30000"),
+                   "number"),
+                  (num_threads, "", "num_threads", "num threads for io",
+                   ::cxxopts::value< uint64_t >()->default_value("8"), "number"))
+SISL_OPTIONS_ENABLE(logging, test_mapping)
 
 int main(int argc, char* argv[]) {
-    SDS_OPTIONS_LOAD(argc, argv, logging, test_mapping)
-    sds_logging::SetLogger("test_mapping");
+    SISL_OPTIONS_LOAD(argc, argv, logging, test_mapping)
+    sisl::logging::SetLogger("test_mapping");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
-    num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
-    num_ios = SDS_OPTIONS["num_ios"].as< uint64_t >();
+    num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
+    num_ios = SISL_OPTIONS["num_ios"].as< uint64_t >();
     num_ios /= 2; // half read half write
 
     ::testing::InitGoogleTest(&argc, argv);

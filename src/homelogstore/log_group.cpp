@@ -4,7 +4,7 @@
 #include "log_store.hpp"
 
 namespace homestore {
-SDS_LOGGING_DECL(logstore)
+SISL_LOGGING_DECL(logstore)
 
 LogGroup::LogGroup() = default;
 void LogGroup::start(const uint64_t flush_multiple_size, const uint32_t align_size) {
@@ -119,14 +119,14 @@ const iovec_array& LogGroup::finish(const crc32_t prev_crc) {
         hdr->footer_offset = m_inline_data_pos;
         hdr->group_size = hdr->oob_data_offset;
     }
-    HS_DEBUG_ASSERT_LE((hdr->footer_offset + sizeof(log_group_footer)), hdr->group_size);
+    HS_DBG_ASSERT_LE((hdr->footer_offset + sizeof(log_group_footer)), hdr->group_size);
 
 #ifndef NDEBUG
     uint64_t len = 0;
     for (auto const& iv : m_iovecs) {
         len += iv.iov_len;
     }
-    HS_DEBUG_ASSERT_EQ(hdr->group_size, len, "length is not same");
+    HS_DBG_ASSERT_EQ(hdr->group_size, len, "length is not same");
 #endif
 
     footer->start_log_idx = hdr->start_log_idx;

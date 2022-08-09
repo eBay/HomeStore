@@ -8,6 +8,7 @@
 #include "virtual_dev.hpp"
 
 namespace homestore {
+typedef std::function< void(const off_t ret_off) > alloc_next_blk_cb_t;
 
 class JournalVirtualDev : public VirtualDev {
     struct Chunk_EOF_t {
@@ -69,6 +70,7 @@ public:
      * write_at_offset(offset_1);
      */
     off_t alloc_next_append_blk(const size_t size, const bool chunk_overlap_ok = false);
+    void alloc_next_append_blk_async(const size_t size, const alloc_next_blk_cb_t& cb);
 
     /**
      * @brief : writes up to count bytes from the buffer starting at buf.
@@ -270,42 +272,42 @@ public:
     // All methods which are invalid for journal vdev are put here.
     // TODO: Do an assert after it is verified to be ok or better split current vdev into vdevbase and vdev.
     bool is_blk_alloced(const BlkId& blkid) const override {
-        HS_DEBUG_ASSERT(false, "Unsupported API for journalvdev");
+        HS_DBG_ASSERT(false, "Unsupported API for journalvdev");
         return false;
     }
 
     BlkAllocStatus reserve_blk(const BlkId& blkid) override {
-        HS_DEBUG_ASSERT(false, "Unsupported API for journalvdev");
+        HS_DBG_ASSERT(false, "Unsupported API for journalvdev");
         return BlkAllocStatus::BLK_ALLOC_NONE;
     }
 
     BlkAllocStatus alloc_blk(const blk_count_t nblks, const blk_alloc_hints& hints,
                              std::vector< BlkId >& out_blkid) override {
-        HS_DEBUG_ASSERT(false, "Unsupported API for journalvdev");
+        HS_DBG_ASSERT(false, "Unsupported API for journalvdev");
         return BlkAllocStatus::BLK_ALLOC_NONE;
     }
 
     bool free_on_realtime(const BlkId& b) override {
-        HS_DEBUG_ASSERT(false, "Unsupported API for journalvdev");
+        HS_DBG_ASSERT(false, "Unsupported API for journalvdev");
         return false;
     }
 
-    void free_blk(const BlkId& b) override { HS_DEBUG_ASSERT(false, "Unsupported API for journalvdev"); }
+    void free_blk(const BlkId& b) override { HS_DBG_ASSERT(false, "Unsupported API for journalvdev"); }
 
-    void recovery_done() override { HS_DEBUG_ASSERT(false, "Unsupported API for journalvdev"); }
+    void recovery_done() override { HS_DBG_ASSERT(false, "Unsupported API for journalvdev"); }
 
     BlkAllocStatus create_debug_bm() override {
-        HS_DEBUG_ASSERT(false, "Unsupported API for journalvdev");
+        HS_DBG_ASSERT(false, "Unsupported API for journalvdev");
         return BlkAllocStatus::BLK_ALLOC_NONE;
     }
 
     BlkAllocStatus update_debug_bm(const BlkId& bid) override {
-        HS_DEBUG_ASSERT(false, "Unsupported API for journalvdev");
+        HS_DBG_ASSERT(false, "Unsupported API for journalvdev");
         return BlkAllocStatus::BLK_ALLOC_NONE;
     }
 
     BlkAllocStatus verify_debug_bm(const bool free_debug_bm) override {
-        HS_DEBUG_ASSERT(false, "Unsupported API for journalvdev");
+        HS_DBG_ASSERT(false, "Unsupported API for journalvdev");
         return BlkAllocStatus::BLK_ALLOC_NONE;
     }
 
@@ -362,6 +364,10 @@ private:
                                    off_t& offset_in_chunk) const;
 
     void high_watermark_check();
+
+    off_t alloc_next_append_blk_internal(const size_t size);
+
+    bool is_alloc_accross_chunk(const size_t size);
 };
 
 } // namespace homestore

@@ -7,7 +7,7 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <nlohmann/json.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/version.hpp>
 
 #include "engine/common/homestore_status_mgr.hpp"
@@ -20,9 +20,6 @@
 
 #include "home_blks.hpp"
 
-SDS_OPTION_GROUP(home_blks,
-                 (hb_stats_port, "", "hb_stats_port", "Stats port for HTTP service",
-                  cxxopts::value< int32_t >()->default_value("5000"), "port"))
 using namespace homestore;
 
 #ifndef DEBUG
@@ -87,54 +84,23 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
         ret = static_cast< VolInterface* >(instance.get());
     } catch (const std::exception& e) {
         LOGERROR("{}", e.what());
-        HS_DEBUG_ASSERT(false, "Exception during homeblks start");
+        HS_DBG_ASSERT(false, "Exception during homeblks start");
         return ret;
     }
 
     /* start thread */
-    auto sthread = sisl::named_thread("hb_init", [instance]() {
-        iomanager.run_io_loop(false, nullptr, [instance](bool thread_started) {
-            if (thread_started) {
-                instance->m_init_thread_id = iomanager.iothread_self();
-                if (instance->is_safe_mode()) {
-                    std::unique_lock< std::mutex > lk(instance->m_cv_mtx);
-                    /* we wait for gdb to attach in safe mode */
-                    LOGINFO("Going to sleep. Waiting for user to send http command to wake up");
-                    instance->m_cv_wakeup_init.wait(lk);
-                }
-                instance->init_devices();
+    iomanager.create_reactor("hb_init", INTERRUPT_LOOP, [instance](bool thread_started) {
+        if (thread_started) {
+            instance->m_init_thread_id = iomanager.iothread_self();
+            if (instance->is_safe_mode()) {
+                std::unique_lock< std::mutex > lk(instance->m_cv_mtx);
+                /* we wait for gdb to attach in safe mode */
+                LOGINFO("Going to sleep. Waiting for user to send http command to wake up");
+                instance->m_cv_wakeup_init.wait(lk);
             }
-        });
+            instance->init_devices();
+        }
     });
-    sthread.detach();
-
-    /* start custom io threads for hdd */
-    if (is_data_drive_hdd()) {
-        const uint32_t hdd_thread_count{HS_DYNAMIC_CONFIG(generic.hdd_io_threads)};
-        instance->m_custom_hdd_threads.reserve(hdd_thread_count);
-
-        for (auto i = 0u; i < hdd_thread_count; ++i) {
-            auto sthread1 = sisl::named_thread("custom_hdd", [&instance, hdd_thread_count]() {
-                iomanager.run_io_loop(false, nullptr, [&](bool is_started) {
-                    if (is_started) {
-                        std::lock_guard< std::mutex > lock(instance->m_hdd_threads_mtx);
-                        instance->m_custom_hdd_threads.emplace_back(iomanager.iothread_self());
-                        if (instance->m_custom_hdd_threads.size() == hdd_thread_count) {
-                            instance->m_hdd_threads_cv.notify_one();
-                        }
-                    }
-                });
-            });
-            sthread1.detach();
-        }
-
-        {
-            auto lg = std::unique_lock< std::mutex >(instance->m_hdd_threads_mtx);
-            instance->m_hdd_threads_cv.wait(lg, [&instance, hdd_thread_count]() {
-                return (instance->m_custom_hdd_threads.size() == hdd_thread_count);
-            });
-        }
-    }
     return ret;
 }
 
@@ -150,7 +116,7 @@ void HomeBlks::zero_boot_sbs(const std::vector< dev_info >& devices) {
         if (devices[device_num].dev_type != dev_type) {
             HS_LOG(ERROR, device, "dev={} type={} does not match type dev={} type={}", devices[device_num].dev_names,
                    devices[device_num].dev_type, devices.front().dev_names, dev_type);
-            HS_DEBUG_ASSERT(false, "Mixed zero_boot_sbs device types");
+            HS_DBG_ASSERT(false, "Mixed zero_boot_sbs device types");
         }
     }
     return DeviceManager::zero_boot_sbs(devices);
@@ -179,7 +145,9 @@ vol_interface_req::vol_interface_req(std::vector< iovec > iovecs, const uint64_t
 vol_interface_req::~vol_interface_req() = default;
 
 HomeBlks::HomeBlks(const init_params& cfg) :
-        m_cfg(cfg), m_metrics(new HomeBlksMetrics("HomeBlks")), m_start_shutdown{false} {
+        m_cfg(cfg),
+        m_metrics(new HomeBlksMetrics("HomeBlks")),
+        m_start_shutdown{false} {
     LOGINFO("Initializing HomeBlks with Config {}", m_cfg.to_string());
 
     if (m_cfg.start_http) {
@@ -242,10 +210,9 @@ void HomeBlks::attach_prepare_indx_cp(std::map< boost::uuids::uuid, indx_cp_ptr 
             if (!happened) { throw std::runtime_error("Unknown bug"); }
         } else {
             /* this volume doesn't want to participate now */
-            HS_ASSERT(RELEASE,
-                      (vol->get_state() == vol_state::DESTROYING ||
-                       vol->get_state() == vol_state::START_INDX_TREE_DESTROYING),
-                      "state {}", vol->get_state());
+            HS_REL_ASSERT((vol->get_state() == vol_state::DESTROYING ||
+                           vol->get_state() == vol_state::START_INDX_TREE_DESTROYING),
+                          "state {}", vol->get_state());
         }
     }
 }
@@ -270,11 +237,6 @@ std::error_condition HomeBlks::write(const VolumePtr& vol, const vol_interface_r
     req->vol_instance = vol;
     req->part_of_batch = part_of_batch;
     req->op_type = Op_type::WRITE;
-    if (is_data_drive_hdd()) {
-        iomanager.run_on(m_custom_hdd_threads[next_available_hdd_thread_idx()],
-                         [vol, req](io_thread_addr_t addr) { vol->write(req); });
-        return std::error_condition();
-    }
     return (vol->write(req));
 }
 
@@ -288,11 +250,6 @@ std::error_condition HomeBlks::read(const VolumePtr& vol, const vol_interface_re
     req->vol_instance = vol;
     req->part_of_batch = part_of_batch;
     req->op_type = Op_type::READ;
-    if (is_data_drive_hdd()) {
-        iomanager.run_on(m_custom_hdd_threads[next_available_hdd_thread_idx()],
-                         [vol, req](io_thread_addr_t addr) { vol->read(req); });
-        return std::error_condition();
-    }
     return (vol->read(req));
 }
 
@@ -316,11 +273,6 @@ std::error_condition HomeBlks::unmap(const VolumePtr& vol, const vol_interface_r
     if (!m_rdy || is_shutdown()) { return std::make_error_condition(std::errc::device_or_resource_busy); }
     req->vol_instance = vol;
     req->op_type = Op_type::UNMAP;
-    if (is_data_drive_hdd()) {
-        iomanager.run_on(m_custom_hdd_threads[next_available_hdd_thread_idx()],
-                         [vol, req](io_thread_addr_t addr) { vol->unmap(req); });
-        return std::error_condition();
-    }
     return (vol->unmap(req));
 }
 
@@ -338,7 +290,7 @@ void HomeBlks::create_volume(VolumePtr vol) {
     std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
     bool happened{false};
     std::tie(it, happened) = m_volume_map.emplace(std::make_pair(vol->get_uuid(), nullptr));
-    HS_ASSERT(RELEASE, happened, "volume already exists");
+    HS_REL_ASSERT(happened, "volume already exists");
 
     // Okay, this is a new volume so let's create it
     it->second = vol;
@@ -423,7 +375,7 @@ SnapshotPtr HomeBlks::snap_volume(VolumePtr volptr) {
 #endif
 
 void HomeBlks::submit_io_batch() {
-    // iomanager.default_drive_interface()->submit_batch();
+    iomanager.drive_interface_submit_batch();
     call_multi_completions();
 }
 
@@ -433,7 +385,7 @@ HomeBlksSafePtr HomeBlks::safe_instance() {
 }
 
 homeblks_sb* HomeBlks::superblock_init() {
-    HS_RELEASE_ASSERT_EQ(m_homeblks_sb_buf, nullptr, "Reinit already initialized super block");
+    HS_REL_ASSERT_EQ(m_homeblks_sb_buf, nullptr, "Reinit already initialized super block");
 
     /* build the homeblks super block */
     // TO DO: Might need to address alignment based on data or fast type
@@ -496,7 +448,7 @@ void HomeBlks::attach_end_of_batch_cb(const end_of_batch_callback& cb) {
 
 void HomeBlks::vol_mounted(const VolumePtr& vol, vol_state state) {
     m_cfg.vol_mounted_cb(vol, state);
-    VOL_INFO_LOG(vol->get_uuid(), " Mounted the volume in state {}", state);
+    VOL_INFO_LOG(vol->get_uuid(), " Mounted the volume:{} in state {}", vol->get_name(), state);
 }
 
 bool HomeBlks::vol_state_change(const VolumePtr& vol, vol_state new_state) {
@@ -525,14 +477,14 @@ void HomeBlks::init_done() {
 #endif
 
     if (is_safe_mode() || HB_DYNAMIC_CONFIG(general_config->boot_consistency_check)) {
-        HS_RELEASE_ASSERT((verify_bitmap()), "bitmap verify failed");
+        HS_REL_ASSERT((verify_bitmap()), "bitmap verify failed");
     } else {
         LOGINFO("Skip running verification (vols/bitmap).");
     }
-    HS_RELEASE_ASSERT_EQ(system_cap.used_data_size, used_size.used_data_size,
-                         "vol data used size mismatch. used size {}", used_size.to_string());
-    HS_RELEASE_ASSERT_EQ(system_cap.used_index_size, used_size.used_index_size,
-                         "index used size mismatch. used size {}", used_size.to_string());
+    HS_REL_ASSERT_EQ(system_cap.used_data_size, used_size.used_data_size, "vol data used size mismatch. used size {}",
+                     used_size.to_string());
+    HS_REL_ASSERT_EQ(system_cap.used_index_size, used_size.used_index_size, "index used size mismatch. used size {}",
+                     used_size.to_string());
 
     LOGINFO("init done");
     m_out_params.first_time_boot = m_dev_mgr->is_first_time_boot();
@@ -545,34 +497,10 @@ void HomeBlks::init_done() {
 
     m_recovery_stats->end();
 
-    /* start custom io threads for hdd */
-    if (is_data_drive_hdd()) {
-        m_custom_hdd_threads.reserve(HS_DYNAMIC_CONFIG(generic.hdd_io_threads));
-        std::atomic< uint32_t > thread_cnt{0};
-        uint32_t expected_thread_cnt{HS_DYNAMIC_CONFIG(generic.hdd_io_threads)};
-        for (auto i = 0u; i < expected_thread_cnt; ++i) {
-            auto sthread1 = sisl::named_thread("custom_hdd_thrd", [this, &thread_cnt]() mutable {
-                iomanager.run_io_loop(false, nullptr, [this, &thread_cnt](bool is_started) {
-                    if (is_started) {
-                        ++thread_cnt;
-                        const std::lock_guard< std::mutex > lock(m_hdd_threads_mtx);
-                        m_custom_hdd_threads.push_back(iomanager.iothread_self());
-                    } else {
-                        // it is called during shutdown
-                    }
-                });
-            });
-            sthread1.detach();
-        }
-        while (thread_cnt.load(std::memory_order_acquire) != expected_thread_cnt) {}
-    }
-  
-
     // start the io watchdog;
     m_io_wd = std::make_unique< VolumeIOWatchDog >();
 
     if (!is_safe_mode()) { m_cfg.init_done_cb(no_error, m_out_params); }
-
 
     // Don't do any callback if it is running in safe mode
 }
@@ -696,8 +624,8 @@ nlohmann::json HomeBlks::get_status(const int log_level) {
 
 bool HomeBlks::verify_bitmap() {
     StaticIndxMgr::hs_cp_suspend();
-    HS_RELEASE_ASSERT(verify_data_bm(), "data debug bitmap verify failed");
-    HS_RELEASE_ASSERT(verify_index_bm(), "index debug bitmap verify failed");
+    HS_REL_ASSERT(verify_data_bm(), "data debug bitmap verify failed");
+    HS_REL_ASSERT(verify_index_bm(), "index debug bitmap verify failed");
     StaticIndxMgr::hs_cp_resume();
     return true;
 }
@@ -743,7 +671,7 @@ bool HomeBlks::shutdown(bool force) {
 // 1. Set persistent state of shutdown
 // 2. Start a thread to do shutdown routines;
 //
-bool HomeBlks::trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force) {
+bool HomeBlks::trigger_shutdown(const hs_comp_callback& shutdown_done_cb, bool force) {
     uint64_t expected = 0;
     if (!m_shutdown_start_time.compare_exchange_strong(expected, get_time_since_epoch_ms())) {
         // shutdown thread should be only started once;
@@ -760,16 +688,14 @@ bool HomeBlks::trigger_shutdown(const shutdown_comp_callback& shutdown_done_cb, 
     }
 
     // Execute the shutdown on the io thread, because clean shutdown will do IO (albeit sync io)
-    auto sthread = sisl::named_thread("hb_shutdown", [this, shutdown_done_cb, force]() {
-        iomanager.run_io_loop(false, nullptr, [&](bool thread_started) {
-            if (thread_started) { do_shutdown(shutdown_done_cb, force); }
-        });
+    iomanager.create_reactor("hb_shutdown", INTERRUPT_LOOP, [this, shutdown_done_cb, force](bool thread_started) {
+        if (thread_started) { do_shutdown(shutdown_done_cb, force); }
     });
-    sthread.detach();
+
     return true;
 }
 
-void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool force) {
+void HomeBlks::do_shutdown(const hs_comp_callback& shutdown_done_cb, bool force) {
     //
     // Need to wait m_init_finished to be true before we create shutdown thread because:
     // 1. if init thread is running slower than shutdown thread,
@@ -784,9 +710,9 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
 
     auto elapsed_time_ms = get_time_since_epoch_ms() - m_shutdown_start_time.load();
     if (elapsed_time_ms > (HB_DYNAMIC_CONFIG(general_config->shutdown_timeout_secs) * 1000)) {
-        HS_RELEASE_ASSERT(
-            false, "Graceful shutdown of volumes took {} ms exceeds time limit {} seconds, forcefully shutting down",
-            elapsed_time_ms, HB_DYNAMIC_CONFIG(general_config->shutdown_timeout_secs));
+        HS_REL_ASSERT(false,
+                      "Graceful shutdown of volumes took {} ms exceeds time limit {} seconds, forcefully shutting down",
+                      elapsed_time_ms, HB_DYNAMIC_CONFIG(general_config->shutdown_timeout_secs));
     }
 
     m_shutdown_done_cb = shutdown_done_cb;
@@ -808,15 +734,6 @@ void HomeBlks::do_shutdown(const shutdown_comp_callback& shutdown_done_cb, bool 
     if (!m_force_shutdown) {
         ((homeblks_sb*)m_homeblks_sb_buf->bytes)->set_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN);
         if (!m_cfg.is_read_only) { homeblks_sb_write(); }
-    }
-
-    // Waiting for http server thread to join
-    if (m_cfg.start_http) {
-        m_hb_http_server->stop();
-        m_hb_http_server.reset();
-        LOGINFO("http server stopped");
-    } else {
-        LOGINFO("Skip stopping http server since it was not started before.");
     }
 
     /* XXX: can we move it to indx mgr */
@@ -861,10 +778,11 @@ void HomeBlks::do_volume_shutdown(bool force) {
 // in IOTest before this function so it will be same use_count both with production or test.
 //
 
-std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid) {
-    return (remove_volume_internal(uuid, false));
+std::error_condition HomeBlks::remove_volume(const boost::uuids::uuid& uuid, const hs_comp_callback& remove_cb) {
+    return (remove_volume_internal(uuid, false, remove_cb));
 }
-std::error_condition HomeBlks::remove_volume_internal(const boost::uuids::uuid& uuid, bool force) {
+std::error_condition HomeBlks::remove_volume_internal(const boost::uuids::uuid& uuid, bool force,
+                                                      const hs_comp_callback& remove_cb) {
     if (HS_STATIC_CONFIG(input.is_read_only)) {
         assert(false);
         return std::make_error_condition(std::errc::device_or_resource_busy);
@@ -884,11 +802,12 @@ std::error_condition HomeBlks::remove_volume_internal(const boost::uuids::uuid& 
         /* Taking a reference on volume only to make sure that it won't get dereference while destroy is going on.
          * One possible scenario if shutdown is called while remove is happening.
          */
-        cur_vol->destroy(([this, uuid, cur_vol](bool success) {
+        cur_vol->destroy(([this, uuid, remove_cb](bool success) {
             if (success) {
                 std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
                 m_volume_map.erase(uuid);
             }
+            if (remove_cb) { remove_cb(success); }
         }));
 
         // volume destructor will be called since the user_count of share_ptr
@@ -977,27 +896,27 @@ void HomeBlks::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t siz
 void HomeBlks::meta_blk_recovery_comp_cb(bool success) { instance()->meta_blk_recovery_comp(success); }
 
 void HomeBlks::meta_blk_recovery_comp(bool success) {
-    HS_ASSERT(RELEASE, success, "failed to recover HomeBlks SB.");
+    HS_REL_ASSERT(success, "failed to recover HomeBlks SB.");
 
     m_recovery_stats->phase0_done();
     if (m_dev_mgr->is_first_time_boot()) { superblock_init(); }
 
     auto sb = (homeblks_sb*)m_homeblks_sb_buf->bytes;
     if (sb->test_flag(HOMEBLKS_SB_FLAGS_RESTRICTED)) {
-        HS_RELEASE_ASSERT(is_safe_mode(), "should be boot in safe mode");
+        HS_REL_ASSERT(is_safe_mode(), "should be boot in safe mode");
         sb->clear_flag(HOMEBLKS_SB_FLAGS_RESTRICTED);
     }
     /* check the status of last boot */
     if (sb->test_flag(HOMEBLKS_SB_FLAGS_CLEAN_SHUTDOWN)) {
         LOGDEBUG("System was shutdown cleanly.");
-        HS_ASSERT_CMP(DEBUG, MetaBlkMgr::is_self_recovered(), ==, false);
+        HS_DBG_ASSERT_EQ(MetaBlkMgr::is_self_recovered(), false);
     } else if (!m_dev_mgr->is_first_time_boot()) {
         m_unclean_shutdown = true;
         LOGCRITICAL("System experienced sudden panic since last boot!");
     } else {
-        HS_ASSERT(RELEASE, m_dev_mgr->is_first_time_boot(), "not the first boot");
+        HS_REL_ASSERT(m_dev_mgr->is_first_time_boot(), "not the first boot");
         LOGINFO("System is booting up first time");
-        HS_ASSERT_CMP(DEBUG, MetaBlkMgr::is_self_recovered(), ==, false);
+        HS_DBG_ASSERT_EQ(MetaBlkMgr::is_self_recovered(), false);
     }
 
     // clear the flag and persist to disk, if we received a new shutdown and completed successfully,
@@ -1078,7 +997,7 @@ void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
     // trigger CP
     LOGINFO("Triggering system CP during initialization");
     Volume::trigger_homeblks_cp(([this, vol_mnt_cnt](bool success) {
-        HS_ASSERT(RELEASE, success, "trigger cp during init failed");
+        HS_REL_ASSERT(success, "trigger cp during init failed");
         {
             std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
             if (m_volume_map.size() != vol_mnt_cnt) {
@@ -1109,11 +1028,11 @@ void HomeBlks::trigger_cp_init(uint32_t vol_mnt_cnt) {
 
 void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     // HomeBlk layer expects to see one valid meta_blk record during reboot;
-    HS_ASSERT(RELEASE, !m_meta_blk_found, "More than one HomeBlk SB is received, only expecting one!");
+    HS_REL_ASSERT(!m_meta_blk_found, "More than one HomeBlk SB is received, only expecting one!");
 
     m_meta_blk_found = true;
 
-    HS_ASSERT(RELEASE, mblk != nullptr, "null meta blk received in meta_blk_found_callback.");
+    HS_REL_ASSERT(mblk != nullptr, "null meta blk received in meta_blk_found_callback.");
 
     m_sb_cookie = (void*)mblk;
 
@@ -1121,8 +1040,8 @@ void HomeBlks::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) 
     // TO DO: Might need to address alignment based on data or fast type
     m_homeblks_sb_buf = hs_utils::extract_byte_array(buf, true, MetaBlkMgrSI()->get_align_size());
     auto* sb = (homeblks_sb*)(m_homeblks_sb_buf->bytes);
-    HS_RELEASE_ASSERT_EQ(sb->version, hb_sb_version, "version does not match");
-    HS_RELEASE_ASSERT_EQ(sb->magic, hb_sb_magic, "magic does not match");
+    HS_REL_ASSERT_EQ(sb->version, hb_sb_version, "version does not match");
+    HS_REL_ASSERT_EQ(sb->magic, hb_sb_magic, "magic does not match");
 }
 
 void HomeBlks::start_home_log_store() {
@@ -1144,7 +1063,7 @@ void HomeBlks::vol_recovery_start_phase1() {
 void HomeBlks::vol_recovery_start_phase2() {
     auto phase2_start = Clock::now();
     for (auto it = m_volume_map.cbegin(); it != m_volume_map.cend(); ++it) {
-        HS_ASSERT(RELEASE, (it->second->verify_tree() == true), "true");
+        HS_REL_ASSERT((it->second->verify_tree() == true), "true");
         it->second->recovery_start_phase2();
     }
 
@@ -1221,11 +1140,12 @@ void HomeBlksMetrics::on_gather() {
     }
 }
 
-uint32_t HomeBlks::next_available_hdd_thread_idx() {
-    static thread_local uint32_t current_index{0};
-    uint32_t ret = current_index;
-    current_index = (current_index + 1) % m_custom_hdd_threads.size();
-    return ret;
+iomgr::drive_type HomeBlks::data_drive_type() {
+    if (is_data_drive_hdd()) {
+        return iomgr::drive_type::block_hdd;
+    } else {
+        return iomgr::drive_type::block_nvme;
+    }
 }
 
 bool HomeBlks::m_meta_blk_found = false;

@@ -15,16 +15,16 @@
 #include <vector>
 
 #include <sisl/metrics/metrics.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/utility/obj_life_counter.hpp>
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/enum.hpp>
 
 #include "device.h"
 #include "device_selector.hpp"
-#include "engine/homeds/memory/mempiece.hpp"
 #include "engine/blkalloc/blk_allocator.h"
 #include "engine/blkalloc/varsize_blk_allocator.h"
+#include "engine/homeds/memory/mempiece.hpp"
 
 namespace iomgr {
 class DriveInterface;
@@ -52,12 +52,16 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
     std::error_condition err{no_error};
     bool is_read{false};
     bool isSyncCall{false};
+    bool is_completed{false};
     sisl::atomic_counter< int > refcount;
-    PhysicalDevChunk* chunk;
+    PhysicalDevChunk* chunk{nullptr};
     Clock::time_point io_start_time;
     bool part_of_batch{false};
     bool format{false};
     vdev_format_cb_t format_cb; // callback stored for format operation.
+    bool fsync{false};
+    vdev_comp_cb_t fsync_cb; // callback stored for fsync operation;
+    uint8_t* cookie;
 
 #ifndef NDEBUG
     uint64_t dev_offset;
@@ -80,9 +84,9 @@ struct virtualdev_req : public sisl::ObjLifeCounter< virtualdev_req > {
         return boost::static_pointer_cast< virtualdev_req >(req);
     }
 
-    // static boost::intrusive_ptr< virtualdev_req > make_request() {
-    //    return boost::intrusive_ptr< virtualdev_req >(sisl::ObjectAllocator< virtualdev_req >::make_object());
-    //}
+    static boost::intrusive_ptr< virtualdev_req > make_request() {
+        return boost::intrusive_ptr< virtualdev_req >(sisl::ObjectAllocator< virtualdev_req >::make_object());
+    }
     virtual void free_yourself() { sisl::ObjectAllocator< virtualdev_req >::deallocate(this); }
     friend void intrusive_ptr_add_ref(virtualdev_req* const req) { req->refcount.increment(1); }
     friend void intrusive_ptr_release(virtualdev_req* const req) {
@@ -113,9 +117,9 @@ public:
         REGISTER_COUNTER(vdev_high_watermark_count, "vdev total high watermark cnt");
         REGISTER_COUNTER(vdev_num_alloc_failure, "vdev blk alloc failure cnt");
         REGISTER_COUNTER(unalign_writes, "unalign write cnt");
-        REGISTER_COUNTER(non_preferred_chunk_allocation_cnt,
-                         "number of times blks are not allocated from preferred chunk");
-
+        REGISTER_COUNTER(default_chunk_allocation_cnt, "default chunk allocation count");
+        REGISTER_COUNTER(random_chunk_allocation_cnt,
+                         "random chunk allocation count"); // ideally it should be zero for hdd
         register_me_to_farm();
     }
 
@@ -138,6 +142,13 @@ static constexpr uint64_t CHUNK_EOF{0xabcdabcd};
 static constexpr off_t INVALID_OFFSET{std::numeric_limits< off_t >::max()};
 
 struct blkalloc_cp;
+typedef uint32_t vdev_stream_id_t;
+struct stream_info_t {
+    uint32_t num_streams = 0;
+    uint64_t stream_cur = 0;
+    std::vector< vdev_stream_id_t > stream_id;
+    std::vector< PhysicalDevChunk* > chunk_list;
+};
 
 class VirtualDev {
 protected:
@@ -167,6 +178,11 @@ protected:
     VirtualDevMetrics m_metrics;
     std::vector< PhysicalDevChunk* > m_free_streams;
     std::mutex m_free_streams_lk;
+    PhysicalDevChunk* m_default_chunk{nullptr};
+    PhysicalDevGroup m_pdev_group;
+
+private:
+    static uint32_t s_num_chunks_created; // vdev will not be created in parallel threads;
 
 public:
     static constexpr size_t context_data_size() { return MAX_CONTEXT_DATA_SZ; }
@@ -238,6 +254,9 @@ public:
               const boost::intrusive_ptr< virtualdev_req >& req);
     void readv(const BlkId& bid, const homeds::MemVector& buf, const boost::intrusive_ptr< virtualdev_req >& req);
 
+    // Issue fsync to all physical devices and call cb on completion
+    void fsync_pdevs(vdev_comp_cb_t cb, uint8_t* const cookie = nullptr);
+
     void submit_batch();
 
     void get_vb_context(const sisl::blob& ctx_data) const;
@@ -272,9 +291,9 @@ public:
 
     /* Verify debug bitmap for all chunks */
     virtual BlkAllocStatus verify_debug_bm(const bool free_debug_bm = true);
-    uintptr_t reserve_stream(const uint32_t id);
-    std::pair< uint32_t, uintptr_t > alloc_stream();
-    void free_stream(const uintptr_t ptr);
+    stream_info_t reserve_stream(const vdev_stream_id_t* id_list, const uint32_t num_streams);
+    stream_info_t alloc_stream(uint64_t size);
+    void free_stream(const stream_info_t& stream_info);
     uint32_t get_align_size() const;
     uint32_t get_phys_page_size() const;
     uint32_t get_atomic_page_size() const;
@@ -347,10 +366,11 @@ private:
     void add_primary_chunk(PhysicalDevChunk* chunk);
     void add_mirror_chunk(PhysicalDevChunk* chunk);
     PhysicalDevChunk* create_dev_chunk(const uint32_t pdev_ind, const std::shared_ptr< BlkAllocator >& ba,
-                                       const uint32_t primary_id, const bool is_stream_aligned);
+                                       const uint32_t primary_id);
     uint64_t to_dev_offset(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const;
     BlkAllocStatus alloc_blk_from_chunk(const blk_count_t nblks, const blk_alloc_hints& hints,
                                         std::vector< BlkId >& out_blkid, PhysicalDevChunk* const chunk);
+    void reserve_stream(const vdev_stream_id_t id);
 };
 
 } // namespace homestore

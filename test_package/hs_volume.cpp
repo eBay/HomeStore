@@ -5,28 +5,27 @@
 #include <boost/uuid/uuid_io.hpp>
 
 /* Facility headers */
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 
 /* IOPath */
 #include <api/vol_interface.hpp>
 #include <engine/common/homestore_header.hpp>
-#include <iomgr/iomgr.hpp>
+#include <iomgr/io_environment.hpp>
 
-
-SDS_OPTION_GROUP(test_hs_vol,
+SISL_OPTION_GROUP(test_hs_vol,
 	(capacity, "", "capacity", "Size of volume", cxxopts::value<uint32_t>()->default_value("2"), "GiB"),
 	(io_threads, "", "io_threads", "Number of IO threads", cxxopts::value<uint32_t>()->default_value("1"), "count"),
 	(name, "", "name", "Volume name", cxxopts::value<std::string>()->default_value("volume"), ""),
 	(addr, "", "addr", "Do IO on a PCIe address", cxxopts::value<std::string>(), "0000:02:00.0"))
 
-#define ENABLED_OPTIONS logging, iomgr, home_blks, test_hs_vol, config
+#define ENABLED_OPTIONS logging, iomgr, test_hs_vol, config
 #define SPDK_LOG_MODS HOMESTORE_LOG_MODS
 
-SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
-SDS_LOGGING_INIT(SPDK_LOG_MODS)
+	SISL_OPTIONS_ENABLE(ENABLED_OPTIONS)
+	SISL_LOGGING_INIT(SPDK_LOG_MODS)
 
-constexpr size_t Ki = 1024;
+	constexpr size_t Ki = 1024;
 constexpr size_t Mi = Ki * Ki;
 constexpr size_t Gi = Ki * Mi;
 
@@ -68,16 +67,16 @@ static void init_homestore(std::string const& device_address) {
 }
 
 int main(int argc, char* argv[]) {
-	SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
-		sds_logging::SetLogger("spdk_volume");
-	sds_logging::install_crash_handler();
+	SISL_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
+		sisl::logging::SetLogger("spdk_volume");
+	sisl::logging::install_crash_handler();
 	spdlog::set_pattern("[%D %T.%e] [%^%l%$] [%t] %v");
 
 	// Configure backend BDev
 	std::string device_address;
-	if (0 < SDS_OPTIONS.count("addr")) {
+	if (0 < SISL_OPTIONS.count("addr")) {
 		device_address = std::string(
-			fmt::format("traddr={}", SDS_OPTIONS["addr"].as<std::string>()));
+			fmt::format("traddr={}", SISL_OPTIONS["addr"].as<std::string>()));
 		LOGINFO("Binding device [{}] to SPDK NVMe-BDEV.", device_address);
 	}
 	else {
@@ -86,7 +85,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	// Start the IOManager
-	iomanager.start(SDS_OPTIONS["io_threads"].as<uint32_t>(), true);
+	ioenvironment.with_iomgr(SISL_OPTIONS["io_threads"].as<uint32_t>(), true);
 
 	// Init HomeStore
 	init_homestore(device_address);
@@ -100,9 +99,9 @@ int main(int argc, char* argv[]) {
 
 	// Create a volume within HomeBlks
 	homestore::vol_params vol_params;
-	auto const vol_name = SDS_OPTIONS["name"].as<std::string>();
+	auto const vol_name = SISL_OPTIONS["name"].as<std::string>();
 	vol_params.page_size = 4 * Ki;
-	vol_params.size = SDS_OPTIONS["capacity"].as<uint32_t>() *
+	vol_params.size = SISL_OPTIONS["capacity"].as<uint32_t>() *
 		Gi; /* assuming unit is Bytes */
 	vol_params.uuid = boost::uuids::random_generator()();
 	auto const vol_uuid = boost::uuids::to_string(vol_params.uuid);

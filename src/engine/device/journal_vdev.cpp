@@ -16,7 +16,7 @@
 
 #include <sisl/fds/buffer.hpp>
 #include <sisl/metrics/metrics.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 #include <sisl/utility/atomic_counter.hpp>
 
 #include "api/meta_interface.hpp"
@@ -33,10 +33,17 @@
 #include "engine/common/resource_mgr.hpp"
 
 namespace homestore {
+bool JournalVirtualDev::is_alloc_accross_chunk(const size_t size) {
+    off_t offset_in_chunk{0};
+    const off_t end_offset{get_tail_offset()};
+    uint32_t dev_id{0}, chunk_id{0};
 
-off_t JournalVirtualDev::alloc_next_append_blk(const size_t size, const bool chunk_overlap_ok) {
-    HS_DEBUG_ASSERT_EQ(chunk_overlap_ok, false);
+    logical_to_dev_offset(end_offset, dev_id, chunk_id, offset_in_chunk);
 
+    return (offset_in_chunk + size > m_chunk_size);
+}
+
+off_t JournalVirtualDev::alloc_next_append_blk_internal(const size_t size) {
     if (get_used_size() + size > get_size()) {
         // not enough space left;
         HS_LOG(ERROR, device, "No space left! m_write_sz_in_total: {}, m_reserved_sz: {}", m_write_sz_in_total.load(),
@@ -57,7 +64,7 @@ off_t JournalVirtualDev::alloc_next_append_blk(const size_t size, const bool chu
 
 #ifndef NDEBUG
     if (end_offset < ds_off) {
-        HS_DEBUG_ASSERT_EQ(get_size() - get_used_size(), static_cast< uint64_t >(ds_off - end_offset));
+        HS_DBG_ASSERT_EQ(get_size() - get_used_size(), static_cast< uint64_t >(ds_off - end_offset));
     }
 #endif
     // works for both "end_offset >= ds_off" and "end_offset < ds_off";
@@ -102,8 +109,28 @@ off_t JournalVirtualDev::alloc_next_append_blk(const size_t size, const bool chu
     HomeStoreFlip::test_and_abort("abort_after_update_eof_next_chunk");
 #endif
     // assert that returnning logical offset is in good range;
-    HS_DEBUG_ASSERT_LE(static_cast< uint64_t >(offset), get_size());
+    HS_DBG_ASSERT_LE(static_cast< uint64_t >(offset), get_size());
     return offset;
+}
+
+void JournalVirtualDev::alloc_next_append_blk_async(const size_t size, const alloc_next_blk_cb_t& cb) {
+    if (sisl_unlikely(is_alloc_accross_chunk(size))) {
+        // send message to user thread to do the sync io
+        iomanager.run_on(iomgr::thread_regex::least_busy_user,
+                         [this, size, cb]([[maybe_unused]] const io_thread_addr_t addr) {
+                             /* send callback to caller */
+                             cb(alloc_next_append_blk_internal(size));
+                         });
+    } else {
+        /* if we are going to alloc within a chunk, no sync write will happen, so just return it in caller's thread */
+        cb(alloc_next_append_blk_internal(size));
+    }
+}
+
+off_t JournalVirtualDev::alloc_next_append_blk(const size_t size, const bool chunk_overlap_ok) {
+    HS_DBG_ASSERT_EQ(chunk_overlap_ok, false);
+
+    return alloc_next_append_blk_internal(size);
 }
 
 ssize_t JournalVirtualDev::write(const void* buf, const size_t count,
@@ -143,7 +170,7 @@ ssize_t JournalVirtualDev::write(const void* buf, const size_t count,
  */
 ssize_t JournalVirtualDev::pwrite(const void* buf, const size_t count, const off_t offset,
                                   const boost::intrusive_ptr< virtualdev_req >& req) {
-    HS_RELEASE_ASSERT_LE(count, m_reserved_sz, "Write size: larger then reserved size is not allowed!");
+    HS_REL_ASSERT_LE(count, m_reserved_sz, "Write size: larger then reserved size is not allowed!");
 
     // update reserved size
     m_reserved_sz -= count;
@@ -159,8 +186,8 @@ ssize_t JournalVirtualDev::pwritev(const iovec* iov, const int iovcnt, const off
 
     // if len is smaller than reserved size, it means write will never be overlapping start offset;
     // it is guaranteed by alloc_next_append_blk api;
-    HS_RELEASE_ASSERT_LE(len, m_reserved_sz, "Write size:{} larger then reserved size: {} is not allowed!", len,
-                         m_reserved_sz);
+    HS_REL_ASSERT_LE(len, m_reserved_sz, "Write size:{} larger then reserved size: {} is not allowed!", len,
+                     m_reserved_sz);
 
     m_reserved_sz -= len;
 
@@ -178,9 +205,9 @@ ssize_t JournalVirtualDev::pwritev(const iovec* iov, const int iovcnt, const off
 
         // bytes written should always equal to requested write size, since alloc_next_append_blk handles offset
         // which will never across chunk boundary;
-        HS_DEBUG_ASSERT_EQ((uint64_t)bytes_written, len, "Bytes written not equal to input len!");
+        HS_DBG_ASSERT_EQ((uint64_t)bytes_written, len, "Bytes written not equal to input len!");
 
-    } catch (const std::exception& e) { HS_ASSERT(DEBUG, 0, "{}", e.what()); }
+    } catch (const std::exception& e) { HS_DBG_ASSERT(0, "{}", e.what()); }
 
     return bytes_written;
 }
@@ -198,11 +225,10 @@ ssize_t JournalVirtualDev::read(void* buf, const size_t count_in) {
 
     bool across_chunk{false};
 
-    HS_RELEASE_ASSERT_LE((uint64_t)end_of_chunk, m_chunk_size, "Invalid end of chunk: {} detected on chunk num: {}",
-                         end_of_chunk, chunk->get_chunk_id());
-    HS_RELEASE_ASSERT_LE((uint64_t)offset_in_chunk, chunk_size,
-                         "Invalid m_seek_cursor: {} which falls in beyond end of chunk: {}!", m_seek_cursor,
-                         end_of_chunk);
+    HS_REL_ASSERT_LE((uint64_t)end_of_chunk, m_chunk_size, "Invalid end of chunk: {} detected on chunk num: {}",
+                     end_of_chunk, chunk->get_chunk_id());
+    HS_REL_ASSERT_LE((uint64_t)offset_in_chunk, chunk_size,
+                     "Invalid m_seek_cursor: {} which falls in beyond end of chunk: {}!", m_seek_cursor, end_of_chunk);
 
     // if read size is larger then what's left in this chunk
     if (count >= (chunk_size - offset_in_chunk)) {
@@ -215,8 +241,8 @@ ssize_t JournalVirtualDev::read(void* buf, const size_t count_in) {
 
     if (bytes_read != -1) {
         // Update seek cursor after read;
-        HS_RELEASE_ASSERT_EQ((size_t)bytes_read, count, "bytes_read returned: {} must be equal to requested size: {}!",
-                             bytes_read, count);
+        HS_REL_ASSERT_EQ((size_t)bytes_read, count, "bytes_read returned: {} must be equal to requested size: {}!",
+                         bytes_read, count);
         m_seek_cursor += bytes_read;
         if (across_chunk) { m_seek_cursor += (m_chunk_size - end_of_chunk); }
         m_seek_cursor = m_seek_cursor % get_size();
@@ -254,7 +280,7 @@ ssize_t JournalVirtualDev::preadv(iovec* iov, const int iovcnt, const off_t offs
     const uint64_t offset_in_dev{logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk)};
 
     if (m_chunk_size - offset_in_chunk < len) {
-        HS_DEBUG_ASSERT_EQ(
+        HS_DBG_ASSERT_EQ(
             iovcnt, 1,
             "iovector more than 1 element is not supported when requested read len is acrossing chunk boundary.");
         if (iovcnt > 1) { return -1; }
@@ -281,7 +307,7 @@ off_t JournalVirtualDev::lseek(const off_t offset, const int whence) {
         break;
     case SEEK_END:
     default:
-        HS_ASSERT(DEBUG, false, "Not supported seek type: {}", whence);
+        HS_DBG_ASSERT(false, "Not supported seek type: {}", whence);
         break;
     }
 
@@ -338,8 +364,7 @@ void JournalVirtualDev::update_tail_offset(const off_t tail) {
 
     HS_LOG(INFO, device, "m_write_sz_in_total updated to: {}", to_hex(m_write_sz_in_total.load()));
 
-    HS_ASSERT(RELEASE, get_tail_offset() == tail, "tail offset mismatch after calculation {} : {}", get_tail_offset(),
-              tail);
+    HS_REL_ASSERT(get_tail_offset() == tail, "tail offset mismatch after calculation {} : {}", get_tail_offset(), tail);
 }
 
 void JournalVirtualDev::truncate(const off_t offset) {
@@ -361,8 +386,8 @@ void JournalVirtualDev::truncate(const off_t offset) {
                         "offset: {}, m_write_sz_in_total: {}",
                         to_hex(offset), to_hex(ds_off), to_hex(m_write_sz_in_total.load()));
         size_to_truncate = get_size() - (ds_off - offset);
-        HS_RELEASE_ASSERT_GE(m_write_sz_in_total.load(), size_to_truncate, "invalid truncate offset");
-        HS_RELEASE_ASSERT_GE(get_tail_offset(), offset);
+        HS_REL_ASSERT_GE(m_write_sz_in_total.load(), size_to_truncate, "invalid truncate offset");
+        HS_REL_ASSERT_GE(get_tail_offset(), offset);
     }
 
     // update in-memory total write size counter;
@@ -390,7 +415,7 @@ off_t JournalVirtualDev::process_pwrite_offset(const size_t len, const off_t off
 
     // this assert only valid for pwrite/pwritev, which calls alloc_next_append_blk to get the offset to do the
     // write, which guarantees write will with the returned offset will not accross chunk boundary.
-    HS_RELEASE_ASSERT_GE(m_chunk_size - offset_in_chunk, len, "Writing size: {} crossing chunk is not allowed!", len);
+    HS_REL_ASSERT_GE(m_chunk_size - offset_in_chunk, len, "Writing size: {} crossing chunk is not allowed!", len);
 
     m_write_sz_in_total.fetch_add(len, std::memory_order_relaxed);
 
@@ -424,9 +449,9 @@ ssize_t JournalVirtualDev::do_pwrite(const void* buf, const size_t count, const 
 
         // bytes written should always equal to requested write size, since alloc_next_append_blk handles offset
         // which will never across chunk boundary;
-        HS_DEBUG_ASSERT_EQ(static_cast< size_t >(bytes_written), count, "Bytes written not equal to input len!");
+        HS_DBG_ASSERT_EQ(static_cast< size_t >(bytes_written), count, "Bytes written not equal to input len!");
 
-    } catch (const std::exception& e) { HS_ASSERT(DEBUG, 0, "{}", e.what()); }
+    } catch (const std::exception& e) { HS_DBG_ASSERT(0, "{}", e.what()); }
 
     return bytes_written;
 }
@@ -461,8 +486,8 @@ uint64_t JournalVirtualDev::logical_to_dev_offset(const off_t log_offset, uint32
         }
     }
 
-    HS_ASSERT(DEBUG, false, "Input log_offset is invalid: {}, should be between 0 ~ {}", log_offset,
-              m_chunk_size * m_num_chunks);
+    HS_DBG_ASSERT(false, "Input log_offset is invalid: {}, should be between 0 ~ {}", log_offset,
+                  m_chunk_size * m_num_chunks);
     return 0;
 }
 

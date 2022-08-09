@@ -9,7 +9,7 @@
 
 #include <sisl/fds/malloc_helper.hpp>
 #include <sisl/fds/buffer.hpp>
-#include <sds_logging/logging.h>
+#include <sisl/logging/logging.h>
 
 #include "api/meta_interface.hpp"
 #include "engine/blkstore/blkstore.hpp"
@@ -62,35 +62,61 @@ public:
 
         HomeStoreDynamicConfig::init_settings_default();
 
-        // check if any of the drive is hard drive
-        for (const auto& dev_info : input.data_devices) {
-            if (DeviceManager::is_hdd(dev_info.dev_names)) {
-                HomeStoreStaticConfig::instance().hdd_drive_present = true;
-                HomeStoreStaticConfig::instance().engine.max_chunks = HDD_MAX_CHUNKS;
-                break;
-            }
-        }
-
         // Restrict iomanager to throttle upto the app mem size allocated for us
-        iomanager.set_io_memory_limit(HS_STATIC_CONFIG(input.app_mem_size));
+        iomanager.set_io_memory_limit(HS_STATIC_CONFIG(input.io_mem_size()));
 
         // Start a custom periodic logger
         static std::once_flag flag1;
         std::call_once(flag1, [this]() {
             m_periodic_logger =
-                sds_logging::CreateCustomLogger("homestore", "_periodic", false, true /* tee_to_stdout_stderr */);
+                sisl::logging::CreateCustomLogger("homestore", "_periodic", false, true /* tee_to_stdout_stderr */);
         });
-        sds_logging::SetLogPattern("[%D %T.%f] [%^%L%$] [%t] %v", m_periodic_logger);
+        sisl::logging::SetLogPattern("[%D %T.%f] [%^%L%$] [%t] %v", m_periodic_logger);
 
 #ifndef NDEBUG
         flip::Flip::instance().start_rpc_server();
 #endif
+
+        start_flush_threads();
 
         /* create device manager */
         m_dev_mgr = std::make_unique< DeviceManager >(input.data_devices, bind_this(HomeStore::new_vdev_found, 2),
                                                       sizeof(sb_blkstore_blob), VirtualDev::static_process_completions,
                                                       bind_this(HomeStore::process_vdev_error, 1));
         m_dev_mgr->init();
+    }
+
+    void start_flush_threads() {
+        /* create local flush thread */
+        static std::mutex cv_mtx;
+        static std::condition_variable flush_thread_cv;
+        uint32_t thread_cnt = 0;
+        uint32_t max_thread_cnt = HS_DYNAMIC_CONFIG(generic.num_flush_threads);
+
+        for (uint32_t i = 0; i < max_thread_cnt; ++i) {
+            iomanager.create_reactor("hs_flush_thread", TIGHT_LOOP | ADAPTIVE_LOOP,
+                                     [this, &tl_cv = flush_thread_cv, &tl_mtx = cv_mtx, &thread_cnt](bool is_started) {
+                                         if (is_started) {
+                                             std::unique_lock< std::mutex > lk{tl_mtx};
+                                             ++thread_cnt;
+                                             m_flush_threads.push_back(iomanager.iothread_self());
+                                             tl_cv.notify_one();
+                                         }
+                                     });
+        }
+        {
+            std::unique_lock< std::mutex > lk{cv_mtx};
+            flush_thread_cv.wait(lk, [&thread_cnt, max_thread_cnt] { return (thread_cnt == max_thread_cnt); });
+        }
+    }
+
+    iomgr::io_thread_t get_hs_flush_thread() const {
+        /* XXX: Does it need to be atomic variable ? Worse case each thread uses it local cache value which shouldn't be
+         * bad.
+         */
+        static int next_thread = 0;
+        next_thread = (next_thread + 1) % m_flush_threads.size();
+        return m_flush_threads[next_thread];
     }
 
     uint32_t get_indx_mgr_page_size() const { return (m_dev_mgr->get_atomic_page_size(PhysicalDevGroup::FAST)); }
@@ -233,7 +259,7 @@ protected:
             create_meta_blkstore(vb);
             break;
         default:
-            HS_ASSERT(LOGMSG, 0, "Unknown blkstore_type {}", blob->type);
+            HS_LOG_ASSERT(0, "Unknown blkstore_type {}", blob->type);
         }
     }
 
@@ -275,8 +301,6 @@ protected:
                 m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE,
                 blk_allocator_type_t::fixed, 0, (char*)&blob, sizeof(blkstore_blob), atomic_phys_page_size, "index",
                 true);
-            ++m_format_cnt;
-            m_index_blk_store->format(([this](bool success) { init_done(true); }));
         } else {
             m_index_blk_store = std::make_unique< BlkStore< IndexBuffer > >(
                 m_dev_mgr.get(), m_cache.get(), vb, pdev_group, BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE,
@@ -287,6 +311,12 @@ protected:
                 throw std::runtime_error("vdev in failed state");
             }
         }
+
+        uint64_t mempool_size =
+            (HS_DYNAMIC_CONFIG(generic.indx_mempool_percent) * ResourceMgrSI().get_cache_size()) / 100;
+        LOGINFO("indx mempool size {}", mempool_size);
+        iomanager.create_mempool(atomic_phys_page_size, mempool_size / atomic_phys_page_size);
+        hs_utils::set_btree_mempool_size(atomic_phys_page_size);
     }
 
     void create_meta_blkstore(vdev_info_block* const vb) {
@@ -300,9 +330,6 @@ protected:
             m_meta_blk_store = std::make_unique< BlkStore<> >(
                 m_dev_mgr.get(), m_cache.get(), size, pdev_group, BlkStoreCacheType::PASS_THRU,
                 blk_allocator_type_t::varsize, 0, (char*)&blob, sizeof(blkstore_blob), phys_page_size, "meta", false);
-            ++m_format_cnt;
-            m_meta_blk_store->format(([this](bool success) { init_done(true); }));
-
         } else {
             m_meta_blk_store = std::make_unique< BlkStore<> >(
                 m_dev_mgr.get(), m_cache.get(), vb, pdev_group, BlkStoreCacheType::PASS_THRU,
@@ -431,6 +458,7 @@ protected:
     std::unique_ptr< CacheType > m_cache;
 
 private:
+    std::vector< iomgr::io_thread_t > m_flush_threads;
     static constexpr float data_blkstore_pct{84.0};
     static constexpr float indx_blkstore_pct{3.0};
 

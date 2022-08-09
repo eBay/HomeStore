@@ -13,7 +13,7 @@
 #include "log_store.hpp"
 
 namespace homestore {
-SDS_LOGGING_DECL(logstore)
+SISL_LOGGING_DECL(logstore)
 
 LogStoreFamily::LogStoreFamily(const logstore_family_id_t f_id) :
         m_family_id{f_id},
@@ -75,9 +75,11 @@ std::shared_ptr< HomeLogStore > LogStoreFamily::create_new_log_store(const bool 
 
     auto m{m_id_logstore_map.wlock()};
     const auto it{m->find(store_id)};
-    HS_RELEASE_ASSERT((it == m->end()), "store_id {} already exists", store_id);
+    HS_REL_ASSERT((it == m->end()), "store_id {}-{} already exists", m_family_id, store_id);
 
     m->insert(std::make_pair<>(store_id, logstore_info_t{lstore, nullptr, append_mode}));
+
+    LOGINFO("Created log store id {}-{}", m_family_id, store_id);
     return lstore;
 }
 
@@ -85,13 +87,16 @@ void LogStoreFamily::open_log_store(const logstore_id_t store_id, const bool app
                                     const log_store_opened_cb_t& on_open_cb) {
     auto m{m_id_logstore_map.wlock()};
     const auto it{m->find(store_id)};
-    HS_RELEASE_ASSERT((it == m->end()), "store_id {}-{} already exists", m_family_id, store_id);
+    HS_REL_ASSERT((it == m->end()), "store_id {}-{} already exists", m_family_id, store_id);
+
+    LOGINFO("Opening log store id {}-{}", m_family_id, store_id);
     m->insert(std::make_pair<>(store_id, logstore_info_t{nullptr, on_open_cb, append_mode}));
 }
 
 void LogStoreFamily::remove_log_store(const logstore_id_t store_id) {
     LOGINFO("Removing log store id {}-{}", m_family_id, store_id);
-    m_id_logstore_map.wlock()->erase(store_id);
+    auto ret = m_id_logstore_map.wlock()->erase(store_id);
+    HS_REL_ASSERT((ret == 1), "try to remove invalid store_id {}-{}", m_family_id, store_id);
     m_log_dev.unreserve_store_id(store_id);
 }
 
@@ -161,7 +166,7 @@ void LogStoreFamily::on_logfound(const logstore_id_t id, const logstore_seq_num_
     if (it == m->end()) {
         auto [unopened_it, inserted] = m_unopened_store_io.insert(std::make_pair<>(id, 0));
         if (inserted) {
-            // HS_RELEASE_ASSERT(0, "log id  {}-{} not found", m_family_id, id);
+            // HS_REL_ASSERT(0, "log id  {}-{} not found", m_family_id, id);
         }
         ++unopened_it->second;
         return;
@@ -181,12 +186,12 @@ void LogStoreFamily::on_batch_completion(HomeLogStore* log_store, const uint32_t
     if ((it == std::end(m_last_flush_info)) || (it->second != flush_ld_key.idx)) {
         // first time completion in this batch for a given store_id
         m_last_flush_info.insert_or_assign(id, flush_ld_key.idx);
-        s_cur_flush_batch_stores.push_back(log_store->shared_from_this());
+        if (it == std::end(m_last_flush_info)) { s_cur_flush_batch_stores.push_back(log_store->shared_from_this()); }
     }
-
     if (nremaining_in_batch == 0) {
         // This batch is completed, call all log stores participated in this batch about the end of batch
         HS_LOG_ASSERT_GT(s_cur_flush_batch_stores.size(), 0U, "Expecting one store to be flushed in batch");
+
         for (auto& l : s_cur_flush_batch_stores) {
             l->on_batch_completion(flush_ld_key);
         }

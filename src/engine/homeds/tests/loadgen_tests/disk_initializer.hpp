@@ -19,6 +19,7 @@
 
 #include "api/vol_interface.hpp"
 #include "homeds/loadgen/loadgen_common.hpp"
+#include "test_common/homestore_test_common.hpp"
 
 namespace homeds {
 namespace loadgen {
@@ -57,12 +58,17 @@ public:
         /* create files */
 
         const std::filesystem::path fpath{m_file_name};
+        auto fd = ::open(m_file_name.c_str(), O_RDWR | O_CREAT | O_DIRECT, 0666);
+        const auto ret{fallocate(fd, 0, 0, DISK_MAX_SIZE)};
+#if 0
         std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
-        std::filesystem::resize_file(fpath, DISK_MAX_SIZE); // set the file size
+        std::filesystem::resize_file(fpath, DISK_MAX_SIZE); // set the file size_t
+#endif
         device_info.emplace_back(std::filesystem::canonical(fpath).string(), homestore::HSDevType::Data);
 
         //                iomgr_obj = std::make_shared<iomgr::ioMgr>(2, num_threads);
         homestore::init_params params;
+
 #ifndef NDEBUG
         params.data_open_flags = homestore::io_flag::BUFFERED_IO;
 #else
@@ -84,6 +90,8 @@ public:
         boost::uuids::string_generator gen;
         // params.system_uuid = gen("01970496-0262-11e9-8eb2-f2801f1b9fd1");
         // uuid = params.system_uuid;
+
+        test_common::set_random_http_port();
         homestore::VolInterface::init(params);
     }
 

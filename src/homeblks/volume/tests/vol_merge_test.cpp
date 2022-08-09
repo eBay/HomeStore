@@ -1,5 +1,5 @@
-#include <sds_logging/logging.h>
-#include <sds_options/options.h>
+#include <sisl/logging/logging.h>
+#include <sisl/options/options.h>
 #include <main/vol_interface.hpp>
 //#include <homeblks/home_blks.hpp>
 #include <boost/uuid/uuid_generators.hpp>
@@ -12,7 +12,7 @@
 #include <atomic>
 #include <string>
 #include <sisl/utility/thread_buffer.hpp>
-#include <iomgr/iomgr.hpp>
+#include <iomgr/io_environment.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <chrono>
 #include <thread>
@@ -40,32 +40,32 @@ constexpr auto Mi = Ki * Ki;
 constexpr auto Gi = Ki * Mi;
 uint64_t max_io_size = 1 * Mi;
 uint64_t max_outstanding_ios = 8u;
-uint64_t max_disk_capacity = 10 * Gi;
+uint64_t max_disk_capacity = 20 * Gi;
 uint64_t match_cnt = 0;
 uint64_t max_capacity;
 using log_level = spdlog::level::level_enum;
-SDS_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-// SDS_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, btree_structures, btree_nodes, btree_generics,
+// SISL_LOGGING_INIT(cache_vmod_evict, cache_vmod_write, iomgr, btree_structures, btree_nodes, btree_generics,
 //                 blkalloc, VMOD_VOL_MAPPING, httpserver_lmod, volume)
 
 /*** CLI options ***/
-SDS_OPTION_GROUP(
+SISL_OPTION_GROUP(
     test_volume,
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("30"), "seconds"),
     (num_threads, "", "num_threads", "num threads for io", ::cxxopts::value< uint32_t >()->default_value("1"),
      "number"),
     (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
     (max_disk_capacity, "", "max_disk_capacity", "max disk capacity",
-     ::cxxopts::value< uint64_t >()->default_value("5"), "GB"),
+     ::cxxopts::value< uint64_t >()->default_value("20"), "GB"),
     (max_volume, "", "max_volume", "max volume", ::cxxopts::value< uint64_t >()->default_value("2"), "number"),
     (max_num_writes, "", "max_num_writes", "max num of writes", ::cxxopts::value< uint64_t >()->default_value("8"),
      "number"),
     (enable_crash_handler, "", "enable_crash_handler", "enable crash handler 0 or 1",
      ::cxxopts::value< uint32_t >()->default_value("1"), "flag"))
 
-#define ENABLED_OPTIONS logging, home_blks, test_volume
-SDS_OPTIONS_ENABLE(ENABLED_OPTIONS)
+#define ENABLED_OPTIONS logging, test_volume
+SISL_OPTIONS_ENABLE(ENABLED_OPTIONS)
 /*** ***/
 
 #include <volume/volume.hpp>
@@ -206,7 +206,7 @@ public:
             max_capacity += max_disk_capacity;
         }
 
-        iomanager.start(num_threads);
+        ioenvironment.with_iomgr(num_threads);
 
         m_ev_fd = eventfd(0, EFD_NONBLOCK);
         m_ev_fdinfo = iomanager.add_fd(iomanager.default_drive_interface(), m_ev_fd,
@@ -491,17 +491,17 @@ int main(int argc, char* argv[]) {
     auto hs = new MinHS;
 
     srand(time(0));
-    SDS_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
-    sds_logging::SetLogger("test_volume");
-    // sds_logging::install_crash_handler();
+    SISL_OPTIONS_LOAD(argc, argv, ENABLED_OPTIONS)
+    sisl::logging::SetLogger("test_volume");
+    // sisl::logging::install_crash_handler();
     spdlog::set_pattern("[%D %T.%f] [%^%L%$] [%t] %v");
 
-    run_time = SDS_OPTIONS["run_time"].as< uint32_t >();
-    num_threads = SDS_OPTIONS["num_threads"].as< uint32_t >();
-    read_enable = SDS_OPTIONS["read_enable"].as< uint32_t >();
-    max_disk_capacity = ((SDS_OPTIONS["max_disk_capacity"].as< uint64_t >()) * (1ul << 30));
-    max_vols = SDS_OPTIONS["max_volume"].as< uint64_t >();
-    max_num_writes = SDS_OPTIONS["max_num_writes"].as< uint64_t >();
+    run_time = SISL_OPTIONS["run_time"].as< uint32_t >();
+    num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
+    read_enable = SISL_OPTIONS["read_enable"].as< uint32_t >();
+    max_disk_capacity = ((SISL_OPTIONS["max_disk_capacity"].as< uint64_t >()) * (1ul << 30));
+    max_vols = SISL_OPTIONS["max_volume"].as< uint64_t >();
+    max_num_writes = SISL_OPTIONS["max_num_writes"].as< uint64_t >();
     hs->init_homestore();
     hs->wait_cmpl();
     hs->shutdown();

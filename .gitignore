@@ -106,3 +106,6 @@ cmake-*/**
 # Visual Studio
 CMakeSettings.json
 .vs/**
+
+# Ignore Flip
+src/Flip/**
