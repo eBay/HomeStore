@@ -1,9 +1,9 @@
+cmake_minimum_required(VERSION 3.11)
+
 include (${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
-include_directories (BEFORE ..)
-set(BLKSTORE_SOURCE
-    blkbuffer.cpp
-    )
+
 add_library(hs_blkstore OBJECT ${BLKSTORE_SOURCE})
+target_sources(hs_blkstore PRIVATE blkbuffer.cpp)
 target_link_libraries(hs_blkstore ${COMMON_DEPS})
 
 message(INFO "BlkStore test disabled due to interface change.")

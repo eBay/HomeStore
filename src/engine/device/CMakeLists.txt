@@ -1,12 +1,13 @@
 include (${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
 include_directories (BEFORE ..)
-set(DEVICE_SOURCE
-    physical_dev.cpp
-    device_manager.cpp
-    virtual_dev.cpp
-    journal_vdev.cpp
+
+add_library(hs_device OBJECT)
+target_sources(hs_device PRIVATE
+      physical_dev.cpp
+      device_manager.cpp
+      virtual_dev.cpp
+      journal_vdev.cpp
     )
-add_library(hs_device OBJECT ${DEVICE_SOURCE})
 target_link_libraries(hs_device ${COMMON_DEPS})
 
 link_directories(${spdk_LIB_DIRS} ${dpdk_LIB_DIRS})

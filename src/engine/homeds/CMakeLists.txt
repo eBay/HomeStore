@@ -30,36 +30,36 @@ link_directories(${spdk_LIB_DIRS} ${dpdk_LIB_DIRS})
 
 can_build_nonio_tests(non_io_tests)
 if (${non_io_tests})
-    set(TEST_BTREE_CRUD_SOURCE_FILES tests/test_btree_crud.cpp)
-    add_executable(test_btree_crud ${TEST_BTREE_CRUD_SOURCE_FILES})
+    add_executable(test_btree_crud)
+    target_sources(test_btree_crud PRIVATE tests/test_btree_crud.cpp)
     target_link_libraries(test_btree_crud homestore ${COMMON_TEST_DEPS})
 
-    set(TEST_HASH_SOURCE_FILES tests/test_hashset.cpp)
-    add_executable(test_hash ${TEST_HASH_SOURCE_FILES})
+    add_executable(test_hash)
+    target_sources(test_hash PRIVATE tests/test_hashset.cpp)
     target_link_libraries(test_hash ${COMMON_TEST_DEPS} benchmark::benchmark iberty)
 
-    set(TEST_AVECTOR_SOURCE_FILES tests/test_avector.cpp)
-    add_executable(test_avector ${TEST_AVECTOR_SOURCE_FILES})
+    add_executable(test_avector)
+    target_sources(test_avector PRIVATE tests/test_avector.cpp)
     target_link_libraries(test_avector ${COMMON_TEST_DEPS})
 
-    set(TEST_LOAD_FILES 
+    add_executable(test_load)
+    target_sources(test_load PRIVATE
             tests/loadgen_tests/test_load.cpp
             loadgen/iomgr_executor.cpp
-            )
-    add_executable(test_load ${TEST_LOAD_FILES})
+          )
     target_compile_options(test_load PRIVATE -Wno-deprecated)
     target_link_libraries(test_load homeblks ${COMMON_TEST_DEPS})
 
-    set(TEST_IOMGR_EXEC_FILES 
-        tests/test_iomgr_executor.cpp
-        loadgen/iomgr_executor.cpp
+    add_executable(test_iomgr_exec)
+    target_sources(test_iomgr_exec PRIVATE
+          tests/test_iomgr_executor.cpp
+          loadgen/iomgr_executor.cpp
         )
-    add_executable(test_iomgr_exec ${TEST_IOMGR_EXEC_FILES})
     target_link_libraries(test_iomgr_exec homestore ${COMMON_TEST_DEPS})
 
     if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-        set(TEST_THREAD_POOL_SOURCE_FILES tests/test_thread_pool.cpp)
-        add_executable(test_threadpool ${TEST_THREAD_POOL_SOURCE_FILES})
+        add_executable(test_threadpool)
+        target_sources(test_threadpool PRIVATE tests/test_thread_pool.cpp)
         target_link_libraries(test_threadpool ${COMMON_TEST_DEPS})
     endif()
     add_test(NAME BTreeCRUD COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_btree_crud)

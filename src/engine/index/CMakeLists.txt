@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.11)
+
 include_directories (BEFORE ../)
 
 set(INDXMGR_SOURCE_FILES

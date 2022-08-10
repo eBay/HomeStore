@@ -1,3 +1,5 @@
+cmake_minimum_required(VERSION 3.11)
+
 if (DEFINED TEST_TARGET)
   macro(can_build_io_tests ret)
       set(${ret} false)

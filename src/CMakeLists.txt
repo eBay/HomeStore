@@ -1,4 +1,5 @@
-include (CTest)
+cmake_minimum_required(VERSION 3.11)
+
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 
 find_package(Threads)
@@ -12,6 +13,7 @@ set (COMMON_DEPS
         iomgr::iomgr
         farmhash::farmhash
         isa-l::isa-l
+        sisl::sisl
     )
 
 set(COMMON_TEST_DEPS
@@ -29,18 +31,26 @@ add_subdirectory(homeblks)
 add_subdirectory(homelogstore)
 add_subdirectory(test_scripts)
 
-set(HOMESTORE_OBJECTS
-    $<TARGET_OBJECTS:hs_engine>
-    $<TARGET_OBJECTS:hs_common>
-    $<TARGET_OBJECTS:hs_device>
-    $<TARGET_OBJECTS:hs_blkalloc>
-    $<TARGET_OBJECTS:hs_logdev>
-    $<TARGET_OBJECTS:hs_metablk>
-    $<TARGET_OBJECTS:indx_mgr>
+add_library(homestore)
+target_sources(homestore PRIVATE
+      $<TARGET_OBJECTS:hs_engine>
+      $<TARGET_OBJECTS:hs_common>
+      $<TARGET_OBJECTS:hs_device>
+      $<TARGET_OBJECTS:hs_blkalloc>
+      $<TARGET_OBJECTS:hs_logdev>
+      $<TARGET_OBJECTS:hs_metablk>
+      $<TARGET_OBJECTS:indx_mgr>
     )
-add_library(homestore STATIC ${HOMESTORE_OBJECTS})
 
-add_library(homeblks STATIC
-            ${HOMESTORE_OBJECTS}
-            $<TARGET_OBJECTS:hs_homeblks>
-            $<TARGET_OBJECTS:hs_volume>)
+add_library(homeblks)
+target_sources(homeblks PRIVATE
+      $<TARGET_OBJECTS:hs_engine>
+      $<TARGET_OBJECTS:hs_common>
+      $<TARGET_OBJECTS:hs_device>
+      $<TARGET_OBJECTS:hs_blkalloc>
+      $<TARGET_OBJECTS:hs_logdev>
+      $<TARGET_OBJECTS:hs_metablk>
+      $<TARGET_OBJECTS:indx_mgr>
+      $<TARGET_OBJECTS:hs_homeblks>
+      $<TARGET_OBJECTS:hs_volume>
+    )
