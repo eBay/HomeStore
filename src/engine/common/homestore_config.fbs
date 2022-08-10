@@ -48,6 +48,9 @@ table BlkAllocator {
 
     /* Number of global variable block size allocator sweeping threads */
     num_slab_sweeper_threads: uint32 = 2;
+
+    /* real time bitmap feature on/off */
+    realtime_bitmap_on: bool = false;
 }
 
 table Btree {
@@ -120,9 +123,6 @@ table Generic {
 
     // if this value is set to 0, no sanity check will be run;
     sanity_check_level: uint32 = 1 (hotswap);
-
-    // if this value is set to 0, no sanity check will be run;
-    sanity_check_level_non_hotswap: uint32 = 1;
 
     // max iteration of unmap done in a cp
     max_unmap_iterations : uint32 = 64;

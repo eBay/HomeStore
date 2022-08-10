@@ -13,11 +13,11 @@ BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, const chunk_num_t id) : m_
     const auto bitmap_id{id};
     m_disk_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), bitmap_id, align_size);
 
-    if (!HS_DYNAMIC_CONFIG(generic.sanity_check_level_non_hotswap)) { m_cfg.m_realtime_bm_on = false; }
-
     if (realtime_bm_on()) {
+        LOGINFO("realtime bitmap turned on for chunk_id: {}", m_chunk_id);
         m_realtime_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), bitmap_id, align_size);
     }
+
     // NOTE:  Blocks per portion must be modulo word size so locks do not fall on same word
     assert(m_cfg.get_blks_per_portion() % m_disk_bm->word_size() == 0);
 }
