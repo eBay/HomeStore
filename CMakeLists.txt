@@ -13,6 +13,7 @@ enable_testing()
 
 if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/conanbuildinfo.cmake)
     include(${CMAKE_CURRENT_BINARY_DIR}/conanbuildinfo.cmake)
+    conan_output_dirs_setup()
 else ()
     message(WARNING "Conan Build file does not exist, trying to build without!")
 endif ()
