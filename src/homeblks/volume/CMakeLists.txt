@@ -5,13 +5,16 @@ set(VOLUME_SOURCE_FILES
     mapping.cpp
     )
 add_library(hs_volume OBJECT ${VOLUME_SOURCE_FILES})
+target_link_libraries(hs_volume ${COMMON_DEPS})
+
+link_directories(${spdk_LIB_DIRS} ${dpdk_LIB_DIRS})
 
 # Coverage doesn't like binaries that don't run...
 is_non_coverage_build(non_coverage_build)
 if (${non_coverage_build})
     set(BTREE_CHECKER_SOURCE_FILES tool/btree_checker.cpp)
     add_executable(check_btree ${BTREE_CHECKER_SOURCE_FILES})
-    target_link_libraries(check_btree homeblks ${CONAN_LIBS})
+    target_link_libraries(check_btree homeblks ${COMMON_TEST_DEPS})
 
     #set(PERF_TEST_VOLUME_SOURCE_FILES tests/vol_perf_gtest.cpp)
     #add_executable(perf_test_volume ${PERF_TEST_VOLUME_SOURCE_FILES})
@@ -29,11 +32,11 @@ if (${build_io_tests})
 
     set(TEST_VOLUME_SOURCE_FILES tests/vol_gtest.cpp tests/mod_test_vdev.cpp tests/mod_test_meta.cpp)
     add_executable(test_volume ${TEST_VOLUME_SOURCE_FILES})
-    target_link_libraries(test_volume homeblks ${CONAN_LIBS})
+    target_link_libraries(test_volume homeblks ${COMMON_TEST_DEPS})
 
     set(HS_SVC_TOOL_SOURCE_FILES tool/hs_svc_tool.cpp)
     add_executable(hs_svc_tool ${HS_SVC_TOOL_SOURCE_FILES})
-    target_link_libraries(hs_svc_tool homeblks ${CONAN_LIBS})
+    target_link_libraries(hs_svc_tool homeblks ${COMMON_TEST_DEPS})
 
     # disable the test for now
     #add_test(NAME TestHttpSanity COMMAND ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=http_sanity_test --dirpath=${CMAKE_BINARY_DIR}/bin/)

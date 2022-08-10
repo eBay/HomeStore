@@ -24,4 +24,4 @@ set(HOMESTORE_OBJECTS
     )
 
 add_library(hs_engine OBJECT ${HOMESTORE_OBJECTS})
-#target_include_directories(hs_engine PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/engine)
+target_link_libraries(hs_engine ${COMMON_DEPS})

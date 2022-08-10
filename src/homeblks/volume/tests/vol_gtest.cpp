@@ -360,6 +360,21 @@ protected:
     iomgr::timer_handle_t m_timer_hdl{iomgr::null_timer_handle};
     uint32_t m_interval_ops_sec = 0;
 };
+
+template <> struct fmt::formatter<TestJob::job_status_t>: formatter<string_view> {
+  // parse is inherited from formatter<string_view>.
+  template <typename FormatContext>
+  auto format(TestJob::job_status_t c, FormatContext& ctx) const {
+    string_view name = "unknown";
+    switch (c) {
+    case TestJob::job_status_t::not_started:     name = "not started"; break;
+    case TestJob::job_status_t::running:         name = "running"; break;
+    case TestJob::job_status_t::stopped:         name = "stopped"; break;
+    case TestJob::job_status_t::completed:       name = "completed"; break;
+    }
+    return formatter<string_view>::format(name, ctx);
+  }
+};
 thread_local bool TestJob::is_this_thread_running_io{false};
 
 struct vol_info_t {

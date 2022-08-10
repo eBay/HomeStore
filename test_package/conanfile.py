@@ -3,7 +3,7 @@ import os
 
 class HSPkgTestConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
-    generators = "cmake"
+    generators = "cmake", "cmake_find_package"
 
     def build(self):
         cmake = CMake(self)
@@ -18,5 +18,4 @@ class HSPkgTestConan(ConanFile):
 
     def test(self):
         if not tools.cross_building(self.settings):
-            os.chdir("bin")
             self.run(".%shs_volume -c -h" % os.sep)

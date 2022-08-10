@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.9)
+cmake_minimum_required(VERSION 3.11)
 project(HomeStore)
 
 option(DEBUG_CMAKE "Debug CMake messages option" OFF)
@@ -13,15 +13,12 @@ enable_testing()
 
 if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/conanbuildinfo.cmake)
     include(${CMAKE_CURRENT_BINARY_DIR}/conanbuildinfo.cmake)
-    conan_basic_setup()
 else ()
-  message(FATAL_ERROR "The file conanbuildinfo.cmake doesn't exist, you have to run conan install first")
+    message(WARNING "Conan Build file does not exist, trying to build without!")
 endif ()
 
 if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-  if (NOT ${CONAN_SETTINGS_COMPILER} STREQUAL "clang" AND NOT ${CONAN_SETTINGS_COMPILER} STREQUAL "apple-clang")
     include (cmake/debug_flags.cmake)
-  endif ()
 endif()
 
 set(ASAN_ENABLED_BUILD false)
@@ -49,7 +46,9 @@ if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
     endif()
 endif()
 
-include(${CONAN_SISL_ROOT}/cmake/settings_gen.cmake)
+find_package(sisl REQUIRED)
+
+include ("${sisl_LIB_DIRS}/../cmake/settings_gen.cmake")
 
 find_program(CCACHE_FOUND ccache)
 if(CCACHE_FOUND)
@@ -76,9 +75,13 @@ endif()
 # add boost options
 add_flags("-DBOOST_ALLOW_DEPRECATED_HEADERS")
 
-# add conan information 
-add_flags("-DPACKAGE_NAME=\\\"${CONAN_PACKAGE_NAME}\\\"")
-add_flags("-DPACKAGE_VERSION=\\\"${CONAN_PACKAGE_VERSION}\\\"")
+# add version information 
+set(PACKAGE_REVISION "0.0.0+unknown")
+if (DEFINED CONAN_PACKAGE_NAME)
+  set(PACKAGE_REVISION "${CONAN_PACKAGE_VERSION}")
+endif ()
+add_flags("-DPACKAGE_NAME=\\\"${PROJECT_NAME}\\\"")
+add_flags("-DPACKAGE_VERSION=\\\"${PACKAGE_REVISION}\\\"")
 
 if(UNIX)
     # enable proper pread/pwrite and large file
@@ -87,10 +90,7 @@ endif()
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
     message(STATUS "Debug build")
-    if((${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU") OR (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")) 
-        remove_flag("-O[0-4]")
-        add_flags("-O0 -DDEBUG_RCU")
-    endif()
+    add_flags("-DDEBUG_RCU")
 else()
     message(STATUS "Release build")
     if((${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU") OR (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")) 

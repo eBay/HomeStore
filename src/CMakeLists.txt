@@ -1,14 +1,24 @@
 include (CTest)
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
-find_package(Threads)
-find_library(LIB_AIO aio)
-find_library(LIB_ISAL isal)
 
-set(COMMON_LIB_DEPS
-    ${CONAN_LIBS}
-    ${LIB_AIO}
-    #${LIB_DOUBLE_CONVERSION}
-    #${LIB_ISAL}
+find_package(Threads)
+find_library(LIB_AIO aio REQUIRED)
+find_package(isa-l REQUIRED)
+find_package(iomgr REQUIRED)
+find_package(farmhash REQUIRED)
+find_package(GTest REQUIRED)
+
+set (COMMON_DEPS
+        iomgr::iomgr
+        farmhash::farmhash
+        isa-l::isa-l
+    )
+
+set(COMMON_TEST_DEPS
+        ${COMMON_DEPS}
+        ${spdk_LIBRARY_LIST}
+        ${dpdk_LIBRARY_LIST}
+        GTest::gmock
     )
 
 include_directories (BEFORE .)
@@ -29,10 +39,8 @@ set(HOMESTORE_OBJECTS
     $<TARGET_OBJECTS:indx_mgr>
     )
 add_library(homestore STATIC ${HOMESTORE_OBJECTS})
-#target_link_libraries(homestore ${COMMON_LIB_DEPS})
 
 add_library(homeblks STATIC
             ${HOMESTORE_OBJECTS}
             $<TARGET_OBJECTS:hs_homeblks>
             $<TARGET_OBJECTS:hs_volume>)
-#target_link_libraries(homeblks ${COMMON_LIB_DEPS})

@@ -1,57 +1,38 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "3.4.2"
-
-    revision_mode = "scm"
-    license = "Proprietary"
-    url = "https://github.corp.ebay.com/SDS/Homestore"
+    version = "3.4.3"
+    homepage = "https://github.corp.ebay.com/SDS/homestore"
     description = "HomeStore"
+    topics = ("ebay", "nublox")
+    url = "https://github.corp.ebay.com/SDS/Homestore"
+    license = "Proprietary"
 
     settings = "arch", "os", "compiler", "build_type"
+
     options = {
                 "shared": ['True', 'False'],
                 "fPIC": ['True', 'False'],
                 "sanitize": ['True', 'False'],
                 'testing' : ['coverage', 'full', 'min', 'off', 'epoll_mode', 'spdk_mode'],
-                'prerelease' : ['True', 'False'],
-                }
-    default_options = (
-                        'shared=False',
-                        'fPIC=True',
-                        'sanitize=True',
-                        'testing=spdk_mode',
-                        'prerelease=True',
-                        )
+            }
+    default_options = {
+                'shared': False,
+                'fPIC': True,
+                'sanitize': True,
+                'testing': 'spdk_mode',
+                'sisl:prerelease': True,
+            }
 
-    build_requires = (
-            "benchmark/1.5.0",
-            "gtest/1.10.0",
-            )
-    requires = (
-            "flip/[~=3, include_prerelease=True]@sds/master",
-            "iomgr/[~=8, include_prerelease=True]@sds/master",
-            "sisl/[~=7, include_prerelease=True]@sisl/master",
 
-            # FOSS, rarely updated
-            "boost/1.73.0",
-            "evhtp/1.2.18.2",
-            "farmhash/1.0.0",
-            "folly/2020.05.04.00",
-            "isa-l/2.21.0",
-            )
-
-    generators = "cmake"
+    generators = "cmake", "cmake_find_package"
     exports_sources = "cmake/*", "src/*", "CMakeLists.txt", "test_wrap.sh"
     keep_imports = True
 
     def configure(self):
-        self.options['iomgr'].prerelease = self.options.prerelease
-        self.options['flip'].prerelease = self.options.prerelease
-        self.options['sisl'].prerelease = self.options.prerelease
+        if self.options.shared:
+            del self.options.fPIC
         if self.settings.build_type == "Debug":
             if self.options.sanitize:
                 self.options['sisl'].malloc_impl = 'libc'
@@ -61,10 +42,27 @@ class HomestoreConan(ConanFile):
     def imports(self):
         self.copy(root_package="flip", pattern="*.py", dst="bin/scripts", src="python/flip/", keep_path=True)
 
+    def build_requirements(self):
+        self.build_requires("benchmark/1.6.1")
+        self.build_requires("gtest/1.11.0")
+
+    def requirements(self):
+        self.requires("flip/[~=3, include_prerelease=True]@sds/develop")
+        self.requires("iomgr/[~=8, include_prerelease=True]@sds/develop")
+        self.requires("sisl/[~=8, include_prerelease=True]@sisl/develop")
+
+        # FOSS, rarely updated
+        self.requires("boost/1.79.0")
+        self.requires("evhtp/1.2.18.2")
+        self.requires("farmhash/1.0.0")
+        self.requires("folly/2022.01.31.00")
+        self.requires("isa-l/2.21.0")
+        self.requires("nlohmann_json/3.10.5")
+
     def build(self):
         cmake = CMake(self)
 
-        definitions = {'CONAN_TEST_TARGET': 'off',
+        definitions = {'TEST_TARGET': 'off',
                        'CMAKE_EXPORT_COMPILE_COMMANDS': 'ON',
                        'MEMORY_SANITIZER_ON': 'OFF'}
         test_target = None
@@ -72,7 +70,7 @@ class HomestoreConan(ConanFile):
         if self.options.sanitize:
             definitions['MEMORY_SANITIZER_ON'] = 'ON'
 
-        definitions['CONAN_TEST_TARGET'] = self.options.testing
+        definitions['TEST_TARGET'] = self.options.testing
         if self.options.testing == 'coverage':
             test_target = 'coverage'
 
@@ -96,13 +94,13 @@ class HomestoreConan(ConanFile):
         self.copy("*homeblks.a", dst="lib", keep_path=False)
 
     def package_info(self):
-        self.cpp_info.libs = tools.collect_libs(self)
+        self.cpp_info.libs = ["homeblks"]
         if self.options.sanitize:
             self.cpp_info.sharedlinkflags.append("-fsanitize=address")
             self.cpp_info.exelinkflags.append("-fsanitize=address")
             self.cpp_info.sharedlinkflags.append("-fsanitize=undefined")
             self.cpp_info.exelinkflags.append("-fsanitize=undefined")
         elif self.options.testing == 'coverage':
-            self.cpp_info.libs.append('gcov')
+            self.cpp_info.system_libs.append('gcov')
         if self.settings.os == "Linux":
-            self.cpp_info.libs.extend(["aio"])
+            self.cpp_info.system_libs.append("aio")
