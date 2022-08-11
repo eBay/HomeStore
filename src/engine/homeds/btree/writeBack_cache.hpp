@@ -541,4 +541,19 @@ thread_local uint64_t wb_cache_t::s_cbq_id{};
 } // namespace btree
 } // namespace homeds
 
+template <> struct fmt::formatter<homeds::btree::writeback_req_state>: formatter<string_view> {
+  // parse is inherited from formatter<string_view>.
+  template <typename FormatContext>
+  auto format(homeds::btree::writeback_req_state c, FormatContext& ctx) const {
+    string_view name = "unknown";
+    switch (c) {
+    case homeds::btree::writeback_req_state::WB_REQ_INIT:   name = "init"; break;
+    case homeds::btree::writeback_req_state::WB_REQ_WAITING: name = "waiting"; break;
+    case homeds::btree::writeback_req_state::WB_REQ_SENT:  name = "sent"; break;
+    case homeds::btree::writeback_req_state::WB_REQ_COMPL:  name = "complete"; break;
+    }
+    return formatter<string_view>::format(name, ctx);
+  }
+};
+
 #endif

@@ -109,10 +109,10 @@ void test_insert(benchmark::State& state) {
     // Actual test
     size_t iteration{0};
     for (auto cs : state) { // Loops upto iteration count
-        const size_t index{static_cast< size_t >(state.thread_index)};
+        const size_t index{static_cast< size_t >(state.thread_index())};
         // LOG(INFO) << "Will insert " << index << " - " << state.range(0) << " entries in this thread";
         for (auto i{index + iteration * state.range(0)}; i < (iteration + 1) * state.range(0);
-             i += state.threads) { // Loops for provided ranges
+             i += state.threads()) { // Loops for provided ranges
             boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
             glob_cache->insert(*glob_ids[i], {reinterpret_cast< uint8_t* >(glob_bufs1[i]), 8192}, 0, &cbuf);
             // LOG(INFO) << "Completed insert of index i = " << i;
@@ -125,9 +125,9 @@ void test_reads(benchmark::State& state) {
     // Actual test
     size_t iteration{0};
     for (auto cs : state) { // Loops upto iteration count
-        const size_t index{static_cast< size_t >(state.thread_index)};
+        const size_t index{static_cast< size_t >(state.thread_index())};
         for (auto i{index + iteration * state.range(0)}; i < (iteration + 1) * state.range(0);
-             i += state.threads) { // Loops for provided ranges
+             i += state.threads()) { // Loops for provided ranges
             boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
             [[maybe_unused]] const bool found{glob_cache->get(*glob_ids[i], &cbuf)};
 #if 0
@@ -150,9 +150,9 @@ void test_updates(benchmark::State& state) {
     // Actual test
     size_t iteration{0};
     for (auto cs : state) { // Loops upto iteration count
-        const size_t index{static_cast< size_t >(state.thread_index)};
+        const size_t index{static_cast< size_t >(state.thread_index())};
         for (auto i{index + iteration * state.range(0)}; i < (iteration + 1) * state.range(0);
-             i += state.threads) { // Loops for provided ranges
+             i += state.threads()) { // Loops for provided ranges
             boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
             glob_cache->update(*glob_ids[i], {reinterpret_cast< uint8_t* >(glob_bufs2[i]), 8192}, 16384, &cbuf);
         }
@@ -164,9 +164,9 @@ void test_erase(benchmark::State& state) {
     // Actual test
     size_t iteration{0};
     for (auto cs : state) { // Loops upto iteration count
-        const size_t index{static_cast< size_t >(state.thread_index)};
+        const size_t index{static_cast< size_t >(state.thread_index())};
         for (auto i{index + iteration * state.range(0)}; i < (iteration + 1) * state.range(0);
-             i += state.threads) { // Loops for provided ranges
+             i += state.threads()) { // Loops for provided ranges
             boost::intrusive_ptr< homestore::CacheBuffer< blk_id > > cbuf;
             glob_cache->erase(*glob_ids[i], &cbuf);
         }

@@ -132,9 +132,9 @@ void test_insert(benchmark::State& state) {
     // Actual test
     size_t iteration{0};
     for (auto cs : state) { // Loops upto iteration count
-        const size_t index{static_cast< size_t >(state.thread_index)};
+        const size_t index{static_cast< size_t >(state.thread_index())};
         for (auto i{index + iteration * state.range(0)}; i < (iteration + 1) * state.range(0);
-             i += state.threads) { // Loops for provided ranges
+             i += state.threads()) { // Loops for provided ranges
             blk_entry* res_entry;
             const bool ret{glob_set->insert(*glob_entries[i], &res_entry)};
         }
@@ -146,9 +146,9 @@ void test_reads(benchmark::State& state) {
     // Actual test
     size_t iteration{0};
     for (auto cs : state) { // Loops upto iteration count
-        const size_t index{static_cast< size_t >(state.thread_index)};
+        const size_t index{static_cast< size_t >(state.thread_index())};
         for (auto i{index + iteration * state.range(0)}; i < (iteration + 1) * state.range(0);
-             i += state.threads) { // Loops for provided ranges
+             i += state.threads()) { // Loops for provided ranges
             blk_entry* res_entry;
             const bool ret{glob_set->get(*glob_ids[i], &res_entry)};
         }
@@ -160,9 +160,9 @@ void test_removes(benchmark::State& state) {
     // Actual test
     size_t iteration{0};
     for (auto cs : state) { // Loops upto iteration count
-        const size_t index{static_cast< size_t >(state.thread_index)};
+        const size_t index{static_cast< size_t >(state.thread_index())};
         for (auto i{index + iteration * state.range(0)}; i < (iteration + 1) * state.range(0);
-             i += state.threads) { // Loops for provided range
+             i += state.threads()) { // Loops for provided range
             const bool ret{glob_set->remove(*glob_ids[i])};
         }
         ++iteration;
