@@ -1446,8 +1446,8 @@ protected:
 
     std::shared_ptr< vol_info_t > pick_vol_round_robin(io_lba_range_t& r) {
         r.vol_idx = ++m_cur_vol % tcfg.max_vols;
-        return (m_voltest->vol_info[r.vol_idx] && m_voltest->vol_info[r.vol_idx]->vol) ? m_voltest->vol_info[r.vol_idx]
-                                                                                       : nullptr;
+        const auto vol_info{m_voltest->vol_info[r.vol_idx]};
+        return (vol_info && vol_info->vol) ? vol_info : nullptr;
     }
 
     io_lba_range_t seq_lbas() {
