@@ -14,7 +14,7 @@ BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, const chunk_num_t id) : m_
     m_disk_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), bitmap_id, align_size);
 
     if (realtime_bm_on()) {
-        LOGINFO("realtime bitmap turned on for chunk_id: {}", m_chunk_id);
+        LOGINFO("realtime bitmap turned ON for chunk_id: {}", m_chunk_id);
         m_realtime_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), bitmap_id, align_size);
     }
 
@@ -25,14 +25,16 @@ BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, const chunk_num_t id) : m_
 void BlkAllocator::set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm) {
     BLKALLOC_LOG(INFO, "Persistent bitmap of size={} recovered", recovered_bm->size());
     m_disk_bm = std::move(recovered_bm);
+    // mark dirty
+    set_disk_bm_dirty();
 }
 
 void BlkAllocator::inited() {
     if (!m_inited) {
-        m_alloced_blk_count.fetch_add(m_disk_bm->get_set_count(), std::memory_order_relaxed);
+        m_alloced_blk_count.fetch_add(get_disk_bm_const()->get_set_count(), std::memory_order_relaxed);
         if (!m_auto_recovery) { m_disk_bm.reset(); }
         m_inited = true;
-        if (realtime_bm_on()) { m_realtime_bm->copy(*(get_disk_bm())); }
+        if (realtime_bm_on()) { m_realtime_bm->copy(*(get_disk_bm_const())); }
     }
 }
 
@@ -41,7 +43,7 @@ bool BlkAllocator::is_blk_alloced_on_disk(const BlkId& b, const bool use_lock) c
         return true; // nothing to compare. So always return true
     }
     auto bits_set{[this, &b]() {
-        if (!m_disk_bm->is_bits_set(b.get_blk_num(), b.get_nblks())) { return false; }
+        if (!get_disk_bm_const()->is_bits_set(b.get_blk_num(), b.get_nblks())) { return false; }
         return true;
     }};
     if (use_lock) {
@@ -69,10 +71,10 @@ BlkAllocStatus BlkAllocator::alloc_on_disk(const BlkId& in_bid) {
         {
             auto lock{portion->portion_auto_lock()};
             if (m_inited) {
-                BLKALLOC_REL_ASSERT(get_disk_bm()->is_bits_reset(in_bid.get_blk_num(), in_bid.get_nblks()),
+                BLKALLOC_REL_ASSERT(get_disk_bm_const()->is_bits_reset(in_bid.get_blk_num(), in_bid.get_nblks()),
                                     "Expected disk blks to reset");
             }
-            get_disk_bm()->set_bits(in_bid.get_blk_num(), in_bid.get_nblks());
+            get_disk_bm_mutable()->set_bits(in_bid.get_blk_num(), in_bid.get_nblks());
             portion->decrease_available_blocks(in_bid.get_nblks());
             BLKALLOC_LOG(DEBUG, "blks allocated {} chunk number {}", in_bid.to_string(), m_chunk_id);
         }
@@ -94,7 +96,7 @@ BlkAllocStatus BlkAllocator::alloc_on_realtime(const BlkId& b) {
                 BLKALLOC_LOG(ERROR, "bit not reset {} nblks {} chunk number {}", b.get_blk_num(), b.get_nblks(),
                              m_chunk_id);
                 for (blk_count_t i{0}; i < b.get_nblks(); ++i) {
-                    if (!get_disk_bm()->is_bits_reset(b.get_blk_num() + i, 1)) {
+                    if (!get_disk_bm_const()->is_bits_reset(b.get_blk_num() + i, 1)) {
                         BLKALLOC_LOG(ERROR, "bit not reset {}", b.get_blk_num() + i);
                     }
                 }
@@ -153,19 +155,19 @@ void BlkAllocator::free_on_disk(const BlkId& b) {
             /* During recovery we might try to free the entry which is already freed while replaying the journal,
              * This assert is valid only post recovery.
              */
-            if (!get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks())) {
+            if (!get_disk_bm_const()->is_bits_set(b.get_blk_num(), b.get_nblks())) {
                 BLKALLOC_LOG(ERROR, "bit not set {} nblks {} chunk number {}", b.get_blk_num(), b.get_nblks(),
                              m_chunk_id);
                 for (blk_count_t i{0}; i < b.get_nblks(); ++i) {
-                    if (!get_disk_bm()->is_bits_set(b.get_blk_num() + i, 1)) {
+                    if (!get_disk_bm_const()->is_bits_set(b.get_blk_num() + i, 1)) {
                         BLKALLOC_LOG(ERROR, "bit not set {}", b.get_blk_num() + i);
                     }
                 }
-                BLKALLOC_REL_ASSERT(get_disk_bm()->is_bits_set(b.get_blk_num(), b.get_nblks()),
+                BLKALLOC_REL_ASSERT(get_disk_bm_const()->is_bits_set(b.get_blk_num(), b.get_nblks()),
                                     "Expected disk bits to set blk num {} num blks {}", b.get_blk_num(), b.get_nblks());
             }
         }
-        get_disk_bm()->reset_bits(b.get_blk_num(), b.get_nblks());
+        get_disk_bm_mutable()->reset_bits(b.get_blk_num(), b.get_nblks());
         portion->increase_available_blocks(b.get_nblks());
     }
 }
@@ -186,6 +188,8 @@ sisl::byte_array BlkAllocator::cp_start([[maybe_unused]] const std::shared_ptr< 
 }
 
 void BlkAllocator::cp_done() {
+    reset_disk_bm_dirty();
+
     // set to nullptr, so that alloc will go to disk bm directly
     auto old_alloc_list_ptr{rcu_xchg_pointer(&m_alloc_blkid_list, nullptr)};
     // wait for all I/Os in critical section (still accumulating bids) to complete and exit;
@@ -209,13 +213,13 @@ void BlkAllocator::create_debug_bm() {
 }
 
 void BlkAllocator::update_debug_bm(const BlkId& bid) {
-    BLKALLOC_REL_ASSERT(get_disk_bm()->is_bits_set(bid.get_blk_num(), bid.get_nblks()),
+    BLKALLOC_REL_ASSERT(get_disk_bm_const()->is_bits_set(bid.get_blk_num(), bid.get_nblks()),
                         "Expected disk bits to set blk num {} num blks {}", bid.get_blk_num(), bid.get_nblks());
     get_debug_bm()->set_bits(bid.get_blk_num(), bid.get_nblks());
 }
 
 bool BlkAllocator::verify_debug_bm(const bool free_debug_bm) {
-    const bool ret{*get_disk_bm() == *get_debug_bm()};
+    const bool ret{*get_disk_bm_const() == *get_debug_bm()};
     if (free_debug_bm) { m_debug_bm.reset(); }
     return ret;
 }

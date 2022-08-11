@@ -36,7 +36,7 @@ blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion* const portion, const 
         BlkAllocPortion* const cur_portion{blknum_to_portion(blk_num)};
         if (portion != cur_portion) break;
 
-        if (!get_disk_bm()->is_bits_set(blk_num, 1)) {
+        if (!get_disk_bm_const()->is_bits_set(blk_num, 1)) {
             const auto pushed = m_blk_q.write(BlkId{blk_num, 1, m_chunk_id});
             HS_DBG_ASSERT_EQ(pushed, true, "Expected to be able to push the blk on fixed capacity Q");
         }

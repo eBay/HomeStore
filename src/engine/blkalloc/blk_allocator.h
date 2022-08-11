@@ -173,7 +173,9 @@ public:
 
     [[nodiscard]] blk_temp_t temperature() const { return m_temperature; }
 
-    static constexpr blk_temp_t default_temperature() { return 1; }
+    static constexpr blk_temp_t default_temperature() {
+        return 1;
+    }
 };
 
 /* We have the following design requirement it is used in auto recovery mode
@@ -232,13 +234,17 @@ public:
     [[nodiscard]] virtual bool is_blk_alloced(const BlkId& b, const bool use_lock = false) const = 0;
     [[nodiscard]] virtual std::string to_string() const = 0;
 
-    [[nodiscard]] sisl::Bitset* get_disk_bm() { return m_disk_bm.get(); }
+    [[nodiscard]] sisl::Bitset* get_disk_bm_mutable() {
+        set_disk_bm_dirty();
+        return m_disk_bm.get();
+    }
     [[nodiscard]] const sisl::Bitset* get_disk_bm_const() const { return m_disk_bm.get(); };
     [[nodiscard]] sisl::Bitset* get_realtime_bm() { return m_realtime_bm.get(); }
     [[nodiscard]] const sisl::Bitset* get_realtime_bm() const { return m_realtime_bm.get(); }
 
-    void set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm);
+    bool need_flush_dirty_bm() const { return is_disk_bm_dirty; }
 
+    void set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm);
     [[nodiscard]] BlkAllocPortion* get_blk_portion(const blk_num_t portion_num) {
         HS_DBG_ASSERT_LT(portion_num, m_cfg.get_total_portions(), "Portion num is not in range");
         return &m_blk_portions[portion_num];
@@ -302,9 +308,12 @@ public:
 
     [[nodiscard]] bool realtime_bm_on() const { return (m_cfg.m_realtime_bm_on && m_auto_recovery); } 
 
+
 private: 
     [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); }
     sisl::ThreadVector< BlkId >* get_alloc_blk_list();
+    void reset_disk_bm_dirty() { is_disk_bm_dirty = false; }
+    void set_disk_bm_dirty() { is_disk_bm_dirty = true; }
 
 protected:
     BlkAllocConfig m_cfg;
@@ -321,11 +330,12 @@ private:
         nullptr}; // it is used only for debugging to keep track of allocated/free blkids in real time
     std::atomic< int64_t > m_alloced_blk_count{0};
     bool m_auto_recovery{false};
+    std::atomic<bool> is_disk_bm_dirty{true}; // initially disk_bm treated as dirty
 };
 
-/* FixedBlkAllocator is a fast allocator where it allocates only 1 size block and ALL free blocks are cached instead of
- * selectively caching few blks which are free. Thus there is no sweeping of bitmap or other to refill the cache. It
- * does not support temperature of blocks and allocates simply on first come first serve basis
+/* FixedBlkAllocator is a fast allocator where it allocates only 1 size block and ALL free blocks are cached instead
+ * of selectively caching few blks which are free. Thus there is no sweeping of bitmap or other to refill the cache.
+ * It does not support temperature of blocks and allocates simply on first come first serve basis
  */
 class FixedBlkAllocator : public BlkAllocator {
 public:

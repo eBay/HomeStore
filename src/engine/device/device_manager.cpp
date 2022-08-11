@@ -50,14 +50,19 @@ void PhysicalDevChunk::recover() {
 }
 
 void PhysicalDevChunk::cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp) {
-    auto bitmap_mem = get_blk_allocator_mutable()->cp_start(std::move(ba_cp));
-    if (m_meta_blk_cookie) {
-        MetaBlkMgrSI()->update_sub_sb(bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
+    // only do write when bitmap is dirty
+    if (get_blk_allocator()->need_flush_dirty_bm()) {
+        auto bitmap_mem = get_blk_allocator_mutable()->cp_start(std::move(ba_cp));
+        if (m_meta_blk_cookie) {
+            MetaBlkMgrSI()->update_sub_sb(bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
+        } else {
+            MetaBlkMgrSI()->add_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
+        }
+        get_blk_allocator_mutable()->cp_done();
     } else {
-        MetaBlkMgrSI()->add_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
+        HS_LOG_EVERY_N(INFO, base, 20, "chunk {} is clean, no need to flush.", get_chunk_id());
+        COUNTER_INCREMENT(m_pdev->get_metrics(), drive_skipped_chunk_bm_writes, 1);
     }
-
-    get_blk_allocator_mutable()->cp_done();
 }
 
 std::shared_ptr< blkalloc_cp > PhysicalDevChunk::attach_prepare_cp([
