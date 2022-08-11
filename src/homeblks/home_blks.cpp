@@ -73,9 +73,7 @@ VolInterface* HomeBlks::init(const init_params& cfg, bool fake_reboot) {
 #else
             LOGINFO("HomeBlks RELEASE version: {}", HomeBlks::version);
 #endif
-            semver_t version {};
-            RELEASE_ASSERT_EQ(0, semver_parse(PACKAGE_VERSION, &version));
-            sisl::VersionMgr::addVersion(PACKAGE_NAME, version);
+            sisl::VersionMgr::addVersion(PACKAGE_NAME, version::Semver200_version(PACKAGE_VERSION));
             MetaBlkMgrSI()->register_handler("HOMEBLK", HomeBlks::meta_blk_found_cb,
                                              HomeBlks::meta_blk_recovery_comp_cb);
             MetaBlkMgrSI()->register_handler("VOLUME", Volume::meta_blk_found_cb, nullptr);
