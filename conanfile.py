@@ -47,7 +47,7 @@ class HomestoreConan(ConanFile):
         self.build_requires("gtest/1.11.0")
 
     def requirements(self):
-        self.requires("flip/[~=3, include_prerelease=True]@sds/develop")
+        self.requires("flip/[~=4, include_prerelease=True]@sds/develop")
         self.requires("iomgr/[~=8, include_prerelease=True]@sds/develop")
         self.requires("sisl/[~=8, include_prerelease=True]@sisl/develop")
 
