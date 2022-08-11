@@ -91,9 +91,7 @@ void HomeBlksHttpServer::get_version(sisl::HttpCallData cd) {
     auto vers{sisl::VersionMgr::getVersions()};
     std::string ver_str{""};
     for (auto v : vers) {
-        char temp_c_string[100] = {'\0'};
-        semver_render(&v.second, temp_c_string);
-        ver_str += fmt::format("{0}: {1}; ", v.first, temp_c_string);
+        ver_str += fmt::format("{0}: {1}; ", v.first, v.second);
     }
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, ver_str);
 }
