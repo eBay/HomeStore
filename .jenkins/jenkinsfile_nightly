@@ -49,7 +49,7 @@ pipeline {
                 }
                 stage("Build") {
                     steps {
-                        sh "conan create ${BUILD_MISSING} -o ${PROJECT}:prerelease=True -o homestore:sanitize=True -o homestore:testing=full -pr debug . ${PROJECT}/${TAG}"
+                        sh "conan create ${BUILD_MISSING} -o sisl:prerelease=True -o homestore:sanitize=True -o homestore:testing=full -pr debug . ${PROJECT}/${TAG}"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
@@ -75,7 +75,7 @@ pipeline {
                     when { expression { ("${failed_stage}" == "") }}
                     steps {
                         sh "echo \"sonar.branch.name=${BRANCH_NAME}\" >> sonar-project.properties"
-                        sh "GIT_COMMIT=${GIT_COMMIT} conan install -pr debug ${BUILD_MISSING} -o homestore:testing=full -o ${PROJECT}:testing=coverage -o ${PROJECT}:sanitize=False . "
+                        sh "GIT_COMMIT=${GIT_COMMIT} conan install -pr debug ${BUILD_MISSING} -o ${PROJECT}:testing=coverage -o ${PROJECT}:sanitize=False . "
                         sh "GIT_COMMIT=${GIT_COMMIT} VERBOSE=1 build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ."
                         sh "gcovr --sonarqube coverage.xml -r ."
                         withSonarQubeEnv('sds-sonar')  {
