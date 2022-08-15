@@ -40,7 +40,7 @@ class HomestoreConan(ConanFile):
             del self.options.fPIC
         if self.settings.build_type == "Debug":
             self.options.prerelease = not self.options.sanitize
-            if self.options.coverage and self.options.sanitize:
+            if self.options.testing == "coverage" and self.options.sanitize:
                 raise ConanInvalidConfiguration("Sanitizer does not work with Code Coverage!")
             if self.options.sanitize:
                 self.options['sisl'].malloc_impl = 'libc'
