@@ -166,11 +166,12 @@ pipeline {
                         }
                     }
                     stage("Build") {
-                        when {
+                        when { allOf {
                             expression { "${COVERAGE}" == 'False' }
-                        }
+                            expression { "${SANITIZE}" == 'False' }
+                        } }
                         steps {
-                            sh "conan create ${BUILD_MISSING} -o sisl:prerelease=${PRERELEASE} -o homestore:sanitize=${SANITIZE} ${BUILD_TEST_MODE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
+                            sh "conan create ${BUILD_MISSING} -o ${PROJECT}:prerelease=${PRERELEASE} ${BUILD_TEST_MODE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
@@ -191,6 +192,15 @@ pipeline {
                             }
                         }
                     }
+                    stage("Sanitize") {
+                        when { allOf {
+                            expression { "${COVERAGE}" == 'False' }
+                            expression { "${SANITIZE}" == 'True' }
+                        } }
+                        steps {
+                            sh "conan create ${BUILD_MISSING} -o ${PROJECT}:sanitize=True ${BUILD_TEST_MODE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
+                        }
+                    }
 
                     stage('Coverage') {
                         when { not { anyOf {
@@ -202,7 +212,7 @@ pipeline {
                                 steps {
                                     slackSend channel: '#sds-ci', message: "*${PROJECT}:${TAG}* is undergoing Code Coverage."
                                     sh "echo \"sonar.branch.name=${BRANCH_NAME}\" >> sonar-project.properties"
-                                    sh "GIT_COMMIT=${GIT_COMMIT} conan install -pr ${BUILD_TYPE} ${BUILD_MISSING} -o ${PROJECT}:testing=coverage -o ${PROJECT}:sanitize=False . "
+                                    sh "GIT_COMMIT=${GIT_COMMIT} conan install -pr ${BUILD_TYPE} ${BUILD_MISSING} -o ${PROJECT}:testing=coverage . "
                                     sh "GIT_COMMIT=${GIT_COMMIT} VERBOSE=1 build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ."
                                     sh "gcovr --sonarqube coverage.xml -r ."
                                     withSonarQubeEnv('sds-sonar')  {
@@ -217,6 +227,7 @@ pipeline {
                         when { allOf { 
                             expression { !(env.BRANCH_NAME =~ /PR-/) }
                             expression { "${COVERAGE}" == 'False' }
+                            expression { "${SANITIZE}" == 'False' }
                             }
                         }
                         steps {
