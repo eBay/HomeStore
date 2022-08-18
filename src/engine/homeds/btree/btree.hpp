@@ -1757,11 +1757,23 @@ private:
         bool unlocked_already = false;
         int curr_ind = -1;
 
+#ifndef NDEBUG
+        uint32_t wr_node_cnt = wr_locked_nodes.size();
+        uint32_t rd_node_cnt = rd_locked_nodes.size();
+        if (curlock == LOCKTYPE_WRITE) {
+            wr_node_cnt -= 1;
+        } else {
+            rd_node_cnt -= 1;
+        }
+#endif
+
         if (my_node->is_leaf()) {
             /* update the leaf node */
             BT_LOG_ASSERT_CMP(curlock, ==, LOCKTYPE_WRITE, my_node);
             ret = update_leaf_node(my_node, k, v, put_type, existing_val, bur, bcp, child_subrange);
             unlock_node(my_node, curlock);
+            BT_DBG_ASSERT_CMP(wr_node_cnt, ==, wr_locked_nodes.size(), my_node, "write lock mismatch");
+            BT_DBG_ASSERT_CMP(rd_node_cnt, ==, rd_locked_nodes.size(), my_node, "read lock mismatch");
             return ret;
         }
 
@@ -1861,6 +1873,7 @@ private:
                 HS_DBG_ASSERT_EQ((bur != nullptr || k.compare(&pkey) >= 0), true);
             }
 #endif
+
             if (curr_ind == end_ind) {
                 // If we have reached the last index, unlock before traversing down, because we no longer need
                 // this lock. Holding this lock will impact performance unncessarily.
@@ -1881,7 +1894,10 @@ private:
             curr_ind++;
         }
     out:
+
         if (curlock != LOCKTYPE_NONE) { unlock_node(my_node, curlock); }
+        BT_DBG_ASSERT_CMP(wr_node_cnt, ==, wr_locked_nodes.size(), my_node, "write lock mismatch");
+        BT_DBG_ASSERT_CMP(rd_node_cnt, ==, rd_locked_nodes.size(), my_node, "read lock mismatch");
         return ret;
         // Warning: Do not access childNode or myNode beyond this point, since it would
         // have been unlocked by the recursive function and it could also been deleted.
