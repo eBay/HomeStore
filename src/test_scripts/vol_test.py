@@ -326,7 +326,7 @@ def logstore_nightly():
     print("log store test started")
 
     cmd_opts = "--iterations=10"
-    subprocess.check_call(dirpath + "test_log_store " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_log_store " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
 
     print("log store test completed")
     
