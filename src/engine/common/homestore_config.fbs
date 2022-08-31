@@ -170,7 +170,7 @@ table MetaBlkStore {
     init_compress_memory_size_mb: uint32 = 10 (hotswap);
     
     // Try to do compress only when input buffer is larger than this size
-    min_compress_size_mb: uint32 = 8 (hotswap);
+    min_compress_size_mb: uint32 = 1 (hotswap);
 
     // Percentage of compress ratio that allowed for compress to take place
     compress_ratio_limit: uint32 = 75 (hotswap);
