@@ -44,8 +44,7 @@ if test_suits == "nightly":
     if (emulate_hdd) : 
         skip_vol_verify_recovery = ' --pre_init_verify=false' # skip preinit vol verify during recovery in nightly hdd long hour (which takes 14 hours for one single test);
 
-addln_opts = ' '
-
+addln_opts = ' ' 
 if bool(dev_list and dev_list.strip()):
     addln_opts += ' --device_list '
     addln_opts += dev_list
@@ -305,9 +304,6 @@ def meta_blk_store_nightly():
     cmd_opts = "--gtest_filter=VMetaBlkMgrTest.min_drive_size_test"
     subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
 
-    cmd_opts = "--gtest_filter=VMetaBlkMgrTest.write_to_full_test"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
-    
     cmd_opts = "--gtest_filter=VMetaBlkMgrTest.single_read_test"
     subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     
@@ -320,6 +316,8 @@ def meta_blk_store_nightly():
     cmd_opts = "--min_write_size=10485760 --max_write_size=104857600 --bitmap=1"
     subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
     
+    cmd_opts = "--gtest_filter=VMetaBlkMgrTest.write_to_full_test" # write to file instead of real disk to save time;
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
     print("meta blk store test completed")
 
 def logstore_nightly():
