@@ -13,6 +13,7 @@ class HomeBlksHttpServer {
 public:
     HomeBlksHttpServer(HomeBlks* hb);
     void start();
+    void register_api_post_start();
 
     static bool is_local_addr(struct sockaddr* addr);
 

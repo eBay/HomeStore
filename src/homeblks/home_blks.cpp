@@ -500,8 +500,9 @@ void HomeBlks::init_done() {
     // start the io watchdog;
     m_io_wd = std::make_unique< VolumeIOWatchDog >();
 
-    if (!is_safe_mode()) { m_cfg.init_done_cb(no_error, m_out_params); }
+    m_hb_http_server->register_api_post_start();
 
+    if (!is_safe_mode()) { m_cfg.init_done_cb(no_error, m_out_params); }
     // Don't do any callback if it is running in safe mode
 }
 

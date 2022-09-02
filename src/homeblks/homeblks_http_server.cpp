@@ -37,17 +37,22 @@ HomeBlksHttpServer::HomeBlksHttpServer(HomeBlks* hb) : m_hb(hb) {
     freeifaddrs(interfaces);
 }
 
+void HomeBlksHttpServer::register_api_post_start() {
+    // apis that rely on start of homestore to be completed should be added here;
+    auto http_server_ptr = ioenvironment.with_http_server().get_http_server();
+    http_server_ptr->register_handler_info(
+        handler_info("/api/v1/getMetrics", HomeBlksHttpServer::get_metrics, (void*)this));
+    http_server_ptr->register_handler_info(
+        handler_info("/metrics", HomeBlksHttpServer::get_prometheus_metrics, (void*)this));
+}
+
 void HomeBlksHttpServer::start() {
     auto http_server_ptr = ioenvironment.with_http_server().get_http_server();
 
     http_server_ptr->register_handler_info(
         handler_info("/api/v1/version", HomeBlksHttpServer::get_version, (void*)this));
     http_server_ptr->register_handler_info(
-        handler_info("/api/v1/getMetrics", HomeBlksHttpServer::get_metrics, (void*)this));
-    http_server_ptr->register_handler_info(
         handler_info("/api/v1/getObjLife", HomeBlksHttpServer::get_obj_life, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/metrics", HomeBlksHttpServer::get_prometheus_metrics, (void*)this));
     http_server_ptr->register_handler_info(
         handler_info("/api/v1/getLogLevel", HomeBlksHttpServer::get_log_level, (void*)this));
     http_server_ptr->register_handler_info(
