@@ -119,7 +119,10 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
                        const blk_allocator_type_t allocator_type, const uint64_t context_size, const uint32_t nmirror,
                        const bool is_stripe, const uint32_t page_size, vdev_comp_cb_t cb, char* blob,
                        const uint64_t size_in, const bool auto_recovery, vdev_high_watermark_cb_t hwm_cb) :
-        m_name{name}, m_allocator_type{allocator_type}, m_metrics{name}, m_pdev_group{pdev_group} {
+        m_name{name},
+        m_allocator_type{allocator_type},
+        m_metrics{name},
+        m_pdev_group{pdev_group} {
     init(mgr, nullptr, std::move(cb), page_size, auto_recovery, std::move(hwm_cb));
 
     const auto pdev_list = m_mgr->get_devices(pdev_group);
@@ -151,31 +154,22 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
         MIN_DATA_CHUNK_SIZE(std::max(m_pagesz, m_primary_pdev_chunks_list[0].pdev->get_page_size()));
 
     // stream size is (device_size / num_streams)
-    LOGINFO("min_sys_chunk_size: {}, max_chunk_size: {}, is_hdd: {}, pdev_group: {}",
-             min_sys_chunk_size, max_chunk_size, is_hdd, pdev_group);
+    LOGINFO("min_sys_chunk_size: {}, max_chunk_size: {}, is_hdd: {}, pdev_group: {}", min_sys_chunk_size,
+            max_chunk_size, is_hdd, pdev_group);
 
     const auto max_num_chunks = HDD_MAX_CHUNKS;
     if (pdev_group == PhysicalDevGroup::DATA && is_hdd) {
         // Only Data blkstore will come here, and it will use up all the remaining chunks if device's reported stream
         // number is larger than system supported maximm;
-        const auto remaining_num_chunks = max_num_chunks - s_num_chunks_created;
-        const unsigned int max_number_of_streams = num_pdevs * m_primary_pdev_chunks_list[0].pdev->get_num_streams();
-        auto total_number_chunks = std::min(remaining_num_chunks, max_number_of_streams);
-        total_number_chunks = sisl::round_down(total_number_chunks, num_pdevs);
-        m_chunk_size = sisl::round_down(size / total_number_chunks, min_sys_chunk_size);
-        LOGINFO("max_number_of_streams: {}, total_number_chunks: {}, m_chunk_size:{}",
-                max_number_of_streams, total_number_chunks, m_chunk_size);
+        const auto remaining_num_chunks = max_num_chunks - s_num_chunks_created - m_mgr->num_sys_chunks();
+        const auto max_number_of_streams = num_pdevs * m_primary_pdev_chunks_list[0].pdev->get_num_streams();
+        m_num_chunks = std::min(static_cast< long unsigned int >(remaining_num_chunks), max_number_of_streams);
+        m_num_chunks = sisl::round_down(m_num_chunks, num_pdevs);
+        m_chunk_size = sisl::round_down(size / m_num_chunks, min_sys_chunk_size);
+        LOGINFO("max_number_of_streams: {}, m_num_chunks: {}, m_chunk_size:{}", max_number_of_streams, m_num_chunks,
+                m_chunk_size);
 
         HS_REL_ASSERT_LE(m_chunk_size, max_chunk_size);
-        const auto chunks_multiple = is_stripe ? static_cast< uint32_t >(num_pdevs) : 1;
-        uint32_t cnt{1};
-        uint64_t total_size{0};
-        do {
-            m_num_chunks = cnt * chunks_multiple;
-            total_size = m_num_chunks * m_chunk_size;
-            ++cnt;
-        } while (total_size < size);
-
     } else {
         if (is_stripe) {
             m_num_chunks = static_cast< uint32_t >(num_pdevs);
@@ -268,7 +262,10 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
 VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, const PhysicalDevGroup pdev_group,
                        const blk_allocator_type_t allocator_type, vdev_comp_cb_t cb, const bool recovery_init,
                        const bool auto_recovery, vdev_high_watermark_cb_t hwm_cb) :
-        m_name{name}, m_allocator_type{allocator_type}, m_metrics{name}, m_pdev_group{pdev_group} {
+        m_name{name},
+        m_allocator_type{allocator_type},
+        m_metrics{name},
+        m_pdev_group{pdev_group} {
     init(mgr, vb, std::move(cb), vb->page_size, auto_recovery, std::move(hwm_cb));
 
     m_recovery_init = recovery_init;
@@ -291,14 +288,13 @@ void VirtualDev::reset_failed_state() {
 void VirtualDev::process_completions(const boost::intrusive_ptr< virtualdev_req >& req) {
 #ifdef _PRERELEASE
     if (!req->delay_induced &&
-        homestore_flip->delay_flip(
-            "simulate_vdev_delay",
-            [req, this]() {
-                HS_LOG(DEBUG, device, "[Vdev={},req={},is_read={}] - Calling delayed completion", m_name,
-                       req->request_id, req->is_read);
-                process_completions(req);
-            },
-            m_name, req->is_read)) {
+        homestore_flip->delay_flip("simulate_vdev_delay",
+                                   [req, this]() {
+                                       HS_LOG(DEBUG, device, "[Vdev={},req={},is_read={}] - Calling delayed completion",
+                                              m_name, req->request_id, req->is_read);
+                                       process_completions(req);
+                                   },
+                                   m_name, req->is_read)) {
         req->delay_induced = true;
         HS_LOG(DEBUG, device, "[Vdev={},req={},is_read={}] - Delaying completion", m_name, req->request_id,
                req->is_read);

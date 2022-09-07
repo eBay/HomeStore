@@ -233,6 +233,7 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
         HS_LOG_ASSERT_EQ((get_size() % get_page_size()), 0,
                          "Expected drive size to be aligned with physical page size");
         m_mgr->create_new_chunk(this, sb_size, get_size() - sb_size, nullptr);
+        m_mgr->incr_num_sys_chunks();
 
         /* check for min size */
         const uint64_t min_size{sb_size + 2 * dm_info_size};
@@ -248,6 +249,7 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
         for (size_t i{0}; i < 2; ++i) {
             HS_LOG_ASSERT_EQ((dm_info_size % get_page_size()), 0, "dm size is not aligned {}", dm_info_size);
             m_dm_chunk[i] = m_mgr->alloc_chunk(this, INVALID_VDEV_ID, dm_info_size, INVALID_CHUNK_ID);
+            m_mgr->incr_num_sys_chunks();
             m_dm_chunk[i]->set_sb_chunk();
         }
         /* super block is written when first DM info block is written. Writing a superblock and making
@@ -556,7 +558,7 @@ PhysicalDevChunk* PhysicalDev::find_free_chunk(const uint64_t req_size) {
 
     PhysicalDevChunk* chunk{device_manager_mutable()->get_chunk_mutable(m_info_blk.first_chunk_id)};
     while (chunk) {
-        const auto size =  chunk->get_size();
+        const auto size = chunk->get_size();
         if (!chunk->is_busy() && size >= req_size) {
             if ((closest_chunk == nullptr) || (chunk->get_size() < closest_chunk->get_size())) {
                 closest_chunk = chunk;

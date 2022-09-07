@@ -743,6 +743,13 @@ public:
 
     bool is_hdd(const std::string& devname);
 
+    /*
+     * @brief: superblock chunks created for all devices;
+     * */
+    uint32_t num_sys_chunks();
+
+    void incr_num_sys_chunks();
+
 public:
     static void zero_boot_sbs(const std::vector< dev_info >& devices);
     static iomgr::drive_type get_drive_type(const std::vector< dev_info >& devices);
@@ -803,6 +810,7 @@ private:
     vdev_error_callback m_vdev_error_cb;
     bool m_first_time_boot{true};
     hs_uuid_t m_data_system_uuid{INVALID_SYSTEM_UUID};
+    uint32_t m_num_sys_chunks{0};
 }; // class DeviceManager
 
 } // namespace homestore

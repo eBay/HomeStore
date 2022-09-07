@@ -494,6 +494,10 @@ int DeviceManager::get_open_flags(const io_flag oflags) {
     return open_flags;
 }
 
+uint32_t DeviceManager::num_sys_chunks() { return m_num_sys_chunks; }
+
+void DeviceManager::incr_num_sys_chunks() { ++m_num_sys_chunks; }
+
 void DeviceManager::zero_boot_sbs(const std::vector< dev_info >& devices) {
     return PhysicalDev::zero_boot_sbs(devices, get_open_flags(io_flag::DIRECT_IO));
 }

@@ -40,9 +40,10 @@ for opt,arg in opts:
         print(("emulate_hdd (%s)") % (arg))
 
 if test_suits == "nightly":
-    app_mem_size_in_gb = ' --app_mem_size_in_gb=14' # default 14 GB for nightly (HDD and epoll mode), this option only valid for volume test
+    app_mem_size_in_gb = ' --app_mem_size_in_gb=14' # default 14 GB for nightly epoll mode, this option only valid for volume test
     if (emulate_hdd) : 
         skip_vol_verify_recovery = ' --pre_init_verify=false' # skip preinit vol verify during recovery in nightly hdd long hour (which takes 14 hours for one single test);
+        app_mem_size_in_gb = ' --app_mem_size_in_gb=18' # default 18 GB for nightly HDD
 
 addln_opts = ' ' 
 if bool(dev_list and dev_list.strip()):
@@ -101,9 +102,18 @@ def vol_mod_test(mod_name, flip_list):
 
     print("All vol_mod_test passed with mod_name: " + mod_name)
 
+## @test HDD_128_stream
+#  @brief HDD 128 streams IO test
+def HDD_128_stream():
+    print("128 HDD streams test started") 
+    cmd_opts = "--run_time=3600 --max_num_writes=50000 --gtest_filter=VolTest.init_io_test --remove_file_on_shutdown=0 --remove_file_on_start=1 --flip=1 --emulate_hdd_stream_cnt=128"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
+    print("128 HDD streams test completed") 
+
 ## @test normal
 #  @brief Normal IO test
 def normal(num_secs="20000"):
+
     print("normal test started")
     cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file_on_shutdown=0 --remove_file_on_start=1 --flip=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
@@ -489,6 +499,10 @@ def hourly():
     sleep(5)
 
 def nightly():
+    if (emulate_hdd) :
+        HDD_128_stream()
+        sleep(5)
+
     normal()
     sleep(5)
 
@@ -513,19 +527,19 @@ def nightly():
     #vol_crc_mismatch_test()   # turn back on if fault_containment doesn't do assert failure;
     #sleep(5)
 
+    normal_unmap()
+    sleep(5)
+    
+    vol_io_flip_test()
+    sleep(5)
+ 
     logstore_nightly()
     sleep(5)
 
     # metablkstore IO test
     meta_blk_store_nightly()
     sleep(5)
-
-    normal_unmap()
-    sleep(5)
-    
-    vol_io_flip_test()
-    sleep(5)
-    
+   
     #one_disk_replace()
     #sleep(5)
 

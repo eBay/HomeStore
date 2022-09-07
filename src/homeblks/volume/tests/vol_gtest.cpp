@@ -154,6 +154,7 @@ struct TestCfg {
     bool create_del_with_io{false};
     bool delete_with_io;
     uint32_t emulate_hdd_cnt{0};
+    uint32_t emulate_hdd_stream_cnt{0};
     uint32_t create_del_ops_cnt;
     uint32_t create_del_ops_interval;
     uint32_t p_vol_files_space;
@@ -361,19 +362,28 @@ protected:
     uint32_t m_interval_ops_sec = 0;
 };
 
-template <> struct fmt::formatter<TestJob::job_status_t>: formatter<string_view> {
-  // parse is inherited from formatter<string_view>.
-  template <typename FormatContext>
-  auto format(TestJob::job_status_t c, FormatContext& ctx) const {
-    string_view name = "unknown";
-    switch (c) {
-    case TestJob::job_status_t::not_started:     name = "not started"; break;
-    case TestJob::job_status_t::running:         name = "running"; break;
-    case TestJob::job_status_t::stopped:         name = "stopped"; break;
-    case TestJob::job_status_t::completed:       name = "completed"; break;
+template <>
+struct fmt::formatter< TestJob::job_status_t > : formatter< string_view > {
+    // parse is inherited from formatter<string_view>.
+    template < typename FormatContext >
+    auto format(TestJob::job_status_t c, FormatContext& ctx) const {
+        string_view name = "unknown";
+        switch (c) {
+        case TestJob::job_status_t::not_started:
+            name = "not started";
+            break;
+        case TestJob::job_status_t::running:
+            name = "running";
+            break;
+        case TestJob::job_status_t::stopped:
+            name = "stopped";
+            break;
+        case TestJob::job_status_t::completed:
+            name = "completed";
+            break;
+        }
+        return formatter< string_view >::format(name, ctx);
     }
-    return formatter<string_view>::format(name, ctx);
-  }
 };
 thread_local bool TestJob::is_this_thread_running_io{false};
 
@@ -688,7 +698,7 @@ public:
                 data_attrs.align_size = 2 * data_attrs.align_size;
                 data_attrs.phys_page_size = 2 * tcfg.phy_page_size;
                 data_attrs.atomic_phys_page_size = 2 * tcfg.atomic_phys_page_size;
-                data_attrs.num_streams = 20;
+                data_attrs.num_streams = tcfg.emulate_hdd_stream_cnt;
                 --hdd_cnt;
             }
             iomgr::DriveInterface::emulate_drive_attributes(dinfo.dev_names, data_attrs);
@@ -2337,6 +2347,8 @@ SISL_OPTION_GROUP(
      ::cxxopts::value< uint32_t >()->default_value("10"), "interval between create del in seconds"),
     (emulate_hdd_cnt, "", "emulate_hdd_cnt", "emulate_hdd_cnt", ::cxxopts::value< uint32_t >()->default_value("0"),
      "number of files or drives to be emulated as hdd"),
+    (emulate_hdd_stream_cnt, "", "emulate_hdd_stream_cnt", "emulate_hdd_stream_cnt",
+     ::cxxopts::value< uint32_t >()->default_value("20"), "number of streams for each emulated hdd"),
     (p_vol_files_space, "", "p_vol_files_space",
      "percentage of volume verficiation files of available free space on hosting file system",
      ::cxxopts::value< uint32_t >()->default_value("30"), "0 to 100"),
@@ -2407,6 +2419,7 @@ int main(int argc, char* argv[]) {
     gcfg.flip_name = SISL_OPTIONS["flip_name"].as< std::string >();
     gcfg.overlapping_allowed = SISL_OPTIONS["overlapping_allowed"].as< bool >();
     gcfg.emulate_hdd_cnt = SISL_OPTIONS["emulate_hdd_cnt"].as< uint32_t >();
+    gcfg.emulate_hdd_stream_cnt = SISL_OPTIONS["emulate_hdd_stream_cnt"].as< uint32_t >();
     gcfg.p_vol_files_space = SISL_OPTIONS["p_vol_files_space"].as< uint32_t >();
     gcfg.app_mem_size_in_gb = SISL_OPTIONS["app_mem_size_in_gb"].as< uint32_t >();
 
