@@ -60,7 +60,6 @@ void PhysicalDevChunk::cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp) {
         }
         get_blk_allocator_mutable()->cp_done();
     } else {
-        HS_LOG_EVERY_N(INFO, base, 20, "chunk {} is clean, no need to flush.", get_chunk_id());
         COUNTER_INCREMENT(m_pdev->get_metrics(), drive_skipped_chunk_bm_writes, 1);
     }
 }

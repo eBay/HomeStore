@@ -543,7 +543,7 @@ public:
 #endif
         if (ret != btree_status_t::success && ret != btree_status_t::has_more &&
             ret != btree_status_t::fast_path_not_possible) {
-            THIS_BT_LOG(ERROR, base, , "btree get failed {}", ret);
+            THIS_BT_LOG(INFO, base, , "btree get failed {}", ret);
             COUNTER_INCREMENT(m_metrics, query_err_cnt, 1);
         } else {
             auto time_spent = get_elapsed_time_ns(start_time);
