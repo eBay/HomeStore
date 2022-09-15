@@ -1193,7 +1193,7 @@ void IndxMgr::do_remaining_unmap(void* unmap_meta_blk_cntx, const sisl::byte_arr
 #endif
     add_prepare_cb_list([this, key, btree_cur, unmap_meta_blk_cntx,
                          seqid](const indx_cp_ptr& cur_icp, hs_cp* const cur_hcp, hs_cp* const new_hcp) mutable {
-        if (is_destroying()) {
+        if (is_destroying() || m_shutdown_started.load()) {
             THIS_INDX_LOG(TRACE, indx_mgr, , "skipping map because it is in destroying state");
             return;
         }
