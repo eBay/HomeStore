@@ -18,8 +18,8 @@ namespace homestore {
 
 std::vector< std::string > HomeBlksHttpServer::m_iface_list;
 
-HomeBlksHttpServer* HomeBlksHttpServer::pThis(sisl::HttpCallData cd) { return (HomeBlksHttpServer*)cd->cookie(); }
-HomeBlks* HomeBlksHttpServer::to_homeblks(sisl::HttpCallData cd) { return pThis(cd)->m_hb; }
+HomeBlksHttpServer* HomeBlksHttpServer::pThis(iomgr::HttpCallData cd) { return (HomeBlksHttpServer*)cd->cookie(); }
+HomeBlks* HomeBlksHttpServer::to_homeblks(iomgr::HttpCallData cd) { return pThis(cd)->m_hb; }
 
 HomeBlksHttpServer::HomeBlksHttpServer(HomeBlks* hb) : m_hb(hb) {
     // get sock interfaces and store ips
@@ -92,7 +92,7 @@ bool HomeBlksHttpServer::is_local_addr(struct sockaddr* addr) {
     return (std::find(m_iface_list.begin(), m_iface_list.end(), client_ip) != m_iface_list.end());
 }
 
-void HomeBlksHttpServer::get_version(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::get_version(iomgr::HttpCallData cd) {
     auto vers{sisl::VersionMgr::getVersions()};
     std::string ver_str{""};
     for (auto v : vers) {
@@ -101,17 +101,17 @@ void HomeBlksHttpServer::get_version(sisl::HttpCallData cd) {
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, ver_str);
 }
 
-void HomeBlksHttpServer::get_metrics(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::get_metrics(iomgr::HttpCallData cd) {
     std::string msg = sisl::MetricsFarm::getInstance().get_result_in_json_string();
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, msg);
 }
 
-void HomeBlksHttpServer::get_prometheus_metrics(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::get_prometheus_metrics(iomgr::HttpCallData cd) {
     std::string msg = sisl::MetricsFarm::getInstance().report(sisl::ReportFormat::kTextFormat);
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, msg);
 }
 
-void HomeBlksHttpServer::get_obj_life(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::get_obj_life(iomgr::HttpCallData cd) {
     nlohmann::json j;
     sisl::ObjCounterRegistry::foreach ([&j](const std::string& name, int64_t created, int64_t alive) {
         std::stringstream ss;
@@ -121,7 +121,7 @@ void HomeBlksHttpServer::get_obj_life(sisl::HttpCallData cd) {
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, j.dump());
 }
 
-void HomeBlksHttpServer::set_log_level(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::set_log_level(iomgr::HttpCallData cd) {
     auto req = cd->request();
 
     const evhtp_kv_t* _new_log_level = nullptr;
@@ -152,7 +152,7 @@ void HomeBlksHttpServer::set_log_level(sisl::HttpCallData cd) {
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
-void HomeBlksHttpServer::get_log_level(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::get_log_level(iomgr::HttpCallData cd) {
     auto req = cd->request();
 
     const evhtp_kv_t* _log_module = nullptr;
@@ -170,7 +170,7 @@ void HomeBlksHttpServer::get_log_level(sisl::HttpCallData cd) {
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
-void HomeBlksHttpServer::dump_stack_trace(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::dump_stack_trace(iomgr::HttpCallData cd) {
     if (!is_local_addr(cd->request()->conn->saddr)) {
         ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
                                                        "Access not allowed from external host");
@@ -181,11 +181,11 @@ void HomeBlksHttpServer::dump_stack_trace(sisl::HttpCallData cd) {
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, "Look for stack trace in the log file");
 }
 
-void HomeBlksHttpServer::get_malloc_stats(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::get_malloc_stats(iomgr::HttpCallData cd) {
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, sisl::get_malloc_stats_detailed().dump(2));
 }
 
-void HomeBlksHttpServer::verify_hs(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::verify_hs(iomgr::HttpCallData cd) {
     if (!is_local_addr(cd->request()->conn->saddr)) {
         ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
                                                        "Access not allowed from external host");
@@ -199,14 +199,14 @@ void HomeBlksHttpServer::verify_hs(sisl::HttpCallData cd) {
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
-void HomeBlksHttpServer::get_config(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::get_config(iomgr::HttpCallData cd) {
     nlohmann::json j;
     j = sisl::SettingsFactoryRegistry::instance().get_json();
     j["static"] = homestore::HomeStoreStaticConfig::instance().to_json();
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, j.dump(2));
 }
 
-void HomeBlksHttpServer::reload_dynamic_config(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::reload_dynamic_config(iomgr::HttpCallData cd) {
     if (!is_local_addr(cd->request()->conn->saddr)) {
         ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
                                                        "Access not allowed from external host");
@@ -241,7 +241,7 @@ bool HomeBlksHttpServer::verify_and_get_verbosity(const evhtp_request_t* req, st
     return ret;
 }
 
-void HomeBlksHttpServer::verify_metablk_store(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::verify_metablk_store(iomgr::HttpCallData cd) {
     auto req = cd->request();
 
     const auto hb = to_homeblks(cd);
@@ -255,7 +255,7 @@ void HomeBlksHttpServer::verify_metablk_store(sisl::HttpCallData cd) {
     }
 }
 
-void HomeBlksHttpServer::dump_disk_metablks(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::dump_disk_metablks(iomgr::HttpCallData cd) {
     auto req = cd->request();
 
     std::vector< std::string > clients;
@@ -281,7 +281,7 @@ void HomeBlksHttpServer::dump_disk_metablks(sisl::HttpCallData cd) {
     }
 }
 
-void HomeBlksHttpServer::get_status(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::get_status(iomgr::HttpCallData cd) {
     auto req = cd->request();
 
     std::vector< std::string > modules;
@@ -302,7 +302,7 @@ void HomeBlksHttpServer::get_status(sisl::HttpCallData cd) {
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, status_json.dump(2));
 }
 
-void HomeBlksHttpServer::verify_bitmap(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::verify_bitmap(iomgr::HttpCallData cd) {
     if (!is_local_addr(cd->request()->conn->saddr)) {
         ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
                                                        "Access not allowed from external host");
@@ -316,7 +316,7 @@ void HomeBlksHttpServer::verify_bitmap(sisl::HttpCallData cd) {
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
-void HomeBlksHttpServer::wakeup_init(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::wakeup_init(iomgr::HttpCallData cd) {
     auto hb = to_homeblks(cd);
     hb->wakeup_init();
     std::string resp{"completed"};
@@ -324,7 +324,7 @@ void HomeBlksHttpServer::wakeup_init(sisl::HttpCallData cd) {
 }
 
 #ifdef _PRERELEASE
-void HomeBlksHttpServer::crash_system(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::crash_system(iomgr::HttpCallData cd) {
     auto req{cd->request()};
 
     const evhtp_kv_t* _crash_type{nullptr};
@@ -344,7 +344,7 @@ void HomeBlksHttpServer::crash_system(sisl::HttpCallData cd) {
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
-void HomeBlksHttpServer::move_vol_online(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::move_vol_online(iomgr::HttpCallData cd) {
     auto req = cd->request();
 
     std::string vol_uuid;
@@ -367,7 +367,7 @@ void HomeBlksHttpServer::move_vol_online(sisl::HttpCallData cd) {
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 
-void HomeBlksHttpServer::move_vol_offline(sisl::HttpCallData cd) {
+void HomeBlksHttpServer::move_vol_offline(iomgr::HttpCallData cd) {
     auto req = cd->request();
 
     std::string vol_uuid;
