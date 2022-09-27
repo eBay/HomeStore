@@ -96,14 +96,7 @@ public:
         }
     }
 
-    VarsizeBlkAllocConfig(const VarsizeBlkAllocConfig& other) :
-            BlkAllocConfig{other},
-            m_phys_page_size{other.m_phys_page_size},
-            m_nsegments{other.m_nsegments},
-            m_blks_per_temp_group{other.m_blks_per_temp_group},
-            m_max_cache_blks{other.m_max_cache_blks},
-            m_slab_config{other.m_slab_config} {}
-
+    VarsizeBlkAllocConfig(const VarsizeBlkAllocConfig& other) = default;
     VarsizeBlkAllocConfig(VarsizeBlkAllocConfig&&) noexcept = delete;
     VarsizeBlkAllocConfig& operator=(const VarsizeBlkAllocConfig&) = delete;
     VarsizeBlkAllocConfig& operator=(VarsizeBlkAllocConfig&&) noexcept = delete;
@@ -144,8 +137,8 @@ public:
     [[nodiscard]] bool get_use_slabs() const { return m_use_slabs; }
 
     [[nodiscard]] std::string to_string() const override {
-        return fmt::format("{} Pagesize={} Totalsegments={} BlksPerPortion={} MaxCacheBlks={} Slabconfig=[{}]",
-                           BlkAllocConfig::to_string(), get_phys_page_size(), get_total_segments(),
+        return fmt::format("IsSlabAlloc: {}, {} Pagesize={} Totalsegments={} BlksPerPortion={} MaxCacheBlks={} Slabconfig=[{}]",
+                           m_use_slabs, BlkAllocConfig::to_string(), get_phys_page_size(), get_total_segments(),
                            get_blks_per_portion(), get_max_cache_blks(), m_slab_config.to_string());
     }
 };
@@ -166,7 +159,7 @@ public:
     BlkAllocSegment(BlkAllocSegment&&) noexcept = delete;
     BlkAllocSegment& operator=(const BlkAllocSegment&) = delete;
     BlkAllocSegment& operator=(BlkAllocSegment&&) noexcept = delete;
-    virtual ~BlkAllocSegment() {}
+    virtual ~BlkAllocSegment(){}
 
     [[nodiscard]] blk_num_t get_clock_hand() const { return m_alloc_clock_hand % m_total_portions; }
     void set_clock_hand(const blk_num_t hand) { m_alloc_clock_hand = hand; }
@@ -245,6 +238,8 @@ private:
     static std::queue< VarsizeBlkAllocator* > s_sweeper_queue;            // Sweeper threads queue
     static std::unordered_set< VarsizeBlkAllocator* > s_block_allocators; // block allocators to be swept
 
+    static constexpr blk_num_t INVALID_PORTION_NUM{UINT_MAX}; // max of type blk_num_t
+
     // per class sweeping logic
     std::mutex m_mutex;           // Mutex to protect regionstate & cb
     std::condition_variable m_cv; // CV to signal thread
@@ -262,6 +257,9 @@ private:
 
     std::uniform_int_distribution< blk_num_t > m_rand_portion_num_generator;
     BlkAllocMetrics m_metrics;
+
+    // TODO: this fields needs to be passed in from hints and persisted in volume's sb;
+    blk_num_t m_start_portion_num{INVALID_PORTION_NUM};
 
 private:
     static void sweeper_thread(const size_t thread_num);

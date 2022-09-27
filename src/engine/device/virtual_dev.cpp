@@ -88,8 +88,13 @@ static std::shared_ptr< BlkAllocator > create_blk_allocator(const blk_allocator_
         return std::make_shared< FixedBlkAllocator >(cfg, is_init, unique_id);
     }
     case blk_allocator_type_t::varsize: {
-        VarsizeBlkAllocConfig cfg{vpage_sz, ppage_sz, align_sz, size,
-                                  std::string("varsize_chunk_") + std::to_string(unique_id)};
+        VarsizeBlkAllocConfig cfg{vpage_sz,
+                                  ppage_sz,
+                                  align_sz,
+                                  size,
+                                  std::string("varsize_chunk_") + std::to_string(unique_id),
+                                  true /* realtime_bitmap */,
+                                  is_data_drive_hdd() ? false : true /* use_slabs */};
         HS_DBG_ASSERT_EQ((size % MIN_DATA_CHUNK_SIZE(ppage_sz)), 0);
         cfg.set_auto_recovery(is_auto_recovery);
         return std::make_shared< VarsizeBlkAllocator >(cfg, is_init, unique_id);

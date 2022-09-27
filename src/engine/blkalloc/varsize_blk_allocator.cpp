@@ -44,6 +44,8 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, const
 
     BLKALLOC_LOG(INFO, "Creating VarsizeBlkAllocator with config: {}", cfg.to_string());
 
+    HS_REL_ASSERT_GE(INVALID_PORTION_NUM, cfg.get_total_portions());
+
     // TODO: Raise exception when blk_size > page_size or total blks is less than some number etc...
     m_cache_bm = std::make_unique< sisl::Bitset >(cfg.get_total_blks(), chunk_id, cfg.get_align_size());
 
@@ -693,9 +695,10 @@ BlkAllocStatus VarsizeBlkAllocator::alloc_blks_direct(const blk_count_t nblks, c
     // Search all segments starting with some random portion num within each segment
     static thread_local std::random_device rd{};
     static thread_local std::default_random_engine re{rd()};
-    const blk_num_t start_portion_num{m_rand_portion_num_generator(re)};
 
-    auto portion_num{start_portion_num};
+    if (m_start_portion_num == INVALID_PORTION_NUM) { m_start_portion_num = m_rand_portion_num_generator(re); }
+
+    auto portion_num{m_start_portion_num};
     const blk_count_t min_blks{hints.is_contiguous ? nblks : std::min< blk_count_t >(nblks, hints.multiplier)};
     blk_count_t nblks_remain{nblks};
     do {
@@ -729,8 +732,11 @@ BlkAllocStatus VarsizeBlkAllocator::alloc_blks_direct(const blk_count_t nblks, c
         }
         if (++portion_num == m_cfg.get_total_portions()) { portion_num = 0; }
         BLKALLOC_LOG(TRACE, "alloc direct unable to find in prev portion, searching in portion={}, start_portion={}",
-                     portion_num, start_portion_num);
-    } while ((nblks_remain > 0) && (portion_num != start_portion_num) && !hints.is_contiguous);
+                     portion_num, m_start_portion_num);
+    } while ((nblks_remain > 0) && (portion_num != m_start_portion_num) && !hints.is_contiguous);
+
+    // save which portion we were at for next allocation;
+    m_start_portion_num = portion_num;
 
     COUNTER_INCREMENT(m_metrics, num_blks_alloc_direct, 1);
     num_allocated = nblks - nblks_remain;
@@ -744,6 +750,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc_blks_direct(const blk_count_t nblks, c
             return BlkAllocStatus::PARTIAL;
         }
     }
+
     return BlkAllocStatus::SUCCESS;
 }
 

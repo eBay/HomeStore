@@ -2,7 +2,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "3.5.0"
+    version = "3.5.1"
 
     homepage = "https://github.corp.ebay.com/SDS/homestore"
     description = "HomeStore"
@@ -54,7 +54,7 @@ class HomestoreConan(ConanFile):
 
         # FOSS, rarely updated
         self.requires("boost/1.79.0")
-        self.requires("evhtp/1.2.18.2")
+        #self.requires("evhtp/1.2.18.2")
         self.requires("farmhash/1.0.0")
         self.requires("folly/2022.01.31.00")
         self.requires("isa-l/2.21.0")
