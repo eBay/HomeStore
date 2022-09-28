@@ -24,7 +24,7 @@
 #include "engine/blkalloc/blkalloc_cp.hpp"
 #include "device.h"
 #include "api/meta_interface.hpp"
-
+#include "test_common/homestore_test_common.hpp"
 namespace homestore {
 
 /********************************************** dm_info ***************************************************/
@@ -100,8 +100,10 @@ DeviceManager::DeviceManager(const std::vector< dev_info >& data_devices, NewVDe
     }
 
     m_hdd_open_flags = get_open_flags(HS_STATIC_CONFIG(input.data_open_flags));
-    if (is_data_drive_hdd() && (HS_STATIC_CONFIG(input.data_open_flags) == io_flag::DIRECT_IO)) {
+    if (is_data_drive_hdd() && (HS_STATIC_CONFIG(input.data_open_flags) == io_flag::DIRECT_IO) &&
+        !is_hdd_direct_io_mode()) {
         // override direct i/o for HDD's
+        LOGINFO("hdd open flags set to BUFFERED_IO.");
         m_hdd_open_flags = get_open_flags(io_flag::BUFFERED_IO);
     }
 
@@ -146,6 +148,14 @@ DeviceManager::DeviceManager(const std::vector< dev_info >& data_devices, NewVDe
     m_scan_cmpltd = false;
 
     HS_LOG_ASSERT_LE(m_vdev_metadata_size, MAX_CONTEXT_DATA_SZ);
+}
+
+bool DeviceManager::is_hdd_direct_io_mode() {
+#ifdef _PRERELEASE
+    if (std::getenv(USER_WANT_DIRECT_IO.c_str())) { return true; }
+#endif
+
+    return HS_DYNAMIC_CONFIG(device->direct_io_mode);
 }
 
 bool DeviceManager::init() {

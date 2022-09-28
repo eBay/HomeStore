@@ -78,6 +78,9 @@ table Device {
 
     // Max completions to process per event in a thread
     max_completions_process_per_event_per_thread: uint32 = 200;
+    
+    // DIRECT_IO mode, switch for HDD IO mode;
+    direct_io_mode: bool = false; 
 }
 
 table LogStore {

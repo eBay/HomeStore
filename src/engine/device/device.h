@@ -753,6 +753,7 @@ public:
 public:
     static void zero_boot_sbs(const std::vector< dev_info >& devices);
     static iomgr::drive_type get_drive_type(const std::vector< dev_info >& devices);
+    static bool is_hdd_direct_io_mode();
 
 private:
     void load_and_repair_devices(const hs_uuid_t& system_uuid);

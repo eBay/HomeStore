@@ -185,12 +185,15 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
     m_info_blk.first_chunk_id = INVALID_CHUNK_ID;
 
     int oflags_used{oflags};
-    if (devname.find("/tmp") == 0 || m_drive_iface->interface_type() == drive_interface_type::uring) {
+    if (devname.find("/tmp") == 0 ||
+        (m_drive_iface->interface_type() == drive_interface_type::uring && m_mgr->is_hdd_direct_io_mode() == false)) {
         // tmp directory in general does not allow Direct I/O
         LOGINFO("Trying to remove O_DIRECT bit from open flags: before: {}, after: {}", oflags_used,
                 oflags & (~O_DIRECT));
         oflags_used &= ~O_DIRECT;
     }
+
+    LOGINFO("Opening device {} with {} mode.", devname, oflags_used & O_DIRECT ? "DIRECT_IO" : "BUFFERED_IO");
 
     m_iodev = iomgr::DriveInterface::open_dev(devname, oflags_used);
     if (m_iodev == nullptr

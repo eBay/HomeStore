@@ -692,6 +692,8 @@ void VirtualDev::readv(const BlkId& bid, const homeds::MemVector& buf,
 }
 
 void VirtualDev::fsync_pdevs(vdev_comp_cb_t cb, uint8_t* const cookie) {
+    HS_DBG_ASSERT_EQ(DeviceManager::is_hdd_direct_io_mode(), false, "Not expect to do fsync in DIRECT_IO_MODE.");
+
     // auto req{virtualdev_req::make_request()};
     boost::intrusive_ptr< virtualdev_req > req{sisl::ObjectAllocator< virtualdev_req >::make_object()};
     req->version = 0xDEAD;

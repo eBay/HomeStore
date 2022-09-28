@@ -21,7 +21,8 @@ SISL_LOGGING_DECL(logstore)
     HS_PERIODIC_DETAILED_LOG(level, logstore, "logdev", m_family_id, , , msg, __VA_ARGS__)
 
 LogDev::LogDev(const logstore_family_id_t f_id, const std::string& metablk_name) :
-        m_family_id{f_id}, m_logdev_meta{metablk_name} {
+        m_family_id{f_id},
+        m_logdev_meta{metablk_name} {
     m_flush_size_multiple = 0;
     if (f_id == HomeLogStoreMgr::DATA_LOG_FAMILY_IDX) {
         m_flush_size_multiple = HS_DYNAMIC_CONFIG(logstore->flush_size_multiple_data_logdev);
@@ -413,7 +414,7 @@ void LogDev::do_write_logs(LogGroup* const lg) {
 }
 
 void LogDev::do_flush_internal(LogGroup* const lg) {
-    if (is_data_drive_hdd()) {
+    if (is_data_drive_hdd() && DeviceManager::is_hdd_direct_io_mode() == false) {
         auto* data_blkstore{m_hb->get_data_blkstore()};
         data_blkstore->get_vdev()->fsync_pdevs(
             std::bind(&LogDev::process_fsync_completions, this, std::placeholders::_1),
