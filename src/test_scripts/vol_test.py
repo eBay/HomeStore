@@ -110,6 +110,19 @@ def HDD_128_stream():
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("128 HDD streams test completed") 
 
+#
+# @test sequential_write_and_recovery
+# @brief do 64k seqential write then do recovery;
+#
+def sequential_write_and_recovery():
+    print("sequential write test started")
+    cmd_opts = "--run_time=600 --max_num_writes=100000 --gtest_filter=VolTest.init_io_test --remove_file_on_shutdown=0 --remove_file_on_start=1 --flip=1 --load_type=2 --read_enable=0 --io_size=64"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
+
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --verify_type=2 --run_time=30 --enable_crash_handler=1 --remove_file_on_shutdown=1 --delete_volume=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
+    print("recovery on sequential write test completed")
+
 ## @test normal
 #  @brief Normal IO test
 def normal(num_secs="20000"):
@@ -179,6 +192,7 @@ def recovery_nightly(num_iteration=10):
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery with writing to same LBA workload passed")
 
+    
 def recovery_nightly_with_create_del(num_iteration=10):
     print("recovery test started")
     i = 1
@@ -502,6 +516,9 @@ def nightly():
     if (emulate_hdd) :
         HDD_128_stream()
         sleep(5)
+    
+    sequential_write_and_recovery()
+    sleep(5) 
 
     normal()
     sleep(5)

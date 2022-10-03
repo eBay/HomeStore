@@ -118,6 +118,7 @@ struct TestCfg {
     uint32_t vol_page_size{4096};
     uint32_t phy_page_size{4096};
     uint32_t mem_btree_page_size{4096};
+    uint32_t io_size{4096};
 
     bool can_delete_volume{false};
     bool read_enable{true};
@@ -400,7 +401,6 @@ struct vol_info_t {
     uint64_t cur_checkpoint;
     std::atomic< uint64_t > start_lba{0};
     std::atomic< uint64_t > start_large_lba{0};
-    std::atomic< uint64_t > num_io{0};
     size_t vol_idx{0};
     sisl::atomic_counter< uint64_t > ref_cnt;
     std::atomic< bool > vol_destroyed{false};
@@ -969,6 +969,9 @@ public:
         tcfg.max_io_size = params.max_io_size;
         if (SISL_OPTIONS.count("max_io_size")) { tcfg.max_io_size = SISL_OPTIONS["max_io_size"].as< uint64_t >(); }
 
+        HS_REL_ASSERT_LE(tcfg.io_size, tcfg.max_io_size, "io_size {} should not exceed max_io_size {}", tcfg.io_size,
+                         tcfg.max_io_size);
+
         const uint64_t init_buf_size{tcfg.verify_csum() ? tcfg.vol_page_size : tcfg.max_io_size};
 
         init_buf = iomanager.iobuf_alloc(512 /* alignment */, init_buf_size);
@@ -984,7 +987,6 @@ public:
             // startTime = Clock::now();
         }
 
-        // tcfg.max_io_size = params.max_io_size;
         /* TODO :- Rishabh: remove it */
 
         outstanding_ios = 0;
@@ -1465,17 +1467,9 @@ protected:
         const auto vinfo{pick_vol_round_robin(ret)};
         if (vinfo == nullptr) { return ret; }
 
-        if (vinfo->num_io.fetch_add(1, std::memory_order_acquire) == 1000) {
-            ret.num_lbas = 200;
-            ret.lba = (vinfo->start_large_lba.fetch_add(ret.num_lbas, std::memory_order_acquire)) %
-                (vinfo->max_vol_blks - ret.num_lbas);
-        } else {
-            ret.num_lbas = 2;
-            ret.lba = (vinfo->start_lba.fetch_add(ret.num_lbas, std::memory_order_acquire)) %
-                (vinfo->max_vol_blks - ret.num_lbas);
-        }
-        if (ret.num_lbas == 0) { ret.num_lbas = 1; }
-
+        ret.num_lbas = tcfg.io_size / VolInterface::get_instance()->get_page_size(vinfo->vol);
+        ret.lba = (vinfo->start_lba.fetch_add(ret.num_lbas, std::memory_order_acquire)) %
+            (vinfo->max_vol_blks - ret.num_lbas);
         ret.valid_io = true;
         return ret;
     }
@@ -2355,7 +2349,8 @@ SISL_OPTION_GROUP(
     (app_mem_size_in_gb, "", "app_mem_size_in_gb", "cache size in gb",
      ::cxxopts::value< uint32_t >()->default_value("1"), "1 to 5"),
     (max_io_size, "", "max_io_size", "max io size", ::cxxopts::value< uint64_t >()->default_value("4096"),
-     "max_io_size"))
+     "max_io_size"),
+    (io_size, "", "io_size", "io size in KB", ::cxxopts::value< uint32_t >()->default_value("4"), "io_size"))
 
 #define ENABLED_OPTIONS logging, test_volume, iomgr, test_indx_mgr, test_meta_mod, test_vdev_mod, config
 
@@ -2369,6 +2364,10 @@ SISL_OPTIONS_ENABLE(ENABLED_OPTIONS)
  *   2. ./test_volume --gtest_filter=*recovery* --run_time=120 --num_threads=16 --max_disk_capacity=10
  * --max_volume=50 Above command run all tests having a recovery keyword for 120 seconds with 16 threads , 10g
  * disk capacity and 50 volumes
+ *
+ *   * Sequential 64KB write work load, read is disabled
+ *   3. ./test_volume --load_type=2 --read_enable=0  --io_size=64 --max_volume=1 --p_volume_size=20   // <<< if want to
+ * only create one volume with specific size, use needs to specify p_volume_size;
  */
 int main(int argc, char* argv[]) {
     ::testing::GTEST_FLAG(filter) = "*lifecycle_test*";
@@ -2422,6 +2421,11 @@ int main(int argc, char* argv[]) {
     gcfg.emulate_hdd_stream_cnt = SISL_OPTIONS["emulate_hdd_stream_cnt"].as< uint32_t >();
     gcfg.p_vol_files_space = SISL_OPTIONS["p_vol_files_space"].as< uint32_t >();
     gcfg.app_mem_size_in_gb = SISL_OPTIONS["app_mem_size_in_gb"].as< uint32_t >();
+    const auto io_size_in_kb = SISL_OPTIONS["io_size"].as< uint32_t >();
+    gcfg.io_size = io_size_in_kb * 1024;
+
+    HS_REL_ASSERT(io_size_in_kb && (io_size_in_kb % 4 == 0),
+                  "input io_size (in KB): {} should not be zero and be 4 aligned.", io_size_in_kb);
 
     if (SISL_OPTIONS.count("device_list")) {
         gcfg.dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
