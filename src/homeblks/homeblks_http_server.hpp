@@ -4,6 +4,7 @@
 #include <string>
 
 #include <iomgr/io_environment.hpp>
+#include <iomgr/http_server.hpp>
 #include <ifaddrs.h>
 
 namespace homestore {

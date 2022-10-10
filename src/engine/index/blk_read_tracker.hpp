@@ -17,7 +17,6 @@
 
 #include "engine/blkalloc/blk.h"
 #include "engine/homeds/hash/intrusive_hashset.hpp"
-#include "homeblks/homeblks_config.hpp"
 
 namespace homestore {
 

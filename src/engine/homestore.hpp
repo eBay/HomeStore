@@ -18,7 +18,6 @@
 #include "engine/device/virtual_dev.hpp"
 #include "engine/homeds/btree/btree.hpp"
 #include "engine/homeds/btree/ssd_btree.hpp"
-#include "homeblks/homeblks_config.hpp"
 #include "homelogstore/log_store.hpp"
 #include "homestore_base.hpp"
 #include "engine/common/resource_mgr.hpp"
@@ -139,9 +138,8 @@ public:
 
         m_data_pagesz = input.min_virtual_page_size;
 
-        LOGINFO("HomeStore starting with dynamic config version: {} static config: {}, safe_mode: {}",
-                HS_DYNAMIC_CONFIG(version), hs_config.to_json().dump(4),
-                HB_DYNAMIC_CONFIG(general_config->boot_safe_mode));
+        LOGINFO("HomeStore starting with dynamic config version: {} static config: {}", HS_DYNAMIC_CONFIG(version),
+                hs_config.to_json().dump(4));
 
         /* create cache */
         uint64_t cache_size = ResourceMgrSI().get_cache_size();

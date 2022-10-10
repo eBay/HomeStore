@@ -95,11 +95,15 @@ pipeline {
                     }
                     axis {
                         name 'SANITIZE'
-                        values 'False', 'True'
+                        values 'False'
                     }
                     axis {
                         name 'COVERAGE'
                         values 'False'
+                    }
+                    axis {
+                        name 'ALLOC_IMPL'
+                        values 'tcmalloc', 'libc'
                     }
                 }
                 excludes {
@@ -110,16 +114,6 @@ pipeline {
                         }
                         axis {
                             name 'COVERAGE'
-                            values 'True'
-                        }
-                    }
-                    exclude {
-                        axis {
-                            name 'BUILD_TYPE'
-                            values 'test'
-                        }
-                        axis {
-                            name 'SANITIZE'
                             values 'True'
                         }
                     }
@@ -146,13 +140,23 @@ pipeline {
                     exclude {
                         axis {
                             name 'BUILD_TYPE'
+                            values 'test'
+                        }
+                        axis {
+                            name 'ALLOC_IMPL'
+                            values 'libc'
+                        }
+                    }
+                    exclude {
+                        axis {
+                            name 'BUILD_TYPE'
                             values 'debug'
                         }
                         axis {
-                            name 'SANITIZE'
-                            values 'True'
+                            name 'ALLOC_IMPL'
+                            values 'tcmalloc'
                         }
-                    }
+                    }       
                 }
 
                 stages {
@@ -170,7 +174,7 @@ pipeline {
                             expression { "${COVERAGE}" == 'False' }
                         }
                         steps {
-                            sh "conan create ${BUILD_MISSING} -o sisl:prerelease=${PRERELEASE} -o homestore:sanitize=${SANITIZE} ${BUILD_TEST_MODE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
+                            sh "conan create ${BUILD_MISSING} -o sisl:prerelease=${PRERELEASE} -o sisl:malloc_impl=${ALLOC_IMPL} -o homestore:sanitize=${SANITIZE} ${BUILD_TEST_MODE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
                             sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"

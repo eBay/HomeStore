@@ -80,8 +80,8 @@ struct dev_info {
 #endif
 
 #define HOMESTORE_LOG_MODS                                                                                             \
-    btree_structures, btree_nodes, btree_generics, cache, device, httpserver_lmod, blkalloc, vol_io_wd, volume, flip,  \
-        cp, metablk, indx_mgr, logstore, replay, transient, IOMGR_LOG_MODS
+    btree_structures, btree_nodes, btree_generics, cache, device, blkalloc, vol_io_wd, volume, flip, cp, metablk,      \
+        indx_mgr, logstore, replay, transient, IOMGR_LOG_MODS
 
 template < typename T >
 std::string to_hex(T i) {

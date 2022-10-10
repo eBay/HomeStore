@@ -9,6 +9,7 @@
 
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <flip/flip.hpp>
+#include <flip/flip_client.hpp>
 #include <iomgr/iomgr.hpp>
 
 namespace homestore {

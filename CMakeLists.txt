@@ -49,7 +49,7 @@ endif()
 
 find_package(sisl REQUIRED)
 
-include ("${sisl_LIB_DIRS}/../cmake/settings_gen.cmake")
+include ("${sisl_INCLUDE_DIRS}/../cmake/settings_gen.cmake")
 
 find_program(CCACHE_FOUND ccache)
 if(CCACHE_FOUND)

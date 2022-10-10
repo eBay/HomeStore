@@ -11,4 +11,5 @@ target_sources(hs_homeblks PRIVATE
     )
 target_link_libraries(hs_homeblks ${COMMON_DEPS})
 
-settings_gen_cpp($<TARGET_FILE:flatbuffers::flatc> ${CMAKE_CURRENT_BINARY_DIR}/generated/ hs_homeblks homeblks_config.fbs)
+set(FLATBUFFERS_FLATC_EXECUTABLE ${flatbuffers_LIB_DIRS}/../bin/flatc)
+settings_gen_cpp(${FLATBUFFERS_FLATC_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/generated/ hs_homeblks homeblks_config.fbs)

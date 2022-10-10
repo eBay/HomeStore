@@ -17,14 +17,16 @@ set (COMMON_DEPS
     )
 
 set(COMMON_TEST_DEPS
-        ${COMMON_DEPS}
-        ${spdk_LIBRARY_LIST}
-        ${dpdk_LIBRARY_LIST}
-        GTest::gmock
-    )
+    ${COMMON_DEPS}
+    ${spdk_LIBRARY_LIST}
+    ${dpdk_LIBRARY_LIST}
+    GTest::gmock
+)
 
 include_directories (BEFORE .)
 include_directories (BEFORE ${CMAKE_CURRENT_BINARY_DIR})
+include_directories (BEFORE ${CONAN_INCLUDE_DIRS_SISL}/sisl)
+include_directories (BEFORE ${CONAN_INCLUDE_DIRS_SISL}/flip)
 
 add_subdirectory(engine)
 add_subdirectory(homeblks)
