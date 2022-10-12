@@ -129,7 +129,7 @@ pipeline {
                                     PRERELEASE = 'False'
                                     BUILD_PROFILE = "test"
                                 }
-                                sh "conan create ${BUILD_MISSING} -o sisl:prerelease=${PRERELEASE} -o sisl:malloc_impl=tcmalloc ${BUILD_TEST_MODE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
+                                sh "conan create ${BUILD_MISSING} -o sisl:prerelease=${PRERELEASE} -o sisl:malloc_impl=tcmalloc ${BUILD_TEST_MODE} -pr ${BUILD_PROFILE} . ${PROJECT}/${TAG}"
                                 sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
                                 sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
                                 sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
@@ -162,7 +162,7 @@ pipeline {
                                 steps {
                                     slackSend channel: '#sds-ci', message: "*${PROJECT}:${TAG}* is undergoing Code Coverage."
                                     sh "echo \"sonar.branch.name=${BRANCH_NAME}\" >> sonar-project.properties"
-                                    sh "GIT_COMMIT=${GIT_COMMIT} conan install -pr ${BUILD_TYPE} ${BUILD_MISSING} -o ${PROJECT}:testing=coverage -o ${PROJECT}:sanitize=False . "
+                                    sh "GIT_COMMIT=${GIT_COMMIT} conan install -pr debug ${BUILD_MISSING} -o ${PROJECT}:testing=coverage -o ${PROJECT}:sanitize=False . "
                                     sh "GIT_COMMIT=${GIT_COMMIT} VERBOSE=1 build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ."
                                     sh "gcovr --sonarqube coverage.xml -r ."
                                     withSonarQubeEnv('sds-sonar')  {
@@ -189,7 +189,6 @@ pipeline {
                     stage("Image") {
                         when { allOf { 
                             expression { "${COVERAGE}" == 'False' }
-                            expression { !(("${BUILD_TYPE}" == 'test') && ("${PRERELEASE}" == 'False')) }
                             }
                         }
                         steps {
@@ -207,7 +206,6 @@ pipeline {
                                 branch "master"
                               }
                               expression { "${COVERAGE}" == 'False' }
-                              expression { !(("${BUILD_TYPE}" == 'test') && ("${PRERELEASE}" == 'False')) }
                             } }
                         steps {
                             retry(3) {
