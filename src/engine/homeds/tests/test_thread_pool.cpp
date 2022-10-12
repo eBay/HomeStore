@@ -9,7 +9,7 @@
 #include <thread>
 #include <vector>
 
-#include <flip/flip.hpp>
+#include <sisl/flip/flip.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 #include <sisl/utility/thread_buffer.hpp>

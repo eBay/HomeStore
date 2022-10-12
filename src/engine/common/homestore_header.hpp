@@ -10,7 +10,7 @@
 #include <sisl/utility/enum.hpp>
 
 #ifdef _PRERELEASE
-#include <flip/flip.hpp>
+#include <sisl/flip/flip.hpp>
 #endif
 #include <spdlog/fmt/fmt.h>
 

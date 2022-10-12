@@ -16,7 +16,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <flip/flip.hpp>
+#include <sisl/flip/flip.hpp>
 #include <sisl/metrics/metrics.hpp>
 #include <sisl/logging/logging.h>
 
@@ -137,9 +137,10 @@ public:
     [[nodiscard]] bool get_use_slabs() const { return m_use_slabs; }
 
     [[nodiscard]] std::string to_string() const override {
-        return fmt::format("IsSlabAlloc: {}, {} Pagesize={} Totalsegments={} BlksPerPortion={} MaxCacheBlks={} Slabconfig=[{}]",
-                           m_use_slabs, BlkAllocConfig::to_string(), get_phys_page_size(), get_total_segments(),
-                           get_blks_per_portion(), get_max_cache_blks(), m_slab_config.to_string());
+        return fmt::format(
+            "IsSlabAlloc: {}, {} Pagesize={} Totalsegments={} BlksPerPortion={} MaxCacheBlks={} Slabconfig=[{}]",
+            m_use_slabs, BlkAllocConfig::to_string(), get_phys_page_size(), get_total_segments(),
+            get_blks_per_portion(), get_max_cache_blks(), m_slab_config.to_string());
     }
 };
 
@@ -159,7 +160,7 @@ public:
     BlkAllocSegment(BlkAllocSegment&&) noexcept = delete;
     BlkAllocSegment& operator=(const BlkAllocSegment&) = delete;
     BlkAllocSegment& operator=(BlkAllocSegment&&) noexcept = delete;
-    virtual ~BlkAllocSegment(){}
+    virtual ~BlkAllocSegment() {}
 
     [[nodiscard]] blk_num_t get_clock_hand() const { return m_alloc_clock_hand % m_total_portions; }
     void set_clock_hand(const blk_num_t hand) { m_alloc_clock_hand = hand; }

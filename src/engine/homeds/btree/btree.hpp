@@ -19,7 +19,7 @@
 
 #include <boost/intrusive_ptr.hpp>
 #include <sisl/fds/buffer.hpp>
-#include <flip/flip.hpp>
+#include <sisl/flip/flip.hpp>
 #include <fmt/ostream.h>
 #include <sisl/logging/logging.h>
 

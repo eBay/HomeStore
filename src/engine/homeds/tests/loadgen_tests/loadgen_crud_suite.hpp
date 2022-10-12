@@ -12,7 +12,7 @@
 #include <thread>
 
 #ifdef _PRERELEASE
-#include <flip/flip.hpp>
+#include <sisl/flip/flip.hpp>
 #endif
 
 #include "homeds/loadgen/loadgen_common.hpp"
@@ -45,7 +45,9 @@ struct BtreeLoadGen {
     BtreeLoadGen& operator=(BtreeLoadGen&&) noexcept = delete;
     ~BtreeLoadGen() = default;
 
-    uint64_t get_warmup_key_count(const uint8_t percent) const { return static_cast<uint64_t>(percent) * p.WARM_UP_KEYS / 100; }
+    uint64_t get_warmup_key_count(const uint8_t percent) const {
+        return static_cast< uint64_t >(percent) * p.WARM_UP_KEYS / 100;
+    }
 
     uint64_t get_existing_key_count(const uint8_t percent) const {
         return static_cast< uint64_t >(percent) * kvg->get_keys_count() / 100;
@@ -173,7 +175,8 @@ struct BtreeLoadGen {
     void specific_tests(const SPECIFIC_TEST st) {
         if (st == SPECIFIC_TEST::MAP) { do_sub_range_test(); }
     }
-    void warmup(const bool update_allowed, const bool remove_allowed, const bool range_update_allowed, const bool range_query_allowed) {
+    void warmup(const bool update_allowed, const bool remove_allowed, const bool range_update_allowed,
+                const bool range_query_allowed) {
         // basic serialized tests
         do_inserts();
         if (update_allowed) { do_updates(); }
@@ -182,7 +185,8 @@ struct BtreeLoadGen {
 
     void join() {
         std::unique_lock< std::mutex > lk{m_mtx};
-        m_cv.wait(lk, [this] { return m_loadgen_verify_mode || ((outstanding_create == 0) && (outstanding_others == 0)); });
+        m_cv.wait(lk,
+                  [this] { return m_loadgen_verify_mode || ((outstanding_create == 0) && (outstanding_others == 0)); });
     }
 
     void insert_success_cb(const int op = 1) {
@@ -190,7 +194,7 @@ struct BtreeLoadGen {
             std::unique_lock< std::mutex > lk{m_mtx};
             assert(op >= 1);
             stored_keys += static_cast< uint64_t >(op);
-            assert(outstanding_create >= static_cast< uint64_t >(op));                            
+            assert(outstanding_create >= static_cast< uint64_t >(op));
             outstanding_create -= static_cast< uint64_t >(op);
         }
         m_cv.notify_one();
@@ -202,7 +206,7 @@ struct BtreeLoadGen {
             assert(op >= 1);
             assert(stored_keys >= static_cast< uint64_t >(op));
             stored_keys -= static_cast< uint64_t >(op);
-            assert(outstanding_others >= static_cast<uint64_t>(op));
+            assert(outstanding_others >= static_cast< uint64_t >(op));
             outstanding_others -= static_cast< uint64_t >(op);
         }
         m_cv.notify_one();
@@ -212,17 +216,17 @@ struct BtreeLoadGen {
         {
             std::unique_lock< std::mutex > lk{m_mtx};
             switch (op) {
-            case 0: 
+            case 0:
                 // range update succes cb
                 assert(outstanding_others >= UPDATE_RANGE_BATCH_SIZE);
                 outstanding_others -= UPDATE_RANGE_BATCH_SIZE;
                 break;
-            case -1: 
+            case -1:
                 // range query succes cb
                 assert(outstanding_others >= QUERY_RANGE_BATCH_SIZE);
                 outstanding_others -= QUERY_RANGE_BATCH_SIZE;
                 break;
-            default: 
+            default:
                 assert(op >= 1);
                 assert(outstanding_others >= static_cast< uint64_t >(op));
                 outstanding_others -= static_cast< uint64_t >(op);
@@ -246,7 +250,8 @@ struct BtreeLoadGen {
 
     bool increment_other(const int op = 1) {
         std::unique_lock< std::mutex > lk{m_mtx};
-        if ((outstanding_others >= stored_keys) || (stored_keys - outstanding_others < static_cast<uint64_t>(op))) return false; // cannot accomodate more
+        if ((outstanding_others >= stored_keys) || (stored_keys - outstanding_others < static_cast< uint64_t >(op)))
+            return false; // cannot accomodate more
         outstanding_others += op;
         return true;
     }
@@ -368,7 +373,8 @@ struct BtreeLoadGen {
         }
     }
 
-    void regression(const bool update_allowed, const bool remove_allowed, const bool range_update_allowed, const bool range_query_allowed) {
+    void regression(const bool update_allowed, const bool remove_allowed, const bool range_update_allowed,
+                    const bool range_query_allowed) {
         kvg->run_parallel([&]() {
             while (true) {
                 const auto op{select_io()};
@@ -378,19 +384,19 @@ struct BtreeLoadGen {
                     continue;
                 }
                 switch (op) {
-                case 1: 
+                case 1:
                     try_create();
                     break;
-                case 2: 
+                case 2:
                     try_read();
                     break;
                 case 3:
                     if (update_allowed) { try_update(); }
                     break;
-                case 4: 
+                case 4:
                     if (remove_allowed) { try_delete(); }
                     break;
-                case 5: 
+                case 5:
                     if (range_update_allowed) { try_range_update(); }
                     break;
                 case 6:
@@ -420,7 +426,7 @@ struct BtreeLoadGen {
     int select_io() {
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine re{rd()};
-        std::uniform_int_distribution<int> rand_op{0, 99};
+        std::uniform_int_distribution< int > rand_op{0, 99};
         try_shift_workload();
         const int ran{rand_op(re)};
         if (ran < p.PC)

@@ -1,4 +1,4 @@
-native_include "utility/non_null_ptr.hpp";
+native_include "sisl/utility/non_null_ptr.hpp";
 
 namespace homeblkscfg;
 

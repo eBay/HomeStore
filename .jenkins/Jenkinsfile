@@ -52,7 +52,7 @@ pipeline {
             } }
             steps {
                 script {
-                    BUILD_TEST_MODE = "-o homestore:testing=spdk_mode"
+                    BUILD_TEST_MODE = "-o homestore:testing=epoll_mode"
                 }
             }
         }
@@ -87,76 +87,24 @@ pipeline {
                 axes {
                     axis {
                         name 'BUILD_TYPE'
-                        values 'debug', 'test'
-                    }
-                    axis {
-                        name 'PRERELEASE'
-                        values 'False', 'True'
-                    }
-                    axis {
-                        name 'SANITIZE'
-                        values 'False'
+                        values 'release', 'debug', 'test'
                     }
                     axis {
                         name 'COVERAGE'
                         values 'False'
                     }
-                    axis {
-                        name 'ALLOC_IMPL'
-                        values 'tcmalloc', 'libc'
-                    }
                 }
-                excludes {
+                excludes { 
                     exclude {
                         axis {
-                            name 'SANITIZE'
-                            values 'True'
+                            name 'BUILD_TYPE'
+                            values 'test', 'release'
                         }
                         axis {
                             name 'COVERAGE'
                             values 'True'
                         }
                     }
-                    exclude {
-                        axis {
-                            name 'BUILD_TYPE'
-                            values 'test'
-                        }
-                        axis {
-                            name 'COVERAGE'
-                            values 'True'
-                        }
-                    }
-                    exclude {
-                        axis {
-                            name 'BUILD_TYPE'
-                            values 'debug'
-                        }
-                        axis {
-                            name 'PRERELEASE'
-                            values 'False'
-                        }
-                    }
-                    exclude {
-                        axis {
-                            name 'BUILD_TYPE'
-                            values 'test'
-                        }
-                        axis {
-                            name 'ALLOC_IMPL'
-                            values 'libc'
-                        }
-                    }
-                    exclude {
-                        axis {
-                            name 'BUILD_TYPE'
-                            values 'debug'
-                        }
-                        axis {
-                            name 'ALLOC_IMPL'
-                            values 'tcmalloc'
-                        }
-                    }       
                 }
 
                 stages {
@@ -174,16 +122,24 @@ pipeline {
                             expression { "${COVERAGE}" == 'False' }
                         }
                         steps {
-                            sh "conan create ${BUILD_MISSING} -o sisl:prerelease=${PRERELEASE} -o sisl:malloc_impl=${ALLOC_IMPL} -o homestore:sanitize=${SANITIZE} ${BUILD_TEST_MODE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
-                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
-                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
-                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
-                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
-                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\;"
-                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/hs_svc_tool ' -exec cp {} .jenkins/hs_svc_tool \\;"
-                            sh "find . -type f -wholename '*test_scripts/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\;"
-                            sh "find ${CONAN_USER_HOME} -type d -wholename '*bin/scripts' -exec cp -a {} .jenkins/scripts \\;"
-                            sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
+                            script {
+                                def PRERELEASE = 'True'
+                                def BUILD_PROFILE = "${BUILD_TYPE}"
+                                if ("${BUILD_TYPE}" == "release") {
+                                    PRERELEASE = 'False'
+                                    BUILD_PROFILE = "test"
+                                }
+                                sh "conan create ${BUILD_MISSING} -o sisl:prerelease=${PRERELEASE} -o sisl:malloc_impl=tcmalloc ${BUILD_TEST_MODE} -pr ${BUILD_TYPE} . ${PROJECT}/${TAG}"
+                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
+                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
+                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
+                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
+                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\;"
+                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/hs_svc_tool ' -exec cp {} .jenkins/hs_svc_tool \\;"
+                                sh "find . -type f -wholename '*test_scripts/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\;"
+                                sh "find ${CONAN_USER_HOME} -type d -wholename '*bin/scripts' -exec cp -a {} .jenkins/scripts \\;"
+                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
+                            }
                         }
                         post {
                             failure {
