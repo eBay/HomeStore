@@ -21,8 +21,8 @@ class HomestoreConan(ConanFile):
     default_options = {
                 'shared': False,
                 'fPIC': True,
-                'sanitize': True,
-                'testing': 'spdk_mode',
+                'sanitize': False,
+                'testing': 'epoll_mode',
                 'sisl:prerelease': True,
             }
 
@@ -36,7 +36,7 @@ class HomestoreConan(ConanFile):
             del self.options.fPIC
         if self.settings.build_type == "Debug":
             if self.options.sanitize:
-                self.options['sisl'].malloc_impl = 'libc'
+                self.options['sisl'].sanitize = True
         else:
             self.options.sanitize = False
 

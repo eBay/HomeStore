@@ -125,11 +125,19 @@ pipeline {
                             script {
                                 def PRERELEASE = 'True'
                                 def BUILD_PROFILE = "${BUILD_TYPE}"
+                                def SANITIZE = 'False'
+
+                                if ("${BUILD_TYPE}" == 'sanitize') {
+                                    SANITIZE = 'True'
+                                    BUILD_PROFILE = "debug"
+                                }
+
                                 if ("${BUILD_TYPE}" == "release") {
                                     PRERELEASE = 'False'
                                     BUILD_PROFILE = "test"
                                 }
-                                sh "conan create ${BUILD_MISSING} -o sisl:prerelease=${PRERELEASE} -o sisl:malloc_impl=tcmalloc ${BUILD_TEST_MODE} -pr ${BUILD_PROFILE} . ${PROJECT}/${TAG}"
+
+                                sh "conan create -u ${BUILD_MISSING} -o sisl:prerelease=${PRERELEASE} -o ${PROJECT}:sanitize=${SANITIZE} ${BUILD_TEST_MODE} -pr ${BUILD_PROFILE} . ${PROJECT}/${TAG}"
                                 sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
                                 sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
                                 sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
