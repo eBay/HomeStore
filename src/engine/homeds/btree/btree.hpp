@@ -384,6 +384,7 @@ public:
         Clock::time_point start_time = Clock::now();
     retry:
 
+        try {
 #ifndef NDEBUG
         check_lock_debug();
 #endif
@@ -440,6 +441,9 @@ public:
 #ifndef NDEBUG
         check_lock_debug();
 #endif
+        BT_LOG_ASSERT_CMP(rd_size(), ==, 0, );
+        BT_LOG_ASSERT_CMP(wr_size(), ==, 0, );
+
         if (ret != btree_status_t::success && ret != btree_status_t::fast_path_not_possible &&
             ret != btree_status_t::cp_mismatch) {
             THIS_BT_LOG(ERROR, base, , "btree put failed {}", ret);
@@ -448,6 +452,7 @@ public:
             auto time_spent = get_elapsed_time_ns(start_time);
             HISTOGRAM_OBSERVE(m_metrics, btree_write_time, time_spent);
         }
+    } catch (const std::exception& e) { BT_LOG_ASSERT(0, , "Exception: {}", e.what()); }
         return ret;
     }
 
