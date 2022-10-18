@@ -1459,7 +1459,9 @@ protected:
     std::shared_ptr< vol_info_t > pick_vol_round_robin(io_lba_range_t& r) {
         r.vol_idx = ++m_cur_vol % tcfg.max_vols;
         const auto vol_info{m_voltest->vol_info[r.vol_idx]};
-        return (vol_info && vol_info->vol) ? vol_info : nullptr;
+
+        // make sure this volume is still active by checking ref_cnt;
+        return (vol_info && vol_info->vol && vol_info->ref_cnt.get()) ? vol_info : nullptr;
     }
 
     io_lba_range_t seq_lbas() {
@@ -2350,7 +2352,9 @@ SISL_OPTION_GROUP(
      ::cxxopts::value< uint32_t >()->default_value("1"), "1 to 5"),
     (max_io_size, "", "max_io_size", "max io size", ::cxxopts::value< uint64_t >()->default_value("4096"),
      "max_io_size"),
-    (io_size, "", "io_size", "io size in KB", ::cxxopts::value< uint32_t >()->default_value("4"), "io_size"))
+    (io_size, "", "io_size", "io size in KB", ::cxxopts::value< uint32_t >()->default_value("4"), "io_size"),
+    (unmap_frequency, "", "unmap_frequency", "do unmap for every N",
+     ::cxxopts::value< uint64_t >()->default_value("100"), "unmap_frequency"))
 
 #define ENABLED_OPTIONS logging, test_volume, iomgr, test_indx_mgr, test_meta_mod, test_vdev_mod, config
 
@@ -2382,6 +2386,7 @@ int main(int argc, char* argv[]) {
     gcfg.num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
     gcfg.read_enable = SISL_OPTIONS["read_enable"].as< uint32_t >();
     gcfg.unmap_enable = SISL_OPTIONS["unmap_enable"].as< uint32_t >();
+    gcfg.unmap_frequency = SISL_OPTIONS["unmap_frequency"].as< uint64_t >();
     gcfg.max_disk_capacity = ((SISL_OPTIONS["max_disk_capacity"].as< uint64_t >()) * (1ul << 30));
     gcfg.max_vols = SISL_OPTIONS["max_volume"].as< uint64_t >();
     gcfg.max_num_writes = SISL_OPTIONS["max_num_writes"].as< uint64_t >();

@@ -447,8 +447,8 @@ def vol_io_flip_test():
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     
     # will be re-enabled later
-    # cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_pre_sb_remove_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
-    # subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --unmap_frequency=10000 --verify_type=2 --unmap_pre_sb_remove_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
+    subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
 
@@ -457,7 +457,7 @@ def vol_io_flip_test():
     cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
 
-    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --verify_type=2 --unmap_pre_second_cp_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
+    cmd_opts = "--gtest_filter=VolTest.recovery_io_test --mod_list=\"index\" --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --unmap_enable=1 --unmap_frequency=10000 --verify_type=2 --unmap_pre_second_cp_abort=1 --max_volume=3 --pre_init_verify=false --max_num_writes=1000000"
     subprocess.call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
     cmd_opts = "--gtest_filter=VolTest.recovery_io_test --remove_file_on_shutdown=0 --run_time=600 --delete_volume=0 --max_volume=3 --verify_type=2"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
@@ -517,6 +517,9 @@ def nightly():
         HDD_128_stream()
         sleep(5)
     
+    vol_io_flip_test()
+    sleep(5)
+
     sequential_write_and_recovery()
     sleep(5) 
 
@@ -547,8 +550,6 @@ def nightly():
     normal_unmap()
     sleep(5)
     
-    vol_io_flip_test()
-    sleep(5)
  
     logstore_nightly()
     sleep(5)
