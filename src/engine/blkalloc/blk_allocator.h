@@ -66,15 +66,15 @@ public:
             m_align_size{align_size},
             m_capacity{static_cast< blk_cap_t >(size / blk_size)},
             m_blks_per_portion{std::min(HS_DYNAMIC_CONFIG(blkallocator.num_blks_per_portion), m_capacity)},
-            m_unique_name{name} { 
+            m_unique_name{name} {
 #ifdef _PRERELEASE
-                // for pre-release build, take it from input which is defaulted to true;
-                m_realtime_bm_on = realtime_bm_on;
+        // for pre-release build, take it from input which is defaulted to true;
+        m_realtime_bm_on = realtime_bm_on;
 #else
-                // for release build, take it from dynamic config which is defaulted to false
-                m_realtime_bm_on = HS_DYNAMIC_CONFIG(blkallocator.realtime_bitmap_on);
+        // for release build, take it from dynamic config which is defaulted to false
+        m_realtime_bm_on = HS_DYNAMIC_CONFIG(blkallocator.realtime_bitmap_on);
 #endif
-            }
+    }
 
     BlkAllocConfig(const BlkAllocConfig&) = default;
     BlkAllocConfig(BlkAllocConfig&&) noexcept = delete;
@@ -94,7 +94,9 @@ public:
 
     [[nodiscard]] blk_cap_t get_blks_per_portion() const { return m_blks_per_portion; }
 
-    [[nodiscard]] blk_cap_t get_total_portions() const { return (get_total_blks() - 1) / get_blks_per_portion() + 1; }
+        [[nodiscard]] blk_cap_t get_total_portions() const {
+        return (get_total_blks() - 1) / get_blks_per_portion() + 1;
+    }
 
     void set_auto_recovery(const bool auto_recovery) { m_auto_recovery = auto_recovery; }
     [[nodiscard]] bool get_auto_recovery() const { return m_auto_recovery; }
@@ -159,16 +161,16 @@ public:
     auto portion_auto_lock() const { return std::scoped_lock< std::mutex >(m_blk_lock); }
     void set_portion_num(const blk_num_t portion_num) { m_portion_num = portion_num; }
 
-    [[nodiscard]] blk_num_t get_portion_num() const { return m_portion_num; } 
-    
+    [[nodiscard]] blk_num_t get_portion_num() const { return m_portion_num; }
+
     void set_available_blocks(const blk_num_t available_blocks) { m_available_blocks = available_blocks; }
 
     [[nodiscard]] blk_num_t get_available_blocks() const { return m_available_blocks; }
-    
+
     [[maybe_unused]] blk_num_t decrease_available_blocks(const blk_num_t count) { return (m_available_blocks -= count); }
 
-    [[maybe_unused]] blk_num_t increase_available_blocks(const blk_num_t count) { return (m_available_blocks += count); } 
-    
+    [[maybe_unused]] blk_num_t increase_available_blocks(const blk_num_t count) { return (m_available_blocks += count); }
+
     void set_temperature(const blk_temp_t temp) { m_temperature = temp; }
 
     [[nodiscard]] blk_temp_t temperature() const { return m_temperature; }
@@ -259,7 +261,7 @@ public:
     void decr_alloced_blk_count(const blk_count_t nblks) {
         m_alloced_blk_count.fetch_sub(nblks, std::memory_order_relaxed);
     }
-    
+
     [[nodiscard]] int64_t get_alloced_blk_count() const { return m_alloced_blk_count.load(std::memory_order_acquire); }
     [[nodiscard]] bool is_blk_alloced_on_disk(const BlkId& b, const bool use_lock = false) const;
 
@@ -306,11 +308,10 @@ public:
     /* Get status */
     nlohmann::json get_status(const int log_level) const;
 
-    [[nodiscard]] bool realtime_bm_on() const { return (m_cfg.m_realtime_bm_on && m_auto_recovery); } 
-
+    [[nodiscard]] bool realtime_bm_on() const { return (m_cfg.m_realtime_bm_on && m_auto_recovery); }
 
 private: 
-    [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); }
+    [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); } 
     sisl::ThreadVector< BlkId >* get_alloc_blk_list();
     void reset_disk_bm_dirty() { is_disk_bm_dirty = false; }
     void set_disk_bm_dirty() { is_disk_bm_dirty = true; }
@@ -330,7 +331,7 @@ private:
         nullptr}; // it is used only for debugging to keep track of allocated/free blkids in real time
     std::atomic< int64_t > m_alloced_blk_count{0};
     bool m_auto_recovery{false};
-    std::atomic<bool> is_disk_bm_dirty{true}; // initially disk_bm treated as dirty
+    std::atomic< bool > is_disk_bm_dirty{true}; // initially disk_bm treated as dirty
 };
 
 /* FixedBlkAllocator is a fast allocator where it allocates only 1 size block and ALL free blocks are cached instead

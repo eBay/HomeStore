@@ -430,6 +430,7 @@ protected:
         cfg.set_phys_page_size(4096);
         cfg.set_auto_recovery(true);
         cfg.set_use_slabs(use_slabs);
+        cfg.set_blks_per_portion(cfg.get_total_blks());
         m_allocator = std::make_unique< VarsizeBlkAllocator >(cfg, true, 0);
         HS_REL_ASSERT_EQ(m_allocator->realtime_bm_on(), false);
     }

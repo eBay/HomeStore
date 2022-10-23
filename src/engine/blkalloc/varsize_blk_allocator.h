@@ -154,13 +154,16 @@ private:
 public:
     BlkAllocSegment(const blk_cap_t nblks, const seg_num_t seg_num, const blk_num_t nportions,
                     const std::string& seg_name) :
-            m_total_blks{nblks}, m_total_portions{nportions}, m_seg_num{seg_num}, m_alloc_clock_hand{0} {}
+            m_total_blks{nblks},
+            m_total_portions{nportions},
+            m_seg_num{seg_num},
+            m_alloc_clock_hand{0} {}
 
     BlkAllocSegment(const BlkAllocSegment&) = delete;
     BlkAllocSegment(BlkAllocSegment&&) noexcept = delete;
     BlkAllocSegment& operator=(const BlkAllocSegment&) = delete;
     BlkAllocSegment& operator=(BlkAllocSegment&&) noexcept = delete;
-    virtual ~BlkAllocSegment() {}
+    virtual ~BlkAllocSegment(){}
 
     [[nodiscard]] blk_num_t get_clock_hand() const { return m_alloc_clock_hand % m_total_portions; }
     void set_clock_hand(const blk_num_t hand) { m_alloc_clock_hand = hand; }

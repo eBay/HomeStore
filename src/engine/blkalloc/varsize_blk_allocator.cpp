@@ -730,9 +730,13 @@ BlkAllocStatus VarsizeBlkAllocator::alloc_blks_direct(const blk_count_t nblks, c
                 cur_blk_id = b.start_bit + b.nbits;
             }
         }
-        if (++portion_num == m_cfg.get_total_portions()) { portion_num = 0; }
-        BLKALLOC_LOG(TRACE, "alloc direct unable to find in prev portion, searching in portion={}, start_portion={}",
-                     portion_num, m_start_portion_num);
+
+        if (nblks_remain) {
+            if (++portion_num == m_cfg.get_total_portions()) { portion_num = 0; }
+            BLKALLOC_LOG(TRACE,
+                         "alloc direct unable to find in prev portion, searching in portion={}, start_portion={}",
+                         portion_num, m_start_portion_num);
+        }
     } while ((nblks_remain > 0) && (portion_num != m_start_portion_num) && !hints.is_contiguous);
 
     // save which portion we were at for next allocation;
