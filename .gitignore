@@ -95,7 +95,6 @@ Testing/**
 test_package/build
 
 # Settings generated files and build files
-generated/**
 debug/**
 release/**
 cmake-*/**

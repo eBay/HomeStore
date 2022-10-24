@@ -14,7 +14,7 @@
 #include <sys/stat.h>
 #endif
 
-#include <metrics/metrics.hpp>
+#include <sisl/metrics/metrics.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 #include <sisl/utility/obj_life_counter.hpp>
