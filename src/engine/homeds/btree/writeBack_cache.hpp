@@ -373,6 +373,13 @@ public:
         ba_cp->free_blks(bcp->free_blkid_list);
     }
 
+    static iomgr::io_thread_t get_next_wb_flush_thread() {
+        /* not using atomic here since it is fine to arrive on same thread */
+        static int next_thread = 0;
+        next_thread = (next_thread + 1) % m_thread_ids.size();
+        return m_thread_ids[next_thread];
+    }
+
     void cp_start(const btree_cp_ptr& bcp) {
         static size_t thread_cnt{0};
         const size_t thread_index{static_cast< size_t >(thread_cnt++ % HS_DYNAMIC_CONFIG(generic.cache_flush_threads))};
@@ -380,7 +387,7 @@ public:
         CP_PERIODIC_LOG(INFO, cp_id, "Starting btree flush buffers dirty_buf_count={} wb_req_cnt={} flush_cb_size={}",
                         m_dirty_buf_cnt[cp_id].get(), m_req_list[cp_id]->size(), flush_buffer_q.size());
         ResourceMgrSI().reset_dirty_buf_qd();
-        iomanager.run_on(HomeStoreBase::instance()->get_hs_flush_thread(),
+        iomanager.run_on(get_next_wb_flush_thread(),
                          [this, bcp]([[maybe_unused]] const io_thread_addr_t addr) { this->flush_buffers(bcp); });
     }
 
@@ -541,19 +548,28 @@ thread_local uint64_t wb_cache_t::s_cbq_id{};
 } // namespace btree
 } // namespace homeds
 
-template <> struct fmt::formatter<homeds::btree::writeback_req_state>: formatter<string_view> {
-  // parse is inherited from formatter<string_view>.
-  template <typename FormatContext>
-  auto format(homeds::btree::writeback_req_state c, FormatContext& ctx) const {
-    string_view name = "unknown";
-    switch (c) {
-    case homeds::btree::writeback_req_state::WB_REQ_INIT:   name = "init"; break;
-    case homeds::btree::writeback_req_state::WB_REQ_WAITING: name = "waiting"; break;
-    case homeds::btree::writeback_req_state::WB_REQ_SENT:  name = "sent"; break;
-    case homeds::btree::writeback_req_state::WB_REQ_COMPL:  name = "complete"; break;
+template <>
+struct fmt::formatter< homeds::btree::writeback_req_state > : formatter< string_view > {
+    // parse is inherited from formatter<string_view>.
+    template < typename FormatContext >
+    auto format(homeds::btree::writeback_req_state c, FormatContext& ctx) const {
+        string_view name = "unknown";
+        switch (c) {
+        case homeds::btree::writeback_req_state::WB_REQ_INIT:
+            name = "init";
+            break;
+        case homeds::btree::writeback_req_state::WB_REQ_WAITING:
+            name = "waiting";
+            break;
+        case homeds::btree::writeback_req_state::WB_REQ_SENT:
+            name = "sent";
+            break;
+        case homeds::btree::writeback_req_state::WB_REQ_COMPL:
+            name = "complete";
+            break;
+        }
+        return formatter< string_view >::format(name, ctx);
     }
-    return formatter<string_view>::format(name, ctx);
-  }
 };
 
 #endif

@@ -476,6 +476,7 @@ std::error_condition Volume::unmap(const vol_interface_req_ptr& iface_req) {
     THIS_VOL_LOG(TRACE, volume, vreq, "unmap: lba={}, nlbas={}", vreq->lba(), vreq->nlbas());
 
     COUNTER_INCREMENT(m_metrics, volume_unmap_count, 1);
+
     /* Sanity checks */
     home_blks_ref_cnt.increment();
     m_vol_ref_cnt.increment();
