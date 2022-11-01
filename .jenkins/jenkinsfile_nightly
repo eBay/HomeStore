@@ -1,26 +1,21 @@
-
 pipeline {
     agent any
     triggers {
           cron('TZ=US/Pacific\nH H(0-2) * * *')
-       }
+    }
 
     environment {
         ORG = 'sds'
         ECR_URL = 'ecr.vip.ebayc3.com'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         CONAN_USER = 'sds'
-        LAST_COMMITS = ''
-        built_chain = ''
         failed_stage = ""
     }
     stages {
-        stage('Adjust Tag for Master') {
+        stage('Adjust Version') {
             steps {
                 script {
                     sh(script: "sed -Ei 's,version = .*\"([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1-${env.BUILD_NUMBER}\",' conanfile.py")
-                    BUILD_MISSING  = "--build missing"
-                    LAST_COMMITS = sh(script: "git log -n 2 --pretty=short", returnStdout: true)
                 }
             }
         }
@@ -29,12 +24,8 @@ pipeline {
                 script {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     VER = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
-                    CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
-                    NIGHTLY_TAG = "-nightly-debug"
-                    CONAN_CHANNEL = "${CONAN_CHANNEL}${NIGHTLY_TAG}"
+                    NIGHTLY_TAG = "master-nightly-debug"
                     ECR_PATH = "${ECR_URL}/${ORG}/${PROJECT}"
-                    TAG = "${VER}@${CONAN_USER}/${CONAN_CHANNEL}"
-                    env.pkg_version = "${PROJECT}/${TAG}"
                     failed_stage = ""
                 }
             }
@@ -49,7 +40,7 @@ pipeline {
                 }
                 stage("Build") {
                     steps {
-                        sh "conan create ${BUILD_MISSING} -o sisl:prerelease=True -o homestore:sanitize=True -o homestore:testing=full -pr debug . ${PROJECT}/${TAG}"
+                        sh "conan create --build missing -o sisl:prerelease=True -o homestore:sanitize=True -o homestore:testing=full -pr debug . ${PROJECT}/${VER}@"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
@@ -63,7 +54,6 @@ pipeline {
                     post {
                         failure {
                             script {
-                                sh "mv /root/.conan/data/homestore ."
                                 sh "find . -name *_log -print | xargs tar cif logs.tar"
                                 failed_stage = "Build"
                             }
@@ -71,69 +61,27 @@ pipeline {
                         }
                     }
                 }
-                stage('Code Coverage') {
-                    when { expression { ("${failed_stage}" == "") }}
+                stage("Image") {
                     steps {
-                        sh "echo \"sonar.branch.name=${BRANCH_NAME}\" >> sonar-project.properties"
-                        sh "GIT_COMMIT=${GIT_COMMIT} conan install -pr debug ${BUILD_MISSING} -o ${PROJECT}:testing=coverage -o ${PROJECT}:sanitize=False . "
-                        sh "GIT_COMMIT=${GIT_COMMIT} VERBOSE=1 build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ."
-                        sh "gcovr --sonarqube coverage.xml -r ."
-                        withSonarQubeEnv('sds-sonar')  {
-                            sh "sonar-scanner -Dsonar.projectBaseDir=. -Dsonar.projectVersion=\"${VER}\""
-                        }
-
-                    }
-                    post {
-                         failure {  script {  failed_stage = "Code Coverage" }  }
-                    }
-               }
-               stage("Deploy Package") {
-                    when { expression { ("${failed_stage}" == "") }}
-                    steps {
-                        retry(3) {
-                            sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
-                            sh "conan upload ${PROJECT}/${TAG} -c --all -r ebay-local"
-                        }
-                    }
-                     post {
-                           failure { script { failed_stage = "Deploy Package" } }
-                     }
-                }
-               stage("Image") {
-                    when { expression { ("${failed_stage}" == "") }}
-                    steps {
-                        retry(3) {
-                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
-                                sh "docker build -t ${ECR_PATH}:${CONAN_CHANNEL} .jenkins/"
+                        withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
+                            sh "docker build -t ${ECR_PATH}:${NIGHTLY_TAG} .jenkins/"
+                            retry(3) {
+                                sh "docker push ${ECR_PATH}:${NIGHTLY_TAG}"
                             }
                         }
                     }
                     post {
-                           failure { script { failed_stage = "Image" } }
-                       }
-               }
-               stage("Deploy Image") {
-                    when { expression { ("${failed_stage}" == "") }}
-                    steps {
-                        retry(3) {
-                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
-                              sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}"
-                           }
-                        }
+                        failure { script { failed_stage = "Image" } }
                     }
-                    post {
-                           failure { script { failed_stage = "Deploy Image" } }
-                       }
-              }
+                }
             }
         }
-
-    }
+   }
 
    post {
         failure {
             script {
-                     slackSend color: '#E43237', channel: '#homestore-build', message: "@here [Nightly] HomeStore build *${PROJECT}/${TAG}* has had a failure in the stage ${failed_stage}: ${BUILD_URL}"
+                     slackSend color: '#E43237', channel: '#homestore-build', message: "@here [Nightly] HomeStore build *${PROJECT}/${VER}* has had a failure in the stage ${failed_stage}: ${BUILD_URL}"
             }
         }
    }
