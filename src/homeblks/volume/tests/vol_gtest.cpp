@@ -123,6 +123,7 @@ struct TestCfg {
     bool can_delete_volume{false};
     bool read_enable{true};
     bool unmap_enable{false};
+    bool oob_unmap_enable{false};
     bool enable_crash_handler{true};
     bool read_verify{false};
     bool remove_file_on_shutdown{true};
@@ -1606,7 +1607,9 @@ protected:
         switch (m_load_type) {
         case load_type_t::random:
             ret = run_io(bind_this(IOTestJob::unmappable_rand_lbas, 0), unmap_function);
-            if (ret) { ret = run_io(bind_this(IOTestJob::large_unmappable_rand_lbas, 0), unmap_function); }
+            if (ret && tcfg.oob_unmap_enable) {
+                ret = run_io(bind_this(IOTestJob::large_unmappable_rand_lbas, 0), unmap_function);
+            }
             break;
         case load_type_t::same:
             assert(false);
@@ -2281,6 +2284,8 @@ SISL_OPTION_GROUP(
     (read_enable, "", "read_enable", "read enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("1"), "flag"),
     (unmap_enable, "", "unmap_enable", "unmap enable 0 or 1", ::cxxopts::value< uint32_t >()->default_value("0"),
      "flag"),
+    (oob_unmap_enable, "", "oob_unmap_enable", "out-of-band unmap enable 0 or 1",
+     ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (max_disk_capacity, "", "max_disk_capacity", "max disk capacity",
      ::cxxopts::value< uint64_t >()->default_value("20"), "GB"),
     (max_volume, "", "max_volume", "max volume", ::cxxopts::value< uint64_t >()->default_value("50"), "number"),
@@ -2386,6 +2391,7 @@ int main(int argc, char* argv[]) {
     gcfg.num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
     gcfg.read_enable = SISL_OPTIONS["read_enable"].as< uint32_t >();
     gcfg.unmap_enable = SISL_OPTIONS["unmap_enable"].as< uint32_t >();
+    gcfg.oob_unmap_enable = SISL_OPTIONS["oob_unmap_enable"].as< uint32_t >();
     gcfg.unmap_frequency = SISL_OPTIONS["unmap_frequency"].as< uint64_t >();
     gcfg.max_disk_capacity = ((SISL_OPTIONS["max_disk_capacity"].as< uint64_t >()) * (1ul << 30));
     gcfg.max_vols = SISL_OPTIONS["max_volume"].as< uint64_t >();

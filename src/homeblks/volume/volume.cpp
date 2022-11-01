@@ -473,6 +473,7 @@ std::error_condition Volume::unmap(const vol_interface_req_ptr& iface_req) {
     std::error_condition ret = no_error;
 
     auto vreq = volume_req::make(iface_req);
+
     THIS_VOL_LOG(TRACE, volume, vreq, "unmap: lba={}, nlbas={}", vreq->lba(), vreq->nlbas());
 
     COUNTER_INCREMENT(m_metrics, volume_unmap_count, 1);
@@ -483,6 +484,13 @@ std::error_condition Volume::unmap(const vol_interface_req_ptr& iface_req) {
 
     if (is_offline()) {
         ret = std::make_error_condition(std::errc::resource_unavailable_try_again);
+        goto done;
+    }
+
+    if (vreq->nlbas() > BlkId::max_blks_in_op()) {
+        THIS_VOL_LOG(ERROR, volume, vreq, "unmap: lba={}, nlbas={} invalid argument, nlbas should not exceed: {} ",
+                     vreq->lba(), vreq->nlbas(), BlkId::max_blks_in_op());
+        ret = std::make_error_condition(std::errc::invalid_argument);
         goto done;
     }
 
