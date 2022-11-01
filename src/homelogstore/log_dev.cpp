@@ -425,7 +425,7 @@ void LogDev::do_flush_internal(LogGroup* const lg) {
 }
 
 void LogDev::do_flush(LogGroup* const lg) {
-    if (iomanager.am_i_tight_loop_reactor() == false) {
+    if (!iomanager.am_i_io_reactor()) {
         /* send message to worker thread to issue the io if we are in user thread */
         iomanager.run_on(iomgr::thread_regex::random_worker,
                          [this, lg]([[maybe_unused]] const io_thread_addr_t addr) { do_flush_internal(lg); });
