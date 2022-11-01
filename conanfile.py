@@ -16,13 +16,15 @@ class HomestoreConan(ConanFile):
                 "shared": ['True', 'False'],
                 "fPIC": ['True', 'False'],
                 "sanitize": ['True', 'False'],
-                'testing' : ['coverage', 'full', 'min', 'off', 'epoll_mode', 'spdk_mode'],
+                "testing" : ['coverage', 'full', 'min', 'off', 'epoll_mode', 'spdk_mode'],
+                "skip_testing": ['True', 'False'],
             }
     default_options = {
                 'shared': False,
                 'fPIC': True,
                 'sanitize': False,
                 'testing': 'epoll_mode',
+                'skip_testing': False,
                 'sisl:prerelease': True,
             }
 
@@ -78,7 +80,7 @@ class HomestoreConan(ConanFile):
         
         cmake.configure(defs=definitions)
         cmake.build()
-        if not self.options.testing == 'off':
+        if not self.options.testing == 'off' and not self.options.skip_testing:
             cmake.test(target=test_target, output_on_failure=True)
 
     def package(self):
