@@ -47,7 +47,9 @@ void LogDev::start(const bool format, JournalVirtualDev* blk_store) {
     m_blkstore = blk_store;
     m_hb = HomeStoreBase::safe_instance();
     if (m_flush_size_multiple == 0) { m_flush_size_multiple = m_blkstore->get_phys_page_size(); }
-    THIS_LOGDEV_LOG(INFO, "Initializing logdev with flush size multiple={}", m_flush_size_multiple);
+    THIS_LOGDEV_LOG(
+        INFO, "Initializing logdev with flush size multiple={}, flush_threshold_size={}, flush_in_current_thread={}",
+        m_flush_size_multiple, flush_data_threshold_size(), HS_DYNAMIC_CONFIG(logstore.flush_in_current_thread));
 
     for (uint32_t i = 0; i < max_log_group; ++i) {
         m_log_group_pool[i].start(m_flush_size_multiple, m_blkstore->get_align_size());
@@ -207,7 +209,11 @@ int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_nu
 
     if (prev_size < threshold_size && ((prev_size + data.size) >= threshold_size) &&
         !m_is_flushing.load(std::memory_order_relaxed)) {
-        HomeLogStoreMgrSI().send_flush_msg();
+        if (HS_DYNAMIC_CONFIG(logstore.flush_in_current_thread)) {
+            flush_if_needed();
+        } else {
+            HomeLogStoreMgrSI().send_flush_msg();
+        }
     }
     return idx;
 }
