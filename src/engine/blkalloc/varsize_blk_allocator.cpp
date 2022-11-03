@@ -526,7 +526,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_all
     case BlkAllocStatus::FAILED:
     case BlkAllocStatus::SPACE_FULL:
         COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
-        BLKALLOC_LOG(ERROR, "nblks={} failed to alloc any number of blocks", nblks);
+        BLKALLOC_LOG(INFO, "nblks={} failed to alloc any number of blocks", nblks);
         break;
     case BlkAllocStatus::PARTIAL:
         COUNTER_INCREMENT(m_metrics, num_alloc_partial, 1);
