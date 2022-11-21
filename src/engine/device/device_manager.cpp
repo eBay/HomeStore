@@ -86,6 +86,7 @@ DeviceManager::DeviceManager(const std::vector< dev_info >& data_devices, NewVDe
             HomeStoreStaticConfig::instance().hdd_drive_present = true;
             HomeStoreStaticConfig::instance().engine.max_chunks = HDD_MAX_CHUNKS;
             found_hdd_dev = true;
+            if (is_block_hdd(dev_info.dev_names)) { m_is_block_hdd = true; }
             break;
         }
     }
@@ -150,13 +151,10 @@ DeviceManager::DeviceManager(const std::vector< dev_info >& data_devices, NewVDe
     HS_LOG_ASSERT_LE(m_vdev_metadata_size, MAX_CONTEXT_DATA_SZ);
 }
 
-bool DeviceManager::is_hdd_direct_io_mode() {
-#ifdef _PRERELEASE
-    if (std::getenv(USER_WANT_DIRECT_IO.c_str())) { return true; }
-#endif
-
-    return HS_DYNAMIC_CONFIG(device->direct_io_mode);
-}
+//
+// Do direct_io_mode when it is real HDD device;
+//
+bool DeviceManager::is_hdd_direct_io_mode() { return m_is_block_hdd && HS_DYNAMIC_CONFIG(device->direct_io_mode); }
 
 bool DeviceManager::init() {
     uint64_t max_dev_offset{0};
@@ -754,6 +752,18 @@ iomgr::drive_type DeviceManager::get_drive_type(const std::vector< dev_info >& d
     return dtype;
 }
 
+//
+// device is on block_hdd (real HDD device)
+//
+bool DeviceManager::is_block_hdd(const std::string& devname) {
+    const iomgr::drive_type dtype = iomgr::DriveInterface::get_drive_type(devname);
+    if (dtype == iomgr::drive_type::block_hdd) { return true; }
+    return false;
+}
+
+//
+// device is either file_on_hdd or block_hdd;
+//
 bool DeviceManager::is_hdd(const std::string& devname) {
     const iomgr::drive_type dtype = iomgr::DriveInterface::get_drive_type(devname);
     if (dtype == iomgr::drive_type::block_hdd || dtype == iomgr::drive_type::file_on_hdd) { return true; }
@@ -838,5 +848,7 @@ uint32_t DeviceManager::get_common_align_sz() {
 
     return max_align_size;
 }
+
+bool DeviceManager::m_is_block_hdd = false;
 
 } // namespace homestore

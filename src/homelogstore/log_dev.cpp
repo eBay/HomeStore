@@ -209,7 +209,7 @@ int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_nu
 
     if (prev_size < threshold_size && ((prev_size + data.size) >= threshold_size) &&
         !m_is_flushing.load(std::memory_order_relaxed)) {
-        if (HS_DYNAMIC_CONFIG(logstore.flush_in_current_thread)) {
+        if (flush_in_current_thread()) {
             flush_if_needed();
         } else {
             HomeLogStoreMgrSI().send_flush_msg();
@@ -229,7 +229,9 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
     }
     auto* rbuf{read_buf.get()};
     auto size = m_blkstore->pread(static_cast< void* >(rbuf), initial_read_size, key.dev_offset);
-    HS_REL_ASSERT_EQ(size, initial_read_size, "it is not completely read");
+
+    // if we are reading end of device, it could be less than 4K
+    HS_REL_ASSERT_LE(size, initial_read_size, "it is not completely read");
 
     const auto* const header{reinterpret_cast< log_group_header* >(rbuf)};
     HS_REL_ASSERT_EQ(header->magic_word(), LOG_GROUP_HDR_MAGIC, "Log header corrupted with magic mismatch!");
@@ -368,7 +370,7 @@ bool LogDev::flush_if_needed() {
         auto new_idx = m_log_idx.load(std::memory_order_relaxed) - 1;
         if (m_last_flush_idx >= new_idx) {
             THIS_LOGDEV_LOG(TRACE, "Log idx {} is just flushed", new_idx);
-            unlock_flush(false);
+            unlock_flush(false /* do_flush */);
             return false;
         }
 
@@ -376,7 +378,7 @@ bool LogDev::flush_if_needed() {
             prepare_flush(new_idx - m_last_flush_idx + 4)}; // Estimate 4 more extra in case of parallel writes
         if (sisl_unlikely(!lg)) {
             THIS_LOGDEV_LOG(TRACE, "Log idx {} last_flush_idx {} prepare flush failed", new_idx, m_last_flush_idx);
-            unlock_flush(false);
+            unlock_flush(false /* do_flush */);
             return false;
         }
         auto sz = m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
@@ -533,6 +535,7 @@ void LogDev::unlock_flush(bool do_flush) {
     // Try to do chain flush if its really needed.
     THIS_LOGDEV_LOG(TRACE, "Unlocked the flush, try doing chain flushing if needed");
     // send a message to see if a new flush can be triggered
+    // we don't skip sending flush message in back-2-back flush to avoid cp stuck
     if (do_flush) { HomeLogStoreMgrSI().send_flush_msg(); }
 }
 

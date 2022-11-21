@@ -80,7 +80,7 @@ table Device {
     max_completions_process_per_event_per_thread: uint32 = 200;
     
     // DIRECT_IO mode, switch for HDD IO mode;
-    direct_io_mode: bool = false; 
+    direct_io_mode: bool = true; 
 }
 
 table LogStore {
@@ -98,7 +98,7 @@ table LogStore {
     bulk_read_size: uint64 = 524288 (hotswap);
 
     // log store flush using current thread; 
-    flush_in_current_thread: bool = false (hotswap);
+    flush_in_current_thread: bool = true (hotswap);
 
     // How blks we need to read before confirming that we have not seen a corrupted block
     recovery_max_blks_read_for_additional_check: uint32 = 20;

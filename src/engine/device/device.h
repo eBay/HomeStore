@@ -742,6 +742,7 @@ public:
     // void zero_pdev_sbs();
 
     bool is_hdd(const std::string& devname);
+    bool is_block_hdd(const std::string& devname);
 
     /*
      * @brief: superblock chunks created for all devices;
@@ -772,6 +773,10 @@ private:
     int get_device_open_flags(const std::string& devname);
 
     static int get_open_flags(const io_flag oflags);
+
+    //***** static private members ********//
+private:
+    static bool m_is_block_hdd;
 
 private:
     int m_hdd_open_flags;

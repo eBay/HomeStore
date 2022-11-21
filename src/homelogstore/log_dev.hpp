@@ -545,6 +545,10 @@ public:
         return HS_DYNAMIC_CONFIG(logstore.flush_threshold_size) - sizeof(log_group_header);
     }
 
+    [[nodiscard]] static bool flush_in_current_thread() {
+        return HS_DYNAMIC_CONFIG(logstore.flush_in_current_thread);
+    }
+
     LogDev(const logstore_family_id_t f_id, const std::string& metablk_name);
     LogDev(const LogDev&) = delete;
     LogDev& operator=(const LogDev&) = delete;
