@@ -17,6 +17,7 @@ public:
     void register_api_post_start();
 
     static bool is_local_addr(struct sockaddr* addr);
+    static bool is_secure_zone();
 
     static void get_version(iomgr::HttpCallData cd);
     static void get_metrics(iomgr::HttpCallData cd);
