@@ -17,7 +17,7 @@ $ conan install ..
 
 # Build the libhomestore.a
 $ conan build ..
-
+```
 ## Contributing to This Project
 We welcome contributions. If you find any bugs, potential flaws and edge cases, improvements, new feature suggestions or discussions, please submit issues or pull requests.
 
