@@ -1,19 +1,35 @@
+# HomeStore
+Homestore is a generic storage engine upon which different storage solutions, like block store, key/value stores, object stores, databases can be built. This storage engine architecture is tuned towards modern storage devices and systems programming to provide ultra high performance. It has a pluggable model throughout to make it easy to extend the functionality to tune to specific use cases or data patterns. This document tries to explain what is the motivation to create another storage engine among an already impressive array of engines.
+
+More details to follow....
+
 ## Building
 
-### Requirements
-* Docker >= v18.03.ce
-
-### Environment
+### With conan
+Assuming the conan setup is already done
 
 ```
-~/dev $ docker pull ecr.vip.ebayc3.com/sds/sds_develop
-~/dev $ alias sds_dev='docker run --rm -it --privileged -v $(pwd):/tmp/source  -P ecr.vip.ebayc3.com/sds/sds_develop'
-~/dev $ git clone git@github.corp.ebay.com:SDS/homestore
-~/dev $ sds_dev
-root@27a278223024:/tmp/build# conan install ../source/homestore
-root@27a278223024:/tmp/build# conan build ../source/homestore
-```
+$ mkdir build
+$ cd build
 
-### Suggestions
+# Install all dependencies
+$ conan install ..
 
-Preserve the alias in the commands above to your profile!
+# Build the libhomestore.a
+$ conan build ..
+
+## Contributing to This Project
+We welcome contributions. If you find any bugs, potential flaws and edge cases, improvements, new feature suggestions or discussions, please submit issues or pull requests.
+
+Contact
+Harihara Kadayam hkadayam@ebay.com
+
+## License Information
+Copyright 2021 eBay Inc.
+
+Primary Author: Harihara Kadayam
+Primary Developers: Harihara Kadayam, Rishabh Mittal, Yaming Kuang, Brian Szymd
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at https://www.apache.org/licenses/LICENSE-2.0.
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
