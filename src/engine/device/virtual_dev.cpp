@@ -51,7 +51,11 @@ void VirtualDev::static_process_completions(const int64_t res, uint8_t* cookie) 
     if ((vd_req->err == no_error) && (res != 0)) {
         LOGERROR("seeing error on request id {} error {}", vd_req->request_id, res);
         /* TODO: it should have more specific errors */
-        vd_req->err = std::make_error_condition(std::io_errc::stream);
+        if (res == -EAGAIN) {
+            vd_req->err = std::make_error_condition(std::errc::resource_unavailable_try_again);
+        } else {
+            vd_req->err = std::make_error_condition(std::io_errc::stream);
+        }
     }
 
 #ifdef _PRERELEASE
