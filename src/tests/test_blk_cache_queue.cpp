@@ -4,16 +4,14 @@
 #include <random>
 #include <vector>
 
+#include <gtest/gtest.h>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 #include <sisl/utility/thread_buffer.hpp>
 
-#include "engine/common/homestore_header.hpp"
-#include "varsize_blk_allocator.h"
-
-#include "blk_cache_queue.h"
-
-#include <gtest/gtest.h>
+#include <homestore_decl.hpp>
+#include "blkalloc/varsize_blk_allocator.h"
+#include "blkalloc/blk_cache_queue.h"
 
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 

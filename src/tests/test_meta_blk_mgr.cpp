@@ -18,16 +18,16 @@
 #include <string>
 #include <vector>
 
-#include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/io_environment.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
-
 #include <gtest/gtest.h>
 
-#include "api/meta_interface.hpp"
-#include "meta_sb.hpp"
-#include "homeblks/home_blks.hpp"
+#include <homestore.hpp>
+#include <meta_service.hpp>
+#include "meta/meta_sb.hpp"
+#include "common/homestore_config.hpp"
+#include "common/homestore_assert.hpp"
 #include "test_common/bits_generator.hpp"
 #include "test_common/homestore_test_common.hpp"
 
@@ -60,16 +60,10 @@ struct Param {
 static Param gp;
 
 static const std::string META_FILE_PREFIX{"/tmp/test_meta_blk_mgr_"};
+static constexpr uint32_t dma_address_boundary{512}; // Mininum size the dma/writes to be aligned with
 
 static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, const uint32_t nthreads) {
     std::vector< dev_info > device_info;
-    // these should be static so that they stay in scope in the lambda in case function ends before lambda completes
-    static std::mutex start_mutex;
-    static std::condition_variable cv;
-    static bool inited;
-
-    inited = false;
-
     if (gp.dev_names.size()) {
         /* if user customized file/disk names */
         for (uint32_t i{0}; i < gp.dev_names.size(); ++i) {
@@ -78,7 +72,7 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
         }
     } else {
         /* create files */
-        LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
+        LOGINFO("creating {} device files with each of size {} ", ndevices, in_bytes(dev_size));
         for (uint32_t i{0}; i < ndevices; ++i) {
             const std::filesystem::path fpath{META_FILE_PREFIX + std::to_string(i + 1)};
             std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
@@ -89,35 +83,15 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
     LOGINFO("Starting iomgr with {} threads", nthreads);
     ioenvironment.with_iomgr(nthreads, gp.is_spdk);
 
-    const uint64_t app_mem_size{((ndevices * dev_size) * 15) / 100};
-    LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", app_mem_size);
+    const uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
+    LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", in_bytes(app_mem_size));
 
-    boost::uuids::string_generator gen;
-    init_params params;
-    params.data_open_flags = homestore::io_flag::DIRECT_IO;
-    params.min_virtual_page_size = 4096;
+    hs_input_params params;
     params.app_mem_size = app_mem_size;
     params.data_devices = device_info;
-    params.init_done_cb = [&tl_start_mutex = start_mutex, &tl_cv = cv, &tl_inited = inited](std::error_condition err,
-                                                                                            const out_params& params) {
-        LOGINFO("HomeBlks Init completed");
-        {
-            std::unique_lock< std::mutex > lk{tl_start_mutex};
-            tl_inited = true;
-        }
-        tl_cv.notify_one();
-    };
-    params.vol_mounted_cb = [](const VolumePtr& vol_obj, vol_state state) {};
-    params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
-    params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
 
     test_common::set_random_http_port();
-    VolInterface::init(params);
-
-    {
-        std::unique_lock< std::mutex > lk{start_mutex};
-        cv.wait(lk, [] { return inited; });
-    }
+    HomeStore::instance()->with_params(params).with_meta_service(85.0).init(true /* wait_for_init */);
 }
 
 struct sb_info_t {
@@ -149,9 +123,9 @@ protected:
     }
 
     [[nodiscard]] bool keep_running() {
-        HS_DBG_ASSERT(m_mbm->get_size() >= m_mbm->get_used_size(), "total size:{} less than used size: {}",
-                      m_mbm->get_size(), m_mbm->get_used_size());
-        const auto free_size{m_mbm->get_size() - m_mbm->get_used_size()};
+        HS_DBG_ASSERT(m_mbm->total_size() >= m_mbm->used_size(), "total size:{} less than used size: {}",
+                      m_mbm->total_size(), m_mbm->used_size());
+        const auto free_size = m_mbm->total_size() - m_mbm->used_size();
         if (free_size < gp.max_wrt_sz) { return false; }
         if ((get_elapsed_time(m_start_time) >= gp.run_time) || (io_cnt() >= gp.num_io)) { return false; }
         return true;
@@ -159,7 +133,7 @@ protected:
 
     [[nodiscard]] uint64_t io_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
 
-    void gen_rand_buf(uint8_t* const s, const uint32_t len) {
+    void gen_rand_buf(uint8_t* s, const uint32_t len) {
         if (gp.is_bitmap) {
             BitsGenerator::gen_random_bits(len, s);
         } else {
@@ -190,15 +164,14 @@ protected:
         }
     }
 
-    [[nodiscard]] uint64_t total_size_written(const void* const cookie) { return m_mbm->get_meta_size(cookie); }
+    [[nodiscard]] uint64_t total_size_written(const void* cookie) { return m_mbm->meta_size(cookie); }
 
     void do_write_to_full() {
         static constexpr uint64_t blkstore_overhead = 4 * 1024ul * 1024ul; // 4MB
-        ssize_t free_size{static_cast< ssize_t >(m_mbm->get_size() - m_mbm->get_used_size() - blkstore_overhead)};
+        ssize_t free_size = uint64_cast(m_mbm->total_size() - m_mbm->used_size() - blkstore_overhead);
 
         HS_REL_ASSERT_GT(free_size, 0);
-        HS_REL_ASSERT_EQ(static_cast< uint64_t >(free_size),
-                         m_mbm->get_available_blks() * m_mbm->get_page_size() - blkstore_overhead);
+        HS_REL_ASSERT_EQ(uint64_cast(free_size), m_mbm->available_blks() * m_mbm->block_size() - blkstore_overhead);
 
         uint64_t size_written{0};
         while (free_size > 0) {
@@ -206,16 +179,15 @@ protected:
                 size_written = do_sb_write(do_overflow());
             } else {
                 size_written = do_sb_write(false, m_mbm->meta_blk_context_sz());
-                HS_REL_ASSERT_EQ(size_written, m_mbm->get_page_size());
+                HS_REL_ASSERT_EQ(size_written, m_mbm->block_size());
             }
 
             // size_written should be at least one page;
-            HS_REL_ASSERT_GE(size_written, m_mbm->get_page_size());
+            HS_REL_ASSERT_GE(size_written, m_mbm->block_size());
 
             free_size -= size_written;
 
-            HS_REL_ASSERT_EQ(static_cast< uint64_t >(free_size),
-                             m_mbm->get_available_blks() * m_mbm->get_page_size() - blkstore_overhead);
+            HS_REL_ASSERT_EQ(uint64_cast(free_size), m_mbm->available_blks() * m_mbm->block_size() - blkstore_overhead);
         }
 
         HS_REL_ASSERT_EQ(free_size, 0);
@@ -225,7 +197,7 @@ protected:
         ++m_wrt_cnt;
         if (!sz_to_wrt) { sz_to_wrt = rand_size(overflow); }
         int64_t ret_size_written{0};
-        uint8_t* const buf{iomanager.iobuf_alloc(512, sz_to_wrt)};
+        uint8_t* buf = iomanager.iobuf_alloc(512, sz_to_wrt);
         gen_rand_buf(buf, sz_to_wrt);
 
         void* cookie{nullptr};
@@ -233,12 +205,12 @@ protected:
         HS_DBG_ASSERT_NE(cookie, nullptr);
 
         // LOGINFO("buf written: size: {}, data: {}", sz_to_wrt, (char*)buf);
-        meta_blk* const mblk{static_cast< meta_blk* >(cookie)};
+        meta_blk* mblk = s_cast< meta_blk* >(cookie);
         // verify context_sz
 
         if (mblk->hdr.h.compressed == false) {
             if (overflow) {
-                HS_DBG_ASSERT_GE(sz_to_wrt, m_mbm->get_page_size());
+                HS_DBG_ASSERT_GE(sz_to_wrt, m_mbm->block_size());
                 HS_DBG_ASSERT(mblk->hdr.h.ovf_bid.is_valid(), "Expected valid ovf meta blkid");
             } else {
                 HS_DBG_ASSERT_LE(sz_to_wrt, m_mbm->meta_blk_context_sz());
@@ -247,32 +219,32 @@ protected:
 
             // verify context_sz
             HS_DBG_ASSERT(mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
-                          static_cast< uint64_t >(mblk->hdr.h.context_sz), sz_to_wrt);
+                          uint64_cast(mblk->hdr.h.context_sz), sz_to_wrt);
         }
 
         {
             // save cookie;
             std::unique_lock< std::mutex > lg{m_mtx};
-            const auto bid{mblk->hdr.h.bid.to_integer()};
+            const auto bid = mblk->hdr.h.bid.to_integer();
             HS_DBG_ASSERT(m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
 
             // save to cache
             m_write_sbs[bid].cookie = cookie;
-            m_write_sbs[bid].str = std::string(reinterpret_cast< const char* >(buf), sz_to_wrt);
+            m_write_sbs[bid].str = std::string(r_cast< const char* >(buf), sz_to_wrt);
 
             ret_size_written = total_size_written(cookie);
             m_total_wrt_sz += ret_size_written;
-            HS_DBG_ASSERT(m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
-                          m_mbm->get_used_size());
+            HS_DBG_ASSERT(m_total_wrt_sz == m_mbm->used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                          m_mbm->used_size());
         }
 
         static bool done_read{false};
         if (!done_read) {
             done_read = true;
             m_mbm->read_sub_sb(mtype);
-            const auto read_buf_str{m_cb_blks[mblk->hdr.h.bid.to_integer()]};
-            const std::string write_buf_str{reinterpret_cast< char* >(buf), sz_to_wrt};
-            const auto ret{read_buf_str.compare(write_buf_str)};
+            const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()];
+            const std::string write_buf_str{r_cast< char* >(buf), sz_to_wrt};
+            const auto ret = read_buf_str.compare(write_buf_str);
             if (mblk->hdr.h.compressed == false) {
                 HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
             }
@@ -301,7 +273,7 @@ protected:
             m_total_wrt_sz -= total_size_written(cookie);
         }
 
-        const auto ret{m_mbm->remove_sub_sb(cookie)};
+        const auto ret = m_mbm->remove_sub_sb(cookie);
         if (ret != no_error) { HS_REL_ASSERT(false, "failed to remove subsystem with status: {}", ret.message()); }
 
         {
@@ -309,8 +281,8 @@ protected:
             m_write_sbs.erase(it);
             HS_REL_ASSERT_EQ(sz, m_write_sbs.size() + 1); // release assert to make compiler happy on sz;
 
-            HS_DBG_ASSERT(m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
-                          m_mbm->get_used_size());
+            HS_DBG_ASSERT(m_total_wrt_sz == m_mbm->used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                          m_mbm->used_size());
         }
     }
 
@@ -319,11 +291,11 @@ protected:
         std::string str;
         {
             std::unique_lock< std::mutex > lg{m_mtx};
-            const auto it{m_write_sbs.begin()};
+            const auto it = m_write_sbs.begin();
 
             HS_DBG_ASSERT_EQ(it != m_write_sbs.end(), true);
             str = it->second.str;
-            mblk = static_cast< meta_blk* >(it->second.cookie);
+            mblk = s_cast< meta_blk* >(it->second.cookie);
         }
 
         // read output will be sent via callback which also holds mutex;
@@ -331,9 +303,9 @@ protected:
 
         {
             std::unique_lock< std::mutex > lg{m_mtx};
-            const auto read_buf_str{m_cb_blks[mblk->hdr.h.bid.to_integer()]};
+            const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()];
             const std::string write_buf_str{str};
-            const auto ret{read_buf_str.compare(write_buf_str)};
+            const auto ret = read_buf_str.compare(write_buf_str);
             HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
         }
     }
@@ -343,7 +315,7 @@ protected:
         uint8_t* buf{nullptr};
         auto overflow = do_overflow();
         if (!aligned_buf_size) { overflow = true; } // for unaligned buf size, let's generate overflow buf size;
-        auto sz_to_wrt{rand_size(overflow, aligned_buf_size)};
+        auto sz_to_wrt = rand_size(overflow, aligned_buf_size);
         void* cookie{nullptr};
         bool unaligned_addr{false};
         uint32_t unaligned_shift{0};
@@ -352,7 +324,7 @@ protected:
             static thread_local std::default_random_engine re{rd()};
             std::unique_lock< std::mutex > lg{m_mtx};
             std::uniform_int_distribution< size_t > advance_random{0, m_write_sbs.size() - 1};
-            auto it{m_write_sbs.begin()};
+            auto it = m_write_sbs.begin();
             std::advance(it, advance_random(re));
             if (aligned_buf_size) {
                 buf = iomanager.iobuf_alloc(512, sz_to_wrt);
@@ -360,8 +332,7 @@ protected:
                 // do unaligned write
                 buf = new uint8_t[sz_to_wrt];
                 // simulate some unaligned sz and unaligned buffer address
-                if (((reinterpret_cast< std::uintptr_t >(buf) &
-                      static_cast< std::uintptr_t >(dma_address_boundary - 1)) == 0x00) &&
+                if (((r_cast< std::uintptr_t >(buf) & s_cast< std::uintptr_t >(dma_address_boundary - 1)) == 0x00) &&
                     !do_aligned()) {
                     unaligned_addr = true;
                     std::uniform_int_distribution< long unsigned > dist{1, dma_address_boundary - 1};
@@ -386,22 +357,22 @@ protected:
 
         {
             std::unique_lock< std::mutex > lg{m_mtx};
-            const auto bid{static_cast< const meta_blk* >(cookie)->hdr.h.bid.to_integer()};
+            const auto bid = s_cast< const meta_blk* >(cookie)->hdr.h.bid.to_integer();
             HS_DBG_ASSERT(m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
             m_write_sbs[bid].cookie = cookie;
-            m_write_sbs[bid].str = std::string{reinterpret_cast< const char* >(buf), sz_to_wrt};
+            m_write_sbs[bid].str = std::string{r_cast< const char* >(buf), sz_to_wrt};
 
             // verify context_sz
-            const meta_blk* const mblk{static_cast< const meta_blk* >(cookie)};
+            const meta_blk* mblk = s_cast< const meta_blk* >(cookie);
             if (mblk->hdr.h.compressed == false) {
                 HS_DBG_ASSERT(mblk->hdr.h.context_sz == sz_to_wrt, "context_sz mismatch: {}/{}",
-                              static_cast< uint64_t >(mblk->hdr.h.context_sz), sz_to_wrt);
+                              uint64_cast(mblk->hdr.h.context_sz), sz_to_wrt);
             }
 
             // update total size, add size of metablk back
             m_total_wrt_sz += total_size_written(cookie);
-            HS_DBG_ASSERT(m_total_wrt_sz == m_mbm->get_used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
-                          m_mbm->get_used_size());
+            HS_DBG_ASSERT(m_total_wrt_sz == m_mbm->used_size(), "Used size mismatch: {}/{}", m_total_wrt_sz,
+                          m_mbm->used_size());
         }
 
         if (aligned_buf_size) {
@@ -421,13 +392,13 @@ protected:
         HS_DBG_ASSERT_EQ(m_cb_blks.size(), m_write_sbs.size());
 
         for (auto it{std::cbegin(m_write_sbs)}; it != std::cend(m_write_sbs); ++it) {
-            const auto bid{it->first};
-            auto it_cb{m_cb_blks.find(bid)};
+            const auto bid = it->first;
+            auto it_cb = m_cb_blks.find(bid);
 
             HS_DBG_ASSERT(it_cb != std::cend(m_cb_blks), "Saved bid during write not found in recover callback.");
 
             // the saved buf should be equal to the buf received in the recover callback;
-            const int ret{it->second.str.compare(it_cb->second)};
+            const int ret = it->second.str.compare(it_cb->second);
             HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, callback: {}.", it->second.str, it_cb->second);
         }
     }
@@ -436,7 +407,7 @@ protected:
         while (keep_running()) {
             switch (get_op()) {
             case meta_op_type::write: {
-                [[maybe_unused]] const auto write_result{do_sb_write(do_overflow())};
+                [[maybe_unused]] const auto write_result = do_sb_write(do_overflow());
             } break;
             case meta_op_type::remove:
                 do_sb_remove();
@@ -457,7 +428,7 @@ protected:
             return true;
         } else {
             std::uniform_int_distribution< uint8_t > overflow_rand{0, 1};
-            return (overflow_rand(re) == static_cast< uint8_t >(1));
+            return (overflow_rand(re) == s_cast< uint8_t >(1));
         }
     }
 
@@ -465,7 +436,7 @@ protected:
         static thread_local std::random_device rd;
         static thread_local std::default_random_engine re{rd()};
         std::uniform_int_distribution< uint8_t > aligned_rand{0, 1};
-        return (aligned_rand(re) == static_cast< uint8_t >(1));
+        return (aligned_rand(re) == s_cast< uint8_t >(1));
     }
 
     void recover() {
@@ -484,19 +455,19 @@ protected:
     [[nodiscard]] meta_op_type get_op() {
         static thread_local bool keep_remove{false};
         // if we hit some high watermark, remove the sbs until hit some low watermark;
-        if (100 * m_mbm->get_used_size() / m_mbm->get_size() > 80) {
+        if (100 * m_mbm->used_size() / m_mbm->total_size() > 80) {
             keep_remove = true;
             return meta_op_type::remove;
         }
 
         if (keep_remove) {
-            if (100 * m_mbm->get_used_size() / m_mbm->get_size() > 20) {
+            if (100 * m_mbm->used_size() / m_mbm->total_size() > 20) {
                 return meta_op_type::remove;
             } else {
                 // let's start over the test;
                 reset_counters();
                 // there is some overhead by MetaBlkMgr, such as meta ssb;
-                m_total_wrt_sz = m_mbm->get_used_size();
+                m_total_wrt_sz = m_mbm->used_size();
                 keep_remove = false;
             }
         }
@@ -548,7 +519,7 @@ protected:
     void shutdown() {
         LOGINFO("shutting down homeblks");
         remove_files();
-        VolInterface::shutdown();
+        HomeStore::instance()->shutdown();
         {
             std::unique_lock< std::mutex > lk(m_mtx);
             reset_counters();
@@ -567,10 +538,10 @@ protected:
     }
 
     void register_client() {
-        m_mbm = MetaBlkMgrSI();
-        m_total_wrt_sz = m_mbm->get_used_size();
+        m_mbm = &(meta_service());
+        m_total_wrt_sz = m_mbm->used_size();
 
-        HS_REL_ASSERT_EQ(m_mbm->get_size() - m_total_wrt_sz, m_mbm->get_available_blks() * m_mbm->get_page_size());
+        HS_REL_ASSERT_EQ(m_mbm->total_size() - m_total_wrt_sz, m_mbm->available_blks() * m_mbm->block_size());
 
         m_mbm->deregister_handler(mtype);
         m_mbm->register_handler(
@@ -578,8 +549,7 @@ protected:
             [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
                 if (mblk) {
                     std::unique_lock< std::mutex > lg{m_mtx};
-                    m_cb_blks[mblk->hdr.h.bid.to_integer()] =
-                        std::string{reinterpret_cast< const char* >(buf.bytes()), size};
+                    m_cb_blks[mblk->hdr.h.bid.to_integer()] = std::string{r_cast< const char* >(buf.bytes()), size};
                 }
             },
             [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
@@ -591,7 +561,7 @@ private:
     uint64_t m_rm_cnt{0};
     uint64_t m_total_wrt_sz{0};
     Clock::time_point m_start_time;
-    MetaBlkMgr* m_mbm{nullptr};
+    MetaBlkService* m_mbm{nullptr};
     std::map< uint64_t, sb_info_t > m_write_sbs; // during write, save blkid to buf map;
     std::map< uint64_t, std::string > m_cb_blks; // during recover, save blkid to buf map;
     std::mutex m_mtx;
@@ -603,7 +573,7 @@ TEST_F(VMetaBlkMgrTest, min_drive_size_test) {
     mtype = "Test_Min_Drive_Size";
     this->register_client();
 
-    EXPECT_GT(this->do_sb_write(false), static_cast< uint64_t >(0));
+    EXPECT_GT(this->do_sb_write(false), uint64_cast(0));
 
     this->do_single_sb_read();
 
@@ -631,7 +601,7 @@ TEST_F(VMetaBlkMgrTest, single_read_test) {
     m_start_time = Clock::now();
     this->register_client();
 
-    EXPECT_GT(this->do_sb_write(false), static_cast< uint64_t >(0));
+    EXPECT_GT(this->do_sb_write(false), uint64_cast(0));
 
     this->do_single_sb_read();
 
@@ -737,7 +707,5 @@ int main(int argc, char* argv[]) {
             "size: {}/{}",
             gp.is_spdk, gp.run_time, gp.num_io, gp.always_do_overflow, gp.per_write, gp.per_update, gp.per_remove,
             gp.min_wrt_sz, gp.max_wrt_sz);
-    const auto res{RUN_ALL_TESTS()};
-
-    return res;
+    return RUN_ALL_TESTS();
 }

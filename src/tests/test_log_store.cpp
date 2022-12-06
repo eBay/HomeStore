@@ -23,17 +23,15 @@
 
 #include <sisl/fds/buffer.hpp>
 #include <folly/Synchronized.h>
-#include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/io_environment.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
-
-#include "api/vol_interface.hpp"
-#include "test_common/homestore_test_common.hpp"
-
-#include "../log_store.hpp"
-
 #include <gtest/gtest.h>
+
+#include <homestore.hpp>
+#include <logstore_service.hpp>
+#include "logstore/log_store.hpp"
+#include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
 RCU_REGISTER_INIT
@@ -49,8 +47,8 @@ struct test_log_data {
 
     uint32_t size;
 
-    uint8_t* get_data() { return reinterpret_cast< uint8_t* >(this) + sizeof(test_log_data); };
-    const uint8_t* get_data() const { return reinterpret_cast< const uint8_t* >(this) + sizeof(test_log_data); }
+    uint8_t* get_data() { return uintptr_cast(this) + sizeof(test_log_data); };
+    const uint8_t* get_data() const { return r_cast< const uint8_t* >(this) + sizeof(test_log_data); }
     uint32_t total_size() const { return sizeof(test_log_data) + size; }
 };
 
@@ -65,7 +63,7 @@ public:
     ~Timer() = default;
 
     void reset() { beg_ = clock_::now(); }
-    [[nodiscard]] double elapsed() const { return std::chrono::duration_cast< second_ >(clock_::now() - beg_).count(); }
+    double elapsed() const { return std::chrono::duration_cast< second_ >(clock_::now() - beg_).count(); }
 
 private:
     typedef std::chrono::high_resolution_clock clock_;
@@ -84,7 +82,7 @@ public:
     }
 
     explicit SampleLogStoreClient(const logstore_family_id_t family_idx, const test_log_store_comp_cb_t& cb) :
-            SampleLogStoreClient(HomeLogStoreMgrSI().create_new_log_store(family_idx, false /* append_mode */),
+            SampleLogStoreClient(logstore_service().create_new_log_store(family_idx, false /* append_mode */),
                                  family_idx, cb) {}
 
     SampleLogStoreClient(const SampleLogStoreClient&) = delete;
@@ -103,13 +101,13 @@ public:
         m_n_recovered_truncated_lsns = 0;
     }
 
-    void insert_next_batch(const uint32_t batch_size, const uint32_t nholes = 0) {
-        const auto cur_lsn{m_cur_lsn.fetch_add(batch_size + nholes)};
+    void insert_next_batch(uint32_t batch_size, uint32_t nholes = 0) {
+        const auto cur_lsn = m_cur_lsn.fetch_add(batch_size + nholes);
         insert(cur_lsn, batch_size, nholes, false);
     }
 
-    void insert(const logstore_seq_num_t start_lsn, const int64_t nparallel_count, int64_t nholes = 0,
-                const bool wait_for_completion = true) {
+    void insert(logstore_seq_num_t start_lsn, int64_t nparallel_count, int64_t nholes = 0,
+                bool wait_for_completion = true) {
         std::vector< logstore_seq_num_t > lsns;
         lsns.reserve(nparallel_count + nholes);
 
@@ -129,15 +127,15 @@ public:
                 --nholes;
             } else {
                 bool io_memory{false};
-                auto* const d{prepare_data(lsn, io_memory)};
-                m_log_store->write_async(lsn, {reinterpret_cast< uint8_t* >(d), d->total_size(), false}, nullptr,
+                auto* d = prepare_data(lsn, io_memory);
+                m_log_store->write_async(lsn, {uintptr_cast(d), d->total_size(), false}, nullptr,
                                          [io_memory, d, this](logstore_seq_num_t seq_num, const sisl::io_blob& b,
                                                               logdev_key ld_key, void* ctx) {
                                              assert(ld_key);
                                              if (io_memory) {
-                                                 iomanager.iobuf_free(reinterpret_cast< uint8_t* >(d));
+                                                 iomanager.iobuf_free(uintptr_cast(d));
                                              } else {
-                                                 std::free(static_cast< void* >(d));
+                                                 std::free(voidptr_cast(d));
                                              }
                                              m_comp_cb(m_family, seq_num, ld_key);
                                          });
@@ -146,17 +144,18 @@ public:
     }
 
     void iterate_validate(const bool expect_all_completed = false) {
-        const auto trunc_upto{m_log_store->truncated_upto()};
-        const auto& hole_end{m_hole_lsns.rlock()->end()};
-        const auto upto{expect_all_completed ? m_cur_lsn.load() - 1 : m_log_store->get_contiguous_completed_seq_num(0)};
+        const auto trunc_upto = m_log_store->truncated_upto();
+        const auto& hole_end = m_hole_lsns.rlock()->end();
+        const auto upto =
+            expect_all_completed ? m_cur_lsn.load() - 1 : m_log_store->get_contiguous_completed_seq_num(0);
 
-        int64_t idx{trunc_upto + 1};
+        int64_t idx = trunc_upto + 1;
         bool hole_expected{false};
     start_iterate:
         try {
-            auto hole_entry{m_hole_lsns.rlock()->find(idx)};
+            auto hole_entry = m_hole_lsns.rlock()->find(idx);
             if ((hole_entry != hole_end) && !hole_entry->second) { // Hole entry exists and not filled
-                ASSERT_THROW([[maybe_unused]] const auto result{m_log_store->read_sync(idx)}, std::out_of_range)
+                ASSERT_THROW(m_log_store->read_sync(idx), std::out_of_range)
                     << "Expected std::out_of_range exception for read of hole lsn=" << m_log_store->get_store_id()
                     << ":" << idx << " but not thrown";
                 hole_expected = true;
@@ -164,11 +163,11 @@ public:
                 m_log_store->foreach (
                     idx,
                     [upto, hole_end, &idx, &hole_expected, &hole_entry, this](const int64_t seq_num,
-                                                                              const homestore::log_buffer& b) -> bool {
+                                                                              const log_buffer& b) -> bool {
                         if ((hole_entry != hole_end) && hole_entry->second) { // Hole entry exists, but filled
                             EXPECT_EQ(b.size(), 0ul);
                         } else {
-                            auto* const tl{reinterpret_cast< test_log_data* >(b.bytes())};
+                            auto* tl = r_cast< test_log_data* >(b.bytes());
                             EXPECT_EQ(tl->total_size(), b.size());
                             validate_data(tl, seq_num);
                         }
@@ -185,7 +184,7 @@ public:
             if (!expect_all_completed) {
                 // In case we run truncation in parallel to read, it is possible truncate moved, so adjust the
                 // truncated_upto accordingly.
-                const auto trunc_upto{m_log_store->truncated_upto()};
+                const auto trunc_upto = m_log_store->truncated_upto();
                 if (idx <= trunc_upto) {
                     idx = trunc_upto + 1;
                     goto start_iterate;
@@ -202,30 +201,31 @@ public:
     }
 
     void read_validate(const bool expect_all_completed = false) {
-        const auto trunc_upto{m_log_store->truncated_upto()};
+        const auto trunc_upto = m_log_store->truncated_upto();
         for (std::remove_const_t< decltype(trunc_upto) > i{0}; i <= trunc_upto; ++i) {
-            ASSERT_THROW([[maybe_unused]] const auto result{m_log_store->read_sync(i)}, std::out_of_range)
+            ASSERT_THROW(m_log_store->read_sync(i), std::out_of_range)
                 << "Expected std::out_of_range exception for lsn=" << m_log_store->get_store_id() << ":" << i
                 << " but not thrown";
         }
 
-        const auto& hole_end{m_hole_lsns.rlock()->end()};
-        const auto upto{expect_all_completed ? m_cur_lsn.load() - 1 : m_log_store->get_contiguous_completed_seq_num(0)};
-        for (auto i{m_log_store->truncated_upto() + 1}; i < upto; ++i) {
-            const auto hole_entry{m_hole_lsns.rlock()->find(i)};
+        const auto& hole_end = m_hole_lsns.rlock()->end();
+        const auto upto =
+            expect_all_completed ? m_cur_lsn.load() - 1 : m_log_store->get_contiguous_completed_seq_num(0);
+        for (auto i = m_log_store->truncated_upto() + 1; i < upto; ++i) {
+            const auto hole_entry = m_hole_lsns.rlock()->find(i);
             if ((hole_entry != hole_end) && (!hole_entry->second)) { // Hole entry exists and not filled
-                ASSERT_THROW([[maybe_unused]] const auto result{m_log_store->read_sync(i)}, std::out_of_range)
+                ASSERT_THROW(m_log_store->read_sync(i), std::out_of_range)
                     << "Expected std::out_of_range exception for read of hole lsn=" << m_log_store->get_store_id()
                     << ":" << i << " but not thrown";
             } else {
                 try {
-                    const auto b{m_log_store->read_sync(i)};
+                    const auto b = m_log_store->read_sync(i);
 
                     if ((hole_entry != hole_end) && (hole_entry->second)) { // Hole entry exists, but filled
                         ASSERT_EQ(b.size(), 0ul)
                             << "Expected null entry for lsn=" << m_log_store->get_store_id() << ":" << i;
                     } else {
-                        auto* const tl{reinterpret_cast< test_log_data* >(b.bytes())};
+                        auto* tl = r_cast< test_log_data* >(b.bytes());
                         ASSERT_EQ(tl->total_size(), b.size())
                             << "Size Mismatch for lsn=" << m_log_store->get_store_id() << ":" << i;
                         validate_data(tl, i);
@@ -234,7 +234,7 @@ public:
                     if (!expect_all_completed) {
                         // In case we run truncation in parallel to read, it is possible truncate moved, so adjust the
                         // truncated_upto accordingly.
-                        const auto trunc_upto{m_log_store->truncated_upto()};
+                        const auto trunc_upto = m_log_store->truncated_upto();
                         if (i <= trunc_upto) {
                             i = trunc_upto;
                             continue;
@@ -248,7 +248,7 @@ public:
     }
 
     void fill_hole_and_validate() {
-        const auto start{m_log_store->truncated_upto()};
+        const auto start = m_log_store->truncated_upto();
         m_hole_lsns.withWLock([&](auto& holes_list) {
             try {
                 for (auto& hole_entry : holes_list) {
@@ -288,11 +288,11 @@ public:
         // m_log_store->read(id);
     }
 
-    void on_log_found(const logstore_seq_num_t lsn, const log_buffer buf, void* const ctx) {
+    void on_log_found(const logstore_seq_num_t lsn, const log_buffer buf, void* ctx) {
         LOGDEBUG("Recovered lsn {}:{} with log data of size {}", m_log_store->get_store_id(), lsn, buf.size())
         EXPECT_LE(lsn, m_cur_lsn.load()) << "Recovered incorrect lsn " << m_log_store->get_store_id() << ":" << lsn
                                          << "Expected less than cur_lsn " << m_cur_lsn.load();
-        auto* const tl{reinterpret_cast< test_log_data* >(buf.bytes())};
+        auto* tl = r_cast< test_log_data* >(buf.bytes());
         validate_data(tl, lsn);
 
         // Count only the ones which are after truncated, because recovery could receive even truncated lsns
@@ -304,11 +304,9 @@ public:
         m_truncated_upto_lsn = lsn;
     }
 
-    [[nodiscard]] bool has_all_lsns_truncated() const {
-        return (m_truncated_upto_lsn.load() == (m_cur_lsn.load() - 1));
-    }
+    bool has_all_lsns_truncated() const { return (m_truncated_upto_lsn.load() == (m_cur_lsn.load() - 1)); }
 
-    [[nodiscard]] static test_log_data* prepare_data(const logstore_seq_num_t lsn, bool& io_memory) {
+    static test_log_data* prepare_data(const logstore_seq_num_t lsn, bool& io_memory) {
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine re{rd()};
         uint32_t sz{0};
@@ -319,7 +317,7 @@ public:
         std::uniform_int_distribution< uint32_t > gen_data_size{0, max_data_size - 1};
         if (gen_percentage(re) < static_cast< uint8_t >(10)) {
             // 10% of data is dma'ble aligned boundary
-            const auto alloc_sz{sisl::round_up(gen_data_size(re) + sizeof(test_log_data), s_max_flush_multiple)};
+            const auto alloc_sz = sisl::round_up(gen_data_size(re) + sizeof(test_log_data), s_max_flush_multiple);
             raw_buf = iomanager.iobuf_alloc(dma_address_boundary, alloc_sz);
             sz = alloc_sz - sizeof(test_log_data);
             io_memory = true;
@@ -329,20 +327,20 @@ public:
             io_memory = false;
         }
 
-        test_log_data* const d{new (raw_buf) test_log_data()};
+        test_log_data* d = new (raw_buf) test_log_data();
         d->size = sz;
 
-        assert(reinterpret_cast< uint8_t* >(d) == raw_buf);
+        assert(uintptr_cast(d) == raw_buf);
 
-        const char c{static_cast< char >((lsn % 94) + 33)};
-        std::memset(static_cast< void* >(d->get_data()), c, static_cast< size_t >(d->size));
+        const char c = static_cast< char >((lsn % 94) + 33);
+        std::memset(voidptr_cast(d->get_data()), c, static_cast< size_t >(d->size));
         return d;
     }
 
 private:
-    void validate_data(const test_log_data* const d, const logstore_seq_num_t lsn) {
-        const char c{static_cast< char >((lsn % 94) + 33)};
-        const std::string actual{reinterpret_cast< const char* >(d->get_data()), static_cast< size_t >(d->size)};
+    void validate_data(const test_log_data* d, const logstore_seq_num_t lsn) {
+        const char c = static_cast< char >((lsn % 94) + 33);
+        const std::string actual{r_cast< const char* >(d->get_data()), static_cast< size_t >(d->size)};
         const std::string expected(static_cast< size_t >(d->size),
                                    c); // needs to be () because of same reason as vector
         ASSERT_EQ(actual, expected) << "Data mismatch for LSN=" << m_log_store->get_store_id() << ":" << lsn
@@ -381,26 +379,19 @@ public:
     SampleDB& operator=(SampleDB&&) noexcept = delete;
     ~SampleDB() = default;
 
-    [[nodiscard]] static SampleDB& instance() {
+    static SampleDB& instance() {
         static SampleDB inst;
         return inst;
     }
 
-    void start_homestore(const uint32_t ndevices, const uint64_t dev_size, uint32_t nthreads,
-                         const uint32_t n_log_stores, const bool restart = false) {
+    void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads, uint32_t n_log_stores,
+                         bool restart = false) {
         if (restart) {
             shutdown(ndevices, false);
             std::this_thread::sleep_for(std::chrono::seconds{5});
         }
 
         std::vector< dev_info > device_info;
-        // these should be static so that they stay in scope in the lambda in case function ends before lambda completes
-        static std::mutex start_mutex;
-        static std::condition_variable cv;
-        static bool inited;
-
-        inited = false;
-
         if (SISL_OPTIONS.count("device_list")) {
             m_dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
             std::string dev_list_str;
@@ -416,7 +407,7 @@ public:
             }
         } else {
             /* create files */
-            LOGINFO("creating {} device files with each of size {} ", ndevices, dev_size);
+            LOGINFO("creating {} device files with each of size {} ", ndevices, in_bytes(dev_size));
             if (!restart) init_files(ndevices, dev_size);
             for (uint32_t i{0}; i < ndevices; ++i) {
                 const std::filesystem::path fpath{s_fpath_root + std::to_string(i + 1)};
@@ -424,68 +415,52 @@ public:
             }
         }
 
-        bool is_spdk{SISL_OPTIONS["spdk"].as< bool >()};
-        /* if --spdk is not set, check env variable if user want to run spdk */
-        if (!is_spdk && std::getenv(SPDK_ENV_VAR_STRING.c_str())) { is_spdk = true; }
+        bool is_spdk = SISL_OPTIONS["spdk"].as< bool >();
         if (is_spdk) { nthreads = 2; }
 
         LOGINFO("Starting iomgr with {} threads, spdk: {}", nthreads, is_spdk);
         ioenvironment.with_iomgr(nthreads, is_spdk);
 
-        if (restart) {
-            for (uint32_t i{0}; i < n_log_stores; ++i) {
-                SampleLogStoreClient* client = m_log_store_clients[i].get();
-                HomeLogStoreMgrSI().open_log_store(
-                    client->m_family, client->m_store_id, false /* append_mode */,
-                    [i, this, client](std::shared_ptr< HomeLogStore > log_store) { client->set_log_store(log_store); });
-            }
-        }
-
-        const uint64_t app_mem_size{((ndevices * dev_size) * 15) / 100};
-        LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", app_mem_size);
-
-        boost::uuids::string_generator gen;
-        init_params params;
-        params.data_open_flags = homestore::io_flag::DIRECT_IO;
-        params.min_virtual_page_size = 4096;
-        params.app_mem_size = app_mem_size;
-        params.data_devices = device_info;
-        params.init_done_cb = [&tl_cv = cv, &tl_start_mutex = start_mutex,
-                               &tl_inited = inited](std::error_condition err, const out_params& params) {
-            LOGINFO("HomeBlks Init completed");
-            {
-                std::unique_lock< std::mutex > lk{tl_start_mutex};
-                tl_inited = true;
-            }
-            tl_cv.notify_one();
-        };
-        params.vol_mounted_cb = [](const VolumePtr& vol_obj, vol_state state) {};
-        params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
-        params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
+        const uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
+        LOGINFO("Initialize and start HomeStore with app_mem_size = {}", in_bytes(app_mem_size));
 
         test_common::set_random_http_port();
-        VolInterface::init(params, restart);
-
-        {
-            std::unique_lock< std::mutex > lk{start_mutex};
-            cv.wait(lk, [] { return inited; });
-        }
+        hs_input_params params;
+        params.app_mem_size = app_mem_size;
+        params.data_devices = device_info;
+        HomeStore::instance()
+            ->with_params(params)
+            .with_meta_service(5.0)
+            .with_log_service(60.0, 10.0)
+            .before_init_devices([this, restart, n_log_stores]() {
+                if (restart) {
+                    for (uint32_t i{0}; i < n_log_stores; ++i) {
+                        SampleLogStoreClient* client = m_log_store_clients[i].get();
+                        logstore_service().open_log_store(client->m_family, client->m_store_id, false /* append_mode */,
+                                                          [i, this, client](std::shared_ptr< HomeLogStore > log_store) {
+                                                              client->set_log_store(log_store);
+                                                          });
+                    }
+                }
+            })
+            .init(true /* wait_for_init */);
 
         if (!restart) {
             for (uint32_t i{0}; i < n_log_stores; ++i) {
                 auto family_idx =
-                    ((i % 2) == 0) ? HomeLogStoreMgr::DATA_LOG_FAMILY_IDX : HomeLogStoreMgr::CTRL_LOG_FAMILY_IDX;
+                    ((i % 2) == 0) ? LogStoreService::DATA_LOG_FAMILY_IDX : LogStoreService::CTRL_LOG_FAMILY_IDX;
                 m_log_store_clients.push_back(std::make_unique< SampleLogStoreClient >(
                     family_idx, bind_this(SampleDB::on_log_insert_completion, 3)));
             }
             SampleLogStoreClient::s_max_flush_multiple =
-                std::max(HomeLogStoreMgr::data_logdev().get_flush_size_multiple(),
-                         HomeLogStoreMgr::ctrl_logdev().get_flush_size_multiple());
+                std::max(logstore_service().data_logdev().get_flush_size_multiple(),
+                         logstore_service().ctrl_logdev().get_flush_size_multiple());
         }
     }
 
-    void shutdown(const uint32_t ndevices, const bool cleanup = true) {
-        VolInterface::shutdown();
+    void shutdown(uint32_t ndevices, bool cleanup = true) {
+        HomeStore::instance()->shutdown();
+        HomeStore::reset_instance();
         iomanager.stop();
 
         if (cleanup) {
@@ -494,7 +469,7 @@ public:
         }
     }
 
-    void init_files(const uint32_t ndevices, const uint64_t dev_size) {
+    void init_files(uint32_t ndevices, uint64_t dev_size) {
         remove_files(ndevices);
         for (uint32_t i{0}; i < ndevices; ++i) {
             const std::string fpath{s_fpath_root + std::to_string(i + 1)};
@@ -503,24 +478,23 @@ public:
         }
     }
 
-    void remove_files(const uint32_t ndevices) {
+    void remove_files(uint32_t ndevices) {
         for (uint32_t i{0}; i < ndevices; ++i) {
             const std::string fpath{s_fpath_root + std::to_string(i + 1)};
             if (std::filesystem::exists(fpath)) { std::filesystem::remove(fpath); }
         }
     }
 
-    void on_log_insert_completion(const logstore_family_id_t fid, const logstore_seq_num_t lsn,
-                                  const logdev_key ld_key) {
+    void on_log_insert_completion(logstore_family_id_t fid, logstore_seq_num_t lsn, logdev_key ld_key) {
         atomic_update_max(m_highest_log_idx[fid], ld_key.idx);
         if (m_io_closure) m_io_closure(fid, lsn, ld_key);
     }
 
-    [[nodiscard]] bool delete_log_store(const logstore_id_t store_id) {
+    bool delete_log_store(logstore_id_t store_id) {
         bool removed{false};
-        for (auto it{std::begin(m_log_store_clients)}; it != std::end(m_log_store_clients); ++it) {
+        for (auto it = std::begin(m_log_store_clients); it != std::end(m_log_store_clients); ++it) {
             if ((*it)->m_log_store->get_store_id() == store_id) {
-                HomeLogStoreMgrSI().remove_log_store((*it)->m_family, store_id);
+                logstore_service().remove_log_store((*it)->m_family, store_id);
                 m_log_store_clients.erase(it);
                 removed = true;
                 break;
@@ -529,9 +503,7 @@ public:
         return removed;
     }
 
-    [[nodiscard]] logid_t highest_log_idx(const logstore_family_id_t fid) const {
-        return m_highest_log_idx[fid].load();
-    }
+    logid_t highest_log_idx(logstore_family_id_t fid) const { return m_highest_log_idx[fid].load(); }
 
 private:
     const static std::string s_fpath_root;
@@ -539,7 +511,7 @@ private:
     std::function< void() > m_on_schedule_io_cb;
     test_log_store_comp_cb_t m_io_closure;
     std::vector< std::unique_ptr< SampleLogStoreClient > > m_log_store_clients;
-    std::array< std::atomic< logid_t >, HomeLogStoreMgr::num_log_families > m_highest_log_idx = {-1, -1};
+    std::array< std::atomic< logid_t >, LogStoreService::num_log_families > m_highest_log_idx = {-1, -1};
 };
 
 const std::string SampleDB::s_fpath_root{"/tmp/log_store_dev_"};
@@ -557,7 +529,7 @@ protected:
     virtual void SetUp() override{};
     virtual void TearDown() override{};
 
-    void init(const uint64_t n_total_records, const std::vector< std::pair< size_t, int > >& inp_freqs = {}) {
+    void init(uint64_t n_total_records, const std::vector< std::pair< size_t, int > >& inp_freqs = {}) {
         // m_nrecords_waiting_to_issue = std::lround(n_total_records / _batch_size) * _batch_size;
         m_nrecords_waiting_to_issue = n_total_records;
         m_nrecords_waiting_to_complete = 0;
@@ -570,11 +542,11 @@ protected:
         set_store_workload_freq(inp_freqs); // Equal distribution by default
     }
 
-    void kickstart_inserts(const uint32_t batch_size, const uint32_t q_depth, const uint32_t holes_per_batch = 0) {
+    void kickstart_inserts(uint32_t batch_size, uint32_t q_depth, uint32_t holes_per_batch = 0) {
         m_batch_size = batch_size;
         m_q_depth = q_depth;
         m_holes_per_batch = holes_per_batch;
-        iomanager.run_on(iomgr::thread_regex::all_io, [](io_thread_addr_t addr) {
+        iomanager.run_on(iomgr::thread_regex::all_io, [](iomgr::io_thread_addr_t addr) {
             if (SampleDB::instance().m_on_schedule_io_cb) SampleDB::instance().m_on_schedule_io_cb();
         });
     }
@@ -585,7 +557,7 @@ protected:
             uint32_t batch_size{0};
             {
                 std::unique_lock< std::mutex > lock{m_pending_mtx};
-                const bool insert{(m_nrecords_waiting_to_issue > 0) && (m_nrecords_waiting_to_complete < m_q_depth)};
+                const bool insert = (m_nrecords_waiting_to_issue > 0) && (m_nrecords_waiting_to_complete < m_q_depth);
                 if (insert) {
                     batch_size = std::min< uint32_t >(m_batch_size, m_nrecords_waiting_to_issue);
                     m_nrecords_waiting_to_issue -= batch_size;
@@ -598,8 +570,7 @@ protected:
         }
     }
 
-    void on_insert_completion([[maybe_unused]] const logstore_family_id_t fid, const logstore_seq_num_t lsn,
-                              const logdev_key ld_key) {
+    void on_insert_completion([[maybe_unused]] logstore_family_id_t fid, logstore_seq_num_t lsn, logdev_key ld_key) {
         bool notify{false};
         uint64_t waiting_to_issue{0};
         {
@@ -620,32 +591,32 @@ protected:
                           [&] { return (m_nrecords_waiting_to_issue == 0) && (m_nrecords_waiting_to_complete == 0); });
     }
 
-    void read_validate(const bool expect_all_completed = false) {
+    void read_validate(bool expect_all_completed = false) {
         for (const auto& lsc : SampleDB::instance().m_log_store_clients) {
             lsc->read_validate(expect_all_completed);
         }
     }
 
-    void iterate_validate(const bool expect_all_completed = false) {
+    void iterate_validate(bool expect_all_completed = false) {
         for (const auto& lsc : SampleDB::instance().m_log_store_clients) {
             lsc->iterate_validate(expect_all_completed);
         }
     }
-    void dump_validate(const int64_t expected_num_records, const bool print_content = false) {
-        homestore::log_dump_req dump_req{homestore::log_dump_req()};
+    void dump_validate(int64_t expected_num_records, bool print_content = false) {
+        log_dump_req dump_req;
         if (print_content) dump_req.verbosity_level = log_dump_verbosity::CONTENT;
         // must use operator= construction as copy construction results in error
 
         size_t dump_sz{0};
         int64_t rec_count{0};
-        for (logstore_family_id_t fid{0}; fid < HomeLogStoreMgr::num_log_families; ++fid) {
-            auto* family = (fid == 0) ? HomeLogStoreMgrSI().data_log_family() : HomeLogStoreMgrSI().ctrl_log_family();
+        for (logstore_family_id_t fid{0}; fid < LogStoreService::num_log_families; ++fid) {
+            auto* family = (fid == 0) ? logstore_service().data_log_family() : logstore_service().ctrl_log_family();
             nlohmann::json json_dump = family->dump_log_store(dump_req);
             dump_sz += json_dump.size();
 
             LOGINFO("Printing json dump of all logstores in family_id{}. \n {}", fid, json_dump.dump());
             for (const auto& logdump : json_dump) {
-                const auto itr{logdump.find("log_records")};
+                const auto itr = logdump.find("log_records");
                 if (itr != std::end(logdump)) { rec_count += static_cast< int64_t >(logdump["log_records"].size()); }
             }
         }
@@ -653,13 +624,13 @@ protected:
         EXPECT_EQ(expected_num_records, rec_count);
     }
 
-    void dump_validate_filter(const logstore_id_t id, const logstore_seq_num_t start_seq,
-                              const logstore_seq_num_t end_seq, const bool print_content = false) {
+    void dump_validate_filter(logstore_id_t id, logstore_seq_num_t start_seq, logstore_seq_num_t end_seq,
+                              bool print_content = false) {
         for (const auto& lsc : SampleDB::instance().m_log_store_clients) {
             if (lsc->m_log_store->get_store_id() != id) { continue; }
 
-            homestore::log_dump_req dump_req{homestore::log_dump_req()};
-            const auto fid{lsc->m_family};
+            log_dump_req dump_req;
+            const auto fid = lsc->m_family;
 
             if (print_content) dump_req.verbosity_level = log_dump_verbosity::CONTENT;
             dump_req.log_store = lsc->m_log_store;
@@ -667,13 +638,13 @@ protected:
             dump_req.end_seq_num = end_seq;
 
             // must use operator= construction as copy construction results in error
-            auto* family = (fid == 0) ? HomeLogStoreMgrSI().data_log_family() : HomeLogStoreMgrSI().ctrl_log_family();
+            auto* family = (fid == 0) ? logstore_service().data_log_family() : logstore_service().ctrl_log_family();
             nlohmann::json json_dump = family->dump_log_store(dump_req);
             LOGINFO("Printing json dump of family_id={} logstore id {}, start_seq {}, end_seq {}, \n\n {}", fid, id,
                     start_seq, end_seq, json_dump.dump());
-            const auto itr_id{json_dump.find(std::to_string(id))};
+            const auto itr_id = json_dump.find(std::to_string(id));
             if (itr_id != std::end(json_dump)) {
-                const auto itr_records{itr_id->find("log_records")};
+                const auto itr_records = itr_id->find("log_records");
                 if (itr_records != std::end(*itr_id)) {
                     EXPECT_EQ(static_cast< size_t >(end_seq - start_seq + 1), itr_records->size());
                 } else {
@@ -687,9 +658,9 @@ protected:
         }
     }
 
-    [[nodiscard]] int find_garbage_upto(const logstore_family_id_t family_idx, const logid_t idx) {
+    int find_garbage_upto(logstore_family_id_t family_idx, logid_t idx) {
         int count{0};
-        auto it{std::begin(m_garbage_stores_upto[family_idx])};
+        auto it = std::begin(m_garbage_stores_upto[family_idx]);
 
         while (it != std::end(m_garbage_stores_upto[family_idx])) {
             if (it->first > idx) { return count; }
@@ -700,16 +671,16 @@ protected:
     }
 
     void fill_hole_and_validate() {
-        for (size_t i{0}; i < SampleDB::instance().m_log_store_clients.size(); ++i) {
-            const auto& lsc{SampleDB::instance().m_log_store_clients[i]};
+        for (size_t i = 0; i < SampleDB::instance().m_log_store_clients.size(); ++i) {
+            const auto& lsc = SampleDB::instance().m_log_store_clients[i];
             lsc->fill_hole_and_validate();
         }
     }
 
-    void truncate_validate(const bool is_parallel_to_write = false) {
+    void truncate_validate(bool is_parallel_to_write = false) {
         int skip_truncation = 0;
         for (size_t i{0}; i < SampleDB::instance().m_log_store_clients.size(); ++i) {
-            const auto& lsc{SampleDB::instance().m_log_store_clients[i]};
+            const auto& lsc = SampleDB::instance().m_log_store_clients[i];
 
             // lsc->truncate(lsc->m_cur_lsn.load() - 1);
             const auto t_seq_num = lsc->m_log_store->truncated_upto();
@@ -728,7 +699,7 @@ protected:
         }
 
         bool failed{false};
-        HomeLogStoreMgrSI().device_truncate(
+        logstore_service().device_truncate(
             [this, is_parallel_to_write, &failed](const auto& trunc_lds) {
                 bool expect_forward_progress{true};
                 uint32_t n_fully_truncated{0};
@@ -763,10 +734,10 @@ protected:
             true /* wait_till_done */);
         ASSERT_FALSE(failed);
 
-        for (logstore_family_id_t fid{0}; fid < HomeLogStoreMgr::num_log_families; ++fid) {
-            const auto upto_count{find_garbage_upto(fid, m_truncate_log_idx[fid].load())};
+        for (logstore_family_id_t fid{0}; fid < LogStoreService::num_log_families; ++fid) {
+            const auto upto_count = find_garbage_upto(fid, m_truncate_log_idx[fid].load());
             std::remove_const_t< decltype(upto_count) > count{0};
-            for (auto it{std::begin(m_garbage_stores_upto[fid])}; count < upto_count; ++count) {
+            for (auto it = std::begin(m_garbage_stores_upto[fid]); count < upto_count; ++count) {
                 it = m_garbage_stores_upto[fid].erase(it);
             }
         }
@@ -775,14 +746,14 @@ protected:
 
     void recovery_validate() {
         for (size_t i{0}; i < SampleDB::instance().m_log_store_clients.size(); ++i) {
-            const auto& lsc{SampleDB::instance().m_log_store_clients[i]};
+            const auto& lsc = SampleDB::instance().m_log_store_clients[i];
             lsc->recovery_validate();
         }
     }
 
     void reset_recovery() {
         for (size_t i{0}; i < SampleDB::instance().m_log_store_clients.size(); ++i) {
-            const auto& lsc{SampleDB::instance().m_log_store_clients[i]};
+            const auto& lsc = SampleDB::instance().m_log_store_clients[i];
             lsc->reset_recovery();
         }
     }
@@ -792,17 +763,17 @@ protected:
         size_t actual_garbage_ids{0};
         size_t exp_garbage_store_count{0};
 
-        for (logstore_family_id_t fid{0}; fid < HomeLogStoreMgr::num_log_families; ++fid) {
+        for (logstore_family_id_t fid{0}; fid < LogStoreService::num_log_families; ++fid) {
             std::vector< logstore_id_t > reg_ids, garbage_ids;
-            LogDev& ld = (fid == HomeLogStoreMgr::DATA_LOG_FAMILY_IDX) ? HomeLogStoreMgrSI().data_logdev()
-                                                                       : HomeLogStoreMgrSI().ctrl_logdev();
+            LogDev& ld = (fid == LogStoreService::DATA_LOG_FAMILY_IDX) ? logstore_service().data_logdev()
+                                                                       : logstore_service().ctrl_logdev();
             ld.get_registered_store_ids(reg_ids, garbage_ids);
             actual_valid_ids += reg_ids.size() - garbage_ids.size();
             actual_garbage_ids += garbage_ids.size();
 
-            auto upto_count{find_garbage_upto(fid, SampleDB::instance().highest_log_idx(fid) + 1)};
+            auto upto_count = find_garbage_upto(fid, SampleDB::instance().highest_log_idx(fid) + 1);
             decltype(upto_count) count{0};
-            for (auto it{std::begin(m_garbage_stores_upto[fid])}; count < upto_count; ++it, ++count) {
+            for (auto it = std::begin(m_garbage_stores_upto[fid]); count < upto_count; ++it, ++count) {
                 exp_garbage_store_count += it->second;
             }
         }
@@ -810,19 +781,19 @@ protected:
         ASSERT_EQ(actual_garbage_ids, exp_garbage_store_count);
     }
 
-    void delete_validate(const uint32_t idx) {
+    void delete_validate(uint32_t idx) {
         auto& db = SampleDB::instance();
         auto fid = db.m_log_store_clients[idx]->m_family;
         validate_num_stores();
 
-        const auto l_idx{db.highest_log_idx(fid)};
+        const auto l_idx = db.highest_log_idx(fid);
         if (m_garbage_stores_upto[fid].find(l_idx) != m_garbage_stores_upto[fid].end()) {
             m_garbage_stores_upto[fid][l_idx]++;
         } else {
             m_garbage_stores_upto[fid].insert(std::pair< logid_t, uint32_t >(l_idx, 1u));
         }
 
-        [[maybe_unused]] const bool result{db.delete_log_store(db.m_log_store_clients[idx]->m_store_id)};
+        db.delete_log_store(db.m_log_store_clients[idx]->m_store_id);
         validate_num_stores();
     }
 
@@ -842,7 +813,7 @@ protected:
 
         size_t d{0};
         for (size_t s{0}; s < SampleDB::instance().m_log_store_clients.size(); ++s) {
-            const auto upto{store_freqs[s].has_value() ? *store_freqs[s] : default_freq};
+            const auto upto = store_freqs[s].has_value() ? *store_freqs[s] : default_freq;
             for (std::remove_const_t< decltype(upto) > i{0}; i < upto; ++i) {
                 m_store_distribution[d++] = s;
             }
@@ -867,8 +838,8 @@ protected:
     uint64_t m_nrecords_waiting_to_complete{0};
     std::mutex m_pending_mtx;
     std::condition_variable m_pending_cv;
-    std::array< std::atomic< logid_t >, HomeLogStoreMgr::num_log_families > m_truncate_log_idx = {-1, -1};
-    std::array< std::map< logid_t, uint32_t >, HomeLogStoreMgr::num_log_families > m_garbage_stores_upto;
+    std::array< std::atomic< logid_t >, LogStoreService::num_log_families > m_truncate_log_idx = {-1, -1};
+    std::array< std::map< logid_t, uint32_t >, LogStoreService::num_log_families > m_garbage_stores_upto;
     std::array< uint32_t, 100 > m_store_distribution;
 
     uint32_t m_q_depth{64};
@@ -877,8 +848,8 @@ protected:
 };
 
 TEST_F(LogStoreTest, BurstRandInsertThenTruncate) {
-    const auto num_records{SISL_OPTIONS["num_records"].as< uint32_t >()};
-    const auto iterations{SISL_OPTIONS["iterations"].as< uint32_t >()};
+    const auto num_records = SISL_OPTIONS["num_records"].as< uint32_t >();
+    const auto iterations = SISL_OPTIONS["iterations"].as< uint32_t >();
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
@@ -913,8 +884,8 @@ TEST_F(LogStoreTest, BurstRandInsertThenTruncate) {
 }
 
 TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
-    const auto num_records{SISL_OPTIONS["num_records"].as< uint32_t >()};
-    const auto iterations{SISL_OPTIONS["iterations"].as< uint32_t >()};
+    const auto num_records = SISL_OPTIONS["num_records"].as< uint32_t >();
+    const auto iterations = SISL_OPTIONS["iterations"].as< uint32_t >();
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
@@ -951,8 +922,8 @@ TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
 }
 
 TEST_F(LogStoreTest, RandInsertsWithHoles) {
-    const auto num_records{SISL_OPTIONS["num_records"].as< uint32_t >()};
-    const auto iterations{SISL_OPTIONS["iterations"].as< uint32_t >()};
+    const auto num_records = SISL_OPTIONS["num_records"].as< uint32_t >();
+    const auto iterations = SISL_OPTIONS["iterations"].as< uint32_t >();
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
@@ -980,8 +951,8 @@ TEST_F(LogStoreTest, RandInsertsWithHoles) {
 }
 
 TEST_F(LogStoreTest, VarRateInsertThenTruncate) {
-    const auto nrecords{SISL_OPTIONS["num_records"].as< uint32_t >()};
-    const auto iterations{SISL_OPTIONS["iterations"].as< uint32_t >()};
+    const auto nrecords = SISL_OPTIONS["num_records"].as< uint32_t >();
+    const auto iterations = SISL_OPTIONS["iterations"].as< uint32_t >();
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
@@ -1044,11 +1015,11 @@ TEST_F(LogStoreTest, VarRateInsertThenTruncate) {
 }
 
 TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
-    const auto num_devs{SISL_OPTIONS["num_devs"].as< uint32_t >()}; // num devices
-    const auto dev_size_bytes{SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024};
-    const auto num_records{SISL_OPTIONS["num_records"].as< uint32_t >()};
-    const auto num_threads{SISL_OPTIONS["num_threads"].as< uint32_t >()};
-    const auto num_logstores{SISL_OPTIONS["num_logstores"].as< uint32_t >()};
+    const auto num_devs = SISL_OPTIONS["num_devs"].as< uint32_t >(); // num devices
+    const auto dev_size_bytes = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
+    const auto num_records = SISL_OPTIONS["num_records"].as< uint32_t >();
+    const auto num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
+    const auto num_logstores = SISL_OPTIONS["num_logstores"].as< uint32_t >();
     // somewhere between 4-15 iterations depending on if run with other tests or not this will fail
     const auto iterations = SISL_OPTIONS["iterations"].as< uint32_t >();
 
@@ -1102,7 +1073,7 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
 }
 
 TEST_F(LogStoreTest, DeleteMultipleLogStores) {
-    const auto nrecords{(SISL_OPTIONS["num_records"].as< uint32_t >() * 5) / 100};
+    const auto nrecords = (SISL_OPTIONS["num_records"].as< uint32_t >() * 5) / 100;
 
     LOGINFO("Step 1: Reinit the {} to start sequential write test", nrecords);
     this->init(nrecords);
@@ -1139,40 +1110,40 @@ TEST_F(LogStoreTest, DeleteMultipleLogStores) {
 }
 
 TEST_F(LogStoreTest, WriteSyncThenRead) {
-    const auto iterations{SISL_OPTIONS["iterations"].as< uint32_t >()};
+    const auto iterations = SISL_OPTIONS["iterations"].as< uint32_t >();
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
-        std::shared_ptr< homestore::HomeLogStore > tmp_log_store{
-            homestore::HomeLogStoreMgrSI().create_new_log_store(HomeLogStoreMgr::DATA_LOG_FAMILY_IDX, false)};
-        const auto store_id{tmp_log_store->get_store_id()};
+        std::shared_ptr< HomeLogStore > tmp_log_store =
+            logstore_service().create_new_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, false);
+        const auto store_id = tmp_log_store->get_store_id();
         LOGINFO("Created new log store -> id {}", store_id);
         const unsigned count{10};
         for (unsigned i{0}; i < count; ++i) {
 
             bool io_memory{false};
-            auto* const d{SampleLogStoreClient::prepare_data(i, io_memory)};
-            const bool succ{tmp_log_store->write_sync(i, {reinterpret_cast< uint8_t* >(d), d->total_size(), false})};
+            auto* d = SampleLogStoreClient::prepare_data(i, io_memory);
+            const bool succ = tmp_log_store->write_sync(i, {uintptr_cast(d), d->total_size(), false});
             EXPECT_TRUE(succ);
             LOGINFO("Written sync data for LSN -> {}", i);
 
             if (io_memory) {
-                iomanager.iobuf_free(reinterpret_cast< uint8_t* >(d));
+                iomanager.iobuf_free(uintptr_cast(d));
             } else {
-                std::free(static_cast< void* >(d));
+                std::free(voidptr_cast(d));
             }
 
-            auto b{tmp_log_store->read_sync(i)};
-            auto* const tl{reinterpret_cast< test_log_data* >(b.bytes())};
+            auto b = tmp_log_store->read_sync(i);
+            auto* tl = r_cast< test_log_data* >(b.bytes());
             ASSERT_EQ(tl->total_size(), b.size()) << "Size Mismatch for lsn=" << store_id << ":" << i;
-            const char c{static_cast< char >((i % 94) + 33)};
-            const std::string actual{reinterpret_cast< const char* >(tl->get_data()), static_cast< size_t >(tl->size)};
+            const char c = static_cast< char >((i % 94) + 33);
+            const std::string actual{r_cast< const char* >(tl->get_data()), static_cast< size_t >(tl->size)};
             const std::string expected(static_cast< size_t >(tl->size),
                                        c); // needs to be () because of same reason as vector
             ASSERT_EQ(actual, expected) << "Data mismatch for LSN=" << store_id << ":" << i << " size=" << tl->size;
         }
 
-        homestore::HomeLogStoreMgrSI().remove_log_store(HomeLogStoreMgr::DATA_LOG_FAMILY_IDX, store_id);
+        logstore_service().remove_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, store_id);
         LOGINFO("Remove logstore -> i {}", store_id);
     }
 }
@@ -1184,7 +1155,7 @@ SISL_OPTION_GROUP(test_log_store,
                   (num_devs, "", "num_devs", "number of devices to create",
                    ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
                   (dev_size_mb, "", "dev_size_mb", "size of each device in MB",
-                   ::cxxopts::value< uint64_t >()->default_value("10240"), "number"),
+                   ::cxxopts::value< uint64_t >()->default_value("1024"), "number"),
                   (device_list, "", "device_list", "Device List instead of default created",
                    ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
                   (num_logstores, "", "num_logstores", "number of log stores",
@@ -1195,43 +1166,14 @@ SISL_OPTION_GROUP(test_log_store,
                   (iterations, "", "iterations", "Iterations", ::cxxopts::value< uint32_t >()->default_value("1"),
                    "the number of iterations to run each test"));
 
-#if 0
-void parse() {
-    if (SISL_OPTIONS.count("log_mods")) {
-        std::regex re("[\\s,]+");
-        auto s = SISL_OPTIONS["log_mods"].as< std::string >();
-        std::sregex_token_iterator it(s.begin(), s.end(), re, -1);
-        std::sregex_token_iterator reg_end;
-        for (; it != reg_end; ++it) {
-            auto mod_stream = std::istringstream(it->str());
-            std::string module_name, module_level;
-            getline(mod_stream, module_name, ':');
-            auto sym = "module_level_" + module_name;
-            if (auto mod_level = (spdlog::level::level_enum*)dlsym(RTLD_DEFAULT, sym.c_str()); nullptr != mod_level) {
-                if (getline(mod_stream, module_level, ':')) {
-                    *mod_level = (spdlog::level::level_enum)strtol(module_level.data(), nullptr, 0);
-                } else {
-                    *mod_level = lvl;
-                }
-                glob_enabled_mods.push_back(module_name);
-            } else {
-                LOGWARN("Could not load module logger: {}\n{}", module_name, dlerror());
-            }
-        }
-        LOGINFO("Enabled modules:\t{}",
-                std::accumulate(glob_enabled_mods.begin(), glob_enabled_mods.end(), std::string("")));
-    }
-}
-#endif
-
 int main(int argc, char* argv[]) {
-    int parsed_argc{argc};
+    int parsed_argc = argc;
     ::testing::InitGoogleTest(&parsed_argc, argv);
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_log_store);
     sisl::logging::SetLogger("test_log_store");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
 
-    auto n_log_stores{SISL_OPTIONS["num_logstores"].as< uint32_t >()};
+    auto n_log_stores = SISL_OPTIONS["num_logstores"].as< uint32_t >();
     if (n_log_stores < 4u) {
         LOGINFO("Log store test needs minimum 4 log stores for testing, setting them to 4");
         n_log_stores = 4u;
@@ -1240,7 +1182,7 @@ int main(int argc, char* argv[]) {
     SampleDB::instance().start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
                                          SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
                                          SISL_OPTIONS["num_threads"].as< uint32_t >(), n_log_stores);
-    const int ret{RUN_ALL_TESTS()};
+    const int ret = RUN_ALL_TESTS();
     SampleDB::instance().shutdown(SISL_OPTIONS["num_devs"].as< uint32_t >());
     return ret;
 }

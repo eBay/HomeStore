@@ -11,7 +11,7 @@
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
-#include "../log_dev.hpp"
+#include "logstore/log_dev.hpp"
 #include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;

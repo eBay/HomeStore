@@ -11,6 +11,7 @@
 #include <thread>
 #include <vector>
 
+#include <gtest/gtest.h>
 #include <boost/dynamic_bitset.hpp>
 #include <sisl/fds/bitword.hpp>
 #include <folly/ConcurrentSkipList.h>
@@ -18,14 +19,12 @@
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
-#include "blk_allocator.h"
-#include "blk_cache.h"
-#include "engine/common/homestore_assert.hpp"
-#include "engine/common/homestore_config.hpp"
-#include "engine/common/homestore_flip.hpp"
-#include "varsize_blk_allocator.h"
-
-#include <gtest/gtest.h>
+#include "blkalloc/blk_allocator.h"
+#include "blkalloc/blk_cache.h"
+#include "common/homestore_assert.hpp"
+#include "common/homestore_config.hpp"
+#include "common/homestore_flip.hpp"
+#include "blkalloc/varsize_blk_allocator.h"
 
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
@@ -43,9 +42,7 @@ using size_generator_t = std::function< blk_count_t(void) >;
 
 struct AllocedBlkTracker {
     AllocedBlkTracker(const uint64_t quota) :
-            m_alloced_blk_list{BlkListT::create(8)},
-            m_alloced_blk_map{quota},
-            m_max_quota{quota} {}
+            m_alloced_blk_list{BlkListT::create(8)}, m_alloced_blk_map{quota}, m_max_quota{quota} {}
 
     void adjust_limits(const uint8_t hi_limit_pct) {
         m_lo_limit = m_alloced_blk_list.size();
@@ -119,15 +116,14 @@ public:
 
     [[nodiscard]] BlkListAccessorT& blk_list(const slab_idx_t idx) {
         return m_slab_alloced_blks[idx].m_alloced_blk_list;
-    }[[nodiscard]] BlkMapT& blk_map(const slab_idx_t idx) {
-        return m_slab_alloced_blks[idx].m_alloced_blk_map;
     }
+    [[nodiscard]] BlkMapT& blk_map(const slab_idx_t idx) { return m_slab_alloced_blks[idx].m_alloced_blk_map; }
 
     [[nodiscard]] slab_idx_t nblks_to_idx(const blk_count_t n_blks) {
         return m_track_slabs ? nblks_to_slab_tbl[n_blks] : 0;
     }
 
-        [[nodiscard]] bool alloced(const BlkId& bid, const bool track_block_group) {
+    [[nodiscard]] bool alloced(const BlkId& bid, const bool track_block_group) {
         uint32_t blk_num{static_cast< uint32_t >(bid.get_blk_num())};
         if (blk_num >= m_total_count) {
             {
@@ -185,8 +181,8 @@ public:
         return true;
     }
 
-        [[nodiscard]] BlkId
-        pick_rand_blks_to_free(const blk_count_t pref_nblks, const bool round_nblks, const bool track_group_block) {
+    [[nodiscard]] BlkId pick_rand_blks_to_free(const blk_count_t pref_nblks, const bool round_nblks,
+                                               const bool track_group_block) {
         return m_track_slabs ? pick_rand_slab_blks_to_free(pref_nblks, track_group_block)
                              : pick_rand_pool_blks_to_free(pref_nblks, round_nblks, track_group_block);
     }
@@ -286,8 +282,8 @@ private:
         return BlkId{start_blk_num, n_blks, 0};
     }
 
-        [[nodiscard]] BlkId pick_rand_pool_blks_to_free(const blk_count_t pref_nblks, const bool round_nblks,
-                                                        const bool track_block_group) {
+    [[nodiscard]] BlkId pick_rand_pool_blks_to_free(const blk_count_t pref_nblks, const bool round_nblks,
+                                                    const bool track_block_group) {
         uint32_t start_blk_num{0};
         blk_count_t n_blks{0};
 
@@ -392,7 +388,7 @@ protected:
         return true;
     }
 
-        [[nodiscard]] bool free_blk(const uint32_t blk_num) {
+    [[nodiscard]] bool free_blk(const uint32_t blk_num) {
         m_allocator->free(BlkId{blk_num, 1, 0});
         return freed(blk_num);
     }
@@ -430,7 +426,6 @@ protected:
         cfg.set_phys_page_size(4096);
         cfg.set_auto_recovery(true);
         cfg.set_use_slabs(use_slabs);
-        cfg.set_blks_per_portion(cfg.get_total_blks());
         m_allocator = std::make_unique< VarsizeBlkAllocator >(cfg, true, 0);
         HS_REL_ASSERT_EQ(m_allocator->realtime_bm_on(), false);
     }
@@ -480,8 +475,8 @@ protected:
         return true;
     }
 
-        [[nodiscard]] BlkId free_random_alloced_sized_blk(const blk_count_t reqd_size, const bool round_nblks,
-                                                          const bool track_block_group) {
+    [[nodiscard]] BlkId free_random_alloced_sized_blk(const blk_count_t reqd_size, const bool round_nblks,
+                                                      const bool track_block_group) {
         const BlkId bid{pick_rand_blks_to_free(reqd_size, round_nblks, track_block_group)};
         m_allocator->free(bid);
         return bid;
@@ -512,10 +507,10 @@ protected:
         return total_alloced;
     }
 
-        [[nodiscard]] std::pair< uint64_t, uint64_t > do_alloc_free(const uint64_t num_iters, const bool is_contiguous,
-                                                                    const size_generator_t& size_generator,
-                                                                    const uint8_t limit_pct, const bool round_nblks,
-                                                                    const bool track_block_group) {
+    [[nodiscard]] std::pair< uint64_t, uint64_t > do_alloc_free(const uint64_t num_iters, const bool is_contiguous,
+                                                                const size_generator_t& size_generator,
+                                                                const uint8_t limit_pct, const bool round_nblks,
+                                                                const bool track_block_group) {
         const auto nthreads{std::clamp< uint32_t >(std::thread::hardware_concurrency(), 2,
                                                    SISL_OPTIONS["num_threads"].as< uint32_t >())};
         for (auto& s : m_slab_alloced_blks) {
@@ -578,7 +573,7 @@ TEST_F(FixedBlkAllocatorTest, alloc_free_fixed_size) {
     run_parallel(nthreads, m_total_count / 4,
                  [&](const uint64_t count_per_thread, std::atomic< bool >& terminate_flag) {
                      for (uint64_t i{0}; (i < count_per_thread) && !terminate_flag; ++i) {
-                         [[maybe_unused]] const BlkId blkId { free_random_alloced_blk(false) };
+                         [[maybe_unused]] const BlkId blkId{free_random_alloced_blk(false)};
                      }
                  });
     validate_count();
@@ -735,13 +730,13 @@ void alloc_free_var_contiguous_onesize(VarsizeBlkAllocatorTest* const block_test
 
     const uint64_t calculated_remaining{static_cast< uint64_t >(block_test_pointer->m_total_count) - preload_alloced +
                                         result.second - result.first};
-    const uint64_t remaining{block_test_pointer->m_allocator->get_available_blks()};
+    const uint64_t remaining{block_test_pointer->m_allocator->available_blks()};
     LOGINFO("Step 3: Reallocate to alloc all remaining count {} calculated remaining {}", remaining,
             calculated_remaining);
     [[maybe_unused]] const auto preload_alloced2{
         block_test_pointer->preload(remaining, true /* is_contiguous */, BlkAllocatorTest::single_blk_size, true)};
 
-    ASSERT_EQ(block_test_pointer->m_allocator->get_available_blks(), 0u) << "Expected no blocks to be free";
+    ASSERT_EQ(block_test_pointer->m_allocator->available_blks(), 0u) << "Expected no blocks to be free";
 }
 }; // namespace
 
@@ -769,7 +764,7 @@ void alloc_free_var_scatter_unirandsize(VarsizeBlkAllocatorTest* const block_tes
     const auto preload_alloced{block_test_pointer->preload(preload_amount, false /* is_contiguous */,
                                                            BlkAllocatorTest::uniform_rand_size, true)};
     const uint64_t remaining_after_preload{block_test_pointer->m_total_count - preload_alloced};
-    ASSERT_EQ(block_test_pointer->m_allocator->get_available_blks(), remaining_after_preload)
+    ASSERT_EQ(block_test_pointer->m_allocator->available_blks(), remaining_after_preload)
         << "Expected available to match";
 
     const auto num_iters{SISL_OPTIONS["iters"].as< uint64_t >()};
@@ -782,12 +777,12 @@ void alloc_free_var_scatter_unirandsize(VarsizeBlkAllocatorTest* const block_tes
                                                         false /* round_blks */, true)};
     // wait for any sweeping to complete.
     const uint64_t calculated_remaining{remaining_after_preload + result.second - result.first};
-    const uint64_t remaining{block_test_pointer->m_allocator->get_available_blks()};
+    const uint64_t remaining{block_test_pointer->m_allocator->available_blks()};
     LOGINFO("Step 3: Reallocate to alloc all remaining count {} calculated remaining {}", remaining,
             calculated_remaining);
     [[maybe_unused]] const auto preload_alloced2{
         block_test_pointer->preload(remaining, false /* is_contiguous */, BlkAllocatorTest::single_blk_size, true)};
-    ASSERT_EQ(block_test_pointer->m_allocator->get_available_blks(), 0u) << "Expected no blocks to be free";
+    ASSERT_EQ(block_test_pointer->m_allocator->available_blks(), 0u) << "Expected no blocks to be free";
 }
 } // namespace
 
@@ -824,13 +819,13 @@ void alloc_var_scatter_direct_unirandsize(VarsizeBlkAllocatorTest* const block_t
     const auto preload_alloced{block_test_pointer->preload(preload_amount, false /* is_contiguous */,
                                                            BlkAllocatorTest::uniform_rand_size, true)};
 
-    const uint64_t remaining{block_test_pointer->m_allocator->get_available_blks()};
+    const uint64_t remaining{block_test_pointer->m_allocator->available_blks()};
     const uint64_t calculated_remaining{block_test_pointer->m_total_count - preload_alloced};
     LOGINFO("Step 3: Reallocate to alloc all remaining count {} calculated remaining {}", remaining,
             calculated_remaining);
     [[maybe_unused]] const auto preload_alloced2{
         block_test_pointer->preload(remaining, false /* is_contiguous */, BlkAllocatorTest::single_blk_size, true)};
-    ASSERT_EQ(block_test_pointer->m_allocator->get_available_blks(), 0u) << "Expected no blocks to be free";
+    ASSERT_EQ(block_test_pointer->m_allocator->available_blks(), 0u) << "Expected no blocks to be free";
 }
 } // namespace
 

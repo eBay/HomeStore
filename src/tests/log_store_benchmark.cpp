@@ -10,16 +10,14 @@
 #include <string>
 #include <vector>
 
-#include <api/vol_interface.hpp>
 #include <benchmark/benchmark.h>
-#include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/io_environment.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
+#include "homestore.hpp"
+#include "homestore_decl.hpp"
 
-#include "engine/common/homestore_header.hpp"
-
-#include "../log_store.hpp"
+#include "logstore/log_store.hpp"
 
 using namespace homestore;
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
@@ -41,7 +39,7 @@ public:
 
     explicit SampleLogStoreClient(const uint64_t nentries, const logstore_family_id_t family_idx,
                                   const test_log_store_comp_cb_t& cb) :
-            SampleLogStoreClient(HomeLogStoreMgrSI().create_new_log_store(family_idx, false /* append_mode */),
+            SampleLogStoreClient(logstore_service().create_new_log_store(family_idx, false /* append_mode */),
                                  family_idx, nentries, cb) {}
 
     SampleLogStoreClient(const SampleLogStoreClient&) = delete;
@@ -117,64 +115,47 @@ public:
 
     void start_homestore(const std::string& devname, const uint32_t nthreads, const uint32_t n_log_stores,
                          const uint32_t n_entries, const uint32_t qdepth, const bool restart = false) {
-        if (restart) { shutdown(); }
+        if (restart) {
+            shutdown();
+            std::this_thread::sleep_for(std::chrono::seconds{5});
+        }
 
         std::vector< dev_info > device_info;
         // these should be static so that they stay in scope in the lambda in case function ends before lambda completes
-        static std::mutex start_mutex;
-        static std::condition_variable cv;
-        static bool inited;
-
-        inited = false;
         m_q_depth = qdepth;
         const std::filesystem::path fpath{devname};
         LOGINFO("opening {} device of size {} ", fpath.string());
         device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
 
-        LOGINFO("Starting iomgr with {} threads", nthreads);
-        ioenvironment.with_iomgr(nthreads);
+        LOGINFO("Starting iomgr with {} threads, spdk: {}", nthreads, SISL_OPTIONS["spdk"].as< bool >());
+        ioenvironment.with_iomgr(nthreads, SISL_OPTIONS["spdk"].as< bool >());
 
-        if (restart) {
-            for (uint32_t i{0}; i < n_log_stores; ++i) {
-                SampleLogStoreClient* client = m_log_store_clients[i].get();
-                HomeLogStoreMgrSI().open_log_store(
-                    client->m_family, client->m_store_id, false /* append_mode */,
-                    [i, this](std::shared_ptr< HomeLogStore > log_store) { m_log_store_clients[i]->init(log_store); });
-            }
-        }
+        constexpr uint64_t app_mem_size = uint64_cast(2) * 1024 * 1024 * 1024;
+        LOGINFO("Initialize and start HomeBlks with memory size = {}", in_bytes(app_mem_size));
 
-        constexpr uint64_t app_mem_size{static_cast< uint64_t >(2) * 1024 * 1024 * 1024};
-        LOGINFO("Initialize and start HomeBlks with memory size = {}", app_mem_size);
-
-        boost::uuids::string_generator gen;
-        init_params params;
-        params.data_open_flags = homestore::io_flag::DIRECT_IO;
-        params.min_virtual_page_size = 4096;
+        hs_input_params params;
         params.app_mem_size = app_mem_size;
         params.data_devices = device_info;
-        params.init_done_cb = [&tl_start_mutex = start_mutex, &tl_cv = cv,
-                               &tl_inited = inited](std::error_condition err, const out_params& params) {
-            LOGINFO("HomeBlks Init completed");
-            {
-                std::unique_lock< std::mutex > lk{tl_start_mutex};
-                tl_inited = true;
-            }
-            tl_cv.notify_one();
-        };
-        params.vol_mounted_cb = [](const VolumePtr& vol_obj, vol_state state) {};
-        params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
-        params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
-        VolInterface::init(params, restart);
-
-        {
-            std::unique_lock< std::mutex > lk{start_mutex};
-            cv.wait(lk, [] { return inited; });
-        }
+        HomeStore::instance()
+            ->with_params(params)
+            .with_meta_service(5.0)
+            .with_log_service(60.0, 10.0)
+            .before_init_devices([this, restart, n_log_stores]() {
+                if (restart) {
+                    for (uint32_t i{0}; i < n_log_stores; ++i) {
+                        SampleLogStoreClient* client = m_log_store_clients[i].get();
+                        logstore_service().open_log_store(
+                            client->m_family, client->m_store_id, false /* append_mode */,
+                            [i, this, client](std::shared_ptr< HomeLogStore > log_store) { client->init(log_store); });
+                    }
+                }
+            })
+            .init(true /* wait_for_init */);
 
         if (!restart) {
             for (uint32_t i{0}; i < n_log_stores; ++i) {
                 auto family_idx =
-                    ((i % 2) == 0) ? HomeLogStoreMgr::DATA_LOG_FAMILY_IDX : HomeLogStoreMgr::CTRL_LOG_FAMILY_IDX;
+                    ((i % 2) == 0) ? LogStoreService::DATA_LOG_FAMILY_IDX : LogStoreService::CTRL_LOG_FAMILY_IDX;
                 m_log_store_clients.push_back(std::make_unique< SampleLogStoreClient >(
                     n_entries, family_idx, bind_this(SampleDB::on_log_append_completion, 1)));
             }
@@ -182,7 +163,8 @@ public:
     }
 
     void shutdown() {
-        VolInterface::shutdown();
+        HomeStore::instance()->shutdown();
+        HomeStore::reset_instance();
 
         // m_log_store_clients.clear();
         iomanager.stop();
@@ -193,7 +175,7 @@ public:
         for (auto& sc : m_log_store_clients) {
             sc->m_nth_entry.store(0);
         }
-        iomanager.run_on(iomgr::thread_regex::all_io, [this](io_thread_addr_t addr) { initial_io(); });
+        iomanager.run_on(iomgr::thread_regex::all_io, [this](iomgr::io_thread_addr_t addr) { initial_io(); });
     }
 
     void initial_io() {
@@ -280,7 +262,8 @@ SISL_OPTION_GROUP(log_store_benchmark,
                   (qdepth, "", "qdepth", "qdepth per thread", ::cxxopts::value< uint32_t >()->default_value("32"),
                    "number"),
                   (max_record_size, "", "max_record_size", "max record size",
-                   ::cxxopts::value< uint32_t >()->default_value("1024"), "number"));
+                   ::cxxopts::value< uint32_t >()->default_value("1024"), "number"),
+                  (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 // BENCHMARK(test_append)->Iterations(10)->Threads(SISL_OPTIONS["num_threads"].as< uint32_t >());
 BENCHMARK(test_append)->Iterations(1);

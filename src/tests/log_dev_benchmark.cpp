@@ -11,7 +11,7 @@
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
-#include "../log_dev.hpp"
+#include "logstore/log_dev.hpp"
 
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 RCU_REGISTER_INIT
