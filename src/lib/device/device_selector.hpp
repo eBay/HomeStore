@@ -5,7 +5,7 @@
 
 #include <vector>
 #include <folly/ThreadLocal.h>
-#include "engine/blkalloc/blk_allocator.h"
+#include "blkalloc/blk_allocator.h"
 
 namespace homestore {
 class PhysicalDev;
