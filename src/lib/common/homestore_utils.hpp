@@ -4,6 +4,11 @@
 #include <sisl/fds/buffer.hpp>
 
 namespace homestore {
+template < typename T >
+std::string to_hex(T i) {
+    return fmt::format("{0:x}", i);
+}
+
 class hs_utils {
     static size_t m_btree_mempool_size;
 
@@ -24,6 +29,4 @@ public:
                                             const size_t alignment);
     static hs_uuid_t gen_system_uuid();
 };
-static constexpr hs_uuid_t INVALID_SYSTEM_UUID{0};
-
 } // namespace homestore
