@@ -21,10 +21,12 @@
 #include <folly/MPMCQueue.h>
 #include <sisl/utility/enum.hpp>
 #include <sisl/utility/urcu_helper.hpp>
+#include <sisl/fds/thread_vector.hpp>
 
+#include "homestore_decl.hpp"
 #include "blk.h"
-#include "engine/common/homestore_config.hpp"
-#include "engine/common/homestore_header.hpp"
+#include "common/homestore_config.hpp"
+#include "common/homestore_assert.hpp"
 
 SISL_LOGGING_DECL(blkalloc)
 SISL_LOGGING_DECL(transient)
@@ -94,9 +96,7 @@ public:
 
     [[nodiscard]] blk_cap_t get_blks_per_portion() const { return m_blks_per_portion; }
 
-        [[nodiscard]] blk_cap_t get_total_portions() const {
-        return (get_total_blks() - 1) / get_blks_per_portion() + 1;
-    }
+    [[nodiscard]] blk_cap_t get_total_portions() const { return (get_total_blks() - 1) / get_blks_per_portion() + 1; }
 
     void set_auto_recovery(const bool auto_recovery) { m_auto_recovery = auto_recovery; }
     [[nodiscard]] bool get_auto_recovery() const { return m_auto_recovery; }
@@ -104,8 +104,8 @@ public:
     [[nodiscard]] const std::string& get_name() const { return m_unique_name; }
 
     [[nodiscard]] virtual std::string to_string() const {
-        return fmt::format("BlkSize={} TotalBlks={} BlksPerPortion={} auto_recovery={}", get_blk_size(),
-                           get_total_blks(), get_blks_per_portion(), get_auto_recovery());
+        return fmt::format("BlkSize={} TotalBlks={} BlksPerPortion={} auto_recovery={}", in_bytes(get_blk_size()),
+                           in_bytes(get_total_blks()), get_blks_per_portion(), get_auto_recovery());
     }
 };
 
@@ -167,17 +167,19 @@ public:
 
     [[nodiscard]] blk_num_t get_available_blocks() const { return m_available_blocks; }
 
-    [[maybe_unused]] blk_num_t decrease_available_blocks(const blk_num_t count) { return (m_available_blocks -= count); }
+    [[maybe_unused]] blk_num_t decrease_available_blocks(const blk_num_t count) {
+        return (m_available_blocks -= count);
+    }
 
-    [[maybe_unused]] blk_num_t increase_available_blocks(const blk_num_t count) { return (m_available_blocks += count); }
+    [[maybe_unused]] blk_num_t increase_available_blocks(const blk_num_t count) {
+        return (m_available_blocks += count);
+    }
 
     void set_temperature(const blk_temp_t temp) { m_temperature = temp; }
 
     [[nodiscard]] blk_temp_t temperature() const { return m_temperature; }
 
-    static constexpr blk_temp_t default_temperature() {
-        return 1;
-    }
+    static constexpr blk_temp_t default_temperature() { return 1; }
 };
 
 /* We have the following design requirement it is used in auto recovery mode
@@ -231,7 +233,7 @@ public:
                                  std::vector< BlkId >& out_blkid) = 0;
     virtual void free(const std::vector< BlkId >& blk_ids) = 0;
     virtual void free(const BlkId& id) = 0;
-    [[nodiscard]] virtual blk_cap_t get_available_blks() const = 0;
+    [[nodiscard]] virtual blk_cap_t available_blks() const = 0;
     [[nodiscard]] virtual blk_cap_t get_used_blks() const = 0;
     [[nodiscard]] virtual bool is_blk_alloced(const BlkId& b, const bool use_lock = false) const = 0;
     [[nodiscard]] virtual std::string to_string() const = 0;
@@ -284,16 +286,16 @@ public:
     /* CP start is called when all its consumers have purged their free lists and now want to persist the
      * disk bitmap.
      */
-    [[nodiscard]] sisl::byte_array cp_start([[maybe_unused]] const std::shared_ptr< blkalloc_cp >& id);
+    //[[nodiscard]] sisl::byte_array cp_start([[maybe_unused]] const std::shared_ptr< blkalloc_cp >& id);
 
-    void cp_done();
+    // void cp_done();
 
     [[nodiscard]] virtual const BlkAllocConfig& get_config() const { return m_cfg; }
     [[nodiscard]] blk_num_t blknum_to_portion_num(const blk_num_t blknum) const {
         return blknum / get_config().get_blks_per_portion();
     }
 
-        [[nodiscard]] BlkAllocPortion* blknum_to_portion(const blk_num_t blknum) {
+    [[nodiscard]] BlkAllocPortion* blknum_to_portion(const blk_num_t blknum) {
         return &m_blk_portions[blknum_to_portion_num(blknum)];
     }
 
@@ -310,8 +312,8 @@ public:
 
     [[nodiscard]] bool realtime_bm_on() const { return (m_cfg.m_realtime_bm_on && m_auto_recovery); }
 
-private: 
-    [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); } 
+private:
+    [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); }
     sisl::ThreadVector< BlkId >* get_alloc_blk_list();
     void reset_disk_bm_dirty() { is_disk_bm_dirty = false; }
     void set_disk_bm_dirty() { is_disk_bm_dirty = true; }
@@ -354,7 +356,7 @@ public:
     void free(const BlkId& b) override;
     void inited() override;
 
-    [[nodiscard]] blk_cap_t get_available_blks() const override;
+    [[nodiscard]] blk_cap_t available_blks() const override;
     [[nodiscard]] blk_cap_t get_used_blks() const override;
     [[nodiscard]] bool is_blk_alloced(const BlkId& in_bid, const bool use_lock = false) const override;
     [[nodiscard]] std::string to_string() const override;

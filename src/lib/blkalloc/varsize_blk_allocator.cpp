@@ -16,7 +16,7 @@
 #include <sisl/utility/thread_buffer.hpp>
 
 #include "blk_cache_queue.h"
-#include "engine/common/homestore_flip.hpp"
+#include "common/homestore_flip.hpp"
 
 #include "varsize_blk_allocator.h"
 
@@ -244,7 +244,7 @@ void VarsizeBlkAllocator::inited() {
     BlkAllocator::inited();
 
     BLKALLOC_LOG(INFO, "VarSizeBlkAllocator initialized loading bitmap of size={} used blks={} from persistent storage",
-                 m_cache_bm->size(), get_alloced_blk_count());
+                 in_bytes(m_cache_bm->size()), get_alloced_blk_count());
 
     // if use slabs then add to sweeper threads queue
     if (m_cfg.get_use_slabs()) {
@@ -526,7 +526,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(const blk_count_t nblks, const blk_all
     case BlkAllocStatus::FAILED:
     case BlkAllocStatus::SPACE_FULL:
         COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
-        BLKALLOC_LOG(INFO, "nblks={} failed to alloc any number of blocks", nblks);
+        BLKALLOC_LOG(ERROR, "nblks={} failed to alloc any number of blocks", nblks);
         break;
     case BlkAllocStatus::PARTIAL:
         COUNTER_INCREMENT(m_metrics, num_alloc_partial, 1);
@@ -570,9 +570,8 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
         static thread_local std::vector< blk_cache_entry > excess_blks;
         excess_blks.clear();
 
-        [[maybe_unused]] const blk_count_t num_zombied {
-            m_fb_cache->try_free_blks(blkid_to_blk_cache_entry(b, 2), excess_blks)
-        };
+        [[maybe_unused]] const blk_count_t num_zombied{
+            m_fb_cache->try_free_blks(blkid_to_blk_cache_entry(b, 2), excess_blks)};
 
         for (const auto& e : excess_blks) {
             BLKALLOC_LOG(TRACE, "Freeing in bitmap of entry={} - excess of free_blks size={}", e.to_string(),
@@ -588,7 +587,7 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
     BLKALLOC_LOG(TRACE, "Freed blk_num={}", blkid_to_blk_cache_entry(b).to_string());
 }
 
-blk_cap_t VarsizeBlkAllocator::get_available_blks() const { return m_cfg.get_total_blks() - get_used_blks(); }
+blk_cap_t VarsizeBlkAllocator::available_blks() const { return m_cfg.get_total_blks() - get_used_blks(); }
 blk_cap_t VarsizeBlkAllocator::get_used_blks() const { return get_alloced_blk_count(); }
 
 void VarsizeBlkAllocator::free_on_bitmap(const BlkId& b) {
@@ -730,13 +729,9 @@ BlkAllocStatus VarsizeBlkAllocator::alloc_blks_direct(const blk_count_t nblks, c
                 cur_blk_id = b.start_bit + b.nbits;
             }
         }
-
-        if (nblks_remain) {
-            if (++portion_num == m_cfg.get_total_portions()) { portion_num = 0; }
-            BLKALLOC_LOG(TRACE,
-                         "alloc direct unable to find in prev portion, searching in portion={}, start_portion={}",
-                         portion_num, m_start_portion_num);
-        }
+        if (++portion_num == m_cfg.get_total_portions()) { portion_num = 0; }
+        BLKALLOC_LOG(TRACE, "alloc direct unable to find in prev portion, searching in portion={}, start_portion={}",
+                     portion_num, m_start_portion_num);
     } while ((nblks_remain > 0) && (portion_num != m_start_portion_num) && !hints.is_contiguous);
 
     // save which portion we were at for next allocation;

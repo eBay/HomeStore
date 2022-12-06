@@ -2,9 +2,8 @@
 // Created by Kadayam, Hari on Sep 20 2020
 //
 
-#include "engine/common/homestore_assert.hpp"
+#include "common/homestore_assert.hpp"
 #include "varsize_blk_allocator.h"
-
 #include "blk_cache_queue.h"
 
 namespace homestore {

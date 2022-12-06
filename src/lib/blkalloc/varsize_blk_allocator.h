@@ -23,7 +23,8 @@
 #include "blk.h"
 #include "blk_allocator.h"
 #include "blk_cache.h"
-#include "engine/common/homestore_assert.hpp"
+#include "../common/homestore_assert.hpp"
+#include "../common/homestore_config.hpp"
 
 namespace homestore {
 typedef blk_num_t seg_num_t;
@@ -138,9 +139,9 @@ public:
 
     [[nodiscard]] std::string to_string() const override {
         return fmt::format(
-            "IsSlabAlloc: {}, {} Pagesize={} Totalsegments={} BlksPerPortion={} MaxCacheBlks={} Slabconfig=[{}]",
-            m_use_slabs, BlkAllocConfig::to_string(), get_phys_page_size(), get_total_segments(),
-            get_blks_per_portion(), get_max_cache_blks(), m_slab_config.to_string());
+            "IsSlabAlloc={}, {} Pagesize={} Totalsegments={} BlksPerPortion={} MaxCacheBlks={} Slabconfig=[{}]",
+            m_use_slabs, BlkAllocConfig::to_string(), in_bytes(get_phys_page_size()), get_total_segments(),
+            get_blks_per_portion(), in_bytes(get_max_cache_blks()), m_slab_config.to_string());
     }
 };
 
@@ -154,16 +155,13 @@ private:
 public:
     BlkAllocSegment(const blk_cap_t nblks, const seg_num_t seg_num, const blk_num_t nportions,
                     const std::string& seg_name) :
-            m_total_blks{nblks},
-            m_total_portions{nportions},
-            m_seg_num{seg_num},
-            m_alloc_clock_hand{0} {}
+            m_total_blks{nblks}, m_total_portions{nportions}, m_seg_num{seg_num}, m_alloc_clock_hand{0} {}
 
     BlkAllocSegment(const BlkAllocSegment&) = delete;
     BlkAllocSegment(BlkAllocSegment&&) noexcept = delete;
     BlkAllocSegment& operator=(const BlkAllocSegment&) = delete;
     BlkAllocSegment& operator=(BlkAllocSegment&&) noexcept = delete;
-    virtual ~BlkAllocSegment(){}
+    virtual ~BlkAllocSegment() {}
 
     [[nodiscard]] blk_num_t get_clock_hand() const { return m_alloc_clock_hand % m_total_portions; }
     void set_clock_hand(const blk_num_t hand) { m_alloc_clock_hand = hand; }
@@ -225,7 +223,7 @@ public:
     [[nodiscard]] BlkAllocStatus alloc_blks_direct(const blk_count_t nblks, const blk_alloc_hints& hints,
                                                    std::vector< BlkId >& out_blkids, blk_count_t& num_allocated);
 
-    [[nodiscard]] blk_cap_t get_available_blks() const override;
+    [[nodiscard]] blk_cap_t available_blks() const override;
     [[nodiscard]] blk_cap_t get_used_blks() const override;
     [[nodiscard]] bool is_blk_alloced(const BlkId& in_bid, const bool use_lock = false) const override;
     [[nodiscard]] std::string to_string() const override;

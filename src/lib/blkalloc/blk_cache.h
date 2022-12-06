@@ -15,6 +15,7 @@
 #include <sisl/utility/enum.hpp>
 
 #include "blk.h"
+#include "common/homestore_assert.hpp"
 
 namespace homestore {
 typedef blk_count_t slab_idx_t;

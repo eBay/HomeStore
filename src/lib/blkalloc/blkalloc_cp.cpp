@@ -1,11 +1,11 @@
 #include "blkalloc_cp.hpp"
-#include "engine/homestore_base.hpp"
-#include "engine/blkalloc/blk_allocator.h"
-#include "engine/device/device.h" // TODO: Remove this once we make chunk accessible as common
+#include "homestore.hpp"
+#include "blkalloc/blk_allocator.h"
+#include "device/device.h" // TODO: Remove this once we make chunk accessible as common
 
 namespace homestore {
 
-blkalloc_cp::blkalloc_cp() : m_hs{HomeStoreBase::safe_instance()} {}
+blkalloc_cp::blkalloc_cp() : m_hs{HomeStore::safe_instance()} {}
 
 void blkalloc_cp::free_blks(const blkid_list_ptr& list) {
     auto it{list->begin(true /* latest */)};
@@ -13,7 +13,7 @@ void blkalloc_cp::free_blks(const blkid_list_ptr& list) {
     while ((bid = list->next(it)) != nullptr) {
         const auto chunk_num{bid->get_chunk_num()};
         auto* const chunk{m_hs->get_device_manager()->get_chunk_mutable(chunk_num)};
-        auto ba{chunk->get_blk_allocator_mutable()};
+        auto ba{chunk->blk_allocator_mutable()};
         ba->free_on_disk(*bid);
     }
     free_blkid_list_vector.push_back(list);

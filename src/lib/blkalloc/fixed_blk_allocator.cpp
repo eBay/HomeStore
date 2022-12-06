@@ -6,15 +6,13 @@
  */
 #include <cassert>
 
-#include "engine/common/homestore_assert.hpp"
-#include "engine/common/homestore_flip.hpp"
-
+#include "common/homestore_assert.hpp"
+#include "common/homestore_flip.hpp"
 #include "blk_allocator.h"
 
 namespace homestore {
 FixedBlkAllocator::FixedBlkAllocator(const BlkAllocConfig& cfg, const bool init, const chunk_num_t chunk_id) :
-        BlkAllocator(cfg, chunk_id),
-        m_blk_q{cfg.get_total_blks()} {
+        BlkAllocator(cfg, chunk_id), m_blk_q{cfg.get_total_blks()} {
     LOGINFO("total blks: {}", cfg.get_total_blks());
     if (init) { inited(); }
 }
@@ -93,10 +91,10 @@ void FixedBlkAllocator::free(const BlkId& b) {
     }
 }
 
-blk_cap_t FixedBlkAllocator::get_available_blks() const { return m_blk_q.sizeGuess(); }
-blk_cap_t FixedBlkAllocator::get_used_blks() const { return get_config().get_total_blks() - get_available_blks(); }
+blk_cap_t FixedBlkAllocator::available_blks() const { return m_blk_q.sizeGuess(); }
+blk_cap_t FixedBlkAllocator::get_used_blks() const { return get_config().get_total_blks() - available_blks(); }
 
 std::string FixedBlkAllocator::to_string() const {
-    return fmt::format("Total Blks={} Available_Blks={}", m_cfg.get_total_blks(), get_available_blks());
+    return fmt::format("Total Blks={} Available_Blks={}", m_cfg.get_total_blks(), available_blks());
 }
 } // namespace homestore

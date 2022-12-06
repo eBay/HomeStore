@@ -1,5 +1,5 @@
 #include "blk_allocator.h"
-#include "blkalloc_cp.hpp"
+//#include "blkalloc_cp.hpp"
 
 namespace homestore {
 BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, const chunk_num_t id) : m_cfg{cfg}, m_chunk_id{id} {
@@ -172,6 +172,7 @@ void BlkAllocator::free_on_disk(const BlkId& b) {
     }
 }
 
+#if 0
 /* CP start is called when all its consumers have purged their free lists and now want to persist the
  * disk bitmap.
  */
@@ -206,6 +207,7 @@ void BlkAllocator::cp_done() {
     delete (old_alloc_list_ptr);
     // another cp flush won't start until this flush is completed, so no cp_start won't be called in parallel;
 }
+#endif
 
 void BlkAllocator::create_debug_bm() {
     m_debug_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), m_chunk_id, m_cfg.get_align_size());
