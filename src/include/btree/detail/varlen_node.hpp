@@ -1,46 +1,34 @@
-/*
- * varlen_node.hpp
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
  *
- *  Created on: 18-Feb-2017
- *      Author: hkadayam
- */
+ * Author/Developer(s): Harihara Kadayam, Rishabh Mittal
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 
-#ifndef BTREE_VARLEN_NODE_HPP_
-#define BTREE_VARLEN_NODE_HPP_
+#pragma once
 
-#include "physical_node.hpp"
-#include <cassert>
-#include "boost/range/irange.hpp"
 #include <sisl/logging/logging.h>
+#include "btree_node.hpp"
+#include "btree/btree_kv.hpp"
 
-SISL_LOGGING_DECL(btree_generics)
+SISL_LOGGING_DECL(btree)
 
-namespace homeds {
-namespace btree {
-
+namespace homestore {
+#pragma pack(1)
 struct btree_obj_record {
     uint16_t m_obj_offset : 14;
     uint16_t reserved : 2;
-} __attribute((packed));
-;
-
-struct var_value_record : public btree_obj_record {
-    uint16_t m_value_len : 14;
-    uint16_t reserved : 2;
-} __attribute((packed));
-
-struct var_key_record : public btree_obj_record {
-    uint16_t m_key_len : 14;
-    uint16_t reserved : 2;
-} __attribute((packed));
-
-struct var_obj_record : public btree_obj_record {
-    uint16_t m_key_len : 14;
-    uint16_t reserved : 2;
-
-    uint16_t m_value_len : 14;
-    uint16_t reserved2 : 2;
-} __attribute((packed));
+};
 
 struct var_node_header {
     uint16_t m_tail_arena_offset; // Tail side of the arena where new keys are inserted
@@ -52,66 +40,34 @@ struct var_node_header {
 
     uint16_t tail_offset() const { return m_tail_arena_offset; }
     uint16_t available_space() const { return m_available_space; }
-} __attribute((packed));
-
-#define memrshift(ptr, size) (memmove(ptr, ptr + size, size))
-#define memlshift(ptr, size) (memmove(ptr, ptr - size, size))
-
-#define NodeTypeImpl btree_node_type::VAR_VALUE
-#define VariableNode VariantNode< btree_node_type::VAR_VALUE, K, V >
-#define VariantNodeType VariantNode< NodeType, K, V >
-
-template < btree_node_type NodeType, typename K, typename V >
-struct VarNodeSpecificImpl {
-    static uint16_t get_nth_key_len(const VariantNodeType* node, int ind) { return 0; }
-    static uint16_t get_nth_value_len(const VariantNodeType* node, int ind) { return 0; }
-    static uint16_t get_record_size(const VariantNodeType* node) { return 0; }
-
-    static void set_nth_key_len(const VariantNodeType* node, uint8_t* rec_ptr, uint16_t key_len) { assert(false); }
-    static void set_nth_value_len(const VariantNodeType* node, uint8_t* rec_ptr, uint16_t value_len) { assert(false); }
 };
+#pragma pack()
 
-/**
- * Internal format of variable node:
- * [var node header][Record][Record].. ...  ... [key][value][key][value]
- *  key and value both can be variying. However for now, we only support variable value. Key is fixed always.
- *
- */
-
+// Internal format of variable node:
+// [Persistent Header][var node header][Record][Record].. ...  ... [key][value][key][value]
+//
 template < typename K, typename V >
-class VariableNode : public PhysicalNode< VariableNode, K, V > {
+class VariableNode : public BtreeNode< K > {
 public:
-    friend struct VarNodeSpecificImpl< NodeTypeImpl, K, V >;
-
-    VariableNode(bnodeid_t id, bool init, const BtreeConfig& cfg) : PhysicalNode< VariableNode, K, V >(id, init) {
-        this->set_node_type(NodeTypeImpl);
+    VariableNode(uint8_t* node_buf, bnodeid_t id, bool init, bool is_leaf, const BtreeConfig& cfg) :
+            BtreeNode< K >(node_buf, id, init, is_leaf) {
         if (init) {
             // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
             // except for the header itself
-            get_var_node_header()->m_init_available_space = cfg.get_node_area_size();
-            get_var_node_header()->m_tail_arena_offset = cfg.get_node_area_size();
+            get_var_node_header()->m_init_available_space = cfg.node_data_size();
+            get_var_node_header()->m_tail_arena_offset = cfg.node_data_size();
             get_var_node_header()->m_available_space =
                 get_var_node_header()->m_tail_arena_offset - sizeof(var_node_header);
         }
     }
 
-    VariableNode(bnodeid_t* id, bool init, const BtreeConfig& cfg) : PhysicalNode< VariableNode, K, V >(id, init) {
-        this->set_node_type(NodeTypeImpl);
-        if (init) {
-            // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
-            // except for the header itself
-            get_var_node_header()->m_init_available_space = cfg.get_node_area_size();
-            get_var_node_header()->m_tail_arena_offset = cfg.get_node_area_size();
-            get_var_node_header()->m_available_space =
-                get_var_node_header()->m_tail_arena_offset - sizeof(var_node_header);
-        }
-    }
+    virtual ~VariableNode() = default;
 
     /* Insert the key and value in provided index
      * Assumption: Node lock is already taken */
-    btree_status_t insert(int ind, const BtreeKey& key, const BtreeValue& val) {
-        LOGTRACEMOD(btree_generics, "{}:{}", key.to_string(), val.to_string());
-        auto sz = insert(ind, key.get_blob(), val.get_blob());
+    btree_status_t insert(uint32_t ind, const BtreeKey& key, const BtreeValue& val) override {
+        LOGTRACEMOD(btree, "{}:{}", key.to_string(), val.to_string());
+        auto sz = insert(ind, key.serialize(), val.serialize());
 #ifndef NDEBUG
         validate_sanity();
 #endif
@@ -121,242 +77,145 @@ public:
 
 #ifndef NDEBUG
     void validate_sanity() {
-        int i = 0;
-        // validate if keys are in ascending orde
+        uint32_t i{0};
+        // validate if keys are in ascending order
         K prevKey;
-        while (i < (int)this->get_total_entries()) {
-            K key;
-            get_nth_key(i, &key, false);
-            uint64_t kp = *(uint64_t*)key.get_blob().bytes;
-            if (i > 0 && prevKey.compare(&key) > 0) {
-                LOGDEBUGMOD(btree_generics, "non sorted entry : {} -> {} ", kp, this->to_string());
-                assert(false);
+        while (i < this->total_entries()) {
+            K key = get_nth_key(i, false);
+            uint64_t kp = *(uint64_t*)key.serialize().bytes;
+            if (i > 0 && prevKey.compare(key) > 0) {
+                DEBUG_ASSERT(false, "Found non sorted entry: {} -> {}", kp, to_string());
             }
             prevKey = key;
-            i++;
+            ++i;
         }
     }
 #endif
 
     /* Update a value in a given index to the provided value. It will support change in size of the new value.
      * Assumption: Node lock is already taken, size check for the node to support new value is already done */
-    void update(int ind, const BtreeValue& val) {
+    void update(uint32_t ind, const BtreeValue& val) override {
         // If we are updating the edge value, none of the other logic matter. Just update edge value and move on
-        if (ind == (int)this->get_total_entries()) {
-            assert(!this->is_leaf());
+        if (ind == this->total_entries()) {
+            DEBUG_ASSERT_EQ(this->is_leaf(), false);
             this->set_edge_value(val);
             this->inc_gen();
-            return;
+        } else {
+            K key = get_nth_key(ind, true);
+            update(ind, key, val);
         }
-
-        K key;
-        get_nth_key(ind, &key, true);
-        update(ind, key, val);
     }
 
     // TODO - currently we do not support variable size key
-    void update(int ind, const BtreeKey& key, const BtreeValue& val) {
-        LOGTRACEMOD(btree_generics, "Update called:{}", this->to_string());
-        assert(ind <= (int)this->get_total_entries());
+    void update(uint32_t ind, const BtreeKey& key, const BtreeValue& val) override {
+        LOGTRACEMOD(btree, "Update called:{}", to_string());
+        DEBUG_ASSERT_LE(ind, this->total_entries());
 
         // If we are updating the edge value, none of the other logic matter. Just update edge value and move on
-        if (ind == (int)this->get_total_entries()) {
-            assert(!this->is_leaf());
+        if (ind == this->total_entries()) {
+            DEBUG_ASSERT_EQ(this->is_leaf(), false);
             this->set_edge_value(val);
             this->inc_gen();
             return;
         }
 
         // Determine if we are doing same size update or smaller size update, in that case, reuse the space.
-        uint16_t nth_key_len = get_nth_key_len(ind);
-        uint16_t new_obj_size = nth_key_len + val.get_blob_size();
+        uint16_t new_obj_size = key.serialized_size() + val.serialized_size();
         uint16_t cur_obj_size = get_nth_obj_size(ind);
 
         if (cur_obj_size >= new_obj_size) {
-            uint8_t* val_ptr = (uint8_t*)get_nth_obj(ind) + nth_key_len;
-            sisl::blob vblob = val.get_blob();
-            // we can avoid memcpy if addresses of val_ptr and vblob.bytes is same. In place update
-            if (val_ptr != vblob.bytes) {
-                // TODO - we can reclaim space if new obj size is lower than cur obj size
-                // Same or smaller size update, just copy the value blob
-                LOGTRACEMOD(btree_generics, "Not an in-place update, have to copying data of size {}", vblob.size);
-                memcpy(val_ptr, vblob.bytes, vblob.size);
-            } else {
-                // do nothing
-                LOGTRACEMOD(btree_generics, "In place update, not copying data.");
-            }
-            this->inc_gen();
-            return;
-        }
+            uint8_t* key_ptr = (uint8_t*)get_nth_obj(ind);
+            uint8_t* val_ptr = key_ptr + key.serialized_size();
+            sisl::blob kblob = key.serialize();
+            sisl::blob vblob = val.serialize();
 
-        remove(ind);
-        insert(ind, key, val);
-        LOGTRACEMOD(btree_generics, "Size changed for either key or value. Had to delete and insert :{}",
-                    this->to_string());
+            DEBUG_ASSERT_EQ(kblob.size, key.serialized_size(),
+                            "Key Serialized size returned different after serialization");
+            DEBUG_ASSERT_EQ(vblob.size, val.serialized_size(),
+                            "Value Serialized size returned different after serialization");
+
+            // we can avoid memcpy if addresses of val_ptr and vblob.bytes is same. In place update
+            if (key_ptr != kblob.bytes) { std::memcpy(key_ptr, kblob.bytes, kblob.size); }
+            if (val_ptr != vblob.bytes) { std::memcpy(val_ptr, vblob.bytes, vblob.size); }
+            set_nth_key_len(get_nth_record_mutable(ind), kblob.size);
+            set_nth_value_len(get_nth_record_mutable(ind), vblob.size);
+            get_var_node_header()->m_available_space += cur_obj_size - new_obj_size;
+            this->inc_gen();
+        } else {
+            remove(ind, ind);
+            insert(ind, key, val);
+            LOGTRACEMOD(btree, "Size changed for either key or value. Had to delete and insert :{}", to_string());
+        }
     }
 
-    void remove(int ind) { remove(ind, ind); }
-
     // ind_s and ind_e are inclusive
-    void remove(int ind_s, int ind_e) {
-        int total_entries = this->get_total_entries();
+    void remove(uint32_t ind_s, uint32_t ind_e) override {
+        uint32_t total_entries = this->total_entries();
         assert(total_entries >= ind_s);
         assert(total_entries >= ind_e);
-        int recSize = get_record_size();
-        int no_of_elem = ind_e - ind_s + 1;
-        if (ind_e == (int)this->get_total_entries()) {
+        uint32_t recSize = this->get_record_size();
+        uint32_t no_of_elem = ind_e - ind_s + 1;
+        if (ind_e == this->total_entries()) {
             assert(!this->is_leaf() && this->has_valid_edge());
 
-            // TODO-we should not use BtreeNodeINfo instead use abstract type
-            BtreeNodeInfo last_1_val;
-
-            // Set the last key/value as edge entry and by decrementing entry count automatically removed the last
-            // entry.
+            V last_1_val;
             get_nth_value(ind_s - 1, &last_1_val, false);
             this->set_edge_value(last_1_val);
 
-            for (int i = ind_s; i < total_entries; i++) {
+            for (uint32_t i = ind_s; i < total_entries; i++) {
                 get_var_node_header()->m_available_space += get_nth_key_len(i) + get_nth_value_len(i) + recSize;
             }
             this->sub_entries(total_entries - ind_s + 1);
         } else {
             // claim available memory
-            for (int i = ind_s; i <= ind_e; i++) {
+            for (uint32_t i = ind_s; i <= ind_e; i++) {
                 get_var_node_header()->m_available_space += get_nth_key_len(i) + get_nth_value_len(i) + recSize;
             }
             uint8_t* rec_ptr = get_nth_record_mutable(ind_s);
-            memmove(rec_ptr, rec_ptr + recSize * no_of_elem, (this->get_total_entries() - ind_e - 1) * recSize);
+            memmove(rec_ptr, rec_ptr + recSize * no_of_elem, (this->total_entries() - ind_e - 1) * recSize);
 
             this->sub_entries(no_of_elem);
         }
         this->inc_gen();
     }
 
-    void get(int ind, BtreeValue* outval, bool copy) const {
-        // Need edge index
-        if (ind == (int)this->get_total_entries()) {
-            assert(!this->is_leaf());
-
-            assert(this->has_valid_edge());
-            this->get_edge_value(outval);
-        } else {
-            this->get_nth_value(ind, outval, copy);
-        }
-    }
-
-#if 0
-    std::string to_string() const {
-        std::stringstream ss;
-        ss << "###################" << endl;
-        ss << "-------------------------------" << endl;
-        ss << "id=" << this->get_node_id() << " nEntries=" << this->get_total_entries() << " leaf?=" << this->is_leaf();
-
-        if (!this->is_leaf()) { ss << " edge_id=" << this->get_edge_id(); }
-        ss << "\n-------------------------------" << endl;
-        for (uint32_t i = 0; i < this->get_total_entries(); i++) {
-            ss << "Key=";
-            K key;
-            get_nth_key(i, &key, false);
-            ss << key.to_string();
-
-            // TODO: Override the << in ostream for Value
-            ss << " Val=";
-            if (this->is_leaf()) {
-                V val;
-                get(i, &val, false);
-                ss << val.to_string();
-            } else {
-                BtreeNodeInfo p;
-                get(i, &p, false);
-                ss << p;
-            }
-            ss << "\n";
-        }
-        return ss.str();
-    }
+    void remove_all(const BtreeConfig& cfg) override {
+        this->sub_entries(this->total_entries());
+        this->invalidate_edge();
+        this->inc_gen();
+        get_var_node_header()->m_init_available_space = cfg.node_data_size();
+        get_var_node_header()->m_tail_arena_offset = cfg.node_data_size();
+        get_var_node_header()->m_available_space = get_var_node_header()->m_tail_arena_offset - sizeof(var_node_header);
+#ifndef NDEBUG
+        validate_sanity();
 #endif
-
-    std::string to_string(bool print_friendly = false) const {
-        auto str = fmt::format(
-            "{}id={} nEntries={} {} free_space={} ",
-            (print_friendly ? "---------------------------------------------------------------------\n" : ""),
-            this->get_node_id(), this->get_total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"),
-            get_var_node_header_const()->m_available_space);
-        if (!this->is_leaf() && (this->has_valid_edge())) {
-            fmt::format_to(std::back_inserter(str), "edge_id={} ", this->get_edge_id());
-        }
-        for (uint32_t i{0}; i < this->get_total_entries(); ++i) {
-            K key;
-            get_nth_key(i, &key, false);
-            fmt::format_to(std::back_inserter(str), "{}Entry{} [Key={}", (print_friendly ? "\n\t" : " "), i + 1,
-                           key.to_string());
-
-            if (this->is_leaf()) {
-                V val;
-                get(i, &val, false);
-                fmt::format_to(std::back_inserter(str), " Val={}]", val.to_string());
-            } else {
-                BtreeNodeInfo p;
-                get(i, &p, false);
-                fmt::format_to(std::back_inserter(str), " Val={}]", p.to_string());
-            }
-        }
-        return str;
     }
 
-    uint32_t get_available_size(const BtreeConfig& cfg) const { return get_var_node_header_const()->m_available_space; }
-
-    bool is_split_needed(const BtreeConfig& cfg, const BtreeKey& key, const BtreeValue& val, int* out_ind_hint,
-                         btree_put_type& putType, BtreeUpdateRequest< K, V >* ureq = nullptr) const {
-        uint32_t size_needed = 0;
-        if (!this->is_leaf()) { // if internal node, size is atmost one additional entry, size of K/V
-            size_needed = key.get_blob_size() + val.get_blob_size() + get_record_size();
+    /*V get(uint32_t ind, bool copy) const {
+        // Need edge index
+        if (ind == this->total_entries()) {
+            assert(!this->is_leaf());
+            assert(this->has_valid_edge());
+            return this->get_edge_value();
         } else {
-            // leaf node,
-            if (ureq) {
-                // TODO - determine size needed for non-callback based range updates in future
-                assert(ureq->get_size_needed_callback() != nullptr);
-                /* If there is an overlap then we can add (n + 1) more keys :- one in the front, one in the tail and
-                 * other in between match entries (n - 1).
-                 */
-                std::vector< std::pair< K, V > > match;
-                int start_ind = 0, end_ind = 0;
-                const_cast< VariableNode* >(this)->get_all(ureq->get_input_range(), UINT32_MAX, start_ind, end_ind,
-                                                           &match);
-                size_needed = ureq->get_size_needed_callback()(match, ureq->get_cb_param()) +
-                    ((match.size() + 1) * (key.get_blob_size() + get_record_size()));
-            } else {
-                // NOTE : size_needed is just an guess here. Actual implementation of Mapping key/value can have
-                // specific logic which determines of size changes on insert or update.
-                auto result = this->find(key, nullptr, nullptr /*amdesai - Commented - &curval*/);
-                if (!result.found) { // We need to insert, this newly. Find out if we have space for value.
-                    size_needed = key.get_blob_size() + val.get_blob_size() + get_record_size();
-                } else if (this->is_leaf()) {
-                    // for internal nodes, size does not change on updates
-                    // Its an update, see how much additioanl space needed
-                    V existingVal;
-                    get(result.end_of_search_index, &existingVal, false);
-                    size_needed =
-                        existingVal.estimate_size_after_append(val) - get_nth_value_len(result.end_of_search_index);
-                }
-            }
+            return get_nth_value(ind, copy);
         }
-        uint32_t alreadyFilledSize = cfg.get_node_area_size() - get_available_size(cfg);
-        return alreadyFilledSize + size_needed >= cfg.get_ideal_fill_size();
-    }
+    }*/
 
-    uint32_t move_out_to_right_by_entries(const BtreeConfig& cfg, VariableNode* o, uint32_t nentries) {
-        auto& other = static_cast< VariableNode& >(*o);
+    uint32_t move_out_to_right_by_entries(const BtreeConfig& cfg, BtreeNode< K >& o, uint32_t nentries) override {
+        auto& other = static_cast< VariableNode& >(o);
+        const auto this_gen = this->node_gen();
+        const auto other_gen = other.node_gen();
 
-        auto this_gen = this->get_gen();
-        auto other_gen = other.get_gen();
-
+        const auto this_nentries = this->total_entries();
+        nentries = std::min(nentries, this_nentries);
         if (nentries == 0) { return 0; /* Nothing to move */ }
-        int start_ind = this->get_total_entries() - 1;
-        int end_ind = this->get_total_entries() - nentries - 1;
 
-        auto ind = start_ind;
-        while (ind > end_ind) {
+        const uint32_t start_ind = this_nentries - 1;
+        const uint32_t end_ind = this_nentries - nentries;
+        uint32_t ind = start_ind;
+        bool full_move{false};
+        while (ind >= end_ind) {
             // Get the ith key and value blob and then remove the entry from here and insert to the other node
             sisl::blob kb;
             kb.bytes = (uint8_t*)get_nth_obj(ind);
@@ -368,15 +227,19 @@ public:
 
             auto sz = other.insert(0, kb, vb);
             if (!sz) { break; }
-            ind--;
+            if (ind == 0) {
+                full_move = true;
+                break;
+            }
+            --ind;
         }
 
-        if (!this->is_leaf() && (other.get_total_entries() != 0)) {
+        if (!this->is_leaf() && (other.total_entries() != 0)) {
             // Incase this node is an edge node, move the stick to the right hand side node
-            other.set_edge_id(this->get_edge_id());
+            other.set_edge_info(this->edge_info());
             this->invalidate_edge();
         }
-        remove(ind + 1, start_ind); // Remove all entries in bulk
+        remove(full_move ? 0u : ind + 1, start_ind); // Remove all entries in bulk
 
         // Remove and insert would have set the gen multiple increments, just reset it to increment only by 1
         // TODO: This is bit ugly but needed in-order to avoid repeat the same code again, but see if we can produce
@@ -384,16 +247,16 @@ public:
         this->set_gen(this_gen + 1);
         other.set_gen(other_gen + 1);
 
-        return (uint32_t)(start_ind - ind);
+        return (start_ind - ind);
     }
 
-    uint32_t move_out_to_right_by_size(const BtreeConfig& cfg, VariableNode* o, uint32_t size_to_move) {
-        auto& other = static_cast< VariableNode& >(*o);
+    uint32_t move_out_to_right_by_size(const BtreeConfig& cfg, BtreeNode< K >& o, uint32_t size_to_move) override {
+        auto& other = static_cast< VariableNode& >(o);
         uint32_t moved_size = 0U;
-        auto this_gen = this->get_gen();
-        auto other_gen = other.get_gen();
+        auto this_gen = this->node_gen();
+        auto other_gen = other.node_gen();
 
-        int ind = this->get_total_entries() - 1;
+        uint32_t ind = this->total_entries() - 1;
         while (ind > 0) {
             sisl::blob kb;
             kb.bytes = (uint8_t*)get_nth_obj(ind);
@@ -406,18 +269,18 @@ public:
             auto sz = other.insert(0, kb, vb); // Keep on inserting on the first index, thus moving everything to right
             if (!sz) break;
             moved_size += sz;
-            ind--;
-            if ((kb.size + vb.size + get_record_size()) > size_to_move) {
+            --ind;
+            if ((kb.size + vb.size + this->get_record_size()) > size_to_move) {
                 // We reached threshold of how much we could move
                 break;
             }
             size_to_move -= sz;
         }
-        remove(ind + 1, this->get_total_entries() - 1);
+        remove(ind + 1, this->total_entries() - 1);
 
-        if (!this->is_leaf() && (other.get_total_entries() != 0)) {
+        if (!this->is_leaf() && (other.total_entries() != 0)) {
             // Incase this node is an edge node, move the stick to the right hand side node
-            other.set_edge_id(this->get_edge_id());
+            other.set_edge_info(this->edge_info());
             this->invalidate_edge();
         }
 
@@ -430,15 +293,82 @@ public:
         return moved_size;
     }
 
-    uint32_t move_in_from_right_by_entries(const BtreeConfig& cfg, VariableNode* o, uint32_t nentries) {
-        auto& other = static_cast< VariableNode& >(*o);
+    uint32_t num_entries_by_size(uint32_t start_idx, uint32_t size) const override {
+        auto idx = start_idx;
+        uint32_t cum_size{0};
 
-        auto this_gen = this->get_gen();
-        auto other_gen = other.get_gen();
-        nentries = std::min(nentries, other.get_total_entries());
+        while (idx < this->total_entries()) {
+            uint32_t const rec_size = this->get_record_size() + get_nth_key_len(idx) + get_nth_value_len(idx);
+            cum_size += rec_size;
+            if (cum_size > size) { break; }
+            ++idx;
+        }
 
-        if (nentries == 0) { return 0; /* Nothing to move */ }
-        int other_ind = 0;
+        return idx - start_idx;
+    }
+
+    uint32_t copy_by_size(const BtreeConfig& cfg, const BtreeNode< K >& o, uint32_t start_idx,
+                          uint32_t copy_size) override {
+        auto& other = static_cast< const VariableNode& >(o);
+        auto this_gen = this->node_gen();
+
+        auto idx = start_idx;
+        uint32_t n = 0;
+        while (idx < other.total_entries()) {
+            sisl::blob kb{(uint8_t*)other.get_nth_obj(idx), other.get_nth_key_len(idx)};
+            sisl::blob vb{kb.bytes + kb.size, other.get_nth_value_len(idx)};
+
+            // We reached threshold of how much we could move
+            if ((kb.size + vb.size + other.get_record_size()) > copy_size) { break; }
+
+            auto sz = insert(this->total_entries(), kb, vb);
+            if (sz == 0) { break; }
+            ++n;
+            ++idx;
+        }
+        this->set_gen(this_gen + 1);
+
+        // If we copied everything from start_idx till end and if its an edge node, need to copy the edge id as well.
+        if (other.has_valid_edge() && ((start_idx + n) == other.total_entries())) {
+            this->set_edge_info(other.edge_info());
+        }
+        return n;
+    }
+
+    uint32_t copy_by_entries(const BtreeConfig& cfg, const BtreeNode< K >& o, uint32_t start_idx,
+                             uint32_t nentries) override {
+        auto& other = static_cast< const VariableNode& >(o);
+        auto this_gen = this->node_gen();
+
+        nentries = std::min(nentries, other.total_entries() - start_idx);
+        auto idx = start_idx;
+        uint32_t n = 0;
+        while (n < nentries) {
+            sisl::blob kb{(uint8_t*)other.get_nth_obj(idx), other.get_nth_key_len(idx)};
+            sisl::blob vb{kb.bytes + kb.size, other.get_nth_value_len(idx)};
+
+            auto sz = insert(this->total_entries(), kb, vb);
+            if (sz == 0) { break; }
+            ++n;
+            ++idx;
+        }
+        this->set_gen(this_gen + 1);
+
+        // If we copied everything from start_idx till end and if its an edge node, need to copy the edge id as well.
+        if (other.has_valid_edge() && ((start_idx + n) == other.total_entries())) {
+            this->set_edge_info(other.edge_info());
+        }
+        return n;
+    }
+
+    /*uint32_t move_in_from_right_by_entries(const BtreeConfig& cfg, BtreeNode< K >& o, uint32_t nentries) override {
+        auto& other = static_cast< VariableNode& >(o);
+        auto this_gen = this->node_gen();
+        auto other_gen = other.node_gen();
+        nentries = std::min(nentries, other.total_entries());
+
+        if (nentries == 0) { return 0; }
+        uint32_t other_ind = 0;
         while (nentries) {
             // Get the ith key and value blob and then remove the entry from here and insert to the other node
             sisl::blob kb;
@@ -449,19 +379,19 @@ public:
             vb.bytes = kb.bytes + kb.size;
             vb.size = other.get_nth_value_len(other_ind);
 
-            auto sz = insert(this->get_total_entries(), kb, vb);
+            auto sz = insert(this->total_entries(), kb, vb);
             if (!sz) { break; }
-            nentries--;
-            other_ind++;
+            --nentries;
+            ++other_ind;
         }
 
         other.remove(0, other_ind - 1); // Remove all entries in bulk
-        assert(other.get_total_entries() == nentries);
+        assert(other.total_entries() == nentries);
 
-        if (!other.is_leaf() && (other.get_total_entries() == 0)) {
+        if (!other.is_leaf() && (other.total_entries() == 0)) {
             // Incase other node is an edge node and we moved all the data into this node, move over the edge info as
             // well.
-            this->set_edge_id(other.get_edge_id());
+            this->set_edge_id(other.edge_id());
             other.invalidate_edge();
         }
 
@@ -471,17 +401,17 @@ public:
         this->set_gen(this_gen + 1);
         other.set_gen(other_gen + 1);
 
-        return (uint32_t)(other_ind);
+        return (other_ind);
     }
 
-    uint32_t move_in_from_right_by_size(const BtreeConfig& cfg, VariableNode* o, uint32_t size_to_move) {
-        auto& other = static_cast< VariableNode& >(*o);
+    uint32_t move_in_from_right_by_size(const BtreeConfig& cfg, BtreeNode< K >& o, uint32_t size_to_move) override {
+        auto& other = static_cast< VariableNode& >(o);
         uint32_t moved_size = 0U;
-        auto this_gen = this->get_gen();
-        auto other_gen = other.get_gen();
+        auto this_gen = this->node_gen();
+        auto other_gen = other.node_gen();
 
-        int ind = 0;
-        while (ind < (int)this->get_total_entries()) {
+        uint32_t ind = 0;
+        while (ind < this->total_entries()) {
             sisl::blob kb;
             kb.bytes = (uint8_t*)other.get_nth_obj(ind);
             kb.size = other.get_nth_key_len(ind);
@@ -494,7 +424,7 @@ public:
                 // We reached threshold of how much we could move
                 break;
             }
-            auto sz = insert(this->get_total_entries(), kb, vb); // Keep on inserting on the last index.
+            auto sz = insert(this->total_entries(), kb, vb); // Keep on inserting on the last index.
             if (!sz) break;
             moved_size += sz;
             ind++;
@@ -502,10 +432,10 @@ public:
         }
         if (ind) other.remove(0, ind - 1);
 
-        if (!other.is_leaf() && (other.get_total_entries() == 0)) {
+        if (!other.is_leaf() && (other.total_entries() == 0)) {
             // Incase other node is an edge node and we moved all the data into this node, move over the edge info as
             // well.
-            this->set_edge_id(other.get_edge_id());
+            this->set_edge_id(other.edge_id());
             other.invalidate_edge();
         }
 
@@ -516,97 +446,109 @@ public:
         other.set_gen(other_gen + 1);
 
         return moved_size;
+    } */
+
+    void append(uint32_t ind, const BtreeKey& key, const BtreeValue& val) override {
+        RELEASE_ASSERT(false, "Append operation is not supported on var node");
     }
 
-    uint32_t get_nth_obj_size(int ind) const { return get_nth_key_len(ind) + get_nth_value_len(ind); }
-
-    void set_nth_key(uint32_t ind, BtreeKey* key) {
-        assert(ind < this->get_total_entries());
-        assert(key->get_blob().size == get_nth_key_len(ind));
-        V value;
-        uint8_t* obj = (uint8_t*)get_nth_obj(ind);
-        memcpy(obj, key->get_blob().bytes, key->get_blob().size);
+    uint32_t available_size(const BtreeConfig& cfg) const override {
+        return get_var_node_header_const()->m_available_space;
     }
 
-    void get_nth_key(int ind, BtreeKey* outkey, bool copy) const {
-        assert(ind < (int)this->get_total_entries());
+    uint32_t get_nth_obj_size(uint32_t ind) const override { return get_nth_key_len(ind) + get_nth_value_len(ind); }
 
-        uint8_t* obj = (uint8_t*)get_nth_obj(ind);
-        if (copy) {
-            outkey->copy_blob({obj, get_nth_key_len(ind)});
+    void set_nth_key(uint32_t ind, const BtreeKey& key) {
+        const auto kb = key.serialize();
+        assert(ind < this->total_entries());
+        assert(kb.size == get_nth_key_len(ind));
+        memcpy(uintptr_cast(get_nth_obj(ind)), kb.bytes, kb.size);
+    }
+
+    virtual uint16_t get_nth_key_len(uint32_t ind) const = 0;
+    virtual uint16_t get_nth_value_len(uint32_t ind) const = 0;
+    virtual void set_nth_key_len(uint8_t* rec_ptr, uint16_t key_len) = 0;
+    virtual void set_nth_value_len(uint8_t* rec_ptr, uint16_t value_len) = 0;
+
+    K get_nth_key(uint32_t ind, bool copy) const {
+        assert(ind < this->total_entries());
+        sisl::blob b{const_cast< uint8_t* >(get_nth_obj(ind)), get_nth_key_len(ind)};
+        return K{b, copy};
+    }
+
+    void get_nth_value(uint32_t ind, BtreeValue* out_val, bool copy) const override {
+        if (ind == this->total_entries()) {
+            DEBUG_ASSERT_EQ(this->is_leaf(), false, "get_nth_value out-of-bound");
+            DEBUG_ASSERT_EQ(this->has_valid_edge(), true, "get_nth_value out-of-bound");
+            *(BtreeLinkInfo*)out_val = this->get_edge_value();
         } else {
-            outkey->set_blob({obj, get_nth_key_len(ind)});
+            sisl::blob b{const_cast< uint8_t* >(get_nth_obj(ind)) + get_nth_key_len(ind), get_nth_value_len(ind)};
+            out_val->deserialize(b, copy);
         }
     }
 
-    void get_nth_value(int ind, BtreeValue* outval, bool copy) const {
-        assert(ind < (int)this->get_total_entries());
+    /*V get_nth_value(uint32_t ind, bool copy) const {
+        assert(ind < this->total_entries());
+        sisl::blob b{const_cast< uint8_t* >(get_nth_obj(ind)) + get_nth_key_len(ind), get_nth_value_len(ind)};
+        return V{b, copy};
+    }*/
 
-        uint8_t* obj = (uint8_t*)get_nth_obj(ind);
-        if (copy) {
-            outval->copy_blob({obj + get_nth_key_len(ind), get_nth_value_len(ind)});
-        } else {
-            outval->set_blob({obj + get_nth_key_len(ind), get_nth_value_len(ind)});
+    std::string to_string(bool print_friendly = false) const override {
+        auto str = fmt::format(
+            "{}id={} nEntries={} {} free_space={} next_node={} ",
+            (print_friendly ? "---------------------------------------------------------------------\n" : ""),
+            this->node_id(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"),
+            get_var_node_header_const()->m_available_space, this->next_bnode());
+        if (!this->is_leaf() && (this->has_valid_edge())) {
+            fmt::format_to(std::back_inserter(str), "edge_id={}.{}", this->edge_info().m_bnodeid,
+                           this->edge_info().m_link_version);
         }
-    }
-
-    int compare_nth_key(const BtreeKey& cmp_key, int ind) const {
-        K nth_key;
-        get_nth_key(ind, &nth_key, false /* copyKey */);
-        return nth_key.compare(&cmp_key);
-    }
-
-    int compare_nth_key_range(const BtreeSearchRange& range, int ind) const {
-        K nth_key;
-        get_nth_key(ind, &nth_key, false /* copyKey */);
-        return nth_key.compare_range(range);
-    }
-
-    void get_all_kvs(std::vector< pair< K, V > >* kvs) const {
-        assert(this->is_leaf());
-        if (!this->is_leaf()) {
-            LOGERROR("Got a non-leaf node {}", this->to_string());
-            return;
-        }
-
-        for (uint32_t i = 0; i < this->get_total_entries(); i++) {
-            K key;
+        for (uint32_t i{0}; i < this->total_entries(); ++i) {
             V val;
-
-            get_nth_key(i, &key, true); // Copy
-            get(i, &val, true);         // Copy
-            kvs->push_back(make_pair(key, val));
+            get_nth_value(i, &val, false);
+            fmt::format_to(std::back_inserter(str), "{}Entry{} [Key={} Val={}]", (print_friendly ? "\n\t" : " "), i + 1,
+                           get_nth_key(i, false).to_string(), val.to_string());
         }
+        return str;
     }
 
-private:
-    uint32_t insert(int ind, const sisl::blob& key_blob, const sisl::blob& val_blob) {
-        assert(ind <= (int)this->get_total_entries());
-        LOGTRACEMOD(btree_generics, "{}:{}:{}:{}", ind, get_var_node_header()->tail_offset(), get_arena_free_space(),
+    int compare_nth_key(const BtreeKey& cmp_key, uint32_t ind) const {
+        return get_nth_key(ind, false).compare(cmp_key);
+    }
+
+    /*int compare_nth_key_range(const BtreeKeyRange& range, uint32_t ind) const {
+        return get_nth_key(ind, false).compare_range(range);
+    }*/
+
+protected:
+    uint32_t insert(uint32_t ind, const sisl::blob& key_blob, const sisl::blob& val_blob) {
+        assert(ind <= this->total_entries());
+        LOGTRACEMOD(btree, "{}:{}:{}:{}", ind, get_var_node_header()->tail_offset(), get_arena_free_space(),
                     get_var_node_header()->available_space());
         uint16_t obj_size = key_blob.size + val_blob.size;
-        uint16_t to_insert_size = obj_size + get_record_size();
+        uint16_t to_insert_size = obj_size + this->get_record_size();
         if (to_insert_size > get_var_node_header()->available_space()) {
-            LOGDEBUG("insert failed insert size {} available size {}", to_insert_size,
-                     get_var_node_header()->available_space());
+            LOGDEBUGMOD(btree, "insert failed insert size {} available size {}", to_insert_size,
+                        get_var_node_header()->available_space());
             return 0;
         }
 
         // If we don't have enough space in the tail arena area, we need to compact and get the space.
         if (to_insert_size > get_arena_free_space()) {
             compact();
-            assert(to_insert_size <=
-                   get_arena_free_space()); // Expect after compaction to have available space to insert
+            // Expect after compaction to have available space to insert
+            assert(to_insert_size <= get_arena_free_space());
         }
 
         // Create a room for a new record
-        uint8_t* rec_ptr = (uint8_t*)get_nth_record_mutable(ind);
-        memmove((void*)(rec_ptr + get_record_size()), rec_ptr, (this->get_total_entries() - ind) * get_record_size());
+        uint8_t* rec_ptr = uintptr_cast(get_nth_record_mutable(ind));
+        memmove((void*)(rec_ptr + this->get_record_size()), rec_ptr,
+                (this->total_entries() - ind) * this->get_record_size());
 
         // Move up the tail area
         assert(get_var_node_header()->m_tail_arena_offset > obj_size);
         get_var_node_header()->m_tail_arena_offset -= obj_size;
-        get_var_node_header()->m_available_space -= (obj_size + get_record_size());
+        get_var_node_header()->m_available_space -= (obj_size + this->get_record_size());
 
         // Create a new record
         set_nth_key_len(rec_ptr, key_blob.size);
@@ -615,21 +557,18 @@ private:
 
         // Copy the contents of key and value in the offset
         uint8_t* raw_data_ptr = offset_to_ptr_mutable(get_var_node_header()->m_tail_arena_offset);
-        memmove(raw_data_ptr, key_blob.bytes, key_blob.size);
+        memcpy(raw_data_ptr, key_blob.bytes, key_blob.size);
         raw_data_ptr += key_blob.size;
-        memmove(raw_data_ptr, val_blob.bytes, val_blob.size);
+        memcpy(raw_data_ptr, val_blob.bytes, val_blob.size);
 
         // Increment the entries and generation number
         this->inc_entries();
         this->inc_gen();
 
 #ifndef NDEBUG
-        validate_sanity();
+        this->validate_sanity();
 #endif
 
-#ifdef DEBUG
-        // print();
-#endif
         return to_insert_size;
     }
 
@@ -639,7 +578,7 @@ private:
      * */
     void compact() {
 #ifndef NDEBUG
-        validate_sanity();
+        this->validate_sanity();
 #endif
         // temp ds to sort records in stack space
         struct Record {
@@ -647,14 +586,15 @@ private:
             uint16_t orig_record_index;
         };
 
-        uint32_t no_of_entries = this->get_total_entries();
+        uint32_t no_of_entries = this->total_entries();
         if (no_of_entries == 0) {
             // this happens when  there is only entry and in update, we first remove and than insert
             get_var_node_header()->m_tail_arena_offset = get_var_node_header()->m_init_available_space;
-            LOGTRACEMOD(btree_generics, "Full available size reclaimed");
+            LOGTRACEMOD(btree, "Full available size reclaimed");
             return;
         }
-        Record rec[no_of_entries];
+        std::vector< Record > rec;
+        rec.reserve(no_of_entries);
 
         uint32_t ind = 0;
         while (ind < no_of_entries) {
@@ -665,7 +605,7 @@ private:
         }
 
         // use comparator to sort based on m_obj_offset in desc order
-        std::sort(rec, rec + no_of_entries,
+        std::sort(rec.begin(), rec.begin() + no_of_entries,
                   [](Record const& a, Record const& b) -> bool { return b.m_obj_offset < a.m_obj_offset; });
 
         uint16_t last_offset = get_var_node_header()->m_init_available_space;
@@ -697,38 +637,22 @@ private:
         }
         get_var_node_header()->m_tail_arena_offset = last_offset;
 #ifndef NDEBUG
-        validate_sanity();
+        this->validate_sanity();
 #endif
-        LOGTRACEMOD(btree_generics, "Sparse space reclaimed:{}", sparce_space);
+        LOGTRACEMOD(btree, "Sparse space reclaimed:{}", sparce_space);
     }
 
-    // See template specialization below for each nodetype
-    uint16_t get_nth_key_len(int ind) const {
-        return VarNodeSpecificImpl< NodeTypeImpl, K, V >::get_nth_key_len(this, ind);
+    const uint8_t* get_nth_record(uint32_t ind) const {
+        return this->node_data_area_const() + sizeof(var_node_header) + (ind * this->get_record_size());
     }
-    uint16_t get_nth_value_len(int ind) const {
-        return VarNodeSpecificImpl< NodeTypeImpl, K, V >::get_nth_value_len(this, ind);
-    }
-    uint16_t get_record_size() const { return VarNodeSpecificImpl< NodeTypeImpl, K, V >::get_record_size(this); }
-
-    void set_nth_key_len(uint8_t* rec_ptr, uint16_t key_len) {
-        VarNodeSpecificImpl< NodeTypeImpl, K, V >::set_nth_key_len(this, rec_ptr, key_len);
-    }
-    void set_nth_value_len(uint8_t* rec_ptr, uint16_t value_len) {
-        VarNodeSpecificImpl< NodeTypeImpl, K, V >::set_nth_value_len(this, rec_ptr, value_len);
+    uint8_t* get_nth_record_mutable(uint32_t ind) {
+        return this->node_data_area() + sizeof(var_node_header) + (ind * this->get_record_size());
     }
 
-    const uint8_t* get_nth_record(int ind) const {
-        return this->get_node_area() + sizeof(var_node_header) + (ind * get_record_size());
-    }
-    uint8_t* get_nth_record_mutable(int ind) {
-        return this->get_node_area_mutable() + sizeof(var_node_header) + (ind * get_record_size());
-    }
-
-    const uint8_t* get_nth_obj(int ind) const {
+    const uint8_t* get_nth_obj(uint32_t ind) const {
         return offset_to_ptr(((btree_obj_record*)get_nth_record(ind))->m_obj_offset);
     }
-    uint8_t* get_nth_obj_mutable(int ind) {
+    uint8_t* get_nth_obj_mutable(uint32_t ind) {
         return offset_to_ptr_mutable(((btree_obj_record*)get_nth_record(ind))->m_obj_offset);
     }
 
@@ -737,176 +661,116 @@ private:
         r->m_obj_offset = offset;
     }
 
-    uint8_t* offset_to_ptr_mutable(uint16_t offset) { return this->get_node_area_mutable() + offset; }
+    uint8_t* offset_to_ptr_mutable(uint16_t offset) { return this->node_data_area() + offset; }
 
-    const uint8_t* offset_to_ptr(uint16_t offset) const { return this->get_node_area() + offset; }
+    const uint8_t* offset_to_ptr(uint16_t offset) const { return this->node_data_area_const() + offset; }
 
     ///////////// Other Private Methods //////////////////
-    inline var_node_header* get_var_node_header() { return (var_node_header*)(this->get_node_area_mutable()); }
+    inline var_node_header* get_var_node_header() { return r_cast< var_node_header* >(this->node_data_area()); }
 
     inline const var_node_header* get_var_node_header_const() const {
-        return (const var_node_header*)(this->get_node_area());
+        return r_cast< const var_node_header* >(this->node_data_area_const());
     }
 
-    uint16_t get_arena_free_space() {
-        return get_var_node_header()->m_tail_arena_offset - sizeof(var_node_header) -
-            (this->get_total_entries() * get_record_size());
+    uint16_t get_arena_free_space() const {
+        return get_var_node_header_const()->m_tail_arena_offset - sizeof(var_node_header) -
+            (this->total_entries() * this->get_record_size());
     }
 };
 
-/***************** Template Specialization for variable key records ******************/
 template < typename K, typename V >
-struct VarNodeSpecificImpl< btree_node_type::VAR_KEY, K, V > {
-    static uint16_t get_nth_key_len(const VariantNode< btree_node_type::VAR_KEY, K, V >* node, int ind) {
-        return ((const var_key_record*)node->get_nth_record(ind))->m_key_len;
+class VarKeySizeNode : public VariableNode< K, V > {
+public:
+    VarKeySizeNode(uint8_t* node_buf, bnodeid_t id, bool init, bool is_leaf, const BtreeConfig& cfg) :
+            VariableNode< K, V >(node_buf, id, init, is_leaf, cfg) {
+        this->set_node_type(btree_node_type::VAR_KEY);
     }
+    virtual ~VarKeySizeNode() = default;
 
-    static uint16_t get_nth_value_len(const VariantNode< btree_node_type::VAR_KEY, K, V >* node, int ind) {
-        return V::get_fixed_size();
+    uint16_t get_nth_key_len(uint32_t ind) const override {
+        return r_cast< const var_key_record* >(this->get_nth_record(ind))->m_key_len;
     }
+    uint16_t get_nth_value_len(uint32_t ind) const override { return V::get_fixed_size(); }
+    uint16_t get_record_size() const override { return sizeof(var_key_record); }
 
-    static uint16_t get_record_size(const VariantNode< btree_node_type::VAR_KEY, K, V >* node) {
-        return sizeof(var_key_record);
+    void set_nth_key_len(uint8_t* rec_ptr, uint16_t key_len) override {
+        r_cast< var_key_record* >(rec_ptr)->m_key_len = key_len;
     }
+    void set_nth_value_len(uint8_t* rec_ptr, uint16_t value_len) override { assert(value_len == V::get_fixed_size()); }
 
-    static void set_nth_key_len(const VariantNode< btree_node_type::VAR_KEY, K, V >* node, uint8_t* rec_ptr,
-                                uint16_t key_len) {
-        ((var_key_record*)rec_ptr)->m_key_len = key_len;
-    }
-
-    static void set_nth_value_len(const VariantNode< btree_node_type::VAR_KEY, K, V >* node, uint8_t* rec_ptr,
-                                  uint16_t value_len) {
-        assert(value_len == V::get_fixed_size());
-    }
+private:
+#pragma pack(1)
+    struct var_key_record : public btree_obj_record {
+        uint16_t m_key_len : 14;
+        uint16_t reserved : 2;
+    };
+#pragma pack()
 };
 
 /***************** Template Specialization for variable value records ******************/
 template < typename K, typename V >
-struct VarNodeSpecificImpl< btree_node_type::VAR_VALUE, K, V > {
-    static uint16_t get_nth_key_len(const VariantNode< btree_node_type::VAR_VALUE, K, V >* node, int ind) {
-        return K::get_fixed_size();
+class VarValueSizeNode : public VariableNode< K, V > {
+public:
+    VarValueSizeNode(uint8_t* node_buf, bnodeid_t id, bool init, bool is_leaf, const BtreeConfig& cfg) :
+            VariableNode< K, V >(node_buf, id, init, is_leaf, cfg) {
+        this->set_node_type(btree_node_type::VAR_VALUE);
+    }
+    virtual ~VarValueSizeNode() = default;
+
+    uint16_t get_nth_key_len(uint32_t ind) const override { return K::get_fixed_size(); }
+    uint16_t get_nth_value_len(uint32_t ind) const override {
+        return r_cast< const var_value_record* >(this->get_nth_record(ind))->m_value_len;
+    }
+    uint16_t get_record_size() const override { return sizeof(var_value_record); }
+
+    void set_nth_key_len(uint8_t* rec_ptr, uint16_t key_len) override { assert(key_len == K::get_fixed_size()); }
+    void set_nth_value_len(uint8_t* rec_ptr, uint16_t value_len) override {
+        r_cast< var_value_record* >(rec_ptr)->m_value_len = value_len;
     }
 
-    static uint16_t get_nth_value_len(const VariantNode< btree_node_type::VAR_VALUE, K, V >* node, int ind) {
-        return ((const var_value_record*)node->get_nth_record(ind))->m_value_len;
-    }
-
-    static uint16_t get_record_size(const VariantNode< btree_node_type::VAR_VALUE, K, V >* node) {
-        return sizeof(var_value_record);
-    }
-
-    static void set_nth_key_len(const VariantNode< btree_node_type::VAR_VALUE, K, V >* node, uint8_t* rec_ptr,
-                                uint16_t key_len) {
-        assert(key_len == K::get_fixed_size());
-    }
-
-    static void set_nth_value_len(const VariantNode< btree_node_type::VAR_VALUE, K, V >* node, uint8_t* rec_ptr,
-                                  uint16_t value_len) {
-        ((var_value_record*)rec_ptr)->m_value_len = value_len;
-    }
+private:
+#pragma pack(1)
+    struct var_value_record : public btree_obj_record {
+        uint16_t m_value_len : 14;
+        uint16_t reserved : 2;
+    };
+#pragma pack()
 };
 
 /***************** Template Specialization for variable object records ******************/
 template < typename K, typename V >
-struct VarNodeSpecificImpl< btree_node_type::VAR_OBJECT, K, V > {
-    static uint16_t get_nth_key_len(const VariantNode< btree_node_type::VAR_OBJECT, K, V >* node, int ind) {
-        return ((const var_obj_record*)node->get_nth_record(ind))->m_key_len;
+class VarObjSizeNode : public VariableNode< K, V > {
+public:
+    VarObjSizeNode(uint8_t* node_buf, bnodeid_t id, bool init, bool is_leaf, const BtreeConfig& cfg) :
+            VariableNode< K, V >(node_buf, id, init, is_leaf, cfg) {
+        this->set_node_type(btree_node_type::VAR_OBJECT);
+    }
+    virtual ~VarObjSizeNode() = default;
+
+    uint16_t get_nth_key_len(uint32_t ind) const override {
+        return r_cast< const var_obj_record* >(this->get_nth_record(ind))->m_key_len;
+    }
+    uint16_t get_nth_value_len(uint32_t ind) const override {
+        return r_cast< const var_obj_record* >(this->get_nth_record(ind))->m_value_len;
+    }
+    uint16_t get_record_size() const override { return sizeof(var_obj_record); }
+
+    void set_nth_key_len(uint8_t* rec_ptr, uint16_t key_len) override {
+        r_cast< var_obj_record* >(rec_ptr)->m_key_len = key_len;
+    }
+    void set_nth_value_len(uint8_t* rec_ptr, uint16_t value_len) override {
+        r_cast< var_obj_record* >(rec_ptr)->m_value_len = value_len;
     }
 
-    static uint16_t get_nth_value_len(const VariantNode< btree_node_type::VAR_OBJECT, K, V >* node, int ind) {
-        return ((const var_value_record*)node->get_nth_record(ind))->m_value_len;
-    }
+private:
+#pragma pack(1)
+    struct var_obj_record : public btree_obj_record {
+        uint16_t m_key_len : 14;
+        uint16_t reserved : 2;
 
-    static uint16_t get_record_size(const VariantNode< btree_node_type::VAR_OBJECT, K, V >* node) {
-        return sizeof(var_value_record);
-    }
-
-    static void set_nth_key_len(const VariantNode< btree_node_type::VAR_OBJECT, K, V >* node, uint8_t* rec_ptr,
-                                uint16_t key_len) {
-        ((var_obj_record*)rec_ptr)->m_key_len = key_len;
-    }
-
-    static void set_nth_value_len(const VariantNode< btree_node_type::VAR_OBJECT, K, V >* node, uint8_t* rec_ptr,
-                                  uint16_t value_len) {
-        ((var_obj_record*)rec_ptr)->m_value_len = value_len;
-    }
+        uint16_t m_value_len : 14;
+        uint16_t reserved2 : 2;
+    };
+#pragma pack()
 };
-
-#if 0
-template< typename K, typename V, btree_node_type NodeType >
-uint16_t VarObjectNode< K, V, btree_node_type::VAR_KEY >::get_nth_value_len(int ind) const {
-    return V::get_blob_size();
-}
-
-template< typename K, typename V, btree_node_type NodeType >
-uint16_t VarObjectNode< K, V, btree_node_type::VAR_KEY >::get_record_size() const {
-    return sizeof(var_key_record);
-}
-
-template< typename K, typename V, btree_node_type NodeType >
-void VarObjectNode< K, V, btree_node_type::VAR_KEY >::set_nth_key_len(uint8_t *rec_ptr, uint16_t key_len) {
-    ((var_key_record *)rec_ptr)->m_key_len = key_len;
-}
-
-template< typename K, typename V, btree_node_type NodeType >
-void VarObjectNode< K, V, btree_node_type::VAR_KEY >::set_nth_value_len(uint8_t *rec_ptr, uint16_t value_len) {
-    assert(value_len == V::get_blob_size());
-}
-
-/***************** Template Specialization for variable value records ******************/
-template< typename K, typename V, btree_node_type NodeType >
-uint16_t VarObjectNode< K, V, btree_node_type::VAR_VALUE >::get_nth_key_len(int ind) const {
-    return K::get_blob_size();
-}
-
-template< typename K, typename V, btree_node_type NodeType >
-uint16_t VarObjectNode< K, V, btree_node_type::VAR_VALUE >::get_nth_value_len(int ind) const {
-    return ((const var_value_record *)get_nth_record_const(ind))->m_value_len;
-}
-
-template< typename K, typename V, btree_node_type NodeType >
-uint16_t VarObjectNode< K, V, btree_node_type::VAR_VALUE >::get_record_size() const {
-    return sizeof(var_value_record);
-}
-
-template< typename K, typename V, btree_node_type NodeType >
-void VarObjectNode< K, V, btree_node_type::VAR_VALUE >::set_nth_key_len(uint8_t *rec_ptr, uint16_t key_len) {
-    assert(key_len == K::get_blob_size());
-}
-
-template< typename K, typename V, btree_node_type NodeType >
-void VarObjectNode< K, V, btree_node_type::VAR_VALUE >::set_nth_value_len(uint8_t *rec_ptr, uint16_t value_len) {
-    ((var_value_record *)rec_ptr)->m_value_len = value_len;
-}
-
-/***************** Template Specialization for variable object records ******************/
-template< typename K, typename V, btree_node_type NodeType >
-uint16_t VarObjectNode< K, V, btree_node_type::VAR_VALUE >::get_nth_key_len(int ind) const {
-    return ((const var_obj_record *)get_nth_record_const(ind))->m_key_len;
-}
-
-template< typename K, typename V, btree_node_type NodeType >
-uint16_t VarObjectNode< K, V, btree_node_type::VAR_VALUE >::get_nth_value_len(int ind) const {
-    return ((const var_obj_record *)get_nth_record_const(ind))->m_value_len;
-}
-
-template< typename K, typename V, btree_node_type NodeType >
-uint16_t VarObjectNode< K, V, btree_node_type::VAR_VALUE >::get_record_size() const {
-    return sizeof(var_obj_record);
-}
-
-template< typename K, typename V, btree_node_type NodeType >
-void VarObjectNode< K, V, btree_node_type::VAR_VALUE >::set_nth_key_len(uint8_t *rec_ptr, uint16_t key_len) {
-    ((var_obj_record *)rec_ptr)->m_key_len = key_len;
-}
-
-template< typename K, typename V, btree_node_type NodeType >
-void VarObjectNode< K, V, btree_node_type::VAR_VALUE >::set_nth_value_len(uint8_t *rec_ptr, uint16_t value_len) {
-    ((var_obj_record *)rec_ptr)->m_value_len = value_len;
-}
-#endif
-
-} // namespace btree
-} // namespace homeds
-
-#endif /* BTREE_VARLEN_NODE_HPP_ */
+} // namespace homestore
