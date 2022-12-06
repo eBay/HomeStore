@@ -5,8 +5,8 @@
 #include <iomgr/iomgr.hpp>
 #include <sisl/utility/thread_factory.hpp>
 
-#include "engine/homestore_base.hpp"
-#include "engine/common/homestore_assert.hpp"
+#include <homestore.hpp>
+#include "common/homestore_assert.hpp"
 
 #include "log_store_family.hpp"
 #include "log_dev.hpp"
@@ -15,16 +15,16 @@
 namespace homestore {
 SISL_LOGGING_DECL(logstore)
 
-LogStoreFamily::LogStoreFamily(const logstore_family_id_t f_id) :
+LogStoreFamily::LogStoreFamily(logstore_family_id_t f_id) :
         m_family_id{f_id},
         m_metablk_name{std::string("LogDevFamily") + std::to_string(f_id)},
         m_log_dev{f_id, m_metablk_name} {}
 
-void LogStoreFamily::meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size) {
+void LogStoreFamily::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     m_log_dev.meta_blk_found(mblk, buf, size);
 }
 
-void LogStoreFamily::start(const bool format, JournalVirtualDev* blk_store) {
+void LogStoreFamily::start(bool format, JournalVirtualDev* blk_store) {
     m_log_dev.register_store_found_cb(bind_this(LogStoreFamily::on_log_store_found, 2));
     m_log_dev.register_append_cb(bind_this(LogStoreFamily::on_io_completion, 5));
     m_log_dev.register_logfound_cb(bind_this(LogStoreFamily::on_logfound, 6));
@@ -68,13 +68,13 @@ void LogStoreFamily::stop() {
     m_log_dev.stop();
 }
 
-std::shared_ptr< HomeLogStore > LogStoreFamily::create_new_log_store(const bool append_mode) {
-    const auto store_id{m_log_dev.reserve_store_id()};
+std::shared_ptr< HomeLogStore > LogStoreFamily::create_new_log_store(bool append_mode) {
+    auto const store_id = m_log_dev.reserve_store_id();
     std::shared_ptr< HomeLogStore > lstore;
     lstore = std::make_shared< HomeLogStore >(*this, store_id, append_mode, 0);
 
-    auto m{m_id_logstore_map.wlock()};
-    const auto it{m->find(store_id)};
+    auto m = m_id_logstore_map.wlock();
+    const auto it = m->find(store_id);
     HS_REL_ASSERT((it == m->end()), "store_id {}-{} already exists", m_family_id, store_id);
 
     m->insert(std::make_pair<>(store_id, logstore_info_t{lstore, nullptr, append_mode}));
@@ -83,17 +83,16 @@ std::shared_ptr< HomeLogStore > LogStoreFamily::create_new_log_store(const bool 
     return lstore;
 }
 
-void LogStoreFamily::open_log_store(const logstore_id_t store_id, const bool append_mode,
-                                    const log_store_opened_cb_t& on_open_cb) {
-    auto m{m_id_logstore_map.wlock()};
-    const auto it{m->find(store_id)};
+void LogStoreFamily::open_log_store(logstore_id_t store_id, bool append_mode, const log_store_opened_cb_t& on_open_cb) {
+    auto m = m_id_logstore_map.wlock();
+    const auto it = m->find(store_id);
     HS_REL_ASSERT((it == m->end()), "store_id {}-{} already exists", m_family_id, store_id);
 
     LOGINFO("Opening log store id {}-{}", m_family_id, store_id);
     m->insert(std::make_pair<>(store_id, logstore_info_t{nullptr, on_open_cb, append_mode}));
 }
 
-void LogStoreFamily::remove_log_store(const logstore_id_t store_id) {
+void LogStoreFamily::remove_log_store(logstore_id_t store_id) {
     LOGINFO("Removing log store id {}-{}", m_family_id, store_id);
     auto ret = m_id_logstore_map.wlock()->erase(store_id);
     HS_REL_ASSERT((ret == 1), "try to remove invalid store_id {}-{}", m_family_id, store_id);
@@ -101,11 +100,11 @@ void LogStoreFamily::remove_log_store(const logstore_id_t store_id) {
 }
 
 void LogStoreFamily::device_truncate_in_user_reactor(const std::shared_ptr< truncate_req >& treq) {
-    const bool locked_now{m_log_dev.try_lock_flush([this, treq]() {
+    const bool locked_now = m_log_dev.try_lock_flush([this, treq]() {
         if (iomanager.am_i_tight_loop_reactor()) {
             iomanager.run_on(
-                HomeLogStoreMgrSI().m_truncate_thread,
-                [this, treq]([[maybe_unused]] io_thread_addr_t addr) { device_truncate_in_user_reactor(treq); });
+                logstore_service().m_truncate_thread,
+                [this, treq]([[maybe_unused]] iomgr::io_thread_addr_t addr) { device_truncate_in_user_reactor(treq); });
         } else {
             const logdev_key trunc_upto = do_device_truncate(treq->dry_run);
             bool done{false};
@@ -121,13 +120,13 @@ void LogStoreFamily::device_truncate_in_user_reactor(const std::shared_ptr< trun
                 if (treq->wait_till_done) { treq->cv.notify_one(); }
             }
         }
-    })};
+    });
     if (locked_now) { m_log_dev.unlock_flush(); }
 }
 
-void LogStoreFamily::on_log_store_found(const logstore_id_t store_id, const logstore_superblk& sb) {
-    auto m{m_id_logstore_map.rlock()};
-    const auto it{m->find(store_id)};
+void LogStoreFamily::on_log_store_found(logstore_id_t store_id, const logstore_superblk& sb) {
+    auto m = m_id_logstore_map.rlock();
+    const auto it = m->find(store_id);
     if (it == m->end()) {
         LOGERROR("Store Id {}-{} found but not opened yet.", m_family_id, store_id);
         m_unopened_store_id.insert(store_id);
@@ -137,17 +136,17 @@ void LogStoreFamily::on_log_store_found(const logstore_id_t store_id, const logs
 
     LOGINFO("Found a logstore store_id={}-{} with start seq_num={}, Creating a new HomeLogStore instance", m_family_id,
             store_id, sb.m_first_seq_num);
-    auto& l_info{const_cast< logstore_info_t& >(it->second)};
+    auto& l_info = const_cast< logstore_info_t& >(it->second);
     l_info.m_log_store = std::make_shared< HomeLogStore >(*this, store_id, l_info.append_mode, sb.m_first_seq_num);
     if (l_info.m_on_log_store_opened) l_info.m_on_log_store_opened(l_info.m_log_store);
 }
 
 static thread_local std::vector< std::shared_ptr< HomeLogStore > > s_cur_flush_batch_stores;
 
-void LogStoreFamily::on_io_completion(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_ld_key,
-                                      const uint32_t nremaining_in_batch, void* const ctx) {
-    auto* const req{static_cast< logstore_req* >(ctx)};
-    HomeLogStore* const log_store{req->log_store};
+void LogStoreFamily::on_io_completion(logstore_id_t id, logdev_key ld_key, logdev_key flush_ld_key,
+                                      uint32_t nremaining_in_batch, void* ctx) {
+    auto* req = s_cast< logstore_req* >(ctx);
+    HomeLogStore* log_store = req->log_store;
 
     if (req->is_write) {
         HS_LOG_ASSERT_EQ(log_store->m_store_id, id, "Expecting store id in log store and io completion to match");
@@ -158,11 +157,10 @@ void LogStoreFamily::on_io_completion(const logstore_id_t id, const logdev_key l
     }
 }
 
-void LogStoreFamily::on_logfound(const logstore_id_t id, const logstore_seq_num_t seq_num, const logdev_key ld_key,
-                                 const logdev_key flush_ld_key, const log_buffer buf,
-                                 const uint32_t nremaining_in_batch) {
-    auto m{m_id_logstore_map.rlock()};
-    const auto it{m->find(id)};
+void LogStoreFamily::on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key,
+                                 logdev_key flush_ld_key, log_buffer buf, uint32_t nremaining_in_batch) {
+    auto m = m_id_logstore_map.rlock();
+    auto const it = m->find(id);
     if (it == m->end()) {
         auto [unopened_it, inserted] = m_unopened_store_io.insert(std::make_pair<>(id, 0));
         if (inserted) {
@@ -171,18 +169,18 @@ void LogStoreFamily::on_logfound(const logstore_id_t id, const logstore_seq_num_
         ++unopened_it->second;
         return;
     }
-    auto& log_store{it->second.m_log_store};
+    auto& log_store = it->second.m_log_store;
     if (!log_store) { return; }
     log_store->on_log_found(seq_num, ld_key, flush_ld_key, buf);
     on_batch_completion(log_store.get(), nremaining_in_batch, flush_ld_key);
 }
 
-void LogStoreFamily::on_batch_completion(HomeLogStore* log_store, const uint32_t nremaining_in_batch,
-                                         const logdev_key flush_ld_key) {
+void LogStoreFamily::on_batch_completion(HomeLogStore* log_store, uint32_t nremaining_in_batch,
+                                         logdev_key flush_ld_key) {
 
     /* check if it is a first update on this log store */
     auto id = log_store->get_store_id();
-    const auto it{m_last_flush_info.find(id)};
+    const auto it = m_last_flush_info.find(id);
     if ((it == std::end(m_last_flush_info)) || (it->second != flush_ld_key.idx)) {
         // first time completion in this batch for a given store_id
         m_last_flush_info.insert_or_assign(id, flush_ld_key.idx);
@@ -200,19 +198,19 @@ void LogStoreFamily::on_batch_completion(HomeLogStore* log_store, const uint32_t
     }
 }
 
-logdev_key LogStoreFamily::do_device_truncate(const bool dry_run) {
+logdev_key LogStoreFamily::do_device_truncate(bool dry_run) {
     static thread_local std::vector< std::shared_ptr< HomeLogStore > > m_min_trunc_stores;
     static thread_local std::vector< std::shared_ptr< HomeLogStore > > m_non_participating_stores;
 
     m_min_trunc_stores.clear();
     m_non_participating_stores.clear();
-    logdev_key min_safe_ld_key{logdev_key::out_of_bound_ld_key()};
+    logdev_key min_safe_ld_key = logdev_key::out_of_bound_ld_key();
 
     std::string dbg_str{"Format [store_id:trunc_lsn:logidx:dev_trunc_pending?:active_writes_in_trucate?] "};
     m_id_logstore_map.withRLock([this, &min_safe_ld_key, &dbg_str](auto& id_logstore_map) {
         for (auto& id_logstore : id_logstore_map) {
-            auto& store_ptr{id_logstore.second.m_log_store};
-            const auto& trunc_info{store_ptr->pre_device_truncation()};
+            auto& store_ptr = id_logstore.second.m_log_store;
+            const auto& trunc_info = store_ptr->pre_device_truncation();
 
             if (!trunc_info.pending_dev_truncation && !trunc_info.active_writes_not_part_of_truncation) {
                 // This log store neither has any pending device truncation nor active logstore io going on for now.
@@ -245,7 +243,7 @@ logdev_key LogStoreFamily::do_device_truncate(const bool dry_run) {
     }
 
     // Got the safest log id to truncate and actually truncate upto the safe log idx to the log device
-    if (!dry_run) { [[maybe_unused]] auto num = m_log_dev.truncate(min_safe_ld_key); }
+    if (!dry_run) { m_log_dev.truncate(min_safe_ld_key); }
     HS_PERIODIC_LOG(INFO, logstore,
                     "[Family={}] LogDevice truncate, all_logstore_info:<{}> safe log dev key to truncate={}",
                     m_family_id, dbg_str, min_safe_ld_key);
@@ -285,7 +283,7 @@ nlohmann::json LogStoreFamily::dump_log_store(const log_dump_req& dump_req) {
     return json_dump;
 }
 
-nlohmann::json LogStoreFamily::get_status(const int verbosity) const {
+nlohmann::json LogStoreFamily::get_status(int verbosity) const {
     nlohmann::json js;
     auto unopened = nlohmann::json::array();
     for (const auto& l : m_unopened_store_id) {

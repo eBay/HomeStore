@@ -15,6 +15,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <folly/Synchronized.h>
 
+#include <logstore_service.hpp>
 #include "logstore_header.hpp"
 #include "log_dev.hpp"
 
@@ -28,8 +29,12 @@ struct logstore_info_t {
 };
 
 struct truncate_req;
+class JournalVirtualDev;
+class HomeLogStore;
+struct meta_blk;
+
 class LogStoreFamily {
-    friend class HomeLogStoreMgr;
+    friend class LogStoreService;
     friend class LogDev;
 
 public:
@@ -39,21 +44,21 @@ public:
     LogStoreFamily& operator=(const LogStoreFamily&) = delete;
     LogStoreFamily& operator=(LogStoreFamily&&) noexcept = delete;
 
-    void meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
+    void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
     void start(const bool format, JournalVirtualDev* blk_store);
     void stop();
 
-    [[nodiscard]] std::shared_ptr< HomeLogStore > create_new_log_store(const bool append_mode = false);
-    void open_log_store(const logstore_id_t store_id, const bool append_mode, const log_store_opened_cb_t& on_open_cb);
-    [[nodiscard]] bool close_log_store(const logstore_id_t store_id) {
+    std::shared_ptr< HomeLogStore > create_new_log_store(bool append_mode = false);
+    void open_log_store(logstore_id_t store_id, bool append_mode, const log_store_opened_cb_t& on_open_cb);
+    bool close_log_store(logstore_id_t store_id) {
         // TODO: Implement this method
         return true;
     }
-    void remove_log_store(const logstore_id_t store_id);
+    void remove_log_store(logstore_id_t store_id);
 
     void device_truncate_in_user_reactor(const std::shared_ptr< truncate_req >& treq);
 
-    [[nodiscard]] nlohmann::json dump_log_store(const log_dump_req& dum_req);
+    nlohmann::json dump_log_store(const log_dump_req& dum_req);
     std::string metablk_name() const { return m_metablk_name; }
 
     LogDev& logdev() { return m_log_dev; }
@@ -62,15 +67,14 @@ public:
     std::string get_name() const { return m_metablk_name; }
 
 private:
-    [[nodiscard]] logdev_key do_device_truncate(const bool dry_run = false);
+    logdev_key do_device_truncate(bool dry_run = false);
 
-    void on_log_store_found(const logstore_id_t store_id, const logstore_superblk& meta);
-    void on_io_completion(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_idx,
-                          const uint32_t nremaining_in_batch, void* const ctx);
-    void on_logfound(const logstore_id_t id, const logstore_seq_num_t seq_num, const logdev_key ld_key,
-                     const logdev_key flush_ld_key, const log_buffer buf, const uint32_t nremaining_in_batch);
-    void on_batch_completion(HomeLogStore* log_store, const uint32_t nremaining_in_batch,
-                             const logdev_key flush_ld_key);
+    void on_log_store_found(logstore_id_t store_id, const logstore_superblk& meta);
+    void on_io_completion(logstore_id_t id, logdev_key ld_key, logdev_key flush_idx, uint32_t nremaining_in_batch,
+                          void* ctx);
+    void on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key, logdev_key flush_ld_key,
+                     log_buffer buf, uint32_t nremaining_in_batch);
+    void on_batch_completion(HomeLogStore* log_store, uint32_t nremaining_in_batch, logdev_key flush_ld_key);
 
 private:
     folly::Synchronized< std::unordered_map< logstore_id_t, logstore_info_t > > m_id_logstore_map;

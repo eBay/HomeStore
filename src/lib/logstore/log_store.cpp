@@ -5,10 +5,9 @@
 #include <iomgr/iomgr.hpp>
 #include <sisl/utility/thread_factory.hpp>
 
-#include "engine/common/homestore_assert.hpp"
-#include "engine/homestore_base.hpp"
+#include <homestore.hpp>
+#include "common/homestore_assert.hpp"
 #include "log_dev.hpp"
-
 #include "log_store.hpp"
 
 namespace homestore {
@@ -26,7 +25,8 @@ HomeLogStore::HomeLogStore(LogStoreFamily& family, const logstore_id_t id, const
         m_records{"HomeLogStoreRecords", start_lsn - 1},
         m_append_mode{append_mode},
         m_seq_num{start_lsn},
-        m_fq_name{fmt::format("{}.{}", family.m_family_id, id)} {
+        m_fq_name{fmt::format("{}.{}", family.m_family_id, id)},
+        m_metrics{logstore_service().metrics()} {
     m_truncation_barriers.reserve(10000);
     m_safe_truncation_boundary.seq_num.store(start_lsn - 1, std::memory_order_release);
 }
@@ -78,8 +78,8 @@ void HomeLogStore::write_async(logstore_req* const req, const log_req_comp_cb_t&
 #endif
 
     m_records.create(req->seq_num);
-    COUNTER_INCREMENT(HomeLogStoreMgrSI().m_metrics, logstore_append_count, 1);
-    HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logstore_record_size, req->data.size);
+    COUNTER_INCREMENT(m_metrics, logstore_append_count, 1);
+    HISTOGRAM_OBSERVE(m_metrics, logstore_record_size, req->data.size);
     m_logdev.append_async(m_store_id, req->seq_num, req->data, static_cast< void* >(req));
 }
 
@@ -114,10 +114,10 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
     const auto start_time{Clock::now()};
     THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} mapped to logdev_key=[idx={} dev_offset={}]", m_store_id, seq_num,
                       ld_key.idx, ld_key.dev_offset);
-    COUNTER_INCREMENT(HomeLogStoreMgrSI().m_metrics, logstore_read_count, 1);
+    COUNTER_INCREMENT(m_metrics, logstore_read_count, 1);
     serialized_log_record header;
     const auto b{m_logdev.read(ld_key, header)};
-    HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logstore_read_latency, get_elapsed_time_us(start_time));
+    HISTOGRAM_OBSERVE(m_metrics, logstore_read_latency, get_elapsed_time_us(start_time));
     return b;
 }
 #if 0
@@ -153,7 +153,7 @@ void HomeLogStore::on_write_completion(logstore_req* const req, const logdev_key
 
     // Update the maximum lsn we have seen for this batch for this store, it is needed to create truncation barrier
     m_flush_batch_max_lsn = std::max(m_flush_batch_max_lsn, req->seq_num);
-    HISTOGRAM_OBSERVE(HomeLogStoreMgrSI().m_metrics, logstore_append_latency, get_elapsed_time_us(req->start_time));
+    HISTOGRAM_OBSERVE(m_metrics, logstore_append_latency, get_elapsed_time_us(req->start_time));
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 }
 
@@ -343,7 +343,6 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
 }
 
 void HomeLogStore::foreach (const int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
-
     m_records.foreach_completed(start_idx,
                                 [&](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
                                     // do a sync read

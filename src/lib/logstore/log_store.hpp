@@ -38,6 +38,7 @@ struct logstore_record {
     logstore_record(const logdev_key& key) : m_dev_key{key} {}
 };
 
+class HomeLogStore;
 struct logstore_req {
     HomeLogStore* log_store; // Backpointer to the log store. We are not storing shared_ptr as user should not destroy
                              // it until all ios are not completed.
@@ -56,12 +57,12 @@ struct logstore_req {
     ~logstore_req() = default;
 
     // Get the size of the read or written record
-    [[nodiscard]] size_t size() const {
+    size_t size() const {
         // TODO: Implement this method
         return 0;
     }
-    [[nodiscard]] static logstore_req* make(HomeLogStore* const store, const logstore_seq_num_t seq_num,
-                                            const sisl::io_blob& data, const bool is_write_req = true) {
+    static logstore_req* make(HomeLogStore* store, logstore_seq_num_t seq_num, const sisl::io_blob& data,
+                              bool is_write_req = true) {
         logstore_req* const req{sisl::ObjectAllocator< logstore_req >::make_object()};
         req->log_store = store;
         req->seq_num = seq_num;
@@ -100,152 +101,18 @@ struct truncation_info {
     bool active_writes_not_part_of_truncation{false};
 };
 
-class HomeLogStoreMgrMetrics : public sisl::MetricsGroup {
-public:
-    HomeLogStoreMgrMetrics();
-    HomeLogStoreMgrMetrics(const HomeLogStoreMgrMetrics&) = delete;
-    HomeLogStoreMgrMetrics(HomeLogStoreMgrMetrics&&) noexcept = delete;
-    HomeLogStoreMgrMetrics& operator=(const HomeLogStoreMgrMetrics&) = delete;
-    HomeLogStoreMgrMetrics& operator=(HomeLogStoreMgrMetrics&&) noexcept = delete;
-};
-
-class HomeLogStore;
-
-class HomeLogStoreMgr {
-    friend class HomeLogStore;
-    friend class LogStoreFamily;
-    friend class LogDev;
-
-    HomeLogStoreMgr();
-
-public:
-    static constexpr logstore_family_id_t DATA_LOG_FAMILY_IDX{0};
-    static constexpr logstore_family_id_t CTRL_LOG_FAMILY_IDX{1};
-    static constexpr size_t num_log_families = CTRL_LOG_FAMILY_IDX + 1;
-    typedef std::function< void(const std::array< logdev_key, num_log_families >&) > device_truncate_cb_t;
-
-    HomeLogStoreMgr(const HomeLogStoreMgr&) = delete;
-    HomeLogStoreMgr(HomeLogStoreMgr&&) noexcept = delete;
-    HomeLogStoreMgr& operator=(const HomeLogStoreMgr&) = delete;
-    HomeLogStoreMgr& operator=(HomeLogStoreMgr&&) noexcept = delete;
-
-    [[nodiscard]] static HomeLogStoreMgr& instance();
-    static void data_meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
-    static void ctrl_meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
-    static void fake_reboot();
-
-    /**
-     * @brief Start the entire HomeLogStore set and does recover the existing logstores. Really this is the first
-     * method to be executed on log store.
-     *
-     * @param format If set to true, will not recover, but create a fresh log store set.
-     */
-    void start(const bool format);
-
-    /**
-     * @brief Stop the HomeLogStore. It resets all parameters and can be restarted with start method.
-     *
-     */
-    void stop();
-
-    /**
-     * @brief Create a brand new log store (both in-memory and on device) and returns its instance. It also book
-     * keeps the created log store and user can get this instance of log store by using logstore_d
-     *
-     * @param family_id: Logstores can be created on different log_devs. As of now we only support data log_dev and
-     * ctrl log dev. The idx indicates which log device it is from. Its a mandatory parameter
-     * @param append_mode: If the log store have to be in append mode, in that case, user can call append_async
-     * and do not need to maintain the log_idx. Else user is expected to keep track of the log idx. Default to false
-     *
-     * @return std::shared_ptr< HomeLogStore >
-     */
-    [[nodiscard]] std::shared_ptr< HomeLogStore > create_new_log_store(const logstore_family_id_t family_id,
-                                                                       const bool append_mode = false);
-
-    /**
-     * @brief Open an existing log store and does a recovery. It then creates an instance of this logstore and
-     * returns
-     *
-     * @param store_id: Store ID of the log store to open
-     * @return std::shared_ptr< HomeLogStore >
-     */
-    void open_log_store(const logstore_family_id_t family_id, const logstore_id_t store_id, const bool append_mode,
-                        const log_store_opened_cb_t& on_open_cb);
-
-    /**
-     * @brief Close the log store instance and free-up the resources
-     *
-     * @param store_id: Store ID of the log store to close
-     * @return true on success
-     */
-    [[nodiscard]] bool close_log_store(const logstore_family_id_t family_id, const logstore_id_t store_id) {
-        // TODO: Implement this method
-        return true;
-    }
-
-    /**
-     * @brief Remove an existing log store. It removes in-memory and schedule to reuse the store id after device
-     * truncation.
-     *
-     * @param store_id
-     */
-    void remove_log_store(const logstore_family_id_t family_id, const logstore_id_t store_id);
-
-    /**
-     * @brief Schedule a truncate all the log stores physically on the device.
-     *
-     * @param cb [OPTIONAL] Callback once truncation is completed, if provided (Default no callback)
-     * @param wait_till_done [OPTIONAL] Wait for the truncation to complete before returning from this method.
-     * Default to false
-     * @param dry_run: If the truncate is a real one or just dry run to simulate the truncation
-     */
-    void device_truncate(const device_truncate_cb_t& cb = nullptr, const bool wait_till_done = false,
-                         const bool dry_run = false);
-    void send_flush_msg();
-
-    [[nodiscard]] nlohmann::json dump_log_store(const log_dump_req& dum_req);
-    [[nodiscard]] nlohmann::json get_status(const int verbosity) const;
-
-    LogStoreFamily* data_log_family() { return m_logstore_families[DATA_LOG_FAMILY_IDX].get(); }
-    LogStoreFamily* ctrl_log_family() { return m_logstore_families[CTRL_LOG_FAMILY_IDX].get(); }
-
-    static LogDev& data_logdev() { return HomeLogStoreMgr::instance().data_log_family()->logdev(); }
-    static LogDev& ctrl_logdev() { return HomeLogStoreMgr::instance().ctrl_log_family()->logdev(); }
-
-private:
-    void start_threads();
-    void flush_if_needed();
-    void stop_flush_thread();
-    uint64_t num_try_flush_iteration();
-
-private:
-    boost::intrusive_ptr< HomeStoreBase > m_hb; // Back pointer to homestore
-    std::mutex m_mtx;                           // mutex to protect m_logstore_families pointer
-    std::array< std::unique_ptr< LogStoreFamily >, num_log_families > m_logstore_families;
-    std::mutex m_cv_mtx;
-    std::condition_variable m_flush_thread_cv; // cv to wait for flush thread to stop
-    HomeLogStoreMgrMetrics m_metrics;
-    iomgr::io_thread_t m_truncate_thread;
-    iomgr::io_thread_t m_flush_thread;
-    bool m_flush_thread_stopped = false;
-};
-
-static HomeLogStoreMgr& HomeLogStoreMgrSI() { return HomeLogStoreMgr::instance(); }
-
 struct truncate_req {
     std::mutex mtx;
     std::condition_variable cv;
     bool wait_till_done{false};
     bool dry_run{false};
-    HomeLogStoreMgr::device_truncate_cb_t cb;
-    std::array< logdev_key, HomeLogStoreMgr::num_log_families > m_trunc_upto_result;
+    LogStoreService::device_truncate_cb_t cb;
+    std::array< logdev_key, LogStoreService::num_log_families > m_trunc_upto_result;
     int trunc_outstanding{0};
 };
 
 class HomeLogStore : public std::enable_shared_from_this< HomeLogStore > {
 public:
-    friend class HomeLogStoreMgr;
-
     HomeLogStore(LogStoreFamily& family, const logstore_id_t id, const bool append_mode,
                  const logstore_seq_num_t start_lsn);
     HomeLogStore(const HomeLogStore&) = delete;
@@ -505,6 +372,7 @@ private:
     log_replay_done_cb_t m_replay_done_cb;
     std::atomic< logstore_seq_num_t > m_seq_num;
     std::string m_fq_name;
+    LogStoreServiceMetrics& m_metrics;
 
     // seq_ld_key_pair m_flush_batch_max = {-1, {0, 0}}; // The maximum seqnum we have seen in the prev flushed
     // batch
