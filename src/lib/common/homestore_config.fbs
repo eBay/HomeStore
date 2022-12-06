@@ -1,0 +1,201 @@
+native_include "sisl/utility/non_null_ptr.hpp";
+
+namespace homestorecfg;
+
+attribute "hotswap";
+attribute "deprecated";
+
+table BlkAllocator {
+    /* Number of attempts we try to allocate from cache before giving up */
+    max_varsize_blk_alloc_attempt: uint32 = 2 (hotswap);
+
+    /* Total number of segments the blkallocator is divided upto */
+    max_segments: uint32 = 1;
+
+    /* Total number of blk temperature supported. Having more temperature helps better block allocation if the
+     * classification is set correctly during blk write */
+    num_blk_temperatures: uint8 = 1;
+
+    /* The entire blk space is divided into multiple portions and atomicity and temperature are assigned to
+     * portion. Having large number of portions provide lot of lock sharding and also more room for fine grained
+     * temperature of blk, but increases the memory usage */
+    num_blks_per_portion: uint32 = 16384;
+
+    /* Count of free blks cache in-terms of device size */
+    free_blk_cache_count_by_vdev_percent: double = 80.0;
+
+    /* Percentage of overall memory allocated for blkallocator free blks cache. The memory allocated effictively is the 
+     * min of memory occupied by (free_blk_cache_size_by_vdev_percent, max_free_blk_cache_memory_percent) */
+    max_free_blk_cache_memory_percent: double = 1.0;
+
+    /* Free blk cache slab distribution percentage
+     * An example assuming blk_size=4K is      [4K,   8K,   16K,  32K,  64K,  128K, 256K, 512K, 1M,  2M,  4M,  8M,  16M]  
+     * free_blk_slab_distribution : [double] = [20.0, 10.0, 10.0, 10.0, 35.0, 3.0,  3.0,  3.0,  2.0, 1.0, 1.0, 1.0, 1.0] */
+    free_blk_slab_distribution : [double];
+
+    /* Percentage of free blks in a slab dedicated for reuse of blks to avoid write amplification. By reusing
+     * the same blocks we are writing soon enough before SSD has to garbage collect, so that not many garbage
+     * nodes are present in the system */
+    free_blk_reuse_pct: double = 70;
+
+    /* Threshold percentage below which we start refilling the cache on that slab */
+    free_blk_cache_refill_threshold_pct: double = 60;
+
+    /* Frequency at which blk cache refill is scheduled proactively so that a slab doesn't run out of space. This is
+     * specified in ms. Default to 5 minutes. Having this value too low will cause more CPU usage in scanning
+     * the bitmap, setting too high will cause run-out-of-slabs during allocation and thus cause increased write latency */
+    free_blk_cache_refill_frequency_ms: uint64 =  300000;
+
+    /* Number of global variable block size allocator sweeping threads */
+    num_slab_sweeper_threads: uint32 = 2;
+
+    /* real time bitmap feature on/off */
+    realtime_bitmap_on: bool = false;
+}
+
+table Btree {
+    max_nodes_to_rebalance: uint32 = 3; 
+
+    mem_btree_page_size: uint32 = 8192;
+}
+
+table Cache {
+    /* Number of entries we ideally want to have per hash bucket. This number if small, will reduce contention and
+     * speed of read/writes, but at the cost of increased memory */
+    entries_per_hash_bucket: uint32 = 2;
+
+    /* Number of eviction partitions. More the partitions better the parallelization of requests, but lesser the
+     * effectiveness of cache, since it could get evicted sooner than expected, if distribution of key hashing is not
+     * even.*/
+    num_evictor_partitions: uint32 = 32;
+}
+
+table Device {
+    max_error_before_marking_dev_down: uint32 = 100 (hotswap);
+
+    // Outstanding IOs expected per thread. Exceeding this will result in io_submit failure
+    max_outstanding_ios_per_aio_thread: uint32 = 200;
+
+    // Max completions to process per event in a thread
+    max_completions_process_per_event_per_thread: uint32 = 200;
+    
+    // DIRECT_IO mode, switch for HDD IO mode;
+    direct_io_mode: bool = false; 
+}
+
+table LogStore {
+    // Size it needs to group upto before it flushes
+    flush_threshold_size: uint64 = 64 (hotswap);
+
+    // Time interval to wake up to check if flush is needed
+    flush_timer_frequency_us: uint64 = 500 (hotswap);
+
+    // Max time between 2 flushes. while it wakes up every flush timer, it checks if it needs to force a flush of
+    // logs if it exceeds this limit
+    max_time_between_flush_us: uint64 = 300 (hotswap);
+
+    // Bulk read size to load during initial recovery
+    bulk_read_size: uint64 = 524288 (hotswap);
+
+    // How blks we need to read before confirming that we have not seen a corrupted block
+    recovery_max_blks_read_for_additional_check: uint32 = 20;
+
+    // Max size upto which data will be inlined instead of creating a separate value
+    optimal_inline_data_size: uint64 = 512 (hotswap);
+
+    // Max iteration flush thread run before yielding
+    try_flush_iteration: uint64 = 10240(hotswap);
+
+    // Logdev flushes in multiples of this size, setting to 0 will make it use default device optimal size
+    flush_size_multiple_data_logdev: uint64 = 0;
+    flush_size_multiple_ctrl_logdev: uint64 = 512;
+
+    // Logdev will flush the logs only in a dedicated thread. Turn this on, if flush IO doesn't want to
+    // intervene with data IO path.
+    flush_only_in_dedicated_thread: bool = false;
+}
+
+table Generic {
+    // blk alloc cp timer in us
+    blkalloc_cp_timer_us: uint64 = 60000000 (hotswap);
+
+    // writeback cache flush threads
+    cache_flush_threads : int32 = 1;
+
+    cp_watchdog_timer_sec : uint32 = 10; // it checks if cp stuck every 10 seconds
+
+    cache_max_throttle_cnt : uint32 = 4; // writeback cache max q depth
+
+    cache_min_throttle_cnt : uint32 = 4; // writeback cache min q deoth
+
+    // if this value is set to 0, no sanity check will be run;
+    sanity_check_level: uint32 = 1 (hotswap);
+
+    // max iteration of unmap done in a cp
+    max_unmap_iterations : uint32 = 64;
+
+    // number of threads for btree writes;
+    num_btree_write_threads : uint32 = 2;
+
+    // percentage of cache used to create indx mempool. It should be more than 100 to 
+    // take into account some floating buffers in writeback cache.
+    indx_mempool_percent : uint32 = 110;
+}
+
+table ResourceLimits {
+    /* it is going to use 2 times of this space because of two concurrent cps */
+    dirty_buf_percent: uint32 = 1 (hotswap);
+    
+    /* it is going to use 2 times of this space because of two concurrent cps */
+    free_blk_cnt: uint32 = 10000000 (hotswap);
+    free_blk_size_percent: uint32 = 2 (hotswap);
+    
+    /* Percentage of memory allocated for homestore cache */
+    cache_size_percent: uint32 = 65; 
+
+    /* precentage of memory used during recovery */
+    memory_in_recovery_precent: uint32 = 40;
+
+    /* journal size used percentage */
+    journal_size_percent: uint32 = 50;
+
+    /* We crash if volume is 95 percent filled and no disk space left */
+    vol_threshhold_used_size_p: uint32 = 95;
+}
+
+table MetaBlkStore {
+    // turn on/off compression feature 
+    compress_feature_on : bool = true (hotswap);
+
+    // Compress buffer larger than this memory limit in MB will not trigger compress; 
+    max_compress_memory_size_mb: uint32 = 512 (hotswap);
+    
+    // Inital memory allocated for compress buffer
+    init_compress_memory_size_mb: uint32 = 10 (hotswap);
+    
+    // Try to do compress only when input buffer is larger than this size
+    min_compress_size_mb: uint32 = 1 (hotswap);
+
+    // Percentage of compress ratio that allowed for compress to take place
+    compress_ratio_limit: uint32 = 75 (hotswap);
+
+    // percentage of *free* root fs while dump to file for get_status;
+    percent_of_free_space: uint32 = 10 (hotswap);
+
+    // meta sanity check interval 
+    sanity_check_interval: uint32 = 10 (hotswap);
+}
+
+table HomeStoreSettings {
+    version: uint32 = 1;
+    generic: Generic;
+    blkallocator: BlkAllocator;
+    cache: Cache;
+    btree: Btree;
+    device: Device;
+    logstore: LogStore;
+    resource_limits: ResourceLimits;
+    metablk: MetaBlkStore;
+}
+
+root_type HomeStoreSettings;
