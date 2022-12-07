@@ -20,11 +20,11 @@
 #include <sisl/metrics/metrics.hpp>
 #include <sisl/logging/logging.h>
 
-#include "blk.h"
+#include <homestore/blk.h>
 #include "blk_allocator.h"
 #include "blk_cache.h"
-#include "../common/homestore_assert.hpp"
-#include "../common/homestore_config.hpp"
+#include "common/homestore_assert.hpp"
+#include "common/homestore_config.hpp"
 
 namespace homestore {
 typedef blk_num_t seg_num_t;

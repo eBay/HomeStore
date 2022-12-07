@@ -1,6 +1,6 @@
+#include <homestore/homestore.hpp>
 #include "resource_mgr.hpp"
 #include "homestore_assert.hpp"
-#include "homestore.hpp"
 
 namespace homestore {
 ResourceMgr& resource_mgr() { return hs()->resource_mgr(); }

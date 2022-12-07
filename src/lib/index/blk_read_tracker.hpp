@@ -15,7 +15,7 @@
 #include <sisl/metrics/metrics.hpp>
 #include <sisl/utility/obj_life_counter.hpp>
 
-#include "engine/blkalloc/blk.h"
+#include "homestore/blk.h"
 #include "engine/homeds/hash/intrusive_hashset.hpp"
 
 namespace homestore {

@@ -5,12 +5,12 @@
 #include <iomgr/iomgr.hpp>
 #include <sisl/utility/thread_factory.hpp>
 
-#include <homestore.hpp>
-#include "common/homestore_assert.hpp"
+#include <homestore/homestore.hpp>
+#include <homestore/logstore/log_store.hpp>
 
+#include "common/homestore_assert.hpp"
 #include "log_store_family.hpp"
 #include "log_dev.hpp"
-#include "log_store.hpp"
 
 namespace homestore {
 SISL_LOGGING_DECL(logstore)

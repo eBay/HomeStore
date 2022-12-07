@@ -1,8 +1,8 @@
 #pragma once
 #include <vector>
 #include <sisl/fds/thread_vector.hpp>
-#include "blk.h"
-#include "homestore_decl.hpp"
+#include <homestore/blk.h>
+#include <homestore/homestore_decl.hpp>
 
 namespace homestore {
 class HomeStore;

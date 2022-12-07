@@ -8,8 +8,8 @@
 #include <sisl/logging/logging.h>
 #include <iomgr/iomgr.hpp>
 
-#include "homestore_decl.hpp"
-#include "blkalloc/blk.h"
+#include <homestore/homestore_decl.hpp>
+#include <homestore/blk.h>
 
 namespace spdlog {
 class logger;

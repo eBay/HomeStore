@@ -23,8 +23,8 @@
 #include <sisl/utility/urcu_helper.hpp>
 #include <sisl/fds/thread_vector.hpp>
 
-#include "homestore_decl.hpp"
-#include "blk.h"
+#include <homestore/homestore_decl.hpp>
+#include <homestore/blk.h>
 #include "common/homestore_config.hpp"
 #include "common/homestore_assert.hpp"
 

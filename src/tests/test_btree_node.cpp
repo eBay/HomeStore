@@ -23,8 +23,8 @@
 #include <sisl/options/options.h>
 #include <sisl/logging/logging.h>
 #include <sisl/utility/enum.hpp>
-#include "btree/detail/simple_node.hpp"
-#include "btree/detail/varlen_node.hpp"
+#include <homestore/btree/detail/simple_node.hpp>
+#include <homestore/btree/detail/varlen_node.hpp>
 #include "btree_test_kvs.hpp"
 
 static constexpr uint32_t g_node_size{4096};

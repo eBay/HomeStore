@@ -4,7 +4,7 @@
 #include <vector>
 
 #include <iomgr/iomgr.hpp>
-#include "homestore_decl.hpp"
+#include <homestore/homestore_decl.hpp>
 
 namespace homestore {
 

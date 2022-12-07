@@ -9,7 +9,7 @@
 #include <sisl/options/options.h>
 #include <sisl/utility/thread_buffer.hpp>
 
-#include <homestore_decl.hpp>
+#include <homestore/homestore_decl.hpp>
 #include "blkalloc/varsize_blk_allocator.h"
 #include "blkalloc/blk_cache_queue.h"
 

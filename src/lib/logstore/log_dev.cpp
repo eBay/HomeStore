@@ -6,12 +6,11 @@
 #include <sisl/fds/vector_pool.hpp>
 #include <isa-l/crc.h>
 
-#include <logstore_service.hpp>
-#include <meta_service.hpp>
-#include <homestore.hpp>
+#include <homestore/logstore_service.hpp>
+#include <homestore/meta_service.hpp>
+#include <homestore/homestore.hpp>
 
 #include "log_dev.hpp"
-#include "log_store.hpp"
 #include "device/journal_vdev.hpp"
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"

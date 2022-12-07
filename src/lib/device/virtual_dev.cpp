@@ -23,7 +23,7 @@
 #include <sisl/utility/atomic_counter.hpp>
 #include <iomgr/drive_interface.hpp>
 
-#include <homestore.hpp>
+#include <homestore/homestore.hpp>
 #include "physical_dev.hpp"
 #include "device.h"
 #include "virtual_dev.hpp"

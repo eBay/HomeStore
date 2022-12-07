@@ -19,7 +19,7 @@
 #include <sisl/logging/logging.h>
 
 #include "common/homestore_config.hpp"
-#include "logstore_header.hpp"
+#include <homestore/logstore/log_store_internal.hpp>
 
 namespace homestore {
 
@@ -330,46 +330,6 @@ private:
 };
 #endif
 
-typedef int64_t logid_t;
-struct logdev_key {
-    constexpr logdev_key(const logid_t idx = std::numeric_limits< logid_t >::min(),
-                         const off_t dev_offset = std::numeric_limits< uint64_t >::min()) :
-            idx{idx}, dev_offset{dev_offset} {}
-    logdev_key(const logdev_key&) = default;
-    logdev_key& operator=(const logdev_key&) = default;
-    logdev_key(logdev_key&&) noexcept = default;
-    logdev_key& operator=(logdev_key&&) noexcept = default;
-    ~logdev_key() = default;
-
-    bool operator==(const logdev_key& other) { return (other.idx == idx) && (other.dev_offset == dev_offset); }
-
-    operator bool() const { return is_valid(); }
-    bool is_valid() const { return !is_lowest() && !is_highest(); }
-
-    bool is_lowest() const { return (idx == std::numeric_limits< logid_t >::min()); }
-    bool is_highest() const { return (idx == std::numeric_limits< logid_t >::max()); }
-
-    void set_lowest() {
-        idx = std::numeric_limits< logid_t >::min();
-        dev_offset = std::numeric_limits< uint64_t >::min();
-    }
-
-    void set_highest() {
-        idx = std::numeric_limits< logid_t >::max();
-        dev_offset = std::numeric_limits< uint64_t >::max();
-    }
-
-    std::string to_string() const { return fmt::format("Logid={} devoffset={}", idx, dev_offset); }
-
-    static const logdev_key& out_of_bound_ld_key() {
-        static constexpr logdev_key s_out_of_bound_ld_key{std::numeric_limits< logid_t >::max(), 0};
-        return s_out_of_bound_ld_key;
-    }
-
-    logid_t idx;
-    off_t dev_offset;
-};
-
 template < typename charT, typename traits >
 std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& out_stream,
                                                 const logdev_key& key) {
@@ -524,7 +484,6 @@ private:
     uint64_t m_read_size_multiple;
 };
 
-enum log_dump_verbosity : uint8_t { CONTENT, HEADER };
 struct meta_blk;
 
 class LogDev {

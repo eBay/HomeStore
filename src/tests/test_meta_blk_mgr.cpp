@@ -23,8 +23,8 @@
 #include <sisl/options/options.h>
 #include <gtest/gtest.h>
 
-#include <homestore.hpp>
-#include <meta_service.hpp>
+#include <homestore/homestore.hpp>
+#include <homestore/meta_service.hpp>
 #include "meta/meta_sb.hpp"
 #include "common/homestore_config.hpp"
 #include "common/homestore_assert.hpp"

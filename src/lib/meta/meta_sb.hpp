@@ -8,7 +8,7 @@
 #include <sstream>
 #include <string>
 
-#include "blkalloc/blk.h"
+#include <homestore/blk.h>
 
 namespace homestore {
 static constexpr uint32_t META_BLK_HDR_MAX_SZ{512}; // max meta_blk_hdr size

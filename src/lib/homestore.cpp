@@ -7,9 +7,9 @@
 #include <sisl/fds/buffer.hpp>
 #include <sisl/logging/logging.h>
 
-#include <meta_service.hpp>
-#include <logstore_service.hpp>
-#include <homestore.hpp>
+#include <homestore/meta_service.hpp>
+#include <homestore/logstore_service.hpp>
+#include <homestore/homestore.hpp>
 #include "common/homestore_utils.hpp"
 #include "common/homestore_config.hpp"
 #include "common/homestore_assert.hpp"
