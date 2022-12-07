@@ -1,29 +1,19 @@
-project(PackageTest CXX)
-cmake_minimum_required(VERSION 3.9)
+cmake_minimum_required(VERSION 3.11)
+project(test_package LANGUAGES CXX)
+
+include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
+conan_basic_setup(TARGETS)
 
 set(CMAKE_CXX_STANDARD 17)
-include(${CMAKE_BINARY_DIR}/conanbuildinfo.cmake)
-
 find_package (Threads REQUIRED)
 find_package (homestore REQUIRED)
 
-find_program(CCACHE_FOUND ccache)
-if (CCACHE_FOUND)
-    set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
-    set_property(GLOBAL PROPERTY RULE_LAUNCH_LINK ccache)
-endif ()
-
 link_directories(${spdk_LIB_DIRS} ${dpdk_LIB_DIRS})
 
-add_executable(hs_volume hs_volume.cpp)
-target_link_libraries(hs_volume
+add_executable(test_package)
+target_sources(test_package PRIVATE test_package.cpp)
+target_link_libraries(test_package
                       homestore::homestore
                       ${spdk_LIBRARY_LIST}
                       ${dpdk_LIBRARY_LIST}
                     )
-
-# CTest is a testing tool that can be used to test your project.
-# enable_testing()
-# add_test(NAME example
-#          WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/bin
-#          COMMAND example)
