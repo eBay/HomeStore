@@ -70,7 +70,6 @@ public:
             std::filesystem::resize_file(fpath, dev_size); // set the file size
             device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
         }
-        std::vector< dev_info > empty_info;
 
         LOGINFO("Starting iomgr with {} threads", nthreads);
         ioenvironment.with_iomgr(nthreads, is_spdk);

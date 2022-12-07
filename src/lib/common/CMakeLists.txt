@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.13)
 include_directories (BEFORE ..)
 include_directories (BEFORE .)
 
-find_package(FlatBuffers REQUIRED)
+find_package(flatbuffers REQUIRED)
 
 add_library(hs_common OBJECT)
 target_sources(hs_common PRIVATE
