@@ -13,7 +13,7 @@
 #include <sisl/fds/bitset.hpp>
 #include <sisl/logging/logging.h>
 
-#include <homestore_decl.hpp>
+#include <homestore/homestore_decl.hpp>
 #include "common/homestore_assert.hpp"
 #include "common/homestore_utils.hpp"
 

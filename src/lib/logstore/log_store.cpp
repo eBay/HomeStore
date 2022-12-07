@@ -5,10 +5,11 @@
 #include <iomgr/iomgr.hpp>
 #include <sisl/utility/thread_factory.hpp>
 
-#include <homestore.hpp>
+#include <homestore/homestore.hpp>
+#include <homestore/logstore_service.hpp>
 #include "common/homestore_assert.hpp"
+#include "log_store_family.hpp"
 #include "log_dev.hpp"
-#include "log_store.hpp"
 
 namespace homestore {
 SISL_LOGGING_DECL(logstore)
@@ -17,8 +18,7 @@ SISL_LOGGING_DECL(logstore)
 #define THIS_LOGSTORE_PERIODIC_LOG(level, msg, ...)                                                                    \
     HS_PERIODIC_DETAILED_LOG(level, logstore, "store", m_fq_name, , , msg, __VA_ARGS__)
 
-HomeLogStore::HomeLogStore(LogStoreFamily& family, const logstore_id_t id, const bool append_mode,
-                           const logstore_seq_num_t start_lsn) :
+HomeLogStore::HomeLogStore(LogStoreFamily& family, logstore_id_t id, bool append_mode, logstore_seq_num_t start_lsn) :
         m_store_id{id},
         m_logstore_family{family},
         m_logdev{family.logdev()},
@@ -31,7 +31,7 @@ HomeLogStore::HomeLogStore(LogStoreFamily& family, const logstore_id_t id, const
     m_safe_truncation_boundary.seq_num.store(start_lsn - 1, std::memory_order_release);
 }
 
-bool HomeLogStore::write_sync(const logstore_seq_num_t seq_num, const sisl::io_blob& b) {
+bool HomeLogStore::write_sync(logstore_seq_num_t seq_num, const sisl::io_blob& b) {
     HS_LOG_ASSERT((!iomanager.am_i_worker_reactor()), "Sync can not be done in worker reactor thread");
 
     // these should be static so that they stay in scope in the lambda in case function ends before lambda completes
@@ -63,7 +63,7 @@ bool HomeLogStore::write_sync(const logstore_seq_num_t seq_num, const sisl::io_b
     return ctx->ret;
 }
 
-void HomeLogStore::write_async(logstore_req* const req, const log_req_comp_cb_t& cb) {
+void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     HS_LOG_ASSERT((cb || m_comp_cb), "Expected either cb is not null or default cb registered");
     req->cb = (cb ? cb : m_comp_cb);
     req->start_time = Clock::now();
@@ -83,7 +83,7 @@ void HomeLogStore::write_async(logstore_req* const req, const log_req_comp_cb_t&
     m_logdev.append_async(m_store_id, req->seq_num, req->data, static_cast< void* >(req));
 }
 
-void HomeLogStore::write_async(const logstore_seq_num_t seq_num, const sisl::io_blob& b, void* const cookie,
+void HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie,
                                const log_write_comp_cb_t& cb) {
     // Form an internal request and issue the write
     auto* const req{logstore_req::make(this, seq_num, b, true /* is_write_req */)};
@@ -95,8 +95,7 @@ void HomeLogStore::write_async(const logstore_seq_num_t seq_num, const sisl::io_
     });
 }
 
-logstore_seq_num_t HomeLogStore::append_async(const sisl::io_blob& b, void* const cookie,
-                                              const log_write_comp_cb_t& cb) {
+logstore_seq_num_t HomeLogStore::append_async(const sisl::io_blob& b, void* cookie, const log_write_comp_cb_t& cb) {
     HS_DBG_ASSERT_EQ(m_append_mode, true, "append_async can be called only on append only mode");
     const auto seq_num{m_seq_num.fetch_add(1, std::memory_order_acq_rel)};
     write_async(seq_num, b, cookie, cb);
@@ -142,7 +141,7 @@ void HomeLogStore::read_async(logstore_seq_num_t seq_num, void* cookie, const lo
 }
 #endif
 
-void HomeLogStore::on_write_completion(logstore_req* const req, const logdev_key ld_key) {
+void HomeLogStore::on_write_completion(logstore_req* req, const logdev_key& ld_key) {
     // Upon completion, create the mapping between seq_num and log dev key
     m_records.update(req->seq_num, [&](logstore_record& rec) -> bool {
         rec.m_dev_key = ld_key;
@@ -157,12 +156,12 @@ void HomeLogStore::on_write_completion(logstore_req* const req, const logdev_key
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 }
 
-void HomeLogStore::on_read_completion(logstore_req* const req, const logdev_key ld_key) {
+void HomeLogStore::on_read_completion(logstore_req* req, const logdev_key& ld_key) {
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 }
 
-void HomeLogStore::on_log_found(const logstore_seq_num_t seq_num, const logdev_key ld_key,
-                                const logdev_key flush_ld_key, const log_buffer buf) {
+void HomeLogStore::on_log_found(logstore_seq_num_t seq_num, const logdev_key& ld_key, const logdev_key& flush_ld_key,
+                                log_buffer buf) {
     THIS_LOGSTORE_LOG(DEBUG, "Found a log lsn={} logdev_key={}", seq_num, ld_key);
 
     // Create the mapping between seq_num and log dev key
@@ -189,7 +188,7 @@ void HomeLogStore::on_batch_completion(const logdev_key& flush_batch_ld_key) {
     m_flush_batch_max_lsn = std::numeric_limits< logstore_seq_num_t >::min(); // Reset the flush batch for next batch.
 }
 
-void HomeLogStore::truncate(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only) {
+void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_truncate_only) {
 #if 0
     if (!iomanager.is_io_thread()) {
         LOGDFATAL("Expected truncate to be called from iomanager thread. Ignoring truncate");
@@ -220,7 +219,7 @@ void HomeLogStore::truncate(const logstore_seq_num_t upto_seq_num, const bool in
 }
 
 // NOTE: This method assumes the flush lock is already acquired by the caller
-void HomeLogStore::do_truncate(const logstore_seq_num_t upto_seq_num) {
+void HomeLogStore::do_truncate(logstore_seq_num_t upto_seq_num) {
     m_records.truncate(upto_seq_num);
     m_safe_truncation_boundary.seq_num.store(upto_seq_num, std::memory_order_release);
 
@@ -267,7 +266,7 @@ void HomeLogStore::post_device_truncation(const logdev_key& trunc_upto_loc) {
     }
 }
 
-void HomeLogStore::fill_gap(const logstore_seq_num_t seq_num) {
+void HomeLogStore::fill_gap(logstore_seq_num_t seq_num) {
     HS_DBG_ASSERT_EQ(m_records.status(seq_num).is_hole, true, "Attempted to fill gap lsn={} which has valid data",
                      seq_num);
 
@@ -275,7 +274,7 @@ void HomeLogStore::fill_gap(const logstore_seq_num_t seq_num) {
     m_records.create_and_complete(seq_num, empty_ld_key);
 }
 
-int HomeLogStore::search_max_le(const logstore_seq_num_t input_sn) {
+int HomeLogStore::search_max_le(logstore_seq_num_t input_sn) {
     int mid{0};
     int start{-1};
     int end{static_cast< int >(m_truncation_barriers.size())};
@@ -342,7 +341,7 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
     return json_dump;
 }
 
-void HomeLogStore::foreach (const int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
+void HomeLogStore::foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
     m_records.foreach_completed(start_idx,
                                 [&](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
                                     // do a sync read
@@ -353,15 +352,15 @@ void HomeLogStore::foreach (const int64_t start_idx, const std::function< bool(l
                                 });
 }
 
-logstore_seq_num_t HomeLogStore::get_contiguous_issued_seq_num(const logstore_seq_num_t from) const {
+logstore_seq_num_t HomeLogStore::get_contiguous_issued_seq_num(logstore_seq_num_t from) const {
     return (logstore_seq_num_t)m_records.active_upto(from + 1);
 }
 
-logstore_seq_num_t HomeLogStore::get_contiguous_completed_seq_num(const logstore_seq_num_t from) const {
+logstore_seq_num_t HomeLogStore::get_contiguous_completed_seq_num(logstore_seq_num_t from) const {
     return (logstore_seq_num_t)m_records.completed_upto(from + 1);
 }
 
-nlohmann::json HomeLogStore::get_status(const int verbosity) const {
+nlohmann::json HomeLogStore::get_status(int verbosity) const {
     nlohmann::json js;
     js["append_mode"] = m_append_mode;
     js["highest_lsn"] = m_seq_num.load(std::memory_order_relaxed);

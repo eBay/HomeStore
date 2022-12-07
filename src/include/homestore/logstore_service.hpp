@@ -12,7 +12,8 @@
 #include <sisl/metrics/metrics.hpp>
 #include <nlohmann/json.hpp>
 
-#include "logstore/logstore_header.hpp"
+#include <homestore/logstore/log_store.hpp>
+
 namespace homestore {
 
 class LogStoreServiceMetrics : public sisl::MetricsGroup {

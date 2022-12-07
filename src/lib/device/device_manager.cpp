@@ -18,8 +18,8 @@
 #include <iomgr/iomgr.hpp>
 #include <isa-l/crc.h>
 
-#include <meta_service.hpp>
-#include <homestore.hpp>
+#include <homestore/meta_service.hpp>
+#include <homestore/homestore.hpp>
 #include "physical_dev.hpp"
 #include "device.h"
 #include "virtual_dev.hpp"

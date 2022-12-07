@@ -1,5 +1,4 @@
 include(${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
-include_directories (BEFORE ../../include/)
 include_directories (BEFORE ..)
 include_directories (BEFORE .)
 

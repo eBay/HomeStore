@@ -14,10 +14,9 @@
 #include <iomgr/io_environment.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
-#include "homestore.hpp"
-#include "homestore_decl.hpp"
-
-#include "logstore/log_store.hpp"
+#include <homestore/homestore.hpp>
+#include <homestore/homestore_decl.hpp>
+#include <homestore/logstore_service.hpp>
 
 using namespace homestore;
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)

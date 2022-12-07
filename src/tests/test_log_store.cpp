@@ -28,9 +28,11 @@
 #include <sisl/options/options.h>
 #include <gtest/gtest.h>
 
-#include <homestore.hpp>
-#include <logstore_service.hpp>
-#include "logstore/log_store.hpp"
+#include <homestore/homestore.hpp>
+#include <homestore/logstore_service.hpp>
+
+#include "logstore/log_dev.hpp"
+#include "logstore/log_store_family.hpp"
 #include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;

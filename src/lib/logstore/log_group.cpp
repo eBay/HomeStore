@@ -2,9 +2,9 @@
 
 #include <isa-l/crc.h>
 
+#include <homestore/logstore/log_store.hpp>
 #include "common/homestore_assert.hpp"
 #include "log_dev.hpp"
-#include "log_store.hpp"
 
 namespace homestore {
 SISL_LOGGING_DECL(logstore)

@@ -19,9 +19,9 @@
 #include <sisl/settings/settings.hpp>
 #include <sisl/utility/enum.hpp>
 
+#include <homestore/homestore_decl.hpp>
 #include "error.h"
 #include "common/generated/homestore_config_generated.h"
-#include "homestore_decl.hpp"
 
 SETTINGS_INIT(homestorecfg::HomeStoreSettings, homestore_config);
 

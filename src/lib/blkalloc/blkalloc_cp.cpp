@@ -1,5 +1,5 @@
 #include "blkalloc_cp.hpp"
-#include "homestore.hpp"
+#include <homestore/homestore.hpp>
 #include "blkalloc/blk_allocator.h"
 #include "device/device.h" // TODO: Remove this once we make chunk accessible as common
 

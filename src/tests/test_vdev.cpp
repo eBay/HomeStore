@@ -19,7 +19,7 @@
 #include <sisl/options/options.h>
 #include <farmhash.h>
 
-#include <homestore.hpp>
+#include <homestore/homestore.hpp>
 #include "device/virtual_dev.hpp"
 #include "device/journal_vdev.hpp"
 #include "common/homestore_utils.hpp"

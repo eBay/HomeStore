@@ -1,4 +1,4 @@
-#include "blk.h"
+#include <homestore/blk.h>
 #include "common/homestore_assert.hpp"
 
 namespace homestore {

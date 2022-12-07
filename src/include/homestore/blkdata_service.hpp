@@ -1,6 +1,6 @@
 #pragma once
-#include "../blkalloc/blk.h"
-#include "homestore_decl.hpp"
+#include <homestore/blk.h>
+#include <homestore/homestore_decl.hpp>
 
 namespace homestore {
 typedef std::function< void(int status, void* cookie) > io_completion_cb_t;

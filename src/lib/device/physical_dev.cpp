@@ -21,7 +21,7 @@
 #include <folly/Exception.h>
 #include <iomgr/iomgr.hpp>
 
-#include <meta_service.hpp>
+#include <homestore/meta_service.hpp>
 
 #include "physical_dev.hpp"
 #include "device.h"

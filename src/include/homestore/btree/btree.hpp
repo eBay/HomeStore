@@ -24,8 +24,8 @@
 
 #include "btree_req.hpp"
 #include "btree_kv.hpp"
-#include "btree/detail/btree_internal.hpp"
-#include "btree/detail/btree_node.hpp"
+#include <homestore/btree/detail/btree_internal.hpp>
+#include <homestore/btree/detail/btree_node.hpp>
 
 namespace homestore {
 

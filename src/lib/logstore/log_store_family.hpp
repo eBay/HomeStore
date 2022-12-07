@@ -15,8 +15,8 @@
 #include <sisl/fds/buffer.hpp>
 #include <folly/Synchronized.h>
 
-#include <logstore_service.hpp>
-#include "logstore_header.hpp"
+#include <homestore/logstore_service.hpp>
+#include <homestore/logstore/log_store_internal.hpp>
 #include "log_dev.hpp"
 
 namespace homestore {
@@ -28,7 +28,16 @@ struct logstore_info_t {
     bool append_mode;
 };
 
-struct truncate_req;
+struct truncate_req {
+    std::mutex mtx;
+    std::condition_variable cv;
+    bool wait_till_done{false};
+    bool dry_run{false};
+    LogStoreService::device_truncate_cb_t cb;
+    std::array< logdev_key, LogStoreService::num_log_families > m_trunc_upto_result;
+    int trunc_outstanding{0};
+};
+
 class JournalVirtualDev;
 class HomeLogStore;
 struct meta_blk;

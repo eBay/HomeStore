@@ -7,7 +7,7 @@
 
 #include <sisl/logging/logging.h>
 
-#include <homestore.hpp>
+#include <homestore/homestore.hpp>
 #include "device.h"
 #include "physical_dev.hpp"
 #include "journal_vdev.hpp"

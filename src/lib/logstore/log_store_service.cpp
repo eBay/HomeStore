@@ -5,9 +5,9 @@
 #include <iomgr/iomgr.hpp>
 #include <sisl/utility/thread_factory.hpp>
 
-#include <meta_service.hpp>
-#include <logstore_service.hpp>
-#include <homestore.hpp>
+#include <homestore/meta_service.hpp>
+#include <homestore/logstore_service.hpp>
+#include <homestore/homestore.hpp>
 
 #include "common/homestore_assert.hpp"
 #include "common/homestore_status_mgr.hpp"
@@ -16,7 +16,6 @@
 #include "device/physical_dev.hpp"
 #include "log_store_family.hpp"
 #include "log_dev.hpp"
-#include "log_store.hpp"
 
 namespace homestore {
 SISL_LOGGING_DECL(logstore)

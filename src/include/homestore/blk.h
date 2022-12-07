@@ -18,7 +18,7 @@
 #include <sstream>
 
 #include <sisl/utility/enum.hpp>
-#include "homestore_decl.hpp"
+#include <homestore/homestore_decl.hpp>
 
 namespace homestore {
 

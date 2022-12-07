@@ -1,0 +1,180 @@
+#pragma once
+
+#include <atomic>
+#include <condition_variable>
+#include <cstdint>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <set>
+#include <unordered_map>
+#include <vector>
+
+#include <sisl/fds/buffer.hpp>
+#include <sisl/fds/obj_allocator.hpp>
+#include <folly/Synchronized.h>
+#include <nlohmann/json.hpp>
+
+namespace homestore {
+
+///////////////////// All typedefs ///////////////////////////////
+class logstore_req;
+class HomeLogStore;
+struct logdev_key;
+
+typedef int64_t logid_t;
+typedef int64_t logstore_seq_num_t;
+typedef std::function< void(logstore_req*, logdev_key) > log_req_comp_cb_t;
+typedef sisl::byte_view log_buffer;
+typedef uint32_t logstore_id_t;
+typedef uint8_t logstore_family_id_t;
+
+typedef std::function< void(logstore_req*, logdev_key) > log_req_comp_cb_t;
+typedef std::function< void(logstore_seq_num_t, sisl::io_blob&, logdev_key, void*) > log_write_comp_cb_t;
+typedef std::function< void(logstore_seq_num_t, log_buffer, void*) > log_found_cb_t;
+typedef std::function< void(std::shared_ptr< HomeLogStore >) > log_store_opened_cb_t;
+typedef std::function< void(std::shared_ptr< HomeLogStore >, logstore_seq_num_t) > log_replay_done_cb_t;
+
+typedef int64_t logid_t;
+struct logdev_key {
+    logid_t idx;
+    off_t dev_offset;
+
+    constexpr logdev_key(const logid_t idx = std::numeric_limits< logid_t >::min(),
+                         const off_t dev_offset = std::numeric_limits< uint64_t >::min()) :
+            idx{idx}, dev_offset{dev_offset} {}
+    logdev_key(const logdev_key&) = default;
+    logdev_key& operator=(const logdev_key&) = default;
+    logdev_key(logdev_key&&) noexcept = default;
+    logdev_key& operator=(logdev_key&&) noexcept = default;
+    ~logdev_key() = default;
+
+    bool operator==(const logdev_key& other) { return (other.idx == idx) && (other.dev_offset == dev_offset); }
+
+    operator bool() const { return is_valid(); }
+    bool is_valid() const { return !is_lowest() && !is_highest(); }
+
+    bool is_lowest() const { return (idx == std::numeric_limits< logid_t >::min()); }
+    bool is_highest() const { return (idx == std::numeric_limits< logid_t >::max()); }
+
+    void set_lowest() {
+        idx = std::numeric_limits< logid_t >::min();
+        dev_offset = std::numeric_limits< uint64_t >::min();
+    }
+
+    void set_highest() {
+        idx = std::numeric_limits< logid_t >::max();
+        dev_offset = std::numeric_limits< uint64_t >::max();
+    }
+
+    std::string to_string() const { return fmt::format("Logid={} devoffset={}", idx, dev_offset); }
+
+    static const logdev_key& out_of_bound_ld_key() {
+        static constexpr logdev_key s_out_of_bound_ld_key{std::numeric_limits< logid_t >::max(), 0};
+        return s_out_of_bound_ld_key;
+    }
+};
+
+enum log_dump_verbosity : uint8_t { CONTENT, HEADER };
+
+class HomeLogStore;
+struct log_dump_req {
+    log_dump_req(log_dump_verbosity level = log_dump_verbosity::HEADER,
+                 std::shared_ptr< HomeLogStore > logstore = nullptr, logstore_seq_num_t s_seq = 0,
+                 logstore_seq_num_t e_seq = std::numeric_limits< int64_t >::max()) :
+            verbosity_level{level}, log_store{logstore}, start_seq_num{s_seq}, end_seq_num{e_seq} {}
+    log_dump_verbosity verbosity_level;        // How much information we need of log file (entire content or header)
+    std::shared_ptr< HomeLogStore > log_store; // if null all log stores are dumped
+    logstore_seq_num_t start_seq_num;          // empty_key if from start of log file
+    logstore_seq_num_t end_seq_num;            // empty_key if till last log entry
+};
+
+struct logstore_record {
+    logdev_key m_dev_key;
+
+    logstore_record() = default;
+    logstore_record(const logdev_key& key) : m_dev_key{key} {}
+};
+
+class HomeLogStore;
+struct logstore_req {
+    HomeLogStore* log_store; // Backpointer to the log store. We are not storing shared_ptr as user should not destroy
+                             // it until all ios are not completed.
+    logstore_seq_num_t seq_num; // Log store specific seq_num (which could be monotonically increaseing with logstore)
+    sisl::io_blob data;         // Data blob containing data
+    void* cookie;               // User generated cookie (considered as opaque)
+    bool is_write;              // Directon of IO
+    bool is_internal_req;       // If the req is created internally by HomeLogStore itself
+    log_req_comp_cb_t cb;       // Callback upon completion of write (overridden than default)
+    Clock::time_point start_time;
+
+    logstore_req(const logstore_req&) = delete;
+    logstore_req& operator=(const logstore_req&) = delete;
+    logstore_req(logstore_req&&) noexcept = delete;
+    logstore_req& operator=(logstore_req&&) noexcept = delete;
+    ~logstore_req() = default;
+
+    // Get the size of the read or written record
+    size_t size() const {
+        // TODO: Implement this method
+        return 0;
+    }
+    static logstore_req* make(HomeLogStore* store, logstore_seq_num_t seq_num, const sisl::io_blob& data,
+                              bool is_write_req = true) {
+        logstore_req* req = sisl::ObjectAllocator< logstore_req >::make_object();
+        req->log_store = store;
+        req->seq_num = seq_num;
+        req->data = data;
+        req->is_write = is_write_req;
+        req->is_internal_req = true;
+        req->cb = nullptr;
+
+        return req;
+    }
+
+    static void free(logstore_req* const req) {
+        if (req->is_internal_req) { sisl::ObjectAllocator< logstore_req >::deallocate(req); }
+    }
+
+private:
+    logstore_req() = default;
+};
+
+struct seq_ld_key_pair {
+    logstore_seq_num_t seq_num{-1};
+    logdev_key ld_key;
+};
+
+struct truncation_info {
+    // Safe log dev location upto which it is truncatable
+    logdev_key ld_key{std::numeric_limits< logid_t >::min(), 0};
+
+    // LSN of this log store upto which it is truncated
+    std::atomic< logstore_seq_num_t > seq_num{-1};
+
+    // Is there any entry which is already store truncated but waiting for device truncation
+    bool pending_dev_truncation{false};
+
+    // Any truncation entries/barriers which are not part of this truncation
+    bool active_writes_not_part_of_truncation{false};
+};
+
+#pragma pack(1)
+struct logstore_superblk {
+    logstore_superblk(const logstore_seq_num_t seq_num = 0) : m_first_seq_num{seq_num} {}
+    logstore_superblk(const logstore_superblk&) = default;
+    logstore_superblk(logstore_superblk&&) noexcept = default;
+    logstore_superblk& operator=(const logstore_superblk&) = default;
+    logstore_superblk& operator=(logstore_superblk&&) noexcept = default;
+    ~logstore_superblk() = default;
+
+    [[nodiscard]] static logstore_superblk default_value();
+    static void init(logstore_superblk& m);
+    static void clear(logstore_superblk& m);
+    [[nodiscard]] static bool is_valid(const logstore_superblk& m);
+
+    logstore_seq_num_t m_first_seq_num{0};
+};
+#pragma pack()
+} // namespace homestore

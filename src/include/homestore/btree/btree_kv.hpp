@@ -20,7 +20,7 @@
 #include <vector>
 #include <fmt/format.h>
 #include <sisl/fds/buffer.hpp>
-#include "btree/detail/btree_internal.hpp"
+#include <homestore/btree/detail/btree_internal.hpp>
 
 namespace homestore {
 

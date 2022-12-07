@@ -11,8 +11,8 @@
 #include <sisl/fds/utils.hpp>
 #include <isa-l/crc.h>
 
-#include <meta_service.hpp>
-#include <homestore.hpp>
+#include <homestore/meta_service.hpp>
+#include <homestore/homestore.hpp>
 #include "device/virtual_dev.hpp"
 #include "device/physical_dev.hpp"
 #include "blkalloc/blk_allocator.h"

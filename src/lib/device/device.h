@@ -28,7 +28,7 @@
 #include <sisl/fds/sparse_vector.hpp>
 #include <sisl/fds/utils.hpp>
 
-#include <homestore_decl.hpp>
+#include <homestore/homestore_decl.hpp>
 
 using namespace iomgr;
 SISL_LOGGING_DECL(device, DEVICE_MANAGER)

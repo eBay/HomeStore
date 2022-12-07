@@ -19,7 +19,7 @@
 
 #include <sisl/logging/logging.h>
 #include "btree_node.hpp"
-#include "btree/btree_kv.hpp"
+#include <homestore/btree/btree_kv.hpp>
 
 SISL_LOGGING_DECL(btree)
 
