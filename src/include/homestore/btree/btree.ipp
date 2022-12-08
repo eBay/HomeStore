@@ -101,7 +101,7 @@ retry:
     BT_LOG_ASSERT_EQ(bt_thread_vars()->rd_locked_nodes.size(), 0);
     BT_LOG_ASSERT_EQ(bt_thread_vars()->wr_locked_nodes.size(), 0);
 
-    BtreeNodePtr< K > root;
+    BtreeNodePtr root;
     ret = read_and_lock_node(m_root_node_info.bnode_id(), root, acq_lock, acq_lock, put_req.m_op_context);
     if (ret != btree_status_t::success) { goto out; }
     is_leaf = root->is_leaf();
@@ -162,7 +162,7 @@ btree_status_t Btree< K, V >::get(ReqT& greq) const {
     btree_status_t ret = btree_status_t::success;
 
     m_btree_lock.lock_shared();
-    BtreeNodePtr< K > root;
+    BtreeNodePtr root;
 
     ret = read_and_lock_node(m_root_node_info.bnode_id(), root, locktype_t::READ, locktype_t::READ, greq.m_op_context);
     if (ret != btree_status_t::success) { goto out; }
@@ -190,7 +190,7 @@ btree_status_t Btree< K, V >::remove(ReqT& req) {
 
 retry:
     btree_status_t ret = btree_status_t::success;
-    BtreeNodePtr< K > root;
+    BtreeNodePtr root;
     ret = read_and_lock_node(m_root_node_info.bnode_id(), root, acq_lock, acq_lock, req.m_op_context);
     if (ret != btree_status_t::success) { goto out; }
 
@@ -246,7 +246,7 @@ btree_status_t Btree< K, V >::query(BtreeQueryRequest< K >& qreq, std::vector< s
     if (qreq.batch_size() == 0) { return ret; }
 
     m_btree_lock.lock_shared();
-    BtreeNodePtr< K > root = nullptr;
+    BtreeNodePtr root = nullptr;
     ret = read_and_lock_node(m_root_node_info.bnode_id(), root, locktype_t::READ, locktype_t::READ, qreq.m_op_context);
     if (ret != btree_status_t::success) { goto out; }
 
@@ -387,43 +387,9 @@ static void Btree< K, V >::set_error_flip() {
 #endif
 #endif
 
-template < typename K >
-void intrusive_ptr_add_ref(BtreeNode< K >* node) {
-    node->m_refcount.increment(1);
-}
+void intrusive_ptr_add_ref(BtreeNode* node) { node->m_refcount.increment(1); }
 
-template < typename K >
-void intrusive_ptr_release(BtreeNode< K >* node) {
+void intrusive_ptr_release(BtreeNode* node) {
     if (node->m_refcount.decrement_testz(1)) { delete node; }
 }
-
-#ifdef INCASE_WE_NEED_COMMON
-template < typename K, typename V >
-bool Btree< K, V >::create_store_common(btree_store_t store_type,
-                                        std::function< std::shared_ptr< BtreeCommon< K, V > >() >&& create_cb) {
-    std::unique_lock lg(s_store_reg_mtx);
-    if (s_btree_stores[int_cast(store_type)] != nullptr) { return false; }
-    s_btree_stores[int_cast(store_type)] = create_cb();
-    return true;
-}
-
-// Get doesn't need to take any lock, since the create/register is once and started once. Please don't add the lock
-// here as this is called in critical path and completely unneccessary.
-template < typename K, typename V >
-BtreeCommon< K, V >* Btree< K, V >::get_store_common(uint8_t store_type) {
-    return s_btree_stores[store_type].get();
-}
-
-friend void intrusive_ptr_add_ref(BtreeNode< K >* node) { node->m_refcount.increment(1); }
-friend void intrusive_ptr_release(BtreeNode< K >* node) { Btree< K, V >::get_store_common()->deref_node(node); }
-
-// static inline const char* _type_desc(const BtreeNodePtr< K >& n) { return n->is_leaf() ? "L" : "I"; }
-
-template < typename K, typename V >
-std::array< std::shared_ptr< BtreeCommon< K, V > >, sizeof(btree_stores_t) > Btree< K, V >::s_btree_stores;
-
-template < typename K, typename V >
-std::mutex Btree< K, V >::s_store_reg_mtx;
-#endif
-
 } // namespace homestore

@@ -23,6 +23,7 @@ class MetaBlkService;
 class LogStoreService;
 struct vdev_info_block;
 class HomeStore;
+class CPManager;
 typedef std::shared_ptr< HomeStore > HomeStoreSafePtr;
 
 VENUM(blkstore_type, uint32_t, DATA_STORE = 1, INDEX_STORE = 2, SB_STORE = 3, DATA_LOGDEV_STORE = 4,
@@ -56,11 +57,12 @@ class HomeStore {
 private:
     std::unique_ptr< MetaBlkService > m_meta_service;
     std::unique_ptr< LogStoreService > m_log_service;
-    std::unique_ptr< DeviceManager > m_dev_mgr;
 
+    std::unique_ptr< DeviceManager > m_dev_mgr;
     std::shared_ptr< sisl::logging::logger_t > m_periodic_logger;
     std::unique_ptr< HomeStoreStatusMgr > m_status_mgr;
     std::unique_ptr< ResourceMgr > m_resource_mgr;
+    std::unique_ptr< CPManager > m_cp_mgr;
 
     bool m_vdev_failed{false};
     std::atomic< uint32_t > m_format_cnt{1};
@@ -137,6 +139,7 @@ public:
     LogStoreService& logstore_service() { return *m_log_service; }
     DeviceManager* device_mgr() { return m_dev_mgr.get(); }
     ResourceMgr& resource_mgr() { return *m_resource_mgr.get(); }
+    CPManager& cp_mgr() { return *m_cp_mgr.get(); }
 
 protected:
     virtual void process_vdev_error(vdev_info_block* vb) {}
@@ -151,7 +154,4 @@ private:
 };
 
 static HomeStore* hs() { return HomeStore::instance(); }
-// static MetaBlkManager& meta_service() { return HomeStore::instance()->meta_service(); }
-// static LogStoreService& logstore_service() { return HomeStore::instance()->logstore_service(); }
-
 } // namespace homestore

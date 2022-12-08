@@ -10,44 +10,45 @@
 
 #include <vector>
 #include <atomic>
-
-#include "btree.ipp"
-
-#include "hsbtree_internal.h"
-#include "hsbtree_cp.h"
-#include "btree_wb_cache.hpp"
+#include <homestore/btree/btree.ipp>
+#include <homestore/index/index_internal.hpp>
+#include <homestore/superblk_handler.hpp>
+#include <homestore/index_service.hpp>
+#include <homestore/index/wb_cache_base.hpp>
 
 namespace homestore {
 
 template < typename K, typename V >
-class HomestoreBtree : public Btree< K, V > {
+class IndexTable : public IndexTableBase, Btree< K, V > {
 private:
-    btree_super_block m_sb;
+    superblk< index_table_sb > m_sb;
     std::function< void(BtreeRequest*, btee_status_t) > m_btree_op_comp_cb;
 
 public:
-    HomestoreBtree(const btree_super_block* sb, const BtreeConfig& cfg, btree_op_comp_cb_t&& op_comp_cb,
-                   on_kv_read_t&& read_cb = nullptr, on_kv_update_t&& update_cb = nullptr,
-                   on_kv_remove_t&& remove_cb = nullptr) :
-            sisl::Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)},
+    IndexTable(uuid_t uuid, const BtreeConfig& cfg, btree_op_comp_cb_t op_comp_cb, on_kv_read_t read_cb = nullptr,
+               on_kv_update_t update_cb = nullptr, on_kv_remove_t remove_cb = nullptr) :
+            Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)},
             m_btree_op_comp_cb{std::move(op_comp_cb)} {
-        if (sb != nullptr) {
-            m_sb = *sb;
-        } else {
-            // TODO: Pass CP context with this to the constructor
-            auto const [status, root_id] = create_root_node(nullptr);
-            if (status != btree_status_t::success) {
-                throw std::runtime_error(fmt::format("Unable to create root node", key_url));
-            }
-            m_sb.root_node = root_id;
+        auto const [status, root_id] = create_root_node(nullptr);
+        if (status != btree_status_t::success) {
+            throw std::runtime_error(fmt::format("Unable to create root node", key_url));
         }
+        m_sb->uuid = uuid;
+        m_sb->root_node = root_id;
+    }
+
+    IndexTable(const superblk< index_table_sb >& sb, const BtreeConfig& cfg, btree_op_comp_cb_t op_comp_cb,
+               on_kv_read_t read_cb = nullptr, on_kv_update_t update_cb = nullptr, on_kv_remove_t remove_cb = nullptr) :
+            Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)},
+            m_btree_op_comp_cb{std::move(op_comp_cb)} {
+        m_sb = sb;
     }
 
     template < typename ReqT >
     void async_put(ReqT* put_req) override {
         iomanager.run_on(index_svc()->get_next_btree_write_thread(), [this, put_req](const io_thread_addr_t addr) {
-            auto cp = cp_manager()->cp_io_enter();
-            put_req->op_context = (void*)cp->context(cp_consumer_t::INDEX_SVC);
+            auto* cp = cp_manager()->cp_io_enter();
+            put_req->op_context = (void*)cp_manager()->get_context(cp, cp_consumer_t::INDEX_SVC);
             auto ret = sisl::Btree< K, V >::put(*put_req);
             cp_manager()->cp_io_exit(cp);
 
@@ -59,8 +60,8 @@ public:
     template < typename ReqT >
     void async_remove(ReqT* remove_req) override {
         iomanager.run_on(index_svc()->get_next_btree_write_thread(), [this, remove_req](const io_thread_addr_t addr) {
-            auto cp = cp_manager()->cp_io_enter();
-            remove_req->op_context = (void*)cp->context(cp_consumer_t::INDEX_SVC);
+            auto* cp = cp_manager()->cp_io_enter();
+            remove_req->op_context = (void*)cp_manager()->get_context(cp, cp_consumer_t::INDEX_SVC);
             auto ret = sisl::Btree< K, V >::remove(*remove_req);
             cp_manager()->cp_io_exit(cp);
 
@@ -100,44 +101,40 @@ public:
     }
 
 protected:
-    static HSBtreeNode* to_hs_btree_node(const BtreeNodePtr< K >& bt_node) {
-        return (HSBtreeNode*)((uint8_t*)bt_node.get() + sizeof(BtreeNodePtr< K >));
+    static IndexBtreeNode* to_idx_btree_node(const BtreeNodePtr& bt_node) {
+        return (IndexBtreeNode*)((uint8_t*)bt_node.get() + sizeof(BtreeNode));
     }
 
-    BtreeWBCache< K >* wb_cache() { return index_svc()->wb_cache(); }
-
     ////////////////// Override Implementation of underlying store requirements //////////////////
-    sisl::BtreeNodePtr< K > alloc_node(bool is_leaf) override {
-        return wb_cache()->alloc_buf([this](const BtreeBufferPtr& bt_buf) -> sisl::BtreeNode< K > {
-            return this->init_node(bt_buf->raw_buffer(), sizeof(HSBtreeNode), bt_buf->blkid().to_integer(), true,
+    BtreeNodePtr alloc_node(bool is_leaf) override {
+        return wb_cache()->alloc_buf([this](const IndexBufferPtr& idx_buf) -> BtreeNode {
+            return this->init_node(idx_buf->raw_buffer(), sizeof(IndexBtreeNode), idx_buf->blkid().to_integer(), true,
                                    is_leaf);
         });
     }
 
-    void realloc_node(const sisl::BtreeNodePtr< K >& node) {
-        wb_cache()->realloc_buf(to_hs_btree_node(node)->m_bt_buf);
-    }
+    void realloc_node(const BtreeNodePtr& node) { wb_cache()->realloc_buf(to_idx_btree_node(node)->m_idx_buf); }
 
-    btree_status_t write_node_impl(const BtreeNodePtr< K >& node, void* context) override {
-        auto cp_ctx = r_cast< BtreeCPContext* >(context);
-        auto hs_node = to_hs_btree_node(node);
+    btree_status_t write_node_impl(const BtreeNodePtr& node, void* context) override {
+        auto cp_ctx = r_cast< CPContext* >(context);
+        auto idx_node = to_idx_btree_node(node);
 
-        if (hs_node->m_last_mod_cp_id != cp_ctx->cp_id()) {
+        if (idx_node->m_last_mod_cp_id != cp_ctx->cp_id()) {
             // Need to put it in wb cache
-            wb_cache()->write_buf(hs_node->m_bt_buf, cp_ctx);
+            wb_cache()->write_buf(idx_node->m_idx_buf, cp_ctx);
         }
         node->set_checksum(m_bt_cfg);
         return btree_status_t::success;
     }
 
-    btree_status_t transact_write_nodes(const folly::small_vector< BtreeNodePtr< K >&, 2 >& new_nodes,
-                                        const BtreeNodePtr< K >& child_node, const BtreeNodePtr< K >& parent_node,
+    btree_status_t transact_write_nodes(const folly::small_vector< BtreeNodePtr&, 2 >& new_nodes,
+                                        const BtreeNodePtr& child_node, const BtreeNodePtr& parent_node,
                                         void* context) override {
-        BtreeCPContext* cp_ctx = r_cast< BtreeCPContext* >(context);
-        auto child_hs_node = to_hs_btree_node(child_node);
-        auto parent_hs_node = to_hs_btree_node(parent_node);
-        auto& child_buf = child_hs_node->buffer();
-        auto& parent_buf = parent_hs_node->buffer();
+        CPContext* cp_ctx = r_cast< CPContext* >(context);
+        auto child_idx_node = to_idx_btree_node(child_node);
+        auto parent_idx_node = to_idx_btree_node(parent_node);
+        auto& child_buf = child_idx_node->buffer();
+        auto& parent_buf = parent_idx_node->buffer();
 
         BT_DBG_ASSERT_NE((void*)child_buf.m_cur_txn, nullptr,
                          "transact_write_nodes called without prepare transaction");
@@ -154,11 +151,11 @@ protected:
         return btree_status_t::success;
     }
 
-    btree_status_t read_node_impl(bnodeid_t id, sisl::BtreeNodePtr< K >& node) override {
+    btree_status_t read_node_impl(bnodeid_t id, sisl::BtreeNodePtr& node) override {
         auto const ret = wb_cache()->read_buf(id, node, iomanager.am_i_tight_loop_reactor(),
-                                              [this](const BtreeBufferPtr& bt_buf) -> sisl::BtreeNode< K > {
-                                                  return this->init_node(bt_buf->raw_buffer(), sizeof(HSBtreeNode),
-                                                                         bt_buf->blkid().to_integer(), true, is_leaf);
+                                              [this](const IndexBufferPtr& idx_buf) -> BtreeNode {
+                                                  return this->init_node(idx_buf->raw_buffer(), sizeof(IndexBtreeNode),
+                                                                         idx_buf->blkid().to_integer(), true, is_leaf);
                                               });
         if (ret == no_error) {
             return btree_status_t::success;
@@ -170,15 +167,15 @@ protected:
         }
     }
 
-    btree_status_t refresh_node(const BtreeNodePtr< K >& node, bool for_read_modify_write, void* context) override {
-        BtreeCPContext* cp_ctx = (BtreeCPContext*)context;
+    btree_status_t refresh_node(const BtreeNodePtr& node, bool for_read_modify_write, void* context) override {
+        CPContext* cp_ctx = (CPContext*)context;
 
-        auto hs_node = to_hs_btree_node(node);
-        if (hs_node->m_last_mod_cp_id > cp_ctx->cp_id()) {
+        auto idx_node = to_idx_btree_node(node);
+        if (idx_node->m_last_mod_cp_id > cp_ctx->cp_id()) {
             return btree_status_t::cp_mismatch;
         } else if (!for_read_modify_write) {
             return btree_status_t::success;
-        } else if (hs_node->m_last_mod_cp_id == cp_ctx->cp_id()) {
+        } else if (idx_node->m_last_mod_cp_id == cp_ctx->cp_id()) {
             // modifying the buffer multiple times in a same cp
             return btree_status_t::success;
         }
@@ -190,11 +187,11 @@ protected:
         }
 
         // If the backing buffer is already in a clean state, we don't need to make a copy of it
-        if (hs_node->m_bt_buf->is_clean()) { return btree_status_t::success; }
+        if (idx_node->m_idx_buf->is_clean()) { return btree_status_t::success; }
 
         // Make a new btree buffer and copy the contents and swap it to make it the current node's buffer. The
         // buffer prior to this copy, would have been written and already added into the dirty buffer list.
-        hs_node->m_bt_buf = wb_cache()->copy_buffer(hs_node->m_bt_buf);
+        idx_node->m_idx_buf = wb_cache()->copy_buffer(idx_node->m_idx_buf);
 
 #ifndef NO_CHECKSUM
         if (!node->verify_node(m_bt_cfg)) {
@@ -205,15 +202,15 @@ protected:
         return btree_status_t::success;
     }
 
-    btree_status_t prepare_node_txn(const BtreeNodePtr< K >& parent_node, const BtreeNodePtr< K >& child_node,
+    btree_status_t prepare_node_txn(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
                                     void* context) override {
-        BtreeCPContext* cp_ctx = (BtreeCPContext*)context;
-        auto child_hs_node = to_hs_btree_node(child_node);
-        auto parent_hs_node = to_hs_btree_node(parent_node);
+        CPContext* cp_ctx = (CPContext*)context;
+        auto child_idx_node = to_idx_btree_node(child_node);
+        auto parent_idx_node = to_idx_btree_node(parent_node);
 
         // Buffer has been modified by higher cp id than whats requested.
-        if ((child_hs_node->m_last_mod_cp_id > cp_ctx->cp_id()) ||
-            (parent_hs_node->m_last_mod_cp_id > cp_ctx->cp_id())) {
+        if ((child_idx_node->m_last_mod_cp_id > cp_ctx->cp_id()) ||
+            (parent_idx_node->m_last_mod_cp_id > cp_ctx->cp_id())) {
             // We don't expect this condition because prepare_node_txn should be called only after individual nodes are
             // refreshed and read
             BT_DBG_ASSERT(
@@ -221,8 +218,8 @@ protected:
             return btree_status_t::cp_mismatch;
         }
 
-        auto& child_buf = child_hs_node->buffer();
-        auto& parent_buf = parent_hs_node->buffer();
+        auto& child_buf = child_idx_node->buffer();
+        auto& parent_buf = parent_idx_node->buffer();
         BT_DBG_ASSERT(child_buf->is_clean(), "Child buffer is not clean, refresh node was not called before?");
         BT_DBG_ASSERT(parent_buf->is_clean(), "Parent buffer is not clean, refresh node was not called before?");
 
@@ -230,8 +227,8 @@ protected:
         return btree_status_t::success;
     }
 
-    void free_node_impl(const BtreeNodePtr< K >& node, void* context) override {
-        wb_cache()->free_buf(node->m_bt_buf, r_cast< BtreeCPContext* >(context));
+    void free_node_impl(const BtreeNodePtr& node, void* context) override {
+        wb_cache()->free_buf(node->m_idx_buf, r_cast< CPContext* >(context));
     }
 };
 

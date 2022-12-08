@@ -29,6 +29,7 @@ include_directories (BEFORE ${CMAKE_CURRENT_BINARY_DIR}/lib)
 
 add_subdirectory(lib/blkalloc)
 add_subdirectory(lib/device)
+add_subdirectory(lib/checkpoint)
 add_subdirectory(lib/common)
 add_subdirectory(lib/logstore)
 add_subdirectory(lib/meta)
@@ -41,6 +42,7 @@ set(HOMESTORE_OBJECTS
     $<TARGET_OBJECTS:hs_blkalloc> 
     $<TARGET_OBJECTS:hs_logdev> 
     $<TARGET_OBJECTS:hs_metablk>
+    $<TARGET_OBJECTS:hs_checkpoint>
     lib/homestore.cpp
     #$<TARGET_OBJECTS:hs_cp>
     #$<TARGET_OBJECTS:indx_mgr>

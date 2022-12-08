@@ -200,6 +200,13 @@ struct NodeTest : public testing::Test {
             << "Node key " << k << " is incorrect presence compared to shadow map";
     }
 
+    void validate_key_order() const {
+        ASSERT_EQ(this->m_node1->template validate_key_order< K >(), true)
+            << "Key order validation of node1 has failed";
+        ASSERT_EQ(this->m_node2->template validate_key_order< K >(), true)
+            << "Key order validation of node2 has failed";
+    }
+
 protected:
     void put_list(const std::vector< uint32_t >& keys) {
         for (const auto& k : keys) {
@@ -331,9 +338,7 @@ TYPED_TEST(NodeTest, Move) {
         << "Move out half entries to right has failed";
     this->validate_get_all();
     this->print();
-
-    ASSERT_EQ(this->m_node1->validate_key_order(), true) << "Key order validation of node1 has failed";
-    ASSERT_EQ(this->m_node2->validate_key_order(), true) << "Key order validation of node2 has failed";
+    this->validate_key_order();
 }
 
 SISL_OPTIONS_ENABLE(logging, test_btree_node)

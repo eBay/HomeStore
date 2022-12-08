@@ -92,6 +92,8 @@ public:
     static uint32_t get_fixed_size() { return (sizeof(uint32_t)); }
     std::string to_string() const { return fmt::format("{}", m_key); }
 
+    void deserialize(const sisl::blob& b, bool copy) override { m_key = *(r_cast< const uint32_t* >(b.bytes)); }
+
     static uint32_t get_estimate_max_size() { return get_fixed_size(); }
     friend std::ostream& operator<<(std::ostream& os, const TestFixedKey& k) {
         os << k.to_string();
@@ -137,13 +139,7 @@ public:
     TestVarLenKey& operator=(const TestVarLenKey& other) = default;
     TestVarLenKey& operator=(TestVarLenKey&& other) = default;
 
-    TestVarLenKey(const sisl::blob& b, bool copy) : BtreeKey() {
-        std::string data{r_cast< const char* >(b.bytes), b.size};
-        std::stringstream ss;
-        ss << std::hex << data.substr(0, 8);
-        ss >> m_key;
-        assert(data == *idx_to_key(m_key));
-    }
+    TestVarLenKey(const sisl::blob& b, bool copy) : BtreeKey() { deserialize(b, copy); }
     virtual ~TestVarLenKey() = default;
 
     virtual void clone(const BtreeKey& other) override { m_key = ((TestVarLenKey&)other).m_key; }
@@ -158,6 +154,14 @@ public:
     static uint32_t get_fixed_size() {
         assert(0);
         return 0;
+    }
+
+    void deserialize(const sisl::blob& b, bool copy) {
+        std::string data{r_cast< const char* >(b.bytes), b.size};
+        std::stringstream ss;
+        ss << std::hex << data.substr(0, 8);
+        ss >> m_key;
+        assert(data == *idx_to_key(m_key));
     }
 
     static uint32_t get_estimate_max_size() { return g_max_keysize; }

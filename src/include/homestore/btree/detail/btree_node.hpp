@@ -33,6 +33,7 @@
 #include <sisl/utility/obj_life_counter.hpp>
 #include "btree_internal.hpp"
 #include <homestore/btree/btree_kv.hpp>
+#include <isa-l/crc.h>
 
 namespace homestore {
 ENUM(locktype_t, uint8_t, NONE, READ, WRITE)
@@ -80,8 +81,7 @@ struct persistent_hdr_t {
 };
 #pragma pack()
 
-template < typename K >
-class BtreeNode : public sisl::ObjLifeCounter< BtreeNode< K > > {
+class BtreeNode : public sisl::ObjLifeCounter< BtreeNode > {
     typedef std::pair< bool, uint32_t > node_find_result_t;
 
 public:
@@ -123,7 +123,7 @@ public:
         return std::make_pair(found, idx);
     }
 
-    template < typename V >
+    template < typename K, typename V >
     uint32_t get_all(const BtreeKeyRange< K >& range, uint32_t max_count, uint32_t& start_idx, uint32_t& end_idx,
                      std::vector< std::pair< K, V > >* out_values = nullptr) const {
         LOGMSG_ASSERT_EQ(magic(), BTREE_NODE_MAGIC, "Magic mismatch on btree_node {}",
@@ -157,12 +157,13 @@ public:
         if (out_values) {
             /* get the keys and values */
             for (auto i{start_idx}; i < (start_idx + count); ++i) {
-                add_nth_obj_to_list< V >(i, out_values, true);
+                add_nth_obj_to_list< K, V >(i, out_values, true);
             }
         }
         return count;
     }
 
+    template < typename K >
     std::pair< bool, uint32_t > get_any(const BtreeKeyRange< K >& range, BtreeKey* out_key, BtreeValue* out_val,
                                         bool copy_key, bool copy_val) const {
         LOGMSG_ASSERT_EQ(magic(), BTREE_NODE_MAGIC, "Magic mismatch on btree_node {}",
@@ -209,7 +210,7 @@ public:
         }
 
     found_result:
-        if (out_key) { *out_key = get_nth_key(result_idx, copy_key); }
+        if (out_key) { get_nth_key_internal(result_idx, *out_key, copy_key); }
         if (out_val) { get_nth_value(result_idx, out_val, copy_val); }
         return std::make_pair(true, result_idx);
     }
@@ -255,14 +256,15 @@ public:
     virtual bool remove_one(const BtreeKey& key, BtreeKey* outkey, BtreeValue* outval) {
         const auto [found, idx] = find(key, outval, true);
         if (found) {
-            if (outkey) { *outkey = get_nth_key(idx, true); }
+            if (outkey) { get_nth_key_internal(idx, *outkey, true); }
             remove(idx);
             LOGMSG_ASSERT_EQ(magic(), BTREE_NODE_MAGIC, "{}", get_persistent_header_const()->to_string());
         }
         return found;
     }
 
-    virtual bool remove_any(const BtreeKeyRange< K >& range, BtreeKey* outkey, BtreeValue* outval) {
+    template < typename K >
+    bool remove_any(const BtreeKeyRange< K >& range, BtreeKey* outkey, BtreeValue* outval) {
         const auto [found, idx] = get_any(range, outkey, outval, true, true);
         if (found) {
             remove(idx);
@@ -307,13 +309,14 @@ public:
         }
     }
 
+    template < typename K >
     K min_of(const K& cmp_key, uint32_t cmp_ind, bool& is_cmp_key_lesser) const {
         K min_key;
         int x{-1};
         is_cmp_key_lesser = false;
 
         if (cmp_ind < total_entries()) {
-            min_key = get_nth_key(cmp_ind, false);
+            get_nth_key_internal(cmp_ind, min_key, false);
             x = cmp_key.compare(min_key);
         }
 
@@ -328,7 +331,7 @@ public:
 #ifndef NDEBUG
         if (upto_ind > 0) {
             // start of input range should always be more then the key in curr_ind - 1
-            DEBUG_ASSERT_LE(get_nth_key(upto_ind - 1, false).compare(inp_range.start_key()), 0, "[node={}]",
+            DEBUG_ASSERT_LE(get_nth_key< K >(upto_ind - 1, false).compare(inp_range.start_key()), 0, "[node={}]",
                             to_string());
         }
 #endif
@@ -338,7 +341,7 @@ public:
         K end_key;
 
         if (upto_ind < int_cast(total_entries())) {
-            end_key = get_nth_key(upto_ind, false);
+            end_key = get_nth_key< K >(upto_ind, false);
             if (end_key.compare(inp_range.end_key()) >= 0) {
                 // this is last index to process as end of range is smaller then key in this node
                 end_key = inp_range.end_key();
@@ -359,17 +362,29 @@ public:
         return subrange;
     } */
 
-    K get_last_key() const {
-        if (total_entries() == 0) { return K{}; }
-        return get_nth_key(total_entries() - 1, true);
+    template < typename K >
+    K get_nth_key(uint32_t idx, bool copy) const {
+        K k;
+        get_nth_key_internal(idx, k, copy);
+        return k;
     }
 
-    K get_first_key() const { return get_nth_key(0, true); }
+    template < typename K >
+    K get_last_key() const {
+        if (total_entries() == 0) { return K{}; }
+        return get_nth_key< K >(total_entries() - 1, true);
+    }
 
+    template < typename K >
+    K get_first_key() const {
+        return get_nth_key< K >(0, true);
+    }
+
+    template < typename K >
     bool validate_key_order() const {
         for (auto i = 1u; i < total_entries(); ++i) {
-            auto prevKey = get_nth_key(i - 1, false);
-            auto curKey = get_nth_key(i, false);
+            auto prevKey = get_nth_key< K >(i - 1, false);
+            auto curKey = get_nth_key< K >(i, false);
             if (prevKey.compare(curKey) >= 0) {
                 DEBUG_ASSERT(false, "Order check failed at entry={}", i);
                 return false;
@@ -422,7 +437,7 @@ public:
         return ((key_size + value_size + get_record_size()) <= available_size(cfg));
     }
 
-    template < typename V >
+    template < typename K, typename V >
     void add_nth_obj_to_list(uint32_t ind, std::vector< std::pair< K, V > >* vec, bool copy) const {
         std::pair< K, V > kv;
         vec->emplace_back(kv);
@@ -431,7 +446,7 @@ public:
         if (ind == total_entries() && !is_leaf()) {
             pkv->second = edge_value_internal< V >();
         } else {
-            pkv->first = get_nth_key(ind, copy);
+            get_nth_key_internal(ind, pkv->first, copy);
             get_nth_value(ind, &pkv->second, copy);
         }
     }
@@ -451,7 +466,7 @@ public:
     virtual uint32_t available_size(const BtreeConfig& cfg) const = 0;
     virtual std::string to_string(bool print_friendly = false) const = 0;
     virtual void get_nth_value(uint32_t ind, BtreeValue* out_val, bool copy) const = 0;
-    virtual K get_nth_key(uint32_t ind, bool copykey) const = 0;
+    virtual void get_nth_key_internal(uint32_t ind, BtreeKey& out_key, bool copykey) const = 0;
 
     virtual btree_status_t insert(uint32_t ind, const BtreeKey& key, const BtreeValue& val) = 0;
     virtual void remove(uint32_t ind) { remove(ind, ind); }
@@ -528,8 +543,8 @@ public:
     }
 
     bool verify_node(const BtreeConfig& cfg) const {
-        HS_DEBUG_ASSERT_EQ(is_valid_node(), true, "verifying invalide node {}!",
-                           get_persistent_header_const()->to_string());
+        DEBUG_ASSERT_EQ(is_valid_node(), true, "verifying invalide node {}!",
+                        get_persistent_header_const()->to_string());
         auto exp_checksum = crc16_t10dif(init_crc_16, node_data_area_const(), cfg.node_data_size());
         return ((magic() == BTREE_NODE_MAGIC) && (checksum() == exp_checksum));
     }
@@ -553,7 +568,7 @@ public:
     void inc_gen() { get_persistent_header()->node_gen++; }
     void set_gen(uint64_t g) { get_persistent_header()->node_gen = g; }
     uint64_t link_version() const { return get_persistent_header_const()->link_version; }
-    void set_link_version(uint64_t version) { return get_persistent_header()->link_version = version; }
+    void set_link_version(uint64_t version) { get_persistent_header()->link_version = version; }
     void inc_link_version() { ++(get_persistent_header()->link_version); }
 
     void set_valid_node(bool valid) { get_persistent_header()->valid_node = (valid ? 1 : 0); }
@@ -591,9 +606,8 @@ public:
     }
 };
 
-template < typename K, typename V >
 struct btree_locked_node_info {
-    BtreeNode< K >* node;
+    BtreeNode* node;
     Clock::time_point start_time;
     const char* fname;
     int line;

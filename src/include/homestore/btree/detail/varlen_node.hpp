@@ -47,10 +47,10 @@ struct var_node_header {
 // [Persistent Header][var node header][Record][Record].. ...  ... [key][value][key][value]
 //
 template < typename K, typename V >
-class VariableNode : public BtreeNode< K > {
+class VariableNode : public BtreeNode {
 public:
     VariableNode(uint8_t* node_buf, bnodeid_t id, bool init, bool is_leaf, const BtreeConfig& cfg) :
-            BtreeNode< K >(node_buf, id, init, is_leaf) {
+            BtreeNode(node_buf, id, init, is_leaf) {
         if (init) {
             // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
             // except for the header itself
@@ -81,7 +81,7 @@ public:
         // validate if keys are in ascending order
         K prevKey;
         while (i < this->total_entries()) {
-            K key = get_nth_key(i, false);
+            K key = get_nth_key< K >(i, false);
             uint64_t kp = *(uint64_t*)key.serialize().bytes;
             if (i > 0 && prevKey.compare(key) > 0) {
                 DEBUG_ASSERT(false, "Found non sorted entry: {} -> {}", kp, to_string());
@@ -101,7 +101,7 @@ public:
             this->set_edge_value(val);
             this->inc_gen();
         } else {
-            K key = get_nth_key(ind, true);
+            K key = get_nth_key< K >(ind, true);
             update(ind, key, val);
         }
     }
@@ -202,7 +202,7 @@ public:
         }
     }*/
 
-    uint32_t move_out_to_right_by_entries(const BtreeConfig& cfg, BtreeNode< K >& o, uint32_t nentries) override {
+    uint32_t move_out_to_right_by_entries(const BtreeConfig& cfg, BtreeNode& o, uint32_t nentries) override {
         auto& other = static_cast< VariableNode& >(o);
         const auto this_gen = this->node_gen();
         const auto other_gen = other.node_gen();
@@ -250,7 +250,7 @@ public:
         return (start_ind - ind);
     }
 
-    uint32_t move_out_to_right_by_size(const BtreeConfig& cfg, BtreeNode< K >& o, uint32_t size_to_move) override {
+    uint32_t move_out_to_right_by_size(const BtreeConfig& cfg, BtreeNode& o, uint32_t size_to_move) override {
         auto& other = static_cast< VariableNode& >(o);
         uint32_t moved_size = 0U;
         auto this_gen = this->node_gen();
@@ -307,8 +307,7 @@ public:
         return idx - start_idx;
     }
 
-    uint32_t copy_by_size(const BtreeConfig& cfg, const BtreeNode< K >& o, uint32_t start_idx,
-                          uint32_t copy_size) override {
+    uint32_t copy_by_size(const BtreeConfig& cfg, const BtreeNode& o, uint32_t start_idx, uint32_t copy_size) override {
         auto& other = static_cast< const VariableNode& >(o);
         auto this_gen = this->node_gen();
 
@@ -335,7 +334,7 @@ public:
         return n;
     }
 
-    uint32_t copy_by_entries(const BtreeConfig& cfg, const BtreeNode< K >& o, uint32_t start_idx,
+    uint32_t copy_by_entries(const BtreeConfig& cfg, const BtreeNode& o, uint32_t start_idx,
                              uint32_t nentries) override {
         auto& other = static_cast< const VariableNode& >(o);
         auto this_gen = this->node_gen();
@@ -361,7 +360,7 @@ public:
         return n;
     }
 
-    /*uint32_t move_in_from_right_by_entries(const BtreeConfig& cfg, BtreeNode< K >& o, uint32_t nentries) override {
+    /*uint32_t move_in_from_right_by_entries(const BtreeConfig& cfg, BtreeNode& o, uint32_t nentries) override {
         auto& other = static_cast< VariableNode& >(o);
         auto this_gen = this->node_gen();
         auto other_gen = other.node_gen();
@@ -404,7 +403,7 @@ public:
         return (other_ind);
     }
 
-    uint32_t move_in_from_right_by_size(const BtreeConfig& cfg, BtreeNode< K >& o, uint32_t size_to_move) override {
+    uint32_t move_in_from_right_by_size(const BtreeConfig& cfg, BtreeNode& o, uint32_t size_to_move) override {
         auto& other = static_cast< VariableNode& >(o);
         uint32_t moved_size = 0U;
         auto this_gen = this->node_gen();
@@ -470,10 +469,10 @@ public:
     virtual void set_nth_key_len(uint8_t* rec_ptr, uint16_t key_len) = 0;
     virtual void set_nth_value_len(uint8_t* rec_ptr, uint16_t value_len) = 0;
 
-    K get_nth_key(uint32_t ind, bool copy) const {
+    void get_nth_key_internal(uint32_t ind, BtreeKey& out_key, bool copy) const override {
         assert(ind < this->total_entries());
         sisl::blob b{const_cast< uint8_t* >(get_nth_obj(ind)), get_nth_key_len(ind)};
-        return K{b, copy};
+        out_key.deserialize(b, copy);
     }
 
     void get_nth_value(uint32_t ind, BtreeValue* out_val, bool copy) const override {
@@ -507,13 +506,13 @@ public:
             V val;
             get_nth_value(i, &val, false);
             fmt::format_to(std::back_inserter(str), "{}Entry{} [Key={} Val={}]", (print_friendly ? "\n\t" : " "), i + 1,
-                           get_nth_key(i, false).to_string(), val.to_string());
+                           get_nth_key< K >(i, false).to_string(), val.to_string());
         }
         return str;
     }
 
     int compare_nth_key(const BtreeKey& cmp_key, uint32_t ind) const {
-        return get_nth_key(ind, false).compare(cmp_key);
+        return get_nth_key< K >(ind, false).compare(cmp_key);
     }
 
     /*int compare_nth_key_range(const BtreeKeyRange& range, uint32_t ind) const {

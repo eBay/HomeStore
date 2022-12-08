@@ -28,10 +28,10 @@ SISL_LOGGING_DECL(btree)
 namespace homestore {
 
 template < typename K, typename V >
-class SimpleNode : public BtreeNode< K > {
+class SimpleNode : public BtreeNode {
 public:
     SimpleNode(uint8_t* node_buf, bnodeid_t id, bool init, bool is_leaf, const BtreeConfig& cfg) :
-            BtreeNode< K >(node_buf, id, init, is_leaf) {
+            BtreeNode(node_buf, id, init, is_leaf) {
         this->set_node_type(btree_node_type::FIXED);
     }
 
@@ -111,7 +111,7 @@ public:
         RELEASE_ASSERT(false, "Append operation is not supported on simple node");
     }
 
-    uint32_t move_out_to_right_by_entries(const BtreeConfig& cfg, BtreeNode< K >& o, uint32_t nentries) override {
+    uint32_t move_out_to_right_by_entries(const BtreeConfig& cfg, BtreeNode& o, uint32_t nentries) override {
         auto& other_node = s_cast< SimpleNode< K, V >& >(o);
 
         // Minimum of whats to be moved out and how many slots available in other node
@@ -142,7 +142,7 @@ public:
         return nentries;
     }
 
-    uint32_t move_out_to_right_by_size(const BtreeConfig& cfg, BtreeNode< K >& o, uint32_t size) override {
+    uint32_t move_out_to_right_by_size(const BtreeConfig& cfg, BtreeNode& o, uint32_t size) override {
         return (get_nth_obj_size(0) * move_out_to_right_by_entries(cfg, o, size / get_nth_obj_size(0)));
     }
 
@@ -151,12 +151,12 @@ public:
         return std::min(possible_entries, this->total_entries() - start_idx);
     }
 
-    uint32_t copy_by_size(const BtreeConfig& cfg, const BtreeNode< K >& o, uint32_t start_idx, uint32_t size) override {
+    uint32_t copy_by_size(const BtreeConfig& cfg, const BtreeNode& o, uint32_t start_idx, uint32_t size) override {
         auto& other = s_cast< const SimpleNode< K, V >& >(o);
         return copy_by_entries(cfg, o, start_idx, other.num_entries_by_size(start_idx, size));
     }
 
-    uint32_t copy_by_entries(const BtreeConfig& cfg, const BtreeNode< K >& o, uint32_t start_idx,
+    uint32_t copy_by_entries(const BtreeConfig& cfg, const BtreeNode& o, uint32_t start_idx,
                              uint32_t nentries) override {
         auto& other = s_cast< const SimpleNode< K, V >& >(o);
 
@@ -174,7 +174,7 @@ public:
         return nentries;
     }
 
-    /*uint32_t move_in_from_right_by_entries(const BtreeConfig& cfg, BtreeNode< K >& o, uint32_t nentries) override {
+    /*uint32_t move_in_from_right_by_entries(const BtreeConfig& cfg, BtreeNode& o, uint32_t nentries) override {
         auto& other_node = s_cast< SimpleNode< K, V >& >(o);
 
         // Minimum of whats to be moved and how many slots available
@@ -206,7 +206,7 @@ public:
         return nentries;
     }
 
-    uint32_t move_in_from_right_by_size(const BtreeConfig& cfg, BtreeNode< K >& o, uint32_t size) override {
+    uint32_t move_in_from_right_by_size(const BtreeConfig& cfg, BtreeNode& o, uint32_t size) override {
         return (get_nth_obj_size(0) * move_in_from_right_by_entries(cfg, o, size / get_nth_obj_size(0)));
     } */
 
@@ -214,12 +214,12 @@ public:
         return (cfg.node_data_size() - (this->total_entries() * get_nth_obj_size(0)));
     }
 
-    K get_nth_key(uint32_t ind, bool copy) const override {
+    void get_nth_key_internal(uint32_t ind, BtreeKey& out_key, bool copy) const override {
         DEBUG_ASSERT_LT(ind, this->total_entries(), "node={}", to_string());
         sisl::blob b;
         b.bytes = (uint8_t*)(this->node_data_area_const() + (get_nth_obj_size(ind) * ind));
         b.size = get_obj_key_size(ind);
-        return K{b, copy};
+        out_key.deserialize(b, copy);
     }
 
     void get_nth_value(uint32_t ind, BtreeValue* out_val, bool copy) const override {
@@ -256,7 +256,7 @@ public:
             V val;
             get_nth_value(i, &val, false);
             fmt::format_to(std::back_inserter(str), "{}Entry{} [Key={} Val={}]", (print_friendly ? "\n\t" : " "), i + 1,
-                           get_nth_key(i, false).to_string(), val.to_string());
+                           get_nth_key< K >(i, false).to_string(), val.to_string());
         }
         return str;
     }
@@ -267,10 +267,10 @@ public:
 
         // validate if keys are in ascending order
         uint32_t i{1};
-        K prevKey = get_nth_key(0, false);
+        K prevKey = get_nth_key< K >(0, false);
 
         while (i < this->total_entries()) {
-            K key = get_nth_key(i, false);
+            K key = get_nth_key< K >(i, false);
             if (i > 0 && prevKey.compare(key) > 0) {
                 LOGDEBUG("non sorted entry : {} -> {} ", prevKey.to_string(), key.to_string());
                 DEBUG_ASSERT(false, "node={}", to_string());
@@ -286,7 +286,7 @@ public:
     }
 
     int compare_nth_key(const BtreeKey& cmp_key, uint32_t ind) const override {
-        return get_nth_key(ind, false).compare(cmp_key);
+        return get_nth_key< K >(ind, false).compare(cmp_key);
     }
 
     // Simple/Fixed node doesn't need a record to point key/value object
