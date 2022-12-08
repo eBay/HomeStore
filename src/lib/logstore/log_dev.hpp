@@ -18,8 +18,9 @@
 #include <fmt/format.h>
 #include <sisl/logging/logging.h>
 
-#include "common/homestore_config.hpp"
 #include <homestore/logstore/log_store_internal.hpp>
+#include <homestore/superblk_handler.hpp>
+#include "common/homestore_config.hpp"
 
 namespace homestore {
 
@@ -416,42 +417,39 @@ public:
 
     logdev_superblk* create();
     void reset();
-    void meta_buf_found(const sisl::byte_view& buf, void* const meta_cookie);
+    void meta_buf_found(const sisl::byte_view& buf, void* meta_cookie);
     std::vector< std::pair< logstore_id_t, logstore_superblk > > load();
     void persist();
 
-    bool is_empty() const { return (m_sb == nullptr); }
+    bool is_empty() const { return m_sb.is_empty(); }
 
     inline off_t get_start_dev_offset() const { return (m_sb->start_offset()); }
-    void set_start_dev_offset(const off_t offset, const logid_t key_idx, const bool persist_now);
+    void set_start_dev_offset(off_t offset, logid_t key_idx, bool persist_now);
     logid_t get_start_log_idx() const;
 
-    logstore_id_t reserve_store(const bool persist_now);
-    void unreserve_store(const logstore_id_t idx, const bool persist_now);
+    logstore_id_t reserve_store(bool persist_now);
+    void unreserve_store(logstore_id_t idx, bool persist_now);
     const std::set< logstore_id_t >& reserved_store_ids() const { return m_store_info; }
 
-    void update_store_superblk(const logstore_id_t idx, const logstore_superblk& meta, const bool persist_now);
-    const logstore_superblk& store_superblk(const logstore_id_t idx) const;
-    logstore_superblk& mutable_store_superblk(const logstore_id_t idx);
+    void update_store_superblk(logstore_id_t idx, const logstore_superblk& meta, const bool persist_now);
+    const logstore_superblk& store_superblk(logstore_id_t idx) const;
+    logstore_superblk& mutable_store_superblk(logstore_id_t idx);
 
 private:
     bool resize_if_needed();
 
-    uint32_t required_sb_size(const uint32_t nstores) const {
+    uint32_t required_sb_size(uint32_t nstores) const {
         // TO DO: Might need to differentiate based on data or fast type
         return size_needed(nstores);
     }
 
-    uint32_t size_needed(const uint32_t nstores) const {
+    uint32_t size_needed(uint32_t nstores) const {
         return sizeof(logdev_superblk) + (nstores * sizeof(logstore_seq_num_t));
     }
 
     uint32_t store_capacity() const;
 
-    sisl::byte_array m_raw_buf;
-    std::string m_metablk_name;
-    logdev_superblk* m_sb{nullptr};
-    void* m_meta_mgr_cookie{nullptr};
+    superblk< logdev_superblk > m_sb;
     std::unique_ptr< sisl::IDReserver > m_id_reserver;
     std::set< logstore_id_t > m_store_info;
 };

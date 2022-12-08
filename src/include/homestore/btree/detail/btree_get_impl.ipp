@@ -20,7 +20,7 @@
 namespace homestore {
 template < typename K, typename V >
 template < typename ReqT >
-btree_status_t Btree< K, V >::do_get(const BtreeNodePtr< K >& my_node, ReqT& greq) const {
+btree_status_t Btree< K, V >::do_get(const BtreeNodePtr& my_node, ReqT& greq) const {
     btree_status_t ret{btree_status_t::success};
     bool found{false};
     uint32_t idx;
@@ -46,7 +46,7 @@ btree_status_t Btree< K, V >::do_get(const BtreeNodePtr< K >& my_node, ReqT& gre
     }
 
     ASSERT_IS_VALID_INTERIOR_CHILD_INDX(found, idx, my_node);
-    BtreeNodePtr< K > child_node;
+    BtreeNodePtr child_node;
     ret = read_and_lock_node(child_info.bnode_id(), child_node, locktype_t::READ, locktype_t::READ, greq.m_op_context);
     if (ret != btree_status_t::success) { goto out; }
 

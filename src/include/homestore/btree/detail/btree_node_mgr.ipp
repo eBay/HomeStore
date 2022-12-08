@@ -27,7 +27,7 @@ namespace homestore {
 template < typename K, typename V >
 btree_status_t Btree< K, V >::create_root_node(void* op_context) {
     // Assign one node as root node and also create a child leaf node and set it as edge
-    BtreeNodePtr< K > root = alloc_leaf_node();
+    BtreeNodePtr root = alloc_leaf_node();
     if (root == nullptr) { return btree_status_t::space_not_avail; }
 
     auto ret = write_node(root, op_context);
@@ -44,7 +44,7 @@ btree_status_t Btree< K, V >::create_root_node(void* op_context) {
  * It reads the node and take a lock of the node.
  */
 template < typename K, typename V >
-btree_status_t Btree< K, V >::read_and_lock_node(bnodeid_t id, BtreeNodePtr< K >& node_ptr, locktype_t int_lock_type,
+btree_status_t Btree< K, V >::read_and_lock_node(bnodeid_t id, BtreeNodePtr& node_ptr, locktype_t int_lock_type,
                                                  locktype_t leaf_lock_type, void* context) const {
     auto ret = read_node_impl(id, node_ptr);
     if (node_ptr == nullptr) {
@@ -60,8 +60,8 @@ btree_status_t Btree< K, V >::read_and_lock_node(bnodeid_t id, BtreeNodePtr< K >
 }
 
 template < typename K, typename V >
-btree_status_t Btree< K, V >::get_child_and_lock_node(const BtreeNodePtr< K >& node, uint32_t index,
-                                                      BtreeLinkInfo& child_info, BtreeNodePtr< K >& child_node,
+btree_status_t Btree< K, V >::get_child_and_lock_node(const BtreeNodePtr& node, uint32_t index,
+                                                      BtreeLinkInfo& child_info, BtreeNodePtr& child_node,
                                                       locktype_t int_lock_type, locktype_t leaf_lock_type,
                                                       void* context) const {
     if (index == node->total_entries()) {
@@ -81,7 +81,7 @@ btree_status_t Btree< K, V >::get_child_and_lock_node(const BtreeNodePtr< K >& n
 }
 
 template < typename K, typename V >
-btree_status_t Btree< K, V >::write_node(const BtreeNodePtr< K >& node, void* context) {
+btree_status_t Btree< K, V >::write_node(const BtreeNodePtr& node, void* context) {
     COUNTER_INCREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_writes, btree_int_node_writes, 1);
     HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_occupancy, btree_int_node_occupancy,
                               ((m_node_size - node->available_size(m_bt_cfg)) * 100) / m_node_size);
@@ -91,7 +91,7 @@ btree_status_t Btree< K, V >::write_node(const BtreeNodePtr< K >& node, void* co
 
 /* Caller of this api doesn't expect read to fail in any circumstance */
 template < typename K, typename V >
-void Btree< K, V >::read_node_or_fail(bnodeid_t id, BtreeNodePtr< K >& node) const {
+void Btree< K, V >::read_node_or_fail(bnodeid_t id, BtreeNodePtr& node) const {
     BT_NODE_REL_ASSERT_EQ(read_node_impl(id, node), btree_status_t::success, node);
 }
 
@@ -112,9 +112,8 @@ void Btree< K, V >::read_node_or_fail(bnodeid_t id, BtreeNodePtr< K >& node) con
  * expected to be read locked and child node could be either read or write locked.
  */
 template < typename K, typename V >
-btree_status_t Btree< K, V >::upgrade_node_locks(const BtreeNodePtr< K >& parent_node,
-                                                 const BtreeNodePtr< K >& child_node, locktype_t parent_cur_lock,
-                                                 locktype_t child_cur_lock, void* context) {
+btree_status_t Btree< K, V >::upgrade_node_locks(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
+                                                 locktype_t parent_cur_lock, locktype_t child_cur_lock, void* context) {
     btree_status_t ret = btree_status_t::success;
 
     auto const parent_prev_gen = parent_node->node_gen();
@@ -181,7 +180,7 @@ btree_status_t Btree< K, V >::upgrade_node_locks(const BtreeNodePtr< K >& parent
 
 #if 0
 template < typename K, typename V >
-btree_status_t Btree< K, V >::upgrade_node(const BtreeNodePtr< K >& node, locktype_t prev_lock, void* context,
+btree_status_t Btree< K, V >::upgrade_node(const BtreeNodePtr& node, locktype_t prev_lock, void* context,
                                            uint64_t prev_gen) {
     if (prev_lock == locktype_t::READ) { unlock_node(node, locktype_t::READ); }
     if (prev_lock != locktype_t::WRITE) {
@@ -206,8 +205,8 @@ btree_status_t Btree< K, V >::upgrade_node(const BtreeNodePtr< K >& node, lockty
 #endif
 
 template < typename K, typename V >
-btree_status_t Btree< K, V >::_lock_node(const BtreeNodePtr< K >& node, locktype_t type, void* context,
-                                         const char* fname, int line) const {
+btree_status_t Btree< K, V >::_lock_node(const BtreeNodePtr& node, locktype_t type, void* context, const char* fname,
+                                         int line) const {
     _start_of_lock(node, type, fname, line);
     node->lock(type);
 
@@ -222,15 +221,15 @@ btree_status_t Btree< K, V >::_lock_node(const BtreeNodePtr< K >& node, locktype
 }
 
 template < typename K, typename V >
-void Btree< K, V >::unlock_node(const BtreeNodePtr< K >& node, locktype_t type) const {
+void Btree< K, V >::unlock_node(const BtreeNodePtr& node, locktype_t type) const {
     node->unlock(type);
     auto time_spent = end_of_lock(node, type);
     observe_lock_time(node, type, time_spent);
 }
 
 template < typename K, typename V >
-BtreeNodePtr< K > Btree< K, V >::alloc_leaf_node() {
-    BtreeNodePtr< K > n = alloc_node(true /* is_leaf */);
+BtreeNodePtr Btree< K, V >::alloc_leaf_node() {
+    BtreeNodePtr n = alloc_node(true /* is_leaf */);
     if (n) {
         COUNTER_INCREMENT(m_metrics, btree_leaf_node_count, 1);
         ++m_total_nodes;
@@ -239,8 +238,8 @@ BtreeNodePtr< K > Btree< K, V >::alloc_leaf_node() {
 }
 
 template < typename K, typename V >
-BtreeNodePtr< K > Btree< K, V >::alloc_interior_node() {
-    BtreeNodePtr< K > n = alloc_node(false /* is_leaf */);
+BtreeNodePtr Btree< K, V >::alloc_interior_node() {
+    BtreeNodePtr n = alloc_node(false /* is_leaf */);
     if (n) {
         COUNTER_INCREMENT(m_metrics, btree_int_node_count, 1);
         ++m_total_nodes;
@@ -249,8 +248,8 @@ BtreeNodePtr< K > Btree< K, V >::alloc_interior_node() {
 }
 
 template < typename K, typename V >
-BtreeNode< K >* Btree< K, V >::init_node(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf) {
-    BtreeNode< K >* ret_node{nullptr};
+BtreeNode* Btree< K, V >::init_node(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf) {
+    BtreeNode* ret_node{nullptr};
     btree_node_type node_type = is_leaf ? m_bt_cfg.leaf_node_type() : m_bt_cfg.interior_node_type();
 
     switch (node_type) {
@@ -264,10 +263,10 @@ BtreeNode< K >* Btree< K, V >::init_node(uint8_t* node_buf, bnodeid_t id, bool i
 
     case btree_node_type::FIXED:
         if (is_leaf) {
-            ret_node = dynamic_cast< BtreeNode< K >* >(
-                new SimpleNode< K, V >(node_buf, id, init_buf, is_leaf, this->m_bt_cfg));
+            ret_node =
+                dynamic_cast< BtreeNode* >(new SimpleNode< K, V >(node_buf, id, init_buf, is_leaf, this->m_bt_cfg));
         } else {
-            ret_node = dynamic_cast< BtreeNode< K >* >(
+            ret_node = dynamic_cast< BtreeNode* >(
                 new SimpleNode< K, BtreeLinkInfo >(node_buf, id, init_buf, is_leaf, this->m_bt_cfg));
         }
         break;
@@ -282,10 +281,10 @@ BtreeNode< K >* Btree< K, V >::init_node(uint8_t* node_buf, bnodeid_t id, bool i
 
     case btree_node_type::VAR_KEY:
         if (is_leaf) {
-            ret_node = dynamic_cast< BtreeNode< K >* >(
-                new VarKeySizeNode< K, V >(node_buf, id, init_buf, is_leaf, this->m_bt_cfg));
+            ret_node =
+                dynamic_cast< BtreeNode* >(new VarKeySizeNode< K, V >(node_buf, id, init_buf, is_leaf, this->m_bt_cfg));
         } else {
-            ret_node = dynamic_cast< BtreeNode< K >* >(
+            ret_node = dynamic_cast< BtreeNode* >(
                 new VarKeySizeNode< K, BtreeLinkInfo >(node_buf, id, init_buf, is_leaf, this->m_bt_cfg));
         }
         break;
@@ -299,7 +298,7 @@ BtreeNode< K >* Btree< K, V >::init_node(uint8_t* node_buf, bnodeid_t id, bool i
 
 /* Note:- This function assumes that access of this node is thread safe. */
 template < typename K, typename V >
-void Btree< K, V >::free_node(const BtreeNodePtr< K >& node, locktype_t cur_lock, void* context) {
+void Btree< K, V >::free_node(const BtreeNodePtr& node, locktype_t cur_lock, void* context) {
     BT_NODE_LOG(DEBUG, node, "Freeing node");
 
     COUNTER_DECREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_count, btree_int_node_count, 1);
@@ -315,7 +314,7 @@ void Btree< K, V >::free_node(const BtreeNodePtr< K >& node, locktype_t cur_lock
 }
 
 template < typename K, typename V >
-void Btree< K, V >::observe_lock_time(const BtreeNodePtr< K >& node, locktype_t type, uint64_t time_spent) const {
+void Btree< K, V >::observe_lock_time(const BtreeNodePtr& node, locktype_t type, uint64_t time_spent) const {
     if (time_spent == 0) { return; }
 
     if (type == locktype_t::READ) {
@@ -328,8 +327,8 @@ void Btree< K, V >::observe_lock_time(const BtreeNodePtr< K >& node, locktype_t 
 }
 
 template < typename K, typename V >
-void Btree< K, V >::_start_of_lock(const BtreeNodePtr< K >& node, locktype_t ltype, const char* fname, int line) {
-    btree_locked_node_info< K, V > info;
+void Btree< K, V >::_start_of_lock(const BtreeNodePtr& node, locktype_t ltype, const char* fname, int line) {
+    btree_locked_node_info info;
 
 #ifndef NDEBUG
     info.fname = fname;
@@ -352,8 +351,7 @@ void Btree< K, V >::_start_of_lock(const BtreeNodePtr< K >& node, locktype_t lty
 }
 
 template < typename K, typename V >
-bool Btree< K, V >::remove_locked_node(const BtreeNodePtr< K >& node, locktype_t ltype,
-                                       btree_locked_node_info< K, V >* out_info) {
+bool Btree< K, V >::remove_locked_node(const BtreeNodePtr& node, locktype_t ltype, btree_locked_node_info* out_info) {
     auto pnode_infos =
         (ltype == locktype_t::WRITE) ? &bt_thread_vars()->wr_locked_nodes : &bt_thread_vars()->rd_locked_nodes;
 
@@ -394,8 +392,8 @@ bool Btree< K, V >::remove_locked_node(const BtreeNodePtr< K >& node, locktype_t
 }
 
 template < typename K, typename V >
-uint64_t Btree< K, V >::end_of_lock(const BtreeNodePtr< K >& node, locktype_t ltype) {
-    btree_locked_node_info< K, V > info;
+uint64_t Btree< K, V >::end_of_lock(const BtreeNodePtr& node, locktype_t ltype) {
+    btree_locked_node_info info;
     if (!remove_locked_node(node, ltype, &info)) {
         DEBUG_ASSERT(false, "Expected node = {} is not there in locked_node_list", (void*)node.get());
         return 0;

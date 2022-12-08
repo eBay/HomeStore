@@ -59,7 +59,7 @@ public:
 
     virtual sisl::blob serialize() const = 0;
     virtual uint32_t serialized_size() const = 0;
-    // virtual void deserialize(const sisl::blob& b) = 0;
+    virtual void deserialize(const sisl::blob& b, bool copy) = 0;
 
     virtual std::string to_string() const = 0;
     virtual bool is_extent_key() const { return false; }

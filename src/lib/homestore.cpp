@@ -10,6 +10,7 @@
 #include <homestore/meta_service.hpp>
 #include <homestore/logstore_service.hpp>
 #include <homestore/homestore.hpp>
+#include <homestore/checkpoint/cp_mgr.hpp>
 #include "common/homestore_utils.hpp"
 #include "common/homestore_config.hpp"
 #include "common/homestore_assert.hpp"
@@ -120,6 +121,7 @@ void HomeStore::init(bool wait_for_init) {
     sisl::MallocMetrics::enable();
     m_status_mgr = std::make_unique< HomeStoreStatusMgr >();
     m_resource_mgr = std::make_unique< ResourceMgr >();
+
 #ifndef NDEBUG
     flip::Flip::instance().start_rpc_server();
 #endif
@@ -189,6 +191,7 @@ void HomeStore::shutdown(bool wait, const hs_comp_callback& done_cb) {
         }
         m_dev_mgr->close_devices();
         m_dev_mgr.reset();
+        m_cp_mgr->shutdown();
         LOGINFO("Homestore is completed its shutdown");
 
         if (wait) {
@@ -289,6 +292,7 @@ void HomeStore::init_done(bool first_time_boot) {
     auto cnt = m_format_cnt.fetch_sub(1);
     if (cnt != 1) { return; }
     m_dev_mgr->init_done();
+    m_cp_mgr = std::make_unique< CPManager >(first_time_boot); // Initialize CPManager
     m_meta_service->start(first_time_boot);
     m_resource_mgr->set_total_cap(m_dev_mgr->total_cap());
 

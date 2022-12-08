@@ -19,8 +19,7 @@
 
 namespace homestore {
 
-template < typename K >
-static bool is_repair_needed(const BtreeNodePtr< K >& child_node, const BtreeLinkInfo& child_info) {
+static bool is_repair_needed(const BtreeNodePtr& child_node, const BtreeLinkInfo& child_info) {
     return child_info.link_version() != child_node->link_version();
 }
 
@@ -37,7 +36,7 @@ static bool is_repair_needed(const BtreeNodePtr< K >& child_node, const BtreeLin
  */
 template < typename K, typename V >
 template < typename ReqT >
-btree_status_t Btree< K, V >::do_put(const BtreeNodePtr< K >& my_node, locktype_t curlock, ReqT& req) {
+btree_status_t Btree< K, V >::do_put(const BtreeNodePtr& my_node, locktype_t curlock, ReqT& req) {
     btree_status_t ret = btree_status_t::success;
 
     if (my_node->is_leaf()) {
@@ -54,7 +53,7 @@ retry:
     uint32_t curr_idx;
 
     if constexpr (std::is_same_v< ReqT, BtreeRangePutRequest< K > >) {
-        const auto count = my_node->template get_all< V >(req.next_range(), UINT32_MAX, start_idx, end_idx);
+        const auto count = my_node->template get_all< K, V >(req.next_range(), UINT32_MAX, start_idx, end_idx);
         if (count == 0) {
             BT_NODE_LOG_ASSERT(false, my_node, "get_all returns 0 entries for interior node is not valid pattern");
             ret = btree_status_t::retry;
@@ -83,7 +82,7 @@ retry:
 
         // Get the childPtr for given key.
         BtreeLinkInfo child_info;
-        BtreeNodePtr< K > child_node;
+        BtreeNodePtr child_node;
         ret = get_child_and_lock_node(my_node, curr_idx, child_info, child_node, locktype_t::READ, locktype_t::WRITE,
                                       req.m_op_context);
         if (ret != btree_status_t::success) {
@@ -147,9 +146,9 @@ retry:
 #ifndef NDEBUG
         K ckey, pkey;
         if (curr_idx != my_node->total_entries()) { // not edge
-            pkey = my_node->get_nth_key(curr_idx, true);
+            pkey = my_node->get_nth_key< K >(curr_idx, true);
             if (child_node->total_entries() != 0) {
-                ckey = child_node->get_last_key();
+                ckey = child_node->get_last_key< K >();
                 if (!child_node->is_leaf()) {
                     BT_NODE_DBG_ASSERT_EQ(ckey.compare(pkey), 0, my_node);
                 } else {
@@ -159,9 +158,9 @@ retry:
             // BT_NODE_DBG_ASSERT_EQ((is_range_put_req(req) || k.compare(pkey) <= 0), true, child_node);
         }
         if (curr_idx > 0) { // not first child
-            pkey = my_node->get_nth_key(curr_idx - 1, true);
+            pkey = my_node->get_nth_key< K >(curr_idx - 1, true);
             if (child_node->total_entries() != 0) {
-                ckey = child_node->get_first_key();
+                ckey = child_node->get_first_key< K >();
                 BT_NODE_DBG_ASSERT_GE(ckey.compare(pkey), 0, child_node);
             }
             // BT_NODE_DBG_ASSERT_EQ((is_range_put_req(req) || k.compare(pkey) >= 0), true, my_node);
@@ -188,7 +187,7 @@ out:
 
 template < typename K, typename V >
 template < typename ReqT >
-btree_status_t Btree< K, V >::mutate_write_leaf_node(const BtreeNodePtr< K >& my_node, ReqT& req) {
+btree_status_t Btree< K, V >::mutate_write_leaf_node(const BtreeNodePtr& my_node, ReqT& req) {
     btree_status_t ret = btree_status_t::success;
     if constexpr (std::is_same_v< ReqT, BtreeRangePutRequest< K > >) {
         const BtreeKeyRange< K >& subrange = req.working_range();
@@ -223,7 +222,7 @@ btree_status_t Btree< K, V >::mutate_write_leaf_node(const BtreeNodePtr< K >& my
 }
 
 template < typename K, typename V >
-btree_status_t Btree< K, V >::mutate_extents_in_leaf(const BtreeNodePtr< K >& node, BtreeRangePutRequest< K >& rpreq) {
+btree_status_t Btree< K, V >::mutate_extents_in_leaf(const BtreeNodePtr& node, BtreeRangePutRequest< K >& rpreq) {
     if constexpr (std::is_base_of_v< ExtentBtreeKey< K >, K > && std::is_base_of_v< ExtentBtreeValue< V >, V >) {
         const BtreeKeyRange< K >& subrange = rpreq.current_sub_range();
         const auto& start_key = static_cast< const ExtentBtreeKey< K >& >(subrange.start_key());
@@ -259,13 +258,13 @@ btree_status_t Btree< K, V >::mutate_extents_in_leaf(const BtreeNodePtr< K >& no
                 // Get the residue head and tail key first if it is present, before updating any fields, otherwise
                 // updating fields will modify the other entry.
                 if (start_found) {
-                    head_k = node->get_nth_key(start_idx, false);
+                    head_k = node->get_nth_key< K >(start_idx, false);
                     head_offset = head_k.distance_start(start_key);
                     BT_NODE_DBG_ASSERT_GE(head_offset, 0, node, "Invalid start_key or head_k");
                     if (head_offset > 0) { node->get_nth_value(start_idx, &head_v, false); }
                 }
                 if (end_found) {
-                    tail_k = node->get_nth_key(end_idx, false);
+                    tail_k = node->get_nth_key< K >(end_idx, false);
                     tail_offset = end_key.distance_end(tail_k);
                     BT_NODE_DBG_ASSERT_GE(tail_offset, 0, node, "Invalid end_key or tail_k");
                     if (tail_offset > 0) { node->get_nth_value(end_idx, &tail_v, false); }
@@ -307,7 +306,8 @@ btree_status_t Btree< K, V >::mutate_extents_in_leaf(const BtreeNodePtr< K >& no
                         V tmp_v;
                         for (auto i = start_idx; i < end_idx; ++i) {
                             node->get_nth_value(i, &tmp_v, false);
-                            size_needed -= (node->get_nth_key(i, false).serialized_size() + tmp_v.serialized_size());
+                            size_needed -=
+                                (node->get_nth_key< K >(i, false).serialized_size() + tmp_v.serialized_size());
                         }
 
                         // If still size is not enough, no other option other than trimming down the keys and retry
@@ -388,10 +388,10 @@ template < typename K, typename V >
 template < typename ReqT >
 btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
     K split_key;
-    BtreeNodePtr< K > child_node = nullptr;
+    BtreeNodePtr child_node = nullptr;
     btree_status_t ret = btree_status_t::success;
-    BtreeNodePtr< K > root;
-    BtreeNodePtr< K > new_root;
+    BtreeNodePtr root;
+    BtreeNodePtr new_root;
 
     m_btree_lock.lock();
     ret = read_and_lock_node(m_root_node_info.bnode_id(), root, locktype_t::WRITE, locktype_t::WRITE, req.m_op_context);
@@ -436,10 +436,10 @@ done:
 }
 
 template < typename K, typename V >
-btree_status_t Btree< K, V >::split_node(const BtreeNodePtr< K >& parent_node, const BtreeNodePtr< K >& child_node,
+btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
                                          uint32_t parent_ind, BtreeKey* out_split_key, void* context) {
-    BtreeNodePtr< K > child_node1 = child_node;
-    BtreeNodePtr< K > child_node2 = child_node1->is_leaf() ? alloc_leaf_node() : alloc_interior_node();
+    BtreeNodePtr child_node1 = child_node;
+    BtreeNodePtr child_node2 = child_node1->is_leaf() ? alloc_leaf_node() : alloc_interior_node();
 
     if (child_node2 == nullptr) { return (btree_status_t::space_not_avail); }
 
@@ -478,7 +478,7 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr< K >& parent_node, c
     parent_node->update(parent_ind, child_node2->link_info());
 
     // Insert the last entry in first child to parent node
-    *out_split_key = child_node1->get_last_key();
+    *out_split_key = child_node1->get_last_key< K >();
 
     // If key is extent then we always insert the tail portion of the extent key in the parent node
     if (out_split_key->is_extent_key()) {
@@ -488,7 +488,7 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr< K >& parent_node, c
         parent_node->insert(parent_ind, *out_split_key, child_node1->link_info());
     }
 
-    BT_NODE_DBG_ASSERT_GT(child_node2->get_first_key().compare(*out_split_key), 0, child_node2);
+    BT_NODE_DBG_ASSERT_GT(child_node2->get_first_key< K >().compare(*out_split_key), 0, child_node2);
     BT_NODE_LOG(DEBUG, parent_node, "Split child_node={} with new_child_node={}, split_key={}", child_node1->node_id(),
                 child_node2->node_id(), out_split_key->to_string());
 
@@ -501,7 +501,7 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr< K >& parent_node, c
 
 template < typename K, typename V >
 template < typename ReqT >
-bool Btree< K, V >::is_split_needed(const BtreeNodePtr< K >& node, const BtreeConfig& cfg, ReqT& req) const {
+bool Btree< K, V >::is_split_needed(const BtreeNodePtr& node, const BtreeConfig& cfg, ReqT& req) const {
     if (bt_thread_vars()->force_split_node && (bt_thread_vars()->force_split_node == node)) {
         bt_thread_vars()->force_split_node = nullptr;
         return true;
@@ -532,10 +532,10 @@ bool Btree< K, V >::is_split_needed(const BtreeNodePtr< K >& node, const BtreeCo
 }
 
 template < typename K, typename V >
-btree_status_t Btree< K, V >::repair_split(const BtreeNodePtr< K >& parent_node, const BtreeNodePtr< K >& child_node1,
+btree_status_t Btree< K, V >::repair_split(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node1,
                                            uint32_t parent_split_idx, void* context) {
     parent_node->update(parent_split_idx, BtreeLinkInfo{child_node1->next_bnode(), child_node1->link_version()});
-    parent_node->insert(parent_split_idx, child_node1->get_last_key(), child_node1->link_info());
+    parent_node->insert(parent_split_idx, child_node1->get_last_key< K >(), child_node1->link_info());
     return write_node(parent_node, context);
 }
 
@@ -565,7 +565,7 @@ Btree< K, V >::custom_kv_select_for_write(uint8_t node_version, const std::vecto
 
 #if 0
 template < typename K, typename V >
-btree_status_t Btree< K, V >::get_start_and_end_idx(const BtreeNodePtr< K >& node, BtreeMutateRequest& req,
+btree_status_t Btree< K, V >::get_start_and_end_idx(const BtreeNodePtr& node, BtreeMutateRequest& req,
                                                     int& start_idx, int& end_idx) {
     btree_status_t ret = btree_status_t::success;
     if (is_range_put_req(req)) {

@@ -18,24 +18,6 @@
 #include "btree.ipp"
 
 namespace homestore {
-#ifdef INCASE_WE_NEED_COMMON
-// Common class for all membtree's
-template < typename K, typename V >
-class MemBtreeCommon : public BtreeCommon< K, V > {
-public:
-    void deref_node(BtreeNode< K >* node) override {
-        if (node->m_refcount.decrement_testz()) {
-            delete node->m_node_buf;
-            delete node;
-        }
-    }
-};
-
-MemBtree(BtreeConfig& cfg) : Btree(update_node_area_size(cfg)) {
-    Btree< K, V >::create_store_common(btree_store_type::MEM, []() { return std::make_shared< MemBtreeCommon >(); });
-}
-#endif
-
 template < typename K, typename V >
 class MemBtree : public Btree< K, V > {
 public:
@@ -51,34 +33,34 @@ public:
     std::string btree_store_type() const override { return "MEM_BTREE"; }
 
 private:
-    BtreeNodePtr< K > alloc_node(bool is_leaf) override {
+    BtreeNodePtr alloc_node(bool is_leaf) override {
         uint8_t* node_buf = new uint8_t[this->m_bt_cfg.node_size()];
         auto new_node = this->init_node(node_buf, bnodeid_t{0}, true, is_leaf);
         new_node->set_node_id(bnodeid_t{r_cast< std::uintptr_t >(new_node)});
         new_node->m_refcount.increment();
-        return BtreeNodePtr< K >{new_node};
+        return BtreeNodePtr{new_node};
     }
 
-    btree_status_t write_node_impl(const BtreeNodePtr< K >& bn, void* context) { return btree_status_t::success; }
+    btree_status_t write_node_impl(const BtreeNodePtr& node, void* context) { return btree_status_t::success; }
 
-    btree_status_t read_node_impl(bnodeid_t id, BtreeNodePtr< K >& node) const override {
-        node = BtreeNodePtr< K >{r_cast< BtreeNode< K >* >(id)};
+    btree_status_t read_node_impl(bnodeid_t id, BtreeNodePtr& node) const override {
+        node = BtreeNodePtr{r_cast< BtreeNode* >(id)};
         return btree_status_t::success;
     }
 
-    btree_status_t refresh_node(const BtreeNodePtr< K >& bn, bool for_read_modify_write, void* context) const override {
+    btree_status_t refresh_node(const BtreeNodePtr& node, bool for_read_modify_write, void* context) const override {
         return btree_status_t::success;
     }
 
-    void free_node_impl(const BtreeNodePtr< K >& node, void* context) override {}
+    void free_node_impl(const BtreeNodePtr& node, void* context) override {}
 
-    btree_status_t prepare_node_txn(const BtreeNodePtr< K >& parent_node, const BtreeNodePtr< K >& child_node,
+    btree_status_t prepare_node_txn(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
                                     void* context) override {
         return btree_status_t::success;
     }
 
-    btree_status_t transact_write_nodes(const folly::small_vector< BtreeNodePtr< K >, 3 >& new_nodes,
-                                        const BtreeNodePtr< K >& child_node, const BtreeNodePtr< K >& parent_node,
+    btree_status_t transact_write_nodes(const folly::small_vector< BtreeNodePtr, 3 >& new_nodes,
+                                        const BtreeNodePtr& child_node, const BtreeNodePtr& parent_node,
                                         void* context) override {
         for (const auto& node : new_nodes) {
             this->write_node(node, context);
@@ -88,16 +70,6 @@ private:
         return btree_status_t::success;
     }
 
-    /*void create_tree_precommit(const BtreeNodePtr< K >& root_node, void* op_context) override {}
-    void split_node_precommit(const BtreeNodePtr< K >& parent_node, const BtreeNodePtr< K >& child_node1,
-                              const BtreeNodePtr< K >& child_node2, bool root_split, bool edge_split,
-                              void* context) override {}
-
-    void merge_node_precommit(bool is_root_merge, const BtreeNodePtr< K >& parent_node, uint32_t parent_merge_start_idx,
-                              const BtreeNodePtr< K >& child_node1,
-                              const std::vector< BtreeNodePtr< K > >* old_child_nodes,
-                              const std::vector< BtreeNodePtr< K > >* replace_child_nodes, void* op_context) override {}
-  */
 #if 0
     static void ref_node(MemBtreeNode* bn) {
         auto mbh = (mem_btree_node_header*)bn;

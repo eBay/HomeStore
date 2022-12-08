@@ -40,7 +40,7 @@ LogDev::LogDev(const logstore_family_id_t f_id, const std::string& metablk_name)
 
 LogDev::~LogDev() = default;
 
-void LogDev::meta_blk_found(meta_blk* const mblk, const sisl::byte_view buf, const size_t size) {
+void LogDev::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
     m_logdev_meta.meta_buf_found(buf, static_cast< void* >(mblk));
 }
 
@@ -561,36 +561,26 @@ void LogDev::get_status(const int verbosity, nlohmann::json& js) const {
 }
 
 /////////////////////////////// LogDevMetadata Section ///////////////////////////////////////
-LogDevMetadata::LogDevMetadata(const std::string& metablk_name) : m_metablk_name{metablk_name} {}
+LogDevMetadata::LogDevMetadata(const std::string& metablk_name) : m_sb{metablk_name} {}
 
 logdev_superblk* LogDevMetadata::create() {
-    const auto req_sz = required_sb_size(0);
-    // TO DO: Might need to address alignment based on data or fast type
-    m_raw_buf = hs_utils::make_byte_array(req_sz, meta_service().is_aligned_buf_needed(req_sz), sisl::buftag::metablk,
-                                          meta_service().align_size());
-    m_sb = new (m_raw_buf->bytes) logdev_superblk();
+    logdev_superblk* sb = m_sb.create(required_sb_size(0));
 
     auto* sb_area = m_sb->get_logstore_superblk();
     std::fill_n(sb_area, store_capacity(), logstore_superblk::default_value());
 
     m_id_reserver = std::make_unique< sisl::IDReserver >();
-    persist();
-    return m_sb;
+    m_sb.write();
+    return sb;
 }
 
 void LogDevMetadata::reset() {
-    m_raw_buf.reset();
-    m_sb = nullptr;
-    m_meta_mgr_cookie = nullptr;
     m_id_reserver.reset();
     m_store_info.clear();
 }
 
-void LogDevMetadata::meta_buf_found(const sisl::byte_view& buf, void* const meta_cookie) {
-    m_meta_mgr_cookie = meta_cookie;
-    m_raw_buf = hs_utils::extract_byte_array(buf, true, meta_service().align_size());
-    m_sb = r_cast< logdev_superblk* >(m_raw_buf->bytes);
-
+void LogDevMetadata::meta_buf_found(const sisl::byte_view& buf, void* meta_cookie) {
+    m_sb.load(buf, meta_cookie);
     HS_REL_ASSERT_EQ(m_sb->get_magic(), logdev_superblk::LOGDEV_SB_MAGIC, "Invalid logdev metablk, magic mismatch");
     HS_REL_ASSERT_EQ(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Invalid version of logdev metablk");
 }
@@ -605,7 +595,7 @@ std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::loa
         m_id_reserver = std::make_unique< sisl::IDReserver >();
     }
 
-    HS_REL_ASSERT_NE(m_raw_buf->bytes, nullptr, "Load called without getting metadata");
+    HS_REL_ASSERT_EQ(m_sb.is_empty(), false, "Load called without getting metadata");
     HS_REL_ASSERT_LE(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Logdev super blk version mismatch");
 
     const logstore_superblk* store_sb = m_sb->get_logstore_superblk();
@@ -624,15 +614,7 @@ std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::loa
     return ret_list;
 }
 
-void LogDevMetadata::persist() {
-    if (m_meta_mgr_cookie) {
-        meta_service().update_sub_sb(m_raw_buf->bytes, m_raw_buf->size, m_meta_mgr_cookie);
-    } else {
-        meta_service().add_sub_sb(m_metablk_name, m_raw_buf->bytes, m_raw_buf->size, m_meta_mgr_cookie);
-    }
-}
-
-logstore_id_t LogDevMetadata::reserve_store(const bool persist_now) {
+logstore_id_t LogDevMetadata::reserve_store(bool persist_now) {
     auto const idx = m_id_reserver->reserve(); // Search the id reserver and alloc an idx;
     m_store_info.insert(idx);
 
@@ -642,10 +624,12 @@ logstore_id_t LogDevMetadata::reserve_store(const bool persist_now) {
     logstore_superblk* sb_area = m_sb->get_logstore_superblk();
     logstore_superblk::init(sb_area[idx]);
     ++m_sb->num_stores;
-    if (persist_now) { persist(); }
+    if (persist_now) { m_sb.write(); }
 
     return idx;
 }
+
+void LogDevMetadata::persist() { m_sb.write(); }
 
 void LogDevMetadata::unreserve_store(logstore_id_t idx, bool persist_now) {
     m_id_reserver->unreserve(idx);
@@ -660,7 +644,7 @@ void LogDevMetadata::unreserve_store(logstore_id_t idx, bool persist_now) {
         logstore_superblk::clear(sb_area[idx]);
     }
     --m_sb->num_stores;
-    if (persist_now) { persist(); }
+    if (persist_now) { m_sb.write(); }
 }
 
 void LogDevMetadata::update_store_superblk(logstore_id_t idx, const logstore_superblk& sb, bool persist_now) {
@@ -670,26 +654,26 @@ void LogDevMetadata::update_store_superblk(logstore_id_t idx, const logstore_sup
     // Update the on-disk copy
     resize_if_needed();
 
-    logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
+    logstore_superblk* sb_area = m_sb->get_logstore_superblk();
     sb_area[idx] = sb;
 
-    if (persist_now) { persist(); }
+    if (persist_now) { m_sb.write(); }
 }
 
 const logstore_superblk& LogDevMetadata::store_superblk(logstore_id_t idx) const {
-    const logstore_superblk* sb_area{m_sb->get_logstore_superblk()};
+    const logstore_superblk* sb_area = m_sb->get_logstore_superblk();
     return sb_area[idx];
 }
 
 logstore_superblk& LogDevMetadata::mutable_store_superblk(logstore_id_t idx) {
-    logstore_superblk* sb_area{m_sb->get_logstore_superblk()};
+    logstore_superblk* sb_area = m_sb->get_logstore_superblk();
     return sb_area[idx];
 }
 
 void LogDevMetadata::set_start_dev_offset(off_t offset, logid_t key_idx, bool persist_now) {
     m_sb->set_start_offset(offset);
     m_sb->key_idx = key_idx;
-    if (persist_now) { persist(); }
+    if (persist_now) { m_sb.write(); }
 }
 
 logid_t LogDevMetadata::get_start_log_idx() const { return m_sb->key_idx; }
@@ -697,18 +681,15 @@ logid_t LogDevMetadata::get_start_log_idx() const { return m_sb->key_idx; }
 bool LogDevMetadata::resize_if_needed() {
     auto req_sz{required_sb_size((m_store_info.size() == 0) ? 0u : *m_store_info.rbegin() + 1)};
     if (meta_service().is_aligned_buf_needed(req_sz)) { req_sz = sisl::round_up(req_sz, meta_service().align_size()); }
-    if (req_sz != m_raw_buf->size) {
-        const auto old_buf = m_raw_buf;
-        // TO DO: Might need to address alignment based on data or fast type
-        m_raw_buf = hs_utils::make_byte_array(req_sz, meta_service().is_aligned_buf_needed(req_sz),
-                                              sisl::buftag::metablk, meta_service().align_size());
-        m_sb = new (m_raw_buf->bytes) logdev_superblk();
+    if (req_sz != m_sb.size()) {
+        const auto old_buf = m_sb.raw_buf();
 
-        logstore_superblk* const sb_area{m_sb->get_logstore_superblk()};
+        m_sb.create(req_sz);
+        logstore_superblk* sb_area = m_sb->get_logstore_superblk();
         std::fill_n(sb_area, store_capacity(), logstore_superblk::default_value());
 
-        std::memcpy(static_cast< void* >(m_raw_buf->bytes), static_cast< const void* >(old_buf->bytes),
-                    std::min(old_buf->size, m_raw_buf->size));
+        std::memcpy(static_cast< void* >(m_sb.raw_buf()->bytes), static_cast< const void* >(old_buf->bytes),
+                    std::min(old_buf->size, m_sb.size()));
         return true;
     } else {
         return false;
@@ -716,6 +697,6 @@ bool LogDevMetadata::resize_if_needed() {
 }
 
 uint32_t LogDevMetadata::store_capacity() const {
-    return (m_raw_buf->size - sizeof(logdev_superblk)) / sizeof(logstore_superblk);
+    return (m_sb.size() - sizeof(logdev_superblk)) / sizeof(logstore_superblk);
 }
 } // namespace homestore

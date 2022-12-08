@@ -20,14 +20,14 @@
 namespace homestore {
 
 template < typename K, typename V >
-btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr< K >& my_node, BtreeQueryRequest< K >& qreq,
+btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr& my_node, BtreeQueryRequest< K >& qreq,
                                              std::vector< std::pair< K, V > >& out_values) const {
     btree_status_t ret = btree_status_t::success;
     if (my_node->is_leaf()) {
         BT_NODE_DBG_ASSERT_GT(qreq.batch_size(), 0, my_node);
 
         auto count = 0U;
-        BtreeNodePtr< K > next_node = nullptr;
+        BtreeNodePtr next_node = nullptr;
 
         do {
             if (next_node) {
@@ -38,7 +38,7 @@ btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr< K >& my_node, BtreeQu
             uint32_t start_ind{0};
             uint32_t end_ind{0};
             auto cur_count =
-                my_node->template get_all< V >(qreq.next_range(), qreq.batch_size() - count, start_ind, end_ind);
+                my_node->template get_all< K, V >(qreq.next_range(), qreq.batch_size() - count, start_ind, end_ind);
             for (auto idx{start_ind}; idx < (start_ind + cur_count); ++idx) {
                 call_on_read_kv_cb(my_node, idx, qreq);
                 my_node->add_nth_obj_to_list(idx, &out_values, true);
@@ -52,7 +52,7 @@ btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr< K >& my_node, BtreeQu
             if (count < qreq.batch_size()) {
                 // Before reading a sibling node, validate if the current node last key is already same as end key. This
                 // avoids reading from a sibling node.
-                if (my_node->get_last_key().compare(qreq.input_range().end_key()) >= 0) { break; }
+                if (my_node->get_last_key< K >().compare(qreq.input_range().end_key()) >= 0) { break; }
                 if (my_node->next_bnode() == empty_bnodeid) { break; }
                 ret = read_and_lock_node(my_node->next_bnode(), next_node, locktype_t::READ, locktype_t::READ,
                                          qreq.m_op_context);
@@ -71,7 +71,7 @@ btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr< K >& my_node, BtreeQu
     const auto [isfound, idx] = my_node->find(qreq.next_key(), &start_child_info, false);
     ASSERT_IS_VALID_INTERIOR_CHILD_INDX(isfound, idx, my_node);
 
-    BtreeNodePtr< K > child_node;
+    BtreeNodePtr child_node;
     ret = read_and_lock_node(start_child_info.bnode_id(), child_node, locktype_t::READ, locktype_t::READ,
                              qreq.m_op_context);
     unlock_node(my_node, locktype_t::READ);
@@ -80,7 +80,7 @@ btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr< K >& my_node, BtreeQu
 }
 
 template < typename K, typename V >
-btree_status_t Btree< K, V >::do_traversal_query(const BtreeNodePtr< K >& my_node, BtreeQueryRequest< K >& qreq,
+btree_status_t Btree< K, V >::do_traversal_query(const BtreeNodePtr& my_node, BtreeQueryRequest< K >& qreq,
                                                  std::vector< std::pair< K, V > >& out_values) const {
     btree_status_t ret = btree_status_t::success;
     uint32_t idx;
@@ -123,7 +123,7 @@ btree_status_t Btree< K, V >::do_traversal_query(const BtreeNodePtr< K >& my_nod
     while (idx <= end_idx) {
         BtreeLinkInfo child_info;
         my_node->get_nth_value(idx, &child_info, false);
-        BtreeNodePtr< K > child_node = nullptr;
+        BtreeNodePtr child_node = nullptr;
         locktype_t child_cur_lock = locktype_t::READ;
         ret = read_and_lock_node(child_info.bnode_id(), child_node, child_cur_lock, child_cur_lock, nullptr);
         if (ret != btree_status_t::success) { break; }
@@ -146,7 +146,7 @@ done:
 }
 
 #ifdef SERIALIZABLE_QUERY_IMPLEMENTATION
-btree_status_t do_serialzable_query(const BtreeNodePtr< K >& my_node, BtreeSerializableQueryRequest& qreq,
+btree_status_t do_serialzable_query(const BtreeNodePtr& my_node, BtreeSerializableQueryRequest& qreq,
                                     std::vector< std::pair< K, V > >& out_values) {
 
     btree_status_t ret = btree_status_t::success;
@@ -188,7 +188,7 @@ btree_status_t do_serialzable_query(const BtreeNodePtr< K >& my_node, BtreeSeria
     auto end_ret = my_node->find(qreq.get_end_of_range(), nullptr, &end_child_ptr);
     ASSERT_IS_VALID_INTERIOR_CHILD_INDX(end_ret, my_node);
 
-    BtreeNodePtr< K > child_node;
+    BtreeNodePtr child_node;
     if (start_ret.end_of_search_index == end_ret.end_of_search_index) {
         BT_LOG_ASSERT_CMP(start_child_ptr, ==, end_child_ptr, my_node);
 
@@ -242,7 +242,7 @@ btree_status_t sweep_query(BtreeQueryRequest< K >& qreq, std::vector< std::pair<
 
     m_btree_lock.lock_shared();
 
-    BtreeNodePtr< K > root;
+    BtreeNodePtr root;
     btree_status_t ret = btree_status_t::success;
 
     ret = read_and_lock_node(m_root_node_info.bnode_id(), root, locktype_t::READ, locktype_t::READ, nullptr);
@@ -262,14 +262,14 @@ btree_status_t serializable_query(BtreeSerializableQueryRequest& qreq, std::vect
     qreq.init_batch_range();
 
     m_btree_lock.lock_shared();
-    BtreeNodePtr< K > node;
+    BtreeNodePtr node;
     btree_status_t ret;
 
     if (qreq.is_empty_cursor()) {
         // Initialize a new lock tracker and put inside the cursor.
         qreq.cursor().m_locked_nodes = std::make_unique< BtreeLockTrackerImpl >(this);
 
-        BtreeNodePtr< K > root;
+        BtreeNodePtr root;
         ret = read_and_lock_node(m_root_node_info.bnode_id(), root, locktype_t::READ, locktype_t::READ, nullptr);
         if (ret != btree_status_t::success) { goto out; }
         get_tracker(qreq)->push(root); // Start tracking the locked nodes.
@@ -307,11 +307,11 @@ public:
         }
     }
 
-    void push(const BtreeNodePtr< K >& node, locktype_t locktype) { m_nodes.emplace(std::make_pair<>(node, locktype)); }
+    void push(const BtreeNodePtr& node, locktype_t locktype) { m_nodes.emplace(std::make_pair<>(node, locktype)); }
 
-    std::pair< BtreeNodePtr< K >, locktype_t > pop() {
+    std::pair< BtreeNodePtr, locktype_t > pop() {
         HS_ASSERT_CMP(DEBUG, m_nodes.size(), !=, 0);
-        std::pair< BtreeNodePtr< K >, locktype_t > p;
+        std::pair< BtreeNodePtr, locktype_t > p;
         if (m_nodes.size()) {
             p = m_nodes.top();
             m_nodes.pop();
@@ -322,11 +322,11 @@ public:
         return p;
     }
 
-    BtreeNodePtr< K > top() { return (m_nodes.size == 0) ? nullptr : m_nodes.top().first; }
+    BtreeNodePtr top() { return (m_nodes.size == 0) ? nullptr : m_nodes.top().first; }
 
 private:
     btree_t m_bt;
-    std::stack< std::pair< BtreeNodePtr< K >, locktype_t > > m_nodes;
+    std::stack< std::pair< BtreeNodePtr, locktype_t > > m_nodes;
 };
 #endif
 } // namespace homestore
