@@ -21,6 +21,7 @@
 #include <homestore/logstore/log_store_internal.hpp>
 #include <homestore/superblk_handler.hpp>
 #include "common/homestore_config.hpp"
+
 namespace homestore {
 
 static constexpr uint32_t LOG_GROUP_HDR_MAGIC{0xF00D1E};

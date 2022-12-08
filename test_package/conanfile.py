@@ -1,21 +1,18 @@
-from conans import ConanFile, CMake, tools
 import os
+from conan import ConanFile
+from conans import CMake
+from conan.tools.build import cross_building
 
-class HSPkgTestConan(ConanFile):
+class TestPackageConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     generators = "cmake", "cmake_find_package"
 
     def build(self):
         cmake = CMake(self)
-        # Current dir is "test_package/build/<build_id>" and CMakeLists.txt is in "test_package"
         cmake.configure()
         cmake.build()
 
-    def imports(self):
-        self.copy("*.dll", dst="bin", src="bin")
-        self.copy("*.dylib*", dst="bin", src="lib")
-        self.copy('*.so*', dst='bin', src='lib')
-
     def test(self):
-        if not tools.cross_building(self.settings):
-            self.run(".%shs_volume -c -h" % os.sep)
+        if not cross_building(self):
+            bin_path = os.path.join("bin", "test_package")
+            self.run(f"{bin_path} -c -h", run_environment=True)
