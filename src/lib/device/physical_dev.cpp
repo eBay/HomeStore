@@ -705,26 +705,20 @@ void PhysicalDevChunk::recover() {
     if (m_allocator && m_recovered_bm) { m_allocator->set_disk_bm(std::move(m_recovered_bm)); }
 }
 
-#if 0
-void PhysicalDevChunk::cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp) {
+void PhysicalDevChunk::cp_flush() {
+    auto& allocator = blk_allocator();
     // only do write when bitmap is dirty
-    if (blk_allocator()->need_flush_dirty_bm()) {
-        auto bitmap_mem = blk_allocator_mutable()->cp_start(std::move(ba_cp));
+    if (allocator->need_flush_dirty_bm()) {
+        auto bitmap_mem = allocator->acquire_underlying_buffer();
         if (m_meta_blk_cookie) {
             MetaBlkMgrSI()->update_sub_sb(bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
         } else {
             MetaBlkMgrSI()->add_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
         }
-        blk_allocator_mutable()->cp_done();
+        allocator->reset_disk_bm_dirty();
+        allocator->release_underlying_buffer();
     } else {
         COUNTER_INCREMENT(m_pdev->metrics(), drive_skipped_chunk_bm_writes, 1);
     }
 }
-
-
-std::shared_ptr< blkalloc_cp >
-PhysicalDevChunk::attach_prepare_cp([[maybe_unused]] const std::shared_ptr< blkalloc_cp >& cur_ba_cp) {
-    return std::make_shared< blkalloc_cp >();
-}
-#endif
 } // namespace homestore

@@ -2,15 +2,15 @@
 //#include "blkalloc_cp.hpp"
 
 namespace homestore {
-BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, const chunk_num_t id) : m_cfg{cfg}, m_chunk_id{id} {
+BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, chunk_num_t id) : m_cfg{cfg}, m_chunk_id{id} {
     m_blk_portions = std::make_unique< BlkAllocPortion[] >(cfg.get_total_portions());
     for (blk_num_t index{0}; index < cfg.get_total_portions(); ++index) {
         m_blk_portions[index].set_portion_num(index);
         m_blk_portions[index].set_available_blocks(m_cfg.get_blks_per_portion());
     }
     m_auto_recovery = cfg.get_auto_recovery();
-    const auto align_size{m_cfg.get_align_size()};
-    const auto bitmap_id{id};
+    const auto align_size = m_cfg.get_align_size();
+    const auto bitmap_id = id;
     m_disk_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), bitmap_id, align_size);
 
     if (realtime_bm_on()) {
@@ -38,7 +38,7 @@ void BlkAllocator::inited() {
     }
 }
 
-bool BlkAllocator::is_blk_alloced_on_disk(const BlkId& b, const bool use_lock) const {
+bool BlkAllocator::is_blk_alloced_on_disk(const BlkId& b, bool use_lock) const {
     if (!m_auto_recovery) {
         return true; // nothing to compare. So always return true
     }
@@ -47,7 +47,7 @@ bool BlkAllocator::is_blk_alloced_on_disk(const BlkId& b, const bool use_lock) c
         return true;
     }};
     if (use_lock) {
-        const BlkAllocPortion* const portion{blknum_to_portion_const(b.get_blk_num())};
+        const BlkAllocPortion* portion = blknum_to_portion_const(b.get_blk_num());
         auto lock{portion->portion_auto_lock()};
         return bits_set();
     } else {
@@ -67,7 +67,7 @@ BlkAllocStatus BlkAllocator::alloc_on_disk(const BlkId& in_bid) {
         // cp is not started or already done, allocate on disk bm directly;
         /* enable this assert later when reboot is supported */
         // assert(m_auto_recovery || !m_inited);
-        BlkAllocPortion* const portion{blknum_to_portion(in_bid.get_blk_num())};
+        BlkAllocPortion* portion = blknum_to_portion(in_bid.get_blk_num());
         {
             auto lock{portion->portion_auto_lock()};
             if (m_inited) {
@@ -88,7 +88,7 @@ BlkAllocStatus BlkAllocator::alloc_on_realtime(const BlkId& b) {
     if (!realtime_bm_on()) { return BlkAllocStatus::SUCCESS; }
 
     if (!m_auto_recovery && m_inited) { return BlkAllocStatus::FAILED; }
-    BlkAllocPortion* const portion{blknum_to_portion(b.get_blk_num())};
+    BlkAllocPortion* portion = blknum_to_portion(b.get_blk_num());
     {
         auto lock{portion->portion_auto_lock()};
         if (m_inited) {
@@ -120,7 +120,7 @@ bool BlkAllocator::free_on_realtime(const BlkId& b) {
 
     /* this api should be called only when auto recovery is enabled */
     assert(m_auto_recovery);
-    BlkAllocPortion* const portion{blknum_to_portion(b.get_blk_num())};
+    BlkAllocPortion* portion = blknum_to_portion(b.get_blk_num());
     {
         auto lock{portion->portion_auto_lock()};
         if (m_inited) {
@@ -148,7 +148,7 @@ bool BlkAllocator::free_on_realtime(const BlkId& b) {
 void BlkAllocator::free_on_disk(const BlkId& b) {
     /* this api should be called only when auto recovery is enabled */
     assert(m_auto_recovery);
-    BlkAllocPortion* const portion{blknum_to_portion(b.get_blk_num())};
+    BlkAllocPortion* portion = blknum_to_portion(b.get_blk_num());
     {
         auto lock{portion->portion_auto_lock()};
         if (m_inited) {
@@ -172,42 +172,32 @@ void BlkAllocator::free_on_disk(const BlkId& b) {
     }
 }
 
-#if 0
-/* CP start is called when all its consumers have purged their free lists and now want to persist the
- * disk bitmap.
- */
-sisl::byte_array BlkAllocator::cp_start([[maybe_unused]] const std::shared_ptr< blkalloc_cp >& id) {
-    // prepare a valid blk alloc list;
-    auto alloc_list_ptr{new sisl::ThreadVector< BlkId >()};
-    // set to valid pointer, blk alloc will be acummulated;
-    auto old_alloc_list_ptr{rcu_xchg_pointer(&m_alloc_blkid_list, alloc_list_ptr)};
-    // wait for all I/Os that are still in critical section (allocating on disk bm) to complete and exit;
+sisl::byte_array BlkAllocator::acquire_underlying_buffer() {
+    // prepare and temporary alloc list, where blkalloc is accumulated till underlying buffer is released.
+    // RCU will wait for all I/Os that are still in critical section (allocating on disk bm) to complete and exit;
+    auto alloc_list_ptr = new sisl::ThreadVector< BlkId >();
+    auto old_alloc_list_ptr = rcu_xchg_pointer(&m_alloc_blkid_list, alloc_list_ptr);
     synchronize_rcu();
 
-    BLKALLOC_REL_ASSERT(old_alloc_list_ptr == nullptr, "Expecting alloc list to be nullptr");
+    BLKALLOC_REL_ASSERT(old_alloc_list_ptr == nullptr, "Multiple acquires concurrently?");
     return (m_disk_bm->serialize(m_cfg.get_align_size()));
 }
 
-void BlkAllocator::cp_done() {
-    reset_disk_bm_dirty();
-
+void BlkAllocator::release_underlying_buffer() {
     // set to nullptr, so that alloc will go to disk bm directly
-    auto old_alloc_list_ptr{rcu_xchg_pointer(&m_alloc_blkid_list, nullptr)};
     // wait for all I/Os in critical section (still accumulating bids) to complete and exit;
+    auto old_alloc_list_ptr = rcu_xchg_pointer(&m_alloc_blkid_list, nullptr);
     synchronize_rcu();
 
     // at this point, no I/O will be pushing back to the list (old_alloc_list_ptr);
-    auto it{old_alloc_list_ptr->begin(true /* latest */)};
+    auto it = old_alloc_list_ptr->begin(true /* latest */);
     const BlkId* bid{nullptr};
     while ((bid = old_alloc_list_ptr->next(it)) != nullptr) {
         alloc_on_disk(*bid);
     }
     old_alloc_list_ptr->clear();
-
     delete (old_alloc_list_ptr);
-    // another cp flush won't start until this flush is completed, so no cp_start won't be called in parallel;
 }
-#endif
 
 void BlkAllocator::create_debug_bm() {
     m_debug_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), m_chunk_id, m_cfg.get_align_size());
@@ -220,14 +210,14 @@ void BlkAllocator::update_debug_bm(const BlkId& bid) {
     get_debug_bm()->set_bits(bid.get_blk_num(), bid.get_nblks());
 }
 
-bool BlkAllocator::verify_debug_bm(const bool free_debug_bm) {
-    const bool ret{*get_disk_bm_const() == *get_debug_bm()};
+bool BlkAllocator::verify_debug_bm(bool free_debug_bm) {
+    const bool ret = *get_disk_bm_const() == *get_debug_bm();
     if (free_debug_bm) { m_debug_bm.reset(); }
     return ret;
 }
 
 /* Get status */
-nlohmann::json BlkAllocator::get_status(const int log_level) const {
+nlohmann::json BlkAllocator::get_status(int log_level) const {
     nlohmann::json j;
     return j;
 }

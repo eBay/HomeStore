@@ -398,7 +398,7 @@ public:
     virtual void set_edge_value(const BtreeValue& v) {
         const auto b = v.serialize();
         auto l = r_cast< BtreeLinkInfo::bnode_link_info* >(b.bytes);
-        ASSERT_EQ(b.size, sizeof(BtreeLinkInfo::bnode_link_info));
+        DEBUG_ASSERT_EQ(b.size, sizeof(BtreeLinkInfo::bnode_link_info));
         set_edge_info(*l);
     }
 

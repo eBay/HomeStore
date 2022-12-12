@@ -1,7 +1,7 @@
 #pragma once
 
 #include <memory>
-#include <boost/intrusive/intrusive_ptr.hpp>
+#include <boost/intrusive_ptr.hpp>
 #include <sisl/utility/atomic_counter.hpp>
 #include <homestore/blk.h>
 #include <homestore/index/index_internal.hpp>
@@ -10,6 +10,7 @@ namespace homestore {
 
 class BtreeNode;
 using BtreeNodePtr = boost::intrusive_ptr< BtreeNode >;
+typedef std::function< BtreeNodePtr(const IndexBufferPtr&) > node_initializer_t;
 
 struct CPContext;
 
@@ -19,7 +20,7 @@ public:
     /// @tparam K Key type of the Index
     /// @param node_initializer Callback to be called upon which buffer is turned into btree node
     /// @return Node which was created by the node_initializer
-    virtual BtreeNodePtr alloc_buf(auto&& node_initializer) = 0;
+    virtual BtreeNodePtr alloc_buf(node_initializer_t&& node_initializer) = 0;
 
     /// @brief Reallocate the buffer from writeback cache perspective. Typically buffer itself is not modified.
     /// @param buf Buffer to reallocate
@@ -31,7 +32,7 @@ public:
     virtual void write_buf(const IndexBufferPtr& buf, CPContext* context) = 0;
 
     virtual std::error_condition read_buf(bnodeid_t id, BtreeNodePtr& node, bool cache_only,
-                                          auto&& node_initializer) = 0;
+                                          node_initializer_t&& node_initializer) = 0;
 
     /// @brief Start a chain of related btree buffers. Typically a chain is creating from second and third pairs and
     /// then first is prepended to the chain. In case the second buffer is already with the WB cache, it will create a
@@ -51,16 +52,12 @@ public:
     /// @brief Free the buffer allocated and remove it from wb cache
     /// @param buf
     /// @param context
-    virtual void free_buf(const IndexBufferPtr& buf, void* context) = 0;
+    virtual void free_buf(const IndexBufferPtr& buf, CPContext* context) = 0;
 
     /// @brief Copy buffer
     /// @param cur_buf
     /// @return
-    virtual IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf) = 0;
-
-    /// @brief Start the flush as part of WB Cache flush
-    /// @param context
-    virtual void cp_flush(void* context) = 0;
+    virtual IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf) const = 0;
 };
 
 } // namespace homestore

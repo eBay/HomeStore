@@ -31,8 +31,8 @@ public:
     void set_total_cap(uint64_t total_cap);
 
     /* monitor dirty buffer count */
-    void inc_dirty_buf_cnt(const uint32_t size);
-    void dec_dirty_buf_cnt(const uint32_t size);
+    void inc_dirty_buf_size(const uint32_t size);
+    void dec_dirty_buf_size(const uint32_t size);
     void register_dirty_buf_exceed_cb(exceed_limit_cb_t cb);
 
     /* monitor free blk cnt */

@@ -17,6 +17,8 @@
 #pragma once
 
 #include <homestore/btree/btree.hpp>
+#include <homestore/btree/detail/simple_node.hpp>
+#include <homestore/btree/detail/varlen_node.hpp>
 #include <sisl/fds/utils.hpp>
 #include <chrono>
 

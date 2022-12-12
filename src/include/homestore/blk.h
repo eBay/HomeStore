@@ -58,7 +58,8 @@ public:
     BlkId& operator=(const BlkId&) = default;
     BlkId(BlkId&&) noexcept = default;
     BlkId& operator=(BlkId&&) noexcept = default;
-    bool operator==(const BlkId& other) noexcept { return (compare(*this, other) == 0); }
+    bool operator==(const BlkId& other) const { return (compare(*this, other) == 0); }
+    bool operator>(const BlkId& other) const { return (compare(*this, other) > 0); }
 
     void invalidate();
     bool is_valid() const;
@@ -115,6 +116,7 @@ static_assert(sizeof(BlkId8_t) == 8);
 
 inline blk_num_t begin_of(const BlkId& bid) { return bid.get_blk_num(); }
 inline blk_num_t end_of(const BlkId& bid) { return bid.get_blk_num() + bid.get_nblks(); }
+size_t hash_value(const BlkId& blkid) { return std::hash< uint64_t >()(bid.to_integer()); }
 
 template < typename charT, typename traits >
 std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream, const BlkId& blk) {

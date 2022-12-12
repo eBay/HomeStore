@@ -6,6 +6,7 @@
 #include <sisl/fds/malloc_helper.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <sisl/logging/logging.h>
+#include <sisl/cache/lru_evictor.hpp>
 
 #include <homestore/meta_service.hpp>
 #include <homestore/logstore_service.hpp>
@@ -47,15 +48,13 @@ HomeStore& HomeStore::with_params(const hs_input_params& input) {
     return *this;
 }
 
-#if 0
-HomeStore& HomeStore::with_index_service(float size_pct, on_create_service_cb_t&& oncreate_cb,
-                                         std::unique_ptr< IndexServiceCallbacks > cbs) {
+HomeStore& HomeStore::with_index_service(float size_pct, std::unique_ptr< IndexServiceCallbacks > cbs) {
     m_index_svc_cbs = (cbs) ? std::move(cbs) : std::make_unique< IndexServiceCallbacks >();
     m_index_store_size_pct = size_pct;
-    m_index_svc_cbs->m_oncreate_cb = std::move(oncreate_cb);
     return *this;
 }
 
+#if 0
 HomeStore& HomeStore::with_data_service(float size_pct, std::unique_ptr< DataServiceCallbacks > cbs) {
     m_data_svc_cbs = (cbs) ? std::move(cbs) : std::make_unique< DataServiceCallbacks >();
     m_data_store_size_pct = size_pct;
@@ -135,7 +134,6 @@ void HomeStore::init(bool wait_for_init) {
 
     ///////////// Config related setup /////////////////////////
     HomeStoreDynamicConfig::init_settings_default();
-    // m_data_pagesz = input.min_virtual_page_size;
 
     // Restrict iomanager to throttle upto the app mem size allocated for us
     iomanager.set_io_memory_limit(HS_STATIC_CONFIG(input.io_mem_size()));
@@ -145,25 +143,35 @@ void HomeStore::init(bool wait_for_init) {
     // 1. Meta Service instance is created
     // 2. All other optional services instances are created. At this point, none of the services are started
     // 3. Create DeviceManager instance and init it
-    // 4. Initialize all the Physical/Virtual devices in separate init thread
-    // 5. Upon device instances are created and read, depending on first_time_boot or not, create or load the superblock
+    // 4. Start the Evictor which bounds the cache
+    // 5. Initialize all the Physical/Virtual devices in separate init thread
+    // 6. Upon device instances are created and read, depending on first_time_boot or not, create or load the superblock
     // of all devices
-    // 6. Start the MetaService instance. This will walk and possibly call all registered service static method which
+    // 7. Start the MetaService instance. This will walk and possibly call all registered service static method which
     // should have enough information about their services
-    // 7. Start all the optional services
+    // 8. Start all the optional services
     LOGINFO("Homestore is initializing with following services: ", list_services());
     if (has_meta_service()) { m_meta_service = std::make_unique< MetaBlkService >(); }
     if (has_log_service()) { m_log_service = std::make_unique< LogStoreService >(); }
+    if (has_index_service()) { m_index_service = std::make_unique< IndexService >(); }
 
     m_dev_mgr = std::make_unique< DeviceManager >(hs_config.input.data_devices, bind_this(HomeStore::new_vdev_found, 2),
                                                   sizeof(sb_blkstore_blob), VirtualDev::static_process_completions,
                                                   bind_this(HomeStore::process_vdev_error, 1));
     m_dev_mgr->init();
 
+    uint64_t cache_size = ResourceMgrSI().get_cache_size();
+    m_evictor = std::make_shared< sisl::LRUEvictor >(cache_size, 1000);
+
+    auto& hs_config = HomeStoreStaticConfig::instance();
+    LOGINFO("HomeStore starting first_time_boot?={} dynamic_config_version={}, cache_size={}, static_config: {}",
+            is_first_time_boot(), HS_DYNAMIC_CONFIG(version), cache_size, hs_config.to_json().dump(4));
+
     iomanager.create_reactor("hs_init", INTERRUPT_LOOP, [this](bool thread_started) {
         if (thread_started) {
             if (m_before_init_starting_cb) { m_before_init_starting_cb(); }
-            init_devices();
+            if (is_first_time_boot()) { create_vdevs(); }
+            init_done();
         }
     });
 
@@ -226,41 +234,30 @@ void HomeStore::shutdown(bool wait, const hs_comp_callback& done_cb) {
     HomeStore::reset_instance();
 }
 
-void HomeStore::init_devices() {
-    auto& hs_config = HomeStoreStaticConfig::instance();
+void HomeStore::create_vdevs() {
+    if (has_meta_service()) { m_meta_service->create_vdev(pct_to_size(m_meta_store_size_pct, PhysicalDevGroup::META)); }
 
-    /* attach physical devices */
-    const bool first_time_boot = m_dev_mgr->is_first_time_boot();
-
-    /* create vdevs if it is a first time boot */
-    if (first_time_boot) {
-        // init_cache();
-        if (has_meta_service()) {
-            m_meta_service->create_vdev(pct_to_size(m_meta_store_size_pct, PhysicalDevGroup::META));
-        }
-
-        if (has_log_service() && m_data_log_store_size_pct) {
-            ++m_format_cnt;
-            m_log_service->create_vdev(pct_to_size(m_data_log_store_size_pct, PhysicalDevGroup::FAST),
-                                       LogStoreService::DATA_LOG_FAMILY_IDX, [this](std::error_condition err) {
-                                           HS_REL_ASSERT((err == no_error), "IO error during format of vdev");
-                                           init_done(true);
-                                       });
-        }
-        if (has_log_service() && m_ctrl_log_store_size_pct) {
-            ++m_format_cnt;
-            m_log_service->create_vdev(pct_to_size(m_ctrl_log_store_size_pct, PhysicalDevGroup::FAST),
-                                       LogStoreService::CTRL_LOG_FAMILY_IDX, [this](std::error_condition err) {
-                                           HS_REL_ASSERT((err == no_error), "IO error during format of vdev");
-                                           init_done(true);
-                                       });
-        }
+    if (has_log_service() && m_data_log_store_size_pct) {
+        ++m_format_cnt;
+        m_log_service->create_vdev(pct_to_size(m_data_log_store_size_pct, PhysicalDevGroup::FAST),
+                                   LogStoreService::DATA_LOG_FAMILY_IDX, [this](std::error_condition err) {
+                                       HS_REL_ASSERT((err == no_error), "IO error during format of vdev");
+                                       init_done();
+                                   });
     }
-    init_done(first_time_boot);
-}
+    if (has_log_service() && m_ctrl_log_store_size_pct) {
+        ++m_format_cnt;
+        m_log_service->create_vdev(pct_to_size(m_ctrl_log_store_size_pct, PhysicalDevGroup::FAST),
+                                   LogStoreService::CTRL_LOG_FAMILY_IDX, [this](std::error_condition err) {
+                                       HS_REL_ASSERT((err == no_error), "IO error during format of vdev");
+                                       init_done();
+                                   });
+    }
 
-// uint32_t HomeStore::get_indx_mgr_page_size() const { return
-// (m_dev_mgr->get_atomic_page_size(PhysicalDevGroup::FAST)); }
+    if (has_index_service()) {
+        m_index_service->create_vdev(pct_to_size(m_index_store_size_pct, PhysicalDevGroup::FAST));
+    }
+}
 
 cap_attrs HomeStore::get_system_capacity() const {
     cap_attrs cap;
@@ -269,10 +266,10 @@ cap_attrs HomeStore::get_system_capacity() const {
     //     cap.initial_total_size = get_data_blkstore()->get_size();
     //     cap.initial_total_data_meta_size += cap.initial_total_size;
     // }
-    // if (has_index_service()) {
-    //    cap.used_index_size = get_index_blkstore()->used_size();
-    //    cap.initial_total_data_meta_size += get_index_blkstore()->get_size();
-    //}
+    if (has_index_service()) {
+        cap.used_index_size = m_index_service->used_size();
+        cap.initial_total_data_meta_size += m_index_service->total_size();
+    }
     if (has_log_service()) {
         cap.used_log_size = m_log_service->used_size();
         cap.initial_total_data_meta_size += m_log_service->total_size();
@@ -287,18 +284,21 @@ cap_attrs HomeStore::get_system_capacity() const {
 
 bool HomeStore::is_first_time_boot() const { return m_dev_mgr->is_first_time_boot(); }
 
-void HomeStore::init_done(bool first_time_boot) {
+void HomeStore::init_done() {
     const auto& inp_params = HomeStoreStaticConfig::instance().input;
     auto cnt = m_format_cnt.fetch_sub(1);
     if (cnt != 1) { return; }
     m_dev_mgr->init_done();
-    m_cp_mgr = std::make_unique< CPManager >(first_time_boot); // Initialize CPManager
-    m_meta_service->start(first_time_boot);
+
+    m_cp_mgr = std::make_unique< CPManager >(is_first_time_boot()); // Initialize CPManager
+    m_meta_service->start(is_first_time_boot());
     m_resource_mgr->set_total_cap(m_dev_mgr->total_cap());
 
     // In case of custom recovery, let consumer starts the recovery and it is consumer module's responsibilities to
     // start log store
-    if (has_log_service() && inp_params.auto_recovery) { m_log_service->start(m_dev_mgr->is_first_time_boot()); }
+    if (has_log_service() && inp_params.auto_recovery) { m_log_service->start(is_first_time_boot()); }
+
+    if (has_index_service()) { m_index_service->start(); }
 
     if (m_init_done_cb) { m_init_done_cb(); }
 }
@@ -352,6 +352,11 @@ void HomeStore::new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb) {
     case blkstore_type::META_STORE:
         if (has_meta_service()) { m_meta_service->open_vdev(vb); }
         break;
+
+    case blkstore_type::INDEX_STORE:
+        if (has_index_service()) { m_index_service->open_vdev(vb); }
+        break;
+
     default:
         HS_LOG_ASSERT(0, "Unknown blkstore_type {}", blob->type);
     }
@@ -384,7 +389,6 @@ nlohmann::json hs_input_params::to_json() const {
     json["fast_open_flags"] = fast_open_flags;
     json["is_read_only"] = is_read_only;
 
-    json["min_virtual_page_size"] = in_bytes(min_virtual_page_size);
     json["app_mem_size"] = in_bytes(app_mem_size);
     json["hugepage_size"] = in_bytes(hugepage_size);
     json["auto_recovery?"] = auto_recovery;
@@ -394,7 +398,6 @@ nlohmann::json hs_input_params::to_json() const {
 
 nlohmann::json hs_engine_config::to_json() const {
     nlohmann::json json;
-    json["min_io_size"] = in_bytes(min_io_size);
     json["max_chunks"] = max_chunks;
     json["max_vdevs"] = max_vdevs;
     json["max_pdevs"] = max_pdevs;

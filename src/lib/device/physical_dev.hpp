@@ -384,11 +384,7 @@ public:
     /////////////// Recovery and CP related ////////////////////
     void recover(std::unique_ptr< sisl::Bitset > recovered_bm, meta_blk* mblk);
     void recover();
-
-    // void cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp);
-    // static std::shared_ptr< blkalloc_cp > attach_prepare_cp(const std::shared_ptr< blkalloc_cp >& cur_ba_cp);
-
-    // void cp_done(std::shared_ptr< blkalloc_cp > ba_cp);
+    void cp_flush();
 
 private:
     chunk_info_block* m_chunk_info;

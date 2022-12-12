@@ -99,13 +99,11 @@ public:
     io_flag data_open_flags{io_flag::DIRECT_IO}; // All data drives open flags
     io_flag fast_open_flags{io_flag::DIRECT_IO}; // All index drives open flags
 
-    uint32_t min_virtual_page_size{4096}; // minimum page size supported. Ideally it should be 4k.
     uint64_t app_mem_size{static_cast< uint64_t >(1024) * static_cast< uint64_t >(1024) *
                           static_cast< uint64_t >(1024)}; // memory available for the app (including cache)
     uint64_t hugepage_size{0};                            // memory available for the hugepage
     bool is_read_only{false};                             // Is read only
     bool auto_recovery{true};                             // Recovery of data is automatic or controlled by the caller
-    // std::unordered_map< service_t, service_options > services;
 
 #ifdef _PRERELEASE
     bool force_reinit{false};
@@ -117,7 +115,6 @@ public:
 };
 
 struct hs_engine_config {
-    size_t min_io_size{4096};        // minimum io size supported by
     uint64_t max_chunks{MAX_CHUNKS}; // These 3 parameters can be ONLY changed with upgrade/revert from device manager
     uint64_t max_vdevs{MAX_VDEVS};
     uint64_t max_pdevs{MAX_PDEVS};

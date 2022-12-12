@@ -159,7 +159,7 @@ protected:
     /////////////////////////////////// Helper Methods ///////////////////////////////////////
     btree_status_t post_order_traversal(locktype_t acq_lock, const auto& cb);
     btree_status_t post_order_traversal(const BtreeNodePtr& node, locktype_t acq_lock, const auto& cb);
-    void get_all_kvs(std::vector< pair< K, V > >& kvs) const;
+    void get_all_kvs(std::vector< std::pair< K, V > >& kvs) const;
     btree_status_t do_destroy(uint64_t& n_freed_nodes, void* context);
     uint64_t get_btree_node_cnt() const;
     uint64_t get_child_node_cnt(bnodeid_t bnodeid) const;

@@ -314,9 +314,7 @@ public:
     void get_vb_context(const sisl::blob& ctx_data) const;
     void update_vb_context(const sisl::blob& ctx_data);
     virtual void recovery_done();
-
-    // std::shared_ptr< blkalloc_cp > attach_prepare_cp(const std::shared_ptr< blkalloc_cp >& cur_ba_cp);
-    // void blkalloc_cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp);
+    void cp_flush();
 
     ////////////////////////// Standard Getters ///////////////////////////////
     virtual uint64_t available_blks() const;

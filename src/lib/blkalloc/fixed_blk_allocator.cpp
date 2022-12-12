@@ -11,7 +11,7 @@
 #include "blk_allocator.h"
 
 namespace homestore {
-FixedBlkAllocator::FixedBlkAllocator(const BlkAllocConfig& cfg, const bool init, const chunk_num_t chunk_id) :
+FixedBlkAllocator::FixedBlkAllocator(const BlkAllocConfig& cfg, bool init, chunk_num_t chunk_id) :
         BlkAllocator(cfg, chunk_id), m_blk_q{cfg.get_total_blks()} {
     LOGINFO("total blks: {}", cfg.get_total_blks());
     if (init) { inited(); }
@@ -26,12 +26,12 @@ void FixedBlkAllocator::inited() {
     BlkAllocator::inited();
 }
 
-blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion* const portion, const blk_num_t start_blk_num) {
+blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion* portion, blk_num_t start_blk_num) {
     auto lock{portion->portion_auto_lock()};
 
-    auto blk_num{start_blk_num};
+    auto blk_num = start_blk_num;
     while (blk_num < m_cfg.get_total_blks()) {
-        BlkAllocPortion* const cur_portion{blknum_to_portion(blk_num)};
+        BlkAllocPortion cur_portion = blknum_to_portion(blk_num);
         if (portion != cur_portion) break;
 
         if (!get_disk_bm_const()->is_bits_set(blk_num, 1)) {
@@ -44,16 +44,16 @@ blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion* const portion, const 
     return blk_num;
 }
 
-bool FixedBlkAllocator::is_blk_alloced(const BlkId& b, const bool use_lock) const { return true; }
+bool FixedBlkAllocator::is_blk_alloced(const BlkId& b, bool use_lock) const { return true; }
 
-BlkAllocStatus FixedBlkAllocator::alloc(const blk_count_t nblks, const blk_alloc_hints& hints,
+BlkAllocStatus FixedBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hints& hints,
                                         std::vector< BlkId >& out_blkid) {
     /* TODO:If it is more then 1 then we need to make sure that we never allocate across the portions. As of now
      * we don't support the vector of blkids in fixed blk allocator */
     HS_DBG_ASSERT_EQ(nblks, 1, "FixedBlkAllocator does not support multiple blk allocation yet");
 
     BlkId bid;
-    const auto status{alloc(bid)};
+    const auto status = alloc(bid);
     if (status == BlkAllocStatus::SUCCESS) {
         out_blkid.push_back(bid);
         // no need to update real time bm as it is already updated in alloc of single blkid api;
@@ -65,7 +65,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(BlkId& out_blkid) {
 #ifdef _PRERELEASE
     if (homestore_flip->test_flip("fixed_blkalloc_no_blks")) { return BlkAllocStatus::SPACE_FULL; }
 #endif
-    const auto ret{m_blk_q.read(out_blkid)};
+    const auto ret = m_blk_q.read(out_blkid);
     if (ret) {
         // update real time bitmap;
         alloc_on_realtime(out_blkid);
