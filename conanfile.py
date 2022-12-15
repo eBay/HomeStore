@@ -48,8 +48,8 @@ class HomestoreConan(ConanFile):
         self.copy(root_package="sisl", pattern="*", dst="bin/scripts/python/flip/", src="bindings/flip/python/", keep_path=False)
 
     def build_requirements(self):
-        self.build_requires("benchmark/1.6.1")
-        self.build_requires("gtest/1.11.0")
+        self.build_requires("benchmark/1.7.1")
+        self.build_requires("gtest/1.12.1")
 
     def requirements(self):
         self.requires("iomgr/[~=8, include_prerelease=True]@sds/master")
@@ -57,10 +57,10 @@ class HomestoreConan(ConanFile):
 
         # FOSS, rarely updated
         self.requires("boost/1.79.0")
-        self.requires("farmhash/1.0.0")
+        self.requires("farmhash/cci.20190513@")
         self.requires("folly/2022.01.31.00")
-        self.requires("isa-l/2.21.0")
-        self.requires("nlohmann_json/3.10.5")
+        self.requires("isa-l/2.30.0")
+        self.requires("nlohmann_json/3.11.2")
 
     def build(self):
         cmake = CMake(self)
