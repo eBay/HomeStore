@@ -825,6 +825,8 @@ std::error_condition HomeBlks::remove_volume_internal(const boost::uuids::uuid& 
 
 vol_state HomeBlks::get_state(VolumePtr vol) { return vol->get_state(); }
 
+bool HomeBlks::is_destroying(const VolumePtr vol) const { return vol->is_destroying(); }
+
 void HomeBlks::register_status_cb(const std::string& module,
                                   const std::function< nlohmann::json(const int verbosity_level) > get_status_cb) {
     status_mgr()->register_status_cb(module, get_status_cb);

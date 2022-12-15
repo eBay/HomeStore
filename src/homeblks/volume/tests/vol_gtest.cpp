@@ -1462,7 +1462,9 @@ protected:
         const auto vol_info{m_voltest->vol_info[r.vol_idx]};
 
         // make sure this volume is still active by checking ref_cnt;
-        return (vol_info && vol_info->vol && vol_info->ref_cnt.get()) ? vol_info : nullptr;
+        // if the volume is in destroying state, it is likely the vol_info can be destroyed by other threads
+        return (vol_info && vol_info->vol && !(VolInterface::get_instance()->is_destroying(vol_info->vol))) ? vol_info
+                                                                                                            : nullptr;
     }
 
     io_lba_range_t seq_lbas() {

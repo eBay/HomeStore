@@ -58,7 +58,9 @@ struct buf_info {
 
     buf_info(uint64_t sz, int off, boost::intrusive_ptr< BlkBuffer >& bbuf) : size(sz), offset(off), buf(bbuf) {}
     buf_info(const uint64_t sz, const int off, boost::intrusive_ptr< BlkBuffer >&& bbuf) :
-            size{sz}, offset{off}, buf{std::move(bbuf)} {}
+            size{sz},
+            offset{off},
+            buf{std::move(bbuf)} {}
 };
 
 struct _counter_generator {
@@ -344,6 +346,7 @@ public:
      */
     virtual bool fix_tree(VolumePtr vol, bool verify = false) = 0;
     virtual vol_state get_state(VolumePtr vol) = 0;
+    virtual bool is_destroying(const VolumePtr vol) const = 0;
 
     virtual void register_status_cb(const std::string& module,
                                     const std::function< nlohmann::json(const int verbosity_level) > get_status_cb) = 0;

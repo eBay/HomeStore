@@ -264,6 +264,7 @@ public:
 
     bool is_recovery_mode() { return !m_rdy; }
     bool is_shutdown() const { return (m_shutdown_start_time.load(std::memory_order_acquire) != 0); }
+    virtual bool is_destroying(const VolumePtr vol) const;
 
     void init_done();
     void inc_sub_system_init_cnt();
