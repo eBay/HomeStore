@@ -1,10 +1,11 @@
 #pragma once
 
 #include <memory>
-
+#include <boost/intrusive_ptr.hpp>
 #include <sisl/utility/atomic_counter.hpp>
 #include <homestore/blk.h>
 #include <homestore/homestore_decl.hpp>
+#include <homestore/btree/detail/btree_internal.hpp>
 
 namespace homestore {
 
@@ -31,6 +32,8 @@ struct index_table_sb {
 class IndexTableBase {
 public:
     virtual ~IndexTableBase() = default;
+    virtual uuid_t uuid() const = 0;
+    virtual uint64_t used_size() const = 0;
 };
 
 enum class index_buf_state_t : uint8_t {
@@ -40,25 +43,29 @@ enum class index_buf_state_t : uint8_t {
 };
 
 ///////////////////////// Btree Node and Buffer Portion //////////////////////////
+class IndexBuffer;
 typedef std::shared_ptr< IndexBuffer > IndexBufferPtr;
+
 class IndexBuffer {
 private:
     uint8_t* m_node_buf{nullptr};                            // Actual buffer
     index_buf_state_t m_buf_state{index_buf_state_t::CLEAN}; // Is buffer yet to persist?
     BlkId m_blkid;                                           // BlkId where this needs to be persisted
-
+    IndexBufferPtr m_next_buffer{nullptr};                   // Next buffer in the chain
     // Number of leader buffers we are waiting for before we write this buffer
     sisl::atomic_counter< int > m_wait_for_leaders{0};
 
 public:
-    IndexBuffer(BlkId blkid, uint32_t buf_size, uint32_t align_size) :
-            m_node_buf{hs_utils::iobuf_alloc(buf_size, sisl::buftag::btree_node, align_size)}, m_blkid{blkid} {}
+    IndexBuffer(BlkId blkid, uint32_t buf_size, uint32_t align_size);
 
     BlkId blkid() const { return m_blkid; }
     uint8_t* raw_buffer() { return m_node_buf; }
 
     bool is_clean() const { return (m_buf_state == index_buf_state_t::CLEAN); }
 };
+
+class BtreeNode;
+typedef boost::intrusive_ptr< BtreeNode > BtreeNodePtr;
 
 struct IndexBtreeNode {
 public:
@@ -68,6 +75,7 @@ public:
 public:
     IndexBtreeNode(const IndexBufferPtr& buf) : m_idx_buf{buf} {}
     uint8_t* raw_buffer() { return m_idx_buf->raw_buffer(); }
+    static IndexBtreeNode* convert(BtreeNode* bt_node);
 };
 
 } // namespace homestore

@@ -77,7 +77,7 @@ btree_status_t Btree< K, V >::post_order_traversal(const BtreeNodePtr& node, loc
 }
 
 template < typename K, typename V >
-void Btree< K, V >::get_all_kvs(std::vector< pair< K, V > >& kvs) const {
+void Btree< K, V >::get_all_kvs(std::vector< std::pair< K, V > >& kvs) const {
     post_order_traversal(locktype_t::READ, [this, &kvs](const auto& node, bool is_leaf) -> btree_status_t {
         if (!is_leaf) { node->get_all_kvs(kvs); }
         return btree_status_t::success;

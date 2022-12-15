@@ -490,9 +490,9 @@ void DeviceManager::read_info_blocks(uint32_t dev_id) {
     auto* dm = reinterpret_cast< dm_info* >(chunk_memory);
     HS_DBG_ASSERT_EQ(dm->get_magic(), MAGIC);
 #ifndef NO_CHECKSUM
-    auto const crc =
-        crc16_t10dif(init_crc_16, reinterpret_cast< const unsigned char* >(chunk_memory + dm_info::s_dm_payload_offset),
-                     dm_derived.info_size - dm_info::s_dm_payload_offset);
+    auto const crc = crc16_t10dif(hs_init_crc_16,
+                                  reinterpret_cast< const unsigned char* >(chunk_memory + dm_info::s_dm_payload_offset),
+                                  dm_derived.info_size - dm_info::s_dm_payload_offset);
     HS_DBG_ASSERT_EQ(dm->get_checksum(), crc);
 #endif
 
@@ -517,9 +517,9 @@ void DeviceManager::write_info_blocks() {
     auto& dm_derived = get_dm_derived();
 
 #ifndef NO_CHECKSUM
-    dm_derived.info->checksum =
-        crc16_t10dif(init_crc_16, reinterpret_cast< const unsigned char* >(chunk_memory + dm_info::s_dm_payload_offset),
-                     dm_derived.info_size - dm_info::s_dm_payload_offset);
+    dm_derived.info->checksum = crc16_t10dif(
+        hs_init_crc_16, reinterpret_cast< const unsigned char* >(chunk_memory + dm_info::s_dm_payload_offset),
+        dm_derived.info_size - dm_info::s_dm_payload_offset);
 #endif
 
     for (uint32_t i{0}; i < dm_derived.pdev_hdr->num_phys_devs; ++i) {

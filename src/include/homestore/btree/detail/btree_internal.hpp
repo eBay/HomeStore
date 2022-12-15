@@ -194,7 +194,7 @@ namespace homestore {
 
 using bnodeid_t = uint64_t;
 static constexpr bnodeid_t empty_bnodeid = std::numeric_limits< bnodeid_t >::max();
-static constexpr uint16_t init_crc_16 = 0x8005;
+static constexpr uint16_t bt_init_crc_16 = 0x8005;
 
 VENUM(btree_node_type, uint32_t, FIXED = 0, VAR_VALUE = 1, VAR_KEY = 2, VAR_OBJECT = 3, PREFIX = 4, COMPACT = 5)
 
@@ -212,6 +212,10 @@ ENUM(btree_status_t, uint32_t, success, not_found, retry, has_more, read_failed,
      inplace_interior, // Node write after a structure change, but this interior node is changed in-place only.
      after_shift       // Node write after a structure change, but this node has its keys shifted to other node.
 );*/
+
+class BtreeNode;
+void intrusive_ptr_add_ref(BtreeNode* node);
+void intrusive_ptr_release(BtreeNode* node);
 
 struct BtreeConfig {
     uint32_t m_node_size;

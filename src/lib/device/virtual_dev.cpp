@@ -831,6 +831,14 @@ void VirtualDev::rm_device() {
     m_mgr->free_vdev(m_vb);
 }
 
+void VirtualDev::cp_flush() {
+    for (size_t i{0}; i < m_primary_pdev_chunks_list.size(); ++i) {
+        for (size_t chunk_indx{0}; chunk_indx < m_primary_pdev_chunks_list[i].chunks_in_pdev.size(); ++chunk_indx) {
+            auto* chunk = m_primary_pdev_chunks_list[i].chunks_in_pdev[chunk_indx];
+            chunk->cp_flush();
+        }
+    }
+}
 /*void VirtualDev::blkalloc_cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp) {
     for (size_t i{0}; i < m_primary_pdev_chunks_list.size(); ++i) {
         for (size_t chunk_indx{0}; chunk_indx < m_primary_pdev_chunks_list[i].chunks_in_pdev.size(); ++chunk_indx) {

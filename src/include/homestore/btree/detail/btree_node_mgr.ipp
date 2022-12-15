@@ -17,6 +17,8 @@
 #pragma once
 
 #include <homestore/btree/btree.hpp>
+#include <homestore/btree/detail/simple_node.hpp>
+#include <homestore/btree/detail/varlen_node.hpp>
 #include <sisl/fds/utils.hpp>
 #include <chrono>
 
@@ -247,53 +249,49 @@ BtreeNodePtr Btree< K, V >::alloc_interior_node() {
     return n;
 }
 
+template < typename T, typename... Args >
+static BtreeNode* create_node(uint32_t node_ctx_size, Args&&... args) {
+    uint8_t* raw_mem = new uint8_t[sizeof(T) + node_ctx_size];
+    return dynamic_cast< BtreeNode* >(new (raw_mem) T(std::forward< Args >(args)...));
+}
+
 template < typename K, typename V >
-BtreeNode* Btree< K, V >::init_node(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf) {
-    BtreeNode* ret_node{nullptr};
+BtreeNode* Btree< K, V >::init_node(uint8_t* node_buf, uint32_t node_ctx_size, bnodeid_t id, bool init_buf,
+                                    bool is_leaf) {
+    BtreeNode* n{nullptr};
     btree_node_type node_type = is_leaf ? m_bt_cfg.leaf_node_type() : m_bt_cfg.interior_node_type();
 
     switch (node_type) {
     case btree_node_type::VAR_OBJECT:
-        if (is_leaf) {
-            ret_node = new VarObjSizeNode< K, V >(node_buf, id, init_buf, is_leaf, this->m_bt_cfg);
-        } else {
-            ret_node = new VarObjSizeNode< K, BtreeLinkInfo >(node_buf, id, init_buf, is_leaf, this->m_bt_cfg);
-        }
+        n = is_leaf ? create_node< VarObjSizeNode< K, V > >(node_ctx_size, node_buf, id, init_buf, true, this->m_bt_cfg)
+                    : create_node< VarObjSizeNode< K, BtreeLinkInfo > >(node_ctx_size, node_buf, id, init_buf, false,
+                                                                        this->m_bt_cfg);
         break;
 
     case btree_node_type::FIXED:
-        if (is_leaf) {
-            ret_node =
-                dynamic_cast< BtreeNode* >(new SimpleNode< K, V >(node_buf, id, init_buf, is_leaf, this->m_bt_cfg));
-        } else {
-            ret_node = dynamic_cast< BtreeNode* >(
-                new SimpleNode< K, BtreeLinkInfo >(node_buf, id, init_buf, is_leaf, this->m_bt_cfg));
-        }
+        n = is_leaf ? create_node< SimpleNode< K, V > >(node_ctx_size, node_buf, id, init_buf, true, this->m_bt_cfg)
+                    : create_node< SimpleNode< K, BtreeLinkInfo > >(node_ctx_size, node_buf, id, init_buf, false,
+                                                                    this->m_bt_cfg);
         break;
 
     case btree_node_type::VAR_VALUE:
-        if (is_leaf) {
-            ret_node = new VarValueSizeNode< K, V >(node_buf, id, init_buf, is_leaf, this->m_bt_cfg);
-        } else {
-            ret_node = new VarValueSizeNode< K, BtreeLinkInfo >(node_buf, id, init_buf, is_leaf, this->m_bt_cfg);
-        }
+        n = is_leaf
+            ? create_node< VarValueSizeNode< K, V > >(node_ctx_size, node_buf, id, init_buf, true, this->m_bt_cfg)
+            : create_node< VarValueSizeNode< K, BtreeLinkInfo > >(node_ctx_size, node_buf, id, init_buf, false,
+                                                                  this->m_bt_cfg);
         break;
 
     case btree_node_type::VAR_KEY:
-        if (is_leaf) {
-            ret_node =
-                dynamic_cast< BtreeNode* >(new VarKeySizeNode< K, V >(node_buf, id, init_buf, is_leaf, this->m_bt_cfg));
-        } else {
-            ret_node = dynamic_cast< BtreeNode* >(
-                new VarKeySizeNode< K, BtreeLinkInfo >(node_buf, id, init_buf, is_leaf, this->m_bt_cfg));
-        }
+        n = is_leaf ? create_node< VarKeySizeNode< K, V > >(node_ctx_size, node_buf, id, init_buf, true, this->m_bt_cfg)
+                    : create_node< VarKeySizeNode< K, BtreeLinkInfo > >(node_ctx_size, node_buf, id, init_buf, false,
+                                                                        this->m_bt_cfg);
         break;
 
     default:
         BT_REL_ASSERT(false, "Unsupported node type {}", node_type);
         break;
     }
-    return ret_node;
+    return n;
 }
 
 /* Note:- This function assumes that access of this node is thread safe. */

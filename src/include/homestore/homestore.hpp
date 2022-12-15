@@ -15,12 +15,18 @@ namespace spdlog {
 class logger;
 } // namespace spdlog
 
+namespace sisl {
+class Evictor;
+}
+
 namespace homestore {
 class DeviceManager;
 class ResourceMgr;
 class HomeStoreStatusMgr;
 class MetaBlkService;
 class LogStoreService;
+class IndexService;
+class IndexServiceCallbacks;
 struct vdev_info_block;
 class HomeStore;
 class CPManager;
@@ -57,12 +63,15 @@ class HomeStore {
 private:
     std::unique_ptr< MetaBlkService > m_meta_service;
     std::unique_ptr< LogStoreService > m_log_service;
+    std::unique_ptr< IndexService > m_index_service;
 
     std::unique_ptr< DeviceManager > m_dev_mgr;
     std::shared_ptr< sisl::logging::logger_t > m_periodic_logger;
     std::unique_ptr< HomeStoreStatusMgr > m_status_mgr;
     std::unique_ptr< ResourceMgr > m_resource_mgr;
     std::unique_ptr< CPManager > m_cp_mgr;
+    std::shared_ptr< sisl::Evictor > m_evictor;
+    std::unique_ptr< IndexServiceCallbacks > m_index_svc_cbs;
 
     bool m_vdev_failed{false};
     std::atomic< uint32_t > m_format_cnt{1};
@@ -108,6 +117,7 @@ public:
     HomeStore& with_params(const hs_input_params& input);
     HomeStore& with_meta_service(float size_pct);
     HomeStore& with_log_service(float data_size_pct, float ctrl_size_pct);
+    HomeStore& with_index_service(float index_size_pct, std::unique_ptr< IndexServiceCallbacks > cbs);
     HomeStore& after_init_done(hs_init_done_cb_t init_done_cb);
     HomeStore& before_init_devices(hs_init_starting_cb_t init_start_cb);
 
@@ -115,7 +125,7 @@ public:
     void shutdown(bool wait = true, const hs_comp_callback& done_cb = nullptr);
 
     iomgr::io_thread_t get_hs_flush_thread() const;
-    cap_attrs get_system_capacity() const;
+    // cap_attrs get_system_capacity() const; // Need to move this to homeblks/homeobj
     bool is_first_time_boot() const;
 
     // Getters
@@ -137,17 +147,19 @@ public:
 
     MetaBlkService& meta_service() { return *m_meta_service; }
     LogStoreService& logstore_service() { return *m_log_service; }
+    IndexService& index_service() { return *m_index_service; }
     DeviceManager* device_mgr() { return m_dev_mgr.get(); }
     ResourceMgr& resource_mgr() { return *m_resource_mgr.get(); }
     CPManager& cp_mgr() { return *m_cp_mgr.get(); }
+    std::shared_ptr< sisl::Evictor > evictor() { return m_evictor; }
 
 protected:
     virtual void process_vdev_error(vdev_info_block* vb) {}
 
 private:
     void init_cache();
-    void init_done(bool first_time_boot);
-    void init_devices();
+    void init_done();
+    void create_vdevs();
     DeviceManager* get_device_manager() { return m_dev_mgr.get(); }
     uint64_t pct_to_size(float pct, PhysicalDevGroup pdev_group) const;
     void new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb);

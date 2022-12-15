@@ -8,7 +8,7 @@ ResourceMgr& resource_mgr() { return hs()->resource_mgr(); }
 void ResourceMgr::set_total_cap(uint64_t total_cap) { m_total_cap = total_cap; }
 
 /* monitor dirty buffer count */
-void ResourceMgr::inc_dirty_buf_cnt(const uint32_t size) {
+void ResourceMgr::inc_dirty_buf_size(const uint32_t size) {
     HS_REL_ASSERT_GT(size, 0);
     const auto dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_add(size, std::memory_order_relaxed);
     COUNTER_INCREMENT(m_metrics, dirty_buf_cnt, size);
@@ -17,7 +17,7 @@ void ResourceMgr::inc_dirty_buf_cnt(const uint32_t size) {
     }
 }
 
-void ResourceMgr::dec_dirty_buf_cnt(const uint32_t size) {
+void ResourceMgr::dec_dirty_buf_size(const uint32_t size) {
     HS_REL_ASSERT_GT(size, 0);
     const int64_t dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_sub(size, std::memory_order_relaxed);
     COUNTER_DECREMENT(m_metrics, dirty_buf_cnt, size);

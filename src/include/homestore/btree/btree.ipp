@@ -35,7 +35,6 @@
 #include <homestore/btree/detail/btree_remove_impl.ipp>
 #include <homestore/btree/detail/btree_node.hpp>
 
-SISL_LOGGING_DECL(btree)
 namespace homestore {
 #if 0
 #define container_of(ptr, type, member) ({ (type*)((char*)ptr - offsetof(type, member)); })

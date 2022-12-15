@@ -70,7 +70,7 @@ struct dev_info {
 };
 
 ////////////// All num constants ///////////////////
-const csum_t init_crc_16 = 0x8005;
+const csum_t hs_init_crc_16 = 0x8005;
 static constexpr crc32_t init_crc32 = 0x12345678;
 static constexpr crc32_t INVALID_CRC32_VALUE = 0x0u;
 
@@ -99,13 +99,11 @@ public:
     io_flag data_open_flags{io_flag::DIRECT_IO}; // All data drives open flags
     io_flag fast_open_flags{io_flag::DIRECT_IO}; // All index drives open flags
 
-    uint32_t min_virtual_page_size{4096}; // minimum page size supported. Ideally it should be 4k.
     uint64_t app_mem_size{static_cast< uint64_t >(1024) * static_cast< uint64_t >(1024) *
                           static_cast< uint64_t >(1024)}; // memory available for the app (including cache)
     uint64_t hugepage_size{0};                            // memory available for the hugepage
     bool is_read_only{false};                             // Is read only
     bool auto_recovery{true};                             // Recovery of data is automatic or controlled by the caller
-    // std::unordered_map< service_t, service_options > services;
 
 #ifdef _PRERELEASE
     bool force_reinit{false};
@@ -117,7 +115,6 @@ public:
 };
 
 struct hs_engine_config {
-    size_t min_io_size{4096};        // minimum io size supported by
     uint64_t max_chunks{MAX_CHUNKS}; // These 3 parameters can be ONLY changed with upgrade/revert from device manager
     uint64_t max_vdevs{MAX_VDEVS};
     uint64_t max_pdevs{MAX_PDEVS};
@@ -126,26 +123,18 @@ struct hs_engine_config {
     nlohmann::json to_json() const;
 };
 
+#if 0
 struct cap_attrs {
-    uint64_t used_data_size{0};     // consumer should use this for used data size;
-    uint64_t used_index_size{0};    // used size of index mgr store;
-    uint64_t used_log_size{0};      // used size of logstore;
-    uint64_t used_metablk_size{0};  // used size of meta blk store;
-    uint64_t used_total_size{0};    // used total size including data and metadata;
-    uint64_t initial_total_size{0}; // consumer uses this field to report to host for available user data capacity;
-    uint64_t initial_total_data_meta_size{0}; // total capacity including data and metadata;
+    uint64_t used_data_size{0};    // consumer should use this for used data size;
+    uint64_t used_index_size{0};   // used size of index mgr store;
+    uint64_t used_log_size{0};     // used size of logstore;
+    uint64_t used_metablk_size{0}; // used size of meta blk store;
+    uint64_t used_total_size{0};   // used total size including data and metadata;
+    uint64_t data_capacity{0};     // consumer uses this field to report to host for available user data capacity;
+    uint64_t meta_capacity{0};     // Capacity of all other internal structure size (index, metablk, journal)
     std::string to_string() const;
-
-    void add(const cap_attrs& other) {
-        used_data_size += other.used_data_size;
-        used_index_size += other.used_index_size;
-        used_log_size += other.used_log_size;
-        used_metablk_size += other.used_metablk_size;
-        used_total_size += other.used_total_size;
-        initial_total_size += other.initial_total_size;
-        initial_total_data_meta_size += other.initial_total_data_meta_size;
-    }
 };
+#endif
 
 ////////////// Misc ///////////////////
 #define HOMESTORE_LOG_MODS                                                                                             \

@@ -12,6 +12,8 @@
 #include <homestore/superblk_handler.hpp>
 
 namespace homestore {
+static constexpr size_t MAX_CP_COUNT{2};
+typedef int64_t cp_id_t;
 
 class CPMgrMetrics : public sisl::MetricsGroup {
 public:
@@ -40,11 +42,13 @@ VENUM(cp_consumer_t, uint8_t,
 struct CP;
 class CPContext {
 private:
+    cp_id_t m_cp_id;
     CP* m_cp;
 
 public:
-    CPContext(CP* cp) : m_cp{cp} {}
-    CP& cp() { return *m_cp; }
+    CPContext(cp_id_t id) : m_cp_id{id} {}
+    cp_id_t id() const { return m_cp_id; }
+    CP* cp() { return m_cp; }
 
     virtual ~CPContext() = default;
 };
@@ -73,7 +77,6 @@ struct CPCallbacks {
 };
 
 class CPWatchdog;
-typedef int64_t cp_id_t;
 
 static constexpr uint64_t cp_sb_magic{0xc0c0c01a};
 static constexpr uint32_t cp_sb_version{0x1};

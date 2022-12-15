@@ -27,6 +27,8 @@
 #include <homestore/btree/detail/btree_internal.hpp>
 #include <homestore/btree/detail/btree_node.hpp>
 
+SISL_LOGGING_DECL(btree)
+
 namespace homestore {
 
 typedef std::function< bool(const BtreeKey&, const BtreeValue&, const BtreeRequest&) > on_kv_read_t;
@@ -40,9 +42,6 @@ struct BtreeThreadVariables {
     std::vector< btree_locked_node_info > rd_locked_nodes;
     BtreeNodePtr force_split_node{nullptr};
 };
-
-void intrusive_ptr_add_ref(BtreeNode* node);
-void intrusive_ptr_release(BtreeNode* node);
 
 template < typename K, typename V >
 class Btree {
@@ -107,7 +106,7 @@ public:
 protected:
     /////////////////////////// Methods the underlying store is expected to handle ///////////////////////////
     virtual BtreeNodePtr alloc_node(bool is_leaf) = 0;
-    virtual BtreeNode* init_node(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf);
+    virtual BtreeNode* init_node(uint8_t* node_buf, uint32_t node_ctx_size, bnodeid_t id, bool init_buf, bool is_leaf);
     virtual btree_status_t read_node_impl(bnodeid_t id, BtreeNodePtr& node) const = 0;
     virtual btree_status_t write_node_impl(const BtreeNodePtr& node, void* context) = 0;
     virtual btree_status_t refresh_node(const BtreeNodePtr& node, bool for_read_modify_write, void* context) const = 0;
@@ -159,7 +158,7 @@ protected:
     /////////////////////////////////// Helper Methods ///////////////////////////////////////
     btree_status_t post_order_traversal(locktype_t acq_lock, const auto& cb);
     btree_status_t post_order_traversal(const BtreeNodePtr& node, locktype_t acq_lock, const auto& cb);
-    void get_all_kvs(std::vector< pair< K, V > >& kvs) const;
+    void get_all_kvs(std::vector< std::pair< K, V > >& kvs) const;
     btree_status_t do_destroy(uint64_t& n_freed_nodes, void* context);
     uint64_t get_btree_node_cnt() const;
     uint64_t get_child_node_cnt(bnodeid_t bnodeid) const;
