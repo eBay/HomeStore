@@ -7,6 +7,8 @@
 #include "device/physical_dev.hpp"
 
 namespace homestore {
+IndexService& index_service() { return hs()->index_service(); }
+
 IndexService::IndexService(std::unique_ptr< IndexServiceCallbacks > cbs) : m_svc_cbs{std::move(cbs)} {
     meta_service().register_handler(
         "index",
@@ -89,6 +91,15 @@ void IndexService::add_index_table(const std::shared_ptr< IndexTableBase >& tbl)
 
 iomgr::io_thread_t IndexService::get_next_btree_write_thread() {
     return m_btree_write_thread_ids[m_btree_write_thrd_idx++ % m_btree_write_thread_ids.size()];
+}
+
+uint64_t IndexService::used_size() const {
+    auto size{0};
+    std::unique_lock lg{m_index_map_mtx};
+    for (auto& [id, table] : m_index_map) {
+        size += table->used_size();
+    }
+    return size;
 }
 
 IndexBuffer::IndexBuffer(BlkId blkid, uint32_t buf_size, uint32_t align_size) :

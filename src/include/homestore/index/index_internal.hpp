@@ -33,6 +33,7 @@ class IndexTableBase {
 public:
     virtual ~IndexTableBase() = default;
     virtual uuid_t uuid() const = 0;
+    virtual uint64_t used_size() const = 0;
 };
 
 enum class index_buf_state_t : uint8_t {
@@ -74,7 +75,7 @@ public:
 public:
     IndexBtreeNode(const IndexBufferPtr& buf) : m_idx_buf{buf} {}
     uint8_t* raw_buffer() { return m_idx_buf->raw_buffer(); }
-    static IndexBtreeNode* convert(const BtreeNodePtr& bt_node);
+    static IndexBtreeNode* convert(BtreeNode* bt_node);
 };
 
 } // namespace homestore

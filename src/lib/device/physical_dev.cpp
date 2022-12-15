@@ -706,14 +706,15 @@ void PhysicalDevChunk::recover() {
 }
 
 void PhysicalDevChunk::cp_flush() {
-    auto& allocator = blk_allocator();
+    auto allocator = blk_allocator_mutable();
+
     // only do write when bitmap is dirty
     if (allocator->need_flush_dirty_bm()) {
         auto bitmap_mem = allocator->acquire_underlying_buffer();
         if (m_meta_blk_cookie) {
-            MetaBlkMgrSI()->update_sub_sb(bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
+            meta_service().update_sub_sb(bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
         } else {
-            MetaBlkMgrSI()->add_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
+            meta_service().add_sub_sb("BLK_ALLOC", bitmap_mem->bytes, bitmap_mem->size, m_meta_blk_cookie);
         }
         allocator->reset_disk_bm_dirty();
         allocator->release_underlying_buffer();

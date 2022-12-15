@@ -10,8 +10,10 @@
 
 #include <homestore/meta_service.hpp>
 #include <homestore/logstore_service.hpp>
+#include <homestore/index_service.hpp>
 #include <homestore/homestore.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
+#include "index/wb_cache.hpp"
 #include "common/homestore_utils.hpp"
 #include "common/homestore_config.hpp"
 #include "common/homestore_assert.hpp"
@@ -49,7 +51,7 @@ HomeStore& HomeStore::with_params(const hs_input_params& input) {
 }
 
 HomeStore& HomeStore::with_index_service(float size_pct, std::unique_ptr< IndexServiceCallbacks > cbs) {
-    m_index_svc_cbs = (cbs) ? std::move(cbs) : std::make_unique< IndexServiceCallbacks >();
+    m_index_svc_cbs = std::move(cbs);
     m_index_store_size_pct = size_pct;
     return *this;
 }
@@ -153,17 +155,16 @@ void HomeStore::init(bool wait_for_init) {
     LOGINFO("Homestore is initializing with following services: ", list_services());
     if (has_meta_service()) { m_meta_service = std::make_unique< MetaBlkService >(); }
     if (has_log_service()) { m_log_service = std::make_unique< LogStoreService >(); }
-    if (has_index_service()) { m_index_service = std::make_unique< IndexService >(); }
+    if (has_index_service()) { m_index_service = std::make_unique< IndexService >(std::move(m_index_svc_cbs)); }
 
     m_dev_mgr = std::make_unique< DeviceManager >(hs_config.input.data_devices, bind_this(HomeStore::new_vdev_found, 2),
                                                   sizeof(sb_blkstore_blob), VirtualDev::static_process_completions,
                                                   bind_this(HomeStore::process_vdev_error, 1));
     m_dev_mgr->init();
 
-    uint64_t cache_size = ResourceMgrSI().get_cache_size();
+    uint64_t cache_size = resource_mgr().get_cache_size();
     m_evictor = std::make_shared< sisl::LRUEvictor >(cache_size, 1000);
 
-    auto& hs_config = HomeStoreStaticConfig::instance();
     LOGINFO("HomeStore starting first_time_boot?={} dynamic_config_version={}, cache_size={}, static_config: {}",
             is_first_time_boot(), HS_DYNAMIC_CONFIG(version), cache_size, hs_config.to_json().dump(4));
 
@@ -259,28 +260,29 @@ void HomeStore::create_vdevs() {
     }
 }
 
+#if 0
 cap_attrs HomeStore::get_system_capacity() const {
     cap_attrs cap;
     // if (has_data_service()) {
     //     cap.used_data_size = get_data_blkstore()->used_size();
-    //     cap.initial_total_size = get_data_blkstore()->get_size();
-    //     cap.initial_total_data_meta_size += cap.initial_total_size;
+    //     cap.data_capacity = get_data_blkstore()->get_size();
     // }
     if (has_index_service()) {
         cap.used_index_size = m_index_service->used_size();
-        cap.initial_total_data_meta_size += m_index_service->total_size();
+        cap.meta_capacity += m_index_service->total_size();
     }
     if (has_log_service()) {
         cap.used_log_size = m_log_service->used_size();
-        cap.initial_total_data_meta_size += m_log_service->total_size();
+        cap.meta_capacity += m_log_service->total_size();
     }
     if (has_meta_service()) {
         cap.used_metablk_size = m_meta_service->used_size();
-        cap.initial_total_data_meta_size += m_meta_service->total_size();
+        cap.meta_capacity += m_meta_service->total_size();
     }
     cap.used_total_size = cap.used_data_size + cap.used_index_size + cap.used_log_size + cap.used_metablk_size;
     return cap;
 }
+#endif
 
 bool HomeStore::is_first_time_boot() const { return m_dev_mgr->is_first_time_boot(); }
 
@@ -370,6 +372,7 @@ uint64_t HomeStore::pct_to_size(const float pct, const PhysicalDevGroup pdev_gro
 /////////////////////////////////////////// static HomeStore member functions /////////////////////////////////
 // void HomeStore::fake_reboot() {}
 
+#if 0
 std::string cap_attrs::to_string() const {
     return fmt::format("used_data_size={}, used_index_size={}, used_log_size={}, used_metablk_size={}, "
                        "used_total_size={}, initial_total_size={}, initial_total_data_meta_size={}",
@@ -377,6 +380,7 @@ std::string cap_attrs::to_string() const {
                        in_bytes(used_metablk_size), in_bytes(used_total_size), in_bytes(initial_total_size),
                        in_bytes(initial_total_data_meta_size));
 }
+#endif
 
 nlohmann::json hs_input_params::to_json() const {
     nlohmann::json json;

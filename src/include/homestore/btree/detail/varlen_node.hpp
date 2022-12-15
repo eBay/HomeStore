@@ -511,6 +511,8 @@ public:
         return str;
     }
 
+    uint8_t* get_node_context() override { return uintptr_cast(this) + sizeof(VariableNode< K, V >); }
+
     int compare_nth_key(const BtreeKey& cmp_key, uint32_t ind) const {
         return get_nth_key< K >(ind, false).compare(cmp_key);
     }

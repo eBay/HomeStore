@@ -35,7 +35,7 @@ public:
 private:
     BtreeNodePtr alloc_node(bool is_leaf) override {
         uint8_t* node_buf = new uint8_t[this->m_bt_cfg.node_size()];
-        auto new_node = this->init_node(node_buf, bnodeid_t{0}, true, is_leaf);
+        auto new_node = this->init_node(node_buf, 0u, bnodeid_t{0}, true, is_leaf);
         new_node->set_node_id(bnodeid_t{r_cast< std::uintptr_t >(new_node)});
         new_node->m_refcount.increment();
         return BtreeNodePtr{new_node};

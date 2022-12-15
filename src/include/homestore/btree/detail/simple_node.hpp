@@ -261,6 +261,8 @@ public:
         return str;
     }
 
+    uint8_t* get_node_context() override { return uintptr_cast(this) + sizeof(SimpleNode< K, V >); }
+
 #ifndef NDEBUG
     void validate_sanity() {
         if (this->total_entries() == 0) { return; }

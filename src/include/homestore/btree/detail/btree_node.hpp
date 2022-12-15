@@ -479,6 +479,7 @@ public:
     virtual uint32_t get_nth_obj_size(uint32_t ind) const = 0;
     virtual uint16_t get_record_size() const = 0;
     virtual int compare_nth_key(const BtreeKey& cmp_key, uint32_t ind) const = 0;
+    virtual uint8_t* get_node_context() = 0;
 
     // Method just to please compiler
     template < typename V >
@@ -539,13 +540,13 @@ public:
 
 #ifndef NO_CHECKSUM
     void set_checksum(const BtreeConfig& cfg) {
-        get_persistent_header()->checksum = crc16_t10dif(init_crc_16, node_data_area_const(), cfg.node_data_size());
+        get_persistent_header()->checksum = crc16_t10dif(bt_init_crc_16, node_data_area_const(), cfg.node_data_size());
     }
 
     bool verify_node(const BtreeConfig& cfg) const {
         DEBUG_ASSERT_EQ(is_valid_node(), true, "verifying invalide node {}!",
                         get_persistent_header_const()->to_string());
-        auto exp_checksum = crc16_t10dif(init_crc_16, node_data_area_const(), cfg.node_data_size());
+        auto exp_checksum = crc16_t10dif(bt_init_crc_16, node_data_area_const(), cfg.node_data_size());
         return ((magic() == BTREE_NODE_MAGIC) && (checksum() == exp_checksum));
     }
 #endif

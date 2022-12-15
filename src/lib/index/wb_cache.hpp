@@ -2,10 +2,9 @@
 #include <memory>
 
 #include <iomgr/iomgr.hpp>
-
-#include <sisl/cache/simple_cache.hpp>
 #include <homestore/index/wb_cache_base.hpp>
 #include <homestore/index/index_internal.hpp>
+#include <sisl/cache/simple_cache.hpp>
 #include "index/index_cp.hpp"
 
 namespace sisl {

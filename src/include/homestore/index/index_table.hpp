@@ -18,10 +18,6 @@
 
 namespace homestore {
 
-IndexBtreeNode* IndexBtreeNode::convert(const BtreeNodePtr& bt_node) {
-    return (IndexBtreeNode*)((uint8_t*)bt_node.get() + sizeof(BtreeNode));
-}
-
 template < typename K, typename V >
 class IndexTable : public IndexTableBase, Btree< K, V > {
 private:
@@ -50,6 +46,7 @@ public:
     }
 
     uuid_t uuid() const override { return m_sb->uuid; }
+    uint64_t used_size() const override { return m_sb->index_size; }
 
     template < typename ReqT >
     void async_put(ReqT* put_req) override {
@@ -111,8 +108,10 @@ protected:
     ////////////////// Override Implementation of underlying store requirements //////////////////
     BtreeNodePtr alloc_node(bool is_leaf) override {
         return wb_cache()->alloc_buf([this](const IndexBufferPtr& idx_buf) -> BtreeNode {
-            return this->init_node(idx_buf->raw_buffer(), sizeof(IndexBtreeNode), idx_buf->blkid().to_integer(), true,
-                                   is_leaf);
+            BtreeNode* n = this->init_node(idx_buf->raw_buffer(), sizeof(IndexBtreeNode), idx_buf->blkid().to_integer(),
+                                           true, is_leaf);
+            uint8_t* ctx_mem = uintptr_cast(IndexBtreeNode::convert(n));
+            new (ctx_mem) IndexBtreeNode(); // TODO: Figure out a way to call destructor of IndexBtreeNode
         });
     }
 
@@ -120,7 +119,7 @@ protected:
 
     btree_status_t write_node_impl(const BtreeNodePtr& node, void* context) override {
         auto cp_ctx = r_cast< CPContext* >(context);
-        auto idx_node = IndexBtreeNode::convert(node);
+        auto idx_node = IndexBtreeNode::convert(node.get());
 
         if (idx_node->m_last_mod_cp_id != cp_ctx->cp_id()) {
             // Need to put it in wb cache
@@ -134,8 +133,8 @@ protected:
                                         const BtreeNodePtr& child_node, const BtreeNodePtr& parent_node,
                                         void* context) override {
         CPContext* cp_ctx = r_cast< CPContext* >(context);
-        auto child_idx_node = IndexBtreeNode::convert(child_node);
-        auto parent_idx_node = IndexBtreeNode::convert(parent_node);
+        auto child_idx_node = IndexBtreeNode::convert(child_node.get());
+        auto parent_idx_node = IndexBtreeNode::convert(parent_node.get());
         auto& child_buf = child_idx_node->buffer();
         auto& parent_buf = parent_idx_node->buffer();
 
@@ -173,7 +172,7 @@ protected:
     btree_status_t refresh_node(const BtreeNodePtr& node, bool for_read_modify_write, void* context) override {
         CPContext* cp_ctx = (CPContext*)context;
 
-        auto idx_node = IndexBtreeNode::convert(node);
+        auto idx_node = IndexBtreeNode::convert(node.get());
         if (idx_node->m_last_mod_cp_id > cp_ctx->cp_id()) {
             return btree_status_t::cp_mismatch;
         } else if (!for_read_modify_write) {
@@ -208,8 +207,8 @@ protected:
     btree_status_t prepare_node_txn(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
                                     void* context) override {
         CPContext* cp_ctx = (CPContext*)context;
-        auto child_idx_node = IndexBtreeNode::convert(child_node);
-        auto parent_idx_node = IndexBtreeNode::convert(parent_node);
+        auto child_idx_node = IndexBtreeNode::convert(child_node.get());
+        auto parent_idx_node = IndexBtreeNode::convert(parent_node.get());
 
         // Buffer has been modified by higher cp id than whats requested.
         if ((child_idx_node->m_last_mod_cp_id > cp_ctx->cp_id()) ||

@@ -1,6 +1,6 @@
 ﻿#include <sisl/fds/thread_vector.hpp>
-#include <homestore/index_service.hpp>
 #include <homestore/btree/btree.ipp>
+#include <homestore/index_service.hpp>
 #include <homestore/homestore.hpp>
 #include "common/homestore_assert.hpp"
 
@@ -10,15 +10,18 @@
 #include "common/resource_mgr.hpp"
 
 namespace homestore {
+IndexWBCache& wb_cache() { return index_service().wb_cache(); }
+
 IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, const std::shared_ptr< sisl::Evictor >& evictor,
                            uint32_t node_size) :
         m_vdev{vdev},
-        m_cache{evictor, 1000, node_size,
-                [](const BtreeNodePtr& node) -> BlkId { return IndexBtreeNode::convert(node)->m_idx_buf->m_blkid; },
-                [](const sisl::CacheRecord& rec) -> bool {
-                    const auto& hnode = (sisl::SingleEntryHashNode< BtreeNodePtr >&)rec;
-                    return (hnode.m_value->m_refcount.test_le(1));
-                }},
+        m_cache{
+            evictor, 1000, node_size,
+            [](const BtreeNodePtr& node) -> BlkId { return IndexBtreeNode::convert(node.get())->m_idx_buf->m_blkid; },
+            [](const sisl::CacheRecord& rec) -> bool {
+                const auto& hnode = (sisl::SingleEntryHashNode< BtreeNodePtr >&)rec;
+                return (hnode.m_value->m_refcount.test_le(1));
+            }},
         m_node_size{node_size} {
     for (size_t i{0}; i < MAX_CP_COUNT; ++i) {
         m_dirty_list[i] = std::make_unique< sisl::ThreadVector< IndexBufferPtr > >();
@@ -87,9 +90,9 @@ retry:
 bool IndexWBCache::create_chain(IndexBufferPtr& second, IndexBufferPtr& third) {
     bool copied{false};
     if (second->m_next_buffer != nullptr) {
-        HS_DBG_ASSERT_EQ((void*)second->m_next_buffer.get(), third.get(),
+        HS_DBG_ASSERT_EQ((void*)second->m_next_buffer.get(), (void*)third.get(),
                          "Overwriting second (child node) with different third (parent node)");
-        HS_DBG_ASSERT_EQ((void*)second->m_next_buffer->m_next_buffer.get(), nullptr,
+        HS_DBG_ASSERT_EQ((void*)second->m_next_buffer->m_next_buffer.get(), (void*)nullptr,
                          "Third node buffer should be the last in the list");
 
         // Second buf has already a next buffer, which means same node is in-place modified with structure change,
@@ -253,6 +256,10 @@ void IndexWBCache::do_free_btree_blks(IndexCPContext* cp_ctx) {
 
     m_vdev->cp_flush(); // As of now its a sync call, since metablk manager is sync write
     cp_ctx->m_flush_done_cb(cp_ctx->cp());
+}
+
+IndexBtreeNode* IndexBtreeNode::convert(BtreeNode* bt_node) {
+    return r_cast< IndexBtreeNode* >(bt_node->get_node_context());
 }
 
 } // namespace homestore

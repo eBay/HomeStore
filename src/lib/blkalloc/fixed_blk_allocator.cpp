@@ -31,7 +31,7 @@ blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion* portion, blk_num_t st
 
     auto blk_num = start_blk_num;
     while (blk_num < m_cfg.get_total_blks()) {
-        BlkAllocPortion cur_portion = blknum_to_portion(blk_num);
+        BlkAllocPortion* cur_portion = blknum_to_portion(blk_num);
         if (portion != cur_portion) break;
 
         if (!get_disk_bm_const()->is_bits_set(blk_num, 1)) {
