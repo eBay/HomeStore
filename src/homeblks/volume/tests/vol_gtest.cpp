@@ -569,7 +569,7 @@ protected:
     std::atomic< size_t > outstanding_ios;
     TestOutput output;
 
-    std::vector< std::shared_ptr< vol_info_t > > vol_info;
+    std::vector< std::shared_ptr< vol_info_t > > m_vol_info;
 
     // std::condition_variable m_cv;
     std::condition_variable m_init_done_cv;
@@ -600,7 +600,7 @@ protected:
 public:
     static thread_local uint32_t _n_completed_this_thread;
 
-    VolTest() : vol_info(g_cfg.max_vols), m_device_info{} {
+    VolTest() : m_vol_info(g_cfg.max_vols), m_device_info{} {
         tcfg = g_cfg; // Reset the config from global config
 
         // cur_vol = 0;
@@ -778,7 +778,7 @@ public:
     bool fix_vol_mapping_btree() {
         /* fix all volumes mapping btrees */
         for (uint64_t i{0}; i < tcfg.max_vols; ++i) {
-            auto vol_ptr{vol_info[i]->vol};
+            auto vol_ptr{m_vol_info[i]->vol};
             const auto ret{VolInterface::get_instance()->fix_tree(vol_ptr, true /* verify */)};
             if (ret == false) {
                 LOGERROR("fix_tree of vol: {} failed!", VolInterface::get_instance()->get_name(vol_ptr));
@@ -791,14 +791,14 @@ public:
     void move_vol_to_offline() {
         /* move all volumes to offline */
         for (uint64_t i{0}; i < tcfg.max_vols; ++i) {
-            VolInterface::get_instance()->vol_state_change(vol_info[i]->vol, homestore::vol_state::OFFLINE);
+            VolInterface::get_instance()->vol_state_change(m_vol_info[i]->vol, homestore::vol_state::OFFLINE);
         }
     }
 
     void move_vol_to_online() {
         /* move all volumes to online */
         for (uint64_t i{0}; i < tcfg.max_vols; ++i) {
-            VolInterface::get_instance()->vol_state_change(vol_info[i]->vol, homestore::vol_state::ONLINE);
+            VolInterface::get_instance()->vol_state_change(m_vol_info[i]->vol, homestore::vol_state::ONLINE);
         }
     }
 
@@ -843,7 +843,7 @@ public:
         info->cur_checkpoint = 0;
         info->ref_cnt.increment(1);
 
-        vol_info[indx] = info;
+        m_vol_info[indx] = info;
     }
 
     void vol_state_change_cb(const VolumePtr& vol, const vol_state old_state, const vol_state new_state) {
@@ -852,13 +852,13 @@ public:
 
     /* Note: It assumes that create volume is not happening in parallel */
     bool create_volume(const int indx) {
-        if ((vol_info.size() != 0) && vol_info[indx]) {
-            if (vol_info[indx]->ref_cnt.get()) {
+        if ((m_vol_info.size() != 0) && m_vol_info[indx]) {
+            if (m_vol_info[indx]->ref_cnt.get()) {
                 // this volume is still active;
                 return false;
             } else {
                 // remove volume has been issued on this volume;
-                const auto vol = VolInterface::get_instance()->lookup_volume(vol_info[indx]->uuid);
+                const auto vol = VolInterface::get_instance()->lookup_volume(m_vol_info[indx]->uuid);
                 if (vol) {
                     // async deletion of this volume is still in progress;
                     // otherwise, vol will not be found by homeblks;
@@ -1016,7 +1016,7 @@ public:
 
         {
             std::unique_lock< std::mutex > lk(m_mutex);
-            vol_info.clear();
+            m_vol_info.clear();
         }
 
         VolInterface::shutdown(false /* force */);
@@ -1047,7 +1047,7 @@ public:
         const uint64_t tot_cap{VolInterface::get_instance()->get_system_capacity().initial_total_data_meta_size};
         uint64_t used_cap{VolInterface::get_instance()->get_system_capacity().used_total_size};
         HS_REL_ASSERT_LE(used_cap, tot_cap);
-        for (uint64_t i{0}; i < vol_info.size(); ++i) {
+        for (uint64_t i{0}; i < m_vol_info.size(); ++i) {
             delete_volume(i);
         }
         used_cap = VolInterface::get_instance()->get_system_capacity().used_total_size;
@@ -1252,7 +1252,7 @@ private:
     bool delete_volume(const int vol_indx) {
         // std::move will release the ref_count in VolTest::vol and pass to HomeBlks::remove_volume
         boost::uuids::uuid uuid;
-        auto vinfo{vol_info[vol_indx]};
+        auto vinfo{m_vol_info[vol_indx]};
         if (!vinfo) { return false; }
         auto& vol{vinfo->vol};
         bool expected{false};
@@ -1277,7 +1277,7 @@ private:
         // release the ref_count to volumes;
         if (!timeout) {
             remove_journal_files();
-            vol_info.clear();
+            m_vol_info.clear();
             force = true;
         }
         VolInterface::shutdown(force);
@@ -1285,8 +1285,8 @@ private:
 
     void remove_journal_files() {
         // Remove journal folders
-        for (size_t i{0}; i < vol_info.size(); ++i) {
-            const fs::path name{boost::lexical_cast< std::string >(vol_info[i]->uuid)};
+        for (size_t i{0}; i < m_vol_info.size(); ++i) {
+            const fs::path name{boost::lexical_cast< std::string >(m_vol_info[i]->uuid)};
             if (fs::exists(name) && fs::is_directory(name)) {
                 fs::remove_all(name);
                 LOGINFO("Removed journal dir: {}", name);
@@ -1459,7 +1459,7 @@ protected:
 
     std::shared_ptr< vol_info_t > pick_vol_round_robin(io_lba_range_t& r) {
         r.vol_idx = ++m_cur_vol % tcfg.max_vols;
-        const auto vol_info{m_voltest->vol_info[r.vol_idx]};
+        const auto vol_info{m_voltest->m_vol_info[r.vol_idx]};
 
         // make sure this volume is still active by checking ref_cnt;
         // if the volume is in destroying state, it is likely the vol_info can be destroyed by other threads
@@ -1630,7 +1630,7 @@ protected:
     }
 
     bool write_vol(const uint32_t cur, const uint64_t lba, const uint32_t nlbas) {
-        const auto vinfo{m_voltest->vol_info[cur]};
+        const auto vinfo{m_voltest->m_vol_info[cur]};
         const auto vol{vinfo->vol};
         if (vol == nullptr) { return false; }
 
@@ -1702,7 +1702,7 @@ protected:
     }
 
     bool read_vol(const uint32_t cur, const uint64_t lba, const uint32_t nlbas) {
-        const auto vinfo{m_voltest->vol_info[cur]};
+        const auto vinfo{m_voltest->m_vol_info[cur]};
         const auto vol{vinfo->vol};
         if (vol == nullptr) { return false; }
         if (read_vol_internal(vinfo, vol, lba, nlbas, false)) { return true; }
@@ -1758,7 +1758,7 @@ protected:
     }
 
     bool unmap_vol(const uint32_t cur, const uint64_t lba, const uint32_t nlbas) {
-        const auto vinfo{m_voltest->vol_info[cur]};
+        const auto vinfo{m_voltest->m_vol_info[cur]};
         const auto vol{vinfo->vol};
         if (vol == nullptr) { return false; }
 
@@ -1926,7 +1926,7 @@ public:
     std::string job_name() const override { return "VerifyJob"; }
 
 private:
-    std::shared_ptr< vol_info_t >& vol_info(const uint32_t nth) { return m_voltest->vol_info[nth]; }
+    std::shared_ptr< vol_info_t >& vol_info(const uint32_t nth) { return m_voltest->m_vol_info[nth]; }
     bool m_is_job_done{false};
 };
 
