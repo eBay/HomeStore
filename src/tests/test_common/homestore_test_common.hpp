@@ -1,7 +1,7 @@
 /*********************************************************************************
  * Modifications Copyright 2017-2019 eBay Inc.
  *
- * Author/Developer(s): Harihara Kadayam
+ * Author/Developer(s): Yaming Kuang
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,8 @@
  *********************************************************************************/
 /*
  * Homestore testing binaries shared common definitions, apis and data structures
- * */
+ *
+ */
 
 #pragma once
 #include <sisl/logging/logging.h>

@@ -1,7 +1,7 @@
 /*********************************************************************************
  * Modifications Copyright 2017-2019 eBay Inc.
  *
- * Author/Developer(s): Harihara Kadayam
+ * Author/Developer(s): Harihara Kadayam, Bryan Zimmerman
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
-﻿#include <algorithm>
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
