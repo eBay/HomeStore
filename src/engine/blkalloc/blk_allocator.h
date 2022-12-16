@@ -1,10 +1,18 @@
-﻿/*
- * BlkAllocator.h
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
  *
- *  Created on: Aug 09, 2016
- *      Author: hkadayam
- */
-
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #ifndef ALLOCATOR_H
 #define ALLOCATOR_H
 
@@ -94,9 +102,7 @@ public:
 
     [[nodiscard]] blk_cap_t get_blks_per_portion() const { return m_blks_per_portion; }
 
-        [[nodiscard]] blk_cap_t get_total_portions() const {
-        return (get_total_blks() - 1) / get_blks_per_portion() + 1;
-    }
+    [[nodiscard]] blk_cap_t get_total_portions() const { return (get_total_blks() - 1) / get_blks_per_portion() + 1; }
 
     void set_auto_recovery(const bool auto_recovery) { m_auto_recovery = auto_recovery; }
     [[nodiscard]] bool get_auto_recovery() const { return m_auto_recovery; }
@@ -167,17 +173,19 @@ public:
 
     [[nodiscard]] blk_num_t get_available_blocks() const { return m_available_blocks; }
 
-    [[maybe_unused]] blk_num_t decrease_available_blocks(const blk_num_t count) { return (m_available_blocks -= count); }
+    [[maybe_unused]] blk_num_t decrease_available_blocks(const blk_num_t count) {
+        return (m_available_blocks -= count);
+    }
 
-    [[maybe_unused]] blk_num_t increase_available_blocks(const blk_num_t count) { return (m_available_blocks += count); }
+    [[maybe_unused]] blk_num_t increase_available_blocks(const blk_num_t count) {
+        return (m_available_blocks += count);
+    }
 
     void set_temperature(const blk_temp_t temp) { m_temperature = temp; }
 
     [[nodiscard]] blk_temp_t temperature() const { return m_temperature; }
 
-    static constexpr blk_temp_t default_temperature() {
-        return 1;
-    }
+    static constexpr blk_temp_t default_temperature() { return 1; }
 };
 
 /* We have the following design requirement it is used in auto recovery mode
@@ -207,9 +215,8 @@ public:
  * Blk allocator has two recoveries auto recovery and manual recovery
  * 1. auto recovery :- disk bit map is persisted. Consumers only have to replay journal. It is used by volume and
  * btree.
- * 2. manual recovery :- disk bit map is not persisted. Consumers have to scan its index table to set blks allocated.
- * It is used meta blk manager.
- * Base class manages disk_bitmap as it is common to all blk allocator.
+ * 2. manual recovery :- disk bit map is not persisted. Consumers have to scan its index table to set blks
+ * allocated. It is used meta blk manager. Base class manages disk_bitmap as it is common to all blk allocator.
  *
  * Disk bitmap is persisted only during checkpoints. These two things always be true while disk bitmap is persisting
  * 1. It contains atleast all the blks allocated upto that checkpoint. It can contain blks allocated for next
@@ -293,7 +300,7 @@ public:
         return blknum / get_config().get_blks_per_portion();
     }
 
-        [[nodiscard]] BlkAllocPortion* blknum_to_portion(const blk_num_t blknum) {
+    [[nodiscard]] BlkAllocPortion* blknum_to_portion(const blk_num_t blknum) {
         return &m_blk_portions[blknum_to_portion_num(blknum)];
     }
 
@@ -310,8 +317,8 @@ public:
 
     [[nodiscard]] bool realtime_bm_on() const { return (m_cfg.m_realtime_bm_on && m_auto_recovery); }
 
-private: 
-    [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); } 
+private:
+    [[nodiscard]] sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); }
     sisl::ThreadVector< BlkId >* get_alloc_blk_list();
     void reset_disk_bm_dirty() { is_disk_bm_dirty = false; }
     void set_disk_bm_dirty() { is_disk_bm_dirty = true; }

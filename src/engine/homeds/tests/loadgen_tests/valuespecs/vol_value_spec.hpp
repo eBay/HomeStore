@@ -1,7 +1,18 @@
-//
-// Created by Kuang Yaming
-//
-
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #ifndef __HOMESTORE_VOLUME_VALUE_SPEC_HPP__
 #define __HOMESTORE_VOLUME_VALUE_SPEC_HPP__
 
@@ -25,7 +36,8 @@ namespace loadgen {
 class VolumeValue : public ValueSpec {
 
 public:
-    static std::shared_ptr< VolumeValue > gen_value(const ValuePattern spec, const VolumeValue* const ref_value = nullptr) {
+    static std::shared_ptr< VolumeValue > gen_value(const ValuePattern spec,
+                                                    const VolumeValue* const ref_value = nullptr) {
         std::shared_ptr< VolumeValue > temp;
         switch (spec) {
         case ValuePattern::SEQUENTIAL_VAL:
@@ -46,11 +58,12 @@ public:
             std::uniform_int_distribution< uint64_t > dist{std::numeric_limits< uint64_t >::min(),
                                                            std::numeric_limits< uint64_t >::max()};
 
-            for (size_t i{0} ; i < bytes.size(); i += sizeof(uint64_t)) {
-                *reinterpret_cast<uint64_t*>(bytes.data() + i) = dist(generator);
+            for (size_t i{0}; i < bytes.size(); i += sizeof(uint64_t)) {
+                *reinterpret_cast< uint64_t* >(bytes.data() + i) = dist(generator);
             }
 
-            temp = std::make_shared< VolumeValue >(1, util::Hash64(reinterpret_cast<const char*>(bytes.data()), VOL_PAGE_SIZE));
+            temp = std::make_shared< VolumeValue >(
+                1, util::Hash64(reinterpret_cast< const char* >(bytes.data()), VOL_PAGE_SIZE));
             break;
         }
 
@@ -111,15 +124,14 @@ public:
         }
     }
 
-    bool operator==(const VolumeValue& rhs) const { return ((m_nblks == rhs.m_nblks) && (m_crc == rhs.m_crc));
-    }
+    bool operator==(const VolumeValue& rhs) const { return ((m_nblks == rhs.m_nblks) && (m_crc == rhs.m_crc)); }
 
     std::string to_string() const { return std::to_string(m_nblks) + " " + std::to_string(m_crc); }
 
     sisl::blob get_blob() const {
         sisl::blob b;
         b.size = sizeof(uint64_t);
-        b.bytes = reinterpret_cast< uint8_t* >(const_cast < uint64_t *>(& m_crc));
+        b.bytes = reinterpret_cast< uint8_t* >(const_cast< uint64_t* >(&m_crc));
         return b;
     }
 

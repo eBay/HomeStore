@@ -1,7 +1,18 @@
-//
-// Modified by Amit Desai
-//
-
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #ifndef HOMESTORE_MAP_VALUE_SPEC_HPP
 #define HOMESTORE_MAP_VALUE_SPEC_HPP
 
@@ -88,15 +99,14 @@ public:
 
             /* Distribution on which to apply the generator */
             const blk_num_t max_blk{MAX_VALUES > static_cast< uint64_t >(std::numeric_limits< blk_num_t >::max())
-                                    ? std::numeric_limits< blk_num_t >::max() :
-                                    static_cast< blk_num_t >(MAX_VALUES) };
-                                    
+                                        ? std::numeric_limits< blk_num_t >::max()
+                                        : static_cast< blk_num_t >(MAX_VALUES)};
+
             std::uniform_int_distribution< blk_num_t > distribution{0, max_blk};
 
             const auto sblk{distribution(generator)};
 
-            temp =
-                std::make_shared< MapValue >(MappingValue{sid, BlkId{sblk, 1u, 0u}, 0u, 1u, carr.data()});
+            temp = std::make_shared< MapValue >(MappingValue{sid, BlkId{sblk, 1u, 0u}, 0u, 1u, carr.data()});
             return temp;
         }
         default:

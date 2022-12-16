@@ -1,10 +1,18 @@
-﻿/*
- * varsize_blk_allocator.cpp
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
  *
- *  Created on: Jun 17, 2015
- *      Author: Hari Kadayam
- */
-
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #include <iostream>
 #include <iterator>
 #include <random>
@@ -570,9 +578,8 @@ void VarsizeBlkAllocator::free(const BlkId& b) {
         static thread_local std::vector< blk_cache_entry > excess_blks;
         excess_blks.clear();
 
-        [[maybe_unused]] const blk_count_t num_zombied {
-            m_fb_cache->try_free_blks(blkid_to_blk_cache_entry(b, 2), excess_blks)
-        };
+        [[maybe_unused]] const blk_count_t num_zombied{
+            m_fb_cache->try_free_blks(blkid_to_blk_cache_entry(b, 2), excess_blks)};
 
         for (const auto& e : excess_blks) {
             BLKALLOC_LOG(TRACE, "Freeing in bitmap of entry={} - excess of free_blks size={}", e.to_string(),

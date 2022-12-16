@@ -1,3 +1,18 @@
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #pragma once
 
 #include <cassert>
@@ -58,7 +73,7 @@ class VolVerifyMgr {
         VolCRCMMap& operator=(VolCRCMMap&&) noexcept = delete;
 
         ~VolCRCMMap() {
-            if (::munmap(m_map_handle, static_cast<size_t>(get_file_size())) == -1) {
+            if (::munmap(m_map_handle, static_cast< size_t >(get_file_size())) == -1) {
                 LOGERROR("Error un-mmapping the file");
                 assert(false);
             }
@@ -78,7 +93,7 @@ class VolVerifyMgr {
         }
 
         int create_crc_file(const uint64_t vol_id, const uint64_t file_size) {
-            const auto fd{open(get_file_name().c_str(), O_RDWR | O_CREAT | O_TRUNC, static_cast<mode_t>(0600))};
+            const auto fd{open(get_file_name().c_str(), O_RDWR | O_CREAT | O_TRUNC, static_cast< mode_t >(0600))};
 
             if (fd == -1) {
                 LOGERROR("Error opening file for writing");
@@ -144,7 +159,7 @@ public:
 
     void set_crc(const uint64_t vol_id, const uint64_t lba, const uint64_t crc) {
         std::lock_guard< std::mutex > lk{m_vol_mmap[vol_id]->m_mtx};
-        *(reinterpret_cast<uint64_t*>(m_vol_mmap[vol_id]->m_map_handle) + lba) = crc;
+        *(reinterpret_cast< uint64_t* >(m_vol_mmap[vol_id]->m_map_handle) + lba) = crc;
     }
 
     uint64_t get_crc(const uint64_t vol_id, const uint64_t lba) const {
@@ -159,7 +174,7 @@ private:
     bool create_dir_tree(const std::string& dir_path) {
         bool create{false};
         size_t p{0};
-        for(;;) {
+        for (;;) {
             p = dir_path.find_first_of("/", p);
             if (p != std::string::npos) {
                 auto s{dir_path.substr(0, ++p)};

@@ -308,7 +308,7 @@ hs_log_store::hs_log_store(const homestore::logstore_id_t logstore_id, const Opt
             homestore::HomeLogStoreMgrSI().create_new_log_store(homestore::HomeLogStoreMgr::CTRL_LOG_FAMILY_IDX, false);
         LOGDEBUGMOD(nublox_logstore, "Creating new log store");
         if (!m_log_store) throw std::runtime_error("Failed to create log store");
-        { 
+        {
             std::lock_guard lock{m_wait_lock};
             m_done = true;
         }
@@ -627,7 +627,7 @@ ptr< buffer > hs_log_store::pack(ulong index, int32 cnt) {
     //     return idx < cnt ? true : false;
     // });
 
-    assert(static_cast<decltype(cnt)>(idx) == cnt);
+    assert(static_cast< decltype(cnt) >(idx) == cnt);
 
     //   << Format >>
     // # records (N)        4 bytes
@@ -674,23 +674,22 @@ void hs_log_store::apply_pack(ulong index, buffer& pack) {
 
         // sisl::io_blob hs_entry((uint8_t*)value_buf.data(), value_buf.size(), false);
         // auto d = prepare_data(index);
-        m_log_store->write_async(index + ii, {ptr, (uint32_t)log_len, false}, nullptr,
-                                 [index, ptr, num, ii,
-                                  this](homestore::logstore_seq_num_t seq_num, const sisl::io_blob& b,
+        m_log_store->write_async(
+            index + ii, {ptr, (uint32_t)log_len, false}, nullptr,
+            [index, ptr, num, ii, this](homestore::logstore_seq_num_t seq_num, const sisl::io_blob& b,
                                         homestore::logdev_key ld_key, void* ctx) {
-                                     LOGDEBUGMOD(nublox_logstore, "hs_log_store::write_async() index: {}, seqnum {}",
-                                                 index + ii, seq_num);
+                LOGDEBUGMOD(nublox_logstore, "hs_log_store::write_async() index: {}, seqnum {}", index + ii, seq_num);
 
-                                     assert(ld_key);
-                                     // assert(seq_num, ld_key.idx);
-                                     if (seq_num >= static_cast<decltype(seq_num)>(index + num - 1)) {
-                                         {
-                                             auto l = std::lock_guard< std::mutex >(write_mutex);
-                                             write_done = true;
-                                         }
-                                         write_cv.notify_one();
-                                     }
-                                 });
+                assert(ld_key);
+                // assert(seq_num, ld_key.idx);
+                if (seq_num >= static_cast< decltype(seq_num) >(index + num - 1)) {
+                    {
+                        auto l = std::lock_guard< std::mutex >(write_mutex);
+                        write_done = true;
+                    }
+                    write_cv.notify_one();
+                }
+            });
     }
 
     {
@@ -728,9 +727,8 @@ bool hs_log_store::compact(ulong last_log_index) {
         write_done = false;
 
         m_log_store->write_async(last_log_index, hs_entry, nullptr,
-                                 [last_log_index,
-                                  this](homestore::logstore_seq_num_t seq_num, const sisl::io_blob& b,
-                                        homestore::logdev_key ld_key, void* ctx) {
+                                 [last_log_index, this](homestore::logstore_seq_num_t seq_num, const sisl::io_blob& b,
+                                                        homestore::logdev_key ld_key, void* ctx) {
                                      LOGDEBUGMOD(nublox_logstore, "hs_log_store::write_async() index: {}, seqnum {}",
                                                  last_log_index, seq_num);
                                      assert(ld_key);

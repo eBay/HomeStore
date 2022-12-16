@@ -1,7 +1,18 @@
-﻿/*!
-    @file   vol_gtest.cpp
-    Volume Google Tests
- */
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -251,9 +262,7 @@ public:
     }
 
     TestJob(VolTest* test, uint32_t interval_ops_sec, bool run_in_worker_thread) :
-            m_voltest(test),
-            m_start_time(Clock::now()),
-            m_interval_ops_sec(interval_ops_sec) {
+            m_voltest(test), m_start_time(Clock::now()), m_interval_ops_sec(interval_ops_sec) {
         m_timer_hdl = iomanager.schedule_global_timer(interval_ops_sec * 1000ul * 1000ul * 1000ul, true, nullptr,
                                                       run_in_worker_thread ? iomgr::thread_regex::all_worker
                                                                            : iomgr::thread_regex::all_user,
@@ -1444,10 +1453,7 @@ protected:
     struct io_lba_range_t {
         io_lba_range_t() {}
         io_lba_range_t(bool valid, uint64_t vidx, uint64_t l, uint32_t n) :
-                valid_io{valid},
-                vol_idx{vidx},
-                lba{l},
-                num_lbas{n} {}
+                valid_io{valid}, vol_idx{vidx}, lba{l}, num_lbas{n} {}
         bool valid_io{false};
         uint64_t vol_idx{0};
         uint64_t lba{0};

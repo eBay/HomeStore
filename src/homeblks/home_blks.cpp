@@ -1,4 +1,19 @@
-﻿#include <algorithm>
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
+#include <algorithm>
 #include <fstream>
 #include <iterator>
 #include <iostream>
@@ -145,9 +160,7 @@ vol_interface_req::vol_interface_req(std::vector< iovec > iovecs, const uint64_t
 vol_interface_req::~vol_interface_req() = default;
 
 HomeBlks::HomeBlks(const init_params& cfg) :
-        m_cfg(cfg),
-        m_metrics(new HomeBlksMetrics("HomeBlks")),
-        m_start_shutdown{false} {
+        m_cfg(cfg), m_metrics(new HomeBlksMetrics("HomeBlks")), m_start_shutdown{false} {
     LOGINFO("Initializing HomeBlks with Config {}", m_cfg.to_string());
 
     if (m_cfg.start_http) {

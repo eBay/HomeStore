@@ -1,3 +1,18 @@
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 
 #if 0
 1. repl store interface and init  2 week
@@ -69,7 +84,6 @@ public:
 
     void get_data_from_journal(uint64_t from_lsn, uint64_t to_lsn, data_read_cb&);
 
-
 private:
     repl_req* push_data(std::vector< iovec >& iov);
 };
@@ -138,7 +152,6 @@ public:
      */
     virtual ptr< std::vector< ptr< log_entry > > > log_entries(ulong start, ulong end) = 0;
 
-
     /**
      * Get the log entry at the specified log index number.
      *
@@ -197,7 +210,6 @@ public:
 
 class ReplState {
     virtual ptr< buffer > commit(const ulong log_idx, buffer& data) {}
-
 
     /**
      * (Optional)
@@ -278,7 +290,6 @@ class ReplState {
      * @returm `true` on success.
      */
     virtual bool apply_snapshot(snapshot& s) = 0;
-
 
     /**
      * Read the given snapshot object.

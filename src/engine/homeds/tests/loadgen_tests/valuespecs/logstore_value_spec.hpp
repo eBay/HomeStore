@@ -1,7 +1,18 @@
-//
-// Created by Kuang Yaming
-//
-
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #pragma once
 
 #include <cassert>
@@ -34,7 +45,8 @@ private:
     }
 
 public:
-    static std::shared_ptr< LogStoreValue > gen_value(const ValuePattern spec, const LogStoreValue* const ref_value = nullptr) {
+    static std::shared_ptr< LogStoreValue > gen_value(const ValuePattern spec,
+                                                      const LogStoreValue* const ref_value = nullptr) {
         const auto size{get_rand_val_size()};
         std::shared_ptr< LogStoreValue > temp{std::make_shared< LogStoreValue >(size)};
 
@@ -72,27 +84,26 @@ public:
     void copy_blob(const sisl::blob& b) {
         if (!m_bytes) {
             m_size = b.size;
-            m_bytes = iomanager.iobuf_alloc(512, m_size); 
-        }
-        else if (b.size > m_size) {
+            m_bytes = iomanager.iobuf_alloc(512, m_size);
+        } else if (b.size > m_size) {
             iomanager.iobuf_free(m_bytes);
             m_size = b.size;
-            m_bytes = iomanager.iobuf_alloc(512, m_size); 
+            m_bytes = iomanager.iobuf_alloc(512, m_size);
         }
 
-        std::memcpy(static_cast< void* >(m_bytes), static_cast< const void* >(b.bytes), static_cast<size_t>(b.size));
+        std::memcpy(static_cast< void* >(m_bytes), static_cast< const void* >(b.bytes), static_cast< size_t >(b.size));
     }
 
     sisl::blob get_blob() const {
         sisl::blob b;
-        b.bytes = const_cast<uint8_t*>(m_bytes);
+        b.bytes = const_cast< uint8_t* >(m_bytes);
         b.size = m_size;
         return b;
     }
 
     virtual uint64_t get_hash_code() const override {
         const sisl::blob b{get_blob()};
-        return util::Hash64(reinterpret_cast<const char*>(b.bytes), static_cast<size_t>(b.size));
+        return util::Hash64(reinterpret_cast< const char* >(b.bytes), static_cast< size_t >(b.size));
     }
 
     uint8_t* get_buf() { return m_bytes; }

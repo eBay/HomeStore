@@ -1,9 +1,18 @@
-/*
- *  Created on: 14-May-2016
- *      Author: Hari Kadayam
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
  *
- *  Copyright © 2016 Kadayam, Hari. All rights reserved.
- */
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #pragma once
 
 #include <atomic>
@@ -386,73 +395,74 @@ public:
 
         try {
 #ifndef NDEBUG
-        check_lock_debug();
+            check_lock_debug();
 #endif
-        BT_LOG_ASSERT_CMP(rd_size(), ==, 0, );
-        BT_LOG_ASSERT_CMP(wr_size(), ==, 0, );
-
-        BtreeNodePtr root;
-        ret = read_and_lock_root(m_root_node, root, acq_lock, acq_lock, bcp);
-        if (ret != btree_status_t::success) { goto out; }
-        is_leaf = root->is_leaf();
-
-        if (root->is_split_needed(m_btree_cfg, k, v, &ind, put_type, bur)) {
-            // Time to do the split of root.
-            unlock_node(root, acq_lock);
-            m_btree_lock.unlock();
-            ret = check_split_root(k, v, put_type, bur, bcp);
             BT_LOG_ASSERT_CMP(rd_size(), ==, 0, );
             BT_LOG_ASSERT_CMP(wr_size(), ==, 0, );
 
-            // We must have gotten a new root, need to start from scratch.
-            m_btree_lock.read_lock();
+            BtreeNodePtr root;
+            ret = read_and_lock_root(m_root_node, root, acq_lock, acq_lock, bcp);
+            if (ret != btree_status_t::success) { goto out; }
+            is_leaf = root->is_leaf();
 
-            if (ret != btree_status_t::success) {
-                LOGERROR("root split failed btree name {}", m_btree_cfg.get_name());
-                goto out;
-            }
-
-            goto retry;
-        } else if ((is_leaf) && (acq_lock != homeds::thread::LOCKTYPE_WRITE)) {
-            // Root is a leaf, need to take write lock, instead of read, retry
-            unlock_node(root, acq_lock);
-            acq_lock = homeds::thread::LOCKTYPE_WRITE;
-            goto retry;
-        } else {
-            K subrange_start_key, subrange_end_key;
-            bool start_incl = false, end_incl = false;
-            if (bur) {
-                bur->get_input_range().copy_start_end_blob(subrange_start_key, start_incl, subrange_end_key, end_incl);
-            }
-            BtreeSearchRange subrange(subrange_start_key, start_incl, subrange_end_key, end_incl);
-            ret = do_put(root, acq_lock, k, v, ind, put_type, *existing_val, bur, bcp, subrange);
-            if (ret == btree_status_t::retry) {
-                // Need to start from top down again, since there is a race between 2 inserts or deletes.
-                acq_lock = homeds::thread::LOCKTYPE_READ;
-                THIS_BT_LOG(TRACE, btree_generics, , "retrying put operation");
+            if (root->is_split_needed(m_btree_cfg, k, v, &ind, put_type, bur)) {
+                // Time to do the split of root.
+                unlock_node(root, acq_lock);
+                m_btree_lock.unlock();
+                ret = check_split_root(k, v, put_type, bur, bcp);
                 BT_LOG_ASSERT_CMP(rd_size(), ==, 0, );
                 BT_LOG_ASSERT_CMP(wr_size(), ==, 0, );
+
+                // We must have gotten a new root, need to start from scratch.
+                m_btree_lock.read_lock();
+
+                if (ret != btree_status_t::success) {
+                    LOGERROR("root split failed btree name {}", m_btree_cfg.get_name());
+                    goto out;
+                }
+
                 goto retry;
+            } else if ((is_leaf) && (acq_lock != homeds::thread::LOCKTYPE_WRITE)) {
+                // Root is a leaf, need to take write lock, instead of read, retry
+                unlock_node(root, acq_lock);
+                acq_lock = homeds::thread::LOCKTYPE_WRITE;
+                goto retry;
+            } else {
+                K subrange_start_key, subrange_end_key;
+                bool start_incl = false, end_incl = false;
+                if (bur) {
+                    bur->get_input_range().copy_start_end_blob(subrange_start_key, start_incl, subrange_end_key,
+                                                               end_incl);
+                }
+                BtreeSearchRange subrange(subrange_start_key, start_incl, subrange_end_key, end_incl);
+                ret = do_put(root, acq_lock, k, v, ind, put_type, *existing_val, bur, bcp, subrange);
+                if (ret == btree_status_t::retry) {
+                    // Need to start from top down again, since there is a race between 2 inserts or deletes.
+                    acq_lock = homeds::thread::LOCKTYPE_READ;
+                    THIS_BT_LOG(TRACE, btree_generics, , "retrying put operation");
+                    BT_LOG_ASSERT_CMP(rd_size(), ==, 0, );
+                    BT_LOG_ASSERT_CMP(wr_size(), ==, 0, );
+                    goto retry;
+                }
             }
-        }
 
-    out:
-        m_btree_lock.unlock();
+        out:
+            m_btree_lock.unlock();
 #ifndef NDEBUG
-        check_lock_debug();
+            check_lock_debug();
 #endif
-        BT_LOG_ASSERT_CMP(rd_size(), ==, 0, );
-        BT_LOG_ASSERT_CMP(wr_size(), ==, 0, );
+            BT_LOG_ASSERT_CMP(rd_size(), ==, 0, );
+            BT_LOG_ASSERT_CMP(wr_size(), ==, 0, );
 
-        if (ret != btree_status_t::success && ret != btree_status_t::fast_path_not_possible &&
-            ret != btree_status_t::cp_mismatch) {
-            THIS_BT_LOG(ERROR, base, , "btree put failed {}", ret);
-            COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
-        } else {
-            auto time_spent = get_elapsed_time_ns(start_time);
-            HISTOGRAM_OBSERVE(m_metrics, btree_write_time, time_spent);
-        }
-    } catch (const std::exception& e) { BT_LOG_ASSERT(0, , "Exception: {}", e.what()); }
+            if (ret != btree_status_t::success && ret != btree_status_t::fast_path_not_possible &&
+                ret != btree_status_t::cp_mismatch) {
+                THIS_BT_LOG(ERROR, base, , "btree put failed {}", ret);
+                COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
+            } else {
+                auto time_spent = get_elapsed_time_ns(start_time);
+                HISTOGRAM_OBSERVE(m_metrics, btree_write_time, time_spent);
+            }
+        } catch (const std::exception& e) { BT_LOG_ASSERT(0, , "Exception: {}", e.what()); }
         return ret;
     }
 

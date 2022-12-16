@@ -1,7 +1,18 @@
-//
-// Modified by Amit Desai
-//
-
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #ifndef HOMESTORE_CACHE_STORE_SPEC_HPP
 #define HOMESTORE_CACHE_STORE_SPEC_HPP
 
@@ -75,14 +86,15 @@ public:
     }
 
     virtual bool remove(const K& k, V* const removed_v = nullptr) override {
-        m_cache->safe_erase(k, [this, &k, removed_v](const boost::intrusive_ptr< CacheBuffer< CacheKey > >& erased_buf) {
-            LOGDEBUG("Cache store removed {}", *(k.getBlkId()));
-        });
+        m_cache->safe_erase(k,
+                            [this, &k, removed_v](const boost::intrusive_ptr< CacheBuffer< CacheKey > >& erased_buf) {
+                                LOGDEBUG("Cache store removed {}", *(k.getBlkId()));
+                            });
         return true;
     }
 
-    virtual bool remove_any(const K& start_key, const bool start_incl, const K& end_key, const bool end_incl, K* const out_key,
-                            V* const out_val) override {
+    virtual bool remove_any(const K& start_key, const bool start_incl, const K& end_key, const bool end_incl,
+                            K* const out_key, V* const out_val) override {
         assert(false);
         return false;
     }

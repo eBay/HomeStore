@@ -1,3 +1,18 @@
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #pragma once
 
 #include <cassert>
@@ -58,9 +73,9 @@ class WriteLogRecorder {
     // TODO: Combine CRC persistent manager as one common persistence class;
     //
     struct VolLogTracker {
-        int m_fd;                     // memory map fd;
-        uint8_t* m_map_handle{nullptr};  // handle for memory mapped region
-        uint64_t m_cursor{0};         // cursor to mapped region
+        int m_fd;                       // memory map fd;
+        uint8_t* m_map_handle{nullptr}; // handle for memory mapped region
+        uint64_t m_cursor{0};           // cursor to mapped region
 
         uint64_t m_vol_id;
         uint64_t m_write_id{0};
@@ -72,7 +87,8 @@ class WriteLogRecorder {
             m_fd = create_file(get_file_size());
             assert(m_fd != -1);
 
-            m_map_handle = static_cast<uint8_t*>(::mmap(0, static_cast<size_t>(get_file_size()), PROT_READ | PROT_WRITE, MAP_SHARED, m_fd, 0));
+            m_map_handle = static_cast< uint8_t* >(
+                ::mmap(0, static_cast< size_t >(get_file_size()), PROT_READ | PROT_WRITE, MAP_SHARED, m_fd, 0));
             if (m_map_handle == MAP_FAILED) {
                 ::close(m_fd);
                 LOGERROR("Error mmapping the file");
@@ -87,7 +103,7 @@ class WriteLogRecorder {
         ~VolLogTracker() {
             // m_log_entries.clear();
 
-            if (::munmap(m_map_handle, static_cast<size_t>(get_file_size())) == -1) {
+            if (::munmap(m_map_handle, static_cast< size_t >(get_file_size())) == -1) {
                 LOGERROR("Error un-mmapping the file");
                 assert(false);
             }
@@ -124,7 +140,7 @@ class WriteLogRecorder {
             // bump up write_id to this volume;
             ++m_write_id;
 
-            *reinterpret_cast<uint64_t*>(m_map_handle + m_cursor) = m_write_id;
+            *reinterpret_cast< uint64_t* >(m_map_handle + m_cursor) = m_write_id;
             m_cursor += sizeof(uint64_t);
 
             *reinterpret_cast< uint64_t* >(m_map_handle + m_cursor) = lba;
@@ -134,7 +150,7 @@ class WriteLogRecorder {
             m_cursor += sizeof(uint64_t);
 
             for (size_t i{0}; i < crc.size(); ++i) {
-                *reinterpret_cast < crc_t* >(m_map_handle + m_cursor) = crc[i];
+                *reinterpret_cast< crc_t* >(m_map_handle + m_cursor) = crc[i];
                 m_cursor += sizeof(crc_t);
             }
         }
@@ -185,14 +201,14 @@ class WriteLogRecorder {
             std::fstream fs{get_file_name(), std::ios::binary};
             std::error_code ec;
             std::filesystem::resize_file(get_file_name(), static_cast< uintmax_t >(file_size),
-                                                             ec); // set the file size
+                                         ec); // set the file size
             if (ec) {
-            	::close(fd);
+                ::close(fd);
                 LOGERROR("Failed to resize file");
                 assert(false);
                 return -1;
             }
-            
+
             return fd;
         }
     };
@@ -208,7 +224,8 @@ public:
         }
         std::filesystem::permissions(vol_log_dir,
                                      std::filesystem::perms::owner_all | std::filesystem::perms::group_all |
-                                         std::filesystem::perms::others_read | std::filesystem::perms::others_exec, ec);
+                                         std::filesystem::perms::others_read | std::filesystem::perms::others_exec,
+                                     ec);
         if (ec) {
             LOGERROR("Create folder set permissions: {} failed.", vol_log_dir);
             assert(false);

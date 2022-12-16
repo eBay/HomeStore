@@ -1,6 +1,18 @@
-﻿//
-// Created by Kadayam, Hari on 14/10/17.
-//
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #pragma once
 
 #include <algorithm>
@@ -154,16 +166,13 @@ private:
 public:
     BlkAllocSegment(const blk_cap_t nblks, const seg_num_t seg_num, const blk_num_t nportions,
                     const std::string& seg_name) :
-            m_total_blks{nblks},
-            m_total_portions{nportions},
-            m_seg_num{seg_num},
-            m_alloc_clock_hand{0} {}
+            m_total_blks{nblks}, m_total_portions{nportions}, m_seg_num{seg_num}, m_alloc_clock_hand{0} {}
 
     BlkAllocSegment(const BlkAllocSegment&) = delete;
     BlkAllocSegment(BlkAllocSegment&&) noexcept = delete;
     BlkAllocSegment& operator=(const BlkAllocSegment&) = delete;
     BlkAllocSegment& operator=(BlkAllocSegment&&) noexcept = delete;
-    virtual ~BlkAllocSegment(){}
+    virtual ~BlkAllocSegment() {}
 
     [[nodiscard]] blk_num_t get_clock_hand() const { return m_alloc_clock_hand % m_total_portions; }
     void set_clock_hand(const blk_num_t hand) { m_alloc_clock_hand = hand; }

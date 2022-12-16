@@ -1,6 +1,18 @@
-//
-//  Created by Yaming Kuang
-//
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #pragma once
 
 #include <cassert>
@@ -59,13 +71,12 @@ public:
 
         {
             std::lock_guard< std::mutex > lg{m_mtx};
-            const auto hash{util::Hash64(reinterpret_cast<const char*>(log_read.bytes()), log_read.size())};
+            const auto hash{util::Hash64(reinterpret_cast< const char* >(log_read.bytes()), log_read.size())};
             const auto itr{m_wrt_map.find(seq)};
             if ((itr == std::end(m_wrt_map)) || (hash != itr->second.crc)) {
                 if (itr != std::cend(m_wrt_map)) {
                     LOGERROR("Crc Mismatch Failure! read crc: {}, write crc: {}", hash, itr->second.crc);
-                } else 
-                {
+                } else {
                     LOGERROR("Crc Mismatch Failure! read crc: {}, write crc not found for seq: {}", hash, seq);
                 }
                 assert(false);
@@ -113,14 +124,14 @@ public:
         return false;
     }
 
-    virtual bool remove_any(const LogStoreKey& start_key, const bool start_incl,const  LogStoreKey& end_key, const bool end_incl,
-                            LogStoreKey* const out_key, LogStoreValue* const out_val) override {
+    virtual bool remove_any(const LogStoreKey& start_key, const bool start_incl, const LogStoreKey& end_key,
+                            const bool end_incl, LogStoreKey* const out_key, LogStoreValue* const out_val) override {
         assert(false);
         return false;
     }
 
-    virtual uint32_t query(const LogStoreKey& start_key, const bool start_incl, const LogStoreKey& end_key, const bool end_incl,
-                           std::vector< std::pair< LogStoreKey, LogStoreValue > >& result) const {
+    virtual uint32_t query(const LogStoreKey& start_key, const bool start_incl, const LogStoreKey& end_key,
+                           const bool end_incl, std::vector< std::pair< LogStoreKey, LogStoreValue > >& result) const {
         assert(false);
         return 0;
     }
