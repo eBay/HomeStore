@@ -1,7 +1,19 @@
-//
-// Created by Kadayam, Hari on 2/22/19.
-//
-
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ * Author/Developer(s): Harihara Kadayam
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #ifndef HOMESTORE_KEYSET_HPP
 #define HOMESTORE_KEYSET_HPP
 
@@ -198,7 +210,6 @@ template < typename K, typename V >
 struct compare_key_info {
 public:
     bool operator()(const key_info< K, V >* const& ki1, const key_info< K, V >* const& ki2) const {
-        // LOGINFO("Comparing k1 => {} k2 => {}, compare = {}", *ki1, *ki2, ki1->m_key.compare(&ki2->m_key));
         return (ki1->m_key.compare(&ki2->m_key) < 0);
     }
 };
@@ -371,8 +382,8 @@ public:
     std::vector< key_info_ptr< K, V > > get_consecutive_keys(const KeyPattern pattern, const bool exclusive_access,
                                                              const bool is_mutate, const uint32_t num_needed) {
         std::unique_lock l{m_rwlock};
-        std::vector< key_info_ptr< K, V > > kips{
-            get_contiguous_keys_impl(pattern, exclusive_access, is_mutate, num_needed)};
+        std::vector< key_info_ptr< K, V > > kips =
+            get_contiguous_keys_impl(pattern, exclusive_access, is_mutate, num_needed);
         if (kips.size() <= 1) return kips;
 
         size_t count{1};
@@ -494,8 +505,8 @@ private:
                 LOGERROR("Could not generate keys!!!");
                 assert(false);
             }
-            newKi= std::make_unique< key_info< K, V > >(
-                K::gen_key(gen_pattern, get_last_gen_key_impl(gen_pattern)), slot_num);
+            newKi = std::make_unique< key_info< K, V > >(K::gen_key(gen_pattern, get_last_gen_key_impl(gen_pattern)),
+                                                         slot_num);
         } while (has_key(newKi.get()));
 
         // Generate a key and put in the key list and mark that slot as valid.
@@ -635,7 +646,7 @@ private:
             }
             return (*it)->m_slot_num;
         } else {
-            int32_t next_slot{static_cast<int32_t>(m_alive_slots.find_next(cur_slot))};
+            int32_t next_slot{static_cast< int32_t >(m_alive_slots.find_next(cur_slot))};
             if ((next_slot == static_cast< int32_t >(boost::dynamic_bitset<>::npos)) || (next_slot == cur_slot)) {
                 next_slot = m_alive_slots.find_first();
                 *rotated = true;

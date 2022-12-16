@@ -30,26 +30,23 @@
 #pragma GCC diagnostic pop
 #endif
 
-#define DELETE(ptr) \
-    delete ptr;     \
-    ptr = nullptr   \
+#define DELETE(ptr)                                                                                                    \
+    delete ptr;                                                                                                        \
+    ptr = nullptr
 
-#define FREE(ptr)   \
-    free(ptr);      \
-    ptr = nullptr   \
+#define FREE(ptr)                                                                                                      \
+    free(ptr);                                                                                                         \
+    ptr = nullptr
 
 class GenericTimer {
-  public:
-    GenericTimer(uint64_t _duration_sec = 0, bool fire_first_event = false)
-        : duration_us(_duration_sec * 1000000)
-        , firstEventFired(!fire_first_event) {
+public:
+    GenericTimer(uint64_t _duration_sec = 0, bool fire_first_event = false) :
+            duration_us(_duration_sec * 1000000), firstEventFired(!fire_first_event) {
         reset();
     }
 
     struct TimeInfo {
-        TimeInfo()
-            : year(0), month(0), day(0), hour(0), min(0), sec(0)
-            , msec(0), usec(0) {}
+        TimeInfo() : year(0), month(0), day(0), hour(0), min(0), sec(0), msec(0), usec(0) {}
         TimeInfo(std::chrono::system_clock::time_point now) {
             std::time_t raw_time = std::chrono::system_clock::to_time_t(now);
             std::tm* lt_tm = std::localtime(&raw_time);
@@ -60,20 +57,14 @@ class GenericTimer {
             min = lt_tm->tm_min;
             sec = lt_tm->tm_sec;
 
-            size_t us_epoch = std::chrono::duration_cast
-                              < std::chrono::microseconds >
-                              ( now.time_since_epoch() ).count();
+            size_t us_epoch = std::chrono::duration_cast< std::chrono::microseconds >(now.time_since_epoch()).count();
             msec = (us_epoch / 1000) % 1000;
             usec = us_epoch % 1000;
         }
-        void now() {
-            *this = TimeInfo(GenericTimer::now());
-        }
+        void now() { *this = TimeInfo(GenericTimer::now()); }
         std::string toString() {
             thread_local char time_char[64];
-            sprintf(time_char, "%04d-%02d-%02d %02d:%02d:%02d.%03d %03d",
-                    year, month, day, hour,
-                    min, sec, msec, usec);
+            sprintf(time_char, "%04d-%02d-%02d %02d:%02d:%02d.%03d %03d", year, month, day, hour, min, sec, msec, usec);
             return time_char;
         }
         int year;
@@ -86,21 +77,13 @@ class GenericTimer {
         int usec;
     };
 
-    static std::chrono::system_clock::time_point now() {
-        return std::chrono::system_clock::now();
-    }
+    static std::chrono::system_clock::time_point now() { return std::chrono::system_clock::now(); }
 
-    static void sleepUs(size_t us) {
-        std::this_thread::sleep_for(std::chrono::microseconds(us));
-    }
+    static void sleepUs(size_t us) { std::this_thread::sleep_for(std::chrono::microseconds(us)); }
 
-    static void sleepMs(size_t ms) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(ms));
-    }
+    static void sleepMs(size_t ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); }
 
-    static void sleepSec(size_t sec) {
-        std::this_thread::sleep_for(std::chrono::seconds(sec));
-    }
+    static void sleepSec(size_t sec) { std::this_thread::sleep_for(std::chrono::seconds(sec)); }
 
     static inline void getTimeofDay(uint64_t& sec_out, uint32_t& us_out) {
         struct timeval tv;
@@ -124,7 +107,7 @@ class GenericTimer {
         }
 
         auto cur = std::chrono::system_clock::now();
-        std::chrono::duration<double> elapsed = cur - start;
+        std::chrono::duration< double > elapsed = cur - start;
         return (duration_us < elapsed.count() * 1000000);
     }
 
@@ -137,7 +120,7 @@ class GenericTimer {
             return true;
         }
 
-        std::chrono::duration<double> elapsed = cur - start;
+        std::chrono::duration< double > elapsed = cur - start;
         if (duration_us < elapsed.count() * 1000000) {
             start = cur;
             return true;
@@ -145,25 +128,21 @@ class GenericTimer {
         return false;
     }
 
-    inline void reset() {
-        start = std::chrono::system_clock::now();
-    }
+    inline void reset() { start = std::chrono::system_clock::now(); }
 
     inline uint64_t getElapsedUs() const {
         auto cur = std::chrono::system_clock::now();
-        std::chrono::duration<double> elapsed = cur - start;
+        std::chrono::duration< double > elapsed = cur - start;
         return elapsed.count() * 1000000;
     }
 
     inline uint64_t getElapsedMs() const {
         auto cur = std::chrono::system_clock::now();
-        std::chrono::duration<double> elapsed = cur - start;
+        std::chrono::duration< double > elapsed = cur - start;
         return elapsed.count() * 1000;
     }
 
-    inline size_t getDurationSec() const {
-        return duration_us / 1000000;
-    }
+    inline size_t getDurationSec() const { return duration_us / 1000000; }
 
     inline void resetDurationUs(uint64_t us) {
         duration_us = us;
@@ -174,22 +153,20 @@ class GenericTimer {
         reset();
     }
 
-  protected:
-    std::chrono::time_point<std::chrono::system_clock> start;
+protected:
+    std::chrono::time_point< std::chrono::system_clock > start;
     uint64_t duration_us;
     mutable bool firstEventFired;
 };
 
 class PathMgr {
-  public:
+public:
     static bool exist(const std::string& path) {
         struct stat st;
         if (stat(path.c_str(), &st) != 0) return false;
         return true;
     }
-    static int mkdir(const std::string& path) {
-        return ::mkdir(path.c_str(), 0755);
-    }
+    static int mkdir(const std::string& path) { return ::mkdir(path.c_str(), 0755); }
     static int rmdir(const std::string& path) {
         if (!exist(path)) return 0;
 
@@ -210,26 +187,24 @@ class PathMgr {
         if (!exist(path)) return 0;
         return ::truncate(path.c_str(), size);
     }
-    static int scan(const std::string& path,
-                    std::vector<std::string>& files_out) {
-        DIR *dir_info = nullptr;
-        struct dirent *dir_entry = nullptr;
+    static int scan(const std::string& path, std::vector< std::string >& files_out) {
+        DIR* dir_info = nullptr;
+        struct dirent* dir_entry = nullptr;
 
         dir_info = opendir(path.c_str());
-        while ( dir_info && (dir_entry = readdir(dir_info)) ) {
+        while (dir_info && (dir_entry = readdir(dir_info))) {
             files_out.push_back(dir_entry->d_name);
         }
         closedir(dir_info);
         return 0;
     }
-    static uint64_t dirSize(const std::string& path,
-                            bool recursive = false) {
+    static uint64_t dirSize(const std::string& path, bool recursive = false) {
         uint64_t ret = 0;
-        DIR *dir_info = nullptr;
-        struct dirent *dir_entry = nullptr;
+        DIR* dir_info = nullptr;
+        struct dirent* dir_entry = nullptr;
 
         dir_info = opendir(path.c_str());
-        while ( dir_info && (dir_entry = readdir(dir_info)) ) {
+        while (dir_info && (dir_entry = readdir(dir_info))) {
             std::string d_name = dir_entry->d_name;
             if (d_name == "." || d_name == "..") continue;
 
@@ -237,9 +212,7 @@ class PathMgr {
 
             if (dir_entry->d_type == DT_REG) {
                 struct stat st;
-                if (stat(full_path.c_str(), &st) == 0) {
-                    ret += st.st_size;
-                }
+                if (stat(full_path.c_str(), &st) == 0) { ret += st.st_size; }
 
             } else if (recursive && dir_entry->d_type == DT_DIR) {
                 ret += dirSize(full_path, recursive);
@@ -255,8 +228,7 @@ class PathMgr {
     }
     static bool isRelPath(const std::string& path) {
         // If start with `./` or `../`: relative path.
-        if (path.substr(0, 2) == "./" ||
-                path.substr(0, 3) == "../") return true;
+        if (path.substr(0, 2) == "./" || path.substr(0, 3) == "../") return true;
 
         // If filename only: relative path.
         if (path.find("/") == std::string::npos) return true;
@@ -291,10 +263,8 @@ class PathMgr {
 };
 
 class HexDump {
-  public:
-    static std::string toString(const std::string& str) {
-        return toString(str.data(), str.size());
-    }
+public:
+    static std::string toString(const std::string& str) { return toString(str.data(), str.size()); }
 
     static std::string toString(const void* pd, size_t len) {
         char* buffer;
@@ -302,9 +272,7 @@ class HexDump {
         print_hex_options opt = PRINT_HEX_OPTIONS_INITIALIZER;
         opt.actual_address = 0;
         opt.enable_colors = 0;
-        print_hex_to_buf(&buffer, &buffer_len,
-                         pd, len,
-                         opt);
+        print_hex_to_buf(&buffer, &buffer_len, pd, len, opt);
         std::string s = std::string(buffer);
         free(buffer);
         return s;
@@ -313,7 +281,7 @@ class HexDump {
     static std::string rStr(const std::string& str, size_t limit = 16) {
         std::stringstream ss;
         size_t size = std::min(str.size(), limit);
-        for (size_t ii=0; ii<size; ++ii) {
+        for (size_t ii = 0; ii < size; ++ii) {
             char cc = str[ii];
             if (0x20 <= cc && cc <= 0x7d) {
                 ss << cc;
@@ -329,7 +297,7 @@ class HexDump {
     // {0x01, 0x23, 0xab} -> "0123ab"
     static std::string bin2HexStr(const void* buf, size_t len) {
         std::string hex_str;
-        const uint8_t* ptr = static_cast<const uint8_t*>(buf);
+        const uint8_t* ptr = static_cast< const uint8_t* >(buf);
         for (size_t ii = 0; ii < len; ++ii) {
             char temp[8];
             sprintf(temp, "%02x", ptr[ii]);
@@ -341,24 +309,22 @@ class HexDump {
     // Convert hex string to binary:
     // "0123ab" -> {0x01, 0x23, 0xab}
     static std::string hexStr2bin(const std::string& hex_str) {
-        std::vector<uint8_t> ret(hex_str.size() / 2, 0);
+        std::vector< uint8_t > ret(hex_str.size() / 2, 0);
         uint8_t* ptr = &ret[0];
-        for (size_t ii=0; ii<hex_str.size(); ii+=2) {
+        for (size_t ii = 0; ii < hex_str.size(); ii += 2) {
             std::string cur_hex = hex_str.substr(ii, 2);
-            *(ptr + (ii/2)) = std::stoul(cur_hex, nullptr, 16);
+            *(ptr + (ii / 2)) = std::stoul(cur_hex, nullptr, 16);
         }
         return std::string((const char*)&ret[0], ret.size());
     }
 };
 
 class StringHelper {
-  public:
+public:
     // Replace all `before`s in `src_str` with `after.
     // e.g.) before="a", after="A", src_str="ababa"
     //       result: "AbAbA"
-    static std::string replace(const std::string& src_str,
-                               const std::string& before,
-                               const std::string& after) {
+    static std::string replace(const std::string& src_str, const std::string& before, const std::string& after) {
         size_t last = 0;
         size_t pos = src_str.find(before, last);
         std::string ret;
@@ -368,10 +334,7 @@ class StringHelper {
             last = pos + before.size();
             pos = src_str.find(before, last);
         }
-        if (last < src_str.size()) {
-            ret += src_str.substr(last);
-        }
+        if (last < src_str.size()) { ret += src_str.substr(last); }
         return ret;
     }
 };
-

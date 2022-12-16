@@ -14,9 +14,6 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
-//
-// Created by Kadayam, Hari on 11/11/17.
-//
 #pragma once
 
 #include <vector>

@@ -12,7 +12,7 @@
 
 // Note: accessing a StatElem instance using multiple threads is safe.
 class StatElem {
-  public:
+public:
     enum Type {
         COUNTER = 0,
         HISTOGRAM = 1,
@@ -31,9 +31,7 @@ class StatElem {
         assert(statType == HISTOGRAM);
         hist->add(us);
     }
-    inline void addVal(uint64_t val) {
-        addLatency(val);
-    }
+    inline void addVal(uint64_t val) { addLatency(val); }
 
     inline void set(int64_t value) {
         assert(statType != HISTOGRAM);
@@ -69,33 +67,23 @@ class StatElem {
         return *this;
     }
 
-    const std::string& getName() const {
-        return statName;
-    }
-    Type getType() const {
-        return statType;
-    }
-    uint64_t getCounter() const {
-        return counter;
-    }
-    int64_t getGauge() const {
-        return gauge;
-    }
-    Histogram* getHistogram() const {
-        return hist;
-    }
+    const std::string& getName() const { return statName; }
+    Type getType() const { return statType; }
+    uint64_t getCounter() const { return counter; }
+    int64_t getGauge() const { return gauge; }
+    Histogram* getHistogram() const { return hist; }
 
-  private:
+private:
     Type statType;
     std::string statName;
-    std::atomic<uint64_t> counter;
-    std::atomic<int64_t> gauge;
+    std::atomic< uint64_t > counter;
+    std::atomic< int64_t > gauge;
     Histogram* hist;
 };
 
 // Singleton class
 class StatMgr {
-  public:
+public:
     struct MemoryStat {
         MemoryStat() : virtSize(0), resSize(0), sharedSize(0) {}
         uint64_t virtSize;
@@ -104,10 +92,7 @@ class StatMgr {
     };
 
     struct CpuStat {
-        CpuStat()
-            : userTimeMs(0), kernelTimeMs(0)
-            , userMilliCores(0), kernelMilliCores(0)
-        {}
+        CpuStat() : userTimeMs(0), kernelTimeMs(0), userMilliCores(0), kernelMilliCores(0) {}
         uint64_t userTimeMs;
         uint64_t kernelTimeMs;
 
@@ -118,18 +103,17 @@ class StatMgr {
     };
 
     struct IoStat {
-        IoStat()
-            : bytesRead(0)
-            , bytesReadFromDisk(0)
-            , bytesWritten(0)
-            , bytesWrittenToDisk(0)
-            , numReads(0)
-            , numWrites(0)
-            , avgRTimeUs(0)
-            , avgWTimeUs(0)
-            , partitionUtil(0)
-            , deviceUtil(0)
-        {}
+        IoStat() :
+                bytesRead(0),
+                bytesReadFromDisk(0),
+                bytesWritten(0),
+                bytesWrittenToDisk(0),
+                numReads(0),
+                numWrites(0),
+                avgRTimeUs(0),
+                avgWTimeUs(0),
+                partitionUtil(0),
+                deviceUtil(0) {}
         uint64_t bytesRead;
         uint64_t bytesReadFromDisk;
         uint64_t bytesWritten;
@@ -157,16 +141,15 @@ class StatMgr {
 
     StatElem* getStat(const std::string& stat_name);
     StatElem* createStat(StatElem::Type type, const std::string& stat_name);
-    void getAllStats(std::vector<StatElem*>& stats_out);
+    void getAllStats(std::vector< StatElem* >& stats_out);
 
-  private:
+private:
     static std::mutex instanceLock;
-    static std::atomic<StatMgr*> instance;
+    static std::atomic< StatMgr* > instance;
 
     StatMgr();
     ~StatMgr();
 
     std::mutex statMapLock;
-    std::map<std::string, StatElem*> statMap;
-
+    std::map< std::string, StatElem* > statMap;
 };

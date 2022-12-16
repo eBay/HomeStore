@@ -1,10 +1,19 @@
-/*
- * varlen_node.hpp
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
  *
- *  Created on: 18-Feb-2017
- *      Author: hkadayam
- */
-
+ * Author/Developer(s): Harihara Kadayam
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #ifndef BTREE_VARLEN_NODE_HPP_
 #define BTREE_VARLEN_NODE_HPP_
 
@@ -227,9 +236,7 @@ class VarValueNode : public AbstractNode< K, V > {
                 get_nth_key(*out_ind_hint, &match_key, false /* copy */);
                 assert(match_key.is_range() == true);
 
-                if (!rkey.is_full_match(match_key)) {
-                    size_needed += (curval.get_blob_size() * 2);
-                }
+                if (!rkey.is_full_match(match_key)) { size_needed += (curval.get_blob_size() * 2); }
             }
         }
 
@@ -301,9 +308,7 @@ private:
 
     // Gets the length of objects between start and end index
     inline uint32_t get_objs_len(int start_ind, int end_ind) {
-        if (end_ind < start_ind) {
-            return 0;
-        }
+        if (end_ind < start_ind) { return 0; }
 
         int start_offset = (start_ind == 0) ? get_last_offset() : get_nth_record(start_ind - 1)->m_obj_offset;
         int end_offset = get_nth_record(end_ind)->m_obj_offset;

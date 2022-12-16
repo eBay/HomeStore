@@ -1,4 +1,4 @@
-﻿/*********************************************************************************
+/*********************************************************************************
  * Modifications Copyright 2017-2019 eBay Inc.
  *
  * Author/Developer(s): Harihara Kadayam, Bryan Zimmerman, Rishabh Mittal

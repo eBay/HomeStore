@@ -34,30 +34,24 @@
 #include <atomic>
 #include <mutex>
 
-template<typename T>
+template < typename T >
 class ashared_ptr {
-  public:
+public:
     ashared_ptr() : object{nullptr} {}
-      ashared_ptr(T* const src_ptr) : object{(src_ptr) ? new PtrWrapper< T >(src_ptr) : nullptr} {}
-    ashared_ptr(const ashared_ptr< T >& src) : object{nullptr} {
-        operator=(src);
-    }
+    ashared_ptr(T* const src_ptr) : object{(src_ptr) ? new PtrWrapper< T >(src_ptr) : nullptr} {}
+    ashared_ptr(const ashared_ptr< T >& src) : object{nullptr} { operator=(src); }
 
-    ~ashared_ptr() {
-        reset();
-    }
+    ~ashared_ptr() { reset(); }
 
     void reset() {
-        std::lock_guard<std::mutex> l{lock};
+        std::lock_guard< std::mutex > l{lock};
         PtrWrapper< T >* const ptr{object.load(MO)};
         // Unlink pointer first, destroy object next.
         object.store(nullptr, MO);
         releaseObject(ptr);
     }
 
-    bool operator==(const ashared_ptr<T>& src) const {
-        return object.load(MO) == src.object.load(MO);
-    }
+    bool operator==(const ashared_ptr< T >& src) const { return object.load(MO) == src.object.load(MO); }
 
     bool operator==(const T* src) const {
         if (!object.load(MO)) {
@@ -81,29 +75,21 @@ class ashared_ptr {
         releaseObject(old);
     }
 
-    T* operator->() const {
-        return object.load(MO)->ptr.load(MO);
-    }
-    T& operator*() const {
-        return *object.load(MO)->ptr.load(MO);
-    }
-    T* get() const {
-        return object.load(MO)->ptr.load(MO);
-    }
+    T* operator->() const { return object.load(MO)->ptr.load(MO); }
+    T& operator*() const { return *object.load(MO)->ptr.load(MO); }
+    T* get() const { return object.load(MO)->ptr.load(MO); }
 
-    inline bool compare_exchange_strong(ashared_ptr<T>& expected,
-                                        ashared_ptr<T> src,
+    inline bool compare_exchange_strong(ashared_ptr< T >& expected, ashared_ptr< T > src,
                                         [[maybe_unused]] const std::memory_order order) {
         return compare_exchange(expected, src);
     }
 
-    inline bool compare_exchange_weak(ashared_ptr<T>& expected,
-                                      ashared_ptr<T> src,
+    inline bool compare_exchange_weak(ashared_ptr< T >& expected, ashared_ptr< T > src,
                                       [[maybe_unused]] const std::memory_order order) {
         return compare_exchange(expected, src);
     }
 
-    bool compare_exchange(ashared_ptr<T>& expected, ashared_ptr<T> src) {
+    bool compare_exchange(ashared_ptr< T >& expected, ashared_ptr< T > src) {
         // Note: it is OK that `expected` becomes outdated.
         PtrWrapper< T >* expected_ptr{expected.object.load(MO)};
         PtrWrapper< T >* const val_ptr{src.shareCurObject()};
@@ -125,18 +111,18 @@ class ashared_ptr {
         return false;
     }
 
-  private:
-    template<typename T2>
+private:
+    template < typename T2 >
     struct PtrWrapper {
         PtrWrapper() : ptr{nullptr}, refCount{0} {}
         PtrWrapper(T2* const src) : ptr{src}, refCount{1} {}
 
-        std::atomic<T2*> ptr;
-        std::atomic<uint64_t> refCount;
+        std::atomic< T2* > ptr;
+        std::atomic< uint64_t > refCount;
     };
 
     // Atomically increase ref count and then return.
-    PtrWrapper<T>* shareCurObject() {
+    PtrWrapper< T >* shareCurObject() {
         std::lock_guard< std::mutex > l{lock};
         if (!object.load(MO)) return nullptr;
 
@@ -148,7 +134,7 @@ class ashared_ptr {
     }
 
     // Decrease ref count and delete if no one refers to it.
-    void releaseObject(PtrWrapper<T>* const target) {
+    void releaseObject(PtrWrapper< T >* const target) {
         if (!target) return;
         if (target->refCount.fetch_sub(1, MO) == 1) {
             std::atomic_thread_fence(std::memory_order_acquire);
@@ -160,6 +146,6 @@ class ashared_ptr {
 
     constexpr static std::memory_order MO{std::memory_order_relaxed};
 
-    std::atomic<PtrWrapper<T>*> object;
+    std::atomic< PtrWrapper< T >* > object;
     std::mutex lock;
 };
