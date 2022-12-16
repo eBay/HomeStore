@@ -1,7 +1,6 @@
-﻿/*********************************************************************************
+/*********************************************************************************
  * Modifications Copyright 2017-2019 eBay Inc.
  *
- * Author/Developer(s): Harihara Kadayam, Rishabh Mittal
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,7 +13,6 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
-
 #ifndef ALLOCATOR_H
 #define ALLOCATOR_H
 
@@ -219,9 +217,8 @@ public:
  * Blk allocator has two recoveries auto recovery and manual recovery
  * 1. auto recovery :- disk bit map is persisted. Consumers only have to replay journal. It is used by volume and
  * btree.
- * 2. manual recovery :- disk bit map is not persisted. Consumers have to scan its index table to set blks allocated.
- * It is used meta blk manager.
- * Base class manages disk_bitmap as it is common to all blk allocator.
+ * 2. manual recovery :- disk bit map is not persisted. Consumers have to scan its index table to set blks
+ * allocated. It is used meta blk manager. Base class manages disk_bitmap as it is common to all blk allocator.
  *
  * Disk bitmap is persisted only during checkpoints. These two things always be true while disk bitmap is persisting
  * 1. It contains atleast all the blks allocated upto that checkpoint. It can contain blks allocated for next

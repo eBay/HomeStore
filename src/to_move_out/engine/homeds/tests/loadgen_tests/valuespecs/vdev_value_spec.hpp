@@ -1,7 +1,18 @@
-//
-// Created by Kuang Yaming
-//
-
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #pragma once
 
 #include <cassert>
@@ -15,7 +26,6 @@
 
 #include "homeds/loadgen/loadgen_common.hpp"
 #include "homeds/loadgen/spec/value_spec.hpp"
-
 
 namespace homeds {
 namespace loadgen {
@@ -73,7 +83,10 @@ public:
     }
 
     bool operator==(const VDevValue& rhs) const {
-        if (m_size == rhs.m_size) { return  (m_size > 0) ? (std::memcmp(static_cast<const void*>(m_bytes), static_cast<const void*>(rhs.m_bytes), m_size) == 0) : true;
+        if (m_size == rhs.m_size) {
+            return (m_size > 0) ? (std::memcmp(static_cast< const void* >(m_bytes),
+                                               static_cast< const void* >(rhs.m_bytes), m_size) == 0)
+                                : true;
         } else
             return false;
     }
@@ -87,7 +100,7 @@ public:
 
     virtual uint64_t get_hash_code() const override {
         const sisl::blob b{get_blob()};
-        return util::Hash64(reinterpret_cast< const char* >(b.bytes), static_cast<size_t>(b.size));
+        return util::Hash64(reinterpret_cast< const char* >(b.bytes), static_cast< size_t >(b.size));
     }
 
     uint8_t* get_buf() { return m_bytes; }

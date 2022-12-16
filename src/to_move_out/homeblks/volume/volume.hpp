@@ -1,3 +1,18 @@
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #pragma once
 
 #include <atomic>
@@ -134,8 +149,7 @@ protected:
 class VolumeMetrics : public sisl::MetricsGroupWrapper {
 public:
     explicit VolumeMetrics(const char* vol_name, Volume* vol) :
-            sisl::MetricsGroupWrapper("Volume", vol_name),
-            m_volume(vol) {
+            sisl::MetricsGroupWrapper("Volume", vol_name), m_volume(vol) {
         REGISTER_COUNTER(volume_read_count, "Total Volume read operations", "volume_op_count", {"op", "read"});
         REGISTER_COUNTER(volume_write_count, "Total Volume write operations", "volume_op_count", {"op", "write"});
         REGISTER_COUNTER(volume_unmap_count, "Total Volume unmap operations", "volume_op_count", {"op", "unmap"});
@@ -215,10 +229,7 @@ struct vol_sb_hdr {
     indx_mgr_sb indx_sb;
     vol_sb_hdr(const uint64_t& page_size, const uint64_t& size, const char* in_vol_name, const boost::uuids::uuid& uuid,
                const uint32_t& num_streams) :
-            num_streams{num_streams},
-            page_size{page_size},
-            size{size},
-            uuid{uuid} {
+            num_streams{num_streams}, page_size{page_size}, size{size}, uuid{uuid} {
         std::strncpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
         vol_name[VOL_NAME_SIZE - 1] = '\0';
     };
@@ -735,9 +746,7 @@ private:
     /********** Constructor/Destructor **********/
     // volume_req() : csum_list(0), alloc_blkid_list(0), fbe_list(0){};
     volume_req(const vol_interface_req_ptr& vi_req) :
-            indx_req(vi_req->request_id, vi_req->op_type),
-            iface_req(vi_req),
-            io_start_time(Clock::now()) {
+            indx_req(vi_req->request_id, vi_req->op_type), iface_req(vi_req), io_start_time(Clock::now()) {
         if (vi_req->use_cache()) {
             HS_DBG_ASSERT(vi_req->iovecs.empty(), "condition not empty");
             // lifetime managed by HomeStore

@@ -1,9 +1,3 @@
-/*
- * unit_test_main.cpp
- *
- *  Created on: Jan 8, 2019
- */
-
 #include <cstdint>
 #include <string>
 

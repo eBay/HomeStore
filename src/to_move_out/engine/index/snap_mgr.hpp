@@ -1,3 +1,18 @@
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #pragma once
 #include "indx_mgr.hpp"
 
@@ -6,7 +21,7 @@ struct snap_sb {
     boost::uuids::uuid indx_mgr_uuid;
     uint64_t snap_id;
     homeds::btree::btree_super_block btree_sb;
-    bool is_diff = true; // we set it to false when snapshot is created successfully
+    bool is_diff = true;    // we set it to false when snapshot is created successfully
     uint64_t indx_tbl_size; // it is used to calculate the size used in reboot.
     int64_t cp_cnt; // start cp_cnt of this snapshot. It means contain all the ios starting from this cp_cnt till the
                     // cp_cnt of next snapshot.
@@ -30,7 +45,8 @@ public:
      *                          false :- it is first time create
      * @params func :- function to create indx table
      */
-    SnapMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, const read_indx_comp_cb_t& read_cb, create_indx_tbl func, bool is_snap_enabled);
+    SnapMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, const read_indx_comp_cb_t& read_cb,
+            create_indx_tbl func, bool is_snap_enabled);
 
     /* constructor for recovery */
     SnapMgr(boost::uuids::uuid uuid, std::string name, io_done_cb io_cb, const read_indx_comp_cb_t& read_cb,

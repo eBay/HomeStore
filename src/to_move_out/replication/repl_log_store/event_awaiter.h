@@ -38,34 +38,23 @@
 #include <mutex>
 
 class EventAwaiter {
-  private:
-    enum class AS {
-        idle    = 0x0,
-        ready   = 0x1,
-        waiting = 0x2,
-        done    = 0x3
-    };
+private:
+    enum class AS { idle = 0x0, ready = 0x1, waiting = 0x2, done = 0x3 };
 
-  public:
+public:
     EventAwaiter() : status(AS::idle) {}
 
-    void reset() {
-        status.store(AS::idle);
-    }
+    void reset() { status.store(AS::idle); }
 
-    void wait() {
-        wait_us(0);
-    }
+    void wait() { wait_us(0); }
 
-    void wait_ms(size_t time_ms) {
-        wait_us(time_ms * 1000);
-    }
+    void wait_ms(size_t time_ms) { wait_us(time_ms * 1000); }
 
     void wait_us(size_t time_us) {
         AS expected = AS::idle;
         if (status.compare_exchange_strong(expected, AS::ready)) {
             // invoke() has not been invoked yet, wait for it.
-            std::unique_lock<std::mutex> l(cvLock);
+            std::unique_lock< std::mutex > l(cvLock);
             expected = AS::ready;
             if (status.compare_exchange_strong(expected, AS::waiting)) {
                 if (time_us) {
@@ -89,7 +78,7 @@ class EventAwaiter {
             return;
         }
 
-        std::unique_lock<std::mutex> l(cvLock);
+        std::unique_lock< std::mutex > l(cvLock);
         expected = AS::ready;
         if (status.compare_exchange_strong(expected, AS::done)) {
             // wait() has been called earlier than invoke(),
@@ -101,10 +90,8 @@ class EventAwaiter {
         }
     }
 
-  private:
-    std::atomic<AS> status;
+private:
+    std::atomic< AS > status;
     std::mutex cvLock;
     std::condition_variable cv;
 };
-
-

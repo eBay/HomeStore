@@ -13,33 +13,27 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
-#ifndef THREAD_LOCK_HPP_
-#define THREAD_LOCK_HPP_
+#pragma once
+#include <type_traits>
+#include <cstdint>
+#include <random>
+#include <iostream>
 
-#include <pthread.h>
+namespace homestore {
 
-namespace homeds {
-namespace thread {
-
-class RWLock {
+class BitsGenerator {
 public:
-    RWLock() { pthread_rwlock_init(&m_lock, NULL); }
+    static void gen_random_bits(size_t size, uint8_t* buf) {
+        std::random_device rd;
+        std::default_random_engine g(rd());
+        std::uniform_int_distribution< unsigned long long > dis(std::numeric_limits< std::uint8_t >::min(),
+                                                                std::numeric_limits< std::uint8_t >::max());
+        for (size_t i = 0; i < size; ++i) {
+            buf[i] = dis(g);
+        }
+    }
 
-    ~RWLock() { pthread_rwlock_destroy(&m_lock); }
-
-    void read_lock() { pthread_rwlock_rdlock(&m_lock); }
-
-    void write_lock() { pthread_rwlock_wrlock(&m_lock); }
-
-    void unlock() { pthread_rwlock_unlock(&m_lock); }
-
-private:
-    pthread_rwlock_t m_lock;
+    static void gen_random_bits(sisl::blob& b) { gen_random_bits(b.size, b.bytes); }
 };
 
-enum locktype { LOCKTYPE_NONE = 0, LOCKTYPE_READ, LOCKTYPE_WRITE };
-
-} // namespace thread
-} // namespace homeds
-
-#endif /* THREAD_LOCK_HPP_ */
+}; // namespace homestore

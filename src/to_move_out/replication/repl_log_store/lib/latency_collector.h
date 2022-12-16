@@ -54,22 +54,11 @@
 #include <string.h>
 
 struct LatencyCollectorDumpOptions {
-    enum SortBy {
-        NAME,
-        TOTAL_TIME,
-        NUM_CALLS,
-        AVG_LATENCY
-    };
+    enum SortBy { NAME, TOTAL_TIME, NUM_CALLS, AVG_LATENCY };
 
-    enum ViewType {
-        TREE,
-        FLAT
-    };
+    enum ViewType { TREE, FLAT };
 
-    LatencyCollectorDumpOptions()
-        : sort_by(SortBy::NAME)
-        , view_type(ViewType::TREE)
-    {}
+    LatencyCollectorDumpOptions() : sort_by(SortBy::NAME), view_type(ViewType::TREE) {}
 
     SortBy sort_by;
     ViewType view_type;
@@ -78,23 +67,19 @@ struct LatencyCollectorDumpOptions {
 class LatencyItem;
 class MapWrapper;
 class LatencyDump {
-  public:
-    virtual std::string dump(MapWrapper* map_w,
-                             const LatencyCollectorDumpOptions& opt) = 0;
-    virtual std::string dumpTree(MapWrapper* map_w,
-                                 const LatencyCollectorDumpOptions& opt) = 0;
+public:
+    virtual std::string dump(MapWrapper* map_w, const LatencyCollectorDumpOptions& opt) = 0;
+    virtual std::string dumpTree(MapWrapper* map_w, const LatencyCollectorDumpOptions& opt) = 0;
 
     // To make child class be able to access internal map.
-    std::unordered_map<std::string, LatencyItem*>& getMap(MapWrapper* map_w);
+    std::unordered_map< std::string, LatencyItem* >& getMap(MapWrapper* map_w);
 };
 
 class LatencyItem {
-  public:
+public:
     LatencyItem() {}
     LatencyItem(const std::string& _name) : statName(_name) {}
-    LatencyItem(const LatencyItem& src)
-        : statName(src.statName)
-        , hist(src.hist) {}
+    LatencyItem(const LatencyItem& src) : statName(src.statName), hist(src.hist) {}
 
     // this = src
     LatencyItem& operator=(const LatencyItem& src) {
@@ -110,37 +95,20 @@ class LatencyItem {
     }
 
     // returning lhs + rhs
-    friend LatencyItem operator+(LatencyItem lhs,
-                                 const LatencyItem& rhs) {
+    friend LatencyItem operator+(LatencyItem lhs, const LatencyItem& rhs) {
         lhs.hist += rhs.hist;
         return lhs;
     }
 
-    std::string getName() const {
-        return statName;
-    }
+    std::string getName() const { return statName; }
 
-    void addLatency(uint64_t latency) {
-        hist.add(latency);
-    }
-    uint64_t getAvgLatency() const {
-        return hist.getAverage();
-    }
-    uint64_t getTotalTime() const {
-        return hist.getSum();
-    }
-    uint64_t getNumCalls() const {
-        return hist.getTotal();
-    }
-    uint64_t getMaxLatency() const {
-        return hist.getMax();
-    }
-    uint64_t getMinLatency() {
-        return hist.estimate(1);
-    }
-    uint64_t getPercentile(double percentile) {
-        return hist.estimate(percentile);
-    }
+    void addLatency(uint64_t latency) { hist.add(latency); }
+    uint64_t getAvgLatency() const { return hist.getAverage(); }
+    uint64_t getTotalTime() const { return hist.getSum(); }
+    uint64_t getNumCalls() const { return hist.getTotal(); }
+    uint64_t getMaxLatency() const { return hist.getMax(); }
+    uint64_t getMinLatency() { return hist.estimate(1); }
+    uint64_t getPercentile(double percentile) { return hist.estimate(percentile); }
 
     size_t getNumStacks() const {
         size_t pos = 0;
@@ -157,31 +125,25 @@ class LatencyItem {
 
     std::string getActualFunction() const {
         size_t level = getNumStacks();
-        if (!level) {
-            return statName;
-        }
+        if (!level) { return statName; }
 
         size_t pos = statName.rfind(" ## ");
         return statName.substr(pos + 4);
     }
 
-    std::string getStatName() const {
-        return statName;
-    }
+    std::string getStatName() const { return statName; }
 
-    std::map<double, uint64_t> dumpHistogram() const {
-        std::map<double, uint64_t> ret;
-        for (auto& entry: hist) {
+    std::map< double, uint64_t > dumpHistogram() const {
+        std::map< double, uint64_t > ret;
+        for (auto& entry : hist) {
             HistItr& itr = entry;
             uint64_t cnt = itr.getCount();
-            if (cnt) {
-                ret.insert( std::make_pair(itr.getUpperBound(), cnt) );
-            }
+            if (cnt) { ret.insert(std::make_pair(itr.getUpperBound(), cnt)); }
         }
         return ret;
     }
 
-  private:
+private:
     std::string statName;
     Histogram hist;
 };
@@ -190,32 +152,29 @@ class LatencyCollector;
 class MapWrapper {
     friend class LatencyCollector;
     friend class LatencyDump;
-  public:
+
+public:
     MapWrapper() {}
-    MapWrapper(const MapWrapper &src) {
-        copyFrom(src);
-    }
+    MapWrapper(const MapWrapper& src) { copyFrom(src); }
 
     ~MapWrapper() {}
 
     size_t getSize() const {
         size_t ret = 0;
-        for (auto& entry: map) {
-            if (entry.second->getNumCalls()) {
-                ret++;
-            }
+        for (auto& entry : map) {
+            if (entry.second->getNumCalls()) { ret++; }
         }
         return ret;
     }
 
-    void copyFrom(const MapWrapper &src) {
+    void copyFrom(const MapWrapper& src) {
         // Make a clone (but the map will point to same LatencyItems)
         map = src.map;
     }
 
     LatencyItem* addItem(const std::string& bin_name) {
         LatencyItem* item = new LatencyItem(bin_name);
-        map.insert( std::make_pair(bin_name, item) );
+        map.insert(std::make_pair(bin_name, item));
         return item;
     }
 
@@ -232,20 +191,16 @@ class MapWrapper {
     LatencyItem* get(const std::string& bin_name) {
         LatencyItem* item = nullptr;
         auto entry = map.find(bin_name);
-        if (entry != map.end()) {
-            item = entry->second;
-        }
+        if (entry != map.end()) { item = entry->second; }
         return item;
     }
 
-    std::string dump(LatencyDump* dump_inst,
-                     const LatencyCollectorDumpOptions& opt) {
+    std::string dump(LatencyDump* dump_inst, const LatencyCollectorDumpOptions& opt) {
         if (dump_inst) return dump_inst->dump(this, opt);
         return "null dump implementation";
     }
 
-    std::string dumpTree(LatencyDump* dump_inst,
-                         const LatencyCollectorDumpOptions& opt) {
+    std::string dumpTree(LatencyDump* dump_inst, const LatencyCollectorDumpOptions& opt) {
         if (dump_inst) return dump_inst->dumpTree(this, opt);
         return "null dump implementation";
     }
@@ -256,39 +211,28 @@ class MapWrapper {
         }
     }
 
-  private:
-    std::unordered_map<std::string, LatencyItem*> map;
+private:
+    std::unordered_map< std::string, LatencyItem* > map;
 };
 
-inline std::unordered_map<std::string, LatencyItem*>&
-LatencyDump::getMap(MapWrapper* map_w) {
-    return map_w->map;
-}
+inline std::unordered_map< std::string, LatencyItem* >& LatencyDump::getMap(MapWrapper* map_w) { return map_w->map; }
 
-using MapWrapperSP = ashared_ptr<MapWrapper>;
-//using MapWrapperSP = std::shared_ptr<MapWrapper>;
+using MapWrapperSP = ashared_ptr< MapWrapper >;
+// using MapWrapperSP = std::shared_ptr<MapWrapper>;
 
 class LatencyCollector {
     friend class LatencyDump;
 
-  public:
-    LatencyCollector() {
-        latestMap = MapWrapperSP(new MapWrapper());
-    }
+public:
+    LatencyCollector() { latestMap = MapWrapperSP(new MapWrapper()); }
 
-    ~LatencyCollector() {
-        latestMap->freeAllItems();
-    }
+    ~LatencyCollector() { latestMap->freeAllItems(); }
 
-    size_t getNumItems() const {
-        return latestMap->getSize();
-    }
+    size_t getNumItems() const { return latestMap->getSize(); }
 
     void addStatName(const std::string& lat_name) {
         MapWrapperSP cur_map = latestMap;
-        if (!cur_map->get(lat_name)) {
-            cur_map->addItem(lat_name);
-        } // Otherwise: already exists.
+        if (!cur_map->get(lat_name)) { cur_map->addItem(lat_name); } // Otherwise: already exists.
     }
 
     void addLatency(const std::string& lat_name, uint64_t lat_value) {
@@ -297,7 +241,7 @@ class LatencyCollector {
         size_t ticks_allowed = MAX_ADD_NEW_ITEM_RETRIES;
         do {
             cur_map = latestMap;
-            LatencyItem *item = cur_map->get(lat_name);
+            LatencyItem* item = cur_map->get(lat_name);
             if (item) {
                 // Found existing latency.
                 item->addLatency(lat_value);
@@ -348,8 +292,8 @@ class LatencyCollector {
         MapWrapperSP cur_map_p = latestMap;
         MapWrapper* cur_map = cur_map_p.get();
 
-        for (auto& entry: cur_map->map) {
-            LatencyItem *item = entry.second;
+        for (auto& entry : cur_map->map) {
+            LatencyItem* item = entry.second;
             std::string actual_name = item->getActualFunction();
 
             if (actual_name != lat_name) continue;
@@ -368,43 +312,41 @@ class LatencyCollector {
 
     uint64_t getAvgLatency(const std::string& lat_name) {
         MapWrapperSP cur_map = latestMap;
-        LatencyItem *item = cur_map->get(lat_name);
-        return (item)? item->getAvgLatency() : 0;
+        LatencyItem* item = cur_map->get(lat_name);
+        return (item) ? item->getAvgLatency() : 0;
     }
 
     uint64_t getMinLatency(const std::string& lat_name) {
         MapWrapperSP cur_map = latestMap;
-        LatencyItem *item = cur_map->get(lat_name);
+        LatencyItem* item = cur_map->get(lat_name);
         return (item && item->getNumCalls()) ? item->getMinLatency() : 0;
     }
 
     uint64_t getMaxLatency(const std::string& lat_name) {
         MapWrapperSP cur_map = latestMap;
-        LatencyItem *item = cur_map->get(lat_name);
+        LatencyItem* item = cur_map->get(lat_name);
         return (item) ? item->getMaxLatency() : 0;
     }
 
     uint64_t getTotalTime(const std::string& lat_name) {
         MapWrapperSP cur_map = latestMap;
-        LatencyItem *item = cur_map->get(lat_name);
+        LatencyItem* item = cur_map->get(lat_name);
         return (item) ? item->getTotalTime() : 0;
     }
 
     uint64_t getNumCalls(const std::string& lat_name) {
         MapWrapperSP cur_map = latestMap;
-        LatencyItem *item = cur_map->get(lat_name);
+        LatencyItem* item = cur_map->get(lat_name);
         return (item) ? item->getNumCalls() : 0;
     }
 
     uint64_t getPercentile(const std::string& lat_name, double percentile) {
         MapWrapperSP cur_map = latestMap;
-        LatencyItem *item = cur_map->get(lat_name);
+        LatencyItem* item = cur_map->get(lat_name);
         return (item) ? item->getPercentile(percentile) : 0;
     }
 
-    std::string dump( LatencyDump* dump_inst,
-                      const LatencyCollectorDumpOptions& opt
-                      = LatencyCollectorDumpOptions() ) {
+    std::string dump(LatencyDump* dump_inst, const LatencyCollectorDumpOptions& opt = LatencyCollectorDumpOptions()) {
         MapWrapperSP cur_map_p = latestMap;
         MapWrapper* cur_map = cur_map_p.get();
 
@@ -415,7 +357,7 @@ class LatencyCollector {
         }
     }
 
-  private:
+private:
     static const size_t MAX_ADD_NEW_ITEM_RETRIES = 16;
     // Mutex for Compare-And-Swap of latestMap.
     std::mutex lock;
@@ -423,11 +365,7 @@ class LatencyCollector {
 };
 
 struct ThreadTrackerItem {
-    ThreadTrackerItem()
-        : numStacks(0),
-          aggrStackNameRaw(4096),
-          lenName(0)
-    {}
+    ThreadTrackerItem() : numStacks(0), aggrStackNameRaw(4096), lenName(0) {}
 
     void pushStackName(const std::string& cur_stack_name) {
         size_t cur_stack_name_len = cur_stack_name.size();
@@ -459,18 +397,17 @@ struct ThreadTrackerItem {
     }
 
     size_t numStacks;
-    std::vector<char> aggrStackNameRaw;
+    std::vector< char > aggrStackNameRaw;
     size_t lenName;
-    std::list<size_t> lenStack;
+    std::list< size_t > lenStack;
 };
 
 struct LatencyCollectWrapper {
     using SystemClock = std::chrono::system_clock;
-    using TimePoint = std::chrono::time_point<SystemClock>;
+    using TimePoint = std::chrono::time_point< SystemClock >;
     using MicroSeconds = std::chrono::microseconds;
 
-    LatencyCollectWrapper(LatencyCollector *_lat,
-                          const std::string& _func_name) {
+    LatencyCollectWrapper(LatencyCollector* _lat, const std::string& _func_name) {
         lat = _lat;
         if (lat) {
             start = SystemClock::now();
@@ -484,26 +421,22 @@ struct LatencyCollectWrapper {
     ~LatencyCollectWrapper() {
         if (lat) {
             TimePoint end = SystemClock::now();
-            auto us = std::chrono::duration_cast<MicroSeconds>(end - start);
+            auto us = std::chrono::duration_cast< MicroSeconds >(end - start);
 
             lat->addLatency(cur_tracker->getAggrStackName(), us.count());
             cur_tracker->popLastStack();
         }
     }
 
-    LatencyCollector *lat;
-    ThreadTrackerItem *cur_tracker;
+    LatencyCollector* lat;
+    ThreadTrackerItem* cur_tracker;
     TimePoint start;
 };
 
 #if defined(WIN32) || defined(_WIN32)
-#define collectFuncLatency(lat) \
-    LatencyCollectWrapper LCW__func_latency__((lat), __FUNCTION__)
+#define collectFuncLatency(lat) LatencyCollectWrapper LCW__func_latency__((lat), __FUNCTION__)
 #else
-#define collectFuncLatency(lat) \
-    LatencyCollectWrapper LCW__func_latency__((lat), __func__)
+#define collectFuncLatency(lat) LatencyCollectWrapper LCW__func_latency__((lat), __func__)
 #endif
 
-#define collectBlockLatency(lat, name) \
-    LatencyCollectWrapper LCW__block_latency__((lat), name)
-
+#define collectBlockLatency(lat, name) LatencyCollectWrapper LCW__block_latency__((lat), name)

@@ -1,12 +1,18 @@
-/*
- * composite_allocator.h
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
  *
- *  Created on: 25-Jun-2016
- *      Author: hkadayam
- */
-
-//  Copyright © 2016 Kadayam, Hari. All rights reserved.#pragma once
-
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #ifndef COMPOSITE_ALLOCATOR_HPP
 #define COMPOSITE_ALLOCATOR_HPP
 
@@ -69,27 +75,21 @@ public:
         uint8_t* ret_mem;
         for (auto i = 0u; i < m_allocators.size(); i++) {
             ret_mem = m_allocators[i]->allocate(size_needed, meta_blk);
-            if (ret_mem != nullptr) {
-                break;
-            }
+            if (ret_mem != nullptr) { break; }
         }
         return ret_mem;
     }
 
     bool deallocate(uint8_t* mem, uint32_t size_alloced = 0) {
         for (auto i = 0u; i < m_allocators.size(); i++) {
-            if (m_allocators[i]->deallocate(mem)) {
-                return true;
-            }
+            if (m_allocators[i]->deallocate(mem)) { return true; }
         }
         return false;
     }
 
     bool owns(uint8_t* mem) const {
         for (auto i = 0u; i < m_allocators.size(); i++) {
-            if (owns(mem)) {
-                return true;
-            }
+            if (owns(mem)) { return true; }
         }
         return false;
     }
@@ -122,27 +122,21 @@ public:
         uint8_t* ret_mem;
         for (auto i = 0u; i < m_allocators.size(); i++) {
             ret_mem = m_allocators[i]->allocate(size_needed, meta_blk, out_meta_size);
-            if (ret_mem != nullptr) {
-                break;
-            }
+            if (ret_mem != nullptr) { break; }
         }
         return ret_mem;
     }
 
     bool deallocate(uint8_t* mem, uint32_t size_alloced = 0) {
         for (auto i = 0u; i < m_allocators.size(); i++) {
-            if (m_allocators[i]->deallocate(mem, size_alloced)) {
-                return true;
-            }
+            if (m_allocators[i]->deallocate(mem, size_alloced)) { return true; }
         }
         return false;
     }
 
     bool owns(uint8_t* mem) const {
         for (auto i = 0u; i < m_allocators.size(); i++) {
-            if (owns(mem)) {
-                return true;
-            }
+            if (owns(mem)) { return true; }
         }
         return false;
     }

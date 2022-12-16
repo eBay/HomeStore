@@ -1,7 +1,6 @@
-﻿/*********************************************************************************
+/*********************************************************************************
  * Modifications Copyright 2017-2019 eBay Inc.
  *
- * Author/Developer(s): Harihara Kadayam, Bryan Zimmerman, Rishabh Mittal
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.

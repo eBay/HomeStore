@@ -1,7 +1,6 @@
 /*********************************************************************************
  * Modifications Copyright 2017-2019 eBay Inc.
  *
- * Author/Developer(s): Harihara Kadayam
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,9 +13,6 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
-//
-// Created by Kadayam, Hari on 11/11/17.
-//
 #pragma once
 
 #include <vector>
