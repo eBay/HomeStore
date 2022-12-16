@@ -9,5 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Moved Homestore code to github.com; start Changelog
+- Use IOManager from OSS channel, publish to same.
 
-[Unreleased]: https://github.com/eBay/IOManager/compare/e298e88...HEAD
+## [3.5.16] - 2022-12-07
+
+[Unreleased]: https://github.com/eBay/IOManager/compare/v3.5.16...HEAD
+[3.5.16]: https://github.com/eBay/IOManager/compare/...v3.5.16
