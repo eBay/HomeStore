@@ -1,3 +1,19 @@
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ * Author/Developer(s): Harihara Kadayam, Yaming Kuang, Rishabh Mittal
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 //
 // Created by Kadayam, Hari on 08/11/17.
 //
@@ -128,10 +144,7 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
                        const blk_allocator_type_t allocator_type, const uint64_t context_size, const uint32_t nmirror,
                        const bool is_stripe, const uint32_t page_size, vdev_comp_cb_t cb, char* blob,
                        const uint64_t size_in, const bool auto_recovery, vdev_high_watermark_cb_t hwm_cb) :
-        m_name{name},
-        m_allocator_type{allocator_type},
-        m_metrics{name},
-        m_pdev_group{pdev_group} {
+        m_name{name}, m_allocator_type{allocator_type}, m_metrics{name}, m_pdev_group{pdev_group} {
     init(mgr, nullptr, std::move(cb), page_size, auto_recovery, std::move(hwm_cb));
 
     const auto pdev_list = m_mgr->get_devices(pdev_group);
@@ -271,10 +284,7 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGr
 VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, const PhysicalDevGroup pdev_group,
                        const blk_allocator_type_t allocator_type, vdev_comp_cb_t cb, const bool recovery_init,
                        const bool auto_recovery, vdev_high_watermark_cb_t hwm_cb) :
-        m_name{name},
-        m_allocator_type{allocator_type},
-        m_metrics{name},
-        m_pdev_group{pdev_group} {
+        m_name{name}, m_allocator_type{allocator_type}, m_metrics{name}, m_pdev_group{pdev_group} {
     init(mgr, vb, std::move(cb), vb->page_size, auto_recovery, std::move(hwm_cb));
 
     m_recovery_init = recovery_init;
@@ -297,13 +307,14 @@ void VirtualDev::reset_failed_state() {
 void VirtualDev::process_completions(const boost::intrusive_ptr< virtualdev_req >& req) {
 #ifdef _PRERELEASE
     if (!req->delay_induced &&
-        homestore_flip->delay_flip("simulate_vdev_delay",
-                                   [req, this]() {
-                                       HS_LOG(DEBUG, device, "[Vdev={},req={},is_read={}] - Calling delayed completion",
-                                              m_name, req->request_id, req->is_read);
-                                       process_completions(req);
-                                   },
-                                   m_name, req->is_read)) {
+        homestore_flip->delay_flip(
+            "simulate_vdev_delay",
+            [req, this]() {
+                HS_LOG(DEBUG, device, "[Vdev={},req={},is_read={}] - Calling delayed completion", m_name,
+                       req->request_id, req->is_read);
+                process_completions(req);
+            },
+            m_name, req->is_read)) {
         req->delay_induced = true;
         HS_LOG(DEBUG, device, "[Vdev={},req={},is_read={}] - Delaying completion", m_name, req->request_id,
                req->is_read);

@@ -8,7 +8,7 @@
 namespace nukv {
 
 class Crc32 {
-  public:
+public:
     static uint32_t get(const void* data, size_t len, uint32_t seed);
 
     static uint32_t get(const SEBuf& buf, uint32_t seed);
@@ -16,5 +16,4 @@ class Crc32 {
     static uint32_t get(const std::string& str, uint32_t seed);
 };
 
-};
-
+}; // namespace nukv

@@ -1,3 +1,19 @@
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ * Author/Developer(s): Harihara Kadayam, Rishabh Mittal
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 /*
  * PhysicalDev.cpp
  *
@@ -174,9 +190,7 @@ PhysicalDev::PhysicalDev(DeviceManager* const mgr, const std::string& devname, c
                          const hs_uuid_t& system_uuid, const uint32_t dev_num, const uint64_t dev_offset,
                          const bool is_init, const uint64_t dm_info_size,
                          const iomgr::io_interface_comp_cb_t& io_comp_cb, bool* const is_inited) :
-        m_mgr{mgr},
-        m_devname{devname},
-        m_metrics{devname} {
+        m_mgr{mgr}, m_devname{devname}, m_metrics{devname} {
     read_and_fill_superblock(oflags);
 
     if (is_init) { m_super_blk->set_system_uuid(system_uuid); }

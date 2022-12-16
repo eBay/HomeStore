@@ -1,10 +1,19 @@
-﻿/*
- * blk.h
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
  *
- *  Created on: 03-Nov-2016
- *      Author: hkadayam
- */
-
+ * Author/Developer(s): Harihara Kadayam
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #ifndef SRC_BLKALLOC_BLK_H_
 #define SRC_BLKALLOC_BLK_H_
 
@@ -82,9 +91,7 @@ public:
         return val;
     }
 
-    explicit BlkId(const uint64_t id_int) {
-        set(id_int);
-    }
+    explicit BlkId(const uint64_t id_int) { set(id_int); }
     BlkId(const blk_num_t blk_num, const blk_count_t nblks, const chunk_num_t chunk_num = 0) {
         set(blk_num, nblks, chunk_num);
     }
@@ -99,7 +106,7 @@ public:
 
     [[nodiscard]] bool is_valid() const { return (m_chunk_num != s_chunk_num_mask); }
 
-        [[nodiscard]] BlkId get_blkid_at(const uint32_t offset, const uint32_t pagesz) const {
+    [[nodiscard]] BlkId get_blkid_at(const uint32_t offset, const uint32_t pagesz) const {
         assert(offset % pagesz == 0);
         const uint32_t remaining_size{((get_nblks() - (offset / pagesz)) * pagesz)};
         return (get_blkid_at(offset, remaining_size, pagesz));
@@ -153,10 +160,8 @@ public:
     }
     [[nodiscard]] chunk_num_t get_chunk_num() const { return m_chunk_num; }
 
-        /* A blkID represent a page size which is assigned to a blk allocator */
-        [[nodiscard]] uint32_t data_size(const uint32_t page_size) const {
-        return (get_nblks() * page_size);
-    }
+    /* A blkID represent a page size which is assigned to a blk allocator */
+    [[nodiscard]] uint32_t data_size(const uint32_t page_size) const { return (get_nblks() * page_size); }
 
     [[nodiscard]] std::string to_string() const {
         return is_valid() ? fmt::format("BlkNum={} nblks={} chunk={}", get_blk_num(), get_nblks(), get_chunk_num())

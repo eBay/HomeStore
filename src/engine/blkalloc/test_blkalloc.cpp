@@ -1,4 +1,20 @@
-﻿#include <algorithm>
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ * Author/Developer(s): Harihara Kadayam, Bryan Zimmerman
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -43,9 +59,7 @@ using size_generator_t = std::function< blk_count_t(void) >;
 
 struct AllocedBlkTracker {
     AllocedBlkTracker(const uint64_t quota) :
-            m_alloced_blk_list{BlkListT::create(8)},
-            m_alloced_blk_map{quota},
-            m_max_quota{quota} {}
+            m_alloced_blk_list{BlkListT::create(8)}, m_alloced_blk_map{quota}, m_max_quota{quota} {}
 
     void adjust_limits(const uint8_t hi_limit_pct) {
         m_lo_limit = m_alloced_blk_list.size();
@@ -119,15 +133,14 @@ public:
 
     [[nodiscard]] BlkListAccessorT& blk_list(const slab_idx_t idx) {
         return m_slab_alloced_blks[idx].m_alloced_blk_list;
-    }[[nodiscard]] BlkMapT& blk_map(const slab_idx_t idx) {
-        return m_slab_alloced_blks[idx].m_alloced_blk_map;
     }
+    [[nodiscard]] BlkMapT& blk_map(const slab_idx_t idx) { return m_slab_alloced_blks[idx].m_alloced_blk_map; }
 
     [[nodiscard]] slab_idx_t nblks_to_idx(const blk_count_t n_blks) {
         return m_track_slabs ? nblks_to_slab_tbl[n_blks] : 0;
     }
 
-        [[nodiscard]] bool alloced(const BlkId& bid, const bool track_block_group) {
+    [[nodiscard]] bool alloced(const BlkId& bid, const bool track_block_group) {
         uint32_t blk_num{static_cast< uint32_t >(bid.get_blk_num())};
         if (blk_num >= m_total_count) {
             {
@@ -185,8 +198,8 @@ public:
         return true;
     }
 
-        [[nodiscard]] BlkId
-        pick_rand_blks_to_free(const blk_count_t pref_nblks, const bool round_nblks, const bool track_group_block) {
+    [[nodiscard]] BlkId pick_rand_blks_to_free(const blk_count_t pref_nblks, const bool round_nblks,
+                                               const bool track_group_block) {
         return m_track_slabs ? pick_rand_slab_blks_to_free(pref_nblks, track_group_block)
                              : pick_rand_pool_blks_to_free(pref_nblks, round_nblks, track_group_block);
     }
@@ -286,8 +299,8 @@ private:
         return BlkId{start_blk_num, n_blks, 0};
     }
 
-        [[nodiscard]] BlkId pick_rand_pool_blks_to_free(const blk_count_t pref_nblks, const bool round_nblks,
-                                                        const bool track_block_group) {
+    [[nodiscard]] BlkId pick_rand_pool_blks_to_free(const blk_count_t pref_nblks, const bool round_nblks,
+                                                    const bool track_block_group) {
         uint32_t start_blk_num{0};
         blk_count_t n_blks{0};
 
@@ -392,7 +405,7 @@ protected:
         return true;
     }
 
-        [[nodiscard]] bool free_blk(const uint32_t blk_num) {
+    [[nodiscard]] bool free_blk(const uint32_t blk_num) {
         m_allocator->free(BlkId{blk_num, 1, 0});
         return freed(blk_num);
     }
@@ -480,8 +493,8 @@ protected:
         return true;
     }
 
-        [[nodiscard]] BlkId free_random_alloced_sized_blk(const blk_count_t reqd_size, const bool round_nblks,
-                                                          const bool track_block_group) {
+    [[nodiscard]] BlkId free_random_alloced_sized_blk(const blk_count_t reqd_size, const bool round_nblks,
+                                                      const bool track_block_group) {
         const BlkId bid{pick_rand_blks_to_free(reqd_size, round_nblks, track_block_group)};
         m_allocator->free(bid);
         return bid;
@@ -512,10 +525,10 @@ protected:
         return total_alloced;
     }
 
-        [[nodiscard]] std::pair< uint64_t, uint64_t > do_alloc_free(const uint64_t num_iters, const bool is_contiguous,
-                                                                    const size_generator_t& size_generator,
-                                                                    const uint8_t limit_pct, const bool round_nblks,
-                                                                    const bool track_block_group) {
+    [[nodiscard]] std::pair< uint64_t, uint64_t > do_alloc_free(const uint64_t num_iters, const bool is_contiguous,
+                                                                const size_generator_t& size_generator,
+                                                                const uint8_t limit_pct, const bool round_nblks,
+                                                                const bool track_block_group) {
         const auto nthreads{std::clamp< uint32_t >(std::thread::hardware_concurrency(), 2,
                                                    SISL_OPTIONS["num_threads"].as< uint32_t >())};
         for (auto& s : m_slab_alloced_blks) {
@@ -578,7 +591,7 @@ TEST_F(FixedBlkAllocatorTest, alloc_free_fixed_size) {
     run_parallel(nthreads, m_total_count / 4,
                  [&](const uint64_t count_per_thread, std::atomic< bool >& terminate_flag) {
                      for (uint64_t i{0}; (i < count_per_thread) && !terminate_flag; ++i) {
-                         [[maybe_unused]] const BlkId blkId { free_random_alloced_blk(false) };
+                         [[maybe_unused]] const BlkId blkId{free_random_alloced_blk(false)};
                      }
                  });
     validate_count();

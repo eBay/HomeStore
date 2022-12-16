@@ -1,7 +1,19 @@
-//
-// Created by Kadayam, Hari on 3/28/19.
-//
-
+/*********************************************************************************
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
+ * Author/Developer(s): Harihara Kadayam
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *    https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed
+ * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ *********************************************************************************/
 #ifndef HOMESTORE_BTREE_VAR_VALUE_SPEC_HPP
 #define HOMESTORE_BTREE_VAR_VALUE_SPEC_HPP
 
@@ -26,8 +38,8 @@ namespace loadgen {
 template < const size_t Max_Size >
 class VarBytesValue : public homeds::btree::BtreeValue, public ValueSpec {
 public:
-    static std::shared_ptr< VarBytesValue< Max_Size > > gen_value(const ValuePattern spec,
-                                                                  const VarBytesValue< Max_Size >* const ref_value = nullptr) {
+    static std::shared_ptr< VarBytesValue< Max_Size > >
+    gen_value(const ValuePattern spec, const VarBytesValue< Max_Size >* const ref_value = nullptr) {
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine re{rd()};
         std::uniform_int_distribution< size_t > size_rand{9, Max_Size - 1};
@@ -76,7 +88,7 @@ public:
     void set_blob(const sisl::blob& b) override { copy_blob(b); }
     void copy_blob(const sisl::blob& b) override {
         m_bytes.clear();
-        std::copy(b.bytes, b.bytes + b.size, std::back_inserter< decltype(m_bytes) >(m_bytes)); 
+        std::copy(b.bytes, b.bytes + b.size, std::back_inserter< decltype(m_bytes) >(m_bytes));
         assert(m_bytes.size() == b.size);
     }
     void append_blob(const BtreeValue& new_val, BtreeValue& existing_val) override { copy_blob(new_val.get_blob()); }
@@ -92,9 +104,7 @@ public:
     }
 
     // This is not mandatory overridden method for BtreeValue, but for testing comparision
-    bool operator==(const VarBytesValue& rhs) const {
-        return (m_bytes == rhs.m_bytes);
-    }
+    bool operator==(const VarBytesValue& rhs) const { return (m_bytes == rhs.m_bytes); }
 
     virtual uint64_t get_hash_code() const override {
         return util::Hash64(reinterpret_cast< const char* >(m_bytes.data()), m_bytes.size());

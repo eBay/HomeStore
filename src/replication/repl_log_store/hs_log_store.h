@@ -32,20 +32,20 @@
 
 namespace nuraft {
 class hs_log_store : public log_store {
-  public:
+public:
     struct Options {
         Options()
 
-        // : maxEntriesInLogFile(64*1024)
-        // , maxLogFileSize(32*1024*1024)
-        // , maxKeepingMemtables(8)
-            : maxCacheSizeBytes((uint64_t)512 * 1024 * 1024)
-            , maxCachedLogs(10000)
-            , compression(false)
-            , strongDurability(false)
-            , flushThreadSleepTimeUs(500)
-            , cache_enabled(false)
-        {}
+                // : maxEntriesInLogFile(64*1024)
+                // , maxLogFileSize(32*1024*1024)
+                // , maxKeepingMemtables(8)
+                :
+                maxCacheSizeBytes((uint64_t)512 * 1024 * 1024),
+                maxCachedLogs(10000),
+                compression(false),
+                strongDurability(false),
+                flushThreadSleepTimeUs(500),
+                cache_enabled(false) {}
         // uint64_t maxEntriesInLogFile;
         // uint64_t maxLogFileSize;
         // uint64_t maxKeepingMemtables;
@@ -71,7 +71,8 @@ class hs_log_store : public log_store {
 
     static void removeLogStore(homestore::logstore_id_t logstore_id);
 
-    explicit hs_log_store(const homestore::logstore_id_t logstore_id = UINT32_MAX, const Options& opt = hs_log_store::Options());
+    explicit hs_log_store(const homestore::logstore_id_t logstore_id = UINT32_MAX,
+                          const Options& opt = hs_log_store::Options());
     ~hs_log_store();
 
     /**
@@ -103,7 +104,7 @@ class hs_log_store : public log_store {
      * @return If no log entry exists: a dummy constant entry with
      *         value set to null and term set to zero.
      */
-    virtual ptr<log_entry> last_entry() const override;
+    virtual ptr< log_entry > last_entry() const override;
 
     /**
      * Append a log entry to store
@@ -111,7 +112,7 @@ class hs_log_store : public log_store {
      * @param entry Log entry
      * @return Log index number.
      */
-    virtual ulong append(ptr<log_entry>& entry) override;
+    virtual ulong append(ptr< log_entry >& entry) override;
 
     /**
      * Overwrite a log entry at the given `index`.
@@ -119,7 +120,7 @@ class hs_log_store : public log_store {
      * @param index Log index number to overwrite.
      * @param entry New log entry to overwrite.
      */
-    virtual void write_at(ulong index, ptr<log_entry>& entry) override;
+    virtual void write_at(ulong index, ptr< log_entry >& entry) override;
 
     /**
      * Invoked after a batch of logs is written as a part of
@@ -137,7 +138,7 @@ class hs_log_store : public log_store {
      * @param end The end log index number (exclusive).
      * @return The log entries between [start, end).
      */
-    virtual ptr<std::vector<ptr<log_entry>>> log_entries(ulong start, ulong end) override;
+    virtual ptr< std::vector< ptr< log_entry > > > log_entries(ulong start, ulong end) override;
 
     /**
      * Get the log entry at the specified log index number.
@@ -145,7 +146,7 @@ class hs_log_store : public log_store {
      * @param index Should be equal to or greater than 1.
      * @return The log entry or null if index >= this->next_slot().
      */
-    virtual ptr<log_entry> entry_at(ulong index) override;
+    virtual ptr< log_entry > entry_at(ulong index) override;
 
     /**
      * Get the term for the log entry at the specified index
@@ -164,7 +165,7 @@ class hs_log_store : public log_store {
      * @param cnt The number of logs to pack.
      * @return log pack
      */
-    virtual ptr<buffer> pack(ulong index, int32 cnt) override;
+    virtual ptr< buffer > pack(ulong index, int32 cnt) override;
 
     /**
      * Apply the log pack to current log store, starting from index.
@@ -218,30 +219,22 @@ class hs_log_store : public log_store {
     */
     homestore::logstore_id_t getLogstoreId();
 
-  private:
-
+private:
     struct log_cache;
 
     struct FlushElem;
 
-    void write_at_internal(ulong index, ptr<log_entry>& entry);
+    void write_at_internal(ulong index, ptr< log_entry >& entry);
 
-    ssize_t getCompMaxSize(homestore::HomeLogStore* db,
-                           const homestore::log_buffer& rec);
+    ssize_t getCompMaxSize(homestore::HomeLogStore* db, const homestore::log_buffer& rec);
 
-    ssize_t compress(homestore::HomeLogStore* db,
-                     const homestore::log_buffer& src,
-                     homestore::log_buffer& dst);
+    ssize_t compress(homestore::HomeLogStore* db, const homestore::log_buffer& src, homestore::log_buffer& dst);
 
-
-    ssize_t decompress(homestore::HomeLogStore* db,
-                       const homestore::log_buffer& src,
-                       homestore::log_buffer& dst);
+    ssize_t decompress(homestore::HomeLogStore* db, const homestore::log_buffer& src, homestore::log_buffer& dst);
 
     void flushLoop();
 
     void on_log_found(homestore::logstore_seq_num_t lsn, homestore::log_buffer buf, void* ctx);
-
 
     /**
      * Directory path.
@@ -251,7 +244,7 @@ class hs_log_store : public log_store {
     /**
      * Dummy log entry for invalid request.
      */
-    ptr<log_entry> dummyLogEntry;
+    ptr< log_entry > dummyLogEntry;
 
     /**
      * Jungle is basically lock-free for both read & write,
@@ -262,12 +255,12 @@ class hs_log_store : public log_store {
     /**
      * DB instance.
      */
-    std::shared_ptr<homestore::HomeLogStore> m_log_store;
+    std::shared_ptr< homestore::HomeLogStore > m_log_store;
     homestore::logstore_id_t logstoreId;
     /**
      * Log cache instance.
      */
-    std::shared_ptr<log_cache> cacheInst;
+    std::shared_ptr< log_cache > cacheInst;
 
     /**
      * Flush thread instance.
@@ -282,7 +275,7 @@ class hs_log_store : public log_store {
     /**
      * List of awaiting flush requests.
      */
-    std::list< std::shared_ptr<FlushElem> > flushReqs;
+    std::list< std::shared_ptr< FlushElem > > flushReqs;
 
     /**
      * Mutex for `flushReqs`.
@@ -299,12 +292,12 @@ class hs_log_store : public log_store {
     /**
      * The index number of the last durable Raft log.
      */
-    std::atomic<uint64_t> lastDurableLogIdx;
+    std::atomic< uint64_t > lastDurableLogIdx;
 
     /**
      * `true` if we are stopping flush thraed.
      */
-    std::atomic<bool> flushThreadStopSignal;
+    std::atomic< bool > flushThreadStopSignal;
 
     /**
      * Local copy of options.
@@ -312,5 +305,4 @@ class hs_log_store : public log_store {
     Options myOpt;
 };
 
-}
-
+} // namespace nuraft
