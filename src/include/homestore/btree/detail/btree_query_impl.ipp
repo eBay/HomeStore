@@ -67,7 +67,7 @@ btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr& my_node, BtreeQueryRe
     }
 
     BtreeLinkInfo start_child_info;
-    const auto [isfound, idx] = my_node->find(qreq.next_key(), &start_child_info, false);
+    [[maybe_unused]] const auto [isfound, idx] = my_node->find(qreq.next_key(), &start_child_info, false);
     ASSERT_IS_VALID_INTERIOR_CHILD_INDX(isfound, idx, my_node);
 
     BtreeNodePtr child_node;
