@@ -35,10 +35,6 @@
 #include <homestore/btree/detail/btree_node.hpp>
 
 namespace homestore {
-#if 0
-#define container_of(ptr, type, member) ({ (type*)((char*)ptr - offsetof(type, member)); })
-#endif
-
 template < typename K, typename V >
 Btree< K, V >::Btree(const BtreeConfig& cfg, on_kv_read_t&& read_cb, on_kv_update_t&& update_cb,
                      on_kv_remove_t&& remove_cb) :
