@@ -673,7 +673,7 @@ public:
     void update_store_superblk(logstore_id_t idx, const logstore_superblk& meta, bool persist_now);
 
     void get_status(int verbosity, nlohmann::json& out_json) const;
-    bool flush_if_needed();
+    bool flush_if_needed(int64_t threshold_size = -1);
 
     bool is_aligned_buf_needed(size_t size) const {
         return (log_record::is_size_inlineable(size, m_flush_size_multiple) == false);

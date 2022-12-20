@@ -173,8 +173,8 @@ void LogDev::do_load(const off_t device_cursor) {
         const auto flush_ld_key =
             logdev_key{header->start_idx() + header->nrecords() - 1, group_dev_offset + header->total_size()};
         while (i < header->nrecords()) {
-            const auto* const rec{header->nth_record(i)};
-            const uint32_t data_offset{(rec->offset + (rec->get_inlined() ? 0 : header->oob_data_offset))};
+            const auto* rec = header->nth_record(i);
+            const uint32_t data_offset = (rec->offset + (rec->get_inlined() ? 0 : header->oob_data_offset));
 
             // Do a callback on the found log entry
             sisl::byte_view b = buf;
@@ -266,7 +266,6 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
     } else {
         // Round them data offset to dma boundary in-order to make sure pread on direct io succeed. We need to skip
         // the rounded portion while copying to user buffer
-        // TO DO: Might need to differentiate based on data or fast type
         auto const rounded_data_offset = sisl::round_down(data_offset, m_vdev->align_size());
         auto const rounded_size = sisl::round_up(b.size() + data_offset - rounded_data_offset, m_vdev->align_size());
 
@@ -358,13 +357,16 @@ static bool can_flush_here() {
 // This method checks if in case we were to add a record of size provided, do we enter into a state which exceeds
 // our threshold. If so, it first flushes whats accumulated so far and then add the pending flush size counter with
 // the new record size
-bool LogDev::flush_if_needed() {
+bool LogDev::flush_if_needed(int64_t threshold_size) {
     // If after adding the record size, if we have enough to flush or if its been too much time before we actually
     // flushed, attempt to flush by setting the atomic bool variable.
+    if (threshold_size < 0) { threshold_size = LogDev::flush_data_threshold_size(); }
+
+    const auto elapsed_time = get_elapsed_time_us(m_last_flush_time);
     auto const pending_sz = m_pending_flush_size.load(std::memory_order_relaxed);
-    bool const flush_by_size = (pending_sz >= LogDev::flush_data_threshold_size());
-    bool const flush_by_time = !flush_by_size && pending_sz &&
-        (get_elapsed_time_us(m_last_flush_time) > HS_DYNAMIC_CONFIG(logstore.max_time_between_flush_us));
+    bool const flush_by_size = (pending_sz >= threshold_size);
+    bool const flush_by_time =
+        !flush_by_size && pending_sz && (elapsed_time > HS_DYNAMIC_CONFIG(logstore.max_time_between_flush_us));
 
     if (flush_by_size || flush_by_time) {
         // First off, check if we can flush in this thread itself, if not, schedule it into different thread
@@ -381,7 +383,7 @@ bool LogDev::flush_if_needed() {
         THIS_LOGDEV_LOG(TRACE,
                         "Flushing now because either pending_size={} is greater than data_threshold={} or "
                         "elapsed time since last flush={} us is greater than max_time_between_flush={} us",
-                        pending_sz, LogDev::flush_data_threshold_size(), get_elapsed_time_us(m_last_flush_time),
+                        pending_sz, threshold_size, elapsed_time,
                         HS_DYNAMIC_CONFIG(logstore.max_time_between_flush_us));
 
         m_last_flush_time = Clock::now();
@@ -423,6 +425,13 @@ void LogDev::do_flush(LogGroup* lg) {
 }
 
 void LogDev::do_flush_write(LogGroup* lg) {
+#ifdef _PRERELEASE
+    if (homestore_flip->delay_flip< int >(
+            "simulate_log_flush_delay", [this, lg]() { do_flush_write(lg); }, m_family_id)) {
+        THIS_LOGDEV_LOG(INFO, "Delaying flush by rescheduling the async write");
+    }
+#endif
+
     HISTOGRAM_OBSERVE(logstore_service().m_metrics, logdev_flush_records_distribution, lg->nrecords());
     HISTOGRAM_OBSERVE(logstore_service().m_metrics, logdev_flush_size_distribution, lg->actual_data_size());
     THIS_LOGDEV_LOG(TRACE, "vdev offset={} log group total size={}", lg->m_log_dev_offset, lg->header()->total_size());
