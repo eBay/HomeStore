@@ -318,11 +318,11 @@ public:
     nlohmann::json get_status(int log_level) const;
 
     bool realtime_bm_on() const { return (m_cfg.m_realtime_bm_on && m_auto_recovery); }
+    void reset_disk_bm_dirty() { is_disk_bm_dirty = false; }
 
 private:
     sisl::Bitset* get_debug_bm() { return m_debug_bm.get(); }
     sisl::ThreadVector< BlkId >* get_alloc_blk_list();
-    void reset_disk_bm_dirty() { is_disk_bm_dirty = false; }
     void set_disk_bm_dirty() { is_disk_bm_dirty = true; }
 
 protected:

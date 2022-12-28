@@ -517,6 +517,7 @@ public:
 
     void init_done();
 
+    bool is_hdd() const;
     void close_device();
 
     hs_uuid_t sys_uuid() { return m_super_blk->get_system_uuid(); }
@@ -564,7 +565,6 @@ private:
     /* Validate if this device is a homestore validated device. If there is any corrupted device, then it
      * throws std::system_exception */
     bool validate_device() const;
-    bool is_hdd() const;
 
     /*
      * return true if we are upgrading from some version that is supported for upgrade;
