@@ -72,7 +72,7 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, bool 
 
     // Create free blk Cache of type Queue
     if (m_cfg.get_use_slabs()) {
-        m_fb_cache = std::make_unique< FreeBlkCacheQueue >(cfg.m_slab_config, &m_metrics);
+        m_fb_cache = std::make_unique< FreeBlkCacheQueue >(cfg.get_slab_config(), &m_metrics);
 
         LOGINFO("m_fb_cache total free blks: {}", m_fb_cache->total_free_blks());
     }

@@ -71,6 +71,8 @@ public:
 
     [[nodiscard]] SlabMetrics& metrics() { return m_metrics; }
 
+    blk_count_t get_slab_size() const { return m_slab_size; }
+
 private:
     blk_count_t m_slab_size; // Slab size in-terms of number of pages
     std::vector< std::unique_ptr< folly::MPMCQueue< blk_cache_entry > > > m_level_queues;
