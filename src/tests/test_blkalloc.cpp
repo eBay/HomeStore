@@ -86,16 +86,16 @@ static uint32_t round_count(const uint32_t count) {
 struct BlkAllocatorTest {
 protected:
     std::atomic< int64_t > m_alloced_count{0};
-    const uint32_t m_total_count;
     std::vector< AllocedBlkTracker > m_slab_alloced_blks;
     std::uniform_int_distribution< uint32_t > m_rand_blk_generator;
     bool m_track_slabs{false};
     size_t m_num_slabs{0};
 
 public:
+    const uint32_t m_total_count;
     BlkAllocatorTest() :
-            m_total_count{round_count(SISL_OPTIONS["num_blks"].as< uint32_t >())},
-            m_rand_blk_generator{1, m_total_count} {
+            m_rand_blk_generator{1, m_total_count} ,
+            m_total_count{round_count(SISL_OPTIONS["num_blks"].as< uint32_t >())} {
         m_slab_alloced_blks.emplace_back(m_total_count);
     }
     BlkAllocatorTest(const BlkAllocatorTest&) = delete;
@@ -369,10 +369,8 @@ private:
 };
 
 struct FixedBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
-protected:
-    std::unique_ptr< FixedBlkAllocator > m_allocator;
-
 public:
+    std::unique_ptr< FixedBlkAllocator > m_allocator;
     FixedBlkAllocatorTest() : BlkAllocatorTest() {
         BlkAllocConfig fixed_cfg{4096, 4096, static_cast< uint64_t >(m_total_count) * 4096, "", false};
         m_allocator = std::make_unique< FixedBlkAllocator >(fixed_cfg, true, 0);
@@ -421,10 +419,9 @@ protected:
 };
 
 struct VarsizeBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
-protected:
+public:
     std::unique_ptr< VarsizeBlkAllocator > m_allocator;
 
-public:
     VarsizeBlkAllocatorTest() : BlkAllocatorTest() { HomeStoreDynamicConfig::init_settings_default(); }
     VarsizeBlkAllocatorTest(const VarsizeBlkAllocatorTest&) = delete;
     VarsizeBlkAllocatorTest(VarsizeBlkAllocatorTest&&) noexcept = delete;
@@ -502,6 +499,7 @@ protected:
             << "Used blks count mismatch";
     }
 
+public:
     [[nodiscard]] uint64_t preload(const uint64_t count, const bool is_contiguous,
                                    const size_generator_t& size_generator, const bool track_block_group) {
         const auto nthreads{std::clamp< uint32_t >(std::thread::hardware_concurrency(), 2,

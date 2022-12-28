@@ -111,9 +111,11 @@ struct sb_info_t {
 
 class VMetaBlkMgrTest : public ::testing::Test {
     enum class meta_op_type : uint8_t { write = 1, update = 2, remove = 3, read = 4 };
-    std::string mtype;
 
 public:
+    std::string mtype;
+    Clock::time_point m_start_time;
+
     VMetaBlkMgrTest() = default;
     VMetaBlkMgrTest(const VMetaBlkMgrTest&) = delete;
     VMetaBlkMgrTest& operator=(const VMetaBlkMgrTest&) = delete;
@@ -570,7 +572,6 @@ private:
     uint64_t m_update_cnt{0};
     uint64_t m_rm_cnt{0};
     uint64_t m_total_wrt_sz{0};
-    Clock::time_point m_start_time;
     MetaBlkService* m_mbm{nullptr};
     std::map< uint64_t, sb_info_t > m_write_sbs; // during write, save blkid to buf map;
     std::map< uint64_t, std::string > m_cb_blks; // during recover, save blkid to buf map;
