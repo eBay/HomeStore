@@ -69,9 +69,9 @@ void LogStoreFamily::start(bool format, JournalVirtualDev* blk_store) {
         if (!format) {
             for (auto& p : m) {
                 auto& lstore{p.second.m_log_store};
-                if (lstore && lstore->m_replay_done_cb) {
-                    lstore->m_replay_done_cb(lstore, lstore->m_seq_num.load(std::memory_order_acquire) - 1);
-                    lstore->truncate(lstore->m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire));
+                if (lstore && lstore->get_log_replay_done_cb()) {
+                    lstore->get_log_replay_done_cb()(lstore, lstore->seq_num() - 1);
+                    lstore->truncate(lstore->truncated_upto());
                 }
             }
         }
@@ -164,7 +164,7 @@ void LogStoreFamily::on_io_completion(logstore_id_t id, logdev_key ld_key, logde
     HomeLogStore* log_store = req->log_store;
 
     if (req->is_write) {
-        HS_LOG_ASSERT_EQ(log_store->m_store_id, id, "Expecting store id in log store and io completion to match");
+        HS_LOG_ASSERT_EQ(log_store->get_store_id(), id, "Expecting store id in log store and io completion to match");
         log_store->on_write_completion(req, ld_key);
         on_batch_completion(log_store, nremaining_in_batch, flush_ld_key);
     } else {

@@ -152,7 +152,6 @@ struct logstore_req {
         if (req->is_internal_req) { sisl::ObjectAllocator< logstore_req >::deallocate(req); }
     }
 
-private:
     logstore_req() = default;
 };
 

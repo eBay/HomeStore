@@ -251,10 +251,15 @@ public:
 
     log_group_header* header() { return reinterpret_cast< log_group_header* >(m_cur_log_buf); }
     const log_group_header* header() const { return reinterpret_cast< const log_group_header* >(m_cur_log_buf); }
-    iovec_array& iovecs() { return m_iovecs; }
+    iovec_array const& iovecs() const { return m_iovecs; }
     // uint32_t data_size() const { return header()->group_size - sizeof(log_group_header); }
     uint32_t actual_data_size() const { return m_actual_data_size; }
     uint32_t nrecords() const { return m_nrecords; }
+
+    auto max_records() const { return m_max_records; }
+    auto flush_log_idx_from() const { return m_flush_log_idx_from; }
+    auto flush_log_idx_upto() const { return m_flush_log_idx_upto; }
+    auto log_dev_offset() const { return m_log_dev_offset; }
 
 private:
     sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logwrite > m_log_buf;
@@ -296,11 +301,11 @@ std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, trait
     out_string_stream.copyfmt(out_stream);
 
     // print the stream
-    const auto* const header{reinterpret_cast< const log_group_header* >(lg.m_cur_log_buf)};
+    const auto* const header{lg.header()};
     const auto s{fmt::format("Header:[{}]\nLog_idx_range: [{} - {}] DevOffset: {} Max_Records: {} IOVecSize: {}\n"
                              "-----------------------------------------------------------------\n",
-                             *header, lg.m_flush_log_idx_from, lg.m_flush_log_idx_upto, lg.m_log_dev_offset,
-                             lg.m_max_records, lg.m_iovecs.size())};
+                             *header, lg.flush_log_idx_from(), lg.flush_log_idx_upto(), lg.log_dev_offset(),
+                             lg.max_records(), lg.iovecs().size())};
     out_string_stream << s;
     out_stream << out_string_stream.str();
 
@@ -449,6 +454,8 @@ public:
     void update_store_superblk(logstore_id_t idx, const logstore_superblk& meta, const bool persist_now);
     const logstore_superblk& store_superblk(logstore_id_t idx) const;
     logstore_superblk& mutable_store_superblk(logstore_id_t idx);
+
+    auto num_stores_reserved() const { return m_sb->num_stores_reserved(); }
 
 private:
     bool resize_if_needed();
@@ -680,6 +687,8 @@ public:
     }
 
     uint64_t get_flush_size_multiple() const { return m_flush_size_multiple; }
+
+    LogDevMetadata& log_dev_meta() { return m_logdev_meta; }
 
 private:
     LogGroup* make_log_group(uint32_t estimated_records) {

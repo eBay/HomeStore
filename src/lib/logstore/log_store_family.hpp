@@ -90,8 +90,11 @@ public:
     nlohmann::json get_status(int verbosity) const;
     std::string get_name() const { return m_metablk_name; }
 
-private:
+    logstore_family_id_t get_family_id() const { return m_family_id; }
+
     logdev_key do_device_truncate(bool dry_run = false);
+
+private:
 
     void on_log_store_found(logstore_id_t store_id, const logstore_superblk& meta);
     void on_io_completion(logstore_id_t id, logdev_key ld_key, logdev_key flush_idx, uint32_t nremaining_in_batch,

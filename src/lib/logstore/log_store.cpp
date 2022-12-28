@@ -40,7 +40,7 @@ HomeLogStore::HomeLogStore(LogStoreFamily& family, logstore_id_t id, bool append
         m_records{"HomeLogStoreRecords", start_lsn - 1},
         m_append_mode{append_mode},
         m_seq_num{start_lsn},
-        m_fq_name{fmt::format("{}.{}", family.m_family_id, id)},
+        m_fq_name{fmt::format("{}.{}", family.get_family_id(), id)},
         m_metrics{logstore_service().metrics()} {
     m_truncation_barriers.reserve(10000);
     m_safe_truncation_boundary.seq_num.store(start_lsn - 1, std::memory_order_release);
@@ -385,7 +385,7 @@ nlohmann::json HomeLogStore::get_status(int verbosity) const {
     js["truncation_pending_on_device?"] = m_safe_truncation_boundary.pending_dev_truncation;
     js["truncation_parallel_to_writes?"] = m_safe_truncation_boundary.active_writes_not_part_of_truncation;
     js["logstore_records"] = m_records.get_status(verbosity);
-    js["logstore_sb_first_lsn"] = m_logdev.m_logdev_meta.store_superblk(m_store_id).m_first_seq_num;
+    js["logstore_sb_first_lsn"] = m_logdev.log_dev_meta().store_superblk(m_store_id).m_first_seq_num;
     return js;
 }
 
