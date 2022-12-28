@@ -15,6 +15,8 @@
  *********************************************************************************/
 #include "homestore_status_mgr.hpp"
 
+#include <mutex>
+
 namespace homestore {
 void HomeStoreStatusMgr::register_status_cb(const std::string& module, const get_status_cb_t get_status_cb) {
     std::unique_lock lock(m_mtx);
