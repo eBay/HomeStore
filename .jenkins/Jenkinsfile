@@ -196,6 +196,7 @@ pipeline {
                     }
                     stage("Image") {
                         when { allOf { 
+                            branch "master"
                             expression { "${COVERAGE}" == 'False' }
                             }
                         }
