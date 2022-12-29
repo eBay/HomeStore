@@ -83,7 +83,13 @@ pipeline {
         stage('Build') {
             failFast true
             matrix {
-                agent { docker { image 'hub.tess.io/sds/sds_tess_build:4.x-latest' } }
+                agent {
+                    docker {
+                        image 'hub.tess.io/sds/sds_tess_build:4.x-latest'
+                        registryCredentialsId 'sds-sds'
+                        registryUrl "https://${ECR_URL}"
+                    }
+                }
                 axes {
                     axis {
                         name 'BUILD_TYPE'
