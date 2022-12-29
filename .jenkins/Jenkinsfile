@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         ORG = 'sds'
-        ECR_URL = 'ecr.vip.ebayc3.com'
+        ECR_URL = 'hub.tess.io'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         CONAN_USER = 'oss'
         TARGET_BRANCH = 'master'
