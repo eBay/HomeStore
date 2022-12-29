@@ -27,6 +27,7 @@
 #include <sisl/flip/flip.hpp>
 #endif
 #include <spdlog/fmt/fmt.h>
+#include <nlohmann/json.hpp>
 
 namespace homestore {
 ////////////// All Typedefs ///////////////////

@@ -72,6 +72,14 @@ public:
     void register_log_replay_done_cb(const log_replay_done_cb_t& cb) { m_replay_done_cb = cb; }
 
     /**
+     * @brief Register callback to indicate the replay is done during recovery. Failing to register for log_replay
+     * callback is ok as long as user of the log store knows when all logs are replayed.
+     *
+     * @param cb
+     */
+    log_replay_done_cb_t get_log_replay_done_cb() const { return m_replay_done_cb; }
+
+    /**
      * @brief Write the blob at the user specified seq number in sync manner. Under the covers it will call async
      * write and then wait for its completion. As such this is much lesser performing than async version since it
      * involves mutex/cv combination
@@ -269,13 +277,14 @@ public:
         return true;
     }
 
+    auto seq_num() const { return m_seq_num.load(std::memory_order_acquire); }
+
     LogStoreFamily& get_family() { return m_logstore_family; }
 
     nlohmann::json dump_log_store(const log_dump_req& dump_req = log_dump_req());
 
     nlohmann::json get_status(int verbosity) const;
 
-private:
     const truncation_info& pre_device_truncation();
     void post_device_truncation(const logdev_key& trunc_upto_key);
     void on_write_completion(logstore_req* req, const logdev_key& ld_key);
@@ -283,10 +292,11 @@ private:
     void on_log_found(logstore_seq_num_t seq_num, const logdev_key& ld_key, const logdev_key& flush_ld_key,
                       log_buffer buf);
     void on_batch_completion(const logdev_key& flush_batch_ld_key);
+
+private:
     void do_truncate(logstore_seq_num_t upto_seq_num);
     int search_max_le(logstore_seq_num_t input_sn);
 
-private:
     logstore_id_t m_store_id;
     LogStoreFamily& m_logstore_family;
     LogDev& m_logdev;

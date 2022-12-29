@@ -571,7 +571,7 @@ void LogDev::get_status(const int verbosity, nlohmann::json& js) const {
         js["logdev_stopped?"] = m_stopped;
         js["is_log_flushing_now?"] = m_is_flushing.load(std::memory_order_relaxed);
         js["logdev_sb_start_offset"] = m_logdev_meta.get_start_dev_offset();
-        js["logdev_sb_num_stores_reserved"] = m_logdev_meta.m_sb->num_stores_reserved();
+        js["logdev_sb_num_stores_reserved"] = m_logdev_meta.num_stores_reserved();
     }
 }
 

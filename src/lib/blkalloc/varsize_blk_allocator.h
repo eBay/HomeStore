@@ -115,6 +115,9 @@ public:
     VarsizeBlkAllocConfig& operator=(VarsizeBlkAllocConfig&&) noexcept = delete;
     virtual ~VarsizeBlkAllocConfig() override = default;
 
+    ///////////// SlabConfig getter /////////////
+    SlabCacheConfig get_slab_config() const { return m_slab_config; }
+
     //////////// Physical page size related getters/setters /////////////
     void set_phys_page_size(const uint32_t page_size) { m_phys_page_size = page_size; }
     uint32_t get_phys_page_size() const { return m_phys_page_size; }

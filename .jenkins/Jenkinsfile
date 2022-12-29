@@ -83,7 +83,7 @@ pipeline {
         stage('Build') {
             failFast true
             matrix {
-                agent { label 'sds-builder' }
+                agent { docker { image 'hub.tess.io/sds/sds_tess_build:4.x-latest' } }
                 axes {
                     axis {
                         name 'BUILD_TYPE'
@@ -196,6 +196,7 @@ pipeline {
                     }
                     stage("Image") {
                         when { allOf { 
+                            branch "master"
                             expression { "${COVERAGE}" == 'False' }
                             }
                         }

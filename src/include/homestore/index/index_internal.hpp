@@ -61,8 +61,7 @@ enum class index_buf_state_t : uint8_t {
 class IndexBuffer;
 typedef std::shared_ptr< IndexBuffer > IndexBufferPtr;
 
-class IndexBuffer {
-private:
+struct IndexBuffer {
     uint8_t* m_node_buf{nullptr};                            // Actual buffer
     index_buf_state_t m_buf_state{index_buf_state_t::CLEAN}; // Is buffer yet to persist?
     BlkId m_blkid;                                           // BlkId where this needs to be persisted
@@ -70,7 +69,6 @@ private:
     // Number of leader buffers we are waiting for before we write this buffer
     sisl::atomic_counter< int > m_wait_for_leaders{0};
 
-public:
     IndexBuffer(BlkId blkid, uint32_t buf_size, uint32_t align_size);
 
     BlkId blkid() const { return m_blkid; }
