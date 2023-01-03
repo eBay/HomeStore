@@ -1,5 +1,5 @@
 pipeline {
-    agent { label: 'sds-builder-2204' }
+    agent { label 'sds-builder-2204' }
 
     environment {
         ORG = 'sds'
