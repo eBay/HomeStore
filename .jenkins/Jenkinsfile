@@ -1,4 +1,12 @@
 pipeline {
+    agent {
+        docker {
+            image 'hub.tess.io/sds/sds_tess_build:4.x-latest'
+            label '5.4_kernel'
+            registryCredentialsId 'sds-sds'
+            registryUrl "https://${ECR_URL}"
+        }
+    }
     agent any
 
     environment {
