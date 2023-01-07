@@ -48,6 +48,7 @@
 
 #include "logstore/log_dev.hpp"
 #include "logstore/log_store_family.hpp"
+#include "common/homestore_flip.hpp"
 #include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
@@ -320,6 +321,8 @@ public:
         m_log_store->truncate(lsn);
         m_truncated_upto_lsn = lsn;
     }
+
+    void flush() { m_log_store->flush_sync(); }
 
     bool has_all_lsns_truncated() const { return (m_truncated_upto_lsn.load() == (m_cur_lsn.load() - 1)); }
 
@@ -761,6 +764,12 @@ protected:
         validate_num_stores();
     }
 
+    void flush() {
+        for (auto& lsc : SampleDB::instance().m_log_store_clients) {
+            lsc->flush();
+        }
+    }
+
     void recovery_validate() {
         for (size_t i{0}; i < SampleDB::instance().m_log_store_clients.size(); ++i) {
             const auto& lsc = SampleDB::instance().m_log_store_clients[i];
@@ -1124,6 +1133,61 @@ TEST_F(LogStoreTest, DeleteMultipleLogStores) {
 
     LOGINFO("Step 9: Truncate again, this time expected to have first log store delete is actually garbage collected");
     this->truncate_validate();
+}
+
+TEST_F(LogStoreTest, FlushSync) {
+#ifdef _PRERELEASE
+    LOGINFO("Step 1: Delay the flush threshold and flush timer to very high value to ensure flush works fine")
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.logstore.max_time_between_flush_us = 5000000ul; // 5 seconds
+        s.logstore.flush_threshold_size = 1048576ul;      // 1MB
+    });
+    HS_SETTINGS_FACTORY().save();
+#endif
+    LOGINFO("Step 2: Reinit the 10 records to start sequential write test");
+    this->init(1000);
+
+    LOGINFO("Step 3: Issue sequential inserts with q depth of 10");
+    this->kickstart_inserts(1, 10);
+
+    LOGINFO("Step 4: Do a sync flush");
+    this->flush();
+
+#ifdef _PRERELEASE
+    LOGINFO("Step 5: Reset the settings back")
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.logstore.max_time_between_flush_us = 300ul;
+        s.logstore.flush_threshold_size = 64ul;
+    });
+    HS_SETTINGS_FACTORY().save();
+#endif
+
+    LOGINFO("Step 6: Wait for the Inserts to complete");
+    this->wait_for_inserts();
+
+#ifdef _PRERELEASE
+    LOGINFO("Step 7: Simulate flush_sync running parallel to regular flush. This is achieved by doing flip to delay "
+            "regular flush and do flush_sync");
+    flip::FlipClient* fc = HomeStoreFlip::client_instance();
+
+    flip::FlipFrequency freq;
+    freq.set_count(1);
+    freq.set_percent(100);
+
+    flip::FlipCondition dont_care_cond;
+    fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &dont_care_cond);
+    fc->inject_delay_flip("simulate_log_flush_delay", {dont_care_cond}, freq, 5000000); // Delay by 5seconds
+#endif
+
+    LOGINFO("Step 8: Reissue sequential inserts with q depth of 10");
+    this->init(10);
+    this->kickstart_inserts(1, 10);
+
+    LOGINFO("Step 9: Do a parallel sync flush");
+    this->flush();
+
+    LOGINFO("Step 10: Wait for the Inserts to complete");
+    this->wait_for_inserts();
 }
 
 TEST_F(LogStoreTest, WriteSyncThenRead) {

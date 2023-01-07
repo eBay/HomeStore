@@ -56,7 +56,7 @@ bool HomeLogStore::write_sync(logstore_seq_num_t seq_num, const sisl::io_blob& b
         bool write_done{false};
         bool ret{false};
     };
-    auto ctx{std::make_shared< Context >()};
+    auto ctx = std::make_shared< Context >();
     this->write_async(seq_num, b, nullptr,
                       [seq_num, this, ctx](homestore::logstore_seq_num_t seq_num_cb,
                                            [[maybe_unused]] const sisl::io_blob& b, homestore::logdev_key ld_key,
@@ -84,7 +84,7 @@ void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     req->start_time = Clock::now();
 
 #ifndef NDEBUG
-    const auto trunc_upto_lsn{truncated_upto()};
+    const auto trunc_upto_lsn = truncated_upto();
     if (req->seq_num <= trunc_upto_lsn) {
         THIS_LOGSTORE_LOG(ERROR, "Assert: Appending lsn={} lesser than or equal to truncated_upto_lsn={}", req->seq_num,
                           trunc_upto_lsn);
@@ -101,7 +101,7 @@ void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
 void HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie,
                                const log_write_comp_cb_t& cb) {
     // Form an internal request and issue the write
-    auto* const req{logstore_req::make(this, seq_num, b, true /* is_write_req */)};
+    auto* req = logstore_req::make(this, seq_num, b, true /* is_write_req */);
     req->cookie = cookie;
 
     write_async(req, [cb](logstore_req* req, logdev_key written_lkey) {
@@ -112,20 +112,20 @@ void HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::io_blob& 
 
 logstore_seq_num_t HomeLogStore::append_async(const sisl::io_blob& b, void* cookie, const log_write_comp_cb_t& cb) {
     HS_DBG_ASSERT_EQ(m_append_mode, true, "append_async can be called only on append only mode");
-    const auto seq_num{m_seq_num.fetch_add(1, std::memory_order_acq_rel)};
+    const auto seq_num = m_seq_num.fetch_add(1, std::memory_order_acq_rel);
     write_async(seq_num, b, cookie, cb);
     return seq_num;
 }
 
 log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
-    const auto record{m_records.at(seq_num)};
-    const logdev_key ld_key{record.m_dev_key};
+    const auto record = m_records.at(seq_num);
+    const logdev_key ld_key = record.m_dev_key;
     if (!ld_key.is_valid()) {
         THIS_LOGSTORE_LOG(ERROR, "ld_key not valid {}", seq_num);
         throw std::out_of_range("key not valid");
     }
 
-    const auto start_time{Clock::now()};
+    const auto start_time = Clock::now();
     THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} mapped to logdev_key=[idx={} dev_offset={}]", m_store_id, seq_num,
                       ld_key.idx, ld_key.dev_offset);
     COUNTER_INCREMENT(m_metrics, logstore_read_count, 1);
@@ -169,6 +169,11 @@ void HomeLogStore::on_write_completion(logstore_req* req, const logdev_key& ld_k
     m_flush_batch_max_lsn = std::max(m_flush_batch_max_lsn, req->seq_num);
     HISTOGRAM_OBSERVE(m_metrics, logstore_append_latency, get_elapsed_time_us(req->start_time));
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
+
+    if (m_sync_flush_waiter_lsn.load() == req->seq_num) {
+        // Sync flush is waiting for this lsn to be completed, wake up the sync flush cv
+        m_sync_flush_cv.notify_one();
+    }
 }
 
 void HomeLogStore::on_read_completion(logstore_req* req, const logdev_key& ld_key) {
@@ -212,7 +217,7 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_trun
 #endif
 
 #ifndef NDEBUG
-    const auto s{m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire)};
+    const auto s = m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire);
     // Don't check this if we don't know our truncation boundary. The call is made to inform us about
     // correct truncation point.
     if (s != -1) {
@@ -222,13 +227,13 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_trun
 #endif
 
     // First try to block the flushing of logdevice and if we are successfully able to do, then
-    auto shared_this{shared_from_this()};
-    const bool locked_now{m_logdev.try_lock_flush([shared_this, upto_seq_num, in_memory_truncate_only]() {
+    auto shared_this = shared_from_this();
+    const bool locked_now = m_logdev.try_lock_flush([shared_this, upto_seq_num, in_memory_truncate_only]() {
         shared_this->do_truncate(upto_seq_num);
         if (!in_memory_truncate_only) {
-            [[maybe_unused]] const auto key{shared_this->get_family().do_device_truncate()};
+            [[maybe_unused]] const auto key = shared_this->get_family().do_device_truncate();
         }
-    })};
+    });
 
     if (locked_now) { m_logdev.unlock_flush(); }
 }
@@ -241,7 +246,7 @@ void HomeLogStore::do_truncate(logstore_seq_num_t upto_seq_num) {
     // Need to update the superblock with meta, we don't persist yet, will be done as part of log dev truncation
     m_logdev.update_store_superblk(m_store_id, logstore_superblk{upto_seq_num + 1}, false /* persist_now */);
 
-    const int ind{search_max_le(upto_seq_num)};
+    const int ind = search_max_le(upto_seq_num);
     if (ind < 0) {
         // m_safe_truncation_boundary.pending_dev_truncation = false;
         THIS_LOGSTORE_PERIODIC_LOG(DEBUG,
@@ -292,11 +297,11 @@ void HomeLogStore::fill_gap(logstore_seq_num_t seq_num) {
 int HomeLogStore::search_max_le(logstore_seq_num_t input_sn) {
     int mid{0};
     int start{-1};
-    int end{static_cast< int >(m_truncation_barriers.size())};
+    int end = int_cast(m_truncation_barriers.size());
 
     while ((end - start) > 1) {
         mid = start + (end - start) / 2;
-        const auto& mid_entry{m_truncation_barriers[mid]};
+        const auto& mid_entry = m_truncation_barriers[mid];
 
         if (mid_entry.seq_num == input_sn) {
             return mid;
@@ -314,7 +319,7 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
     nlohmann::json json_dump{}; // create root object
     json_dump["store_id"] = this->m_store_id;
 
-    const auto trunc_upto{this->truncated_upto()};
+    const auto trunc_upto = this->truncated_upto();
     std::remove_const_t< decltype(trunc_upto) > idx{trunc_upto + 1};
     if (dump_req.start_seq_num != 0) idx = dump_req.start_seq_num;
 
@@ -341,7 +346,7 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
             } catch (const std::exception& ex) { THIS_LOGSTORE_LOG(ERROR, "Exception in json dump- {}", ex.what()); }
 
             if (dump_req.verbosity_level == homestore::log_dump_verbosity::CONTENT) {
-                const uint8_t* const b{log_buffer.bytes()};
+                const uint8_t* b = log_buffer.bytes();
                 const std::vector< uint8_t > bv(b, b + log_buffer.size());
                 auto content = nlohmann::json::binary_t(bv);
                 json_val["content"] = std::move(content);
@@ -373,6 +378,34 @@ logstore_seq_num_t HomeLogStore::get_contiguous_issued_seq_num(logstore_seq_num_
 
 logstore_seq_num_t HomeLogStore::get_contiguous_completed_seq_num(logstore_seq_num_t from) const {
     return (logstore_seq_num_t)m_records.completed_upto(from + 1);
+}
+
+void HomeLogStore::flush_sync(logstore_seq_num_t upto_seq_num) {
+    if (upto_seq_num == invalid_lsn()) { upto_seq_num = m_records.active_upto(); }
+
+    // if we have flushed already, we are done
+    if (m_records.completed_upto() >= upto_seq_num) { return; }
+
+    {
+        std::unique_lock lk(m_sync_flush_mtx);
+
+        // Step 1: Mark the waiter lsn to the seqnum we wanted to wait for. The completion of every lsn checks
+        // for this and if this lsn is completed, will make a callback which signals the cv.
+        m_sync_flush_waiter_lsn.store(upto_seq_num);
+
+        // Step 2: After marking this lsn, we again do a check, to avoid a race where completion checked for no lsn
+        // and the lsn is stored in step 1 above.
+        if (m_records.completed_upto() >= upto_seq_num) { return; }
+
+        // Step 3: Force a flush (with least threshold)
+        m_logdev.flush_if_needed(1);
+
+        // Step 4: Wait for completion
+        m_sync_flush_cv.wait(lk, [this, upto_seq_num] { return m_records.completed_upto() >= upto_seq_num; });
+
+        // NOTE: We are not resetting the lsn because same seq number should never have 2 completions and thus not
+        // doing it saves an atomic instruction
+    }
 }
 
 nlohmann::json HomeLogStore::get_status(int verbosity) const {
