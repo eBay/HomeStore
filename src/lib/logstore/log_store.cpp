@@ -388,24 +388,23 @@ void HomeLogStore::flush_sync(logstore_seq_num_t upto_seq_num) {
 
     {
         std::unique_lock lk(m_sync_flush_mtx);
-        while (true) {
-            // Step 1: Mark the waiter lsn to the seqnum we wanted to wait for. The completion of every lsn checks
-            // for this and if this lsn is completed, will make a callback which signals the cv.
-            m_sync_flush_waiter_lsn.store(upto_seq_num);
 
-            // Step 2: After marking this lsn, we again do a check, to avoid a race where completion checked for no lsn
-            // and the lsn is stored in step 1 above.
-            if (m_records.completed_upto() >= upto_seq_num) { break; }
+        // Step 1: Mark the waiter lsn to the seqnum we wanted to wait for. The completion of every lsn checks
+        // for this and if this lsn is completed, will make a callback which signals the cv.
+        m_sync_flush_waiter_lsn.store(upto_seq_num);
 
-            // Step 3: Force a flush (with least threshold)
-            m_logdev.flush_if_needed(1);
+        // Step 2: After marking this lsn, we again do a check, to avoid a race where completion checked for no lsn
+        // and the lsn is stored in step 1 above.
+        if (m_records.completed_upto() >= upto_seq_num) { return; }
 
-            // Step 4: Wait for completion
-            m_sync_flush_cv.wait(lk, [this, upto_seq_num] { return m_records.completed_upto() >= upto_seq_num; });
+        // Step 3: Force a flush (with least threshold)
+        m_logdev.flush_if_needed(1);
 
-            // NOTE: We are not resetting the lsn because same seq number should never have 2 completions and thus not
-            // doing it saves an atomic instruction
-        }
+        // Step 4: Wait for completion
+        m_sync_flush_cv.wait(lk, [this, upto_seq_num] { return m_records.completed_upto() >= upto_seq_num; });
+
+        // NOTE: We are not resetting the lsn because same seq number should never have 2 completions and thus not
+        // doing it saves an atomic instruction
     }
 }
 
