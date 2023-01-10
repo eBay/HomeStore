@@ -381,6 +381,11 @@ logstore_seq_num_t HomeLogStore::get_contiguous_completed_seq_num(logstore_seq_n
 }
 
 void HomeLogStore::flush_sync(logstore_seq_num_t upto_seq_num) {
+    // Logdev flush is async call and if flush_sync is called on the same thread which could potentially do logdev
+    // flush, waiting sync would cause deadlock.
+    HS_DBG_ASSERT_EQ(LogDev::can_flush_in_this_thread(), false,
+                     "Logstore flush sync cannot be called on same thread which could do logdev flush");
+
     if (upto_seq_num == invalid_lsn()) { upto_seq_num = m_records.active_upto(); }
 
     // if we have flushed already, we are done
@@ -406,6 +411,49 @@ void HomeLogStore::flush_sync(logstore_seq_num_t upto_seq_num) {
         // NOTE: We are not resetting the lsn because same seq number should never have 2 completions and thus not
         // doing it saves an atomic instruction
     }
+}
+
+uint64_t HomeLogStore::rollback_async(logstore_seq_num_t to_lsn, on_rollback_cb_t cb) {
+    // Validate if the lsn to which it is rolledback to is not truncated.
+    auto ret = m_records.status(to_lsn + 1);
+    if (ret.is_out_of_range) {
+        HS_LOG_ASSERT(false, "Attempted to rollback to {} which is already truncated", to_lsn);
+        return 0;
+    }
+
+    // Ensure that there are no pending lsn to flush. If so lets flush them now.
+    const auto from_lsn = get_contiguous_issued_seq_num(0);
+    if (get_contiguous_completed_seq_num(0) < from_lsn) { flush_sync(); }
+    HS_DBG_ASSERT_EQ(get_contiguous_completed_seq_num(0), get_contiguous_issued_seq_num(0),
+                     "Still some pending lsns to flush, concurrent write and rollback is not supported");
+
+    // Do an in-memory rollback of lsns before we persist the log ids. This is done, so that subsequent appends can
+    // be queued without waiting for rollback async operation completion. It is safe to do so, since before returning
+    // from this method, we will queue ourselves to the flush lock and thus subsequent writes are guaranteed to go after
+    // this rollback is completed.
+    m_seq_num.store(to_lsn + 1, std::memory_order_release); // Rollback the next append lsn
+    logid_range_t logid_range = std::make_pair(m_records.at(to_lsn + 1).m_dev_key.idx,
+                                               m_records.at(from_lsn).m_dev_key.idx); // Get the logid range to rollback
+    m_records.rollback(to_lsn); // Rollback all bitset records and from here on, we can't access any lsns beyond to_lsn
+
+    if (m_logdev.try_lock_flush([logid_range, to_lsn, this, comp_cb = std::move(cb)]() {
+            // Rollback the log_ids in the range, for this log store (which persists this info in its superblk)
+            m_logdev.rollback(m_store_id, logid_range);
+
+            // Remove all truncation barriers on rolled back lsns
+            for (auto it = std::rbegin(m_truncation_barriers); it != std::rend(m_truncation_barriers); ++it) {
+                if (it->seq_num > to_lsn) {
+                    m_truncation_barriers.erase(std::next(it).base());
+                } else {
+                    break;
+                }
+            }
+            m_flush_batch_max_lsn = invalid_lsn(); // Reset the flush batch for next batch.
+            if (comp_cb) { comp_cb(to_lsn); }
+        })) {
+        m_logdev.unlock_flush();
+    }
+    return from_lsn - to_lsn;
 }
 
 nlohmann::json HomeLogStore::get_status(int verbosity) const {

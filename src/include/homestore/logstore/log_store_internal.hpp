@@ -52,6 +52,7 @@ typedef std::function< void(std::shared_ptr< HomeLogStore >) > log_store_opened_
 typedef std::function< void(std::shared_ptr< HomeLogStore >, logstore_seq_num_t) > log_replay_done_cb_t;
 
 typedef int64_t logid_t;
+
 struct logdev_key {
     logid_t idx;
     off_t dev_offset;
