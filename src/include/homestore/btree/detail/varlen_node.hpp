@@ -510,6 +510,56 @@ public:
         return str;
     }
 
+    std::string to_string_keys(bool print_friendly = false) const override {
+        std::string delimiter = print_friendly ? "\n" : "\t";
+        auto str = fmt::format("{} nEntries={} {} ",
+                               print_friendly ? "------------------------------------------------------------\n" : "",
+                               this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
+        if (!this->is_leaf() && (this->has_valid_edge())) {
+            fmt::format_to(std::back_inserter(str), "edge_id={}.{}", this->edge_info().m_bnodeid,
+                           this->edge_info().m_link_version);
+        }
+        if (this->total_entries() == 0) {
+            fmt::format_to(std::back_inserter(str), " [EMPTY] ");
+            return str;
+        }
+        if (!this->is_leaf()) {
+            fmt::format_to(std::back_inserter(str), " [");
+            for (uint32_t i{0}; i < this->total_entries(); ++i) {
+                uint32_t cur_key = get_nth_key< K >(i, false).key();
+                fmt::format_to(std::back_inserter(str), "{}{}", cur_key, i == this->total_entries() - 1 ? "" : ", ");
+            }
+            fmt::format_to(std::back_inserter(str), "]");
+            return str;
+        }
+        uint32_t prev_key = get_nth_key< K >(0, false).key();
+        uint32_t cur_key = prev_key;
+        uint32_t last_key = get_nth_key< K >(this->total_entries() - 1, false).key();
+        if (last_key - prev_key == this->total_entries() - 1) {
+            if (this->total_entries() == 1)
+                fmt::format_to(std::back_inserter(str), "{}[{}]", delimiter, prev_key);
+            else
+                fmt::format_to(std::back_inserter(str), "{}[{}-{}]", delimiter, prev_key, last_key);
+            return str;
+        }
+        fmt::format_to(std::back_inserter(str), "{}0 - [{}", delimiter, prev_key);
+
+        for (uint32_t i{1}; i < this->total_entries(); ++i) {
+            cur_key = get_nth_key< K >(i, false).key();
+            if (cur_key != prev_key + 1) {
+                fmt::format_to(std::back_inserter(str), "-{}]{}{}- [{}", prev_key, delimiter, i, cur_key);
+            }
+            prev_key = cur_key;
+        }
+
+        if (last_key - prev_key == this->total_entries() - 1) {
+            fmt::format_to(std::back_inserter(str), "]");
+        } else {
+            fmt::format_to(std::back_inserter(str), "-{}]", cur_key);
+        }
+        return str;
+    }
+
     uint8_t* get_node_context() override { return uintptr_cast(this) + sizeof(VariableNode< K, V >); }
 
     int compare_nth_key(const BtreeKey& cmp_key, uint32_t ind) const {

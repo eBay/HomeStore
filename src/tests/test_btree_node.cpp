@@ -27,7 +27,7 @@
 
 static constexpr uint32_t g_node_size{4096};
 static constexpr uint32_t g_max_keys{6000};
-static std::uniform_int_distribution< uint32_t > g_randkey_generator{0, g_max_keys};
+static std::uniform_int_distribution< uint32_t > g_randkey_generator{0, g_max_keys - 1};
 
 using namespace homestore;
 SISL_LOGGING_INIT(btree)
@@ -133,6 +133,35 @@ struct NodeTest : public testing::Test {
         ASSERT_EQ(removed_1 || removed_2, shadow_found) << "To remove key=" << k << " is not present in the nodes";
 
         if (validate_remove) { validate_specific(k); }
+    }
+
+    void remove_range(uint32_t start_idx, uint32_t end_idx) {
+        ASSERT_LT(end_idx, m_node1->total_entries());
+        ASSERT_LT(start_idx, m_node1->total_entries());
+        ASSERT_GE(start_idx, 0);
+        ASSERT_GE(end_idx, start_idx);
+        int64_t head_offset{0};
+        int64_t tail_offset{0};
+
+        K head_k = m_node1->template get_nth_key< K >(start_idx, false);
+        K tail_k = m_node1->template get_nth_key< K >(end_idx, false);
+
+        auto num_entries = m_node1->total_entries();
+        m_node1->remove(start_idx, end_idx);
+
+        // validate
+        auto new_num_entries = m_node1->total_entries();
+        ASSERT_EQ(end_idx - start_idx + 1, num_entries - new_num_entries)
+            << "Total deleted objects does not match! start_idx= " << start_idx << " end_idx= " << end_idx
+            << " expected delete: " << end_idx - start_idx + 1 << " original node entries: " << num_entries
+            << " current node entries: " << new_num_entries;
+        for (uint32_t i = 0; i < new_num_entries; i++) {
+            ASSERT_EQ(m_node1->compare_nth_key(head_k, i), start_idx > i ? -1 : 1)
+                << "start index key= " << head_k << " key[" << i
+                << "]= " << m_node1->template get_nth_key< K >(i, false);
+            ASSERT_EQ(m_node1->compare_nth_key(tail_k, i), start_idx > i ? -1 : 1)
+                << "end index key= " << head_k << " key[" << i << "]= " << m_node1->template get_nth_key< K >(i, false);
+        }
     }
 
     void validate_get_all() const {
@@ -266,6 +295,19 @@ TYPED_TEST(NodeTest, Remove) {
     this->validate_get_any(0, 2);
     this->validate_get_any(3, 3);
     this->validate_get_any(g_max_keys / 2, g_max_keys - 1);
+}
+
+TYPED_TEST(NodeTest, RemoveRangeIndex) {
+    for (uint32_t i = 0; i < 20; i++) {
+        this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    }
+    this->print();
+    this->remove_range(5, 10); // size = 14  EXPECT: 0 1 2 3 4 [5 6 7 8 9 10] 11 12 13 14 15 16 17 18 19
+    this->print();
+    this->remove_range(0, 5); // size = 8   EXPECT: [0 1 2 3 4 11] 12 13 14 15 16 17 18 19
+    this->print();
+    this->remove_range(7, 7); // size = 7 EXPECT 12 13 14 15 16 17 18 [19]
+    this->print();
 }
 
 TYPED_TEST(NodeTest, Update) {

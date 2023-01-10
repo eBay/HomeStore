@@ -97,6 +97,7 @@ public:
     virtual std::pair< btree_status_t, uint64_t > destroy_btree(void* context);
     nlohmann::json get_status(int log_level) const;
     void print_tree() const;
+    void print_tree_keys() const;
     nlohmann::json get_metrics_in_json(bool updated = true);
 
     // static void set_io_flip();
@@ -162,6 +163,7 @@ protected:
     uint64_t get_btree_node_cnt() const;
     uint64_t get_child_node_cnt(bnodeid_t bnodeid) const;
     void to_string(bnodeid_t bnodeid, std::string& buf) const;
+    void to_string_keys(bnodeid_t bnodeid, std::string& buf) const;
     void validate_sanity_child(const BtreeNodePtr& parent_node, uint32_t ind) const;
     void validate_sanity_next_child(const BtreeNodePtr& parent_node, uint32_t ind) const;
     void print_node(const bnodeid_t& bnodeid) const;
