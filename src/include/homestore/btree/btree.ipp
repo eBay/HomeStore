@@ -328,6 +328,16 @@ void Btree< K, V >::print_tree() const {
 }
 
 template < typename K, typename V >
+void Btree< K, V >::print_tree_keys() const {
+    std::string buf;
+    m_btree_lock.lock_shared();
+    to_string_keys(m_root_node_info.bnode_id(), buf);
+    m_btree_lock.unlock_shared();
+
+    BT_LOG(INFO, "Pre order traversal of tree:\n<{}>", buf);
+}
+
+template < typename K, typename V >
 nlohmann::json Btree< K, V >::get_metrics_in_json(bool updated) {
     return m_metrics.get_result_in_json(updated);
 }
