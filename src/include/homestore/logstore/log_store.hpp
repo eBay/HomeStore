@@ -40,6 +40,7 @@ class LogDev;
 class LogStoreServiceMetrics;
 
 static constexpr logstore_seq_num_t invalid_lsn() { return std::numeric_limits< logstore_seq_num_t >::min(); }
+typedef std::function< void(logstore_seq_num_t) > on_rollback_cb_t;
 
 class HomeLogStore : public std::enable_shared_from_this< HomeLogStore > {
 public:
@@ -256,26 +257,12 @@ public:
     void flush_sync(logstore_seq_num_t upto_seq_num = invalid_lsn());
 
     /**
-     * @brief Sync the log store to disk
-     *
-     * @param
-     * @return True on success
-     */
-    bool sync() {
-        // TODO: Implement this method
-        return true;
-    }
-
-    /**
      * @brief Rollback the given instance to the given sequence number
      *
      * @param seq_num Sequence number back which logs are to be rollbacked
      * @return True on success
      */
-    bool rollback(logstore_seq_num_t seq_num) {
-        // TODO: Implement this method
-        return true;
-    }
+    uint64_t rollback_async(logstore_seq_num_t to_lsn, on_rollback_cb_t cb);
 
     auto seq_num() const { return m_seq_num.load(std::memory_order_acquire); }
 
