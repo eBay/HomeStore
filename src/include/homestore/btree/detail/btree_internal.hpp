@@ -223,7 +223,8 @@ struct BtreeConfig {
     uint8_t m_suggested_min_pct{30};
     uint8_t m_split_pct{50};
     uint32_t m_max_merge_nodes{3};
-    uint32_t m_rebalance_turned_on{false};
+    bool m_rebalance_turned_on{false};
+    bool m_merge_turned_on{false};
 
     btree_node_type m_leaf_node_type{btree_node_type::VAR_OBJECT};
     btree_node_type m_int_node_type{btree_node_type::VAR_KEY};

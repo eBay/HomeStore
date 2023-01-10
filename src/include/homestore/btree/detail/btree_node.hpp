@@ -464,6 +464,7 @@ public:
     virtual uint32_t move_in_from_right_by_size(const BtreeConfig& cfg, BtreeNode& other_node, uint32_t size) = 0;*/
     virtual uint32_t available_size(const BtreeConfig& cfg) const = 0;
     virtual std::string to_string(bool print_friendly = false) const = 0;
+    virtual std::string to_string_keys(bool print_friendly = false) const = 0;
     virtual void get_nth_value(uint32_t ind, BtreeValue* out_val, bool copy) const = 0;
     virtual void get_nth_key_internal(uint32_t ind, BtreeKey& out_key, bool copykey) const = 0;
 
