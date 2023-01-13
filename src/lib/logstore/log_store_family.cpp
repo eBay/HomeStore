@@ -31,13 +31,7 @@ namespace homestore {
 SISL_LOGGING_DECL(logstore)
 
 LogStoreFamily::LogStoreFamily(logstore_family_id_t f_id) :
-        m_family_id{f_id},
-        m_metablk_name{std::string("LogDevFamily") + std::to_string(f_id)},
-        m_log_dev{f_id, m_metablk_name} {}
-
-void LogStoreFamily::meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size) {
-    m_log_dev.meta_blk_found(mblk, buf, size);
-}
+        m_family_id{f_id}, m_name{std::string("LogDevFamily") + std::to_string(f_id)}, m_log_dev{f_id, m_name} {}
 
 void LogStoreFamily::start(bool format, JournalVirtualDev* blk_store) {
     m_log_dev.register_store_found_cb(bind_this(LogStoreFamily::on_log_store_found, 2));

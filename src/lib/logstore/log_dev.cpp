@@ -43,8 +43,8 @@ SISL_LOGGING_DECL(logstore)
 static bool has_data_service() { return HomeStore::instance()->has_data_service(); }
 // static BlkDataService& data_service() { return HomeStore::instance()->data_service(); }
 
-LogDev::LogDev(const logstore_family_id_t f_id, const std::string& metablk_name) :
-        m_family_id{f_id}, m_logdev_meta{metablk_name} {
+LogDev::LogDev(const logstore_family_id_t f_id, const std::string& logdev_name) :
+        m_family_id{f_id}, m_logdev_meta{logdev_name} {
     m_flush_size_multiple = 0;
     if (f_id == LogStoreService::DATA_LOG_FAMILY_IDX) {
         m_flush_size_multiple = HS_DYNAMIC_CONFIG(logstore->flush_size_multiple_data_logdev);
@@ -54,10 +54,6 @@ LogDev::LogDev(const logstore_family_id_t f_id, const std::string& metablk_name)
 }
 
 LogDev::~LogDev() = default;
-
-void LogDev::meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size) {
-    m_logdev_meta.meta_buf_found(buf, static_cast< void* >(mblk));
-}
 
 void LogDev::start(bool format, JournalVirtualDev* vdev) {
     HS_LOG_ASSERT((m_append_comp_cb != nullptr), "Expected Append callback to be registered");
@@ -182,10 +178,17 @@ void LogDev::do_load(const off_t device_cursor) {
             b.set_size(rec->size);
             if (m_last_truncate_idx == -1) { m_last_truncate_idx = header->start_idx() + i; }
             if (m_logfound_cb) {
-                THIS_LOGDEV_LOG(TRACE, "seq num {}, log indx {}, group dev offset {} size {}", rec->store_seq_num,
-                                (header->start_idx() + i), group_dev_offset, rec->size);
-                m_logfound_cb(rec->store_id, rec->store_seq_num, {header->start_idx() + i, group_dev_offset},
-                              flush_ld_key, b, (header->nrecords() - (i + 1)));
+                // Validate if the id is present in rollback info
+                if (m_logdev_meta.is_rolled_back(rec->store_id, header->start_idx() + i)) {
+                    THIS_LOGDEV_LOG(
+                        DEBUG, "logstore_id[{}] log_idx={}, lsn={} has been rolledback, not notifying the logstore",
+                        rec->store_id, (header->start_idx() + i), rec->store_seq_num);
+                } else {
+                    THIS_LOGDEV_LOG(TRACE, "seq num {}, log indx {}, group dev offset {} size {}", rec->store_seq_num,
+                                    (header->start_idx() + i), group_dev_offset, rec->size);
+                    m_logfound_cb(rec->store_id, rec->store_seq_num, {header->start_idx() + i, group_dev_offset},
+                                  flush_ld_key, b, (header->nrecords() - (i + 1)));
+                }
             }
             ++i;
         }
@@ -348,10 +351,11 @@ LogGroup* LogDev::prepare_flush(const int32_t estimated_records) {
     return lg;
 }
 
-static bool can_flush_here() {
-    if (!iomanager.am_i_io_reactor()) { return false; }
-    return (!HS_DYNAMIC_CONFIG(logstore.flush_only_in_dedicated_thread) ||
-            (iomanager.iothread_self() != logstore_service().flush_thread()));
+bool LogDev::can_flush_in_this_thread() {
+    if (iomanager.am_i_io_reactor() && (iomanager.iothread_self() == logstore_service().flush_thread())) {
+        return true;
+    }
+    return (!HS_DYNAMIC_CONFIG(logstore.flush_only_in_dedicated_thread) && iomanager.am_i_worker_reactor());
 }
 
 // This method checks if in case we were to add a record of size provided, do we enter into a state which exceeds
@@ -370,7 +374,7 @@ bool LogDev::flush_if_needed(int64_t threshold_size) {
 
     if (flush_by_size || flush_by_time) {
         // First off, check if we can flush in this thread itself, if not, schedule it into different thread
-        if (!can_flush_here()) {
+        if (!can_flush_in_this_thread()) {
             iomanager.run_on(logstore_service().flush_thread(),
                              [this]([[maybe_unused]] const io_thread_addr_t addr) { flush_if_needed(); });
             return false;
@@ -554,6 +558,9 @@ uint64_t LogDev::truncate(const logdev_key& key) {
 #endif
             }
 
+            // We can remove the rollback records of those upto which logid is getting truncated
+            m_logdev_meta.remove_rollback_record_upto(key.idx, false /* persist_now */);
+
             m_logdev_meta.persist();
 #ifdef _PRERELEASE
             if (garbage_collect && homestore_flip->test_flip("logdev_abort_after_garbage")) {
@@ -566,9 +573,14 @@ uint64_t LogDev::truncate(const logdev_key& key) {
     return num_records_to_truncate;
 }
 
-void LogDev::update_store_superblk(const logstore_id_t idx, const logstore_superblk& meta, const bool persist_now) {
+void LogDev::update_store_superblk(logstore_id_t store_id, const logstore_superblk& lsb, bool persist_now) {
     std::unique_lock lg{m_meta_mutex};
-    m_logdev_meta.update_store_superblk(idx, meta, persist_now);
+    m_logdev_meta.update_store_superblk(store_id, lsb, persist_now);
+}
+
+void LogDev::rollback(logstore_id_t store_id, logid_range_t id_range) {
+    std::unique_lock lg{m_meta_mutex};
+    m_logdev_meta.add_rollback_record(store_id, id_range, true);
 }
 
 void LogDev::get_status(const int verbosity, nlohmann::json& js) const {
@@ -585,16 +597,33 @@ void LogDev::get_status(const int verbosity, nlohmann::json& js) const {
 }
 
 /////////////////////////////// LogDevMetadata Section ///////////////////////////////////////
-LogDevMetadata::LogDevMetadata(const std::string& metablk_name) : m_sb{metablk_name} {}
+LogDevMetadata::LogDevMetadata(const std::string& logdev_name) :
+        m_sb{logdev_name + "_logdev_sb"}, m_rollback_sb{logdev_name + "_rollback_sb"} {
+    meta_service().register_handler(
+        logdev_name + "_logdev_sb",
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+            logdev_super_blk_found(std::move(buf), voidptr_cast(mblk));
+        },
+        nullptr);
+
+    meta_service().register_handler(
+        logdev_name + "_rollback_sb",
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+            rollback_super_blk_found(std::move(buf), voidptr_cast(mblk));
+        },
+        nullptr);
+}
 
 logdev_superblk* LogDevMetadata::create() {
-    logdev_superblk* sb = m_sb.create(required_sb_size(0));
+    logdev_superblk* sb = m_sb.create(logdev_sb_size_needed(0));
+    rollback_superblk* rsb = m_rollback_sb.create(rollback_superblk::size_needed(1));
 
     auto* sb_area = m_sb->get_logstore_superblk();
     std::fill_n(sb_area, store_capacity(), logstore_superblk::default_value());
 
     m_id_reserver = std::make_unique< sisl::IDReserver >();
     m_sb.write();
+    m_rollback_sb.write();
     return sb;
 }
 
@@ -603,10 +632,17 @@ void LogDevMetadata::reset() {
     m_store_info.clear();
 }
 
-void LogDevMetadata::meta_buf_found(const sisl::byte_view& buf, void* meta_cookie) {
+void LogDevMetadata::logdev_super_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
     m_sb.load(buf, meta_cookie);
     HS_REL_ASSERT_EQ(m_sb->get_magic(), logdev_superblk::LOGDEV_SB_MAGIC, "Invalid logdev metablk, magic mismatch");
     HS_REL_ASSERT_EQ(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Invalid version of logdev metablk");
+}
+
+void LogDevMetadata::rollback_super_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
+    m_rollback_sb.load(buf, meta_cookie);
+    HS_REL_ASSERT_EQ(m_rollback_sb->get_magic(), rollback_superblk::ROLLBACK_SB_MAGIC, "Rollback sb magic mismatch");
+    HS_REL_ASSERT_EQ(m_rollback_sb->get_version(), rollback_superblk::ROLLBACK_SB_VERSION,
+                     "Rollback sb version mismatch");
 }
 
 std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::load() {
@@ -635,6 +671,11 @@ std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::loa
         ++idx;
     }
 
+    for (uint32_t i{0}; i < m_rollback_sb->num_records; ++i) {
+        const auto& rec = m_rollback_sb->at(i);
+        m_rollback_info.insert({rec.store_id, rec.idx_range});
+    }
+
     return ret_list;
 }
 
@@ -643,7 +684,7 @@ logstore_id_t LogDevMetadata::reserve_store(bool persist_now) {
     m_store_info.insert(idx);
 
     // Write the meta inforation on-disk meta
-    resize_if_needed(); // In case the idx falls out of the alloc boundary, resize them
+    resize_logdev_sb_if_needed(); // In case the idx falls out of the alloc boundary, resize them
 
     logstore_superblk* sb_area = m_sb->get_logstore_superblk();
     logstore_superblk::init(sb_area[idx]);
@@ -653,19 +694,26 @@ logstore_id_t LogDevMetadata::reserve_store(bool persist_now) {
     return idx;
 }
 
-void LogDevMetadata::persist() { m_sb.write(); }
+void LogDevMetadata::persist() {
+    m_sb.write();
+    if (m_rollback_info_dirty) {
+        m_rollback_sb.write();
+        m_rollback_info_dirty = false;
+    }
+}
 
-void LogDevMetadata::unreserve_store(logstore_id_t idx, bool persist_now) {
-    m_id_reserver->unreserve(idx);
-    m_store_info.erase(idx);
+void LogDevMetadata::unreserve_store(logstore_id_t store_id, bool persist_now) {
+    m_id_reserver->unreserve(store_id);
+    m_store_info.erase(store_id);
+    remove_all_rollback_records(store_id, persist_now);
 
-    resize_if_needed();
-    if (idx < *m_store_info.rbegin()) {
-        HS_LOG(DEBUG, logstore, "logdev meta not shrunk log_idx={} highest indx {}", idx, *m_store_info.rbegin(),
+    resize_logdev_sb_if_needed();
+    if (store_id < *m_store_info.rbegin()) {
+        HS_LOG(DEBUG, logstore, "logdev meta not shrunk log_idx={} highest indx {}", store_id, *m_store_info.rbegin(),
                m_sb->num_stores);
         // We have not shrunk the store info, so we need to explicitly clear the store meta in on-disk meta
         logstore_superblk* sb_area = m_sb->get_logstore_superblk();
-        logstore_superblk::clear(sb_area[idx]);
+        logstore_superblk::clear(sb_area[store_id]);
     }
     --m_sb->num_stores;
     if (persist_now) { m_sb.write(); }
@@ -676,7 +724,7 @@ void LogDevMetadata::update_store_superblk(logstore_id_t idx, const logstore_sup
     m_store_info.insert(idx);
 
     // Update the on-disk copy
-    resize_if_needed();
+    resize_logdev_sb_if_needed();
 
     logstore_superblk* sb_area = m_sb->get_logstore_superblk();
     sb_area[idx] = sb;
@@ -702,8 +750,8 @@ void LogDevMetadata::set_start_dev_offset(off_t offset, logid_t key_idx, bool pe
 
 logid_t LogDevMetadata::get_start_log_idx() const { return m_sb->key_idx; }
 
-bool LogDevMetadata::resize_if_needed() {
-    auto req_sz{required_sb_size((m_store_info.size() == 0) ? 0u : *m_store_info.rbegin() + 1)};
+bool LogDevMetadata::resize_logdev_sb_if_needed() {
+    auto req_sz = logdev_sb_size_needed((m_store_info.size() == 0) ? 0u : *m_store_info.rbegin() + 1);
     if (meta_service().is_aligned_buf_needed(req_sz)) { req_sz = sisl::round_up(req_sz, meta_service().align_size()); }
     if (req_sz != m_sb.size()) {
         const auto old_buf = m_sb.raw_buf();
@@ -712,7 +760,7 @@ bool LogDevMetadata::resize_if_needed() {
         logstore_superblk* sb_area = m_sb->get_logstore_superblk();
         std::fill_n(sb_area, store_capacity(), logstore_superblk::default_value());
 
-        std::memcpy(static_cast< void* >(m_sb.raw_buf()->bytes), static_cast< const void* >(old_buf->bytes),
+        std::memcpy(voidptr_cast(m_sb.raw_buf()->bytes), static_cast< const void* >(old_buf->bytes),
                     std::min(old_buf->size, m_sb.size()));
         return true;
     } else {
@@ -722,5 +770,86 @@ bool LogDevMetadata::resize_if_needed() {
 
 uint32_t LogDevMetadata::store_capacity() const {
     return (m_sb.size() - sizeof(logdev_superblk)) / sizeof(logstore_superblk);
+}
+
+void LogDevMetadata::add_rollback_record(logstore_id_t store_id, logid_range_t id_range, bool persist_now) {
+    m_rollback_info.insert({store_id, id_range});
+    resize_rollback_sb_if_needed();
+    m_rollback_sb->add_record(store_id, id_range);
+
+    if (persist_now) { m_rollback_sb.write(); }
+    m_rollback_info_dirty = !persist_now;
+}
+
+void LogDevMetadata::remove_rollback_record_upto(logid_t upto_id, bool persist_now) {
+    uint32_t n_removed{0};
+    for (auto i = m_rollback_sb->num_records; i > 0; --i) {
+        auto& rec = m_rollback_sb->at(i - 1);
+        if (rec.idx_range.second <= upto_id) {
+            m_rollback_sb->remove_ith_record(i - 1);
+            ++n_removed;
+        }
+    }
+
+    if (n_removed) {
+        for (auto it = m_rollback_info.begin(); it != m_rollback_info.end();) {
+            if (it->second.second <= upto_id) {
+                it = m_rollback_info.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        resize_rollback_sb_if_needed();
+        if (persist_now) { m_rollback_sb.write(); }
+        m_rollback_info_dirty = !persist_now;
+    }
+}
+
+void LogDevMetadata::remove_all_rollback_records(logstore_id_t store_id, bool persist_now) {
+    uint32_t n_removed{0};
+    for (auto i = m_rollback_sb->num_records; i > 0; --i) {
+        auto& rec = m_rollback_sb->at(i - 1);
+        if (rec.store_id == store_id) {
+            m_rollback_sb->remove_ith_record(i - 1);
+            ++n_removed;
+        }
+    }
+    if (n_removed) {
+        m_rollback_info.erase(store_id);
+        resize_rollback_sb_if_needed();
+        if (persist_now) { m_rollback_sb.write(); }
+        m_rollback_info_dirty = !persist_now;
+    }
+}
+
+uint32_t LogDevMetadata::num_rollback_records(logstore_id_t store_id) const {
+    HS_DBG_ASSERT_EQ(m_rollback_sb->num_records, m_rollback_info.size(),
+                     "Rollback record count mismatch between sb and in-memory");
+    return m_rollback_info.count(store_id);
+}
+
+bool LogDevMetadata::is_rolled_back(logstore_id_t store_id, logid_t logid) const {
+    auto it_pair = m_rollback_info.equal_range(store_id);
+    for (auto it = it_pair.first; it != it_pair.second; ++it) {
+        const logid_range_t& log_id_range = it->second;
+        if ((logid >= log_id_range.first) && (logid <= log_id_range.second)) { return true; }
+    }
+    return false;
+}
+
+bool LogDevMetadata::resize_rollback_sb_if_needed() {
+    auto req_sz = rollback_superblk::size_needed(m_rollback_info.size());
+    if (meta_service().is_aligned_buf_needed(req_sz)) { req_sz = sisl::round_up(req_sz, meta_service().align_size()); }
+
+    if (req_sz != m_rollback_sb.size()) {
+        const auto old_buf = m_rollback_sb.raw_buf();
+
+        m_rollback_sb.create(req_sz);
+        std::memcpy(voidptr_cast(m_rollback_sb.raw_buf()->bytes), static_cast< const void* >(old_buf->bytes),
+                    std::min(old_buf->size, m_rollback_sb.size()));
+        return true;
+    } else {
+        return false;
+    }
 }
 } // namespace homestore
