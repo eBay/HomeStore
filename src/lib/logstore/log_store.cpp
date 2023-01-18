@@ -118,6 +118,16 @@ logstore_seq_num_t HomeLogStore::append_async(const sisl::io_blob& b, void* cook
 }
 
 log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
+    // If seq_num has not been flushed yet, but issued, then we flush them before reading
+    auto const s = m_records.status(seq_num);
+    if (s.is_out_of_range || s.is_hole) {
+        THIS_LOGSTORE_LOG(DEBUG, "ld_key not valid {}", seq_num);
+        throw std::out_of_range("key not valid");
+    } else if (!s.is_completed) {
+        THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} before flushed, doing flush first", m_store_id, seq_num);
+        flush_sync(seq_num);
+    }
+
     const auto record = m_records.at(seq_num);
     const logdev_key ld_key = record.m_dev_key;
     if (!ld_key.is_valid()) {
@@ -130,7 +140,7 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
                       ld_key.idx, ld_key.dev_offset);
     COUNTER_INCREMENT(m_metrics, logstore_read_count, 1);
     serialized_log_record header;
-    const auto b{m_logdev.read(ld_key, header)};
+    const auto b = m_logdev.read(ld_key, header);
     HISTOGRAM_OBSERVE(m_metrics, logstore_read_latency, get_elapsed_time_us(start_time));
     return b;
 }

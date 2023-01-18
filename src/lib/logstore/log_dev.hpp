@@ -90,7 +90,6 @@ struct serialized_log_record {
 
 /* This structure represents the in-memory representation of a log record */
 struct log_record {
-    serialized_log_record* pers_record{nullptr};
     sisl::io_blob data;
     void* context;
     logstore_id_t store_id;
