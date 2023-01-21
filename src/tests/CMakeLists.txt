@@ -35,6 +35,11 @@ if (${build_nonio_tests})
     add_executable(test_mem_btree ${TEST_MEMBTREE_SOURCE_FILES})
     target_link_libraries(test_mem_btree ${COMMON_TEST_DEPS} GTest::gtest)
     add_test(NAME MemBtree COMMAND test_mem_btree)
+
+    add_executable(test_blk_read_tracker)
+    target_sources(test_blk_read_tracker PRIVATE test_blk_read_tracker.cpp ../lib/blkdata_svc/blk_read_tracker.cpp ../lib/blkalloc/blk.cpp)
+    target_link_libraries(test_blk_read_tracker ${COMMON_TEST_DEPS} GTest::gtest)
+    add_test(NAME BlkReadTracker COMMAND test_blk_read_tracker)
 endif()
 
 can_build_io_tests(io_tests)
