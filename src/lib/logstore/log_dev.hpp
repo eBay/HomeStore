@@ -745,6 +745,7 @@ public:
     }
 
     uint64_t get_flush_size_multiple() const { return m_flush_size_multiple; }
+    logdev_key get_last_flush_ld_key() const { return logdev_key{m_last_flush_idx, m_last_flush_dev_offset}; }
 
     LogDevMetadata& log_dev_meta() { return m_logdev_meta; }
     static bool can_flush_in_this_thread();
@@ -789,7 +790,8 @@ private:
     std::multimap< logid_t, logstore_id_t > m_garbage_store_ids;
     Clock::time_point m_last_flush_time;
 
-    logid_t m_last_flush_idx{-1}; // Track last flushed and truncated log idx
+    logid_t m_last_flush_idx{-1}; // Track last flushed, last device offset and truncated log idx
+    off_t m_last_flush_dev_offset{0};
     logid_t m_last_truncate_idx{-1};
 
     crc32_t m_last_crc{INVALID_CRC32_VALUE};

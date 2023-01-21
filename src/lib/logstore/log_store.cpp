@@ -43,6 +43,7 @@ HomeLogStore::HomeLogStore(LogStoreFamily& family, logstore_id_t id, bool append
         m_fq_name{fmt::format("{}.{}", family.get_family_id(), id)},
         m_metrics{logstore_service().metrics()} {
     m_truncation_barriers.reserve(10000);
+    m_safe_truncation_boundary.ld_key = m_logdev.get_last_flush_ld_key();
     m_safe_truncation_boundary.seq_num.store(start_lsn - 1, std::memory_order_release);
 }
 
@@ -82,7 +83,7 @@ void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     HS_LOG_ASSERT((cb || m_comp_cb), "Expected either cb is not null or default cb registered");
     req->cb = (cb ? cb : m_comp_cb);
     req->start_time = Clock::now();
-
+    if (req->seq_num == 0) { m_safe_truncation_boundary.ld_key = m_logdev.get_last_flush_ld_key(); }
 #ifndef NDEBUG
     const auto trunc_upto_lsn = truncated_upto();
     if (req->seq_num <= trunc_upto_lsn) {
@@ -240,9 +241,7 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_trun
     auto shared_this = shared_from_this();
     const bool locked_now = m_logdev.try_lock_flush([shared_this, upto_seq_num, in_memory_truncate_only]() {
         shared_this->do_truncate(upto_seq_num);
-        if (!in_memory_truncate_only) {
-            [[maybe_unused]] const auto key = shared_this->get_family().do_device_truncate();
-        }
+        if (!in_memory_truncate_only) { shared_this->get_family().do_device_truncate(); }
     });
 
     if (locked_now) { m_logdev.unlock_flush(); }
