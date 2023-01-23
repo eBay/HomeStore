@@ -26,29 +26,29 @@ namespace homestore {
 typedef std::function< void(void) > after_remove_cb_t;
 
 struct blk_track_waiter {
-    blk_track_waiter(after_remove_cb_t&& cb) : m_cb{std::move(cb)} {}
+    blk_track_waiter(after_remove_cb_t&& cb) : m_cb{std::move(cb)} {
+#ifdef _PRERELEASEA
+        m_start_time = CLock::now();
+#endif
+    }
 
-    ~blk_track_waiter() { m_cb(); }
+    ~blk_track_waiter() {
+#ifdef _PRERELEASEA
+        // TODO: enable this after data service is ready;
+        // HISTOGRAM_OBSERVE(get_data_service().get_blk_read_tracker_inst().get_metrics(),
+        //                   blktrack_erase_blk_rescheduled_latency, get_elapsed_time_us(m_start_time, CLock::now()));
+#endif
+        m_cb();
+    }
+
     after_remove_cb_t m_cb;
+
+#ifdef _PRERELEASEA
+    Clock::time_point m_start_time;
+#endif
 };
 
 typedef std::shared_ptr< blk_track_waiter > blk_track_waiter_ptr;
-
-#if 0
-struct blk_sub_range_record {
-    blk_sub_range_record(const BlkId& bid, int64_t ref) : sub_range{bid}, ref_count{ref} {}
-
-    BlkId sub_range;
-    int64_t ref_count{0};
-    std::shared_ptr< blk_track_waiter > waiter;
-};
-
-struct BlkTrackRecord {
-    BlkId m_key;
-    int64_t m_total_refcount{0};
-    folly::small_vector< blk_sub_range_record, 8 > m_sub_record;
-};
-#endif
 
 //
 // clang-format off
@@ -92,11 +92,11 @@ struct BlkTrackRecord {
 class BlkReadTrackerMetrics : public sisl::MetricsGroup {
 public:
     explicit BlkReadTrackerMetrics() : sisl::MetricsGroupWrapper("BlkReadTracker", "DataSvc") {
-        REGISTER_COUNTER(blktrack_pending_blk_read_map_sz, "Size of pending blk read map",
-                         sisl::_publish_as::publish_as_gauge);
+#ifdef _PRERELEASE
+        REGISTER_COUNTER(blktrack_pending_blk_read_map_sz, "Size of pending blk read map", sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(blktrack_erase_blk_rescheduled, "Erase blk rescheduled due to concurrent rw");
-        // TODO: add latency for average waiter's cb, from the time being wait_on to the point we trigger this cb back
-        // to caller;
+        REGISTER_HISTOGRAM(blktrack_erase_blk_rescheduled_latency, "Erase blk rescheduled latency");
+#endif
         register_me_to_farm();
     }
 

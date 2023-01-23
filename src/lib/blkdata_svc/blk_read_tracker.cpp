@@ -39,6 +39,7 @@ void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
         last_blk_num_aligned_up += 1;
     }
 
+    bool waiter_rescheduled{false};
     // everything is aligned after this point, so we don't need to handle sub_range in a base blkid;
     while (cur_blk_num_aligned <= last_blk_num_aligned_up) {
         BlkId base_blkid{cur_blk_num_aligned, entries_per_record(), blkid.get_chunk_num()};
@@ -76,6 +77,7 @@ void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
                 rec.m_waiters.push_back(waiters);
                 // overwirte existing record;
                 m_pending_reads_map.upsert(base_blkid, rec);
+                waiter_rescheduled = true;
             }
 
             // not found, nothing needs to be done; fall through and visit remaining records;
@@ -83,6 +85,10 @@ void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
 
         cur_blk_num_aligned += entries_per_record();
     }
+
+#ifdef _PRERELEASE
+    if (waiter_rescheduled) { COUNTER_INCREMENT(m_metrics, blktrack_erase_blk_rescheduled, 1); }
+#endif
 
     // if no record is found for a wait-on operation, it means no one is holding reference for this waiter and cb will
     // be called automatically when this function exits (waiter's destrctor will be called);
