@@ -27,13 +27,13 @@ typedef std::function< void(void) > after_remove_cb_t;
 
 struct blk_track_waiter {
     blk_track_waiter(after_remove_cb_t&& cb) : m_cb{std::move(cb)} {
-#ifdef _PRERELEASEA
-        m_start_time = CLock::now();
+#ifdef _PRERELEASE
+        m_start_time = Clock::now();
 #endif
     }
 
     ~blk_track_waiter() {
-#ifdef _PRERELEASEA
+#ifdef _PRERELEASE
         // TODO: enable this after data service is ready;
         // HISTOGRAM_OBSERVE(get_data_service().get_blk_read_tracker_inst().get_metrics(),
         //                   blktrack_erase_blk_rescheduled_latency, get_elapsed_time_us(m_start_time, CLock::now()));
@@ -43,7 +43,7 @@ struct blk_track_waiter {
 
     after_remove_cb_t m_cb;
 
-#ifdef _PRERELEASEA
+#ifdef _PRERELEASE
     Clock::time_point m_start_time;
 #endif
 };

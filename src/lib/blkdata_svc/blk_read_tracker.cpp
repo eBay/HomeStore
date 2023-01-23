@@ -13,6 +13,7 @@
  *
  *********************************************************************************/
 #include "blk_read_tracker.hpp"
+#include "common/homestore_assert.hpp"
 
 namespace homestore {
 static BlkId extract_key(const BlkTrackRecord& rec) { return rec.m_key; }
@@ -20,12 +21,8 @@ static BlkId extract_key(const BlkTrackRecord& rec) { return rec.m_key; }
 BlkReadTracker::BlkReadTracker() : m_pending_reads_map(s_expected_num_records, extract_key, nullptr /* access_cb */) {}
 
 void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
-                           const std::shared_ptr< blk_track_waiter >& waiters) {
-    if (new_ref_count == 0) {
-        assert(waiters);
-    } else {
-        assert(!waiters);
-    }
+                           const std::shared_ptr< blk_track_waiter >& waiter) {
+    HS_DBG_ASSERT(new_ref_count ? waiter == nullptr : waiter != nullptr, "Invalid waiter");
 
     //
     // Don't move alignment handling outside of this function, because the nblks between (first and last blk num after
@@ -59,13 +56,13 @@ void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
             }
 
             // in either case, ref_cnt can not drop below zero;
-            assert(rec.m_ref_cnt >= 0);
+            HS_DBG_ASSERT_GE(rec.m_ref_cnt, 0);
 
             if (rec.m_ref_cnt > 0) {
                 m_pending_reads_map.upsert(base_blkid, rec);
             } else {
-                // ref_cnt drops to zer, clear all the references held by this record;
-                assert(rec_found);
+                // ref_cnt drops to zero, clear all the references held by this record;
+                HS_DBG_ASSERT_EQ(rec_found, true);
                 rec.m_waiters.clear();
                 BlkTrackRecord dummy_rec;
                 m_pending_reads_map.erase(base_blkid, dummy_rec);
@@ -74,7 +71,7 @@ void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
             // this is wait_on operation
             if (rec_found) {
                 // apply waiter to this record;
-                rec.m_waiters.push_back(waiters);
+                rec.m_waiters.push_back(waiter);
                 // overwirte existing record;
                 m_pending_reads_map.upsert(base_blkid, rec);
                 waiter_rescheduled = true;
