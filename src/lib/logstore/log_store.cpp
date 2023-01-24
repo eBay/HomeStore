@@ -43,6 +43,7 @@ HomeLogStore::HomeLogStore(LogStoreFamily& family, logstore_id_t id, bool append
         m_fq_name{fmt::format("{}.{}", family.get_family_id(), id)},
         m_metrics{logstore_service().metrics()} {
     m_truncation_barriers.reserve(10000);
+    m_safe_truncation_boundary.ld_key = m_logdev.get_last_flush_ld_key();
     m_safe_truncation_boundary.seq_num.store(start_lsn - 1, std::memory_order_release);
 }
 
@@ -82,7 +83,7 @@ void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     HS_LOG_ASSERT((cb || m_comp_cb), "Expected either cb is not null or default cb registered");
     req->cb = (cb ? cb : m_comp_cb);
     req->start_time = Clock::now();
-
+    if (req->seq_num == 0) { m_safe_truncation_boundary.ld_key = m_logdev.get_last_flush_ld_key(); }
 #ifndef NDEBUG
     const auto trunc_upto_lsn = truncated_upto();
     if (req->seq_num <= trunc_upto_lsn) {
@@ -118,6 +119,16 @@ logstore_seq_num_t HomeLogStore::append_async(const sisl::io_blob& b, void* cook
 }
 
 log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
+    // If seq_num has not been flushed yet, but issued, then we flush them before reading
+    auto const s = m_records.status(seq_num);
+    if (s.is_out_of_range || s.is_hole) {
+        THIS_LOGSTORE_LOG(DEBUG, "ld_key not valid {}", seq_num);
+        throw std::out_of_range("key not valid");
+    } else if (!s.is_completed) {
+        THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} before flushed, doing flush first", m_store_id, seq_num);
+        flush_sync(seq_num);
+    }
+
     const auto record = m_records.at(seq_num);
     const logdev_key ld_key = record.m_dev_key;
     if (!ld_key.is_valid()) {
@@ -130,7 +141,7 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
                       ld_key.idx, ld_key.dev_offset);
     COUNTER_INCREMENT(m_metrics, logstore_read_count, 1);
     serialized_log_record header;
-    const auto b{m_logdev.read(ld_key, header)};
+    const auto b = m_logdev.read(ld_key, header);
     HISTOGRAM_OBSERVE(m_metrics, logstore_read_latency, get_elapsed_time_us(start_time));
     return b;
 }
@@ -230,9 +241,7 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_trun
     auto shared_this = shared_from_this();
     const bool locked_now = m_logdev.try_lock_flush([shared_this, upto_seq_num, in_memory_truncate_only]() {
         shared_this->do_truncate(upto_seq_num);
-        if (!in_memory_truncate_only) {
-            [[maybe_unused]] const auto key = shared_this->get_family().do_device_truncate();
-        }
+        if (!in_memory_truncate_only) { shared_this->get_family().do_device_truncate(); }
     });
 
     if (locked_now) { m_logdev.unlock_flush(); }

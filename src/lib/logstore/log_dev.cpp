@@ -124,6 +124,7 @@ void LogDev::stop() {
     m_pending_flush_size.store(0);
     m_is_flushing.store(false);
     m_last_flush_idx = -1;
+    m_last_flush_dev_offset = 0;
     m_last_truncate_idx = -1;
     m_last_crc = INVALID_CRC32_VALUE;
     if (m_block_flush_q != nullptr) {
@@ -199,6 +200,7 @@ void LogDev::do_load(const off_t device_cursor) {
     // Update the tail offset with where we finally end up loading, so that new append entries can be written from
     // here.
     m_vdev->update_tail_offset(group_dev_offset);
+    m_last_flush_dev_offset = group_dev_offset;
 }
 
 void LogDev::assert_next_pages(log_stream_reader& lstream) {
@@ -458,7 +460,8 @@ void LogDev::on_flush_completion(LogGroup* lg) {
 
     m_log_records->complete(lg->m_flush_log_idx_from, lg->m_flush_log_idx_upto);
     m_last_flush_idx = lg->m_flush_log_idx_upto;
-    const auto flush_ld_key = logdev_key{m_last_flush_idx, lg->m_log_dev_offset + lg->header()->total_size()};
+    m_last_flush_dev_offset = lg->m_log_dev_offset + lg->header()->total_size();
+    const auto flush_ld_key = logdev_key{m_last_flush_idx, m_last_flush_dev_offset};
     m_last_crc = lg->header()->cur_grp_crc;
 
     auto from_indx = lg->m_flush_log_idx_from;
@@ -586,6 +589,7 @@ void LogDev::rollback(logstore_id_t store_id, logid_range_t id_range) {
 void LogDev::get_status(const int verbosity, nlohmann::json& js) const {
     js["current_log_idx"] = m_log_idx.load(std::memory_order_relaxed);
     js["last_flush_log_idx"] = m_last_flush_idx;
+    js["last_flush_dev_offset"] = m_last_flush_dev_offset;
     js["last_truncate_log_idx"] = m_last_truncate_idx;
     js["time_since_last_log_flush_ns"] = get_elapsed_time_ns(m_last_flush_time);
     if (verbosity == 2) {
