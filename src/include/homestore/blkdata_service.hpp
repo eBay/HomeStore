@@ -14,29 +14,105 @@
  *
  *********************************************************************************/
 #pragma once
-#include <homestore/blk.h>
+#include <sys/uio.h>
+#include <cstdint>
+
+#include <sisl/fds/buffer.hpp>
+#include <sisl/utility/atomic_counter.hpp>
+
 #include <homestore/homestore_decl.hpp>
+#include <homestore/blk.h>
 
 namespace homestore {
-typedef std::function< void(int status, void* cookie) > io_completion_cb_t;
+// callback type for caller to provide
+typedef std::function< void(std::error_condition) > io_completion_cb_t;
 
 class VirtualDev;
 struct vdev_info_block;
+struct stream_info_t;
+class BlkReadTracker;
+struct blk_alloc_hints;
+
+struct async_info {
+    io_completion_cb_t cb;
+    bool is_read{false};
+    BlkId bid; // only needed when is_read is true, used for blk read tracker;
+    sisl::atomic_counter< int > outstanding_io_cnt = 0;
+};
 
 class BlkDataService {
 public:
-    BlkDataService(uint64_t size, uint32_t page_size, blk_allocator_type_t blkalloc_type, bool cache = false);
-    BlkDataService(vdev_info_block* vb, blk_allocator_type_t blkalloc_type, bool cache = false);
+    BlkDataService();
+    ~BlkDataService();
 
-    void async_write(const sg_list& sgs, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids,
-                     const io_completion_cb_t& cb);
-    void async_read(const BlkId& bid, sg_list& sgs, uint32_t size, const io_completion_cb_t& cb);
+    /**
+     * @brief : called during recovery to open existing vdev for data service
+     *
+     * @param vb
+     */
+    void open_vdev(vdev_info_block* vb);
 
-    void commit_blks(const BlkId& bid);
-    void async_free_blks(const BlkId& bid, const io_completion_cb_t& cb);
+    /**
+     * @brief : called in non-recovery mode to create a new vdev for data service
+     *
+     * @param size
+     */
+    void create_vdev(uint64_t size);
+
+    void async_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids,
+                     const io_completion_cb_t& cb, bool part_of_batch = false);
+    void async_read(const BlkId& bid, sisl::sg_list& sgs, uint32_t size, const io_completion_cb_t& cb,
+                    bool part_of_batch = false);
+
+    void commit_blk(const BlkId& bid);
+
+    void async_free_blk(const BlkId bid, const io_completion_cb_t& cb);
+
+    BlkReadTracker* read_blk_tracker() { return m_blk_read_tracker.get(); }
+
+    /************************ hdd stream apis *************************/
+    /**
+     * @brief : allocate a stream for client in non-recovery mode;
+     *
+     * @param size
+     *
+     * @return
+     */
+    stream_info_t alloc_stream(const uint64_t size);
+
+    /**
+     * @brief : reserve a stream for consumer during recovery
+     *
+     * @param id_list
+     * @param num_streams
+     *
+     * @return
+     */
+    stream_info_t reserve_stream(const stream_id_t* id_list, const uint32_t num_streams);
+
+    /**
+     * @brief
+     *
+     * @param stream_info
+     */
+    void free_stream(const stream_info_t& stream_info);
+
+    uint32_t get_page_size() const { return m_page_size; }
+
+private:
+    BlkAllocStatus alloc_blks(uint32_t size, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids);
+
+    /**
+     * @brief : common initialize for BlkDataService
+     */
+    void init();
+
+private:
+    static void process_data_completion(std::error_condition ec, void* cookie);
 
 private:
     std::unique_ptr< VirtualDev > m_vdev;
+    std::unique_ptr< BlkReadTracker > m_blk_read_tracker;
     uint32_t m_page_size;
 };
 } // namespace homestore

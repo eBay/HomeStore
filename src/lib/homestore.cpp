@@ -23,6 +23,7 @@
 #include <sisl/logging/logging.h>
 #include <sisl/cache/lru_evictor.hpp>
 
+#include <homestore/blkdata_service.hpp>
 #include <homestore/meta_service.hpp>
 #include <homestore/logstore_service.hpp>
 #include <homestore/index_service.hpp>
@@ -90,6 +91,11 @@ HomeStore& HomeStore::with_meta_service(float size_pct) {
     return *this;
 }
 
+HomeStore& HomeStore::with_data_service(float size_pct) {
+    m_data_store_size_pct = size_pct;
+    return *this;
+}
+
 HomeStore& HomeStore::after_init_done(hs_init_done_cb_t init_done_cb) {
     m_init_done_cb = std::move(init_done_cb);
     return *this;
@@ -122,7 +128,7 @@ void HomeStore::init(bool wait_for_init) {
             LOGWARN("Homestore init is called with wait till init, but it has valid after_init_done callback set in "
                     "its init params, ignoring the after_init_done callback; it will not be called");
         }
-        m_init_done_cb = [&tl_cv = cv, &tl_start_mutex = start_mutex, &tl_inited = inited]() {
+        m_init_done_cb = [& tl_cv = cv, &tl_start_mutex = start_mutex, &tl_inited = inited]() {
             LOGINFO("HomeStore Init completed");
             {
                 std::unique_lock< std::mutex > lk{tl_start_mutex};
@@ -170,6 +176,7 @@ void HomeStore::init(bool wait_for_init) {
     LOGINFO("Homestore is initializing with following services: ", list_services());
     if (has_meta_service()) { m_meta_service = std::make_unique< MetaBlkService >(); }
     if (has_log_service()) { m_log_service = std::make_unique< LogStoreService >(); }
+    if (has_data_service()) { m_data_service = std::make_unique< BlkDataService >(); }
     if (has_index_service()) { m_index_service = std::make_unique< IndexService >(std::move(m_index_svc_cbs)); }
 
     m_dev_mgr = std::make_unique< DeviceManager >(hs_config.input.data_devices, bind_this(HomeStore::new_vdev_found, 2),
@@ -209,10 +216,14 @@ void HomeStore::shutdown(bool wait, const hs_comp_callback& done_cb) {
             m_log_service->stop();
             m_log_service.reset();
         }
+
         if (has_meta_service()) {
             m_meta_service->stop();
             m_meta_service.reset();
         }
+
+        if (has_data_service()) { m_data_service.reset(); }
+
         m_dev_mgr->close_devices();
         m_dev_mgr.reset();
         m_cp_mgr->shutdown();
@@ -253,10 +264,13 @@ void HomeStore::shutdown(bool wait, const hs_comp_callback& done_cb) {
 void HomeStore::create_vdevs() {
     if (has_meta_service()) { m_meta_service->create_vdev(pct_to_size(m_meta_store_size_pct, PhysicalDevGroup::META)); }
 
+    if (has_data_service()) { m_data_service->create_vdev(pct_to_size(m_data_store_size_pct, PhysicalDevGroup::DATA)); }
+
     if (has_log_service() && m_data_log_store_size_pct) {
         ++m_format_cnt;
         m_log_service->create_vdev(pct_to_size(m_data_log_store_size_pct, PhysicalDevGroup::FAST),
-                                   LogStoreService::DATA_LOG_FAMILY_IDX, [this](std::error_condition err) {
+                                   LogStoreService::DATA_LOG_FAMILY_IDX,
+                                   [this](std::error_condition err, void* cookie) {
                                        HS_REL_ASSERT((err == no_error), "IO error during format of vdev");
                                        init_done();
                                    });
@@ -264,7 +278,8 @@ void HomeStore::create_vdevs() {
     if (has_log_service() && m_ctrl_log_store_size_pct) {
         ++m_format_cnt;
         m_log_service->create_vdev(pct_to_size(m_ctrl_log_store_size_pct, PhysicalDevGroup::FAST),
-                                   LogStoreService::CTRL_LOG_FAMILY_IDX, [this](std::error_condition err) {
+                                   LogStoreService::CTRL_LOG_FAMILY_IDX,
+                                   [this](std::error_condition err, void* cookie) {
                                        HS_REL_ASSERT((err == no_error), "IO error during format of vdev");
                                        init_done();
                                    });
