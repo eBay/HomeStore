@@ -33,9 +33,8 @@ struct blk_track_waiter {
 
     ~blk_track_waiter() {
 #ifdef _PRERELEASE
-        // TODO: enable this after data service is ready;
-        // HISTOGRAM_OBSERVE(get_data_service().get_blk_read_tracker_inst().get_metrics(),
-        //                   blktrack_erase_blk_rescheduled_latency, get_elapsed_time_us(m_start_time, CLock::now()));
+        // HISTOGRAM_OBSERVE(hs()->data_service().read_blk_tracker()->get_metrics(),
+        //                  blktrack_erase_blk_rescheduled_latency, get_elapsed_time_us(m_start_time, Cock::now()));
 #endif
         m_cb();
     }
