@@ -20,6 +20,10 @@ static BlkId extract_key(const BlkTrackRecord& rec) { return rec.m_key; }
 
 BlkReadTracker::BlkReadTracker() : m_pending_reads_map(s_expected_num_records, extract_key, nullptr /* access_cb */) {}
 
+BlkReadTracker::~BlkReadTracker() {}
+
+BlkReadTrackerMetrics& BlkReadTracker::get_metrics() { return m_metrics; }
+
 void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
                            const std::shared_ptr< blk_track_waiter >& waiter) {
     HS_DBG_ASSERT(new_ref_count ? waiter == nullptr : waiter != nullptr, "Invalid waiter");

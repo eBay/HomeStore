@@ -117,6 +117,7 @@ TEST_F(BlkReadTrackerTest, TestInsertWithWaiter) {
 
     bool called{false};
     get_inst()->wait_on(b, [&called, &b]() {
+        LOGMSG_ASSERT_EQ(called, false, "not expecting wait_on callback to be called more than once!");
         called = true;
         LOGINFO("wait_on called on blkid: {};", b.to_string());
     });
@@ -144,6 +145,7 @@ TEST_F(BlkReadTrackerTest, TestInsRmWithWaiterOnSameBid) {
     bool called{false};
     LOGINFO("Step 2: free blkid: {} to be completed on reading");
     get_inst()->wait_on(b, [&called, &b]() {
+        LOGMSG_ASSERT_EQ(called, false, "not expecting wait_on callback to be called more than once!");
         called = true;
         LOGINFO("wait_on callback triggered on blkid: {};", b.to_string());
     });
@@ -182,6 +184,7 @@ TEST_F(BlkReadTrackerTest, TestInsRmeWithWaiterOverlapOneRead) {
     BlkId free_bid{10, 8, 0};
     LOGINFO("Step 3: free blkid: {}.", free_bid);
     get_inst()->wait_on(free_bid, [&called, &free_bid]() {
+        LOGMSG_ASSERT_EQ(called, false, "not expecting wait_on callback to be called more than once!");
         called = true;
         LOGINFO("wait_on callback triggered on blkid: {}.", free_bid.to_string());
     });
@@ -229,6 +232,7 @@ TEST_F(BlkReadTrackerTest, TestInsRmWithWaiterOverlapMultiReads0) {
     LOGINFO("Step 3: free blkid: {}.", free_bid.to_string());
     bool called{false};
     get_inst()->wait_on(free_bid, [&free_bid, &called]() {
+        LOGMSG_ASSERT_EQ(called, false, "not expecting wait_on callback to be called more than once!");
         called = true;
         LOGINFO("wait on callback triggered on blkid: {}", free_bid.to_string());
     });
@@ -283,6 +287,7 @@ TEST_F(BlkReadTrackerTest, TestInsRmWithWaiterOverlapMultiReads1) {
     bool called{false};
     LOGINFO("Step 4: free blkid: {}.", free_bid);
     get_inst()->wait_on(free_bid, [&free_bid, &called]() {
+        LOGMSG_ASSERT_EQ(called, false, "not expecting wait_on callback to be called more than once!");
         called = true;
         LOGINFO("wait_on callback triggered on blkid: {}", free_bid.to_string());
     });
@@ -328,6 +333,7 @@ TEST_F(BlkReadTrackerTest, TestInsRmWithWaiterOverlapMultiReads2) {
     LOGINFO("Step 3: free on blkid: {}. ", free_bid.to_string());
     bool called{false};
     get_inst()->wait_on(free_bid, [&free_bid, &called]() {
+        LOGMSG_ASSERT_EQ(called, false, "not expecting wait_on callback to be called more than once!");
         called = true;
         LOGINFO("wait on callback triggered on free_bid: {}", free_bid.to_string());
     });

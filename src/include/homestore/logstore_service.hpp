@@ -47,7 +47,7 @@ struct logdev_key;
 class JournalVirtualDev;
 struct vdev_info_block;
 struct log_dump_req;
-typedef std::function< void(std::error_condition) > vdev_io_comp_cb_t;
+typedef std::function< void(std::error_condition, void* /* cookie */) > vdev_io_comp_cb_t;
 
 class LogStoreService {
     friend class HomeLogStore;

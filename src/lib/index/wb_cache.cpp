@@ -182,13 +182,12 @@ IndexBufferPtr IndexWBCache::copy_buffer(const IndexBufferPtr& cur_buf) const {
 
 void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, const IndexBufferPtr& buf, bool part_of_batch) {
     buf->m_buf_state = index_buf_state_t::FLUSHING;
-    m_vdev->async_write(
-        r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid,
-        [pbuf = buf.get(), cp_ctx](std::error_condition err) {
-            auto& pthis = s_cast< IndexWBCache& >(wb_cache()); // Avoiding more than 16 bytes capture
-            pthis.process_write_completion(cp_ctx, pbuf);
-        },
-        part_of_batch);
+    m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid,
+                        [pbuf = buf.get(), cp_ctx](std::error_condition err, void* cookie) {
+                            auto& pthis = s_cast< IndexWBCache& >(wb_cache()); // Avoiding more than 16 bytes capture
+                            pthis.process_write_completion(cp_ctx, pbuf);
+                        },
+                        nullptr /*cookie*/, part_of_batch);
 
     if (!part_of_batch) { m_vdev->submit_batch(); }
 }
