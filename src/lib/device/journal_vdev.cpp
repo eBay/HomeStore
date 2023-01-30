@@ -141,7 +141,7 @@ auto JournalVirtualDev::process_pwrite_offset(size_t len, off_t offset) {
 /////////////////////////////// Write Section //////////////////////////////////
 void JournalVirtualDev::async_append(const uint8_t* buf, size_t size, vdev_io_comp_cb_t cb) {
     if (!validate_append_size(size)) {
-        cb(std::make_error_condition(std::errc::no_space_on_device));
+        cb(std::make_error_condition(std::errc::no_space_on_device), nullptr /*cookie*/);
     } else {
         auto [pdev, chunk, offset_in_dev] = process_pwrite_offset(size, m_seek_cursor);
         async_write_internal(r_cast< const char* >(buf), size, pdev, chunk, offset_in_dev, std::move(cb));

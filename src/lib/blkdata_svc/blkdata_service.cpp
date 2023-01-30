@@ -13,92 +13,120 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
-#include "../api/blkdata_service.hpp"
-#include "../device/virtual_dev.hpp"
-#include "../homestore.hpp"
+#include <homestore/blkdata_service.hpp>
+#include <homestore/homestore.hpp>
+#include "device/virtual_dev.hpp"
+#include "device/physical_dev.hpp"     // vdev_info_block
+#include "common/homestore_config.hpp" // is_data_drive_hdd
+#include "common/error.h"
+#include "blk_read_tracker.hpp"
 
 namespace homestore {
-BlkDataService::BlkDataService(uint64_t size, uint32_t page_size, blk_allocator_type_t blkalloc_type,
-                               bool cache = false) {
-    HS_REL_ASSERT_EQ(cache, false, "We don't support cached blkdata service yet");
 
-    struct blkstore_blob hdr {};
-    hdr.type = blkstore_type::DATA_STORE;
+BlkDataService::BlkDataService() { m_blk_read_tracker = std::make_unique< BlkReadTracker >(); }
+BlkDataService::~BlkDataService() {}
 
-    m_vdev = std::make_unique< VirtualDev >(hs()->device_manager(), "DataVDev", PhysicalDevGroup::DATA, blkalloc_type,
-                                            sizeof(blkstore_blob), 0, true /* is_stripe */, page_size,
-                                            bind_this(BlkDataService::vdev_io_completion, 1), hdr, size,
-                                            true /* auto_recovery */);
-    m_page_size = page_size;
-}
+// recovery path
+void BlkDataService::open_vdev(vdev_info_block* vb) {
+    m_vdev = std::make_unique< VirtualDev >(hs()->device_mgr(), "DataVDev", vb, PhysicalDevGroup::DATA,
+                                            blk_allocator_type_t::varsize, vb->is_failed(), true /* auto_recovery */);
 
-BlkDataService::BlkDataService(vdev_info_block* vb, blk_allocator_type_t blkalloc_type, bool cache = false) {
-    HS_REL_ASSERT_EQ(cache, false, "We don't support cached blkdata service yet");
+    m_page_size = vb->blk_size;
 
-    m_vdev = std::make_unique< VirtualDev >(hs()->device_manager(), "DataVDev", vb, PhysicalDevGroup::DATA,
-                                            blkalloc_type, bind_this(BlkDataService::vdev_io_completion, 1), true,
-                                            true /* auto_recovery */);
-    m_page_size = vb->page_size;
-}
-
-struct sg_iterator {
-    sg_iterator(const std::vector< iovec >& v) : m_input_iovs{v} {
-        HS_DBG_ASSERT_GT(v.size(), 0, "Iterating over empty iov list");
+    if (vb->is_failed()) {
+        LOGINFO("Data vdev is in failed state");
+        throw std::runtime_error("data vdev in failed state");
     }
+}
 
-    std::vector< iovec > next_iovs(uint32_t size) {
-        std::vector< iovec > ret_iovs;
-        int64_t remain_size = size;
+void BlkDataService::async_free_blk(const BlkId bid, const io_completion_cb_t& cb) {
+    // create blk read waiter instance;
+    m_blk_read_tracker->wait_on(bid, [this, bid, cb]() {
+        m_vdev->free_blk(bid);
+        cb(no_error);
+    });
+}
 
-        while ((remain_size > 0) && (m_cur_index < m_input_iovs.size()) {
-            const auto& inp_iov = m_input_iovs[m_cur_index];
-            iovec this_iov;
-            this_iov.iov_base = static_cast< uint8_t* >(inp_iov.iov_base) + m_cur_offset;
-            if (remain_size < inp_iov.iov_len - m_cur_offset) {
-                this_iov.iov_len = remain_size;
-                m_cur_offset += remain_size;
-            } else {
-                this_iov.iov_len = inp_iov.iov_len - m_cur_offset;
-                ++m_cur_index;
-                m_cur_offset = 0;
-            }
+// first-time boot path
+void BlkDataService::create_vdev(uint64_t size) {
+    struct blkstore_blob blob;
+    blob.type = blkstore_type::DATA_STORE;
+    m_page_size = hs()->device_mgr()->phys_page_size({PhysicalDevGroup::DATA});
+    m_vdev = std::make_unique< VirtualDev >(hs()->device_mgr(), "DataVDev", PhysicalDevGroup::DATA,
+                                            blk_allocator_type_t::varsize, size, 0, true /* is_stripe */, m_page_size,
+                                            (char*)&blob, sizeof(blkstore_blob), true /* auto_recovery */);
+}
 
-            ret_iovs.push_back(this_iov);
-            remain_size -= iov.iov_len
+void BlkDataService::async_read(const BlkId& bid, sisl::sg_list& sgs, uint32_t size, const io_completion_cb_t& cb,
+                                bool part_of_batch) {
+
+    m_blk_read_tracker->insert(bid);
+
+    auto as_info = sisl::ObjectAllocator< async_info >::make_object();
+    as_info->cb = cb;
+    as_info->is_read = true;
+    as_info->bid = bid;
+
+    HS_DBG_ASSERT_EQ(sgs.iovs.size(), 1, "Expecting iov size to be 1 since reading on one blk.");
+
+    as_info->outstanding_io_cnt.increment(1);
+
+    m_vdev->async_readv(sgs.iovs.data(), sgs.iovs.size(), size, bid, BlkDataService::process_data_completion,
+                        reinterpret_cast< const void* >(as_info) /* cookie */, part_of_batch);
+}
+
+void BlkDataService::process_data_completion(std::error_condition ec, void* cookie) {
+    auto as_info = reinterpret_cast< async_info* >(cookie);
+
+    if (as_info->outstanding_io_cnt.decrement_testz(1)) {
+
+        if (as_info->is_read) {
+            // this will trigger any pending free_blk on this read to complete;
+            hs()->data_service().read_blk_tracker()->remove(as_info->bid);
         }
-        return ret_iovs;
+
+        // send callback to caller;
+        as_info->cb(ec);
+        sisl::ObjectAllocator< async_info >::deallocate(as_info);
     }
+}
 
-    const std::vector< iovec >& m_input_iovs;
-    uint64_t m_cur_offset{0};
-    size_t m_cur_index{0};
-};
-
-void BlkDataService::async_write(const sg_list& sgs, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids,
-                                 const io_completion_cb_t& cb) {
+void BlkDataService::async_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints,
+                                 std::vector< BlkId >& out_blkids, const io_completion_cb_t& cb, bool part_of_batch) {
     out_blkids.clear();
     const auto status = alloc_blks(sgs.size, hints, out_blkids);
-    if (status != BlkAllocStatus::success) {
-        cb(-ENOMEM, nullptr);
+    if (status != BlkAllocStatus::SUCCESS) {
+        cb(std::make_error_condition(std::errc::resource_unavailable_try_again));
         return;
     }
 
+    auto as_info = sisl::ObjectAllocator< async_info >::make_object();
+    as_info->cb = cb;
+
     if (out_blkids.size() == 1) {
         // Shortcut to most common case
-        m_vdev.write(bid, sgs.iovs.data(), sgs.iovs.size(), req);
+        as_info->outstanding_io_cnt.increment(1);
+        m_vdev->async_writev(sgs.iovs.data(), sgs.iovs.size(), out_blkids[0], BlkDataService::process_data_completion,
+                             reinterpret_cast< const void* >(as_info) /* cookie */, part_of_batch);
     } else {
-        sg_iterator sg_it{sgs.iovs};
+        sisl::sg_iterator sg_it{sgs.iovs};
         for (const auto& bid : out_blkids) {
             const auto iovs = sg_it.next_iovs(bid.get_nblks() * m_page_size);
-            m_vdev.write(bid, iovs.data(), iovs.size(), req);
+            as_info->outstanding_io_cnt.increment(1);
+            m_vdev->async_writev(iovs.data(), iovs.size(), bid, BlkDataService::process_data_completion,
+                                 reinterpret_cast< const void* >(as_info) /* cookie */, part_of_batch);
         }
     }
 }
 
-BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, blk_alloc_hints& hints, std::vector< BlkId >& out_blkids) {
+BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& hints,
+                                          std::vector< BlkId >& out_blkids) {
     HS_DBG_ASSERT_EQ(size % m_page_size, 0, "Non aligned size requested");
-    blk_count_t nblks = static_cast< blk_count_t >(size / m_pagesz);
+    blk_count_t nblks = static_cast< blk_count_t >(size / m_page_size);
 
+    return m_vdev->alloc_blk(nblks, hints, out_blkids);
+
+#if 0 // already done by vdev layer
     if (nblks <= BlkId::max_blks_in_op()) {
         return (m_vdev.alloc_blk(nblks, hints, out_blkid));
     } else {
@@ -116,5 +144,17 @@ BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, blk_alloc_hints& hints,
         }
         return BlkAllocStatus::SUCCESS;
     }
+#endif
 }
+
+void BlkDataService::commit_blk(const BlkId& bid) { m_vdev->commit_blk(bid); }
+
+stream_info_t BlkDataService::alloc_stream(const uint64_t size) { return m_vdev->alloc_stream(size); }
+
+stream_info_t BlkDataService::reserve_stream(const stream_id_t* id_list, const uint32_t num_streams) {
+    return m_vdev->reserve_stream(id_list, num_streams);
+}
+
+void BlkDataService::free_stream(const stream_info_t& stream_info) { m_vdev->free_stream(stream_info); }
+
 } // namespace homestore
