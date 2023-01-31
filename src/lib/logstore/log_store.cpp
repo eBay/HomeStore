@@ -229,11 +229,14 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_trun
 
 #ifndef NDEBUG
     const auto s = m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire);
-    // Don't check this if we don't know our truncation boundary. The call is made to inform us about
-    // correct truncation point.
     if (s != -1) {
-        HS_DBG_ASSERT_LE(upto_seq_num, get_contiguous_completed_seq_num(s),
-                         "Logstore {} expects truncation to be contiguously completed", m_store_id);
+        auto cs = get_contiguous_completed_seq_num(s);
+        if (upto_seq_num > cs) {
+            THIS_LOGSTORE_LOG(WARN,
+                              "Truncation issued on seq_num={} outside of contiguous completions={}, "
+                              "still proceeding to truncate",
+                              upto_seq_num, cs);
+        }
     }
 #endif
 
@@ -330,14 +333,14 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
 
     const auto trunc_upto = this->truncated_upto();
     std::remove_const_t< decltype(trunc_upto) > idx{trunc_upto + 1};
-    if (dump_req.start_seq_num != 0) idx = dump_req.start_seq_num;
+    if (dump_req.start_seq_num != 0) { idx = dump_req.start_seq_num; }
 
     // must use move operator= operation instead of move copy constructor
     nlohmann::json json_records = nlohmann::json::array();
     bool end_iterate{false};
-    m_records.foreach_completed(
+    m_records.foreach_contiguous_completed(
         idx,
-        [&json_records, &dump_req, &end_iterate, this](decltype(idx) cur_idx, decltype(idx) max_idx,
+        [&json_records, &dump_req, &end_iterate, this](int64_t cur_idx, int64_t max_idx,
                                                        const homestore::logstore_record& record) -> bool {
             // do a sync read
             // must use move operator= operation instead of move copy constructor
@@ -361,7 +364,7 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
                 json_val["content"] = std::move(content);
             }
             json_records.emplace_back(std::move(json_val));
-            decltype(idx) end_idx{std::min(max_idx, dump_req.end_seq_num)};
+            int64_t end_idx = std::min(max_idx, dump_req.end_seq_num);
             end_iterate = (cur_idx < end_idx) ? true : false;
             return end_iterate;
         });
@@ -371,14 +374,12 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
 }
 
 void HomeLogStore::foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
-    m_records.foreach_completed(start_idx,
-                                [&](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
-                                    // do a sync read
-                                    serialized_log_record header;
-
-                                    auto log_buf{m_logdev.read(record.m_dev_key, header)};
-                                    return cb(cur_idx, log_buf);
-                                });
+    m_records.foreach_all_completed(start_idx, [&](int64_t cur_idx, homestore::logstore_record& record) -> bool {
+        // do a sync read
+        serialized_log_record header;
+        auto log_buf = m_logdev.read(record.m_dev_key, header);
+        return cb(cur_idx, log_buf);
+    });
 }
 
 logstore_seq_num_t HomeLogStore::get_contiguous_issued_seq_num(logstore_seq_num_t from) const {
@@ -398,7 +399,7 @@ void HomeLogStore::flush_sync(logstore_seq_num_t upto_seq_num) {
     if (upto_seq_num == invalid_lsn()) { upto_seq_num = m_records.active_upto(); }
 
     // if we have flushed already, we are done
-    if (m_records.completed_upto() >= upto_seq_num) { return; }
+    if (!m_records.status(upto_seq_num).is_active) { return; }
 
     {
         std::unique_lock lk(m_sync_flush_mtx);
@@ -409,13 +410,13 @@ void HomeLogStore::flush_sync(logstore_seq_num_t upto_seq_num) {
 
         // Step 2: After marking this lsn, we again do a check, to avoid a race where completion checked for no lsn
         // and the lsn is stored in step 1 above.
-        if (m_records.completed_upto() >= upto_seq_num) { return; }
+        if (!m_records.status(upto_seq_num).is_active) { return; }
 
         // Step 3: Force a flush (with least threshold)
         m_logdev.flush_if_needed(1);
 
         // Step 4: Wait for completion
-        m_sync_flush_cv.wait(lk, [this, upto_seq_num] { return m_records.completed_upto() >= upto_seq_num; });
+        m_sync_flush_cv.wait(lk, [this, upto_seq_num] { return !m_records.status(upto_seq_num).is_active; });
 
         // NOTE: We are not resetting the lsn because same seq number should never have 2 completions and thus not
         // doing it saves an atomic instruction
