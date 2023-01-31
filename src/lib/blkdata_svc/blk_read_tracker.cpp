@@ -36,7 +36,7 @@ void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
         last_blk_num_aligned_up += 1;
     }
 
-    bool waiter_rescheduled{false};
+    [[maybe_unused]] bool waiter_rescheduled{false};
     // everything is aligned after this point, so we don't need to handle sub_range in a base blkid;
     while (cur_blk_num_aligned <= last_blk_num_aligned_up) {
         BlkId base_blkid{cur_blk_num_aligned, entries_per_record(), blkid.get_chunk_num()};
@@ -103,8 +103,6 @@ uint16_t BlkReadTracker::entries_per_record() const {
     return m_entries_per_record;
 }
 
-#ifdef _PRERELEASE
 void BlkReadTracker::set_entries_per_record(uint16_t num_entries) { m_entries_per_record = num_entries; }
-#endif
 
 } // namespace homestore

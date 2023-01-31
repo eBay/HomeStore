@@ -331,14 +331,15 @@ LogGroup* LogDev::prepare_flush(const int32_t estimated_records) {
 
     assert(estimated_records > 0);
     auto* lg = make_log_group(static_cast< uint32_t >(estimated_records));
-    m_log_records->foreach_active(m_last_flush_idx + 1, [&](int64_t idx, int64_t upto_idx, log_record& record) -> bool {
-        if (lg->add_record(record, idx)) {
-            flushing_upto_idx = idx;
-            return true;
-        } else {
-            return false;
-        }
-    });
+    m_log_records->foreach_contiguous_active(m_last_flush_idx + 1,
+                                             [&](int64_t idx, int64_t, log_record& record) -> bool {
+                                                 if (lg->add_record(record, idx)) {
+                                                     flushing_upto_idx = idx;
+                                                     return true;
+                                                 } else {
+                                                     return false;
+                                                 }
+                                             });
 
     lg->finish(get_prev_crc());
     if (sisl_unlikely(flushing_upto_idx == -1)) { return nullptr; }
