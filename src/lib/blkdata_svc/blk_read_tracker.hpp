@@ -128,9 +128,8 @@ public:
     uint16_t entries_per_record() const;
     
     BlkReadTrackerMetrics& get_metrics();
-#ifdef _PRERELEASE
+
     void set_entries_per_record(uint16_t num_entries);
-#endif
 
     /**
      * @brief :  Insert the blkid into read tracker. If entry already exists, it will increment the reference count of
