@@ -43,6 +43,7 @@ HomeLogStore::HomeLogStore(LogStoreFamily& family, logstore_id_t id, bool append
         m_fq_name{fmt::format("{}.{}", family.get_family_id(), id)},
         m_metrics{logstore_service().metrics()} {
     m_truncation_barriers.reserve(10000);
+    m_safe_truncation_boundary.ld_key = m_logdev.get_last_flush_ld_key();
     m_safe_truncation_boundary.seq_num.store(start_lsn - 1, std::memory_order_release);
 }
 
@@ -82,7 +83,7 @@ void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     HS_LOG_ASSERT((cb || m_comp_cb), "Expected either cb is not null or default cb registered");
     req->cb = (cb ? cb : m_comp_cb);
     req->start_time = Clock::now();
-
+    if (req->seq_num == 0) { m_safe_truncation_boundary.ld_key = m_logdev.get_last_flush_ld_key(); }
 #ifndef NDEBUG
     const auto trunc_upto_lsn = truncated_upto();
     if (req->seq_num <= trunc_upto_lsn) {
@@ -118,6 +119,16 @@ logstore_seq_num_t HomeLogStore::append_async(const sisl::io_blob& b, void* cook
 }
 
 log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
+    // If seq_num has not been flushed yet, but issued, then we flush them before reading
+    auto const s = m_records.status(seq_num);
+    if (s.is_out_of_range || s.is_hole) {
+        THIS_LOGSTORE_LOG(DEBUG, "ld_key not valid {}", seq_num);
+        throw std::out_of_range("key not valid");
+    } else if (!s.is_completed) {
+        THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} before flushed, doing flush first", m_store_id, seq_num);
+        flush_sync(seq_num);
+    }
+
     const auto record = m_records.at(seq_num);
     const logdev_key ld_key = record.m_dev_key;
     if (!ld_key.is_valid()) {
@@ -130,7 +141,7 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
                       ld_key.idx, ld_key.dev_offset);
     COUNTER_INCREMENT(m_metrics, logstore_read_count, 1);
     serialized_log_record header;
-    const auto b{m_logdev.read(ld_key, header)};
+    const auto b = m_logdev.read(ld_key, header);
     HISTOGRAM_OBSERVE(m_metrics, logstore_read_latency, get_elapsed_time_us(start_time));
     return b;
 }
@@ -218,11 +229,14 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_trun
 
 #ifndef NDEBUG
     const auto s = m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire);
-    // Don't check this if we don't know our truncation boundary. The call is made to inform us about
-    // correct truncation point.
     if (s != -1) {
-        HS_DBG_ASSERT_LE(upto_seq_num, get_contiguous_completed_seq_num(s),
-                         "Logstore {} expects truncation to be contiguously completed", m_store_id);
+        auto cs = get_contiguous_completed_seq_num(s);
+        if (upto_seq_num > cs) {
+            THIS_LOGSTORE_LOG(WARN,
+                              "Truncation issued on seq_num={} outside of contiguous completions={}, "
+                              "still proceeding to truncate",
+                              upto_seq_num, cs);
+        }
     }
 #endif
 
@@ -230,9 +244,7 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_trun
     auto shared_this = shared_from_this();
     const bool locked_now = m_logdev.try_lock_flush([shared_this, upto_seq_num, in_memory_truncate_only]() {
         shared_this->do_truncate(upto_seq_num);
-        if (!in_memory_truncate_only) {
-            [[maybe_unused]] const auto key = shared_this->get_family().do_device_truncate();
-        }
+        if (!in_memory_truncate_only) { shared_this->get_family().do_device_truncate(); }
     });
 
     if (locked_now) { m_logdev.unlock_flush(); }
@@ -321,14 +333,14 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
 
     const auto trunc_upto = this->truncated_upto();
     std::remove_const_t< decltype(trunc_upto) > idx{trunc_upto + 1};
-    if (dump_req.start_seq_num != 0) idx = dump_req.start_seq_num;
+    if (dump_req.start_seq_num != 0) { idx = dump_req.start_seq_num; }
 
     // must use move operator= operation instead of move copy constructor
     nlohmann::json json_records = nlohmann::json::array();
     bool end_iterate{false};
-    m_records.foreach_completed(
+    m_records.foreach_contiguous_completed(
         idx,
-        [&json_records, &dump_req, &end_iterate, this](decltype(idx) cur_idx, decltype(idx) max_idx,
+        [&json_records, &dump_req, &end_iterate, this](int64_t cur_idx, int64_t max_idx,
                                                        const homestore::logstore_record& record) -> bool {
             // do a sync read
             // must use move operator= operation instead of move copy constructor
@@ -352,7 +364,7 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
                 json_val["content"] = std::move(content);
             }
             json_records.emplace_back(std::move(json_val));
-            decltype(idx) end_idx{std::min(max_idx, dump_req.end_seq_num)};
+            int64_t end_idx = std::min(max_idx, dump_req.end_seq_num);
             end_iterate = (cur_idx < end_idx) ? true : false;
             return end_iterate;
         });
@@ -362,14 +374,12 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
 }
 
 void HomeLogStore::foreach (int64_t start_idx, const std::function< bool(logstore_seq_num_t, log_buffer) >& cb) {
-    m_records.foreach_completed(start_idx,
-                                [&](long int cur_idx, long int max_idx, homestore::logstore_record& record) -> bool {
-                                    // do a sync read
-                                    serialized_log_record header;
-
-                                    auto log_buf{m_logdev.read(record.m_dev_key, header)};
-                                    return cb(cur_idx, log_buf);
-                                });
+    m_records.foreach_all_completed(start_idx, [&](int64_t cur_idx, homestore::logstore_record& record) -> bool {
+        // do a sync read
+        serialized_log_record header;
+        auto log_buf = m_logdev.read(record.m_dev_key, header);
+        return cb(cur_idx, log_buf);
+    });
 }
 
 logstore_seq_num_t HomeLogStore::get_contiguous_issued_seq_num(logstore_seq_num_t from) const {
@@ -381,10 +391,15 @@ logstore_seq_num_t HomeLogStore::get_contiguous_completed_seq_num(logstore_seq_n
 }
 
 void HomeLogStore::flush_sync(logstore_seq_num_t upto_seq_num) {
+    // Logdev flush is async call and if flush_sync is called on the same thread which could potentially do logdev
+    // flush, waiting sync would cause deadlock.
+    HS_DBG_ASSERT_EQ(LogDev::can_flush_in_this_thread(), false,
+                     "Logstore flush sync cannot be called on same thread which could do logdev flush");
+
     if (upto_seq_num == invalid_lsn()) { upto_seq_num = m_records.active_upto(); }
 
     // if we have flushed already, we are done
-    if (m_records.completed_upto() >= upto_seq_num) { return; }
+    if (!m_records.status(upto_seq_num).is_active) { return; }
 
     {
         std::unique_lock lk(m_sync_flush_mtx);
@@ -395,17 +410,60 @@ void HomeLogStore::flush_sync(logstore_seq_num_t upto_seq_num) {
 
         // Step 2: After marking this lsn, we again do a check, to avoid a race where completion checked for no lsn
         // and the lsn is stored in step 1 above.
-        if (m_records.completed_upto() >= upto_seq_num) { return; }
+        if (!m_records.status(upto_seq_num).is_active) { return; }
 
         // Step 3: Force a flush (with least threshold)
         m_logdev.flush_if_needed(1);
 
         // Step 4: Wait for completion
-        m_sync_flush_cv.wait(lk, [this, upto_seq_num] { return m_records.completed_upto() >= upto_seq_num; });
+        m_sync_flush_cv.wait(lk, [this, upto_seq_num] { return !m_records.status(upto_seq_num).is_active; });
 
         // NOTE: We are not resetting the lsn because same seq number should never have 2 completions and thus not
         // doing it saves an atomic instruction
     }
+}
+
+uint64_t HomeLogStore::rollback_async(logstore_seq_num_t to_lsn, on_rollback_cb_t cb) {
+    // Validate if the lsn to which it is rolledback to is not truncated.
+    auto ret = m_records.status(to_lsn + 1);
+    if (ret.is_out_of_range) {
+        HS_LOG_ASSERT(false, "Attempted to rollback to {} which is already truncated", to_lsn);
+        return 0;
+    }
+
+    // Ensure that there are no pending lsn to flush. If so lets flush them now.
+    const auto from_lsn = get_contiguous_issued_seq_num(0);
+    if (get_contiguous_completed_seq_num(0) < from_lsn) { flush_sync(); }
+    HS_DBG_ASSERT_EQ(get_contiguous_completed_seq_num(0), get_contiguous_issued_seq_num(0),
+                     "Still some pending lsns to flush, concurrent write and rollback is not supported");
+
+    // Do an in-memory rollback of lsns before we persist the log ids. This is done, so that subsequent appends can
+    // be queued without waiting for rollback async operation completion. It is safe to do so, since before returning
+    // from this method, we will queue ourselves to the flush lock and thus subsequent writes are guaranteed to go after
+    // this rollback is completed.
+    m_seq_num.store(to_lsn + 1, std::memory_order_release); // Rollback the next append lsn
+    logid_range_t logid_range = std::make_pair(m_records.at(to_lsn + 1).m_dev_key.idx,
+                                               m_records.at(from_lsn).m_dev_key.idx); // Get the logid range to rollback
+    m_records.rollback(to_lsn); // Rollback all bitset records and from here on, we can't access any lsns beyond to_lsn
+
+    if (m_logdev.try_lock_flush([logid_range, to_lsn, this, comp_cb = std::move(cb)]() {
+            // Rollback the log_ids in the range, for this log store (which persists this info in its superblk)
+            m_logdev.rollback(m_store_id, logid_range);
+
+            // Remove all truncation barriers on rolled back lsns
+            for (auto it = std::rbegin(m_truncation_barriers); it != std::rend(m_truncation_barriers); ++it) {
+                if (it->seq_num > to_lsn) {
+                    m_truncation_barriers.erase(std::next(it).base());
+                } else {
+                    break;
+                }
+            }
+            m_flush_batch_max_lsn = invalid_lsn(); // Reset the flush batch for next batch.
+            if (comp_cb) { comp_cb(to_lsn); }
+        })) {
+        m_logdev.unlock_flush();
+    }
+    return from_lsn - to_lsn;
 }
 
 nlohmann::json HomeLogStore::get_status(int verbosity) const {

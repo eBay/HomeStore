@@ -68,7 +68,6 @@ public:
     LogStoreFamily& operator=(const LogStoreFamily&) = delete;
     LogStoreFamily& operator=(LogStoreFamily&&) noexcept = delete;
 
-    void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
     void start(const bool format, JournalVirtualDev* blk_store);
     void stop();
 
@@ -83,12 +82,11 @@ public:
     void device_truncate_in_user_reactor(const std::shared_ptr< truncate_req >& treq);
 
     nlohmann::json dump_log_store(const log_dump_req& dum_req);
-    std::string metablk_name() const { return m_metablk_name; }
 
     LogDev& logdev() { return m_log_dev; }
 
     nlohmann::json get_status(int verbosity) const;
-    std::string get_name() const { return m_metablk_name; }
+    std::string get_name() const { return m_name; }
 
     logstore_family_id_t get_family_id() const { return m_family_id; }
 
@@ -109,7 +107,7 @@ private:
     std::unordered_set< logstore_id_t > m_unopened_store_id;
     std::unordered_map< logstore_id_t, logid_t > m_last_flush_info;
     logstore_family_id_t m_family_id;
-    std::string m_metablk_name;
+    std::string m_name;
     LogDev m_log_dev;
 };
 } // namespace homestore

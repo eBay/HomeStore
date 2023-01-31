@@ -72,12 +72,11 @@ struct serialized_log_record {
     logstore_seq_num_t store_seq_num; // Seqnum by the log store
     logstore_id_t store_id;           // ID of the store this log is associated with
 
-    void set_inlined(const bool inlined) { is_inlined = static_cast< uint32_t >(inlined ? 0x1 : 0x0); }
+    void set_inlined(bool inlined) { is_inlined = static_cast< uint32_t >(inlined ? 0x1 : 0x0); }
     bool get_inlined() const { return ((is_inlined == static_cast< uint32_t >(0x1)) ? true : false); }
 
     serialized_log_record() = default;
-    serialized_log_record(const uint32_t s, const uint32_t o, const bool inlined, const logstore_seq_num_t sq,
-                          const logstore_id_t id) :
+    serialized_log_record(uint32_t s, uint32_t o, bool inlined, logstore_seq_num_t sq, logstore_id_t id) :
             size{s}, offset{o}, store_seq_num{sq}, store_id{id} {
         set_inlined(inlined);
     }
@@ -91,7 +90,6 @@ struct serialized_log_record {
 
 /* This structure represents the in-memory representation of a log record */
 struct log_record {
-    serialized_log_record* pers_record{nullptr};
     sisl::io_blob data;
     void* context;
     logstore_id_t store_id;
@@ -425,10 +423,53 @@ struct logdev_superblk {
 };
 #pragma pack()
 
+#pragma pack(1)
+typedef std::pair< logid_t, logid_t > logid_range_t;
+
+struct rollback_record {
+    logstore_id_t store_id;
+    logid_range_t idx_range;
+};
+
+struct rollback_superblk {
+    static constexpr uint32_t ROLLBACK_SB_MAGIC{0xDABAF00D};
+    static constexpr uint32_t ROLLBACK_SB_VERSION{1};
+    static constexpr uint32_t num_record_increment{8};
+
+    uint32_t magic{ROLLBACK_SB_MAGIC};
+    uint32_t version{ROLLBACK_SB_VERSION};
+    uint32_t num_records{0};
+
+    uint32_t get_magic() const { return magic; }
+    uint32_t get_version() const { return version; }
+
+    static uint32_t size_needed(uint32_t nrecords) {
+        return sizeof(rollback_superblk) + (sisl::round_up(nrecords, num_record_increment) * sizeof(rollback_record));
+    }
+
+    rollback_record& at(uint32_t idx) {
+        auto r = r_cast< rollback_record* >(uintptr_cast(this) + sizeof(rollback_superblk));
+        return r[idx];
+    }
+
+    void remove_ith_record(uint32_t i) {
+        uint8_t* rmem = uintptr_cast(&at(i));
+        std::memmove(rmem, rmem + sizeof(rollback_record), sizeof(rollback_record) * (num_records - i - 1));
+        --num_records;
+    }
+
+    void add_record(logstore_id_t store_id, logid_range_t idx_range) {
+        rollback_record& r = at(num_records++);
+        r.store_id = store_id;
+        r.idx_range = idx_range;
+    }
+};
+#pragma pack()
+
 // This class represents the metadata of logdev providing methods to change/access log dev super block.
 class LogDevMetadata {
 public:
-    LogDevMetadata(const std::string& metablk_name);
+    LogDevMetadata(const std::string& logdev_name);
     LogDevMetadata(const LogDevMetadata&) = delete;
     LogDevMetadata& operator=(const LogDevMetadata&) = delete;
     LogDevMetadata(LogDevMetadata&&) noexcept = delete;
@@ -437,7 +478,6 @@ public:
 
     logdev_superblk* create();
     void reset();
-    void meta_buf_found(const sisl::byte_view& buf, void* meta_cookie);
     std::vector< std::pair< logstore_id_t, logstore_superblk > > load();
     void persist();
 
@@ -451,29 +491,38 @@ public:
     void unreserve_store(logstore_id_t idx, bool persist_now);
     const std::set< logstore_id_t >& reserved_store_ids() const { return m_store_info; }
 
-    void update_store_superblk(logstore_id_t idx, const logstore_superblk& meta, const bool persist_now);
+    void update_store_superblk(logstore_id_t idx, const logstore_superblk& meta, bool persist_now);
     const logstore_superblk& store_superblk(logstore_id_t idx) const;
     logstore_superblk& mutable_store_superblk(logstore_id_t idx);
 
     auto num_stores_reserved() const { return m_sb->num_stores_reserved(); }
 
+    void add_rollback_record(logstore_id_t store_id, logid_range_t id_range, bool persist_now);
+    void remove_rollback_record_upto(logid_t upto_id, bool persist_now);
+    void remove_all_rollback_records(logstore_id_t store_id, bool persist_now);
+    uint32_t num_rollback_records(logstore_id_t store_id) const;
+    bool is_rolled_back(logstore_id_t store_id, logid_t logid) const;
+
 private:
-    bool resize_if_needed();
+    bool resize_logdev_sb_if_needed();
+    bool resize_rollback_sb_if_needed();
+    void logdev_super_blk_found(const sisl::byte_view& buf, void* meta_cookie);
+    void rollback_super_blk_found(const sisl::byte_view& buf, void* meta_cookie);
 
-    uint32_t required_sb_size(uint32_t nstores) const {
-        // TO DO: Might need to differentiate based on data or fast type
-        return size_needed(nstores);
-    }
-
-    uint32_t size_needed(uint32_t nstores) const {
-        return sizeof(logdev_superblk) + (nstores * sizeof(logstore_seq_num_t));
+    uint32_t logdev_sb_size_needed(uint32_t nstores) const {
+        return sizeof(logdev_superblk) + (nstores * sizeof(logstore_superblk));
     }
 
     uint32_t store_capacity() const;
+    void remove_all_rollback_records(logstore_id_t id);
 
+private:
     superblk< logdev_superblk > m_sb;
+    superblk< rollback_superblk > m_rollback_sb;
     std::unique_ptr< sisl::IDReserver > m_id_reserver;
     std::set< logstore_id_t > m_store_info;
+    std::multimap< logstore_id_t, logid_range_t > m_rollback_info;
+    bool m_rollback_info_dirty{false};
 };
 
 class HomeStore;
@@ -675,7 +724,16 @@ public:
      * @return number of records to truncate
      */
     uint64_t truncate(const logdev_key& key);
-    void meta_blk_found(meta_blk* mblk, sisl::byte_view buf, size_t size);
+
+    /**
+     * @brief Rollback the logid range specific to the given store id. This method persists the information
+     * synchronously to the underlying storage. Once rolledback those logids in this range are ignored (only for
+     * this logstore) during load.
+     *
+     * @param store_id : Store id whose logids are to be rolled back or invalidated
+     * @param id_range : Log id range to rollback/invalidate
+     */
+    void rollback(logstore_id_t store_id, logid_range_t id_range);
 
     void update_store_superblk(logstore_id_t idx, const logstore_superblk& meta, bool persist_now);
 
@@ -687,8 +745,10 @@ public:
     }
 
     uint64_t get_flush_size_multiple() const { return m_flush_size_multiple; }
+    logdev_key get_last_flush_ld_key() const { return logdev_key{m_last_flush_idx, m_last_flush_dev_offset}; }
 
     LogDevMetadata& log_dev_meta() { return m_logdev_meta; }
+    static bool can_flush_in_this_thread();
 
 private:
     LogGroup* make_log_group(uint32_t estimated_records) {
@@ -730,7 +790,8 @@ private:
     std::multimap< logid_t, logstore_id_t > m_garbage_store_ids;
     Clock::time_point m_last_flush_time;
 
-    logid_t m_last_flush_idx{-1}; // Track last flushed and truncated log idx
+    logid_t m_last_flush_idx{-1}; // Track last flushed, last device offset and truncated log idx
+    off_t m_last_flush_dev_offset{0};
     logid_t m_last_truncate_idx{-1};
 
     crc32_t m_last_crc{INVALID_CRC32_VALUE};

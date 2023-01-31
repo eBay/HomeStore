@@ -40,21 +40,7 @@ LogStoreService& logstore_service() { return hs()->logstore_service(); }
 /////////////////////////////////////// LogStoreService Section ///////////////////////////////////////
 LogStoreService::LogStoreService() :
         m_logstore_families{std::make_unique< LogStoreFamily >(DATA_LOG_FAMILY_IDX),
-                            std::make_unique< LogStoreFamily >(CTRL_LOG_FAMILY_IDX)} {
-    meta_service().register_handler(
-        data_log_family()->metablk_name(),
-        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-            m_logstore_families[DATA_LOG_FAMILY_IDX]->meta_blk_found_cb(mblk, std::move(buf), size);
-        },
-        nullptr);
-
-    meta_service().register_handler(
-        ctrl_log_family()->metablk_name(),
-        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-            m_logstore_families[CTRL_LOG_FAMILY_IDX]->meta_blk_found_cb(mblk, std::move(buf), size);
-        },
-        nullptr);
-}
+                            std::make_unique< LogStoreFamily >(CTRL_LOG_FAMILY_IDX)} {}
 
 void LogStoreService::create_vdev(uint64_t size, logstore_family_id_t family, vdev_io_comp_cb_t format_cb) {
     const auto atomic_page_size = hs()->device_mgr()->atomic_page_size({PhysicalDevGroup::FAST});
@@ -201,13 +187,13 @@ nlohmann::json LogStoreService::dump_log_store(const log_dump_req& dump_req) {
     nlohmann::json json_dump{}; // create root object
     if (dump_req.log_store == nullptr) {
         for (auto& family : m_logstore_families) {
-            json_dump[family->metablk_name()] = family->dump_log_store(dump_req);
+            json_dump[family->get_name()] = family->dump_log_store(dump_req);
         }
     } else {
         auto& family = dump_req.log_store->get_family();
         // must use operator= construction as copy construction results in error
         nlohmann::json val = family.dump_log_store(dump_req);
-        json_dump[family.metablk_name()] = std::move(val);
+        json_dump[family.get_name()] = std::move(val);
     }
     return json_dump;
 }

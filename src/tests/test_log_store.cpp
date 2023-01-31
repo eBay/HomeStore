@@ -301,9 +301,25 @@ public:
         }
     }
 
+    void rollback_validate(uint32_t num_lsns_to_rollback) {
+        auto const upto_lsn = m_cur_lsn.fetch_sub(num_lsns_to_rollback) - num_lsns_to_rollback - 1;
+        m_log_store->rollback_async(upto_lsn, nullptr);
+        ASSERT_EQ(m_log_store->get_contiguous_completed_seq_num(0), upto_lsn)
+            << "Last completed seq num is not reset after rollback";
+        ASSERT_EQ(m_log_store->get_contiguous_issued_seq_num(0), upto_lsn)
+            << "Last issued seq num is not reset after rollback";
+        read_validate(true);
+    }
+
     void read(const logstore_seq_num_t lsn) {
         ASSERT_GT(lsn, m_truncated_upto_lsn);
         // m_log_store->read(id);
+    }
+
+    void rollback_record_count(uint32_t expected_count) {
+        auto actual_count =
+            m_log_store->get_family().logdev().log_dev_meta().num_rollback_records(m_log_store->get_store_id());
+        ASSERT_EQ(actual_count, expected_count);
     }
 
     void on_log_found(const logstore_seq_num_t lsn, const log_buffer buf, void* ctx) {
@@ -404,8 +420,20 @@ public:
         return inst;
     }
 
-    void start_homestore(uint32_t ndevices, uint64_t dev_size, uint32_t nthreads, uint32_t n_log_stores,
-                         bool restart = false) {
+    void start_homestore(bool restart = false) {
+        auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
+        auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
+
+        auto nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
+        bool is_spdk = SISL_OPTIONS["spdk"].as< bool >();
+        if (is_spdk) { nthreads = 2; }
+
+        auto n_log_stores = SISL_OPTIONS["num_logstores"].as< uint32_t >();
+        if (n_log_stores < 4u) {
+            LOGINFO("Log store test needs minimum 4 log stores for testing, setting them to 4");
+            n_log_stores = 4u;
+        }
+
         if (restart) {
             shutdown(ndevices, false);
             std::this_thread::sleep_for(std::chrono::seconds{5});
@@ -434,9 +462,6 @@ public:
                 device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
             }
         }
-
-        bool is_spdk = SISL_OPTIONS["spdk"].as< bool >();
-        if (is_spdk) { nthreads = 2; }
 
         LOGINFO("Starting iomgr with {} threads, spdk: {}", nthreads, is_spdk);
         ioenvironment.with_iomgr(nthreads, is_spdk);
@@ -777,6 +802,15 @@ protected:
         }
     }
 
+    void rollback_validate(uint32_t num_lsns_to_rollback) { pick_log_store()->rollback_validate(num_lsns_to_rollback); }
+
+    void post_truncate_rollback_validate() {
+        for (size_t i{0}; i < SampleDB::instance().m_log_store_clients.size(); ++i) {
+            const auto& lsc = SampleDB::instance().m_log_store_clients[i];
+            lsc->rollback_record_count(0ul);
+        }
+    }
+
     void reset_recovery() {
         for (size_t i{0}; i < SampleDB::instance().m_log_store_clients.size(); ++i) {
             const auto& lsc = SampleDB::instance().m_log_store_clients[i];
@@ -1041,13 +1075,9 @@ TEST_F(LogStoreTest, VarRateInsertThenTruncate) {
 }
 
 TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
-    const auto num_devs = SISL_OPTIONS["num_devs"].as< uint32_t >(); // num devices
-    const auto dev_size_bytes = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-    const auto num_records = SISL_OPTIONS["num_records"].as< uint32_t >();
-    const auto num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
-    const auto num_logstores = SISL_OPTIONS["num_logstores"].as< uint32_t >();
     // somewhere between 4-15 iterations depending on if run with other tests or not this will fail
     const auto iterations = SISL_OPTIONS["iterations"].as< uint32_t >();
+    const auto num_records = SISL_OPTIONS["num_records"].as< uint32_t >();
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
@@ -1067,12 +1097,12 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
         this->iterate_validate(true);
 
         LOGINFO("Step 5: Restart homestore");
-        SampleDB::instance().start_homestore(num_devs, dev_size_bytes, num_threads, num_logstores, true /* restart */);
+        SampleDB::instance().start_homestore(true /* restart */);
         this->recovery_validate();
         this->init(num_records);
 
         LOGINFO("Step 6: Restart homestore again to validate recovery on consecutive restarts");
-        SampleDB::instance().start_homestore(num_devs, dev_size_bytes, num_threads, num_logstores, true /* restart */);
+        SampleDB::instance().start_homestore(true /* restart */);
         this->recovery_validate();
         this->init(num_records);
 
@@ -1089,7 +1119,7 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
         this->iterate_validate(true);
 
         LOGINFO("Step 10: Restart homestore again to validate recovery after inserts");
-        SampleDB::instance().start_homestore(num_devs, dev_size_bytes, num_threads, num_logstores, true /* restart */);
+        SampleDB::instance().start_homestore(true /* restart */);
         this->recovery_validate();
         this->init(num_records);
 
@@ -1097,44 +1127,6 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
         this->truncate_validate();
     }
 }
-
-TEST_F(LogStoreTest, DeleteMultipleLogStores) {
-    const auto nrecords = (SISL_OPTIONS["num_records"].as< uint32_t >() * 5) / 100;
-
-    LOGINFO("Step 1: Reinit the {} to start sequential write test", nrecords);
-    this->init(nrecords);
-
-    LOGINFO("Step 2: Issue sequential inserts with q depth of 40");
-    this->kickstart_inserts(1, 40);
-
-    LOGINFO("Step 3: Wait for the Inserts to complete");
-    this->wait_for_inserts();
-
-    LOGINFO("Step 4: Read all the inserts one by one for each log store to validate if what is written is valid");
-    this->read_validate(true);
-
-    LOGINFO("Step 4.1: Iterate all inserts one by one for each log store and validate if what is written is valid");
-    this->iterate_validate(true);
-
-    LOGINFO("Step 5: Remove log store 0");
-    this->delete_validate(0);
-
-    LOGINFO("Step 6: Truncate all of the remaining log stores and validate log dev truncation is marked "
-            "correctly and also validate if all data prior to truncation return exception");
-    this->truncate_validate();
-
-    LOGINFO("Step 7: Do IO on remaining log stores for records={}", nrecords);
-    this->init(nrecords);
-    this->kickstart_inserts(1, 40);
-    this->wait_for_inserts();
-
-    LOGINFO("Step 8: Remove log store 1");
-    this->delete_validate(1);
-
-    LOGINFO("Step 9: Truncate again, this time expected to have first log store delete is actually garbage collected");
-    this->truncate_validate();
-}
-
 TEST_F(LogStoreTest, FlushSync) {
 #ifdef _PRERELEASE
     LOGINFO("Step 1: Delay the flush threshold and flush timer to very high value to ensure flush works fine")
@@ -1188,6 +1180,105 @@ TEST_F(LogStoreTest, FlushSync) {
 
     LOGINFO("Step 10: Wait for the Inserts to complete");
     this->wait_for_inserts();
+}
+
+TEST_F(LogStoreTest, Rollback) {
+    LOGINFO("Step 1: Reinit the 500 records on a single logstore to start rollback test");
+    this->init(500, {std::make_pair(1ull, 100)}); // Last entry = 500
+
+    LOGINFO("Step 2: Issue sequential inserts with q depth of 10");
+    this->kickstart_inserts(1, 10);
+
+    LOGINFO("Step 3: Wait for the Inserts to complete");
+    this->wait_for_inserts();
+
+    LOGINFO("Step 4: Rollback last 50 entries and validate if pre-rollback entries are intact");
+    this->rollback_validate(50); // Last entry = 450
+
+    LOGINFO("Step 5: Append 25 entries after rollback is completed");
+    this->init(25, {std::make_pair(1ull, 100)});
+    this->kickstart_inserts(1, 10);
+    this->wait_for_inserts(); // Last entry = 475
+
+    LOGINFO("Step 7: Rollback again for 75 entries even before previous rollback entry");
+    this->rollback_validate(75); // Last entry = 400
+
+    LOGINFO("Step 8: Append 25 entries after second rollback is completed");
+    this->init(25, {std::make_pair(1ull, 100)});
+    this->kickstart_inserts(1, 10);
+    this->wait_for_inserts(); // Last entry = 425
+
+    LOGINFO("Step 9: Restart homestore and ensure all rollbacks are effectively validated");
+    SampleDB::instance().start_homestore(true /* restart */);
+    this->recovery_validate();
+
+    LOGINFO("Step 10: Post recovery, append another 25 entries");
+    this->init(25, {std::make_pair(1ull, 100)});
+    this->kickstart_inserts(1, 5);
+    this->wait_for_inserts(); // Last entry = 450
+
+    LOGINFO("Step 11: Rollback again for 75 entries even before previous rollback entry");
+    this->rollback_validate(75); // Last entry = 375
+
+    LOGINFO("Step 12: After 3rd rollback, append another 25 entries");
+    this->init(25, {std::make_pair(1ull, 100)});
+    this->kickstart_inserts(1, 5);
+    this->wait_for_inserts(); // Last entry = 400
+
+    LOGINFO("Step 13: Truncate all entries");
+    this->truncate_validate();
+
+    LOGINFO("Step 14: Restart homestore and ensure all truncations after rollbacks are effectively validated");
+    SampleDB::instance().start_homestore(true /* restart */);
+    this->recovery_validate();
+
+    LOGINFO("Step 15: Append 25 entries after truncation is completed");
+    this->init(25, {std::make_pair(1ull, 100)});
+    this->kickstart_inserts(1, 10);
+    this->wait_for_inserts(); // Last entry = 425
+
+    LOGINFO("Step 16: Do another truncation to effectively truncate previous records");
+    this->truncate_validate();
+
+    LOGINFO("Step 17: Validate if there are no rollback records");
+    this->post_truncate_rollback_validate();
+}
+
+TEST_F(LogStoreTest, DeleteMultipleLogStores) {
+    const auto nrecords = (SISL_OPTIONS["num_records"].as< uint32_t >() * 5) / 100;
+
+    LOGINFO("Step 1: Reinit the {} to start sequential write test", nrecords);
+    this->init(nrecords);
+
+    LOGINFO("Step 2: Issue sequential inserts with q depth of 40");
+    this->kickstart_inserts(1, 40);
+
+    LOGINFO("Step 3: Wait for the Inserts to complete");
+    this->wait_for_inserts();
+
+    LOGINFO("Step 4: Read all the inserts one by one for each log store to validate if what is written is valid");
+    this->read_validate(true);
+
+    LOGINFO("Step 4.1: Iterate all inserts one by one for each log store and validate if what is written is valid");
+    this->iterate_validate(true);
+
+    LOGINFO("Step 5: Remove log store 0");
+    this->delete_validate(0);
+
+    LOGINFO("Step 6: Truncate all of the remaining log stores and validate log dev truncation is marked "
+            "correctly and also validate if all data prior to truncation return exception");
+    this->truncate_validate();
+
+    LOGINFO("Step 7: Do IO on remaining log stores for records={}", nrecords);
+    this->init(nrecords);
+    this->kickstart_inserts(1, 40);
+    this->wait_for_inserts();
+
+    LOGINFO("Step 8: Remove log store 1");
+    this->delete_validate(1);
+
+    LOGINFO("Step 9: Truncate again, this time expected to have first log store delete is actually garbage collected");
+    this->truncate_validate();
 }
 
 TEST_F(LogStoreTest, WriteSyncThenRead) {
@@ -1254,15 +1345,7 @@ int main(int argc, char* argv[]) {
     sisl::logging::SetLogger("test_log_store");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
 
-    auto n_log_stores = SISL_OPTIONS["num_logstores"].as< uint32_t >();
-    if (n_log_stores < 4u) {
-        LOGINFO("Log store test needs minimum 4 log stores for testing, setting them to 4");
-        n_log_stores = 4u;
-    }
-
-    SampleDB::instance().start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
-                                         SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024,
-                                         SISL_OPTIONS["num_threads"].as< uint32_t >(), n_log_stores);
+    SampleDB::instance().start_homestore();
     const int ret = RUN_ALL_TESTS();
     SampleDB::instance().shutdown(SISL_OPTIONS["num_devs"].as< uint32_t >());
     return ret;

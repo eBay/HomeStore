@@ -82,6 +82,8 @@ public:
 
     void set_blk_num(blk_num_t blk_num);
     blk_num_t get_blk_num() const { return m_blk_num; }
+    // last blk num is the last blk num that belongs this blkid;
+    blk_num_t get_last_blk_num() const { return get_blk_num() + get_nblks() - 1; }
 
     void set_nblks(blk_count_t nblks);
     blk_count_t get_nblks() const { return static_cast< blk_count_t >(m_nblks) + 1; }
