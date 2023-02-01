@@ -45,6 +45,7 @@ class HomestoreConan(ConanFile):
             ("fmt/7.1.3", "override"),
             "folly/2020.05.04.00",
             "isa-l/2.21.0",
+            ("zlib/1.2.12", "override"),
             )
 
     generators = "cmake"
