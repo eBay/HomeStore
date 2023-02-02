@@ -766,6 +766,8 @@ void MetaBlkMgr::update_sub_sb(const void* const context_data, const uint64_t sz
     if (it->second.do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
 #endif
 
+    // set inital compressed state as false, because it might be compressed in previous write;
+    mblk->hdr.h.compressed = 0;
     mblk->hdr.h.ovf_bid.invalidate();
     mblk->hdr.h.gen_cnt += 1;
 
