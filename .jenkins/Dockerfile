@@ -5,6 +5,7 @@ LABEL description="Automated HomeStore compilation"
 WORKDIR /output
 
 RUN set -eux; \
+    sed -i 's/master/latest/g' /etc/apt/sources.list \
     apt-get update; \
     apt-get upgrade -y; \
     apt-get install iputils-ping; \
