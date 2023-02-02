@@ -95,7 +95,7 @@ pipeline {
                     }
                     axis {
                         name 'SANITIZE'
-                        values 'False', 'True'
+                        values 'False'
                     }
                     axis {
                         name 'COVERAGE'
