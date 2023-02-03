@@ -137,7 +137,7 @@ protected:
         return sec.count();
     }
 
-        [[nodiscard]] bool keep_running() {
+    [[nodiscard]] bool keep_running() {
         HS_DBG_ASSERT(m_mbm->total_size() >= m_mbm->used_size(), "total size:{} less than used size: {}",
                       m_mbm->total_size(), m_mbm->used_size());
         const auto free_size = m_mbm->total_size() - m_mbm->used_size();
@@ -179,7 +179,7 @@ protected:
         }
     }
 
-        [[nodiscard]] uint64_t total_size_written(const void* cookie) {
+    [[nodiscard]] uint64_t total_size_written(const void* cookie) {
         return m_mbm->meta_size(cookie);
     }
 
@@ -474,7 +474,7 @@ protected:
         }
     }
 
-        [[nodiscard]] bool do_aligned() const {
+    [[nodiscard]] bool do_aligned() const {
         static thread_local std::random_device rd;
         static thread_local std::default_random_engine re{rd()};
         std::uniform_int_distribution< uint8_t > aligned_rand{0, 1};
@@ -523,7 +523,7 @@ protected:
         }
     }
 
-        [[nodiscard]] uint64_t total_op_cnt() const {
+    [[nodiscard]] uint64_t total_op_cnt() const {
         return m_update_cnt + m_wrt_cnt + m_rm_cnt;
     }
 
@@ -532,7 +532,7 @@ protected:
         return (100 * m_wrt_cnt) / total_op_cnt();
     }
 
-        [[nodiscard]] uint32_t update_ratio() const {
+    [[nodiscard]] uint32_t update_ratio() const {
         if (m_update_cnt == 0) return 0;
         return (100 * m_update_cnt) / total_op_cnt();
     }
@@ -542,7 +542,7 @@ protected:
         return false;
     }
 
-        [[nodiscard]] bool do_write() const {
+    [[nodiscard]] bool do_write() const {
         if (write_ratio() < gp.per_write) { return true; }
         return false;
     }
