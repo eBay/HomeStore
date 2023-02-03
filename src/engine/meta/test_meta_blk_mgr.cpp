@@ -70,6 +70,9 @@ struct Param {
 static Param gp;
 
 static const std::string META_FILE_PREFIX{"/tmp/test_meta_blk_mgr_"};
+static constexpr uint64_t Ki{1024};
+static constexpr uint64_t Mi{Ki * Ki};
+static constexpr uint64_t Gi{Ki * Mi};
 
 static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, const uint32_t nthreads) {
     std::vector< dev_info > device_info;
@@ -108,8 +111,8 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
     params.min_virtual_page_size = 4096;
     params.app_mem_size = app_mem_size;
     params.data_devices = device_info;
-    params.init_done_cb = [&tl_start_mutex = start_mutex, &tl_cv = cv, &tl_inited = inited](std::error_condition err,
-                                                                                            const out_params& params) {
+    params.init_done_cb = [& tl_start_mutex = start_mutex, &tl_cv = cv, &tl_inited = inited](std::error_condition err,
+                                                                                             const out_params& params) {
         LOGINFO("HomeBlks Init completed");
         {
             std::unique_lock< std::mutex > lk{tl_start_mutex};
@@ -158,7 +161,7 @@ protected:
         return sec.count();
     }
 
-    [[nodiscard]] bool keep_running() {
+        [[nodiscard]] bool keep_running() {
         HS_DBG_ASSERT(m_mbm->get_size() >= m_mbm->get_used_size(), "total size:{} less than used size: {}",
                       m_mbm->get_size(), m_mbm->get_used_size());
         const auto free_size{m_mbm->get_size() - m_mbm->get_used_size()};
@@ -200,7 +203,9 @@ protected:
         }
     }
 
-    [[nodiscard]] uint64_t total_size_written(const void* const cookie) { return m_mbm->get_meta_size(cookie); }
+        [[nodiscard]] uint64_t total_size_written(const void* const cookie) {
+        return m_mbm->get_meta_size(cookie);
+    }
 
     void do_write_to_full() {
         static constexpr uint64_t blkstore_overhead = 4 * 1024ul * 1024ul; // 4MB
@@ -215,7 +220,7 @@ protected:
             if (free_size >= gp.max_wrt_sz) {
                 size_written = do_sb_write(do_overflow());
             } else {
-                size_written = do_sb_write(false, m_mbm->meta_blk_context_sz());
+                size_written = do_sb_write(false /* overflow */, m_mbm->meta_blk_context_sz());
                 HS_REL_ASSERT_EQ(size_written, m_mbm->get_page_size());
             }
 
@@ -348,12 +353,12 @@ protected:
         }
     }
 
-    void do_sb_update(const bool aligned_buf_size) {
+    void do_sb_update(const bool aligned_buf_size, uint64_t size_to_update = 0) {
         ++m_update_cnt;
         uint8_t* buf{nullptr};
         auto overflow = do_overflow();
         if (!aligned_buf_size) { overflow = true; } // for unaligned buf size, let's generate overflow buf size;
-        auto sz_to_wrt{rand_size(overflow, aligned_buf_size)};
+        auto sz_to_wrt{size_to_update ? size_to_update : rand_size(overflow, aligned_buf_size)};
         void* cookie{nullptr};
         bool unaligned_addr{false};
         uint32_t unaligned_shift{0};
@@ -442,6 +447,31 @@ protected:
         }
     }
 
+    //
+    // 1. do a write, make sure compression is triggered.
+    // 2. update same meta blk, with data that exceeds compression ratio and thus back off compression.
+    //
+    void write_compression_backoff() {
+        HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+            s.metablk.compress_ratio_limit = 100; // this will allow every compression attempt;
+            HS_SETTINGS_FACTORY().save();
+        });
+
+        LOGINFO("compression ratio limit changed to: {}", m_mbm->get_compress_ratio_limit());
+
+        [[maybe_unused]] const auto write_result = do_sb_write(true /* do_overflow */, 15 * Mi);
+
+        HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+            s.metablk.compress_ratio_limit = 0; // this will disallow every compression attempt;
+            HS_SETTINGS_FACTORY().save();
+        });
+
+        LOGINFO("compression ratio limit changed to: {}", m_mbm->get_compress_ratio_limit());
+
+        // since we only wrote 1 metablk, it will always pick up the same one;
+        do_sb_update(true /* aligned */, 12 * Mi);
+    }
+
     void do_rand_load() {
         while (keep_running()) {
             switch (get_op()) {
@@ -471,7 +501,7 @@ protected:
         }
     }
 
-    [[nodiscard]] bool do_aligned() const {
+        [[nodiscard]] bool do_aligned() const {
         static thread_local std::random_device rd;
         static thread_local std::default_random_engine re{rd()};
         std::uniform_int_distribution< uint8_t > aligned_rand{0, 1};
@@ -520,14 +550,16 @@ protected:
         }
     }
 
-    [[nodiscard]] uint64_t total_op_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
+        [[nodiscard]] uint64_t total_op_cnt() const {
+        return m_update_cnt + m_wrt_cnt + m_rm_cnt;
+    }
 
     [[nodiscard]] uint32_t write_ratio() const {
         if (m_wrt_cnt == 0) return 0;
         return (100 * m_wrt_cnt) / total_op_cnt();
     }
 
-    [[nodiscard]] uint32_t update_ratio() const {
+        [[nodiscard]] uint32_t update_ratio() const {
         if (m_update_cnt == 0) return 0;
         return (100 * m_update_cnt) / total_op_cnt();
     }
@@ -537,7 +569,7 @@ protected:
         return false;
     }
 
-    [[nodiscard]] bool do_write() const {
+        [[nodiscard]] bool do_write() const {
         if (write_ratio() < gp.per_write) { return true; }
         return false;
     }
@@ -583,16 +615,15 @@ protected:
         HS_REL_ASSERT_EQ(m_mbm->get_size() - m_total_wrt_sz, m_mbm->get_available_blks() * m_mbm->get_page_size());
 
         m_mbm->deregister_handler(mtype);
-        m_mbm->register_handler(
-            mtype,
-            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-                if (mblk) {
-                    std::unique_lock< std::mutex > lg{m_mtx};
-                    m_cb_blks[mblk->hdr.h.bid.to_integer()] =
-                        std::string{reinterpret_cast< const char* >(buf.bytes()), size};
-                }
-            },
-            [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
+        m_mbm->register_handler(mtype,
+                                [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+                                    if (mblk) {
+                                        std::unique_lock< std::mutex > lg{m_mtx};
+                                        m_cb_blks[mblk->hdr.h.bid.to_integer()] =
+                                            std::string{reinterpret_cast< const char* >(buf.bytes()), size};
+                                    }
+                                },
+                                [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
     }
 
 private:
@@ -608,6 +639,7 @@ private:
 };
 
 static constexpr uint64_t MIN_DRIVE_SIZE{2147483648}; // 2 GB
+
 TEST_F(VMetaBlkMgrTest, min_drive_size_test) {
     start_homestore(1, MIN_DRIVE_SIZE, gp.num_threads);
     mtype = "Test_Min_Drive_Size";
@@ -659,6 +691,34 @@ TEST_F(VMetaBlkMgrTest, random_load_test) {
     register_client();
 
     this->do_rand_load();
+
+    // simulate reboot case that MetaBlkMgr will scan the disk for all the metablks that were written;
+    this->scan_blks();
+
+    this->recover();
+
+    this->validate();
+
+    this->shutdown();
+}
+
+TEST_F(VMetaBlkMgrTest, CompressionBackoff) {
+    start_homestore(1, MIN_DRIVE_SIZE, gp.num_threads);
+    mtype = "Test_Compression_Backoff";
+    reset_counters();
+    m_start_time = Clock::now();
+    this->register_client();
+
+    //
+    // 1. write compressed metablk
+    // 2. do an update on the metablk with compression ratio not meet limit, so backoff compression.
+    //
+    this->write_compression_backoff();
+
+    //
+    // Then do a recovery, the data read from disk should be uncompressed and match the size we saved in its metablk
+    // header. If size mismatch, it will hit assert failure;
+    //
 
     // simulate reboot case that MetaBlkMgr will scan the disk for all the metablks that were written;
     this->scan_blks();
