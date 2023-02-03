@@ -127,9 +127,10 @@ BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& 
     return m_vdev->alloc_blk(nblks, hints, out_blkids);
 
 #if 0 // already done by vdev layer
-    if (nblks <= BlkId::max_blks_in_op()) {
+        if (nblks <= BlkId::max_blks_in_op()) {
         return (m_vdev.alloc_blk(nblks, hints, out_blkid));
-    } else {
+    }
+    else {
         while (nblks != 0) {
             static thread_local std::vector< BlkId > result_blkid{};
             result_blkid.clear();
