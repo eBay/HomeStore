@@ -66,7 +66,6 @@ void BlkDataService::async_read(const BlkId& bid, sisl::sg_list& sgs, uint32_t s
     as_info->cb = cb;
     as_info->is_read = true;
     as_info->bid = bid;
-<<<<<<< HEAD
 
     HS_DBG_ASSERT_EQ(sgs.iovs.size(), 1, "Expecting iov size to be 1 since reading on one blk.");
 
@@ -76,17 +75,6 @@ void BlkDataService::async_read(const BlkId& bid, sisl::sg_list& sgs, uint32_t s
                         reinterpret_cast< const void* >(as_info) /* cookie */, part_of_batch);
 }
 
-=======
-
-    HS_DBG_ASSERT_EQ(sgs.iovs.size(), 1, "Expecting iov size to be 1 since reading on one blk.");
-
-    as_info->outstanding_io_cnt.increment(1);
-
-    m_vdev->async_readv(sgs.iovs.data(), sgs.iovs.size(), size, bid, BlkDataService::process_data_completion,
-                        reinterpret_cast< const void* >(as_info) /* cookie */, part_of_batch);
-}
-
->>>>>>> e0241b15de74ebd514c5754459e667aa01cbf0a0
 void BlkDataService::process_data_completion(std::error_condition ec, void* cookie) {
     auto as_info = reinterpret_cast< async_info* >(cookie);
 
@@ -135,19 +123,13 @@ BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& 
                                           std::vector< BlkId >& out_blkids) {
     HS_DBG_ASSERT_EQ(size % m_page_size, 0, "Non aligned size requested");
     blk_count_t nblks = static_cast< blk_count_t >(size / m_page_size);
-<<<<<<< HEAD
 
     return m_vdev->alloc_blk(nblks, hints, out_blkids);
-
-=======
-
-    return m_vdev->alloc_blk(nblks, hints, out_blkids);
-
->>>>>>> e0241b15de74ebd514c5754459e667aa01cbf0a0
 #if 0 // already done by vdev layer
-    if (nblks <= BlkId::max_blks_in_op()) {
+        if (nblks <= BlkId::max_blks_in_op()) {
         return (m_vdev.alloc_blk(nblks, hints, out_blkid));
-    } else {
+    }
+    else {
         while (nblks != 0) {
             static thread_local std::vector< BlkId > result_blkid{};
             result_blkid.clear();
@@ -163,7 +145,6 @@ BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& 
         return BlkAllocStatus::SUCCESS;
     }
 #endif
-<<<<<<< HEAD
 }
 
 void BlkDataService::commit_blk(const BlkId& bid) { m_vdev->commit_blk(bid); }
@@ -193,18 +174,6 @@ stream_info_t BlkDataService::reserve_stream(const stream_id_t* id_list, const u
     return m_vdev->reserve_stream(id_list, num_streams);
 }
 
-=======
-}
-
-void BlkDataService::commit_blk(const BlkId& bid) { m_vdev->commit_blk(bid); }
-
-stream_info_t BlkDataService::alloc_stream(const uint64_t size) { return m_vdev->alloc_stream(size); }
-
-stream_info_t BlkDataService::reserve_stream(const stream_id_t* id_list, const uint32_t num_streams) {
-    return m_vdev->reserve_stream(id_list, num_streams);
-}
-
->>>>>>> e0241b15de74ebd514c5754459e667aa01cbf0a0
 void BlkDataService::free_stream(const stream_info_t& stream_info) { m_vdev->free_stream(stream_info); }
 
 } // namespace homestore

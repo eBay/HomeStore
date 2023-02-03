@@ -17,10 +17,7 @@
 #include <sys/uio.h>
 #include <cstdint>
 
-<<<<<<< HEAD
 #include <folly/small_vector.h>
-=======
->>>>>>> e0241b15de74ebd514c5754459e667aa01cbf0a0
 #include <sisl/fds/buffer.hpp>
 #include <sisl/utility/atomic_counter.hpp>
 
@@ -43,12 +40,9 @@ struct async_info {
     BlkId bid; // only needed when is_read is true, used for blk read tracker;
     sisl::atomic_counter< int > outstanding_io_cnt = 0;
 };
-<<<<<<< HEAD
 
 using blk_t = uint64_t;
 using blk_list_t = folly::small_vector< blk_t, 4 >;
-=======
->>>>>>> e0241b15de74ebd514c5754459e667aa01cbf0a0
 
 class BlkDataService {
 public:
@@ -76,15 +70,10 @@ public:
 
     void commit_blk(const BlkId& bid);
 
-<<<<<<< HEAD
     blk_list_t alloc_blks(uint32_t size);
 
     void async_free_blk(const BlkId bid, const io_completion_cb_t& cb);
 
-=======
-    void async_free_blk(const BlkId bid, const io_completion_cb_t& cb);
-
->>>>>>> e0241b15de74ebd514c5754459e667aa01cbf0a0
     BlkReadTracker* read_blk_tracker() { return m_blk_read_tracker.get(); }
 
     /************************ hdd stream apis *************************/
