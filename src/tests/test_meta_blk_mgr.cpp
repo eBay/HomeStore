@@ -137,7 +137,7 @@ protected:
         return sec.count();
     }
 
-    [[nodiscard]] bool keep_running() {
+        [[nodiscard]] bool keep_running() {
         HS_DBG_ASSERT(m_mbm->total_size() >= m_mbm->used_size(), "total size:{} less than used size: {}",
                       m_mbm->total_size(), m_mbm->used_size());
         const auto free_size = m_mbm->total_size() - m_mbm->used_size();
@@ -430,16 +430,16 @@ protected:
             HS_SETTINGS_FACTORY().save();
         });
 
-        LOGINFO("compression ratio limit changed to: {}", m_mbm->get_compress_ratio_limit());
+        LOGINFO("compression ratio limit changed to: {}", HS_DYNAMIC_CONFIG(metablk.compress_ratio_limit));
 
-        do_sb_write(true /* do_overflow */, 15 * Mi);
+        [[maybe_unused]] const auto write_result = do_sb_write(true /* do_overflow */, 15 * Mi);
 
         HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
             s.metablk.compress_ratio_limit = 0; // this will disallow every compression attempt;
             HS_SETTINGS_FACTORY().save();
         });
 
-        LOGINFO("compression ratio limit changed to: {}", m_mbm->get_compress_ratio_limit());
+        LOGINFO("compression ratio limit changed to: {}", HS_DYNAMIC_CONFIG(metablk.compress_ratio_limit));
 
         // since we only wrote 1 metablk, it will always pick up the same one;
         do_sb_update(true /* aligned */, 12 * Mi);
