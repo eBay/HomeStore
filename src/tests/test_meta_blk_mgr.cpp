@@ -179,9 +179,7 @@ protected:
         }
     }
 
-    [[nodiscard]] uint64_t total_size_written(const void* cookie) {
-        return m_mbm->meta_size(cookie);
-    }
+    [[nodiscard]] uint64_t total_size_written(const void* cookie) { return m_mbm->meta_size(cookie); }
 
     void do_write_to_full() {
         static constexpr uint64_t blkstore_overhead = 4 * 1024ul * 1024ul; // 4MB
