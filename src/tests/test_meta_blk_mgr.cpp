@@ -137,7 +137,7 @@ protected:
         return sec.count();
     }
 
-        [[nodiscard]] bool keep_running() {
+    [[nodiscard]] bool keep_running() {
         HS_DBG_ASSERT(m_mbm->total_size() >= m_mbm->used_size(), "total size:{} less than used size: {}",
                       m_mbm->total_size(), m_mbm->used_size());
         const auto free_size = m_mbm->total_size() - m_mbm->used_size();
@@ -332,7 +332,7 @@ protected:
         uint8_t* buf{nullptr};
         auto overflow = do_overflow();
         if (!aligned_buf_size) { overflow = true; } // for unaligned buf size, let's generate overflow buf size;
-        auto sz_to_wrt{size_to_update ? size_to_update : rand_size(overflow, aligned_buf_size)};
+        auto sz_to_wrt = (size_to_update ? size_to_update : rand_size(overflow, aligned_buf_size));
         void* cookie{nullptr};
         bool unaligned_addr{false};
         uint32_t unaligned_shift{0};
@@ -432,7 +432,7 @@ protected:
 
         LOGINFO("compression ratio limit changed to: {}", m_mbm->get_compress_ratio_limit());
 
-        [[maybe_unused]] const auto write_result = do_sb_write(true /* do_overflow */, 15 * Mi);
+        do_sb_write(true /* do_overflow */, 15 * Mi);
 
         HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
             s.metablk.compress_ratio_limit = 0; // this will disallow every compression attempt;
