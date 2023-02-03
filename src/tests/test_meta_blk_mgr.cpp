@@ -523,9 +523,7 @@ protected:
         }
     }
 
-    [[nodiscard]] uint64_t total_op_cnt() const {
-        return m_update_cnt + m_wrt_cnt + m_rm_cnt;
-    }
+    [[nodiscard]] uint64_t total_op_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
 
     [[nodiscard]] uint32_t write_ratio() const {
         if (m_wrt_cnt == 0) return 0;
