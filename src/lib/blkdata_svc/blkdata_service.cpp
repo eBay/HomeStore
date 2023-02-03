@@ -149,6 +149,25 @@ BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& 
 
 void BlkDataService::commit_blk(const BlkId& bid) { m_vdev->commit_blk(bid); }
 
+blk_list_t BlkDataService::alloc_blks(uint32_t size) {
+    blk_alloc_hints hints; // default hints
+    std::vector< BlkId > out_blkids;
+    const auto status = alloc_blks(size, hints, out_blkids);
+
+    blk_list_t blk_list;
+    if (status != BlkAllocStatus::SUCCESS) {
+        LOGERROR("Resouce unavailable!");
+        return blk_list;
+    }
+
+    // convert BlkId to blklist;
+    for (auto i = 0ul; i < out_blkids.size(); ++i) {
+        blk_list.emplace_back(out_blkids[i].to_integer());
+    }
+
+    return blk_list;
+}
+
 stream_info_t BlkDataService::alloc_stream(const uint64_t size) { return m_vdev->alloc_stream(size); }
 
 stream_info_t BlkDataService::reserve_stream(const stream_id_t* id_list, const uint32_t num_streams) {
