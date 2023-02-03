@@ -453,7 +453,7 @@ protected:
     //
     void write_compression_backoff() {
         HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
-            s.metablk.compress_ratio_limit = 100; // this will allow every compression attemp;
+            s.metablk.compress_ratio_limit = 100; // this will allow every compression attempt;
             HS_SETTINGS_FACTORY().save();
         });
 
