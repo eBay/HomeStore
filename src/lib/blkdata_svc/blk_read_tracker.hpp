@@ -126,6 +126,9 @@ public:
     BlkReadTracker& operator=(BlkReadTracker&&) noexcept = delete;
 
     uint16_t entries_per_record() const;
+    
+    BlkReadTrackerMetrics& get_metrics();
+
     void set_entries_per_record(uint16_t num_entries);
 
     /**

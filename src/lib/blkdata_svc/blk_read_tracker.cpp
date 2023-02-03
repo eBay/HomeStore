@@ -22,7 +22,11 @@ BlkReadTracker::BlkReadTracker() : m_pending_reads_map(s_expected_num_records, e
 
 BlkReadTracker::~BlkReadTracker() {}
 
+<<<<<<< HEAD
 // BlkReadTrackerMetrics& BlkReadTracker::get_metrics() { return m_metrics; }
+=======
+BlkReadTrackerMetrics& BlkReadTracker::get_metrics() { return m_metrics; }
+>>>>>>> e0241b15de74ebd514c5754459e667aa01cbf0a0
 
 void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
                            const std::shared_ptr< blk_track_waiter >& waiter) {

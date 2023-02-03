@@ -6,6 +6,10 @@ from conans import CMake
 class HomestoreConan(ConanFile):
     name = "homestore"
     version = "4.0.5"
+<<<<<<< HEAD
+=======
+
+>>>>>>> e0241b15de74ebd514c5754459e667aa01cbf0a0
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
     topics = ("ebay", "nublox")
