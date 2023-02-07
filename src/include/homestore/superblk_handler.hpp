@@ -57,6 +57,15 @@ public:
         return m_sb;
     }
 
+    void destroy() {
+        if (m_meta_mgr_cookie) {
+            meta_service().remove_sub_sb(m_meta_mgr_cookie);
+            m_meta_mgr_cookie = nullptr;
+        }
+        m_raw_buf.reset();
+        m_sb = nullptr;
+    }
+
     uint32_t size() const { return m_raw_buf->size; }
     sisl::byte_array raw_buf() { return m_raw_buf; }
 
