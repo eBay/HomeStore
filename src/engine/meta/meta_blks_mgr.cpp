@@ -312,6 +312,9 @@ bool MetaBlkMgr::scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_map_
         if (read_sz != static_cast< uint64_t >(mblk->hdr.h.context_sz)) {
             LOGERROR("[type={}], total size read: {} mismatch from meta blk context_sz: {}", mblk->hdr.h.type, read_sz,
                      mblk->hdr.h.context_sz);
+            mblk->hdr.h.context_sz = read_sz; // hotfix: needed for fixing bad data during upgrade;
+            LOGINFO("[type={}], fixing mblk's context_sz from {} to read_sz: {}", mblk->hdr.h.type,
+                    mblk->hdr.h.context_sz, read_sz);
             if (HS_DYNAMIC_CONFIG(metablk.skip_header_size_check) == false) {
                 HS_RELEASE_ASSERT_EQ(read_sz, static_cast< uint64_t >(mblk->hdr.h.context_sz),
                                      "[type={}], total size read: {} mismatch from meta blk context_sz: {}",
