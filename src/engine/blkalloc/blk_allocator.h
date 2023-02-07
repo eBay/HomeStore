@@ -205,8 +205,12 @@ public:
         }
         m_auto_recovery = cfg.get_auto_recovery();
         m_disk_bm = std::make_unique< sisl::Bitset >(cfg.get_total_blks(), id, HS_STATIC_CONFIG(drive_attr.align_size));
-
-        if (!HS_DYNAMIC_CONFIG(generic.sanity_check_level_non_hotswap)) { m_cfg.m_realtime_bm_on = false; }
+#if defined _PRERELEASE || defined DEBUG
+        if (!HS_DYNAMIC_CONFIG(generic.sanity_check_level_non_hotswap))
+#endif
+        {
+            m_cfg.m_realtime_bm_on = false;
+        }
 
         if (realtime_bm_on()) {
             m_realtime_bm =
