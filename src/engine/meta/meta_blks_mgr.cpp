@@ -309,9 +309,17 @@ bool MetaBlkMgr::scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_map_
             obid = ovf_hdr->h.next_bid;
         }
 
-        HS_RELEASE_ASSERT_EQ(read_sz, static_cast< uint64_t >(mblk->hdr.h.context_sz),
-                             "[type={}], total size read: {} mismatch from meta blk context_sz: {}", mblk->hdr.h.type,
-                             read_sz, mblk->hdr.h.context_sz);
+        if (read_sz != static_cast< uint64_t >(mblk->hdr.h.context_sz)) {
+            LOGERROR("[type={}], total size read: {} mismatch from meta blk context_sz: {}", mblk->hdr.h.type, read_sz,
+                     mblk->hdr.h.context_sz);
+            if (HS_DYNAMIC_CONFIG(metablk.skip_header_size_check) == false) {
+                HS_RELEASE_ASSERT_EQ(read_sz, static_cast< uint64_t >(mblk->hdr.h.context_sz),
+                                     "[type={}], total size read: {} mismatch from meta blk context_sz: {}",
+                                     mblk->hdr.h.type, read_sz, mblk->hdr.h.context_sz);
+            }
+        } else {
+            LOGINFO("[type={}], meta blk size check passed!", mblk->hdr.h.type);
+        }
 
         // move on to next meta blk;
         bid = mblk->hdr.h.next_bid;
