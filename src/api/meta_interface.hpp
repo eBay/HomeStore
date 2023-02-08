@@ -339,6 +339,7 @@ private:
     [[nodiscard]] uint64_t get_max_compress_memory_size() const;
     [[nodiscard]] uint64_t get_init_compress_memory_size() const;
     [[nodiscard]] uint32_t get_compress_ratio_limit() const;
+    [[nodiscard]] bool get_skip_hdr_check() const;
     [[nodiscard]] bool compress_feature_on() const;
 
     [[nodiscard]] nlohmann::json get_status(const int log_level);

@@ -626,6 +626,15 @@ protected:
                                 [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
     }
 
+    void set_flip_point(const std::string flip_name) {
+        FlipCondition null_cond;
+        FlipFrequency freq;
+        freq.set_count(1);
+        freq.set_percent(100);
+        m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
+        LOGDEBUG("Flip " + flip_name + " set");
+    }
+
 private:
     uint64_t m_wrt_cnt{0};
     uint64_t m_update_cnt{0};
@@ -636,6 +645,7 @@ private:
     std::map< uint64_t, sb_info_t > m_write_sbs; // during write, save blkid to buf map;
     std::map< uint64_t, std::string > m_cb_blks; // during recover, save blkid to buf map;
     std::mutex m_mtx;
+    FlipClient m_fc{HomeStoreFlip::instance()};
 };
 
 static constexpr uint64_t MIN_DRIVE_SIZE{2147483648}; // 2 GB
@@ -698,6 +708,55 @@ TEST_F(VMetaBlkMgrTest, random_load_test) {
     this->recover();
 
     this->validate();
+
+    this->shutdown();
+}
+
+//
+// 1. Turn on flip to simulate fix is not there;
+// 2. Write compressed then uncompressed to reproduce the issue which ends up writing bad data (hdr size mismatch) to
+// disk, Change dynamic setting to skip hdr size check, because we've introduced bad data.
+// 3. Do a recover, verify no crash or assert should happen (need the code change to recover a bad data during
+// scan_meta_blks) and data can be fixed during recovery and send back to consumer;
+// 4. After recovery everything should be fine;
+//
+TEST_F(VMetaBlkMgrTest, RecoveryFromBadData) {
+    start_homestore(1, MIN_DRIVE_SIZE, gp.num_threads);
+    mtype = "Test_Recovery_from_bad_data";
+    reset_counters();
+    m_start_time = Clock::now();
+    this->register_client();
+
+    set_flip_point("without_compress_init");
+    //
+    // 1. write compressed metablk
+    // 2. do an update on the metablk with compression ratio not meet limit, so backoff compression.
+    // 3. bad data (with size mismatch) will be written which is expected;
+    //
+    this->write_compression_backoff();
+
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.metablk.skip_header_size_check =
+            1; // this will skip hdr size mismatch check during recovery, because we know bad data is written;
+        HS_SETTINGS_FACTORY().save();
+    });
+
+    LOGINFO("skip_header_size_check changed to: {}", m_mbm->get_skip_hdr_check());
+
+    //
+    // Then do a recovery, the data read from disk should be uncompressed and match the size we saved in its metablk
+    // header. If size mismatch, it will hit assert failure;
+    //
+
+    // simulate reboot case that MetaBlkMgr will scan the disk for all the metablks that were written;
+    this->scan_blks();
+
+    this->recover();
+
+    this->validate();
+
+    // up to this point, we can not use the cached meta blk to keep doing update because the mblk in memory copy inside
+    // metablkstore are all freed;
 
     this->shutdown();
 }
