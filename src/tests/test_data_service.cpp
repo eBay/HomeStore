@@ -570,8 +570,7 @@ TEST_F(BlkDataServiceTest, TestWriteReadThenFreeBlkAfterReadComp) {
     this->shutdown();
 }
 
-// TEST_F(BlkDataServiceTest, TestWriteReadThenFreeBeforeReadComp) {
-TEST_F(BlkDataServiceTest, aa) {
+TEST_F(BlkDataServiceTest, TestWriteReadThenFreeBeforeReadComp) {
     LOGINFO("Step 0: Starting homestore.");
     start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
                     SISL_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
