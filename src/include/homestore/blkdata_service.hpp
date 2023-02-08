@@ -121,4 +121,6 @@ private:
     std::unique_ptr< BlkReadTracker > m_blk_read_tracker;
     uint32_t m_page_size;
 };
+
+extern BlkDataService& data_service();
 } // namespace homestore

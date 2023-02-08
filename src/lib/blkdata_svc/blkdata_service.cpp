@@ -23,6 +23,8 @@
 
 namespace homestore {
 
+BlkDataService& data_service() { return hs()->data_service(); }
+
 BlkDataService::BlkDataService() { m_blk_read_tracker = std::make_unique< BlkReadTracker >(); }
 BlkDataService::~BlkDataService() = default;
 
