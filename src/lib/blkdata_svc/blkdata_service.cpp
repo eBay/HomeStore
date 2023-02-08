@@ -24,7 +24,7 @@
 namespace homestore {
 
 BlkDataService::BlkDataService() { m_blk_read_tracker = std::make_unique< BlkReadTracker >(); }
-BlkDataService::~BlkDataService() {}
+BlkDataService::~BlkDataService() = default;
 
 // recovery path
 void BlkDataService::open_vdev(vdev_info_block* vb) {

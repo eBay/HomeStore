@@ -20,7 +20,7 @@ static BlkId extract_key(const BlkTrackRecord& rec) { return rec.m_key; }
 
 BlkReadTracker::BlkReadTracker() : m_pending_reads_map(s_expected_num_records, extract_key, nullptr /* access_cb */) {}
 
-BlkReadTracker::~BlkReadTracker() {}
+BlkReadTracker::~BlkReadTracker() = default;
 
 // BlkReadTrackerMetrics& BlkReadTracker::get_metrics() { return m_metrics; }
 
