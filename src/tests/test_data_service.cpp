@@ -107,7 +107,10 @@ typedef std::function< void(std::error_condition err, std::shared_ptr< std::vect
 
 class BlkDataServiceTest : public testing::Test {
 public:
-    BlkDataService& inst() { return hs()->data_service(); }
+    BlkDataService& inst() {
+        // return hs()->data_service();
+        return homestore::data_service();
+    }
 
     void remove_files() {
         /* no need to delete the user created file/disk */
