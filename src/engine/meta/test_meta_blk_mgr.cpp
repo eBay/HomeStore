@@ -645,7 +645,9 @@ private:
     std::map< uint64_t, sb_info_t > m_write_sbs; // during write, save blkid to buf map;
     std::map< uint64_t, std::string > m_cb_blks; // during recover, save blkid to buf map;
     std::mutex m_mtx;
+#ifdef _PRERELEASE
     FlipClient m_fc{HomeStoreFlip::instance()};
+#endif
 };
 
 static constexpr uint64_t MIN_DRIVE_SIZE{2147483648}; // 2 GB
@@ -712,6 +714,7 @@ TEST_F(VMetaBlkMgrTest, random_load_test) {
     this->shutdown();
 }
 
+#ifdef _PRERELEASE // release build doens't have flip point
 //
 // 1. Turn on flip to simulate fix is not there;
 // 2. Write compressed then uncompressed to reproduce the issue which ends up writing bad data (hdr size mismatch) to
@@ -760,6 +763,7 @@ TEST_F(VMetaBlkMgrTest, RecoveryFromBadData) {
 
     this->shutdown();
 }
+#endif
 
 TEST_F(VMetaBlkMgrTest, CompressionBackoff) {
     start_homestore(1, MIN_DRIVE_SIZE, gp.num_threads);
