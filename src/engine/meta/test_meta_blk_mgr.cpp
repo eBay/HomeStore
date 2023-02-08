@@ -626,6 +626,7 @@ protected:
                                 [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
     }
 
+#ifdef _PRERELEASE
     void set_flip_point(const std::string flip_name) {
         FlipCondition null_cond;
         FlipFrequency freq;
@@ -634,6 +635,7 @@ protected:
         m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
         LOGDEBUG("Flip " + flip_name + " set");
     }
+#endif
 
 private:
     uint64_t m_wrt_cnt{0};
