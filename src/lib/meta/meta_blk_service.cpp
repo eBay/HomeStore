@@ -753,6 +753,8 @@ void MetaBlkService::update_sub_sb(const uint8_t* context_data, uint64_t sz, voi
     if (it->second.do_crc) { crc = crc32_ieee(init_crc32, s_cast< const uint8_t* >(context_data), sz); }
 #endif
 
+    // init compression field to be false;
+    mblk->hdr.h.compressed = 0;
     mblk->hdr.h.ovf_bid.invalidate();
     mblk->hdr.h.gen_cnt += 1;
 
@@ -1135,7 +1137,6 @@ void MetaBlkService::read_sub_sb(meta_sub_type type) {
         // No client writes compressed data with reads it back with read_sub_sb for now;
         // This assert can be removed if any client writes compressed data who calls read_sub_sb to read it back;
         //
-        HS_REL_ASSERT_EQ(mblk->hdr.h.compressed, false);
         sisl::byte_array buf = read_sub_sb_internal(mblk);
 
         // if consumer is reading its sbs with this api, the blk found cb should already be registered;

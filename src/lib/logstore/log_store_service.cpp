@@ -81,12 +81,12 @@ bool LogStoreService::open_vdev(vdev_info_block* vb, logstore_family_id_t family
 void LogStoreService::start(const bool format) {
     // hs()->status_mgr()->register_status_cb("LogStore", bind_this(LogStoreService::get_status, 1));
 
+    // Create an truncate thread loop which handles truncation which does sync IO
+    start_threads();
+
     // Start the logstore families
     m_logstore_families[DATA_LOG_FAMILY_IDX]->start(format, m_data_logdev_vdev.get());
     m_logstore_families[CTRL_LOG_FAMILY_IDX]->start(format, m_ctrl_logdev_vdev.get());
-
-    // Create an truncate thread loop which handles truncation which does sync IO
-    start_threads();
 }
 
 void LogStoreService::stop() {
