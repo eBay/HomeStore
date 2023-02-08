@@ -24,11 +24,7 @@
 namespace homestore {
 
 BlkDataService::BlkDataService() { m_blk_read_tracker = std::make_unique< BlkReadTracker >(); }
-<<<<<<< HEAD
 BlkDataService::~BlkDataService() = default;
-=======
-BlkDataService::~BlkDataService() {}
->>>>>>> 67e2b3b57d4c05ba5237435d195c905ce89f209a
 
 // recovery path
 void BlkDataService::open_vdev(vdev_info_block* vb) {
@@ -127,14 +123,8 @@ BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& 
                                           std::vector< BlkId >& out_blkids) {
     HS_DBG_ASSERT_EQ(size % m_page_size, 0, "Non aligned size requested");
     blk_count_t nblks = static_cast< blk_count_t >(size / m_page_size);
-<<<<<<< HEAD
 
     return m_vdev->alloc_blk(nblks, hints, out_blkids);
-
-=======
-
-    return m_vdev->alloc_blk(nblks, hints, out_blkids);
->>>>>>> 67e2b3b57d4c05ba5237435d195c905ce89f209a
 #if 0 // already done by vdev layer
         if (nblks <= BlkId::max_blks_in_op()) {
         return (m_vdev.alloc_blk(nblks, hints, out_blkid));
