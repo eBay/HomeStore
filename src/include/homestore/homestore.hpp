@@ -40,6 +40,7 @@ class ResourceMgr;
 class HomeStoreStatusMgr;
 class MetaBlkService;
 class LogStoreService;
+class BlkDataService;
 class IndexService;
 class IndexServiceCallbacks;
 struct vdev_info_block;
@@ -76,6 +77,7 @@ typedef std::function< void(bool success) > hs_comp_callback;
 
 class HomeStore {
 private:
+    std::unique_ptr< BlkDataService > m_data_service;
     std::unique_ptr< MetaBlkService > m_meta_service;
     std::unique_ptr< LogStoreService > m_log_service;
     std::unique_ptr< IndexService > m_index_service;
@@ -131,6 +133,7 @@ public:
     ///////////////////////////// Member functions /////////////////////////////////////////////
     HomeStore& with_params(const hs_input_params& input);
     HomeStore& with_meta_service(float size_pct);
+    HomeStore& with_data_service(float size_pct);
     HomeStore& with_log_service(float data_size_pct, float ctrl_size_pct);
     HomeStore& with_index_service(float index_size_pct, std::unique_ptr< IndexServiceCallbacks > cbs);
     HomeStore& after_init_done(hs_init_done_cb_t init_done_cb);
@@ -160,6 +163,7 @@ public:
         return str;
     }
 
+    BlkDataService& data_service() { return *m_data_service; }
     MetaBlkService& meta_service() { return *m_meta_service; }
     LogStoreService& logstore_service() { return *m_log_service; }
     IndexService& index_service() { return *m_index_service; }

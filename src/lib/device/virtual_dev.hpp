@@ -32,6 +32,8 @@
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/enum.hpp>
 
+#include <homestore/homestore_decl.hpp>
+
 #include "device.h"
 #include "device_selector.hpp"
 
@@ -48,20 +50,21 @@ struct pdev_chunk_map {
     PhysicalDev* pdev;
     std::vector< PhysicalDevChunk* > chunks_in_pdev;
 };
-ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize);
+// ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize);
 ENUM(vdev_op_type_t, uint8_t, read, write, format, fsync);
 
-typedef std::function< void(std::error_condition) > vdev_io_comp_cb_t;
+typedef std::function< void(std::error_condition, void* /* cookie */) > vdev_io_comp_cb_t;
 typedef std::function< void(void) > vdev_high_watermark_cb_t;
 
 struct vdev_req_context : public sisl::ObjLifeCounter< vdev_req_context > {
-    uint64_t request_id{0};                              // ID of the request
-    uint64_t version{0xDEAD};                            // Version for debugging
-    vdev_io_comp_cb_t cb;                                // User callback is put here
-    std::error_condition err{no_error};                  // Any error info
-    vdev_op_type_t op_type{vdev_op_type_t::read};        // Op Type
-    sisl::atomic_counter< int > refcount{1};             // Refcount for intrusive ptr
-    bool io_on_multi_pdevs{false};                       // Is IO part of multiple pdevs (say format)
+    uint64_t request_id{0};                       // ID of the request
+    uint64_t version{0xDEAD};                     // Version for debugging
+    vdev_io_comp_cb_t cb;                         // User callback is put here
+    void* cookie{nullptr};                        // User defined cookie, will be returned back to caller on completion;
+    std::error_condition err{no_error};           // Any error info
+    vdev_op_type_t op_type{vdev_op_type_t::read}; // Op Type
+    sisl::atomic_counter< int > refcount{1};      // Refcount for intrusive ptr
+    bool io_on_multi_pdevs{false};                // Is IO part of multiple pdevs (say format)
     sisl::atomic_counter< uint32_t > outstanding_ios{0}; // Outstanding ios in case of multi pdev io
     PhysicalDevChunk* chunk{nullptr};                    // Chunk where the io is issued if its a single pdev io
     Clock::time_point io_start_time{Clock::now()};
@@ -127,13 +130,6 @@ static constexpr uint64_t CHUNK_EOF{0xabcdabcd};
 static constexpr off_t INVALID_OFFSET{std::numeric_limits< off_t >::max()};
 
 struct blkalloc_cp;
-typedef uint32_t vdev_stream_id_t;
-struct stream_info_t {
-    uint32_t num_streams = 0;
-    uint64_t stream_cur = 0;
-    std::vector< vdev_stream_id_t > stream_id;
-    std::vector< PhysicalDevChunk* > chunk_list;
-};
 
 class VirtualDev {
 protected:
@@ -248,19 +244,24 @@ public:
     /// @param size : Size of the buffer
     /// @param bid : BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @param cb : Callback once write is completed
+    /// @param cookie : cookie set by caller and returned on completion; It is defaulted to null as some caller is not
+    /// intrested of of this field
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
     void async_write(const char* buf, uint32_t size, const BlkId& bid, vdev_io_comp_cb_t cb,
-                     bool part_of_batch = false);
+                     const void* cookie = nullptr, bool part_of_batch = false);
 
     /// @brief Asynchornously write the buffer to the device on a given blkid from vector of buffer
     /// @param iov : Vector of buffer to write data from
     /// @param iovcnt : Count of buffer
     /// @param bid  BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @param cb : Callback once write is completed
+    /// @param cookie : cookie set by caller and returned on completion; It is defaulted to null as some caller is not
+    /// intrested of of this field
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
-    void async_writev(const iovec* iov, int iovcnt, const BlkId& bid, vdev_io_comp_cb_t cb, bool part_of_batch = false);
+    void async_writev(const iovec* iov, int iovcnt, const BlkId& bid, vdev_io_comp_cb_t cb,
+                      const void* cookie = nullptr, bool part_of_batch = false);
 
     /// @brief Synchronously write the buffer to the blkid
     /// @param buf : Buffer to write data from
@@ -284,9 +285,12 @@ public:
     /// @param bid : BlkId from data needs to be read
     /// @param cb : Callback once the read is completed and buffer is filled with data. Note that we don't support
     /// partial data read and hence callback will not be provided with size read or written
+    /// @param cookie : cookie set by caller and returned on completion; It is defaulted to null as some caller is not
+    /// intrested of of this field
     /// @param part_of_batch : Is this read part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this read request will not be queued.
-    void async_read(char* buf, uint64_t size, const BlkId& bid, vdev_io_comp_cb_t cb, bool part_of_batch = false);
+    void async_read(char* buf, uint64_t size, const BlkId& bid, vdev_io_comp_cb_t cb, const void* cookie = nullptr,
+                    bool part_of_batch = false);
 
     /// @brief Asynchronously read the data for a given BlkId to the vector of buffers
     /// @param iov : Vector of buffer to write read to
@@ -295,10 +299,12 @@ public:
     /// @param bid : BlkId from data needs to be read
     /// @param cb : Callback once the read is completed and buffer is filled with data. Note that we don't support
     /// partial data read and hence callback will not be provided with size read or written.
+    /// @param cookie : cookie set by caller and returned on completion; It is defaulted to null as some caller is not
+    /// intrested of of this field
     /// @param part_of_batch : Is this read part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this read request will not be queued.
     void async_readv(iovec* iovs, int iovcnt, uint64_t size, const BlkId& bid, vdev_io_comp_cb_t cb,
-                     bool part_of_batch = false);
+                     const void* cookie = nullptr, bool part_of_batch = false);
 
     /// @brief Synchronously read the data for a given BlkId.
     /// @param buf : Buffer to read data to
@@ -355,7 +361,7 @@ public:
 
     /* Verify debug bitmap for all chunks */
     virtual BlkAllocStatus verify_debug_bm(const bool free_debug_bm = true);
-    stream_info_t reserve_stream(const vdev_stream_id_t* id_list, const uint32_t num_streams);
+    stream_info_t reserve_stream(const stream_id_t* id_list, const uint32_t num_streams);
     stream_info_t alloc_stream(uint64_t size);
     void free_stream(const stream_info_t& stream_info);
     uint32_t align_size() const;
@@ -371,10 +377,12 @@ protected:
     /// @param pchunk : pointer to physical chunk in the device
     /// @param dev_offset : offset within the physical device
     /// @param cb : Completion callback to be called after write is completed
+    /// @param cookie : cookie set by caller and returned on completion;
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
     void async_write_internal(const char* buf, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                              uint64_t dev_offset, vdev_io_comp_cb_t cb, bool part_of_batch = false);
+                              uint64_t dev_offset, vdev_io_comp_cb_t cb, const void* cookie = nullptr,
+                              bool part_of_batch = false);
 
     /// @brief : internal implementation of async_writev
     ///
@@ -384,10 +392,12 @@ protected:
     /// @param pchunk : pointer to physical chunk in the device
     /// @param dev_offset : offset within the physical device
     /// @param cb : Completion callback to be called after write is completed
+    /// @param cookie : cookie set by caller and returned on completion;
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
     void async_writev_internal(const iovec* iov, int iovcnt, uint64_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                               uint64_t dev_offset, vdev_io_comp_cb_t cb, bool part_of_batch = false);
+                               uint64_t dev_offset, vdev_io_comp_cb_t cb, const void* cookie = nullptr,
+                               bool part_of_batch = false);
 
     ssize_t sync_write_internal(const char* buf, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
                                 uint64_t dev_offset);
@@ -403,10 +413,11 @@ protected:
     /// @param pchunk : pointer to physical chunk in the device
     /// @param dev_offset : offset within the physical device
     /// @param cb : Completion callback to be called after read is completed
+    /// @param cookie : cookie set by caller and returned on completion;
     /// @param part_of_batch : Is this read part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this read request will not be queued.
     void async_read_internal(char* buf, uint64_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk, uint64_t dev_offset,
-                             vdev_io_comp_cb_t cb, bool part_of_batch = false);
+                             vdev_io_comp_cb_t cb, const void* cookie = nullptr, bool part_of_batch = false);
 
     /// @brief : internal implementation of async_readv
     ///
@@ -416,10 +427,12 @@ protected:
     /// @param pchunk : pointer to physical chunk in the device
     /// @param dev_offset : offset within the physical device
     /// @param cb : Completion callback to be called after read is completed
+    /// @param cookie : cookie set by caller and returned on completion;
     /// @param part_of_batch : Is this read part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this read request will not be queued.
     void async_readv_internal(iovec* iovs, int iovcnt, uint64_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                              uint64_t dev_offset, vdev_io_comp_cb_t cb, bool part_of_batch = false);
+                              uint64_t dev_offset, vdev_io_comp_cb_t cb, const void* cookie = nullptr,
+                              bool part_of_batch = false);
 
     ssize_t sync_read_internal(char* buf, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
                                uint64_t dev_offset);
@@ -443,7 +456,7 @@ private:
     uint64_t to_dev_offset(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const;
     BlkAllocStatus alloc_blk_from_chunk(const blk_count_t nblks, const blk_alloc_hints& hints,
                                         std::vector< BlkId >& out_blkid, PhysicalDevChunk* const chunk);
-    void reserve_stream(const vdev_stream_id_t id);
+    void reserve_stream(const stream_id_t id);
 };
 
 } // namespace homestore

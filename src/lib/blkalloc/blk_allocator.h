@@ -126,29 +126,6 @@ VENUM(BlkOpStatus, uint8_t,
 
 ENUM(BlkAllocatorState, uint8_t, INIT, WAITING, SWEEP_SCHEDULED, SWEEPING, EXITING, DONE);
 
-/* Hints for various allocators */
-struct blk_alloc_hints {
-    blk_alloc_hints() :
-            desired_temp{0},
-            dev_id_hint{INVALID_DEV_ID},
-            can_look_for_other_chunk{true},
-            is_contiguous{false},
-            multiplier{1},
-            max_blks_per_entry{BlkId::max_blks_in_op()},
-            stream_info{(uintptr_t) nullptr} {}
-
-    blk_temp_t desired_temp;       // Temperature hint for the device
-    uint32_t dev_id_hint;          // which physical device to pick (hint if any) -1 for don't care
-    bool can_look_for_other_chunk; // If alloc on device not available can I pick other device
-    bool is_contiguous;
-    uint32_t multiplier;         // blks allocated in a blkid should be a multiple of multiplier
-    uint32_t max_blks_per_entry; // Number of blks on every entry
-    uintptr_t stream_info;
-#ifdef _PRERELEASE
-    bool error_simulate = false; // can error simulate happen
-#endif
-};
-
 static constexpr blk_temp_t default_temperature() { return 1; }
 
 class BlkAllocPortion {
@@ -179,7 +156,7 @@ public:
         return (m_available_blocks -= count);
     }
 
-    [[maybe_unused]] blk_num_t increase_available_blocks(const blk_num_t count) {
+        [[maybe_unused]] blk_num_t increase_available_blocks(const blk_num_t count) {
         return (m_available_blocks += count);
     }
 

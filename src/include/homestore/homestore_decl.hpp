@@ -29,13 +29,18 @@
 #include <spdlog/fmt/fmt.h>
 #include <nlohmann/json.hpp>
 
+//
+// Note:
+// This file should only include stuffs that are needed by both service layer and internal homestore components;
+//
+
 namespace homestore {
-////////////// All Typedefs ///////////////////
 typedef uint32_t crc32_t;
 typedef uint16_t csum_t;
 typedef int64_t seq_id_t;
 typedef boost::uuids::uuid uuid_t;
 typedef time_t hs_uuid_t;
+typedef uint32_t stream_id_t;
 
 ////////////// All Size Limits ///////////////////
 constexpr uint32_t BLK_NUM_BITS{32};
@@ -75,14 +80,24 @@ ENUM(io_flag, uint8_t,
      DIRECT_IO,   // recommended mode
      READ_ONLY    // Read-only mode for post-mortem checks
 );
+ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize);
 
+////////////// All structs ///////////////////
 struct dev_info {
     explicit dev_info(std::string name, HSDevType type = HSDevType::Data) :
-            dev_names{std::move(name)}, dev_type{type} {}
+            dev_names{std::move(name)},
+            dev_type{type} {}
     std::string to_string() const { return fmt::format("{} - {}", dev_names, enum_name(dev_type)); }
 
     std::string dev_names;
     HSDevType dev_type;
+};
+
+struct stream_info_t {
+    uint32_t num_streams = 0;
+    uint64_t stream_cur = 0;
+    std::vector< stream_id_t > stream_id;
+    std::vector< void* > chunk_list;
 };
 
 ////////////// All num constants ///////////////////
