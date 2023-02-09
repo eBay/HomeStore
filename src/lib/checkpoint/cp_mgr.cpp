@@ -61,11 +61,11 @@ void CPManager::shutdown() {
     m_wd_cp->stop();
 }
 
-void CPManager::register_consumer(cp_consumer_t consumer_id, CPCallbacks&& callbacks) {
+void CPManager::register_consumer(cp_consumer_t consumer_id, std::unique_ptr< CPCallbacks > callbacks) {
     size_t idx = (size_t)consumer_id;
     m_cp_cb_table[idx] = std::move(callbacks);
-    if (m_cp_cb_table[idx].on_switchover_cp) {
-        m_cur_cp->m_contexts[idx] = std::move(m_cp_cb_table[idx].on_switchover_cp(nullptr, m_cur_cp));
+    if (m_cp_cb_table[idx]) {
+        m_cur_cp->m_contexts[idx] = std::move(m_cp_cb_table[idx]->on_switchover_cp(nullptr, m_cur_cp));
     }
 }
 
@@ -127,12 +127,12 @@ void CPManager::trigger_cp_flush(cp_done_cb_t&& cb, bool force) {
     auto new_cp = new CP();
     {
         std::unique_lock< std::mutex > lk(trigger_cp_mtx);
+        new_cp->m_cp_id = cur_cp->m_cp_id + 1;
+
         HS_PERIODIC_LOG(DEBUG, cp, "Create New CP session", new_cp->id());
         size_t idx{0};
         for (auto& consumer : m_cp_cb_table) {
-            if (consumer.on_switchover_cp) {
-                new_cp->m_contexts[idx] = std::move(consumer.on_switchover_cp(cur_cp, new_cp));
-            }
+            if (consumer) { new_cp->m_contexts[idx] = std::move(consumer->on_switchover_cp(cur_cp, new_cp)); }
             ++idx;
         }
 
@@ -140,7 +140,6 @@ void CPManager::trigger_cp_flush(cp_done_cb_t&& cb, bool force) {
         cur_cp->m_done_cb = cb;
         cur_cp->m_cp_status = cp_status_t::cp_flush_prepare;
         new_cp->m_cp_status = cp_status_t::cp_io_ready;
-        new_cp->m_cp_id = cur_cp->m_cp_id + 1;
         rcu_xchg_pointer(&m_cur_cp, new_cp);
         synchronize_rcu();
     }
@@ -155,9 +154,9 @@ void CPManager::cp_start_flush(CP* cp) {
     cp->m_cp_status = cp_status_t::cp_flushing;
     m_cp_flush_waiters.increment();
     for (auto& consumer : m_cp_cb_table) {
-        if (consumer.cp_flush) {
+        if (consumer) {
             m_cp_flush_waiters.increment();
-            consumer.cp_flush(cp, [this](CP* cp) {
+            consumer->cp_flush(cp, [this](CP* cp) {
                 if (m_cp_flush_waiters.decrement_testz()) {
                     // All consumers have flushed for the cp
                     on_cp_flush_done(cp);
@@ -202,7 +201,7 @@ void CPManager::on_cp_flush_done(CP* cp) {
 void CPManager::cleanup_cp(CP* cp) {
     cp->m_cp_status = cp_status_t::cp_cleaning;
     for (auto& consumer : m_cp_cb_table) {
-        if (consumer.cp_cleanup) { consumer.cp_cleanup(cp); }
+        if (consumer) { consumer->cp_cleanup(cp); }
     }
 }
 
@@ -247,9 +246,9 @@ void CPWatchdog::cp_watchdog_timer() {
     uint32_t cum_pct{0};
     uint32_t count{0};
     for (auto& consumer : m_cp_mgr->consumer_list()) {
-        if (consumer.cp_progress_percent) {
+        if (consumer) {
             ++count;
-            cum_pct += consumer.cp_progress_percent();
+            cum_pct += consumer->cp_progress_percent();
         }
     }
     if (m_progress_pct > cum_pct / count) {
@@ -268,17 +267,19 @@ void CPWatchdog::cp_watchdog_timer() {
     if (get_elapsed_time_ms(m_last_state_ch_time) < max_time_multiplier * m_timer_sec * 1000) {
         uint32_t repair_attempted{0};
         for (auto& consumer : m_cp_mgr->consumer_list()) {
-            const auto pct = consumer.cp_progress_percent ? consumer.cp_progress_percent() : 100;
-            if ((pct != 100) && (consumer.repair_slow_cp)) {
-                consumer.repair_slow_cp();
-                ++repair_attempted;
+            if (consumer) {
+                const auto pct = consumer->cp_progress_percent();
+                if (pct != 100) {
+                    consumer->repair_slow_cp();
+                    ++repair_attempted;
+                }
             }
+            if (repair_attempted) { return; }
         }
-        if (repair_attempted) { return; }
-    }
 
-    HS_REL_ASSERT(0, "cp seems to be stuck. CP State={} total time elapsed {}", m_cp->to_string(),
-                  get_elapsed_time_ms(m_last_state_ch_time));
+        HS_REL_ASSERT(0, "cp seems to be stuck. CP State={} total time elapsed {}", m_cp->to_string(),
+                      get_elapsed_time_ms(m_last_state_ch_time));
+    }
 }
 
 } // namespace homestore

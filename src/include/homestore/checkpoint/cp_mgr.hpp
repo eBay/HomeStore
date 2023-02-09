@@ -71,6 +71,35 @@ public:
 typedef std::function< void(CP*) > cp_flush_done_cb_t;
 typedef std::function< void(bool success) > cp_done_cb_t;
 
+class CPCallbacks {
+public:
+    /// @brief CPManager calls this method when a new CP is triggered and it is time to switchover the dirty buffer
+    /// collection to the new CP and flush the existing CP.
+    /// @param cur_cp Pointer to the current CP session which about to be switchedover
+    /// @param new_cp Pointer to the new CP session which will be switched over to
+    /// @return Returns the CPContext it has gathered so far as part of current cp session.
+    virtual std::unique_ptr< CPContext > on_switchover_cp(CP* cur_cp, CP* new_cp) = 0;
+
+    /// @brief After gathering CPContext from all consumers, CPManager calls this method to flush the dirty buffers
+    /// accumulated in this CP. Once CP flush is completed, consumers are required to call the flush_done callback.
+    /// @param cp CP pointer to which the dirty buffers have to be flushed
+    /// @param done_cb Callback after cp is done
+    virtual void cp_flush(CP* cp, cp_flush_done_cb_t&& done_cb) = 0;
+
+    /// @brief After flushed the CP, CPManager calls this method to clean up any CP related structures
+    /// @param cp
+    virtual void cp_cleanup(CP* cp) = 0;
+
+    /// @brief While CP is progressing, CPManager calls this method frequently to check its flush progress.
+    /// @return Returns the progress percentage of flush.
+    virtual int cp_progress_percent() = 0;
+
+    /// @brief In case CP is not progressing at all, CPManager calls this method to attempt the consumer to push harder
+    /// to flush. Consumers are expected to increase any flow control to ensure flush goes faster.
+    virtual void repair_slow_cp() {}
+};
+
+#if 0
 struct CPCallbacks {
     // Called by CPManager, when a new CP is triggered and it is time to switchover the dirty buffer collection to the
     // new CP and flush the existing CP
@@ -90,6 +119,7 @@ struct CPCallbacks {
     // increasing any flow control on how fast flush is happening.
     std::function< void(void) > repair_slow_cp{nullptr};
 };
+#endif
 
 class CPWatchdog;
 
@@ -114,7 +144,7 @@ private:
     std::unique_ptr< CPMgrMetrics > m_metrics;
     std::mutex trigger_cp_mtx;
     Clock::time_point m_cp_start_time;
-    std::array< CPCallbacks, (size_t)cp_consumer_t::SENTINEL > m_cp_cb_table;
+    std::array< std::unique_ptr< CPCallbacks >, (size_t)cp_consumer_t::SENTINEL > m_cp_cb_table;
     sisl::atomic_counter< int32_t > m_cp_flush_waiters{0};
     std::unique_ptr< CPWatchdog > m_wd_cp;
     superblk< cp_mgr_super_block > m_sb;
@@ -133,7 +163,7 @@ public:
     /// @param consumer_id : Pre-determined consumer id. Consumers are compile time defined. It doesn't support dynamic
     /// consumer registeration
     /// @param callbacks : Callbacks denoted by the consumers. Details are provided in CPCallbacks class
-    void register_consumer(cp_consumer_t consumer_id, CPCallbacks&& callbacks);
+    void register_consumer(cp_consumer_t consumer_id, std::unique_ptr< CPCallbacks > callbacks);
 
     /// @brief Call this method before every IO that needs to be checkpointed. It marks the entrance of critical section
     /// of the returned CP and ensures that until it is exited, flush of the CP will not happen.
@@ -158,7 +188,9 @@ public:
     /// @param force : Do we need to force queue the checkpoint flush, in case previous checkpoint is been flushed
     void trigger_cp_flush(cp_done_cb_t&& cb = nullptr, bool force = false);
 
-    const std::array< CPCallbacks, (size_t)cp_consumer_t::SENTINEL >& consumer_list() const { return m_cp_cb_table; }
+    const std::array< std::unique_ptr< CPCallbacks >, (size_t)cp_consumer_t::SENTINEL >& consumer_list() const {
+        return m_cp_cb_table;
+    }
 
 private:
     void create_first_cp();

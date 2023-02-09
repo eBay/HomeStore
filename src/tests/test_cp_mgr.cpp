@@ -39,15 +39,107 @@ SISL_OPTION_GROUP(test_cp_mgr,
                   (iterations, "", "iterations", "Iterations", ::cxxopts::value< uint32_t >()->default_value("1"),
                    "the number of iterations to run each test"));
 
+class TestCPContext : public CPContext {
+public:
+    TestCPContext(cp_id_t id) : CPContext{id} {}
+    virtual ~TestCPContext() = default;
+
+    void add() {
+        auto val = m_next_val.fetch_add(1);
+        if (val < max_values) { m_cur_values[val] = std::make_pair(id(), val); }
+    }
+
+    void validate(uint64_t cp_id) {
+        for (uint64_t i{0}; i < m_next_val.load(); ++i) {
+            auto [session, val] = m_cur_values[i];
+            ASSERT_EQ(session, cp_id) << "CP Context has data with mismatched cp_id";
+            ASSERT_EQ(val, i);
+        }
+    }
+
+private:
+    static constexpr size_t max_values = 10000;
+
+    std::array< std::pair< uint64_t, uint64_t >, max_values > m_cur_values;
+    std::atomic< uint64_t > m_next_val{0};
+};
+
+class TestCPCallbacks : public CPCallbacks {
+public:
+    std::unique_ptr< CPContext > on_switchover_cp(CP*, CP* new_cp) override {
+        return std::make_unique< TestCPContext >(new_cp->id());
+    }
+
+    void cp_flush(CP* cp, cp_flush_done_cb_t&& done_cb) override {
+        auto ctx = s_cast< TestCPContext* >(cp->context(cp_consumer_t::HS_CLIENT));
+        ctx->validate(cp->id());
+        done_cb(cp);
+    }
+
+    void cp_cleanup(CP* cp) override {}
+
+    int cp_progress_percent() override { return 100; }
+};
+
 class TestCPMgr : public ::testing::Test {
 public:
+    void SetUp() override {
+        test_common::HSTestHelper::start_homestore("test_cp", 85, 0, 0, 0, nullptr, false /* restart */);
+        hs()->cp_mgr().register_consumer(cp_consumer_t::HS_CLIENT, std::move(std::make_unique< TestCPCallbacks >()));
+    }
+    void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
+
+    void simulate_io() {
+        iomanager.run_on(iomgr::thread_regex::least_busy_worker, [this](iomgr::io_thread_addr_t) {
+            auto cur_cp = homestore::hs()->cp_mgr().cp_io_enter();
+            r_cast< TestCPContext* >(cur_cp->context(cp_consumer_t::HS_CLIENT))->add();
+            homestore::hs()->cp_mgr().cp_io_exit(cur_cp);
+        });
+    }
+
+    void trigger_cp(bool wait) {
+        static std::mutex mtx;
+        static std::condition_variable cv;
+        static uint64_t cp_iteration{0};
+        static uint64_t last_flushed_cp{0};
+
+        uint64_t this_cp_iter = ++cp_iteration;
+        homestore::hs()->cp_mgr().trigger_cp_flush(
+            [&](bool success) {
+                ASSERT_EQ(success, true) << "CP Flush failed";
+                {
+                    std::unique_lock lg(mtx);
+                    last_flushed_cp = this_cp_iter;
+                }
+                cv.notify_all();
+            },
+            true /* force */);
+
+        if (wait) {
+            std::unique_lock lg{mtx};
+            cv.wait(lg, [&]() { return (last_flushed_cp == this_cp_iter); });
+        }
+    }
 };
 
 TEST_F(TestCPMgr, cp_start_and_flush) {
-    LOGINFO("Step 1: Start HomeStore");
-    test_common::HSTestHelper::start_homestore("test_cp", 85, 0, 0, 0, nullptr, false /* restart */);
+    auto nrecords = SISL_OPTIONS["num_records"].as< uint32_t >();
+    LOGINFO("Simulate IO on cp session for {} records", nrecords);
+    for (uint32_t i{0}; i < nrecords; ++i) {
+        this->simulate_io();
+    }
 
-    test_common::HSTestHelper::shutdown_homestore();
+    LOGINFO("Trigger a new cp without waiting for it to complete");
+    this->trigger_cp(false /* wait */);
+
+    LOGINFO("Simulate IO parallel to CP for {} records", nrecords);
+    for (uint32_t i{0}; i < nrecords; ++i) {
+        this->simulate_io();
+    }
+
+    LOGINFO("Trigger a back-to-back cp");
+    this->trigger_cp(false /* wait */);
+    this->trigger_cp(true /* wait */);
 }
 
 int main(int argc, char* argv[]) {
