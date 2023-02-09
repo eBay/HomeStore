@@ -34,6 +34,7 @@ add_subdirectory(lib/common)
 add_subdirectory(lib/logstore)
 add_subdirectory(lib/meta)
 add_subdirectory(lib/index)
+add_subdirectory(lib/blkdata_svc/)
 
 add_subdirectory(tests)
 set(HOMESTORE_OBJECTS
@@ -44,6 +45,7 @@ set(HOMESTORE_OBJECTS
     $<TARGET_OBJECTS:hs_metablk>
     $<TARGET_OBJECTS:hs_checkpoint>
     $<TARGET_OBJECTS:hs_index>
+    $<TARGET_OBJECTS:hs_datasvc>
     lib/homestore.cpp
     #$<TARGET_OBJECTS:hs_cp>
     #$<TARGET_OBJECTS:indx_mgr>

@@ -20,6 +20,10 @@ static BlkId extract_key(const BlkTrackRecord& rec) { return rec.m_key; }
 
 BlkReadTracker::BlkReadTracker() : m_pending_reads_map(s_expected_num_records, extract_key, nullptr /* access_cb */) {}
 
+BlkReadTracker::~BlkReadTracker() = default;
+
+// BlkReadTrackerMetrics& BlkReadTracker::get_metrics() { return m_metrics; }
+
 void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
                            const std::shared_ptr< blk_track_waiter >& waiter) {
     HS_DBG_ASSERT(new_ref_count ? waiter == nullptr : waiter != nullptr, "Invalid waiter");
@@ -36,7 +40,7 @@ void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
         last_blk_num_aligned_up += 1;
     }
 
-    [[maybe_unused]] bool waiter_rescheduled{false};
+    [[maybe_unused]] bool waiter_rescheduled { false };
     // everything is aligned after this point, so we don't need to handle sub_range in a base blkid;
     while (cur_blk_num_aligned <= last_blk_num_aligned_up) {
         BlkId base_blkid{cur_blk_num_aligned, entries_per_record(), blkid.get_chunk_num()};
