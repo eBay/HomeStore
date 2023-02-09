@@ -55,6 +55,7 @@ public:
             ASSERT_EQ(session, cp_id) << "CP Context has data with mismatched cp_id";
             ASSERT_EQ(val, i);
         }
+        LOGINFO("CP={}, CPContext has {} values to be flushed/validated", cp_id, m_next_val.load());
     }
 
 private:
@@ -124,20 +125,22 @@ public:
 
 TEST_F(TestCPMgr, cp_start_and_flush) {
     auto nrecords = SISL_OPTIONS["num_records"].as< uint32_t >();
-    LOGINFO("Simulate IO on cp session for {} records", nrecords);
+    LOGINFO("Step 1: Simulate IO on cp session for {} records", nrecords);
     for (uint32_t i{0}; i < nrecords; ++i) {
         this->simulate_io();
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds{1000});
 
-    LOGINFO("Trigger a new cp without waiting for it to complete");
+    LOGINFO("Step 2: Trigger a new cp without waiting for it to complete");
     this->trigger_cp(false /* wait */);
 
-    LOGINFO("Simulate IO parallel to CP for {} records", nrecords);
+    LOGINFO("Step 3: Simulate IO parallel to CP for {} records", nrecords);
     for (uint32_t i{0}; i < nrecords; ++i) {
         this->simulate_io();
     }
+    std::this_thread::sleep_for(std::chrono::milliseconds{1000});
 
-    LOGINFO("Trigger a back-to-back cp");
+    LOGINFO("Step 4: Trigger a back-to-back cp");
     this->trigger_cp(false /* wait */);
     this->trigger_cp(true /* wait */);
 }

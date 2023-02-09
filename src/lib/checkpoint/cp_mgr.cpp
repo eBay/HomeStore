@@ -29,7 +29,7 @@ CPManager::CPManager(bool first_time_boot) :
         m_wd_cp{std::make_unique< CPWatchdog >(this)},
         m_sb{"CPSuperBlock"} {
     meta_service().register_handler(
-        "CheckpointManager",
+        "CPSuperBlock",
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { on_meta_blk_found(std::move(buf), (void*)mblk); },
         nullptr);
     if (first_time_boot) {
