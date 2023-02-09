@@ -325,6 +325,12 @@ def vdev_nightly():
 
 def meta_blk_store_nightly():
     print("meta blk store test started")
+    cmd_opts = "--gtest_filter=VMetaBlkMgrTest.CompressionBackoff"
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    
+    cmd_opts = "--gtest_filter=VMetaBlkMgrTest.RecoveryFromBadData"
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+
     cmd_opts = "--gtest_filter=VMetaBlkMgrTest.min_drive_size_test"
     subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
 

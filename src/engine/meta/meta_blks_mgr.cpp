@@ -331,9 +331,27 @@ bool MetaBlkMgr::scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_map_
             obid = ovf_hdr->h.next_bid;
         }
 
-        HS_REL_ASSERT_EQ(read_sz, static_cast< uint64_t >(mblk->hdr.h.context_sz),
-                         "[type={}], total size read: {} mismatch from meta blk context_sz: {}", mblk->hdr.h.type,
-                         read_sz, mblk->hdr.h.context_sz);
+        if (read_sz != static_cast< uint64_t >(mblk->hdr.h.context_sz)) {
+            LOGERROR("[type={}], total size read: {} mismatch from meta blk context_sz: {}", mblk->hdr.h.type, read_sz,
+                     mblk->hdr.h.context_sz);
+            // we are here because we write uncompressed data, but left compressed field as true and context_sz still
+            // setting to compressed size;
+
+            if (!(HS_DYNAMIC_CONFIG(metablk.skip_header_size_check))) {
+                HS_REL_ASSERT_EQ(read_sz, static_cast< uint64_t >(mblk->hdr.h.context_sz),
+                                 "[type={}], total size read: {} mismatch from meta blk context_sz: {}",
+                                 mblk->hdr.h.type, read_sz, mblk->hdr.h.context_sz);
+            }
+
+            LOGINFO("[type={}], fixing mblk's context_sz from {} to read_sz: {}", mblk->hdr.h.type,
+                    mblk->hdr.h.context_sz, read_sz);
+
+            // upgrade fix: needed for fixing bad data during upgrade;
+            mblk->hdr.h.compressed = 0;
+            mblk->hdr.h.context_sz = read_sz;
+        } else {
+            LOGINFO("[type={}], meta blk size check passed!", mblk->hdr.h.type);
+        }
 
         // move on to next meta blk;
         bid = mblk->hdr.h.next_bid;
@@ -786,8 +804,18 @@ void MetaBlkMgr::update_sub_sb(const void* context_data, const uint64_t sz, void
     if (it->second.do_crc) { crc = crc32_ieee(init_crc32, static_cast< const uint8_t* >(context_data), sz); }
 #endif
 
+#ifdef _PRERELEASE
+    auto old_compressed_val = mblk->hdr.h.compressed;
+#endif
+
     // init compression field to be false;
     mblk->hdr.h.compressed = 0;
+
+#ifdef _PRERELEASE
+    // simulate without above fix to generate bad data written to disk (to test recover from bad data);
+    if (HomeStoreFlip::instance()->test_flip("without_compress_init")) { mblk->hdr.h.compressed = old_compressed_val; }
+#endif
+
     mblk->hdr.h.ovf_bid.invalidate();
     mblk->hdr.h.gen_cnt += 1;
 
@@ -1211,6 +1239,8 @@ uint64_t MetaBlkMgr::get_meta_size(const void* cookie) const {
 }
 
 bool MetaBlkMgr::compress_feature_on() const { return HS_DYNAMIC_CONFIG(metablk.compress_feature_on); }
+
+bool MetaBlkMgr::get_skip_hdr_check() const { return HS_DYNAMIC_CONFIG(metablk.skip_header_size_check); }
 
 uint64_t MetaBlkMgr::get_min_compress_size() const {
     return HS_DYNAMIC_CONFIG(metablk.min_compress_size_mb) * static_cast< uint64_t >(1024) * 1024;
