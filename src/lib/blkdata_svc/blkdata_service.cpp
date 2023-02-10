@@ -93,6 +93,28 @@ void BlkDataService::process_data_completion(std::error_condition ec, void* cook
     }
 }
 
+void BlkDataService::async_write_ahead(const sisl::sg_list& sgs, const blk_alloc_hints& hints,
+                                       const std::vector< BlkId >& in_blkids, const io_completion_cb_t& cb,
+                                       bool part_of_batch) {
+    auto as_info = sisl::ObjectAllocator< async_info >::make_object();
+    as_info->cb = cb;
+
+    if (in_blkids.size() == 1) {
+        // Shortcut to most common case
+        as_info->outstanding_io_cnt.increment(1);
+        m_vdev->async_writev(sgs.iovs.data(), sgs.iovs.size(), in_blkids[0], BlkDataService::process_data_completion,
+                             reinterpret_cast< const void* >(as_info) /* cookie */, part_of_batch);
+    } else {
+        sisl::sg_iterator sg_it{sgs.iovs};
+        for (const auto& bid : in_blkids) {
+            const auto iovs = sg_it.next_iovs(bid.get_nblks() * m_page_size);
+            as_info->outstanding_io_cnt.increment(1);
+            m_vdev->async_writev(iovs.data(), iovs.size(), bid, BlkDataService::process_data_completion,
+                                 reinterpret_cast< const void* >(as_info) /* cookie */, part_of_batch);
+        }
+    }
+}
+
 void BlkDataService::async_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints,
                                  std::vector< BlkId >& out_blkids, const io_completion_cb_t& cb, bool part_of_batch) {
     out_blkids.clear();
@@ -102,23 +124,7 @@ void BlkDataService::async_write(const sisl::sg_list& sgs, const blk_alloc_hints
         return;
     }
 
-    auto as_info = sisl::ObjectAllocator< async_info >::make_object();
-    as_info->cb = cb;
-
-    if (out_blkids.size() == 1) {
-        // Shortcut to most common case
-        as_info->outstanding_io_cnt.increment(1);
-        m_vdev->async_writev(sgs.iovs.data(), sgs.iovs.size(), out_blkids[0], BlkDataService::process_data_completion,
-                             reinterpret_cast< const void* >(as_info) /* cookie */, part_of_batch);
-    } else {
-        sisl::sg_iterator sg_it{sgs.iovs};
-        for (const auto& bid : out_blkids) {
-            const auto iovs = sg_it.next_iovs(bid.get_nblks() * m_page_size);
-            as_info->outstanding_io_cnt.increment(1);
-            m_vdev->async_writev(iovs.data(), iovs.size(), bid, BlkDataService::process_data_completion,
-                                 reinterpret_cast< const void* >(as_info) /* cookie */, part_of_batch);
-        }
-    }
+    async_write_ahead(sgs, hints, out_blkids, cb, part_of_batch);
 }
 
 BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& hints,

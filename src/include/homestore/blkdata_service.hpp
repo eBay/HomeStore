@@ -63,16 +63,73 @@ public:
      */
     void create_vdev(uint64_t size);
 
+    /**
+     * @brief
+     *
+     * @param sgs
+     * @param hints
+     * @param out_blkids
+     * @param cb
+     * @param part_of_batch
+     */
     void async_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids,
                      const io_completion_cb_t& cb, bool part_of_batch = false);
+
+    /**
+     * @brief
+     *
+     * @param sgs
+     * @param hints
+     * @param in_blkids
+     * @param cb
+     * @param part_of_batch
+     */
+    void async_write_ahead(const sisl::sg_list& sgs, const blk_alloc_hints& hints,
+                           const std::vector< BlkId >& in_blkids, const io_completion_cb_t& cb,
+                           bool part_of_batch = false);
+
+    /**
+     * @brief
+     *
+     * @param bid
+     * @param sgs
+     * @param size
+     * @param cb
+     * @param part_of_batch
+     */
     void async_read(const BlkId& bid, sisl::sg_list& sgs, uint32_t size, const io_completion_cb_t& cb,
                     bool part_of_batch = false);
 
+    /**
+     * @brief
+     *
+     * @param bid
+     */
     void commit_blk(const BlkId& bid);
 
+    /**
+     * @brief
+     *
+     * @param size
+     *
+     * @return
+     */
     blk_list_t alloc_blks(uint32_t size);
 
+    /**
+     * @brief
+     *
+     * @param bid
+     * @param cb
+     */
     void async_free_blk(const BlkId bid, const io_completion_cb_t& cb);
+
+    /**
+     * @brief
+     *
+     * @return
+     */
+    uint32_t get_page_size() const { return m_page_size; }
 
     BlkReadTracker* read_blk_tracker() { return m_blk_read_tracker.get(); }
 
@@ -102,8 +159,6 @@ public:
      * @param stream_info
      */
     void free_stream(const stream_info_t& stream_info);
-
-    uint32_t get_page_size() const { return m_page_size; }
 
 private:
     BlkAllocStatus alloc_blks(uint32_t size, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids);
