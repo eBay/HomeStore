@@ -104,7 +104,7 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
     params.data_devices = device_info;
 
     test_common::set_random_http_port();
-    HomeStore::instance()->with_params(params).with_meta_service(85.0).init(true /* wait_for_init */);
+    HomeStore::instance()->with_params(params).init(true /* wait_for_init */, 85.0 /* meta_service */);
 }
 
 struct sb_info_t {
@@ -137,7 +137,7 @@ protected:
         return sec.count();
     }
 
-    [[nodiscard]] bool keep_running() {
+        [[nodiscard]] bool keep_running() {
         HS_DBG_ASSERT(m_mbm->total_size() >= m_mbm->used_size(), "total size:{} less than used size: {}",
                       m_mbm->total_size(), m_mbm->used_size());
         const auto free_size = m_mbm->total_size() - m_mbm->used_size();
@@ -179,7 +179,9 @@ protected:
         }
     }
 
-    [[nodiscard]] uint64_t total_size_written(const void* cookie) { return m_mbm->meta_size(cookie); }
+        [[nodiscard]] uint64_t total_size_written(const void* cookie) {
+        return m_mbm->meta_size(cookie);
+    }
 
     void do_write_to_full() {
         static constexpr uint64_t blkstore_overhead = 4 * 1024ul * 1024ul; // 4MB
@@ -472,7 +474,7 @@ protected:
         }
     }
 
-    [[nodiscard]] bool do_aligned() const {
+        [[nodiscard]] bool do_aligned() const {
         static thread_local std::random_device rd;
         static thread_local std::default_random_engine re{rd()};
         std::uniform_int_distribution< uint8_t > aligned_rand{0, 1};
@@ -521,14 +523,16 @@ protected:
         }
     }
 
-    [[nodiscard]] uint64_t total_op_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
+        [[nodiscard]] uint64_t total_op_cnt() const {
+        return m_update_cnt + m_wrt_cnt + m_rm_cnt;
+    }
 
     [[nodiscard]] uint32_t write_ratio() const {
         if (m_wrt_cnt == 0) return 0;
         return (100 * m_wrt_cnt) / total_op_cnt();
     }
 
-    [[nodiscard]] uint32_t update_ratio() const {
+        [[nodiscard]] uint32_t update_ratio() const {
         if (m_update_cnt == 0) return 0;
         return (100 * m_update_cnt) / total_op_cnt();
     }
@@ -538,7 +542,7 @@ protected:
         return false;
     }
 
-    [[nodiscard]] bool do_write() const {
+        [[nodiscard]] bool do_write() const {
         if (write_ratio() < gp.per_write) { return true; }
         return false;
     }

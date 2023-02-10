@@ -46,7 +46,10 @@ public:
     friend class SampleDB;
     SampleLogStoreClient(std::shared_ptr< HomeLogStore > store, const logstore_family_id_t family_idx,
                          const uint64_t nentries, const test_log_store_comp_cb_t& cb) :
-            m_comp_cb{cb}, m_nentries{nentries}, m_family{family_idx}, m_store_id{store->get_store_id()} {
+            m_comp_cb{cb},
+            m_nentries{nentries},
+            m_family{family_idx},
+            m_store_id{store->get_store_id()} {
         init(store);
         generate_rand_data(nentries);
     }
@@ -80,7 +83,9 @@ public:
         return true;
     }
 
-    void read(const logstore_seq_num_t lsn) { [[maybe_unused]] const auto b{m_log_store->read_sync(lsn)}; }
+    void read(const logstore_seq_num_t lsn) {
+        [[maybe_unused]] const auto b{m_log_store->read_sync(lsn)};
+    }
 
     void on_log_found(const logstore_seq_num_t lsn, const log_buffer buf, void* const ctx) {
         // LOGDEBUG("Recovered lsn {}:{} with log data of size {}", m_log_store->get_store_id(), lsn, buf.size())
@@ -152,8 +157,6 @@ public:
         params.data_devices = device_info;
         HomeStore::instance()
             ->with_params(params)
-            .with_meta_service(5.0)
-            .with_log_service(60.0, 10.0)
             .before_init_devices([this, restart, n_log_stores]() {
                 if (restart) {
                     for (uint32_t i{0}; i < n_log_stores; ++i) {
@@ -164,7 +167,7 @@ public:
                     }
                 }
             })
-            .init(true /* wait_for_init */);
+            .init(true /* wait_for_init */, 5.0 /* meta_service */, 60.0 /* log_data */, 10.0 /*log_ctrl*/);
 
         if (!restart) {
             for (uint32_t i{0}; i < n_log_stores; ++i) {
@@ -245,7 +248,7 @@ private:
 #define sample_db SampleDB::instance()
 
 static void test_append(benchmark::State& state) {
-    [[maybe_unused]] uint64_t counter{0};
+    [[maybe_unused]] uint64_t counter { 0 };
     for ([[maybe_unused]] auto current_state : state) { // Loops upto iteration count
         sample_db.kickstart_io();
         sample_db.wait_for_appends();

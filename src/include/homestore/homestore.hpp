@@ -132,14 +132,12 @@ public:
 
     ///////////////////////////// Member functions /////////////////////////////////////////////
     HomeStore& with_params(const hs_input_params& input);
-    HomeStore& with_meta_service(float size_pct);
-    HomeStore& with_data_service(float size_pct);
-    HomeStore& with_log_service(float data_size_pct, float ctrl_size_pct);
-    HomeStore& with_index_service(float index_size_pct, std::unique_ptr< IndexServiceCallbacks > cbs);
     HomeStore& after_init_done(hs_init_done_cb_t init_done_cb);
     HomeStore& before_init_devices(hs_init_starting_cb_t init_start_cb);
 
-    void init(bool wait_for_init = false);
+    void init_internal(bool wait_for_init);
+    void init(bool wait_for_init = false, float meta_size_pct = 0, float log_data_size_pct = 0,
+              float log_ctrl_size_pct = 0, float data_svc_size_pct = 0);
     void shutdown(bool wait = true, const hs_comp_callback& done_cb = nullptr);
 
     iomgr::io_thread_t get_hs_flush_thread() const;
@@ -176,6 +174,11 @@ protected:
     virtual void process_vdev_error(vdev_info_block* vb) {}
 
 private:
+    HomeStore& with_meta_service(float size_pct);
+    HomeStore& with_data_service(float size_pct);
+    HomeStore& with_log_service(float data_size_pct, float ctrl_size_pct);
+    HomeStore& with_index_service(float index_size_pct, std::unique_ptr< IndexServiceCallbacks > cbs);
+
     void init_cache();
     void init_done();
     void create_vdevs();

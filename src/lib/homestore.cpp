@@ -106,7 +106,15 @@ HomeStore& HomeStore::before_init_devices(hs_init_starting_cb_t init_starting_cb
     return *this;
 }
 
-void HomeStore::init(bool wait_for_init) {
+void HomeStore::init(bool wait_for_init, float meta_size_pct, float log_data_size_pct, float log_ctrl_size_pct,
+                     float data_svc_size_pct) {
+    with_meta_service(meta_size_pct);
+    with_log_service(log_data_size_pct, log_ctrl_size_pct);
+    with_data_service(data_svc_size_pct);
+    init_internal(wait_for_init);
+}
+
+void HomeStore::init_internal(bool wait_for_init) {
     auto& hs_config = HomeStoreStaticConfig::instance();
     if (hs_config.input.data_devices.empty()) {
         LOGERROR("no data devices given");

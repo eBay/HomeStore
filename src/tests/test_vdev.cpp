@@ -91,7 +91,7 @@ public:
         hs_input_params params;
         params.app_mem_size = app_mem_size;
         params.data_devices = device_info;
-        HomeStore::instance()->with_params(params).with_meta_service(15.0).init(true /* wait_for_init */);
+        HomeStore::instance()->with_params(params).init(true /* wait_for_init */, 15.0 /* meta_service */);
 
         m_vdev = std::make_unique< JournalVirtualDev >(hs()->device_mgr(), "test_vdev", PhysicalDevGroup::DATA,
                                                        (dev_size * ndevices * 60) / 100, 0 /* nmirror */,
