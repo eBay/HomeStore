@@ -89,8 +89,8 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
     params.data_devices = device_info;
 
     test_common::set_random_http_port();
-    HomeStore::instance()->with_params(params).init(true /* wait_for_init */, 5.0 /* meta_service */, 0 /* log_data */,
-                                                    0 /* log_ctrl */, 80.0 /* data_service */);
+    HomeStore::instance()->with_params(params).with_data_service(80.0).with_meta_service(5.0).init(
+        true /* wait_for_init */);
 }
 
 bool free_blk_cb_called{false};
@@ -432,19 +432,19 @@ private:
         std::shared_ptr< std::vector< BlkId > > out_bids_ptr = std::make_shared< std::vector< BlkId > >();
         out_bids_ptr->clear();
 
-        inst().async_alloc_write(*(sg.get()), hints, *(out_bids_ptr.get()),
-                                 [sg, this, after_write_cb, out_bids_ptr](std::error_condition err) {
-                                     LOGINFO("async_alloc_write completed, err: {}", err.message());
-                                     assert(!err);
-                                     const auto out_bids = *(out_bids_ptr.get());
+        inst().async_write(*(sg.get()), hints, *(out_bids_ptr.get()),
+                           [sg, this, after_write_cb, out_bids_ptr](std::error_condition err) {
+                               LOGINFO("async_write completed, err: {}", err.message());
+                               assert(!err);
+                               const auto out_bids = *(out_bids_ptr.get());
 
-                                     for (auto i = 0ul; i < out_bids.size(); ++i) {
-                                         LOGINFO("bid-{}: {}", i, out_bids[i].to_string());
-                                     }
+                               for (auto i = 0ul; i < out_bids.size(); ++i) {
+                                   LOGINFO("bid-{}: {}", i, out_bids[i].to_string());
+                               }
 
-                                     if (after_write_cb != nullptr) { after_write_cb(err, out_bids_ptr); }
-                                 },
-                                 false /* part_of_batch */);
+                               if (after_write_cb != nullptr) { after_write_cb(err, out_bids_ptr); }
+                           },
+                           false /* part_of_batch */);
     }
 
 private:

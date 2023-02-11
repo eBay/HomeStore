@@ -95,9 +95,7 @@ public:
 
     SampleLogStoreClient(std::shared_ptr< HomeLogStore > store, const logstore_family_id_t family_idx,
                          const test_log_store_comp_cb_t& cb) :
-            m_store_id{store->get_store_id()},
-            m_comp_cb{cb},
-            m_family{family_idx} {
+            m_store_id{store->get_store_id()}, m_comp_cb{cb}, m_family{family_idx} {
         set_log_store(store);
     }
 
@@ -477,6 +475,8 @@ public:
         params.data_devices = device_info;
         HomeStore::instance()
             ->with_params(params)
+            .with_meta_service(5.0)
+            .with_log_service(60.0, 10.0)
             .before_init_devices([this, restart, n_log_stores]() {
                 if (restart) {
                     for (uint32_t i{0}; i < n_log_stores; ++i) {
@@ -488,7 +488,7 @@ public:
                     }
                 }
             })
-            .init(true /* wait_for_init */, 5.0 /* meta_service */, 60.0 /* log_data */, 10.0 /* log_ctrl */);
+            .init(true /* wait_for_init */);
 
         if (!restart) {
             for (uint32_t i{0}; i < n_log_stores; ++i) {
