@@ -72,8 +72,8 @@ public:
      * @param cb : callback that will be triggered after write completes;
      * @param part_of_batch : is this write part of a batch;
      */
-    void async_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids,
-                     const io_completion_cb_t& cb, bool part_of_batch = false);
+    void async_alloc_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids,
+                           const io_completion_cb_t& cb, bool part_of_batch = false);
 
     /**
      * @brief : asynchronous write with input block ids;
@@ -84,9 +84,8 @@ public:
      * @param cb : callback that will be triggered after write completes
      * @param part_of_batch : is this write part of a batch;
      */
-    void async_write_ahead(const sisl::sg_list& sgs, const blk_alloc_hints& hints,
-                           const std::vector< BlkId >& in_blkids, const io_completion_cb_t& cb,
-                           bool part_of_batch = false);
+    void async_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints, const std::vector< BlkId >& in_blkids,
+                     const io_completion_cb_t& cb, bool part_of_batch = false);
 
     /**
      * @brief : asynchronous read
