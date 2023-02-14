@@ -59,6 +59,11 @@ if (${io_tests})
     add_executable(test_meta_blk_mgr ${TEST_METABLK_SOURCE_FILES})
     target_link_libraries(test_meta_blk_mgr homestore ${COMMON_TEST_DEPS} GTest::gmock)
 
+    add_executable(test_cp_mgr)
+    target_sources(test_cp_mgr PRIVATE test_cp_mgr.cpp)
+    target_link_libraries(test_cp_mgr homestore ${COMMON_TEST_DEPS} GTest::gtest)
+    add_test(NAME CPMgr COMMAND test_cp_mgr)
+
     can_build_epoll_io_tests(epoll_tests)
     if(${epoll_tests})
         add_test(NAME LogStore-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_log_store)

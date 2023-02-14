@@ -77,6 +77,9 @@ struct CP {
     cp_id_t id() const { return m_cp_id; }
     cp_status_t get_status() const { return m_cp_status.load(); }
     CPContext* context(cp_consumer_t consumer) { return m_contexts[(size_t)consumer].get(); }
+    void set_context(cp_consumer_t consumer, std::unique_ptr< CPContext > context) {
+        m_contexts[(size_t)consumer] = std::move(context);
+    }
 
     std::string to_string() const {
         return fmt::format("CP={}: status={}, enter_count={}", m_cp_id, enum_name(get_status()), m_enter_cnt.load());
