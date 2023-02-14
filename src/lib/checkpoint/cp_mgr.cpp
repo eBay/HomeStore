@@ -24,6 +24,8 @@
 #include "cp.hpp"
 
 namespace homestore {
+thread_local std::stack< CP* > CPGuard::t_cp_stack;
+
 CPManager::CPManager(bool first_time_boot) :
         m_metrics{std::make_unique< CPMgrMetrics >()},
         m_wd_cp{std::make_unique< CPWatchdog >(this)},
@@ -69,6 +71,8 @@ void CPManager::register_consumer(cp_consumer_t consumer_id, std::unique_ptr< CP
     }
 }
 
+[[nodiscard]] CPGuard CPManager::cp_guard() { return CPGuard{}; }
+
 CP* CPManager::cp_io_enter() {
     rcu_read_lock();
     auto cp = get_cur_cp();
@@ -76,17 +80,20 @@ CP* CPManager::cp_io_enter() {
         rcu_read_unlock();
         return nullptr;
     }
+    cp_ref(cp);
+    rcu_read_unlock();
 
-    auto cnt = cp->m_enter_cnt.fetch_add(1);
+    return cp;
+}
+
+void CPManager::cp_ref(CP* cp) {
+    cp->m_enter_cnt.fetch_add(1);
 #ifndef NDEBUG
     auto status = cp->m_cp_status.load();
     HS_DBG_ASSERT((status == cp_status_t::cp_io_ready || status == cp_status_t::cp_trigger ||
                    status == cp_status_t::cp_flush_prepare),
                   "cp status {}", status);
 #endif
-
-    rcu_read_unlock();
-    return cp;
 }
 
 void CPManager::cp_io_exit(CP* cp) {
@@ -108,45 +115,45 @@ void CPManager::trigger_cp_flush(cp_done_cb_t&& cb, bool force) {
         // They are already an existing CP on-going, but if force is set, we create a back-to-back CP.
         if (force) {
             std::unique_lock< std::mutex > lk(trigger_cp_mtx);
-            auto cp = cp_io_enter();
-            HS_DBG_ASSERT_NE(cp->m_cp_status, cp_status_t::cp_flush_prepare);
-            cp->m_done_cb = cb;
-            cp->m_cp_waiting_to_trigger = true;
-            cp_io_exit(cp);
+            auto cpg = cp_guard();
+            HS_DBG_ASSERT_NE(cpg->m_cp_status, cp_status_t::cp_flush_prepare);
+            cpg->m_done_cb = cb;
+            cpg->m_cp_waiting_to_trigger = true;
         }
         return;
     }
 
-    auto cur_cp = cp_io_enter();
-    cur_cp->m_cp_status = cp_status_t::cp_trigger;
-    HS_PERIODIC_LOG(INFO, cp, "<<<<<<<<<<< Triggering flush of the CP {}", cur_cp->to_string());
-    COUNTER_INCREMENT(*m_metrics, cp_cnt, 1);
-    m_cp_start_time = Clock::now();
-
-    /* allocate a new cp */
-    auto new_cp = new CP();
     {
-        std::unique_lock< std::mutex > lk(trigger_cp_mtx);
-        new_cp->m_cp_id = cur_cp->m_cp_id + 1;
+        auto cpg = cp_guard();
+        CP* cur_cp = cpg.get();
+        cur_cp->m_cp_status = cp_status_t::cp_trigger;
+        HS_PERIODIC_LOG(INFO, cp, "<<<<<<<<<<< Triggering flush of the CP {}", cur_cp->to_string());
+        COUNTER_INCREMENT(*m_metrics, cp_cnt, 1);
+        m_cp_start_time = Clock::now();
 
-        HS_PERIODIC_LOG(DEBUG, cp, "Create New CP session", new_cp->id());
-        size_t idx{0};
-        for (auto& consumer : m_cp_cb_table) {
-            if (consumer) { new_cp->m_contexts[idx] = std::move(consumer->on_switchover_cp(cur_cp, new_cp)); }
-            ++idx;
+        /* allocate a new cp */
+        auto new_cp = new CP();
+        {
+            std::unique_lock< std::mutex > lk(trigger_cp_mtx);
+            new_cp->m_cp_id = cur_cp->m_cp_id + 1;
+
+            HS_PERIODIC_LOG(DEBUG, cp, "Create New CP session", new_cp->id());
+            size_t idx{0};
+            for (auto& consumer : m_cp_cb_table) {
+                if (consumer) { new_cp->m_contexts[idx] = std::move(consumer->on_switchover_cp(cur_cp, new_cp)); }
+                ++idx;
+            }
+
+            HS_PERIODIC_LOG(DEBUG, cp, "CP Attached completed, proceed to exit cp critical section");
+            cur_cp->m_done_cb = cb;
+            cur_cp->m_cp_status = cp_status_t::cp_flush_prepare;
+            new_cp->m_cp_status = cp_status_t::cp_io_ready;
+            rcu_xchg_pointer(&m_cur_cp, new_cp);
+            synchronize_rcu();
         }
-
-        HS_PERIODIC_LOG(DEBUG, cp, "CP Attached completed, proceed to exit cp critical section");
-        cur_cp->m_done_cb = cb;
-        cur_cp->m_cp_status = cp_status_t::cp_flush_prepare;
-        new_cp->m_cp_status = cp_status_t::cp_io_ready;
-        rcu_xchg_pointer(&m_cur_cp, new_cp);
-        synchronize_rcu();
+        // At this point we are sure that there is no thread working on prev_cp without incrementing the cp_enter cnt
     }
-    // At this point we are sure that there is no thread working on prev_cp without incrementing the cp_enter cnt
-
     HS_PERIODIC_LOG(DEBUG, cp, "CP critical section done, doing cp_io_exit");
-    cp_io_exit(cur_cp);
 }
 
 void CPManager::cp_start_flush(CP* cp) {
@@ -187,15 +194,17 @@ void CPManager::on_cp_flush_done(CP* cp) {
     delete cp;
 
     // Trigger CP in case there is one back to back CP
-    auto cur_cp = cp_io_enter();
-    if (!cur_cp) { return; }
-    m_wd_cp->set_cp(cur_cp);
-    if (cur_cp->m_cp_waiting_to_trigger) {
-        HS_PERIODIC_LOG(INFO, cp, "Triggering back to back CP");
-        COUNTER_INCREMENT(*m_metrics, back_to_back_cps, 1);
-        trigger_cp_flush();
+    {
+        auto cpg = cp_guard();
+        auto cur_cp = cpg.get();
+        if (!cur_cp) { return; }
+        m_wd_cp->set_cp(cur_cp);
+        if (cur_cp->m_cp_waiting_to_trigger) {
+            HS_PERIODIC_LOG(INFO, cp, "Triggering back to back CP");
+            COUNTER_INCREMENT(*m_metrics, back_to_back_cps, 1);
+            trigger_cp_flush();
+        }
     }
-    cp_io_exit(cur_cp);
 }
 
 void CPManager::cleanup_cp(CP* cp) {
@@ -203,6 +212,54 @@ void CPManager::cleanup_cp(CP* cp) {
     for (auto& consumer : m_cp_cb_table) {
         if (consumer) { consumer->cp_cleanup(cp); }
     }
+}
+
+//////////////////////////////////////// CP Holder class ////////////////////////////////////////////
+CPGuard::CPGuard() {
+    if (t_cp_stack.empty()) {
+        // First CP in this thread stack.
+        m_cp = hs()->cp_mgr().cp_io_enter();
+    } else {
+        // Nested CP sections
+        m_cp = t_cp_stack.top();
+        hs()->cp_mgr().cp_ref(m_cp);
+    }
+    t_cp_stack.push(m_cp);
+    m_pushed = true; // m_pushed represented if this is added to current thread stack
+}
+
+CPGuard::~CPGuard() {
+    if (m_pushed && !t_cp_stack.empty()) {
+        HS_DBG_ASSERT_EQ((void*)m_cp, (void*)t_cp_stack.top(), "CPGuard mismatch of CP pointers");
+        t_cp_stack.pop();
+    }
+    if (m_cp) { hs()->cp_mgr().cp_io_exit(m_cp); }
+}
+
+CPGuard::CPGuard(const CPGuard& other) {
+    m_cp = other.m_cp;
+    m_pushed = false;
+    hs()->cp_mgr().cp_ref(m_cp);
+}
+
+CPGuard CPGuard::operator=(const CPGuard& other) {
+    m_cp = other.m_cp;
+    m_pushed = false;
+    hs()->cp_mgr().cp_ref(m_cp);
+    return *this;
+}
+
+CP& CPGuard::operator*() { return *get(); }
+CP* CPGuard::operator->() { return get(); }
+
+CP* CPGuard::get() {
+    HS_DBG_ASSERT_NE((void*)m_cp, (void*)nullptr, "CPGuard get on empty CP pointer");
+    if (!m_pushed) {
+        // m_pushed is false in case cp guard is moved from one thread to other
+        t_cp_stack.push(m_cp);
+        m_pushed = true;
+    }
+    return m_cp;
 }
 
 //////////////////////////////////////// CP Watchdog class //////////////////////////////////////////
