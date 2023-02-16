@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 ## @file vol_test.py
 #  Regression Tests linked to PR merge
 import subprocess
