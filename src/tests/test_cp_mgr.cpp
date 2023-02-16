@@ -94,7 +94,6 @@ public:
         iomanager.run_on(iomgr::thread_regex::least_busy_worker, [this](iomgr::io_thread_addr_t) {
             auto cur_cp = homestore::hs()->cp_mgr().cp_guard();
             r_cast< TestCPContext* >(cur_cp->context(cp_consumer_t::HS_CLIENT))->add();
-            // homestore::hs()->cp_mgr().cp_io_exit(cur_cp);
         });
     }
 
@@ -158,7 +157,6 @@ TEST_F(TestCPMgr, cp_start_and_flush) {
     LOGINFO("Step 4: Trigger a back-to-back cp");
     this->trigger_cp(false /* wait */);
     this->trigger_cp(true /* wait */);
-<<<<<<< HEAD
 
     LOGINFO("Step 5: Simulate rescheduled IO for {} records", nrecords);
     for (uint32_t i{0}; i < nrecords; ++i) {
@@ -168,8 +166,6 @@ TEST_F(TestCPMgr, cp_start_and_flush) {
 
     LOGINFO("Step 6: Trigger a cp to validate");
     this->trigger_cp(true /* wait */);
-=======
->>>>>>> d500e721d0d7b9250302ae655e2881efd9ac19c2
 }
 
 int main(int argc, char* argv[]) {
