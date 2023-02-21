@@ -228,6 +228,10 @@ pipeline {
                     }
                     stage("Image") {
                         when { allOf { 
+                            anyOf {
+                              branch "testing/v*"
+                              branch "master"
+                            }
                             expression { "${COVERAGE}" == 'False' }
                             expression { !(("${BUILD_TYPE}" == 'test') && ("${PRERELEASE}" == 'False')) }
                             }
