@@ -112,6 +112,7 @@ struct cp_mgr_super_block {
 };
 #pragma pack()
 
+class CPManager;
 class CPGuard {
 private:
     CP* m_cp{nullptr};
@@ -131,7 +132,7 @@ private:
     static thread_local std::stack< CP* > t_cp_stack;
 
 public:
-    CPGuard();
+    CPGuard(CPManager* mgr);
     ~CPGuard();
 
     CPGuard(const CPGuard& other);

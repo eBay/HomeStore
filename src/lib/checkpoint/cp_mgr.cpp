@@ -50,7 +50,7 @@ void CPManager::on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie)
 }
 
 void CPManager::create_first_cp() {
-    m_cur_cp = new CP();
+    m_cur_cp = new CP(this);
     m_cur_cp->m_cp_status = cp_status_t::cp_io_ready;
     m_cur_cp->m_cp_id = m_sb->m_last_flushed_cp + 1;
 }
@@ -71,11 +71,13 @@ void CPManager::register_consumer(cp_consumer_t consumer_id, std::unique_ptr< CP
     }
 }
 
-[[nodiscard]] CPGuard CPManager::cp_guard() { return CPGuard{}; }
+[[nodiscard]] CPGuard CPManager::cp_guard() { return CPGuard{this}; }
 
 CP* CPManager::cp_io_enter() {
     rcu_read_lock();
     auto cp = get_cur_cp();
+
+    HS_DBG_ASSERT_NE((void*)cp, nullptr, "get_cur_cp returned null, cp_io_enter() after shutdown?");
     if (!cp) {
         rcu_read_unlock();
         return nullptr;
@@ -87,7 +89,7 @@ CP* CPManager::cp_io_enter() {
 }
 
 void CPManager::cp_ref(CP* cp) {
-    cp->m_enter_cnt.fetch_add(1);
+    cp->m_enter_cnt.increment(1);
 #ifndef NDEBUG
     auto status = cp->m_cp_status.load();
     HS_DBG_ASSERT((status == cp_status_t::cp_io_ready || status == cp_status_t::cp_trigger ||
@@ -98,8 +100,9 @@ void CPManager::cp_ref(CP* cp) {
 
 void CPManager::cp_io_exit(CP* cp) {
     HS_DBG_ASSERT_NE(cp->m_cp_status, cp_status_t::cp_flushing);
-    auto cnt = cp->m_enter_cnt.fetch_sub(1);
-    if (cnt == 1 && cp->m_cp_status == cp_status_t::cp_flush_prepare) { cp_start_flush(cp); }
+    if (cp->m_enter_cnt.decrement_testz(1) && (cp->m_cp_status == cp_status_t::cp_flush_prepare)) {
+        cp_start_flush(cp);
+    }
 }
 
 CP* CPManager::get_cur_cp() {
@@ -112,7 +115,7 @@ void CPManager::trigger_cp_flush(cp_done_cb_t&& cb, bool force) {
     bool expected = false;
     auto ret = m_in_flush_phase.compare_exchange_strong(expected, true);
     if (!ret) {
-        // They are already an existing CP on-going, but if force is set, we create a back-to-back CP.
+        // There is already an existing CP on-going, but if force is set, we create a back-to-back CP.
         if (force) {
             std::unique_lock< std::mutex > lk(trigger_cp_mtx);
             auto cpg = cp_guard();
@@ -132,7 +135,7 @@ void CPManager::trigger_cp_flush(cp_done_cb_t&& cb, bool force) {
         m_cp_start_time = Clock::now();
 
         /* allocate a new cp */
-        auto new_cp = new CP();
+        auto new_cp = new CP(this);
         {
             std::unique_lock< std::mutex > lk(trigger_cp_mtx);
             new_cp->m_cp_id = cur_cp->m_cp_id + 1;
@@ -215,14 +218,14 @@ void CPManager::cleanup_cp(CP* cp) {
 }
 
 //////////////////////////////////////// CP Guard class ////////////////////////////////////////////
-CPGuard::CPGuard() {
+CPGuard::CPGuard(CPManager* mgr) {
     if (t_cp_stack.empty()) {
         // First CP in this thread stack.
-        m_cp = hs()->cp_mgr().cp_io_enter();
+        m_cp = mgr->cp_io_enter();
     } else {
         // Nested CP sections
         m_cp = t_cp_stack.top();
-        hs()->cp_mgr().cp_ref(m_cp);
+        m_cp->m_cp_mgr->cp_ref(m_cp);
     }
     t_cp_stack.push(m_cp);
     m_pushed = true; // m_pushed represented if this is added to current thread stack
@@ -233,19 +236,19 @@ CPGuard::~CPGuard() {
         HS_DBG_ASSERT_EQ((void*)m_cp, (void*)t_cp_stack.top(), "CPGuard mismatch of CP pointers");
         t_cp_stack.pop();
     }
-    if (m_cp) { hs()->cp_mgr().cp_io_exit(m_cp); }
+    if (m_cp) { m_cp->m_cp_mgr->cp_io_exit(m_cp); }
 }
 
 CPGuard::CPGuard(const CPGuard& other) {
     m_cp = other.m_cp;
     m_pushed = false;
-    hs()->cp_mgr().cp_ref(m_cp);
+    m_cp->m_cp_mgr->cp_ref(m_cp);
 }
 
 CPGuard CPGuard::operator=(const CPGuard& other) {
     m_cp = other.m_cp;
     m_pushed = false;
-    hs()->cp_mgr().cp_ref(m_cp);
+    m_cp->m_cp_mgr->cp_ref(m_cp);
     return *this;
 }
 
