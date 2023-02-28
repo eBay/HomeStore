@@ -54,9 +54,8 @@ public:
     VarsizeBlkAllocConfig(const std::string& name) : VarsizeBlkAllocConfig{0, 0, 0, 0, name} {}
 
     VarsizeBlkAllocConfig(const uint32_t blk_size, const uint32_t ppage_sz, const uint32_t align_sz,
-                          const uint64_t size, const std::string& name, const bool realtime_bm_on = true,
-                          const bool use_slabs = true) :
-            BlkAllocConfig{blk_size, align_sz, size, name, realtime_bm_on},
+                          const uint64_t size, const std::string& name, const bool use_slabs = true) :
+            BlkAllocConfig{blk_size, align_sz, size, name},
             m_phys_page_size{ppage_sz},
             m_nsegments{HS_DYNAMIC_CONFIG(blkallocator.max_segments)},
             m_blks_per_temp_group{get_total_blks() / HS_DYNAMIC_CONFIG(blkallocator.num_blk_temperatures)},

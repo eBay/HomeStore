@@ -69,20 +69,19 @@ private:
 
 public:
     BlkAllocConfig(const uint32_t blk_size, const uint32_t align_size, const uint64_t size,
-                   const std::string& name = "", const bool realtime_bm_on = true) :
+                   const std::string& name = "") :
             m_blk_size{blk_size},
             m_align_size{align_size},
             m_capacity{static_cast< blk_cap_t >(size / blk_size)},
             m_blks_per_portion{std::min(HS_DYNAMIC_CONFIG(blkallocator.num_blks_per_portion), m_capacity)},
             m_unique_name{name} {
-#ifdef _PRERELEASE
-        // for pre-release build, take it from input which is defaulted to true;
-        m_realtime_bm_on = realtime_bm_on;
-#else
-        // for release build, take it from dynamic config which is defaulted to false
-        m_realtime_bm_on = HS_DYNAMIC_CONFIG(blkallocator.realtime_bitmap_on);
+
+#if defined _PRERELEASE || defined DEBUG
+        if (!HS_DYNAMIC_CONFIG(blkallocator.realtime_bitmap_on))
 #endif
-    }
+        {
+            m_realtime_bm_on = false;
+        }
 
     BlkAllocConfig(const BlkAllocConfig&) = default;
     BlkAllocConfig(BlkAllocConfig&&) noexcept = delete;
