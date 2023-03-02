@@ -1,5 +1,5 @@
 # ##########   #######   ############
-FROM ecr.vip.ebayc3.com/sds/sds_develop:latest
+FROM ecr.vip.ebayc3.com/sds/sds_develop:3.x-latest
 LABEL description="Automated HomeStore compilation"
 
 WORKDIR /output
