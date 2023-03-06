@@ -212,6 +212,7 @@ pipeline {
                               anyOf {
                                 branch "testing/v*"
                                 branch "master"
+                                branch "stable/v3.x"
                               }
                               expression { "${COVERAGE}" == 'False' }
                             } }
