@@ -62,6 +62,7 @@ public:
     void remove_index_table(const std::shared_ptr< IndexTableBase >& tbl);
 
     uint64_t used_size() const;
+    uint32_t node_size() const;
 
     iomgr::io_thread_t get_next_btree_write_thread();
     IndexWBCache& wb_cache() { return *m_wb_cache; }

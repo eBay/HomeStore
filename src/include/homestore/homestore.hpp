@@ -46,7 +46,8 @@ class IndexServiceCallbacks;
 struct vdev_info_block;
 class HomeStore;
 class CPManager;
-typedef std::shared_ptr< HomeStore > HomeStoreSafePtr;
+
+using HomeStoreSafePtr = std::shared_ptr< HomeStore >;
 
 VENUM(blkstore_type, uint32_t, DATA_STORE = 1, INDEX_STORE = 2, SB_STORE = 3, DATA_LOGDEV_STORE = 4,
       CTRL_LOGDEV_STORE = 5, META_STORE = 6);
@@ -83,11 +84,11 @@ private:
     std::unique_ptr< IndexService > m_index_service;
 
     std::unique_ptr< DeviceManager > m_dev_mgr;
-    std::shared_ptr< sisl::logging::logger_t > m_periodic_logger;
+    shared< sisl::logging::logger_t > m_periodic_logger;
     std::unique_ptr< HomeStoreStatusMgr > m_status_mgr;
     std::unique_ptr< ResourceMgr > m_resource_mgr;
     std::unique_ptr< CPManager > m_cp_mgr;
-    std::shared_ptr< sisl::Evictor > m_evictor;
+    shared< sisl::Evictor > m_evictor;
     std::unique_ptr< IndexServiceCallbacks > m_index_svc_cbs;
 
     bool m_vdev_failed{false};
@@ -126,9 +127,9 @@ public:
     static void set_instance(const HomeStoreSafePtr& instance) { s_instance = instance; }
     static void reset_instance() { s_instance.reset(); }
     static HomeStore* instance();
-    static std::shared_ptr< HomeStore > safe_instance() { return s_instance; }
+    static shared< HomeStore > safe_instance() { return s_instance; }
 
-    static std::shared_ptr< spdlog::logger >& periodic_logger() { return instance()->m_periodic_logger; }
+    static shared< spdlog::logger >& periodic_logger() { return instance()->m_periodic_logger; }
 
     ///////////////////////////// Member functions /////////////////////////////////////////////
     HomeStore& with_params(const hs_input_params& input);
@@ -170,7 +171,7 @@ public:
     DeviceManager* device_mgr() { return m_dev_mgr.get(); }
     ResourceMgr& resource_mgr() { return *m_resource_mgr.get(); }
     CPManager& cp_mgr() { return *m_cp_mgr.get(); }
-    std::shared_ptr< sisl::Evictor > evictor() { return m_evictor; }
+    shared< sisl::Evictor > evictor() { return m_evictor; }
 
 protected:
     virtual void process_vdev_error(vdev_info_block* vb) {}

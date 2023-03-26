@@ -19,10 +19,11 @@
 #include <sisl/cache/simple_hashmap.hpp>
 #include <sisl/fds/utils.hpp>
 #include <sisl/metrics/metrics.hpp>
+#include <folly/Function.h>
 #include "homestore/blk.h"
 
 namespace homestore {
-typedef std::function< void(void) > after_remove_cb_t;
+typedef folly::Function< void(void) > after_remove_cb_t;
 
 struct blk_track_waiter {
     blk_track_waiter(after_remove_cb_t&& cb) : m_cb{std::move(cb)} {

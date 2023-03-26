@@ -18,6 +18,7 @@
 #include <cstdint>
 
 #include <folly/small_vector.h>
+#include <folly/futures/Future.h>
 #include <sisl/fds/buffer.hpp>
 #include <sisl/utility/atomic_counter.hpp>
 
@@ -35,10 +36,11 @@ class BlkReadTracker;
 struct blk_alloc_hints;
 
 struct async_info {
-    io_completion_cb_t cb;
+    io_completion_cb_t cb{nullptr};
     bool is_read{false};
     BlkId bid; // only needed when is_read is true, used for blk read tracker;
-    sisl::atomic_counter< int > outstanding_io_cnt = 0;
+    sisl::atomic_counter< int > outstanding_io_cnt{0};
+    folly::Promise< std::error_condition > promise{folly::Promise< std::error_condition >::makeEmpty()};
 };
 
 using blk_t = uint64_t;
@@ -75,6 +77,9 @@ public:
     void async_alloc_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids,
                            const io_completion_cb_t& cb, bool part_of_batch = false);
 
+    folly::Future< std::error_condition > alloc_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints,
+                                                      std::vector< BlkId >& out_blkids, bool part_of_batch = false);
+
     /**
      * @brief : asynchronous write with input block ids;
      *
@@ -87,6 +92,9 @@ public:
     void async_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints, const std::vector< BlkId >& in_blkids,
                      const io_completion_cb_t& cb, bool part_of_batch = false);
 
+    folly::Future< bool > async_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints,
+                                      const std::vector< BlkId >& in_blkids, bool part_of_batch = false);
+
     /**
      * @brief : asynchronous read
      *
@@ -98,6 +106,8 @@ public:
      */
     void async_read(const BlkId& bid, sisl::sg_list& sgs, uint32_t size, const io_completion_cb_t& cb,
                     bool part_of_batch = false);
+
+    folly::Future< bool > async_read(const BlkId& bid, sisl::sg_list& sgs, uint32_t size, bool part_of_batch = false);
 
     /**
      * @brief : commit a block, usually called during recovery
@@ -123,6 +133,8 @@ public:
      * @param cb : the callback that will be triggered after free block completes;
      */
     void async_free_blk(const BlkId bid, const io_completion_cb_t& cb);
+
+    folly::Future< bool > async_free_blk(const BlkId bid);
 
     /**
      * @brief : get the page size of this data service;
@@ -168,12 +180,11 @@ public:
 private:
     BlkAllocStatus alloc_blks(uint32_t size, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids);
 
-    /**
-     * @brief : common initialize for BlkDataService
-     */
+    void queue_write(async_info* as_info, const sisl::sg_list& sgs, const blk_alloc_hints& hints,
+                     const std::vector< BlkId >& in_blkids, bool part_of_batch);
+    void queue_read(async_info* as_info, const BlkId& bid, sisl::sg_list& sgs, uint32_t size, bool part_of_batch);
     void init();
 
-private:
     static void process_data_completion(std::error_condition ec, void* cookie);
 
 private:

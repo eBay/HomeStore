@@ -203,7 +203,7 @@ public:
     /// @brief Formats the vdev asynchronously by zeroing the entire vdev. It will use underlying physical device
     /// capabilities to zero them if fast zero is possible, otherwise will zero block by block
     /// @param cb Callback after formatting is completed.
-    virtual void async_format(vdev_io_comp_cb_t cb);
+    virtual folly::Future< bool > async_format();
 
     /////////////////////// Block Allocation related methods /////////////////////////////
     /// @brief This method allocates contigous blocks in the vdev
@@ -243,13 +243,10 @@ public:
     /// @param buf : Buffer to write data from
     /// @param size : Size of the buffer
     /// @param bid : BlkId which was previously allocated. It is expected that entire size was allocated previously.
-    /// @param cb : Callback once write is completed
-    /// @param cookie : cookie set by caller and returned on completion; It is defaulted to null as some caller is not
-    /// intrested of of this field
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
-    void async_write(const char* buf, uint32_t size, const BlkId& bid, vdev_io_comp_cb_t cb,
-                     const void* cookie = nullptr, bool part_of_batch = false);
+    /// @return future< bool > Future result with bool to indicate if IO is actually executed
+    folly::Future< bool > async_write(const char* buf, uint32_t size, const BlkId& bid, bool part_of_batch = false);
 
     /// @brief Asynchornously write the buffer to the device on a given blkid from vector of buffer
     /// @param iov : Vector of buffer to write data from
@@ -260,8 +257,7 @@ public:
     /// intrested of of this field
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
-    void async_writev(const iovec* iov, int iovcnt, const BlkId& bid, vdev_io_comp_cb_t cb,
-                      const void* cookie = nullptr, bool part_of_batch = false);
+    folly::Future< bool > async_writev(const iovec* iov, int iovcnt, const BlkId& bid, bool part_of_batch = false);
 
     /// @brief Synchronously write the buffer to the blkid
     /// @param buf : Buffer to write data from
@@ -289,8 +285,7 @@ public:
     /// intrested of of this field
     /// @param part_of_batch : Is this read part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this read request will not be queued.
-    void async_read(char* buf, uint64_t size, const BlkId& bid, vdev_io_comp_cb_t cb, const void* cookie = nullptr,
-                    bool part_of_batch = false);
+    folly::Future< bool > async_read(char* buf, uint64_t size, const BlkId& bid, bool part_of_batch = false);
 
     /// @brief Asynchronously read the data for a given BlkId to the vector of buffers
     /// @param iov : Vector of buffer to write read to
@@ -303,8 +298,8 @@ public:
     /// intrested of of this field
     /// @param part_of_batch : Is this read part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this read request will not be queued.
-    void async_readv(iovec* iovs, int iovcnt, uint64_t size, const BlkId& bid, vdev_io_comp_cb_t cb,
-                     const void* cookie = nullptr, bool part_of_batch = false);
+    folly::Future< bool > async_readv(iovec* iovs, int iovcnt, uint64_t size, const BlkId& bid,
+                                      bool part_of_batch = false);
 
     /// @brief Synchronously read the data for a given BlkId.
     /// @param buf : Buffer to read data to

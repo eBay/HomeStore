@@ -160,6 +160,7 @@ void CPManager::trigger_cp_flush(cp_done_cb_t&& cb, bool force) {
 }
 
 void CPManager::cp_start_flush(CP* cp) {
+    // TODO: Switch to sync only fiber/thread and execute the following code there
     HS_PERIODIC_LOG(INFO, cp, "Starting CP {} flush", cp->id());
     cp->m_cp_status = cp_status_t::cp_flushing;
     m_cp_flush_waiters.increment();

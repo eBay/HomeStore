@@ -432,19 +432,19 @@ private:
         std::shared_ptr< std::vector< BlkId > > out_bids_ptr = std::make_shared< std::vector< BlkId > >();
         out_bids_ptr->clear();
 
-        inst().async_alloc_write(*(sg.get()), hints, *(out_bids_ptr.get()),
-                                 [sg, this, after_write_cb, out_bids_ptr](std::error_condition err) {
-                                     LOGINFO("async_alloc_write completed, err: {}", err.message());
-                                     assert(!err);
-                                     const auto out_bids = *(out_bids_ptr.get());
+        inst()
+            .alloc_write(*(sg.get()), hints, *(out_bids_ptr.get()), false /* part_of_batch*/)
+            .thenValue([sg, this, after_write_cb, out_bids_ptr](std::error_condition err) {
+                LOGINFO("async_alloc_write completed, err: {}", err.message());
+                assert(!err);
+                const auto out_bids = *(out_bids_ptr.get());
 
-                                     for (auto i = 0ul; i < out_bids.size(); ++i) {
-                                         LOGINFO("bid-{}: {}", i, out_bids[i].to_string());
-                                     }
+                for (auto i = 0ul; i < out_bids.size(); ++i) {
+                    LOGINFO("bid-{}: {}", i, out_bids[i].to_string());
+                }
 
-                                     if (after_write_cb != nullptr) { after_write_cb(err, out_bids_ptr); }
-                                 },
-                                 false /* part_of_batch */);
+                if (after_write_cb != nullptr) { after_write_cb(err, out_bids_ptr); }
+            });
     }
 
 private:

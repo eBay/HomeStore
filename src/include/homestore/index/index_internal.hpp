@@ -34,12 +34,16 @@ static constexpr uint32_t indx_sb_version{0x2};
 struct index_table_sb {
     uint64_t magic{indx_sb_magic};
     uint32_t version{indx_sb_version};
-    uuid_t m_uuid; // UUID of the index
+    uuid_t m_uuid;        // UUID of the index
+    uuid_t m_parent_uuid; // UUID of the parent container of index (controlled by user)
 
     // Btree Section
     bnodeid_t root_node{empty_bnodeid}; // Btree Root Node ID
     int64_t index_size{0};              // Size of the Index
     // seq_id_t last_seq_id{-1};           // TODO: See if this is needed
+
+    uint32_t user_sb_size; // Size of the user superblk
+    uint8_t user_sb_bytes[0];
 };
 #pragma pack()
 

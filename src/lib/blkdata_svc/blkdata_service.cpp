@@ -49,6 +49,16 @@ void BlkDataService::async_free_blk(const BlkId bid, const io_completion_cb_t& c
     });
 }
 
+folly::Future< bool > BlkDataService::free_blk(const BlkId bid) {
+    // create blk read waiter instance;
+    folly::Promise< bool > promise;
+    m_blk_read_tracker->wait_on(bid, [this, bid, p = std::move(promise)]() mutable {
+        m_vdev->free_blk(bid);
+        p.setValue(true);
+    });
+    return promise.getFuture();
+}
+
 // first-time boot path
 void BlkDataService::create_vdev(uint64_t size) {
     struct blkstore_blob blob;
@@ -59,58 +69,78 @@ void BlkDataService::create_vdev(uint64_t size) {
                                             (char*)&blob, sizeof(blkstore_blob), true /* auto_recovery */);
 }
 
-void BlkDataService::async_read(const BlkId& bid, sisl::sg_list& sgs, uint32_t size, const io_completion_cb_t& cb,
-                                bool part_of_batch) {
-
-    m_blk_read_tracker->insert(bid);
-
-    auto as_info = sisl::ObjectAllocator< async_info >::make_object();
-    as_info->cb = cb;
-    as_info->is_read = true;
-    as_info->bid = bid;
-
-    HS_DBG_ASSERT_EQ(sgs.iovs.size(), 1, "Expecting iov size to be 1 since reading on one blk.");
-
-    as_info->outstanding_io_cnt.increment(1);
-
-    m_vdev->async_readv(sgs.iovs.data(), sgs.iovs.size(), size, bid, BlkDataService::process_data_completion,
-                        reinterpret_cast< const void* >(as_info) /* cookie */, part_of_batch);
-}
-
 void BlkDataService::process_data_completion(std::error_condition ec, void* cookie) {
     auto as_info = reinterpret_cast< async_info* >(cookie);
 
     if (as_info->outstanding_io_cnt.decrement_testz(1)) {
-
         if (as_info->is_read) {
             // this will trigger any pending free_blk on this read to complete;
             hs()->data_service().read_blk_tracker()->remove(as_info->bid);
         }
 
-        // send callback to caller;
-        as_info->cb(ec);
+        // send callback or fulfill promise to caller;
+        as_info->cb ? as_info->cb(ec) : as_info->promise.setValue(ec);
         sisl::ObjectAllocator< async_info >::deallocate(as_info);
     }
 }
 
-void BlkDataService::async_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints,
-                                 const std::vector< BlkId >& in_blkids, const io_completion_cb_t& cb,
-                                 bool part_of_batch) {
+void BlkDataService::async_read(const BlkId& bid, sisl::sg_list& sgs, uint32_t size, const io_completion_cb_t& cb,
+                                bool part_of_batch) {
     auto as_info = sisl::ObjectAllocator< async_info >::make_object();
     as_info->cb = cb;
+    queue_read(as_info, bid, sgs, size, part_of_batch);
+}
 
+folly::Future< std::error_condition > BlkDataService::read(const BlkId& bid, sisl::sg_list& sgs, uint32_t size,
+                                                           bool part_of_batch) {
+    auto as_info = sisl::ObjectAllocator< async_info >::make_object();
+    as_info->promise = std::move(folly::Promise< std::error_condition >{});
+    auto ret = std::move(as_info->promise.getFuture());
+    queue_read(as_info, bid, sgs, size, part_of_batch);
+    return ret;
+}
+
+void BlkDataService::queue_read(async_info* as_info, const BlkId& bid, sisl::sg_list& sgs, uint32_t size,
+                                bool part_of_batch) {
+    m_blk_read_tracker->insert(bid);
+    HS_DBG_ASSERT_EQ(sgs.iovs.size(), 1, "Expecting iov size to be 1 since reading on one blk.");
+    as_info->outstanding_io_cnt.increment(1);
+    as_info->is_read = true;
+    as_info->bid = bid;
+
+    m_vdev->async_readv(sgs.iovs.data(), sgs.iovs.size(), size, bid, BlkDataService::process_data_completion,
+                        r_cast< const void* >(as_info) /* cookie */, part_of_batch);
+}
+
+void BlkDataService::async_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints,
+                                 const std::vector< BlkId >& blkids, const io_completion_cb_t& cb, bool part_of_batch) {
+    auto as_info = sisl::ObjectAllocator< async_info >::make_object();
+    as_info->cb = cb;
+    queue_write(as_info, sgs, hints, blkids, part_of_batch);
+}
+
+folly::Future< std::error_condition > BlkDataService::write(const sisl::sg_list& sgs, const blk_alloc_hints& hints,
+                                                            const std::vector< BlkId >& blkids, bool part_of_batch) {
+    auto as_info = sisl::ObjectAllocator< async_info >::make_object();
+    as_info->promise = std::move(folly::Promise< std::error_condition >{});
+    auto ret = std::move(as_info->promise.getFuture());
+    queue_write(as_info, sgs, hints, blkids, part_of_batch);
+    return ret;
+}
+
+void BlkDataService::queue_write(async_info* as_info, const sisl::sg_list& sgs, const blk_alloc_hints& hints,
+                                 const std::vector< BlkId >& in_blkids, bool part_of_batch) {
+    as_info->outstanding_io_cnt.increment(int_cast(in_blkids.size()));
     if (in_blkids.size() == 1) {
         // Shortcut to most common case
-        as_info->outstanding_io_cnt.increment(1);
         m_vdev->async_writev(sgs.iovs.data(), sgs.iovs.size(), in_blkids[0], BlkDataService::process_data_completion,
-                             reinterpret_cast< const void* >(as_info) /* cookie */, part_of_batch);
+                             r_cast< const void* >(as_info) /* cookie */, part_of_batch);
     } else {
         sisl::sg_iterator sg_it{sgs.iovs};
         for (const auto& bid : in_blkids) {
             const auto iovs = sg_it.next_iovs(bid.get_nblks() * m_page_size);
-            as_info->outstanding_io_cnt.increment(1);
             m_vdev->async_writev(iovs.data(), iovs.size(), bid, BlkDataService::process_data_completion,
-                                 reinterpret_cast< const void* >(as_info) /* cookie */, part_of_batch);
+                                 r_cast< const void* >(as_info) /* cookie */, part_of_batch);
         }
     }
 }
@@ -128,32 +158,24 @@ void BlkDataService::async_alloc_write(const sisl::sg_list& sgs, const blk_alloc
     async_write(sgs, hints, out_blkids, cb, part_of_batch);
 }
 
+folly::Future< std::error_condition > BlkDataService::alloc_write(const sisl::sg_list& sgs,
+                                                                  const blk_alloc_hints& hints,
+                                                                  std::vector< BlkId >& out_blkids,
+                                                                  bool part_of_batch) {
+    out_blkids.clear();
+    const auto status = alloc_blks(sgs.size, hints, out_blkids);
+    if (status != BlkAllocStatus::SUCCESS) {
+        return folly::makeFuture< std::error_condition >(std::errc::resource_unavailable_try_again);
+    }
+    return write(sgs, hints, out_blkids, part_of_batch);
+}
+
 BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& hints,
                                           std::vector< BlkId >& out_blkids) {
     HS_DBG_ASSERT_EQ(size % m_page_size, 0, "Non aligned size requested");
     blk_count_t nblks = static_cast< blk_count_t >(size / m_page_size);
 
     return m_vdev->alloc_blk(nblks, hints, out_blkids);
-#if 0 // already done by vdev layer
-        if (nblks <= BlkId::max_blks_in_op()) {
-        return (m_vdev.alloc_blk(nblks, hints, out_blkid));
-    }
-    else {
-        while (nblks != 0) {
-            static thread_local std::vector< BlkId > result_blkid{};
-            result_blkid.clear();
-
-            const blk_count_t nblks_op = std::min(static_cast< blk_count_t >(BlkId::max_blks_in_op()), nblks);
-            const auto ret = m_vdev.alloc_blk(nblks_op, hints, result_blkid);
-            if (ret != BlkAllocStatus::SUCCESS) { return ret; }
-
-            out_blkid.insert(std::end(out_blkid), std::make_move_iterator(std::begin(result_blkid)),
-                             std::make_move_iterator(std::end(result_blkid)));
-            nblks -= nblks_op;
-        }
-        return BlkAllocStatus::SUCCESS;
-    }
-#endif
 }
 
 void BlkDataService::commit_blk(const BlkId& bid) { m_vdev->commit_blk(bid); }

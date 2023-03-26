@@ -108,6 +108,8 @@ iomgr::io_thread_t IndexService::get_next_btree_write_thread() {
     return m_btree_write_thread_ids[m_btree_write_thrd_idx++ % m_btree_write_thread_ids.size()];
 }
 
+uint32_t IndexService::node_size() const { return m_vdev->block_size(); }
+
 uint64_t IndexService::used_size() const {
     auto size{0};
     std::unique_lock lg{m_index_map_mtx};

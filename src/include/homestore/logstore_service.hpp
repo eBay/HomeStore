@@ -27,6 +27,7 @@
 #include <sisl/metrics/metrics.hpp>
 #include <nlohmann/json.hpp>
 
+#include <homestore/homestore_decl.hpp>
 #include <homestore/logstore/log_store.hpp>
 
 namespace homestore {

@@ -37,85 +37,94 @@ template < typename K, typename V >
 class IndexTable : public IndexTableBase, Btree< K, V > {
 private:
     superblk< index_table_sb > m_sb;
-    std::function< void(BtreeRequest*, btee_status_t) > m_btree_op_comp_cb;
 
 public:
-    IndexTable(uuid_t uuid, const BtreeConfig& cfg, btree_op_comp_cb_t op_comp_cb, on_kv_read_t read_cb = nullptr,
-               on_kv_update_t update_cb = nullptr, on_kv_remove_t remove_cb = nullptr) :
-            Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)},
-            m_btree_op_comp_cb{std::move(op_comp_cb)} {
+    IndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, const BtreeConfig& cfg,
+               on_kv_read_t read_cb = nullptr, on_kv_update_t update_cb = nullptr, on_kv_remove_t remove_cb = nullptr) :
+            Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)} {
         auto const [status, root_id] = create_root_node(nullptr);
         if (status != btree_status_t::success) {
             throw std::runtime_error(fmt::format("Unable to create root node", key_url));
         }
         m_sb.create(sizeof(index_table_sb));
         m_sb->uuid = uuid;
+        m_sb->parent_uuid = parent_uuid;
         m_sb->root_node = root_id;
+        m_sb->user_sb_size = user_sb_size;
     }
 
-    IndexTable(const superblk< index_table_sb >& sb, const BtreeConfig& cfg, btree_op_comp_cb_t op_comp_cb,
-               on_kv_read_t read_cb = nullptr, on_kv_update_t update_cb = nullptr, on_kv_remove_t remove_cb = nullptr) :
-            Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)},
-            m_btree_op_comp_cb{std::move(op_comp_cb)} {
+    IndexTable(const superblk< index_table_sb >& sb, const BtreeConfig& cfg, on_kv_read_t read_cb = nullptr,
+               on_kv_update_t update_cb = nullptr, on_kv_remove_t remove_cb = nullptr) :
+            Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)} {
         m_sb = sb;
     }
 
     uuid_t uuid() const override { return m_sb->uuid; }
     uint64_t used_size() const override { return m_sb->index_size; }
+    superblk< index_table_sb >& mutable_super_blk() { return m_sb; }
+    const superblk< index_table_sb >& mutable_super_blk() const { return m_sb; }
 
     template < typename ReqT >
-    void async_put(ReqT* put_req) override {
-        iomanager.run_on(index_svc()->get_next_btree_write_thread(), [this, put_req](const io_thread_addr_t addr) {
+    folly::Future< btree_status_t > async_put(cshared< ReqT >& put_req) {
+        put_req->m_promise = std::move(folly::Promise< btree_status_t >());
+        iomanager.run_on(index_svc()->get_next_btree_write_thread(), [this, put_req](io_thread_addr_t) {
             auto* cp = cp_manager()->cp_io_enter();
             put_req->op_context = (void*)cp_manager()->get_context(cp, cp_consumer_t::INDEX_SVC);
             auto ret = sisl::Btree< K, V >::put(*put_req);
             cp_manager()->cp_io_exit(cp);
 
             BT_DBG_ASSERT_NE(ret, btree_status_t::fast_path_not_possible, "Btree write thread is not fast path thread");
-            m_btree_op_comp_cb(put_req, ret);
+            put_req->m_promise.setValue(ret);
         });
+        return put_req->m_promise.getFuture();
     }
 
     template < typename ReqT >
-    void async_remove(ReqT* remove_req) override {
-        iomanager.run_on(index_svc()->get_next_btree_write_thread(), [this, remove_req](const io_thread_addr_t addr) {
+    folly::Future< btree_status_t > async_remove(cshared< ReqT >& remove_req) {
+        remove_req->m_promise = std::move(folly::Promise< btree_status_t >{});
+        iomanager.run_on(index_svc()->get_next_btree_write_thread(), [this, remove_req](io_thread_addr_t) {
             auto* cp = cp_manager()->cp_io_enter();
             remove_req->op_context = (void*)cp_manager()->get_context(cp, cp_consumer_t::INDEX_SVC);
             auto ret = sisl::Btree< K, V >::remove(*remove_req);
             cp_manager()->cp_io_exit(cp);
 
             BT_DBG_ASSERT_NE(ret, btree_status_t::fast_path_not_possible, "Btree write thread is not fast path thread");
-            m_btree_op_comp_cb(remove_req, ret);
+            remove_req->m_promise.setValue(ret);
         });
+        return remove_req->m_promise.getFuture();
     }
 
     template < typename ReqT >
-    void async_get(ReqT* get_req) override {
+    folly::Future< btree_status_t > async_get(cshared< ReqT >& get_req) override {
         auto ret = sisl::Btree< K, V >::get(*get_req);
         if (ret == btree_status_t::fast_path_not_possible) {
-            iomanager.run_on(index_svc()->get_next_btree_write_thread(), [this, get_req](const io_thread_addr_t addr) {
+            get_req->m_promise = std::move(folly::Promise< btree_status_t >());
+            iomanager.run_on(index_svc()->get_next_btree_write_thread(), [this, get_req](io_thread_addr_t) {
                 auto ret = sisl::Btree< K, V >::get(*get_req);
                 BT_DBG_ASSERT_NE(ret, btree_status_t::fast_path_not_possible,
                                  "Btree write thread is not fast path thread");
-                m_btree_op_comp_cb(get_req, ret);
+                get_req->m_promise.setValue(ret);
             });
+            return get_req->m_promise.getFuture();
         } else {
-            m_btree_op_comp_cb(get_req, ret);
+            return folly::makeFuture< btree_status_t >(ret);
         }
     }
 
     template < typename ReqT >
-    void async_query(ReqT* query_req) override {
+    folly::Future< btree_status_t > async_query(cshared< ReqT >& query_req) override {
         auto ret = sisl::Btree< K, V >::query(*query_req);
         if (ret == btree_status_t::fast_path_not_possible) {
-            iomanager.run_on(index_svc()->get_next_btree_write_thread(), [this, get_req](const io_thread_addr_t addr) {
+            query_req->m_promise = std::move(folly::Promise< btree_status_t >());
+            iomanager.run_on(index_svc()->get_next_btree_write_thread(), [this, query_req](io_thread_addr_t) {
                 auto ret = sisl::Btree< K, V >::query(*query_req);
                 BT_DBG_ASSERT_NE(ret, btree_status_t::fast_path_not_possible,
                                  "Btree write thread is not fast path thread");
-                m_btree_op_comp_cb(query_req, ret);
+                query_req->m_promise.setValue(ret);
             });
+            return query_req->m_promise.getFuture();
         } else {
-            m_btree_op_comp_cb(query_req, ret);
+            return folly::makeFuture< btree_status_t >(ret);
         }
     }
 

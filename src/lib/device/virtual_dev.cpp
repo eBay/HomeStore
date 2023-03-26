@@ -169,10 +169,7 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, PhysicalDevGroup pd
                        blk_allocator_type_t allocator_type, uint64_t size_in, uint32_t nmirror, bool is_stripe,
                        uint32_t blk_size, char* context, uint64_t context_size, bool auto_recovery,
                        vdev_high_watermark_cb_t hwm_cb) :
-        m_name{name},
-        m_allocator_type{allocator_type},
-        m_metrics{name},
-        m_pdev_group{pdev_group} {
+        m_name{name}, m_allocator_type{allocator_type}, m_metrics{name}, m_pdev_group{pdev_group} {
     init(mgr, nullptr, blk_size, auto_recovery, std::move(hwm_cb));
 
     auto const pdev_list = m_mgr->get_devices(pdev_group);
@@ -310,10 +307,7 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, PhysicalDevGroup pd
 VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, PhysicalDevGroup pdev_group,
                        blk_allocator_type_t allocator_type, bool recovery_init, bool auto_recovery,
                        vdev_high_watermark_cb_t hwm_cb) :
-        m_name{name},
-        m_allocator_type{allocator_type},
-        m_metrics{name},
-        m_pdev_group{pdev_group} {
+        m_name{name}, m_allocator_type{allocator_type}, m_metrics{name}, m_pdev_group{pdev_group} {
     init(mgr, vb, vb->blk_size, auto_recovery, std::move(hwm_cb));
 
     m_recovery_init = recovery_init;
@@ -611,8 +605,7 @@ void VirtualDev::recovery_done() {
 }
 
 ////////////////////////// async write section //////////////////////////////////
-void VirtualDev::async_write(const char* buf, uint32_t size, const BlkId& bid, vdev_io_comp_cb_t cb, const void* cookie,
-                             bool part_of_batch) {
+folly::Future< bool > VirtualDev::async_write(const char* buf, uint32_t size, const BlkId& bid, bool part_of_batch) {
     PhysicalDevChunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
     async_write_internal(buf, size, chunk->physical_dev_mutable(), chunk, dev_offset, std::move(cb), cookie,
@@ -628,14 +621,13 @@ void VirtualDev::async_writev(const iovec* iov, const int iovcnt, const BlkId& b
                           part_of_batch);
 }
 
-void VirtualDev::async_write_internal(const char* buf, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                                      uint64_t dev_offset, vdev_io_comp_cb_t cb, const void* cookie,
-                                      bool part_of_batch) {
+folly::Future< bool > VirtualDev::async_write_internal(const char* buf, uint32_t size, PhysicalDev* pdev,
+                                                       PhysicalDevChunk* pchunk, uint64_t dev_offset,
+                                                       bool part_of_batch) {
     auto req = vdev_req_context::make_req_context();
     req->cb = std::move(cb);
     req->op_type = vdev_op_type_t::write;
     req->chunk = pchunk;
-    req->cookie = const_cast< void* >(cookie);
 
     HS_LOG(TRACE, device, "Writing in device: {}, offset = {}", pdev->dev_id(), dev_offset);
     COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
