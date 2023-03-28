@@ -13,12 +13,13 @@ import requests
 from threading import Thread
 
 
-opts,args = getopt.getopt(sys.argv[1:], 'tdlme:', ['test_suits=', 'dirpath=', 'dev_list=', 'log_mods=', 'emulate_hdd='] ) 
+opts,args = getopt.getopt(sys.argv[1:], 'tdlme:', ['test_suits=', 'dirpath=', 'dev_list=', 'log_mods=', 'emulate_hdd=', 'http_port='] )
 test_suits = ""
 dirpath = "./"
 dev_list = ""
 log_mods = ""
 emulate_hdd=""
+http_port = ""
 app_mem_size_in_gb=""
 skip_vol_verify_recovery=""
 
@@ -32,6 +33,9 @@ for opt,arg in opts:
     if opt in ('-l', '--dev_list'):
         dev_list = arg
         print(("device list (%s)") % (arg))
+    if opt in ('-p', '--http_port'):
+        http_port = " --http_port " + arg
+        print(("http_port (%s)") % (arg))
     if opt in ('-m', '--log_mods'):
         log_mods = arg
         print(("log_mods (%s)") % (arg))
@@ -59,7 +63,7 @@ if (test_suits == "nightly") :
     if (os.environ.get('USER_WANT_SPDK')) or ("--spdk" in addln_opts):
         app_mem_size_in_gb = ' --app_mem_size_in_gb=5' # set to 5GB for spdk mode;
 
-vol_addln_opts = addln_opts + emulate_hdd + app_mem_size_in_gb + skip_vol_verify_recovery
+vol_addln_opts = addln_opts + emulate_hdd + app_mem_size_in_gb + skip_vol_verify_recovery + http_port
 
 print("addln_opts: " + addln_opts)
 print("vol_addln_opts: " + vol_addln_opts)
@@ -477,7 +481,7 @@ def vdev_mod_abort():
 def http_sanity_routine():
     sleep(20)
     get_api_list = ['version', 'getObjLife', 'getLogLevel', 'verifyHS', 'mallocStats', 'getConfig', 'getStatus'""", 'verifyBitmap'"""]
-    endpoint = "127.0.0.1:12345"
+    endpoint = "127.0.0.1:5000"
     # homestore takes variable time to init. Retry brfore failing.
     retry_limit = 10
     for api in get_api_list:

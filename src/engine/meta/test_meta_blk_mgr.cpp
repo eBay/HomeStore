@@ -124,7 +124,11 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
     params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
     params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
 
-    test_common::set_random_http_port();
+    if (SISL_OPTIONS.count("http_port")) {
+        test_common::set_fixed_http_port(SISL_OPTIONS["http_port"].as< uint32_t >());
+    }else {
+        test_common::set_random_http_port();
+    }
     VolInterface::init(params);
 
     {
@@ -820,7 +824,9 @@ SISL_OPTION_GROUP(
     (per_write, "", "per_write", "write percentage", ::cxxopts::value< uint32_t >()->default_value("60"), "number"),
     (per_remove, "", "per_remove", "remove percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
     (bitmap, "", "bitmap", "bitmap test", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
-    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
+    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+    (http_port, "", "http_port", "http_port", ::cxxopts::value< uint32_t >()->default_value("5000"),
+     "http server port"));
 
 int main(int argc, char* argv[]) {
     ::testing::GTEST_FLAG(filter) = "*random_load_test*";
