@@ -330,35 +330,35 @@ def vdev_nightly():
 def meta_blk_store_nightly():
     print("meta blk store test started")
     cmd_opts = "--gtest_filter=VMetaBlkMgrTest.CompressionBackoff"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
     
     cmd_opts = "--gtest_filter=VMetaBlkMgrTest.RecoveryFromBadData"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
 
     cmd_opts = "--gtest_filter=VMetaBlkMgrTest.min_drive_size_test"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
 
     cmd_opts = "--gtest_filter=VMetaBlkMgrTest.single_read_test"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
     
     cmd_opts = "--run_time=7200 --num_io=1000000"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
     
     cmd_opts = "--min_write_size=65536 --max_write_size=2097152 --run_time=14400 --num_io=1000000"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
     
     cmd_opts = "--min_write_size=10485760 --max_write_size=104857600 --bitmap=1"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
     
     cmd_opts = "--gtest_filter=VMetaBlkMgrTest.write_to_full_test" # write to file instead of real disk to save time;
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
     print("meta blk store test completed")
 
 def logstore_nightly():
     print("log store test started")
 
     cmd_opts = "--iterations=10"
-    subprocess.check_call(dirpath + "test_log_store " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_log_store " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
 
     print("log store test completed")
     
