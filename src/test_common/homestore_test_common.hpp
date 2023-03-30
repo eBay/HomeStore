@@ -30,6 +30,13 @@ const std::string USER_WANT_DIRECT_IO{"USER_WANT_DIRECT_IO"};               // u
 
 namespace test_common {
 
+// Fix a port for http server
+inline static void set_fixed_http_port(uint32_t http_port){
+    IM_SETTINGS_FACTORY().modifiable_settings([http_port](auto& s) { s.io_env->http_port = http_port; });
+    IM_SETTINGS_FACTORY().save();
+    LOGINFO("http port = {}", http_port);
+}
+
 // generate random port for http server
 inline static void set_random_http_port() {
     static std::random_device dev;

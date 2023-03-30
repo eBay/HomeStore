@@ -13,12 +13,13 @@ import requests
 from threading import Thread
 
 
-opts,args = getopt.getopt(sys.argv[1:], 'tdlme:', ['test_suits=', 'dirpath=', 'dev_list=', 'log_mods=', 'emulate_hdd='] ) 
+opts,args = getopt.getopt(sys.argv[1:], 'tdlme:', ['test_suits=', 'dirpath=', 'dev_list=', 'log_mods=', 'emulate_hdd=', 'http_port='] )
 test_suits = ""
 dirpath = "./"
 dev_list = ""
 log_mods = ""
 emulate_hdd=""
+http_port = ""
 app_mem_size_in_gb=""
 skip_vol_verify_recovery=""
 
@@ -32,6 +33,9 @@ for opt,arg in opts:
     if opt in ('-l', '--dev_list'):
         dev_list = arg
         print(("device list (%s)") % (arg))
+    if opt in ('-p', '--http_port'):
+        http_port = " --http_port " + arg
+        print(("http_port (%s)") % (arg))
     if opt in ('-m', '--log_mods'):
         log_mods = arg
         print(("log_mods (%s)") % (arg))
@@ -59,7 +63,7 @@ if (test_suits == "nightly") :
     if (os.environ.get('USER_WANT_SPDK')) or ("--spdk" in addln_opts):
         app_mem_size_in_gb = ' --app_mem_size_in_gb=5' # set to 5GB for spdk mode;
 
-vol_addln_opts = addln_opts + emulate_hdd + app_mem_size_in_gb + skip_vol_verify_recovery
+vol_addln_opts = addln_opts + emulate_hdd + app_mem_size_in_gb + skip_vol_verify_recovery + http_port
 
 print("addln_opts: " + addln_opts)
 print("vol_addln_opts: " + vol_addln_opts)
@@ -326,35 +330,35 @@ def vdev_nightly():
 def meta_blk_store_nightly():
     print("meta blk store test started")
     cmd_opts = "--gtest_filter=VMetaBlkMgrTest.CompressionBackoff"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
     
     cmd_opts = "--gtest_filter=VMetaBlkMgrTest.RecoveryFromBadData"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
 
     cmd_opts = "--gtest_filter=VMetaBlkMgrTest.min_drive_size_test"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
 
     cmd_opts = "--gtest_filter=VMetaBlkMgrTest.single_read_test"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
     
     cmd_opts = "--run_time=7200 --num_io=1000000"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
     
     cmd_opts = "--min_write_size=65536 --max_write_size=2097152 --run_time=14400 --num_io=1000000"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
     
     cmd_opts = "--min_write_size=10485760 --max_write_size=104857600 --bitmap=1"
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
     
     cmd_opts = "--gtest_filter=VMetaBlkMgrTest.write_to_full_test" # write to file instead of real disk to save time;
-    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_meta_blk_mgr " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
     print("meta blk store test completed")
 
 def logstore_nightly():
     print("log store test started")
 
     cmd_opts = "--iterations=10"
-    subprocess.check_call(dirpath + "test_log_store " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    subprocess.check_call(dirpath + "test_log_store " + cmd_opts + http_port, stderr=subprocess.STDOUT, shell=True)
 
     print("log store test completed")
     
@@ -477,7 +481,7 @@ def vdev_mod_abort():
 def http_sanity_routine():
     sleep(20)
     get_api_list = ['version', 'getObjLife', 'getLogLevel', 'verifyHS', 'mallocStats', 'getConfig', 'getStatus'""", 'verifyBitmap'"""]
-    endpoint = "127.0.0.1:12345"
+    endpoint = "127.0.0.1:5000"
     # homestore takes variable time to init. Retry brfore failing.
     retry_limit = 10
     for api in get_api_list:
