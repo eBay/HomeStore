@@ -21,7 +21,6 @@
 #pragma once
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
-#include <iomgr/iomgr_config.hpp>
 #include <homestore/homestore.hpp>
 
 const std::string SPDK_ENV_VAR_STRING{"USER_WANT_SPDK"};
@@ -40,6 +39,8 @@ SISL_OPTION_GROUP(test_common_setup,
                    ::cxxopts::value< uint64_t >()->default_value("1024"), "number"),
                   (device_list, "", "device_list", "Device List instead of default created",
                    ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
+                  (http_port, "", "http_port", "http port (0 for no http, -1 for random, rest specific value)",
+                   ::cxxopts::value< int >()->default_value("-1"), "number"),
                   (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 using namespace homestore;
@@ -47,14 +48,13 @@ using namespace homestore;
 namespace test_common {
 
 // generate random port for http server
-inline static void set_random_http_port() {
+inline static uint32_t generate_random_http_port() {
     static std::random_device dev;
     static std::mt19937 rng(dev());
     std::uniform_int_distribution< std::mt19937::result_type > dist(1001u, 99999u);
     const uint32_t http_port = dist(rng);
     LOGINFO("random port generated = {}", http_port);
-    IM_SETTINGS_FACTORY().modifiable_settings([http_port](auto& s) { s.io_env->http_port = http_port; });
-    IM_SETTINGS_FACTORY().save();
+    return http_port;
 }
 
 class HSTestHelper {
@@ -118,7 +118,12 @@ public:
         }
 
         LOGINFO("Starting iomgr with {} threads, spdk: {}", nthreads, is_spdk);
-        ioenvironment.with_iomgr(nthreads, is_spdk);
+        ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = nthreads, .is_spdk = is_spdk});
+
+        auto const http_port = SISL_OPTIONS["http_port"].as< int >();
+        if (http_port != 0) {
+            ioenvironment.with_http_server((http_port == -1) ? generate_random_http_port() : uint32_cast(http_port));
+        }
 
         const uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
         LOGINFO("Initialize and start HomeStore with app_mem_size = {}", homestore::in_bytes(app_mem_size));
@@ -140,6 +145,7 @@ public:
         iomanager.stop();
 
         if (cleanup) { remove_files(s_dev_names); }
+        s_dev_names.clear();
     }
 };
 } // namespace test_common

@@ -91,19 +91,18 @@ public:
     void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
 
     void simulate_io() {
-        iomanager.run_on(iomgr::thread_regex::least_busy_worker, [this](iomgr::io_thread_addr_t) {
+        iomanager.run_on_forget(iomgr::reactor_regex::least_busy_worker, [this]() {
             auto cur_cp = homestore::hs()->cp_mgr().cp_guard();
             r_cast< TestCPContext* >(cur_cp->context(cp_consumer_t::HS_CLIENT))->add();
         });
     }
 
     void rescheduled_io() {
-        iomanager.run_on(iomgr::thread_regex::least_busy_worker, [this](iomgr::io_thread_addr_t) {
+        iomanager.run_on_forget(iomgr::reactor_regex::least_busy_worker, [this]() {
             auto cur_cp = homestore::hs()->cp_mgr().cp_guard();
-            iomanager.run_on(iomgr::thread_regex::least_busy_worker,
-                             [moved_cp = std::move(cur_cp)](iomgr::io_thread_addr_t) mutable {
-                                 r_cast< TestCPContext* >(moved_cp->context(cp_consumer_t::HS_CLIENT))->add();
-                             });
+            iomanager.run_on_forget(iomgr::reactor_regex::least_busy_worker, [moved_cp = std::move(cur_cp)]() mutable {
+                r_cast< TestCPContext* >(moved_cp->context(cp_consumer_t::HS_CLIENT))->add();
+            });
         });
     }
 

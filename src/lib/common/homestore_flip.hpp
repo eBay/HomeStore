@@ -21,6 +21,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <map>
 
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <sisl/flip/flip.hpp>
@@ -30,11 +31,40 @@
 namespace homestore {
 class FlipTimerIOMgr : public flip::FlipTimerBase {
 public:
-    void schedule(const boost::posix_time::time_duration delay_us, const std::function< void() >& closure) override {
-        auto cb{[closure]([[maybe_unused]] void* const cookie) { closure(); }};
-        iomgr::IOManager::instance().schedule_thread_timer(delay_us.total_nanoseconds(), false /* recurring */,
-                                                           nullptr /* cookie */, cb);
+    void schedule(const std::string& timer_name, const boost::posix_time::time_duration delay_us,
+                  const std::function< void() >& closure) override {
+        auto thdl = std::make_shared< iomgr::timer_handle_t >();
+        auto cb = [closure, timer_name, thdl, this](void*) {
+            closure();
+            remove_timer(timer_name, thdl);
+        };
+
+        std::unique_lock< std::mutex > lk(m_mutex);
+        *thdl = iomgr::IOManager::instance().schedule_thread_timer(delay_us.total_nanoseconds(), false /* recurring */,
+                                                                   nullptr /* cookie */, cb);
+        m_timer_instances.insert(std::make_pair(timer_name, thdl));
     }
+
+    void cancel(const std::string& timer_name) { remove_timer(timer_name, nullptr); }
+
+private:
+    void remove_timer(const std::string& timer_name, const std::shared_ptr< iomgr::timer_handle_t >& thdl) {
+        std::unique_lock< std::mutex > lk(m_mutex);
+        if (thdl) { iomgr::IOManager::instance().cancel_timer(*thdl, false /* wait_to_cancel */); }
+
+        auto range = m_timer_instances.equal_range(timer_name);
+        for (auto it = range.first; it != range.second;) {
+            if ((thdl == nullptr) || (it->second == thdl)) {
+                it = m_timer_instances.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+private:
+    std::mutex m_mutex;
+    std::multimap< std::string, std::shared_ptr< iomgr::timer_handle_t > > m_timer_instances;
 };
 
 namespace HomeStoreFlip {

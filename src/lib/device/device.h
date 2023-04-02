@@ -72,7 +72,7 @@ class DeviceManager {
 
 public:
     DeviceManager(const std::vector< dev_info >& data_devices, NewVDevCallback vcb, uint32_t vdev_metadata_size,
-                  iomgr::io_interface_comp_cb_t io_comp_cb, vdev_error_callback vdev_error_cb);
+                  vdev_error_callback vdev_error_cb);
 
     DeviceManager(const DeviceManager& other) = delete;
     DeviceManager& operator=(const DeviceManager& other) = delete;
@@ -179,7 +179,6 @@ private:
     int m_hdd_open_flags;
     int m_ssd_open_flags;
     NewVDevCallback m_new_vdev_cb;
-    iomgr::io_interface_comp_cb_t m_io_comp_cb;
     std::atomic< uint64_t > m_data_gen_cnt{0};
     uint8_t* m_data_chunk_memory{nullptr};
     const std::vector< dev_info > m_data_devices;

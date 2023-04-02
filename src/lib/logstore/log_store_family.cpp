@@ -50,9 +50,10 @@ void LogStoreFamily::start(bool format, JournalVirtualDev* blk_store) {
     // do the remove from store id reserver now.
     // TODO: At present we are assuming all unopened store ids could be removed. In future have a callback to this
     // start routine, which takes the list of unopened store ids and can return a new set, which can be removed.
-    m_id_logstore_map.withWLock([&](auto& m) {
+    {
+        folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);
         for (auto it{std::begin(m_unopened_store_id)}; it != std::end(m_unopened_store_id);) {
-            if (m.find(*it) == m.end()) {
+            if (m_id_logstore_map.find(*it) == m_id_logstore_map.end()) {
                 // Not opened even on second time check, simply unreserve id
                 m_log_dev.unreserve_store_id(*it);
             }
@@ -61,7 +62,7 @@ void LogStoreFamily::start(bool format, JournalVirtualDev* blk_store) {
 
         // Also call the logstore to inform that start/replay is completed.
         if (!format) {
-            for (auto& p : m) {
+            for (auto& p : m_id_logstore_map) {
                 auto& lstore{p.second.m_log_store};
                 if (lstore && lstore->get_log_replay_done_cb()) {
                     lstore->get_log_replay_done_cb()(lstore, lstore->seq_num() - 1);
@@ -69,11 +70,14 @@ void LogStoreFamily::start(bool format, JournalVirtualDev* blk_store) {
                 }
             }
         }
-    });
+    }
 }
 
 void LogStoreFamily::stop() {
-    m_id_logstore_map.wlock()->clear();
+    {
+        folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);
+        m_id_logstore_map.clear();
+    }
     m_log_dev.stop();
 }
 
@@ -82,39 +86,38 @@ std::shared_ptr< HomeLogStore > LogStoreFamily::create_new_log_store(bool append
     std::shared_ptr< HomeLogStore > lstore;
     lstore = std::make_shared< HomeLogStore >(*this, store_id, append_mode, 0);
 
-    auto m = m_id_logstore_map.wlock();
-    const auto it = m->find(store_id);
-    HS_REL_ASSERT((it == m->end()), "store_id {}-{} already exists", m_family_id, store_id);
-
-    m->insert(std::make_pair<>(store_id, logstore_info_t{lstore, nullptr, append_mode}));
-
+    {
+        folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);
+        const auto it = m_id_logstore_map.find(store_id);
+        HS_REL_ASSERT((it == m_id_logstore_map.end()), "store_id {}-{} already exists", m_family_id, store_id);
+        m_id_logstore_map.insert(std::make_pair<>(store_id, logstore_info_t{lstore, nullptr, append_mode}));
+    }
     LOGINFO("Created log store id {}-{}", m_family_id, store_id);
     return lstore;
 }
 
 void LogStoreFamily::open_log_store(logstore_id_t store_id, bool append_mode, const log_store_opened_cb_t& on_open_cb) {
-    auto m = m_id_logstore_map.wlock();
-    const auto it = m->find(store_id);
-    HS_REL_ASSERT((it == m->end()), "store_id {}-{} already exists", m_family_id, store_id);
-
+    folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);
+    const auto it = m_id_logstore_map.find(store_id);
+    HS_REL_ASSERT((it == m_id_logstore_map.end()), "store_id {}-{} already exists", m_family_id, store_id);
     LOGINFO("Opening log store id {}-{}", m_family_id, store_id);
-    m->insert(std::make_pair<>(store_id, logstore_info_t{nullptr, on_open_cb, append_mode}));
+    m_id_logstore_map.insert(std::make_pair<>(store_id, logstore_info_t{nullptr, on_open_cb, append_mode}));
 }
 
 void LogStoreFamily::remove_log_store(logstore_id_t store_id) {
     LOGINFO("Removing log store id {}-{}", m_family_id, store_id);
-    auto ret = m_id_logstore_map.wlock()->erase(store_id);
-    HS_REL_ASSERT((ret == 1), "try to remove invalid store_id {}-{}", m_family_id, store_id);
+
+    {
+        folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);
+        auto ret = m_id_logstore_map.erase(store_id);
+        HS_REL_ASSERT((ret == 1), "try to remove invalid store_id {}-{}", m_family_id, store_id);
+    }
     m_log_dev.unreserve_store_id(store_id);
 }
 
-void LogStoreFamily::device_truncate_in_user_reactor(const std::shared_ptr< truncate_req >& treq) {
-    const bool locked_now = m_log_dev.try_lock_flush([this, treq]() {
-        if (iomanager.am_i_tight_loop_reactor()) {
-            iomanager.run_on(
-                logstore_service().m_truncate_thread,
-                [this, treq]([[maybe_unused]] iomgr::io_thread_addr_t addr) { device_truncate_in_user_reactor(treq); });
-        } else {
+void LogStoreFamily::device_truncate(const std::shared_ptr< truncate_req >& treq) {
+    m_log_dev.run_under_flush_lock([this, treq]() {
+        iomanager.run_on_forget(logstore_service().truncate_thread(), [this, treq]() {
             const logdev_key trunc_upto = do_device_truncate(treq->dry_run);
             bool done{false};
             if (treq->cb || treq->wait_till_done) {
@@ -128,15 +131,16 @@ void LogStoreFamily::device_truncate_in_user_reactor(const std::shared_ptr< trun
                 if (treq->cb) { treq->cb(treq->m_trunc_upto_result); }
                 if (treq->wait_till_done) { treq->cv.notify_one(); }
             }
-        }
+            m_log_dev.unlock_flush();
+        });
+        return false; // Do not release the flush lock yet, the scheduler will unlock it.
     });
-    if (locked_now) { m_log_dev.unlock_flush(); }
 }
 
 void LogStoreFamily::on_log_store_found(logstore_id_t store_id, const logstore_superblk& sb) {
-    auto m = m_id_logstore_map.rlock();
-    const auto it = m->find(store_id);
-    if (it == m->end()) {
+    folly::SharedMutexWritePriority::ReadHolder holder(m_store_map_mtx);
+    const auto it = m_id_logstore_map.find(store_id);
+    if (it == m_id_logstore_map.end()) {
         LOGERROR("Store Id {}-{} found but not opened yet.", m_family_id, store_id);
         m_unopened_store_id.insert(store_id);
         m_unopened_store_io.insert(std::make_pair<>(store_id, 0));
@@ -168,20 +172,24 @@ void LogStoreFamily::on_io_completion(logstore_id_t id, logdev_key ld_key, logde
 
 void LogStoreFamily::on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key,
                                  logdev_key flush_ld_key, log_buffer buf, uint32_t nremaining_in_batch) {
-    auto m = m_id_logstore_map.rlock();
-    auto const it = m->find(id);
-    if (it == m->end()) {
-        auto [unopened_it, inserted] = m_unopened_store_io.insert(std::make_pair<>(id, 0));
-        if (inserted) {
-            // HS_REL_ASSERT(0, "log id  {}-{} not found", m_family_id, id);
+    HomeLogStore* log_store{nullptr};
+
+    {
+        folly::SharedMutexWritePriority::ReadHolder holder(m_store_map_mtx);
+        auto const it = m_id_logstore_map.find(id);
+        if (it == m_id_logstore_map.end()) {
+            auto [unopened_it, inserted] = m_unopened_store_io.insert(std::make_pair<>(id, 0));
+            if (inserted) {
+                // HS_REL_ASSERT(0, "log id  {}-{} not found", m_family_id, id);
+            }
+            ++unopened_it->second;
+            return;
         }
-        ++unopened_it->second;
-        return;
+        log_store = it->second.m_log_store.get();
     }
-    auto& log_store = it->second.m_log_store;
     if (!log_store) { return; }
     log_store->on_log_found(seq_num, ld_key, flush_ld_key, buf);
-    on_batch_completion(log_store.get(), nremaining_in_batch, flush_ld_key);
+    on_batch_completion(log_store, nremaining_in_batch, flush_ld_key);
 }
 
 void LogStoreFamily::on_batch_completion(HomeLogStore* log_store, uint32_t nremaining_in_batch,
@@ -216,8 +224,10 @@ logdev_key LogStoreFamily::do_device_truncate(bool dry_run) {
     logdev_key min_safe_ld_key = logdev_key::out_of_bound_ld_key();
 
     std::string dbg_str{"Format [store_id:trunc_lsn:logidx:dev_trunc_pending?:active_writes_in_trucate?] "};
-    m_id_logstore_map.withRLock([this, &min_safe_ld_key, &dbg_str](auto& id_logstore_map) {
-        for (auto& id_logstore : id_logstore_map) {
+
+    {
+        folly::SharedMutexWritePriority::ReadHolder holder(m_store_map_mtx);
+        for (auto& id_logstore : m_id_logstore_map) {
             auto& store_ptr = id_logstore.second.m_log_store;
             const auto& trunc_info = store_ptr->pre_device_truncation();
 
@@ -241,7 +251,7 @@ logdev_key LogStoreFamily::do_device_truncate(bool dry_run) {
             }
             m_min_trunc_stores.push_back(store_ptr);
         }
-    });
+    }
 
     if ((min_safe_ld_key == logdev_key::out_of_bound_ld_key()) || (min_safe_ld_key.idx < 0)) {
         HS_PERIODIC_LOG(
@@ -274,15 +284,14 @@ logdev_key LogStoreFamily::do_device_truncate(bool dry_run) {
 nlohmann::json LogStoreFamily::dump_log_store(const log_dump_req& dump_req) {
     nlohmann::json json_dump{}; // create root object
     if (dump_req.log_store == nullptr) {
-        m_id_logstore_map.withRLock([&](auto& id_logstore_map) {
-            for (auto& id_logstore : id_logstore_map) {
-                auto store_ptr{id_logstore.second.m_log_store};
-                const std::string id{std::to_string(store_ptr->get_store_id())};
-                // must use operator= construction as copy construction results in error
-                nlohmann::json val = store_ptr->dump_log_store(dump_req);
-                json_dump[id] = std::move(val);
-            }
-        });
+        folly::SharedMutexWritePriority::ReadHolder holder(m_store_map_mtx);
+        for (auto& id_logstore : m_id_logstore_map) {
+            auto store_ptr{id_logstore.second.m_log_store};
+            const std::string id{std::to_string(store_ptr->get_store_id())};
+            // must use operator= construction as copy construction results in error
+            nlohmann::json val = store_ptr->dump_log_store(dump_req);
+            json_dump[id] = std::move(val);
+        }
     } else {
         const std::string id{std::to_string(dump_req.log_store->get_store_id())};
         // must use operator= construction as copy construction results in error
@@ -304,11 +313,12 @@ nlohmann::json LogStoreFamily::get_status(int verbosity) const {
     m_log_dev.get_status(verbosity, js);
 
     // All logstores
-    m_id_logstore_map.withRLock([&](auto& id_logstore_map) {
-        for (const auto& [id, lstore] : id_logstore_map) {
+    {
+        folly::SharedMutexWritePriority::ReadHolder holder(m_store_map_mtx);
+        for (const auto& [id, lstore] : m_id_logstore_map) {
             js["logstore_id_" + std::to_string(id)] = lstore.m_log_store->get_status(verbosity);
         }
-    });
+    }
     return js;
 }
 } // namespace homestore

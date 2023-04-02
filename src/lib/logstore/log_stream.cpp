@@ -141,11 +141,10 @@ sisl::byte_view log_stream_reader::read_next_bytes(uint64_t nbytes) {
     }
 
     const auto prev_pos = m_vdev->seeked_pos();
-    auto actual_read = m_vdev->sync_next_read(out_buf.bytes(), nbytes);
-    HS_REL_ASSERT_NE(actual_read, 0, "zero bytes are read");
-    LOGINFOMOD(logstore, "LogStream read {} bytes from vdev offset {} and vdev cur offset {}", actual_read, prev_pos,
+    m_vdev->sync_next_read(out_buf.bytes(), nbytes);
+    LOGINFOMOD(logstore, "LogStream read {} bytes from vdev offset {} and vdev cur offset {}", nbytes, prev_pos,
                m_vdev->seeked_pos());
-    ret_buf.set_size(actual_read + m_cur_log_buf.size());
+    ret_buf.set_size(nbytes + m_cur_log_buf.size());
     return ret_buf;
 }
 } // namespace homestore

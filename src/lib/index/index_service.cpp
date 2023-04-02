@@ -61,51 +61,14 @@ void IndexService::meta_blk_found(const sisl::byte_view& buf, void* meta_cookie)
 }
 
 void IndexService::start() {
-    start_threads();
-
     // Start Writeback cache
     m_wb_cache = std::make_unique< IndexWBCache >(m_vdev, hs()->evictor(),
                                                   hs()->device_mgr()->atomic_page_size({PhysicalDevGroup::FAST}));
 }
 
-void IndexService::start_threads() {
-    struct Context {
-        std::condition_variable cv;
-        std::mutex mtx;
-        size_t thread_cnt{0};
-    };
-    auto ctx = std::make_shared< Context >();
-    auto nthreads = std::max(uint32_cast(1), HS_DYNAMIC_CONFIG(generic.num_btree_write_threads));
-    m_btree_write_thread_ids.reserve(nthreads);
-
-    for (uint32_t i = 0; i < nthreads; ++i) {
-        /* start user thread for btree write operations */
-        iomanager.create_reactor("index_btree_write_" + std::to_string(i), INTERRUPT_LOOP,
-                                 [this, &ctx](bool is_started) {
-                                     if (is_started) {
-                                         {
-                                             std::unique_lock< std::mutex > lk{ctx->mtx};
-                                             m_btree_write_thread_ids.push_back(iomanager.iothread_self());
-                                             ++(ctx->thread_cnt);
-                                         }
-                                         ctx->cv.notify_one();
-                                     }
-                                 });
-    }
-
-    {
-        std::unique_lock< std::mutex > lk{ctx->mtx};
-        ctx->cv.wait(lk, [&ctx, nthreads] { return (ctx->thread_cnt == nthreads); });
-    }
-}
-
 void IndexService::add_index_table(const std::shared_ptr< IndexTableBase >& tbl) {
     std::unique_lock lg(m_index_map_mtx);
     m_index_map.insert(std::make_pair(tbl->uuid(), tbl));
-}
-
-iomgr::io_thread_t IndexService::get_next_btree_write_thread() {
-    return m_btree_write_thread_ids[m_btree_write_thrd_idx++ % m_btree_write_thread_ids.size()];
 }
 
 uint32_t IndexService::node_size() const { return m_vdev->block_size(); }

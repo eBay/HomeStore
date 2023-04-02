@@ -39,13 +39,11 @@
 
 namespace homestore {
 
-std::atomic< uint64_t > vdev_req_context::s_req_id{0};
+// std::atomic< uint64_t > vdev_req_context::s_req_id{0};
 
 DeviceManager::DeviceManager(const std::vector< dev_info >& data_devices, NewVDevCallback vcb,
-                             uint32_t vdev_metadata_size, iomgr::io_interface_comp_cb_t io_comp_cb,
-                             vdev_error_callback vdev_error_cb) :
+                             uint32_t vdev_metadata_size, vdev_error_callback vdev_error_cb) :
         m_new_vdev_cb{std::move(vcb)},
-        m_io_comp_cb{std::move(io_comp_cb)},
         m_data_devices{data_devices},
         m_vdev_metadata_size{vdev_metadata_size},
         m_vdev_error_cb{std::move(vdev_error_cb)} {
@@ -182,9 +180,9 @@ void DeviceManager::init_devices() {
     for (const auto& d : m_data_devices) {
         bool is_inited;
 
-        std::unique_ptr< PhysicalDev > pdev{std::make_unique< PhysicalDev >(
-            this, d.dev_names, get_device_open_flags(d.dev_names), sys_uuid, m_pdev_id++, max_dev_offset, true,
-            dm_derived.info_size, m_io_comp_cb, &is_inited)};
+        std::unique_ptr< PhysicalDev > pdev{
+            std::make_unique< PhysicalDev >(this, d.dev_names, get_device_open_flags(d.dev_names), sys_uuid,
+                                            m_pdev_id++, max_dev_offset, true, dm_derived.info_size, &is_inited)};
 
         LOGINFO("Initializing device name: {}, with system uuid: {} size {}", d.dev_names, std::ctime(&sys_uuid),
                 in_bytes(pdev->size()));
@@ -251,7 +249,7 @@ void DeviceManager::load_and_repair_devices(const hs_uuid_t& sys_uuid) {
         bool is_inited;
         std::unique_ptr< PhysicalDev > pdev =
             std::make_unique< PhysicalDev >(this, d.dev_names, get_device_open_flags(d.dev_names), sys_uuid,
-                                            INVALID_DEV_ID, 0, false, dm_derived.info_size, m_io_comp_cb, &is_inited);
+                                            INVALID_DEV_ID, 0, false, dm_derived.info_size, &is_inited);
         if (!is_inited) {
             // Super block is not present, possibly a new device, will format the device later
             HS_LOG(CRITICAL, device,

@@ -138,7 +138,7 @@ struct logstore_req {
     }
     static logstore_req* make(HomeLogStore* store, logstore_seq_num_t seq_num, const sisl::io_blob& data,
                               bool is_write_req = true) {
-        logstore_req* req = sisl::ObjectAllocator< logstore_req >::make_object();
+        logstore_req* req = new logstore_req();
         req->log_store = store;
         req->seq_num = seq_num;
         req->data = data;
@@ -149,8 +149,8 @@ struct logstore_req {
         return req;
     }
 
-    static void free(logstore_req* const req) {
-        if (req->is_internal_req) { sisl::ObjectAllocator< logstore_req >::deallocate(req); }
+    static void free(logstore_req* req) {
+        if (req->is_internal_req) { delete req; }
     }
 
     logstore_req() = default;

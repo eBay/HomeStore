@@ -436,8 +436,7 @@ public:
      *  this field will not be changed if is_init is set to true(first-time-boot)
      */
     PhysicalDev(DeviceManager* mgr, const std::string& devname, int oflags, const hs_uuid_t& uuid, uint32_t dev_num,
-                uint64_t dev_offset, bool is_init, uint64_t dm_info_size,
-                const iomgr::io_interface_comp_cb_t& io_comp_cb, bool* is_inited);
+                uint64_t dev_offset, bool is_init, uint64_t dm_info_size, bool* is_inited);
 
     PhysicalDev(const PhysicalDev&) = delete;
     PhysicalDev(PhysicalDev&&) noexcept = delete;

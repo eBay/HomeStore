@@ -92,7 +92,6 @@ private:
     std::unique_ptr< IndexServiceCallbacks > m_index_svc_cbs;
 
     bool m_vdev_failed{false};
-    std::atomic< uint32_t > m_format_cnt{1};
 
     float m_index_store_size_pct{0};
     float m_data_store_size_pct{0};
@@ -141,9 +140,8 @@ public:
     HomeStore& before_init_devices(hs_init_starting_cb_t init_start_cb);
 
     void init(bool wait_for_init = false);
-    void shutdown(bool wait = true, const hs_comp_callback& done_cb = nullptr);
+    void shutdown();
 
-    iomgr::io_thread_t get_hs_flush_thread() const;
     // cap_attrs get_system_capacity() const; // Need to move this to homeblks/homeobj
     bool is_first_time_boot() const;
 

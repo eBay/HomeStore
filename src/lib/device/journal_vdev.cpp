@@ -139,13 +139,13 @@ auto JournalVirtualDev::process_pwrite_offset(size_t len, off_t offset) {
 }
 
 /////////////////////////////// Write Section //////////////////////////////////
-void JournalVirtualDev::async_append(const uint8_t* buf, size_t size, vdev_io_comp_cb_t cb) {
+folly::Future< bool > JournalVirtualDev::async_append(const uint8_t* buf, size_t size) {
     if (!validate_append_size(size)) {
-        cb(std::make_error_condition(std::errc::no_space_on_device), nullptr /*cookie*/);
+        return folly::makeFuture< bool >(std::system_error(std::make_error_code(std::errc::no_space_on_device)));
     } else {
         auto [pdev, chunk, offset_in_dev] = process_pwrite_offset(size, m_seek_cursor);
-        async_write_internal(r_cast< const char* >(buf), size, pdev, chunk, offset_in_dev, std::move(cb));
         m_seek_cursor += size;
+        return async_write_internal(r_cast< const char* >(buf), size, pdev, chunk, offset_in_dev);
     }
 }
 
@@ -162,15 +162,15 @@ void JournalVirtualDev::async_append(const uint8_t* buf, size_t size, vdev_io_co
  * @param cb : callback after write is completed, can be null
  *
  */
-void JournalVirtualDev::async_pwrite(const uint8_t* buf, size_t size, off_t offset, vdev_io_comp_cb_t cb) {
+folly::Future< bool > JournalVirtualDev::async_pwrite(const uint8_t* buf, size_t size, off_t offset) {
     HS_REL_ASSERT_LE(size, m_reserved_sz, "Write size: larger then reserved size is not allowed!");
     m_reserved_sz -= size; // update reserved size
 
     auto [pdev, chunk, offset_in_dev] = process_pwrite_offset(size, offset);
-    async_write_internal(r_cast< const char* >(buf), size, pdev, chunk, offset_in_dev, std::move(cb));
+    return async_write_internal(r_cast< const char* >(buf), size, pdev, chunk, offset_in_dev);
 }
 
-void JournalVirtualDev::async_pwritev(const iovec* iov, int iovcnt, off_t offset, vdev_io_comp_cb_t cb) {
+folly::Future< bool > JournalVirtualDev::async_pwritev(const iovec* iov, int iovcnt, off_t offset) {
     auto const size = VirtualDev::get_len(iov, iovcnt);
 
     // if size is smaller than reserved size, it means write will never be overlapping start offset;
@@ -179,18 +179,18 @@ void JournalVirtualDev::async_pwritev(const iovec* iov, int iovcnt, off_t offset
 
     m_reserved_sz -= size;
     auto [pdev, chunk, offset_in_dev] = process_pwrite_offset(size, offset);
-    async_writev_internal(iov, iovcnt, size, pdev, chunk, offset_in_dev, std::move(cb));
+    return async_writev_internal(iov, iovcnt, size, pdev, chunk, offset_in_dev);
 }
 
-ssize_t JournalVirtualDev::sync_pwrite(const uint8_t* buf, size_t size, off_t offset) {
+void JournalVirtualDev::sync_pwrite(const uint8_t* buf, size_t size, off_t offset) {
     HS_REL_ASSERT_LE(size, m_reserved_sz, "Write size: larger then reserved size is not allowed!");
     m_reserved_sz -= size; // update reserved size
 
     auto [pdev, chunk, offset_in_dev] = process_pwrite_offset(size, offset);
-    return sync_write_internal(r_cast< const char* >(buf), size, pdev, chunk, offset_in_dev);
+    sync_write_internal(r_cast< const char* >(buf), size, pdev, chunk, offset_in_dev);
 }
 
-ssize_t JournalVirtualDev::sync_pwritev(const iovec* iov, int iovcnt, off_t offset) {
+void JournalVirtualDev::sync_pwritev(const iovec* iov, int iovcnt, off_t offset) {
     auto const size = VirtualDev::get_len(iov, iovcnt);
 
     // if size is smaller than reserved size, it means write will never be overlapping start offset;
@@ -199,42 +199,11 @@ ssize_t JournalVirtualDev::sync_pwritev(const iovec* iov, int iovcnt, off_t offs
 
     m_reserved_sz -= size;
     auto [pdev, chunk, offset_in_dev] = process_pwrite_offset(size, offset);
-    return sync_writev_internal(iov, iovcnt, pdev, chunk, offset_in_dev);
+    sync_writev_internal(iov, iovcnt, pdev, chunk, offset_in_dev);
 }
-
-#if 0
-void JournalVirtualDev::do_pwrite(const void* buf, size_t count, off_t offset, vdev_io_comp_cb_t cb) {
-    uint32_t dev_id{0}, chunk_id{0};
-
-    auto const offset_in_dev = process_pwrite_offset(count, offset, dev_id, chunk_id);
-    try {
-        PhysicalDevChunk* chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
-        auto* pdev = m_primary_pdev_chunks_list[dev_id].pdev;
-
-        HS_LOG(TRACE, device, "Writing in device: {}, offset: {}, m_write_sz_in_total: {}, start off: {}",
-               to_hex(dev_id), to_hex(offset_in_dev), to_hex(m_write_sz_in_total.load()), to_hex(data_start_offset()));
-
-        async_write(r_cast< const char* >(buf), count, pdev, chunk, offset_in_dev, std::move(cb));
-    } catch (const std::exception& e) { HS_DBG_ASSERT(0, "{}", e.what()); }
-}
-
-off_t JournalVirtualDev::process_pwrite_offset(size_t len, off_t offset, uint32_t& dev_id, uint32_t& chunk_id) {
-    off_t offset_in_chunk{0};
-
-    // convert logical offset to dev offset
-    const uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
-
-    // this assert only valid for pwrite/pwritev, which calls alloc_next_append_blk to get the offset to do the
-    // write, which guarantees write will with the returned offset will not accross chunk boundary.
-    HS_REL_ASSERT_GE(m_chunk_size - offset_in_chunk, len, "Writing size: {} crossing chunk is not allowed!", len);
-
-    m_write_sz_in_total.fetch_add(len, std::memory_order_relaxed);
-    return offset_in_dev;
-}
-#endif
 
 /////////////////////////////// Read Section //////////////////////////////////
-ssize_t JournalVirtualDev::sync_next_read(uint8_t* buf, size_t size_rd) {
+void JournalVirtualDev::sync_next_read(uint8_t* buf, size_t size_rd) {
     uint32_t dev_id{0}, chunk_id{0};
     off_t offset_in_chunk{0};
 
@@ -258,20 +227,15 @@ ssize_t JournalVirtualDev::sync_next_read(uint8_t* buf, size_t size_rd) {
         across_chunk = true;
     }
 
-    auto const bytes_read = sync_pread(buf, size_rd, m_seek_cursor);
-    if (bytes_read != -1) {
-        // Update seek cursor after read;
-        HS_REL_ASSERT_EQ((size_t)bytes_read, size_rd, "bytes_read returned: {} must be equal to requested size: {}!",
-                         bytes_read, size_rd);
-        m_seek_cursor += bytes_read;
-        if (across_chunk) { m_seek_cursor += (m_chunk_size - end_of_chunk); }
-        m_seek_cursor = m_seek_cursor % size();
-    }
+    sync_pread(buf, size_rd, m_seek_cursor);
 
-    return bytes_read;
+    // Update seek cursor after read;
+    m_seek_cursor += size_rd;
+    if (across_chunk) { m_seek_cursor += (m_chunk_size - end_of_chunk); }
+    m_seek_cursor = m_seek_cursor % size();
 }
 
-ssize_t JournalVirtualDev::sync_pread(uint8_t* buf, size_t size, off_t offset) {
+void JournalVirtualDev::sync_pread(uint8_t* buf, size_t size, off_t offset) {
     uint32_t dev_id{0}, chunk_id{0};
     off_t offset_in_chunk{0};
 
@@ -289,7 +253,7 @@ ssize_t JournalVirtualDev::sync_pread(uint8_t* buf, size_t size, off_t offset) {
     return sync_read_internal(r_cast< char* >(buf), size, pdev, pchunk, offset_in_dev);
 }
 
-ssize_t JournalVirtualDev::sync_preadv(iovec* iov, int iovcnt, off_t offset) {
+void JournalVirtualDev::sync_preadv(iovec* iov, int iovcnt, off_t offset) {
     uint32_t dev_id{0}, chunk_id{0};
     off_t offset_in_chunk{0};
 
@@ -297,10 +261,10 @@ ssize_t JournalVirtualDev::sync_preadv(iovec* iov, int iovcnt, off_t offset) {
     const uint64_t offset_in_dev = logical_to_dev_offset(offset, dev_id, chunk_id, offset_in_chunk);
 
     if (m_chunk_size - offset_in_chunk < len) {
-        HS_DBG_ASSERT_EQ(
-            iovcnt, 1,
-            "iovector more than 1 element is not supported when requested read len is acrossing chunk boundary.");
-        if (iovcnt > 1) { return -1; }
+        if (iovcnt > 1) {
+            throw std::out_of_range(
+                "iovector more than 1 element is not supported when requested read len is acrossing chunk boundary");
+        }
 
         // truncate requsted read length to end of chunk;
         len = m_chunk_size - offset_in_chunk;
@@ -310,7 +274,7 @@ ssize_t JournalVirtualDev::sync_preadv(iovec* iov, int iovcnt, off_t offset) {
     auto* pdev = m_primary_pdev_chunks_list[dev_id].pdev;
     auto* chunk = m_primary_pdev_chunks_list[dev_id].chunks_in_pdev[chunk_id];
 
-    return sync_readv_internal(iov, iovcnt, len, pdev, chunk, offset_in_dev);
+    sync_readv_internal(iov, iovcnt, len, pdev, chunk, offset_in_dev);
 }
 
 off_t JournalVirtualDev::lseek(off_t offset, int whence) {

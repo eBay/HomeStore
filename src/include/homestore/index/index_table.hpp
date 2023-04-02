@@ -65,67 +65,17 @@ public:
     const superblk< index_table_sb >& mutable_super_blk() const { return m_sb; }
 
     template < typename ReqT >
-    folly::Future< btree_status_t > async_put(cshared< ReqT >& put_req) {
-        put_req->m_promise = std::move(folly::Promise< btree_status_t >());
-        iomanager.run_on(index_svc()->get_next_btree_write_thread(), [this, put_req](io_thread_addr_t) {
-            auto* cp = cp_manager()->cp_io_enter();
-            put_req->op_context = (void*)cp_manager()->get_context(cp, cp_consumer_t::INDEX_SVC);
-            auto ret = sisl::Btree< K, V >::put(*put_req);
-            cp_manager()->cp_io_exit(cp);
-
-            BT_DBG_ASSERT_NE(ret, btree_status_t::fast_path_not_possible, "Btree write thread is not fast path thread");
-            put_req->m_promise.setValue(ret);
-        });
-        return put_req->m_promise.getFuture();
+    btree_status_t put(ReqT& put_req) {
+        auto cpg = cp_guard();
+        put_req->op_context = (void*)cp_manager()->get_context(*cpg, cp_consumer_t::INDEX_SVC);
+        return sisl::Btree< K, V >::put(put_req);
     }
 
     template < typename ReqT >
-    folly::Future< btree_status_t > async_remove(cshared< ReqT >& remove_req) {
-        remove_req->m_promise = std::move(folly::Promise< btree_status_t >{});
-        iomanager.run_on(index_svc()->get_next_btree_write_thread(), [this, remove_req](io_thread_addr_t) {
-            auto* cp = cp_manager()->cp_io_enter();
-            remove_req->op_context = (void*)cp_manager()->get_context(cp, cp_consumer_t::INDEX_SVC);
-            auto ret = sisl::Btree< K, V >::remove(*remove_req);
-            cp_manager()->cp_io_exit(cp);
-
-            BT_DBG_ASSERT_NE(ret, btree_status_t::fast_path_not_possible, "Btree write thread is not fast path thread");
-            remove_req->m_promise.setValue(ret);
-        });
-        return remove_req->m_promise.getFuture();
-    }
-
-    template < typename ReqT >
-    folly::Future< btree_status_t > async_get(cshared< ReqT >& get_req) override {
-        auto ret = sisl::Btree< K, V >::get(*get_req);
-        if (ret == btree_status_t::fast_path_not_possible) {
-            get_req->m_promise = std::move(folly::Promise< btree_status_t >());
-            iomanager.run_on(index_svc()->get_next_btree_write_thread(), [this, get_req](io_thread_addr_t) {
-                auto ret = sisl::Btree< K, V >::get(*get_req);
-                BT_DBG_ASSERT_NE(ret, btree_status_t::fast_path_not_possible,
-                                 "Btree write thread is not fast path thread");
-                get_req->m_promise.setValue(ret);
-            });
-            return get_req->m_promise.getFuture();
-        } else {
-            return folly::makeFuture< btree_status_t >(ret);
-        }
-    }
-
-    template < typename ReqT >
-    folly::Future< btree_status_t > async_query(cshared< ReqT >& query_req) override {
-        auto ret = sisl::Btree< K, V >::query(*query_req);
-        if (ret == btree_status_t::fast_path_not_possible) {
-            query_req->m_promise = std::move(folly::Promise< btree_status_t >());
-            iomanager.run_on(index_svc()->get_next_btree_write_thread(), [this, query_req](io_thread_addr_t) {
-                auto ret = sisl::Btree< K, V >::query(*query_req);
-                BT_DBG_ASSERT_NE(ret, btree_status_t::fast_path_not_possible,
-                                 "Btree write thread is not fast path thread");
-                query_req->m_promise.setValue(ret);
-            });
-            return query_req->m_promise.getFuture();
-        } else {
-            return folly::makeFuture< btree_status_t >(ret);
-        }
+    btree_status_t remove(ReqT& remove_req) {
+        auto cpg = cp_guard();
+        remove_req->op_context = (void*)cp_manager()->get_context(*cpg, cp_consumer_t::INDEX_SVC);
+        return Btree< K, V >::remove(remove_req);
     }
 
 protected:
@@ -178,19 +128,13 @@ protected:
     }
 
     btree_status_t read_node_impl(bnodeid_t id, sisl::BtreeNodePtr& node) override {
-        auto const ret = wb_cache()->read_buf(id, node, iomanager.am_i_tight_loop_reactor(),
-                                              [this](const IndexBufferPtr& idx_buf) -> BtreeNode {
-                                                  return this->init_node(idx_buf->raw_buffer(), sizeof(IndexBtreeNode),
-                                                                         idx_buf->blkid().to_integer(), true, is_leaf);
-                                              });
-        if (ret == no_error) {
+        try {
+            wb_cache()->read_buf(id, node, [this](const IndexBufferPtr& idx_buf) -> BtreeNode {
+                return this->init_node(idx_buf->raw_buffer(), sizeof(IndexBtreeNode), idx_buf->blkid().to_integer(),
+                                       true, is_leaf);
+            });
             return btree_status_t::success;
-        } else if (ret == std::errc::operation_would_block) {
-            // We cannot do sync read from any tight loop reactor, let caller relocate the thread and call back
-            return btree_status_t::fast_path_not_possible;
-        } else {
-            return btee_status_t::read_failed;
-        }
+        } catch (std::exception& e) { return btree_status_t::read_failed; }
     }
 
     btree_status_t refresh_node(const BtreeNodePtr& node, bool for_read_modify_write, void* context) override {
