@@ -50,8 +50,6 @@ public:
 private:
     void remove_timer(const std::string& timer_name, const std::shared_ptr< iomgr::timer_handle_t >& thdl) {
         std::unique_lock< std::mutex > lk(m_mutex);
-        if (thdl) { iomgr::IOManager::instance().cancel_timer(*thdl, false /* wait_to_cancel */); }
-
         auto range = m_timer_instances.equal_range(timer_name);
         for (auto it = range.first; it != range.second;) {
             if ((thdl == nullptr) || (it->second == thdl)) {

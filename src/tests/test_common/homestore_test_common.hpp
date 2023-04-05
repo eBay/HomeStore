@@ -77,7 +77,7 @@ private:
 
 public:
     static void start_homestore(const std::string& test_name, float meta_pct, float data_log_pct, float ctrl_log_pct,
-                                float index_pct, hs_init_starting_cb_t cb, bool restart = false) {
+                                float data_pct, float index_pct, hs_init_starting_cb_t cb, bool restart = false) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
@@ -135,6 +135,7 @@ public:
             ->with_params(params)
             .with_meta_service(meta_pct)
             .with_log_service(data_log_pct, ctrl_log_pct)
+            .with_data_service(data_pct)
             .before_init_devices(std::move(cb))
             .init(true /* wait_for_init */);
     }

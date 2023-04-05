@@ -25,6 +25,7 @@
 #include <sisl/fds/bitset.hpp>
 #include <iomgr/iomgr.hpp>
 #include <isa-l/crc.h>
+#include <iomgr/iomgr_flip.hpp>
 
 #include <homestore/meta_service.hpp>
 #include <homestore/homestore.hpp>
@@ -35,7 +36,6 @@
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
 #include "common/homestore_utils.hpp"
-#include "common/homestore_flip.hpp"
 
 namespace homestore {
 
@@ -354,7 +354,7 @@ void DeviceManager::handle_error(PhysicalDev* pdev) {
      */
     if (cnt < HS_DYNAMIC_CONFIG(device->max_error_before_marking_dev_down)
 #ifdef _PRERELEASE
-        && !(homestore_flip->test_flip("device_fail", pdev->get_devname()))
+        && !(iomgr_flip::instance()->test_flip("device_fail", pdev->get_devname()))
 #endif
     ) {
         return;

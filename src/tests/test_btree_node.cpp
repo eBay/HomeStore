@@ -62,6 +62,8 @@ struct NodeTest : public testing::Test {
     using K = typename TestType::KeyType;
     using V = typename TestType::ValueType;
 
+    std::unique_ptr< uint8_t[] > m_node1_buf;
+    std::unique_ptr< uint8_t[] > m_node2_buf;
     std::unique_ptr< typename T::NodeType > m_node1;
     std::unique_ptr< typename T::NodeType > m_node2;
     std::map< K, V > m_shadow_map;
@@ -69,8 +71,11 @@ struct NodeTest : public testing::Test {
 
     void SetUp() override {
         m_cfg.set_node_data_size(m_cfg.node_size() - sizeof(persistent_hdr_t));
-        m_node1 = std::make_unique< typename T::NodeType >(new uint8_t[g_node_size], 1ul, true, true, m_cfg);
-        m_node2 = std::make_unique< typename T::NodeType >(new uint8_t[g_node_size], 2ul, true, true, m_cfg);
+        m_node1_buf = std::unique_ptr< uint8_t[] >(new uint8_t[g_node_size]);
+        m_node2_buf = std::unique_ptr< uint8_t[] >(new uint8_t[g_node_size]);
+
+        m_node1 = std::make_unique< typename T::NodeType >(m_node1_buf.get(), 1ul, true, true, m_cfg);
+        m_node2 = std::make_unique< typename T::NodeType >(m_node2_buf.get(), 2ul, true, true, m_cfg);
     }
 
     void put(uint32_t k, btree_put_type put_type) {

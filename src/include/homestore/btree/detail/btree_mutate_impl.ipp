@@ -71,7 +71,7 @@ retry:
     while (curr_idx <= end_idx) { // iterate all matched childrens
 #if 0
 #ifdef _PRERELEASE
-        if (curr_idx - start_idx > 1 && homestore_flip->test_flip("btree_leaf_node_split")) {
+        if (curr_idx - start_idx > 1 && iomgr_flip::instance()->test_flip("btree_leaf_node_split")) {
             ret = btree_status_t::retry;
             goto out;
         }

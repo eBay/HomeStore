@@ -38,7 +38,7 @@ using namespace homestore;
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
-SISL_OPTIONS_ENABLE(logging, log_store_benchmark, test_common_setup)
+SISL_OPTIONS_ENABLE(logging, log_store_benchmark, iomgr, test_common_setup)
 SISL_OPTION_GROUP(log_store_benchmark,
                   (num_logstores, "", "num_logstores", "number of log stores",
                    ::cxxopts::value< uint32_t >()->default_value("1"), "number"),
@@ -167,7 +167,7 @@ static void test_append(benchmark::State& state) {
     }
 }
 
-static void setup() { test_common::HSTestHelper::start_homestore("logstore_bench", 5, 85, 2, 0, nullptr); }
+static void setup() { test_common::HSTestHelper::start_homestore("logstore_bench", 5.0, 85.0, 2.0, 0, 0, nullptr); }
 
 static void teardown() { test_common::HSTestHelper::shutdown_homestore(); }
 
@@ -175,7 +175,7 @@ static void teardown() { test_common::HSTestHelper::shutdown_homestore(); }
 BENCHMARK(test_append)->Iterations(1);
 
 int main(int argc, char** argv) {
-    SISL_OPTIONS_LOAD(argc, argv, logging, log_store_benchmark, test_common_setup)
+    SISL_OPTIONS_LOAD(argc, argv, logging, log_store_benchmark, iomgr, test_common_setup)
     sisl::logging::SetLogger("log_store_benchmark");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 

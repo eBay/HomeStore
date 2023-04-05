@@ -19,6 +19,8 @@
 #include <homestore/btree/detail/simple_node.hpp>
 #include <homestore/btree/detail/varlen_node.hpp>
 #include <sisl/fds/utils.hpp>
+//#include <iomgr/iomgr_flip.hpp>
+
 #include <chrono>
 
 namespace homestore {
@@ -151,7 +153,7 @@ btree_status_t Btree< K, V >::upgrade_node_locks(const BtreeNodePtr& parent_node
 #if 0
 #ifdef _PRERELEASE
     {
-        auto time = homestore_flip->get_test_flip< uint64_t >("btree_upgrade_delay");
+        auto time = iomgr_flip::instance()->get_test_flip< uint64_t >("btree_upgrade_delay");
         if (time) { std::this_thread::sleep_for(std::chrono::microseconds{time.get()}); }
     }
 #endif
@@ -163,7 +165,7 @@ btree_status_t Btree< K, V >::upgrade_node_locks(const BtreeNodePtr& parent_node
         int is_leaf = 0;
 
         if (child_node && child_node->is_leaf()) { is_leaf = 1; }
-        if (homestore_flip->test_flip("btree_upgrade_node_fail", is_leaf)) {
+        if (iomgr_flip::instance()->test_flip("btree_upgrade_node_fail", is_leaf)) {
             unlock_node(my_node, cur_lock);
             cur_lock = locktype_t::NONE;
             if (child_node) {

@@ -34,6 +34,7 @@
 #include <sisl/logging/logging.h>
 #include <sisl/utility/atomic_counter.hpp>
 #include <iomgr/drive_interface.hpp>
+#include <iomgr/iomgr_flip.hpp>
 
 #include <homestore/homestore.hpp>
 #include "physical_dev.hpp"
@@ -43,34 +44,12 @@
 #include "blkalloc/varsize_blk_allocator.h"
 #include "common/error.h"
 #include "common/homestore_assert.hpp"
-#include "common/homestore_flip.hpp"
 
 SISL_LOGGING_DECL(device)
 
 namespace homestore {
 
 uint32_t VirtualDev::s_num_chunks_created{0};
-
-// clang-format off
-#if 0
-#ifdef _PRERELEASE
-static bool inject_delay_if_needed(PhysicalDev* pdev, const boost::intrusive_ptr< vdev_req_context >& vd_req) {
-    bool ret{false};
-    if (pdev && (homestore_flip->delay_flip("simulate_pdev_delay", [vd_req, pdev]() {
-                HS_LOG(DEBUG, device, "[pdev={},req={},op_type={}] - Calling delayed completion", pdev->get_devname(),
-                       vd_req->request_id, enum_name(vd_req->op_type));
-                vd_req->cb(vd_req->err, nullptr /*cookie*/);
-                vd_req->dec_ref();
-            }, pdev->get_devname(), (vd_req->op_type == vdev_op_type_t::read)))) {
-        HS_LOG(DEBUG, device, "[pdev={},req={},op_type={}] - Delaying completion", pdev->get_devname(),
-               vd_req->request_id, enum_name(vd_req->op_type));
-        ret = true;
-    }
-    return ret;
-}
-#endif
-#endif
-// clang-format on
 
 uint64_t VirtualDev::get_len(const iovec* iov, const int iovcnt) {
     uint64_t len{0};
@@ -513,7 +492,7 @@ BlkAllocStatus VirtualDev::alloc_blk_from_chunk(blk_count_t nblks, const blk_all
                                                 std::vector< BlkId >& out_blkid, PhysicalDevChunk* chunk) {
 #ifdef _PRERELEASE
     if (auto const fake_status =
-            homestore_flip->get_test_flip< uint32_t >("blk_allocation_flip", nblks, chunk->vdev_id())) {
+            iomgr_flip::instance()->get_test_flip< uint32_t >("blk_allocation_flip", nblks, chunk->vdev_id())) {
         return static_cast< BlkAllocStatus >(fake_status.get());
     }
 #endif

@@ -20,6 +20,7 @@
 
 #include <sisl/fds/vector_pool.hpp>
 #include <isa-l/crc.h>
+#include <iomgr/iomgr_flip.hpp>
 
 #include <homestore/logstore_service.hpp>
 #include <homestore/meta_service.hpp>
@@ -29,7 +30,6 @@
 #include "device/journal_vdev.hpp"
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
-#include "common/homestore_flip.hpp"
 #include "common/homestore_utils.hpp"
 
 namespace homestore {
@@ -420,7 +420,7 @@ bool LogDev::flush_if_needed(int64_t threshold_size) {
 
 void LogDev::do_flush(LogGroup* lg) {
 #ifdef _PRERELEASE
-    if (homestore_flip->delay_flip< int >(
+    if (iomgr_flip::instance()->delay_flip< int >(
             "simulate_log_flush_delay", [this, lg]() { do_flush_write(lg); }, m_family_id)) {
         THIS_LOGDEV_LOG(INFO, "Delaying flush by rescheduling the async write");
         return;
@@ -576,7 +576,7 @@ uint64_t LogDev::truncate(const logdev_key& key) {
 
             m_logdev_meta.persist();
 #ifdef _PRERELEASE
-            if (garbage_collect && homestore_flip->test_flip("logdev_abort_after_garbage")) {
+            if (garbage_collect && iomgr_flip::instance()->test_flip("logdev_abort_after_garbage")) {
                 LOGINFO("logdev aborting after unreserving garbage ids");
                 raise(SIGKILL);
             }

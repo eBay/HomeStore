@@ -123,11 +123,13 @@ blk_list_t BlkDataService::alloc_blks(uint32_t size) {
 folly::Future< bool > BlkDataService::async_free_blk(const BlkId bid) {
     // create blk read waiter instance;
     folly::Promise< bool > promise;
+    auto f = promise.getFuture();
+
     m_blk_read_tracker->wait_on(bid, [this, bid, p = std::move(promise)]() mutable {
         m_vdev->free_blk(bid);
         p.setValue(true);
     });
-    return promise.getFuture();
+    return f;
 }
 
 stream_info_t BlkDataService::alloc_stream(const uint64_t size) { return m_vdev->alloc_stream(size); }

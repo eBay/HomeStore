@@ -28,13 +28,12 @@
 
 #include <folly/Exception.h>
 #include <iomgr/iomgr.hpp>
-
+#include <iomgr/iomgr_flip.hpp>
 #include <homestore/meta_service.hpp>
 
 #include "physical_dev.hpp"
 #include "device.h"
 #include "blkalloc/blk_allocator.h"
-#include "common/homestore_flip.hpp"
 #include "common/homestore_utils.hpp"
 
 namespace homestore {
@@ -80,7 +79,7 @@ PhysicalDev::PhysicalDev(DeviceManager* mgr, const std::string& devname, int ofl
     m_iodev = iomgr::DriveInterface::open_dev(devname, oflags_used);
     if (m_iodev == nullptr
 #ifdef _PRERELEASE
-        || (homestore_flip->test_flip("device_boot_fail", devname.c_str()))
+        || (iomgr_flip::instance()->test_flip("device_boot_fail", devname.c_str()))
 #endif
     ) {
 

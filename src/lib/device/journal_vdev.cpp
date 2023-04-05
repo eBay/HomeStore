@@ -21,14 +21,13 @@
 #include <memory>
 
 #include <sisl/logging/logging.h>
-
+#include <iomgr/iomgr_flip.hpp>
 #include <homestore/homestore.hpp>
 #include "device.h"
 #include "physical_dev.hpp"
 #include "journal_vdev.hpp"
 #include "common/error.h"
 #include "common/homestore_assert.hpp"
-#include "common/homestore_flip.hpp"
 #include "common/homestore_utils.hpp"
 #include "common/resource_mgr.hpp"
 
@@ -42,7 +41,7 @@ off_t JournalVirtualDev::alloc_next_append_blk(size_t sz) {
     }
 
 #ifdef _PRERELEASE
-    HomeStoreFlip::test_and_abort("abort_before_update_eof_cur_chunk");
+    iomgr_flip::test_and_abort("abort_before_update_eof_cur_chunk");
 #endif
 
     const off_t ds_off = data_start_offset();
@@ -69,7 +68,7 @@ off_t JournalVirtualDev::alloc_next_append_blk(size_t sz) {
         m_mgr->update_end_of_chunk(chunk, offset_in_chunk);
 
 #ifdef _PRERELEASE
-        HomeStoreFlip::test_and_abort("abort_after_update_eof_cur_chunk");
+        iomgr_flip::test_and_abort("abort_after_update_eof_cur_chunk");
 #endif
         // get next chunk handle
         auto* next_chunk = get_next_chunk(dev_id, chunk_id);
@@ -94,7 +93,7 @@ off_t JournalVirtualDev::alloc_next_append_blk(size_t sz) {
     high_watermark_check();
 
 #ifdef _PRERELEASE
-    HomeStoreFlip::test_and_abort("abort_after_update_eof_next_chunk");
+    iomgr_flip::test_and_abort("abort_after_update_eof_next_chunk");
 #endif
     // assert that returnning logical offset is in good range;
     HS_DBG_ASSERT_LE(static_cast< uint64_t >(offset), size());

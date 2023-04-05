@@ -39,6 +39,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <folly/Synchronized.h>
 #include <iomgr/io_environment.hpp>
+#include <iomgr/iomgr_flip.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 #include <gtest/gtest.h>
@@ -48,7 +49,6 @@
 
 #include "logstore/log_dev.hpp"
 #include "logstore/log_store_family.hpp"
-#include "common/homestore_flip.hpp"
 #include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
@@ -429,7 +429,7 @@ public:
         }
 
         test_common::HSTestHelper::start_homestore(
-            "test_log_store", 5.0, 42.0, 42.0, 0,
+            "test_log_store", 5.0, 42.0, 42.0, 0, 0,
             [this, restart, n_log_stores]() {
                 if (restart) {
                     for (uint32_t i{0}; i < n_log_stores; ++i) {
@@ -1094,7 +1094,7 @@ TEST_F(LogStoreTest, FlushSync) {
 #ifdef _PRERELEASE
     LOGINFO("Step 7: Simulate flush_sync running parallel to regular flush. This is achieved by doing flip to delay "
             "regular flush and do flush_sync");
-    flip::FlipClient* fc = HomeStoreFlip::client_instance();
+    flip::FlipClient* fc = iomgr_flip::client_instance();
 
     flip::FlipFrequency freq;
     freq.set_count(1);
