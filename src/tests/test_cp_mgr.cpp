@@ -92,10 +92,24 @@ public:
 
     void simulate_io() {
         iomanager.run_on(iomgr::thread_regex::least_busy_worker, [this](iomgr::io_thread_addr_t) {
-            auto cur_cp = homestore::hs()->cp_mgr().cp_io_enter();
+            auto cur_cp = homestore::hs()->cp_mgr().cp_guard();
             r_cast< TestCPContext* >(cur_cp->context(cp_consumer_t::HS_CLIENT))->add();
-            homestore::hs()->cp_mgr().cp_io_exit(cur_cp);
         });
+    }
+
+    void rescheduled_io() {
+        iomanager.run_on(iomgr::thread_regex::least_busy_worker, [this](iomgr::io_thread_addr_t) {
+            auto cur_cp = homestore::hs()->cp_mgr().cp_guard();
+            iomanager.run_on(iomgr::thread_regex::least_busy_worker,
+                             [moved_cp = std::move(cur_cp)](iomgr::io_thread_addr_t) mutable {
+                                 r_cast< TestCPContext* >(moved_cp->context(cp_consumer_t::HS_CLIENT))->add();
+                             });
+        });
+    }
+
+    void nested_io() {
+        [[maybe_unused]] auto cur_cp = homestore::hs()->cp_mgr().cp_guard();
+        rescheduled_io();
     }
 
     void trigger_cp(bool wait) {
@@ -142,6 +156,15 @@ TEST_F(TestCPMgr, cp_start_and_flush) {
 
     LOGINFO("Step 4: Trigger a back-to-back cp");
     this->trigger_cp(false /* wait */);
+    this->trigger_cp(true /* wait */);
+
+    LOGINFO("Step 5: Simulate rescheduled IO for {} records", nrecords);
+    for (uint32_t i{0}; i < nrecords; ++i) {
+        this->nested_io();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds{1000});
+
+    LOGINFO("Step 6: Trigger a cp to validate");
     this->trigger_cp(true /* wait */);
 }
 
