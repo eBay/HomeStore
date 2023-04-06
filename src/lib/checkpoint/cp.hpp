@@ -68,21 +68,25 @@ ENUM(cp_status_t, uint8_t,
 class CPContext;
 struct CP {
     std::atomic< cp_status_t > m_cp_status{cp_status_t::cp_unknown};
-    std::atomic< int > m_enter_cnt;
+    sisl::atomic_counter< int64_t > m_enter_cnt;
+    CPManager* m_cp_mgr;
     bool m_cp_waiting_to_trigger{false}; // it is waiting for previous cp to complete
     cp_id_t m_cp_id;
     std::array< std::unique_ptr< CPContext >, (size_t)cp_consumer_t::SENTINEL > m_contexts;
     cp_done_cb_t m_done_cb; // TODO: Check if we need to make this a list because of multiple trigger points
 
+public:
+    CP(CPManager* mgr) : m_cp_mgr{mgr} {}
+
     cp_id_t id() const { return m_cp_id; }
     cp_status_t get_status() const { return m_cp_status.load(); }
-    CPContext* context(cp_consumer_t consumer) { return m_contexts[(size_t)consumer].get(); }
+    CPContext* context(cp_consumer_t consumer) const { return m_contexts[(size_t)consumer].get(); }
     void set_context(cp_consumer_t consumer, std::unique_ptr< CPContext > context) {
         m_contexts[(size_t)consumer] = std::move(context);
     }
 
     std::string to_string() const {
-        return fmt::format("CP={}: status={}, enter_count={}", m_cp_id, enum_name(get_status()), m_enter_cnt.load());
+        return fmt::format("CP={}: status={}, enter_count={}", m_cp_id, enum_name(get_status()), m_enter_cnt.get());
     }
 };
 

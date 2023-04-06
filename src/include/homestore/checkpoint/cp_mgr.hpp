@@ -99,28 +99,6 @@ public:
     virtual void repair_slow_cp() {}
 };
 
-#if 0
-struct CPCallbacks {
-    // Called by CPManager, when a new CP is triggered and it is time to switchover the dirty buffer collection to the
-    // new CP and flush the existing CP
-    std::function< std::unique_ptr< CPContext >(CP*, CP*) > on_switchover_cp{nullptr};
-
-    // CPManager asks consumers to start flushing the CP dirty buffers. Once CP flush is completed, consumers are
-    // required to call the flush_done callback.
-    std::function< void(CP*, cp_flush_done_cb_t&&) > cp_flush{nullptr};
-
-    // Cleanup any CP related structures allocated and truncate the journal.
-    std::function< void(CP*) > cp_cleanup{nullptr};
-
-    // Provide back the progress percentage on flush
-    std::function< int(void) > cp_progress_percent{nullptr};
-
-    // Will be called by CPManager, in case cp is not progressing at all. Consumers could repair this by
-    // increasing any flow control on how fast flush is happening.
-    std::function< void(void) > repair_slow_cp{nullptr};
-};
-#endif
-
 class CPWatchdog;
 
 static constexpr uint64_t cp_sb_magic{0xc0c0c01a};
@@ -134,10 +112,43 @@ struct cp_mgr_super_block {
 };
 #pragma pack()
 
+class CPManager;
+class CPGuard {
+private:
+    CP* m_cp{nullptr};
+    bool m_pushed{false};
+
+    // Why we need this thread_local variable and that too of type stack?
+    // thread_local variable is needed because we wanted to make cp critical section re-entrant. So when a thread enters
+    // into a critical section and crosses methods and other code within the stack needs to enter to critical section,
+    // having this facility make sure that it uses already entered critical section within the stack.
+    //
+    // Why do we need a stack instead of only one CP* to track current critical section?
+    // It is because CPGuard can be moved from one thread to other. The thread which it is moved to can be accessed
+    // on a different cp critical section than one passed to. For example, if thread 1 gets into cp1 critical section
+    // and passes the cp1 to thread2. However, before accessing cp1, thread2 already takes cp2 critical section and then
+    // access cp1, then it needs to wind up with cp1 and once cp1 is done, has to go back to cp2. This nesting can
+    // potentially happen recursively (although such pattern is not great, it can exist). That is why we use stack here
+    static thread_local std::stack< CP* > t_cp_stack;
+
+public:
+    CPGuard(CPManager* mgr);
+    ~CPGuard();
+
+    CPGuard(const CPGuard& other);
+    CPGuard operator=(const CPGuard& other);
+
+    CP& operator*();
+    CP* operator->();
+    CP* get();
+};
+
 /* It is responsible to trigger the checkpoints when all concurrent IOs are completed.
  * @ cp_type :- It is a consumer checkpoint with a base class of cp
  */
 class CPManager {
+    friend class CPGuard;
+
 private:
     CP* m_cur_cp{nullptr}; // Current CP information
     std::atomic< bool > m_in_flush_phase{false};
@@ -178,6 +189,12 @@ public:
     /// @param cp : Current CP that needs to exit from critical section
     void cp_io_exit(CP* cp);
 
+    /// @brief RAII for cp_io_enter() and cp_io_exit(). This method returns a holder, which needs to be kept in context
+    /// till the caller is in cp critical section. The CPHolder can be moved in that case, until it is accessed again,
+    /// and releases, it will continue to be in critical section.
+    /// @return CPHolder: Holder class of cp
+    CPGuard cp_guard();
+
     /// @brief Get the current cp session.
     /// @return Returns the current CP
     CP* get_cur_cp();
@@ -193,6 +210,7 @@ public:
     }
 
 private:
+    void cp_ref(CP* cp);
     void create_first_cp();
     void cp_start_flush(CP* cp);
     void on_cp_flush_done(CP* cp);
