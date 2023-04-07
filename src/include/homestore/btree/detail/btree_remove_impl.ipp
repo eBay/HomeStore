@@ -390,20 +390,20 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     // doing a dry run and if for some reason there is a problem in balancing the nodes, then it is easy to give up.
     available_size = balanced_size - leftmost_node->occupied_size(m_bt_cfg);
     src_cursor.ith_node = old_nodes.size();
-    for (uint32_t i{0}; (i < old_nodes.size()) && (available_size >= 0); ++i) {
+    for (uint32_t i{0}; (i < old_nodes.size()); ++i) {
         leftmost_src.ith_nodes.push_back(i);
         // TODO: check whether value size of the node is greater than available_size? If so nentries is 0. Suppose if a
         // node contains one entry and the value size is much bigger than available size
         auto const nentries = old_nodes[i]->num_entries_by_size(0, available_size);
         if ((old_nodes[i]->total_entries() - nentries) == 0) { // Entire node goes in
             available_size -= old_nodes[i]->occupied_size(m_bt_cfg);
-            // we reach the end so the "else" statement gets no chance to run
             if (i >= old_nodes.size() - 1) {
                 src_cursor.ith_node = i + 1;
                 src_cursor.nth_entry = std::numeric_limits< uint32_t >::max();
                 leftmost_src.last_node_upto = nentries;
                 BT_NODE_LOG(DEBUG, parent_node, "MERGE: no new nodes is supposed to be created");
             }
+            // we reach the end so the "else" statement gets no chance to run
         } else {
             src_cursor.ith_node = i;
             src_cursor.nth_entry = nentries;
@@ -455,7 +455,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             post_merge_size += old_node->get_nth_obj_size(
                 std::min(leftmost_src.last_node_upto, old_node->total_entries() - 1)); // New leftmost entry
         }
-        post_merge_size -= parent_node->get_nth_obj_size(start_idx); // Previous left entry
+        post_merge_size -= parent_node->get_nth_obj_size(start_idx);                   // Previous left entry
 
         for (auto& node : new_nodes) {
             if (node->total_entries()) { post_merge_size += node->get_nth_obj_size(node->total_entries() - 1); }
