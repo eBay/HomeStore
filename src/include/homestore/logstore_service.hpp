@@ -47,7 +47,7 @@ struct logdev_key;
 class JournalVirtualDev;
 struct vdev_info_block;
 struct log_dump_req;
-typedef std::function< void(std::error_condition) > vdev_io_comp_cb_t;
+typedef std::function< void(std::error_condition, void* /* cookie */) > vdev_io_comp_cb_t;
 
 class LogStoreService {
     friend class HomeLogStore;
@@ -150,6 +150,7 @@ public:
     uint32_t used_size() const;
     uint32_t total_size() const;
     iomgr::io_thread_t& flush_thread() { return m_flush_thread; }
+    iomgr::io_thread_t& truncate_thread() { return m_truncate_thread; }
 
 private:
     void start_threads();

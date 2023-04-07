@@ -58,7 +58,7 @@ static bool inject_delay_if_needed(PhysicalDev* pdev, const boost::intrusive_ptr
     if (pdev && (homestore_flip->delay_flip("simulate_pdev_delay", [vd_req, pdev]() {
                 HS_LOG(DEBUG, device, "[pdev={},req={},op_type={}] - Calling delayed completion", pdev->get_devname(),
                        vd_req->request_id, enum_name(vd_req->op_type));
-                vd_req->cb(vd_req->err);
+                vd_req->cb(vd_req->err, nullptr /*cookie*/);
                 vd_req->dec_ref();
             }, pdev->get_devname(), (vd_req->op_type == vdev_op_type_t::read)))) {
         HS_LOG(DEBUG, device, "[pdev={},req={},op_type={}] - Delaying completion", pdev->get_devname(),
@@ -107,7 +107,7 @@ void VirtualDev::static_process_completions(int64_t res, uint8_t* cookie) {
 #ifdef _PRERELEASE
             if (inject_delay_if_needed(pdev, vd_req)) { return; }
 #endif
-            vd_req->cb(vd_req->err);
+            vd_req->cb(vd_req->err, vd_req->cookie);
         }
     }
 
@@ -169,7 +169,10 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, PhysicalDevGroup pd
                        blk_allocator_type_t allocator_type, uint64_t size_in, uint32_t nmirror, bool is_stripe,
                        uint32_t blk_size, char* context, uint64_t context_size, bool auto_recovery,
                        vdev_high_watermark_cb_t hwm_cb) :
-        m_name{name}, m_allocator_type{allocator_type}, m_metrics{name}, m_pdev_group{pdev_group} {
+        m_name{name},
+        m_allocator_type{allocator_type},
+        m_metrics{name},
+        m_pdev_group{pdev_group} {
     init(mgr, nullptr, blk_size, auto_recovery, std::move(hwm_cb));
 
     auto const pdev_list = m_mgr->get_devices(pdev_group);
@@ -307,7 +310,10 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, PhysicalDevGroup pd
 VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, PhysicalDevGroup pdev_group,
                        blk_allocator_type_t allocator_type, bool recovery_init, bool auto_recovery,
                        vdev_high_watermark_cb_t hwm_cb) :
-        m_name{name}, m_allocator_type{allocator_type}, m_metrics{name}, m_pdev_group{pdev_group} {
+        m_name{name},
+        m_allocator_type{allocator_type},
+        m_metrics{name},
+        m_pdev_group{pdev_group} {
     init(mgr, vb, vb->blk_size, auto_recovery, std::move(hwm_cb));
 
     m_recovery_init = recovery_init;
@@ -384,7 +390,7 @@ stream_info_t VirtualDev::alloc_stream(uint64_t size) {
         auto* chunk = m_free_streams.back();
         m_free_streams.pop_back();
         ++stream_info.num_streams;
-        stream_info.chunk_list.push_back(chunk);
+        stream_info.chunk_list.push_back(reinterpret_cast< void* >(chunk));
         stream_info.stream_id.push_back(chunk->chunk_id());
         // either size becomes 0 or keep finding next chunk to get enough space;
         size -= std::min(size, stream_size());
@@ -395,11 +401,11 @@ stream_info_t VirtualDev::alloc_stream(uint64_t size) {
 void VirtualDev::free_stream(const stream_info_t& stream_info) {
     std::unique_lock< std::mutex > lk(m_free_streams_lk);
     for (auto* chunk_ptr : stream_info.chunk_list) {
-        m_free_streams.push_back(chunk_ptr);
+        m_free_streams.push_back(reinterpret_cast< PhysicalDevChunk* >(chunk_ptr));
     }
 }
 
-stream_info_t VirtualDev::reserve_stream(const vdev_stream_id_t* id_list, uint32_t nstreams) {
+stream_info_t VirtualDev::reserve_stream(const stream_id_t* id_list, uint32_t nstreams) {
     stream_info_t stream_info;
     if (nstreams == 0) { return stream_info; }
     std::unique_lock< std::mutex > lk(m_free_streams_lk);
@@ -409,7 +415,7 @@ stream_info_t VirtualDev::reserve_stream(const vdev_stream_id_t* id_list, uint32
             if ((*it)->chunk_id() == id) {
                 ++stream_info.num_streams;
                 stream_info.stream_id.push_back(id);
-                stream_info.chunk_list.push_back(*it);
+                stream_info.chunk_list.push_back(reinterpret_cast< void* >(*it));
                 it = m_free_streams.erase(it);
                 break;
             } else {
@@ -422,7 +428,7 @@ stream_info_t VirtualDev::reserve_stream(const vdev_stream_id_t* id_list, uint32
     return stream_info;
 }
 
-void VirtualDev::reserve_stream(vdev_stream_id_t id) {
+void VirtualDev::reserve_stream(stream_id_t id) {
     for (auto it = m_free_streams.begin(); it != m_free_streams.end();) {
         if ((*it)->chunk_id() == id) {
             it = m_free_streams.erase(it);
@@ -501,7 +507,7 @@ BlkAllocStatus VirtualDev::do_alloc_blk(blk_count_t nblks, const blk_alloc_hints
         BlkAllocStatus status = BlkAllocStatus::FAILED;
 
         while (try_streams != 0) {
-            preferred_chunk = stream_info->chunk_list[stream_info->stream_cur];
+            preferred_chunk = reinterpret_cast< PhysicalDevChunk* >(stream_info->chunk_list[stream_info->stream_cur]);
             if (preferred_chunk) {
                 // try to allocate from the preferred chunk
                 status = alloc_blk_from_chunk(nblks, hints, out_blkid, preferred_chunk);
@@ -605,28 +611,31 @@ void VirtualDev::recovery_done() {
 }
 
 ////////////////////////// async write section //////////////////////////////////
-void VirtualDev::async_write(const char* buf, uint32_t size, const BlkId& bid, vdev_io_comp_cb_t cb,
+void VirtualDev::async_write(const char* buf, uint32_t size, const BlkId& bid, vdev_io_comp_cb_t cb, const void* cookie,
                              bool part_of_batch) {
     PhysicalDevChunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
-    async_write_internal(buf, size, chunk->physical_dev_mutable(), chunk, dev_offset, std::move(cb), part_of_batch);
+    async_write_internal(buf, size, chunk->physical_dev_mutable(), chunk, dev_offset, std::move(cb), cookie,
+                         part_of_batch);
 }
 
 void VirtualDev::async_writev(const iovec* iov, const int iovcnt, const BlkId& bid, vdev_io_comp_cb_t cb,
-                              bool part_of_batch) {
+                              const void* cookie, bool part_of_batch) {
     PhysicalDevChunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
     auto const size = get_len(iov, iovcnt);
-    async_writev_internal(iov, iovcnt, size, chunk->physical_dev_mutable(), chunk, dev_offset, std::move(cb),
+    async_writev_internal(iov, iovcnt, size, chunk->physical_dev_mutable(), chunk, dev_offset, std::move(cb), cookie,
                           part_of_batch);
 }
 
 void VirtualDev::async_write_internal(const char* buf, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                                      uint64_t dev_offset, vdev_io_comp_cb_t cb, bool part_of_batch) {
+                                      uint64_t dev_offset, vdev_io_comp_cb_t cb, const void* cookie,
+                                      bool part_of_batch) {
     auto req = vdev_req_context::make_req_context();
     req->cb = std::move(cb);
     req->op_type = vdev_op_type_t::write;
     req->chunk = pchunk;
+    req->cookie = const_cast< void* >(cookie);
 
     HS_LOG(TRACE, device, "Writing in device: {}, offset = {}", pdev->dev_id(), dev_offset);
     COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
@@ -638,11 +647,12 @@ void VirtualDev::async_write_internal(const char* buf, uint32_t size, PhysicalDe
 
 void VirtualDev::async_writev_internal(const iovec* iov, int iovcnt, uint64_t size, PhysicalDev* pdev,
                                        PhysicalDevChunk* pchunk, uint64_t dev_offset, vdev_io_comp_cb_t cb,
-                                       bool part_of_batch) {
+                                       const void* cookie, bool part_of_batch) {
     auto req = vdev_req_context::make_req_context();
     req->cb = std::move(cb);
     req->op_type = vdev_op_type_t::write;
     req->chunk = pchunk;
+    req->cookie = const_cast< void* >(cookie);
 
     HS_LOG(TRACE, device, "Writing in device: {}, offset = {}", pdev->dev_id(), dev_offset);
     COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
@@ -692,36 +702,43 @@ ssize_t VirtualDev::sync_writev_internal(const iovec* iov, int iovcnt, PhysicalD
     return bytes_written;
 }
 ////////////////////////////////// async read section ///////////////////////////////////////////////
-void VirtualDev::async_read(char* buf, uint64_t size, const BlkId& bid, vdev_io_comp_cb_t cb, bool part_of_batch) {
+void VirtualDev::async_read(char* buf, uint64_t size, const BlkId& bid, vdev_io_comp_cb_t cb, const void* cookie,
+                            bool part_of_batch) {
     PhysicalDevChunk* pchunk;
     uint64_t const dev_offset = to_dev_offset(bid, &pchunk);
-    async_read_internal(buf, size, pchunk->physical_dev_mutable(), pchunk, dev_offset, std::move(cb), part_of_batch);
+    async_read_internal(buf, size, pchunk->physical_dev_mutable(), pchunk, dev_offset, std::move(cb), cookie,
+                        part_of_batch);
 }
 
 void VirtualDev::async_readv(iovec* iovs, int iovcnt, uint64_t size, const BlkId& bid, vdev_io_comp_cb_t cb,
-                             bool part_of_batch) {
+                             const void* cookie, bool part_of_batch) {
     PhysicalDevChunk* pchunk;
     uint64_t const dev_offset = to_dev_offset(bid, &pchunk);
-    async_readv_internal(iovs, iovcnt, size, pchunk->physical_dev_mutable(), pchunk, dev_offset, std::move(cb),
+    async_readv_internal(iovs, iovcnt, size, pchunk->physical_dev_mutable(), pchunk, dev_offset, std::move(cb), cookie,
                          part_of_batch);
 }
 
 void VirtualDev::async_read_internal(char* buf, uint64_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                                     uint64_t dev_offset, vdev_io_comp_cb_t cb, bool part_of_batch) {
+                                     uint64_t dev_offset, vdev_io_comp_cb_t cb, const void* cookie,
+                                     bool part_of_batch) {
     auto req = vdev_req_context::make_req_context();
     req->cb = std::move(cb);
     req->op_type = vdev_op_type_t::read;
     req->chunk = pchunk;
+    req->cookie = const_cast< void* >(cookie);
+
     pdev->read(buf, size, dev_offset, uintptr_cast(req.get()), part_of_batch);
 }
 
 void VirtualDev::async_readv_internal(iovec* iovs, int iovcnt, uint64_t size, PhysicalDev* pdev,
                                       PhysicalDevChunk* pchunk, uint64_t dev_offset, vdev_io_comp_cb_t cb,
-                                      bool part_of_batch) {
+                                      const void* cookie, bool part_of_batch) {
     auto req = vdev_req_context::make_req_context();
     req->cb = std::move(cb);
     req->op_type = vdev_op_type_t::read;
     req->chunk = pchunk;
+    req->cookie = const_cast< void* >(cookie);
+
     pdev->readv(iovs, iovcnt, size, dev_offset, uintptr_cast(req.get()), part_of_batch);
 }
 
