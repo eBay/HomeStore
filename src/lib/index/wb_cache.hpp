@@ -41,7 +41,7 @@ private:
     // Dirty buffer list arranged in a dependent list fashion
     std::unique_ptr< sisl::ThreadVector< IndexBufferPtr > > m_dirty_list[MAX_CP_COUNT];
     std::unique_ptr< sisl::ThreadVector< BlkId > > m_free_blkid_list[MAX_CP_COUNT]; // Free'd btree blkids per cp
-    std::vector< iomgr::io_thread_t > m_flush_thread_ids;
+    std::vector< iomgr::io_fiber_t > m_cp_flush_fibers;
     std::mutex m_flush_mtx;
 
 public:
@@ -51,8 +51,7 @@ public:
     BtreeNodePtr alloc_buf(node_initializer_t&& node_initializer) override;
     void realloc_buf(const IndexBufferPtr& buf) override;
     void write_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) override;
-    std::error_condition read_buf(bnodeid_t id, BtreeNodePtr& node, bool cache_only,
-                                  node_initializer_t&& node_initializer) override;
+    void read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) override;
     bool create_chain(IndexBufferPtr& second, IndexBufferPtr& third) override;
     void prepend_to_chain(const IndexBufferPtr& first, const IndexBufferPtr& second) override;
     void free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) override;
@@ -63,6 +62,7 @@ public:
     IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf) const;
 
 private:
+    void start_flush_threads();
     void process_write_completion(IndexCPContext* cp_ctx, IndexBuffer* pbuf);
     void do_flush_one_buf(IndexCPContext* cp_ctx, const IndexBufferPtr& buf, bool part_of_batch);
     std::pair< IndexBufferPtr, bool > on_buf_flush_done(IndexCPContext* cp_ctx, IndexBuffer* buf);

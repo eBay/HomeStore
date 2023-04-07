@@ -31,7 +31,7 @@ btree_status_t Btree< K, V >::do_remove(const BtreeNodePtr& my_node, locktype_t 
 #endif
 
         if constexpr (std::is_same_v< ReqT, BtreeSingleRemoveRequest >) {
-            if ((modified = my_node->remove_one(req.key(), nullptr, req.m_outval.get()))) { ++removed_count; }
+            if ((modified = my_node->remove_one(req.key(), nullptr, req.m_outval))) { ++removed_count; }
         } else if constexpr (std::is_same_v< ReqT, BtreeRangeRemoveRequest< K > >) {
             if (req.next_key().is_extent_key()) {
                 modified = remove_extents_in_leaf(my_node, req);
@@ -48,9 +48,7 @@ btree_status_t Btree< K, V >::do_remove(const BtreeNodePtr& my_node, locktype_t 
                 removed_count = end_idx - start_idx;
             }
         } else if constexpr (std::is_same_v< ReqT, BtreeRemoveAnyRequest< K > >) {
-            if ((modified = my_node->remove_any(req.m_range, req.m_outkey.get(), req.m_outval.get()))) {
-                ++removed_count;
-            }
+            if ((modified = my_node->remove_any(req.m_range, req.m_outkey, req.m_outval))) { ++removed_count; }
         }
 #ifndef NDEBUG
         my_node->validate_key_order< K >();

@@ -35,12 +35,21 @@
 //
 
 namespace homestore {
-typedef uint32_t crc32_t;
-typedef uint16_t csum_t;
-typedef int64_t seq_id_t;
-typedef boost::uuids::uuid uuid_t;
-typedef time_t hs_uuid_t;
-typedef uint32_t stream_id_t;
+using crc32_t = uint32_t;
+using csum_t = uint16_t;
+using seq_id_t = int64_t;
+using uuid_t = boost::uuids::uuid;
+using hs_uuid_t = time_t;
+using stream_id_t = uint32_t;
+
+template < typename T >
+using shared = std::shared_ptr< T >;
+
+template < typename T >
+using cshared = const std::shared_ptr< T >;
+
+template < typename T >
+using unique = const std::unique_ptr< T >;
 
 ////////////// All Size Limits ///////////////////
 constexpr uint32_t BLK_NUM_BITS{32};
@@ -85,8 +94,7 @@ ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize);
 ////////////// All structs ///////////////////
 struct dev_info {
     explicit dev_info(std::string name, HSDevType type = HSDevType::Data) :
-            dev_names{std::move(name)},
-            dev_type{type} {}
+            dev_names{std::move(name)}, dev_type{type} {}
     std::string to_string() const { return fmt::format("{} - {}", dev_names, enum_name(dev_type)); }
 
     std::string dev_names;

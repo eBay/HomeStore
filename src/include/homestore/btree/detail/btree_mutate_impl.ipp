@@ -71,7 +71,7 @@ retry:
     while (curr_idx <= end_idx) { // iterate all matched childrens
 #if 0
 #ifdef _PRERELEASE
-        if (curr_idx - start_idx > 1 && homestore_flip->test_flip("btree_leaf_node_split")) {
+        if (curr_idx - start_idx > 1 && iomgr_flip::instance()->test_flip("btree_leaf_node_split")) {
             ret = btree_status_t::retry;
             goto out;
         }
@@ -208,7 +208,7 @@ btree_status_t Btree< K, V >::mutate_write_leaf_node(const BtreeNodePtr& my_node
             req.set_cursor_key(subrange.end_key());
         }
     } else if constexpr (std::is_same_v< ReqT, BtreeSinglePutRequest >) {
-        if (!my_node->put(req.key(), req.value(), req.m_put_type, req.m_existing_val.get())) {
+        if (!my_node->put(req.key(), req.value(), req.m_put_type, req.m_existing_val)) {
             ret = btree_status_t::put_failed;
         }
         COUNTER_INCREMENT(m_metrics, btree_obj_count, 1);
@@ -515,7 +515,7 @@ bool Btree< K, V >::is_split_needed(const BtreeNodePtr& node, const BtreeConfig&
         if (next_key.is_extent_key()) {
             // For extent keys we expect to write atleast first value in the req along with 2 possible keys
             // in case of splitting existing key
-            auto val = static_cast< const ExtentBtreeValue< V >* >(req.m_newval.get());
+            auto val = static_cast< const ExtentBtreeValue< V >* >(req.m_newval);
             size_needed = val->extracted_size(0, 1) + 2 * (next_key.serialized_size() + node->get_record_size());
         } else {
             size_needed = req.m_newval->serialized_size();

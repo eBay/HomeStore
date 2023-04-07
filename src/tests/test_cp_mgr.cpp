@@ -29,7 +29,7 @@ using namespace homestore;
 
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-SISL_OPTIONS_ENABLE(logging, test_cp_mgr, test_common_setup)
+SISL_OPTIONS_ENABLE(logging, test_cp_mgr, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_cp_mgr)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
@@ -85,25 +85,24 @@ public:
 class TestCPMgr : public ::testing::Test {
 public:
     void SetUp() override {
-        test_common::HSTestHelper::start_homestore("test_cp", 85, 0, 0, 0, nullptr, false /* restart */);
+        test_common::HSTestHelper::start_homestore("test_cp", 85.0, 0, 0, 0, 0, nullptr, false /* restart */);
         hs()->cp_mgr().register_consumer(cp_consumer_t::HS_CLIENT, std::move(std::make_unique< TestCPCallbacks >()));
     }
     void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
 
     void simulate_io() {
-        iomanager.run_on(iomgr::thread_regex::least_busy_worker, [this](iomgr::io_thread_addr_t) {
+        iomanager.run_on_forget(iomgr::reactor_regex::least_busy_worker, [this]() {
             auto cur_cp = homestore::hs()->cp_mgr().cp_guard();
             r_cast< TestCPContext* >(cur_cp->context(cp_consumer_t::HS_CLIENT))->add();
         });
     }
 
     void rescheduled_io() {
-        iomanager.run_on(iomgr::thread_regex::least_busy_worker, [this](iomgr::io_thread_addr_t) {
+        iomanager.run_on_forget(iomgr::reactor_regex::least_busy_worker, [this]() {
             auto cur_cp = homestore::hs()->cp_mgr().cp_guard();
-            iomanager.run_on(iomgr::thread_regex::least_busy_worker,
-                             [moved_cp = std::move(cur_cp)](iomgr::io_thread_addr_t) mutable {
-                                 r_cast< TestCPContext* >(moved_cp->context(cp_consumer_t::HS_CLIENT))->add();
-                             });
+            iomanager.run_on_forget(iomgr::reactor_regex::least_busy_worker, [moved_cp = std::move(cur_cp)]() mutable {
+                r_cast< TestCPContext* >(moved_cp->context(cp_consumer_t::HS_CLIENT))->add();
+            });
         });
     }
 
@@ -171,7 +170,7 @@ TEST_F(TestCPMgr, cp_start_and_flush) {
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
     ::testing::InitGoogleTest(&parsed_argc, argv);
-    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_cp_mgr, test_common_setup);
+    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_cp_mgr, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_home_local_journal");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
 

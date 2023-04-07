@@ -160,6 +160,7 @@ void CPManager::trigger_cp_flush(cp_done_cb_t&& cb, bool force) {
 }
 
 void CPManager::cp_start_flush(CP* cp) {
+    // TODO: Switch to sync only fiber/thread and execute the following code there
     HS_PERIODIC_LOG(INFO, cp, "Starting CP {} flush", cp->id());
     cp->m_cp_status = cp_status_t::cp_flushing;
     m_cp_flush_waiters.increment();
@@ -270,7 +271,7 @@ CPWatchdog::CPWatchdog(CPManager* cp_mgr) :
         m_cp{nullptr}, m_cp_mgr{cp_mgr}, m_timer_sec{HS_DYNAMIC_CONFIG(generic.cp_watchdog_timer_sec)} {
     LOGINFO("CP watchdog timer setting to : {} seconds", m_timer_sec);
     m_timer_hdl =
-        iomanager.schedule_global_timer(m_timer_sec * 1000 * 1000 * 1000, true, nullptr, iomgr::thread_regex::all_user,
+        iomanager.schedule_global_timer(m_timer_sec * 1000 * 1000 * 1000, true, nullptr, iomgr::reactor_regex::all_user,
                                         [this](void* cookie) { cp_watchdog_timer(); });
 }
 

@@ -91,7 +91,7 @@ public:
      *
      * @return : On success, the number of bytes written is returned.  On error, -1 is returned.
      */
-    void async_append(const uint8_t* buf, size_t count, vdev_io_comp_cb_t cb);
+    folly::Future< bool > async_append(const uint8_t* buf, size_t count);
 
     /**
      * @brief : writes up to count bytes from the buffer starting at buf at offset offset.
@@ -107,7 +107,7 @@ public:
      *
      * @return : On success, the number of bytes read or written is returned, or -1 on error.
      */
-    void async_pwrite(const uint8_t* buf, size_t size, off_t offset, vdev_io_comp_cb_t cb);
+    folly::Future< bool > async_pwrite(const uint8_t* buf, size_t size, off_t offset);
 
     /**
      * @brief : writes iovcnt buffers of data described by iov to the offset.
@@ -122,7 +122,7 @@ public:
      *
      * @return : On success, number of bytes written. On error, -1 is returned
      */
-    void async_pwritev(const iovec* iov, int iovcnt, off_t offset, vdev_io_comp_cb_t cb);
+    folly::Future< bool > async_pwritev(const iovec* iov, int iovcnt, off_t offset);
 
     /// @brief writes up to count bytes from the buffer starting at buf at offset offset. The cursor is not
     /// changed. pwrite always use offset returned from alloc_next_append_blk to do the write;pwrite should not across
@@ -132,9 +132,9 @@ public:
     /// @param size : size of buffer to be written
     /// @param offset : offset to be written
     /// @return : On success, the number of bytes written is returned, or -1 on error.
-    ssize_t sync_pwrite(const uint8_t* buf, size_t size, off_t offset);
+    void sync_pwrite(const uint8_t* buf, size_t size, off_t offset);
 
-    ssize_t sync_pwritev(const iovec* iov, int iovcnt, off_t offset);
+    void sync_pwritev(const iovec* iov, int iovcnt, off_t offset);
 
     /**
      * @brief : read up to count bytes into the buffer starting at buf.
@@ -147,7 +147,7 @@ public:
      * advanced by this number. it is not an error if this number is smaller than the number requested, because it can
      * be end of chunk, since read won't across chunk.
      */
-    ssize_t sync_next_read(uint8_t* buf, size_t count_in);
+    void sync_next_read(uint8_t* buf, size_t count_in);
 
     /**
      * @brief : reads up to count bytes at offset into the buffer starting at buf.
@@ -159,7 +159,7 @@ public:
      *
      * @return : On success, returns the number of bytes. On error, -1 is returned.
      */
-    ssize_t sync_pread(uint8_t* buf, const size_t count_in, const off_t offset);
+    void sync_pread(uint8_t* buf, size_t count_in, off_t offset);
 
     /**
      * @brief : read at offset and save output to iov.
@@ -173,7 +173,7 @@ public:
      *
      * @return : return the number of bytes read; On error, -1 is returned.
      */
-    ssize_t sync_preadv(iovec* iov, const int iovcnt, const off_t offset);
+    void sync_preadv(iovec* iov, int iovcnt, off_t offset);
 
     /**
      * @brief : repositions the cusor of the device to the argument offset
@@ -338,7 +338,6 @@ private:
      * @return : the unique offset
      */
     auto process_pwrite_offset(size_t len, off_t offset);
-    void do_pwrite(const uint8_t* buf, size_t count, off_t offset, vdev_io_comp_cb_t cb);
 
     /**
      * @brief : convert logical offset in chunk to the physical device offset

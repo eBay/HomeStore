@@ -436,8 +436,7 @@ public:
      *  this field will not be changed if is_init is set to true(first-time-boot)
      */
     PhysicalDev(DeviceManager* mgr, const std::string& devname, int oflags, const hs_uuid_t& uuid, uint32_t dev_num,
-                uint64_t dev_offset, bool is_init, uint64_t dm_info_size,
-                const iomgr::io_interface_comp_cb_t& io_comp_cb, bool* is_inited);
+                uint64_t dev_offset, bool is_init, uint64_t dm_info_size, bool* is_inited);
 
     PhysicalDev(const PhysicalDev&) = delete;
     PhysicalDev(PhysicalDev&&) noexcept = delete;
@@ -484,20 +483,21 @@ public:
     PhysicalDevChunk* find_free_chunk(uint64_t req_size);
 
     //////////// IO Methods /////////////////////
-    void write(const char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch = false);
-    void writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie,
-                bool part_of_batch = false);
-    void write_zero(uint64_t size, uint64_t offset, uint8_t* cookie);
+    folly::Future< bool > async_write(const char* data, uint32_t size, uint64_t offset, bool part_of_batch = false);
+    folly::Future< bool > async_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset,
+                                       bool part_of_batch = false);
+    folly::Future< bool > async_read(char* data, uint32_t size, uint64_t offset, bool part_of_batch = false);
+    folly::Future< bool > async_readv(iovec* iov, int iovcnt, uint32_t size, uint64_t offset,
+                                      bool part_of_batch = false);
+    folly::Future< bool > async_write_zero(uint64_t size, uint64_t offset);
+    folly::Future< bool > queue_fsync();
 
-    void read(char* data, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch = false);
-    void readv(iovec* iov, int iovcnt, uint32_t size, uint64_t offset, uint8_t* cookie, bool part_of_batch = false);
-    void fsync(uint8_t* cookie);
+    void sync_write(const char* data, uint32_t size, uint64_t offset);
+    void sync_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
+    void sync_read(char* data, uint32_t size, uint64_t offset);
+    void sync_readv(iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
+    void sync_write_zero(uint64_t size, uint64_t offset);
 
-    ssize_t sync_write(const char* data, uint32_t size, uint64_t offset);
-    ssize_t sync_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
-
-    ssize_t sync_read(char* data, uint32_t size, uint64_t offset);
-    ssize_t sync_readv(iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
     pdev_info_block get_info_blk();
     void read_dm_chunk(char* mem, uint64_t size);
     void write_dm_chunk(uint64_t gen_cnt, const char* mem, uint64_t size);

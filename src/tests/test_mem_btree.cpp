@@ -89,10 +89,10 @@ struct BtreeTest : public testing::Test {
     }
 
     void put(uint32_t k, btree_put_type put_type) {
-        std::unique_ptr< V > existing_v = std::make_unique< V >();
-
-        auto sreq = BtreeSinglePutRequest{std::make_unique< K >(k), std::make_unique< V >(V::generate_rand()), put_type,
-                                          std::move(existing_v)};
+        auto existing_v = std::make_unique< V >();
+        auto pk = std::make_unique< K >(k);
+        auto pv = std::make_unique< V >(V::generate_rand());
+        auto sreq{BtreeSinglePutRequest{pk.get(), pv.get(), put_type, existing_v.get()}};
         bool done = (m_bt->put(sreq) == btree_status_t::success);
 
         // auto& sreq = to_single_put_req(req);
@@ -129,13 +129,15 @@ struct BtreeTest : public testing::Test {
         if (count == 0) { goto retry; }
 
         auto mreq = BtreeRangePutRequest< K >{BtreeKeyRange< K >{start_it->first, true, end_it->first, true},
-                                              btree_put_type::REPLACE_ONLY_IF_EXISTS, std::move(val)};
+                                              btree_put_type::REPLACE_ONLY_IF_EXISTS, val.get()};
         ASSERT_EQ(m_bt->put(mreq), btree_status_t::success);
     }
 
     void remove_one(uint32_t k) {
-        std::unique_ptr< V > existing_v = std::make_unique< V >();
-        auto rreq = BtreeSingleRemoveRequest{std::make_unique< K >(k), std::move(existing_v)};
+        auto existing_v = std::make_unique< V >();
+        auto pk = std::make_unique< K >(k);
+
+        auto rreq = BtreeSingleRemoveRequest{pk.get(), existing_v.get()};
         bool removed = (m_bt->remove(rreq) == btree_status_t::success);
 
         bool expected_removed = (m_shadow_map.find(rreq.key()) != m_shadow_map.end());
@@ -191,8 +193,9 @@ struct BtreeTest : public testing::Test {
         for (const auto& [key, value] : m_shadow_map) {
             auto copy_key = std::make_unique< K >();
             *copy_key = key;
-            auto req = BtreeSingleGetRequest{std::move(copy_key), std::make_unique< V >()};
-            // BtreeSingleGetRequest& greq = to_single_get_req(req);
+            auto out_v = std::make_unique< V >();
+            auto req = BtreeSingleGetRequest{copy_key.get(), out_v.get()};
+
             const auto ret = m_bt->get(req);
             ASSERT_EQ(ret, btree_status_t::success) << "Missing key " << key << " in btree but present in shadow map";
             ASSERT_EQ((const V&)req.value(), value)
@@ -201,8 +204,10 @@ struct BtreeTest : public testing::Test {
     }
 
     void get_specific_validate(uint32_t k) const {
-        auto req = BtreeSingleGetRequest{std::make_unique< K >(k), std::make_unique< V >()};
-        // BtreeSingleGetRequest& greq = to_single_get_req(req);
+        auto pk = std::make_unique< K >(k);
+        auto out_v = std::make_unique< V >();
+        auto req = BtreeSingleGetRequest{pk.get(), out_v.get()};
+
         const auto status = m_bt->get(req);
         if (status == btree_status_t::success) {
             validate_data(req.key(), (const V&)req.value());
@@ -213,16 +218,18 @@ struct BtreeTest : public testing::Test {
     }
 
     void get_any_validate(uint32_t start_k, uint32_t end_k) const {
-        auto req = BtreeGetAnyRequest< K >{BtreeKeyRange< K >{K{start_k}, true, K{end_k}, true},
-                                           std::make_unique< K >(), std::make_unique< V >()};
+        auto out_k = std::make_unique< K >();
+        auto out_v = std::make_unique< V >();
+        auto req =
+            BtreeGetAnyRequest< K >{BtreeKeyRange< K >{K{start_k}, true, K{end_k}, true}, out_k.get(), out_v.get()};
         const auto status = m_bt->get(req);
         if (status == btree_status_t::success) {
-            ASSERT_EQ(found_in_range(*(K*)req.m_outkey.get(), start_k, end_k), true)
-                << "Get Any returned key=" << *(K*)req.m_outkey.get() << " which is not in range " << start_k << "-"
-                << end_k << "according to shadow map";
-            validate_data(*(K*)req.m_outkey.get(), *(V*)req.m_outval.get());
+            ASSERT_EQ(found_in_range(*(K*)req.m_outkey, start_k, end_k), true)
+                << "Get Any returned key=" << *(K*)req.m_outkey << " which is not in range " << start_k << "-" << end_k
+                << "according to shadow map";
+            validate_data(*(K*)req.m_outkey, *(V*)req.m_outval);
         } else {
-            ASSERT_EQ(found_in_range(*(K*)req.m_outkey.get(), start_k, end_k), false)
+            ASSERT_EQ(found_in_range(*(K*)req.m_outkey, start_k, end_k), false)
                 << "Get Any couldn't find key in the range " << start_k << "-" << end_k
                 << " but it present in shadow map";
         }

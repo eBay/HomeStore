@@ -32,6 +32,7 @@
 #include <sisl/utility/obj_life_counter.hpp>
 #include "btree_internal.hpp"
 #include <homestore/btree/btree_kv.hpp>
+//#include <iomgr/iomgr_flip.hpp>
 #include <isa-l/crc.h>
 
 namespace homestore {
@@ -580,11 +581,11 @@ public:
     bool is_merge_needed(const BtreeConfig& cfg) const {
 #if 0
 #ifdef _PRERELEASE
-        if (homestore_flip->test_flip("btree_merge_node") && occupied_size(cfg) < node_area_size(cfg)) {
+        if (iomgr_flip::instance()->test_flip("btree_merge_node") && occupied_size(cfg) < node_area_size(cfg)) {
             return true;
         }
 
-        auto ret = homestore_flip->get_test_flip< uint64_t >("btree_merge_node_pct");
+        auto ret = iomgr_flip::instance()->get_test_flip< uint64_t >("btree_merge_node_pct");
         if (ret && occupied_size(cfg) < (ret.get() * node_area_size(cfg) / 100)) { return true; }
 #endif
 #endif

@@ -27,6 +27,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <sisl/metrics/metrics.hpp>
 #include <nlohmann/json.hpp>
+#include <homestore/homestore_decl.hpp>
 
 namespace homestore {
 

@@ -338,7 +338,7 @@ nlohmann::json Btree< K, V >::get_metrics_in_json(bool updated) {
 template < typename K, typename V >
 static void Btree< K, V >::set_io_flip() {
     /* IO flips */
-    FlipClient* fc = homestore::HomeStoreFlip::client_instance();
+    FlipClient* fc = iomgr_flip::client_instance();
     FlipFrequency freq;
     FlipCondition cond1;
     FlipCondition cond2;
@@ -367,7 +367,7 @@ static void Btree< K, V >::set_io_flip() {
 template < typename K, typename V >
 static void Btree< K, V >::set_error_flip() {
     /* error flips */
-    FlipClient* fc = homestore::HomeStoreFlip::client_instance();
+    FlipClient* fc = iomgr_flip::client_instance();
     FlipFrequency freq;
     freq.set_count(20);
     freq.set_percent(10);
@@ -384,6 +384,9 @@ static void Btree< K, V >::set_error_flip() {
 void intrusive_ptr_add_ref(BtreeNode* node) { node->m_refcount.increment(1); }
 
 void intrusive_ptr_release(BtreeNode* node) {
-    if (node->m_refcount.decrement_testz(1)) { delete node; }
+    if (node->m_refcount.decrement_testz(1)) {
+        node->~BtreeNode();
+        delete[] uintptr_cast(node);
+    }
 }
 } // namespace homestore

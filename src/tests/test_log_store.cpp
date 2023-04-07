@@ -39,6 +39,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <folly/Synchronized.h>
 #include <iomgr/io_environment.hpp>
+#include <iomgr/iomgr_flip.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 #include <gtest/gtest.h>
@@ -48,12 +49,12 @@
 
 #include "logstore/log_dev.hpp"
 #include "logstore/log_store_family.hpp"
-#include "common/homestore_flip.hpp"
 #include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
 RCU_REGISTER_INIT
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
 struct test_log_data {
     test_log_data() = default;
@@ -137,8 +138,8 @@ public:
         static thread_local std::default_random_engine re{rd()};
         std::shuffle(lsns.begin(), lsns.end(), re);
 
-        ASSERT_LT(m_log_store->get_contiguous_issued_seq_num(0), start_lsn + nparallel_count + nholes);
-        ASSERT_LT(m_log_store->get_contiguous_completed_seq_num(0), start_lsn + nparallel_count + nholes);
+        ASSERT_LT(m_log_store->get_contiguous_issued_seq_num(-1), start_lsn + nparallel_count + nholes);
+        ASSERT_LT(m_log_store->get_contiguous_completed_seq_num(-1), start_lsn + nparallel_count + nholes);
         for (const auto lsn : lsns) {
             if (nholes) {
                 m_hole_lsns.wlock()->insert(std::make_pair<>(lsn, false));
@@ -165,7 +166,7 @@ public:
         const auto trunc_upto = m_log_store->truncated_upto();
         const auto& hole_end = m_hole_lsns.rlock()->end();
         const auto upto =
-            expect_all_completed ? m_cur_lsn.load() - 1 : m_log_store->get_contiguous_completed_seq_num(0);
+            expect_all_completed ? m_cur_lsn.load() - 1 : m_log_store->get_contiguous_completed_seq_num(-1);
 
         int64_t idx = trunc_upto + 1;
         bool hole_expected{false};
@@ -228,7 +229,7 @@ public:
 
         const auto& hole_end = m_hole_lsns.rlock()->end();
         const auto upto =
-            expect_all_completed ? m_cur_lsn.load() - 1 : m_log_store->get_contiguous_completed_seq_num(0);
+            expect_all_completed ? m_cur_lsn.load() - 1 : m_log_store->get_contiguous_completed_seq_num(-1);
         for (auto i = m_log_store->truncated_upto() + 1; i < upto; ++i) {
             const auto hole_entry = m_hole_lsns.rlock()->find(i);
             if ((hole_entry != hole_end) && (!hole_entry->second)) { // Hole entry exists and not filled
@@ -304,9 +305,9 @@ public:
     void rollback_validate(uint32_t num_lsns_to_rollback) {
         auto const upto_lsn = m_cur_lsn.fetch_sub(num_lsns_to_rollback) - num_lsns_to_rollback - 1;
         m_log_store->rollback_async(upto_lsn, nullptr);
-        ASSERT_EQ(m_log_store->get_contiguous_completed_seq_num(0), upto_lsn)
+        ASSERT_EQ(m_log_store->get_contiguous_completed_seq_num(-1), upto_lsn)
             << "Last completed seq num is not reset after rollback";
-        ASSERT_EQ(m_log_store->get_contiguous_issued_seq_num(0), upto_lsn)
+        ASSERT_EQ(m_log_store->get_contiguous_issued_seq_num(-1), upto_lsn)
             << "Last issued seq num is not reset after rollback";
         read_validate(true);
     }
@@ -421,63 +422,15 @@ public:
     }
 
     void start_homestore(bool restart = false) {
-        auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
-        auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-
-        auto nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
-        bool is_spdk = SISL_OPTIONS["spdk"].as< bool >();
-        if (is_spdk) { nthreads = 2; }
-
         auto n_log_stores = SISL_OPTIONS["num_logstores"].as< uint32_t >();
         if (n_log_stores < 4u) {
             LOGINFO("Log store test needs minimum 4 log stores for testing, setting them to 4");
             n_log_stores = 4u;
         }
 
-        if (restart) {
-            shutdown(ndevices, false);
-            std::this_thread::sleep_for(std::chrono::seconds{5});
-        }
-
-        std::vector< dev_info > device_info;
-        if (SISL_OPTIONS.count("device_list")) {
-            m_dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
-            std::string dev_list_str;
-            for (const auto& d : m_dev_names) {
-                dev_list_str += d;
-            }
-            LOGINFO("Taking input dev_list: {}", dev_list_str);
-
-            /* if user customized file/disk names */
-            for (uint32_t i{0}; i < m_dev_names.size(); ++i) {
-                const std::filesystem::path fpath{m_dev_names[i]};
-                device_info.emplace_back(m_dev_names[i], HSDevType::Data);
-            }
-        } else {
-            /* create files */
-            LOGINFO("creating {} device files with each of size {} ", ndevices, in_bytes(dev_size));
-            if (!restart) init_files(ndevices, dev_size);
-            for (uint32_t i{0}; i < ndevices; ++i) {
-                const std::filesystem::path fpath{s_fpath_root + std::to_string(i + 1)};
-                device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
-            }
-        }
-
-        LOGINFO("Starting iomgr with {} threads, spdk: {}", nthreads, is_spdk);
-        ioenvironment.with_iomgr(nthreads, is_spdk);
-
-        const uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
-        LOGINFO("Initialize and start HomeStore with app_mem_size = {}", in_bytes(app_mem_size));
-
-        test_common::set_random_http_port();
-        hs_input_params params;
-        params.app_mem_size = app_mem_size;
-        params.data_devices = device_info;
-        HomeStore::instance()
-            ->with_params(params)
-            .with_meta_service(5.0)
-            .with_log_service(60.0, 10.0)
-            .before_init_devices([this, restart, n_log_stores]() {
+        test_common::HSTestHelper::start_homestore(
+            "test_log_store", 5.0, 42.0, 42.0, 0, 0,
+            [this, restart, n_log_stores]() {
                 if (restart) {
                     for (uint32_t i{0}; i < n_log_stores; ++i) {
                         SampleLogStoreClient* client = m_log_store_clients[i].get();
@@ -487,8 +440,8 @@ public:
                                                           });
                     }
                 }
-            })
-            .init(true /* wait_for_init */);
+            },
+            restart);
 
         if (!restart) {
             for (uint32_t i{0}; i < n_log_stores; ++i) {
@@ -503,31 +456,9 @@ public:
         }
     }
 
-    void shutdown(uint32_t ndevices, bool cleanup = true) {
-        HomeStore::instance()->shutdown();
-        HomeStore::reset_instance();
-        iomanager.stop();
-
-        if (cleanup) {
-            m_log_store_clients.clear();
-            remove_files(ndevices);
-        }
-    }
-
-    void init_files(uint32_t ndevices, uint64_t dev_size) {
-        remove_files(ndevices);
-        for (uint32_t i{0}; i < ndevices; ++i) {
-            const std::string fpath{s_fpath_root + std::to_string(i + 1)};
-            std::ofstream ofs{fpath, std::ios::binary | std::ios::out | std::ios::trunc};
-            std::filesystem::resize_file(fpath, dev_size);
-        }
-    }
-
-    void remove_files(uint32_t ndevices) {
-        for (uint32_t i{0}; i < ndevices; ++i) {
-            const std::string fpath{s_fpath_root + std::to_string(i + 1)};
-            if (std::filesystem::exists(fpath)) { std::filesystem::remove(fpath); }
-        }
+    void shutdown(bool cleanup = true) {
+        test_common::HSTestHelper::shutdown_homestore(cleanup);
+        if (cleanup) { m_log_store_clients.clear(); }
     }
 
     void on_log_insert_completion(logstore_family_id_t fid, logstore_seq_num_t lsn, logdev_key ld_key) {
@@ -591,7 +522,7 @@ protected:
         m_batch_size = batch_size;
         m_q_depth = q_depth;
         m_holes_per_batch = holes_per_batch;
-        iomanager.run_on(iomgr::thread_regex::all_io, [](iomgr::io_thread_addr_t addr) {
+        iomanager.run_on_forget(iomgr::reactor_regex::all_io, []() {
             if (SampleDB::instance().m_on_schedule_io_cb) SampleDB::instance().m_on_schedule_io_cb();
         });
     }
@@ -729,12 +660,12 @@ protected:
 
             // lsc->truncate(lsc->m_cur_lsn.load() - 1);
             const auto t_seq_num = lsc->m_log_store->truncated_upto();
-            const auto c_seq_num = lsc->m_log_store->get_contiguous_completed_seq_num(0);
+            const auto c_seq_num = lsc->m_log_store->get_contiguous_completed_seq_num(-1);
             if (t_seq_num == c_seq_num) {
                 ++skip_truncation;
                 continue;
             }
-            lsc->truncate(lsc->m_log_store->get_contiguous_completed_seq_num(0));
+            lsc->truncate(lsc->m_log_store->get_contiguous_completed_seq_num(-1));
             lsc->read_validate();
         }
 
@@ -872,13 +803,16 @@ protected:
         int default_freq = (100 - cum_freqs) / (SampleDB::instance().m_log_store_clients.size() - inp_freqs.size());
 
         size_t d{0};
+        std::string print_str("LogStore Client/Distribution pct: ");
         for (size_t s{0}; s < SampleDB::instance().m_log_store_clients.size(); ++s) {
             const auto upto = store_freqs[s].has_value() ? *store_freqs[s] : default_freq;
             for (std::remove_const_t< decltype(upto) > i{0}; i < upto; ++i) {
                 m_store_distribution[d++] = s;
             }
-            LOGINFO("LogStore Client: {} distribution pct = {}", s, upto);
+            fmt::format_to(std::back_inserter(print_str), "[{}]={} ", s, upto);
         }
+        LOGINFO("{}", print_str);
+
         // Fill in the last reminder with last store
         while (d < 100) {
             m_store_distribution[d++] = SampleDB::instance().m_log_store_clients.size() - 1;
@@ -1160,7 +1094,7 @@ TEST_F(LogStoreTest, FlushSync) {
 #ifdef _PRERELEASE
     LOGINFO("Step 7: Simulate flush_sync running parallel to regular flush. This is achieved by doing flip to delay "
             "regular flush and do flush_sync");
-    flip::FlipClient* fc = HomeStoreFlip::client_instance();
+    flip::FlipClient* fc = iomgr_flip::client_instance();
 
     flip::FlipFrequency freq;
     freq.set_count(1);
@@ -1180,6 +1114,10 @@ TEST_F(LogStoreTest, FlushSync) {
 
     LOGINFO("Step 10: Wait for the Inserts to complete");
     this->wait_for_inserts();
+
+#ifdef _PRERELEASE
+    fc->remove_flip("simulate_log_flush_delay");
+#endif
 }
 
 TEST_F(LogStoreTest, Rollback) {
@@ -1320,28 +1258,19 @@ TEST_F(LogStoreTest, WriteSyncThenRead) {
     }
 }
 
-SISL_OPTIONS_ENABLE(logging, test_log_store)
+SISL_OPTIONS_ENABLE(logging, test_log_store, iomgr, test_common_setup)
 SISL_OPTION_GROUP(test_log_store,
-                  (num_threads, "", "num_threads", "number of threads",
-                   ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-                  (num_devs, "", "num_devs", "number of devices to create",
-                   ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-                  (dev_size_mb, "", "dev_size_mb", "size of each device in MB",
-                   ::cxxopts::value< uint64_t >()->default_value("1024"), "number"),
-                  (device_list, "", "device_list", "Device List instead of default created",
-                   ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
                   (num_logstores, "", "num_logstores", "number of log stores",
                    ::cxxopts::value< uint32_t >()->default_value("4"), "number"),
                   (num_records, "", "num_records", "number of record to test",
                    ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
-                  (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
                   (iterations, "", "iterations", "Iterations", ::cxxopts::value< uint32_t >()->default_value("1"),
                    "the number of iterations to run each test"));
 
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
     ::testing::InitGoogleTest(&parsed_argc, argv);
-    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_log_store);
+    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_log_store, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_log_store");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
 

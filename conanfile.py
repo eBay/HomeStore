@@ -5,7 +5,7 @@ from conans import CMake
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "4.0.10"
+    version = "4.1.0"
 
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
@@ -53,7 +53,7 @@ class HomestoreConan(ConanFile):
         self.build_requires("gtest/1.12.1")
 
     def requirements(self):
-        self.requires("iomgr/[~=8, include_prerelease=True]@oss/master")
+        self.requires("iomgr/[~=9, include_prerelease=True]@oss/fiber")
         self.requires("sisl/[~=9, include_prerelease=True]@oss/master")
 
         # FOSS, rarely updated

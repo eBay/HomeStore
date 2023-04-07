@@ -33,12 +33,12 @@
 #include <folly/concurrency/ConcurrentHashMap.h>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
+#include <iomgr/iomgr_flip.hpp>
 
 #include "blkalloc/blk_allocator.h"
 #include "blkalloc/blk_cache.h"
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
-#include "common/homestore_flip.hpp"
 #include "blkalloc/varsize_blk_allocator.h"
 
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
@@ -94,7 +94,7 @@ protected:
 public:
     const uint32_t m_total_count;
     BlkAllocatorTest() :
-            m_rand_blk_generator{1, m_total_count} ,
+            m_rand_blk_generator{1, m_total_count},
             m_total_count{round_count(SISL_OPTIONS["num_blks"].as< uint32_t >())} {
         m_slab_alloced_blks.emplace_back(m_total_count);
     }
@@ -817,7 +817,7 @@ namespace {
 void alloc_var_scatter_direct_unirandsize(VarsizeBlkAllocatorTest* const block_test_pointer) {
     LOGINFO("Step 1: Set the flip to force directly bypassing freeblk cache");
 #ifdef _PRERELEASE
-    flip::FlipClient* const fc{HomeStoreFlip::client_instance()};
+    flip::FlipClient* const fc{iomgr_flip::client_instance()};
     flip::FlipFrequency freq;
     freq.set_count(static_cast< uint32_t >(block_test_pointer->m_total_count) * 1000);
     freq.set_percent(100);
