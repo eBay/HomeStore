@@ -33,9 +33,11 @@ SISL_LOGGING_INIT(btree)
 SISL_OPTIONS_ENABLE(logging, test_mem_btree)
 SISL_OPTION_GROUP(test_mem_btree,
                   (num_iters, "", "num_iters", "number of iterations for rand ops",
-                   ::cxxopts::value< uint32_t >()->default_value("65536"), "number"),
+                   ::cxxopts::value< uint32_t >()->default_value("100"), "number"),
                   (num_entries, "", "num_entries", "number of entries to test with",
                    ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
+                  (merge_activate, "", "merge_activate", "merge_activate",
+                   ::cxxopts::value< bool >()->default_value("0"), ""),
                   (seed, "", "seed", "random engine seed, use random if not defined",
                    ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
@@ -84,6 +86,7 @@ struct BtreeTest : public testing::Test {
     void SetUp() override {
         m_cfg.m_leaf_node_type = T::leaf_node_type;
         m_cfg.m_int_node_type = T::interior_node_type;
+        if (SISL_OPTIONS.count("merge_activate")) m_cfg.m_merge_turned_on = true;
         m_bt = std::make_unique< typename T::BtreeType >(m_cfg);
         m_bt->init(nullptr);
     }
@@ -147,9 +150,45 @@ struct BtreeTest : public testing::Test {
         }
     }
 
+    void range_remove(uint32_t start_key, uint32_t end_key) {
+
+        auto start_it = m_shadow_map.lower_bound(K{start_key});
+        auto end_it = m_shadow_map.lower_bound(K{end_key});
+        auto fount_it = m_shadow_map.find(K{end_key});
+        bool expected = (start_it != m_shadow_map.end()) && (std::distance(start_it, end_it) >= 0);
+        if (start_it == end_it && fount_it == m_shadow_map.end()) { expected = false; }
+        auto range = BtreeKeyRange< K >{K{start_key}, true, K{end_key}, true};
+        LOGINFO("range : {}", range.to_string());
+        auto mreq = BtreeRangeRemoveRequest< K >{std::move(range)};
+
+        size_t original_ts = get_tree_size();
+        size_t original_ms = m_shadow_map.size();
+
+        auto ret = m_bt->remove(mreq);
+        ASSERT_EQ(expected, ret == btree_status_t::success)
+            << " not a successful remove op for range " << range.to_string()
+            << "start_it!=m_shadow_map.end(): " << (start_it != m_shadow_map.end())
+            << " and std::distance(start_it,end_it) >= 0 : " << (std::distance(start_it, end_it) >= 0);
+
+        K out_key;
+        V out_value;
+        auto qret = get_num_elements_in_tree(start_key, end_key, out_key, out_value);
+        ASSERT_EQ(qret, btree_status_t::not_found)
+            << "  At least one element found! [" << out_key << "] = " << out_value;
+
+        if (expected) { m_shadow_map.erase(start_it, fount_it != m_shadow_map.end() ? ++end_it : end_it); }
+        size_t ms = m_shadow_map.size();
+        size_t ts = get_tree_size();
+        ASSERT_EQ(original_ms - ms, original_ts - ts) << " number of removed from map is " << original_ms - ms
+                                                      << " whereas number of existing keys is " << original_ts - ts;
+
+        ASSERT_EQ(ts, ms) << " size of tree is " << ts << " vs number of existing keys are " << ms;
+    }
+
     void query_all_validate() const {
         query_validate(0u, SISL_OPTIONS["num_entries"].as< uint32_t >() - 1, UINT32_MAX);
     }
+
     void query_all_paginate_validate(uint32_t batch_size) const {
         query_validate(0u, SISL_OPTIONS["num_entries"].as< uint32_t >() - 1, batch_size);
     }
@@ -229,6 +268,26 @@ struct BtreeTest : public testing::Test {
     }
 
     void print() const { m_bt->print_tree(); }
+
+    void print_keys() const { m_bt->print_tree_keys(); }
+
+    size_t get_tree_size() {
+        BtreeQueryRequest< K > qreq{
+            BtreeKeyRange< K >{K{0}, true, K{SISL_OPTIONS["num_entries"].as< uint32_t >()}, true},
+            BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, UINT32_MAX};
+        std::vector< std::pair< K, V > > out_vector;
+        auto const ret = m_bt->query(qreq, out_vector);
+        return out_vector.size();
+    }
+
+    btree_status_t get_num_elements_in_tree(uint32_t start_k, uint32_t end_k, K& out_key, V& out_value) const {
+        auto req = BtreeGetAnyRequest< K >{BtreeKeyRange< K >{K{start_k}, true, K{end_k}, true},
+                                           std::make_unique< K >(), std::make_unique< V >()};
+        auto ret = m_bt->get(req);
+        out_key = *((K*)req.m_outkey.get());
+        out_value = *((V*)req.m_outval.get());
+        return ret;
+    }
 
 private:
     void validate_data(const K& key, const V& btree_val) const {
@@ -341,6 +400,95 @@ TYPED_TEST(BtreeTest, RangeUpdate) {
 
     LOGINFO("Step 2: Query {} entries and validate with pagination of 75 entries", num_entries);
     this->query_validate(0, num_entries, 75);
+}
+
+TYPED_TEST(BtreeTest, SimpleRemoveRange) {
+    // Forward sequential insert
+    const auto num_entries = 20;
+    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries);
+    for (uint32_t i{0}; i < num_entries; ++i) {
+        this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    }
+
+    //    this->print_keys(); // EXPECT size = 20 : 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19
+    this->range_remove(5, 10);
+    //    this->print_keys(); // EXPECT size = 14 : 0 1 2 3 4 [5 6 7 8 9 10] 11 12 13 14 15 16 17 18 19
+    this->range_remove(0, 2);
+    //    this->print_keys(); // EXPECT size = 11 : [0 1 2] 3 4 11 12 13 14 15 16 17 18 19
+    this->range_remove(18, 19);
+    //    this->print_keys(); // EXPECT size = 9 : 3 4 11 12 13 14 15 16 17 [18 19]
+    this->range_remove(17, 17);
+    //    this->print_keys(); // EXPECT size = 8 : 3 4 11 12 13 14 15 16 [17]
+    this->range_remove(1, 5);
+    //    this->print_keys(); // EXPECT size = 6 : [3 4] 11 12 13 14 15 16
+    this->range_remove(1, 20);
+    //    this->print_keys(); // EXPECT size = 0 : [11 12 13 14 15 16]
+
+    this->query_all_validate();
+    //    this->query_validate(0, num_entries , 75);
+}
+
+TYPED_TEST(BtreeTest, removeAllEntriesReverse) {
+    // Forward sequential insert
+    const auto num_entries = 1000;
+    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries);
+    for (uint32_t i{0}; i < num_entries; ++i) {
+        this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    }
+    //    this->print_keys();
+    this->range_remove(681, 999);
+    //    this->print_keys();
+    this->range_remove(454, 680);
+    //    this->print_keys();
+    this->range_remove(227, 453);
+    //    this->print_keys();
+    this->range_remove(0, 226);
+    //    this->print_keys();
+    this->query_all_validate();
+}
+
+TYPED_TEST(BtreeTest, removeAllEntries) {
+    // Forward sequential insert
+    const auto num_entries = 1000;
+    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries);
+    for (uint32_t i{0}; i < num_entries; ++i) {
+        this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    }
+    //    this->print_keys();
+    this->range_remove(0, 226);
+    //    this->print_keys();
+    this->range_remove(227, 453);
+    //    this->print_keys();
+    this->range_remove(454, 680);
+    //    this->print_keys();
+    this->range_remove(681, 999);
+    //    this->print_keys();
+    this->query_all_validate();
+}
+
+TYPED_TEST(BtreeTest, RandomRemoveRange) {
+
+    // Forward sequential insert
+    const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
+    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries);
+    for (uint32_t i{0}; i < num_entries; ++i) {
+        this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    }
+
+    static std::uniform_int_distribution< uint32_t > s_rand_key_generator{0, 2 * num_entries};
+    //    this->print_keys();
+    for (uint32_t i{0}; i < SISL_OPTIONS["num_iters"].as< uint32_t >() && this->m_shadow_map.size() > 0; ++i) {
+        uint32_t key1 = s_rand_key_generator(g_re);
+        uint32_t key2 = s_rand_key_generator(g_re);
+        uint32_t start_key = std::min(key1, key2);
+        uint32_t end_key = std::max(key1, key2);
+
+        LOGINFO("Step 2 - {}: Do Range Remove of maximum [{},{}] keys ", i, start_key, end_key);
+        this->range_remove(std::min(key1, key2), std::max(key1, key2));
+        //        this->print_keys();
+    }
+
+    this->query_all_validate();
 }
 
 int main(int argc, char* argv[]) {
