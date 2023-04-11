@@ -93,6 +93,7 @@ public:
     BtreeNode(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf) : m_phys_node_buf{node_buf} {
         if (init_buf) {
             new (node_buf) persistent_hdr_t{};
+            set_node_id(id);
             set_leaf(is_leaf);
         } else {
             DEBUG_ASSERT_EQ(node_id(), id);

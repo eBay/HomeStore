@@ -47,8 +47,13 @@ endif()
 can_build_io_tests(io_tests)
 if (${io_tests})
 
+    set(TEST_INDEXBTREE_SOURCE_FILES test_index_btree.cpp)
+    add_executable(test_index_btree ${TEST_INDEXBTREE_SOURCE_FILES})
+    target_link_libraries(test_index_btree homestore ${COMMON_TEST_DEPS} GTest::gtest)
+    add_test(NAME IndexBtree COMMAND test_index_btree)
+
     add_executable(test_data_service)
-    target_sources(test_data_service PRIVATE test_data_service.cpp) 
+    target_sources(test_data_service PRIVATE test_data_service.cpp)
     target_link_libraries(test_data_service homestore ${COMMON_TEST_DEPS} GTest::gmock)
 
     add_executable(test_log_store)

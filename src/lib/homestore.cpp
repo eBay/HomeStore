@@ -180,7 +180,6 @@ void HomeStore::init(bool wait_for_init) {
         std::make_unique< DeviceManager >(hs_config.input.data_devices, bind_this(HomeStore::new_vdev_found, 2),
                                           sizeof(sb_blkstore_blob), bind_this(HomeStore::process_vdev_error, 1));
     m_dev_mgr->init();
-
     uint64_t cache_size = resource_mgr().get_cache_size();
     m_evictor = std::make_shared< sisl::LRUEvictor >(cache_size, 1000);
 
@@ -223,6 +222,9 @@ void HomeStore::shutdown() {
 
 void HomeStore::create_vdevs() {
     std::vector< folly::Future< bool > > futs;
+
+    hs_utils::set_btree_mempool_size(hs()->device_mgr()->atomic_page_size({PhysicalDevGroup::FAST}));
+
     if (has_meta_service()) { m_meta_service->create_vdev(pct_to_size(m_meta_store_size_pct, PhysicalDevGroup::META)); }
 
     if (has_data_service()) { m_data_service->create_vdev(pct_to_size(m_data_store_size_pct, PhysicalDevGroup::DATA)); }

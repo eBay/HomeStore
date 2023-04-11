@@ -59,7 +59,8 @@ public:
 
     void add_to_dirty_list(const IndexBufferPtr& buf) {
         buf->m_buf_state = index_buf_state_t::DIRTY;
-        m_dirty_buf_list->push_back(buf);
+        // TODO
+        // m_dirty_buf_list->push_back(buf);
         m_dirty_buf_count.increment(1);
     }
 

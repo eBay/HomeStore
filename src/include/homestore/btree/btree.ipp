@@ -332,6 +332,11 @@ nlohmann::json Btree< K, V >::get_metrics_in_json(bool updated) {
     return m_metrics.get_result_in_json(updated);
 }
 
+template < typename K, typename V >
+bnodeid_t Btree< K, V >::root_node_id() const {
+    return m_root_node_info.bnode_id();
+}
+
 // TODO: Commenting out flip till we figure out how to move flip dependency inside sisl package.
 #if 0
 #ifdef _PRERELEASE

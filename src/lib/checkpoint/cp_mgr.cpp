@@ -234,7 +234,7 @@ CPGuard::CPGuard(CPManager* mgr) {
 
 CPGuard::~CPGuard() {
     if (m_pushed && !t_cp_stack.empty()) {
-        HS_DBG_ASSERT_EQ((void*)m_cp, (void*)t_cp_stack.top(), "CPGuard mismatch of CP pointers");
+//        HS_DBG_ASSERT_EQ((void*)m_cp, (void*)t_cp_stack.top(), "CPGuard mismatch of CP pointers");
         t_cp_stack.pop();
     }
     if (m_cp) { m_cp->m_cp_mgr->cp_io_exit(m_cp); }

@@ -14,7 +14,7 @@
  *
  *********************************************************************************/
 #include <sisl/fds/thread_vector.hpp>
-#include <homestore/btree/btree.ipp>
+#include <homestore/btree/detail/btree_node.hpp>
 #include <homestore/index_service.hpp>
 #include <homestore/homestore.hpp>
 #include "common/homestore_assert.hpp"

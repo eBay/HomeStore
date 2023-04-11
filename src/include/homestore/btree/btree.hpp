@@ -98,6 +98,7 @@ public:
     nlohmann::json get_status(int log_level) const;
     void print_tree() const;
     nlohmann::json get_metrics_in_json(bool updated = true);
+    bnodeid_t root_node_id() const;
 
     // static void set_io_flip();
     // static void set_error_flip();
@@ -105,7 +106,7 @@ public:
 protected:
     /////////////////////////// Methods the underlying store is expected to handle ///////////////////////////
     virtual BtreeNodePtr alloc_node(bool is_leaf) = 0;
-    virtual BtreeNode* init_node(uint8_t* node_buf, uint32_t node_ctx_size, bnodeid_t id, bool init_buf, bool is_leaf);
+    virtual BtreeNode* init_node(uint8_t* node_buf, uint32_t node_ctx_size, bnodeid_t id, bool init_buf, bool is_leaf) const;
     virtual btree_status_t read_node_impl(bnodeid_t id, BtreeNodePtr& node) const = 0;
     virtual btree_status_t write_node_impl(const BtreeNodePtr& node, void* context) = 0;
     virtual btree_status_t refresh_node(const BtreeNodePtr& node, bool for_read_modify_write, void* context) const = 0;

@@ -258,7 +258,7 @@ static BtreeNode* create_node(uint32_t node_ctx_size, Args&&... args) {
 
 template < typename K, typename V >
 BtreeNode* Btree< K, V >::init_node(uint8_t* node_buf, uint32_t node_ctx_size, bnodeid_t id, bool init_buf,
-                                    bool is_leaf) {
+                                    bool is_leaf) const {
     BtreeNode* n{nullptr};
     btree_node_type node_type = is_leaf ? m_bt_cfg.leaf_node_type() : m_bt_cfg.interior_node_type();
 
