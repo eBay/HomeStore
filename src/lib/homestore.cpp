@@ -223,6 +223,9 @@ void HomeStore::shutdown() {
 
 void HomeStore::create_vdevs() {
     std::vector< folly::Future< bool > > futs;
+
+    hs_utils::set_btree_mempool_size(hs()->device_mgr()->atomic_page_size({PhysicalDevGroup::FAST}));
+
     if (has_meta_service()) { m_meta_service->create_vdev(pct_to_size(m_meta_store_size_pct, PhysicalDevGroup::META)); }
 
     if (has_data_service()) { m_data_service->create_vdev(pct_to_size(m_data_store_size_pct, PhysicalDevGroup::DATA)); }

@@ -14,7 +14,7 @@
  *
  *********************************************************************************/
 #include <sisl/fds/thread_vector.hpp>
-#include <homestore/btree/btree.ipp>
+#include <homestore/btree/detail/btree_node.hpp>
 #include <homestore/index_service.hpp>
 #include <homestore/homestore.hpp>
 #include "common/homestore_assert.hpp"
@@ -25,20 +25,20 @@
 #include "common/resource_mgr.hpp"
 
 namespace homestore {
+
 IndexWBCache& wb_cache() { return index_service().wb_cache(); }
 
 IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, const std::shared_ptr< sisl::Evictor >& evictor,
                            uint32_t node_size) :
         m_vdev{vdev},
         m_cache{
-            evictor, 1000, node_size,
+            evictor, 100000, node_size,
             [](const BtreeNodePtr& node) -> BlkId { return IndexBtreeNode::convert(node.get())->m_idx_buf->m_blkid; },
             [](const sisl::CacheRecord& rec) -> bool {
                 const auto& hnode = (sisl::SingleEntryHashNode< BtreeNodePtr >&)rec;
                 return (hnode.m_value->m_refcount.test_le(1));
             }},
         m_node_size{node_size} {
-
     start_flush_threads();
     for (size_t i{0}; i < MAX_CP_COUNT; ++i) {
         m_dirty_list[i] = std::make_unique< sisl::ThreadVector< IndexBufferPtr > >();
@@ -99,7 +99,8 @@ void IndexWBCache::realloc_buf(const IndexBufferPtr& buf) {
     m_vdev->commit_blk(buf->m_blkid);
 }
 
-void IndexWBCache::write_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
+void IndexWBCache::write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* cp_ctx) {
+    m_cache.upsert(node);
     r_cast< IndexCPContext* >(cp_ctx)->add_to_dirty_list(buf);
     resource_mgr().inc_dirty_buf_size(m_node_size);
 }
@@ -300,5 +301,4 @@ void IndexWBCache::do_free_btree_blks(IndexCPContext* cp_ctx) {
 IndexBtreeNode* IndexBtreeNode::convert(BtreeNode* bt_node) {
     return r_cast< IndexBtreeNode* >(bt_node->get_node_context());
 }
-
 } // namespace homestore

@@ -22,6 +22,7 @@
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 #include <homestore/homestore.hpp>
+#include <homestore/index_service.hpp>
 
 const std::string SPDK_ENV_VAR_STRING{"USER_WANT_SPDK"};
 const std::string HTTP_SVC_ENV_VAR_STRING{"USER_WANT_HTTP_OFF"};
@@ -56,6 +57,14 @@ inline static uint32_t generate_random_http_port() {
     LOGINFO("random port generated = {}", http_port);
     return http_port;
 }
+
+class TestIndexServiceCallbacks : public IndexServiceCallbacks {
+public:
+    std::shared_ptr< IndexTableBase > on_index_table_found(const superblk< index_table_sb >& cb) override {
+        return nullptr;
+    }
+};
+
 
 class HSTestHelper {
 private:
@@ -136,6 +145,7 @@ public:
             .with_meta_service(meta_pct)
             .with_log_service(data_log_pct, ctrl_log_pct)
             .with_data_service(data_pct)
+            .with_index_service(index_pct, std::make_unique< TestIndexServiceCallbacks >())
             .before_init_devices(std::move(cb))
             .init(true /* wait_for_init */);
     }
