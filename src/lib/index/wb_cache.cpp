@@ -169,15 +169,13 @@ void IndexWBCache::free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
 }
 
 //////////////////// CP Related API section /////////////////////////////////
-void IndexWBCache::async_cp_flush(CPContext* context, cp_flush_done_cb_t cp_done_cb) {
+folly::Future< bool > IndexWBCache::async_cp_flush(CPContext* context) {
     IndexCPContext* cp_ctx = s_cast< IndexCPContext* >(context);
     if (!cp_ctx->any_dirty_buffers()) {
         CP_PERIODIC_LOG(DEBUG, cp_ctx->id(), "Btree does not have any dirty buffers to flush");
-        cp_done_cb(cp_ctx->cp());
-        return; // nothing to flush
+        return folly::makeFuture< bool >(true); // nothing to flush
     }
 
-    cp_ctx->m_flush_done_cb = std::move(cp_done_cb);
     cp_ctx->prepare_flush_iteration();
 
     for (auto& fiber : m_cp_flush_fibers) {
@@ -224,7 +222,7 @@ void IndexWBCache::process_write_completion(IndexCPContext* cp_ctx, IndexBuffer*
         do_flush_one_buf(cp_ctx, next_buf, false);
     } else if (!has_more) {
         // We are done flushing the buffers, lets free the btree blocks and then flush the bitmap
-        do_free_btree_blks(cp_ctx);
+        free_btree_blks_and_flush(cp_ctx);
     }
 }
 
@@ -287,7 +285,9 @@ void IndexWBCache::get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_c
     }
 }
 
-void IndexWBCache::do_free_btree_blks(IndexCPContext* cp_ctx) {
+void IndexWBCache::free_btree_blks_and_flush(IndexCPContext* cp_ctx) {
+    // Pick a CP Manager blocking IO fiber to execute this operation
+    iomanager.run_on_forget(hs()->cp_mgr().);
     BlkId* pbid;
     while ((pbid = cp_ctx->next_blkid()) != nullptr) {
         m_vdev->free_blk(*pbid);

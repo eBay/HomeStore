@@ -38,6 +38,8 @@ CPManager::CPManager(bool first_time_boot) :
         m_sb.create(sizeof(cp_mgr_super_block));
         create_first_cp();
     }
+
+    start_cp_thread();
 }
 
 CPManager::~CPManager() { HS_REL_ASSERT(!m_cur_cp, "CPManager is tiering down without calling shutdown"); }
@@ -110,7 +112,7 @@ CP* CPManager::get_cur_cp() {
     return p;
 }
 
-void CPManager::trigger_cp_flush(cp_done_cb_t&& cb, bool force) {
+folly::Future< bool > CPManager::trigger_cp_flush(bool force) {
     // check the state of previous CP flush
     bool expected = false;
     auto ret = m_in_flush_phase.compare_exchange_strong(expected, true);
@@ -118,17 +120,19 @@ void CPManager::trigger_cp_flush(cp_done_cb_t&& cb, bool force) {
         // There is already an existing CP on-going, but if force is set, we create a back-to-back CP.
         if (force) {
             std::unique_lock< std::mutex > lk(trigger_cp_mtx);
-            auto cpg = cp_guard();
-            HS_DBG_ASSERT_NE(cpg->m_cp_status, cp_status_t::cp_flush_prepare);
-            cpg->m_done_cb = cb;
-            cpg->m_cp_waiting_to_trigger = true;
+            auto cur_cp = cp_guard();
+            HS_DBG_ASSERT_NE(cur_cp->m_cp_status, cp_status_t::cp_flush_prepare);
+            cur_cp->comp_promise = std::move(folly::Promise< bool >{});
+            cur_cp->m_cp_waiting_to_trigger = true;
+            return cur_cp->comp_promise.getFuture();
+        } else {
+            return folly::makeFuture< bool >(false);
         }
-        return;
     }
 
+    folly::Future< bool > ret;
     {
-        auto cpg = cp_guard();
-        CP* cur_cp = cpg.get();
+        auto cur_cp = cp_guard();
         cur_cp->m_cp_status = cp_status_t::cp_trigger;
         HS_PERIODIC_LOG(INFO, cp, "<<<<<<<<<<< Triggering flush of the CP {}", cur_cp->to_string());
         COUNTER_INCREMENT(*m_metrics, cp_cnt, 1);
@@ -148,7 +152,14 @@ void CPManager::trigger_cp_flush(cp_done_cb_t&& cb, bool force) {
             }
 
             HS_PERIODIC_LOG(DEBUG, cp, "CP Attached completed, proceed to exit cp critical section");
-            cur_cp->m_done_cb = cb;
+            if (cur_cp->m_cp_waiting_to_trigger) {
+                // Triggered because of back-2-back CP, generate a different future. Actual future which it was attached
+                // originally by the caller will be untouched and completed upto CP completion/
+                ret = folly::makeFuture< bool >(true);
+            } else {
+                cur_cp->comp_promise = std::move(folly::Promise< bool >{});
+                ret = cur_cp->comp_promise.getFuture();
+            }
             cur_cp->m_cp_status = cp_status_t::cp_flush_prepare;
             new_cp->m_cp_status = cp_status_t::cp_io_ready;
             rcu_xchg_pointer(&m_cur_cp, new_cp);
@@ -156,30 +167,24 @@ void CPManager::trigger_cp_flush(cp_done_cb_t&& cb, bool force) {
         }
         // At this point we are sure that there is no thread working on prev_cp without incrementing the cp_enter cnt
     }
+
     HS_PERIODIC_LOG(DEBUG, cp, "CP critical section done, doing cp_io_exit");
+    return ret;
 }
 
 void CPManager::cp_start_flush(CP* cp) {
-    // TODO: Switch to sync only fiber/thread and execute the following code there
+    std::vector< folly::Future< bool > > futs;
     HS_PERIODIC_LOG(INFO, cp, "Starting CP {} flush", cp->id());
     cp->m_cp_status = cp_status_t::cp_flushing;
-    m_cp_flush_waiters.increment();
+
     for (auto& consumer : m_cp_cb_table) {
-        if (consumer) {
-            m_cp_flush_waiters.increment();
-            consumer->cp_flush(cp, [this](CP* cp) {
-                if (m_cp_flush_waiters.decrement_testz()) {
-                    // All consumers have flushed for the cp
-                    on_cp_flush_done(cp);
-                }
-            });
-        }
+        if (consumer) { futs.emplace_back(std::move(consumer->cp_flush(cp))); }
     }
 
-    if (m_cp_flush_waiters.decrement_testz()) {
+    folly::collectAllUnsafe(futs).thenValue([this, cp](auto) {
         // All consumers have flushed for the cp
         on_cp_flush_done(cp);
-    }
+    });
 }
 
 void CPManager::on_cp_flush_done(CP* cp) {
@@ -191,7 +196,7 @@ void CPManager::on_cp_flush_done(CP* cp) {
     m_sb.write();
 
     cleanup_cp(cp);
-    if (cp->m_done_cb) { cp->m_done_cb(true); }
+    cp->comp_promise.setValue(true);
 
     m_in_flush_phase = false;
     m_wd_cp->reset_cp();
@@ -199,14 +204,13 @@ void CPManager::on_cp_flush_done(CP* cp) {
 
     // Trigger CP in case there is one back to back CP
     {
-        auto cpg = cp_guard();
-        auto cur_cp = cpg.get();
-        if (!cur_cp) { return; }
-        m_wd_cp->set_cp(cur_cp);
+        auto cur_cp = cp_guard();
+        if (cur_cp.get() == nullptr) { return; }
+        m_wd_cp->set_cp(cur_cp.get());
         if (cur_cp->m_cp_waiting_to_trigger) {
             HS_PERIODIC_LOG(INFO, cp, "Triggering back to back CP");
             COUNTER_INCREMENT(*m_metrics, back_to_back_cps, 1);
-            trigger_cp_flush();
+            trigger_cp_flush(false);
         }
     }
 }
@@ -217,6 +221,35 @@ void CPManager::cleanup_cp(CP* cp) {
         if (consumer) { consumer->cp_cleanup(cp); }
     }
 }
+
+void CPManager::start_cp_thread() {
+    // Start WBCache flush threads
+    struct Context {
+        std::condition_variable cv;
+        std::mutex mtx;
+        int32_t thread_cnt{1};
+    };
+    auto ctx = std::make_shared< Context >();
+
+    // Start a reactor with 9 fibers (8 for sync io)
+    iomanager.create_reactor("cp_io", INTERRUPT_LOOP, 8u, [this, &ctx](bool is_started) {
+        if (is_started) {
+            {
+                std::unique_lock< std::mutex > lk{ctx->mtx};
+                m_cp_io_fibers.insert(iomanager.sync_io_capable_fibers());
+                ++(ctx->thread_cnt);
+            }
+            ctx->cv.notify_one();
+        }
+    });
+
+    {
+        std::unique_lock< std::mutex > lk{ctx->mtx};
+        ctx->cv.wait(lk, [&ctx, nthreads] { return (ctx->thread_cnt == nthreads); });
+    }
+}
+
+iomgr::io_fiber_t CPManager::pick_blocking_io_fiber() const { HS; }
 
 //////////////////////////////////////// CP Guard class ////////////////////////////////////////////
 CPGuard::CPGuard(CPManager* mgr) {

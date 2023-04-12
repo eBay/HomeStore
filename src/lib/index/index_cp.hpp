@@ -28,8 +28,6 @@ struct flush_buffer_iterator {
     sisl::thread_vector_iterator free_node_list_it;
 };
 
-typedef std::function< void(CP*) > cp_flush_done_cb_t;
-
 struct IndexCPContext : public CPContext {
 public:
     std::atomic< uint64_t > m_num_nodes_added{0};
@@ -37,7 +35,6 @@ public:
     sisl::ThreadVector< IndexBufferPtr >* m_dirty_buf_list{nullptr};
     sisl::ThreadVector< BlkId >* m_free_node_blkid_list{nullptr};
     sisl::atomic_counter< int64_t > m_dirty_buf_count{0};
-    cp_flush_done_cb_t m_flush_done_cb;
 
     std::mutex m_flush_buffer_mtx;
     flush_buffer_iterator m_buf_it;
@@ -69,5 +66,18 @@ public:
 
     IndexBufferPtr* next_dirty() { return m_dirty_buf_list->next(m_buf_it.dirty_buf_list_it); }
     BlkId* next_blkid() { return m_free_node_blkid_list->next(m_buf_it.free_node_list_it); }
+};
+
+class IndexWBCache;
+class IndexCPCallbacks : public CPCallbacks {
+public:
+    IndexCPCallbacks(IndexWBCache* wb_cache);
+    std::unique_ptr< CPContext > on_switchover_cp(CP* cur_cp, CP* new_cp) override;
+    void cp_flush(CP* cp, cp_flush_done_cb_t&& done_cb) override;
+    void cp_cleanup(CP* cp) override;
+    int cp_progress_percent() override;
+
+private:
+    IndexWBCache* m_wb_cache;
 };
 } // namespace homestore

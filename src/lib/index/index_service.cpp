@@ -17,6 +17,7 @@
 #include <homestore/index_service.hpp>
 #include <homestore/index/index_internal.hpp>
 #include "index/wb_cache.hpp"
+#include "index/index_cp.hpp"
 #include "common/homestore_utils.hpp"
 #include "device/virtual_dev.hpp"
 #include "device/physical_dev.hpp"
@@ -64,6 +65,10 @@ void IndexService::start() {
     // Start Writeback cache
     m_wb_cache = std::make_unique< IndexWBCache >(m_vdev, hs()->evictor(),
                                                   hs()->device_mgr()->atomic_page_size({PhysicalDevGroup::FAST}));
+
+    // Register to CP for flush dirty buffers
+    hs()->cp_mgr().register_consumer(cp_consumer_t::INDEX_SVC,
+                                     std::move(std::make_unique< IndexCPCallbacks >(m_wb_cache.get())));
 }
 
 void IndexService::add_index_table(const std::shared_ptr< IndexTableBase >& tbl) {

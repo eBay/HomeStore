@@ -57,7 +57,7 @@ public:
     void free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) override;
 
     //////////////////// CP Related API section /////////////////////////////////
-    void async_cp_flush(CPContext* context, cp_flush_done_cb_t cp_done_cb);
+    folly::Future< bool > async_cp_flush(CPContext* context);
     std::unique_ptr< CPContext > create_cp_context(cp_id_t cp_id);
     IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf) const;
 
@@ -71,6 +71,6 @@ private:
     void get_next_bufs(IndexCPContext* cp_ctx, uint32_t max_count, std::vector< IndexBufferPtr >& bufs);
     void get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_count, IndexBuffer* prev_flushed_buf,
                                 std::vector< IndexBufferPtr >& bufs);
-    void do_free_btree_blks(IndexCPContext* cp_ctx);
+    void free_btree_blks_and_flush(IndexCPContext* cp_ctx);
 };
 } // namespace homestore

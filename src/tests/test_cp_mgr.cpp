@@ -63,6 +63,7 @@ private:
 
     std::array< std::pair< uint64_t, uint64_t >, max_values > m_cur_values;
     std::atomic< uint64_t > m_next_val{0};
+    folly::Promise< bool > m_comp_promise;
 };
 
 class TestCPCallbacks : public CPCallbacks {
@@ -71,10 +72,10 @@ public:
         return std::make_unique< TestCPContext >(new_cp->id());
     }
 
-    void cp_flush(CP* cp, cp_flush_done_cb_t&& done_cb) override {
+    folly::Future< bool > cp_flush(CP* cp) override {
         auto ctx = s_cast< TestCPContext* >(cp->context(cp_consumer_t::HS_CLIENT));
         ctx->validate(cp->id());
-        done_cb(cp);
+        return folly::makeFuture< bool >(true);
     }
 
     void cp_cleanup(CP* cp) override {}
