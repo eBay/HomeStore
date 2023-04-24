@@ -59,6 +59,7 @@ class HomestoreConan(ConanFile):
         self.requires("folly/2022.01.31.00")
         self.requires("isa-l/2.30.0")
         self.requires("nlohmann_json/3.11.2")
+        self.requires("spdk/21.07.y")
 
     def build(self):
         cmake = CMake(self)
