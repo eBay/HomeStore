@@ -5,7 +5,7 @@ from conans import CMake
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "4.0.11"
+    version = "4.0.12"
 
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
