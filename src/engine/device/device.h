@@ -598,6 +598,7 @@ public:
 
 public:
     static void zero_boot_sbs(const std::vector< dev_info >& devices, const int oflags);
+    bool is_hdd() const;
 
 private:
     void write_superblock();
@@ -622,7 +623,6 @@ private:
     /* Validate if this device is a homestore validated device. If there is any corrupted device, then it
      * throws std::system_exception */
     bool validate_device() const;
-    bool is_hdd() const;
 
     /*
      * return true if we are upgrading from some version that is supported for upgrade;

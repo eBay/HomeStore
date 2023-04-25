@@ -63,12 +63,13 @@ struct sb_blkstore_blob : blkstore_blob {
 class HomeStoreBase {
 private:
     sisl::atomic_counter< uint64_t > m_usage_counter{0};
-    std::shared_ptr< sisl::logging::logger_t > m_periodic_logger;
-    std::unique_ptr< HomeStoreStatusMgr > m_status_mgr;
 
     static HomeStoreBaseSafePtr s_instance;
 
 protected:
+    std::shared_ptr< sisl::logging::logger_t > m_periodic_logger;
+    std::unique_ptr< HomeStoreStatusMgr > m_status_mgr;
+
     bool m_vdev_failed{false};
     bool m_print_checksum{true};
     uint64_t m_size_avail{0};

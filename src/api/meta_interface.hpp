@@ -217,6 +217,8 @@ public:
     [[nodiscard]] uint64_t ovf_blk_max_num_data_blk() const;
     [[nodiscard]] uint32_t get_align_size() const;
 
+    [[nodiscard]] nlohmann::json get_status(const int log_level);
+
 public:
     /*********************** static public function **********************/
     static void set_self_recover() { m_self_recover = true; }
@@ -338,11 +340,11 @@ private:
     [[nodiscard]] uint64_t get_min_compress_size() const;
     [[nodiscard]] uint64_t get_max_compress_memory_size() const;
     [[nodiscard]] uint64_t get_init_compress_memory_size() const;
+public:
     [[nodiscard]] uint32_t get_compress_ratio_limit() const;
     [[nodiscard]] bool get_skip_hdr_check() const;
+private:
     [[nodiscard]] bool compress_feature_on() const;
-
-    [[nodiscard]] nlohmann::json get_status(const int log_level);
 
     /**
      * @brief : check the field in this cookie whether they are correct and consistent;
@@ -365,6 +367,7 @@ private:
     [[nodiscard]] bool scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_map_t& ovf_blk_hdrs,
                                                BlkId* last_mblk_id, client_info_map_t& sub_info);
 
+public:
     [[nodiscard]] bool verify_metablk_store();
 
     [[nodiscard]] nlohmann::json dump_disk_metablks(const std::string& client);

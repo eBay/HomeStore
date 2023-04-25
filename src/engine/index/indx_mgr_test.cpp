@@ -60,6 +60,7 @@ enum flip_state { FLIP_NOT_SET = 0, FLIP_SET = 1, SYSTEM_PANIC = 2 };
 
 #ifdef _PRERELEASE
 class indx_test : public module_test {
+public:
     indx_test() : m_fc(HomeStoreFlip::instance()) {}
     virtual void run_start() override {}
 
