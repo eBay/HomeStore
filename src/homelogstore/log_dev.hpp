@@ -264,7 +264,6 @@ public:
     [[nodiscard]] uint32_t actual_data_size() const { return m_actual_data_size; }
     [[nodiscard]] uint32_t nrecords() const { return m_nrecords; }
 
-private:
     sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logwrite > m_log_buf;
     sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logwrite > m_footer_buf;
     sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logwrite > m_overflow_log_buf;
@@ -468,6 +467,7 @@ struct logdev_superblk {
 
 // This class represents the metadata of logdev providing methods to change/access log dev super block.
 class LogDevMetadata {
+    friend class LogDev;
 public:
     LogDevMetadata(const std::string& metablk_name);
     LogDevMetadata(const LogDevMetadata&) = delete;
@@ -547,6 +547,7 @@ private:
 enum log_dump_verbosity : uint8_t { CONTENT, HEADER };
 
 class LogDev {
+    friend class HomeLogStore;
 public:
     // NOTE: Possibly change these in future to include constant correctness
     typedef std::function< void(logstore_id_t, logdev_key, logdev_key, uint32_t nremaining_in_batch, void*) >

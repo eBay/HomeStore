@@ -41,6 +41,7 @@ namespace homestore {
 typedef blk_num_t seg_num_t;
 
 class VarsizeBlkAllocConfig : public BlkAllocConfig {
+    friend class VarsizeBlkAllocator;
 private:
     uint32_t m_phys_page_size;
     seg_num_t m_nsegments;

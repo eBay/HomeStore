@@ -44,6 +44,7 @@ static constexpr uint64_t abort_time_sec = 10;
 
 #ifdef _PRERELEASE
 class mod_test_vdev : public module_test {
+public:
     mod_test_vdev() : m_fc(HomeStoreFlip::instance()) {}
 
     virtual void run_start() override {
@@ -71,7 +72,6 @@ class mod_test_vdev : public module_test {
         m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
     }
 
-protected:
     Clock::time_point m_start_time;
     Clock::time_point m_flip_start_time;
     std::mutex m_mutex;

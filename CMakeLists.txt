@@ -71,6 +71,9 @@ if((${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU") OR (${CMAKE_CXX_COMPILER_ID} STREQU
     
     # add C++ only warning options
     add_flags("-Wno-deprecated-copy" Languages "CXX")
+
+    # Allow deprecated C++
+    add_flags("-fpermissive")
 endif()
 
 # add boost options

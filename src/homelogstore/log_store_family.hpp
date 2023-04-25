@@ -76,8 +76,9 @@ public:
     nlohmann::json get_status(int verbosity) const;
     std::string get_name() const { return m_metablk_name; }
 
-private:
     [[nodiscard]] logdev_key do_device_truncate(const bool dry_run = false);
+
+private:
 
     void on_log_store_found(const logstore_id_t store_id, const logstore_superblk& meta);
     void on_io_completion(const logstore_id_t id, const logdev_key ld_key, const logdev_key flush_idx,
@@ -87,7 +88,7 @@ private:
     void on_batch_completion(HomeLogStore* log_store, const uint32_t nremaining_in_batch,
                              const logdev_key flush_ld_key);
 
-private:
+public:
     folly::Synchronized< std::unordered_map< logstore_id_t, logstore_info_t > > m_id_logstore_map;
     std::unordered_map< logstore_id_t, uint64_t > m_unopened_store_io;
     std::unordered_set< logstore_id_t > m_unopened_store_id;

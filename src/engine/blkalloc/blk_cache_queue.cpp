@@ -105,14 +105,14 @@ blk_count_t FreeBlkCacheQueue::try_free_blks(const blk_cache_entry& entry,
         }
 #endif
 
-        e.set_nblks(m_slab_queues[slab_idx]->m_slab_size);
+        e.set_nblks(m_slab_queues[slab_idx]->slab_size());
         if (!push_slab(slab_idx, e, false /* only_this_level */)) {
             excess_blks.push_back(e);
             num_zombied += e.get_nblks();
         }
 
         if (excess == 0) { break; }
-        e.set_blk_num(e.get_blk_num() + m_slab_queues[slab_idx]->m_slab_size);
+        e.set_blk_num(e.get_blk_num() + m_slab_queues[slab_idx]->slab_size());
         e.set_nblks(excess);
     }
 
@@ -307,7 +307,7 @@ SlabCacheQueue::SlabCacheQueue(const blk_count_t slab_size, const std::vector< b
 
 std::optional< blk_temp_t > SlabCacheQueue::push(const blk_cache_entry& entry, const bool only_this_level) {
     const blk_temp_t start_level{
-        static_cast< blk_temp_t >((entry.m_temp >= m_level_queues.size()) ? m_level_queues.size() - 1 : entry.m_temp)};
+        static_cast< blk_temp_t >((entry.get_temperature() >= m_level_queues.size()) ? m_level_queues.size() - 1 : entry.get_temperature())};
     blk_temp_t level{start_level};
     bool pushed{m_level_queues[start_level]->write(entry)};
 

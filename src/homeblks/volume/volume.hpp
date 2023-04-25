@@ -299,6 +299,7 @@ private:
 };
 
 class Volume : public std::enable_shared_from_this< Volume > {
+    friend class HomeBlks;
 private:
     vol_params m_params;
     VolumeMetrics m_metrics;
@@ -394,7 +395,9 @@ private:
     void destroy_internal();
     indx_tbl* create_indx_tbl();
     indx_tbl* recover_indx_tbl(btree_super_block& sb, btree_cp_sb& cp_sb);
+public:
     mapping* get_active_indx();
+private:
 
     void vol_sb_init();
 

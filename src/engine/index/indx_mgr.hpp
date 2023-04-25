@@ -436,6 +436,7 @@ ENUM(indx_recovery_state, uint8_t, create_sb_st, create_indx_tbl_st, create_firs
 /************************************ Static indx manager *****************************************/
 /* this class defines all the static members of indx_mgr */
 class StaticIndxMgr {
+    friend class HomeBlks;
 public:
     /*********************** static public functions **********************/
 

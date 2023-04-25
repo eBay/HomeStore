@@ -224,7 +224,6 @@ public:
 
     uint8_t get_version() const;
 
-protected:
     uint32_t get_nth_obj_size(int ind) const;
     void get_nth_value(int ind, BtreeValue* outval, bool copy) const;
     void get_nth_element(int ind, BtreeKey* out_key, BtreeValue* out_val, bool is_copy) const;

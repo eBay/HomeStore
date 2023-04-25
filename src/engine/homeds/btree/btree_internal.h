@@ -644,7 +644,7 @@ ENUM(BtreeQueryType, uint8_t,
 
 // Base class for range callback params
 class BRangeCBParam {
-protected:
+public:
     uint8_t node_version;
 };
 

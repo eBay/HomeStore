@@ -71,7 +71,6 @@ public:
         }
     }
 
-private:
     StoreSpec() = default;
 };
 

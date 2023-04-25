@@ -92,6 +92,8 @@ struct logstore_req {
         if (req->is_internal_req) { sisl::ObjectAllocator< logstore_req >::deallocate(req); }
     }
 
+    friend class sisl::ObjectAllocator<logstore_req>;
+
 private:
     logstore_req() = default;
 };
@@ -260,6 +262,7 @@ struct truncate_req {
 class HomeLogStore : public std::enable_shared_from_this< HomeLogStore > {
 public:
     friend class HomeLogStoreMgr;
+    friend class LogStoreFamily;
 
     HomeLogStore(LogStoreFamily& family, const logstore_id_t id, const bool append_mode,
                  const logstore_seq_num_t start_lsn);

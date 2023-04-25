@@ -143,10 +143,10 @@ struct sb_info_t {
 };
 
 class VMetaBlkMgrTest : public ::testing::Test {
+public:
     enum class meta_op_type : uint8_t { write = 1, update = 2, remove = 3, read = 4 };
     std::string mtype;
 
-public:
     VMetaBlkMgrTest() = default;
     VMetaBlkMgrTest(const VMetaBlkMgrTest&) = delete;
     VMetaBlkMgrTest& operator=(const VMetaBlkMgrTest&) = delete;
@@ -159,6 +159,7 @@ protected:
     void SetUp() override{};
 
     void TearDown() override{};
+public:
 
     [[nodiscard]] uint64_t get_elapsed_time(const Clock::time_point& start) {
         const std::chrono::seconds sec{std::chrono::duration_cast< std::chrono::seconds >(Clock::now() - start)};
@@ -641,7 +642,6 @@ protected:
     }
 #endif
 
-private:
     uint64_t m_wrt_cnt{0};
     uint64_t m_update_cnt{0};
     uint64_t m_rm_cnt{0};

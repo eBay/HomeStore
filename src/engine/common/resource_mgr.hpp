@@ -20,6 +20,7 @@
 
 namespace homestore {
 class RsrcMgrMetrics : public sisl::MetricsGroup {
+public:
     explicit RsrcMgrMetrics() : sisl::MetricsGroup("resource_mgr", "resource_mgr") {
         REGISTER_COUNTER(dirty_buf_cnt, "Total wb cache dirty buffer cnt", sisl::_publish_as::publish_as_gauge);
         REGISTER_COUNTER(free_blk_size_in_cp, "Total free blks size accumulated in a cp",
