@@ -230,7 +230,7 @@ struct vol_sb_hdr {
     vol_sb_hdr(const uint64_t& page_size, const uint64_t& size, const char* in_vol_name, const boost::uuids::uuid& uuid,
                const uint32_t& num_streams) :
             num_streams{num_streams}, page_size{page_size}, size{size}, uuid{uuid} {
-        std::strncpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE);
+        std::strncpy((char*)vol_name, in_vol_name, VOL_NAME_SIZE - 1);
         vol_name[VOL_NAME_SIZE - 1] = '\0';
     };
 

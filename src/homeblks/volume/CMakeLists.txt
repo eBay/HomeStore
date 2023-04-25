@@ -1,5 +1,6 @@
 include (${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
 
+add_flags("-Wno-stringop-truncation")
 set(VOLUME_SOURCE_FILES
     volume.cpp
     mapping.cpp
