@@ -92,6 +92,7 @@ void HomeBlksHttpServer::start() {
         handler_info("/api/v1/verifyMetaBlkStore", HomeBlksHttpServer::verify_metablk_store, (void*)this));
     http_server_ptr->register_handler_info(
         handler_info("/api/v1/wakeupInit", HomeBlksHttpServer::wakeup_init, (void*)this));
+    http_server_ptr->register_handler_info(handler_info("/api/v1/copy_vol", HomeBlksHttpServer::copy_vol, (void*)this));
 #ifdef _PRERELEASE
     http_server_ptr->register_handler_info(
         handler_info("/api/v1/crashSystem", HomeBlksHttpServer::crash_system, (void*)this));
@@ -393,6 +394,47 @@ void HomeBlksHttpServer::wakeup_init(iomgr::HttpCallData cd) {
     auto hb = to_homeblks(cd);
     hb->wakeup_init();
     std::string resp{"completed"};
+    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
+}
+
+void HomeBlksHttpServer::copy_vol(iomgr::HttpCallData cd) {
+    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
+        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
+                                                       "Access not allowed from external host");
+        return;
+    }
+    auto req = cd->request();
+
+    std::vector< std::string > vol_uuids;
+    auto vol_uuids_kv = evhtp_kvs_find_kv(req->uri->query, "uuid");
+    if (vol_uuids_kv) {
+        boost::algorithm::split(vol_uuids, vol_uuids_kv->val, boost::is_any_of(","), boost::token_compress_on);
+    }
+
+    std::vector< std::string > write_path;
+    auto write_path_kv = evhtp_kvs_find_kv(req->uri->query, "path");
+    if (write_path_kv) {
+        boost::algorithm::split(write_path, write_path_kv->val, boost::is_any_of(","), boost::token_compress_on);
+    }
+
+    std::string resp{"volume write to path: " + write_path[0] + " , file name: " + vol_uuids[0]};
+    auto hb = to_homeblks(cd);
+
+    //
+    // TODO: error condition:
+    // 0. only take one vol uuid and one write path;
+    // 1. return error if uuid file already exists;
+    // 2. vol uuid not recognized;
+    // 3. check disk free space before copying;
+    //
+    boost::uuids::string_generator gen;
+    boost::uuids::uuid uuid = gen(vol_uuids[0]);
+
+    // TODO: remove tailing / of write_path[0] if there is any;
+    const auto file_path = write_path[0] + "/" + vol_uuids[0];
+    const auto err = hb->copy_vol(uuid, file_path);
+
+    resp += (err == no_error ? " Successfully" : " Failed");
     ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
 }
 

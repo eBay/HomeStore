@@ -50,6 +50,7 @@ public:
     static void dump_disk_metablks(iomgr::HttpCallData cd);
     static void verify_metablk_store(iomgr::HttpCallData cd);
     static void wakeup_init(iomgr::HttpCallData cd);
+    static void copy_vol(iomgr::HttpCallData cd);
 #ifdef _PRERELEASE
     static void set_safe_mode(iomgr::HttpCallData cd);
     static void unset_safe_mode(iomgr::HttpCallData cd);

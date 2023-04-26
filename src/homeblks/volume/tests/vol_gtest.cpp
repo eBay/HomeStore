@@ -772,7 +772,7 @@ public:
         }
         if (SISL_OPTIONS.count("http_port")) {
             test_common::set_fixed_http_port(SISL_OPTIONS["http_port"].as< uint32_t >());
-        }else {
+        } else {
             test_common::set_random_http_port();
         }
         VolInterface::init(params);
@@ -2064,6 +2064,41 @@ TEST_F(VolTest, recovery_io_test) {
     output.print("recovery_io_test");
 
     if (tcfg.create_del_with_io || tcfg.delete_with_io) { cdjob->wait_for_completion(); }
+
+    if (tcfg.can_delete_volume) { this->delete_volumes(); }
+    this->shutdown();
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
+}
+
+/*!
+    @test   recovery_boot_test
+    @brief  Tests which does recovery. End up with a clean shutdown
+    This test doesn't do any io to volume;
+ */
+TEST_F(VolTest, recovery_boot_test) {
+    const auto start_time(Clock::now());
+    tcfg.init = false;
+    this->start_homestore(false /* force_reinit */);
+
+    LOGINFO("recovery verify started");
+    std::unique_ptr< VolVerifyJob > verify_job;
+    if (tcfg.pre_init_verify || tcfg.verify_only) {
+        verify_job = std::make_unique< VolVerifyJob >(this);
+        this->start_job(verify_job.get(), wait_type::for_completion);
+        LOGINFO("recovery verify done");
+    } else {
+        LOGINFO("bypassing recovery verify");
+    }
+
+#if 0
+    this->start_io_job();
+#endif
+
+    while (get_elapsed_time_sec(start_time) < tcfg.run_time) {
+        std::this_thread::sleep_for(std::chrono::seconds{10});
+    }
+
+    output.print("recovery_boot_test");
 
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();

@@ -1166,3 +1166,77 @@ void VolumeMetrics::on_gather() {
             m_volume->is_online() ? "Online" : "Offline", m_volume->is_recovery_done());
     }
 }
+
+std::error_condition Volume::copy_to(const std::string& file_path) {
+    // open file;
+    std::ofstream vol_file(file_path, ios::out | ios::binary);
+    lba_t start_lba = 0ul;
+    const auto last_lba = get_last_lba();
+    const auto batch = BlkId::max_blks_in_op();
+    BtreeQueryCursor cur;
+#if 0
+    auto zero_buf = hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::common,
+                                                 m_hb->get_data_blkstore()->get_vdev()->get_align_size());
+    std::memset(zero_buf, get_page_size());
+#endif
+
+    while (start_lba <= last_lba) {
+        // read from index table;
+        std::vector< std::pair< MappingKey, MappingValue > > kvs;
+        LOGDEBUG("Reading -> lba:{}, nlbas:{}", start_lba, batch);
+        MappingKey key(start_lba, batch);
+        get_active_indx()->get(key, cur, kvs);
+
+        for (auto& kv : kvs) {
+            if (!kv.second.is_valid()) { continue; }
+            ValueEntry* ve = kv.second.get_nth_entry(0);
+            const BlkId bid{ve->get_offset_blkid(m_blks_per_lba)};
+            const auto nlbas = kv.first.get_n_lba();
+            if (!bid.is_valid()) {
+                // no pba is found in this lba range,
+                // leave unmapped lba range as hole and seek ahead to next visting lba;
+                const auto pos = vol_file.tellp();
+                vol_file.seekp(pos + static_cast< long >(nlbas * get_page_size()));
+#if 0
+                // write nlbas page size of zeros to the file;
+                for (auto i = 0ul; i < nlbas; ++i) {
+                    vol_file.write(zero_buf, get_page_size());
+                }
+#endif
+            } else {
+                // valid bid
+                const auto read_sz = nlbas * get_page_size();
+                auto read_buf = hs_utils::iobuf_alloc(read_sz, sisl::buftag::common,
+                                                      m_hb->get_data_blkstore()->get_vdev()->get_align_size());
+
+                // assert that read_sz from mapping key equals to mapped physical block id;
+                HS_DBG_ASSERT_EQ(read_sz, bid.get_nblks() * get_page_size());
+                // sync-read BlkId
+                auto req{blkstore_req< BlkBuffer >::make_request()};
+                req->isSyncCall = true;
+                iovec iov{read_buf, read_sz};
+                std::vector< iovec > iov_vector{};
+                iov_vector.push_back(std::move(iov));
+
+                try {
+                    m_hb->get_data_blkstore()->read(bid, iov_vector, read_sz, req);
+                } catch (std::exception& e) { HS_REL_ASSERT(0, "Exception: {}", e.what()); }
+
+                // write to file
+                vol_file.write((const char*)read_buf, read_sz);
+
+                // free read buf;
+                hs_utils::iobuf_free(read_buf, sisl::buftag::common);
+            }
+        }
+
+        start_lba += batch;
+    }
+
+    vol_file.close();
+
+#if 0
+    hs_utils::iobuf_free(zero_buf);
+#endif
+    return no_error;
+}
