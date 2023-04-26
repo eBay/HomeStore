@@ -165,7 +165,6 @@ HomeBlks::HomeBlks(const init_params& cfg) :
 
     if (m_cfg.start_http) {
         m_hb_http_server = std::make_unique< HomeBlksHttpServer >(this);
-        m_hb_http_server->start();
     } else {
         LOGINFO("Http server is not started by user! start_http = {}", m_cfg.start_http);
     }
@@ -177,7 +176,11 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     m_recovery_stats = std::make_unique< HomeBlksRecoveryStats >();
     m_recovery_stats->start();
 
-    if (HB_DYNAMIC_CONFIG(general_config->boot_safe_mode)) { LOGINFO("HomeBlks booting into safe_mode"); }
+    if (HB_DYNAMIC_CONFIG(general_config->boot_safe_mode)) {
+        LOGINFO("HomeBlks booting into safe_mode");
+        // start http server
+        m_hb_http_server->start();
+    }
 }
 
 void HomeBlks::wakeup_init() { m_cv_wakeup_init.notify_one(); }

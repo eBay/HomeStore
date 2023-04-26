@@ -31,154 +31,113 @@
 
 namespace homestore {
 
-std::vector< std::string > HomeBlksHttpServer::m_iface_list;
-
-HomeBlksHttpServer* HomeBlksHttpServer::pThis(iomgr::HttpCallData cd) { return (HomeBlksHttpServer*)cd->cookie(); }
-HomeBlks* HomeBlksHttpServer::to_homeblks(iomgr::HttpCallData cd) { return pThis(cd)->m_hb; }
-
-HomeBlksHttpServer::HomeBlksHttpServer(HomeBlks* hb) : m_hb(hb) {
-    // get sock interfaces and store ips
-    struct ifaddrs* interfaces = nullptr;
-    struct ifaddrs* temp_addr = nullptr;
-    auto error = getifaddrs(&interfaces);
-    if (error != 0) { LOGWARN("getifaddrs returned non zero code: {}", error); }
-    temp_addr = interfaces;
-    while (temp_addr != nullptr) {
-        if (temp_addr->ifa_addr->sa_family == AF_INET) {
-            m_iface_list.emplace_back(inet_ntoa(((struct sockaddr_in*)temp_addr->ifa_addr)->sin_addr));
-        }
-        temp_addr = temp_addr->ifa_next;
-    }
-    freeifaddrs(interfaces);
-}
+HomeBlksHttpServer::HomeBlksHttpServer(HomeBlks* hb) : m_hb(hb) { setup_routes(); }
 
 void HomeBlksHttpServer::register_api_post_start() {
     // apis that rely on start of homestore to be completed should be added here;
-    auto http_server_ptr = ioenvironment.with_http_server().get_http_server();
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/getMetrics", HomeBlksHttpServer::get_metrics, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/metrics", HomeBlksHttpServer::get_prometheus_metrics, (void*)this));
+    auto http_server_ptr = ioenvironment.get_http_server();
+    try {
+        http_server_ptr->setup_route(Pistache::Http::Method::Get, "/api/v1/getMetrics",
+                                     Pistache::Rest::Routes::bind(&HomeBlksHttpServer::get_metrics, this));
+        http_server_ptr->setup_route(Pistache::Http::Method::Get, "/metrics",
+                                     Pistache::Rest::Routes::bind(&HomeBlksHttpServer::get_prometheus_metrics, this),
+                                     iomgr::url_t::safe);
+    } catch (const std::runtime_error& e) { LOGWARN("{}", e.what()) }
 }
 
-void HomeBlksHttpServer::start() {
-    auto http_server_ptr = ioenvironment.with_http_server().get_http_server();
+void HomeBlksHttpServer::start() { ioenvironment.get_http_server()->start(); }
 
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/version", HomeBlksHttpServer::get_version, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/getObjLife", HomeBlksHttpServer::get_obj_life, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/getLogLevel", HomeBlksHttpServer::get_log_level, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/setLogLevel", HomeBlksHttpServer::set_log_level, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/dumpStackTrace", HomeBlksHttpServer::dump_stack_trace, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/verifyHS", HomeBlksHttpServer::verify_hs, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/mallocStats", HomeBlksHttpServer::get_malloc_stats, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/getConfig", HomeBlksHttpServer::get_config, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/reloadConfig", HomeBlksHttpServer::reload_dynamic_config, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/getStatus", HomeBlksHttpServer::get_status, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/verifyBitmap", HomeBlksHttpServer::verify_bitmap, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/dumpDiskMetaBlks", HomeBlksHttpServer::dump_disk_metablks, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/verifyMetaBlkStore", HomeBlksHttpServer::verify_metablk_store, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/wakeupInit", HomeBlksHttpServer::wakeup_init, (void*)this));
+void HomeBlksHttpServer::setup_routes() {
+    using namespace Pistache;
+    using namespace Pistache::Rest;
+    auto http_server_ptr = ioenvironment.with_http_server().get_http_server();
+    try {
+        http_server_ptr->setup_route(Http::Method::Get, "/api/v1/version",
+                                     Routes::bind(&HomeBlksHttpServer::get_version, this));
+        http_server_ptr->setup_route(Http::Method::Get, "/api/v1/getObjLife",
+                                     Routes::bind(&HomeBlksHttpServer::get_obj_life, this));
+        http_server_ptr->setup_route(Http::Method::Get, "/api/v1/getLogLevel",
+                                     Routes::bind(&HomeBlksHttpServer::get_log_level, this));
+        http_server_ptr->setup_route(Http::Method::Post, "/api/v1/setLogLevel",
+                                     Routes::bind(&HomeBlksHttpServer::set_log_level, this));
+        http_server_ptr->setup_route(Http::Method::Get, "/api/v1/dumpStackTrace",
+                                     Routes::bind(&HomeBlksHttpServer::dump_stack_trace, this),
+                                     iomgr::url_t::localhost);
+        http_server_ptr->setup_route(Http::Method::Get, "/api/v1/verifyHS",
+                                     Routes::bind(&HomeBlksHttpServer::verify_hs, this), iomgr::url_t::localhost);
+        http_server_ptr->setup_route(Http::Method::Get, "/api/v1/mallocStats",
+                                     Routes::bind(&HomeBlksHttpServer::get_malloc_stats, this));
+        http_server_ptr->setup_route(Http::Method::Get, "/api/v1/getConfig",
+                                     Routes::bind(&HomeBlksHttpServer::get_config, this));
+        http_server_ptr->setup_route(Http::Method::Post, "/api/v1/reloadConfig",
+                                     Routes::bind(&HomeBlksHttpServer::reload_dynamic_config, this),
+                                     iomgr::url_t::localhost);
+        http_server_ptr->setup_route(Http::Method::Get, "/api/v1/getStatus",
+                                     Routes::bind(&HomeBlksHttpServer::get_status, this));
+        http_server_ptr->setup_route(Http::Method::Get, "/api/v1/verifyBitmap",
+                                     Routes::bind(&HomeBlksHttpServer::verify_bitmap, this), iomgr::url_t::localhost);
+        http_server_ptr->setup_route(Http::Method::Get, "/api/v1/dumpDiskMetaBlks",
+                                     Routes::bind(&HomeBlksHttpServer::dump_disk_metablks, this));
+        http_server_ptr->setup_route(Http::Method::Get, "/api/v1/verifyMetaBlkStore",
+                                     Routes::bind(&HomeBlksHttpServer::verify_metablk_store, this));
+        http_server_ptr->setup_route(Http::Method::Post, "/api/v1/wakeupInit",
+                                     Routes::bind(&HomeBlksHttpServer::wakeup_init, this));
 #ifdef _PRERELEASE
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/crashSystem", HomeBlksHttpServer::crash_system, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/moveVolOffline", HomeBlksHttpServer::move_vol_offline, (void*)this));
-    http_server_ptr->register_handler_info(
-        handler_info("/api/v1/moveVolOnline", HomeBlksHttpServer::move_vol_online, (void*)this));
+        http_server_ptr->setup_route(Http::Method::Post, "/api/v1/crashSystem",
+                                     Routes::bind(&HomeBlksHttpServer::crash_system, this));
+        http_server_ptr->setup_route(Http::Method::Post, "/api/v1/moveVolOffline",
+                                     Routes::bind(&HomeBlksHttpServer::move_vol_offline, this));
+        http_server_ptr->setup_route(Http::Method::Post, "/api/v1/moveVolOnline",
+                                     Routes::bind(&HomeBlksHttpServer::move_vol_online, this));
 #endif
-}
-bool HomeBlksHttpServer::is_secure_zone() {
-    return IM_DYNAMIC_CONFIG(io_env->encryption) || IM_DYNAMIC_CONFIG(io_env->authorization);
+    } catch (const std::runtime_error& e) { LOGWARN("{}", e.what()) }
 }
 
-bool HomeBlksHttpServer::is_local_addr(struct sockaddr* addr) {
-    std::string client_ip = inet_ntoa(((struct sockaddr_in*)addr)->sin_addr);
-    return (std::find(m_iface_list.begin(), m_iface_list.end(), client_ip) != m_iface_list.end());
-}
-
-void HomeBlksHttpServer::get_version(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
+void HomeBlksHttpServer::get_version(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
     auto vers{sisl::VersionMgr::getVersions()};
     std::string ver_str{""};
     for (auto v : vers) {
         ver_str += fmt::format("{0}: {1}; ", v.first, v.second);
     }
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, ver_str);
+    response.send(Pistache::Http::Code::Ok, ver_str);
 }
 
-void HomeBlksHttpServer::get_metrics(iomgr::HttpCallData cd) {
+void HomeBlksHttpServer::get_metrics(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
     std::string msg = sisl::MetricsFarm::getInstance().get_result_in_json_string();
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, msg);
+    response.send(Pistache::Http::Code::Ok, msg);
 }
 
-void HomeBlksHttpServer::get_prometheus_metrics(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
+void HomeBlksHttpServer::get_prometheus_metrics(const Pistache::Rest::Request& request,
+                                                Pistache::Http::ResponseWriter response) {
     std::string msg = sisl::MetricsFarm::getInstance().report(sisl::ReportFormat::kTextFormat);
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, msg);
+    response.send(Pistache::Http::Code::Ok, msg);
 }
 
-void HomeBlksHttpServer::get_obj_life(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
+void HomeBlksHttpServer::get_obj_life(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
     nlohmann::json j;
     sisl::ObjCounterRegistry::foreach ([&j](const std::string& name, int64_t created, int64_t alive) {
         std::stringstream ss;
         ss << "created=" << created << " alive=" << alive;
         j[name] = ss.str();
     });
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, j.dump());
+    response.send(Pistache::Http::Code::Ok, j.dump());
 }
 
-void HomeBlksHttpServer::set_log_level(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-    auto req = cd->request();
+void HomeBlksHttpServer::set_log_level(const Pistache::Rest::Request& request,
+                                       Pistache::Http::ResponseWriter response) {
+    std::string logmodule;
+    const auto _new_log_module{request.query().get("logmodule")};
+    if (_new_log_module) { logmodule = _new_log_module.value(); }
 
-    const evhtp_kv_t* _new_log_level = nullptr;
-    const evhtp_kv_t* _new_log_module = nullptr;
-    const char* logmodule = nullptr;
-    char* endptr = nullptr;
-
-    _new_log_module = evhtp_kvs_find_kv(req->uri->query, "logmodule");
-    if (_new_log_module) { logmodule = _new_log_module->val; }
-
-    _new_log_level = evhtp_kvs_find_kv(req->uri->query, "loglevel");
+    const auto _new_log_level{request.query().get("loglevel")};
     if (!_new_log_level) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_BADREQ, "Invalid loglevel param!");
+        response.send(Pistache::Http::Code::Bad_Request, "Invalid loglevel param!");
         return;
     }
-    auto new_log_level = _new_log_level->val;
+    auto new_log_level = _new_log_level.value();
 
-    std::string resp = "";
-    if (logmodule == nullptr) {
+    std::string resp;
+    if (logmodule.empty()) {
         sisl::logging::SetAllModuleLogLevel(spdlog::level::from_str(new_log_level));
         resp = sisl::logging::GetAllModuleLogLevel().dump(2);
     } else {
@@ -187,89 +146,55 @@ void HomeBlksHttpServer::set_log_level(iomgr::HttpCallData cd) {
             spdlog::level::to_string_view(sisl::logging::GetModuleLogLevel(logmodule)).data();
     }
 
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
+    response.send(Pistache::Http::Code::Ok, resp);
 }
 
-void HomeBlksHttpServer::get_log_level(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-    auto req = cd->request();
+void HomeBlksHttpServer::get_log_level(const Pistache::Rest::Request& request,
+                                       Pistache::Http::ResponseWriter response) {
+    std::string logmodule;
+    const auto _new_log_module{request.query().get("logmodule")};
+    if (_new_log_module) { logmodule = _new_log_module.value(); }
 
-    const evhtp_kv_t* _log_module = nullptr;
-    const char* logmodule = nullptr;
-    _log_module = evhtp_kvs_find_kv(req->uri->query, "logmodule");
-    if (_log_module) { logmodule = _log_module->val; }
-
-    std::string resp = "";
-    if (logmodule == nullptr) {
+    std::string resp;
+    if (logmodule.empty()) {
         resp = sisl::logging::GetAllModuleLogLevel().dump(2);
     } else {
         resp = std::string("logmodule ") + logmodule +
             " level = " + spdlog::level::to_string_view(sisl::logging::GetModuleLogLevel(logmodule)).data();
     }
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
+    response.send(Pistache::Http::Code::Ok, resp);
 }
 
-void HomeBlksHttpServer::dump_stack_trace(iomgr::HttpCallData cd) {
-    if (!is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-
+void HomeBlksHttpServer::dump_stack_trace(const Pistache::Rest::Request& request,
+                                          Pistache::Http::ResponseWriter response) {
     sisl::logging::log_stack_trace(true);
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, "Look for stack trace in the log file");
+    response.send(Pistache::Http::Code::Ok, "Look for stack trace in the log file");
 }
 
-void HomeBlksHttpServer::get_malloc_stats(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, sisl::get_malloc_stats_detailed().dump(2));
+void HomeBlksHttpServer::get_malloc_stats(const Pistache::Rest::Request& request,
+                                          Pistache::Http::ResponseWriter response) {
+    response.send(Pistache::Http::Code::Ok, sisl::get_malloc_stats_detailed().dump(2));
 }
 
-void HomeBlksHttpServer::verify_hs(iomgr::HttpCallData cd) {
-    if (!is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-
-    auto hb = to_homeblks(cd);
-    auto ret = hb->verify_vols();
+void HomeBlksHttpServer::verify_hs(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
+    auto ret = m_hb->verify_vols();
     std::string resp{"HomeBlks verified "};
     resp += ret ? "successfully" : "failed";
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
+    response.send(Pistache::Http::Code::Ok, resp);
 }
 
-void HomeBlksHttpServer::get_config(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
+void HomeBlksHttpServer::get_config(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
     nlohmann::json j;
     j = sisl::SettingsFactoryRegistry::instance().get_json();
     j["static"] = homestore::HomeStoreStaticConfig::instance().to_json();
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, j.dump(2));
+    response.send(Pistache::Http::Code::Ok, j.dump(2));
 }
 
-void HomeBlksHttpServer::reload_dynamic_config(iomgr::HttpCallData cd) {
-    if (!is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-
+void HomeBlksHttpServer::reload_dynamic_config(const Pistache::Rest::Request& request,
+                                               Pistache::Http::ResponseWriter response) {
     bool restart_needed = sisl::SettingsFactoryRegistry::instance().reload_all();
-    ioenvironment.get_http_server()->respond_OK(
-        cd, EVHTP_RES_OK,
-        fmt::format("All config reloaded, is app restarted {}\n", (restart_needed ? "true" : "false")));
+    response.send(Pistache::Http::Code::Ok,
+                  fmt::format("All config reloaded, is app restarted {}\n", (restart_needed ? "true" : "false")));
     if (restart_needed) {
         LOGINFO("Restarting HomeBlks because of config change which needed a restart");
         std::this_thread::sleep_for(std::chrono::microseconds{1000});
@@ -277,15 +202,15 @@ void HomeBlksHttpServer::reload_dynamic_config(iomgr::HttpCallData cd) {
     }
 }
 
-bool HomeBlksHttpServer::verify_and_get_verbosity(const evhtp_request_t* req, std::string& failure_resp,
+bool HomeBlksHttpServer::verify_and_get_verbosity(const Pistache::Rest::Request& request, std::string& failure_resp,
                                                   int& verbosity_level) {
     bool ret{true};
-    auto verbosity_kv = evhtp_kvs_find_kv(req->uri->query, "verbosity");
+    const auto verbosity_kv{request.query().get("verbosity")};
     if (verbosity_kv) {
         try {
-            verbosity_level = std::stoi(verbosity_kv->val);
+            verbosity_level = std::stoi(verbosity_kv.value());
         } catch (...) {
-            failure_resp = fmt::format("{} is not a valid verbosity level", verbosity_kv->val);
+            failure_resp = fmt::format("{} is not a valid verbosity level", verbosity_kv.value());
             ret = false;
         }
     } else {
@@ -294,121 +219,78 @@ bool HomeBlksHttpServer::verify_and_get_verbosity(const evhtp_request_t* req, st
     return ret;
 }
 
-void HomeBlksHttpServer::verify_metablk_store(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-    auto req = cd->request();
-
-    const auto hb = to_homeblks(cd);
-    if (hb->is_safe_mode()) {
-        const auto ret = hb->verify_metablk_store();
-        ioenvironment.get_http_server()->respond_OK(
-            cd, EVHTP_RES_OK, fmt::format("Disk sanity of MetaBlkStore result: {}", ret ? "Passed" : "Failed"));
+void HomeBlksHttpServer::verify_metablk_store(const Pistache::Rest::Request& request,
+                                              Pistache::Http::ResponseWriter response) {
+    if (m_hb->is_safe_mode()) {
+        const auto ret = m_hb->verify_metablk_store();
+        response.send(Pistache::Http::Code::Ok,
+                      fmt::format("Disk sanity of MetaBlkStore result: {}", ret ? "Passed" : "Failed"));
     } else {
-        ioenvironment.get_http_server()->respond_NOTOK(
-            cd, EVHTP_RES_BADREQ, fmt::format("HomeBlks not in safe mode, not allowed to serve this request"));
+        response.send(Pistache::Http::Code::Bad_Request,
+                      "HomeBlks not in safe mode, not allowed to serve this request");
     }
 }
 
-void HomeBlksHttpServer::dump_disk_metablks(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-    auto req = cd->request();
-
+void HomeBlksHttpServer::dump_disk_metablks(const Pistache::Rest::Request& request,
+                                            Pistache::Http::ResponseWriter response) {
     std::vector< std::string > clients;
-    auto modules_kv = evhtp_kvs_find_kv(req->uri->query, "client");
+    const auto modules_kv{request.query().get("client")};
     if (modules_kv) {
-        boost::algorithm::split(clients, modules_kv->val, boost::is_any_of(","), boost::token_compress_on);
+        boost::algorithm::split(clients, modules_kv.value(), boost::is_any_of(","), boost::token_compress_on);
     }
 
     if (clients.size() != 1) {
-        ioenvironment.get_http_server()->respond_NOTOK(
-            cd, EVHTP_RES_BADREQ,
+        response.send(
+            Pistache::Http::Code::Bad_Request,
             fmt::format("Can serve only one client per request. Number clients received: {}\n", clients.size()));
         return;
     }
 
-    const auto hb = to_homeblks(cd);
-    if (hb->is_safe_mode()) {
-        const auto j = to_homeblks(cd)->dump_disk_metablks(clients[0]);
-        ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, j.dump(2));
+    if (m_hb->is_safe_mode()) {
+        const auto j = m_hb->dump_disk_metablks(clients[0]);
+        response.send(Pistache::Http::Code::Ok, j.dump(2));
     } else {
-        ioenvironment.get_http_server()->respond_NOTOK(
-            cd, EVHTP_RES_BADREQ, fmt::format("HomeBlks not in safe mode, not allowed to serve this request"));
+        response.send(Pistache::Http::Code::Bad_Request,
+                      "HomeBlks not in safe mode, not allowed to serve this request");
     }
 }
 
-void HomeBlksHttpServer::get_status(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-    auto req = cd->request();
-
+void HomeBlksHttpServer::get_status(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
     std::vector< std::string > modules;
-    auto modules_kv = evhtp_kvs_find_kv(req->uri->query, "module");
+    const auto modules_kv{request.query().get("module")};
     if (modules_kv) {
-        boost::algorithm::split(modules, modules_kv->val, boost::is_any_of(","), boost::token_compress_on);
+        boost::algorithm::split(modules, modules_kv.value(), boost::is_any_of(","), boost::token_compress_on);
     }
 
     std::string failure_resp{""};
     int verbosity_level{-1};
-    if (!verify_and_get_verbosity(req, failure_resp, verbosity_level)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_BADREQ, failure_resp);
+    if (!verify_and_get_verbosity(request, failure_resp, verbosity_level)) {
+        response.send(Pistache::Http::Code::Bad_Request, failure_resp);
         return;
     }
 
-    const auto status_mgr = to_homeblks(cd)->status_mgr();
+    const auto status_mgr = m_hb->status_mgr();
     auto status_json = status_mgr->get_status(modules, verbosity_level);
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, status_json.dump(2));
+    response.send(Pistache::Http::Code::Ok, status_json.dump(2));
 }
 
-void HomeBlksHttpServer::verify_bitmap(iomgr::HttpCallData cd) {
-    if (!is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-
-    auto hb = to_homeblks(cd);
-    auto ret = hb->verify_bitmap();
-    std::string resp{"HomeBlks bitmap verified "};
-    resp += ret ? "successfully" : "failed";
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
+void HomeBlksHttpServer::verify_bitmap(const Pistache::Rest::Request& request,
+                                       Pistache::Http::ResponseWriter response) {
+    auto ret = m_hb->verify_bitmap();
+    response.send(Pistache::Http::Code::Ok,
+                  fmt::format("HomeBlks bitmap verified {}", ret ? "successfully" : "failed"));
 }
 
-void HomeBlksHttpServer::wakeup_init(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-    auto hb = to_homeblks(cd);
-    hb->wakeup_init();
-    std::string resp{"completed"};
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
+void HomeBlksHttpServer::wakeup_init(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
+    m_hb->wakeup_init();
+    response.send(Pistache::Http::Code::Ok, "completed");
 }
 
 #ifdef _PRERELEASE
-void HomeBlksHttpServer::crash_system(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-    auto req{cd->request()};
-
-    const evhtp_kv_t* _crash_type{nullptr};
+void HomeBlksHttpServer::crash_system(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
     std::string crash_type;
-    _crash_type = evhtp_kvs_find_kv(req->uri->query, "type");
-    if (_crash_type) { crash_type = _crash_type->val; }
+    const auto _crash_type{request.query().get("type")};
+    if (_crash_type) { crash_type = _crash_type.value(); }
 
     std::string resp = "";
     if (crash_type.empty() || boost::iequals(crash_type, "assert")) {
@@ -419,63 +301,49 @@ void HomeBlksHttpServer::crash_system(iomgr::HttpCallData cd) {
     } else {
         resp = "crash type " + crash_type + " not supported yet";
     }
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
+    response.send(Pistache::Http::Code::Ok, resp);
 }
 
-void HomeBlksHttpServer::move_vol_online(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-    auto req = cd->request();
-
+void HomeBlksHttpServer::move_vol_online(const Pistache::Rest::Request& request,
+                                         Pistache::Http::ResponseWriter response) {
     std::string vol_uuid;
-    const evhtp_kv_t* _vol_uuid = evhtp_kvs_find_kv(req->uri->query, "uuid");
-    if (_vol_uuid) { vol_uuid = _vol_uuid->val; }
+    const auto _vol_uuid{request.query().get("uuid")};
+    if (_vol_uuid) { vol_uuid = _vol_uuid.value(); }
 
     if (vol_uuid.length() == 0) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_BADREQ, std::string("empty vol_uuid!"));
+        response.send(Pistache::Http::Code::Bad_Request, "empty vol_uuid!");
         return;
     }
 
     boost::uuids::string_generator gen;
     boost::uuids::uuid uuid = gen(vol_uuid);
-    auto hb = to_homeblks(cd);
-    auto res = hb->mark_vol_online(uuid);
+    auto res = m_hb->mark_vol_online(uuid);
     std::string resp{"Vol: " + vol_uuid + " moved to online state "};
 
     resp += (res == no_error ? "successfully" : "failed");
     if (res != no_error) { resp += ("error: " + res.message()); }
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
+    response.send(Pistache::Http::Code::Ok, resp);
 }
 
-void HomeBlksHttpServer::move_vol_offline(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-    auto req = cd->request();
-
+void HomeBlksHttpServer::move_vol_offline(const Pistache::Rest::Request& request,
+                                          Pistache::Http::ResponseWriter response) {
     std::string vol_uuid;
-    const evhtp_kv_t* _vol_uuid = evhtp_kvs_find_kv(req->uri->query, "uuid");
-    if (_vol_uuid) { vol_uuid = _vol_uuid->val; }
+    const auto _vol_uuid{request.query().get("uuid")};
+    if (_vol_uuid) { vol_uuid = _vol_uuid.value(); }
 
     if (vol_uuid.length() == 0) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_BADREQ, std::string("empty vol_uuid!"));
+        response.send(Pistache::Http::Code::Bad_Request, "empty vol_uuid!");
         return;
     }
 
     boost::uuids::string_generator gen;
     boost::uuids::uuid uuid = gen(vol_uuid);
-    auto hb = to_homeblks(cd);
-    auto res = hb->mark_vol_offline(uuid);
+    auto res = m_hb->mark_vol_offline(uuid);
     std::string resp{"Vol: " + vol_uuid + " moved to offline state "};
 
     resp += (res == no_error ? "successfully" : "failed");
     if (res != no_error) { resp += ("error: " + res.message()); }
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
+    response.send(Pistache::Http::Code::Ok, resp);
 }
 #endif
 
