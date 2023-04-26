@@ -40,6 +40,7 @@
 #include <folly/Synchronized.h>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/io_environment.hpp>
+#include <iomgr/http_server.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
@@ -405,6 +406,7 @@ public:
                          const uint32_t n_log_stores, const bool restart = false) {
         if (restart) {
             shutdown(ndevices, false);
+            ioenvironment.get_http_server()->stop();
             std::this_thread::sleep_for(std::chrono::seconds{5});
         }
 

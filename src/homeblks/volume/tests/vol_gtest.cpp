@@ -48,6 +48,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/io_environment.hpp>
+#include <iomgr/http_server.hpp>
 #include <iomgr/spdk_drive_interface.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
@@ -778,6 +779,7 @@ public:
         VolInterface::init(params);
 
         if (wait_for_init_done) { wait_homestore_init_done(); }
+        ioenvironment.get_http_server()->start();
 
         if (tcfg.init) {
             void* cookie{nullptr};
@@ -1032,6 +1034,7 @@ public:
         }
 
         VolInterface::shutdown(false /* force */);
+        ioenvironment.get_http_server()->stop();
 
         LOGINFO("stopping iomgr");
         iomanager.stop();
@@ -1293,6 +1296,7 @@ private:
             force = true;
         }
         VolInterface::shutdown(force);
+        ioenvironment.get_http_server()->stop();
     }
 
     void remove_journal_files() {
