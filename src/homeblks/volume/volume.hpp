@@ -613,6 +613,8 @@ public:
     }
 
     void inc_ref_cnt();
+
+    std::error_condition copy_to(const std::string& file_path);
 };
 
 /* Note :- Any member inside this structure is not lock protected. Its caller responsibility to call it under lock

@@ -348,6 +348,8 @@ public:
     virtual void print_tree(const VolumePtr& vol, bool chksum = true) = 0;
     virtual bool verify_tree(const VolumePtr& vol) = 0;
 
+    virtual std::error_condition copy_vol(const boost::uuids::uuid& uuid, const std::string& path) = 0;
+
     /**
      * @brief : fix the btree which is in corrupted state;
      *
