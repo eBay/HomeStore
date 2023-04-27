@@ -44,7 +44,7 @@ public:
     /// @brief Write buffer
     /// @param buf
     /// @param context
-    virtual void write_buf(const IndexBufferPtr& buf, CPContext* context) = 0;
+    virtual void write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* context) = 0;
 
     virtual void read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) = 0;
 

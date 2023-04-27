@@ -13,25 +13,34 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
+
 #include <random>
 #include <map>
 #include <memory>
 #include <gtest/gtest.h>
+#include <boost/uuid/random_generator.hpp>
 
+#include <iomgr/io_environment.hpp>
 #include <sisl/options/options.h>
 #include <sisl/logging/logging.h>
 #include <sisl/utility/enum.hpp>
 #include "btree_test_kvs.hpp"
 #include <homestore/btree/detail/simple_node.hpp>
 #include <homestore/btree/detail/varlen_node.hpp>
-#include <homestore/btree/mem_btree.hpp>
+#include <homestore/homestore.hpp>
+#include <homestore/index/index_table.hpp>
+#include "test_common/homestore_test_common.hpp"
+
+using namespace homestore;
+
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_OPTIONS_ENABLE(logging, test_index_btree, iomgr, test_common_setup)
+SISL_LOGGING_DECL(test_index_btree)
 
 static constexpr uint32_t g_node_size{4096};
-using namespace homestore;
-SISL_LOGGING_INIT(btree)
+std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
-SISL_OPTIONS_ENABLE(logging, test_mem_btree)
-SISL_OPTION_GROUP(test_mem_btree,
+SISL_OPTION_GROUP(test_index_btree,
                   (num_iters, "", "num_iters", "number of iterations for rand ops",
                    ::cxxopts::value< uint32_t >()->default_value("65536"), "number"),
                   (num_entries, "", "num_entries", "number of entries to test with",
@@ -40,7 +49,7 @@ SISL_OPTION_GROUP(test_mem_btree,
                    ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
 struct FixedLenBtreeTest {
-    using BtreeType = MemBtree< TestFixedKey, TestFixedValue >;
+    using BtreeType = IndexTable< TestFixedKey, TestFixedValue >;
     using KeyType = TestFixedKey;
     using ValueType = TestFixedValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::FIXED;
@@ -48,7 +57,7 @@ struct FixedLenBtreeTest {
 };
 
 struct VarKeySizeBtreeTest {
-    using BtreeType = MemBtree< TestVarLenKey, TestFixedValue >;
+    using BtreeType = IndexTable< TestVarLenKey, TestFixedValue >;
     using KeyType = TestVarLenKey;
     using ValueType = TestFixedValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_KEY;
@@ -56,7 +65,7 @@ struct VarKeySizeBtreeTest {
 };
 
 struct VarValueSizeBtreeTest {
-    using BtreeType = MemBtree< TestFixedKey, TestVarLenValue >;
+    using BtreeType = IndexTable< TestFixedKey, TestVarLenValue >;
     using KeyType = TestFixedKey;
     using ValueType = TestVarLenValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_VALUE;
@@ -64,11 +73,33 @@ struct VarValueSizeBtreeTest {
 };
 
 struct VarObjSizeBtreeTest {
-    using BtreeType = MemBtree< TestVarLenKey, TestVarLenValue >;
+    using BtreeType = IndexTable< TestVarLenKey, TestVarLenValue >;
     using KeyType = TestVarLenKey;
     using ValueType = TestVarLenValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_OBJECT;
     static constexpr btree_node_type interior_node_type = btree_node_type::VAR_OBJECT;
+};
+
+class TestCPContext : public CPContext {
+public:
+    TestCPContext(cp_id_t id) : CPContext{id} {}
+    virtual ~TestCPContext() = default;
+};
+
+class TestCPCallbacks : public CPCallbacks {
+public:
+    std::unique_ptr< CPContext > on_switchover_cp(CP*, CP* new_cp) override {
+        return hs()->index_service().wb_cache().create_cp_context(new_cp->id());
+    }
+
+    void cp_flush(CP* cp, cp_flush_done_cb_t&& done_cb) override {
+        auto ctx = s_cast< IndexCPContext* >(cp->context(cp_consumer_t::INDEX_SVC));
+        done_cb(cp);
+    }
+
+    void cp_cleanup(CP* cp) override {}
+
+    int cp_progress_percent() override { return 100; }
 };
 
 template < typename TestType >
@@ -77,15 +108,32 @@ struct BtreeTest : public testing::Test {
     using K = typename TestType::KeyType;
     using V = typename TestType::ValueType;
 
-    std::unique_ptr< typename T::BtreeType > m_bt;
+    std::shared_ptr< typename T::BtreeType > m_bt;
     std::map< K, V > m_shadow_map;
+    std::unique_ptr< CPContext > m_cp_context;
     BtreeConfig m_cfg{g_node_size};
 
     void SetUp() override {
         m_cfg.m_leaf_node_type = T::leaf_node_type;
         m_cfg.m_int_node_type = T::interior_node_type;
-        m_bt = std::make_unique< typename T::BtreeType >(m_cfg);
-        m_bt->init(nullptr);
+        test_common::HSTestHelper::start_homestore("test_index_btree", 10 /* meta */, 0 /* data log */, 0 /* ctrl log*/,
+                                                   0 /* data */, 70 /* index */, nullptr, false /* restart */);
+        hs()->cp_mgr().register_consumer(cp_consumer_t::INDEX_SVC, std::move(std::make_unique< TestCPCallbacks >()));
+        auto uuid = boost::uuids::random_generator()();
+        auto parent_uuid = boost::uuids::random_generator()();
+        m_bt = std::make_shared< typename T::BtreeType >(uuid, parent_uuid, 0, m_cfg);
+        m_cp_context = hs()->index_service().wb_cache().create_cp_context(0 /* cp_id */);
+        auto ret = m_bt->init(m_cp_context.get());
+        ASSERT_EQ(ret, btree_status_t::success);
+        LOGINFO("Created index table");
+        hs()->index_service().add_index_table(m_bt);
+        LOGINFO("Added index table to index service");
+    }
+
+    void TearDown() override {
+        m_cp_context.reset();
+        m_bt.reset();
+        test_common::HSTestHelper::shutdown_homestore();
     }
 
     void put(uint32_t k, btree_put_type put_type) {
@@ -272,6 +320,7 @@ TYPED_TEST(BtreeTest, SequentialInsert) {
     LOGINFO("Step 1: Do Forward sequential insert for {} entries", entries_iter1);
     for (uint32_t i{0}; i < entries_iter1; ++i) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+        // this->print();
     }
     LOGINFO("Step 2: Query {} entries and validate with pagination of 75 entries", entries_iter1);
     this->query_validate(0, entries_iter1, 75);
@@ -351,9 +400,10 @@ TYPED_TEST(BtreeTest, RangeUpdate) {
 }
 
 int main(int argc, char* argv[]) {
-    ::testing::InitGoogleTest(&argc, argv);
-    SISL_OPTIONS_LOAD(argc, argv, logging, test_mem_btree)
-    sisl::logging::SetLogger("test_mem_btree");
+    int parsed_argc{argc};
+    ::testing::InitGoogleTest(&parsed_argc, argv);
+    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_index_btree, iomgr, test_common_setup);
+    sisl::logging::SetLogger("test_index_btree");
     spdlog::set_pattern("[%D %T%z] [%^%L%$] [%t] %v");
 
     if (SISL_OPTIONS.count("seed")) {
