@@ -319,6 +319,7 @@ private:
     indxmgr_stop_cb m_destroy_done_cb;
     std::atomic< bool > m_indx_mgr_destroy_started;
     void* m_sb_cookie = nullptr;
+    sisl::status_object_ptr m_status_obj;
 
     typedef struct IoVecTransversal {
         uint64_t current_iovecs_offset{0};
@@ -397,6 +398,7 @@ private:
     indx_tbl* recover_indx_tbl(btree_super_block& sb, btree_cp_sb& cp_sb);
 public:
     mapping* get_active_indx();
+    sisl::status_object_ptr status_object() { return m_status_obj; }
 private:
 
     void vol_sb_init();
@@ -490,7 +492,7 @@ public:
     bool verify_tree(bool update_debug_bm = false);
 
     /* get status */
-    nlohmann::json get_status(const int log_level);
+    sisl::status_response get_status(const sisl::status_request& request);
 
     /* populate debug bitmap */
     void populate_debug_bm();

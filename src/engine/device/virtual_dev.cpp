@@ -785,22 +785,22 @@ void VirtualDev::blkalloc_cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp) 
 }
 
 /* Get status for all chunks */
-nlohmann::json VirtualDev::get_status(const int log_level) const {
-    nlohmann::json j;
+sisl::status_response VirtualDev::get_status(const sisl::status_request& request) const {
+    sisl::status_response response;
     try {
         for (const auto& pdev_chunks : m_primary_pdev_chunks_list) {
             const auto chunk_list{pdev_chunks.chunks_in_pdev};
             for (const auto& chunk : chunk_list) {
                 nlohmann::json chunk_j;
-                chunk_j["ChunkInfo"] = chunk->get_status(log_level);
+                chunk_j["ChunkInfo"] = chunk->get_status(request).json;
                 if (chunk->get_blk_allocator() != nullptr) {
-                    chunk_j["BlkallocInfo"] = chunk->get_blk_allocator()->get_status(log_level);
+                    chunk_j["BlkallocInfo"] = chunk->get_blk_allocator()->get_status(request).json;
                 }
-                j[std::to_string(chunk->get_chunk_id())] = chunk_j;
+                response.json[std::to_string(chunk->get_chunk_id())] = chunk_j;
             }
         }
     } catch (const std::exception& e) { LOGERROR("exception happened {}", e.what()); }
-    return j;
+    return response;
 }
 
 ///////////////////////// VirtualDev Private Methods /////////////////////////////

@@ -25,7 +25,7 @@
 #include <sisl/logging/logging.h>
 #include <sisl/version.hpp>
 
-#include "engine/common/homestore_status_mgr.hpp"
+#include <sisl/status_mgr/status_mgr.hpp>
 #include "engine/blkstore/blkbuffer.hpp"
 #include "engine/device/device.h"
 #include "engine/device/virtual_dev.hpp"
@@ -176,6 +176,10 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     m_recovery_stats = std::make_unique< HomeBlksRecoveryStats >();
     m_recovery_stats->start();
 
+    m_status_obj =
+        status_mgr()->create_object("Volumes", "module", std::bind(&HomeBlks::get_status, this, std::placeholders::_1));
+    status_mgr()->register_module(m_status_obj);
+
     if (HB_DYNAMIC_CONFIG(general_config->boot_safe_mode)) {
         LOGINFO("HomeBlks booting into safe_mode");
         // start http server
@@ -311,6 +315,8 @@ void HomeBlks::create_volume(VolumePtr vol) {
     // Okay, this is a new volume so let's create it
     it->second = vol;
 
+    m_status_obj->add_child(vol->status_object());
+
     /* set available size and return */
     set_available_size(available_size() - vol->get_size());
 
@@ -343,6 +349,7 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
         return nullptr;
     }
 
+    m_status_obj->add_child(new_vol->status_object());
     auto system_cap = get_system_capacity();
     LOGINFO("System capacity after vol create: {}", system_cap.to_string());
     VOL_INFO_LOG(new_vol->get_uuid(), "Create volume with params: {}", params.to_string());
@@ -507,10 +514,6 @@ void HomeBlks::init_done() {
     m_out_params.max_io_size = HS_STATIC_CONFIG(engine.max_vol_io_size);
     if (m_cfg.end_of_batch_cb) { attach_end_of_batch_cb(m_cfg.end_of_batch_cb); }
 
-    status_mgr()->register_status_cb("MetaBlkMgr",
-                                     std::bind(&MetaBlkMgr::get_status, MetaBlkMgrSI(), std::placeholders::_1));
-    status_mgr()->register_status_cb("Volumes", std::bind(&HomeBlks::get_status, this, std::placeholders::_1));
-
     m_recovery_stats->end();
     GAUGE_UPDATE(*m_metrics, recovery_phase0_latency, m_recovery_stats->m_phase0_ms);
     GAUGE_UPDATE(*m_metrics, recovery_phase1_latency, m_recovery_stats->m_phase1_ms);
@@ -624,24 +627,27 @@ bool HomeBlks::verify_index_bm() {
     return true;
 }
 
-nlohmann::json HomeBlks::get_status(const int log_level) {
-    nlohmann::json j;
+sisl::status_response HomeBlks::get_status(const sisl::status_request& request) {
+    sisl::status_response response;
     /* Update per volume status */
     std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
     auto it{m_volume_map.begin()};
     LOGINFO("Print status of all volumes");
     while (it != m_volume_map.end()) {
         const VolumePtr& vol{it->second};
-        auto vol_json = vol->get_status(log_level);
-        if (!vol_json.empty()) { j.update(vol_json); }
+        auto id = vol->status_object()->name();
+        auto vol_json = vol->get_status(request).json;
+        if (!vol_json.empty()) { response.json[id] = vol_json; }
         ++it;
     }
+
     /* Get status from index blkstore */
     auto hb{HomeBlks::safe_instance()};
-    auto index_blkstore_json = hb->get_index_blkstore()->get_status(log_level);
-    if (!index_blkstore_json.empty()) { j.update(index_blkstore_json); }
+    auto id = hb->get_index_blkstore()->status_object()->name();
+    auto index_blkstore_json = hb->get_index_blkstore()->get_status(request).json;
+    if (!index_blkstore_json.empty()) { response.json[id] = index_blkstore_json; }
 
-    return j;
+    return response;
 }
 
 bool HomeBlks::verify_bitmap() {
@@ -849,9 +855,7 @@ vol_state HomeBlks::get_state(VolumePtr vol) { return vol->get_state(); }
 bool HomeBlks::is_destroying(const VolumePtr vol) const { return vol->is_destroying(); }
 
 void HomeBlks::register_status_cb(const std::string& module,
-                                  const std::function< nlohmann::json(const int verbosity_level) > get_status_cb) {
-    status_mgr()->register_status_cb(module, get_status_cb);
-}
+                                  const std::function< nlohmann::json(const int verbosity_level) > get_status_cb) {}
 
 bool HomeBlks::fix_tree(VolumePtr vol, bool verify) { return vol->fix_mapping_btree(verify); }
 

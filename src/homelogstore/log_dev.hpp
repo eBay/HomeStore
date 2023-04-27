@@ -50,15 +50,15 @@ static constexpr uint32_t max_log_group{2};
 /*
  * LogGroup Layout:
  *
- *   <----        Log Group Header         ---> <--   Record 1   --> <--   Record 2   -->        <-- -  Inline data area  --> 
+ *   <----        Log Group Header         ---> <--   Record 1   --> <--   Record 2   -->        <-- -  Inline data area  -->
  *  |----------------------------------------- |--------------------|--------------------|      |----------------|-----------|----------------|
  *  |#records|...| oob area   | inline area    | Size | data offset | Size | data offset | ...  | Record #1 data |     ...   |   OOB Record 1 |
  *  |----------------------------------------- |--------------------|--------------------|      |----------------|-----------|----------------|
- *                      |             |                     |                                     ^                            ^ 
+ *                      |             |                     |                                     ^                            ^
  *                      |             |                     |                                     |                            |
  *                      |             |                      -------------------------------------|                            |
  *                      |             ------------------------------------------------------------|                            |
- *                      |------------------------------------------------------------------------------------------------------|         
+ *                      |------------------------------------------------------------------------------------------------------|
  */
 // clang-format on
 
@@ -726,7 +726,7 @@ public:
 
     void update_store_superblk(const logstore_id_t idx, const logstore_superblk& meta, const bool persist_now);
 
-    void get_status(const int verbosity, nlohmann::json& out_json) const;
+    sisl::status_response get_status(const sisl::status_request& request) const;
     bool flush_if_needed();
 
     [[nodiscard]] bool is_aligned_buf_needed(const size_t size) const {

@@ -28,6 +28,8 @@
 #include <sisl/metrics/metrics.hpp>
 #include <nlohmann/json.hpp>
 
+#include <sisl/status_mgr/status_mgr.hpp>
+
 namespace homestore {
 
 // forward declarations
@@ -87,6 +89,7 @@ private:
     sisl::blob m_compress_info;
     MetablkMetrics m_metrics;
     bool m_inited{false};
+    sisl::status_object_ptr m_status_obj;
 
 public:
     MetaBlkMgr(const char* const name = "MetaBlkStore");
@@ -217,7 +220,9 @@ public:
     [[nodiscard]] uint64_t ovf_blk_max_num_data_blk() const;
     [[nodiscard]] uint32_t get_align_size() const;
 
-    [[nodiscard]] nlohmann::json get_status(const int log_level);
+    [[nodiscard]] sisl::status_response get_status(const sisl::status_request& request);
+
+    sisl::status_object_ptr status_object() { return m_status_obj; }
 
 public:
     /*********************** static public function **********************/

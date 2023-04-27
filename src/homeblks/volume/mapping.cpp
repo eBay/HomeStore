@@ -269,11 +269,8 @@ uint64_t mapping::get_btree_node_cnt() { return m_bt->get_btree_node_cnt(); }
 void mapping::print_tree() { m_bt->print_tree(); }
 bool mapping::verify_tree(bool update_debug_bm) { return m_bt->verify_tree(update_debug_bm); }
 
-nlohmann::json mapping::get_status(const int log_level) {
-    nlohmann::json j;
-    auto bt_json = m_bt->get_status(log_level);
-    if (!bt_json.empty()) { j.update(bt_json); }
-    return j;
+sisl::status_response mapping::get_status(const sisl::status_request& request) {
+    return m_bt->get_status(request);
 }
 
 /**

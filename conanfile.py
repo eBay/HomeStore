@@ -51,7 +51,9 @@ class HomestoreConan(ConanFile):
 
     def requirements(self):
         self.requires("iomgr/8.7.1")
-        self.requires("sisl/8.2.8") # sisl: stable/v8.x
+        #self.requires("sisl/8.2.8") # sisl: stable/v8.x
+        #TODO fix after code review
+        self.requires("sisl/8.5.2@pillai/master")
 
         # FOSS, rarely updated
         self.requires("boost/1.79.0")
@@ -78,7 +80,7 @@ class HomestoreConan(ConanFile):
 
         if self.settings.build_type == 'Debug':
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
-        
+
         cmake.configure(defs=definitions)
         cmake.build()
         if not self.options.testing == 'off' and not self.options.skip_testing:

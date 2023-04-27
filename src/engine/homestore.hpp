@@ -67,7 +67,7 @@ public:
         }
 
         sisl::ObjCounterRegistry::enable_metrics_reporting();
-        m_status_mgr = std::make_unique< HomeStoreStatusMgr >();
+        m_status_mgr = std::make_unique< sisl::status_manager >();
         MetaBlkMgrSI()->register_handler("INDX_MGR_CP", StaticIndxMgr::meta_blk_found_cb, nullptr);
 
         /* set the homestore static config parameters */

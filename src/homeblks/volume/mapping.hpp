@@ -591,17 +591,17 @@ public:
         uint32_t meta_size() const { return sizeof(ValueEntryMeta) + m_earr.get_meta_size(); }
 #endif
 
-#if 0    
+#if 0
         void truncate(volume_req* req) {
             Blob_Array< ValueEntry >& e_varray = get_array();
 
-            // iterate and remove all entries except latest one    
+            // iterate and remove all entries except latest one
             for (int i = e_varray.get_total_elements() - 1; i >= 0; i--) {
                 ValueEntry ve;
                 e_varray.get(i, ve, false);
                 uint32_t total = e_varray.get_total_elements();
                 if (req->lastCommited_seqid == INVALID_SEQ_ID ||
-                    ve.get_seqid() < req->lastCommited_seqid) { // eligible for removal    
+                    ve.get_seqid() < req->lastCommited_seqid) { // eligible for removal
 
                     LOGTRACE("Free entry:{} nlbas {}", ve.to_string(),
                         (m_vol_page_size / HomeBlks::instance()->get_data_pagesz()) * e_key->get_n_lba());
@@ -685,7 +685,7 @@ public:
 
     void print_tree();
     bool verify_tree(bool update_debug_bm);
-    nlohmann::json get_status(const int log_level);
+    sisl::status_response get_status(const sisl::status_request& request);
 
     /**
      * @brief : Fix a btree by :

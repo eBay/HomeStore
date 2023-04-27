@@ -714,17 +714,17 @@ std::string PhysicalDevChunk::to_string() const {
                        m_chunk_info->is_slot_allocated());
 }
 
-nlohmann::json PhysicalDevChunk::get_status([[maybe_unused]] const int log_level) const {
-    nlohmann::json j;
-    j["chunk_id"] = get_chunk_id();
-    j["prev_chunk_id"] = m_chunk_info->prev_chunk_id;
-    j["next_chunk_id"] = m_chunk_info->next_chunk_id;
-    j["pdev_id"] = m_chunk_info->pdev_id;
-    j["vdev_id"] = m_chunk_info->vdev_id;
-    j["start_offset"] = m_chunk_info->chunk_start_offset;
-    j["size"] = m_chunk_info->chunk_size;
-    j["busy?"] = is_busy();
-    j["slot_alloced?"] = m_chunk_info->is_slot_allocated();
-    return j;
+sisl::status_response PhysicalDevChunk::get_status(const sisl::status_request& request) const {
+    sisl::status_response response;
+    response.json["chunk_id"] = get_chunk_id();
+    response.json["prev_chunk_id"] = m_chunk_info->prev_chunk_id;
+    response.json["next_chunk_id"] = m_chunk_info->next_chunk_id;
+    response.json["pdev_id"] = m_chunk_info->pdev_id;
+    response.json["vdev_id"] = m_chunk_info->vdev_id;
+    response.json["start_offset"] = m_chunk_info->chunk_start_offset;
+    response.json["size"] = m_chunk_info->chunk_size;
+    response.json["busy?"] = is_busy();
+    response.json["slot_alloced?"] = m_chunk_info->is_slot_allocated();
+    return response;
 }
 } // namespace homestore

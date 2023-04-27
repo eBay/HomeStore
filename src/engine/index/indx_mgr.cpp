@@ -371,6 +371,10 @@ IndxMgr::IndxMgr(const boost::uuids::uuid uuid, std::string name, const io_done_
     m_prepare_cb_list->reserve(4);
     m_active_tbl = m_create_indx_tbl();
 
+    auto hs = HomeStoreBase::safe_instance();
+    m_status_obj =
+        hs->status_mgr()->create_object(name, "index", std::bind(&IndxMgr::get_status, this, std::placeholders::_1));
+
     THIS_INDX_LOG(INFO, indx_mgr, , "Creating new log store for name: {}", name);
     m_journal = HomeLogStoreMgrSI().create_new_log_store(HomeLogStoreMgr::DATA_LOG_FAMILY_IDX, false /* append_mode */);
     m_journal_comp_cb = bind_this(IndxMgr::journal_comp_cb, 2);
@@ -398,6 +402,10 @@ IndxMgr::IndxMgr(const boost::uuids::uuid uuid, std::string name, const io_done_
     m_journal = nullptr;
     m_prepare_cb_list = std::make_unique< std::vector< prepare_cb > >();
     m_prepare_cb_list->reserve(4);
+
+    auto hs = HomeStoreBase::safe_instance();
+    m_status_obj =
+        hs->status_mgr()->create_object(name, "index", std::bind(&IndxMgr::get_status, this, std::placeholders::_1));
 
     HS_REL_ASSERT_EQ(m_immutable_sb.version, indx_sb_version);
     m_is_snap_enabled = sb.is_snap_enabled ? true : false;
@@ -1583,6 +1591,11 @@ bool IndxMgr::is_recovery_done() const {
 hs_cp* IndxMgr::cp_io_enter() { return (m_cp_mgr->cp_io_enter()); }
 
 void IndxMgr::cp_io_exit(hs_cp* const hcp) { m_cp_mgr->cp_io_exit(hcp); }
+
+sisl::status_response IndxMgr::get_status(const sisl::status_request& request) {
+    return {};
+}
+
 
 /********************** Static Indx mgr functions *********************************/
 

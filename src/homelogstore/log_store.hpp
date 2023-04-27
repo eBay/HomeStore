@@ -32,6 +32,7 @@
 
 #include "logstore_header.hpp"
 #include "log_store_family.hpp"
+#include <sisl/status_mgr/status_mgr.hpp>
 
 namespace homestore {
 
@@ -221,7 +222,7 @@ public:
     void send_flush_msg();
 
     [[nodiscard]] nlohmann::json dump_log_store(const log_dump_req& dum_req);
-    [[nodiscard]] nlohmann::json get_status(const int verbosity) const;
+    [[nodiscard]] sisl::status_response get_status(const sisl::status_request& request) const;
 
     LogStoreFamily* data_log_family() { return m_logstore_families[DATA_LOG_FAMILY_IDX].get(); }
     LogStoreFamily* ctrl_log_family() { return m_logstore_families[CTRL_LOG_FAMILY_IDX].get(); }
@@ -245,6 +246,7 @@ private:
     iomgr::io_thread_t m_truncate_thread;
     iomgr::io_thread_t m_flush_thread;
     bool m_flush_thread_stopped = false;
+    sisl::status_object_ptr m_status_obj;
 };
 
 static HomeLogStoreMgr& HomeLogStoreMgrSI() { return HomeLogStoreMgr::instance(); }
@@ -498,8 +500,7 @@ public:
     [[nodiscard]] LogStoreFamily& get_family() { return m_logstore_family; }
 
     [[nodiscard]] nlohmann::json dump_log_store(const log_dump_req& dump_req = log_dump_req());
-
-    [[nodiscard]] nlohmann::json get_status(const int verbosity) const;
+    [[nodiscard]] sisl::status_response get_status(const sisl::status_request& request) const;
 
 private:
     [[nodiscard]] const truncation_info& pre_device_truncation();

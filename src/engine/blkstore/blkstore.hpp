@@ -29,6 +29,7 @@
 #include <boost/optional.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <sisl/utility/atomic_counter.hpp>
+#include <sisl/status_mgr/status_mgr.hpp>
 
 #include "engine/cache/cache.h"
 #include "engine/common/error.h"
@@ -39,6 +40,7 @@
 #include "engine/device/device.h"
 #include "engine/device/virtual_dev.hpp"
 #include "engine/homeds/memory/mempiece.hpp"
+#include "engine/homestore_base.hpp"
 
 namespace homestore {
 
@@ -217,7 +219,9 @@ public:
                    size,
                    auto_recovery},
             m_comp_cb{std::move(comp_cb)},
-            m_metrics{name} {}
+            m_metrics{name} {
+        init_status_object(name);
+    }
 
     BlkStore(DeviceManager* const mgr,  // Device manager instance
              CacheType* const cache,    // Cache Instance
@@ -239,7 +243,9 @@ public:
                 pdev_group,    allocator_type, (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)),
                 recovery_init, auto_recovery},
             m_comp_cb{std::move(comp_cb)},
-            m_metrics{name} {}
+            m_metrics{name} {
+        init_status_object(name);
+    }
 
     BlkStore(const BlkStore&) = delete;
     BlkStore& operator=(const BlkStore&) = delete;
@@ -247,6 +253,13 @@ public:
     BlkStore& operator=(BlkStore&&) noexcept = delete;
 
     ~BlkStore() = default;
+
+    sisl::status_object_ptr status_object() { return m_status_obj; }
+    void init_status_object(const char* const name) {
+        auto hs = HomeStoreBase::safe_instance();
+        m_status_obj = hs->status_mgr()->create_object(name, "BlkStore",
+                                                       std::bind(&BlkStore::get_status, this, std::placeholders::_1));
+    }
 
     void attach_compl(comp_callback comp_cb) { m_comp_cb = std::move(comp_cb); }
 
@@ -809,12 +822,7 @@ public:
     BlkAllocStatus verify_debug_bm() { return (m_vdev.verify_debug_bm()); }
 
     /* Get status */
-    nlohmann::json get_status(const int log_level) {
-        nlohmann::json j;
-        auto vdev_json = m_vdev.get_status(log_level);
-        if (!vdev_json.empty()) { j.update(vdev_json); }
-        return j;
-    }
+    sisl::status_response get_status(const sisl::status_request& request) { return m_vdev.get_status(request); }
 
 private:
     uint32_t m_pagesz;
@@ -823,6 +831,7 @@ private:
     VirtualDev m_vdev;
     comp_callback m_comp_cb;
     BlkStoreMetrics m_metrics;
+    sisl::status_object_ptr m_status_obj;
 };
 } // namespace homestore
 #endif // OMSTORE_BLKSTORE_HPP

@@ -29,6 +29,7 @@
 #include <folly/MPMCQueue.h>
 #include <sisl/utility/enum.hpp>
 #include <sisl/utility/urcu_helper.hpp>
+#include <sisl/status_mgr/status_mgr.hpp>
 
 #include "blk.h"
 #include "engine/common/homestore_config.hpp"
@@ -313,7 +314,7 @@ public:
     [[nodiscard]] bool verify_debug_bm(const bool free_debug_bm);
 
     /* Get status */
-    nlohmann::json get_status(const int log_level) const;
+    [[nodiscard]] sisl::status_response get_status(const sisl::status_request& request) const;
 
     [[nodiscard]] bool realtime_bm_on() const { return (m_cfg.m_realtime_bm_on && m_auto_recovery); }
 
