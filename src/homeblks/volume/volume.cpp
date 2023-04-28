@@ -1167,9 +1167,13 @@ void VolumeMetrics::on_gather() {
     }
 }
 
+//
+// the file being written is a sparse file, holes will be left in file;
+//
 std::error_condition Volume::copy_to(const std::string& file_path) {
     // open file;
-    std::ofstream vol_file(file_path, ios::out | ios::binary);
+    // std::ofstream vol_file(file_path, ios::out | ios::binary);
+    auto vol_file = open(file_path.c_str(), O_RDWR);
     lba_t start_lba = 0ul;
     const auto last_lba = get_last_lba();
     const auto batch = BlkId::max_blks_in_op();
@@ -1195,9 +1199,14 @@ std::error_condition Volume::copy_to(const std::string& file_path) {
             if (!bid.is_valid()) {
                 // no pba is found in this lba range,
                 // leave unmapped lba range as hole and seek ahead to next visting lba;
+#if 0 
                 const auto pos = vol_file.tellp();
                 vol_file.seekp(pos + static_cast< long >(nlbas * get_page_size()));
+#endif
+
+                lseek(vol_file, static_cast< long >(nlbas * get_page_size()), SEEK_CUR);
 #if 0
+
                 // write nlbas page size of zeros to the file;
                 for (auto i = 0ul; i < nlbas; ++i) {
                     vol_file.write(zero_buf, get_page_size());
@@ -1223,7 +1232,11 @@ std::error_condition Volume::copy_to(const std::string& file_path) {
                 } catch (std::exception& e) { HS_REL_ASSERT(0, "Exception: {}", e.what()); }
 
                 // write to file
-                vol_file.write((const char*)read_buf, read_sz);
+                const auto nbytes = ::write(vol_file, (const char*)read_buf, read_sz);
+
+                // vol_file.write((const char*)read_buf, read_sz);
+
+                HS_DBG_ASSERT_EQ(static_cast< uint64_t >(nbytes), read_sz)
 
                 // free read buf;
                 hs_utils::iobuf_free(read_buf, sisl::buftag::common);
@@ -1233,7 +1246,8 @@ std::error_condition Volume::copy_to(const std::string& file_path) {
         start_lba += batch;
     }
 
-    vol_file.close();
+    ::close(vol_file);
+    // vol_file.close();
 
 #if 0
     hs_utils::iobuf_free(zero_buf);

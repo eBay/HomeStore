@@ -172,6 +172,7 @@ struct TestCfg {
     uint32_t create_del_ops_interval;
     uint32_t p_vol_files_space;
     std::string flip_name;
+    std::string vol_copy_file_path;
 
     bool verify_csum() { return verify_type == verify_type_t::csum; }
     bool verify_data() { return verify_type == verify_type_t::data; }
@@ -1306,6 +1307,76 @@ private:
         }
     }
 
+    // vol data is copied to "vol_copy_file_path",
+    // 1. read data out, calculate crc and compare it with vol file saved under test_files/vol[1...x]
+    // 2. this is only valid when --verify_type is set to 0, which is default value;
+    void verify_vol_copy(std::string& vol_copy_file_path) {
+        // vol_copy_file_path: the file dumped with copied volume data
+        // crc_file_name: the file stored with crc when volume is being written in io job;
+        const auto vol_uuid = fs::path(vol_copy_file_path).filename();
+        const std::string crc_file_name{VOL_PREFIX + std::to_string(0)};
+        auto crc_fd = open(crc_file_name.c_str(), O_RDONLY);
+        const auto hdr_offset = sizeof(vol_file_hdr);
+        vol_file_hdr hdr;
+        pread(crc_fd, (char*)&hdr, hdr_offset, 0 /* offset*/);
+
+        // 1. verify uuid does match;
+        HS_DBG_ASSERT_EQ(vol_uuid.string(), boost::uuids::to_string(hdr.uuid));
+
+        // 2. read vol_copy_rf (sparse file) and compare with vol_file (dense file);
+        //    make sure everything written in vol_copy is also written in vol_file;
+        auto fd = open(vol_copy_file_path.c_str(), O_RDONLY);
+
+        // std::vector< uint16_t > crc_vec;
+        off_t hole, data, pos, len;
+        auto buf = iomanager.iobuf_alloc(512 /* alignment */,
+                                         tcfg.vol_page_size); // replace with data blkstore get_align_size();
+        for (hole = 0;; data = hole) {
+            if ((data = lseek(fd, hole, SEEK_DATA)) == -1) {
+                if (errno == ENXIO) {
+                    LOGINFO("no more data on seek + data.");
+                    break;
+                }
+            }
+
+            if ((hole = lseek(0, data, SEEK_HOLE)) == -1) {
+                if (errno == ENXIO) {
+                    LOGINFO("no more data on seek + data.");
+                    break;
+                }
+            }
+
+            HS_DBG_ASSERT_EQ(data % tcfg.vol_page_size, 0, "Unexpected data offset: {}", data);
+            HS_DBG_ASSERT_EQ(hole % tcfg.vol_page_size, 0, "Unexpected hole offset: {}", hole);
+
+            const auto data_len = hole - data;
+            LOGINFO("data len: {}", data_len);
+
+            for (pos = data; pos < hole;) {
+                // io size should be times of 4KB;
+                const auto len = tcfg.vol_page_size;
+                pread(fd, buf, len, pos);
+                // calculate crc
+                const auto crc1 = crc16_t10dif(init_crc_16, buf, len);
+                uint16_t crc2 = 0;
+                pread(crc_fd, &crc2, sizeof(uint16_t), hdr_offset + (data / tcfg.vol_page_size) * sizeof(uint16_t));
+                HS_DBG_ASSERT_EQ(crc1, crc2, "crc mismatch: copy vol crc: {}, origin crc: {}, offset: {}, len: {}",
+                                 crc1, crc2, pos, len);
+                // crc_vec.push_back(crc);
+                pos += len;
+            }
+
+            HS_DBG_ASSERT_EQ(pos, hole, "pos: {}, hole: {}", pos, hole);
+        }
+
+        iomanager.iobuf_free(buf);
+        close(fd);
+
+        // 3. read vol_file, skip all zero crc, and compare it with vol_copy_rf
+        //   cross compare, making sure vol_copy_rf is not missing any data written in vol_file;
+        close(crc_fd);
+    }
+
 public:
     void force_reinit(const std::vector< dev_info >& data_devices, const io_flag data_oflags,
                       const io_flag fast_oflags) {
@@ -1685,9 +1756,10 @@ protected:
         ++m_outstanding_ios;
         vinfo->ref_cnt.increment(1);
         const auto ret_io{VolInterface::get_instance()->write(vol, vreq)};
-        LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas,
-                 m_outstanding_ios.load(), (tcfg.write_iovec != 0 ? true : false),
-                 (tcfg.write_cache != 0 ? true : false));
+        // LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas,
+        LOGINFO("Wrote lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas,
+                m_outstanding_ios.load(), (tcfg.write_iovec != 0 ? true : false),
+                (tcfg.write_cache != 0 ? true : false));
         if (ret_io != no_error) { return false; }
         return true;
     }
@@ -2100,6 +2172,11 @@ TEST_F(VolTest, recovery_boot_test) {
 
     output.print("recovery_boot_test");
 
+    LOGINFO("Starting to verify dumpped files with saved vol file with crc checksum");
+
+    // TODO: send curl http command to dump volume file in this test case and use file name to call verify;
+    verify_vol_copy(tcfg.vol_copy_file_path);
+
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();
     if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
@@ -2406,6 +2483,8 @@ SISL_OPTION_GROUP(
     (max_io_size, "", "max_io_size", "max io size", ::cxxopts::value< uint64_t >()->default_value("4096"),
      "max_io_size"),
     (io_size, "", "io_size", "io size in KB", ::cxxopts::value< uint32_t >()->default_value("4"), "io_size"),
+    (vol_copy_file_path, "", "vol_copy_file_path", "file path for copied volume",
+     ::cxxopts::value< std::string >()->default_value(""), "path [...]"),
     (unmap_frequency, "", "unmap_frequency", "do unmap for every N",
      ::cxxopts::value< uint64_t >()->default_value("100"), "unmap_frequency"))
 
@@ -2480,6 +2559,7 @@ int main(int argc, char* argv[]) {
     gcfg.emulate_hdd_stream_cnt = SISL_OPTIONS["emulate_hdd_stream_cnt"].as< uint32_t >();
     gcfg.p_vol_files_space = SISL_OPTIONS["p_vol_files_space"].as< uint32_t >();
     gcfg.app_mem_size_in_gb = SISL_OPTIONS["app_mem_size_in_gb"].as< uint32_t >();
+    gcfg.vol_copy_file_path = SISL_OPTIONS["vol_copy_file_path"].as< std::string >();
     const auto io_size_in_kb = SISL_OPTIONS["io_size"].as< uint32_t >();
     gcfg.io_size = io_size_in_kb * 1024;
 
