@@ -50,7 +50,7 @@ public:
 
     BtreeNodePtr alloc_buf(node_initializer_t&& node_initializer) override;
     void realloc_buf(const IndexBufferPtr& buf) override;
-    void write_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) override;
+    void write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* cp_ctx) override;
     void read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) override;
     bool create_chain(IndexBufferPtr& second, IndexBufferPtr& third) override;
     void prepend_to_chain(const IndexBufferPtr& first, const IndexBufferPtr& second) override;

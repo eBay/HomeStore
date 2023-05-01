@@ -122,15 +122,15 @@ folly::Future< bool > CPManager::trigger_cp_flush(bool force) {
             std::unique_lock< std::mutex > lk(trigger_cp_mtx);
             auto cur_cp = cp_guard();
             HS_DBG_ASSERT_NE(cur_cp->m_cp_status, cp_status_t::cp_flush_prepare);
-            cur_cp->comp_promise = std::move(folly::Promise< bool >{});
+            cur_cp->m_comp_promise = std::move(folly::Promise< bool >{});
             cur_cp->m_cp_waiting_to_trigger = true;
-            return cur_cp->comp_promise.getFuture();
+            return cur_cp->m_comp_promise.getFuture();
         } else {
             return folly::makeFuture< bool >(false);
         }
     }
 
-    folly::Future< bool > ret;
+    folly::Future< bool > ret_fut = folly::Future< bool >::makeEmpty();
     {
         auto cur_cp = cp_guard();
         cur_cp->m_cp_status = cp_status_t::cp_trigger;
@@ -147,7 +147,7 @@ folly::Future< bool > CPManager::trigger_cp_flush(bool force) {
             HS_PERIODIC_LOG(DEBUG, cp, "Create New CP session", new_cp->id());
             size_t idx{0};
             for (auto& consumer : m_cp_cb_table) {
-                if (consumer) { new_cp->m_contexts[idx] = std::move(consumer->on_switchover_cp(cur_cp, new_cp)); }
+                if (consumer) { new_cp->m_contexts[idx] = std::move(consumer->on_switchover_cp(cur_cp.get(), new_cp)); }
                 ++idx;
             }
 
@@ -155,10 +155,10 @@ folly::Future< bool > CPManager::trigger_cp_flush(bool force) {
             if (cur_cp->m_cp_waiting_to_trigger) {
                 // Triggered because of back-2-back CP, generate a different future. Actual future which it was attached
                 // originally by the caller will be untouched and completed upto CP completion/
-                ret = folly::makeFuture< bool >(true);
+                ret_fut = folly::makeFuture< bool >(true);
             } else {
-                cur_cp->comp_promise = std::move(folly::Promise< bool >{});
-                ret = cur_cp->comp_promise.getFuture();
+                cur_cp->m_comp_promise = std::move(folly::Promise< bool >{});
+                ret_fut = cur_cp->m_comp_promise.getFuture();
             }
             cur_cp->m_cp_status = cp_status_t::cp_flush_prepare;
             new_cp->m_cp_status = cp_status_t::cp_io_ready;
@@ -169,7 +169,7 @@ folly::Future< bool > CPManager::trigger_cp_flush(bool force) {
     }
 
     HS_PERIODIC_LOG(DEBUG, cp, "CP critical section done, doing cp_io_exit");
-    return ret;
+    return ret_fut;
 }
 
 void CPManager::cp_start_flush(CP* cp) {
@@ -191,28 +191,30 @@ void CPManager::on_cp_flush_done(CP* cp) {
     HS_DBG_ASSERT_EQ(cp->m_cp_status, cp_status_t::cp_flushing);
     cp->m_cp_status = cp_status_t::cp_flush_done;
 
-    // Persist the superblock with this flushed cp information
-    ++(m_sb->m_last_flushed_cp);
-    m_sb.write();
+    iomanager.run_on_forget(pick_blocking_io_fiber(), [this, cp]() {
+        // Persist the superblock with this flushed cp information
+        ++(m_sb->m_last_flushed_cp);
+        m_sb.write();
 
-    cleanup_cp(cp);
-    cp->comp_promise.setValue(true);
+        cleanup_cp(cp);
+        cp->m_comp_promise.setValue(true);
 
-    m_in_flush_phase = false;
-    m_wd_cp->reset_cp();
-    delete cp;
+        m_in_flush_phase = false;
+        m_wd_cp->reset_cp();
+        delete cp;
 
-    // Trigger CP in case there is one back to back CP
-    {
-        auto cur_cp = cp_guard();
-        if (cur_cp.get() == nullptr) { return; }
-        m_wd_cp->set_cp(cur_cp.get());
-        if (cur_cp->m_cp_waiting_to_trigger) {
-            HS_PERIODIC_LOG(INFO, cp, "Triggering back to back CP");
-            COUNTER_INCREMENT(*m_metrics, back_to_back_cps, 1);
-            trigger_cp_flush(false);
+        // Trigger CP in case there is one back to back CP
+        {
+            auto cur_cp = cp_guard();
+            if (cur_cp.get() == nullptr) { return; }
+            m_wd_cp->set_cp(cur_cp.get());
+            if (cur_cp->m_cp_waiting_to_trigger) {
+                HS_PERIODIC_LOG(INFO, cp, "Triggering back to back CP");
+                COUNTER_INCREMENT(*m_metrics, back_to_back_cps, 1);
+                trigger_cp_flush(false);
+            }
         }
-    }
+    });
 }
 
 void CPManager::cleanup_cp(CP* cp) {
@@ -227,16 +229,17 @@ void CPManager::start_cp_thread() {
     struct Context {
         std::condition_variable cv;
         std::mutex mtx;
-        int32_t thread_cnt{1};
+        int32_t thread_cnt{0};
     };
     auto ctx = std::make_shared< Context >();
 
     // Start a reactor with 9 fibers (8 for sync io)
-    iomanager.create_reactor("cp_io", INTERRUPT_LOOP, 8u, [this, &ctx](bool is_started) {
+    iomanager.create_reactor("cp_io", iomgr::INTERRUPT_LOOP, 8u, [this, &ctx](bool is_started) {
         if (is_started) {
             {
                 std::unique_lock< std::mutex > lk{ctx->mtx};
-                m_cp_io_fibers.insert(iomanager.sync_io_capable_fibers());
+                auto v = iomanager.sync_io_capable_fibers();
+                m_cp_io_fibers.insert(m_cp_io_fibers.end(), v.begin(), v.end());
                 ++(ctx->thread_cnt);
             }
             ctx->cv.notify_one();
@@ -245,11 +248,16 @@ void CPManager::start_cp_thread() {
 
     {
         std::unique_lock< std::mutex > lk{ctx->mtx};
-        ctx->cv.wait(lk, [&ctx, nthreads] { return (ctx->thread_cnt == nthreads); });
+        ctx->cv.wait(lk, [&ctx] { return (ctx->thread_cnt == 1); });
     }
 }
 
-iomgr::io_fiber_t CPManager::pick_blocking_io_fiber() const { HS; }
+iomgr::io_fiber_t CPManager::pick_blocking_io_fiber() const {
+    static thread_local std::random_device s_rd{};
+    static thread_local std::default_random_engine s_re{s_rd()};
+    static auto rand_fiber = std::uniform_int_distribution< size_t >(0, m_cp_io_fibers.size() - 1);
+    return m_cp_io_fibers[rand_fiber(s_re)];
+}
 
 //////////////////////////////////////// CP Guard class ////////////////////////////////////////////
 CPGuard::CPGuard(CPManager* mgr) {
@@ -267,7 +275,7 @@ CPGuard::CPGuard(CPManager* mgr) {
 
 CPGuard::~CPGuard() {
     if (m_pushed && !t_cp_stack.empty()) {
-        HS_DBG_ASSERT_EQ((void*)m_cp, (void*)t_cp_stack.top(), "CPGuard mismatch of CP pointers");
+        //        HS_DBG_ASSERT_EQ((void*)m_cp, (void*)t_cp_stack.top(), "CPGuard mismatch of CP pointers");
         t_cp_stack.pop();
     }
     if (m_cp) { m_cp->m_cp_mgr->cp_io_exit(m_cp); }

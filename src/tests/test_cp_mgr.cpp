@@ -115,24 +115,29 @@ public:
     void trigger_cp(bool wait) {
         static std::mutex mtx;
         static std::condition_variable cv;
-        static uint64_t cp_iteration{0};
+        static uint64_t this_flush_cp{0};
         static uint64_t last_flushed_cp{0};
 
-        uint64_t this_cp_iter = ++cp_iteration;
-        homestore::hs()->cp_mgr().trigger_cp_flush(
-            [&](bool success) {
-                ASSERT_EQ(success, true) << "CP Flush failed";
-                {
-                    std::unique_lock lg(mtx);
-                    last_flushed_cp = this_cp_iter;
-                }
-                cv.notify_all();
-            },
-            true /* force */);
+        {
+            std::unique_lock lg(mtx);
+            ++this_flush_cp;
+        }
+
+        auto fut = homestore::hs()->cp_mgr().trigger_cp_flush(true /* force */);
+
+        auto on_complete = [&](auto success) {
+            ASSERT_EQ(success, true) << "CP Flush failed";
+            {
+                std::unique_lock lg(mtx);
+                ASSERT_LT(last_flushed_cp, this_flush_cp) << "CP out_of_order completion";
+                ++last_flushed_cp;
+            }
+        };
 
         if (wait) {
-            std::unique_lock lg{mtx};
-            cv.wait(lg, [&]() { return (last_flushed_cp == this_cp_iter); });
+            on_complete(std::move(fut).get());
+        } else {
+            std::move(fut).thenValue(on_complete);
         }
     }
 };

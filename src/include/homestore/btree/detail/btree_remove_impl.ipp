@@ -537,6 +537,7 @@ out:
     if (ret == btree_status_t::success) {
         for (auto it = old_nodes.rbegin(); it != old_nodes.rend(); ++it) {
             free_node(*it, locktype_t::WRITE, context);
+            it->reset();
         }
     } else {
         for (auto it = old_nodes.rbegin(); it != old_nodes.rend(); ++it) {
@@ -544,6 +545,7 @@ out:
         }
         for (auto it = new_nodes.rbegin(); it != new_nodes.rend(); ++it) {
             free_node(*it, locktype_t::NONE, context);
+            it->reset();
         }
     }
     return ret;

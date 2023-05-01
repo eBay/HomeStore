@@ -59,19 +59,22 @@ class CPContext {
 private:
     cp_id_t m_cp_id;
     CP* m_cp;
+    folly::Promise< bool > m_flush_comp;
 
 public:
     CPContext(cp_id_t id) : m_cp_id{id} {}
     cp_id_t id() const { return m_cp_id; }
     CP* cp() { return m_cp; }
+    void complete(bool status) { m_flush_comp.setValue(status); }
+    folly::Future< bool > get_future() { return m_flush_comp.getFuture(); }
 
     virtual ~CPContext() = default;
 };
 
-typedef std::function< void(CP*) > cp_flush_done_cb_t;
-
 class CPCallbacks {
 public:
+    virtual ~CPCallbacks() = default;
+
     /// @brief CPManager calls this method when a new CP is triggered and it is time to switchover the dirty buffer
     /// collection to the new CP and flush the existing CP.
     /// @param cur_cp Pointer to the current CP session which about to be switchedover
@@ -200,7 +203,6 @@ public:
 
     /// @brief Trigger a checkpoint flush on all subsystems registered. There is only 1 checkpoint per checkpoint
     /// manager. Checkpoint flush will wait for cp to exited all critical io sections.
-    /// @param cb : Callback to be called upon completion of checkpoint flush
     /// @param force : Do we need to force queue the checkpoint flush, in case previous checkpoint is been flushed
     folly::Future< bool > trigger_cp_flush(bool force = false);
 

@@ -14,7 +14,7 @@
  *
  *********************************************************************************/
 #include <sisl/fds/thread_vector.hpp>
-#include <homestore/btree/btree.ipp>
+#include <homestore/btree/detail/btree_node.hpp>
 #include <homestore/index_service.hpp>
 #include <homestore/homestore.hpp>
 #include "common/homestore_assert.hpp"
@@ -25,20 +25,20 @@
 #include "common/resource_mgr.hpp"
 
 namespace homestore {
+
 IndexWBCache& wb_cache() { return index_service().wb_cache(); }
 
 IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, const std::shared_ptr< sisl::Evictor >& evictor,
                            uint32_t node_size) :
         m_vdev{vdev},
         m_cache{
-            evictor, 1000, node_size,
+            evictor, 100000, node_size,
             [](const BtreeNodePtr& node) -> BlkId { return IndexBtreeNode::convert(node.get())->m_idx_buf->m_blkid; },
             [](const sisl::CacheRecord& rec) -> bool {
                 const auto& hnode = (sisl::SingleEntryHashNode< BtreeNodePtr >&)rec;
                 return (hnode.m_value->m_refcount.test_le(1));
             }},
         m_node_size{node_size} {
-
     start_flush_threads();
     for (size_t i{0}; i < MAX_CP_COUNT; ++i) {
         m_dirty_list[i] = std::make_unique< sisl::ThreadVector< IndexBufferPtr > >();
@@ -99,7 +99,8 @@ void IndexWBCache::realloc_buf(const IndexBufferPtr& buf) {
     m_vdev->commit_blk(buf->m_blkid);
 }
 
-void IndexWBCache::write_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
+void IndexWBCache::write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* cp_ctx) {
+    m_cache.upsert(node);
     r_cast< IndexCPContext* >(cp_ctx)->add_to_dirty_list(buf);
     resource_mgr().inc_dirty_buf_size(m_node_size);
 }
@@ -190,6 +191,7 @@ folly::Future< bool > IndexWBCache::async_cp_flush(CPContext* context) {
             m_vdev->submit_batch();
         });
     }
+    return std::move(cp_ctx->get_future());
 }
 
 std::unique_ptr< CPContext > IndexWBCache::create_cp_context(cp_id_t cp_id) {
@@ -286,19 +288,19 @@ void IndexWBCache::get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_c
 }
 
 void IndexWBCache::free_btree_blks_and_flush(IndexCPContext* cp_ctx) {
-    // Pick a CP Manager blocking IO fiber to execute this operation
-    iomanager.run_on_forget(hs()->cp_mgr().);
     BlkId* pbid;
     while ((pbid = cp_ctx->next_blkid()) != nullptr) {
         m_vdev->free_blk(*pbid);
     }
 
-    m_vdev->cp_flush(); // As of now its a sync call, since metablk manager is sync write
-    cp_ctx->m_flush_done_cb(cp_ctx->cp());
+    // Pick a CP Manager blocking IO fiber to execute the cp flush of vdev
+    iomanager.run_on_forget(hs()->cp_mgr().pick_blocking_io_fiber(), [this, cp_ctx]() {
+        m_vdev->cp_flush(); // This is a blocking io call
+        cp_ctx->complete(true);
+    });
 }
 
 IndexBtreeNode* IndexBtreeNode::convert(BtreeNode* bt_node) {
     return r_cast< IndexBtreeNode* >(bt_node->get_node_context());
 }
-
 } // namespace homestore

@@ -72,8 +72,11 @@ class IndexWBCache;
 class IndexCPCallbacks : public CPCallbacks {
 public:
     IndexCPCallbacks(IndexWBCache* wb_cache);
+    virtual ~IndexCPCallbacks() = default;
+
+public:
     std::unique_ptr< CPContext > on_switchover_cp(CP* cur_cp, CP* new_cp) override;
-    void cp_flush(CP* cp, cp_flush_done_cb_t&& done_cb) override;
+    folly::Future< bool > cp_flush(CP* cp) override;
     void cp_cleanup(CP* cp) override;
     int cp_progress_percent() override;
 

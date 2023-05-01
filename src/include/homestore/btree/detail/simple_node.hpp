@@ -273,7 +273,7 @@ public:
         while (i < this->total_entries()) {
             K key = get_nth_key< K >(i, false);
             if (i > 0 && prevKey.compare(key) > 0) {
-                LOGDEBUG("non sorted entry : {} -> {} ", prevKey.to_string(), key.to_string());
+                LOGINFO("non sorted entry : {} -> {} ", prevKey.to_string(), key.to_string());
                 DEBUG_ASSERT(false, "node={}", to_string());
             }
             ++i;

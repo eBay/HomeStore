@@ -76,7 +76,7 @@ void IndexService::add_index_table(const std::shared_ptr< IndexTableBase >& tbl)
     m_index_map.insert(std::make_pair(tbl->uuid(), tbl));
 }
 
-uint32_t IndexService::node_size() const { return m_vdev->block_size(); }
+uint32_t IndexService::node_size() const { return hs()->device_mgr()->atomic_page_size({PhysicalDevGroup::FAST}); }
 
 uint64_t IndexService::used_size() const {
     auto size{0};

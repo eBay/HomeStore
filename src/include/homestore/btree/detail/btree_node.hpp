@@ -16,16 +16,8 @@
 
 #pragma once
 #include <iostream>
-
-#if defined __clang__ or defined __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
-#pragma GCC diagnostic ignored "-Wattributes"
-#endif
-#include <folly/SharedMutex.h>
-#if defined __clang__ or defined __GNUC__
-#pragma GCC diagnostic pop
-#endif
+#include <queue>
+#include <iomgr/fiber_lib.hpp>
 
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/enum.hpp>
@@ -40,7 +32,7 @@ ENUM(locktype_t, uint8_t, NONE, READ, WRITE)
 
 #pragma pack(1)
 struct transient_hdr_t {
-    mutable folly::SharedMutexReadPriority lock;
+    mutable iomgr::FiberManagerLib::shared_mutex lock;
     sisl::atomic_counter< uint16_t > upgraders{0};
 
     /* these variables are accessed without taking lock and are not expected to change after init */
@@ -93,6 +85,7 @@ public:
     BtreeNode(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf) : m_phys_node_buf{node_buf} {
         if (init_buf) {
             new (node_buf) persistent_hdr_t{};
+            set_node_id(id);
             set_leaf(is_leaf);
         } else {
             DEBUG_ASSERT_EQ(node_id(), id);
@@ -604,6 +597,15 @@ public:
     bool has_valid_edge() const {
         if (is_leaf()) { return false; }
         return (edge_id() != empty_bnodeid);
+    }
+
+    friend void intrusive_ptr_add_ref(BtreeNode* node) { node->m_refcount.increment(1); }
+
+    friend void intrusive_ptr_release(BtreeNode* node) {
+        if (node->m_refcount.decrement_testz(1)) {
+            node->~BtreeNode();
+            delete[] uintptr_cast(node);
+        }
     }
 };
 
