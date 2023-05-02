@@ -1311,77 +1311,85 @@ private:
         }
     }
 
+public:
     // vol data is copied to "vol_copy_file_path",
     // 1. read data out, calculate crc and compare it with vol file saved under test_files/vol[1...x]
     // 2. this is only valid when --verify_type is set to 0, which is default value;
-    void verify_vol_copy(std::string& vol_copy_file_path) {
+    void verify_vol(std::string& vol_copy_file_path) {
         // vol_copy_file_path: the file dumped with copied volume data
         // crc_file_name: the file stored with crc when volume is being written in io job;
-        const auto vol_uuid = fs::path(vol_copy_file_path).filename();
+        const auto fname = fs::path(vol_copy_file_path).filename().string();
+        const auto vol_uuid = fname.substr(0, fname.find("_p_"));
         const std::string crc_file_name{VOL_PREFIX + std::to_string(0)};
         auto crc_fd = open(crc_file_name.c_str(), O_RDONLY);
-        const auto hdr_offset = sizeof(vol_file_hdr);
         vol_file_hdr hdr;
-        pread(crc_fd, (char*)&hdr, hdr_offset, 0 /* offset*/);
+        pread(crc_fd, (char*)&hdr, VOL_FILE_HDR_SZ, 0 /* offset*/);
 
         // 1. verify uuid does match;
-        HS_DBG_ASSERT_EQ(vol_uuid.string(), boost::uuids::to_string(hdr.uuid));
+        HS_DBG_ASSERT_EQ(vol_uuid, boost::uuids::to_string(hdr.uuid));
 
         // 2. read vol_copy_rf (sparse file) and compare with vol_file (dense file);
         //    make sure everything written in vol_copy is also written in vol_file;
         auto fd = open(vol_copy_file_path.c_str(), O_RDONLY);
 
+        uint64_t total_bytes = 0ull;
         // std::vector< uint16_t > crc_vec;
-        off_t hole, data, pos, len;
+        off_t hole, data, pos;
         auto buf = iomanager.iobuf_alloc(512 /* alignment */,
                                          tcfg.vol_page_size); // replace with data blkstore get_align_size();
+        std::memset(buf, 0, tcfg.vol_page_size);
+
+        // read until end of the file;
         for (hole = 0;; data = hole) {
             if ((data = lseek(fd, hole, SEEK_DATA)) == -1) {
                 if (errno == ENXIO) {
                     LOGINFO("no more data on seek + data.");
                     break;
                 }
+                HS_REL_ASSERT(false, "Unexpected error: {}, msg: {}", errno, std::strerror(errno));
             }
 
-            if ((hole = lseek(0, data, SEEK_HOLE)) == -1) {
+            if ((hole = lseek(fd, data, SEEK_HOLE)) == -1) {
                 if (errno == ENXIO) {
                     LOGINFO("no more data on seek + data.");
                     break;
                 }
+                HS_REL_ASSERT(false, "Unexpected error: {}, msg: {}", errno, std::strerror(errno));
             }
 
             HS_DBG_ASSERT_EQ(data % tcfg.vol_page_size, 0, "Unexpected data offset: {}", data);
             HS_DBG_ASSERT_EQ(hole % tcfg.vol_page_size, 0, "Unexpected hole offset: {}", hole);
 
             const auto data_len = hole - data;
-            LOGINFO("data len: {}", data_len);
+            LOGINFO("Found data lba: {}, len: {}", data / tcfg.vol_page_size, data_len);
+            total_bytes += data_len;
 
+            // read page by page to cross compare crc with the crc saved on disk;
             for (pos = data; pos < hole;) {
                 // io size should be times of 4KB;
-                const auto len = tcfg.vol_page_size;
-                pread(fd, buf, len, pos);
+                std::memset(buf, 0, tcfg.vol_page_size);
+                pread(fd, buf, tcfg.vol_page_size, pos);
                 // calculate crc
-                const auto crc1 = crc16_t10dif(init_crc_16, buf, len);
+                const auto crc1 = crc16_t10dif(init_crc_16, buf, tcfg.vol_page_size);
                 uint16_t crc2 = 0;
-                pread(crc_fd, &crc2, sizeof(uint16_t), hdr_offset + (data / tcfg.vol_page_size) * sizeof(uint16_t));
-                HS_DBG_ASSERT_EQ(crc1, crc2, "crc mismatch: copy vol crc: {}, origin crc: {}, offset: {}, len: {}",
-                                 crc1, crc2, pos, len);
-                // crc_vec.push_back(crc);
-                pos += len;
+                pread(crc_fd, &crc2, sizeof(uint16_t), VOL_FILE_HDR_SZ + (pos / tcfg.vol_page_size) * sizeof(uint16_t));
+                HS_REL_ASSERT_EQ(crc1, crc2, "crc mismatch: copy vol crc: {}, origin crc: {}, offset: {}, len: {}",
+                                 crc1, crc2, pos, tcfg.vol_page_size);
+                pos += tcfg.vol_page_size;
             }
 
             HS_DBG_ASSERT_EQ(pos, hole, "pos: {}, hole: {}", pos, hole);
         }
 
+        LOGINFO(
+            "Successfully verficed copied volume's name: {}, crc matches with crc file saved on disk, total bytes: {}",
+            vol_uuid, total_bytes);
+
         iomanager.iobuf_free(buf);
         close(fd);
-
-        // 3. read vol_file, skip all zero crc, and compare it with vol_copy_rf
-        //   cross compare, making sure vol_copy_rf is not missing any data written in vol_file;
         close(crc_fd);
     }
 
-public:
     void force_reinit(const std::vector< dev_info >& data_devices, const io_flag data_oflags,
                       const io_flag fast_oflags) {
         ioenvironment.with_iomgr(1);
@@ -2179,7 +2187,7 @@ TEST_F(VolTest, recovery_boot_test) {
     LOGINFO("Starting to verify dumpped files with saved vol file with crc checksum");
 
     // TODO: send curl http command to dump volume file in this test case and use file name to call verify;
-    verify_vol_copy(tcfg.vol_copy_file_path);
+    verify_vol(tcfg.vol_copy_file_path);
 
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();

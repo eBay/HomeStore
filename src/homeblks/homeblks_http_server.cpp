@@ -288,28 +288,31 @@ void HomeBlksHttpServer::wakeup_init(const Pistache::Rest::Request& request, Pis
     response.send(Pistache::Http::Code::Ok, "completed");
 }
 
-void HomeBlksHttpServer::copy_vol(iomgr::HttpCallData cd) {
-    if (is_secure_zone() && !is_local_addr(cd->request()->conn->saddr)) {
-        ioenvironment.get_http_server()->respond_NOTOK(cd, EVHTP_RES_FORBIDDEN,
-                                                       "Access not allowed from external host");
-        return;
-    }
-    auto req = cd->request();
-
+void HomeBlksHttpServer::copy_vol(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
     std::vector< std::string > vol_uuids;
-    auto vol_uuids_kv = evhtp_kvs_find_kv(req->uri->query, "uuid");
+    auto vol_uuids_kv = request.query().get("uuid");
     if (vol_uuids_kv) {
-        boost::algorithm::split(vol_uuids, vol_uuids_kv->val, boost::is_any_of(","), boost::token_compress_on);
+        boost::algorithm::split(vol_uuids, vol_uuids_kv.value(), boost::is_any_of(","), boost::token_compress_on);
+    }
+
+    std::vector< std::string > part_info;
+    auto part_info_kv = request.query().get("part_info");
+    if (part_info_kv) {
+        boost::algorithm::split(part_info, part_info_kv.value(), boost::is_any_of(","), boost::token_compress_on);
     }
 
     std::vector< std::string > write_path;
-    auto write_path_kv = evhtp_kvs_find_kv(req->uri->query, "path");
+    auto write_path_kv = request.query().get("path");
     if (write_path_kv) {
-        boost::algorithm::split(write_path, write_path_kv->val, boost::is_any_of(","), boost::token_compress_on);
+        boost::algorithm::split(write_path, write_path_kv.value(), boost::is_any_of(","), boost::token_compress_on);
     }
 
-    std::string resp{"volume write to path: " + write_path[0] + " , file name: " + vol_uuids[0]};
-    auto hb = to_homeblks(cd);
+    // TODO: Only allow this request in safe_mdoe ?
+    if (vol_uuids.empty() || part_info.empty() || write_path.empty()) {
+        response.send(Pistache::Http::Code::Bad_Request,
+                      "uuid, part_info, path all need to be set to proceed this request.");
+        return;
+    }
 
     //
     // TODO: error condition:
@@ -322,11 +325,16 @@ void HomeBlksHttpServer::copy_vol(iomgr::HttpCallData cd) {
     boost::uuids::uuid uuid = gen(vol_uuids[0]);
 
     // TODO: remove tailing / of write_path[0] if there is any;
-    const auto file_path = write_path[0] + "/" + vol_uuids[0];
-    const auto err = hb->copy_vol(uuid, file_path);
+    // file name: <vol_uuid>_p_<part_info>
+    // _p_ is the splitter only useful for verfification;
+    const auto file_name = vol_uuids[0] + "_p_" + part_info[0];
+    const auto file_path = write_path[0] + "/" + file_name;
+    const auto err = m_hb->copy_vol(uuid, file_path);
 
-    resp += (err == no_error ? " Successfully" : " Failed");
-    ioenvironment.get_http_server()->respond_OK(cd, EVHTP_RES_OK, resp);
+    std::string resp{"volume write to path: " + write_path[0] + " , file name: " + file_name};
+    resp += (err == no_error ? " Successfully" : (" Failed, error msg: " + err.message()));
+
+    response.send(Pistache::Http::Code::Ok, resp);
 }
 
 #ifdef _PRERELEASE

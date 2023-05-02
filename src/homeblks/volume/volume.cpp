@@ -1172,17 +1172,21 @@ void VolumeMetrics::on_gather() {
 //
 std::error_condition Volume::copy_to(const std::string& file_path) {
     // open file;
-    // std::ofstream vol_file(file_path, ios::out | ios::binary);
-    auto vol_file = open(file_path.c_str(), O_RDWR);
+    auto fd = open(file_path.c_str(), O_RDWR | O_CREAT | O_DIRECT);
+    if (fd == -1) {
+        LOGERROR("open file failed: errno: {}, msg: {}", errno, std::strerror(errno));
+        return std::make_error_condition(std::errc::invalid_argument);
+    }
+
+    const auto ret = lseek(fd, 0, get_size());
+    LOGINFO("Successfully seek file to {}", get_size());
+
     lba_t start_lba = 0ul;
+    uint64_t total_nbytes = 0;
     const auto last_lba = get_last_lba();
     const auto batch = BlkId::max_blks_in_op();
+    const auto page_sz = get_page_size();
     BtreeQueryCursor cur;
-#if 0
-    auto zero_buf = hs_utils::iobuf_alloc(get_page_size(), sisl::buftag::common,
-                                                 m_hb->get_data_blkstore()->get_vdev()->get_align_size());
-    std::memset(zero_buf, get_page_size());
-#endif
 
     while (start_lba <= last_lba) {
         // read from index table;
@@ -1191,35 +1195,29 @@ std::error_condition Volume::copy_to(const std::string& file_path) {
         MappingKey key(start_lba, batch);
         get_active_indx()->get(key, cur, kvs);
 
+        // we are good if kvs is empty;
         for (auto& kv : kvs) {
-            if (!kv.second.is_valid()) { continue; }
+            // TODO: this assert can be release, it doesn't impact data written;
+            HS_REL_ASSERT(kv.second.is_valid(), "Unexpected invalid value covered by k: {}", kv.first.to_string());
+
             ValueEntry* ve = kv.second.get_nth_entry(0);
             const BlkId bid{ve->get_offset_blkid(m_blks_per_lba)};
             const auto nlbas = kv.first.get_n_lba();
             if (!bid.is_valid()) {
                 // no pba is found in this lba range,
                 // leave unmapped lba range as hole and seek ahead to next visting lba;
-#if 0 
-                const auto pos = vol_file.tellp();
-                vol_file.seekp(pos + static_cast< long >(nlbas * get_page_size()));
-#endif
-
-                lseek(vol_file, static_cast< long >(nlbas * get_page_size()), SEEK_CUR);
-#if 0
-
-                // write nlbas page size of zeros to the file;
-                for (auto i = 0ul; i < nlbas; ++i) {
-                    vol_file.write(zero_buf, get_page_size());
-                }
-#endif
+                continue;
             } else {
                 // valid bid
-                const auto read_sz = nlbas * get_page_size();
+                const auto read_sz = nlbas * page_sz;
                 auto read_buf = hs_utils::iobuf_alloc(read_sz, sisl::buftag::common,
                                                       m_hb->get_data_blkstore()->get_vdev()->get_align_size());
 
+                // TODO: reuse read_buf to avoid alloc/free;
+                std::memset(read_buf, 0, read_sz);
+
                 // assert that read_sz from mapping key equals to mapped physical block id;
-                HS_DBG_ASSERT_EQ(read_sz, bid.get_nblks() * get_page_size());
+                HS_DBG_ASSERT_EQ(read_sz, bid.get_nblks() * page_sz);
                 // sync-read BlkId
                 auto req{blkstore_req< BlkBuffer >::make_request()};
                 req->isSyncCall = true;
@@ -1227,16 +1225,26 @@ std::error_condition Volume::copy_to(const std::string& file_path) {
                 std::vector< iovec > iov_vector{};
                 iov_vector.push_back(std::move(iov));
 
+                LOGINFO("Found data on lba: {}, size: {}", kv.first.start(), read_sz);
                 try {
                     m_hb->get_data_blkstore()->read(bid, iov_vector, read_sz, req);
                 } catch (std::exception& e) { HS_REL_ASSERT(0, "Exception: {}", e.what()); }
 
+#if 0
+                for (auto i = 0ul; i < nlbas; ++i) {
+                    LOGINFO("read crc on page start lba: {}, crc: {}", kv.first.start() + i,
+                            crc16_t10dif(init_crc_16, read_buf + i * page_sz, page_sz));
+                }
+#endif
                 // write to file
-                const auto nbytes = ::write(vol_file, (const char*)read_buf, read_sz);
+                LOGINFO("write data to vol file on lba: {}, size: {}", kv.first.start(), read_sz);
+                const auto nbytes = pwrite(fd, (const char*)read_buf, read_sz, kv.first.start() * page_sz);
 
-                // vol_file.write((const char*)read_buf, read_sz);
+                HS_DBG_ASSERT_EQ(static_cast< uint64_t >(nbytes), read_sz,
+                                 "nbytes: {}, read_sz: {}, errno: {}, msg: {}", nbytes, read_sz, errno,
+                                 std::strerror(errno));
 
-                HS_DBG_ASSERT_EQ(static_cast< uint64_t >(nbytes), read_sz)
+                total_nbytes += nbytes;
 
                 // free read buf;
                 hs_utils::iobuf_free(read_buf, sisl::buftag::common);
@@ -1246,11 +1254,9 @@ std::error_condition Volume::copy_to(const std::string& file_path) {
         start_lba += batch;
     }
 
-    ::close(vol_file);
-    // vol_file.close();
+    ::close(fd);
 
-#if 0
-    hs_utils::iobuf_free(zero_buf);
-#endif
+    LOGINFO("Successfully copy vol to: {}, total bytes written: {}, vol info: {}", file_path, total_nbytes,
+            reinterpret_cast< vol_sb_hdr* >(m_sb_buf->bytes)->to_string());
     return no_error;
 }
