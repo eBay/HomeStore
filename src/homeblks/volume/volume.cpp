@@ -1245,7 +1245,6 @@ std::error_condition Volume::copy_to(const std::string& file_path) {
                                  std::strerror(errno));
 
                 total_nbytes += nbytes;
-
                 // free read buf;
                 hs_utils::iobuf_free(read_buf, sisl::buftag::common);
             }
