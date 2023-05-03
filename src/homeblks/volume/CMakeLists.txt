@@ -56,13 +56,16 @@ if (${build_io_tests})
             SET_TESTS_PROPERTIES(TestHSForceReinit-Epoll PROPERTIES DEPENDS TestVol-Epoll)
         endif()
 
-        add_test(NAME TestVolRecovery-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery --dirpath=${CMAKE_BINARY_DIR}/bin/ --emulate_hdd=1 --)
+        add_test(NAME TestVolCopy-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=copy_vol --dirpath=${CMAKE_BINARY_DIR}/bin/ --emulate_hdd=1 --)
         if (${PRERELEASE_ON})
-            SET_TESTS_PROPERTIES(TestVolRecovery-Epoll PROPERTIES DEPENDS TestHSForceReinit-Epoll)
+            SET_TESTS_PROPERTIES(TestVolCopy-Epoll PROPERTIES DEPENDS TestHSForceReinit-Epoll)
         else()
-            SET_TESTS_PROPERTIES(TestVolRecovery-Epoll PROPERTIES DEPENDS TestVol-Epoll)
+            SET_TESTS_PROPERTIES(TestVolCopy-Epoll PROPERTIES DEPENDS TestVol-Epoll)
         endif()
-    
+
+        add_test(NAME TestVolRecovery-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery --dirpath=${CMAKE_BINARY_DIR}/bin/ --emulate_hdd=1 --)
+        SET_TESTS_PROPERTIES(TestVolRecovery-Epoll PROPERTIES DEPENDS TestVolCopy-Epoll)
+            
         add_test(NAME TestVolRecoveryCrash-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery_crash --dirpath=${CMAKE_BINARY_DIR}/bin/ --emulate_hdd=1 --)
         SET_TESTS_PROPERTIES(TestVolRecoveryCrash-Epoll PROPERTIES DEPENDS TestVolRecovery-Epoll)
         add_test(NAME TestVolError-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_volume --flip=2 --verify_type=2 --emulate_hdd_cnt=1)
@@ -89,13 +92,16 @@ if (${build_io_tests})
             SET_TESTS_PROPERTIES(TestHSForceReinit-Spdk PROPERTIES DEPENDS TestVol-Spdk)
         endif()
 
-        add_test(NAME TestVolRecovery-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery --dirpath=${CMAKE_BINARY_DIR}/bin/ -- --spdk true)
+        add_test(NAME TestVolCopy-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=copy_vol --dirpath=${CMAKE_BINARY_DIR}/bin/ -- --spdk true)
         if (${PRERELEASE_ON})
-            SET_TESTS_PROPERTIES(TestVolRecovery-Spdk PROPERTIES DEPENDS TestHSForceReinit-Spdk)
+            SET_TESTS_PROPERTIES(TestVolCopy-Spdk PROPERTIES DEPENDS TestHSForceReinit-Spdk)
         else()
-            SET_TESTS_PROPERTIES(TestVolRecovery-Spdk PROPERTIES DEPENDS TestVol-Spdk)
+            SET_TESTS_PROPERTIES(TestVolCopy-Spdk PROPERTIES DEPENDS TestVol-Spdk)
         endif()
-    
+
+        add_test(NAME TestVolRecovery-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery --dirpath=${CMAKE_BINARY_DIR}/bin/ -- --spdk true)
+        SET_TESTS_PROPERTIES(TestVolRecovery-Spdk PROPERTIES DEPENDS TestVolCopy-Spdk)
+
         add_test(NAME TestVolRecoveryCrash-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery_crash --dirpath=${CMAKE_BINARY_DIR}/bin/ -- --spdk true)
         SET_TESTS_PROPERTIES(TestVolRecoveryCrash-Spdk PROPERTIES DEPENDS TestVolRecovery-Spdk)
         add_test(NAME TestVolError-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_volume --spdk --flip=2 --verify_type=2)
