@@ -1179,7 +1179,14 @@ std::error_condition Volume::copy_to(const std::string& file_path) {
     }
 
     // make this file a sparse file according to volume size;
-    const auto ret = lseek(fd, 0, get_size());
+    const auto ret = lseek(fd, get_size(), SEEK_SET);
+
+    HS_DBG_ASSERT_NE(ret, -1, "lseek returned error: {}", errno);
+    if (ret == -1) {
+        LOGERROR("lseek return err: {}", errno);
+        return std::make_error_condition(static_cast< std::errc >(errno));
+    }
+
     LOGINFO("Successfully seek file to {}", get_size());
 
     lba_t start_lba = 0ul;
@@ -1227,7 +1234,11 @@ std::error_condition Volume::copy_to(const std::string& file_path) {
                 THIS_VOL_LOG(DEBUG, volume, , "Found data on lba: {}, size: {}", kv.first.start(), read_sz);
                 try {
                     m_hb->get_data_blkstore()->read(bid, iov_vector, read_sz, req);
-                } catch (std::exception& e) { HS_REL_ASSERT(0, "Exception: {}", e.what()); }
+                } catch (std::exception& e) {
+                    HS_DBG_ASSERT(0, "Exception: {}", e.what());
+                    // in release mode, fail the operation;
+                    return std::make_error_condition(std::errc::io_error);
+                }
 
                 // write to file
                 const auto nbytes = pwrite(fd, (const char*)read_buf, read_sz, kv.first.start() * page_sz);
@@ -1235,6 +1246,11 @@ std::error_condition Volume::copy_to(const std::string& file_path) {
                 HS_DBG_ASSERT_EQ(static_cast< uint64_t >(nbytes), read_sz,
                                  "nbytes: {}, read_sz: {}, errno: {}, msg: {}", nbytes, read_sz, errno,
                                  std::strerror(errno));
+                // release mode
+                if (nbytes == -1) {
+                    LOGERROR("pwrite error: {}, message: {}", errno, std::strerror(errno));
+                    return std::make_error_condition(static_cast< std::errc >(errno));
+                }
 
                 total_nbytes += nbytes;
             }

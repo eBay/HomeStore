@@ -308,27 +308,26 @@ void HomeBlksHttpServer::copy_vol(const Pistache::Rest::Request& request, Pistac
     }
 
     // TODO: Only allow this request in safe_mdoe ?
-    if (vol_uuids.empty() || part_info.empty() || write_path.empty()) {
+    if (vol_uuids.size() != 1 || part_info.size() != 1 || write_path.size() != 1) {
         response.send(Pistache::Http::Code::Bad_Request,
-                      "uuid, part_info, path all need to be set to proceed this request.");
+                      "uuid, part_info, path all need to be provided (only once) to proceed this request.");
         return;
     }
 
-    //
-    // TODO: error condition:
-    // 0. only take one vol uuid and one write path;
-    // 1. return error if uuid file already exists;
-    // 2. vol uuid not recognized;
-    // 3. check disk free space before copying;
-    //
     boost::uuids::string_generator gen;
     boost::uuids::uuid uuid = gen(vol_uuids[0]);
 
-    // TODO: remove tailing / of write_path[0] if there is any;
     // file name: <vol_uuid>_p_<part_info>
     // _p_ is the splitter only useful for verfification;
     const auto file_name = vol_uuids[0] + "_p_" + part_info[0];
     const auto file_path = write_path[0] + "/" + file_name;
+
+    const std::filesystem::path fpath{file_path};
+    if (std::filesystem::exists(fpath)) {
+        const auto resp_fail = "file already exists at path: " + file_path;
+        response.send(Pistache::Http::Code::Bad_Request, resp_fail);
+    }
+
     const auto err = m_hb->copy_vol(uuid, file_path);
 
     std::string resp{"volume write to path: " + write_path[0] + " , file name: " + file_name};
