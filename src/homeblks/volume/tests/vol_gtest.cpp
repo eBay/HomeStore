@@ -1358,6 +1358,9 @@ public:
         }
         // end of file
 
+        iomanager.iobuf_free(read_buf);
+        close(crc_fd);
+        close(fd);
         LOGINFO("Successfully reverse verified crc.");
     }
 
