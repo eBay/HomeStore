@@ -1172,7 +1172,7 @@ void VolumeMetrics::on_gather() {
 //
 std::error_condition Volume::copy_to(const std::string& file_path) {
     // open file;
-    auto fd = open(file_path.c_str(), O_RDWR | O_CREAT | O_DIRECT);
+    auto fd = ::open(file_path.c_str(), O_RDWR | O_CREAT | O_DIRECT, 0666);
     if (fd == -1) {
         LOGERROR("open file failed: errno: {}, msg: {}", errno, std::strerror(errno));
         return std::make_error_condition(std::errc::invalid_argument);

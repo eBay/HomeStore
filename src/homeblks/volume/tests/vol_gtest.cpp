@@ -1345,7 +1345,8 @@ public:
 
                 if (crc1 != zero_crc) {
                     std::memset(read_buf, 0, tcfg.vol_page_size);
-                    pread(fd, read_buf, tcfg.vol_page_size, crc_off * tcfg.vol_page_size);
+                    [[maybe_unused]] const auto ret =
+                        pread(fd, read_buf, tcfg.vol_page_size, crc_off * tcfg.vol_page_size);
                     const auto crc2 = crc16_t10dif(init_crc_16, read_buf, tcfg.vol_page_size);
                     HS_REL_ASSERT_EQ(crc1, crc2, "crc mismatch: origin crc: {}, copy vol crc: {}, offset: {}, len: {}",
                                      crc1, crc2, crc_off, tcfg.vol_page_size);
@@ -1377,7 +1378,7 @@ public:
         const std::string crc_file_name{VOL_PREFIX + std::to_string(0)};
         auto crc_fd = open(crc_file_name.c_str(), O_RDONLY);
         vol_file_hdr hdr;
-        pread(crc_fd, (char*)&hdr, VOL_FILE_HDR_SZ, 0 /* offset*/);
+        [[maybe_unused]] const auto rd_sz = pread(crc_fd, (char*)&hdr, VOL_FILE_HDR_SZ, 0 /* offset*/);
 
         // 1. verify uuid does match;
         HS_DBG_ASSERT_EQ(vol_uuid, boost::uuids::to_string(hdr.uuid));
@@ -1421,11 +1422,12 @@ public:
             for (pos = data; pos < hole;) {
                 // io size should be times of 4KB;
                 std::memset(buf, 0, tcfg.vol_page_size);
-                pread(fd, buf, tcfg.vol_page_size, pos);
+                [[maybe_unused]] const auto ret = pread(fd, buf, tcfg.vol_page_size, pos);
                 // calculate crc
                 const auto crc1 = crc16_t10dif(init_crc_16, buf, tcfg.vol_page_size);
                 uint16_t crc2 = 0;
-                pread(crc_fd, &crc2, sizeof(uint16_t), VOL_FILE_HDR_SZ + (pos / tcfg.vol_page_size) * sizeof(uint16_t));
+                [[maybe_unused]] const auto ret2 = pread(
+                    crc_fd, &crc2, sizeof(uint16_t), VOL_FILE_HDR_SZ + (pos / tcfg.vol_page_size) * sizeof(uint16_t));
                 HS_REL_ASSERT_EQ(crc1, crc2, "crc mismatch: copy vol crc: {}, origin crc: {}, offset: {}, len: {}",
                                  crc1, crc2, pos, tcfg.vol_page_size);
                 pos += tcfg.vol_page_size;
