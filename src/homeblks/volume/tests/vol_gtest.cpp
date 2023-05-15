@@ -48,6 +48,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/io_environment.hpp>
+#include <iomgr/http_server.hpp>
 #include <iomgr/spdk_drive_interface.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
@@ -770,11 +771,15 @@ public:
         for (uint32_t i{0}; i < mod_tests.size(); ++i) {
             mod_tests[i]->try_init_iteration();
         }
-
-        test_common::set_random_http_port();
+        if (SISL_OPTIONS.count("http_port")) {
+            test_common::set_fixed_http_port(SISL_OPTIONS["http_port"].as< uint32_t >());
+        }else {
+            test_common::set_random_http_port();
+        }
         VolInterface::init(params);
 
         if (wait_for_init_done) { wait_homestore_init_done(); }
+        ioenvironment.get_http_server()->start();
 
         if (tcfg.init) {
             void* cookie{nullptr};
@@ -1029,6 +1034,7 @@ public:
         }
 
         VolInterface::shutdown(false /* force */);
+        ioenvironment.get_http_server()->stop();
 
         LOGINFO("stopping iomgr");
         iomanager.stop();
@@ -1290,6 +1296,7 @@ private:
             force = true;
         }
         VolInterface::shutdown(force);
+        ioenvironment.get_http_server()->stop();
     }
 
     void remove_journal_files() {
@@ -2356,6 +2363,8 @@ SISL_OPTION_GROUP(
      ::cxxopts::value< uint32_t >()->default_value("10"), "interval between create del in seconds"),
     (emulate_hdd_cnt, "", "emulate_hdd_cnt", "emulate_hdd_cnt", ::cxxopts::value< uint32_t >()->default_value("0"),
      "number of files or drives to be emulated as hdd"),
+    (http_port, "", "http_port", "http_port", ::cxxopts::value< uint32_t >()->default_value("5000"),
+     "http server port"),
     (emulate_hdd_stream_cnt, "", "emulate_hdd_stream_cnt", "emulate_hdd_stream_cnt",
      ::cxxopts::value< uint32_t >()->default_value("20"), "number of streams for each emulated hdd"),
     (p_vol_files_space, "", "p_vol_files_space",

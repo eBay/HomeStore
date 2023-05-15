@@ -85,7 +85,6 @@ static uint32_t round_count(const uint32_t count) {
 }
 
 struct BlkAllocatorTest {
-protected:
     std::atomic< int64_t > m_alloced_count{0};
     const uint32_t m_total_count;
     std::vector< AllocedBlkTracker > m_slab_alloced_blks;
@@ -93,7 +92,6 @@ protected:
     bool m_track_slabs{false};
     size_t m_num_slabs{0};
 
-public:
     BlkAllocatorTest() :
             m_total_count{round_count(SISL_OPTIONS["num_blks"].as< uint32_t >())},
             m_rand_blk_generator{1, m_total_count} {
@@ -234,7 +232,6 @@ public:
 
     [[nodiscard]] static constexpr blk_count_t single_blk_size() { return 1; }
 
-private:
     [[nodiscard]] BlkId pick_rand_slab_blks_to_free(const blk_count_t pref_nblks, const bool track_block_group) {
         const auto start_idx{nblks_to_idx(pref_nblks)};
         auto idx{start_idx};
@@ -370,10 +367,8 @@ private:
 };
 
 struct FixedBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
-protected:
     std::unique_ptr< FixedBlkAllocator > m_allocator;
 
-public:
     FixedBlkAllocatorTest() : BlkAllocatorTest() {
         BlkAllocConfig fixed_cfg{4096, 4096, static_cast< uint64_t >(m_total_count) * 4096, "", false};
         m_allocator = std::make_unique< FixedBlkAllocator >(fixed_cfg, true, 0);
@@ -385,7 +380,6 @@ public:
     FixedBlkAllocatorTest& operator=(FixedBlkAllocatorTest&&) noexcept = delete;
     virtual ~FixedBlkAllocatorTest() override = default;
 
-protected:
     virtual void SetUp() override{};
     virtual void TearDown() override{};
 
@@ -422,10 +416,8 @@ protected:
 };
 
 struct VarsizeBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
-protected:
     std::unique_ptr< VarsizeBlkAllocator > m_allocator;
 
-public:
     VarsizeBlkAllocatorTest() : BlkAllocatorTest() { HomeStoreDynamicConfig::init_settings_default(); }
     VarsizeBlkAllocatorTest(const VarsizeBlkAllocatorTest&) = delete;
     VarsizeBlkAllocatorTest(VarsizeBlkAllocatorTest&&) noexcept = delete;
@@ -433,7 +425,6 @@ public:
     VarsizeBlkAllocatorTest& operator=(VarsizeBlkAllocatorTest&&) noexcept = delete;
     virtual ~VarsizeBlkAllocatorTest() override = default;
 
-protected:
     virtual void SetUp() override{};
     virtual void TearDown() override{};
 

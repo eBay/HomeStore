@@ -165,7 +165,6 @@ HomeBlks::HomeBlks(const init_params& cfg) :
 
     if (m_cfg.start_http) {
         m_hb_http_server = std::make_unique< HomeBlksHttpServer >(this);
-        m_hb_http_server->start();
     } else {
         LOGINFO("Http server is not started by user! start_http = {}", m_cfg.start_http);
     }
@@ -177,7 +176,11 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     m_recovery_stats = std::make_unique< HomeBlksRecoveryStats >();
     m_recovery_stats->start();
 
-    if (HB_DYNAMIC_CONFIG(general_config->boot_safe_mode)) { LOGINFO("HomeBlks booting into safe_mode"); }
+    if (HB_DYNAMIC_CONFIG(general_config->boot_safe_mode)) {
+        LOGINFO("HomeBlks booting into safe_mode");
+        // start http server
+        m_hb_http_server->start();
+    }
 }
 
 void HomeBlks::wakeup_init() { m_cv_wakeup_init.notify_one(); }
@@ -509,6 +512,11 @@ void HomeBlks::init_done() {
     status_mgr()->register_status_cb("Volumes", std::bind(&HomeBlks::get_status, this, std::placeholders::_1));
 
     m_recovery_stats->end();
+    GAUGE_UPDATE(*m_metrics, recovery_phase0_latency, m_recovery_stats->m_phase0_ms);
+    GAUGE_UPDATE(*m_metrics, recovery_phase1_latency, m_recovery_stats->m_phase1_ms);
+    GAUGE_UPDATE(*m_metrics, recovery_phase2_latency, m_recovery_stats->m_phase2_ms);
+    GAUGE_UPDATE(*m_metrics, recovery_log_store_latency, m_recovery_stats->m_log_store_ms);
+    GAUGE_UPDATE(*m_metrics, recovery_total_latency, m_recovery_stats->m_total_ms);
 
     // start the io watchdog;
     m_io_wd = std::make_unique< VolumeIOWatchDog >();

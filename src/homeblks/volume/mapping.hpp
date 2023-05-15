@@ -226,7 +226,7 @@ private:
     blk_count_serialized_t m_nlbas{0};      // Number of blkids within the view
     csum_t m_carr[0];                       // Array holding the checksums
 
-private:
+public:
     ValueEntry() = default;
     ValueEntry(const seq_id_t seqid, const BlkId& blkid, const lba_count_t lba_offset, const lba_count_t nlbas,
                const csum_t* carr) :

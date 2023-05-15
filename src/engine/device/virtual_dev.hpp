@@ -312,6 +312,8 @@ public:
     uint32_t get_align_size() const;
     uint32_t get_phys_page_size() const;
     uint32_t get_atomic_page_size() const;
+    uint32_t get_num_streams() const;
+    uint64_t get_stream_size() const;
 
 protected:
     /**
@@ -366,9 +368,6 @@ protected:
     ssize_t do_preadv_internal(PhysicalDev* pdev, PhysicalDevChunk* pchunk, const uint64_t dev_offset, iovec* iov,
                                const int iovcnt, const uint64_t size,
                                const boost::intrusive_ptr< virtualdev_req >& req = nullptr);
-
-    uint32_t get_num_streams() const;
-    uint64_t get_stream_size() const;
 
 private:
     void write_nmirror(const char* buf, const uint32_t size, PhysicalDevChunk* chunk, const uint64_t dev_offset_in);

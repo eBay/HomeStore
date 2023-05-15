@@ -1,5 +1,5 @@
 pipeline {
-    agent any
+    agent { label 'sds-builder-2204' }
 
     environment {
         ORG = 'sds'
@@ -83,7 +83,7 @@ pipeline {
         stage('Build') {
             failFast true
             matrix {
-                agent { label 'sds-builder' }
+                agent { label 'sds-builder-2204' }
                 axes {
                     axis {
                         name 'BUILD_TYPE'
@@ -212,6 +212,7 @@ pipeline {
                               anyOf {
                                 branch "testing/v*"
                                 branch "master"
+                                branch "stable/v*"
                               }
                               expression { "${COVERAGE}" == 'False' }
                             } }

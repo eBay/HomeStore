@@ -106,6 +106,11 @@ public:
     explicit HomeBlksMetrics(const char* homeblks_name) : sisl::MetricsGroupWrapper("HomeBlks", homeblks_name) {
         REGISTER_HISTOGRAM(scan_volumes_latency, "Scan Volumes latency");
         REGISTER_COUNTER(boot_cnt, "boot cnt", sisl::_publish_as::publish_as_gauge);
+        REGISTER_GAUGE(recovery_phase0_latency, "recovery phase0 latency");
+        REGISTER_GAUGE(recovery_phase1_latency, "recovery phase1 latency");
+        REGISTER_GAUGE(recovery_phase2_latency, "recovery phase2 latency");
+        REGISTER_GAUGE(recovery_log_store_latency, "recovery logstore latency");
+        REGISTER_GAUGE(recovery_total_latency, "recovery total latency");
         REGISTER_GAUGE(unclean_shutdown, "unclean shutdown");
         register_me_to_farm();
     }
@@ -139,7 +144,7 @@ struct HomeBlksRecoveryStats {
     }
 
     std::string to_string() {
-        return fmt::format("Recovery Total (ms): {}, Recovery Total (ms): {},  Volume Phase-1 (ms): {}, Log Store "
+        return fmt::format("Recovery Total (ms): {}, Volume Phase-0 (ms): {},  Volume Phase-1 (ms): {}, Log Store "
                            "Recovery (ms): {}, Volume Phase-2 (ms): {}",
                            m_total_ms, m_phase0_ms, m_phase1_ms, m_log_store_ms, m_phase2_ms);
     }

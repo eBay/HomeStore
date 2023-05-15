@@ -40,6 +40,7 @@
 #include <folly/Synchronized.h>
 #include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/io_environment.hpp>
+#include <iomgr/http_server.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
@@ -405,6 +406,7 @@ public:
                          const uint32_t n_log_stores, const bool restart = false) {
         if (restart) {
             shutdown(ndevices, false);
+            ioenvironment.get_http_server()->stop();
             std::this_thread::sleep_for(std::chrono::seconds{5});
         }
 
@@ -478,7 +480,11 @@ public:
         params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
         params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
 
-        test_common::set_random_http_port();
+        if (SISL_OPTIONS.count("http_port")) {
+            test_common::set_fixed_http_port(SISL_OPTIONS["http_port"].as< uint32_t >());
+        }else {
+            test_common::set_random_http_port();
+        }
         VolInterface::init(params, restart);
 
         {
@@ -1208,7 +1214,9 @@ SISL_OPTION_GROUP(test_log_store,
                    ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
                   (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
                   (iterations, "", "iterations", "Iterations", ::cxxopts::value< uint32_t >()->default_value("1"),
-                   "the number of iterations to run each test"));
+                   "the number of iterations to run each test"),
+                  (http_port, "", "http_port", "http_port", ::cxxopts::value< uint32_t >()->default_value("5000"),
+                   "http server port"));
 
 #if 0
 void parse() {

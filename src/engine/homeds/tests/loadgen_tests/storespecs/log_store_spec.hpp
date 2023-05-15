@@ -30,6 +30,7 @@ namespace homeds {
 namespace loadgen {
 
 class LogStoreSpec : public StoreSpec< LogStoreKey, LogStoreValue > {
+public:
     LogStoreSpec() = default;
     LogStoreSpec(const LogStoreSpec&) = delete;
     LogStoreSpec& operator=(const LogStoreSpec&) = delete;
@@ -42,7 +43,6 @@ class LogStoreSpec : public StoreSpec< LogStoreKey, LogStoreValue > {
         uint64_t crc;
     };
 
-public:
     virtual void init_store(const homeds::loadgen::Param& parameters) override {
         HomeLogStoreMgrSI().start(true);
         m_store =
@@ -142,7 +142,6 @@ public:
         return false;
     }
 
-private:
     std::shared_ptr< HomeLogStore > m_store = nullptr;
     std::unordered_map< logstore_seq_num_t, LogWriteInfo >
         m_wrt_map; // seq to its written data crc map, used for verfication;

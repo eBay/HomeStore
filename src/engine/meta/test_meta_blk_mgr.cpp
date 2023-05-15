@@ -124,7 +124,11 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
     params.vol_state_change_cb = [](const VolumePtr& vol, vol_state old_state, vol_state new_state) {};
     params.vol_found_cb = [](boost::uuids::uuid uuid) -> bool { return true; };
 
-    test_common::set_random_http_port();
+    if (SISL_OPTIONS.count("http_port")) {
+        test_common::set_fixed_http_port(SISL_OPTIONS["http_port"].as< uint32_t >());
+    }else {
+        test_common::set_random_http_port();
+    }
     VolInterface::init(params);
 
     {
@@ -139,10 +143,10 @@ struct sb_info_t {
 };
 
 class VMetaBlkMgrTest : public ::testing::Test {
+public:
     enum class meta_op_type : uint8_t { write = 1, update = 2, remove = 3, read = 4 };
     std::string mtype;
 
-public:
     VMetaBlkMgrTest() = default;
     VMetaBlkMgrTest(const VMetaBlkMgrTest&) = delete;
     VMetaBlkMgrTest& operator=(const VMetaBlkMgrTest&) = delete;
@@ -155,6 +159,7 @@ protected:
     void SetUp() override{};
 
     void TearDown() override{};
+public:
 
     [[nodiscard]] uint64_t get_elapsed_time(const Clock::time_point& start) {
         const std::chrono::seconds sec{std::chrono::duration_cast< std::chrono::seconds >(Clock::now() - start)};
@@ -637,7 +642,6 @@ protected:
     }
 #endif
 
-private:
     uint64_t m_wrt_cnt{0};
     uint64_t m_update_cnt{0};
     uint64_t m_rm_cnt{0};
@@ -820,7 +824,9 @@ SISL_OPTION_GROUP(
     (per_write, "", "per_write", "write percentage", ::cxxopts::value< uint32_t >()->default_value("60"), "number"),
     (per_remove, "", "per_remove", "remove percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
     (bitmap, "", "bitmap", "bitmap test", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
-    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
+    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+    (http_port, "", "http_port", "http_port", ::cxxopts::value< uint32_t >()->default_value("5000"),
+     "http server port"));
 
 int main(int argc, char* argv[]) {
     ::testing::GTEST_FLAG(filter) = "*random_load_test*";

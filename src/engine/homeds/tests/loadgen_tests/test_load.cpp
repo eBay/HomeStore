@@ -122,10 +122,9 @@ protected:
     virtual void SetUp() override{};
     virtual void TearDown() override { loadgen.reset(); };
 
-private:
+public:
     std::unique_ptr< G_SimpleKV_Mem > loadgen;
 
-protected:
     void execute() {
         loadgen = std::make_unique< G_SimpleKV_Mem >(parameters.NT);
         loadgen->initParam(parameters);
@@ -152,7 +151,7 @@ protected:
     virtual void SetUp() override{};
     virtual void TearDown() override { loadgen.reset(); };
 
-private:
+public:
     std::unique_ptr< G_SimpleKV_SSD > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
@@ -175,7 +174,6 @@ private:
         m_cv.notify_one();
     }
 
-protected:
     void execute() {
         loadgen = std::make_unique< G_SimpleKV_SSD >(parameters.NT); // starts iomgr
         di.init(loadgen->get_executor(),
@@ -200,7 +198,7 @@ protected:
     virtual void SetUp() override{};
     virtual void TearDown() override { loadgen.reset(); };
 
-private:
+public:
     std::unique_ptr< G_VarKV_SSD > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
@@ -223,7 +221,6 @@ private:
         m_cv.notify_one();
     }
 
-protected:
     void execute() {
         loadgen = std::make_unique< G_VarKV_SSD >(parameters.NT); // starts iomgr
         di.init(loadgen->get_executor(),
@@ -248,7 +245,7 @@ protected:
     virtual void SetUp() override{};
     virtual void TearDown() override { loadgen.reset(); };
 
-private:
+public:
     DiskInitializer< IOMgrExecutor > di;
     std::unique_ptr< G_MapKV_SSD > loadgen;
     std::mutex m_mtx;
@@ -272,7 +269,6 @@ private:
         m_cv.notify_one();
     }
 
-protected:
     void execute() {
         loadgen = std::make_unique< G_MapKV_SSD >(parameters.NT); // starts iomgr
         di.init(loadgen->get_executor(),
@@ -297,7 +293,7 @@ protected:
     virtual void SetUp() override{};
     virtual void TearDown() override { loadgen.reset(); };
 
-private:
+public:
     std::unique_ptr< G_FileKV > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
@@ -336,7 +332,6 @@ private:
         m_cv.notify_one();
     }
 
-protected:
     void execute() {
         loadgen = std::make_unique< G_FileKV >(parameters.NT); // starts iomgr
         di.init(loadgen->get_executor(),
@@ -361,7 +356,7 @@ protected:
     virtual void SetUp() override{};
     virtual void TearDown() override { loadgen.reset(); };
 
-private:
+public:
     std::unique_ptr< G_VDev_Test_RW > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
@@ -384,7 +379,6 @@ private:
         m_cv.notify_one();
     }
 
-protected:
     void execute() {
         // disable verfication for vdev test
         parameters.NT = 1; // vdev APIs are not thread-safe;
@@ -411,7 +405,7 @@ protected:
     virtual void SetUp() override{};
     virtual void TearDown() override { loadgen.reset(); };
 
-private:
+public:
     std::unique_ptr< G_VDev_Test_PRW > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
@@ -434,7 +428,6 @@ private:
         m_cv.notify_one();
     }
 
-protected:
     void execute() {
         // disable verfication for vdev test
         parameters.NT = 1; // vdev APIs are not thread-safe;
@@ -461,10 +454,9 @@ protected:
     virtual void SetUp() override{};
     virtual void TearDown() override { loadgen.reset(); };
 
-private:
+public:
     std::unique_ptr< G_CacheKV > loadgen;
 
-protected:
     void execute() {
         loadgen = std::make_unique< G_CacheKV >(parameters.NT);
         loadgen->initParam(parameters);
@@ -488,7 +480,7 @@ protected:
     virtual void SetUp() override{};
     virtual void TearDown() override{};
 
-private:
+public:
     std::unique_ptr< G_Volume_Test > m_loadgen;
     VolumeManager< IOMgrExecutor >* m_vol_mgr = nullptr;
     std::mutex m_mtx;
@@ -515,7 +507,6 @@ private:
         m_cv.wait(lk, [this] { return m_is_complete; });
     }
 
-protected:
     void execute() {
         // start iomgr
         // volume store handles verification by itself;
@@ -558,7 +549,7 @@ protected:
     virtual void SetUp() override{};
     virtual void TearDown() override { loadgen.reset(); };
 
-private:
+public:
     std::unique_ptr< G_LogStore_Test > loadgen;
     DiskInitializer< IOMgrExecutor > di;
     std::mutex m_mtx;
@@ -581,7 +572,6 @@ private:
         m_cv.notify_one();
     }
 
-protected:
     void execute() {
         // disable verification because it is async write, similar as volume test load;
         // verification will be done by logstore spec;
