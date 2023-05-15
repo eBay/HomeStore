@@ -92,7 +92,7 @@ struct logstore_req {
         if (req->is_internal_req) { sisl::ObjectAllocator< logstore_req >::deallocate(req); }
     }
 
-    friend class sisl::ObjectAllocator<logstore_req>;
+    friend class sisl::ObjectAllocator< logstore_req >;
 
 private:
     logstore_req() = default;
@@ -222,6 +222,9 @@ public:
 
     [[nodiscard]] nlohmann::json dump_log_store(const log_dump_req& dum_req);
     [[nodiscard]] nlohmann::json get_status(const int verbosity) const;
+    [[nodiscard]] nlohmann::json get_status_family(std::string family_name, const int verbosity) const;
+    [[nodiscard]] nlohmann::json get_status_logstore(std::string family_name, logstore_id_t log_id,
+                                                     const int verbosity) const;
 
     LogStoreFamily* data_log_family() { return m_logstore_families[DATA_LOG_FAMILY_IDX].get(); }
     LogStoreFamily* ctrl_log_family() { return m_logstore_families[CTRL_LOG_FAMILY_IDX].get(); }

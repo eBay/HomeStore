@@ -177,6 +177,27 @@ nlohmann::json HomeLogStoreMgr::get_status(const int verbosity) const {
     return js;
 }
 
+nlohmann::json HomeLogStoreMgr::get_status_family(std::string family_name, const int verbosity) const {
+    nlohmann::json js;
+    for (auto& l : m_logstore_families) {
+        if (l->get_name() == family_name) { return l->get_status(verbosity); }
+    }
+    return js;
+}
+nlohmann::json HomeLogStoreMgr::get_status_logstore(std::string family_name, logstore_id_t log_id,
+                                                    const int verbosity) const {
+    nlohmann::json js;
+    for (auto& l : m_logstore_families) {
+        if (l->get_name() == family_name) {
+            auto m{l->m_id_logstore_map.rlock()};
+            const auto it{m->find(log_id)};
+            if (it == m->end()) { return js; }
+            auto& log_store{it->second.m_log_store};
+            return log_store->get_status(verbosity);
+        }
+    }
+    return js;
+}
 HomeLogStoreMgrMetrics::HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores", "AllLogStores") {
     REGISTER_COUNTER(logstores_count, "Total number of log stores", sisl::_publish_as::publish_as_gauge);
     REGISTER_COUNTER(logstore_append_count, "Total number of append requests to log stores", "logstore_op_count",

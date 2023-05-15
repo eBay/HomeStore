@@ -50,6 +50,13 @@ public:
     void dump_disk_metablks(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
     void verify_metablk_store(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
     void wakeup_init(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
+    void get_status_metablk(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
+
+    void get_status_logstore(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
+    void get_status_logstore_family(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
+    void get_status_logstore_by_id(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
+    void dump_logstore_family(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
+
 #ifdef _PRERELEASE
     void set_safe_mode(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
     void unset_safe_mode(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
