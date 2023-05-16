@@ -1,14 +1,17 @@
-from conans import ConanFile, CMake, tools
+from os.path import join
+from conan import ConanFile
+from conan.tools.files import copy
+from conans import CMake
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "3.6.2"
+    version = "4.0.12"
 
-    homepage = "https://github.corp.ebay.com/SDS/homestore"
-    description = "HomeStore"
+    homepage = "https://github.com/eBay/Homestore"
+    description = "HomeStore Storage Engine"
     topics = ("ebay", "nublox")
-    url = "https://github.corp.ebay.com/SDS/Homestore"
-    license = "Proprietary"
+    url = "https://github.com/eBay/Homestore"
+    license = "Apache-2.0"
 
     settings = "arch", "os", "compiler", "build_type"
 
@@ -30,7 +33,7 @@ class HomestoreConan(ConanFile):
 
 
     generators = "cmake", "cmake_find_package"
-    exports_sources = "cmake/*", "src/*", "CMakeLists.txt", "test_wrap.sh"
+    exports_sources = "cmake/*", "src/*", "CMakeLists.txt", "test_wrap.sh", "LICENSE"
     keep_imports = True
 
     def configure(self):
@@ -47,7 +50,7 @@ class HomestoreConan(ConanFile):
 
     def build_requirements(self):
         self.build_requires("benchmark/1.7.1")
-        self.build_requires("gtest/1.12.1")
+        self.build_requires("gtest/1.13.0")
 
     def requirements(self):
         self.requires("iomgr/[~=8, include_prerelease=True]@oss/master")
@@ -85,18 +88,17 @@ class HomestoreConan(ConanFile):
             cmake.test(target=test_target, output_on_failure=True)
 
     def package(self):
-        self.copy("*.h", dst="include", src="src", keep_path=True)
-        self.copy("*.hpp", dst="include", src="src", keep_path=True)
-        self.copy("*/btree_node.cpp", dst="include", src="src", keep_path=True)
-        self.copy("*cache/cache.ipp", dst="include", src="src", keep_path=True)
-        self.copy("*homeblks.so", dst="lib", keep_path=False)
-        self.copy("*homeblks.dll", dst="lib", keep_path=False)
-        self.copy("*homeblks.dylib", dst="lib", keep_path=False)
-        self.copy("*homeblks.lib", dst="lib", keep_path=False)
-        self.copy("*homeblks.a", dst="lib", keep_path=False)
+        copy(self, "LICENSE", self.source_folder, join(self.package_folder, "licenses"), keep_path=False)
+        copy(self, "*.h", join(self.source_folder, "src", "include"), join(self.package_folder, "include"), keep_path=True)
+        copy(self, "*.hpp", join(self.source_folder, "src", "include"), join(self.package_folder, "include"), keep_path=True)
+        copy(self, "*.ipp", join(self.source_folder, "src", "include"), join(self.package_folder, "include"), keep_path=True)
+        copy(self, "*.a", self.build_folder, join(self.package_folder, "lib"), keep_path=False)
+        copy(self, "*.so", self.build_folder, join(self.package_folder, "lib"), keep_path=False)
+        copy(self, "*.dylib", self.build_folder, join(self.package_folder, "lib"), keep_path=False)
+        copy(self, "*.dll", self.build_folder, join(self.package_folder, "lib"), keep_path=False)
 
     def package_info(self):
-        self.cpp_info.libs = ["homeblks"]
+        self.cpp_info.libs = ["homestore"]
         if self.options.sanitize:
             self.cpp_info.sharedlinkflags.append("-fsanitize=address")
             self.cpp_info.exelinkflags.append("-fsanitize=address")
