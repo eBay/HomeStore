@@ -437,7 +437,7 @@ public:
 
         if (restart) {
             shutdown(ndevices, false);
-            ioenvironment.get_http_server()->stop();
+            if (auto hsrv = ioenvironment.get_http_server(); hsrv) hsrv->stop();
             std::this_thread::sleep_for(std::chrono::seconds{5});
         }
 
@@ -473,7 +473,7 @@ public:
 
         if (SISL_OPTIONS.count("http_port")) {
             test_common::set_fixed_http_port(SISL_OPTIONS["http_port"].as< uint32_t >());
-        }else {
+        } else {
             test_common::set_random_http_port();
         }
         hs_input_params params;
