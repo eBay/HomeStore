@@ -241,39 +241,15 @@ pipeline {
             } }
         
             stages {
-                stage('NuBlox Logstore') {
+                stage('HomeReplication') {
                     steps {
                         script {
-                            built_chain = env.pkg_version
-                            def nls_res = build job: "Nublox Logstore/${TARGET_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
-                            built_chain = "${built_chain}" + ", " + "$nls_res.buildVariables.pkg_version"
+                            def hrepl_res = build job: "HomeReplication/${TARGET_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
+                            built_chain = "${built_chain}" + ", " + "$hrepl_res.buildVariables.pkg_version"
                         }
                     }
                     post {
-                        failure { script { failed_pkg = "Nublox Logstore" } }
-                    }
-                }
-                stage('Homestore BDev') {
-                    steps {
-                        script {
-                            built_chain = env.pkg_version
-                            def hsbdev_res = build job: "Homestore Bdev/${TARGET_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
-                            built_chain = "${built_chain}" + ", " + "$hsbdev_res.buildVariables.pkg_version"
-                        }
-                    }
-                    post {
-                        failure { script { failed_pkg = "Homestore BDev" } }
-                    }
-                }
-                stage('SPDK Connector') {
-                    steps {
-                        script {
-                            def spdk_res = build job: "SPDK Connector/${TARGET_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
-                            built_chain = "${built_chain}" + ", " + "$spdk_res.buildVariables.pkg_version"
-                        }
-                    }
-                    post {
-                        failure { script { failed_pkg = "SPDK Connector" } }
+                        failure { script { failed_pkg = "HomeReplication" } }
                     }
                 }
             }
