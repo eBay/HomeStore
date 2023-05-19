@@ -5,15 +5,26 @@ More details to follow....
 
 ## Building
 
-### With conan
+### prerequires
+```
+camke 3.13 or later
+conan 1.5x.0 (pip install --user conan==1.59.0)
+libjemalloc-dev
+libaio-dev
+uuid-dev
+```
 Assuming the conan setup is already done
-
+### build
 ```
 $ mkdir build
 $ cd build
 
 # Install all dependencies
 $ conan install ..
+
+# if it is the first time for building and some errors happens when installing dependencies,
+# please try to build all dependencies by yourself
+$ conan install -u -b missing ..
 
 # Build the libhomestore.a
 $ conan build ..
