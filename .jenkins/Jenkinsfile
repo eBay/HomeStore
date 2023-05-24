@@ -194,42 +194,6 @@ pipeline {
                             }
                         }
                     }
-                    stage("Image") {
-                        when { allOf { 
-                            branch "master"
-                            expression { "${COVERAGE}" == 'False' }
-                            }
-                        }
-                        steps {
-                            retry(3) {
-                                withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
-                                    sh "docker build -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins/"
-                                }
-                            }
-                        }
-                    }
-                    stage("Deploy Image") {
-                        when  { allOf {
-                              anyOf {
-                                branch "testing/v*"
-                                branch "master"
-                                branch "stable/v*"
-                              }
-                              expression { "${COVERAGE}" == 'False' }
-                            } }
-                        steps {
-                            retry(3) {
-                                withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
-                                  sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
-                                }
-                            }
-                        }
-                        post {
-                            success {
-                                slackSend color: '#85B717', channel: '#sds-ci', message: "*${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been uploaded to ECR."
-                            }
-                        }
-                    }
                 }
             }
         }
