@@ -208,7 +208,7 @@ pipeline {
                 stage('HomeReplication') {
                     steps {
                         script {
-                            def hrepl_res = build job: "HomeReplication/${TARGET_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
+                            def hrepl_res = build job: "HomeReplication/main", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
                             built_chain = "${built_chain}" + ", " + "$hrepl_res.buildVariables.pkg_version"
                         }
                     }
