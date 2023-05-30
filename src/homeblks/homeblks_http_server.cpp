@@ -328,10 +328,15 @@ void HomeBlksHttpServer::copy_vol(const Pistache::Rest::Request& request, Pistac
         response.send(Pistache::Http::Code::Bad_Request, resp_fail);
     }
 
-    const auto err = m_hb->copy_vol(uuid, file_path);
+    // const auto err = m_hb->copy_vol(uuid, file_path);
 
-    std::string resp{"volume write to path: " + write_path[0] + " , file name: " + file_name};
-    resp += (err == no_error ? " Successfully" : (" Failed, error msg: " + err.message()));
+    auto sthread =
+        sisl::named_thread("copy_volume", [this, uuid, file_path]() mutable { m_hb->copy_vol(uuid, file_path); });
+    sthread.detach();
+
+    std::string resp{"Starting volume write to path: " + write_path[0] + " , file name: " + file_name +
+                     " Successfully"};
+    // resp += (err == no_error ? " Successfully" : (" Failed, error msg: " + err.message()));
 
     response.send(Pistache::Http::Code::Ok, resp);
 }

@@ -2213,6 +2213,35 @@ TEST_F(VolTest, recovery_io_test) {
     @brief  Tests which does recovery. End up with a clean shutdown
     This test doesn't do any io to volume;
  */
+TEST_F(VolTest, recovery_boot_test) {
+    const auto start_time(Clock::now());
+    tcfg.init = false;
+    this->start_homestore(false /* force_reinit */);
+
+    LOGINFO("recovery verify started");
+    std::unique_ptr< VolVerifyJob > verify_job;
+    if (tcfg.pre_init_verify || tcfg.verify_only) {
+        verify_job = std::make_unique< VolVerifyJob >(this);
+        this->start_job(verify_job.get(), wait_type::for_completion);
+        LOGINFO("recovery verify done");
+    } else {
+        LOGINFO("bypassing recovery verify");
+    }
+
+    while ((get_elapsed_time_sec(start_time) < tcfg.run_time)) {
+        std::this_thread::sleep_for(std::chrono::seconds{2});
+    }
+
+    if (tcfg.can_delete_volume) { this->delete_volumes(); }
+    this->shutdown();
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
+}
+
+/*!
+    @test   recovery_boot_copy_vol_test
+    @brief  Tests which does recovery. End up with a clean shutdown
+    This test doesn't do any io to volume;
+ */
 TEST_F(VolTest, recovery_boot_copy_vol_test) {
     const auto start_time(Clock::now());
     tcfg.init = false;
