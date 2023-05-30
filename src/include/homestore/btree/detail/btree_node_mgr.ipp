@@ -19,7 +19,7 @@
 #include <homestore/btree/detail/simple_node.hpp>
 #include <homestore/btree/detail/varlen_node.hpp>
 #include <sisl/fds/utils.hpp>
-//#include <iomgr/iomgr_flip.hpp>
+// #include <iomgr/iomgr_flip.hpp>
 
 #include <chrono>
 
@@ -33,6 +33,7 @@ btree_status_t Btree< K, V >::create_root_node(void* op_context) {
     BtreeNodePtr root = alloc_leaf_node();
     if (root == nullptr) { return btree_status_t::space_not_avail; }
 
+    root->set_level(0u);
     auto ret = write_node(root, op_context);
     if (ret != btree_status_t::success) {
         free_node(root, locktype_t::NONE, op_context);
@@ -309,7 +310,7 @@ void Btree< K, V >::free_node(const BtreeNodePtr& node, locktype_t cur_lock, voi
     --m_total_nodes;
 
     free_node_impl(node, context);
-    intrusive_ptr_release(node.get());
+    // intrusive_ptr_release(node.get());
 }
 
 template < typename K, typename V >

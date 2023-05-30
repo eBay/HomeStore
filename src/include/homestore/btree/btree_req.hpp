@@ -15,8 +15,7 @@
  *********************************************************************************/
 #pragma once
 #include <sisl/fds/buffer.hpp>
-#include <folly/futures/Future.h>
-#include "btree_kv.hpp"
+#include <homestore/btree/btree_kv.hpp>
 
 namespace homestore {
 struct BtreeRequest;
@@ -26,12 +25,27 @@ typedef std::pair< BtreeKey, BtreeValue > btree_kv_t;
 // Base class for any btree operations
 struct BtreeRequest {
     BtreeRequest() = default;
-    BtreeRequest(void* app_ctx, void* op_ctx) :
-            m_app_context{app_ctx}, m_op_context{op_ctx}, m_promise{folly::Promise< btree_status_t >::makeEmpty()} {}
+    BtreeRequest(void* app_ctx, void* op_ctx) : m_app_context{app_ctx}, m_op_context{op_ctx} {}
+
+    void enable_route_tracing() {
+        route_tracing = std::make_unique< std::vector< trace_route_entry > >();
+        route_tracing->reserve(8);
+    }
+
+    std::string route_string() const {
+        std::string out;
+        if (route_tracing) {
+            fmt::format_to(std::back_inserter(out), "Route size={}\n", route_tracing->size());
+            for (const auto& r : *route_tracing) {
+                fmt::format_to(std::back_inserter(out), "{}\n", r.to_string());
+            }
+        }
+        return out;
+    }
 
     void* m_app_context{nullptr};
     void* m_op_context{nullptr};
-    folly::Promise< btree_status_t > m_promise;
+    std::unique_ptr< std::vector< trace_route_entry > > route_tracing{nullptr};
 };
 
 // Base class for all range related operations

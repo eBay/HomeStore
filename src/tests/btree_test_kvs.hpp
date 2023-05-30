@@ -25,9 +25,11 @@ static constexpr uint32_t g_max_keysize{120};
 static constexpr uint32_t g_max_valsize{120};
 static std::random_device g_rd{};
 static std::default_random_engine g_re{g_rd()};
-static std::uniform_int_distribution< uint32_t > g_randkeysize_generator{2, g_max_keysize};
+static std::normal_distribution<> g_randkeysize_generator{32, 24};
+// static std::uniform_int_distribution< uint32_t > g_randkeysize_generator{2, g_max_keysize};
 static std::uniform_int_distribution< uint32_t > g_randval_generator{1, 30000};
-static std::uniform_int_distribution< uint32_t > g_randvalsize_generator{2, g_max_valsize};
+static std::normal_distribution<> g_randvalsize_generator{32, 24};
+// static std::uniform_int_distribution< uint32_t > g_randvalsize_generator{2, g_max_valsize};
 
 static std::map< uint32_t, std::shared_ptr< std::string > > g_key_pool;
 
@@ -133,11 +135,15 @@ class TestVarLenKey : public BtreeKey {
 private:
     uint32_t m_key{0};
 
+    static uint32_t rand_key_size() {
+        return (uint32_cast(std::abs(std::round(g_randkeysize_generator(g_re)))) % g_max_keysize) + 1;
+    }
+
     static std::shared_ptr< std::string > idx_to_key(uint32_t idx) {
         auto it = g_key_pool.find(idx);
         if (it == g_key_pool.end()) {
-            const auto& [it, happened] = g_key_pool.emplace(
-                idx, std::make_shared< std::string >(gen_random_string(g_randkeysize_generator(g_re), idx)));
+            const auto& [it, happened] =
+                g_key_pool.emplace(idx, std::make_shared< std::string >(gen_random_string(rand_key_size(), idx)));
             assert(happened);
             return it->second;
         } else {
@@ -272,6 +278,11 @@ private:
 };
 
 class TestVarLenValue : public BtreeValue {
+private:
+    static uint32_t rand_val_size() {
+        return (uint32_cast(std::abs(std::round(g_randvalsize_generator(g_re)))) % g_max_valsize) + 1;
+    }
+
 public:
     TestVarLenValue(bnodeid_t val) { assert(0); }
     TestVarLenValue(const std::string& val) : BtreeValue(), m_val{val} {}
@@ -285,7 +296,7 @@ public:
         return *this;
     }
 
-    static TestVarLenValue generate_rand() { return TestVarLenValue{gen_random_string(g_randvalsize_generator(g_re))}; }
+    static TestVarLenValue generate_rand() { return TestVarLenValue{gen_random_string(rand_val_size())}; }
 
     sisl::blob serialize() const override {
         sisl::blob b;

@@ -67,6 +67,8 @@ retry:
     BT_NODE_DBG_ASSERT((curlock == locktype_t::READ || curlock == locktype_t::WRITE), my_node, "unexpected locktype {}",
                        curlock);
 
+    if (req.route_tracing) { append_route_trace(req, my_node, btree_event_t::READ, start_idx, end_idx); }
+
     curr_idx = start_idx;
     while (curr_idx <= end_idx) { // iterate all matched childrens
 #if 0
@@ -122,6 +124,7 @@ retry:
             if (ret != btree_status_t::success) {
                 goto out;
             } else {
+                if (req.route_tracing) { append_route_trace(req, child_node, btree_event_t::SPLIT); }
                 COUNTER_INCREMENT(m_metrics, btree_split_count, 1);
                 goto retry; // After split, retry search and walk down.
             }
@@ -215,6 +218,7 @@ btree_status_t Btree< K, V >::mutate_write_leaf_node(const BtreeNodePtr& my_node
     }
 
     if ((ret == btree_status_t::success) || (ret == btree_status_t::has_more)) {
+        if (req.route_tracing) { append_route_trace(req, my_node, btree_event_t::MUTATE); }
         write_node(my_node, req.m_op_context);
     }
     return ret;
@@ -407,8 +411,9 @@ btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
         unlock_node(root, locktype_t::WRITE);
         goto done;
     }
+    new_root->set_level(root->level() + 1);
 
-    BT_NODE_LOG(DEBUG, root, "Root node is full, creating new root node", new_root->node_id());
+    BT_NODE_LOG(DEBUG, root, "Root node is full, creating new root node={}", new_root->node_id());
     child_node = std::move(root);
     root = std::move(new_root);
     BT_NODE_DBG_ASSERT_EQ(root->total_entries(), 0, root);
@@ -424,6 +429,8 @@ btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
         root = std::move(child_node);
         unlock_node(root, locktype_t::WRITE);
     } else {
+        if (req.route_tracing) { append_route_trace(req, child_node, btree_event_t::SPLIT); }
+
         m_root_node_info = BtreeLinkInfo{root->node_id(), root->link_version()};
         unlock_node(child_node, locktype_t::WRITE);
         COUNTER_INCREMENT(m_metrics, btree_depth, 1);
@@ -446,6 +453,7 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const 
 
     child_node2->set_next_bnode(child_node1->next_bnode());
     child_node1->set_next_bnode(child_node2->node_id());
+    child_node2->set_level(child_node1->level());
     uint32_t child1_filled_size = m_bt_cfg.node_data_size() - child_node1->available_size(m_bt_cfg);
 
     auto split_size = m_bt_cfg.split_size(child1_filled_size);
@@ -455,29 +463,30 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const 
                           "Unable to split entries in the child node"); // means cannot split entries
     BT_NODE_DBG_ASSERT_GT(child_node1->total_entries(), 0, child_node1);
 
+    // Insert the last entry in first child to parent node
+    *out_split_key = child_node1->get_last_key< K >();
+
     // In an unlikely case where parent node has no room to accomodate the child key, we need to un-split and then
     // free up the new node. This situation could happen on variable key, where the key max size is purely
     // an estimation. This logic allows the max size to be declared more optimistically than say 1/4 of node
     // which will have substantially large number of splits and performance constraints.
-    if (out_split_key->serialized_size() > parent_node->available_size(m_bt_cfg)) {
+    if (!parent_node->can_accomodate(m_bt_cfg, out_split_key->serialized_size(), BtreeLinkInfo::get_fixed_size())) {
         uint32_t move_in_res = child_node1->copy_by_entries(m_bt_cfg, *child_node2, 0, child_node2->total_entries());
         BT_NODE_REL_ASSERT_EQ(move_in_res, res, child_node1,
                               "The split key size is more than estimated parent available space, but when revert is "
                               "attempted it fails. Continuing can cause data loss, so crashing");
-        free_node(child_node2, locktype_t::WRITE, context);
+        free_node(child_node2, locktype_t::NONE, context);
 
         // Mark the parent_node itself to be split upon next retry.
         bt_thread_vars()->force_split_node = parent_node;
         return btree_status_t::retry;
     }
+    BT_NODE_LOG(TRACE, parent_node, "Available space for split entry={}", parent_node->available_size(m_bt_cfg));
 
     child_node1->inc_link_version();
 
     // Update the existing parent node entry to point to second child ptr.
     parent_node->update(parent_ind, child_node2->link_info());
-
-    // Insert the last entry in first child to parent node
-    *out_split_key = child_node1->get_last_key< K >();
 
     // If key is extent then we always insert the tail portion of the extent key in the parent node
     if (out_split_key->is_extent_key()) {
@@ -490,6 +499,8 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const 
     BT_NODE_DBG_ASSERT_GT(child_node2->get_first_key< K >().compare(*out_split_key), 0, child_node2);
     BT_NODE_LOG(DEBUG, parent_node, "Split child_node={} with new_child_node={}, split_key={}", child_node1->node_id(),
                 child_node2->node_id(), out_split_key->to_string());
+    BT_NODE_LOG(DEBUG, child_node1, "Left child");
+    BT_NODE_LOG(DEBUG, child_node2, "Right child");
 
     ret = transact_write_nodes({child_node2}, child_node1, parent_node, context);
 

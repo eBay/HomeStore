@@ -21,7 +21,7 @@
 #include <vector>
 
 #include <boost/intrusive_ptr.hpp>
-//#include <flip/flip.hpp>
+// #include <flip/flip.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/fds/buffer.hpp>
 
@@ -260,16 +260,14 @@ btree_status_t Btree< K, V >::query(BtreeQueryRequest< K >& qreq, std::vector< s
     }
 
     if ((qreq.query_type() == BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY ||
-         qreq.query_type() == BtreeQueryType::TREE_TRAVERSAL_QUERY) &&
-        out_values.size() > 0) {
-
-        /* if return is not success then set the cursor to last read. No need to set cursor if user is not
-         * interested in it.
-         */
-        qreq.set_cursor_key(out_values.back().first);
-
-        /* check if we finished just at the last key */
-        if (out_values.back().first.compare(qreq.input_range().end_key()) == 0) { ret = btree_status_t::success; }
+         qreq.query_type() == BtreeQueryType::TREE_TRAVERSAL_QUERY)) {
+        if (out_values.size()) {
+            K& out_last_key = out_values.back().first;
+            qreq.set_cursor_key(out_last_key);
+            if (out_last_key.compare(qreq.input_range().end_key()) >= 0) { ret = btree_status_t::success; }
+        } else {
+            DEBUG_ASSERT_NE(ret, btree_status_t::has_more, "Query returned has_more, but no values added")
+        }
     }
 
 out:

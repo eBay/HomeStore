@@ -172,6 +172,8 @@ protected:
     bool call_on_remove_kv_cb(const BtreeNodePtr& node, uint32_t idx, const BtreeRequest& req) const;
     bool call_on_update_kv_cb(const BtreeNodePtr& node, uint32_t idx, const BtreeKey& new_key,
                               const BtreeRequest& req) const;
+    void append_route_trace(BtreeRequest& req, const BtreeNodePtr& node, btree_event_t event, uint32_t start_idx = 0,
+                            uint32_t end_idx = 0) const;
 
     //////////////////////////////// Impl Methods //////////////////////////////////////////
 

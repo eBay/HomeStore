@@ -24,7 +24,7 @@
 #include <sisl/utility/obj_life_counter.hpp>
 #include "btree_internal.hpp"
 #include <homestore/btree/btree_kv.hpp>
-//#include <iomgr/iomgr_flip.hpp>
+// #include <iomgr/iomgr_flip.hpp>
 #include <isa-l/crc.h>
 
 namespace homestore {
@@ -63,12 +63,16 @@ struct persistent_hdr_t {
     uint64_t link_version{0};                 // Version of the link between its parent, updated if structure changes
     BtreeLinkInfo::bnode_link_info edge_info; // Edge entry information
 
+    uint16_t level; // Level of the node within the tree
+    uint16_t reserved1;
+    uint32_t reserved2;
+
     persistent_hdr_t() : nentries{0}, leaf{0}, valid_node{1} {}
     std::string to_string() const {
         return fmt::format("magic={} version={} csum={} node_id={} next_node={} nentries={} node_type={} is_leaf={} "
-                           "valid_node={} node_gen={} link_version={} edge_nodeid={}, edge_link_version={}",
+                           "valid_node={} node_gen={} link_version={} edge_nodeid={}, edge_link_version={} level={} ",
                            magic, version, checksum, node_id, next_node, nentries, node_type, leaf, valid_node,
-                           node_gen, link_version, edge_info.m_bnodeid, edge_info.m_link_version);
+                           node_gen, link_version, edge_info.m_bnodeid, edge_info.m_link_version, level);
     }
 };
 #pragma pack()
@@ -125,7 +129,10 @@ public:
         bool sfound, efound;
         // Get the start index of the search range.
         std::tie(sfound, start_idx) = bsearch_node(range.start_key());
-        if (sfound && !range.is_start_inclusive()) { ++start_idx; }
+        if (sfound && !range.is_start_inclusive()) {
+            ++start_idx;
+            sfound = false;
+        }
         if (start_idx == total_entries()) {
             end_idx = start_idx;
             if (is_leaf() || !has_valid_edge()) {
@@ -139,7 +146,12 @@ public:
         if (efound && !range.is_end_inclusive()) {
             if (end_idx == 0) { return 0; }
             --end_idx;
+            efound = false;
         }
+
+        // If we point to same start and end without any match, it is hitting unavailable range
+        if ((start_idx == end_idx) && !sfound && !efound) { return 0; }
+
         if (end_idx == total_entries()) {
             DEBUG_ASSERT_GT(end_idx, 0); // At this point end_idx should never have been zero
             if (!has_valid_edge()) { --end_idx; }
@@ -398,6 +410,10 @@ public:
     void invalidate_edge() { set_edge_id(empty_bnodeid); }
 
     uint32_t total_entries() const { return get_persistent_header_const()->nentries; }
+
+    void set_level(uint16_t l) { get_persistent_header()->level = l; }
+    uint16_t level() const { return get_persistent_header_const()->level; }
+
     // uint32_t total_entries() const { return (has_valid_edge() ? total_entries() + 1 : total_entries()); }
 
     void lock(locktype_t l) const {

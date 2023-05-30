@@ -51,7 +51,7 @@ private:
         return btree_status_t::success;
     }
 
-    void free_node_impl(const BtreeNodePtr& node, void* context) override {}
+    void free_node_impl(const BtreeNodePtr& node, void* context) override { intrusive_ptr_release(node.get()); }
 
     btree_status_t prepare_node_txn(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
                                     void* context) override {
