@@ -25,6 +25,7 @@
 #include <homestore/btree/detail/simple_node.hpp>
 #include <homestore/btree/detail/varlen_node.hpp>
 #include <homestore/btree/mem_btree.hpp>
+#include "test_common/range_scheduler.hpp"
 
 static constexpr uint32_t g_node_size{4096};
 using namespace homestore;
@@ -36,6 +37,10 @@ SISL_OPTION_GROUP(test_mem_btree,
                    ::cxxopts::value< uint32_t >()->default_value("65536"), "number"),
                   (num_entries, "", "num_entries", "number of entries to test with",
                    ::cxxopts::value< uint32_t >()->default_value("65536"), "number"),
+                  (n_threads, "", "n_threads", "number of threads", ::cxxopts::value< uint32_t >()->default_value("10"),
+                   "number"),
+                  (preload_size, "", "preload_size", "number of entries to preload tree with",
+                   ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
                   (seed, "", "seed", "random engine seed, use random if not defined",
                    ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
@@ -348,6 +353,348 @@ TYPED_TEST(BtreeTest, RangeUpdate) {
 
     LOGINFO("Step 2: Query {} entries and validate with pagination of 75 entries", num_entries);
     this->query_validate(0, num_entries, 75);
+}
+
+template < typename TestType >
+class BtreeConcurrentTest : public testing::Test {
+    typedef void (BtreeConcurrentTest::*pt2func)(void);
+    using T = TestType;
+    using K = typename TestType::KeyType;
+    using V = typename TestType::ValueType;
+
+public:
+    void preload(uint32_t start, uint32_t end) {
+        for (uint32_t i = start; i <= end; i++) {
+            auto value = V::generate_rand();
+            put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS, value);
+            m_range_scheduler.add_to_existing(i);
+        }
+        LOGINFO("PRELOAD DONE FOR [{},{}]", start, end);
+    }
+
+    void RunInParallel(size_t n_threads = 10) {
+        for (size_t i = 0; i < n_threads; ++i)
+            m_threads.push_back(std::thread(&BtreeConcurrentTest::doSomething, this));
+        for (auto& th : m_threads) {
+            th.join();
+        }
+    }
+
+    void set_operations(std::vector< std::string > op_list) { this->m_op_list = op_list; }
+
+    void doSomething() {
+        std::random_device g_rd{};
+        std::default_random_engine re{g_rd()};
+        const auto num_iters_per_thread = SISL_OPTIONS["num_iters"].as< uint32_t >();
+        std::uniform_int_distribution< uint32_t > s_rand_op_generator{0, static_cast< uint32_t >(m_op_list.size() - 1)};
+        for (uint32_t i = 0; i < num_iters_per_thread; i++) {
+            uint32_t operation = s_rand_op_generator(re);
+            run_one_iteration(m_op_list[operation]);
+        }
+    }
+
+    void SetUp() override {
+        m_cfg.m_leaf_node_type = T::leaf_node_type;
+        m_cfg.m_int_node_type = T::interior_node_type;
+        m_bt = std::make_unique< typename T::BtreeType >(m_cfg);
+        m_bt->init(nullptr);
+        m_operations["put"] = &BtreeConcurrentTest::random_put;
+        m_operations["remove"] = &BtreeConcurrentTest::random_remove;
+        m_operations["range_put"] = &BtreeConcurrentTest::random_range_put;
+        m_operations["range_update"] = &BtreeConcurrentTest::random_range_update;
+        m_operations["range_remove"] = &BtreeConcurrentTest::random_range_remove;
+        m_operations["query"] = &BtreeConcurrentTest::random_get;
+    }
+
+    void run_one_iteration(std::string operation_name) {
+        auto op = m_operations[operation_name];
+        (*this.*op)();
+    }
+
+    void execute(std::vector< std::string > op_list) {
+        const auto preload_size = SISL_OPTIONS["preload_size"].as< uint32_t >();
+        const auto n_threads = SISL_OPTIONS["n_threads"].as< uint32_t >();
+        set_operations(op_list);
+        preload(0, preload_size);
+        RunInParallel(n_threads);
+    }
+
+private:
+    void random_range_put() { random_range_put_update(false); }
+    void random_range_update() { random_range_put_update(true); }
+
+    void random_put() {
+        int key = m_range_scheduler.pick_random_non_existing_keys(1, m_max_range_input);
+        if (key == -1) { return; }
+        LOGINFO("Adding the new key {}", key);
+        auto value = V::generate_rand();
+        put(key, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS, value);
+        m_range_scheduler.lock();
+        m_range_scheduler.add_to_existing(static_cast< uint32_t >(key));
+        m_range_scheduler.remove_from_working(static_cast< uint32_t >(key));
+        m_range_scheduler.unlock();
+    }
+
+    void random_remove() {
+        int key = m_range_scheduler.pick_random_existing_keys(1, m_max_range_input);
+        if (key == -1) { return; }
+        LOGINFO("Removing the key {}", key);
+        remove(key);
+        m_range_scheduler.lock();
+        m_range_scheduler.remove_from_existing(static_cast< uint32_t >(key));
+        m_range_scheduler.remove_from_working(static_cast< uint32_t >(key));
+        m_range_scheduler.unlock();
+    }
+
+    void random_range_put_update(bool replace = false) {
+        static std::uniform_int_distribution< uint32_t > s_rand_range_generator{2, 5};
+
+        std::random_device g_re{};
+        uint32_t nkeys = s_rand_range_generator(g_re);
+        int key = -1;
+
+        if (replace) {
+            key = m_range_scheduler.pick_random_existing_keys(nkeys, m_max_range_input);
+        } else {
+            key = m_range_scheduler.pick_random_non_existing_keys(nkeys, m_max_range_input);
+        }
+
+        if (key == -1) { return; }
+        LOGINFO("{} range keys [{},{}]", replace ? "RANGE_UPDATE existing" : "RANGE_PUT non-existing", key,
+                key + nkeys - 1);
+        auto value = V::generate_rand();
+        range_put(key, key + nkeys - 1, value, replace);
+        m_range_scheduler.lock();
+        if (!replace)
+            m_range_scheduler.add_to_existing(static_cast< uint32_t >(key), static_cast< uint32_t >(key + nkeys - 1));
+        m_range_scheduler.remove_from_working(static_cast< uint32_t >(key), static_cast< uint32_t >(key + nkeys - 1));
+        m_range_scheduler.unlock();
+    }
+
+    void random_range_remove() {
+        static std::uniform_int_distribution< uint32_t > s_rand_range_generator{2, 5};
+        std::random_device g_re{};
+        uint32_t nkeys = s_rand_range_generator(g_re);
+        int key = m_range_scheduler.pick_random_existing_keys(nkeys, m_max_range_input);
+        if (key == -1) { return; }
+        LOGINFO("RANGE_REMOVE range keys [{},{}]", key, key + nkeys - 1);
+        range_remove(key, key + nkeys - 1);
+
+        m_range_scheduler.lock();
+        m_range_scheduler.remove_from_existing(static_cast< uint32_t >(key), static_cast< uint32_t >(key + nkeys - 1));
+        m_range_scheduler.remove_from_working(static_cast< uint32_t >(key), static_cast< uint32_t >(key + nkeys - 1));
+        m_range_scheduler.unlock();
+    }
+
+    void put(uint32_t k, btree_put_type put_type, V value) {
+        auto existing_v = std::make_unique< V >();
+        auto pk = std::make_unique< K >(k);
+        auto pv = std::make_unique< V >(V::generate_rand());
+        auto sreq{BtreeSinglePutRequest{pk.get(), pv.get(), put_type, existing_v.get()}};
+        //        auto sreq = BtreeSinglePutRequest{std::make_unique< K >(k).get(), std::make_unique< V >(value),
+        //        put_type,
+        //                                          std::move(existing_v)};
+        bool done = (m_bt->put(sreq) == btree_status_t::success);
+        auto expected_done = m_shadow_map.put(k, value.to_string());
+        ASSERT_EQ(done, expected_done) << "Expected put of key " << k << " of put_type " << enum_name(put_type)
+                                       << " to be " << expected_done;
+    }
+
+    void remove(uint32_t key) {
+        auto existing_v = std::make_unique< V >();
+        auto pk = std::make_unique< K >(key);
+        auto rreq = BtreeSingleRemoveRequest{pk.get(), existing_v.get()};
+
+        bool removed = (m_bt->remove(rreq) == btree_status_t::success);
+        auto expected_done = m_shadow_map.remove(key, ((const V&)rreq.value()).to_string());
+        ASSERT_EQ(removed, expected_done) << "Expected remove of key " << key << " to be " << expected_done;
+    }
+
+    void range_put(uint32_t start_key, uint32_t end_key, V value, bool update) {
+        auto val = std::make_unique< V >(value);
+        auto preq = BtreeRangePutRequest< K >{
+            BtreeKeyRange< K >{start_key, true, end_key, true},
+            update ? btree_put_type::REPLACE_ONLY_IF_EXISTS : btree_put_type::INSERT_ONLY_IF_NOT_EXISTS, val.get()};
+        bool done = (m_bt->put(preq) == btree_status_t::success);
+        auto expected_done = m_shadow_map.range_put(start_key, end_key - start_key + 1, value.to_string(), update);
+        ASSERT_EQ(done, expected_done);
+    }
+
+    void range_remove(uint32_t start_key, uint32_t end_key) {
+        auto range = BtreeKeyRange< K >{K{start_key}, true, K{end_key}, true};
+        auto out_vector = query(start_key, end_key);
+        auto rreq = BtreeRangeRemoveRequest< K >{std::move(range)};
+        bool removed = (m_bt->remove(rreq) == btree_status_t::success);
+        bool expected_removed = m_shadow_map.range_remove(start_key, end_key - start_key + 1, out_vector);
+        ASSERT_EQ(removed, expected_removed) << "not a successful remove op for range " << range.to_string();
+    }
+
+    void random_query(uint32_t start_key, uint32_t end_key) {
+        auto range = BtreeKeyRange< K >{K{start_key}, true, K{end_key}, true};
+        auto out_vector = query(start_key, end_key);
+        bool expected = m_shadow_map.range_get(start_key, end_key - start_key + 1, out_vector);
+        ASSERT_TRUE(expected) << "not a successful query op for range " << range.to_string();
+    }
+
+    std::unordered_map< uint32_t, std::string > query(uint32_t start_k, uint32_t end_k) const {
+        std::vector< std::pair< K, V > > out_vector;
+        BtreeQueryRequest< K > qreq{BtreeKeyRange< K >{K{start_k}, true, K{end_k}, true},
+                                    BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, UINT32_MAX};
+        auto const ret = m_bt->query(qreq, out_vector);
+        std::unordered_map< uint32_t, std::string > result;
+        for (auto const& pair : out_vector) {
+            result[pair.first.key()] = pair.second.to_string();
+        }
+        return result;
+    }
+
+    void random_get() {
+        static std::uniform_int_distribution< uint32_t > s_rand_range_generator{1, 100};
+
+        std::random_device g_re{};
+        uint32_t nkeys = s_rand_range_generator(g_re);
+        int key = -1;
+        key = m_range_scheduler.pick_random_non_working_keys(nkeys, m_max_range_input);
+        if (key == -1) { return; }
+        LOGINFO("Query range keys [{},{}]", key, key + nkeys - 1);
+        random_query(key, key + nkeys - 1);
+        m_range_scheduler.lock();
+        m_range_scheduler.remove_from_working(static_cast< uint32_t >(key), static_cast< uint32_t >(key + nkeys - 1));
+        m_range_scheduler.unlock();
+    }
+
+private:
+    std::unique_ptr< typename T::BtreeType > m_bt;
+    struct ShadowMap {
+    public:
+        bool put(uint32_t key, std::string value, bool update = false) {
+            std::unique_lock< std::mutex > lk(m_map_lock);
+            auto it = m_data.find(key);
+            if ((it == m_data.end() && update) || (it != m_data.end() && !update)) { return false; }
+            m_data[key] = value;
+            return true;
+        }
+        bool range_put(uint32_t key, uint32_t nkeys, std::string value, bool update = false) {
+            std::unique_lock< std::mutex > lk(m_map_lock);
+            if (update) {
+                if (!all_existed(key, nkeys)) { return false; }
+            } else {
+                if (!non_of_them_existed(key, nkeys)) { return false; }
+            }
+            for (auto cur = key; cur < key + nkeys; cur++) {
+                m_data[cur] = value;
+            }
+            return true;
+        }
+
+        bool remove(uint32_t key) {
+            std::unique_lock< std::mutex > lk(m_map_lock);
+            if (non_of_them_existed(key, 1)) { return false; }
+            auto it = m_data.find(key);
+            if (it == m_data.end()) { return false; }
+            m_data.erase(it);
+            return true;
+        }
+        bool remove(uint32_t key, std::string value) {
+            std::unique_lock< std::mutex > lk(m_map_lock);
+            if (non_of_them_existed(key, 1)) { return false; }
+            auto it = m_data.find(key);
+            if (it == m_data.end()) { return false; }
+            if (it->second != value) { return false; }
+            m_data.erase(it);
+            return true;
+        }
+
+        bool range_remove(uint32_t key, uint32_t nkeys) {
+            std::unique_lock< std::mutex > lk(m_map_lock);
+            if (non_of_them_existed(key, nkeys)) { return false; }
+            auto first_it = m_data.find(key);
+            auto last_it = m_data.upper_bound(key + nkeys - 1);
+            m_data.erase(first_it, last_it);
+            return true;
+        }
+        bool range_get(uint32_t key, uint32_t nkeys) {
+            std::unique_lock< std::mutex > lk(m_map_lock);
+            if (non_of_them_existed(key, nkeys)) { return false; }
+            auto first_it = m_data.find(key);
+            auto last_it = m_data.upper_bound(key + nkeys - 1);
+            m_data.erase(first_it, last_it);
+            return true;
+        }
+        bool range_get(uint32_t key, uint32_t nkeys, std::unordered_map< uint32_t, std::string > val_map) {
+            std::unique_lock< std::mutex > lk(m_map_lock);
+            if (non_of_them_existed(key, nkeys) && val_map.size()) { return false; }
+            uint32_t count = 0;
+            for (auto cur = key; cur < key + nkeys; cur++) {
+                if (m_data.find(cur) != m_data.end() && val_map[cur] != m_data[cur]) { return false; }
+                ++count;
+            }
+            if (count != val_map.size()) { return false; }
+            return true;
+        }
+        bool range_remove(uint32_t key, uint32_t nkeys, std::unordered_map< uint32_t, std::string > val_map) {
+            std::unique_lock< std::mutex > lk(m_map_lock);
+            if (non_of_them_existed(key, nkeys)) { return false; }
+            for (auto cur = key; cur < key + nkeys; cur++)
+                if (m_data.find(cur) != m_data.end() && val_map[cur] != m_data[cur]) { return false; }
+            auto first_it = m_data.find(key);
+            auto last_it = m_data.upper_bound(key + nkeys - 1);
+            m_data.erase(first_it, last_it);
+            return true;
+        }
+
+    private:
+        bool non_of_them_existed(uint32_t key, uint32_t nkeys) {
+            for (auto cur = key; cur < key + nkeys; cur++)
+                if (m_data.find(cur) != m_data.end()) return false;
+            return true;
+        }
+
+        bool all_existed(uint32_t key, uint32_t nkeys) {
+            for (auto cur = key; cur < key + nkeys; cur++)
+                if (m_data.find(cur) == m_data.end()) return false;
+            return true;
+        }
+
+        std::map< uint32_t, std::string > m_data;
+        std::mutex m_map_lock;
+    };
+    ShadowMap m_shadow_map;
+    RangeScheduler m_range_scheduler;
+    std::vector< std::thread > m_threads;
+    uint32_t m_max_range_input = 10000;
+    BtreeConfig m_cfg{g_node_size};
+    std::map< std::string, pt2func > m_operations;
+    std::vector< std::string > m_op_list;
+};
+
+TYPED_TEST_SUITE(BtreeConcurrentTest, BtreeTypes);
+
+TYPED_TEST(BtreeConcurrentTest, PutTree) {
+    std::vector< std::string > ops = {"put", "query"};
+    this->execute(ops);
+}
+
+TYPED_TEST(BtreeConcurrentTest, RemoveTree) {
+    std::vector< std::string > ops = {"remove", "query"};
+    this->execute(ops);
+}
+
+TYPED_TEST(BtreeConcurrentTest, PutRemoveTree) {
+    std::vector< std::string > ops = {"put", "remove", "query"};
+    this->execute(ops);
+}
+
+TYPED_TEST(BtreeConcurrentTest, RangeUpdateRemoveTree) {
+    // range put is not supported for non-extent keys
+    std::vector< std::string > ops = {"range_update", "range_remove", "query"};
+    this->execute(ops);
+}
+
+TYPED_TEST(BtreeConcurrentTest, AllTree) {
+    // range put is not supported for non-extent keys
+    std::vector< std::string > ops = {"put", "remove", "range_update", "range_remove", "query"};
+    this->execute(ops);
 }
 
 int main(int argc, char* argv[]) {
