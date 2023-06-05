@@ -243,6 +243,9 @@ public:
     virtual cap_attrs get_system_capacity() override {
         return HomeStore< BLKSTORE_BUFFER_TYPE >::get_system_capacity();
     }
+
+    virtual std::error_condition copy_vol(const boost::uuids::uuid& uuid, const std::string& path) override;
+
     /**
      * @brief : fix corrupted mapping in volume
      *

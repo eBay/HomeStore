@@ -173,6 +173,7 @@ struct TestCfg {
     uint32_t create_del_ops_interval;
     uint32_t p_vol_files_space;
     std::string flip_name;
+    std::string vol_copy_file_path;
 
     bool verify_csum() { return verify_type == verify_type_t::csum; }
     bool verify_data() { return verify_type == verify_type_t::data; }
@@ -606,7 +607,6 @@ protected:
     static boost::uuids::uuid m_am_uuid; // simulate am system uuid
     static bool m_am_sb_received;        // used in recovery mode;
     static bool m_am_sb_written;         // track whether am sb is written or not
-
 public:
     static thread_local uint32_t _n_completed_this_thread;
 
@@ -773,7 +773,7 @@ public:
         }
         if (SISL_OPTIONS.count("http_port")) {
             test_common::set_fixed_http_port(SISL_OPTIONS["http_port"].as< uint32_t >());
-        }else {
+        } else {
             test_common::set_random_http_port();
         }
         VolInterface::init(params);
@@ -1190,12 +1190,13 @@ private:
             // initialize the file only for non-header case;
             uint8_t* init_csum_buf{nullptr};
             const uint32_t num_csums_write{1024};
-            const uint16_t csum_zero{
-                crc16_t10dif(init_crc_16, static_cast< const uint8_t* >(init_buf), tcfg.vol_page_size)};
+            const auto crc_zero =
+                crc16_t10dif(init_crc_16, static_cast< const uint8_t* >(init_buf), tcfg.vol_page_size);
+
             if (tcfg.verify_csum()) {
                 init_csum_buf = iomanager.iobuf_alloc(512, num_csums_write * sizeof(uint16_t));
                 for (size_t i = 0; i < num_csums_write; ++i) {
-                    *(reinterpret_cast< uint16_t* >(init_csum_buf) + i) = csum_zero;
+                    *(reinterpret_cast< uint16_t* >(init_csum_buf) + i) = crc_zero;
                 }
             }
             const uint64_t offset_increment{tcfg.verify_csum() ? (sizeof(uint16_t) * num_csums_write)
@@ -1311,6 +1312,139 @@ private:
     }
 
 public:
+    //
+    // read crc from test_files/vol[1...x]
+    // read data on vol file and caculate its crc and make sure they match;
+    //
+    void reverse_verify_vol(const std::string& vol_copy_file_path) {
+        const auto fname = fs::path(vol_copy_file_path).filename().string();
+        const auto vol_uuid = fname.substr(0, fname.find("_p_"));
+        const std::string crc_file_name{VOL_PREFIX + std::to_string(0)};
+        auto crc_fd = open(crc_file_name.c_str(), O_RDONLY);
+        auto fd = open(vol_copy_file_path.c_str(), O_RDONLY);
+
+        lseek(crc_fd, VOL_FILE_HDR_SZ, SEEK_SET);
+        ssize_t nbytes = 0;
+        off_t crc_off = 0;
+        const auto read_buf = iomanager.iobuf_alloc(512 /* alignment */, tcfg.vol_page_size);
+        std::memset(read_buf, 0, tcfg.vol_page_size);
+        const auto zero_crc = crc16_t10dif(init_crc_16, read_buf, tcfg.vol_page_size);
+        uint16_t crc1 = 0;
+
+        // let crc_fd's file offset advance automatcially;
+        while ((nbytes = read(crc_fd, &crc1, sizeof(uint16_t))) != 0) {
+            if (nbytes == -1) {
+                HS_REL_ASSERT(true, "read errno: {}, message: {}", errno, std::strerror(errno));
+            } else {
+                if (nbytes != sizeof(uint16_t)) {
+                    // we reached end of file;
+                    // vol file was written one byte of null at the end of the file;
+                    LOGINFO("Reached end of vol file storing crc.");
+                    break;
+                }
+
+                if (crc1 != zero_crc) {
+                    std::memset(read_buf, 0, tcfg.vol_page_size);
+                    [[maybe_unused]] const auto ret =
+                        pread(fd, read_buf, tcfg.vol_page_size, crc_off * tcfg.vol_page_size);
+                    const auto crc2 = crc16_t10dif(init_crc_16, read_buf, tcfg.vol_page_size);
+                    HS_REL_ASSERT_EQ(crc1, crc2, "crc mismatch: origin crc: {}, copy vol crc: {}, offset: {}, len: {}",
+                                     crc1, crc2, crc_off, tcfg.vol_page_size);
+                }
+                // fall through for crc equal to m_crc_zero
+            }
+
+            // move to next page crc;
+            ++crc_off;
+        }
+        // end of file
+
+        iomanager.iobuf_free(read_buf);
+        close(crc_fd);
+        close(fd);
+        LOGINFO("Successfully reverse verified crc.");
+    }
+
+    //
+    // vol data is copied to "vol_copy_file_path",
+    // 1. read data out, calculate crc and compare it with vol file saved under test_files/vol[1...x]
+    // 2. this is only valid when --verify_type is set to 0, which is default value;
+    //
+    void verify_vol(const std::string& vol_copy_file_path) {
+        // vol_copy_file_path: the file dumped with copied volume data
+        // crc_file_name: the file stored with crc when volume is being written in io job;
+        const auto fname = fs::path(vol_copy_file_path).filename().string();
+        const auto vol_uuid = fname.substr(0, fname.find("_p_"));
+        const std::string crc_file_name{VOL_PREFIX + std::to_string(0)};
+        auto crc_fd = open(crc_file_name.c_str(), O_RDONLY);
+        vol_file_hdr hdr;
+        [[maybe_unused]] const auto rd_sz = pread(crc_fd, (char*)&hdr, VOL_FILE_HDR_SZ, 0 /* offset*/);
+
+        // 1. verify uuid does match;
+        HS_DBG_ASSERT_EQ(vol_uuid, boost::uuids::to_string(hdr.uuid));
+
+        // 2. read vol_copy_rf (sparse file) and compare with vol_file (dense file);
+        //    make sure everything written in vol_copy is also written in vol_file;
+        auto fd = open(vol_copy_file_path.c_str(), O_RDONLY);
+
+        uint64_t total_bytes = 0ull;
+        // std::vector< uint16_t > crc_vec;
+        off_t hole, data, pos;
+        auto buf = iomanager.iobuf_alloc(512 /* alignment */, tcfg.vol_page_size);
+        std::memset(buf, 0, tcfg.vol_page_size);
+
+        // read until end of the file;
+        for (hole = 0;; data = hole) {
+            if ((data = lseek(fd, hole, SEEK_DATA)) == -1) {
+                if (errno == ENXIO) {
+                    LOGINFO("no more data on seek + data.");
+                    break;
+                }
+                HS_REL_ASSERT(false, "Unexpected error: {}, msg: {}", errno, std::strerror(errno));
+            }
+
+            if ((hole = lseek(fd, data, SEEK_HOLE)) == -1) {
+                if (errno == ENXIO) {
+                    LOGINFO("no more data on seek + data.");
+                    break;
+                }
+                HS_REL_ASSERT(false, "Unexpected error: {}, msg: {}", errno, std::strerror(errno));
+            }
+
+            HS_DBG_ASSERT_EQ(data % tcfg.vol_page_size, 0, "Unexpected data offset: {}", data);
+            HS_DBG_ASSERT_EQ(hole % tcfg.vol_page_size, 0, "Unexpected hole offset: {}", hole);
+
+            const auto data_len = hole - data;
+            LOGINFO("Found data lba: {}, len: {}", data / tcfg.vol_page_size, data_len);
+            total_bytes += data_len;
+
+            // read page by page to cross compare crc with the crc saved on disk;
+            for (pos = data; pos < hole;) {
+                // io size should be times of 4KB;
+                std::memset(buf, 0, tcfg.vol_page_size);
+                [[maybe_unused]] const auto ret = pread(fd, buf, tcfg.vol_page_size, pos);
+                // calculate crc
+                const auto crc1 = crc16_t10dif(init_crc_16, buf, tcfg.vol_page_size);
+                uint16_t crc2 = 0;
+                [[maybe_unused]] const auto ret2 = pread(
+                    crc_fd, &crc2, sizeof(uint16_t), VOL_FILE_HDR_SZ + (pos / tcfg.vol_page_size) * sizeof(uint16_t));
+                HS_REL_ASSERT_EQ(crc1, crc2, "crc mismatch: copy vol crc: {}, origin crc: {}, offset: {}, len: {}",
+                                 crc1, crc2, pos, tcfg.vol_page_size);
+                pos += tcfg.vol_page_size;
+            }
+
+            HS_DBG_ASSERT_EQ(pos, hole, "pos: {}, hole: {}", pos, hole);
+        }
+
+        LOGINFO(
+            "Successfully verficed copied volume's name: {}, crc matches with crc file saved on disk, total bytes: {}",
+            vol_uuid, total_bytes);
+
+        iomanager.iobuf_free(buf);
+        close(fd);
+        close(crc_fd);
+    }
+
     void force_reinit(const std::vector< dev_info >& data_devices, const io_flag data_oflags,
                       const io_flag fast_oflags) {
         ioenvironment.with_iomgr(1);
@@ -2074,6 +2208,78 @@ TEST_F(VolTest, recovery_io_test) {
     if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
+/*!
+    @test   recovery_boot_test
+    @brief  Tests which does recovery. End up with a clean shutdown
+    This test doesn't do any io to volume;
+ */
+TEST_F(VolTest, recovery_boot_test) {
+    const auto start_time(Clock::now());
+    tcfg.init = false;
+    this->start_homestore(false /* force_reinit */);
+
+    LOGINFO("recovery verify started");
+    std::unique_ptr< VolVerifyJob > verify_job;
+    if (tcfg.pre_init_verify || tcfg.verify_only) {
+        verify_job = std::make_unique< VolVerifyJob >(this);
+        this->start_job(verify_job.get(), wait_type::for_completion);
+        LOGINFO("recovery verify done");
+    } else {
+        LOGINFO("bypassing recovery verify");
+    }
+
+    while ((get_elapsed_time_sec(start_time) < tcfg.run_time)) {
+        std::this_thread::sleep_for(std::chrono::seconds{2});
+    }
+
+    if (tcfg.can_delete_volume) { this->delete_volumes(); }
+    this->shutdown();
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
+}
+
+/*!
+    @test   recovery_boot_copy_vol_test
+    @brief  Tests which does recovery. End up with a clean shutdown
+    This test doesn't do any io to volume;
+ */
+TEST_F(VolTest, recovery_boot_copy_vol_test) {
+    const auto start_time(Clock::now());
+    tcfg.init = false;
+    this->start_homestore(false /* force_reinit */);
+
+    LOGINFO("recovery verify started");
+    std::unique_ptr< VolVerifyJob > verify_job;
+    if (tcfg.pre_init_verify || tcfg.verify_only) {
+        verify_job = std::make_unique< VolVerifyJob >(this);
+        this->start_job(verify_job.get(), wait_type::for_completion);
+        LOGINFO("recovery verify done");
+    } else {
+        LOGINFO("bypassing recovery verify");
+    }
+
+    LOGINFO("Starting to verify dumpped files with saved vol file with crc checksum");
+
+    HS_REL_ASSERT_EQ(m_vol_info.empty(), false);
+
+    // use real vol uuid and faked partition info
+    const auto file_path =
+        "./test_files/" + boost::uuids::to_string(m_vol_info[0]->uuid) + "_p_" + "137_sds_tess86_01_am02";
+
+    // copy vol
+    VolInterface::get_instance()->copy_vol(m_vol_info[0]->uuid, file_path);
+
+    // verify copied vol;
+    // make sure everything we wrote to vol file matches the crc we saved on crc_vol_file;
+    verify_vol(file_path);
+    // make sure everything we wrote on crc_vol_file also matches the data we wrote on copied vol file,
+    // it is required to make sure the copied file doesn't miss anything data;
+    reverse_verify_vol(file_path);
+
+    if (tcfg.can_delete_volume) { this->delete_volumes(); }
+    this->shutdown();
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
+}
+
 #ifdef _PRERELEASE
 /*
  * @test    hs_force_reinit_test only works in PRERELEASE mode;
@@ -2375,6 +2581,8 @@ SISL_OPTION_GROUP(
     (max_io_size, "", "max_io_size", "max io size", ::cxxopts::value< uint64_t >()->default_value("4096"),
      "max_io_size"),
     (io_size, "", "io_size", "io size in KB", ::cxxopts::value< uint32_t >()->default_value("4"), "io_size"),
+    (vol_copy_file_path, "", "vol_copy_file_path", "file path for copied volume",
+     ::cxxopts::value< std::string >()->default_value(""), "path [...]"),
     (unmap_frequency, "", "unmap_frequency", "do unmap for every N",
      ::cxxopts::value< uint64_t >()->default_value("100"), "unmap_frequency"))
 
@@ -2449,6 +2657,7 @@ int main(int argc, char* argv[]) {
     gcfg.emulate_hdd_stream_cnt = SISL_OPTIONS["emulate_hdd_stream_cnt"].as< uint32_t >();
     gcfg.p_vol_files_space = SISL_OPTIONS["p_vol_files_space"].as< uint32_t >();
     gcfg.app_mem_size_in_gb = SISL_OPTIONS["app_mem_size_in_gb"].as< uint32_t >();
+    gcfg.vol_copy_file_path = SISL_OPTIONS["vol_copy_file_path"].as< std::string >();
     const auto io_size_in_kb = SISL_OPTIONS["io_size"].as< uint32_t >();
     gcfg.io_size = io_size_in_kb * 1024;
 

@@ -1172,4 +1172,17 @@ iomgr::drive_type HomeBlks::data_drive_type() {
     }
 }
 
+std::error_condition HomeBlks::copy_vol(const boost::uuids::uuid& uuid, const std::string& file_path) {
+    // at this point, file_path is gaurnteened to be not existed yet by caller;
+    VolumePtr vol = nullptr;
+    {
+        std::lock_guard< std::recursive_mutex > lg(m_vol_lock);
+        auto it = m_volume_map.find(uuid);
+        if (it == m_volume_map.end()) { return std::make_error_condition(std::errc::no_such_device_or_address); }
+        vol = it->second;
+    }
+
+    return vol->copy_to(file_path);
+}
+
 bool HomeBlks::m_meta_blk_found = false;

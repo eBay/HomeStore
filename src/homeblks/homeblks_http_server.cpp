@@ -82,6 +82,8 @@ void HomeBlksHttpServer::setup_routes() {
                                      Routes::bind(&HomeBlksHttpServer::verify_metablk_store, this));
         http_server_ptr->setup_route(Http::Method::Post, "/api/v1/wakeupInit",
                                      Routes::bind(&HomeBlksHttpServer::wakeup_init, this));
+        http_server_ptr->setup_route(Http::Method::Post, "/api/v1/copy_vol",
+                                     Routes::bind(&HomeBlksHttpServer::copy_vol, this));
 #ifdef _PRERELEASE
         http_server_ptr->setup_route(Http::Method::Post, "/api/v1/crashSystem",
                                      Routes::bind(&HomeBlksHttpServer::crash_system, this));
@@ -284,6 +286,59 @@ void HomeBlksHttpServer::verify_bitmap(const Pistache::Rest::Request& request,
 void HomeBlksHttpServer::wakeup_init(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
     m_hb->wakeup_init();
     response.send(Pistache::Http::Code::Ok, "completed");
+}
+
+void HomeBlksHttpServer::copy_vol(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
+    std::vector< std::string > vol_uuids;
+    auto vol_uuids_kv = request.query().get("uuid");
+    if (vol_uuids_kv) {
+        boost::algorithm::split(vol_uuids, vol_uuids_kv.value(), boost::is_any_of(","), boost::token_compress_on);
+    }
+
+    std::vector< std::string > part_info;
+    auto part_info_kv = request.query().get("part_info");
+    if (part_info_kv) {
+        boost::algorithm::split(part_info, part_info_kv.value(), boost::is_any_of(","), boost::token_compress_on);
+    }
+
+    std::vector< std::string > write_path;
+    auto write_path_kv = request.query().get("path");
+    if (write_path_kv) {
+        boost::algorithm::split(write_path, write_path_kv.value(), boost::is_any_of(","), boost::token_compress_on);
+    }
+
+    // TODO: Only allow this request in safe_mdoe ?
+    if (vol_uuids.size() != 1 || part_info.size() != 1 || write_path.size() != 1) {
+        response.send(Pistache::Http::Code::Bad_Request,
+                      "uuid, part_info, path all need to be provided (only once) to proceed this request.");
+        return;
+    }
+
+    boost::uuids::string_generator gen;
+    boost::uuids::uuid uuid = gen(vol_uuids[0]);
+
+    // file name: <vol_uuid>_p_<part_info>
+    // _p_ is the splitter only useful for verfification;
+    const auto file_name = vol_uuids[0] + "_p_" + part_info[0];
+    const auto file_path = write_path[0] + "/" + file_name;
+
+    const std::filesystem::path fpath{file_path};
+    if (std::filesystem::exists(fpath)) {
+        const auto resp_fail = "file already exists at path: " + file_path;
+        response.send(Pistache::Http::Code::Bad_Request, resp_fail);
+    }
+
+    // const auto err = m_hb->copy_vol(uuid, file_path);
+
+    auto sthread =
+        sisl::named_thread("copy_volume", [this, uuid, file_path]() mutable { m_hb->copy_vol(uuid, file_path); });
+    sthread.detach();
+
+    std::string resp{"Starting volume write to path: " + write_path[0] + " , file name: " + file_name +
+                     " Successfully"};
+    // resp += (err == no_error ? " Successfully" : (" Failed, error msg: " + err.message()));
+
+    response.send(Pistache::Http::Code::Ok, resp);
 }
 
 #ifdef _PRERELEASE
