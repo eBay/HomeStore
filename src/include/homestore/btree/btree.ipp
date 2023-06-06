@@ -56,6 +56,11 @@ btree_status_t Btree< K, V >::init(void* op_context) {
 }
 
 template < typename K, typename V >
+void Btree< K, V >::set_root_node_info(const BtreeLinkInfo &info) {
+    m_root_node_info = info;
+}
+
+template < typename K, typename V >
 std::pair< btree_status_t, uint64_t > Btree< K, V >::destroy_btree(void* context) {
     btree_status_t ret{btree_status_t::success};
     uint64_t n_freed_nodes{0};
@@ -333,6 +338,10 @@ nlohmann::json Btree< K, V >::get_metrics_in_json(bool updated) {
 template < typename K, typename V >
 bnodeid_t Btree< K, V >::root_node_id() const {
     return m_root_node_info.bnode_id();
+}
+template < typename K, typename V >
+uint64_t Btree< K, V >::root_link_version() const {
+    return m_root_node_info.link_version();
 }
 
 // TODO: Commenting out flip till we figure out how to move flip dependency inside sisl package.

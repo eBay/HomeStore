@@ -100,6 +100,8 @@ public:
     void print_tree() const;
     nlohmann::json get_metrics_in_json(bool updated = true);
     bnodeid_t root_node_id() const;
+    uint64_t root_link_version() const;
+    void set_root_node_info(const BtreeLinkInfo &info);
 
     // static void set_io_flip();
     // static void set_error_flip();

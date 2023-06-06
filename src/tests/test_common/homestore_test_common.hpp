@@ -60,7 +60,7 @@ inline static uint32_t generate_random_http_port() {
 
 class TestIndexServiceCallbacks : public IndexServiceCallbacks {
 public:
-    std::shared_ptr< IndexTableBase > on_index_table_found(const superblk< index_table_sb >& cb) override {
+    std::shared_ptr< IndexTableBase > on_index_table_found(const superblk< index_table_sb >& sb) override {
         return nullptr;
     }
 };
@@ -85,7 +85,8 @@ private:
 
 public:
     static void start_homestore(const std::string& test_name, float meta_pct, float data_log_pct, float ctrl_log_pct,
-                                float data_pct, float index_pct, hs_init_starting_cb_t cb, bool restart = false) {
+                                float data_pct, float index_pct, hs_init_starting_cb_t cb, bool restart = false,
+                                std::unique_ptr< IndexServiceCallbacks > index_svc_cb = nullptr) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
@@ -133,6 +134,8 @@ public:
             ioenvironment.with_http_server((http_port == -1) ? generate_random_http_port() : uint32_cast(http_port));
         }
 
+        if (!index_svc_cb) { index_svc_cb = std::make_unique< TestIndexServiceCallbacks >(); }
+
         const uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
         LOGINFO("Initialize and start HomeStore with app_mem_size = {}", homestore::in_bytes(app_mem_size));
 
@@ -144,7 +147,7 @@ public:
             .with_meta_service(meta_pct)
             .with_log_service(data_log_pct, ctrl_log_pct)
             .with_data_service(data_pct)
-            .with_index_service(index_pct, std::make_unique< TestIndexServiceCallbacks >())
+            .with_index_service(index_pct, std::move(index_svc_cb))
             .before_init_devices(std::move(cb))
             .init(true /* wait_for_init */);
     }
