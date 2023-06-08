@@ -39,6 +39,7 @@ struct index_table_sb {
 
     // Btree Section
     bnodeid_t root_node{empty_bnodeid}; // Btree Root Node ID
+    uint64_t link_version{0};
     int64_t index_size{0};              // Size of the Index
     // seq_id_t last_seq_id{-1};           // TODO: See if this is needed
 
@@ -87,7 +88,7 @@ typedef boost::intrusive_ptr< BtreeNode > BtreeNodePtr;
 struct IndexBtreeNode {
 public:
     IndexBufferPtr m_idx_buf;    // Buffer backing this node
-    cp_id_t m_last_mod_cp_id{0}; // This node is previously modified by the cp id;
+    cp_id_t m_last_mod_cp_id{-1}; // This node is previously modified by the cp id;
 
 public:
     IndexBtreeNode(const IndexBufferPtr& buf) : m_idx_buf{buf} {}

@@ -35,7 +35,7 @@ private:
 public:
     IndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, const BtreeConfig& cfg,
                on_kv_read_t read_cb = nullptr, on_kv_update_t update_cb = nullptr, on_kv_remove_t remove_cb = nullptr) :
-            Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)} {
+        Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)}, m_sb{"index"} {
         m_sb.create(sizeof(index_table_sb));
         m_sb->uuid = uuid;
         m_sb->parent_uuid = parent_uuid;
@@ -49,12 +49,15 @@ public:
                on_kv_update_t update_cb = nullptr, on_kv_remove_t remove_cb = nullptr) :
             Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)} {
         m_sb = sb;
+        Btree< K, V >::set_root_node_info(BtreeLinkInfo{m_sb->root_node, m_sb->link_version});
     }
 
     btree_status_t init() {
         auto cp = hs()->cp_mgr().cp_guard();
         auto ret = Btree< K, V >::init((void*)cp->context(cp_consumer_t::INDEX_SVC));
         m_sb->root_node = Btree< K, V >::root_node_id();
+        m_sb->link_version = Btree< K, V >::root_link_version();
+        m_sb.write();
         return ret;
     }
 
@@ -101,6 +104,7 @@ protected:
         if (idx_node->m_last_mod_cp_id != cp_ctx->id()) {
             // Need to put it in wb cache
             wb_cache().write_buf(node, idx_node->m_idx_buf, cp_ctx);
+            idx_node->m_last_mod_cp_id = cp_ctx->id();
         }
         node->set_checksum(this->m_bt_cfg);
         return btree_status_t::success;
@@ -172,6 +176,7 @@ protected:
         // Make a new btree buffer and copy the contents and swap it to make it the current node's buffer. The
         // buffer prior to this copy, would have been written and already added into the dirty buffer list.
         idx_node->m_idx_buf = wb_cache().copy_buffer(idx_node->m_idx_buf);
+        node->m_phys_node_buf = idx_node->m_idx_buf->raw_buffer();
 
 #ifndef NO_CHECKSUM
         if (!node->verify_node(this->m_bt_cfg)) {
@@ -202,7 +207,7 @@ protected:
         BT_DBG_ASSERT(child_buf->is_clean(), "Child buffer is not clean, refresh node was not called before?");
         BT_DBG_ASSERT(parent_buf->is_clean(), "Parent buffer is not clean, refresh node was not called before?");
 
-        //        wb_cache().create_chain(child_buf, parent_buf);
+        wb_cache().create_chain(child_buf, parent_buf);
         return btree_status_t::success;
     }
 

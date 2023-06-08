@@ -29,6 +29,8 @@
 #include <homestore/btree/detail/varlen_node.hpp>
 #include <homestore/homestore.hpp>
 #include <homestore/index/index_table.hpp>
+#include "common/homestore_config.hpp"
+#include "common/resource_mgr.hpp"
 #include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
@@ -85,23 +87,36 @@ struct BtreeTest : public testing::Test {
     using K = typename TestType::KeyType;
     using V = typename TestType::ValueType;
 
+    class TestIndexServiceCallbacks : public IndexServiceCallbacks {
+    public:
+        TestIndexServiceCallbacks(BtreeConfig cfg) : m_bt_cfg(cfg) {}
+        std::shared_ptr< IndexTableBase > on_index_table_found(const superblk< index_table_sb >& sb) override {
+            LOGINFO("Index table recovered");
+            return std::make_shared< typename T::BtreeType >(sb, this->m_bt_cfg);
+        }
+
+    private:
+        BtreeConfig m_bt_cfg;
+    };
+
     std::shared_ptr< typename T::BtreeType > m_bt;
     std::map< K, V > m_shadow_map;
+    std::unique_ptr< BtreeConfig > m_bt_cfg;
 
     void SetUp() override {
         test_common::HSTestHelper::start_homestore("test_index_btree", 10 /* meta */, 0 /* data log */, 0 /* ctrl log*/,
                                                    0 /* data */, 70 /* index */, nullptr, false /* restart */);
 
-        BtreeConfig bt_cfg{hs()->index_service().node_size()};
-        bt_cfg.m_leaf_node_type = T::leaf_node_type;
-        bt_cfg.m_int_node_type = T::interior_node_type;
+        m_bt_cfg = std::make_unique< BtreeConfig >(hs()->index_service().node_size());
+        m_bt_cfg->m_leaf_node_type = T::leaf_node_type;
+        m_bt_cfg->m_int_node_type = T::interior_node_type;
 
         auto uuid = boost::uuids::random_generator()();
         auto parent_uuid = boost::uuids::random_generator()();
-        m_bt = std::make_shared< typename T::BtreeType >(uuid, parent_uuid, 0, bt_cfg);
-        auto ret = m_bt->init();
-        ASSERT_EQ(ret, btree_status_t::success);
 
+        // Create index table and attach to index service.
+
+        m_bt = std::make_shared< typename T::BtreeType >(uuid, parent_uuid, 0, *m_bt_cfg);
         hs()->index_service().add_index_table(m_bt);
         LOGINFO("Added index table to index service");
     }
@@ -116,6 +131,7 @@ struct BtreeTest : public testing::Test {
         auto pk = std::make_unique< K >(k);
         auto pv = std::make_unique< V >(V::generate_rand());
         auto sreq{BtreeSinglePutRequest{pk.get(), pv.get(), put_type, existing_v.get()}};
+        sreq.enable_route_tracing();
         bool done = (m_bt->put(sreq) == btree_status_t::success);
 
         // auto& sreq = to_single_put_req(req);
@@ -153,6 +169,7 @@ struct BtreeTest : public testing::Test {
 
         auto mreq = BtreeRangePutRequest< K >{BtreeKeyRange< K >{start_it->first, true, end_it->first, true},
                                               btree_put_type::REPLACE_ONLY_IF_EXISTS, val.get()};
+        mreq.enable_route_tracing();
         ASSERT_EQ(m_bt->put(mreq), btree_status_t::success);
     }
 
@@ -222,7 +239,7 @@ struct BtreeTest : public testing::Test {
             *copy_key = key;
             auto out_v = std::make_unique< V >();
             auto req = BtreeSingleGetRequest{copy_key.get(), out_v.get()};
-
+            req.enable_route_tracing();
             const auto ret = m_bt->get(req);
             ASSERT_EQ(ret, btree_status_t::success) << "Missing key " << key << " in btree but present in shadow map";
             ASSERT_EQ((const V&)req.value(), value)
@@ -264,6 +281,20 @@ struct BtreeTest : public testing::Test {
 
     void print() const { m_bt->print_tree(); }
 
+    void trigger_cp(bool wait) {
+        auto fut = homestore::hs()->cp_mgr().trigger_cp_flush(true /* force */);
+        auto on_complete = [&](auto success) {
+            ASSERT_EQ(success, true) << "CP Flush failed";
+            LOGINFO("CP Flush completed");
+        };
+
+        if (wait) {
+            on_complete(std::move(fut).get());
+        } else {
+            std::move(fut).thenValue(on_complete);
+        }
+    }
+
 private:
     void validate_data(const K& key, const V& btree_val) const {
         const auto r = m_shadow_map.find(key);
@@ -292,6 +323,7 @@ private:
 // using BtreeTypes = testing::Types< FixedLenBtreeTest, VarKeySizeBtreeTest, VarValueSizeBtreeTest, VarObjSizeBtreeTest
 // >;
 using BtreeTypes = testing::Types< VarKeySizeBtreeTest, VarValueSizeBtreeTest, VarObjSizeBtreeTest >;
+
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 
 TYPED_TEST(BtreeTest, SequentialInsert) {
@@ -378,6 +410,56 @@ TYPED_TEST(BtreeTest, RangeUpdate) {
     }
 
     LOGINFO("Step 2: Query {} entries and validate with pagination of 75 entries", num_entries);
+    this->query_validate(0, num_entries - 1, 75);
+}
+
+
+TYPED_TEST(BtreeTest, CpFlush) {
+    // Test cp flush of write back.
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.generic.cache_max_throttle_cnt = 100;
+        HS_SETTINGS_FACTORY().save();
+    });
+    homestore::hs()->resource_mgr().reset_dirty_buf_qd();
+
+    const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
+    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries / 2);
+    for (uint32_t i{0}; i < num_entries / 2; ++i) {
+        this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    }
+    LOGINFO("Step 2: Query {} entries and validate with pagination of 75 entries", num_entries / 2);
+    this->query_validate(0, num_entries / 2 - 1, 75);
+
+    LOGINFO("Step 3: Trigger checkpoint flush.");
+    // this->trigger_cp(true /* wait */);
+
+    LOGINFO("Step 4: Simulate parallel insert for {} entries", num_entries / 2);
+    for (uint32_t i{num_entries / 2}; i < num_entries; ++i) {
+        this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    }
+
+    LOGINFO("Step 5: Query {} entries and validate with pagination of 75 entries", num_entries);
+    this->query_validate(0, num_entries - 1, 75);
+
+    LOGINFO("Step 4: Trigger a back-to-back cp");
+    // this->trigger_cp(false /* wait */);
+    this->trigger_cp(true /* wait */);
+
+    LOGINFO("Step 4: Query {} entries and validate with pagination of 75 entries", num_entries);
+    this->query_validate(0, num_entries - 1, 75);
+    this->print();
+
+    // Restart homestore.
+    auto index_svc_cb = std::make_unique< typename TestFixture::TestIndexServiceCallbacks >(*this->m_bt_cfg);
+    test_common::HSTestHelper::start_homestore("test_index_btree", 10 /* meta */, 0 /* data log */, 0 /* ctrl log*/,
+                                               0 /* data */, 70 /* index */, nullptr, true /* restart */,
+                                               std::move(index_svc_cb) /* index service callbacks */);
+    std::this_thread::sleep_for(std::chrono::seconds{3});
+    LOGINFO("Step 5: Restarted homestore with index recovered");
+
+    LOGINFO("Query {} entries", num_entries);
+
+    this->print();
     this->query_validate(0, num_entries - 1, 75);
 }
 

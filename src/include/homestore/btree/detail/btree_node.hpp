@@ -150,7 +150,7 @@ public:
         }
 
         // If we point to same start and end without any match, it is hitting unavailable range
-        if ((start_idx == end_idx) && !sfound && !efound) { return 0; }
+        if ((start_idx == end_idx) && is_leaf() && !sfound && !efound) { return 0; }
 
         if (end_idx == total_entries()) {
             DEBUG_ASSERT_GT(end_idx, 0); // At this point end_idx should never have been zero
