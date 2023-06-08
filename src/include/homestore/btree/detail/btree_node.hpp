@@ -86,7 +86,7 @@ public:
     uint8_t* m_phys_node_buf;
 
 public:
-   ~BtreeNode() = default;
+    ~BtreeNode() = default;
     BtreeNode(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf) : m_phys_node_buf{node_buf} {
         if (init_buf) {
             new (node_buf) persistent_hdr_t{};
@@ -333,13 +333,13 @@ public:
     }
 
     /*BtreeKeyRange get_subrange(const BtreeKeyRange< K >& inp_range, int upto_ind) const {
-#ifndef NDEBUG
+ #ifndef NDEBUG
         if (upto_ind > 0) {
             // start of input range should always be more then the key in curr_ind - 1
             DEBUG_ASSERT_LE(get_nth_key< K >(upto_ind - 1, false).compare(inp_range.start_key()), 0, "[node={}]",
                             to_string());
         }
-#endif
+ #endif
 
         // find end of subrange
         bool end_inc = true;
@@ -587,16 +587,18 @@ public:
 
     BtreeLinkInfo link_info() const { return BtreeLinkInfo{node_id(), link_version()}; }
 
-    uint32_t occupied_size(const BtreeConfig& cfg) const { return (cfg.node_data_size() - available_size(cfg)); }
+    virtual uint32_t occupied_size(const BtreeConfig& cfg) const {
+        return (cfg.node_data_size() - available_size(cfg));
+    }
     bool is_merge_needed(const BtreeConfig& cfg) const {
 #if 0
 #ifdef _PRERELEASE
-        if (iomgr_flip::instance()->test_flip("btree_merge_node") && occupied_size(cfg) < node_area_size(cfg)) {
-            return true;
-        }
+       if (iomgr_flip::instance()->test_flip("btree_merge_node") && occupied_size(cfg) < node_area_size(cfg)) {
+           return true;
+       }
 
-        auto ret = iomgr_flip::instance()->get_test_flip< uint64_t >("btree_merge_node_pct");
-        if (ret && occupied_size(cfg) < (ret.get() * node_area_size(cfg) / 100)) { return true; }
+       auto ret = iomgr_flip::instance()->get_test_flip< uint64_t >("btree_merge_node_pct");
+       if (ret && occupied_size(cfg) < (ret.get() * node_area_size(cfg) / 100)) { return true; }
 #endif
 #endif
         return (occupied_size(cfg) < cfg.suggested_min_size());
