@@ -82,7 +82,7 @@ jobs:
           ~/.conan/data/liburing
           ~/.conan/data/sisl
           ~/.conan/data/spdk
-        key: IOMgr-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+        key: IOMgrDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
 
     - name: Restore Homestore 3rdParty Cache
       id: restore-cache-homestore
