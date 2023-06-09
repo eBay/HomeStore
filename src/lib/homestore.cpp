@@ -144,7 +144,7 @@ void HomeStore::init(bool wait_for_init) {
     m_status_mgr = std::make_unique< HomeStoreStatusMgr >();
     m_resource_mgr = std::make_unique< ResourceMgr >();
 
-#ifndef NDEBUG
+#ifdef _PRERELEASE
     flip::Flip::instance().start_rpc_server();
 #endif
 
