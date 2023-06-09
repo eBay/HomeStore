@@ -133,6 +133,7 @@ jobs:
         conan create \
             -o sisl:prerelease=${{ matrix.prerelease }} \
             -o sisl:malloc_impl=${{ matrix.malloc-impl }} \
+            -o iomgr:testing=off \
             -s build_type=${{ matrix.build-type }} \
             --build missing deps/iomgr oss/master
 
@@ -150,3 +151,26 @@ jobs:
           ~/.conan/data/grpc_internal
           ~/.conan/data/spdk
         key: ${{ matrix.build-type }}-${{ matrix.malloc-impl }}
+
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Install dependencies
+      # Build your program with the given configuration
+      run: |
+        conan install \
+            -o sisl:prerelease=${{ matrix.prerelease }} \
+            -o sisl:malloc_impl=${{ matrix.malloc-impl }} \
+            -o iomgr:testing=off \
+            -s build_type=${{ matrix.build-type }} \
+            --build missing .
+            #-o sanitize=${{ matrix.sanitize }} \
+
+    - name: Cleanup dep builds
+      run: |
+        rm -rf ~/.conan/data/*/*/*/*/build
+
+    - name: Build
+      # Build your program with the given configuration
+      run: |
+        conan build .
