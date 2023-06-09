@@ -133,7 +133,7 @@ jobs:
         conan create \
             -o sisl:prerelease=${{ matrix.prerelease }} \
             -o sisl:malloc_impl=${{ matrix.malloc-impl }} \
-            -o testing=off \
+            -o iomgr:testing=off \
             -s build_type=${{ matrix.build-type }} \
             --build missing deps/iomgr oss/master
 
