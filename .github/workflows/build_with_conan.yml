@@ -16,20 +16,20 @@ jobs:
       matrix:
         build-type: ["Debug", "Release"]
         malloc-impl: ["libc", "tcmalloc", "jemalloc"]
-        prerelease: ["True", "False"]
-        sanitize: ["MemCheck", "NoCheck"]
+        prerelease: ["PreRelease", ""]
+        #sanitize: ["MemCheck", "NoCheck"]
         exclude:
           - build-type: Debug
-            prerelease: "True"
+            prerelease: "PreRelease"
           - build-type: Debug
             malloc-impl: tcmalloc
           - build-type: Debug
             malloc-impl: jemalloc
           - build-type: Release
             malloc-impl: libc
-          - build-type: Release
-            sanitize: "MemCheck"
-          - prerelease: "True"
+          #- build-type: Release
+          #  sanitize: "MemCheck"
+          - prerelease: "PreRelease"
             malloc-impl: jemalloc
 
     steps:
@@ -89,13 +89,14 @@ jobs:
 
     - name: Build IOMgr and Dependencies
       run: |
+        prerelease_opt=$([[ ${{ matrix.prerelease }} == *"Pre"* ]] && echo "True" || echo "False")
         rm -rf deps/iomgr/test_package
         conan export deps/iomgr/3rd_party/dpdk
         conan export deps/iomgr/3rd_party/grpc_internal
         conan export deps/iomgr/3rd_party/fio
         conan export deps/iomgr/3rd_party/spdk
         conan create \
-            -o sisl:prerelease=${{ matrix.prerelease }} \
+            -o sisl:prerelease=${prerelease_opt} \
             -o sisl:malloc_impl=${{ matrix.malloc-impl }} \
             -o sisl:testing=False \
             -o iomgr:testing=off \
@@ -128,13 +129,14 @@ jobs:
 
     - name: Install dependencies
       run: |
-        sanitize_opt=$([[ $string == *"MemCheck"* ]] && echo "True" || echo "False")
+        prerelease_opt=$([[ ${{ matrix.prerelease }} == *"Pre"* ]] && echo "True" || echo "False")
+        #sanitize_opt=$([[ ${{ matrix.sanitize }} == *"MemCheck"* ]] && echo "True" || echo "False")
         conan install \
-            -o sisl:prerelease=${{ matrix.prerelease }} \
+            -o sisl:prerelease=${prerelease_opt} \
             -o sisl:malloc_impl=${{ matrix.malloc-impl }} \
-            -o sanitize=${sanitize_opt} \
             -s build_type=${{ matrix.build-type }} \
             --build missing .
+            #-o sanitize=${sanitize_opt} \
 
     - name: Build
       # Build your program with the given configuration
