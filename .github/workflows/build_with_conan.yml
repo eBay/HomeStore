@@ -16,11 +16,11 @@ jobs:
       matrix:
         build-type: ["Debug", "Release"]
         malloc-impl: ["libc", "tcmalloc", "jemalloc"]
-        prerelease: ["PreRelease", ""]
+        prerelease: ["PRERELEASE", ""]
         #sanitize: ["MemCheck", "NoCheck"]
         exclude:
           - build-type: Debug
-            prerelease: "PreRelease"
+            prerelease: "PRERELEASE"
           - build-type: Debug
             malloc-impl: tcmalloc
           - build-type: Debug
@@ -29,7 +29,7 @@ jobs:
             malloc-impl: libc
           #- build-type: Release
           #  sanitize: "MemCheck"
-          - prerelease: "PreRelease"
+          - prerelease: "PRERELEASE"
             malloc-impl: jemalloc
 
     steps:
@@ -89,7 +89,8 @@ jobs:
 
     - name: Build IOMgr and Dependencies
       run: |
-        prerelease_opt=$([[ ${{ matrix.prerelease }} == *"Pre"* ]] && echo "True" || echo "False")
+        prerelease_opt="False"
+        if [[ ${{ matrix.prerelease }} == *"PRE"* ]]; then prerelease_opt="True"; fi
         rm -rf deps/iomgr/test_package
         conan export deps/iomgr/3rd_party/dpdk
         conan export deps/iomgr/3rd_party/grpc_internal
@@ -129,7 +130,8 @@ jobs:
 
     - name: Install dependencies
       run: |
-        prerelease_opt=$([[ ${{ matrix.prerelease }} == *"Pre"* ]] && echo "True" || echo "False")
+        prerelease_opt="False"
+        if [[ ${{ matrix.prerelease }} == *"PRE"* ]]; then prerelease_opt="True"; fi
         #sanitize_opt=$([[ ${{ matrix.sanitize }} == *"MemCheck"* ]] && echo "True" || echo "False")
         conan install \
             -o sisl:prerelease=${prerelease_opt} \
