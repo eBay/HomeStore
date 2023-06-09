@@ -56,46 +56,6 @@ jobs:
         path: deps/sisl
         ref: master
 
-    - name: Restore Sisl Cache
-      id: restore-sisl-3rd-party
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ~/.conan/data/folly
-          ~/.conan/data/gperftools
-          ~/.conan/data/jemalloc
-          ~/.conan/data/prerelease_dummy
-          ~/.conan/data/spdlog
-        key: ${{ matrix.build-type }}-${{ matrix.malloc-impl }}
-
-    - name: Build Sisl and Dependencies
-      run: |
-        conan export deps/sisl/3rd_party/gperftools
-        conan export deps/sisl/3rd_party/jemalloc
-        conan export deps/sisl/3rd_party/prerelease_dummy
-        conan create \
-            -o sisl:prerelease=${{ matrix.prerelease }} \
-            -o sisl:malloc_impl=${{ matrix.malloc-impl }} \
-            -o sisl:testing=False \
-            -s build_type=${{ matrix.build-type }} \
-            --build missing deps/sisl oss/master
-
-    - name: Cleanup build directories
-      run: |
-        rm -rf ~/.conan/data/*/*/*/*/build
-
-    - name: Save Sisl Cache
-      id: save-sisl-3rd-party
-      uses: actions/cache/save@v3
-      with:
-        path: |
-          ~/.conan/data/folly
-          ~/.conan/data/gperftools
-          ~/.conan/data/jemalloc
-          ~/.conan/data/prerelease_dummy
-          ~/.conan/data/spdlog
-        key: ${{ matrix.build-type }}-${{ matrix.malloc-impl }}
-
     - name: Retrieve IOMgr
       uses: actions/checkout@v3
       with:
@@ -103,19 +63,33 @@ jobs:
         path: deps/iomgr
         ref: master
 
-    - name: Restore IOMgr Cache
-      id: restore-iomgr-3rd-party
+    - name: Restore Dependency Cache
+      id: restore-3rd-party
       uses: actions/cache/restore@v3
       with:
         path: |
           ~/.conan/data/dpdk
           ~/.conan/data/fio
+          ~/.conan/data/folly
+          ~/.conan/data/gperftools
           ~/.conan/data/grpc_internal
+          ~/.conan/data/jemalloc
+          ~/.conan/data/liburing
+          ~/.conan/data/prerelease_dummy
           ~/.conan/data/spdk
+          ~/.conan/data/spdlog
         key: ${{ matrix.build-type }}-${{ matrix.malloc-impl }}
+
+    - name: Export Sisl and Dependencies
+      run: |
+        conan export deps/sisl/3rd_party/gperftools
+        conan export deps/sisl/3rd_party/jemalloc
+        conan export deps/sisl/3rd_party/prerelease_dummy
+        conan export deps/sisl oss/master
 
     - name: Build IOMgr and Dependencies
       run: |
+        rm -rf deps/iomgr/test_package
         conan export deps/iomgr/3rd_party/dpdk
         conan export deps/iomgr/3rd_party/grpc_internal
         conan export deps/iomgr/3rd_party/fio
@@ -123,6 +97,7 @@ jobs:
         conan create \
             -o sisl:prerelease=${{ matrix.prerelease }} \
             -o sisl:malloc_impl=${{ matrix.malloc-impl }} \
+            -o sisl:testing=False \
             -o iomgr:testing=off \
             -s build_type=${{ matrix.build-type }} \
             --build missing deps/iomgr oss/master
@@ -131,15 +106,21 @@ jobs:
       run: |
         rm -rf ~/.conan/data/*/*/*/*/build
 
-    - name: Save IOMgr Cache
-      id: save-iomgr-3rd-party
+    - name: Save Dependency Cache
+      id: save-3rd-party
       uses: actions/cache/save@v3
       with:
         path: |
           ~/.conan/data/dpdk
           ~/.conan/data/fio
+          ~/.conan/data/folly
+          ~/.conan/data/gperftools
           ~/.conan/data/grpc_internal
+          ~/.conan/data/jemalloc
+          ~/.conan/data/liburing
+          ~/.conan/data/prerelease_dummy
           ~/.conan/data/spdk
+          ~/.conan/data/spdlog
         key: ${{ matrix.build-type }}-${{ matrix.malloc-impl }}
 
     - name: Checkout Code
