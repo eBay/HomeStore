@@ -86,7 +86,7 @@ jobs:
 
     - name: Restore Homestore 3rdParty Cache
       id: restore-cache-homestore
-      uses: actions/cache/save@v3
+      uses: actions/cache/restore@v3
       with:
         path: |
           ~/.conan/data/iomgr
