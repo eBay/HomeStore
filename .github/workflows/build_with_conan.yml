@@ -1,0 +1,152 @@
+name: Conan Build
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+#env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  #BUILD_TYPE: Release
+
+jobs:
+  build:
+    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
+    # You can convert this to a matrix build if you need cross-platform coverage.
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Currently folly in conan-center has a bug when used with gcc 11.3 and sanitizer
+        # sanitize: ["True", "False"]
+        build-type: ["Debug", "Release"]
+        malloc-impl: ["libc", "tcmalloc", "jemalloc"]
+        prerelease: ["True", "False"]
+        exclude:
+          - build-type: Debug
+            prerelease: "True"
+          - build-type: Debug
+            malloc-impl: tcmalloc
+          - build-type: Debug
+            malloc-impl: jemalloc
+          - build-type: Release
+            malloc-impl: libc
+          # - build-type: Release
+          # sanitize: "True"
+          - prerelease: "True"
+            malloc-impl: jemalloc
+
+    steps:
+    - name: Set up Python
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.8"
+
+    - name: Install Conan
+      run: |
+        sudo apt-get install -y python3-pyelftools libaio-dev
+        python -m pip install --upgrade pip
+        python -m pip install pyelftools
+        python -m pip install conan~=1.0
+
+    - name: Configure Conan
+      # Configure conan profiles for build runner
+      run: |
+        conan user
+        conan profile new --detect default
+        sed -i 's,compiler.libcxx=libstdc++$,compiler.libcxx=libstdc++11,g' ~/.conan/profiles/default
+
+    - name: Retrieve Sisl Dependencies
+      uses: actions/checkout@v3
+      with:
+        repository: ebay/sisl
+        path: deps/sisl
+        ref: master
+
+    - name: Restore Sisl 3rdParty
+      id: restore-sisl-3rd-party
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.conan/data/folly
+          ~/.conan/data/gperftools
+          ~/.conan/data/jemalloc
+          ~/.conan/data/prerelease_dummy
+          ~/.conan/data/spdlog
+        key: ${{ matrix.build-type }}-${{ matrix.malloc-impl }}
+
+    - name: Export Sisl Dependencies
+      run: |
+        conan export deps/sisl/3rd_party/gperftools
+        conan export deps/sisl/3rd_party/jemalloc
+        conan export deps/sisl/3rd_party/prerelease_dummy
+        conan create \
+            -o sisl:prerelease=${{ matrix.prerelease }} \
+            -o sisl:malloc_impl=${{ matrix.malloc-impl }} \
+            -s build_type=${{ matrix.build-type }} \
+            --build missing deps/sisl oss/master
+
+    - name: Cleanup dep builds
+      run: |
+        rm -rf ~/.conan/data/*/*/*/*/build
+
+    - name: Save Sisl 3rdParty
+      id: save-sisl-3rd-party
+      uses: actions/cache/save@v3
+      with:
+        path: |
+          ~/.conan/data/folly
+          ~/.conan/data/gperftools
+          ~/.conan/data/jemalloc
+          ~/.conan/data/prerelease_dummy
+          ~/.conan/data/spdlog
+        key: ${{ matrix.build-type }}-${{ matrix.malloc-impl }}
+
+    - name: Retrieve IOMgr Dependencies
+      uses: actions/checkout@v3
+      with:
+        repository: ebay/IOManager
+        path: deps/iomgr
+        ref: master
+
+    - name: Restore IOMgr 3rdParty
+      id: restore-iomgr-3rd-party
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.conan/data/dpdk
+          ~/.conan/data/fio
+          ~/.conan/data/grpc_internal
+          ~/.conan/data/spdk
+        key: ${{ matrix.build-type }}-${{ matrix.malloc-impl }}
+
+    - name: Export IOMgr Dependencies
+      run: |
+        conan export deps/iomgr/3rd_party/dpdk
+        conan export deps/iomgr/3rd_party/grpc_internal
+        conan export deps/iomgr/3rd_party/fio
+        conan export deps/iomgr/3rd_party/spdk
+        conan create \
+            -o sisl:prerelease=${{ matrix.prerelease }} \
+            -o sisl:malloc_impl=${{ matrix.malloc-impl }} \
+            -s build_type=${{ matrix.build-type }} \
+            --build missing deps/iomgr oss/master
+
+    - name: Cleanup dep builds
+      run: |
+        rm -rf ~/.conan/data/*/*/*/*/build
+
+    - name: Save IOMgr 3rdParty
+      id: save-iomgr-3rd-party
+      uses: actions/cache/save@v3
+      with:
+        path: |
+          ~/.conan/data/dpdk
+          ~/.conan/data/fio
+          ~/.conan/data/grpc_internal
+          ~/.conan/data/spdk
+        key: ${{ matrix.build-type }}-${{ matrix.malloc-impl }}
