@@ -14,10 +14,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sanitize: ["True", "False"]
         build-type: ["Debug", "Release"]
         malloc-impl: ["libc", "tcmalloc", "jemalloc"]
         prerelease: ["True", "False"]
+        sanitize: ["MemCheck", "NoCheck"]
         exclude:
           - build-type: Debug
             prerelease: "True"
@@ -28,7 +28,7 @@ jobs:
           - build-type: Release
             malloc-impl: libc
           - build-type: Release
-            sanitize: "True"
+            sanitize: "MemCheck"
           - prerelease: "True"
             malloc-impl: jemalloc
 
@@ -147,10 +147,11 @@ jobs:
 
     - name: Install dependencies
       run: |
+        sanitize_opt=$([[ $string == *"MemCheck"* ]] && echo "True" || echo "False")
         conan install \
             -o sisl:prerelease=${{ matrix.prerelease }} \
             -o sisl:malloc_impl=${{ matrix.malloc-impl }} \
-            -o sanitize=${{ matrix.sanitize }} \
+            -o sanitize=${sanitize_opt} \
             -s build_type=${{ matrix.build-type }} \
             --build missing .
 
