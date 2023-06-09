@@ -23,6 +23,7 @@ jobs:
       branch: master
       build-type: ${{ inputs.build-type }}
       malloc-impl: ${{ inputs.malloc-impl }}
+      prerelease: ${{ inputs.prerelease }}
 
   BuildHomestoreDeps:
     needs: IomgrDeps
