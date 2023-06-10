@@ -17,16 +17,7 @@ on:
         type: string
 
 jobs:
-  IomgrDeps:
-    uses: eBay/iomanager/.github/workflows/build_dependencies.yml@master
-    with:
-      branch: master
-      build-type: ${{ inputs.build-type }}
-      malloc-impl: ${{ inputs.malloc-impl }}
-      prerelease: ${{ inputs.prerelease }}
-
   BuildHomestoreDeps:
-    needs: IomgrDeps
     runs-on: ubuntu-22.04
     steps:
     - name: Setup Python

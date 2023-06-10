@@ -9,7 +9,29 @@ on:
       - master
 
 jobs:
+  BuildIOMgr:
+    strategy:
+      fail-fast: false
+      matrix:
+        build-type: ["Debug", "Release"]
+        malloc-impl: ["libc", "tcmalloc", "jemalloc"]
+        prerelease: ["True", "False"]
+        exclude:
+          - build-type: Debug
+            malloc-impl: tcmalloc
+          - build-type: Debug
+            malloc-impl: jemalloc
+          - build-type: Release
+            malloc-impl: libc
+          - prerelease: "True"
+            malloc-impl: jemalloc
+    uses: ./.github/workflows/build_sisl.yml
+    with:
+      build-type: ${{ matrix.build-type }}
+      malloc-impl: ${{ matrix.malloc-impl }}
+
   BuildDependencies:
+    needs: BuildIOMgr
     strategy:
       fail-fast: false
       matrix:
