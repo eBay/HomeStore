@@ -1,0 +1,30 @@
+name: SISL Build
+
+on:
+  workflow_call:
+    inputs:
+      build-type:
+        required: true
+        type: string
+      malloc-impl:
+        required: true
+        type: string
+      prerelease:
+        required: true
+        type: string
+
+jobs:
+  SislDeps:
+    uses: eBay/sisl/.github/workflows/build_dependencies.yml@master
+    with:
+      branch: master
+      build-type: ${{ inputs.build-type }}
+      malloc-impl: ${{ inputs.malloc-impl }}
+  IOMgrDeps:
+    needs: SislDeps
+    uses: eBay/iomanager/.github/workflows/build_dependencies.yml@master
+    with:
+      branch: master
+      build-type: ${{ inputs.build-type }}
+      malloc-impl: ${{ inputs.malloc-impl }}
+      prerelease: ${{ inputs.prerelease }}
