@@ -29,6 +29,7 @@ jobs:
     with:
       build-type: ${{ matrix.build-type }}
       malloc-impl: ${{ matrix.malloc-impl }}
+      prerelease: ${{ matrix.prerelease }}
 
   CacheDependencies:
     needs: BuildIOMgr
