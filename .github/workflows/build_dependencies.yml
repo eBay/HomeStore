@@ -1,0 +1,115 @@
+name: Conan Build
+
+on:
+  workflow_call:
+    inputs:
+      branch:
+        required: true
+        type: string
+      build-type:
+        required: true
+        type: string
+      malloc-impl:
+        required: true
+        type: string
+      prerelease:
+        required: true
+        type: string
+
+jobs:
+  IomgrDeps:
+    uses: eBay/iomanager/.github/workflows/build_dependencies.yml@master
+    with:
+      branch: master
+      build-type: ${{ inputs.build-type }}
+      malloc-impl: ${{ inputs.malloc-impl }}
+      prerelease: ${{ inputs.prerelease }}
+
+  BuildHomestoreDeps:
+    needs: IomgrDeps
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Setup Python
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.8"
+
+    - name: Setup Conan
+      run: |
+        sudo apt-get install -y python3-pyelftools libaio-dev
+        python -m pip install --upgrade pip
+        python -m pip install pyelftools
+        python -m pip install conan~=1.0
+        conan user
+        conan profile new --detect default
+        # Set std::string to non-CoW C++11 version
+        sed -i 's,compiler.libcxx=libstdc++$,compiler.libcxx=libstdc++11,g' ~/.conan/profiles/default
+
+    - name: Retrieve Dependencies
+      uses: actions/checkout@v3
+      with:
+        repository: eBay/iomanager
+        path: deps/iomgr
+        ref: master
+
+    - name: Retrieve Dependencies
+      uses: actions/checkout@v3
+      with:
+        repository: eBay/Homestore
+        path: deps/homestore
+        ref: ${{ inputs.branch }}
+
+    - name: Restore Sisl 3rdParty Cache
+      id: restore-cache-sisl
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.conan/data/folly
+          ~/.conan/data/gperftools
+          ~/.conan/data/jemalloc
+          ~/.conan/data/prerelease_dummy
+          ~/.conan/data/spdlog
+        key: SislDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}
+
+    - name: Restore IOMgr 3rdParty Cache
+      id: restore-cache-iomgr
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.conan/data/dpdk
+          ~/.conan/data/fio
+          ~/.conan/data/grpc_internal
+          ~/.conan/data/liburing
+          ~/.conan/data/sisl
+          ~/.conan/data/spdk
+        key: IOMgrDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+
+    - name: Restore Homestore 3rdParty Cache
+      id: restore-cache-homestore
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.conan/data/iomgr
+        key: HomestoreDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+
+    - name: Install Dependencies
+      run: |
+        conan export deps/iomgr oss/master
+        conan install \
+            -o sisl:prerelease=${{ inputs.prerelease }} \
+            -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
+            -o iomgr:testing=off \
+            -s build_type=${{ inputs.build-type }} \
+            --build missing deps/homestore
+
+    - name: Cleanup dep builds
+      run: |
+        rm -rf ~/.conan/data/*/*/*/*/build
+
+    - name: Save Homestore 3rdParty Cache
+      id: save-cache-homestore
+      uses: actions/cache/save@v3
+      with:
+        path: |
+          ~/.conan/data/iomgr
+        key: HomestoreDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
