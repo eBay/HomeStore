@@ -1,4 +1,4 @@
-name: Homestore Main Build
+name: Homestore PR Build
 
 on:
   pull_request:
