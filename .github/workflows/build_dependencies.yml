@@ -60,7 +60,7 @@ jobs:
           ~/.conan/data/jemalloc
           ~/.conan/data/prerelease_dummy
           ~/.conan/data/spdlog
-        key: SislDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}
+        key: SislDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
 
     - name: Restore IOMgr 3rdParty Cache
       id: restore-cache-iomgr

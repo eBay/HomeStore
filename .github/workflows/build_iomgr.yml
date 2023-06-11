@@ -20,6 +20,7 @@ jobs:
       branch: master
       build-type: ${{ inputs.build-type }}
       malloc-impl: ${{ inputs.malloc-impl }}
+      prerelease: ${{ inputs.prerelease }}
   IOMgrDeps:
     needs: SislDeps
     uses: eBay/iomanager/.github/workflows/build_dependencies.yml@master

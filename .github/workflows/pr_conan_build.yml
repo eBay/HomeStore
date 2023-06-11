@@ -1,9 +1,6 @@
-name: Conan Build
+name: Homestore Main Build
 
 on:
-  push:
-    branches:
-      - master
   pull_request:
     branches:
       - master
@@ -11,11 +8,11 @@ on:
 jobs:
   BuildIOMgr:
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         build-type: ["Debug", "Release"]
         malloc-impl: ["libc", "tcmalloc", "jemalloc"]
-        prerelease: ["True", "False"]
+        prerelease: ["False"]
         exclude:
           - build-type: Debug
             malloc-impl: tcmalloc
@@ -23,8 +20,6 @@ jobs:
             malloc-impl: jemalloc
           - build-type: Release
             malloc-impl: libc
-          - prerelease: "True"
-            malloc-impl: jemalloc
     uses: ./.github/workflows/build_iomgr.yml
     with:
       build-type: ${{ matrix.build-type }}
@@ -34,22 +29,18 @@ jobs:
   CacheDependencies:
     needs: BuildIOMgr
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         build-type: ["Debug", "Release"]
         malloc-impl: ["libc", "tcmalloc", "jemalloc"]
-        prerelease: ["True", "False"]
+        prerelease: ["False"]
         exclude:
-          - build-type: Debug
-            prerelease: "True"
           - build-type: Debug
             malloc-impl: tcmalloc
           - build-type: Debug
             malloc-impl: jemalloc
           - build-type: Release
             malloc-impl: libc
-          - prerelease: "True"
-            malloc-impl: jemalloc
     uses: ./.github/workflows/build_dependencies.yml
     with:
       branch: master
@@ -65,10 +56,8 @@ jobs:
       matrix:
         build-type: ["Debug", "Release"]
         malloc-impl: ["libc", "tcmalloc", "jemalloc"]
-        prerelease: ["True", "False"]
+        prerelease: ["False"]
         exclude:
-          - build-type: Debug
-            prerelease: "True"
           - build-type: Debug
             malloc-impl: tcmalloc
           - build-type: Debug
@@ -77,8 +66,6 @@ jobs:
             malloc-impl: libc
           # - build-type: Release
           # sanitize: "True"
-          - prerelease: "True"
-            malloc-impl: jemalloc
 
     steps:
     - name: Setup Python
@@ -107,7 +94,7 @@ jobs:
           ~/.conan/data/jemalloc
           ~/.conan/data/prerelease_dummy
           ~/.conan/data/spdlog
-        key: SislDeps-${{ matrix.build-type }}-${{ matrix.malloc-impl }}
+        key: SislDeps-${{ matrix.build-type }}-${{ matrix.malloc-impl }}-${{ matrix.prerelease }}
 
     - name: Restore IOMgr 3rdParty Cache
       id: restore-iomgr-3rd-party
