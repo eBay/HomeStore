@@ -6,28 +6,7 @@ on:
       - master
 
 jobs:
-  BuildIOMgr:
-    strategy:
-      fail-fast: true
-      matrix:
-        build-type: ["Debug", "Release"]
-        malloc-impl: ["libc", "tcmalloc", "jemalloc"]
-        prerelease: ["False"]
-        exclude:
-          - build-type: Debug
-            malloc-impl: tcmalloc
-          - build-type: Debug
-            malloc-impl: jemalloc
-          - build-type: Release
-            malloc-impl: libc
-    uses: ./.github/workflows/build_iomgr.yml
-    with:
-      build-type: ${{ matrix.build-type }}
-      malloc-impl: ${{ matrix.malloc-impl }}
-      prerelease: ${{ matrix.prerelease }}
-
   CacheDependencies:
-    needs: BuildIOMgr
     strategy:
       fail-fast: true
       matrix:
@@ -41,7 +20,7 @@ jobs:
             malloc-impl: jemalloc
           - build-type: Release
             malloc-impl: libc
-    uses: ./.github/workflows/build_dependencies.yml
+    uses: ./.github/workflows/cache_dependencies.yml
     with:
       branch: master
       build-type: ${{ matrix.build-type }}

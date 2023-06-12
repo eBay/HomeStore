@@ -29,3 +29,11 @@ jobs:
       build-type: ${{ inputs.build-type }}
       malloc-impl: ${{ inputs.malloc-impl }}
       prerelease: ${{ inputs.prerelease }}
+  IOMgrDeps:
+    needs: IOMgrDeps
+    uses: ./.github/workflows/build_dependencies.yml
+    with:
+      branch: master
+      build-type: ${{ inputs.build-type }}
+      malloc-impl: ${{ inputs.malloc-impl }}
+      prerelease: ${{ inputs.prerelease }}
