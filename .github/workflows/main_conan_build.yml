@@ -99,11 +99,7 @@ jobs:
       uses: actions/cache/restore@v3
       with:
         path: |
-          ~/.conan/data/folly
-          ~/.conan/data/gperftools
-          ~/.conan/data/jemalloc
-          ~/.conan/data/prerelease_dummy
-          ~/.conan/data/spdlog
+          ~/.conan/data
         key: SislDeps-${{ matrix.build-type }}-${{ matrix.malloc-impl }}-${{ matrix.prerelease }}
 
     - name: Restore IOMgr 3rdParty Cache
@@ -111,12 +107,7 @@ jobs:
       uses: actions/cache/restore@v3
       with:
         path: |
-          ~/.conan/data/dpdk
-          ~/.conan/data/fio
-          ~/.conan/data/grpc_internal
-          ~/.conan/data/liburing
-          ~/.conan/data/sisl
-          ~/.conan/data/spdk
+          ~/.conan/data
         key: IOMgrDeps-${{ matrix.build-type }}-${{ matrix.malloc-impl }}-${{ matrix.prerelease }}
 
     - name: Restore Homestore 3rdParty Cache
@@ -124,7 +115,7 @@ jobs:
       uses: actions/cache/restore@v3
       with:
         path: |
-          ~/.conan/data/iomgr
+          ~/.conan/data
         key: HomestoreDeps-${{ matrix.build-type }}-${{ matrix.malloc-impl }}-${{ matrix.prerelease }}
 
     - name: Checkout Code

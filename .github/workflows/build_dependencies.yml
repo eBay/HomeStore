@@ -55,11 +55,7 @@ jobs:
       uses: actions/cache/restore@v3
       with:
         path: |
-          ~/.conan/data/folly
-          ~/.conan/data/gperftools
-          ~/.conan/data/jemalloc
-          ~/.conan/data/prerelease_dummy
-          ~/.conan/data/spdlog
+          ~/.conan/data
         key: SislDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
 
     - name: Restore IOMgr 3rdParty Cache
@@ -67,12 +63,7 @@ jobs:
       uses: actions/cache/restore@v3
       with:
         path: |
-          ~/.conan/data/dpdk
-          ~/.conan/data/fio
-          ~/.conan/data/grpc_internal
-          ~/.conan/data/liburing
-          ~/.conan/data/sisl
-          ~/.conan/data/spdk
+          ~/.conan/data
         key: IOMgrDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
 
     - name: Restore Homestore 3rdParty Cache
@@ -80,7 +71,7 @@ jobs:
       uses: actions/cache/restore@v3
       with:
         path: |
-          ~/.conan/data/iomgr
+          ~/.conan/data
         key: HomestoreDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
 
     - name: Install Dependencies
@@ -93,15 +84,19 @@ jobs:
             -o iomgr:testing=off \
             -s build_type=${{ inputs.build-type }} \
             --build missing deps/homestore
+      if: ${{ steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
 
     - name: Cleanup dep builds
       run: |
+        ls -1d ~/.conan/data/* | grep -Ev '(iomgr)' | xargs rm -rf
         rm -rf ~/.conan/data/*/*/*/*/build
+      if: ${{ steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
 
     - name: Save Homestore 3rdParty Cache
       id: save-cache-homestore
       uses: actions/cache/save@v3
       with:
         path: |
-          ~/.conan/data/iomgr
+          ~/.conan/data
         key: HomestoreDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+      if: ${{ github.event_name != 'pull_request' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
