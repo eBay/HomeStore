@@ -15,6 +15,10 @@ on:
       prerelease:
         required: true
         type: string
+      native:
+        required: false
+        default: 'false'
+        type: string
 
 jobs:
   BuildHomestoreDeps:
@@ -36,12 +40,17 @@ jobs:
         # Set std::string to non-CoW C++11 version
         sed -i 's,compiler.libcxx=libstdc++$,compiler.libcxx=libstdc++11,g' ~/.conan/profiles/default
 
+    - name: Retrieve Code
+      uses: actions/checkout@v3
+      if: ${{ inputs.native == 'true' }}
+
     - name: Retrieve Dependencies
       uses: actions/checkout@v3
       with:
         repository: eBay/iomanager
         path: deps/iomgr
         ref: master
+      if: ${{ inputs.native == 'false' }}
 
     - name: Retrieve Dependencies
       uses: actions/checkout@v3
@@ -49,6 +58,7 @@ jobs:
         repository: eBay/Homestore
         path: deps/homestore
         ref: ${{ inputs.branch }}
+      if: ${{ inputs.native == 'false' }}
 
     - name: Restore Sisl 3rdParty Cache
       id: restore-cache-sisl
@@ -84,7 +94,20 @@ jobs:
             -o iomgr:testing=off \
             -s build_type=${{ inputs.build-type }} \
             --build missing deps/homestore
-      if: ${{ steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+      if: ${{ steps.restore-cache-homestore.outputs.cache-hit != 'true' && inputs.native == 'false'  }}
+
+   - name: Build
+     run: |
+       conan create \
+           -o sisl:prerelease=${{ inputs.prerelease }} \
+           -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
+           -o sisl:testing=False \
+           -o iomgr:testing=off \
+           -s build_type=${{ inputs.build-type }} \
+           --build missing \
+           . \
+           oss/master
+      if: ${{ inputs.native == 'true' }}
 
     - name: Cleanup dep builds
       run: |
