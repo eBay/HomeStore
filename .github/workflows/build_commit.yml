@@ -38,7 +38,7 @@ jobs:
       malloc-impl: ${{ inputs.malloc-impl }}
       prerelease: ${{ inputs.prerelease }}
   BuildCommit:
-    needs: IOMgrDeps
+    needs: HomestoreDeps
     runs-on: ubuntu-22.04
 
     steps:
