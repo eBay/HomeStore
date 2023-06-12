@@ -22,7 +22,6 @@ jobs:
             malloc-impl: libc
     uses: ./.github/workflows/cache_dependencies.yml
     with:
-      branch: master
       build-type: ${{ matrix.build-type }}
       malloc-impl: ${{ matrix.malloc-impl }}
       prerelease: ${{ matrix.prerelease }}
