@@ -6,7 +6,7 @@ on:
       - master
 
 jobs:
-  CacheDependencies:
+  BuildCommit:
     strategy:
       fail-fast: true
       matrix:
@@ -24,87 +24,8 @@ jobs:
             malloc-impl: libc
           - prerelease: "True"
             malloc-impl: jemalloc
-    uses: ./.github/workflows/cache_dependencies.yml
+    uses: ./.github/workflows/build_commit.yml
     with:
       build-type: ${{ matrix.build-type }}
       malloc-impl: ${{ matrix.malloc-impl }}
       prerelease: ${{ matrix.prerelease }}
-
-  BuildPR:
-    needs: CacheDependencies
-    runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        build-type: ["Debug", "Release"]
-        malloc-impl: ["libc", "tcmalloc", "jemalloc"]
-        prerelease: ["True", "False"]
-        exclude:
-          - build-type: Debug
-            prerelease: "True"
-          - build-type: Debug
-            malloc-impl: tcmalloc
-          - build-type: Debug
-            malloc-impl: jemalloc
-          - build-type: Release
-            malloc-impl: libc
-          # - build-type: Release
-          # sanitize: "True"
-          - prerelease: "True"
-            malloc-impl: jemalloc
-
-    steps:
-    - name: Setup Python
-      uses: actions/setup-python@v3
-      with:
-        python-version: "3.8"
-
-    - name: Setup Conan
-      run: |
-        sudo apt-get install -y python3-pyelftools libaio-dev
-        python -m pip install --upgrade pip
-        python -m pip install pyelftools
-        python -m pip install conan~=1.0
-        conan user
-        conan profile new --detect default
-        # Set std::string to non-CoW C++11 version
-        sed -i 's,compiler.libcxx=libstdc++$,compiler.libcxx=libstdc++11,g' ~/.conan/profiles/default
-
-    - name: Restore Sisl 3rdParty Cache
-      id: restore-cache-sisl
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ~/.conan/data
-        key: SislDeps-${{ matrix.build-type }}-${{ matrix.malloc-impl }}-${{ matrix.prerelease }}
-
-    - name: Restore IOMgr 3rdParty Cache
-      id: restore-iomgr-3rd-party
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ~/.conan/data
-        key: IOMgrDeps-${{ matrix.build-type }}-${{ matrix.malloc-impl }}-${{ matrix.prerelease }}
-
-    - name: Restore Homestore 3rdParty Cache
-      id: restore-homestore-3rd-party
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ~/.conan/data
-        key: HomestoreDeps-${{ matrix.build-type }}-${{ matrix.malloc-impl }}-${{ matrix.prerelease }}
-
-    - name: Checkout Code
-      uses: actions/checkout@v3
-
-    - name: Build
-      run: |
-        conan create \
-            -o sisl:prerelease=${{ matrix.prerelease }} \
-            -o sisl:malloc_impl=${{ matrix.malloc-impl }} \
-            -o sisl:testing=False \
-            -o iomgr:testing=off \
-            -s build_type=${{ matrix.build-type }} \
-            --build missing \
-            . \
-            oss/master
