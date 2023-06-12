@@ -15,7 +15,7 @@ jobs:
         prerelease: ["True", "False"]
         exclude:
           - build-type: Debug
-            prerelease: "True"
+            prerelease: "False"
           - build-type: Debug
             malloc-impl: tcmalloc
           - build-type: Debug
