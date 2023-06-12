@@ -12,7 +12,7 @@ jobs:
       matrix:
         build-type: ["Debug", "Release"]
         malloc-impl: ["libc", "tcmalloc", "jemalloc"]
-        prerelease: ["False"]
+        prerelease: ["True"]
         exclude:
           - build-type: Debug
             malloc-impl: tcmalloc
