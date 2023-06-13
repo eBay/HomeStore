@@ -1,4 +1,4 @@
-name: Homestore Main Build
+name: Homestore Merge Build
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 jobs:
   BuildCommit:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         build-type: ["Debug", "Release"]
         malloc-impl: ["libc", "tcmalloc", "jemalloc"]
