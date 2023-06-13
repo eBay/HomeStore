@@ -12,14 +12,18 @@ jobs:
       matrix:
         build-type: ["Debug", "Release"]
         malloc-impl: ["libc", "tcmalloc", "jemalloc"]
-        prerelease: ["False"]
+        prerelease: ["True", "False"]
         exclude:
+          - build-type: Debug
+            prerelease: "False"
           - build-type: Debug
             malloc-impl: tcmalloc
           - build-type: Debug
             malloc-impl: jemalloc
           - build-type: Release
             malloc-impl: libc
+          - prerelease: "True"
+            malloc-impl: jemalloc
     uses: ./.github/workflows/build_commit.yml
     with:
       build-type: ${{ matrix.build-type }}
