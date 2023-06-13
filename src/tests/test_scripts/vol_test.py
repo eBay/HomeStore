@@ -71,6 +71,22 @@ print("vol_addln_opts: " + vol_addln_opts)
 meta_flip_list = ["write_sb_abort", "write_with_ovf_abort", "remove_sb_abort", "update_sb_abort", "abort_before_recover_cb_sent", "abort_after_recover_cb_sent"]
 vdev_flip_list = ["abort_before_update_eof_cur_chunk", "abort_after_update_eof_cur_chunk", "abort_after_update_eof_next_chunk"]
 
+def copy_vol_load():
+    cmd_opts = "--gtest_filter=VolTest.init_io_test  --run_time=300 --max_num_writes=9999 --enable_crash_handler=1 --remove_file_on_shutdown=0 --remove_file_on_start=1 --max_volume=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
+
+    cmd_opts = "--max_volume=1 --gtest_filter=VolTest.recovery_boot_copy_vol_test --remove_file_on_shutdown=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
+    print("copy volume and verify load test passed")
+
+def copy_vol():
+    cmd_opts = "--gtest_filter=VolTest.init_io_test  --run_time=100 --max_num_writes=1000 --enable_crash_handler=1 --remove_file_on_shutdown=0 --remove_file_on_start=1 --max_volume=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
+
+    cmd_opts = "--max_volume=1 --gtest_filter=VolTest.recovery_boot_copy_vol_test --remove_file_on_shutdown=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
+    print("copy volume and verify passed")
+
 def recovery():
     cmd_opts = "--gtest_filter=VolTest.init_io_test --run_time=30 --enable_crash_handler=1 --remove_file_on_shutdown=0 --remove_file_on_start=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
@@ -540,6 +556,9 @@ def nightly():
     sleep(5)
 
     #load()
+    sleep(5)
+
+    copy_vol_load();
     sleep(5)
 
     vol_create_delete_test()

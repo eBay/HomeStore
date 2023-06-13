@@ -1166,3 +1166,104 @@ void VolumeMetrics::on_gather() {
             m_volume->is_online() ? "Online" : "Offline", m_volume->is_recovery_done());
     }
 }
+
+//
+// the file being written is a sparse file, holes will be left in file;
+//
+std::error_condition Volume::copy_to(const std::string& file_path) {
+    // open file;
+    auto fd = ::open(file_path.c_str(), O_RDWR | O_CREAT | O_DIRECT, 0666);
+    if (fd == -1) {
+        LOGERROR("open file failed: errno: {}, msg: {}", errno, std::strerror(errno));
+        return std::make_error_condition(std::errc::invalid_argument);
+    }
+
+    // make this file a sparse file according to volume size;
+    const auto ret = lseek(fd, get_size(), SEEK_SET);
+
+    HS_DBG_ASSERT_NE(ret, -1, "lseek returned error: {}", errno);
+    if (ret == -1) {
+        LOGERROR("lseek return err: {}", errno);
+        return std::make_error_condition(static_cast< std::errc >(errno));
+    }
+
+    LOGINFO("Successfully seek file to {}", get_size());
+
+    lba_t start_lba = 0ul;
+    uint64_t total_nbytes = 0;
+    const auto last_lba = get_last_lba();
+    const auto batch = BlkId::max_blks_in_op();
+    const auto page_sz = get_page_size();
+    const auto max_read_buf_sz = batch * page_sz;
+    BtreeQueryCursor cur;
+
+    auto read_buf = hs_utils::iobuf_alloc(max_read_buf_sz, sisl::buftag::common,
+                                          m_hb->get_data_blkstore()->get_vdev()->get_align_size());
+
+    while (start_lba <= last_lba) {
+        // read from index table;
+        std::vector< std::pair< MappingKey, MappingValue > > kvs;
+        LOGDEBUG("Reading -> lba:{}, nlbas:{}", start_lba, batch);
+        MappingKey key(start_lba, batch);
+        get_active_indx()->get(key, cur, kvs);
+
+        // we are good if kvs is empty;
+        for (auto& kv : kvs) {
+            ValueEntry* ve = kv.second.get_nth_entry(0);
+            const BlkId bid{ve->get_offset_blkid(m_blks_per_lba)};
+            const auto nlbas = kv.first.get_n_lba();
+            if (!bid.is_valid()) {
+                // no pba is found in this lba range,
+                // leave unmapped lba range as hole and continue;
+                continue;
+            } else {
+                // valid bid
+                const auto read_sz = nlbas * page_sz;
+                std::memset(read_buf, 0, max_read_buf_sz);
+
+                // assert that read_sz from mapping key equals to mapped physical block id;
+                HS_DBG_ASSERT_EQ(read_sz, bid.get_nblks() * page_sz);
+
+                // sync-read BlkId
+                auto req{blkstore_req< BlkBuffer >::make_request()};
+                req->isSyncCall = true;
+                iovec iov{read_buf, read_sz};
+                std::vector< iovec > iov_vector{};
+                iov_vector.push_back(std::move(iov));
+
+                THIS_VOL_LOG(DEBUG, volume, , "Found data on lba: {}, size: {}", kv.first.start(), read_sz);
+                try {
+                    m_hb->get_data_blkstore()->read(bid, iov_vector, read_sz, req);
+                } catch (std::exception& e) {
+                    HS_DBG_ASSERT(0, "Exception: {}", e.what());
+                    // in release mode, fail the operation;
+                    return std::make_error_condition(std::errc::io_error);
+                }
+
+                // write to file
+                const auto nbytes = pwrite(fd, (const char*)read_buf, read_sz, kv.first.start() * page_sz);
+
+                HS_DBG_ASSERT_EQ(static_cast< uint64_t >(nbytes), read_sz,
+                                 "nbytes: {}, read_sz: {}, errno: {}, msg: {}", nbytes, read_sz, errno,
+                                 std::strerror(errno));
+                // release mode
+                if (nbytes == -1) {
+                    LOGERROR("pwrite error: {}, message: {}", errno, std::strerror(errno));
+                    return std::make_error_condition(static_cast< std::errc >(errno));
+                }
+
+                total_nbytes += nbytes;
+            }
+        }
+
+        // prepare for next batch
+        start_lba += batch;
+    }
+
+    ::close(fd);
+    // free read buf;
+    hs_utils::iobuf_free(read_buf, sisl::buftag::common);
+    LOGINFO("Successfully copy vol to: {}, total bytes written: {}, vol info: {}", file_path, total_nbytes,
+            reinterpret_cast< vol_sb_hdr* >(m_sb_buf->bytes)->to_string());
+    return no_error;
+}
