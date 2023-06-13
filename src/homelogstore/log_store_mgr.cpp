@@ -22,7 +22,6 @@
 
 #include "api/meta_interface.hpp"
 #include "engine/common/homestore_assert.hpp"
-#include "engine/common/homestore_status_mgr.hpp"
 #include "engine/homestore_base.hpp"
 #include "log_dev.hpp"
 #include "log_store.hpp"
@@ -55,7 +54,8 @@ void HomeLogStoreMgr::ctrl_meta_blk_found_cb(meta_blk* const mblk, const sisl::b
 
 void HomeLogStoreMgr::start(const bool format) {
     m_hb = HomeStoreBase::safe_instance();
-    m_hb->status_mgr()->register_status_cb("LogStore", bind_this(HomeLogStoreMgr::get_status, 1));
+    m_sobject = m_hb->sobject_mgr()->create_object(
+        "module", "LogStore", std::bind(&HomeLogStoreMgr::get_status, this, std::placeholders::_1));
 
     // Start the logstore families
     m_logstore_families[DATA_LOG_FAMILY_IDX]->start(format, m_hb->get_data_logdev_blkstore());
@@ -169,12 +169,12 @@ nlohmann::json HomeLogStoreMgr::dump_log_store(const log_dump_req& dump_req) {
     return json_dump;
 }
 
-nlohmann::json HomeLogStoreMgr::get_status(const int verbosity) const {
-    nlohmann::json js;
+sisl::status_response HomeLogStoreMgr::get_status(const sisl::status_request& request) const {
+    sisl::status_response response;
     for (auto& l : m_logstore_families) {
-        js[l->get_name()] = l->get_status(verbosity);
+        response.json[l->get_name()] = l->get_status(request).json;
     }
-    return js;
+    return response;
 }
 
 HomeLogStoreMgrMetrics::HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores", "AllLogStores") {

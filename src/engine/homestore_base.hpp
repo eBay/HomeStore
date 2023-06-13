@@ -23,6 +23,10 @@ namespace spdlog {
 class logger;
 } // namespace spdlog
 
+namespace sisl {
+class sobject_manager;
+}
+
 namespace homestore {
 
 struct blkalloc_cp;
@@ -39,7 +43,6 @@ class BlkStore;
 class HomeStoreBase;
 typedef boost::intrusive_ptr< HomeStoreBase > HomeStoreBaseSafePtr;
 
-class HomeStoreStatusMgr;
 struct sb_blkstore_blob;
 
 typedef BlkStore< BlkBuffer > meta_blkstore_t;
@@ -68,7 +71,7 @@ private:
 
 protected:
     std::shared_ptr< sisl::logging::logger_t > m_periodic_logger;
-    std::unique_ptr< HomeStoreStatusMgr > m_status_mgr;
+    std::unique_ptr< sisl::sobject_manager > m_sobject_mgr;
 
     bool m_vdev_failed{false};
     bool m_print_checksum{true};
@@ -107,8 +110,7 @@ public:
     virtual bool fault_containment(const boost::uuids::uuid& uuid) = 0;
     virtual void set_indx_btree_start_destroying(const boost::uuids::uuid& uuid) = 0;
     virtual iomgr::io_thread_t get_hs_flush_thread() const = 0;
-
-    HomeStoreStatusMgr* status_mgr();
+    sisl::sobject_manager* sobject_mgr();
 };
 
 static inline HomeStoreBaseSafePtr HomeStorePtr() { return HomeStoreBase::safe_instance(); }

@@ -45,6 +45,7 @@
 #include "engine/homeds/thread/threadpool/thread_pool.h"
 #include "engine/homestore.hpp"
 #include "homeblks_config.hpp"
+#include <sisl/sobject/sobject.hpp>
 
 #ifndef DEBUG
 extern bool same_value_gen;
@@ -318,7 +319,7 @@ public:
     [[nodiscard]] bool verify_bitmap();
     [[nodiscard]] bool verify_metablk_store();
 
-    [[nodiscard]] nlohmann::json get_status(const int log_level);
+    [[nodiscard]] sisl::status_response get_status(const sisl::status_request& request);
 
     [[nodiscard]] bool is_safe_mode();
 
@@ -345,6 +346,7 @@ public:
     // Other static functions
     static void meta_blk_found_cb(meta_blk* mblk, sisl::byte_view buf, size_t size);
     static void meta_blk_recovery_comp_cb(bool success);
+    sisl::sobject_ptr sobject() { return m_sobject; }
 
 protected:
     void process_vdev_error(vdev_info_block* vb) override;
@@ -419,6 +421,8 @@ private:
 
     /* hdd custom threads */
     std::unique_ptr< VolumeIOWatchDog > m_io_wd{nullptr};
+
+    sisl::sobject_ptr m_sobject;
 };
 
 static inline HomeBlksSafePtr HomeBlksPtr() { return HomeBlks::safe_instance(); }

@@ -170,6 +170,9 @@ Volume::Volume(const vol_params& params) :
         if (home_blks_ref_cnt.decrement_testz(1)) { m_hb->do_volume_shutdown(true); }
         throw std::runtime_error("shutdown in progress");
     }
+    m_sobject = m_hb->sobject_mgr()->create_object("volume", params.vol_name,
+                                                     std::bind(&Volume::get_status, this, std::placeholders::_1));
+
     m_state = vol_state::UNINITED;
 }
 
@@ -186,6 +189,8 @@ Volume::Volume(meta_blk* mblk_cookie, sisl::byte_view sb_buf) :
     HS_REL_ASSERT_LE(sb->version, vol_sb_version, "version mismatch");
     HS_REL_ASSERT_EQ(sb->magic, vol_sb_magic, "magic mismatch");
     m_hb = HomeBlks::safe_instance();
+    m_sobject = m_hb->sobject_mgr()->create_object("volume", sb->vol_name,
+                                                     std::bind(&Volume::get_status, this, std::placeholders::_1));
 }
 
 void Volume::init() {
@@ -215,6 +220,7 @@ void Volume::init() {
             std::bind(&Volume::process_read_indx_completions, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&Volume::create_indx_tbl, this), false);
 
+        // m_sobject->add_child(get_active_indx()->sobject());
         sb->indx_sb = m_indx_mgr->get_immutable_sb();
         vdev_stream_id_t* const id = (vdev_stream_id_t*)(m_sb_buf->bytes + sizeof(vol_sb_hdr));
         for (uint32_t i{0}; i < sb->num_streams; ++i) {
@@ -913,11 +919,17 @@ volume_child_req_ptr Volume::create_vol_child_req(const BlkId& bid, const volume
 void Volume::print_tree() { get_active_indx()->print_tree(); }
 bool Volume::verify_tree(bool update_debug_bm) { return (get_active_indx()->verify_tree(update_debug_bm)); }
 
-nlohmann::json Volume::get_status(const int log_level) {
-    nlohmann::json j;
-    auto active_indx_json = get_active_indx()->get_status(log_level);
-    if (!active_indx_json.empty()) { j.update(active_indx_json); }
-    return j;
+sisl::status_response Volume::get_status(const sisl::status_request& request) {
+    sisl::status_response response;
+    auto active_indx_json = get_active_indx()->sobject()->run_callback(request).json;
+    if (!active_indx_json.empty()) { response.json["index"] = active_indx_json; }
+
+    response.json["name"] =  sobject()->name();
+    response.json["type"] = sobject()->type();
+    response.json["uuid"] = boost::lexical_cast< std::string >(get_uuid());
+    response.json["state"] = is_offline() ? "Offline" : "Online";
+    response.json["size"]=  get_size();
+    return response;
 }
 
 void Volume::populate_debug_bm() {
@@ -997,7 +1009,6 @@ bool Volume::fix_mapping_btree(bool verify) {
 #if 0
         /* TODO: move it to indx mgr */
 //    auto ret = m_map->fix(0, get_last_lba(), verify);
-    
     // update new btree sb;
     if (ret) {
         m_sb->ondisk_sb->btree_sb = m_map->get_btree_sb();

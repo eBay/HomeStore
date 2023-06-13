@@ -36,8 +36,7 @@ SISL_LOGGING_DECL(logstore)
     HS_PERIODIC_DETAILED_LOG(level, logstore, "logdev", m_family_id, , , msg, __VA_ARGS__)
 
 LogDev::LogDev(const logstore_family_id_t f_id, const std::string& metablk_name) :
-        m_family_id{f_id},
-        m_logdev_meta{metablk_name} {
+        m_family_id{f_id}, m_logdev_meta{metablk_name} {
     m_flush_size_multiple = 0;
     if (f_id == HomeLogStoreMgr::DATA_LOG_FAMILY_IDX) {
         m_flush_size_multiple = HS_DYNAMIC_CONFIG(logstore->flush_size_multiple_data_logdev);
@@ -603,17 +602,19 @@ void LogDev::update_store_superblk(const logstore_id_t idx, const logstore_super
     m_logdev_meta.update_store_superblk(idx, meta, persist_now);
 }
 
-void LogDev::get_status(const int verbosity, nlohmann::json& js) const {
-    js["current_log_idx"] = m_log_idx.load(std::memory_order_relaxed);
-    js["last_flush_log_idx"] = m_last_flush_idx;
-    js["last_truncate_log_idx"] = m_last_truncate_idx;
-    js["time_since_last_log_flush_ns"] = get_elapsed_time_ns(m_last_flush_time);
-    if (verbosity == 2) {
-        js["logdev_stopped?"] = m_stopped;
-        js["is_log_flushing_now?"] = m_is_flushing.load(std::memory_order_relaxed);
-        js["logdev_sb_start_offset"] = m_logdev_meta.get_start_dev_offset();
-        js["logdev_sb_num_stores_reserved"] = m_logdev_meta.m_sb->num_stores_reserved();
+sisl::status_response LogDev::get_status(const sisl::status_request& request) const {
+    sisl::status_response response;
+    response.json["current_log_idx"] = m_log_idx.load(std::memory_order_relaxed);
+    response.json["last_flush_log_idx"] = m_last_flush_idx;
+    response.json["last_truncate_log_idx"] = m_last_truncate_idx;
+    response.json["time_since_last_log_flush_ns"] = get_elapsed_time_ns(m_last_flush_time);
+    if (request.verbose_level >= 2) {
+        response.json["logdev_stopped?"] = m_stopped;
+        response.json["is_log_flushing_now?"] = m_is_flushing.load(std::memory_order_relaxed);
+        response.json["logdev_sb_start_offset"] = m_logdev_meta.get_start_dev_offset();
+        response.json["logdev_sb_num_stores_reserved"] = m_logdev_meta.m_sb->num_stores_reserved();
     }
+    return response;
 }
 
 /////////////////////////////// LogDevMetadata Section ///////////////////////////////////////

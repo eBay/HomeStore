@@ -300,23 +300,23 @@ nlohmann::json LogStoreFamily::dump_log_store(const log_dump_req& dump_req) {
     return json_dump;
 }
 
-nlohmann::json LogStoreFamily::get_status(const int verbosity) const {
-    nlohmann::json js;
+sisl::status_response LogStoreFamily::get_status(const sisl::status_request& request) const {
+    sisl::status_response response;
     auto unopened = nlohmann::json::array();
     for (const auto& l : m_unopened_store_id) {
         unopened.push_back(l);
     }
-    js["logstores_unopened"] = std::move(unopened);
+    response.json["logstores_unopened"] = std::move(unopened);
 
     // Logdev status
-    m_log_dev.get_status(verbosity, js);
+    response.json["log_dev"] = m_log_dev.get_status(request).json;
 
     // All logstores
     m_id_logstore_map.withRLock([&](auto& id_logstore_map) {
         for (const auto& [id, lstore] : id_logstore_map) {
-            js["logstore_id_" + std::to_string(id)] = lstore.m_log_store->get_status(verbosity);
+            response.json["logstore_id_" + std::to_string(id)] = lstore.m_log_store->get_status(request).json;
         }
     });
-    return js;
+    return response;
 }
 } // namespace homestore

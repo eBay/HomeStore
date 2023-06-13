@@ -78,6 +78,9 @@ mapping::mapping(const uint64_t volsize, const uint32_t page_size, const std::st
 
     m_bt = MappingBtreeDeclType::create_btree(btree_cfg);
     if (!m_bt) { throw homestore::homestore_exception("btree creation failed", homestore_error::no_space_avail); }
+
+    m_sobject = m_hb->sobject_mgr()->create_object("mapping", m_unique_name,
+                                                      std::bind(&mapping::get_status, this, std::placeholders::_1));
 }
 
 mapping::mapping(const uint64_t volsize, const uint32_t page_size, const std::string& unique_name,
@@ -106,6 +109,8 @@ mapping::mapping(const uint64_t volsize, const uint32_t page_size, const std::st
     m_bt = MappingBtreeDeclType::create_btree(btree_sb, btree_cfg, btree_cp_sb,
                                               std::bind(&mapping::split_key_recovery, this, placeholders::_1,
                                                         placeholders::_2, placeholders::_3, placeholders::_4));
+    m_sobject = m_hb->sobject_mgr()->create_object("mapping", m_unique_name,
+                                                      std::bind(&mapping::get_status, this, std::placeholders::_1));
 }
 
 mapping::~mapping() { delete m_bt; }
@@ -269,12 +274,7 @@ uint64_t mapping::get_btree_node_cnt() { return m_bt->get_btree_node_cnt(); }
 void mapping::print_tree() { m_bt->print_tree(); }
 bool mapping::verify_tree(bool update_debug_bm) { return m_bt->verify_tree(update_debug_bm); }
 
-nlohmann::json mapping::get_status(const int log_level) {
-    nlohmann::json j;
-    auto bt_json = m_bt->get_status(log_level);
-    if (!bt_json.empty()) { j.update(bt_json); }
-    return j;
-}
+sisl::status_response mapping::get_status(const sisl::status_request& request) { return m_bt->get_status(request); }
 
 /**
  * @brief : Fix a btree by :
