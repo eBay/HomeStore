@@ -77,7 +77,7 @@ jobs:
         key: SislDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
       if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
 
-    - name: Restore IOMgr 3rdParty Cache
+    - name: Restore IOMgr Cache
       id: restore-cache-iomgr
       uses: actions/cache/restore@v3
       with:
@@ -125,6 +125,7 @@ jobs:
         # Set std::string to non-CoW C++11 version
         sed -i 's,compiler.libcxx=libstdc++$,compiler.libcxx=libstdc++11,g' ~/.conan/profiles/default
         conan export deps/iomgr oss/master
+      if: ${{ inputs.testing == 'True' || steps.restore-cache-iomgr.outputs.cache-hit != 'true' }}
 
     - name: Build Cache
       run: |
