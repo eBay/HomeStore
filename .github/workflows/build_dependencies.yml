@@ -125,7 +125,7 @@ jobs:
         # Set std::string to non-CoW C++11 version
         sed -i 's,compiler.libcxx=libstdc++$,compiler.libcxx=libstdc++11,g' ~/.conan/profiles/default
         conan export deps/iomgr oss/master
-      if: ${{ inputs.testing == 'True' || steps.restore-cache-iomgr.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
 
     - name: Build Cache
       run: |
