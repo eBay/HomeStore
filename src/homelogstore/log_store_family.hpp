@@ -73,7 +73,7 @@ public:
 
     LogDev& logdev() { return m_log_dev; }
 
-    nlohmann::json get_status(int verbosity) const;
+    sisl::status_response get_status(const sisl::status_request& request) const;
     std::string get_name() const { return m_metablk_name; }
 
     [[nodiscard]] logdev_key do_device_truncate(const bool dry_run = false);

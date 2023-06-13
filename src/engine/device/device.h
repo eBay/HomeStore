@@ -47,6 +47,8 @@
 #include <sisl/fds/sparse_vector.hpp>
 #include <sisl/fds/utils.hpp>
 #include <sisl/utility/enum.hpp>
+#include <sisl/sobject/sobject.hpp>
+
 #include "engine/common/homestore_header.hpp"
 #include "engine/common/homestore_assert.hpp"
 #include "engine/common/homestore_config.hpp"
@@ -406,7 +408,7 @@ public:
     void set_primary_chunk_id(const uint32_t primary_id) { m_chunk_info->primary_chunk_id = primary_id; }
 
     std::string to_string() const;
-    nlohmann::json get_status([[maybe_unused]] const int log_level) const;
+    sisl::status_response get_status(const sisl::status_request& request) const;
 
     void update_end_of_chunk(const uint64_t size) {
         LOGINFOMOD(device, "chunk id {}, end size {} actual size {}", get_chunk_id(), size, get_size());

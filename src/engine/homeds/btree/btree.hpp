@@ -31,6 +31,7 @@
 #include <sisl/flip/flip.hpp>
 #include <fmt/ostream.h>
 #include <sisl/logging/logging.h>
+#include <sisl/sobject/sobject.hpp>
 
 #include "engine/common/error.h"
 #include "engine/common/homestore_config.hpp"
@@ -734,10 +735,7 @@ public:
      *
      * @return : status in json form;
      */
-    nlohmann::json get_status(const int log_level) {
-        nlohmann::json j;
-        return j;
-    }
+    sisl::status_response get_status(const sisl::status_request& request) { return {}; }
 
     void diff(Btree* other, uint32_t param, vector< pair< K, V > >* diff_kv) {
         std::vector< pair< K, V > > my_kvs, other_kvs;

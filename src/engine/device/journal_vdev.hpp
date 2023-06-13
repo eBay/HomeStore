@@ -281,7 +281,7 @@ public:
      * @param log_level: Log level to do verbosity.
      * @return Json containing internal details
      */
-    nlohmann::json get_status(const int log_level) const override;
+    sisl::status_response get_status(const sisl::status_request& request) const override;
 
     /////////////////////////////////////////////////////////////////////////
     // All methods which are invalid for journal vdev are put here.

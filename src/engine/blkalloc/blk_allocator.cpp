@@ -240,10 +240,7 @@ bool BlkAllocator::verify_debug_bm(const bool free_debug_bm) {
 }
 
 /* Get status */
-nlohmann::json BlkAllocator::get_status(const int log_level) const {
-    nlohmann::json j;
-    return j;
-}
+sisl::status_response BlkAllocator::get_status(const sisl::status_request& request) const { return {}; }
 
 sisl::ThreadVector< BlkId >* BlkAllocator::get_alloc_blk_list() {
     auto p = rcu_dereference(m_alloc_blkid_list);

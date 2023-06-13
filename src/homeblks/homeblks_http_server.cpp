@@ -22,11 +22,12 @@
 #include <boost/algorithm/string.hpp>
 #include <nlohmann/json.hpp>
 #include <sisl/version.hpp>
+#include <folly/String.h>
 
 #include "engine/common/homestore_config.hpp"
 #include "homeblks_config.hpp"
 #include "homeblks_http_server.hpp"
-#include "engine/common/homestore_status_mgr.hpp"
+#include <sisl/sobject/sobject.hpp>
 #include "home_blks.hpp"
 
 namespace homestore {
@@ -258,22 +259,49 @@ void HomeBlksHttpServer::dump_disk_metablks(const Pistache::Rest::Request& reque
 }
 
 void HomeBlksHttpServer::get_status(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
-    std::vector< std::string > modules;
-    const auto modules_kv{request.query().get("module")};
-    if (modules_kv) {
-        boost::algorithm::split(modules, modules_kv.value(), boost::is_any_of(","), boost::token_compress_on);
-    }
+    LOGINFO("Got status request ");
 
+    sisl::status_request status_req;
     std::string failure_resp{""};
-    int verbosity_level{-1};
-    if (!verify_and_get_verbosity(request, failure_resp, verbosity_level)) {
+    int verbose_level{-1};
+    if (!verify_and_get_verbosity(request, failure_resp, status_req.verbose_level)) {
         response.send(Pistache::Http::Code::Bad_Request, failure_resp);
         return;
     }
 
-    const auto status_mgr = m_hb->status_mgr();
-    auto status_json = status_mgr->get_status(modules, verbosity_level);
-    response.send(Pistache::Http::Code::Ok, status_json.dump(2));
+    const auto& query = request.query();
+    for (auto iter = query.parameters_begin(); iter != query.parameters_end(); ++iter) {
+        status_req.json.emplace(iter->first, folly::uriUnescape< std::string >(iter->second));
+    }
+
+    auto type(query.get("type"));
+    if (type) { status_req.obj_type = folly::uriUnescape< std::string >(type.value()); }
+
+    auto name(query.get("name"));
+    if (name) { status_req.obj_name = folly::uriUnescape< std::string >(name.value()); }
+
+    auto path(query.get("path"));
+    if (path) {
+        boost::split(status_req.obj_path, folly::uriUnescape< std::string >(path.value()), boost::is_any_of("."));
+    }
+
+    auto recurse(query.get("recurse"));
+    if (recurse && recurse.value() == "True") { status_req.do_recurse = true; }
+
+    auto batch_size(query.get("batch_size"));
+    if (batch_size) { status_req.batch_size = std::stoi(batch_size.value()); }
+
+    auto next_cursor(query.get("next_cursor"));
+    if (next_cursor) {
+        status_req.next_cursor = folly::uriUnescape< std::string >(next_cursor.value());
+    }
+
+    const auto sobject_mgr = HomeStoreBase::safe_instance()->sobject_mgr();
+    sisl::status_response status_resp = sobject_mgr->get_status(status_req);
+    Pistache::Http::Code code = Pistache::Http::Code::Ok;
+    if (status_resp.json.contains("error")) { code = Pistache::Http::Code::Bad_Request; }
+
+    response.send(code, status_resp.json.dump(2));
 }
 
 void HomeBlksHttpServer::verify_bitmap(const Pistache::Rest::Request& request,

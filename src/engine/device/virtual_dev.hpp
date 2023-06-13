@@ -290,7 +290,7 @@ public:
     virtual uint32_t get_page_size() const { return m_vb->page_size; }
     virtual uint32_t get_nmirrors() const { return m_vb->num_mirrors; }
     virtual std::string to_string() const { return std::string{}; }
-    virtual nlohmann::json get_status(const int log_level) const;
+    virtual sisl::status_response get_status(const sisl::status_request& request) const;
 
     static uint64_t get_len(const iovec* iov, const int iovcnt);
 

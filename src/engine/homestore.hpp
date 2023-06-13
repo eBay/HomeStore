@@ -67,7 +67,10 @@ public:
         }
 
         sisl::ObjCounterRegistry::enable_metrics_reporting();
-        m_status_mgr = std::make_unique< HomeStoreStatusMgr >();
+        m_sobject_mgr = std::make_unique< sisl::sobject_manager >();
+        m_sobject =
+            sobject_mgr()->create_object("module", "HomeStore", std::bind(&HomeStore::get_status, this, std::placeholders::_1));
+
         MetaBlkMgrSI()->register_handler("INDX_MGR_CP", StaticIndxMgr::meta_blk_found_cb, nullptr);
 
         /* set the homestore static config parameters */
@@ -450,6 +453,10 @@ public:
         HomeLogStoreMgr::fake_reboot();
     }
 
+    sisl::status_response get_status(const sisl::status_request& request) {
+        return {};
+    }
+
 #if 0
     static void zero_pdev_sbs(const std::vector< dev_info >& devices) { DeviceManager::zero_pdev_sbs(devices); }
 #endif
@@ -471,6 +478,7 @@ protected:
     std::unique_ptr< CacheType > m_cache;
 
 private:
+    sisl::sobject_ptr m_sobject;
     std::vector< iomgr::io_thread_t > m_flush_threads;
     static constexpr float data_blkstore_pct{84.0};
     static constexpr float indx_blkstore_pct{3.0};
