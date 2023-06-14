@@ -50,15 +50,15 @@ static constexpr uint32_t max_log_group{2};
 /*
  * LogGroup Layout:
  *
- *   <----        Log Group Header         ---> <--   Record 1   --> <--   Record 2   -->        <-- -  Inline data area  --> 
+ *   <----        Log Group Header         ---> <--   Record 1   --> <--   Record 2   -->        <-- -  Inline data area  -->
  *  |----------------------------------------- |--------------------|--------------------|      |----------------|-----------|----------------|
  *  |#records|...| oob area   | inline area    | Size | data offset | Size | data offset | ...  | Record #1 data |     ...   |   OOB Record 1 |
  *  |----------------------------------------- |--------------------|--------------------|      |----------------|-----------|----------------|
- *                      |             |                     |                                     ^                            ^ 
+ *                      |             |                     |                                     ^                            ^
  *                      |             |                     |                                     |                            |
  *                      |             |                      -------------------------------------|                            |
  *                      |             ------------------------------------------------------------|                            |
- *                      |------------------------------------------------------------------------------------------------------|         
+ *                      |------------------------------------------------------------------------------------------------------|
  */
 // clang-format on
 
@@ -491,7 +491,6 @@ public:
     void unreserve_store(logstore_id_t idx, bool persist_now);
     const std::set< logstore_id_t >& reserved_store_ids() const { return m_store_info; }
 
-    void update_store_superblk(logstore_id_t idx, const logstore_superblk& meta, bool persist_now);
     const logstore_superblk& store_superblk(logstore_id_t idx) const;
     logstore_superblk& mutable_store_superblk(logstore_id_t idx);
 
@@ -738,7 +737,7 @@ public:
 
     void update_store_superblk(logstore_id_t idx, const logstore_superblk& meta, bool persist_now);
 
-    void get_status(int verbosity, nlohmann::json& out_json) const;
+    sisl::status_response get_status(const sisl::status_request& request) const;
     bool flush_if_needed(int64_t threshold_size = -1);
 
     bool is_aligned_buf_needed(size_t size) const {

@@ -80,6 +80,9 @@ bool LogStoreService::open_vdev(vdev_info_block* vb, logstore_family_id_t family
 
 void LogStoreService::start(const bool format) {
     // hs()->status_mgr()->register_status_cb("LogStore", bind_this(LogStoreService::get_status, 1));
+    m_hb = HomeStoreBase::safe_instance();
+    m_sobject = m_hb->sobject_mgr()->create_object(
+        "module", "LogStore", std::bind(&HomeLogStoreMgr::get_status, this, std::placeholders::_1));
 
     // Create an truncate thread loop which handles truncation which does sync IO
     start_threads();
@@ -198,12 +201,12 @@ nlohmann::json LogStoreService::dump_log_store(const log_dump_req& dump_req) {
     return json_dump;
 }
 
-nlohmann::json LogStoreService::get_status(const int verbosity) const {
-    nlohmann::json js;
+sisl::status_response HomeLogStoreMgr::get_status(const sisl::status_request& request) const {
+    sisl::status_response response;
     for (auto& l : m_logstore_families) {
-        js[l->get_name()] = l->get_status(verbosity);
+        response.json[l->get_name()] = l->get_status(request).json;
     }
-    return js;
+    return response;
 }
 
 uint32_t LogStoreService::used_size() const {

@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - master
+      - stable/v3.x
 
 jobs:
   BuildCommit:

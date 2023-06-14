@@ -474,14 +474,14 @@ bool JournalVirtualDev::is_alloc_accross_chunk(size_t size) {
     return (offset_in_chunk + size > m_chunk_size);
 }
 
-nlohmann::json JournalVirtualDev::get_status(int log_level) const {
-    nlohmann::json j;
-    j["VirtualDev"] = VirtualDev::get_status(log_level);
-    j["JournalVirtualDev"]["m_seek_cursor"] = m_seek_cursor;
-    j["JournalVirtualDev"]["data_start_offset"] = m_data_start_offset;
-    j["JournalVirtualDev"]["write_size"] = m_write_sz_in_total.load(std::memory_order_relaxed);
-    j["JournalVirtualDev"]["truncate_done"] = m_truncate_done;
-    j["JournalVirtualDev"]["reserved_size"] = m_reserved_sz;
-    return j;
+sisl::status_response JournalVirtualDev::get_status(const sisl::status_request& request) const {
+    sisl::status_response response;
+    response.json["VirtualDev"] = VirtualDev::get_status(request).json;
+    response.json["JournalVirtualDev"]["m_seek_cursor"] = m_seek_cursor;
+    response.json["JournalVirtualDev"]["data_start_offset"] = m_data_start_offset;
+    response.json["JournalVirtualDev"]["write_size"] = m_write_sz_in_total.load(std::memory_order_relaxed);
+    response.json["JournalVirtualDev"]["truncate_done"] = m_truncate_done;
+    response.json["JournalVirtualDev"]["reserved_size"] = m_reserved_sz;
+    return response;
 }
 } // namespace homestore

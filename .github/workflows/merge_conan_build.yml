@@ -4,9 +4,10 @@ on:
   push:
     branches:
       - master
+      - stable/v3.x
 
 jobs:
-  BuildCommit:
+  Build:
     strategy:
       fail-fast: false
       matrix:

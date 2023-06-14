@@ -36,6 +36,7 @@
 #include "checkpoint.hpp"
 #include "engine/homeds/btree/btree_internal.h"
 #include "engine/homestore_base.hpp"
+#include <sisl/sobject/sobject.hpp>
 
 #include "homelogstore/logstore_header.hpp"
 
@@ -671,6 +672,7 @@ public:
     btree_cp_ptr get_btree_cp(hs_cp* const hcp);
     bool is_recovery_done() const;
     std::string get_cp_flush_status(const indx_cp_ptr& icp);
+    sisl::sobject_ptr sobject() { return m_sobject; }
 
 protected:
     /*********************** virtual functions required to support snapshot  **********************/
@@ -729,6 +731,7 @@ private:
     seq_id_t m_max_seqid_in_recovery{-1};
     std::atomic< bool > m_active_cp_suspend{false};
     IndxMgrMetrics m_metrics;
+    sisl::sobject_ptr m_sobject;
 
     /*************************************** private functions ************************/
     bool is_destroying();
@@ -775,6 +778,7 @@ private:
     void free_blkid_and_send_completion(const indx_req_ptr& ireq);
 
     iomgr::io_thread_t get_next_btree_write_thread();
+    sisl::status_response get_status(const sisl::status_request& request);
 };
 
 /*************************************************** indx request ***********************************/

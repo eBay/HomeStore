@@ -85,7 +85,7 @@ public:
 
     LogDev& logdev() { return m_log_dev; }
 
-    nlohmann::json get_status(int verbosity) const;
+    sisl::status_response get_status(const sisl::status_request& request) const;
     std::string get_name() const { return m_name; }
 
     logstore_family_id_t get_family_id() const { return m_family_id; }

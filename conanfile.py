@@ -5,7 +5,7 @@ from conans import CMake
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "4.0.12"
+    version = "4.0.13"
 
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
@@ -81,7 +81,7 @@ class HomestoreConan(ConanFile):
 
         if self.settings.build_type == 'Debug':
             definitions['CMAKE_BUILD_TYPE'] = 'Debug'
-        
+
         cmake.configure(defs=definitions)
         cmake.build()
         if not self.options.testing == 'off' and not self.options.skip_testing:

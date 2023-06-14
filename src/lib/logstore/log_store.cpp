@@ -466,18 +466,18 @@ uint64_t HomeLogStore::rollback_async(logstore_seq_num_t to_lsn, on_rollback_cb_
     return from_lsn - to_lsn;
 }
 
-nlohmann::json HomeLogStore::get_status(int verbosity) const {
-    nlohmann::json js;
-    js["append_mode"] = m_append_mode;
-    js["highest_lsn"] = m_seq_num.load(std::memory_order_relaxed);
-    js["max_lsn_in_prev_flush_batch"] = m_flush_batch_max_lsn;
-    js["truncated_upto_logdev_key"] = m_safe_truncation_boundary.ld_key.to_string();
-    js["truncated_upto_lsn"] = m_safe_truncation_boundary.seq_num.load(std::memory_order_relaxed);
-    js["truncation_pending_on_device?"] = m_safe_truncation_boundary.pending_dev_truncation;
-    js["truncation_parallel_to_writes?"] = m_safe_truncation_boundary.active_writes_not_part_of_truncation;
-    js["logstore_records"] = m_records.get_status(verbosity);
-    js["logstore_sb_first_lsn"] = m_logdev.log_dev_meta().store_superblk(m_store_id).m_first_seq_num;
-    return js;
+sisl::status_response HomeLogStore::get_status(const sisl::status_request& request) const {
+    sisl::status_response response;
+    response.json["append_mode"] = m_append_mode;
+    response.json["highest_lsn"] = m_seq_num.load(std::memory_order_relaxed);
+    response.json["max_lsn_in_prev_flush_batch"] = m_flush_batch_max_lsn;
+    response.json["truncated_upto_logdev_key"] = m_safe_truncation_boundary.ld_key.to_string();
+    response.json["truncated_upto_lsn"] = m_safe_truncation_boundary.seq_num.load(std::memory_order_relaxed);
+    response.json["truncation_pending_on_device?"] = m_safe_truncation_boundary.pending_dev_truncation;
+    response.json["truncation_parallel_to_writes?"] = m_safe_truncation_boundary.active_writes_not_part_of_truncation;
+    response.json["logstore_records"] = m_records.get_status(request.verbose_level);
+    response.json["logstore_sb_first_lsn"] = m_logdev.m_logdev_meta.store_superblk(m_store_id).m_first_seq_num;
+    return response;
 }
 
 logstore_superblk logstore_superblk::default_value() { return logstore_superblk{-1}; }

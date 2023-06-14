@@ -81,6 +81,10 @@ void MetaBlkService::start(bool is_init) {
     HS_REL_ASSERT_GT(block_size(), META_BLK_HDR_MAX_SZ);
     HS_REL_ASSERT_GT(block_size(), MAX_BLK_OVF_HDR_MAX_SZ);
 
+    auto hs = HomeStoreBase::safe_instance();
+    m_sobject = hs->sobject_mgr()->create_object("module", "MetaBlkMgr",
+                                                   std::bind(&MetaBlkMgr::get_status, this, std::placeholders::_1));
+
     reset_self_recover();
     alloc_compress_buf(init_compress_memory_size());
     if (is_init) {
@@ -1392,11 +1396,12 @@ exit:
 // Note: get_status can be called in release build, should never hit any release assert failure, instead should
 // print error log and return to caller with error message
 //
-nlohmann::json MetaBlkService::get_status(int log_level) {
-    LOGINFO("Gettting status with log_level: {}", log_level);
+sisl::status_response MetaBlkMgr::get_status(const sisl::status_request& request) {
+    sisl::status_response response;
     std::string dummy_client;
-    return populate_json(log_level, m_meta_blks, m_ovf_blk_hdrs, m_last_mblk_id.get(), m_sub_info, is_self_recovered(),
-                         dummy_client);
+    response.json = populate_json(request.verbose_level, m_meta_blks, m_ovf_blk_hdrs, m_last_mblk_id.get(), m_sub_info,
+                                  m_self_recover, dummy_client);
+    return response;
 }
 
 nlohmann::json MetaBlkService::populate_json(int log_level, meta_blk_map_t& meta_blks, ovf_hdr_map_t& ovf_blk_hdrs,

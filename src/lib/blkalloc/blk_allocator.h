@@ -30,6 +30,7 @@
 #include <sisl/utility/enum.hpp>
 #include <sisl/utility/urcu_helper.hpp>
 #include <sisl/fds/thread_vector.hpp>
+#include <sisl/sobject/sobject.hpp>
 
 #include <homestore/homestore_decl.hpp>
 #include <homestore/blk.h>
@@ -292,7 +293,7 @@ public:
     bool verify_debug_bm(bool free_debug_bm);
 
     /* Get status */
-    nlohmann::json get_status(int log_level) const;
+    [[nodiscard]] sisl::status_response get_status(const sisl::status_request& request) const;
 
     bool realtime_bm_on() const { return (m_cfg.m_realtime_bm_on && m_auto_recovery); }
     void reset_disk_bm_dirty() { is_disk_bm_dirty = false; }

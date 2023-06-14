@@ -28,6 +28,8 @@
 #include <sisl/metrics/metrics.hpp>
 #include <nlohmann/json.hpp>
 
+#include <sisl/sobject/sobject.hpp>
+
 namespace homestore {
 
 // forward declarations
@@ -86,6 +88,7 @@ private:
     MetablkMetrics m_metrics;
     bool m_inited{false};
     std::unique_ptr< sb_blkstore_blob > m_meta_sb_blob;
+    sisl::sobject_ptr m_sobject;
 
 public:
     MetaBlkService(const char* name = "MetaBlkStore");
@@ -204,7 +207,9 @@ public:
 
     uint64_t meta_blk_context_sz() const;
 
-    nlohmann::json get_status(const int log_level);
+    [[nodiscard]] sisl::status_response get_status(const sisl::status_request& request);
+
+    sisl::sobject_ptr sobject() { return m_sobject; }
 
 public:
     /*********************** static public function **********************/
