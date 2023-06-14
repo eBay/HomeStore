@@ -12,6 +12,7 @@ target_sources(hs_logdev PRIVATE
       log_store_mgr.cpp
     )
 target_link_libraries(hs_logdev ${COMMON_DEPS})
+add_dependencies(hs_logdev hs_common)
 
 link_directories(${spdk_LIB_DIRS} ${dpdk_LIB_DIRS})
 
