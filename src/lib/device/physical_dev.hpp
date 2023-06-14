@@ -27,22 +27,6 @@
 #include <sisl/metrics/metrics.hpp>
 #include <sisl/fds/bitset.hpp>
 #include <sisl/logging/logging.h>
-<<<<<<< HEAD:src/lib/device/physical_dev.hpp
-=======
-#include <sisl/fds/buffer.hpp>
-#include <sisl/fds/sparse_vector.hpp>
-#include <sisl/fds/utils.hpp>
-#include <sisl/utility/enum.hpp>
-#include <sisl/sobject/sobject.hpp>
-
-#include "engine/common/homestore_header.hpp"
-#include "engine/common/homestore_assert.hpp"
-#include "engine/common/homestore_config.hpp"
-#include "engine/common/homestore_utils.hpp"
-
-using namespace iomgr;
-SISL_LOGGING_DECL(device, DEVICE_MANAGER)
->>>>>>> upstream/stable/v3.x:src/engine/device/device.h
 
 #include <homestore/homestore_decl.hpp>
 #include "common/homestore_assert.hpp"
