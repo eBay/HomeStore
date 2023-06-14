@@ -1,0 +1,40 @@
+name: Build Commit
+
+on:
+  workflow_call:
+    inputs:
+      build-type:
+        required: true
+        type: string
+      malloc-impl:
+        required: true
+        type: string
+      prerelease:
+        required: true
+        type: string
+
+jobs:
+  SislDeps:
+    uses: eBay/sisl/.github/workflows/build_dependencies.yml@stable/v8.x
+    with:
+      branch: stable/v8.x
+      build-type: ${{ inputs.build-type }}
+      malloc-impl: ${{ inputs.malloc-impl }}
+      prerelease: ${{ inputs.prerelease }}
+  IOMgrDeps:
+    needs: SislDeps
+    uses: eBay/iomanager/.github/workflows/build_dependencies.yml@stable/v8.x
+    with:
+      branch: stable/v8.x
+      build-type: ${{ inputs.build-type }}
+      malloc-impl: ${{ inputs.malloc-impl }}
+      prerelease: ${{ inputs.prerelease }}
+  HomestoreDeps:
+    needs: IOMgrDeps
+    uses: ./.github/workflows/build_dependencies.yml
+    with:
+      branch: ${{ github.ref }}
+      build-type: ${{ inputs.build-type }}
+      malloc-impl: ${{ inputs.malloc-impl }}
+      prerelease: ${{ inputs.prerelease }}
+      testing: 'True'

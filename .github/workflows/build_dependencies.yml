@@ -1,0 +1,168 @@
+name: Conan Build
+
+on:
+  workflow_call:
+    inputs:
+      branch:
+        required: true
+        type: string
+      build-type:
+        required: true
+        type: string
+      malloc-impl:
+        required: true
+        type: string
+      prerelease:
+        required: true
+        type: string
+      testing:
+        required: false
+        type: string
+        default: 'False'
+  workflow_dispatch:
+    inputs:
+      branch:
+        required: true
+        type: string
+      build-type:
+        required: true
+        type: choice
+        options:
+          - Debug
+          - Release
+          - RelWithDebInfo
+      malloc-impl:
+        description: 'Allocation Library'
+        required: true
+        type: choice
+        options:
+          - libc
+          - tcmalloc
+          - jemalloc
+      prerelease:
+        description: 'Fault Instrumentation'
+        required: false
+        type: choice
+        options:
+          - 'True'
+          - 'False'
+        default: 'False'
+      testing:
+        description: 'Build and Test'
+        required: true
+        type: choice
+        options:
+          - 'True'
+          - 'False'
+        default: 'False'
+
+jobs:
+  BuildHomestoreDeps:
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Restore Homestore Cache
+      id: restore-cache-homestore
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.conan/data
+        key: HomestoreDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+
+    - name: Restore Sisl Cache
+      id: restore-cache-sisl
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.conan/data
+        key: Sisl8Deps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Restore IOMgr Cache
+      id: restore-cache-iomgr
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.conan/data
+        key: IOMgr8Deps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Retrieve Code
+      uses: actions/checkout@v3
+      with:
+        path: deps/homestore
+        ref: ${{ inputs.branch }}
+      if: ${{ inputs.testing == 'True' }}
+
+    - name: Retrieve Dependencies
+      uses: actions/checkout@v3
+      with:
+        repository: eBay/iomanager
+        path: deps/iomgr
+        ref: stable/v8.x
+      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Retrieve Recipe
+      uses: actions/checkout@v3
+      with:
+        repository: eBay/Homestore
+        path: deps/homestore
+        ref: ${{ inputs.branch }}
+      if: ${{ inputs.testing == 'False' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Setup Python
+      uses: actions/setup-python@v3
+      with:
+        python-version: "3.8"
+      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Setup Conan and Export Recipes
+      run: |
+        sudo apt-get install -y python3-pyelftools libaio-dev
+        python -m pip install --upgrade pip
+        python -m pip install pyelftools
+        python -m pip install conan~=1.0
+        conan user
+        conan profile new --detect default
+        # Set std::string to non-CoW C++11 version
+        sed -i 's,compiler.libcxx=libstdc++$,compiler.libcxx=libstdc++11,g' ~/.conan/profiles/default
+        conan export deps/iomgr
+      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Build Cache
+      run: |
+        conan install \
+            -o sisl:prerelease=${{ inputs.prerelease }} \
+            -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
+            -o sisl:testing=False \
+            -o iomgr:testing=off \
+            -s build_type=${{ inputs.build-type }} \
+            --build missing \
+            deps/homestore
+      if: ${{ inputs.testing != 'True' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Test Package
+      run: |
+        conan create \
+            -o sisl:prerelease=${{ inputs.prerelease }} \
+            -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
+            -o sisl:testing=False \
+            -o iomgr:testing=off \
+            -s build_type=${{ inputs.build-type }} \
+            --build missing \
+            deps/homestore
+      if: ${{ inputs.testing == 'True' }}
+
+    - name: Cleanup
+      run: |
+        ls -1d ~/.conan/data/* | grep -Ev '(iomgr)' | xargs rm -rf
+        rm -rf ~/.conan/data/*/*/*/*/build
+      if: ${{ steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Save Homestore Cache
+      id: save-cache-homestore
+      uses: actions/cache/save@v3
+      with:
+        path: |
+          ~/.conan/data
+        key: HomestoreDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+      if: ${{ github.event_name != 'pull_request' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
