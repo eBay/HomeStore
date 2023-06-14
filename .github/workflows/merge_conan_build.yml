@@ -1,0 +1,26 @@
+name: Homestore Merge Build
+
+on:
+  push:
+    branches:
+      - master
+      - stable/v3.x
+
+jobs:
+  Build:
+    strategy:
+      fail-fast: false
+      matrix:
+        build-type: ["Debug", "Release"]
+        malloc-impl: ["libc", "tcmalloc"]
+        prerelease: ["True", "False"]
+        exclude:
+          - build-type: Debug
+            prerelease: "False"
+          - build-type: Release
+            malloc-impl: libc
+    uses: ./.github/workflows/build_commit.yml
+    with:
+      build-type: ${{ matrix.build-type }}
+      malloc-impl: ${{ matrix.malloc-impl }}
+      prerelease: ${{ matrix.prerelease }}
