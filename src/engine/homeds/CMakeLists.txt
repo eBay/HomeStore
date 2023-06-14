@@ -36,7 +36,7 @@ if (${non_io_tests})
 
     add_executable(test_hash)
     target_sources(test_hash PRIVATE tests/test_hashset.cpp)
-    target_link_libraries(test_hash ${COMMON_TEST_DEPS} benchmark::benchmark iberty)
+    target_link_libraries(test_hash ${COMMON_TEST_DEPS} benchmark::benchmark)
 
     add_executable(test_avector)
     target_sources(test_avector PRIVATE tests/test_avector.cpp)
