@@ -22,7 +22,6 @@ jobs:
             platform: ubuntu-20.04
           - malloc-impl: jemalloc
             platform: ubuntu-20.04
-          - build-type: Debug
           - malloc-impl: jemalloc
             build-type: Debug
           - malloc-impl: jemalloc
