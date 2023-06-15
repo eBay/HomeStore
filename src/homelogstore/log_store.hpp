@@ -226,6 +226,7 @@ public:
 
     LogStoreFamily* data_log_family() { return m_logstore_families[DATA_LOG_FAMILY_IDX].get(); }
     LogStoreFamily* ctrl_log_family() { return m_logstore_families[CTRL_LOG_FAMILY_IDX].get(); }
+    LogStoreFamily* get_family(std::string family_name);
 
     static LogDev& data_logdev() { return HomeLogStoreMgr::instance().data_log_family()->logdev(); }
     static LogDev& ctrl_logdev() { return HomeLogStoreMgr::instance().ctrl_log_family()->logdev(); }
