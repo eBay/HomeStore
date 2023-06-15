@@ -1,32 +1,41 @@
 name: Homestore Merge Build
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - master
       - stable/v3.x
 
 jobs:
-  Build:
+  BuildMerge:
     strategy:
       fail-fast: false
       matrix:
+        platform: ["ubuntu-22.04", "ubuntu-20.04"]
         build-type: ["Debug", "Release"]
         malloc-impl: ["libc", "tcmalloc", "jemalloc"]
         prerelease: ["True", "False"]
         exclude:
           - build-type: Debug
+            platform: ubuntu-20.04
+          - malloc-impl: tcmalloc
+            platform: ubuntu-20.04
+          - malloc-impl: jemalloc
+            platform: ubuntu-20.04
+          - build-type: Debug
+          - malloc-impl: jemalloc
+            build-type: Debug
+          - malloc-impl: jemalloc
             prerelease: "False"
-          - build-type: Debug
-            malloc-impl: tcmalloc
-          - build-type: Debug
-            malloc-impl: jemalloc
-          - build-type: Release
-            malloc-impl: libc
-          - prerelease: "True"
-            malloc-impl: jemalloc
+          - malloc-impl: libc
+            build-type: Release
+            platform: ubuntu-22.04
+          - prerelease: "False"
+            build-type: Debug
     uses: ./.github/workflows/build_commit.yml
     with:
+      platform: ${{ matrix.platform }}
       build-type: ${{ matrix.build-type }}
       malloc-impl: ${{ matrix.malloc-impl }}
       prerelease: ${{ matrix.prerelease }}
