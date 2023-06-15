@@ -3,6 +3,10 @@ name: Conan Build
 on:
   workflow_call:
     inputs:
+      platform:
+        required: false
+        default: 'ubuntu-22.04'
+        type: string
       branch:
         required: true
         type: string
@@ -21,6 +25,15 @@ on:
         default: 'False'
   workflow_dispatch:
     inputs:
+      platform:
+        required: true
+        type: choice
+        options:
+          - ubuntu-22.04
+          - ubuntu-20.04
+          - macos-13
+          - macos-12
+        default: 'ubuntu-22.04'
       branch:
         required: true
         type: string
@@ -48,44 +61,18 @@ on:
           - 'False'
         default: 'False'
       testing:
-        description: 'Run Tests'
+        description: 'Build and Run'
         required: true
         type: choice
         options:
           - 'True'
           - 'False'
-        default: 'False'
+        default: 'True'
 
 jobs:
   BuildHomestoreDeps:
-    runs-on: ubuntu-22.04
+    runs-on: ${{ inputs.platform }}
     steps:
-    - name: Restore Homestore Cache
-      id: restore-cache-homestore
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ~/.conan/data
-        key: HomestoreDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
-
-    - name: Restore Sisl Cache
-      id: restore-cache-sisl
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ~/.conan/data
-        key: SislDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
-      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
-
-    - name: Restore IOMgr Cache
-      id: restore-cache-iomgr
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ~/.conan/data
-        key: IOMgrDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
-      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
-
     - name: Retrieve Code
       uses: actions/checkout@v3
       with:
@@ -104,9 +91,45 @@ jobs:
     - name: Retrieve Recipe
       uses: actions/checkout@v3
       with:
+        repository: eBay/Homestore
         path: deps/homestore
         ref: ${{ inputs.branch }}
       if: ${{ inputs.testing == 'False' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Restore Homestore Cache
+      id: restore-cache-homestore
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.conan/data
+        key: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('**/conanfile.py') }}
+        restore-keys: |
+          HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease == 'True' && 'True-' || '' }}
+
+    - name: Restore Sisl Cache
+      id: restore-cache-sisl
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.conan/data
+        key: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('**/conanfile.py') }}
+        restore-keys: |
+          SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease == 'True' && 'True-' || '' }}
+        fail-on-cache-miss: true
+      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Restore IOMgr Cache
+      id: restore-cache-iomgr
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.conan/data
+        key: IOMgrDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('**/conanfile.py') }}
+        restore-keys: |
+          IOMgrDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease == 'True' && 'True-' || '' }}
+        fail-on-cache-miss: true
+      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
 
     - name: Setup Python
       uses: actions/setup-python@v3
@@ -122,10 +145,16 @@ jobs:
         python -m pip install conan~=1.0
         conan user
         conan profile new --detect default
+        conan export deps/iomgr oss/master
+        cached_pkgs=$(ls -1d ~/.conan/data/*/*/*/*/package | sed 's,.*data/,,' | cut -d'/' -f1,2 | paste -sd',' - -)
+        echo "::info:: Pre-cached: ${cached_pkgs}"
+      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Fixup libstdc++
+      run: |
         # Set std::string to non-CoW C++11 version
         sed -i 's,compiler.libcxx=libstdc++$,compiler.libcxx=libstdc++11,g' ~/.conan/profiles/default
-        conan export deps/iomgr oss/master
-      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.platform == 'ubuntu-22.04' && ( inputs.testing == 'True' || steps.restore-cache-sisl.outputs.cache-hit != 'true' ) }}
 
     - name: Build Cache
       run: |
@@ -137,7 +166,7 @@ jobs:
             -s build_type=${{ inputs.build-type }} \
             --build missing \
             deps/homestore
-      if: ${{ inputs.testing != 'True' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+      if: ${{ steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
 
     - name: Test Package
       run: |
@@ -149,12 +178,18 @@ jobs:
             -s build_type=${{ inputs.build-type }} \
             --build missing \
             deps/homestore
+        conan remove -f homestore
       if: ${{ inputs.testing == 'True' }}
 
     - name: Cleanup
       run: |
-        ls -1d ~/.conan/data/* | grep -Ev '(iomgr)' | xargs rm -rf
+        dirty_pkgs=$(ls -1d ~/.conan/data/*/*/*/*/build | sed 's,.*data/,,')
+        dirty_pkgs_v=$(echo "${dirty_pkgs}" | cut -d'/' -f1,2 | paste -sd',' - -)
+        echo "::info:: Caching: ${dirty_pkgs_v}"
+        dirty_pkgs_d=$(echo "${dirty_pkgs}" | cut -d'/' -f1 | paste -sd'|' - -)
+        ls -1d ~/.conan/data/* | grep -Ev "(${dirty_pkgs_d})" | xargs rm -rf
         rm -rf ~/.conan/data/*/*/*/*/build
+        rm -rf ~/.conan/data/*/*/*/*/source
       if: ${{ steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
 
     - name: Save Homestore Cache
@@ -163,5 +198,5 @@ jobs:
       with:
         path: |
           ~/.conan/data
-        key: HomestoreDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+        key: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('**/conanfile.py') }}
       if: ${{ github.event_name != 'pull_request' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
