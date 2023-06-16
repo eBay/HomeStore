@@ -102,9 +102,16 @@ jobs:
       with:
         path: |
           ~/.conan/data
-        key: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('**/conanfile.py') }}
-        restore-keys: |
-          HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease == 'True' && 'True-' || '' }}
+        key: HomestoreDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/homestore/**/conanfile.py') }}
+
+    - name: Restore Testing Cache
+      id: restore-cache-testing-homestore
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.conan/data
+        key: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-
+      if: ${{ github.event_name == 'pull_request' && inputs.testing == 'True' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
 
     - name: Restore Sisl Cache
       id: restore-cache-sisl
@@ -112,24 +119,20 @@ jobs:
       with:
         path: |
           ~/.conan/data
-        key: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('**/conanfile.py') }}
-        restore-keys: |
-          SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease == 'True' && 'True-' || '' }}
+        key: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/sisl/**/conanfile.py') }}
         fail-on-cache-miss: true
+        restore-keys: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-
       if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
 
     - name: Restore IOMgr Cache
-      id: restore-cache-iomgr
       uses: actions/cache/restore@v3
       with:
         path: |
           ~/.conan/data
-        key: IOMgrDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('**/conanfile.py') }}
-        restore-keys: |
-          IOMgrDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease == 'True' && 'True-' || '' }}
+        key: IOMgrDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/iomgr/**/conanfile.py') }}
         fail-on-cache-miss: true
+        restore-keys: IOMgrDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-
       if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
-
 
     - name: Setup Python
       uses: actions/setup-python@v3
@@ -157,6 +160,7 @@ jobs:
       if: ${{ inputs.platform == 'ubuntu-22.04' && ( inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' ) }}
 
     - name: Build Cache
+      id: build_cache
       run: |
         conan install \
             -o sisl:prerelease=${{ inputs.prerelease }} \
@@ -168,7 +172,53 @@ jobs:
             deps/homestore
       if: ${{ steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
 
-    - name: Test Package
+    - name: Clean Package Cache
+      run: |
+        dep_pkgs=$(ls -1d deps/iomgr/3rd_party/* 2>/dev/null | cut -d'/' -f4 | paste -sd'|' - -)
+        if [ -z "${dep_pkgs}" ]; then
+           dep_pkgs="no_3rd_party"
+        fi
+        dirty_pkgs=$(ls -1d ~/.conan/data/*/*/*/*/build 2>/dev/null | sed 's,.*data/,,')
+        if [ -z "${dirty_pkgs}" ]; then
+           dirty_pkgs="no_public/0"
+        fi
+        dirty_pkgs_d=$(echo "${dirty_pkgs}" | cut -d'/' -f1 | paste -sd'|' - -)
+        echo "::info:: Caching: ${dirty_pkgs_d}|${dep_pkgs}"
+        ls -1d ~/.conan/data/* | grep -Ev "(${dirty_pkgs_d}|${dep_pkgs})" | xargs rm -rf
+        rm -rf ~/.conan/data/*/*/*/*/build
+        rm -rf ~/.conan/data/*/*/*/*/source
+      if: ${{ github.event_name != 'pull_request' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Save Homestore Cache
+      id: save-cache-homestore
+      uses: actions/cache/save@v3
+      with:
+        path: |
+          ~/.conan/data
+        key: HomestoreDeps-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/homestore/**/conanfile.py') }}
+      if: ${{ github.event_name != 'pull_request' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Restore Sisl Cache
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.conan/data
+        key: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/sisl/**/conanfile.py') }}
+        fail-on-cache-miss: true
+        restore-keys: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-
+      if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Restore IOMgr Cache
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ~/.conan/data
+        key: IOMgrDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/iomgr/**/conanfile.py') }}
+        fail-on-cache-miss: true
+        restore-keys: IOMgrDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-
+      if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+
+    - name: Create and test Package
       run: |
         conan create \
             -o sisl:prerelease=${{ inputs.prerelease }} \
@@ -178,25 +228,4 @@ jobs:
             -s build_type=${{ inputs.build-type }} \
             --build missing \
             deps/homestore
-        conan remove -f homestore
       if: ${{ inputs.testing == 'True' }}
-
-    - name: Cleanup
-      run: |
-        dirty_pkgs=$(ls -1d ~/.conan/data/*/*/*/*/build | sed 's,.*data/,,')
-        dirty_pkgs_v=$(echo "${dirty_pkgs}" | cut -d'/' -f1,2 | paste -sd',' - -)
-        echo "::info:: Caching: ${dirty_pkgs_v}"
-        dirty_pkgs_d=$(echo "${dirty_pkgs}" | cut -d'/' -f1 | paste -sd'|' - -)
-        ls -1d ~/.conan/data/* | grep -Ev "(${dirty_pkgs_d})" | xargs rm -rf
-        rm -rf ~/.conan/data/*/*/*/*/build
-        rm -rf ~/.conan/data/*/*/*/*/source
-      if: ${{ steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
-
-    - name: Save Homestore Cache
-      id: save-cache-homestore
-      uses: actions/cache/save@v3
-      with:
-        path: |
-          ~/.conan/data
-        key: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('**/conanfile.py') }}
-      if: ${{ github.event_name != 'pull_request' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
