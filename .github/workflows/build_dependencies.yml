@@ -216,6 +216,7 @@ jobs:
         key: IOMgrDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/iomgr/**/conanfile.py') }}
         fail-on-cache-miss: true
         restore-keys: IOMgrDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-
+      if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
 
     - name: Create and test Package
       run: |
