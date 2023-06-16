@@ -161,12 +161,6 @@ jobs:
       id: build_cache
       run: |
         conan install \
-            -o prerelease=${{ inputs.prerelease }} \
-            -o malloc_impl=${{ inputs.malloc-impl }} \
-            -s build_type=${{ inputs.build-type }} \
-            --build missing \
-            deps/sisl
-        conan install \
             -o sisl:prerelease=${{ inputs.prerelease }} \
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
             -o iomgr:testing=off \
