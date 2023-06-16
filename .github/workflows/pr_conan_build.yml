@@ -7,7 +7,7 @@ on:
       - stable/v3.x
 
 jobs:
-  BuildPR:
+  Build:
     strategy:
       fail-fast: false
       matrix:
