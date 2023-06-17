@@ -102,7 +102,7 @@ jobs:
       with:
         path: |
           ~/.conan/data
-        key: HomestoreDeps-${{ innputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/homestore/**/conanfile.py') }}
+        key: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/homestore/**/conanfile.py') }}
 
     - name: Restore Testing Cache
       id: restore-cache-testing-homestore
@@ -195,7 +195,7 @@ jobs:
       with:
         path: |
           ~/.conan/data
-        key: HomestoreDeps-${{ innputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/homestore/**/conanfile.py') }}
+        key: HomestoreDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/homestore/**/conanfile.py') }}
       if: ${{ github.event_name != 'pull_request' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
 
     - name: Restore Sisl Cache
