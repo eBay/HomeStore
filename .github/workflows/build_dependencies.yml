@@ -174,7 +174,7 @@ jobs:
 
     - name: Clean Package Cache
       run: |
-        dep_pkgs=$(ls -1d deps/iomgr/3rd_party/* 2>/dev/null | cut -d'/' -f4 | paste -sd'|' - -)
+        dep_pkgs=$(ls -1d deps/homestore/3rd_party/* 2>/dev/null | cut -d'/' -f4 | paste -sd'|' - -)
         if [ -z "${dep_pkgs}" ]; then
            dep_pkgs="no_3rd_party"
         fi
