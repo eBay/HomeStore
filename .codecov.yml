@@ -1,0 +1,15 @@
+codecov:
+  notify:
+    require_ci_to_pass: no
+
+fixes:
+  - "deps/homestore/::"
+
+ignore:
+  - "deps/iomgr/**"
+  - "**/*_test.c*"
+  - "**/*_test.h*"
+  - "**/*_generated.h"
+  - "**/*.pb.cc"
+  - "**/*.pb.h"
+  - "**/tests/*"
