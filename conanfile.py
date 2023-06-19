@@ -44,7 +44,7 @@ class HomestoreConan(ConanFile):
             if self.options.sanitize:
                 self.options['sisl'].malloc_impl = 'libc'
             elif self.options.coverage:
-                self.options.testing = True
+                self.options.testing = 'min'
 
     def imports(self):
         self.copy(root_package="sisl", pattern="*", dst="bin/scripts/python/flip/", src="bindings/flip/python/", keep_path=False)
