@@ -18,13 +18,13 @@ jobs:
         exclude:
           - build-type: Debug
             platform: ubuntu-20.04
+          - build-type: Debug
+            malloc-impl: tcmalloc
           - malloc-impl: tcmalloc
             platform: ubuntu-20.04
           - malloc-impl: libc
             build-type: Release
             platform: ubuntu-22.04
-          - prerelease: "False"
-            build-type: Debug
     uses: ./.github/workflows/build_commit.yml
     with:
       platform: ${{ matrix.platform }}
