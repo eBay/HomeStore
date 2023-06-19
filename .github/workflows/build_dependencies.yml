@@ -144,6 +144,7 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install pyelftools
         python -m pip install conan~=1.0
+        python -m pip install gcovr
         conan user
         conan profile new --detect default
         conan export deps/iomgr
