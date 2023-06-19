@@ -1,5 +1,6 @@
 # HomeStore
 [![Conan Build](https://github.com/eBay/HomeStore/actions/workflows/merge_conan_build.yml/badge.svg?branch=stable/v3.x)](https://github.com/eBay/HomeStore/actions/workflows/merge_conan_build.yml)
+[![CodeCov](https://codecov.io/gh/eBay/homestore/branch/stable/v3.x/graph/badge.svg)](https://codecov.io/gh/eBay/homestore)
 
 Homestore is a generic storage engine upon which different storage solutions, like block store, key/value stores, object stores, databases can be built. This storage engine architecture is tuned towards modern storage devices and systems programming to provide ultra high performance. It has a pluggable model throughout to make it easy to extend the functionality to tune to specific use cases or data patterns. This document tries to explain what is the motivation to create another storage engine among an already impressive array of engines.
 
