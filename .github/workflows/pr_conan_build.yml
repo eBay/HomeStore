@@ -25,6 +25,8 @@ jobs:
           - malloc-impl: libc
             build-type: Release
             platform: ubuntu-22.04
+          - prerelease: "True"
+            platform: ubuntu-20.04
     uses: ./.github/workflows/build_commit.yml
     with:
       platform: ${{ matrix.platform }}
