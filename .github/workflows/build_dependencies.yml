@@ -146,6 +146,7 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install pyelftools
         python -m pip install conan~=1.0
+        python -m pip install gcovr
         conan user
         conan profile new --detect default
         conan export deps/iomgr oss/master
@@ -220,12 +221,36 @@ jobs:
 
     - name: Create and test Package
       run: |
-        conan create \
-            -o sisl:prerelease=${{ inputs.prerelease }} \
-            -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
-            -o sisl:testing=False \
-            -o iomgr:testing=off \
-            -s build_type=${{ inputs.build-type }} \
-            --build missing \
-            deps/homestore
+        if [[ "${{ inputs.platform }}" == "ubuntu-22.04" && \
+              "${{ inputs.build-type }}" == "Debug" && \
+              "${{ inputs.malloc-impl }}" == "libc" && \
+              "${{ inputs.prerelease }}" == "False" ]]; then
+          conan install \
+              -o sisl:prerelease=${{ inputs.prerelease }} \
+              -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
+              -o sisl:testing=False \
+              -o iomgr:testing=off \
+              -o coverage=True \
+              -s build_type=${{ inputs.build-type }} \
+              --build missing \
+              deps/homestore
+          conan build deps/homestore
+        else
+          sanitize=$([[ "${{ inputs.build-type }}" == "Debug" && "${{ inputs.malloc-impl }}" == "libc" && "${{ inputs.prerelease }}" == "True" ]] && echo "True" || echo "False")
+          conan create \
+              -o sisl:prerelease=${{ inputs.prerelease }} \
+              -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
+              -o sisl:testing=False \
+              -o iomgr:testing=off \
+              -o homestore:sanitize=${sanitize} \
+              -s build_type=${{ inputs.build-type }} \
+              --build missing \
+              deps/homestore
+        fi
       if: ${{ inputs.testing == 'True' }}
+
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        gcov: true

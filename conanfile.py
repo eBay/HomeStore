@@ -18,13 +18,15 @@ class HomestoreConan(ConanFile):
     options = {
                 "shared": ['True', 'False'],
                 "fPIC": ['True', 'False'],
+                "coverage": ['True', 'False'],
                 "sanitize": ['True', 'False'],
-                "testing" : ['coverage', 'full', 'min', 'off', 'epoll_mode', 'spdk_mode'],
+                "testing" : ['full', 'min', 'off', 'epoll_mode', 'spdk_mode'],
                 "skip_testing": ['True', 'False'],
             }
     default_options = {
                 'shared': False,
                 'fPIC': True,
+                'coverage': False,
                 'sanitize': False,
                 'testing': 'epoll_mode',
                 'skip_testing': False,
@@ -40,10 +42,12 @@ class HomestoreConan(ConanFile):
         if self.options.shared:
             del self.options.fPIC
         if self.settings.build_type == "Debug":
+            if self.options.coverage and self.options.sanitize:
+                raise ConanInvalidConfiguration("Sanitizer does not work with Code Coverage!")
             if self.options.sanitize:
-                self.options['sisl'].sanitize = True
-        else:
-            self.options.sanitize = False
+                self.options['sisl'].malloc_impl = 'libc'
+            elif self.options.coverage:
+                self.options.testing = 'min'
 
     def imports(self):
         self.copy(root_package="sisl", pattern="*", dst="bin/scripts/python/flip/", src="bindings/flip/python/", keep_path=False)
@@ -72,16 +76,12 @@ class HomestoreConan(ConanFile):
                        'MEMORY_SANITIZER_ON': 'OFF'}
         test_target = None
 
-        if self.options.sanitize:
-            definitions['MEMORY_SANITIZER_ON'] = 'ON'
-
         definitions['TEST_TARGET'] = self.options.testing
-        if self.options.testing == 'coverage':
-            test_target = 'coverage'
-
         if self.settings.build_type == 'Debug':
-            definitions['CMAKE_BUILD_TYPE'] = 'Debug'
-        
+            if self.options.sanitize:
+                definitions['MEMORY_SANITIZER_ON'] = 'ON'
+            elif self.options.coverage:
+                definitions['CONAN_BUILD_COVERAGE'] = 'ON'
         cmake.configure(defs=definitions)
         cmake.build()
         if not self.options.testing == 'off' and not self.options.skip_testing:
@@ -104,7 +104,5 @@ class HomestoreConan(ConanFile):
             self.cpp_info.exelinkflags.append("-fsanitize=address")
             self.cpp_info.sharedlinkflags.append("-fsanitize=undefined")
             self.cpp_info.exelinkflags.append("-fsanitize=undefined")
-        elif self.options.testing == 'coverage':
-            self.cpp_info.system_libs.append('gcov')
         if self.settings.os == "Linux":
             self.cpp_info.system_libs.append("aio")
