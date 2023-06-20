@@ -13,3 +13,4 @@ ignore:
   - "**/*.pb.cc"
   - "**/*.pb.h"
   - "**/tests/*"
+  - "**/to_move_out/**"

@@ -73,6 +73,7 @@ class HomestoreConan(ConanFile):
 
         definitions = {'TEST_TARGET': 'off',
                        'CMAKE_EXPORT_COMPILE_COMMANDS': 'ON',
+                       'CONAN_CMAKE_SILENT_OUTPUT': 'ON',
                        'MEMORY_SANITIZER_ON': 'OFF'}
         test_target = None
 

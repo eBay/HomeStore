@@ -186,7 +186,14 @@ void LogStoreService::start_threads() {
     }
 }
 
-nlohmann::json LogStoreService::dump_log_store(const log_dump_req& dump_req) {
+LogStoreFamily* HomeLogStoreMgr::get_family(std::string family_name){
+    for (auto& l : m_logstore_families) {
+        if (l->get_name() == family_name) { return l.get(); }
+    }
+    return nullptr;
+}
+
+nlohmann::json HomeLogStoreMgr::dump_log_store(const log_dump_req& dump_req) {
     nlohmann::json json_dump{}; // create root object
     if (dump_req.log_store == nullptr) {
         for (auto& family : m_logstore_families) {

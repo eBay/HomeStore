@@ -81,7 +81,9 @@ public:
 
     void device_truncate_in_user_reactor(const std::shared_ptr< truncate_req >& treq);
 
-    nlohmann::json dump_log_store(const log_dump_req& dum_req);
+    [[nodiscard]] nlohmann::json dump_log_store(const log_dump_req& dum_req);
+    std::string metablk_name() const { return m_metablk_name; }
+    std::shared_ptr< HomeLogStore > find_logstore_by_id(logstore_id_t store_id);
 
     LogDev& logdev() { return m_log_dev; }
 
