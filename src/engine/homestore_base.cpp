@@ -14,10 +14,9 @@
  *
  *********************************************************************************/
 #include <sisl/fds/buffer.hpp>
-#include <iomgr/iomgr.hpp>
+#include <iomgr/io_environment.hpp>
 
 #include "homestore_base.hpp"
-#include <sisl/sobject/sobject.hpp>
 #include "common/homestore_assert.hpp"
 
 namespace homestore {
@@ -29,6 +28,6 @@ void HomeStoreBase::reset_instance() { s_instance.reset(); }
 
 std::shared_ptr< spdlog::logger >& HomeStoreBase::periodic_logger() { return instance()->m_periodic_logger; }
 
-sisl::sobject_manager* HomeStoreBase::sobject_mgr() { return m_sobject_mgr.get(); }
+std::shared_ptr< sisl::sobject_manager > HomeStoreBase::sobject_mgr() { return ioenvironment.get_object_mgr(); }
 
 } // namespace homestore
