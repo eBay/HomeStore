@@ -169,8 +169,8 @@ void HomeBlksHttpServer::get_log_level(const Pistache::Rest::Request& request,
 
 void HomeBlksHttpServer::dump_stack_trace(const Pistache::Rest::Request& request,
                                           Pistache::Http::ResponseWriter response) {
-    sisl::logging::log_stack_trace(true);
-    response.send(Pistache::Http::Code::Ok, "Look for stack trace in the log file");
+    raise(SIGUSR3);
+    response.send(Pistache::Http::Code::Ok, "Look for minidump in the working directory");
 }
 
 void HomeBlksHttpServer::get_malloc_stats(const Pistache::Rest::Request& request,
