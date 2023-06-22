@@ -84,13 +84,6 @@ jobs:
         ref: ${{ inputs.branch }}
       if: ${{ inputs.testing == 'False' }}
 
-    - name: Retrieve Dependencies
-      uses: actions/checkout@v3
-      with:
-        repository: eBay/iomanager
-        path: 3rd_party/iomgr
-        ref: stable/v8.x
-
     - name: Load Homestore Cache
       id: restore-cache
       uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
@@ -103,6 +96,14 @@ jobs:
       with:
         testing: 'True'
         key_prefix: SislDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
+
+    - name: Retrieve Dependencies
+      uses: actions/checkout@v3
+      with:
+        repository: eBay/iomanager
+        path: 3rd_party/iomgr
+        ref: stable/v8.x
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Load IOMgr Cache
