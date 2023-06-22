@@ -115,6 +115,12 @@ jobs:
         fail_on_cache_miss: true
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
+    - name: Setup Conan
+      uses: eBay/sisl/.github/actions/setup_conan@stable/v8.x
+      with:
+        platform: ${{ inputs.platform }}
+      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
+
     - name: Export Recipes
       run: |
         sudo apt-get install -y python3-pyelftools libaio-dev
