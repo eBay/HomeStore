@@ -80,7 +80,7 @@ mapping::mapping(const uint64_t volsize, const uint32_t page_size, const std::st
     if (!m_bt) { throw homestore::homestore_exception("btree creation failed", homestore_error::no_space_avail); }
 
     m_sobject = m_hb->sobject_mgr()->create_object("mapping", m_unique_name,
-                                                      std::bind(&mapping::get_status, this, std::placeholders::_1));
+                                                   std::bind(&mapping::get_status, this, std::placeholders::_1));
 }
 
 mapping::mapping(const uint64_t volsize, const uint32_t page_size, const std::string& unique_name,
@@ -110,7 +110,7 @@ mapping::mapping(const uint64_t volsize, const uint32_t page_size, const std::st
                                               std::bind(&mapping::split_key_recovery, this, placeholders::_1,
                                                         placeholders::_2, placeholders::_3, placeholders::_4));
     m_sobject = m_hb->sobject_mgr()->create_object("mapping", m_unique_name,
-                                                      std::bind(&mapping::get_status, this, std::placeholders::_1));
+                                                   std::bind(&mapping::get_status, this, std::placeholders::_1));
 }
 
 mapping::~mapping() { delete m_bt; }
