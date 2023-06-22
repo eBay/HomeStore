@@ -2,11 +2,8 @@ codecov:
   notify:
     require_ci_to_pass: no
 
-fixes:
-  - "deps/homestore/::"
-
 ignore:
-  - "deps/iomgr/**"
+  - "import/iomgr/**"
   - "**/*_test.c*"
   - "**/*_test.h*"
   - "**/*_generated.h"
