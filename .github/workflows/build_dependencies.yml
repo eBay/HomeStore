@@ -102,7 +102,7 @@ jobs:
       uses: actions/checkout@v3
       with:
         repository: eBay/iomanager
-        path: 3rd_party/iomgr
+        path: import/iomgr
         ref: stable/v8.x
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
@@ -110,7 +110,7 @@ jobs:
       uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
       with:
         testing: 'False'
-        path: 3rd_party/iomgr
+        path: import/iomgr
         key_prefix: IOMgrDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
         fail_on_cache_miss: true
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
@@ -119,7 +119,7 @@ jobs:
       run: |
         sudo apt-get install -y python3-pyelftools libaio-dev
         python -m pip install pyelftools
-        conan export 3rd_party/iomgr
+        conan export import/iomgr
         cached_pkgs=$(ls -1d ~/.conan/data/*/*/*/*/package | sed 's,.*data/,,' | cut -d'/' -f1,2 | paste -sd',' - -)
         echo "::info:: Pre-cached: ${cached_pkgs}"
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
@@ -153,7 +153,7 @@ jobs:
       uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
       with:
         testing: 'False'
-        path: 3rd_party/sisl
+        path: import/sisl
         key_prefix: IOMgrDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
         fail_on_cache_miss: true
       if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
