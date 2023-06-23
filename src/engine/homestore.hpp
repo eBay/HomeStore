@@ -25,6 +25,7 @@
 #include <sisl/fds/malloc_helper.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <sisl/logging/logging.h>
+#include <iomgr/io_environment.hpp>
 
 #include "api/meta_interface.hpp"
 #include "engine/blkstore/blkstore.hpp"
@@ -67,7 +68,7 @@ public:
         }
 
         sisl::ObjCounterRegistry::enable_metrics_reporting();
-        m_sobject_mgr = std::make_unique< sisl::sobject_manager >();
+        ioenvironment.with_object_manager();
         m_sobject =
             sobject_mgr()->create_object("module", "HomeStore", std::bind(&HomeStore::get_status, this, std::placeholders::_1));
 

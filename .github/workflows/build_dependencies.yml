@@ -74,92 +74,63 @@ jobs:
     - name: Retrieve Code
       uses: actions/checkout@v3
       with:
-        path: deps/homestore
         ref: ${{ inputs.branch }}
       if: ${{ inputs.testing == 'True' }}
-
-    - name: Retrieve Dependencies
-      uses: actions/checkout@v3
-      with:
-        repository: eBay/iomanager
-        path: deps/iomgr
-        ref: stable/v8.x
-      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
 
     - name: Retrieve Recipe
       uses: actions/checkout@v3
       with:
         repository: eBay/Homestore
-        path: deps/homestore
         ref: ${{ inputs.branch }}
-      if: ${{ inputs.testing == 'False' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+      if: ${{ inputs.testing == 'False' }}
 
-    - name: Restore Homestore Cache
-      id: restore-cache-homestore
-      uses: actions/cache/restore@v3
+    - name: Load Homestore Cache
+      id: restore-cache
+      uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
       with:
-        path: |
-          ~/.conan/data
-        key: HomestoreDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/homestore/**/conanfile.py') }}
+        testing: ${{ inputs.testing }}
+        key_prefix: HomestoreDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
 
-    - name: Restore Testing Cache
-      id: restore-cache-testing-homestore
-      uses: actions/cache/restore@v3
+    - name: Load Sisl Cache
+      uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
       with:
-        path: |
-          ~/.conan/data
-        key: HomestoreDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-
-      if: ${{ github.event_name == 'pull_request' && inputs.testing == 'True' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+        load_any: 'True'
+        key_prefix: SislDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
-    - name: Restore Sisl Cache
-      id: restore-cache-sisl
-      uses: actions/cache/restore@v3
+    - name: Retrieve Dependencies
+      uses: actions/checkout@v3
       with:
-        path: |
-          ~/.conan/data
-        key: SislDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/sisl/**/conanfile.py') }}
-        fail-on-cache-miss: true
-        restore-keys: SislDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-
-      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+        repository: eBay/iomanager
+        path: import/iomgr
+        ref: stable/v8.x
+      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
-    - name: Restore IOMgr Cache
-      uses: actions/cache/restore@v3
+    - name: Load IOMgr Cache
+      uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
       with:
-        path: |
-          ~/.conan/data
-        key: IOMgrDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/iomgr/**/conanfile.py') }}
-        fail-on-cache-miss: true
-        restore-keys: IOMgrDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-
-      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+        testing: 'False'
+        path: import/iomgr
+        key_prefix: IOMgrDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+        fail_on_cache_miss: true
+      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
-    - name: Setup Python
-      uses: actions/setup-python@v3
+    - name: Setup Conan
+      uses: eBay/sisl/.github/actions/setup_conan@stable/v8.x
       with:
-        python-version: "3.8"
-      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+        platform: ${{ inputs.platform }}
+      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
-    - name: Setup Conan and Export Recipes
+    - name: Export Recipes
       run: |
         sudo apt-get install -y python3-pyelftools libaio-dev
-        python -m pip install --upgrade pip
         python -m pip install pyelftools
-        python -m pip install conan~=1.0
-        python -m pip install gcovr
-        conan user
-        conan profile new --detect default
-        conan export deps/iomgr
+        conan export import/iomgr
         cached_pkgs=$(ls -1d ~/.conan/data/*/*/*/*/package | sed 's,.*data/,,' | cut -d'/' -f1,2 | paste -sd',' - -)
         echo "::info:: Pre-cached: ${cached_pkgs}"
-      if: ${{ inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
-
-    - name: Fixup libstdc++
-      run: |
-        # Set std::string to non-CoW C++11 version
-        sed -i 's,compiler.libcxx=libstdc++$,compiler.libcxx=libstdc++11,g' ~/.conan/profiles/default
-      if: ${{ inputs.platform == 'ubuntu-22.04' && ( inputs.testing == 'True' || steps.restore-cache-homestore.outputs.cache-hit != 'true' ) }}
+      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Build Cache
-      id: build_cache
       run: |
         conan install \
             -o sisl:prerelease=${{ inputs.prerelease }} \
@@ -168,87 +139,65 @@ jobs:
             -o testing=min \
             -s build_type=${{ inputs.build-type }} \
             --build missing \
-            deps/homestore
-      if: ${{ steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
+            .
+      if: ${{ steps.restore-cache.outputs.cache-hit != 'true' }}
 
-    - name: Clean Package Cache
+    - name: Save Conan Cache
+      uses: eBay/sisl/.github/actions/store_conan@stable/v8.x
+      with:
+        key_prefix: HomestoreDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+      if: ${{ github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
+
+    - name: Reload Sisl Cache
+      uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
+      with:
+        load_any: 'True'
+        key_prefix: SislDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+      if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
+
+    - name: Reload IOMgr Cache
+      uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
+      with:
+        testing: 'False'
+        path: import/sisl
+        key_prefix: IOMgrDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+        fail_on_cache_miss: true
+      if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
+
+    - name: Code Coverage Run
       run: |
-        dep_pkgs=$(ls -1d deps/homestore/3rd_party/* 2>/dev/null | cut -d'/' -f4 | paste -sd'|' - -)
-        if [ -z "${dep_pkgs}" ]; then
-           dep_pkgs="no_3rd_party"
-        fi
-        dirty_pkgs=$(ls -1d ~/.conan/data/*/*/*/*/build 2>/dev/null | sed 's,.*data/,,')
-        if [ -z "${dirty_pkgs}" ]; then
-           dirty_pkgs="no_public/0"
-        fi
-        dirty_pkgs_d=$(echo "${dirty_pkgs}" | cut -d'/' -f1 | paste -sd'|' - -)
-        echo "::info:: Caching: ${dirty_pkgs_d}|${dep_pkgs}"
-        ls -1d ~/.conan/data/* | grep -Ev "(${dirty_pkgs_d}|${dep_pkgs})" | xargs rm -rf
-        rm -rf ~/.conan/data/*/*/*/*/build
-        rm -rf ~/.conan/data/*/*/*/*/source
-      if: ${{ github.event_name != 'pull_request' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
-
-    - name: Save Homestore Cache
-      id: save-cache-homestore
-      uses: actions/cache/save@v3
-      with:
-        path: |
-          ~/.conan/data
-        key: HomestoreDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/homestore/**/conanfile.py') }}
-      if: ${{ github.event_name != 'pull_request' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
-
-    - name: Restore Sisl Cache
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ~/.conan/data
-        key: SislDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/sisl/**/conanfile.py') }}
-        fail-on-cache-miss: true
-        restore-keys: SislDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-
-      if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
-
-    - name: Restore IOMgr Cache
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ~/.conan/data
-        key: IOMgrDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-${{ hashFiles('deps/iomgr/**/conanfile.py') }}
-        fail-on-cache-miss: true
-        restore-keys: IOMgrDeps8-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}-
-      if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache-homestore.outputs.cache-hit != 'true' }}
-
-    - name: Create and test Package
-      run: |
-        if [[ "${{ inputs.platform }}" == "ubuntu-22.04" && \
-              "${{ inputs.build-type }}" == "Debug" && \
-              "${{ inputs.malloc-impl }}" == "libc" && \
-              "${{ inputs.prerelease }}" == "False" ]]; then
-          conan install \
-              -o sisl:prerelease=${{ inputs.prerelease }} \
-              -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
-              -o iomgr:testing=off \
-              -o homestore:testing=min \
-              -o coverage=True \
-              -s build_type=${{ inputs.build-type }} \
-              --build missing \
-              deps/homestore
-          conan build deps/homestore
-        else
-          sanitize=$([[ "${{ inputs.build-type }}" == "Debug" && "${{ inputs.malloc-impl }}" == "libc" && "${{ inputs.prerelease }}" == "True" ]] && echo "True" || echo "False")
-          conan create \
-              -o sisl:prerelease=${{ inputs.prerelease }} \
-              -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
-              -o iomgr:testing=off \
-              -o homestore:testing=min \
-              -o homestore:sanitize=${sanitize} \
-              -s build_type=${{ inputs.build-type }} \
-              --build missing \
-              deps/homestore
-        fi
-      if: ${{ inputs.testing == 'True' }}
+        conan install \
+            -o sisl:prerelease=${{ inputs.prerelease }} \
+            -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
+            -o iomgr:testing=off \
+            -o homestore:testing=min \
+            -o coverage=True \
+            -s build_type=${{ inputs.build-type }} \
+            --build missing \
+            .
+        conan build .
+      if: ${{ inputs.testing == 'True' && inputs.platform == 'ubuntu-22.04' && inputs.build-type == 'Debug' && inputs.malloc-impl == 'libc' && inputs.prerelease == 'False' }}
 
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v3
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         gcov: true
+      if: ${{ inputs.testing == 'True' && inputs.platform == 'ubuntu-22.04' && inputs.build-type == 'Debug' && inputs.malloc-impl == 'libc' && inputs.prerelease == 'False' }}
+
+    - name: Create and Test Package
+      run: |
+        sanitize=$([[ "${{ inputs.build-type }}" == "Debug" && \
+                      "${{ inputs.malloc-impl }}" == "libc" && \
+                      "${{ inputs.prerelease }}" == "True" ]] && \
+                          echo "True" || echo "False")
+        conan create \
+            -o sisl:prerelease=${{ inputs.prerelease }} \
+            -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
+            -o iomgr:testing=off \
+            -o homestore:testing=min \
+            -o homestore:sanitize=${sanitize} \
+            -s build_type=${{ inputs.build-type }} \
+            --build missing \
+            .
+      if: ${{ inputs.testing == 'True' && ( inputs.platform != 'ubuntu-22.04' || inputs.build-type != 'Debug' || inputs.malloc-impl != 'libc' || inputs.prerelease != 'False' ) }}
