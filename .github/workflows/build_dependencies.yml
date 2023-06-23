@@ -127,7 +127,7 @@ jobs:
       run: |
         sudo apt-get install -y python3-pyelftools libaio-dev
         python -m pip install pyelftools
-        conan export import/iomgr
+        conan export import/iomgr oss/master
         cached_pkgs=$(ls -1d ~/.conan/data/*/*/*/*/package | sed 's,.*data/,,' | cut -d'/' -f1,2 | paste -sd',' - -)
         echo "::info:: Pre-cached: ${cached_pkgs}"
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
