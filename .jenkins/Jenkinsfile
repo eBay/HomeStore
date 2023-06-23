@@ -3,20 +3,14 @@ pipeline {
 
     environment {
         ORG = 'sds'
-        ECR_URL = 'ecr.vip.ebayc3.com'
+        HUB_URL = 'hub.tess.io'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         CONAN_USER = 'oss'
         TARGET_BRANCH = 'master'
         STABLE_BRANCH = 'stable/v*'
         LAST_COMMITS = ''
-        built_chain = ''
-        failed_pkg = ""
     }
 
-    parameters {
-        string(defaultValue: "", description: 'UpstreamTriggered', name: 'upstream_triggered')
-    }
-    
     stages {
         stage('Adjust Tag for Master') {
             when { not {
@@ -47,7 +41,7 @@ pipeline {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     VER = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
-                    ECR_PATH = "${ECR_URL}/${ORG}/${PROJECT}"
+                    ECR_PATH = "${HUB_URL}/${ORG}/${PROJECT}"
                     TAG = "${VER}@${CONAN_USER}/${CONAN_CHANNEL}"
                     slackSend color: '#0063D1', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* is building."
                     env.pkg_version = "${PROJECT}/${TAG}"
@@ -96,7 +90,7 @@ pipeline {
                                     BUILD_PROFILE = "test"
                                 }
 
-                                sh "conan create -u ${BUILD_MISSING} -o testing=epoll_mode -o sisl:prerelease=${PRERELEASE} -pr ${BUILD_PROFILE} . ${PROJECT}/${TAG} ; \
+                                sh "conan create -u ${BUILD_MISSING} -o ${PROJECT}:testing=epoll_mode -o sisl:prerelease=${PRERELEASE} -pr ${BUILD_PROFILE} . ${PROJECT}/${TAG} ; \
                                     find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;                      \
                                     find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;                  \
                                     find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;                  \
@@ -118,7 +112,7 @@ pipeline {
                     }
                     stage("Image") {
                         steps {
-                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
+                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://${HUB_URL}"]) {
                                 sh "docker build -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins/"
                                 sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
                             }
@@ -137,11 +131,7 @@ pipeline {
     post {
         failure {
             script {
-                if ("${failed_pkg}" != "") {
-                    slackSend color: '#E43237', channel: '#homestore-build', message: "@here HomeStore downstream pkg - *${failed_pkg}* build failed.\n*URL:* ${BUILD_URL}\n*Last 2 commits:* ```${LAST_COMMITS}```\nIf result not expected, revert (aka `conan remove -r ebay-local`) these pkgs: ```${built_chain}```"
-                } else {
-                    slackSend color: '#E43237', channel: '#homestore-build', message: "@here HomeStore build *${PROJECT}/${TAG}* has had a failure : ${BUILD_URL}"
-                }
+                slackSend color: '#E43237', channel: '#${PROJECT}-build', message: "@here ${PROJECT} build *${PROJECT}/${TAG}* has had a failure : ${BUILD_URL}"
             }
         }
         success {
