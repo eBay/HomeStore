@@ -105,7 +105,7 @@ jobs:
       with:
         repository: eBay/iomanager
         path: import/iomgr
-        ref: stable/v8.x
+        ref: master
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Load IOMgr Cache
