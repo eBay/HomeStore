@@ -171,6 +171,7 @@ jobs:
         conan install \
             -o sisl:prerelease=${{ inputs.prerelease }} \
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
+            -o sisl:testing=False \
             -o iomgr:testing=off \
             -o homestore:testing=min \
             -o coverage=True \
@@ -196,6 +197,7 @@ jobs:
         conan create \
             -o sisl:prerelease=${{ inputs.prerelease }} \
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
+            -o sisl:testing=False \
             -o iomgr:testing=off \
             -o homestore:testing=min \
             -o homestore:sanitize=${sanitize} \
