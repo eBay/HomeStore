@@ -120,6 +120,18 @@ private:
 
     ////////////////// Implementation /////////////////////////
 public:
+    std::string to_string() {
+        std::string str;
+        str += fmt::format("root_node_id: {}, m_max_nodes: {}, m_sb: {}, m_destroy: {}, m_total_nodes: {}, "
+                           "m_node_size: {}, m_last_cp_sb: {}, m_next_left_node id: {}, m_btree_cfg: {}",
+                           m_root_node, m_max_nodes, m_sb.to_string(), m_destroy, m_total_nodes, m_node_size,
+                           m_last_cp_sb.to_string(),
+                           m_next_left_node == nullptr ? "null" : std::to_string(m_next_left_node->get_node_id()),
+                           m_btree_cfg.to_string());
+
+        return str;
+    }
+
     btree_super_block get_btree_sb() { return m_sb; }
     const btree_cp_sb& get_last_cp_cb() const { return m_last_cp_sb; }
 
@@ -742,7 +754,11 @@ public:
      *
      * @return : status in json form;
      */
-    sisl::status_response get_status(const sisl::status_request& request) { return {}; }
+    sisl::status_response get_status(const sisl::status_request& request) {
+        sisl::status_response resp;
+        resp.json["btree"] = to_string();
+        return resp;
+    }
 
     sisl::status_response get_status_nodes(const sisl::status_request& request) {
         sisl::status_response resp;
