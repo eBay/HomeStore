@@ -20,7 +20,7 @@ jobs:
             malloc-impl: tcmalloc
           - malloc-impl: libc
             build-type: Release
-            prerelease: "False"
+            platform: 'ubuntu-22.04'
     uses: ./.github/workflows/build_commit.yml
     with:
       platform: ${{ matrix.platform }}
