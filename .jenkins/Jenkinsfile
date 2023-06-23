@@ -90,7 +90,7 @@ pipeline {
                                     BUILD_PROFILE = "test"
                                 }
 
-                                sh "conan create -u ${BUILD_MISSING} -o ${PROJECT}:testing=off -o sisl:prerelease=${PRERELEASE} -pr ${BUILD_PROFILE} . ${PROJECT}/${TAG} ; \
+                                sh "conan create -u ${BUILD_MISSING} -o ${PROJECT}:testing=epoll_mode -o sisl:prerelease=${PRERELEASE} -pr ${BUILD_PROFILE} . ${PROJECT}/${TAG} ; \
                                     find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\; ;                    \
                                     find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\; ;                \
                                     find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\; ;                \
