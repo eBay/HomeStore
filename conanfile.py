@@ -72,6 +72,7 @@ class HomestoreConan(ConanFile):
         cmake = CMake(self)
 
         definitions = {'TEST_TARGET': 'off',
+                       'CONAN_CMAKE_SILENT_OUTPUT': 'ON',
                        'CMAKE_EXPORT_COMPILE_COMMANDS': 'ON',
                        'MEMORY_SANITIZER_ON': 'OFF'}
         test_target = None
