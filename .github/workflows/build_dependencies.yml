@@ -96,7 +96,7 @@ jobs:
     - name: Load Sisl Cache
       uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
       with:
-        testing: 'True'
+        load_any: 'True'
         key_prefix: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
@@ -153,7 +153,7 @@ jobs:
     - name: Reload Sisl Cache
       uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
       with:
-        testing: 'True'
+        load_any: 'True'
         key_prefix: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
       if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
