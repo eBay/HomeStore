@@ -225,7 +225,7 @@ public:
         btree_store_t::update_sb(m_btree_store.get(), m_sb, &m_last_cp_sb, is_recovery);
         const auto hs = homestore::HomeStoreBase::safe_instance();
         if (hs) {
-            hs->sobject_mgr()->create_object("btree_node", m_btree_cfg.get_name(),
+            hs->sobject_mgr()->create_object("btree_node", "btree_node_" + m_btree_cfg.get_name(),
                                              std::bind(&Btree::get_status_nodes, this, std::placeholders::_1));
         }
     }
@@ -759,7 +759,7 @@ public:
             const auto error_msg =
                 "Can't find start btree node id: " + next_bnodeid_str + ", btree name: " + m_btree_cfg.get_name();
 
-            if (next_bnodeid != m_next_left_node->get_node_id()) {
+            if ((m_next_left_node == nullptr) || (next_bnodeid != m_next_left_node->get_node_id())) {
                 // this is a new range query;
                 // seek m_next_left_node to the leaf node same as the input: next_bnodeid_str;
                 get_left_most_node(m_root_node, m_next_left_node);
@@ -773,7 +773,7 @@ public:
                         BtreeNodePtr next_node = nullptr;
                         auto ret = read_and_lock_sibling(m_next_left_node->get_next_bnode(), next_node, LOCKTYPE_READ,
                                                          LOCKTYPE_READ, nullptr);
-                        unlock_node(m_next_left_node, LOCKTYPE_READ);
+                        unlock_node(next_node, LOCKTYPE_READ);
                         HS_DBG_ASSERT_EQ(ret, btree_status_t::success);
 
                         if (ret != btree_status_t::success) {
@@ -812,7 +812,7 @@ public:
             BtreeNodePtr next_node = nullptr;
             auto ret =
                 read_and_lock_sibling(cur_node->get_next_bnode(), next_node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
-            unlock_node(cur_node, LOCKTYPE_READ);
+            unlock_node(next_node, LOCKTYPE_READ);
 
             HS_DBG_ASSERT_EQ(ret, btree_status_t::success);
             if (ret != btree_status_t::success) {
