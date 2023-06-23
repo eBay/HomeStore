@@ -4,8 +4,10 @@ codecov:
 
 ignore:
   - "import/iomgr/**"
+  - "src/tests/**"
+  - "src/to_move_out/**"
+  - "**/test_.*"
   - "**/*_test.c*"
-  - "**/*_test.h*"
   - "**/*_generated.h"
   - "**/*.pb.cc"
   - "**/*.pb.h"
