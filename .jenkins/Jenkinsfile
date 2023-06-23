@@ -41,7 +41,7 @@ pipeline {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     VER = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
-                    ECR_PATH = "${HUB_URL}/${ORG}/${PROJECT}"
+                    HUB_PATH = "${HUB_URL}/${ORG}/${PROJECT}"
                     TAG = "${VER}@${CONAN_USER}/${CONAN_CHANNEL}"
                     slackSend color: '#0063D1', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* is building."
                     env.pkg_version = "${PROJECT}/${TAG}"
@@ -113,13 +113,13 @@ pipeline {
                     stage("Image") {
                         steps {
                             withDockerRegistry([credentialsId: 'sds-sds', url: "https://${HUB_URL}"]) {
-                                sh "docker build -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins/"
-                                sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
+                                sh "docker build -t ${HUB_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins/"
+                                sh "docker push ${HUB_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
                             }
                         }
                         post {
                             success {
-                                slackSend color: '#85B717', channel: '#sds-ci', message: "*${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been uploaded to ECR."
+                                slackSend color: '#85B717', channel: '#sds-ci', message: "*${HUB_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been uploaded to ECR."
                             }
                         }
                     }
@@ -130,9 +130,7 @@ pipeline {
 
     post {
         failure {
-            script {
-                slackSend color: '#E43237', channel: '#${PROJECT}-build', message: "@here ${PROJECT} build *${PROJECT}/${TAG}* has had a failure : ${BUILD_URL}"
-            }
+            slackSend color: '#E43237', channel: '#${PROJECT}-build', message: "@here ${PROJECT} build *${PROJECT}/${TAG}* has had a failure : ${BUILD_URL}"
         }
         success {
             slackSend color: '#85B717', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* has completed successfully."
