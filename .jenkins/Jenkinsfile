@@ -91,14 +91,14 @@ pipeline {
                                 }
 
                                 sh "conan create -u ${BUILD_MISSING} -o ${PROJECT}:testing=epoll_mode -o sisl:prerelease=${PRERELEASE} -pr ${BUILD_PROFILE} . ${PROJECT}/${TAG} ; \
-                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;                      \
-                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;                  \
-                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;                  \
-                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;            \
-                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\;      \
-                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/hs_svc_tool ' -exec cp {} .jenkins/hs_svc_tool \\;                 \
-                                    find . -type f -wholename '*test_scripts/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\;                       \
-                                    find ${CONAN_USER_HOME} -type d -wholename '*bin/scripts' -exec cp -a {} .jenkins/scripts \\;                       \
+                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\; ;                    \
+                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\; ;                \
+                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\; ;                \
+                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\; ;          \
+                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\; ;    \
+                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/hs_svc_tool ' -exec cp {} .jenkins/hs_svc_tool \\; ;               \
+                                    find . -type f -wholename '*test_scripts/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\; ;                     \
+                                    find ${CONAN_USER_HOME} -type d -wholename '*bin/scripts' -exec cp -a {} .jenkins/scripts \\; ;                     \
                                     find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
                             }
                         }
