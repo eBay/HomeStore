@@ -71,7 +71,6 @@ private:
 
 protected:
     std::shared_ptr< sisl::logging::logger_t > m_periodic_logger;
-    std::unique_ptr< sisl::sobject_manager > m_sobject_mgr;
 
     bool m_vdev_failed{false};
     bool m_print_checksum{true};
@@ -110,7 +109,7 @@ public:
     virtual bool fault_containment(const boost::uuids::uuid& uuid) = 0;
     virtual void set_indx_btree_start_destroying(const boost::uuids::uuid& uuid) = 0;
     virtual iomgr::io_thread_t get_hs_flush_thread() const = 0;
-    sisl::sobject_manager* sobject_mgr();
+    std::shared_ptr< sisl::sobject_manager > sobject_mgr();
 };
 
 static inline HomeStoreBaseSafePtr HomeStorePtr() { return HomeStoreBase::safe_instance(); }
