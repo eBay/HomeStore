@@ -3,56 +3,34 @@ pipeline {
 
     environment {
         ORG = 'sds'
-        ECR_URL = 'ecr.vip.ebayc3.com'
+        HUB_URL = 'hub.tess.io'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         CONAN_USER = 'oss'
         TARGET_BRANCH = 'master'
-        TESTING_BRANCH = 'testing/v*'
         STABLE_BRANCH = 'stable/v*'
         LAST_COMMITS = ''
-        built_chain = ''
-        failed_pkg = ""
     }
 
-    parameters {
-        string(defaultValue: "", description: 'UpstreamTriggered', name: 'upstream_triggered')
-    }
-    
     stages {
-        stage('Adjust Tag for Master/PR') {
-            when { not { anyOf {
-                branch "${TESTING_BRANCH}"
+        stage('Adjust Tag for Master') {
+            when { not {
                 branch "${STABLE_BRANCH}"
-            } } }
+            } }
             steps {
                 script {
                     sh(script: "sed -Ei 's,version = .*\"([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1-${env.BUILD_NUMBER}\",' conanfile.py")
                     BUILD_MISSING = "--build missing"
                     LAST_COMMITS = sh(script: "git log -n 2 --pretty=short", returnStdout: true)
-                    BUILD_TEST_MODE = ""
                 }
             }
         }
-        stage('Adjust for Testing/Stable') {
-            when { anyOf {
-                branch "${TESTING_BRANCH}"
+        stage('Adjust for Stable') {
+            when {
                 branch "${STABLE_BRANCH}"
-            } }
+            }
             steps {
                 script {
                     BUILD_MISSING = ""
-                    BUILD_TEST_MODE = ""
-                }
-            }
-        }
-        stage('Adjust build test level') {
-            when { allOf {
-               expression { (env.BRANCH_NAME == "${TARGET_BRANCH}") }
-               expression { (params.upstream_triggered == null) || ("${upstream_triggered}" == "") }
-            } }
-            steps {
-                script {
-                    BUILD_TEST_MODE = "-o homestore:testing=epoll_mode"
                 }
             }
         }
@@ -63,7 +41,7 @@ pipeline {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     VER = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
-                    ECR_PATH = "${ECR_URL}/${ORG}/${PROJECT}"
+                    HUB_PATH = "${HUB_URL}/${ORG}/${PROJECT}"
                     TAG = "${VER}@${CONAN_USER}/${CONAN_CHANNEL}"
                     slackSend color: '#0063D1', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* is building."
                     env.pkg_version = "${PROJECT}/${TAG}"
@@ -89,190 +67,61 @@ pipeline {
                         name 'BUILD_TYPE'
                         values 'release', 'debug', 'test'
                     }
-                    axis {
-                        name 'COVERAGE'
-                        values 'False'
-                    }
-                }
-                excludes { 
-                    exclude {
-                        axis {
-                            name 'BUILD_TYPE'
-                            values 'test', 'release'
-                        }
-                        axis {
-                            name 'COVERAGE'
-                            values 'True'
-                        }
-                    }
                 }
 
                 stages {
-                    stage('Adjust Tag for Master/PR') {
-                        when { not { anyOf {
-                            branch "${TESTING_BRANCH}"
+                    stage('Adjust Tag for Master') {
+                        when { not {
                             branch "${STABLE_BRANCH}"
-                        } } }
+                        } }
                         steps {
                             sh(script: "sed -Ei 's,version = .*\"([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*,version = \"\\1-${env.BUILD_NUMBER}\",' conanfile.py")
                         }
                     }
                     stage("Build") {
-                        when {
-                            expression { "${COVERAGE}" == 'False' }
-                        }
                         steps {
                             script {
                                 def PRERELEASE = 'True'
                                 def BUILD_PROFILE = "${BUILD_TYPE}"
                                 def SANITIZE = 'False'
 
-                                if ("${BUILD_TYPE}" == 'sanitize') {
-                                    SANITIZE = 'True'
-                                    BUILD_PROFILE = "debug"
-                                }
-
                                 if ("${BUILD_TYPE}" == "release") {
                                     PRERELEASE = 'False'
                                     BUILD_PROFILE = "test"
                                 }
 
-                                sh "conan create -u ${BUILD_MISSING} -o sisl:prerelease=${PRERELEASE} -o ${PROJECT}:sanitize=${SANITIZE} ${BUILD_TEST_MODE} -pr ${BUILD_PROFILE} . ${PROJECT}/${TAG}"
-                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
-                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
-                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
-                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
-                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\;"
-                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/hs_svc_tool ' -exec cp {} .jenkins/hs_svc_tool \\;"
-                                sh "find . -type f -wholename '*test_scripts/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\;"
-                                sh "find ${CONAN_USER_HOME} -type d -wholename '*bin/scripts' -exec cp -a {} .jenkins/scripts \\;"
-                                sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
-                            }
-                        }
-                        post {
-                            failure {
-                                script {
-                                    sh "mv /root/.conan/data/homestore ."
-                                    sh "find . -name *_log -print | xargs tar cif logs.tar"
-                                }
-                                archiveArtifacts artifacts: "logs.tar", fingerprint: true
+                                sh "conan create -u ${BUILD_MISSING} -o ${PROJECT}:testing=epoll_mode -o sisl:prerelease=${PRERELEASE} -pr ${BUILD_PROFILE} . ${PROJECT}/${TAG} ; \
+                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\; ;                    \
+                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\; ;                \
+                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\; ;                \
+                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\; ;          \
+                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\; ;    \
+                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/hs_svc_tool ' -exec cp {} .jenkins/hs_svc_tool \\; ;               \
+                                    find . -type f -wholename '*test_scripts/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\; ;                     \
+                                    find ${CONAN_USER_HOME} -type d -wholename '*bin/scripts' -exec cp -a {} .jenkins/scripts \\; ;                     \
+                                    find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
                             }
                         }
                     }
 
-                    stage('Coverage') {
-                        when { not { anyOf {
-                            branch "${STABLE_BRANCH}"
-                            expression { "${COVERAGE}" == 'False' }
-                        }}}
-                        stages {
-                            stage("Code Coverage") {
-                                steps {
-                                    slackSend channel: '#sds-ci', message: "*${PROJECT}:${TAG}* is undergoing Code Coverage."
-                                    sh "echo \"sonar.branch.name=${BRANCH_NAME}\" >> sonar-project.properties"
-                                    sh "GIT_COMMIT=${GIT_COMMIT} conan install -pr debug ${BUILD_MISSING} -o ${PROJECT}:testing=coverage -o ${PROJECT}:sanitize=False . "
-                                    sh "GIT_COMMIT=${GIT_COMMIT} VERBOSE=1 build-wrapper-linux-x86-64 --out-dir /tmp/sonar conan build ."
-                                    sh "gcovr --sonarqube coverage.xml -r ."
-                                    withSonarQubeEnv('sds-sonar')  {
-                                        sh "sonar-scanner -Dsonar.projectBaseDir=. -Dsonar.projectVersion=\"${VER}\""
-                                    }
-                                }
-                            }
-                        }
-                   }
-
                    stage("Deploy Package") {
-                        when { allOf { 
-                            expression { !(env.BRANCH_NAME =~ /PR-/) }
-                            expression { "${COVERAGE}" == 'False' }
-                            }
-                        }
                         steps {
-                            retry(3) {
-                                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
-                                sh "conan upload ${PROJECT}/${TAG} -c --all -r ebay-local"
-                            }
+                            sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
+                            sh "conan upload ${PROJECT}/${TAG} -c --all -r ebay-local"
                         }
                     }
                     stage("Image") {
-                        when { allOf { 
-                            expression { "${COVERAGE}" == 'False' }
-                            }
-                        }
                         steps {
-                            retry(3) {
-                                withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
-                                    sh "docker build -t ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins/"
-                                }
-                            }
-                        }
-                    }
-                    stage("Deploy Image") {
-                        when  { allOf {
-                              anyOf {
-                                branch "testing/v*"
-                                branch "master"
-                                branch "stable/v*"
-                              }
-                              expression { "${COVERAGE}" == 'False' }
-                            } }
-                        steps {
-                            retry(3) {
-                                withDockerRegistry([credentialsId: 'sds-sds', url: "https://${ECR_URL}"]) {
-                                  sh "docker push ${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
-                                }
+                            withDockerRegistry([credentialsId: 'sds-sds', url: "https://${HUB_URL}"]) {
+                                sh "docker build -t ${HUB_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE} .jenkins/"
+                                sh "docker push ${HUB_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}"
                             }
                         }
                         post {
                             success {
-                                slackSend color: '#85B717', channel: '#sds-ci', message: "*${ECR_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been uploaded to ECR."
+                                slackSend color: '#85B717', channel: '#sds-ci', message: "*${HUB_PATH}:${CONAN_CHANNEL}-${BUILD_TYPE}* has been uploaded to ECR."
                             }
                         }
-                    }
-                }
-            }
-        }
-
-        stage("Downstream Build") {
-            when { allOf {
-               expression { (env.BRANCH_NAME == "${TARGET_BRANCH}") }
-               expression { (!"${upstream_triggered}") || ("${upstream_triggered}" == "") }
-            } }
-        
-            stages {
-                stage('NuBlox Logstore') {
-                    steps {
-                        script {
-                            built_chain = env.pkg_version
-                            def nls_res = build job: "Nublox Logstore/${TARGET_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
-                            built_chain = "${built_chain}" + ", " + "$nls_res.buildVariables.pkg_version"
-                        }
-                    }
-                    post {
-                        failure { script { failed_pkg = "Nublox Logstore" } }
-                    }
-                }
-                stage('Homestore BDev') {
-                    steps {
-                        script {
-                            built_chain = env.pkg_version
-                            def hsbdev_res = build job: "Homestore Bdev/${TARGET_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
-                            built_chain = "${built_chain}" + ", " + "$hsbdev_res.buildVariables.pkg_version"
-                        }
-                    }
-                    post {
-                        failure { script { failed_pkg = "Homestore BDev" } }
-                    }
-                }
-                stage('SPDK Connector') {
-                    steps {
-                        script {
-                            def spdk_res = build job: "SPDK Connector/${TARGET_BRANCH}", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
-                            built_chain = "${built_chain}" + ", " + "$spdk_res.buildVariables.pkg_version"
-                        }
-                    }
-                    post {
-                        failure { script { failed_pkg = "SPDK Connector" } }
                     }
                 }
             }
@@ -281,13 +130,7 @@ pipeline {
 
     post {
         failure {
-            script {
-                if ("${failed_pkg}" != "") {
-                    slackSend color: '#E43237', channel: '#homestore-build', message: "@here HomeStore downstream pkg - *${failed_pkg}* build failed.\n*URL:* ${BUILD_URL}\n*Last 2 commits:* ```${LAST_COMMITS}```\nIf result not expected, revert (aka `conan remove -r ebay-local`) these pkgs: ```${built_chain}```"
-                } else {
-                    slackSend color: '#E43237', channel: '#homestore-build', message: "@here HomeStore build *${PROJECT}/${TAG}* has had a failure : ${BUILD_URL}"
-                }
-            }
+            slackSend color: '#E43237', channel: '#${PROJECT}-build', message: "@here ${PROJECT} build *${PROJECT}/${TAG}* has had a failure : ${BUILD_URL}"
         }
         success {
             slackSend color: '#85B717', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* has completed successfully."
