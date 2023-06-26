@@ -103,8 +103,11 @@ if (${build_io_tests})
             SET_TESTS_PROPERTIES(TestVolCopy-Spdk PROPERTIES DEPENDS TestVol-Spdk)
         endif()
 
+        add_test(NAME TestVolBtreePagintion-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=btree_node_pagination --dirpath=${CMAKE_BINARY_DIR}/bin/ --spdk true)
+        SET_TESTS_PROPERTIES(TestVolBtreePagintion-Spdk PROPERTIES DEPENDS TestVolCopy-Spdk)
+
         add_test(NAME TestVolRecovery-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery --dirpath=${CMAKE_BINARY_DIR}/bin/ -- --spdk true)
-        SET_TESTS_PROPERTIES(TestVolRecovery-Spdk PROPERTIES DEPENDS TestVolCopy-Spdk)
+        SET_TESTS_PROPERTIES(TestVolRecovery-Spdk PROPERTIES DEPENDS TestVolBtreePagintion-Spdk)
 
         add_test(NAME TestVolRecoveryCrash-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery_crash --dirpath=${CMAKE_BINARY_DIR}/bin/ -- --spdk true)
         SET_TESTS_PROPERTIES(TestVolRecoveryCrash-Spdk PROPERTIES DEPENDS TestVolRecovery-Spdk)
