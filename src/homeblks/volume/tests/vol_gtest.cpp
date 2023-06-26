@@ -2259,6 +2259,28 @@ TEST_F(VolTest, recovery_boot_btree_node_pagination_test) {
 
     LOGINFO("Starting btree leaf node pagination.");
 
+    sisl::status_request status_req;
+    status_req.obj_type = "btree_node";
+    status_req.obj_name = "btree_node_test_files/vol0";
+
+    const auto sobject_mgr = HomeStoreBase::safe_instance()->sobject_mgr();
+    while (true) {
+        const auto status_resp = sobject_mgr->get_status(status_req);
+        if (status_resp.json.contains("error")) {
+            HS_DBG_ASSERT(false, "get_status returned error: {}", status_resp.json.dump(2));
+        } else {
+            LOGINFO("get_status return successfully: {}", status_resp.json.dump(2));
+        }
+
+        if (status_resp.json["has_more"] == "true") {
+            status_req.next_cursor = std::to_string(status_resp.json["next_cursor"].get< uint64_t >());
+            LOGINFO("more leaf nodes to get, next_cursor: {}", status_req.next_cursor);
+        } else {
+            LOGINFO("no more leaf node. ");
+            break;
+        }
+    }
+
     if (tcfg.can_delete_volume) { this->delete_volumes(); }
     this->shutdown();
     if (tcfg.remove_file_on_shutdown) { this->remove_files(); }

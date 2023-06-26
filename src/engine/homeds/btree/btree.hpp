@@ -783,7 +783,8 @@ public:
                     if (m_next_left_node->get_next_bnode() == empty_bnodeid) {
                         LOGERROR("{}", error_msg);
                         resp.json["has_more"] = "fasle";
-                        resp.json["error_msg"] = error_msg;
+                        // http_server layer consumes this "error" field for any error case;
+                        resp.json["error"] = error_msg;
                         return resp;
                     } else {
                         BtreeNodePtr next_node = nullptr;
@@ -794,7 +795,7 @@ public:
 
                         if (ret != btree_status_t::success) {
                             LOGERROR("Cannot read sibling node for {}", m_next_left_node);
-                            resp.json["error_msg"] = "Cannot read sibling node for {}" + m_next_left_node->to_string();
+                            resp.json["error"] = "Cannot read sibling node for {}" + m_next_left_node->to_string();
                             return resp;
                         }
 
@@ -833,7 +834,7 @@ public:
             HS_DBG_ASSERT_EQ(ret, btree_status_t::success);
             if (ret != btree_status_t::success) {
                 LOGERROR("Cannot read sibling node for {}", cur_node);
-                resp.json["error_msg"] = "Cannot read sibling node for {}" + cur_node->to_string();
+                resp.json["error"] = "Cannot read sibling node for {}" + cur_node->to_string();
                 return resp;
             }
 
