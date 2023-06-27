@@ -138,6 +138,13 @@ void VirtualDev::init(DeviceManager* mgr, vdev_info_block* vb, vdev_comp_cb_t cb
     m_hwm_cb = std::move(hwm_cb);
 }
 
+void VirtualDev::create_object() {
+    auto hs = HomeStoreBase::safe_instance();
+    HS_DBG_ASSERT(hs != nullptr, "Expecting hs instance to be initialized. ");
+    hs->sobject_mgr()->create_object("vdev", "vdev_" + m_name,
+                                     std::bind(&VirtualDev::get_status, this, std::placeholders::_1));
+}
+
 /* Create a new virtual dev for these parameters */
 VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, const PhysicalDevGroup pdev_group,
                        const blk_allocator_type_t allocator_type, const uint64_t context_size, const uint32_t nmirror,
@@ -784,9 +791,21 @@ void VirtualDev::blkalloc_cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp) 
     }
 }
 
+std::string VirtualDev::to_string() const {
+    std::string str;
+    str +=
+        fmt::format("name: {}, chunk_size: {}, num_chunks: {}, page_sz: {}, allocator_type: {}, m_recovery_init: {}, "
+                    "m_auto_recovery: {}, size: {}, used_size: {}, available_blks: {}, blks_per_chunk: {}",
+                    m_name, get_chunk_size(), get_num_chunks(), get_page_size(), m_allocator_type, m_recovery_init,
+                    m_auto_recovery, get_size(), get_used_size(), get_available_blks(), get_blks_per_chunk());
+    return str;
+}
+
 /* Get status for all chunks */
 sisl::status_response VirtualDev::get_status(const sisl::status_request& request) const {
     sisl::status_response response;
+    response.json["vdev"] = to_string();
+
     try {
         for (const auto& pdev_chunks : m_primary_pdev_chunks_list) {
             const auto chunk_list{pdev_chunks.chunks_in_pdev};

@@ -223,6 +223,14 @@ public:
     VirtualDev& operator=(VirtualDev&&) noexcept = delete;
     virtual ~VirtualDev() = default;
 
+    /* @brief register object tree handler;
+     * Note:
+     * 1. it is called for both first_time_boot and recovery case;
+     * 2. create_object can't be done in VirtualDev constructor because in recovery case, hs instance is not fully
+     * initialized yet;
+     * */
+    void create_object();
+
     virtual void reset_failed_state();
     void process_completions(const boost::intrusive_ptr< virtualdev_req >& req);
 
@@ -289,7 +297,7 @@ public:
     virtual uint32_t get_blks_per_chunk() const { return get_chunk_size() / get_page_size(); }
     virtual uint32_t get_page_size() const { return m_vb->page_size; }
     virtual uint32_t get_nmirrors() const { return m_vb->num_mirrors; }
-    virtual std::string to_string() const { return std::string{}; }
+    virtual std::string to_string() const;
     virtual sisl::status_response get_status(const sisl::status_request& request) const;
 
     static uint64_t get_len(const iovec* iov, const int iovcnt);
