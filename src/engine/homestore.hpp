@@ -69,8 +69,8 @@ public:
 
         sisl::ObjCounterRegistry::enable_metrics_reporting();
         ioenvironment.with_object_manager();
-        m_sobject =
-            sobject_mgr()->create_object("module", "HomeStore", std::bind(&HomeStore::get_status, this, std::placeholders::_1));
+        m_sobject = sobject_mgr()->create_object("module", "HomeStore",
+                                                 std::bind(&HomeStore::get_status, this, std::placeholders::_1));
 
         MetaBlkMgrSI()->register_handler("INDX_MGR_CP", StaticIndxMgr::meta_blk_found_cb, nullptr);
 
@@ -231,6 +231,14 @@ protected:
             create_index_blkstore(nullptr);
             create_data_blkstore(nullptr);
         }
+
+        // for both first_time_boot and recovery case, create the object;
+        m_meta_blk_store->create_object();
+        m_data_blk_store->create_object();
+        m_index_blk_store->create_object();
+        m_ctrl_logdev_blk_store->create_object();
+        m_data_logdev_blk_store->create_object();
+
         init_done(first_time_boot);
     }
 
@@ -454,9 +462,7 @@ public:
         HomeLogStoreMgr::fake_reboot();
     }
 
-    sisl::status_response get_status(const sisl::status_request& request) {
-        return {};
-    }
+    sisl::status_response get_status(const sisl::status_request& request) { return {}; }
 
 #if 0
     static void zero_pdev_sbs(const std::vector< dev_info >& devices) { DeviceManager::zero_pdev_sbs(devices); }

@@ -237,6 +237,7 @@ public:
         btree_store_t::update_sb(m_btree_store.get(), m_sb, &m_last_cp_sb, is_recovery);
         const auto hs = homestore::HomeStoreBase::safe_instance();
         if (hs) {
+            // test_load doesn't instance homestore, so just to make that work;
             hs->sobject_mgr()->create_object("btree_node", "btree_node_" + m_btree_cfg.get_name(),
                                              std::bind(&Btree::get_status_nodes, this, std::placeholders::_1));
         }
