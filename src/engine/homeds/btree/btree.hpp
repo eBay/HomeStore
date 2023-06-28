@@ -240,6 +240,8 @@ public:
             // test_load doesn't instance homestore, so just to make that work;
             hs->sobject_mgr()->create_object("btree_node", "btree_node_" + m_btree_cfg.get_name(),
                                              std::bind(&Btree::get_status_nodes, this, std::placeholders::_1));
+            hs->sobject_mgr()->create_object("btree_single_node", "btree_single_node_" + m_btree_cfg.get_name(),
+                                             std::bind(&Btree::get_status_single_node, this, std::placeholders::_1));
         }
     }
 
@@ -761,11 +763,38 @@ public:
         return resp;
     }
 
+    sisl::status_response get_status_single_node(const sisl::status_request& request) {
+        sisl::status_response resp;
+        if (request.next_cursor.empty()) {
+            resp.json["error"] = "next_cursor can't be null for single node request";
+            return resp;
+        }
+
+        const auto bnodeid_str = request.next_cursor;
+        const auto bnodeid = static_cast< unsigned long long >(std::stoll(bnodeid_str));
+
+        BtreeNodePtr node = nullptr;
+        const auto ret = read_and_lock_node(bnodeid, node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
+        if (ret != btree_status_t::success) {
+            resp.json["error"] = fmt::format("Can't read node id: {}, error: {}", bnodeid, ret);
+            return resp;
+        }
+        unlock_node(node, LOCKTYPE_READ);
+
+        resp.json["node"] = node->to_string();
+
+        return resp;
+    }
+
     sisl::status_response get_status_nodes(const sisl::status_request& request) {
         sisl::status_response resp;
         if (request.next_cursor.empty()) {
             // this is a new pagination request, start from left most;
-            get_left_most_node(m_root_node, m_next_left_node);
+            const auto ret = get_left_most_node(m_root_node, m_next_left_node);
+            if (ret != btree_status_t::success) {
+                resp.json["error"] = fmt::format("Can't read node id: {}, error: {}", m_root_node, ret);
+                return resp;
+            }
         } else if (request.next_cursor == "no_more_nodes") {
             resp.json["has_more"] = "false";
             return resp;
@@ -779,9 +808,16 @@ public:
             if ((m_next_left_node == nullptr) || (next_bnodeid != m_next_left_node->get_node_id())) {
                 // this is a new range query;
                 // seek m_next_left_node to the leaf node same as the input: next_bnodeid_str;
-                get_left_most_node(m_root_node, m_next_left_node);
+                const auto ret2 = get_left_most_node(m_root_node, m_next_left_node);
+                if (ret2 != btree_status_t::success) {
+                    resp.json["error"] = fmt::format("Can't read node id: {}, error: {}", m_root_node, ret2);
+                    return resp;
+                }
+
                 while (m_next_left_node->get_node_id() != next_bnodeid) {
                     if (m_next_left_node->get_next_bnode() == empty_bnodeid) {
+                        // searched leaf_node chain until tail, no node is equal to the input next_bnodeid,
+                        // return error;
                         LOGERROR("{}", error_msg);
                         resp.json["has_more"] = "fasle";
                         // http_server layer consumes this "error" field for any error case;
@@ -792,7 +828,6 @@ public:
                         auto ret = read_and_lock_sibling(m_next_left_node->get_next_bnode(), next_node, LOCKTYPE_READ,
                                                          LOCKTYPE_READ, nullptr);
                         unlock_node(next_node, LOCKTYPE_READ);
-                        HS_DBG_ASSERT_EQ(ret, btree_status_t::success);
 
                         if (ret != btree_status_t::success) {
                             LOGERROR("Cannot read sibling node for {}", m_next_left_node);
@@ -800,7 +835,12 @@ public:
                             return resp;
                         }
 
-                        HS_DBG_ASSERT_EQ(next_node->is_leaf(), true);
+                        if (next_node->is_leaf() == false) {
+                            LOGERROR("next_node: {} is not leaf, not expected!", next_node->to_string());
+                            resp.json["error"] = "node: " + next_node->to_string() + " is not leaf, internal error. ";
+                            return resp;
+                        }
+
                         m_next_left_node = next_node;
                     }
                 }
