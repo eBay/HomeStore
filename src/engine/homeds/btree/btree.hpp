@@ -786,6 +786,7 @@ public:
         return resp;
     }
 
+    // after this function finishes, no node is locked by this function;
     sisl::status_response get_status_nodes(const sisl::status_request& request) {
         sisl::status_response resp;
         if (request.next_cursor.empty()) {
@@ -795,6 +796,7 @@ public:
                 resp.json["error"] = fmt::format("Can't read node id: {}, error: {}", m_root_node, ret);
                 return resp;
             }
+            lock_and_refresh_node(m_next_left_node, LOCKTYPE_READ, nullptr);
         } else if (request.next_cursor == "no_more_nodes") {
             resp.json["has_more"] = "false";
             return resp;
@@ -813,6 +815,7 @@ public:
                     resp.json["error"] = fmt::format("Can't read node id: {}, error: {}", m_root_node, ret2);
                     return resp;
                 }
+                lock_and_refresh_node(m_next_left_node, LOCKTYPE_READ, nullptr);
 
                 while (m_next_left_node->get_node_id() != next_bnodeid) {
                     if (m_next_left_node->get_next_bnode() == empty_bnodeid) {
@@ -827,7 +830,7 @@ public:
                         BtreeNodePtr next_node = nullptr;
                         auto ret = read_and_lock_sibling(m_next_left_node->get_next_bnode(), next_node, LOCKTYPE_READ,
                                                          LOCKTYPE_READ, nullptr);
-                        unlock_node(next_node, LOCKTYPE_READ);
+                        unlock_node(m_next_left_node, LOCKTYPE_READ);
 
                         if (ret != btree_status_t::success) {
                             LOGERROR("Cannot read sibling node for {}", m_next_left_node);
@@ -844,15 +847,20 @@ public:
                         m_next_left_node = next_node;
                     }
                 }
+            } else {
+                // if we are here, it means it is a continue of next pagination,
+                // let's lock the next left node firstly;
+                lock_and_refresh_node(m_next_left_node, LOCKTYPE_READ, nullptr);
             }
 
             //
-            // if we are here, it means it is a continue of next pagination,
             // fall through
             //
         }
 
-        // now both range query and/or pagination starts here;
+        // both range query and/or pagination starts here;
+
+        // m_next_left_node is in locked state now;
         auto cur_node = m_next_left_node;
         bool has_more = true;
         for (int i = 0u; i < request.batch_size; ++i) {
@@ -870,7 +878,7 @@ public:
             BtreeNodePtr next_node = nullptr;
             auto ret =
                 read_and_lock_sibling(cur_node->get_next_bnode(), next_node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
-            unlock_node(next_node, LOCKTYPE_READ);
+            unlock_node(cur_node, LOCKTYPE_READ);
 
             HS_DBG_ASSERT_EQ(ret, btree_status_t::success);
             if (ret != btree_status_t::success) {
@@ -883,8 +891,9 @@ public:
             cur_node = next_node;
         }
 
+        unlock_node(cur_node, LOCKTYPE_READ);
+
         if (has_more) {
-            // prepare for next batch
             m_next_left_node = cur_node;
             // remember where we are, this cursor also tells us whether this
             // is a range query;
@@ -896,6 +905,7 @@ public:
             resp.json["has_more"] = "false";
         }
 
+        // m_next_left_node should always be nullptr or in unlocked state when exiting this fuction;
         return resp;
     }
 
