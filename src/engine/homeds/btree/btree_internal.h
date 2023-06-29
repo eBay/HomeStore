@@ -380,7 +380,7 @@ struct btree_super_block {
 
     uint32_t get_journal_id() const { return journal_id; }
 
-    std::string to_string() {
+    std::string to_string() const {
         std::string str;
         str += fmt::format("root_node_id: {}, journal_id: {}", root_node, journal_id);
         return str;
