@@ -822,7 +822,7 @@ public:
                         // searched leaf_node chain until tail, no node is equal to the input next_bnodeid,
                         // return error;
                         LOGERROR("{}", error_msg);
-                        resp.json["has_more"] = "fasle";
+                        resp.json["has_more"] = "false";
                         // http_server layer consumes this "error" field for any error case;
                         resp.json["error"] = error_msg;
                         return resp;
@@ -897,7 +897,7 @@ public:
             m_next_left_node = cur_node;
             // remember where we are, this cursor also tells us whether this
             // is a range query;
-            resp.json["next_cursor"] = m_next_left_node->get_node_id();
+            resp.json["next_cursor"] = std::to_string(m_next_left_node->get_node_id());
             resp.json["has_more"] = "true";
         } else {
             m_next_left_node = nullptr;

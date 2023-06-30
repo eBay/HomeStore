@@ -2273,7 +2273,7 @@ TEST_F(VolTest, recovery_boot_btree_node_pagination_test) {
         }
 
         if (status_resp.json["has_more"] == "true") {
-            status_req.next_cursor = std::to_string(status_resp.json["next_cursor"].get< uint64_t >());
+            status_req.next_cursor = status_resp.json["next_cursor"].get< std::string >();
             LOGINFO("more leaf nodes to get, next_cursor: {}", status_req.next_cursor);
         } else {
             LOGINFO("no more leaf node. ");
