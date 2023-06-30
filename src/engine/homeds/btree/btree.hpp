@@ -789,6 +789,14 @@ public:
     // after this function finishes, no node is locked by this function;
     sisl::status_response get_status_nodes(const sisl::status_request& request) {
         sisl::status_response resp;
+
+        if (request.next_cursor == "reset") {
+            // user want to reset
+            m_next_left_node = nullptr;
+            resp.json["reset"] = "Successfully";
+            return resp;
+        }
+
         if (request.next_cursor.empty()) {
             // this is a new pagination request, start from left most;
             const auto ret = get_left_most_node(m_root_node, m_next_left_node);
@@ -799,6 +807,7 @@ public:
             lock_and_refresh_node(m_next_left_node, LOCKTYPE_READ, nullptr);
         } else if (request.next_cursor == "no_more_nodes") {
             resp.json["has_more"] = "false";
+            resp.json["next_cursor"] = "no_more_nodes";
             return resp;
         } else {
             // this is either a continue of on-going pagination request or a range query request
