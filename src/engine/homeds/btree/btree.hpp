@@ -44,6 +44,7 @@
 #include "btree_internal.h"
 #include "btree_node.cpp"
 #include "physical_node.hpp"
+#include <sisl/sobject/sobject.hpp>
 
 // need to remove these.  polluting scope in headers is a bad idea
 using namespace std;
@@ -107,6 +108,7 @@ private:
     uint32_t m_node_size = 4096;
     btree_cp_sb m_last_cp_sb;
     split_key_callback m_split_key_cb;
+    BtreeNodePtr m_next_left_node = nullptr;
 #ifndef NDEBUG
     std::atomic< uint64_t > m_req_id = 0;
 #endif
@@ -118,6 +120,18 @@ private:
 
     ////////////////// Implementation /////////////////////////
 public:
+    std::string to_string() {
+        std::string str;
+        str += fmt::format("root_node_id: {}, m_max_nodes: {}, m_sb: {}, m_destroy: {}, m_total_nodes: {}, "
+                           "m_node_size: {}, m_last_cp_sb: {}, m_next_left_node id: {}, m_btree_cfg: {}",
+                           m_root_node, m_max_nodes, m_sb.to_string(), m_destroy, m_total_nodes, m_node_size,
+                           m_last_cp_sb.to_string(),
+                           m_next_left_node == nullptr ? "null" : std::to_string(m_next_left_node->get_node_id()),
+                           m_btree_cfg.to_string());
+
+        return str;
+    }
+
     btree_super_block get_btree_sb() { return m_sb; }
     const btree_cp_sb& get_last_cp_cb() const { return m_last_cp_sb; }
 
@@ -221,6 +235,14 @@ public:
         m_max_nodes = max_leaf_nodes + ((double)max_leaf_nodes * 0.05) + 1; // Assume 5% for interior nodes
         m_total_nodes = m_last_cp_sb.btree_size;
         btree_store_t::update_sb(m_btree_store.get(), m_sb, &m_last_cp_sb, is_recovery);
+        const auto hs = homestore::HomeStoreBase::safe_instance();
+        if (hs) {
+            // test_load doesn't instance homestore, so just to make that work;
+            hs->sobject_mgr()->create_object("btree_node", "btree_node_" + m_btree_cfg.get_name(),
+                                             std::bind(&Btree::get_status_nodes, this, std::placeholders::_1));
+            hs->sobject_mgr()->create_object("btree_single_node", "btree_single_node_" + m_btree_cfg.get_name(),
+                                             std::bind(&Btree::get_status_single_node, this, std::placeholders::_1));
+        }
     }
 
     void replay_done(const btree_cp_ptr& bcp) {
@@ -735,7 +757,201 @@ public:
      *
      * @return : status in json form;
      */
-    sisl::status_response get_status(const sisl::status_request& request) { return {}; }
+    sisl::status_response get_status(const sisl::status_request& request) {
+        sisl::status_response resp;
+        resp.json["btree"] = to_string();
+        return resp;
+    }
+
+    sisl::status_response get_status_single_node(const sisl::status_request& request) {
+        sisl::status_response resp;
+        if (request.next_cursor.empty()) {
+            resp.json["error"] = "next_cursor can't be null for single node request";
+            return resp;
+        }
+
+        const auto bnodeid_str = request.next_cursor;
+        const auto bnodeid = static_cast< unsigned long long >(std::stoll(bnodeid_str));
+
+        BtreeNodePtr node = nullptr;
+        const auto ret = read_and_lock_node(bnodeid, node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
+        if (ret != btree_status_t::success) {
+            resp.json["error"] = fmt::format("Can't read node id: {}, error: {}", bnodeid, ret);
+            return resp;
+        }
+        unlock_node(node, LOCKTYPE_READ);
+
+        resp.json["node"] = node->to_string();
+
+        return resp;
+    }
+
+    // after this function finishes, no node is locked by this function;
+    sisl::status_response get_status_nodes(const sisl::status_request& request) {
+        sisl::status_response resp;
+
+        if (request.next_cursor == "reset") {
+            // user want to reset
+            m_next_left_node = nullptr;
+            resp.json["reset"] = "Successfully";
+            return resp;
+        }
+
+        if (request.next_cursor.empty()) {
+            // this is a new pagination request, start from left most;
+            const auto ret = get_left_most_node(m_root_node, m_next_left_node);
+            if (ret != btree_status_t::success) {
+                resp.json["error"] = fmt::format("Can't read node id: {}, error: {}", m_root_node, ret);
+                return resp;
+            }
+            lock_and_refresh_node(m_next_left_node, LOCKTYPE_READ, nullptr);
+        } else if (request.next_cursor == "no_more_nodes") {
+            resp.json["has_more"] = "false";
+            resp.json["next_cursor"] = "no_more_nodes";
+            return resp;
+        } else {
+            // this is either a continue of on-going pagination request or a range query request
+            const auto next_bnodeid_str = request.next_cursor;
+            const auto next_bnodeid = static_cast< unsigned long long >(std::stoll(next_bnodeid_str));
+            const auto error_msg =
+                "Can't find start btree node id: " + next_bnodeid_str + ", btree name: " + m_btree_cfg.get_name();
+
+            if ((m_next_left_node == nullptr) || (next_bnodeid != m_next_left_node->get_node_id())) {
+                // this is a new range query;
+                // seek m_next_left_node to the leaf node same as the input: next_bnodeid_str;
+                const auto ret2 = get_left_most_node(m_root_node, m_next_left_node);
+                if (ret2 != btree_status_t::success) {
+                    resp.json["error"] = fmt::format("Can't read node id: {}, error: {}", m_root_node, ret2);
+                    return resp;
+                }
+                lock_and_refresh_node(m_next_left_node, LOCKTYPE_READ, nullptr);
+
+                while (m_next_left_node->get_node_id() != next_bnodeid) {
+                    if (m_next_left_node->get_next_bnode() == empty_bnodeid) {
+                        // searched leaf_node chain until tail, no node is equal to the input next_bnodeid,
+                        // return error;
+                        LOGERROR("{}", error_msg);
+                        resp.json["has_more"] = "false";
+                        // http_server layer consumes this "error" field for any error case;
+                        resp.json["error"] = error_msg;
+                        return resp;
+                    } else {
+                        BtreeNodePtr next_node = nullptr;
+                        auto ret = read_and_lock_sibling(m_next_left_node->get_next_bnode(), next_node, LOCKTYPE_READ,
+                                                         LOCKTYPE_READ, nullptr);
+                        unlock_node(m_next_left_node, LOCKTYPE_READ);
+
+                        if (ret != btree_status_t::success) {
+                            LOGERROR("Cannot read sibling node for {}", m_next_left_node);
+                            resp.json["error"] = "Cannot read sibling node for {}" + m_next_left_node->to_string();
+                            return resp;
+                        }
+
+                        if (next_node->is_leaf() == false) {
+                            LOGERROR("next_node: {} is not leaf, not expected!", next_node->to_string());
+                            resp.json["error"] = "node: " + next_node->to_string() + " is not leaf, internal error. ";
+                            return resp;
+                        }
+
+                        m_next_left_node = next_node;
+                    }
+                }
+            } else {
+                // if we are here, it means it is a continue of next pagination,
+                // let's lock the next left node firstly;
+                lock_and_refresh_node(m_next_left_node, LOCKTYPE_READ, nullptr);
+            }
+
+            //
+            // fall through
+            //
+        }
+
+        // both range query and/or pagination starts here;
+
+        // m_next_left_node is in locked state now;
+        auto cur_node = m_next_left_node;
+        bool has_more = true;
+        for (int i = 0u; i < request.batch_size; ++i) {
+            // fill the response
+            std::string node_str = "leaf_" + std::to_string(i);
+            resp.json[node_str] = cur_node->to_string();
+
+            // get next node in chain;
+            if (cur_node->get_next_bnode() == empty_bnodeid) {
+                // no more leaf nodes, let's break out;
+                has_more = false;
+                break;
+            }
+
+            BtreeNodePtr next_node = nullptr;
+            auto ret =
+                read_and_lock_sibling(cur_node->get_next_bnode(), next_node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
+            unlock_node(cur_node, LOCKTYPE_READ);
+
+            HS_DBG_ASSERT_EQ(ret, btree_status_t::success);
+            if (ret != btree_status_t::success) {
+                LOGERROR("Cannot read sibling node for {}", cur_node);
+                resp.json["error"] = "Cannot read sibling node for {}" + cur_node->to_string();
+                return resp;
+            }
+
+            HS_DBG_ASSERT_EQ(next_node->is_leaf(), true);
+            cur_node = next_node;
+        }
+
+        unlock_node(cur_node, LOCKTYPE_READ);
+
+        if (has_more) {
+            m_next_left_node = cur_node;
+            // remember where we are, this cursor also tells us whether this
+            // is a range query;
+            resp.json["next_cursor"] = std::to_string(m_next_left_node->get_node_id());
+            resp.json["has_more"] = "true";
+        } else {
+            m_next_left_node = nullptr;
+            resp.json["next_cursor"] = "no_more_nodes";
+            resp.json["has_more"] = "false";
+        }
+
+        // m_next_left_node should always be nullptr or in unlocked state when exiting this fuction;
+        return resp;
+    }
+
+    /**
+     * @brief: return the left mode leaf node of the given btree;
+     *
+     * @param bnodeid : the root bnode id
+     *
+     * @return: the left most leaf node
+     */
+    btree_status_t get_left_most_node(bnodeid_t bnodeid, BtreeNodePtr& left_most_node) {
+        BtreeNodePtr node;
+        left_most_node = nullptr;
+
+        auto ret = read_and_lock_node(bnodeid, node, LOCKTYPE_READ, LOCKTYPE_READ, nullptr);
+        if (ret != btree_status_t::success) {
+            left_most_node = nullptr;
+            return ret;
+        }
+
+        if (node->is_leaf()) {
+            unlock_node(node, LOCKTYPE_READ);
+            left_most_node = node;
+            return btree_status_t::success;
+        }
+
+        HS_DBG_ASSERT_GT(node->get_total_entries(), 0);
+        if (node->get_total_entries() > 0) {
+            BtreeNodeInfo p;
+            node->get(0, &p, false);
+            ret = get_left_most_node(p.bnode_id(), left_most_node);
+        }
+
+        unlock_node(node, LOCKTYPE_READ);
+
+        return ret;
+    }
 
     void diff(Btree* other, uint32_t param, vector< pair< K, V > >* diff_kv) {
         std::vector< pair< K, V > > my_kvs, other_kvs;

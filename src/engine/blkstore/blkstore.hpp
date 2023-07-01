@@ -219,9 +219,7 @@ public:
                    size,
                    auto_recovery},
             m_comp_cb{std::move(comp_cb)},
-            m_metrics{name} {
-        init_sobject(name);
-    }
+            m_metrics{name} {}
 
     BlkStore(DeviceManager* const mgr,  // Device manager instance
              CacheType* const cache,    // Cache Instance
@@ -243,9 +241,7 @@ public:
                 pdev_group,    allocator_type, (std::bind(&BlkStore::process_completions, this, std::placeholders::_1)),
                 recovery_init, auto_recovery},
             m_comp_cb{std::move(comp_cb)},
-            m_metrics{name} {
-        init_sobject(name);
-    }
+            m_metrics{name} {}
 
     BlkStore(const BlkStore&) = delete;
     BlkStore& operator=(const BlkStore&) = delete;
@@ -255,17 +251,21 @@ public:
     ~BlkStore() = default;
 
     sisl::sobject_ptr sobject() { return m_sobject; }
-    void init_sobject(const char* const name) {
+    void init_sobject() {
         auto hs = HomeStoreBase::safe_instance();
-        if (hs) {
-            m_sobject = hs->sobject_mgr()->create_object("module", "BlkStore",
-                                                         std::bind(&BlkStore::get_status, this, std::placeholders::_1));
-        }
+        m_sobject = hs->sobject_mgr()->create_object("module", "BlkStore",
+                                                     std::bind(&BlkStore::get_status, this, std::placeholders::_1));
     }
 
     void attach_compl(comp_callback comp_cb) { m_comp_cb = std::move(comp_cb); }
 
     bool is_read_modify_cache() { return (m_cache_type == BlkStoreCacheType::RD_MODIFY_WRITEBACK_CACHE); }
+
+    // this is called for both first time boot and recovery case;
+    void create_object() {
+        init_sobject();
+        m_vdev.create_object();
+    }
 
     void process_completions(const boost::intrusive_ptr< virtualdev_req >& v_req) {
         HS_REL_ASSERT_EQ(m_comp_cb.operator bool(), true);

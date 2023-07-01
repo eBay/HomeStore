@@ -379,6 +379,12 @@ struct btree_super_block {
     uint32_t journal_id = 0;
 
     uint32_t get_journal_id() const { return journal_id; }
+
+    std::string to_string() const {
+        std::string str;
+        str += fmt::format("root_node_id: {}, journal_id: {}", root_node, journal_id);
+        return str;
+    }
 };
 #pragma pack()
 
@@ -867,6 +873,15 @@ struct BtreeConfig {
     uint32_t get_merge_suggested_size() const { return get_node_area_size() - get_ideal_fill_size(); }
     uint32_t get_split_size(uint32_t filled_size) const { return (uint32_t)(filled_size * m_split_pct) / 100; }
     const std::string& get_name() const { return m_btree_name; }
+
+    std::string to_string() {
+        std::string str;
+        str += fmt::format("m_max_objs: {}, m_max_key_size: {}, m_max_value_size: {}, m_node_area_size: {}, "
+                           "m_node_size: {}, m_ideal_fill_pct: {}, m_split_pct: {}, m_btree_name: {}, align_size: {}",
+                           m_max_objs, m_max_key_size, m_max_value_size, m_node_area_size, m_node_size,
+                           m_ideal_fill_pct, m_split_pct, m_btree_name, align_size);
+        return str;
+    }
 };
 
 #define DEFAULT_FREELIST_CACHE_COUNT 10000

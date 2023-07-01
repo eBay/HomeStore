@@ -56,6 +56,7 @@ if (${build_io_tests})
             SET_TESTS_PROPERTIES(TestHSForceReinit-Epoll PROPERTIES DEPENDS TestVol-Epoll)
         endif()
 
+
         add_test(NAME TestVolCopy-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=copy_vol --dirpath=${CMAKE_BINARY_DIR}/bin/ --emulate_hdd=1 --)
         if (${PRERELEASE_ON})
             SET_TESTS_PROPERTIES(TestVolCopy-Epoll PROPERTIES DEPENDS TestHSForceReinit-Epoll)
@@ -63,8 +64,11 @@ if (${build_io_tests})
             SET_TESTS_PROPERTIES(TestVolCopy-Epoll PROPERTIES DEPENDS TestVol-Epoll)
         endif()
 
+        add_test(NAME TestVolBtreePagintion-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=btree_node_pagination --dirpath=${CMAKE_BINARY_DIR}/bin/ --emulate_hdd=1 --)
+        SET_TESTS_PROPERTIES(TestVolBtreePagintion-Epoll PROPERTIES DEPENDS TestVolCopy-Epoll)
+
         add_test(NAME TestVolRecovery-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery --dirpath=${CMAKE_BINARY_DIR}/bin/ --emulate_hdd=1 --)
-        SET_TESTS_PROPERTIES(TestVolRecovery-Epoll PROPERTIES DEPENDS TestVolCopy-Epoll)
+        SET_TESTS_PROPERTIES(TestVolRecovery-Epoll PROPERTIES DEPENDS TestVolBtreePagintion-Epoll)
             
         add_test(NAME TestVolRecoveryCrash-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery_crash --dirpath=${CMAKE_BINARY_DIR}/bin/ --emulate_hdd=1 --)
         SET_TESTS_PROPERTIES(TestVolRecoveryCrash-Epoll PROPERTIES DEPENDS TestVolRecovery-Epoll)
@@ -99,8 +103,11 @@ if (${build_io_tests})
             SET_TESTS_PROPERTIES(TestVolCopy-Spdk PROPERTIES DEPENDS TestVol-Spdk)
         endif()
 
+        add_test(NAME TestVolBtreePagintion-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=btree_node_pagination --dirpath=${CMAKE_BINARY_DIR}/bin/ --spdk true)
+        SET_TESTS_PROPERTIES(TestVolBtreePagintion-Spdk PROPERTIES DEPENDS TestVolCopy-Spdk)
+
         add_test(NAME TestVolRecovery-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery --dirpath=${CMAKE_BINARY_DIR}/bin/ -- --spdk true)
-        SET_TESTS_PROPERTIES(TestVolRecovery-Spdk PROPERTIES DEPENDS TestVolCopy-Spdk)
+        SET_TESTS_PROPERTIES(TestVolRecovery-Spdk PROPERTIES DEPENDS TestVolBtreePagintion-Spdk)
 
         add_test(NAME TestVolRecoveryCrash-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/scripts/vol_test.py --test_suits=recovery_crash --dirpath=${CMAKE_BINARY_DIR}/bin/ -- --spdk true)
         SET_TESTS_PROPERTIES(TestVolRecoveryCrash-Spdk PROPERTIES DEPENDS TestVolRecovery-Spdk)

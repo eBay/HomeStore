@@ -2238,6 +2238,55 @@ TEST_F(VolTest, recovery_boot_test) {
 }
 
 /*!
+    @test   recovery_boot_btree_node_pagination_test
+    @brief  Tests which does recovery. End up with a clean shutdown
+    This test doesn't do any io to volume;
+ */
+TEST_F(VolTest, recovery_boot_btree_node_pagination_test) {
+    const auto start_time(Clock::now());
+    tcfg.init = false;
+    this->start_homestore(false /* force_reinit */);
+
+    LOGINFO("recovery verify started");
+    std::unique_ptr< VolVerifyJob > verify_job;
+    if (tcfg.pre_init_verify || tcfg.verify_only) {
+        verify_job = std::make_unique< VolVerifyJob >(this);
+        this->start_job(verify_job.get(), wait_type::for_completion);
+        LOGINFO("recovery verify done");
+    } else {
+        LOGINFO("bypassing recovery verify");
+    }
+
+    LOGINFO("Starting btree leaf node pagination.");
+
+    sisl::status_request status_req;
+    status_req.obj_type = "btree_node";
+    status_req.obj_name = "btree_node_test_files/vol0";
+
+    const auto sobject_mgr = HomeStoreBase::safe_instance()->sobject_mgr();
+    while (true) {
+        const auto status_resp = sobject_mgr->get_status(status_req);
+        if (status_resp.json.contains("error")) {
+            HS_DBG_ASSERT(false, "get_status returned error: {}", status_resp.json.dump(2));
+        } else {
+            LOGINFO("get_status return successfully: {}", status_resp.json.dump(2));
+        }
+
+        if (status_resp.json["has_more"] == "true") {
+            status_req.next_cursor = status_resp.json["next_cursor"].get< std::string >();
+            LOGINFO("more leaf nodes to get, next_cursor: {}", status_req.next_cursor);
+        } else {
+            LOGINFO("no more leaf node. ");
+            break;
+        }
+    }
+
+    if (tcfg.can_delete_volume) { this->delete_volumes(); }
+    this->shutdown();
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
+}
+
+/*!
     @test   recovery_boot_copy_vol_test
     @brief  Tests which does recovery. End up with a clean shutdown
     This test doesn't do any io to volume;

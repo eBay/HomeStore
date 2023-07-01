@@ -292,13 +292,11 @@ void HomeBlksHttpServer::get_status(const Pistache::Rest::Request& request, Pist
     if (batch_size) { status_req.batch_size = std::stoi(batch_size.value()); }
 
     auto next_cursor(query.get("next_cursor"));
-    if (next_cursor) {
-        status_req.next_cursor = folly::uriUnescape< std::string >(next_cursor.value());
-    }
+    if (next_cursor) { status_req.next_cursor = folly::uriUnescape< std::string >(next_cursor.value()); }
 
     const auto sobject_mgr = HomeStoreBase::safe_instance()->sobject_mgr();
-    sisl::status_response status_resp = sobject_mgr->get_status(status_req);
-    Pistache::Http::Code code = Pistache::Http::Code::Ok;
+    const auto status_resp = sobject_mgr->get_status(status_req);
+    auto code = Pistache::Http::Code::Ok;
     if (status_resp.json.contains("error")) { code = Pistache::Http::Code::Bad_Request; }
 
     response.send(code, status_resp.json.dump(2));
