@@ -51,8 +51,6 @@ public:
     void verify_metablk_store(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
     void wakeup_init(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
     void copy_vol(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
-    void dump_logstore_family(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
-    void dump_logstore_by_id(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
 
 #ifdef _PRERELEASE
     void set_safe_mode(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);

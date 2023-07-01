@@ -44,6 +44,9 @@ HomeLogStore::HomeLogStore(LogStoreFamily& family, const logstore_id_t id, const
         m_fq_name{fmt::format("{}.{}", family.m_family_id, id)} {
     m_truncation_barriers.reserve(10000);
     m_safe_truncation_boundary.seq_num.store(start_lsn - 1, std::memory_order_release);
+    auto hb = HomeStoreBase::safe_instance();
+    m_sobject = hb->sobject_mgr()->create_object("HomeLogStore", "HomeLogStore_" + std::to_string(m_store_id),
+                                                 std::bind(&HomeLogStore::get_status, this, std::placeholders::_1));
 }
 
 bool HomeLogStore::write_sync(const logstore_seq_num_t seq_num, const sisl::io_blob& b) {
@@ -377,7 +380,7 @@ logstore_seq_num_t HomeLogStore::get_contiguous_completed_seq_num(const logstore
     return (logstore_seq_num_t)m_records.completed_upto(from + 1);
 }
 
-sisl::status_response HomeLogStore::get_status(const sisl::status_request& request) const {
+sisl::status_response HomeLogStore::get_status(const sisl::status_request& request) {
     sisl::status_response response;
     response.json["append_mode"] = m_append_mode;
     response.json["highest_lsn"] = m_seq_num.load(std::memory_order_relaxed);
@@ -388,6 +391,16 @@ sisl::status_response HomeLogStore::get_status(const sisl::status_request& reque
     response.json["truncation_parallel_to_writes?"] = m_safe_truncation_boundary.active_writes_not_part_of_truncation;
     response.json["logstore_records"] = m_records.get_status(request.verbose_level);
     response.json["logstore_sb_first_lsn"] = m_logdev.m_logdev_meta.store_superblk(m_store_id).m_first_seq_num;
+
+    if (request.json.contains("type") && request.json["type"] == "logstore_record") {
+        log_dump_req dump_req{};
+        if (!request.next_cursor.empty()) { dump_req.start_seq_num = std::stoul(request.next_cursor); }
+        dump_req.end_seq_num = dump_req.start_seq_num + request.batch_size;
+        homestore::log_dump_verbosity verbose_level = homestore::log_dump_verbosity::HEADER;
+        if (request.json.contains("log_content")) { verbose_level = homestore::log_dump_verbosity::CONTENT; }
+        dump_req.verbosity_level = verbose_level;
+        response.json.update(dump_log_store(dump_req));
+    }
     return response;
 }
 
