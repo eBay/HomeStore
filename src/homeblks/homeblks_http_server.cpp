@@ -77,10 +77,6 @@ void HomeBlksHttpServer::setup_routes() {
                                      Routes::bind(&HomeBlksHttpServer::get_status, this));
         http_server_ptr->setup_route(Http::Method::Get, "/api/v1/verifyBitmap",
                                      Routes::bind(&HomeBlksHttpServer::verify_bitmap, this), iomgr::url_t::localhost);
-        http_server_ptr->setup_route(Http::Method::Get, "/api/v1/logstore/:family/dump",
-                                     Routes::bind(&HomeBlksHttpServer::dump_logstore_family, this));
-        http_server_ptr->setup_route(Http::Method::Get, "/api/v1/logstore/:family/:logstore/dump",
-                                     Routes::bind(&HomeBlksHttpServer::dump_logstore_by_id, this));
         http_server_ptr->setup_route(Http::Method::Get, "/api/v1/dumpDiskMetaBlks",
                                      Routes::bind(&HomeBlksHttpServer::dump_disk_metablks, this));
         http_server_ptr->setup_route(Http::Method::Get, "/api/v1/verifyMetaBlkStore",
@@ -260,55 +256,6 @@ void HomeBlksHttpServer::dump_disk_metablks(const Pistache::Rest::Request& reque
         response.send(Pistache::Http::Code::Bad_Request,
                       "HomeBlks not in safe mode, not allowed to serve this request");
     }
-}
-
-void HomeBlksHttpServer::dump_logstore_family(const Pistache::Rest::Request& request,
-                                              Pistache::Http::ResponseWriter response) {
-    auto f_name = request.param(":family").as< std::string >();
-    homestore::log_dump_req dump_req{homestore::log_dump_req()};
-    auto family = HomeLogStoreMgrSI().get_family(f_name);
-    if (family == nullptr) {
-        response.send(Pistache::Http::Code::Bad_Request, "invalid log family");
-        return;
-    }
-    const auto start_seq_num_kv{request.query().get("start_seq_num")};
-    if (start_seq_num_kv) dump_req.start_seq_num = std::stoll(start_seq_num_kv.value());
-    const auto end_seq_num_kv{request.query().get("end_seq_num")};
-    if (end_seq_num_kv) dump_req.end_seq_num = std::stoll(end_seq_num_kv.value());
-
-    const auto content_kv{request.query().get("content")};
-    if (content_kv) dump_req.verbosity_level = log_dump_verbosity::CONTENT;
-
-    auto status_json = family->dump_log_store(dump_req);
-    response.send(Pistache::Http::Code::Ok, status_json.dump());
-}
-
-void HomeBlksHttpServer::dump_logstore_by_id(const Pistache::Rest::Request& request,
-                                             Pistache::Http::ResponseWriter response) {
-    auto f_name = request.param(":family").as< std::string >();
-    auto store_id = request.param(":logstore").as< int >();
-    homestore::log_dump_req dump_req{homestore::log_dump_req()};
-    auto family = HomeLogStoreMgrSI().get_family(f_name);
-    if (family == nullptr) {
-        response.send(Pistache::Http::Code::Bad_Request, "invalid log family");
-        return;
-    }
-    const auto start_seq_num_kv{request.query().get("start_seq_num")};
-    if (start_seq_num_kv) dump_req.start_seq_num = std::stoll(start_seq_num_kv.value());
-    const auto end_seq_num_kv{request.query().get("end_seq_num")};
-    if (end_seq_num_kv) dump_req.end_seq_num = std::stoll(end_seq_num_kv.value());
-
-    std::string failure_resp{""};
-    int verbosity_level{-1};
-    if (!verify_and_get_verbosity(request, failure_resp, verbosity_level)) {
-        response.send(Pistache::Http::Code::Bad_Request, failure_resp);
-        return;
-    }
-    dump_req.verbosity_level = static_cast<log_dump_verbosity> (verbosity_level);
-    auto logstore = family->find_logstore_by_id(store_id);
-    dump_req.log_store = logstore;
-    auto status_json = family->dump_log_store(dump_req);
-    response.send(Pistache::Http::Code::Ok, status_json.dump());
 }
 
 void HomeBlksHttpServer::get_status(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
