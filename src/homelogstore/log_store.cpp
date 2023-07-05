@@ -19,6 +19,8 @@
 #include <fmt/format.h>
 #include <iomgr/iomgr.hpp>
 #include <sisl/utility/thread_factory.hpp>
+#include <boost/archive/iterators/base64_from_binary.hpp>
+#include <boost/archive/iterators/transform_width.hpp>
 
 #include "engine/common/homestore_assert.hpp"
 #include "engine/homestore_base.hpp"
@@ -313,6 +315,19 @@ int HomeLogStore::search_max_le(const logstore_seq_num_t input_sn) {
 
     return (end - 1);
 }
+static inline std::string encodeBase64(const uint8_t* first, std::size_t size) {
+    using Base64FromBinary = boost::archive::iterators::base64_from_binary<
+        boost::archive::iterators::transform_width< const char*, // sequence of chars
+                                                    6,           // get view of 6 bit
+                                                    8            // from sequence of 8 bit
+                                                    > >;
+    std::vector< unsigned char > bytes{first, first + size};
+    std::size_t bytes_to_pad = (3 - size % 3) % 3;
+    if (bytes_to_pad > 0) { bytes.resize(bytes.size() + bytes_to_pad, 0); }
+    std::string encoded{Base64FromBinary{bytes.data()}, Base64FromBinary{bytes.data() + (bytes.size() - bytes_to_pad)}};
+
+    return encoded.append(bytes_to_pad, '=');
+}
 
 nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
     nlohmann::json json_dump{}; // create root object
@@ -342,14 +357,11 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
                 json_val["is_inlined"] = static_cast< uint32_t >(record_header.get_inlined());
                 json_val["store_seq_num"] = static_cast< uint64_t >(record_header.store_seq_num);
                 json_val["store_id"] = static_cast< logstore_id_t >(record_header.store_id);
+                if (dump_req.verbosity_level == homestore::log_dump_verbosity::CONTENT) {
+                    json_val["content"] = encodeBase64(log_buffer.bytes(), log_buffer.size());
+                }
             } catch (const std::exception& ex) { THIS_LOGSTORE_LOG(ERROR, "Exception in json dump- {}", ex.what()); }
 
-            if (dump_req.verbosity_level == homestore::log_dump_verbosity::CONTENT) {
-                const uint8_t* const b{log_buffer.bytes()};
-                const std::vector< uint8_t > bv(b, b + log_buffer.size());
-                auto content = nlohmann::json::binary_t(bv);
-                json_val["content"] = std::move(content);
-            }
             json_records.emplace_back(std::move(json_val));
             decltype(idx) end_idx{std::min(max_idx, dump_req.end_seq_num)};
             end_iterate = (cur_idx < end_idx) ? true : false;
