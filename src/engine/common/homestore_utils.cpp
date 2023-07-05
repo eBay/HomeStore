@@ -15,6 +15,9 @@
  *********************************************************************************/
 #include "homestore_utils.hpp"
 #include "homestore_assert.hpp"
+#include <boost/archive/iterators/base64_from_binary.hpp>
+#include <boost/archive/iterators/binary_from_base64.hpp>
+#include <boost/archive/iterators/transform_width.hpp>
 
 namespace homestore {
 uint8_t* hs_utils::iobuf_alloc(const size_t size, const sisl::buftag tag, const size_t alignment) {
@@ -72,6 +75,50 @@ sisl::byte_array hs_utils::extract_byte_array(const sisl::byte_view& b, const bo
                                               const size_t alignment) {
     return (is_aligned_needed) ? b.extract(alignment) : b.extract(0);
 };
+
+std::string hs_utils::encodeBase64(const uint8_t* first, std::size_t size) {
+    using Base64FromBinary = boost::archive::iterators::base64_from_binary<
+        boost::archive::iterators::transform_width< const char*, // sequence of chars
+                                                    6,           // get view of 6 bit
+                                                    8            // from sequence of 8 bit
+                                                    > >;
+    std::vector< unsigned char > bytes{first, first + size};
+    std::size_t bytes_to_pad = (3 - size % 3) % 3;
+    if (bytes_to_pad > 0) { bytes.resize(bytes.size() + bytes_to_pad, 0); }
+    std::string encoded{Base64FromBinary{bytes.data()}, Base64FromBinary{bytes.data() + (bytes.size() - bytes_to_pad)}};
+
+    return encoded.append(bytes_to_pad, '=');
+}
+
+std::string hs_utils::encodeBase64(const sisl::byte_view& b){
+    return encodeBase64(b.bytes(), b.size());
+}
+
+template <typename T>
+void hs_utils::decodeBase64(const std::string &encoded_data, T out)
+{
+    using BinaryFromBase64 = boost::archive::iterators::transform_width<
+        boost::archive::iterators::binary_from_base64<std::string::const_iterator>,
+        8, // get a view of 8 bit
+        6  // from a sequence of 6 bit
+        >;
+    auto unpadded_data = encoded_data;
+    const auto bytes_to_pad = std::count(begin(encoded_data), end(encoded_data), '=');
+    std::replace(begin(unpadded_data), end(unpadded_data), '=', 'A'); // A_64 == \0
+
+    std::string decoded_data{BinaryFromBase64{begin(unpadded_data)},
+                        BinaryFromBase64{begin(unpadded_data) + unpadded_data.length()}};
+
+    decoded_data.erase(end(decoded_data) - bytes_to_pad, end(decoded_data));
+    std::copy(begin(decoded_data), end(decoded_data), out);
+}
+
+std::string hs_utils::decodeBase64(const std::string &encoded_data)
+{
+    std::string rv;
+    decodeBase64(encoded_data, std::back_inserter(rv));
+    return rv;
+}
 
 size_t hs_utils::m_btree_mempool_size;
 } // namespace homestore

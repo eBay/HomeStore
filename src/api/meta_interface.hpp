@@ -43,6 +43,10 @@ class BlkBuffer;
 template < typename Buffer >
 class BlkStore;
 
+// The offset of vol_name is needed for metablk service to translate the vol_name from buffer of metablk_VOLUME for
+// example in get_status
+#define VOL_NAME_OFFSET 48
+
 typedef homestore::BlkStore< BlkBuffer > blk_store_t;
 
 // each subsystem could receive callbacks multiple times
@@ -89,7 +93,6 @@ private:
     sisl::blob m_compress_info;
     MetablkMetrics m_metrics;
     bool m_inited{false};
-    sisl::sobject_ptr m_sobject;
 
 public:
     MetaBlkMgr(const char* const name = "MetaBlkStore");
@@ -221,8 +224,8 @@ public:
     [[nodiscard]] uint32_t get_align_size() const;
 
     [[nodiscard]] sisl::status_response get_status(const sisl::status_request& request);
-
-    sisl::sobject_ptr sobject() { return m_sobject; }
+    [[nodiscard]] sisl::status_response get_status_metablk(const sisl::status_request& request, std::string type = "");
+    void create_sobject(meta_sub_type type);
 
 public:
     /*********************** static public function **********************/
@@ -345,9 +348,11 @@ private:
     [[nodiscard]] uint64_t get_min_compress_size() const;
     [[nodiscard]] uint64_t get_max_compress_memory_size() const;
     [[nodiscard]] uint64_t get_init_compress_memory_size() const;
+
 public:
     [[nodiscard]] uint32_t get_compress_ratio_limit() const;
     [[nodiscard]] bool get_skip_hdr_check() const;
+
 private:
     [[nodiscard]] bool compress_feature_on() const;
 

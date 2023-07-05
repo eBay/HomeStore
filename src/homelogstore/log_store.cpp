@@ -342,14 +342,11 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
                 json_val["is_inlined"] = static_cast< uint32_t >(record_header.get_inlined());
                 json_val["store_seq_num"] = static_cast< uint64_t >(record_header.store_seq_num);
                 json_val["store_id"] = static_cast< logstore_id_t >(record_header.store_id);
+                if (dump_req.verbosity_level == homestore::log_dump_verbosity::CONTENT) {
+                    json_val["content"] = hs_utils::encodeBase64(log_buffer);
+                }
             } catch (const std::exception& ex) { THIS_LOGSTORE_LOG(ERROR, "Exception in json dump- {}", ex.what()); }
 
-            if (dump_req.verbosity_level == homestore::log_dump_verbosity::CONTENT) {
-                const uint8_t* const b{log_buffer.bytes()};
-                const std::vector< uint8_t > bv(b, b + log_buffer.size());
-                auto content = nlohmann::json::binary_t(bv);
-                json_val["content"] = std::move(content);
-            }
             json_records.emplace_back(std::move(json_val));
             decltype(idx) end_idx{std::min(max_idx, dump_req.end_seq_num)};
             end_iterate = (cur_idx < end_idx) ? true : false;
@@ -397,7 +394,9 @@ sisl::status_response HomeLogStore::get_status(const sisl::status_request& reque
         if (!request.next_cursor.empty()) { dump_req.start_seq_num = std::stoul(request.next_cursor); }
         dump_req.end_seq_num = dump_req.start_seq_num + request.batch_size;
         homestore::log_dump_verbosity verbose_level = homestore::log_dump_verbosity::HEADER;
-        if (request.json.contains("log_content")) { verbose_level = homestore::log_dump_verbosity::CONTENT; }
+        if (request.json.contains("log_content")) {
+            verbose_level = homestore::log_dump_verbosity::CONTENT;
+        }
         dump_req.verbosity_level = verbose_level;
         response.json.update(dump_log_store(dump_req));
     }

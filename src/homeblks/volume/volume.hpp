@@ -247,6 +247,7 @@ struct vol_sb_hdr {
                            magic, version, num_streams, page_size, size, uuid, vol_name, state);
     }
 };
+static_assert(offsetof(struct vol_sb_hdr, vol_name) == VOL_NAME_OFFSET);
 
 /* A simple self contained wrapper for completion list, which uses vector pool to avoid additional allocations */
 struct vol_completion_req_list {
@@ -300,6 +301,7 @@ private:
 
 class Volume : public std::enable_shared_from_this< Volume > {
     friend class HomeBlks;
+
 private:
     vol_params m_params;
     VolumeMetrics m_metrics;
@@ -314,7 +316,7 @@ private:
     std::atomic< uint64_t > m_err_cnt = 0;
     sisl::atomic_counter< uint64_t > m_vol_ref_cnt = 0; // volume can not be destroy/shutdown until it is not zero
 
-    std::mutex m_sb_lock; // lock for updating vol's sb
+    std::mutex m_sb_lock;                               // lock for updating vol's sb
     sisl::byte_array m_sb_buf;
     indxmgr_stop_cb m_destroy_done_cb;
     std::atomic< bool > m_indx_mgr_destroy_started;
@@ -396,11 +398,12 @@ private:
     void destroy_internal();
     indx_tbl* create_indx_tbl();
     indx_tbl* recover_indx_tbl(btree_super_block& sb, btree_cp_sb& cp_sb);
+
 public:
     mapping* get_active_indx();
     sisl::sobject_ptr sobject() { return m_sobject; }
-private:
 
+private:
     void vol_sb_init();
 
     std::vector< iovec > get_next_iovecs(IoVecTransversal& iovec_transversal, const std::vector< iovec >& data_iovecs,
