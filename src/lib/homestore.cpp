@@ -128,7 +128,7 @@ void HomeStore::init(bool wait_for_init) {
             LOGWARN("Homestore init is called with wait till init, but it has valid after_init_done callback set in "
                     "its init params, ignoring the after_init_done callback; it will not be called");
         }
-        m_init_done_cb = [& tl_cv = cv, &tl_start_mutex = start_mutex, &tl_inited = inited]() {
+        m_init_done_cb = [&tl_cv = cv, &tl_start_mutex = start_mutex, &tl_inited = inited]() {
             LOGINFO("HomeStore Init completed");
             {
                 std::unique_lock< std::mutex > lk{tl_start_mutex};
@@ -387,6 +387,10 @@ void HomeStore::new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb) {
 
     case blkstore_type::INDEX_STORE:
         if (has_index_service()) { m_index_service->open_vdev(vb); }
+        break;
+
+    case blkstore_type::DATA_STORE:
+        if (has_data_service()) { m_data_service->open_vdev(vb); }
         break;
 
     default:
