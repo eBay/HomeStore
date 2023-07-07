@@ -34,9 +34,6 @@ LogStoreFamily::LogStoreFamily(const logstore_family_id_t f_id) :
         m_family_id{f_id},
         m_metablk_name{std::string("LogStoreFamily") + std::to_string(f_id)},
         m_log_dev{f_id, m_metablk_name} {
-    auto hb = HomeStoreBase::safe_instance();
-    m_sobject = hb->sobject_mgr()->create_object("LogStoreFamily", m_metablk_name,
-                                                 std::bind(&LogStoreFamily::get_status, this, std::placeholders::_1));
 }
 
 void LogStoreFamily::meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size) {
@@ -44,6 +41,10 @@ void LogStoreFamily::meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_vi
 }
 
 void LogStoreFamily::start(const bool format, JournalVirtualDev* blk_store) {
+    auto hb = HomeStoreBase::safe_instance();
+    m_sobject = hb->sobject_mgr()->create_object("LogStoreFamily", m_metablk_name,
+                                                 std::bind(&LogStoreFamily::get_status, this, std::placeholders::_1));
+
     m_log_dev.register_store_found_cb(bind_this(LogStoreFamily::on_log_store_found, 2));
     m_log_dev.register_append_cb(bind_this(LogStoreFamily::on_io_completion, 5));
     m_log_dev.register_logfound_cb(bind_this(LogStoreFamily::on_logfound, 6));
