@@ -316,19 +316,23 @@ int HomeLogStore::search_max_le(const logstore_seq_num_t input_sn) {
 
 nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
     nlohmann::json json_dump{}; // create root object
-    json_dump["store_id"] = this->m_store_id;
-
     const auto trunc_upto{this->truncated_upto()};
     std::remove_const_t< decltype(trunc_upto) > idx{trunc_upto + 1};
+    int32_t batch_size;
+    if (dump_req.batch_size != 0) {
+        batch_size = dump_req.batch_size;
+    } else {
+        batch_size = dump_req.end_seq_num - dump_req.start_seq_num;
+    }
     if (dump_req.start_seq_num != 0) idx = dump_req.start_seq_num;
 
     // must use move operator= operation instead of move copy constructor
     nlohmann::json json_records = nlohmann::json::array();
-    bool end_iterate{false};
+    bool proceed{false};
     m_records.foreach_completed(
         idx,
-        [&json_records, &dump_req, &end_iterate, this](decltype(idx) cur_idx, decltype(idx) max_idx,
-                                                       const homestore::logstore_record& record) -> bool {
+        [&batch_size, &json_dump, &json_records, &dump_req, &proceed,
+         this](decltype(idx) cur_idx, decltype(idx) max_idx, const homestore::logstore_record& record) -> bool {
             // do a sync read
             // must use move operator= operation instead of move copy constructor
             nlohmann::json json_val = nlohmann::json::object();
@@ -349,8 +353,10 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
 
             json_records.emplace_back(std::move(json_val));
             decltype(idx) end_idx{std::min(max_idx, dump_req.end_seq_num)};
-            end_iterate = (cur_idx < end_idx) ? true : false;
-            return end_iterate;
+            proceed = (cur_idx < end_idx && --batch_size > 0) ? true : false;
+            // User can provide either the end_seq_num or batch_size in the request.
+            if (cur_idx < end_idx && batch_size == 0) { json_dump["next_cursor"] = std::to_string(cur_idx + 1); }
+            return proceed;
         });
 
     json_dump["log_records"] = std::move(json_records);
@@ -379,6 +385,19 @@ logstore_seq_num_t HomeLogStore::get_contiguous_completed_seq_num(const logstore
 
 sisl::status_response HomeLogStore::get_status(const sisl::status_request& request) {
     sisl::status_response response;
+    if (request.json.contains("type") && request.json["type"] == "logstore_record") {
+        log_dump_req dump_req{};
+        if (!request.next_cursor.empty()) { dump_req.start_seq_num = std::stoul(request.next_cursor); }
+        dump_req.batch_size = request.batch_size;
+        dump_req.end_seq_num = UINT32_MAX;
+        homestore::log_dump_verbosity verbose_level = homestore::log_dump_verbosity::HEADER;
+        if (request.json.contains("log_content")) { verbose_level = homestore::log_dump_verbosity::CONTENT; }
+        dump_req.verbosity_level = verbose_level;
+        response.json.update(dump_log_store(dump_req));
+        return response;
+    }
+
+    response.json["store_id"] = this->m_store_id;
     response.json["append_mode"] = m_append_mode;
     response.json["highest_lsn"] = m_seq_num.load(std::memory_order_relaxed);
     response.json["max_lsn_in_prev_flush_batch"] = m_flush_batch_max_lsn;
@@ -400,6 +419,7 @@ sisl::status_response HomeLogStore::get_status(const sisl::status_request& reque
         dump_req.verbosity_level = verbose_level;
         response.json.update(dump_log_store(dump_req));
     }
+
     return response;
 }
 

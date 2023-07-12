@@ -90,9 +90,8 @@ void MetaBlkMgr::start(blk_store_t* sb_blk_store, const sb_blkstore_blob* blob, 
 
     HS_REL_ASSERT_GT(get_page_size(), META_BLK_HDR_MAX_SZ);
     HS_REL_ASSERT_GT(get_page_size(), MAX_BLK_OVF_HDR_MAX_SZ);
-    auto sm{HomeStoreBase::safe_instance()->sobject_mgr()};
-    sm->create_object("module", "MetaBlkMgr",
-                                                 std::bind(&MetaBlkMgr::get_status, this, std::placeholders::_1));
+    HomeStoreBase::safe_instance()->sobject_mgr()->create_object(
+        "module", "MetaBlkMgr", std::bind(&MetaBlkMgr::get_status, this, std::placeholders::_1));
 
     reset_self_recover();
     alloc_compress_buf(get_init_compress_memory_size());
@@ -401,10 +400,10 @@ void MetaBlkMgr::register_handler(const meta_sub_type type, const meta_blk_found
 }
 
 void MetaBlkMgr::create_sobject(meta_sub_type type) {
-    if(m_sub_info[type].meta_bids.size()==1) {
-        auto sm{HomeStoreBase::safe_instance()->sobject_mgr()};
-        sm->create_object("MetaBlk", "MetaBlk_" + type,
-                          std::bind(&MetaBlkMgr::get_status_metablk, this, std::placeholders::_1, "MetaBlk_" + type));
+    if (m_sub_info[type].meta_bids.size() == 1) {
+        HomeStoreBase::safe_instance()->sobject_mgr()->create_object(
+            "MetaBlk", "MetaBlk_" + type,
+            std::bind(&MetaBlkMgr::get_status_metablk, this, std::placeholders::_1, "MetaBlk_" + type));
     }
 }
 
@@ -1500,10 +1499,11 @@ sisl::status_response MetaBlkMgr::get_status_metablk(const sisl::status_request&
                     std::string jname = "content";
                     sisl::byte_array buf;
                     if (client == "VOLUME" || log_level == 3) {
-                        if(it == m_meta_blks.end()){
-                           j["error"] = fmt::format("Expecting meta_bid: {} to be found in meta blks cache. Corruption detected!",
-                                         bid.to_string());
-                           return response;
+                        if (it == m_meta_blks.end()) {
+                            j["error"] = fmt::format(
+                                "Expecting meta_bid: {} to be found in meta blks cache. Corruption detected!",
+                                bid.to_string());
+                            return response;
                         }
 
                         if (it == m_meta_blks.end()) {
@@ -1616,9 +1616,7 @@ nlohmann::json MetaBlkMgr::populate_json(const int log_level, meta_blk_map_t& me
                         const std::string file_path{fmt::format("{}/{}_{}", dump_dir, x.first, bid_cnt)};
                         std::ofstream f{file_path};
                         f.write(reinterpret_cast< const char* >(buf->bytes), buf->size);
-                        j[x.first]["content"][std::to_string(bid_cnt)] =
-                            hs_utils::encodeBase64(buf->bytes, buf->size);
-                        ;
+                        j[x.first]["content"][std::to_string(bid_cnt)] = hs_utils::encodeBase64(buf->bytes, buf->size);
 
                         free_space -= buf->size;
                     }

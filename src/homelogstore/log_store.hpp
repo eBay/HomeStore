@@ -45,6 +45,7 @@ struct log_dump_req {
     std::shared_ptr< HomeLogStore > log_store; // if null all log stores are dumped
     logstore_seq_num_t start_seq_num;          // empty_key if from start of log file
     logstore_seq_num_t end_seq_num;            // empty_key if till last log entry
+    int32_t batch_size = 0;                    // Size of the output batch.
 };
 
 struct logstore_record {
