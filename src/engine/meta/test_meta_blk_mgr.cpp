@@ -111,8 +111,8 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
     params.min_virtual_page_size = 4096;
     params.app_mem_size = app_mem_size;
     params.data_devices = device_info;
-    params.init_done_cb = [& tl_start_mutex = start_mutex, &tl_cv = cv, &tl_inited = inited](std::error_condition err,
-                                                                                             const out_params& params) {
+    params.init_done_cb = [&tl_start_mutex = start_mutex, &tl_cv = cv, &tl_inited = inited](std::error_condition err,
+                                                                                            const out_params& params) {
         LOGINFO("HomeBlks Init completed");
         {
             std::unique_lock< std::mutex > lk{tl_start_mutex};
@@ -126,7 +126,7 @@ static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, co
 
     if (SISL_OPTIONS.count("http_port")) {
         test_common::set_fixed_http_port(SISL_OPTIONS["http_port"].as< uint32_t >());
-    }else {
+    } else {
         test_common::set_random_http_port();
     }
     VolInterface::init(params);
@@ -159,14 +159,14 @@ protected:
     void SetUp() override{};
 
     void TearDown() override{};
-public:
 
+public:
     [[nodiscard]] uint64_t get_elapsed_time(const Clock::time_point& start) {
         const std::chrono::seconds sec{std::chrono::duration_cast< std::chrono::seconds >(Clock::now() - start)};
         return sec.count();
     }
 
-        [[nodiscard]] bool keep_running() {
+    [[nodiscard]] bool keep_running() {
         HS_DBG_ASSERT(m_mbm->get_size() >= m_mbm->get_used_size(), "total size:{} less than used size: {}",
                       m_mbm->get_size(), m_mbm->get_used_size());
         const auto free_size{m_mbm->get_size() - m_mbm->get_used_size()};
@@ -208,9 +208,7 @@ public:
         }
     }
 
-        [[nodiscard]] uint64_t total_size_written(const void* const cookie) {
-        return m_mbm->get_meta_size(cookie);
-    }
+    [[nodiscard]] uint64_t total_size_written(const void* const cookie) { return m_mbm->get_meta_size(cookie); }
 
     void do_write_to_full() {
         static constexpr uint64_t blkstore_overhead = 4 * 1024ul * 1024ul; // 4MB
@@ -428,7 +426,7 @@ public:
             iomanager.iobuf_free(buf);
         } else {
             if (unaligned_addr) {
-                delete[](buf - unaligned_shift);
+                delete[] (buf - unaligned_shift);
             } else {
                 delete[] buf;
             }
@@ -506,7 +504,7 @@ public:
         }
     }
 
-        [[nodiscard]] bool do_aligned() const {
+    [[nodiscard]] bool do_aligned() const {
         static thread_local std::random_device rd;
         static thread_local std::default_random_engine re{rd()};
         std::uniform_int_distribution< uint8_t > aligned_rand{0, 1};
@@ -555,16 +553,14 @@ public:
         }
     }
 
-        [[nodiscard]] uint64_t total_op_cnt() const {
-        return m_update_cnt + m_wrt_cnt + m_rm_cnt;
-    }
+    [[nodiscard]] uint64_t total_op_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
 
     [[nodiscard]] uint32_t write_ratio() const {
         if (m_wrt_cnt == 0) return 0;
         return (100 * m_wrt_cnt) / total_op_cnt();
     }
 
-        [[nodiscard]] uint32_t update_ratio() const {
+    [[nodiscard]] uint32_t update_ratio() const {
         if (m_update_cnt == 0) return 0;
         return (100 * m_update_cnt) / total_op_cnt();
     }
@@ -574,7 +570,7 @@ public:
         return false;
     }
 
-        [[nodiscard]] bool do_write() const {
+    [[nodiscard]] bool do_write() const {
         if (write_ratio() < gp.per_write) { return true; }
         return false;
     }
@@ -620,15 +616,16 @@ public:
         HS_REL_ASSERT_EQ(m_mbm->get_size() - m_total_wrt_sz, m_mbm->get_available_blks() * m_mbm->get_page_size());
 
         m_mbm->deregister_handler(mtype);
-        m_mbm->register_handler(mtype,
-                                [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-                                    if (mblk) {
-                                        std::unique_lock< std::mutex > lg{m_mtx};
-                                        m_cb_blks[mblk->hdr.h.bid.to_integer()] =
-                                            std::string{reinterpret_cast< const char* >(buf.bytes()), size};
-                                    }
-                                },
-                                [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
+        m_mbm->register_handler(
+            mtype,
+            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+                if (mblk) {
+                    std::unique_lock< std::mutex > lg{m_mtx};
+                    m_cb_blks[mblk->hdr.h.bid.to_integer()] =
+                        std::string{reinterpret_cast< const char* >(buf.bytes()), size};
+                }
+            },
+            [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
     }
 
 #ifdef _PRERELEASE
@@ -716,6 +713,60 @@ TEST_F(VMetaBlkMgrTest, random_load_test) {
     this->recover();
 
     this->validate();
+
+    this->shutdown();
+}
+TEST_F(VMetaBlkMgrTest, get_status_test) {
+    start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
+                    SISL_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
+    auto validate_status = [this](std::string type, uint64_t size, bool expected_error=false) {
+        sisl::status_request status_req;
+        status_req.obj_name = "MetaBlk_"+type;
+        status_req.verbose_level = 3;
+        const auto sobject_mgr = HomeStoreBase::safe_instance()->sobject_mgr();
+        const auto status_resp = sobject_mgr->get_status(status_req);
+        LOGINFO("get_status returned : {}", status_resp.json.dump());
+        if(status_resp.json.contains("error")) {
+             ASSERT_TRUE(expected_error);
+        }
+        if(status_resp.json.contains("[0] content")){
+            auto encoded_content = status_resp.json["[0] content"];
+            const auto decode_content = hs_utils::decodeBase64(encoded_content);
+            auto val_content = hs_utils::encodeBase64(reinterpret_cast< const unsigned char* >(decode_content.data()),
+                                                      decode_content.size());
+            ASSERT_EQ(encoded_content, val_content);
+            ASSERT_EQ(!expected_error, decode_content.size() == size);
+        }
+    };
+
+    mtype = "Test_Write";
+    reset_counters();
+    m_start_time = Clock::now();
+    register_client();
+    [[maybe_unused]] auto write_result = do_sb_write(false, 500);
+    validate_status(mtype, 500 ); // check the size written is correct as well as encode/decode
+
+    mtype = "Test_Write2";
+    reset_counters();
+    register_client();
+    write_result = do_sb_write(false, 500);
+    validate_status(mtype, 500); // register the second type and validate it
+
+    // simulate reboot case that MetaBlkMgr will scan the disk for all the metablks that were written;
+    this->scan_blks();
+    this->recover();
+    this->validate();
+    MetaBlkMgrSI()->deregister_handler(mtype); // deregister the first type and make sure it is not existed
+    validate_status("Test_Write", 500);
+    validate_status("Test_Write2", 500, true); // expected to have error
+
+    mtype = "Test_Write2"; // agian add the first type with different size
+    reset_counters();
+    register_client();
+    write_result = do_sb_write(false, 100);
+    validate_status(mtype, 500, true); // Since the size is 100, the former size must be wrong
+    validate_status("ERROR_TYPE", 500, true); // An error type also must results in error
+
 
     this->shutdown();
 }

@@ -259,8 +259,6 @@ void HomeBlksHttpServer::dump_disk_metablks(const Pistache::Rest::Request& reque
 }
 
 void HomeBlksHttpServer::get_status(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response) {
-    LOGINFO("Got status request ");
-
     sisl::status_request status_req;
     std::string failure_resp{""};
     int verbose_level{-1};
@@ -273,6 +271,8 @@ void HomeBlksHttpServer::get_status(const Pistache::Rest::Request& request, Pist
     for (auto iter = query.parameters_begin(); iter != query.parameters_end(); ++iter) {
         status_req.json.emplace(iter->first, folly::uriUnescape< std::string >(iter->second));
     }
+
+    LOGINFO("Got status request {} ", status_req.json.dump());
 
     auto type(query.get("type"));
     if (type) { status_req.obj_type = folly::uriUnescape< std::string >(type.value()); }

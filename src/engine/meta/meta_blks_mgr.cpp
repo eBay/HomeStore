@@ -90,10 +90,8 @@ void MetaBlkMgr::start(blk_store_t* sb_blk_store, const sb_blkstore_blob* blob, 
 
     HS_REL_ASSERT_GT(get_page_size(), META_BLK_HDR_MAX_SZ);
     HS_REL_ASSERT_GT(get_page_size(), MAX_BLK_OVF_HDR_MAX_SZ);
-
-    auto hs = HomeStoreBase::safe_instance();
-    m_sobject = hs->sobject_mgr()->create_object("module", "MetaBlkMgr",
-                                                   std::bind(&MetaBlkMgr::get_status, this, std::placeholders::_1));
+    HomeStoreBase::safe_instance()->sobject_mgr()->create_object(
+        "module", "MetaBlkMgr", std::bind(&MetaBlkMgr::get_status, this, std::placeholders::_1));
 
     reset_self_recover();
     alloc_compress_buf(get_init_compress_memory_size());
@@ -261,6 +259,8 @@ bool MetaBlkMgr::scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_map_
         HS_DBG_ASSERT_EQ(mblk->hdr.h.bid.to_integer(), bid.to_integer(), "{}, bid mismatch: {} : {} ", mblk->hdr.h.type,
                          mblk->hdr.h.bid.to_string(), bid.to_string());
 
+        create_sobject(mblk->hdr.h.type);
+
         if (prev_meta_bid.to_integer() != mblk->hdr.h.prev_bid.to_integer()) {
             // recover from previous crash during remove_sub_sb;
             HS_LOG(INFO, metablk, "[type={}], Recovering fromp previous crash. Fixing prev linkage.", mblk->hdr.h.type);
@@ -399,6 +399,14 @@ void MetaBlkMgr::register_handler(const meta_sub_type type, const meta_blk_found
     HS_LOG(INFO, metablk, "[type={}] registered with do_crc: {}", type, do_crc);
 }
 
+void MetaBlkMgr::create_sobject(meta_sub_type type) {
+    if (m_sub_info[type].meta_bids.size() == 1) {
+        HomeStoreBase::safe_instance()->sobject_mgr()->create_object(
+            "MetaBlk", "MetaBlk_" + type,
+            std::bind(&MetaBlkMgr::get_status_metablk, this, std::placeholders::_1, "MetaBlk_" + type));
+    }
+}
+
 void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* context_data, const uint64_t sz, void*& cookie) {
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     HS_REL_ASSERT_EQ(m_inited, true, "accessing metablk store before init is not allowed.");
@@ -412,6 +420,7 @@ void MetaBlkMgr::add_sub_sb(const meta_sub_type type, const void* context_data, 
 
     // add meta_bid to in-memory for reverse mapping;
     m_sub_info[type].meta_bids.insert(meta_bid.to_integer());
+    create_sobject(type);
 
 #ifdef _PRERELEASE
     uint32_t crc{0};
@@ -1435,9 +1444,92 @@ exit:
 //
 sisl::status_response MetaBlkMgr::get_status(const sisl::status_request& request) {
     sisl::status_response response;
-    std::string dummy_client;
-    response.json = populate_json(request.verbose_level, m_meta_blks, m_ovf_blk_hdrs, m_last_mblk_id.get(), m_sub_info,
-                                  m_self_recover, dummy_client);
+    nlohmann::json j;
+    {
+        std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+        j["ssb"] = m_ssb ? m_ssb->to_string() : "";
+        j["self_recovery"] = m_self_recover;
+        j["last_mid"] = m_last_mblk_id->to_string();
+        j["compression"] = compress_feature_on() ? "On" : "Off";
+    }
+
+    response.json = j;
+    return response;
+}
+sisl::status_response MetaBlkMgr::get_status_metablk(const sisl::status_request& request, std::string child_type) {
+
+    auto log_level{request.verbose_level};
+    sisl::status_response response;
+    std::string metablk_type = request.json.contains("name") ? request.obj_name : child_type;
+
+    nlohmann::json& j = response.json;
+    {
+        std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
+        std::string metablk_name_template{"MetaBlk_"};
+        auto pos{metablk_name_template.size()};
+        auto client = metablk_type.substr(pos);
+        if (m_sub_info.find(client) == m_sub_info.end()) {
+            j["error"] = "no client " + client + "  found";
+            return response;
+        }
+        for (auto& x : m_sub_info) {
+            if (!client.empty() && client.compare(x.first)) { continue; }
+
+            j[x.first]["type"] = x.first;
+            j[x.first]["do_crc"] = x.second.do_crc;
+            j[x.first]["cb"] = x.second.cb ? "registered valid cb" : "nullptr";
+            j[x.first]["comp_cb"] = x.second.comp_cb ? "registered valid cb" : "nullptr";
+            j[x.first]["num_meta_bids"] = x.second.meta_bids.size();
+            if (log_level >= 2 && log_level <= 3) {
+                size_t bid_cnt{0};
+                uint32_t start_sub_type = request.json.contains("start_sub_type_id")
+                    ? std::stoul(request.json["start_sub_type_id"].get< std::string >())
+                    : 0;
+                uint32_t end_sub_type = request.json.contains("end_sub_type_id")
+                    ? std::stoul(request.json["end_sub_type_id"].get< std::string >())
+                    : UINT32_MAX;
+
+                for (const auto& y : x.second.meta_bids) {
+                    if (bid_cnt < start_sub_type || bid_cnt > end_sub_type) {
+                        bid_cnt++;
+                        continue;
+                    }
+                    BlkId bid(y);
+                    auto it = m_meta_blks.find(y);
+                    std::string jname = "content";
+                    sisl::byte_array buf;
+                    if (client == "VOLUME" || log_level == 3) {
+                        if (it == m_meta_blks.end()) {
+                            j["error"] = fmt::format(
+                                "Expecting meta_bid: {} to be found in meta blks cache. Corruption detected!",
+                                bid.to_string());
+                            return response;
+                        }
+
+                        if (it == m_meta_blks.end()) {
+                            LOGERROR("bid: {} not found in meta blk cache, corruption detected!", y);
+                            continue;
+                        }
+
+                        buf = read_sub_sb_internal(it->second);
+                        if (client == "VOLUME") { jname = std::string((const char*)(buf->bytes + VOL_NAME_OFFSET)); }
+                    }
+
+                    if (log_level == 2) {
+                        // dump bid if log level is 2 or dump to file is not possible;
+                        j[x.first]["[" + std::to_string(bid_cnt) + "] " + jname] = bid.to_string();
+
+                    } else if (log_level == 3) { // log_level >= 3 and can dump to file
+                        // dump the whole data buffer to file
+                        j[x.first]["[" + std::to_string(bid_cnt) + "] " + jname] =
+                            hs_utils::encodeBase64(buf->bytes, buf->size);
+                    }
+
+                    ++bid_cnt;
+                }
+            }
+        }
+    }
     return response;
 }
 
@@ -1524,7 +1616,7 @@ nlohmann::json MetaBlkMgr::populate_json(const int log_level, meta_blk_map_t& me
                         const std::string file_path{fmt::format("{}/{}_{}", dump_dir, x.first, bid_cnt)};
                         std::ofstream f{file_path};
                         f.write(reinterpret_cast< const char* >(buf->bytes), buf->size);
-                        j[x.first]["meta_bids"][std::to_string(bid_cnt)] = file_path;
+                        j[x.first]["content"][std::to_string(bid_cnt)] = hs_utils::encodeBase64(buf->bytes, buf->size);
 
                         free_space -= buf->size;
                     }
