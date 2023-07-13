@@ -140,23 +140,23 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
 }
 #if 0
 void HomeLogStore::read_async(logstore_req* req, const log_found_cb_t& cb) {
-    HS_LOG_ASSERT( ((cb != nullptr) || (m_comp_cb != nullptr)),
-              "Expected either cb is not null or default cb registered");
-    auto record = m_records.at(req->seq_num);
-    logdev_key ld_key = record.m_dev_key;
-    req->cb = cb;
-    m_logdev.read_async(ld_key, (void*)req);
+   HS_LOG_ASSERT( ((cb != nullptr) || (m_comp_cb != nullptr)),
+             "Expected either cb is not null or default cb registered");
+   auto record = m_records.at(req->seq_num);
+   logdev_key ld_key = record.m_dev_key;
+   req->cb = cb;
+   m_logdev.read_async(ld_key, (void*)req);
 }
 
 void HomeLogStore::read_async(logstore_seq_num_t seq_num, void* cookie, const log_found_cb_t& cb) {
-    auto record = m_records.at(seq_num);
-    logdev_key ld_key = record.m_dev_key;
-    sisl::io_blob b;
-    auto* req = logstore_req::make(this, seq_num, &b, false /* not write */);
-    read_async(req, [cookie, cb](logstore_seq_num_t seq_num, log_buffer log_buf, void* cookie) {
-            cb(seq, log_buf, cookie);
-            logstore_req::free(req);
-            });
+   auto record = m_records.at(seq_num);
+   logdev_key ld_key = record.m_dev_key;
+   sisl::io_blob b;
+   auto* req = logstore_req::make(this, seq_num, &b, false /* not write */);
+   read_async(req, [cookie, cb](logstore_seq_num_t seq_num, log_buffer log_buf, void* cookie) {
+           cb(seq, log_buf, cookie);
+           logstore_req::free(req);
+           });
 }
 #endif
 
@@ -209,10 +209,10 @@ void HomeLogStore::on_batch_completion(const logdev_key& flush_batch_ld_key) {
 
 void HomeLogStore::truncate(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only) {
 #if 0
-    if (!iomanager.is_io_thread()) {
-        LOGDFATAL("Expected truncate to be called from iomanager thread. Ignoring truncate");
-        return;
-    }
+   if (!iomanager.is_io_thread()) {
+       LOGDFATAL("Expected truncate to be called from iomanager thread. Ignoring truncate");
+       return;
+   }
 #endif
 
 #ifndef NDEBUG
@@ -318,13 +318,18 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
     nlohmann::json json_dump{}; // create root object
     const auto trunc_upto{this->truncated_upto()};
     std::remove_const_t< decltype(trunc_upto) > idx{trunc_upto + 1};
-    int32_t batch_size;
-    if (dump_req.batch_size != 0) {
+    if (dump_req.start_seq_num) idx = dump_req.start_seq_num;
+
+    logstore_seq_num_t batch_size;
+    if (dump_req.batch_size) {
         batch_size = dump_req.batch_size;
     } else {
-        batch_size = dump_req.end_seq_num - dump_req.start_seq_num;
+        if (dump_req.end_seq_num) {
+            batch_size = dump_req.end_seq_num - idx + 1;
+        } else {
+            batch_size = std::numeric_limits< int64_t >::max() - idx;
+        }
     }
-    if (dump_req.start_seq_num != 0) idx = dump_req.start_seq_num;
 
     // must use move operator= operation instead of move copy constructor
     nlohmann::json json_records = nlohmann::json::array();
@@ -355,7 +360,7 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
             decltype(idx) end_idx{std::min(max_idx, dump_req.end_seq_num)};
             proceed = (cur_idx < end_idx && --batch_size > 0) ? true : false;
             // User can provide either the end_seq_num or batch_size in the request.
-            if (cur_idx < end_idx && batch_size == 0) { json_dump["next_cursor"] = std::to_string(cur_idx + 1); }
+            if (cur_idx < end_idx && !batch_size) { json_dump["next_cursor"] = std::to_string(cur_idx + 1); }
             return proceed;
         });
 
@@ -387,9 +392,9 @@ sisl::status_response HomeLogStore::get_status(const sisl::status_request& reque
     sisl::status_response response;
     if (request.json.contains("type") && request.json["type"] == "logstore_record") {
         log_dump_req dump_req{};
-        if (!request.next_cursor.empty()) { dump_req.start_seq_num = std::stoul(request.next_cursor); }
+        if (!request.next_cursor.empty()) { dump_req.start_seq_num = std::stoull(request.next_cursor); }
         dump_req.batch_size = request.batch_size;
-        dump_req.end_seq_num = UINT32_MAX;
+        dump_req.end_seq_num = std::numeric_limits< int64_t >::max() - 1;
         homestore::log_dump_verbosity verbose_level = homestore::log_dump_verbosity::HEADER;
         if (request.json.contains("log_content")) { verbose_level = homestore::log_dump_verbosity::CONTENT; }
         dump_req.verbosity_level = verbose_level;
