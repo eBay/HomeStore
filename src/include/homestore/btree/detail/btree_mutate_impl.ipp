@@ -203,7 +203,23 @@ btree_status_t Btree< K, V >::mutate_write_leaf_node(const BtreeNodePtr& my_node
                 BT_DBG_ASSERT(false, "For non-extent keys range-update should be really update and cannot insert");
                 ret = btree_status_t::not_supported;
             } else {
+                if (!end_found) {
+                    if (end_idx == my_node->total_entries() || end_idx == start_idx) {
+                        return btree_status_t::not_found;
+                    }
+                    K tail_key = my_node->get_nth_key< K >(end_idx, false);
+                    if (tail_key.compare(subrange.end_key()) == 1) { return btree_status_t::not_found; }
+                }
+                if (!start_found && !end_found && end_idx >= start_idx) { return btree_status_t::not_found; }
+                if (end_idx < start_idx) { return btree_status_t::not_found; }
+                const auto new_val_size{(*req.m_newval).serialized_size()};
+                V tmp_v;
                 for (auto idx{start_idx}; idx <= end_idx; ++idx) {
+                    my_node->get_nth_value(idx, &tmp_v, false);
+                    if (my_node->available_size(m_bt_cfg) + tmp_v.serialized_size() < new_val_size) {
+                        req.set_cursor_key(my_node->get_nth_key< K >(idx, false));
+                        return btree_status_t::has_more;
+                    }
                     my_node->update(idx, *req.m_newval);
                 }
             }
@@ -445,7 +461,8 @@ template < typename K, typename V >
 btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
                                          uint32_t parent_ind, BtreeKey* out_split_key, void* context) {
     BtreeNodePtr child_node1 = child_node;
-    BtreeNodePtr child_node2 = child_node1->is_leaf() ? alloc_leaf_node() : alloc_interior_node();
+    BtreeNodePtr child_node2;
+    child_node2.reset(child_node1->is_leaf() ? alloc_leaf_node().get() : alloc_interior_node().get());
 
     if (child_node2 == nullptr) { return (btree_status_t::space_not_avail); }
 

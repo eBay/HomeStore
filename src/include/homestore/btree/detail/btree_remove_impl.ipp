@@ -420,7 +420,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     available_size = 0;
     while (src_cursor.ith_node < old_nodes.size()) {
         if (available_size == 0) {
-            new_node = alloc_node(leftmost_node->is_leaf());
+            new_node.reset(alloc_node(leftmost_node->is_leaf()).get());
             if (new_node == nullptr) {
                 ret = btree_status_t::merge_failed;
                 goto out;

@@ -115,6 +115,13 @@ struct BtreeTest : public testing::Test {
         }
     }
 
+    void range_put(uint32_t start_entry, uint32_t end_entry, bool expected) {
+        auto val = std::make_unique< V >(V::generate_rand());
+        auto mreq = BtreeRangePutRequest< K >{BtreeKeyRange< K >{start_entry, true, end_entry, true},
+                                              btree_put_type::REPLACE_ONLY_IF_EXISTS, val.get()};
+        ASSERT_EQ(m_bt->put(mreq) == btree_status_t::success, expected);
+    }
+
     void range_put(uint32_t max_count) {
         const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
         static std::uniform_int_distribution< uint32_t > s_randkey_start_generator{1, num_entries};
@@ -160,7 +167,6 @@ struct BtreeTest : public testing::Test {
         bool expected = (start_it != m_shadow_map.end()) && (std::distance(start_it, end_it) >= 0);
         if (start_it == end_it && fount_it == m_shadow_map.end()) { expected = false; }
         auto range = BtreeKeyRange< K >{K{start_key}, true, K{end_key}, true};
-        LOGINFO("range : {}", range.to_string());
         auto mreq = BtreeRangeRemoveRequest< K >{std::move(range)};
 
         size_t original_ts = get_tree_size();
@@ -329,7 +335,7 @@ TYPED_TEST(BtreeTest, SequentialInsert) {
     // Forward sequential insert
     const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
     const auto entries_iter1 = num_entries / 2;
-    LOGINFO("Step 1: Do Forward sequential insert for {} entries", entries_iter1);
+    LOGINFO("Step 1: Do forward sequential insert for {} entries", entries_iter1);
     for (uint32_t i{0}; i < entries_iter1; ++i) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
@@ -338,7 +344,7 @@ TYPED_TEST(BtreeTest, SequentialInsert) {
 
     // Reverse sequential insert
     const auto entries_iter2 = num_entries - entries_iter1;
-    LOGINFO("Step 3: Do Reverse sequential insert of remaining {} entries", entries_iter2);
+    LOGINFO("Step 3: Do reverse sequential insert of remaining {} entries", entries_iter2);
     for (uint32_t i{num_entries - 1}; i >= entries_iter1; --i) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
@@ -365,7 +371,7 @@ TYPED_TEST(BtreeTest, SequentialInsert) {
 TYPED_TEST(BtreeTest, SequentialRemove) {
     // Forward sequential insert
     const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
-    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries);
+    LOGINFO("Step 1: Do forward sequential insert for {} entries", num_entries);
     for (uint32_t i{0}; i < num_entries; ++i) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
@@ -373,7 +379,7 @@ TYPED_TEST(BtreeTest, SequentialRemove) {
     this->query_validate(0, num_entries - 1, 75);
 
     const auto entries_iter1 = num_entries / 2;
-    LOGINFO("Step 3: Do Forward sequential remove for {} entries", entries_iter1);
+    LOGINFO("Step 3: Do forward sequential remove for {} entries", entries_iter1);
     for (uint32_t i{0}; i < entries_iter1; ++i) {
         this->remove_one(i);
     }
@@ -381,7 +387,7 @@ TYPED_TEST(BtreeTest, SequentialRemove) {
     this->query_validate(0, entries_iter1 - 1, 75);
 
     const auto entries_iter2 = num_entries - entries_iter1;
-    LOGINFO("Step 5: Do Reverse sequential remove of remaining {} entries", entries_iter2);
+    LOGINFO("Step 5: Do reverse sequential remove of remaining {} entries", entries_iter2);
     for (uint32_t i{num_entries - 1}; i >= entries_iter1; --i) {
         this->remove_one(i);
     }
@@ -400,6 +406,7 @@ TYPED_TEST(BtreeTest, RandomInsert) {
     iota(vec.begin(), vec.end(), 0);
     // shuffle keys
     std::random_shuffle(vec.begin(), vec.end());
+    LOGINFO("Step 1: Do forward random insert for {} entries", num_entries);
     for (uint32_t i{0}; i < num_entries; ++i) {
         this->put(vec[i], btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
@@ -409,29 +416,29 @@ TYPED_TEST(BtreeTest, RandomInsert) {
 TYPED_TEST(BtreeTest, RangeUpdate) {
     // Forward sequential insert
     const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
-    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries);
+    LOGINFO("Step 1: Do forward sequential insert for {} entries", num_entries);
     for (uint32_t i{0}; i < num_entries; ++i) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
 
-    LOGINFO("Step 2: Do Range Update of random intervals between [1-50] for 100 times with random key ranges");
+    LOGINFO("Step 2: Do range update of random intervals between [1-50] for 100 times with random key ranges");
     static std::uniform_int_distribution< uint32_t > s_rand_key_count_generator{1, 50};
     for (uint32_t i{0}; i < 100; ++i) {
         this->range_put(s_rand_key_count_generator(g_re));
     }
 
-    LOGINFO("Step 2: Query {} entries and validate with pagination of 75 entries", num_entries);
+    LOGINFO("Step 3: Query {} entries and validate with pagination of 75 entries", num_entries);
     this->query_validate(0, num_entries - 1, 75);
 }
 
 TYPED_TEST(BtreeTest, SimpleRemoveRange) {
     // Forward sequential insert
     const auto num_entries = 20;
-    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries);
+    LOGINFO("Step 1: Do forward sequential insert for {} entries", num_entries);
     for (uint32_t i{0}; i < num_entries; ++i) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
-
+    LOGINFO("Step 2: Do range remove for {} entries", num_entries);
     //    this->print_keys(); // EXPECT size = 20 : 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19
     this->range_remove(5, 10);
     //    this->print_keys(); // EXPECT size = 14 : 0 1 2 3 4 [5 6 7 8 9 10] 11 12 13 14 15 16 17 18 19
@@ -453,6 +460,9 @@ TYPED_TEST(BtreeTest, SimpleRemoveRange) {
 TYPED_TEST(BtreeTest, RandomRemove) {
     // Forward sequential insert
     const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
+    const auto num_iters = SISL_OPTIONS["num_iters"].as< uint32_t >();
+
+    LOGINFO("Step 1: Do forward sequential insert for {} entries", num_entries);
     for (uint32_t i{0}; i < num_entries; ++i) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
@@ -462,7 +472,8 @@ TYPED_TEST(BtreeTest, RandomRemove) {
 
     // shuffle keys in [0, num_entries)
     std::random_shuffle(vec.begin(), vec.end());
-    for (uint32_t i{0}; i < SISL_OPTIONS["num_iters"].as< uint32_t >(); ++i) {
+    LOGINFO("Step 2: Do remove one by one for {} iterations", num_iters);
+    for (uint32_t i{0}; i < num_iters; ++i) {
         this->remove_one(vec[i]);
     }
     this->get_all_validate();
@@ -472,14 +483,17 @@ TYPED_TEST(BtreeTest, RandomRemoveRange) {
 
     // Forward sequential insert
     const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
-    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries);
+    const auto num_iters = SISL_OPTIONS["num_iters"].as< uint32_t >();
+
+    LOGINFO("Step 1: Do forward sequential insert for {} entries", num_entries);
     for (uint32_t i{0}; i < num_entries; ++i) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
-
+    // generate keys including out of bound
     static std::uniform_int_distribution< uint32_t > s_rand_key_generator{0, 2 * num_entries};
     //    this->print_keys();
-    for (uint32_t i{0}; i < SISL_OPTIONS["num_iters"].as< uint32_t >() && this->m_shadow_map.size() > 0; ++i) {
+    LOGINFO("Step 2: Do range remove for maximum of {} iterations", num_iters);
+    for (uint32_t i{0}; i < num_iters && this->m_shadow_map.size() > 0; ++i) {
         uint32_t key1 = s_rand_key_generator(g_re);
         uint32_t key2 = s_rand_key_generator(g_re);
         uint32_t start_key = std::min(key1, key2);
