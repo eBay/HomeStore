@@ -203,7 +203,14 @@ btree_status_t Btree< K, V >::mutate_write_leaf_node(const BtreeNodePtr& my_node
                 BT_DBG_ASSERT(false, "For non-extent keys range-update should be really update and cannot insert");
                 ret = btree_status_t::not_supported;
             } else {
+                const auto new_val_size{(*req.m_newval).serialized_size()};
+                V tmp_v;
                 for (auto idx{start_idx}; idx <= end_idx; ++idx) {
+                    my_node->get_nth_value(idx, &tmp_v, false);
+                    if (my_node->available_size(m_bt_cfg) + tmp_v.serialized_size() <= new_val_size) {
+                        req.set_cursor_key(my_node->get_nth_key< K >(idx, false));
+                        return btree_status_t::has_more;
+                    }
                     my_node->update(idx, *req.m_newval);
                 }
             }

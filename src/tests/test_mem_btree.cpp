@@ -28,7 +28,7 @@
 
 static constexpr uint32_t g_node_size{4096};
 using namespace homestore;
-SISL_LOGGING_INIT(btree)
+SISL_LOGGING_INIT(btree, iomgr, io_wd)
 
 SISL_OPTIONS_ENABLE(logging, test_mem_btree)
 SISL_OPTION_GROUP(test_mem_btree,
@@ -340,9 +340,9 @@ TYPED_TEST(BtreeTest, RangeUpdate) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
 
-    LOGINFO("Step 2: Do Range Update of random intervals between [1-50] for 100 times with random key ranges");
+    LOGINFO("Step 2: Do Range Update of random intervals between [1-50] for 1000 times with random key ranges");
     static std::uniform_int_distribution< uint32_t > s_rand_key_count_generator{1, 50};
-    for (uint32_t i{0}; i < 100; ++i) {
+    for (uint32_t i{0}; i < 1000; ++i) {
         this->range_put(s_rand_key_count_generator(g_re));
     }
 
