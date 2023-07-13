@@ -408,18 +408,6 @@ sisl::status_response HomeLogStore::get_status(const sisl::status_request& reque
     response.json["logstore_records"] = m_records.get_status(request.verbose_level);
     response.json["logstore_sb_first_lsn"] = m_logdev.m_logdev_meta.store_superblk(m_store_id).m_first_seq_num;
 
-    if (request.json.contains("type") && request.json["type"] == "logstore_record") {
-        log_dump_req dump_req{};
-        if (!request.next_cursor.empty()) { dump_req.start_seq_num = std::stoul(request.next_cursor); }
-        dump_req.end_seq_num = dump_req.start_seq_num + request.batch_size;
-        homestore::log_dump_verbosity verbose_level = homestore::log_dump_verbosity::HEADER;
-        if (request.json.contains("log_content")) {
-            verbose_level = homestore::log_dump_verbosity::CONTENT;
-        }
-        dump_req.verbosity_level = verbose_level;
-        response.json.update(dump_log_store(dump_req));
-    }
-
     return response;
 }
 
