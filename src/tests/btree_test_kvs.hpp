@@ -30,7 +30,7 @@ static std::normal_distribution<> g_randkeysize_generator{32, 24};
 static std::uniform_int_distribution< uint32_t > g_randval_generator{1, 30000};
 static std::normal_distribution<> g_randvalsize_generator{32, 24};
 // static std::uniform_int_distribution< uint32_t > g_randvalsize_generator{2, g_max_valsize};
-
+static std::mutex g_map_lk;
 static std::map< uint32_t, std::shared_ptr< std::string > > g_key_pool;
 
 static constexpr std::array< const char, 62 > alphanum{
@@ -140,6 +140,7 @@ private:
     }
 
     static std::shared_ptr< std::string > idx_to_key(uint32_t idx) {
+        std::unique_lock< std::mutex > lk(g_map_lk);
         auto it = g_key_pool.find(idx);
         if (it == g_key_pool.end()) {
             const auto& [it, happened] =
