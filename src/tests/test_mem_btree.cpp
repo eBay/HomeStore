@@ -28,7 +28,7 @@
 
 static constexpr uint32_t g_node_size{4096};
 using namespace homestore;
-SISL_LOGGING_INIT(btree)
+SISL_LOGGING_INIT(btree, iomgr)
 
 SISL_OPTIONS_ENABLE(logging, test_mem_btree)
 SISL_OPTION_GROUP(test_mem_btree,

@@ -52,7 +52,7 @@ DeviceManager::DeviceManager(const std::vector< dev_info >& data_devices, NewVDe
     // check if any of the drive is hard drive
     bool found_hdd_dev{false};
     for (const auto& dev_info : data_devices) {
-        if (is_hdd(dev_info.dev_names)) {
+        if (is_hdd(dev_info.dev_name)) {
             HomeStoreStaticConfig::instance().hdd_drive_present = true;
             HomeStoreStaticConfig::instance().engine.max_chunks = HDD_MAX_CHUNKS;
             found_hdd_dev = true;
@@ -106,7 +106,7 @@ DeviceManager::DeviceManager(const std::vector< dev_info >& data_devices, NewVDe
 
     uint32_t max_phys_page_size{0}, max_align_size{0};
     for (const auto& d : m_data_devices) {
-        auto pdev = std::make_unique< PhysicalDev >(d.dev_names, get_device_open_flags(d.dev_names));
+        auto pdev = std::make_unique< PhysicalDev >(d.dev_name, get_device_open_flags(d.dev_name));
         if (pdev->has_valid_superblock(m_data_system_uuid)) { m_first_time_boot = false; }
         auto const page_size = pdev->page_size();
         auto const align_size = pdev->align_size();
@@ -181,10 +181,10 @@ void DeviceManager::init_devices() {
         bool is_inited;
 
         std::unique_ptr< PhysicalDev > pdev{
-            std::make_unique< PhysicalDev >(this, d.dev_names, get_device_open_flags(d.dev_names), sys_uuid,
-                                            m_pdev_id++, max_dev_offset, true, dm_derived.info_size, &is_inited)};
+            std::make_unique< PhysicalDev >(this, d.dev_name, get_device_open_flags(d.dev_name), sys_uuid, m_pdev_id++,
+                                            max_dev_offset, true, dm_derived.info_size, &is_inited)};
 
-        LOGINFO("Initializing device name: {}, with system uuid: {} size {}", d.dev_names, std::ctime(&sys_uuid),
+        LOGINFO("Initializing device name: {}, with system uuid: {} size {}", d.dev_name, std::ctime(&sys_uuid),
                 in_bytes(pdev->size()));
 
         max_dev_offset += pdev->size();
@@ -248,7 +248,7 @@ void DeviceManager::load_and_repair_devices(const hs_uuid_t& sys_uuid) {
     for (const auto& d : m_data_devices) {
         bool is_inited;
         std::unique_ptr< PhysicalDev > pdev =
-            std::make_unique< PhysicalDev >(this, d.dev_names, get_device_open_flags(d.dev_names), sys_uuid,
+            std::make_unique< PhysicalDev >(this, d.dev_name, get_device_open_flags(d.dev_name), sys_uuid,
                                             INVALID_DEV_ID, 0, false, dm_derived.info_size, &is_inited);
         if (!is_inited) {
             // Super block is not present, possibly a new device, will format the device later
@@ -256,12 +256,12 @@ void DeviceManager::load_and_repair_devices(const hs_uuid_t& sys_uuid) {
                    "{} device {} appears to be not formatted. Will format it and replace it with the "
                    "failed disks."
                    "Replacing it with the failed disks can cause data loss",
-                   d.dev_names);
+                   d.dev_name);
 
             HS_REL_ASSERT(false, "hot plug-in device not supported!");
         }
 
-        LOGINFO("Loaded device: {}, with system uuid: {}", d.dev_names, std::ctime(&sys_uuid));
+        LOGINFO("Loaded device: {}, with system uuid: {}", d.dev_name, std::ctime(&sys_uuid));
 
         if (gen_count.load() < pdev->sb_gen_cnt()) {
             gen_count = pdev->sb_gen_cnt();
@@ -709,12 +709,12 @@ vdev_info_block* DeviceManager::alloc_new_vdev_slot() {
 }
 
 iomgr::drive_type DeviceManager::get_drive_type(const std::vector< dev_info >& devices) {
-    iomgr::drive_type dtype = iomgr::DriveInterface::get_drive_type(devices[0].dev_names);
+    iomgr::drive_type dtype = iomgr::DriveInterface::get_drive_type(devices[0].dev_name);
 #ifndef NDEBUG
     for (auto i{1u}; i < devices.size(); ++i) {
-        auto observed_dtype = iomgr::DriveInterface::get_drive_type(devices[i].dev_names);
+        auto observed_dtype = iomgr::DriveInterface::get_drive_type(devices[i].dev_name);
         HS_DBG_ASSERT_EQ(enum_name(dtype), enum_name(observed_dtype),
-                         "Expected all phys dev have same drive_type, mismatched dev={}", devices[i].dev_names);
+                         "Expected all phys dev have same drive_type, mismatched dev={}", devices[i].dev_name);
     }
 #endif
 

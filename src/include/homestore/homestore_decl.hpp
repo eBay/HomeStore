@@ -90,15 +90,16 @@ ENUM(io_flag, uint8_t,
      READ_ONLY    // Read-only mode for post-mortem checks
 );
 ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize);
+ENUM(chunk_selector_type_t, uint8_t, round_robin, heap);
 
 ////////////// All structs ///////////////////
 struct dev_info {
-    explicit dev_info(std::string name, HSDevType type = HSDevType::Data) :
-            dev_names{std::move(name)}, dev_type{type} {}
-    std::string to_string() const { return fmt::format("{} - {}", dev_names, enum_name(dev_type)); }
+    explicit dev_info(std::string name, HSDevType type = HSDevType::Data) : dev_name{std::move(name)}, dev_type{type} {}
+    std::string to_string() const { return fmt::format("{} - {} size={}", dev_name, enum_name(dev_type), dev_size); }
 
-    std::string dev_names;
+    std::string dev_name;
     HSDevType dev_type;
+    uint64_t dev_size{0};
 };
 
 struct stream_info_t {
@@ -132,8 +133,8 @@ static std::string in_bytes(uint64_t sz) {
 
 struct hs_input_params {
 public:
-    std::vector< dev_info > data_devices; // name of the data devices.
-    uuid_t system_uuid;                   // Deprecated. UUID assigned to the system
+    std::vector< dev_info > data_devices;        // name of the data devices.
+    uuid_t system_uuid;                          // Deprecated. UUID assigned to the system
 
     io_flag data_open_flags{io_flag::DIRECT_IO}; // All data drives open flags
     io_flag fast_open_flags{io_flag::DIRECT_IO}; // All index drives open flags
@@ -177,7 +178,7 @@ struct cap_attrs {
 
 ////////////// Misc ///////////////////
 #define HOMESTORE_LOG_MODS                                                                                             \
-    btree_structures, btree_nodes, btree_generics, btree, cache, device, blkalloc, vol_io_wd, volume, flip, cp, metablk, \
-        indx_mgr, logstore, replay, transient, IOMGR_LOG_MODS
+    btree_structures, btree_nodes, btree_generics, btree, cache, device, blkalloc, vol_io_wd, volume, flip, cp,        \
+        metablk, indx_mgr, logstore, replay, transient, IOMGR_LOG_MODS
 
 } // namespace homestore

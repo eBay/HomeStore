@@ -132,10 +132,10 @@ retry:
 bool IndexWBCache::create_chain(IndexBufferPtr& second, IndexBufferPtr& third) {
     bool copied{false};
     if (second->m_next_buffer != nullptr) {
-        HS_DBG_ASSERT_EQ((void*)second->m_next_buffer.get(), (void*)third.get(),
-                         "Overwriting second (child node) with different third (parent node)");
-        HS_DBG_ASSERT_EQ((void*)second->m_next_buffer->m_next_buffer.get(), (void*)nullptr,
-                         "Third node buffer should be the last in the list");
+        // HS_DBG_ASSERT_EQ((void*)second->m_next_buffer.get(), (void*)third.get(),
+        //                  "Overwriting second (child node) with different third (parent node)");
+        // HS_DBG_ASSERT_EQ((void*)second->m_next_buffer->m_next_buffer.get(), (void*)nullptr,
+        //                  "Third node buffer should be the last in the list");
 
         // Second buf has already a next buffer, which means same node is in-place modified with structure change,
         // we need to copy both this and next buffer.

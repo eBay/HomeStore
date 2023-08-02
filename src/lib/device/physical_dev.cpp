@@ -330,7 +330,7 @@ void PhysicalDev::zero_boot_sbs(const std::vector< dev_info >& devices, int ofla
     for (const auto& dev : devices) {
         // alloc re-usable super block
         auto const dev_type = dev.dev_type;
-        const std::string& dev_str = dev.dev_names;
+        const std::string& dev_str = dev.dev_name;
         auto const superblock_size = super_block::s_min_sb_size;
         auto* membuf = hs_utils::iobuf_alloc(superblock_size, sisl::buftag::superblk, 512);
         super_block* super_blk = new (membuf) super_block{};
