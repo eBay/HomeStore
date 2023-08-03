@@ -103,6 +103,16 @@ retry:
         // If the child and child_info link in the parent mismatch, we need to do btree repair, it might have
         // encountered a crash in-between the split or merge and only partial commit happened.
         if (is_split_needed(child_node, m_bt_cfg, req) || is_repair_needed(child_node, child_info)) {
+
+
+            if (!my_node->can_accomodate(m_bt_cfg, K::get_estimate_max_size(), BtreeLinkInfo::get_fixed_size())) {
+                // Mark the parent_node itself to be split upon next retry.
+                bt_thread_vars()->force_split_node = my_node;
+                unlock_node(child_node, child_cur_lock);
+                ret = btree_status_t::retry;
+                goto out;
+            }
+
             ret = upgrade_node_locks(my_node, child_node, curlock, child_cur_lock, req.m_op_context);
             if (ret != btree_status_t::success) {
                 BT_NODE_LOG(DEBUG, my_node, "Upgrade of node lock failed, retrying from root");
@@ -113,9 +123,12 @@ retry:
             curlock = child_cur_lock = locktype_t::WRITE;
 
             if (is_repair_needed(child_node, child_info)) {
+                BT_NODE_LOG(TRACE, child_node, "Node repair needed");
                 ret = repair_split(my_node, child_node, curr_idx, req.m_op_context);
+
             } else {
                 K split_key;
+                BT_NODE_LOG(TRACE, my_node, "Split node needed");
                 ret = split_node(my_node, child_node, curr_idx, &split_key, req.m_op_context);
             }
             unlock_node(child_node, locktype_t::WRITE);
@@ -135,10 +148,11 @@ retry:
             if (child_node->is_leaf()) {
                 // We get the trimmed range only for leaf because this is where we will be inserting keys. In
                 // interior nodes, keys are always propogated from the lower nodes.
-                bool is_inp_key_lesser;
-                req.trim_working_range(
-                    my_node->min_of(s_cast< const K& >(req.input_range().end_key()), curr_idx, is_inp_key_lesser),
-                    is_inp_key_lesser ? req.input_range().is_end_inclusive() : true);
+                bool is_inp_key_lesser = false;
+                K end_key =
+                    my_node->min_of(s_cast< const K& >(req.input_range().end_key()), curr_idx, is_inp_key_lesser);
+                bool end_incl = is_inp_key_lesser ? req.input_range().is_end_inclusive() : true;
+                req.trim_working_range(std::move(end_key), end_incl);
 
                 BT_NODE_LOG(DEBUG, my_node, "Subrange:idx=[{}-{}],c={},working={}", start_idx, end_idx, curr_idx,
                             req.working_range().to_string());
@@ -418,6 +432,14 @@ btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
     root = std::move(new_root);
     BT_NODE_DBG_ASSERT_EQ(root->total_entries(), 0, root);
 
+    ret = prepare_node_txn(root, child_node, req.m_op_context);
+    if (ret != btree_status_t::success) {
+        free_node(root, locktype_t::WRITE, req.m_op_context);
+        root = std::move(child_node);
+        unlock_node(root, locktype_t::WRITE);
+        goto done;
+    }
+
     if (is_repair_needed(child_node, m_root_node_info)) {
         ret = repair_split(root, child_node, root->total_entries(), req.m_op_context);
     } else {
@@ -434,6 +456,7 @@ btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
         m_root_node_info = BtreeLinkInfo{root->node_id(), root->link_version()};
         unlock_node(child_node, locktype_t::WRITE);
         COUNTER_INCREMENT(m_metrics, btree_depth, 1);
+        update_new_root_info(root->node_id(), root->link_version());
     }
 
 done:

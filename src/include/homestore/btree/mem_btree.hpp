@@ -69,6 +69,8 @@ private:
         return btree_status_t::success;
     }
 
+    void update_new_root_info(bnodeid_t root_node, uint64_t version) override {}
+
 #if 0
     static void ref_node(MemBtreeNode* bn) {
         auto mbh = (mem_btree_node_header*)bn;

@@ -40,7 +40,7 @@ struct index_table_sb {
     // Btree Section
     bnodeid_t root_node{empty_bnodeid}; // Btree Root Node ID
     uint64_t link_version{0};
-    int64_t index_size{0};              // Size of the Index
+    int64_t index_size{0}; // Size of the Index
     // seq_id_t last_seq_id{-1};           // TODO: See if this is needed
 
     uint32_t user_sb_size; // Size of the user superblk
@@ -63,23 +63,51 @@ enum class index_buf_state_t : uint8_t {
 };
 
 ///////////////////////// Btree Node and Buffer Portion //////////////////////////
-class IndexBuffer;
+struct IndexBuffer;
+struct IndexBufferGroup;
 typedef std::shared_ptr< IndexBuffer > IndexBufferPtr;
+typedef std::shared_ptr< IndexBufferGroup > IndexBufferGroupPtr;
 
 struct IndexBuffer {
     uint8_t* m_node_buf{nullptr};                            // Actual buffer
     index_buf_state_t m_buf_state{index_buf_state_t::CLEAN}; // Is buffer yet to persist?
     BlkId m_blkid;                                           // BlkId where this needs to be persisted
-    IndexBufferPtr m_next_buffer{nullptr};                   // Next buffer in the chain
-    // Number of leader buffers we are waiting for before we write this buffer
-    sisl::atomic_counter< int > m_wait_for_leaders{0};
+    IndexBufferGroupPtr m_buf_group;                         // Buffer group to which it belongs.
 
     IndexBuffer(BlkId blkid, uint32_t buf_size, uint32_t align_size);
+    ~IndexBuffer();
 
     BlkId blkid() const { return m_blkid; }
     uint8_t* raw_buffer() { return m_node_buf; }
 
     bool is_clean() const { return (m_buf_state == index_buf_state_t::CLEAN); }
+    std::string to_string() const {
+        return fmt::format("IndexBuffer {} blkid={} state={} node_buf={}",
+                           reinterpret_cast< void* >(const_cast< IndexBuffer* >(this)), m_blkid.to_integer(),
+                           static_cast< int >(m_buf_state), static_cast< void* >(m_node_buf));
+    }
+};
+
+struct IndexBufferGroup {
+    // First and second index buffers are flushed in order.
+    std::array< IndexBufferPtr, 2 > m_bufs;
+    IndexBufferGroupPtr m_next_group{nullptr}; // Next buffer group in the chain
+    // Number of leader group buffers we are waiting for before we write this buffer
+    sisl::atomic_counter< int > m_wait_for_leaders{0};
+
+    IndexBufferGroup(IndexBufferPtr first, IndexBufferPtr second = nullptr) : m_bufs{first, second} {}
+    IndexBufferPtr first() const { return m_bufs[0]; }
+    IndexBufferPtr second() const { return m_bufs[1]; }
+    int count() { return m_bufs[1] ? 2 : 1; }
+
+    std::string to_string() const {
+        return fmt::format(
+            "IndexBufferGroup {} m_bufs = [{}:{}, {}] next_group={} wait_for_leaders={}",
+            reinterpret_cast< void* >(const_cast< IndexBufferGroup* >(this)), voidptr_cast(m_bufs[0].get()),
+            m_bufs[0]->blkid().to_integer(),
+            m_bufs[1] ? fmt::format("{}:{}", voidptr_cast(m_bufs[1].get()), m_bufs[1]->blkid().to_integer()) : "null",
+            voidptr_cast(m_next_group.get()), m_wait_for_leaders.get());
+    }
 };
 
 class BtreeNode;
@@ -87,7 +115,7 @@ typedef boost::intrusive_ptr< BtreeNode > BtreeNodePtr;
 
 struct IndexBtreeNode {
 public:
-    IndexBufferPtr m_idx_buf;    // Buffer backing this node
+    IndexBufferPtr m_idx_buf;     // Buffer backing this node
     cp_id_t m_last_mod_cp_id{-1}; // This node is previously modified by the cp id;
 
 public:

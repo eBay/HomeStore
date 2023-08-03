@@ -24,6 +24,8 @@
 #include "device/virtual_dev.hpp"
 #include "common/resource_mgr.hpp"
 
+SISL_LOGGING_DECL(wbcache)
+
 namespace homestore {
 
 IndexWBCache& wb_cache() { return index_service().wb_cache(); }
@@ -32,7 +34,7 @@ IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, const std:
                            uint32_t node_size) :
         m_vdev{vdev},
         m_cache{
-            evictor, 100000, node_size,
+            evictor, 1000000, node_size,
             [](const BtreeNodePtr& node) -> BlkId { return IndexBtreeNode::convert(node.get())->m_idx_buf->m_blkid; },
             [](const sisl::CacheRecord& rec) -> bool {
                 const auto& hnode = (sisl::SingleEntryHashNode< BtreeNodePtr >&)rec;
@@ -41,7 +43,7 @@ IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, const std:
         m_node_size{node_size} {
     start_flush_threads();
     for (size_t i{0}; i < MAX_CP_COUNT; ++i) {
-        m_dirty_list[i] = std::make_unique< sisl::ThreadVector< IndexBufferPtr > >();
+        m_dirty_list[i] = std::make_unique< sisl::ThreadVector< IndexBufferGroupPtr > >();
         m_free_blkid_list[i] = std::make_unique< sisl::ThreadVector< BlkId > >();
     }
 }
@@ -87,6 +89,7 @@ BtreeNodePtr IndexWBCache::alloc_buf(node_initializer_t&& node_initializer) {
     // Alloc buffer and initialize the node
     auto idx_buf = std::make_shared< IndexBuffer >(blkid, m_node_size, m_vdev->align_size());
     auto node = node_initializer(idx_buf);
+    LOGTRACEMOD(wbcache, "idx_buf {} blkid {}", static_cast< void* >(idx_buf.get()), blkid.to_integer());
 
     // Add the node to the cache
     bool done = m_cache.insert(node);
@@ -99,10 +102,18 @@ void IndexWBCache::realloc_buf(const IndexBufferPtr& buf) {
     m_vdev->commit_blk(buf->m_blkid);
 }
 
-void IndexWBCache::write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* cp_ctx) {
-    m_cache.upsert(node);
-    r_cast< IndexCPContext* >(cp_ctx)->add_to_dirty_list(buf);
-    resource_mgr().inc_dirty_buf_size(m_node_size);
+IndexBufferPtr IndexWBCache::copy_buffer(const IndexBufferPtr& cur_buf) const {
+    auto new_buf = std::make_shared< IndexBuffer >(cur_buf->m_blkid, m_node_size, m_vdev->align_size());
+    std::memcpy(new_buf->raw_buffer(), cur_buf->raw_buffer(), m_node_size);
+    LOGTRACEMOD(wbcache, "new_buf {} cur_buf {} cur_buf_blkid {}", static_cast< void* >(new_buf.get()),
+                static_cast< void* >(cur_buf.get()), cur_buf->m_blkid.to_integer());
+    return new_buf;
+}
+
+void IndexWBCache::write_buf_group(const IndexBufferGroupPtr& buf_group, CPContext* cp_ctx) {
+    LOGTRACEMOD(wbcache, "buf_group {}", buf_group->to_string());
+    r_cast< IndexCPContext* >(cp_ctx)->add_to_dirty_list(buf_group);
+    resource_mgr().inc_dirty_buf_size(buf_group->count() * m_node_size);
 }
 
 void IndexWBCache::read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) {
@@ -129,35 +140,53 @@ retry:
     }
 }
 
-bool IndexWBCache::create_chain(IndexBufferPtr& second, IndexBufferPtr& third) {
-    bool copied{false};
-    if (second->m_next_buffer != nullptr) {
-        HS_DBG_ASSERT_EQ((void*)second->m_next_buffer.get(), (void*)third.get(),
-                         "Overwriting second (child node) with different third (parent node)");
-        HS_DBG_ASSERT_EQ((void*)second->m_next_buffer->m_next_buffer.get(), (void*)nullptr,
-                         "Third node buffer should be the last in the list");
+std::tuple< bool, bool > IndexWBCache::create_chain(IndexBufferPtr& second, IndexBufferPtr& third, CPContext* cp_ctx) {
+    bool second_copied{false}, third_copied{false};
+    IndexBufferGroupPtr chain_end = second->m_buf_group;
 
-        // Second buf has already a next buffer, which means same node is in-place modified with structure change,
-        // we need to copy both this and next buffer.
+    if (!second->is_clean()) {
         auto new_second = copy_buffer(second);
-        auto new_third = copy_buffer(third);
-
-        third->m_next_buffer = new_second;
-        new_second->m_wait_for_leaders.increment(1);
-
+        LOGTRACEMOD(wbcache, "copied blkid {} second {} new_second {}", second->m_blkid.to_integer(),
+                    static_cast< void* >(second.get()), static_cast< void* >(new_second.get()));
         second = new_second;
-        third = new_third;
-        copied = true;
+        second_copied = true;
     }
-    second->m_next_buffer = third;
-    third->m_wait_for_leaders.increment(1);
+    if (!third->is_clean()) {
+        auto new_third = copy_buffer(third);
+        LOGTRACEMOD(wbcache, "copied blkid {} third {} new_third {}", third->m_blkid.to_integer(),
+                    static_cast< void* >(third.get()), static_cast< void* >(new_third.get()));
+        third = new_third;
+        third_copied = true;
+    }
 
-    return copied;
+    // TODO put left child and parent in same indexbuffergroup.
+    auto second_buf_group = std::make_shared< IndexBufferGroup >(second, nullptr);
+    second->m_buf_group = second_buf_group;
+
+    auto third_buf_group = std::make_shared< IndexBufferGroup >(third, nullptr);
+    third->m_buf_group = third_buf_group;
+
+    prepend_to_chain(second_buf_group, third_buf_group);
+
+    if (chain_end) {
+        while (chain_end->m_next_group != nullptr) {
+            chain_end = chain_end->m_next_group;
+        }
+
+        chain_end->m_next_group = second_buf_group;
+        second_buf_group->m_wait_for_leaders.increment(1);
+    }
+
+    return {second_copied, third_copied};
 }
 
-void IndexWBCache::prepend_to_chain(const IndexBufferPtr& first, const IndexBufferPtr& second) {
-    first->m_next_buffer = second;
+void IndexWBCache::prepend_to_chain(const IndexBufferGroupPtr& first, const IndexBufferGroupPtr& second) {
+    // first is the right child. create a new group with only the right child and
+    // depend on the parent-left child group.
+    assert(first->m_next_group == nullptr);
+    first->m_next_group = second;
     second->m_wait_for_leaders.increment(1);
+    LOGTRACEMOD(wbcache, "first {} second {}", first->to_string(), second->to_string());
 }
 
 void IndexWBCache::free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
@@ -172,6 +201,7 @@ void IndexWBCache::free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
 //////////////////// CP Related API section /////////////////////////////////
 folly::Future< bool > IndexWBCache::async_cp_flush(CPContext* context) {
     IndexCPContext* cp_ctx = s_cast< IndexCPContext* >(context);
+    LOGTRACEMOD(wbcache, "cp_ctx {}", cp_ctx->to_string());
     if (!cp_ctx->any_dirty_buffers()) {
         CP_PERIODIC_LOG(DEBUG, cp_ctx->id(), "Btree does not have any dirty buffers to flush");
         return folly::makeFuture< bool >(true); // nothing to flush
@@ -181,12 +211,12 @@ folly::Future< bool > IndexWBCache::async_cp_flush(CPContext* context) {
 
     for (auto& fiber : m_cp_flush_fibers) {
         iomanager.run_on_forget(fiber, [this, cp_ctx]() {
-            static thread_local std::vector< IndexBufferPtr > t_buf_list;
-            t_buf_list.clear();
-            get_next_bufs(cp_ctx, resource_mgr().get_dirty_buf_qd(), t_buf_list);
+            static thread_local std::vector< IndexBufferGroupPtr > t_buf_group_list;
+            t_buf_group_list.clear();
+            get_next_buf_groups(cp_ctx, resource_mgr().get_dirty_buf_qd(), t_buf_group_list);
 
-            for (auto& buf : t_buf_list) {
-                do_flush_one_buf(cp_ctx, buf, true);
+            for (auto& buf_group : t_buf_group_list) {
+                do_flush_one_buf_group(cp_ctx, buf_group, true);
             }
             m_vdev->submit_batch();
         });
@@ -200,86 +230,103 @@ std::unique_ptr< CPContext > IndexWBCache::create_cp_context(cp_id_t cp_id) {
                                               m_free_blkid_list[cp_id_slot].get());
 }
 
-IndexBufferPtr IndexWBCache::copy_buffer(const IndexBufferPtr& cur_buf) const {
-    auto new_buf = std::make_shared< IndexBuffer >(cur_buf->m_blkid, m_node_size, m_vdev->align_size());
-    std::memcpy(new_buf->raw_buffer(), cur_buf->raw_buffer(), m_node_size);
-    return new_buf;
-}
-
-void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, const IndexBufferPtr& buf, bool part_of_batch) {
+void IndexWBCache::do_flush_one_buf_group(IndexCPContext* cp_ctx, const IndexBufferGroupPtr& buf_group,
+                                          bool part_of_batch) {
+    LOGTRACEMOD(wbcache, "buf_group {}", buf_group->to_string());
+    auto buf = buf_group->first();
     buf->m_buf_state = index_buf_state_t::FLUSHING;
     m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid, part_of_batch)
-        .thenValue([pbuf = buf.get(), cp_ctx](auto) {
+        .thenValue([this, buf_group, part_of_batch, cp_ctx](auto) {
+            if (!buf_group->second()) { return folly::makeFuture< bool >(true); }
+
+            auto buf = buf_group->second();
+            buf->m_buf_state = index_buf_state_t::FLUSHING;
+            LOGTRACEMOD(wbcache, "write second {}", buf_group->to_string());
+            return m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid,
+                                       part_of_batch);
+        })
+        .thenValue([this, buf_group, cp_ctx](auto) {
+            LOGTRACEMOD(wbcache, "done {}", buf_group->to_string());
             auto& pthis = s_cast< IndexWBCache& >(wb_cache()); // Avoiding more than 16 bytes capture
-            pthis.process_write_completion(cp_ctx, pbuf);
+            pthis.process_write_completion(cp_ctx, buf_group);
         });
 
     if (!part_of_batch) { m_vdev->submit_batch(); }
 }
 
-void IndexWBCache::process_write_completion(IndexCPContext* cp_ctx, IndexBuffer* pbuf) {
-    resource_mgr().dec_dirty_buf_size(m_node_size);
-    auto [next_buf, has_more] = on_buf_flush_done(cp_ctx, pbuf);
-    if (next_buf) {
-        do_flush_one_buf(cp_ctx, next_buf, false);
+void IndexWBCache::process_write_completion(IndexCPContext* cp_ctx, IndexBufferGroupPtr buf_group) {
+    LOGTRACEMOD(wbcache, "buf_group {}", buf_group->to_string());
+    resource_mgr().dec_dirty_buf_size(buf_group->count() * m_node_size);
+    auto [next_buf_group, has_more] = on_buf_group_flush_done(cp_ctx, buf_group);
+    if (next_buf_group) {
+        do_flush_one_buf_group(cp_ctx, next_buf_group, false);
     } else if (!has_more) {
         // We are done flushing the buffers, lets free the btree blocks and then flush the bitmap
         free_btree_blks_and_flush(cp_ctx);
     }
 }
 
-std::pair< IndexBufferPtr, bool > IndexWBCache::on_buf_flush_done(IndexCPContext* cp_ctx, IndexBuffer* buf) {
+std::pair< IndexBufferGroupPtr, bool > IndexWBCache::on_buf_group_flush_done(IndexCPContext* cp_ctx,
+                                                                             IndexBufferGroupPtr pbuf_group) {
     if (m_cp_flush_fibers.size() > 1) {
         std::unique_lock lg(m_flush_mtx);
-        return on_buf_flush_done_internal(cp_ctx, buf);
+        return on_buf_group_flush_done_internal(cp_ctx, pbuf_group);
     } else {
-        return on_buf_flush_done_internal(cp_ctx, buf);
+        return on_buf_group_flush_done_internal(cp_ctx, pbuf_group);
     }
 }
 
-std::pair< IndexBufferPtr, bool > IndexWBCache::on_buf_flush_done_internal(IndexCPContext* cp_ctx, IndexBuffer* buf) {
-    static thread_local std::vector< IndexBufferPtr > t_buf_list;
-    t_buf_list.clear();
-
-    buf->m_buf_state = index_buf_state_t::CLEAN;
+std::pair< IndexBufferGroupPtr, bool > IndexWBCache::on_buf_group_flush_done_internal(IndexCPContext* cp_ctx,
+                                                                                      IndexBufferGroupPtr buf_group) {
+    static thread_local std::vector< IndexBufferGroupPtr > t_buf_group_list;
+    buf_group->first()->m_buf_state = index_buf_state_t::CLEAN;
+    if (buf_group->second()) { buf_group->second()->m_buf_state = index_buf_state_t::CLEAN; }
+    t_buf_group_list.clear();
 
     if (cp_ctx->m_dirty_buf_count.decrement_testz()) {
         return std::make_pair(nullptr, false);
     } else {
-        get_next_bufs_internal(cp_ctx, 1u, buf, t_buf_list);
-        return std::make_pair((t_buf_list.size() ? t_buf_list[0] : nullptr), true);
+        get_next_buf_groups_internal(cp_ctx, 1u, buf_group, t_buf_group_list);
+        return std::make_pair((t_buf_group_list.size() ? t_buf_group_list[0] : nullptr), true);
     }
 }
 
-void IndexWBCache::get_next_bufs(IndexCPContext* cp_ctx, uint32_t max_count, std::vector< IndexBufferPtr >& bufs) {
+void IndexWBCache::get_next_buf_groups(IndexCPContext* cp_ctx, uint32_t max_count,
+                                       std::vector< IndexBufferGroupPtr >& buf_groups) {
     if (m_cp_flush_fibers.size() > 1) {
         std::unique_lock lg(m_flush_mtx);
-        get_next_bufs_internal(cp_ctx, max_count, nullptr, bufs);
+        get_next_buf_groups_internal(cp_ctx, max_count, nullptr, buf_groups);
     } else {
-        get_next_bufs_internal(cp_ctx, max_count, nullptr, bufs);
+        get_next_buf_groups_internal(cp_ctx, max_count, nullptr, buf_groups);
     }
 }
 
-void IndexWBCache::get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_count, IndexBuffer* prev_flushed_buf,
-                                          std::vector< IndexBufferPtr >& bufs) {
+void IndexWBCache::get_next_buf_groups_internal(IndexCPContext* cp_ctx, uint32_t max_count,
+                                                IndexBufferGroupPtr prev_flushed_buf_group,
+                                                std::vector< IndexBufferGroupPtr >& buf_groups) {
     uint32_t count{0};
 
     // First attempt to execute any follower buffer flush
-    if (prev_flushed_buf) {
-        auto& next_buffer = prev_flushed_buf->m_next_buffer;
-        if (next_buffer && next_buffer->m_wait_for_leaders.decrement_testz()) {
-            bufs.emplace_back(next_buffer);
-            ++count;
+    if (prev_flushed_buf_group) {
+        auto& next_group = prev_flushed_buf_group->m_next_group;
+        if (next_group) {
+            if (next_group->m_wait_for_leaders.decrement_testz()) {
+                LOGTRACEMOD(wbcache, "added prev_flushed_buf_group {} next_buf {}",
+                            static_cast< void* >(prev_flushed_buf_group.get()), static_cast< void* >(next_group.get()));
+
+                buf_groups.emplace_back(next_group);
+                ++count;
+            }
         }
     }
 
     // If we still have room to push the next buffer, take it from the main list
     while (count < max_count) {
-        IndexBufferPtr* ppbuf = cp_ctx->next_dirty();
+        IndexBufferGroupPtr* ppbuf = cp_ctx->next_dirty();
         if (ppbuf == nullptr) { break; } // End of list
-        IndexBufferPtr buf = *ppbuf;
-        if (buf->m_wait_for_leaders.testz()) {
-            bufs.emplace_back(std::move(buf));
+        IndexBufferGroupPtr group = *ppbuf;
+        if (group->m_wait_for_leaders.testz()) {
+            buf_groups.emplace_back(std::move(group));
             ++count;
         } else {
             // There is some leader buffer still flushing, once done its completion will flush this buffer
@@ -295,6 +342,7 @@ void IndexWBCache::free_btree_blks_and_flush(IndexCPContext* cp_ctx) {
 
     // Pick a CP Manager blocking IO fiber to execute the cp flush of vdev
     iomanager.run_on_forget(hs()->cp_mgr().pick_blocking_io_fiber(), [this, cp_ctx]() {
+        LOGTRACEMOD(wbcache, "Initiating CP flush");
         m_vdev->cp_flush(); // This is a blocking io call
         cp_ctx->complete(true);
     });

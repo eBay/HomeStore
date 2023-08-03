@@ -22,6 +22,8 @@
 
 #include "checkpoint/cp.hpp"
 
+SISL_LOGGING_DECL(wbcache)
+
 namespace homestore {
 struct flush_buffer_iterator {
     sisl::thread_vector_iterator dirty_buf_list_it;
@@ -32,7 +34,7 @@ struct IndexCPContext : public CPContext {
 public:
     std::atomic< uint64_t > m_num_nodes_added{0};
     std::atomic< uint64_t > m_num_nodes_removed{0};
-    sisl::ThreadVector< IndexBufferPtr >* m_dirty_buf_list{nullptr};
+    sisl::ThreadVector< IndexBufferGroupPtr >* m_dirty_buf_group_list{nullptr};
     sisl::ThreadVector< BlkId >* m_free_node_blkid_list{nullptr};
     sisl::atomic_counter< int64_t > m_dirty_buf_count{0};
 
@@ -40,32 +42,45 @@ public:
     flush_buffer_iterator m_buf_it;
 
 public:
-    IndexCPContext(cp_id_t cp_id, sisl::ThreadVector< IndexBufferPtr >* dirty_list,
+    IndexCPContext(cp_id_t cp_id, sisl::ThreadVector< IndexBufferGroupPtr >* dirty_list,
                    sisl::ThreadVector< BlkId >* free_blkid_list) :
-            CPContext(cp_id), m_dirty_buf_list{dirty_list}, m_free_node_blkid_list{free_blkid_list} {}
+            CPContext(cp_id), m_dirty_buf_group_list{dirty_list}, m_free_node_blkid_list{free_blkid_list} {}
 
     virtual ~IndexCPContext() {
-        m_dirty_buf_list->clear();
+        m_dirty_buf_group_list->clear();
         m_free_node_blkid_list->clear();
     }
 
     void prepare_flush_iteration() {
-        m_buf_it.dirty_buf_list_it = m_dirty_buf_list->begin(true /* latest */);
+        m_buf_it.dirty_buf_list_it = m_dirty_buf_group_list->begin(true /* latest */);
         m_buf_it.free_node_list_it = m_free_node_blkid_list->begin(true /* latest */);
     }
 
-    void add_to_dirty_list(const IndexBufferPtr& buf) {
-        buf->m_buf_state = index_buf_state_t::DIRTY;
-        m_dirty_buf_list->push_back(buf);
+    void add_to_dirty_list(const IndexBufferGroupPtr& buf_group) {
+        if (buf_group->second() != nullptr) {
+            buf_group->second()->m_buf_state = index_buf_state_t::DIRTY;
+        }
+        assert(buf_group->first());
+        buf_group->first()->m_buf_state = index_buf_state_t::DIRTY;
+        m_dirty_buf_group_list->push_back(buf_group);
         m_dirty_buf_count.increment(1);
+        LOGTRACEMOD(wbcache, "{}", buf_group->to_string());
     }
 
     void add_to_free_node_list(BlkId blkid) { m_free_node_blkid_list->push_back(blkid); }
 
     bool any_dirty_buffers() const { return !m_dirty_buf_count.testz(); }
 
-    IndexBufferPtr* next_dirty() { return m_dirty_buf_list->next(m_buf_it.dirty_buf_list_it); }
+    IndexBufferGroupPtr* next_dirty() { return m_dirty_buf_group_list->next(m_buf_it.dirty_buf_list_it); }
     BlkId* next_blkid() { return m_free_node_blkid_list->next(m_buf_it.free_node_list_it); }
+    std::string to_string() const {
+        std::string str{
+            fmt::format("IndexCPContext cpid={} dirty_buf_count={} dirty_buf_list_size={} blkid_list_size={}", id(),
+                        m_dirty_buf_count.get(), m_dirty_buf_group_list->size(), m_free_node_blkid_list->size())};
+
+        // TODO dump all index buffers.
+        return str;
+    }
 };
 
 class IndexWBCache;

@@ -41,11 +41,6 @@ public:
     /// @param buf Buffer to reallocate
     virtual void realloc_buf(const IndexBufferPtr& buf) = 0;
 
-    /// @brief Write buffer
-    /// @param buf
-    /// @param context
-    virtual void write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* context) = 0;
-
     virtual void read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) = 0;
 
     /// @brief Start a chain of related btree buffers. Typically a chain is creating from second and third pairs and
@@ -56,12 +51,12 @@ public:
     /// @param third Thrid btree buffer in the chain. It will be updated to copy of third buffer if buffer already
     /// has dependencies.
     /// @return Returns if the buffer had to be copied
-    virtual bool create_chain(IndexBufferPtr& second, IndexBufferPtr& third) = 0;
+    virtual std::tuple< bool, bool > create_chain(IndexBufferPtr& second, IndexBufferPtr& third, CPContext* cp_ctx) = 0;
 
     /// @brief Prepend to the chain that was already created with second
     /// @param first
     /// @param second
-    virtual void prepend_to_chain(const IndexBufferPtr& first, const IndexBufferPtr& second) = 0;
+    virtual void prepend_to_chain(const IndexBufferGroupPtr& first, const IndexBufferGroupPtr& second) = 0;
 
     /// @brief Free the buffer allocated and remove it from wb cache
     /// @param buf

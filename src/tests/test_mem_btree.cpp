@@ -18,6 +18,7 @@
 #include <memory>
 #include <gtest/gtest.h>
 
+#include <iomgr/io_environment.hpp>
 #include <sisl/options/options.h>
 #include <sisl/logging/logging.h>
 #include <sisl/utility/enum.hpp>
@@ -28,7 +29,7 @@
 
 static constexpr uint32_t g_node_size{4096};
 using namespace homestore;
-SISL_LOGGING_INIT(btree)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 SISL_OPTIONS_ENABLE(logging, test_mem_btree)
 SISL_OPTION_GROUP(test_mem_btree,
@@ -274,6 +275,7 @@ TYPED_TEST(BtreeTest, SequentialInsert) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
     LOGINFO("Step 2: Query {} entries and validate with pagination of 75 entries", entries_iter1);
+    this->print();
     this->query_validate(0, entries_iter1, 75);
 
     // Reverse sequential insert

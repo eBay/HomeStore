@@ -19,6 +19,7 @@
 #include <sisl/logging/logging.h>
 #include "btree_node.hpp"
 #include <homestore/btree/btree_kv.hpp>
+#include "homestore/index/index_internal.hpp"
 
 SISL_LOGGING_DECL(btree)
 
@@ -510,6 +511,10 @@ public:
                            get_nth_key< K >(i, false).to_string(), val.to_string());
         }
         return str;
+    }
+
+    uint8_t* get_node_context() const {
+        return uintptr_cast(const_cast< VariableNode* >(this)) + sizeof(VariableNode< K, V >);
     }
 
     uint8_t* get_node_context() override { return uintptr_cast(this) + sizeof(VariableNode< K, V >); }
