@@ -19,6 +19,9 @@
 namespace homestore {
 template < typename K, typename V >
 class MemBtree : public Btree< K, V > {
+private:
+    std::vector< std::shared_ptr< uint8_t[] > > node_buf_ptr_vec;
+
 public:
     MemBtree(const BtreeConfig& cfg) : Btree< K, V >(cfg) {
         BT_LOG(INFO, "New {} being created: Node size {}", btree_store_type(), cfg.node_size());
@@ -33,8 +36,10 @@ public:
 
 private:
     BtreeNodePtr alloc_node(bool is_leaf) override {
-        uint8_t* node_buf = new uint8_t[this->m_bt_cfg.node_size()];
-        auto new_node = this->init_node(node_buf, 0u, bnodeid_t{0}, true, is_leaf);
+        std::shared_ptr< uint8_t[] > ptr(new uint8_t[this->m_bt_cfg.node_size()]);
+        node_buf_ptr_vec.emplace_back(ptr);
+
+        auto new_node = this->init_node(ptr.get(), 0u, bnodeid_t{0}, true, is_leaf);
         new_node->set_node_id(bnodeid_t{r_cast< std::uintptr_t >(new_node)});
         new_node->m_refcount.increment();
         return BtreeNodePtr{new_node};
@@ -68,6 +73,8 @@ private:
         this->write_node(parent_node, context);
         return btree_status_t::success;
     }
+
+    void update_new_root_info(bnodeid_t root_node, uint64_t version) override {}
 
 #if 0
     static void ref_node(MemBtreeNode* bn) {

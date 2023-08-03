@@ -25,6 +25,8 @@
 #include "checkpoint/cp.hpp"
 #include "index/wb_cache.hpp"
 
+SISL_LOGGING_DECL(wbcache)
+
 namespace homestore {
 
 template < typename K, typename V >
@@ -35,7 +37,7 @@ private:
 public:
     IndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, const BtreeConfig& cfg,
                on_kv_read_t read_cb = nullptr, on_kv_update_t update_cb = nullptr, on_kv_remove_t remove_cb = nullptr) :
-        Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)}, m_sb{"index"} {
+            Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)}, m_sb{"index"} {
         m_sb.create(sizeof(index_table_sb));
         m_sb->uuid = uuid;
         m_sb->parent_uuid = parent_uuid;
@@ -55,9 +57,7 @@ public:
     btree_status_t init() {
         auto cp = hs()->cp_mgr().cp_guard();
         auto ret = Btree< K, V >::init((void*)cp->context(cp_consumer_t::INDEX_SVC));
-        m_sb->root_node = Btree< K, V >::root_node_id();
-        m_sb->link_version = Btree< K, V >::root_link_version();
-        m_sb.write();
+        update_new_root_info(Btree< K, V >::root_node_id(), Btree< K, V >::root_link_version());
         return ret;
     }
 
@@ -66,6 +66,13 @@ public:
     superblk< index_table_sb >& mutable_super_blk() { return m_sb; }
     const superblk< index_table_sb >& mutable_super_blk() const { return m_sb; }
     std::string btree_store_type() const override { return "INDEX_BTREE"; }
+
+    void update_new_root_info(bnodeid_t root_node, uint64_t version) override {
+        m_sb->root_node = root_node;
+        m_sb->link_version = version;
+        m_sb.write();
+        LOGINFO("Updated index superblk root bnode_id {} version {}", root_node, version);
+    }
 
     template < typename ReqT >
     btree_status_t put(ReqT& put_req) {
@@ -105,32 +112,33 @@ protected:
             // Need to put it in wb cache
             wb_cache().write_buf(node, idx_node->m_idx_buf, cp_ctx);
             idx_node->m_last_mod_cp_id = cp_ctx->id();
+            LOGTRACEMOD(wbcache, "{}", idx_node->m_idx_buf->to_string());
         }
         node->set_checksum(this->m_bt_cfg);
         return btree_status_t::success;
     }
 
     btree_status_t transact_write_nodes(const folly::small_vector< BtreeNodePtr, 3 >& new_nodes,
-                                        const BtreeNodePtr& child_node, const BtreeNodePtr& parent_node,
+                                        const BtreeNodePtr& left_child_node, const BtreeNodePtr& parent_node,
                                         void* context) override {
         CPContext* cp_ctx = r_cast< CPContext* >(context);
-        auto child_idx_node = IndexBtreeNode::convert(child_node.get());
+        auto left_child_idx_node = IndexBtreeNode::convert(left_child_node.get());
         auto parent_idx_node = IndexBtreeNode::convert(parent_node.get());
-        auto& child_buf = child_idx_node->m_idx_buf;
+        auto& left_child_buf = left_child_idx_node->m_idx_buf;
         auto& parent_buf = parent_idx_node->m_idx_buf;
 
-        // TODO
-        // BT_DBG_ASSERT_NE((void*)child_buf.m_cur_txn, nullptr,
-        //                  "transact_write_nodes called without prepare transaction");
+        LOGTRACEMOD(wbcache, "left {} parent {} ", left_child_buf->to_string(), parent_buf->to_string());
 
         // Write new nodes in the list as standalone outside transacted pairs.
-        for (const auto& node : new_nodes) {
-            write_node_impl(node, context);
-            auto n = IndexBtreeNode::convert(node.get());
-            wb_cache().prepend_to_chain(n->m_idx_buf, child_buf);
+        // Write the new right child nodes, left node and parent in order.
+        for (const auto& right_child_node : new_nodes) {
+            auto right_child = IndexBtreeNode::convert(right_child_node.get());
+            write_node_impl(right_child_node, context);
+            wb_cache().prepend_to_chain(right_child->m_idx_buf, left_child_buf);
+            LOGTRACEMOD(wbcache, "right {} left {} ", right_child->m_idx_buf->to_string(), left_child_buf->to_string());
         }
 
-        write_node_impl(child_node, context);
+        write_node_impl(left_child_node, context);
         write_node_impl(parent_node, context);
 
         return btree_status_t::success;
@@ -152,6 +160,9 @@ protected:
 
     btree_status_t refresh_node(const BtreeNodePtr& node, bool for_read_modify_write, void* context) const override {
         CPContext* cp_ctx = (CPContext*)context;
+        if (cp_ctx == nullptr) {
+            return btree_status_t::success;
+        }
 
         auto idx_node = IndexBtreeNode::convert(node.get());
         if (!for_read_modify_write) {
@@ -164,11 +175,11 @@ protected:
         }
 
         // TODO
-        //        if (cp_ctx->is_recovery_cp()) {
-        // If this refresh is part of cp taken during recovery, we need to realloc all nodes that are being
-        // modified, which sets the btree blkid
-        // realloc_node(node);
-        //        }
+        // if (cp_ctx->is_recovery_cp()) {
+        //     // If this refresh is part of cp taken during recovery, we need to realloc all nodes that are being
+        //     // modified, which sets the btree blkid
+        //     realloc_node(node);
+        // }
 
         // If the backing buffer is already in a clean state, we don't need to make a copy of it
         if (idx_node->m_idx_buf->is_clean()) { return btree_status_t::success; }
@@ -176,7 +187,12 @@ protected:
         // Make a new btree buffer and copy the contents and swap it to make it the current node's buffer. The
         // buffer prior to this copy, would have been written and already added into the dirty buffer list.
         idx_node->m_idx_buf = wb_cache().copy_buffer(idx_node->m_idx_buf);
+        idx_node->m_last_mod_cp_id = -1;
+
         node->m_phys_node_buf = idx_node->m_idx_buf->raw_buffer();
+        node->set_checksum(this->m_bt_cfg);
+
+        LOGTRACEMOD(wbcache, "buf {} ", idx_node->m_idx_buf->to_string());
 
 #ifndef NO_CHECKSUM
         if (!node->verify_node(this->m_bt_cfg)) {
@@ -204,16 +220,25 @@ protected:
 
         auto& child_buf = child_idx_node->m_idx_buf;
         auto& parent_buf = parent_idx_node->m_idx_buf;
-        BT_DBG_ASSERT(child_buf->is_clean(), "Child buffer is not clean, refresh node was not called before?");
-        BT_DBG_ASSERT(parent_buf->is_clean(), "Parent buffer is not clean, refresh node was not called before?");
 
-        wb_cache().create_chain(child_buf, parent_buf);
+        auto [child_copied, parent_copied] = wb_cache().create_chain(child_buf, parent_buf, cp_ctx);
+        if (child_copied) {
+            child_node->m_phys_node_buf = child_buf->raw_buffer();
+            child_idx_node->m_last_mod_cp_id = -1;
+        }
+        if (parent_copied) {
+            parent_node->m_phys_node_buf = parent_buf->raw_buffer();
+            parent_idx_node->m_last_mod_cp_id = -1;
+        }
+
+        LOGTRACEMOD(wbcache, "child {} parent {} ", child_buf->to_string(), parent_buf->to_string());
         return btree_status_t::success;
     }
 
     void free_node_impl(const BtreeNodePtr& node, void* context) override {
         auto n = IndexBtreeNode::convert(node.get());
         wb_cache().free_buf(n->m_idx_buf, r_cast< CPContext* >(context));
+        n->~IndexBtreeNode();
     }
 };
 

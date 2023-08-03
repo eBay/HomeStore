@@ -155,10 +155,10 @@ retry:
             if (child_node->is_leaf()) {
                 // We get the trimmed range only for leaf because this is where we will be removing keys. In interior
                 // nodes, keys are always propogated from the lower nodes.
-                bool is_inp_key_lesser;
-                req.trim_working_range(
-                    my_node->min_of(s_cast< const K& >(req.input_range().end_key()), curr_idx, is_inp_key_lesser),
-                    is_inp_key_lesser ? req.input_range().is_end_inclusive() : true);
+                bool is_inp_key_lesser = false;
+                K end_key = my_node->min_of(s_cast< const K& >(req.input_range().end_key()), curr_idx, is_inp_key_lesser);
+                bool end_incl = is_inp_key_lesser ? req.input_range().is_end_inclusive() : true;
+                req.trim_working_range(std::move(end_key), end_incl);
 
                 BT_NODE_LOG(DEBUG, my_node, "Subrange:idx=[{}-{}],c={},working={}", start_idx, end_idx, curr_idx,
                             req.working_range().to_string());

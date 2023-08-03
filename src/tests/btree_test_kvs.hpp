@@ -185,7 +185,8 @@ public:
         assert(data == *idx_to_key(m_key));
     }
 
-    static uint32_t get_estimate_max_size() { return g_max_keysize; }
+    // Add 8 bytes for preamble.
+    static uint32_t get_estimate_max_size() { return g_max_keysize + 8; }
 
     int compare(const BtreeKey& o) const override {
         const TestVarLenKey& other = s_cast< const TestVarLenKey& >(o);

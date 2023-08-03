@@ -622,10 +622,8 @@ public:
 
     friend void intrusive_ptr_release(BtreeNode* node) {
         if (node->m_refcount.decrement_testz(1)) {
-            auto node_buffer = node->m_phys_node_buf;
             node->~BtreeNode();
             delete[] uintptr_cast(node);
-            delete[] node_buffer;
         }
     }
 };
