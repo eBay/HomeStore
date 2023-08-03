@@ -97,12 +97,14 @@ public:
     // bool verify_tree(bool update_debug_bm) const;
     virtual std::pair< btree_status_t, uint64_t > destroy_btree(void* context);
     nlohmann::json get_status(int log_level) const;
-    void print_tree() const;
+
+    void print_tree(const std::string& file = "") const;
     void print_tree_keys() const;
+
     nlohmann::json get_metrics_in_json(bool updated = true);
     bnodeid_t root_node_id() const;
     uint64_t root_link_version() const;
-    void set_root_node_info(const BtreeLinkInfo &info);
+    void set_root_node_info(const BtreeLinkInfo& info);
 
     // static void set_io_flip();
     // static void set_error_flip();
@@ -123,6 +125,7 @@ protected:
                                                 void* context) = 0;
 
     virtual std::string btree_store_type() const = 0;
+    virtual void update_new_root_info(bnodeid_t root_node, uint64_t version) = 0;
 
     /////////////////////////// Methods the application use case is expected to handle ///////////////////////////
 

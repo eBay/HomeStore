@@ -18,6 +18,7 @@
 #include <homestore/btree/btree_kv.hpp>
 #include "btree_node.hpp"
 #include "btree_internal.hpp"
+#include "homestore/index/index_internal.hpp"
 
 using namespace std;
 using namespace boost;
@@ -242,10 +243,10 @@ public:
     }*/
 
     std::string to_string(bool print_friendly = false) const override {
-        auto str = fmt::format("{}id={} nEntries={} {} next_node={} ",
+        auto str = fmt::format("{}id={} level={} nEntries={} {} next_node={} ",
                                (print_friendly ? "------------------------------------------------------------\n" : ""),
-                               this->node_id(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"),
-                               this->next_bnode());
+                               this->node_id(), this->level(), this->total_entries(),
+                               (this->is_leaf() ? "LEAF" : "INTERIOR"), this->next_bnode());
         if (!this->is_leaf() && (this->has_valid_edge())) {
             fmt::format_to(std::back_inserter(str), "edge_id={}.{}", this->edge_info().m_bnodeid,
                            this->edge_info().m_link_version);

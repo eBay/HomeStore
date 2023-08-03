@@ -56,7 +56,7 @@ public:
     /// @param third Thrid btree buffer in the chain. It will be updated to copy of third buffer if buffer already
     /// has dependencies.
     /// @return Returns if the buffer had to be copied
-    virtual bool create_chain(IndexBufferPtr& second, IndexBufferPtr& third) = 0;
+    virtual std::tuple< bool, bool > create_chain(IndexBufferPtr& second, IndexBufferPtr& third, CPContext* cp_ctx) = 0;
 
     /// @brief Prepend to the chain that was already created with second
     /// @param first
