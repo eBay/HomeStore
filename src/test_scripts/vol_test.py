@@ -157,25 +157,6 @@ def del_create_same_vol_uuid_test():
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("del_create_same_vol_uuid_test completed")
 
-def normal_unmap(num_secs="1500"):
-    print("normal unmap test started")
-    i = 1
-    while i < 5:
-        cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file_on_shutdown=0 --remove_file_on_start=1 --flip=1 --verify_type=2 --unmap_enable=1 --remove_file_on_shutdown=1 --delete_volume=1"
-        subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
-    
-        cmd_opts = "--gtest_filter=VolTest.recovery_io_test --run_time=800 --enable_crash_handler=1 --pre_init_verify=false --abort=0 --flip=1 --remove_file_on_shutdown=0 --verify_type=2"
-        subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, shell=True)
-        s = "normal unmap iteration" + repr(i) + "passed"
-        print(s)
-        i += 1
-
-    print("normal unmap test completed")
-
-## @test load
-#  @brief Test using load generator
-def load():
-    print("load test started")
 ## @test normal
 #  @brief Normal IO test
 def normal(num_secs="20000"):
