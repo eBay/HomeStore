@@ -27,7 +27,7 @@
 
 static constexpr uint32_t g_node_size{4096};
 static constexpr uint32_t g_max_keys{6000};
-static std::uniform_int_distribution< uint32_t > g_randkey_generator{0, g_max_keys};
+static std::uniform_int_distribution< uint32_t > g_randkey_generator{0, g_max_keys - 1};
 
 using namespace homestore;
 SISL_LOGGING_INIT(btree)
