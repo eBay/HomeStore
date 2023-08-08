@@ -176,8 +176,8 @@ HomeBlks::HomeBlks(const init_params& cfg) :
     m_recovery_stats = std::make_unique< HomeBlksRecoveryStats >();
     m_recovery_stats->start();
 
-    m_sobject =
-        sobject_mgr()->create_object("module", "HomeBlks", std::bind(&HomeBlks::get_status, this, std::placeholders::_1));
+    m_sobject = sobject_mgr()->create_object("module", "HomeBlks",
+                                             std::bind(&HomeBlks::get_status, this, std::placeholders::_1));
 
     if (HB_DYNAMIC_CONFIG(general_config->boot_safe_mode)) {
         LOGINFO("HomeBlks booting into safe_mode");
@@ -329,6 +329,14 @@ VolumePtr HomeBlks::create_volume(const vol_params& params) {
         return nullptr;
     }
     if (!m_rdy || is_shutdown()) { return nullptr; }
+
+    // if the same vol uuid already exists, return null to AM.
+    const auto vol_lookup = lookup_volume(params.uuid);
+    if (vol_lookup != nullptr) {
+        LOGERROR("Can't serve this create_volume: vol uuid: {} already exists, state: {}",
+                 boost::lexical_cast< std::string >(params.uuid), vol_lookup->get_state());
+        return nullptr;
+    }
 
     if (params.page_size != get_data_pagesz()) {
         LOGERROR("{} page size is not supported", params.page_size);
