@@ -86,6 +86,7 @@ public:
     uint8_t* m_phys_node_buf;
 
 public:
+   ~BtreeNode() = default;
     BtreeNode(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf) : m_phys_node_buf{node_buf} {
         if (init_buf) {
             new (node_buf) persistent_hdr_t{};
@@ -98,7 +99,6 @@ public:
         }
         m_trans_hdr.is_leaf_node = is_leaf;
     }
-    virtual ~BtreeNode() { ((persistent_hdr_t*)m_phys_node_buf)->~persistent_hdr_t(); }
 
     // Identify if a node is a leaf node or not, from raw buffer, by just reading persistent_hdr_t
     static bool identify_leaf_node(uint8_t* buf) { return (r_cast< persistent_hdr_t* >(buf))->leaf; }
@@ -619,8 +619,10 @@ public:
 
     friend void intrusive_ptr_release(BtreeNode* node) {
         if (node->m_refcount.decrement_testz(1)) {
+            auto node_buffer = node->m_phys_node_buf;
             node->~BtreeNode();
             delete[] uintptr_cast(node);
+            delete[] node_buffer;
         }
     }
 };
