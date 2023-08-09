@@ -29,7 +29,7 @@ using namespace homestore;
 
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-SISL_OPTIONS_ENABLE(logging, test_cp_mgr, test_common_setup)
+SISL_OPTIONS_ENABLE(logging, test_cp_mgr, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_cp_mgr)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
@@ -63,6 +63,7 @@ private:
 
     std::array< std::pair< uint64_t, uint64_t >, max_values > m_cur_values;
     std::atomic< uint64_t > m_next_val{0};
+    folly::Promise< bool > m_comp_promise;
 };
 
 class TestCPCallbacks : public CPCallbacks {
@@ -71,10 +72,10 @@ public:
         return std::make_unique< TestCPContext >(new_cp->id());
     }
 
-    void cp_flush(CP* cp, cp_flush_done_cb_t&& done_cb) override {
+    folly::Future< bool > cp_flush(CP* cp) override {
         auto ctx = s_cast< TestCPContext* >(cp->context(cp_consumer_t::HS_CLIENT));
         ctx->validate(cp->id());
-        done_cb(cp);
+        return folly::makeFuture< bool >(true);
     }
 
     void cp_cleanup(CP* cp) override {}
@@ -85,25 +86,24 @@ public:
 class TestCPMgr : public ::testing::Test {
 public:
     void SetUp() override {
-        test_common::HSTestHelper::start_homestore("test_cp", 85, 0, 0, 0, nullptr, false /* restart */);
+        test_common::HSTestHelper::start_homestore("test_cp", 85.0, 0, 0, 0, 0, nullptr, false /* restart */);
         hs()->cp_mgr().register_consumer(cp_consumer_t::HS_CLIENT, std::move(std::make_unique< TestCPCallbacks >()));
     }
     void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
 
     void simulate_io() {
-        iomanager.run_on(iomgr::thread_regex::least_busy_worker, [this](iomgr::io_thread_addr_t) {
+        iomanager.run_on_forget(iomgr::reactor_regex::least_busy_worker, [this]() {
             auto cur_cp = homestore::hs()->cp_mgr().cp_guard();
             r_cast< TestCPContext* >(cur_cp->context(cp_consumer_t::HS_CLIENT))->add();
         });
     }
 
     void rescheduled_io() {
-        iomanager.run_on(iomgr::thread_regex::least_busy_worker, [this](iomgr::io_thread_addr_t) {
+        iomanager.run_on_forget(iomgr::reactor_regex::least_busy_worker, [this]() {
             auto cur_cp = homestore::hs()->cp_mgr().cp_guard();
-            iomanager.run_on(iomgr::thread_regex::least_busy_worker,
-                             [moved_cp = std::move(cur_cp)](iomgr::io_thread_addr_t) mutable {
-                                 r_cast< TestCPContext* >(moved_cp->context(cp_consumer_t::HS_CLIENT))->add();
-                             });
+            iomanager.run_on_forget(iomgr::reactor_regex::least_busy_worker, [moved_cp = std::move(cur_cp)]() mutable {
+                r_cast< TestCPContext* >(moved_cp->context(cp_consumer_t::HS_CLIENT))->add();
+            });
         });
     }
 
@@ -115,24 +115,29 @@ public:
     void trigger_cp(bool wait) {
         static std::mutex mtx;
         static std::condition_variable cv;
-        static uint64_t cp_iteration{0};
+        static uint64_t this_flush_cp{0};
         static uint64_t last_flushed_cp{0};
 
-        uint64_t this_cp_iter = ++cp_iteration;
-        homestore::hs()->cp_mgr().trigger_cp_flush(
-            [&](bool success) {
-                ASSERT_EQ(success, true) << "CP Flush failed";
-                {
-                    std::unique_lock lg(mtx);
-                    last_flushed_cp = this_cp_iter;
-                }
-                cv.notify_all();
-            },
-            true /* force */);
+        {
+            std::unique_lock lg(mtx);
+            ++this_flush_cp;
+        }
+
+        auto fut = homestore::hs()->cp_mgr().trigger_cp_flush(true /* force */);
+
+        auto on_complete = [&](auto success) {
+            ASSERT_EQ(success, true) << "CP Flush failed";
+            {
+                std::unique_lock lg(mtx);
+                ASSERT_LT(last_flushed_cp, this_flush_cp) << "CP out_of_order completion";
+                ++last_flushed_cp;
+            }
+        };
 
         if (wait) {
-            std::unique_lock lg{mtx};
-            cv.wait(lg, [&]() { return (last_flushed_cp == this_cp_iter); });
+            on_complete(std::move(fut).get());
+        } else {
+            std::move(fut).thenValue(on_complete);
         }
     }
 };
@@ -171,7 +176,7 @@ TEST_F(TestCPMgr, cp_start_and_flush) {
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
     ::testing::InitGoogleTest(&parsed_argc, argv);
-    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_cp_mgr, test_common_setup);
+    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_cp_mgr, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_home_local_journal");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
 

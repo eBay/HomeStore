@@ -47,8 +47,9 @@ using namespace homestore;
 
 RCU_REGISTER_INIT
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
-SISL_OPTIONS_ENABLE(logging, test_meta_blk_mgr)
+SISL_OPTIONS_ENABLE(logging, test_meta_blk_mgr, iomgr, test_common_setup)
 
 SISL_LOGGING_DECL(test_meta_blk_mgr)
 
@@ -56,7 +57,6 @@ struct Param {
     uint64_t num_io;
     uint64_t run_time;
     uint32_t per_write;
-    uint32_t num_threads;
     uint32_t per_update;
     uint32_t per_remove;
     bool fixed_wrt_sz_enabled;
@@ -64,9 +64,7 @@ struct Param {
     uint32_t min_wrt_sz;
     uint32_t max_wrt_sz;
     bool always_do_overflow;
-    bool is_spdk;
     bool is_bitmap;
-    std::vector< std::string > dev_names;
 };
 
 static Param gp;
@@ -76,42 +74,6 @@ static constexpr uint32_t dma_address_boundary{512}; // Mininum size the dma/wri
 static constexpr uint64_t Ki{1024};
 static constexpr uint64_t Mi{Ki * Ki};
 static constexpr uint64_t Gi{Ki * Mi};
-
-static void start_homestore(const uint32_t ndevices, const uint64_t dev_size, const uint32_t nthreads) {
-    std::vector< dev_info > device_info;
-    if (gp.dev_names.size()) {
-        /* if user customized file/disk names */
-        for (uint32_t i{0}; i < gp.dev_names.size(); ++i) {
-            const std::filesystem::path fpath{gp.dev_names[i]};
-            device_info.emplace_back(gp.dev_names[i], HSDevType::Data);
-        }
-    } else {
-        /* create files */
-        LOGINFO("creating {} device files with each of size {} ", ndevices, in_bytes(dev_size));
-        for (uint32_t i{0}; i < ndevices; ++i) {
-            const std::filesystem::path fpath{META_FILE_PREFIX + std::to_string(i + 1)};
-            std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
-            std::filesystem::resize_file(fpath, dev_size); // set the file size
-            device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
-        }
-    }
-    LOGINFO("Starting iomgr with {} threads", nthreads);
-    ioenvironment.with_iomgr(nthreads, gp.is_spdk);
-
-    const uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
-    LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", in_bytes(app_mem_size));
-
-    hs_input_params params;
-    params.app_mem_size = app_mem_size;
-    params.data_devices = device_info;
-
-    if (SISL_OPTIONS.count("http_port")) {
-        test_common::set_fixed_http_port(SISL_OPTIONS["http_port"].as< uint32_t >());
-    } else {
-        test_common::set_random_http_port();
-    }
-    HomeStore::instance()->with_params(params).with_meta_service(85.0).init(true /* wait_for_init */);
-}
 
 struct sb_info_t {
     void* cookie;
@@ -144,7 +106,7 @@ public:
         return sec.count();
     }
 
-    [[nodiscard]] bool keep_running() {
+    bool keep_running() {
         HS_DBG_ASSERT(m_mbm->total_size() >= m_mbm->used_size(), "total size:{} less than used size: {}",
                       m_mbm->total_size(), m_mbm->used_size());
         const auto free_size = m_mbm->total_size() - m_mbm->used_size();
@@ -153,7 +115,7 @@ public:
         return true;
     }
 
-    [[nodiscard]] uint64_t io_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
+    uint64_t io_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
 
     void gen_rand_buf(uint8_t* s, const uint32_t len) {
         if (gp.is_bitmap) {
@@ -174,7 +136,7 @@ public:
     }
 
     // size between 512 ~ 8192, 512 aligned;
-    [[nodiscard]] uint32_t rand_size(const bool overflow, const bool aligned = true) {
+    uint32_t rand_size(const bool overflow, const bool aligned = true) {
         static thread_local std::random_device rd;
         static thread_local std::default_random_engine re{rd()};
         if (overflow) {
@@ -186,7 +148,7 @@ public:
         }
     }
 
-    [[nodiscard]] uint64_t total_size_written(const void* cookie) { return m_mbm->meta_size(cookie); }
+    uint64_t total_size_written(const void* cookie) { return m_mbm->meta_size(cookie); }
 
     void do_write_to_full() {
         static constexpr uint64_t blkstore_overhead = 4 * 1024ul * 1024ul; // 4MB
@@ -215,7 +177,7 @@ public:
         HS_REL_ASSERT_EQ(free_size, 0);
     }
 
-    [[nodiscard]] uint64_t do_sb_write(const bool overflow, size_t sz_to_wrt = 0) {
+    uint64_t do_sb_write(const bool overflow, size_t sz_to_wrt = 0) {
         ++m_wrt_cnt;
         if (!sz_to_wrt) { sz_to_wrt = rand_size(overflow); }
         int64_t ret_size_written{0};
@@ -401,7 +363,7 @@ public:
             iomanager.iobuf_free(buf);
         } else {
             if (unaligned_addr) {
-                delete[](buf - unaligned_shift);
+                delete[] (buf - unaligned_shift);
             } else {
                 delete[] buf;
             }
@@ -437,7 +399,7 @@ public:
 
         LOGINFO("compression ratio limit changed to: {}", HS_DYNAMIC_CONFIG(metablk.compress_ratio_limit));
 
-        [[maybe_unused]] const auto write_result = do_sb_write(true /* do_overflow */, 15 * Mi);
+        do_sb_write(true /* do_overflow */, 15 * Mi);
 
         HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
             s.metablk.compress_ratio_limit = 0; // this will disallow every compression attempt;
@@ -454,7 +416,7 @@ public:
         while (keep_running()) {
             switch (get_op()) {
             case meta_op_type::write: {
-                [[maybe_unused]] const auto write_result = do_sb_write(do_overflow());
+                do_sb_write(do_overflow());
             } break;
             case meta_op_type::remove:
                 do_sb_remove();
@@ -468,7 +430,7 @@ public:
         }
     }
 
-    [[nodiscard]] bool do_overflow() const {
+    bool do_overflow() const {
         static thread_local std::random_device rd;
         static thread_local std::default_random_engine re{rd()};
         if (gp.always_do_overflow) {
@@ -479,7 +441,7 @@ public:
         }
     }
 
-    [[nodiscard]] bool do_aligned() const {
+    bool do_aligned() const {
         static thread_local std::random_device rd;
         static thread_local std::default_random_engine re{rd()};
         std::uniform_int_distribution< uint8_t > aligned_rand{0, 1};
@@ -499,7 +461,7 @@ public:
 
     void scan_blks() { m_mbm->scan_meta_blks(); }
 
-    [[nodiscard]] meta_op_type get_op() {
+    meta_op_type get_op() {
         static thread_local bool keep_remove{false};
         // if we hit some high watermark, remove the sbs until hit some low watermark;
         if (100 * m_mbm->used_size() / m_mbm->total_size() > 80) {
@@ -528,53 +490,36 @@ public:
         }
     }
 
-    [[nodiscard]] uint64_t total_op_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
+    uint64_t total_op_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
 
-    [[nodiscard]] uint32_t write_ratio() const {
+    uint32_t write_ratio() const {
         if (m_wrt_cnt == 0) return 0;
         return (100 * m_wrt_cnt) / total_op_cnt();
     }
 
-    [[nodiscard]] uint32_t update_ratio() const {
+    uint32_t update_ratio() const {
         if (m_update_cnt == 0) return 0;
         return (100 * m_update_cnt) / total_op_cnt();
     }
 
-    [[nodiscard]] bool do_update() const {
+    bool do_update() const {
         if (update_ratio() < gp.per_update) { return true; }
         return false;
     }
 
-    [[nodiscard]] bool do_write() const {
+    bool do_write() const {
         if (write_ratio() < gp.per_write) { return true; }
         return false;
     }
 
-    void remove_files() {
-        /* no need to delete the user created file/disk */
-        if (gp.dev_names.size() == 0) {
-            auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
-            for (uint32_t i{0}; i < ndevices; ++i) {
-                const std::filesystem::path fpath{META_FILE_PREFIX + std::to_string(i + 1)};
-                if (std::filesystem::exists(fpath) && std::filesystem::is_regular_file(fpath)) {
-                    std::filesystem::remove(fpath);
-                }
-            }
-        }
-    }
-
     void shutdown() {
-        LOGINFO("shutting down homeblks");
-        remove_files();
-        HomeStore::instance()->shutdown();
         {
             std::unique_lock< std::mutex > lk(m_mtx);
             reset_counters();
             m_write_sbs.clear();
             m_cb_blks.clear();
         }
-        LOGINFO("stopping iomgr");
-        iomanager.stop();
+        test_common::HSTestHelper::shutdown_homestore();
     }
 
     void reset_counters() {
@@ -629,7 +574,7 @@ public:
 static constexpr uint64_t MIN_DRIVE_SIZE{2147483648}; // 2 GB
 
 TEST_F(VMetaBlkMgrTest, min_drive_size_test) {
-    start_homestore(1, MIN_DRIVE_SIZE, gp.num_threads);
+    test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", 85.0, 0, 0, 0, 0, nullptr);
     mtype = "Test_Min_Drive_Size";
     this->register_client();
 
@@ -641,8 +586,7 @@ TEST_F(VMetaBlkMgrTest, min_drive_size_test) {
 }
 
 TEST_F(VMetaBlkMgrTest, write_to_full_test) {
-    start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
-                    SISL_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
+    test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", 85.0, 0, 0, 0, 0, nullptr);
     mtype = "Test_Write_to_Full";
     reset_counters();
     m_start_time = Clock::now();
@@ -654,8 +598,7 @@ TEST_F(VMetaBlkMgrTest, write_to_full_test) {
 }
 
 TEST_F(VMetaBlkMgrTest, single_read_test) {
-    start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
-                    SISL_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
+    test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", 85.0, 0, 0, 0, 0, nullptr);
     mtype = "Test_Read";
     reset_counters();
     m_start_time = Clock::now();
@@ -671,8 +614,7 @@ TEST_F(VMetaBlkMgrTest, single_read_test) {
 // 1. randome write, update, remove;
 // 2. recovery test and verify callback context data matches;
 TEST_F(VMetaBlkMgrTest, random_load_test) {
-    start_homestore(SISL_OPTIONS["num_devs"].as< uint32_t >(),
-                    SISL_OPTIONS["dev_size_gb"].as< uint64_t >() * 1024 * 1024 * 1024, gp.num_threads);
+    test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", 85.0, 0, 0, 0, 0, nullptr);
     mtype = "Test_Rand_Load";
     reset_counters();
     m_start_time = Clock::now();
@@ -700,7 +642,7 @@ TEST_F(VMetaBlkMgrTest, random_load_test) {
 // 4. After recovery everything should be fine;
 //
 TEST_F(VMetaBlkMgrTest, RecoveryFromBadData) {
-    start_homestore(1, MIN_DRIVE_SIZE, gp.num_threads);
+    test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", 85.0, 0, 0, 0, 0, nullptr);
     mtype = "Test_Recovery_from_bad_data";
     reset_counters();
     m_start_time = Clock::now();
@@ -742,7 +684,7 @@ TEST_F(VMetaBlkMgrTest, RecoveryFromBadData) {
 #endif
 
 TEST_F(VMetaBlkMgrTest, CompressionBackoff) {
-    start_homestore(1, MIN_DRIVE_SIZE, gp.num_threads);
+    test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", 85.0, 0, 0, 0, 0, nullptr);
     mtype = "Test_Compression_Backoff";
     reset_counters();
     m_start_time = Clock::now();
@@ -771,16 +713,9 @@ TEST_F(VMetaBlkMgrTest, CompressionBackoff) {
 
 SISL_OPTION_GROUP(
     test_meta_blk_mgr,
-    (num_threads, "", "num_threads", "number of threads", ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-    (num_devs, "", "num_devs", "number of devices to create", ::cxxopts::value< uint32_t >()->default_value("2"),
-     "number"),
-    (device_list, "", "device_list", "List of device paths", ::cxxopts::value< std::vector< std::string > >(),
-     "path [...]"),
     (fixed_write_size_enabled, "", "fixed_write_size_enabled", "fixed write size enabled 0 or 1",
      ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (fixed_write_size, "", "fixed_write_size", "fixed write size", ::cxxopts::value< uint32_t >()->default_value("512"),
-     "number"),
-    (dev_size_gb, "", "dev_size_gb", "size of each device in GB", ::cxxopts::value< uint64_t >()->default_value("5"),
      "number"),
     (run_time, "", "run_time", "running time in seconds", ::cxxopts::value< uint64_t >()->default_value("30"),
      "number"),
@@ -793,20 +728,16 @@ SISL_OPTION_GROUP(
     (per_update, "", "per_update", "update percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
     (per_write, "", "per_write", "write percentage", ::cxxopts::value< uint32_t >()->default_value("60"), "number"),
     (per_remove, "", "per_remove", "remove percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
-    (bitmap, "", "bitmap", "bitmap test", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
-    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
-    (http_port, "", "http_port", "http_port", ::cxxopts::value< uint32_t >()->default_value("5000"),
-     "http server port"));
+    (bitmap, "", "bitmap", "bitmap test", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 int main(int argc, char* argv[]) {
     ::testing::GTEST_FLAG(filter) = "*random_load_test*";
     ::testing::InitGoogleTest(&argc, argv);
-    SISL_OPTIONS_LOAD(argc, argv, logging, test_meta_blk_mgr);
+    SISL_OPTIONS_LOAD(argc, argv, logging, test_meta_blk_mgr, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_meta_blk_mgr");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
     gp.num_io = SISL_OPTIONS["num_io"].as< uint64_t >();
-    gp.num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
     gp.run_time = SISL_OPTIONS["run_time"].as< uint64_t >();
     gp.per_update = SISL_OPTIONS["per_update"].as< uint32_t >();
     gp.per_write = SISL_OPTIONS["per_write"].as< uint32_t >();
@@ -815,17 +746,7 @@ int main(int argc, char* argv[]) {
     gp.min_wrt_sz = SISL_OPTIONS["min_write_size"].as< uint32_t >();
     gp.max_wrt_sz = SISL_OPTIONS["max_write_size"].as< uint32_t >();
     gp.always_do_overflow = SISL_OPTIONS["overflow"].as< uint32_t >();
-    gp.is_spdk = SISL_OPTIONS["spdk"].as< bool >();
     gp.is_bitmap = SISL_OPTIONS["bitmap"].as< bool >();
-
-    if (SISL_OPTIONS.count("device_list")) {
-        gp.dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
-        std::string dev_list_str;
-        for (const auto& d : gp.dev_names) {
-            dev_list_str += d;
-        }
-        LOGINFO("Taking input dev_list: {}", dev_list_str);
-    }
 
     if ((gp.per_update == 0) || (gp.per_write == 0) || (gp.per_update + gp.per_write + gp.per_remove != 100)) {
         gp.per_update = 20;
@@ -839,14 +760,10 @@ int main(int argc, char* argv[]) {
         LOGINFO("Invalid input for min/max wrt sz: defaulting to {}/{}", gp.min_wrt_sz, gp.max_wrt_sz);
     }
 
-    /* if --spdk is not set, check env variable if user want to run spdk */
-    if (!gp.is_spdk && std::getenv(SPDK_ENV_VAR_STRING.c_str())) { gp.is_spdk = true; }
-    if (gp.is_spdk) { gp.num_threads = 2; }
-
-    LOGINFO("Testing with spdk: {}, run_time: {}, num_io: {}, overflow: {}, write/update/remove percentage: {}/{}/{}, "
+    LOGINFO("Testing with run_time: {}, num_io: {}, overflow: {}, write/update/remove percentage: {}/{}/{}, "
             "min/max io "
             "size: {}/{}",
-            gp.is_spdk, gp.run_time, gp.num_io, gp.always_do_overflow, gp.per_write, gp.per_update, gp.per_remove,
-            gp.min_wrt_sz, gp.max_wrt_sz);
+            gp.run_time, gp.num_io, gp.always_do_overflow, gp.per_write, gp.per_update, gp.per_remove, gp.min_wrt_sz,
+            gp.max_wrt_sz);
     return RUN_ALL_TESTS();
 }

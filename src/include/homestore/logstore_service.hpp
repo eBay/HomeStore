@@ -27,6 +27,7 @@
 #include <sisl/metrics/metrics.hpp>
 #include <nlohmann/json.hpp>
 
+#include <homestore/homestore_decl.hpp>
 #include <homestore/logstore/log_store.hpp>
 
 namespace homestore {
@@ -47,7 +48,6 @@ struct logdev_key;
 class JournalVirtualDev;
 struct vdev_info_block;
 struct log_dump_req;
-typedef std::function< void(std::error_condition, void* /* cookie */) > vdev_io_comp_cb_t;
 
 class LogStoreService {
     friend class HomeLogStore;
@@ -134,7 +134,7 @@ public:
     void device_truncate(const device_truncate_cb_t& cb = nullptr, const bool wait_till_done = false,
                          const bool dry_run = false);
 
-    void create_vdev(uint64_t size, logstore_family_id_t family, vdev_io_comp_cb_t format_cb);
+    folly::Future< bool > create_vdev(uint64_t size, logstore_family_id_t family);
     bool open_vdev(vdev_info_block* vb, logstore_family_id_t family);
 
     nlohmann::json dump_log_store(const log_dump_req& dum_req);
@@ -149,20 +149,19 @@ public:
 
     uint32_t used_size() const;
     uint32_t total_size() const;
-    iomgr::io_thread_t& flush_thread() { return m_flush_thread; }
-    iomgr::io_thread_t& truncate_thread() { return m_truncate_thread; }
+    iomgr::io_fiber_t flush_thread() { return m_flush_fiber; }
+    iomgr::io_fiber_t truncate_thread() { return m_truncate_fiber; }
 
 private:
     void start_threads();
     void flush_if_needed();
-    void send_flush_msg();
 
 private:
     std::array< std::unique_ptr< LogStoreFamily >, num_log_families > m_logstore_families;
     std::unique_ptr< JournalVirtualDev > m_data_logdev_vdev;
     std::unique_ptr< JournalVirtualDev > m_ctrl_logdev_vdev;
-    iomgr::io_thread_t m_truncate_thread;
-    iomgr::io_thread_t m_flush_thread;
+    iomgr::io_fiber_t m_truncate_fiber;
+    iomgr::io_fiber_t m_flush_fiber;
     LogStoreServiceMetrics m_metrics;
 };
 

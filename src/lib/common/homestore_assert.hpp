@@ -195,6 +195,16 @@
  * HS_ASSERT is barebone version of HS_DETAILED_ASSERT, where no request, submodule and details name/value is present. 
  */
 // clang-format on
+
+// No need of metrics dump in debug build
+#ifdef DEBUG
+#define HS_ASSERT_METRICS(buf)                                                                                         \
+    fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[Metrics = {}]\n"},                                        \
+                    fmt::make_format_args(sisl::MetricsFarm::getInstance().get_result_in_json().dump(4)));
+#else
+#define HS_ASSERT_METRICS(buf)
+#endif
+
 #define HS_DETAILED_ASSERT(assert_type, cond, req, submod_name, submod_val, detail_name, detail_val, msg, ...)         \
     {                                                                                                                  \
         assert_type(                                                                                                   \
@@ -211,8 +221,7 @@
                             BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[{}={}] "},      \
                                                               fmt::make_format_args(detail_name, detail_val))))        \
                 ();                                                                                                    \
-                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[Metrics = {}]\n"},                            \
-                                fmt::make_format_args(sisl::MetricsFarm::getInstance().get_result_in_json().dump(4))); \
+                HS_ASSERT_METRICS(buf)                                                                                 \
                 fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb},                                           \
                                 fmt::make_format_args(std::forward< decltype(args) >(args)...));                       \
                 return true;                                                                                           \
@@ -246,8 +255,7 @@
                             BOOST_PP_IDENTITY(fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[{}={}] "},      \
                                                               fmt::make_format_args(detail_name, detail_val))))        \
                 ();                                                                                                    \
-                fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"\n[Metrics = {}]\n"},                            \
-                                fmt::make_format_args(sisl::MetricsFarm::getInstance().get_result_in_json().dump(4))); \
+                HS_ASSERT_METRICS(buf)                                                                                 \
                 return true;                                                                                           \
             },                                                                                                         \
             ##__VA_ARGS__);                                                                                            \

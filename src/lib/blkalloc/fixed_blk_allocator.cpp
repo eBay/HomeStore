@@ -14,9 +14,9 @@
  *
  *********************************************************************************/
 #include <cassert>
+#include <iomgr/iomgr_flip.hpp>
 
 #include "common/homestore_assert.hpp"
-#include "common/homestore_flip.hpp"
 #include "blk_allocator.h"
 
 namespace homestore {
@@ -72,7 +72,7 @@ BlkAllocStatus FixedBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hints
 
 BlkAllocStatus FixedBlkAllocator::alloc(BlkId& out_blkid) {
 #ifdef _PRERELEASE
-    if (homestore_flip->test_flip("fixed_blkalloc_no_blks")) { return BlkAllocStatus::SPACE_FULL; }
+    if (iomgr_flip::instance()->test_flip("fixed_blkalloc_no_blks")) { return BlkAllocStatus::SPACE_FULL; }
 #endif
     const auto ret = m_blk_q.read(out_blkid);
     if (ret) {

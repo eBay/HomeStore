@@ -41,14 +41,18 @@ if (${build_nonio_tests})
     target_link_libraries(test_blk_read_tracker ${COMMON_TEST_DEPS} GTest::gtest)
     add_test(NAME BlkReadTracker COMMAND test_blk_read_tracker)
 
-
 endif()
 
 can_build_io_tests(io_tests)
 if (${io_tests})
 
+    set(TEST_INDEXBTREE_SOURCE_FILES test_index_btree.cpp)
+    add_executable(test_index_btree ${TEST_INDEXBTREE_SOURCE_FILES})
+    target_link_libraries(test_index_btree homestore ${COMMON_TEST_DEPS} GTest::gtest)
+    #add_test(NAME IndexBtree COMMAND test_index_btree)
+
     add_executable(test_data_service)
-    target_sources(test_data_service PRIVATE test_data_service.cpp) 
+    target_sources(test_data_service PRIVATE test_data_service.cpp)
     target_link_libraries(test_data_service homestore ${COMMON_TEST_DEPS} GTest::gmock)
 
     add_executable(test_log_store)
@@ -68,7 +72,7 @@ if (${io_tests})
     if(${epoll_tests})
         add_test(NAME LogStore-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_log_store)
         add_test(NAME MetaBlkMgr-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_meta_blk_mgr)
-        add_test(NAME DataSerice-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_data_service)
+        #add_test(NAME DataService-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_data_service)
     endif()
 
     can_build_spdk_io_tests(spdk_tests)
@@ -78,7 +82,7 @@ if (${io_tests})
         add_test(NAME DataSerice-Spdk COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_data_service -- --spdk "true")
         if(${epoll_tests})
         SET_TESTS_PROPERTIES(MetaBlkMgr-Spdk PROPERTIES DEPENDS LogStore-Spdk)
-        SET_TESTS_PROPERTIES(DataSerice-Spdk PROPERTIES DEPENDS MetaBlkMgr-Spdk)
+        SET_TESTS_PROPERTIES(DataService-Spdk PROPERTIES DEPENDS MetaBlkMgr-Spdk)
         endif()
     endif()
 endif()

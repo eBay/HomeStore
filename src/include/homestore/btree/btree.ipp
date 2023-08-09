@@ -21,7 +21,7 @@
 #include <vector>
 
 #include <boost/intrusive_ptr.hpp>
-//#include <flip/flip.hpp>
+// #include <flip/flip.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/fds/buffer.hpp>
 
@@ -53,6 +53,11 @@ Btree< K, V >::~Btree() = default;
 template < typename K, typename V >
 btree_status_t Btree< K, V >::init(void* op_context) {
     return create_root_node(op_context);
+}
+
+template < typename K, typename V >
+void Btree< K, V >::set_root_node_info(const BtreeLinkInfo &info) {
+    m_root_node_info = info;
 }
 
 template < typename K, typename V >
@@ -260,16 +265,14 @@ btree_status_t Btree< K, V >::query(BtreeQueryRequest< K >& qreq, std::vector< s
     }
 
     if ((qreq.query_type() == BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY ||
-         qreq.query_type() == BtreeQueryType::TREE_TRAVERSAL_QUERY) &&
-        out_values.size() > 0) {
-
-        /* if return is not success then set the cursor to last read. No need to set cursor if user is not
-         * interested in it.
-         */
-        qreq.set_cursor_key(out_values.back().first);
-
-        /* check if we finished just at the last key */
-        if (out_values.back().first.compare(qreq.input_range().end_key()) == 0) { ret = btree_status_t::success; }
+         qreq.query_type() == BtreeQueryType::TREE_TRAVERSAL_QUERY)) {
+        if (out_values.size()) {
+            K& out_last_key = out_values.back().first;
+            qreq.set_cursor_key(out_last_key);
+            if (out_last_key.compare(qreq.input_range().end_key()) >= 0) { ret = btree_status_t::success; }
+        } else {
+            DEBUG_ASSERT_NE(ret, btree_status_t::has_more, "Query returned has_more, but no values added")
+        }
     }
 
 out:
@@ -342,13 +345,22 @@ nlohmann::json Btree< K, V >::get_metrics_in_json(bool updated) {
     return m_metrics.get_result_in_json(updated);
 }
 
+template < typename K, typename V >
+bnodeid_t Btree< K, V >::root_node_id() const {
+    return m_root_node_info.bnode_id();
+}
+template < typename K, typename V >
+uint64_t Btree< K, V >::root_link_version() const {
+    return m_root_node_info.link_version();
+}
+
 // TODO: Commenting out flip till we figure out how to move flip dependency inside sisl package.
 #if 0
 #ifdef _PRERELEASE
 template < typename K, typename V >
 static void Btree< K, V >::set_io_flip() {
     /* IO flips */
-    FlipClient* fc = homestore::HomeStoreFlip::client_instance();
+    FlipClient* fc = iomgr_flip::client_instance();
     FlipFrequency freq;
     FlipCondition cond1;
     FlipCondition cond2;
@@ -377,7 +389,7 @@ static void Btree< K, V >::set_io_flip() {
 template < typename K, typename V >
 static void Btree< K, V >::set_error_flip() {
     /* error flips */
-    FlipClient* fc = homestore::HomeStoreFlip::client_instance();
+    FlipClient* fc = iomgr_flip::client_instance();
     FlipFrequency freq;
     freq.set_count(20);
     freq.set_percent(10);
@@ -390,10 +402,4 @@ static void Btree< K, V >::set_error_flip() {
 }
 #endif
 #endif
-
-void intrusive_ptr_add_ref(BtreeNode* node) { node->m_refcount.increment(1); }
-
-void intrusive_ptr_release(BtreeNode* node) {
-    if (node->m_refcount.decrement_testz(1)) { delete node; }
-}
 } // namespace homestore

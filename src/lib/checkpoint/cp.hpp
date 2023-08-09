@@ -73,7 +73,7 @@ struct CP {
     bool m_cp_waiting_to_trigger{false}; // it is waiting for previous cp to complete
     cp_id_t m_cp_id;
     std::array< std::unique_ptr< CPContext >, (size_t)cp_consumer_t::SENTINEL > m_contexts;
-    cp_done_cb_t m_done_cb; // TODO: Check if we need to make this a list because of multiple trigger points
+    folly::Promise< bool > m_comp_promise;
 
 public:
     CP(CPManager* mgr) : m_cp_mgr{mgr} {}

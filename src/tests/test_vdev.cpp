@@ -24,7 +24,6 @@
 #include <random>
 
 #include <gtest/gtest.h>
-#include <iomgr/aio_drive_interface.hpp>
 #include <iomgr/io_environment.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
@@ -34,13 +33,15 @@
 #include "device/virtual_dev.hpp"
 #include "device/journal_vdev.hpp"
 #include "common/homestore_utils.hpp"
+#include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
 
 RCU_REGISTER_INIT
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-SISL_OPTIONS_ENABLE(logging, test_vdev)
+SISL_OPTIONS_ENABLE(logging, test_vdev, iomgr, test_common_setup)
+std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
 struct Param {
     uint64_t num_io;
@@ -68,31 +69,9 @@ class VDevIOTest : public ::testing::Test {
 
 public:
     virtual void SetUp() override {
-        const auto ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
-        const auto dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-        const auto nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
-        const auto is_spdk = SISL_OPTIONS["spdk"].as< bool >();
-
-        std::vector< dev_info > device_info;
-        LOGINFO("creating {} device files with each of size {} ", ndevices, in_bytes(dev_size));
-        for (uint32_t i{0}; i < ndevices; ++i) {
-            const std::filesystem::path fpath{"/tmp/test_vdev_" + std::to_string(i + 1)};
-            std::ofstream ofs{fpath.string(), std::ios::binary | std::ios::out};
-            std::filesystem::resize_file(fpath, dev_size); // set the file size
-            device_info.emplace_back(std::filesystem::canonical(fpath).string(), HSDevType::Data);
-        }
-
-        LOGINFO("Starting iomgr with {} threads", nthreads);
-        ioenvironment.with_iomgr(nthreads, is_spdk);
-
-        const uint64_t app_mem_size{((ndevices * dev_size) * 15) / 100};
-        LOGINFO("Initialize and start HomeBlks with app_mem_size = {}", in_bytes(app_mem_size));
-
-        hs_input_params params;
-        params.app_mem_size = app_mem_size;
-        params.data_devices = device_info;
-        HomeStore::instance()->with_params(params).with_meta_service(15.0).init(true /* wait_for_init */);
-
+        auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
+        auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
+        test_common::HSTestHelper::start_homestore("test_data_service", 15.0, 0, 0, 0, 0, nullptr);
         m_vdev = std::make_unique< JournalVirtualDev >(hs()->device_mgr(), "test_vdev", PhysicalDevGroup::DATA,
                                                        (dev_size * ndevices * 60) / 100, 0 /* nmirror */,
                                                        true /* is_stripe */, 4096 /* blk_size */, nullptr, 0);
@@ -100,8 +79,7 @@ public:
 
     virtual void TearDown() override {
         m_vdev.reset();
-        HomeStore::instance()->shutdown(true);
-        iomanager.stop();
+        test_common::HSTestHelper::shutdown_homestore();
     }
 
     uint64_t get_elapsed_time(Clock::time_point start) {
@@ -278,11 +256,9 @@ public:
         // validate_read_offset(off_to_read);
 
         auto buf = iomanager.iobuf_alloc(512, it->second.size);
-        auto bytes_read = m_vdev->sync_pread(buf, (size_t)it->second.size, (off_t)off_to_read);
-        if (bytes_read == -1) { HS_DBG_ASSERT(false, "bytes_read returned -1, errno: {}", errno); }
-        HS_DBG_ASSERT_EQ((size_t)bytes_read, (size_t)(it->second.size));
+        m_vdev->sync_pread(buf, (size_t)it->second.size, (off_t)off_to_read);
 
-        auto crc = util::Hash64((const char*)buf, (size_t)bytes_read);
+        auto crc = util::Hash64((const char*)buf, (size_t)it->second.size);
         HS_DBG_ASSERT_EQ(crc, it->second.crc, "CRC Mismatch: read out crc: {}, saved write: {}", crc, it->second.crc);
         iomanager.iobuf_free(buf);
         m_read_cnt++;
@@ -308,10 +284,7 @@ public:
         auto buf = iomanager.iobuf_alloc(512, sz_to_wrt);
         gen_rand_buf(buf, sz_to_wrt);
 
-        auto bytes_written = m_vdev->sync_pwrite(buf, sz_to_wrt, off_to_wrt);
-
-        HS_DBG_ASSERT_NE(bytes_written, -1, "bytes_written returned -1, errno: {}", errno);
-        HS_DBG_ASSERT_EQ((size_t)bytes_written, (size_t)sz_to_wrt);
+        m_vdev->sync_pwrite(buf, sz_to_wrt, off_to_wrt);
         HS_DBG_ASSERT_LT((size_t)off_to_wrt, (size_t)m_total_size);
 
         m_wrt_cnt++;
@@ -353,34 +326,29 @@ private:
 
 TEST_F(VDevIOTest, VDevIOTest) { this->execute(); }
 
-SISL_OPTION_GROUP(
-    test_vdev,
-    (truncate_watermark_percentage, "", "truncate_watermark_percentage",
-     "percentage of space usage to trigger truncate", ::cxxopts::value< uint32_t >()->default_value("80"), "number"),
-    (fixed_write_size_enabled, "", "fixed_write_size_enabled", "fixed write size enabled 0 or 1",
-     ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
-    (fixed_write_size, "", "fixed_write_size", "fixed write size", ::cxxopts::value< uint32_t >()->default_value("512"),
-     "number"),
-    (min_write_size, "", "min_write_size", "minimum write size", ::cxxopts::value< uint32_t >()->default_value("512"),
-     "number"),
-    (max_write_size, "", "max_write_size", "maximum write size", ::cxxopts::value< uint32_t >()->default_value("8192"),
-     "number"),
-    (num_threads, "", "num_threads", "number of threads", ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-    (num_devs, "", "num_devs", "number of devices to create", ::cxxopts::value< uint32_t >()->default_value("2"),
-     "number"),
-    (dev_size_mb, "", "dev_size_mb", "size of each device in MB", ::cxxopts::value< uint64_t >()->default_value("5120"),
-     "number"),
-    (run_time, "", "run_time", "running time in seconds", ::cxxopts::value< uint64_t >()->default_value("30"),
-     "number"),
-    (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("3000"), "number"),
-    (per_read, "", "per_read", "read percentage of io that are reads",
-     ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
-    (per_write, "", "per_write", "write percentage of io that are writes",
-     ::cxxopts::value< uint32_t >()->default_value("80"), "number"),
-    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
+SISL_OPTION_GROUP(test_vdev,
+                  (truncate_watermark_percentage, "", "truncate_watermark_percentage",
+                   "percentage of space usage to trigger truncate", ::cxxopts::value< uint32_t >()->default_value("80"),
+                   "number"),
+                  (fixed_write_size_enabled, "", "fixed_write_size_enabled", "fixed write size enabled 0 or 1",
+                   ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
+                  (fixed_write_size, "", "fixed_write_size", "fixed write size",
+                   ::cxxopts::value< uint32_t >()->default_value("512"), "number"),
+                  (min_write_size, "", "min_write_size", "minimum write size",
+                   ::cxxopts::value< uint32_t >()->default_value("512"), "number"),
+                  (max_write_size, "", "max_write_size", "maximum write size",
+                   ::cxxopts::value< uint32_t >()->default_value("8192"), "number"),
+                  (run_time, "", "run_time", "running time in seconds",
+                   ::cxxopts::value< uint64_t >()->default_value("30"), "number"),
+                  (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("3000"),
+                   "number"),
+                  (per_read, "", "per_read", "read percentage of io that are reads",
+                   ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
+                  (per_write, "", "per_write", "write percentage of io that are writes",
+                   ::cxxopts::value< uint32_t >()->default_value("80"), "number"));
 
 int main(int argc, char* argv[]) {
-    SISL_OPTIONS_LOAD(argc, argv, logging, test_vdev);
+    SISL_OPTIONS_LOAD(argc, argv, logging, test_vdev, iomgr, test_common_setup);
     ::testing::InitGoogleTest(&argc, argv);
     sisl::logging::SetLogger("test_vdev");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
@@ -414,9 +382,5 @@ int main(int argc, char* argv[]) {
         LOGINFO("Testing with min write size: {}, max write size: {}", gp.min_wrt_sz, gp.max_wrt_sz);
     }
 
-    auto res = RUN_ALL_TESTS();
-    // VolInterface::shutdown();
-    // iomanager.stop();
-
-    return res;
+    return RUN_ALL_TESTS();
 }
