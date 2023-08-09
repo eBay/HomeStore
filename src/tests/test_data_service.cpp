@@ -161,7 +161,7 @@ public:
                         // trigger the free_blk cb firstly then send read complete cb back to caller;
                         m_read_blk_done = true;
                         LOGINFO("read completed;");
-                        HS_DBG_ASSERT_EQ(m_free_blk_done, true,
+                        HS_DBG_ASSERT_EQ(m_free_blk_done.load(), true,
                                          "free blk callback should not be called before read blk completes");
 
                         free_sg_buf(*sg_read_ptr);
@@ -171,7 +171,7 @@ public:
                 LOGINFO("Step 3: started async_free_blk: {}", test_blkid_ptr->to_string());
                 inst().async_free_blk(*test_blkid_ptr).thenValue([this](auto) {
                     LOGINFO("completed async_free_blk");
-                    HS_DBG_ASSERT_EQ(m_free_blk_done, false, "Duplicate free blk completion");
+                    HS_DBG_ASSERT_EQ(m_free_blk_done.load(), false, "Duplicate free blk completion");
                     m_free_blk_done = true;
                 });
             });

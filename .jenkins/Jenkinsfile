@@ -137,7 +137,7 @@ pipeline {
                                     BUILD_PROFILE = "test"
                                 }
 
-                                sh "conan create -u ${BUILD_MISSING} -o sisl:prerelease=${PRERELEASE} -o ${PROJECT}:sanitize=${SANITIZE} ${BUILD_TEST_MODE} -pr ${BUILD_PROFILE} . ${PROJECT}/${TAG}"
+                                sh "conan create ${BUILD_MISSING} -o iomgr:testing=off -o sisl:prerelease=${PRERELEASE} -o ${PROJECT}:sanitize=${SANITIZE} ${BUILD_TEST_MODE} -pr ${BUILD_PROFILE} . ${PROJECT}/${TAG}"
                                 sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
                                 sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
                                 sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"

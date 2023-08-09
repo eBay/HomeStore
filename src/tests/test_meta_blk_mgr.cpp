@@ -100,12 +100,8 @@ protected:
 
     void TearDown() override{};
 
-<<<<<<< HEAD
 public:
     [[nodiscard]] uint64_t get_elapsed_time(const Clock::time_point& start) {
-=======
-    uint64_t get_elapsed_time(const Clock::time_point& start) {
->>>>>>> upstream/fiber
         const std::chrono::seconds sec{std::chrono::duration_cast< std::chrono::seconds >(Clock::now() - start)};
         return sec.count();
     }
@@ -367,7 +363,7 @@ public:
             iomanager.iobuf_free(buf);
         } else {
             if (unaligned_addr) {
-                delete[](buf - unaligned_shift);
+                delete[] (buf - unaligned_shift);
             } else {
                 delete[] buf;
             }
@@ -732,14 +728,7 @@ SISL_OPTION_GROUP(
     (per_update, "", "per_update", "update percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
     (per_write, "", "per_write", "write percentage", ::cxxopts::value< uint32_t >()->default_value("60"), "number"),
     (per_remove, "", "per_remove", "remove percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
-<<<<<<< HEAD
-    (bitmap, "", "bitmap", "bitmap test", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
-    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
-    (http_port, "", "http_port", "http_port", ::cxxopts::value< uint32_t >()->default_value("5000"),
-     "http server port"));
-=======
     (bitmap, "", "bitmap", "bitmap test", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
->>>>>>> upstream/fiber
 
 int main(int argc, char* argv[]) {
     ::testing::GTEST_FLAG(filter) = "*random_load_test*";

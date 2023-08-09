@@ -30,6 +30,14 @@
 
 SISL_LOGGING_DECL(blkalloc)
 
+template <>
+struct fmt::formatter< std::thread::id > {
+    constexpr auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    auto format(const std::thread::id& i, format_context& ctx) const -> format_context::iterator {
+        return fmt::format_to(ctx.out(), "{}", std::hash< std::thread::id >{}(i));
+    }
+};
+
 namespace homestore {
 
 // initialize static variables

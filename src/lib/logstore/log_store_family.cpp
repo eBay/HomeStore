@@ -240,7 +240,7 @@ logdev_key LogStoreFamily::do_device_truncate(bool dry_run) {
             }
 
             fmt::format_to(std::back_inserter(dbg_str), "[{}:{}:{}:{}:{}] ", store_ptr->get_store_id(),
-                           trunc_info.seq_num, trunc_info.ld_key.idx, trunc_info.pending_dev_truncation,
+                           trunc_info.seq_num.load(), trunc_info.ld_key.idx, trunc_info.pending_dev_truncation,
                            trunc_info.active_writes_not_part_of_truncation);
             if (trunc_info.ld_key.idx > min_safe_ld_key.idx) { continue; }
 

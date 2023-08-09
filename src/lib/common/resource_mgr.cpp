@@ -135,8 +135,8 @@ uint32_t ResourceMgr::get_dirty_buf_qd() const { return m_flush_dirty_buf_q_dept
 void ResourceMgr::increase_dirty_buf_qd() {
     auto qd = m_flush_dirty_buf_q_depth.load();
     if (qd < max_qd_multiplier * HS_DYNAMIC_CONFIG(generic.cache_max_throttle_cnt)) {
-        m_flush_dirty_buf_q_depth.fetch_add(2 * qd);
-        HS_PERIODIC_LOG(INFO, base, "q depth increased to {}", m_flush_dirty_buf_q_depth);
+        auto const nd = m_flush_dirty_buf_q_depth.fetch_add(2 * qd) + (2 * qd);
+        HS_PERIODIC_LOG(INFO, base, "q depth increased to {}", nd);
     }
 }
 

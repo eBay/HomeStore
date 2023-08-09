@@ -163,7 +163,7 @@ void LogDev::do_load(const off_t device_cursor) {
             break;
         }
 
-        HS_REL_ASSERT_EQ(header->start_idx(), m_log_idx, "log indx is not the expected one");
+        HS_REL_ASSERT_EQ(header->start_idx(), m_log_idx.load(), "log indx is not the expected one");
         if (loaded_from == -1) { loaded_from = header->start_idx(); }
 
         // Loop through each record within the log group and do a callback

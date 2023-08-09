@@ -29,6 +29,7 @@
 
 #include <homestore/meta_service.hpp>
 #include <homestore/homestore.hpp>
+#include "common/homestore_flip.hpp"
 #include "device/virtual_dev.hpp"
 #include "device/physical_dev.hpp"
 #include "blkalloc/blk_allocator.h"
@@ -1223,7 +1224,7 @@ void MetaBlkService::alloc_compress_buf(size_t size) {
     m_compress_info.size = size;
     m_compress_info.bytes = hs_utils::iobuf_alloc(size, sisl::buftag::compression, align_size());
 
-    HS_REL_ASSERT_NE(m_compress_info.bytes, nullptr, "fail to allocate iobuf for compression of size: {}", size);
+    HS_REL_ASSERT_NOTNULL(m_compress_info.bytes, "fail to allocate iobuf for compression of size: {}", size);
 }
 
 uint64_t MetaBlkService::meta_blk_context_sz() const { return block_size() - META_BLK_HDR_MAX_SZ; }

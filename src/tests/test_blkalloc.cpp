@@ -557,7 +557,8 @@ public:
             total_dealloc += freed_nblks;
             return !terminate_flag;
         });
-        LOGINFO("Total Alloced {} random blks and freed {} random blks in all thread", total_alloc, total_dealloc);
+        LOGINFO("Total Alloced {} random blks and freed {} random blks in all thread", total_alloc.load(),
+                total_dealloc.load());
         return {total_alloc, total_dealloc};
     }
 };

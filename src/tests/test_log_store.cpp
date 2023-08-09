@@ -1266,9 +1266,7 @@ SISL_OPTION_GROUP(test_log_store,
                   (num_records, "", "num_records", "number of record to test",
                    ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
                   (iterations, "", "iterations", "Iterations", ::cxxopts::value< uint32_t >()->default_value("1"),
-                   "the number of iterations to run each test"),
-                  (http_port, "", "http_port", "http_port", ::cxxopts::value< uint32_t >()->default_value("5000"),
-                   "http server port"));
+                   "the number of iterations to run each test"));
 
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;

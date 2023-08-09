@@ -28,7 +28,7 @@
 
 static constexpr uint32_t g_node_size{4096};
 using namespace homestore;
-SISL_LOGGING_INIT(btree, iomgr, io_wd)
+SISL_LOGGING_INIT(btree, iomgr, io_wd, flip)
 
 SISL_OPTIONS_ENABLE(logging, test_mem_btree)
 SISL_OPTION_GROUP(test_mem_btree,
@@ -288,11 +288,12 @@ struct BtreeTest : public testing::Test {
     }
 
     btree_status_t get_num_elements_in_tree(uint32_t start_k, uint32_t end_k, K& out_key, V& out_value) const {
-        auto req = BtreeGetAnyRequest< K >{BtreeKeyRange< K >{K{start_k}, true, K{end_k}, true},
-                                           std::make_unique< K >(), std::make_unique< V >()};
+        auto k = std::make_unique<K>();
+        auto v = std::make_unique<V>();
+        auto req = BtreeGetAnyRequest< K >{BtreeKeyRange< K >{K{start_k}, true, K{end_k}, true}, k.get(), v.get()};
         auto ret = m_bt->get(req);
-        out_key = *((K*)req.m_outkey.get());
-        out_value = *((V*)req.m_outval.get());
+        out_key = *((K*)req.m_outkey);
+        out_value = *((V*)req.m_outval);
         return ret;
     }
 

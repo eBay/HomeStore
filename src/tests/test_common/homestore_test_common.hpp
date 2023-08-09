@@ -21,8 +21,10 @@
 #pragma once
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
+#include <sisl/settings/settings.hpp>
 #include <homestore/homestore.hpp>
 #include <homestore/index_service.hpp>
+#include <iomgr/iomgr_config_generated.h>
 
 const std::string SPDK_ENV_VAR_STRING{"USER_WANT_SPDK"};
 const std::string HTTP_SVC_ENV_VAR_STRING{"USER_WANT_HTTP_OFF"};
@@ -44,14 +46,16 @@ SISL_OPTION_GROUP(test_common_setup,
                    ::cxxopts::value< int >()->default_value("-1"), "number"),
                   (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
+SETTINGS_INIT(iomgrcfg::IomgrSettings, iomgr_config);
+
 using namespace homestore;
 
 namespace test_common {
 
 // Fix a port for http server
-inline static void set_fixed_http_port(uint32_t http_port){
-    IM_SETTINGS_FACTORY().modifiable_settings([http_port](auto& s) { s.io_env->http_port = http_port; });
-    IM_SETTINGS_FACTORY().save();
+inline static void set_fixed_http_port(uint32_t http_port) {
+    SETTINGS_FACTORY(iomgr_config).modifiable_settings([http_port](auto& s) { s.io_env->http_port = http_port; });
+    SETTINGS_FACTORY(iomgr_config).save();
     LOGINFO("http port = {}", http_port);
 }
 
@@ -138,7 +142,8 @@ public:
 
         auto const http_port = SISL_OPTIONS["http_port"].as< int >();
         if (http_port != 0) {
-            ioenvironment.with_http_server((http_port == -1) ? generate_random_http_port() : uint32_cast(http_port));
+            set_fixed_http_port((http_port == -1) ? generate_random_http_port() : uint32_cast(http_port));
+            ioenvironment.with_http_server();
         }
 
         if (!index_svc_cb) { index_svc_cb = std::make_unique< TestIndexServiceCallbacks >(); }

@@ -53,14 +53,13 @@ class HomestoreConan(ConanFile):
         self.copy(root_package="sisl", pattern="*", dst="bin/scripts/python/flip/", src="bindings/flip/python/", keep_path=False)
 
     def build_requirements(self):
-        self.build_requires("benchmark/1.7.1")
-        self.build_requires("gtest/1.13.0")
+        self.build_requires("benchmark/1.8.2")
+        self.build_requires("gtest/1.14.0")
 
     def requirements(self):
         self.requires("iomgr/[~=9, include_prerelease=True]@oss/master")
         self.requires("sisl/[~=10, include_prerelease=True]@oss/master")
 
-        # FOSS, rarely updated
         self.requires("farmhash/cci.20190513@")
         self.requires("isa-l/2.30.0")
         self.requires("spdk/21.07.y")
