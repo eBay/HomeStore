@@ -564,7 +564,7 @@ public:
     typedef std::function< void(logstore_id_t, logstore_seq_num_t, logdev_key, logdev_key, log_buffer, uint32_t) >
         log_found_callback;
     typedef std::function< void(logstore_id_t, const logstore_superblk&) > store_found_callback;
-    typedef std::function< void(void) > flush_blocked_callback;
+    typedef std::function< bool(void) > flush_blocked_callback;
 
     static inline int64_t flush_data_threshold_size() {
         return HS_DYNAMIC_CONFIG(logstore.flush_threshold_size) - sizeof(log_group_header);
@@ -710,7 +710,7 @@ public:
      * @param cb Callback
      * @return true or false based on if it is able to block the flush right away.
      */
-    bool try_lock_flush(const flush_blocked_callback& cb);
+    bool run_under_flush_lock(const flush_blocked_callback& cb);
 
     /**
      * @brief Unblock the flush. While unblocking if there are other requests to block or any flush pending it first

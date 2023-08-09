@@ -128,7 +128,7 @@ void HomeStore::init(bool wait_for_init) {
             LOGWARN("Homestore init is called with wait till init, but it has valid after_init_done callback set in "
                     "its init params, ignoring the after_init_done callback; it will not be called");
         }
-        m_init_done_cb = [& tl_cv = cv, &tl_start_mutex = start_mutex, &tl_inited = inited]() {
+        m_init_done_cb = [&tl_cv = cv, &tl_start_mutex = start_mutex, &tl_inited = inited]() {
             LOGINFO("HomeStore Init completed");
             {
                 std::unique_lock< std::mutex > lk{tl_start_mutex};
@@ -158,9 +158,6 @@ void HomeStore::init(bool wait_for_init) {
     ///////////// Config related setup /////////////////////////
     HomeStoreDynamicConfig::init_settings_default();
 
-    // Restrict iomanager to throttle upto the app mem size allocated for us
-    iomanager.set_io_memory_limit(HS_STATIC_CONFIG(input.io_mem_size()));
-
     ///////////// Startup of services  /////////////////////////
     // Order of the initialization
     // 1. Meta Service instance is created
@@ -179,9 +176,9 @@ void HomeStore::init(bool wait_for_init) {
     if (has_data_service()) { m_data_service = std::make_unique< BlkDataService >(); }
     if (has_index_service()) { m_index_service = std::make_unique< IndexService >(std::move(m_index_svc_cbs)); }
 
-    m_dev_mgr = std::make_unique< DeviceManager >(hs_config.input.data_devices, bind_this(HomeStore::new_vdev_found, 2),
-                                                  sizeof(sb_blkstore_blob), VirtualDev::static_process_completions,
-                                                  bind_this(HomeStore::process_vdev_error, 1));
+    m_dev_mgr =
+        std::make_unique< DeviceManager >(hs_config.input.data_devices, bind_this(HomeStore::new_vdev_found, 2),
+                                          sizeof(sb_blkstore_blob), bind_this(HomeStore::process_vdev_error, 1));
     m_dev_mgr->init();
 
     uint64_t cache_size = resource_mgr().get_cache_size();
@@ -190,13 +187,11 @@ void HomeStore::init(bool wait_for_init) {
     LOGINFO("HomeStore starting first_time_boot?={} dynamic_config_version={}, cache_size={}, static_config: {}",
             is_first_time_boot(), HS_DYNAMIC_CONFIG(version), cache_size, hs_config.to_json().dump(4));
 
-    iomanager.create_reactor("hs_init", INTERRUPT_LOOP, [this](bool thread_started) {
-        if (thread_started) {
-            if (m_before_init_starting_cb) { m_before_init_starting_cb(); }
-            if (is_first_time_boot()) { create_vdevs(); }
-            init_done();
-        }
-    });
+    if (m_before_init_starting_cb) { m_before_init_starting_cb(); }
+
+    if (is_first_time_boot()) { create_vdevs(); }
+
+    init_done();
 
     if (wait_for_init) {
         std::unique_lock< std::mutex > lk{start_mutex};
@@ -204,90 +199,54 @@ void HomeStore::init(bool wait_for_init) {
     }
 }
 
-void HomeStore::shutdown(bool wait, const hs_comp_callback& done_cb) {
-    static std::mutex stop_mutex;
-    static std::condition_variable cv;
-    static bool done;
-
-    done = false;
-    auto _stop = [this](bool wait, const hs_comp_callback& done_cb) {
-        LOGINFO("Homestore shutdown is started");
-        if (has_log_service()) {
-            m_log_service->stop();
-            m_log_service.reset();
-        }
-
-        if (has_meta_service()) {
-            m_meta_service->stop();
-            m_meta_service.reset();
-        }
-
-        if (has_data_service()) { m_data_service.reset(); }
-
-        m_dev_mgr->close_devices();
-        m_dev_mgr.reset();
-        m_cp_mgr->shutdown();
-        LOGINFO("Homestore is completed its shutdown");
-
-        if (wait) {
-            {
-                std::unique_lock< std::mutex > lk{stop_mutex};
-                done = true;
-            }
-            cv.notify_one();
-        }
-
-        if (done_cb) { done_cb(true); }
-    };
-
-    // Doing shutdown on non-user io reactor threads will be a problem, so in those cases start a new reactor thread for
-    // shutdown. For HomeBlks shutdown is issued from its own reactor thread, so this will not create additional thread
-    // in that context.
-    if (!iomanager.am_i_io_reactor() || iomanager.am_i_worker_reactor()) {
-        iomanager.create_reactor("hs_shutdown", INTERRUPT_LOOP, [this, wait, done_cb, _stop](bool thread_started) {
-            if (thread_started) {
-                _stop(wait, done_cb);
-                iomanager.stop_io_loop();
-            }
-        });
-    } else {
-        _stop(wait, done_cb);
+void HomeStore::shutdown() {
+    LOGINFO("Homestore shutdown is started");
+    if (has_log_service()) {
+        m_log_service->stop();
+        m_log_service.reset();
     }
 
-    if (wait) {
-        std::unique_lock< std::mutex > lk{stop_mutex};
-        cv.wait(lk, [] { return done; });
+    if (has_meta_service()) {
+        m_meta_service->stop();
+        m_meta_service.reset();
     }
+
+    if (has_data_service()) { m_data_service.reset(); }
+
+    m_dev_mgr->close_devices();
+    m_dev_mgr.reset();
+    m_cp_mgr->shutdown();
+
     HomeStore::reset_instance();
+    LOGINFO("Homestore is completed its shutdown");
 }
 
 void HomeStore::create_vdevs() {
+    std::vector< folly::Future< bool > > futs;
+
+    hs_utils::set_btree_mempool_size(hs()->device_mgr()->atomic_page_size({PhysicalDevGroup::FAST}));
+
     if (has_meta_service()) { m_meta_service->create_vdev(pct_to_size(m_meta_store_size_pct, PhysicalDevGroup::META)); }
 
     if (has_data_service()) { m_data_service->create_vdev(pct_to_size(m_data_store_size_pct, PhysicalDevGroup::DATA)); }
 
     if (has_log_service() && m_data_log_store_size_pct) {
-        ++m_format_cnt;
-        m_log_service->create_vdev(pct_to_size(m_data_log_store_size_pct, PhysicalDevGroup::FAST),
-                                   LogStoreService::DATA_LOG_FAMILY_IDX,
-                                   [this](std::error_condition err, void* cookie) {
-                                       HS_REL_ASSERT((err == no_error), "IO error during format of vdev");
-                                       init_done();
-                                   });
+        futs.emplace_back(m_log_service->create_vdev(pct_to_size(m_data_log_store_size_pct, PhysicalDevGroup::FAST),
+                                                     LogStoreService::DATA_LOG_FAMILY_IDX));
     }
+
     if (has_log_service() && m_ctrl_log_store_size_pct) {
-        ++m_format_cnt;
-        m_log_service->create_vdev(pct_to_size(m_ctrl_log_store_size_pct, PhysicalDevGroup::FAST),
-                                   LogStoreService::CTRL_LOG_FAMILY_IDX,
-                                   [this](std::error_condition err, void* cookie) {
-                                       HS_REL_ASSERT((err == no_error), "IO error during format of vdev");
-                                       init_done();
-                                   });
+        futs.emplace_back(m_log_service->create_vdev(pct_to_size(m_ctrl_log_store_size_pct, PhysicalDevGroup::FAST),
+                                                     LogStoreService::CTRL_LOG_FAMILY_IDX));
     }
 
     if (has_index_service()) {
         m_index_service->create_vdev(pct_to_size(m_index_store_size_pct, PhysicalDevGroup::FAST));
     }
+
+    try {
+        if (!futs.empty()) { folly::collectAllUnsafe(futs).get(); }
+    } catch (const std::exception& e) { HS_REL_ASSERT(false, "IO error during format of vdev, error={}", e.what()); }
 }
 
 #if 0
@@ -318,8 +277,6 @@ bool HomeStore::is_first_time_boot() const { return m_dev_mgr->is_first_time_boo
 
 void HomeStore::init_done() {
     const auto& inp_params = HomeStoreStaticConfig::instance().input;
-    auto cnt = m_format_cnt.fetch_sub(1);
-    if (cnt != 1) { return; }
     m_dev_mgr->init_done();
 
     m_cp_mgr = std::make_unique< CPManager >(is_first_time_boot()); // Initialize CPManager

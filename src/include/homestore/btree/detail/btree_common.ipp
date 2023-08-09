@@ -288,4 +288,19 @@ bool Btree< K, V >::call_on_update_kv_cb(const BtreeNodePtr& node, uint32_t idx,
     }
     return true;
 }
+
+template < typename K, typename V >
+void Btree< K, V >::append_route_trace(BtreeRequest& req, const BtreeNodePtr& node, btree_event_t event,
+                                       uint32_t start_idx, uint32_t end_idx) const {
+    if (req.route_tracing) {
+        req.route_tracing->emplace_back(trace_route_entry{.node_id = node->node_id(),
+                                                          .node = node.get(),
+                                                          .start_idx = start_idx,
+                                                          .end_idx = end_idx,
+                                                          .num_entries = node->total_entries(),
+                                                          .level = node->level(),
+                                                          .is_leaf = node->is_leaf(),
+                                                          .event = event});
+    }
+}
 } // namespace homestore

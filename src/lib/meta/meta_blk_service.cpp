@@ -25,13 +25,13 @@
 #include <sisl/fds/compress.hpp>
 #include <sisl/fds/utils.hpp>
 #include <isa-l/crc.h>
+#include <iomgr/iomgr_flip.hpp>
 
 #include <homestore/meta_service.hpp>
 #include <homestore/homestore.hpp>
 #include "device/virtual_dev.hpp"
 #include "device/physical_dev.hpp"
 #include "blkalloc/blk_allocator.h"
-#include "common/homestore_flip.hpp"
 #include "meta_sb.hpp"
 
 SISL_LOGGING_DECL(metablk)
@@ -688,7 +688,7 @@ void MetaBlkService::write_meta_blk_internal(meta_blk* mblk, const uint8_t* cont
         mblk->hdr.h.ovf_bid = obid;
 
 #ifdef _PRERELEASE
-        HomeStoreFlip::test_and_abort("write_with_ovf_abort");
+        iomgr_flip::test_and_abort("write_with_ovf_abort");
 #endif
     }
 
@@ -701,7 +701,7 @@ void MetaBlkService::write_meta_blk_internal(meta_blk* mblk, const uint8_t* cont
     write_meta_blk_to_disk(mblk);
 
 #ifdef _PRERELEASE
-    HomeStoreFlip::test_and_abort("write_sb_abort");
+    iomgr_flip::test_and_abort("write_sb_abort");
 #endif
 }
 
@@ -790,7 +790,7 @@ void MetaBlkService::update_sub_sb(const uint8_t* context_data, uint64_t sz, voi
     write_meta_blk_internal(mblk, context_data, sz);
 
 #ifdef _PRERELEASE
-    HomeStoreFlip::test_and_abort("update_sb_abort");
+    iomgr_flip::test_and_abort("update_sb_abort");
 #endif
 
     // free the overflow bid if it is there
@@ -889,7 +889,7 @@ std::error_condition MetaBlkService::remove_sub_sb(void* cookie) {
     free_meta_blk(rm_blk);
 
 #ifdef _PRERELEASE
-    HomeStoreFlip::test_and_abort("remove_sb_abort");
+    iomgr_flip::test_and_abort("remove_sb_abort");
 #endif
 
     HS_LOG(DEBUG, metablk, "after remove, mstore used size: {}", m_sb_vdev->used_size());

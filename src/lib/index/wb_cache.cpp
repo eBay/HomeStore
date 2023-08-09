@@ -14,7 +14,7 @@
  *
  *********************************************************************************/
 #include <sisl/fds/thread_vector.hpp>
-#include <homestore/btree/btree.ipp>
+#include <homestore/btree/detail/btree_node.hpp>
 #include <homestore/index_service.hpp>
 #include <homestore/homestore.hpp>
 #include "common/homestore_assert.hpp"
@@ -25,22 +25,54 @@
 #include "common/resource_mgr.hpp"
 
 namespace homestore {
+
 IndexWBCache& wb_cache() { return index_service().wb_cache(); }
 
 IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, const std::shared_ptr< sisl::Evictor >& evictor,
                            uint32_t node_size) :
         m_vdev{vdev},
         m_cache{
-            evictor, 1000, node_size,
+            evictor, 100000, node_size,
             [](const BtreeNodePtr& node) -> BlkId { return IndexBtreeNode::convert(node.get())->m_idx_buf->m_blkid; },
             [](const sisl::CacheRecord& rec) -> bool {
                 const auto& hnode = (sisl::SingleEntryHashNode< BtreeNodePtr >&)rec;
                 return (hnode.m_value->m_refcount.test_le(1));
             }},
         m_node_size{node_size} {
+    start_flush_threads();
     for (size_t i{0}; i < MAX_CP_COUNT; ++i) {
         m_dirty_list[i] = std::make_unique< sisl::ThreadVector< IndexBufferPtr > >();
         m_free_blkid_list[i] = std::make_unique< sisl::ThreadVector< BlkId > >();
+    }
+}
+
+void IndexWBCache::start_flush_threads() {
+    // Start WBCache flush threads
+    struct Context {
+        std::condition_variable cv;
+        std::mutex mtx;
+        int32_t thread_cnt{0};
+    };
+    auto ctx = std::make_shared< Context >();
+    auto nthreads = std::max(1, HS_DYNAMIC_CONFIG(generic.cache_flush_threads));
+
+    for (int32_t i{0}; i < nthreads; ++i) {
+        iomanager.create_reactor("index_cp_flush" + std::to_string(i), INTERRUPT_LOOP, 1u,
+                                 [this, &ctx](bool is_started) {
+                                     if (is_started) {
+                                         {
+                                             std::unique_lock< std::mutex > lk{ctx->mtx};
+                                             m_cp_flush_fibers.push_back(iomanager.iofiber_self());
+                                             ++(ctx->thread_cnt);
+                                         }
+                                         ctx->cv.notify_one();
+                                     }
+                                 });
+    }
+
+    {
+        std::unique_lock< std::mutex > lk{ctx->mtx};
+        ctx->cv.wait(lk, [&ctx, nthreads] { return (ctx->thread_cnt == nthreads); });
     }
 }
 
@@ -67,28 +99,24 @@ void IndexWBCache::realloc_buf(const IndexBufferPtr& buf) {
     m_vdev->commit_blk(buf->m_blkid);
 }
 
-void IndexWBCache::write_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
+void IndexWBCache::write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* cp_ctx) {
+    m_cache.upsert(node);
     r_cast< IndexCPContext* >(cp_ctx)->add_to_dirty_list(buf);
     resource_mgr().inc_dirty_buf_size(m_node_size);
 }
 
-std::error_condition IndexWBCache::read_buf(bnodeid_t id, BtreeNodePtr& node, bool cache_only,
-                                            node_initializer_t&& node_initializer) {
+void IndexWBCache::read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) {
     auto const blkid = BlkId{id};
 
 retry:
     // Check if the blkid is already in cache, if not load and put it into the cache
-    if (m_cache.get(blkid, node)) {
-        return no_error;
-    } else if (cache_only) {
-        return std::make_error_condition(std::errc::operation_would_block);
-    }
+    if (m_cache.get(blkid, node)) { return; }
 
     // Read the buffer from virtual device
     auto idx_buf = std::make_shared< IndexBuffer >(blkid, m_node_size, m_vdev->align_size());
     auto raw_buf = idx_buf->raw_buffer();
-    auto const size = m_vdev->sync_read(r_cast< char* >(raw_buf), m_node_size, blkid);
-    if (size != m_node_size) { return std::make_error_condition(std::io_errc::stream); }
+
+    m_vdev->sync_read(r_cast< char* >(raw_buf), m_node_size, blkid);
 
     // Create the btree node out of buffer
     node = node_initializer(idx_buf);
@@ -99,7 +127,6 @@ retry:
         // There is a race between 2 concurrent reads from vdev and other party won the race. Re-read from cache
         goto retry;
     }
-    return no_error;
 }
 
 bool IndexWBCache::create_chain(IndexBufferPtr& second, IndexBufferPtr& third) {
@@ -143,19 +170,17 @@ void IndexWBCache::free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
 }
 
 //////////////////// CP Related API section /////////////////////////////////
-void IndexWBCache::async_cp_flush(CPContext* context, cp_flush_done_cb_t cp_done_cb) {
+folly::Future< bool > IndexWBCache::async_cp_flush(CPContext* context) {
     IndexCPContext* cp_ctx = s_cast< IndexCPContext* >(context);
     if (!cp_ctx->any_dirty_buffers()) {
         CP_PERIODIC_LOG(DEBUG, cp_ctx->id(), "Btree does not have any dirty buffers to flush");
-        cp_done_cb(cp_ctx->cp());
-        return; // nothing to flush
+        return folly::makeFuture< bool >(true); // nothing to flush
     }
 
-    cp_ctx->m_flush_done_cb = std::move(cp_done_cb);
     cp_ctx->prepare_flush_iteration();
 
-    for (auto& thr : m_flush_thread_ids) {
-        iomanager.run_on(thr, [this, cp_ctx](const io_thread_addr_t addr) {
+    for (auto& fiber : m_cp_flush_fibers) {
+        iomanager.run_on_forget(fiber, [this, cp_ctx]() {
             static thread_local std::vector< IndexBufferPtr > t_buf_list;
             t_buf_list.clear();
             get_next_bufs(cp_ctx, resource_mgr().get_dirty_buf_qd(), t_buf_list);
@@ -166,6 +191,7 @@ void IndexWBCache::async_cp_flush(CPContext* context, cp_flush_done_cb_t cp_done
             m_vdev->submit_batch();
         });
     }
+    return std::move(cp_ctx->get_future());
 }
 
 std::unique_ptr< CPContext > IndexWBCache::create_cp_context(cp_id_t cp_id) {
@@ -182,12 +208,11 @@ IndexBufferPtr IndexWBCache::copy_buffer(const IndexBufferPtr& cur_buf) const {
 
 void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, const IndexBufferPtr& buf, bool part_of_batch) {
     buf->m_buf_state = index_buf_state_t::FLUSHING;
-    m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid,
-                        [pbuf = buf.get(), cp_ctx](std::error_condition err, void* cookie) {
-                            auto& pthis = s_cast< IndexWBCache& >(wb_cache()); // Avoiding more than 16 bytes capture
-                            pthis.process_write_completion(cp_ctx, pbuf);
-                        },
-                        nullptr /*cookie*/, part_of_batch);
+    m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid, part_of_batch)
+        .thenValue([pbuf = buf.get(), cp_ctx](auto) {
+            auto& pthis = s_cast< IndexWBCache& >(wb_cache()); // Avoiding more than 16 bytes capture
+            pthis.process_write_completion(cp_ctx, pbuf);
+        });
 
     if (!part_of_batch) { m_vdev->submit_batch(); }
 }
@@ -199,12 +224,12 @@ void IndexWBCache::process_write_completion(IndexCPContext* cp_ctx, IndexBuffer*
         do_flush_one_buf(cp_ctx, next_buf, false);
     } else if (!has_more) {
         // We are done flushing the buffers, lets free the btree blocks and then flush the bitmap
-        do_free_btree_blks(cp_ctx);
+        free_btree_blks_and_flush(cp_ctx);
     }
 }
 
 std::pair< IndexBufferPtr, bool > IndexWBCache::on_buf_flush_done(IndexCPContext* cp_ctx, IndexBuffer* buf) {
-    if (m_flush_thread_ids.size() > 1) {
+    if (m_cp_flush_fibers.size() > 1) {
         std::unique_lock lg(m_flush_mtx);
         return on_buf_flush_done_internal(cp_ctx, buf);
     } else {
@@ -227,7 +252,7 @@ std::pair< IndexBufferPtr, bool > IndexWBCache::on_buf_flush_done_internal(Index
 }
 
 void IndexWBCache::get_next_bufs(IndexCPContext* cp_ctx, uint32_t max_count, std::vector< IndexBufferPtr >& bufs) {
-    if (m_flush_thread_ids.size() > 1) {
+    if (m_cp_flush_fibers.size() > 1) {
         std::unique_lock lg(m_flush_mtx);
         get_next_bufs_internal(cp_ctx, max_count, nullptr, bufs);
     } else {
@@ -262,18 +287,20 @@ void IndexWBCache::get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_c
     }
 }
 
-void IndexWBCache::do_free_btree_blks(IndexCPContext* cp_ctx) {
+void IndexWBCache::free_btree_blks_and_flush(IndexCPContext* cp_ctx) {
     BlkId* pbid;
     while ((pbid = cp_ctx->next_blkid()) != nullptr) {
         m_vdev->free_blk(*pbid);
     }
 
-    m_vdev->cp_flush(); // As of now its a sync call, since metablk manager is sync write
-    cp_ctx->m_flush_done_cb(cp_ctx->cp());
+    // Pick a CP Manager blocking IO fiber to execute the cp flush of vdev
+    iomanager.run_on_forget(hs()->cp_mgr().pick_blocking_io_fiber(), [this, cp_ctx]() {
+        m_vdev->cp_flush(); // This is a blocking io call
+        cp_ctx->complete(true);
+    });
 }
 
 IndexBtreeNode* IndexBtreeNode::convert(BtreeNode* bt_node) {
     return r_cast< IndexBtreeNode* >(bt_node->get_node_context());
 }
-
 } // namespace homestore

@@ -44,6 +44,10 @@ btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr& my_node, BtreeQueryRe
             }
             count += cur_count;
 
+            if (qreq.route_tracing) {
+                append_route_trace(qreq, my_node, btree_event_t::READ, start_ind, start_ind + cur_count);
+            }
+
             // If this is not the last entry found, then surely we have reached the end of search criteria
             if ((end_ind + 1) < my_node->total_entries()) { break; }
 
@@ -69,6 +73,7 @@ btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr& my_node, BtreeQueryRe
     BtreeLinkInfo start_child_info;
     [[maybe_unused]] const auto [isfound, idx] = my_node->find(qreq.next_key(), &start_child_info, false);
     ASSERT_IS_VALID_INTERIOR_CHILD_INDX(isfound, idx, my_node);
+    if (qreq.route_tracing) { append_route_trace(qreq, my_node, btree_event_t::READ, idx, idx); }
 
     BtreeNodePtr child_node;
     ret = read_and_lock_node(start_child_info.bnode_id(), child_node, locktype_t::READ, locktype_t::READ,
@@ -98,6 +103,9 @@ btree_status_t Btree< K, V >::do_traversal_query(const BtreeNodePtr& my_node, Bt
             }
         }
 
+        if (qreq.route_tracing) {
+            append_route_trace(qreq, my_node, btree_event_t::READ, start_ind, start_ind + cur_count);
+        }
         unlock_node(my_node, locktype_t::READ);
         if (ret != btree_status_t::success || out_values.size() >= qreq.batch_size()) {
             if (out_values.size() >= qreq.batch_size()) { ret = btree_status_t::has_more; }
@@ -119,6 +127,7 @@ btree_status_t Btree< K, V >::do_traversal_query(const BtreeNodePtr& my_node, Bt
     BT_NODE_LOG_ASSERT_LE(start_idx, end_idx, my_node);
     idx = start_idx;
 
+    if (qreq.route_tracing) { append_route_trace(qreq, my_node, btree_event_t::READ, start_idx, end_idx); }
     while (idx <= end_idx) {
         BtreeLinkInfo child_info;
         my_node->get_nth_value(idx, &child_info, false);

@@ -21,8 +21,8 @@
 #pragma once
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
-#include <iomgr/iomgr_config.hpp>
 #include <homestore/homestore.hpp>
+#include <homestore/index_service.hpp>
 
 const std::string SPDK_ENV_VAR_STRING{"USER_WANT_SPDK"};
 const std::string HTTP_SVC_ENV_VAR_STRING{"USER_WANT_HTTP_OFF"};
@@ -40,6 +40,8 @@ SISL_OPTION_GROUP(test_common_setup,
                    ::cxxopts::value< uint64_t >()->default_value("1024"), "number"),
                   (device_list, "", "device_list", "Device List instead of default created",
                    ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
+                  (http_port, "", "http_port", "http port (0 for no http, -1 for random, rest specific value)",
+                   ::cxxopts::value< int >()->default_value("-1"), "number"),
                   (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 using namespace homestore;
@@ -54,15 +56,21 @@ inline static void set_fixed_http_port(uint32_t http_port){
 }
 
 // generate random port for http server
-inline static void set_random_http_port() {
+inline static uint32_t generate_random_http_port() {
     static std::random_device dev;
     static std::mt19937 rng(dev());
     std::uniform_int_distribution< std::mt19937::result_type > dist(1001u, 99999u);
     const uint32_t http_port = dist(rng);
     LOGINFO("random port generated = {}", http_port);
-    IM_SETTINGS_FACTORY().modifiable_settings([http_port](auto& s) { s.io_env->http_port = http_port; });
-    IM_SETTINGS_FACTORY().save();
+    return http_port;
 }
+
+class TestIndexServiceCallbacks : public IndexServiceCallbacks {
+public:
+    std::shared_ptr< IndexTableBase > on_index_table_found(const superblk< index_table_sb >& sb) override {
+        return nullptr;
+    }
+};
 
 class HSTestHelper {
 private:
@@ -84,7 +92,8 @@ private:
 
 public:
     static void start_homestore(const std::string& test_name, float meta_pct, float data_log_pct, float ctrl_log_pct,
-                                float index_pct, hs_init_starting_cb_t cb, bool restart = false) {
+                                float data_pct, float index_pct, hs_init_starting_cb_t cb, bool restart = false,
+                                std::unique_ptr< IndexServiceCallbacks > index_svc_cb = nullptr) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
@@ -125,7 +134,14 @@ public:
         }
 
         LOGINFO("Starting iomgr with {} threads, spdk: {}", nthreads, is_spdk);
-        ioenvironment.with_iomgr(nthreads, is_spdk);
+        ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = nthreads, .is_spdk = is_spdk});
+
+        auto const http_port = SISL_OPTIONS["http_port"].as< int >();
+        if (http_port != 0) {
+            ioenvironment.with_http_server((http_port == -1) ? generate_random_http_port() : uint32_cast(http_port));
+        }
+
+        if (!index_svc_cb) { index_svc_cb = std::make_unique< TestIndexServiceCallbacks >(); }
 
         const uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
         LOGINFO("Initialize and start HomeStore with app_mem_size = {}", homestore::in_bytes(app_mem_size));
@@ -137,6 +153,8 @@ public:
             ->with_params(params)
             .with_meta_service(meta_pct)
             .with_log_service(data_log_pct, ctrl_log_pct)
+            .with_data_service(data_pct)
+            .with_index_service(index_pct, std::move(index_svc_cb))
             .before_init_devices(std::move(cb))
             .init(true /* wait_for_init */);
     }
@@ -147,6 +165,7 @@ public:
         iomanager.stop();
 
         if (cleanup) { remove_files(s_dev_names); }
+        s_dev_names.clear();
     }
 };
 } // namespace test_common

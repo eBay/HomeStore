@@ -19,6 +19,8 @@
 #include <homestore/btree/detail/simple_node.hpp>
 #include <homestore/btree/detail/varlen_node.hpp>
 #include <sisl/fds/utils.hpp>
+// #include <iomgr/iomgr_flip.hpp>
+
 #include <chrono>
 
 namespace homestore {
@@ -31,6 +33,7 @@ btree_status_t Btree< K, V >::create_root_node(void* op_context) {
     BtreeNodePtr root = alloc_leaf_node();
     if (root == nullptr) { return btree_status_t::space_not_avail; }
 
+    root->set_level(0u);
     auto ret = write_node(root, op_context);
     if (ret != btree_status_t::success) {
         free_node(root, locktype_t::NONE, op_context);
@@ -151,7 +154,7 @@ btree_status_t Btree< K, V >::upgrade_node_locks(const BtreeNodePtr& parent_node
 #if 0
 #ifdef _PRERELEASE
     {
-        auto time = homestore_flip->get_test_flip< uint64_t >("btree_upgrade_delay");
+        auto time = iomgr_flip::instance()->get_test_flip< uint64_t >("btree_upgrade_delay");
         if (time) { std::this_thread::sleep_for(std::chrono::microseconds{time.get()}); }
     }
 #endif
@@ -163,7 +166,7 @@ btree_status_t Btree< K, V >::upgrade_node_locks(const BtreeNodePtr& parent_node
         int is_leaf = 0;
 
         if (child_node && child_node->is_leaf()) { is_leaf = 1; }
-        if (homestore_flip->test_flip("btree_upgrade_node_fail", is_leaf)) {
+        if (iomgr_flip::instance()->test_flip("btree_upgrade_node_fail", is_leaf)) {
             unlock_node(my_node, cur_lock);
             cur_lock = locktype_t::NONE;
             if (child_node) {
@@ -256,7 +259,7 @@ static BtreeNode* create_node(uint32_t node_ctx_size, Args&&... args) {
 
 template < typename K, typename V >
 BtreeNode* Btree< K, V >::init_node(uint8_t* node_buf, uint32_t node_ctx_size, bnodeid_t id, bool init_buf,
-                                    bool is_leaf) {
+                                    bool is_leaf) const {
     BtreeNode* n{nullptr};
     btree_node_type node_type = is_leaf ? m_bt_cfg.leaf_node_type() : m_bt_cfg.interior_node_type();
 
@@ -307,7 +310,7 @@ void Btree< K, V >::free_node(const BtreeNodePtr& node, locktype_t cur_lock, voi
     --m_total_nodes;
 
     free_node_impl(node, context);
-    intrusive_ptr_release(node.get());
+    // intrusive_ptr_release(node.get());
 }
 
 template < typename K, typename V >

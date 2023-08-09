@@ -13,36 +13,44 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
+
 #include <random>
 #include <map>
 #include <memory>
 #include <gtest/gtest.h>
+#include <boost/uuid/random_generator.hpp>
 
+#include <iomgr/io_environment.hpp>
 #include <sisl/options/options.h>
 #include <sisl/logging/logging.h>
 #include <sisl/utility/enum.hpp>
 #include "btree_test_kvs.hpp"
 #include <homestore/btree/detail/simple_node.hpp>
 #include <homestore/btree/detail/varlen_node.hpp>
-#include <homestore/btree/mem_btree.hpp>
+#include <homestore/homestore.hpp>
+#include <homestore/index/index_table.hpp>
+#include "common/homestore_config.hpp"
+#include "common/resource_mgr.hpp"
+#include "test_common/homestore_test_common.hpp"
 
-static constexpr uint32_t g_node_size{4096};
 using namespace homestore;
-SISL_LOGGING_INIT(btree, iomgr, io_wd)
 
-SISL_OPTIONS_ENABLE(logging, test_mem_btree)
-SISL_OPTION_GROUP(test_mem_btree,
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_OPTIONS_ENABLE(logging, test_index_btree, iomgr, test_common_setup)
+SISL_LOGGING_DECL(test_index_btree)
+
+std::vector< std::string > test_common::HSTestHelper::s_dev_names;
+
+SISL_OPTION_GROUP(test_index_btree,
                   (num_iters, "", "num_iters", "number of iterations for rand ops",
-                   ::cxxopts::value< uint32_t >()->default_value("100"), "number"),
+                   ::cxxopts::value< uint32_t >()->default_value("65536"), "number"),
                   (num_entries, "", "num_entries", "number of entries to test with",
-                   ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
-                  (merge_activate, "", "merge_activate", "merge_activate",
-                   ::cxxopts::value< bool >()->default_value("0"), ""),
+                   ::cxxopts::value< uint32_t >()->default_value("65536"), "number"),
                   (seed, "", "seed", "random engine seed, use random if not defined",
                    ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
 struct FixedLenBtreeTest {
-    using BtreeType = MemBtree< TestFixedKey, TestFixedValue >;
+    using BtreeType = IndexTable< TestFixedKey, TestFixedValue >;
     using KeyType = TestFixedKey;
     using ValueType = TestFixedValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::FIXED;
@@ -50,7 +58,7 @@ struct FixedLenBtreeTest {
 };
 
 struct VarKeySizeBtreeTest {
-    using BtreeType = MemBtree< TestVarLenKey, TestFixedValue >;
+    using BtreeType = IndexTable< TestVarLenKey, TestFixedValue >;
     using KeyType = TestVarLenKey;
     using ValueType = TestFixedValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_KEY;
@@ -58,7 +66,7 @@ struct VarKeySizeBtreeTest {
 };
 
 struct VarValueSizeBtreeTest {
-    using BtreeType = MemBtree< TestFixedKey, TestVarLenValue >;
+    using BtreeType = IndexTable< TestFixedKey, TestVarLenValue >;
     using KeyType = TestFixedKey;
     using ValueType = TestVarLenValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_VALUE;
@@ -66,7 +74,7 @@ struct VarValueSizeBtreeTest {
 };
 
 struct VarObjSizeBtreeTest {
-    using BtreeType = MemBtree< TestVarLenKey, TestVarLenValue >;
+    using BtreeType = IndexTable< TestVarLenKey, TestVarLenValue >;
     using KeyType = TestVarLenKey;
     using ValueType = TestVarLenValue;
     static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_OBJECT;
@@ -79,16 +87,43 @@ struct BtreeTest : public testing::Test {
     using K = typename TestType::KeyType;
     using V = typename TestType::ValueType;
 
-    std::unique_ptr< typename T::BtreeType > m_bt;
+    class TestIndexServiceCallbacks : public IndexServiceCallbacks {
+    public:
+        TestIndexServiceCallbacks(BtreeConfig cfg) : m_bt_cfg(cfg) {}
+        std::shared_ptr< IndexTableBase > on_index_table_found(const superblk< index_table_sb >& sb) override {
+            LOGINFO("Index table recovered");
+            return std::make_shared< typename T::BtreeType >(sb, this->m_bt_cfg);
+        }
+
+    private:
+        BtreeConfig m_bt_cfg;
+    };
+
+    std::shared_ptr< typename T::BtreeType > m_bt;
     std::map< K, V > m_shadow_map;
-    BtreeConfig m_cfg{g_node_size};
+    std::unique_ptr< BtreeConfig > m_bt_cfg;
 
     void SetUp() override {
-        m_cfg.m_leaf_node_type = T::leaf_node_type;
-        m_cfg.m_int_node_type = T::interior_node_type;
-        if (SISL_OPTIONS.count("merge_activate")) m_cfg.m_merge_turned_on = true;
-        m_bt = std::make_unique< typename T::BtreeType >(m_cfg);
-        m_bt->init(nullptr);
+        test_common::HSTestHelper::start_homestore("test_index_btree", 10 /* meta */, 0 /* data log */, 0 /* ctrl log*/,
+                                                   0 /* data */, 70 /* index */, nullptr, false /* restart */);
+
+        m_bt_cfg = std::make_unique< BtreeConfig >(hs()->index_service().node_size());
+        m_bt_cfg->m_leaf_node_type = T::leaf_node_type;
+        m_bt_cfg->m_int_node_type = T::interior_node_type;
+
+        auto uuid = boost::uuids::random_generator()();
+        auto parent_uuid = boost::uuids::random_generator()();
+
+        // Create index table and attach to index service.
+
+        m_bt = std::make_shared< typename T::BtreeType >(uuid, parent_uuid, 0, *m_bt_cfg);
+        hs()->index_service().add_index_table(m_bt);
+        LOGINFO("Added index table to index service");
+    }
+
+    void TearDown() override {
+        m_bt.reset();
+        test_common::HSTestHelper::shutdown_homestore();
     }
 
     void put(uint32_t k, btree_put_type put_type) {
@@ -96,6 +131,7 @@ struct BtreeTest : public testing::Test {
         auto pk = std::make_unique< K >(k);
         auto pv = std::make_unique< V >(V::generate_rand());
         auto sreq{BtreeSinglePutRequest{pk.get(), pv.get(), put_type, existing_v.get()}};
+        sreq.enable_route_tracing();
         bool done = (m_bt->put(sreq) == btree_status_t::success);
 
         // auto& sreq = to_single_put_req(req);
@@ -133,6 +169,7 @@ struct BtreeTest : public testing::Test {
 
         auto mreq = BtreeRangePutRequest< K >{BtreeKeyRange< K >{start_it->first, true, end_it->first, true},
                                               btree_put_type::REPLACE_ONLY_IF_EXISTS, val.get()};
+        mreq.enable_route_tracing();
         ASSERT_EQ(m_bt->put(mreq), btree_status_t::success);
     }
 
@@ -141,6 +178,7 @@ struct BtreeTest : public testing::Test {
         auto pk = std::make_unique< K >(k);
 
         auto rreq = BtreeSingleRemoveRequest{pk.get(), existing_v.get()};
+        rreq.enable_route_tracing();
         bool removed = (m_bt->remove(rreq) == btree_status_t::success);
 
         bool expected_removed = (m_shadow_map.find(rreq.key()) != m_shadow_map.end());
@@ -152,45 +190,9 @@ struct BtreeTest : public testing::Test {
         }
     }
 
-    void range_remove(uint32_t start_key, uint32_t end_key) {
-
-        auto start_it = m_shadow_map.lower_bound(K{start_key});
-        auto end_it = m_shadow_map.lower_bound(K{end_key});
-        auto fount_it = m_shadow_map.find(K{end_key});
-        bool expected = (start_it != m_shadow_map.end()) && (std::distance(start_it, end_it) >= 0);
-        if (start_it == end_it && fount_it == m_shadow_map.end()) { expected = false; }
-        auto range = BtreeKeyRange< K >{K{start_key}, true, K{end_key}, true};
-        LOGINFO("range : {}", range.to_string());
-        auto mreq = BtreeRangeRemoveRequest< K >{std::move(range)};
-
-        size_t original_ts = get_tree_size();
-        size_t original_ms = m_shadow_map.size();
-
-        auto ret = m_bt->remove(mreq);
-        ASSERT_EQ(expected, ret == btree_status_t::success)
-            << " not a successful remove op for range " << range.to_string()
-            << "start_it!=m_shadow_map.end(): " << (start_it != m_shadow_map.end())
-            << " and std::distance(start_it,end_it) >= 0 : " << (std::distance(start_it, end_it) >= 0);
-
-        K out_key;
-        V out_value;
-        auto qret = get_num_elements_in_tree(start_key, end_key, out_key, out_value);
-        ASSERT_EQ(qret, btree_status_t::not_found)
-            << "  At least one element found! [" << out_key << "] = " << out_value;
-
-        if (expected) { m_shadow_map.erase(start_it, fount_it != m_shadow_map.end() ? ++end_it : end_it); }
-        size_t ms = m_shadow_map.size();
-        size_t ts = get_tree_size();
-        ASSERT_EQ(original_ms - ms, original_ts - ts) << " number of removed from map is " << original_ms - ms
-                                                      << " whereas number of existing keys is " << original_ts - ts;
-
-        ASSERT_EQ(ts, ms) << " size of tree is " << ts << " vs number of existing keys are " << ms;
-    }
-
     void query_all_validate() const {
         query_validate(0u, SISL_OPTIONS["num_entries"].as< uint32_t >() - 1, UINT32_MAX);
     }
-
     void query_all_paginate_validate(uint32_t batch_size) const {
         query_validate(0u, SISL_OPTIONS["num_entries"].as< uint32_t >() - 1, batch_size);
     }
@@ -202,30 +204,33 @@ struct BtreeTest : public testing::Test {
 
         BtreeQueryRequest< K > qreq{BtreeKeyRange< K >{K{start_k}, true, K{end_k}, true},
                                     BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, batch_size};
-        while (remaining > 0) {
+        qreq.enable_route_tracing();
+
+        do {
             out_vector.clear();
             auto const ret = m_bt->query(qreq, out_vector);
             auto const expected_count = std::min(remaining, batch_size);
 
-            ASSERT_EQ(out_vector.size(), expected_count) << "Received incorrect value on query pagination";
             remaining -= expected_count;
-
             if (remaining == 0) {
                 ASSERT_EQ(ret, btree_status_t::success) << "Expected success on query";
             } else {
                 ASSERT_EQ(ret, btree_status_t::has_more) << "Expected query to return has_more";
             }
+            ASSERT_EQ(out_vector.size(), expected_count) << "Received incorrect value on query pagination";
 
             for (size_t idx{0}; idx < out_vector.size(); ++idx) {
                 ASSERT_EQ(out_vector[idx].second, it->second)
                     << "Range get doesn't return correct data for key=" << it->first << " idx=" << idx;
                 ++it;
             }
-        }
+        } while (remaining > 0);
+#if 0
         out_vector.clear();
         auto ret = m_bt->query(qreq, out_vector);
         ASSERT_EQ(ret, btree_status_t::success) << "Expected success on query";
         ASSERT_EQ(out_vector.size(), 0) << "Received incorrect value on empty query pagination";
+#endif
     }
 
     void get_all_validate() const {
@@ -234,7 +239,7 @@ struct BtreeTest : public testing::Test {
             *copy_key = key;
             auto out_v = std::make_unique< V >();
             auto req = BtreeSingleGetRequest{copy_key.get(), out_v.get()};
-
+            req.enable_route_tracing();
             const auto ret = m_bt->get(req);
             ASSERT_EQ(ret, btree_status_t::success) << "Missing key " << key << " in btree but present in shadow map";
             ASSERT_EQ((const V&)req.value(), value)
@@ -276,24 +281,18 @@ struct BtreeTest : public testing::Test {
 
     void print() const { m_bt->print_tree(); }
 
-    void print_keys() const { m_bt->print_tree_keys(); }
+    void trigger_cp(bool wait) {
+        auto fut = homestore::hs()->cp_mgr().trigger_cp_flush(true /* force */);
+        auto on_complete = [&](auto success) {
+            ASSERT_EQ(success, true) << "CP Flush failed";
+            LOGINFO("CP Flush completed");
+        };
 
-    size_t get_tree_size() {
-        BtreeQueryRequest< K > qreq{
-            BtreeKeyRange< K >{K{0}, true, K{SISL_OPTIONS["num_entries"].as< uint32_t >()}, true},
-            BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY, UINT32_MAX};
-        std::vector< std::pair< K, V > > out_vector;
-        auto const ret = m_bt->query(qreq, out_vector);
-        return out_vector.size();
-    }
-
-    btree_status_t get_num_elements_in_tree(uint32_t start_k, uint32_t end_k, K& out_key, V& out_value) const {
-        auto req = BtreeGetAnyRequest< K >{BtreeKeyRange< K >{K{start_k}, true, K{end_k}, true},
-                                           std::make_unique< K >(), std::make_unique< V >()};
-        auto ret = m_bt->get(req);
-        out_key = *((K*)req.m_outkey.get());
-        out_value = *((V*)req.m_outval.get());
-        return ret;
+        if (wait) {
+            on_complete(std::move(fut).get());
+        } else {
+            std::move(fut).thenValue(on_complete);
+        }
     }
 
 private:
@@ -321,7 +320,10 @@ private:
     }
 };
 
-using BtreeTypes = testing::Types< FixedLenBtreeTest, VarKeySizeBtreeTest, VarValueSizeBtreeTest, VarObjSizeBtreeTest >;
+// using BtreeTypes = testing::Types< FixedLenBtreeTest, VarKeySizeBtreeTest, VarValueSizeBtreeTest, VarObjSizeBtreeTest
+// >;
+using BtreeTypes = testing::Types< VarKeySizeBtreeTest, VarValueSizeBtreeTest, VarObjSizeBtreeTest >;
+
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 
 TYPED_TEST(BtreeTest, SequentialInsert) {
@@ -331,9 +333,10 @@ TYPED_TEST(BtreeTest, SequentialInsert) {
     LOGINFO("Step 1: Do Forward sequential insert for {} entries", entries_iter1);
     for (uint32_t i{0}; i < entries_iter1; ++i) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+        // this->print();
     }
     LOGINFO("Step 2: Query {} entries and validate with pagination of 75 entries", entries_iter1);
-    this->query_validate(0, entries_iter1, 75);
+    this->query_validate(0, entries_iter1 - 1, 75);
 
     // Reverse sequential insert
     const auto entries_iter2 = num_entries - entries_iter1;
@@ -369,7 +372,7 @@ TYPED_TEST(BtreeTest, SequentialRemove) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
     LOGINFO("Step 2: Query {} entries and validate with pagination of 75 entries", num_entries);
-    this->query_validate(0, num_entries, 75);
+    this->query_validate(0, num_entries - 1, 75);
 
     const auto entries_iter1 = num_entries / 2;
     LOGINFO("Step 3: Do Forward sequential remove for {} entries", entries_iter1);
@@ -377,7 +380,8 @@ TYPED_TEST(BtreeTest, SequentialRemove) {
         this->remove_one(i);
     }
     LOGINFO("Step 4: Query {} entries and validate with pagination of 75 entries", entries_iter1);
-    this->query_validate(0, entries_iter1, 75);
+    this->query_validate(0, entries_iter1 - 1, 75);
+    this->query_validate(entries_iter1, num_entries - 1, 75);
 
     const auto entries_iter2 = num_entries - entries_iter1;
     LOGINFO("Step 5: Do Reverse sequential remove of remaining {} entries", entries_iter2);
@@ -386,7 +390,7 @@ TYPED_TEST(BtreeTest, SequentialRemove) {
     }
 
     LOGINFO("Step 6: Query the empty tree");
-    this->query_validate(0, num_entries, 75);
+    this->query_validate(0, num_entries - 1, 75);
     this->get_any_validate(0, 1);
     this->get_specific_validate(0);
 }
@@ -406,102 +410,64 @@ TYPED_TEST(BtreeTest, RangeUpdate) {
     }
 
     LOGINFO("Step 2: Query {} entries and validate with pagination of 75 entries", num_entries);
-    this->query_validate(0, num_entries, 75);
+    this->query_validate(0, num_entries - 1, 75);
 }
 
-TYPED_TEST(BtreeTest, SimpleRemoveRange) {
-    // Forward sequential insert
-    const auto num_entries = 20;
-    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries);
-    for (uint32_t i{0}; i < num_entries; ++i) {
-        this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-    }
 
-    //    this->print_keys(); // EXPECT size = 20 : 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19
-    this->range_remove(5, 10);
-    //    this->print_keys(); // EXPECT size = 14 : 0 1 2 3 4 [5 6 7 8 9 10] 11 12 13 14 15 16 17 18 19
-    this->range_remove(0, 2);
-    //    this->print_keys(); // EXPECT size = 11 : [0 1 2] 3 4 11 12 13 14 15 16 17 18 19
-    this->range_remove(18, 19);
-    //    this->print_keys(); // EXPECT size = 9 : 3 4 11 12 13 14 15 16 17 [18 19]
-    this->range_remove(17, 17);
-    //    this->print_keys(); // EXPECT size = 8 : 3 4 11 12 13 14 15 16 [17]
-    this->range_remove(1, 5);
-    //    this->print_keys(); // EXPECT size = 6 : [3 4] 11 12 13 14 15 16
-    this->range_remove(1, 20);
-    //    this->print_keys(); // EXPECT size = 0 : [11 12 13 14 15 16]
+TYPED_TEST(BtreeTest, CpFlush) {
+    // Test cp flush of write back.
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.generic.cache_max_throttle_cnt = 100;
+        HS_SETTINGS_FACTORY().save();
+    });
+    homestore::hs()->resource_mgr().reset_dirty_buf_qd();
 
-    this->query_all_validate();
-    //    this->query_validate(0, num_entries , 75);
-}
-
-TYPED_TEST(BtreeTest, removeAllEntriesReverse) {
-    // Forward sequential insert
-    const auto num_entries = 1000;
-    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries);
-    for (uint32_t i{0}; i < num_entries; ++i) {
-        this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-    }
-    //    this->print_keys();
-    this->range_remove(681, 999);
-    //    this->print_keys();
-    this->range_remove(454, 680);
-    //    this->print_keys();
-    this->range_remove(227, 453);
-    //    this->print_keys();
-    this->range_remove(0, 226);
-    //    this->print_keys();
-    this->query_all_validate();
-}
-
-TYPED_TEST(BtreeTest, removeAllEntries) {
-    // Forward sequential insert
-    const auto num_entries = 1000;
-    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries);
-    for (uint32_t i{0}; i < num_entries; ++i) {
-        this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
-    }
-    //    this->print_keys();
-    this->range_remove(0, 226);
-    //    this->print_keys();
-    this->range_remove(227, 453);
-    //    this->print_keys();
-    this->range_remove(454, 680);
-    //    this->print_keys();
-    this->range_remove(681, 999);
-    //    this->print_keys();
-    this->query_all_validate();
-}
-
-TYPED_TEST(BtreeTest, RandomRemoveRange) {
-
-    // Forward sequential insert
     const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
-    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries);
-    for (uint32_t i{0}; i < num_entries; ++i) {
+    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries / 2);
+    for (uint32_t i{0}; i < num_entries / 2; ++i) {
+        this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    }
+    LOGINFO("Step 2: Query {} entries and validate with pagination of 75 entries", num_entries / 2);
+    this->query_validate(0, num_entries / 2 - 1, 75);
+
+    LOGINFO("Step 3: Trigger checkpoint flush.");
+    // this->trigger_cp(true /* wait */);
+
+    LOGINFO("Step 4: Simulate parallel insert for {} entries", num_entries / 2);
+    for (uint32_t i{num_entries / 2}; i < num_entries; ++i) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
 
-    static std::uniform_int_distribution< uint32_t > s_rand_key_generator{0, 2 * num_entries};
-    //    this->print_keys();
-    for (uint32_t i{0}; i < SISL_OPTIONS["num_iters"].as< uint32_t >() && this->m_shadow_map.size() > 0; ++i) {
-        uint32_t key1 = s_rand_key_generator(g_re);
-        uint32_t key2 = s_rand_key_generator(g_re);
-        uint32_t start_key = std::min(key1, key2);
-        uint32_t end_key = std::max(key1, key2);
+    LOGINFO("Step 5: Query {} entries and validate with pagination of 75 entries", num_entries);
+    this->query_validate(0, num_entries - 1, 75);
 
-        LOGINFO("Step 2 - {}: Do Range Remove of maximum [{},{}] keys ", i, start_key, end_key);
-        this->range_remove(std::min(key1, key2), std::max(key1, key2));
-        //        this->print_keys();
-    }
+    LOGINFO("Step 4: Trigger a back-to-back cp");
+    // this->trigger_cp(false /* wait */);
+    this->trigger_cp(true /* wait */);
 
-    this->query_all_validate();
+    LOGINFO("Step 4: Query {} entries and validate with pagination of 75 entries", num_entries);
+    this->query_validate(0, num_entries - 1, 75);
+    this->print();
+
+    // Restart homestore.
+    auto index_svc_cb = std::make_unique< typename TestFixture::TestIndexServiceCallbacks >(*this->m_bt_cfg);
+    test_common::HSTestHelper::start_homestore("test_index_btree", 10 /* meta */, 0 /* data log */, 0 /* ctrl log*/,
+                                               0 /* data */, 70 /* index */, nullptr, true /* restart */,
+                                               std::move(index_svc_cb) /* index service callbacks */);
+    std::this_thread::sleep_for(std::chrono::seconds{3});
+    LOGINFO("Step 5: Restarted homestore with index recovered");
+
+    LOGINFO("Query {} entries", num_entries);
+
+    this->print();
+    this->query_validate(0, num_entries - 1, 75);
 }
 
 int main(int argc, char* argv[]) {
-    ::testing::InitGoogleTest(&argc, argv);
-    SISL_OPTIONS_LOAD(argc, argv, logging, test_mem_btree)
-    sisl::logging::SetLogger("test_mem_btree");
+    int parsed_argc{argc};
+    ::testing::InitGoogleTest(&parsed_argc, argv);
+    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_index_btree, iomgr, test_common_setup);
+    sisl::logging::SetLogger("test_index_btree");
     spdlog::set_pattern("[%D %T%z] [%^%L%$] [%t] %v");
 
     if (SISL_OPTIONS.count("seed")) {

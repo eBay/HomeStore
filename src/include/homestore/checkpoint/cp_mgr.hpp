@@ -59,20 +59,22 @@ class CPContext {
 private:
     cp_id_t m_cp_id;
     CP* m_cp;
+    folly::Promise< bool > m_flush_comp;
 
 public:
     CPContext(cp_id_t id) : m_cp_id{id} {}
     cp_id_t id() const { return m_cp_id; }
     CP* cp() { return m_cp; }
+    void complete(bool status) { m_flush_comp.setValue(status); }
+    folly::Future< bool > get_future() { return m_flush_comp.getFuture(); }
 
     virtual ~CPContext() = default;
 };
 
-typedef std::function< void(CP*) > cp_flush_done_cb_t;
-typedef std::function< void(bool success) > cp_done_cb_t;
-
 class CPCallbacks {
 public:
+    virtual ~CPCallbacks() = default;
+
     /// @brief CPManager calls this method when a new CP is triggered and it is time to switchover the dirty buffer
     /// collection to the new CP and flush the existing CP.
     /// @param cur_cp Pointer to the current CP session which about to be switchedover
@@ -84,7 +86,7 @@ public:
     /// accumulated in this CP. Once CP flush is completed, consumers are required to call the flush_done callback.
     /// @param cp CP pointer to which the dirty buffers have to be flushed
     /// @param done_cb Callback after cp is done
-    virtual void cp_flush(CP* cp, cp_flush_done_cb_t&& done_cb) = 0;
+    virtual folly::Future< bool > cp_flush(CP* cp) = 0;
 
     /// @brief After flushed the CP, CPManager calls this method to clean up any CP related structures
     /// @param cp
@@ -156,9 +158,9 @@ private:
     std::mutex trigger_cp_mtx;
     Clock::time_point m_cp_start_time;
     std::array< std::unique_ptr< CPCallbacks >, (size_t)cp_consumer_t::SENTINEL > m_cp_cb_table;
-    sisl::atomic_counter< int32_t > m_cp_flush_waiters{0};
     std::unique_ptr< CPWatchdog > m_wd_cp;
     superblk< cp_mgr_super_block > m_sb;
+    std::vector< iomgr::io_fiber_t > m_cp_io_fibers;
 
 public:
     CPManager(bool first_time_boot);
@@ -201,13 +203,14 @@ public:
 
     /// @brief Trigger a checkpoint flush on all subsystems registered. There is only 1 checkpoint per checkpoint
     /// manager. Checkpoint flush will wait for cp to exited all critical io sections.
-    /// @param cb : Callback to be called upon completion of checkpoint flush
     /// @param force : Do we need to force queue the checkpoint flush, in case previous checkpoint is been flushed
-    void trigger_cp_flush(cp_done_cb_t&& cb = nullptr, bool force = false);
+    folly::Future< bool > trigger_cp_flush(bool force = false);
 
     const std::array< std::unique_ptr< CPCallbacks >, (size_t)cp_consumer_t::SENTINEL >& consumer_list() const {
         return m_cp_cb_table;
     }
+
+    iomgr::io_fiber_t pick_blocking_io_fiber() const;
 
 private:
     void cp_ref(CP* cp);
@@ -216,5 +219,6 @@ private:
     void on_cp_flush_done(CP* cp);
     void cleanup_cp(CP* cp);
     void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
+    void start_cp_thread();
 };
 } // namespace homestore

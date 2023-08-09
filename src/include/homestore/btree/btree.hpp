@@ -20,6 +20,7 @@
 
 #include <boost/intrusive_ptr.hpp>
 #include <folly/small_vector.h>
+#include <iomgr/fiber_lib.hpp>
 
 #include "btree_req.hpp"
 #include "btree_kv.hpp"
@@ -45,7 +46,7 @@ struct BtreeThreadVariables {
 template < typename K, typename V >
 class Btree {
 private:
-    mutable folly::SharedMutexWritePriority m_btree_lock;
+    mutable iomgr::FiberManagerLib::shared_mutex m_btree_lock;
     BtreeLinkInfo m_root_node_info;
 
     BtreeMetrics m_metrics;
@@ -99,6 +100,9 @@ public:
     void print_tree() const;
     void print_tree_keys() const;
     nlohmann::json get_metrics_in_json(bool updated = true);
+    bnodeid_t root_node_id() const;
+    uint64_t root_link_version() const;
+    void set_root_node_info(const BtreeLinkInfo &info);
 
     // static void set_io_flip();
     // static void set_error_flip();
@@ -106,7 +110,8 @@ public:
 protected:
     /////////////////////////// Methods the underlying store is expected to handle ///////////////////////////
     virtual BtreeNodePtr alloc_node(bool is_leaf) = 0;
-    virtual BtreeNode* init_node(uint8_t* node_buf, uint32_t node_ctx_size, bnodeid_t id, bool init_buf, bool is_leaf);
+    virtual BtreeNode* init_node(uint8_t* node_buf, uint32_t node_ctx_size, bnodeid_t id, bool init_buf,
+                                 bool is_leaf) const;
     virtual btree_status_t read_node_impl(bnodeid_t id, BtreeNodePtr& node) const = 0;
     virtual btree_status_t write_node_impl(const BtreeNodePtr& node, void* context) = 0;
     virtual btree_status_t refresh_node(const BtreeNodePtr& node, bool for_read_modify_write, void* context) const = 0;
@@ -171,6 +176,8 @@ protected:
     bool call_on_remove_kv_cb(const BtreeNodePtr& node, uint32_t idx, const BtreeRequest& req) const;
     bool call_on_update_kv_cb(const BtreeNodePtr& node, uint32_t idx, const BtreeKey& new_key,
                               const BtreeRequest& req) const;
+    void append_route_trace(BtreeRequest& req, const BtreeNodePtr& node, btree_event_t event, uint32_t start_idx = 0,
+                            uint32_t end_idx = 0) const;
 
     //////////////////////////////// Impl Methods //////////////////////////////////////////
 

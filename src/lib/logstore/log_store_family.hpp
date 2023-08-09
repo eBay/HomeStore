@@ -79,7 +79,7 @@ public:
     }
     void remove_log_store(logstore_id_t store_id);
 
-    void device_truncate_in_user_reactor(const std::shared_ptr< truncate_req >& treq);
+    void device_truncate(const std::shared_ptr< truncate_req >& treq);
 
     nlohmann::json dump_log_store(const log_dump_req& dum_req);
 
@@ -93,7 +93,6 @@ public:
     logdev_key do_device_truncate(bool dry_run = false);
 
 private:
-
     void on_log_store_found(logstore_id_t store_id, const logstore_superblk& meta);
     void on_io_completion(logstore_id_t id, logdev_key ld_key, logdev_key flush_idx, uint32_t nremaining_in_batch,
                           void* ctx);
@@ -101,8 +100,9 @@ private:
                      log_buffer buf, uint32_t nremaining_in_batch);
     void on_batch_completion(HomeLogStore* log_store, uint32_t nremaining_in_batch, logdev_key flush_ld_key);
 
-public:
-    folly::Synchronized< std::unordered_map< logstore_id_t, logstore_info_t > > m_id_logstore_map;
+private:
+    folly::SharedMutexWritePriority m_store_map_mtx;
+    std::unordered_map< logstore_id_t, logstore_info_t > m_id_logstore_map;
     std::unordered_map< logstore_id_t, uint64_t > m_unopened_store_io;
     std::unordered_set< logstore_id_t > m_unopened_store_id;
     std::unordered_map< logstore_id_t, logid_t > m_last_flush_info;

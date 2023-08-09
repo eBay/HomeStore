@@ -251,9 +251,9 @@ public:
 
     uint32_t move_out_to_right_by_size(const BtreeConfig& cfg, BtreeNode& o, uint32_t size_to_move) override {
         auto& other = static_cast< VariableNode& >(o);
-        uint32_t moved_size = 0U;
         auto this_gen = this->node_gen();
         auto other_gen = other.node_gen();
+        uint32_t nmoved{0};
 
         uint32_t ind = this->total_entries() - 1;
         while (ind > 0) {
@@ -267,8 +267,9 @@ public:
 
             auto sz = other.insert(0, kb, vb); // Keep on inserting on the first index, thus moving everything to right
             if (!sz) break;
-            moved_size += sz;
+
             --ind;
+            ++nmoved;
             if ((kb.size + vb.size + this->get_record_size()) > size_to_move) {
                 // We reached threshold of how much we could move
                 break;
@@ -289,7 +290,7 @@ public:
         this->set_gen(this_gen + 1);
         other.set_gen(other_gen + 1);
 
-        return moved_size;
+        return nmoved;
     }
 
     uint32_t num_entries_by_size(uint32_t start_idx, uint32_t size) const override {
@@ -493,10 +494,11 @@ public:
 
     std::string to_string(bool print_friendly = false) const override {
         auto str = fmt::format(
-            "{}id={} nEntries={} {} free_space={} next_node={} ",
+            "{}id={} level={} nEntries={} {} free_space={}{} ",
             (print_friendly ? "---------------------------------------------------------------------\n" : ""),
-            this->node_id(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"),
-            get_var_node_header_const()->m_available_space, this->next_bnode());
+            this->node_id(), this->level(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"),
+            get_var_node_header_const()->m_available_space,
+            (this->next_bnode() == empty_bnodeid) ? "" : fmt::format(" next_node={}", this->next_bnode()));
         if (!this->is_leaf() && (this->has_valid_edge())) {
             fmt::format_to(std::back_inserter(str), "edge_id={}.{}", this->edge_info().m_bnodeid,
                            this->edge_info().m_link_version);
@@ -578,8 +580,8 @@ protected:
         uint16_t obj_size = key_blob.size + val_blob.size;
         uint16_t to_insert_size = obj_size + this->get_record_size();
         if (to_insert_size > get_var_node_header()->available_space()) {
-            LOGDEBUGMOD(btree, "insert failed insert size {} available size {}", to_insert_size,
-                        get_var_node_header()->available_space());
+            RELEASE_ASSERT(false, "insert failed insert size {} available size {}", to_insert_size,
+                           get_var_node_header()->available_space());
             return 0;
         }
 
@@ -587,7 +589,7 @@ protected:
         if (to_insert_size > get_arena_free_space()) {
             compact();
             // Expect after compaction to have available space to insert
-            assert(to_insert_size <= get_arena_free_space());
+            DEBUG_ASSERT_LE(to_insert_size, get_arena_free_space(), "We should have space available after compaction");
         }
 
         // Create a room for a new record
