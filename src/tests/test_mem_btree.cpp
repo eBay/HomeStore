@@ -36,8 +36,8 @@ SISL_OPTION_GROUP(test_mem_btree,
                    ::cxxopts::value< uint32_t >()->default_value("100"), "number"),
                   (num_entries, "", "num_entries", "number of entries to test with",
                    ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
-                  (merge_activate, "", "merge_activate", "merge_activate",
-                   ::cxxopts::value< bool >()->default_value("0"), ""),
+                  (disable_merge, "", "disable_merge", "disable_merge", ::cxxopts::value< bool >()->default_value("0"),
+                   ""),
                   (seed, "", "seed", "random engine seed, use random if not defined",
                    ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
@@ -86,7 +86,7 @@ struct BtreeTest : public testing::Test {
     void SetUp() override {
         m_cfg.m_leaf_node_type = T::leaf_node_type;
         m_cfg.m_int_node_type = T::interior_node_type;
-        if (SISL_OPTIONS.count("merge_activate")) m_cfg.m_merge_turned_on = true;
+        if (SISL_OPTIONS.count("merge_disable")) m_cfg.m_merge_turned_on = false;
         m_bt = std::make_unique< typename T::BtreeType >(m_cfg);
         m_bt->init(nullptr);
     }
@@ -288,8 +288,8 @@ struct BtreeTest : public testing::Test {
     }
 
     btree_status_t get_num_elements_in_tree(uint32_t start_k, uint32_t end_k, K& out_key, V& out_value) const {
-        auto k = std::make_unique<K>();
-        auto v = std::make_unique<V>();
+        auto k = std::make_unique< K >();
+        auto v = std::make_unique< V >();
         auto req = BtreeGetAnyRequest< K >{BtreeKeyRange< K >{K{start_k}, true, K{end_k}, true}, k.get(), v.get()};
         auto ret = m_bt->get(req);
         out_key = *((K*)req.m_outkey);
@@ -334,7 +334,7 @@ TYPED_TEST(BtreeTest, SequentialInsert) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
     LOGINFO("Step 2: Query {} entries and validate with pagination of 75 entries", entries_iter1);
-    this->query_validate(0, entries_iter1, 75);
+    this->query_validate(0, entries_iter1 - 1, 75);
 
     // Reverse sequential insert
     const auto entries_iter2 = num_entries - entries_iter1;
@@ -370,7 +370,7 @@ TYPED_TEST(BtreeTest, SequentialRemove) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
     LOGINFO("Step 2: Query {} entries and validate with pagination of 75 entries", num_entries);
-    this->query_validate(0, num_entries, 75);
+    this->query_validate(0, num_entries - 1, 75);
 
     const auto entries_iter1 = num_entries / 2;
     LOGINFO("Step 3: Do Forward sequential remove for {} entries", entries_iter1);
@@ -378,7 +378,7 @@ TYPED_TEST(BtreeTest, SequentialRemove) {
         this->remove_one(i);
     }
     LOGINFO("Step 4: Query {} entries and validate with pagination of 75 entries", entries_iter1);
-    this->query_validate(0, entries_iter1, 75);
+    this->query_validate(0, entries_iter1 - 1, 75);
 
     const auto entries_iter2 = num_entries - entries_iter1;
     LOGINFO("Step 5: Do Reverse sequential remove of remaining {} entries", entries_iter2);
@@ -390,6 +390,20 @@ TYPED_TEST(BtreeTest, SequentialRemove) {
     this->query_validate(0, num_entries, 75);
     this->get_any_validate(0, 1);
     this->get_specific_validate(0);
+}
+
+TYPED_TEST(BtreeTest, RandomInsert) {
+    // Forward sequential insert
+    const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
+    std::vector< uint32_t > vec(num_entries);
+    // make keys [0, num_entries)
+    iota(vec.begin(), vec.end(), 0);
+    // shuffle keys
+    std::random_shuffle(vec.begin(), vec.end());
+    for (uint32_t i{0}; i < num_entries; ++i) {
+        this->put(vec[i], btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    }
+    this->get_all_validate();
 }
 
 TYPED_TEST(BtreeTest, RangeUpdate) {
@@ -407,7 +421,7 @@ TYPED_TEST(BtreeTest, RangeUpdate) {
     }
 
     LOGINFO("Step 2: Query {} entries and validate with pagination of 75 entries", num_entries);
-    this->query_validate(0, num_entries, 75);
+    this->query_validate(0, num_entries - 1, 75);
 }
 
 TYPED_TEST(BtreeTest, SimpleRemoveRange) {
@@ -436,42 +450,22 @@ TYPED_TEST(BtreeTest, SimpleRemoveRange) {
     //    this->query_validate(0, num_entries , 75);
 }
 
-TYPED_TEST(BtreeTest, removeAllEntriesReverse) {
+TYPED_TEST(BtreeTest, RandomRemove) {
     // Forward sequential insert
-    const auto num_entries = 1000;
-    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries);
+    const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
     for (uint32_t i{0}; i < num_entries; ++i) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
-    //    this->print_keys();
-    this->range_remove(681, 999);
-    //    this->print_keys();
-    this->range_remove(454, 680);
-    //    this->print_keys();
-    this->range_remove(227, 453);
-    //    this->print_keys();
-    this->range_remove(0, 226);
-    //    this->print_keys();
-    this->query_all_validate();
-}
 
-TYPED_TEST(BtreeTest, removeAllEntries) {
-    // Forward sequential insert
-    const auto num_entries = 1000;
-    LOGINFO("Step 1: Do Forward sequential insert for {} entries", num_entries);
-    for (uint32_t i{0}; i < num_entries; ++i) {
-        this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    std::vector< uint32_t > vec(num_entries);
+    iota(vec.begin(), vec.end(), 0);
+
+    // shuffle keys in [0, num_entries)
+    std::random_shuffle(vec.begin(), vec.end());
+    for (uint32_t i{0}; i < SISL_OPTIONS["num_iters"].as< uint32_t >(); ++i) {
+        this->remove_one(vec[i]);
     }
-    //    this->print_keys();
-    this->range_remove(0, 226);
-    //    this->print_keys();
-    this->range_remove(227, 453);
-    //    this->print_keys();
-    this->range_remove(454, 680);
-    //    this->print_keys();
-    this->range_remove(681, 999);
-    //    this->print_keys();
-    this->query_all_validate();
+    this->get_all_validate();
 }
 
 TYPED_TEST(BtreeTest, RandomRemoveRange) {
@@ -491,7 +485,7 @@ TYPED_TEST(BtreeTest, RandomRemoveRange) {
         uint32_t start_key = std::min(key1, key2);
         uint32_t end_key = std::max(key1, key2);
 
-        LOGINFO("Step 2 - {}: Do Range Remove of maximum [{},{}] keys ", i, start_key, end_key);
+        //        LOGINFO("Step 2 - {}: Do Range Remove of maximum [{},{}] keys ", i, start_key, end_key);
         this->range_remove(std::min(key1, key2), std::max(key1, key2));
         //        this->print_keys();
     }

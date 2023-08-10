@@ -332,7 +332,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     BtreeNodePtr new_node;
     uint32_t total_size{0};
     uint32_t balanced_size{0};
-    uint32_t available_size{0};
+    int32_t available_size{0};
     uint32_t num_nodes{0};
 
     struct _leftmost_src_info {
@@ -392,9 +392,9 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     // First try to see how many entries you can fit in the leftmost node within the balanced size. We are checking
     // leftmost node as special case without moving, because that is the only node which is modified in-place and hence
     // doing a dry run and if for some reason there is a problem in balancing the nodes, then it is easy to give up.
-    available_size = balanced_size - leftmost_node->occupied_size(m_bt_cfg);
+    available_size = static_cast<int32_t> (balanced_size) - leftmost_node->occupied_size(m_bt_cfg);
     src_cursor.ith_node = old_nodes.size();
-    for (uint32_t i{0}; (i < old_nodes.size()); ++i) {
+    for (uint32_t i{0}; (i < old_nodes.size() && available_size >= 0) ; ++i) {
         leftmost_src.ith_nodes.push_back(i);
         // TODO: check whether value size of the node is greater than available_size? If so nentries is 0. Suppose if a
         // node contains one entry and the value size is much bigger than available size

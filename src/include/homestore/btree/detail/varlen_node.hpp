@@ -62,6 +62,10 @@ public:
 
     virtual ~VariableNode() = default;
 
+    uint32_t occupied_size(const BtreeConfig& cfg) const override {
+        return (cfg.node_data_size() - sizeof(var_node_header) - available_size(cfg));
+    }
+
     /* Insert the key and value in provided index
      * Assumption: Node lock is already taken */
     btree_status_t insert(uint32_t ind, const BtreeKey& key, const BtreeValue& val) override {
