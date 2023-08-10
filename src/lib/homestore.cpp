@@ -346,6 +346,10 @@ void HomeStore::new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb) {
         if (has_index_service()) { m_index_service->open_vdev(vb); }
         break;
 
+    case blkstore_type::DATA_STORE:
+        if (has_data_service()) { m_data_service->open_vdev(vb); }
+        break;
+
     default:
         HS_LOG_ASSERT(0, "Unknown blkstore_type {}", blob->type);
     }
