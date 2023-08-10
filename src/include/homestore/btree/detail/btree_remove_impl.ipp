@@ -32,7 +32,7 @@ btree_status_t Btree< K, V >::do_remove(const BtreeNodePtr& my_node, locktype_t 
 #endif
 
         if constexpr (std::is_same_v< ReqT, BtreeSingleRemoveRequest >) {
-            if ((modified = my_node->remove_one(req.key(), nullptr, req.m_outval.get()))) { ++removed_count; }
+            if ((modified = my_node->remove_one(req.key(), nullptr, req.m_outval))) { ++removed_count; }
         } else if constexpr (std::is_same_v< ReqT, BtreeRangeRemoveRequest< K > >) {
             if (req.next_key().is_extent_key()) {
                 modified = remove_extents_in_leaf(my_node, req);
@@ -53,9 +53,7 @@ btree_status_t Btree< K, V >::do_remove(const BtreeNodePtr& my_node, locktype_t 
                 }
             }
         } else if constexpr (std::is_same_v< ReqT, BtreeRemoveAnyRequest< K > >) {
-            if ((modified = my_node->remove_any(req.m_range, req.m_outkey.get(), req.m_outval.get()))) {
-                ++removed_count;
-            }
+            if ((modified = my_node->remove_any(req.m_range, req.m_outkey, req.m_outval))) { ++removed_count; }
         }
 #ifndef NDEBUG
         my_node->validate_key_order< K >();
@@ -63,6 +61,7 @@ btree_status_t Btree< K, V >::do_remove(const BtreeNodePtr& my_node, locktype_t 
         if (modified) {
             write_node(my_node, req.m_op_context);
             COUNTER_DECREMENT(m_metrics, btree_obj_count, removed_count);
+            if (req.route_tracing) { append_route_trace(req, my_node, btree_event_t::REMOVE); }
         }
 
         unlock_node(my_node, curlock);
@@ -96,6 +95,8 @@ retry:
         end_idx = start_idx = (end_idx - start_idx) / 2; // Pick the middle, TODO: Ideally we need to pick random
     }
     if (go_to_out) { goto out_return; }
+
+    if (req.route_tracing) { append_route_trace(req, my_node, btree_event_t::READ, start_idx, end_idx); }
     curr_idx = start_idx;
     while (curr_idx <= end_idx) {
         BtreeLinkInfo child_info;
@@ -135,6 +136,7 @@ retry:
                 }
 
                 if (ret == btree_status_t::success) {
+                    if (req.route_tracing) { append_route_trace(req, child_node, btree_event_t::MERGE); }
                     unlock_node(child_node, locktype_t::WRITE);
                     child_cur_lock = locktype_t::NONE;
                     COUNTER_INCREMENT(m_metrics, btree_merge_count, 1);
@@ -306,6 +308,8 @@ btree_status_t Btree< K, V >::check_collapse_root(ReqT& req) {
         goto done;
     }
 
+    if (req.route_tracing) { append_route_trace(req, root, btree_event_t::MERGE); }
+
     free_node(root, locktype_t::WRITE, req.m_op_context);
     m_root_node_info = child->link_info();
     unlock_node(child, locktype_t::WRITE);
@@ -328,7 +332,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     BtreeNodePtr new_node;
     uint32_t total_size{0};
     uint32_t balanced_size{0};
-    uint32_t available_size{0};
+    int32_t available_size{0};
     uint32_t num_nodes{0};
 
     struct _leftmost_src_info {
@@ -388,9 +392,9 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     // First try to see how many entries you can fit in the leftmost node within the balanced size. We are checking
     // leftmost node as special case without moving, because that is the only node which is modified in-place and hence
     // doing a dry run and if for some reason there is a problem in balancing the nodes, then it is easy to give up.
-    available_size = balanced_size - leftmost_node->occupied_size(m_bt_cfg);
+    available_size = static_cast<int32_t> (balanced_size) - leftmost_node->occupied_size(m_bt_cfg);
     src_cursor.ith_node = old_nodes.size();
-    for (uint32_t i{0}; (i < old_nodes.size()); ++i) {
+    for (uint32_t i{0}; (i < old_nodes.size() && available_size >= 0) ; ++i) {
         leftmost_src.ith_nodes.push_back(i);
         // TODO: check whether value size of the node is greater than available_size? If so nentries is 0. Suppose if a
         // node contains one entry and the value size is much bigger than available size
@@ -421,13 +425,14 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
                 ret = btree_status_t::merge_failed;
                 goto out;
             }
+            new_node->set_level(leftmost_node->level());
             available_size = balanced_size;
             new_nodes.emplace_back(new_node);
         }
 
-        auto const nentries =
-            new_node->copy_by_size(m_bt_cfg, *old_nodes[src_cursor.ith_node], src_cursor.nth_entry, available_size);
-        if (old_nodes[src_cursor.ith_node]->total_entries() == (src_cursor.nth_entry + nentries)) {
+        auto& old_ith_node = old_nodes[src_cursor.ith_node];
+        auto const nentries = new_node->copy_by_size(m_bt_cfg, *old_ith_node, src_cursor.nth_entry, available_size);
+        if (old_ith_node->total_entries() == (src_cursor.nth_entry + nentries)) {
             // Copied entire node
             ++src_cursor.ith_node;
             src_cursor.nth_entry = 0;
@@ -442,6 +447,14 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     // more than initial number of nodes before rebalance. In those cases, just give up the merging and hope for a
     // better merge next time.
     if (new_nodes.size() > old_nodes.size()) {
+        ret = btree_status_t::merge_not_required;
+        goto out;
+    }
+
+    // There is a case where we are rebalancing and the second node which rebalanced didn't move any size, in that case
+    // the first node is going to be exactly same and we will do again merge, so bail out here.
+    if ((new_nodes.size() == old_nodes.size()) &&
+        (old_nodes[0]->occupied_size(m_bt_cfg) >= new_nodes[0]->occupied_size(m_bt_cfg))) {
         ret = btree_status_t::merge_not_required;
         goto out;
     }
@@ -484,7 +497,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
                                                ? leftmost_src.last_node_upto
                                                : std::numeric_limits< uint32_t >::max());
         }
-        std::string parent_node_step1 = parent_node->to_string();
+        // std::string parent_node_step1 = parent_node->to_string();
 
         // First remove the excess entries between new nodes and old nodes
         auto excess = old_nodes.size() - new_nodes.size();
@@ -493,7 +506,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             end_idx -= excess;
         }
 
-        std::string parent_node_step2 = parent_node->to_string();
+        // std::string parent_node_step2 = parent_node->to_string();
 
         // Update all the new node entries to parent and while iterating update their node links
         auto cur_idx = end_idx;
@@ -508,7 +521,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             next_node_id = this_node_id;
         }
 
-        std::string parent_node_step3 = parent_node->to_string();
+        // std::string parent_node_step3 = parent_node->to_string();
 
         // Finally update the leftmost node with latest key
         leftmost_node->set_next_bnode(next_node_id);
@@ -550,8 +563,8 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
 #endif
 
 #ifndef NDEBUG
-        BT_DBG_ASSERT(!parent_node_step1.empty() && !parent_node_step2.empty() && !parent_node_step3.empty(),
-                      "Empty string");
+        // BT_DBG_ASSERT(!parent_node_step1.empty() && !parent_node_step2.empty() && !parent_node_step3.empty(),
+        //               "Empty string");
         if (leftmost_node->total_entries() && (start_idx < parent_node->total_entries())) {
             BT_NODE_DBG_ASSERT_LE(
                 leftmost_node->get_last_key< K >().compare(parent_node->get_nth_key< K >(start_idx, false)), 0,
@@ -575,15 +588,15 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
 out:
     // Do free/unlock based on success/failure in reverse order
     if (ret == btree_status_t::success) {
-        for (auto it = old_nodes.rbegin(); it != old_nodes.rend(); ++it) {
-            free_node(*it, locktype_t::WRITE, context);
+        for (auto& node : old_nodes) {
+            free_node(node, locktype_t::WRITE, context);
         }
     } else {
-        for (auto it = old_nodes.rbegin(); it != old_nodes.rend(); ++it) {
-            unlock_node(*it, locktype_t::WRITE);
+        for (auto& node : old_nodes) {
+            unlock_node(node, locktype_t::WRITE);
         }
-        for (auto it = new_nodes.rbegin(); it != new_nodes.rend(); ++it) {
-            free_node(*it, locktype_t::NONE, context);
+        for (auto& node : new_nodes) {
+            free_node(node, locktype_t::NONE, context);
         }
     }
     return ret;

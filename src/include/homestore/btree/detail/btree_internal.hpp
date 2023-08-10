@@ -216,6 +216,25 @@ class BtreeNode;
 void intrusive_ptr_add_ref(BtreeNode* node);
 void intrusive_ptr_release(BtreeNode* node);
 
+ENUM(btree_event_t, uint8_t, READ, MUTATE, REMOVE, SPLIT, REPAIR, MERGE);
+
+struct trace_route_entry {
+    bnodeid_t node_id{empty_bnodeid};
+    BtreeNode* node{nullptr};
+    uint32_t start_idx{0};
+    uint32_t end_idx{0};
+    uint32_t num_entries{0};
+    uint16_t level{0};
+    bool is_leaf{false};
+    btree_event_t event{btree_event_t::READ};
+
+    std::string to_string() const {
+        return fmt::format("[level={} {} event={} id={} ptr={} start_idx={} end_idx={} entries={}]", level,
+                           (is_leaf ? "LEAF" : "INTERIOR"), enum_name(event), node_id, (void*)node, start_idx, end_idx,
+                           num_entries);
+    }
+};
+
 struct BtreeConfig {
     uint32_t m_node_size;
     uint32_t m_node_data_size;
@@ -224,7 +243,7 @@ struct BtreeConfig {
     uint8_t m_split_pct{50};
     uint32_t m_max_merge_nodes{3};
     bool m_rebalance_turned_on{false};
-    bool m_merge_turned_on{false};
+    bool m_merge_turned_on{true};
 
     btree_node_type m_leaf_node_type{btree_node_type::VAR_OBJECT};
     btree_node_type m_int_node_type{btree_node_type::VAR_KEY};

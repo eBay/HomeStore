@@ -39,8 +39,6 @@ private:
     std::unique_ptr< IndexServiceCallbacks > m_svc_cbs;
     std::unique_ptr< IndexWBCache > m_wb_cache;
     std::shared_ptr< VirtualDev > m_vdev;
-    std::vector< iomgr::io_thread_t > m_btree_write_thread_ids; // user io threads for btree write
-    uint32_t m_btree_write_thrd_idx{0};
 
     mutable std::mutex m_index_map_mtx;
     std::map< uuid_t, std::shared_ptr< IndexTableBase > > m_index_map;
@@ -62,13 +60,12 @@ public:
     void remove_index_table(const std::shared_ptr< IndexTableBase >& tbl);
 
     uint64_t used_size() const;
+    uint32_t node_size() const;
 
-    iomgr::io_thread_t get_next_btree_write_thread();
     IndexWBCache& wb_cache() { return *m_wb_cache; }
 
 private:
     void meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
-    void start_threads();
 };
 
 extern IndexService& index_service();

@@ -122,7 +122,7 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
     // If seq_num has not been flushed yet, but issued, then we flush them before reading
     auto const s = m_records.status(seq_num);
     if (s.is_out_of_range || s.is_hole) {
-        THIS_LOGSTORE_LOG(DEBUG, "ld_key not valid {}", seq_num);
+        // THIS_LOGSTORE_LOG(DEBUG, "ld_key not valid {}", seq_num);
         throw std::out_of_range("key not valid");
     } else if (!s.is_completed) {
         THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} before flushed, doing flush first", m_store_id, seq_num);
@@ -137,8 +137,8 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
     }
 
     const auto start_time = Clock::now();
-    THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} mapped to logdev_key=[idx={} dev_offset={}]", m_store_id, seq_num,
-                      ld_key.idx, ld_key.dev_offset);
+    // THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} mapped to logdev_key=[idx={} dev_offset={}]", m_store_id, seq_num,
+    //                   ld_key.idx, ld_key.dev_offset);
     COUNTER_INCREMENT(m_metrics, logstore_read_count, 1);
     serialized_log_record header;
     const auto b = m_logdev.read(ld_key, header);
@@ -171,7 +171,7 @@ void HomeLogStore::on_write_completion(logstore_req* req, const logdev_key& ld_k
     // Upon completion, create the mapping between seq_num and log dev key
     m_records.update(req->seq_num, [&](logstore_record& rec) -> bool {
         rec.m_dev_key = ld_key;
-        THIS_LOGSTORE_LOG(DEBUG, "Completed write of lsn {} logdev_key={}", req->seq_num, ld_key);
+        // THIS_LOGSTORE_LOG(DEBUG, "Completed write of lsn {} logdev_key={}", req->seq_num, ld_key);
         return true;
     });
     // assert(flush_ld_key.idx >= m_last_flush_ldkey.idx);
@@ -179,9 +179,10 @@ void HomeLogStore::on_write_completion(logstore_req* req, const logdev_key& ld_k
     // Update the maximum lsn we have seen for this batch for this store, it is needed to create truncation barrier
     m_flush_batch_max_lsn = std::max(m_flush_batch_max_lsn, req->seq_num);
     HISTOGRAM_OBSERVE(m_metrics, logstore_append_latency, get_elapsed_time_us(req->start_time));
+    auto lsn = req->seq_num;
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 
-    if (m_sync_flush_waiter_lsn.load() == req->seq_num) {
+    if (m_sync_flush_waiter_lsn.load() == lsn) {
         // Sync flush is waiting for this lsn to be completed, wake up the sync flush cv
         m_sync_flush_cv.notify_one();
     }
@@ -242,12 +243,10 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_trun
 
     // First try to block the flushing of logdevice and if we are successfully able to do, then
     auto shared_this = shared_from_this();
-    const bool locked_now = m_logdev.try_lock_flush([shared_this, upto_seq_num, in_memory_truncate_only]() {
+    m_logdev.run_under_flush_lock([shared_this, upto_seq_num]() {
         shared_this->do_truncate(upto_seq_num);
-        if (!in_memory_truncate_only) { shared_this->get_family().do_device_truncate(); }
+        return true;
     });
-
-    if (locked_now) { m_logdev.unlock_flush(); }
 }
 
 // NOTE: This method assumes the flush lock is already acquired by the caller
@@ -446,7 +445,8 @@ uint64_t HomeLogStore::rollback_async(logstore_seq_num_t to_lsn, on_rollback_cb_
                                                m_records.at(from_lsn).m_dev_key.idx); // Get the logid range to rollback
     m_records.rollback(to_lsn); // Rollback all bitset records and from here on, we can't access any lsns beyond to_lsn
 
-    if (m_logdev.try_lock_flush([logid_range, to_lsn, this, comp_cb = std::move(cb)]() {
+    m_logdev.run_under_flush_lock([logid_range, to_lsn, this, comp_cb = std::move(cb)]() {
+        iomanager.run_on_forget(logstore_service().truncate_thread(), [logid_range, to_lsn, this, comp_cb]() {
             // Rollback the log_ids in the range, for this log store (which persists this info in its superblk)
             m_logdev.rollback(m_store_id, logid_range);
 
@@ -460,9 +460,11 @@ uint64_t HomeLogStore::rollback_async(logstore_seq_num_t to_lsn, on_rollback_cb_
             }
             m_flush_batch_max_lsn = invalid_lsn(); // Reset the flush batch for next batch.
             if (comp_cb) { comp_cb(to_lsn); }
-        })) {
-        m_logdev.unlock_flush();
-    }
+            m_logdev.unlock_flush();
+        });
+        return false;
+    });
+
     return from_lsn - to_lsn;
 }
 

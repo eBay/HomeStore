@@ -187,7 +187,22 @@ struct log_group_footer {
     uint8_t padding[12];
 };
 #pragma pack()
+} // namespace homestore
 
+template <>
+struct fmt::formatter< homestore::log_group_header > {
+    constexpr auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    auto format(const homestore::log_group_header& header, format_context& ctx) const -> format_context::iterator {
+        return fmt::format_to(
+            ctx.out(),
+            "magic = {} version={} n_log_records = {} start_log_idx = {} group_size = {} inline_data_offset = {} "
+            "oob_data_offset = {} prev_grp_crc = {} cur_grp_crc = {}",
+            header.magic, header.version, header.n_log_records, header.start_log_idx, header.group_size,
+            header.inline_data_offset, header.oob_data_offset, header.prev_grp_crc, header.cur_grp_crc);
+    }
+};
+
+namespace homestore {
 template < typename charT, typename traits >
 std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& out_stream,
                                                 const log_group_header& header) {
@@ -196,12 +211,7 @@ std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, trait
     out_string_stream.copyfmt(out_stream);
 
     // print the stream
-    const auto s{fmt::format(
-        "magic = {} version={} n_log_records = {} start_log_idx = {} group_size = {} inline_data_offset = {} "
-        "oob_data_offset = {} prev_grp_crc = {} cur_grp_crc = {}",
-        header.magic, header.version, header.n_log_records, header.start_log_idx, header.group_size,
-        header.inline_data_offset, header.oob_data_offset, header.prev_grp_crc, header.cur_grp_crc)};
-    out_string_stream << s;
+    out_string_stream << fmt::format("{}", header);
     out_stream << out_string_stream.str();
 
     return out_stream;
@@ -290,7 +300,22 @@ private:
     log_group_footer* add_and_get_footer();
     bool new_iovec_for_footer() const;
 };
+} // namespace homestore
 
+template <>
+struct fmt::formatter< homestore::LogGroup > {
+    constexpr auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    auto format(const homestore::LogGroup& lg, format_context& ctx) const -> format_context::iterator {
+        const auto* const header{lg.header()};
+        return fmt::format_to(ctx.out(),
+                              "Header:[{}]\nLog_idx_range: [{} - {}] DevOffset: {} Max_Records: {} IOVecSize: {}\n"
+                              "-----------------------------------------------------------------\n",
+                              *header, lg.flush_log_idx_from(), lg.flush_log_idx_upto(), lg.log_dev_offset(),
+                              lg.max_records(), lg.iovecs().size());
+    }
+};
+
+namespace homestore {
 template < typename charT, typename traits >
 std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& out_stream, const LogGroup& lg) {
     // copy the stream formatting
@@ -298,12 +323,7 @@ std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, trait
     out_string_stream.copyfmt(out_stream);
 
     // print the stream
-    const auto* const header{lg.header()};
-    const auto s{fmt::format("Header:[{}]\nLog_idx_range: [{} - {}] DevOffset: {} Max_Records: {} IOVecSize: {}\n"
-                             "-----------------------------------------------------------------\n",
-                             *header, lg.flush_log_idx_from(), lg.flush_log_idx_upto(), lg.log_dev_offset(),
-                             lg.max_records(), lg.iovecs().size())};
-    out_string_stream << s;
+    out_string_stream << fmt::format("{}", lg);
     out_stream << out_string_stream.str();
 
     return out_stream;
@@ -468,6 +488,7 @@ struct rollback_superblk {
 // This class represents the metadata of logdev providing methods to change/access log dev super block.
 class LogDevMetadata {
     friend class LogDev;
+
 public:
     LogDevMetadata(const std::string& logdev_name);
     LogDevMetadata(const LogDevMetadata&) = delete;
@@ -557,6 +578,7 @@ struct meta_blk;
 
 class LogDev {
     friend class HomeLogStore;
+
 public:
     // NOTE: Possibly change these in future to include constant correctness
     typedef std::function< void(logstore_id_t, logdev_key, logdev_key, uint32_t nremaining_in_batch, void*) >
@@ -564,7 +586,7 @@ public:
     typedef std::function< void(logstore_id_t, logstore_seq_num_t, logdev_key, logdev_key, log_buffer, uint32_t) >
         log_found_callback;
     typedef std::function< void(logstore_id_t, const logstore_superblk&) > store_found_callback;
-    typedef std::function< void(void) > flush_blocked_callback;
+    typedef std::function< bool(void) > flush_blocked_callback;
 
     static inline int64_t flush_data_threshold_size() {
         return HS_DYNAMIC_CONFIG(logstore.flush_threshold_size) - sizeof(log_group_header);
@@ -710,7 +732,7 @@ public:
      * @param cb Callback
      * @return true or false based on if it is able to block the flush right away.
      */
-    bool try_lock_flush(const flush_blocked_callback& cb);
+    bool run_under_flush_lock(const flush_blocked_callback& cb);
 
     /**
      * @brief Unblock the flush. While unblocking if there are other requests to block or any flush pending it first

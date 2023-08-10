@@ -22,13 +22,21 @@
 #include <sisl/logging/logging.h>
 #include <sisl/utility/thread_factory.hpp>
 #include <sisl/utility/thread_buffer.hpp>
+#include <iomgr/iomgr_flip.hpp>
 
 #include "blk_cache_queue.h"
-#include "common/homestore_flip.hpp"
 
 #include "varsize_blk_allocator.h"
 
 SISL_LOGGING_DECL(blkalloc)
+
+template <>
+struct fmt::formatter< std::thread::id > {
+    constexpr auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    auto format(const std::thread::id& i, format_context& ctx) const -> format_context::iterator {
+        return fmt::format_to(ctx.out(), "{}", std::hash< std::thread::id >{}(i));
+    }
+};
 
 namespace homestore {
 
@@ -291,7 +299,7 @@ void VarsizeBlkAllocator::inited() {
  */
 void VarsizeBlkAllocator::fill_cache(BlkAllocSegment* in_seg, blk_cache_fill_session& fill_session) {
 #ifdef _PRERELEASE
-    if (homestore_flip->test_flip("varsize_blkalloc_bypass_cache")) {
+    if (iomgr_flip::instance()->test_flip("varsize_blkalloc_bypass_cache")) {
         m_fb_cache->close_cache_fill_session(fill_session);
         return;
     }
@@ -418,11 +426,11 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hin
     BLKALLOC_LOG(TRACE, "nblks={}, hints multiplier={}", nblks, hints.multiplier);
 
 #ifdef _PRERELEASE
-    if (hints.error_simulate && homestore_flip->test_flip("varsize_blkalloc_no_blks", nblks)) {
+    if (hints.error_simulate && iomgr_flip::instance()->test_flip("varsize_blkalloc_no_blks", nblks)) {
         return BlkAllocStatus::SPACE_FULL;
     }
 
-    if (homestore_flip->test_flip("varsize_blkalloc_bypass_cache")) {
+    if (iomgr_flip::instance()->test_flip("varsize_blkalloc_bypass_cache")) {
         blk_count_t num_alllocated{0};
         auto const status = alloc_blks_direct(nblks, hints, out_blkids, num_alllocated);
         if (status == BlkAllocStatus::SUCCESS) {

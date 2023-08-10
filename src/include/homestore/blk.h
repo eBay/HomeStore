@@ -13,8 +13,7 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
-#ifndef SRC_BLKALLOC_BLK_H_
-#define SRC_BLKALLOC_BLK_H_
+#pragma once
 
 #include <cassert>
 #include <cstdint>
@@ -128,6 +127,29 @@ static_assert(sizeof(BlkId8_t) == 8);
 inline blk_num_t begin_of(const BlkId& blkid) { return blkid.get_blk_num(); }
 inline blk_num_t end_of(const BlkId& blkid) { return blkid.get_blk_num() + blkid.get_nblks(); }
 inline size_t hash_value(const BlkId& blkid) { return std::hash< uint64_t >()(blkid.to_integer()); }
+} // namespace homestore
+
+// hash function definitions
+namespace std {
+template <>
+struct hash< homestore::BlkId > {
+    typedef homestore::BlkId argument_type;
+    typedef size_t result_type;
+    result_type operator()(const argument_type& bid) const noexcept {
+        return std::hash< uint64_t >()(bid.to_integer());
+    }
+};
+} // namespace std
+
+template < typename T >
+struct fmt::formatter< T, std::enable_if_t< std::is_base_of< homestore::BlkId, T >::value, char > >
+        : fmt::formatter< std::string > {
+    auto format(const homestore::BlkId& a, format_context& ctx) const {
+        return fmt::formatter< std::string >::format(a.to_string(), ctx);
+    }
+};
+
+namespace homestore {
 
 template < typename charT, typename traits >
 std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream, const BlkId& blk) {
@@ -166,32 +188,3 @@ struct blk_alloc_hints {
 };
 
 } // namespace homestore
-
-// hash function definitions
-namespace std {
-template <>
-struct hash< homestore::BlkId > {
-    typedef homestore::BlkId argument_type;
-    typedef size_t result_type;
-    result_type operator()(const argument_type& bid) const noexcept {
-        return std::hash< uint64_t >()(bid.to_integer());
-    }
-};
-} // namespace std
-
-namespace fmt {
-template <>
-struct formatter< homestore::BlkId > {
-    template < typename ParseContext >
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
-    }
-
-    template < typename FormatContext >
-    auto format(const homestore::BlkId& s, FormatContext& ctx) {
-        return format_to(ctx.out(), s.to_string());
-    }
-};
-
-} // namespace fmt
-#endif /* SRC_BLKALLOC_BLK_H_ */

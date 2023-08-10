@@ -43,7 +43,7 @@ private:
     btree_status_t write_node_impl(const BtreeNodePtr& node, void* context) { return btree_status_t::success; }
 
     btree_status_t read_node_impl(bnodeid_t id, BtreeNodePtr& node) const override {
-        node = BtreeNodePtr{r_cast< BtreeNode* >(id)};
+        node.reset(r_cast< BtreeNode* >(id));
         return btree_status_t::success;
     }
 
@@ -51,7 +51,7 @@ private:
         return btree_status_t::success;
     }
 
-    void free_node_impl(const BtreeNodePtr& node, void* context) override {}
+    void free_node_impl(const BtreeNodePtr& node, void* context) override { intrusive_ptr_release(node.get()); }
 
     btree_status_t prepare_node_txn(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
                                     void* context) override {

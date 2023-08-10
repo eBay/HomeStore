@@ -42,7 +42,7 @@ LogStoreService::LogStoreService() :
         m_logstore_families{std::make_unique< LogStoreFamily >(DATA_LOG_FAMILY_IDX),
                             std::make_unique< LogStoreFamily >(CTRL_LOG_FAMILY_IDX)} {}
 
-void LogStoreService::create_vdev(uint64_t size, logstore_family_id_t family, vdev_io_comp_cb_t format_cb) {
+folly::Future< bool > LogStoreService::create_vdev(uint64_t size, logstore_family_id_t family) {
     const auto atomic_page_size = hs()->device_mgr()->atomic_page_size({PhysicalDevGroup::FAST});
 
     struct blkstore_blob blob;
@@ -51,13 +51,13 @@ void LogStoreService::create_vdev(uint64_t size, logstore_family_id_t family, vd
         m_data_logdev_vdev = std::make_unique< JournalVirtualDev >(
             hs()->device_mgr(), "data_logdev", PhysicalDevGroup::FAST, size, 0 /* nmirror */, true /* is_stripe */,
             atomic_page_size /* blk_size */, (char*)&blob, sizeof(blkstore_blob), true /* auto_recovery */);
-        m_data_logdev_vdev->async_format(std::move(format_cb));
+        return m_data_logdev_vdev->async_format();
     } else {
         blob.type = blkstore_type::CTRL_LOGDEV_STORE;
         m_ctrl_logdev_vdev = std::make_unique< JournalVirtualDev >(
             hs()->device_mgr(), "ctrl_logdev", PhysicalDevGroup::FAST, size, 0 /* nmirror */, true /* is_stripe */,
             atomic_page_size /* blk_size */, (char*)&blob, sizeof(blkstore_blob), true /* auto_recovery */);
-        m_ctrl_logdev_vdev->async_format(std::move(format_cb));
+        return m_ctrl_logdev_vdev->async_format();
     }
 }
 
@@ -78,7 +78,7 @@ bool LogStoreService::open_vdev(vdev_info_block* vb, logstore_family_id_t family
     return ret;
 }
 
-void LogStoreService::start(const bool format) {
+void LogStoreService::start(bool format) {
     // hs()->status_mgr()->register_status_cb("LogStore", bind_this(LogStoreService::get_status, 1));
 
     // Create an truncate thread loop which handles truncation which does sync IO
@@ -124,7 +124,7 @@ void LogStoreService::device_truncate(const device_truncate_cb_t& cb, const bool
     if (treq->wait_till_done) { treq->trunc_outstanding = m_logstore_families.size(); }
 
     for (auto& l : m_logstore_families) {
-        l->device_truncate_in_user_reactor(treq);
+        l->device_truncate(treq);
     }
 
     if (treq->wait_till_done) {
@@ -142,10 +142,6 @@ void LogStoreService::flush_if_needed() {
 LogDev& LogStoreService::data_logdev() { return data_log_family()->logdev(); }
 LogDev& LogStoreService::ctrl_logdev() { return ctrl_log_family()->logdev(); }
 
-void LogStoreService::send_flush_msg() {
-    iomanager.run_on(m_flush_thread, [this]([[maybe_unused]] const io_thread_addr_t addr) { flush_if_needed(); });
-}
-
 void LogStoreService::start_threads() {
     struct Context {
         std::condition_variable cv;
@@ -154,22 +150,23 @@ void LogStoreService::start_threads() {
     };
     auto ctx = std::make_shared< Context >();
 
-    m_flush_thread = nullptr;
-    iomanager.create_reactor("log_flush_thread", TIGHT_LOOP | ADAPTIVE_LOOP, [this, &ctx](bool is_started) {
-        if (is_started) {
-            m_flush_thread = iomanager.iothread_self();
-            {
-                std::unique_lock< std::mutex > lk{ctx->mtx};
-                ++(ctx->thread_cnt);
-            }
-            ctx->cv.notify_one();
-        }
-    });
+    m_flush_fiber = nullptr;
+    iomanager.create_reactor("log_flush_thread", TIGHT_LOOP | ADAPTIVE_LOOP, 1 /* num_fibers */,
+                             [this, &ctx](bool is_started) {
+                                 if (is_started) {
+                                     m_flush_fiber = iomanager.iofiber_self();
+                                     {
+                                         std::unique_lock< std::mutex > lk{ctx->mtx};
+                                         ++(ctx->thread_cnt);
+                                     }
+                                     ctx->cv.notify_one();
+                                 }
+                             });
 
-    m_truncate_thread = nullptr;
-    iomanager.create_reactor("logstore_truncater", INTERRUPT_LOOP, [this, &ctx](bool is_started) {
+    m_truncate_fiber = nullptr;
+    iomanager.create_reactor("logstore_truncater", INTERRUPT_LOOP, 2 /* num_fibers */, [this, &ctx](bool is_started) {
         if (is_started) {
-            m_truncate_thread = iomanager.iothread_self();
+            m_truncate_fiber = iomanager.sync_io_capable_fibers()[0];
             {
                 std::unique_lock< std::mutex > lk{ctx->mtx};
                 ++(ctx->thread_cnt);

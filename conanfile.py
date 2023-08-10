@@ -5,7 +5,7 @@ from conans import CMake
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "4.0.13"
+    version = "4.1.4"
 
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
@@ -53,19 +53,15 @@ class HomestoreConan(ConanFile):
         self.copy(root_package="sisl", pattern="*", dst="bin/scripts/python/flip/", src="bindings/flip/python/", keep_path=False)
 
     def build_requirements(self):
-        self.build_requires("benchmark/1.7.1")
-        self.build_requires("gtest/1.13.0")
+        self.build_requires("benchmark/1.8.2")
+        self.build_requires("gtest/1.14.0")
 
     def requirements(self):
-        self.requires("iomgr/[~=8, include_prerelease=True]@oss/master")
-        self.requires("sisl/[~=9, include_prerelease=True]@oss/master")
+        self.requires("iomgr/[~=9, include_prerelease=True]@oss/master")
+        self.requires("sisl/[~=10, include_prerelease=True]@oss/master")
 
-        # FOSS, rarely updated
-        self.requires("boost/1.79.0")
         self.requires("farmhash/cci.20190513@")
-        self.requires("folly/2022.01.31.00")
         self.requires("isa-l/2.30.0")
-        self.requires("nlohmann_json/3.11.2")
         self.requires("spdk/21.07.y")
 
     def build(self):

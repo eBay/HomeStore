@@ -53,9 +53,9 @@ struct pdev_chunk_map {
 // ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize);
 ENUM(vdev_op_type_t, uint8_t, read, write, format, fsync);
 
-typedef std::function< void(std::error_condition, void* /* cookie */) > vdev_io_comp_cb_t;
 typedef std::function< void(void) > vdev_high_watermark_cb_t;
 
+#if 0
 struct vdev_req_context : public sisl::ObjLifeCounter< vdev_req_context > {
     uint64_t request_id{0};                       // ID of the request
     uint64_t version{0xDEAD};                     // Version for debugging
@@ -95,6 +95,7 @@ protected:
     friend class sisl::ObjectAllocator< vdev_req_context >;
     vdev_req_context() : request_id{s_req_id.fetch_add(1, std::memory_order_relaxed)} {}
 };
+#endif
 
 class VirtualDevMetrics : public sisl::MetricsGroupWrapper {
 public:
@@ -165,8 +166,6 @@ private:
     static uint32_t s_num_chunks_created; // vdev will not be created in parallel threads;
 
 public:
-    static void static_process_completions(int64_t res, uint8_t* cookie);
-
     void init(DeviceManager* mgr, vdev_info_block* vb, uint32_t blk_size, bool auto_recovery,
               vdev_high_watermark_cb_t hwm_cb);
 
@@ -203,7 +202,7 @@ public:
     /// @brief Formats the vdev asynchronously by zeroing the entire vdev. It will use underlying physical device
     /// capabilities to zero them if fast zero is possible, otherwise will zero block by block
     /// @param cb Callback after formatting is completed.
-    virtual void async_format(vdev_io_comp_cb_t cb);
+    virtual folly::Future< bool > async_format();
 
     /////////////////////// Block Allocation related methods /////////////////////////////
     /// @brief This method allocates contigous blocks in the vdev
@@ -243,13 +242,10 @@ public:
     /// @param buf : Buffer to write data from
     /// @param size : Size of the buffer
     /// @param bid : BlkId which was previously allocated. It is expected that entire size was allocated previously.
-    /// @param cb : Callback once write is completed
-    /// @param cookie : cookie set by caller and returned on completion; It is defaulted to null as some caller is not
-    /// intrested of of this field
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
-    void async_write(const char* buf, uint32_t size, const BlkId& bid, vdev_io_comp_cb_t cb,
-                     const void* cookie = nullptr, bool part_of_batch = false);
+    /// @return future< bool > Future result with bool to indicate if IO is actually executed
+    folly::Future< bool > async_write(const char* buf, uint32_t size, const BlkId& bid, bool part_of_batch = false);
 
     /// @brief Asynchornously write the buffer to the device on a given blkid from vector of buffer
     /// @param iov : Vector of buffer to write data from
@@ -260,22 +256,21 @@ public:
     /// intrested of of this field
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
-    void async_writev(const iovec* iov, int iovcnt, const BlkId& bid, vdev_io_comp_cb_t cb,
-                      const void* cookie = nullptr, bool part_of_batch = false);
+    folly::Future< bool > async_writev(const iovec* iov, int iovcnt, const BlkId& bid, bool part_of_batch = false);
 
     /// @brief Synchronously write the buffer to the blkid
     /// @param buf : Buffer to write data from
     /// @param size : Size of the buffer
     /// @param bid : BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @return ssize_t: Size of the data actually written.
-    ssize_t sync_write(const char* buf, uint32_t size, const BlkId& bid);
+    void sync_write(const char* buf, uint32_t size, const BlkId& bid);
 
     /// @brief Synchronously write the vector of buffers to the blkid
     /// @param iov : Vector of buffer to write data from
     /// @param iovcnt : Count of buffer
     /// @param bid  BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @return ssize_t: Size of the data actually written.
-    ssize_t sync_writev(const iovec* iov, int iovcnt, const BlkId& bid);
+    void sync_writev(const iovec* iov, int iovcnt, const BlkId& bid);
 
     /////////////////////// Read API related methods /////////////////////////////
 
@@ -289,8 +284,7 @@ public:
     /// intrested of of this field
     /// @param part_of_batch : Is this read part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this read request will not be queued.
-    void async_read(char* buf, uint64_t size, const BlkId& bid, vdev_io_comp_cb_t cb, const void* cookie = nullptr,
-                    bool part_of_batch = false);
+    folly::Future< bool > async_read(char* buf, uint64_t size, const BlkId& bid, bool part_of_batch = false);
 
     /// @brief Asynchronously read the data for a given BlkId to the vector of buffers
     /// @param iov : Vector of buffer to write read to
@@ -303,28 +297,28 @@ public:
     /// intrested of of this field
     /// @param part_of_batch : Is this read part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this read request will not be queued.
-    void async_readv(iovec* iovs, int iovcnt, uint64_t size, const BlkId& bid, vdev_io_comp_cb_t cb,
-                     const void* cookie = nullptr, bool part_of_batch = false);
+    folly::Future< bool > async_readv(iovec* iovs, int iovcnt, uint64_t size, const BlkId& bid,
+                                      bool part_of_batch = false);
 
     /// @brief Synchronously read the data for a given BlkId.
     /// @param buf : Buffer to read data to
     /// @param size : Size of the buffer
     /// @param bid : BlkId from data needs to be read
     /// @return ssize_t: Size of the data actually read.
-    ssize_t sync_read(char* buf, uint32_t size, const BlkId& bid);
+    void sync_read(char* buf, uint32_t size, const BlkId& bid);
 
     /// @brief Synchronously read the data for a given BlkId to vector of buffers
     /// @param iov : Vector of buffer to write read to
     /// @param iovcnt : Count of buffer
     /// @param size : Size of the actual data, it is really to optimize the iovec from iterating again to get size
     /// @return ssize_t: Size of the data actually read.
-    ssize_t sync_readv(iovec* iov, int iovcnt, const BlkId& bid);
+    void sync_readv(iovec* iov, int iovcnt, const BlkId& bid);
 
     /////////////////////// Other API related methods /////////////////////////////
 
     /// @brief Fsync the underlying physical devices that vdev is sitting on asynchornously
     /// @param cb Callback upon fsync on all devices is completed
-    void fsync_pdevs(vdev_io_comp_cb_t cb);
+    folly::Future< bool > queue_fsync_pdevs();
 
     /// @brief Submit the batch of IOs previously queued as part of async read/write APIs.
     void submit_batch();
@@ -380,9 +374,9 @@ protected:
     /// @param cookie : cookie set by caller and returned on completion;
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
-    void async_write_internal(const char* buf, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                              uint64_t dev_offset, vdev_io_comp_cb_t cb, const void* cookie = nullptr,
-                              bool part_of_batch = false);
+    folly::Future< bool > async_write_internal(const char* buf, uint32_t size, PhysicalDev* pdev,
+                                               PhysicalDevChunk* pchunk, uint64_t dev_offset,
+                                               bool part_of_batch = false);
 
     /// @brief : internal implementation of async_writev
     ///
@@ -395,54 +389,25 @@ protected:
     /// @param cookie : cookie set by caller and returned on completion;
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
-    void async_writev_internal(const iovec* iov, int iovcnt, uint64_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                               uint64_t dev_offset, vdev_io_comp_cb_t cb, const void* cookie = nullptr,
-                               bool part_of_batch = false);
+    folly::Future< bool > async_writev_internal(const iovec* iov, int iovcnt, uint64_t size, PhysicalDev* pdev,
+                                                PhysicalDevChunk* pchunk, uint64_t dev_offset,
+                                                bool part_of_batch = false);
 
-    ssize_t sync_write_internal(const char* buf, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                                uint64_t dev_offset);
+    void sync_write_internal(const char* buf, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
+                             uint64_t dev_offset);
 
-    ssize_t sync_writev_internal(const iovec* iov, int iovcnt, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                                 uint64_t dev_offset);
+    void sync_writev_internal(const iovec* iov, int iovcnt, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
+                              uint64_t dev_offset);
 
-    /// @brief  Internal implementation of async read
-    ///
-    /// @param buf : buffer to be read data to
-    /// @param size : total size of buffer
-    /// @param pdev : pointer to physical device
-    /// @param pchunk : pointer to physical chunk in the device
-    /// @param dev_offset : offset within the physical device
-    /// @param cb : Completion callback to be called after read is completed
-    /// @param cookie : cookie set by caller and returned on completion;
-    /// @param part_of_batch : Is this read part of batch io. If true, caller is expected to call submit_batch at
-    /// the end of the batch, otherwise this read request will not be queued.
-    void async_read_internal(char* buf, uint64_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk, uint64_t dev_offset,
-                             vdev_io_comp_cb_t cb, const void* cookie = nullptr, bool part_of_batch = false);
-
-    /// @brief : internal implementation of async_readv
-    ///
-    /// @param iov : Vector of buffer to read data to
-    /// @param iovcnt : Count of buffer
-    /// @param pdev : pointer to physical device
-    /// @param pchunk : pointer to physical chunk in the device
-    /// @param dev_offset : offset within the physical device
-    /// @param cb : Completion callback to be called after read is completed
-    /// @param cookie : cookie set by caller and returned on completion;
-    /// @param part_of_batch : Is this read part of batch io. If true, caller is expected to call submit_batch at
-    /// the end of the batch, otherwise this read request will not be queued.
-    void async_readv_internal(iovec* iovs, int iovcnt, uint64_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                              uint64_t dev_offset, vdev_io_comp_cb_t cb, const void* cookie = nullptr,
-                              bool part_of_batch = false);
-
-    ssize_t sync_read_internal(char* buf, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                               uint64_t dev_offset);
-    ssize_t sync_readv_internal(iovec* iov, int iovcnt, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                                uint64_t dev_offset);
+    void sync_read_internal(char* buf, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk, uint64_t dev_offset);
+    void sync_readv_internal(iovec* iov, int iovcnt, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
+                             uint64_t dev_offset);
 
 private:
-    void write_nmirror(const char* buf, const uint32_t size, PhysicalDevChunk* chunk, const uint64_t dev_offset_in);
-    void writev_nmirror(const iovec* iov, const int iovcnt, const uint32_t size, PhysicalDevChunk* chunk,
-                        const uint64_t dev_offset_in);
+    void write_nmirror(const char* buf, uint32_t size, PhysicalDevChunk* chunk, uint64_t dev_offset_in);
+    void writev_nmirror(const iovec* iov, int iovcnt, uint32_t size, PhysicalDevChunk* chunk, uint64_t dev_offset_in);
+    void sync_read_mirrors(char* buf, uint32_t size, PhysicalDevChunk* pchunk, uint64_t dev_offset);
+    void sync_readv_mirrors(iovec* iov, int iovcnt, uint32_t size, PhysicalDevChunk* pchunk, uint64_t dev_offset);
 
     virtual BlkAllocStatus do_alloc_blk(blk_count_t nblks, const blk_alloc_hints& hints,
                                         std::vector< BlkId >& out_blkid);

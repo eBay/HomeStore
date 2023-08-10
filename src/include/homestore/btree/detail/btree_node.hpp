@@ -16,22 +16,15 @@
 
 #pragma once
 #include <iostream>
-
-#if defined __clang__ or defined __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
-#pragma GCC diagnostic ignored "-Wattributes"
-#endif
-#include <folly/SharedMutex.h>
-#if defined __clang__ or defined __GNUC__
-#pragma GCC diagnostic pop
-#endif
+#include <queue>
+#include <iomgr/fiber_lib.hpp>
 
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/enum.hpp>
 #include <sisl/utility/obj_life_counter.hpp>
 #include "btree_internal.hpp"
 #include <homestore/btree/btree_kv.hpp>
+// #include <iomgr/iomgr_flip.hpp>
 #include <isa-l/crc.h>
 
 namespace homestore {
@@ -39,7 +32,7 @@ ENUM(locktype_t, uint8_t, NONE, READ, WRITE)
 
 #pragma pack(1)
 struct transient_hdr_t {
-    mutable folly::SharedMutexReadPriority lock;
+    mutable iomgr::FiberManagerLib::shared_mutex lock;
     sisl::atomic_counter< uint16_t > upgraders{0};
 
     /* these variables are accessed without taking lock and are not expected to change after init */
@@ -70,12 +63,16 @@ struct persistent_hdr_t {
     uint64_t link_version{0};                 // Version of the link between its parent, updated if structure changes
     BtreeLinkInfo::bnode_link_info edge_info; // Edge entry information
 
+    uint16_t level; // Level of the node within the tree
+    uint16_t reserved1;
+    uint32_t reserved2;
+
     persistent_hdr_t() : nentries{0}, leaf{0}, valid_node{1} {}
     std::string to_string() const {
         return fmt::format("magic={} version={} csum={} node_id={} next_node={} nentries={} node_type={} is_leaf={} "
-                           "valid_node={} node_gen={} link_version={} edge_nodeid={}, edge_link_version={}",
+                           "valid_node={} node_gen={} link_version={} edge_nodeid={}, edge_link_version={} level={} ",
                            magic, version, checksum, node_id, next_node, nentries, node_type, leaf, valid_node,
-                           node_gen, link_version, edge_info.m_bnodeid, edge_info.m_link_version);
+                           node_gen, link_version, edge_info.m_bnodeid, edge_info.m_link_version, level);
     }
 };
 #pragma pack()
@@ -89,9 +86,11 @@ public:
     uint8_t* m_phys_node_buf;
 
 public:
+    ~BtreeNode() = default;
     BtreeNode(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf) : m_phys_node_buf{node_buf} {
         if (init_buf) {
             new (node_buf) persistent_hdr_t{};
+            set_node_id(id);
             set_leaf(is_leaf);
         } else {
             DEBUG_ASSERT_EQ(node_id(), id);
@@ -100,7 +99,6 @@ public:
         }
         m_trans_hdr.is_leaf_node = is_leaf;
     }
-    virtual ~BtreeNode() { ((persistent_hdr_t*)m_phys_node_buf)->~persistent_hdr_t(); }
 
     // Identify if a node is a leaf node or not, from raw buffer, by just reading persistent_hdr_t
     static bool identify_leaf_node(uint8_t* buf) { return (r_cast< persistent_hdr_t* >(buf))->leaf; }
@@ -131,7 +129,10 @@ public:
         bool sfound, efound;
         // Get the start index of the search range.
         std::tie(sfound, start_idx) = bsearch_node(range.start_key());
-        if (sfound && !range.is_start_inclusive()) { ++start_idx; }
+        if (sfound && !range.is_start_inclusive()) {
+            ++start_idx;
+            sfound = false;
+        }
         if (start_idx == total_entries()) {
             end_idx = start_idx;
             if (is_leaf() || !has_valid_edge()) {
@@ -145,7 +146,12 @@ public:
         if (efound && !range.is_end_inclusive()) {
             if (end_idx == 0) { return 0; }
             --end_idx;
+            efound = false;
         }
+
+        // If we point to same start and end without any match, it is hitting unavailable range
+        if ((start_idx == end_idx) && is_leaf() && !sfound && !efound) { return 0; }
+
         if (end_idx == total_entries()) {
             DEBUG_ASSERT_GT(end_idx, 0); // At this point end_idx should never have been zero
             if (!has_valid_edge()) { --end_idx; }
@@ -327,13 +333,13 @@ public:
     }
 
     /*BtreeKeyRange get_subrange(const BtreeKeyRange< K >& inp_range, int upto_ind) const {
-#ifndef NDEBUG
+ #ifndef NDEBUG
         if (upto_ind > 0) {
             // start of input range should always be more then the key in curr_ind - 1
             DEBUG_ASSERT_LE(get_nth_key< K >(upto_ind - 1, false).compare(inp_range.start_key()), 0, "[node={}]",
                             to_string());
         }
-#endif
+ #endif
 
         // find end of subrange
         bool end_inc = true;
@@ -404,6 +410,10 @@ public:
     void invalidate_edge() { set_edge_id(empty_bnodeid); }
 
     uint32_t total_entries() const { return get_persistent_header_const()->nentries; }
+
+    void set_level(uint16_t l) { get_persistent_header()->level = l; }
+    uint16_t level() const { return get_persistent_header_const()->level; }
+
     // uint32_t total_entries() const { return (has_valid_edge() ? total_entries() + 1 : total_entries()); }
 
     void lock(locktype_t l) const {
@@ -577,16 +587,18 @@ public:
 
     BtreeLinkInfo link_info() const { return BtreeLinkInfo{node_id(), link_version()}; }
 
-    uint32_t occupied_size(const BtreeConfig& cfg) const { return (cfg.node_data_size() - available_size(cfg)); }
+    virtual uint32_t occupied_size(const BtreeConfig& cfg) const {
+        return (cfg.node_data_size() - available_size(cfg));
+    }
     bool is_merge_needed(const BtreeConfig& cfg) const {
 #if 0
 #ifdef _PRERELEASE
-        if (homestore_flip->test_flip("btree_merge_node") && occupied_size(cfg) < node_area_size(cfg)) {
-            return true;
-        }
+       if (iomgr_flip::instance()->test_flip("btree_merge_node") && occupied_size(cfg) < node_area_size(cfg)) {
+           return true;
+       }
 
-        auto ret = homestore_flip->get_test_flip< uint64_t >("btree_merge_node_pct");
-        if (ret && occupied_size(cfg) < (ret.get() * node_area_size(cfg) / 100)) { return true; }
+       auto ret = iomgr_flip::instance()->get_test_flip< uint64_t >("btree_merge_node_pct");
+       if (ret && occupied_size(cfg) < (ret.get() * node_area_size(cfg) / 100)) { return true; }
 #endif
 #endif
         return (occupied_size(cfg) < cfg.suggested_min_size());
@@ -604,6 +616,17 @@ public:
     bool has_valid_edge() const {
         if (is_leaf()) { return false; }
         return (edge_id() != empty_bnodeid);
+    }
+
+    friend void intrusive_ptr_add_ref(BtreeNode* node) { node->m_refcount.increment(1); }
+
+    friend void intrusive_ptr_release(BtreeNode* node) {
+        if (node->m_refcount.decrement_testz(1)) {
+            auto node_buffer = node->m_phys_node_buf;
+            node->~BtreeNode();
+            delete[] uintptr_cast(node);
+            delete[] node_buffer;
+        }
     }
 };
 
