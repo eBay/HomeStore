@@ -1058,6 +1058,38 @@ public:
         m_init_done_cv.wait(lk, [this]() { return m_init_done; });
     }
 
+    //
+    // pick up an existing volume issue an destroy then create same volume with same uuid before destroy volume
+    // finishes;
+    //
+    void delete_and_create_same_uuid_vol() {
+        HS_REL_ASSERT_GT(m_vol_info.size(), 0, "Expecting at least one volumee");
+        auto vinfo = m_vol_info[0];
+        const auto uuid = VolInterface::get_instance()->get_uuid(vinfo->vol);
+
+        VolInterface::get_instance()->remove_volume(uuid);
+
+        /* Create a volume */
+        vol_params params;
+        params.page_size = tcfg.vol_page_size;
+        params.size = max_vol_size;
+        params.io_comp_cb = tcfg.batch_completion ? io_comp_callback(bind_this(VolTest::process_multi_completions, 1))
+                                                  : io_comp_callback(bind_this(VolTest::process_single_completion, 1));
+        params.uuid = uuid; /* use same uuid that is pending on destroying */
+        const std::string name{VOL_PREFIX + std::to_string(0)};
+        ::strcpy(params.vol_name, name.c_str());
+
+        /* check if same volume exist or not */
+        const auto vol_obj = VolInterface::get_instance()->create_volume(params);
+        if (vol_obj == nullptr) {
+            LOGINFO("Create vol with same uuid: {} failed as expected!", boost::lexical_cast< std::string >(uuid));
+        } else {
+            // trigger assert failure to fail the test;
+            HS_REL_ASSERT(
+                false, "Expecting vol_obj to be null when creating vol with same uuid that is pending on destroying.");
+        }
+    }
+
     void delete_volumes() {
         const uint64_t tot_cap{VolInterface::get_instance()->get_system_capacity().initial_total_data_meta_size};
         uint64_t used_cap{VolInterface::get_instance()->get_system_capacity().used_total_size};
@@ -2106,6 +2138,24 @@ TEST_F(VolTest, lifecycle_test) {
     fc.inject_retval_flip("vol_comp_delay_us", {}, freq, 100);
 #endif
     this->delete_volumes();
+
+    LOGINFO("All volumes are deleted, do a shutdown of homestore");
+    this->shutdown();
+
+    LOGINFO("Shutdown of homestore is completed, removing files");
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
+}
+
+/// @brief : create vol with same uuid that is pending on destroy
+///
+/// @param VolTest
+/// @param del_create_same_uuid_vol
+TEST_F(VolTest, del_and_create_same_uuid_vol) {
+    this->start_homestore();
+    this->start_io_job();
+    output.print("del_and_create_same_uuid_vol");
+
+    this->delete_and_create_same_uuid_vol();
 
     LOGINFO("All volumes are deleted, do a shutdown of homestore");
     this->shutdown();

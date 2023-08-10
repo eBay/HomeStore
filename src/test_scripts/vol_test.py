@@ -151,10 +151,15 @@ def sequential_write_and_recovery():
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
     print("recovery on sequential write test completed")
 
+def del_create_same_vol_uuid_test():
+    print("del_create_same_vol_uuid_test started")
+    cmd_opts = "--gtest_filter=VolTest.del_and_create_same_uuid_vol --max_volume=3 --remove_file_on_shutdown=1 --remove_file_on_start=1"
+    subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
+    print("del_create_same_vol_uuid_test completed")
+
 ## @test normal
 #  @brief Normal IO test
 def normal(num_secs="20000"):
-
     print("normal test started")
     cmd_opts = "--run_time=" + num_secs + " --max_num_writes=5000000 --gtest_filter=VolTest.init_io_test --remove_file_on_shutdown=0 --remove_file_on_start=1 --flip=1"
     subprocess.check_call(dirpath + "test_volume " + cmd_opts + vol_addln_opts, stderr=subprocess.STDOUT, shell=True)
@@ -567,6 +572,9 @@ def nightly():
     sleep(5)
 
     copy_vol_load();
+    sleep(5)
+
+    del_create_same_vol_uuid_test()
     sleep(5)
 
     vol_create_delete_test()
