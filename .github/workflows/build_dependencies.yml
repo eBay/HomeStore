@@ -175,6 +175,7 @@ jobs:
             -o iomgr:testing=off \
             -o homestore:testing=min \
             -o coverage=True \
+            -o sanitize=False \
             -s build_type=${{ inputs.build-type }} \
             --build missing \
             .

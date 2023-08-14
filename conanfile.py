@@ -27,7 +27,7 @@ class HomestoreConan(ConanFile):
                 'shared': False,
                 'fPIC': True,
                 'coverage': False,
-                'sanitize': False,
+                'sanitize': True,
                 'testing': 'epoll_mode',
                 'skip_testing': False,
                 'sisl:prerelease': True,
