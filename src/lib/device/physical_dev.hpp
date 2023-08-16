@@ -91,6 +91,8 @@ struct chunks_block {
 };
 #pragma pack()
 
+static constexpr size_t MAX_USER_DATA_SIZE_IN_CHUNK{32};
+
 #pragma pack(1)
 struct chunk_info_block {
     uint64_t chunk_start_offset{0}; // Start offset of the chunk within a pdev
@@ -104,7 +106,9 @@ struct chunk_info_block {
     int64_t end_of_chunk_size{0};   // The offset indicates end of chunk. off_t is ambiguous size
     uint8_t slot_allocated{0};      // Is this slot allocated for any chunks.
     uint8_t sb_chunk{0};            // This chunk is not assigned to any vdev but super block
-    uint8_t pad[6]{};               // pad to 8 byte total alignment
+    uint8_t user_data_size{0};      // The user data area size
+    uint8_t user_data[MAX_USER_DATA_SIZE_IN_CHUNK]{};  // The user data area which allow upper layer to store some customize data
+    uint8_t pad[5]{};               // pad to 8 byte total alignment
 
     uint64_t get_chunk_size() const { return chunk_size; }
     uint32_t get_chunk_id() const { return chunk_id; }
@@ -382,6 +386,14 @@ public:
     void free_slot() { m_chunk_info->set_slot_allocated(false); }
     void update_end_of_chunk(uint64_t sz) { m_chunk_info->end_of_chunk_size = int64_cast(sz); }
     void update_start_offset(uint64_t start_offset) { m_chunk_info->update_start_offset(start_offset); }
+    void set_user_data(uint8_t* user_data, uint8_t user_data_size) {
+        HS_REL_ASSERT_LE(user_data_size, MAX_USER_DATA_SIZE_IN_CHUNK);
+        std::memcpy(m_chunk_info->user_data, user_data, user_data_size);
+        if (user_data_size < MAX_USER_DATA_SIZE_IN_CHUNK) {
+            std::memset(m_chunk_info->user_data + user_data_size, 0, MAX_USER_DATA_SIZE_IN_CHUNK - user_data_size);
+        }
+        m_chunk_info->user_data_size = user_data_size;
+    }
 
     /////////////// Getters ////////////////////
     uint64_t start_offset() const { return m_chunk_info->chunk_start_offset; }
@@ -392,6 +404,10 @@ public:
     uint32_t prev_chunk_id() const { return m_chunk_info->prev_chunk_id; }
     uint16_t chunk_id() const { return static_cast< uint16_t >(m_chunk_info->chunk_id); }
     off_t end_of_chunk() const { return s_cast< off_t >(m_chunk_info->end_of_chunk_size); }
+    uint8_t* get_user_data(uint8_t* size) {
+        *size = m_chunk_info->user_data_size;
+        return m_chunk_info->user_data;
+    }
 
     std::string to_string() const;
     nlohmann::json get_status([[maybe_unused]] int log_level) const;

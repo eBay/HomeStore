@@ -219,6 +219,13 @@ void DeviceManager::update_end_of_chunk(PhysicalDevChunk* chunk, off_t offset) {
     write_info_blocks();
 }
 
+void DeviceManager::update_chunk_user_data(PhysicalDevChunk* chunk, uint8_t* user_data, uint8_t user_data_size) {
+    std::lock_guard< decltype(m_dev_mutex) > lock{m_dev_mutex};
+    HS_LOG_ASSERT_LE(user_data_size, MAX_USER_DATA_SIZE_IN_CHUNK);
+    chunk->set_user_data(user_data, user_data_size);
+    write_info_blocks();
+}
+
 void DeviceManager::get_vb_context(uint32_t vdev_id, const sisl::blob& ctx_data) const {
     std::lock_guard< decltype(m_dev_mutex) > lock{m_dev_mutex};
     HS_LOG_ASSERT_LE(ctx_data.size, vdev_info_block::max_context_size());

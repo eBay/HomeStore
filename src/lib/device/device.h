@@ -138,6 +138,7 @@ public:
     void update_vb_context(uint32_t vdev_id, const sisl::blob& ctx_data);
     void get_vb_context(uint32_t vdev_id, const sisl::blob& ctx_data) const;
     void update_end_of_chunk(PhysicalDevChunk* chunk, off_t offset);
+    void update_chunk_user_data(PhysicalDevChunk* chunk, uint8_t* user_data, uint8_t user_data_size);
     void init_done();
     void close_devices();
     bool is_first_time_boot() const { return m_first_time_boot; }
