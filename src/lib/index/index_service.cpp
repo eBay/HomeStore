@@ -39,14 +39,17 @@ void IndexService::create_vdev(uint64_t size) {
 
     struct blkstore_blob blob;
     blob.type = blkstore_type::INDEX_STORE;
+    auto chunkSelector = HomeStoreStaticConfig::instance().input.IndexChunkSelector;
     m_vdev =
-        std::make_shared< VirtualDev >(hs()->device_mgr(), "index", PhysicalDevGroup::FAST, blk_allocator_type_t::fixed,
-                                       size, 0, true, atomic_page_size, (char*)&blob, sizeof(blkstore_blob), true);
+        std::make_shared< VirtualDev >(hs()->device_mgr(), chunkSelector, "index", 
+        PhysicalDevGroup::FAST, blk_allocator_type_t::fixed, size, 0, true, atomic_page_size, 
+        (char*)&blob, sizeof(blkstore_blob), true);
 }
 
 void IndexService::open_vdev(vdev_info_block* vb) {
-    m_vdev = std::make_shared< VirtualDev >(hs()->device_mgr(), "index", vb, PhysicalDevGroup::FAST,
-                                            blk_allocator_type_t::fixed, vb->is_failed(), true);
+    auto chunkSelector = HomeStoreStaticConfig::instance().input.IndexChunkSelector;
+    m_vdev = std::make_shared< VirtualDev >(hs()->device_mgr(), chunkSelector, 
+    "index", vb, PhysicalDevGroup::FAST,blk_allocator_type_t::fixed, vb->is_failed(), true);
     if (vb->is_failed()) {
         LOGINFO("index vdev is in failed state");
         throw std::runtime_error("vdev in failed state");

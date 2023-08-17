@@ -48,13 +48,15 @@ void MetaBlkService::create_vdev(uint64_t size) {
 
     struct blkstore_blob blob;
     blob.type = blkstore_type::META_STORE;
-    m_sb_vdev = std::make_unique< VirtualDev >(hs()->device_mgr(), "meta", PhysicalDevGroup::META,
+    auto chunkSelector = HomeStoreStaticConfig::instance().input.metaChunkSelector;
+    m_sb_vdev = std::make_unique< VirtualDev >(hs()->device_mgr(), chunkSelector, "meta", PhysicalDevGroup::META,
                                                blk_allocator_type_t::varsize, size, 0, true, phys_page_size,
                                                (char*)&blob, sizeof(blkstore_blob), false);
 }
 
 void MetaBlkService::open_vdev(vdev_info_block* vb) {
-    m_sb_vdev = std::make_unique< VirtualDev >(hs()->device_mgr(), "meta", vb, PhysicalDevGroup::META,
+    auto chunkSelector = HomeStoreStaticConfig::instance().input.metaChunkSelector;
+    m_sb_vdev = std::make_unique< VirtualDev >(hs()->device_mgr(), chunkSelector, "meta", vb, PhysicalDevGroup::META,
                                                blk_allocator_type_t::varsize, vb->is_failed(), false);
     if (vb->is_failed()) {
         LOGINFO("metablk vdev is in failed state");

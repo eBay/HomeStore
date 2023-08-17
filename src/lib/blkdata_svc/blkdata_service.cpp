@@ -30,7 +30,8 @@ BlkDataService::~BlkDataService() = default;
 
 // recovery path
 void BlkDataService::open_vdev(vdev_info_block* vb) {
-    m_vdev = std::make_unique< VirtualDev >(hs()->device_mgr(), "DataVDev", vb, PhysicalDevGroup::DATA,
+    auto chunkSelector = HomeStoreStaticConfig::instance().input.dataChunkSelector;
+    m_vdev = std::make_unique< VirtualDev >(hs()->device_mgr(), chunkSelector, "DataVDev", vb, PhysicalDevGroup::DATA,
                                             blk_allocator_type_t::varsize, vb->is_failed(), true /* auto_recovery */);
 
     m_page_size = vb->blk_size;
@@ -46,7 +47,8 @@ void BlkDataService::create_vdev(uint64_t size) {
     struct blkstore_blob blob;
     blob.type = blkstore_type::DATA_STORE;
     m_page_size = hs()->device_mgr()->phys_page_size({PhysicalDevGroup::DATA});
-    m_vdev = std::make_unique< VirtualDev >(hs()->device_mgr(), "DataVDev", PhysicalDevGroup::DATA,
+    auto chunkSelector = HomeStoreStaticConfig::instance().input.dataChunkSelector;
+    m_vdev = std::make_unique< VirtualDev >(hs()->device_mgr(), chunkSelector, "DataVDev", PhysicalDevGroup::DATA,
                                             blk_allocator_type_t::varsize, size, 0, true /* is_stripe */, m_page_size,
                                             (char*)&blob, sizeof(blkstore_blob), true /* auto_recovery */);
 }

@@ -29,6 +29,8 @@
 #include <spdlog/fmt/fmt.h>
 #include <nlohmann/json.hpp>
 
+#include <homestore/chunk_selector.h>
+
 //
 // Note:
 // This file should only include stuffs that are needed by both service layer and internal homestore components;
@@ -138,11 +140,16 @@ public:
     io_flag data_open_flags{io_flag::DIRECT_IO}; // All data drives open flags
     io_flag fast_open_flags{io_flag::DIRECT_IO}; // All index drives open flags
 
+
     uint64_t app_mem_size{static_cast< uint64_t >(1024) * static_cast< uint64_t >(1024) *
                           static_cast< uint64_t >(1024)}; // memory available for the app (including cache)
     uint64_t hugepage_size{0};                            // memory available for the hugepage
     bool is_read_only{false};                             // Is read only
     bool auto_recovery{true};                             // Recovery of data is automatic or controlled by the caller
+    ChunkSelector* dataChunkSelector{nullptr};        // ChunkSelector for DataService
+    ChunkSelector* logChunkSelector{nullptr};          // ChunkSelector for LogService
+    ChunkSelector* IndexChunkSelector{nullptr};      // ChunkSelector for IndexService
+    ChunkSelector* metaChunkSelector{nullptr};        // ChunkSelector for MetaService
 
 #ifdef _PRERELEASE
     bool force_reinit{false};

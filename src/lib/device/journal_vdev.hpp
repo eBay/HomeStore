@@ -49,17 +49,17 @@ private:
 
 public:
     /* Create a new virtual dev for these parameters */
-    JournalVirtualDev(DeviceManager* mgr, const char* name, PhysicalDevGroup pdev_group, uint64_t size_in,
+    JournalVirtualDev(DeviceManager* mgr, ChunkSelector* chunkSelector, const char* name, PhysicalDevGroup pdev_group, uint64_t size_in,
                       uint32_t nmirror, bool is_stripe, uint32_t blk_size, char* context, uint64_t context_size,
                       bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
-            VirtualDev{mgr,     name,         pdev_group,    blk_allocator_type_t::none,
+            VirtualDev{mgr,     chunkSelector, name,         pdev_group,    blk_allocator_type_t::none,
                        size_in, nmirror,      is_stripe,     blk_size,
                        context, context_size, auto_recovery, hwm_cb} {}
 
     /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
-    JournalVirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, PhysicalDevGroup pdev_group,
+    JournalVirtualDev(DeviceManager* mgr, ChunkSelector* chunkSelector, const char* name, vdev_info_block* vb, PhysicalDevGroup pdev_group,
                       bool recovery_init, bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
-            VirtualDev(mgr, name, vb, pdev_group, blk_allocator_type_t::none, recovery_init, auto_recovery, hwm_cb) {}
+            VirtualDev(mgr, chunkSelector, name, vb, pdev_group, blk_allocator_type_t::none, recovery_init, auto_recovery, hwm_cb) {}
 
     JournalVirtualDev(const JournalVirtualDev& other) = delete;
     JournalVirtualDev& operator=(const JournalVirtualDev& other) = delete;

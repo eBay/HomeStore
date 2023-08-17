@@ -36,6 +36,7 @@
 
 #include "device.h"
 #include "device_selector.hpp"
+#include <homestore/chunk_selector.h>
 
 namespace iomgr {
 class DriveInterface;
@@ -136,6 +137,7 @@ class VirtualDev {
 protected:
     vdev_info_block* m_vb;   // This device block info
     DeviceManager* m_mgr;    // Device Manager back pointer
+    ChunkSelector* m_chunk_selector; //ChunkSelector
     std::string m_name;      // Name of the vdev
     uint64_t m_chunk_size;   // Chunk size that will be allocated in a physical device
     std::mutex m_mgmt_mutex; // Any mutex taken for management operations (like adding/removing chunks).
@@ -166,16 +168,16 @@ private:
     static uint32_t s_num_chunks_created; // vdev will not be created in parallel threads;
 
 public:
-    void init(DeviceManager* mgr, vdev_info_block* vb, uint32_t blk_size, bool auto_recovery,
+    void init(DeviceManager* mgr, ChunkSelector* chunkSelector, vdev_info_block* vb, uint32_t blk_size, bool auto_recovery,
               vdev_high_watermark_cb_t hwm_cb);
 
     // Create a new virtual dev for these parameters
-    VirtualDev(DeviceManager* mgr, const char* name, PhysicalDevGroup pdev_group, blk_allocator_type_t allocator_type,
+    VirtualDev(DeviceManager* mgr, ChunkSelector* chunkSelector, const char* name, PhysicalDevGroup pdev_group, blk_allocator_type_t allocator_type,
                uint64_t size_in, uint32_t nmirror, bool is_stripe, uint32_t blk_size, char* context,
                uint64_t context_size, bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr);
 
     // Load the virtual dev from vdev_info_block and create a Virtual Dev instance
-    VirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, PhysicalDevGroup pdev_group,
+    VirtualDev(DeviceManager* mgr, ChunkSelector* chunkSelector, const char* name, vdev_info_block* vb, PhysicalDevGroup pdev_group,
                blk_allocator_type_t allocator_type, bool recovery_init, bool auto_recovery = false,
                vdev_high_watermark_cb_t hwm_cb = nullptr);
 

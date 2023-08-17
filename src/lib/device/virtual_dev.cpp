@@ -86,7 +86,7 @@ static std::shared_ptr< BlkAllocator > create_blk_allocator(blk_allocator_type_t
     }
 }
 
-void VirtualDev::init(DeviceManager* mgr, vdev_info_block* vb, uint32_t blk_size, bool auto_recovery,
+void VirtualDev::init(DeviceManager* mgr, ChunkSelector* chunkSelector, vdev_info_block* vb, uint32_t blk_size, bool auto_recovery,
                       vdev_high_watermark_cb_t hwm_cb) {
     m_mgr = mgr;
     m_vb = vb;
@@ -97,15 +97,16 @@ void VirtualDev::init(DeviceManager* mgr, vdev_info_block* vb, uint32_t blk_size
     m_recovery_init = false;
     m_auto_recovery = auto_recovery;
     m_hwm_cb = std::move(hwm_cb);
+    m_chunk_selector = chunkSelector;
 }
 
 /* Create a new virtual dev for these parameters */
-VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, PhysicalDevGroup pdev_group,
+VirtualDev::VirtualDev(DeviceManager* mgr, ChunkSelector* chunkSelector, const char* name, PhysicalDevGroup pdev_group,
                        blk_allocator_type_t allocator_type, uint64_t size_in, uint32_t nmirror, bool is_stripe,
                        uint32_t blk_size, char* context, uint64_t context_size, bool auto_recovery,
                        vdev_high_watermark_cb_t hwm_cb) :
         m_name{name}, m_allocator_type{allocator_type}, m_metrics{name}, m_pdev_group{pdev_group} {
-    init(mgr, nullptr, blk_size, auto_recovery, std::move(hwm_cb));
+    init(mgr, chunkSelector, nullptr, blk_size, auto_recovery, std::move(hwm_cb));
 
     auto const pdev_list = m_mgr->get_devices(pdev_group);
     // Prepare primary chunks in a physical device for future inserts.
@@ -217,6 +218,8 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, PhysicalDevGroup pd
 
         chunk->set_blk_allocator((nmirror > 0) ? ba : std::move(ba));
         m_primary_pdev_chunks_list[pdev_ind].chunks_in_pdev.push_back(chunk);
+        
+        if(m_chunk_selector) m_chunk_selector->add_chunk(chunk);
 
         // If we have mirror, create a map between chunk and its mirrored chunks
         if (nmirror > 0) {
@@ -239,11 +242,11 @@ VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, PhysicalDevGroup pd
 }
 
 /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
-VirtualDev::VirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, PhysicalDevGroup pdev_group,
+VirtualDev::VirtualDev(DeviceManager* mgr, ChunkSelector* chunkSelector, const char* name, vdev_info_block* vb, PhysicalDevGroup pdev_group,
                        blk_allocator_type_t allocator_type, bool recovery_init, bool auto_recovery,
                        vdev_high_watermark_cb_t hwm_cb) :
         m_name{name}, m_allocator_type{allocator_type}, m_metrics{name}, m_pdev_group{pdev_group} {
-    init(mgr, vb, vb->blk_size, auto_recovery, std::move(hwm_cb));
+    init(mgr, chunkSelector, vb, vb->blk_size, auto_recovery, std::move(hwm_cb));
 
     m_recovery_init = recovery_init;
     m_mgr->add_chunks(vb->vdev_id, [this](PhysicalDevChunk* chunk) {
@@ -273,6 +276,7 @@ void VirtualDev::add_chunk(PhysicalDevChunk* chunk) {
         ++m_num_chunks;
         add_primary_chunk(chunk);
     }
+    if(m_chunk_selector) m_chunk_selector->add_chunk(chunk);
 }
 
 PhysicalDevChunk* VirtualDev::get_next_chunk(uint32_t dev_id, uint32_t chunk_id) {
@@ -434,7 +438,8 @@ BlkAllocStatus VirtualDev::do_alloc_blk(blk_count_t nblks, const blk_alloc_hints
         BlkAllocStatus status = BlkAllocStatus::FAILED;
 
         while (try_streams != 0) {
-            preferred_chunk = reinterpret_cast< PhysicalDevChunk* >(stream_info->chunk_list[stream_info->stream_cur]);
+            if(m_chunk_selector) preferred_chunk = m_chunk_selector->select_chunk();
+            else preferred_chunk = reinterpret_cast< PhysicalDevChunk* >(stream_info->chunk_list[stream_info->stream_cur]);
             if (preferred_chunk) {
                 // try to allocate from the preferred chunk
                 status = alloc_blk_from_chunk(nblks, hints, out_blkid, preferred_chunk);
