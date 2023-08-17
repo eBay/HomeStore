@@ -72,7 +72,7 @@ public:
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         test_common::HSTestHelper::start_homestore("test_vdev", 15.0, 0, 0, 0, 0, nullptr);
-        m_vdev = std::make_unique< JournalVirtualDev >(hs()->device_mgr(), "test_vdev", PhysicalDevGroup::DATA,
+        m_vdev = std::make_unique< JournalVirtualDev >(hs()->device_mgr(), nullptr, "test_vdev", PhysicalDevGroup::DATA,
                                                        (dev_size * ndevices * 60) / 100, 0 /* nmirror */,
                                                        true /* is_stripe */, 4096 /* blk_size */, nullptr, 0);
     }

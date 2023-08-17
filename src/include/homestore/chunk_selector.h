@@ -1,8 +1,8 @@
 #pragma once
 
-class PhysicalDevChunk;
-
 namespace homestore {
+
+class PhysicalDevChunk;
 
 class ChunkSelector {
 public:
@@ -17,4 +17,4 @@ public:
     virtual PhysicalDevChunk* select_chunk() = 0;
 };
 
-} // namespace homestore
+}

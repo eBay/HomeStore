@@ -49,13 +49,13 @@ folly::Future< bool > LogStoreService::create_vdev(uint64_t size, logstore_famil
     if (family == DATA_LOG_FAMILY_IDX) {
         blob.type = blkstore_type::DATA_LOGDEV_STORE;
         m_data_logdev_vdev = std::make_unique< JournalVirtualDev >(
-            hs()->device_mgr(), logChunkSelector, "data_logdev", PhysicalDevGroup::FAST, size, 0 /* nmirror */, true /* is_stripe */,
+            hs()->device_mgr(), chunkSelector, "data_logdev", PhysicalDevGroup::FAST, size, 0 /* nmirror */, true /* is_stripe */,
             atomic_page_size /* blk_size */, (char*)&blob, sizeof(blkstore_blob), true /* auto_recovery */);
         return m_data_logdev_vdev->async_format();
     } else {
         blob.type = blkstore_type::CTRL_LOGDEV_STORE;
         m_ctrl_logdev_vdev = std::make_unique< JournalVirtualDev >(
-            hs()->device_mgr(), logChunkSelector, "ctrl_logdev", PhysicalDevGroup::FAST, size, 0 /* nmirror */, true /* is_stripe */,
+            hs()->device_mgr(), chunkSelector, "ctrl_logdev", PhysicalDevGroup::FAST, size, 0 /* nmirror */, true /* is_stripe */,
             atomic_page_size /* blk_size */, (char*)&blob, sizeof(blkstore_blob), true /* auto_recovery */);
         return m_ctrl_logdev_vdev->async_format();
     }
