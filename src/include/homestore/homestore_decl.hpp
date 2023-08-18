@@ -131,11 +131,39 @@ static std::string in_bytes(uint64_t sz) {
     return _format_decimals(size / arr.back().first, arr.back().second);
 }
 
+struct HS_SERVICE {
+    static constexpr uint32_t META = 1 << 0;
+    static constexpr uint32_t LOG_REPLICATED = 1 << 1;
+    static constexpr uint32_t LOG_LOCAL = 1 << 2;
+    static constexpr uint32_t DATA = 1 << 3;
+    static constexpr uint32_t INDEX = 1 << 4;
+
+    uint32_t svcs;
+
+    HS_SERVICE() : svcs{META} {}
+    HS_SERVICE(uint32_t val) : svcs{val} {
+        svcs |= META; // Force meta to be present always
+    }
+
+    std::string list() const {
+        std::string str;
+        if (svcs & META) { str += "meta,"; }
+        if (svcs & DATA) { str += "data,"; }
+        if (svcs & INDEX) { str += "index,"; }
+        if (svcs & LOG_REPLICATED) { str += "log_replicated,"; }
+        if (svcs & LOG_LOCAL) { str += "log_local,"; }
+        return str;
+    }
+};
+
+struct hs_format_params {
+    float size_pct;
+    uint32_t num_chunks{1};
+};
+
 struct hs_input_params {
 public:
-    std::vector< dev_info > data_devices;        // name of the data devices.
-    uuid_t system_uuid;                          // Deprecated. UUID assigned to the system
-
+    std::vector< dev_info > devices;             // name of the data devices.
     io_flag data_open_flags{io_flag::DIRECT_IO}; // All data drives open flags
     io_flag fast_open_flags{io_flag::DIRECT_IO}; // All index drives open flags
 
@@ -144,6 +172,7 @@ public:
     uint64_t hugepage_size{0};                            // memory available for the hugepage
     bool is_read_only{false};                             // Is read only
     bool auto_recovery{true};                             // Recovery of data is automatic or controlled by the caller
+    HS_SERVICE services;                                  // Services homestore is starting with
 
 #ifdef _PRERELEASE
     bool force_reinit{false};

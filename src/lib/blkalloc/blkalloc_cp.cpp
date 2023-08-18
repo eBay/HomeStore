@@ -43,7 +43,7 @@ blkalloc_cp::~blkalloc_cp() {
             const auto chunk_num{bid->get_chunk_num()};
             auto* const chunk{m_hs->get_device_manager()->get_chunk_mutable(chunk_num)};
             chunk->get_blk_allocator_mutable()->free(*bid);
-            const auto page_size{chunk->get_blk_allocator()->get_config().get_blk_size()};
+            const auto page_size{chunk->get_blk_allocator()->get_blk_size()};
             if (m_notify_free) { m_notify_free(bid->data_size(page_size)); }
         }
         list->clear();

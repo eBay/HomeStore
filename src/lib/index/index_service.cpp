@@ -21,6 +21,7 @@
 #include "common/homestore_utils.hpp"
 #include "device/virtual_dev.hpp"
 #include "device/physical_dev.hpp"
+#include "device/chunk.h"
 
 namespace homestore {
 IndexService& index_service() { return hs()->index_service(); }
@@ -35,22 +36,29 @@ IndexService::IndexService(std::unique_ptr< IndexServiceCallbacks > cbs) : m_svc
 }
 
 void IndexService::create_vdev(uint64_t size) {
-    auto const atomic_page_size = hs()->device_mgr()->atomic_page_size({PhysicalDevGroup::FAST});
+    auto const atomic_page_size = hs()->device_mgr()->atomic_page_size(HSDevType::Fast);
+    hs_vdev_context vdev_ctx;
+    vdev_ctx.type = hs_vdev_type_t::INDEX_VDEV;
 
-    struct blkstore_blob blob;
-    blob.type = blkstore_type::INDEX_STORE;
     m_vdev =
-        std::make_shared< VirtualDev >(hs()->device_mgr(), "index", PhysicalDevGroup::FAST, blk_allocator_type_t::fixed,
-                                       size, 0, true, atomic_page_size, (char*)&blob, sizeof(blkstore_blob), true);
+        hs()->device_mgr()->create_vdev(vdev_parameters{.vdev_name = "index",
+                                                        .vdev_size = size,
+                                                        .num_chunks = 1,
+                                                        .blk_size = atomic_page_size,
+                                                        .dev_type = HSDevType::Fast,
+                                                        .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
+                                                        .context_data = vdev_ctx.to_blob()},
+                                        [this](const vdev_info& vinfo) {
+                                            return std::make_shared< VirtualDev >(
+                                                *(hs()->device_mgr()), vinfo, blk_allocator_type_t::fixed,
+                                                chunk_selector_type_t::round_robin, nullptr, true /* auto_recovery */);
+                                        });
 }
 
-void IndexService::open_vdev(vdev_info_block* vb) {
-    m_vdev = std::make_shared< VirtualDev >(hs()->device_mgr(), "index", vb, PhysicalDevGroup::FAST,
-                                            blk_allocator_type_t::fixed, vb->is_failed(), true);
-    if (vb->is_failed()) {
-        LOGINFO("index vdev is in failed state");
-        throw std::runtime_error("vdev in failed state");
-    }
+shared< VirtualDev > IndexService::open_vdev(const vdev_info& vinfo) {
+    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, blk_allocator_type_t::fixed,
+                                            chunk_selector_type_t::round_robin, nullptr, true /* auto_recovery */);
+    return m_vdev;
 }
 
 void IndexService::meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
@@ -64,7 +72,7 @@ void IndexService::meta_blk_found(const sisl::byte_view& buf, void* meta_cookie)
 void IndexService::start() {
     // Start Writeback cache
     m_wb_cache = std::make_unique< IndexWBCache >(m_vdev, hs()->evictor(),
-                                                  hs()->device_mgr()->atomic_page_size({PhysicalDevGroup::FAST}));
+                                                  hs()->device_mgr()->atomic_page_size(HSDevType::Fast));
 
     // Register to CP for flush dirty buffers
     hs()->cp_mgr().register_consumer(cp_consumer_t::INDEX_SVC,
@@ -76,7 +84,7 @@ void IndexService::add_index_table(const std::shared_ptr< IndexTableBase >& tbl)
     m_index_map.insert(std::make_pair(tbl->uuid(), tbl));
 }
 
-uint32_t IndexService::node_size() const { return hs()->device_mgr()->atomic_page_size({PhysicalDevGroup::FAST}); }
+uint32_t IndexService::node_size() const { return hs()->device_mgr()->atomic_page_size(HSDevType::Fast); }
 
 uint64_t IndexService::used_size() const {
     auto size{0};

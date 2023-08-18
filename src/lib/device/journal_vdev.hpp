@@ -44,23 +44,11 @@ private:
     off_t m_data_start_offset{0};                   // Start offset of where actual data begin for this vdev
     std::atomic< uint64_t > m_write_sz_in_total{0}; // this size will be decreased by truncate and increased by append;
     bool m_truncate_done{true};
-    vdev_high_watermark_cb_t m_hwm_cb{nullptr};
-    uint64_t m_reserved_sz{0}; // write size within chunk, used to check chunk boundary;
+    uint64_t m_reserved_sz{0};                      // write size within chunk, used to check chunk boundary;
 
 public:
     /* Create a new virtual dev for these parameters */
-    JournalVirtualDev(DeviceManager* mgr, const char* name, PhysicalDevGroup pdev_group, uint64_t size_in,
-                      uint32_t nmirror, bool is_stripe, uint32_t blk_size, char* context, uint64_t context_size,
-                      bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
-            VirtualDev{mgr,     name,         pdev_group,    blk_allocator_type_t::none,
-                       size_in, nmirror,      is_stripe,     blk_size,
-                       context, context_size, auto_recovery, hwm_cb} {}
-
-    /* Load the virtual dev from vdev_info_block and create a Virtual Dev. */
-    JournalVirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, PhysicalDevGroup pdev_group,
-                      bool recovery_init, bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr) :
-            VirtualDev(mgr, name, vb, pdev_group, blk_allocator_type_t::none, recovery_init, auto_recovery, hwm_cb) {}
-
+    JournalVirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, vdev_event_cb_t event_cb);
     JournalVirtualDev(const JournalVirtualDev& other) = delete;
     JournalVirtualDev& operator=(const JournalVirtualDev& other) = delete;
     JournalVirtualDev(JournalVirtualDev&&) noexcept = delete;
@@ -283,48 +271,6 @@ public:
      */
     nlohmann::json get_status(int log_level) const override;
 
-    /////////////////////////////////////////////////////////////////////////
-    // All methods which are invalid for journal vdev are put here.
-    // TODO: Do an assert after it is verified to be ok or better split current vdev into vdevbase and vdev.
-    bool is_blk_alloced(const BlkId& blkid) const override {
-        HS_DBG_ASSERT(false, "Unsupported API for journalvdev");
-        return false;
-    }
-
-    BlkAllocStatus commit_blk(const BlkId& blkid) override {
-        HS_DBG_ASSERT(false, "Unsupported API for journalvdev");
-        return BlkAllocStatus::BLK_ALLOC_NONE;
-    }
-
-    BlkAllocStatus alloc_blk(uint32_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) override {
-        HS_DBG_ASSERT(false, "Unsupported API for journalvdev");
-        return BlkAllocStatus::BLK_ALLOC_NONE;
-    }
-
-    bool free_on_realtime(const BlkId& b) override {
-        HS_DBG_ASSERT(false, "Unsupported API for journalvdev");
-        return false;
-    }
-
-    void free_blk(const BlkId& b) override { HS_DBG_ASSERT(false, "Unsupported API for journalvdev"); }
-
-    void recovery_done() override { HS_DBG_ASSERT(false, "Unsupported API for journalvdev"); }
-
-    BlkAllocStatus create_debug_bm() override {
-        HS_DBG_ASSERT(false, "Unsupported API for journalvdev");
-        return BlkAllocStatus::BLK_ALLOC_NONE;
-    }
-
-    BlkAllocStatus update_debug_bm(const BlkId& bid) override {
-        HS_DBG_ASSERT(false, "Unsupported API for journalvdev");
-        return BlkAllocStatus::BLK_ALLOC_NONE;
-    }
-
-    BlkAllocStatus verify_debug_bm(const bool free_debug_bm) override {
-        HS_DBG_ASSERT(false, "Unsupported API for journalvdev");
-        return BlkAllocStatus::BLK_ALLOC_NONE;
-    }
-
 private:
     /**
      * @brief : convert logical offset to physical offset for pwrite/pwritev;
@@ -371,8 +317,10 @@ private:
      *
      * @return : the unique offset after converion;
      */
-    uint64_t logical_to_dev_offset(off_t log_offset, uint32_t& dev_id, uint32_t& chunk_id,
-                                   off_t& offset_in_chunk) const;
+    // uint64_t logical_to_dev_offset(off_t log_offset, uint32_t& dev_id, uint32_t& chunk_id,
+    //                                off_t& offset_in_chunk) const;
+
+    std::pair< cshared< Chunk >&, off_t > offset_to_chunk(off_t log_offset) const;
 
     bool validate_append_size(size_t count) const;
 
@@ -380,7 +328,7 @@ private:
 
     off_t alloc_next_append_blk_internal(size_t size);
 
-    bool is_alloc_accross_chunk(size_t size);
+    bool is_alloc_accross_chunk(size_t size) const;
 
     auto get_dev_details(size_t len, off_t offset);
 };

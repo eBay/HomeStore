@@ -35,11 +35,11 @@ namespace homestore {
 struct meta_blk_ovf_hdr;
 struct meta_blk_sb;
 struct meta_blk;
-struct sb_blkstore_blob;
+struct meta_vdev_context;
 struct MetaSubRegInfo;
 struct BlkId;
 class VirtualDev;
-struct vdev_info_block;
+struct vdev_info;
 
 // each subsystem could receive callbacks multiple times
 // NOTE: look at this prototype some other time for const correctness and efficiency
@@ -70,12 +70,12 @@ public:
     ~MetablkMetrics() { deregister_me_from_farm(); }
 };
 
-struct sb_blkstore_blob;
+struct meta_vdev_context;
 
 class MetaBlkService {
 private:
     static bool s_self_recover;
-    std::unique_ptr< VirtualDev > m_sb_vdev; // super block vdev
+    std::shared_ptr< VirtualDev > m_sb_vdev; // super block vdev
     std::mutex m_meta_mtx;                   // mutex to access to meta_map;
     std::mutex m_shutdown_mtx;               // protects concurrent operations between recover and shutdown;
     meta_blk_map_t m_meta_blks;              // subsystem type to meta blk map;
@@ -86,7 +86,7 @@ private:
     sisl::blob m_compress_info;
     MetablkMetrics m_metrics;
     bool m_inited{false};
-    std::unique_ptr< sb_blkstore_blob > m_meta_sb_blob;
+    std::unique_ptr< meta_vdev_context > m_meta_vdev_context;
 
 public:
     MetaBlkService(const char* name = "MetaBlkStore");
@@ -100,8 +100,8 @@ public:
     // Creates the vdev that is needed to initialize the device
     void create_vdev(uint64_t size);
 
-    // Open the existing vdev which is represnted by the vdev_info_block
-    void open_vdev(vdev_info_block* vb);
+    // Open the existing vdev which is represented by the vdev_info
+    shared< VirtualDev > open_vdev(const vdev_info& vinfo);
 
     /**
      * @brief :
@@ -245,11 +245,11 @@ private:
     void load_ssb();
 
     /**
-     * @brief : init super super block
+     * @brief : format super super block
      *
      * @return
      */
-    void init_ssb();
+    void format_ssb();
 
     /**
      * @brief : Write MetaBlkService's superblock to disk;
@@ -357,6 +357,7 @@ private:
     nlohmann::json populate_json(int log_level, meta_blk_map_t& meta_blks, ovf_hdr_map_t& ovf_blk_hdrs,
                                  BlkId* last_mblk_id, client_info_map_t& sub_info, bool self_recover,
                                  const std::string& client);
+    shared< VirtualDev > do_open_vdev(const vdev_info& vinfo);
 };
 
 extern MetaBlkService& meta_service();

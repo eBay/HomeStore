@@ -29,6 +29,7 @@
 #include "device/device.h"
 #include "device/journal_vdev.hpp"
 #include "device/physical_dev.hpp"
+#include "device/chunk.h"
 #include "log_store_family.hpp"
 #include "log_dev.hpp"
 
@@ -43,39 +44,48 @@ LogStoreService::LogStoreService() :
                             std::make_unique< LogStoreFamily >(CTRL_LOG_FAMILY_IDX)} {}
 
 folly::Future< bool > LogStoreService::create_vdev(uint64_t size, logstore_family_id_t family) {
-    const auto atomic_page_size = hs()->device_mgr()->atomic_page_size({PhysicalDevGroup::FAST});
+    const auto atomic_page_size = hs()->device_mgr()->atomic_page_size(HSDevType::Fast);
 
-    struct blkstore_blob blob;
+    hs_vdev_context hs_ctx;
+    std::string name;
+
     if (family == DATA_LOG_FAMILY_IDX) {
-        blob.type = blkstore_type::DATA_LOGDEV_STORE;
-        m_data_logdev_vdev = std::make_unique< JournalVirtualDev >(
-            hs()->device_mgr(), "data_logdev", PhysicalDevGroup::FAST, size, 0 /* nmirror */, true /* is_stripe */,
-            atomic_page_size /* blk_size */, (char*)&blob, sizeof(blkstore_blob), true /* auto_recovery */);
-        return m_data_logdev_vdev->async_format();
+        name = "data_logdev";
+        hs_ctx.type = hs_vdev_type_t::DATA_LOGDEV_VDEV;
     } else {
-        blob.type = blkstore_type::CTRL_LOGDEV_STORE;
-        m_ctrl_logdev_vdev = std::make_unique< JournalVirtualDev >(
-            hs()->device_mgr(), "ctrl_logdev", PhysicalDevGroup::FAST, size, 0 /* nmirror */, true /* is_stripe */,
-            atomic_page_size /* blk_size */, (char*)&blob, sizeof(blkstore_blob), true /* auto_recovery */);
-        return m_ctrl_logdev_vdev->async_format();
+        name = "ctrl_logdev";
+        hs_ctx.type = hs_vdev_type_t::CTRL_LOGDEV_VDEV;
     }
+
+    auto vdev = hs()->device_mgr()->create_vdev(
+        vdev_parameters{.vdev_name = name,
+                        .vdev_size = size,
+                        .num_chunks = 1,
+                        .blk_size = atomic_page_size,
+                        .dev_type = HSDevType::Fast,
+                        .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
+                        .context_data = hs_ctx.to_blob()},
+        [this](const vdev_info& vinfo) {
+            return std::make_shared< JournalVirtualDev >(*(hs()->device_mgr()), vinfo, nullptr);
+        });
+
+    if (family == DATA_LOG_FAMILY_IDX) {
+        m_data_logdev_vdev = std::dynamic_pointer_cast< JournalVirtualDev >(vdev);
+    } else {
+        m_ctrl_logdev_vdev = std::dynamic_pointer_cast< JournalVirtualDev >(vdev);
+    }
+
+    return vdev->async_format();
 }
 
-bool LogStoreService::open_vdev(vdev_info_block* vb, logstore_family_id_t family) {
-    bool ret{true};
+shared< VirtualDev > LogStoreService::open_vdev(const vdev_info& vinfo, logstore_family_id_t family) {
+    auto vdev = std::make_shared< JournalVirtualDev >(*(hs()->device_mgr()), vinfo, nullptr);
     if (family == DATA_LOG_FAMILY_IDX) {
-        m_data_logdev_vdev = std::make_unique< JournalVirtualDev >(hs()->device_mgr(), "data_logdev", vb,
-                                                                   PhysicalDevGroup::FAST, vb->is_failed(), false);
+        m_data_logdev_vdev = std::dynamic_pointer_cast< JournalVirtualDev >(vdev);
     } else {
-        m_ctrl_logdev_vdev = std::make_unique< JournalVirtualDev >(hs()->device_mgr(), "ctrl_logdev", vb,
-                                                                   PhysicalDevGroup::FAST, vb->is_failed(), false);
+        m_ctrl_logdev_vdev = std::dynamic_pointer_cast< JournalVirtualDev >(vdev);
     }
-
-    if (vb->is_failed()) {
-        LOGERROR("{} vdev is in failed state", vb->get_vdev_id());
-        ret = false;
-    }
-    return ret;
+    return vdev;
 }
 
 void LogStoreService::start(bool format) {
@@ -151,7 +161,7 @@ void LogStoreService::start_threads() {
     auto ctx = std::make_shared< Context >();
 
     m_flush_fiber = nullptr;
-    iomanager.create_reactor("log_flush_thread", TIGHT_LOOP | ADAPTIVE_LOOP, 1 /* num_fibers */,
+    iomanager.create_reactor("log_flush_thread", iomgr::TIGHT_LOOP | iomgr::ADAPTIVE_LOOP, 1 /* num_fibers */,
                              [this, &ctx](bool is_started) {
                                  if (is_started) {
                                      m_flush_fiber = iomanager.iofiber_self();
@@ -164,16 +174,17 @@ void LogStoreService::start_threads() {
                              });
 
     m_truncate_fiber = nullptr;
-    iomanager.create_reactor("logstore_truncater", INTERRUPT_LOOP, 2 /* num_fibers */, [this, &ctx](bool is_started) {
-        if (is_started) {
-            m_truncate_fiber = iomanager.sync_io_capable_fibers()[0];
-            {
-                std::unique_lock< std::mutex > lk{ctx->mtx};
-                ++(ctx->thread_cnt);
-            }
-            ctx->cv.notify_one();
-        }
-    });
+    iomanager.create_reactor("logstore_truncater", iomgr::INTERRUPT_LOOP, 2 /* num_fibers */,
+                             [this, &ctx](bool is_started) {
+                                 if (is_started) {
+                                     m_truncate_fiber = iomanager.sync_io_capable_fibers()[0];
+                                     {
+                                         std::unique_lock< std::mutex > lk{ctx->mtx};
+                                         ++(ctx->thread_cnt);
+                                     }
+                                     ctx->cv.notify_one();
+                                 }
+                             });
     {
         std::unique_lock< std::mutex > lk{ctx->mtx};
         ctx->cv.wait(lk, [&ctx] { return (ctx->thread_cnt == 2); });

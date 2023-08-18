@@ -14,27 +14,32 @@
  *
  *********************************************************************************/
 #include "blk_allocator.h"
-//#include "blkalloc_cp.hpp"
+// #include "blkalloc_cp.hpp"
 
 namespace homestore {
-BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, chunk_num_t id) : m_cfg{cfg}, m_chunk_id{id} {
-    m_blk_portions = std::make_unique< BlkAllocPortion[] >(cfg.get_total_portions());
-    for (blk_num_t index{0}; index < cfg.get_total_portions(); ++index) {
+BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, chunk_num_t id) :
+        m_name{cfg.m_unique_name},
+        m_blk_size{cfg.m_blk_size},
+        m_align_size{cfg.m_align_size},
+        m_num_blks{cfg.m_capacity},
+        m_auto_recovery{cfg.m_auto_recovery},
+        m_realtime_bm_on{cfg.m_realtime_bm_on},
+        m_chunk_id{id} {
+    m_disk_bm = std::make_unique< sisl::Bitset >(m_num_blks, m_chunk_id, m_align_size);
+
+    // NOTE:  Blocks per portion must be modulo word size so locks do not fall on same word
+    m_blks_per_portion = sisl::round_up(cfg.m_blks_per_portion, m_disk_bm->word_size());
+
+    m_blk_portions = std::make_unique< BlkAllocPortion[] >(get_num_portions());
+    for (blk_num_t index{0}; index < get_num_portions(); ++index) {
         m_blk_portions[index].set_portion_num(index);
-        m_blk_portions[index].set_available_blocks(m_cfg.get_blks_per_portion());
+        m_blk_portions[index].set_available_blocks(get_blks_per_portion());
     }
-    m_auto_recovery = cfg.get_auto_recovery();
-    const auto align_size = m_cfg.get_align_size();
-    const auto bitmap_id = id;
-    m_disk_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), bitmap_id, align_size);
 
     if (realtime_bm_on()) {
         LOGINFO("realtime bitmap turned ON for chunk_id: {}", m_chunk_id);
-        m_realtime_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), bitmap_id, align_size);
+        m_realtime_bm = std::make_unique< sisl::Bitset >(m_num_blks, m_chunk_id, m_align_size);
     }
-
-    // NOTE:  Blocks per portion must be modulo word size so locks do not fall on same word
-    assert(m_cfg.get_blks_per_portion() % m_disk_bm->word_size() == 0);
 }
 
 void BlkAllocator::set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm) {
@@ -47,14 +52,14 @@ void BlkAllocator::set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm) {
 void BlkAllocator::inited() {
     if (!m_inited) {
         m_alloced_blk_count.fetch_add(get_disk_bm_const()->get_set_count(), std::memory_order_relaxed);
-        if (!m_auto_recovery) { m_disk_bm.reset(); }
+        if (!auto_recovery_on()) { m_disk_bm.reset(); }
         m_inited = true;
         if (realtime_bm_on()) { m_realtime_bm->copy(*(get_disk_bm_const())); }
     }
 }
 
 bool BlkAllocator::is_blk_alloced_on_disk(const BlkId& b, bool use_lock) const {
-    if (!m_auto_recovery) {
+    if (!auto_recovery_on()) {
         return true; // nothing to compare. So always return true
     }
     auto bits_set{[this, &b]() {
@@ -62,8 +67,8 @@ bool BlkAllocator::is_blk_alloced_on_disk(const BlkId& b, bool use_lock) const {
         return true;
     }};
     if (use_lock) {
-        const BlkAllocPortion* portion = blknum_to_portion_const(b.get_blk_num());
-        auto lock{portion->portion_auto_lock()};
+        const BlkAllocPortion& portion = blknum_to_portion_const(b.get_blk_num());
+        auto lock{portion.portion_auto_lock()};
         return bits_set();
     } else {
         return bits_set();
@@ -71,7 +76,7 @@ bool BlkAllocator::is_blk_alloced_on_disk(const BlkId& b, bool use_lock) const {
 }
 
 BlkAllocStatus BlkAllocator::alloc_on_disk(const BlkId& in_bid) {
-    if (!m_auto_recovery && m_inited) { return BlkAllocStatus::FAILED; }
+    if (!auto_recovery_on() && m_inited) { return BlkAllocStatus::FAILED; }
 
     rcu_read_lock();
     auto list = get_alloc_blk_list();
@@ -81,16 +86,16 @@ BlkAllocStatus BlkAllocator::alloc_on_disk(const BlkId& in_bid) {
     } else {
         // cp is not started or already done, allocate on disk bm directly;
         /* enable this assert later when reboot is supported */
-        // assert(m_auto_recovery || !m_inited);
-        BlkAllocPortion* portion = blknum_to_portion(in_bid.get_blk_num());
+        // assert(auto_recovery_on() || !m_inited);
+        BlkAllocPortion& portion = blknum_to_portion(in_bid.get_blk_num());
         {
-            auto lock{portion->portion_auto_lock()};
+            auto lock{portion.portion_auto_lock()};
             if (m_inited) {
                 BLKALLOC_REL_ASSERT(get_disk_bm_const()->is_bits_reset(in_bid.get_blk_num(), in_bid.get_nblks()),
                                     "Expected disk blks to reset");
             }
             get_disk_bm_mutable()->set_bits(in_bid.get_blk_num(), in_bid.get_nblks());
-            portion->decrease_available_blocks(in_bid.get_nblks());
+            portion.decrease_available_blocks(in_bid.get_nblks());
             BLKALLOC_LOG(DEBUG, "blks allocated {} chunk number {}", in_bid.to_string(), m_chunk_id);
         }
     }
@@ -102,10 +107,10 @@ BlkAllocStatus BlkAllocator::alloc_on_disk(const BlkId& in_bid) {
 BlkAllocStatus BlkAllocator::alloc_on_realtime(const BlkId& b) {
     if (!realtime_bm_on()) { return BlkAllocStatus::SUCCESS; }
 
-    if (!m_auto_recovery && m_inited) { return BlkAllocStatus::FAILED; }
-    BlkAllocPortion* portion = blknum_to_portion(b.get_blk_num());
+    if (!auto_recovery_on() && m_inited) { return BlkAllocStatus::FAILED; }
+    BlkAllocPortion& portion = blknum_to_portion(b.get_blk_num());
     {
-        auto lock{portion->portion_auto_lock()};
+        auto lock{portion.portion_auto_lock()};
         if (m_inited) {
             if (!get_realtime_bm()->is_bits_reset(b.get_blk_num(), b.get_nblks())) {
                 BLKALLOC_LOG(ERROR, "bit not reset {} nblks {} chunk number {}", b.get_blk_num(), b.get_nblks(),
@@ -134,10 +139,10 @@ bool BlkAllocator::free_on_realtime(const BlkId& b) {
     if (!realtime_bm_on()) { return true; }
 
     /* this api should be called only when auto recovery is enabled */
-    assert(m_auto_recovery);
-    BlkAllocPortion* portion = blknum_to_portion(b.get_blk_num());
+    assert(auto_recovery_on());
+    BlkAllocPortion& portion = blknum_to_portion(b.get_blk_num());
     {
-        auto lock{portion->portion_auto_lock()};
+        auto lock{portion.portion_auto_lock()};
         if (m_inited) {
             /* During recovery we might try to free the entry which is already freed while replaying the journal,
              * This assert is valid only post recovery.
@@ -162,10 +167,10 @@ bool BlkAllocator::free_on_realtime(const BlkId& b) {
 
 void BlkAllocator::free_on_disk(const BlkId& b) {
     /* this api should be called only when auto recovery is enabled */
-    assert(m_auto_recovery);
-    BlkAllocPortion* portion = blknum_to_portion(b.get_blk_num());
+    assert(auto_recovery_on());
+    BlkAllocPortion& portion = blknum_to_portion(b.get_blk_num());
     {
-        auto lock{portion->portion_auto_lock()};
+        auto lock{portion.portion_auto_lock()};
         if (m_inited) {
             /* During recovery we might try to free the entry which is already freed while replaying the journal,
              * This assert is valid only post recovery.
@@ -183,7 +188,7 @@ void BlkAllocator::free_on_disk(const BlkId& b) {
             }
         }
         get_disk_bm_mutable()->reset_bits(b.get_blk_num(), b.get_nblks());
-        portion->increase_available_blocks(b.get_nblks());
+        portion.increase_available_blocks(b.get_nblks());
     }
 }
 
@@ -195,7 +200,7 @@ sisl::byte_array BlkAllocator::acquire_underlying_buffer() {
     synchronize_rcu();
 
     BLKALLOC_REL_ASSERT(old_alloc_list_ptr == nullptr, "Multiple acquires concurrently?");
-    return (m_disk_bm->serialize(m_cfg.get_align_size()));
+    return (m_disk_bm->serialize(m_align_size));
 }
 
 void BlkAllocator::release_underlying_buffer() {
@@ -215,8 +220,8 @@ void BlkAllocator::release_underlying_buffer() {
 }
 
 void BlkAllocator::create_debug_bm() {
-    m_debug_bm = std::make_unique< sisl::Bitset >(m_cfg.get_total_blks(), m_chunk_id, m_cfg.get_align_size());
-    assert(m_cfg.get_blks_per_portion() % m_debug_bm->word_size() == 0);
+    m_debug_bm = std::make_unique< sisl::Bitset >(m_num_blks, m_chunk_id, m_align_size);
+    assert(get_blks_per_portion() % m_debug_bm->word_size() == 0);
 }
 
 void BlkAllocator::update_debug_bm(const BlkId& bid) {

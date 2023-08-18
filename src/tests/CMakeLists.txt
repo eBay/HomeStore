@@ -43,12 +43,12 @@ if (${build_nonio_tests})
 
     set(TEST_PDEV_SOURCES test_pdev.cpp)
     add_executable(test_physical_device ${TEST_PDEV_SOURCES})
-    target_link_libraries(test_physical_device hs_new_device hs_common ${COMMON_TEST_DEPS} GTest::gmock)
+    target_link_libraries(test_physical_device hs_device hs_common ${COMMON_TEST_DEPS} GTest::gmock)
     add_test(NAME PhysicalDev COMMAND test_physical_device)
 
     set(TEST_DEV_MGR_SOURCES test_device_manager.cpp)
     add_executable(test_device_manager ${TEST_DEV_MGR_SOURCES})
-    target_link_libraries(test_device_manager hs_new_device hs_common ${COMMON_TEST_DEPS} GTest::gmock)
+    target_link_libraries(test_device_manager hs_device hs_common ${COMMON_TEST_DEPS} GTest::gmock)
     add_test(NAME DeviceManager COMMAND test_device_manager)
 
 endif()

@@ -85,8 +85,8 @@ private:
 
 public:
     static void start_homestore(const std::string& test_name, float meta_pct, float data_log_pct, float ctrl_log_pct,
-                                float data_pct, float index_pct, hs_init_starting_cb_t cb, bool restart = false,
-                                std::unique_ptr< IndexServiceCallbacks > index_svc_cb = nullptr) {
+                                float data_pct, float index_pct, hs_before_services_starting_cb_t cb,
+                                bool restart = false, std::unique_ptr< IndexServiceCallbacks > index_svc_cb = nullptr) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
@@ -139,17 +139,27 @@ public:
         const uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
         LOGINFO("Initialize and start HomeStore with app_mem_size = {}", homestore::in_bytes(app_mem_size));
 
-        homestore::hs_input_params params;
-        params.app_mem_size = app_mem_size;
-        params.data_devices = device_info;
-        homestore::HomeStore::instance()
-            ->with_params(params)
-            .with_meta_service(meta_pct)
-            .with_log_service(data_log_pct, ctrl_log_pct)
-            .with_data_service(data_pct)
-            .with_index_service(index_pct, std::move(index_svc_cb))
-            .before_init_devices(std::move(cb))
-            .init(true /* wait_for_init */);
+        using namespace homestore;
+        uint32_t services = 0;
+        if (meta_pct) { services |= HS_SERVICE::META; }
+        if (data_log_pct) { services |= HS_SERVICE::LOG_REPLICATED; }
+        if (ctrl_log_pct) { services |= HS_SERVICE::LOG_LOCAL; }
+        if (data_pct) { services |= HS_SERVICE::DATA; }
+        if (index_pct) { services |= HS_SERVICE::INDEX; }
+
+        bool need_format = HomeStore::instance()->start(
+            hs_input_params{.devices = device_info, .app_mem_size = app_mem_size, .services = services}, std::move(cb),
+            std::move(index_svc_cb));
+
+        if (need_format) {
+            HomeStore::instance()->format_and_start(std::map< uint32_t, hs_format_params >{
+                {HS_SERVICE::META, hs_format_params{.size_pct = meta_pct}},
+                {HS_SERVICE::LOG_REPLICATED, hs_format_params{.size_pct = data_log_pct}},
+                {HS_SERVICE::LOG_LOCAL, hs_format_params{.size_pct = ctrl_log_pct}},
+                {HS_SERVICE::DATA, hs_format_params{.size_pct = data_pct}},
+                {HS_SERVICE::INDEX, hs_format_params{.size_pct = index_pct}},
+            });
+        }
     }
 
     static void shutdown_homestore(bool cleanup = true) {

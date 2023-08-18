@@ -1,7 +1,6 @@
 /*********************************************************************************
  * Modifications Copyright 2017-2019 eBay Inc.
  *
- *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -33,69 +32,13 @@
 #include <sisl/utility/enum.hpp>
 
 #include <homestore/homestore_decl.hpp>
-
-#include "device.h"
-#include "device_selector.hpp"
-
-namespace iomgr {
-class DriveInterface;
-}
+#include "device/device.h"
+#include "device/chunk_selector.hpp"
 
 namespace homestore {
 class PhysicalDev;
-class PhysicalDevChunk;
+class Chunk;
 class BlkAllocator;
-
-struct pdev_chunk_map {
-    PhysicalDev* pdev;
-    std::vector< PhysicalDevChunk* > chunks_in_pdev;
-};
-// ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize);
-ENUM(vdev_op_type_t, uint8_t, read, write, format, fsync);
-
-typedef std::function< void(void) > vdev_high_watermark_cb_t;
-
-#if 0
-struct vdev_req_context : public sisl::ObjLifeCounter< vdev_req_context > {
-    uint64_t request_id{0};                       // ID of the request
-    uint64_t version{0xDEAD};                     // Version for debugging
-    vdev_io_comp_cb_t cb;                         // User callback is put here
-    void* cookie{nullptr};                        // User defined cookie, will be returned back to caller on completion;
-    std::error_condition err{no_error};           // Any error info
-    vdev_op_type_t op_type{vdev_op_type_t::read}; // Op Type
-    sisl::atomic_counter< int > refcount{1};      // Refcount for intrusive ptr
-    bool io_on_multi_pdevs{false};                // Is IO part of multiple pdevs (say format)
-    sisl::atomic_counter< uint32_t > outstanding_ios{0}; // Outstanding ios in case of multi pdev io
-    PhysicalDevChunk* chunk{nullptr};                    // Chunk where the io is issued if its a single pdev io
-    Clock::time_point io_start_time{Clock::now()};
-
-    void inc_ref() { intrusive_ptr_add_ref(this); }
-    void dec_ref() { intrusive_ptr_release(this); }
-
-    static boost::intrusive_ptr< vdev_req_context > make_req_context() {
-        return boost::intrusive_ptr< vdev_req_context >(sisl::ObjectAllocator< vdev_req_context >::make_object());
-    }
-
-    friend void intrusive_ptr_add_ref(vdev_req_context* req) { req->refcount.increment(1); }
-    friend void intrusive_ptr_release(vdev_req_context* req) {
-        if (req->refcount.decrement_testz()) { sisl::ObjectAllocator< vdev_req_context >::deallocate(req); }
-    }
-
-    vdev_req_context(const vdev_req_context&) = delete;
-    vdev_req_context(vdev_req_context&&) noexcept = delete;
-    vdev_req_context& operator=(const vdev_req_context&) = delete;
-    vdev_req_context& operator=(vdev_req_context&&) noexcept = delete;
-
-    virtual ~vdev_req_context() { version = 0; }
-
-private:
-    static std::atomic< uint64_t > s_req_id;
-
-protected:
-    friend class sisl::ObjectAllocator< vdev_req_context >;
-    vdev_req_context() : request_id{s_req_id.fetch_add(1, std::memory_order_relaxed)} {}
-};
-#endif
 
 class VirtualDevMetrics : public sisl::MetricsGroupWrapper {
 public:
@@ -132,52 +75,29 @@ static constexpr off_t INVALID_OFFSET{std::numeric_limits< off_t >::max()};
 
 struct blkalloc_cp;
 
+class VirtualDev;
+ENUM(vdev_event_t, uint8_t, SIZE_THRESHOLD_REACHED, VDEV_ERRORED_OUT);
+using vdev_event_cb_t = std::function< void(VirtualDev&, vdev_event_t, const std::string&) >;
+
 class VirtualDev {
 protected:
-    vdev_info_block* m_vb;   // This device block info
-    DeviceManager* m_mgr;    // Device Manager back pointer
-    std::string m_name;      // Name of the vdev
-    uint64_t m_chunk_size;   // Chunk size that will be allocated in a physical device
-    std::mutex m_mgmt_mutex; // Any mutex taken for management operations (like adding/removing chunks).
-
-    // List of physical devices this virtual device uses and its corresponding chunks for the physdev
-    std::vector< pdev_chunk_map > m_primary_pdev_chunks_list;
-
-    // For each of the primary chunk we created, this is the list of mirrored chunks. The physical devices
-    // for the mirrored chunk always follows the next device pattern.
-    std::map< PhysicalDevChunk*, std::vector< PhysicalDevChunk* > > m_mirror_chunks;
-
-    std::unique_ptr< RoundRobinDeviceSelector > m_selector; // Instance of device selector
-    uint32_t m_num_chunks{0};
-    uint32_t m_blk_size{4096};
-    bool m_recovery_init{false};
-
-    blk_allocator_type_t m_allocator_type;
-    bool m_auto_recovery{false};
-    vdev_high_watermark_cb_t m_hwm_cb{nullptr};
-    iomgr::DriveInterface* m_drive_iface{nullptr};
+    vdev_info m_vdev_info;      // This device block info
+    DeviceManager& m_dmgr;      // Device Manager back pointer
+    std::string m_name;         // Name of the vdev
+    vdev_event_cb_t m_event_cb; // Callback registered for any events
     VirtualDevMetrics m_metrics;
-    std::vector< PhysicalDevChunk* > m_free_streams;
-    std::mutex m_free_streams_lk;
-    PhysicalDevChunk* m_default_chunk{nullptr};
-    PhysicalDevGroup m_pdev_group;
 
-private:
-    static uint32_t s_num_chunks_created; // vdev will not be created in parallel threads;
+    std::mutex m_mgmt_mutex;          // Any mutex taken for management operations (like adding/removing chunks).
+    std::set< PhysicalDev* > m_pdevs; // PDevs this vdev is working on
+    sisl::sparse_vector< shared< Chunk > > m_all_chunks; // All chunks part of this vdev
+    std::unique_ptr< ChunkSelector > m_chunk_selector;   // Instance of chunk selector
+    blk_allocator_type_t m_allocator_type;
+    chunk_selector_type_t m_chunk_selector_type;
+    bool m_auto_recovery;
 
 public:
-    void init(DeviceManager* mgr, vdev_info_block* vb, uint32_t blk_size, bool auto_recovery,
-              vdev_high_watermark_cb_t hwm_cb);
-
-    // Create a new virtual dev for these parameters
-    VirtualDev(DeviceManager* mgr, const char* name, PhysicalDevGroup pdev_group, blk_allocator_type_t allocator_type,
-               uint64_t size_in, uint32_t nmirror, bool is_stripe, uint32_t blk_size, char* context,
-               uint64_t context_size, bool auto_recovery = false, vdev_high_watermark_cb_t hwm_cb = nullptr);
-
-    // Load the virtual dev from vdev_info_block and create a Virtual Dev instance
-    VirtualDev(DeviceManager* mgr, const char* name, vdev_info_block* vb, PhysicalDevGroup pdev_group,
-               blk_allocator_type_t allocator_type, bool recovery_init, bool auto_recovery = false,
-               vdev_high_watermark_cb_t hwm_cb = nullptr);
+    VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, blk_allocator_type_t allocator_type,
+               chunk_selector_type_t chunk_selector, vdev_event_cb_t event_cb, bool is_auto_recovery);
 
     VirtualDev(const VirtualDev& other) = delete;
     VirtualDev& operator=(const VirtualDev& other) = delete;
@@ -189,15 +109,7 @@ public:
     /// takes lock for writing and not reading
     ///
     /// @param chunk Chunk to be added
-    virtual void add_chunk(PhysicalDevChunk* chunk);
-
-    /// @brief get the next chunk handle based on input dev_id and chunk_id
-    /// @param dev_id : the current dev_id
-    /// @param chunk_id : the current chunk_id
-    /// @return  the hundle to the next chunk, if current chunk is the last chunk, loop back to begining device/chunk;
-    ///
-    /// TODO: organize chunks in a vector so that we can get next chunk id easily;
-    PhysicalDevChunk* get_next_chunk(uint32_t dev_id, uint32_t chunk_id);
+    virtual void add_chunk(cshared< Chunk >& chunk, bool is_fresh_chunk);
 
     /// @brief Formats the vdev asynchronously by zeroing the entire vdev. It will use underlying physical device
     /// capabilities to zero them if fast zero is possible, otherwise will zero block by block
@@ -234,7 +146,6 @@ public:
     /// @return Allocation Status
     virtual BlkAllocStatus commit_blk(const BlkId& blkid);
 
-    virtual bool free_on_realtime(const BlkId& b);
     virtual void free_blk(const BlkId& b);
 
     /////////////////////// Write API related methods /////////////////////////////
@@ -247,16 +158,22 @@ public:
     /// @return future< bool > Future result with bool to indicate if IO is actually executed
     folly::Future< bool > async_write(const char* buf, uint32_t size, const BlkId& bid, bool part_of_batch = false);
 
+    folly::Future< bool > async_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
+                                      uint64_t offset_in_chunk);
+
     /// @brief Asynchornously write the buffer to the device on a given blkid from vector of buffer
     /// @param iov : Vector of buffer to write data from
     /// @param iovcnt : Count of buffer
     /// @param bid  BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @param cb : Callback once write is completed
-    /// @param cookie : cookie set by caller and returned on completion; It is defaulted to null as some caller is not
-    /// intrested of of this field
+    /// @param cookie : cookie set by caller and returned on completion; It is defaulted to null as some caller is
+    /// not intrested of of this field
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
     folly::Future< bool > async_writev(const iovec* iov, int iovcnt, const BlkId& bid, bool part_of_batch = false);
+
+    folly::Future< bool > async_writev(const iovec* iov, const int iovcnt, cshared< Chunk >& chunk,
+                                       uint64_t offset_in_chunk);
 
     /// @brief Synchronously write the buffer to the blkid
     /// @param buf : Buffer to write data from
@@ -264,6 +181,7 @@ public:
     /// @param bid : BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @return ssize_t: Size of the data actually written.
     void sync_write(const char* buf, uint32_t size, const BlkId& bid);
+    void sync_write(const char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /// @brief Synchronously write the vector of buffers to the blkid
     /// @param iov : Vector of buffer to write data from
@@ -271,6 +189,7 @@ public:
     /// @param bid  BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @return ssize_t: Size of the data actually written.
     void sync_writev(const iovec* iov, int iovcnt, const BlkId& bid);
+    void sync_writev(const iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /////////////////////// Read API related methods /////////////////////////////
 
@@ -306,6 +225,7 @@ public:
     /// @param bid : BlkId from data needs to be read
     /// @return ssize_t: Size of the data actually read.
     void sync_read(char* buf, uint32_t size, const BlkId& bid);
+    void sync_read(char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /// @brief Synchronously read the data for a given BlkId to vector of buffers
     /// @param iov : Vector of buffer to write read to
@@ -313,6 +233,7 @@ public:
     /// @param size : Size of the actual data, it is really to optimize the iovec from iterating again to get size
     /// @return ssize_t: Size of the data actually read.
     void sync_readv(iovec* iov, int iovcnt, const BlkId& bid);
+    void sync_readv(iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /////////////////////// Other API related methods /////////////////////////////
 
@@ -323,105 +244,36 @@ public:
     /// @brief Submit the batch of IOs previously queued as part of async read/write APIs.
     void submit_batch();
 
-    void get_vb_context(const sisl::blob& ctx_data) const;
-    void update_vb_context(const sisl::blob& ctx_data);
     virtual void recovery_done();
     void cp_flush();
 
     ////////////////////////// Standard Getters ///////////////////////////////
     virtual uint64_t available_blks() const;
-    virtual uint64_t size() const { return (num_chunks() * chunk_size()); }
+    virtual uint64_t size() const { return m_vdev_info.vdev_size; }
     virtual uint64_t used_size() const;
-    virtual uint64_t num_chunks() const { return m_num_chunks; }
-    virtual uint64_t chunk_size() const { return m_chunk_size; }
-    virtual uint32_t blks_per_chunk() const { return chunk_size() / block_size(); }
-    virtual uint32_t block_size() const;
-    virtual uint32_t num_mirrors() const;
-    virtual std::string to_string() const { return std::string{}; }
-    virtual nlohmann::json get_status(const int log_level) const;
+    virtual uint64_t num_chunks() const { return m_vdev_info.num_primary_chunks; }
+    virtual uint32_t block_size() const { return m_vdev_info.blk_size; }
+    virtual uint32_t num_mirrors() const { return 0; }
+    virtual std::string to_string() const;
+    virtual nlohmann::json get_status(int log_level) const;
 
-    static uint64_t get_len(const iovec* iov, const int iovcnt);
-    virtual void reset_failed_state();
-
-    // Remove this virtualdev altogether
-    void rm_device();
-    void expand(const uint32_t addln_size);
-
-    /* Create debug bitmap for all chunks */
-    virtual BlkAllocStatus create_debug_bm();
-
-    /* Update debug bitmap for a given BlkId */
-    virtual BlkAllocStatus update_debug_bm(const BlkId& bid);
-
-    /* Verify debug bitmap for all chunks */
-    virtual BlkAllocStatus verify_debug_bm(const bool free_debug_bm = true);
-    stream_info_t reserve_stream(const stream_id_t* id_list, const uint32_t num_streams);
-    stream_info_t alloc_stream(uint64_t size);
-    void free_stream(const stream_info_t& stream_info);
     uint32_t align_size() const;
-    uint32_t phys_page_size() const;
+    uint32_t optimal_page_size() const;
     uint32_t atomic_page_size() const;
 
-protected:
-    /// @brief : internal implementation of async_write
-    ///
-    /// @param buf : buffer to be written
-    /// @param size : total size of buffer
-    /// @param pdev : pointer to physical device
-    /// @param pchunk : pointer to physical chunk in the device
-    /// @param dev_offset : offset within the physical device
-    /// @param cb : Completion callback to be called after write is completed
-    /// @param cookie : cookie set by caller and returned on completion;
-    /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
-    /// the end of the batch, otherwise this write request will not be queued.
-    folly::Future< bool > async_write_internal(const char* buf, uint32_t size, PhysicalDev* pdev,
-                                               PhysicalDevChunk* pchunk, uint64_t dev_offset,
-                                               bool part_of_batch = false);
+    static uint64_t get_len(const iovec* iov, const int iovcnt);
+    const std::set< PhysicalDev* >& get_pdevs() const { return m_pdevs; }
+    std::vector< shared< Chunk > > get_chunks() const;
+    shared< Chunk > get_next_chunk(cshared< Chunk >& chunk) const;
 
-    /// @brief : internal implementation of async_writev
-    ///
-    /// @param iov : Vector of buffer to write data from
-    /// @param iovcnt : Count of buffer
-    /// @param pdev : pointer to physical device
-    /// @param pchunk : pointer to physical chunk in the device
-    /// @param dev_offset : offset within the physical device
-    /// @param cb : Completion callback to be called after write is completed
-    /// @param cookie : cookie set by caller and returned on completion;
-    /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
-    /// the end of the batch, otherwise this write request will not be queued.
-    folly::Future< bool > async_writev_internal(const iovec* iov, int iovcnt, uint64_t size, PhysicalDev* pdev,
-                                                PhysicalDevChunk* pchunk, uint64_t dev_offset,
-                                                bool part_of_batch = false);
-
-    void sync_write_internal(const char* buf, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                             uint64_t dev_offset);
-
-    void sync_writev_internal(const iovec* iov, int iovcnt, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                              uint64_t dev_offset);
-
-    void sync_read_internal(char* buf, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk, uint64_t dev_offset);
-    void sync_readv_internal(iovec* iov, int iovcnt, uint32_t size, PhysicalDev* pdev, PhysicalDevChunk* pchunk,
-                             uint64_t dev_offset);
+    ///////////////////////// Meta operations on vdev ////////////////////////
+    void update_vdev_private(const sisl::blob& data);
 
 private:
-    void write_nmirror(const char* buf, uint32_t size, PhysicalDevChunk* chunk, uint64_t dev_offset_in);
-    void writev_nmirror(const iovec* iov, int iovcnt, uint32_t size, PhysicalDevChunk* chunk, uint64_t dev_offset_in);
-    void sync_read_mirrors(char* buf, uint32_t size, PhysicalDevChunk* pchunk, uint64_t dev_offset);
-    void sync_readv_mirrors(iovec* iov, int iovcnt, uint32_t size, PhysicalDevChunk* pchunk, uint64_t dev_offset);
-
-    virtual BlkAllocStatus do_alloc_blk(blk_count_t nblks, const blk_alloc_hints& hints,
-                                        std::vector< BlkId >& out_blkid);
-    uint32_t num_streams() const;
-    uint64_t stream_size() const;
-
-    void add_primary_chunk(PhysicalDevChunk* chunk);
-    void add_mirror_chunk(PhysicalDevChunk* chunk);
-    PhysicalDevChunk* create_dev_chunk(const uint32_t pdev_ind, const std::shared_ptr< BlkAllocator >& ba,
-                                       const uint32_t primary_id);
-    uint64_t to_dev_offset(const BlkId& glob_uniq_id, PhysicalDevChunk** chunk) const;
-    BlkAllocStatus alloc_blk_from_chunk(const blk_count_t nblks, const blk_alloc_hints& hints,
-                                        std::vector< BlkId >& out_blkid, PhysicalDevChunk* const chunk);
-    void reserve_stream(const stream_id_t id);
+    BlkAllocStatus do_alloc_blk(blk_count_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid);
+    uint64_t to_dev_offset(const BlkId& b, Chunk** chunk) const;
+    BlkAllocStatus alloc_blk_from_chunk(blk_count_t nblks, const blk_alloc_hints& hints,
+                                        std::vector< BlkId >& out_blkid, Chunk* chunk);
 };
 
 } // namespace homestore

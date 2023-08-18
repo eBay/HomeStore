@@ -21,27 +21,27 @@
 
 namespace homestore {
 FixedBlkAllocator::FixedBlkAllocator(const BlkAllocConfig& cfg, bool init, chunk_num_t chunk_id) :
-        BlkAllocator(cfg, chunk_id), m_blk_q{cfg.get_total_blks()} {
-    LOGINFO("total blks: {}", cfg.get_total_blks());
+        BlkAllocator(cfg, chunk_id), m_blk_q{get_total_blks()} {
+    LOGINFO("total blks: {}", get_total_blks());
     if (init) { inited(); }
 }
 
 void FixedBlkAllocator::inited() {
     blk_num_t blk_num{0};
 
-    while (blk_num < m_cfg.get_total_blks()) {
+    while (blk_num < get_total_blks()) {
         blk_num = init_portion(blknum_to_portion(blk_num), blk_num);
     }
     BlkAllocator::inited();
 }
 
-blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion* portion, blk_num_t start_blk_num) {
-    auto lock{portion->portion_auto_lock()};
+blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion& portion, blk_num_t start_blk_num) {
+    auto lock{portion.portion_auto_lock()};
 
     auto blk_num = start_blk_num;
-    while (blk_num < m_cfg.get_total_blks()) {
-        BlkAllocPortion* cur_portion = blknum_to_portion(blk_num);
-        if (portion != cur_portion) break;
+    while (blk_num < get_total_blks()) {
+        BlkAllocPortion& cur_portion = blknum_to_portion(blk_num);
+        if (portion.get_portion_num() != cur_portion.get_portion_num()) break;
 
         if (!get_disk_bm_const()->is_bits_set(blk_num, 1)) {
             const auto pushed = m_blk_q.write(BlkId{blk_num, 1, m_chunk_id});
@@ -101,9 +101,9 @@ void FixedBlkAllocator::free(const BlkId& b) {
 }
 
 blk_cap_t FixedBlkAllocator::available_blks() const { return m_blk_q.sizeGuess(); }
-blk_cap_t FixedBlkAllocator::get_used_blks() const { return get_config().get_total_blks() - available_blks(); }
+blk_cap_t FixedBlkAllocator::get_used_blks() const { return get_total_blks() - available_blks(); }
 
 std::string FixedBlkAllocator::to_string() const {
-    return fmt::format("Total Blks={} Available_Blks={}", m_cfg.get_total_blks(), available_blks());
+    return fmt::format("Total Blks={} Available_Blks={}", get_total_blks(), available_blks());
 }
 } // namespace homestore

@@ -28,9 +28,9 @@
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
-#include "new_device/new_device.h"
-#include "new_device/physical_dev.hpp"
-#include "new_device/chunk.h"
+#include "device/device.h"
+#include "device/physical_dev.hpp"
+#include "device/chunk.h"
 
 using namespace homestore;
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
@@ -79,9 +79,8 @@ public:
 
         ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = is_spdk});
         m_dmgr = std::make_unique< homestore::DeviceManager >(
-            m_dev_infos, [](homestore::DeviceManager&, const homestore::vdev_info&) -> shared< homestore::VirtualDev > {
-                return nullptr;
-            });
+            m_dev_infos, [this](const homestore::vdev_info&) -> shared< homestore::VirtualDev > { return nullptr; });
+        m_dmgr->is_first_time_boot() ? m_dmgr->format_devices() : m_dmgr->load_devices();
         m_first_data_pdev = m_dmgr->get_pdevs_by_dev_type(homestore::HSDevType::Data)[0];
         m_first_fast_pdev = m_dmgr->get_pdevs_by_dev_type(homestore::HSDevType::Fast)[0];
     }

@@ -28,10 +28,10 @@
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
-#include "new_device/new_device.h"
-#include "new_device/physical_dev.hpp"
-#include "new_device/virtual_dev.hpp"
-#include "new_device/chunk.h"
+#include "device/device.h"
+#include "device/physical_dev.hpp"
+#include "device/virtual_dev.hpp"
+#include "device/chunk.h"
 
 using namespace homestore;
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
@@ -70,11 +70,11 @@ public:
 
         ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = is_spdk});
         m_dmgr = std::make_unique< homestore::DeviceManager >(
-            m_dev_infos,
-            [](homestore::DeviceManager& dmgr, const homestore::vdev_info& vinfo) -> shared< homestore::VirtualDev > {
-                return std::make_shared< homestore::VirtualDev >(dmgr, vinfo, homestore::blk_allocator_type_t::fixed,
+            m_dev_infos, [this](const homestore::vdev_info& vinfo) -> shared< homestore::VirtualDev > {
+                return std::make_shared< homestore::VirtualDev >(*m_dmgr, vinfo, homestore::blk_allocator_type_t::fixed,
                                                                  homestore::chunk_selector_type_t::round_robin, false);
             });
+        m_dmgr->is_first_time_boot() ? m_dmgr->format_devices() : m_dmgr->load_devices();
         m_pdevs = m_dmgr->get_pdevs_by_dev_type(homestore::HSDevType::Data);
     }
 
@@ -154,7 +154,7 @@ TEST_F(DeviceMgrTest, StripedVDevCreation) {
                                                            .blk_size = 4096,
                                                            .dev_type = HSDevType::Data,
                                                            .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
-                                                           .context_data = ""});
+                                                           .context_data = sisl::blob{}});
         m_vdevs.push_back(std::move(vdev));
     }
 

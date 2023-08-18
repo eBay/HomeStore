@@ -41,30 +41,29 @@
 namespace homestore {
 typedef blk_num_t seg_num_t;
 
-class VarsizeBlkAllocConfig : public BlkAllocConfig {
-private:
-    uint32_t m_phys_page_size;
-    seg_num_t m_nsegments;
+struct VarsizeBlkAllocConfig : public BlkAllocConfig {
+public:
+    const uint32_t m_phys_page_size;
+    const seg_num_t m_nsegments;
     const blk_cap_t m_blks_per_temp_group;
     blk_cap_t m_max_cache_blks;
     SlabCacheConfig m_slab_config;
-    bool m_use_slabs{true}; // use sweeping thread pool with slabs in variable size block allocator
+    const bool m_use_slabs{true}; // use sweeping thread pool with slabs in variable size block allocator
 
 public:
     VarsizeBlkAllocConfig() : VarsizeBlkAllocConfig{0, 0, 0, 0, ""} {}
     VarsizeBlkAllocConfig(const std::string& name) : VarsizeBlkAllocConfig{0, 0, 0, 0, name} {}
 
-    VarsizeBlkAllocConfig(const uint32_t blk_size, const uint32_t ppage_sz, const uint32_t align_sz,
-                          const uint64_t size, const std::string& name, const bool realtime_bm_on = true,
-                          const bool use_slabs = true) :
+    VarsizeBlkAllocConfig(uint32_t blk_size, uint32_t ppage_sz, uint32_t align_sz, uint64_t size,
+                          const std::string& name, bool realtime_bm_on = true, bool use_slabs = true) :
             BlkAllocConfig{blk_size, align_sz, size, name, realtime_bm_on},
             m_phys_page_size{ppage_sz},
             m_nsegments{HS_DYNAMIC_CONFIG(blkallocator.max_segments)},
-            m_blks_per_temp_group{get_total_blks() / HS_DYNAMIC_CONFIG(blkallocator.num_blk_temperatures)},
+            m_blks_per_temp_group{m_capacity / HS_DYNAMIC_CONFIG(blkallocator.num_blk_temperatures)},
             m_use_slabs{use_slabs} {
         // Initialize the max cache blks as minimum dictated by the number of blks or memory limits whichever is lower
-        const blk_cap_t size_by_count{static_cast< blk_cap_t >(std::trunc(
-            HS_DYNAMIC_CONFIG(blkallocator.free_blk_cache_count_by_vdev_percent) * get_total_blks() / 100.0))};
+        const blk_cap_t size_by_count{static_cast< blk_cap_t >(
+            std::trunc(HS_DYNAMIC_CONFIG(blkallocator.free_blk_cache_count_by_vdev_percent) * m_capacity / 100.0))};
         const blk_cap_t size_by_mem{
             static_cast< blk_cap_t >(std::trunc(HS_DYNAMIC_CONFIG(blkallocator.max_free_blk_cache_memory_percent) *
                                                 HS_STATIC_CONFIG(input.app_mem_size) / 100.0))};
@@ -118,24 +117,14 @@ public:
     ///////////// SlabConfig getter /////////////
     SlabCacheConfig get_slab_config() const { return m_slab_config; }
 
-    //////////// Physical page size related getters/setters /////////////
-    void set_phys_page_size(const uint32_t page_size) { m_phys_page_size = page_size; }
-    uint32_t get_phys_page_size() const { return m_phys_page_size; }
-
     //////////// Segments related getters/setters /////////////
-    void set_total_segments(const seg_num_t nsegments) { m_nsegments = nsegments; }
     seg_num_t get_total_segments() const { return m_nsegments; }
-    blk_cap_t get_blks_per_segment() const { return (get_total_blks() / get_total_segments()); }
-    blk_cap_t get_portions_per_segment() const { return (get_total_portions() / get_total_segments()); }
+    blk_cap_t get_blks_per_segment() const { return (m_capacity / m_nsegments); }
 
     //////////// Blks related getters/setters /////////////
     blk_cap_t get_max_cache_blks() const { return m_max_cache_blks; }
     blk_cap_t get_blks_per_temp_group() const { return m_blks_per_temp_group; }
-    blk_cap_t get_blks_per_phys_page() const {
-        blk_cap_t nblks = get_phys_page_size() / get_blk_size();
-        assert(get_blks_per_portion() % nblks == 0);
-        return nblks;
-    }
+    blk_cap_t get_blks_per_phys_page() const { return m_phys_page_size / m_blk_size; }
 
     //////////// Slab related getters/setters /////////////
     slab_idx_t get_slab_cnt() const { return m_slab_config.m_per_slab_cfg.size(); }
@@ -147,28 +136,23 @@ public:
         const slab_idx_t index{get_slab_cnt()};
         return (index > 0) ? m_slab_config.m_per_slab_cfg[index - 1].slab_size : 0;
     }
-    void set_use_slabs(const bool use_slabs) { m_use_slabs = use_slabs; }
-    bool get_use_slabs() const { return m_use_slabs; }
 
     std::string to_string() const override {
-        return fmt::format(
-            "IsSlabAlloc={}, {} Pagesize={} Totalsegments={} BlksPerPortion={} MaxCacheBlks={} Slabconfig=[{}]",
-            m_use_slabs, BlkAllocConfig::to_string(), in_bytes(get_phys_page_size()), get_total_segments(),
-            get_blks_per_portion(), in_bytes(get_max_cache_blks()), m_slab_config.to_string());
+        return fmt::format("IsSlabAlloc={}, {} Pagesize={} Totalsegments={} MaxCacheBlks={} Slabconfig=[{}]",
+                           m_use_slabs, BlkAllocConfig::to_string(), in_bytes(m_phys_page_size), m_nsegments,
+                           in_bytes(m_max_cache_blks), m_slab_config.to_string());
     }
 };
 
 class BlkAllocSegment {
 private:
-    blk_cap_t m_total_blks;
     blk_num_t m_total_portions;
     seg_num_t m_seg_num; // Segment sequence number
     blk_num_t m_alloc_clock_hand;
 
 public:
-    BlkAllocSegment(const blk_cap_t nblks, const seg_num_t seg_num, const blk_num_t nportions,
-                    const std::string& seg_name) :
-            m_total_blks{nblks}, m_total_portions{nportions}, m_seg_num{seg_num}, m_alloc_clock_hand{0} {}
+    BlkAllocSegment(const seg_num_t seg_num, const blk_num_t nportions, const std::string& seg_name) :
+            m_total_portions{nportions}, m_seg_num{seg_num}, m_alloc_clock_hand{0} {}
 
     BlkAllocSegment(const BlkAllocSegment&) = delete;
     BlkAllocSegment(BlkAllocSegment&&) noexcept = delete;
@@ -181,9 +165,6 @@ public:
     void inc_clock_hand() { ++m_alloc_clock_hand; }
 
     // bool operator<(BlkAllocSegment& other_seg) const { return (this->get_free_blks() < other_seg.get_free_blks()); }
-
-    void set_total_blks(const blk_cap_t a) { m_total_blks = a; }
-    blk_cap_t get_total_blks() const { return m_total_blks; }
 
     void set_seg_num(const seg_num_t n) { m_seg_num = n; }
     seg_num_t get_seg_num() const { return m_seg_num; }
@@ -252,17 +233,17 @@ private:
     static std::queue< VarsizeBlkAllocator* > s_sweeper_queue;            // Sweeper threads queue
     static std::unordered_set< VarsizeBlkAllocator* > s_block_allocators; // block allocators to be swept
 
-    static constexpr blk_num_t INVALID_PORTION_NUM{UINT_MAX}; // max of type blk_num_t
+    static constexpr blk_num_t INVALID_PORTION_NUM{UINT_MAX};             // max of type blk_num_t
 
     // per class sweeping logic
-    std::mutex m_mutex;           // Mutex to protect regionstate & cb
-    std::condition_variable m_cv; // CV to signal thread
-    BlkAllocatorState m_state;    // Current state of the blkallocator
+    std::mutex m_mutex;                                           // Mutex to protect regionstate & cb
+    std::condition_variable m_cv;                                 // CV to signal thread
+    BlkAllocatorState m_state;                                    // Current state of the blkallocator
 
-    std::unique_ptr< sisl::Bitset > m_cache_bm; // Bitset representing entire blks in this allocator
-    std::unique_ptr< FreeBlkCache > m_fb_cache; // Free Blks cache
+    std::unique_ptr< sisl::Bitset > m_cache_bm;                   // Bitset representing entire blks in this allocator
+    std::unique_ptr< FreeBlkCache > m_fb_cache;                   // Free Blks cache
 
-    VarsizeBlkAllocConfig m_cfg; // Config for Varsize
+    VarsizeBlkAllocConfig m_cfg;                                  // Config for Varsize
 
     std::vector< std::unique_ptr< BlkAllocSegment > > m_segments; // Lookup map for segment id - segment
 
@@ -275,6 +256,9 @@ private:
     // TODO: this fields needs to be passed in from hints and persisted in volume's sb;
     blk_num_t m_start_portion_num{INVALID_PORTION_NUM};
 
+    blk_cap_t m_blks_per_seg{1};
+    blk_num_t m_portions_per_seg{1};
+
 private:
     static void sweeper_thread(size_t thread_num);
     bool allocator_state_machine();
@@ -284,9 +268,6 @@ private:
     void alloc_sanity_check(blk_count_t nblks, const blk_alloc_hints& hints,
                             const std::vector< BlkId >& out_blkids) const;
 #endif
-
-    const VarsizeBlkAllocConfig& get_config() const override { return (VarsizeBlkAllocConfig&)m_cfg; }
-    blk_num_t get_portions_per_segment() const;
 
     // Sweep and cache related functions
     bool prepare_sweep(BlkAllocSegment* seg, bool fill_entire_cache);
@@ -300,13 +281,13 @@ private:
 
     //////////////////////////////////////////// Convenience routines ///////////////////////////////////////////
     ///////////////////// Physical page related routines ////////////////////////
-    blk_num_t blknum_to_phys_pageid(blk_num_t blknum) const { return blknum / get_config().get_blks_per_phys_page(); }
-    blk_num_t offset_within_phys_page(blk_num_t blknum) const { return blknum % get_config().get_blks_per_phys_page(); }
+    blk_num_t blknum_to_phys_pageid(blk_num_t blknum) const { return blknum / m_cfg.get_blks_per_phys_page(); }
+    blk_num_t offset_within_phys_page(blk_num_t blknum) const { return blknum % m_cfg.get_blks_per_phys_page(); }
 
     ///////////////////// Segment related routines ////////////////////////
     seg_num_t blknum_to_segment_num(blk_num_t blknum) const {
-        const auto seg_num{blknum / get_config().get_blks_per_segment()};
-        assert(seg_num < m_cfg.get_total_segments());
+        const auto seg_num{blknum / m_cfg.get_blks_per_segment()};
+        assert(seg_num < m_cfg.m_nsegments);
         return seg_num;
     }
 

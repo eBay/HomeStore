@@ -29,6 +29,7 @@
 #include <homestore/index_service.hpp>
 #include <homestore/homestore.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
+
 #include "index/wb_cache.hpp"
 #include "common/homestore_utils.hpp"
 #include "common/homestore_config.hpp"
@@ -40,7 +41,6 @@
 #include "common/resource_mgr.hpp"
 #include "meta/meta_sb.hpp"
 #include "logstore/log_store_family.hpp"
-#include "device/journal_vdev.hpp"
 
 /*
  * IO errors handling by homestore.
@@ -60,83 +60,17 @@ HomeStore* HomeStore::instance() {
     return s_instance.get();
 }
 
-HomeStore& HomeStore::with_params(const hs_input_params& input) {
+bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_cb_t svcs_starting_cb,
+                      std::unique_ptr< IndexServiceCallbacks > cbs) {
     auto& hs_config = HomeStoreStaticConfig::instance();
     hs_config.input = input;
-    return *this;
-}
 
-HomeStore& HomeStore::with_index_service(float size_pct, std::unique_ptr< IndexServiceCallbacks > cbs) {
-    m_index_svc_cbs = std::move(cbs);
-    m_index_store_size_pct = size_pct;
-    return *this;
-}
-
-#if 0
-HomeStore& HomeStore::with_data_service(float size_pct, std::unique_ptr< DataServiceCallbacks > cbs) {
-    m_data_svc_cbs = (cbs) ? std::move(cbs) : std::make_unique< DataServiceCallbacks >();
-    m_data_store_size_pct = size_pct;
-    return *this;
-}
-#endif
-
-HomeStore& HomeStore::with_log_service(float data_size_pct, float ctrl_size_pct) {
-    m_data_log_store_size_pct = data_size_pct;
-    m_ctrl_log_store_size_pct = ctrl_size_pct;
-    return *this;
-}
-
-HomeStore& HomeStore::with_meta_service(float size_pct) {
-    m_meta_store_size_pct = size_pct;
-    return *this;
-}
-
-HomeStore& HomeStore::with_data_service(float size_pct) {
-    m_data_store_size_pct = size_pct;
-    return *this;
-}
-
-HomeStore& HomeStore::after_init_done(hs_init_done_cb_t init_done_cb) {
-    m_init_done_cb = std::move(init_done_cb);
-    return *this;
-}
-
-HomeStore& HomeStore::before_init_devices(hs_init_starting_cb_t init_starting_cb) {
-    m_before_init_starting_cb = std::move(init_starting_cb);
-    return *this;
-}
-
-void HomeStore::init(bool wait_for_init) {
-    auto& hs_config = HomeStoreStaticConfig::instance();
-    if (hs_config.input.data_devices.empty()) {
-        LOGERROR("no data devices given");
+    if (input.devices.empty()) {
+        LOGERROR("No devices provided to start homestore");
         throw std::invalid_argument("null device list");
     }
 
-    // Validate all pre-requisite services started
-    if (!has_meta_service()) {
-        LOGERROR("Meta services is mandatory to be started");
-        throw std::invalid_argument("Meta services has to be started");
-    }
-
-    static std::mutex start_mutex;
-    static std::condition_variable cv;
-    static bool inited;
-    inited = false;
-    if (wait_for_init) {
-        if (m_init_done_cb) {
-            LOGWARN("Homestore init is called with wait till init, but it has valid after_init_done callback set in "
-                    "its init params, ignoring the after_init_done callback; it will not be called");
-        }
-        m_init_done_cb = [&tl_cv = cv, &tl_start_mutex = start_mutex, &tl_inited = inited]() {
-            LOGINFO("HomeStore Init completed");
-            {
-                std::unique_lock< std::mutex > lk{tl_start_mutex};
-                tl_inited = true;
-            }
-            tl_cv.notify_one();
-        };
-    }
+    m_before_services_starting_cb = std::move(svcs_starting_cb);
 
     ///////////// Startup resource status and other manager outside core services /////////////////////////
     sisl::ObjCounterRegistry::enable_metrics_reporting();
@@ -155,48 +89,75 @@ void HomeStore::init(bool wait_for_init) {
     });
     sisl::logging::SetLogPattern("[%D %T.%f] [%^%L%$] [%t] %v", m_periodic_logger);
 
-    ///////////// Config related setup /////////////////////////
     HomeStoreDynamicConfig::init_settings_default();
 
-    ///////////// Startup of services  /////////////////////////
-    // Order of the initialization
-    // 1. Meta Service instance is created
-    // 2. All other optional services instances are created. At this point, none of the services are started
-    // 3. Create DeviceManager instance and init it
-    // 4. Start the Evictor which bounds the cache
-    // 5. Initialize all the Physical/Virtual devices in separate init thread
-    // 6. Upon device instances are created and read, depending on first_time_boot or not, create or load the superblock
-    // of all devices
-    // 7. Start the MetaService instance. This will walk and possibly call all registered service static method which
-    // should have enough information about their services
-    // 8. Start all the optional services
-    LOGINFO("Homestore is initializing with following services: ", list_services());
+    LOGINFO("Homestore is loading with following services: ", input.services.list());
     if (has_meta_service()) { m_meta_service = std::make_unique< MetaBlkService >(); }
     if (has_log_service()) { m_log_service = std::make_unique< LogStoreService >(); }
     if (has_data_service()) { m_data_service = std::make_unique< BlkDataService >(); }
-    if (has_index_service()) { m_index_service = std::make_unique< IndexService >(std::move(m_index_svc_cbs)); }
+    if (has_index_service()) { m_index_service = std::make_unique< IndexService >(std::move(cbs)); }
 
-    m_dev_mgr =
-        std::make_unique< DeviceManager >(hs_config.input.data_devices, bind_this(HomeStore::new_vdev_found, 2),
-                                          sizeof(sb_blkstore_blob), bind_this(HomeStore::process_vdev_error, 1));
-    m_dev_mgr->init();
+    m_dev_mgr = std::make_unique< DeviceManager >(input.devices, bind_this(HomeStore::on_vdev_info_found, 1));
+
+    if (!m_dev_mgr->is_first_time_boot()) {
+        m_dev_mgr->load_devices();
+        hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Fast}));
+        do_start();
+        return false;
+    } else {
+        return true;
+    }
+}
+
+void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format_opts) {
+    m_dev_mgr->format_devices();
+    hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Fast}));
+
+    std::vector< folly::Future< bool > > futs;
+    for (const auto& [svc_type, fparams] : format_opts) {
+        if ((svc_type & HS_SERVICE::META) && has_meta_service()) {
+            m_meta_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast));
+        } else if ((svc_type & HS_SERVICE::LOG_REPLICATED) && has_log_service()) {
+            futs.emplace_back(m_log_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast),
+                                                         LogStoreService::DATA_LOG_FAMILY_IDX));
+        } else if ((svc_type & HS_SERVICE::LOG_LOCAL) && has_log_service()) {
+            futs.emplace_back(m_log_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast),
+                                                         LogStoreService::CTRL_LOG_FAMILY_IDX));
+        } else if ((svc_type & HS_SERVICE::DATA) && has_data_service()) {
+            m_data_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Data));
+        } else if ((svc_type & HS_SERVICE::INDEX) && has_index_service()) {
+            m_index_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast));
+        }
+    }
+
+    try {
+        if (!futs.empty()) { folly::collectAllUnsafe(futs).get(); }
+    } catch (const std::exception& e) { HS_REL_ASSERT(false, "IO error during format of vdev, error={}", e.what()); }
+
+    do_start();
+}
+
+void HomeStore::do_start() {
+    const auto& inp_params = HomeStoreStaticConfig::instance().input;
 
     uint64_t cache_size = resource_mgr().get_cache_size();
     m_evictor = std::make_shared< sisl::LRUEvictor >(cache_size, 1000);
 
+    if (m_before_services_starting_cb) { m_before_services_starting_cb(); }
+
     LOGINFO("HomeStore starting first_time_boot?={} dynamic_config_version={}, cache_size={}, static_config: {}",
-            is_first_time_boot(), HS_DYNAMIC_CONFIG(version), cache_size, hs_config.to_json().dump(4));
+            m_dev_mgr->is_first_time_boot(), HS_DYNAMIC_CONFIG(version), cache_size,
+            HomeStoreStaticConfig::instance().to_json().dump(4));
 
-    if (m_before_init_starting_cb) { m_before_init_starting_cb(); }
+    m_cp_mgr = std::make_unique< CPManager >(is_first_time_boot()); // Initialize CPManager
+    m_meta_service->start(m_dev_mgr->is_first_time_boot());
+    m_resource_mgr->set_total_cap(m_dev_mgr->total_capacity());
 
-    if (is_first_time_boot()) { create_vdevs(); }
+    // In case of custom recovery, let consumer starts the recovery and it is consumer module's responsibilities to
+    // start log store
+    if (has_log_service() && inp_params.auto_recovery) { m_log_service->start(is_first_time_boot()); }
 
-    init_done();
-
-    if (wait_for_init) {
-        std::unique_lock< std::mutex > lk{start_mutex};
-        cv.wait(lk, [] { return inited; });
-    }
+    if (has_index_service()) { m_index_service->start(); }
 }
 
 void HomeStore::shutdown() {
@@ -219,34 +180,6 @@ void HomeStore::shutdown() {
 
     HomeStore::reset_instance();
     LOGINFO("Homestore is completed its shutdown");
-}
-
-void HomeStore::create_vdevs() {
-    std::vector< folly::Future< bool > > futs;
-
-    hs_utils::set_btree_mempool_size(hs()->device_mgr()->atomic_page_size({PhysicalDevGroup::FAST}));
-
-    if (has_meta_service()) { m_meta_service->create_vdev(pct_to_size(m_meta_store_size_pct, PhysicalDevGroup::META)); }
-
-    if (has_data_service()) { m_data_service->create_vdev(pct_to_size(m_data_store_size_pct, PhysicalDevGroup::DATA)); }
-
-    if (has_log_service() && m_data_log_store_size_pct) {
-        futs.emplace_back(m_log_service->create_vdev(pct_to_size(m_data_log_store_size_pct, PhysicalDevGroup::FAST),
-                                                     LogStoreService::DATA_LOG_FAMILY_IDX));
-    }
-
-    if (has_log_service() && m_ctrl_log_store_size_pct) {
-        futs.emplace_back(m_log_service->create_vdev(pct_to_size(m_ctrl_log_store_size_pct, PhysicalDevGroup::FAST),
-                                                     LogStoreService::CTRL_LOG_FAMILY_IDX));
-    }
-
-    if (has_index_service()) {
-        m_index_service->create_vdev(pct_to_size(m_index_store_size_pct, PhysicalDevGroup::FAST));
-    }
-
-    try {
-        if (!futs.empty()) { folly::collectAllUnsafe(futs).get(); }
-    } catch (const std::exception& e) { HS_REL_ASSERT(false, "IO error during format of vdev, error={}", e.what()); }
 }
 
 #if 0
@@ -275,21 +208,18 @@ cap_attrs HomeStore::get_system_capacity() const {
 
 bool HomeStore::is_first_time_boot() const { return m_dev_mgr->is_first_time_boot(); }
 
-void HomeStore::init_done() {
-    const auto& inp_params = HomeStoreStaticConfig::instance().input;
-    m_dev_mgr->init_done();
-
-    m_cp_mgr = std::make_unique< CPManager >(is_first_time_boot()); // Initialize CPManager
-    m_meta_service->start(is_first_time_boot());
-    m_resource_mgr->set_total_cap(m_dev_mgr->total_cap());
-
-    // In case of custom recovery, let consumer starts the recovery and it is consumer module's responsibilities to
-    // start log store
-    if (has_log_service() && inp_params.auto_recovery) { m_log_service->start(is_first_time_boot()); }
-
-    if (has_index_service()) { m_index_service->start(); }
-
-    if (m_init_done_cb) { m_init_done_cb(); }
+bool HomeStore::has_index_service() const {
+    return HomeStoreStaticConfig::instance().input.services.svcs & HS_SERVICE::INDEX;
+}
+bool HomeStore::has_data_service() const {
+    return HomeStoreStaticConfig::instance().input.services.svcs & HS_SERVICE::DATA;
+}
+bool HomeStore::has_meta_service() const {
+    return HomeStoreStaticConfig::instance().input.services.svcs & HS_SERVICE::META;
+}
+bool HomeStore::has_log_service() const {
+    auto const s = HomeStoreStaticConfig::instance().input.services.svcs;
+    return (s & (HS_SERVICE::LOG_REPLICATED | HS_SERVICE::LOG_LOCAL));
 }
 
 #if 0
@@ -321,39 +251,42 @@ void HomeStore::init_cache() {
 }
 #endif
 
-void HomeStore::new_vdev_found(DeviceManager* dev_mgr, vdev_info_block* vb) {
+shared< VirtualDev > HomeStore::on_vdev_info_found(const vdev_info& vinfo) {
+    shared< VirtualDev > ret_vdev;
     auto& hs_config = HomeStoreStaticConfig::instance();
+    auto vdev_context = r_cast< const hs_vdev_context* >(vinfo.get_user_private());
 
-    /* create blkstore */
-    blkstore_blob* blob = r_cast< blkstore_blob* >(vb->context_data);
-
-    switch (blob->type) {
-    case blkstore_type::DATA_LOGDEV_STORE:
-        if (has_log_service() && m_data_log_store_size_pct) {
-            m_log_service->open_vdev(vb, LogStoreService::DATA_LOG_FAMILY_IDX);
-        }
-        break;
-    case blkstore_type::CTRL_LOGDEV_STORE:
-        if (has_log_service() && m_ctrl_log_store_size_pct) {
-            m_log_service->open_vdev(vb, LogStoreService::CTRL_LOG_FAMILY_IDX);
-        }
-        break;
-    case blkstore_type::META_STORE:
-        if (has_meta_service()) { m_meta_service->open_vdev(vb); }
+    switch (vdev_context->type) {
+    case hs_vdev_type_t::DATA_LOGDEV_VDEV:
+        if (has_log_service()) { ret_vdev = m_log_service->open_vdev(vinfo, LogStoreService::DATA_LOG_FAMILY_IDX); }
         break;
 
-    case blkstore_type::INDEX_STORE:
-        if (has_index_service()) { m_index_service->open_vdev(vb); }
+    case hs_vdev_type_t::CTRL_LOGDEV_VDEV:
+        if (has_log_service()) { ret_vdev = m_log_service->open_vdev(vinfo, LogStoreService::CTRL_LOG_FAMILY_IDX); }
+        break;
+
+    case hs_vdev_type_t::META_VDEV:
+        if (has_meta_service()) { ret_vdev = m_meta_service->open_vdev(vinfo); }
+        break;
+
+    case hs_vdev_type_t::INDEX_VDEV:
+        if (has_index_service()) { ret_vdev = m_index_service->open_vdev(vinfo); }
+        break;
+
+    case hs_vdev_type_t::DATA_VDEV:
+        if (has_data_service()) { ret_vdev = m_data_service->open_vdev(vinfo); }
         break;
 
     default:
-        HS_LOG_ASSERT(0, "Unknown blkstore_type {}", blob->type);
+        HS_LOG_ASSERT(0, "Unknown vdev_type {}", vdev_context->type);
     }
+
+    return ret_vdev;
 }
 
-uint64_t HomeStore::pct_to_size(const float pct, const PhysicalDevGroup pdev_group) const {
-    uint64_t sz = uint64_cast((pct * static_cast< double >(m_dev_mgr->total_cap(pdev_group))) / 100);
-    return sisl::round_up(sz, m_dev_mgr->phys_page_size(pdev_group));
+uint64_t HomeStore::pct_to_size(float pct, HSDevType dev_type) const {
+    uint64_t sz = uint64_cast((pct * static_cast< double >(m_dev_mgr->total_capacity())) / 100);
+    return sisl::round_up(sz, m_dev_mgr->optimal_page_size(dev_type));
 }
 
 /////////////////////////////////////////// static HomeStore member functions /////////////////////////////////
@@ -371,9 +304,8 @@ std::string cap_attrs::to_string() const {
 
 nlohmann::json hs_input_params::to_json() const {
     nlohmann::json json;
-    json["system_uuid"] = boost::uuids::to_string(system_uuid);
     json["devices"] = nlohmann::json::array();
-    for (const auto& d : data_devices) {
+    for (const auto& d : devices) {
         json["devices"].push_back(d.to_string());
     }
     json["data_open_flags"] = data_open_flags;
@@ -383,7 +315,7 @@ nlohmann::json hs_input_params::to_json() const {
     json["app_mem_size"] = in_bytes(app_mem_size);
     json["hugepage_size"] = in_bytes(hugepage_size);
     json["auto_recovery?"] = auto_recovery;
-
+    json["services"] = services.list();
     return json;
 }
 

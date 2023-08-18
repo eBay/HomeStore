@@ -30,7 +30,7 @@ namespace homestore {
 typedef std::function< void(std::error_condition) > io_completion_cb_t;
 
 class VirtualDev;
-struct vdev_info_block;
+struct vdev_info;
 struct stream_info_t;
 class BlkReadTracker;
 struct blk_alloc_hints;
@@ -44,18 +44,18 @@ public:
     ~BlkDataService();
 
     /**
-     * @brief : called during recovery to open existing vdev for data service
-     *
-     * @param vb : vdev info blk containing the details of this blkstore
-     */
-    void open_vdev(vdev_info_block* vb);
-
-    /**
      * @brief : called in non-recovery mode to create a new vdev for data service
      *
      * @param size : size of this vdev
      */
     void create_vdev(uint64_t size);
+
+    /**
+     * @brief : called during recovery to open existing vdev for data service
+     *
+     * @param vb : vdev info blk containing the details of this blkstore
+     */
+    shared< VirtualDev > open_vdev(const vdev_info& vinfo);
 
     /**
      * @brief : asynchronous write without input block ids. Block ids will be allocated by this api and returned;
@@ -131,33 +131,6 @@ public:
      */
     BlkReadTracker* read_blk_tracker() { return m_blk_read_tracker.get(); }
 
-    /************************ hdd stream apis *************************/
-    /**
-     * @brief : allocate a stream for client in non-recovery mode;
-     *
-     * @param size : size of stream to allocate
-     *
-     * @return : stream handle;
-     */
-    stream_info_t alloc_stream(const uint64_t size);
-
-    /**
-     * @brief : reserve a stream for consumer during recovery
-     *
-     * @param id_list : the id of streams to reserve
-     * @param num_streams : number of streams
-     *
-     * @return : stream handle;
-     */
-    stream_info_t reserve_stream(const stream_id_t* id_list, const uint32_t num_streams);
-
-    /**
-     * @brief : free a stream;
-     *
-     * @param stream_info : stream handle
-     */
-    void free_stream(const stream_info_t& stream_info);
-
 private:
     BlkAllocStatus alloc_blks(uint32_t size, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids);
 
@@ -166,7 +139,7 @@ private:
     static void process_data_completion(std::error_condition ec, void* cookie);
 
 private:
-    std::unique_ptr< VirtualDev > m_vdev;
+    std::shared_ptr< VirtualDev > m_vdev;
     std::unique_ptr< BlkReadTracker > m_blk_read_tracker;
     uint32_t m_page_size;
 };
