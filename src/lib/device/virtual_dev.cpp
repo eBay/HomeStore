@@ -247,6 +247,14 @@ uint64_t VirtualDev::get_len(const iovec* iov, const int iovcnt) {
     return len;
 }
 
+uint64_t VirtualDev::get_len(const iovec* iov, const int iovcnt) {
+    uint64_t len{0};
+    for (int i{0}; i < iovcnt; ++i) {
+        len += iov[i].iov_len;
+    }
+    return len;
+}
+
 ////////////////////////// async write section //////////////////////////////////
 folly::Future< bool > VirtualDev::async_write(const char* buf, uint32_t size, const BlkId& bid, bool part_of_batch) {
     Chunk* chunk;

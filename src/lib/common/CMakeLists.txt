@@ -10,7 +10,7 @@ target_sources(hs_common PRIVATE
       error.cpp
       homestore_status_mgr.cpp
       homestore_utils.cpp
-      #resource_mgr.cpp
+      resource_mgr.cpp
     )
 target_link_libraries(hs_common ${COMMON_DEPS})
 
