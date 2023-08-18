@@ -15,6 +15,7 @@
 #pragma once
 #include <vector>
 #include <string>
+#include "hs_super_blk.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -120,14 +121,14 @@ struct Stream {
 class PhysicalDev {
 private:
     iomgr::io_device_ptr m_iodev;
-    iomgr::DriveInterface* m_drive_iface;               // Interface to do IO
+    iomgr::DriveInterface* m_drive_iface; // Interface to do IO
     PhysicalDevMetrics m_metrics;
-    std::string m_devname;                              // Physical device path
-    HSDevType m_dev_type;                               // Device type
-    dev_info m_dev_info;                                // Input device info
-    pdev_info_header m_pdev_info;                       // Persistent information about this physical device
-    uint64_t m_devsize{0};                              // Actual device size
-    bool m_super_blk_in_footer;                         // Indicate if the super blk is stored in the footer as well
+    std::string m_devname;        // Physical device path
+    HSDevType m_dev_type;         // Device type
+    dev_info m_dev_info;          // Input device info
+    pdev_info_header m_pdev_info; // Persistent information about this physical device
+    uint64_t m_devsize{0};        // Actual device size
+    bool m_super_blk_in_footer;   // Indicate if the super blk is stored in the footer as well
 
     std::mutex m_chunk_op_mtx;                          // Mutex for all chunk related operations
     std::vector< Stream > m_streams;                    // List of streams in the system

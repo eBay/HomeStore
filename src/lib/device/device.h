@@ -123,9 +123,9 @@ private:
     sisl::sparse_vector< shared< Chunk > > m_chunks;                // Chunks organized as array (indexed on chunk id)
     sisl::Bitset m_chunk_id_bm{hs_super_blk::MAX_CHUNKS_IN_SYSTEM}; // Bitmap to keep track of chunk ids available
 
-    std::mutex m_vdev_mutex;                                        // Create/Remove operation of vdev synchronization
-    sisl::sparse_vector< shared< VirtualDev > > m_vdevs;            // VDevs organized in array for quick lookup
-    sisl::Bitset m_vdev_id_bm{hs_super_blk::MAX_VDEVS_IN_SYSTEM};   // Bitmap to keep track of vdev ids available
+    std::mutex m_vdev_mutex;                                      // Create/Remove operation of vdev synchronization
+    sisl::sparse_vector< shared< VirtualDev > > m_vdevs;          // VDevs organized in array for quick lookup
+    sisl::Bitset m_vdev_id_bm{hs_super_blk::MAX_VDEVS_IN_SYSTEM}; // Bitmap to keep track of vdev ids available
     vdev_create_cb_t m_vdev_create_cb;
 
     // std::unique_ptr< ChunkManager > m_chunk_mgr;

@@ -16,7 +16,7 @@
 #include <homestore/blkdata_service.hpp>
 #include <homestore/homestore.hpp>
 #include "device/virtual_dev.hpp"
-#include "device/physical_dev.hpp"     // vdev_info_block
+#include "device/physical_dev.hpp" // vdev_info_block
 #include "device/chunk.h"
 #include "common/homestore_config.hpp" // is_data_drive_hdd
 #include "common/homestore_assert.hpp"

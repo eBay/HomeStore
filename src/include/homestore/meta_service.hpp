@@ -364,6 +364,7 @@ public:
     nlohmann::json populate_json(int log_level, meta_blk_map_t& meta_blks, ovf_hdr_map_t& ovf_blk_hdrs,
                                  BlkId* last_mblk_id, client_info_map_t& sub_info, bool self_recover,
                                  const std::string& client);
+    shared< VirtualDev > do_open_vdev(const vdev_info& vinfo);
 };
 
 extern MetaBlkService& meta_service();

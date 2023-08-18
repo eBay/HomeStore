@@ -72,11 +72,11 @@ public:
     uint32_t version{0};                      // Version Id of this structure
     char product_name[s_product_name_size]{}; // Product name
 
-    uint32_t num_pdevs{0};                    // Total number of pdevs homestore is being created on
-    uint32_t max_vdevs{0};                    // Max VDevs possible, this cannot be changed post formatting
-    uint32_t max_system_chunks{0};            // Max Chunks possible, this cannot be changed post formatting
+    uint32_t num_pdevs{0};         // Total number of pdevs homestore is being created on
+    uint32_t max_vdevs{0};         // Max VDevs possible, this cannot be changed post formatting
+    uint32_t max_system_chunks{0}; // Max Chunks possible, this cannot be changed post formatting
 
-    uint64_t system_uuid{0};                  // homestore system uuid.
+    uint64_t system_uuid{0}; // homestore system uuid.
 
 public:
     const char* get_product_name() const { return product_name; }

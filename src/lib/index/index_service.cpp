@@ -92,8 +92,6 @@ uint64_t IndexService::used_size() const {
 IndexBuffer::IndexBuffer(BlkId blkid, uint32_t buf_size, uint32_t align_size) :
         m_node_buf{hs_utils::iobuf_alloc(buf_size, sisl::buftag::btree_node, align_size)}, m_blkid{blkid} {}
 
-IndexBuffer::~IndexBuffer() {
-    hs_utils::iobuf_free(m_node_buf, sisl::buftag::btree_node);
-}
+IndexBuffer::~IndexBuffer() { hs_utils::iobuf_free(m_node_buf, sisl::buftag::btree_node); }
 
 } // namespace homestore
