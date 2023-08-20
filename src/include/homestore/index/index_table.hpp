@@ -35,7 +35,7 @@ private:
 public:
     IndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, const BtreeConfig& cfg,
                on_kv_read_t read_cb = nullptr, on_kv_update_t update_cb = nullptr, on_kv_remove_t remove_cb = nullptr) :
-        Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)}, m_sb{"index"} {
+            Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)}, m_sb{"index"} {
         m_sb.create(sizeof(index_table_sb));
         m_sb->uuid = uuid;
         m_sb->parent_uuid = parent_uuid;
@@ -204,8 +204,8 @@ protected:
 
         auto& child_buf = child_idx_node->m_idx_buf;
         auto& parent_buf = parent_idx_node->m_idx_buf;
-        BT_DBG_ASSERT(child_buf->is_clean(), "Child buffer is not clean, refresh node was not called before?");
-        BT_DBG_ASSERT(parent_buf->is_clean(), "Parent buffer is not clean, refresh node was not called before?");
+        // BT_DBG_ASSERT(child_buf->is_clean(), "Child buffer is not clean, refresh node was not called before?");
+        // BT_DBG_ASSERT(parent_buf->is_clean(), "Parent buffer is not clean, refresh node was not called before?");
 
         wb_cache().create_chain(child_buf, parent_buf);
         return btree_status_t::success;

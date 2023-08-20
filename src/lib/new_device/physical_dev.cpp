@@ -1,6 +1,7 @@
 /*********************************************************************************
  * Modifications Copyright 2017-2019 eBay Inc.
  *
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -25,9 +26,9 @@
 #include <isa-l/crc.h>
 
 #include <homestore/homestore_decl.hpp>
-#include "device/physical_dev.hpp"
-#include "device/device.h"
-#include "device/chunk.h"
+#include "new_device/physical_dev.hpp"
+#include "new_device/new_device.h"
+#include "new_device/chunk.h"
 #include "common/homestore_utils.hpp"
 #include "common/homestore_assert.hpp"
 
@@ -422,7 +423,8 @@ void PhysicalDev::populate_chunk_info(chunk_info* cinfo, uint32_t vdev_id, uint6
     cinfo->chunk_id = chunk_id;
     cinfo->chunk_ordinal = ordinal;
     cinfo->set_allocated();
-    cinfo->compute_checksum();
+    cinfo->checksum = 0;
+    cinfo->checksum = crc16_t10dif(hs_init_crc_16, r_cast< const unsigned char* >(cinfo), sizeof(chunk_info));
 }
 
 void PhysicalDev::free_chunk_info(chunk_info* cinfo) {

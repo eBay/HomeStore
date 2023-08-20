@@ -17,7 +17,9 @@
 #include <homestore/homestore.hpp>
 #include "device/virtual_dev.hpp"
 #include "device/physical_dev.hpp"     // vdev_info_block
+#include "device/chunk.h"
 #include "common/homestore_config.hpp" // is_data_drive_hdd
+#include "common/homestore_assert.hpp"
 #include "common/error.h"
 #include "blk_read_tracker.hpp"
 
@@ -28,27 +30,29 @@ BlkDataService& data_service() { return hs()->data_service(); }
 BlkDataService::BlkDataService() { m_blk_read_tracker = std::make_unique< BlkReadTracker >(); }
 BlkDataService::~BlkDataService() = default;
 
-// recovery path
-void BlkDataService::open_vdev(vdev_info_block* vb) {
-    m_vdev = std::make_unique< VirtualDev >(hs()->device_mgr(), "DataVDev", vb, PhysicalDevGroup::DATA,
-                                            blk_allocator_type_t::varsize, vb->is_failed(), true /* auto_recovery */);
-
-    m_page_size = vb->blk_size;
-
-    if (vb->is_failed()) {
-        LOGINFO("Data vdev is in failed state");
-        throw std::runtime_error("data vdev in failed state");
-    }
-}
-
 // first-time boot path
 void BlkDataService::create_vdev(uint64_t size) {
-    struct blkstore_blob blob;
-    blob.type = blkstore_type::DATA_STORE;
-    m_page_size = hs()->device_mgr()->phys_page_size({PhysicalDevGroup::DATA});
-    m_vdev = std::make_unique< VirtualDev >(hs()->device_mgr(), "DataVDev", PhysicalDevGroup::DATA,
-                                            blk_allocator_type_t::varsize, size, 0, true /* is_stripe */, m_page_size,
-                                            (char*)&blob, sizeof(blkstore_blob), true /* auto_recovery */);
+    const auto phys_page_size = hs()->device_mgr()->optimal_page_size(HSDevType::Fast);
+
+    hs_vdev_context vdev_ctx;
+    vdev_ctx.type = hs_vdev_type_t::DATA_VDEV;
+
+    m_vdev =
+        hs()->device_mgr()->create_vdev(vdev_parameters{.vdev_name = "blkdata",
+                                                        .vdev_size = size,
+                                                        .num_chunks = 1,
+                                                        .blk_size = phys_page_size,
+                                                        .dev_type = HSDevType::Data,
+                                                        .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
+                                                        .context_data = vdev_ctx.to_blob()});
+}
+
+// recovery path
+shared< VirtualDev > BlkDataService::open_vdev(const vdev_info& vinfo, bool load_existing) {
+    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, blk_allocator_type_t::varsize,
+                                            chunk_selector_type_t::round_robin, nullptr, true /* auto_recovery */);
+    m_page_size = vinfo.blk_size;
+    return m_vdev;
 }
 
 folly::Future< bool > BlkDataService::async_read(const BlkId& bid, sisl::sg_list& sgs, uint32_t size,
@@ -131,13 +135,4 @@ folly::Future< bool > BlkDataService::async_free_blk(const BlkId bid) {
     });
     return f;
 }
-
-stream_info_t BlkDataService::alloc_stream(const uint64_t size) { return m_vdev->alloc_stream(size); }
-
-stream_info_t BlkDataService::reserve_stream(const stream_id_t* id_list, const uint32_t num_streams) {
-    return m_vdev->reserve_stream(id_list, num_streams);
-}
-
-void BlkDataService::free_stream(const stream_info_t& stream_info) { m_vdev->free_stream(stream_info); }
-
 } // namespace homestore

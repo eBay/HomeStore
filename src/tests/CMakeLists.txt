@@ -21,10 +21,10 @@ if (${build_nonio_tests})
     target_link_libraries(test_blk_cache_queue homestore ${COMMON_TEST_DEPS} )
     add_test(NAME BlkCacheQueue COMMAND test_blk_cache_queue)
 
-    set(TEST_VDEV_SOURCES test_vdev.cpp)
-    add_executable(test_virtual_device ${TEST_VDEV_SOURCES})
-    target_link_libraries(test_virtual_device homestore ${COMMON_TEST_DEPS} GTest::gmock)
-    add_test(NAME VirtualDev COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_virtual_device)
+    set(TEST_JOURNAL_VDEV_SOURCES test_journal_vdev.cpp)
+    add_executable(test_journal_vdev ${TEST_JOURNAL_VDEV_SOURCES})
+    target_link_libraries(test_journal_vdev homestore ${COMMON_TEST_DEPS} GTest::gmock)
+    add_test(NAME JournalVDev COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_journal_vdev)
 
     set(TEST_BTREENODE_SOURCE_FILES test_btree_node.cpp)
     add_executable(test_btree_node ${TEST_BTREENODE_SOURCE_FILES})
@@ -40,6 +40,16 @@ if (${build_nonio_tests})
     target_sources(test_blk_read_tracker PRIVATE test_blk_read_tracker.cpp ../lib/blkdata_svc/blk_read_tracker.cpp ../lib/blkalloc/blk.cpp)
     target_link_libraries(test_blk_read_tracker ${COMMON_TEST_DEPS} GTest::gtest)
     add_test(NAME BlkReadTracker COMMAND test_blk_read_tracker)
+
+    set(TEST_PDEV_SOURCES test_pdev.cpp)
+    add_executable(test_physical_device ${TEST_PDEV_SOURCES})
+    target_link_libraries(test_physical_device homestore ${COMMON_TEST_DEPS} GTest::gmock)
+    add_test(NAME PhysicalDev COMMAND test_physical_device)
+
+    set(TEST_DEV_MGR_SOURCES test_device_manager.cpp)
+    add_executable(test_device_manager ${TEST_DEV_MGR_SOURCES})
+    target_link_libraries(test_device_manager homestore ${COMMON_TEST_DEPS} GTest::gmock)
+    add_test(NAME DeviceManager COMMAND test_device_manager)
 
 endif()
 

@@ -40,38 +40,38 @@ SISL_LOGGING_DECL(blkalloc)
 SISL_LOGGING_DECL(transient)
 
 namespace homestore {
-#define BLKALLOC_LOG(level, msg, ...) HS_SUBMOD_LOG(level, blkalloc, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
+#define BLKALLOC_LOG(level, msg, ...) HS_SUBMOD_LOG(level, blkalloc, , "blkalloc", get_name(), msg, ##__VA_ARGS__)
 #define BLKALLOC_DBG_ASSERT(cond, msg, ...)                                                                            \
-    HS_SUBMOD_ASSERT(DEBUG_ASSERT_FMT, cond, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT(DEBUG_ASSERT_FMT, cond, , "blkalloc", get_name(), msg, ##__VA_ARGS__)
 #define BLKALLOC_REL_ASSERT(cond, msg, ...)                                                                            \
-    HS_SUBMOD_ASSERT(RELEASE_ASSERT_FMT, cond, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT(RELEASE_ASSERT_FMT, cond, , "blkalloc", get_name(), msg, ##__VA_ARGS__)
 #define BLKALLOC_LOG_ASSERT(cond, msg, ...)                                                                            \
-    HS_SUBMOD_ASSERT(LOGMSG_ASSERT_FMT, cond, , "blkalloc", m_cfg.get_name(), msg, ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT(LOGMSG_ASSERT_FMT, cond, , "blkalloc", get_name(), msg, ##__VA_ARGS__)
 
 #define BLKALLOC_REL_ASSERT_CMP(val1, cmp, val2, ...)                                                                  \
-    HS_SUBMOD_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, cmp, val2, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT_CMP(RELEASE_ASSERT_CMP, val1, cmp, val2, , "blkalloc", get_name(), ##__VA_ARGS__)
 #define BLKALLOC_DBG_ASSERT_CMP(val1, cmp, val2, ...)                                                                  \
-    HS_SUBMOD_ASSERT_CMP(DEBUG_ASSERT_CMP, val1, cmp, val2, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT_CMP(DEBUG_ASSERT_CMP, val1, cmp, val2, , "blkalloc", get_name(), ##__VA_ARGS__)
 #define BLKALLOC_LOG_ASSERT_CMP(val1, cmp, val2, ...)                                                                  \
-    HS_SUBMOD_ASSERT_CMP(LOGMSG_ASSERT_CMP, val1, cmp, val2, , "blkalloc", m_cfg.get_name(), ##__VA_ARGS__)
+    HS_SUBMOD_ASSERT_CMP(LOGMSG_ASSERT_CMP, val1, cmp, val2, , "blkalloc", get_name(), ##__VA_ARGS__)
 
 struct blkalloc_cp;
 
-class BlkAllocConfig {
+struct BlkAllocConfig {
     friend class BlkAllocator;
 
-private:
-    uint32_t m_blk_size;
-    uint32_t m_align_size;
-    blk_cap_t m_capacity;
-    blk_cap_t m_blks_per_portion;
-    std::string m_unique_name;
+public:
+    const uint32_t m_blk_size;
+    const uint32_t m_align_size;
+    const blk_cap_t m_capacity;
+    const blk_cap_t m_blks_per_portion;
+    const std::string m_unique_name;
     bool m_auto_recovery{false};
     bool m_realtime_bm_on{false}; // only specifically turn off in BlkAlloc Test;
 
 public:
-    BlkAllocConfig(const uint32_t blk_size, const uint32_t align_size, const uint64_t size,
-                   const std::string& name = "", const bool realtime_bm_on = true) :
+    BlkAllocConfig(uint32_t blk_size, uint32_t align_size, uint64_t size, const std::string& name = "",
+                   bool realtime_bm_on = true) :
             m_blk_size{blk_size},
             m_align_size{align_size},
             m_capacity{static_cast< blk_cap_t >(size / blk_size)},
@@ -91,29 +91,11 @@ public:
     BlkAllocConfig& operator=(const BlkAllocConfig&) = default;
     BlkAllocConfig& operator=(BlkAllocConfig&&) noexcept = delete;
     virtual ~BlkAllocConfig() = default;
-
-    void set_blk_size(const uint32_t blk_size) { m_blk_size = blk_size; }
-    uint32_t get_blk_size() const { return m_blk_size; }
-
-    uint32_t get_align_size() const { return m_align_size; }
-
-    void set_total_blks(const blk_cap_t cap) { m_capacity = cap; }
-    blk_cap_t get_total_blks() const { return m_capacity; }
-
-    void set_blks_per_portion(const blk_cap_t pg_per_portion) { m_blks_per_portion = pg_per_portion; }
-
-    blk_cap_t get_blks_per_portion() const { return m_blks_per_portion; }
-
-    blk_cap_t get_total_portions() const { return (get_total_blks() - 1) / get_blks_per_portion() + 1; }
-
-    void set_auto_recovery(const bool auto_recovery) { m_auto_recovery = auto_recovery; }
-    bool get_auto_recovery() const { return m_auto_recovery; }
-
-    const std::string& get_name() const { return m_unique_name; }
+    void set_auto_recovery(bool is_auto_recovery) { m_auto_recovery = is_auto_recovery; }
 
     virtual std::string to_string() const {
-        return fmt::format("BlkSize={} TotalBlks={} BlksPerPortion={} auto_recovery={}", in_bytes(get_blk_size()),
-                           in_bytes(get_total_blks()), get_blks_per_portion(), get_auto_recovery());
+        return fmt::format("BlkSize={} TotalBlks={} BlksPerPortion={} auto_recovery={}", in_bytes(m_blk_size),
+                           in_bytes(m_capacity), m_blks_per_portion, m_auto_recovery);
     }
 };
 
@@ -126,8 +108,6 @@ VENUM(BlkOpStatus, uint8_t,
 
 ENUM(BlkAllocatorState, uint8_t, INIT, WAITING, SWEEP_SCHEDULED, SWEEPING, EXITING, DONE);
 
-static constexpr blk_temp_t default_temperature() { return 1; }
-
 class BlkAllocPortion {
 private:
     mutable std::mutex m_blk_lock;
@@ -136,7 +116,7 @@ private:
     blk_num_t m_available_blocks;
 
 public:
-    BlkAllocPortion(const blk_temp_t temp = default_temperature()) : m_temperature(temp) {}
+    BlkAllocPortion(blk_temp_t temp = default_temperature()) : m_temperature(temp) {}
     ~BlkAllocPortion() = default;
     BlkAllocPortion(const BlkAllocPortion&) = delete;
     BlkAllocPortion(BlkAllocPortion&&) noexcept = delete;
@@ -144,26 +124,15 @@ public:
     BlkAllocPortion& operator=(BlkAllocPortion&&) noexcept = delete;
 
     auto portion_auto_lock() const { return std::scoped_lock< std::mutex >(m_blk_lock); }
-    void set_portion_num(const blk_num_t portion_num) { m_portion_num = portion_num; }
-
     blk_num_t get_portion_num() const { return m_portion_num; }
-
-    void set_available_blocks(const blk_num_t available_blocks) { m_available_blocks = available_blocks; }
-
     blk_num_t get_available_blocks() const { return m_available_blocks; }
-
-    [[maybe_unused]] blk_num_t decrease_available_blocks(const blk_num_t count) {
-        return (m_available_blocks -= count);
-    }
-
-        [[maybe_unused]] blk_num_t increase_available_blocks(const blk_num_t count) {
-        return (m_available_blocks += count);
-    }
-
-    void set_temperature(const blk_temp_t temp) { m_temperature = temp; }
-
     blk_temp_t temperature() const { return m_temperature; }
 
+    void set_portion_num(blk_num_t portion_num) { m_portion_num = portion_num; }
+    void set_available_blocks(const blk_num_t available_blocks) { m_available_blocks = available_blocks; }
+    blk_num_t decrease_available_blocks(const blk_num_t count) { return (m_available_blocks -= count); }
+    blk_num_t increase_available_blocks(const blk_num_t count) { return (m_available_blocks += count); }
+    void set_temperature(const blk_temp_t temp) { m_temperature = temp; }
     static constexpr blk_temp_t default_temperature() { return 1; }
 };
 
@@ -232,9 +201,9 @@ public:
     bool need_flush_dirty_bm() const { return is_disk_bm_dirty; }
 
     void set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm);
-    BlkAllocPortion* get_blk_portion(blk_num_t portion_num) {
-        HS_DBG_ASSERT_LT(portion_num, m_cfg.get_total_portions(), "Portion num is not in range");
-        return &m_blk_portions[portion_num];
+    BlkAllocPortion& get_blk_portion(blk_num_t portion_num) {
+        HS_DBG_ASSERT_LT(portion_num, get_num_portions(), "Portion num is not in range");
+        return m_blk_portions[portion_num];
     }
 
     virtual void inited();
@@ -276,15 +245,18 @@ public:
 
     // void cp_done();
 
-    virtual const BlkAllocConfig& get_config() const { return m_cfg; }
-    blk_num_t blknum_to_portion_num(const blk_num_t blknum) const {
-        return blknum / get_config().get_blks_per_portion();
-    }
+    uint32_t get_align_size() const { return m_align_size; }
+    blk_cap_t get_total_blks() const { return m_num_blks; }
+    blk_cap_t get_blks_per_portion() const { return m_blks_per_portion; }
+    blk_cap_t get_num_portions() const { return (m_num_blks - 1) / m_blks_per_portion + 1; }
+    const std::string& get_name() const { return m_name; }
+    bool auto_recovery_on() const { return m_auto_recovery; }
+    uint32_t get_blk_size() const { return m_blk_size; }
 
-    BlkAllocPortion* blknum_to_portion(blk_num_t blknum) { return &m_blk_portions[blknum_to_portion_num(blknum)]; }
-
-    const BlkAllocPortion* blknum_to_portion_const(blk_num_t blknum) const {
-        return &m_blk_portions[blknum_to_portion_num(blknum)];
+    blk_num_t blknum_to_portion_num(const blk_num_t blknum) const { return blknum / m_blks_per_portion; }
+    BlkAllocPortion& blknum_to_portion(blk_num_t blknum) { return m_blk_portions[blknum_to_portion_num(blknum)]; }
+    const BlkAllocPortion& blknum_to_portion_const(blk_num_t blknum) const {
+        return m_blk_portions[blknum_to_portion_num(blknum)];
     }
 
     void create_debug_bm();
@@ -294,7 +266,7 @@ public:
     /* Get status */
     nlohmann::json get_status(int log_level) const;
 
-    bool realtime_bm_on() const { return (m_cfg.m_realtime_bm_on && m_auto_recovery); }
+    bool realtime_bm_on() const { return (m_realtime_bm_on && m_auto_recovery); }
     void reset_disk_bm_dirty() { is_disk_bm_dirty = false; }
 
 private:
@@ -303,9 +275,15 @@ private:
     void set_disk_bm_dirty() { is_disk_bm_dirty = true; }
 
 protected:
-    BlkAllocConfig m_cfg;
+    const std::string m_name;
+    const uint32_t m_blk_size;
+    const uint32_t m_align_size;
+    const blk_cap_t m_num_blks;
+    blk_cap_t m_blks_per_portion;
+    const bool m_auto_recovery{false};
+    const bool m_realtime_bm_on{false}; // only specifically turn off in BlkAlloc Test;
     bool m_inited{false};
-    chunk_num_t m_chunk_id;
+    const chunk_num_t m_chunk_id;
 
 private:
     sisl::ThreadVector< BlkId >* m_alloc_blkid_list{nullptr};
@@ -316,7 +294,6 @@ private:
     std::unique_ptr< sisl::Bitset > m_realtime_bm{
         nullptr}; // it is used only for debugging to keep track of allocated/free blkids in real time
     std::atomic< int64_t > m_alloced_blk_count{0};
-    bool m_auto_recovery{false};
     std::atomic< bool > is_disk_bm_dirty{true}; // initially disk_bm treated as dirty
 };
 
@@ -345,7 +322,7 @@ public:
     std::string to_string() const override;
 
 private:
-    blk_num_t init_portion(BlkAllocPortion* portion, blk_num_t start_blk_num);
+    blk_num_t init_portion(BlkAllocPortion& portion, blk_num_t start_blk_num);
 
 private:
     folly::MPMCQueue< BlkId > m_blk_q;

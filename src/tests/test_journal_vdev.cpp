@@ -30,9 +30,11 @@
 #include <farmhash.h>
 
 #include <homestore/homestore.hpp>
+#include <homestore/logstore_service.hpp>
 #include "device/virtual_dev.hpp"
 #include "device/journal_vdev.hpp"
 #include "common/homestore_utils.hpp"
+#include "common/homestore_assert.hpp"
 #include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
@@ -71,16 +73,11 @@ public:
     virtual void SetUp() override {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-        test_common::HSTestHelper::start_homestore("test_vdev", 15.0, 0, 0, 0, 0, nullptr);
-        m_vdev = std::make_unique< JournalVirtualDev >(hs()->device_mgr(), "test_vdev", PhysicalDevGroup::DATA,
-                                                       (dev_size * ndevices * 60) / 100, 0 /* nmirror */,
-                                                       true /* is_stripe */, 4096 /* blk_size */, nullptr, 0);
+        test_common::HSTestHelper::start_homestore("test_vdev", 15.0, 75.0, 5.0, 0, 0, nullptr);
+        m_vdev = hs()->logstore_service().get_vdev(homestore::LogStoreService::DATA_LOG_FAMILY_IDX);
     }
 
-    virtual void TearDown() override {
-        m_vdev.reset();
-        test_common::HSTestHelper::shutdown_homestore();
-    }
+    virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
 
     uint64_t get_elapsed_time(Clock::time_point start) {
         std::chrono::seconds sec = std::chrono::duration_cast< std::chrono::seconds >(Clock::now() - start);
@@ -321,7 +318,7 @@ private:
     uint64_t m_total_size = 0;
     std::map< off_t, write_info > m_off_to_info_map;
     Clock::time_point m_start_time;
-    std::unique_ptr< JournalVirtualDev > m_vdev;
+    std::shared_ptr< JournalVirtualDev > m_vdev;
 };
 
 TEST_F(VDevIOTest, VDevIOTest) { this->execute(); }

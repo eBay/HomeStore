@@ -30,8 +30,12 @@
 #include <homestore/meta_service.hpp>
 #include <homestore/homestore.hpp>
 #include "common/homestore_flip.hpp"
+#include "common/homestore_utils.hpp"
+#include "device/device.h"
 #include "device/virtual_dev.hpp"
 #include "device/physical_dev.hpp"
+#include "device/chunk.h"
+#include "device/chunk_selector.hpp"
 #include "blkalloc/blk_allocator.h"
 #include "meta_sb.hpp"
 
@@ -44,49 +48,53 @@ MetaBlkService& meta_service() { return hs()->meta_service(); }
 MetaBlkService::MetaBlkService(const char* name) : m_metrics{name} { m_last_mblk_id = std::make_unique< BlkId >(); }
 
 void MetaBlkService::create_vdev(uint64_t size) {
-    const auto phys_page_size = hs()->device_mgr()->phys_page_size({PhysicalDevGroup::META});
+    const auto phys_page_size = hs()->device_mgr()->optimal_page_size(HSDevType::Fast);
 
-    struct blkstore_blob blob;
-    blob.type = blkstore_type::META_STORE;
-    m_sb_vdev = std::make_unique< VirtualDev >(hs()->device_mgr(), "meta", PhysicalDevGroup::META,
-                                               blk_allocator_type_t::varsize, size, 0, true, phys_page_size,
-                                               (char*)&blob, sizeof(blkstore_blob), false);
+    meta_vdev_context meta_ctx;
+    meta_ctx.type = hs_vdev_type_t::META_VDEV;
+
+    hs()->device_mgr()->create_vdev(vdev_parameters{.vdev_name = "meta",
+                                                    .vdev_size = size,
+                                                    .num_chunks = 1,
+                                                    .blk_size = phys_page_size,
+                                                    .dev_type = HSDevType::Fast,
+                                                    .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
+                                                    .context_data = meta_ctx.to_blob()});
 }
 
-void MetaBlkService::open_vdev(vdev_info_block* vb) {
-    m_sb_vdev = std::make_unique< VirtualDev >(hs()->device_mgr(), "meta", vb, PhysicalDevGroup::META,
-                                               blk_allocator_type_t::varsize, vb->is_failed(), false);
-    if (vb->is_failed()) {
-        LOGINFO("metablk vdev is in failed state");
-        throw std::runtime_error("vdev in failed state");
+shared< VirtualDev > MetaBlkService::open_vdev(const vdev_info& vinfo, bool load_existing) {
+    m_sb_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, blk_allocator_type_t::varsize,
+                                               chunk_selector_type_t::round_robin, nullptr, false /* auto_recovery */);
+
+    if (load_existing) {
+        /* get the blkid of homestore super block */
+        auto const meta_ctx = r_cast< const meta_vdev_context* >(vinfo.get_user_private());
+        HS_REL_ASSERT_EQ(meta_ctx->type, hs_vdev_type_t::META_VDEV, "Invalid vdev [type={}]", meta_ctx->type);
+
+        m_meta_vdev_context = std::make_unique< meta_vdev_context >();
+        *m_meta_vdev_context = *meta_ctx;
+
+        if (!meta_ctx->first_blkid.is_valid()) {
+            LOGINFO("MetaBlkService create vdev was failed last time. Should retry it with init flag");
+            throw homestore::homestore_exception("init was failed last time. Should retry it with init",
+                                                 homestore_error::init_failed);
+        }
     }
-
-    /* get the blkid of homestore super block */
-    auto blob = (sb_blkstore_blob*)(&(vb->context_data));
-    HS_REL_ASSERT_EQ(blob->type, blkstore_type::META_STORE, "Invalid blkstore [type={}]", blob->type);
-
-    m_meta_sb_blob = std::make_unique< sb_blkstore_blob >();
-    *m_meta_sb_blob = *blob;
-
-    if (!blob->blkid.is_valid()) {
-        LOGINFO("MetaBlkService create vdev was failed last time. Should retry it with init flag");
-        throw homestore::homestore_exception("init was failed last time. Should retry it with init",
-                                             homestore_error::init_failed);
-    }
+    return m_sb_vdev;
 }
 
-void MetaBlkService::start(bool is_init) {
-    LOGINFO("Initialize MetaBlkStore with total size={}, used size={}, is_init: {}", in_bytes(m_sb_vdev->size()),
-            in_bytes(m_sb_vdev->used_size()), is_init);
+void MetaBlkService::start(bool need_format) {
+    LOGINFO("Initialize MetaBlkStore with total size={}, used size={}, need_format={}", in_bytes(m_sb_vdev->size()),
+            in_bytes(m_sb_vdev->used_size()), need_format);
 
     HS_REL_ASSERT_GT(block_size(), META_BLK_HDR_MAX_SZ);
     HS_REL_ASSERT_GT(block_size(), MAX_BLK_OVF_HDR_MAX_SZ);
 
     reset_self_recover();
     alloc_compress_buf(init_compress_memory_size());
-    if (is_init) {
+    if (need_format) {
         // write the meta blk manager's sb;
-        init_ssb();
+        format_ssb();
     } else {
         load_ssb();
         scan_meta_blks();
@@ -133,7 +141,7 @@ void MetaBlkService::read(const BlkId& bid, uint8_t* dest, size_t sz) const {
 }
 
 void MetaBlkService::load_ssb() {
-    const BlkId bid = m_meta_sb_blob->blkid;
+    const BlkId bid = m_meta_vdev_context->first_blkid;
     HS_LOG(INFO, metablk, "Loading meta ssb blkid: {}", bid.to_string());
 
     m_sb_vdev->commit_blk(bid);
@@ -160,16 +168,16 @@ bool MetaBlkService::migrated() {
     return m_ssb->migrated;
 }
 
-void MetaBlkService::init_ssb() {
+void MetaBlkService::format_ssb() {
     std::lock_guard< decltype(m_meta_mtx) > lg(m_meta_mtx);
     BlkId bid;
     alloc_meta_blk(bid);
     HS_LOG(INFO, metablk, "allocated ssb blk: {}", bid.to_string());
 
-    m_meta_sb_blob = std::make_unique< sb_blkstore_blob >();
-    m_meta_sb_blob->type = blkstore_type::META_STORE;
-    m_meta_sb_blob->blkid = bid;
-    m_sb_vdev->update_vb_context(sisl::blob{uintptr_cast(m_meta_sb_blob.get()), sizeof(sb_blkstore_blob)});
+    m_meta_vdev_context = std::make_unique< meta_vdev_context >();
+    m_meta_vdev_context->type = hs_vdev_type_t::META_VDEV;
+    m_meta_vdev_context->first_blkid = bid;
+    m_sb_vdev->update_vdev_private(sisl::blob{uintptr_cast(m_meta_vdev_context.get()), sizeof(meta_vdev_context)});
 
     m_ssb = r_cast< meta_blk_sb* >(hs_utils::iobuf_alloc(block_size(), sisl::buftag::metablk, align_size()));
     std::memset(voidptr_cast(m_ssb), 0, block_size());

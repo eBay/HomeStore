@@ -50,7 +50,7 @@ public:
     void create_vdev(uint64_t size);
 
     // Open the existing vdev which is represnted by the vdev_info_block
-    void open_vdev(vdev_info_block* vb);
+    shared< VirtualDev > open_vdev(const vdev_info& vb, bool load_existing);
 
     // Start the Index Service
     void start();

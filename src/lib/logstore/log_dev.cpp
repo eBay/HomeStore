@@ -61,7 +61,7 @@ void LogDev::start(bool format, JournalVirtualDev* vdev) {
     HS_LOG_ASSERT((m_logfound_cb != nullptr), "Expected Logs found callback to be registered");
 
     m_vdev = vdev;
-    if (m_flush_size_multiple == 0) { m_flush_size_multiple = m_vdev->phys_page_size(); }
+    if (m_flush_size_multiple == 0) { m_flush_size_multiple = m_vdev->optimal_page_size(); }
     THIS_LOGDEV_LOG(INFO, "Initializing logdev with flush size multiple={}", m_flush_size_multiple);
 
     for (uint32_t i = 0; i < max_log_group; ++i) {

@@ -24,6 +24,7 @@
 #include <string>
 
 #include <homestore/blk.h>
+#include <homestore/homestore.hpp>
 
 namespace homestore {
 static constexpr uint32_t META_BLK_HDR_MAX_SZ{512}; // max meta_blk_hdr size
@@ -95,7 +96,7 @@ struct MetaSubRegInfo {
 // meta blk super block put as 1st block in the block chain;
 #pragma pack(1)
 struct meta_blk_sb {
-    uint32_t magic; // ssb magic
+    uint32_t magic;    // ssb magic
     uint32_t version;
     BlkId8_t next_bid; // next metablk
     BlkId8_t bid;
@@ -115,9 +116,9 @@ struct meta_blk_sb {
 //
 #pragma pack(1)
 struct meta_blk_hdr_s {
-    uint32_t magic; // magic
+    uint32_t magic;         // magic
     uint32_t version;
-    uint32_t gen_cnt; // generation count, bump on every update
+    uint32_t gen_cnt;       // generation count, bump on every update
     crc32_t crc;
     BlkId8_t next_bid;      // next metablk
     BlkId8_t prev_bid;      // previous metablk
@@ -217,6 +218,14 @@ struct meta_blk_ovf_hdr {
 
         return ovf_hdr_str;
     }
+};
+#pragma pack()
+
+#pragma pack(1)
+struct meta_vdev_context : public hs_vdev_context {
+    BlkId first_blkid;
+
+    sisl::blob to_blob() { return sisl::blob{uintptr_cast(this), sizeof(*this)}; }
 };
 #pragma pack()
 

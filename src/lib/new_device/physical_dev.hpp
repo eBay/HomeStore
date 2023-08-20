@@ -1,6 +1,7 @@
 /*********************************************************************************
  * Modifications Copyright 2017-2019 eBay Inc.
  *
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -15,6 +16,7 @@
 #pragma once
 #include <vector>
 #include <string>
+#include "hs_super_blk.h"
 
 #ifdef __linux__
 #include <fcntl.h>
@@ -24,12 +26,10 @@
 
 #include <boost/icl/split_interval_set.hpp>
 #include <nlohmann/json.hpp>
-#include <isa-l/crc.h>
 #include <sisl/metrics/metrics.hpp>
 #include <sisl/logging/logging.h>
 #include <homestore/homestore_decl.hpp>
 
-#include "hs_super_blk.h"
 SISL_LOGGING_DECL(device)
 
 namespace homestore {
@@ -78,7 +78,7 @@ struct chunk_info {
 
     uint64_t chunk_start_offset{0}; // 0: Start offset of the chunk within a pdev
     uint64_t chunk_size{0};         // 8: Chunk size
-    uint64_t end_of_chunk_size{0};  // 16: The offset indicates end of chunk.
+    int64_t end_of_chunk_size{0};   // 16: The offset indicates end of chunk.
     uint32_t vdev_id{0};            // 24: Virtual device id this chunk hosts. UINT32_MAX if chunk is free
     uint32_t chunk_id{0};           // 28: ID for this chunk - unique for entire homestore across devices
     uint32_t chunk_ordinal{0};      // 32: Chunk ordinal within the vdev on this pdev
@@ -94,17 +94,10 @@ struct chunk_info {
     void set_allocated() { chunk_allocated = 0x01; }
     void set_free() { chunk_allocated = 0x00; }
 
-    void set_selector_private(const sisl::blob& data) {
-        std::memcpy(&chunk_selector_private, data.bytes, std::min(data.size, uint32_cast(selector_private_size)));
+    void set_selector_private(uint8_t* private_data) {
+        std::memcpy(&chunk_selector_private, private_data, selector_private_size);
     }
-    void set_user_private(const sisl::blob& data) {
-        std::memcpy(&user_private, data.bytes, std::min(data.size, uint32_cast(user_private_size)));
-    }
-
-    void compute_checksum() {
-        checksum = 0;
-        checksum = crc16_t10dif(hs_init_crc_16, r_cast< const unsigned char* >(this), sizeof(chunk_info));
-    }
+    void set_user_private(uint8_t* private_data) { std::memcpy(&user_private, private_data, user_private_size); }
 };
 #pragma pack()
 
@@ -222,9 +215,9 @@ public:
 
     uint64_t data_size() const { return data_end_offset() - data_start_offset(); }
 
+private:
     uint64_t chunk_info_offset_nth(uint32_t slot) const;
 
-private:
     void do_remove_chunk(cshared< Chunk >& chunk);
     void populate_chunk_info(chunk_info* cinfo, uint32_t vdev_id, uint64_t size, uint32_t chunk_id, uint32_t ordinal);
     void free_chunk_info(chunk_info* cinfo);

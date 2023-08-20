@@ -45,8 +45,9 @@ class LogStoreFamily;
 class HomeLogStore;
 class LogDev;
 struct logdev_key;
+class VirtualDev;
 class JournalVirtualDev;
-struct vdev_info_block;
+struct vdev_info;
 struct log_dump_req;
 
 class LogStoreService {
@@ -135,7 +136,10 @@ public:
                          const bool dry_run = false);
 
     folly::Future< bool > create_vdev(uint64_t size, logstore_family_id_t family);
-    bool open_vdev(vdev_info_block* vb, logstore_family_id_t family);
+    shared< VirtualDev > open_vdev(const vdev_info& vinfo, logstore_family_id_t family, bool load_existing);
+    shared< JournalVirtualDev > get_vdev(logstore_family_id_t family) const {
+        return (family == DATA_LOG_FAMILY_IDX) ? m_data_logdev_vdev : m_ctrl_logdev_vdev;
+    }
 
     nlohmann::json dump_log_store(const log_dump_req& dum_req);
     nlohmann::json get_status(const int verbosity) const;
@@ -158,8 +162,8 @@ private:
 
 private:
     std::array< std::unique_ptr< LogStoreFamily >, num_log_families > m_logstore_families;
-    std::unique_ptr< JournalVirtualDev > m_data_logdev_vdev;
-    std::unique_ptr< JournalVirtualDev > m_ctrl_logdev_vdev;
+    std::shared_ptr< JournalVirtualDev > m_data_logdev_vdev;
+    std::shared_ptr< JournalVirtualDev > m_ctrl_logdev_vdev;
     iomgr::io_fiber_t m_truncate_fiber;
     iomgr::io_fiber_t m_flush_fiber;
     LogStoreServiceMetrics m_metrics;

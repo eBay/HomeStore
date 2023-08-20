@@ -74,11 +74,11 @@ public:
     blk_count_t get_slab_size() const { return m_slab_size; }
 
 private:
-    blk_count_t m_slab_size; // Slab size in-terms of number of pages
+    blk_count_t m_slab_size;                     // Slab size in-terms of number of pages
     std::vector< std::unique_ptr< folly::MPMCQueue< blk_cache_entry > > > m_level_queues;
     std::atomic< uint64_t > m_refill_session{0}; // Is a refill pending for this slab
     blk_cap_t m_total_capacity{0};
-    blk_cap_t m_refill_threshold_limits; // For every level whats their threshold limit size
+    blk_cap_t m_refill_threshold_limits;         // For every level whats their threshold limit size
     SlabMetrics m_metrics;
 };
 
@@ -119,6 +119,8 @@ private:
     [[nodiscard]] inline SlabMetrics& slab_metrics(const slab_idx_t slab_idx) const {
         return m_slab_queues[slab_idx]->metrics();
     }
+
+    std::string get_name() { return m_cfg.get_name(); }
 
 private:
     std::vector< std::unique_ptr< SlabCacheQueue > > m_slab_queues;

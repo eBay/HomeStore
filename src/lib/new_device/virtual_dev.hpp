@@ -1,6 +1,7 @@
 /*********************************************************************************
  * Modifications Copyright 2017-2019 eBay Inc.
  *
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -32,8 +33,7 @@
 #include <sisl/utility/enum.hpp>
 
 #include <homestore/homestore_decl.hpp>
-#include "device/device.h"
-#include "device/chunk_selector.hpp"
+#include "new_device/chunk_selector.hpp"
 
 namespace homestore {
 class PhysicalDev;
@@ -75,29 +75,23 @@ static constexpr off_t INVALID_OFFSET{std::numeric_limits< off_t >::max()};
 
 struct blkalloc_cp;
 
-class VirtualDev;
-ENUM(vdev_event_t, uint8_t, SIZE_THRESHOLD_REACHED, VDEV_ERRORED_OUT);
-using vdev_event_cb_t = std::function< void(VirtualDev&, vdev_event_t, const std::string&) >;
-
 class VirtualDev {
 protected:
-    vdev_info m_vdev_info;      // This device block info
-    DeviceManager& m_dmgr;      // Device Manager back pointer
-    std::string m_name;         // Name of the vdev
-    vdev_event_cb_t m_event_cb; // Callback registered for any events
+    vdev_info m_vdev_info; // This device block info
+    DeviceManager& m_dmgr; // Device Manager back pointer
+    std::string m_name;    // Name of the vdev
     VirtualDevMetrics m_metrics;
 
     std::mutex m_mgmt_mutex;          // Any mutex taken for management operations (like adding/removing chunks).
     std::set< PhysicalDev* > m_pdevs; // PDevs this vdev is working on
-    sisl::sparse_vector< shared< Chunk > > m_all_chunks; // All chunks part of this vdev
-    std::unique_ptr< ChunkSelector > m_chunk_selector;   // Instance of chunk selector
+    std::unique_ptr< ChunkSelector > m_chunk_selector; // Instance of chunk selector
     blk_allocator_type_t m_allocator_type;
     chunk_selector_type_t m_chunk_selector_type;
     bool m_auto_recovery;
 
 public:
     VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, blk_allocator_type_t allocator_type,
-               chunk_selector_type_t chunk_selector, vdev_event_cb_t event_cb, bool is_auto_recovery);
+               chunk_selector_type_t chunk_selector, bool is_auto_recovery);
 
     VirtualDev(const VirtualDev& other) = delete;
     VirtualDev& operator=(const VirtualDev& other) = delete;
@@ -137,6 +131,7 @@ public:
     /// @return true or false
     virtual bool is_blk_alloced(const BlkId& blkid) const;
 
+#ifdef ENABLE_LATER
     /// @brief Commits the blkid in on-disk version of the blk allocator. The blkid is assumed to be allocated using
     /// alloc_blk or alloc_contiguous_blk method earlier (either after reboot or prior to reboot). It is not required
     /// to call this method if alloc_blk is called and system is not restarted. Typical use case of this method is
@@ -145,6 +140,7 @@ public:
     /// @param blkid BlkId to commit explicitly.
     /// @return Allocation Status
     virtual BlkAllocStatus commit_blk(const BlkId& blkid);
+#endif
 
     virtual void free_blk(const BlkId& b);
 
@@ -158,22 +154,16 @@ public:
     /// @return future< bool > Future result with bool to indicate if IO is actually executed
     folly::Future< bool > async_write(const char* buf, uint32_t size, const BlkId& bid, bool part_of_batch = false);
 
-    folly::Future< bool > async_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
-                                      uint64_t offset_in_chunk);
-
     /// @brief Asynchornously write the buffer to the device on a given blkid from vector of buffer
     /// @param iov : Vector of buffer to write data from
     /// @param iovcnt : Count of buffer
     /// @param bid  BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @param cb : Callback once write is completed
-    /// @param cookie : cookie set by caller and returned on completion; It is defaulted to null as some caller is
-    /// not intrested of of this field
+    /// @param cookie : cookie set by caller and returned on completion; It is defaulted to null as some caller is not
+    /// intrested of of this field
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
     folly::Future< bool > async_writev(const iovec* iov, int iovcnt, const BlkId& bid, bool part_of_batch = false);
-
-    folly::Future< bool > async_writev(const iovec* iov, const int iovcnt, cshared< Chunk >& chunk,
-                                       uint64_t offset_in_chunk);
 
     /// @brief Synchronously write the buffer to the blkid
     /// @param buf : Buffer to write data from
@@ -181,7 +171,6 @@ public:
     /// @param bid : BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @return ssize_t: Size of the data actually written.
     void sync_write(const char* buf, uint32_t size, const BlkId& bid);
-    void sync_write(const char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /// @brief Synchronously write the vector of buffers to the blkid
     /// @param iov : Vector of buffer to write data from
@@ -189,7 +178,6 @@ public:
     /// @param bid  BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @return ssize_t: Size of the data actually written.
     void sync_writev(const iovec* iov, int iovcnt, const BlkId& bid);
-    void sync_writev(const iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /////////////////////// Read API related methods /////////////////////////////
 
@@ -225,7 +213,6 @@ public:
     /// @param bid : BlkId from data needs to be read
     /// @return ssize_t: Size of the data actually read.
     void sync_read(char* buf, uint32_t size, const BlkId& bid);
-    void sync_read(char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /// @brief Synchronously read the data for a given BlkId to vector of buffers
     /// @param iov : Vector of buffer to write read to
@@ -233,7 +220,6 @@ public:
     /// @param size : Size of the actual data, it is really to optimize the iovec from iterating again to get size
     /// @return ssize_t: Size of the data actually read.
     void sync_readv(iovec* iov, int iovcnt, const BlkId& bid);
-    void sync_readv(iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /////////////////////// Other API related methods /////////////////////////////
 
@@ -264,10 +250,6 @@ public:
     static uint64_t get_len(const iovec* iov, const int iovcnt);
     const std::set< PhysicalDev* >& get_pdevs() const { return m_pdevs; }
     std::vector< shared< Chunk > > get_chunks() const;
-    shared< Chunk > get_next_chunk(cshared< Chunk >& chunk) const;
-
-    ///////////////////////// Meta operations on vdev ////////////////////////
-    void update_vdev_private(const sisl::blob& data);
 
 private:
     BlkAllocStatus do_alloc_blk(blk_count_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid);

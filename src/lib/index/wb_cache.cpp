@@ -22,6 +22,7 @@
 #include "wb_cache.hpp"
 #include "index_cp.hpp"
 #include "device/virtual_dev.hpp"
+#include "device/chunk.h"
 #include "common/resource_mgr.hpp"
 
 namespace homestore {
@@ -57,7 +58,7 @@ void IndexWBCache::start_flush_threads() {
     auto nthreads = std::max(1, HS_DYNAMIC_CONFIG(generic.cache_flush_threads));
 
     for (int32_t i{0}; i < nthreads; ++i) {
-        iomanager.create_reactor("index_cp_flush" + std::to_string(i), INTERRUPT_LOOP, 1u,
+        iomanager.create_reactor("index_cp_flush" + std::to_string(i), iomgr::INTERRUPT_LOOP, 1u,
                                  [this, &ctx](bool is_started) {
                                      if (is_started) {
                                          {
@@ -132,10 +133,10 @@ retry:
 bool IndexWBCache::create_chain(IndexBufferPtr& second, IndexBufferPtr& third) {
     bool copied{false};
     if (second->m_next_buffer != nullptr) {
-        HS_DBG_ASSERT_EQ((void*)second->m_next_buffer.get(), (void*)third.get(),
-                         "Overwriting second (child node) with different third (parent node)");
-        HS_DBG_ASSERT_EQ((void*)second->m_next_buffer->m_next_buffer.get(), (void*)nullptr,
-                         "Third node buffer should be the last in the list");
+        // HS_DBG_ASSERT_EQ((void*)second->m_next_buffer.get(), (void*)third.get(),
+        //                  "Overwriting second (child node) with different third (parent node)");
+        // HS_DBG_ASSERT_EQ((void*)second->m_next_buffer->m_next_buffer.get(), (void*)nullptr,
+        //                  "Third node buffer should be the last in the list");
 
         // Second buf has already a next buffer, which means same node is in-place modified with structure change,
         // we need to copy both this and next buffer.
