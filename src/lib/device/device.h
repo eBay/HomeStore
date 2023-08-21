@@ -54,7 +54,7 @@ struct vdev_info {
     uint32_t get_vdev_id() const { return vdev_id; }
     uint64_t get_size() const { return vdev_size; }
 
-    void set_name(const std::string& n) { std::strncpy(charptr_cast(name), n.c_str(), 64); }
+    void set_name(const std::string& n) { std::strncpy(charptr_cast(name), n.c_str(), 63); }
     std::string get_name() const { return std::string{c_charptr_cast(name)}; }
 
     void set_allocated() { slot_allocated = s_cast< uint8_t >(0x01); };

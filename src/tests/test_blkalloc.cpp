@@ -427,7 +427,8 @@ struct VarsizeBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
     virtual void TearDown() override{};
 
     void create_allocator(const bool use_slabs = true) {
-        VarsizeBlkAllocConfig cfg{4096, 4096, 4096u, static_cast< uint64_t >(m_total_count) * 4096, "", use_slabs};
+        VarsizeBlkAllocConfig cfg{4096, 4096,  4096u,    static_cast< uint64_t >(m_total_count) * 4096,
+                                  "",   false, use_slabs};
         cfg.set_auto_recovery(true);
         m_allocator = std::make_unique< VarsizeBlkAllocator >(cfg, true, 0);
         HS_REL_ASSERT_EQ(m_allocator->realtime_bm_on(), false);
