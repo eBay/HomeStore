@@ -52,7 +52,7 @@ public:
     void realloc_buf(const IndexBufferPtr& buf) override;
     void write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* cp_ctx) override;
     void read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) override;
-    bool create_chain(IndexBufferPtr& second, IndexBufferPtr& third) override;
+    std::tuple< bool, bool > create_chain(IndexBufferPtr& second, IndexBufferPtr& third, CPContext* cp_ctx) override;
     void prepend_to_chain(const IndexBufferPtr& first, const IndexBufferPtr& second) override;
     void free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) override;
 
@@ -72,5 +72,6 @@ private:
     void get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_count, IndexBuffer* prev_flushed_buf,
                                 std::vector< IndexBufferPtr >& bufs);
     void free_btree_blks_and_flush(IndexCPContext* cp_ctx);
+
 };
 } // namespace homestore

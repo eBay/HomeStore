@@ -22,6 +22,8 @@
 
 #include "checkpoint/cp.hpp"
 
+SISL_LOGGING_DECL(wbcache)
+
 namespace homestore {
 struct flush_buffer_iterator {
     sisl::thread_vector_iterator dirty_buf_list_it;
@@ -35,7 +37,7 @@ public:
     sisl::ThreadVector< IndexBufferPtr >* m_dirty_buf_list{nullptr};
     sisl::ThreadVector< BlkId >* m_free_node_blkid_list{nullptr};
     sisl::atomic_counter< int64_t > m_dirty_buf_count{0};
-
+    IndexBufferPtr m_last_in_chain;
     std::mutex m_flush_buffer_mtx;
     flush_buffer_iterator m_buf_it;
 
@@ -45,6 +47,11 @@ public:
             CPContext(cp_id), m_dirty_buf_list{dirty_list}, m_free_node_blkid_list{free_blkid_list} {}
 
     virtual ~IndexCPContext() {
+        auto it = m_dirty_buf_list->begin(true /* latest */);
+        IndexBufferPtr *tmp = nullptr;
+        while((tmp = m_dirty_buf_list->next(it)) != nullptr) {
+            tmp->reset();
+        }
         m_dirty_buf_list->clear();
         m_free_node_blkid_list->clear();
     }
@@ -58,6 +65,8 @@ public:
         buf->m_buf_state = index_buf_state_t::DIRTY;
         m_dirty_buf_list->push_back(buf);
         m_dirty_buf_count.increment(1);
+        m_last_in_chain = buf;
+        LOGTRACEMOD(wbcache, "{}", buf->to_string());
     }
 
     void add_to_free_node_list(BlkId blkid) { m_free_node_blkid_list->push_back(blkid); }
@@ -66,6 +75,14 @@ public:
 
     IndexBufferPtr* next_dirty() { return m_dirty_buf_list->next(m_buf_it.dirty_buf_list_it); }
     BlkId* next_blkid() { return m_free_node_blkid_list->next(m_buf_it.free_node_list_it); }
+    std::string to_string() const {
+        std::string str{
+            fmt::format("IndexCPContext cpid={} dirty_buf_count={} dirty_buf_list_size={} blkid_list_size={}", id(),
+                        m_dirty_buf_count.get(), m_dirty_buf_list->size(), m_free_node_blkid_list->size())};
+
+        // TODO dump all index buffers.
+        return str;
+    }
 };
 
 class IndexWBCache;

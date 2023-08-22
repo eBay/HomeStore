@@ -40,7 +40,7 @@ struct index_table_sb {
     // Btree Section
     bnodeid_t root_node{empty_bnodeid}; // Btree Root Node ID
     uint64_t link_version{0};
-    int64_t index_size{0};              // Size of the Index
+    int64_t index_size{0}; // Size of the Index
     // seq_id_t last_seq_id{-1};           // TODO: See if this is needed
 
     uint32_t user_sb_size; // Size of the user superblk
@@ -63,23 +63,30 @@ enum class index_buf_state_t : uint8_t {
 };
 
 ///////////////////////// Btree Node and Buffer Portion //////////////////////////
-class IndexBuffer;
+struct IndexBuffer;
 typedef std::shared_ptr< IndexBuffer > IndexBufferPtr;
 
 struct IndexBuffer {
     uint8_t* m_node_buf{nullptr};                            // Actual buffer
     index_buf_state_t m_buf_state{index_buf_state_t::CLEAN}; // Is buffer yet to persist?
     BlkId m_blkid;                                           // BlkId where this needs to be persisted
-    IndexBufferPtr m_next_buffer{nullptr};                   // Next buffer in the chain
+    std::weak_ptr< IndexBuffer > m_next_buffer;     // Next buffer in the chain
     // Number of leader buffers we are waiting for before we write this buffer
     sisl::atomic_counter< int > m_wait_for_leaders{0};
 
     IndexBuffer(BlkId blkid, uint32_t buf_size, uint32_t align_size);
+    ~IndexBuffer();
 
     BlkId blkid() const { return m_blkid; }
     uint8_t* raw_buffer() { return m_node_buf; }
 
     bool is_clean() const { return (m_buf_state == index_buf_state_t::CLEAN); }
+    std::string to_string() const {
+        return fmt::format("IndexBuffer {} blkid={} state={} node_buf={} next_buffer={} wait_for={}",
+                           reinterpret_cast< void* >(const_cast< IndexBuffer* >(this)), m_blkid.to_integer(),
+                           static_cast< int >(m_buf_state), static_cast< void* >(m_node_buf),
+                           voidptr_cast(m_next_buffer.lock().get()), m_wait_for_leaders.get());
+    }
 };
 
 class BtreeNode;
@@ -87,11 +94,12 @@ typedef boost::intrusive_ptr< BtreeNode > BtreeNodePtr;
 
 struct IndexBtreeNode {
 public:
-    IndexBufferPtr m_idx_buf;    // Buffer backing this node
+    IndexBufferPtr m_idx_buf;     // Buffer backing this node
     cp_id_t m_last_mod_cp_id{-1}; // This node is previously modified by the cp id;
 
 public:
     IndexBtreeNode(const IndexBufferPtr& buf) : m_idx_buf{buf} {}
+    ~IndexBtreeNode() { m_idx_buf.reset(); }
     uint8_t* raw_buffer() { return m_idx_buf->raw_buffer(); }
     static IndexBtreeNode* convert(BtreeNode* bt_node);
 };
