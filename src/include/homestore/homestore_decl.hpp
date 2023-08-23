@@ -166,7 +166,7 @@ struct hs_format_params {
     float size_pct;
     uint32_t num_chunks{1};
     blk_allocator_type_t alloc_type{blk_allocator_type_t::varsize};
-    chunk_selector_type_t chunk_sel_type{chunk_selector_type_t::round_robin};
+    chunk_selector_type_t chunk_sel_type{chunk_selector_type_t::ROUND_ROBIN};
 };
 
 struct hs_input_params {
