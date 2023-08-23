@@ -93,8 +93,10 @@ private:
     }
 
     static std::vector< std::string > s_dev_names;
+    static blk_allocator_type_t s_alloc_type{blk_allocator_type_t::varsize};
 
 public:
+    static set_data_service_allocator(blk_allocator_type_t alloc_type) { s_alloc_type = alloc_type }
     static void start_homestore(const std::string& test_name, float meta_pct, float data_log_pct, float ctrl_log_pct,
                                 float data_pct, float index_pct, hs_before_services_starting_cb_t cb,
                                 bool restart = false, std::unique_ptr< IndexServiceCallbacks > index_svc_cb = nullptr) {
@@ -168,7 +170,7 @@ public:
                 {HS_SERVICE::META, hs_format_params{.size_pct = meta_pct}},
                 {HS_SERVICE::LOG_REPLICATED, hs_format_params{.size_pct = data_log_pct}},
                 {HS_SERVICE::LOG_LOCAL, hs_format_params{.size_pct = ctrl_log_pct}},
-                {HS_SERVICE::DATA, hs_format_params{.size_pct = data_pct}},
+                {HS_SERVICE::DATA, hs_format_params{.size_pct = data_pct, .alloc_type = s_alloc_type}},
                 {HS_SERVICE::INDEX, hs_format_params{.size_pct = index_pct}},
             });
         }

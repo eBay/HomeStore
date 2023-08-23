@@ -47,8 +47,9 @@ struct vdev_info {
     uint8_t hs_dev_type{0};                    // 26: PDev dev type (as in fast or data)
     uint8_t multi_pdev_choice{0};              // 27: Choice when multiple pdevs are present (vdev_multi_pdev_opts_t)
     char name[64];                             // 28: Name of the vdev
-    uint16_t checksum{0};                      // 94: Checksum of this entire block
-    uint8_t padding[32]{};                     // 96: Pad to make it 256 bytes total
+    uint16_t checksum{0};                      // 94: Checksum of this entire Block
+    uint8_t alloc_type;                        // 96: Allocator type of this vdev
+    uint8_t padding[24]{};                     // 97: Pad to make it 256 bytes total
     uint8_t user_private[user_private_size]{}; // 128: User specific information
 
     uint32_t get_vdev_id() const { return vdev_id; }
@@ -91,6 +92,7 @@ struct vdev_parameters {
                                             // to number of pdevs evenly
     uint32_t blk_size;                      // Block size vdev operates on
     HSDevType dev_type;                     // Which physical device type this vdev belongs to (FAST or DATA)
+    blk_allocator_type_t alloc_type;        // which allocator type this vdev wants to be with;
     vdev_multi_pdev_opts_t multi_pdev_opts; // How data to be placed on multiple vdevs
     sisl::blob context_data;                // Context data about this vdev
 };
@@ -123,9 +125,9 @@ private:
     sisl::sparse_vector< shared< Chunk > > m_chunks;                // Chunks organized as array (indexed on chunk id)
     sisl::Bitset m_chunk_id_bm{hs_super_blk::MAX_CHUNKS_IN_SYSTEM}; // Bitmap to keep track of chunk ids available
 
-    std::mutex m_vdev_mutex;                                        // Create/Remove operation of vdev synchronization
-    sisl::sparse_vector< shared< VirtualDev > > m_vdevs;            // VDevs organized in array for quick lookup
-    sisl::Bitset m_vdev_id_bm{hs_super_blk::MAX_VDEVS_IN_SYSTEM};   // Bitmap to keep track of vdev ids available
+    std::mutex m_vdev_mutex;                                      // Create/Remove operation of vdev synchronization
+    sisl::sparse_vector< shared< VirtualDev > > m_vdevs;          // VDevs organized in array for quick lookup
+    sisl::Bitset m_vdev_id_bm{hs_super_blk::MAX_VDEVS_IN_SYSTEM}; // Bitmap to keep track of vdev ids available
     vdev_create_cb_t m_vdev_create_cb;
 
     // std::unique_ptr< ChunkManager > m_chunk_mgr;

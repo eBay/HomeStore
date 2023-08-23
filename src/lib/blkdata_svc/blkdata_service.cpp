@@ -16,7 +16,7 @@
 #include <homestore/blkdata_service.hpp>
 #include <homestore/homestore.hpp>
 #include "device/virtual_dev.hpp"
-#include "device/physical_dev.hpp"     // vdev_info_block
+#include "device/physical_dev.hpp" // vdev_info_block
 #include "device/chunk.h"
 #include "common/homestore_config.hpp" // is_data_drive_hdd
 #include "common/homestore_assert.hpp"
@@ -31,7 +31,7 @@ BlkDataService::BlkDataService() { m_blk_read_tracker = std::make_unique< BlkRea
 BlkDataService::~BlkDataService() = default;
 
 // first-time boot path
-void BlkDataService::create_vdev(uint64_t size) {
+void BlkDataService::create_vdev(uint64_t size, blk_allocator_type_t) {
     const auto phys_page_size = hs()->device_mgr()->optimal_page_size(HSDevType::Fast);
 
     hs_vdev_context vdev_ctx;
@@ -47,10 +47,18 @@ void BlkDataService::create_vdev(uint64_t size) {
                                                         .context_data = vdev_ctx.to_blob()});
 }
 
-// recovery path
+// both first_time_boot and recovery path will come here
 shared< VirtualDev > BlkDataService::open_vdev(const vdev_info& vinfo, bool load_existing) {
-    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, blk_allocator_type_t::varsize,
-                                            chunk_selector_type_t::round_robin, nullptr, true /* auto_recovery */);
+    auto chunk_sel_type{chunk_selector_type_t::round_robin};
+
+    if (vinfo.alloc_type == blk_allocator_type_t::append) {
+        // TODO: enalbe it after chunksel is ready;
+        // chunk_sel_type = chunk_selector_type_t::heap;
+        chunk_sel_type = chunk_selector_type_t::round_robin;
+    }
+
+    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, vinfo.alloc_type, chunk_sel_type, nullptr,
+                                            true /* auto_recovery */);
     m_page_size = vinfo.blk_size;
     return m_vdev;
 }

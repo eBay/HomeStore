@@ -89,7 +89,7 @@ ENUM(io_flag, uint8_t,
      DIRECT_IO,   // recommended mode
      READ_ONLY    // Read-only mode for post-mortem checks
 );
-ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize);
+ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize, append);
 ENUM(chunk_selector_type_t, uint8_t, round_robin, heap);
 
 ////////////// All structs ///////////////////
@@ -159,6 +159,7 @@ struct HS_SERVICE {
 struct hs_format_params {
     float size_pct;
     uint32_t num_chunks{1};
+    blk_allocator_type_t alloc_type{blk_allocator_type_t::varsize};
 };
 
 struct hs_input_params {
