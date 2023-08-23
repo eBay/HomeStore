@@ -30,7 +30,6 @@ class HomestoreConan(ConanFile):
                 'sanitize': False,
                 'testing': 'epoll_mode',
                 'skip_testing': False,
-                'sisl:prerelease': True,
             }
 
 
@@ -44,10 +43,9 @@ class HomestoreConan(ConanFile):
         if self.settings.build_type == "Debug":
             if self.options.coverage and self.options.sanitize:
                 raise ConanInvalidConfiguration("Sanitizer does not work with Code Coverage!")
-            if self.options.sanitize:
-                self.options['sisl'].malloc_impl = 'libc'
-            elif self.options.coverage:
-                self.options.testing = 'min'
+            if self.options.testing == 'off':
+                if self.options.coverage or self.options.sanitize:
+                    raise ConanInvalidConfiguration("Coverage/Sanitizer requires Testing!")
 
     def imports(self):
         self.copy(root_package="sisl", pattern="*", dst="bin/scripts/python/flip/", src="bindings/flip/python/", keep_path=False)
