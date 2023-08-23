@@ -69,6 +69,11 @@ static std::shared_ptr< BlkAllocator > create_blk_allocator(blk_allocator_type_t
         cfg.set_auto_recovery(is_auto_recovery);
         return std::make_shared< VarsizeBlkAllocator >(cfg, is_init, unique_id);
     }
+    case blk_allocator_type_t::append: {
+        AppendBlkAllocConfig cfg{vblock_size, align_sz, size, std::string("append_chunk_") + std::to_string(unique_id)};
+        cfg.set_auto_recovery(is_auto_recovery);
+        return std::make_shared< AppendBlkAllocator >(cfg, is_init, unique_id);
+    }
     case blk_allocator_type_t::none:
     default:
         return nullptr;

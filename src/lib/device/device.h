@@ -47,9 +47,10 @@ struct vdev_info {
     uint8_t hs_dev_type{0};                    // 26: PDev dev type (as in fast or data)
     uint8_t multi_pdev_choice{0};              // 27: Choice when multiple pdevs are present (vdev_multi_pdev_opts_t)
     char name[64];                             // 28: Name of the vdev
-    uint16_t checksum{0};                      // 94: Checksum of this entire block
-    uint8_t padding[162]{};                    // 96: Pad to make it 256 bytes total
-    uint8_t user_private[user_private_size]{}; // 256: User specific information
+    uint16_t checksum{0};                      // 92: Checksum of this entire Block
+    uint8_t alloc_type;                        // 94: Allocator type of this vdev
+    uint8_t padding[162]{};                    // 95: Pad to make it 256 bytes total
+    uint8_t user_private[user_private_size]{}; // 128: User specific information
 
     uint32_t get_vdev_id() const { return vdev_id; }
     uint64_t get_size() const { return vdev_size; }
@@ -91,6 +92,7 @@ struct vdev_parameters {
                                             // to number of pdevs evenly
     uint32_t blk_size;                      // Block size vdev operates on
     HSDevType dev_type;                     // Which physical device type this vdev belongs to (FAST or DATA)
+    blk_allocator_type_t alloc_type;        // which allocator type this vdev wants to be with;
     vdev_multi_pdev_opts_t multi_pdev_opts; // How data to be placed on multiple vdevs
     sisl::blob context_data;                // Context data about this vdev
 };
