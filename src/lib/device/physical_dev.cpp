@@ -257,6 +257,8 @@ std::vector< shared< Chunk > > PhysicalDev::create_chunks(const std::vector< uin
                 auto chunk = std::make_shared< Chunk >(this, *cinfo, cslot);
                 ret_chunks.push_back(chunk);
                 get_stream(chunk).m_chunks_map.insert(std::pair{chunk_ids[cit], std::move(chunk)});
+
+                cinfo->~chunk_info();
             }
 
             m_chunk_info_slots->set_bits(b.start_bit, b.nbits);

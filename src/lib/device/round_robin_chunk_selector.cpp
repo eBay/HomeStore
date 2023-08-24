@@ -23,7 +23,7 @@ RoundRobinChunkSelector::RoundRobinChunkSelector(bool dynamic_chunk_add) : m_dyn
 
 void RoundRobinChunkSelector::add_chunk(cshared< Chunk >& chunk) { m_chunks.push_back(chunk); }
 
-Chunk* RoundRobinChunkSelector::select(const blk_alloc_hints& hints) {
+Chunk* RoundRobinChunkSelector::select([[maybe_unused]] const blk_alloc_hints& hints) {
     if (*m_next_chunk_index >= m_chunks.size()) { *m_next_chunk_index = 0; }
     return m_chunks[(*m_next_chunk_index)++].get();
 }

@@ -114,7 +114,7 @@ private:
     int m_hdd_open_flags;
     int m_ssd_open_flags;
     first_block_header m_first_blk_hdr;
-    bool m_first_time_boot;
+    bool m_first_time_boot{false};
 
     sisl::sparse_vector< std::unique_ptr< PhysicalDev > > m_all_pdevs;
     std::map< HSDevType, std::vector< PhysicalDev* > > m_pdevs_by_type;

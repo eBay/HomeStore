@@ -85,8 +85,8 @@ struct chunk_info {
     uint8_t chunk_allocated{0x00};  // 36: Is chunk allocated or free
     uint16_t checksum{0};           // 37: checksum of this chunk info
     uint8_t padding[25]{};          // 39: pad to make it 128 bytes total
-    uint8_t chunk_selector_private{selector_private_size}; // 64: Chunk selector private area
-    uint8_t user_private[user_private_size]{};             // 128: Opaque user of the chunk information
+    uint8_t chunk_selector_private[selector_private_size]{}; // 64: Chunk selector private area
+    uint8_t user_private[user_private_size]{};               // 128: Opaque user of the chunk information
 
     uint64_t get_chunk_size() const { return chunk_size; }
     uint32_t get_chunk_id() const { return chunk_id; }

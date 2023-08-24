@@ -199,7 +199,7 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
     }
 
     auto input_vdev_size = vparam.vdev_size;
-    vparam.vdev_size = sisl::round_up(vparam.vdev_size, vparam.num_chunks);
+    vparam.vdev_size = sisl::round_up(vparam.vdev_size, vparam.num_chunks * vparam.blk_size);
     if (input_vdev_size != vparam.vdev_size) {
         LOGINFO("{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}",
                 vparam.vdev_name, in_bytes(input_vdev_size), in_bytes(vparam.vdev_size));

@@ -32,7 +32,7 @@ BlkDataService::~BlkDataService() = default;
 
 // first-time boot path
 void BlkDataService::create_vdev(uint64_t size) {
-    const auto phys_page_size = hs()->device_mgr()->optimal_page_size(HSDevType::Fast);
+    const auto phys_page_size = hs()->device_mgr()->optimal_page_size(HSDevType::Data);
 
     hs_vdev_context vdev_ctx;
     vdev_ctx.type = hs_vdev_type_t::DATA_VDEV;

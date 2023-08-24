@@ -167,19 +167,21 @@ BlkAllocStatus VirtualDev::alloc_blk(uint32_t nblks, const blk_alloc_hints& hint
 BlkAllocStatus VirtualDev::do_alloc_blk(blk_count_t nblks, const blk_alloc_hints& hints,
                                         std::vector< BlkId >& out_blkid) {
     try {
-        Chunk* first_failed_chunk = nullptr;
-
         // First select a chunk to allocate it from
         BlkAllocStatus status;
         Chunk* chunk;
+        size_t attempt{0};
+
         do {
             chunk = m_chunk_selector->select(hints);
+            if (chunk == nullptr) { status = BlkAllocStatus::SPACE_FULL; }
+
             status = alloc_blk_from_chunk(nblks, hints, out_blkid, chunk);
             if (status == BlkAllocStatus::SUCCESS || !hints.can_look_for_other_chunk) { break; }
-        } while (chunk != first_failed_chunk);
+        } while (++attempt < m_all_chunks.size());
 
         if (status != BlkAllocStatus::SUCCESS) {
-            LOGERROR("nblks={} failed to alloc after trying to allo on every chunks {} and devices {}.", nblks);
+            LOGERROR("nblks={} failed to alloc after trying to alloc on every chunks {} and devices {}.", nblks);
             COUNTER_INCREMENT(m_metrics, vdev_num_alloc_failure, 1);
         }
 

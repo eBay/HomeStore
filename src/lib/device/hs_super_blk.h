@@ -181,7 +181,7 @@ public:
     }
     static uint32_t max_chunks_in_pdev(const dev_info& dinfo) {
         return (dinfo.dev_size - 1) /
-            ((dinfo.dev_type == HSDevType::Fast) ? MIN_CHUNK_SIZE_DATA_DEVICE : MIN_CHUNK_SIZE_FAST_DEVICE) +
+            ((dinfo.dev_type == HSDevType::Fast) ? MIN_CHUNK_SIZE_FAST_DEVICE : MIN_CHUNK_SIZE_DATA_DEVICE) +
             1;
     }
 };
