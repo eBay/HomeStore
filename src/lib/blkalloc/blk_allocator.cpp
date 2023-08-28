@@ -42,6 +42,11 @@ BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, chunk_num_t id) :
     }
 }
 
+void BlkAllocator::cp_flush() const {
+    // To be implemented;
+    LOGINFO("BitmapBlkAllocator cp_flush in not yet supported. ");
+}
+
 void BlkAllocator::set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm) {
     BLKALLOC_LOG(INFO, "Persistent bitmap of size={} recovered", recovered_bm->size());
     m_disk_bm = std::move(recovered_bm);

@@ -20,7 +20,7 @@ namespace homestore {
 Chunk::Chunk(PhysicalDev* pdev, const chunk_info& cinfo, uint32_t chunk_slot) :
         m_chunk_info{cinfo}, m_pdev{pdev}, m_chunk_slot{chunk_slot}, m_stream_id{pdev->chunk_to_stream_id(cinfo)} {}
 
-void Chunk::cp_flush() {}
+void Chunk::cp_flush() { m_blk_allocator->cp_flush(); }
 
 std::string Chunk::to_string() const {
     return fmt::format("chunk_id={}, vdev_id={}, start_offset={}, size={}, end_of_chunk={}, slot_num_in_pdev={} "

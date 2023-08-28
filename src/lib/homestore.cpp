@@ -157,9 +157,11 @@ void HomeStore::do_start() {
 
     // In case of custom recovery, let consumer starts the recovery and it is consumer module's responsibilities to
     // start log store
-    if (has_log_service() && inp_params.auto_recovery) { m_log_service->start(is_first_time_boot()); }
+    if (has_log_service() && inp_params.auto_recovery) { m_log_service->start(is_first_time_boot() /* format */); }
 
     if (has_index_service()) { m_index_service->start(); }
+
+    if (has_data_service()) { m_data_service->start(); }
 }
 
 void HomeStore::shutdown() {
