@@ -13,24 +13,39 @@
  * specific language governing permissions and limitations under the License.
  * *
  * *********************************************************************************/
-
+#include <homestore/meta_service.hpp>
 #include "append_blk_allocator.h"
 
 ISL_LOGGING_DECL(blkalloc)
 
 namespace homestore {
 
-AppendBlkAllocator::AppendBlkAllocator(const AppendBlkAllocConfig& cfg, bool init, chunk_num_t id) :
-        BlkAllocator{cfg, id}, m_metrics{get_name().c_str()} {
-    if (init) { BlkAllocator::inited(); }
+AppendBlkAllocator::AppendBlkAllocator(const AppendBlkAllocConfig& cfg, bool first_time_boot, chunk_num_t id) :
+        BlkAllocator{cfg, id}, m_metrics{get_name().c_str()}, m_sb{"AppendBlkAlloc_chunk_" + std::to_string(id)} {
+    // all append_blk_allocator instances use same client type;
+    meta_service().register_handler(
+        "AppendBlkAlloc",
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { on_meta_blk_found(std::move(buf), (void*)mblk); },
+        nullptr);
+
+    if (first_time_boot) {
+        m_sb.create(sizeof(append_blkalloc_sb));
+        m_sb.chunk_id = id;
+        m_sb.last_append_offset = 0;
+    }
+}
+
+void AppendBlkAllocator::on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
+    m_sb.load(buf, meta_cookie);
+    HS_REL_ASSERT_EQ(m_sb->magic, append_blkalloc_sb_magic, "Invalid AppendBlkAlloc metablk, magic mismatch");
+    HS_REL_ASSERT_EQ(m_sb->version, append_blkalloc_sb_version, "Invalid version of AppendBlkAllocator metablk");
 }
 
 BlkAllocStatus AppendBlkAllocator::alloc(BlkId& bid) {
-    BLKALLOC_REL_ASSERT(last_append_offset % get_blk_size() == 0);
+    bid.set(last_append_offset, 1, m_chunk_id);
+    ++last_append_offset;
 
-    const auto blk_num = last_append_offset / get_blk_size();
-    // assumption is caller can use all of the remaining space in this chunk;
-    bid.set(blk_num, get_total_blks() - blk_num, m_chunk_id);
+    set_dirty_offset();
 
     return BlkAllocStatus::SUCCESS;
 }
@@ -39,10 +54,60 @@ BlkAllocStatus AppendBlkAllocator::alloc(BlkId& bid) {
 // For append blk allocator, the assumption is only one writer will append data on one chunk.
 // If we want to change above design, we can open this api for vector allocation;
 //
-BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t, const blk_alloc_hints&, std::vector< BlkId >&) {
-    BLKALLOC_REL_ASSERT(false, "not supported for append_blk_allocator for milestone2.");
+BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hints& hint,
+                                         std::vector< BlkId >& out_bids) {
+    if (available_blk() < nblks) {
+        // TODO: metris update;
+        LOGERROR("No space left to serve request nblks: {}, available_blks: {}", nblks, available_blks());
+        return BlkAllocStatus::SPACE_FULL;
+    }
+
+    out_bids.emplace_back({last_append_offset, nblks, m_chunk_id});
+    last_append_offset += nblks;
+
+    set_dirty_offset();
+
     return BlkAllocStatus::SUCCESS;
 }
+
+//
+// Alternative design option:
+// Option-1. Everytime offset is updated in a single append_blk_allocator instance, update the dirty buffer into
+// VDevCPContext, which contains a list of (ThreadVector) dirty buffers from all the append_blk_allocator instances
+// (protected by RCU);
+//
+// And cp_flush flush every dirty buffer in that list to disk;
+//
+// Option-2. vdev cp_flush will call each individual chunk's blkallocator and each append_blk_allocator instance flush
+// its dirty buffer on demond;
+//
+// We are using option-2.
+//
+
+//
+// cp_flush is happening in different thread that is running concurrently as AppendBlkAllocator::alloc;
+//
+// 1. if clear_dirty_offset happens before offset is updated by alloc, but before set_dirty_offset, we are flushing
+// offset twice, which is fine.
+// 2. If clear_dirty_offset happens after set_dirty_offset, we are flushing offset ahead of log
+// store, which is also fine during recovery, it is consistent after log store flush completes;
+// 3. Any alloc happened after metablk is persisted will come to next cp;
+//
+void AppendBlkAllocator::cp_flush(CP*) {
+    if (m_is_dirty) {
+        // clear must happen before write to metablk becuase if metablk is written first, if
+        // alloc(in-parallel) happened after written but before clear, then the dirty buffer will be cleared.
+        clear_dirty_offset();
+
+        // write to metablk;
+        m_sb.last_append_offset = last_append_offset;
+        m_sb.write();
+    }
+}
+
+void AppendBlkAllocator::set_dirty_offset() { m_is_dirty = true; }
+
+void AppendBlkAllocator::clear_dirty_offset() { m_is_dirty = false; }
 
 void AppendBlkAllocator::free(BlkId& bid) {
     // free is a no-op;
@@ -56,7 +121,7 @@ void AppendBlkAllocator::free(const std::vector< BlkId >& blk_ids) {
 
 blk_cap_t AppendBlkAllocator::available_blks() const { return get_total_blks() - get_used_blks(); }
 
-blk_cap_t AppendBlkAllocator::get_used_blks() const { return last_append_offset / get_blk_size(); }
+blk_cap_t AppendBlkAllocator::get_used_blks() const { return last_append_offset; }
 
 bool AppendBlkAllocator::is_blk_alloced(const BlkId& in_bid, bool use_lock) const {
     // blk_num starts from 0;

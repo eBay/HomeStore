@@ -245,7 +245,14 @@ public:
     void submit_batch();
 
     virtual void recovery_done();
-    void cp_flush();
+
+    ////////////////////// Checkpointing related methods ///////////////////////////
+    /// @brief
+    ///
+    /// @param cp
+    void cp_flush(CP* cp);
+
+    std::unique_ptr< CPContext > create_cp_context();
 
     ////////////////////////// Standard Getters ///////////////////////////////
     virtual uint64_t available_blks() const;
@@ -274,6 +281,10 @@ private:
     uint64_t to_dev_offset(const BlkId& b, Chunk** chunk) const;
     BlkAllocStatus alloc_blk_from_chunk(blk_count_t nblks, const blk_alloc_hints& hints,
                                         std::vector< BlkId >& out_blkid, Chunk* chunk);
+};
+
+class VDevCPContext : public CPContext {
+    // place holder for future needs in which components underlying virtualdev needs cp flush context;
 };
 
 } // namespace homestore
