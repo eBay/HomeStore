@@ -447,10 +447,6 @@ uint64_t VirtualDev::used_size() const {
     return (alloc_cnt * block_size());
 }
 
-void VirtualDev::cp_flush() {
-    m_chunk_selector->foreach_chunks([this](cshared< Chunk >& chunk) { chunk->cp_flush(); });
-}
-
 std::vector< shared< Chunk > > VirtualDev::get_chunks() const { return m_all_chunks; }
 
 /*void VirtualDev::blkalloc_cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp) {
@@ -515,6 +511,14 @@ void VirtualDev::update_vdev_private(const sisl::blob& private_data) {
 
     vinfo->~vdev_info();
     hs_utils::iobuf_free(buf, sisl::buftag::superblk);
+}
+
+///////////////////////// VirtualDev Checkpoint methods /////////////////////////////
+std::unique_ptr< CPContext > VirtualDev::create_cp_context() { return std::make_unique< VDevCPContext >(); }
+
+void VirtualDev::cp_flush(CP* cp) {
+    // pass down cp so that underlying componnents can get their customized CP context if needed;
+    m_chunk_selector->foreach_chunks([this](cshared< Chunk >& chunk) { chunk->cp_flush(cp); });
 }
 
 ///////////////////////// VirtualDev Private Methods /////////////////////////////

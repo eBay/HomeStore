@@ -143,4 +143,11 @@ folly::Future< bool > BlkDataService::async_free_blk(const BlkId bid) {
     });
     return f;
 }
+
+void BlkDataService::start() {
+    // Register to CP for flush dirty buffers underlying virtual device layer;
+    hs()->cp_mgr().register_consumer(cp_consumer_t::BLK_DATA_SVC,
+                                     std::move(std::make_unique< VDevCPCallbacks >(m_vdev)));
+}
+
 } // namespace homestore

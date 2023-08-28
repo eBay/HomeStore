@@ -131,6 +131,11 @@ public:
      */
     BlkReadTracker* read_blk_tracker() { return m_blk_read_tracker.get(); }
 
+    /**
+     * @brief : start data service;
+     */
+    void start();
+
 private:
     BlkAllocStatus alloc_blks(uint32_t size, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids);
 

@@ -22,10 +22,22 @@
 #include "common/homestore_config.hpp"
 
 namespace homestore {
+static constexpr uint64_t append_blkalloc_sb_magic{0xd0d0d02b};
+static constexpr uint64_t append_blkalloc_sb_version{0x1};
 
+#pragma pack(1)
+struct append_blkalloc_sb {
+    uint64_t magic{append_blkalloc_sb_magic};
+    uint32_t version{append_blkalloc_sb_version};
+    uint64_t chunk_id;
+    uint64_t last_append_offset;
+};
+#pragma pack()
+
+// TODO: add metrics
 class AppendBlkAllocator : public BlkAllocator {
 public:
-    AppendBlkAllocator(const BlkAllocConfig& cfg, bool init, chunk_num_t id = 0);
+    AppendBlkAllocator(const BlkAllocConfig& cfg, bool first_time_boot, chunk_num_t id = 0);
 
     AppendBlkAllocator(const AppendBlkAllocator&) = delete;
     AppendBlkAllocator(AppendBlkAllocator&&) noexcept = delete;
@@ -45,8 +57,21 @@ public:
     bool is_blk_alloced(const BlkId& in_bid, bool use_lock = false) const override;
     std::string to_string() const override;
 
+    void set_dirty_offset();
+
+    /// @brief : clear dirty is best effort;
+    /// offset flush is idempotent;
+    void clear_dirty_offset();
+
+    void cp_flush(CP* cp);
+
 private:
-    uint64_t last_append_offset;
+    void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
+
+private:
+    std::atomic< uint64_t > last_append_offset; // last appended offset in blocks;
+    std::atomic< bool > m_is_dirty{false};
+    superblk< append_blkalloc_sb > m_sb;
 };
 
 } // namespace homestore

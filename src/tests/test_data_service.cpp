@@ -56,8 +56,6 @@ struct Param {
 
 static Param gp;
 
-static const std::string DATA_SVC_FILE_PREFIX{"/tmp/test_data_service_"};
-
 ENUM(DataSvcOp, uint8_t, WRITE, READ, FREE_BLK, COMMIT_BLK, RESERVE_STREAM, ALLOC_STREAM, FREE_STREAM)
 
 typedef std::function< void(std::error_condition err, std::shared_ptr< std::vector< BlkId > > out_bids) >
