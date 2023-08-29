@@ -44,6 +44,8 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
+blk_allocator_type_t test_common::HSTestHelper::s_ds_alloc_type;
+chunk_selector_type_t test_common::HSTestHelper::s_ds_chunk_sel_type;
 
 constexpr uint64_t Ki{1024};
 constexpr uint64_t Mi{Ki * Ki};
@@ -111,7 +113,7 @@ private:
             struct iovec iov;
             iov.iov_len = iov_len;
             iov.iov_base = iomanager.iobuf_alloc(512, iov_len);
-            fill_data_buf(r_cast< uint8_t* >(iov.iov_base), iov.iov_len);
+            // fill_data_buf(r_cast< uint8_t* >(iov.iov_base), iov.iov_len);
             sg->iovs.push_back(iov);
             sg->size += iov_len;
         }
@@ -136,7 +138,10 @@ private:
 
 TEST_F(AppendBlkAllocatorTest, TestBasicWrite) {
     LOGINFO("Step 0: Starting homestore.");
-    test_common::HSTestHelper::set_data_service_allocator(blk_allocator_type_t::append);
+
+    test_common::HSTestHelper::set_data_svc_allocator(homestore::blk_allocator_type_t::append);
+    test_common::HSTestHelper::set_data_svc_chunk_selector(
+        homestore::chunk_selector_type_t::round_robin); // <<< TODO: change to heap
 
     test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0, 0, 0, 80.0, 0, nullptr);
 
