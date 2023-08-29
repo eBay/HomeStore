@@ -58,13 +58,15 @@ void MetaBlkService::create_vdev(uint64_t size) {
                                                     .num_chunks = 1,
                                                     .blk_size = phys_page_size,
                                                     .dev_type = HSDevType::Fast,
+                                                    .alloc_type = blk_allocator_type_t::varsize,
+                                                    .chunk_sel_type = chunk_selector_type_t::round_robin,
                                                     .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
                                                     .context_data = meta_ctx.to_blob()});
 }
 
 shared< VirtualDev > MetaBlkService::open_vdev(const vdev_info& vinfo, bool load_existing) {
-    m_sb_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, blk_allocator_type_t::varsize,
-                                               chunk_selector_type_t::round_robin, nullptr, false /* auto_recovery */);
+    m_sb_vdev =
+        std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, nullptr /* event_cb */, false /* auto_recovery */);
 
     if (load_existing) {
         /* get the blkid of homestore super block */

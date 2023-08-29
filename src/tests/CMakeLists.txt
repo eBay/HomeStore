@@ -52,7 +52,7 @@ if (${build_nonio_tests})
     add_test(NAME DeviceManager COMMAND test_device_manager)
 
     add_executable(test_append_blk_allocator)
-    target_sources(test_append_blk_allocator PRIVATE test_append_blk_allocator.cpp)
+    target_sources(test_append_blk_allocator PRIVATE test_append_blkalloc.cpp)
     target_link_libraries(test_append_blk_allocator homestore ${COMMON_TEST_DEPS} GTest::gmock)
     add_test(NAME AppendBlkAlloc COMMAND test_append_blk_allocator)
 endif()

@@ -48,8 +48,9 @@ struct vdev_info {
     uint8_t multi_pdev_choice{0};              // 27: Choice when multiple pdevs are present (vdev_multi_pdev_opts_t)
     char name[64];                             // 28: Name of the vdev
     uint16_t checksum{0};                      // 94: Checksum of this entire Block
-    uint8_t alloc_type;                        // 96: Allocator type of this vdev
-    uint8_t padding[24]{};                     // 97: Pad to make it 256 bytes total
+    uint8_t alloc_type;                        // 96: Allocator type of this vdev_id
+    uint8_t chunk_sel_type;                    // 97: Chunk Selector type of this vdev_id
+    uint8_t padding[30]{};                     // 98: Pad to make it 256 bytes total
     uint8_t user_private[user_private_size]{}; // 128: User specific information
 
     uint32_t get_vdev_id() const { return vdev_id; }
@@ -84,6 +85,13 @@ struct vdev_info {
 
 static_assert(sizeof(vdev_info) <= vdev_info::size, "VDev info sizeof() mismatch");
 
+ENUM(chunk_selector_t, uint8_t, // What are the options to select chunk to allocate a block
+     ROUND_ROBIN,               // Pick round robin
+     RANDOM,                    // Pick any chunk in uniformly random fashion
+     MOST_AVAILABLE_SPACE,      // Pick the most available space
+     ALWAYS_CALLER_CONTROLLED   // Expect the caller to always provide the specific chunkid
+);
+
 struct vdev_parameters {
     std::string vdev_name;                  // Name of the vdev
     uint64_t vdev_size;                     // Current Vdev size.
@@ -93,16 +101,10 @@ struct vdev_parameters {
     uint32_t blk_size;                      // Block size vdev operates on
     HSDevType dev_type;                     // Which physical device type this vdev belongs to (FAST or DATA)
     blk_allocator_type_t alloc_type;        // which allocator type this vdev wants to be with;
+    chunk_selector_type_t chunk_sel_type;   // which chunk selector type this vdev wants to be with;
     vdev_multi_pdev_opts_t multi_pdev_opts; // How data to be placed on multiple vdevs
     sisl::blob context_data;                // Context data about this vdev
 };
-
-ENUM(chunk_selector_t, uint8_t, // What are the options to select chunk to allocate a block
-     ROUND_ROBIN,               // Pick round robin
-     RANDOM,                    // Pick any chunk in uniformly random fashion
-     MOST_AVAILABLE_SPACE,      // Pick the most available space
-     ALWAYS_CALLER_CONTROLLED   // Expect the caller to always provide the specific chunkid
-);
 
 class VirtualDev;
 class PhysicalDev;

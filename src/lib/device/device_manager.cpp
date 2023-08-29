@@ -328,7 +328,8 @@ static void populate_vdev_info(const vdev_parameters& vparam, uint32_t vdev_id,
     out_info->set_name(vparam.vdev_name);
     out_info->set_user_private(vparam.context_data);
     out_info->compute_checksum();
-    out_info->alloc_type = vparam.alloc_type;
+    out_info->alloc_type = s_cast< uint8_t >(vparam.alloc_type);
+    out_info->chunk_sel_type = s_cast< uint8_t >(vparam.chunk_sel_type);
 }
 
 std::vector< vdev_info > DeviceManager::read_vdev_infos(const std::vector< PhysicalDev* >& pdevs) {

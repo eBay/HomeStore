@@ -34,8 +34,7 @@
 
 namespace homestore {
 JournalVirtualDev::JournalVirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, vdev_event_cb_t event_cb) :
-        VirtualDev{dmgr, vinfo, blk_allocator_type_t::none, chunk_selector_type_t::round_robin, std::move(event_cb),
-                   false /* is_auto_recovery */} {}
+        VirtualDev{dmgr, vinfo, std::move(event_cb), false /* is_auto_recovery */} {}
 
 off_t JournalVirtualDev::alloc_next_append_blk(size_t sz) {
     if (used_size() + sz > size()) {

@@ -126,7 +126,8 @@ void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format
             futs.emplace_back(m_log_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast),
                                                          LogStoreService::CTRL_LOG_FAMILY_IDX));
         } else if ((svc_type & HS_SERVICE::DATA) && has_data_service()) {
-            m_data_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Data), fparams.alloc_type);
+            m_data_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Data), fparams.alloc_type,
+                                        fparams.chunk_sel_type);
         } else if ((svc_type & HS_SERVICE::INDEX) && has_index_service()) {
             m_index_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast));
         }

@@ -93,13 +93,24 @@ private:
     }
 
     static std::vector< std::string > s_dev_names;
-    static blk_allocator_type_t s_ds_alloc_type{blk_allocator_type_t::varsize};
+    static blk_allocator_type_t s_ds_alloc_type;
+    static chunk_selector_type_t s_ds_chunk_sel_type;
 
 public:
-    static set_data_service_allocator(blk_allocator_type_t alloc_type) { s_ds_alloc_type = alloc_type }
+    static void set_data_svc_allocator(blk_allocator_type_t alloc_type) { s_ds_alloc_type = alloc_type; }
+    static void set_data_svc_chunk_selector(chunk_selector_type_t chunk_sel_type) {
+        s_ds_chunk_sel_type = chunk_sel_type;
+    }
+
     static void start_homestore(const std::string& test_name, float meta_pct, float data_log_pct, float ctrl_log_pct,
                                 float data_pct, float index_pct, hs_before_services_starting_cb_t cb,
-                                bool restart = false, std::unique_ptr< IndexServiceCallbacks > index_svc_cb = nullptr) {
+                                bool restart = false, std::unique_ptr< IndexServiceCallbacks > index_svc_cb = nullptr,
+                                bool default_data_svc_alloc_type = true) {
+        if (default_data_svc_alloc_type) {
+            set_data_svc_allocator(homestore::blk_allocator_type_t::varsize);
+            set_data_svc_chunk_selector(homestore::chunk_selector_type_t::round_robin);
+        }
+
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
@@ -170,7 +181,9 @@ public:
                 {HS_SERVICE::META, hs_format_params{.size_pct = meta_pct}},
                 {HS_SERVICE::LOG_REPLICATED, hs_format_params{.size_pct = data_log_pct}},
                 {HS_SERVICE::LOG_LOCAL, hs_format_params{.size_pct = ctrl_log_pct}},
-                {HS_SERVICE::DATA, hs_format_params{.size_pct = data_pct, .alloc_type = s_ds_alloc_type}},
+                {HS_SERVICE::DATA,
+                 hs_format_params{
+                     .size_pct = data_pct, .alloc_type = s_ds_alloc_type, .chunk_sel_type = s_ds_chunk_sel_type}},
                 {HS_SERVICE::INDEX, hs_format_params{.size_pct = index_pct}},
             });
         }
