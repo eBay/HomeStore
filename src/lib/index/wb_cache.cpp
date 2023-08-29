@@ -313,7 +313,7 @@ void IndexWBCache::free_btree_blks_and_flush(IndexCPContext* cp_ctx) {
     // Pick a CP Manager blocking IO fiber to execute the cp flush of vdev
     iomanager.run_on_forget(hs()->cp_mgr().pick_blocking_io_fiber(), [this, cp_ctx]() {
         LOGTRACEMOD(wbcache, "Initiating CP flush");
-        m_vdev->cp_flush(); // This is a blocking io call
+        m_vdev->cp_flush(nullptr); // This is a blocking io call
         cp_ctx->complete(true);
     });
 }

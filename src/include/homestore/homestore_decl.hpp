@@ -89,7 +89,7 @@ ENUM(io_flag, uint8_t,
      DIRECT_IO,   // recommended mode
      READ_ONLY    // Read-only mode for post-mortem checks
 );
-ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize);
+ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize, append);
 ENUM(chunk_selector_type_t, uint8_t, // What are the options to select chunk to allocate a block
      ROUND_ROBIN,                    // Pick round robin
      CUSTOM,                         // Controlled by the upper layer
@@ -166,6 +166,7 @@ struct hs_format_params {
     float size_pct;
     uint32_t num_chunks{1};
     blk_allocator_type_t alloc_type{blk_allocator_type_t::varsize};
+    chunk_selector_type_t chunk_sel_type{chunk_selector_type_t::round_robin};
 };
 
 struct hs_input_params {

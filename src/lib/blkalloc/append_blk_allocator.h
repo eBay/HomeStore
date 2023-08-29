@@ -20,6 +20,7 @@
 #include "blk_allocator.h"
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
+#include <homestore/superblk_handler.hpp>
 
 namespace homestore {
 static constexpr uint64_t append_blkalloc_sb_magic{0xd0d0d02b};
@@ -34,7 +35,22 @@ struct append_blkalloc_sb {
 };
 #pragma pack()
 
-// TODO: add metrics
+class AppendBlkAllocMetrics : public sisl::MetricsGroup {
+public:
+    explicit AppendBlkAllocMetrics(const char* inst_name) : sisl::MetricsGroup("AppendBlkAlloc", inst_name) {
+        REGISTER_COUNTER(num_alloc, "Number of blks alloc attempts");
+        REGISTER_COUNTER(num_alloc_failure, "Number of blk alloc failures");
+
+        register_me_to_farm();
+    }
+
+    AppendBlkAllocMetrics(const AppendBlkAllocMetrics&) = delete;
+    AppendBlkAllocMetrics(AppendBlkAllocMetrics&&) noexcept = delete;
+    AppendBlkAllocMetrics& operator=(const AppendBlkAllocMetrics&) = delete;
+    AppendBlkAllocMetrics& operator=(AppendBlkAllocMetrics&&) noexcept = delete;
+    ~AppendBlkAllocMetrics() { deregister_me_from_farm(); }
+};
+
 class AppendBlkAllocator : public BlkAllocator {
 public:
     AppendBlkAllocator(const BlkAllocConfig& cfg, bool first_time_boot, chunk_num_t id = 0);
@@ -63,14 +79,16 @@ public:
     /// offset flush is idempotent;
     void clear_dirty_offset();
 
-    void cp_flush(CP* cp);
+    void cp_flush() override;
 
 private:
+    std::string get_name() const;
     void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
 
 private:
     std::atomic< uint64_t > last_append_offset; // last appended offset in blocks;
     std::atomic< bool > m_is_dirty{false};
+    AppendBlkAllocMetrics m_metrics;
     superblk< append_blkalloc_sb > m_sb;
 };
 

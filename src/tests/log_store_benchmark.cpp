@@ -37,6 +37,8 @@
 using namespace homestore;
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
+blk_allocator_type_t test_common::HSTestHelper::s_ds_alloc_type;
+chunk_selector_type_t test_common::HSTestHelper::s_ds_chunk_sel_type;
 
 SISL_OPTIONS_ENABLE(logging, log_store_benchmark, iomgr, test_common_setup)
 SISL_OPTION_GROUP(log_store_benchmark,

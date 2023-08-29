@@ -233,17 +233,17 @@ private:
     static std::queue< VarsizeBlkAllocator* > s_sweeper_queue;            // Sweeper threads queue
     static std::unordered_set< VarsizeBlkAllocator* > s_block_allocators; // block allocators to be swept
 
-    static constexpr blk_num_t INVALID_PORTION_NUM{UINT_MAX};             // max of type blk_num_t
+    static constexpr blk_num_t INVALID_PORTION_NUM{UINT_MAX}; // max of type blk_num_t
 
     // per class sweeping logic
-    std::mutex m_mutex;                                           // Mutex to protect regionstate & cb
-    std::condition_variable m_cv;                                 // CV to signal thread
-    BlkAllocatorState m_state;                                    // Current state of the blkallocator
+    std::mutex m_mutex;           // Mutex to protect regionstate & cb
+    std::condition_variable m_cv; // CV to signal thread
+    BlkAllocatorState m_state;    // Current state of the blkallocator
 
-    std::unique_ptr< sisl::Bitset > m_cache_bm;                   // Bitset representing entire blks in this allocator
-    std::unique_ptr< FreeBlkCache > m_fb_cache;                   // Free Blks cache
+    std::unique_ptr< sisl::Bitset > m_cache_bm; // Bitset representing entire blks in this allocator
+    std::unique_ptr< FreeBlkCache > m_fb_cache; // Free Blks cache
 
-    VarsizeBlkAllocConfig m_cfg;                                  // Config for Varsize
+    VarsizeBlkAllocConfig m_cfg; // Config for Varsize
 
     std::vector< std::unique_ptr< BlkAllocSegment > > m_segments; // Lookup map for segment id - segment
 

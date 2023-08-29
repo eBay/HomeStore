@@ -10,6 +10,7 @@ target_sources(hs_blkalloc PRIVATE
         fixed_blk_allocator.cpp
         varsize_blk_allocator.cpp
         blk_cache_queue.cpp
+        append_blk_allocator.cpp
         #blkalloc_cp.cpp
       )
 target_link_libraries(hs_blkalloc ${COMMON_DEPS})

@@ -71,9 +71,11 @@ public:
         ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = 1, .is_spdk = is_spdk});
         m_dmgr = std::make_unique< homestore::DeviceManager >(
             m_dev_infos, [this](const homestore::vdev_info& vinfo, bool load_existing) {
-                return std::make_shared< homestore::VirtualDev >(*m_dmgr, vinfo, homestore::blk_allocator_type_t::fixed,
-                                                                 homestore::chunk_selector_type_t::ROUND_ROBIN, nullptr,
-                                                                 false);
+                vdev_info vinfo_tmp = vinfo;
+                vinfo_tmp.alloc_type = s_cast< uint8_t >(homestore::blk_allocator_type_t::fixed);
+                vinfo_tmp.chunk_sel_type = s_cast< uint8_t >(homestore::chunk_selector_type_t::round_robin);
+
+                return std::make_shared< homestore::VirtualDev >(*m_dmgr, vinfo_tmp, nullptr /* event_cb */, false);
             });
         m_dmgr->is_first_time_boot() ? m_dmgr->format_devices() : m_dmgr->load_devices();
         m_pdevs = m_dmgr->get_pdevs_by_dev_type(homestore::HSDevType::Data);
@@ -154,6 +156,8 @@ TEST_F(DeviceMgrTest, StripedVDevCreation) {
                                                            .num_chunks = uint32_cast(m_pdevs.size() * 2),
                                                            .blk_size = 4096,
                                                            .dev_type = HSDevType::Data,
+                                                           .alloc_type = blk_allocator_type_t::none,
+                                                           .chunk_sel_type = chunk_selector_type_t::none,
                                                            .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
                                                            .context_data = sisl::blob{}});
         m_vdevs.push_back(std::move(vdev));

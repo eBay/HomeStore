@@ -22,6 +22,7 @@
 #include "common/homestore_assert.hpp"
 #include "common/error.h"
 #include "blk_read_tracker.hpp"
+#include "data_svc_cp.hpp"
 
 namespace homestore {
 
@@ -31,7 +32,8 @@ BlkDataService::BlkDataService() { m_blk_read_tracker = std::make_unique< BlkRea
 BlkDataService::~BlkDataService() = default;
 
 // first-time boot path
-void BlkDataService::create_vdev(uint64_t size, blk_allocator_type_t) {
+void BlkDataService::create_vdev(uint64_t size, homestore::blk_allocator_type_t alloc_type,
+                                 homestore::chunk_selector_type_t chunk_sel_type) {
     const auto phys_page_size = hs()->device_mgr()->optimal_page_size(HSDevType::Fast);
 
     hs_vdev_context vdev_ctx;
@@ -43,22 +45,15 @@ void BlkDataService::create_vdev(uint64_t size, blk_allocator_type_t) {
                                                         .num_chunks = 1,
                                                         .blk_size = phys_page_size,
                                                         .dev_type = HSDevType::Data,
+                                                        .alloc_type = alloc_type,
+                                                        .chunk_sel_type = chunk_sel_type,
                                                         .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
                                                         .context_data = vdev_ctx.to_blob()});
 }
 
 // both first_time_boot and recovery path will come here
 shared< VirtualDev > BlkDataService::open_vdev(const vdev_info& vinfo, bool load_existing) {
-    auto chunk_sel_type{chunk_selector_type_t::round_robin};
-
-    if (vinfo.alloc_type == blk_allocator_type_t::append) {
-        // TODO: enalbe it after chunksel is ready;
-        // chunk_sel_type = chunk_selector_type_t::heap;
-        chunk_sel_type = chunk_selector_type_t::ROUND_ROBIN;
-    }
-
-    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, vinfo.alloc_type, chunk_sel_type, nullptr,
-                                            true /* auto_recovery */);
+    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, nullptr, true /* auto_recovery */);
     m_page_size = vinfo.blk_size;
     return m_vdev;
 }
@@ -147,7 +142,7 @@ folly::Future< bool > BlkDataService::async_free_blk(const BlkId bid) {
 void BlkDataService::start() {
     // Register to CP for flush dirty buffers underlying virtual device layer;
     hs()->cp_mgr().register_consumer(cp_consumer_t::BLK_DATA_SVC,
-                                     std::move(std::make_unique< VDevCPCallbacks >(m_vdev)));
+                                     std::move(std::make_unique< DataSvcCPCallbacks >(m_vdev.get())));
 }
 
 } // namespace homestore

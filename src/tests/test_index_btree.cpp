@@ -40,8 +40,10 @@ SISL_OPTIONS_ENABLE(logging, test_index_btree, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_index_btree)
 
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-
 // TODO increase num_entries to 65k as io mgr page size is 512 and its slow.
+blk_allocator_type_t test_common::HSTestHelper::s_ds_alloc_type;
+chunk_selector_type_t test_common::HSTestHelper::s_ds_chunk_sel_type;
+
 SISL_OPTION_GROUP(test_index_btree,
                   (num_iters, "", "num_iters", "number of iterations for rand ops",
                    ::cxxopts::value< uint32_t >()->default_value("65536"), "number"),

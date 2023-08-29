@@ -48,7 +48,8 @@ using namespace homestore;
 RCU_REGISTER_INIT
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-
+blk_allocator_type_t test_common::HSTestHelper::s_ds_alloc_type;
+chunk_selector_type_t test_common::HSTestHelper::s_ds_chunk_sel_type;
 SISL_OPTIONS_ENABLE(logging, test_meta_blk_mgr, iomgr, test_common_setup)
 
 SISL_LOGGING_DECL(test_meta_blk_mgr)
@@ -363,7 +364,7 @@ public:
             iomanager.iobuf_free(buf);
         } else {
             if (unaligned_addr) {
-                delete[] (buf - unaligned_shift);
+                delete[](buf - unaligned_shift);
             } else {
                 delete[] buf;
             }
