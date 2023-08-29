@@ -265,12 +265,6 @@ public:
         return true;
     }
 
-    void fill_data_buf(uint8_t* buf, uint64_t size) {
-        for (uint64_t i = 0ul; i < size; ++i) {
-            *(buf + i) = (i % 256);
-        }
-    }
-
     //
     // this api is for caller who is not interested with the write buffer and blkids;
     //
@@ -313,7 +307,7 @@ private:
             struct iovec iov;
             iov.iov_len = iov_len;
             iov.iov_base = iomanager.iobuf_alloc(512, iov_len);
-            fill_data_buf(r_cast< uint8_t* >(iov.iov_base), iov.iov_len);
+            test_common::HSTestHelper::fill_data_buf(r_cast< uint8_t* >(iov.iov_base), iov.iov_len);
             sg->iovs.push_back(iov);
             sg->size += iov_len;
         }
