@@ -16,12 +16,10 @@
 #include <homestore/meta_service.hpp>
 #include "append_blk_allocator.h"
 
-ISL_LOGGING_DECL(blkalloc)
-
 namespace homestore {
 
-AppendBlkAllocator::AppendBlkAllocator(const AppendBlkAllocConfig& cfg, bool first_time_boot, chunk_num_t id) :
-        BlkAllocator{cfg, id}, m_metrics{get_name().c_str()}, m_sb{"AppendBlkAlloc_chunk_" + std::to_string(id)} {
+AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool first_time_boot, chunk_num_t id) :
+        BlkAllocator{cfg, id}, m_metrics{get_name().c_str()}, m_sb{get_name()} {
     // all append_blk_allocator instances use same client type;
     meta_service().register_handler(
         "AppendBlkAlloc",
@@ -30,8 +28,8 @@ AppendBlkAllocator::AppendBlkAllocator(const AppendBlkAllocConfig& cfg, bool fir
 
     if (first_time_boot) {
         m_sb.create(sizeof(append_blkalloc_sb));
-        m_sb.chunk_id = id;
-        m_sb.last_append_offset = 0;
+        m_sb->chunk_id = id;
+        m_sb->last_append_offset = 0;
     }
 }
 
@@ -47,6 +45,7 @@ BlkAllocStatus AppendBlkAllocator::alloc(BlkId& bid) {
 
     set_dirty_offset();
 
+    COUNTER_INCREMENT(m_metrics, num_alloc, 1);
     return BlkAllocStatus::SUCCESS;
 }
 
@@ -56,16 +55,18 @@ BlkAllocStatus AppendBlkAllocator::alloc(BlkId& bid) {
 //
 BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hints& hint,
                                          std::vector< BlkId >& out_bids) {
-    if (available_blk() < nblks) {
-        // TODO: metris update;
+    if (available_blks() < nblks) {
+        COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
         LOGERROR("No space left to serve request nblks: {}, available_blks: {}", nblks, available_blks());
         return BlkAllocStatus::SPACE_FULL;
     }
 
-    out_bids.emplace_back({last_append_offset, nblks, m_chunk_id});
+    out_bids.emplace_back(last_append_offset, nblks, m_chunk_id);
     last_append_offset += nblks;
 
     set_dirty_offset();
+
+    COUNTER_INCREMENT(m_metrics, num_alloc, 1);
 
     return BlkAllocStatus::SUCCESS;
 }
@@ -93,14 +94,14 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
 // store, which is also fine during recovery, it is consistent after log store flush completes;
 // 3. Any alloc happened after metablk is persisted will come to next cp;
 //
-void AppendBlkAllocator::cp_flush(CP*) {
+void AppendBlkAllocator::cp_flush() {
     if (m_is_dirty) {
         // clear must happen before write to metablk becuase if metablk is written first, if
         // alloc(in-parallel) happened after written but before clear, then the dirty buffer will be cleared.
         clear_dirty_offset();
 
         // write to metablk;
-        m_sb.last_append_offset = last_append_offset;
+        m_sb->last_append_offset = last_append_offset;
         m_sb.write();
     }
 }
@@ -109,14 +110,13 @@ void AppendBlkAllocator::set_dirty_offset() { m_is_dirty = true; }
 
 void AppendBlkAllocator::clear_dirty_offset() { m_is_dirty = false; }
 
-void AppendBlkAllocator::free(BlkId& bid) {
+void AppendBlkAllocator::free(const BlkId& bid) {
     // free is a no-op;
     return;
 }
 
 void AppendBlkAllocator::free(const std::vector< BlkId >& blk_ids) {
     BLKALLOC_REL_ASSERT(false, "not supported for append_blk_allocator for milestone2.");
-    return BlkAllocStatus::SUCCESS;
 }
 
 blk_cap_t AppendBlkAllocator::available_blks() const { return get_total_blks() - get_used_blks(); }
@@ -128,8 +128,11 @@ bool AppendBlkAllocator::is_blk_alloced(const BlkId& in_bid, bool use_lock) cons
     return in_bid.get_blk_num() < get_used_blks();
 }
 
+std::string AppendBlkAllocator::get_name() const { return "AppendBlkAlloc_chunk_" + std::to_string(m_chunk_id); }
+
 std::string AppendBlkAllocator::to_string() const {
-    return fmt::format("{}, last_append_offset: {}", to_string(), last_append_offset);
+    // return fmt::format("{}, last_append_offset: {}", get_name(), last_append_offset);
+    return "test";
 }
 
 } // namespace homestore

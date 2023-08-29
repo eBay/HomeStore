@@ -14,9 +14,6 @@
  *
  *********************************************************************************/
 #pragma once
-#include <atomic>
-#include <sisl/fds/thread_vector.hpp>
-#include <homestore/blk.h>
 #include <homestore/checkpoint/cp_mgr.hpp>
 #include "checkpoint/cp.hpp"
 

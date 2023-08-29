@@ -48,7 +48,8 @@ public:
      *
      * @param size : size of this vdev
      */
-    void create_vdev(uint64_t size);
+    void create_vdev(uint64_t size, homestore::blk_allocator_type_t alloc_type,
+                     homestore::chunk_selector_type_t chunk_sel_type);
 
     /**
      * @brief : called during recovery to open existing vdev for data service

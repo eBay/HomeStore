@@ -42,7 +42,7 @@ BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, chunk_num_t id) :
     }
 }
 
-void BlkAllocator::cp_flush() const {
+void BlkAllocator::cp_flush() {
     // To be implemented;
     LOGINFO("BitmapBlkAllocator cp_flush in not yet supported. ");
 }

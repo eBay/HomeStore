@@ -44,6 +44,8 @@ SISL_OPTIONS_ENABLE(logging, test_data_service, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_data_service)
 
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
+blk_allocator_type_t test_common::HSTestHelper::s_ds_alloc_type;
+chunk_selector_type_t test_common::HSTestHelper::s_ds_chunk_sel_type;
 
 constexpr uint64_t Ki{1024};
 constexpr uint64_t Mi{Ki * Ki};
