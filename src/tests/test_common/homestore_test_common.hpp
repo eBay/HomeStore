@@ -197,6 +197,12 @@ public:
         if (cleanup) { remove_files(s_dev_names); }
         s_dev_names.clear();
     }
+
+    static void fill_data_buf(uint8_t* buf, uint64_t size) {
+        for (uint64_t i = 0ul; i < size; ++i) {
+            *(buf + i) = (i % 256);
+        }
+    }
 };
 } // namespace test_common
 

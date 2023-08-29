@@ -51,6 +51,11 @@ public:
     ~AppendBlkAllocMetrics() { deregister_me_from_farm(); }
 };
 
+//
+// The assumption for AppendBlkAllocator:
+// 1. Operations (alloc/free) are being called single threaded
+// 2. cp_flush will be triggered in a different thread
+//
 class AppendBlkAllocator : public BlkAllocator {
 public:
     AppendBlkAllocator(const BlkAllocConfig& cfg, bool first_time_boot, chunk_num_t id = 0);
@@ -69,6 +74,7 @@ public:
 
     blk_cap_t available_blks() const override;
     blk_cap_t get_used_blks() const override;
+    blk_cap_t get_freeable_nblks() const;
 
     bool is_blk_alloced(const BlkId& in_bid, bool use_lock = false) const override;
     std::string to_string() const override;
@@ -86,8 +92,9 @@ private:
     void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
 
 private:
-    std::atomic< uint64_t > last_append_offset; // last appended offset in blocks;
+    std::atomic< uint64_t > m_last_append_offset; // last appended offset in blocks;
     std::atomic< bool > m_is_dirty{false};
+    std::atomic< uint64_t > m_freeable_nblks{false};
     AppendBlkAllocMetrics m_metrics;
     superblk< append_blkalloc_sb > m_sb;
 };
