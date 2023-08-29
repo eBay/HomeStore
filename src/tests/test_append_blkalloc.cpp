@@ -113,7 +113,7 @@ private:
             struct iovec iov;
             iov.iov_len = iov_len;
             iov.iov_base = iomanager.iobuf_alloc(512, iov_len);
-            // fill_data_buf(r_cast< uint8_t* >(iov.iov_base), iov.iov_len);
+            test_common::HSTestHelper::fill_data_buf(r_cast< uint8_t* >(iov.iov_base), iov.iov_len);
             sg->iovs.push_back(iov);
             sg->size += iov_len;
         }
