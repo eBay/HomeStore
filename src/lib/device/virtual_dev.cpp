@@ -90,7 +90,24 @@ VirtualDev::VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, vdev_event_c
         m_allocator_type{vinfo.alloc_type},
         m_chunk_selector_type{vinfo.chunk_sel_type},
         m_auto_recovery{is_auto_recovery} {
-    m_chunk_selector = std::make_unique< RoundRobinChunkSelector >(false /* dynamically add chunk */);
+    switch (m_chunk_selector_type) {
+    case chunk_selector_type_t::round_robin: {
+        m_chunk_selector = std::make_unique< RoundRobinChunkSelector >(false /* dynamically add chunk */);
+        break;
+    }
+    case chunk_selector_type_t::heap: {
+        // FIXME: change to HeapChunkSelector after it is ready;
+        m_chunk_selector = std::make_unique< RoundRobinChunkSelector >(false /* dynamically add chunk */);
+        break;
+    }
+    case chunk_selector_type_t::none: {
+        m_chunk_selector = nullptr;
+        break;
+    }
+    default:
+        LOGERROR("Unexpected chunk selector type: {}", m_chunk_selector_type);
+        m_chunk_selector = nullptr;
+    }
 }
 
 void VirtualDev::add_chunk(cshared< Chunk >& chunk, bool is_fresh_chunk) {

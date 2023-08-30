@@ -22,7 +22,7 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool first_tim
         BlkAllocator{cfg, id}, m_metrics{get_name().c_str()}, m_sb{get_name()} {
     // all append_blk_allocator instances use same client type;
     meta_service().register_handler(
-        "AppendBlkAlloc",
+        get_name(),
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { on_meta_blk_found(std::move(buf), (void*)mblk); },
         nullptr);
 

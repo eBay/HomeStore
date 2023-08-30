@@ -282,20 +282,6 @@ struct BtreeTest : public testing::Test {
 
     void print() const { m_bt->print_tree(); }
 
-    void trigger_cp(bool wait) {
-        auto fut = homestore::hs()->cp_mgr().trigger_cp_flush(true /* force */);
-        auto on_complete = [&](auto success) {
-            ASSERT_EQ(success, true) << "CP Flush failed";
-            LOGINFO("CP Flush completed");
-        };
-
-        if (wait) {
-            on_complete(std::move(fut).get());
-        } else {
-            std::move(fut).thenValue(on_complete);
-        }
-    }
-
 private:
     void validate_data(const K& key, const V& btree_val) const {
         const auto r = m_shadow_map.find(key);
@@ -443,7 +429,7 @@ TYPED_TEST(BtreeTest, CpFlush) {
 
     LOGINFO("Step 4: Trigger a back-to-back cp");
     // this->trigger_cp(false /* wait */);
-    this->trigger_cp(true /* wait */);
+    test_common::HSTestHelper::trigger_cp(true /* wait */);
 
     LOGINFO("Step 4: Query {} entries and validate with pagination of 75 entries", num_entries);
     this->query_validate(0, num_entries - 1, 75);
