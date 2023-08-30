@@ -538,7 +538,7 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
     cp_flush_thread.join();
 
     LOGINFO("Trigger checkpoint flush wait=true.");
-    this->trigger_cp(true /* wait */);
+    test_common::HSTestHelper::trigger_cp(true /* wait */);
 
     LOGINFO("Query {} entries and validate with pagination of 75 entries", num_entries);
     this->query_validate(0, num_entries - 1, 75);

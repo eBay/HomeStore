@@ -61,14 +61,10 @@ static Param gp;
 class AppendBlkAllocatorTest : public testing::Test {
 public:
     BlkDataService& inst() { return homestore::data_service(); }
-    void free_sg_buf(sisl::sg_list& sg) {
-        for (auto x : sg.iovs) {
-            iomanager.iobuf_free(s_cast< uint8_t* >(x.iov_base));
-            x.iov_base = nullptr;
-            x.iov_len = 0;
-        }
 
-        sg.size = 0;
+    virtual void SetUp() override {
+        test_common::HSTestHelper::set_data_svc_allocator(homestore::blk_allocator_type_t::append);
+        test_common::HSTestHelper::set_data_svc_chunk_selector(homestore::chunk_selector_type_t::heap);
     }
 
     void finish_and_notify() {
@@ -80,13 +76,15 @@ public:
         this->m_cv.notify_one();
     }
 
+    void free(sisl::sg_list& sg) { test_common::HSTestHelper::free(sg); }
+
     //
     // this api is for caller who is not interested with the write buffer and blkids;
     //
     void write_io(uint64_t io_size, uint32_t num_iovs = 1) {
         auto sg = std::make_shared< sisl::sg_list >();
         write_sgs(io_size, sg, num_iovs).thenValue([this, sg](auto) {
-            free_sg_buf(*sg);
+            free(*sg);
             finish_and_notify();
         });
     }
@@ -96,13 +94,72 @@ public:
         m_cv.wait(lk, [this] { return this->m_io_job_done; });
     }
 
+    void write_io_verify(const uint64_t io_size) {
+        auto sg_write_ptr = std::make_shared< sisl::sg_list >();
+        auto sg_read_ptr = std::make_shared< sisl::sg_list >();
+
+        write_sgs(io_size, sg_write_ptr, 1 /* num_iovs */)
+            .thenValue([sg_write_ptr, sg_read_ptr, this](const std::vector< BlkId >& out_bids) mutable {
+                // this will be called in write io completion cb;
+                LOGINFO("after_write_cb: Write completed;");
+
+                HS_DBG_ASSERT_EQ(out_bids.size(), 1);
+
+                const auto num_iovs = out_bids.size();
+
+                for (auto i = 0ul; i < num_iovs; ++i) {
+                    struct iovec iov;
+                    iov.iov_len = out_bids[i].get_nblks() * inst().get_page_size();
+                    iov.iov_base = iomanager.iobuf_alloc(512, iov.iov_len);
+                    sg_read_ptr->iovs.push_back(iov);
+                    sg_read_ptr->size += iov.iov_len;
+                }
+
+                LOGINFO("Step 2: async read on blkid: {}", out_bids[0].to_string());
+                return inst().async_read(out_bids[0], *sg_read_ptr, sg_read_ptr->size);
+            })
+            .thenValue([this, sg_write_ptr, sg_read_ptr](auto) mutable {
+                const auto equal = test_common::HSTestHelper::compare(*sg_read_ptr, *sg_write_ptr);
+                assert(equal);
+
+                LOGINFO("Read completed;");
+                free(*sg_write_ptr);
+                free(*sg_read_ptr);
+
+                this->finish_and_notify();
+            });
+    }
+
+    void write_io_free_blk(const uint64_t io_size) {
+        std::shared_ptr< sisl::sg_list > sg_write_ptr = std::make_shared< sisl::sg_list >();
+
+        auto futs = write_sgs(io_size, sg_write_ptr, 1 /* num_iovs */)
+                        .thenValue([sg_write_ptr, this](const std::vector< BlkId >& out_bids) {
+                            LOGINFO("after_write_cb: Write completed;");
+                            free(*sg_write_ptr);
+
+                            std::vector< folly::Future< bool > > futs;
+                            for (const auto& free_bid : out_bids) {
+                                LOGINFO("Step 2: started async_free_blk: {}", free_bid.to_string());
+                                auto f = inst().async_free_blk(free_bid);
+                                futs.emplace_back(std::move(f));
+                            }
+                            return futs;
+                        });
+
+        folly::collectAllUnsafe(futs).then([this](auto) {
+            LOGINFO("completed async_free_blks");
+            this->finish_and_notify();
+        });
+    }
+
 private:
     //
     // call this api when caller needs the write buffer and blkids;
     // caller is responsible to free the sg buffer;
     //
-    // caller should be responsible to call free_sg_buf(sg) to free the iobuf allocated in iovs, normally it should be
-    // freed in after_write_cb;
+    // caller should be responsible to call free(sg) to free the iobuf allocated in iovs,
+    // normally it should be freed in after_write_cb;
     //
     folly::Future< std::vector< BlkId > > write_sgs(uint64_t io_size, cshared< sisl::sg_list >& sg, uint32_t num_iovs) {
         // TODO: What if iov_len is not multiple of 4Ki?
@@ -138,12 +195,9 @@ private:
 
 TEST_F(AppendBlkAllocatorTest, TestBasicWrite) {
     LOGINFO("Step 0: Starting homestore.");
-
-    test_common::HSTestHelper::set_data_svc_allocator(homestore::blk_allocator_type_t::append);
-    test_common::HSTestHelper::set_data_svc_chunk_selector(
-        homestore::chunk_selector_type_t::round_robin); // <<< TODO: change to heap
-
-    test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0, 0, 0, 80.0, 0, nullptr);
+    test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0 /* meta */, 0 /* data_log */,
+                                               0 /* ctrl_log */, 80.0 /* data */, 0 /* index */, nullptr,
+                                               false /* recovery */, nullptr, false /* default ds type */);
 
     // start io in worker thread;
     const auto io_size = 4 * Ki;
@@ -154,6 +208,58 @@ TEST_F(AppendBlkAllocatorTest, TestBasicWrite) {
     wait_for_all_io_complete();
 
     LOGINFO("Step 3: I/O completed, do shutdown.");
+    test_common::HSTestHelper::shutdown_homestore();
+}
+
+TEST_F(AppendBlkAllocatorTest, TestWriteThenReadVerify) {
+    LOGINFO("Step 0: Starting homestore.");
+    test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0, 0, 0, 80.0, 0, nullptr, false, nullptr,
+                                               false /* default ds type */);
+
+    // start io in worker thread;
+    auto io_size = 4 * Ki;
+    LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
+    iomanager.run_on_forget(iomgr::reactor_regex::random_worker, [this, io_size]() { this->write_io_verify(io_size); });
+
+    LOGINFO("Step 3: Wait for I/O to complete.");
+    wait_for_all_io_complete();
+
+    LOGINFO("Step 4: I/O completed, do shutdown.");
+    test_common::HSTestHelper::shutdown_homestore();
+}
+
+TEST_F(AppendBlkAllocatorTest, TestWriteThenFreeBlk) {
+    LOGINFO("Step 0: Starting homestore.");
+    test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0, 0, 0, 80.0, 0, nullptr, false, nullptr,
+                                               false /* default ds type */);
+
+    // start io in worker thread;
+    auto io_size = 4 * Mi;
+    LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes, then free blk.", io_size);
+    iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
+                            [this, io_size]() { this->write_io_free_blk(io_size); });
+
+    LOGINFO("Step 3: Wait for I/O to complete.");
+    wait_for_all_io_complete();
+
+    LOGINFO("Step 4: I/O completed, do shutdown.");
+    test_common::HSTestHelper::shutdown_homestore();
+}
+
+TEST_F(AppendBlkAllocatorTest, TestCPFlush) {
+    LOGINFO("Step 0: Starting homestore.");
+    test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0, 0, 0, 80.0, 0, nullptr, false, nullptr,
+                                               false /* default ds type */);
+    const auto io_size = 4 * Ki;
+    LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
+    iomanager.run_on_forget(iomgr::reactor_regex::random_worker, [this, io_size]() { this->write_io(io_size); });
+
+    LOGINFO("Step 2: Wait for I/O to complete.");
+    wait_for_all_io_complete();
+
+    test_common::HSTestHelper::trigger_cp(true /* wait */);
+
+    LOGINFO("Step 4: I/O completed, do shutdown.");
     test_common::HSTestHelper::shutdown_homestore();
 }
 
