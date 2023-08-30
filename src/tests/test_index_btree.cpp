@@ -296,39 +296,6 @@ struct BtreeTest : public testing::Test {
 
     void print(const std::string& file = "") const { m_bt->print_tree(file); }
 
-    void trigger_cp(bool wait) {
-        auto fut = homestore::hs()->cp_mgr().trigger_cp_flush(true /* force */);
-        auto on_complete = [&](auto success) {
-            ASSERT_EQ(success, true) << "CP Flush failed";
-            LOGINFO("CP Flush completed");
-        };
-
-        if (wait) {
-            on_complete(std::move(fut).get());
-        } else {
-            std::move(fut).thenValue(on_complete);
-        }
-    }
-
-    void destroy_btree() {
-        auto cpg = hs()->cp_mgr().cp_guard();
-        auto op_context = (void*)cpg->context(cp_consumer_t::INDEX_SVC);
-        const auto [ret, free_node_cnt] = m_bt->destroy_btree(op_context);
-        ASSERT_EQ(ret, btree_status_t::success) << "btree destroy failed";
-        m_bt.reset();
-    }
-
-    void compare_files(const std::string& before, const std::string& after) {
-        std::ifstream b(before);
-        std::ifstream a(after);
-        std::ostringstream ss_before, ss_after;
-        ss_before << b.rdbuf();
-        ss_after << a.rdbuf();
-        std::string s1 = ss_before.str();
-        std::string s2 = ss_after.str();
-        ASSERT_EQ(s1, s2) << "Mismatch in btree structure";
-    }
-
 private:
     void validate_data(const K& key, const V& btree_val) const {
         const auto r = m_shadow_map.find(key);
@@ -519,10 +486,10 @@ TYPED_TEST(BtreeTest, MultipleCpFlush) {
     }
 
     LOGINFO("Trigger checkpoint flush wait=false.");
-    this->trigger_cp(false /* wait */);
+    test_common::HSTestHelper::trigger_cp(false /* wait */);
 
     LOGINFO("Trigger checkpoint flush wait=true.");
-    this->trigger_cp(true /* wait */);
+    test_common::HSTestHelper::trigger_cp(true /* wait */);
 
     LOGINFO("Query {} entries and validate with pagination of 75 entries", num_entries);
     this->query_validate(0, num_entries - 1, 75);

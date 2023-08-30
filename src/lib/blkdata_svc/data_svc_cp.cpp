@@ -13,6 +13,7 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
+#include <homestore/homestore.hpp>
 #include "data_svc_cp.hpp"
 #include "device/virtual_dev.hpp"
 
@@ -25,8 +26,13 @@ std::unique_ptr< CPContext > DataSvcCPCallbacks::on_switchover_cp(CP* cur_cp, CP
 }
 
 folly::Future< bool > DataSvcCPCallbacks::cp_flush(CP* cp) {
-    // blocking io call to vdev
-    m_vdev->cp_flush(cp);
+    // Pick a CP Manager blocking IO fiber to execute the cp flush of vdev
+    // iomanager.run_on_forget(hs()->cp_mgr().pick_blocking_io_fiber(), [this, cp]() {
+    auto cp_ctx = s_cast< VDevCPContext* >(cp->context(cp_consumer_t::BLK_DATA_SVC));
+    m_vdev->cp_flush(cp); // this is a blocking io call
+    cp_ctx->complete(true);
+    //});
+
     return folly::makeFuture< bool >(true);
 }
 
