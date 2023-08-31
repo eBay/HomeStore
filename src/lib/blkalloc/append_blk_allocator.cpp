@@ -78,6 +78,11 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
         COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
         LOGERROR("No space left to serve request nblks: {}, available_blks: {}", nblks, available_blks());
         return BlkAllocStatus::SPACE_FULL;
+    } else if (nblks > BlkId::max_blks_in_op()) {
+        // consumer(vdev) already handles this case.
+        COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
+        LOGERROR("Can't serve request nblks: {} larger than max_blks_in_op: {}", nblks, max_blks_in_op());
+        return BlkAllocStatus::FAILED;
     }
 
     // Push 1 blk to the vector which has all the requested nblks;
