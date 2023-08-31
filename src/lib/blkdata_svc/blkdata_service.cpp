@@ -50,7 +50,7 @@ void BlkDataService::create_vdev(uint64_t size) {
 // recovery path
 shared< VirtualDev > BlkDataService::open_vdev(const vdev_info& vinfo, bool load_existing) {
     m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, blk_allocator_type_t::varsize,
-                                            chunk_selector_type_t::round_robin, nullptr, true /* auto_recovery */);
+                                            chunk_selector_type_t::ROUND_ROBIN, nullptr, true /* auto_recovery */);
     m_page_size = vinfo.blk_size;
     return m_vdev;
 }

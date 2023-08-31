@@ -21,6 +21,17 @@
 #include <sisl/fds/sparse_vector.hpp>
 #include <homestore/homestore_decl.hpp>
 
+// Super blk format
+//  ________________________________________________________________________________________________________
+//  |        |<---------Vdev Area---------->|  <---------------------Chunk Area--------------->|           |
+//  | First  | Vdev[1]| Vdev[2]| .. |Vdev[N]| Chunk Slot | Chunk[1] | Chunk[2]| .. |  Chunk[M] | Reserved  |
+//  | Block  | Info   | Info   |    | Info  | Bitmap     | Info     | Info    |    |  Info     | Space     |
+//  |________|________|________|___ |_______|____________|__________|_________|____|___________|___________|
+//
+//  where:
+//    N = max number of vdevs we support for this class of device
+//    M = max number of chunks we support for this class of device
+
 namespace homestore {
 
 #pragma pack(1)
@@ -75,18 +86,17 @@ public:
     uint32_t num_pdevs{0};         // Total number of pdevs homestore is being created on
     uint32_t max_vdevs{0};         // Max VDevs possible, this cannot be changed post formatting
     uint32_t max_system_chunks{0}; // Max Chunks possible, this cannot be changed post formatting
-
-    uint64_t system_uuid{0}; // homestore system uuid.
+    uuid_t system_uuid;
 
 public:
     const char* get_product_name() const { return product_name; }
     uint32_t get_version() const { return version; }
-    void set_system_uuid(const hs_uuid_t uuid) { system_uuid = static_cast< uint64_t >(uuid); }
-    hs_uuid_t get_system_uuid() const { return static_cast< hs_uuid_t >(system_uuid); }
+    uuid_t get_system_uuid() const { return system_uuid; }
+    std::string get_system_uuid_str() const { return boost::uuids::to_string(system_uuid); };
 
     std::string to_string() const {
         auto str = fmt::format("gen_number={}, version={}, product_name={} system_uuid={}", gen_number, get_version(),
-                               get_product_name(), get_system_uuid());
+                               get_product_name(), get_system_uuid_str());
         return str;
     }
 };
@@ -99,6 +109,7 @@ public:
     uint32_t max_pdev_chunks{0};     // Max chunks in this pdev possible
     disk_attr dev_attr;              // Attributes homestore expects from all the devices.
     uint8_t mirror_super_block{0x0}; // Have we mirrored the super block on head/tail
+    uuid_t system_uuid;              // Current system uuid stamp to protect from device exchange
 
 public:
     std::string to_string() const {
@@ -108,6 +119,8 @@ public:
                         (mirror_super_block == 0x00) ? "false" : "true");
         return str;
     }
+
+    std::string get_system_uuid_str() const { return boost::uuids::to_string(system_uuid); };
 };
 
 struct first_block {
@@ -161,7 +174,7 @@ public:
     static constexpr uint64_t EXTRA_SB_SIZE_FOR_FAST_DEVICE = 1 * 1024 * 1024;
 
     static constexpr uint32_t first_block_offset() { return 0; } // Offset in physical device we can use for first block
-    static uint32_t first_block_size() { return first_block::s_io_fb_size; }
+    static constexpr uint32_t first_block_size() { return first_block::s_io_fb_size; }
     static uint64_t vdev_super_block_size();
     static uint64_t chunk_super_block_size(const dev_info& dinfo);
     static uint64_t chunk_info_bitmap_size(const dev_info& dinfo) {

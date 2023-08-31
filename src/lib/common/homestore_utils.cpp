@@ -29,7 +29,7 @@ uint8_t* hs_utils::iobuf_alloc(const size_t size, const sisl::buftag tag, const 
     return buf;
 }
 
-hs_uuid_t hs_utils::gen_system_uuid() { return std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()); }
+uuid_t hs_utils::gen_system_uuid() { return std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()); }
 
 void hs_utils::iobuf_free(uint8_t* const ptr, const sisl::buftag tag) {
     if (tag == sisl::buftag::btree_node) {

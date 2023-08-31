@@ -64,7 +64,7 @@ void MetaBlkService::create_vdev(uint64_t size) {
 
 shared< VirtualDev > MetaBlkService::open_vdev(const vdev_info& vinfo, bool load_existing) {
     m_sb_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, blk_allocator_type_t::varsize,
-                                               chunk_selector_type_t::round_robin, nullptr, false /* auto_recovery */);
+                                               chunk_selector_type_t::ROUND_ROBIN, nullptr, false /* auto_recovery */);
 
     if (load_existing) {
         /* get the blkid of homestore super block */

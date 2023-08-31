@@ -51,7 +51,7 @@ void IndexService::create_vdev(uint64_t size) {
 
 shared< VirtualDev > IndexService::open_vdev(const vdev_info& vinfo, bool load_existing) {
     m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, blk_allocator_type_t::fixed,
-                                            chunk_selector_type_t::round_robin, nullptr, true /* auto_recovery */);
+                                            chunk_selector_type_t::ROUND_ROBIN, nullptr, true /* auto_recovery */);
     return m_vdev;
 }
 

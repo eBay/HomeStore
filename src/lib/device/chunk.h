@@ -15,18 +15,6 @@
 #pragma once
 #include "device/physical_dev.hpp"
 
-// Header to the chunk super blk. The format of the chunk super block is
-//  ________________________________________________________________________________________
-//  | H |                    | H |                        |     | H |                      |
-//  | D | chunk_info[1 to M] | D | chunk_info[M+1 to M*2] | ... | D | chunk_info[N-M to N] |
-//  |_R_|____________________|_R_|________________________|_____|_R_|______________________|
-//
-//
-//  where:
-//    M = max number of chunk_info we can fit in atomic page. Typically (4096 - 64)/72
-//    N = max number of chunks homestore supported
-//
-
 namespace homestore {
 class BlkAllocator;
 

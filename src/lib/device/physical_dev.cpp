@@ -333,7 +333,7 @@ std::pair< uint64_t, uint64_t > get_next_contiguous_set_bit(const sisl::Bitset& 
     return std::pair(first_set_bit, set_count);
 }
 
-void PhysicalDev::load_chunks(std::function< void(cshared< Chunk >&) >&& chunk_found_cb) {
+void PhysicalDev::load_chunks(std::function< bool(cshared< Chunk >&) >&& chunk_found_cb) {
     std::unique_lock lg{m_chunk_op_mtx};
 
     // Read the chunk info bitmap area from super block and load them into in-memory bitmap of chunk slots
@@ -369,8 +369,7 @@ void PhysicalDev::load_chunks(std::function< void(cshared< Chunk >&) >&& chunk_f
             cinfo->checksum = info_crc;
 
             auto chunk = std::make_shared< Chunk >(this, *cinfo, cslot);
-            chunk_found_cb(chunk);
-            get_stream(chunk).m_chunks_map.insert(std::pair{cinfo->chunk_id, chunk});
+            if (chunk_found_cb(chunk)) { get_stream(chunk).m_chunks_map.insert(std::pair{cinfo->chunk_id, chunk}); }
         }
         hs_utils::iobuf_free(buf, sisl::buftag::superblk);
     } while (true);

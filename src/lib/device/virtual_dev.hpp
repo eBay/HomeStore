@@ -155,7 +155,7 @@ public:
     /// @param bid : BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
-    /// @return future< bool > Future result with bool to indicate if IO is actually executed
+    /// @return future< bool > Future result of success or failure
     folly::Future< bool > async_write(const char* buf, uint32_t size, const BlkId& bid, bool part_of_batch = false);
 
     folly::Future< bool > async_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
@@ -165,13 +165,12 @@ public:
     /// @param iov : Vector of buffer to write data from
     /// @param iovcnt : Count of buffer
     /// @param bid  BlkId which was previously allocated. It is expected that entire size was allocated previously.
-    /// @param cb : Callback once write is completed
-    /// @param cookie : cookie set by caller and returned on completion; It is defaulted to null as some caller is
-    /// not intrested of of this field
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
+    /// @return future< bool > Future result of success or failure
     folly::Future< bool > async_writev(const iovec* iov, int iovcnt, const BlkId& bid, bool part_of_batch = false);
 
+    // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
     folly::Future< bool > async_writev(const iovec* iov, const int iovcnt, cshared< Chunk >& chunk,
                                        uint64_t offset_in_chunk);
 
@@ -181,6 +180,8 @@ public:
     /// @param bid : BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @return ssize_t: Size of the data actually written.
     void sync_write(const char* buf, uint32_t size, const BlkId& bid);
+
+    // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
     void sync_write(const char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /// @brief Synchronously write the vector of buffers to the blkid
@@ -189,6 +190,8 @@ public:
     /// @param bid  BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @return ssize_t: Size of the data actually written.
     void sync_writev(const iovec* iov, int iovcnt, const BlkId& bid);
+
+    // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
     void sync_writev(const iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /////////////////////// Read API related methods /////////////////////////////
@@ -197,12 +200,9 @@ public:
     /// @param buf : Buffer to read data to
     /// @param size : Size of the buffer
     /// @param bid : BlkId from data needs to be read
-    /// @param cb : Callback once the read is completed and buffer is filled with data. Note that we don't support
-    /// partial data read and hence callback will not be provided with size read or written
-    /// @param cookie : cookie set by caller and returned on completion; It is defaulted to null as some caller is not
-    /// intrested of of this field
     /// @param part_of_batch : Is this read part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this read request will not be queued.
+    /// @return future< bool > Future result of success or failure
     folly::Future< bool > async_read(char* buf, uint64_t size, const BlkId& bid, bool part_of_batch = false);
 
     /// @brief Asynchronously read the data for a given BlkId to the vector of buffers
@@ -210,12 +210,9 @@ public:
     /// @param iovcnt : Count of buffer
     /// @param size : Size of the actual data, it is really to optimize the iovec from iterating again to get size
     /// @param bid : BlkId from data needs to be read
-    /// @param cb : Callback once the read is completed and buffer is filled with data. Note that we don't support
-    /// partial data read and hence callback will not be provided with size read or written.
-    /// @param cookie : cookie set by caller and returned on completion; It is defaulted to null as some caller is not
-    /// intrested of of this field
     /// @param part_of_batch : Is this read part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this read request will not be queued.
+    /// @return future< bool > Future result of success or failure
     folly::Future< bool > async_readv(iovec* iovs, int iovcnt, uint64_t size, const BlkId& bid,
                                       bool part_of_batch = false);
 
@@ -225,6 +222,8 @@ public:
     /// @param bid : BlkId from data needs to be read
     /// @return ssize_t: Size of the data actually read.
     void sync_read(char* buf, uint32_t size, const BlkId& bid);
+
+    // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
     void sync_read(char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /// @brief Synchronously read the data for a given BlkId to vector of buffers
@@ -233,12 +232,14 @@ public:
     /// @param size : Size of the actual data, it is really to optimize the iovec from iterating again to get size
     /// @return ssize_t: Size of the data actually read.
     void sync_readv(iovec* iov, int iovcnt, const BlkId& bid);
+
+    // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
     void sync_readv(iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /////////////////////// Other API related methods /////////////////////////////
 
     /// @brief Fsync the underlying physical devices that vdev is sitting on asynchornously
-    /// @param cb Callback upon fsync on all devices is completed
+    /// @return future< bool > Future result with bool to indicate when fsync is actually executed
     folly::Future< bool > queue_fsync_pdevs();
 
     /// @brief Submit the batch of IOs previously queued as part of async read/write APIs.

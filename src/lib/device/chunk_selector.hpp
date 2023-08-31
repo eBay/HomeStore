@@ -29,7 +29,7 @@ public:
     ChunkSelector() = default;
     virtual void add_chunk(cshared< Chunk >& chunk) = 0;
     virtual void foreach_chunks(std::function< void(cshared< Chunk >&) >&& cb) = 0;
-    virtual Chunk* select(const blk_alloc_hints& hints) = 0;
+    virtual Chunk* select(uint32_t nblks, const blk_alloc_hints& hints) = 0;
 
     virtual ~ChunkSelector() = default;
 };
@@ -45,7 +45,7 @@ public:
 
     void add_chunk(cshared< Chunk >& chunk) override;
 
-    Chunk* select(const blk_alloc_hints& hints) override;
+    Chunk* select(blk_count_t nblks, const blk_alloc_hints& hints) override;
 
     void foreach_chunks(std::function< void(cshared< Chunk >&) >&& cb) override;
 

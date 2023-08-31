@@ -175,7 +175,7 @@ public:
     /// @return Shared instance of chunk class created
     shared< Chunk > create_chunk(uint32_t chunk_id, uint32_t vdev_id, uint64_t size, uint32_t ordinal);
 
-    void load_chunks(std::function< void(cshared< Chunk >&) >&& chunk_found_cb);
+    void load_chunks(std::function< bool(cshared< Chunk >&) >&& chunk_found_cb);
     void remove_chunks(std::vector< shared< Chunk > >& chunks);
     void remove_chunk(cshared< Chunk >& chunk);
     void format_chunks();

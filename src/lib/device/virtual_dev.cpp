@@ -88,6 +88,8 @@ VirtualDev::VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, blk_allocato
     m_chunk_selector = std::make_unique< RoundRobinChunkSelector >(false /* dynamically add chunk */);
 }
 
+// TODO: Have an additional parameter for vdev to check if dynamic add chunk. If so, we need to take do an rcu for
+// m_all_chunks.
 void VirtualDev::add_chunk(cshared< Chunk >& chunk, bool is_fresh_chunk) {
     std::unique_lock lg{m_mgmt_mutex};
     auto ba = create_blk_allocator(m_allocator_type, block_size(), chunk->physical_dev()->optimal_page_size(),
@@ -173,7 +175,7 @@ BlkAllocStatus VirtualDev::do_alloc_blk(blk_count_t nblks, const blk_alloc_hints
         size_t attempt{0};
 
         do {
-            chunk = m_chunk_selector->select(hints);
+            chunk = m_chunk_selector->select(nblks, hints);
             if (chunk == nullptr) { status = BlkAllocStatus::SPACE_FULL; }
 
             status = alloc_blk_from_chunk(nblks, hints, out_blkid, chunk);
@@ -480,7 +482,7 @@ uint32_t VirtualDev::atomic_page_size() const {
 std::string VirtualDev::to_string() const { return ""; }
 
 shared< Chunk > VirtualDev::get_next_chunk(cshared< Chunk >& chunk) const {
-    return m_all_chunks[chunk->vdev_ordinal() % m_all_chunks.size()];
+    return m_all_chunks[(chunk->vdev_ordinal() + 1) % m_all_chunks.size()];
 }
 
 void VirtualDev::update_vdev_private(const sisl::blob& private_data) {

@@ -72,7 +72,7 @@ public:
         m_dmgr = std::make_unique< homestore::DeviceManager >(
             m_dev_infos, [this](const homestore::vdev_info& vinfo, bool load_existing) {
                 return std::make_shared< homestore::VirtualDev >(*m_dmgr, vinfo, homestore::blk_allocator_type_t::fixed,
-                                                                 homestore::chunk_selector_type_t::round_robin, nullptr,
+                                                                 homestore::chunk_selector_type_t::ROUND_ROBIN, nullptr,
                                                                  false);
             });
         m_dmgr->is_first_time_boot() ? m_dmgr->format_devices() : m_dmgr->load_devices();
