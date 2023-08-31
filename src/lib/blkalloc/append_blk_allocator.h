@@ -31,6 +31,7 @@ struct append_blkalloc_sb {
     uint64_t magic{append_blkalloc_sb_magic};
     uint32_t version{append_blkalloc_sb_version};
     uint64_t chunk_id;
+    uint64_t freeable_nblks;
     uint64_t last_append_offset;
 };
 #pragma pack()
@@ -92,9 +93,9 @@ private:
     void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
 
 private:
-    std::atomic< uint64_t > m_last_append_offset; // last appended offset in blocks;
+    std::atomic< uint64_t > m_last_append_offset{0}; // last appended offset in blocks;
     std::atomic< bool > m_is_dirty{false};
-    std::atomic< uint64_t > m_freeable_nblks{false};
+    std::atomic< uint64_t > m_freeable_nblks{0};
     AppendBlkAllocMetrics m_metrics;
     superblk< append_blkalloc_sb > m_sb;
 };
