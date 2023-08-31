@@ -27,14 +27,25 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool first_tim
         nullptr);
 
     if (first_time_boot) {
+        m_freeable_nblks = available_blks();
+        m_last_append_offset = 0;
+
         m_sb.create(sizeof(append_blkalloc_sb));
         m_sb->chunk_id = id;
         m_sb->last_append_offset = 0;
+        m_sb->freeable_nblks = m_freeable_nblks;
     }
+
+    // for recovery boot, fields should be recovered from metablks;
 }
 
 void AppendBlkAllocator::on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
+    // TODO: also needs to initialize base class blkallocator for recovery path;
+
     m_sb.load(buf, meta_cookie);
+    m_last_append_offset = m_sb->last_append_offset;
+    m_freeable_nblks = m_sb->freeable_nblks;
+
     HS_REL_ASSERT_EQ(m_sb->magic, append_blkalloc_sb_magic, "Invalid AppendBlkAlloc metablk, magic mismatch");
     HS_REL_ASSERT_EQ(m_sb->version, append_blkalloc_sb_version, "Invalid version of AppendBlkAllocator metablk");
 }
@@ -113,6 +124,7 @@ void AppendBlkAllocator::cp_flush() {
 
         // write to metablk;
         m_sb->last_append_offset = m_last_append_offset;
+        m_sb->freeable_nblks = m_freeable_nblks;
         m_sb.write();
     }
 }
@@ -133,6 +145,7 @@ void AppendBlkAllocator::free(const BlkId& bid) {
         // we are freeing the the last blk id, let's rewind.
         m_last_append_offset -= n;
     }
+    set_dirty_offset();
 }
 
 void AppendBlkAllocator::free(const std::vector< BlkId >& blk_ids) {
