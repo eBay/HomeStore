@@ -180,6 +180,7 @@ public:
     /// @param bid : BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @return ssize_t: Size of the data actually written.
     void sync_write(const char* buf, uint32_t size, const BlkId& bid);
+    void sync_write(const char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
     void sync_write(const char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
@@ -190,6 +191,7 @@ public:
     /// @param bid  BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @return ssize_t: Size of the data actually written.
     void sync_writev(const iovec* iov, int iovcnt, const BlkId& bid);
+    void sync_writev(const iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
     void sync_writev(const iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
@@ -222,6 +224,7 @@ public:
     /// @param bid : BlkId from data needs to be read
     /// @return ssize_t: Size of the data actually read.
     void sync_read(char* buf, uint32_t size, const BlkId& bid);
+    void sync_read(char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
     void sync_read(char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
@@ -232,6 +235,7 @@ public:
     /// @param size : Size of the actual data, it is really to optimize the iovec from iterating again to get size
     /// @return ssize_t: Size of the data actually read.
     void sync_readv(iovec* iov, int iovcnt, const BlkId& bid);
+    void sync_readv(iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
     void sync_readv(iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk);

@@ -43,9 +43,6 @@ void Chunk::update_end_of_chunk(uint64_t end_offset) {
     m_chunk_info.end_of_chunk_size = end_offset;
     m_chunk_info.compute_checksum();
     write_chunk_info();
-}
-
-void Chunk::write_chunk_info() {
     auto buf = hs_utils::iobuf_alloc(chunk_info::size, sisl::buftag::superblk, physical_dev()->align_size());
     auto cinfo = new (buf) chunk_info();
     *cinfo = m_chunk_info;

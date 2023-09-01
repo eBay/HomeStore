@@ -42,6 +42,7 @@
 //     This test is to test data serice with append block allocator with heap chunk selector      //
 //                                                                                                //
 ////////////////////////////////////////////////////////////////////////////////////////////////////
+
 RCU_REGISTER_INIT
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, test_append_blkalloc, iomgr, test_common_setup)

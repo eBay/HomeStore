@@ -493,7 +493,7 @@ TYPED_TEST(BtreeTest, RandomRemoveRange) {
     static std::uniform_int_distribution< uint32_t > s_rand_key_generator{0, 2 * num_entries};
     //    this->print_keys();
     LOGINFO("Step 2: Do range remove for maximum of {} iterations", num_iters);
-    for (uint32_t i{0}; i < num_iters && this->m_shadow_map.size() > 0; ++i) {
+    for (uint32_t i{0}; i< num_iters&& this->m_shadow_map.size() > 0; ++i) {
         uint32_t key1 = s_rand_key_generator(g_re);
         uint32_t key2 = s_rand_key_generator(g_re);
         uint32_t start_key = std::min(key1, key2);
