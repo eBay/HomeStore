@@ -153,10 +153,10 @@ void DeviceManager::load_devices() {
         first_block fblk = PhysicalDev::read_first_block(d.dev_name, device_open_flags(d.dev_name));
         pdev_info_header* pinfo = &fblk.this_pdev_hdr;
 
-        RELEASE_ASSERT_EQ(pinfo->get_system_uuid_str(), fblk.get_system_uuid_str(),
+        RELEASE_ASSERT_EQ(pinfo->get_system_uuid_str(), m_first_blk_hdr.get_system_uuid_str(),
                           "Device {} has uuid stamp different than this instance uuid. Perhaps device from other "
                           "homestore is provided?",
-                          d);
+                          d.dev_name);
 
         auto pdev = std::make_unique< PhysicalDev >(d, device_open_flags(d.dev_name), *pinfo);
         LOGINFO("Loading Homestore from Device={} with first block as: [{}]", d.dev_name, fblk.to_string());
@@ -291,119 +291,119 @@ void DeviceManager::load_vdevs() {
             });
         }
     }
+}
 
-    uint32_t DeviceManager::populate_pdev_info(const dev_info& dinfo, const iomgr::drive_attributes& attr,
-                                               const uuid_t& uuid, pdev_info_header& pinfo) {
-        bool hdd = is_hdd(dinfo.dev_name);
+uint32_t DeviceManager::populate_pdev_info(const dev_info& dinfo, const iomgr::drive_attributes& attr,
+                                           const uuid_t& uuid, pdev_info_header& pinfo) {
+    bool hdd = is_hdd(dinfo.dev_name);
 
-        pinfo.pdev_id = m_cur_pdev_id++;
-        pinfo.mirror_super_block = hdd ? 0x01 : 0x00;
-        pinfo.max_pdev_chunks = hs_super_blk::max_chunks_in_pdev(dinfo);
+    pinfo.pdev_id = m_cur_pdev_id++;
+    pinfo.mirror_super_block = hdd ? 0x01 : 0x00;
+    pinfo.max_pdev_chunks = hs_super_blk::max_chunks_in_pdev(dinfo);
 
-        auto sb_size = hs_super_blk::total_size(dinfo);
-        pinfo.data_offset = hs_super_blk::first_block_offset() + sb_size;
-        pinfo.size = dinfo.dev_size - pinfo.data_offset - (hdd ? sb_size : 0);
-        pinfo.dev_attr = attr;
-        pinfo.system_uuid = uuid;
+    auto sb_size = hs_super_blk::total_size(dinfo);
+    pinfo.data_offset = hs_super_blk::first_block_offset() + sb_size;
+    pinfo.size = dinfo.dev_size - pinfo.data_offset - (hdd ? sb_size : 0);
+    pinfo.dev_attr = attr;
+    pinfo.system_uuid = uuid;
 
-        return pinfo.pdev_id;
+    return pinfo.pdev_id;
+}
+
+uint64_t DeviceManager::total_capacity() const {
+    uint64_t cap{0};
+    for (const auto& pdev : m_all_pdevs) {
+        cap += pdev->data_size();
     }
+    return cap;
+}
 
-    uint64_t DeviceManager::total_capacity() const {
-        uint64_t cap{0};
-        for (const auto& pdev : m_all_pdevs) {
-            cap += pdev->data_size();
-        }
-        return cap;
+uint64_t DeviceManager::total_capacity(HSDevType dtype) const {
+    uint64_t cap{0};
+    const auto& pdevs = pdevs_by_type_internal(dtype);
+    for (const auto& pdev : pdevs) {
+        cap += pdev->data_size();
     }
+    return cap;
+}
 
-    uint64_t DeviceManager::total_capacity(HSDevType dtype) const {
-        uint64_t cap{0};
-        const auto& pdevs = pdevs_by_type_internal(dtype);
-        for (const auto& pdev : pdevs) {
-            cap += pdev->data_size();
-        }
-        return cap;
-    }
+static void populate_vdev_info(const vdev_parameters& vparam, uint32_t vdev_id,
+                               const std::vector< PhysicalDev* >& pdevs, vdev_info* out_info) {
+    out_info->vdev_size = vparam.vdev_size;
+    out_info->vdev_id = vdev_id;
+    out_info->num_mirrors = (vparam.multi_pdev_opts == vdev_multi_pdev_opts_t::ALL_PDEV_MIRRORED) ? pdevs.size() : 0;
+    out_info->blk_size = vparam.blk_size;
+    out_info->num_primary_chunks =
+        (vparam.multi_pdev_opts == vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED) ? pdevs.size() : 1u;
+    out_info->set_allocated();
+    out_info->set_dev_type(vparam.dev_type);
+    out_info->set_pdev_choice(vparam.multi_pdev_opts);
+    out_info->set_name(vparam.vdev_name);
+    out_info->set_user_private(vparam.context_data);
+    out_info->compute_checksum();
+}
 
-    static void populate_vdev_info(const vdev_parameters& vparam, uint32_t vdev_id,
-                                   const std::vector< PhysicalDev* >& pdevs, vdev_info* out_info) {
-        out_info->vdev_size = vparam.vdev_size;
-        out_info->vdev_id = vdev_id;
-        out_info->num_mirrors =
-            (vparam.multi_pdev_opts == vdev_multi_pdev_opts_t::ALL_PDEV_MIRRORED) ? pdevs.size() : 0;
-        out_info->blk_size = vparam.blk_size;
-        out_info->num_primary_chunks =
-            (vparam.multi_pdev_opts == vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED) ? pdevs.size() : 1u;
-        out_info->set_allocated();
-        out_info->set_dev_type(vparam.dev_type);
-        out_info->set_pdev_choice(vparam.multi_pdev_opts);
-        out_info->set_name(vparam.vdev_name);
-        out_info->set_user_private(vparam.context_data);
-        out_info->compute_checksum();
-    }
+std::vector< vdev_info > DeviceManager::read_vdev_infos(const std::vector< PhysicalDev* >& pdevs) {
+    std::vector< vdev_info > ret_vinfos;
+    auto buf =
+        hs_utils::iobuf_alloc(hs_super_blk::vdev_super_block_size(), sisl::buftag::superblk, pdevs[0]->align_size());
 
-    std::vector< vdev_info > DeviceManager::read_vdev_infos(const std::vector< PhysicalDev* >& pdevs) {
-        std::vector< vdev_info > ret_vinfos;
-        auto buf = hs_utils::iobuf_alloc(hs_super_blk::vdev_super_block_size(), sisl::buftag::superblk,
-                                         pdevs[0]->align_size());
+    // TODO: Read from all pdevs and validate that they are correct
+    pdevs[0]->read_super_block(buf, hs_super_blk::vdev_super_block_size(), hs_super_blk::vdev_sb_offset());
 
-        // TODO: Read from all pdevs and validate that they are correct
-        pdevs[0]->read_super_block(buf, hs_super_blk::vdev_super_block_size(), hs_super_blk::vdev_sb_offset());
-
-        uint8_t* ptr = buf;
-        for (uint32_t v{0}; v < hs_super_blk::MAX_VDEVS_IN_SYSTEM; ++v, ptr += vdev_info::size) {
-            vdev_info* vinfo = r_cast< vdev_info* >(ptr);
-            if (vinfo->checksum != 0) {
-                auto expected_crc = vinfo->checksum;
-                vinfo->checksum = 0;
-                auto crc = crc16_t10dif(hs_init_crc_16, r_cast< const unsigned char* >(vinfo), sizeof(vdev_info));
-                RELEASE_ASSERT_EQ(crc, expected_crc, "VDev id={} mismatch on crc", v);
-                vinfo->checksum = crc;
-            }
-
-            if (vinfo->slot_allocated) { ret_vinfos.push_back(*vinfo); }
+    uint8_t* ptr = buf;
+    for (uint32_t v{0}; v < hs_super_blk::MAX_VDEVS_IN_SYSTEM; ++v, ptr += vdev_info::size) {
+        vdev_info* vinfo = r_cast< vdev_info* >(ptr);
+        if (vinfo->checksum != 0) {
+            auto expected_crc = vinfo->checksum;
+            vinfo->checksum = 0;
+            auto crc = crc16_t10dif(hs_init_crc_16, r_cast< const unsigned char* >(vinfo), sizeof(vdev_info));
+            RELEASE_ASSERT_EQ(crc, expected_crc, "VDev id={} mismatch on crc", v);
+            vinfo->checksum = crc;
         }
 
-        hs_utils::iobuf_free(buf, sisl::buftag::superblk);
-        return ret_vinfos;
+        if (vinfo->slot_allocated) { ret_vinfos.push_back(*vinfo); }
     }
 
-    int DeviceManager::device_open_flags(const std::string& devname) const {
-        return is_hdd(devname) ? m_hdd_open_flags : m_ssd_open_flags;
-    }
+    hs_utils::iobuf_free(buf, sisl::buftag::superblk);
+    return ret_vinfos;
+}
 
-    std::vector< PhysicalDev* > DeviceManager::get_pdevs_by_dev_type(HSDevType dtype) const {
-        return m_pdevs_by_type.at(dtype);
-    }
+int DeviceManager::device_open_flags(const std::string& devname) const {
+    return is_hdd(devname) ? m_hdd_open_flags : m_ssd_open_flags;
+}
 
-    const std::vector< PhysicalDev* >& DeviceManager::pdevs_by_type_internal(HSDevType dtype) const {
-        auto it = m_pdevs_by_type.find(dtype);
-        if (it == m_pdevs_by_type.cend()) { it = m_pdevs_by_type.find(HSDevType::Data); }
-        return it->second;
-    }
+std::vector< PhysicalDev* > DeviceManager::get_pdevs_by_dev_type(HSDevType dtype) const {
+    return m_pdevs_by_type.at(dtype);
+}
 
-    uint32_t DeviceManager::atomic_page_size(HSDevType dtype) const {
-        return pdevs_by_type_internal(dtype)[0]->atomic_page_size();
-    }
+const std::vector< PhysicalDev* >& DeviceManager::pdevs_by_type_internal(HSDevType dtype) const {
+    auto it = m_pdevs_by_type.find(dtype);
+    if (it == m_pdevs_by_type.cend()) { it = m_pdevs_by_type.find(HSDevType::Data); }
+    return it->second;
+}
 
-    uint32_t DeviceManager::optimal_page_size(HSDevType dtype) const {
-        return pdevs_by_type_internal(dtype)[0]->optimal_page_size();
-    }
+uint32_t DeviceManager::atomic_page_size(HSDevType dtype) const {
+    return pdevs_by_type_internal(dtype)[0]->atomic_page_size();
+}
 
-    std::vector< shared< VirtualDev > > DeviceManager::get_vdevs() const {
-        std::vector< shared< VirtualDev > > ret_v;
-        for (const auto& vdev : m_vdevs) {
-            if (vdev != nullptr) { ret_v.push_back(vdev); }
-        }
-        return ret_v;
-    }
+uint32_t DeviceManager::optimal_page_size(HSDevType dtype) const {
+    return pdevs_by_type_internal(dtype)[0]->optimal_page_size();
+}
 
-    // Some of the hs_super_blk details
-    uint64_t hs_super_blk::vdev_super_block_size() { return (hs_super_blk::MAX_VDEVS_IN_SYSTEM * vdev_info::size); }
-
-    uint64_t hs_super_blk::chunk_super_block_size(const dev_info& dinfo) {
-        return chunk_info_bitmap_size(dinfo) + (max_chunks_in_pdev(dinfo) * chunk_info::size);
+std::vector< shared< VirtualDev > > DeviceManager::get_vdevs() const {
+    std::vector< shared< VirtualDev > > ret_v;
+    for (const auto& vdev : m_vdevs) {
+        if (vdev != nullptr) { ret_v.push_back(vdev); }
     }
+    return ret_v;
+}
+
+// Some of the hs_super_blk details
+uint64_t hs_super_blk::vdev_super_block_size() { return (hs_super_blk::MAX_VDEVS_IN_SYSTEM * vdev_info::size); }
+
+uint64_t hs_super_blk::chunk_super_block_size(const dev_info& dinfo) {
+    return chunk_info_bitmap_size(dinfo) + (max_chunks_in_pdev(dinfo) * chunk_info::size);
+}
 
 } // namespace homestore

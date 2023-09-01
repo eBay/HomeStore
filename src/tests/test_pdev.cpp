@@ -99,10 +99,12 @@ public:
         m_first_data_pdev->load_chunks([this](cshared< Chunk >& chunk) {
             LOGINFO("Loading data chunk details={}", chunk->to_string());
             m_data_chunks.push_back(chunk);
+            return true;
         });
         m_first_fast_pdev->load_chunks([this](cshared< Chunk >& chunk) {
             LOGINFO("Loading fast chunk details={}", chunk->to_string());
             m_fast_chunks.push_back(chunk);
+            return true;
         });
     }
 

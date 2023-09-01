@@ -90,12 +90,12 @@ ENUM(io_flag, uint8_t,
      READ_ONLY    // Read-only mode for post-mortem checks
 );
 ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize);
-ENUM(chunk_selector_t, uint8_t, // What are the options to select chunk to allocate a block
-     ROUND_ROBIN,               // Pick round robin
-     CUSTOM,                    // Controlled by the upper layer
-     RANDOM,                    // Pick any chunk in uniformly random fashion
-     MOST_AVAILABLE_SPACE,      // Pick the most available space
-     ALWAYS_CALLER_CONTROLLED   // Expect the caller to always provide the specific chunkid
+ENUM(chunk_selector_type_t, uint8_t, // What are the options to select chunk to allocate a block
+     ROUND_ROBIN,                    // Pick round robin
+     CUSTOM,                         // Controlled by the upper layer
+     RANDOM,                         // Pick any chunk in uniformly random fashion
+     MOST_AVAILABLE_SPACE,           // Pick the most available space
+     ALWAYS_CALLER_CONTROLLED        // Expect the caller to always provide the specific chunkid
 );
 
 ////////////// All structs ///////////////////

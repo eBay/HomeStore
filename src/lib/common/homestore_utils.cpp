@@ -13,6 +13,7 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
+#include <boost/uuid/random_generator.hpp>
 #include "homestore_utils.hpp"
 #include "homestore_assert.hpp"
 
@@ -29,7 +30,7 @@ uint8_t* hs_utils::iobuf_alloc(const size_t size, const sisl::buftag tag, const 
     return buf;
 }
 
-uuid_t hs_utils::gen_system_uuid() { return std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()); }
+uuid_t hs_utils::gen_random_uuid() { return boost::uuids::random_generator()(); }
 
 void hs_utils::iobuf_free(uint8_t* const ptr, const sisl::buftag tag) {
     if (tag == sisl::buftag::btree_node) {

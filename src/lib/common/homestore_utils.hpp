@@ -42,6 +42,6 @@ public:
                                                const size_t alignment);
     static sisl::byte_array make_byte_array(const uint64_t size, const bool is_aligned_needed, const sisl::buftag tag,
                                             const size_t alignment);
-    static hs_uuid_t gen_system_uuid();
+    static uuid_t gen_random_uuid();
 };
 } // namespace homestore
