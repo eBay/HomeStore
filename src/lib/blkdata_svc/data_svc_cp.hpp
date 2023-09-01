@@ -15,13 +15,14 @@
  *********************************************************************************/
 #pragma once
 #include <homestore/checkpoint/cp_mgr.hpp>
+#include <homestore/homestore_decl.hpp>
 #include "checkpoint/cp.hpp"
 
 namespace homestore {
 
 class DataSvcCPCallbacks : public CPCallbacks {
 public:
-    DataSvcCPCallbacks(VirtualDev* vdev);
+    DataSvcCPCallbacks(shared< VirtualDev > vdev);
     virtual ~DataSvcCPCallbacks() = default;
 
 public:
@@ -31,7 +32,7 @@ public:
     int cp_progress_percent() override;
 
 private:
-    VirtualDev* m_vdev;
+    shared< VirtualDev > m_vdev;
 };
 
 } // namespace homestore

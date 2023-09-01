@@ -19,7 +19,7 @@
 
 namespace homestore {
 
-DataSvcCPCallbacks::DataSvcCPCallbacks(VirtualDev* vdev) : m_vdev{vdev} {}
+DataSvcCPCallbacks::DataSvcCPCallbacks(shared< VirtualDev > vdev) : m_vdev{vdev} {}
 
 std::unique_ptr< CPContext > DataSvcCPCallbacks::on_switchover_cp(CP* cur_cp, CP* new_cp) {
     return m_vdev->create_cp_context(new_cp->id());
@@ -36,8 +36,8 @@ folly::Future< bool > DataSvcCPCallbacks::cp_flush(CP* cp) {
     return folly::makeFuture< bool >(true);
 }
 
-void DataSvcCPCallbacks::cp_cleanup(CP* cp) {}
+void DataSvcCPCallbacks::cp_cleanup(CP* cp) { m_vdev->cp_cleanup(cp); }
 
-int DataSvcCPCallbacks::cp_progress_percent() { return 100; }
+int DataSvcCPCallbacks::cp_progress_percent() { return m_vdev->cp_progress_percent(); }
 
 } // namespace homestore

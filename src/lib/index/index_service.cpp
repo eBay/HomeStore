@@ -72,7 +72,7 @@ void IndexService::start() {
 
     // Register to CP for flush dirty buffers
     hs()->cp_mgr().register_consumer(cp_consumer_t::INDEX_SVC,
-                                     std::move(std::make_unique< IndexCPCallbacks >(m_wb_cache.get())));
+                                     std::move(std::make_unique< IndexCPCallbacks >(std::move(m_wb_cache))));
 }
 
 void IndexService::add_index_table(const std::shared_ptr< IndexTableBase >& tbl) {

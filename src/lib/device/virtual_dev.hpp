@@ -252,6 +252,11 @@ public:
     /// @param cp
     void cp_flush(CP* cp);
 
+    void cp_cleanup(CP* cp);
+
+    /// @brief : percentage CP has been progressed, this api is normally used for cp watchdog;
+    int cp_progress_percent();
+
     std::unique_ptr< CPContext > create_cp_context(cp_id_t cp_id);
 
     ////////////////////////// Standard Getters ///////////////////////////////

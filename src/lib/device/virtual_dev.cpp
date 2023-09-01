@@ -533,6 +533,13 @@ void VirtualDev::cp_flush(CP*) {
     m_chunk_selector->foreach_chunks([this](cshared< Chunk >& chunk) { chunk->cp_flush(); });
 }
 
+// sync-ops during cp_flush, so return 100;
+int VirtualDev::cp_progress_percent() { return 100; }
+
+void VirtualDev::cp_cleanup(CP*) {
+    // no-op;
+}
+
 ///////////////////////// VirtualDev Private Methods /////////////////////////////
 uint64_t VirtualDev::to_dev_offset(const BlkId& b, Chunk** chunk) const {
     *chunk = m_dmgr.get_chunk_mutable(b.get_chunk_num());
