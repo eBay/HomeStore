@@ -22,6 +22,7 @@
 #include "wb_cache.hpp"
 #include "index_cp.hpp"
 #include "device/virtual_dev.hpp"
+#include "device/chunk.h"
 #include "common/resource_mgr.hpp"
 
 SISL_LOGGING_DECL(wbcache)
@@ -59,7 +60,7 @@ void IndexWBCache::start_flush_threads() {
     auto nthreads = std::max(1, HS_DYNAMIC_CONFIG(generic.cache_flush_threads));
 
     for (int32_t i{0}; i < nthreads; ++i) {
-        iomanager.create_reactor("index_cp_flush" + std::to_string(i), INTERRUPT_LOOP, 1u,
+        iomanager.create_reactor("index_cp_flush" + std::to_string(i), iomgr::INTERRUPT_LOOP, 1u,
                                  [this, &ctx](bool is_started) {
                                      if (is_started) {
                                          {

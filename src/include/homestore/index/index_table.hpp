@@ -160,9 +160,7 @@ protected:
 
     btree_status_t refresh_node(const BtreeNodePtr& node, bool for_read_modify_write, void* context) const override {
         CPContext* cp_ctx = (CPContext*)context;
-        if (cp_ctx == nullptr) {
-            return btree_status_t::success;
-        }
+        if (cp_ctx == nullptr) { return btree_status_t::success; }
 
         auto idx_node = IndexBtreeNode::convert(node.get());
         if (!for_read_modify_write) {

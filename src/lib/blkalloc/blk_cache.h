@@ -220,7 +220,7 @@ struct SlabCacheConfig {
     std::string m_name;
     std::vector< _slab_config > m_per_slab_cfg;
 
-    [[nodiscard]] std::string to_string() const {
+    std::string to_string() const {
         std::string str;
         for (const auto& s : m_per_slab_cfg) {
             fmt::format_to(std::back_inserter(str),
@@ -229,7 +229,7 @@ struct SlabCacheConfig {
         }
         return str;
     }
-    [[nodiscard]] std::string get_name() const { return m_name; }
+    std::string get_name() const { return m_name; }
 };
 
 class FreeBlkCache {

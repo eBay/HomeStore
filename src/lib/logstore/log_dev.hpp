@@ -36,6 +36,7 @@
 #include <homestore/logstore/log_store_internal.hpp>
 #include <homestore/superblk_handler.hpp>
 #include "common/homestore_config.hpp"
+#include "device/chunk.h"
 
 namespace homestore {
 
@@ -808,7 +809,7 @@ private:
     bool m_stopped{false}; // Is Logdev stopped. We don't need lock here, because it is updated under flush lock
     logstore_family_id_t m_family_id; // The family id this logdev is part of
     JournalVirtualDev* m_vdev{nullptr};
-    HomeStoreSafePtr m_hs; // Back pointer to homestore
+    HomeStoreSafePtr m_hs;            // Back pointer to homestore
 
     std::multimap< logid_t, logstore_id_t > m_garbage_store_ids;
     Clock::time_point m_last_flush_time;

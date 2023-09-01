@@ -9,5 +9,7 @@ target_sources(hs_device PRIVATE
       device_manager.cpp
       virtual_dev.cpp
       journal_vdev.cpp
+      chunk.cpp
+      round_robin_chunk_selector.cpp
     )
 target_link_libraries(hs_device hs_common ${COMMON_DEPS})
