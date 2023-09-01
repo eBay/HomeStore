@@ -30,7 +30,7 @@ static constexpr uint64_t append_blkalloc_sb_version{0x1};
 struct append_blkalloc_sb {
     uint64_t magic{append_blkalloc_sb_magic};
     uint32_t version{append_blkalloc_sb_version};
-    uint64_t chunk_id;
+    uint64_t allocator_id;
     uint64_t freeable_nblks;
     uint64_t last_append_offset;
 };

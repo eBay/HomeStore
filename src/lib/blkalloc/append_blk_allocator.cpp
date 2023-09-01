@@ -31,7 +31,7 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool first_tim
         m_last_append_offset = 0;
 
         m_sb.create(sizeof(append_blkalloc_sb));
-        m_sb->chunk_id = id;
+        m_sb->allocator_id = id;
         m_sb->last_append_offset = 0;
         m_sb->freeable_nblks = m_freeable_nblks;
     }
@@ -155,7 +155,7 @@ void AppendBlkAllocator::free(const BlkId& bid) {
 
 void AppendBlkAllocator::free(const std::vector< BlkId >& blk_ids) {
     for (const auto b : blk_ids) {
-        free(b);
+        this->free(b);
     }
 }
 
@@ -163,7 +163,7 @@ blk_cap_t AppendBlkAllocator::available_blks() const { return get_total_blks() -
 
 blk_cap_t AppendBlkAllocator::get_used_blks() const { return m_last_append_offset; }
 
-bool AppendBlkAllocator::is_blk_alloced(const BlkId& in_bid, bool use_lock) const {
+bool AppendBlkAllocator::is_blk_alloced(const BlkId& in_bid, bool) const {
     // blk_num starts from 0;
     return in_bid.get_blk_num() < get_used_blks();
 }

@@ -32,8 +32,7 @@ BlkDataService::BlkDataService() { m_blk_read_tracker = std::make_unique< BlkRea
 BlkDataService::~BlkDataService() = default;
 
 // first-time boot path
-void BlkDataService::create_vdev(uint64_t size, homestore::blk_allocator_type_t alloc_type,
-                                 homestore::chunk_selector_type_t chunk_sel_type) {
+void BlkDataService::create_vdev(uint64_t size, blk_allocator_type_t alloc_type, chunk_selector_type_t chunk_sel_type) {
     const auto phys_page_size = hs()->device_mgr()->optimal_page_size(HSDevType::Data);
 
     hs_vdev_context vdev_ctx;
@@ -142,7 +141,7 @@ folly::Future< bool > BlkDataService::async_free_blk(const BlkId bid) {
 void BlkDataService::start() {
     // Register to CP for flush dirty buffers underlying virtual device layer;
     hs()->cp_mgr().register_consumer(cp_consumer_t::BLK_DATA_SVC,
-                                     std::move(std::make_unique< DataSvcCPCallbacks >(m_vdev.get())));
+                                     std::move(std::make_unique< DataSvcCPCallbacks >(m_vdev)));
 }
 
 } // namespace homestore
