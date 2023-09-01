@@ -50,7 +50,7 @@ struct vdev_info {
     uint16_t checksum{0};                      // 92: Checksum of this entire Block
     uint8_t alloc_type;                        // 94: Allocator type of this vdev
     uint8_t chunk_sel_type;                    // 95: Chunk Selector type of this vdev_id
-    uint8_t padding[161]{};                    // 96: Pad to make it 256 bytes total
+    uint8_t padding[160]{};                    // 96: Pad to make it 256 bytes total
     uint8_t user_private[user_private_size]{}; // 128: User specific information
 
     uint32_t get_vdev_id() const { return vdev_id; }

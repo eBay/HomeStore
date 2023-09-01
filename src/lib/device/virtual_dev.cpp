@@ -91,16 +91,16 @@ VirtualDev::VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, vdev_event_c
         m_chunk_selector_type{vinfo.chunk_sel_type},
         m_auto_recovery{is_auto_recovery} {
     switch (m_chunk_selector_type) {
-    case chunk_selector_type_t::round_robin: {
+    case chunk_selector_type_t::ROUND_ROBIN: {
         m_chunk_selector = std::make_unique< RoundRobinChunkSelector >(false /* dynamically add chunk */);
         break;
     }
-    case chunk_selector_type_t::heap: {
+    case chunk_selector_type_t::HEAP: {
         // FIXME: change to HeapChunkSelector after it is ready;
         m_chunk_selector = std::make_unique< RoundRobinChunkSelector >(false /* dynamically add chunk */);
         break;
     }
-    case chunk_selector_type_t::none: {
+    case chunk_selector_type_t::NONE: {
         m_chunk_selector = nullptr;
         break;
     }
@@ -259,14 +259,6 @@ void VirtualDev::recovery_done() {
     for (auto& chunk : m_all_chunks) {
         chunk->blk_allocator_mutable()->inited();
     }
-}
-
-uint64_t VirtualDev::get_len(const iovec* iov, const int iovcnt) {
-    uint64_t len{0};
-    for (int i{0}; i < iovcnt; ++i) {
-        len += iov[i].iov_len;
-    }
-    return len;
 }
 
 uint64_t VirtualDev::get_len(const iovec* iov, const int iovcnt) {

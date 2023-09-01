@@ -296,6 +296,25 @@ struct BtreeTest : public testing::Test {
 
     void print(const std::string& file = "") const { m_bt->print_tree(file); }
 
+    void destroy_btree() {
+        auto cpg = hs()->cp_mgr().cp_guard();
+        auto op_context = (void*)cpg->context(cp_consumer_t::INDEX_SVC);
+        const auto [ret, free_node_cnt] = m_bt->destroy_btree(op_context);
+        ASSERT_EQ(ret, btree_status_t::success) << "btree destroy failed";
+        m_bt.reset();
+    }
+
+    void compare_files(const std::string& before, const std::string& after) {
+        std::ifstream b(before);
+        std::ifstream a(after);
+        std::ostringstream ss_before, ss_after;
+        ss_before << b.rdbuf();
+        ss_after << a.rdbuf();
+        std::string s1 = ss_before.str();
+        std::string s2 = ss_after.str();
+        ASSERT_EQ(s1, s2) << "Mismatch in btree structure";
+    }
+
 private:
     void validate_data(const K& key, const V& btree_val) const {
         const auto r = m_shadow_map.find(key);
@@ -441,7 +460,7 @@ TYPED_TEST(BtreeTest, CpFlush) {
     this->print(std::string("before.txt"));
 
     LOGINFO("Trigger checkpoint flush.");
-    this->trigger_cp(true /* wait */);
+    test_common::HSTestHelper::trigger_cp(true /* wait */);
 
     LOGINFO("Query {} entries and validate with pagination of 75 entries", num_entries);
     this->query_validate(0, num_entries - 1, 75);
@@ -474,12 +493,12 @@ TYPED_TEST(BtreeTest, MultipleCpFlush) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
         if (i % 500 == 0) {
             LOGINFO("Trigger checkpoint flush wait=false.");
-            this->trigger_cp(false /* wait */);
+            test_common::HSTestHelper::trigger_cp(false /* wait */);
         }
     }
 
     LOGINFO("Trigger checkpoint flush wait=false.");
-    this->trigger_cp(false /* wait */);
+    test_common::HSTestHelper::trigger_cp(false /* wait */);
 
     for (uint32_t i = num_entries / 2; i < num_entries; ++i) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
@@ -528,7 +547,7 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
     auto cp_flush_thread = std::thread([this, &stop_cp_flush] {
         while (!stop_cp_flush) {
             LOGINFO("Trigger checkpoint flush wait=false.");
-            this->trigger_cp(false /* wait */);
+            test_common::HSTestHelper::trigger_cp(false /* wait */);
             std::this_thread::sleep_for(std::chrono::seconds{1});
         }
     });

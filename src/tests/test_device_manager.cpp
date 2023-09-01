@@ -73,7 +73,7 @@ public:
             m_dev_infos, [this](const homestore::vdev_info& vinfo, bool load_existing) {
                 vdev_info vinfo_tmp = vinfo;
                 vinfo_tmp.alloc_type = s_cast< uint8_t >(homestore::blk_allocator_type_t::fixed);
-                vinfo_tmp.chunk_sel_type = s_cast< uint8_t >(homestore::chunk_selector_type_t::round_robin);
+                vinfo_tmp.chunk_sel_type = s_cast< uint8_t >(homestore::chunk_selector_type_t::ROUND_ROBIN);
 
                 return std::make_shared< homestore::VirtualDev >(*m_dmgr, vinfo_tmp, nullptr /* event_cb */, false);
             });
@@ -157,7 +157,7 @@ TEST_F(DeviceMgrTest, StripedVDevCreation) {
                                                            .blk_size = 4096,
                                                            .dev_type = HSDevType::Data,
                                                            .alloc_type = blk_allocator_type_t::none,
-                                                           .chunk_sel_type = chunk_selector_type_t::none,
+                                                           .chunk_sel_type = chunk_selector_type_t::NONE,
                                                            .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
                                                            .context_data = sisl::blob{}});
         m_vdevs.push_back(std::move(vdev));

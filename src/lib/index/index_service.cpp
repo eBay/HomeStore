@@ -46,7 +46,7 @@ void IndexService::create_vdev(uint64_t size) {
                                                     .blk_size = atomic_page_size,
                                                     .dev_type = HSDevType::Fast,
                                                     .alloc_type = blk_allocator_type_t::fixed,
-                                                    .chunk_sel_type = chunk_selector_type_t::round_robin,
+                                                    .chunk_sel_type = chunk_selector_type_t::ROUND_ROBIN,
                                                     .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
                                                     .context_data = vdev_ctx.to_blob()});
 }

@@ -110,7 +110,7 @@ public:
                                 bool default_data_svc_alloc_type = true) {
         if (default_data_svc_alloc_type) {
             set_data_svc_allocator(homestore::blk_allocator_type_t::varsize);
-            set_data_svc_chunk_selector(homestore::chunk_selector_type_t::round_robin);
+            set_data_svc_chunk_selector(homestore::chunk_selector_type_t::ROUND_ROBIN);
         }
 
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
