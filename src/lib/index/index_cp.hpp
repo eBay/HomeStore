@@ -88,7 +88,7 @@ public:
 class IndexWBCache;
 class IndexCPCallbacks : public CPCallbacks {
 public:
-    IndexCPCallbacks(std::unique_ptr< IndexWBCache > wb_cache);
+    IndexCPCallbacks(IndexWBCache* wb_cache);
     virtual ~IndexCPCallbacks() = default;
 
 public:
@@ -98,6 +98,6 @@ public:
     int cp_progress_percent() override;
 
 private:
-    std::unique_ptr< IndexWBCache > m_wb_cache;
+    IndexWBCache* m_wb_cache;
 };
 } // namespace homestore
