@@ -71,7 +71,7 @@ public:
         m_sb->root_node = root_node;
         m_sb->link_version = version;
         m_sb.write();
-        LOGINFO("Updated index superblk root bnode_id {} version {}", root_node, version);
+        BT_LOG(DEBUG, "Updated index superblk root bnode_id {} version {}", root_node, version);
     }
 
     template < typename ReqT >

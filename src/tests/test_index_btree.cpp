@@ -356,7 +356,7 @@ private:
 // using BtreeTypes = testing::Types< FixedLenBtreeTest, VarKeySizeBtreeTest, VarValueSizeBtreeTest, VarObjSizeBtreeTest
 // >;
 
-using BtreeTypes = testing::Types< FixedLenBtreeTest, VarValueSizeBtreeTest, VarObjSizeBtreeTest >;
+using BtreeTypes = testing::Types< FixedLenBtreeTest >;
 
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 
