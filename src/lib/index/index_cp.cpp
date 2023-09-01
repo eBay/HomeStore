@@ -2,7 +2,7 @@
 #include "index/wb_cache.hpp"
 
 namespace homestore {
-IndexCPCallbacks::IndexCPCallbacks(std::unique_ptr< IndexWBCache > wb_cache) { m_wb_cache = std::move(wb_cache); }
+IndexCPCallbacks::IndexCPCallbacks(IndexWBCache* wb_cache) : m_wb_cache{wb_cache} {}
 
 std::unique_ptr< CPContext > IndexCPCallbacks::on_switchover_cp(CP* cur_cp, CP* new_cp) {
     return m_wb_cache->create_cp_context(new_cp->id());
