@@ -92,6 +92,7 @@ ENUM(io_flag, uint8_t,
 ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize);
 ENUM(chunk_selector_type_t, uint8_t, // What are the options to select chunk to allocate a block
      ROUND_ROBIN,                    // Pick round robin
+     HEAP,                           // Pick the chunk with the most available blocks
      CUSTOM,                         // Controlled by the upper layer
      RANDOM,                         // Pick any chunk in uniformly random fashion
      MOST_AVAILABLE_SPACE,           // Pick the most available space

@@ -43,6 +43,8 @@
 #include "common/homestore_assert.hpp"
 #include "common/homestore_utils.hpp"
 #include "blkalloc/varsize_blk_allocator.h"
+#include "device/round_robin_chunk_selector.h"
+#include "device/chunk_selector_factory.h"
 
 SISL_LOGGING_DECL(device)
 
@@ -76,16 +78,16 @@ static std::shared_ptr< BlkAllocator > create_blk_allocator(blk_allocator_type_t
 }
 
 VirtualDev::VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, blk_allocator_type_t allocator_type,
-                       chunk_selector_type_t chunk_selector, vdev_event_cb_t event_cb, bool is_auto_recovery) :
+                       chunk_selector_type_t chunk_selector_type, vdev_event_cb_t event_cb, bool is_auto_recovery) :
         m_vdev_info{vinfo},
         m_dmgr{dmgr},
         m_name{vinfo.name},
         m_event_cb{std::move(event_cb)},
         m_metrics{vinfo.name},
         m_allocator_type{allocator_type},
-        m_chunk_selector_type{chunk_selector},
+        m_chunk_selector_type{chunk_selector_type},
         m_auto_recovery{is_auto_recovery} {
-    m_chunk_selector = std::make_unique< RoundRobinChunkSelector >(false /* dynamically add chunk */);
+    m_chunk_selector = ChunkSelectorFactory::getChunkSelector(chunk_selector_type);
 }
 
 // TODO: Have an additional parameter for vdev to check if dynamic add chunk. If so, we need to take do an rcu for

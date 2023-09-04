@@ -12,8 +12,8 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
-#include "device/chunk_selector.hpp"
-#include "device/chunk.h"
+
+#include "device/round_robin_chunk_selector.h"
 
 namespace homestore {
 RoundRobinChunkSelector::RoundRobinChunkSelector(bool dynamic_chunk_add) : m_dynamic_chunk_add{dynamic_chunk_add} {
@@ -32,5 +32,9 @@ void RoundRobinChunkSelector::foreach_chunks(std::function< void(cshared< Chunk 
     for (auto& chunk : m_chunks) {
         cb(chunk);
     }
+}
+
+void RoundRobinChunkSelector::remove_chunk(cshared< Chunk >& chunk) { 
+    m_chunks.erase(std::remove(m_chunks.begin(), m_chunks.end(), chunk), m_chunks.end()); 
 }
 } // namespace homestore

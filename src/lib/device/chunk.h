@@ -14,10 +14,9 @@
  *********************************************************************************/
 #pragma once
 #include "device/physical_dev.hpp"
+#include "blkalloc/blk_allocator.h"
 
 namespace homestore {
-class BlkAllocator;
-
 class Chunk {
 private:
     std::mutex m_mgmt_mutex;
@@ -62,6 +61,7 @@ public:
     nlohmann::json get_status([[maybe_unused]] int log_level) const;
     const BlkAllocator* blk_allocator() const { return m_blk_allocator.get(); }
     BlkAllocator* blk_allocator_mutable() { return m_blk_allocator.get(); }
+    blk_cap_t get_available_blks() { return m_blk_allocator->available_blks(); }
 
     ////////////// Setters /////////////////////
     void update_end_of_chunk(uint64_t end_offset);

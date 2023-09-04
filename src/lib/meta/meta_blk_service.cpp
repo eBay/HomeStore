@@ -35,7 +35,7 @@
 #include "device/virtual_dev.hpp"
 #include "device/physical_dev.hpp"
 #include "device/chunk.h"
-#include "device/chunk_selector.hpp"
+#include "device/chunk_selector.h"
 #include "blkalloc/blk_allocator.h"
 #include "meta_sb.hpp"
 

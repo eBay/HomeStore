@@ -12,27 +12,15 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
+
 #pragma once
+
+#include "device/chunk_selector.h"
 
 #include <vector>
 #include <folly/ThreadLocal.h>
-#include <sisl/logging/logging.h>
-
-#include <homestore/homestore_decl.hpp>
-#include <homestore/blk.h>
 
 namespace homestore {
-class Chunk;
-
-class ChunkSelector {
-public:
-    ChunkSelector() = default;
-    virtual void add_chunk(cshared< Chunk >& chunk) = 0;
-    virtual void foreach_chunks(std::function< void(cshared< Chunk >&) >&& cb) = 0;
-    virtual Chunk* select(blk_count_t nblks, const blk_alloc_hints& hints) = 0;
-
-    virtual ~ChunkSelector() = default;
-};
 
 class RoundRobinChunkSelector : public ChunkSelector {
 public:
@@ -49,10 +37,11 @@ public:
 
     void foreach_chunks(std::function< void(cshared< Chunk >&) >&& cb) override;
 
+    void remove_chunk(cshared< Chunk >& chunk) override;
+
 private:
     std::vector< shared< Chunk > > m_chunks;
     folly::ThreadLocal< uint32_t > m_next_chunk_index;
     bool m_dynamic_chunk_add; // Can we add chunk dynamically
 };
-
 } // namespace homestore
