@@ -18,15 +18,15 @@
 
 namespace homestore {
 
-AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool first_time_boot, chunk_num_t id) :
+AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_format, chunk_num_t id) :
         BlkAllocator{cfg, id}, m_metrics{get_name().c_str()}, m_sb{get_name()} {
-    // all append_blk_allocator instances use same client type;
+    // TODO: try to make all append_blk_allocator instances use same client type to reduce metablk's cache footprint;
     meta_service().register_handler(
         get_name(),
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { on_meta_blk_found(std::move(buf), (void*)mblk); },
         nullptr);
 
-    if (first_time_boot) {
+    if (need_format) {
         m_freeable_nblks = available_blks();
         m_last_append_offset = 0;
 
