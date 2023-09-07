@@ -34,15 +34,15 @@
 #include <sisl/utility/atomic_counter.hpp>
 #include <iomgr/iomgr_flip.hpp>
 
-// #include <homestore/homestore.hpp>
+#include "device/chunk.h"
 #include "device/physical_dev.hpp"
 #include "device/device.h"
 #include "device/virtual_dev.hpp"
-#include "device/chunk.h"
 #include "common/error.h"
 #include "common/homestore_assert.hpp"
 #include "common/homestore_utils.hpp"
 #include "blkalloc/varsize_blk_allocator.h"
+#include "device/round_robin_chunk_selector.h"
 
 SISL_LOGGING_DECL(device)
 
@@ -435,7 +435,7 @@ uint64_t VirtualDev::used_size() const {
 }
 
 void VirtualDev::cp_flush() {
-    m_chunk_selector->foreach_chunks([this](cshared< Chunk >& chunk) { chunk->cp_flush(); });
+    m_chunk_selector->foreach_chunks([this](VChunk& vchunk) { vchunk.getInternalChunk()->cp_flush(); });
 }
 
 std::vector< shared< Chunk > > VirtualDev::get_chunks() const { return m_all_chunks; }

@@ -25,9 +25,9 @@
 #include <isa-l/crc.h>
 
 #include <homestore/homestore_decl.hpp>
+#include "device/chunk.h"
 #include "device/physical_dev.hpp"
 #include "device/device.h"
-#include "device/chunk.h"
 #include "common/homestore_utils.hpp"
 #include "common/homestore_assert.hpp"
 

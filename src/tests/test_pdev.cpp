@@ -28,9 +28,10 @@
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 
+#include "device/chunk.h"
+
 #include "device/device.h"
 #include "device/physical_dev.hpp"
-#include "device/chunk.h"
 
 using namespace homestore;
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)

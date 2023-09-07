@@ -23,13 +23,12 @@
 #include <homestore/meta_service.hpp>
 #include <homestore/logstore_service.hpp>
 #include <homestore/homestore.hpp>
+#include "device/chunk.h"
 
 #include "common/homestore_assert.hpp"
 #include "common/homestore_status_mgr.hpp"
-#include "device/device.h"
 #include "device/journal_vdev.hpp"
 #include "device/physical_dev.hpp"
-#include "device/chunk.h"
 #include "log_store_family.hpp"
 #include "log_dev.hpp"
 

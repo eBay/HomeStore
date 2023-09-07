@@ -17,12 +17,12 @@
 #include <homestore/btree/detail/btree_node.hpp>
 #include <homestore/index_service.hpp>
 #include <homestore/homestore.hpp>
+#include "device/chunk.h"
 #include "common/homestore_assert.hpp"
 
 #include "wb_cache.hpp"
 #include "index_cp.hpp"
 #include "device/virtual_dev.hpp"
-#include "device/chunk.h"
 #include "common/resource_mgr.hpp"
 
 SISL_LOGGING_DECL(wbcache)

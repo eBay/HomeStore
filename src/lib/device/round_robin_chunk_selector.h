@@ -14,25 +14,17 @@
  *********************************************************************************/
 #pragma once
 
+#include <homestore/chunk_selector.h>
+
 #include <vector>
 #include <folly/ThreadLocal.h>
 #include <sisl/logging/logging.h>
 
-#include <homestore/homestore_decl.hpp>
-#include <homestore/blk.h>
+#include <homestore/vchunk.h>
+#include "device/chunk.h"
 
 namespace homestore {
 class Chunk;
-
-class ChunkSelector {
-public:
-    ChunkSelector() = default;
-    virtual void add_chunk(cshared< Chunk >& chunk) = 0;
-    virtual void foreach_chunks(std::function< void(cshared< Chunk >&) >&& cb) = 0;
-    virtual Chunk* select(blk_count_t nblks, const blk_alloc_hints& hints) = 0;
-
-    virtual ~ChunkSelector() = default;
-};
 
 class RoundRobinChunkSelector : public ChunkSelector {
 public:
@@ -43,14 +35,12 @@ public:
     RoundRobinChunkSelector& operator=(RoundRobinChunkSelector&&) noexcept = delete;
     ~RoundRobinChunkSelector() = default;
 
-    void add_chunk(cshared< Chunk >& chunk) override;
-
+    void add_chunk(VChunk chunk) override;
     Chunk* select(blk_count_t nblks, const blk_alloc_hints& hints) override;
-
-    void foreach_chunks(std::function< void(cshared< Chunk >&) >&& cb) override;
+    void foreach_chunks(std::function< void(VChunk&) >&& cb) override;
 
 private:
-    std::vector< shared< Chunk > > m_chunks;
+    std::vector< VChunk > m_chunks;
     folly::ThreadLocal< uint32_t > m_next_chunk_index;
     bool m_dynamic_chunk_add; // Can we add chunk dynamically
 };

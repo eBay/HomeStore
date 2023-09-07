@@ -15,12 +15,13 @@
  *********************************************************************************/
 #include <isa-l/crc.h>
 
+#include "device/chunk.h"
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
 #include "common/homestore_utils.hpp"
 #include "log_dev.hpp"
 #include "device/journal_vdev.hpp"
-#include "device/chunk.h"
+
 
 namespace homestore {
 SISL_LOGGING_DECL(logstore)
