@@ -35,6 +35,7 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_form
 
         for (uint8_t i = 0; i < m_sb.size(); ++i) {
             m_sb[i].create(sizeof(append_blkalloc_ctx));
+            m_sb[i]->is_dirty = false;
             m_sb[i]->allocator_id = id;
             m_sb[i]->last_append_offset = 0;
             m_sb[i]->freeable_nblks = m_freeable_nblks;
@@ -118,24 +119,27 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
 // cp_flush doesn't need CPGuard as it is triggered by CPMgr which already handles the reference check;
 //
 void AppendBlkAllocator::cp_flush(CP* cp) {
-    if (m_is_dirty) {
-        // clear must happen before write to metablk becuase if metablk is written first, if
-        // alloc(in-parallel) happened after written but before clear, then the dirty buffer will be cleared.
-        clear_dirty_offset();
-
+    const auto idx = cp->id();
+    // check if current cp's context has dirty buffer already
+    if (m_sb[idx]->is_dirty) {
         // write to metablk;
         m_sb[cp->id()].write();
+
+        // clear this dirty buff's dirty flag;
+        clear_dirty_offset(idx);
     }
 }
 
+// updating current cp's dirty buffer context;
 void AppendBlkAllocator::set_dirty_offset(const uint8_t idx) {
-    m_is_dirty = true;
+    m_sb[idx]->is_dirty = true;
 
     m_sb[idx]->last_append_offset = m_last_append_offset;
     m_sb[idx]->freeable_nblks = m_freeable_nblks;
 }
 
-void AppendBlkAllocator::clear_dirty_offset() { m_is_dirty = false; }
+// clearing current cp context's dirty flag;
+void AppendBlkAllocator::clear_dirty_offset(const uint8_t idx) { m_sb[idx]->is_dirty = false; }
 
 //
 // free operation does:
