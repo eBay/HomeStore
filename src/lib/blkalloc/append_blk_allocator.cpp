@@ -13,9 +13,11 @@
  * specific language governing permissions and limitations under the License.
  * *
  * *********************************************************************************/
-#include <homestore/meta_service.hpp>
-#include "append_blk_allocator.h"
 #include <homestore/checkpoint/cp_mgr.hpp>
+#include <homestore/meta_service.hpp>
+
+#include "append_blk_allocator.h"
+#include "checkpoint/cp.hpp"
 
 namespace homestore {
 
@@ -31,10 +33,12 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_form
         m_freeable_nblks = available_blks();
         m_last_append_offset = 0;
 
-        m_sb.create(sizeof(append_blkalloc_sb));
-        m_sb->allocator_id = id;
-        m_sb->last_append_offset = 0;
-        m_sb->freeable_nblks = m_freeable_nblks;
+        for (uint8_t i = 0; i < m_sb.size(); ++i) {
+            m_sb[i].create(sizeof(append_blkalloc_ctx));
+            m_sb[i]->allocator_id = id;
+            m_sb[i]->last_append_offset = 0;
+            m_sb[i]->freeable_nblks = m_freeable_nblks;
+        }
     }
 
     // for recovery boot, fields should be recovered from metablks;
@@ -42,13 +46,17 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_form
 
 void AppendBlkAllocator::on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
     // TODO: also needs to initialize base class blkallocator for recovery path;
+    // load all dirty buffer from the same starting point;
+    m_sb[0].load(buf, meta_cookie);
+    for (uint8_t i = 1; i < m_sb.size(); ++i) {
+        m_sb[i].load(buf, meta_cookie);
+    }
 
-    m_sb.load(buf, meta_cookie);
-    m_last_append_offset = m_sb->last_append_offset;
-    m_freeable_nblks = m_sb->freeable_nblks;
+    m_last_append_offset = m_sb[0]->last_append_offset;
+    m_freeable_nblks = m_sb[0]->freeable_nblks;
 
-    HS_REL_ASSERT_EQ(m_sb->magic, append_blkalloc_sb_magic, "Invalid AppendBlkAlloc metablk, magic mismatch");
-    HS_REL_ASSERT_EQ(m_sb->version, append_blkalloc_sb_version, "Invalid version of AppendBlkAllocator metablk");
+    HS_REL_ASSERT_EQ(m_sb[0]->magic, append_blkalloc_sb_magic, "Invalid AppendBlkAlloc metablk, magic mismatch");
+    HS_REL_ASSERT_EQ(m_sb[0]->version, append_blkalloc_sb_version, "Invalid version of AppendBlkAllocator metablk");
 }
 
 //
@@ -69,7 +77,7 @@ BlkAllocStatus AppendBlkAllocator::alloc(BlkId& bid) {
     [[maybe_unused]] auto cur_cp = hs()->cp_mgr().cp_guard();
     ++m_last_append_offset;
     --m_freeable_nblks;
-    set_dirty_offset();
+    set_dirty_offset(cur_cp->id() % MAX_CP_COUNT);
 
     COUNTER_INCREMENT(m_metrics, num_alloc, 1);
     return BlkAllocStatus::SUCCESS;
@@ -99,7 +107,7 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
     m_last_append_offset += nblks;
     m_freeable_nblks -= nblks;
 
-    set_dirty_offset();
+    set_dirty_offset(cur_cp->id() % MAX_CP_COUNT);
 
     COUNTER_INCREMENT(m_metrics, num_alloc, 1);
 
@@ -109,20 +117,23 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
 //
 // cp_flush doesn't need CPGuard as it is triggered by CPMgr which already handles the reference check;
 //
-void AppendBlkAllocator::cp_flush() {
+void AppendBlkAllocator::cp_flush(CP* cp) {
     if (m_is_dirty) {
         // clear must happen before write to metablk becuase if metablk is written first, if
         // alloc(in-parallel) happened after written but before clear, then the dirty buffer will be cleared.
         clear_dirty_offset();
 
         // write to metablk;
-        m_sb->last_append_offset = m_last_append_offset;
-        m_sb->freeable_nblks = m_freeable_nblks;
-        m_sb.write();
+        m_sb[cp->id()].write();
     }
 }
 
-void AppendBlkAllocator::set_dirty_offset() { m_is_dirty = true; }
+void AppendBlkAllocator::set_dirty_offset(const uint8_t idx) {
+    m_is_dirty = true;
+
+    m_sb[idx]->last_append_offset = m_last_append_offset;
+    m_sb[idx]->freeable_nblks = m_freeable_nblks;
+}
 
 void AppendBlkAllocator::clear_dirty_offset() { m_is_dirty = false; }
 
@@ -139,7 +150,7 @@ void AppendBlkAllocator::free(const BlkId& bid) {
         // we are freeing the the last blk id, let's rewind.
         m_last_append_offset -= n;
     }
-    set_dirty_offset();
+    set_dirty_offset(cur_cp->id() % MAX_CP_COUNT);
 }
 
 void AppendBlkAllocator::free(const std::vector< BlkId >& blk_ids) {

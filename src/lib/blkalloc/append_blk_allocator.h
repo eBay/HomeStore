@@ -20,15 +20,16 @@
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
 #include <homestore/blk.h>
-#include <homestore/superblk_handler.hpp>
+#include <homestore/checkpoint/cp_mgr.hpp>
 #include <homestore/homestore.hpp>
+#include <homestore/superblk_handler.hpp>
 
 namespace homestore {
 static constexpr uint64_t append_blkalloc_sb_magic{0xd0d0d02b};
 static constexpr uint64_t append_blkalloc_sb_version{0x1};
 
 #pragma pack(1)
-struct append_blkalloc_sb {
+struct append_blkalloc_ctx {
     uint64_t magic{append_blkalloc_sb_magic};
     uint32_t version{append_blkalloc_sb_version};
     uint64_t allocator_id;
@@ -82,13 +83,13 @@ public:
     std::string to_string() const override;
 
     /// @brief : needs to be called with cp_guard();
-    void set_dirty_offset();
+    void set_dirty_offset(const uint8_t idx);
 
     /// @brief : clear dirty is best effort;
     /// offset flush is idempotent;
     void clear_dirty_offset();
 
-    void cp_flush() override;
+    void cp_flush(CP* cp) override;
 
 private:
     std::string get_name() const;
@@ -99,7 +100,7 @@ private:
     std::atomic< bool > m_is_dirty{false};
     std::atomic< uint64_t > m_freeable_nblks{0};
     AppendBlkAllocMetrics m_metrics;
-    superblk< append_blkalloc_sb > m_sb;
+    std::array< superblk< append_blkalloc_ctx >, MAX_CP_COUNT > m_sb;
 };
 
 } // namespace homestore

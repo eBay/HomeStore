@@ -530,9 +530,9 @@ std::unique_ptr< CPContext > VirtualDev::create_cp_context(cp_id_t cp_id) {
     return std::make_unique< VDevCPContext >(cp_id);
 }
 
-void VirtualDev::cp_flush(CP*) {
+void VirtualDev::cp_flush(CP* cp) {
     // pass down cp so that underlying componnents can get their customized CP context if needed;
-    m_chunk_selector->foreach_chunks([this](cshared< Chunk >& chunk) { chunk->cp_flush(); });
+    m_chunk_selector->foreach_chunks([this, cp](cshared< Chunk >& chunk) { chunk->cp_flush(cp); });
 }
 
 // sync-ops during cp_flush, so return 100;

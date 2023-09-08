@@ -172,6 +172,7 @@ public:
  * 2. It contains blks freed only upto that checkpoint.
  */
 
+class CP;
 class BlkAllocator {
 public:
     BlkAllocator(const BlkAllocConfig& cfg, chunk_num_t id = 0);
@@ -190,8 +191,8 @@ public:
     virtual bool is_blk_alloced(const BlkId& b, bool use_lock = false) const = 0;
     virtual std::string to_string() const = 0;
 
-    virtual void cp_flush(); // TODO: it needs to be a pure virtual function after bitmap blkallocator is derived
-                             // from base BlkAllocator;
+    virtual void cp_flush(CP* cp); // TODO: it needs to be a pure virtual function after bitmap blkallocator is derived
+                                   // from base BlkAllocator;
 
     sisl::Bitset* get_disk_bm_mutable() {
         set_disk_bm_dirty();

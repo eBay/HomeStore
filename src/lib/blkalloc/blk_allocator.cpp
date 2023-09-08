@@ -14,7 +14,6 @@
  *
  *********************************************************************************/
 #include "blk_allocator.h"
-// #include "blkalloc_cp.hpp"
 
 namespace homestore {
 BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, chunk_num_t id) :
@@ -42,7 +41,7 @@ BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, chunk_num_t id) :
     }
 }
 
-void BlkAllocator::cp_flush() {
+void BlkAllocator::cp_flush(CP*) {
     // To be implemented;
     LOGINFO("BitmapBlkAllocator cp_flush in not yet supported. ");
 }
