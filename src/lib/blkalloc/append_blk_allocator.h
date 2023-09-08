@@ -16,11 +16,12 @@
 #pragma once
 
 #include <sisl/logging/logging.h>
-#include <homestore/blk.h>
 #include "blk_allocator.h"
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
+#include <homestore/blk.h>
 #include <homestore/superblk_handler.hpp>
+#include <homestore/homestore.hpp>
 
 namespace homestore {
 static constexpr uint64_t append_blkalloc_sb_magic{0xd0d0d02b};
@@ -80,6 +81,7 @@ public:
     bool is_blk_alloced(const BlkId& in_bid, bool use_lock = false) const override;
     std::string to_string() const override;
 
+    /// @brief : needs to be called with cp_guard();
     void set_dirty_offset();
 
     /// @brief : clear dirty is best effort;

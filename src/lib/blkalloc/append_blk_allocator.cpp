@@ -15,6 +15,7 @@
  * *********************************************************************************/
 #include <homestore/meta_service.hpp>
 #include "append_blk_allocator.h"
+#include <homestore/checkpoint/cp_mgr.hpp>
 
 namespace homestore {
 
@@ -50,7 +51,12 @@ void AppendBlkAllocator::on_meta_blk_found(const sisl::byte_view& buf, void* met
     HS_REL_ASSERT_EQ(m_sb->version, append_blkalloc_sb_version, "Invalid version of AppendBlkAllocator metablk");
 }
 
+//
+// Every time buffer is being dirtied, it needs to be within CPGuard().
+// It garunteens either this dirty buffer is flushed in current cp or next cp as a whole;
+//
 // alloc a single block;
+//
 BlkAllocStatus AppendBlkAllocator::alloc(BlkId& bid) {
     if (available_blks() < 1) {
         COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
@@ -59,9 +65,10 @@ BlkAllocStatus AppendBlkAllocator::alloc(BlkId& bid) {
     }
 
     bid.set(m_last_append_offset, 1, m_chunk_id);
+
+    [[maybe_unused]] auto cur_cp = hs()->cp_mgr().cp_guard();
     ++m_last_append_offset;
     --m_freeable_nblks;
-
     set_dirty_offset();
 
     COUNTER_INCREMENT(m_metrics, num_alloc, 1);
@@ -88,6 +95,7 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
     // Push 1 blk to the vector which has all the requested nblks;
     out_bids.emplace_back(m_last_append_offset, nblks, m_chunk_id);
 
+    [[maybe_unused]] auto cur_cp = hs()->cp_mgr().cp_guard();
     m_last_append_offset += nblks;
     m_freeable_nblks -= nblks;
 
@@ -99,27 +107,7 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
 }
 
 //
-// Alternative design option:
-// Option-1. Everytime offset is updated in a single append_blk_allocator instance, update the dirty buffer into
-// VDevCPContext, which contains a list of (ThreadVector) dirty buffers from all the append_blk_allocator instances
-// (protected by RCU);
-//
-// And cp_flush flush every dirty buffer in that list to disk;
-//
-// Option-2. vdev cp_flush will call each individual chunk's blkallocator and each append_blk_allocator instance flush
-// its dirty buffer on demond;
-//
-// We are using option-2.
-//
-
-//
-// cp_flush is happening in different thread that is running concurrently as AppendBlkAllocator::alloc;
-//
-// 1. if clear_dirty_offset happens before offset is updated by alloc, but before set_dirty_offset, we are flushing
-// offset twice, which is fine.
-// 2. If clear_dirty_offset happens after set_dirty_offset, we are flushing offset ahead of log
-// store, which is also fine during recovery, it is consistent after log store flush completes;
-// 3. Any alloc happened after metablk is persisted will come to next cp;
+// cp_flush doesn't need CPGuard as it is triggered by CPMgr which already handles the reference check;
 //
 void AppendBlkAllocator::cp_flush() {
     if (m_is_dirty) {
@@ -144,6 +132,7 @@ void AppendBlkAllocator::clear_dirty_offset() { m_is_dirty = false; }
 // 2. if the blk being freed happens to be last block, move last_append_offset backwards accordingly;
 //
 void AppendBlkAllocator::free(const BlkId& bid) {
+    [[maybe_unused]] auto cur_cp = hs()->cp_mgr().cp_guard();
     const auto n = bid.get_nblks();
     m_freeable_nblks += n;
     if (bid.get_blk_num() + n == m_last_append_offset) {
