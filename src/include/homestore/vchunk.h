@@ -1,5 +1,5 @@
 /*********************************************************************************
- * Modifications Copyright 2017-2019 eBay Inc.
+ * Modifications Copyright 2017-2023 eBay Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,8 @@ class Chunk;
 
 class VChunk {
 public:
-    VChunk(cshared< Chunk >&);
+    VChunk(cshared< Chunk > const&);
+    
     ~VChunk() = default;
 
     void set_user_private(const sisl::blob& data);
