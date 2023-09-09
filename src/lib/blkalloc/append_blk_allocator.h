@@ -102,9 +102,9 @@ private:
     void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
 
 private:
-    std::mutex m_mtx; // thread_safe, TODO: open option for consumer to choose to go lockless;
-    std::atomic< uint64_t > m_last_append_offset{0}; // last appended offset in blocks;
-    std::atomic< uint64_t > m_freeable_nblks{0};
+    std::mutex m_mtx;                 // thread_safe, TODO: open option for consumer to choose to go lockless;
+    uint64_t m_last_append_offset{0}; // last appended offset in blocks;
+    uint64_t m_freeable_nblks{0};
     AppendBlkAllocMetrics m_metrics;
     std::array< superblk< append_blkalloc_ctx >, MAX_CP_COUNT > m_sb;
 };

@@ -183,7 +183,7 @@ bool AppendBlkAllocator::is_blk_alloced(const BlkId& in_bid, bool) const {
 std::string AppendBlkAllocator::get_name() const { return "AppendBlkAlloc_chunk_" + std::to_string(m_chunk_id); }
 
 std::string AppendBlkAllocator::to_string() const {
-    auto str = fmt::format("{}, last_append_offset: {}", get_name(), m_last_append_offset.load());
+    auto str = fmt::format("{}, last_append_offset: {}", get_name(), m_last_append_offset);
     return str;
 }
 
