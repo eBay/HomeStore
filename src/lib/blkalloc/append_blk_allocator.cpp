@@ -22,7 +22,7 @@
 namespace homestore {
 
 AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_format, chunk_num_t id) :
-        BlkAllocator{cfg, id}, m_metrics{get_name().c_str()}, m_sb{get_name()} {
+        BlkAllocator{cfg, id}, m_metrics{get_name().c_str()} {
     // TODO: try to make all append_blk_allocator instances use same client type to reduce metablk's cache footprint;
     meta_service().register_handler(
         get_name(),
@@ -34,6 +34,7 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_form
         m_last_append_offset = 0;
 
         for (uint8_t i = 0; i < m_sb.size(); ++i) {
+            m_sb[i].set_name(get_name());
             m_sb[i].create(sizeof(append_blkalloc_ctx));
             m_sb[i]->is_dirty = false;
             m_sb[i]->allocator_id = id;
@@ -67,6 +68,7 @@ void AppendBlkAllocator::on_meta_blk_found(const sisl::byte_view& buf, void* met
 // alloc a single block;
 //
 BlkAllocStatus AppendBlkAllocator::alloc(BlkId& bid) {
+    std::unique_lock lk(m_mtx);
     if (available_blks() < 1) {
         COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
         LOGERROR("No space left to serve request nblks: 1, available_blks: {}", available_blks());
@@ -90,6 +92,7 @@ BlkAllocStatus AppendBlkAllocator::alloc(BlkId& bid) {
 //
 BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hints& hint,
                                          std::vector< BlkId >& out_bids) {
+    std::unique_lock lk(m_mtx);
     if (available_blks() < nblks) {
         COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
         LOGERROR("No space left to serve request nblks: {}, available_blks: {}", nblks, available_blks());
@@ -108,6 +111,8 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
     m_last_append_offset += nblks;
     m_freeable_nblks -= nblks;
 
+    // it is garunteened dirty buffer always contains updates of current_cp or next_cp, it will
+    // never get dirty buffer from across updates;
     set_dirty_offset(cur_cp->id() % MAX_CP_COUNT);
 
     COUNTER_INCREMENT(m_metrics, num_alloc, 1);
@@ -117,6 +122,8 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
 
 //
 // cp_flush doesn't need CPGuard as it is triggered by CPMgr which already handles the reference check;
+//
+// cp_flush should not block alloc/free;
 //
 void AppendBlkAllocator::cp_flush(CP* cp) {
     const auto idx = cp->id();
@@ -147,6 +154,7 @@ void AppendBlkAllocator::clear_dirty_offset(const uint8_t idx) { m_sb[idx]->is_d
 // 2. if the blk being freed happens to be last block, move last_append_offset backwards accordingly;
 //
 void AppendBlkAllocator::free(const BlkId& bid) {
+    std::unique_lock lk(m_mtx);
     [[maybe_unused]] auto cur_cp = hs()->cp_mgr().cp_guard();
     const auto n = bid.get_nblks();
     m_freeable_nblks += n;

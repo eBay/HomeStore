@@ -57,8 +57,13 @@ public:
 
 //
 // The assumption for AppendBlkAllocator:
-// 1. Operations (alloc/free) are being called single threaded
+// 1. Operations (alloc/free) are being called multiple threadeds
 // 2. cp_flush will be triggered in a different thread
+//
+// Why do we want thread-safe AppendBlkAllocator:
+// 1. one reason is it makes sense for AppendBlkAllocator to work on a nvme drive
+// 2. for HDD, performance will drop significantly if alloc/write is being done in multi-threaded model, it is left for
+// consumer to make choice;
 //
 class AppendBlkAllocator : public BlkAllocator {
 public:
@@ -97,8 +102,8 @@ private:
     void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
 
 private:
+    std::mutex m_mtx; // thread_safe, TODO: open option for consumer to choose to go lockless;
     std::atomic< uint64_t > m_last_append_offset{0}; // last appended offset in blocks;
-    std::atomic< bool > m_is_dirty{false};
     std::atomic< uint64_t > m_freeable_nblks{0};
     AppendBlkAllocMetrics m_metrics;
     std::array< superblk< append_blkalloc_ctx >, MAX_CP_COUNT > m_sb;
