@@ -23,7 +23,7 @@ public:
     ChunkSelector() = default;
     virtual void add_chunk(VChunk chunk) = 0;
     virtual void foreach_chunks(std::function< void(VChunk&) >&& cb) = 0;
-    virtual Chunk* select(blk_count_t nblks, const blk_alloc_hints& hints) = 0;
+    virtual Chunk* select_chunk(blk_count_t nblks, const blk_alloc_hints& hints) = 0;
 
     virtual ~ChunkSelector() = default;
 };

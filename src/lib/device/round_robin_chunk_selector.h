@@ -36,7 +36,7 @@ public:
     ~RoundRobinChunkSelector() = default;
 
     void add_chunk(VChunk chunk) override;
-    Chunk* select(blk_count_t nblks, const blk_alloc_hints& hints) override;
+    Chunk* select_chunk(blk_count_t nblks, const blk_alloc_hints& hints) override;
     void foreach_chunks(std::function< void(VChunk&) >&& cb) override;
 
 private:

@@ -22,9 +22,9 @@ RoundRobinChunkSelector::RoundRobinChunkSelector(bool dynamic_chunk_add) : m_dyn
 
 void RoundRobinChunkSelector::add_chunk(VChunk chunk) { m_chunks.push_back(chunk); }
 
-Chunk* RoundRobinChunkSelector::select(blk_count_t, const blk_alloc_hints&) {
+Chunk* RoundRobinChunkSelector::select_chunk(blk_count_t, const blk_alloc_hints&) {
     if (*m_next_chunk_index >= m_chunks.size()) { *m_next_chunk_index = 0; }
-    return m_chunks[(*m_next_chunk_index)++].getInternalChunk().get();
+    return m_chunks[(*m_next_chunk_index)++].get_internal_chunk().get();
 }
 
 void RoundRobinChunkSelector::foreach_chunks(std::function< void(VChunk&) >&& cb) {

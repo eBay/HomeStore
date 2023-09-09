@@ -175,7 +175,7 @@ BlkAllocStatus VirtualDev::do_alloc_blk(blk_count_t nblks, const blk_alloc_hints
         size_t attempt{0};
 
         do {
-            chunk = m_chunk_selector->select(nblks, hints);
+            chunk = m_chunk_selector->select_chunk(nblks, hints);
             if (chunk == nullptr) { status = BlkAllocStatus::SPACE_FULL; }
 
             status = alloc_blk_from_chunk(nblks, hints, out_blkid, chunk);
@@ -435,7 +435,7 @@ uint64_t VirtualDev::used_size() const {
 }
 
 void VirtualDev::cp_flush() {
-    m_chunk_selector->foreach_chunks([this](VChunk& vchunk) { vchunk.getInternalChunk()->cp_flush(); });
+    m_chunk_selector->foreach_chunks([this](VChunk& vchunk) { vchunk.get_internal_chunk()->cp_flush(); });
 }
 
 std::vector< shared< Chunk > > VirtualDev::get_chunks() const { return m_all_chunks; }

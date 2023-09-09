@@ -19,21 +19,21 @@
 namespace homestore {
     VChunk::VChunk(cshared< Chunk >& chunk) : internalChunk(chunk){}
 
-    void VChunk::set_user_private(const sisl::blob& data){
+    void VChunk::set_user_private(const sisl::blob& data) const{
         internalChunk->set_user_private(data);
     }
 
-    uint8_t* VChunk::get_user_private() {
+    uint8_t* VChunk::get_user_private() const {
         return internalChunk->user_private();
     };
 
-    blk_cap_t VChunk::available_blks() {
+    blk_cap_t VChunk::available_blks() const {
         return internalChunk->blk_allocator()->available_blks();
     }
 
-    uint32_t VChunk::getPdevID() {
+    uint32_t VChunk::get_pdev_id() const {
         return internalChunk->physical_dev()->pdev_id();
     }
 
-    cshared< Chunk > VChunk::getInternalChunk() {return internalChunk;}
+    cshared< Chunk > VChunk::get_internal_chunk() const {return internalChunk;}
 }// namespace homestore
