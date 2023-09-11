@@ -19,11 +19,11 @@
 namespace homestore {
     VChunk::VChunk(cshared< Chunk >& chunk) : internalChunk(chunk){}
 
-    void VChunk::set_user_private(const sisl::blob& data) const{
+    void VChunk::set_user_private(const sisl::blob& data){
         internalChunk->set_user_private(data);
     }
 
-    uint8_t* VChunk::get_user_private() const {
+    const uint8_t* VChunk::get_user_private() const {
         return internalChunk->user_private();
     };
 

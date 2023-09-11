@@ -53,7 +53,7 @@ public:
     uint16_t chunk_id() const { return static_cast< uint16_t >(m_chunk_info.chunk_id); }
     uint64_t end_of_chunk() const { return m_chunk_info.end_of_chunk_size; }
     uint32_t pdev_ordinal() const { return m_chunk_info.chunk_ordinal; }
-    uint8_t* user_private() { return &m_chunk_info.user_private[0]; }
+    const uint8_t* user_private() { return &m_chunk_info.user_private[0]; }
     uint32_t stream_id() const { return m_stream_id; }
     uint32_t slot_number() const { return m_chunk_slot; }
     uint32_t vdev_ordinal() const { return m_vdev_ordinal; }

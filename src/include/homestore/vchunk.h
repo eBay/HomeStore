@@ -27,8 +27,8 @@ public:
     
     ~VChunk() = default;
 
-    void set_user_private(const sisl::blob& data) const;
-    uint8_t* get_user_private() const;
+    void set_user_private(const sisl::blob& data);
+    const uint8_t* get_user_private() const;
     blk_cap_t available_blks() const;
     uint32_t get_pdev_id() const;
     cshared< Chunk > get_internal_chunk () const;
