@@ -24,7 +24,9 @@
 #include <sisl/settings/settings.hpp>
 #include <homestore/homestore.hpp>
 #include <homestore/index_service.hpp>
+#include <homestore/checkpoint/cp_mgr.hpp>
 #include <iomgr/iomgr_config_generated.h>
+#include <common/homestore_assert.hpp>
 
 const std::string SPDK_ENV_VAR_STRING{"USER_WANT_SPDK"};
 const std::string HTTP_SVC_ENV_VAR_STRING{"USER_WANT_HTTP_OFF"};
@@ -93,11 +95,24 @@ private:
     }
 
     static std::vector< std::string > s_dev_names;
+    static blk_allocator_type_t s_ds_alloc_type;
+    static chunk_selector_type_t s_ds_chunk_sel_type;
 
 public:
+    static void set_data_svc_allocator(blk_allocator_type_t alloc_type) { s_ds_alloc_type = alloc_type; }
+    static void set_data_svc_chunk_selector(chunk_selector_type_t chunk_sel_type) {
+        s_ds_chunk_sel_type = chunk_sel_type;
+    }
+
     static void start_homestore(const std::string& test_name, float meta_pct, float data_log_pct, float ctrl_log_pct,
                                 float data_pct, float index_pct, hs_before_services_starting_cb_t cb,
-                                bool restart = false, std::unique_ptr< IndexServiceCallbacks > index_svc_cb = nullptr) {
+                                bool restart = false, std::unique_ptr< IndexServiceCallbacks > index_svc_cb = nullptr,
+                                bool default_data_svc_alloc_type = true) {
+        if (default_data_svc_alloc_type) {
+            set_data_svc_allocator(homestore::blk_allocator_type_t::varsize);
+            set_data_svc_chunk_selector(homestore::chunk_selector_type_t::ROUND_ROBIN);
+        }
+
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
@@ -168,7 +183,9 @@ public:
                 {HS_SERVICE::META, hs_format_params{.size_pct = meta_pct}},
                 {HS_SERVICE::LOG_REPLICATED, hs_format_params{.size_pct = data_log_pct}},
                 {HS_SERVICE::LOG_LOCAL, hs_format_params{.size_pct = ctrl_log_pct}},
-                {HS_SERVICE::DATA, hs_format_params{.size_pct = data_pct}},
+                {HS_SERVICE::DATA,
+                 hs_format_params{
+                     .size_pct = data_pct, .alloc_type = s_ds_alloc_type, .chunk_sel_type = s_ds_chunk_sel_type}},
                 {HS_SERVICE::INDEX, hs_format_params{.size_pct = index_pct}},
             });
         }
@@ -181,6 +198,63 @@ public:
 
         if (cleanup) { remove_files(s_dev_names); }
         s_dev_names.clear();
+    }
+
+    static void fill_data_buf(uint8_t* buf, uint64_t size) {
+        for (uint64_t i = 0ul; i < size; ++i) {
+            *(buf + i) = (i % 256);
+        }
+    }
+
+    static bool compare(const sisl::sg_list& sg1, const sisl::sg_list& sg2) {
+        if ((sg2.size != sg1.size)) {
+            LOGINFO("sg_list of sg1 size: {} mismatch with sg2 size: {}, ", sg1.size, sg2.size);
+            return false;
+        }
+
+        if (sg2.iovs.size() != sg1.iovs.size()) {
+            LOGINFO("sg_list num of iovs mismatch: sg1: {}, sg2: {}", sg1.iovs.size(), sg2.iovs.size());
+            return false;
+        }
+
+        const auto num_iovs = sg2.iovs.size();
+        for (auto i = 0ul; i < num_iovs; ++i) {
+            if (sg2.iovs[i].iov_len != sg1.iovs[i].iov_len) {
+                LOGINFO("iov_len of iov[{}] mismatch, sg1: {}, sg2: {}", i, sg1.iovs[i].iov_len, sg2.iovs[i].iov_len);
+                return false;
+            }
+            auto ret = std::memcmp(sg2.iovs[i].iov_base, sg1.iovs[i].iov_base, sg1.iovs[i].iov_len);
+            if (ret != 0) {
+                LOGINFO("memcmp return false for iovs[{}] between sg1 and sg2.", i);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    static void free(sisl::sg_list& sg) {
+        for (auto x : sg.iovs) {
+            iomanager.iobuf_free(s_cast< uint8_t* >(x.iov_base));
+            x.iov_base = nullptr;
+            x.iov_len = 0;
+        }
+
+        sg.size = 0;
+    }
+
+    static void trigger_cp(bool wait) {
+        auto fut = homestore::hs()->cp_mgr().trigger_cp_flush(true /* force */);
+        auto on_complete = [&](auto success) {
+            HS_REL_ASSERT_EQ(success, true, "CP Flush failed");
+            LOGINFO("CP Flush completed");
+        };
+
+        if (wait) {
+            on_complete(std::move(fut).get());
+        } else {
+            std::move(fut).thenValue(on_complete);
+        }
     }
 };
 } // namespace test_common

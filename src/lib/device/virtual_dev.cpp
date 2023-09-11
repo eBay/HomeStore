@@ -43,6 +43,7 @@
 #include "common/homestore_assert.hpp"
 #include "common/homestore_utils.hpp"
 #include "blkalloc/varsize_blk_allocator.h"
+#include "blkalloc/append_blk_allocator.h"
 
 SISL_LOGGING_DECL(device)
 
@@ -69,23 +70,44 @@ static std::shared_ptr< BlkAllocator > create_blk_allocator(blk_allocator_type_t
         cfg.set_auto_recovery(is_auto_recovery);
         return std::make_shared< VarsizeBlkAllocator >(cfg, is_init, unique_id);
     }
+    case blk_allocator_type_t::append: {
+        BlkAllocConfig cfg{vblock_size, align_sz, size, std::string("append_chunk_") + std::to_string(unique_id)};
+        cfg.set_auto_recovery(is_auto_recovery);
+        return std::make_shared< AppendBlkAllocator >(cfg, is_init, unique_id);
+    }
     case blk_allocator_type_t::none:
     default:
         return nullptr;
     }
 }
 
-VirtualDev::VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, blk_allocator_type_t allocator_type,
-                       chunk_selector_type_t chunk_selector, vdev_event_cb_t event_cb, bool is_auto_recovery) :
+VirtualDev::VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, vdev_event_cb_t event_cb, bool is_auto_recovery) :
         m_vdev_info{vinfo},
         m_dmgr{dmgr},
         m_name{vinfo.name},
         m_event_cb{std::move(event_cb)},
         m_metrics{vinfo.name},
-        m_allocator_type{allocator_type},
-        m_chunk_selector_type{chunk_selector},
+        m_allocator_type{vinfo.alloc_type},
+        m_chunk_selector_type{vinfo.chunk_sel_type},
         m_auto_recovery{is_auto_recovery} {
-    m_chunk_selector = std::make_unique< RoundRobinChunkSelector >(false /* dynamically add chunk */);
+    switch (m_chunk_selector_type) {
+    case chunk_selector_type_t::ROUND_ROBIN: {
+        m_chunk_selector = std::make_unique< RoundRobinChunkSelector >(false /* dynamically add chunk */);
+        break;
+    }
+    case chunk_selector_type_t::HEAP: {
+        // FIXME: change to HeapChunkSelector after it is ready;
+        m_chunk_selector = std::make_unique< RoundRobinChunkSelector >(false /* dynamically add chunk */);
+        break;
+    }
+    case chunk_selector_type_t::NONE: {
+        m_chunk_selector = nullptr;
+        break;
+    }
+    default:
+        LOGERROR("Unexpected chunk selector type: {}", m_chunk_selector_type);
+        m_chunk_selector = nullptr;
+    }
 }
 
 // TODO: Have an additional parameter for vdev to check if dynamic add chunk. If so, we need to take do an rcu for
@@ -434,10 +456,6 @@ uint64_t VirtualDev::used_size() const {
     return (alloc_cnt * block_size());
 }
 
-void VirtualDev::cp_flush() {
-    m_chunk_selector->foreach_chunks([this](cshared< Chunk >& chunk) { chunk->cp_flush(); });
-}
-
 std::vector< shared< Chunk > > VirtualDev::get_chunks() const { return m_all_chunks; }
 
 /*void VirtualDev::blkalloc_cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp) {
@@ -502,6 +520,26 @@ void VirtualDev::update_vdev_private(const sisl::blob& private_data) {
 
     vinfo->~vdev_info();
     hs_utils::iobuf_free(buf, sisl::buftag::superblk);
+}
+
+///////////////////////// VirtualDev Checkpoint methods /////////////////////////////
+
+VDevCPContext::VDevCPContext(cp_id_t cp_id) : CPContext(cp_id) {}
+
+std::unique_ptr< CPContext > VirtualDev::create_cp_context(cp_id_t cp_id) {
+    return std::make_unique< VDevCPContext >(cp_id);
+}
+
+void VirtualDev::cp_flush(CP* cp) {
+    // pass down cp so that underlying componnents can get their customized CP context if needed;
+    m_chunk_selector->foreach_chunks([this, cp](cshared< Chunk >& chunk) { chunk->cp_flush(cp); });
+}
+
+// sync-ops during cp_flush, so return 100;
+int VirtualDev::cp_progress_percent() { return 100; }
+
+void VirtualDev::cp_cleanup(CP*) {
+    // no-op;
 }
 
 ///////////////////////// VirtualDev Private Methods /////////////////////////////

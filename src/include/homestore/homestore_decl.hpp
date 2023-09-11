@@ -89,9 +89,11 @@ ENUM(io_flag, uint8_t,
      DIRECT_IO,   // recommended mode
      READ_ONLY    // Read-only mode for post-mortem checks
 );
-ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize);
+ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize, append);
 ENUM(chunk_selector_type_t, uint8_t, // What are the options to select chunk to allocate a block
+     NONE,                           // Caller want nothing to be set
      ROUND_ROBIN,                    // Pick round robin
+     HEAP,                           // Heap chunk selector
      CUSTOM,                         // Controlled by the upper layer
      RANDOM,                         // Pick any chunk in uniformly random fashion
      MOST_AVAILABLE_SPACE,           // Pick the most available space
@@ -165,6 +167,8 @@ struct HS_SERVICE {
 struct hs_format_params {
     float size_pct;
     uint32_t num_chunks{1};
+    blk_allocator_type_t alloc_type{blk_allocator_type_t::varsize};
+    chunk_selector_type_t chunk_sel_type{chunk_selector_type_t::ROUND_ROBIN};
 };
 
 struct hs_input_params {
@@ -212,8 +216,8 @@ struct cap_attrs {
 #endif
 
 ////////////// Misc ///////////////////
-#define HOMESTORE_LOG_MODS                                                                                               \
-    btree_structures, btree_nodes, btree_generics, btree, cache, device, blkalloc, vol_io_wd, volume, flip, cp, metablk, \
-        indx_mgr, wbcache, logstore, replay, transient, IOMGR_LOG_MODS
+#define HOMESTORE_LOG_MODS                                                                                             \
+    btree_structures, btree_nodes, btree_generics, btree, cache, device, blkalloc, vol_io_wd, volume, flip, cp,        \
+        metablk, indx_mgr, wbcache, logstore, replay, transient, IOMGR_LOG_MODS
 
 } // namespace homestore

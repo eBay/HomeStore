@@ -31,6 +31,7 @@
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/enum.hpp>
 
+#include <homestore/checkpoint/cp_mgr.hpp>
 #include <homestore/homestore_decl.hpp>
 #include "device/device.h"
 #include "device/chunk_selector.hpp"
@@ -96,8 +97,7 @@ protected:
     bool m_auto_recovery;
 
 public:
-    VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, blk_allocator_type_t allocator_type,
-               chunk_selector_type_t chunk_selector, vdev_event_cb_t event_cb, bool is_auto_recovery);
+    VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, vdev_event_cb_t event_cb, bool is_auto_recovery);
 
     VirtualDev(const VirtualDev& other) = delete;
     VirtualDev& operator=(const VirtualDev& other) = delete;
@@ -246,7 +246,19 @@ public:
     void submit_batch();
 
     virtual void recovery_done();
-    void cp_flush();
+
+    ////////////////////// Checkpointing related methods ///////////////////////////
+    /// @brief
+    ///
+    /// @param cp
+    void cp_flush(CP* cp);
+
+    void cp_cleanup(CP* cp);
+
+    /// @brief : percentage CP has been progressed, this api is normally used for cp watchdog;
+    int cp_progress_percent();
+
+    std::unique_ptr< CPContext > create_cp_context(cp_id_t cp_id);
 
     ////////////////////////// Standard Getters ///////////////////////////////
     virtual uint64_t available_blks() const;
@@ -275,6 +287,13 @@ private:
     uint64_t to_dev_offset(const BlkId& b, Chunk** chunk) const;
     BlkAllocStatus alloc_blk_from_chunk(blk_count_t nblks, const blk_alloc_hints& hints,
                                         std::vector< BlkId >& out_blkid, Chunk* chunk);
+};
+
+// place holder for future needs in which components underlying virtualdev needs cp flush context;
+class VDevCPContext : public CPContext {
+public:
+    VDevCPContext(cp_id_t cp_id);
+    virtual ~VDevCPContext() = default;
 };
 
 } // namespace homestore

@@ -57,12 +57,17 @@ folly::Future< bool > LogStoreService::create_vdev(uint64_t size, logstore_famil
         hs_ctx.type = hs_vdev_type_t::CTRL_LOGDEV_VDEV;
     }
 
+    // reason we set alloc_type/chunk_sel_type here instead of by homestore logstore service consumer is because
+    // consumer doesn't care or understands the underlying alloc/chunkSel for this service, if this changes in the
+    // future, we can let consumer set it by then;
     auto vdev =
         hs()->device_mgr()->create_vdev(vdev_parameters{.vdev_name = name,
                                                         .vdev_size = size,
                                                         .num_chunks = 1,
                                                         .blk_size = atomic_page_size,
                                                         .dev_type = HSDevType::Fast,
+                                                        .alloc_type = blk_allocator_type_t::none,
+                                                        .chunk_sel_type = chunk_selector_type_t::ROUND_ROBIN,
                                                         .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
                                                         .context_data = hs_ctx.to_blob()});
 
