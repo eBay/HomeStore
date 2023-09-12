@@ -42,7 +42,7 @@ LogStoreService::LogStoreService() :
         m_logstore_families{std::make_unique< LogStoreFamily >(DATA_LOG_FAMILY_IDX),
                             std::make_unique< LogStoreFamily >(CTRL_LOG_FAMILY_IDX)} {}
 
-folly::Future< bool > LogStoreService::create_vdev(uint64_t size, logstore_family_id_t family) {
+folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, logstore_family_id_t family) {
     const auto atomic_page_size = hs()->device_mgr()->atomic_page_size(HSDevType::Fast);
 
     hs_vdev_context hs_ctx;

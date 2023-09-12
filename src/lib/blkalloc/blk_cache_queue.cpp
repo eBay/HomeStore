@@ -26,16 +26,16 @@ FreeBlkCacheQueue::FreeBlkCacheQueue(const SlabCacheConfig& cfg, BlkAllocMetrics
 
     m_slab_queues.reserve(cfg.m_per_slab_cfg.size());
     for (const auto& slab_cfg : cfg.m_per_slab_cfg) {
-        std::vector< blk_cap_t > level_limits;
+        std::vector< blk_num_t > level_limits;
         level_limits.reserve(slab_cfg.m_level_distribution_pct.size());
 #ifndef NDEBUG
         HS_DBG_ASSERT_EQ(slab_cfg.slab_size, slab_size, "Slab config size is not contiguous power of 2");
         slab_size *= 2;
 #endif
 
-        blk_cap_t sum{0};
+        blk_num_t sum{0};
         for (const auto& p : slab_cfg.m_level_distribution_pct) {
-            const blk_cap_t limit{static_cast< blk_cap_t >((static_cast< double >(slab_cfg.max_entries) * p) / 100.0)};
+            const blk_num_t limit{static_cast< blk_num_t >((static_cast< double >(slab_cfg.max_entries) * p) / 100.0)};
             sum += limit;
             level_limits.push_back(limit);
         }
@@ -54,7 +54,7 @@ BlkAllocStatus FreeBlkCacheQueue::try_alloc_blks(const blk_cache_alloc_req& req,
     const auto slab_idx{std::min(FreeBlkCache::find_slab(req.nblks), req.max_slab_idx)};
 
     COUNTER_INCREMENT(slab_metrics(slab_idx), num_slab_alloc, 1);
-    BlkAllocStatus status{try_alloc_in_slab(slab_idx, req, resp)};
+    BlkAllocStatus status = try_alloc_in_slab(slab_idx, req, resp);
     if (status == BlkAllocStatus::SUCCESS) {
         BLKALLOC_LOG(TRACE, "Alloced in slab {}", resp.out_blks.front().to_string());
         return status;
@@ -95,8 +95,8 @@ blk_count_t FreeBlkCacheQueue::try_free_blks(const blk_cache_entry& entry,
     blk_cache_entry e{entry};
     blk_count_t num_zombied{0};
 
-    while (e.get_nblks() > 0) {
-        const auto [slab_idx, excess]{FreeBlkCache::find_round_down_slab(e.get_nblks())};
+    while (e.blk_count() > 0) {
+        const auto [slab_idx, excess]{FreeBlkCache::find_round_down_slab(e.blk_count())};
 #ifndef NDEBUG
         if (slab_idx >= m_slab_queues.size()) {
             BLKALLOC_LOG(ERROR, "Entry=[{}] slab_idx={} exceeds max slab queues {}", entry.to_string(), slab_idx,
@@ -104,15 +104,15 @@ blk_count_t FreeBlkCacheQueue::try_free_blks(const blk_cache_entry& entry,
         }
 #endif
 
-        e.set_nblks(m_slab_queues[slab_idx]->get_slab_size());
+        e.set_blk_count(m_slab_queues[slab_idx]->get_slab_size());
         if (!push_slab(slab_idx, e, false /* only_this_level */)) {
             excess_blks.push_back(e);
-            num_zombied += e.get_nblks();
+            num_zombied += e.blk_count();
         }
 
         if (excess == 0) { break; }
         e.set_blk_num(e.get_blk_num() + m_slab_queues[slab_idx]->get_slab_size());
-        e.set_nblks(excess);
+        e.set_blk_count(excess);
     }
 
     return num_zombied;
@@ -129,8 +129,8 @@ blk_count_t FreeBlkCacheQueue::try_free_blks(const std::vector< blk_cache_entry 
     return num_zombied;
 }
 
-blk_cap_t FreeBlkCacheQueue::try_fill_cache(const blk_cache_fill_req& fill_req, blk_cache_fill_session& fill_session) {
-    blk_cap_t nblks_added{0};
+blk_num_t FreeBlkCacheQueue::try_fill_cache(const blk_cache_fill_req& fill_req, blk_cache_fill_session& fill_session) {
+    blk_num_t nblks_added{0};
     slab_idx_t slabs_pending_refill{static_cast< slab_idx_t >(m_slab_queues.size())};
 
     auto slab_idx{FreeBlkCache::find_slab(fill_req.nblks)};
@@ -167,8 +167,8 @@ blk_cap_t FreeBlkCacheQueue::try_fill_cache(const blk_cache_fill_req& fill_req, 
     return (fill_req.nblks - nblks_remain);
 }
 
-blk_cap_t FreeBlkCacheQueue::total_free_blks() const {
-    blk_cap_t count{0};
+blk_num_t FreeBlkCacheQueue::total_free_blks() const {
+    blk_num_t count{0};
     for (const auto& sq : m_slab_queues) {
         count += sq->entry_count() * sq->slab_size();
     }
@@ -194,13 +194,13 @@ BlkAllocStatus FreeBlkCacheQueue::try_alloc_in_slab(const slab_idx_t slab_idx, c
                              "Residue block count are not expected to exceed last entry");
             const blk_count_t needed_blocks{
                 static_cast< blk_count_t >(m_slab_queues[slab_idx]->slab_size() - residue_nblks)};
-            resp.out_blks.back().set_nblks(needed_blocks);
+            resp.out_blks.back().set_blk_count(needed_blocks);
             resp.nblks_alloced -= residue_nblks;
 
             // Create the trail residue entry and use that to free them.
             auto residue_e{resp.out_blks.back()};
             residue_e.set_blk_num(residue_e.get_blk_num() + needed_blocks);
-            residue_e.set_nblks(residue_nblks);
+            residue_e.set_blk_count(residue_nblks);
             BLKALLOC_LOG(TRACE, "Residue blocks {}", residue_e.to_string());
             resp.nblks_zombied += try_free_blks(residue_e, resp.excess_blks);
         }
@@ -292,7 +292,7 @@ std::optional< blk_temp_t > FreeBlkCacheQueue::pop_slab(const slab_idx_t slab_id
     return ret;
 }
 
-SlabCacheQueue::SlabCacheQueue(const blk_count_t slab_size, const std::vector< blk_cap_t >& level_limits,
+SlabCacheQueue::SlabCacheQueue(const blk_count_t slab_size, const std::vector< blk_num_t >& level_limits,
                                const float refill_pct, BlkAllocMetrics* parent_metrics) :
         m_slab_size{slab_size}, m_metrics{m_slab_size, this, parent_metrics} {
     for (auto& limit : level_limits) {
@@ -305,8 +305,8 @@ SlabCacheQueue::SlabCacheQueue(const blk_count_t slab_size, const std::vector< b
 }
 
 std::optional< blk_temp_t > SlabCacheQueue::push(const blk_cache_entry& entry, const bool only_this_level) {
-    const blk_temp_t start_level{
-        static_cast< blk_temp_t >((entry.get_temperature() >= m_level_queues.size()) ? m_level_queues.size() - 1 : entry.get_temperature())};
+    const blk_temp_t start_level{static_cast< blk_temp_t >(
+        (entry.get_temperature() >= m_level_queues.size()) ? m_level_queues.size() - 1 : entry.get_temperature())};
     blk_temp_t level{start_level};
     bool pushed{m_level_queues[start_level]->write(entry)};
 
@@ -337,20 +337,20 @@ std::optional< blk_temp_t > SlabCacheQueue::pop(const blk_temp_t input_level, co
     return popped ? std::optional< blk_temp_t >{start_level} : std::nullopt;
 }
 
-blk_cap_t SlabCacheQueue::entry_count() const {
-    blk_cap_t sz{0};
+blk_num_t SlabCacheQueue::entry_count() const {
+    blk_num_t sz{0};
     for (size_t l{0}; l < m_level_queues.size(); ++l) {
         sz += num_level_entries(l);
     }
     return sz;
 }
 
-blk_cap_t SlabCacheQueue::entry_capacity() const { return m_total_capacity; }
+blk_num_t SlabCacheQueue::entry_capacity() const { return m_total_capacity; }
 
-blk_cap_t SlabCacheQueue::num_level_entries(const blk_temp_t level) const { return m_level_queues[level]->sizeGuess(); }
+blk_num_t SlabCacheQueue::num_level_entries(const blk_temp_t level) const { return m_level_queues[level]->sizeGuess(); }
 
-blk_cap_t SlabCacheQueue::open_session(const uint64_t session_id, const bool fill_entire_cache) {
-    blk_cap_t count{0};
+blk_num_t SlabCacheQueue::open_session(const uint64_t session_id, const bool fill_entire_cache) {
+    blk_num_t count{0};
 
     uint64_t id{m_refill_session.load(std::memory_order_acquire)};
     if (id == 0) {

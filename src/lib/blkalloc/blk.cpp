@@ -17,94 +17,157 @@
 #include "common/homestore_assert.hpp"
 
 namespace homestore {
+BlkId::BlkId(uint64_t id_int) {
+    *r_cast< uint64_t* >(&s) = id_int;
+    DEBUG_ASSERT_EQ(is_multi(), 0, "MultiBlkId is set on BlkId constructor");
+}
+
+BlkId::BlkId(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num) : s{false, blk_num, nblks, chunk_num} {}
+
+uint64_t BlkId::to_integer() const { return *r_cast< const uint64_t* >(&s); }
+
+sisl::blob BlkId::serialize() { return sisl::blob{r_cast< uint8_t* >(&s), sizeof(serialized)}; }
+
+uint32_t BlkId::serialized_size() const { return sizeof(BlkId); }
+
+void BlkId::deserialize(sisl::blob const& b, bool copy) {
+    serialized* other = r_cast< serialized* >(b.bytes);
+    s = *other;
+}
+
+void BlkId::invalidate() { s.m_nblks = 0; }
+
+bool BlkId::is_valid() const { return (blk_count() > 0); }
+
+std::string BlkId::to_string() const {
+    return is_valid() ? fmt::format("BlkNum={} nblks={} chunk={}", blk_num(), blk_count(), chunk_num())
+                      : "Invalid_Blkid";
+}
+
 int BlkId::compare(const BlkId& one, const BlkId& two) {
-    if (one.m_chunk_num > two.m_chunk_num) {
+    if (one.chunk_num() < two.chunk_num()) {
         return -1;
-    } else if (one.m_chunk_num < two.m_chunk_num) {
+    } else if (one.chunk_num() > two.chunk_num()) {
         return 1;
     }
 
-    if (one.m_blk_num > two.m_blk_num) {
+    if (one.blk_num() < two.blk_num()) {
         return -1;
-    } else if (one.m_blk_num < two.m_blk_num) {
+    } else if (one.blk_num() > two.blk_num()) {
         return 1;
     }
 
-    if (one.m_nblks > two.m_nblks) {
+    if (one.blk_count() < two.blk_count()) {
         return -1;
-    } else if (one.m_nblks < two.m_nblks) {
+    } else if (one.blk_count() > two.blk_count()) {
         return 1;
     }
 
     return 0;
 }
 
-uint64_t BlkId::to_integer() const {
-    const uint64_t val{m_blk_num | (static_cast< uint64_t >(m_nblks) << BLK_NUM_BITS) |
-                       (static_cast< uint64_t >(m_chunk_num) << (BLK_NUM_BITS + NBLKS_BITS))};
-    return val;
+//////////////////////////////////// MultiBlkId Section //////////////////////////////
+MultiBlkId::MultiBlkId() : BlkId::BlkId() { s.m_is_multi = 1; }
+
+MultiBlkId::MultiBlkId(BlkId const& b) : BlkId::BlkId(b) { s.m_is_multi = 1; }
+
+MultiBlkId::MultiBlkId(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num) :
+        BlkId::BlkId{blk_num, nblks, chunk_num} {
+    s.m_is_multi = 1;
 }
 
-BlkId::BlkId(uint64_t id_int) { set(id_int); }
-BlkId::BlkId(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num) { set(blk_num, nblks, chunk_num); }
-
-void BlkId::invalidate() { set(blk_num_t{0}, blk_count_t{0}, s_chunk_num_mask); }
-
-bool BlkId::is_valid() const { return (m_chunk_num != s_chunk_num_mask); }
-
-BlkId BlkId::get_blkid_at(uint32_t offset, uint32_t pagesz) const {
-    assert(offset % pagesz == 0);
-    const uint32_t remaining_size{((get_nblks() - (offset / pagesz)) * pagesz)};
-    return (get_blkid_at(offset, remaining_size, pagesz));
+void MultiBlkId::add(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num) {
+    if (BlkId::is_valid()) {
+        RELEASE_ASSERT_EQ(s.m_chunk_num, chunk_num, "MultiBlkId has to be all from same chunk");
+        RELEASE_ASSERT_LT(n_addln_piece, max_addln_pieces, "MultiBlkId cannot support more than {} pieces",
+                          max_addln_pieces + 1);
+        addln_pieces[n_addln_piece] = chain_blkid{.m_blk_num = blk_num, .m_nblks = nblks};
+        ++n_addln_piece;
+    } else {
+        s = BlkId::serialized{true, blk_num, nblks, chunk_num};
+    }
 }
 
-BlkId BlkId::get_blkid_at(uint32_t offset, uint32_t size, uint32_t pagesz) const {
-    assert(size % pagesz == 0);
-    assert(offset % pagesz == 0);
+void MultiBlkId::add(BlkId const& b) { add(b.blk_num(), b.blk_count(), b.chunk_num()); }
 
-    BlkId other;
+sisl::blob MultiBlkId::serialize() { return sisl::blob{r_cast< uint8_t* >(this), serialized_size()}; }
 
-    other.set_blk_num(get_blk_num() + (offset / pagesz));
-    other.set_nblks(size / pagesz);
-    other.set_chunk_num(get_chunk_num());
-
-    assert(other.get_blk_num() < get_blk_num() + get_nblks());
-    assert((other.get_blk_num() + other.get_nblks()) <= (get_blk_num() + get_nblks()));
-    return other;
+uint32_t MultiBlkId::serialized_size() const {
+    uint32_t sz = BlkId::serialized_size();
+    if (n_addln_piece != 0) { sz += sizeof(uint16_t) + (n_addln_piece * sizeof(chain_blkid)); }
+    return sz;
 }
 
-void BlkId::set(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num) {
-    set_blk_num(blk_num);
-    set_nblks(nblks);
-    set_chunk_num(chunk_num);
+void MultiBlkId::deserialize(sisl::blob const& b, bool copy) {
+    MultiBlkId* other = r_cast< MultiBlkId* >(b.bytes);
+    s = other->s;
+    if (b.size == sizeof(BlkId)) {
+        n_addln_piece = 0;
+    } else {
+        n_addln_piece = other->n_addln_piece;
+        std::copy(other->addln_pieces.begin(), other->addln_pieces.begin() + other->n_addln_piece,
+                  addln_pieces.begin());
+    }
 }
 
-void BlkId::set(const BlkId& bid) { set(bid.get_blk_num(), bid.get_nblks(), bid.get_chunk_num()); }
+uint16_t MultiBlkId::num_pieces() const { return n_addln_piece + (BlkId::is_valid() ? 1 : 0); }
 
-void BlkId::set(uint64_t id_int) {
-    HS_DBG_ASSERT_LE(id_int, max_id_int());
-    m_blk_num = (id_int & s_blk_num_mask);
-    m_nblks = static_cast< blk_count_t >((id_int >> BLK_NUM_BITS) & s_nblks_mask);
-    m_chunk_num = static_cast< chunk_num_t >((id_int >> (BLK_NUM_BITS + NBLKS_BITS)) & s_chunk_num_mask);
+bool MultiBlkId::has_room() const { return (n_addln_piece < max_addln_pieces); }
+
+MultiBlkId::iterator MultiBlkId::iterate() const { return MultiBlkId::iterator{*this}; }
+
+std::string MultiBlkId::to_string() const {
+    std::string str = "MultiBlks: {";
+    auto it = iterate();
+    while (auto const b = it.next()) {
+        str += b->to_string();
+    }
+    str += std::string("}");
+    return str;
 }
 
-void BlkId::set_blk_num(blk_num_t blk_num) {
-    HS_DBG_ASSERT_LE(blk_num, s_blk_num_mask);
-    m_blk_num = blk_num;
+blk_count_t MultiBlkId::blk_count() const {
+    blk_count_t nblks{0};
+    auto it = iterate();
+    while (auto b = it.next()) {
+        nblks += b->blk_count();
+    }
+    return nblks;
 }
 
-void BlkId::set_nblks(blk_count_t nblks) {
-    HS_DBG_ASSERT_LE(nblks, max_blks_in_op());
-    m_nblks = static_cast< blk_count_serialized_t >(nblks - 1);
-}
+int MultiBlkId::compare(MultiBlkId const& left, MultiBlkId const& right) {
+    if (left.chunk_num() < right.chunk_num()) {
+        return -1;
+    } else if (left.chunk_num() > right.chunk_num()) {
+        return 1;
+    }
 
-void BlkId::set_chunk_num(chunk_num_t chunk_num) {
-    HS_DBG_ASSERT_LE(chunk_num, s_chunk_num_mask);
-    m_chunk_num = chunk_num;
-}
+    // Shortcut path for simple BlkId search to avoid building icl set
+    if ((left.num_pieces() == 1) && (right.num_pieces() == 1)) {
+        return BlkId::compare(d_cast< BlkId const& >(left), d_cast< BlkId const& >(right));
+    }
 
-std::string BlkId::to_string() const {
-    return is_valid() ? fmt::format("BlkNum={} nblks={} chunk={}", get_blk_num(), get_nblks(), get_chunk_num())
-                      : "Invalid_Blkid";
+    using IntervalSet = boost::icl::interval_set< uint64_t >;
+    using Interval = IntervalSet::interval_type;
+
+    IntervalSet lset;
+    auto lit = left.iterate();
+    while (auto b = lit.next()) {
+        lset.insert(Interval::right_open(b->blk_num(), b->blk_num() + b->blk_count()));
+    }
+
+    IntervalSet rset;
+    auto rit = right.iterate();
+    while (auto b = rit.next()) {
+        rset.insert(Interval::right_open(b->blk_num(), b->blk_num() + b->blk_count()));
+    }
+
+    if (lset < rset) {
+        return -1;
+    } else if (lset > rset) {
+        return 1;
+    } else {
+        return 0;
+    }
 }
 } // namespace homestore

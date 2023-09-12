@@ -66,41 +66,54 @@ bool BlkAllocator::is_blk_alloced_on_disk(const BlkId& b, bool use_lock) const {
     if (!auto_recovery_on()) {
         return true; // nothing to compare. So always return true
     }
-    auto bits_set{[this, &b]() {
-        if (!get_disk_bm_const()->is_bits_set(b.get_blk_num(), b.get_nblks())) { return false; }
+    auto bits_set = [this](BlkId const& b) {
+        if (!get_disk_bm_const()->is_bits_set(b.blk_num(), b.blk_count())) { return false; }
         return true;
-    }};
+    };
+
     if (use_lock) {
-        const BlkAllocPortion& portion = blknum_to_portion_const(b.get_blk_num());
+        const BlkAllocPortion& portion = blknum_to_portion_const(b.blk_num());
         auto lock{portion.portion_auto_lock()};
-        return bits_set();
+        return bits_set(b);
     } else {
-        return bits_set();
+        return bits_set(b);
     }
 }
 
-BlkAllocStatus BlkAllocator::alloc_on_disk(const BlkId& in_bid) {
+BlkAllocStatus BlkAllocator::alloc_on_disk(BlkId const& bid) {
     if (!auto_recovery_on() && m_inited) { return BlkAllocStatus::FAILED; }
 
     rcu_read_lock();
     auto list = get_alloc_blk_list();
     if (list) {
         // cp has started, accumulating to the list
-        list->push_back(in_bid);
+        list->push_back(bid);
     } else {
+        auto set_on_disk_bm = [this](auto& b) {
+            BlkAllocPortion& portion = blknum_to_portion(b.blk_num());
+            {
+                auto lock{portion.portion_auto_lock()};
+                if (m_inited) {
+                    BLKALLOC_REL_ASSERT(get_disk_bm_const()->is_bits_reset(b.blk_num(), b.blk_count()),
+                                        "Expected disk blks to reset");
+                }
+                get_disk_bm_mutable()->set_bits(b.blk_num(), b.blk_count());
+                portion.decrease_available_blocks(b.blk_count());
+                BLKALLOC_LOG(DEBUG, "blks allocated {} chunk number {}", b.to_string(), m_chunk_id);
+            }
+        };
+
         // cp is not started or already done, allocate on disk bm directly;
         /* enable this assert later when reboot is supported */
         // assert(auto_recovery_on() || !m_inited);
-        BlkAllocPortion& portion = blknum_to_portion(in_bid.get_blk_num());
-        {
-            auto lock{portion.portion_auto_lock()};
-            if (m_inited) {
-                BLKALLOC_REL_ASSERT(get_disk_bm_const()->is_bits_reset(in_bid.get_blk_num(), in_bid.get_nblks()),
-                                    "Expected disk blks to reset");
+        if (bid.is_multi()) {
+            MultiBlkId const& mbid = r_cast< MultiBlkId const& >(bid);
+            auto it = mbid.iterate();
+            while (auto b = it.next()) {
+                set_on_disk_bm(*b);
             }
-            get_disk_bm_mutable()->set_bits(in_bid.get_blk_num(), in_bid.get_nblks());
-            portion.decrease_available_blocks(in_bid.get_nblks());
-            BLKALLOC_LOG(DEBUG, "blks allocated {} chunk number {}", in_bid.to_string(), m_chunk_id);
+        } else {
+            set_on_disk_bm(bid);
         }
     }
     rcu_read_unlock();
@@ -108,29 +121,42 @@ BlkAllocStatus BlkAllocator::alloc_on_disk(const BlkId& in_bid) {
     return BlkAllocStatus::SUCCESS;
 }
 
-BlkAllocStatus BlkAllocator::alloc_on_realtime(const BlkId& b) {
+BlkAllocStatus BlkAllocator::alloc_on_realtime(BlkId const& bid) {
     if (!realtime_bm_on()) { return BlkAllocStatus::SUCCESS; }
 
     if (!auto_recovery_on() && m_inited) { return BlkAllocStatus::FAILED; }
-    BlkAllocPortion& portion = blknum_to_portion(b.get_blk_num());
-    {
-        auto lock{portion.portion_auto_lock()};
-        if (m_inited) {
-            if (!get_realtime_bm()->is_bits_reset(b.get_blk_num(), b.get_nblks())) {
-                BLKALLOC_LOG(ERROR, "bit not reset {} nblks {} chunk number {}", b.get_blk_num(), b.get_nblks(),
-                             m_chunk_id);
-                for (blk_count_t i{0}; i < b.get_nblks(); ++i) {
-                    if (!get_disk_bm_const()->is_bits_reset(b.get_blk_num() + i, 1)) {
-                        BLKALLOC_LOG(ERROR, "bit not reset {}", b.get_blk_num() + i);
+
+    auto set_on_realtime_bm = [this](BlkId const& b) {
+        BlkAllocPortion& portion = blknum_to_portion(b.blk_num());
+        {
+            auto lock{portion.portion_auto_lock()};
+            if (m_inited) {
+                if (!get_realtime_bm()->is_bits_reset(b.blk_num(), b.blk_count())) {
+                    BLKALLOC_LOG(ERROR, "bit not reset {} nblks {} chunk number {}", b.blk_num(), b.blk_count(),
+                                 m_chunk_id);
+                    for (blk_count_t i{0}; i < b.blk_count(); ++i) {
+                        if (!get_disk_bm_const()->is_bits_reset(b.blk_num() + i, 1)) {
+                            BLKALLOC_LOG(ERROR, "bit not reset {}", b.blk_num() + i);
+                        }
                     }
+                    BLKALLOC_REL_ASSERT(get_realtime_bm()->is_bits_reset(b.blk_num(), b.blk_count()),
+                                        "Expected disk bits to reset blk num {} num blks {}", b.blk_num(),
+                                        b.blk_count());
                 }
-                BLKALLOC_REL_ASSERT(get_realtime_bm()->is_bits_reset(b.get_blk_num(), b.get_nblks()),
-                                    "Expected disk bits to reset blk num {} num blks {}", b.get_blk_num(),
-                                    b.get_nblks());
             }
+            get_realtime_bm()->set_bits(b.blk_num(), b.blk_count());
+            BLKALLOC_LOG(DEBUG, "realtime blks allocated {} chunk number {}", b.to_string(), m_chunk_id);
         }
-        get_realtime_bm()->set_bits(b.get_blk_num(), b.get_nblks());
-        BLKALLOC_LOG(DEBUG, "realtime blks allocated {} chunk number {}", b.to_string(), m_chunk_id);
+    };
+
+    if (bid.is_multi()) {
+        MultiBlkId const& mbid = r_cast< MultiBlkId const& >(bid);
+        auto it = mbid.iterate();
+        while (auto const b = it.next()) {
+            set_on_realtime_bm(*b);
+        }
+    } else {
+        set_on_realtime_bm(bid);
     }
 
     return BlkAllocStatus::SUCCESS;
@@ -139,60 +165,90 @@ BlkAllocStatus BlkAllocator::alloc_on_realtime(const BlkId& b) {
 //
 // Caller should consume the return value and print context when return false;
 //
-bool BlkAllocator::free_on_realtime(const BlkId& b) {
+bool BlkAllocator::free_on_realtime(BlkId const& bid) {
     if (!realtime_bm_on()) { return true; }
 
     /* this api should be called only when auto recovery is enabled */
     assert(auto_recovery_on());
-    BlkAllocPortion& portion = blknum_to_portion(b.get_blk_num());
-    {
-        auto lock{portion.portion_auto_lock()};
-        if (m_inited) {
-            /* During recovery we might try to free the entry which is already freed while replaying the journal,
-             * This assert is valid only post recovery.
-             */
-            if (!get_realtime_bm()->is_bits_set(b.get_blk_num(), b.get_nblks())) {
-                BLKALLOC_LOG(ERROR, "{}, bit not set {} nblks{} chunk number {}", b.to_string(), b.get_blk_num(),
-                             b.get_nblks(), m_chunk_id);
-                for (blk_count_t i{0}; i < b.get_nblks(); ++i) {
-                    if (!get_realtime_bm()->is_bits_set(b.get_blk_num() + i, 1)) {
-                        BLKALLOC_LOG(ERROR, "bit not set {}", b.get_blk_num() + i);
+
+    auto unset_on_realtime_bm = [this](BlkId const& b) {
+        BlkAllocPortion& portion = blknum_to_portion(b.blk_num());
+        {
+            auto lock{portion.portion_auto_lock()};
+            if (m_inited) {
+                /* During recovery we might try to free the entry which is already freed while replaying the journal,
+                 * This assert is valid only post recovery.
+                 */
+                if (!get_realtime_bm()->is_bits_set(b.blk_num(), b.blk_count())) {
+                    BLKALLOC_LOG(ERROR, "{}, bit not set {} nblks{} chunk number {}", b.to_string(), b.blk_num(),
+                                 b.blk_count(), m_chunk_id);
+                    for (blk_count_t i{0}; i < b.blk_count(); ++i) {
+                        if (!get_realtime_bm()->is_bits_set(b.blk_num() + i, 1)) {
+                            BLKALLOC_LOG(ERROR, "bit not set {}", b.blk_num() + i);
+                        }
                     }
+                    return false;
                 }
-                return false;
+            }
+
+            BLKALLOC_LOG(DEBUG, "realtime: free bid: {}", b.to_string());
+            get_realtime_bm()->reset_bits(b.blk_num(), b.blk_count());
+            return true;
+        }
+    };
+
+    bool ret{true};
+    if (bid.is_multi()) {
+        MultiBlkId const& mbid = r_cast< MultiBlkId const& >(bid);
+        auto it = mbid.iterate();
+        while (auto const b = it.next()) {
+            if (!unset_on_realtime_bm(*b)) {
+                ret = false;
+                break;
             }
         }
-
-        BLKALLOC_LOG(DEBUG, "realtime: free bid: {}", b.to_string());
-        get_realtime_bm()->reset_bits(b.get_blk_num(), b.get_nblks());
-        return true;
+    } else {
+        ret = unset_on_realtime_bm(bid);
     }
+    return ret;
 }
 
-void BlkAllocator::free_on_disk(const BlkId& b) {
+void BlkAllocator::free_on_disk(BlkId const& bid) {
     /* this api should be called only when auto recovery is enabled */
     assert(auto_recovery_on());
-    BlkAllocPortion& portion = blknum_to_portion(b.get_blk_num());
-    {
-        auto lock{portion.portion_auto_lock()};
-        if (m_inited) {
-            /* During recovery we might try to free the entry which is already freed while replaying the journal,
-             * This assert is valid only post recovery.
-             */
-            if (!get_disk_bm_const()->is_bits_set(b.get_blk_num(), b.get_nblks())) {
-                BLKALLOC_LOG(ERROR, "bit not set {} nblks {} chunk number {}", b.get_blk_num(), b.get_nblks(),
-                             m_chunk_id);
-                for (blk_count_t i{0}; i < b.get_nblks(); ++i) {
-                    if (!get_disk_bm_const()->is_bits_set(b.get_blk_num() + i, 1)) {
-                        BLKALLOC_LOG(ERROR, "bit not set {}", b.get_blk_num() + i);
+    auto unset_on_disk_bm = [this](auto& b) {
+        BlkAllocPortion& portion = blknum_to_portion(b.blk_num());
+        {
+            auto lock{portion.portion_auto_lock()};
+            if (m_inited) {
+                /* During recovery we might try to free the entry which is already freed while replaying the journal,
+                 * This assert is valid only post recovery.
+                 */
+                if (!get_disk_bm_const()->is_bits_set(b.blk_num(), b.blk_count())) {
+                    BLKALLOC_LOG(ERROR, "bit not set {} nblks {} chunk number {}", b.blk_num(), b.blk_count(),
+                                 m_chunk_id);
+                    for (blk_count_t i{0}; i < b.blk_count(); ++i) {
+                        if (!get_disk_bm_const()->is_bits_set(b.blk_num() + i, 1)) {
+                            BLKALLOC_LOG(ERROR, "bit not set {}", b.blk_num() + i);
+                        }
                     }
+                    BLKALLOC_REL_ASSERT(get_disk_bm_const()->is_bits_set(b.blk_num(), b.blk_count()),
+                                        "Expected disk bits to set blk num {} num blks {}", b.blk_num(), b.blk_count());
                 }
-                BLKALLOC_REL_ASSERT(get_disk_bm_const()->is_bits_set(b.get_blk_num(), b.get_nblks()),
-                                    "Expected disk bits to set blk num {} num blks {}", b.get_blk_num(), b.get_nblks());
             }
+            get_disk_bm_mutable()->reset_bits(b.blk_num(), b.blk_count());
+            portion.increase_available_blocks(b.blk_count());
         }
-        get_disk_bm_mutable()->reset_bits(b.get_blk_num(), b.get_nblks());
-        portion.increase_available_blocks(b.get_nblks());
+    };
+
+    if (bid.is_multi()) {
+        MultiBlkId const& mbid = r_cast< MultiBlkId const& >(bid);
+        auto it = mbid.iterate();
+        while (auto const b = it.next()) {
+            unset_on_disk_bm(*b);
+        }
+    } else {
+        unset_on_disk_bm(bid);
     }
 }
 
@@ -229,9 +285,9 @@ void BlkAllocator::create_debug_bm() {
 }
 
 void BlkAllocator::update_debug_bm(const BlkId& bid) {
-    BLKALLOC_REL_ASSERT(get_disk_bm_const()->is_bits_set(bid.get_blk_num(), bid.get_nblks()),
-                        "Expected disk bits to set blk num {} num blks {}", bid.get_blk_num(), bid.get_nblks());
-    get_debug_bm()->set_bits(bid.get_blk_num(), bid.get_nblks());
+    BLKALLOC_REL_ASSERT(get_disk_bm_const()->is_bits_set(bid.blk_num(), bid.blk_count()),
+                        "Expected disk bits to set blk num {} num blks {}", bid.blk_num(), bid.blk_count());
+    get_debug_bm()->set_bits(bid.blk_num(), bid.blk_count());
 }
 
 bool BlkAllocator::verify_debug_bm(bool free_debug_bm) {

@@ -136,7 +136,7 @@ void MetaBlkService::cache_clear() {
 
 void MetaBlkService::read(const BlkId& bid, uint8_t* dest, size_t sz) const {
     sz = sisl::round_up(sz, align_size());
-    HS_DBG_ASSERT_LE(sz, bid.get_nblks() * block_size());
+    HS_DBG_ASSERT_LE(sz, bid.blk_count() * block_size());
     try {
         m_sb_vdev->sync_read(r_cast< char* >(dest), sz, bid);
     } catch (std::exception& e) { HS_REL_ASSERT(0, "Exception: {}", e.what()); }
@@ -224,7 +224,7 @@ bool MetaBlkService::scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_
     auto self_recover{false};
 
     while (bid.is_valid()) {
-        last_mblk_id->set(bid);
+        *last_mblk_id = bid;
 
         // TODO: add a new API in blkstore read to by pass cache;
         // e.g. take caller's read buf to avoid this extra memory copy;
@@ -462,7 +462,7 @@ void MetaBlkService::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const uint
 
         cur_ptr = const_cast< uint8_t* >(write_context_data) + size_written;
         if (i < ovf_hdr->h.nbids - 1) {
-            cur_size = data_bid[i].get_nblks() * block_size();
+            cur_size = data_bid[i].blk_count() * block_size();
             size_written += cur_size;
         } else {
             const size_t remain_sz_to_write = uint64_cast(write_size - size_written);
@@ -549,7 +549,7 @@ meta_blk* MetaBlkService::init_meta_blk(BlkId& bid, meta_sub_type type, const ui
     }
 
     // point last mblk to this mblk;
-    m_last_mblk_id->set(bid);
+    *m_last_mblk_id = bid;
 
     // add to cache;
     HS_DBG_ASSERT(m_meta_blks.find(bid.to_integer()) == m_meta_blks.end(),
@@ -573,7 +573,7 @@ void MetaBlkService::write_meta_blk_ovf(BlkId& out_obid, const uint8_t* context_
     // allocate data blocks
     static thread_local std::vector< BlkId > context_data_blkids{};
     context_data_blkids.clear();
-    alloc_meta_blk(sisl::round_up(sz, block_size()), context_data_blkids);
+    alloc_meta_blks(sisl::round_up(sz, block_size()), context_data_blkids);
 
     HS_LOG(DEBUG, metablk, "Start to allocate nblks(data): {}, mstore used size: {}", context_data_blkids.size(),
            m_sb_vdev->used_size());
@@ -603,7 +603,7 @@ void MetaBlkService::write_meta_blk_ovf(BlkId& out_obid, const uint8_t* context_
         uint64_t data_size{0};
         auto* data_bid = ovf_hdr->get_data_bid_mutable();
         for (; (j < ovf_blk_max_num_data_blk()) && (data_blkid_indx < context_data_blkids.size()); ++j) {
-            data_size += context_data_blkids[data_blkid_indx].data_size(block_size());
+            data_size += context_data_blkids[data_blkid_indx].blk_count() * block_size();
             data_bid[j] = context_data_blkids[data_blkid_indx++];
         }
 
@@ -887,7 +887,7 @@ std::error_condition MetaBlkService::remove_sub_sb(void* cookie) {
 
         HS_LOG(DEBUG, metablk, "removing last mblk, change m_last_mblk to bid: {}, [type={}]", prev_bid.to_string(),
                m_meta_blks[prev_bid.to_integer()]->hdr.h.type);
-        m_last_mblk_id->set(prev_bid);
+        *m_last_mblk_id = prev_bid;
     }
 
     // remove the in-memory handle from meta blk map;
@@ -925,7 +925,7 @@ void MetaBlkService::free_ovf_blk_chain(const BlkId& obid) {
         auto* data_bid = ovf_hdr->get_data_bid();
         for (decltype(ovf_hdr->h.nbids) i{0}; i < ovf_hdr->h.nbids; ++i) {
             m_sb_vdev->free_blk(data_bid[i]);
-            total_nblks_freed += data_bid[i].get_nblks();
+            total_nblks_freed += data_bid[i].blk_count();
 
             HS_LOG(DEBUG, metablk, "after freeing data bid: {}, mstore used size: {}", data_bid[i].to_string(),
                    m_sb_vdev->used_size());
@@ -933,7 +933,7 @@ void MetaBlkService::free_ovf_blk_chain(const BlkId& obid) {
 
         // free on-disk ovf header blk
         m_sb_vdev->free_blk(cur_obid);
-        total_nblks_freed += cur_obid.get_nblks();
+        total_nblks_freed += cur_obid.blk_count();
 
         HS_LOG(DEBUG, metablk, "after freeing ovf bidid: {}, mstore used size: {}", cur_obid.to_string(),
                m_sb_vdev->used_size());
@@ -973,16 +973,24 @@ void MetaBlkService::free_meta_blk(meta_blk* mblk) {
     hs_utils::iobuf_free(uintptr_cast(mblk), sisl::buftag::metablk);
 }
 
-void MetaBlkService::alloc_meta_blk(uint64_t size, std::vector< BlkId >& bid) {
+void MetaBlkService::alloc_meta_blks(uint64_t size, std::vector< BlkId >& bids) {
     auto const nblks = uint32_cast(size / m_sb_vdev->block_size());
+    std::vector< MultiBlkId > mbids;
+
     try {
-        const auto ret = m_sb_vdev->alloc_blk(nblks, blk_alloc_hints{}, bid);
+        [[maybe_unused]] uint64_t debug_size{0};
+        const auto ret = m_sb_vdev->alloc_blks(nblks, blk_alloc_hints{}, mbids);
         HS_REL_ASSERT_EQ(ret, BlkAllocStatus::SUCCESS);
+        for (auto const& mb : mbids) {
+            auto it = mb.iterate();
+            while (auto const b = it.next()) {
+                bids.push_back(*b);
 #ifndef NDEBUG
-        uint64_t debug_size{0};
-        for (size_t i{0}; i < bid.size(); ++i) {
-            debug_size += bid[i].data_size(m_sb_vdev->block_size());
+                debug_size += (b->blk_count() * m_sb_vdev->block_size());
+#endif
+            }
         }
+#ifndef NDEBUG
         HS_DBG_ASSERT_EQ(debug_size, size);
 #endif
 
@@ -997,7 +1005,7 @@ void MetaBlkService::alloc_meta_blk(BlkId& bid) {
     hints.is_contiguous = true;
 
     try {
-        const auto ret = m_sb_vdev->alloc_contiguous_blk(1, hints, &bid);
+        const auto ret = m_sb_vdev->alloc_contiguous_blks(1, hints, bid);
         HS_REL_ASSERT_EQ(ret, BlkAllocStatus::SUCCESS);
     } catch (const std::exception& e) { HS_REL_ASSERT(0, "{}", e.what()); }
 }
@@ -1038,7 +1046,7 @@ sisl::byte_array MetaBlkService::read_sub_sb_internal(const meta_blk* mblk) cons
             for (decltype(ovf_hdr->h.nbids) i{0}; i < ovf_hdr->h.nbids; ++i) {
                 size_t read_sz_per_db{0};
                 if (i < ovf_hdr->h.nbids - 1) {
-                    read_sz_per_db = data_bid[i].get_nblks() * block_size();
+                    read_sz_per_db = data_bid[i].blk_count() * block_size();
                 } else {
                     // it is possible user context data doesn't occupy the whole block, so we need to remember the
                     // size that was written to the last data blk;
@@ -1197,7 +1205,7 @@ uint64_t MetaBlkService::meta_size(const void* cookie) const {
         ++nblks; // ovf header blk;
         const auto* data_bid = ovf_hdr->get_data_bid();
         for (decltype(ovf_hdr->h.nbids) i{0}; i < ovf_hdr->h.nbids; ++i) {
-            nblks += data_bid[i].get_nblks(); // data blks;
+            nblks += data_bid[i].blk_count(); // data blks;
         }
         obid = ovf_hdr->h.next_bid;
     }

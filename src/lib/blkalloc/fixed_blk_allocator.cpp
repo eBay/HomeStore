@@ -20,7 +20,7 @@
 #include "blk_allocator.h"
 
 namespace homestore {
-FixedBlkAllocator::FixedBlkAllocator(const BlkAllocConfig& cfg, bool init, chunk_num_t chunk_id) :
+FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig const& cfg, bool init, chunk_num_t chunk_id) :
         BlkAllocator(cfg, chunk_id), m_blk_q{get_total_blks()} {
     LOGINFO("total blks: {}", get_total_blks());
     if (init) { inited(); }
@@ -53,45 +53,29 @@ blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion& portion, blk_num_t st
     return blk_num;
 }
 
-bool FixedBlkAllocator::is_blk_alloced(const BlkId& b, bool use_lock) const { return true; }
+bool FixedBlkAllocator::is_blk_alloced(BlkId const& b, bool use_lock) const { return true; }
 
-BlkAllocStatus FixedBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hints& hints,
-                                        std::vector< BlkId >& out_blkid) {
-    /* TODO:If it is more then 1 then we need to make sure that we never allocate across the portions. As of now
-     * we don't support the vector of blkids in fixed blk allocator */
+BlkAllocStatus FixedBlkAllocator::alloc([[maybe_unused]] blk_count_t nblks, blk_alloc_hints const&, BlkId& out_blkid) {
     HS_DBG_ASSERT_EQ(nblks, 1, "FixedBlkAllocator does not support multiple blk allocation yet");
-
-    BlkId bid;
-    const auto status = alloc(bid);
-    if (status == BlkAllocStatus::SUCCESS) {
-        out_blkid.push_back(bid);
-        // no need to update real time bm as it is already updated in alloc of single blkid api;
-    }
-    return status;
+    return alloc_contiguous(r_cast< BlkId& >(out_blkid));
 }
 
-BlkAllocStatus FixedBlkAllocator::alloc(BlkId& out_blkid) {
+BlkAllocStatus FixedBlkAllocator::alloc_contiguous(BlkId& out_blkid) {
 #ifdef _PRERELEASE
     if (iomgr_flip::instance()->test_flip("fixed_blkalloc_no_blks")) { return BlkAllocStatus::SPACE_FULL; }
 #endif
     const auto ret = m_blk_q.read(out_blkid);
     if (ret) {
         // update real time bitmap;
-        alloc_on_realtime(out_blkid);
+        if (realtime_bm_on()) { alloc_on_realtime(out_blkid); }
         return BlkAllocStatus::SUCCESS;
     } else {
         return BlkAllocStatus::SPACE_FULL;
     }
 }
 
-void FixedBlkAllocator::free(const std::vector< BlkId >& blk_ids) {
-    for (const auto& blk_id : blk_ids) {
-        free(blk_id);
-    }
-}
-
-void FixedBlkAllocator::free(const BlkId& b) {
-    HS_DBG_ASSERT_EQ(b.get_nblks(), 1, "Multiple blk free for FixedBlkAllocator? allocated by different allocator?");
+void FixedBlkAllocator::free(BlkId const& b) {
+    HS_DBG_ASSERT_EQ(b.blk_count(), 1, "Multiple blk free for FixedBlkAllocator? allocated by different allocator?");
 
     // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache bm.
     if (m_inited) {
@@ -100,8 +84,8 @@ void FixedBlkAllocator::free(const BlkId& b) {
     }
 }
 
-blk_cap_t FixedBlkAllocator::available_blks() const { return m_blk_q.sizeGuess(); }
-blk_cap_t FixedBlkAllocator::get_used_blks() const { return get_total_blks() - available_blks(); }
+blk_num_t FixedBlkAllocator::available_blks() const { return m_blk_q.sizeGuess(); }
+blk_num_t FixedBlkAllocator::get_used_blks() const { return get_total_blks() - available_blks(); }
 
 std::string FixedBlkAllocator::to_string() const {
     return fmt::format("Total Blks={} Available_Blks={}", get_total_blks(), available_blks());

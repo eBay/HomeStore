@@ -55,6 +55,12 @@ if (${build_nonio_tests})
     target_sources(test_append_blk_allocator PRIVATE test_append_blkalloc.cpp)
     target_link_libraries(test_append_blk_allocator homestore ${COMMON_TEST_DEPS} GTest::gmock)
     add_test(NAME AppendBlkAlloc COMMAND test_append_blk_allocator)
+    
+    set(TEST_BLKID_SOURCES test_blkid.cpp ../lib/blkalloc/blk.cpp)
+    add_executable(test_blkid ${TEST_BLKID_SOURCES})
+    target_link_libraries(test_blkid ${COMMON_TEST_DEPS} GTest::gtest)
+    add_test(NAME TestBlkid COMMAND test_blkid)
+
 endif()
 
 can_build_io_tests(io_tests)

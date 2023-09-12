@@ -71,9 +71,7 @@ typedef std::function< void(std::error_condition err, std::shared_ptr< std::vect
 
 class BlkDataServiceTest : public testing::Test {
 public:
-    BlkDataService& inst() { // return hs()->data_service();
-        return homestore::data_service();
-    }
+    BlkDataService& inst() { return homestore::data_service(); }
 
     void print_bids(const std::vector< BlkId >& out_bids) {
         for (auto i = 0ul; i < out_bids.size(); ++i) {
@@ -87,10 +85,10 @@ public:
     void write_read_free_blk(uint64_t io_size) {
         auto sg_write_ptr = std::make_shared< sisl::sg_list >();
         auto sg_read_ptr = std::make_shared< sisl::sg_list >();
-        auto test_blkid_ptr = std::make_shared< BlkId >();
+        auto test_blkid_ptr = std::make_shared< MultiBlkId >();
 
         write_sgs(io_size, sg_write_ptr, 1 /* num_iovs */)
-            .thenValue([this, sg_write_ptr, test_blkid_ptr](const std::vector< BlkId >& out_bids) {
+            .thenValue([this, sg_write_ptr, test_blkid_ptr](MultiBlkId const& out_bids) {
                 LOGINFO("after_write_cb: Write completed;");
                 // sg_write buffer is no longer needed;
                 free(*sg_write_ptr);
@@ -98,12 +96,12 @@ public:
                 LOGINFO("Write blk ids: ");
                 print_bids(out_bids);
 
-                HS_DBG_ASSERT_GE(out_bids.size(), 1);
+                HS_DBG_ASSERT_GE(out_bids.num_pieces(), 1);
                 *test_blkid_ptr = out_bids[0];
             })
             .thenValue([this, sg_read_ptr, test_blkid_ptr](auto) {
                 struct iovec iov;
-                iov.iov_len = test_blkid_ptr->get_nblks() * inst().get_page_size();
+                iov.iov_len = test_blkid_ptr->blk_count() * inst().get_blk_size();
                 iov.iov_base = iomanager.iobuf_alloc(512, iov.iov_len);
                 sg_read_ptr->iovs.push_back(iov);
                 sg_read_ptr->size += iov.iov_len;
@@ -145,7 +143,7 @@ public:
             })
             .thenValue([this, sg_read_ptr, test_blkid_ptr](auto) mutable {
                 struct iovec iov;
-                iov.iov_len = test_blkid_ptr->get_nblks() * inst().get_page_size();
+                iov.iov_len = test_blkid_ptr->blk_count() * inst().get_page_size();
                 iov.iov_base = iomanager.iobuf_alloc(512, iov.iov_len);
                 sg_read_ptr->iovs.push_back(iov);
                 sg_read_ptr->size += iov.iov_len;
@@ -214,7 +212,7 @@ public:
 
                 for (auto i = 0ul; i < num_iovs; ++i) {
                     struct iovec iov;
-                    iov.iov_len = out_bids[i].get_nblks() * inst().get_page_size();
+                    iov.iov_len = out_bids[i].blk_count() * inst().get_page_size();
                     iov.iov_base = iomanager.iobuf_alloc(512, iov.iov_len);
                     sg_read_ptr->iovs.push_back(iov);
                     sg_read_ptr->size += iov.iov_len;
@@ -268,7 +266,7 @@ private:
     // caller should be responsible to call free(sg) to free the iobuf allocated in iovs,
     // normally it should be freed in after_write_cb;
     //
-    folly::Future< std::vector< BlkId > > write_sgs(uint64_t io_size, cshared< sisl::sg_list >& sg, uint32_t num_iovs) {
+    folly::Future< MultiBlkId > write_sgs(uint64_t io_size, cshared< sisl::sg_list >& sg, uint32_t num_iovs) {
         // TODO: What if iov_len is not multiple of 4Ki?
         HS_DBG_ASSERT_EQ(io_size % (4 * Ki * num_iovs), 0, "Expecting iov_len : {} to be multiple of {}.",
                          io_size / num_iovs, 4 * Ki);
@@ -282,15 +280,13 @@ private:
             sg->size += iov_len;
         }
 
-        auto out_bids_ptr = std::make_shared< std::vector< BlkId > >();
+        MultiBlkId out_bid;
         return inst()
-            .async_alloc_write(*(sg.get()), blk_alloc_hints{}, *out_bids_ptr, false /* part_of_batch*/)
-            .thenValue([sg, this, out_bids_ptr](bool success) {
-                assert(success);
-                for (const auto& bid : *out_bids_ptr) {
-                    LOGINFO("bid: {}", bid.to_string());
-                }
-                return folly::makeFuture< std::vector< BlkId > >(std::move(*out_bids_ptr));
+            .async_alloc_write(*(sg.get()), blk_alloc_hints{}, out_bid, false /* part_of_batch*/)
+            .thenValue([sg, this, out_bid](auto const err) {
+                assert(!err);
+                LOGINFO("bid: {}", bid.to_string());
+                return folly::makeFuture< MultiBlkd >(std::move(out_bid));
             });
     }
 

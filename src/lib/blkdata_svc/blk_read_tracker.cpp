@@ -32,18 +32,14 @@ void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
     // Don't move alignment handling outside of this function, because the nblks between (first and last blk num after
     // alignment) could be larger than 255 which exceeds a BlkId can hold;
     //
-    auto cur_blk_num_aligned = s_cast< blk_num_t >(sisl::round_down(blkid.get_blk_num(), entries_per_record()));
-    auto last_blk_num_aligned_up = s_cast< blk_num_t >(sisl::round_up(blkid.get_last_blk_num(), entries_per_record()) -
-                                                       1); //  -1 so that it does not cover next base id;
-    if (blkid.get_last_blk_num() % entries_per_record() == 0) {
-        // if last blk num happens to be aligned, it actually belongs to next base id, so add 1 back;
-        last_blk_num_aligned_up += 1;
-    }
+    auto cur_blk_num_aligned = s_cast< blk_num_t >(sisl::round_down(blkid.blk_num(), entries_per_record()));
+    auto last_blk_num_aligned_up =
+        s_cast< blk_num_t >(sisl::round_up(blkid.blk_num() + blkid.blk_count() + 1, entries_per_record()) - 1);
 
     [[maybe_unused]] bool waiter_rescheduled{false};
     // everything is aligned after this point, so we don't need to handle sub_range in a base blkid;
     while (cur_blk_num_aligned <= last_blk_num_aligned_up) {
-        BlkId base_blkid{cur_blk_num_aligned, entries_per_record(), blkid.get_chunk_num()};
+        BlkId base_blkid{cur_blk_num_aligned, entries_per_record(), blkid.chunk_num()};
 
         BlkTrackRecord rec;
         const auto rec_found = m_pending_reads_map.get(base_blkid, rec);
@@ -98,8 +94,16 @@ void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
 void BlkReadTracker::insert(const BlkId& blkid) { merge(blkid, 1, nullptr); }
 void BlkReadTracker::remove(const BlkId& blkid) { merge(blkid, -1, nullptr); }
 
-void BlkReadTracker::wait_on(const BlkId& blkid, after_remove_cb_t&& after_remove_cb) {
-    merge(blkid, 0, std::make_shared< blk_track_waiter >(std::move(after_remove_cb)));
+void BlkReadTracker::wait_on(MultiBlkId const& blkids, after_remove_cb_t&& after_remove_cb) {
+    if (blkids.num_pieces() == 1) {
+        merge(blkids, 0, std::make_shared< blk_track_waiter >(std::move(after_remove_cb)));
+    } else {
+        auto waiter = std::make_shared< blk_track_waiter >(std::move(after_remove_cb));
+        auto it = blkids.iterate();
+        while (auto const b = it.next()) {
+            merge(*b, 0, waiter);
+        }
+    }
 }
 
 uint16_t BlkReadTracker::entries_per_record() const {

@@ -81,11 +81,9 @@ void IndexWBCache::start_flush_threads() {
 
 BtreeNodePtr IndexWBCache::alloc_buf(node_initializer_t&& node_initializer) {
     // Alloc a block of data from underlying vdev
-    static thread_local std::vector< BlkId > t_blkids;
-    t_blkids.clear();
-    auto ret = m_vdev->alloc_blk(1, blk_alloc_hints{}, t_blkids);
+    BlkId blkid;
+    auto ret = m_vdev->alloc_contiguous_blks(1, blk_alloc_hints{}, blkid);
     if (ret != BlkAllocStatus::SUCCESS) { return nullptr; }
-    BlkId blkid = t_blkids[0];
 
     // Alloc buffer and initialize the node
     auto idx_buf = std::make_shared< IndexBuffer >(blkid, m_node_size, m_vdev->align_size());

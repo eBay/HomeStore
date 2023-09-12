@@ -77,7 +77,7 @@ protected:
         if (!(fill_session->slab_requirements.empty())) {
             uint32_t blk_id{0};
             for (const auto& slab_cfg : m_cfg.m_per_slab_cfg) {
-                for (blk_cap_t i{0}; i < slab_cfg.max_entries; ++i) {
+                for (blk_num_t i{0}; i < slab_cfg.max_entries; ++i) {
                     blk_cache_fill_req fill_req;
                     fill_req.start_blk_num = blk_id;
                     fill_req.nblks = slab_cfg.slab_size;

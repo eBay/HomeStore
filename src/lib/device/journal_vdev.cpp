@@ -34,7 +34,8 @@
 
 namespace homestore {
 JournalVirtualDev::JournalVirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, vdev_event_cb_t event_cb) :
-        VirtualDev{dmgr, vinfo, std::move(event_cb), false /* is_auto_recovery */} {}
+        VirtualDev{dmgr, vinfo, blk_allocator_type_t::none, nullptr, std::move(event_cb),
+                   false /* is_auto_recovery */} {}
 
 off_t JournalVirtualDev::alloc_next_append_blk(size_t sz) {
     if (used_size() + sz > size()) {
@@ -134,9 +135,9 @@ auto JournalVirtualDev::process_pwrite_offset(size_t len, off_t offset) {
 }
 
 /////////////////////////////// Write Section //////////////////////////////////
-folly::Future< bool > JournalVirtualDev::async_append(const uint8_t* buf, size_t size) {
+folly::Future< std::error_code > JournalVirtualDev::async_append(const uint8_t* buf, size_t size) {
     if (!validate_append_size(size)) {
-        return folly::makeFuture< bool >(std::system_error(std::make_error_code(std::errc::no_space_on_device)));
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::no_space_on_device));
     } else {
         auto const [chunk, offset_in_chunk] = process_pwrite_offset(size, m_seek_cursor);
         m_seek_cursor += size;
@@ -157,7 +158,7 @@ folly::Future< bool > JournalVirtualDev::async_append(const uint8_t* buf, size_t
  * @param cb : callback after write is completed, can be null
  *
  */
-folly::Future< bool > JournalVirtualDev::async_pwrite(const uint8_t* buf, size_t size, off_t offset) {
+folly::Future< std::error_code > JournalVirtualDev::async_pwrite(const uint8_t* buf, size_t size, off_t offset) {
     HS_REL_ASSERT_LE(size, m_reserved_sz, "Write size: larger then reserved size is not allowed!");
     m_reserved_sz -= size; // update reserved size
 
@@ -165,7 +166,7 @@ folly::Future< bool > JournalVirtualDev::async_pwrite(const uint8_t* buf, size_t
     return async_write(r_cast< const char* >(buf), size, chunk, offset_in_chunk);
 }
 
-folly::Future< bool > JournalVirtualDev::async_pwritev(const iovec* iov, int iovcnt, off_t offset) {
+folly::Future< std::error_code > JournalVirtualDev::async_pwritev(const iovec* iov, int iovcnt, off_t offset) {
     auto const size = VirtualDev::get_len(iov, iovcnt);
 
     // if size is smaller than reserved size, it means write will never be overlapping start offset;
@@ -216,7 +217,9 @@ void JournalVirtualDev::sync_next_read(uint8_t* buf, size_t size_rd) {
         across_chunk = true;
     }
 
-    sync_pread(buf, size_rd, m_seek_cursor);
+    auto ec = sync_pread(buf, size_rd, m_seek_cursor);
+    // TODO: Check if we can have tolerate this error and somehow start homestore without replaying or in degraded mode?
+    HS_REL_ASSERT(!ec, "Error in reading next stream of bytes, proceeding could cause some inconsistency, exiting");
 
     // Update seek cursor after read;
     m_seek_cursor += size_rd;
@@ -224,7 +227,7 @@ void JournalVirtualDev::sync_next_read(uint8_t* buf, size_t size_rd) {
     m_seek_cursor = m_seek_cursor % size();
 }
 
-void JournalVirtualDev::sync_pread(uint8_t* buf, size_t size, off_t offset) {
+std::error_code JournalVirtualDev::sync_pread(uint8_t* buf, size_t size, off_t offset) {
     auto const [chunk, offset_in_chunk] = offset_to_chunk(offset);
 
     // if the read count is acrossing chunk, only return what's left in this chunk
@@ -236,7 +239,7 @@ void JournalVirtualDev::sync_pread(uint8_t* buf, size_t size, off_t offset) {
     return sync_read(r_cast< char* >(buf), size, chunk, offset_in_chunk);
 }
 
-void JournalVirtualDev::sync_preadv(iovec* iov, int iovcnt, off_t offset) {
+std::error_code JournalVirtualDev::sync_preadv(iovec* iov, int iovcnt, off_t offset) {
     uint64_t len = VirtualDev::get_len(iov, iovcnt);
     auto const [chunk, offset_in_chunk] = offset_to_chunk(offset);
 
@@ -251,7 +254,7 @@ void JournalVirtualDev::sync_preadv(iovec* iov, int iovcnt, off_t offset) {
         iov[0].iov_len = len; // is this needed?
     }
 
-    sync_readv(iov, iovcnt, chunk, offset_in_chunk);
+    return sync_readv(iov, iovcnt, chunk, offset_in_chunk);
 }
 
 off_t JournalVirtualDev::lseek(off_t offset, int whence) {

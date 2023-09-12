@@ -113,7 +113,7 @@ void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format
     m_dev_mgr->format_devices();
     hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Fast}));
 
-    std::vector< folly::Future< bool > > futs;
+    std::vector< folly::Future< std::error_code > > futs;
     for (const auto& [svc_type, fparams] : format_opts) {
         if (fparams.size_pct == 0) { continue; }
 
@@ -133,10 +133,13 @@ void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format
         }
     }
 
-    try {
-        if (!futs.empty()) { folly::collectAllUnsafe(futs).get(); }
-    } catch (const std::exception& e) { HS_REL_ASSERT(false, "IO error during format of vdev, error={}", e.what()); }
-
+    if (!futs.empty()) {
+        auto tlist = folly::collectAllUnsafe(futs).get();
+        for (auto const& t : tlist) {
+            auto const err = t.value();
+            HS_REL_ASSERT(!err, "IO error during format of vdev, error={}", err.message());
+        }
+    }
     do_start();
 }
 
