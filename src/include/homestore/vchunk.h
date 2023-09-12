@@ -31,7 +31,7 @@ public:
     const uint8_t* get_user_private() const;
     blk_cap_t available_blks() const;
     uint32_t get_pdev_id() const;
-    cshared< Chunk > get_internal_chunk () const;
+    cshared< Chunk > get_internal_chunk() const;
 
 private:
     cshared< Chunk > internalChunk;

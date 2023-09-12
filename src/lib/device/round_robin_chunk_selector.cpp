@@ -20,14 +20,14 @@ RoundRobinChunkSelector::RoundRobinChunkSelector(bool dynamic_chunk_add) : m_dyn
                       "Dynamically adding chunk to chunkselector is not supported, need RCU to make it thread safe");
 }
 
-void RoundRobinChunkSelector::add_chunk(VChunk chunk) { m_chunks.push_back(chunk); }
+void RoundRobinChunkSelector::add_chunk(cshared< Chunk >& chunk) { m_chunks.emplace_back(std::move(chunk)); }
 
-Chunk* RoundRobinChunkSelector::select_chunk(blk_count_t, const blk_alloc_hints&) {
+cshared< Chunk > RoundRobinChunkSelector::select_chunk(blk_count_t, const blk_alloc_hints&) {
     if (*m_next_chunk_index >= m_chunks.size()) { *m_next_chunk_index = 0; }
-    return m_chunks[(*m_next_chunk_index)++].get_internal_chunk().get();
+    return m_chunks[(*m_next_chunk_index)++];
 }
 
-void RoundRobinChunkSelector::foreach_chunks(std::function< void(VChunk&) >&& cb) {
+void RoundRobinChunkSelector::foreach_chunks(std::function< void(cshared< Chunk >&) >&& cb) {
     for (auto& chunk : m_chunks) {
         cb(chunk);
     }

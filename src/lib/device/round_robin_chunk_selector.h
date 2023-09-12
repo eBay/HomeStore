@@ -24,8 +24,6 @@
 #include "device/chunk.h"
 
 namespace homestore {
-class Chunk;
-
 class RoundRobinChunkSelector : public ChunkSelector {
 public:
     RoundRobinChunkSelector(bool dynamic_chunk_add = false);
@@ -35,12 +33,12 @@ public:
     RoundRobinChunkSelector& operator=(RoundRobinChunkSelector&&) noexcept = delete;
     ~RoundRobinChunkSelector() = default;
 
-    void add_chunk(VChunk chunk) override;
-    Chunk* select_chunk(blk_count_t nblks, const blk_alloc_hints& hints) override;
-    void foreach_chunks(std::function< void(VChunk&) >&& cb) override;
+    void add_chunk(cshared< Chunk >&) override;
+    cshared< Chunk > select_chunk(blk_count_t nblks, const blk_alloc_hints& hints) override;
+    void foreach_chunks(std::function< void(cshared< Chunk >&) >&& cb) override;
 
 private:
-    std::vector< VChunk > m_chunks;
+    std::vector< shared< Chunk > > m_chunks;
     folly::ThreadLocal< uint32_t > m_next_chunk_index;
     bool m_dynamic_chunk_add; // Can we add chunk dynamically
 };
