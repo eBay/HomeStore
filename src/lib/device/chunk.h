@@ -17,7 +17,7 @@
 
 namespace homestore {
 class BlkAllocator;
-
+class CP;
 class Chunk {
 private:
     std::mutex m_mgmt_mutex;
@@ -38,7 +38,7 @@ public:
     Chunk& operator=(Chunk&&) noexcept = delete;
     virtual ~Chunk() = default;
 
-    void cp_flush();
+    void cp_flush(CP* cp);
 
     /////////////// Pointer Getters ////////////////////
     const PhysicalDev* physical_dev() const { return m_pdev; }

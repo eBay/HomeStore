@@ -30,7 +30,9 @@ public:
         return ++s_count;
     }
 
-    superblk(const std::string& meta_name = "") {
+    superblk(const std::string& meta_name = "") { set_name(meta_name); }
+
+    void set_name(const std::string& meta_name) {
         if (meta_name.empty()) {
             m_metablk_name = "meta_blk_" + std::to_string(next_count());
         } else {

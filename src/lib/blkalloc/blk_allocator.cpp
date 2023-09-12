@@ -14,7 +14,6 @@
  *
  *********************************************************************************/
 #include "blk_allocator.h"
-// #include "blkalloc_cp.hpp"
 
 namespace homestore {
 BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, chunk_num_t id) :
@@ -40,6 +39,11 @@ BlkAllocator::BlkAllocator(const BlkAllocConfig& cfg, chunk_num_t id) :
         LOGINFO("realtime bitmap turned ON for chunk_id: {}", m_chunk_id);
         m_realtime_bm = std::make_unique< sisl::Bitset >(m_num_blks, m_chunk_id, m_align_size);
     }
+}
+
+void BlkAllocator::cp_flush(CP*) {
+    // To be implemented;
+    LOGINFO("BitmapBlkAllocator cp_flush in not yet supported. ");
 }
 
 void BlkAllocator::set_disk_bm(std::unique_ptr< sisl::Bitset > recovered_bm) {

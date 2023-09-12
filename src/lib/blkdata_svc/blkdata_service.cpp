@@ -22,6 +22,7 @@
 #include "common/homestore_assert.hpp"
 #include "common/error.h"
 #include "blk_read_tracker.hpp"
+#include "data_svc_cp.hpp"
 
 namespace homestore {
 
@@ -31,7 +32,7 @@ BlkDataService::BlkDataService() { m_blk_read_tracker = std::make_unique< BlkRea
 BlkDataService::~BlkDataService() = default;
 
 // first-time boot path
-void BlkDataService::create_vdev(uint64_t size) {
+void BlkDataService::create_vdev(uint64_t size, blk_allocator_type_t alloc_type, chunk_selector_type_t chunk_sel_type) {
     const auto phys_page_size = hs()->device_mgr()->optimal_page_size(HSDevType::Data);
 
     hs_vdev_context vdev_ctx;
@@ -43,14 +44,15 @@ void BlkDataService::create_vdev(uint64_t size) {
                                                         .num_chunks = 1,
                                                         .blk_size = phys_page_size,
                                                         .dev_type = HSDevType::Data,
+                                                        .alloc_type = alloc_type,
+                                                        .chunk_sel_type = chunk_sel_type,
                                                         .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
                                                         .context_data = vdev_ctx.to_blob()});
 }
 
-// recovery path
+// both first_time_boot and recovery path will come here
 shared< VirtualDev > BlkDataService::open_vdev(const vdev_info& vinfo, bool load_existing) {
-    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, blk_allocator_type_t::varsize,
-                                            chunk_selector_type_t::ROUND_ROBIN, nullptr, true /* auto_recovery */);
+    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, nullptr, true /* auto_recovery */);
     m_page_size = vinfo.blk_size;
     return m_vdev;
 }
@@ -135,4 +137,11 @@ folly::Future< bool > BlkDataService::async_free_blk(const BlkId bid) {
     });
     return f;
 }
+
+void BlkDataService::start() {
+    // Register to CP for flush dirty buffers underlying virtual device layer;
+    hs()->cp_mgr().register_consumer(cp_consumer_t::BLK_DATA_SVC,
+                                     std::move(std::make_unique< DataSvcCPCallbacks >(m_vdev)));
+}
+
 } // namespace homestore

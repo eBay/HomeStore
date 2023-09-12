@@ -48,7 +48,8 @@ public:
      *
      * @param size : size of this vdev
      */
-    void create_vdev(uint64_t size);
+    void create_vdev(uint64_t size, homestore::blk_allocator_type_t alloc_type,
+                     homestore::chunk_selector_type_t chunk_sel_type);
 
     /**
      * @brief : called during recovery to open existing vdev for data service
@@ -130,6 +131,11 @@ public:
      * @return : the read block tracker pointer;
      */
     BlkReadTracker* read_blk_tracker() { return m_blk_read_tracker.get(); }
+
+    /**
+     * @brief : start data service;
+     */
+    void start();
 
 private:
     BlkAllocStatus alloc_blks(uint32_t size, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids);

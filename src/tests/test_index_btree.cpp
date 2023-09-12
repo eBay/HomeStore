@@ -40,8 +40,10 @@ SISL_OPTIONS_ENABLE(logging, test_index_btree, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_index_btree)
 
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-
 // TODO increase num_entries to 65k as io mgr page size is 512 and its slow.
+blk_allocator_type_t test_common::HSTestHelper::s_ds_alloc_type;
+chunk_selector_type_t test_common::HSTestHelper::s_ds_chunk_sel_type;
+
 SISL_OPTION_GROUP(test_index_btree,
                   (num_iters, "", "num_iters", "number of iterations for rand ops",
                    ::cxxopts::value< uint32_t >()->default_value("65536"), "number"),
@@ -294,20 +296,6 @@ struct BtreeTest : public testing::Test {
 
     void print(const std::string& file = "") const { m_bt->print_tree(file); }
 
-    void trigger_cp(bool wait) {
-        auto fut = homestore::hs()->cp_mgr().trigger_cp_flush(true /* force */);
-        auto on_complete = [&](auto success) {
-            ASSERT_EQ(success, true) << "CP Flush failed";
-            LOGINFO("CP Flush completed");
-        };
-
-        if (wait) {
-            on_complete(std::move(fut).get());
-        } else {
-            std::move(fut).thenValue(on_complete);
-        }
-    }
-
     void destroy_btree() {
         auto cpg = hs()->cp_mgr().cp_guard();
         auto op_context = (void*)cpg->context(cp_consumer_t::INDEX_SVC);
@@ -472,7 +460,7 @@ TYPED_TEST(BtreeTest, CpFlush) {
     this->print(std::string("before.txt"));
 
     LOGINFO("Trigger checkpoint flush.");
-    this->trigger_cp(true /* wait */);
+    test_common::HSTestHelper::trigger_cp(true /* wait */);
 
     LOGINFO("Query {} entries and validate with pagination of 75 entries", num_entries);
     this->query_validate(0, num_entries - 1, 75);
@@ -505,22 +493,22 @@ TYPED_TEST(BtreeTest, MultipleCpFlush) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
         if (i % 500 == 0) {
             LOGINFO("Trigger checkpoint flush wait=false.");
-            this->trigger_cp(false /* wait */);
+            test_common::HSTestHelper::trigger_cp(false /* wait */);
         }
     }
 
     LOGINFO("Trigger checkpoint flush wait=false.");
-    this->trigger_cp(false /* wait */);
+    test_common::HSTestHelper::trigger_cp(false /* wait */);
 
     for (uint32_t i = num_entries / 2; i < num_entries; ++i) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
 
     LOGINFO("Trigger checkpoint flush wait=false.");
-    this->trigger_cp(false /* wait */);
+    test_common::HSTestHelper::trigger_cp(false /* wait */);
 
     LOGINFO("Trigger checkpoint flush wait=true.");
-    this->trigger_cp(true /* wait */);
+    test_common::HSTestHelper::trigger_cp(true /* wait */);
 
     LOGINFO("Query {} entries and validate with pagination of 75 entries", num_entries);
     this->query_validate(0, num_entries - 1, 75);
@@ -559,7 +547,7 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
     auto cp_flush_thread = std::thread([this, &stop_cp_flush] {
         while (!stop_cp_flush) {
             LOGINFO("Trigger checkpoint flush wait=false.");
-            this->trigger_cp(false /* wait */);
+            test_common::HSTestHelper::trigger_cp(false /* wait */);
             std::this_thread::sleep_for(std::chrono::seconds{1});
         }
     });
@@ -569,7 +557,7 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
     cp_flush_thread.join();
 
     LOGINFO("Trigger checkpoint flush wait=true.");
-    this->trigger_cp(true /* wait */);
+    test_common::HSTestHelper::trigger_cp(true /* wait */);
 
     LOGINFO("Query {} entries and validate with pagination of 75 entries", num_entries);
     this->query_validate(0, num_entries - 1, 75);

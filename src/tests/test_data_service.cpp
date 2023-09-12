@@ -36,6 +36,12 @@
 
 #include <homestore/blkdata_service.hpp>
 
+////////////////////////////////////////////////////////////////////////////
+//                                                                        //
+//     This test is to test data serice with varsize block allocator      //
+//                                                                        //
+////////////////////////////////////////////////////////////////////////////
+
 using namespace homestore;
 
 RCU_REGISTER_INIT
@@ -44,6 +50,8 @@ SISL_OPTIONS_ENABLE(logging, test_data_service, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_data_service)
 
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
+blk_allocator_type_t test_common::HSTestHelper::s_ds_alloc_type;
+chunk_selector_type_t test_common::HSTestHelper::s_ds_chunk_sel_type;
 
 constexpr uint64_t Ki{1024};
 constexpr uint64_t Mi{Ki * Ki};
@@ -56,8 +64,6 @@ struct Param {
 
 static Param gp;
 
-static const std::string DATA_SVC_FILE_PREFIX{"/tmp/test_data_service_"};
-
 ENUM(DataSvcOp, uint8_t, WRITE, READ, FREE_BLK, COMMIT_BLK, RESERVE_STREAM, ALLOC_STREAM, FREE_STREAM)
 
 typedef std::function< void(std::error_condition err, std::shared_ptr< std::vector< BlkId > > out_bids) >
@@ -69,21 +75,13 @@ public:
         return homestore::data_service();
     }
 
-    void free_sg_buf(sisl::sg_list& sg) {
-        for (auto x : sg.iovs) {
-            iomanager.iobuf_free(s_cast< uint8_t* >(x.iov_base));
-            x.iov_base = nullptr;
-            x.iov_len = 0;
-        }
-
-        sg.size = 0;
-    }
-
     void print_bids(const std::vector< BlkId >& out_bids) {
         for (auto i = 0ul; i < out_bids.size(); ++i) {
             LOGINFO("bid[{}]: {}", i, out_bids[i].to_string());
         }
     }
+
+    void free(sisl::sg_list& sg) { test_common::HSTestHelper::free(sg); }
 
     // free_blk after read completes
     void write_read_free_blk(uint64_t io_size) {
@@ -95,7 +93,7 @@ public:
             .thenValue([this, sg_write_ptr, test_blkid_ptr](const std::vector< BlkId >& out_bids) {
                 LOGINFO("after_write_cb: Write completed;");
                 // sg_write buffer is no longer needed;
-                free_sg_buf(*sg_write_ptr);
+                free(*sg_write_ptr);
 
                 LOGINFO("Write blk ids: ");
                 print_bids(out_bids);
@@ -116,7 +114,7 @@ public:
             })
             .thenValue([this, sg_read_ptr, test_blkid_ptr](auto) {
                 LOGINFO("read completed;");
-                free_sg_buf(*sg_read_ptr);
+                free(*sg_read_ptr);
                 return inst().async_free_blk(*test_blkid_ptr);
             })
             .thenValue([this, test_blkid_ptr](auto) {
@@ -137,7 +135,7 @@ public:
                 // a free blk;
 
                 LOGINFO("after_write_cb: Write completed;");
-                free_sg_buf(*sg_write_ptr); // sg_write buffer is no longer needed;
+                free(*sg_write_ptr); // sg_write buffer is no longer needed;
 
                 LOGINFO("Write blk ids: ");
                 print_bids(out_bids);
@@ -164,7 +162,7 @@ public:
                         HS_DBG_ASSERT_EQ(m_free_blk_done.load(), true,
                                          "free blk callback should not be called before read blk completes");
 
-                        free_sg_buf(*sg_read_ptr);
+                        free(*sg_read_ptr);
                         this->finish_and_notify();
                     });
 
@@ -183,7 +181,7 @@ public:
         auto futs = write_sgs(io_size, sg_write_ptr, 1 /* num_iovs */)
                         .thenValue([sg_write_ptr, this](const std::vector< BlkId >& out_bids) {
                             LOGINFO("after_write_cb: Write completed;");
-                            free_sg_buf(*sg_write_ptr);
+                            free(*sg_write_ptr);
 
                             std::vector< folly::Future< bool > > futs;
                             for (const auto& free_bid : out_bids) {
@@ -226,49 +224,15 @@ public:
                 return inst().async_read(out_bids[0], *sg_read_ptr, sg_read_ptr->size);
             })
             .thenValue([this, sg_write_ptr, sg_read_ptr](auto) mutable {
-                assert(verify_read(*sg_read_ptr, *sg_write_ptr));
+                const auto equal = test_common::HSTestHelper::compare(*sg_read_ptr, *sg_write_ptr);
+                assert(equal);
 
                 LOGINFO("Read completed;");
-                free_sg_buf(*sg_write_ptr);
-                free_sg_buf(*sg_read_ptr);
+                free(*sg_write_ptr);
+                free(*sg_read_ptr);
 
                 this->finish_and_notify();
             });
-    }
-
-    bool verify_read(const sisl::sg_list& read_sg, const sisl::sg_list& write_sg) {
-        if ((write_sg.size != read_sg.size)) {
-            LOGINFO("sg_list of read size: {} mismatch with write size: {}, ", read_sg.size, write_sg.size);
-            return false;
-        }
-
-        if (write_sg.iovs.size() != read_sg.iovs.size()) {
-            LOGINFO("sg_list num of iovs mismatch: read: {}, write: {}", read_sg.iovs.size(), write_sg.iovs.size());
-            return false;
-        }
-
-        const auto num_iovs = write_sg.iovs.size();
-        for (auto i = 0ul; i < num_iovs; ++i) {
-            if (write_sg.iovs[i].iov_len != read_sg.iovs[i].iov_len) {
-                LOGINFO("iov_len of iov[{}] mismatch, read: {}, write: {}", i, read_sg.iovs[i].iov_len,
-                        write_sg.iovs[i].iov_len);
-                return false;
-            }
-            auto ret = std::memcmp(write_sg.iovs[i].iov_base, read_sg.iovs[i].iov_base, read_sg.iovs[i].iov_len);
-            if (ret != 0) {
-                LOGINFO("memcmp return false for iovs[{}] between read and write.", i);
-                return false;
-            }
-        }
-
-        LOGINFO("verify_read passed! data size: {}, num_iovs: {}", read_sg.size, read_sg.iovs.size());
-        return true;
-    }
-
-    void fill_data_buf(uint8_t* buf, uint64_t size) {
-        for (uint64_t i = 0ul; i < size; ++i) {
-            *(buf + i) = (i % 256);
-        }
     }
 
     //
@@ -277,7 +241,7 @@ public:
     void write_io(uint64_t io_size, uint32_t num_iovs = 1) {
         auto sg = std::make_shared< sisl::sg_list >();
         write_sgs(io_size, sg, num_iovs).thenValue([this, sg](auto) {
-            free_sg_buf(*sg);
+            free(*sg);
             finish_and_notify();
         });
     }
@@ -301,8 +265,8 @@ private:
     // call this api when caller needs the write buffer and blkids;
     // caller is responsible to free the sg buffer;
     //
-    // caller should be responsible to call free_sg_buf(sg) to free the iobuf allocated in iovs, normally it should be
-    // freed in after_write_cb;
+    // caller should be responsible to call free(sg) to free the iobuf allocated in iovs,
+    // normally it should be freed in after_write_cb;
     //
     folly::Future< std::vector< BlkId > > write_sgs(uint64_t io_size, cshared< sisl::sg_list >& sg, uint32_t num_iovs) {
         // TODO: What if iov_len is not multiple of 4Ki?
@@ -313,7 +277,7 @@ private:
             struct iovec iov;
             iov.iov_len = iov_len;
             iov.iov_base = iomanager.iobuf_alloc(512, iov_len);
-            fill_data_buf(r_cast< uint8_t* >(iov.iov_base), iov.iov_len);
+            test_common::HSTestHelper::fill_data_buf(r_cast< uint8_t* >(iov.iov_base), iov.iov_len);
             sg->iovs.push_back(iov);
             sg->size += iov_len;
         }
