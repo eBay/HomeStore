@@ -97,7 +97,6 @@ ENUM(blk_allocator_type_t, uint8_t, none, fixed, varsize, append);
 ENUM(chunk_selector_type_t, uint8_t, // What are the options to select chunk to allocate a block
      NONE,                           // Caller want nothing to be set
      ROUND_ROBIN,                    // Pick round robin
-     HEAP,                           // Heap chunk selector
      CUSTOM,                         // Controlled by the upper layer
      RANDOM,                         // Pick any chunk in uniformly random fashion
      MOST_AVAILABLE_SPACE,           // Pick the most available space
