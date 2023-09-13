@@ -12,8 +12,7 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
-#include "device/chunk_selector.hpp"
-#include "device/chunk.h"
+#include "round_robin_chunk_selector.h"
 
 namespace homestore {
 RoundRobinChunkSelector::RoundRobinChunkSelector(bool dynamic_chunk_add) : m_dynamic_chunk_add{dynamic_chunk_add} {
@@ -21,11 +20,11 @@ RoundRobinChunkSelector::RoundRobinChunkSelector(bool dynamic_chunk_add) : m_dyn
                       "Dynamically adding chunk to chunkselector is not supported, need RCU to make it thread safe");
 }
 
-void RoundRobinChunkSelector::add_chunk(cshared< Chunk >& chunk) { m_chunks.push_back(chunk); }
+void RoundRobinChunkSelector::add_chunk(cshared< Chunk >& chunk) { m_chunks.emplace_back(std::move(chunk)); }
 
-Chunk* RoundRobinChunkSelector::select(blk_count_t, const blk_alloc_hints&) {
+cshared< Chunk > RoundRobinChunkSelector::select_chunk(blk_count_t, const blk_alloc_hints&) {
     if (*m_next_chunk_index >= m_chunks.size()) { *m_next_chunk_index = 0; }
-    return m_chunks[(*m_next_chunk_index)++].get();
+    return m_chunks[(*m_next_chunk_index)++];
 }
 
 void RoundRobinChunkSelector::foreach_chunks(std::function< void(cshared< Chunk >&) >&& cb) {

@@ -34,15 +34,15 @@
 #include <sisl/utility/atomic_counter.hpp>
 #include <iomgr/iomgr_flip.hpp>
 
-// #include <homestore/homestore.hpp>
+#include "device/chunk.h"
 #include "device/physical_dev.hpp"
 #include "device/device.h"
 #include "device/virtual_dev.hpp"
-#include "device/chunk.h"
 #include "common/error.h"
 #include "common/homestore_assert.hpp"
 #include "common/homestore_utils.hpp"
 #include "blkalloc/varsize_blk_allocator.h"
+#include "device/round_robin_chunk_selector.h"
 #include "blkalloc/append_blk_allocator.h"
 
 SISL_LOGGING_DECL(device)
@@ -197,7 +197,7 @@ BlkAllocStatus VirtualDev::do_alloc_blk(blk_count_t nblks, const blk_alloc_hints
         size_t attempt{0};
 
         do {
-            chunk = m_chunk_selector->select(nblks, hints);
+            chunk = m_chunk_selector->select_chunk(nblks, hints).get();
             if (chunk == nullptr) { status = BlkAllocStatus::SPACE_FULL; }
 
             status = alloc_blk_from_chunk(nblks, hints, out_blkid, chunk);

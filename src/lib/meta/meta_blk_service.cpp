@@ -29,13 +29,13 @@
 
 #include <homestore/meta_service.hpp>
 #include <homestore/homestore.hpp>
+#include "device/chunk.h"
+#include <homestore/chunk_selector.h>
 #include "common/homestore_flip.hpp"
 #include "common/homestore_utils.hpp"
 #include "device/device.h"
 #include "device/virtual_dev.hpp"
 #include "device/physical_dev.hpp"
-#include "device/chunk.h"
-#include "device/chunk_selector.hpp"
 #include "blkalloc/blk_allocator.h"
 #include "meta_sb.hpp"
 

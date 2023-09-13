@@ -23,10 +23,10 @@
 #include <sisl/logging/logging.h>
 #include <iomgr/iomgr_flip.hpp>
 #include <homestore/homestore.hpp>
+#include "device/chunk.h"
 #include "device/device.h"
 #include "device/physical_dev.hpp"
 #include "device/journal_vdev.hpp"
-#include "device/chunk.h"
 #include "common/error.h"
 #include "common/homestore_assert.hpp"
 #include "common/homestore_utils.hpp"

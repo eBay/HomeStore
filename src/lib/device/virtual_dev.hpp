@@ -34,7 +34,7 @@
 #include <homestore/checkpoint/cp_mgr.hpp>
 #include <homestore/homestore_decl.hpp>
 #include "device/device.h"
-#include "device/chunk_selector.hpp"
+#include <homestore/chunk_selector.h>
 
 namespace homestore {
 class PhysicalDev;

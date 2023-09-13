@@ -21,9 +21,9 @@
 #include <boost/uuid/random_generator.hpp>
 
 #include <homestore/homestore_decl.hpp>
+#include "device/chunk.h"
 #include "device/device.h"
 #include "device/physical_dev.hpp"
-#include "device/chunk.h"
 #include "device/virtual_dev.hpp"
 #include "common/homestore_utils.hpp"
 #include "common/homestore_assert.hpp"
