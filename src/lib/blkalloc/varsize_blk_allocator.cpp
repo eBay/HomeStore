@@ -415,7 +415,7 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(blk_count_t nblks, blk_alloc_hints con
     blk_count_t num_allocated{0};
     blk_count_t nblks_remain;
 
-    if (use_slabs) {
+    if (use_slabs && (nblks <= m_cfg.highest_slab_blks_count())) {
         num_allocated = alloc_blks_slab(nblks, hints, out_mbid);
         if (num_allocated >= nblks) {
             status = BlkAllocStatus::SUCCESS;
@@ -448,7 +448,7 @@ out:
 #endif
     }
 
-    if (!out_blkid.is_multi()) { out_blkid = out_mbid; }
+    if (!out_blkid.is_multi()) { out_blkid = out_mbid.to_single_blkid(); }
     return status;
 }
 
@@ -498,7 +498,7 @@ blk_count_t VarsizeBlkAllocator::alloc_blks_slab(blk_count_t nblks, blk_alloc_hi
     static thread_local blk_cache_alloc_resp s_alloc_resp;
     const blk_cache_alloc_req alloc_req{nblks, hints.desired_temp, hints.is_contiguous,
                                         FreeBlkCache::find_slab(hints.min_blks_per_piece),
-                                        FreeBlkCache::find_slab(hints.max_blks_per_piece)};
+                                        s_cast< slab_idx_t >(m_cfg.get_slab_cnt() - 1)};
     COUNTER_INCREMENT(m_metrics, num_alloc, 1);
 
     auto free_excess_blocks = [this]() {
@@ -638,8 +638,9 @@ void VarsizeBlkAllocator::free(BlkId const& bid) {
         return;
     }
 
-    blk_count_t n_freed = m_cfg.m_use_slabs ? free_blks_slab(r_cast< MultiBlkId const& >(bid))
-                                            : free_blks_direct(r_cast< MultiBlkId const& >(bid));
+    blk_count_t n_freed = (m_cfg.m_use_slabs && (bid.blk_count() <= m_cfg.highest_slab_blks_count()))
+        ? free_blks_slab(r_cast< MultiBlkId const& >(bid))
+        : free_blks_direct(r_cast< MultiBlkId const& >(bid));
     decr_alloced_blk_count(n_freed);
     BLKALLOC_LOG(TRACE, "Freed blk_num={}", bid.to_string());
 }

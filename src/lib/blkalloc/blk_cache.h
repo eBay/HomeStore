@@ -30,7 +30,7 @@
 #include "common/homestore_assert.hpp"
 
 namespace homestore {
-typedef blk_count_t slab_idx_t;
+using slab_idx_t = blk_count_t;
 
 static constexpr uint16_t slab_tbl_size{257};
 
@@ -268,8 +268,7 @@ public:
 
     [[nodiscard]] static slab_idx_t find_slab(const blk_count_t nblks) {
         if (sisl_unlikely(nblks >= slab_tbl_size)) {
-            return static_cast< slab_idx_t >((nblks > 1) ? sisl::logBase2(static_cast< blk_count_t >(nblks - 1)) + 1
-                                                         : 0);
+            return s_cast< slab_idx_t >((nblks > 1) ? sisl::logBase2(s_cast< blk_count_t >(nblks - 1)) + 1 : 0);
         }
         return nblks_to_slab_tbl[nblks];
     }

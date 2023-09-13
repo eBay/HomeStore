@@ -22,7 +22,7 @@ BlkId::BlkId(uint64_t id_int) {
     DEBUG_ASSERT_EQ(is_multi(), 0, "MultiBlkId is set on BlkId constructor");
 }
 
-BlkId::BlkId(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num) : s{false, blk_num, nblks, chunk_num} {}
+BlkId::BlkId(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num) : s{0x0, blk_num, nblks, chunk_num} {}
 
 uint64_t BlkId::to_integer() const { return *r_cast< const uint64_t* >(&s); }
 
@@ -84,7 +84,7 @@ void MultiBlkId::add(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num
         addln_pieces[n_addln_piece] = chain_blkid{.m_blk_num = blk_num, .m_nblks = nblks};
         ++n_addln_piece;
     } else {
-        s = BlkId::serialized{true, blk_num, nblks, chunk_num};
+        s = BlkId::serialized{0x1, blk_num, nblks, chunk_num};
     }
 }
 
@@ -133,6 +133,11 @@ blk_count_t MultiBlkId::blk_count() const {
         nblks += b->blk_count();
     }
     return nblks;
+}
+
+BlkId MultiBlkId::to_single_blkid() const {
+    HS_DBG_ASSERT_LE(num_pieces(), 1, "Can only MultiBlkId with one piece to BlkId");
+    return BlkId{blk_num(), blk_count(), chunk_num()};
 }
 
 int MultiBlkId::compare(MultiBlkId const& left, MultiBlkId const& right) {

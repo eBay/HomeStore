@@ -84,7 +84,8 @@ public:
     folly::Future< std::error_code > async_write(sisl::sg_list const& sgs, MultiBlkId const& in_blkids,
                                                  bool part_of_batch = false);
 
-    folly::Future< std::error_code > async_read(BlkId const& bid, uint8_t* buf, uint32_t size, bool part_of_batch);
+    folly::Future< std::error_code > async_read(MultiBlkId const& bid, uint8_t* buf, uint32_t size,
+                                                bool part_of_batch = false);
 
     /**
      * @brief : asynchronous read
@@ -95,7 +96,7 @@ public:
      * @param cb : callback that will be triggered after read completes
      * @param part_of_batch : is this read part of batch;
      */
-    folly::Future< std::error_code > async_read(BlkId const& bid, sisl::sg_list& sgs, uint32_t size,
+    folly::Future< std::error_code > async_read(MultiBlkId const& bid, sisl::sg_list& sgs, uint32_t size,
                                                 bool part_of_batch = false);
 
     /**

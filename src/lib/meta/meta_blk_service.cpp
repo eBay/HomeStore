@@ -975,22 +975,15 @@ void MetaBlkService::free_meta_blk(meta_blk* mblk) {
 
 void MetaBlkService::alloc_meta_blks(uint64_t size, std::vector< BlkId >& bids) {
     auto const nblks = uint32_cast(size / m_sb_vdev->block_size());
-    std::vector< MultiBlkId > mbids;
 
     try {
-        [[maybe_unused]] uint64_t debug_size{0};
-        const auto ret = m_sb_vdev->alloc_blks(nblks, blk_alloc_hints{}, mbids);
+        const auto ret = m_sb_vdev->alloc_blks(nblks, blk_alloc_hints{}, bids);
         HS_REL_ASSERT_EQ(ret, BlkAllocStatus::SUCCESS);
-        for (auto const& mb : mbids) {
-            auto it = mb.iterate();
-            while (auto const b = it.next()) {
-                bids.push_back(*b);
 #ifndef NDEBUG
-                debug_size += (b->blk_count() * m_sb_vdev->block_size());
-#endif
-            }
+        uint64_t debug_size{0};
+        for (auto const& b : bids) {
+            debug_size += (b.blk_count() * m_sb_vdev->block_size());
         }
-#ifndef NDEBUG
         HS_DBG_ASSERT_EQ(debug_size, size);
 #endif
 

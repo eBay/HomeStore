@@ -81,9 +81,7 @@ static std::shared_ptr< BlkAllocator > create_blk_allocator(blk_allocator_type_t
     }
 }
 
-VirtualDev::VirtualDev(DeviceManager& dmgr, vdev_info const& vinfo, blk_allocator_type_t allocator_type,
-                       std::unique_ptr< ChunkSelector > chunk_selector, vdev_event_cb_t event_cb,
-                       bool is_auto_recovery) :
+VirtualDev::VirtualDev(DeviceManager& dmgr, vdev_info const& vinfo, vdev_event_cb_t event_cb, bool is_auto_recovery) :
         m_vdev_info{vinfo},
         m_dmgr{dmgr},
         m_name{vinfo.name},
@@ -171,7 +169,7 @@ BlkAllocStatus VirtualDev::alloc_contiguous_blks(blk_count_t nblks, blk_alloc_hi
             ret = alloc_blks(nblks, hints, mbid);
         }
         HS_REL_ASSERT_EQ(mbid.num_pieces(), 1, "out blkid more than 1 entries will lead to blk leak!");
-        out_blkid = r_cast< BlkId& >(mbid);
+        out_blkid = mbid.to_single_blkid();
     } catch (const std::exception& e) {
         ret = BlkAllocStatus::FAILED;
         HS_DBG_ASSERT(0, "{}", e.what());
@@ -214,20 +212,21 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
 }
 
 BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& hints,
-                                      std::vector< MultiBlkId >& out_blkids) {
+                                      std::vector< BlkId >& out_blkids) {
     // Regular alloc blks will allocate in MultiBlkId, but there is an upper limit on how many it can accomodate in a
     // single MultiBlkId, if caller is ok to generate multiple MultiBlkids, this method is called.
     auto h = hints;
     h.partial_alloc_ok = true;
+    h.is_contiguous = true;
     blk_count_t nblks_remain = nblks;
     BlkAllocStatus status;
 
     do {
         out_blkids.emplace_back(); // Put an empty MultiBlkId and use that for allocating them
-        MultiBlkId& out_mbid = out_blkids.back();
-        status = alloc_blks(nblks_remain, h, out_mbid);
+        BlkId& out_bid = out_blkids.back();
+        status = alloc_contiguous_blks(nblks_remain, h, out_bid);
 
-        auto nblks_this_iter = out_mbid.blk_count();
+        auto nblks_this_iter = out_bid.blk_count();
         nblks_remain = (nblks_remain < nblks_this_iter) ? 0 : (nblks_remain - nblks_this_iter);
     } while (nblks_remain);
 

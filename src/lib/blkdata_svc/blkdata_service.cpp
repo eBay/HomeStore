@@ -52,32 +52,76 @@ void BlkDataService::create_vdev(uint64_t size, blk_allocator_type_t alloc_type,
 
 // both first_time_boot and recovery path will come here
 shared< VirtualDev > BlkDataService::open_vdev(const vdev_info& vinfo, bool load_existing) {
-    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, blk_allocator_type_t::varsize, nullptr,
-                                            nullptr, true /* auto_recovery */);
+    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, nullptr, true /* auto_recovery */);
     m_blk_size = vinfo.blk_size;
     return m_vdev;
 }
 
-folly::Future< std::error_code > BlkDataService::async_read(BlkId const& bid, uint8_t* buf, uint32_t size,
-                                                            bool part_of_batch) {
-    m_blk_read_tracker->insert(bid);
-
-    return m_vdev->async_read(r_cast< char* >(buf), size, bid, part_of_batch).thenValue([this, bid](auto&& ec) {
-        m_blk_read_tracker->remove(bid);
-        return folly::makeFuture< std::error_code >(std::move(ec));
+static auto collect_all_futures(std::vector< folly::Future< std::error_code > >& futs) {
+    return folly::collectAllUnsafe(futs).thenValue([](auto&& vf) {
+        for (auto const& err_c : vf) {
+            if (sisl_unlikely(err_c.value())) {
+                auto ec = err_c.value();
+                return folly::makeFuture< std::error_code >(std::move(ec));
+            }
+        }
+        return folly::makeFuture< std::error_code >(std::error_code{});
     });
 }
 
-folly::Future< std::error_code > BlkDataService::async_read(BlkId const& bid, sisl::sg_list& sgs, uint32_t size,
+folly::Future< std::error_code > BlkDataService::async_read(MultiBlkId const& blkid, uint8_t* buf, uint32_t size,
                                                             bool part_of_batch) {
-    m_blk_read_tracker->insert(bid);
-    HS_DBG_ASSERT_EQ(sgs.iovs.size(), 1, "Expecting iov size to be 1 since reading on one blk.");
 
-    return m_vdev->async_readv(sgs.iovs.data(), sgs.iovs.size(), size, bid, part_of_batch)
-        .thenValue([this, bid](auto&& ec) {
+    auto do_read = [this](BlkId const& bid, uint8_t* buf, uint32_t size, bool part_of_batch) {
+        m_blk_read_tracker->insert(bid);
+
+        return m_vdev->async_read(r_cast< char* >(buf), size, bid, part_of_batch).thenValue([this, bid](auto&& ec) {
             m_blk_read_tracker->remove(bid);
             return folly::makeFuture< std::error_code >(std::move(ec));
         });
+    };
+
+    if (blkid.num_pieces() == 1) {
+        return do_read(blkid.to_single_blkid(), buf, size, part_of_batch);
+    } else {
+        static thread_local std::vector< folly::Future< std::error_code > > s_futs;
+        s_futs.clear();
+
+        auto it = blkid.iterate();
+        while (auto const bid = it.next()) {
+            s_futs.emplace_back(do_read(*bid, buf, size, part_of_batch));
+        }
+
+        return collect_all_futures(s_futs);
+    }
+}
+
+folly::Future< std::error_code > BlkDataService::async_read(MultiBlkId const& blkid, sisl::sg_list& sgs, uint32_t size,
+                                                            bool part_of_batch) {
+    auto do_read = [this](BlkId const& bid, sisl::sg_list& sgs, uint32_t size, bool part_of_batch) {
+        m_blk_read_tracker->insert(bid);
+        HS_DBG_ASSERT_EQ(sgs.iovs.size(), 1, "Expecting iov size to be 1 since reading on one blk.");
+
+        return m_vdev->async_readv(sgs.iovs.data(), sgs.iovs.size(), size, bid, part_of_batch)
+            .thenValue([this, bid](auto&& ec) {
+                m_blk_read_tracker->remove(bid);
+                return folly::makeFuture< std::error_code >(std::move(ec));
+            });
+    };
+
+    if (blkid.num_pieces() == 1) {
+        return do_read(blkid.to_single_blkid(), sgs, size, part_of_batch);
+    } else {
+        static thread_local std::vector< folly::Future< std::error_code > > s_futs;
+        s_futs.clear();
+
+        auto it = blkid.iterate();
+        while (auto const bid = it.next()) {
+            s_futs.emplace_back(do_read(*bid, sgs, size, part_of_batch));
+        }
+
+        return collect_all_futures(s_futs);
+    }
 }
 
 folly::Future< std::error_code > BlkDataService::async_alloc_write(const sisl::sg_list& sgs,
@@ -94,7 +138,7 @@ folly::Future< std::error_code > BlkDataService::async_write(const char* buf, ui
                                                              bool part_of_batch) {
     if (blkid.num_pieces() == 1) {
         // Shortcut to most common case
-        return m_vdev->async_write(buf, size, blkid, part_of_batch);
+        return m_vdev->async_write(buf, size, blkid.to_single_blkid(), part_of_batch);
     } else {
         static thread_local std::vector< folly::Future< std::error_code > > s_futs;
         s_futs.clear();
@@ -106,15 +150,7 @@ folly::Future< std::error_code > BlkDataService::async_write(const char* buf, ui
             s_futs.emplace_back(m_vdev->async_write(ptr, sz, *bid, part_of_batch));
             ptr += sz;
         }
-        return folly::collectAllUnsafe(s_futs).thenValue([](auto&& vf) {
-            for (auto const& err_c : vf) {
-                if (sisl_unlikely(err_c.value())) {
-                    auto ec = err_c.value();
-                    return folly::makeFuture< std::error_code >(std::move(ec));
-                }
-            }
-            return folly::makeFuture< std::error_code >(std::error_code{});
-        });
+        return collect_all_futures(s_futs);
     }
 }
 
@@ -122,7 +158,7 @@ folly::Future< std::error_code > BlkDataService::async_write(sisl::sg_list const
                                                              bool part_of_batch) {
     if (blkid.num_pieces() == 1) {
         // Shortcut to most common case
-        return m_vdev->async_writev(sgs.iovs.data(), sgs.iovs.size(), r_cast< BlkId const& >(blkid), part_of_batch);
+        return m_vdev->async_writev(sgs.iovs.data(), sgs.iovs.size(), blkid.to_single_blkid(), part_of_batch);
     } else {
         static thread_local std::vector< folly::Future< std::error_code > > s_futs;
         s_futs.clear();
@@ -133,15 +169,7 @@ folly::Future< std::error_code > BlkDataService::async_write(sisl::sg_list const
             const auto iovs = sg_it.next_iovs(bid->blk_count() * m_blk_size);
             s_futs.emplace_back(m_vdev->async_writev(iovs.data(), iovs.size(), *bid, part_of_batch));
         }
-        return folly::collectAllUnsafe(s_futs).thenValue([](auto&& vf) {
-            for (auto const& err_c : vf) {
-                if (sisl_unlikely(err_c.value())) {
-                    auto ec = err_c.value();
-                    return folly::makeFuture< std::error_code >(std::move(ec));
-                }
-            }
-            return folly::makeFuture< std::error_code >(std::error_code{});
-        });
+        return collect_all_futures(s_futs);
     }
 }
 

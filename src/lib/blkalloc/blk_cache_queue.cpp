@@ -51,7 +51,7 @@ FreeBlkCacheQueue::FreeBlkCacheQueue(const SlabCacheConfig& cfg, BlkAllocMetrics
 }
 
 BlkAllocStatus FreeBlkCacheQueue::try_alloc_blks(const blk_cache_alloc_req& req, blk_cache_alloc_resp& resp) {
-    const auto slab_idx{std::min(FreeBlkCache::find_slab(req.nblks), req.max_slab_idx)};
+    const auto slab_idx = std::min(FreeBlkCache::find_slab(req.nblks), req.max_slab_idx);
 
     COUNTER_INCREMENT(slab_metrics(slab_idx), num_slab_alloc, 1);
     BlkAllocStatus status = try_alloc_in_slab(slab_idx, req, resp);

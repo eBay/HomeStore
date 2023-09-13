@@ -175,10 +175,12 @@ folly::Future< std::error_code > PhysicalDev::async_write_zero(uint64_t size, ui
 
 folly::Future< std::error_code > PhysicalDev::queue_fsync() { return m_drive_iface->queue_fsync(m_iodev.get()); }
 
+__attribute__((no_sanitize_address)) static auto get_current_time() { return Clock::now(); }
+
 std::error_code PhysicalDev::sync_write(const char* data, uint32_t size, uint64_t offset) {
     HISTOGRAM_OBSERVE(m_metrics, write_io_sizes, (((size - 1) / 1024) + 1));
     COUNTER_INCREMENT(m_metrics, drive_sync_write_count, 1);
-    auto const start_time = Clock::now();
+    auto const start_time = get_current_time();
     auto const ret = m_drive_iface->sync_write(m_iodev.get(), data, size, offset);
     HISTOGRAM_OBSERVE(m_metrics, drive_write_latency, get_elapsed_time_us(start_time));
     return ret;

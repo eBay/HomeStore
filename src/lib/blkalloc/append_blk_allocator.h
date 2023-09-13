@@ -34,8 +34,8 @@ struct append_blkalloc_ctx {
     uint32_t version{append_blkalloc_sb_version};
     bool is_dirty; // this field is needed for cp_flush, but not necessarily needed for persistence;
     uint64_t allocator_id;
-    uint64_t freeable_nblks;
-    uint64_t last_append_offset;
+    blk_num_t freeable_nblks;
+    blk_num_t last_append_offset;
 };
 #pragma pack()
 
@@ -75,15 +75,13 @@ public:
     AppendBlkAllocator& operator=(AppendBlkAllocator&&) noexcept = delete;
     virtual ~AppendBlkAllocator() = default;
 
-    BlkAllocStatus alloc(BlkId& bid) override;
-    BlkAllocStatus alloc(blk_count_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) override;
+    BlkAllocStatus alloc_contiguous(BlkId& bid) override;
+    BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
+    void free(BlkId const& b) override;
 
-    void free(const std::vector< BlkId >& blk_ids) override;
-    void free(const BlkId& b) override;
-
-    blk_cap_t available_blks() const override;
-    blk_cap_t get_used_blks() const override;
-    blk_cap_t get_freeable_nblks() const;
+    blk_num_t available_blks() const override;
+    blk_num_t get_used_blks() const override;
+    blk_num_t get_freeable_nblks() const;
 
     bool is_blk_alloced(const BlkId& in_bid, bool use_lock = false) const override;
     std::string to_string() const override;
@@ -102,9 +100,9 @@ private:
     void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
 
 private:
-    std::mutex m_mtx;                 // thread_safe, TODO: open option for consumer to choose to go lockless;
-    uint64_t m_last_append_offset{0}; // last appended offset in blocks;
-    uint64_t m_freeable_nblks{0};
+    std::mutex m_mtx;                  // thread_safe, TODO: open option for consumer to choose to go lockless;
+    blk_num_t m_last_append_offset{0}; // last appended offset in blocks;
+    blk_num_t m_freeable_nblks{0};
     AppendBlkAllocMetrics m_metrics;
     std::array< superblk< append_blkalloc_ctx >, MAX_CP_COUNT > m_sb;
 };

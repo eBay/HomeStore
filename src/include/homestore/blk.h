@@ -128,6 +128,8 @@ public:
     void deserialize(sisl::blob const& b, bool copy);
 
     bool has_room() const;
+    BlkId to_single_blkid() const;
+
     static int compare(MultiBlkId const& one, MultiBlkId const& two);
 
     struct iterator {
@@ -246,7 +248,7 @@ struct blk_alloc_hints {
     std::optional< chunk_num_t > chunk_id_hint;  // any specific chunk id to pick for this allocation
     std::optional< stream_id_t > stream_id_hint; // any specific stream to pick
     bool can_look_for_other_chunk{true};         // If alloc on device not available can I pick other device
-    bool is_contiguous{false};                   // Should the entire allocation be one contiguous block
+    bool is_contiguous{true};                    // Should the entire allocation be one contiguous block
     bool partial_alloc_ok{false};   // ok to allocate only portion of nblks? Mutually exclusive with is_contiguous
     uint32_t min_blks_per_piece{1}; // blks allocated in a blkid should be atleast this size per entry
     uint32_t max_blks_per_piece{max_blks_per_blkid()}; // Number of blks on every entry

@@ -127,7 +127,7 @@ public:
     blk_num_t get_blks_per_phys_page() const { return m_phys_page_size / m_blk_size; }
 
     //////////// Slab related getters/setters /////////////
-    slab_idx_t get_slab_cnt() const { return m_slab_config.m_per_slab_cfg.size(); }
+    slab_idx_t get_slab_cnt() const { return s_cast< slab_idx_t >(m_slab_config.m_per_slab_cfg.size()); }
     blk_count_t get_slab_block_count(const slab_idx_t index) { return m_slab_config.m_per_slab_cfg[index].slab_size; }
     blk_num_t get_slab_capacity(const slab_idx_t slab_idx) const {
         return m_slab_config.m_per_slab_cfg[slab_idx].max_entries;

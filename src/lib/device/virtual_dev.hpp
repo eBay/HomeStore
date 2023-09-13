@@ -93,6 +93,7 @@ protected:
     sisl::sparse_vector< shared< Chunk > > m_all_chunks; // All chunks part of this vdev
     std::unique_ptr< ChunkSelector > m_chunk_selector;   // Instance of chunk selector
     blk_allocator_type_t m_allocator_type;
+    chunk_selector_type_t m_chunk_selector_type;
     bool m_auto_recovery;
 
 public:
@@ -132,7 +133,7 @@ public:
     virtual BlkAllocStatus alloc_blks(blk_count_t nblks, blk_alloc_hints const& hints, MultiBlkId& out_blkid);
 
     virtual BlkAllocStatus alloc_blks(blk_count_t nblks, blk_alloc_hints const& hints,
-                                      std::vector< MultiBlkId >& out_blkids);
+                                      std::vector< BlkId >& out_blkids);
 
     /// @brief Checks if a given block id is allocated in the in-memory version of the blk allocator
     /// @param blkid : BlkId to check for allocation
@@ -149,7 +150,6 @@ public:
     virtual BlkAllocStatus commit_blk(BlkId const& blkid);
 
     virtual void free_blk(BlkId const& b);
-    virtual void free_blk(MultiBlkId const& b);
 
     /////////////////////// Write API related methods /////////////////////////////
     /// @brief Asynchornously write the buffer to the device on a given blkid
