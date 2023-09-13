@@ -39,6 +39,8 @@ static_assert(sizeof(blk_count_serialized_t) == (NBLKS_BITS - 1) / 8 + 1,
               "Expected blk_count_t to matching NBLKS_BITS");
 
 typedef uint8_t chunk_num_t;
+typedef chunk_num_t allocator_id_t;
+
 static_assert(sizeof(chunk_num_t) == (CHUNK_NUM_BITS - 1) / 8 + 1, "Expected blk_count_t to matching CHUNK_NUM_BITS");
 
 typedef uint8_t blk_temp_t;
@@ -178,8 +180,8 @@ struct blk_alloc_hints {
     uint32_t dev_id_hint;          // which physical device to pick (hint if any) -1 for don't care
     bool can_look_for_other_chunk; // If alloc on device not available can I pick other device
     bool is_contiguous;
-    uint32_t multiplier;           // blks allocated in a blkid should be a multiple of multiplier
-    uint32_t max_blks_per_entry;   // Number of blks on every entry
+    uint32_t multiplier;         // blks allocated in a blkid should be a multiple of multiplier
+    uint32_t max_blks_per_entry; // Number of blks on every entry
     uintptr_t stream_info;
 #ifdef _PRERELEASE
     bool error_simulate = false; // can error simulate happen

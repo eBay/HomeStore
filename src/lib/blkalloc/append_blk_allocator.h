@@ -67,7 +67,7 @@ public:
 //
 class AppendBlkAllocator : public BlkAllocator {
 public:
-    AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_format, chunk_num_t id = 0);
+    AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_format, allocator_id_t id = 0);
 
     AppendBlkAllocator(const AppendBlkAllocator&) = delete;
     AppendBlkAllocator(AppendBlkAllocator&&) noexcept = delete;
