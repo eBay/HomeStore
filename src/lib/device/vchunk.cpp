@@ -17,23 +17,15 @@
 #include "device/chunk.h"
 
 namespace homestore {
-    VChunk::VChunk(cshared< Chunk >& chunk) : internalChunk(chunk){}
+VChunk::VChunk(cshared< Chunk >& chunk) : internalChunk(chunk) {}
 
-    void VChunk::set_user_private(const sisl::blob& data){
-        internalChunk->set_user_private(data);
-    }
+void VChunk::set_user_private(const sisl::blob& data) { internalChunk->set_user_private(data); }
 
-    const uint8_t* VChunk::get_user_private() const {
-        return internalChunk->user_private();
-    };
+const uint8_t* VChunk::get_user_private() const { return internalChunk->user_private(); };
 
-    blk_cap_t VChunk::available_blks() const {
-        return internalChunk->blk_allocator()->available_blks();
-    }
+blk_num_t VChunk::available_blks() const { return internalChunk->blk_allocator()->available_blks(); }
 
-    uint32_t VChunk::get_pdev_id() const {
-        return internalChunk->physical_dev()->pdev_id();
-    }
+uint32_t VChunk::get_pdev_id() const { return internalChunk->physical_dev()->pdev_id(); }
 
-    cshared< Chunk > VChunk::get_internal_chunk() const {return internalChunk;}
-}// namespace homestore
+cshared< Chunk > VChunk::get_internal_chunk() const { return internalChunk; }
+} // namespace homestore

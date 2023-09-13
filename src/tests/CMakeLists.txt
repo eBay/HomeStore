@@ -55,7 +55,8 @@ if (${build_nonio_tests})
     target_sources(test_append_blk_allocator PRIVATE test_append_blkalloc.cpp)
     target_link_libraries(test_append_blk_allocator homestore ${COMMON_TEST_DEPS} GTest::gmock)
     add_test(NAME AppendBlkAlloc COMMAND test_append_blk_allocator)
-    
+    set_property(TEST AppendBlkAlloc PROPERTY ENVIRONMENT "ASAN_OPTIONS=detect_stack_use_after_return=true")
+ 
     set(TEST_BLKID_SOURCES test_blkid.cpp ../lib/blkalloc/blk.cpp)
     add_executable(test_blkid ${TEST_BLKID_SOURCES})
     target_link_libraries(test_blkid ${COMMON_TEST_DEPS} GTest::gtest)
@@ -65,11 +66,11 @@ endif()
 
 can_build_io_tests(io_tests)
 if (${io_tests})
-
     set(TEST_INDEXBTREE_SOURCE_FILES test_index_btree.cpp)
     add_executable(test_index_btree ${TEST_INDEXBTREE_SOURCE_FILES})
     target_link_libraries(test_index_btree homestore ${COMMON_TEST_DEPS} GTest::gtest)
     add_test(NAME IndexBtree COMMAND test_index_btree)
+    set_property(TEST IndexBtree PROPERTY ENVIRONMENT "ASAN_OPTIONS=detect_stack_use_after_return=true")
 
     add_executable(test_data_service)
     target_sources(test_data_service PRIVATE test_data_service.cpp)
