@@ -1,4 +1,4 @@
-name: Homestore Build
+name: Homestore PR Build
 
 on:
   workflow_dispatch:
