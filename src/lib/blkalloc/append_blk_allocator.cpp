@@ -49,11 +49,11 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_form
 void AppendBlkAllocator::on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
     // TODO: also needs to initialize base class blkallocator for recovery path;
     // load all dirty buffer from the same starting point;
-    m_sb[0].load(buf, meta_cookie);
-    for (uint8_t i = 1; i < m_sb.size(); ++i) {
+    for (uint8_t i = 0; i < m_sb.size(); ++i) {
         m_sb[i].load(buf, meta_cookie);
     }
 
+    // recover in-memory counter/offset from metablk;
     m_last_append_offset = m_sb[0]->last_append_offset;
     m_freeable_nblks = m_sb[0]->freeable_nblks;
 
@@ -125,11 +125,11 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
 // cp_flush should not block alloc/free;
 //
 void AppendBlkAllocator::cp_flush(CP* cp) {
-    const auto idx = cp->id();
+    const auto idx = cp->id() % MAX_CP_COUNT;
     // check if current cp's context has dirty buffer already
     if (m_sb[idx]->is_dirty) {
         // write to metablk;
-        m_sb[cp->id()].write();
+        m_sb[idx].write();
 
         // clear this dirty buff's dirty flag;
         clear_dirty_offset(idx);
