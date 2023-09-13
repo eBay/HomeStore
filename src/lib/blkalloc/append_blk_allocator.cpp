@@ -47,7 +47,6 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_form
 }
 
 void AppendBlkAllocator::on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
-    // TODO: also needs to initialize base class blkallocator for recovery path;
     // load all dirty buffer from the same starting point;
     for (uint8_t i = 0; i < m_sb.size(); ++i) {
         m_sb[i].load(buf, meta_cookie);

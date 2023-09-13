@@ -99,6 +99,8 @@ public:
         m_cv.wait(lk, [this] { return this->m_io_job_done; });
     }
 
+    void reset_io_job_done() { m_io_job_done = false; }
+
     void write_io_verify(const uint64_t io_size) {
         auto sg_write_ptr = std::make_shared< sisl::sg_list >();
         auto sg_read_ptr = std::make_shared< sisl::sg_list >();
@@ -256,7 +258,7 @@ TEST_F(AppendBlkAllocatorTest, TestCPFlush) {
     test_common::HSTestHelper::shutdown_homestore();
 }
 
-TEST_F(AppendBlkAllocatorTest, TestWriteThenRecovey) {
+TEST_F(AppendBlkAllocatorTest, TestWriteFreeThenRecover) {
     LOGINFO("Step 0: Starting homestore.");
     test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0, 0, 0, 80.0, 0, nullptr, false, nullptr,
                                                false /* default ds type */);
@@ -281,7 +283,18 @@ TEST_F(AppendBlkAllocatorTest, TestWriteThenRecovey) {
     std::this_thread::sleep_for(std::chrono::seconds{3});
     LOGINFO("Step 5: Restarted homestore with data service recovered");
 
-    LOGINFO("Step 6: do shutdown. ");
+    this->reset_io_job_done();
+
+    LOGINFO("Step 6: run on worker thread to schedule write for {} Bytes.", io_size);
+    iomanager.run_on_forget(iomgr::reactor_regex::random_worker, [this, io_size]() { this->write_io(io_size); });
+
+    LOGINFO("Step 7: Wait for I/O to complete.");
+    wait_for_all_io_complete();
+
+    LOGINFO("Step 8: I/O completed, trigger_cp and wait.");
+    test_common::HSTestHelper::trigger_cp(true /* wait */);
+
+    LOGINFO("Step 9: do shutdown. ");
     test_common::HSTestHelper::shutdown_homestore();
 }
 
