@@ -286,6 +286,7 @@ TEST_F(AppendBlkAllocatorTest, TestWriteFreeThenRecover) {
     wait_for_all_io_complete();
 
     LOGINFO("Step 3: I/O completed, trigger_cp and wait.");
+
     test_common::HSTestHelper::trigger_cp(true /* wait */);
 
     LOGINFO("Step 4: cp completed, restart homestore.");
