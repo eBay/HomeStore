@@ -35,7 +35,7 @@ using chunk_num_t = uint16_t;
 using blk_count_t = uint16_t;
 using blk_num_t = uint32_t;
 using blk_temp_t = uint16_t;
-
+using allocator_id_t = chunk_num_t;
 static constexpr size_t max_addressable_chunks() { return 1UL << (8 * sizeof(chunk_num_t)); }
 static constexpr size_t max_blks_per_chunk() { return 1UL << (8 * sizeof(blk_num_t)); }
 static constexpr size_t max_blks_per_blkid() { return (1UL << (8 * sizeof(blk_count_t))) - 1; }
