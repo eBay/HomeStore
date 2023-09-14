@@ -24,7 +24,7 @@ class Chunk;
 class VChunk {
 public:
     VChunk(cshared< Chunk > const&);
-    
+
     ~VChunk() = default;
 
     void set_user_private(const sisl::blob& data);
@@ -34,6 +34,6 @@ public:
     cshared< Chunk > get_internal_chunk() const;
 
 private:
-    cshared< Chunk > internalChunk;
+    shared< Chunk > internalChunk;
 };
-}// namespace homestore
+} // namespace homestore
