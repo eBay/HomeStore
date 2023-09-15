@@ -389,7 +389,7 @@ public:
         const bool inserted{m_cache->insert(blkid, ibuf, &out_bbuf)};
         if (!inserted) {
             free_blk(blkid, boost::none, boost::none);
-            HS_DBG_ASSERT(0, "cache is full. failing blk allocation");
+            HS_REL_ASSERT(0, "cache is full. failing blk allocation");
             return nullptr;
         }
 
