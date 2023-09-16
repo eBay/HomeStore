@@ -34,6 +34,6 @@ public:
     cshared< Chunk > get_internal_chunk() const;
 
 private:
-    shared< Chunk > internalChunk;
+    shared< Chunk > m_internal_chunk;
 };
 } // namespace homestore
