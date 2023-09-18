@@ -17,7 +17,7 @@
 #include <homestore/homestore.hpp>
 #include "device/chunk.h"
 #include "device/virtual_dev.hpp"
-#include "device/physical_dev.hpp" // vdev_info_block
+#include "device/physical_dev.hpp"     // vdev_info_block
 #include "common/homestore_config.hpp" // is_data_drive_hdd
 #include "common/homestore_assert.hpp"
 #include "common/error.h"
@@ -71,7 +71,6 @@ static auto collect_all_futures(std::vector< folly::Future< std::error_code > >&
 
 folly::Future< std::error_code > BlkDataService::async_read(MultiBlkId const& blkid, uint8_t* buf, uint32_t size,
                                                             bool part_of_batch) {
-
     auto do_read = [this](BlkId const& bid, uint8_t* buf, uint32_t size, bool part_of_batch) {
         m_blk_read_tracker->insert(bid);
 
@@ -89,7 +88,9 @@ folly::Future< std::error_code > BlkDataService::async_read(MultiBlkId const& bl
 
         auto it = blkid.iterate();
         while (auto const bid = it.next()) {
-            s_futs.emplace_back(do_read(*bid, buf, size, part_of_batch));
+            uint32_t sz = bid->blk_count() * m_blk_size;
+            s_futs.emplace_back(do_read(*bid, buf, sz, part_of_batch));
+            buf += sz;
         }
 
         return collect_all_futures(s_futs);
@@ -98,11 +99,13 @@ folly::Future< std::error_code > BlkDataService::async_read(MultiBlkId const& bl
 
 folly::Future< std::error_code > BlkDataService::async_read(MultiBlkId const& blkid, sisl::sg_list& sgs, uint32_t size,
                                                             bool part_of_batch) {
-    auto do_read = [this](BlkId const& bid, sisl::sg_list& sgs, uint32_t size, bool part_of_batch) {
+    // TODO: sg_iovs_t should not be passed by value. We need it pass it as const&, but that is failing because
+    // iovs.data() will then return "const iovec*", but unfortunately all the way down to iomgr, we take iovec*
+    // instead it can easily take "const iovec*". Until we change this is made as copy by value
+    auto do_read = [this](BlkId const& bid, sisl::sg_iovs_t iovs, uint32_t size, bool part_of_batch) {
         m_blk_read_tracker->insert(bid);
-        HS_DBG_ASSERT_EQ(sgs.iovs.size(), 1, "Expecting iov size to be 1 since reading on one blk.");
 
-        return m_vdev->async_readv(sgs.iovs.data(), sgs.iovs.size(), size, bid, part_of_batch)
+        return m_vdev->async_readv(iovs.data(), iovs.size(), size, bid, part_of_batch)
             .thenValue([this, bid](auto&& ec) {
                 m_blk_read_tracker->remove(bid);
                 return folly::makeFuture< std::error_code >(std::move(ec));
@@ -110,14 +113,16 @@ folly::Future< std::error_code > BlkDataService::async_read(MultiBlkId const& bl
     };
 
     if (blkid.num_pieces() == 1) {
-        return do_read(blkid.to_single_blkid(), sgs, size, part_of_batch);
+        return do_read(blkid.to_single_blkid(), sgs.iovs, size, part_of_batch);
     } else {
         static thread_local std::vector< folly::Future< std::error_code > > s_futs;
         s_futs.clear();
 
-        auto it = blkid.iterate();
-        while (auto const bid = it.next()) {
-            s_futs.emplace_back(do_read(*bid, sgs, size, part_of_batch));
+        sisl::sg_iterator sg_it{sgs.iovs};
+        auto blkid_it = blkid.iterate();
+        while (auto const bid = blkid_it.next()) {
+            uint32_t const sz = bid->blk_count() * m_blk_size;
+            s_futs.emplace_back(do_read(*bid, sg_it.next_iovs(sz), sz, part_of_batch));
         }
 
         return collect_all_futures(s_futs);
@@ -156,6 +161,9 @@ folly::Future< std::error_code > BlkDataService::async_write(const char* buf, ui
 
 folly::Future< std::error_code > BlkDataService::async_write(sisl::sg_list const& sgs, MultiBlkId const& blkid,
                                                              bool part_of_batch) {
+    // TODO: Async write should pass this by value the sgs.size parameter as well, currently vdev write routine
+    // walks through again all the iovs and then getting the len to pass it down to iomgr. This defeats the purpose of
+    // taking size parameters (which was done exactly done to avoid this walk through)
     if (blkid.num_pieces() == 1) {
         // Shortcut to most common case
         return m_vdev->async_writev(sgs.iovs.data(), sgs.iovs.size(), blkid.to_single_blkid(), part_of_batch);
@@ -193,8 +201,6 @@ void BlkDataService::commit_blk(MultiBlkId const& blkid) {
 }
 
 folly::Future< std::error_code > BlkDataService::async_free_blk(MultiBlkId const& bids) {
-    // Shortcut to most common case
-
     // create blk read waiter instance;
     folly::Promise< std::error_code > promise;
     auto f = promise.getFuture();

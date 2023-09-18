@@ -110,7 +110,7 @@ void MultiBlkId::deserialize(sisl::blob const& b, bool copy) {
     }
 }
 
-uint16_t MultiBlkId::num_pieces() const { return n_addln_piece + (BlkId::is_valid() ? 1 : 0); }
+uint16_t MultiBlkId::num_pieces() const { return BlkId::is_valid() ? n_addln_piece + 1 : 0; }
 
 bool MultiBlkId::has_room() const { return (n_addln_piece < max_addln_pieces); }
 

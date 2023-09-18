@@ -703,41 +703,37 @@ blk_count_t VarsizeBlkAllocator::free_blks_direct(MultiBlkId const& bid) {
     return n_freed;
 }
 
-bool VarsizeBlkAllocator::is_blk_alloced(BlkId const& b, bool use_lock) const {
+bool VarsizeBlkAllocator::is_blk_alloced(BlkId const& bid, bool use_lock) const {
     if (!m_inited) { return true; }
-    auto bits_set{[this, &b]() {
-        // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache
-        // bm.
-        if (!m_cache_bm->is_bits_set(b.blk_num(), b.blk_count())) {
-            BLKALLOC_REL_ASSERT(0, "Expected bits to set");
-            return false;
+
+    auto check_bits_set = [this](BlkId const& b, bool use_lock) {
+        if (use_lock) {
+            BlkAllocPortion const& portion = blknum_to_portion_const(b.blk_num());
+            auto lock{portion.portion_auto_lock()};
+            return m_cache_bm->is_bits_set(b.blk_num(), b.blk_count());
+        } else {
+            return m_cache_bm->is_bits_set(b.blk_num(), b.blk_count());
         }
-        return true;
-    }};
-    if (use_lock) {
-        BlkAllocPortion const& portion = blknum_to_portion_const(b.blk_num());
-        auto lock{portion.portion_auto_lock()};
-        if (!bits_set()) return false;
+    };
+
+    bool ret;
+    if (bid.is_multi()) {
+        auto& mbid = r_cast< MultiBlkId const& >(bid);
+        auto it = mbid.iterate();
+        while (auto const b = it.next()) {
+            ret = check_bits_set(*b, use_lock);
+            if (!ret) { break; }
+        }
     } else {
-        if (!bits_set()) return false;
+        ret = check_bits_set(bid, use_lock);
     }
-    return true;
+    return ret;
 }
 
 blk_num_t VarsizeBlkAllocator::available_blks() const { return get_total_blks() - get_used_blks(); }
 blk_num_t VarsizeBlkAllocator::get_used_blks() const { return get_alloced_blk_count(); }
 
 #ifdef _PRERELEASE
-bool VarsizeBlkAllocator::is_set_on_bitmap(BlkId const& b) const {
-    BlkAllocPortion const& portion = blknum_to_portion_const(b.blk_num());
-    {
-        // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache
-        // bm.
-        auto lock{portion.portion_auto_lock()};
-        return m_cache_bm->is_bits_set(b.blk_num(), b.blk_count());
-    }
-}
-
 void VarsizeBlkAllocator::alloc_sanity_check(blk_count_t nblks, blk_alloc_hints const& hints,
                                              MultiBlkId const& out_blkid) const {
     if (HS_DYNAMIC_CONFIG(generic.sanity_check_level)) {

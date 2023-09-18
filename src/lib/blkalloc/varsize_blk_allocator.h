@@ -268,7 +268,6 @@ private:
     blk_count_t free_blks_direct(MultiBlkId const& b);
 
 #ifdef _PRERELEASE
-    bool is_set_on_bitmap(BlkId const& b) const;
     void alloc_sanity_check(blk_count_t nblks, blk_alloc_hints const& hints, MultiBlkId const& out_blkids) const;
 #endif
 

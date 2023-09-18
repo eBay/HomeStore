@@ -77,7 +77,7 @@ public:
 
     void invalidate();
     uint64_t to_integer() const;
-    sisl::blob serialize();
+    sisl::blob serialize(); // TODO: Consider making this const, perhaps returns const uint8_t version of blob
     void deserialize(sisl::blob const& b, bool copy);
     uint32_t serialized_size() const;
     std::string to_string() const;
@@ -168,7 +168,7 @@ struct hash< homestore::BlkId > {
 template <>
 struct hash< homestore::MultiBlkId > {
     size_t operator()(const homestore::MultiBlkId& mbid) const noexcept {
-        static constexpr size_t s_start_seed = 0; // TODO: Pickup a better seed
+        static constexpr size_t s_start_seed = 0xB504F333;
         size_t seed = s_start_seed;
         auto it = mbid.iterate();
         while (auto b = it.next()) {
