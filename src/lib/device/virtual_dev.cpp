@@ -196,13 +196,20 @@ BlkAllocStatus VirtualDev::do_alloc_blk(blk_count_t nblks, const blk_alloc_hints
         Chunk* chunk;
         size_t attempt{0};
 
-        do {
-            chunk = m_chunk_selector->select_chunk(nblks, hints).get();
-            if (chunk == nullptr) { status = BlkAllocStatus::SPACE_FULL; }
-
+        if (hints.chunk_id_hint) {
+            // this is a target-chunk allocation;
+            chunk = m_dmgr.get_chunk_mutable(*(hints.chunk_id_hint));
             status = alloc_blk_from_chunk(nblks, hints, out_blkid, chunk);
-            if (status == BlkAllocStatus::SUCCESS || !hints.can_look_for_other_chunk) { break; }
-        } while (++attempt < m_all_chunks.size());
+            // don't look for other chunks because user wants allocation on chunk_id_hint only;
+        } else {
+            do {
+                chunk = m_chunk_selector->select_chunk(nblks, hints).get();
+                if (chunk == nullptr) { status = BlkAllocStatus::SPACE_FULL; }
+
+                status = alloc_blk_from_chunk(nblks, hints, out_blkid, chunk);
+                if (status == BlkAllocStatus::SUCCESS || !hints.can_look_for_other_chunk) { break; }
+            } while (++attempt < m_all_chunks.size());
+        }
 
         if (status != BlkAllocStatus::SUCCESS) {
             LOGERROR("nblks={} failed to alloc after trying to alloc on every chunks {} and devices {}.", nblks);
