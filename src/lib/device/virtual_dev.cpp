@@ -184,21 +184,28 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
         Chunk* chunk;
         size_t attempt{0};
 
-        do {
-            chunk = m_chunk_selector->select_chunk(nblks, hints).get();
-            if (chunk == nullptr) {
-                status = BlkAllocStatus::SPACE_FULL;
-                break;
-            }
+        if (hints.chunk_id_hint) {
+            // this is a target-chunk allocation;
+            chunk = m_dmgr.get_chunk_mutable(*(hints.chunk_id_hint));
+            status = alloc_blk_from_chunk(nblks, hints, out_blkid, chunk);
+            // don't look for other chunks because user wants allocation on chunk_id_hint only;
+        } else {
+            do {
+                chunk = m_chunk_selector->select_chunk(nblks, hints).get();
+                if (chunk == nullptr) {
+                    status = BlkAllocStatus::SPACE_FULL;
+                    break;
+                }
 
-            status = alloc_blks_from_chunk(nblks, hints, out_blkid, chunk);
-            if ((status == BlkAllocStatus::SUCCESS) || !hints.can_look_for_other_chunk ||
-                (status == BlkAllocStatus::PARTIAL && hints.partial_alloc_ok)) {
-                break;
-            }
-        } while (++attempt < m_all_chunks.size());
+                status = alloc_blks_from_chunk(nblks, hints, out_blkid, chunk);
+                if ((status == BlkAllocStatus::SUCCESS) || !hints.can_look_for_other_chunk ||
+                    (status == BlkAllocStatus::PARTIAL && hints.partial_alloc_ok)) {
+                    break;
+                }
+            } while (++attempt < m_all_chunks.size());
+        }
 
-        if ((status != BlkAllocStatus::SUCCESS) || (status != BlkAllocStatus::PARTIAL)) {
+        if ((status != BlkAllocStatus::SUCCESS) && !((status == BlkAllocStatus::PARTIAL) && hints.partial_alloc_ok) {
             LOGERROR("nblks={} failed to alloc after trying to alloc on every chunks {} and devices {}.", nblks);
             COUNTER_INCREMENT(m_metrics, vdev_num_alloc_failure, 1);
         }
@@ -220,6 +227,8 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
     h.is_contiguous = true;
     blk_count_t nblks_remain = nblks;
     BlkAllocStatus status;
+
+    HS_REL_ASSERT(h.chunk_id_hint, "Not expecting to received targetd chunk allocation in this function. ");
 
     do {
         out_blkids.emplace_back(); // Put an empty MultiBlkId and use that for allocating them
