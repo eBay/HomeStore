@@ -21,11 +21,15 @@ VChunk::VChunk(cshared< Chunk >& chunk) : m_internal_chunk(chunk) {}
 
 void VChunk::set_user_private(const sisl::blob& data) { m_internal_chunk->set_user_private(data); }
 
-const uint8_t* VChunk::get_user_private() const { return m_internal_chunk->user_private(); };
+const uint8_t* VChunk::get_user_private() const { return m_internal_chunk->user_private(); }
+
+uint16_t VChunk::get_chunk_id() const { return m_internal_chunk->chunk_id(); }
 
 blk_cap_t VChunk::available_blks() const { return m_internal_chunk->blk_allocator()->available_blks(); }
 
 uint32_t VChunk::get_pdev_id() const { return m_internal_chunk->physical_dev()->pdev_id(); }
 
 cshared< Chunk > VChunk::get_internal_chunk() const { return m_internal_chunk; }
+
+bool VChunk::operator==(const VChunk& vchunk) const { return vchunk.get_chunk_id() == get_chunk_id(); }
 } // namespace homestore
