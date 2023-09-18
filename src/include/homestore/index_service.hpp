@@ -25,7 +25,7 @@
 
 namespace homestore {
 
-class IndexWBCache;
+class IndexWBCacheBase;
 class IndexTableBase;
 class VirtualDev;
 
@@ -38,7 +38,7 @@ public:
 class IndexService {
 private:
     std::unique_ptr< IndexServiceCallbacks > m_svc_cbs;
-    std::unique_ptr< IndexWBCache > m_wb_cache;
+    std::unique_ptr< IndexWBCacheBase > m_wb_cache;
     std::shared_ptr< VirtualDev > m_vdev;
 
     mutable std::mutex m_index_map_mtx;
@@ -63,13 +63,13 @@ public:
     uint64_t used_size() const;
     uint32_t node_size() const;
 
-    IndexWBCache& wb_cache() { return *m_wb_cache; }
+    IndexWBCacheBase& wb_cache() { return *m_wb_cache; }
 
 private:
     void meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
 };
 
 extern IndexService& index_service();
-extern IndexWBCache& wb_cache();
+extern IndexWBCacheBase& wb_cache();
 
 } // namespace homestore

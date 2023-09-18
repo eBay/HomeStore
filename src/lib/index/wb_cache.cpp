@@ -29,7 +29,7 @@ SISL_LOGGING_DECL(wbcache)
 
 namespace homestore {
 
-IndexWBCache& wb_cache() { return index_service().wb_cache(); }
+IndexWBCacheBase& wb_cache() { return index_service().wb_cache(); }
 
 IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, const std::shared_ptr< sisl::Evictor >& evictor,
                            uint32_t node_size) :

@@ -140,6 +140,7 @@ public:
     CPGuard(const CPGuard& other);
     CPGuard operator=(const CPGuard& other);
 
+    CPContext* context(cp_consumer_t consumer);
     CP& operator*();
     CP* operator->();
     CP* get();
