@@ -71,15 +71,7 @@ typedef std::function< void(std::error_condition err, std::shared_ptr< std::vect
 
 class BlkDataServiceTest : public testing::Test {
 public:
-    BlkDataService& inst() { // return hs()->data_service();
-        return homestore::data_service();
-    }
-
-    void print_bids(const std::vector< BlkId >& out_bids) {
-        for (auto i = 0ul; i < out_bids.size(); ++i) {
-            LOGINFO("bid[{}]: {}", i, out_bids[i].to_string());
-        }
-    }
+    BlkDataService& inst() { return homestore::data_service(); }
 
     void free(sisl::sg_list& sg) { test_common::HSTestHelper::free(sg); }
 
@@ -87,37 +79,35 @@ public:
     void write_read_free_blk(uint64_t io_size) {
         auto sg_write_ptr = std::make_shared< sisl::sg_list >();
         auto sg_read_ptr = std::make_shared< sisl::sg_list >();
-        auto test_blkid_ptr = std::make_shared< BlkId >();
+        auto test_blkid_ptr = std::make_shared< MultiBlkId >();
 
-        write_sgs(io_size, sg_write_ptr, 1 /* num_iovs */)
-            .thenValue([this, sg_write_ptr, test_blkid_ptr](const std::vector< BlkId >& out_bids) {
+        write_sgs(io_size, sg_write_ptr, 1 /* num_iovs */, *test_blkid_ptr)
+            .thenValue([this, sg_write_ptr, sg_read_ptr, test_blkid_ptr](auto&& err) {
+                RELEASE_ASSERT(!err, "Write error");
                 LOGINFO("after_write_cb: Write completed;");
                 // sg_write buffer is no longer needed;
                 free(*sg_write_ptr);
 
-                LOGINFO("Write blk ids: ");
-                print_bids(out_bids);
+                LOGINFO("Write blk ids: {}", test_blkid_ptr->to_string());
+                HS_REL_ASSERT_GE(test_blkid_ptr->num_pieces(), 1);
 
-                HS_DBG_ASSERT_GE(out_bids.size(), 1);
-                *test_blkid_ptr = out_bids[0];
-            })
-            .thenValue([this, sg_read_ptr, test_blkid_ptr](auto) {
                 struct iovec iov;
-                iov.iov_len = test_blkid_ptr->get_nblks() * inst().get_page_size();
+                iov.iov_len = test_blkid_ptr->blk_count() * inst().get_blk_size();
                 iov.iov_base = iomanager.iobuf_alloc(512, iov.iov_len);
                 sg_read_ptr->iovs.push_back(iov);
-                sg_read_ptr->size += iov.iov_len;
+                sg_read_ptr->size = iov.iov_len;
 
                 LOGINFO("Step 2: async read on blkid: {}", test_blkid_ptr->to_string());
-                add_read_delay();
                 return inst().async_read(*test_blkid_ptr, *sg_read_ptr, sg_read_ptr->size);
             })
-            .thenValue([this, sg_read_ptr, test_blkid_ptr](auto) {
+            .thenValue([this, sg_read_ptr, test_blkid_ptr](auto&& err) {
+                RELEASE_ASSERT(!err, "Read error");
                 LOGINFO("read completed;");
                 free(*sg_read_ptr);
                 return inst().async_free_blk(*test_blkid_ptr);
             })
-            .thenValue([this, test_blkid_ptr](auto) {
+            .thenValue([this, test_blkid_ptr](auto&& err) {
+                RELEASE_ASSERT(!err, "free_blk error");
                 LOGINFO("completed async_free_blk: {}", test_blkid_ptr->to_string());
                 this->finish_and_notify();
             });
@@ -127,39 +117,35 @@ public:
     void write_free_blk_before_read_comp(const uint64_t io_size) {
         auto sg_write_ptr = std::make_shared< sisl::sg_list >();
         auto sg_read_ptr = std::make_shared< sisl::sg_list >();
-        auto test_blkid_ptr = std::make_shared< BlkId >();
+        auto test_blkid_ptr = std::make_shared< MultiBlkId >();
 
-        write_sgs(io_size, sg_write_ptr, 1 /* num_iovs */)
-            .thenValue([this, sg_write_ptr, test_blkid_ptr](const std::vector< BlkId >& out_bids) {
-                // write completed, now we trigger read on a blkid and in read completion routine, we do
-                // a free blk;
-
+        write_sgs(io_size, sg_write_ptr, 1 /* num_iovs */, *test_blkid_ptr)
+            .thenValue([this, sg_write_ptr, sg_read_ptr, test_blkid_ptr](auto&& err) {
+                RELEASE_ASSERT(!err, "Write error");
                 LOGINFO("after_write_cb: Write completed;");
                 free(*sg_write_ptr); // sg_write buffer is no longer needed;
 
-                LOGINFO("Write blk ids: ");
-                print_bids(out_bids);
+                LOGINFO("Write blk ids: {}", test_blkid_ptr->to_string());
+                HS_REL_ASSERT_GE(test_blkid_ptr->num_pieces(), 1);
 
-                HS_DBG_ASSERT_GE(out_bids.size(), 1);
-                *test_blkid_ptr = out_bids[0];
-            })
-            .thenValue([this, sg_read_ptr, test_blkid_ptr](auto) mutable {
                 struct iovec iov;
-                iov.iov_len = test_blkid_ptr->get_nblks() * inst().get_page_size();
+                iov.iov_len = test_blkid_ptr->blk_count() * inst().get_blk_size();
                 iov.iov_base = iomanager.iobuf_alloc(512, iov.iov_len);
                 sg_read_ptr->iovs.push_back(iov);
-                sg_read_ptr->size += iov.iov_len;
+                sg_read_ptr->size = iov.iov_len;
 
-                LOGINFO("Step 2a: inject read delay on blkid: {}", test_blkid_ptr->to_string());
-                LOGINFO("Step 2b: async read on blkid: {}", test_blkid_ptr->to_string());
+                LOGINFO("Step 2a: inject read delay and read on blkid: {}", test_blkid_ptr->to_string());
+                add_read_delay();
                 inst()
                     .async_read(*test_blkid_ptr, *sg_read_ptr, sg_read_ptr->size)
-                    .thenValue([sg_read_ptr, this](auto) {
+                    .thenValue([sg_read_ptr, this](auto&& err) {
+                        RELEASE_ASSERT(!err, "Read error");
+
                         // if we are here, free_blk callback must have been called already, because data service layer
                         // trigger the free_blk cb firstly then send read complete cb back to caller;
                         m_read_blk_done = true;
                         LOGINFO("read completed;");
-                        HS_DBG_ASSERT_EQ(m_free_blk_done.load(), true,
+                        HS_REL_ASSERT_EQ(m_free_blk_done.load(), true,
                                          "free blk callback should not be called before read blk completes");
 
                         free(*sg_read_ptr);
@@ -167,9 +153,10 @@ public:
                     });
 
                 LOGINFO("Step 3: started async_free_blk: {}", test_blkid_ptr->to_string());
-                inst().async_free_blk(*test_blkid_ptr).thenValue([this](auto) {
+                inst().async_free_blk(*test_blkid_ptr).thenValue([this](auto&& err) {
+                    RELEASE_ASSERT(!err, "free_blk error");
                     LOGINFO("completed async_free_blk");
-                    HS_DBG_ASSERT_EQ(m_free_blk_done.load(), false, "Duplicate free blk completion");
+                    HS_REL_ASSERT_EQ(m_free_blk_done.load(), false, "Duplicate free blk completion");
                     m_free_blk_done = true;
                 });
             });
@@ -177,55 +164,52 @@ public:
 
     void write_io_free_blk(const uint64_t io_size) {
         std::shared_ptr< sisl::sg_list > sg_write_ptr = std::make_shared< sisl::sg_list >();
+        auto test_blkid_ptr = std::make_shared< MultiBlkId >();
 
-        auto futs = write_sgs(io_size, sg_write_ptr, 1 /* num_iovs */)
-                        .thenValue([sg_write_ptr, this](const std::vector< BlkId >& out_bids) {
-                            LOGINFO("after_write_cb: Write completed;");
-                            free(*sg_write_ptr);
+        write_sgs(io_size, sg_write_ptr, 1 /* num_iovs */, *test_blkid_ptr)
+            .thenValue([sg_write_ptr, this, test_blkid_ptr](auto&& err) {
+                RELEASE_ASSERT(!err, "Write error");
+                LOGINFO("after_write_cb: Write completed;");
+                free(*sg_write_ptr);
 
-                            std::vector< folly::Future< bool > > futs;
-                            for (const auto& free_bid : out_bids) {
-                                LOGINFO("Step 2: started async_free_blk: {}", free_bid.to_string());
-                                auto f = inst().async_free_blk(free_bid);
-                                futs.emplace_back(std::move(f));
-                            }
-                            return futs;
-                        });
-
-        folly::collectAllUnsafe(futs).then([this](auto) {
-            LOGINFO("completed async_free_blks");
-            this->finish_and_notify();
-        });
+                LOGINFO("Step 2: started async_free_blk: {}", test_blkid_ptr->to_string());
+                inst().async_free_blk(*test_blkid_ptr).thenValue([this](auto&& err) {
+                    RELEASE_ASSERT(!err, "Free error");
+                    LOGINFO("completed async_free_blks");
+                    this->finish_and_notify();
+                });
+            });
     }
 
     void write_io_verify(const uint64_t io_size) {
         auto sg_write_ptr = std::make_shared< sisl::sg_list >();
         auto sg_read_ptr = std::make_shared< sisl::sg_list >();
+        auto test_blkid_ptr = std::make_shared< MultiBlkId >();
 
-        write_sgs(io_size, sg_write_ptr, 1 /* num_iovs */)
-            .thenValue([sg_write_ptr, sg_read_ptr, this](const std::vector< BlkId >& out_bids) mutable {
+        write_sgs(io_size, sg_write_ptr, 1 /* num_iovs */, *test_blkid_ptr)
+            .thenValue([sg_write_ptr, sg_read_ptr, test_blkid_ptr, this](auto&& err) {
+                RELEASE_ASSERT(!err, "Write error");
+
                 // this will be called in write io completion cb;
                 LOGINFO("after_write_cb: Write completed;");
 
                 // TODO: verify multiple read blks;
-                HS_DBG_ASSERT_EQ(out_bids.size(), 1);
+                HS_DBG_ASSERT_EQ(test_blkid_ptr->num_pieces(), 1);
 
-                const auto num_iovs = out_bids.size();
+                struct iovec iov;
+                iov.iov_len = test_blkid_ptr->blk_count() * inst().get_blk_size();
+                iov.iov_base = iomanager.iobuf_alloc(512, iov.iov_len);
+                sg_read_ptr->iovs.push_back(iov);
+                sg_read_ptr->size = iov.iov_len;
 
-                for (auto i = 0ul; i < num_iovs; ++i) {
-                    struct iovec iov;
-                    iov.iov_len = out_bids[i].get_nblks() * inst().get_page_size();
-                    iov.iov_base = iomanager.iobuf_alloc(512, iov.iov_len);
-                    sg_read_ptr->iovs.push_back(iov);
-                    sg_read_ptr->size += iov.iov_len;
-                }
-
-                LOGINFO("Step 2: async read on blkid: {}", out_bids[0].to_string());
-                return inst().async_read(out_bids[0], *sg_read_ptr, sg_read_ptr->size);
+                LOGINFO("Step 2: async read on blkid: {}", test_blkid_ptr->to_string());
+                return inst().async_read(*test_blkid_ptr, *sg_read_ptr, sg_read_ptr->size);
             })
-            .thenValue([this, sg_write_ptr, sg_read_ptr](auto) mutable {
+            .thenValue([this, sg_write_ptr, sg_read_ptr](auto&& err) mutable {
+                RELEASE_ASSERT(!err, "Read error");
+
                 const auto equal = test_common::HSTestHelper::compare(*sg_read_ptr, *sg_write_ptr);
-                assert(equal);
+                RELEASE_ASSERT(equal, "Read after write data mismatch");
 
                 LOGINFO("Read completed;");
                 free(*sg_write_ptr);
@@ -240,7 +224,8 @@ public:
     //
     void write_io(uint64_t io_size, uint32_t num_iovs = 1) {
         auto sg = std::make_shared< sisl::sg_list >();
-        write_sgs(io_size, sg, num_iovs).thenValue([this, sg](auto) {
+        MultiBlkId blkid;
+        write_sgs(io_size, sg, num_iovs, blkid).thenValue([this, sg](auto) {
             free(*sg);
             finish_and_notify();
         });
@@ -268,7 +253,8 @@ private:
     // caller should be responsible to call free(sg) to free the iobuf allocated in iovs,
     // normally it should be freed in after_write_cb;
     //
-    folly::Future< std::vector< BlkId > > write_sgs(uint64_t io_size, cshared< sisl::sg_list >& sg, uint32_t num_iovs) {
+    folly::Future< std::error_code > write_sgs(uint64_t io_size, cshared< sisl::sg_list >& sg, uint32_t num_iovs,
+                                               MultiBlkId& out_bids) {
         // TODO: What if iov_len is not multiple of 4Ki?
         HS_DBG_ASSERT_EQ(io_size % (4 * Ki * num_iovs), 0, "Expecting iov_len : {} to be multiple of {}.",
                          io_size / num_iovs, 4 * Ki);
@@ -282,16 +268,7 @@ private:
             sg->size += iov_len;
         }
 
-        auto out_bids_ptr = std::make_shared< std::vector< BlkId > >();
-        return inst()
-            .async_alloc_write(*(sg.get()), blk_alloc_hints{}, *out_bids_ptr, false /* part_of_batch*/)
-            .thenValue([sg, this, out_bids_ptr](bool success) {
-                assert(success);
-                for (const auto& bid : *out_bids_ptr) {
-                    LOGINFO("bid: {}", bid.to_string());
-                }
-                return folly::makeFuture< std::vector< BlkId > >(std::move(*out_bids_ptr));
-            });
+        return inst().async_alloc_write(*(sg.get()), blk_alloc_hints{}, out_bids, false /* part_of_batch*/);
     }
 
     void add_read_delay() {

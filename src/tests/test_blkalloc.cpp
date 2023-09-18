@@ -114,8 +114,8 @@ struct BlkAllocatorTest {
         for (size_t slab_index{0}; slab_index < slab_distribution.size(); ++slab_index) {
             cum_pct += slab_distribution[slab_index];
             const blk_count_t slab_size{static_cast< blk_count_t >(static_cast< blk_count_t >(1) << slab_index)};
-            const blk_cap_t slab_count{
-                static_cast< blk_cap_t >((m_total_count / slab_size) * (slab_distribution[slab_index] / 100.0))};
+            const blk_num_t slab_count{
+                static_cast< blk_num_t >((m_total_count / slab_size) * (slab_distribution[slab_index] / 100.0))};
             if (slab_index == 0) {
                 m_slab_alloced_blks[0].m_max_quota = slab_count;
             } else {
@@ -137,7 +137,7 @@ struct BlkAllocatorTest {
     }
 
     [[nodiscard]] bool alloced(const BlkId& bid, const bool track_block_group) {
-        uint32_t blk_num{static_cast< uint32_t >(bid.get_blk_num())};
+        uint32_t blk_num = bid.blk_num();
         if (blk_num >= m_total_count) {
             {
                 std::scoped_lock< std::mutex > lock{s_print_mutex};
@@ -145,12 +145,12 @@ struct BlkAllocatorTest {
             }
             return false;
         }
-        m_alloced_count.fetch_add(bid.get_nblks(), std::memory_order_acq_rel);
+        m_alloced_count.fetch_add(bid.blk_count(), std::memory_order_acq_rel);
 
-        const slab_idx_t slab_idx{m_track_slabs ? nblks_to_idx(bid.get_nblks()) : static_cast< slab_idx_t >(0)};
+        const slab_idx_t slab_idx{m_track_slabs ? nblks_to_idx(bid.blk_count()) : static_cast< slab_idx_t >(0)};
         if (track_block_group) {
             // add blocks as group to each slab
-            if (!blk_map(slab_idx).insert(blk_num, bid.get_nblks()).second) {
+            if (!blk_map(slab_idx).insert(blk_num, bid.blk_count()).second) {
                 {
                     std::scoped_lock< std::mutex > lock{s_print_mutex};
                     std::cout << "Duplicate alloc of blk=" << blk_num << std::endl;
@@ -163,7 +163,7 @@ struct BlkAllocatorTest {
 
         } else {
             // add blocks individually to each slab
-            for (blk_count_t i{0}; i < bid.get_nblks(); ++i) {
+            for (blk_count_t i{0}; i < bid.blk_count(); ++i) {
                 if (!blk_list(slab_idx).add(blk_num)) {
                     {
                         std::scoped_lock< std::mutex > lock{s_print_mutex};
@@ -176,7 +176,7 @@ struct BlkAllocatorTest {
         }
 
         LOGTRACEMOD(blkalloc, "After Alloced nblks={} blk_range=[{}-{}] skip_list_size={} alloced_count={}",
-                    bid.get_nblks(), blk_num, blk_num + bid.get_nblks() - 1, blk_list(slab_idx).size(),
+                    bid.blk_count(), blk_num, blk_num + bid.blk_count() - 1, blk_list(slab_idx).size(),
                     m_alloced_count.load(std::memory_order_relaxed));
         return true;
     }
@@ -381,8 +381,8 @@ struct FixedBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
     virtual void SetUp() override{};
     virtual void TearDown() override{};
 
-    [[nodiscard]] bool alloc_blk(const BlkAllocStatus exp_status, BlkId& bid, const bool track_block_group) {
-        const auto ret{m_allocator->alloc(bid)};
+    bool alloc_blk(const BlkAllocStatus exp_status, BlkId& bid, const bool track_block_group) {
+        const auto ret = m_allocator->alloc_contiguous(bid);
         if (ret != exp_status) {
             {
                 std::scoped_lock< std::mutex > lock{s_print_mutex};
@@ -442,7 +442,7 @@ struct VarsizeBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
         static thread_local std::vector< BlkId > bids;
         bids.clear();
 
-        const auto ret{m_allocator->alloc(reqd_size, hints, bids)};
+        const auto ret = m_allocator->alloc(reqd_size, hints, bids);
         if (ret != exp_status) {
             {
                 std::scoped_lock< std::mutex > lock{s_print_mutex};
@@ -465,7 +465,7 @@ struct VarsizeBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
             blk_count_t sz{0};
             for (auto& bid : bids) {
                 if (!alloced(bid, track_block_group)) { return false; }
-                sz += bid.get_nblks();
+                sz += bid.blk_count();
             }
             if (sz != reqd_size) {
                 {
@@ -546,8 +546,8 @@ public:
                     while (freed_size < rand_size) {
                         const auto bid{
                             free_random_alloced_sized_blk(rand_size - freed_size, round_nblks, track_block_group)};
-                        freed_nblks += bid.get_nblks();
-                        freed_size += bid.get_nblks();
+                        freed_nblks += bid.blk_count();
+                        freed_size += bid.blk_count();
                     }
                 }
             }

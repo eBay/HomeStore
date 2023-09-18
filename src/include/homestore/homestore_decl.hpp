@@ -20,6 +20,7 @@
 
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <boost/intrusive_ptr.hpp>
 #include <sisl/utility/enum.hpp>
 #include <sisl/fds/utils.hpp>
 
@@ -49,7 +50,10 @@ template < typename T >
 using cshared = const std::shared_ptr< T >;
 
 template < typename T >
-using unique = const std::unique_ptr< T >;
+using unique = std::unique_ptr< T >;
+
+template < typename T >
+using intrusive = boost::intrusive_ptr< T >;
 
 ////////////// All Size Limits ///////////////////
 constexpr uint32_t BLK_NUM_BITS{32};
@@ -145,12 +149,17 @@ struct HS_SERVICE {
     static constexpr uint32_t LOG_LOCAL = 1 << 2;
     static constexpr uint32_t DATA = 1 << 3;
     static constexpr uint32_t INDEX = 1 << 4;
+    static constexpr uint32_t REPLICATION = 1 << 5;
 
     uint32_t svcs;
 
     HS_SERVICE() : svcs{META} {}
     HS_SERVICE(uint32_t val) : svcs{val} {
         svcs |= META; // Force meta to be present always
+        if (svcs & REPLICATION) {
+            svcs |= LOG_REPLICATED | LOG_LOCAL;
+            svcs &= ~DATA; // ReplicationDataSvc or DataSvc only one of them
+        }
     }
 
     std::string list() const {
@@ -160,6 +169,7 @@ struct HS_SERVICE {
         if (svcs & INDEX) { str += "index,"; }
         if (svcs & LOG_REPLICATED) { str += "log_replicated,"; }
         if (svcs & LOG_LOCAL) { str += "log_local,"; }
+        if (svcs & REPLICATION) { str += "replication,"; }
         return str;
     }
 };

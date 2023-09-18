@@ -56,9 +56,9 @@ public:
         register_me_to_farm();
     }
 
-    VirtualDevMetrics(const VirtualDevMetrics&) = delete;
+    VirtualDevMetrics(VirtualDevMetrics const&) = delete;
     VirtualDevMetrics(VirtualDevMetrics&&) noexcept = delete;
-    VirtualDevMetrics& operator=(const VirtualDevMetrics&) = delete;
+    VirtualDevMetrics& operator=(VirtualDevMetrics const&) = delete;
     VirtualDevMetrics& operator=(VirtualDevMetrics&&) noexcept = delete;
 
     ~VirtualDevMetrics() { deregister_me_from_farm(); }
@@ -99,8 +99,8 @@ protected:
 public:
     VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, vdev_event_cb_t event_cb, bool is_auto_recovery);
 
-    VirtualDev(const VirtualDev& other) = delete;
-    VirtualDev& operator=(const VirtualDev& other) = delete;
+    VirtualDev(VirtualDev const& other) = delete;
+    VirtualDev& operator=(VirtualDev const& other) = delete;
     VirtualDev(VirtualDev&&) noexcept = delete;
     VirtualDev& operator=(VirtualDev&&) noexcept = delete;
     virtual ~VirtualDev() = default;
@@ -114,28 +114,31 @@ public:
     /// @brief Formats the vdev asynchronously by zeroing the entire vdev. It will use underlying physical device
     /// capabilities to zero them if fast zero is possible, otherwise will zero block by block
     /// @param cb Callback after formatting is completed.
-    virtual folly::Future< bool > async_format();
+    virtual folly::Future< std::error_code > async_format();
 
     /////////////////////// Block Allocation related methods /////////////////////////////
     /// @brief This method allocates contigous blocks in the vdev
     /// @param nblks : Number of blocks to allocate
     /// @param hints : Hints about block allocation, (specific device to allocate, stream etc)
-    /// @param out_blkid : Pointer to where allocated BlkId to be placed
+    /// @param out_blkid : Reference to where allocated BlkId to be placed
     /// @return BlkAllocStatus : Status about the allocation
-    virtual BlkAllocStatus alloc_contiguous_blk(blk_count_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid);
+    virtual BlkAllocStatus alloc_contiguous_blks(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid);
 
     /// @brief This method allocates blocks in the vdev and it could be non-contiguous, hence multiple BlkIds are
     /// returned
     /// @param nblks : Number of blocks to allocate
     /// @param hints : Hints about block allocation, (specific device to allocate, stream etc)
-    /// @param out_blkid : Reference to the vector of blkids to be placed. It appends into the vector
+    /// @param out_blkid : Reference to the MultiBlkd which can hold multiple blkids.
     /// @return BlkAllocStatus : Status about the allocation
-    virtual BlkAllocStatus alloc_blk(uint32_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid);
+    virtual BlkAllocStatus alloc_blks(blk_count_t nblks, blk_alloc_hints const& hints, MultiBlkId& out_blkid);
+
+    virtual BlkAllocStatus alloc_blks(blk_count_t nblks, blk_alloc_hints const& hints,
+                                      std::vector< BlkId >& out_blkids);
 
     /// @brief Checks if a given block id is allocated in the in-memory version of the blk allocator
     /// @param blkid : BlkId to check for allocation
     /// @return true or false
-    virtual bool is_blk_alloced(const BlkId& blkid) const;
+    virtual bool is_blk_alloced(BlkId const& blkid) const;
 
     /// @brief Commits the blkid in on-disk version of the blk allocator. The blkid is assumed to be allocated using
     /// alloc_blk or alloc_contiguous_blk method earlier (either after reboot or prior to reboot). It is not required
@@ -144,9 +147,9 @@ public:
     /// recover Please note that even calling this method is not guaranteed to persisted until checkpoint is taken.
     /// @param blkid BlkId to commit explicitly.
     /// @return Allocation Status
-    virtual BlkAllocStatus commit_blk(const BlkId& blkid);
+    virtual BlkAllocStatus commit_blk(BlkId const& blkid);
 
-    virtual void free_blk(const BlkId& b);
+    virtual void free_blk(BlkId const& b);
 
     /////////////////////// Write API related methods /////////////////////////////
     /// @brief Asynchornously write the buffer to the device on a given blkid
@@ -156,10 +159,11 @@ public:
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
     /// @return future< bool > Future result of success or failure
-    folly::Future< bool > async_write(const char* buf, uint32_t size, const BlkId& bid, bool part_of_batch = false);
+    folly::Future< std::error_code > async_write(const char* buf, uint32_t size, BlkId const& bid,
+                                                 bool part_of_batch = false);
 
-    folly::Future< bool > async_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
-                                      uint64_t offset_in_chunk);
+    folly::Future< std::error_code > async_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
+                                                 uint64_t offset_in_chunk);
 
     /// @brief Asynchornously write the buffer to the device on a given blkid from vector of buffer
     /// @param iov : Vector of buffer to write data from
@@ -168,31 +172,32 @@ public:
     /// @param part_of_batch : Is this write part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this write request will not be queued.
     /// @return future< bool > Future result of success or failure
-    folly::Future< bool > async_writev(const iovec* iov, int iovcnt, const BlkId& bid, bool part_of_batch = false);
+    folly::Future< std::error_code > async_writev(const iovec* iov, int iovcnt, BlkId const& bid,
+                                                  bool part_of_batch = false);
 
     // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
-    folly::Future< bool > async_writev(const iovec* iov, const int iovcnt, cshared< Chunk >& chunk,
-                                       uint64_t offset_in_chunk);
+    folly::Future< std::error_code > async_writev(const iovec* iov, const int iovcnt, cshared< Chunk >& chunk,
+                                                  uint64_t offset_in_chunk);
 
     /// @brief Synchronously write the buffer to the blkid
     /// @param buf : Buffer to write data from
     /// @param size : Size of the buffer
     /// @param bid : BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @return ssize_t: Size of the data actually written.
-    void sync_write(const char* buf, uint32_t size, const BlkId& bid);
+    std::error_code sync_write(const char* buf, uint32_t size, BlkId const& bid);
 
     // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
-    void sync_write(const char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
+    std::error_code sync_write(const char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /// @brief Synchronously write the vector of buffers to the blkid
     /// @param iov : Vector of buffer to write data from
     /// @param iovcnt : Count of buffer
     /// @param bid  BlkId which was previously allocated. It is expected that entire size was allocated previously.
     /// @return ssize_t: Size of the data actually written.
-    void sync_writev(const iovec* iov, int iovcnt, const BlkId& bid);
+    std::error_code sync_writev(const iovec* iov, int iovcnt, BlkId const& bid);
 
     // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
-    void sync_writev(const iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
+    std::error_code sync_writev(const iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /////////////////////// Read API related methods /////////////////////////////
 
@@ -203,7 +208,7 @@ public:
     /// @param part_of_batch : Is this read part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this read request will not be queued.
     /// @return future< bool > Future result of success or failure
-    folly::Future< bool > async_read(char* buf, uint64_t size, const BlkId& bid, bool part_of_batch = false);
+    folly::Future< std::error_code > async_read(char* buf, uint64_t size, BlkId const& bid, bool part_of_batch = false);
 
     /// @brief Asynchronously read the data for a given BlkId to the vector of buffers
     /// @param iov : Vector of buffer to write read to
@@ -213,34 +218,34 @@ public:
     /// @param part_of_batch : Is this read part of batch io. If true, caller is expected to call submit_batch at
     /// the end of the batch, otherwise this read request will not be queued.
     /// @return future< bool > Future result of success or failure
-    folly::Future< bool > async_readv(iovec* iovs, int iovcnt, uint64_t size, const BlkId& bid,
-                                      bool part_of_batch = false);
+    folly::Future< std::error_code > async_readv(iovec* iovs, int iovcnt, uint64_t size, BlkId const& bid,
+                                                 bool part_of_batch = false);
 
     /// @brief Synchronously read the data for a given BlkId.
     /// @param buf : Buffer to read data to
     /// @param size : Size of the buffer
     /// @param bid : BlkId from data needs to be read
     /// @return ssize_t: Size of the data actually read.
-    void sync_read(char* buf, uint32_t size, const BlkId& bid);
+    std::error_code sync_read(char* buf, uint32_t size, BlkId const& bid);
 
     // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
-    void sync_read(char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
+    std::error_code sync_read(char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /// @brief Synchronously read the data for a given BlkId to vector of buffers
     /// @param iov : Vector of buffer to write read to
     /// @param iovcnt : Count of buffer
     /// @param size : Size of the actual data, it is really to optimize the iovec from iterating again to get size
     /// @return ssize_t: Size of the data actually read.
-    void sync_readv(iovec* iov, int iovcnt, const BlkId& bid);
+    std::error_code sync_readv(iovec* iov, int iovcnt, BlkId const& bid);
 
     // TODO: This needs to be removed once Journal starting to use AppendBlkAllocator
-    void sync_readv(iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
+    std::error_code sync_readv(iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk);
 
     /////////////////////// Other API related methods /////////////////////////////
 
     /// @brief Fsync the underlying physical devices that vdev is sitting on asynchornously
     /// @return future< bool > Future result with bool to indicate when fsync is actually executed
-    folly::Future< bool > queue_fsync_pdevs();
+    folly::Future< std::error_code > queue_fsync_pdevs();
 
     /// @brief Submit the batch of IOs previously queued as part of async read/write APIs.
     void submit_batch();
@@ -274,7 +279,7 @@ public:
     uint32_t optimal_page_size() const;
     uint32_t atomic_page_size() const;
 
-    static uint64_t get_len(const iovec* iov, const int iovcnt);
+    static uint64_t get_len(const iovec* iov, int iovcnt);
     const std::set< PhysicalDev* >& get_pdevs() const { return m_pdevs; }
     std::vector< shared< Chunk > > get_chunks() const;
     shared< Chunk > get_next_chunk(cshared< Chunk >& chunk) const;
@@ -283,10 +288,9 @@ public:
     void update_vdev_private(const sisl::blob& data);
 
 private:
-    BlkAllocStatus do_alloc_blk(blk_count_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid);
-    uint64_t to_dev_offset(const BlkId& b, Chunk** chunk) const;
-    BlkAllocStatus alloc_blk_from_chunk(blk_count_t nblks, const blk_alloc_hints& hints,
-                                        std::vector< BlkId >& out_blkid, Chunk* chunk);
+    uint64_t to_dev_offset(BlkId const& b, Chunk** chunk) const;
+    BlkAllocStatus alloc_blks_from_chunk(blk_count_t nblks, blk_alloc_hints const& hints, MultiBlkId& out_blkid,
+                                         Chunk* chunk);
 };
 
 // place holder for future needs in which components underlying virtualdev needs cp flush context;

@@ -56,7 +56,7 @@ public:
      *
      * @param vb : vdev info blk containing the details of this blkstore
      */
-    shared< VirtualDev > open_vdev(const vdev_info& vinfo, bool load_existing);
+    shared< VirtualDev > open_vdev(vdev_info const& vinfo, bool load_existing);
 
     /**
      * @brief : asynchronous write without input block ids. Block ids will be allocated by this api and returned;
@@ -67,9 +67,11 @@ public:
      * @param cb : callback that will be triggered after write completes;
      * @param part_of_batch : is this write part of a batch;
      */
-    folly::Future< bool > async_alloc_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints,
-                                            std::vector< BlkId >& out_blkids, bool part_of_batch = false);
+    folly::Future< std::error_code > async_alloc_write(sisl::sg_list const& sgs, blk_alloc_hints const& hints,
+                                                       MultiBlkId& out_blkids, bool part_of_batch = false);
 
+    folly::Future< std::error_code > async_write(const char* buf, uint32_t size, MultiBlkId const& bid,
+                                                 bool part_of_batch);
     /**
      * @brief : asynchronous write with input block ids;
      *
@@ -79,8 +81,11 @@ public:
      * @param cb : callback that will be triggered after write completes
      * @param part_of_batch : is this write part of a batch;
      */
-    folly::Future< bool > async_write(const sisl::sg_list& sgs, const blk_alloc_hints& hints,
-                                      const std::vector< BlkId >& in_blkids, bool part_of_batch = false);
+    folly::Future< std::error_code > async_write(sisl::sg_list const& sgs, MultiBlkId const& in_blkids,
+                                                 bool part_of_batch = false);
+
+    folly::Future< std::error_code > async_read(MultiBlkId const& bid, uint8_t* buf, uint32_t size,
+                                                bool part_of_batch = false);
 
     /**
      * @brief : asynchronous read
@@ -91,14 +96,15 @@ public:
      * @param cb : callback that will be triggered after read completes
      * @param part_of_batch : is this read part of batch;
      */
-    folly::Future< bool > async_read(const BlkId& bid, sisl::sg_list& sgs, uint32_t size, bool part_of_batch = false);
+    folly::Future< std::error_code > async_read(MultiBlkId const& bid, sisl::sg_list& sgs, uint32_t size,
+                                                bool part_of_batch = false);
 
     /**
      * @brief : commit a block, usually called during recovery
      *
      * @param bid : block id to commit;
      */
-    void commit_blk(const BlkId& bid);
+    void commit_blk(MultiBlkId const& bid);
 
     /**
      * @brief : alloc blocks based on input size;
@@ -116,14 +122,14 @@ public:
      * @param bid : the block id to free
      * @param cb : the callback that will be triggered after free block completes;
      */
-    folly::Future< bool > async_free_blk(const BlkId bid);
+    folly::Future< std::error_code > async_free_blk(MultiBlkId const& bid);
 
     /**
-     * @brief : get the page size of this data service;
+     * @brief : get the blk size of this data service;
      *
-     * @return : page size
+     * @return : blk size
      */
-    uint32_t get_page_size() const { return m_page_size; }
+    uint32_t get_blk_size() const { return m_blk_size; }
 
     /**
      * @brief : get the read block tracker handle;
@@ -138,7 +144,7 @@ public:
     void start();
 
 private:
-    BlkAllocStatus alloc_blks(uint32_t size, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids);
+    BlkAllocStatus alloc_blks(uint32_t size, blk_alloc_hints const& hints, MultiBlkId& out_blkids);
 
     void init();
 
@@ -147,7 +153,7 @@ private:
 private:
     std::shared_ptr< VirtualDev > m_vdev;
     std::unique_ptr< BlkReadTracker > m_blk_read_tracker;
-    uint32_t m_page_size;
+    uint32_t m_blk_size;
 };
 
 extern BlkDataService& data_service();

@@ -63,8 +63,8 @@ struct BlkAllocConfig {
 public:
     const uint32_t m_blk_size;
     const uint32_t m_align_size;
-    const blk_cap_t m_capacity;
-    const blk_cap_t m_blks_per_portion;
+    const blk_num_t m_capacity;
+    const blk_num_t m_blks_per_portion;
     const std::string m_unique_name;
     bool m_auto_recovery{false};
     bool m_realtime_bm_on{false}; // only specifically turn off in BlkAlloc Test;
@@ -74,7 +74,7 @@ public:
                    bool realtime_bm_on = true) :
             m_blk_size{blk_size},
             m_align_size{align_size},
-            m_capacity{static_cast< blk_cap_t >(size / blk_size)},
+            m_capacity{static_cast< blk_num_t >(size / blk_size)},
             m_blks_per_portion{std::min(HS_DYNAMIC_CONFIG(blkallocator.num_blks_per_portion), m_capacity)},
             m_unique_name{name} {
 #ifdef _PRERELEASE
@@ -86,9 +86,9 @@ public:
 #endif
     }
 
-    BlkAllocConfig(const BlkAllocConfig&) = default;
+    BlkAllocConfig(BlkAllocConfig const&) = default;
     BlkAllocConfig(BlkAllocConfig&&) noexcept = delete;
-    BlkAllocConfig& operator=(const BlkAllocConfig&) = default;
+    BlkAllocConfig& operator=(BlkAllocConfig const&) = default;
     BlkAllocConfig& operator=(BlkAllocConfig&&) noexcept = delete;
     virtual ~BlkAllocConfig() = default;
     void set_auto_recovery(bool is_auto_recovery) { m_auto_recovery = is_auto_recovery; }
@@ -118,9 +118,9 @@ private:
 public:
     BlkAllocPortion(blk_temp_t temp = default_temperature()) : m_temperature(temp) {}
     ~BlkAllocPortion() = default;
-    BlkAllocPortion(const BlkAllocPortion&) = delete;
+    BlkAllocPortion(BlkAllocPortion const&) = delete;
     BlkAllocPortion(BlkAllocPortion&&) noexcept = delete;
-    BlkAllocPortion& operator=(const BlkAllocPortion&) = delete;
+    BlkAllocPortion& operator=(BlkAllocPortion const&) = delete;
     BlkAllocPortion& operator=(BlkAllocPortion&&) noexcept = delete;
 
     auto portion_auto_lock() const { return std::scoped_lock< std::mutex >(m_blk_lock); }
@@ -175,20 +175,19 @@ public:
 class CP;
 class BlkAllocator {
 public:
-    BlkAllocator(const BlkAllocConfig& cfg, chunk_num_t id = 0);
-    BlkAllocator(const BlkAllocator&) = delete;
+    BlkAllocator(BlkAllocConfig const& cfg, chunk_num_t id = 0);
+    BlkAllocator(BlkAllocator const&) = delete;
     BlkAllocator(BlkAllocator&&) noexcept = delete;
-    BlkAllocator& operator=(const BlkAllocator&) = delete;
+    BlkAllocator& operator=(BlkAllocator const&) = delete;
     BlkAllocator& operator=(BlkAllocator&&) noexcept = delete;
     virtual ~BlkAllocator() = default;
 
-    virtual BlkAllocStatus alloc(BlkId& bid) = 0;
-    virtual BlkAllocStatus alloc(blk_count_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) = 0;
-    virtual void free(const std::vector< BlkId >& blk_ids) = 0;
-    virtual void free(const BlkId& id) = 0;
-    virtual blk_cap_t available_blks() const = 0;
-    virtual blk_cap_t get_used_blks() const = 0;
-    virtual bool is_blk_alloced(const BlkId& b, bool use_lock = false) const = 0;
+    virtual BlkAllocStatus alloc_contiguous(BlkId& bid) = 0;
+    virtual BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) = 0;
+    virtual void free(BlkId const& id) = 0;
+    virtual blk_num_t available_blks() const = 0;
+    virtual blk_num_t get_used_blks() const = 0;
+    virtual bool is_blk_alloced(BlkId const& b, bool use_lock = false) const = 0;
     virtual std::string to_string() const = 0;
 
     virtual void cp_flush(CP* cp); // TODO: it needs to be a pure virtual function after bitmap blkallocator is derived
@@ -217,30 +216,23 @@ public:
     void decr_alloced_blk_count(blk_count_t nblks) { m_alloced_blk_count.fetch_sub(nblks, std::memory_order_relaxed); }
 
     int64_t get_alloced_blk_count() const { return m_alloced_blk_count.load(std::memory_order_acquire); }
-    bool is_blk_alloced_on_disk(const BlkId& b, bool use_lock = false) const;
 
     /* It is used during recovery in both mode :- auto recovery and manual recovery
      * It is also used in normal IO during auto recovery mode.
      */
 
-    BlkAllocStatus alloc_on_disk(const BlkId& in_bid);
+    BlkAllocStatus alloc_on_disk(BlkId const& in_bid);
 
-    BlkAllocStatus alloc_on_realtime(const BlkId& b);
+    BlkAllocStatus alloc_on_realtime(BlkId const& b);
+
+    bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const;
 
     //
     // Caller should consume the return value and print context when return false;
     //
+    [[nodiscard]] bool free_on_realtime(BlkId const& b);
 
-    bool free_on_realtime(const BlkId& b);
-
-    void free_on_disk(const BlkId& b);
-
-    // Acquire the underlying bitmap buffer and while the caller has acquired, all the new allocations
-    // will be captured in a separate list and then pushes into buffer once released.
-    // NOTE: THIS IS NON-THREAD SAFE METHOD. Caller is expected to ensure synchronization between multiple
-    // acquires/releases
-    sisl::byte_array acquire_underlying_buffer();
-    void release_underlying_buffer();
+    void free_on_disk(BlkId const& b);
 
     /* CP start is called when all its consumers have purged their free lists and now want to persist the
      * disk bitmap.
@@ -250,21 +242,21 @@ public:
     // void cp_done();
 
     uint32_t get_align_size() const { return m_align_size; }
-    blk_cap_t get_total_blks() const { return m_num_blks; }
-    blk_cap_t get_blks_per_portion() const { return m_blks_per_portion; }
-    blk_cap_t get_num_portions() const { return (m_num_blks - 1) / m_blks_per_portion + 1; }
+    blk_num_t get_total_blks() const { return m_num_blks; }
+    blk_num_t get_blks_per_portion() const { return m_blks_per_portion; }
+    blk_num_t get_num_portions() const { return (m_num_blks - 1) / m_blks_per_portion + 1; }
     const std::string& get_name() const { return m_name; }
     bool auto_recovery_on() const { return m_auto_recovery; }
     uint32_t get_blk_size() const { return m_blk_size; }
 
     blk_num_t blknum_to_portion_num(const blk_num_t blknum) const { return blknum / m_blks_per_portion; }
     BlkAllocPortion& blknum_to_portion(blk_num_t blknum) { return m_blk_portions[blknum_to_portion_num(blknum)]; }
-    const BlkAllocPortion& blknum_to_portion_const(blk_num_t blknum) const {
+    BlkAllocPortion const& blknum_to_portion_const(blk_num_t blknum) const {
         return m_blk_portions[blknum_to_portion_num(blknum)];
     }
 
     void create_debug_bm();
-    void update_debug_bm(const BlkId& bid);
+    void update_debug_bm(BlkId const& bid);
     bool verify_debug_bm(bool free_debug_bm);
 
     /* Get status */
@@ -278,12 +270,19 @@ private:
     sisl::ThreadVector< BlkId >* get_alloc_blk_list();
     void set_disk_bm_dirty() { is_disk_bm_dirty = true; }
 
+    // Acquire the underlying bitmap buffer and while the caller has acquired, all the new allocations
+    // will be captured in a separate list and then pushes into buffer once released.
+    // NOTE: THIS IS NON-THREAD SAFE METHOD. Caller is expected to ensure synchronization between multiple
+    // acquires/releases
+    sisl::byte_array acquire_underlying_buffer();
+    void release_underlying_buffer();
+
 protected:
     const std::string m_name;
     const uint32_t m_blk_size;
     const uint32_t m_align_size;
-    const blk_cap_t m_num_blks;
-    blk_cap_t m_blks_per_portion;
+    const blk_num_t m_num_blks;
+    blk_num_t m_blks_per_portion;
     const bool m_auto_recovery{false};
     const bool m_realtime_bm_on{false}; // only specifically turn off in BlkAlloc Test;
     bool m_inited{false};
@@ -307,22 +306,21 @@ private:
  */
 class FixedBlkAllocator : public BlkAllocator {
 public:
-    FixedBlkAllocator(const BlkAllocConfig& cfg, bool init, chunk_num_t chunk_id);
-    FixedBlkAllocator(const FixedBlkAllocator&) = delete;
+    FixedBlkAllocator(BlkAllocConfig const& cfg, bool init, chunk_num_t chunk_id);
+    FixedBlkAllocator(FixedBlkAllocator const&) = delete;
     FixedBlkAllocator(FixedBlkAllocator&&) noexcept = delete;
-    FixedBlkAllocator& operator=(const FixedBlkAllocator&) = delete;
+    FixedBlkAllocator& operator=(FixedBlkAllocator const&) = delete;
     FixedBlkAllocator& operator=(FixedBlkAllocator&&) noexcept = delete;
     ~FixedBlkAllocator() override = default;
 
-    BlkAllocStatus alloc(BlkId& bid) override;
-    BlkAllocStatus alloc(blk_count_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) override;
-    void free(const std::vector< BlkId >& blk_ids) override;
-    void free(const BlkId& b) override;
+    BlkAllocStatus alloc_contiguous(BlkId& bid) override;
+    BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
+    void free(BlkId const& b) override;
     void inited() override;
 
-    blk_cap_t available_blks() const override;
-    blk_cap_t get_used_blks() const override;
-    bool is_blk_alloced(const BlkId& in_bid, bool use_lock = false) const override;
+    blk_num_t available_blks() const override;
+    blk_num_t get_used_blks() const override;
+    bool is_blk_alloced(BlkId const& in_bid, bool use_lock = false) const override;
     std::string to_string() const override;
 
 private:

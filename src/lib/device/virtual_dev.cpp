@@ -81,7 +81,7 @@ static std::shared_ptr< BlkAllocator > create_blk_allocator(blk_allocator_type_t
     }
 }
 
-VirtualDev::VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, vdev_event_cb_t event_cb, bool is_auto_recovery) :
+VirtualDev::VirtualDev(DeviceManager& dmgr, vdev_info const& vinfo, vdev_event_cb_t event_cb, bool is_auto_recovery) :
         m_vdev_info{vinfo},
         m_dmgr{dmgr},
         m_name{vinfo.name},
@@ -124,8 +124,8 @@ void VirtualDev::add_chunk(cshared< Chunk >& chunk, bool is_fresh_chunk) {
     m_chunk_selector->add_chunk(chunk);
 }
 
-folly::Future< bool > VirtualDev::async_format() {
-    static thread_local std::vector< folly::Future< bool > > s_futs;
+folly::Future< std::error_code > VirtualDev::async_format() {
+    static thread_local std::vector< folly::Future< std::error_code > > s_futs;
     s_futs.clear();
 
     for (auto& chunk : m_all_chunks) {
@@ -134,36 +134,42 @@ folly::Future< bool > VirtualDev::async_format() {
                 chunk->start_offset());
         s_futs.emplace_back(pdev->async_write_zero(chunk->size(), chunk->start_offset()));
     }
-    return folly::collectAllUnsafe(s_futs).thenTry([](auto&&) { return folly::makeFuture< bool >(true); });
+    return folly::collectAllUnsafe(s_futs).thenTry([](auto&& t) {
+        for (const auto& err_c : t.value()) {
+            if (sisl_unlikely(err_c.value())) { return folly::makeFuture< std::error_code >(err_c); }
+        }
+        return folly::makeFuture< std::error_code >(std::error_code{});
+    });
 }
 
 /*std::shared_ptr< blkalloc_cp > VirtualDev::attach_prepare_cp(const std::shared_ptr< blkalloc_cp >& cur_ba_cp) {
     return (Chunk::attach_prepare_cp(cur_ba_cp));
 }*/
 
-bool VirtualDev::is_blk_alloced(const BlkId& blkid) const {
-    return m_dmgr.get_chunk(blkid.get_chunk_num())->blk_allocator()->is_blk_alloced(blkid);
+bool VirtualDev::is_blk_alloced(BlkId const& blkid) const {
+    return m_dmgr.get_chunk(blkid.chunk_num())->blk_allocator()->is_blk_alloced(blkid);
 }
 
-BlkAllocStatus VirtualDev::commit_blk(const BlkId& blkid) {
-    Chunk* chunk = m_dmgr.get_chunk_mutable(blkid.get_chunk_num());
+BlkAllocStatus VirtualDev::commit_blk(BlkId const& blkid) {
+    Chunk* chunk = m_dmgr.get_chunk_mutable(blkid.chunk_num());
     HS_LOG(DEBUG, device, "commit_blk: bid {}", blkid.to_string());
     return chunk->blk_allocator_mutable()->alloc_on_disk(blkid);
 }
 
-BlkAllocStatus VirtualDev::alloc_contiguous_blk(blk_count_t nblks, const blk_alloc_hints& hints, BlkId* out_blkid) {
+BlkAllocStatus VirtualDev::alloc_contiguous_blks(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) {
     BlkAllocStatus ret;
     try {
-        static thread_local std::vector< BlkId > blkid{};
-        blkid.clear();
-        HS_DBG_ASSERT_EQ(hints.is_contiguous, true);
-        ret = alloc_blk(nblks, hints, blkid);
-        if (ret == BlkAllocStatus::SUCCESS) {
-            HS_REL_ASSERT_EQ(blkid.size(), 1, "out blkid more than 1 entries({}) will lead to blk leak!", blkid.size());
-            *out_blkid = std::move(blkid.front());
+        MultiBlkId mbid;
+        if (!hints.is_contiguous) {
+            HS_DBG_ASSERT(false, "Expected alloc_contiguous_blk call to be with hints.is_contiguous=true");
+            blk_alloc_hints adjusted_hints = hints;
+            adjusted_hints.is_contiguous = true;
+            ret = alloc_blks(nblks, adjusted_hints, mbid);
         } else {
-            HS_DBG_ASSERT_EQ(blkid.size(), 0);
+            ret = alloc_blks(nblks, hints, mbid);
         }
+        HS_REL_ASSERT_EQ(mbid.num_pieces(), 1, "out blkid more than 1 entries will lead to blk leak!");
+        out_blkid = mbid.to_single_blkid();
     } catch (const std::exception& e) {
         ret = BlkAllocStatus::FAILED;
         HS_DBG_ASSERT(0, "{}", e.what());
@@ -171,25 +177,7 @@ BlkAllocStatus VirtualDev::alloc_contiguous_blk(blk_count_t nblks, const blk_all
     return ret;
 }
 
-BlkAllocStatus VirtualDev::alloc_blk(uint32_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
-    size_t start_idx = out_blkid.size();
-    while (nblks != 0) {
-        const blk_count_t nblks_op = std::min(BlkId::max_blks_in_op(), s_cast< blk_count_t >(nblks));
-        const auto ret = do_alloc_blk(nblks_op, hints, out_blkid);
-        if (ret != BlkAllocStatus::SUCCESS) {
-            for (auto i = start_idx; i < out_blkid.size(); ++i) {
-                free_blk(out_blkid[i]);
-                out_blkid.erase(out_blkid.begin() + start_idx, out_blkid.end());
-            }
-            return ret;
-        }
-        nblks -= nblks_op;
-    }
-    return BlkAllocStatus::SUCCESS;
-}
-
-BlkAllocStatus VirtualDev::do_alloc_blk(blk_count_t nblks, const blk_alloc_hints& hints,
-                                        std::vector< BlkId >& out_blkid) {
+BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& hints, MultiBlkId& out_blkid) {
     try {
         // First select a chunk to allocate it from
         BlkAllocStatus status;
@@ -198,13 +186,19 @@ BlkAllocStatus VirtualDev::do_alloc_blk(blk_count_t nblks, const blk_alloc_hints
 
         do {
             chunk = m_chunk_selector->select_chunk(nblks, hints).get();
-            if (chunk == nullptr) { status = BlkAllocStatus::SPACE_FULL; }
+            if (chunk == nullptr) {
+                status = BlkAllocStatus::SPACE_FULL;
+                break;
+            }
 
-            status = alloc_blk_from_chunk(nblks, hints, out_blkid, chunk);
-            if (status == BlkAllocStatus::SUCCESS || !hints.can_look_for_other_chunk) { break; }
+            status = alloc_blks_from_chunk(nblks, hints, out_blkid, chunk);
+            if ((status == BlkAllocStatus::SUCCESS) || !hints.can_look_for_other_chunk ||
+                (status == BlkAllocStatus::PARTIAL && hints.partial_alloc_ok)) {
+                break;
+            }
         } while (++attempt < m_all_chunks.size());
 
-        if (status != BlkAllocStatus::SUCCESS) {
+        if ((status != BlkAllocStatus::SUCCESS) || (status != BlkAllocStatus::PARTIAL)) {
             LOGERROR("nblks={} failed to alloc after trying to alloc on every chunks {} and devices {}.", nblks);
             COUNTER_INCREMENT(m_metrics, vdev_num_alloc_failure, 1);
         }
@@ -217,41 +211,66 @@ BlkAllocStatus VirtualDev::do_alloc_blk(blk_count_t nblks, const blk_alloc_hints
     }
 }
 
-BlkAllocStatus VirtualDev::alloc_blk_from_chunk(blk_count_t nblks, const blk_alloc_hints& hints,
-                                                std::vector< BlkId >& out_blkid, Chunk* chunk) {
+BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& hints,
+                                      std::vector< BlkId >& out_blkids) {
+    // Regular alloc blks will allocate in MultiBlkId, but there is an upper limit on how many it can accomodate in a
+    // single MultiBlkId, if caller is ok to generate multiple MultiBlkids, this method is called.
+    auto h = hints;
+    h.partial_alloc_ok = true;
+    h.is_contiguous = true;
+    blk_count_t nblks_remain = nblks;
+    BlkAllocStatus status;
+
+    do {
+        out_blkids.emplace_back(); // Put an empty MultiBlkId and use that for allocating them
+        BlkId& out_bid = out_blkids.back();
+        status = alloc_contiguous_blks(nblks_remain, h, out_bid);
+
+        auto nblks_this_iter = out_bid.blk_count();
+        nblks_remain = (nblks_remain < nblks_this_iter) ? 0 : (nblks_remain - nblks_this_iter);
+    } while (nblks_remain);
+
+    return status;
+}
+
+BlkAllocStatus VirtualDev::alloc_blks_from_chunk(blk_count_t nblks, blk_alloc_hints const& hints, MultiBlkId& out_blkid,
+                                                 Chunk* chunk) {
 #ifdef _PRERELEASE
     if (auto const fake_status =
             iomgr_flip::instance()->get_test_flip< uint32_t >("blk_allocation_flip", nblks, chunk->vdev_id())) {
         return static_cast< BlkAllocStatus >(fake_status.get());
     }
 #endif
-    static thread_local std::vector< BlkId > chunk_blkid{};
-    chunk_blkid.clear();
-    auto status = chunk->blk_allocator_mutable()->alloc(nblks, hints, chunk_blkid);
-    if (status == BlkAllocStatus::PARTIAL) {
+    auto status = chunk->blk_allocator_mutable()->alloc(nblks, hints, out_blkid);
+    if ((status == BlkAllocStatus::PARTIAL) && (!hints.partial_alloc_ok)) {
         // free partial result
-        for (auto const b : chunk_blkid) {
-            auto const ret = chunk->blk_allocator_mutable()->free_on_realtime(b);
+        auto it = out_blkid.iterate();
+        while (auto const b = it.next()) {
+            auto const ret = chunk->blk_allocator_mutable()->free_on_realtime(*b);
             HS_REL_ASSERT(ret, "failed to free on realtime");
         }
-        chunk->blk_allocator_mutable()->free(chunk_blkid);
+        chunk->blk_allocator_mutable()->free(out_blkid);
+        out_blkid = MultiBlkId{};
         status = BlkAllocStatus::FAILED;
-    } else if (status == BlkAllocStatus::SUCCESS) {
-        // append chunk blocks to out blocks
-        out_blkid.insert(std::end(out_blkid), std::make_move_iterator(std::begin(chunk_blkid)),
-                         std::make_move_iterator(std::end(chunk_blkid)));
     }
+
     return status;
 }
 
-/*bool VirtualDev::free_on_realtime(const BlkId& b) {
-    Chunk* chunk = m_dmgr.get_chunk_mutable(b.get_chunk_num());
+/*bool VirtualDev::free_on_realtime(BlkId const& b) {
+    Chunk* chunk = m_dmgr.get_chunk_mutable(b.chunk_num());
     return chunk->blk_allocator_mutable()->free_on_realtime(b);
 }*/
 
-void VirtualDev::free_blk(const BlkId& b) {
-    Chunk* chunk = m_dmgr.get_chunk_mutable(b.get_chunk_num());
-    chunk->blk_allocator_mutable()->free(b);
+void VirtualDev::free_blk(BlkId const& b) {
+    if (b.is_multi()) {
+        MultiBlkId const& mb = r_cast< MultiBlkId const& >(b);
+        Chunk* chunk = m_dmgr.get_chunk_mutable(mb.chunk_num());
+        chunk->blk_allocator_mutable()->free(mb);
+    } else {
+        Chunk* chunk = m_dmgr.get_chunk_mutable(b.chunk_num());
+        chunk->blk_allocator_mutable()->free(b);
+    }
 }
 
 void VirtualDev::recovery_done() {
@@ -261,7 +280,7 @@ void VirtualDev::recovery_done() {
     }
 }
 
-uint64_t VirtualDev::get_len(const iovec* iov, const int iovcnt) {
+uint64_t VirtualDev::get_len(const iovec* iov, int iovcnt) {
     uint64_t len{0};
     for (int i{0}; i < iovcnt; ++i) {
         len += iov[i].iov_len;
@@ -270,7 +289,10 @@ uint64_t VirtualDev::get_len(const iovec* iov, const int iovcnt) {
 }
 
 ////////////////////////// async write section //////////////////////////////////
-folly::Future< bool > VirtualDev::async_write(const char* buf, uint32_t size, const BlkId& bid, bool part_of_batch) {
+folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32_t size, BlkId const& bid,
+                                                         bool part_of_batch) {
+    HS_DBG_ASSERT_EQ(bid.is_multi(), false, "async_write needs individual pieces of blkid - not MultiBlkid");
+
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
     auto* pdev = chunk->physical_dev_mutable();
@@ -283,8 +305,8 @@ folly::Future< bool > VirtualDev::async_write(const char* buf, uint32_t size, co
     return pdev->async_write(buf, size, dev_offset, part_of_batch);
 }
 
-folly::Future< bool > VirtualDev::async_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
-                                              uint64_t offset_in_chunk) {
+folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
+                                                         uint64_t offset_in_chunk) {
     auto const dev_offset = chunk->start_offset() + offset_in_chunk;
     auto* pdev = chunk->physical_dev_mutable();
 
@@ -296,8 +318,10 @@ folly::Future< bool > VirtualDev::async_write(const char* buf, uint32_t size, cs
     return pdev->async_write(buf, size, dev_offset, false /* part_of_batch */);
 }
 
-folly::Future< bool > VirtualDev::async_writev(const iovec* iov, const int iovcnt, const BlkId& bid,
-                                               bool part_of_batch) {
+folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, const int iovcnt, BlkId const& bid,
+                                                          bool part_of_batch) {
+    HS_DBG_ASSERT_EQ(bid.is_multi(), false, "async_writev needs individual pieces of blkid - not MultiBlkid");
+
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
     auto const size = get_len(iov, iovcnt);
@@ -311,8 +335,8 @@ folly::Future< bool > VirtualDev::async_writev(const iovec* iov, const int iovcn
     return pdev->async_writev(iov, iovcnt, size, dev_offset, part_of_batch);
 }
 
-folly::Future< bool > VirtualDev::async_writev(const iovec* iov, const int iovcnt, cshared< Chunk >& chunk,
-                                               uint64_t offset_in_chunk) {
+folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, const int iovcnt, cshared< Chunk >& chunk,
+                                                          uint64_t offset_in_chunk) {
     auto const dev_offset = chunk->start_offset() + offset_in_chunk;
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
@@ -326,17 +350,22 @@ folly::Future< bool > VirtualDev::async_writev(const iovec* iov, const int iovcn
 }
 
 ////////////////////////// sync write section //////////////////////////////////
-void VirtualDev::sync_write(const char* buf, uint32_t size, const BlkId& bid) {
+std::error_code VirtualDev::sync_write(const char* buf, uint32_t size, BlkId const& bid) {
+    HS_DBG_ASSERT_EQ(bid.is_multi(), false, "sync_write needs individual pieces of blkid - not MultiBlkid");
+
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
-    chunk->physical_dev_mutable()->sync_write(buf, size, dev_offset);
+    return chunk->physical_dev_mutable()->sync_write(buf, size, dev_offset);
 }
 
-void VirtualDev::sync_write(const char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk) {
-    chunk->physical_dev_mutable()->sync_write(buf, size, chunk->start_offset() + offset_in_chunk);
+std::error_code VirtualDev::sync_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
+                                       uint64_t offset_in_chunk) {
+    return chunk->physical_dev_mutable()->sync_write(buf, size, chunk->start_offset() + offset_in_chunk);
 }
 
-void VirtualDev::sync_writev(const iovec* iov, int iovcnt, const BlkId& bid) {
+std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, BlkId const& bid) {
+    HS_DBG_ASSERT_EQ(bid.is_multi(), false, "sync_writev needs individual pieces of blkid - not MultiBlkid");
+
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
     auto const size = get_len(iov, iovcnt);
@@ -347,10 +376,11 @@ void VirtualDev::sync_writev(const iovec* iov, int iovcnt, const BlkId& bid) {
         COUNTER_INCREMENT(m_metrics, unalign_writes, 1);
     }
 
-    pdev->sync_writev(iov, iovcnt, size, dev_offset);
+    return pdev->sync_writev(iov, iovcnt, size, dev_offset);
 }
 
-void VirtualDev::sync_writev(const iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk) {
+std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, cshared< Chunk >& chunk,
+                                        uint64_t offset_in_chunk) {
     uint64_t const dev_offset = chunk->start_offset() + offset_in_chunk;
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
@@ -360,35 +390,44 @@ void VirtualDev::sync_writev(const iovec* iov, int iovcnt, cshared< Chunk >& chu
         COUNTER_INCREMENT(m_metrics, unalign_writes, 1);
     }
 
-    pdev->sync_writev(iov, iovcnt, size, dev_offset);
+    return pdev->sync_writev(iov, iovcnt, size, dev_offset);
 }
 
 ////////////////////////////////// async read section ///////////////////////////////////////////////
-folly::Future< bool > VirtualDev::async_read(char* buf, uint64_t size, const BlkId& bid, bool part_of_batch) {
+folly::Future< std::error_code > VirtualDev::async_read(char* buf, uint64_t size, BlkId const& bid,
+                                                        bool part_of_batch) {
+    HS_DBG_ASSERT_EQ(bid.is_multi(), false, "async_read needs individual pieces of blkid - not MultiBlkid");
+
     Chunk* pchunk;
     uint64_t const dev_offset = to_dev_offset(bid, &pchunk);
     return pchunk->physical_dev_mutable()->async_read(buf, size, dev_offset, part_of_batch);
 }
 
-folly::Future< bool > VirtualDev::async_readv(iovec* iovs, int iovcnt, uint64_t size, const BlkId& bid,
-                                              bool part_of_batch) {
+folly::Future< std::error_code > VirtualDev::async_readv(iovec* iovs, int iovcnt, uint64_t size, BlkId const& bid,
+                                                         bool part_of_batch) {
+    HS_DBG_ASSERT_EQ(bid.is_multi(), false, "async_readv needs individual pieces of blkid - not MultiBlkid");
+
     Chunk* pchunk;
     uint64_t const dev_offset = to_dev_offset(bid, &pchunk);
     return pchunk->physical_dev_mutable()->async_readv(iovs, iovcnt, size, dev_offset, part_of_batch);
 }
 
 ////////////////////////////////////////// sync read section ////////////////////////////////////////////
-void VirtualDev::sync_read(char* buf, uint32_t size, const BlkId& bid) {
+std::error_code VirtualDev::sync_read(char* buf, uint32_t size, BlkId const& bid) {
+    HS_DBG_ASSERT_EQ(bid.is_multi(), false, "sync_read needs individual pieces of blkid - not MultiBlkid");
+
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
-    chunk->physical_dev_mutable()->sync_read(buf, size, dev_offset);
+    return chunk->physical_dev_mutable()->sync_read(buf, size, dev_offset);
 }
 
-void VirtualDev::sync_read(char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk) {
-    chunk->physical_dev_mutable()->sync_read(buf, size, chunk->start_offset() + offset_in_chunk);
+std::error_code VirtualDev::sync_read(char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk) {
+    return chunk->physical_dev_mutable()->sync_read(buf, size, chunk->start_offset() + offset_in_chunk);
 }
 
-void VirtualDev::sync_readv(iovec* iov, int iovcnt, const BlkId& bid) {
+std::error_code VirtualDev::sync_readv(iovec* iov, int iovcnt, BlkId const& bid) {
+    HS_DBG_ASSERT_EQ(bid.is_multi(), false, "sync_readv needs individual pieces of blkid - not MultiBlkid");
+
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
     auto const size = get_len(iov, iovcnt);
@@ -399,10 +438,10 @@ void VirtualDev::sync_readv(iovec* iov, int iovcnt, const BlkId& bid) {
         COUNTER_INCREMENT(m_metrics, unalign_writes, 1);
     }
 
-    pdev->sync_readv(iov, iovcnt, size, dev_offset);
+    return pdev->sync_readv(iov, iovcnt, size, dev_offset);
 }
 
-void VirtualDev::sync_readv(iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk) {
+std::error_code VirtualDev::sync_readv(iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk) {
     uint64_t const dev_offset = chunk->start_offset() + offset_in_chunk;
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
@@ -412,10 +451,10 @@ void VirtualDev::sync_readv(iovec* iov, int iovcnt, cshared< Chunk >& chunk, uin
         COUNTER_INCREMENT(m_metrics, unalign_writes, 1);
     }
 
-    pdev->sync_readv(iov, iovcnt, size, dev_offset);
+    return pdev->sync_readv(iov, iovcnt, size, dev_offset);
 }
 
-folly::Future< bool > VirtualDev::queue_fsync_pdevs() {
+folly::Future< std::error_code > VirtualDev::queue_fsync_pdevs() {
     HS_DBG_ASSERT_EQ(HS_DYNAMIC_CONFIG(device->direct_io_mode), false, "Not expect to do fsync in DIRECT_IO_MODE.");
 
     assert(m_pdevs.size() > 0);
@@ -424,13 +463,18 @@ folly::Future< bool > VirtualDev::queue_fsync_pdevs() {
         HS_LOG(TRACE, device, "Flushing pdev {}", pdev->get_devname());
         return pdev->queue_fsync();
     } else {
-        static thread_local std::vector< folly::Future< bool > > s_futs;
+        static thread_local std::vector< folly::Future< std::error_code > > s_futs;
         s_futs.clear();
         for (auto* pdev : m_pdevs) {
             HS_LOG(TRACE, device, "Flushing pdev {}", pdev->get_devname());
             s_futs.emplace_back(pdev->queue_fsync());
         }
-        return folly::collectAllUnsafe(s_futs).thenTry([](auto&&) { return folly::makeFuture< bool >(true); });
+        return folly::collectAllUnsafe(s_futs).thenTry([](auto&& t) {
+            for (const auto& err_c : t.value()) {
+                if (sisl_unlikely(err_c.value())) { return folly::makeFuture< std::error_code >(err_c); }
+            }
+            return folly::makeFuture< std::error_code >(std::error_code{});
+        });
     }
 }
 
@@ -543,9 +587,9 @@ void VirtualDev::cp_cleanup(CP*) {
 }
 
 ///////////////////////// VirtualDev Private Methods /////////////////////////////
-uint64_t VirtualDev::to_dev_offset(const BlkId& b, Chunk** chunk) const {
-    *chunk = m_dmgr.get_chunk_mutable(b.get_chunk_num());
-    return uint64_cast(b.get_blk_num()) * block_size() + uint64_cast((*chunk)->start_offset());
+uint64_t VirtualDev::to_dev_offset(BlkId const& b, Chunk** chunk) const {
+    *chunk = m_dmgr.get_chunk_mutable(b.chunk_num());
+    return uint64_cast(b.blk_num()) * block_size() + uint64_cast((*chunk)->start_offset());
 }
 
 } // namespace homestore

@@ -30,7 +30,7 @@
 #include "common/homestore_assert.hpp"
 
 namespace homestore {
-typedef blk_count_t slab_idx_t;
+using slab_idx_t = blk_count_t;
 
 static constexpr uint16_t slab_tbl_size{257};
 
@@ -77,30 +77,30 @@ public:
     blk_cache_entry() : blk_cache_entry{0, 0, 0} {}
     blk_cache_entry(const blk_num_t blk_num, const blk_count_t nblks, const blk_temp_t temp) {
         set_blk_num(blk_num);
-        set_nblks(nblks);
+        set_blk_count(nblks);
         set_temperature(temp);
     }
 
     void set_blk_num(const blk_num_t blk_num) { m_blk_num = blk_num; }
     [[nodiscard]] blk_num_t get_blk_num() const { return m_blk_num; }
 
-    void set_nblks(const blk_count_t nblks) {
-        HS_DBG_ASSERT_LE(nblks, BlkId::max_blks_in_op());
-        m_nblks = static_cast< blk_count_serialized_t >(nblks - 1);
+    void set_blk_count(const blk_count_t nblks) {
+        HS_DBG_ASSERT_LE(nblks, max_blks_per_blkid());
+        m_nblks = nblks;
     }
-    [[nodiscard]] blk_count_t get_nblks() const { return static_cast< blk_count_t >(m_nblks) + 1; }
+    [[nodiscard]] blk_count_t blk_count() const { return m_nblks; }
 
     void set_temperature(const blk_temp_t temp) { m_temp = temp; }
     [[nodiscard]] blk_temp_t get_temperature() const { return m_temp; }
 
     [[nodiscard]] std::string to_string() const {
-        return fmt::format("BlkNum={} nblks={} temp={}", get_blk_num(), get_nblks(), get_temperature());
+        return fmt::format("BlkNum={} nblks={} temp={}", get_blk_num(), blk_count(), get_temperature());
     }
 
 private:
-    blk_num_t m_blk_num;            // Blk number within the chunk
-    blk_count_serialized_t m_nblks; // Total number of blocks
-    blk_temp_t m_temp;              // Temperature of each page
+    blk_num_t m_blk_num; // Blk number within the chunk
+    blk_count_t m_nblks; // Total number of blocks
+    blk_temp_t m_temp;   // Temperature of each page
 };
 #pragma pack()
 
@@ -143,8 +143,8 @@ struct blk_cache_fill_req {
 };
 
 struct blk_cache_refill_status {
-    blk_cap_t slab_required_count{0};
-    blk_cap_t slab_refilled_count{0};
+    blk_num_t slab_required_count{0};
+    blk_num_t slab_refilled_count{0};
 
     [[nodiscard]] bool need_refill() const {
         return (slab_required_count && (slab_refilled_count != slab_required_count));
@@ -160,9 +160,9 @@ struct blk_cache_refill_status {
 struct blk_cache_fill_session {
     uint64_t session_id;
     std::vector< blk_cache_refill_status > slab_requirements; // A slot for each slab about count of required/refilled
-    blk_cap_t overall_refilled_num_blks{0};
+    blk_num_t overall_refilled_num_blks{0};
     bool overall_refill_done{false};
-    std::atomic< blk_cap_t > urgent_refill_blks_count{0}; // Send notification after approx this much blks refilled
+    std::atomic< blk_num_t > urgent_refill_blks_count{0}; // Send notification after approx this much blks refilled
 
     [[nodiscard]] static uint64_t gen_session_id() {
         static std::atomic< uint64_t > s_session_id{1};
@@ -179,7 +179,7 @@ struct blk_cache_fill_session {
         slab_requirements.reserve(num_slabs);
     }
 
-    void urgent_need_atleast(const blk_cap_t wait_count) {
+    void urgent_need_atleast(const blk_num_t wait_count) {
         urgent_refill_blks_count.store(overall_refilled_num_blks + wait_count, std::memory_order_release);
     }
 
@@ -211,7 +211,7 @@ struct blk_cache_fill_session {
 struct SlabCacheConfig {
     struct _slab_config {
         blk_count_t slab_size;      // Size of this slab (in terms of number of blks)
-        blk_cap_t max_entries;      // Max entries allowed in this slab
+        blk_num_t max_entries;      // Max entries allowed in this slab
         float refill_threshold_pct; // At what percentage empty should we start refilling this slab cache
         std::vector< float > m_level_distribution_pct; // How to distribute entries into multiple levels
         std::string m_name;                            // Name of the base blk allocator
@@ -257,7 +257,7 @@ public:
                                                        std::vector< blk_cache_entry >& excess_blks) = 0;
     [[maybe_unused]] virtual blk_count_t try_free_blks(const std::vector< blk_cache_entry >& blks,
                                                        std::vector< blk_cache_entry >& excess_blks) = 0;
-    [[nodiscard]] virtual blk_cap_t try_fill_cache(const blk_cache_fill_req& fill_req,
+    [[nodiscard]] virtual blk_num_t try_fill_cache(const blk_cache_fill_req& fill_req,
                                                    blk_cache_fill_session& fill_session) = 0;
 
     [[nodiscard]] virtual std::shared_ptr< blk_cache_fill_session >
@@ -268,8 +268,7 @@ public:
 
     [[nodiscard]] static slab_idx_t find_slab(const blk_count_t nblks) {
         if (sisl_unlikely(nblks >= slab_tbl_size)) {
-            return static_cast< slab_idx_t >((nblks > 1) ? sisl::logBase2(static_cast< blk_count_t >(nblks - 1)) + 1
-                                                         : 0);
+            return s_cast< slab_idx_t >((nblks > 1) ? sisl::logBase2(s_cast< blk_count_t >(nblks - 1)) + 1 : 0);
         }
         return nblks_to_slab_tbl[nblks];
     }

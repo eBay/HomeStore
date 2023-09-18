@@ -45,27 +45,27 @@ struct VarsizeBlkAllocConfig : public BlkAllocConfig {
 public:
     const uint32_t m_phys_page_size;
     const seg_num_t m_nsegments;
-    const blk_cap_t m_blks_per_temp_group;
-    blk_cap_t m_max_cache_blks;
+    const blk_num_t m_blks_per_temp_group;
+    blk_num_t m_max_cache_blks;
     SlabCacheConfig m_slab_config;
     const bool m_use_slabs{true}; // use sweeping thread pool with slabs in variable size block allocator
 
 public:
     VarsizeBlkAllocConfig() : VarsizeBlkAllocConfig{0, 0, 0, 0, ""} {}
-    VarsizeBlkAllocConfig(const std::string& name) : VarsizeBlkAllocConfig{0, 0, 0, 0, name} {}
+    VarsizeBlkAllocConfig(std::string const& name) : VarsizeBlkAllocConfig{0, 0, 0, 0, name} {}
 
     VarsizeBlkAllocConfig(uint32_t blk_size, uint32_t ppage_sz, uint32_t align_sz, uint64_t size,
-                          const std::string& name, bool realtime_bm_on = true, bool use_slabs = true) :
+                          std::string const& name, bool realtime_bm_on = true, bool use_slabs = true) :
             BlkAllocConfig{blk_size, align_sz, size, name, realtime_bm_on},
             m_phys_page_size{ppage_sz},
             m_nsegments{HS_DYNAMIC_CONFIG(blkallocator.max_segments)},
             m_blks_per_temp_group{m_capacity / HS_DYNAMIC_CONFIG(blkallocator.num_blk_temperatures)},
             m_use_slabs{use_slabs} {
         // Initialize the max cache blks as minimum dictated by the number of blks or memory limits whichever is lower
-        const blk_cap_t size_by_count{static_cast< blk_cap_t >(
+        const blk_num_t size_by_count{static_cast< blk_num_t >(
             std::trunc(HS_DYNAMIC_CONFIG(blkallocator.free_blk_cache_count_by_vdev_percent) * m_capacity / 100.0))};
-        const blk_cap_t size_by_mem{
-            static_cast< blk_cap_t >(std::trunc(HS_DYNAMIC_CONFIG(blkallocator.max_free_blk_cache_memory_percent) *
+        const blk_num_t size_by_mem{
+            static_cast< blk_num_t >(std::trunc(HS_DYNAMIC_CONFIG(blkallocator.max_free_blk_cache_memory_percent) *
                                                 HS_STATIC_CONFIG(input.app_mem_size) / 100.0))};
         m_max_cache_blks = std::min(size_by_count, size_by_mem);
 
@@ -81,11 +81,11 @@ public:
         const auto num_temp_slab_pct{(100.0 - reuse_pct) / static_cast< double >(num_temp)};
 
         m_slab_config.m_name = name;
-        for (const auto& pct : HS_DYNAMIC_CONFIG(blkallocator.free_blk_slab_distribution)) {
+        for (auto const& pct : HS_DYNAMIC_CONFIG(blkallocator.free_blk_slab_distribution)) {
             cum_pct += pct;
             SlabCacheConfig::_slab_config s_cfg;
             s_cfg.slab_size = static_cast< blk_count_t >(1) << slab_idx;
-            s_cfg.max_entries = static_cast< blk_cap_t >((m_max_cache_blks / s_cfg.slab_size) * (pct / 100.0));
+            s_cfg.max_entries = static_cast< blk_num_t >((m_max_cache_blks / s_cfg.slab_size) * (pct / 100.0));
             s_cfg.m_name = name;
             s_cfg.refill_threshold_pct = HS_DYNAMIC_CONFIG(blkallocator.free_blk_cache_refill_threshold_pct);
 
@@ -108,9 +108,9 @@ public:
         }
     }
 
-    VarsizeBlkAllocConfig(const VarsizeBlkAllocConfig& other) = default;
+    VarsizeBlkAllocConfig(VarsizeBlkAllocConfig const& other) = default;
     VarsizeBlkAllocConfig(VarsizeBlkAllocConfig&&) noexcept = delete;
-    VarsizeBlkAllocConfig& operator=(const VarsizeBlkAllocConfig&) = delete;
+    VarsizeBlkAllocConfig& operator=(VarsizeBlkAllocConfig const&) = delete;
     VarsizeBlkAllocConfig& operator=(VarsizeBlkAllocConfig&&) noexcept = delete;
     virtual ~VarsizeBlkAllocConfig() override = default;
 
@@ -119,20 +119,20 @@ public:
 
     //////////// Segments related getters/setters /////////////
     seg_num_t get_total_segments() const { return m_nsegments; }
-    blk_cap_t get_blks_per_segment() const { return (m_capacity / m_nsegments); }
+    blk_num_t get_blks_per_segment() const { return (m_capacity / m_nsegments); }
 
     //////////// Blks related getters/setters /////////////
-    blk_cap_t get_max_cache_blks() const { return m_max_cache_blks; }
-    blk_cap_t get_blks_per_temp_group() const { return m_blks_per_temp_group; }
-    blk_cap_t get_blks_per_phys_page() const { return m_phys_page_size / m_blk_size; }
+    blk_num_t get_max_cache_blks() const { return m_max_cache_blks; }
+    blk_num_t get_blks_per_temp_group() const { return m_blks_per_temp_group; }
+    blk_num_t get_blks_per_phys_page() const { return m_phys_page_size / m_blk_size; }
 
     //////////// Slab related getters/setters /////////////
-    slab_idx_t get_slab_cnt() const { return m_slab_config.m_per_slab_cfg.size(); }
+    slab_idx_t get_slab_cnt() const { return s_cast< slab_idx_t >(m_slab_config.m_per_slab_cfg.size()); }
     blk_count_t get_slab_block_count(const slab_idx_t index) { return m_slab_config.m_per_slab_cfg[index].slab_size; }
-    blk_cap_t get_slab_capacity(const slab_idx_t slab_idx) const {
+    blk_num_t get_slab_capacity(const slab_idx_t slab_idx) const {
         return m_slab_config.m_per_slab_cfg[slab_idx].max_entries;
     }
-    blk_cap_t highest_slab_blks_count() const {
+    blk_num_t highest_slab_blks_count() const {
         const slab_idx_t index{get_slab_cnt()};
         return (index > 0) ? m_slab_config.m_per_slab_cfg[index - 1].slab_size : 0;
     }
@@ -151,12 +151,12 @@ private:
     blk_num_t m_alloc_clock_hand;
 
 public:
-    BlkAllocSegment(const seg_num_t seg_num, const blk_num_t nportions, const std::string& seg_name) :
+    BlkAllocSegment(const seg_num_t seg_num, const blk_num_t nportions, std::string const& seg_name) :
             m_total_portions{nportions}, m_seg_num{seg_num}, m_alloc_clock_hand{0} {}
 
-    BlkAllocSegment(const BlkAllocSegment&) = delete;
+    BlkAllocSegment(BlkAllocSegment const&) = delete;
     BlkAllocSegment(BlkAllocSegment&&) noexcept = delete;
-    BlkAllocSegment& operator=(const BlkAllocSegment&) = delete;
+    BlkAllocSegment& operator=(BlkAllocSegment const&) = delete;
     BlkAllocSegment& operator=(BlkAllocSegment&&) noexcept = delete;
     virtual ~BlkAllocSegment() {}
 
@@ -185,9 +185,9 @@ public:
         register_me_to_farm();
     }
 
-    BlkAllocMetrics(const BlkAllocMetrics&) = delete;
+    BlkAllocMetrics(BlkAllocMetrics const&) = delete;
     BlkAllocMetrics(BlkAllocMetrics&&) noexcept = delete;
-    BlkAllocMetrics& operator=(const BlkAllocMetrics&) = delete;
+    BlkAllocMetrics& operator=(BlkAllocMetrics const&) = delete;
     BlkAllocMetrics& operator=(BlkAllocMetrics&&) noexcept = delete;
     ~BlkAllocMetrics() { deregister_me_from_farm(); }
 };
@@ -201,24 +201,23 @@ public:
  */
 class VarsizeBlkAllocator : public BlkAllocator {
 public:
-    VarsizeBlkAllocator(const VarsizeBlkAllocConfig& cfg, bool init, chunk_num_t chunk_id);
-    VarsizeBlkAllocator(const VarsizeBlkAllocator&) = delete;
+    VarsizeBlkAllocator(VarsizeBlkAllocConfig const& cfg, bool init, chunk_num_t chunk_id);
+    VarsizeBlkAllocator(VarsizeBlkAllocator const&) = delete;
     VarsizeBlkAllocator(VarsizeBlkAllocator&&) noexcept = delete;
-    VarsizeBlkAllocator& operator=(const VarsizeBlkAllocator&) = delete;
+    VarsizeBlkAllocator& operator=(VarsizeBlkAllocator const&) = delete;
     VarsizeBlkAllocator& operator=(VarsizeBlkAllocator&&) noexcept = delete;
     virtual ~VarsizeBlkAllocator() override;
 
-    BlkAllocStatus alloc(BlkId& bid) override;
-    BlkAllocStatus alloc(blk_count_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) override;
-    void free(const std::vector< BlkId >& blk_ids) override;
-    void free(const BlkId& b) override;
+    BlkAllocStatus alloc_contiguous(BlkId& bid) override;
+    BlkAllocStatus alloc_contiguous(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid);
+    BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
+    BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, std::vector< BlkId >& out_blkids);
+    void free(BlkId const& blk_id) override;
     void inited() override;
-    BlkAllocStatus alloc_blks_direct(blk_count_t nblks, const blk_alloc_hints& hints, std::vector< BlkId >& out_blkids,
-                                     blk_count_t& num_allocated);
 
-    blk_cap_t available_blks() const override;
-    blk_cap_t get_used_blks() const override;
-    bool is_blk_alloced(const BlkId& in_bid, bool use_lock = false) const override;
+    blk_num_t available_blks() const override;
+    blk_num_t get_used_blks() const override;
+    bool is_blk_alloced(BlkId const& in_bid, bool use_lock = false) const override;
     std::string to_string() const override;
     nlohmann::json get_metrics_in_json();
 
@@ -256,17 +255,20 @@ private:
     // TODO: this fields needs to be passed in from hints and persisted in volume's sb;
     blk_num_t m_start_portion_num{INVALID_PORTION_NUM};
 
-    blk_cap_t m_blks_per_seg{1};
+    blk_num_t m_blks_per_seg{1};
     blk_num_t m_portions_per_seg{1};
 
 private:
     static void sweeper_thread(size_t thread_num);
     bool allocator_state_machine();
 
+    blk_count_t alloc_blks_slab(blk_count_t nblks, blk_alloc_hints const& hints, MultiBlkId& out_blkid);
+    blk_count_t alloc_blks_direct(blk_count_t nblks, blk_alloc_hints const& hints, MultiBlkId& out_blkids);
+    blk_count_t free_blks_slab(MultiBlkId const& b);
+    blk_count_t free_blks_direct(MultiBlkId const& b);
+
 #ifdef _PRERELEASE
-    bool is_set_on_bitmap(const BlkId& b) const;
-    void alloc_sanity_check(blk_count_t nblks, const blk_alloc_hints& hints,
-                            const std::vector< BlkId >& out_blkids) const;
+    void alloc_sanity_check(blk_count_t nblks, blk_alloc_hints const& hints, MultiBlkId const& out_blkids) const;
 #endif
 
     // Sweep and cache related functions
@@ -277,7 +279,7 @@ private:
     void fill_cache(BlkAllocSegment* seg, blk_cache_fill_session& fill_session);
     void fill_cache_in_portion(blk_num_t portion_num, blk_cache_fill_session& fill_session);
 
-    void free_on_bitmap(const BlkId& b);
+    void free_on_bitmap(BlkId const& b);
 
     //////////////////////////////////////////// Convenience routines ///////////////////////////////////////////
     ///////////////////// Physical page related routines ////////////////////////
@@ -296,8 +298,8 @@ private:
     }
 
     ///////////////////// Cache Entry related routines ////////////////////////
-    void blk_cache_entries_to_blkids(const std::vector< blk_cache_entry >& entries, std::vector< BlkId >& out_blkids);
-    BlkId blk_cache_entry_to_blkid(const blk_cache_entry& e);
-    blk_cache_entry blkid_to_blk_cache_entry(const BlkId& bid, blk_temp_t preferred_level = 1);
+    // void blk_cache_entries_to_blkids(const std::vector< blk_cache_entry >& entries, MultiBlkId& out_blkids);
+    BlkId blk_cache_entry_to_blkid(blk_cache_entry const& e);
+    blk_cache_entry blkid_to_blk_cache_entry(BlkId const& bid, blk_temp_t preferred_level = 1);
 };
 } // namespace homestore

@@ -135,7 +135,7 @@ public:
     void device_truncate(const device_truncate_cb_t& cb = nullptr, const bool wait_till_done = false,
                          const bool dry_run = false);
 
-    folly::Future< bool > create_vdev(uint64_t size, logstore_family_id_t family);
+    folly::Future< std::error_code > create_vdev(uint64_t size, logstore_family_id_t family);
     shared< VirtualDev > open_vdev(const vdev_info& vinfo, logstore_family_id_t family, bool load_existing);
     shared< JournalVirtualDev > get_vdev(logstore_family_id_t family) const {
         return (family == DATA_LOG_FAMILY_IDX) ? m_data_logdev_vdev : m_ctrl_logdev_vdev;

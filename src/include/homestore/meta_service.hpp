@@ -265,7 +265,7 @@ private:
      *
      */
     void alloc_meta_blk(BlkId& bid);
-    void alloc_meta_blk(uint64_t size, std::vector< BlkId >& bid);
+    void alloc_meta_blks(uint64_t size, std::vector< BlkId >& bid);
 
     void free_meta_blk(meta_blk* mblk);
 

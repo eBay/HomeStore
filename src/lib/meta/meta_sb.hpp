@@ -96,10 +96,10 @@ struct MetaSubRegInfo {
 // meta blk super block put as 1st block in the block chain;
 #pragma pack(1)
 struct meta_blk_sb {
-    uint32_t magic;    // ssb magic
+    uint32_t magic; // ssb magic
     uint32_t version;
-    BlkId8_t next_bid; // next metablk
-    BlkId8_t bid;
+    BlkId next_bid; // next metablk
+    BlkId bid;
     uint8_t migrated;
     uint8_t pad[7];
     std::string to_string() const {
@@ -116,14 +116,14 @@ struct meta_blk_sb {
 //
 #pragma pack(1)
 struct meta_blk_hdr_s {
-    uint32_t magic;         // magic
+    uint32_t magic; // magic
     uint32_t version;
-    uint32_t gen_cnt;       // generation count, bump on every update
+    uint32_t gen_cnt; // generation count, bump on every update
     crc32_t crc;
-    BlkId8_t next_bid;      // next metablk
-    BlkId8_t prev_bid;      // previous metablk
-    BlkId8_t ovf_bid;       // overflow blk id;
-    BlkId8_t bid;           // current blk id; might not be needd;
+    BlkId next_bid;         // next metablk
+    BlkId prev_bid;         // previous metablk
+    BlkId ovf_bid;          // overflow blk id;
+    BlkId bid;              // current blk id; might not be needd;
     uint64_t context_sz;    // total size of context data; if compressed is true, it is the round up of compressed size
                             // that is written to disk; if compressed is false, it is the original size of context data;
     uint64_t compressed_sz; // compressed size before round up to align_size, used for decompress
@@ -171,10 +171,10 @@ struct meta_blk {
 // single list overflow block chain
 #pragma pack(1)
 struct meta_blk_ovf_hdr_s {
-    uint32_t magic;    // ovf magic
-    uint32_t nbids;    // number of data blkids stored in data_bid;
-    BlkId8_t next_bid; // next ovf blk id;
-    BlkId8_t bid;      // self blkid
+    uint32_t magic; // ovf magic
+    uint32_t nbids; // number of data blkids stored in data_bid;
+    BlkId next_bid; // next ovf blk id;
+    BlkId bid;      // self blkid
     uint64_t context_sz;
 };
 #pragma pack()

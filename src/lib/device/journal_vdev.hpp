@@ -44,7 +44,7 @@ private:
     off_t m_data_start_offset{0};                   // Start offset of where actual data begin for this vdev
     std::atomic< uint64_t > m_write_sz_in_total{0}; // this size will be decreased by truncate and increased by append;
     bool m_truncate_done{true};
-    uint64_t m_reserved_sz{0};                      // write size within chunk, used to check chunk boundary;
+    uint64_t m_reserved_sz{0}; // write size within chunk, used to check chunk boundary;
 
 public:
     /* Create a new virtual dev for these parameters */
@@ -79,7 +79,7 @@ public:
      *
      * @return : On success, the number of bytes written is returned.  On error, -1 is returned.
      */
-    folly::Future< bool > async_append(const uint8_t* buf, size_t count);
+    folly::Future< std::error_code > async_append(const uint8_t* buf, size_t count);
 
     /**
      * @brief : writes up to count bytes from the buffer starting at buf at offset offset.
@@ -95,7 +95,7 @@ public:
      *
      * @return : On success, the number of bytes read or written is returned, or -1 on error.
      */
-    folly::Future< bool > async_pwrite(const uint8_t* buf, size_t size, off_t offset);
+    folly::Future< std::error_code > async_pwrite(const uint8_t* buf, size_t size, off_t offset);
 
     /**
      * @brief : writes iovcnt buffers of data described by iov to the offset.
@@ -110,7 +110,7 @@ public:
      *
      * @return : On success, number of bytes written. On error, -1 is returned
      */
-    folly::Future< bool > async_pwritev(const iovec* iov, int iovcnt, off_t offset);
+    folly::Future< std::error_code > async_pwritev(const iovec* iov, int iovcnt, off_t offset);
 
     /// @brief writes up to count bytes from the buffer starting at buf at offset offset. The cursor is not
     /// changed. pwrite always use offset returned from alloc_next_append_blk to do the write;pwrite should not across
@@ -145,9 +145,9 @@ public:
      * @param count : size of buffer
      * @param offset : the start offset to do read
      *
-     * @return : On success, returns the number of bytes. On error, -1 is returned.
+     * @return : return the error code of the read
      */
-    void sync_pread(uint8_t* buf, size_t count_in, off_t offset);
+    std::error_code sync_pread(uint8_t* buf, size_t count_in, off_t offset);
 
     /**
      * @brief : read at offset and save output to iov.
@@ -159,9 +159,9 @@ public:
      * @param iovcnt : size of iovev
      * @param offset : the start offset to read
      *
-     * @return : return the number of bytes read; On error, -1 is returned.
+     * @return : return the error code of the read
      */
-    void sync_preadv(iovec* iov, int iovcnt, off_t offset);
+    std::error_code sync_preadv(iovec* iov, int iovcnt, off_t offset);
 
     /**
      * @brief : repositions the cusor of the device to the argument offset

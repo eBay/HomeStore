@@ -20,7 +20,7 @@
 #include <sisl/fds/utils.hpp>
 #include <sisl/metrics/metrics.hpp>
 #include <folly/Function.h>
-#include "homestore/blk.h"
+#include <homestore/blk.h>
 
 namespace homestore {
 typedef folly::Function< void(void) > after_remove_cb_t;
@@ -157,7 +157,7 @@ public:
      * @param blkid : blkid that caller wants to wait on for pending read;
      * @param after_remove_cb : the callback to be sent after read on this blkid are all completed;
      */
-    void wait_on(const BlkId& blkid, after_remove_cb_t&& after_remove_cb);
+    void wait_on(MultiBlkId const& blkids, after_remove_cb_t&& after_remove_cb);
 
     /**
      * @brief : get size of the pending map;

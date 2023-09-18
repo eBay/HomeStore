@@ -147,7 +147,7 @@ public:
     static first_block read_first_block(const std::string& devname, int oflags);
     static uint64_t get_dev_size(const std::string& devname);
 
-    void read_super_block(uint8_t* buf, uint32_t sb_size, uint64_t offset);
+    std::error_code read_super_block(uint8_t* buf, uint32_t sb_size, uint64_t offset);
     void write_super_block(uint8_t* buf, uint32_t sb_size, uint64_t offset);
     void close_device();
 
@@ -194,20 +194,21 @@ public:
     const std::string& get_devname() const { return m_devname; }
 
     /////////////////////////////////////// IO Methods //////////////////////////////////////////
-    folly::Future< bool > async_write(const char* data, uint32_t size, uint64_t offset, bool part_of_batch = false);
-    folly::Future< bool > async_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset,
-                                       bool part_of_batch = false);
-    folly::Future< bool > async_read(char* data, uint32_t size, uint64_t offset, bool part_of_batch = false);
-    folly::Future< bool > async_readv(iovec* iov, int iovcnt, uint32_t size, uint64_t offset,
-                                      bool part_of_batch = false);
-    folly::Future< bool > async_write_zero(uint64_t size, uint64_t offset);
-    folly::Future< bool > queue_fsync();
+    folly::Future< std::error_code > async_write(const char* data, uint32_t size, uint64_t offset,
+                                                 bool part_of_batch = false);
+    folly::Future< std::error_code > async_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset,
+                                                  bool part_of_batch = false);
+    folly::Future< std::error_code > async_read(char* data, uint32_t size, uint64_t offset, bool part_of_batch = false);
+    folly::Future< std::error_code > async_readv(iovec* iov, int iovcnt, uint32_t size, uint64_t offset,
+                                                 bool part_of_batch = false);
+    folly::Future< std::error_code > async_write_zero(uint64_t size, uint64_t offset);
+    folly::Future< std::error_code > queue_fsync();
 
-    void sync_write(const char* data, uint32_t size, uint64_t offset);
-    void sync_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
-    void sync_read(char* data, uint32_t size, uint64_t offset);
-    void sync_readv(iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
-    void sync_write_zero(uint64_t size, uint64_t offset);
+    std::error_code sync_write(const char* data, uint32_t size, uint64_t offset);
+    std::error_code sync_writev(const iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
+    std::error_code sync_read(char* data, uint32_t size, uint64_t offset);
+    std::error_code sync_readv(iovec* iov, int iovcnt, uint32_t size, uint64_t offset);
+    std::error_code sync_write_zero(uint64_t size, uint64_t offset);
     void submit_batch();
 
     ///////////// Parameters Getters ///////////////////////

@@ -24,122 +24,162 @@
 #include <memory>
 #include <sstream>
 
+#include <boost/icl/interval_map.hpp>
 #include <sisl/utility/enum.hpp>
+#include <sisl/fds/buffer.hpp>
 #include <homestore/homestore_decl.hpp>
 
 namespace homestore {
 
-typedef uint32_t blk_num_t;
-typedef blk_num_t blk_cap_t;
-static_assert(sizeof(blk_num_t) == (BLK_NUM_BITS - 1) / 8 + 1, "Expected blk_num_t to matching BLK_NUM_BITS");
+using chunk_num_t = uint16_t;
+using blk_count_t = uint16_t;
+using blk_num_t = uint32_t;
+using blk_temp_t = uint16_t;
 
-typedef uint8_t blk_count_serialized_t;
-typedef uint16_t blk_count_t;
-static_assert(sizeof(blk_count_serialized_t) == (NBLKS_BITS - 1) / 8 + 1,
-              "Expected blk_count_t to matching NBLKS_BITS");
+static constexpr size_t max_addressable_chunks() { return 1UL << (8 * sizeof(chunk_num_t)); }
+static constexpr size_t max_blks_per_chunk() { return 1UL << (8 * sizeof(blk_num_t)); }
+static constexpr size_t max_blks_per_blkid() { return (1UL << (8 * sizeof(blk_count_t))) - 1; }
 
-typedef uint8_t chunk_num_t;
-static_assert(sizeof(chunk_num_t) == (CHUNK_NUM_BITS - 1) / 8 + 1, "Expected blk_count_t to matching CHUNK_NUM_BITS");
-
-typedef uint8_t blk_temp_t;
-
-/* This structure represents the application wide unique block number. It also encomposses the number of blks. */
+#pragma pack(1)
 struct BlkId {
-private:
-    static constexpr uint64_t s_blk_num_mask{(static_cast< uint64_t >(1) << BLK_NUM_BITS) - 1};
-    static constexpr uint64_t s_nblks_mask{(static_cast< uint64_t >(1) << NBLKS_BITS) - 1};
-    static constexpr uint64_t s_chunk_num_mask{(static_cast< uint64_t >(1) << CHUNK_NUM_BITS) - 1};
+protected:
+    struct serialized {
+        blk_num_t m_is_multi : 1; // Is it a part of multi blkid or not
+        blk_num_t m_blk_num : 31; // Block number which is unique within the chunk
+        blk_count_t m_nblks;      // Number of blocks+1 for this blkid, don't directly acccess this - use blk_count()
+        chunk_num_t m_chunk_num;  // Chunk number - which is unique for the entire application
+
+        serialized() : m_is_multi{0}, m_blk_num{0}, m_nblks{0}, m_chunk_num{0} {}
+        serialized(bool is_multi, blk_num_t blk_num, blk_count_t nblks, chunk_num_t cnum) :
+                m_is_multi{is_multi ? 0x1u : 0x0u}, m_blk_num{blk_num}, m_nblks{nblks}, m_chunk_num{cnum} {}
+    };
+    static_assert(sizeof(serialized) == sizeof(uint64_t), "Expected serialized size to 64 bits");
+
+    serialized s;
 
 public:
-    static constexpr blk_count_t max_blks_in_op() { return (1 << NBLKS_BITS); }
-    static constexpr uint64_t max_id_int() { return (1ull << (BLK_NUM_BITS + NBLKS_BITS + CHUNK_NUM_BITS)) - 1; }
-
-    static int compare(const BlkId& one, const BlkId& two);
-    uint64_t to_integer() const;
-
+    BlkId() = default;
     explicit BlkId(uint64_t id_int);
-    BlkId(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num = 0);
-    BlkId() { invalidate(); }
-    BlkId(const BlkId&) = default;
-    BlkId& operator=(const BlkId&) = default;
+    BlkId(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num);
+    BlkId(BlkId const&) = default;
+    BlkId& operator=(BlkId const&) = default;
     BlkId(BlkId&&) noexcept = default;
     BlkId& operator=(BlkId&&) noexcept = default;
-    bool operator==(const BlkId& other) const { return (compare(*this, other) == 0); }
-    bool operator>(const BlkId& other) const { return (compare(*this, other) > 0); }
-    bool operator<(const BlkId& other) const { return (compare(*this, other) < 0); }
+
+    bool operator==(BlkId const& other) const { return (compare(*this, other) == 0); }
+    bool operator>(BlkId const& other) const { return (compare(*this, other) > 0); }
+    bool operator<(BlkId const& other) const { return (compare(*this, other) < 0); }
+
+    blk_num_t blk_num() const { return s.m_blk_num; }
+    blk_count_t blk_count() const { return s.m_nblks; }
+    chunk_num_t chunk_num() const { return s.m_chunk_num; }
+    bool is_multi() const { return s.m_is_multi; }
 
     void invalidate();
+    uint64_t to_integer() const;
+    sisl::blob serialize(); // TODO: Consider making this const, perhaps returns const uint8_t version of blob
+    void deserialize(sisl::blob const& b, bool copy);
+    uint32_t serialized_size() const;
+    std::string to_string() const;
     bool is_valid() const;
 
-    BlkId get_blkid_at(uint32_t offset, uint32_t pagesz) const;
-    BlkId get_blkid_at(uint32_t offset, uint32_t size, uint32_t pagesz) const;
-
-    void set(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num = 0);
-    void set(const BlkId& bid);
-    void set(uint64_t id_int);
-
-    void set_blk_num(blk_num_t blk_num);
-    blk_num_t get_blk_num() const { return m_blk_num; }
-    // last blk num is the last blk num that belongs this blkid;
-    blk_num_t get_last_blk_num() const { return get_blk_num() + get_nblks() - 1; }
-
-    void set_nblks(blk_count_t nblks);
-    blk_count_t get_nblks() const { return static_cast< blk_count_t >(m_nblks) + 1; }
-
-    void set_chunk_num(const chunk_num_t chunk_num);
-    chunk_num_t get_chunk_num() const { return m_chunk_num; }
-
-    /* A blkID represent a page size which is assigned to a blk allocator */
-    uint32_t data_size(const uint32_t page_size) const { return (get_nblks() * page_size); }
-
-    std::string to_string() const;
-
-    blk_num_t m_blk_num;            // Block number which is unique within the chunk
-    blk_count_serialized_t m_nblks; // Number of blocks+1 for this blkid, don't directly acccess this - use get_nblks()
-    chunk_num_t m_chunk_num;        // Chunk number - which is unique for the entire application
-} __attribute__((__packed__));
-
-VENUM(BlkAllocStatus, uint32_t,
-      BLK_ALLOC_NONE = 0,       // No Action taken
-      SUCCESS = 1ul << 0,       // Success
-      FAILED = 1ul << 1,        // Failed to alloc/free
-      REQ_MORE = 1ul << 2,      // Indicate that we need more
-      SPACE_FULL = 1ul << 3,    // Space is full
-      INVALID_DEV = 1ul << 4,   // Invalid Device provided for alloc
-      PARTIAL = 1ul << 5,       // In case of multiple blks, only partial is alloced/freed
-      INVALID_THREAD = 1ul << 6 // Not possible to alloc in this thread
-);
-
-static_assert(sizeof(BlkId) < 8);
-#pragma pack(1)
-struct BlkId8_t : public BlkId {
-    uint8_t pad[8 - sizeof(BlkId)]{};
-
-    BlkId8_t& operator=(const BlkId& rhs) {
-        BlkId::operator=(rhs);
-        return *this;
-    }
+    static int compare(BlkId const& one, BlkId const& two);
 };
 #pragma pack()
-static_assert(sizeof(BlkId8_t) == 8);
 
-inline blk_num_t begin_of(const BlkId& blkid) { return blkid.get_blk_num(); }
-inline blk_num_t end_of(const BlkId& blkid) { return blkid.get_blk_num() + blkid.get_nblks(); }
-inline size_t hash_value(const BlkId& blkid) { return std::hash< uint64_t >()(blkid.to_integer()); }
+#pragma pack(1)
+struct MultiBlkId : public BlkId {
+    static constexpr uint32_t max_addln_pieces{5};
+    static constexpr uint32_t max_pieces{max_addln_pieces + 1};
+
+private:
+    struct chain_blkid {
+        blk_num_t m_blk_num;
+        blk_count_t m_nblks{0};
+
+        bool is_valid() const { return (m_nblks != 0); }
+    };
+
+    uint16_t n_addln_piece{0};
+    std::array< chain_blkid, max_addln_pieces > addln_pieces;
+
+public:
+    MultiBlkId();
+    MultiBlkId(BlkId const& b);
+    MultiBlkId(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num);
+    MultiBlkId(MultiBlkId const&) = default;
+    MultiBlkId& operator=(MultiBlkId const&) = default;
+    MultiBlkId(MultiBlkId&&) noexcept = default;
+    MultiBlkId& operator=(MultiBlkId&&) noexcept = default;
+
+    void add(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num);
+    void add(BlkId const&);
+
+    uint16_t num_pieces() const;
+    blk_count_t blk_count() const;
+    std::string to_string() const;
+
+    bool operator==(MultiBlkId const& other) const { return (compare(*this, other) == 0); }
+    bool operator>(MultiBlkId const& other) const { return (compare(*this, other) > 0); }
+    bool operator<(MultiBlkId const& other) const { return (compare(*this, other) < 0); }
+
+    sisl::blob serialize();
+    uint32_t serialized_size() const;
+    void deserialize(sisl::blob const& b, bool copy);
+
+    bool has_room() const;
+    BlkId to_single_blkid() const;
+
+    static int compare(MultiBlkId const& one, MultiBlkId const& two);
+
+    struct iterator {
+        MultiBlkId const& mbid_;
+        uint16_t next_blk_{0};
+
+        iterator(MultiBlkId const& mb) : mbid_{mb} {}
+        std::optional< BlkId > next() {
+            if (next_blk_ == 0) {
+                auto bid = r_cast< BlkId const& >(mbid_);
+                ++next_blk_;
+                return (bid.is_valid()) ? std::make_optional(bid) : std::nullopt;
+            } else if (next_blk_ < mbid_.num_pieces()) {
+                auto cbid = mbid_.addln_pieces[next_blk_ - 1];
+                ++next_blk_;
+                return std::make_optional(BlkId{cbid.m_blk_num, cbid.m_nblks, mbid_.chunk_num()});
+            } else {
+                return std::nullopt;
+            }
+        }
+    };
+
+    iterator iterate() const;
+};
+#pragma pack()
+
 } // namespace homestore
 
-// hash function definitions
+///////////////////// hash function definitions /////////////////////
 namespace std {
 template <>
 struct hash< homestore::BlkId > {
-    typedef homestore::BlkId argument_type;
-    typedef size_t result_type;
-    result_type operator()(const argument_type& bid) const noexcept {
-        return std::hash< uint64_t >()(bid.to_integer());
+    size_t operator()(const homestore::BlkId& bid) const noexcept { return std::hash< uint64_t >()(bid.to_integer()); }
+};
+
+template <>
+struct hash< homestore::MultiBlkId > {
+    size_t operator()(const homestore::MultiBlkId& mbid) const noexcept {
+        static constexpr size_t s_start_seed = 0xB504F333;
+        size_t seed = s_start_seed;
+        auto it = mbid.iterate();
+        while (auto b = it.next()) {
+            boost::hash_combine(seed, b->to_integer());
+        }
+        return seed;
     }
 };
 } // namespace std
 
+///////////////////// formatting definitions /////////////////////
 template < typename T >
 struct fmt::formatter< T, std::enable_if_t< std::is_base_of< homestore::BlkId, T >::value, char > >
         : fmt::formatter< std::string > {
@@ -148,10 +188,25 @@ struct fmt::formatter< T, std::enable_if_t< std::is_base_of< homestore::BlkId, T
     }
 };
 
-namespace homestore {
+template < typename T >
+struct fmt::formatter< T, std::enable_if_t< std::is_base_of< homestore::MultiBlkId, T >::value, char > >
+        : fmt::formatter< std::string > {
+    auto format(const homestore::MultiBlkId& a, format_context& ctx) const {
+        return fmt::formatter< std::string >::format(a.to_string(), ctx);
+    }
+};
 
-template < typename charT, typename traits >
-std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream, const BlkId& blk) {
+namespace boost {
+template <>
+struct hash< homestore::BlkId > {
+    size_t operator()(const homestore::BlkId& bid) const noexcept { return std::hash< homestore::BlkId >()(bid); }
+};
+} // namespace boost
+
+namespace homestore {
+///////////////////// stream operation definitions /////////////////////
+template < typename charT, typename traits, typename blkidT >
+std::basic_ostream< charT, traits >& stream_op(std::basic_ostream< charT, traits >& outStream, blkidT const& blk) {
     // copy the stream formatting
     std::basic_ostringstream< charT, traits > outStringStream;
     outStringStream.copyfmt(outStream);
@@ -163,27 +218,40 @@ std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, trait
     return outStream;
 }
 
-/* Hints for various allocators */
-struct blk_alloc_hints {
-    blk_alloc_hints() :
-            desired_temp{0},
-            dev_id_hint{INVALID_DEV_ID},
-            can_look_for_other_chunk{true},
-            is_contiguous{false},
-            multiplier{1},
-            max_blks_per_entry{BlkId::max_blks_in_op()},
-            stream_info{(uintptr_t) nullptr} {}
+template < typename charT, typename traits >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream, BlkId const& blk) {
+    return stream_op< charT, traits, BlkId >(outStream, blk);
+}
 
-    blk_temp_t desired_temp;       // Temperature hint for the device
-    uint32_t dev_id_hint;          // which physical device to pick (hint if any) -1 for don't care
-    bool can_look_for_other_chunk; // If alloc on device not available can I pick other device
-    bool is_contiguous;
-    uint32_t multiplier;           // blks allocated in a blkid should be a multiple of multiplier
-    uint32_t max_blks_per_entry;   // Number of blks on every entry
-    uintptr_t stream_info;
-#ifdef _PRERELEASE
-    bool error_simulate = false; // can error simulate happen
-#endif
+template < typename charT, typename traits >
+std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, traits >& outStream, MultiBlkId const& blk) {
+    return stream_op< charT, traits, MultiBlkId >(outStream, blk);
+}
+
+///////////////////// Other common Blkd definitions /////////////////////
+VENUM(BlkAllocStatus, uint32_t,
+      BLK_ALLOC_NONE = 0,        // No Action taken
+      SUCCESS = 1ul << 0,        // Success
+      FAILED = 1ul << 1,         // Failed to alloc/free
+      REQ_MORE = 1ul << 2,       // Indicate that we need more
+      SPACE_FULL = 1ul << 3,     // Space is full
+      INVALID_DEV = 1ul << 4,    // Invalid Device provided for alloc
+      PARTIAL = 1ul << 5,        // In case of multiple blks, only partial is alloced/freed
+      INVALID_THREAD = 1ul << 6, // Not possible to alloc in this thread
+      INVALID_INPUT = 1ul << 7,  // Invalid input
+      TOO_MANY_PIECES = 1ul << 8 // Allocation results in more pieces than passed on
+);
+
+struct blk_alloc_hints {
+    blk_temp_t desired_temp{0};                  // Temperature hint for the device
+    std::optional< uint32_t > pdev_id_hint;      // which physical device to pick (hint if any) -1 for don't care
+    std::optional< chunk_num_t > chunk_id_hint;  // any specific chunk id to pick for this allocation
+    std::optional< stream_id_t > stream_id_hint; // any specific stream to pick
+    bool can_look_for_other_chunk{true};         // If alloc on device not available can I pick other device
+    bool is_contiguous{true};                    // Should the entire allocation be one contiguous block
+    bool partial_alloc_ok{false};   // ok to allocate only portion of nblks? Mutually exclusive with is_contiguous
+    uint32_t min_blks_per_piece{1}; // blks allocated in a blkid should be atleast this size per entry
+    uint32_t max_blks_per_piece{max_blks_per_blkid()}; // Number of blks on every entry
 };
 
 } // namespace homestore
