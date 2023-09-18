@@ -55,7 +55,7 @@ class HomestoreConan(ConanFile):
         self.build_requires("gtest/1.14.0")
 
     def requirements(self):
-        self.requires("iomgr/[~=9, include_prerelease=True]@oss/master")
+        self.requires("iomgr/[~=10, include_prerelease=True]@oss/master")
         self.requires("sisl/[~=10, include_prerelease=True]@oss/master")
 
         self.requires("farmhash/cci.20190513@")
