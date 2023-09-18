@@ -41,6 +41,7 @@
 #include "common/resource_mgr.hpp"
 #include "meta/meta_sb.hpp"
 #include "logstore/log_store_family.hpp"
+#include "replication/service/repl_service_impl.h"
 
 /*
  * IO errors handling by homestore.
@@ -55,13 +56,45 @@
 namespace homestore {
 HomeStoreSafePtr HomeStore::s_instance{nullptr};
 
+static std::unique_ptr< IndexServiceCallbacks > s_index_cbs;
+static repl_impl_type s_repl_impl_type{repl_impl_type::solo};
+static std::unique_ptr< ReplServiceCallbacks > s_repl_cbs;
+shared< ChunkSelector > s_custom_chunk_selector{nullptr};
+
 HomeStore* HomeStore::instance() {
     if (s_instance == nullptr) { s_instance = std::make_shared< HomeStore >(); }
     return s_instance.get();
 }
 
-bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_cb_t svcs_starting_cb,
-                      std::unique_ptr< IndexServiceCallbacks > cbs) {
+HomeStore& HomeStore::with_data_service(cshared< ChunkSelector >& custom_chunk_selector) {
+    m_services.svcs |= HS_SERVICE::DATA;
+    m_services.svcs &= ~HS_SERVICE::REPLICATION; // ReplicationDataSvc or DataSvc are mutually exclusive
+    s_custom_chunk_selector = std::move(custom_chunk_selector);
+    return *this;
+}
+
+HomeStore& HomeStore::with_index_service(std::unique_ptr< IndexServiceCallbacks > cbs) {
+    m_services.svcs |= HS_SERVICE::INDEX;
+    s_index_cbs = std::move(cbs);
+    return *this;
+}
+
+HomeStore& HomeStore::with_log_service() {
+    m_services.svcs |= HS_SERVICE::LOG_REPLICATED | HS_SERVICE::LOG_LOCAL;
+    return *this;
+}
+
+HomeStore& HomeStore::with_repl_data_service(repl_impl_type repl_type, std::unique_ptr< ReplServiceCallbacks > cbs,
+                                             cshared< ChunkSelector >& custom_chunk_selector) {
+    m_services.svcs |= HS_SERVICE::REPLICATION | HS_SERVICE::LOG_REPLICATED | HS_SERVICE::LOG_LOCAL;
+    m_services.svcs &= ~HS_SERVICE::DATA; // ReplicationDataSvc or DataSvc are mutually exclusive
+    s_repl_impl_type = repl_type;
+    s_repl_cbs = std::move(cbs);
+    s_custom_chunk_selector = std::move(custom_chunk_selector);
+    return *this;
+}
+
+bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_cb_t svcs_starting_cb) {
     auto& hs_config = HomeStoreStaticConfig::instance();
     hs_config.input = input;
 
@@ -91,12 +124,16 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
 
     HomeStoreDynamicConfig::init_settings_default();
 
-    LOGINFO("Homestore is loading with following services: ", input.services.list());
+    LOGINFO("Homestore is loading with following services: {}", m_services.list());
     if (has_meta_service()) { m_meta_service = std::make_unique< MetaBlkService >(); }
     if (has_log_service()) { m_log_service = std::make_unique< LogStoreService >(); }
-    if (has_data_service()) { m_data_service = std::make_unique< BlkDataService >(); }
-    if (has_index_service()) { m_index_service = std::make_unique< IndexService >(std::move(cbs)); }
-
+    if (has_data_service()) { m_data_service = std::make_unique< BlkDataService >(std::move(s_custom_chunk_selector)); }
+    if (has_index_service()) { m_index_service = std::make_unique< IndexService >(std::move(s_index_cbs)); }
+    if (has_repl_data_service()) {
+        m_repl_service = std::make_unique< ReplicationServiceImpl >(s_repl_impl_type, std::move(s_repl_cbs));
+        m_data_service = std::make_unique< BlkDataService >(std::move(s_custom_chunk_selector));
+    }
+    m_cp_mgr = std::make_unique< CPManager >();
     m_dev_mgr = std::make_unique< DeviceManager >(input.devices, bind_this(HomeStore::create_vdev_cb, 2));
 
     if (!m_dev_mgr->is_first_time_boot()) {
@@ -126,10 +163,13 @@ void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format
             futs.emplace_back(m_log_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast),
                                                          LogStoreService::CTRL_LOG_FAMILY_IDX));
         } else if ((svc_type & HS_SERVICE::DATA) && has_data_service()) {
-            m_data_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Data), fparams.alloc_type,
-                                        fparams.chunk_sel_type);
+            m_data_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Data), fparams.block_size,
+                                        fparams.alloc_type, fparams.chunk_sel_type);
         } else if ((svc_type & HS_SERVICE::INDEX) && has_index_service()) {
             m_index_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast));
+        } else if ((svc_type & HS_SERVICE::REPLICATION) && has_repl_data_service()) {
+            m_data_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Data), fparams.block_size,
+                                        fparams.alloc_type, fparams.chunk_sel_type);
         }
     }
 
@@ -155,17 +195,22 @@ void HomeStore::do_start() {
             m_dev_mgr->is_first_time_boot(), HS_DYNAMIC_CONFIG(version), cache_size,
             HomeStoreStaticConfig::instance().to_json().dump(4));
 
-    m_cp_mgr = std::make_unique< CPManager >(is_first_time_boot()); // Initialize CPManager
     m_meta_service->start(m_dev_mgr->is_first_time_boot());
+    m_cp_mgr->start(is_first_time_boot());
     m_resource_mgr->set_total_cap(m_dev_mgr->total_capacity());
-
-    // In case of custom recovery, let consumer starts the recovery and it is consumer module's responsibilities to
-    // start log store
-    if (has_log_service() && inp_params.auto_recovery) { m_log_service->start(is_first_time_boot() /* format */); }
 
     if (has_index_service()) { m_index_service->start(); }
 
-    if (has_data_service()) { m_data_service->start(); }
+    if (has_data_service()) {
+        m_data_service->start();
+    } else if (has_repl_data_service()) {
+        m_data_service->start();
+        m_repl_service->start();
+    }
+
+    // In case of custom recovery, let consumer starts the recovery and it is consumer module's responsibilities
+    // to start log store
+    if (has_log_service() && inp_params.auto_recovery) { m_log_service->start(is_first_time_boot() /* format */); }
 }
 
 void HomeStore::shutdown() {
@@ -182,6 +227,10 @@ void HomeStore::shutdown() {
 
     if (has_data_service()) { m_data_service.reset(); }
 
+    if (has_repl_data_service()) {
+        m_repl_service->stop();
+        m_repl_service.reset();
+    }
     m_dev_mgr->close_devices();
     m_dev_mgr.reset();
     m_cp_mgr->shutdown();
@@ -216,17 +265,12 @@ cap_attrs HomeStore::get_system_capacity() const {
 
 bool HomeStore::is_first_time_boot() const { return m_dev_mgr->is_first_time_boot(); }
 
-bool HomeStore::has_index_service() const {
-    return HomeStoreStaticConfig::instance().input.services.svcs & HS_SERVICE::INDEX;
-}
-bool HomeStore::has_data_service() const {
-    return HomeStoreStaticConfig::instance().input.services.svcs & HS_SERVICE::DATA;
-}
-bool HomeStore::has_meta_service() const {
-    return HomeStoreStaticConfig::instance().input.services.svcs & HS_SERVICE::META;
-}
+bool HomeStore::has_index_service() const { return m_services.svcs & HS_SERVICE::INDEX; }
+bool HomeStore::has_data_service() const { return m_services.svcs & HS_SERVICE::DATA; }
+bool HomeStore::has_repl_data_service() const { return m_services.svcs & HS_SERVICE::REPLICATION; }
+bool HomeStore::has_meta_service() const { return m_services.svcs & HS_SERVICE::META; }
 bool HomeStore::has_log_service() const {
-    auto const s = HomeStoreStaticConfig::instance().input.services.svcs;
+    auto const s = m_services.svcs;
     return (s & (HS_SERVICE::LOG_REPLICATED | HS_SERVICE::LOG_LOCAL));
 }
 
@@ -286,7 +330,9 @@ shared< VirtualDev > HomeStore::create_vdev_cb(const vdev_info& vinfo, bool load
         break;
 
     case hs_vdev_type_t::DATA_VDEV:
-        if (has_data_service()) { ret_vdev = m_data_service->open_vdev(vinfo, load_existing); }
+        if (has_data_service() || has_repl_data_service()) {
+            ret_vdev = m_data_service->open_vdev(vinfo, load_existing);
+        }
         break;
 
     default:
@@ -327,7 +373,6 @@ nlohmann::json hs_input_params::to_json() const {
     json["app_mem_size"] = in_bytes(app_mem_size);
     json["hugepage_size"] = in_bytes(hugepage_size);
     json["auto_recovery?"] = auto_recovery;
-    json["services"] = services.list();
     return json;
 }
 

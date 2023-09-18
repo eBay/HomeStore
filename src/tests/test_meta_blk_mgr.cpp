@@ -48,8 +48,7 @@ using namespace homestore;
 RCU_REGISTER_INIT
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-blk_allocator_type_t test_common::HSTestHelper::s_ds_alloc_type;
-chunk_selector_type_t test_common::HSTestHelper::s_ds_chunk_sel_type;
+
 SISL_OPTIONS_ENABLE(logging, test_meta_blk_mgr, iomgr, test_common_setup)
 
 SISL_LOGGING_DECL(test_meta_blk_mgr)
@@ -97,7 +96,9 @@ public:
     virtual ~VMetaBlkMgrTest() override = default;
 
 protected:
-    void SetUp() override{};
+    void SetUp() override {
+        test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", {{HS_SERVICE::META, {.size_pct = 85.0}}});
+    }
 
     void TearDown() override{};
 
@@ -364,7 +365,7 @@ public:
             iomanager.iobuf_free(buf);
         } else {
             if (unaligned_addr) {
-                delete[](buf - unaligned_shift);
+                delete[] (buf - unaligned_shift);
             } else {
                 delete[] buf;
             }
@@ -575,7 +576,6 @@ public:
 static constexpr uint64_t MIN_DRIVE_SIZE{2147483648}; // 2 GB
 
 TEST_F(VMetaBlkMgrTest, min_drive_size_test) {
-    test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", 85.0, 0, 0, 0, 0, nullptr);
     mtype = "Test_Min_Drive_Size";
     this->register_client();
 
@@ -587,7 +587,6 @@ TEST_F(VMetaBlkMgrTest, min_drive_size_test) {
 }
 
 TEST_F(VMetaBlkMgrTest, write_to_full_test) {
-    test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", 85.0, 0, 0, 0, 0, nullptr);
     mtype = "Test_Write_to_Full";
     reset_counters();
     m_start_time = Clock::now();
@@ -599,7 +598,6 @@ TEST_F(VMetaBlkMgrTest, write_to_full_test) {
 }
 
 TEST_F(VMetaBlkMgrTest, single_read_test) {
-    test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", 85.0, 0, 0, 0, 0, nullptr);
     mtype = "Test_Read";
     reset_counters();
     m_start_time = Clock::now();
@@ -615,7 +613,6 @@ TEST_F(VMetaBlkMgrTest, single_read_test) {
 // 1. randome write, update, remove;
 // 2. recovery test and verify callback context data matches;
 TEST_F(VMetaBlkMgrTest, random_load_test) {
-    test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", 85.0, 0, 0, 0, 0, nullptr);
     mtype = "Test_Rand_Load";
     reset_counters();
     m_start_time = Clock::now();
@@ -643,7 +640,6 @@ TEST_F(VMetaBlkMgrTest, random_load_test) {
 // 4. After recovery everything should be fine;
 //
 TEST_F(VMetaBlkMgrTest, RecoveryFromBadData) {
-    test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", 85.0, 0, 0, 0, 0, nullptr);
     mtype = "Test_Recovery_from_bad_data";
     reset_counters();
     m_start_time = Clock::now();
@@ -685,7 +681,6 @@ TEST_F(VMetaBlkMgrTest, RecoveryFromBadData) {
 #endif
 
 TEST_F(VMetaBlkMgrTest, CompressionBackoff) {
-    test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", 85.0, 0, 0, 0, 0, nullptr);
     mtype = "Test_Compression_Backoff";
     reset_counters();
     m_start_time = Clock::now();

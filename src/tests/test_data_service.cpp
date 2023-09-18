@@ -50,8 +50,6 @@ SISL_OPTIONS_ENABLE(logging, test_data_service, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_data_service)
 
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-blk_allocator_type_t test_common::HSTestHelper::s_ds_alloc_type;
-chunk_selector_type_t test_common::HSTestHelper::s_ds_chunk_sel_type;
 
 constexpr uint64_t Ki{1024};
 constexpr uint64_t Mi{Ki * Ki};
@@ -72,6 +70,13 @@ typedef std::function< void(std::error_condition err, std::shared_ptr< std::vect
 class BlkDataServiceTest : public testing::Test {
 public:
     BlkDataService& inst() { return homestore::data_service(); }
+
+    virtual void SetUp() override {
+        test_common::HSTestHelper::start_homestore(
+            "test_data_service", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::DATA, {.size_pct = 80.0}}});
+    }
+
+    virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
 
     void free(sisl::sg_list& sg) { test_common::HSTestHelper::free(sg); }
 
@@ -301,9 +306,6 @@ private:
 // single vector in sg_list;
 //
 TEST_F(BlkDataServiceTest, TestBasicWrite) {
-    LOGINFO("Step 0: Starting homestore.");
-    test_common::HSTestHelper::start_homestore("test_data_service", 5.0, 0, 0, 80.0, 0, nullptr);
-
     // start io in worker thread;
     const auto io_size = 4 * Ki;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
@@ -313,13 +315,9 @@ TEST_F(BlkDataServiceTest, TestBasicWrite) {
     wait_for_all_io_complete();
 
     LOGINFO("Step 3: I/O completed, do shutdown.");
-    test_common::HSTestHelper::shutdown_homestore();
 }
 
 TEST_F(BlkDataServiceTest, TestWriteMultiplePagesSingleIov) {
-    LOGINFO("Step 0: Starting homestore.");
-    test_common::HSTestHelper::start_homestore("test_data_service", 5.0, 0, 0, 80.0, 0, nullptr);
-
     // start io in worker thread;
     const auto io_size = 4 * Mi;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
@@ -329,13 +327,9 @@ TEST_F(BlkDataServiceTest, TestWriteMultiplePagesSingleIov) {
     wait_for_all_io_complete();
 
     LOGINFO("Step 3: I/O completed, do shutdown.");
-    test_common::HSTestHelper::shutdown_homestore();
 }
 
 TEST_F(BlkDataServiceTest, TestWriteMultiplePagesMultiIovs) {
-    LOGINFO("Step 0: Starting homestore.");
-    test_common::HSTestHelper::start_homestore("test_data_service", 5.0, 0, 0, 80.0, 0, nullptr);
-
     // start io in worker thread;
     const auto io_size = 4 * Mi;
     const auto num_iovs = 4;
@@ -347,13 +341,9 @@ TEST_F(BlkDataServiceTest, TestWriteMultiplePagesMultiIovs) {
     wait_for_all_io_complete();
 
     LOGINFO("Step 3: I/O completed, do shutdown.");
-    test_common::HSTestHelper::shutdown_homestore();
 }
 
 TEST_F(BlkDataServiceTest, TestWriteThenReadVerify) {
-    LOGINFO("Step 0: Starting homestore.");
-    test_common::HSTestHelper::start_homestore("test_data_service", 5.0, 0, 0, 80.0, 0, nullptr);
-
     // start io in worker thread;
     auto io_size = 4 * Ki;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
@@ -363,14 +353,10 @@ TEST_F(BlkDataServiceTest, TestWriteThenReadVerify) {
     wait_for_all_io_complete();
 
     LOGINFO("Step 4: I/O completed, do shutdown.");
-    test_common::HSTestHelper::shutdown_homestore();
 }
 
 // Free_blk test, no read involved;
 TEST_F(BlkDataServiceTest, TestWriteThenFreeBlk) {
-    LOGINFO("Step 0: Starting homestore.");
-    test_common::HSTestHelper::start_homestore("test_data_service", 5.0, 0, 0, 80.0, 0, nullptr);
-
     // start io in worker thread;
     auto io_size = 4 * Mi;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes, then free blk.", io_size);
@@ -381,16 +367,12 @@ TEST_F(BlkDataServiceTest, TestWriteThenFreeBlk) {
     wait_for_all_io_complete();
 
     LOGINFO("Step 4: I/O completed, do shutdown.");
-    test_common::HSTestHelper::shutdown_homestore();
 }
 
 //
 // write, read, then free the blk after read completes, free should succeed
 //
 TEST_F(BlkDataServiceTest, TestWriteReadThenFreeBlkAfterReadComp) {
-    LOGINFO("Step 0: Starting homestore.");
-    test_common::HSTestHelper::start_homestore("test_data_service", 5.0, 0, 0, 80.0, 0, nullptr);
-
     // start io in worker thread;
     auto io_size = 4 * Ki;
     LOGINFO("Step 1: Run on worker thread to schedule write for {} Bytes.", io_size);
@@ -401,13 +383,9 @@ TEST_F(BlkDataServiceTest, TestWriteReadThenFreeBlkAfterReadComp) {
     wait_for_all_io_complete();
 
     LOGINFO("Step 3: I/O completed, do shutdown.");
-    test_common::HSTestHelper::shutdown_homestore();
 }
 
 TEST_F(BlkDataServiceTest, TestWriteReadThenFreeBeforeReadComp) {
-    LOGINFO("Step 0: Starting homestore.");
-    test_common::HSTestHelper::start_homestore("test_data_service", 5.0, 0, 0, 80.0, 0, nullptr);
-
     // start io in worker thread;
     auto io_size = 4 * Ki;
     LOGINFO("Step 1: Run on worker thread to schedule write for {} Bytes.", io_size);
@@ -418,7 +396,6 @@ TEST_F(BlkDataServiceTest, TestWriteReadThenFreeBeforeReadComp) {
     wait_for_all_io_complete();
 
     LOGINFO("Step 5: I/O completed, do shutdown.");
-    test_common::HSTestHelper::shutdown_homestore();
 }
 
 // Stream related test

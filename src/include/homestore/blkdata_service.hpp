@@ -34,13 +34,11 @@ struct vdev_info;
 struct stream_info_t;
 class BlkReadTracker;
 struct blk_alloc_hints;
-
-using blk_t = uint64_t;
-using blk_list_t = folly::small_vector< blk_t, 4 >;
+class ChunkSelector;
 
 class BlkDataService {
 public:
-    BlkDataService();
+    BlkDataService(shared< ChunkSelector > custom_chunk_selector);
     ~BlkDataService();
 
     /**
@@ -48,8 +46,8 @@ public:
      *
      * @param size : size of this vdev
      */
-    void create_vdev(uint64_t size, homestore::blk_allocator_type_t alloc_type,
-                     homestore::chunk_selector_type_t chunk_sel_type);
+    void create_vdev(uint64_t size, uint32_t blk_size, blk_allocator_type_t alloc_type,
+                     chunk_selector_type_t chunk_sel_type);
 
     /**
      * @brief : called during recovery to open existing vdev for data service
@@ -113,7 +111,7 @@ public:
      *
      * @return : the block list that have the blocks;
      */
-    blk_list_t alloc_blks(uint32_t size);
+    BlkAllocStatus alloc_blks(uint32_t size, blk_alloc_hints const& hints, MultiBlkId& out_blkids);
 
     /**
      * @brief : asynchronous free block, it is asynchronous because it might need to wait for pending read to complete
@@ -144,8 +142,6 @@ public:
     void start();
 
 private:
-    BlkAllocStatus alloc_blks(uint32_t size, blk_alloc_hints const& hints, MultiBlkId& out_blkids);
-
     void init();
 
     static void process_data_completion(std::error_condition ec, void* cookie);
@@ -153,6 +149,7 @@ private:
 private:
     std::shared_ptr< VirtualDev > m_vdev;
     std::unique_ptr< BlkReadTracker > m_blk_read_tracker;
+    std::shared_ptr< ChunkSelector > m_custom_chunk_selector;
     uint32_t m_blk_size;
 };
 

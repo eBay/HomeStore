@@ -142,40 +142,10 @@ static std::string in_bytes(uint64_t sz) {
     return _format_decimals(size / arr.back().first, arr.back().second);
 }
 
-struct HS_SERVICE {
-    static constexpr uint32_t META = 1 << 0;
-    static constexpr uint32_t LOG_REPLICATED = 1 << 1;
-    static constexpr uint32_t LOG_LOCAL = 1 << 2;
-    static constexpr uint32_t DATA = 1 << 3;
-    static constexpr uint32_t INDEX = 1 << 4;
-    static constexpr uint32_t REPLICATION = 1 << 5;
-
-    uint32_t svcs;
-
-    HS_SERVICE() : svcs{META} {}
-    HS_SERVICE(uint32_t val) : svcs{val} {
-        svcs |= META; // Force meta to be present always
-        if (svcs & REPLICATION) {
-            svcs |= LOG_REPLICATED | LOG_LOCAL;
-            svcs &= ~DATA; // ReplicationDataSvc or DataSvc only one of them
-        }
-    }
-
-    std::string list() const {
-        std::string str;
-        if (svcs & META) { str += "meta,"; }
-        if (svcs & DATA) { str += "data,"; }
-        if (svcs & INDEX) { str += "index,"; }
-        if (svcs & LOG_REPLICATED) { str += "log_replicated,"; }
-        if (svcs & LOG_LOCAL) { str += "log_local,"; }
-        if (svcs & REPLICATION) { str += "replication,"; }
-        return str;
-    }
-};
-
 struct hs_format_params {
     float size_pct;
     uint32_t num_chunks{1};
+    uint32_t block_size{0};
     blk_allocator_type_t alloc_type{blk_allocator_type_t::varsize};
     chunk_selector_type_t chunk_sel_type{chunk_selector_type_t::ROUND_ROBIN};
 };
@@ -191,7 +161,6 @@ public:
     uint64_t hugepage_size{0};                            // memory available for the hugepage
     bool is_read_only{false};                             // Is read only
     bool auto_recovery{true};                             // Recovery of data is automatic or controlled by the caller
-    HS_SERVICE services;                                  // Services homestore is starting with
 
 #ifdef _PRERELEASE
     bool force_reinit{false};

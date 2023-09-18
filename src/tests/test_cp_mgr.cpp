@@ -32,8 +32,6 @@ SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, test_cp_mgr, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_cp_mgr)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-blk_allocator_type_t test_common::HSTestHelper::s_ds_alloc_type;
-chunk_selector_type_t test_common::HSTestHelper::s_ds_chunk_sel_type;
 
 SISL_OPTION_GROUP(test_cp_mgr,
                   (num_records, "", "num_records", "number of record to test",
@@ -88,7 +86,7 @@ public:
 class TestCPMgr : public ::testing::Test {
 public:
     void SetUp() override {
-        test_common::HSTestHelper::start_homestore("test_cp", 85.0, 0, 0, 0, 0, nullptr, false /* restart */);
+        test_common::HSTestHelper::start_homestore("test_cp", {{HS_SERVICE::META, {.size_pct = 85.0}}});
         hs()->cp_mgr().register_consumer(cp_consumer_t::HS_CLIENT, std::move(std::make_unique< TestCPCallbacks >()));
     }
     void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }

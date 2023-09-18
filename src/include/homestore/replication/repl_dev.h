@@ -1,12 +1,11 @@
 #pragma once
 
-#include <nuraft_mesg/messaging_if.hpp>
+// #include <nuraft_mesg/messaging_if.hpp>
 #include <sisl/fds/buffer.hpp>
 
 #include <homestore/replication/repl_decls.h>
 
-namespace home_replication {
-
+namespace homestore {
 //
 // Callbacks to be implemented by ReplDev users.
 //
@@ -25,7 +24,7 @@ public:
     /// @param blkids - List of blkids where data is written to the storage engine.
     /// @param ctx - User contenxt passed as part of the replica_set::write() api
     ///
-    virtual void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key, blkid_list_t const& blkids,
+    virtual void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key, MultiBlkId const& blkids,
                            void* ctx) = 0;
 
     /// @brief Called when the log entry has been received by the replica dev.
@@ -71,7 +70,7 @@ public:
     ///
     /// @param header Header originally passed with repl_dev::write() api on the leader
     /// @return Expected to return blk_alloc_hints for this write
-    virtual blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header) = 0;
+    virtual blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header, void* user_ctx) = 0;
 
     /// @brief Called when the replica set is being stopped
     virtual void on_replica_stop() = 0;
@@ -79,6 +78,7 @@ public:
 
 class ReplDev {
 public:
+    ReplDev() = default;
     virtual ~ReplDev() = default;
 
     /// @brief Replicate the data to the replica set. This method goes through the
@@ -100,7 +100,7 @@ public:
     /// list size is 0, then only key is written to replicadev without data.
     /// @param user_ctx - User supplied opaque context which will be passed to listener
     /// callbacks
-    virtual void async_alloc_write(const sisl::blob& header, const sisl::blob& key, const sisl::sg_list& value,
+    virtual void async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
                                    void* user_ctx) = 0;
 
     /// @brief Reads the data and returns a future to continue on
@@ -109,16 +109,16 @@ public:
     /// @param size Total size of the data read
     /// @param part_of_batch Is read is part of a batch. If part of the batch, then submit_batch needs to be called at
     /// the end
-    /// @return A Future with bool to notify if it has successfully read the data, raises the exception in case of
-    /// failure
-    virtual folly::Future< bool > async_read(const BlkId& bid, sisl::sg_list& sgs, uint32_t size,
-                                             bool part_of_batch = false);
+    /// @return A Future with std::error_code to notify if it has successfully read the data or any error code in case
+    /// of failure
+    virtual folly::Future< std::error_code > async_read(MultiBlkId const& blkid, sisl::sg_list& sgs, uint32_t size,
+                                                        bool part_of_batch = false) = 0;
 
     /// @brief After data is replicated and on_commit to the listener is called. the blkids can be freed.
     ///
     /// @param lsn - LSN of the old blkids that is being freed
     /// @param blkids - blkids to be freed.
-    virtual void async_free_blks(int64_t lsn, const blkid_list_t& blkids) = 0;
+    virtual void async_free_blks(int64_t lsn, MultiBlkId const& blkid) = 0;
 
     /// @brief Checks if this replica is the leader in this ReplDev
     /// @return true or false
@@ -126,7 +126,12 @@ public:
 
     /// @brief Gets the group_id this repldev is working for
     /// @return group_id
-    virtual std::string group_id() const = 0;
+    virtual uuid_t group_id() const = 0;
+
+    virtual void attach_listener(std::unique_ptr< ReplDevListener > listener) { m_listener = std::move(listener); }
+
+protected:
+    std::unique_ptr< ReplDevListener > m_listener;
 };
 
-} // namespace home_replication
+} // namespace homestore

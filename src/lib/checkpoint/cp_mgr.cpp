@@ -26,7 +26,7 @@
 namespace homestore {
 thread_local std::stack< CP* > CPGuard::t_cp_stack;
 
-CPManager::CPManager(bool first_time_boot) :
+CPManager::CPManager() :
         m_metrics{std::make_unique< CPMgrMetrics >()},
         m_wd_cp{std::make_unique< CPWatchdog >(this)},
         m_sb{"CPSuperBlock"} {
@@ -34,15 +34,19 @@ CPManager::CPManager(bool first_time_boot) :
         "CPSuperBlock",
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { on_meta_blk_found(std::move(buf), (void*)mblk); },
         nullptr);
-    if (first_time_boot) {
-        m_sb.create(sizeof(cp_mgr_super_block));
-        create_first_cp();
-    }
 
     start_cp_thread();
 }
 
 CPManager::~CPManager() { HS_REL_ASSERT(!m_cur_cp, "CPManager is tiering down without calling shutdown"); }
+
+void CPManager::start(bool first_time_boot) {
+    if (first_time_boot) {
+        m_sb.create(sizeof(cp_mgr_super_block));
+        create_first_cp();
+        m_sb.write();
+    }
+}
 
 void CPManager::on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
     m_sb.load(buf, meta_cookie);

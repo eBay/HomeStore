@@ -24,6 +24,7 @@
 #include <sisl/settings/settings.hpp>
 #include <homestore/homestore.hpp>
 #include <homestore/index_service.hpp>
+#include <homestore/replication_service.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
 #include <iomgr/iomgr_config_generated.h>
 #include <common/homestore_assert.hpp>
@@ -71,13 +72,6 @@ inline static uint32_t generate_random_http_port() {
     return http_port;
 }
 
-class TestIndexServiceCallbacks : public IndexServiceCallbacks {
-public:
-    std::shared_ptr< IndexTableBase > on_index_table_found(const superblk< index_table_sb >& sb) override {
-        return nullptr;
-    }
-};
-
 class HSTestHelper {
 private:
     static void remove_files(const std::vector< std::string >& file_paths) {
@@ -95,24 +89,26 @@ private:
     }
 
     static std::vector< std::string > s_dev_names;
-    static blk_allocator_type_t s_ds_alloc_type;
-    static chunk_selector_type_t s_ds_chunk_sel_type;
 
 public:
-    static void set_data_svc_allocator(blk_allocator_type_t alloc_type) { s_ds_alloc_type = alloc_type; }
-    static void set_data_svc_chunk_selector(chunk_selector_type_t chunk_sel_type) {
-        s_ds_chunk_sel_type = chunk_sel_type;
-    }
+    struct test_params {
+        float size_pct{0};
+        blk_allocator_type_t blkalloc_type{blk_allocator_type_t::varsize};
+        uint32_t blk_size{0};
+        shared< ChunkSelector > custom_chunk_selector{nullptr};
+        IndexServiceCallbacks* index_svc_cbs{nullptr};
+        ReplServiceCallbacks* repl_svc_cbs{nullptr};
+        repl_impl_type repl_impl{repl_impl_type::solo};
+    };
 
+#if 0
     static void start_homestore(const std::string& test_name, float meta_pct, float data_log_pct, float ctrl_log_pct,
                                 float data_pct, float index_pct, hs_before_services_starting_cb_t cb,
                                 bool restart = false, std::unique_ptr< IndexServiceCallbacks > index_svc_cb = nullptr,
-                                bool default_data_svc_alloc_type = true) {
-        if (default_data_svc_alloc_type) {
-            set_data_svc_allocator(homestore::blk_allocator_type_t::varsize);
-            set_data_svc_chunk_selector(homestore::chunk_selector_type_t::ROUND_ROBIN);
-        }
-
+                                bool default_data_svc_alloc_type = true);
+#endif
+    static void start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
+                                hs_before_services_starting_cb_t cb = nullptr, bool restart = false) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
@@ -161,33 +157,44 @@ public:
             ioenvironment.with_http_server();
         }
 
-        if (!index_svc_cb) { index_svc_cb = std::make_unique< TestIndexServiceCallbacks >(); }
-
         const uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
         LOGINFO("Initialize and start HomeStore with app_mem_size = {}", homestore::in_bytes(app_mem_size));
 
         using namespace homestore;
-        uint32_t services = 0;
-        if (meta_pct) { services |= HS_SERVICE::META; }
-        if (data_log_pct) { services |= HS_SERVICE::LOG_REPLICATED; }
-        if (ctrl_log_pct) { services |= HS_SERVICE::LOG_LOCAL; }
-        if (data_pct) { services |= HS_SERVICE::DATA; }
-        if (index_pct) { services |= HS_SERVICE::INDEX; }
-
-        bool need_format = HomeStore::instance()->start(
-            hs_input_params{.devices = device_info, .app_mem_size = app_mem_size, .services = services}, std::move(cb),
-            std::move(index_svc_cb));
+        auto hsi = HomeStore::instance();
+        for (auto& [svc, tp] : svc_params) {
+            if (svc == HS_SERVICE::DATA) {
+                hsi->with_data_service(tp.custom_chunk_selector);
+            } else if (svc == HS_SERVICE::INDEX) {
+                hsi->with_index_service(std::unique_ptr< IndexServiceCallbacks >(tp.index_svc_cbs));
+            } else if ((svc == HS_SERVICE::LOG_REPLICATED) || (svc == HS_SERVICE::LOG_LOCAL)) {
+                hsi->with_log_service();
+            } else if (svc == HS_SERVICE::REPLICATION) {
+                hsi->with_repl_data_service(tp.repl_impl, std::unique_ptr< ReplServiceCallbacks >(tp.repl_svc_cbs),
+                                            tp.custom_chunk_selector);
+            }
+        }
+        bool need_format =
+            hsi->start(hs_input_params{.devices = device_info, .app_mem_size = app_mem_size}, std::move(cb));
 
         if (need_format) {
-            HomeStore::instance()->format_and_start(std::map< uint32_t, hs_format_params >{
-                {HS_SERVICE::META, hs_format_params{.size_pct = meta_pct}},
-                {HS_SERVICE::LOG_REPLICATED, hs_format_params{.size_pct = data_log_pct}},
-                {HS_SERVICE::LOG_LOCAL, hs_format_params{.size_pct = ctrl_log_pct}},
-                {HS_SERVICE::DATA,
-                 hs_format_params{
-                     .size_pct = data_pct, .alloc_type = s_ds_alloc_type, .chunk_sel_type = s_ds_chunk_sel_type}},
-                {HS_SERVICE::INDEX, hs_format_params{.size_pct = index_pct}},
-            });
+            hsi->format_and_start(
+                {{HS_SERVICE::META, {.size_pct = svc_params[HS_SERVICE::META].size_pct}},
+                 {HS_SERVICE::LOG_REPLICATED, {.size_pct = svc_params[HS_SERVICE::LOG_REPLICATED].size_pct}},
+                 {HS_SERVICE::LOG_LOCAL, {.size_pct = svc_params[HS_SERVICE::LOG_LOCAL].size_pct}},
+                 {HS_SERVICE::DATA,
+                  {.size_pct = svc_params[HS_SERVICE::DATA].size_pct,
+                   .alloc_type = svc_params[HS_SERVICE::DATA].blkalloc_type,
+                   .chunk_sel_type = svc_params[HS_SERVICE::DATA].custom_chunk_selector
+                       ? chunk_selector_type_t::CUSTOM
+                       : chunk_selector_type_t::ROUND_ROBIN}},
+                 {HS_SERVICE::INDEX, {.size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
+                 {HS_SERVICE::REPLICATION,
+                  {.size_pct = svc_params[HS_SERVICE::REPLICATION].size_pct,
+                   .alloc_type = svc_params[HS_SERVICE::REPLICATION].blkalloc_type,
+                   .chunk_sel_type = svc_params[HS_SERVICE::REPLICATION].custom_chunk_selector
+                       ? chunk_selector_type_t::CUSTOM
+                       : chunk_selector_type_t::ROUND_ROBIN}}});
         }
     }
 
@@ -200,10 +207,48 @@ public:
         s_dev_names.clear();
     }
 
-    static void fill_data_buf(uint8_t* buf, uint64_t size) {
-        for (uint64_t i = 0ul; i < size; ++i) {
-            *(buf + i) = (i % 256);
+    static void fill_data_buf(uint8_t* buf, uint64_t size, uint64_t pattern = 0) {
+        uint64_t* ptr = r_cast< uint64_t* >(buf);
+        for (uint64_t i = 0ul; i < size / sizeof(uint64_t); ++i) {
+            *(ptr + i) = (pattern == 0) ? i : pattern;
         }
+    }
+
+    static void validate_data_buf(uint8_t* buf, uint64_t size, uint64_t pattern = 0) {
+        uint64_t* ptr = r_cast< uint64_t* >(buf);
+        for (uint64_t i = 0ul; i < size / sizeof(uint64_t); ++i) {
+            HS_REL_ASSERT_EQ(ptr[i], ((pattern == 0) ? i : pattern), "data_buf mismatch at offset={}", i);
+        }
+    }
+
+    static sisl::sg_list create_sgs(uint64_t io_size, uint32_t blk_size, uint32_t max_size_per_iov,
+                                    std::optional< uint64_t > fill_data_pattern = std::nullopt) {
+        HS_REL_ASSERT_EQ(io_size % blk_size, 0, "io_size should be a multiple of blk_size");
+        HS_REL_ASSERT_EQ(max_size_per_iov % blk_size, 0, "max_size_per_iov should be a multiple of blk_size");
+
+        uint32_t const nblks = io_size / blk_size;
+        uint32_t const max_iov_nblks = std::min(nblks, max_size_per_iov / blk_size);
+
+        static std::random_device s_rd{};
+        static std::default_random_engine s_re{s_rd()};
+        static std::uniform_int_distribution< uint32_t > iov_nblks_generator{1u, max_iov_nblks};
+
+        sisl::sg_list sgs;
+        sgs.size = 0;
+        uint32_t remain_nblks = nblks;
+        while (remain_nblks != 0) {
+            uint32_t iov_nblks = iov_nblks_generator(s_re);
+            uint32_t iov_len = blk_size * std::min(iov_nblks, remain_nblks);
+            sgs.iovs.emplace_back(iovec{.iov_base = iomanager.iobuf_alloc(512, iov_len), .iov_len = iov_len});
+            sgs.size += iov_nblks * blk_size;
+            remain_nblks -= iov_nblks;
+
+            if (fill_data_pattern) {
+                fill_data_buf(uintptr_cast(sgs.iovs.back().iov_base), sgs.iovs.back().iov_len, *fill_data_pattern);
+            }
+        }
+
+        return sgs;
     }
 
     static bool compare(const sisl::sg_list& sg1, const sisl::sg_list& sg2) {
@@ -258,5 +303,3 @@ public:
     }
 };
 } // namespace test_common
-
-// TODO: start_homestore should be moved here and called by each testing binaries

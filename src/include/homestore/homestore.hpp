@@ -44,11 +44,14 @@ class MetaBlkService;
 class LogStoreService;
 class BlkDataService;
 class IndexService;
+class ReplicationServiceImpl;
 class IndexServiceCallbacks;
+class ReplServiceCallbacks;
 struct vdev_info;
 class HomeStore;
 class CPManager;
 class VirtualDev;
+class ChunkSelector;
 
 using HomeStoreSafePtr = std::shared_ptr< HomeStore >;
 
@@ -63,8 +66,37 @@ struct hs_vdev_context {
 };
 #pragma pack()
 
-typedef std::function< void(void) > hs_before_services_starting_cb_t;
-typedef std::function< void(bool success) > hs_comp_callback;
+using hs_before_services_starting_cb_t = std::function< void(void) >;
+
+struct HS_SERVICE {
+    static constexpr uint32_t META = 1 << 0;
+    static constexpr uint32_t LOG_REPLICATED = 1 << 1;
+    static constexpr uint32_t LOG_LOCAL = 1 << 2;
+    static constexpr uint32_t DATA = 1 << 3;
+    static constexpr uint32_t INDEX = 1 << 4;
+    static constexpr uint32_t REPLICATION = 1 << 5;
+
+    uint32_t svcs;
+
+    HS_SERVICE() : svcs{META} {}
+
+    std::string list() const {
+        std::string str;
+        if (svcs & META) { str += "meta,"; }
+        if (svcs & DATA) { str += "data,"; }
+        if (svcs & INDEX) { str += "index,"; }
+        if (svcs & LOG_REPLICATED) { str += "log_replicated,"; }
+        if (svcs & LOG_LOCAL) { str += "log_local,"; }
+        if (svcs & REPLICATION) { str += "replication,"; }
+        return str;
+    }
+};
+
+VENUM(repl_impl_type, uint8_t,
+      server_side,     // Completely homestore controlled replication
+      client_assisted, // Client assisting in replication
+      solo             // For single node - no replication
+);
 
 /*
  * IO errors handling by homestore.
@@ -82,6 +114,7 @@ private:
     std::unique_ptr< MetaBlkService > m_meta_service;
     std::unique_ptr< LogStoreService > m_log_service;
     std::unique_ptr< IndexService > m_index_service;
+    std::unique_ptr< ReplicationServiceImpl > m_repl_service;
 
     std::unique_ptr< DeviceManager > m_dev_mgr;
     shared< sisl::logging::logger_t > m_periodic_logger;
@@ -90,8 +123,7 @@ private:
     std::unique_ptr< CPManager > m_cp_mgr;
     shared< sisl::Evictor > m_evictor;
 
-    bool m_vdev_failed{false};
-
+    HS_SERVICE m_services; // Services homestore is starting with
     hs_before_services_starting_cb_t m_before_services_starting_cb{nullptr};
 
 public:
@@ -109,11 +141,14 @@ public:
     static shared< spdlog::logger >& periodic_logger() { return instance()->m_periodic_logger; }
 
     ///////////////////////////// Member functions /////////////////////////////////////////////
-    bool start(const hs_input_params& input, hs_before_services_starting_cb_t svcs_starting_cb = nullptr,
-               std::unique_ptr< IndexServiceCallbacks > cbs = nullptr);
+    HomeStore& with_data_service(cshared< ChunkSelector >& custom_chunk_selector = nullptr);
+    HomeStore& with_log_service();
+    HomeStore& with_index_service(std::unique_ptr< IndexServiceCallbacks > cbs);
+    HomeStore& with_repl_data_service(repl_impl_type repl_type, std::unique_ptr< ReplServiceCallbacks > cbs,
+                                      cshared< ChunkSelector >& custom_chunk_selector = nullptr);
 
+    bool start(const hs_input_params& input, hs_before_services_starting_cb_t svcs_starting_cb = nullptr);
     void format_and_start(std::map< uint32_t, hs_format_params >&& format_opts);
-
     void shutdown();
 
     // cap_attrs get_system_capacity() const; // Need to move this to homeblks/homeobj
@@ -124,11 +159,13 @@ public:
     bool has_data_service() const;
     bool has_meta_service() const;
     bool has_log_service() const;
+    bool has_repl_data_service() const;
 
     BlkDataService& data_service() { return *m_data_service; }
     MetaBlkService& meta_service() { return *m_meta_service; }
     LogStoreService& logstore_service() { return *m_log_service; }
     IndexService& index_service() { return *m_index_service; }
+    ReplicationServiceImpl& repl_service() { return *m_repl_service; }
     DeviceManager* device_mgr() { return m_dev_mgr.get(); }
     ResourceMgr& resource_mgr() { return *m_resource_mgr.get(); }
     CPManager& cp_mgr() { return *m_cp_mgr.get(); }
