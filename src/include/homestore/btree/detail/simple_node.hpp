@@ -147,7 +147,7 @@ public:
     }
 
     uint32_t num_entries_by_size(uint32_t start_idx, uint32_t size) const override {
-        uint32_t possible_entries = (size - 1) / get_nth_obj_size(0) + 1;
+        uint32_t possible_entries = (size == 0) ? 0 : (size - 1) / get_nth_obj_size(0) + 1;
         return std::min(possible_entries, this->total_entries() - start_idx);
     }
 
@@ -263,9 +263,9 @@ public:
 
     std::string to_string_keys(bool print_friendly = false) const override {
         std::string delimiter = print_friendly ? "\n" : "\t";
-        auto str = fmt::format("{} nEntries={} {} ",
+        auto str = fmt::format("{}{} nEntries={} {} ",
                                print_friendly ? "------------------------------------------------------------\n" : "",
-                               this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
+                               this->node_id(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
         if (!this->is_leaf() && (this->has_valid_edge())) {
             fmt::format_to(std::back_inserter(str), "edge_id={}.{}", this->edge_info().m_bnodeid,
                            this->edge_info().m_link_version);
@@ -294,16 +294,21 @@ public:
             return str;
         }
         fmt::format_to(std::back_inserter(str), "{}0 - [{}", delimiter, prev_key);
-
+        uint32_t start_interval_key = prev_key;
         for (uint32_t i{1}; i < this->total_entries(); ++i) {
             cur_key = get_nth_key< K >(i, false).key();
             if (cur_key != prev_key + 1) {
-                fmt::format_to(std::back_inserter(str), "-{}]{}{}- [{}", prev_key, delimiter, i, cur_key);
+                if (start_interval_key == prev_key) {
+                    fmt::format_to(std::back_inserter(str), "-{}]{}{}- [{}", prev_key, delimiter, i, cur_key);
+                } else {
+                    fmt::format_to(std::back_inserter(str), "]{}{}- [{}", delimiter, i, cur_key);
+                }
+                start_interval_key = cur_key;
             }
             prev_key = cur_key;
         }
 
-        if (last_key - prev_key == this->total_entries() - 1) {
+        if (start_interval_key == prev_key) {
             fmt::format_to(std::back_inserter(str), "]");
         } else {
             fmt::format_to(std::back_inserter(str), "-{}]", cur_key);

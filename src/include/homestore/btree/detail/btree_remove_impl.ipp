@@ -156,7 +156,8 @@ retry:
                 // We get the trimmed range only for leaf because this is where we will be removing keys. In interior
                 // nodes, keys are always propogated from the lower nodes.
                 bool is_inp_key_lesser = false;
-                K end_key = my_node->min_of(s_cast< const K& >(req.input_range().end_key()), curr_idx, is_inp_key_lesser);
+                K end_key =
+                    my_node->min_of(s_cast< const K& >(req.input_range().end_key()), curr_idx, is_inp_key_lesser);
                 bool end_incl = is_inp_key_lesser ? req.input_range().is_end_inclusive() : true;
                 req.trim_working_range(std::move(end_key), end_incl);
 
@@ -312,6 +313,7 @@ btree_status_t Btree< K, V >::check_collapse_root(ReqT& req) {
 
     free_node(root, locktype_t::WRITE, req.m_op_context);
     m_root_node_info = child->link_info();
+    update_new_root_info(m_root_node_info.bnode_id(), m_root_node_info.link_version());
     unlock_node(child, locktype_t::WRITE);
 
     // TODO: Have a precommit code here to notify the change in root node id
@@ -392,9 +394,9 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     // First try to see how many entries you can fit in the leftmost node within the balanced size. We are checking
     // leftmost node as special case without moving, because that is the only node which is modified in-place and hence
     // doing a dry run and if for some reason there is a problem in balancing the nodes, then it is easy to give up.
-    available_size = static_cast<int32_t> (balanced_size) - leftmost_node->occupied_size(m_bt_cfg);
+    available_size = static_cast< int32_t >(balanced_size) - leftmost_node->occupied_size(m_bt_cfg);
     src_cursor.ith_node = old_nodes.size();
-    for (uint32_t i{0}; (i < old_nodes.size() && available_size >= 0) ; ++i) {
+    for (uint32_t i{0}; (i < old_nodes.size() && available_size >= 0); ++i) {
         leftmost_src.ith_nodes.push_back(i);
         // TODO: check whether value size of the node is greater than available_size? If so nentries is 0. Suppose if a
         // node contains one entry and the value size is much bigger than available size
@@ -468,7 +470,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             post_merge_size += old_node->get_nth_obj_size(
                 std::min(leftmost_src.last_node_upto, old_node->total_entries() - 1)); // New leftmost entry
         }
-        post_merge_size -= parent_node->get_nth_obj_size(start_idx);                   // Previous left entry
+        post_merge_size -= parent_node->get_nth_obj_size(start_idx); // Previous left entry
 
         for (auto& node : new_nodes) {
             if (node->total_entries()) { post_merge_size += node->get_nth_obj_size(node->total_entries() - 1); }
@@ -526,7 +528,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
         // Finally update the leftmost node with latest key
         leftmost_node->set_next_bnode(next_node_id);
         if (leftmost_node->total_entries()) {
-            leftmost_node->inc_link_version();
+            //            leftmost_node->inc_link_version();
             parent_node->update(start_idx, leftmost_node->get_last_key< K >(), leftmost_node->link_info());
         }
 

@@ -4,6 +4,7 @@ include (${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
 include_directories (BEFORE ../include/)
 include_directories (BEFORE ../lib/)
 include_directories (BEFORE .)
+add_subdirectory(test_scripts)
 
 can_build_nonio_tests(build_nonio_tests)
 if (${build_nonio_tests})

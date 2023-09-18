@@ -65,12 +65,11 @@ private:
     // This workaround of BtreeThreadVariables is needed instead of directly declaring statics
     // to overcome the gcc bug, pointer here: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66944
     static BtreeThreadVariables* bt_thread_vars() {
-        static thread_local BtreeThreadVariables* s_ptr{nullptr};
-        if (s_ptr == nullptr) {
-            static thread_local BtreeThreadVariables inst;
-            s_ptr = &inst;
-        }
-        return s_ptr;
+        auto this_id(boost::this_fiber::get_id());
+        static thread_local std::map< fibers::fiber::id, std::unique_ptr< BtreeThreadVariables > > fiber_map;
+        if (fiber_map.count(this_id)) { return fiber_map[this_id].get(); }
+        fiber_map[this_id] = std::make_unique< BtreeThreadVariables >();
+        return fiber_map[this_id].get();
     }
 
 protected:

@@ -46,7 +46,7 @@ chunk_selector_type_t test_common::HSTestHelper::s_ds_chunk_sel_type;
 
 SISL_OPTION_GROUP(test_index_btree,
                   (num_iters, "", "num_iters", "number of iterations for rand ops",
-                   ::cxxopts::value< uint32_t >()->default_value("65536"), "number"),
+                   ::cxxopts::value< uint32_t >()->default_value("1500"), "number"),
                   (num_entries, "", "num_entries", "number of entries to test with",
                    ::cxxopts::value< uint32_t >()->default_value("15000"), "number"),
                   (seed, "", "seed", "random engine seed, use random if not defined",
@@ -340,11 +340,8 @@ private:
     }
 };
 
-// TODO sanal fix the varkey issue.
-// using BtreeTypes = testing::Types< FixedLenBtreeTest, VarKeySizeBtreeTest, VarValueSizeBtreeTest, VarObjSizeBtreeTest
-// >;
-
-using BtreeTypes = testing::Types< FixedLenBtreeTest >;
+ using BtreeTypes = testing::Types< FixedLenBtreeTest, VarKeySizeBtreeTest, VarValueSizeBtreeTest, VarObjSizeBtreeTest
+ >;
 
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 
@@ -385,13 +382,26 @@ TYPED_TEST(BtreeTest, SequentialInsert) {
     LOGINFO("Step 8: Do incorrect input and validate errors");
     this->query_validate(num_entries + 100, num_entries + 500, 5);
     this->get_any_validate(num_entries + 1, num_entries + 2);
-    this->print();
+//    this->print();
 
     LOGINFO("SequentialInsert test end");
 }
 
-// TODO fix var key lenght has some issue.
-#if 0
+TYPED_TEST(BtreeTest, RandomInsert) {
+    // Forward sequential insert
+    const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
+    std::vector< uint32_t > vec(num_entries);
+    // make keys [0, num_entries)
+    iota(vec.begin(), vec.end(), 0);
+    // shuffle keys
+    std::random_shuffle(vec.begin(), vec.end());
+    LOGINFO("Step 1: Do forward random insert for {} entries", num_entries);
+    for (uint32_t i{0}; i < num_entries; ++i) {
+        this->put(vec[i], btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    }
+    this->get_all_validate();
+}
+
 TYPED_TEST(BtreeTest, SequentialRemove) {
     LOGINFO("SequentialRemove test start");
     // Forward sequential insert
@@ -424,7 +434,28 @@ TYPED_TEST(BtreeTest, SequentialRemove) {
     this->get_specific_validate(0);
     LOGINFO("SequentialRemove test end");
 }
-#endif
+
+TYPED_TEST(BtreeTest, RandomRemove) {
+    // Forward sequential insert
+    const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
+    const auto num_iters = SISL_OPTIONS["num_iters"].as< uint32_t >();
+
+    LOGINFO("Step 1: Do forward sequential insert for {} entries", num_entries);
+    for (uint32_t i{0}; i < num_entries; ++i) {
+        this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+    }
+
+    std::vector< uint32_t > vec(num_entries);
+    iota(vec.begin(), vec.end(), 0);
+
+    // shuffle keys in [0, num_entries)
+    std::random_shuffle(vec.begin(), vec.end());
+    LOGINFO("Step 2: Do remove one by one for {} iterations", num_iters);
+    for (uint32_t i{0}; i < num_iters; ++i) {
+        this->remove_one(vec[i]);
+    }
+    this->get_all_validate();
+}
 
 TYPED_TEST(BtreeTest, RangeUpdate) {
     LOGINFO("RangeUpdate test start");
