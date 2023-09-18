@@ -4,6 +4,7 @@ include (${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
 include_directories (BEFORE ../include/)
 include_directories (BEFORE ../lib/)
 include_directories (BEFORE .)
+add_subdirectory(test_scripts)
 
 can_build_nonio_tests(build_nonio_tests)
 if (${build_nonio_tests})
@@ -36,6 +37,11 @@ if (${build_nonio_tests})
     target_link_libraries(test_mem_btree ${COMMON_TEST_DEPS} GTest::gtest)
     add_test(NAME MemBtree COMMAND test_mem_btree)
 
+    set(TEST_INDEXBTREE_SOURCE_FILES test_index_btree.cpp)
+    add_executable(test_index_btree ${TEST_INDEXBTREE_SOURCE_FILES})
+    target_link_libraries(test_index_btree homestore ${COMMON_TEST_DEPS} GTest::gtest)
+    add_test(NAME IndexBtree COMMAND test_index_btree)
+
     add_executable(test_blk_read_tracker)
     target_sources(test_blk_read_tracker PRIVATE test_blk_read_tracker.cpp ../lib/blkdata_svc/blk_read_tracker.cpp ../lib/blkalloc/blk.cpp)
     target_link_libraries(test_blk_read_tracker ${COMMON_TEST_DEPS} GTest::gtest)
@@ -59,11 +65,6 @@ endif()
 
 can_build_io_tests(io_tests)
 if (${io_tests})
-
-    set(TEST_INDEXBTREE_SOURCE_FILES test_index_btree.cpp)
-    add_executable(test_index_btree ${TEST_INDEXBTREE_SOURCE_FILES})
-    target_link_libraries(test_index_btree homestore ${COMMON_TEST_DEPS} GTest::gtest)
-    add_test(NAME IndexBtree COMMAND test_index_btree)
 
     add_executable(test_data_service)
     target_sources(test_data_service PRIVATE test_data_service.cpp)
