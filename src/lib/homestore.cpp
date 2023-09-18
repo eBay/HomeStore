@@ -234,6 +234,7 @@ void HomeStore::shutdown() {
     m_dev_mgr->close_devices();
     m_dev_mgr.reset();
     m_cp_mgr->shutdown();
+    m_cp_mgr.reset();
 
     HomeStore::reset_instance();
     LOGINFO("Homestore is completed its shutdown");

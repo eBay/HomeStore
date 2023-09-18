@@ -66,7 +66,10 @@ void CPManager::shutdown() {
     delete (cp);
     rcu_xchg_pointer(&m_cur_cp, nullptr);
     m_metrics.reset();
-    m_wd_cp->stop();
+    if (m_wd_cp) {
+        m_wd_cp->stop();
+        m_wd_cp.reset();
+    }
 }
 
 void CPManager::register_consumer(cp_consumer_t consumer_id, std::unique_ptr< CPCallbacks > callbacks) {

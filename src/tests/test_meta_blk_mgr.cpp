@@ -451,8 +451,12 @@ public:
     }
 
     void recover() {
+        // TODO: This scan_blks and recover should be replaced with actual TestHelper::start_homestore with restart
+        // on. That way, we don't need to simulate all these calls here
         // do recover and callbacks will be triggered;
         m_cb_blks.clear();
+        hs()->cp_mgr().shutdown();
+        hs()->cp_mgr().start(false /* first_time_boot */);
         m_mbm->recover(false);
     }
 
