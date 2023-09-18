@@ -184,19 +184,20 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
         Chunk* chunk;
         size_t attempt{0};
 
-        do {
-            chunk = m_chunk_selector->select_chunk(nblks, hints).get();
-            if (chunk == nullptr) {
-                status = BlkAllocStatus::SPACE_FULL;
-                break;
-            }
+        if (hints.chunk_id_hint) {
+            // this is a target-chunk allocation;
+            chunk = m_dmgr.get_chunk_mutable(*(hints.chunk_id_hint));
+            status = alloc_blk_from_chunk(nblks, hints, out_blkid, chunk);
+            // don't look for other chunks because user wants allocation on chunk_id_hint only;
+        } else {
+            do {
+                chunk = m_chunk_selector->select_chunk(nblks, hints).get();
+                if (chunk == nullptr) { status = BlkAllocStatus::SPACE_FULL; }
 
-            status = alloc_blks_from_chunk(nblks, hints, out_blkid, chunk);
-            if ((status == BlkAllocStatus::SUCCESS) || !hints.can_look_for_other_chunk ||
-                (status == BlkAllocStatus::PARTIAL && hints.partial_alloc_ok)) {
-                break;
-            }
-        } while (++attempt < m_all_chunks.size());
+                status = alloc_blk_from_chunk(nblks, hints, out_blkid, chunk);
+                if (status == BlkAllocStatus::SUCCESS || !hints.can_look_for_other_chunk) { break; }
+            } while (++attempt < m_all_chunks.size());
+        }
 
         if ((status != BlkAllocStatus::SUCCESS) || (status != BlkAllocStatus::PARTIAL)) {
             LOGERROR("nblks={} failed to alloc after trying to alloc on every chunks {} and devices {}.", nblks);
