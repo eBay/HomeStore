@@ -32,18 +32,19 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_form
     if (need_format) {
         m_freeable_nblks = available_blks();
         m_last_append_offset = 0;
-
-        for (uint8_t i = 0; i < m_sb.size(); ++i) {
-            m_sb[i].set_name(get_name());
-            m_sb[i].create(sizeof(append_blkalloc_ctx));
-            m_sb[i]->is_dirty = false;
-            m_sb[i]->allocator_id = id;
-            m_sb[i]->last_append_offset = 0;
-            m_sb[i]->freeable_nblks = m_freeable_nblks;
-        }
     }
 
-    // for recovery boot, fields should be recovered from metablks;
+    // for both fresh start and recovery, firstly init m_sb fields;
+    for (uint8_t i = 0; i < m_sb.size(); ++i) {
+        m_sb[i].set_name(get_name());
+        m_sb[i].create(sizeof(append_blkalloc_ctx));
+        m_sb[i]->is_dirty = false;
+        m_sb[i]->allocator_id = id;
+        m_sb[i]->last_append_offset = 0;
+        m_sb[i]->freeable_nblks = m_freeable_nblks;
+    }
+
+    // for recovery boot, fields will also be recovered from metablks;
 }
 
 void AppendBlkAllocator::on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {

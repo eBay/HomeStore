@@ -228,8 +228,6 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
     blk_count_t nblks_remain = nblks;
     BlkAllocStatus status;
 
-    HS_REL_ASSERT(h.chunk_id_hint, "Not expecting to received targetd chunk allocation in this function. ");
-
     do {
         out_blkids.emplace_back(); // Put an empty MultiBlkId and use that for allocating them
         BlkId& out_bid = out_blkids.back();
