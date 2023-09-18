@@ -177,6 +177,7 @@ struct blk_alloc_hints {
 
     blk_temp_t desired_temp;       // Temperature hint for the device
     uint32_t dev_id_hint;          // which physical device to pick (hint if any) -1 for don't care
+    uint32_t chunk_id_hint;          // which chunk to pick (hint if any) -1 for don't care
     bool can_look_for_other_chunk; // If alloc on device not available can I pick other device
     bool is_contiguous;
     uint32_t multiplier;         // blks allocated in a blkid should be a multiple of multiplier
