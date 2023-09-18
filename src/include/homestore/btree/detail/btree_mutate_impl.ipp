@@ -523,7 +523,7 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const 
     }
     BT_NODE_LOG(TRACE, parent_node, "Available space for split entry={}", parent_node->available_size(m_bt_cfg));
 
-//    child_node1->inc_link_version();
+    // child_node1->inc_link_version();
 
     // Update the existing parent node entry to point to second child ptr.
     parent_node->update(parent_ind, child_node2->link_info());

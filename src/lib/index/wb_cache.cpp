@@ -222,6 +222,7 @@ std::unique_ptr< CPContext > IndexWBCache::create_cp_context(cp_id_t cp_id) {
 void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, const IndexBufferPtr& buf, bool part_of_batch) {
     LOGTRACEMOD(wbcache, "buf {}", buf->to_string());
     buf->m_buf_state = index_buf_state_t::FLUSHING;
+
     m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid, part_of_batch)
         .thenValue([pbuf = buf.get(), cp_ctx](auto) {
             auto& pthis = s_cast< IndexWBCache& >(wb_cache()); // Avoiding more than 16 bytes capture

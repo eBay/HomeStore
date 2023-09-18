@@ -117,7 +117,7 @@ struct BtreeTest : public testing::Test {
         m_bt_cfg->m_leaf_node_type = T::leaf_node_type;
         m_bt_cfg->m_int_node_type = T::interior_node_type;
         // TODO fix. SequentialRemove failing in case of VarObj test.
-        m_bt_cfg->m_merge_turned_on = false;
+        m_bt_cfg->m_merge_turned_on = true;
 
         auto uuid = boost::uuids::random_generator()();
         auto parent_uuid = boost::uuids::random_generator()();
@@ -311,14 +311,32 @@ struct BtreeTest : public testing::Test {
     }
 
     void compare_files(const std::string& before, const std::string& after) {
-        std::ifstream b(before);
-        std::ifstream a(after);
-        std::ostringstream ss_before, ss_after;
-        ss_before << b.rdbuf();
-        ss_after << a.rdbuf();
-        std::string s1 = ss_before.str();
-        std::string s2 = ss_after.str();
-        ASSERT_EQ(s1, s2) << "Mismatch in btree structure";
+        std::ifstream b(before, std::ifstream::ate);
+        std::ifstream a(after, std::ifstream::ate);
+        if (a.fail() || b.fail()) {
+            LOGINFO("Failed to open file");
+            assert(false);
+        }
+        if (a.tellg() != b.tellg()) {
+            LOGINFO("Mismatch in btree files");
+            assert(false);
+        }
+
+        int64_t pending = a.tellg();
+        const int64_t batch_size = 4096;
+        a.seekg(0, ifstream::beg);
+        b.seekg(0, ifstream::beg);
+        char a_buffer[batch_size], b_buffer[batch_size];
+        while (pending > 0) {
+            auto count = std::min(pending, batch_size);
+            a.read(a_buffer, count);
+            b.read(b_buffer, count);
+            if (std::memcmp(a_buffer, b_buffer, count) != 0) {
+                LOGINFO("Mismatch in btree files");
+                assert(false);
+            }
+            pending -= count;
+        }
     }
 
 private:
@@ -495,6 +513,12 @@ TYPED_TEST(BtreeTest, CpFlush) {
     for (uint32_t i = 0; i < num_entries; ++i) {
         this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
     }
+
+    // Remove some of the entries.
+    for (uint32_t i = 0; i < num_entries; i += 10) {
+        this->remove_one(i);
+    }
+
     LOGINFO("Query {} entries and validate with pagination of 75 entries", num_entries / 2);
     this->query_validate(0, num_entries / 2 - 1, 75);
 
@@ -574,24 +598,40 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
     LOGINFO("ThreadedCpFlush test start");
 
     const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
-    bool stop_cp_flush = false;
-    auto io_thread = std::thread([this, num_entries] {
+    bool stop = false;
+    std::atomic<uint32_t> last_index{0};
+    auto insert_io_thread = std::thread([this, num_entries, &last_index] {
         LOGINFO("Do Forward sequential insert for {} entries", num_entries);
+        uint32_t j = 0;
         for (uint32_t i = 0; i < num_entries; ++i) {
             this->put(i, btree_put_type::INSERT_ONLY_IF_NOT_EXISTS);
+            last_index = i;
         }
     });
 
-    auto cp_flush_thread = std::thread([this, &stop_cp_flush] {
-        while (!stop_cp_flush) {
+    auto remove_io_thread = std::thread([this, &stop, num_entries, &last_index] {
+        LOGINFO("Do random removes for {} entries", num_entries);
+        while(!stop) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+            // Remove a random entry.
+            std::uniform_int_distribution< uint32_t > rand{0, last_index.load()};
+            auto rm_idx = rand(g_re);
+            LOGINFO("Removing entry {}", rm_idx);
+            this->remove_one(rm_idx);
+        }
+    });
+
+    auto cp_flush_thread = std::thread([this, &stop] {
+        while (!stop) {
+            std::this_thread::sleep_for(std::chrono::seconds{1});
             LOGINFO("Trigger checkpoint flush wait=false.");
             test_common::HSTestHelper::trigger_cp(false /* wait */);
-            std::this_thread::sleep_for(std::chrono::seconds{1});
         }
     });
 
-    io_thread.join();
-    stop_cp_flush = true;
+    insert_io_thread.join();
+    stop = true;
+    remove_io_thread.join();
     cp_flush_thread.join();
 
     LOGINFO("Trigger checkpoint flush wait=true.");

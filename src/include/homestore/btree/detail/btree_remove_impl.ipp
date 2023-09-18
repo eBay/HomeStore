@@ -583,11 +583,13 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             ++idx;
         }
 #endif
-
-        transact_write_nodes(new_nodes, leftmost_node, parent_node, context);
     }
 
 out:
+    if (ret == btree_status_t::success || ret == btree_status_t::merge_not_required) {
+        transact_write_nodes(new_nodes, leftmost_node, parent_node, context);
+    }
+
     // Do free/unlock based on success/failure in reverse order
     if (ret == btree_status_t::success) {
         for (auto& node : old_nodes) {
