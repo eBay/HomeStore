@@ -27,5 +27,7 @@ blk_num_t VChunk::available_blks() const { return m_internal_chunk->blk_allocato
 
 uint32_t VChunk::get_pdev_id() const { return m_internal_chunk->physical_dev()->pdev_id(); }
 
+uint16_t VChunk::get_chunk_id() const { return m_internal_chunk->chunk_id(); }
+
 cshared< Chunk > VChunk::get_internal_chunk() const { return m_internal_chunk; }
 } // namespace homestore
