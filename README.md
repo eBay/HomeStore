@@ -12,20 +12,24 @@ model throughout making it easy to extend the functionality to tune to specific 
 A reference Object *StorageSolution* can be found in [HomeObject](https://github.com/eBay/HomeObject).
 
 ## Building Blocks
-Several building blocks are provided by Homestore that should satisfy the majority cases for custom any given storage
+Several building blocks are provided by Homestore that should satisfy the majority cases for any given storage
 solution. Each "service" provides a crash-resilient and persistent form of familiar data structures.
 
-### MetaSvc (Map)
-// TODO
+### MetaSvc (std::map)
+K/V store that avoids _torn pages_. Used to store recovery information (e.g. Superblocks) to re-initialize application
+state after reboot.
 
-### DataSvc (Heap)
-// TODO
+### DataSvc (new/delete)
+Free flat-allocation space. Hooks are provided if a particular allocation pattern (e.g. Heap) is desirable.
 
-### IndexSvc (HashMap)
-// TODO
+### IndexSvc (std::unordered_map)
+A B+Tree used to optimize for *FAST* Reads.  Value is typically the result of allocation from the DataSvc.
 
-### LogSvc (Circular Buffer)
-// TODO
+### LogSvc (std::list)
+Random Access ciruclar buffer. Typically not used directly but levaraged by other Services to provide crash-resiliency.
+
+### ReplicationSvc
+An abstraction on DataSvc that replicates between application instances.
 
 ## Building
 
