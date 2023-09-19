@@ -70,7 +70,21 @@ public:
     virtual void SetUp() override {
         test_common::HSTestHelper::set_data_svc_allocator(homestore::blk_allocator_type_t::append);
         test_common::HSTestHelper::set_data_svc_chunk_selector(homestore::chunk_selector_type_t::HEAP);
+
+        test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0 /* meta */, 0 /* data_log */,
+                                                   0 /* ctrl_log */, 80.0 /* data */, 0 /* index */, nullptr,
+                                                   false /* recovery */, nullptr, false /* default ds type */);
     }
+
+    virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
+
+    void restart_homestore() {
+        test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0, 0, 0, 80.0, 0,
+                                                   nullptr /* before_svc_start_cb */, true /* restart */,
+                                                   nullptr /* indx_svc_cb */, false /* default ds type */);
+    }
+
+    void reset_io_job_done() { m_io_job_done = false; }
 
     void finish_and_notify() {
         {
@@ -186,11 +200,6 @@ private:
 };
 
 TEST_F(AppendBlkAllocatorTest, TestBasicWrite) {
-    LOGINFO("Step 0: Starting homestore.");
-    test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0 /* meta */, 0 /* data_log */,
-                                               0 /* ctrl_log */, 80.0 /* data */, 0 /* index */, nullptr,
-                                               false /* recovery */, nullptr, false /* default ds type */);
-
     // start io in worker thread;
     const auto io_size = 4 * Ki;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
@@ -200,48 +209,34 @@ TEST_F(AppendBlkAllocatorTest, TestBasicWrite) {
     wait_for_all_io_complete();
 
     LOGINFO("Step 3: I/O completed, do shutdown.");
-    test_common::HSTestHelper::shutdown_homestore();
 }
 
 TEST_F(AppendBlkAllocatorTest, TestWriteThenReadVerify) {
-    LOGINFO("Step 0: Starting homestore.");
-    test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0, 0, 0, 80.0, 0, nullptr, false, nullptr,
-                                               false /* default ds type */);
-
     // start io in worker thread;
     auto io_size = 4 * Ki;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker, [this, io_size]() { this->write_io_verify(io_size); });
 
-    LOGINFO("Step 3: Wait for I/O to complete.");
+    LOGINFO("Step 2: Wait for I/O to complete.");
     wait_for_all_io_complete();
 
-    LOGINFO("Step 4: I/O completed, do shutdown.");
-    test_common::HSTestHelper::shutdown_homestore();
+    LOGINFO("Step 3: I/O completed, do shutdown.");
 }
 
 TEST_F(AppendBlkAllocatorTest, TestWriteThenFreeBlk) {
-    LOGINFO("Step 0: Starting homestore.");
-    test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0, 0, 0, 80.0, 0, nullptr, false, nullptr,
-                                               false /* default ds type */);
-
     // start io in worker thread;
     auto io_size = 4 * Mi;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes, then free blk.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
                             [this, io_size]() { this->write_io_free_blk(io_size); });
 
-    LOGINFO("Step 3: Wait for I/O to complete.");
+    LOGINFO("Step 2: Wait for I/O to complete.");
     wait_for_all_io_complete();
 
-    LOGINFO("Step 4: I/O completed, do shutdown.");
-    test_common::HSTestHelper::shutdown_homestore();
+    LOGINFO("Step 3: I/O completed, do shutdown.");
 }
 
 TEST_F(AppendBlkAllocatorTest, TestCPFlush) {
-    LOGINFO("Step 0: Starting homestore.");
-    test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0, 0, 0, 80.0, 0, nullptr, false, nullptr,
-                                               false /* default ds type */);
     const auto io_size = 4 * Ki;
     LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes.", io_size);
     iomanager.run_on_forget(iomgr::reactor_regex::random_worker, [this, io_size]() { this->write_io(io_size); });
@@ -249,10 +244,43 @@ TEST_F(AppendBlkAllocatorTest, TestCPFlush) {
     LOGINFO("Step 2: Wait for I/O to complete.");
     wait_for_all_io_complete();
 
+    LOGINFO("Step 3: I/O completed, trigger_cp and wait.");
     test_common::HSTestHelper::trigger_cp(true /* wait */);
 
-    LOGINFO("Step 4: I/O completed, do shutdown.");
-    test_common::HSTestHelper::shutdown_homestore();
+    LOGINFO("Step 4: cp completed, do shutdown.");
+}
+
+TEST_F(AppendBlkAllocatorTest, TestWriteThenRecovey) {
+    // start io in worker thread;
+    auto io_size = 4 * Mi;
+    LOGINFO("Step 1: run on worker thread to schedule write for {} Bytes, then free blk.", io_size);
+    iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
+                            [this, io_size]() { this->write_io_free_blk(io_size); });
+
+    LOGINFO("Step 2: Wait for I/O to complete.");
+    wait_for_all_io_complete();
+
+    LOGINFO("Step 3: I/O completed, trigger_cp and wait.");
+    test_common::HSTestHelper::trigger_cp(true /* wait */);
+
+    LOGINFO("Step 4: cp completed, restart homestore.");
+    this->restart_homestore();
+
+    std::this_thread::sleep_for(std::chrono::seconds{3});
+    LOGINFO("Step 5: Restarted homestore with data service recovered");
+
+    this->reset_io_job_done();
+
+    LOGINFO("Step 6: run on worker thread to schedule write for {} Bytes.", io_size);
+    iomanager.run_on_forget(iomgr::reactor_regex::random_worker, [this, io_size]() { this->write_io(io_size); });
+
+    LOGINFO("Step 7: Wait for I/O to complete.");
+    wait_for_all_io_complete();
+
+    LOGINFO("Step 8: I/O completed, trigger_cp and wait.");
+    test_common::HSTestHelper::trigger_cp(true /* wait */);
+
+    LOGINFO("Step 9: do shutdown. ");
 }
 
 SISL_OPTION_GROUP(test_append_blkalloc,
