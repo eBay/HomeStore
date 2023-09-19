@@ -33,7 +33,7 @@ struct append_blkalloc_ctx {
     uint64_t magic{append_blkalloc_sb_magic};
     uint32_t version{append_blkalloc_sb_version};
     bool is_dirty; // this field is needed for cp_flush, but not necessarily needed for persistence;
-    uint64_t allocator_id;
+    allocator_id_t allocator_id;
     blk_num_t freeable_nblks;
     blk_num_t last_append_offset;
 };
@@ -67,7 +67,7 @@ public:
 //
 class AppendBlkAllocator : public BlkAllocator {
 public:
-    AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_format, chunk_num_t id = 0);
+    AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_format, allocator_id_t id = 0);
 
     AppendBlkAllocator(const AppendBlkAllocator&) = delete;
     AppendBlkAllocator(AppendBlkAllocator&&) noexcept = delete;
