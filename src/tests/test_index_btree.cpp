@@ -298,7 +298,7 @@ struct BtreeTest : public testing::Test {
 
     void destroy_btree() {
         auto cpg = hs()->cp_mgr().cp_guard();
-        auto op_context = (void*)cpg->context(cp_consumer_t::INDEX_SVC);
+        auto op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
         const auto [ret, free_node_cnt] = m_bt->destroy_btree(op_context);
         ASSERT_EQ(ret, btree_status_t::success) << "btree destroy failed";
         m_bt.reset();

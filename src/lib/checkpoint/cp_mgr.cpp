@@ -296,6 +296,7 @@ CPGuard CPGuard::operator=(const CPGuard& other) {
 
 CP& CPGuard::operator*() { return *get(); }
 CP* CPGuard::operator->() { return get(); }
+CPContext* CPGuard::context(cp_consumer_t consumer) { return get()->context(consumer); }
 
 CP* CPGuard::get() {
     HS_DBG_ASSERT_NE((void*)m_cp, (void*)nullptr, "CPGuard get on empty CP pointer");

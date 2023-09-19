@@ -22,8 +22,7 @@
 #include <homestore/superblk_handler.hpp>
 #include <homestore/index_service.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
-#include "checkpoint/cp.hpp"
-#include "index/wb_cache.hpp"
+#include <homestore/index/wb_cache_base.hpp>
 
 SISL_LOGGING_DECL(wbcache)
 
@@ -56,7 +55,7 @@ public:
 
     btree_status_t init() {
         auto cp = hs()->cp_mgr().cp_guard();
-        auto ret = Btree< K, V >::init((void*)cp->context(cp_consumer_t::INDEX_SVC));
+        auto ret = Btree< K, V >::init((void*)cp.context(cp_consumer_t::INDEX_SVC));
         update_new_root_info(Btree< K, V >::root_node_id(), Btree< K, V >::root_link_version());
         return ret;
     }
@@ -77,14 +76,14 @@ public:
     template < typename ReqT >
     btree_status_t put(ReqT& put_req) {
         auto cpg = hs()->cp_mgr().cp_guard();
-        put_req.m_op_context = (void*)cpg->context(cp_consumer_t::INDEX_SVC);
+        put_req.m_op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
         return Btree< K, V >::put(put_req);
     }
 
     template < typename ReqT >
     btree_status_t remove(ReqT& remove_req) {
         auto cpg = hs()->cp_mgr().cp_guard();
-        remove_req.m_op_context = (void*)cpg->context(cp_consumer_t::INDEX_SVC);
+        remove_req.m_op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
         return Btree< K, V >::remove(remove_req);
     }
 
