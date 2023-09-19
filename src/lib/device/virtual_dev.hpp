@@ -93,7 +93,6 @@ protected:
     sisl::sparse_vector< shared< Chunk > > m_all_chunks; // All chunks part of this vdev
     std::unique_ptr< ChunkSelector > m_chunk_selector;   // Instance of chunk selector
     blk_allocator_type_t m_allocator_type;
-    chunk_selector_type_t m_chunk_selector_type;
     bool m_auto_recovery;
 
 public:

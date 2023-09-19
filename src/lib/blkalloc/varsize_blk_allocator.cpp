@@ -703,6 +703,30 @@ blk_count_t VarsizeBlkAllocator::free_blks_direct(MultiBlkId const& bid) {
     return n_freed;
 }
 
+bool VarsizeBlkAllocator::is_blk_alloced(BlkId const& b, bool use_lock) const {
+    if (!m_inited) { return true; }
+    auto bits_set{[this, &b]() {
+        // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache
+        // bm.
+        if (!m_cache_bm->is_bits_set(b.blk_num(), b.blk_count())) {
+            BLKALLOC_REL_ASSERT(0, "Expected bits to set");
+            return false;
+        }
+        return true;
+    }};
+    if (use_lock) {
+        BlkAllocPortion const& portion = blknum_to_portion_const(b.blk_num());
+        auto lock{portion.portion_auto_lock()};
+        if (!bits_set()) return false;
+    } else {
+        if (!bits_set()) return false;
+    }
+    return true;
+}
+
+blk_num_t VarsizeBlkAllocator::available_blks() const { return get_total_blks() - get_used_blks(); }
+blk_num_t VarsizeBlkAllocator::get_used_blks() const { return get_alloced_blk_count(); }
+
 bool VarsizeBlkAllocator::is_blk_alloced(BlkId const& bid, bool use_lock) const {
     if (!m_inited) { return true; }
 
