@@ -91,13 +91,14 @@ protected:
     std::mutex m_mgmt_mutex;          // Any mutex taken for management operations (like adding/removing chunks).
     std::set< PhysicalDev* > m_pdevs; // PDevs this vdev is working on
     sisl::sparse_vector< shared< Chunk > > m_all_chunks; // All chunks part of this vdev
-    std::unique_ptr< ChunkSelector > m_chunk_selector;   // Instance of chunk selector
+    std::shared_ptr< ChunkSelector > m_chunk_selector;   // Instance of chunk selector
     blk_allocator_type_t m_allocator_type;
     chunk_selector_type_t m_chunk_selector_type;
     bool m_auto_recovery;
 
 public:
-    VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, vdev_event_cb_t event_cb, bool is_auto_recovery);
+    VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, vdev_event_cb_t event_cb, bool is_auto_recovery,
+               shared< ChunkSelector > custom_chunk_selector = nullptr);
 
     VirtualDev(VirtualDev const& other) = delete;
     VirtualDev& operator=(VirtualDev const& other) = delete;

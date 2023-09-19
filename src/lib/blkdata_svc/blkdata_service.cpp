@@ -57,24 +57,12 @@ void BlkDataService::create_vdev(uint64_t size, uint32_t blk_size, blk_allocator
 
 // both first_time_boot and recovery path will come here
 shared< VirtualDev > BlkDataService::open_vdev(const vdev_info& vinfo, bool load_existing) {
-    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, nullptr, true /* auto_recovery */);
+    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, nullptr, true /* auto_recovery */,
+                                            std::move(m_custom_chunk_selector));
     m_blk_size = vinfo.blk_size;
     return m_vdev;
 }
 
-static auto collect_all_futures(std::vector< folly::Future< std::error_code > >& futs) {
-    return folly::collectAllUnsafe(futs).thenValue([](auto&& vf) {
-        for (auto const& err_c : vf) {
-            if (sisl_unlikely(err_c.value())) {
-                auto ec = err_c.value();
-                return folly::makeFuture< std::error_code >(std::move(ec));
-            }
-        }
-        return folly::makeFuture< std::error_code >(std::error_code{});
-    });
-}
-
-folly::Future< std::error_code > BlkDataService::async_read(MultiBlkId const& blkid, uint8_t* buf, uint32_t size,
 static auto collect_all_futures(std::vector< folly::Future< std::error_code > >& futs) {
     return folly::collectAllUnsafe(futs).thenValue([](auto&& vf) {
         for (auto const& err_c : vf) {
