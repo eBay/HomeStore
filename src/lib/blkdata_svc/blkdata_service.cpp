@@ -70,6 +70,19 @@ static auto collect_all_futures(std::vector< folly::Future< std::error_code > >&
 }
 
 folly::Future< std::error_code > BlkDataService::async_read(MultiBlkId const& blkid, uint8_t* buf, uint32_t size,
+static auto collect_all_futures(std::vector< folly::Future< std::error_code > >& futs) {
+    return folly::collectAllUnsafe(futs).thenValue([](auto&& vf) {
+        for (auto const& err_c : vf) {
+            if (sisl_unlikely(err_c.value())) {
+                auto ec = err_c.value();
+                return folly::makeFuture< std::error_code >(std::move(ec));
+            }
+        }
+        return folly::makeFuture< std::error_code >(std::error_code{});
+    });
+}
+
+folly::Future< std::error_code > BlkDataService::async_read(MultiBlkId const& blkid, uint8_t* buf, uint32_t size,
                                                             bool part_of_batch) {
     auto do_read = [this](BlkId const& bid, uint8_t* buf, uint32_t size, bool part_of_batch) {
         m_blk_read_tracker->insert(bid);
@@ -88,9 +101,7 @@ folly::Future< std::error_code > BlkDataService::async_read(MultiBlkId const& bl
 
         auto it = blkid.iterate();
         while (auto const bid = it.next()) {
-            uint32_t sz = bid->blk_count() * m_blk_size;
-            s_futs.emplace_back(do_read(*bid, buf, sz, part_of_batch));
-            buf += sz;
+            s_futs.emplace_back(do_read(*bid, buf, size, part_of_batch));
         }
 
         return collect_all_futures(s_futs);
