@@ -79,6 +79,7 @@ Harihara Kadayam hkadayam@ebay.com
 Copyright 2021 eBay Inc.
 
 Primary Author: Harihara Kadayam
+
 Primary Developers:
 [Harihara Kadayam](https://github.com/hkadayam),
 [Yaming Kuang](https://github.com/yamingk),
