@@ -31,6 +31,10 @@ Random Access ciruclar buffer. Typically not used directly but levaraged by othe
 ### ReplicationSvc
 An abstraction on DataSvc that replicates between application instances.
 
+## Application Diagram
+
+![HomeObject Overview](docs/imgs/HomeStore.png)
+
 ## Building
 
 ### System Pre-requisites
