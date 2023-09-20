@@ -5,9 +5,9 @@
 Homestore is a generic *StorageEngine* upon which different *StorageSolution*s can be built. These Solutions can model
 Block, K/V, Object or Database *StorageInterface*s.
 
-The architecture is tuned towards modern storage devices and systems programming leveraging the "run to complete" model
-provide by [IOManager](https://github.com/eBay/IOManager) to provide maximum performance. Homestore has a pluggable
-model throughout making it easy to extend the functionality to tune to specific use cases or data patterns.
+The architecture is tuned towards modern storage devices and systems programming leveraging the "run to completion"
+model provided by [IOManager](https://github.com/eBay/IOManager) to achieve "light-speed" performance. Homestore has a
+pluggable model throughout making it easy to extend the functionality, tuned to specific use cases or data patterns.
 
 A reference Object *StorageSolution* can be found in [HomeObject](https://github.com/eBay/HomeObject).
 
@@ -16,20 +16,20 @@ Several building blocks are provided by Homestore that should satisfy the majori
 solution. Each "service" provides a crash-resilient and persistent form of familiar data structures.
 
 ### MetaSvc (std::map)
-K/V store that avoids _torn pages_. Used to store recovery information (e.g. Superblocks) to re-initialize application
+K/V store that avoids _torn pages_. Used to store state information (e.g. Superblocks) which re-initialize application
 state after reboot.
+
+### IndexSvc (std::unordered_map)
+A B+Tree used to optimize for *FAST* Reads. Value is typically the result of allocation from the ReplicationSvc.
+
+### ReplicationSvc
+An abstraction on DataSvc that replicates between application instances.
 
 ### DataSvc (new/delete)
 Free flat-allocation space. Hooks are provided if a particular allocation pattern (e.g. Heap) is desirable.
 
-### IndexSvc (std::unordered_map)
-A B+Tree used to optimize for *FAST* Reads.  Value is typically the result of allocation from the DataSvc.
-
 ### LogSvc (std::list)
-Random Access ciruclar buffer. Typically not used directly but levaraged by other Services to provide crash-resiliency.
-
-### ReplicationSvc
-An abstraction on DataSvc that replicates between application instances.
+Random Access circular buffer. Typically not used directly but levaraged by other Services to provide crash-resiliency.
 
 ## Application Diagram
 
