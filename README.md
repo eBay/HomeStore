@@ -79,7 +79,10 @@ Harihara Kadayam hkadayam@ebay.com
 Copyright 2021 eBay Inc.
 
 Primary Author: Harihara Kadayam
-Primary Developers: Harihara Kadayam, Rishabh Mittal, Yaming Kuang, Brian Szmyd
+Primary Developers:
+[Harihara Kadayam](https://github.com/hkadayam),
+[Yaming Kuang](https://github.com/yamingk),
+[Brian Szmyd](https://github.com/szmyd)
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the
 License. You may obtain a copy of the License at https://www.apache.org/licenses/LICENSE-2.0.
