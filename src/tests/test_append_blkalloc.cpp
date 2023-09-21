@@ -72,6 +72,16 @@ public:
              {HS_SERVICE::DATA, {.size_pct = 80.0, .blkalloc_type = homestore::blk_allocator_type_t::append}}});
     }
 
+    virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
+
+    void restart_homestore() {
+        test_common::HSTestHelper::start_homestore(
+            "test_append_blkalloc",
+            {{HS_SERVICE::META, {.size_pct = 5.0}},
+             {HS_SERVICE::DATA, {.size_pct = 80.0, .blkalloc_type = homestore::blk_allocator_type_t::append}}},
+            nullptr /* before_svc_start_cb */, true /* restart */);
+    }
+
     void reset_io_job_done() { m_io_job_done = false; }
 
     void finish_and_notify() {
