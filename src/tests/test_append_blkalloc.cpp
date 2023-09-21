@@ -49,8 +49,6 @@ SISL_OPTIONS_ENABLE(logging, test_append_blkalloc, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_append_blkalloc)
 
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-blk_allocator_type_t test_common::HSTestHelper::s_ds_alloc_type;
-chunk_selector_type_t test_common::HSTestHelper::s_ds_chunk_sel_type;
 
 constexpr uint64_t Ki{1024};
 constexpr uint64_t Mi{Ki * Ki};
@@ -68,20 +66,20 @@ public:
     BlkDataService& inst() { return homestore::data_service(); }
 
     virtual void SetUp() override {
-        test_common::HSTestHelper::set_data_svc_allocator(homestore::blk_allocator_type_t::append);
-        test_common::HSTestHelper::set_data_svc_chunk_selector(homestore::chunk_selector_type_t::HEAP);
-
-        test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0 /* meta */, 0 /* data_log */,
-                                                   0 /* ctrl_log */, 80.0 /* data */, 0 /* index */, nullptr,
-                                                   false /* recovery */, nullptr, false /* default ds type */);
+        test_common::HSTestHelper::start_homestore(
+            "test_append_blkalloc",
+            {{HS_SERVICE::META, {.size_pct = 5.0}},
+             {HS_SERVICE::DATA, {.size_pct = 80.0, .blkalloc_type = homestore::blk_allocator_type_t::append}}});
     }
 
     virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
 
     void restart_homestore() {
-        test_common::HSTestHelper::start_homestore("test_append_blkalloc", 5.0, 0, 0, 80.0, 0,
-                                                   nullptr /* before_svc_start_cb */, true /* restart */,
-                                                   nullptr /* indx_svc_cb */, false /* default ds type */);
+        test_common::HSTestHelper::start_homestore(
+            "test_append_blkalloc",
+            {{HS_SERVICE::META, {.size_pct = 5.0}},
+             {HS_SERVICE::DATA, {.size_pct = 80.0, .blkalloc_type = homestore::blk_allocator_type_t::append}}},
+            nullptr /* before_svc_start_cb */, true /* restart */);
     }
 
     void reset_io_job_done() { m_io_job_done = false; }

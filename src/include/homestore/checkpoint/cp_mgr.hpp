@@ -83,12 +83,13 @@ public:
     virtual std::unique_ptr< CPContext > on_switchover_cp(CP* cur_cp, CP* new_cp) = 0;
 
     /// @brief After gathering CPContext from all consumers, CPManager calls this method to flush the dirty buffers
-    /// accumulated in this CP. Once CP flush is completed, consumers are required to call the flush_done callback.
+    /// accumulated in this CP. Once CP flush is completed, consumers are required to set the promise corresponding to
+    /// returned future.
     /// @param cp CP pointer to which the dirty buffers have to be flushed
     /// @param done_cb Callback after cp is done
     virtual folly::Future< bool > cp_flush(CP* cp) = 0;
 
-    /// @brief After flushed the CP, CPManager calls this method to clean up any CP related structures
+    /// @brief After all consumers flushed the CP, CPManager calls this method to clean up any CP related structures
     /// @param cp
     virtual void cp_cleanup(CP* cp) = 0;
 
@@ -164,9 +165,10 @@ private:
     std::vector< iomgr::io_fiber_t > m_cp_io_fibers;
 
 public:
-    CPManager(bool first_time_boot);
+    CPManager();
     virtual ~CPManager();
 
+    void start(bool first_time_boot);
     /// @brief Shutdown the checkpoint manager services. It will not trigger a flush, but cancels any existing
     /// checkpoint session abruptly. If caller needs clean shutdown, then they explicitly needs to trigger cp flush
     /// before calling shutdown.

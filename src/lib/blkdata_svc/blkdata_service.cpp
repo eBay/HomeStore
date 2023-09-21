@@ -15,6 +15,8 @@
  *********************************************************************************/
 #include <homestore/blkdata_service.hpp>
 #include <homestore/homestore.hpp>
+#include <homestore/chunk_selector.h>
+
 #include "device/chunk.h"
 #include "device/virtual_dev.hpp"
 #include "device/physical_dev.hpp"     // vdev_info_block
@@ -28,21 +30,24 @@ namespace homestore {
 
 BlkDataService& data_service() { return hs()->data_service(); }
 
-BlkDataService::BlkDataService() { m_blk_read_tracker = std::make_unique< BlkReadTracker >(); }
+BlkDataService::BlkDataService(shared< ChunkSelector > chunk_selector) :
+        m_custom_chunk_selector{std::move(chunk_selector)} {
+    m_blk_read_tracker = std::make_unique< BlkReadTracker >();
+}
 BlkDataService::~BlkDataService() = default;
 
 // first-time boot path
-void BlkDataService::create_vdev(uint64_t size, blk_allocator_type_t alloc_type, chunk_selector_type_t chunk_sel_type) {
-    const auto phys_page_size = hs()->device_mgr()->optimal_page_size(HSDevType::Data);
-
+void BlkDataService::create_vdev(uint64_t size, uint32_t blk_size, blk_allocator_type_t alloc_type,
+                                 chunk_selector_type_t chunk_sel_type) {
     hs_vdev_context vdev_ctx;
     vdev_ctx.type = hs_vdev_type_t::DATA_VDEV;
 
+    if (blk_size == 0) { blk_size = hs()->device_mgr()->optimal_page_size(HSDevType::Data); }
     m_vdev =
         hs()->device_mgr()->create_vdev(vdev_parameters{.vdev_name = "blkdata",
                                                         .vdev_size = size,
                                                         .num_chunks = 1,
-                                                        .blk_size = phys_page_size,
+                                                        .blk_size = blk_size,
                                                         .dev_type = HSDevType::Data,
                                                         .alloc_type = alloc_type,
                                                         .chunk_sel_type = chunk_sel_type,
@@ -52,7 +57,8 @@ void BlkDataService::create_vdev(uint64_t size, blk_allocator_type_t alloc_type,
 
 // both first_time_boot and recovery path will come here
 shared< VirtualDev > BlkDataService::open_vdev(const vdev_info& vinfo, bool load_existing) {
-    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, nullptr, true /* auto_recovery */);
+    m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, nullptr, true /* auto_recovery */,
+                                            std::move(m_custom_chunk_selector));
     m_blk_size = vinfo.blk_size;
     return m_vdev;
 }

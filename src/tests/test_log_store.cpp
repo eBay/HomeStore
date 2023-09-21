@@ -56,8 +56,7 @@ using namespace homestore;
 RCU_REGISTER_INIT
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-blk_allocator_type_t test_common::HSTestHelper::s_ds_alloc_type;
-chunk_selector_type_t test_common::HSTestHelper::s_ds_chunk_sel_type;
+
 struct test_log_data {
     test_log_data() = default;
     test_log_data(const test_log_data&) = delete;
@@ -431,7 +430,10 @@ public:
         }
 
         test_common::HSTestHelper::start_homestore(
-            "test_log_store", 5.0, 42.0, 42.0, 0, 0,
+            "test_log_store",
+            {{HS_SERVICE::META, {.size_pct = 5.0}},
+             {HS_SERVICE::LOG_REPLICATED, {.size_pct = 42.0}},
+             {HS_SERVICE::LOG_LOCAL, {.size_pct = 42.0}}},
             [this, restart, n_log_stores]() {
                 if (restart) {
                     for (uint32_t i{0}; i < n_log_stores; ++i) {

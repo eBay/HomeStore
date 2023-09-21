@@ -81,7 +81,8 @@ static std::shared_ptr< BlkAllocator > create_blk_allocator(blk_allocator_type_t
     }
 }
 
-VirtualDev::VirtualDev(DeviceManager& dmgr, vdev_info const& vinfo, vdev_event_cb_t event_cb, bool is_auto_recovery) :
+VirtualDev::VirtualDev(DeviceManager& dmgr, vdev_info const& vinfo, vdev_event_cb_t event_cb, bool is_auto_recovery,
+                       shared< ChunkSelector > custom_chunk_selector) :
         m_vdev_info{vinfo},
         m_dmgr{dmgr},
         m_name{vinfo.name},
@@ -92,21 +93,19 @@ VirtualDev::VirtualDev(DeviceManager& dmgr, vdev_info const& vinfo, vdev_event_c
         m_auto_recovery{is_auto_recovery} {
     switch (m_chunk_selector_type) {
     case chunk_selector_type_t::ROUND_ROBIN: {
-        m_chunk_selector = std::make_unique< RoundRobinChunkSelector >(false /* dynamically add chunk */);
+        m_chunk_selector = std::make_shared< RoundRobinChunkSelector >(false /* dynamically add chunk */);
         break;
     }
-    case chunk_selector_type_t::HEAP: {
-        // FIXME: change to HeapChunkSelector after it is ready;
-        m_chunk_selector = std::make_unique< RoundRobinChunkSelector >(false /* dynamically add chunk */);
+    case chunk_selector_type_t::CUSTOM: {
+        HS_REL_ASSERT(custom_chunk_selector, "Expected custom chunk selector to be passed with selector_type=CUSTOM");
+        m_chunk_selector = std::move(custom_chunk_selector);
         break;
     }
     case chunk_selector_type_t::NONE: {
-        m_chunk_selector = nullptr;
         break;
     }
     default:
-        LOGERROR("Unexpected chunk selector type: {}", m_chunk_selector_type);
-        m_chunk_selector = nullptr;
+        HS_DBG_ASSERT(false, "Chunk selector type {} not supported yet", m_chunk_selector_type);
     }
 }
 

@@ -44,8 +44,7 @@ SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 SISL_OPTIONS_ENABLE(logging, test_vdev, iomgr, test_common_setup)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-blk_allocator_type_t test_common::HSTestHelper::s_ds_alloc_type;
-chunk_selector_type_t test_common::HSTestHelper::s_ds_chunk_sel_type;
+
 struct Param {
     uint64_t num_io;
     uint64_t run_time;
@@ -74,7 +73,12 @@ public:
     virtual void SetUp() override {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-        test_common::HSTestHelper::start_homestore("test_vdev", 15.0, 75.0, 5.0, 0, 0, nullptr);
+
+        test_common::HSTestHelper::start_homestore("test_journal_vdev",
+                                                   {{HS_SERVICE::META, {.size_pct = 15.0}},
+                                                    {HS_SERVICE::LOG_REPLICATED, {.size_pct = 75.0}},
+                                                    {HS_SERVICE::LOG_LOCAL, {.size_pct = 5.0}}});
+
         m_vdev = hs()->logstore_service().get_vdev(homestore::LogStoreService::DATA_LOG_FAMILY_IDX);
     }
 

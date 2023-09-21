@@ -986,7 +986,6 @@ void MetaBlkService::alloc_meta_blks(uint64_t size, std::vector< BlkId >& bids) 
         }
         HS_DBG_ASSERT_EQ(debug_size, size);
 #endif
-
     } catch (const std::exception& e) {
         HS_REL_ASSERT(0, "{}", e.what());
         return;
@@ -1041,8 +1040,8 @@ sisl::byte_array MetaBlkService::read_sub_sb_internal(const meta_blk* mblk) cons
                 if (i < ovf_hdr->h.nbids - 1) {
                     read_sz_per_db = data_bid[i].blk_count() * block_size();
                 } else {
-                    // it is possible user context data doesn't occupy the whole block, so we need to remember the
-                    // size that was written to the last data blk;
+                    // it is possible user context data doesn't occupy the whole block, so we need to remember
+                    // the size that was written to the last data blk;
                     read_sz_per_db = ovf_hdr->h.context_sz - read_offset_in_this_ovf;
                 }
 
@@ -1116,8 +1115,8 @@ void MetaBlkService::recover(bool do_comp_cb) {
                     } else {
                         // decompressed_size must equal to input sz before compress
                         HS_REL_ASSERT_EQ(uint64_cast(mblk->hdr.h.src_context_sz),
-                                         uint64_cast(decompressed_size)); /* since decompressed_size is >=0 it is
-                                                                                         safe to cast to uint64_t */
+                                         uint64_cast(decompressed_size)); /* since decompressed_size is >=0 it
+                                                                             is safe to cast to uint64_t */
                         HS_LOG(DEBUG, metablk,
                                "[type={}] Successfully decompressed, compressed_sz: {}, src_context_sz: {}, "
                                "decompressed_size: {}",
@@ -1127,8 +1126,8 @@ void MetaBlkService::recover(bool do_comp_cb) {
 
                     cb(mblk, decompressed_buf, mblk->hdr.h.src_context_sz);
                 } else {
-                    // There is use case that cb could be nullptr because client want to get its superblock via read
-                    // api;
+                    // There is use case that cb could be nullptr because client want to get its superblock via
+                    // read api;
                     cb(mblk, buf, mblk->hdr.h.context_sz);
                 }
 
@@ -1175,7 +1174,8 @@ void MetaBlkService::read_sub_sb(meta_sub_type type) {
         auto* mblk = it->second;
         //
         // No client writes compressed data with reads it back with read_sub_sb for now;
-        // This assert can be removed if any client writes compressed data who calls read_sub_sb to read it back;
+        // This assert can be removed if any client writes compressed data who calls read_sub_sb to read it
+        // back;
         //
         sisl::byte_array buf = read_sub_sb_internal(mblk);
 
@@ -1184,7 +1184,8 @@ void MetaBlkService::read_sub_sb(meta_sub_type type) {
         it_s->second.cb(mblk, buf, mblk->hdr.h.context_sz);
     }
 
-    // if is allowed if consumer doesn't care about complete cb, e.g. consumer knows how many mblks it is expecting;
+    // if is allowed if consumer doesn't care about complete cb, e.g. consumer knows how many mblks it is
+    // expecting;
     if (it_s->second.comp_cb) { it_s->second.comp_cb(true); }
 }
 
@@ -1374,7 +1375,8 @@ bool MetaBlkService::sanity_check(bool check_ovf_chain) {
 
     //
     // some clients might registered but not written any meta blk to disk, which is okay;
-    // one case is create a volume, then delete a volume, then client: VOLUME will don't have any meta blk on disk;
+    // one case is create a volume, then delete a volume, then client: VOLUME will don't have any meta blk on
+    // disk;
     //
     HS_LOG_ASSERT_LE(clients.size(), m_sub_info.size(),
                      "client size on disk: {} is larger than registered: {}, which is not possible!", clients.size(),
@@ -1482,12 +1484,12 @@ nlohmann::json MetaBlkService::populate_json(int log_level, meta_blk_map_t& meta
                         if (free_space < buf->size) {
                             j[x.first]["meta_bids"][std::to_string(bid_cnt)] =
                                 "Not_able_to_dump_to_file_exceeding_allowed_space";
-                            HS_LOG_EVERY_N(
-                                WARN, metablk, 100,
-                                "[type={}] Skip dumping to file, exceeding allowed space: {}, requested_size: {}, "
-                                "total_free: {}, free_fs_percent: {}",
-                                x.first, free_space, buf->size, total_free,
-                                HS_DYNAMIC_CONFIG(metablk.percent_of_free_space));
+                            HS_LOG_EVERY_N(WARN, metablk, 100,
+                                           "[type={}] Skip dumping to file, exceeding allowed space: {}, "
+                                           "requested_size: {}, "
+                                           "total_free: {}, free_fs_percent: {}",
+                                           x.first, free_space, buf->size, total_free,
+                                           HS_DYNAMIC_CONFIG(metablk.percent_of_free_space));
                             continue;
                         }
 
