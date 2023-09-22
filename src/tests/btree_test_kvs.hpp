@@ -21,8 +21,8 @@
 #include <array>
 #include <homestore/btree/btree_kv.hpp>
 
-static constexpr uint32_t g_max_keysize{120};
-static constexpr uint32_t g_max_valsize{120};
+static constexpr uint32_t g_max_keysize{100}; // for  node size = 512 : free space : 442 => 100+100+6(record size) = 46%
+static constexpr uint32_t g_max_valsize{100};
 static std::random_device g_rd{};
 static std::default_random_engine g_re{g_rd()};
 static std::normal_distribution<> g_randkeysize_generator{32, 24};
@@ -49,10 +49,10 @@ static std::string gen_random_string(size_t len, uint32_t preamble = std::numeri
     static thread_local std::random_device rd{};
     static thread_local std::default_random_engine re{rd()};
     std::uniform_int_distribution< size_t > rand_char{0, alphanum.size() - 1};
-    for (size_t i{0}; i < len; ++i) {
+    if (len < str.size()) { len = str.size(); }
+    for (size_t i{0}; i < len - str.size(); ++i) {
         str += alphanum[rand_char(re)];
     }
-    str += '\0';
     return str;
 }
 
