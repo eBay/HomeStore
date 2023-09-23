@@ -163,6 +163,7 @@ private:
     std::unique_ptr< CPWatchdog > m_wd_cp;
     superblk< cp_mgr_super_block > m_sb;
     std::vector< iomgr::io_fiber_t > m_cp_io_fibers;
+    iomgr::timer_handle_t m_cp_timer_hdl;
 
 public:
     CPManager();
@@ -206,7 +207,7 @@ public:
 
     /// @brief Trigger a checkpoint flush on all subsystems registered. There is only 1 checkpoint per checkpoint
     /// manager. Checkpoint flush will wait for cp to exited all critical io sections.
-    /// @param force : Do we need to force queue the checkpoint flush, in case previous checkpoint is been flushed
+    /// @param force : Do we need to force queue the checkpoint flush, in case previous checkpoint is being flushed
     folly::Future< bool > trigger_cp_flush(bool force = false);
 
     const std::array< std::unique_ptr< CPCallbacks >, (size_t)cp_consumer_t::SENTINEL >& consumer_list() const {
