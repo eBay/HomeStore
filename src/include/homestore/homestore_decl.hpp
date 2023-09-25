@@ -55,6 +55,9 @@ using unique = std::unique_ptr< T >;
 template < typename T >
 using intrusive = boost::intrusive_ptr< T >;
 
+template < typename T >
+using cintrusive = const boost::intrusive_ptr< T >;
+
 ////////////// All Size Limits ///////////////////
 constexpr uint32_t BLK_NUM_BITS{32};
 constexpr uint32_t NBLKS_BITS{8};

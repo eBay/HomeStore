@@ -97,7 +97,6 @@ public:
         uint32_t blk_size{0};
         shared< ChunkSelector > custom_chunk_selector{nullptr};
         IndexServiceCallbacks* index_svc_cbs{nullptr};
-        ReplServiceCallbacks* repl_svc_cbs{nullptr};
         repl_impl_type repl_impl{repl_impl_type::solo};
     };
 
@@ -170,8 +169,7 @@ public:
             } else if ((svc == HS_SERVICE::LOG_REPLICATED) || (svc == HS_SERVICE::LOG_LOCAL)) {
                 hsi->with_log_service();
             } else if (svc == HS_SERVICE::REPLICATION) {
-                hsi->with_repl_data_service(tp.repl_impl, std::unique_ptr< ReplServiceCallbacks >(tp.repl_svc_cbs),
-                                            tp.custom_chunk_selector);
+                hsi->with_repl_data_service(tp.repl_impl, tp.custom_chunk_selector);
             }
         }
         bool need_format =

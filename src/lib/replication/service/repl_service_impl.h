@@ -21,6 +21,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <sisl/logging/logging.h>
 
+#include <folly/Expected.h>
 #include <folly/futures/Future.h>
 #include <homestore/homestore.hpp>
 #include <homestore/replication_service.hpp>
@@ -32,26 +33,45 @@ namespace homestore {
 
 struct repl_dev_superblk;
 class ReplicationServiceImpl : public ReplicationService {
+    struct listener_info {
+        folly::Promise< folly::Expected< shared< ReplDev >, ReplServiceError > > dev_promise{};
+        std::unique_ptr< ReplDevListener > listener;
+    };
+
+    template < class V >
+    auto make_async_error(ReplServiceError err) {
+        return folly::makeFuture< ReplResult< V > >(folly::makeUnexpected(err));
+    }
+
+    template < class V >
+    auto make_async_success(V&& v) {
+        return folly::makeFuture< ReplResult< V > >(std::move(v));
+    }
+
 protected:
-    std::unique_ptr< ReplServiceCallbacks > m_svc_cbs;
     repl_impl_type m_repl_type;
     std::shared_mutex m_rd_map_mtx;
     std::map< uuid_t, shared< ReplDev > > m_rd_map;
+    std::map< uuid_t, listener_info > m_pending_open;
+    std::atomic< bool > m_rd_map_loaded{false};
 
 public:
-    ReplicationServiceImpl(repl_impl_type impl_type, std::unique_ptr< ReplServiceCallbacks > cbs);
+    ReplicationServiceImpl(repl_impl_type impl_type);
     void start();
     void stop();
-    AsyncReplResult< shared< ReplDev > > create_replica_dev(uuid_t group_id,
-                                                            std::set< std::string, std::less<> >&& members) override;
-    ReplResult< shared< ReplDev > > get_replica_dev(uuid_t group_id) const override;
-    void iterate_replica_devs(std::function< void(cshared< ReplDev >&) > const& cb) override;
+    AsyncReplResult< shared< ReplDev > > create_repl_dev(uuid_t group_id,
+                                                         std::set< std::string, std::less<> >&& members,
+                                                         std::unique_ptr< ReplDevListener > listener) override;
+    AsyncReplResult< shared< ReplDev > > open_repl_dev(uuid_t group_id,
+                                                       std::unique_ptr< ReplDevListener > listener) override;
+    ReplResult< shared< ReplDev > > get_repl_dev(uuid_t group_id) const override;
+    void iterate_repl_devs(std::function< void(cshared< ReplDev >&) > const& cb) override;
 
-    folly::SemiFuture< ReplServiceError > replace_member(uuid_t group_id, std::string const& member_out,
-                                                         std::string const& member_in) const override;
+    folly::Future< ReplServiceError > replace_member(uuid_t group_id, std::string const& member_out,
+                                                     std::string const& member_in) const override;
 
 private:
-    shared< ReplDev > open_replica_dev(superblk< repl_dev_superblk > const& rd_sb, bool load_existing);
+    shared< ReplDev > create_repl_dev_instance(superblk< repl_dev_superblk > const& rd_sb, bool load_existing);
     void rd_super_blk_found(sisl::byte_view const& buf, void* meta_cookie);
 };
 
@@ -67,5 +87,5 @@ public:
     int cp_progress_percent() override;
 };
 
-extern ReplicationServiceImpl& repl_service();
+extern ReplicationService& repl_service();
 } // namespace homestore

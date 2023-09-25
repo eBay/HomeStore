@@ -68,9 +68,11 @@ struct Runner {
     std::function< void(void) > task;
     folly::Promise< folly::Unit > comp_promise;
 
-    Runner() : total_tasks{SISL_OPTIONS["num_io"].as< uint64_t >()} {
+    Runner(uint64_t num_tasks, uint32_t qd = 8) : total_tasks{num_tasks}, qdepth{qd} {
         if (total_tasks < (uint64_t)qdepth) { total_tasks = qdepth; }
     }
+
+    Runner() : Runner{SISL_OPTIONS["num_io"].as< uint64_t >()} {}
 
     void set_task(std::function< void(void) > f) { task = std::move(f); }
 
@@ -97,7 +99,25 @@ struct Runner {
     }
 };
 
-struct rdev_req : boost::intrusive_ref_counter< rdev_req > {
+struct Waiter {
+    std::atomic< uint64_t > expected_comp{0};
+    std::atomic< uint64_t > actual_comp{0};
+    folly::Promise< folly::Unit > comp_promise;
+
+    Waiter(uint64_t num_op) : expected_comp{num_op} {}
+    Waiter() : Waiter{SISL_OPTIONS["num_io"].as< uint64_t >()} {}
+
+    folly::Future< folly::Unit > start(std::function< void(void) > f) {
+        f();
+        return comp_promise.getFuture();
+    }
+
+    void one_complete() {
+        if ((actual_comp.fetch_add(1) + 1) >= expected_comp.load()) { comp_promise.setValue(); }
+    }
+};
+
+struct test_repl_req : public repl_req_ctx {
     sisl::byte_array header;
     sisl::byte_array key;
     sisl::sg_list write_sgs;
@@ -105,11 +125,11 @@ struct rdev_req : boost::intrusive_ref_counter< rdev_req > {
     int64_t lsn;
     MultiBlkId written_blkids;
 
-    rdev_req() {
+    test_repl_req() {
         write_sgs.size = 0;
         read_sgs.size = 0;
     }
-    ~rdev_req() {
+    ~test_repl_req() {
         for (auto const& iov : write_sgs.iovs) {
             iomanager.iobuf_free(uintptr_cast(iov.iov_base));
         }
@@ -131,65 +151,60 @@ public:
     class Listener : public ReplDevListener {
     private:
         SoloReplDevTest& m_test;
-        ReplDev& m_rdev;
 
     public:
-        Listener(SoloReplDevTest& test, ReplDev& rdev) : m_test{test}, m_rdev{rdev} {}
+        Listener(SoloReplDevTest& test) : m_test{test} {}
         virtual ~Listener() = default;
 
         void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key, MultiBlkId const& blkids,
-                       void* ctx) override {
+                       cintrusive< repl_req_ctx >& ctx) override {
             if (ctx == nullptr) {
-                m_test.validate_replay(m_rdev, lsn, header, key, blkids);
+                m_test.validate_replay(*repl_dev(), lsn, header, key, blkids);
             } else {
-                rdev_req* req = r_cast< rdev_req* >(ctx);
+                auto req = boost::static_pointer_cast< test_repl_req >(ctx);
                 req->lsn = lsn;
                 req->written_blkids = std::move(blkids);
-                m_test.on_write_complete(m_rdev, intrusive< rdev_req >(req, false));
+                m_test.on_write_complete(*repl_dev(), req);
             }
         }
 
-        void on_pre_commit(int64_t lsn, const sisl::blob& header, const sisl::blob& key, void* ctx) override {}
+        bool on_pre_commit(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
+                           cintrusive< repl_req_ctx >& ctx) override {
+            return true;
+        }
 
-        void on_rollback(int64_t lsn, const sisl::blob& header, const sisl::blob& key, void* ctx) override {}
+        void on_rollback(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
+                         cintrusive< repl_req_ctx >& ctx) override {}
 
-        blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header, void* user_ctx) override {
+        blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header, cintrusive< repl_req_ctx >& ctx) override {
             return blk_alloc_hints{};
         }
 
         void on_replica_stop() override {}
     };
 
-    class Callbacks : public ReplServiceCallbacks {
-    private:
-        SoloReplDevTest& m_test;
-
-    public:
-        Callbacks(SoloReplDevTest* test) : m_test{*test} {}
-        virtual ~Callbacks() = default;
-
-        std::unique_ptr< ReplDevListener > on_repl_dev_init(cshared< ReplDev >& rdev) override {
-            m_test.found_repl_dev(rdev);
-            return std::make_unique< Listener >(m_test, *rdev);
-        }
-    };
-
 protected:
-    Runner m_runner;
+    Runner m_io_runner;
+    Waiter m_task_waiter;
     shared< ReplDev > m_repl_dev1;
     shared< ReplDev > m_repl_dev2;
+    uuid_t m_uuid1;
+    uuid_t m_uuid2;
 
 public:
     virtual void SetUp() override {
         test_common::HSTestHelper::start_homestore(
             "test_solo_repl_dev",
             {{HS_SERVICE::META, {.size_pct = 5.0}},
-             {HS_SERVICE::REPLICATION,
-              {.size_pct = 60.0, .repl_svc_cbs = new Callbacks(this), .repl_impl = repl_impl_type::solo}},
+             {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_impl = repl_impl_type::solo}},
              {HS_SERVICE::LOG_REPLICATED, {.size_pct = 20.0}},
              {HS_SERVICE::LOG_LOCAL, {.size_pct = 2.0}}});
-        hs()->repl_service().create_replica_dev(hs_utils::gen_random_uuid(), {});
-        hs()->repl_service().create_replica_dev(hs_utils::gen_random_uuid(), {});
+        m_uuid1 = hs_utils::gen_random_uuid();
+        m_uuid2 = hs_utils::gen_random_uuid();
+        m_repl_dev1 =
+            hs()->repl_service().create_repl_dev(m_uuid1, {}, std::make_unique< Listener >(*this)).get().value();
+        m_repl_dev2 =
+            hs()->repl_service().create_repl_dev(m_uuid2, {}, std::make_unique< Listener >(*this)).get().value();
     }
 
     virtual void TearDown() override {
@@ -201,27 +216,26 @@ public:
     void restart() {
         m_repl_dev1.reset();
         m_repl_dev2.reset();
+
         test_common::HSTestHelper::start_homestore(
             "test_solo_repl_dev",
-            {{HS_SERVICE::REPLICATION, {.repl_svc_cbs = new Callbacks(this), .repl_impl = repl_impl_type::solo}},
+            {{HS_SERVICE::REPLICATION, {.repl_impl = repl_impl_type::solo}},
              {HS_SERVICE::LOG_REPLICATED, {}},
              {HS_SERVICE::LOG_LOCAL, {}}},
-            nullptr, true /* restart */);
-    }
+            [this]() {
+                hs()->repl_service().open_repl_dev(m_uuid1, std::make_unique< Listener >(*this));
+                hs()->repl_service().open_repl_dev(m_uuid2, std::make_unique< Listener >(*this));
+            },
+            true /* restart */);
 
-    void found_repl_dev(cshared< ReplDev >& rdev) {
-        if (m_repl_dev1 == nullptr) {
-            m_repl_dev1 = rdev;
-        } else {
-            HS_REL_ASSERT_EQ((void*)m_repl_dev2.get(), (void*)nullptr, "More than one replica dev reported");
-            m_repl_dev2 = rdev;
-        }
+        m_repl_dev1 = hs()->repl_service().get_repl_dev(m_uuid1).value();
+        m_repl_dev2 = hs()->repl_service().get_repl_dev(m_uuid2).value();
     }
 
     void write_io(uint32_t key_size, uint64_t data_size, uint32_t max_size_per_iov) {
-        auto req = intrusive< rdev_req >(new rdev_req());
-        req->header = sisl::make_byte_array(sizeof(rdev_req::journal_header));
-        auto hdr = r_cast< rdev_req::journal_header* >(req->header->bytes);
+        auto req = intrusive< test_repl_req >(new test_repl_req());
+        req->header = sisl::make_byte_array(sizeof(test_repl_req::journal_header));
+        auto hdr = r_cast< test_repl_req::journal_header* >(req->header->bytes);
         hdr->key_size = key_size;
         hdr->key_pattern = ((long long)rand() << 32) | rand();
         hdr->data_size = data_size;
@@ -237,30 +251,38 @@ public:
         }
 
         auto& rdev = (rand() % 2) ? m_repl_dev1 : m_repl_dev2;
-        intrusive_ptr_add_ref(req.get());
-        rdev->async_alloc_write(*req->header, req->key ? *req->key : sisl::blob{}, req->write_sgs, (void*)req.get());
+        rdev->async_alloc_write(*req->header, req->key ? *req->key : sisl::blob{}, req->write_sgs, req);
     }
 
     void validate_replay(ReplDev& rdev, int64_t lsn, sisl::blob const& header, sisl::blob const& key,
                          MultiBlkId const& blkids) {
-        auto jhdr = r_cast< rdev_req::journal_header* >(header.bytes);
+        auto jhdr = r_cast< test_repl_req::journal_header* >(header.bytes);
         HSTestHelper::validate_data_buf(key.bytes, key.size, jhdr->key_pattern);
 
         uint32_t size = blkids.blk_count() * g_block_size;
         if (size) {
             auto read_sgs = HSTestHelper::create_sgs(size, g_block_size, size);
-            rdev.async_read(blkids, read_sgs, size).thenValue([jhdr, read_sgs](auto&& err) {
-                RELEASE_ASSERT(!err, "Error during async_read");
-                HS_REL_ASSERT_EQ(jhdr->data_size, read_sgs.size, "journal hdr data size mismatch with actual size");
+            LOGDEBUG("[{}] Validating replay of lsn={} blkid = {}", boost::uuids::to_string(rdev.group_id()), lsn,
+                     blkids.to_string());
+            rdev.async_read(blkids, read_sgs, size)
+                .thenValue([this, hdr = *jhdr, read_sgs, lsn, blkids, &rdev](auto&& err) {
+                    RELEASE_ASSERT(!err, "Error during async_read");
+                    HS_REL_ASSERT_EQ(hdr.data_size, read_sgs.size, "journal hdr data size mismatch with actual size");
 
-                for (auto const& iov : read_sgs.iovs) {
-                    HSTestHelper::validate_data_buf(uintptr_cast(iov.iov_base), iov.iov_len, jhdr->data_pattern);
-                }
-            });
+                    for (auto const& iov : read_sgs.iovs) {
+                        HSTestHelper::validate_data_buf(uintptr_cast(iov.iov_base), iov.iov_len, hdr.data_pattern);
+                        iomanager.iobuf_free(uintptr_cast(iov.iov_base));
+                    }
+                    LOGDEBUG("[{}] Replay of lsn={} blkid={} validated successfully",
+                             boost::uuids::to_string(rdev.group_id()), lsn, blkids.to_string());
+                    m_task_waiter.one_complete();
+                });
+        } else {
+            m_task_waiter.one_complete();
         }
     }
 
-    void on_write_complete(ReplDev& rdev, intrusive< rdev_req > req) {
+    void on_write_complete(ReplDev& rdev, intrusive< test_repl_req > req) {
         // If we did send some data to the repl_dev, validate it by doing async_read
         if (req->write_sgs.size != 0) {
             req->read_sgs = HSTestHelper::create_sgs(req->write_sgs.size, g_block_size, req->write_sgs.size);
@@ -269,47 +291,49 @@ public:
                 .thenValue([this, &rdev, req](auto&& err) {
                     RELEASE_ASSERT(!err, "Error during async_read");
 
-                    LOGDEBUG("Write complete with lsn={} for size={}", req->lsn, req->write_sgs.size);
-                    auto hdr = r_cast< rdev_req::journal_header* >(req->header->bytes);
+                    LOGDEBUG("[{}] Write complete with lsn={} for size={} blkids={}",
+                             boost::uuids::to_string(rdev.group_id()), req->lsn, req->write_sgs.size,
+                             req->written_blkids.to_string());
+                    auto hdr = r_cast< test_repl_req::journal_header* >(req->header->bytes);
                     HS_REL_ASSERT_EQ(hdr->data_size, req->read_sgs.size,
                                      "journal hdr data size mismatch with actual size");
 
                     for (auto const& iov : req->read_sgs.iovs) {
                         HSTestHelper::validate_data_buf(uintptr_cast(iov.iov_base), iov.iov_len, hdr->data_pattern);
                     }
-                    m_runner.next_task();
+                    m_io_runner.next_task();
                 });
         } else {
-            m_runner.next_task();
+            m_io_runner.next_task();
         }
     }
 };
 
 TEST_F(SoloReplDevTest, TestSingleDataBlock) {
     LOGINFO("Step 1: run on worker threads to schedule write for {} Bytes.", g_block_size);
-    this->m_runner.set_task([this]() { this->write_io(0u, g_block_size, g_block_size); });
-    this->m_runner.execute().get();
+    this->m_io_runner.set_task([this]() { this->write_io(0u, g_block_size, g_block_size); });
+    this->m_io_runner.execute().get();
 
     LOGINFO("Step 2: Restart homestore and validate replay data.", g_block_size);
-    restart();
+    this->m_task_waiter.start([this]() { this->restart(); }).get();
 }
 
 TEST_F(SoloReplDevTest, TestRandomSizedDataBlock) {
     LOGINFO("Step 1: run on worker threads to schedule write for random bytes ranging {}-{}.", 0, 1 * Mi);
-    this->m_runner.set_task([this]() {
+    this->m_io_runner.set_task([this]() {
         uint32_t nblks = rand() % ((1 * Mi) / g_block_size);
         uint32_t key_size = rand() % 512 + 8;
         this->write_io(key_size, nblks * g_block_size, g_block_size);
     });
-    this->m_runner.execute().get();
-    restart();
+    this->m_io_runner.execute().get();
+    this->m_task_waiter.start([this]() { this->restart(); }).get();
 }
 
 TEST_F(SoloReplDevTest, TestHeaderOnly) {
     LOGINFO("Step 1: run on worker threads to schedule write");
-    this->m_runner.set_task([this]() { this->write_io(0u, 0u, g_block_size); });
-    this->m_runner.execute().get();
-    restart();
+    this->m_io_runner.set_task([this]() { this->write_io(0u, 0u, g_block_size); });
+    this->m_io_runner.execute().get();
+    this->m_task_waiter.start([this]() { this->restart(); }).get();
 }
 
 SISL_OPTION_GROUP(test_solo_repl_dev,

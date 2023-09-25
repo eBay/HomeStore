@@ -1,17 +1,43 @@
 #pragma once
 
-// #include <nuraft_mesg/messaging_if.hpp>
+#include <boost/intrusive_ptr.hpp>
+#include <boost/smart_ptr/intrusive_ref_counter.hpp>
 #include <sisl/fds/buffer.hpp>
 
 #include <homestore/replication/repl_decls.h>
 
 namespace homestore {
+class ReplDev;
+
+struct repl_journal_entry;
+struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::thread_safe_counter > {
+    friend class SoloReplDev;
+
+public:
+    virtual ~repl_req_ctx();
+
+private:
+    sisl::blob header;                          // User header
+    sisl::blob key;                             // Key to replicate
+    sisl::sg_list value;                        // Raw value - applicable only to leader req
+    MultiBlkId local_blkid;                     // List of corresponding local blkids for the value
+    RemoteBlkId remote_blkid;                   // List of remote blkid for the value
+    std::unique_ptr< uint8_t[] > journal_buf;   // Buf for the journal entry
+    repl_journal_entry* journal_entry{nullptr}; // pointer to the journal entry
+    int64_t lsn{0};                             // Lsn for this replication req
+
+    void alloc_journal_entry(uint32_t size);
+};
+
 //
 // Callbacks to be implemented by ReplDev users.
 //
 class ReplDevListener {
 public:
     virtual ~ReplDevListener() = default;
+
+    void set_repl_dev(ReplDev* rdev) { m_repl_dev = std::move(rdev); }
+    virtual ReplDev* repl_dev() { return m_repl_dev; }
 
     /// @brief Called when the log entry has been committed in the replica set.
     ///
@@ -22,10 +48,10 @@ public:
     /// @param header - Header originally passed with replica_set::write() api
     /// @param key - Key originally passed with replica_set::write() api
     /// @param blkids - List of blkids where data is written to the storage engine.
-    /// @param ctx - User contenxt passed as part of the replica_set::write() api
+    /// @param ctx - Context passed as part of the replica_set::write() api
     ///
     virtual void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key, MultiBlkId const& blkids,
-                           void* ctx) = 0;
+                           cintrusive< repl_req_ctx >& ctx) = 0;
 
     /// @brief Called when the log entry has been received by the replica dev.
     ///
@@ -44,8 +70,9 @@ public:
     /// @param lsn - The log sequence number
     /// @param header - Header originally passed with repl_dev::write() api
     /// @param key - Key originally passed with repl_dev::write() api
-    /// @param ctx - User contenxt passed as part of the repl_dev::write() api
-    virtual void on_pre_commit(int64_t lsn, const sisl::blob& header, const sisl::blob& key, void* ctx) = 0;
+    /// @param ctx - Context passed as part of the replica_set::write() api
+    virtual bool on_pre_commit(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
+                               cintrusive< repl_req_ctx >& ctx) = 0;
 
     /// @brief Called when the log entry has been rolled back by the replica set.
     ///
@@ -59,8 +86,9 @@ public:
     /// @param lsn - The log sequence number getting rolled back
     /// @param header - Header originally passed with repl_dev::write() api
     /// @param key - Key originally passed with repl_dev::write() api
-    /// @param ctx - User contenxt passed as part of the repl_dev::write() api
-    virtual void on_rollback(int64_t lsn, const sisl::blob& header, const sisl::blob& key, void* ctx) = 0;
+    /// @param ctx - Context passed as part of the replica_set::write() api
+    virtual void on_rollback(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
+                             cintrusive< repl_req_ctx >& ctx) = 0;
 
     /// @brief Called when replication module is trying to allocate a block to write the value
     ///
@@ -68,12 +96,16 @@ public:
     /// value. Caller is expected to provide hints for allocation based on the header supplied as part of original
     /// write. In cases where caller don't care about the hints can return default blk_alloc_hints.
     ///
-    /// @param header Header originally passed with repl_dev::write() api on the leader
+    /// @param header Header originally passed with repl_dev::async_alloc_write() api on the leader
+    /// @param Original context passed as part of repl_dev::async_alloc_write
     /// @return Expected to return blk_alloc_hints for this write
-    virtual blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header, void* user_ctx) = 0;
+    virtual blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header, cintrusive< repl_req_ctx >& ctx) = 0;
 
     /// @brief Called when the replica set is being stopped
     virtual void on_replica_stop() = 0;
+
+private:
+    ReplDev* m_repl_dev;
 };
 
 class ReplDev {
@@ -98,10 +130,10 @@ public:
     /// cases
     /// @param value - vector of io buffers that contain value for the key. It is an optional field and if the value
     /// list size is 0, then only key is written to replicadev without data.
-    /// @param user_ctx - User supplied opaque context which will be passed to listener
+    /// @param ctx - User supplied context which will be passed to listener
     /// callbacks
     virtual void async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
-                                   void* user_ctx) = 0;
+                                   intrusive< repl_req_ctx > ctx) = 0;
 
     /// @brief Reads the data and returns a future to continue on
     /// @param bid Block id to read

@@ -31,6 +31,8 @@ struct CPContext;
 
 class IndexWBCacheBase {
 public:
+    virtual ~IndexWBCacheBase() = default;
+
     /// @brief Allocate the buffer and initialize the btree node. It adds the node to the wb cache.
     /// @tparam K Key type of the Index
     /// @param node_initializer Callback to be called upon which buffer is turned into btree node

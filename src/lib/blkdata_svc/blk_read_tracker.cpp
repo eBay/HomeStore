@@ -28,59 +28,39 @@ void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
                            const std::shared_ptr< blk_track_waiter >& waiter) {
     HS_DBG_ASSERT(new_ref_count ? waiter == nullptr : waiter != nullptr, "Invalid waiter");
 
-    //
-    // Don't move alignment handling outside of this function, because the nblks between (first and last blk num after
-    // alignment) could be larger than 255 which exceeds a BlkId can hold;
-    //
-    auto cur_blk_num_aligned = s_cast< blk_num_t >(sisl::round_down(blkid.blk_num(), entries_per_record()));
-    auto last_blk_num_aligned_up =
-        s_cast< blk_num_t >(sisl::round_up(blkid.blk_num() + blkid.blk_count() + 1, entries_per_record()) - 1);
+    auto cur_base_blk_num = s_cast< blk_num_t >(sisl::round_down(blkid.blk_num(), entries_per_record()));
+    auto last_base_blk_num =
+        s_cast< blk_num_t >(sisl::round_down(blkid.blk_num() + blkid.blk_count() - 1, entries_per_record()));
 
     [[maybe_unused]] bool waiter_rescheduled{false};
     // everything is aligned after this point, so we don't need to handle sub_range in a base blkid;
-    while (cur_blk_num_aligned <= last_blk_num_aligned_up) {
-        BlkId base_blkid{cur_blk_num_aligned, entries_per_record(), blkid.chunk_num()};
+    while (cur_base_blk_num <= last_base_blk_num) {
+        BlkId base_blkid{cur_base_blk_num, entries_per_record(), blkid.chunk_num()};
 
-        BlkTrackRecord rec;
-        const auto rec_found = m_pending_reads_map.get(base_blkid, rec);
-
-        if (new_ref_count != 0) {
-            // this is insert/remove operations
-            if (rec_found) {
-                // if some read is already happening on this record, just update the ref_cnt;
+        if (new_ref_count > 0) {
+            m_pending_reads_map.upsert_or_delete(base_blkid,
+                                                 [&base_blkid, new_ref_count](BlkTrackRecord& rec, bool existing) {
+                                                     if (!existing) { rec.m_key = base_blkid; }
+                                                     rec.m_ref_cnt += new_ref_count;
+                                                     return false;
+                                                 });
+        } else if (new_ref_count < 0) {
+            m_pending_reads_map.upsert_or_delete(base_blkid, [new_ref_count](BlkTrackRecord& rec, bool existing) {
+                HS_DBG_ASSERT_EQ(existing, true, "Decrement a ref count which does not exist in map");
                 rec.m_ref_cnt += new_ref_count;
-            } else {
-                // if no record found, no read is happening on this record;
-                rec.m_key = base_blkid;
-                rec.m_ref_cnt = new_ref_count;
-            }
-
-            // in either case, ref_cnt can not drop below zero;
-            HS_DBG_ASSERT_GE(rec.m_ref_cnt, 0);
-
-            if (rec.m_ref_cnt > 0) {
-                m_pending_reads_map.upsert(base_blkid, rec);
-            } else {
-                // ref_cnt drops to zero, clear all the references held by this record;
-                HS_DBG_ASSERT_EQ(rec_found, true);
-                rec.m_waiters.clear();
-                BlkTrackRecord dummy_rec;
-                m_pending_reads_map.erase(base_blkid, dummy_rec);
-            }
+                return (rec.m_ref_cnt == 0);
+            });
         } else {
-            // this is wait_on operation
-            if (rec_found) {
-                // apply waiter to this record;
+            m_pending_reads_map.update(base_blkid, [&waiter_rescheduled, &waiter](BlkTrackRecord& rec) {
                 rec.m_waiters.push_back(waiter);
-                // overwirte existing record;
-                m_pending_reads_map.upsert(base_blkid, rec);
                 waiter_rescheduled = true;
-            }
-
-            // not found, nothing needs to be done; fall through and visit remaining records;
+            });
         }
 
-        cur_blk_num_aligned += entries_per_record();
+        /*LOGDEBUG("[{}] {} rec_found={} rec_blkid=[{}] cur_rec_ref_cnt={}", base_blkid.to_string(),
+                 (new_ref_count < 0 ? "DEC" : "INC"), rec_found, rec.m_key.to_string(), rec.m_ref_cnt); */
+
+        cur_base_blk_num += entries_per_record();
     }
 
 #ifdef _PRERELEASE
