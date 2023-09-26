@@ -25,6 +25,11 @@ SISL_OPTIONS_ENABLE(logging, test_blk_read_tracker)
 
 class BlkReadTrackerTest : public testing::Test {
 public:
+    virtual void SetUp() override {
+        LOGINFO("Step 0: initialize BlkReadTracker instance. ");
+        init();
+    }
+
     void init() { m_blk_read_tracker = std::make_unique< BlkReadTracker >(); }
     std::shared_ptr< BlkReadTracker > get_inst() { return m_blk_read_tracker; }
 
@@ -37,9 +42,6 @@ private:
  * 2. no overlap insert and remove without any waiter,
  * */
 TEST_F(BlkReadTrackerTest, TestBaiscInsertRemoveWithNoWaiter) {
-    LOGINFO("Step 0: initialize BlkReadTracker instance. ");
-    init();
-
     LOGINFO("Step 1: set entries per record to 16");
     get_inst()->set_entries_per_record(16);
 
@@ -69,9 +71,6 @@ TEST_F(BlkReadTrackerTest, TestBaiscInsertRemoveWithNoWaiter) {
  * alignment: 16
  * */
 TEST_F(BlkReadTrackerTest, TestOverlapInsertThenRemoveWithNoWaiter) {
-    LOGINFO("Step 0: initialize BlkReadTracker instance. ");
-    init();
-
     LOGINFO("Step 1: set entries per record to 16");
     get_inst()->set_entries_per_record(16);
 
@@ -109,8 +108,6 @@ TEST_F(BlkReadTrackerTest, TestOverlapInsertThenRemoveWithNoWaiter) {
  * waiter overlap with read, but there is no read completes, waiter's cb should NOT be triggered;
  * */
 TEST_F(BlkReadTrackerTest, TestInsertWithWaiter) {
-    LOGINFO("Step 0: initialize BlkReadTracker instance. ");
-    init();
 
     BlkId b{16, 20, 0};
     get_inst()->insert(b);
@@ -135,9 +132,6 @@ TEST_F(BlkReadTrackerTest, TestInsertWithWaiter) {
  * free bid callback should be called after read completes
  * */
 TEST_F(BlkReadTrackerTest, TestInsRmWithWaiterOnSameBid) {
-    LOGINFO("Step 0: initialize BlkReadTracker instance. ");
-    init();
-
     BlkId b{16, 20, 0};
     LOGINFO("Step 1: read blkid: {} into hash map.", b.to_string());
     get_inst()->insert(b);
@@ -169,9 +163,6 @@ TEST_F(BlkReadTrackerTest, TestInsRmWithWaiterOnSameBid) {
  * free cb1 should be called only after read-1 completes;
  * */
 TEST_F(BlkReadTrackerTest, TestInsRmeWithWaiterOverlapOneRead) {
-    LOGINFO("Step 0: initialize BlkReadTracker instance. ");
-    init();
-
     auto align = 16ul;
     LOGINFO("Step 1: set entries per record to {}.", align);
     get_inst()->set_entries_per_record(align);
@@ -217,9 +208,6 @@ TEST_F(BlkReadTrackerTest, TestInsRmeWithWaiterOverlapOneRead) {
  *  5. Read-1 completes // <<< free cb should be triggered
  * */
 TEST_F(BlkReadTrackerTest, TestInsRmWithWaiterOverlapMultiReads0) {
-    LOGINFO("Step 0: initialize BlkReadTracker instance. ");
-    init();
-
     auto align = 16ul;
     LOGINFO("Step 1: set entries per record to {}.", align);
     get_inst()->set_entries_per_record(align);
@@ -265,9 +253,6 @@ TEST_F(BlkReadTrackerTest, TestInsRmWithWaiterOverlapMultiReads0) {
  * 5. Read-2 completes; // free cb should be triggered;
  * */
 TEST_F(BlkReadTrackerTest, TestInsRmWithWaiterOverlapMultiReads1) {
-    LOGINFO("Step 0: initialize BlkReadTracker instance. ");
-    init();
-
     auto align = 8ul;
     LOGINFO("Step 1: set entries per record to {}.", align);
     get_inst()->set_entries_per_record(align);
@@ -313,14 +298,11 @@ TEST_F(BlkReadTrackerTest, TestInsRmWithWaiterOverlapMultiReads1) {
  * overlapping;
  * 4. read-1 completes // callback of free should be called, even though read-2 is not completed yet;
  * 5. read-2 completes
- * Note: read should never olverap with unfinished free blkid; read-2 is not vialating this rule;
+ * Note: read should never olverap with unfinished free blkid; read-2 is not violating this rule;
  *
  * free cb1 should only wait on read-1 to completes, read-2 should not block free;
  * */
 TEST_F(BlkReadTrackerTest, TestInsRmWithWaiterOverlapMultiReads2) {
-    LOGINFO("Step 0: initialize BlkReadTracker instance. ");
-    init();
-
     auto align = 16ul;
     LOGINFO("Step 1: set entries per record to {}.", align);
     get_inst()->set_entries_per_record(align);
@@ -350,6 +332,106 @@ TEST_F(BlkReadTrackerTest, TestInsRmWithWaiterOverlapMultiReads2) {
 
     LOGINFO("Step 6: read-2 completed on blkid: {}.", c.to_string());
     get_inst()->remove(c);
+}
+
+//////////////////////////// Multi-thread test cases //////////////////////////////
+
+/*
+ * Multi-thread Insert and remove, with no free operation;
+ *
+ * 1. do insert with a few threads -- (can also be done in massive threads, but not necessary)
+ * 2. do remove in massive threads (must be same amount of inserts);
+ * */
+VENUM(op_type_t, uint8_t, insert = 1, remove = 2, wait_on = 3, no_op = 4);
+TEST_F(BlkReadTrackerTest, TestThreadedInsertAndRemove) {
+    auto align = 8ul;
+    LOGINFO("Step 1: set entries per record to {}.", align);
+    get_inst()->set_entries_per_record(align);
+
+    std::vector< BlkId > bids{{10, 8, 0}, {20, 5, 0}, {25, 6, 0}, {43, 16, 0}, {56, 4, 0}, {72, 18, 0}, {122, 4, 0}};
+
+    const auto repeat = 100ul;
+    std::vector< std::thread > op_threads;
+    for (auto i = 0ul; i < bids.size(); ++i) {
+        std::thread t([this, &bids, i]() {
+            for (auto j = 0ul; j < repeat; ++j) {
+                get_inst()->insert(bids[i]);
+            }
+        });
+        op_threads.push_back(std::move(t));
+    }
+
+    LOGINFO("Step 2: threaded insert issued.");
+
+    for (auto i = 0ul; i < bids.size(); ++i) {
+        for (auto j = 0ul; j < repeat; ++j) {
+            std::thread t([this, &bids, i]() { get_inst()->remove(bids[i]); });
+            op_threads.push_back(std::move(t));
+        }
+    }
+
+    LOGINFO("Step 3: threaded remove issued.");
+    for (auto& t : op_threads) {
+        t.join();
+    }
+
+    LOGINFO("Step 4: all threads joined.");
+}
+
+TEST_F(BlkReadTrackerTest, TestThreadedInsertWaitonThenRemove) {
+    auto align = 8ul;
+    LOGINFO("Step 1: set entries per record to {}.", align);
+    get_inst()->set_entries_per_record(align);
+
+    std::vector< BlkId > bids{{12, 6, 0}, {18, 5, 0}, {25, 8, 0}, {36, 16, 0}, {57, 4, 0}, {66, 18, 0}, {92, 14, 0}};
+    const auto repeat = 100ul;
+    std::vector< std::thread > op_threads;
+    for (auto i = 0ul; i < bids.size(); ++i) {
+        std::thread t([this, &bids, i]() {
+            for (auto j = 0ul; j < repeat; ++j) {
+                get_inst()->insert(bids[i]);
+            }
+        });
+        op_threads.push_back(std::move(t));
+    }
+
+    LOGINFO("Step 2: threaded insert issued.");
+
+    std::vector< bool > called(bids.size(), false);
+    std::mutex mtx;
+    for (auto i = 0ul; i < bids.size(); ++i) {
+        std::thread t([this, &bids, i, &mtx, &called]() {
+            get_inst()->wait_on(bids[i], [i, &bids, &mtx, &called]() {
+                std::unique_lock lk(mtx);
+                assert(!called[i]); // callback shouldn't be called more than once;
+                called[i] = true;
+                LOGINFO("wait_on called on blkid: {};", bids[i].to_string());
+            });
+        });
+        t.detach();
+    }
+
+    LOGINFO("Step 3: threaded wait_on issued on all bids.");
+
+    for (auto i = 0ul; i < bids.size(); ++i) {
+        for (auto j = 0ul; j < repeat; ++j) {
+            std::thread t([this, &bids, i]() { get_inst()->remove(bids[i]); });
+            op_threads.push_back(std::move(t));
+        }
+    }
+
+    LOGINFO("Step 3: threaded remove issued.");
+    for (auto& t : op_threads) {
+        t.join();
+    }
+
+    LOGINFO("Step 4: all threads joined.");
+
+    for (const auto x : called) {
+        assert(x); // all callbacks should be called;
+    }
+
+    LOGINFO("Step 5: all bids wait_on cb called.");
 }
 
 SISL_OPTION_GROUP(test_blk_read_tracker,
