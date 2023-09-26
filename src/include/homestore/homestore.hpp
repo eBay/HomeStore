@@ -44,9 +44,8 @@ class MetaBlkService;
 class LogStoreService;
 class BlkDataService;
 class IndexService;
-class ReplicationServiceImpl;
+class ReplicationService;
 class IndexServiceCallbacks;
-class ReplServiceCallbacks;
 struct vdev_info;
 class HomeStore;
 class CPManager;
@@ -114,7 +113,7 @@ private:
     std::unique_ptr< MetaBlkService > m_meta_service;
     std::unique_ptr< LogStoreService > m_log_service;
     std::unique_ptr< IndexService > m_index_service;
-    std::unique_ptr< ReplicationServiceImpl > m_repl_service;
+    std::unique_ptr< ReplicationService > m_repl_service;
 
     std::unique_ptr< DeviceManager > m_dev_mgr;
     shared< sisl::logging::logger_t > m_periodic_logger;
@@ -144,7 +143,7 @@ public:
     HomeStore& with_data_service(cshared< ChunkSelector >& custom_chunk_selector = nullptr);
     HomeStore& with_log_service();
     HomeStore& with_index_service(std::unique_ptr< IndexServiceCallbacks > cbs);
-    HomeStore& with_repl_data_service(repl_impl_type repl_type, std::unique_ptr< ReplServiceCallbacks > cbs,
+    HomeStore& with_repl_data_service(repl_impl_type repl_type,
                                       cshared< ChunkSelector >& custom_chunk_selector = nullptr);
 
     bool start(const hs_input_params& input, hs_before_services_starting_cb_t svcs_starting_cb = nullptr);
@@ -165,7 +164,7 @@ public:
     MetaBlkService& meta_service() { return *m_meta_service; }
     LogStoreService& logstore_service() { return *m_log_service; }
     IndexService& index_service() { return *m_index_service; }
-    ReplicationServiceImpl& repl_service() { return *m_repl_service; }
+    ReplicationService& repl_service() { return *m_repl_service; }
     DeviceManager* device_mgr() { return m_dev_mgr.get(); }
     ResourceMgr& resource_mgr() { return *m_resource_mgr.get(); }
     CPManager& cp_mgr() { return *m_cp_mgr.get(); }

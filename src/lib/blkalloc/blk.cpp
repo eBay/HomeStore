@@ -110,6 +110,14 @@ void MultiBlkId::deserialize(sisl::blob const& b, bool copy) {
     }
 }
 
+#if 0
+static uint32_t MultiBlkId::expected_serialized_size(uint16_t num_pieces) {
+    uint32_t sz = BlkId::expected_serialized_size();
+    if (num_pieces > 1) { sz += sizeof(uint16_t) + ((num_pieces - 1) * sizeof(chain_blkid)); }
+    return sz;
+}
+#endif
+
 uint16_t MultiBlkId::num_pieces() const { return BlkId::is_valid() ? n_addln_piece + 1 : 0; }
 
 bool MultiBlkId::has_room() const { return (n_addln_piece < max_addln_pieces); }

@@ -19,12 +19,11 @@
 #include "replication/repl_dev/solo_repl_dev.h"
 
 namespace homestore {
-ReplicationServiceImpl& repl_service() { return hs()->repl_service(); }
+ReplicationService& repl_service() { return hs()->repl_service(); }
 
-ReplicationServiceImpl::ReplicationServiceImpl(repl_impl_type impl_type, std::unique_ptr< ReplServiceCallbacks > cbs) :
-        m_svc_cbs{std::move(cbs)}, m_repl_type{impl_type} {
+ReplicationServiceImpl::ReplicationServiceImpl(repl_impl_type impl_type) : m_repl_type{impl_type} {
     meta_service().register_handler(
-        "replication",
+        "repl_dev",
         [this](meta_blk* mblk, sisl::byte_view buf, size_t) { rd_super_blk_found(std::move(buf), voidptr_cast(mblk)); },
         nullptr);
 }
@@ -32,6 +31,14 @@ ReplicationServiceImpl::ReplicationServiceImpl(repl_impl_type impl_type, std::un
 void ReplicationServiceImpl::start() {
     // Register to CP to flush the super blk and truncate the logstore
     hs()->cp_mgr().register_consumer(cp_consumer_t::REPLICATION_SVC, std::make_unique< ReplServiceCPHandler >());
+
+    {
+        std::shared_lock lg{m_rd_map_mtx};
+        for (auto const& [gid, info] : m_pending_open) {
+            // info.dev_promise.setValue(folly::makeUnexpected(ReplServiceError::SERVER_NOT_FOUND));
+        }
+    }
+    m_rd_map_loaded = true;
 }
 
 void ReplicationServiceImpl::stop() {
@@ -40,36 +47,66 @@ void ReplicationServiceImpl::stop() {
 }
 
 AsyncReplResult< shared< ReplDev > >
-ReplicationServiceImpl::create_replica_dev(uuid_t group_id, std::set< std::string, std::less<> >&& members) {
-    superblk< repl_dev_superblk > rd_sb;
+ReplicationServiceImpl::create_repl_dev(uuid_t group_id, std::set< std::string, std::less<> >&& members,
+                                        std::unique_ptr< ReplDevListener > listener) {
+    superblk< repl_dev_superblk > rd_sb{"repl_dev"};
     rd_sb.create(sizeof(repl_dev_superblk));
     rd_sb->gid = group_id;
 
-    shared< ReplDev > repl_dev = open_replica_dev(rd_sb, false /* load_existing */);
-    return folly::makeSemiFuture< ReplResult< shared< ReplDev > > >(std::move(repl_dev));
+    shared< ReplDev > repl_dev = create_repl_dev_instance(rd_sb, false /* load_existing */);
+    listener->set_repl_dev(repl_dev.get());
+    repl_dev->attach_listener(std::move(listener));
+    rd_sb.write();
+    return make_async_success(std::move(repl_dev));
 }
 
-ReplResult< shared< ReplDev > > ReplicationServiceImpl::get_replica_dev(uuid_t group_id) const {
+AsyncReplResult< shared< ReplDev > >
+ReplicationServiceImpl::open_repl_dev(uuid_t group_id, std::unique_ptr< ReplDevListener > listener) {
+    if (m_rd_map_loaded) {
+        // We have already loaded all repl_dev and open_repl_dev is called after that, we don't support dynamically
+        // opening the repl_dev. Return an error
+        LOGERROR("Opening group_id={} after services are started, which is not supported",
+                 boost::uuids::to_string(group_id));
+        return make_async_error< shared< ReplDev > >(ReplServiceError::BAD_REQUEST);
+    }
+
+    std::unique_lock lg(m_rd_map_mtx);
+    auto it = m_rd_map.find(group_id);
+    if (it != m_rd_map.end()) {
+        // We already loaded the ReplDev, just call the group_id and attach the listener
+        auto& repl_dev = it->second;
+        listener->set_repl_dev(repl_dev.get());
+        repl_dev->attach_listener(std::move(listener));
+        return make_async_success< shared< ReplDev > >(std::move(repl_dev));
+    } else {
+        auto [pending_it, inserted] =
+            m_pending_open.insert_or_assign(group_id, listener_info{.listener = std::move(listener)});
+        DEBUG_ASSERT(inserted, "Duplicate open_replica_dev called for group_id = {}",
+                     boost::uuids::to_string(group_id));
+        return pending_it->second.dev_promise.getFuture();
+    }
+}
+
+ReplResult< shared< ReplDev > > ReplicationServiceImpl::get_repl_dev(uuid_t group_id) const {
     std::shared_lock lg(m_rd_map_mtx);
     if (auto it = m_rd_map.find(group_id); it != m_rd_map.end()) { return it->second; }
     return folly::makeUnexpected(ReplServiceError::SERVER_NOT_FOUND);
 }
 
-void ReplicationServiceImpl::iterate_replica_devs(std::function< void(cshared< ReplDev >&) > const& cb) {
+void ReplicationServiceImpl::iterate_repl_devs(std::function< void(cshared< ReplDev >&) > const& cb) {
     std::shared_lock lg(m_rd_map_mtx);
     for (const auto& [uuid, rd] : m_rd_map) {
         cb(rd);
     }
 }
 
-folly::SemiFuture< ReplServiceError > ReplicationServiceImpl::replace_member(uuid_t group_id,
-                                                                             std::string const& member_out,
-                                                                             std::string const& member_in) const {
-    return folly::makeSemiFuture< ReplServiceError >(ReplServiceError::NOT_IMPLEMENTED);
+folly::Future< ReplServiceError > ReplicationServiceImpl::replace_member(uuid_t group_id, std::string const& member_out,
+                                                                         std::string const& member_in) const {
+    return folly::makeFuture< ReplServiceError >(ReplServiceError::NOT_IMPLEMENTED);
 }
 
-shared< ReplDev > ReplicationServiceImpl::open_replica_dev(superblk< repl_dev_superblk > const& rd_sb,
-                                                           bool load_existing) {
+shared< ReplDev > ReplicationServiceImpl::create_repl_dev_instance(superblk< repl_dev_superblk > const& rd_sb,
+                                                                   bool load_existing) {
     auto it = m_rd_map.end();
     bool happened = false;
 
@@ -86,7 +123,6 @@ shared< ReplDev > ReplicationServiceImpl::open_replica_dev(superblk< repl_dev_su
     } else {
         HS_REL_ASSERT(false, "Repl impl type = {} is not supported yet", enum_name(m_repl_type));
     }
-    repl_dev->attach_listener(m_svc_cbs->on_repl_dev_init(repl_dev));
     it->second = repl_dev;
 
     return repl_dev;
@@ -98,7 +134,19 @@ void ReplicationServiceImpl::rd_super_blk_found(sisl::byte_view const& buf, void
     HS_DBG_ASSERT_EQ(rd_sb->get_magic(), repl_dev_superblk::REPL_DEV_SB_MAGIC, "Invalid rdev metablk, magic mismatch");
     HS_DBG_ASSERT_EQ(rd_sb->get_version(), repl_dev_superblk::REPL_DEV_SB_VERSION, "Invalid version of rdev metablk");
 
-    open_replica_dev(rd_sb, true /* load_existing */);
+    shared< ReplDev > repl_dev = create_repl_dev_instance(rd_sb, true /* load_existing */);
+    {
+        std::unique_lock lg(m_rd_map_mtx);
+        auto it = m_pending_open.find(rd_sb->gid);
+        if (it != m_pending_open.end()) {
+            auto& li_info = it->second;
+            // Someone waiting for this repl dev to open, call them to attach the listener and provide the value
+            li_info.listener->set_repl_dev(repl_dev.get());
+            repl_dev->attach_listener(std::move(li_info.listener));
+            li_info.dev_promise.setValue(repl_dev);
+            m_pending_open.erase(it);
+        }
+    }
 }
 
 ///////////////////// CP Callbacks for Repl Service //////////////
@@ -107,13 +155,13 @@ ReplServiceCPHandler::ReplServiceCPHandler() {}
 std::unique_ptr< CPContext > ReplServiceCPHandler::on_switchover_cp(CP* cur_cp, CP* new_cp) { return nullptr; }
 
 folly::Future< bool > ReplServiceCPHandler::cp_flush(CP* cp) {
-    repl_service().iterate_replica_devs(
+    repl_service().iterate_repl_devs(
         [cp](cshared< ReplDev >& repl_dev) { std::dynamic_pointer_cast< SoloReplDev >(repl_dev)->cp_flush(cp); });
     return folly::makeFuture< bool >(true);
 }
 
 void ReplServiceCPHandler::cp_cleanup(CP* cp) {
-    repl_service().iterate_replica_devs(
+    repl_service().iterate_repl_devs(
         [cp](cshared< ReplDev >& repl_dev) { std::dynamic_pointer_cast< SoloReplDev >(repl_dev)->cp_cleanup(cp); });
 }
 

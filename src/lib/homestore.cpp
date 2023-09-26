@@ -58,7 +58,6 @@ HomeStoreSafePtr HomeStore::s_instance{nullptr};
 
 static std::unique_ptr< IndexServiceCallbacks > s_index_cbs;
 static repl_impl_type s_repl_impl_type{repl_impl_type::solo};
-static std::unique_ptr< ReplServiceCallbacks > s_repl_cbs;
 shared< ChunkSelector > s_custom_chunk_selector{nullptr};
 
 HomeStore* HomeStore::instance() {
@@ -84,12 +83,11 @@ HomeStore& HomeStore::with_log_service() {
     return *this;
 }
 
-HomeStore& HomeStore::with_repl_data_service(repl_impl_type repl_type, std::unique_ptr< ReplServiceCallbacks > cbs,
+HomeStore& HomeStore::with_repl_data_service(repl_impl_type repl_type,
                                              cshared< ChunkSelector >& custom_chunk_selector) {
     m_services.svcs |= HS_SERVICE::REPLICATION | HS_SERVICE::LOG_REPLICATED | HS_SERVICE::LOG_LOCAL;
     m_services.svcs &= ~HS_SERVICE::DATA; // ReplicationDataSvc or DataSvc are mutually exclusive
     s_repl_impl_type = repl_type;
-    s_repl_cbs = std::move(cbs);
     s_custom_chunk_selector = std::move(custom_chunk_selector);
     return *this;
 }
@@ -130,7 +128,7 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
     if (has_data_service()) { m_data_service = std::make_unique< BlkDataService >(std::move(s_custom_chunk_selector)); }
     if (has_index_service()) { m_index_service = std::make_unique< IndexService >(std::move(s_index_cbs)); }
     if (has_repl_data_service()) {
-        m_repl_service = std::make_unique< ReplicationServiceImpl >(s_repl_impl_type, std::move(s_repl_cbs));
+        m_repl_service = std::make_unique< ReplicationServiceImpl >(s_repl_impl_type);
         m_data_service = std::make_unique< BlkDataService >(std::move(s_custom_chunk_selector));
     }
     m_cp_mgr = std::make_unique< CPManager >();
@@ -205,7 +203,7 @@ void HomeStore::do_start() {
         m_data_service->start();
     } else if (has_repl_data_service()) {
         m_data_service->start();
-        m_repl_service->start();
+        s_cast< ReplicationServiceImpl* >(m_repl_service.get())->start();
     }
 
     // In case of custom recovery, let consumer starts the recovery and it is consumer module's responsibilities
@@ -228,7 +226,7 @@ void HomeStore::shutdown() {
     if (has_data_service()) { m_data_service.reset(); }
 
     if (has_repl_data_service()) {
-        m_repl_service->stop();
+        s_cast< ReplicationServiceImpl* >(m_repl_service.get())->stop();
         m_repl_service.reset();
     }
     m_dev_mgr->close_devices();
