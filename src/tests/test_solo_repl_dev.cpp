@@ -122,7 +122,6 @@ struct test_repl_req : public repl_req_ctx {
     sisl::byte_array key;
     sisl::sg_list write_sgs;
     sisl::sg_list read_sgs;
-    int64_t lsn;
     MultiBlkId written_blkids;
 
     test_repl_req() {
@@ -162,7 +161,6 @@ public:
                 m_test.validate_replay(*repl_dev(), lsn, header, key, blkids);
             } else {
                 auto req = boost::static_pointer_cast< test_repl_req >(ctx);
-                req->lsn = lsn;
                 req->written_blkids = std::move(blkids);
                 m_test.on_write_complete(*repl_dev(), req);
             }
@@ -292,7 +290,7 @@ public:
                     RELEASE_ASSERT(!err, "Error during async_read");
 
                     LOGDEBUG("[{}] Write complete with lsn={} for size={} blkids={}",
-                             boost::uuids::to_string(rdev.group_id()), req->lsn, req->write_sgs.size,
+                             boost::uuids::to_string(rdev.group_id()), req->get_lsn(), req->write_sgs.size,
                              req->written_blkids.to_string());
                     auto hdr = r_cast< test_repl_req::journal_header* >(req->header->bytes);
                     HS_REL_ASSERT_EQ(hdr->data_size, req->read_sgs.size,

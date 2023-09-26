@@ -15,6 +15,7 @@ struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::
 
 public:
     virtual ~repl_req_ctx();
+    int64_t get_lsn() const { return lsn; }
 
 private:
     sisl::blob header;                          // User header
@@ -161,6 +162,8 @@ public:
     virtual uuid_t group_id() const = 0;
 
     virtual void attach_listener(std::unique_ptr< ReplDevListener > listener) { m_listener = std::move(listener); }
+
+    virtual uint32_t get_blk_size() const = 0;
 
 protected:
     std::unique_ptr< ReplDevListener > m_listener;

@@ -124,6 +124,8 @@ folly::Future< std::error_code > SoloReplDev::async_read(MultiBlkId const& bid, 
 
 void SoloReplDev::async_free_blks(int64_t, MultiBlkId const& bid) { data_service().async_free_blk(bid); }
 
+uint32_t SoloReplDev::get_blk_size() const { return data_service().get_blk_size(); }
+
 void SoloReplDev::cp_flush(CP*) {
     auto lsn = m_commit_upto.load();
     m_rd_sb->commit_lsn = lsn;

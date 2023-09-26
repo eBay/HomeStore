@@ -85,6 +85,8 @@ public:
 
     uuid_t group_id() const override { return m_group_id; }
 
+    uint32_t get_blk_size() const override;
+
     void cp_flush(CP* cp);
     void cp_cleanup(CP* cp);
 
