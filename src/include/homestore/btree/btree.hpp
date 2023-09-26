@@ -66,7 +66,7 @@ private:
     // to overcome the gcc bug, pointer here: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66944
     static BtreeThreadVariables* bt_thread_vars() {
         auto this_id(boost::this_fiber::get_id());
-        static thread_local std::map< fibers::fiber::id, std::unique_ptr< BtreeThreadVariables > > fiber_map;
+        static thread_local std::map< boost::fibers::fiber::id, std::unique_ptr< BtreeThreadVariables > > fiber_map;
         if (fiber_map.count(this_id)) { return fiber_map[this_id].get(); }
         fiber_map[this_id] = std::make_unique< BtreeThreadVariables >();
         return fiber_map[this_id].get();
