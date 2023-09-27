@@ -408,7 +408,7 @@ TEST_F(BlkReadTrackerTest, TestThreadedInsertWaitonThenRemove) {
                 LOGINFO("wait_on called on blkid: {};", bids[i].to_string());
             });
         });
-        t.detach();
+        op_threads.push_back(std::move(t));
     }
 
     LOGINFO("Step 3: threaded wait_on issued on all bids.");
