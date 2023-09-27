@@ -61,7 +61,8 @@ void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
                 waiter_rescheduled = true;
             });
         }
-        cur_base_blk_num += 1;
+
+        cur_base_blk_num += entries_per_record();
     }
 
 #ifdef _PRERELEASE
