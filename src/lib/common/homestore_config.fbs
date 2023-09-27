@@ -116,8 +116,8 @@ table LogStore {
 }
 
 table Generic {
-    // blk alloc cp timer in us
-    blkalloc_cp_timer_us: uint64 = 60000000 (hotswap);
+    // cp timer in us
+    cp_timer_us: uint64 = 60000000 (hotswap);
 
     // writeback cache flush threads
     cache_flush_threads : int32 = 1;

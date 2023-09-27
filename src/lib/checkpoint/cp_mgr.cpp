@@ -18,9 +18,10 @@
 #include <homestore/homestore.hpp>
 #include <homestore/meta_service.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
-
+#include <homestore/homestore.hpp>
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
+#include "common/resource_mgr.hpp"
 #include "cp.hpp"
 
 namespace homestore {
@@ -35,6 +36,9 @@ CPManager::CPManager() :
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { on_meta_blk_found(std::move(buf), (void*)mblk); },
         nullptr);
 
+    resource_mgr().register_dirty_buf_exceed_cb(
+        [this]([[maybe_unused]] int64_t dirty_buf_count) { this->trigger_cp_flush(false /* false */); });
+
     start_cp_thread();
 }
 
@@ -46,6 +50,11 @@ void CPManager::start(bool first_time_boot) {
         create_first_cp();
         m_sb.write();
     }
+
+    LOGINFO("cp timer is set to {} usec", HS_DYNAMIC_CONFIG(generic.cp_timer_us));
+    m_cp_timer_hdl = iomanager.schedule_global_timer(
+        HS_DYNAMIC_CONFIG(generic.cp_timer_us) * 1000, true, nullptr /*cookie*/, iomgr::reactor_regex::all_worker,
+        [this](void*) { trigger_cp_flush(false /* false */); }, true /* wait_to_schedule */);
 }
 
 void CPManager::on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
@@ -70,6 +79,9 @@ void CPManager::shutdown() {
         m_wd_cp->stop();
         m_wd_cp.reset();
     }
+
+    iomanager.cancel_timer(m_cp_timer_hdl, true);
+    m_cp_timer_hdl = iomgr::null_timer_handle;
 }
 
 void CPManager::register_consumer(cp_consumer_t consumer_id, std::unique_ptr< CPCallbacks > callbacks) {

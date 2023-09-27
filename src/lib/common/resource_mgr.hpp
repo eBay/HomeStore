@@ -39,7 +39,7 @@ public:
     ~RsrcMgrMetrics() { deregister_me_from_farm(); }
 };
 
-typedef std::function< void(int64_t) > exceed_limit_cb_t;
+typedef std::function< void(int64_t /* dirty_buf_cnt */) > exceed_limit_cb_t;
 const uint32_t max_qd_multiplier = 32;
 
 class ResourceMgr {
