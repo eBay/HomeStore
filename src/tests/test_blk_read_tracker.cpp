@@ -364,6 +364,16 @@ TEST_F(BlkReadTrackerTest, TestThreadedInsertAndRemove) {
 
     LOGINFO("Step 2: threaded insert issued.");
 
+    for (auto& t : op_threads) {
+        t.join();
+    }
+
+    // remove has to wait for insert to complete because if insert thread runs slower than remove, it might assert
+    // complaining no elements are found in map;
+
+    LOGINFO("Step 3: threaded insert joined.");
+    op_threads.clear();
+
     for (auto i = 0ul; i < bids.size(); ++i) {
         for (auto j = 0ul; j < repeat; ++j) {
             std::thread t([this, &bids, i]() { get_inst()->remove(bids[i]); });
@@ -371,7 +381,7 @@ TEST_F(BlkReadTrackerTest, TestThreadedInsertAndRemove) {
         }
     }
 
-    LOGINFO("Step 3: threaded remove issued.");
+    LOGINFO("Step 4: threaded remove issued.");
     for (auto& t : op_threads) {
         t.join();
     }
@@ -411,6 +421,13 @@ TEST_F(BlkReadTrackerTest, TestThreadedInsertWaitonThenRemove) {
         });
         op_threads.push_back(std::move(t));
     }
+
+    // wait for all insert to complete, otherwise it will race with remove thread;
+    for (auto& t : op_threads) {
+        t.join();
+    }
+
+    op_threads.clear();
 
     LOGINFO("Step 3: threaded wait_on issued on all bids.");
 
