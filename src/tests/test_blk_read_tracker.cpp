@@ -403,7 +403,7 @@ TEST_F(BlkReadTrackerTest, TestThreadedInsertWaitonThenRemove) {
         std::thread t([this, &bids, i, &mtx, &called]() {
             get_inst()->wait_on(bids[i], [i, &bids, &mtx, &called]() {
                 std::unique_lock lk(mtx);
-                assert(!called[i]); // callback shouldn't be called more than once;
+                LOGMSG_ASSERT(called[i] == false, "not expecting callback to be called more than once!");
                 called[i] = true;
                 LOGINFO("wait_on called on blkid: {};", bids[i].to_string());
             });
@@ -427,8 +427,8 @@ TEST_F(BlkReadTrackerTest, TestThreadedInsertWaitonThenRemove) {
 
     LOGINFO("Step 4: all threads joined.");
 
-    for (const auto x : called) {
-        assert(x); // all callbacks should be called;
+    for (auto i = 0ul; i < called.size(); ++i) {
+        LOGMSG_ASSERT(called[i] == true, "expecting all waiters to be called");
     }
 
     LOGINFO("Step 5: all bids wait_on cb called.");
