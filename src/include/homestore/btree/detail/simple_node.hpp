@@ -262,6 +262,7 @@ public:
     }
 
     std::string to_string_keys(bool print_friendly = false) const override {
+#if 0
         std::string delimiter = print_friendly ? "\n" : "\t";
         auto str = fmt::format("{}{} nEntries={} {} ",
                                print_friendly ? "------------------------------------------------------------\n" : "",
@@ -314,6 +315,8 @@ public:
             fmt::format_to(std::back_inserter(str), "-{}]", cur_key);
         }
         return str;
+#endif
+        return {};
     }
 
     uint8_t* get_node_context() override { return uintptr_cast(this) + sizeof(SimpleNode< K, V >); }
