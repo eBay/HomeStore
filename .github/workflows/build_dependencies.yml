@@ -186,7 +186,6 @@ jobs:
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
             -o sisl:testing=False \
             -o iomgr:testing=off \
-            -o homestore:testing=min \
             -o homestore:sanitize=${sanitize} \
             -s build_type=${{ inputs.build-type }} \
             --build missing \
@@ -201,7 +200,6 @@ jobs:
             -o sisl:testing=False \
             -o iomgr:testing=off \
             -o coverage=True \
-            -o homestore:testing=min \
             -s build_type=${{ inputs.build-type }} \
             --build missing \
             .
