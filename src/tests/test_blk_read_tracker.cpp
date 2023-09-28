@@ -374,9 +374,9 @@ TEST_F(BlkReadTrackerTest, TestThreadedInsertAndRemove) {
     LOGINFO("Step 3: threaded insert joined.");
     op_threads.clear();
 
-    for (auto i = 0ul; i < bids.size(); ++i) {
+    for (const auto& b : bids) {
         for (auto j = 0ul; j < repeat; ++j) {
-            std::thread t([this, &bids, i]() { get_inst()->remove(bids[i]); });
+            std::thread t([this, &b]() { get_inst()->remove(b); });
             op_threads.push_back(std::move(t));
         }
     }
@@ -397,10 +397,10 @@ TEST_F(BlkReadTrackerTest, TestThreadedInsertWaitonThenRemove) {
     std::vector< BlkId > bids{{12, 6, 0}, {18, 5, 0}, {25, 8, 0}, {36, 16, 0}, {57, 4, 0}, {66, 18, 0}, {92, 14, 0}};
     const auto repeat = 100ul;
     std::vector< std::thread > op_threads;
-    for (auto i = 0ul; i < bids.size(); ++i) {
-        std::thread t([this, &bids, i]() {
+    for (const auto& b : bids) {
+        std::thread t([this, &b]() {
             for (auto j = 0ul; j < repeat; ++j) {
-                get_inst()->insert(bids[i]);
+                get_inst()->insert(b);
             }
         });
         op_threads.push_back(std::move(t));
@@ -431,9 +431,9 @@ TEST_F(BlkReadTrackerTest, TestThreadedInsertWaitonThenRemove) {
 
     LOGINFO("Step 3: threaded wait_on issued on all bids.");
 
-    for (auto i = 0ul; i < bids.size(); ++i) {
+    for (const auto& b : bids) {
         for (auto j = 0ul; j < repeat; ++j) {
-            std::thread t([this, &bids, i]() { get_inst()->remove(bids[i]); });
+            std::thread t([this, &b]() { get_inst()->remove(b); });
             op_threads.push_back(std::move(t));
         }
     }
@@ -445,8 +445,8 @@ TEST_F(BlkReadTrackerTest, TestThreadedInsertWaitonThenRemove) {
 
     LOGINFO("Step 4: all threads joined.");
 
-    for (auto i = 0ul; i < called.size(); ++i) {
-        LOGMSG_ASSERT(called[i] == true, "expecting all waiters to be called");
+    for (const auto x : called) {
+        LOGMSG_ASSERT(x == true, "expecting all waiters to be called");
     }
 
     LOGINFO("Step 5: all bids wait_on cb called.");
