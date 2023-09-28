@@ -353,10 +353,10 @@ TEST_F(BlkReadTrackerTest, TestThreadedInsertAndRemove) {
     const auto repeat = 100ul;
     std::vector< std::thread > op_threads;
 
-    for (auto i = 0ul; i < bids.size(); ++i) {
-        std::thread t([this, &bids, i]() {
+    for (const auto& b : bids) {
+        std::thread t([this, &b]() {
             for (auto j = 0ul; j < repeat; ++j) {
-                get_inst()->insert(bids[i]);
+                get_inst()->insert(b);
             }
         });
         op_threads.push_back(std::move(t));
