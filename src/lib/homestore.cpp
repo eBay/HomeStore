@@ -213,6 +213,12 @@ void HomeStore::do_start() {
 
 void HomeStore::shutdown() {
     LOGINFO("Homestore shutdown is started");
+
+    if (has_index_service()) {
+        m_index_service->stop();
+//        m_index_service.reset();
+    }
+
     if (has_log_service()) {
         m_log_service->stop();
         m_log_service.reset();

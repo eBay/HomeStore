@@ -54,6 +54,7 @@ public:
     virtual ~IndexTableBase() = default;
     virtual uuid_t uuid() const = 0;
     virtual uint64_t used_size() const = 0;
+    virtual void destroy() = 0;
 };
 
 enum class index_buf_state_t : uint8_t {

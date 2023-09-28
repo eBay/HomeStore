@@ -53,6 +53,12 @@ public:
         Btree< K, V >::set_root_node_info(BtreeLinkInfo{m_sb->root_node, m_sb->link_version});
     }
 
+    void destroy() override {
+        auto cpg = hs()->cp_mgr().cp_guard();
+        auto op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
+        Btree< K, V >::destroy_btree(op_context);
+    }
+
     btree_status_t init() {
         auto cp = hs()->cp_mgr().cp_guard();
         auto ret = Btree< K, V >::init((void*)cp.context(cp_consumer_t::INDEX_SVC));

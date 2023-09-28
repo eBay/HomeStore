@@ -59,6 +59,9 @@ public:
     // Start the Index Service
     void start();
 
+    // Stop the Index Service
+    void stop();
+
     // Add/Remove Index Table to/from the index service
     void add_index_table(const std::shared_ptr< IndexTableBase >& tbl);
     void remove_index_table(const std::shared_ptr< IndexTableBase >& tbl);
