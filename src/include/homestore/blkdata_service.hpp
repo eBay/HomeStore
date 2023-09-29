@@ -47,7 +47,7 @@ public:
      * @param size : size of this vdev
      */
     void create_vdev(uint64_t size, uint32_t blk_size, blk_allocator_type_t alloc_type,
-                     chunk_selector_type_t chunk_sel_type);
+                     chunk_selector_type_t chunk_sel_type, uint32_t num_chunks);
 
     /**
      * @brief : called during recovery to open existing vdev for data service

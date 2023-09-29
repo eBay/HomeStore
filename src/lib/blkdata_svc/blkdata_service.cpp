@@ -38,7 +38,7 @@ BlkDataService::~BlkDataService() = default;
 
 // first-time boot path
 void BlkDataService::create_vdev(uint64_t size, uint32_t blk_size, blk_allocator_type_t alloc_type,
-                                 chunk_selector_type_t chunk_sel_type) {
+                                 chunk_selector_type_t chunk_sel_type, uint32_t num_chunks) {
     hs_vdev_context vdev_ctx;
     vdev_ctx.type = hs_vdev_type_t::DATA_VDEV;
 
@@ -46,7 +46,7 @@ void BlkDataService::create_vdev(uint64_t size, uint32_t blk_size, blk_allocator
     m_vdev =
         hs()->device_mgr()->create_vdev(vdev_parameters{.vdev_name = "blkdata",
                                                         .vdev_size = size,
-                                                        .num_chunks = 1,
+                                                        .num_chunks = num_chunks,
                                                         .blk_size = blk_size,
                                                         .dev_type = HSDevType::Data,
                                                         .alloc_type = alloc_type,
