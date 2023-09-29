@@ -98,7 +98,7 @@ private:
     std::atomic< int64_t > m_hs_fb_size; // free size
     std::atomic< int64_t > m_hs_ab_cnt;  // alloc count
     std::atomic< int64_t > m_memory_used_in_recovery;
-    std::atomic< uint32_t > m_flush_dirty_buf_q_depth;
+    std::atomic< uint32_t > m_flush_dirty_buf_q_depth{64};
     uint64_t m_total_cap;
     exceed_limit_cb_t m_dirty_buf_exceed_cb;
     exceed_limit_cb_t m_free_blks_exceed_cb;

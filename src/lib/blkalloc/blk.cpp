@@ -29,6 +29,7 @@ uint64_t BlkId::to_integer() const { return *r_cast< const uint64_t* >(&s); }
 sisl::blob BlkId::serialize() { return sisl::blob{r_cast< uint8_t* >(&s), sizeof(serialized)}; }
 
 uint32_t BlkId::serialized_size() const { return sizeof(BlkId); }
+uint32_t BlkId::expected_serialized_size() { return sizeof(BlkId); }
 
 void BlkId::deserialize(sisl::blob const& b, bool copy) {
     serialized* other = r_cast< serialized* >(b.bytes);
@@ -110,13 +111,11 @@ void MultiBlkId::deserialize(sisl::blob const& b, bool copy) {
     }
 }
 
-#if 0
-static uint32_t MultiBlkId::expected_serialized_size(uint16_t num_pieces) {
+uint32_t MultiBlkId::expected_serialized_size(uint16_t num_pieces) {
     uint32_t sz = BlkId::expected_serialized_size();
     if (num_pieces > 1) { sz += sizeof(uint16_t) + ((num_pieces - 1) * sizeof(chain_blkid)); }
     return sz;
 }
-#endif
 
 uint16_t MultiBlkId::num_pieces() const { return BlkId::is_valid() ? n_addln_piece + 1 : 0; }
 

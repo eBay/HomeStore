@@ -57,7 +57,7 @@ if (${build_nonio_tests})
     target_link_libraries(test_append_blk_allocator homestore ${COMMON_TEST_DEPS} GTest::gmock)
     add_test(NAME AppendBlkAlloc COMMAND test_append_blk_allocator)
     set_property(TEST AppendBlkAlloc PROPERTY ENVIRONMENT "ASAN_OPTIONS=detect_stack_use_after_return=true")
- 
+
     set(TEST_BLKID_SOURCES test_blkid.cpp ../lib/blkalloc/blk.cpp)
     add_executable(test_blkid ${TEST_BLKID_SOURCES})
     target_link_libraries(test_blkid ${COMMON_TEST_DEPS} GTest::gtest)
