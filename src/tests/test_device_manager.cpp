@@ -140,7 +140,7 @@ TEST_F(DeviceMgrTest, StripedVDevCreation) {
         avail_size += pdev->data_size();
     }
 
-    uint32_t size_pct = 4;
+    uint32_t size_pct = 2;
     uint64_t remain_size = avail_size;
 
     LOGINFO("Step 1: Creating {} vdevs with combined size as {}", in_bytes(avail_size));

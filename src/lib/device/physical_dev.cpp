@@ -427,7 +427,7 @@ void PhysicalDev::free_chunk_info(chunk_info* cinfo) {
 }
 
 ChunkInterval PhysicalDev::find_next_chunk_area(uint64_t size) const {
-    auto ins_ival = ChunkInterval::right_open(data_start_offset(), size);
+    auto ins_ival = ChunkInterval::right_open(data_start_offset(), data_start_offset() + size);
     for (auto& exist_ival : m_chunk_data_area) {
         if (ins_ival.upper() <= exist_ival.lower()) { break; }
         ins_ival = ChunkInterval::right_open(exist_ival.upper(), exist_ival.upper() + size);

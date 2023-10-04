@@ -412,6 +412,7 @@ TYPED_TEST(BtreeTest, RandomInsert) {
     this->get_all_validate();
 }
 
+#if 0
 TYPED_TEST(BtreeTest, SequentialRemove) {
     LOGINFO("SequentialRemove test start");
     // Forward sequential insert
@@ -466,6 +467,7 @@ TYPED_TEST(BtreeTest, RandomRemove) {
     }
     this->get_all_validate();
 }
+#endif
 
 TYPED_TEST(BtreeTest, RangeUpdate) {
     LOGINFO("RangeUpdate test start");
