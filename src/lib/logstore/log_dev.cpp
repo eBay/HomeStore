@@ -121,6 +121,9 @@ void LogDev::stop() {
         m_block_flush_q_cv.wait(lk, [&] { return m_stopped; });
     }
 
+    // cancel the timer
+    iomanager.cancel_timer(m_flush_timer_hdl, true);
+
     m_log_records = nullptr;
     m_logdev_meta.reset();
     m_log_idx.store(0);
@@ -137,8 +140,6 @@ void LogDev::stop() {
     }
 
     THIS_LOGDEV_LOG(INFO, "LogDev stopped successfully");
-    // cancel the timer
-    iomanager.cancel_timer(m_flush_timer_hdl, true);
     m_hs.reset();
 }
 

@@ -211,6 +211,19 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
         LOGINFO("{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}",
                 vparam.vdev_name, in_bytes(input_vdev_size), in_bytes(vparam.vdev_size));
     }
+
+    // Adjust the maximum number chunks requested.
+    uint32_t max_num_chunks = 0;
+    for (const auto& d : m_dev_infos) {
+        max_num_chunks += hs_super_blk::max_chunks_in_pdev(d);
+    }
+    auto input_num_chunks = vparam.num_chunks;
+    vparam.num_chunks = std::min(vparam.num_chunks, max_num_chunks);
+    if (input_num_chunks != vparam.num_chunks) {
+        LOGINFO("{} Virtual device is attempted to be created with num_chunks={}, it needs to be adjust to "
+                "new_num_chunks={}",
+                vparam.vdev_name, in_bytes(input_num_chunks), in_bytes(vparam.num_chunks));
+    }
     uint32_t chunk_size = vparam.vdev_size / vparam.num_chunks;
 
     LOGINFO(
