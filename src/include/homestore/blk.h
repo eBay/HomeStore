@@ -83,6 +83,7 @@ public:
     uint32_t serialized_size() const;
     std::string to_string() const;
     bool is_valid() const;
+    static uint32_t expected_serialized_size();
 
     static int compare(BlkId const& one, BlkId const& two);
 };
@@ -131,6 +132,7 @@ public:
     bool has_room() const;
     BlkId to_single_blkid() const;
 
+    static uint32_t expected_serialized_size(uint16_t num_pieces);
     static int compare(MultiBlkId const& one, MultiBlkId const& two);
 
     struct iterator {
