@@ -136,7 +136,6 @@ struct BtreeTest : public testing::Test {
     }
 
     void TearDown() override {
-        this->destroy_btree();
         test_common::HSTestHelper::shutdown_homestore();
     }
 
