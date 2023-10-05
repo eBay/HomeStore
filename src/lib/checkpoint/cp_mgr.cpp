@@ -71,6 +71,10 @@ void CPManager::create_first_cp() {
 }
 
 void CPManager::shutdown() {
+    LOGINFO("Stopping cp timer");
+    iomanager.cancel_timer(m_cp_timer_hdl, true);
+    m_cp_timer_hdl = iomgr::null_timer_handle;
+
     auto cp = get_cur_cp();
     delete (cp);
     rcu_xchg_pointer(&m_cur_cp, nullptr);
@@ -79,9 +83,6 @@ void CPManager::shutdown() {
         m_wd_cp->stop();
         m_wd_cp.reset();
     }
-
-    iomanager.cancel_timer(m_cp_timer_hdl, true);
-    m_cp_timer_hdl = iomgr::null_timer_handle;
 }
 
 void CPManager::register_consumer(cp_consumer_t consumer_id, std::unique_ptr< CPCallbacks > callbacks) {

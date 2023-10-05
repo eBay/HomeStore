@@ -42,7 +42,8 @@ LogStoreService::LogStoreService() :
         m_logstore_families{std::make_unique< LogStoreFamily >(DATA_LOG_FAMILY_IDX),
                             std::make_unique< LogStoreFamily >(CTRL_LOG_FAMILY_IDX)} {}
 
-folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, logstore_family_id_t family) {
+folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, logstore_family_id_t family,
+                                                              uint32_t num_chunks) {
     const auto atomic_page_size = hs()->device_mgr()->atomic_page_size(HSDevType::Fast);
 
     hs_vdev_context hs_ctx;
@@ -62,7 +63,7 @@ folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, log
     auto vdev =
         hs()->device_mgr()->create_vdev(vdev_parameters{.vdev_name = name,
                                                         .vdev_size = size,
-                                                        .num_chunks = 1,
+                                                        .num_chunks = num_chunks,
                                                         .blk_size = atomic_page_size,
                                                         .dev_type = HSDevType::Fast,
                                                         .alloc_type = blk_allocator_type_t::none,

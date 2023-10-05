@@ -51,7 +51,7 @@ public:
     IndexService(std::unique_ptr< IndexServiceCallbacks > cbs);
 
     // Creates the vdev that is needed to initialize the device
-    void create_vdev(uint64_t size);
+    void create_vdev(uint64_t size, uint32_t num_chunks);
 
     // Open the existing vdev which is represnted by the vdev_info_block
     shared< VirtualDev > open_vdev(const vdev_info& vb, bool load_existing);
