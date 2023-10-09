@@ -47,11 +47,13 @@ void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
                                                  });
         } else if (new_ref_count < 0) {
             // This is a remove operation
-            m_pending_reads_map.upsert_or_delete(base_blkid, [new_ref_count](BlkTrackRecord& rec, bool existing) {
-                HS_DBG_ASSERT_EQ(existing, true, "Decrement a ref count which does not exist in map");
-                rec.m_ref_cnt += new_ref_count;
-                return (rec.m_ref_cnt == 0);
-            });
+            m_pending_reads_map.upsert_or_delete(
+                base_blkid, [new_ref_count, &base_blkid](BlkTrackRecord& rec, bool existing) {
+                    HS_DBG_ASSERT_EQ(existing, true, "Decrement a ref count (blk: {}) which does not exist in map",
+                                     base_blkid.to_string());
+                    rec.m_ref_cnt += new_ref_count;
+                    return (rec.m_ref_cnt == 0);
+                });
         } else {
             // this is wait_on operation
             m_pending_reads_map.update(base_blkid, [&waiter_rescheduled, &waiter](BlkTrackRecord& rec) {
@@ -59,6 +61,7 @@ void BlkReadTracker::merge(const BlkId& blkid, int64_t new_ref_count,
                 waiter_rescheduled = true;
             });
         }
+
         cur_base_blk_num += entries_per_record();
     }
 
