@@ -74,7 +74,7 @@ ReplicationServiceImpl::open_repl_dev(uuid_t group_id, std::unique_ptr< ReplDevL
     auto it = m_rd_map.find(group_id);
     if (it != m_rd_map.end()) {
         // We already loaded the ReplDev, just call the group_id and attach the listener
-        auto& repl_dev = it->second;
+        auto repl_dev = it->second;
         listener->set_repl_dev(repl_dev.get());
         repl_dev->attach_listener(std::move(listener));
         return make_async_success< shared< ReplDev > >(std::move(repl_dev));
