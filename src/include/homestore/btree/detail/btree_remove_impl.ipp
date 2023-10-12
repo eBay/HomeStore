@@ -528,13 +528,14 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
         // Finally update the leftmost node with latest key
         leftmost_node->set_next_bnode(next_node_id);
         if (leftmost_node->total_entries()) {
-            //            leftmost_node->inc_link_version();
+            leftmost_node->inc_link_version();
             parent_node->update(start_idx, leftmost_node->get_last_key< K >(), leftmost_node->link_info());
         }
 
         if (parent_node->total_entries() && !parent_node->has_valid_edge()) {
             if (parent_node->compare_nth_key(plast_key, parent_node->total_entries() - 1)) {
                 auto last_node = new_nodes.size() > 0 ? new_nodes[new_nodes.size() - 1] : leftmost_node;
+                last_node->inc_link_version();
                 parent_node->update(parent_node->total_entries() - 1, plast_key, last_node->link_info());
             }
         }
@@ -567,6 +568,28 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
 #ifndef NDEBUG
         // BT_DBG_ASSERT(!parent_node_step1.empty() && !parent_node_step2.empty() && !parent_node_step3.empty(),
         //               "Empty string");
+        // check if the link version of parent for each key info match the link version of its child
+        BtreeLinkInfo child_info;
+        if (ret == btree_status_t::success) {
+            for (uint32_t idx = 0; idx < new_nodes.size(); idx++) {
+                parent_node->get_nth_value(start_idx + 1 + idx, &child_info, false /* copy */);
+                BT_NODE_DBG_ASSERT_EQ(child_info.link_version(), new_nodes[idx]->link_version(), parent_node,
+                                      "mismatch of link version of new nodes in successful merge");
+            }
+            parent_node->get_nth_value(start_idx, &child_info, false /* copy */);
+            BT_NODE_DBG_ASSERT_EQ(child_info.link_version(), leftmost_node->link_version(), parent_node,
+                                  "parent_node, mismatch of link version of leftmost node in successful merge");
+        } else {
+            for (uint32_t idx = 0; idx < old_nodes.size(); idx++) {
+                parent_node->get_nth_value(start_idx + 1 + idx, &child_info, false /* copy */);
+                BT_NODE_DBG_ASSERT_EQ(child_info.link_version(), old_nodes[idx]->link_version(), parent_node,
+                                      "mismatch of link version of old nodes in unsuccessful merge");
+            }
+            parent_node->get_nth_value(start_idx, &child_info, false /* copy */);
+            BT_NODE_DBG_ASSERT_EQ(child_info.link_version(), leftmost_node->link_version(), parent_node,
+                                  "parent_node, mismatch of link version of leftmost node in unsuccessful merge");
+        }
+
         if (leftmost_node->total_entries() && (start_idx < parent_node->total_entries())) {
             BT_NODE_DBG_ASSERT_LE(
                 leftmost_node->get_last_key< K >().compare(parent_node->get_nth_key< K >(start_idx, false)), 0,
