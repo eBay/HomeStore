@@ -78,37 +78,37 @@ public:
     BlkAllocStatus alloc_contiguous(BlkId& bid) override;
     BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
     void free(BlkId const& b) override;
-    
+
     /**
-    * @brief :  the number of available blocks that can be allocated by the AppendBlkAllocator.
-    * @return : the number of available blocks.
-    */
+     * @brief :  the number of available blocks that can be allocated by the AppendBlkAllocator.
+     * @return : the number of available blocks.
+     */
     blk_num_t available_blks() const override;
 
     /**
      * @brief : the number of used blocks by the AppendBlkAllocator.
      * @return : the number of used blocks.
-    */
+     */
     blk_num_t get_used_blks() const override;
 
     /**
      * @brief : the number of freeable blocks by the AppendBlkAllocator.
      * @return : the number of freeable blocks.
-    */
+     */
     blk_num_t get_freeable_nblks() const;
 
     /**
      * @brief : the number of blocks that have been allocated by the AppendBlkAllocator.
      * @return : the number of allocated blocks.
-    */
+     */
     blk_num_t get_defrag_nblks() const;
 
     /**
-     * @brief : the number of blocks that have been allocated by the AppendBlkAllocator.
-     * @return : the number of allocated blocks.
-    */
+     * @brief : check if the input blk id is allocated or not.
+     * @return : true if blkid is allocated, false if not;
+     */
     bool is_blk_alloced(const BlkId& in_bid, bool use_lock = false) const override;
-    
+
     std::string to_string() const override;
 
     /// @brief : needs to be called with cp_guard();
