@@ -18,6 +18,7 @@
 #include <homestore/btree/btree.hpp>
 #include <homestore/btree/detail/simple_node.hpp>
 #include <homestore/btree/detail/varlen_node.hpp>
+#include <homestore/btree/detail/prefix_node.hpp>
 #include <sisl/fds/utils.hpp>
 // #include <iomgr/iomgr_flip.hpp>
 
@@ -52,7 +53,7 @@ btree_status_t Btree< K, V >::read_and_lock_node(bnodeid_t id, BtreeNodePtr& nod
                                                  locktype_t leaf_lock_type, void* context) const {
     auto ret = read_node_impl(id, node_ptr);
     if (node_ptr == nullptr) {
-        if (ret != btree_status_t::fast_path_not_possible) { BT_LOG(ERROR, "read failed, reason: {}", ret); }
+        BT_LOG(ERROR, "read failed, reason: {}", ret);
         return ret;
     }
 
@@ -86,7 +87,7 @@ template < typename K, typename V >
 btree_status_t Btree< K, V >::write_node(const BtreeNodePtr& node, void* context) {
     COUNTER_INCREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_writes, btree_int_node_writes, 1);
     HISTOGRAM_OBSERVE_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_occupancy, btree_int_node_occupancy,
-                              ((m_node_size - node->available_size(m_bt_cfg)) * 100) / m_node_size);
+                              ((m_node_size - node->available_size()) * 100) / m_node_size);
 
     return (write_node_impl(node, context));
 }
@@ -285,6 +286,13 @@ BtreeNode* Btree< K, V >::init_node(uint8_t* node_buf, uint32_t node_ctx_size, b
         n = is_leaf ? create_node< VarKeySizeNode< K, V > >(node_ctx_size, node_buf, id, init_buf, true, this->m_bt_cfg)
                     : create_node< VarKeySizeNode< K, BtreeLinkInfo > >(node_ctx_size, node_buf, id, init_buf, false,
                                                                         this->m_bt_cfg);
+        break;
+
+    case btree_node_type::PREFIX:
+        n = is_leaf
+            ? create_node< FixedPrefixNode< K, V > >(node_ctx_size, node_buf, id, init_buf, true, this->m_bt_cfg)
+            : create_node< FixedPrefixNode< K, BtreeLinkInfo > >(node_ctx_size, node_buf, id, init_buf, false,
+                                                                 this->m_bt_cfg);
         break;
 
     default:

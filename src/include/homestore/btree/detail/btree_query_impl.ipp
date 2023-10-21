@@ -36,12 +36,8 @@ btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr& my_node, BtreeQueryRe
 
             uint32_t start_ind{0};
             uint32_t end_ind{0};
-            auto cur_count =
-                my_node->template get_all< K, V >(qreq.next_range(), qreq.batch_size() - count, start_ind, end_ind);
-            for (auto idx{start_ind}; idx < (start_ind + cur_count); ++idx) {
-                call_on_read_kv_cb(my_node, idx, qreq);
-                my_node->add_nth_obj_to_list(idx, &out_values, true);
-            }
+            auto cur_count = to_variant_node(my_node)->multi_get(qreq.working_range(), qreq.batch_size() - count,
+                                                                 start_ind, end_ind, &out_values, qreq.filter());
             count += cur_count;
 
             if (qreq.route_tracing) {
@@ -49,7 +45,7 @@ btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr& my_node, BtreeQueryRe
             }
 
             // If this is not the last entry found, then surely we have reached the end of search criteria
-            if ((end_ind + 1) < my_node->total_entries()) { break; }
+            // if ((end_ind + 1) < my_node->total_entries()) { break; }
 
             // Keep querying sibling nodes
             if (count < qreq.batch_size()) {
@@ -71,7 +67,7 @@ btree_status_t Btree< K, V >::do_sweep_query(BtreeNodePtr& my_node, BtreeQueryRe
     }
 
     BtreeLinkInfo start_child_info;
-    [[maybe_unused]] const auto [isfound, idx] = my_node->find(qreq.next_key(), &start_child_info, false);
+    [[maybe_unused]] const auto [isfound, idx] = my_node->find(qreq.first_key(), &start_child_info, false);
     ASSERT_IS_VALID_INTERIOR_CHILD_INDX(isfound, idx, my_node);
     if (qreq.route_tracing) { append_route_trace(qreq, my_node, btree_event_t::READ, idx, idx); }
 
@@ -92,17 +88,11 @@ btree_status_t Btree< K, V >::do_traversal_query(const BtreeNodePtr& my_node, Bt
     if (my_node->is_leaf()) {
         BT_NODE_LOG_ASSERT_GT(qreq.batch_size(), 0, my_node);
 
-        uint32_t start_ind = 0, end_ind = 0;
-        auto cur_count = my_node->get_all(qreq.next_range(), qreq.batch_size() - (uint32_t)out_values.size(), start_ind,
-                                          end_ind, &out_values);
-
-        if (cur_count) {
-            for (auto idx{start_ind}; idx < (start_ind + cur_count); ++idx) {
-                call_on_read_kv_cb(my_node, idx, qreq);
-                // my_node->add_nth_obj_to_list(idx, &out_values, true);
-            }
-        }
-
+        uint32_t start_ind{0};
+        uint32_t end_ind{0};
+        auto cur_count = to_variant_node(my_node)->multi_get(qreq.working_range(),
+                                                             qreq.batch_size() - uint32_cast(out_values.size()),
+                                                             start_ind, end_ind, &out_values, qreq.filter());
         if (qreq.route_tracing) {
             append_route_trace(qreq, my_node, btree_event_t::READ, start_ind, start_ind + cur_count);
         }
@@ -114,7 +104,7 @@ btree_status_t Btree< K, V >::do_traversal_query(const BtreeNodePtr& my_node, Bt
         return ret;
     }
 
-    const auto [start_isfound, start_idx] = my_node->find(qreq.next_key(), nullptr, false);
+    const auto [start_isfound, start_idx] = my_node->find(qreq.first_key(), nullptr, false);
     auto [end_is_found, end_idx] = my_node->find(qreq.input_range().end_key(), nullptr, false);
     bool unlocked_already = false;
 
@@ -241,9 +231,7 @@ btree_status_t do_serialzable_query(const BtreeNodePtr& my_node, BtreeSerializab
         return ret;
     }
 }
-#endif
 
-#ifdef SERIALIZABLE_QUERY_IMPLEMENTATION
 btree_status_t sweep_query(BtreeQueryRequest< K >& qreq, std::vector< std::pair< K, V > >& out_values) {
     COUNTER_INCREMENT(m_metrics, btree_read_ops_count, 1);
     qreq.init_batch_range();
