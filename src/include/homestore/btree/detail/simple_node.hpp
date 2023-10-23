@@ -147,8 +147,7 @@ public:
     }
 
     uint32_t num_entries_by_size(uint32_t start_idx, uint32_t size) const override {
-        uint32_t possible_entries = (size == 0) ? 0 : (size - 1) / get_nth_obj_size(0) + 1;
-        return std::min(possible_entries, this->total_entries() - start_idx);
+        return std::min(size / get_nth_obj_size(0), this->total_entries() - start_idx);
     }
 
     uint32_t copy_by_size(const BtreeConfig& cfg, const BtreeNode& o, uint32_t start_idx, uint32_t size) override {

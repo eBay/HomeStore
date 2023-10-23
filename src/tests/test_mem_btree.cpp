@@ -556,9 +556,7 @@ public:
         });
 
         preload(SISL_OPTIONS["preload_size"].as< uint32_t >());
-        print_keys();
         runInParallel(op_list);
-        print_keys();
     }
 
 private:

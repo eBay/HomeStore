@@ -166,7 +166,7 @@ public:
             get_nth_value(ind_s - 1, &last_1_val, false);
             this->set_edge_value(last_1_val);
 
-            for (uint32_t i = ind_s; i < total_entries; i++) {
+            for (uint32_t i = ind_s - 1; i < total_entries; i++) {
                 get_var_node_header()->m_available_space += get_nth_key_len(i) + get_nth_value_len(i) + recSize;
             }
             this->sub_entries(total_entries - ind_s + 1);
@@ -270,15 +270,15 @@ public:
             vb.bytes = kb.bytes + kb.size;
             vb.size = get_nth_value_len(ind);
 
-            auto sz = other.insert(0, kb, vb); // Keep on inserting on the first index, thus moving everything to right
-            if (!sz) break;
-
-            --ind;
-            ++nmoved;
             if ((kb.size + vb.size + this->get_record_size()) > size_to_move) {
                 // We reached threshold of how much we could move
                 break;
             }
+
+            auto sz = other.insert(0, kb, vb); // Keep on inserting on the first index, thus moving everything to right
+
+            --ind;
+            ++nmoved;
             size_to_move -= sz;
         }
         remove(ind + 1, this->total_entries() - 1);
@@ -329,6 +329,7 @@ public:
             if (sz == 0) { break; }
             ++n;
             ++idx;
+            copy_size -= sz;
         }
         this->set_gen(this_gen + 1);
 

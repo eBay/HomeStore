@@ -207,7 +207,7 @@ retry:
         m_btree_lock.unlock_shared();
 
         ret = check_collapse_root(req);
-        if (ret != btree_status_t::success) {
+        if (ret != btree_status_t::success && ret != btree_status_t::merge_not_required) {
             LOGERROR("check collapse read failed btree name {}", m_bt_cfg.name());
             goto out;
         }
