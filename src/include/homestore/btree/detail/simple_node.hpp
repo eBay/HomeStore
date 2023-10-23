@@ -230,7 +230,9 @@ public:
 #if 0
         std::string delimiter = print_friendly ? "\n" : "\t";
         auto str = fmt::format("{}{}.{} nEntries={} {} ",
+        auto str = fmt::format("{}{}.{} nEntries={} {} ",
                                print_friendly ? "------------------------------------------------------------\n" : "",
+                               this->node_id(), this->link_version(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
                                this->node_id(), this->link_version(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
         if (!this->is_leaf() && (this->has_valid_edge())) {
             fmt::format_to(std::back_inserter(str), "edge_id={}.{}", this->edge_info().m_bnodeid,
@@ -243,7 +245,7 @@ public:
         if (!this->is_leaf()) {
             fmt::format_to(std::back_inserter(str), " [");
             for (uint32_t i{0}; i < this->total_entries(); ++i) {
-                uint32_t cur_key = BtreeNode::gget_nth_key< K >(i, false).key();
+                uint32_t cur_key = BtreeNode::get_nth_key< K >(i, false).key();
                 BtreeLinkInfo child_info;
                 get_nth_value(i, &child_info, false /* copy */);
                 fmt::format_to(std::back_inserter(str), "{}.{} {}", cur_key,  child_info.link_version(), i == this->total_entries() - 1 ? "" : ", ");
