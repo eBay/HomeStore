@@ -69,13 +69,11 @@ btree_status_t Btree< K, V >::get_child_and_lock_node(const BtreeNodePtr& node, 
                                                       locktype_t int_lock_type, locktype_t leaf_lock_type,
                                                       void* context) const {
     if (index == node->total_entries()) {
-        const auto& edge_id{node->edge_id()};
-        child_info.set_bnode_id(edge_id);
-        // If bsearch points to last index, it means the search has not found entry unless it is an edge value.
-        if (!child_info.has_valid_bnode_id()) {
+        if (!node->has_valid_edge()) {
             BT_NODE_LOG_ASSERT(false, node, "Child index {} does not have valid bnode_id", index);
             return btree_status_t::not_found;
         }
+        child_info = node->get_edge_value();
     } else {
         BT_NODE_LOG_ASSERT_LT(index, node->total_entries(), node);
         node->get_nth_value(index, &child_info, false /* copy */);
