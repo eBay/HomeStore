@@ -49,23 +49,23 @@ public:
     void realloc_buf(const IndexBufferPtr& buf) override;
     void write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* cp_ctx) override;
     void read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) override;
-    std::tuple< bool, bool > create_chain(IndexBufferPtr& second, IndexBufferPtr& third, CPContext* cp_ctx) override;
+    std::pair< bool, bool > create_chain(IndexBufferPtr& second, IndexBufferPtr& third, CPContext* cp_ctx) override;
     void prepend_to_chain(const IndexBufferPtr& first, const IndexBufferPtr& second) override;
     void free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) override;
 
     //////////////////// CP Related API section /////////////////////////////////
     folly::Future< bool > async_cp_flush(IndexCPContext* context);
-    IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf) const;
+    IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext *cp_ctx) const;
 
 private:
     void start_flush_threads();
-    void process_write_completion(IndexCPContext* cp_ctx, IndexBuffer* pbuf);
-    void do_flush_one_buf(IndexCPContext* cp_ctx, const IndexBufferPtr& buf, bool part_of_batch);
-    std::pair< IndexBufferPtr, bool > on_buf_flush_done(IndexCPContext* cp_ctx, IndexBuffer* buf);
-    std::pair< IndexBufferPtr, bool > on_buf_flush_done_internal(IndexCPContext* cp_ctx, IndexBuffer* buf);
+    void process_write_completion(IndexCPContext* cp_ctx, IndexBufferPtr pbuf);
+    void do_flush_one_buf(IndexCPContext* cp_ctx, const IndexBufferPtr buf, bool part_of_batch);
+    std::pair< IndexBufferPtr, bool > on_buf_flush_done(IndexCPContext* cp_ctx, IndexBufferPtr& buf);
+    std::pair< IndexBufferPtr, bool > on_buf_flush_done_internal(IndexCPContext* cp_ctx, IndexBufferPtr& buf);
 
     void get_next_bufs(IndexCPContext* cp_ctx, uint32_t max_count, std::vector< IndexBufferPtr >& bufs);
-    void get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_count, IndexBuffer* prev_flushed_buf,
+    void get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_count, IndexBufferPtr prev_flushed_buf,
                                 std::vector< IndexBufferPtr >& bufs);
 };
 } // namespace homestore

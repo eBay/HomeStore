@@ -305,7 +305,7 @@ BtreeNode* Btree< K, V >::init_node(uint8_t* node_buf, uint32_t node_ctx_size, b
 /* Note:- This function assumes that access of this node is thread safe. */
 template < typename K, typename V >
 void Btree< K, V >::free_node(const BtreeNodePtr& node, locktype_t cur_lock, void* context) {
-    BT_NODE_LOG(DEBUG, node, "Freeing node");
+    BT_NODE_LOG(TRACE, node, "Freeing node");
 
     COUNTER_DECREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_count, btree_int_node_count, 1);
     if (cur_lock != locktype_t::NONE) {
