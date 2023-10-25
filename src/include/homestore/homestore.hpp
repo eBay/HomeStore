@@ -125,6 +125,8 @@ private:
     HS_SERVICE m_services; // Services homestore is starting with
     hs_before_services_starting_cb_t m_before_services_starting_cb{nullptr};
 
+    bool m_init_done{false};
+
 public:
     HomeStore() = default;
     virtual ~HomeStore() = default;

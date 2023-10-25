@@ -98,6 +98,7 @@ public:
         shared< ChunkSelector > custom_chunk_selector{nullptr};
         IndexServiceCallbacks* index_svc_cbs{nullptr};
         repl_impl_type repl_impl{repl_impl_type::solo};
+        chunk_num_t num_chunks{1};
     };
 
 #if 0
@@ -182,6 +183,7 @@ public:
                  {HS_SERVICE::LOG_LOCAL, {.size_pct = svc_params[HS_SERVICE::LOG_LOCAL].size_pct}},
                  {HS_SERVICE::DATA,
                   {.size_pct = svc_params[HS_SERVICE::DATA].size_pct,
+                   .num_chunks = svc_params[HS_SERVICE::DATA].num_chunks,
                    .alloc_type = svc_params[HS_SERVICE::DATA].blkalloc_type,
                    .chunk_sel_type = svc_params[HS_SERVICE::DATA].custom_chunk_selector
                        ? chunk_selector_type_t::CUSTOM
