@@ -223,6 +223,8 @@ void HomeStore::do_start() {
     m_init_done = true;
 }
 
+void HomeStore::init_done() { m_init_done = true; }
+
 void HomeStore::shutdown() {
     if (!m_init_done) {
         LOGWARN("Homestore shutdown is called before init is completed");
