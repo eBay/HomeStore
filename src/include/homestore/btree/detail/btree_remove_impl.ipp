@@ -288,6 +288,7 @@ bool Btree< K, V >::remove_extents_in_leaf(const BtreeNodePtr& node, BtreeRangeR
 template < typename K, typename V >
 template < typename ReqT >
 btree_status_t Btree< K, V >::check_collapse_root(ReqT& req) {
+    if (!m_bt_cfg.m_merge_turned_on) { return btree_status_t::merge_not_required; }
     BtreeNodePtr child;
     BtreeNodePtr root;
     btree_status_t ret = btree_status_t::success;
@@ -355,7 +356,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     for (auto indx = start_idx + 1; indx <= end_idx; ++indx) {
         if (indx == parent_node->total_entries()) {
             BT_NODE_LOG_ASSERT(parent_node->has_valid_edge(), parent_node,
-                               "Assertion failure, expected valid edge for parent_node: {}");
+                               "Assertion failure, expected valid edge for parent_node");
         }
 
         BtreeLinkInfo child_info;
@@ -463,28 +464,25 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
 
     if (!K::is_fixed_size()) {
         // Lets see if we have enough room in parent node to accommodate changes. This is needed only if the key is not
-        // fixed length. For fixed length node merge will always result in lesser or equal size
-        int64_t post_merge_size{0};
-        auto& old_node = old_nodes[leftmost_src.ith_nodes.back()];
-        if (old_node->total_entries()) {
-            post_merge_size += old_node->get_nth_obj_size(
-                std::min(leftmost_src.last_node_upto, old_node->total_entries() - 1)); // New leftmost entry
-        }
-        post_merge_size -= parent_node->get_nth_obj_size(start_idx); // Previous left entry
+        // fixed length. For fixed length node merge will always result in less or equal size
 
-        for (auto& node : new_nodes) {
-            if (node->total_entries()) { post_merge_size += node->get_nth_obj_size(node->total_entries() - 1); }
-        }
+        // we first calculate the least amount of space being released after removing excess children. the key size
+        // cannot be taken account; so we know for sure that value (i.e., linkinfo) and also its record will be freed.
+        // If the end_idx is the parent's edge, the space is not released eventually.
+        auto excess_releasing_nodes =
+            old_nodes.size() - new_nodes.size() - parent_node->total_entries() == end_idx ? 1 : 0;
+        auto minimum_releasing_excess_size =
+            excess_releasing_nodes * (BtreeLinkInfo::get_fixed_size() + parent_node->get_record_size());
 
-        for (auto& node : old_nodes) {
-            if (node->total_entries()) { post_merge_size -= node->get_nth_obj_size(node->total_entries() - 1); }
-        }
-
-        if (post_merge_size > parent_node->available_size(m_bt_cfg)) {
+        // aside from releasing size due to excess node, K::get_estimate_max_size is needed for each updating element
+        // at worst case (linkinfo and record remain the same for old and new nodes). The number of updating elements
+        // are the size of the new nodes (the last key of the last new node is not getting updated; hence excluded) plus
+        // the leftmost node.
+        if (parent_node->available_size(m_bt_cfg) + minimum_releasing_excess_size <
+            (1 + new_nodes.size() ? new_nodes.size() - 1 : 0) * K::get_estimate_max_size()) {
             BT_NODE_LOG(DEBUG, parent_node,
-                        "Merge is needed, however after merge it will add {} bytes which is more than "
-                        "available_size={}, so not proceeding with merge",
-                        post_merge_size, parent_node->available_size(m_bt_cfg));
+                        "Merge is needed, however after merge, the parent MAY not have enough space to accommodate the "
+                        "new keys, so not proceeding with merge");
             ret = btree_status_t::merge_not_required;
             goto out;
         }
@@ -528,13 +526,14 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
         // Finally update the leftmost node with latest key
         leftmost_node->set_next_bnode(next_node_id);
         if (leftmost_node->total_entries()) {
-            //            leftmost_node->inc_link_version();
+            leftmost_node->inc_link_version();
             parent_node->update(start_idx, leftmost_node->get_last_key< K >(), leftmost_node->link_info());
         }
 
         if (parent_node->total_entries() && !parent_node->has_valid_edge()) {
             if (parent_node->compare_nth_key(plast_key, parent_node->total_entries() - 1)) {
                 auto last_node = new_nodes.size() > 0 ? new_nodes[new_nodes.size() - 1] : leftmost_node;
+                last_node->inc_link_version();
                 parent_node->update(parent_node->total_entries() - 1, plast_key, last_node->link_info());
             }
         }
@@ -567,6 +566,28 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
 #ifndef NDEBUG
         // BT_DBG_ASSERT(!parent_node_step1.empty() && !parent_node_step2.empty() && !parent_node_step3.empty(),
         //               "Empty string");
+        // check if the link version of parent for each key info match the link version of its child
+        BtreeLinkInfo child_info;
+        if (ret == btree_status_t::success) {
+            for (uint32_t idx = 0; idx < new_nodes.size(); idx++) {
+                parent_node->get_nth_value(start_idx + 1 + idx, &child_info, false /* copy */);
+                BT_NODE_DBG_ASSERT_EQ(child_info.link_version(), new_nodes[idx]->link_version(), parent_node,
+                                      "mismatch of link version of new nodes in successful merge");
+            }
+            parent_node->get_nth_value(start_idx, &child_info, false /* copy */);
+            BT_NODE_DBG_ASSERT_EQ(child_info.link_version(), leftmost_node->link_version(), parent_node,
+                                  "parent_node, mismatch of link version of leftmost node in successful merge");
+        } else {
+            for (uint32_t idx = 0; idx < old_nodes.size(); idx++) {
+                parent_node->get_nth_value(start_idx + 1 + idx, &child_info, false /* copy */);
+                BT_NODE_DBG_ASSERT_EQ(child_info.link_version(), old_nodes[idx]->link_version(), parent_node,
+                                      "mismatch of link version of old nodes in unsuccessful merge");
+            }
+            parent_node->get_nth_value(start_idx, &child_info, false /* copy */);
+            BT_NODE_DBG_ASSERT_EQ(child_info.link_version(), leftmost_node->link_version(), parent_node,
+                                  "parent_node, mismatch of link version of leftmost node in unsuccessful merge");
+        }
+
         if (leftmost_node->total_entries() && (start_idx < parent_node->total_entries())) {
             BT_NODE_DBG_ASSERT_LE(
                 leftmost_node->get_last_key< K >().compare(parent_node->get_nth_key< K >(start_idx, false)), 0,
@@ -590,15 +611,18 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
 out:
     // Do free/unlock based on success/failure in reverse order
     if (ret == btree_status_t::success) {
-        for (auto& node : old_nodes) {
-            free_node(node, locktype_t::WRITE, context);
+        for (auto it = old_nodes.rbegin(); it != old_nodes.rend(); ++it) {
+            BT_NODE_LOG(DEBUG, (*it).get(), "Freeing this node as part of successful merge");
+            free_node(*it, locktype_t::WRITE, context);
         }
     } else {
-        for (auto& node : old_nodes) {
-            unlock_node(node, locktype_t::WRITE);
+        for (auto it = old_nodes.rbegin(); it != old_nodes.rend(); ++it) {
+            BT_NODE_LOG(DEBUG, (*it).get(), "Unlocking this node as part of unsuccessful merge");
+            unlock_node(*it, locktype_t::WRITE);
         }
-        for (auto& node : new_nodes) {
-            free_node(node, locktype_t::NONE, context);
+        for (auto it = new_nodes.rbegin(); it != new_nodes.rend(); ++it) {
+            BT_NODE_LOG(DEBUG, (*it).get(), "Freeing this new node as part of unsuccessful merge");
+            free_node(*it, locktype_t::NONE, context);
         }
     }
     return ret;

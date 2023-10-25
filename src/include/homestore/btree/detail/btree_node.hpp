@@ -398,7 +398,7 @@ public:
         return true;
     }
 
-    virtual BtreeLinkInfo get_edge_value() const { return BtreeLinkInfo{edge_id(), link_version()}; }
+    virtual BtreeLinkInfo get_edge_value() const { return BtreeLinkInfo{edge_id(), edge_link_version()}; }
 
     virtual void set_edge_value(const BtreeValue& v) {
         const auto b = v.serialize();
@@ -609,6 +609,10 @@ public:
 
     bnodeid_t edge_id() const { return get_persistent_header_const()->edge_info.m_bnodeid; }
     void set_edge_id(bnodeid_t edge) { get_persistent_header()->edge_info.m_bnodeid = edge; }
+    uint64_t edge_link_version() const { return get_persistent_header_const()->edge_info.m_link_version; }
+    void set_edge_link_version(uint64_t link_version) {
+        get_persistent_header()->edge_info.m_link_version = link_version;
+    }
 
     BtreeLinkInfo::bnode_link_info edge_info() const { return get_persistent_header_const()->edge_info; }
     void set_edge_info(const BtreeLinkInfo::bnode_link_info& info) { get_persistent_header()->edge_info = info; }

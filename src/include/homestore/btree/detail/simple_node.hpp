@@ -147,8 +147,7 @@ public:
     }
 
     uint32_t num_entries_by_size(uint32_t start_idx, uint32_t size) const override {
-        uint32_t possible_entries = (size == 0) ? 0 : (size - 1) / get_nth_obj_size(0) + 1;
-        return std::min(possible_entries, this->total_entries() - start_idx);
+        return std::min(size / get_nth_obj_size(0), this->total_entries() - start_idx);
     }
 
     uint32_t copy_by_size(const BtreeConfig& cfg, const BtreeNode& o, uint32_t start_idx, uint32_t size) override {
@@ -264,9 +263,9 @@ public:
     std::string to_string_keys(bool print_friendly = false) const override {
 #if 0
         std::string delimiter = print_friendly ? "\n" : "\t";
-        auto str = fmt::format("{}{} nEntries={} {} ",
+        auto str = fmt::format("{}{}.{} nEntries={} {} ",
                                print_friendly ? "------------------------------------------------------------\n" : "",
-                               this->node_id(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
+                               this->node_id(), this->link_version(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
         if (!this->is_leaf() && (this->has_valid_edge())) {
             fmt::format_to(std::back_inserter(str), "edge_id={}.{}", this->edge_info().m_bnodeid,
                            this->edge_info().m_link_version);
@@ -279,7 +278,9 @@ public:
             fmt::format_to(std::back_inserter(str), " [");
             for (uint32_t i{0}; i < this->total_entries(); ++i) {
                 uint32_t cur_key = get_nth_key< K >(i, false).key();
-                fmt::format_to(std::back_inserter(str), "{}{}", cur_key, i == this->total_entries() - 1 ? "" : ", ");
+                BtreeLinkInfo child_info;
+                get_nth_value(i, &child_info, false /* copy */);
+                fmt::format_to(std::back_inserter(str), "{}.{} {}", cur_key,  child_info.link_version(), i == this->total_entries() - 1 ? "" : ", ");
             }
             fmt::format_to(std::back_inserter(str), "]");
             return str;

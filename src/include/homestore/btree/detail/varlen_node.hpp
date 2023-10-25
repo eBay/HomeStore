@@ -166,7 +166,7 @@ public:
             get_nth_value(ind_s - 1, &last_1_val, false);
             this->set_edge_value(last_1_val);
 
-            for (uint32_t i = ind_s; i < total_entries; i++) {
+            for (uint32_t i = ind_s - 1; i < total_entries; i++) {
                 get_var_node_header()->m_available_space += get_nth_key_len(i) + get_nth_value_len(i) + recSize;
             }
             this->sub_entries(total_entries - ind_s + 1);
@@ -270,15 +270,15 @@ public:
             vb.bytes = kb.bytes + kb.size;
             vb.size = get_nth_value_len(ind);
 
-            auto sz = other.insert(0, kb, vb); // Keep on inserting on the first index, thus moving everything to right
-            if (!sz) break;
-
-            --ind;
-            ++nmoved;
             if ((kb.size + vb.size + this->get_record_size()) > size_to_move) {
                 // We reached threshold of how much we could move
                 break;
             }
+
+            auto sz = other.insert(0, kb, vb); // Keep on inserting on the first index, thus moving everything to right
+
+            --ind;
+            ++nmoved;
             size_to_move -= sz;
         }
         remove(ind + 1, this->total_entries() - 1);
@@ -329,6 +329,7 @@ public:
             if (sz == 0) { break; }
             ++n;
             ++idx;
+            copy_size -= sz;
         }
         this->set_gen(this_gen + 1);
 
@@ -520,9 +521,9 @@ public:
     std::string to_string_keys(bool print_friendly = false) const override {
 #if 0
         std::string delimiter = print_friendly ? "\n" : "\t";
-        auto str = fmt::format("{}{} nEntries={} {} ",
+        auto str = fmt::format("{}{}.{} nEntries={} {} ",
                                print_friendly ? "------------------------------------------------------------\n" : "",
-                               this->node_id(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
+                               this->node_id(), this->link_version(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
         if (!this->is_leaf() && (this->has_valid_edge())) {
             fmt::format_to(std::back_inserter(str), "edge_id={}.{}", this->edge_info().m_bnodeid,
                            this->edge_info().m_link_version);
@@ -535,7 +536,9 @@ public:
             fmt::format_to(std::back_inserter(str), " [");
             for (uint32_t i{0}; i < this->total_entries(); ++i) {
                 uint32_t cur_key = get_nth_key< K >(i, false).key();
-                fmt::format_to(std::back_inserter(str), "{}{}", cur_key, i == this->total_entries() - 1 ? "" : ", ");
+                BtreeLinkInfo child_info;
+                get_nth_value(i, &child_info, false /* copy */);
+                fmt::format_to(std::back_inserter(str), "{}.{} {}", cur_key, child_info.link_version(), i == this->total_entries() - 1 ? "" : ", ");
             }
             fmt::format_to(std::back_inserter(str), "]");
             return str;
