@@ -129,7 +129,6 @@ private:
 
     HS_SERVICE m_services; // Services homestore is starting with
     hs_before_services_starting_cb_t m_before_services_starting_cb{nullptr};
-
     bool m_init_done{false};
 
 public:
@@ -159,6 +158,7 @@ public:
 
     // cap_attrs get_system_capacity() const; // Need to move this to homeblks/homeobj
     bool is_first_time_boot() const;
+    bool is_initializing() const { return !m_init_done; }
 
     // Getters
     bool has_index_service() const;
@@ -179,7 +179,6 @@ public:
 
 private:
     void init_cache();
-    void init_done();
     shared< VirtualDev > create_vdev_cb(const vdev_info& vinfo, bool load_existing);
     uint64_t pct_to_size(float pct, HSDevType dev_type) const;
     void do_start();

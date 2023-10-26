@@ -50,8 +50,8 @@ std::condition_variable VarsizeBlkAllocator::s_sweeper_cv;
 std::queue< VarsizeBlkAllocator* > VarsizeBlkAllocator::s_sweeper_queue;
 std::unordered_set< VarsizeBlkAllocator* > VarsizeBlkAllocator::s_block_allocators;
 
-VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig const& cfg, bool init, chunk_num_t chunk_id) :
-        BlkAllocator{cfg, chunk_id},
+VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig const& cfg, bool is_fresh, chunk_num_t chunk_id) :
+        BitmapBlkAllocator{cfg, is_fresh, chunk_id},
         m_state{BlkAllocatorState::INIT},
         m_cfg{cfg},
         m_rand_portion_num_generator{0, s_cast< blk_count_t >(get_num_portions() - 1)},
@@ -84,8 +84,7 @@ VarsizeBlkAllocator::VarsizeBlkAllocator(VarsizeBlkAllocConfig const& cfg, bool 
         LOGINFO("m_fb_cache total free blks: {}", m_fb_cache->total_free_blks());
     }
 
-    // Start a thread which will do sweeping job of free segments
-    if (init) { inited(); }
+    if (is_fresh || !is_persistent()) { do_start(); }
 }
 
 VarsizeBlkAllocator::~VarsizeBlkAllocator() {
@@ -232,13 +231,15 @@ bool VarsizeBlkAllocator::allocator_state_machine() {
     return active_state;
 }
 
-void VarsizeBlkAllocator::inited() {
-    m_cache_bm->copy(*(get_disk_bm_const()));
-    BlkAllocator::inited();
+void VarsizeBlkAllocator::load() {
+    m_cache_bm->copy(*get_disk_bitmap());
 
     BLKALLOC_LOG(INFO, "VarSizeBlkAllocator initialized loading bitmap of size={} used blks={} from persistent storage",
                  in_bytes(m_cache_bm->size()), get_alloced_blk_count());
+    do_start();
+}
 
+void VarsizeBlkAllocator::do_start() {
     // if use slabs then add to sweeper threads queue
     if (m_cfg.m_use_slabs) {
         {
@@ -367,10 +368,7 @@ void VarsizeBlkAllocator::fill_cache_in_portion(blk_num_t portion_num, blk_cache
                          fill_session.session_id, portion_num, b.start_bit, nblks_added, get_alloced_blk_count());
 
             // Set the bitmap indicating the blocks are allocated
-            if (nblks_added > 0) {
-                m_cache_bm->set_bits(b.start_bit, nblks_added);
-                if (portion.decrease_available_blocks(nblks_added) == 0) break;
-            }
+            if (nblks_added > 0) { m_cache_bm->set_bits(b.start_bit, nblks_added); }
             cur_blk_id = b.start_bit + b.nbits;
         }
     }
@@ -439,9 +437,6 @@ BlkAllocStatus VarsizeBlkAllocator::alloc(blk_count_t nblks, blk_alloc_hints con
 out:
     if ((status == BlkAllocStatus::SUCCESS) || (status == BlkAllocStatus::PARTIAL)) {
         incr_alloced_blk_count(num_allocated);
-
-        // update real time bitmap
-        if (realtime_bm_on()) { alloc_on_realtime(out_mbid); }
 
 #ifdef _PRERELEASE
         alloc_sanity_check(num_allocated, hints, out_mbid);
@@ -616,7 +611,6 @@ blk_count_t VarsizeBlkAllocator::alloc_blks_direct(blk_count_t nblks, blk_alloc_
 
                 // Set the bitmap indicating the blocks are allocated
                 m_cache_bm->set_bits(b.start_bit, b.nbits);
-                if (portion.decrease_available_blocks(b.nbits) == 0) break;
                 cur_blk_id = b.start_bit + b.nbits;
             }
         }
@@ -633,11 +627,6 @@ blk_count_t VarsizeBlkAllocator::alloc_blks_direct(blk_count_t nblks, blk_alloc_
 }
 
 void VarsizeBlkAllocator::free(BlkId const& bid) {
-    if (!m_inited) {
-        BLKALLOC_LOG(DEBUG, "Free not required for blk num = {}", bid.blk_num());
-        return;
-    }
-
     blk_count_t n_freed = (m_cfg.m_use_slabs && (bid.blk_count() <= m_cfg.highest_slab_blks_count()))
         ? free_blks_slab(r_cast< MultiBlkId const& >(bid))
         : free_blks_direct(r_cast< MultiBlkId const& >(bid));
@@ -684,7 +673,6 @@ blk_count_t VarsizeBlkAllocator::free_blks_direct(MultiBlkId const& bid) {
                              "Expected end bit to be smaller than portion end bit");
             BLKALLOC_REL_ASSERT(m_cache_bm->is_bits_set(b.blk_num(), b.blk_count()), "Expected bits to be set");
             m_cache_bm->reset_bits(b.blk_num(), b.blk_count());
-            portion.increase_available_blocks(b.blk_count());
         }
         BLKALLOC_LOG(TRACE, "Freeing directly to portion={} blkid={} set_bits_count={}",
                      blknum_to_portion_num(b.blk_num()), b.to_string(), get_alloced_blk_count());
@@ -704,8 +692,6 @@ blk_count_t VarsizeBlkAllocator::free_blks_direct(MultiBlkId const& bid) {
 }
 
 bool VarsizeBlkAllocator::is_blk_alloced(BlkId const& bid, bool use_lock) const {
-    if (!m_inited) { return true; }
-
     auto check_bits_set = [this](BlkId const& b, bool use_lock) {
         if (use_lock) {
             BlkAllocPortion const& portion = blknum_to_portion_const(b.blk_num());
@@ -758,7 +744,7 @@ void VarsizeBlkAllocator::alloc_sanity_check(blk_count_t nblks, blk_alloc_hints 
 
             BLKALLOC_REL_ASSERT(m_cache_bm->is_bits_set(b->blk_num(), b->blk_count()),
                                 "Expected blkid={} to be already set in cache bitmap", b->to_string());
-            if (get_disk_bm_const()) {
+            if (is_persistent()) {
                 BLKALLOC_REL_ASSERT(!is_blk_alloced_on_disk(*b), "Expected blkid={} to be already free in disk bitmap",
                                     b->to_string());
             }

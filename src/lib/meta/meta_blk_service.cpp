@@ -100,7 +100,6 @@ void MetaBlkService::start(bool need_format) {
     } else {
         load_ssb();
         scan_meta_blks();
-        m_sb_vdev->recovery_done();
     }
     recover();
 }

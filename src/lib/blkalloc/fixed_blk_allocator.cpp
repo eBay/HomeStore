@@ -17,22 +17,21 @@
 #include <iomgr/iomgr_flip.hpp>
 
 #include "common/homestore_assert.hpp"
-#include "blk_allocator.h"
+#include "fixed_blk_allocator.h"
 
 namespace homestore {
-FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig const& cfg, bool init, chunk_num_t chunk_id) :
-        BlkAllocator(cfg, chunk_id), m_blk_q{get_total_blks()} {
-    LOGINFO("total blks: {}", get_total_blks());
-    if (init) { inited(); }
+FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig const& cfg, bool is_fresh, chunk_num_t chunk_id) :
+        BitmapBlkAllocator(cfg, is_fresh, chunk_id), m_blk_q{get_total_blks()} {
+    LOGINFO("FixedBlkAllocator total blks: {}", get_total_blks());
+
+    if (is_fresh || !is_persistent()) { load(); }
 }
 
-void FixedBlkAllocator::inited() {
+void FixedBlkAllocator::load() {
     blk_num_t blk_num{0};
-
     while (blk_num < get_total_blks()) {
         blk_num = init_portion(blknum_to_portion(blk_num), blk_num);
     }
-    BlkAllocator::inited();
 }
 
 blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion& portion, blk_num_t start_blk_num) {
@@ -43,7 +42,7 @@ blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion& portion, blk_num_t st
         BlkAllocPortion& cur_portion = blknum_to_portion(blk_num);
         if (portion.get_portion_num() != cur_portion.get_portion_num()) break;
 
-        if (!get_disk_bm_const()->is_bits_set(blk_num, 1)) {
+        if (!is_persistent() || get_disk_bitmap()->is_bits_reset(blk_num, 1)) {
             const auto pushed = m_blk_q.write(BlkId{blk_num, 1, m_chunk_id});
             HS_DBG_ASSERT_EQ(pushed, true, "Expected to be able to push the blk on fixed capacity Q");
         }
@@ -64,24 +63,14 @@ BlkAllocStatus FixedBlkAllocator::alloc_contiguous(BlkId& out_blkid) {
 #ifdef _PRERELEASE
     if (iomgr_flip::instance()->test_flip("fixed_blkalloc_no_blks")) { return BlkAllocStatus::SPACE_FULL; }
 #endif
-    const auto ret = m_blk_q.read(out_blkid);
-    if (ret) {
-        // update real time bitmap;
-        if (realtime_bm_on()) { alloc_on_realtime(out_blkid); }
-        return BlkAllocStatus::SUCCESS;
-    } else {
-        return BlkAllocStatus::SPACE_FULL;
-    }
+    return m_blk_q.read(out_blkid) ? BlkAllocStatus::SUCCESS : BlkAllocStatus::SPACE_FULL;
 }
 
 void FixedBlkAllocator::free(BlkId const& b) {
     HS_DBG_ASSERT_EQ(b.blk_count(), 1, "Multiple blk free for FixedBlkAllocator? allocated by different allocator?");
 
-    // No need to set in cache if it is not recovered. When recovery is complete we copy the disk_bm to cache bm.
-    if (m_inited) {
-        const auto pushed = m_blk_q.write(b);
-        HS_DBG_ASSERT_EQ(pushed, true, "Expected to be able to push the blk on fixed capacity Q");
-    }
+    const auto pushed = m_blk_q.write(b);
+    HS_DBG_ASSERT_EQ(pushed, true, "Expected to be able to push the blk on fixed capacity Q");
 }
 
 blk_num_t FixedBlkAllocator::available_blks() const { return m_blk_q.sizeGuess(); }

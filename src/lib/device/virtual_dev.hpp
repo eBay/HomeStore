@@ -251,8 +251,6 @@ public:
     /// @brief Submit the batch of IOs previously queued as part of async read/write APIs.
     void submit_batch();
 
-    virtual void recovery_done();
-
     ////////////////////// Checkpointing related methods ///////////////////////////
     /// @brief
     ///

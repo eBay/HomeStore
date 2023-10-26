@@ -220,10 +220,8 @@ void HomeStore::do_start() {
     // to start log store
     if (has_log_service() && inp_params.auto_recovery) { m_log_service->start(is_first_time_boot() /* format */); }
 
-    init_done();
+    m_init_done = true;
 }
-
-void HomeStore::init_done() { m_init_done = true; }
 
 void HomeStore::shutdown() {
     if (!m_init_done) {
