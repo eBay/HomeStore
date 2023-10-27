@@ -30,6 +30,8 @@ public:
     void set_user_private(const sisl::blob& data);
     const uint8_t* get_user_private() const;
     blk_num_t available_blks() const;
+    blk_num_t get_freeable_nblks() const;
+    blk_num_t get_defrag_nblks() const;
     uint32_t get_pdev_id() const;
     uint16_t get_chunk_id() const;
     cshared< Chunk > get_internal_chunk() const;

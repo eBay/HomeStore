@@ -186,6 +186,8 @@ public:
     virtual BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) = 0;
     virtual void free(BlkId const& id) = 0;
     virtual blk_num_t available_blks() const = 0;
+    virtual blk_num_t get_freeable_nblks() const = 0;
+    virtual blk_num_t get_defrag_nblks() const = 0;
     virtual blk_num_t get_used_blks() const = 0;
     virtual bool is_blk_alloced(BlkId const& b, bool use_lock = false) const = 0;
     virtual std::string to_string() const = 0;
@@ -319,6 +321,8 @@ public:
     void inited() override;
 
     blk_num_t available_blks() const override;
+    blk_num_t get_freeable_nblks() const override;
+    blk_num_t get_defrag_nblks() const override;
     blk_num_t get_used_blks() const override;
     bool is_blk_alloced(BlkId const& in_bid, bool use_lock = false) const override;
     std::string to_string() const override;

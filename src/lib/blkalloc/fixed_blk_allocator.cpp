@@ -85,6 +85,17 @@ void FixedBlkAllocator::free(BlkId const& b) {
 }
 
 blk_num_t FixedBlkAllocator::available_blks() const { return m_blk_q.sizeGuess(); }
+
+blk_num_t FixedBlkAllocator::get_freeable_nblks() const {
+    // TODO: implement this
+    return 0;
+}
+
+blk_num_t FixedBlkAllocator::get_defrag_nblks() const {
+    // TODO: implement this
+    return 0;
+}
+
 blk_num_t FixedBlkAllocator::get_used_blks() const { return get_total_blks() - available_blks(); }
 
 std::string FixedBlkAllocator::to_string() const {
