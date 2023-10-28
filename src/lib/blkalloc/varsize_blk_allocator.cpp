@@ -734,11 +734,13 @@ blk_num_t VarsizeBlkAllocator::available_blks() const { return get_total_blks() 
 
 blk_num_t VarsizeBlkAllocator::get_freeable_nblks() const {
     // TODO: implement this
+    BLKALLOC_REL_ASSERT(false, "VarsizeBlkAllocator get_freeable_nblks Not implemented")
     return 0;
 }
 
 blk_num_t VarsizeBlkAllocator::get_defrag_nblks() const {
     // TODO: implement this
+    BLKALLOC_REL_ASSERT(false, "VarsizeBlkAllocator get_defrag_nblks Not implemented")
     return 0;
 }
 
