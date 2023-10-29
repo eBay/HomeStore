@@ -25,6 +25,10 @@ const uint8_t* VChunk::get_user_private() const { return m_internal_chunk->user_
 
 blk_num_t VChunk::available_blks() const { return m_internal_chunk->blk_allocator()->available_blks(); }
 
+blk_num_t VChunk::get_freeable_nblks() const { return m_internal_chunk->blk_allocator()->get_freeable_nblks(); }
+
+blk_num_t VChunk::get_defrag_nblks() const { return m_internal_chunk->blk_allocator()->get_defrag_nblks(); }
+
 uint32_t VChunk::get_pdev_id() const { return m_internal_chunk->physical_dev()->pdev_id(); }
 
 uint16_t VChunk::get_chunk_id() const { return m_internal_chunk->chunk_id(); }

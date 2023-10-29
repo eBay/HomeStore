@@ -731,6 +731,19 @@ bool VarsizeBlkAllocator::is_blk_alloced(BlkId const& bid, bool use_lock) const 
 }
 
 blk_num_t VarsizeBlkAllocator::available_blks() const { return get_total_blks() - get_used_blks(); }
+
+blk_num_t VarsizeBlkAllocator::get_freeable_nblks() const {
+    // TODO: implement this
+    BLKALLOC_REL_ASSERT(false, "VarsizeBlkAllocator get_freeable_nblks Not implemented")
+    return 0;
+}
+
+blk_num_t VarsizeBlkAllocator::get_defrag_nblks() const {
+    // TODO: implement this
+    BLKALLOC_REL_ASSERT(false, "VarsizeBlkAllocator get_defrag_nblks Not implemented")
+    return 0;
+}
+
 blk_num_t VarsizeBlkAllocator::get_used_blks() const { return get_alloced_blk_count(); }
 
 #ifdef _PRERELEASE
