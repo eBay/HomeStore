@@ -591,8 +591,7 @@ blk_count_t VarsizeBlkAllocator::alloc_blks_direct(blk_count_t nblks, blk_alloc_
         auto const end_blk_id = cur_blk_id + get_blks_per_portion() - 1;
         {
             auto lock{portion.portion_auto_lock()};
-            while (nblks_remain && (cur_blk_id <= end_blk_id) && portion.get_available_blocks() &&
-                   out_blkid.has_room()) {
+            while (nblks_remain && (cur_blk_id <= end_blk_id) && out_blkid.has_room()) {
                 // Get next reset bits and insert to cache and then reset those bits
                 auto const b = m_cache_bm->get_next_contiguous_n_reset_bits(
                     cur_blk_id, end_blk_id, std::min(min_blks, nblks_remain), nblks_remain);

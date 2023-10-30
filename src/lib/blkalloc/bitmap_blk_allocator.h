@@ -43,7 +43,6 @@ private:
     mutable std::mutex m_blk_lock;
     blk_num_t m_portion_num;
     blk_temp_t m_temperature;
-    blk_num_t m_available_blocks;
 
 public:
     BlkAllocPortion(blk_temp_t temp = default_temperature()) : m_temperature(temp) {}
@@ -55,7 +54,6 @@ public:
 
     auto portion_auto_lock() const { return std::scoped_lock< std::mutex >(m_blk_lock); }
     blk_num_t get_portion_num() const { return m_portion_num; }
-    blk_num_t get_available_blocks() const { return m_available_blocks; }
     blk_temp_t temperature() const { return m_temperature; }
 
     void set_portion_num(blk_num_t portion_num) { m_portion_num = portion_num; }
