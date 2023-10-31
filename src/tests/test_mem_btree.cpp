@@ -502,7 +502,7 @@ TYPED_TEST(BtreeTest, RandomRemoveRange) {
     static thread_local std::uniform_int_distribution< uint32_t > s_rand_key_generator{0, 2 * num_entries};
     //    this->print_keys();
     LOGINFO("Step 2: Do range remove for maximum of {} iterations", num_iters);
-    for (uint32_t i{0}; i < num_iters && this->m_shadow_map.size() > 0; ++i) {
+    for (uint32_t i{0}; i< num_iters&& this->m_shadow_map.size() > 0; ++i) {
         uint32_t key1 = s_rand_key_generator(g_re);
         uint32_t key2 = s_rand_key_generator(g_re);
         uint32_t start_key = std::min(key1, key2);
@@ -541,13 +541,12 @@ public:
     void print_keys() const { m_bt->print_tree_keys(); }
 
     void execute(const std::vector< std::pair< std::string, int > >& op_list) {
-
         LOGINFO("Starting iomgr with {} threads", SISL_OPTIONS["n_threads"].as< uint32_t >());
         ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = SISL_OPTIONS["n_threads"].as< uint32_t >(),
-                                                     false,
+                                                     .is_spdk = false,
                                                      .num_fibers = 1 + SISL_OPTIONS["n_fibers"].as< uint32_t >(),
-                                                     0,
-                                                     0});
+                                                     .app_mem_size_mb = 0,
+                                                     .hugepage_size_mb = 0});
         std::mutex mtx;
         iomanager.run_on_wait(iomgr::reactor_regex::all_io, [this, &mtx]() {
             auto fv = iomanager.sync_io_capable_fibers();

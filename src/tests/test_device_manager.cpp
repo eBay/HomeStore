@@ -143,7 +143,7 @@ TEST_F(DeviceMgrTest, StripedVDevCreation) {
     uint32_t size_pct = 2;
     uint64_t remain_size = avail_size;
 
-    LOGINFO("Step 1: Creating {} vdevs with combined size as {}", in_bytes(avail_size));
+    LOGINFO("Step 1: Creating {} vdevs with combined size as {}", num_test_vdevs, in_bytes(avail_size));
     for (uint32_t i = 0; i < num_test_vdevs; ++i) {
         std::string name = "test_vdev_" + std::to_string(i + 1);
         uint64_t size = std::min(remain_size, (avail_size * size_pct) / 100);

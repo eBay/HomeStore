@@ -405,4 +405,6 @@ void CPWatchdog::cp_watchdog_timer() {
     }
 }
 
+cp_id_t CPContext::id() const { return m_cp->id(); }
+
 } // namespace homestore

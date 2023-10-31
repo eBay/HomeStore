@@ -38,8 +38,6 @@ public:
     Chunk& operator=(Chunk&&) noexcept = delete;
     virtual ~Chunk() = default;
 
-    void cp_flush(CP* cp);
-
     /////////////// Pointer Getters ////////////////////
     const PhysicalDev* physical_dev() const { return m_pdev; }
     PhysicalDev* physical_dev_mutable() { return m_pdev; };

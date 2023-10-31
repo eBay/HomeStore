@@ -200,7 +200,7 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
         }
 
         if ((status != BlkAllocStatus::SUCCESS) && !((status == BlkAllocStatus::PARTIAL) && hints.partial_alloc_ok)) {
-            LOGERROR("nblks={} failed to alloc after trying to alloc on every chunks {} and devices {}.", nblks);
+            LOGERROR("nblks={} failed to alloc after trying to alloc on every chunks and devices", nblks);
             COUNTER_INCREMENT(m_metrics, vdev_num_alloc_failure, 1);
         }
 
@@ -252,14 +252,25 @@ BlkAllocStatus VirtualDev::alloc_blks_from_chunk(blk_count_t nblks, blk_alloc_hi
     return status;
 }
 
-void VirtualDev::free_blk(BlkId const& b) {
-    if (b.is_multi()) {
-        MultiBlkId const& mb = r_cast< MultiBlkId const& >(b);
-        Chunk* chunk = m_dmgr.get_chunk_mutable(mb.chunk_num());
-        chunk->blk_allocator_mutable()->free(mb);
+void VirtualDev::free_blk(BlkId const& bid, VDevCPContext* vctx) {
+    auto do_free_action = [this](auto const& b, VDevCPContext* vctx) {
+        if (vctx) {
+            vctx->m_free_blkid_list.push_back(b);
+        } else {
+            BlkAllocator* allocator = m_dmgr.get_chunk_mutable(b.chunk_num())->blk_allocator_mutable();
+            if (m_auto_recovery) { allocator->free_on_disk(b); }
+            allocator->free(b);
+        }
+    };
+
+    if (bid.is_multi()) {
+        MultiBlkId const& mbid = r_cast< MultiBlkId const& >(bid);
+        auto it = mbid.iterate();
+        while (auto const b = it.next()) {
+            do_free_action(*b, vctx);
+        }
     } else {
-        Chunk* chunk = m_dmgr.get_chunk_mutable(b.chunk_num());
-        chunk->blk_allocator_mutable()->free(b);
+        do_free_action(bid, vctx);
     }
 }
 
@@ -541,24 +552,28 @@ void VirtualDev::update_vdev_private(const sisl::blob& private_data) {
 }
 
 ///////////////////////// VirtualDev Checkpoint methods /////////////////////////////
+VDevCPContext::VDevCPContext(CP* cp) : CPContext(cp) {}
 
-VDevCPContext::VDevCPContext(cp_id_t cp_id) : CPContext(cp_id) {}
+std::unique_ptr< CPContext > VirtualDev::create_cp_context(CP* cp) { return std::make_unique< VDevCPContext >(cp); }
 
-std::unique_ptr< CPContext > VirtualDev::create_cp_context(cp_id_t cp_id) {
-    return std::make_unique< VDevCPContext >(cp_id);
-}
+void VirtualDev::cp_flush(VDevCPContext* v_cp_ctx) {
+    CP* cp = v_cp_ctx->cp();
 
-void VirtualDev::cp_flush(CP* cp) {
-    // pass down cp so that underlying componnents can get their customized CP context if needed;
-    m_chunk_selector->foreach_chunks([this, cp](cshared< Chunk >& chunk) { chunk->cp_flush(cp); });
+    // pass down cp so that underlying components can get their customized CP context if needed;
+    m_chunk_selector->foreach_chunks(
+        [this, cp](cshared< Chunk >& chunk) { chunk->blk_allocator_mutable()->cp_flush(cp); });
+
+    // All of the blkids which were captured in the current vdev cp context will now be freed and hence available for
+    // allocation on the new CP dirty collection session which is ongoing
+    for (auto const& b : v_cp_ctx->m_free_blkid_list) {
+        BlkAllocator* allocator = m_dmgr.get_chunk_mutable(b.chunk_num())->blk_allocator_mutable();
+        if (m_auto_recovery) { allocator->free_on_disk(b); }
+        allocator->free(b);
+    }
 }
 
 // sync-ops during cp_flush, so return 100;
 int VirtualDev::cp_progress_percent() { return 100; }
-
-void VirtualDev::cp_cleanup(CP*) {
-    // no-op;
-}
 
 ///////////////////////// VirtualDev Private Methods /////////////////////////////
 uint64_t VirtualDev::to_dev_offset(BlkId const& b, Chunk** chunk) const {

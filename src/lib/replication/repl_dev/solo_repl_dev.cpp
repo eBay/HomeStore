@@ -83,6 +83,7 @@ void SoloReplDev::write_journal(intrusive< repl_req_ctx > rreq) {
                                      auto cur_lsn = m_commit_upto.load();
                                      if (cur_lsn < lsn) { m_commit_upto.compare_exchange_strong(cur_lsn, lsn); }
 
+                                     data_service().commit_blk(rreq->local_blkid);
                                      m_listener->on_commit(rreq->lsn, rreq->header, rreq->key, rreq->local_blkid, rreq);
                                  });
 }

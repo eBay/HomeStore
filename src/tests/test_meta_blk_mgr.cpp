@@ -658,7 +658,7 @@ public:
         freq.set_count(1);
         freq.set_percent(100);
         m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
-        LOGDEBUG("Flip " + flip_name + " set");
+        LOGDEBUG("Flip {} set", flip_name);
     }
 #endif
 

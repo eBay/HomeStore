@@ -66,7 +66,6 @@ DeviceManager::DeviceManager(const std::vector< dev_info >& devs, vdev_create_cb
         if (is_hdd(dev_info.dev_name)) {
             HomeStoreStaticConfig::instance().hdd_drive_present = true;
             found_hdd_dev = true;
-            LOGINFO("HDD device found: {}");
             break;
         }
     }

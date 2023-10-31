@@ -5,7 +5,7 @@ namespace homestore {
 IndexCPCallbacks::IndexCPCallbacks(IndexWBCache* wb_cache) : m_wb_cache{wb_cache} {}
 
 std::unique_ptr< CPContext > IndexCPCallbacks::on_switchover_cp(CP* cur_cp, CP* new_cp) {
-    return m_wb_cache->create_cp_context(new_cp->id());
+    return std::make_unique< IndexCPContext >(new_cp);
 }
 
 folly::Future< bool > IndexCPCallbacks::cp_flush(CP* cp) {

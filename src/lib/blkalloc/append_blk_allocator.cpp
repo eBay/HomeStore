@@ -119,19 +119,11 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
     return BlkAllocStatus::SUCCESS;
 }
 
-BlkAllocStatus AppendBlkAllocator::alloc_on_disk(BlkId const&) {
-    DEBUG_ASSERT(false, "alloc_on_disk called on non-persisted allocator");
-    return BlkAllocStatus::SUCCESS;
-}
+BlkAllocStatus AppendBlkAllocator::alloc_on_disk(BlkId const&) { return BlkAllocStatus::SUCCESS; }
 
-void AppendBlkAllocator::free_on_disk(BlkId const&) {
-    DEBUG_ASSERT(false, "free_on_disk called on non-persisted allocator");
-}
+void AppendBlkAllocator::free_on_disk(BlkId const&) {}
 
-bool AppendBlkAllocator::is_blk_alloced_on_disk(BlkId const&, bool) const {
-    DEBUG_ASSERT(false, "is_blk_alloced_on_disk called on non-persisted allocator");
-    return false;
-}
+bool AppendBlkAllocator::is_blk_alloced_on_disk(BlkId const&, bool) const { return false; }
 
 //
 // cp_flush doesn't need CPGuard as it is triggered by CPMgr which already handles the reference check;
