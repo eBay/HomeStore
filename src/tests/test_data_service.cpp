@@ -16,6 +16,9 @@
 #include <vector>
 #include <iostream>
 #include <filesystem>
+#include <random>
+#include <unordered_set>
+#include <farmhash.h>
 
 #include <gtest/gtest.h>
 #include <iomgr/io_environment.hpp>
@@ -24,6 +27,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <gtest/gtest.h>
 #include <iomgr/iomgr_flip.hpp>
+#include <folly/concurrency/ConcurrentHashMap.h>
 
 #include <homestore/blk.h>
 #include <homestore/homestore.hpp>
@@ -56,13 +60,15 @@ constexpr uint64_t Mi{Ki * Ki};
 constexpr uint64_t Gi{Ki * Mi};
 
 struct Param {
-    uint64_t num_io;
-    uint64_t run_time;
+    uint64_t num_io{1000};
+    uint64_t run_time{200};        // in seconds
+    uint32_t min_io_size{4 * Ki};  // blk_size aligned;
+    uint32_t max_io_size{32 * Mi}; // blk_size aligned;
 };
 
 static Param gp;
 
-ENUM(DataSvcOp, uint8_t, WRITE, READ, FREE_BLK, COMMIT_BLK, RESERVE_STREAM, ALLOC_STREAM, FREE_STREAM)
+ENUM(DataSvcOp_t, uint8_t, async_alloc_write = 1, async_read = 2, async_free = 3, max_op = 4);
 
 typedef std::function< void(std::error_condition err, std::shared_ptr< std::vector< BlkId > > out_bids) >
     after_write_cb_t;
@@ -72,8 +78,17 @@ public:
     BlkDataService& inst() { return homestore::data_service(); }
 
     virtual void SetUp() override {
+        m_blk_crc_map.clear();
         test_common::HSTestHelper::start_homestore(
             "test_data_service", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::DATA, {.size_pct = 80.0}}});
+
+        if (gp.min_io_size % homestore::data_service().get_blk_size() ||
+            gp.max_io_size % homestore::data_service().get_blk_size()) {
+            gp.min_io_size = sisl::round_up(gp.min_io_size, homestore::data_service().get_blk_size());
+            gp.max_io_size = sisl::round_up(gp.max_io_size, homestore::data_service().get_blk_size());
+            LOGWARN("adjusted to min_io_size: {} and max_io_size: {} which must be multiple of blk_size: {}",
+                    gp.min_io_size, gp.max_io_size, homestore::data_service().get_blk_size());
+        }
     }
 
     virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
@@ -245,10 +260,211 @@ public:
         this->m_cv.notify_one();
     }
 
+    // wait for all io jobs to complete;
     void wait_for_all_io_complete() {
         std::unique_lock lk(m_mtx);
         m_cv.wait(lk, [this] { return this->m_io_job_done; });
     }
+
+    ////////////////////////// Load Test APIS ////////////////////////////////
+    void write_io_load(uint64_t io_size, uint32_t num_iovs = 1) {
+        auto sg = std::make_shared< sisl::sg_list >();
+        auto out_bids = std::make_shared< MultiBlkId >();
+        ++m_outstanding_io_cnt;
+
+        // out_bids are returned syncronously;
+        write_sgs(io_size, sg, num_iovs, *out_bids).thenValue([this, sg, out_bids](auto) {
+            cal_write_blk_crc(*sg, *out_bids);
+            free(*sg);
+            --m_outstanding_io_cnt;
+            ++m_total_io_comp_cnt;
+        });
+    }
+
+    // read_io has to process and send async_read all the blkids before it can exit and yielf to next io;
+    // because next io could be free_blk which can also pick up the same blkid, that has been generated for read, but
+    // hasn't been sent yet.
+    void read_io(uint32_t io_size) {
+        auto remaining_io_size = io_size;
+        while (remaining_io_size > 0) {
+            auto const bid = get_rand_blkid_to_read(io_size);
+            if (!bid.is_valid()) {
+                // didn't find any block to read, either write blk map is empty or
+                // all blks are pending on free.
+                return;
+            }
+
+            // every piece in bid is a single block, e.g.  nblks = 1
+            auto const nbids = bid.num_pieces();
+            auto sub_io_size = nbids * inst().get_blk_size();
+
+            iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
+                                    [this, sub_io_size]() { this->do_read_io(bid, sub_io_size); });
+            remaining_io_size -= sub_io_size;
+        }
+    }
+
+    void free_blk(MultiBlkId bid) {
+        RELEASE_ASSERT(bid.is_valid() && !bid.is_multi(), "expecting valid bid and single blkid");
+
+        ++m_outstanding_io_cnt;
+        inst().async_free_blk(bid).thenValue([this, bid](auto&& err) {
+            RELEASE_ASSERT(!err, "Free error");
+            LOGINFO("completed async_free_blks, bid freed: {}", bid.to_string());
+            // remove from ouststanding free blk set and written blk crc map;
+            {
+                std::scoped_lock l(m_free_mtx, m_blkmap_mtx);
+                // loop bid for every piece of blkid;
+                auto bid_it = bid.iterate();
+
+                while (auto b = bid_it.next()) {
+                    LOGINFO("removing bid from map: {}", bid.to_string());
+                    m_outstanding_free_bid.erase(b->to_integer());
+                    m_blk_crc_map.erase(b->to_integer());
+                }
+            }
+            --m_outstanding_io_cnt;
+            ++m_total_io_comp_cnt;
+        });
+    }
+
+    // wait for all outstanding io to complete
+    void wait_for_outstanding_io_done() {
+        while (this->m_outstanding_io_cnt.load() != 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        }
+
+        LOGINFO("m_total_io_comp_cnt: {}", m_total_io_comp_cnt.load());
+    }
+    /**
+     * @brief Generates a random I/O size based on configurated min/max I/O sizes, rounded up to the block size.
+     *
+     * @return uint64_t The generated I/O size.
+     */
+    uint64_t gen_rand_io_size() {
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine re{rd()};
+        std::uniform_int_distribution< long long unsigned > io_size{gp.min_io_size, gp.max_io_size};
+
+        // result won't exceed max_io_size becaues max_io_size is blk_size aligned;
+        return sisl::round_up(io_size(re), inst().get_blk_size());
+    }
+
+    /**
+     * @brief Generates a random DataSvcOp_t operation type.
+     *
+     * @return A random DataSvcOp_t operation type.
+     * TODO: Support IO ratio based on IO type:
+     * .write: 0.5
+     * .read: 0.3
+     * .free: 0.2
+     */
+    DataSvcOp_t gen_rand_op_type() {
+        // gererate randome op type based on the ratio;
+        // write op ratio: 50%
+        // read op ratio : 30%, free op ratio: 20%
+        static thread_local std::random_device rd{};
+        static thread_local std::default_random_engine re{rd()};
+        std::uniform_int_distribution< uint8_t > op_type{1, static_cast< uint8_t >(DataSvcOp_t::max_op) - 1};
+
+        return static_cast< DataSvcOp_t >(op_type(re));
+    }
+
+    MultiBlkId get_rand_blkid_to_free() {
+        MultiBlkId ret_b{};
+        {
+            std::scoped_lock l(m_blkmap_mtx);
+            // alow some warm up before we do free;
+            if (m_blk_crc_map.size() < 20) { return ret_b; }
+        }
+
+        auto retry_cnt = 0ul;
+        while (!ret_b.is_valid() && retry_cnt++ <= 10) {
+            {
+                std::scoped_lock l(m_blkmap_mtx, m_free_mtx);
+                auto it = m_blk_crc_map.begin();
+                std::advance(it, rand() % m_blk_crc_map.size());
+
+                if (m_outstanding_free_bid.find(it->first /* bid_integer */) == m_outstanding_free_bid.end()) {
+                    // add to outstanding free blk set;
+                    m_outstanding_free_bid.insert(it->first);
+                    ret_b = MultiBlkId{BlkId{it->first}};
+                }
+
+                // else this is bid is already pending on free, continue while loop to pick another random one;
+            }
+        }
+
+        return ret_b;
+    }
+
+    bool is_outstanding_free_bid(uint64_t bid_integer) {
+        std::scoped_lock l(m_free_mtx);
+        return m_outstanding_free_bid.find(bid_integer) != m_outstanding_free_bid.end();
+    }
+
+    // the returned blkid might be less than io_size.
+    // Caller will have to redo to cover the rest of io_size;
+    MultiBlkId get_rand_blkid_to_read(uint32_t io_size) {
+        std::scoped_lock l(m_blkmap_mtx);
+        // allow some warm up on write before reading;
+        if (m_blk_crc_map.size() < 20) { return MultiBlkId{}; }
+
+        MultiBlkId mb;
+        // pick a random single bid from the map;
+        auto skip_nbids = rand() % m_blk_crc_map.size(); // randomly skip between [0, size() - 1]
+        auto nbids = io_size / inst().get_blk_size();    // number of blks to read;
+
+        // nbids should not exceed max pieces that MultiBlkId can hold;
+        nbids = std::max(nbids, MultiBlkId::max_addln_pieces);
+
+        // make sure skip + nbids are in the range of m_blk_crc_map;
+        if (skip_nbids + nbids > m_blk_crc_map.size()) { skip_nbids = m_blk_crc_map.size() - nbids; }
+
+        // skip to the random position in the map;
+        auto it = m_blk_crc_map.cbegin();
+        std::advance(it, skip_nbids);
+
+        for (; mb.num_pieces() < nbids && it != m_blk_crc_map.cend(); ++it) {
+            if (is_outstanding_free_bid(it->first)) {
+                // read should not happen on ouststanding free bids;
+                continue;
+            }
+
+            // MultiBlkId can only add piece from same chunk;
+            if (!mb.is_valid()) {
+                mb.add(BlkId{it->first /* bid integer */});
+            } else {
+                BlkId blk{it->first /* bid integer */};
+                if (blk.chunk_num() == mb.chunk_num()) { mb.add(blk); }
+            }
+        }
+
+        // if we still can't find enough blks to read, then we need to start from the beginning of the map until the
+        // skipped point;
+        auto next_round_cnt = 0ul;
+        for (it = m_blk_crc_map.cbegin(); mb.num_pieces() < nbids && next_round_cnt < skip_nbids;
+             ++next_round_cnt, ++it) {
+            if (is_outstanding_free_bid(it->first)) {
+                // read should not happen on ouststanding free bids;
+                continue;
+            }
+            // MultiBlkId can only add piece from same chunk;
+            if (!mb.is_valid()) {
+                mb.add(BlkId{it->first /* bid integer */});
+            } else {
+                BlkId blk{it->first /* bid integer */};
+                if (blk.chunk_num() == mb.chunk_num()) { mb.add(blk); }
+            }
+        }
+
+        // it is possible that we still can't find enough blks to read, which means all blks are pending on free,
+        // which is extreamly rare case.
+        HS_REL_ASSERT_LE(mb.num_pieces(), nbids, "not expecting num_pieces to exceed nbids");
+
+        return mb;
+    }
+    ////////////////////////// End of Load Test APIS ////////////////////////////////
 
 private:
     //
@@ -258,7 +474,7 @@ private:
     // caller should be responsible to call free(sg) to free the iobuf allocated in iovs,
     // normally it should be freed in after_write_cb;
     //
-    folly::Future< std::error_code > write_sgs(uint64_t io_size, cshared< sisl::sg_list >& sg, uint32_t num_iovs,
+    folly::Future< std::error_code > write_sgs(uint64_t io_size, cshared< sisl::sg_list > sg, uint32_t num_iovs,
                                                MultiBlkId& out_bids) {
         // TODO: What if iov_len is not multiple of 4Ki?
         HS_DBG_ASSERT_EQ(io_size % (4 * Ki * num_iovs), 0, "Expecting iov_len : {} to be multiple of {}.",
@@ -274,6 +490,139 @@ private:
         }
 
         return inst().async_alloc_write(*(sg.get()), blk_alloc_hints{}, out_bids, false /* part_of_batch*/);
+    }
+
+    void verify_read_blk_crc(sisl::sg_list& sg, std::vector< uint64_t > read_crc_vec) {
+        auto const blk_size = inst().get_blk_size();
+        auto const blk_count = sg.iovs[0].iov_len / blk_size;
+        auto const blk_base = r_cast< uint8_t* >(sg.iovs[0].iov_base);
+        auto blk_base_offset = 0ul;
+
+        RELEASE_ASSERT_EQ(sg.iovs.size(), 1, "not expecting iovs size to be greater than 1");
+        RELEASE_ASSERT_EQ(sg.iovs[0].iov_len % inst().get_blk_size(), 0,
+                          "iov_len expected to be aligned with blk_size");
+        RELEASE_ASSERT_EQ(blk_count, read_crc_vec.size(), "expecting blk_count to be equal to crc vec size");
+
+        for (auto i = 0ul; i < blk_count; ++i) {
+            auto blk_crc = util::Hash64((const char*)(blk_base + blk_base_offset), blk_size);
+            HS_REL_ASSERT_EQ(read_crc_vec[i], blk_crc, "blk crc mismatch");
+            blk_base_offset += blk_size;
+        }
+    }
+
+#if 0
+    void verify_read_blk_crc(sisl::sg_list& sg, MultiBlkId bid) {
+        auto const blk_size = inst().get_blk_size();
+        auto const blk_count = sg.iovs[0].iov_len / blk_size;
+        auto const blk_base = r_cast< uint8_t* >(sg.iovs[0].iov_base);
+        auto const blk_base_offset = 0ul;
+
+        RELEASE_ASSERT_EQ(sg.iovs.size(), 1, "not expecting iovs size to be greater than 1");
+        RELEASE_ASSERT_EQ(sg.iovs[0].iov_len % inst().get_blk_size(), 0,
+                          "iov_len expected to be aligned with blk_size");
+        RELEASE_ASSERT_EQ(blk_count, bid.num_pieces(), "expecting blk_count to be equal to num_pieces");
+
+        {
+            std::scoped_lock l(m_blkmap_mtx);
+            auto bid_it = bid.iterate();
+            while (b = bid_it.next()) {
+                // move to next piece of BlkId, ever piece of BlkId is a single block whose nblks equals to 1;
+                auto it = m_blk_crc_map.find(b.to_integer());
+                HS_REL_ASSERT(it != m_blk_crc_map.end(), "expecting blk to be in the map");
+
+                auto blk_crc = util::Hash64((const char*)(blk_base + blk_base_offset), blk_size);
+                HS_REL_ASSERT_EQ(it->second, blk_crc, "blk crc mismatch");
+                blk_base_offset += blk_size;
+            }
+        }
+    }
+#endif
+    // copy crc from m_blk_crc_map to a vector;
+    std::shared_ptr< std::vector< uint64_t > > get_crc_vector(MultiBlkId bid) {
+        auto crc_vec = std::make_shared< std::vector< uint64_t > >();
+        auto bid_it = bid.iterate();
+        while (auto const b = bid_it.next()) {
+            std::scoped_lock l(m_blkmap_mtx);
+            // LOGINFO("getting crc for blk: {}, is_multi: {}, integer:{}", b->to_string(), b->is_multi(),
+            //        b->to_integer());
+            auto it = m_blk_crc_map.find(b->to_integer());
+            HS_REL_ASSERT(it != m_blk_crc_map.end(), "expecting blk:{} to be in the map", b->to_string());
+            crc_vec->push_back(it->second);
+        }
+
+        return crc_vec;
+    }
+
+    void do_read_io(MultiBlkId bid, uint32_t io_size) {
+        auto sg = std::make_shared< sisl::sg_list >();
+        sg->size = io_size;
+        struct iovec iov;
+        iov.iov_len = io_size;
+        iov.iov_base = iomanager.iobuf_alloc(512, iov.iov_len);
+        sg->iovs.push_back(iov);
+
+        // we pass crc from lambda becaues if there is any async_free_blk, the written blks in the blkcrc map will be
+        // removed by the time read thenVlue is called;
+        auto read_crc_vec = get_crc_vector(bid);
+
+        ++m_outstanding_io_cnt;
+        inst().async_read(bid, *sg, io_size).thenValue([this, bid, sg, read_crc_vec](auto&& err) {
+            // if there is any pending free blk on this read, and if we arrive here, the free blk callback has
+            // already been called;
+            RELEASE_ASSERT(!err, "Read error");
+            LOGINFO("read completed, bid: {}", bid.to_string());
+
+            // now verify read data crc equals which was previous saved on write;
+            verify_read_blk_crc(*sg, *read_crc_vec);
+
+            free(*sg);
+            --m_outstanding_io_cnt;
+            ++m_total_io_comp_cnt;
+        });
+    }
+
+    /**
+     * Calculates and writes the CRC for a given scatter-gather list and block ID.
+     *
+     * The crc will be calcuated based on per-block-size and save them to m_blk_crc_map;
+     * this map is used for read verfication;
+     *
+     * @param sg The scatter-gather list to calculate the CRC for.
+     * @param bid The ID of the block to calculate the CRC for.
+     */
+    void cal_write_blk_crc(sisl::sg_list& sg, MultiBlkId bid) {
+        RELEASE_ASSERT_EQ(sg.iovs.size(), 1, "Only expect one iov.");
+
+        // calculate crc blk by blk and save them to m_blk_crc_map;
+        auto const iov = sg.iovs[0];
+        auto const blk_size = inst().get_blk_size();
+        auto const blk_count = iov.iov_len / blk_size;
+        auto const blk_base = r_cast< uint8_t* >(iov.iov_base);
+        auto blk_base_offset = 0ul;
+        std::vector< BlkId > single_blkid_vec{};
+        auto bid_it = bid.iterate();
+        // loop bid for every piece of blkid and convert them into single blkid, nblks=1;
+        while (auto b = bid_it.next()) {
+            for (auto i = 0u; i < b->blk_count(); ++i) {
+                single_blkid_vec.push_back(BlkId{b->blk_num() + i /* blk_num */, 1 /* nblks */, b->chunk_num()});
+            }
+        }
+
+        RELEASE_ASSERT_EQ(blk_count, bid.num_pieces(), "expecting blk_count to be equal to num_pieces in bid");
+
+        // now insert blk crc to its corresponding blk id in m_blk_crc_map;
+        for (auto i = 0ul; i < blk_count; ++i) {
+            auto blk_crc = util::Hash64((const char*)(blk_base + blk_base_offset), blk_size);
+            blk_base_offset += blk_size;
+            // also works for overwritten blks;
+            {
+                std::scoped_lock l(m_blkmap_mtx);
+                auto [it, inserted] = m_blk_crc_map.insert_or_assign(single_blkid_vec[i].to_integer(), blk_crc);
+                RELEASE_ASSERT_EQ(inserted, true);
+                LOGINFO("blk inserted: {}, is_multi:{}, crc: {}, integer: {}", single_blkid_vec[i].to_string(),
+                        single_blkid_vec[i].is_multi(), blk_crc, single_blkid_vec[i].to_integer());
+            }
+        }
     }
 
     void add_read_delay() {
@@ -297,9 +646,17 @@ private:
     std::mutex m_mtx;
     std::condition_variable m_cv;
     bool m_io_job_done{false};
-    std::unique_ptr< BlkDataService > m_data_service;
     std::atomic< bool > m_free_blk_done{false};
     std::atomic< bool > m_read_blk_done{false};
+
+    // blk to crc mapping, the crc is calculated from the data buffer that is pointed by this blk for each blk_size.
+    // e.g. if data service blk size is 4K, then crc is calculated for every 4K data buffer;
+    std::mutex m_blkmap_mtx;
+    std::unordered_map< uint64_t, uint64_t > m_blk_crc_map{gp.num_io};
+    std::mutex m_free_mtx;
+    std::unordered_set< uint64_t > m_outstanding_free_bid;
+    std::atomic< uint64_t > m_outstanding_io_cnt{0};
+    std::atomic< uint64_t > m_total_io_comp_cnt{0};
 };
 
 //
@@ -398,13 +755,69 @@ TEST_F(BlkDataServiceTest, TestWriteReadThenFreeBeforeReadComp) {
     LOGINFO("Step 5: I/O completed, do shutdown.");
 }
 
+/**
+ * @brief Tests the random read-write-free load functionality of the BlkDataService.
+ *  Random write, read-verify, free blks;
+ */
+TEST_F(BlkDataServiceTest, TestRandMixIOLoad) {
+    // Define the test parameters
+    auto const run_time = gp.run_time;
+    auto const num_io = gp.num_io;
+
+    // Start the I/O operations
+    for (uint64_t i = 0; i < num_io; ++i) {
+        // Generate a random I/O size round up to blk_size;
+        uint32_t const io_size = gen_rand_io_size();
+
+        // Generate a random I/O operation
+        auto const io_op = gen_rand_op_type();
+
+        // Perform the I/O operation
+        switch (io_op) {
+        case DataSvcOp_t::async_alloc_write: // Write
+            iomanager.run_on_forget(iomgr::reactor_regex::random_worker, [this, io_size]() {
+                // num_iovs defaulted to 1;
+                this->write_io_load(io_size);
+            });
+            break;
+        case DataSvcOp_t::async_read: // Read
+
+            // iomanager.run_on_forget(iomgr::reactor_regex::random_worker, [this, io_size]() {
+            // this->read_io(io_size);});
+            this->read_io(io_size);
+            break;
+        case DataSvcOp_t::async_free: // free
+        {
+            auto const blkid = get_rand_blkid_to_free();
+            if (blkid.is_valid()) {
+                iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
+                                        [this, blkid]() { this->free_blk(blkid); });
+            }
+            // else skip this free request as not able to find a good free candidate;
+            // it can happen if there is little blk left in the map, and all of them are already pending
+            // free;
+            break;
+        }
+        case DataSvcOp_t::max_op:
+        default:
+            RELEASE_ASSERT(false, "Unexpected I/O operation type");
+            break;
+        }
+    }
+
+    // Wait for the I/O operations to complete
+    wait_for_outstanding_io_done();
+}
+
 // Stream related test
 
-SISL_OPTION_GROUP(test_data_service,
-                  (run_time, "", "run_time", "running time in seconds",
-                   ::cxxopts::value< uint64_t >()->default_value("30"), "number"),
-                  (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("300"),
-                   "number"));
+SISL_OPTION_GROUP(
+    test_data_service,
+    (run_time, "", "run_time", "running time in seconds", ::cxxopts::value< uint64_t >()->default_value("30"),
+     "number"),
+    (min_io_size, "", "min_io_size", "mim io size", ::cxxopts::value< uint32_t >()->default_value("4096"), "number"),
+    (max_io_size, "", "max_io_size", "max io size", ::cxxopts::value< uint32_t >()->default_value("4096"), "number"),
+    (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("300"), "number"));
 
 int main(int argc, char* argv[]) {
     int parsed_argc{argc};
@@ -412,9 +825,10 @@ int main(int argc, char* argv[]) {
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_data_service, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_data_service");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
-
     gp.run_time = SISL_OPTIONS["run_time"].as< uint64_t >();
     gp.num_io = SISL_OPTIONS["num_io"].as< uint64_t >();
 
+    gp.min_io_size = SISL_OPTIONS["min_io_size"].as< uint32_t >();
+    gp.max_io_size = SISL_OPTIONS["max_io_size"].as< uint32_t >();
     return RUN_ALL_TESTS();
 }

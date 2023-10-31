@@ -144,7 +144,8 @@ public:
             if (next_blk_ == 0) {
                 auto bid = r_cast< BlkId const& >(mbid_);
                 ++next_blk_;
-                return (bid.is_valid()) ? std::make_optional(bid) : std::nullopt;
+                return (bid.is_valid()) ? std::make_optional(BlkId{bid.blk_num(), bid.blk_count(), bid.chunk_num()})
+                                        : std::nullopt;
             } else if (next_blk_ < mbid_.num_pieces()) {
                 auto cbid = mbid_.addln_pieces[next_blk_ - 1];
                 ++next_blk_;
