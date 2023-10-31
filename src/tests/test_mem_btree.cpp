@@ -295,7 +295,7 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType > {
                                                      .is_spdk = false,
                                                      .num_fibers = 1 + SISL_OPTIONS["num_fibers"].as< uint32_t >(),
                                                      .app_mem_size_mb = 0,
-                                                     .hugepage_size_mb = 0});
+                                                     0});
 
         BtreeTestHelper< TestType >::SetUp();
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
