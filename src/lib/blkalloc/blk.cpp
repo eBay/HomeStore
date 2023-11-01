@@ -127,8 +127,7 @@ std::string MultiBlkId::to_string() const {
     std::string str = "MultiBlks: {";
     auto it = iterate();
     while (auto const b = it.next()) {
-        str += b->to_string();
-        str += " ";
+        str += (b->to_string() + " ");
     }
     str += std::string("}");
     return str;

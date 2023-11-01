@@ -68,7 +68,7 @@ struct Param {
 
 static Param gp;
 
-ENUM(DataSvcOp_t, uint8_t, async_alloc_write = 1, async_read = 2, async_free = 3, max_op = 4);
+VENUM(DataSvcOp_t, uint8_t, async_alloc_write = 1, async_read = 2, async_free = 3, max_op = 4);
 
 typedef std::function< void(std::error_condition err, std::shared_ptr< std::vector< BlkId > > out_bids) >
     after_write_cb_t;
