@@ -271,7 +271,6 @@ public:
         auto sg = std::make_shared< sisl::sg_list >();
         auto out_bids = std::make_shared< MultiBlkId >();
         ++m_outstanding_io_cnt;
-
         // out_bids are returned syncronously;
         write_sgs(io_size, sg, num_iovs, *out_bids).thenValue([this, sg, out_bids](auto) {
             cal_write_blk_crc(*sg, *out_bids);
@@ -298,14 +297,21 @@ public:
             auto const nbids = bid.num_pieces();
             auto sub_io_size = nbids * inst().get_blk_size();
 
-            iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
-                                    [this, sub_io_size]() { this->do_read_io(bid, sub_io_size); });
+            // we pass crc from lambda becaues if there is any async_free_blk, the written blks in the blkcrc map will
+            // be removed by the time read thenVlue is called;
+            // this must be called before we send to iomgr worker thread, because worker thread might pick it up running
+            // later but outer for loop will continue to run to free this same blk;
+            auto read_crc_vec = get_crc_vector(bid);
+
+            iomanager.run_on_forget(iomgr::reactor_regex::random_worker, [this, read_crc_vec, bid, sub_io_size]() {
+                this->do_read_io(bid, sub_io_size, read_crc_vec);
+            });
             remaining_io_size -= sub_io_size;
         }
     }
 
     void free_blk(MultiBlkId bid) {
-        RELEASE_ASSERT(bid.is_valid() && !bid.is_multi(), "expecting valid bid and single blkid");
+        RELEASE_ASSERT(bid.is_valid(), "expecting valid bid and single blkid, is_valid: {}", bid.is_valid());
 
         ++m_outstanding_io_cnt;
         inst().async_free_blk(bid).thenValue([this, bid](auto&& err) {
@@ -375,7 +381,7 @@ public:
         {
             std::scoped_lock l(m_blkmap_mtx);
             // alow some warm up before we do free;
-            if (m_blk_crc_map.size() < 20) { return ret_b; }
+            if (m_blk_crc_map.size() < 10) { return ret_b; }
         }
 
         auto retry_cnt = 0ul;
@@ -383,7 +389,7 @@ public:
             {
                 std::scoped_lock l(m_blkmap_mtx, m_free_mtx);
                 auto it = m_blk_crc_map.begin();
-                std::advance(it, rand() % m_blk_crc_map.size());
+                std::advance(it, rand() % std::min(100ul, m_blk_crc_map.size()));
 
                 if (m_outstanding_free_bid.find(it->first /* bid_integer */) == m_outstanding_free_bid.end()) {
                     // add to outstanding free blk set;
@@ -538,13 +544,13 @@ private:
     }
 #endif
     // copy crc from m_blk_crc_map to a vector;
-    std::shared_ptr< std::vector< uint64_t > > get_crc_vector(MultiBlkId bid) {
+    cshared< std::vector< uint64_t > > get_crc_vector(MultiBlkId bid) {
         auto crc_vec = std::make_shared< std::vector< uint64_t > >();
         auto bid_it = bid.iterate();
         while (auto const b = bid_it.next()) {
             std::scoped_lock l(m_blkmap_mtx);
             // LOGINFO("getting crc for blk: {}, is_multi: {}, integer:{}", b->to_string(), b->is_multi(),
-            //        b->to_integer());
+            // b->to_integer());
             auto it = m_blk_crc_map.find(b->to_integer());
             HS_REL_ASSERT(it != m_blk_crc_map.end(), "expecting blk:{} to be in the map", b->to_string());
             crc_vec->push_back(it->second);
@@ -553,24 +559,19 @@ private:
         return crc_vec;
     }
 
-    void do_read_io(MultiBlkId bid, uint32_t io_size) {
+    void do_read_io(MultiBlkId bid, uint32_t io_size, cshared< std::vector< uint64_t > > read_crc_vec) {
         auto sg = std::make_shared< sisl::sg_list >();
         sg->size = io_size;
         struct iovec iov;
         iov.iov_len = io_size;
         iov.iov_base = iomanager.iobuf_alloc(512, iov.iov_len);
         sg->iovs.push_back(iov);
-
-        // we pass crc from lambda becaues if there is any async_free_blk, the written blks in the blkcrc map will be
-        // removed by the time read thenVlue is called;
-        auto read_crc_vec = get_crc_vector(bid);
-
         ++m_outstanding_io_cnt;
         inst().async_read(bid, *sg, io_size).thenValue([this, bid, sg, read_crc_vec](auto&& err) {
             // if there is any pending free blk on this read, and if we arrive here, the free blk callback has
             // already been called;
             RELEASE_ASSERT(!err, "Read error");
-            LOGINFO("read completed, bid: {}", bid.to_string());
+            // LOGINFO("read completed, bid: {}", bid.to_string());
 
             // now verify read data crc equals which was previous saved on write;
             verify_read_blk_crc(*sg, *read_crc_vec);
@@ -602,13 +603,17 @@ private:
         std::vector< BlkId > single_blkid_vec{};
         auto bid_it = bid.iterate();
         // loop bid for every piece of blkid and convert them into single blkid, nblks=1;
+        auto total_single_blks_cnt{0ul};
         while (auto b = bid_it.next()) {
             for (auto i = 0u; i < b->blk_count(); ++i) {
                 single_blkid_vec.push_back(BlkId{b->blk_num() + i /* blk_num */, 1 /* nblks */, b->chunk_num()});
+                RELEASE_ASSERT_EQ(single_blkid_vec[i].is_multi(), false, "not expecting multile blkid");
+                ++total_single_blks_cnt;
             }
         }
 
-        RELEASE_ASSERT_EQ(blk_count, bid.num_pieces(), "expecting blk_count to be equal to num_pieces in bid");
+        RELEASE_ASSERT_EQ(blk_count, total_single_blks_cnt,
+                          "expecting blk_count to be equal to total blks found in bid");
 
         // now insert blk crc to its corresponding blk id in m_blk_crc_map;
         for (auto i = 0ul; i < blk_count; ++i) {
@@ -619,8 +624,8 @@ private:
                 std::scoped_lock l(m_blkmap_mtx);
                 auto [it, inserted] = m_blk_crc_map.insert_or_assign(single_blkid_vec[i].to_integer(), blk_crc);
                 RELEASE_ASSERT_EQ(inserted, true);
-                LOGINFO("blk inserted: {}, is_multi:{}, crc: {}, integer: {}", single_blkid_vec[i].to_string(),
-                        single_blkid_vec[i].is_multi(), blk_crc, single_blkid_vec[i].to_integer());
+                LOGDEBUG("blk inserted: {}, is_multi:{}, crc: {}, integer: {}", single_blkid_vec[i].to_string(),
+                         single_blkid_vec[i].is_multi(), blk_crc, single_blkid_vec[i].to_integer());
             }
         }
     }
