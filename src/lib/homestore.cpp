@@ -145,6 +145,16 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
 }
 
 void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format_opts) {
+    auto total_pct_sum = 0.0f;
+    for (const auto& [svc_type, fparams] : format_opts) {
+        total_pct_sum += fparams.size_pct;
+    }
+
+    if (total_pct_sum > 100.0f) {
+        LOGERROR("Total percentage of all services is greater than 100.0f, total_pct_sum={}", total_pct_sum);
+        throw std::invalid_argument("total percentage of all services is greater than 100.0f");
+    }
+
     m_dev_mgr->format_devices();
     hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Fast}));
 
@@ -209,9 +219,18 @@ void HomeStore::do_start() {
     // In case of custom recovery, let consumer starts the recovery and it is consumer module's responsibilities
     // to start log store
     if (has_log_service() && inp_params.auto_recovery) { m_log_service->start(is_first_time_boot() /* format */); }
+
+    init_done();
 }
 
+void HomeStore::init_done() { m_init_done = true; }
+
 void HomeStore::shutdown() {
+    if (!m_init_done) { 
+        LOGWARN("Homestore shutdown is called before init is completed");
+        return; 
+    }
+    
     LOGINFO("Homestore shutdown is started");
 
     if (has_index_service()) {

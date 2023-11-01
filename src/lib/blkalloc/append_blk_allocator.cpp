@@ -164,10 +164,6 @@ void AppendBlkAllocator::free(const BlkId& bid) {
     set_dirty_offset(cur_cp->id() % MAX_CP_COUNT);
 }
 
-blk_num_t AppendBlkAllocator::available_blks() const { return get_total_blks() - get_used_blks(); }
-
-blk_num_t AppendBlkAllocator::get_used_blks() const { return m_last_append_offset; }
-
 bool AppendBlkAllocator::is_blk_alloced(const BlkId& in_bid, bool) const {
     // blk_num starts from 0;
     return in_bid.blk_num() < get_used_blks();
@@ -179,6 +175,12 @@ std::string AppendBlkAllocator::to_string() const {
     return fmt::format("{}, last_append_offset: {}", get_name(), m_last_append_offset);
 }
 
+blk_num_t AppendBlkAllocator::available_blks() const { return get_total_blks() - get_used_blks(); }
+
+blk_num_t AppendBlkAllocator::get_used_blks() const { return m_last_append_offset; }
+
 blk_num_t AppendBlkAllocator::get_freeable_nblks() const { return m_freeable_nblks; }
+
+blk_num_t AppendBlkAllocator::get_defrag_nblks() const { return get_freeable_nblks() - available_blks(); }
 
 } // namespace homestore
