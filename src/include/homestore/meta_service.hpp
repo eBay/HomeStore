@@ -18,11 +18,13 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <unordered_map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <system_error>
 #include <vector>
+#include <optional>
 
 #include <sisl/fds/buffer.hpp>
 #include <sisl/metrics/metrics.hpp>
@@ -46,10 +48,12 @@ struct vdev_info;
 // new blk found subsystem callback
 typedef std::function< void(meta_blk* mblk, sisl::byte_view buf, size_t size) > meta_blk_found_cb_t;
 typedef std::string meta_sub_type;
+typedef std::vector< meta_sub_type > meta_subtype_vec_t;
 typedef std::function< void(bool success) > meta_blk_recover_comp_cb_t; // recover complete subsystem callbacks;
 typedef std::map< uint64_t, meta_blk* > meta_blk_map_t;                 // blkid to meta_blk map;
 typedef std::map< uint64_t, meta_blk_ovf_hdr* > ovf_hdr_map_t;          // ovf_blkid to ovf_blk_hdr map;
 typedef std::map< meta_sub_type, MetaSubRegInfo > client_info_map_t;    // client information map;
+typedef std::unordered_map< meta_sub_type, std::vector< meta_sub_type > > subtype_graph_t;
 
 class MetablkMetrics : public sisl::MetricsGroupWrapper {
 public:
@@ -87,6 +91,7 @@ private:
     MetablkMetrics m_metrics;
     bool m_inited{false};
     std::unique_ptr< meta_vdev_context > m_meta_vdev_context;
+    subtype_graph_t m_dep_topo_graph;
 
 public:
     MetaBlkService(const char* name = "MetaBlkStore");
@@ -121,7 +126,7 @@ public:
      * @param cb : subsystem cb
      */
     void register_handler(meta_sub_type type, const meta_blk_found_cb_t& cb, const meta_blk_recover_comp_cb_t& comp_cb,
-                          bool do_crc = true);
+                          bool do_crc = true, std::optional< meta_subtype_vec_t > deps = std::nullopt);
 
     /**
      * @brief
@@ -356,6 +361,8 @@ private:
 
     bool scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_map_t& ovf_blk_hdrs, BlkId* last_mblk_id,
                                  client_info_map_t& sub_info);
+
+    void recover_meta_block(meta_blk* meta_block);
 
 public:
     bool verify_metablk_store();

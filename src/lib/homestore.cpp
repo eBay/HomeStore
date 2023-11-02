@@ -226,16 +226,16 @@ void HomeStore::do_start() {
 void HomeStore::init_done() { m_init_done = true; }
 
 void HomeStore::shutdown() {
-    if (!m_init_done) { 
+    if (!m_init_done) {
         LOGWARN("Homestore shutdown is called before init is completed");
-        return; 
+        return;
     }
-    
+
     LOGINFO("Homestore shutdown is started");
 
     if (has_index_service()) {
         m_index_service->stop();
-//        m_index_service.reset();
+        //        m_index_service.reset();
     }
 
     if (has_log_service()) {

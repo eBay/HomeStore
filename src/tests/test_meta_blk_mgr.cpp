@@ -27,7 +27,6 @@
 #include <random>
 #include <string>
 #include <vector>
-
 #include <iomgr/io_environment.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
@@ -42,6 +41,8 @@
 #include "common/homestore_flip.hpp"
 #include "test_common/bits_generator.hpp"
 #include "test_common/homestore_test_common.hpp"
+
+#define private public
 
 using namespace homestore;
 
@@ -86,6 +87,9 @@ public:
 
     std::string mtype;
     Clock::time_point m_start_time;
+    std::vector< meta_sub_type > actual_cb_order;
+    std::vector< meta_sub_type > actual_on_complete_cb_order;
+    std::vector< void* > cookies;
 
     VMetaBlkMgrTest() = default;
     VMetaBlkMgrTest(const VMetaBlkMgrTest&) = delete;
@@ -365,7 +369,7 @@ public:
             iomanager.iobuf_free(buf);
         } else {
             if (unaligned_addr) {
-                delete[] (buf - unaligned_shift);
+                delete[](buf - unaligned_shift);
             } else {
                 delete[] buf;
             }
@@ -458,6 +462,16 @@ public:
         hs()->cp_mgr().shutdown();
         hs()->cp_mgr().start(false /* first_time_boot */);
         m_mbm->recover(false);
+    }
+
+    void recover_with_on_complete() {
+        // TODO: This scan_blks and recover should be replaced with actual TestHelper::start_homestore with restart
+        // on. That way, we don't need to simulate all these calls here
+        // do recover and callbacks will be triggered;
+        m_cb_blks.clear();
+        hs()->cp_mgr().shutdown();
+        hs()->cp_mgr().start(false /* first_time_boot */);
+        m_mbm->recover(true);
     }
 
     void validate() {
@@ -553,6 +567,92 @@ public:
             [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
     }
 
+    void register_client_inlcuding_dependencies() {
+        m_mbm = &(meta_service());
+        m_total_wrt_sz = m_mbm->used_size();
+
+        HS_REL_ASSERT_EQ(m_mbm->total_size() - m_total_wrt_sz, m_mbm->available_blks() * m_mbm->block_size());
+
+        m_mbm->deregister_handler(mtype);
+
+        /*
+            we have a DAG to simulate dependencies like this:
+                       A
+                      / \
+                     B   C
+                    / \   \
+                   D   E   F
+        */
+
+        // register with dependencies
+        m_mbm->register_handler(
+            "A",
+            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+                meta_sub_type subType(mblk->hdr.h.type);
+                actual_cb_order.push_back(subType);
+            },
+            [this](bool success) { actual_on_complete_cb_order.push_back("A"); }, false,
+            std::optional< meta_subtype_vec_t >({"B", "C"}));
+
+        m_mbm->register_handler(
+            "B",
+            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+                meta_sub_type subType(mblk->hdr.h.type);
+                actual_cb_order.push_back(subType);
+            },
+            [this](bool success) { actual_on_complete_cb_order.push_back("B"); }, false,
+            std::optional< meta_subtype_vec_t >({"D", "E"}));
+
+        m_mbm->register_handler(
+            "C",
+            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+                meta_sub_type subType(mblk->hdr.h.type);
+                actual_cb_order.push_back(subType);
+            },
+            [this](bool success) { actual_on_complete_cb_order.push_back("C"); }, false,
+            std::optional< meta_subtype_vec_t >({"F"}));
+
+        m_mbm->register_handler(
+            "D",
+            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+                meta_sub_type subType(mblk->hdr.h.type);
+                actual_cb_order.push_back(subType);
+            },
+            [this](bool success) { actual_on_complete_cb_order.push_back("D"); }, false);
+        m_mbm->register_handler(
+            "E",
+            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+                meta_sub_type subType(mblk->hdr.h.type);
+                actual_cb_order.push_back(subType);
+            },
+            [this](bool success) { actual_on_complete_cb_order.push_back("E"); }, false);
+        m_mbm->register_handler(
+            "F",
+            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+                meta_sub_type subType(mblk->hdr.h.type);
+                actual_cb_order.push_back(subType);
+            },
+            [this](bool success) { actual_on_complete_cb_order.push_back("F"); }, false);
+    }
+
+    void deregister_client_inlcuding_dependencies() {
+        m_mbm->deregister_handler("A");
+        m_mbm->deregister_handler("B");
+        m_mbm->deregister_handler("C");
+        m_mbm->deregister_handler("D");
+        m_mbm->deregister_handler("E");
+        m_mbm->deregister_handler("F");
+        m_mbm->register_handler(
+            mtype,
+            [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+                if (mblk) {
+                    std::unique_lock< std::mutex > lg{m_mtx};
+                    m_cb_blks[mblk->hdr.h.bid.to_integer()] = std::string{r_cast< const char* >(buf.bytes()), size};
+                }
+            },
+            [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
+    }
+
 #ifdef _PRERELEASE
     void set_flip_point(const std::string flip_name) {
         flip::FlipCondition null_cond;
@@ -614,6 +714,70 @@ TEST_F(VMetaBlkMgrTest, single_read_test) {
     this->shutdown();
 }
 
+TEST_F(VMetaBlkMgrTest, register_dependency_test) {
+    reset_counters();
+    m_start_time = Clock::now();
+    this->register_client_inlcuding_dependencies();
+
+    // add sub super block out of order
+    uint8_t* buf = iomanager.iobuf_alloc(512, 1);
+    void* cookie{nullptr};
+    for (int i = 0; i < 10; i++) {
+        m_mbm->add_sub_sb("E", buf, 1, cookie);
+        cookies.push_back(cookie);
+        m_mbm->add_sub_sb("B", buf, 1, cookie);
+        cookies.push_back(cookie);
+        m_mbm->add_sub_sb("A", buf, 1, cookie);
+        cookies.push_back(cookie);
+        m_mbm->add_sub_sb("F", buf, 1, cookie);
+        cookies.push_back(cookie);
+        m_mbm->add_sub_sb("C", buf, 1, cookie);
+        cookies.push_back(cookie);
+        m_mbm->add_sub_sb("D", buf, 1, cookie);
+        cookies.push_back(cookie);
+    }
+
+    iomanager.iobuf_free(buf);
+
+    // simulate reboot case that MetaBlkMgr will scan the disk for all the metablks that were written;
+    this->scan_blks();
+
+    this->recover_with_on_complete();
+
+    std::unordered_map< meta_sub_type, int > actual_first_cb_order_map;
+    std::unordered_map< meta_sub_type, int > actual_last_cb_order_map;
+
+    // verify the order of callback
+    for (long unsigned int i = 0; i < actual_cb_order.size(); i++) {
+        meta_sub_type subType = actual_cb_order[i];
+        actual_last_cb_order_map[subType] = i;
+        if (actual_first_cb_order_map.find(subType) == actual_first_cb_order_map.end()) {
+            actual_first_cb_order_map[subType] = i;
+        }
+    }
+
+    EXPECT_TRUE(actual_last_cb_order_map["B"] < actual_first_cb_order_map["A"]);
+    EXPECT_TRUE(actual_last_cb_order_map["C"] < actual_first_cb_order_map["A"]);
+    EXPECT_TRUE(actual_last_cb_order_map["D"] < actual_first_cb_order_map["B"]);
+    EXPECT_TRUE(actual_last_cb_order_map["E"] < actual_first_cb_order_map["B"]);
+    EXPECT_TRUE(actual_last_cb_order_map["F"] < actual_first_cb_order_map["C"]);
+
+    actual_first_cb_order_map.clear();
+
+    for (long unsigned int i = 0; i < actual_on_complete_cb_order.size(); i++) {
+        actual_first_cb_order_map[actual_on_complete_cb_order[i]] = i;
+    }
+    EXPECT_TRUE(actual_first_cb_order_map["B"] < actual_first_cb_order_map["A"]);
+    EXPECT_TRUE(actual_first_cb_order_map["C"] < actual_first_cb_order_map["A"]);
+    EXPECT_TRUE(actual_first_cb_order_map["D"] < actual_first_cb_order_map["B"]);
+    EXPECT_TRUE(actual_first_cb_order_map["E"] < actual_first_cb_order_map["B"]);
+    EXPECT_TRUE(actual_first_cb_order_map["F"] < actual_first_cb_order_map["C"]);
+
+    this->deregister_client_inlcuding_dependencies();
+
+    this->shutdown();
+}
+
 // 1. randome write, update, remove;
 // 2. recovery test and verify callback context data matches;
 TEST_F(VMetaBlkMgrTest, random_load_test) {
@@ -637,8 +801,8 @@ TEST_F(VMetaBlkMgrTest, random_load_test) {
 #ifdef _PRERELEASE // release build doens't have flip point
 //
 // 1. Turn on flip to simulate fix is not there;
-// 2. Write compressed then uncompressed to reproduce the issue which ends up writing bad data (hdr size mismatch) to
-// disk, Change dynamic setting to skip hdr size check, because we've introduced bad data.
+// 2. Write compressed then uncompressed to reproduce the issue which ends up writing bad data (hdr size mismatch)
+// to disk, Change dynamic setting to skip hdr size check, because we've introduced bad data.
 // 3. Do a recover, verify no crash or assert should happen (need the code change to recover a bad data during
 // scan_meta_blks) and data can be fixed during recovery and send back to consumer;
 // 4. After recovery everything should be fine;
@@ -677,8 +841,8 @@ TEST_F(VMetaBlkMgrTest, RecoveryFromBadData) {
 
     this->validate();
 
-    // up to this point, we can not use the cached meta blk to keep doing update because the mblk in memory copy inside
-    // metablkstore are all freed;
+    // up to this point, we can not use the cached meta blk to keep doing update because the mblk in memory copy
+    // inside metablkstore are all freed;
 
     this->shutdown();
 }
@@ -731,6 +895,7 @@ SISL_OPTION_GROUP(
     (bitmap, "", "bitmap", "bitmap test", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 int main(int argc, char* argv[]) {
+    ::testing::GTEST_FLAG(filter) = "*register_dependency_test*";
     ::testing::GTEST_FLAG(filter) = "*random_load_test*";
     ::testing::InitGoogleTest(&argc, argv);
     SISL_OPTIONS_LOAD(argc, argv, logging, test_meta_blk_mgr, iomgr, test_common_setup);
