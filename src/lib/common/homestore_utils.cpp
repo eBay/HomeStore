@@ -75,8 +75,7 @@ sisl::byte_array hs_utils::extract_byte_array(const sisl::byte_view& b, const bo
 };
 
 bool hs_utils::topological_sort(std::unordered_map< std::string, std::vector< std::string > >& DAG,
-                                std::vector< std::string >& ordered_entries,
-                                std::optional< std::vector< std::string >* > independent_entries) {
+                                std::vector< std::string >& ordered_entries) {
     std::unordered_map< std::string, int > in_degree;
     std::queue< std::string > q;
 
@@ -92,17 +91,7 @@ bool hs_utils::topological_sort(std::unordered_map< std::string, std::vector< st
 
     // Add vertices with in-degree 0 to the queue
     for (const auto& [vertex, degree] : in_degree) {
-        if (degree == 0) {
-            if (DAG[vertex].empty()) {
-                // in_degree and out_degree are both 0, it is independent entry
-                if (independent_entries.has_value())
-                    independent_entries.value()->push_back(vertex);
-                else
-                    ordered_entries.push_back(vertex);
-            } else {
-                q.push(vertex);
-            }
-        }
+        if (degree == 0) q.push(vertex);
     }
 
     // Process vertices in the queue
@@ -118,8 +107,6 @@ bool hs_utils::topological_sort(std::unordered_map< std::string, std::vector< st
     }
 
     // Check for cycle
-    if (independent_entries.has_value())
-        return ordered_entries.size() != DAG.size() - independent_entries.value()->size();
     return ordered_entries.size() != DAG.size();
 }
 

@@ -42,8 +42,6 @@
 #include "test_common/bits_generator.hpp"
 #include "test_common/homestore_test_common.hpp"
 
-#define private public
-
 using namespace homestore;
 
 RCU_REGISTER_INIT
@@ -714,7 +712,7 @@ TEST_F(VMetaBlkMgrTest, single_read_test) {
     this->shutdown();
 }
 
-TEST_F(VMetaBlkMgrTest, register_dependency_test) {
+TEST_F(VMetaBlkMgrTest, random_dependency_test) {
     reset_counters();
     m_start_time = Clock::now();
     this->register_client_inlcuding_dependencies();
@@ -895,8 +893,7 @@ SISL_OPTION_GROUP(
     (bitmap, "", "bitmap", "bitmap test", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 int main(int argc, char* argv[]) {
-    ::testing::GTEST_FLAG(filter) = "*register_dependency_test*";
-    ::testing::GTEST_FLAG(filter) = "*random_load_test*";
+    ::testing::GTEST_FLAG(filter) = "*random*";
     ::testing::InitGoogleTest(&argc, argv);
     SISL_OPTIONS_LOAD(argc, argv, logging, test_meta_blk_mgr, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_meta_blk_mgr");

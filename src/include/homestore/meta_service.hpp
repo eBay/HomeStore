@@ -363,6 +363,7 @@ private:
                                  client_info_map_t& sub_info);
 
     void recover_meta_block(meta_blk* meta_block);
+    void recover_meta_sub_type(bool do_comp_cb, const meta_sub_type&);
 
 public:
     bool verify_metablk_store();

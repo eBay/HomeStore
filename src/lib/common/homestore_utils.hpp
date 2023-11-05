@@ -50,7 +50,6 @@ public:
      * @return true if the DAG has a circle ,or false if not.
      */
     static bool topological_sort(std::unordered_map< std::string, std::vector< std::string > >& DAG,
-                                 std::vector< std::string >& ordered_entries,
-                                 std::optional< std::vector< std::string >* > independent_entries = std::nullopt);
+                                 std::vector< std::string >& ordered_entries);
 };
 } // namespace homestore

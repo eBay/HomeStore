@@ -377,10 +377,11 @@ void MetaBlkService::register_handler(meta_sub_type type, const meta_blk_found_c
     m_sub_info[type].cb = cb;
     m_sub_info[type].comp_cb = comp_cb;
     m_sub_info[type].do_crc = do_crc ? 1 : 0;
-    m_dep_topo_graph[type];
     if (deps.has_value()) {
-        for (const auto& dep : deps.value()) {
-            m_dep_topo_graph[dep].push_back(type);
+        m_sub_info[type].has_deps = true;
+        for (auto const& x : deps.value()) {
+            m_sub_info[x].has_deps = true;
+            m_dep_topo_graph[x].push_back(type);
         }
     }
 }
@@ -1081,11 +1082,9 @@ sisl::byte_array MetaBlkService::read_sub_sb_internal(const meta_blk* mblk) cons
 void MetaBlkService::recover(bool do_comp_cb) {
     // for each registered subsystem, look up in cache for their meta blks;
     std::lock_guard< decltype(m_shutdown_mtx) > lg{m_shutdown_mtx};
-
-    meta_subtype_vec_t independent_subtypes;
     meta_subtype_vec_t ordered_subtypes;
 
-    if (hs_utils::topological_sort(m_dep_topo_graph, ordered_subtypes, &independent_subtypes)) {
+    if (hs_utils::topological_sort(m_dep_topo_graph, ordered_subtypes)) {
         throw homestore::homestore_exception(
             "MetaBlkService has circular dependency, please check the dependency graph", homestore_error::init_failed);
     }
@@ -1093,28 +1092,25 @@ void MetaBlkService::recover(bool do_comp_cb) {
     // all the subsystems are divided into two parts.
     // for subsystems in ordered_subtypes, we need to recover in order.
     for (const auto& subtype : ordered_subtypes) {
-        for (const auto& m : m_sub_info[subtype].meta_bids) {
-            auto mblk = m_meta_blks[m];
-            recover_meta_block(mblk);
-        }
-
-        if (do_comp_cb && m_sub_info[subtype].comp_cb) {
-            m_sub_info[subtype].comp_cb(true);
-            HS_LOG(DEBUG, metablk, "[type={}] completion callback sent.", subtype);
-        }
+        recover_meta_sub_type(do_comp_cb, subtype);
     }
 
-    // TODO: for subsystems in independent_subtypes, we can use concurrent recovery if necessary.
-    for (const auto& subtype : independent_subtypes) {
-        for (const auto& m : m_sub_info[subtype].meta_bids) {
-            auto mblk = m_meta_blks[m];
-            recover_meta_block(mblk);
-        }
+    // TODO: for independent subsystems, we can use concurrent recovery if necessary.
+    for (auto const& x : m_sub_info) {
+        auto& reg_info = x.second;
+        if (!reg_info.has_deps) { recover_meta_sub_type(do_comp_cb, x.first); }
+    }
+}
 
-        if (do_comp_cb && m_sub_info[subtype].comp_cb) {
-            m_sub_info[subtype].comp_cb(true);
-            HS_LOG(DEBUG, metablk, "[type={}] completion callback sent.", subtype);
-        }
+void MetaBlkService::recover_meta_sub_type(bool do_comp_cb, const meta_sub_type& sub_type) {
+    for (const auto& m : m_sub_info[sub_type].meta_bids) {
+        auto mblk = m_meta_blks[m];
+        recover_meta_block(mblk);
+    }
+
+    if (do_comp_cb && m_sub_info[sub_type].comp_cb) {
+        m_sub_info[sub_type].comp_cb(true);
+        HS_LOG(DEBUG, metablk, "[type={}] completion callback sent.", sub_type);
     }
 }
 
