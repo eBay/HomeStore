@@ -351,6 +351,7 @@ void MetaBlkService::deregister_handler(meta_sub_type type) {
     const auto it = m_sub_info.find(type);
     if (it != std::end(m_sub_info)) {
         m_sub_info.erase(it);
+        m_dep_topo_graph.erase(type);
         HS_LOG(INFO, metablk, "[type={}] deregistered Successfully", type);
     } else {
         HS_LOG(INFO, metablk, "[type={}] not found in registered list, no-op", type);
@@ -358,7 +359,8 @@ void MetaBlkService::deregister_handler(meta_sub_type type) {
 }
 
 void MetaBlkService::register_handler(meta_sub_type type, const meta_blk_found_cb_t& cb,
-                                      const meta_blk_recover_comp_cb_t& comp_cb, bool do_crc) {
+                                      const meta_blk_recover_comp_cb_t& comp_cb, bool do_crc,
+                                      std::optional< meta_subtype_vec_t > deps) {
     std::lock_guard< decltype(m_meta_mtx) > lk(m_meta_mtx);
     HS_REL_ASSERT_LT(type.length(), MAX_SUBSYS_TYPE_LEN, "type len: {} should not exceed len: {}", type.length(),
                      MAX_SUBSYS_TYPE_LEN);
@@ -375,7 +377,13 @@ void MetaBlkService::register_handler(meta_sub_type type, const meta_blk_found_c
     m_sub_info[type].cb = cb;
     m_sub_info[type].comp_cb = comp_cb;
     m_sub_info[type].do_crc = do_crc ? 1 : 0;
-    HS_LOG(INFO, metablk, "[type={}] registered with do_crc: {}", type, do_crc);
+    if (deps.has_value()) {
+        m_sub_info[type].has_deps = true;
+        for (auto const& x : deps.value()) {
+            m_sub_info[x].has_deps = true;
+            m_dep_topo_graph[x].push_back(type);
+        }
+    }
 }
 
 void MetaBlkService::add_sub_sb(meta_sub_type type, const uint8_t* context_data, uint64_t sz, void*& cookie) {
@@ -1074,84 +1082,103 @@ sisl::byte_array MetaBlkService::read_sub_sb_internal(const meta_blk* mblk) cons
 void MetaBlkService::recover(bool do_comp_cb) {
     // for each registered subsystem, look up in cache for their meta blks;
     std::lock_guard< decltype(m_shutdown_mtx) > lg{m_shutdown_mtx};
-    for (auto& m : m_meta_blks) {
-        auto* mblk = m.second;
-        auto buf = read_sub_sb_internal(mblk);
+    meta_subtype_vec_t ordered_subtypes;
 
-        // found a meta blk and callback to sub system;
-        const auto itr = m_sub_info.find(mblk->hdr.h.type);
-        if (itr != std::end(m_sub_info)) {
-            // if subsystem registered crc protection, verify crc before sending to subsystem;
-            if (itr->second.do_crc) {
-                const auto crc = crc32_ieee(init_crc32, s_cast< const uint8_t* >(buf->bytes), mblk->hdr.h.context_sz);
+    if (hs_utils::topological_sort(m_dep_topo_graph, ordered_subtypes)) {
+        throw homestore::homestore_exception(
+            "MetaBlkService has circular dependency, please check the dependency graph", homestore_error::init_failed);
+    }
 
-                HS_REL_ASSERT_EQ(crc, uint32_cast(mblk->hdr.h.crc),
-                                 "[type={}], CRC mismatch: {}/{}, on mblk bid: {}, context_sz: {}", mblk->hdr.h.type,
-                                 crc, uint32_cast(mblk->hdr.h.crc), mblk->hdr.h.bid.to_string(),
-                                 uint64_cast(mblk->hdr.h.context_sz));
-            } else {
-                HS_LOG(DEBUG, metablk, "[type={}] meta blk found with bypassing crc.", mblk->hdr.h.type);
-            }
+    // all the subsystems are divided into two parts.
+    // for subsystems in ordered_subtypes, we need to recover in order.
+    for (const auto& subtype : ordered_subtypes) {
+        recover_meta_sub_type(do_comp_cb, subtype);
+    }
 
-            // send the callbck;
-            auto& cb = itr->second.cb;
-            if (cb) { // cb could be nullptr because client want to get its superblock via read api;
-                // decompress if necessary
-                if (mblk->hdr.h.compressed) {
-                    // HS_DBG_ASSERT_GE(mblk->hdr.h.context_sz, META_BLK_CONTEXT_SZ);
-                    // TO DO: Might need to address alignment based on data or fast type
-                    auto decompressed_buf{hs_utils::make_byte_array(mblk->hdr.h.src_context_sz, true /* aligned */,
-                                                                    sisl::buftag::compression, align_size())};
-                    size_t decompressed_size = mblk->hdr.h.src_context_sz;
-                    const auto ret{sisl::Compress::decompress(r_cast< const char* >(buf->bytes),
-                                                              r_cast< char* >(decompressed_buf->bytes),
-                                                              mblk->hdr.h.compressed_sz, &decompressed_size)};
-                    if (ret != 0) {
-                        LOGERROR("[type={}], negative result: {} from decompress trying to decompress the "
-                                 "data. compressed_sz: {}, src_context_sz: {}",
-                                 mblk->hdr.h.type, ret, uint64_cast(mblk->hdr.h.compressed_sz),
-                                 uint64_cast(mblk->hdr.h.src_context_sz));
-                        HS_REL_ASSERT(false, "failed to decompress");
-                    } else {
-                        // decompressed_size must equal to input sz before compress
-                        HS_REL_ASSERT_EQ(uint64_cast(mblk->hdr.h.src_context_sz),
-                                         uint64_cast(decompressed_size)); /* since decompressed_size is >=0 it
-                                                                             is safe to cast to uint64_t */
-                        HS_LOG(DEBUG, metablk,
-                               "[type={}] Successfully decompressed, compressed_sz: {}, src_context_sz: {}, "
-                               "decompressed_size: {}",
-                               mblk->hdr.h.type, uint64_cast(mblk->hdr.h.compressed_sz),
-                               uint64_cast(mblk->hdr.h.src_context_sz), decompressed_size);
-                    }
+    // TODO: for independent subsystems, we can use concurrent recovery if necessary.
+    for (auto const& x : m_sub_info) {
+        auto& reg_info = x.second;
+        if (!reg_info.has_deps) { recover_meta_sub_type(do_comp_cb, x.first); }
+    }
+}
 
-                    cb(mblk, decompressed_buf, mblk->hdr.h.src_context_sz);
+void MetaBlkService::recover_meta_sub_type(bool do_comp_cb, const meta_sub_type& sub_type) {
+    for (const auto& m : m_sub_info[sub_type].meta_bids) {
+        auto mblk = m_meta_blks[m];
+        recover_meta_block(mblk);
+    }
+
+    if (do_comp_cb && m_sub_info[sub_type].comp_cb) {
+        m_sub_info[sub_type].comp_cb(true);
+        HS_LOG(DEBUG, metablk, "[type={}] completion callback sent.", sub_type);
+    }
+}
+
+void MetaBlkService::recover_meta_block(meta_blk* mblk) {
+    auto buf = read_sub_sb_internal(mblk);
+    // found a meta blk and callback to sub system;
+    const auto itr = m_sub_info.find(mblk->hdr.h.type);
+    if (itr != std::end(m_sub_info)) {
+        // if subsystem registered crc protection, verify crc before sending to subsystem;
+        if (itr->second.do_crc) {
+            const auto crc = crc32_ieee(init_crc32, s_cast< const uint8_t* >(buf->bytes), mblk->hdr.h.context_sz);
+
+            HS_REL_ASSERT_EQ(crc, uint32_cast(mblk->hdr.h.crc),
+                             "[type={}], CRC mismatch: {}/{}, on mblk bid: {}, context_sz: {}", mblk->hdr.h.type, crc,
+                             uint32_cast(mblk->hdr.h.crc), mblk->hdr.h.bid.to_string(),
+                             uint64_cast(mblk->hdr.h.context_sz));
+        } else {
+            HS_LOG(DEBUG, metablk, "[type={}] meta blk found with bypassing crc.", mblk->hdr.h.type);
+        }
+
+        // send the callbck;
+        auto& cb = itr->second.cb;
+        if (cb) { // cb could be nullptr because client want to get its superblock via read api;
+            // decompress if necessary
+            if (mblk->hdr.h.compressed) {
+                // HS_DBG_ASSERT_GE(mblk->hdr.h.context_sz, META_BLK_CONTEXT_SZ);
+                // TO DO: Might need to address alignment based on data or fast type
+                auto decompressed_buf{hs_utils::make_byte_array(mblk->hdr.h.src_context_sz, true /* aligned */,
+                                                                sisl::buftag::compression, align_size())};
+                size_t decompressed_size = mblk->hdr.h.src_context_sz;
+                const auto ret{sisl::Compress::decompress(r_cast< const char* >(buf->bytes),
+                                                          r_cast< char* >(decompressed_buf->bytes),
+                                                          mblk->hdr.h.compressed_sz, &decompressed_size)};
+                if (ret != 0) {
+                    LOGERROR("[type={}], negative result: {} from decompress trying to decompress the "
+                             "data. compressed_sz: {}, src_context_sz: {}",
+                             mblk->hdr.h.type, ret, uint64_cast(mblk->hdr.h.compressed_sz),
+                             uint64_cast(mblk->hdr.h.src_context_sz));
+                    HS_REL_ASSERT(false, "failed to decompress");
                 } else {
-                    // There is use case that cb could be nullptr because client want to get its superblock via
-                    // read api;
-                    cb(mblk, buf, mblk->hdr.h.context_sz);
+                    // decompressed_size must equal to input sz before compress
+                    HS_REL_ASSERT_EQ(uint64_cast(mblk->hdr.h.src_context_sz),
+                                     uint64_cast(decompressed_size)); /* since decompressed_size is >=0 it
+                                                                         is safe to cast to uint64_t */
+                    HS_LOG(DEBUG, metablk,
+                           "[type={}] Successfully decompressed, compressed_sz: {}, src_context_sz: {}, "
+                           "decompressed_size: {}",
+                           mblk->hdr.h.type, uint64_cast(mblk->hdr.h.compressed_sz),
+                           uint64_cast(mblk->hdr.h.src_context_sz), decompressed_size);
                 }
 
-                HS_LOG(DEBUG, metablk, "[type={}] meta blk sent with size: {}.", mblk->hdr.h.type,
-                       uint64_cast(mblk->hdr.h.context_sz));
+                cb(mblk, decompressed_buf, mblk->hdr.h.src_context_sz);
+            } else {
+                // There is use case that cb could be nullptr because client want to get its superblock via
+                // read api;
+                cb(mblk, buf, mblk->hdr.h.context_sz);
             }
-        } else {
-            HS_LOG(DEBUG, metablk, "[type={}], unregistered client found. ");
+
+            HS_LOG(DEBUG, metablk, "[type={}] meta blk sent with size: {}.", mblk->hdr.h.type,
+                   uint64_cast(mblk->hdr.h.context_sz));
+        }
+    } else {
+        HS_LOG(DEBUG, metablk, "[type={}], unregistered client found. ");
 #if 0
             // should never arrive here since we do assert on type before write to disk;
             HS_LOG_ASSERT( false, "[type={}] not registered for mblk found on disk. Skip this meta blk. ",
                       mblk->hdr.h.type);
 #endif
-        }
-    }
-
-    if (do_comp_cb) {
-        // for each registered subsystem, do recovery complete callback;
-        for (auto& sub : m_sub_info) {
-            if (sub.second.comp_cb) {
-                sub.second.comp_cb(true);
-                HS_LOG(DEBUG, metablk, "[type={}] completion callback sent.", sub.first);
-            }
-        }
     }
 }
 

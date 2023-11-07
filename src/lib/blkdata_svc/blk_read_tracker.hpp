@@ -143,7 +143,7 @@ public:
     /**
      * @brief : decrease the reference count of the BlkId by 1 in this read tracker.
      * If the ref count drops to zero, it means no read is pending on this blkid and if there is a waiter on this blkid,
-     * callback should be trigggered and all entries associated with this blkid (there could be more than one
+     * callback should be triggered and all entries associated with this blkid (there could be more than one
      * sub_ranges) should be removed.
      *
      * @param blkid : blkid that is being dereferneced;

@@ -43,5 +43,13 @@ public:
     static sisl::byte_array make_byte_array(const uint64_t size, const bool is_aligned_needed, const sisl::buftag tag,
                                             const size_t alignment);
     static uuid_t gen_random_uuid();
+
+    /**
+     * @brief  given a DAG graph , build the partial order sequence.
+     *
+     * @return true if the DAG has a circle ,or false if not.
+     */
+    static bool topological_sort(std::unordered_map< std::string, std::vector< std::string > >& DAG,
+                                 std::vector< std::string >& ordered_entries);
 };
 } // namespace homestore

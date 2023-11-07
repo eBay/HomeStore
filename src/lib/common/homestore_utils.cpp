@@ -74,5 +74,41 @@ sisl::byte_array hs_utils::extract_byte_array(const sisl::byte_view& b, const bo
     return (is_aligned_needed) ? b.extract(alignment) : b.extract(0);
 };
 
+bool hs_utils::topological_sort(std::unordered_map< std::string, std::vector< std::string > >& DAG,
+                                std::vector< std::string >& ordered_entries) {
+    std::unordered_map< std::string, int > in_degree;
+    std::queue< std::string > q;
+
+    // Calculate in-degree of each vertex
+    for (const auto& [vertex, edges] : DAG) {
+        // we should make sure all the vertex in in_degree map;
+        // if vertex is not in the map, 0 will be assigned.
+        in_degree[vertex];
+        for (const auto& edge : edges) {
+            in_degree[edge]++;
+        }
+    }
+
+    // Add vertices with in-degree 0 to the queue
+    for (const auto& [vertex, degree] : in_degree) {
+        if (degree == 0) q.push(vertex);
+    }
+
+    // Process vertices in the queue
+    while (!q.empty()) {
+        const auto vertex = q.front();
+        q.pop();
+        ordered_entries.push_back(vertex);
+
+        for (const auto& edge : DAG[vertex]) {
+            in_degree[edge]--;
+            if (in_degree[edge] == 0) { q.push(edge); }
+        }
+    }
+
+    // Check for cycle
+    return ordered_entries.size() != DAG.size();
+}
+
 size_t hs_utils::m_btree_mempool_size;
 } // namespace homestore

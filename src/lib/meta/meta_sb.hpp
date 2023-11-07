@@ -91,6 +91,7 @@ struct MetaSubRegInfo {
     std::set< uint64_t > meta_bids; // meta blk id
     meta_blk_found_cb_t cb{nullptr};
     meta_blk_recover_comp_cb_t comp_cb{nullptr};
+    bool has_deps{false};
 };
 
 // meta blk super block put as 1st block in the block chain;
