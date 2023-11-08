@@ -187,6 +187,10 @@ public:
      */
     void start();
 
+    uint64_t get_total_capacity() const;
+
+    uint64_t get_used_capacity() const;
+
 private:
     /**
      * @brief Initializes the block data service.

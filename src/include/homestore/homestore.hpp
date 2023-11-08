@@ -67,6 +67,11 @@ struct hs_vdev_context {
 
 using hs_before_services_starting_cb_t = std::function< void(void) >;
 
+struct hs_stats {
+    uint64_t total_capacity{0ul};
+    uint64_t used_capacity{0ul};
+};
+
 struct HS_SERVICE {
     static constexpr uint32_t META = 1 << 0;
     static constexpr uint32_t LOG_REPLICATED = 1 << 1;

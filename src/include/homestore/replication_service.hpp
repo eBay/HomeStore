@@ -6,6 +6,7 @@
 
 #include <folly/futures/Future.h>
 
+#include <homestore/homestore.hpp>
 #include <homestore/replication/repl_decls.h>
 
 namespace homestore {
@@ -84,5 +85,8 @@ public:
     /// @brief Iterate over all repl devs and then call the callback provided
     /// @param cb Callback with repl dev
     virtual void iterate_repl_devs(std::function< void(cshared< ReplDev >&) > const& cb) = 0;
+
+    /// @brief Get the current term of the repl dev
+    virtual hs_stats get_cap_stats() const = 0;
 };
 } // namespace homestore

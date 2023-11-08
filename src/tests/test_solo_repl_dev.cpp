@@ -249,6 +249,10 @@ public:
         }
 
         auto& rdev = (rand() % 2) ? m_repl_dev1 : m_repl_dev2;
+
+        auto const cap = hs()->repl_service().get_cap_stats();
+        LOGDEBUG("Before write, cap stats: used={} total={}", cap.used_capacity, cap.total_capacity);
+
         rdev->async_alloc_write(*req->header, req->key ? *req->key : sisl::blob{}, req->write_sgs, req);
     }
 
@@ -284,6 +288,9 @@ public:
         // If we did send some data to the repl_dev, validate it by doing async_read
         if (req->write_sgs.size != 0) {
             req->read_sgs = HSTestHelper::create_sgs(req->write_sgs.size, g_block_size, req->write_sgs.size);
+
+            auto const cap = hs()->repl_service().get_cap_stats();
+            LOGDEBUG("Write complete with cap stats: used={} total={}", cap.used_capacity, cap.total_capacity);
 
             rdev.async_read(req->written_blkids, req->read_sgs, req->read_sgs.size)
                 .thenValue([this, &rdev, req](auto&& err) {
