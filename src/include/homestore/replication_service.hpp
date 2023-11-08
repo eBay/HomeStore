@@ -6,7 +6,6 @@
 
 #include <folly/futures/Future.h>
 
-#include <homestore/homestore.hpp>
 #include <homestore/replication/repl_decls.h>
 
 namespace homestore {
@@ -32,6 +31,7 @@ VENUM(ReplServiceError, int32_t,
 
 class ReplDev;
 class ReplDevListener;
+struct hs_stats;
 
 template < typename V, typename E >
 using Result = folly::Expected< V, E >;

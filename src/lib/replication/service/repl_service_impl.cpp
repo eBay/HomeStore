@@ -18,6 +18,7 @@
 #include "replication/service/repl_service_impl.h"
 #include "replication/repl_dev/solo_repl_dev.h"
 #include "homestore/blkdata_service.hpp"
+#include "homestore/homestore.hpp"
 
 namespace homestore {
 ReplicationService& repl_service() { return hs()->repl_service(); }
