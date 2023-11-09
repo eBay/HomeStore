@@ -96,7 +96,7 @@ BlkAllocStatus BitmapBlkAllocator::alloc_on_disk(BlkId const& bid) {
             {
                 auto lock{portion.portion_auto_lock()};
                 if (!hs()->is_initializing()) {
-                    // During recovery we might try to free the entry which is already freed while replaying the
+                    // During recovery we might try to alloc the entry which is already alloced while replaying the
                     // journal, This assert is valid only post recovery.
                     BLKALLOC_REL_ASSERT(m_disk_bm->is_bits_reset(b.blk_num(), b.blk_count()),
                                         "Expected disk blks to reset");
