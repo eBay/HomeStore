@@ -292,10 +292,9 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType > {
         LOGINFO("Starting iomgr with {} threads", SISL_OPTIONS["n_threads"].as< uint32_t >());
         ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = SISL_OPTIONS["n_threads"].as< uint32_t >(),
                                                      .is_spdk = false,
-                                                     .is_spdk = false,
                                                      .num_fibers = 1 + SISL_OPTIONS["n_fibers"].as< uint32_t >(),
                                                      .app_mem_size_mb = 0,
-                                                     0});
+                                                     .hugepage_size_mb = 0});
 
         BtreeTestHelper< TestType >::SetUp();
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
