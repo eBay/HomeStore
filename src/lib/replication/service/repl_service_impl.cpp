@@ -17,6 +17,8 @@
 #include "common/homestore_assert.hpp"
 #include "replication/service/repl_service_impl.h"
 #include "replication/repl_dev/solo_repl_dev.h"
+#include "homestore/blkdata_service.hpp"
+#include "homestore/homestore.hpp"
 
 namespace homestore {
 ReplicationService& repl_service() { return hs()->repl_service(); }
@@ -44,6 +46,14 @@ void ReplicationServiceImpl::start() {
 void ReplicationServiceImpl::stop() {
     std::unique_lock lg{m_rd_map_mtx};
     m_rd_map.clear();
+}
+
+hs_stats ReplicationServiceImpl::get_cap_stats() const {
+    hs_stats stats;
+
+    stats.total_capacity = data_service().get_total_capacity();
+    stats.used_capacity = data_service().get_used_capacity();
+    return stats;
 }
 
 AsyncReplResult< shared< ReplDev > >

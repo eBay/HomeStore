@@ -224,4 +224,8 @@ void BlkDataService::start() {
                                      std::move(std::make_unique< DataSvcCPCallbacks >(m_vdev)));
 }
 
+uint64_t BlkDataService::get_total_capacity() const { return m_vdev->size(); }
+
+uint64_t BlkDataService::get_used_capacity() const { return m_vdev->used_size(); }
+
 } // namespace homestore

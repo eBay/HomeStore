@@ -31,6 +31,7 @@ VENUM(ReplServiceError, int32_t,
 
 class ReplDev;
 class ReplDevListener;
+struct hs_stats;
 
 template < typename V, typename E >
 using Result = folly::Expected< V, E >;
@@ -84,5 +85,9 @@ public:
     /// @brief Iterate over all repl devs and then call the callback provided
     /// @param cb Callback with repl dev
     virtual void iterate_repl_devs(std::function< void(cshared< ReplDev >&) > const& cb) = 0;
+
+    /// @brief get the capacity stats form underlying backend;
+    /// @return the capacity stats;
+    virtual hs_stats get_cap_stats() const = 0;
 };
 } // namespace homestore

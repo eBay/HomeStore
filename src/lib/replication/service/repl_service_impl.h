@@ -69,6 +69,8 @@ public:
 
     folly::Future< ReplServiceError > replace_member(uuid_t group_id, std::string const& member_out,
                                                      std::string const& member_in) const override;
+    hs_stats get_cap_stats() const override;
+
 
 private:
     shared< ReplDev > create_repl_dev_instance(superblk< repl_dev_superblk > const& rd_sb, bool load_existing);
