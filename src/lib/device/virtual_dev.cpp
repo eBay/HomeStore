@@ -254,7 +254,8 @@ BlkAllocStatus VirtualDev::alloc_blks_from_chunk(blk_count_t nblks, blk_alloc_hi
 
 void VirtualDev::free_blk(BlkId const& bid, VDevCPContext* vctx) {
     auto do_free_action = [this](auto const& b, VDevCPContext* vctx) {
-        if (vctx) {
+        if (vctx && (m_allocator_type != blk_allocator_type_t::append)) {
+            // We don't want to accumulate here for append blk allocator.
             vctx->m_free_blkid_list.push_back(b);
         } else {
             BlkAllocator* allocator = m_dmgr.get_chunk_mutable(b.chunk_num())->blk_allocator_mutable();

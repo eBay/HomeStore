@@ -96,6 +96,10 @@ public:
     /* Get status */
     nlohmann::json get_status(int log_level) const override;
 
+    void incr_alloced_blk_count(blk_count_t nblks) { m_alloced_blk_count.fetch_add(nblks, std::memory_order_relaxed); }
+    void decr_alloced_blk_count(blk_count_t nblks) { m_alloced_blk_count.fetch_sub(nblks, std::memory_order_relaxed); }
+    int64_t get_alloced_blk_count() const { return m_alloced_blk_count.load(std::memory_order_acquire); }
+
 private:
     void do_init();
     sisl::ThreadVector< BlkId >* get_alloc_blk_list();
@@ -117,5 +121,6 @@ private:
     std::unique_ptr< sisl::Bitset > m_disk_bm{nullptr};
     std::atomic< bool > m_is_disk_bm_dirty{true}; // initially disk_bm treated as dirty
     void* m_meta_blk_cookie{nullptr};
+    std::atomic< int64_t > m_alloced_blk_count{0};
 };
 } // namespace homestore

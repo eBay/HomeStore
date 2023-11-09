@@ -31,13 +31,10 @@ BitmapBlkAllocator::BitmapBlkAllocator(BlkAllocConfig const& cfg, bool is_fresh,
             nullptr);
     }
 
-    if (is_fresh || !is_persistent()) {
-        m_disk_bm = std::make_unique< sisl::Bitset >(m_num_blks, m_chunk_id, m_align_size);
-        do_init();
+    if (is_fresh) {
+        if (is_persistent()) { m_disk_bm = std::make_unique< sisl::Bitset >(m_num_blks, m_chunk_id, m_align_size); }
     }
-}
 
-void BitmapBlkAllocator::do_init() {
     // NOTE:  Blocks per portion must be modulo word size so locks do not fall on same word
     m_blks_per_portion = sisl::round_up(m_blks_per_portion, m_disk_bm ? m_disk_bm->word_size() : 64u);
 
@@ -54,12 +51,12 @@ void BitmapBlkAllocator::on_meta_blk_found(void* mblk_cookie, sisl::byte_view co
         hs_utils::extract_byte_array(buf, meta_service().is_aligned_buf_needed(size), meta_service().align_size())}};
 
     m_alloced_blk_count.store(m_disk_bm->get_set_count(), std::memory_order_relaxed);
-    do_init();
-
     load();
 }
 
 void BitmapBlkAllocator::cp_flush(CP*) {
+    if (!is_persistent()) { return; }
+
     if (m_is_disk_bm_dirty.load()) {
         sisl::byte_array bitmap_buf = acquire_underlying_buffer();
         if (m_meta_blk_cookie) {
@@ -99,6 +96,8 @@ BlkAllocStatus BitmapBlkAllocator::alloc_on_disk(BlkId const& bid) {
             {
                 auto lock{portion.portion_auto_lock()};
                 if (!hs()->is_initializing()) {
+                    // During recovery we might try to free the entry which is already freed while replaying the
+                    // journal, This assert is valid only post recovery.
                     BLKALLOC_REL_ASSERT(m_disk_bm->is_bits_reset(b.blk_num(), b.blk_count()),
                                         "Expected disk blks to reset");
                 }
@@ -133,9 +132,8 @@ void BitmapBlkAllocator::free_on_disk(BlkId const& bid) {
         {
             auto lock{portion.portion_auto_lock()};
             if (!hs()->is_initializing()) {
-                /* During recovery we might try to free the entry which is already freed while replaying the journal,
-                 * This assert is valid only post recovery.
-                 */
+                // During recovery we might try to free the entry which is already freed while replaying the journal,
+                // This assert is valid only post recovery.
                 if (!m_disk_bm->is_bits_set(b.blk_num(), b.blk_count())) {
                     BLKALLOC_LOG(ERROR, "bit not set {} nblks {} chunk number {}", b.blk_num(), b.blk_count(),
                                  m_chunk_id);

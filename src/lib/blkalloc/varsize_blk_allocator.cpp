@@ -232,6 +232,7 @@ bool VarsizeBlkAllocator::allocator_state_machine() {
 }
 
 void VarsizeBlkAllocator::load() {
+    BLKALLOC_DBG_ASSERT_CMP(is_persistent(), ==, true, "Load called on non-persistent blk allocator");
     m_cache_bm->copy(*get_disk_bitmap());
 
     BLKALLOC_LOG(INFO, "VarSizeBlkAllocator initialized loading bitmap of size={} used blks={} from persistent storage",

@@ -166,10 +166,6 @@ public:
     virtual std::string to_string() const = 0;
     virtual void cp_flush(CP* cp) = 0;
 
-    void incr_alloced_blk_count(blk_count_t nblks) { m_alloced_blk_count.fetch_add(nblks, std::memory_order_relaxed); }
-    void decr_alloced_blk_count(blk_count_t nblks) { m_alloced_blk_count.fetch_sub(nblks, std::memory_order_relaxed); }
-    int64_t get_alloced_blk_count() const { return m_alloced_blk_count.load(std::memory_order_acquire); }
-
     uint32_t get_align_size() const { return m_align_size; }
     blk_num_t get_total_blks() const { return m_num_blks; }
     const std::string& get_name() const { return m_name; }
@@ -186,7 +182,6 @@ protected:
     const blk_num_t m_num_blks;
     const chunk_num_t m_chunk_id;
     const bool m_is_persistent;
-    std::atomic< int64_t > m_alloced_blk_count{0};
 };
 
 } // namespace homestore
