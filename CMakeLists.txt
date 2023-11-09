@@ -8,7 +8,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON) # turn on folder hierarchies
 
 include (cmake/Flags.cmake)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 enable_testing()
 
 if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/conanbuildinfo.cmake)
@@ -107,6 +107,7 @@ else()
     endif()
 endif()
 
+add_flags("-g")
 add_subdirectory(src)
 
 # build info

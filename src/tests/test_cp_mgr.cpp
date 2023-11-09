@@ -41,7 +41,7 @@ SISL_OPTION_GROUP(test_cp_mgr,
 
 class TestCPContext : public CPContext {
 public:
-    TestCPContext(cp_id_t id) : CPContext{id} {}
+    TestCPContext(CP* cp) : CPContext{cp} {}
     virtual ~TestCPContext() = default;
 
     void add() {
@@ -69,7 +69,7 @@ private:
 class TestCPCallbacks : public CPCallbacks {
 public:
     std::unique_ptr< CPContext > on_switchover_cp(CP*, CP* new_cp) override {
-        return std::make_unique< TestCPContext >(new_cp->id());
+        return std::make_unique< TestCPContext >(new_cp);
     }
 
     folly::Future< bool > cp_flush(CP* cp) override {

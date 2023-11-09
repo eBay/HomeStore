@@ -30,6 +30,7 @@
 #include <sisl/utility/obj_life_counter.hpp>
 #include <sisl/utility/atomic_counter.hpp>
 #include <sisl/utility/enum.hpp>
+#include <sisl/fds/concurrent_insert_vector.hpp>
 
 #include <homestore/checkpoint/cp_mgr.hpp>
 #include <homestore/homestore_decl.hpp>
@@ -79,6 +80,7 @@ struct blkalloc_cp;
 class VirtualDev;
 ENUM(vdev_event_t, uint8_t, SIZE_THRESHOLD_REACHED, VDEV_ERRORED_OUT);
 using vdev_event_cb_t = std::function< void(VirtualDev&, vdev_event_t, const std::string&) >;
+class VDevCPContext;
 
 class VirtualDev {
 protected:
@@ -150,7 +152,7 @@ public:
     /// @return Allocation Status
     virtual BlkAllocStatus commit_blk(BlkId const& blkid);
 
-    virtual void free_blk(BlkId const& b);
+    virtual void free_blk(BlkId const& b, VDevCPContext* vctx = nullptr);
 
     /////////////////////// Write API related methods /////////////////////////////
     /// @brief Asynchornously write the buffer to the device on a given blkid
@@ -251,20 +253,16 @@ public:
     /// @brief Submit the batch of IOs previously queued as part of async read/write APIs.
     void submit_batch();
 
-    virtual void recovery_done();
-
     ////////////////////// Checkpointing related methods ///////////////////////////
     /// @brief
     ///
     /// @param cp
-    void cp_flush(CP* cp);
-
-    void cp_cleanup(CP* cp);
+    void cp_flush(VDevCPContext* v_cp_ctx);
 
     /// @brief : percentage CP has been progressed, this api is normally used for cp watchdog;
     int cp_progress_percent();
 
-    std::unique_ptr< CPContext > create_cp_context(cp_id_t cp_id);
+    std::unique_ptr< CPContext > create_cp_context(CP* cp);
 
     ////////////////////////// Standard Getters ///////////////////////////////
     virtual uint64_t available_blks() const;
@@ -297,7 +295,10 @@ private:
 // place holder for future needs in which components underlying virtualdev needs cp flush context;
 class VDevCPContext : public CPContext {
 public:
-    VDevCPContext(cp_id_t cp_id);
+    sisl::ConcurrentInsertVector< BlkId > m_free_blkid_list;
+
+public:
+    VDevCPContext(CP* cp);
     virtual ~VDevCPContext() = default;
 };
 

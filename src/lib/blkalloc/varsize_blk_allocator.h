@@ -33,7 +33,7 @@
 #include <sisl/logging/logging.h>
 
 #include <homestore/blk.h>
-#include "blk_allocator.h"
+#include "bitmap_blk_allocator.h"
 #include "blk_cache.h"
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
@@ -51,12 +51,12 @@ public:
     const bool m_use_slabs{true}; // use sweeping thread pool with slabs in variable size block allocator
 
 public:
-    VarsizeBlkAllocConfig() : VarsizeBlkAllocConfig{0, 0, 0, 0, ""} {}
-    VarsizeBlkAllocConfig(std::string const& name) : VarsizeBlkAllocConfig{0, 0, 0, 0, name} {}
+    VarsizeBlkAllocConfig() : VarsizeBlkAllocConfig{0, 0, 0, 0, false, ""} {}
+    VarsizeBlkAllocConfig(std::string const& name) : VarsizeBlkAllocConfig{0, 0, 0, 0, false, name} {}
 
-    VarsizeBlkAllocConfig(uint32_t blk_size, uint32_t ppage_sz, uint32_t align_sz, uint64_t size,
-                          std::string const& name, bool realtime_bm_on = true, bool use_slabs = true) :
-            BlkAllocConfig{blk_size, align_sz, size, name, realtime_bm_on},
+    VarsizeBlkAllocConfig(uint32_t blk_size, uint32_t ppage_sz, uint32_t align_sz, uint64_t size, bool persistent,
+                          std::string const& name, bool use_slabs = true) :
+            BlkAllocConfig{blk_size, align_sz, size, persistent, name},
             m_phys_page_size{ppage_sz},
             m_nsegments{HS_DYNAMIC_CONFIG(blkallocator.max_segments)},
             m_blks_per_temp_group{m_capacity / HS_DYNAMIC_CONFIG(blkallocator.num_blk_temperatures)},
@@ -199,21 +199,22 @@ public:
  * 3. Caching of available blocks instead of scanning during allocation.
  *
  */
-class VarsizeBlkAllocator : public BlkAllocator {
+class VarsizeBlkAllocator : public BitmapBlkAllocator {
 public:
     VarsizeBlkAllocator(VarsizeBlkAllocConfig const& cfg, bool init, chunk_num_t chunk_id);
     VarsizeBlkAllocator(VarsizeBlkAllocator const&) = delete;
     VarsizeBlkAllocator(VarsizeBlkAllocator&&) noexcept = delete;
     VarsizeBlkAllocator& operator=(VarsizeBlkAllocator const&) = delete;
     VarsizeBlkAllocator& operator=(VarsizeBlkAllocator&&) noexcept = delete;
-    virtual ~VarsizeBlkAllocator() override;
+    virtual ~VarsizeBlkAllocator();
+
+    void load() override;
 
     BlkAllocStatus alloc_contiguous(BlkId& bid) override;
     BlkAllocStatus alloc_contiguous(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid);
     BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
     BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, std::vector< BlkId >& out_blkids);
     void free(BlkId const& blk_id) override;
-    void inited() override;
 
     blk_num_t available_blks() const override;
     blk_num_t get_freeable_nblks() const override;
@@ -263,6 +264,7 @@ private:
 private:
     static void sweeper_thread(size_t thread_num);
     bool allocator_state_machine();
+    void do_start();
 
     blk_count_t alloc_blks_slab(blk_count_t nblks, blk_alloc_hints const& hints, MultiBlkId& out_blkid);
     blk_count_t alloc_blks_direct(blk_count_t nblks, blk_alloc_hints const& hints, MultiBlkId& out_blkids);

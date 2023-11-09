@@ -156,7 +156,24 @@ struct blk_cache_refill_status {
 
     void mark_refill_done() { slab_refilled_count = slab_required_count; }
 };
+} // namespace homestore
 
+namespace fmt {
+template <>
+struct formatter< homestore::blk_cache_refill_status > {
+    template < typename ParseContext >
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template < typename FormatContext >
+    auto format(const homestore::blk_cache_refill_status& s, FormatContext& ctx) {
+        return format_to(ctx.out(), "{}/{}", s.slab_refilled_count, s.slab_required_count);
+    }
+};
+} // namespace fmt
+
+namespace homestore {
 struct blk_cache_fill_session {
     uint64_t session_id;
     std::vector< blk_cache_refill_status > slab_requirements; // A slot for each slab about count of required/refilled
@@ -231,7 +248,24 @@ struct SlabCacheConfig {
     }
     std::string get_name() const { return m_name; }
 };
+} // namespace homestore
 
+namespace fmt {
+template <>
+struct formatter< homestore::SlabCacheConfig > {
+    template < typename ParseContext >
+    constexpr auto parse(ParseContext& ctx) {
+        return ctx.begin();
+    }
+
+    template < typename FormatContext >
+    auto format(const homestore::SlabCacheConfig& s, FormatContext& ctx) {
+        return format_to(ctx.out(), "{}", s.to_string());
+    }
+};
+} // namespace fmt
+
+namespace homestore {
 class FreeBlkCache {
 public:
     FreeBlkCache() = default;
@@ -282,31 +316,3 @@ public:
     }
 };
 } // namespace homestore
-
-namespace fmt {
-template <>
-struct formatter< homestore::blk_cache_refill_status > {
-    template < typename ParseContext >
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
-    }
-
-    template < typename FormatContext >
-    auto format(const homestore::blk_cache_refill_status& s, FormatContext& ctx) {
-        return format_to(ctx.out(), "{}/{}", s.slab_refilled_count, s.slab_required_count);
-    }
-};
-
-template <>
-struct formatter< homestore::SlabCacheConfig > {
-    template < typename ParseContext >
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
-    }
-
-    template < typename FormatContext >
-    auto format(const homestore::SlabCacheConfig& s, FormatContext& ctx) {
-        return format_to(ctx.out(), "{}", s.to_string());
-    }
-};
-} // namespace fmt

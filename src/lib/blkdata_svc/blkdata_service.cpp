@@ -212,7 +212,10 @@ folly::Future< std::error_code > BlkDataService::async_free_blk(MultiBlkId const
     auto f = promise.getFuture();
 
     m_blk_read_tracker->wait_on(bids, [this, bids, p = std::move(promise)]() mutable {
-        m_vdev->free_blk(bids);
+        {
+            auto cpg = hs()->cp_mgr().cp_guard();
+            m_vdev->free_blk(bids, s_cast< VDevCPContext* >(cpg.context(cp_consumer_t::BLK_DATA_SVC)));
+        }
         p.setValue(std::error_code{});
     });
     return f;

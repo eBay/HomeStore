@@ -44,6 +44,7 @@
 #include "blkalloc/varsize_blk_allocator.h"
 #include "device/round_robin_chunk_selector.h"
 #include "blkalloc/append_blk_allocator.h"
+#include "blkalloc/fixed_blk_allocator.h"
 
 SISL_LOGGING_DECL(device)
 
@@ -54,8 +55,8 @@ static std::shared_ptr< BlkAllocator > create_blk_allocator(blk_allocator_type_t
                                                             bool is_auto_recovery, uint32_t unique_id, bool is_init) {
     switch (btype) {
     case blk_allocator_type_t::fixed: {
-        BlkAllocConfig cfg{vblock_size, align_sz, size, std::string{"fixed_chunk_"} + std::to_string(unique_id)};
-        cfg.set_auto_recovery(is_auto_recovery);
+        BlkAllocConfig cfg{vblock_size, align_sz, size, is_auto_recovery,
+                           std::string{"fixed_chunk_"} + std::to_string(unique_id)};
         return std::make_shared< FixedBlkAllocator >(cfg, is_init, unique_id);
     }
     case blk_allocator_type_t::varsize: {
@@ -63,16 +64,15 @@ static std::shared_ptr< BlkAllocator > create_blk_allocator(blk_allocator_type_t
                                   ppage_sz,
                                   align_sz,
                                   size,
+                                  is_auto_recovery,
                                   std::string("varsize_chunk_") + std::to_string(unique_id),
-                                  true /* realtime_bitmap */,
                                   is_data_drive_hdd() ? false : true /* use_slabs */};
         // HS_DBG_ASSERT_EQ((size % MIN_DATA_CHUNK_SIZE(ppage_sz)), 0);
-        cfg.set_auto_recovery(is_auto_recovery);
         return std::make_shared< VarsizeBlkAllocator >(cfg, is_init, unique_id);
     }
     case blk_allocator_type_t::append: {
-        BlkAllocConfig cfg{vblock_size, align_sz, size, std::string("append_chunk_") + std::to_string(unique_id)};
-        cfg.set_auto_recovery(is_auto_recovery);
+        BlkAllocConfig cfg{vblock_size, align_sz, size, false,
+                           std::string("append_chunk_") + std::to_string(unique_id)};
         return std::make_shared< AppendBlkAllocator >(cfg, is_init, unique_id);
     }
     case blk_allocator_type_t::none:
@@ -141,10 +141,6 @@ folly::Future< std::error_code > VirtualDev::async_format() {
     });
 }
 
-/*std::shared_ptr< blkalloc_cp > VirtualDev::attach_prepare_cp(const std::shared_ptr< blkalloc_cp >& cur_ba_cp) {
-    return (Chunk::attach_prepare_cp(cur_ba_cp));
-}*/
-
 bool VirtualDev::is_blk_alloced(BlkId const& blkid) const {
     return m_dmgr.get_chunk(blkid.chunk_num())->blk_allocator()->is_blk_alloced(blkid);
 }
@@ -204,7 +200,7 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
         }
 
         if ((status != BlkAllocStatus::SUCCESS) && !((status == BlkAllocStatus::PARTIAL) && hints.partial_alloc_ok)) {
-            LOGERROR("nblks={} failed to alloc after trying to alloc on every chunks {} and devices {}.", nblks);
+            LOGERROR("nblks={} failed to alloc after trying to alloc on every chunks and devices", nblks);
             COUNTER_INCREMENT(m_metrics, vdev_num_alloc_failure, 1);
         }
 
@@ -248,12 +244,6 @@ BlkAllocStatus VirtualDev::alloc_blks_from_chunk(blk_count_t nblks, blk_alloc_hi
 #endif
     auto status = chunk->blk_allocator_mutable()->alloc(nblks, hints, out_blkid);
     if ((status == BlkAllocStatus::PARTIAL) && (!hints.partial_alloc_ok)) {
-        // free partial result
-        auto it = out_blkid.iterate();
-        while (auto const b = it.next()) {
-            auto const ret = chunk->blk_allocator_mutable()->free_on_realtime(*b);
-            HS_REL_ASSERT(ret, "failed to free on realtime");
-        }
         chunk->blk_allocator_mutable()->free(out_blkid);
         out_blkid = MultiBlkId{};
         status = BlkAllocStatus::FAILED;
@@ -262,26 +252,26 @@ BlkAllocStatus VirtualDev::alloc_blks_from_chunk(blk_count_t nblks, blk_alloc_hi
     return status;
 }
 
-/*bool VirtualDev::free_on_realtime(BlkId const& b) {
-    Chunk* chunk = m_dmgr.get_chunk_mutable(b.chunk_num());
-    return chunk->blk_allocator_mutable()->free_on_realtime(b);
-}*/
+void VirtualDev::free_blk(BlkId const& bid, VDevCPContext* vctx) {
+    auto do_free_action = [this](auto const& b, VDevCPContext* vctx) {
+        if (vctx && (m_allocator_type != blk_allocator_type_t::append)) {
+            // We don't want to accumulate here for append blk allocator.
+            vctx->m_free_blkid_list.push_back(b);
+        } else {
+            BlkAllocator* allocator = m_dmgr.get_chunk_mutable(b.chunk_num())->blk_allocator_mutable();
+            if (m_auto_recovery) { allocator->free_on_disk(b); }
+            allocator->free(b);
+        }
+    };
 
-void VirtualDev::free_blk(BlkId const& b) {
-    if (b.is_multi()) {
-        MultiBlkId const& mb = r_cast< MultiBlkId const& >(b);
-        Chunk* chunk = m_dmgr.get_chunk_mutable(mb.chunk_num());
-        chunk->blk_allocator_mutable()->free(mb);
+    if (bid.is_multi()) {
+        MultiBlkId const& mbid = r_cast< MultiBlkId const& >(bid);
+        auto it = mbid.iterate();
+        while (auto const b = it.next()) {
+            do_free_action(*b, vctx);
+        }
     } else {
-        Chunk* chunk = m_dmgr.get_chunk_mutable(b.chunk_num());
-        chunk->blk_allocator_mutable()->free(b);
-    }
-}
-
-void VirtualDev::recovery_done() {
-    DEBUG_ASSERT_EQ(m_auto_recovery, false, "recovery done (manual recovery completion) called on auto recovery vdev");
-    for (auto& chunk : m_all_chunks) {
-        chunk->blk_allocator_mutable()->inited();
+        do_free_action(bid, vctx);
     }
 }
 
@@ -507,15 +497,6 @@ uint64_t VirtualDev::used_size() const {
 
 std::vector< shared< Chunk > > VirtualDev::get_chunks() const { return m_all_chunks; }
 
-/*void VirtualDev::blkalloc_cp_start(const std::shared_ptr< blkalloc_cp >& ba_cp) {
-    for (size_t i{0}; i < m_primary_pdev_chunks_list.size(); ++i) {
-        for (size_t chunk_indx{0}; chunk_indx < m_primary_pdev_chunks_list[i].chunks_in_pdev.size(); ++chunk_indx) {
-            auto* chunk = m_primary_pdev_chunks_list[i].chunks_in_pdev[chunk_indx];
-            chunk->cp_start(ba_cp);
-        }
-    }
-}*/
-
 /* Get status for all chunks */
 nlohmann::json VirtualDev::get_status(int log_level) const {
     nlohmann::json j;
@@ -572,24 +553,28 @@ void VirtualDev::update_vdev_private(const sisl::blob& private_data) {
 }
 
 ///////////////////////// VirtualDev Checkpoint methods /////////////////////////////
+VDevCPContext::VDevCPContext(CP* cp) : CPContext(cp) {}
 
-VDevCPContext::VDevCPContext(cp_id_t cp_id) : CPContext(cp_id) {}
+std::unique_ptr< CPContext > VirtualDev::create_cp_context(CP* cp) { return std::make_unique< VDevCPContext >(cp); }
 
-std::unique_ptr< CPContext > VirtualDev::create_cp_context(cp_id_t cp_id) {
-    return std::make_unique< VDevCPContext >(cp_id);
-}
+void VirtualDev::cp_flush(VDevCPContext* v_cp_ctx) {
+    CP* cp = v_cp_ctx->cp();
 
-void VirtualDev::cp_flush(CP* cp) {
-    // pass down cp so that underlying componnents can get their customized CP context if needed;
-    m_chunk_selector->foreach_chunks([this, cp](cshared< Chunk >& chunk) { chunk->cp_flush(cp); });
+    // pass down cp so that underlying components can get their customized CP context if needed;
+    m_chunk_selector->foreach_chunks(
+        [this, cp](cshared< Chunk >& chunk) { chunk->blk_allocator_mutable()->cp_flush(cp); });
+
+    // All of the blkids which were captured in the current vdev cp context will now be freed and hence available for
+    // allocation on the new CP dirty collection session which is ongoing
+    for (auto const& b : v_cp_ctx->m_free_blkid_list) {
+        BlkAllocator* allocator = m_dmgr.get_chunk_mutable(b.chunk_num())->blk_allocator_mutable();
+        if (m_auto_recovery) { allocator->free_on_disk(b); }
+        allocator->free(b);
+    }
 }
 
 // sync-ops during cp_flush, so return 100;
 int VirtualDev::cp_progress_percent() { return 100; }
-
-void VirtualDev::cp_cleanup(CP*) {
-    // no-op;
-}
 
 ///////////////////////// VirtualDev Private Methods /////////////////////////////
 uint64_t VirtualDev::to_dev_offset(BlkId const& b, Chunk** chunk) const {

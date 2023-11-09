@@ -38,9 +38,6 @@ private:
     sisl::SimpleCache< BlkId, BtreeNodePtr > m_cache;
     uint32_t m_node_size;
 
-    // Dirty buffer list arranged in a dependent list fashion
-    std::unique_ptr< sisl::ThreadVector< IndexBufferPtr > > m_dirty_list[MAX_CP_COUNT];
-    std::unique_ptr< sisl::ThreadVector< BlkId > > m_free_blkid_list[MAX_CP_COUNT]; // Free'd btree blkids per cp
     std::vector< iomgr::io_fiber_t > m_cp_flush_fibers;
     std::mutex m_flush_mtx;
 
@@ -57,8 +54,7 @@ public:
     void free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) override;
 
     //////////////////// CP Related API section /////////////////////////////////
-    folly::Future< bool > async_cp_flush(CPContext* context);
-    std::unique_ptr< CPContext > create_cp_context(cp_id_t cp_id);
+    folly::Future< bool > async_cp_flush(IndexCPContext* context);
     IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf) const;
 
 private:
@@ -71,7 +67,5 @@ private:
     void get_next_bufs(IndexCPContext* cp_ctx, uint32_t max_count, std::vector< IndexBufferPtr >& bufs);
     void get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_count, IndexBuffer* prev_flushed_buf,
                                 std::vector< IndexBufferPtr >& bufs);
-    void free_btree_blks_and_flush(IndexCPContext* cp_ctx);
-
 };
 } // namespace homestore

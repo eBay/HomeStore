@@ -79,6 +79,10 @@ public:
     BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
     void free(BlkId const& b) override;
 
+    BlkAllocStatus alloc_on_disk(BlkId const& in_bid) override;
+    void free_on_disk(BlkId const& b) override;
+    bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const override;
+
     /**
      * @brief :  the number of available blocks that can be allocated by the AppendBlkAllocator.
      * @return : the number of available blocks.
@@ -119,6 +123,8 @@ public:
     void clear_dirty_offset(const uint8_t idx);
 
     void cp_flush(CP* cp) override;
+
+    nlohmann::json get_status(int log_level) const override;
 
 private:
     std::string get_name() const;

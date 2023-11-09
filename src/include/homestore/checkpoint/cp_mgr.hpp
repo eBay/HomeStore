@@ -56,15 +56,14 @@ VENUM(cp_consumer_t, uint8_t,
 
 struct CP;
 class CPContext {
-private:
-    cp_id_t m_cp_id;
+protected:
     CP* m_cp;
     folly::Promise< bool > m_flush_comp;
 
 public:
-    CPContext(cp_id_t id) : m_cp_id{id} {}
-    cp_id_t id() const { return m_cp_id; }
+    CPContext(CP* cp) : m_cp{cp} {}
     CP* cp() { return m_cp; }
+    cp_id_t id() const;
     void complete(bool status) { m_flush_comp.setValue(status); }
     folly::Future< bool > get_future() { return m_flush_comp.getFuture(); }
 

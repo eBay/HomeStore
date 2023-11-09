@@ -157,18 +157,18 @@ TEST_F(BlkReadTrackerTest, TestInsertWithWaiter) {
  * */
 TEST_F(BlkReadTrackerTest, TestInsRmWithWaiterOnSameBid) {
     BlkId b{16, 20, 0};
-    LOGINFO("Step 1: read blkid: {} into hash map.", b.to_string());
+    LOGINFO("Step 1: read blkid: {} into hash map.", b);
     get_inst()->insert(b);
 
     bool called{false};
-    LOGINFO("Step 2: free blkid: {} to be completed on reading");
+    LOGINFO("Step 2: free blkid: {} to be completed on reading", b);
     get_inst()->wait_on(b, [&called, &b]() {
         LOGMSG_ASSERT_EQ(called, false, "not expecting wait_on callback to be called more than once!");
         called = true;
-        LOGINFO("wait_on callback triggered on blkid: {};", b.to_string());
+        LOGINFO("wait_on callback triggered on blkid: {};", b);
     });
 
-    LOGINFO("Step 3: try to do read completed on blkid: {}. ", b.to_string());
+    LOGINFO("Step 3: try to do read completed on blkid: {}. ", b);
     get_inst()->remove(b);
 
     // cb should be called in same thread serving remove;

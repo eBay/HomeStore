@@ -6,7 +6,7 @@ include_directories (BEFORE .)
 add_library(hs_blkalloc OBJECT)
 target_sources(hs_blkalloc PRIVATE
         blk.cpp
-        blk_allocator.cpp
+        bitmap_blk_allocator.cpp
         fixed_blk_allocator.cpp
         varsize_blk_allocator.cpp
         blk_cache_queue.cpp

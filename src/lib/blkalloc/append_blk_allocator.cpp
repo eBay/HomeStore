@@ -119,6 +119,12 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
     return BlkAllocStatus::SUCCESS;
 }
 
+BlkAllocStatus AppendBlkAllocator::alloc_on_disk(BlkId const&) { return BlkAllocStatus::SUCCESS; }
+
+void AppendBlkAllocator::free_on_disk(BlkId const&) {}
+
+bool AppendBlkAllocator::is_blk_alloced_on_disk(BlkId const&, bool) const { return false; }
+
 //
 // cp_flush doesn't need CPGuard as it is triggered by CPMgr which already handles the reference check;
 //
@@ -183,4 +189,5 @@ blk_num_t AppendBlkAllocator::get_freeable_nblks() const { return m_freeable_nbl
 
 blk_num_t AppendBlkAllocator::get_defrag_nblks() const { return get_freeable_nblks() - available_blks(); }
 
+nlohmann::json AppendBlkAllocator::get_status(int log_level) const { return nlohmann::json{}; }
 } // namespace homestore
