@@ -467,7 +467,7 @@ public:
 
     bool has_room_for_put(btree_put_type put_type, uint32_t key_size, uint32_t value_size) const override {
         auto needed_size = key_size + value_size;
-        if ((put_type == btree_put_type::UPSERT) + (put_type == btree_put_type::INSERT)) {
+        if ((put_type == btree_put_type::UPSERT) || (put_type == btree_put_type::INSERT)) {
             needed_size += get_record_size();
         }
         return (available_size() >= needed_size);

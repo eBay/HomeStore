@@ -346,9 +346,15 @@ template < typename K, typename V >
 bnodeid_t Btree< K, V >::root_node_id() const {
     return m_root_node_info.bnode_id();
 }
+
 template < typename K, typename V >
 uint64_t Btree< K, V >::root_link_version() const {
     return m_root_node_info.link_version();
+}
+
+template < typename K, typename V >
+bool Btree< K, V >::is_repair_needed(const BtreeNodePtr& child_node, const BtreeLinkInfo& child_info) {
+    return child_info.link_version() != child_node->link_version();
 }
 
 // TODO: Commenting out flip till we figure out how to move flip dependency inside sisl package.

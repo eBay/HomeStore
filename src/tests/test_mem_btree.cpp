@@ -289,44 +289,12 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType > {
     BtreeConcurrentTest() { this->m_is_multi_threaded = true; }
 
     void SetUp() override {
-        m_cfg.m_leaf_node_type = T::leaf_node_type;
-        m_cfg.m_int_node_type = T::interior_node_type;
-        m_max_range_input = SISL_OPTIONS["num_entries"].as< uint32_t >();
-        if (SISL_OPTIONS.count("disable_merge")) m_cfg.m_merge_turned_on = false;
-        m_fibers.clear();
-        m_bt = std::make_unique< typename T::BtreeType >(m_cfg);
-        m_bt->init(nullptr);
-    }
-
-    void TearDown() override { iomanager.stop(); }
-
-    void print() const { m_bt->print_tree(); }
-    void print_keys() const { m_bt->print_tree_keys(); }
-
-    void execute(const std::vector< std::pair< std::string, int > >& op_list) {
-
-        m_cfg.m_leaf_node_type = T::leaf_node_type;
-        m_cfg.m_int_node_type = T::interior_node_type;
-        m_max_range_input = SISL_OPTIONS["num_entries"].as< uint32_t >();
-        if (SISL_OPTIONS.count("disable_merge")) m_cfg.m_merge_turned_on = false;
-        m_fibers.clear();
-        m_bt = std::make_unique< typename T::BtreeType >(m_cfg);
-        m_bt->init(nullptr);
-    }
-
-    void TearDown() override { iomanager.stop(); }
-
-    void print() const { m_bt->print_tree(); }
-    void print_keys() const { m_bt->print_tree_keys(); }
-
-    void execute(const std::vector< std::pair< std::string, int > >& op_list) {
         LOGINFO("Starting iomgr with {} threads", SISL_OPTIONS["n_threads"].as< uint32_t >());
         ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = SISL_OPTIONS["n_threads"].as< uint32_t >(),
                                                      .is_spdk = false,
-                                                     .is_spdk = false,
                                                      .num_fibers = 1 + SISL_OPTIONS["n_fibers"].as< uint32_t >(),
                                                      .app_mem_size_mb = 0,
-                                                     0});
+                                                     .hugepage_size_mb = 0});
 
         BtreeTestHelper< TestType >::SetUp();
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);

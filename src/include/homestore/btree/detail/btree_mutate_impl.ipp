@@ -18,10 +18,6 @@
 
 namespace homestore {
 
-static bool is_repair_needed(const BtreeNodePtr& child_node, const BtreeLinkInfo& child_info) {
-    return child_info.link_version() != child_node->link_version();
-}
-
 /* This function does the heavy lifiting of co-ordinating inserts. It is a recursive function which walks
  * down the tree.
  *

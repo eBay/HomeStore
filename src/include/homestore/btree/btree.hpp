@@ -63,6 +63,8 @@ private:
         return fiber_map[this_id].get();
     }
 
+    static bool is_repair_needed(const BtreeNodePtr& child_node, const BtreeLinkInfo& child_info);
+
 protected:
     BtreeConfig m_bt_cfg;
 

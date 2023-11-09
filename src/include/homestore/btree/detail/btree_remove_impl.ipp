@@ -53,7 +53,6 @@ btree_status_t Btree< K, V >::do_remove(const BtreeNodePtr& my_node, locktype_t 
         return modified ? btree_status_t::success : btree_status_t::not_found;
     }
 
-    // bool go_to_out = false;
 retry:
     locktype_t child_cur_lock = locktype_t::NONE;
     uint32_t curr_idx;
@@ -80,7 +79,6 @@ retry:
         }
         end_idx = start_idx = (end_idx - start_idx) / 2; // Pick the middle, TODO: Ideally we need to pick random
     }
-    // if (go_to_out) { goto out_return; }
 
     if (req.route_tracing) { append_route_trace(req, my_node, btree_event_t::READ, start_idx, end_idx); }
     curr_idx = start_idx;
@@ -366,27 +364,39 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     if (!K::is_fixed_size()) {
         // Lets see if we have enough room in parent node to accommodate changes. This is needed only if the key is not
         // fixed length. For fixed length node merge will always result in less or equal size
-
-        // we first calculate the least amount of space being released after removing excess children. the key size
-        // cannot be taken account; so we know for sure that value (i.e., linkinfo) and also its record will be freed.
-        // If the end_idx is the parent's edge, the space is not released eventually.
         auto excess_releasing_nodes =
-            old_nodes.size() - new_nodes.size() - parent_node->total_entries() == end_idx ? 1 : 0;
-        auto minimum_releasing_excess_size =
-            excess_releasing_nodes * (BtreeLinkInfo::get_fixed_size() + parent_node->get_record_size());
-
-        // aside from releasing size due to excess node, K::get_estimate_max_size is needed for each updating element
-        // at worst case (linkinfo and record remain the same for old and new nodes). The number of updating elements
-        // are the size of the new nodes (the last key of the last new node is not getting updated; hence excluded) plus
-        // the leftmost node.
-        if (parent_node->available_size(m_bt_cfg) + minimum_releasing_excess_size <
-            (1 + new_nodes.size() ? new_nodes.size() - 1 : 0) * K::get_estimate_max_size()) {
+            old_nodes.size() - new_nodes.size() - (parent_node->total_entries() == end_idx) ? 1 : 0;
+        if (!parent_node->has_room_for_put(btree_put_type::INSERT, excess_releasing_nodes * K::get_max_size(),
+                                           excess_releasing_nodes * BtreeLinkInfo::get_fixed_size())) {
             BT_NODE_LOG(DEBUG, parent_node,
                         "Merge is needed, however after merge, the parent MAY not have enough space to accommodate the "
                         "new keys, so not proceeding with merge");
             ret = btree_status_t::merge_not_required;
             goto out;
         }
+
+#if 0
+        // we first calculate the least amount of space being released after removing excess children. the key size
+        // cannot be taken account; so we know for sure that value (i.e., linkinfo) and also its record will be freed.
+        // If the end_idx is the parent's edge, the space is not released eventually.
+        auto excess_releasing_nodes =
+            old_nodes.size() - new_nodes.size() - (parent_node->total_entries() == end_idx) ? 1 : 0;
+        auto minimum_releasing_excess_size =
+            excess_releasing_nodes * (BtreeLinkInfo::get_fixed_size() + parent_node->get_record_size());
+
+        // aside from releasing size due to excess node, K::get_max_size is needed for each updating element
+        // at worst case (linkinfo and record remain the same for old and new nodes). The number of updating elements
+        // are the size of the new nodes (the last key of the last new node is not getting updated; hence excluded) plus
+        // the leftmost node.
+        if (parent_node->available_size() + minimum_releasing_excess_size <
+            (1 + new_nodes.size() ? new_nodes.size() - 1 : 0) * K::get_max_size()) {
+            BT_NODE_LOG(DEBUG, parent_node,
+                        "Merge is needed, however after merge, the parent MAY not have enough space to accommodate the "
+                        "new keys, so not proceeding with merge");
+            ret = btree_status_t::merge_not_required;
+            goto out;
+        }
+#endif
     }
 
     // Now it is time to commit things and at this point no going back, since in-place write nodes are modified
