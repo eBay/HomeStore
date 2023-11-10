@@ -51,6 +51,7 @@ struct BtreeTestHelper : public testing::Test {
 
         if (m_is_multi_threaded) {
             std::mutex mtx;
+            m_run_time = SISL_OPTIONS["run_time"].as< uint32_t >();
             iomanager.run_on_wait(iomgr::reactor_regex::all_io, [this, &mtx]() {
                 auto fv = iomanager.sync_io_capable_fibers();
                 std::unique_lock lg(mtx);
@@ -73,6 +74,7 @@ protected:
     BtreeConfig m_cfg{g_node_size};
     uint32_t m_max_range_input{1000};
     bool m_is_multi_threaded{false};
+    uint32_t m_run_time{0};
 
     std::map< std::string, op_func_t > m_operations;
     std::vector< iomgr::io_fiber_t > m_fibers;
@@ -378,8 +380,9 @@ private:
 
                 // Construct a weighted distribution based on the input frequencies
                 std::discrete_distribution< uint32_t > s_rand_op_generator(weights.begin(), weights.end());
-
-                for (uint32_t i = 0; i < num_iters_per_thread; i++) {
+                auto m_start_time = Clock::now();
+                auto time_to_stop = [this, m_start_time]() {return (get_elapsed_time_sec(m_start_time) > m_run_time);};
+                for (uint32_t i = 0; i < num_iters_per_thread && !time_to_stop(); i++) {
                     uint32_t op_idx = s_rand_op_generator(re);
                     (this->m_operations[op_list[op_idx].first])();
                 }
