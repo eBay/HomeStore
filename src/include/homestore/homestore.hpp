@@ -51,6 +51,8 @@ class HomeStore;
 class CPManager;
 class VirtualDev;
 class ChunkSelector;
+class ReplDevListener;
+class ReplApplication;
 
 using HomeStoreSafePtr = std::shared_ptr< HomeStore >;
 
@@ -95,12 +97,6 @@ struct HS_SERVICE {
         return str;
     }
 };
-
-VENUM(repl_impl_type, uint8_t,
-      server_side,     // Completely homestore controlled replication
-      client_assisted, // Client assisting in replication
-      solo             // For single node - no replication
-);
 
 /*
  * IO errors handling by homestore.
@@ -149,7 +145,7 @@ public:
     HomeStore& with_data_service(cshared< ChunkSelector >& custom_chunk_selector = nullptr);
     HomeStore& with_log_service();
     HomeStore& with_index_service(std::unique_ptr< IndexServiceCallbacks > cbs);
-    HomeStore& with_repl_data_service(repl_impl_type repl_type,
+    HomeStore& with_repl_data_service(cshared< ReplApplication >& repl_app,
                                       cshared< ChunkSelector >& custom_chunk_selector = nullptr);
 
     bool start(const hs_input_params& input, hs_before_services_starting_cb_t svcs_starting_cb = nullptr);

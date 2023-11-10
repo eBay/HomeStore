@@ -97,7 +97,7 @@ public:
         uint32_t blk_size{0};
         shared< ChunkSelector > custom_chunk_selector{nullptr};
         IndexServiceCallbacks* index_svc_cbs{nullptr};
-        repl_impl_type repl_impl{repl_impl_type::solo};
+        shared< ReplApplication > repl_app{nullptr};
         chunk_num_t num_chunks{1};
     };
 
@@ -170,7 +170,7 @@ public:
             } else if ((svc == HS_SERVICE::LOG_REPLICATED) || (svc == HS_SERVICE::LOG_LOCAL)) {
                 hsi->with_log_service();
             } else if (svc == HS_SERVICE::REPLICATION) {
-                hsi->with_repl_data_service(tp.repl_impl, tp.custom_chunk_selector);
+                hsi->with_repl_data_service(tp.repl_app, tp.custom_chunk_selector);
             }
         }
         bool need_format =
@@ -214,8 +214,8 @@ public:
         }
     }
 
-    static void validate_data_buf(uint8_t* buf, uint64_t size, uint64_t pattern = 0) {
-        uint64_t* ptr = r_cast< uint64_t* >(buf);
+    static void validate_data_buf(uint8_t const* buf, uint64_t size, uint64_t pattern = 0) {
+        uint64_t const* ptr = r_cast< uint64_t const* >(buf);
         for (uint64_t i = 0ul; i < size / sizeof(uint64_t); ++i) {
             HS_REL_ASSERT_EQ(ptr[i], ((pattern == 0) ? i : pattern), "data_buf mismatch at offset={}", i);
         }

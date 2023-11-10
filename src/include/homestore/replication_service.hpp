@@ -5,8 +5,9 @@
 #include <variant>
 
 #include <folly/futures/Future.h>
-
+#include <sisl/utility/enum.hpp>
 #include <homestore/replication/repl_decls.h>
+#include <homestore/meta_service.hpp>
 
 namespace homestore {
 
@@ -36,14 +37,22 @@ struct hs_stats;
 template < typename V, typename E >
 using Result = folly::Expected< V, E >;
 
-template < class V, class E >
-using AsyncResult = folly::Future< Result< V, E > >;
-
 template < class V >
 using ReplResult = Result< V, ReplServiceError >;
 
-template < class V >
+template < class V, class E >
+using AsyncResult = folly::SemiFuture< Result< V, E > >;
+
+template < class V = folly::Unit >
 using AsyncReplResult = AsyncResult< V, ReplServiceError >;
+
+VENUM(repl_impl_type, uint8_t,
+      server_side,     // Completely homestore controlled replication
+      client_assisted, // Client assisting in replication
+      solo             // For single node - no replication
+);
+
+class ReplApplication;
 
 class ReplicationService {
 public:
@@ -56,26 +65,9 @@ public:
     /// @param listener state machine listener of all the events happening on the repl_dev (commit, precommit etc)
     /// @return A Future ReplDev on success or Future ReplServiceError upon error
     virtual AsyncReplResult< shared< ReplDev > > create_repl_dev(uuid_t group_id,
-                                                                 std::set< std::string, std::less<> >&& members,
-                                                                 std::unique_ptr< ReplDevListener > listener) = 0;
+                                                                 std::set< uuid_t, std::less<> >&& members) = 0;
 
-    /// @brief Opens the Repl Device for a given group id. It is expected that the repl dev is already created and used
-    /// this method for recovering. It is possible that repl_dev is not ready and in that case it will provide Repl
-    /// Device after it is ready and thus returns a Future.
-    ///
-    /// NOTE 1: If callers does an open for a repl device which was not created before, then at the end of
-    /// initialization an error is returned saying ReplServiceError::SERVER_NOT_FOUND
-    ///
-    /// NOTE 2: If the open repl device is called after Replication service is started, then it returns an error
-    /// ReplServiceError::BAD_REQUEST
-    /// @param group_id Group id to open the repl device with
-    /// @param listener state machine listener of all the events happening on the repl_dev (commit, precommit etc)
-    /// @return A Future ReplDev on successful open of ReplDev or Future ReplServiceError upon error
-    virtual AsyncReplResult< shared< ReplDev > > open_repl_dev(uuid_t group_id,
-                                                               std::unique_ptr< ReplDevListener > listener) = 0;
-
-    virtual folly::Future< ReplServiceError > replace_member(uuid_t group_id, std::string const& member_out,
-                                                             std::string const& member_in) const = 0;
+    virtual AsyncReplResult<> replace_member(uuid_t group_id, uuid_t member_out, uuid_t member_in) const = 0;
 
     /// @brief Get the repl dev for a given group id if it is already created or opened
     /// @param group_id Group id interested in
@@ -89,5 +81,27 @@ public:
     /// @brief get the capacity stats form underlying backend;
     /// @return the capacity stats;
     virtual hs_stats get_cap_stats() const = 0;
+
+    virtual meta_sub_type get_meta_blk_name() const = 0;
 };
+
+//////////////// Application which uses Replication needs to be provide the following callbacks ////////////////
+class ReplApplication {
+public:
+    // Returns the required implementation type of replication
+    virtual repl_impl_type get_impl_type() const = 0;
+
+    // Is the replica recovery needs timeline consistency. This is used to determine if the replica needs to be
+    // recovered by key or by block of data. At present only non-timeline consistent replication is supported.
+    virtual bool need_timeline_consistency() const = 0;
+
+    // Called when the repl dev is found upon restart of the homestore instance. The caller should return an instance of
+    // Listener corresponding to the ReplDev which will be used to perform the precommit/commit/rollback.
+    virtual std::unique_ptr< ReplDevListener > create_repl_dev_listener(uuid_t group_id) = 0;
+
+    virtual std::string lookup_peer(uuid_t uuid) const = 0;
+
+    virtual uint16_t lookup_port() const = 0;
+};
+
 } // namespace homestore

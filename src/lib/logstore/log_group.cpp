@@ -74,7 +74,7 @@ void LogGroup::create_overflow_buf(const uint32_t min_needed) {
     m_iovecs[0].iov_base = m_cur_log_buf;
 }
 
-bool LogGroup::add_record(const log_record& record, const int64_t log_idx) {
+bool LogGroup::add_record(log_record& record, const int64_t log_idx) {
     if (m_nrecords >= m_max_records) {
         LOGDEBUGMOD(logstore,
                     "Will exceed estimated records={} if we add idx={} record. Hence stopping adding in this batch",
@@ -82,9 +82,9 @@ bool LogGroup::add_record(const log_record& record, const int64_t log_idx) {
         return false;
     }
 
-    m_actual_data_size += record.data.size;
-    if ((m_inline_data_pos + record.data.size) >= m_cur_buf_len) {
-        create_overflow_buf(m_inline_data_pos + record.data.size);
+    m_actual_data_size += record.data.size();
+    if ((m_inline_data_pos + record.data.size()) >= m_cur_buf_len) {
+        create_overflow_buf(m_inline_data_pos + record.data.size());
     }
 
     // We use log_idx reference in the header as we expect each slot record is in order.
@@ -93,22 +93,22 @@ bool LogGroup::add_record(const log_record& record, const int64_t log_idx) {
     // assert(header()->start_log_idx - log_idx);
 
     // Fill the slots
-    m_record_slots[m_nrecords].size = record.data.size;
+    m_record_slots[m_nrecords].size = record.data.size();
     m_record_slots[m_nrecords].store_id = record.store_id;
     m_record_slots[m_nrecords].store_seq_num = record.seq_num;
     if (record.is_inlineable(m_flush_multiple_size)) {
         m_record_slots[m_nrecords].offset = m_inline_data_pos;
         m_record_slots[m_nrecords].set_inlined(true);
-        std::memcpy(s_cast< void* >(m_cur_log_buf + m_inline_data_pos), s_cast< const void* >(record.data.bytes),
-                    record.data.size);
-        m_inline_data_pos += record.data.size;
+        std::memcpy(s_cast< void* >(m_cur_log_buf + m_inline_data_pos), s_cast< const void* >(record.data.cbytes()),
+                    record.data.size());
+        m_inline_data_pos += record.data.size();
         m_iovecs[0].iov_len = m_inline_data_pos;
     } else {
         // We do not round it now, it will be rounded during finish
         m_record_slots[m_nrecords].offset = m_oob_data_pos;
         m_record_slots[m_nrecords].set_inlined(false);
-        m_iovecs.emplace_back(s_cast< void* >(record.data.bytes), record.data.size);
-        m_oob_data_pos += record.data.size;
+        m_iovecs.emplace_back(s_cast< void* >(record.data.bytes()), record.data.size());
+        m_oob_data_pos += record.data.size();
     }
     ++m_nrecords;
 

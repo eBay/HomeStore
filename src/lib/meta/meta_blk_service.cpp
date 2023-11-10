@@ -637,16 +637,16 @@ void MetaBlkService::write_meta_blk_internal(meta_blk* mblk, const uint8_t* cont
         // TO DO: Might need to differentiate based on data or fast type
         const uint64_t max_dst_size = sisl::round_up(sisl::Compress::max_compress_len(sz), align_size());
         if (max_dst_size <= max_compress_memory_size()) {
-            if (max_dst_size > m_compress_info.size) {
+            if (max_dst_size > m_compress_info.size()) {
                 free_compress_buf();
                 alloc_compress_buf(max_dst_size);
             }
 
-            std::memset(voidptr_cast(m_compress_info.bytes), 0, max_dst_size);
+            std::memset(voidptr_cast(m_compress_info.bytes()), 0, max_dst_size);
 
             size_t compressed_size = max_dst_size;
             const auto ret = sisl::Compress::compress(r_cast< const char* >(context_data),
-                                                      r_cast< char* >(m_compress_info.bytes), sz, &compressed_size);
+                                                      r_cast< char* >(m_compress_info.bytes()), sz, &compressed_size);
             if (ret != 0) {
                 LOGERROR("hs_compress_default indicates a failure trying to compress the data, ret: {}", ret);
                 HS_REL_ASSERT(false, "failed to compress");
@@ -670,7 +670,7 @@ void MetaBlkService::write_meta_blk_internal(meta_blk* mblk, const uint8_t* cont
                 HS_REL_ASSERT_GE(max_dst_size, uint64_cast(mblk->hdr.h.context_sz));
 
                 // point context_data to compressed data;
-                context_data = m_compress_info.bytes;
+                context_data = m_compress_info.cbytes();
                 data_sz = mblk->hdr.h.context_sz;
             } else {
                 // back off compression if compress ratio doesn't meet criteria.
@@ -1019,7 +1019,7 @@ sisl::byte_array MetaBlkService::read_sub_sb_internal(const meta_blk* mblk) cons
             hs_utils::make_byte_array(mblk->hdr.h.context_sz, false /* aligned */, sisl::buftag::metablk, align_size());
         HS_DBG_ASSERT_EQ(mblk->hdr.h.ovf_bid.is_valid(), false, "[type={}], unexpected ovf_bid: {}", mblk->hdr.h.type,
                          mblk->hdr.h.ovf_bid.to_string());
-        std::memcpy(buf->bytes, mblk->get_context_data(), mblk->hdr.h.context_sz);
+        std::memcpy(buf->bytes(), mblk->get_context_data(), mblk->hdr.h.context_sz);
     } else {
         //
         // read through the ovf blk chain to get the buffer;
@@ -1053,7 +1053,7 @@ sisl::byte_array MetaBlkService::read_sub_sb_internal(const meta_blk* mblk) cons
                 }
 
                 // TO DO: Might need to differentiate based on data or fast type
-                read(data_bid[i], buf->bytes + read_offset, sisl::round_up(read_sz_per_db, align_size()));
+                read(data_bid[i], buf->bytes() + read_offset, sisl::round_up(read_sz_per_db, align_size()));
 
                 read_offset_in_this_ovf += read_sz_per_db;
                 read_offset += read_sz_per_db;
@@ -1120,7 +1120,7 @@ void MetaBlkService::recover_meta_block(meta_blk* mblk) {
     if (itr != std::end(m_sub_info)) {
         // if subsystem registered crc protection, verify crc before sending to subsystem;
         if (itr->second.do_crc) {
-            const auto crc = crc32_ieee(init_crc32, s_cast< const uint8_t* >(buf->bytes), mblk->hdr.h.context_sz);
+            const auto crc = crc32_ieee(init_crc32, buf->cbytes(), mblk->hdr.h.context_sz);
 
             HS_REL_ASSERT_EQ(crc, uint32_cast(mblk->hdr.h.crc),
                              "[type={}], CRC mismatch: {}/{}, on mblk bid: {}, context_sz: {}", mblk->hdr.h.type, crc,
@@ -1140,8 +1140,8 @@ void MetaBlkService::recover_meta_block(meta_blk* mblk) {
                 auto decompressed_buf{hs_utils::make_byte_array(mblk->hdr.h.src_context_sz, true /* aligned */,
                                                                 sisl::buftag::compression, align_size())};
                 size_t decompressed_size = mblk->hdr.h.src_context_sz;
-                const auto ret{sisl::Compress::decompress(r_cast< const char* >(buf->bytes),
-                                                          r_cast< char* >(decompressed_buf->bytes),
+                const auto ret{sisl::Compress::decompress(r_cast< const char* >(buf->cbytes()),
+                                                          r_cast< char* >(decompressed_buf->bytes()),
                                                           mblk->hdr.h.compressed_sz, &decompressed_size)};
                 if (ret != 0) {
                     LOGERROR("[type={}], negative result: {} from decompress trying to decompress the "
@@ -1256,13 +1256,12 @@ bool MetaBlkService::is_aligned_buf_needed(size_t size) const { return (size <= 
 
 bool MetaBlkService::s_self_recover{false};
 
-void MetaBlkService::free_compress_buf() { hs_utils::iobuf_free(m_compress_info.bytes, sisl::buftag::compression); }
+void MetaBlkService::free_compress_buf() { hs_utils::iobuf_free(m_compress_info.bytes(), sisl::buftag::compression); }
 
 void MetaBlkService::alloc_compress_buf(size_t size) {
-    m_compress_info.size = size;
-    m_compress_info.bytes = hs_utils::iobuf_alloc(size, sisl::buftag::compression, align_size());
-
-    HS_REL_ASSERT_NOTNULL(m_compress_info.bytes, "fail to allocate iobuf for compression of size: {}", size);
+    m_compress_info =
+        sisl::blob{hs_utils::iobuf_alloc(size, sisl::buftag::compression, align_size()), uint32_cast(size)};
+    HS_REL_ASSERT_NOTNULL(m_compress_info.cbytes(), "fail to allocate iobuf for compression of size: {}", size);
 }
 
 uint64_t MetaBlkService::meta_blk_context_sz() const { return block_size() - META_BLK_HDR_MAX_SZ; }
@@ -1507,24 +1506,24 @@ nlohmann::json MetaBlkService::populate_json(int log_level, meta_blk_map_t& meta
                         }
 
                         sisl::byte_array buf = read_sub_sb_internal(it->second);
-                        if (free_space < buf->size) {
+                        if (free_space < buf->size()) {
                             j[x.first]["meta_bids"][std::to_string(bid_cnt)] =
                                 "Not_able_to_dump_to_file_exceeding_allowed_space";
                             HS_LOG_EVERY_N(WARN, metablk, 100,
                                            "[type={}] Skip dumping to file, exceeding allowed space: {}, "
                                            "requested_size: {}, "
                                            "total_free: {}, free_fs_percent: {}",
-                                           x.first, free_space, buf->size, total_free,
+                                           x.first, free_space, buf->size(), total_free,
                                            HS_DYNAMIC_CONFIG(metablk.percent_of_free_space));
                             continue;
                         }
 
                         const std::string file_path = fmt::format("{}/{}_{}", dump_dir, x.first, bid_cnt);
                         std::ofstream f{file_path};
-                        f.write(r_cast< const char* >(buf->bytes), buf->size);
+                        f.write(r_cast< const char* >(buf->bytes()), buf->size());
                         j[x.first]["meta_bids"][std::to_string(bid_cnt)] = file_path;
 
-                        free_space -= buf->size;
+                        free_space -= buf->size();
                     }
 
                     ++bid_cnt;

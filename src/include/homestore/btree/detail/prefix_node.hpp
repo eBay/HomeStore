@@ -79,21 +79,20 @@ private:
                 sisl::blob const kblob = s_cast< K const& >(key).serialize_prefix();
                 sisl::blob const vblob = s_cast< V const& >(val).serialize_prefix();
 
-                DEBUG_ASSERT_EQ(kblob.size, key_size(), "Prefix key size mismatch with serialized prefix size");
-                DEBUG_ASSERT_EQ(vblob.size, value_size(), "Prefix value size mismatch with serialized prefix size");
+                DEBUG_ASSERT_EQ(kblob.size(), key_size(), "Prefix key size mismatch with serialized prefix size");
+                DEBUG_ASSERT_EQ(vblob.size(), value_size(), "Prefix value size mismatch with serialized prefix size");
 
                 uint8_t* cur_ptr = uintptr_cast(this) + sizeof(prefix_entry);
-                std::memcpy(cur_ptr, kblob.bytes, kblob.size);
-                cur_ptr += kblob.size;
-                std::memcpy(cur_ptr, vblob.bytes, vblob.size);
+                std::memcpy(cur_ptr, kblob.cbytes(), kblob.size());
+                cur_ptr += kblob.size();
+                std::memcpy(cur_ptr, vblob.cbytes(), vblob.size());
             }
         }
 
         sisl::blob key_buf() const {
-            return sisl::blob{const_cast< uint8_t* >(r_cast< uint8_t const* >(this) + sizeof(prefix_entry)),
-                              key_size()};
+            return sisl::blob{r_cast< uint8_t const* >(this) + sizeof(prefix_entry), key_size()};
         }
-        sisl::blob val_buf() const { return sisl::blob{key_buf().bytes + key_buf().size, value_size()}; }
+        sisl::blob val_buf() const { return sisl::blob{key_buf().cbytes() + key_buf().size(), value_size()}; }
     };
 
     struct suffix_entry {
@@ -131,19 +130,19 @@ private:
                 kblob = key.serialize();
                 vblob = val.serialize();
             }
-            DEBUG_ASSERT_EQ(kblob.size, key_size(), "Suffix key size mismatch with serialized suffix size");
-            DEBUG_ASSERT_EQ(vblob.size, value_size(), "Suffix value size mismatch with serialized suffix size");
+            DEBUG_ASSERT_EQ(kblob.size(), key_size(), "Suffix key size mismatch with serialized suffix size");
+            DEBUG_ASSERT_EQ(vblob.size(), value_size(), "Suffix value size mismatch with serialized suffix size");
 
-            std::memcpy(cur_ptr, kblob.bytes, kblob.size);
-            cur_ptr += kblob.size;
-            std::memcpy(cur_ptr, vblob.bytes, vblob.size);
+            std::memcpy(cur_ptr, kblob.cbytes(), kblob.size());
+            cur_ptr += kblob.size();
+            std::memcpy(cur_ptr, vblob.cbytes(), vblob.size());
         }
 
         sisl::blob key_buf() const {
             return sisl::blob{const_cast< uint8_t* >(r_cast< uint8_t const* >(this) + sizeof(suffix_entry)),
                               key_size()};
         }
-        sisl::blob val_buf() const { return sisl::blob{key_buf().bytes + key_buf().size, value_size()}; }
+        sisl::blob val_buf() const { return sisl::blob{key_buf().bytes() + key_buf().size(), value_size()}; }
     };
 #pragma pack()
 
@@ -778,7 +777,7 @@ private:
         K prevKey;
         while (i < this->total_entries()) {
             K key = BtreeNode::get_nth_key< K >(i, false);
-            uint64_t kp = *(uint64_t*)key.serialize().bytes;
+            uint64_t kp = *(uint64_t*)key.serialize().bytes();
             if (i > 0 && prevKey.compare(key) > 0) {
                 DEBUG_ASSERT(false, "Found non sorted entry: {} -> {}", kp, to_string());
             }
