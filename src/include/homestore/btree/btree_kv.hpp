@@ -31,11 +31,10 @@ ENUM(MultiMatchOption, uint16_t,
 )
 
 ENUM(btree_put_type, uint16_t,
-     INSERT_ONLY_IF_NOT_EXISTS,     // Insert
-     REPLACE_ONLY_IF_EXISTS,        // Update
-     REPLACE_IF_EXISTS_ELSE_INSERT, // Upsert
-     APPEND_ONLY_IF_EXISTS,         // Update
-     APPEND_IF_EXISTS_ELSE_INSERT)
+     INSERT, // Insert only if it doesn't exist
+     UPDATE, // Update only if it exists
+     UPSERT  // Update if exists, insert otherwise
+)
 
 // The base class, btree library expects its key to be derived from
 class BtreeKey {
@@ -45,23 +44,33 @@ public:
     // Deleting copy constructor forces the derived class to define its own copy constructor
     // BtreeKey(const BtreeKey& other) = delete;
     // BtreeKey(const sisl::blob& b) = delete;
-    BtreeKey(const BtreeKey& other) = default;
+    BtreeKey(BtreeKey const& other) = default;
     virtual ~BtreeKey() = default;
 
-    virtual BtreeKey& operator=(const BtreeKey& other) {
-        clone(other);
-        return *this;
-    };
-
-    virtual void clone(const BtreeKey& other) = 0;
-    virtual int compare(const BtreeKey& other) const = 0;
+    virtual int compare(BtreeKey const& other) const = 0;
 
     virtual sisl::blob serialize() const = 0;
     virtual uint32_t serialized_size() const = 0;
-    virtual void deserialize(const sisl::blob& b, bool copy) = 0;
+    virtual void deserialize(sisl::blob const& b, bool copy) = 0;
 
     virtual std::string to_string() const = 0;
-    virtual bool is_extent_key() const { return false; }
+    virtual bool is_interval_key() const { return false; }
+};
+
+// An extension of BtreeKey where each key is part of an interval range. Keys are not neccessarily only needs to be
+// integers, but it needs to be able to get next or prev key from a given key in the key range
+class BtreeIntervalKey : public BtreeKey {
+public:
+    virtual void shift(int n) = 0;
+    virtual int distance(BtreeKey const& from) const = 0;
+    bool is_interval_key() const override { return true; }
+
+    virtual sisl::blob serialize_prefix() const = 0;
+    virtual sisl::blob serialize_suffix() const = 0;
+
+    virtual uint32_t serialized_prefix_size() const = 0;
+    virtual uint32_t serialized_suffix_size() const = 0;
+    virtual void deserialize(sisl::blob const& prefix, sisl::blob const& suffix, bool copy) = 0;
 };
 
 template < typename K >
@@ -69,13 +78,9 @@ class BtreeTraversalState;
 
 template < typename K >
 class BtreeKeyRange {
-private:
-    K m_actual_start_key;
-    K m_actual_end_key;
-
 public:
-    K* m_input_start_key{&m_actual_start_key};
-    K* m_input_end_key{&m_actual_end_key};
+    K m_start_key;
+    K m_end_key;
     bool m_start_incl{true};
     bool m_end_incl{true};
     MultiMatchOption m_multi_selector{MultiMatchOption::DO_NOT_CARE};
@@ -85,68 +90,35 @@ public:
 public:
     BtreeKeyRange() = default;
 
-    BtreeKeyRange(const K& start_key, bool start_incl = true) :
-            m_actual_start_key{start_key},
-            m_input_start_key{&m_actual_start_key},
-            m_input_end_key{&m_actual_start_key},
-            m_start_incl{start_incl},
-            m_end_incl{true},
-            m_multi_selector{MultiMatchOption::DO_NOT_CARE} {}
-
     BtreeKeyRange(const K& start_key, bool start_incl, const K& end_key, bool end_incl = true,
                   MultiMatchOption option = MultiMatchOption::DO_NOT_CARE) :
-            m_actual_start_key{start_key},
-            m_actual_end_key{end_key},
-            m_input_start_key{&m_actual_start_key},
-            m_input_end_key{&m_actual_end_key},
+            m_start_key{start_key},
+            m_end_key{end_key},
             m_start_incl{start_incl},
             m_end_incl{end_incl},
             m_multi_selector{option} {}
 
     BtreeKeyRange(const K& start_key, const K& end_key) : BtreeKeyRange(start_key, true, end_key, true) {}
 
-    BtreeKeyRange(const BtreeKeyRange& other) { copy(other); }
-    BtreeKeyRange(BtreeKeyRange&& other) { do_move(std::move(other)); }
-    BtreeKeyRange& operator=(const BtreeKeyRange< K >& other) {
-        this->copy(other);
-        return *this;
-    }
-    BtreeKeyRange& operator=(BtreeKeyRange< K >&& other) {
-        this->do_move(std::move(other));
-        return *this;
-    }
-
-    void copy(const BtreeKeyRange< K >& other) {
-        m_actual_start_key = other.m_actual_start_key;
-        m_actual_end_key = other.m_actual_end_key;
-        m_input_start_key = &m_actual_start_key;
-        m_input_end_key =
-            (other.m_input_end_key == &other.m_actual_start_key) ? &m_actual_start_key : &m_actual_end_key;
-        m_start_incl = other.m_start_incl;
-        m_end_incl = other.m_end_incl;
-        m_multi_selector = other.m_multi_selector;
-    }
-
-    void do_move(BtreeKeyRange< K >&& other) {
-        m_input_start_key = &m_actual_start_key;
-        m_input_end_key =
-            (other.m_input_end_key == &other.m_actual_start_key) ? &m_actual_start_key : &m_actual_end_key;
-        m_actual_start_key = std::move(other.m_actual_start_key);
-        m_actual_end_key = std::move(other.m_actual_end_key);
-        m_start_incl = std::move(other.m_start_incl);
-        m_end_incl = std::move(other.m_end_incl);
-        m_multi_selector = std::move(other.m_multi_selector);
-    }
+    BtreeKeyRange(const BtreeKeyRange& other) = default;
+    BtreeKeyRange(BtreeKeyRange&& other) = default;
+    BtreeKeyRange& operator=(const BtreeKeyRange< K >& other) = default;
+    BtreeKeyRange& operator=(BtreeKeyRange< K >&& other) = default;
 
     void set_multi_option(MultiMatchOption o) { m_multi_selector = o; }
-    const K& start_key() const { return *m_input_start_key; }
-    const K& end_key() const { return *m_input_end_key; }
+    const K& start_key() const { return m_start_key; }
+    const K& end_key() const { return m_end_key; }
     bool is_start_inclusive() const { return m_start_incl; }
     bool is_end_inclusive() const { return m_end_incl; }
     MultiMatchOption multi_option() const { return m_multi_selector; }
 
+    void set_start_key(K&& key, bool incl) {
+        m_start_key = std::move(key);
+        m_start_incl = incl;
+    }
+
     void set_end_key(K&& key, bool incl) {
-        m_actual_end_key = std::move(key);
+        m_end_key = std::move(key);
         m_end_incl = incl;
     }
 
@@ -154,61 +126,12 @@ public:
         return fmt::format("{}{}-{}{}", is_start_inclusive() ? '[' : '(', start_key().to_string(),
                            end_key().to_string(), is_end_inclusive() ? ']' : ')');
     }
-
-private:
-    const K& actual_start_key() const { return m_actual_start_key; }
-    const K& actual_end_key() const { return m_actual_end_key; }
-};
-
-/*
- * This type is for keys which is range in itself i.e each key is having its own
- * start() and end().
- */
-template < typename K >
-class ExtentBtreeKey : public BtreeKey {
-public:
-    ExtentBtreeKey() = default;
-    virtual ~ExtentBtreeKey() = default;
-    virtual bool is_extent_key() const { return true; }
-
-    // Provide the length of the extent key, which is end - start + 1
-    virtual uint32_t extent_length() const = 0;
-
-    // Get the distance between the start of this key and start of other key. It returns equivalent of
-    // (other.start - this->start + 1)
-    virtual int64_t distance_start(const ExtentBtreeKey< K >& other) const = 0;
-
-    // Get the distance between the end of this key and end of other key. It returns equivalent of
-    // (other.end - this->end + 1)
-    virtual int64_t distance_end(const ExtentBtreeKey< K >& other) const = 0;
-
-    // Get the distance between the start of this key and end of other key. It returns equivalent of
-    // (other.end - this->start + 1)
-    virtual int64_t distance(const ExtentBtreeKey< K >& other) const = 0;
-
-    // Extract a new extent key from the given offset upto this length from this key and optionally do a deep copy
-    virtual K extract(uint32_t offset, uint32_t length, bool copy) const = 0;
-
-    // Merge this extent btree key with other extent btree key and return a new key
-    virtual K combine(const ExtentBtreeKey< K >& other) const = 0;
-
-    // TODO: Evaluate if we need these 3 methods or we can manage with other methods
-    virtual int compare_start(const BtreeKey& other) const = 0;
-    virtual int compare_end(const BtreeKey& other) const = 0;
-
-    /* we always compare the end key in case of extent */
-    virtual int compare(const BtreeKey& other) const override { return (compare_end(other)); }
-
-    K extract_end(bool copy) const { return extract(extent_length() - 1, 1, copy); }
 };
 
 class BtreeValue {
 public:
     BtreeValue() = default;
     virtual ~BtreeValue() = default;
-
-    // Deleting copy constructor forces the derived class to define its own copy constructor
-    BtreeValue(const BtreeValue& other) = delete;
 
     virtual sisl::blob serialize() const = 0;
     virtual uint32_t serialized_size() const = 0;
@@ -217,30 +140,16 @@ public:
     virtual std::string to_string() const { return ""; }
 };
 
-template < typename V >
-class ExtentBtreeValue : public BtreeValue {
+class BtreeIntervalValue : public BtreeValue {
 public:
-    virtual ~ExtentBtreeValue() = default;
+    virtual void shift(int n) = 0;
 
-    // Extract a new extent value from the given offset upto this length from this value and optionally do a deep copy
-    virtual V extract(uint32_t offset, uint32_t length, bool copy) const = 0;
+    virtual sisl::blob serialize_prefix() const = 0;
+    virtual sisl::blob serialize_suffix() const = 0;
 
-    // Returns the returns the serialized size if we were to extract other value from offset upto length
-    // This method is equivalent to: extract(offset, length, false).serialized_size()
-    // However, this method provides values to directly compute the extracted size without extracting - which is more
-    // efficient.
-    virtual uint32_t extracted_size(uint32_t offset, uint32_t length) const = 0;
-
-    // This method is similar to extract(0, length) along with moving the current values start to length. So for example
-    // if value has 0-100 and if shift(80) is called, this method returns a value from 0-79 and moves the start offset
-    // of current value to 80.
-    virtual V shift(uint32_t length, bool copy) = 0;
-
-    // Given the length, report back how many extents from the current value can fit.
-    virtual uint32_t num_extents_fit(uint32_t length) const = 0;
-
-    // Returns if every piece of extents are equally sized.
-    virtual bool is_equal_sized() const = 0;
+    virtual uint32_t serialized_prefix_size() const = 0;
+    virtual uint32_t serialized_suffix_size() const = 0;
+    virtual void deserialize(sisl::blob const& prefix, sisl::blob const& suffix, bool copy) = 0;
 };
 
 struct BtreeLockTracker;
@@ -262,53 +171,61 @@ class BtreeTraversalState {
 protected:
     const BtreeKeyRange< K > m_input_range;
     BtreeKeyRange< K > m_working_range;
-    BtreeKeyRange< K > m_next_range;
-    std::unique_ptr< BtreeQueryCursor< K > > m_cursor;
+    bool m_trimmed{false};   // Keep track of trimmed, so that a shift doesn't do unwanted copy of input_range
+    bool m_exhausted{false}; // The entire working range is exhausted
 
 public:
-    BtreeTraversalState(BtreeKeyRange< K >&& inp_range, bool paginated_query = false) :
-            m_input_range{std::move(inp_range)}, m_working_range{m_input_range} {
-        if (paginated_query) { m_cursor = std::make_unique< BtreeQueryCursor< K > >(); }
-    }
+    BtreeTraversalState(BtreeKeyRange< K >&& inp_range) :
+            m_input_range{std::move(inp_range)}, m_working_range{m_input_range} {}
     BtreeTraversalState(const BtreeTraversalState& other) = default;
     BtreeTraversalState(BtreeTraversalState&& other) = default;
 
-    const BtreeQueryCursor< K >* const_cursor() const { return m_cursor.get(); }
-    BtreeQueryCursor< K >* cursor() { return m_cursor.get(); }
-    bool is_cursor_valid() const { return (m_cursor != nullptr); }
-
-    void set_cursor_key(const K& end_key) {
-        // no need to set cursor as user doesn't want to keep track of it
-        if (!m_cursor) { return; }
-        m_cursor->m_last_key = std::make_unique< K >(end_key);
-    }
-
     const BtreeKeyRange< K >& input_range() const { return m_input_range; }
-    const BtreeKeyRange< K >& working_range() const { return m_working_range; }
+    const BtreeKeyRange< K >& working_range() const {
+        DEBUG_ASSERT_EQ(m_exhausted, false, "requested for working range on an exhausted traversal state");
+        return m_working_range;
+    }
 
     // Returns the mutable reference to the end key, which caller can update it to trim down the end key
-    void trim_working_range(K&& end_key, bool end_incl) { m_working_range.set_end_key(std::move(end_key), end_incl); }
-
-    const K& next_key() const {
-        return (m_cursor && m_cursor->m_last_key) ? *m_cursor->m_last_key : m_input_range.start_key();
+    void trim_working_range(K&& end_key, bool end_incl) {
+        m_working_range.set_end_key(std::move(end_key), end_incl);
+        m_trimmed = true;
     }
 
-    const BtreeKeyRange< K >& next_range() {
-        if (m_cursor && m_cursor->m_last_key) {
-            m_next_range = BtreeKeyRange< K >(*m_cursor->m_last_key, false, m_input_range.end_key(), is_end_inclusive(),
-                                              m_input_range.multi_option());
-            return m_next_range;
+    // Shift the working range start to previous working range end_key
+    void shift_working_range() {
+        if (m_trimmed) {
+            m_working_range.set_start_key(std::move(m_working_range.m_end_key), false);
+            m_working_range.m_end_key = m_input_range.end_key();
+            m_working_range.m_end_incl = m_input_range.is_end_inclusive();
+            m_trimmed = false;
         } else {
-            return m_input_range;
+            m_exhausted = true;
+        }
+    }
+
+    // Shift the working range start to specific end key
+    void shift_working_range(K&& start_key, bool start_incl) {
+        m_working_range.set_start_key(std::move(start_key), start_incl);
+        if (m_trimmed) {
+            m_working_range.m_end_key = m_input_range.end_key();
+            m_working_range.m_end_incl = m_input_range.is_end_inclusive();
+            m_trimmed = false;
+        }
+    }
+
+    const K& first_key() const { return m_working_range.start_key(); }
+
+    uint32_t first_key_size() const {
+        if (is_start_inclusive() || K::is_fixed_size()) {
+            return m_working_range.start_key().serialized_size();
+        } else {
+            return K::get_max_size();
         }
     }
 
 private:
-    bool is_start_inclusive() const {
-        // cursor always have the last key not included
-        return (m_cursor && m_cursor->m_last_key) ? false : m_input_range.is_start_inclusive();
-    }
-
+    bool is_start_inclusive() const { return m_input_range.is_start_inclusive(); }
     bool is_end_inclusive() const { return m_input_range.is_end_inclusive(); }
 };
 

@@ -36,14 +36,8 @@
 
 namespace homestore {
 template < typename K, typename V >
-Btree< K, V >::Btree(const BtreeConfig& cfg, on_kv_read_t&& read_cb, on_kv_update_t&& update_cb,
-                     on_kv_remove_t&& remove_cb) :
-        m_metrics{cfg.name().c_str()},
-        m_node_size{cfg.node_size()},
-        m_on_read_cb{std::move(read_cb)},
-        m_on_update_cb{std::move(update_cb)},
-        m_on_remove_cb{std::move(remove_cb)},
-        m_bt_cfg{cfg} {
+Btree< K, V >::Btree(const BtreeConfig& cfg) :
+        m_metrics{cfg.name().c_str()}, m_node_size{cfg.node_size()}, m_bt_cfg{cfg} {
     m_bt_cfg.set_node_data_size(cfg.node_size() - sizeof(persistent_hdr_t));
 }
 
@@ -105,7 +99,7 @@ retry:
     if (ret != btree_status_t::success) { goto out; }
     is_leaf = root->is_leaf();
 
-    if (is_split_needed(root, m_bt_cfg, put_req)) {
+    if (is_split_needed(root, put_req)) {
         // Time to do the split of root.
         unlock_node(root, acq_lock);
         m_btree_lock.unlock_shared();
@@ -143,8 +137,7 @@ out:
 #ifndef NDEBUG
     check_lock_debug();
 #endif
-    if (ret != btree_status_t::success && ret != btree_status_t::fast_path_not_possible &&
-        ret != btree_status_t::cp_mismatch) {
+    if (ret != btree_status_t::success && ret != btree_status_t::cp_mismatch) {
         BT_LOG(ERROR, "btree put failed {}", ret);
         COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
     }
@@ -267,9 +260,9 @@ btree_status_t Btree< K, V >::query(BtreeQueryRequest< K >& qreq, std::vector< s
     if ((qreq.query_type() == BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY ||
          qreq.query_type() == BtreeQueryType::TREE_TRAVERSAL_QUERY)) {
         if (out_values.size()) {
-            K& out_last_key = out_values.back().first;
-            qreq.set_cursor_key(out_last_key);
+            K out_last_key = out_values.back().first;
             if (out_last_key.compare(qreq.input_range().end_key()) >= 0) { ret = btree_status_t::success; }
+            qreq.shift_working_range(std::move(out_last_key), false /* non inclusive*/);
         } else {
             DEBUG_ASSERT_NE(ret, btree_status_t::has_more, "Query returned has_more, but no values added")
         }
@@ -280,8 +273,7 @@ out:
 #ifndef NDEBUG
     check_lock_debug();
 #endif
-    if (ret != btree_status_t::success && ret != btree_status_t::has_more &&
-        ret != btree_status_t::fast_path_not_possible) {
+    if ((ret != btree_status_t::success) && (ret != btree_status_t::has_more)) {
         BT_LOG(ERROR, "btree query failed {}", ret);
         COUNTER_INCREMENT(m_metrics, query_err_cnt, 1);
     }
@@ -354,9 +346,15 @@ template < typename K, typename V >
 bnodeid_t Btree< K, V >::root_node_id() const {
     return m_root_node_info.bnode_id();
 }
+
 template < typename K, typename V >
 uint64_t Btree< K, V >::root_link_version() const {
     return m_root_node_info.link_version();
+}
+
+template < typename K, typename V >
+bool Btree< K, V >::is_repair_needed(const BtreeNodePtr& child_node, const BtreeLinkInfo& child_info) {
+    return child_info.link_version() != child_node->link_version();
 }
 
 // TODO: Commenting out flip till we figure out how to move flip dependency inside sisl package.

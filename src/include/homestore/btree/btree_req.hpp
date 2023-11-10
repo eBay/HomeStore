@@ -55,31 +55,24 @@ public:
     uint32_t batch_size() const { return m_batch_size; }
     void set_batch_size(uint32_t count) { m_batch_size = count; }
 
-    bool is_empty_cursor() const {
-        return ((m_search_state.const_cursor()->m_last_key == nullptr) &&
-                (m_search_state.const_cursor()->m_locked_nodes == nullptr));
-    }
-
     BtreeTraversalState< K >& search_state() { return m_search_state; }
-    BtreeQueryCursor< K >* cursor() { return m_search_state.cursor(); }
-    const BtreeQueryCursor< K >* const_cursor() const { return m_search_state.const_cursor(); }
-
     const BtreeKeyRange< K >& input_range() const { return m_search_state.input_range(); }
-    const BtreeKeyRange< K >& next_range() { return m_search_state.next_range(); }
+    void shift_working_range(K&& start_key, bool start_incl) {
+        m_search_state.shift_working_range(std::move(start_key), start_incl);
+    }
+    void shift_working_range() { m_search_state.shift_working_range(); }
     const BtreeKeyRange< K >& working_range() const { return m_search_state.working_range(); }
 
-    const K& next_key() const { return m_search_state.next_key(); }
+    const K& first_key() const { return m_search_state.first_key(); }
+    uint32_t first_key_size() const { return m_search_state.first_key_size(); }
+
     void trim_working_range(K&& end_key, bool end_incl) {
         m_search_state.trim_working_range(std::move(end_key), end_incl);
     }
-    void set_cursor_key(const K& end_key) { return m_search_state.set_cursor_key(end_key); }
 
 protected:
-    BtreeRangeRequest(BtreeKeyRange< K >&& input_range, bool external_pagination = false, void* app_context = nullptr,
-                      uint32_t batch_size = UINT32_MAX) :
-            BtreeRequest{app_context, nullptr},
-            m_search_state{std::move(input_range), external_pagination},
-            m_batch_size{batch_size} {}
+    BtreeRangeRequest(BtreeKeyRange< K >&& input_range, void* app_context = nullptr, uint32_t batch_size = UINT32_MAX) :
+            BtreeRequest{app_context, nullptr}, m_search_state{std::move(input_range)}, m_batch_size{batch_size} {}
 
 private:
     BtreeTraversalState< K > m_search_state;
@@ -87,11 +80,14 @@ private:
 };
 
 /////////////////////////// 1: Put Operations /////////////////////////////////////
+ENUM(put_filter_decision, uint8_t, keep, replace, remove);
+using put_filter_cb_t = std::function< put_filter_decision(BtreeKey const&, BtreeValue const&, BtreeValue const&) >;
+
 struct BtreeSinglePutRequest : public BtreeRequest {
 public:
     BtreeSinglePutRequest(const BtreeKey* k, const BtreeValue* v, btree_put_type put_type,
-                          BtreeValue* existing_val = nullptr) :
-            m_k{k}, m_v{v}, m_put_type{put_type}, m_existing_val{existing_val} {}
+                          BtreeValue* existing_val = nullptr, put_filter_cb_t filter_cb = nullptr) :
+            m_k{k}, m_v{v}, m_put_type{put_type}, m_existing_val{existing_val}, m_filter_cb{std::move(filter_cb)} {}
 
     const BtreeKey& key() const { return *m_k; }
     const BtreeValue& value() const { return *m_v; }
@@ -100,19 +96,23 @@ public:
     const BtreeValue* m_v;
     const btree_put_type m_put_type;
     BtreeValue* m_existing_val;
+    put_filter_cb_t m_filter_cb;
 };
 
 template < typename K >
 struct BtreeRangePutRequest : public BtreeRangeRequest< K > {
 public:
     BtreeRangePutRequest(BtreeKeyRange< K >&& inp_range, btree_put_type put_type, const BtreeValue* value,
-                         void* app_context = nullptr, uint32_t batch_size = std::numeric_limits< uint32_t >::max()) :
-            BtreeRangeRequest< K >(std::move(inp_range), false, app_context, batch_size),
+                         void* app_context = nullptr, uint32_t batch_size = std::numeric_limits< uint32_t >::max(),
+                         put_filter_cb_t filter_cb = nullptr) :
+            BtreeRangeRequest< K >(std::move(inp_range), app_context, batch_size),
             m_put_type{put_type},
-            m_newval{value} {}
+            m_newval{value},
+            m_filter_cb{std::move(filter_cb)} {}
 
-    const btree_put_type m_put_type{btree_put_type::REPLACE_ONLY_IF_EXISTS};
+    const btree_put_type m_put_type{btree_put_type::UPDATE};
     const BtreeValue* m_newval;
+    put_filter_cb_t m_filter_cb;
 };
 
 /////////////////////////// 2: Remove Operations /////////////////////////////////////
@@ -138,12 +138,18 @@ public:
     BtreeValue* m_outval;
 };
 
+using remove_filter_cb_t = std::function< bool(BtreeKey const&, BtreeValue const&) >;
+
 template < typename K >
 struct BtreeRangeRemoveRequest : public BtreeRangeRequest< K > {
 public:
+    remove_filter_cb_t m_filter_cb;
+
+public:
     BtreeRangeRemoveRequest(BtreeKeyRange< K >&& inp_range, void* app_context = nullptr,
-                            uint32_t batch_size = std::numeric_limits< uint32_t >::max()) :
-            BtreeRangeRequest< K >(std::move(inp_range), false, app_context, batch_size) {}
+                            uint32_t batch_size = std::numeric_limits< uint32_t >::max(),
+                            remove_filter_cb_t filter_cb = nullptr) :
+            BtreeRangeRequest< K >(std::move(inp_range), app_context, batch_size), m_filter_cb{std::move(filter_cb)} {}
 };
 
 /////////////////////////// 3: Get Operations /////////////////////////////////////
@@ -191,21 +197,28 @@ ENUM(BtreeQueryType, uint8_t,
      // essentially create a serializable level of isolation.
      SERIALIZABLE_QUERY)
 
+using get_filter_cb_t = std::function< bool(BtreeKey const&, BtreeValue const&) >;
+
 template < typename K >
 struct BtreeQueryRequest : public BtreeRangeRequest< K > {
 public:
     BtreeQueryRequest(BtreeKeyRange< K >&& inp_range,
                       BtreeQueryType query_type = BtreeQueryType::SWEEP_NON_INTRUSIVE_PAGINATION_QUERY,
-                      uint32_t batch_size = UINT32_MAX, void* app_context = nullptr) :
-            BtreeRangeRequest< K >{std::move(inp_range), true, app_context, batch_size}, m_query_type{query_type} {}
+                      uint32_t batch_size = UINT32_MAX, get_filter_cb_t filter_cb = nullptr,
+                      void* app_context = nullptr) :
+            BtreeRangeRequest< K >{std::move(inp_range), app_context, batch_size},
+            m_query_type{query_type},
+            m_filter_cb{std::move(filter_cb)} {}
     ~BtreeQueryRequest() = default;
 
     // virtual bool is_serializable() const = 0;
     BtreeQueryType query_type() const { return m_query_type; }
 
+    get_filter_cb_t const& filter() const { return m_filter_cb; }
+
 protected:
-    const BtreeQueryType m_query_type;                                // Type of the query
-    const std::unique_ptr< BtreeQueryCursor< K > > m_paginated_query; // Is it a paginated query
+    const BtreeQueryType m_query_type; // Type of the query
+    get_filter_cb_t m_filter_cb;
 };
 
 /* This class is a top level class to keep track of the locks that are held currently. It is

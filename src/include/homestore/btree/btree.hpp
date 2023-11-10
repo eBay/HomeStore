@@ -31,10 +31,6 @@ SISL_LOGGING_DECL(btree)
 
 namespace homestore {
 
-typedef std::function< bool(const BtreeKey&, const BtreeValue&, const BtreeRequest&) > on_kv_read_t;
-typedef std::function< bool(const BtreeKey&, const BtreeValue&, const BtreeRequest&) > on_kv_remove_t;
-typedef std::function< bool(const BtreeKey&, const BtreeKey&, const BtreeValue&, const BtreeRequest&) > on_kv_update_t;
-
 using BtreeNodePtr = boost::intrusive_ptr< BtreeNode >;
 
 struct BtreeThreadVariables {
@@ -57,11 +53,6 @@ private:
     std::atomic< uint64_t > m_req_id{0};
 #endif
 
-    // Optional callback on various read or kv operations
-    on_kv_read_t m_on_read_cb{nullptr};
-    on_kv_update_t m_on_update_cb{nullptr};
-    on_kv_remove_t m_on_remove_cb{nullptr};
-
     // This workaround of BtreeThreadVariables is needed instead of directly declaring statics
     // to overcome the gcc bug, pointer here: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66944
     static BtreeThreadVariables* bt_thread_vars() {
@@ -72,13 +63,14 @@ private:
         return fiber_map[this_id].get();
     }
 
+    static bool is_repair_needed(const BtreeNodePtr& child_node, const BtreeLinkInfo& child_info);
+
 protected:
     BtreeConfig m_bt_cfg;
 
 public:
     /////////////////////////////////////// All External APIs /////////////////////////////
-    Btree(const BtreeConfig& cfg, on_kv_read_t&& read_cb = nullptr, on_kv_update_t&& update_cb = nullptr,
-          on_kv_remove_t&& remove_cb = nullptr);
+    Btree(const BtreeConfig& cfg);
     virtual ~Btree();
     virtual btree_status_t init(void* op_context);
 
@@ -174,10 +166,6 @@ protected:
     void validate_sanity_child(const BtreeNodePtr& parent_node, uint32_t ind) const;
     void validate_sanity_next_child(const BtreeNodePtr& parent_node, uint32_t ind) const;
     void print_node(const bnodeid_t& bnodeid) const;
-    bool call_on_read_kv_cb(const BtreeNodePtr& node, uint32_t idx, const BtreeRequest& req) const;
-    bool call_on_remove_kv_cb(const BtreeNodePtr& node, uint32_t idx, const BtreeRequest& req) const;
-    bool call_on_update_kv_cb(const BtreeNodePtr& node, uint32_t idx, const BtreeKey& new_key,
-                              const BtreeRequest& req) const;
     void append_route_trace(BtreeRequest& req, const BtreeNodePtr& node, btree_event_t event, uint32_t start_idx = 0,
                             uint32_t end_idx = 0) const;
 
@@ -194,10 +182,10 @@ protected:
     btree_status_t check_split_root(ReqT& req);
 
     template < typename ReqT >
-    bool is_split_needed(const BtreeNodePtr& node, const BtreeConfig& cfg, ReqT& req) const;
+    bool is_split_needed(const BtreeNodePtr& node, ReqT& req) const;
 
     btree_status_t split_node(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node, uint32_t parent_ind,
-                              BtreeKey* out_split_key, void* context);
+                              K* out_split_key, void* context);
     btree_status_t mutate_extents_in_leaf(const BtreeNodePtr& my_node, BtreeRangePutRequest< K >& rpreq);
     btree_status_t repair_split(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node1,
                                 uint32_t parent_split_idx, void* context);

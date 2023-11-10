@@ -201,9 +201,8 @@ VENUM(btree_node_type, uint32_t, FIXED = 0, VAR_VALUE = 1, VAR_KEY = 2, VAR_OBJE
 VENUM(btree_store_type, uint8_t, MEM = 0, SSD = 1)
 #endif
 
-ENUM(btree_status_t, uint32_t, success, not_found, retry, has_more, read_failed, write_failed, stale_buf,
-     refresh_failed, put_failed, space_not_avail, split_failed, insert_failed, cp_mismatch, merge_not_required,
-     merge_failed, replay_not_needed, fast_path_not_possible, resource_full, crc_mismatch, not_supported, node_freed)
+ENUM(btree_status_t, uint32_t, success, not_found, retry, has_more, node_read_failed, put_failed, space_not_avail,
+     cp_mismatch, merge_not_required, merge_failed, crc_mismatch, not_supported, node_freed)
 
 /*ENUM(btree_node_write_type, uint8_t,
      new_node,     // Node write whenever a new node is created.
@@ -300,7 +299,6 @@ public:
         REGISTER_COUNTER(btree_int_node_count, "Btree Interior node count", "btree_node_count",
                          {"node_type", "interior"}, _publish_as::publish_as_gauge);
         REGISTER_COUNTER(btree_split_count, "Total number of btree node splits");
-        REGISTER_COUNTER(insert_failed_count, "Total number of inserts failed");
         REGISTER_COUNTER(btree_merge_count, "Total number of btree node merges");
         REGISTER_COUNTER(btree_depth, "Depth of btree", _publish_as::publish_as_gauge);
 
@@ -316,7 +314,6 @@ public:
                            {"node_type", "leaf"}, HistogramBucketsType(LinearUpto128Buckets));
         REGISTER_COUNTER(btree_retry_count, "number of retries");
         REGISTER_COUNTER(write_err_cnt, "number of errors in write");
-        REGISTER_COUNTER(split_failed, "split failed");
         REGISTER_COUNTER(query_err_cnt, "number of errors in query");
         REGISTER_COUNTER(read_node_count_in_write_ops, "number of nodes read in write_op");
         REGISTER_COUNTER(read_node_count_in_query_ops, "number of nodes read in query_op");

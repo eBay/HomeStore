@@ -34,9 +34,8 @@ private:
     superblk< index_table_sb > m_sb;
 
 public:
-    IndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, const BtreeConfig& cfg,
-               on_kv_read_t read_cb = nullptr, on_kv_update_t update_cb = nullptr, on_kv_remove_t remove_cb = nullptr) :
-            Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)}, m_sb{"index"} {
+    IndexTable(uuid_t uuid, uuid_t parent_uuid, uint32_t user_sb_size, const BtreeConfig& cfg) :
+            Btree< K, V >{cfg}, m_sb{"index"} {
         m_sb.create(sizeof(index_table_sb));
         m_sb->uuid = uuid;
         m_sb->parent_uuid = parent_uuid;
@@ -46,9 +45,7 @@ public:
         if (status != btree_status_t::success) { throw std::runtime_error(fmt::format("Unable to create root node")); }
     }
 
-    IndexTable(const superblk< index_table_sb >& sb, const BtreeConfig& cfg, on_kv_read_t read_cb = nullptr,
-               on_kv_update_t update_cb = nullptr, on_kv_remove_t remove_cb = nullptr) :
-            Btree< K, V >{cfg, std::move(read_cb), std::move(update_cb), std::move(remove_cb)} {
+    IndexTable(const superblk< index_table_sb >& sb, const BtreeConfig& cfg) : Btree< K, V >{cfg} {
         m_sb = sb;
         Btree< K, V >::set_root_node_info(BtreeLinkInfo{m_sb->root_node, m_sb->link_version});
     }
@@ -160,7 +157,7 @@ protected:
                 return BtreeNodePtr{n};
             });
             return btree_status_t::success;
-        } catch (std::exception& e) { return btree_status_t::read_failed; }
+        } catch (std::exception& e) { return btree_status_t::node_read_failed; }
     }
 
     btree_status_t refresh_node(const BtreeNodePtr& node, bool for_read_modify_write, void* context) const override {

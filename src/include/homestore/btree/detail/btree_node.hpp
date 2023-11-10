@@ -54,8 +54,7 @@ struct persistent_hdr_t {
     bnodeid_t node_id{empty_bnodeid};
     bnodeid_t next_node{empty_bnodeid};
 
-    uint32_t nentries : 27;
-    uint32_t node_type : 3;
+    uint32_t nentries : 30;
     uint32_t leaf : 1;
     uint32_t valid_node : 1;
 
@@ -63,9 +62,11 @@ struct persistent_hdr_t {
     uint64_t link_version{0};                 // Version of the link between its parent, updated if structure changes
     BtreeLinkInfo::bnode_link_info edge_info; // Edge entry information
 
-    uint16_t level; // Level of the node within the tree
-    uint16_t reserved1;
-    uint32_t reserved2;
+    uint16_t level;    // Level of the node within the tree
+    uint8_t node_type; // Type of the node (simple vs varlen etc..)
+    uint8_t reserved1;
+    uint16_t node_size;
+    uint16_t reserved2;
 
     persistent_hdr_t() : nentries{0}, leaf{0}, valid_node{1} {}
     std::string to_string() const {
@@ -78,7 +79,7 @@ struct persistent_hdr_t {
 #pragma pack()
 
 class BtreeNode : public sisl::ObjLifeCounter< BtreeNode > {
-    typedef std::pair< bool, uint32_t > node_find_result_t;
+    using node_find_result_t = std::pair< bool, uint32_t >;
 
 public:
     sisl::atomic_counter< int32_t > m_refcount{0};
@@ -86,12 +87,13 @@ public:
     uint8_t* m_phys_node_buf;
 
 public:
-    ~BtreeNode() = default;
-    BtreeNode(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf) : m_phys_node_buf{node_buf} {
+    BtreeNode(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf, BtreeConfig const& cfg) :
+            m_phys_node_buf{node_buf} {
         if (init_buf) {
             new (node_buf) persistent_hdr_t{};
             set_node_id(id);
             set_leaf(is_leaf);
+            set_node_size(cfg.node_size());
         } else {
             DEBUG_ASSERT_EQ(node_id(), id);
             DEBUG_ASSERT_EQ(magic(), BTREE_NODE_MAGIC);
@@ -99,11 +101,26 @@ public:
         }
         m_trans_hdr.is_leaf_node = is_leaf;
     }
+    virtual ~BtreeNode() = default;
 
     // Identify if a node is a leaf node or not, from raw buffer, by just reading persistent_hdr_t
     static bool identify_leaf_node(uint8_t* buf) { return (r_cast< persistent_hdr_t* >(buf))->leaf; }
 
-    node_find_result_t find(const BtreeKey& key, BtreeValue* outval, bool copy_val) const {
+    /// @brief Finds the index of the entry with the specified key in the node.
+    ///
+    /// This method performs a binary search on the node to find the index of the entry with the specified key.
+    /// If the key is not found in the node, the method returns the index of the first entry greater than the key.
+    ///
+    /// @param key The key to search for.
+    /// @param outval [optional] A pointer to a BtreeValue object to store the value associated with the key.
+    /// @param copy_val If outval is non-null, is the value deserialized from node needs to be copy of the btree
+    /// internal buffer. Safest option is to set this true, it is ok to set it false, if find() is called and value is
+    /// accessed and used before subsequent node modification.
+    /// @return A pair of values representing the result of the search.
+    ///         The first value is a boolean indicating whether the key was found in the node.
+    ///         The second value is an integer representing the index of the entry with the specified key or the index
+    ///         of the first entry greater than the key.
+    node_find_result_t find(BtreeKey const& key, BtreeValue* outval, bool copy_val) const {
         LOGMSG_ASSERT_EQ(magic(), BTREE_NODE_MAGIC, "Magic mismatch on btree_node {}",
                          get_persistent_header_const()->to_string());
 
@@ -120,134 +137,42 @@ public:
         return std::make_pair(found, idx);
     }
 
-    template < typename K, typename V >
-    uint32_t get_all(const BtreeKeyRange< K >& range, uint32_t max_count, uint32_t& start_idx, uint32_t& end_idx,
-                     std::vector< std::pair< K, V > >* out_values = nullptr) const {
+    template < typename K >
+    bool match_range(BtreeKeyRange< K > const& range, uint32_t& start_idx, uint32_t& end_idx) const {
         LOGMSG_ASSERT_EQ(magic(), BTREE_NODE_MAGIC, "Magic mismatch on btree_node {}",
                          get_persistent_header_const()->to_string());
-        auto count = 0U;
+
         bool sfound, efound;
         // Get the start index of the search range.
-        std::tie(sfound, start_idx) = bsearch_node(range.start_key());
+        std::tie(sfound, start_idx) = this->bsearch_node(range.start_key());
         if (sfound && !range.is_start_inclusive()) {
             ++start_idx;
             sfound = false;
         }
-        if (start_idx == total_entries()) {
+
+        if (start_idx == this->total_entries()) {
+            // We are already at the end of search, we should return this as the only entry
             end_idx = start_idx;
-            if (is_leaf() || !has_valid_edge()) {
-                return 0; // No result found
-            } else {
-                goto out;
+            return (!is_leaf() && this->has_valid_edge()); // No result found unless its a edge node
+        }
+
+        // Get the end index of the search range.
+        std::tie(efound, end_idx) = this->bsearch_node(range.end_key());
+        if (is_leaf() || ((end_idx == this->total_entries()) && !has_valid_edge())) {
+            // Binary search will always return the index as the first key that is >= given key (end_key in this
+            // case). Our goal here in leaf node is to find the last key that is less than in case of non_inclusive
+            // search or less than or equal in case of inclusive search.
+            if (!efound || !range.is_end_inclusive()) {
+                // If we are already on the first key, then obviously nothing has been matched.
+                if (end_idx == 0) { return false; }
+                --end_idx;
             }
+
+            // If we point to same start and end without any match, it is hitting unavailable range
+            if (start_idx > end_idx) { return false; }
         }
 
-        std::tie(efound, end_idx) = bsearch_node(range.end_key());
-        if (efound && !range.is_end_inclusive()) {
-            if (end_idx == 0) { return 0; }
-            --end_idx;
-            efound = false;
-        }
-
-        // If we point to same start and end without any match, it is hitting unavailable range
-        if ((start_idx == end_idx) && is_leaf() && !sfound && !efound) { return 0; }
-
-        if (end_idx == total_entries()) {
-            DEBUG_ASSERT_GT(end_idx, 0); // At this point end_idx should never have been zero
-            if (!has_valid_edge()) { --end_idx; }
-        }
-
-    out:
-        count = std::min(end_idx - start_idx + 1, max_count);
-        if (out_values) {
-            /* get the keys and values */
-            for (auto i{start_idx}; i < (start_idx + count); ++i) {
-                add_nth_obj_to_list< K, V >(i, out_values, true);
-            }
-        }
-        return count;
-    }
-
-    template < typename K >
-    std::pair< bool, uint32_t > get_any(const BtreeKeyRange< K >& range, BtreeKey* out_key, BtreeValue* out_val,
-                                        bool copy_key, bool copy_val) const {
-        LOGMSG_ASSERT_EQ(magic(), BTREE_NODE_MAGIC, "Magic mismatch on btree_node {}",
-                         get_persistent_header_const()->to_string());
-        uint32_t result_idx;
-        const auto mm_opt = range.multi_option();
-        bool efound;
-        uint32_t end_idx;
-
-        // Get the start index of the search range.
-        auto [sfound, start_idx] = bsearch_node(range.start_key());
-        if (sfound && !range.is_start_inclusive()) {
-            ++start_idx;
-            sfound = false;
-        }
-
-        if (sfound && ((mm_opt == MultiMatchOption::DO_NOT_CARE) || (mm_opt == MultiMatchOption::LEFT_MOST))) {
-            result_idx = start_idx;
-            goto found_result;
-        } else if (start_idx == total_entries()) {
-            DEBUG_ASSERT(is_leaf() || has_valid_edge(), "Invalid node");
-            return std::make_pair(false, 0); // out_of_range
-        }
-
-        std::tie(efound, end_idx) = bsearch_node(range.end_key());
-        if (efound && !range.is_end_inclusive()) {
-            if (end_idx == 0) { return std::make_pair(false, 0); }
-            --end_idx;
-            efound = false;
-        }
-
-        if (end_idx > start_idx) {
-            if (mm_opt == MultiMatchOption::RIGHT_MOST) {
-                result_idx = end_idx;
-            } else if (mm_opt == MultiMatchOption::MID) {
-                result_idx = (end_idx - start_idx) / 2;
-            } else {
-                result_idx = start_idx;
-            }
-        } else if ((start_idx == end_idx) && ((sfound || efound))) {
-            result_idx = start_idx;
-        } else {
-            return std::make_pair(false, 0);
-        }
-
-    found_result:
-        if (out_key) { get_nth_key_internal(result_idx, *out_key, copy_key); }
-        if (out_val) { get_nth_value(result_idx, out_val, copy_val); }
-        return std::make_pair(true, result_idx);
-    }
-
-    bool put(const BtreeKey& key, const BtreeValue& val, btree_put_type put_type, BtreeValue* existing_val) {
-        LOGMSG_ASSERT_EQ(magic(), BTREE_NODE_MAGIC, "Magic mismatch on btree_node {}",
-                         get_persistent_header_const()->to_string());
-        bool ret = true;
-
-        const auto [found, idx] = find(key, nullptr, false);
-        if (found && existing_val) { get_nth_value(idx, existing_val, true); }
-
-        if (put_type == btree_put_type::INSERT_ONLY_IF_NOT_EXISTS) {
-            if (found) {
-                LOGDEBUG("Attempt to insert duplicate entry {}", key.to_string());
-                return false;
-            }
-            ret = (insert(idx, key, val) == btree_status_t::success);
-        } else if (put_type == btree_put_type::REPLACE_ONLY_IF_EXISTS) {
-            if (!found) return false;
-            update(idx, key, val);
-        } else if (put_type == btree_put_type::REPLACE_IF_EXISTS_ELSE_INSERT) {
-            (found) ? update(idx, key, val) : (void)insert(idx, key, val);
-        } else if (put_type == btree_put_type::APPEND_ONLY_IF_EXISTS) {
-            if (!found) return false;
-            append(idx, key, val);
-        } else if (put_type == btree_put_type::APPEND_IF_EXISTS_ELSE_INSERT) {
-            (found) ? append(idx, key, val) : (void)insert(idx, key, val);
-        } else {
-            DEBUG_ASSERT(false, "Wrong put_type {}", put_type);
-        }
-        return ret;
+        return true;
     }
 
     virtual btree_status_t insert(const BtreeKey& key, const BtreeValue& val) {
@@ -313,59 +238,6 @@ public:
             }
         }
     }
-
-    template < typename K >
-    K min_of(const K& cmp_key, uint32_t cmp_ind, bool& is_cmp_key_lesser) const {
-        K min_key;
-        int x{-1};
-        is_cmp_key_lesser = false;
-
-        if (cmp_ind < total_entries()) {
-            get_nth_key_internal(cmp_ind, min_key, false);
-            x = cmp_key.compare(min_key);
-        }
-
-        if (x < 0) {
-            min_key = cmp_key;
-            is_cmp_key_lesser = true;
-        }
-        return min_key;
-    }
-
-    /*BtreeKeyRange get_subrange(const BtreeKeyRange< K >& inp_range, int upto_ind) const {
- #ifndef NDEBUG
-        if (upto_ind > 0) {
-            // start of input range should always be more then the key in curr_ind - 1
-            DEBUG_ASSERT_LE(get_nth_key< K >(upto_ind - 1, false).compare(inp_range.start_key()), 0, "[node={}]",
-                            to_string());
-        }
- #endif
-
-        // find end of subrange
-        bool end_inc = true;
-        K end_key;
-
-        if (upto_ind < int_cast(total_entries())) {
-            end_key = get_nth_key< K >(upto_ind, false);
-            if (end_key.compare(inp_range.end_key()) >= 0) {
-                // this is last index to process as end of range is smaller then key in this node
-                end_key = inp_range.end_key();
-                end_inc = inp_range.is_end_inclusive();
-            } else {
-                end_inc = true;
-            }
-        } else {
-            // it is the edge node. end key is the end of input range
-            LOGMSG_ASSERT_EQ(has_valid_edge(), true, "node={}", to_string());
-            end_key = inp_range.end_key();
-            end_inc = inp_range.is_end_inclusive();
-        }
-
-        BtreeKeyRangeSafe< K > subrange{inp_range.start_key(), inp_range.is_start_inclusive(), end_key, end_inc};
-        RELEASE_ASSERT_LE(subrange.start_key().compare(subrange.end_key()), 0, "[node={}]", to_string());
-        RELEASE_ASSERT_LE(subrange.start_key().compare(inp_range.end_key()), 0, "[node={}]", to_string());
-        return subrange;
-    } */
 
     template < typename K >
     K get_nth_key(uint32_t idx, bool copy) const {
@@ -442,29 +314,17 @@ public:
     void lock_acknowledge() { m_trans_hdr.upgraders.decrement(1); }
     bool any_upgrade_waiters() const { return (!m_trans_hdr.upgraders.testz()); }
 
-    bool can_accomodate(const BtreeConfig& cfg, uint32_t key_size, uint32_t value_size) const {
-        return ((key_size + value_size + get_record_size()) <= available_size(cfg));
-    }
-
-    template < typename K, typename V >
-    void add_nth_obj_to_list(uint32_t ind, std::vector< std::pair< K, V > >* vec, bool copy) const {
-        std::pair< K, V > kv;
-        vec->emplace_back(kv);
-
-        auto* pkv = &vec->back();
-        if (ind == total_entries() && !is_leaf()) {
-            pkv->second = edge_value_internal< V >();
-        } else {
-            get_nth_key_internal(ind, pkv->first, copy);
-            get_nth_value(ind, &pkv->second, copy);
-        }
-    }
-
 public:
     // Public method which needs to be implemented by variants
+    virtual btree_status_t insert(uint32_t ind, const BtreeKey& key, const BtreeValue& val) = 0;
+    virtual void remove(uint32_t ind) { remove(ind, ind); }
+    virtual void remove(uint32_t ind_s, uint32_t ind_e) = 0;
+    virtual void remove_all(const BtreeConfig& cfg) = 0;
+    virtual void update(uint32_t ind, const BtreeValue& val) = 0;
+    virtual void update(uint32_t ind, const BtreeKey& key, const BtreeValue& val) = 0;
+
     virtual uint32_t move_out_to_right_by_entries(const BtreeConfig& cfg, BtreeNode& other_node, uint32_t nentries) = 0;
     virtual uint32_t move_out_to_right_by_size(const BtreeConfig& cfg, BtreeNode& other_node, uint32_t size) = 0;
-    virtual uint32_t num_entries_by_size(uint32_t start_idx, uint32_t size) const = 0;
     virtual uint32_t copy_by_size(const BtreeConfig& cfg, const BtreeNode& other_node, uint32_t start_idx,
                                   uint32_t size) = 0;
     virtual uint32_t copy_by_entries(const BtreeConfig& cfg, const BtreeNode& other_node, uint32_t start_idx,
@@ -472,23 +332,17 @@ public:
     /*virtual uint32_t move_in_from_right_by_entries(const BtreeConfig& cfg, BtreeNode& other_node,
                                                    uint32_t nentries) = 0;
     virtual uint32_t move_in_from_right_by_size(const BtreeConfig& cfg, BtreeNode& other_node, uint32_t size) = 0;*/
-    virtual uint32_t available_size(const BtreeConfig& cfg) const = 0;
-    virtual std::string to_string(bool print_friendly = false) const = 0;
-    virtual std::string to_string_keys(bool print_friendly = false) const = 0;
-    virtual void get_nth_value(uint32_t ind, BtreeValue* out_val, bool copy) const = 0;
-    virtual void get_nth_key_internal(uint32_t ind, BtreeKey& out_key, bool copykey) const = 0;
 
-    virtual btree_status_t insert(uint32_t ind, const BtreeKey& key, const BtreeValue& val) = 0;
-    virtual void remove(uint32_t ind) { remove(ind, ind); }
-    virtual void remove(uint32_t ind_s, uint32_t ind_e) = 0;
-    virtual void remove_all(const BtreeConfig& cfg) = 0;
-    virtual void update(uint32_t ind, const BtreeValue& val) = 0;
-    virtual void update(uint32_t ind, const BtreeKey& key, const BtreeValue& val) = 0;
-    virtual void append(uint32_t ind, const BtreeKey& key, const BtreeValue& val) = 0;
+    virtual uint32_t available_size() const = 0;
+    virtual bool has_room_for_put(btree_put_type put_type, uint32_t key_size, uint32_t value_size) const = 0;
+    virtual uint32_t num_entries_by_size(uint32_t start_idx, uint32_t size) const = 0;
 
-    virtual uint32_t get_nth_obj_size(uint32_t ind) const = 0;
-    virtual uint16_t get_record_size() const = 0;
     virtual int compare_nth_key(const BtreeKey& cmp_key, uint32_t ind) const = 0;
+    virtual void get_nth_key_internal(uint32_t ind, BtreeKey& out_key, bool copykey) const = 0;
+    virtual uint32_t get_nth_key_size(uint32_t ind) const = 0;
+    virtual void get_nth_value(uint32_t ind, BtreeValue* out_val, bool copy) const = 0;
+    virtual uint32_t get_nth_value_size(uint32_t ind) const = 0;
+    virtual uint32_t get_nth_obj_size(uint32_t ind) const { return get_nth_key_size(ind) + get_nth_value_size(ind); }
     virtual uint8_t* get_node_context() = 0;
 
     // Method just to please compiler
@@ -497,7 +351,10 @@ public:
         return V{edge_id()};
     }
 
-private:
+    virtual std::string to_string(bool print_friendly = false) const = 0;
+    virtual std::string to_string_keys(bool print_friendly = false) const = 0;
+
+protected:
     node_find_result_t bsearch_node(const BtreeKey& key) const {
         DEBUG_ASSERT_EQ(magic(), BTREE_NODE_MAGIC);
         auto [found, idx] = bsearch(-1, total_entries(), key);
@@ -575,7 +432,11 @@ public:
 
     void set_leaf(bool leaf) { get_persistent_header()->leaf = leaf; }
     void set_node_type(btree_node_type t) { get_persistent_header()->node_type = uint32_cast(t); }
+    void set_node_size(uint32_t size) { get_persistent_header()->node_size = s_cast< uint16_t >(size - 1); }
     uint64_t node_gen() const { return get_persistent_header_const()->node_gen; }
+    uint32_t node_size() const { return s_cast< uint32_t >(get_persistent_header_const()->node_size) + 1; }
+    uint32_t node_data_size() const { return node_size() - sizeof(persistent_hdr_t); }
+
     void inc_gen() { get_persistent_header()->node_gen++; }
     void set_gen(uint64_t g) { get_persistent_header()->node_gen = g; }
     uint64_t link_version() const { return get_persistent_header_const()->link_version; }
@@ -587,21 +448,19 @@ public:
 
     BtreeLinkInfo link_info() const { return BtreeLinkInfo{node_id(), link_version()}; }
 
-    virtual uint32_t occupied_size(const BtreeConfig& cfg) const {
-        return (cfg.node_data_size() - available_size(cfg));
-    }
+    virtual uint32_t occupied_size() const { return (node_data_size() - available_size()); }
     bool is_merge_needed(const BtreeConfig& cfg) const {
 #if 0
 #ifdef _PRERELEASE
-       if (iomgr_flip::instance()->test_flip("btree_merge_node") && occupied_size(cfg) < node_area_size(cfg)) {
+       if (iomgr_flip::instance()->test_flip("btree_merge_node") && occupied_size() < node_data_size) {
            return true;
        }
 
        auto ret = iomgr_flip::instance()->get_test_flip< uint64_t >("btree_merge_node_pct");
-       if (ret && occupied_size(cfg) < (ret.get() * node_area_size(cfg) / 100)) { return true; }
+       if (ret && occupied_size() < (ret.get() * node_data_size() / 100)) { return true; }
 #endif
 #endif
-        return (occupied_size(cfg) < cfg.suggested_min_size());
+        return (occupied_size() < cfg.suggested_min_size());
     }
 
     bnodeid_t next_bnode() const { return get_persistent_header_const()->next_node; }

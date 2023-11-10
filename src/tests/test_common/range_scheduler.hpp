@@ -20,19 +20,44 @@
 
 #pragma once
 
-#include <boost/icl/closed_interval.hpp>
-#include <boost/icl/interval_set.hpp>
-#include <boost/icl/separate_interval_set.hpp>
-#include <boost/icl/split_interval_set.hpp>
+#include <sisl/fds/bitset.hpp>
 #include <cassert>
+
 namespace homestore {
-using namespace boost::icl;
-typedef interval_set< uint32_t > set_t;
-typedef set_t::interval_type ival;
 using mutex = iomgr::FiberManagerLib::shared_mutex;
 
+static std::pair< uint64_t, uint64_t > get_next_contiguous_set_bits(const sisl::Bitset& bm, uint64_t search_start_bit,
+                                                                    uint64_t max_count) {
+    uint64_t first_set_bit{sisl::Bitset::npos};
+    uint64_t set_count{0};
+    uint64_t b;
+    while (((b = bm.get_next_set_bit(search_start_bit)) != sisl::Bitset::npos) && (set_count < max_count)) {
+        if (first_set_bit == sisl::Bitset::npos) {
+            first_set_bit = b;
+        } else if (b > search_start_bit) {
+            break;
+        }
+        ++set_count;
+        search_start_bit = b + 1;
+    }
+
+    return std::pair(first_set_bit, set_count);
+}
+
 class RangeScheduler {
+private:
+    sisl::Bitset m_existing_keys;
+    sisl::Bitset m_working_keys;
+    mutex m_set_lock;
+    std::uniform_int_distribution< uint32_t > m_rand_start_key_generator;
+
+    std::random_device m_rd;
+
 public:
+    RangeScheduler(uint32_t num_keys) : m_existing_keys{num_keys}, m_working_keys{num_keys} {
+        m_rand_start_key_generator = std::uniform_int_distribution< uint32_t >(0, num_keys - 1);
+    }
+
     void remove_keys_from_working(uint32_t s, uint32_t e) {
         std::unique_lock< mutex > lk(m_set_lock);
         remove_from_working(s, e);
@@ -62,165 +87,109 @@ public:
         remove_from_working(start_key, end_key);
     }
 
-    int pick_random_non_existing_keys(uint32_t n_keys = 1, uint32_t max_range = 0) {
-        std::unique_lock< mutex > lk(m_set_lock);
-        uint32_t working_range = max_range <= 0 ? std::numeric_limits< uint32_t >::max() : max_range;
-        uint32_t num_retry = 0;
+    std::pair< uint32_t, uint32_t > pick_random_non_existing_keys(uint32_t max_keys) {
+        std::pair< uint32_t, uint32_t > ret;
+        do {
+            ret = try_pick_random_non_existing_keys(max_keys);
+            if (ret.first != UINT32_MAX) { break; }
+        } while (true);
 
-        auto num_intervals = static_cast< uint32_t >(m_existing_keys.iterative_size());
-        std::uniform_int_distribution< uint32_t > s_rand_interval_generator{0, num_intervals - 1};
-        uint32_t start_key = std::numeric_limits< uint32_t >::max();
-
-        while (num_retry < max_retries) {
-            // find a random interval
-            uint32_t next_lower = working_range;
-            uint32_t previous_upper = 0;
-            auto it = m_existing_keys.begin();
-            // if the selected interval is the last ... check size between this one and the working_range, rand n keys
-            // in (previous_upper, working_range] = [previous_upper+1, working_range] choose the gap between this upper
-            // and the next begin. and check the size! rand nkeys in [previous_upper, next_lower]
-            if (num_intervals != 0) {
-                uint32_t cur_interval_idx = s_rand_interval_generator(m_re);
-                std::advance(it, cur_interval_idx);
-                previous_upper = last(*it) + 1; // to be inclusivelast
-                it++;
-                if (it != m_existing_keys.end()) { next_lower = first(*it) - 1; }
-            }
-            if ((next_lower + 1) < (n_keys + previous_upper)) { // check < or <=
-                num_retry++;
-                continue;
-            }
-
-            // choose randomly n keys in [previous_upper, next_lower]
-            std::uniform_int_distribution< uint32_t > rand_key_generator{
-                previous_upper, next_lower - n_keys + 1}; // n_keys or n_keys +- (1)
-            start_key = rand_key_generator(m_re);
-            auto found = (m_working_keys & ival::closed(start_key, start_key + n_keys - 1));
-            if (found.empty()) {
-                auto validate = m_existing_keys & ival::closed(start_key, start_key + n_keys - 1);
-                assert(validate.empty());
-                break;
-            }
-            num_retry++;
-            continue;
-        }
-        if (num_retry == max_retries) { return -1; }
-        // add from working keys and return the start_key;
-        this->add_to_working(start_key, start_key + n_keys - 1);
-        assert(start_key + n_keys - 1 <= working_range);
-        return static_cast< int >(start_key);
+        return ret;
     }
 
-    int pick_random_existing_keys(uint32_t n_keys = 1, uint32_t max_range = 0) {
-        std::unique_lock< mutex > lk(m_set_lock);
-        uint32_t working_range = max_range <= 0 ? std::numeric_limits< uint32_t >::max() : max_range;
-        uint32_t num_retry = 0;
+    std::pair< uint32_t, uint32_t > pick_random_existing_keys(uint32_t max_keys) {
+        std::pair< uint32_t, uint32_t > ret;
+        do {
+            ret = try_pick_random_existing_keys(max_keys);
+            if (ret.first != UINT32_MAX) { break; }
+        } while (true);
 
-        auto num_intervals = static_cast< uint32_t >(m_existing_keys.iterative_size());
-        // empty keys
-        if (num_intervals == 0) { return -1; }
-        std::uniform_int_distribution< uint32_t > s_rand_interval_generator{0, num_intervals - 1};
-        uint32_t start_key = std::numeric_limits< uint32_t >::max();
-
-        while (num_retry < max_retries) {
-            // find a random interval
-            auto it = m_existing_keys.begin();
-            uint32_t cur_interval_idx = s_rand_interval_generator(m_re);
-            std::advance(it, cur_interval_idx);
-            uint32_t upper = last(*it);
-            uint32_t lower = first(*it);
-            if ((upper + 1) < (n_keys + lower)) {
-                num_retry++;
-                continue;
-            }
-            // choose randomly n keys in [lower, upper]
-            std::uniform_int_distribution< uint32_t > rand_key_generator{lower, upper - n_keys + 1};
-            start_key = rand_key_generator(m_re);
-            auto found = (m_working_keys & ival::closed(start_key, start_key + n_keys - 1));
-            if (found.empty()) {
-                auto validate = m_existing_keys & ival::closed(start_key, start_key + n_keys - 1);
-                assert(!validate.empty());
-                break;
-            }
-            num_retry++;
-            continue;
-        }
-        if (num_retry == max_retries) { return -1; }
-        // add from working keys and return the start_key;
-        this->add_to_working(start_key, start_key + n_keys - 1);
-        assert(start_key + n_keys - 1 <= working_range);
-        return static_cast< int >(start_key);
+        return ret;
     }
 
-    int pick_random_non_working_keys(uint32_t n_keys = 1, uint32_t max_range = 0) {
-        std::unique_lock< mutex > lk(m_set_lock);
-        uint32_t working_range = max_range <= 0 ? std::numeric_limits< uint32_t >::max() : max_range;
-        uint32_t num_retry = 0;
+    std::pair< uint32_t, uint32_t > pick_random_non_working_keys(uint32_t max_keys) {
+        std::pair< uint32_t, uint32_t > ret;
+        do {
+            ret = try_pick_random_non_working_keys(max_keys);
+            if (ret.first != UINT32_MAX) { break; }
+        } while (true);
 
-        auto num_intervals = static_cast< uint32_t >(m_working_keys.iterative_size());
-        // empty keys
-        if (num_intervals == 0) { return -1; }
-        std::uniform_int_distribution< uint32_t > s_rand_interval_generator{0, num_intervals - 1};
-        uint32_t start_key = std::numeric_limits< uint32_t >::max();
-
-        while (num_retry < max_retries) {
-            // find a random interval
-            uint32_t next_lower = working_range;
-            uint32_t previous_upper = 0;
-            auto it = m_working_keys.begin();
-            if (num_intervals != 0) {
-                uint32_t cur_interval_idx = s_rand_interval_generator(m_re);
-                std::advance(it, cur_interval_idx);
-                previous_upper = last(*it) + 1; // to be inclusivelast
-                it++;
-                if (it != m_working_keys.end()) { next_lower = first(*it) - 1; }
-            }
-            if ((next_lower + 1) < (n_keys + previous_upper)) { // check < or <=
-                num_retry++;
-                continue;
-            }
-
-            // choose randomly n keys in [previous_upper, next_lower]
-            std::uniform_int_distribution< uint32_t > rand_key_generator{
-                previous_upper, next_lower - n_keys + 1}; // n_keys or n_keys +- (1)
-            start_key = rand_key_generator(m_re);
-            break;
-        }
-        if (num_retry == max_retries) { return -1; }
-        // add from working keys and return the start_key;
-        this->add_to_working(start_key, start_key + n_keys - 1);
-        assert(start_key + n_keys - 1 <= working_range);
-        return static_cast< int >(start_key);
+        return ret;
     }
 
 private:
+    std::pair< uint32_t, uint32_t > try_pick_random_non_existing_keys(uint32_t max_keys) {
+        std::unique_lock< mutex > lk(m_set_lock);
+        if ((m_existing_keys.size() - m_existing_keys.get_set_count()) == 0) {
+            throw std::out_of_range("All keys are being worked on right now");
+        }
+
+        uint32_t const search_start = m_rand_start_key_generator(m_rd);
+        auto bb = m_existing_keys.get_next_contiguous_n_reset_bits(search_start, max_keys);
+        if (bb.nbits && m_working_keys.is_bits_reset(bb.start_bit, bb.nbits)) {
+            uint32_t const start = uint32_cast(bb.start_bit);
+            uint32_t const end = uint32_cast(bb.start_bit + bb.nbits - 1);
+            add_to_working(start, end);
+            return std::pair(start, end);
+        } else {
+            return std::pair(UINT32_MAX, UINT32_MAX);
+        }
+    }
+
+    std::pair< uint32_t, uint32_t > try_pick_random_existing_keys(uint32_t max_keys) {
+        std::unique_lock< mutex > lk(m_set_lock);
+        if (m_existing_keys.get_set_count() == 0) {
+            DEBUG_ASSERT(false, "Couldn't find one existing keys");
+            throw std::out_of_range("Couldn't find one existing keys");
+        }
+
+        uint32_t const search_start = m_rand_start_key_generator(m_rd);
+        auto [s, count] = get_next_contiguous_set_bits(m_existing_keys, search_start, max_keys);
+
+        if (count && m_working_keys.is_bits_reset(s, count)) {
+            uint32_t const start = uint32_cast(s);
+            uint32_t const end = uint32_cast(s + count - 1);
+            add_to_working(start, end);
+            return std::pair(start, end);
+        } else {
+            return std::pair(UINT32_MAX, UINT32_MAX);
+        }
+    }
+
+    std::pair< uint32_t, uint32_t > try_pick_random_non_working_keys(uint32_t max_keys) {
+        std::unique_lock< mutex > lk(m_set_lock);
+
+        uint32_t const search_start = m_rand_start_key_generator(m_rd);
+        auto bb = m_working_keys.get_next_contiguous_n_reset_bits(search_start, max_keys);
+
+        if (bb.nbits) {
+            uint32_t const start = uint32_cast(bb.start_bit);
+            uint32_t const end = uint32_cast(bb.start_bit + bb.nbits - 1);
+            add_to_working(start, end);
+            return std::pair(start, end);
+        } else {
+            return std::pair(UINT32_MAX, UINT32_MAX);
+        }
+    }
+
     void add_to_existing(uint32_t s) { add_to_existing(s, s); }
 
     void add_to_working(uint32_t s) { add_to_working(s, s); }
 
-    void add_to_existing(uint32_t s, uint32_t e) { m_existing_keys += ival::closed(s, e); }
+    void add_to_existing(uint32_t s, uint32_t e) { m_existing_keys.set_bits(s, e - s + 1); }
 
-    void add_to_working(uint32_t s, uint32_t e) { m_working_keys += ival::closed(s, e); }
+    void add_to_working(uint32_t s, uint32_t e) { m_working_keys.set_bits(s, e - s + 1); }
 
-    void remove_from_existing(uint32_t s, uint32_t e) { m_existing_keys -= ival::closed(s, e); }
+    void remove_from_existing(uint32_t s, uint32_t e) { m_existing_keys.reset_bits(s, e - s + 1); }
 
     void remove_from_existing(uint32_t s) { remove_from_existing(s, s); }
 
     void remove_from_working(uint32_t s) { remove_from_working(s, s); }
 
-    void remove_from_working(uint32_t s, uint32_t e) { m_working_keys -= ival::closed(s, e); }
+    void remove_from_working(uint32_t s, uint32_t e) { m_working_keys.reset_bits(s, e - s + 1); }
 
-    bool is_working(uint32_t cur_key) { return m_working_keys.find(cur_key) != m_working_keys.end(); }
+    bool is_working(uint32_t cur_key) const { return m_working_keys.is_bits_set(cur_key, 1); }
 
-    bool is_existing(uint32_t cur_key) { return m_existing_keys.find(cur_key) != m_existing_keys.end(); }
-
-private:
-    set_t m_existing_keys;
-    set_t m_working_keys;
-    mutex m_set_lock;
-
-    std::random_device m_rd{};
-    std::default_random_engine m_re{m_rd()};
-    const uint32_t max_retries = 5;
+    bool is_existing(uint32_t cur_key) const { return m_existing_keys.is_bits_set(cur_key, 1); }
 };
 }; // namespace homestore

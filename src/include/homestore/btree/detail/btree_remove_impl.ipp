@@ -34,24 +34,9 @@ btree_status_t Btree< K, V >::do_remove(const BtreeNodePtr& my_node, locktype_t 
         if constexpr (std::is_same_v< ReqT, BtreeSingleRemoveRequest >) {
             if ((modified = my_node->remove_one(req.key(), nullptr, req.m_outval))) { ++removed_count; }
         } else if constexpr (std::is_same_v< ReqT, BtreeRangeRemoveRequest< K > >) {
-            if (req.next_key().is_extent_key()) {
-                modified = remove_extents_in_leaf(my_node, req);
-            } else {
-                if (my_node->total_entries()) {
-                    auto& subrange = req.working_range();
-                    auto const [start_found, start_idx] = my_node->find(subrange.start_key(), nullptr, false);
-                    auto [end_found, end_idx] = my_node->find(subrange.end_key(), nullptr, false);
-                    if (end_found) { ++end_idx; }
-
-                    removed_count = end_idx - start_idx;
-                    for (uint32_t count = 0; count < removed_count; ++count) {
-                        call_on_remove_kv_cb(my_node, start_idx, req);
-                        // since start_idx is getting updated, always call remove_start_idx
-                        my_node->remove(start_idx);
-                        modified = true;
-                    }
-                }
-            }
+            removed_count = to_variant_node(my_node)->multi_remove(req.working_range(), req.m_filter_cb);
+            modified = (removed_count != 0);
+            req.shift_working_range();
         } else if constexpr (std::is_same_v< ReqT, BtreeRemoveAnyRequest< K > >) {
             if ((modified = my_node->remove_any(req.m_range, req.m_outkey, req.m_outval))) { ++removed_count; }
         }
@@ -68,7 +53,6 @@ btree_status_t Btree< K, V >::do_remove(const BtreeNodePtr& my_node, locktype_t 
         return modified ? btree_status_t::success : btree_status_t::not_found;
     }
 
-    bool go_to_out = false;
 retry:
     locktype_t child_cur_lock = locktype_t::NONE;
     uint32_t curr_idx;
@@ -80,21 +64,21 @@ retry:
         auto const [found, idx] = my_node->find(req.key(), nullptr, false);
         ASSERT_IS_VALID_INTERIOR_CHILD_INDX(found, idx, my_node);
         end_idx = start_idx = idx;
+        if (false) { goto out_return; } // Please the compiler
     } else if constexpr (std::is_same_v< ReqT, BtreeRangeRemoveRequest< K > >) {
-        const auto count = my_node->template get_all< K, V >(req.next_range(), UINT32_MAX, start_idx, end_idx);
-        if (!count) {
+        auto const matched = my_node->match_range< K >(req.working_range(), start_idx, end_idx);
+        if (!matched) {
             ret = btree_status_t::not_found;
-            go_to_out = true;
+            goto out_return;
         }
-        //        BT_NODE_REL_ASSERT_NE(count, 0, my_node, "get_all returns 0 entries for interior node is not valid
-        //        pattern");
-
     } else if constexpr (std::is_same_v< ReqT, BtreeRemoveAnyRequest< K > >) {
-        const auto count = my_node->template get_all< V >(req.m_range, UINT32_MAX, start_idx, end_idx);
-        BT_NODE_REL_ASSERT_NE(count, 0, my_node, "get_all returns 0 entries for interior node is not valid pattern");
+        auto const matched = my_node->match_range< K >(req.m_range, start_idx, end_idx);
+        if (!matched) {
+            ret = btree_status_t::not_found;
+            goto out_return;
+        }
         end_idx = start_idx = (end_idx - start_idx) / 2; // Pick the middle, TODO: Ideally we need to pick random
     }
-    if (go_to_out) { goto out_return; }
 
     if (req.route_tracing) { append_route_trace(req, my_node, btree_event_t::READ, start_idx, end_idx); }
     curr_idx = start_idx;
@@ -155,14 +139,15 @@ retry:
             if (child_node->is_leaf()) {
                 // We get the trimmed range only for leaf because this is where we will be removing keys. In interior
                 // nodes, keys are always propogated from the lower nodes.
-                bool is_inp_key_lesser = false;
-                K end_key =
-                    my_node->min_of(s_cast< const K& >(req.input_range().end_key()), curr_idx, is_inp_key_lesser);
-                bool end_incl = is_inp_key_lesser ? req.input_range().is_end_inclusive() : true;
-                req.trim_working_range(std::move(end_key), end_incl);
+                if (curr_idx < my_node->total_entries()) {
+                    K child_end_key = my_node->get_nth_key< K >(curr_idx, true);
+                    if (child_end_key.compare(req.working_range().end_key()) < 0) {
+                        req.trim_working_range(std::move(child_end_key), true /* inclusive child key */);
+                    }
 
-                BT_NODE_LOG(DEBUG, my_node, "Subrange:idx=[{}-{}],c={},working={}", start_idx, end_idx, curr_idx,
-                            req.working_range().to_string());
+                    BT_NODE_LOG(DEBUG, my_node, "Subrange:idx=[{}-{}],c={},working={}", start_idx, end_idx, curr_idx,
+                                req.working_range().to_string());
+                }
             }
         }
 
@@ -198,91 +183,6 @@ out_return:
     // have been unlocked by the recursive function and it could also been deleted.
     if (curlock != locktype_t::NONE) { unlock_node(my_node, curlock); }
     return (at_least_one_child_modified == btree_status_t::success) ? btree_status_t::success : ret;
-}
-
-template < typename K, typename V >
-bool Btree< K, V >::remove_extents_in_leaf(const BtreeNodePtr& node, BtreeRangeRemoveRequest< K >& rrreq) {
-    if constexpr (std::is_base_of_v< ExtentBtreeKey< K >, K > && std::is_base_of_v< ExtentBtreeValue< V >, V >) {
-        const BtreeKeyRange< K >& subrange = rrreq.working_range();
-        const auto& start_key = static_cast< const ExtentBtreeKey< K >& >(subrange.start_key());
-        const auto& end_key = static_cast< ExtentBtreeKey< K >& >(subrange.end_key());
-
-        auto const [start_found, start_idx] = node->find(start_key, nullptr, false);
-        auto const [end_found, end_idx] = node->find(end_key, nullptr, false);
-
-        K h_k, t_k;
-        V h_v, t_v;
-        int64_t head_offset{0};
-        int64_t tail_offset{0};
-        ExtentBtreeKey< K >& head_k = static_cast< ExtentBtreeKey< K >& >(h_k);
-        ExtentBtreeKey< K >& tail_k = static_cast< ExtentBtreeKey< K >& >(t_k);
-        ExtentBtreeValue< V >& head_v = static_cast< ExtentBtreeValue< V >& >(h_v);
-        ExtentBtreeValue< V >& tail_v = static_cast< ExtentBtreeValue< V >& >(t_v);
-
-        if (start_found) {
-            head_k = node->get_nth_key< K >(start_idx, false);
-            head_offset = head_k.distance_start(start_key);
-            BT_NODE_DBG_ASSERT_GE(head_offset, 0, node, "Invalid start_key or head_k");
-            if (head_offset > 0) { node->get_nth_value(start_idx, &head_v, false); }
-        }
-        if (end_found) {
-            tail_k = node->get_nth_key< K >(end_idx, false);
-            tail_offset = end_key.distance_end(tail_k);
-            BT_NODE_DBG_ASSERT_GE(tail_offset, 0, node, "Invalid end_key or tail_k");
-            if (tail_offset > 0) { node->get_nth_value(end_idx, &tail_v, false); }
-        }
-
-        // Write partial head and tail kv. At this point we are committing and we can't go back and not update
-        // some of the extents.
-        auto idx = start_idx;
-        if (end_idx == start_idx) {
-            // Special case - where there is a overlap and single entry is split into 3
-            auto const tail_start = tail_k.extent_length() - tail_offset;
-            if (m_on_remove_cb) {
-                m_on_remove_cb(head_k.extract(head_offset, tail_start - head_offset, false),
-                               head_v.extract(head_offset, tail_start - head_offset, false), rrreq);
-            }
-
-            if (tail_offset > 0) {
-                node->insert(end_idx + 1, tail_k.extract(tail_start, tail_offset, false),
-                             tail_v.extract(tail_start, tail_offset, false));
-                COUNTER_INCREMENT(m_metrics, btree_obj_count, 1);
-            }
-
-            if (head_offset > 0) {
-                node->update(idx++, head_k.extract(0, head_offset, false), head_v.extract(0, head_offset, false));
-            }
-        } else {
-            if (tail_offset > 0) {
-                auto const tail_start = tail_k.extent_length() - tail_offset;
-                auto const shrunk_k = tail_k.extract(tail_start, tail_offset, false);
-                call_on_update_kv_cb(node, end_idx, shrunk_k, rrreq);
-                node->update(end_idx, shrunk_k, tail_v.extract(tail_start, tail_offset, false));
-            } else if (end_found) {
-                ++end_idx;
-            }
-            if (head_offset > 0) {
-                auto const shrunk_k = head_k.extract(0, -head_offset, false);
-                call_on_update_kv_cb(node, idx, shrunk_k, rrreq);
-                node->update(idx++, shrunk_k, head_v.extract(0, -head_offset, false));
-            }
-        }
-
-        // Remove everything in-between
-        if (idx < end_idx) {
-            if (m_on_remove_cb) {
-                for (auto i{idx}; i <= end_idx; ++i) {
-                    call_on_remove_kv_cb(node, i, rrreq);
-                }
-            }
-            node->remove(idx, end_idx - 1);
-            COUNTER_DECREMENT(m_metrics, btree_obj_count, end_idx - idx);
-        }
-        return true;
-    } else {
-        BT_REL_ASSERT(false, "Don't expect remove_extents to be called on non-extent code path");
-        return false;
-    }
 }
 
 template < typename K, typename V >
@@ -352,7 +252,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     _leftmost_src_info leftmost_src;
     _src_cursor_info src_cursor;
 
-    total_size = leftmost_node->occupied_size(m_bt_cfg);
+    total_size = leftmost_node->occupied_size();
     for (auto indx = start_idx + 1; indx <= end_idx; ++indx) {
         if (indx == parent_node->total_entries()) {
             BT_NODE_LOG_ASSERT(parent_node->has_valid_edge(), parent_node,
@@ -368,7 +268,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
         BT_NODE_LOG_ASSERT_EQ(child->is_valid_node(), true, child);
 
         old_nodes.push_back(child);
-        total_size += child->occupied_size(m_bt_cfg);
+        total_size += child->occupied_size();
     }
 
     // Determine if packing the nodes would result in reducing the number of nodes, if so go with that. If else
@@ -383,7 +283,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     }
 
     balanced_size = (total_size == 0) ? 0 : (total_size - 1) / num_nodes + 1;
-    if (leftmost_node->occupied_size(m_bt_cfg) > balanced_size) {
+    if (leftmost_node->occupied_size() > balanced_size) {
         // If for some reason balancing increases the current size, give up.
         // TODO: Is this a real case, isn't happening would mean some sort of bug in calculation of is_merge_needed?
         BT_NODE_DBG_ASSERT(false, leftmost_node,
@@ -395,7 +295,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     // First try to see how many entries you can fit in the leftmost node within the balanced size. We are checking
     // leftmost node as special case without moving, because that is the only node which is modified in-place and hence
     // doing a dry run and if for some reason there is a problem in balancing the nodes, then it is easy to give up.
-    available_size = static_cast< int32_t >(balanced_size) - leftmost_node->occupied_size(m_bt_cfg);
+    available_size = static_cast< int32_t >(balanced_size) - leftmost_node->occupied_size();
     src_cursor.ith_node = old_nodes.size();
     for (uint32_t i{0}; (i < old_nodes.size() && available_size >= 0); ++i) {
         leftmost_src.ith_nodes.push_back(i);
@@ -403,7 +303,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
         // node contains one entry and the value size is much bigger than available size
         auto const nentries = old_nodes[i]->num_entries_by_size(0, available_size);
         if ((old_nodes[i]->total_entries() - nentries) == 0) { // Entire node goes in
-            available_size -= old_nodes[i]->occupied_size(m_bt_cfg);
+            available_size -= old_nodes[i]->occupied_size();
             if (i >= old_nodes.size() - 1) {
                 src_cursor.ith_node = i + 1;
                 src_cursor.nth_entry = std::numeric_limits< uint32_t >::max();
@@ -439,7 +339,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             // Copied entire node
             ++src_cursor.ith_node;
             src_cursor.nth_entry = 0;
-            available_size = balanced_size - new_node->occupied_size(m_bt_cfg);
+            available_size = balanced_size - new_node->occupied_size();
         } else {
             src_cursor.nth_entry += nentries;
             available_size = 0;
@@ -456,8 +356,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
 
     // There is a case where we are rebalancing and the second node which rebalanced didn't move any size, in that case
     // the first node is going to be exactly same and we will do again merge, so bail out here.
-    if ((new_nodes.size() == old_nodes.size()) &&
-        (old_nodes[0]->occupied_size(m_bt_cfg) >= new_nodes[0]->occupied_size(m_bt_cfg))) {
+    if ((new_nodes.size() == old_nodes.size()) && (old_nodes[0]->occupied_size() >= new_nodes[0]->occupied_size())) {
         ret = btree_status_t::merge_not_required;
         goto out;
     }
@@ -465,27 +364,39 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     if (!K::is_fixed_size()) {
         // Lets see if we have enough room in parent node to accommodate changes. This is needed only if the key is not
         // fixed length. For fixed length node merge will always result in less or equal size
-
-        // we first calculate the least amount of space being released after removing excess children. the key size
-        // cannot be taken account; so we know for sure that value (i.e., linkinfo) and also its record will be freed.
-        // If the end_idx is the parent's edge, the space is not released eventually.
         auto excess_releasing_nodes =
-            old_nodes.size() - new_nodes.size() - parent_node->total_entries() == end_idx ? 1 : 0;
-        auto minimum_releasing_excess_size =
-            excess_releasing_nodes * (BtreeLinkInfo::get_fixed_size() + parent_node->get_record_size());
-
-        // aside from releasing size due to excess node, K::get_estimate_max_size is needed for each updating element
-        // at worst case (linkinfo and record remain the same for old and new nodes). The number of updating elements
-        // are the size of the new nodes (the last key of the last new node is not getting updated; hence excluded) plus
-        // the leftmost node.
-        if (parent_node->available_size(m_bt_cfg) + minimum_releasing_excess_size <
-            (1 + new_nodes.size() ? new_nodes.size() - 1 : 0) * K::get_estimate_max_size()) {
+            old_nodes.size() - new_nodes.size() - (parent_node->total_entries() == end_idx) ? 1 : 0;
+        if (!parent_node->has_room_for_put(btree_put_type::INSERT, excess_releasing_nodes * K::get_max_size(),
+                                           excess_releasing_nodes * BtreeLinkInfo::get_fixed_size())) {
             BT_NODE_LOG(DEBUG, parent_node,
                         "Merge is needed, however after merge, the parent MAY not have enough space to accommodate the "
                         "new keys, so not proceeding with merge");
             ret = btree_status_t::merge_not_required;
             goto out;
         }
+
+#if 0
+        // we first calculate the least amount of space being released after removing excess children. the key size
+        // cannot be taken account; so we know for sure that value (i.e., linkinfo) and also its record will be freed.
+        // If the end_idx is the parent's edge, the space is not released eventually.
+        auto excess_releasing_nodes =
+            old_nodes.size() - new_nodes.size() - (parent_node->total_entries() == end_idx) ? 1 : 0;
+        auto minimum_releasing_excess_size =
+            excess_releasing_nodes * (BtreeLinkInfo::get_fixed_size() + parent_node->get_record_size());
+
+        // aside from releasing size due to excess node, K::get_max_size is needed for each updating element
+        // at worst case (linkinfo and record remain the same for old and new nodes). The number of updating elements
+        // are the size of the new nodes (the last key of the last new node is not getting updated; hence excluded) plus
+        // the leftmost node.
+        if (parent_node->available_size() + minimum_releasing_excess_size <
+            (1 + new_nodes.size() ? new_nodes.size() - 1 : 0) * K::get_max_size()) {
+            BT_NODE_LOG(DEBUG, parent_node,
+                        "Merge is needed, however after merge, the parent MAY not have enough space to accommodate the "
+                        "new keys, so not proceeding with merge");
+            ret = btree_status_t::merge_not_required;
+            goto out;
+        }
+#endif
     }
 
     // Now it is time to commit things and at this point no going back, since in-place write nodes are modified

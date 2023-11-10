@@ -18,6 +18,8 @@
 
 namespace homestore {
 
+#define to_variant_node(n) boost::static_pointer_cast< VariantNode< K, V > >(n)
+
 template < typename K, typename V >
 btree_status_t Btree< K, V >::post_order_traversal(locktype_t ltype, const auto& cb) {
     BtreeNodePtr root;
@@ -256,37 +258,6 @@ done:
     m_btree_lock.unlock_shared();
 
     BT_LOG(INFO, "Node: <{}>", buf);
-}
-
-template < typename K, typename V >
-bool Btree< K, V >::call_on_read_kv_cb(const BtreeNodePtr& node, uint32_t idx, const BtreeRequest& req) const {
-    if (m_on_read_cb) {
-        V v;
-        node->get_nth_value(idx, &v, false);
-        return m_on_read_cb(node->get_nth_key< K >(idx, false), v, req);
-    }
-    return true;
-}
-
-template < typename K, typename V >
-bool Btree< K, V >::call_on_remove_kv_cb(const BtreeNodePtr& node, uint32_t idx, const BtreeRequest& req) const {
-    if (m_on_remove_cb) {
-        V v;
-        node->get_nth_value(idx, &v, false);
-        return m_on_remove_cb(node->get_nth_key< K >(idx, false), v, req);
-    }
-    return true;
-}
-
-template < typename K, typename V >
-bool Btree< K, V >::call_on_update_kv_cb(const BtreeNodePtr& node, uint32_t idx, const BtreeKey& new_key,
-                                         const BtreeRequest& req) const {
-    if (m_on_update_cb) {
-        V v;
-        node->get_nth_value(idx, &v, false);
-        return m_on_update_cb(node->get_nth_key< K >(idx, false), new_key, v, req);
-    }
-    return true;
 }
 
 template < typename K, typename V >

@@ -98,7 +98,7 @@ endif()
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
     message(STATUS "Debug build")
-    add_flags("-DDEBUG_RCU")
+    add_flags("-DDEBUG_RCU -D_DEBUG")
 else()
     message(STATUS "Release build")
     if((${CMAKE_CXX_COMPILER_ID} STREQUAL "GNU") OR (${CMAKE_CXX_COMPILER_ID} STREQUAL "Clang")) 

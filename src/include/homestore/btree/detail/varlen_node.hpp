@@ -17,7 +17,7 @@
 #pragma once
 
 #include <sisl/logging/logging.h>
-#include "btree_node.hpp"
+#include <homestore/btree/detail/variant_node.hpp>
 #include <homestore/btree/btree_kv.hpp>
 #include "homestore/index/index_internal.hpp"
 
@@ -47,10 +47,18 @@ struct var_node_header {
 // [Persistent Header][var node header][Record][Record].. ...  ... [key][value][key][value]
 //
 template < typename K, typename V >
-class VariableNode : public BtreeNode {
+class VariableNode : public VariantNode< K, V > {
 public:
+    using BtreeNode::get_nth_key_internal;
+    using BtreeNode::get_nth_key_size;
+    using BtreeNode::get_nth_obj_size;
+    using BtreeNode::get_nth_value;
+    using BtreeNode::get_nth_value_size;
+    using BtreeNode::to_string;
+    using VariantNode< K, V >::get_nth_value;
+
     VariableNode(uint8_t* node_buf, bnodeid_t id, bool init, bool is_leaf, const BtreeConfig& cfg) :
-            BtreeNode(node_buf, id, init, is_leaf) {
+            VariantNode< K, V >(node_buf, id, init, is_leaf, cfg) {
         if (init) {
             // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
             // except for the header itself
@@ -63,10 +71,6 @@ public:
 
     virtual ~VariableNode() = default;
 
-    uint32_t occupied_size(const BtreeConfig& cfg) const override {
-        return (cfg.node_data_size() - sizeof(var_node_header) - available_size(cfg));
-    }
-
     /* Insert the key and value in provided index
      * Assumption: Node lock is already taken */
     btree_status_t insert(uint32_t ind, const BtreeKey& key, const BtreeValue& val) override {
@@ -75,8 +79,7 @@ public:
 #ifndef NDEBUG
         validate_sanity();
 #endif
-        if (sz == 0) { return btree_status_t::insert_failed; }
-        return btree_status_t::success;
+        return (sz == 0) ? btree_status_t::space_not_avail : btree_status_t::success;
     }
 
 #ifndef NDEBUG
@@ -85,7 +88,7 @@ public:
         // validate if keys are in ascending order
         K prevKey;
         while (i < this->total_entries()) {
-            K key = get_nth_key< K >(i, false);
+            K key = BtreeNode::get_nth_key< K >(i, false);
             uint64_t kp = *(uint64_t*)key.serialize().bytes;
             if (i > 0 && prevKey.compare(key) > 0) {
                 DEBUG_ASSERT(false, "Found non sorted entry: {} -> {}", kp, to_string());
@@ -105,7 +108,7 @@ public:
             this->set_edge_value(val);
             this->inc_gen();
         } else {
-            K key = get_nth_key< K >(ind, true);
+            K key = BtreeNode::get_nth_key< K >(ind, true);
             update(ind, key, val);
         }
     }
@@ -167,13 +170,13 @@ public:
             this->set_edge_value(last_1_val);
 
             for (uint32_t i = ind_s - 1; i < total_entries; i++) {
-                get_var_node_header()->m_available_space += get_nth_key_len(i) + get_nth_value_len(i) + recSize;
+                get_var_node_header()->m_available_space += get_nth_key_size(i) + get_nth_value_size(i) + recSize;
             }
             this->sub_entries(total_entries - ind_s + 1);
         } else {
             // claim available memory
             for (uint32_t i = ind_s; i <= ind_e; i++) {
-                get_var_node_header()->m_available_space += get_nth_key_len(i) + get_nth_value_len(i) + recSize;
+                get_var_node_header()->m_available_space += get_nth_key_size(i) + get_nth_value_size(i) + recSize;
             }
             uint8_t* rec_ptr = get_nth_record_mutable(ind_s);
             memmove(rec_ptr, rec_ptr + recSize * no_of_elem, (this->total_entries() - ind_e - 1) * recSize);
@@ -223,11 +226,11 @@ public:
             // Get the ith key and value blob and then remove the entry from here and insert to the other node
             sisl::blob kb;
             kb.bytes = (uint8_t*)get_nth_obj(ind);
-            kb.size = get_nth_key_len(ind);
+            kb.size = get_nth_key_size(ind);
 
             sisl::blob vb;
             vb.bytes = kb.bytes + kb.size;
-            vb.size = get_nth_value_len(ind);
+            vb.size = get_nth_value_size(ind);
 
             auto sz = other.insert(0, kb, vb);
             if (!sz) { break; }
@@ -264,11 +267,11 @@ public:
         while (ind > 0) {
             sisl::blob kb;
             kb.bytes = (uint8_t*)get_nth_obj(ind);
-            kb.size = get_nth_key_len(ind);
+            kb.size = get_nth_key_size(ind);
 
             sisl::blob vb;
             vb.bytes = kb.bytes + kb.size;
-            vb.size = get_nth_value_len(ind);
+            vb.size = get_nth_value_size(ind);
 
             if ((kb.size + vb.size + this->get_record_size()) > size_to_move) {
                 // We reached threshold of how much we could move
@@ -303,7 +306,7 @@ public:
         uint32_t cum_size{0};
 
         while (idx < this->total_entries()) {
-            uint32_t const rec_size = this->get_record_size() + get_nth_key_len(idx) + get_nth_value_len(idx);
+            uint32_t const rec_size = this->get_record_size() + get_nth_key_size(idx) + get_nth_value_size(idx);
             cum_size += rec_size;
             if (cum_size > size) { break; }
             ++idx;
@@ -319,8 +322,8 @@ public:
         auto idx = start_idx;
         uint32_t n = 0;
         while (idx < other.total_entries()) {
-            sisl::blob kb{(uint8_t*)other.get_nth_obj(idx), other.get_nth_key_len(idx)};
-            sisl::blob vb{kb.bytes + kb.size, other.get_nth_value_len(idx)};
+            sisl::blob kb{(uint8_t*)other.get_nth_obj(idx), other.get_nth_key_size(idx)};
+            sisl::blob vb{kb.bytes + kb.size, other.get_nth_value_size(idx)};
 
             // We reached threshold of how much we could move
             if ((kb.size + vb.size + other.get_record_size()) > copy_size) { break; }
@@ -349,8 +352,8 @@ public:
         auto idx = start_idx;
         uint32_t n = 0;
         while (n < nentries) {
-            sisl::blob kb{(uint8_t*)other.get_nth_obj(idx), other.get_nth_key_len(idx)};
-            sisl::blob vb{kb.bytes + kb.size, other.get_nth_value_len(idx)};
+            sisl::blob kb{(uint8_t*)other.get_nth_obj(idx), other.get_nth_key_size(idx)};
+            sisl::blob vb{kb.bytes + kb.size, other.get_nth_value_size(idx)};
 
             auto sz = insert(this->total_entries(), kb, vb);
             if (sz == 0) { break; }
@@ -378,11 +381,11 @@ public:
             // Get the ith key and value blob and then remove the entry from here and insert to the other node
             sisl::blob kb;
             kb.bytes = (uint8_t*)other.get_nth_obj(other_ind);
-            kb.size = other.get_nth_key_len(other_ind);
+            kb.size = other.get_nth_key_size(other_ind);
 
             sisl::blob vb;
             vb.bytes = kb.bytes + kb.size;
-            vb.size = other.get_nth_value_len(other_ind);
+            vb.size = other.get_nth_value_size(other_ind);
 
             auto sz = insert(this->total_entries(), kb, vb);
             if (!sz) { break; }
@@ -419,11 +422,11 @@ public:
         while (ind < this->total_entries()) {
             sisl::blob kb;
             kb.bytes = (uint8_t*)other.get_nth_obj(ind);
-            kb.size = other.get_nth_key_len(ind);
+            kb.size = other.get_nth_key_size(ind);
 
             sisl::blob vb;
             vb.bytes = kb.bytes + kb.size;
-            vb.size = other.get_nth_value_len(ind);
+            vb.size = other.get_nth_value_size(ind);
 
             if ((kb.size + vb.size + other.get_record_size()) > size_to_move) {
                 // We reached threshold of how much we could move
@@ -453,31 +456,30 @@ public:
         return moved_size;
     } */
 
-    void append(uint32_t ind, const BtreeKey& key, const BtreeValue& val) override {
-        RELEASE_ASSERT(false, "Append operation is not supported on var node");
-    }
-
-    uint32_t available_size(const BtreeConfig& cfg) const override {
-        return get_var_node_header_const()->m_available_space;
-    }
-
-    uint32_t get_nth_obj_size(uint32_t ind) const override { return get_nth_key_len(ind) + get_nth_value_len(ind); }
+    uint32_t available_size() const override { return get_var_node_header_const()->m_available_space; }
 
     void set_nth_key(uint32_t ind, const BtreeKey& key) {
         const auto kb = key.serialize();
         assert(ind < this->total_entries());
-        assert(kb.size == get_nth_key_len(ind));
+        assert(kb.size == get_nth_key_size(ind));
         memcpy(uintptr_cast(get_nth_obj(ind)), kb.bytes, kb.size);
     }
 
-    virtual uint16_t get_nth_key_len(uint32_t ind) const = 0;
-    virtual uint16_t get_nth_value_len(uint32_t ind) const = 0;
-    virtual void set_nth_key_len(uint8_t* rec_ptr, uint16_t key_len) = 0;
-    virtual void set_nth_value_len(uint8_t* rec_ptr, uint16_t value_len) = 0;
+    bool has_room_for_put(btree_put_type put_type, uint32_t key_size, uint32_t value_size) const override {
+        auto needed_size = key_size + value_size;
+        if ((put_type == btree_put_type::UPSERT) || (put_type == btree_put_type::INSERT)) {
+            needed_size += get_record_size();
+        }
+        return (available_size() >= needed_size);
+    }
+
+    virtual uint32_t get_record_size() const = 0;
+    virtual void set_nth_key_len(uint8_t* rec_ptr, uint32_t key_len) = 0;
+    virtual void set_nth_value_len(uint8_t* rec_ptr, uint32_t value_len) = 0;
 
     void get_nth_key_internal(uint32_t ind, BtreeKey& out_key, bool copy) const override {
         assert(ind < this->total_entries());
-        sisl::blob b{const_cast< uint8_t* >(get_nth_obj(ind)), get_nth_key_len(ind)};
+        sisl::blob b{const_cast< uint8_t* >(get_nth_obj(ind)), get_nth_key_size(ind)};
         out_key.deserialize(b, copy);
     }
 
@@ -487,16 +489,10 @@ public:
             DEBUG_ASSERT_EQ(this->has_valid_edge(), true, "get_nth_value out-of-bound");
             *(BtreeLinkInfo*)out_val = this->get_edge_value();
         } else {
-            sisl::blob b{const_cast< uint8_t* >(get_nth_obj(ind)) + get_nth_key_len(ind), get_nth_value_len(ind)};
+            sisl::blob b{const_cast< uint8_t* >(get_nth_obj(ind)) + get_nth_key_size(ind), get_nth_value_size(ind)};
             out_val->deserialize(b, copy);
         }
     }
-
-    /*V get_nth_value(uint32_t ind, bool copy) const {
-        assert(ind < this->total_entries());
-        sisl::blob b{const_cast< uint8_t* >(get_nth_obj(ind)) + get_nth_key_len(ind), get_nth_value_len(ind)};
-        return V{b, copy};
-    }*/
 
     std::string to_string(bool print_friendly = false) const override {
         auto str = fmt::format(
@@ -513,7 +509,7 @@ public:
             V val;
             get_nth_value(i, &val, false);
             fmt::format_to(std::back_inserter(str), "{}Entry{} [Key={} Val={}]", (print_friendly ? "\n\t" : " "), i + 1,
-                           get_nth_key< K >(i, false).to_string(), val.to_string());
+                           BtreeNode::get_nth_key< K >(i, false).to_string(), val.to_string());
         }
         return str;
     }
@@ -522,7 +518,9 @@ public:
 #if 0
         std::string delimiter = print_friendly ? "\n" : "\t";
         auto str = fmt::format("{}{}.{} nEntries={} {} ",
+        auto str = fmt::format("{}{}.{} nEntries={} {} ",
                                print_friendly ? "------------------------------------------------------------\n" : "",
+                               this->node_id(), this->link_version(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
                                this->node_id(), this->link_version(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
         if (!this->is_leaf() && (this->has_valid_edge())) {
             fmt::format_to(std::back_inserter(str), "edge_id={}.{}", this->edge_info().m_bnodeid,
@@ -535,7 +533,7 @@ public:
         if (!this->is_leaf()) {
             fmt::format_to(std::back_inserter(str), " [");
             for (uint32_t i{0}; i < this->total_entries(); ++i) {
-                uint32_t cur_key = get_nth_key< K >(i, false).key();
+                uint32_t cur_key = BtreeNode::get_nth_key< K >(i, false).key();
                 BtreeLinkInfo child_info;
                 get_nth_value(i, &child_info, false /* copy */);
                 fmt::format_to(std::back_inserter(str), "{}.{} {}", cur_key, child_info.link_version(), i == this->total_entries() - 1 ? "" : ", ");
@@ -543,9 +541,9 @@ public:
             fmt::format_to(std::back_inserter(str), "]");
             return str;
         }
-        uint32_t prev_key = get_nth_key< K >(0, false).key();
+        uint32_t prev_key = BtreeNode::get_nth_key< K >(0, false).key();
         uint32_t cur_key = prev_key;
-        uint32_t last_key = get_nth_key< K >(this->total_entries() - 1, false).key();
+        uint32_t last_key = BtreeNode::get_nth_key< K >(this->total_entries() - 1, false).key();
         if (last_key - prev_key == this->total_entries() - 1) {
             if (this->total_entries() == 1)
                 fmt::format_to(std::back_inserter(str), "{}[{}]", delimiter, prev_key);
@@ -556,7 +554,7 @@ public:
         fmt::format_to(std::back_inserter(str), "{}0 - [{}", delimiter, prev_key);
         uint32_t start_interval_key = prev_key;
         for (uint32_t i{1}; i < this->total_entries(); ++i) {
-            cur_key = get_nth_key< K >(i, false).key();
+            cur_key = BtreeNode::get_nth_key< K >(i, false).key();
             if (cur_key != prev_key + 1) {
                 if (start_interval_key == prev_key) {
                     fmt::format_to(std::back_inserter(str), "-{}]{}{}- [{}", prev_key, delimiter, i, cur_key);
@@ -579,10 +577,6 @@ public:
     }
 
     uint8_t* get_node_context() override { return uintptr_cast(this) + sizeof(VariableNode< K, V >); }
-
-    int compare_nth_key(const BtreeKey& cmp_key, uint32_t ind) const {
-        return get_nth_key< K >(ind, false).compare(cmp_key);
-    }
 
     /*int compare_nth_key_range(const BtreeKeyRange& range, uint32_t ind) const {
         return get_nth_key(ind, false).compare_range(range);
@@ -683,7 +677,7 @@ protected:
         // loop records
         while (ind < no_of_entries) {
             uint16_t total_key_value_len =
-                get_nth_key_len(rec[ind].orig_record_index) + get_nth_value_len(rec[ind].orig_record_index);
+                get_nth_key_size(rec[ind].orig_record_index) + get_nth_value_size(rec[ind].orig_record_index);
             sparce_space = last_offset - (rec[ind].m_obj_offset + total_key_value_len);
             if (sparce_space > 0) {
                 // do compaction
@@ -755,16 +749,18 @@ public:
     }
     virtual ~VarKeySizeNode() = default;
 
-    uint16_t get_nth_key_len(uint32_t ind) const override {
+    uint32_t get_nth_key_size(uint32_t ind) const override {
         return r_cast< const var_key_record* >(this->get_nth_record(ind))->m_key_len;
     }
-    uint16_t get_nth_value_len(uint32_t ind) const override { return V::get_fixed_size(); }
-    uint16_t get_record_size() const override { return sizeof(var_key_record); }
+    uint32_t get_nth_value_size(uint32_t ind) const override { return dummy_value< V >.serialized_size(); }
+    uint32_t get_record_size() const override { return sizeof(var_key_record); }
 
-    void set_nth_key_len(uint8_t* rec_ptr, uint16_t key_len) override {
+    void set_nth_key_len(uint8_t* rec_ptr, uint32_t key_len) override {
         r_cast< var_key_record* >(rec_ptr)->m_key_len = key_len;
     }
-    void set_nth_value_len(uint8_t* rec_ptr, uint16_t value_len) override { assert(value_len == V::get_fixed_size()); }
+    void set_nth_value_len(uint8_t* rec_ptr, uint32_t value_len) override {
+        assert(value_len == dummy_value< V >.serialized_size());
+    }
 
 private:
 #pragma pack(1)
@@ -785,14 +781,16 @@ public:
     }
     virtual ~VarValueSizeNode() = default;
 
-    uint16_t get_nth_key_len(uint32_t ind) const override { return K::get_fixed_size(); }
-    uint16_t get_nth_value_len(uint32_t ind) const override {
+    uint32_t get_nth_key_size(uint32_t ind) const override { return dummy_key< K >.serialized_size(); }
+    uint32_t get_nth_value_size(uint32_t ind) const override {
         return r_cast< const var_value_record* >(this->get_nth_record(ind))->m_value_len;
     }
-    uint16_t get_record_size() const override { return sizeof(var_value_record); }
+    uint32_t get_record_size() const override { return sizeof(var_value_record); }
 
-    void set_nth_key_len(uint8_t* rec_ptr, uint16_t key_len) override { assert(key_len == K::get_fixed_size()); }
-    void set_nth_value_len(uint8_t* rec_ptr, uint16_t value_len) override {
+    void set_nth_key_len(uint8_t* rec_ptr, uint32_t key_len) override {
+        assert(key_len == dummy_key< K >.serialized_size());
+    }
+    void set_nth_value_len(uint8_t* rec_ptr, uint32_t value_len) override {
         r_cast< var_value_record* >(rec_ptr)->m_value_len = value_len;
     }
 
@@ -815,18 +813,18 @@ public:
     }
     virtual ~VarObjSizeNode() = default;
 
-    uint16_t get_nth_key_len(uint32_t ind) const override {
+    uint32_t get_nth_key_size(uint32_t ind) const override {
         return r_cast< const var_obj_record* >(this->get_nth_record(ind))->m_key_len;
     }
-    uint16_t get_nth_value_len(uint32_t ind) const override {
+    uint32_t get_nth_value_size(uint32_t ind) const override {
         return r_cast< const var_obj_record* >(this->get_nth_record(ind))->m_value_len;
     }
-    uint16_t get_record_size() const override { return sizeof(var_obj_record); }
+    uint32_t get_record_size() const override { return sizeof(var_obj_record); }
 
-    void set_nth_key_len(uint8_t* rec_ptr, uint16_t key_len) override {
+    void set_nth_key_len(uint8_t* rec_ptr, uint32_t key_len) override {
         r_cast< var_obj_record* >(rec_ptr)->m_key_len = key_len;
     }
-    void set_nth_value_len(uint8_t* rec_ptr, uint16_t value_len) override {
+    void set_nth_value_len(uint8_t* rec_ptr, uint32_t value_len) override {
         r_cast< var_obj_record* >(rec_ptr)->m_value_len = value_len;
     }
 
