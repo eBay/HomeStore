@@ -73,9 +73,10 @@ pipeline {
         }
 
         stage("Deploy") {
-            when {
+            when { allOf {
+                expression { !(env.BRANCH_NAME =~ /long_running/) }
                 expression { !(env.BRANCH_NAME =~ /PR-/) }
-            }
+            } }
             steps {
                 sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
                 sh "conan upload ${PROJECT}/${TAG} -c --all -r ebay-local"
