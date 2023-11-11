@@ -142,8 +142,11 @@ folly::Future< bool > CPManager::trigger_cp_flush(bool force) {
             std::unique_lock< std::mutex > lk(trigger_cp_mtx);
             auto cur_cp = cp_guard();
             HS_DBG_ASSERT_NE(cur_cp->m_cp_status, cp_status_t::cp_flush_prepare);
-            cur_cp->m_comp_promise = std::move(folly::Promise< bool >{});
-            cur_cp->m_cp_waiting_to_trigger = true;
+            // If multiple threads call trigger, they all get the future from the same promise.
+            if (!cur_cp->m_cp_waiting_to_trigger) {
+                cur_cp->m_comp_promise = std::move(folly::SharedPromise< bool >{});
+                cur_cp->m_cp_waiting_to_trigger = true;
+            }
             return cur_cp->m_comp_promise.getFuture();
         } else {
             return folly::makeFuture< bool >(false);
@@ -177,7 +180,7 @@ folly::Future< bool > CPManager::trigger_cp_flush(bool force) {
                 // originally by the caller will be untouched and completed upto CP completion/
                 ret_fut = folly::makeFuture< bool >(true);
             } else {
-                cur_cp->m_comp_promise = std::move(folly::Promise< bool >{});
+                cur_cp->m_comp_promise = std::move(folly::SharedPromise< bool >{});
                 ret_fut = cur_cp->m_comp_promise.getFuture();
             }
             cur_cp->m_cp_status = cp_status_t::cp_flush_prepare;

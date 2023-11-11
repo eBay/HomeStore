@@ -64,29 +64,68 @@ enum class index_buf_state_t : uint8_t {
 };
 
 ///////////////////////// Btree Node and Buffer Portion //////////////////////////
+
+
+// Multiple IndexBuffer could point to the same NodeBuffer if its clean.
+struct NodeBuffer;
+typedef std::shared_ptr< NodeBuffer > NodeBufferPtr;
+struct NodeBuffer {
+    uint8_t* m_bytes{nullptr};                                          // Actual data buffer
+    std::atomic< index_buf_state_t > m_state{index_buf_state_t::CLEAN}; // Is buffer yet to persist?
+    NodeBuffer(uint32_t buf_size, uint32_t align_size);
+    ~NodeBuffer();
+};
+
+// IndexBuffer is for each CP. The dependent index buffers are chained using
+// m_next_buffer and each buffer is flushed only its wait_for_leaders reaches 0
+// which means all its dependent buffers are flushed.
 struct IndexBuffer;
 typedef std::shared_ptr< IndexBuffer > IndexBufferPtr;
-
 struct IndexBuffer {
-    uint8_t* m_node_buf{nullptr};                            // Actual buffer
-    index_buf_state_t m_buf_state{index_buf_state_t::CLEAN}; // Is buffer yet to persist?
-    BlkId m_blkid;                                           // BlkId where this needs to be persisted
-    std::weak_ptr< IndexBuffer > m_next_buffer;     // Next buffer in the chain
+    NodeBufferPtr m_node_buf;
+    BlkId m_blkid;                              // BlkId where this needs to be persisted
+    std::weak_ptr< IndexBuffer > m_next_buffer; // Next buffer in the chain
     // Number of leader buffers we are waiting for before we write this buffer
     sisl::atomic_counter< int > m_wait_for_leaders{0};
 
     IndexBuffer(BlkId blkid, uint32_t buf_size, uint32_t align_size);
+    IndexBuffer(NodeBufferPtr node_buf, BlkId blkid);
     ~IndexBuffer();
 
     BlkId blkid() const { return m_blkid; }
-    uint8_t* raw_buffer() { return m_node_buf; }
+    uint8_t* raw_buffer() {
+        RELEASE_ASSERT(m_node_buf, "Node buffer null blkid {}", m_blkid.to_integer());
+        return m_node_buf->m_bytes;
+    }
 
-    bool is_clean() const { return (m_buf_state == index_buf_state_t::CLEAN); }
+    bool is_clean() const {
+        RELEASE_ASSERT(m_node_buf, "Node buffer null blkid {}", m_blkid.to_integer());
+        return (m_node_buf->m_state.load() == index_buf_state_t::CLEAN);
+    }
+
+    index_buf_state_t state() const {
+        RELEASE_ASSERT(m_node_buf, "Node buffer null blkid {}", m_blkid.to_integer());
+        return m_node_buf->m_state;
+    }
+
+    void set_state(index_buf_state_t state) {
+        RELEASE_ASSERT(m_node_buf, "Node buffer null blkid {}", m_blkid.to_integer());
+        m_node_buf->m_state = state;
+    }
+
     std::string to_string() const {
-        return fmt::format("IndexBuffer {} blkid={} state={} node_buf={} next_buffer={} wait_for={}",
-                           reinterpret_cast< void* >(const_cast< IndexBuffer* >(this)), m_blkid.to_integer(),
-                           static_cast< int >(m_buf_state), static_cast< void* >(m_node_buf),
-                           voidptr_cast(m_next_buffer.lock().get()), m_wait_for_leaders.get());
+        auto str = fmt::format("IndexBuffer {} blkid={}", reinterpret_cast< void* >(const_cast< IndexBuffer* >(this)),
+                               m_blkid.to_integer());
+        if (m_node_buf == nullptr) {
+            fmt::format_to(std::back_inserter(str), " node_buf=nullptr");
+        } else {
+            fmt::format_to(std::back_inserter(str), " state={} node_buf={}",
+                           static_cast< int >(m_node_buf->m_state.load()), static_cast< void* >(m_node_buf->m_bytes));
+        }
+        fmt::format_to(std::back_inserter(str), " next_buffer={} wait_for={}",
+                       m_next_buffer.lock() ? reinterpret_cast< void* >(m_next_buffer.lock().get()) : 0,
+                       m_wait_for_leaders.get());
+        return str;
     }
 };
 
