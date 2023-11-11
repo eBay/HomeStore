@@ -21,7 +21,7 @@
 
 #include <sisl/logging/logging.h>
 #include <iomgr/iomgr.hpp>
-
+#include <folly/futures/SharedPromise.h>
 #include "common/homestore_assert.hpp"
 
 /*
@@ -73,7 +73,7 @@ struct CP {
     bool m_cp_waiting_to_trigger{false}; // it is waiting for previous cp to complete
     cp_id_t m_cp_id;
     std::array< std::unique_ptr< CPContext >, (size_t)cp_consumer_t::SENTINEL > m_contexts;
-    folly::Promise< bool > m_comp_promise;
+    folly::SharedPromise< bool > m_comp_promise;
 
 public:
     CP(CPManager* mgr) : m_cp_mgr{mgr} {}

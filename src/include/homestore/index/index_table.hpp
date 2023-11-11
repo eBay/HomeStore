@@ -114,7 +114,7 @@ protected:
             // Need to put it in wb cache
             wb_cache().write_buf(node, idx_node->m_idx_buf, cp_ctx);
             idx_node->m_last_mod_cp_id = cp_ctx->id();
-            LOGTRACEMOD(wbcache, "{}", idx_node->m_idx_buf->to_string());
+            LOGTRACEMOD(wbcache, "add to dirty list cp {} {}", cp_ctx->id(), idx_node->m_idx_buf->to_string());
         }
         node->set_checksum(this->m_bt_cfg);
         return btree_status_t::success;
@@ -129,17 +129,28 @@ protected:
         auto& left_child_buf = left_child_idx_node->m_idx_buf;
         auto& parent_buf = parent_idx_node->m_idx_buf;
 
-        LOGTRACEMOD(wbcache, "left {} parent {} ", left_child_buf->to_string(), parent_buf->to_string());
-
         // Write new nodes in the list as standalone outside transacted pairs.
         // Write the new right child nodes, left node and parent in order.
+        // Create the relationship of right child to the left node via prepend_to_chain below.
+        // Parent and left node are linked in the prepare_node_txn
         for (const auto& right_child_node : new_nodes) {
             auto right_child = IndexBtreeNode::convert(right_child_node.get());
             write_node_impl(right_child_node, context);
             wb_cache().prepend_to_chain(right_child->m_idx_buf, left_child_buf);
-            LOGTRACEMOD(wbcache, "right {} left {} ", right_child->m_idx_buf->to_string(), left_child_buf->to_string());
         }
 
+        auto trace_index_bufs = [&]() {
+            std::string str;
+            str = fmt::format("cp {} left {} parent {}", cp_ctx->id(), left_child_buf->to_string(),
+                              parent_buf->to_string());
+            for (const auto& right_child_node : new_nodes) {
+                auto right_child = IndexBtreeNode::convert(right_child_node.get());
+                fmt::format_to(std::back_inserter(str), " right {}", right_child->m_idx_buf->to_string());
+            }
+            return str;
+        };
+
+        LOGTRACEMOD(wbcache, "{}", trace_index_bufs());
         write_node_impl(left_child_node, context);
         write_node_impl(parent_node, context);
 
@@ -181,18 +192,17 @@ protected:
         //     realloc_node(node);
         // }
 
-        // If the backing buffer is already in a clean state, we don't need to make a copy of it
-        if (idx_node->m_idx_buf->is_clean()) { return btree_status_t::success; }
-
-        // Make a new btree buffer and copy the contents and swap it to make it the current node's buffer. The
+        // We create IndexBuffer for each CP. But if the backing buffer is already in a clean state
+        // we dont copy the node buffer. Copy buffer will handle it. If the node buffer is dirty,
+        // make a new btree buffer and copy the contents and swap it to make it the current node's buffer. The
         // buffer prior to this copy, would have been written and already added into the dirty buffer list.
-        idx_node->m_idx_buf = wb_cache().copy_buffer(idx_node->m_idx_buf);
+        idx_node->m_idx_buf = wb_cache().copy_buffer(idx_node->m_idx_buf, cp_ctx);
         idx_node->m_last_mod_cp_id = -1;
 
         node->m_phys_node_buf = idx_node->m_idx_buf->raw_buffer();
         node->set_checksum(this->m_bt_cfg);
 
-        LOGTRACEMOD(wbcache, "buf {} ", idx_node->m_idx_buf->to_string());
+        LOGTRACEMOD(wbcache, "cp {} {} ", cp_ctx->id(), idx_node->m_idx_buf->to_string());
 
 #ifndef NO_CHECKSUM
         if (!node->verify_node(this->m_bt_cfg)) {
@@ -221,6 +231,8 @@ protected:
         auto& child_buf = child_idx_node->m_idx_buf;
         auto& parent_buf = parent_idx_node->m_idx_buf;
 
+        LOGTRACEMOD(wbcache, "cp {} left {} parent {} ", cp_ctx->id(), child_buf->to_string(), parent_buf->to_string());
+
         auto [child_copied, parent_copied] = wb_cache().create_chain(child_buf, parent_buf, cp_ctx);
         if (child_copied) {
             child_node->m_phys_node_buf = child_buf->raw_buffer();
@@ -231,7 +243,6 @@ protected:
             parent_idx_node->m_last_mod_cp_id = -1;
         }
 
-        LOGTRACEMOD(wbcache, "child {} parent {} ", child_buf->to_string(), parent_buf->to_string());
         return btree_status_t::success;
     }
 

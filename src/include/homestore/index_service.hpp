@@ -22,7 +22,7 @@
 #include <homestore/homestore_decl.hpp>
 #include <homestore/index/index_internal.hpp>
 #include <homestore/superblk_handler.hpp>
-
+#include <homestore/index/wb_cache_base.hpp>
 namespace homestore {
 
 class IndexWBCacheBase;

@@ -41,7 +41,7 @@ struct BtreeTestHelper : public testing::Test {
     using mutex = iomgr::FiberManagerLib::shared_mutex;
     using op_func_t = std::function< void(void) >;
 
-    BtreeTestHelper() : testing::Test(), m_range_scheduler{SISL_OPTIONS["num_entries"].as< uint32_t >()} {}
+    BtreeTestHelper() : testing::Test(), m_shadow_map{SISL_OPTIONS["num_entries"].as< uint32_t >()} {}
 
     void SetUp() override {
         m_cfg.m_leaf_node_type = T::leaf_node_type;
@@ -71,7 +71,6 @@ protected:
     std::shared_ptr< typename T::BtreeType > m_bt;
     ShadowMap< K, V > m_shadow_map;
     BtreeConfig m_cfg{g_node_size};
-    RangeScheduler m_range_scheduler;
     uint32_t m_max_range_input{1000};
     bool m_is_multi_threaded{false};
 
@@ -94,7 +93,6 @@ public:
             iomanager.run_on_forget(m_fibers[i], [this, start_range, end_range, &test_count]() {
                 for (uint32_t i = start_range; i < end_range; i++) {
                     put(i, btree_put_type::INSERT);
-                    m_range_scheduler.put_key(i);
                 }
                 {
                     std::unique_lock lg(m_test_done_mtx);
@@ -114,7 +112,7 @@ public:
     void put(uint64_t k, btree_put_type put_type) { do_put(k, put_type, V::generate_rand()); }
 
     void put_random() {
-        auto [start_k, end_k] = m_range_scheduler.pick_random_non_existing_keys(1);
+        auto [start_k, end_k] = m_shadow_map.pick_random_non_existing_keys(1);
         RELEASE_ASSERT_EQ(start_k, end_k, "Range scheduler pick_random_non_existing_keys issue");
 
         do_put(start_k, btree_put_type::INSERT, V::generate_rand());
@@ -132,10 +130,8 @@ public:
 
         if (update) {
             m_shadow_map.range_update(start_key, nkeys, value);
-            m_range_scheduler.remove_keys_from_working(start_k, end_k);
         } else {
             m_shadow_map.range_upsert(start_k, nkeys, value);
-            m_range_scheduler.put_keys(start_k, end_k);
         }
     }
 
@@ -146,8 +142,8 @@ public:
         static thread_local std::uniform_int_distribution< uint32_t > s_rand_range_generator{1, 50};
 
         auto const [start_k, end_k] = is_update
-            ? m_range_scheduler.pick_random_existing_keys(s_rand_range_generator(m_re))
-            : m_range_scheduler.pick_random_non_working_keys(s_rand_range_generator(m_re));
+            ? m_shadow_map.pick_random_existing_keys(s_rand_range_generator(m_re))
+            : m_shadow_map.pick_random_non_working_keys(s_rand_range_generator(m_re));
 
         range_put(start_k, end_k, V::generate_rand(), is_update);
     }
@@ -167,15 +163,13 @@ public:
             m_shadow_map.validate_data(rreq.key(), (const V&)rreq.value());
             m_shadow_map.erase(rreq.key());
         }
-        m_range_scheduler.remove_key(k);
     }
 
     void remove_random() {
-        auto const [start_k, end_k] = m_range_scheduler.pick_random_existing_keys(1);
+        auto const [start_k, end_k] = m_shadow_map.pick_random_existing_keys(1);
         RELEASE_ASSERT_EQ(start_k, end_k, "Range scheduler pick_random_existing_keys issue");
 
         remove_one(start_k);
-        m_range_scheduler.remove_key(start_k);
     }
 
     void range_remove_existing(uint32_t start_k, uint32_t count) {
@@ -186,7 +180,7 @@ public:
     void range_remove_existing_random() {
         static std::uniform_int_distribution< uint32_t > s_rand_range_generator{2, 5};
 
-        auto const [start_k, end_k] = m_range_scheduler.pick_random_existing_keys(s_rand_range_generator(m_re));
+        auto const [start_k, end_k] = m_shadow_map.pick_random_existing_keys(s_rand_range_generator(m_re));
         do_range_remove(start_k, end_k, true /* only_existing */);
     }
 
@@ -203,6 +197,7 @@ public:
 
     void do_query(uint32_t start_k, uint32_t end_k, uint32_t batch_size) {
         std::vector< std::pair< K, V > > out_vector;
+        m_shadow_map.guard().lock();
         uint32_t remaining = m_shadow_map.num_elems_in_range(start_k, end_k);
         auto it = m_shadow_map.map_const().lower_bound(K{start_k});
 
@@ -234,21 +229,23 @@ public:
         ASSERT_EQ(ret, btree_status_t::success) << "Expected success on query";
         ASSERT_EQ(out_vector.size(), 0) << "Received incorrect value on empty query pagination";
 
+        m_shadow_map.guard().unlock();
+
         if (start_k < m_max_range_input) {
-            m_range_scheduler.remove_keys_from_working(start_k, std::min(end_k, m_max_range_input - 1));
+            m_shadow_map.remove_keys_from_working(start_k, std::min(end_k, m_max_range_input - 1));
         }
     }
 
     void query_random() {
         static thread_local std::uniform_int_distribution< uint32_t > s_rand_range_generator{1, 100};
 
-        auto const [start_k, end_k] = m_range_scheduler.pick_random_non_working_keys(s_rand_range_generator(m_re));
+        auto const [start_k, end_k] = m_shadow_map.pick_random_non_working_keys(s_rand_range_generator(m_re));
         do_query(start_k, end_k, 79);
     }
 
     ////////////////////// All get operation variants ///////////////////////////////
     void get_all() const {
-        for (const auto& [key, value] : m_shadow_map.map_const()) {
+        m_shadow_map.foreach ([this](K key, V value) {
             auto copy_key = std::make_unique< K >();
             *copy_key = key;
             auto out_v = std::make_unique< V >();
@@ -258,7 +255,7 @@ public:
             ASSERT_EQ(ret, btree_status_t::success) << "Missing key " << key << " in btree but present in shadow map";
             ASSERT_EQ((const V&)req.value(), value)
                 << "Found value in btree doesn't return correct data for key=" << key;
-        }
+        });
     }
 
     void get_specific(uint32_t k) const {
@@ -280,6 +277,7 @@ public:
         auto req =
             BtreeGetAnyRequest< K >{BtreeKeyRange< K >{K{start_k}, true, K{end_k}, true}, out_k.get(), out_v.get()};
         const auto status = m_bt->get(req);
+
         if (status == btree_status_t::success) {
             ASSERT_EQ(m_shadow_map.exists_in_range(*(K*)req.m_outkey, start_k, end_k), true)
                 << "Get Any returned key=" << *(K*)req.m_outkey << " which is not in range " << start_k << "-" << end_k
@@ -303,14 +301,32 @@ public:
     void print_keys() const { m_bt->print_tree_keys(); }
 
     void compare_files(const std::string& before, const std::string& after) {
-        std::ifstream b(before);
-        std::ifstream a(after);
-        std::ostringstream ss_before, ss_after;
-        ss_before << b.rdbuf();
-        ss_after << a.rdbuf();
-        std::string s1 = ss_before.str();
-        std::string s2 = ss_after.str();
-        ASSERT_EQ(s1, s2) << "Mismatch in btree structure";
+        std::ifstream b(before, std::ifstream::ate);
+        std::ifstream a(after, std::ifstream::ate);
+        if (a.fail() || b.fail()) {
+            LOGINFO("Failed to open file");
+            assert(false);
+        }
+        if (a.tellg() != b.tellg()) {
+            LOGINFO("Mismatch in btree files");
+            assert(false);
+        }
+
+        int64_t pending = a.tellg();
+        const int64_t batch_size = 4096;
+        a.seekg(0, ifstream::beg);
+        b.seekg(0, ifstream::beg);
+        char a_buffer[batch_size], b_buffer[batch_size];
+        while (pending > 0) {
+            auto count = std::min(pending, batch_size);
+            a.read(a_buffer, count);
+            b.read(b_buffer, count);
+            if (std::memcmp(a_buffer, b_buffer, count) != 0) {
+                LOGINFO("Mismatch in btree files");
+                assert(false);
+            }
+            pending -= count;
+        }
     }
 
 private:
@@ -327,7 +343,6 @@ private:
         }
 
         m_shadow_map.put_and_check(key, value, *existing_v, done);
-        m_range_scheduler.put_key(k);
     }
 
     void do_range_remove(uint64_t start_k, uint64_t end_k, bool all_existing) {
@@ -336,6 +351,7 @@ private:
 
         auto rreq = BtreeRangeRemoveRequest< K >{BtreeKeyRange< K >{start_key, true, end_key, true}};
         auto const ret = m_bt->remove(rreq);
+
         m_shadow_map.range_erase(start_key, end_key);
 
         if (all_existing) {
@@ -344,7 +360,7 @@ private:
         }
 
         if (start_k < m_max_range_input) {
-            m_range_scheduler.remove_keys(start_k, std::min(end_k, uint64_cast(m_max_range_input - 1)));
+            m_shadow_map.remove_keys(start_k, std::min(end_k, uint64_cast(m_max_range_input - 1)));
         }
     }
 

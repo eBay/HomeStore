@@ -82,7 +82,9 @@ void IndexService::stop() {
     HS_REL_ASSERT_EQ(success, true, "CP Flush failed");
     LOGINFO("CP Flush completed");
 
-    for (auto [id, tbl] : m_index_map) { tbl->destroy(); }
+    for (auto [id, tbl] : m_index_map) {
+        tbl->destroy();
+    }
 }
 void IndexService::add_index_table(const std::shared_ptr< IndexTableBase >& tbl) {
     std::unique_lock lg(m_index_map_mtx);
@@ -107,9 +109,16 @@ uint64_t IndexService::used_size() const {
     return size;
 }
 
-IndexBuffer::IndexBuffer(BlkId blkid, uint32_t buf_size, uint32_t align_size) :
-        m_node_buf{hs_utils::iobuf_alloc(buf_size, sisl::buftag::btree_node, align_size)}, m_blkid{blkid} {}
+NodeBuffer::NodeBuffer(uint32_t buf_size, uint32_t align_size) :
+        m_bytes{hs_utils::iobuf_alloc(buf_size, sisl::buftag::btree_node, align_size)} {}
 
-IndexBuffer::~IndexBuffer() { hs_utils::iobuf_free(m_node_buf, sisl::buftag::btree_node); }
+NodeBuffer::~NodeBuffer() { hs_utils::iobuf_free(m_bytes, sisl::buftag::btree_node); }
+
+IndexBuffer::IndexBuffer(BlkId blkid, uint32_t buf_size, uint32_t align_size) :
+        m_node_buf{std::make_shared< NodeBuffer >(buf_size, align_size)}, m_blkid{blkid} {}
+
+IndexBuffer::IndexBuffer(NodeBufferPtr node_buf, BlkId blkid) : m_node_buf(node_buf), m_blkid(blkid) {}
+
+IndexBuffer::~IndexBuffer() { m_node_buf.reset(); }
 
 } // namespace homestore
