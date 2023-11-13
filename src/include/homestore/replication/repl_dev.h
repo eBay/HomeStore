@@ -1,13 +1,53 @@
 #pragma once
 
+#include <variant>
+
 #include <boost/intrusive_ptr.hpp>
 #include <boost/smart_ptr/intrusive_ref_counter.hpp>
+#include <flatbuffers/flatbuffers.h>
+#include <folly/futures/Future.h>
 #include <sisl/fds/buffer.hpp>
 
 #include <homestore/replication/repl_decls.h>
 
+namespace nuraft {
+template < typename T >
+using ptr = std::shared_ptr< T >;
+
+// class buffer;
+class buffer {
+public:
+    static ptr< buffer > alloc(uint32_t size) { return std::make_shared< buffer >(); }
+}; // Temporary till we get nuraft included by homestore impl
+
+} // namespace nuraft
+
 namespace homestore {
 class ReplDev;
+struct repl_req_ctx;
+using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
+using repl_req_ptr_t = boost::intrusive_ptr< repl_req_ctx >;
+
+VENUM(repl_req_state_t, uint32_t,
+      INIT = 0,               // Initial state
+      DATA_RECEIVED = 1 << 1, // Data has been received and being written to the storage
+      DATA_WRITTEN = 1 << 2,  // Data has been written to the storage
+      LOG_RECEIVED = 1 << 3,  // Log is received and waiting for data
+      LOG_FLUSHED = 1 << 4    // Log has been flushed
+)
+
+struct repl_key {
+    int32_t server_id{0}; // Server Id which this req is originated from
+    uint64_t term;        // RAFT term number
+    uint64_t dsn{0};      // Data sequence number to tie the data with the raft journal entry
+
+    struct Hasher {
+        size_t operator()(repl_key const& rk) const {
+            return std::hash< int32_t >()(rk.server_id) ^ std::hash< uint64_t >()(rk.term) ^
+                std::hash< uint64_t >()(rk.dsn);
+        }
+    };
+};
 
 struct repl_journal_entry;
 struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::thread_safe_counter > {
@@ -17,17 +57,35 @@ public:
     virtual ~repl_req_ctx();
     int64_t get_lsn() const { return lsn; }
 
-private:
-    sisl::blob header;                          // User header
-    sisl::blob key;                             // Key to replicate
-    sisl::sg_list value;                        // Raw value - applicable only to leader req
-    MultiBlkId local_blkid;                     // List of corresponding local blkids for the value
-    RemoteBlkId remote_blkid;                   // List of remote blkid for the value
-    std::unique_ptr< uint8_t[] > journal_buf;   // Buf for the journal entry
-    repl_journal_entry* journal_entry{nullptr}; // pointer to the journal entry
-    int64_t lsn{0};                             // Lsn for this replication req
+    uint64_t dsn() const { return rkey.dsn; }
+    uint64_t term() const { return rkey.term; }
+    void alloc_journal_entry(uint32_t size, bool is_raft_buf);
+    raft_buf_ptr_t& raft_journal_buf();
+    uint8_t* raw_journal_buf();
 
-    void alloc_journal_entry(uint32_t size);
+public:
+    repl_key rkey;     // Unique key for the request
+    sisl::blob header; // User header
+    sisl::blob key;    // User supplied key for this req
+    int64_t lsn{0};    // Lsn for this replication req
+
+    //////////////// Value related section /////////////////
+    sisl::sg_list value;      // Raw value - applicable only to leader req
+    MultiBlkId local_blkid;   // Local BlkId for the value
+    RemoteBlkId remote_blkid; // Corresponding remote blkid for the value
+
+    //////////////// Journal/Buf related section /////////////////
+    std::variant< std::unique_ptr< uint8_t[] >, raft_buf_ptr_t > journal_buf; // Buf for the journal entry
+    repl_journal_entry* journal_entry{nullptr};                               // pointer to the journal entry
+
+    //////////////// Replication state related section /////////////////
+    std::mutex state_mtx;
+    std::atomic< repl_req_state_t > state{repl_req_state_t::INIT}; // State of the replication request
+    folly::Promise< folly::Unit > data_written_promise;            // Promise to be fulfilled when data is written
+
+    //////////////// Communication packet/builder section /////////////////
+    sisl::io_blob_list_t pkts;
+    flatbuffers::FlatBufferBuilder fb_builder;
 };
 
 //
@@ -134,7 +192,7 @@ public:
     /// @param ctx - User supplied context which will be passed to listener
     /// callbacks
     virtual void async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
-                                   intrusive< repl_req_ctx > ctx) = 0;
+                                   repl_req_ptr_t ctx) = 0;
 
     /// @brief Reads the data and returns a future to continue on
     /// @param bid Block id to read

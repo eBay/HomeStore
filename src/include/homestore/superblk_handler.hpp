@@ -17,6 +17,7 @@
 #include <atomic>
 #include <string>
 
+#include <nlohmann/json.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <homestore/meta_service.hpp>
 
@@ -44,7 +45,7 @@ public:
         m_meta_mgr_cookie = voidptr_cast(meta_cookie);
         m_raw_buf = meta_service().is_aligned_buf_needed(buf.size()) ? buf.extract(meta_service().align_size())
                                                                      : buf.extract(0);
-        m_sb = r_cast< T* >(m_raw_buf->bytes);
+        m_sb = r_cast< T* >(m_raw_buf->bytes());
         return m_sb;
     }
 
@@ -55,7 +56,7 @@ public:
         } else {
             m_raw_buf = sisl::make_byte_array(uint32_cast(size), 0, sisl::buftag::metablk);
         }
-        m_sb = new (m_raw_buf->bytes) T();
+        m_sb = new (m_raw_buf->bytes()) T();
         return m_sb;
     }
 
@@ -68,14 +69,14 @@ public:
         m_sb = nullptr;
     }
 
-    uint32_t size() const { return m_raw_buf->size; }
+    uint32_t size() const { return m_raw_buf->size(); }
     sisl::byte_array raw_buf() { return m_raw_buf; }
 
     void write() {
         if (m_meta_mgr_cookie) {
-            meta_service().update_sub_sb(m_raw_buf->bytes, m_raw_buf->size, m_meta_mgr_cookie);
+            meta_service().update_sub_sb(m_raw_buf->cbytes(), m_raw_buf->size(), m_meta_mgr_cookie);
         } else {
-            meta_service().add_sub_sb(m_metablk_name, m_raw_buf->bytes, m_raw_buf->size, m_meta_mgr_cookie);
+            meta_service().add_sub_sb(m_metablk_name, m_raw_buf->cbytes(), m_raw_buf->size(), m_meta_mgr_cookie);
         }
     }
 
@@ -90,6 +91,76 @@ private:
     sisl::byte_array m_raw_buf;
     T* m_sb{nullptr};
     std::string m_metablk_name;
+};
+
+class json_superblk {
+private:
+    void* m_meta_mgr_cookie{nullptr};
+    nlohmann::json m_json_sb;
+    std::string m_metablk_name;
+
+public:
+    static uint64_t next_count() {
+        static std::atomic< uint64_t > s_count{0};
+        return ++s_count;
+    }
+
+    json_superblk(const std::string& meta_name = "") { set_name(meta_name); }
+
+    void set_name(const std::string& meta_name) {
+        if (meta_name.empty()) {
+            m_metablk_name = "meta_blk_" + std::to_string(next_count());
+        } else {
+            m_metablk_name = meta_name;
+        }
+    }
+
+    nlohmann::json& load(const sisl::byte_view& buf, void* meta_cookie) {
+        m_meta_mgr_cookie = voidptr_cast(meta_cookie);
+        std::string_view const b{c_charptr_cast(buf.bytes()), buf.size()};
+
+        try {
+            m_json_sb = nlohmann::json::from_msgpack(b);
+        } catch (nlohmann::json::exception const& e) {
+            DEBUG_ASSERT(false, "Failed to load superblk for meta_blk={}", m_metablk_name);
+            return m_json_sb;
+        }
+        return m_json_sb;
+    }
+
+    nlohmann::json& create() { return m_json_sb; }
+
+    void destroy() {
+        if (m_meta_mgr_cookie) {
+            meta_service().remove_sub_sb(m_meta_mgr_cookie);
+            m_meta_mgr_cookie = nullptr;
+        }
+        m_json_sb = nlohmann::json{};
+    }
+
+    uint32_t size() const { return m_json_sb.size(); }
+
+    void write() {
+        auto do_write = [this](sisl::blob const& b) {
+            if (m_meta_mgr_cookie) {
+                meta_service().update_sub_sb(b.cbytes(), b.size(), m_meta_mgr_cookie);
+            } else {
+                meta_service().add_sub_sb(m_metablk_name, b.cbytes(), b.size(), m_meta_mgr_cookie);
+            }
+        };
+
+        auto const packed_data = nlohmann::json::to_msgpack(m_json_sb);
+        auto const size = packed_data.size();
+        if (meta_service().is_aligned_buf_needed(size)) {
+            sisl::io_blob_safe buffer(size, meta_service().align_size());
+            std::memcpy(buffer.bytes(), packed_data.data(), size);
+            do_write(buffer);
+        } else {
+            do_write(sisl::blob{r_cast< uint8_t const* >(packed_data.data()), uint32_cast(size)});
+        }
+    }
+
+    nlohmann::json& operator*() { return m_json_sb; }
 };
 
 } // namespace homestore

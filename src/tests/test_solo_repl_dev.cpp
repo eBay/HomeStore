@@ -35,7 +35,7 @@
 #include "common/homestore_assert.hpp"
 #include "common/homestore_utils.hpp"
 #include "test_common/homestore_test_common.hpp"
-#include "replication/service/repl_service_impl.h"
+#include "replication/service/generic_repl_svc.h"
 #include "replication/repl_dev/solo_repl_dev.h"
 
 ////////////////////////////////////////////////////////////////////////////
@@ -181,6 +181,23 @@ public:
         void on_replica_stop() override {}
     };
 
+    class Application : public ReplApplication {
+    private:
+        SoloReplDevTest& m_test;
+
+    public:
+        Application(SoloReplDevTest& test) : m_test{test} {}
+        virtual ~Application() = default;
+
+        repl_impl_type get_impl_type() const override { return repl_impl_type::solo; }
+        bool need_timeline_consistency() const { return true; }
+        std::unique_ptr< ReplDevListener > create_repl_dev_listener(uuid_t) override {
+            return std::make_unique< Listener >(m_test);
+        }
+        std::string lookup_peer(uuid_t uuid) const override { return std::string(""); }
+        uint16_t lookup_port() const override { return 0; }
+    };
+
 protected:
     Runner m_io_runner;
     Waiter m_task_waiter;
@@ -194,15 +211,13 @@ public:
         test_common::HSTestHelper::start_homestore(
             "test_solo_repl_dev",
             {{HS_SERVICE::META, {.size_pct = 5.0}},
-             {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_impl = repl_impl_type::solo}},
+             {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_app = std::make_unique< Application >(*this)}},
              {HS_SERVICE::LOG_REPLICATED, {.size_pct = 20.0}},
              {HS_SERVICE::LOG_LOCAL, {.size_pct = 2.0}}});
         m_uuid1 = hs_utils::gen_random_uuid();
         m_uuid2 = hs_utils::gen_random_uuid();
-        m_repl_dev1 =
-            hs()->repl_service().create_repl_dev(m_uuid1, {}, std::make_unique< Listener >(*this)).get().value();
-        m_repl_dev2 =
-            hs()->repl_service().create_repl_dev(m_uuid2, {}, std::make_unique< Listener >(*this)).get().value();
+        m_repl_dev1 = hs()->repl_service().create_repl_dev(m_uuid1, {}).get().value();
+        m_repl_dev2 = hs()->repl_service().create_repl_dev(m_uuid2, {}).get().value();
     }
 
     virtual void TearDown() override {
@@ -217,14 +232,10 @@ public:
 
         test_common::HSTestHelper::start_homestore(
             "test_solo_repl_dev",
-            {{HS_SERVICE::REPLICATION, {.repl_impl = repl_impl_type::solo}},
+            {{HS_SERVICE::REPLICATION, {.repl_app = std::make_unique< Application >(*this)}},
              {HS_SERVICE::LOG_REPLICATED, {}},
              {HS_SERVICE::LOG_LOCAL, {}}},
-            [this]() {
-                hs()->repl_service().open_repl_dev(m_uuid1, std::make_unique< Listener >(*this));
-                hs()->repl_service().open_repl_dev(m_uuid2, std::make_unique< Listener >(*this));
-            },
-            true /* restart */);
+            nullptr, true /* restart */);
 
         m_repl_dev1 = hs()->repl_service().get_repl_dev(m_uuid1).value();
         m_repl_dev2 = hs()->repl_service().get_repl_dev(m_uuid2).value();
@@ -233,7 +244,7 @@ public:
     void write_io(uint32_t key_size, uint64_t data_size, uint32_t max_size_per_iov) {
         auto req = intrusive< test_repl_req >(new test_repl_req());
         req->header = sisl::make_byte_array(sizeof(test_repl_req::journal_header));
-        auto hdr = r_cast< test_repl_req::journal_header* >(req->header->bytes);
+        auto hdr = r_cast< test_repl_req::journal_header* >(req->header->bytes());
         hdr->key_size = key_size;
         hdr->key_pattern = ((long long)rand() << 32) | rand();
         hdr->data_size = data_size;
@@ -241,7 +252,7 @@ public:
 
         if (key_size != 0) {
             req->key = sisl::make_byte_array(key_size);
-            HSTestHelper::fill_data_buf(req->key->bytes, key_size, hdr->key_pattern);
+            HSTestHelper::fill_data_buf(req->key->bytes(), key_size, hdr->key_pattern);
         }
 
         if (data_size != 0) {
@@ -258,8 +269,8 @@ public:
 
     void validate_replay(ReplDev& rdev, int64_t lsn, sisl::blob const& header, sisl::blob const& key,
                          MultiBlkId const& blkids) {
-        auto jhdr = r_cast< test_repl_req::journal_header* >(header.bytes);
-        HSTestHelper::validate_data_buf(key.bytes, key.size, jhdr->key_pattern);
+        auto const jhdr = r_cast< test_repl_req::journal_header const* >(header.cbytes());
+        HSTestHelper::validate_data_buf(key.cbytes(), key.size(), jhdr->key_pattern);
 
         uint32_t size = blkids.blk_count() * g_block_size;
         if (size) {
@@ -299,7 +310,7 @@ public:
                     LOGDEBUG("[{}] Write complete with lsn={} for size={} blkids={}",
                              boost::uuids::to_string(rdev.group_id()), req->get_lsn(), req->write_sgs.size,
                              req->written_blkids.to_string());
-                    auto hdr = r_cast< test_repl_req::journal_header* >(req->header->bytes);
+                    auto hdr = r_cast< test_repl_req::journal_header* >(req->header->bytes());
                     HS_REL_ASSERT_EQ(hdr->data_size, req->read_sgs.size,
                                      "journal hdr data size mismatch with actual size");
 

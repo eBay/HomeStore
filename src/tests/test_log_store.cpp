@@ -68,8 +68,12 @@ struct test_log_data {
     uint32_t size;
 
     uint8_t* get_data() { return uintptr_cast(this) + sizeof(test_log_data); };
+    uint8_t const* get_data_const() const { return r_cast< uint8_t const* >(this) + sizeof(test_log_data); }
     const uint8_t* get_data() const { return r_cast< const uint8_t* >(this) + sizeof(test_log_data); }
     uint32_t total_size() const { return sizeof(test_log_data) + size; }
+    std::string get_data_str() const {
+        return std::string(r_cast< const char* >(get_data_const()), static_cast< size_t >(size));
+    }
 };
 
 typedef std::function< void(logstore_family_id_t, logstore_seq_num_t, logdev_key) > test_log_store_comp_cb_t;
@@ -187,7 +191,7 @@ public:
                         if ((hole_entry != hole_end) && hole_entry->second) { // Hole entry exists, but filled
                             EXPECT_EQ(b.size(), 0ul);
                         } else {
-                            auto* tl = r_cast< test_log_data* >(b.bytes());
+                            auto const* tl = r_cast< test_log_data const* >(b.bytes());
                             EXPECT_EQ(tl->total_size(), b.size());
                             validate_data(tl, seq_num);
                         }
@@ -245,15 +249,15 @@ public:
                         ASSERT_EQ(b.size(), 0ul)
                             << "Expected null entry for lsn=" << m_log_store->get_store_id() << ":" << i;
                     } else {
-                        auto* tl = r_cast< test_log_data* >(b.bytes());
+                        auto* tl = r_cast< test_log_data const* >(b.bytes());
                         ASSERT_EQ(tl->total_size(), b.size())
                             << "Size Mismatch for lsn=" << m_log_store->get_store_id() << ":" << i;
                         validate_data(tl, i);
                     }
                 } catch (const std::exception& e) {
                     if (!expect_all_completed) {
-                        // In case we run truncation in parallel to read, it is possible truncate moved, so adjust the
-                        // truncated_upto accordingly.
+                        // In case we run truncation in parallel to read, it is possible truncate moved, so adjust
+                        // the truncated_upto accordingly.
                         const auto trunc_upto = m_log_store->truncated_upto();
                         if (i <= trunc_upto) {
                             i = trunc_upto;
@@ -328,7 +332,7 @@ public:
         LOGDEBUG("Recovered lsn {}:{} with log data of size {}", m_log_store->get_store_id(), lsn, buf.size())
         EXPECT_LE(lsn, m_cur_lsn.load()) << "Recovered incorrect lsn " << m_log_store->get_store_id() << ":" << lsn
                                          << "Expected less than cur_lsn " << m_cur_lsn.load();
-        auto* tl = r_cast< test_log_data* >(buf.bytes());
+        auto* tl = r_cast< test_log_data const* >(buf.bytes());
         validate_data(tl, lsn);
 
         // Count only the ones which are after truncated, because recovery could receive even truncated lsns
@@ -378,7 +382,7 @@ public:
 private:
     void validate_data(const test_log_data* d, const logstore_seq_num_t lsn) {
         const char c = static_cast< char >((lsn % 94) + 33);
-        const std::string actual{r_cast< const char* >(d->get_data()), static_cast< size_t >(d->size)};
+        const std::string actual = d->get_data_str();
         const std::string expected(static_cast< size_t >(d->size),
                                    c); // needs to be () because of same reason as vector
         ASSERT_EQ(actual, expected) << "Data mismatch for LSN=" << m_log_store->get_store_id() << ":" << lsn
@@ -688,10 +692,11 @@ protected:
                         if (lsc->has_all_lsns_truncated()) ++n_fully_truncated;
                     }
 
-                    // While inserts are going on, truncation can guaranteed to be forward progressed if none of the log
-                    // stores are fully truncated. If all stores are fully truncated, its obvious no progress, but even
-                    // if one of the store is fully truncated, then it might be possible that logstore is holding lowest
-                    // logdev location and waiting for next flush to finish to move the safe logdev location.
+                    // While inserts are going on, truncation can guaranteed to be forward progressed if none of the
+                    // log stores are fully truncated. If all stores are fully truncated, its obvious no progress,
+                    // but even if one of the store is fully truncated, then it might be possible that logstore is
+                    // holding lowest logdev location and waiting for next flush to finish to move the safe logdev
+                    // location.
                     expect_forward_progress = (n_fully_truncated == 0);
                 }
 
@@ -954,10 +959,10 @@ TEST_F(LogStoreTest, VarRateInsertThenTruncate) {
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
-        LOGINFO(
-            "Step 1: Reinit the num records={} and insert them as batch of 10 with qdepth=500 and wait for all records "
-            "to be inserted and then validate them",
-            nrecords);
+        LOGINFO("Step 1: Reinit the num records={} and insert them as batch of 10 with qdepth=500 and wait for all "
+                "records "
+                "to be inserted and then validate them",
+                nrecords);
         this->init(nrecords);
         this->kickstart_inserts(10, 500);
         this->wait_for_inserts();
@@ -980,10 +985,10 @@ TEST_F(LogStoreTest, VarRateInsertThenTruncate) {
             this->truncate_validate();
         }
 
-        LOGINFO(
-            "Step 3: Change data rate on stores 0,1 but still slower than other stores, write num_records={} wait for "
-            "their completion, validate it is readable, then truncate - all in a loop for 3 times",
-            nrecords);
+        LOGINFO("Step 3: Change data rate on stores 0,1 but still slower than other stores, write num_records={} "
+                "wait for "
+                "their completion, validate it is readable, then truncate - all in a loop for 3 times",
+                nrecords);
         for (auto i{0u}; i < 3u; ++i) {
             LOGINFO("Step 3.{}.1: Write and wait for {}", i + 1, nrecords);
             this->init(nrecords, {{0, 5}, {1, 20}});
@@ -1248,10 +1253,10 @@ TEST_F(LogStoreTest, WriteSyncThenRead) {
             }
 
             auto b = tmp_log_store->read_sync(i);
-            auto* tl = r_cast< test_log_data* >(b.bytes());
+            auto* tl = r_cast< test_log_data const* >(b.bytes());
             ASSERT_EQ(tl->total_size(), b.size()) << "Size Mismatch for lsn=" << store_id << ":" << i;
             const char c = static_cast< char >((i % 94) + 33);
-            const std::string actual{r_cast< const char* >(tl->get_data()), static_cast< size_t >(tl->size)};
+            const std::string actual = tl->get_data_str();
             const std::string expected(static_cast< size_t >(tl->size),
                                        c); // needs to be () because of same reason as vector
             ASSERT_EQ(actual, expected) << "Data mismatch for LSN=" << store_id << ":" << i << " size=" << tl->size;

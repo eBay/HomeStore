@@ -273,9 +273,9 @@ public:
     virtual BtreeLinkInfo get_edge_value() const { return BtreeLinkInfo{edge_id(), edge_link_version()}; }
 
     virtual void set_edge_value(const BtreeValue& v) {
-        const auto b = v.serialize();
-        auto l = r_cast< BtreeLinkInfo::bnode_link_info* >(b.bytes);
-        DEBUG_ASSERT_EQ(b.size, sizeof(BtreeLinkInfo::bnode_link_info));
+        auto const b = v.serialize();
+        auto const l = r_cast< BtreeLinkInfo::bnode_link_info const* >(b.cbytes());
+        DEBUG_ASSERT_EQ(b.size(), sizeof(BtreeLinkInfo::bnode_link_info));
         set_edge_info(*l);
     }
 

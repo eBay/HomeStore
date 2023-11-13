@@ -56,7 +56,8 @@ class HomestoreConan(ConanFile):
 
     def requirements(self):
         self.requires("iomgr/[~=10, include_prerelease=True]@oss/master")
-        self.requires("sisl/[~=10, include_prerelease=True]@oss/master")
+        self.requires("sisl/[~=11, include_prerelease=True]@oss/master")
+        self.requires("nuraft_mesg/[~=2, include_prerelease=True]@oss/main")
 
         self.requires("farmhash/cci.20190513@")
         self.requires("isa-l/2.30.0")

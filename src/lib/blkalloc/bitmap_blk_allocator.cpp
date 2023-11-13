@@ -60,9 +60,9 @@ void BitmapBlkAllocator::cp_flush(CP*) {
     if (m_is_disk_bm_dirty.load()) {
         sisl::byte_array bitmap_buf = acquire_underlying_buffer();
         if (m_meta_blk_cookie) {
-            meta_service().update_sub_sb(bitmap_buf->bytes, bitmap_buf->size, m_meta_blk_cookie);
+            meta_service().update_sub_sb(bitmap_buf->cbytes(), bitmap_buf->size(), m_meta_blk_cookie);
         } else {
-            meta_service().add_sub_sb(get_name(), bitmap_buf->bytes, bitmap_buf->size, m_meta_blk_cookie);
+            meta_service().add_sub_sb(get_name(), bitmap_buf->cbytes(), bitmap_buf->size(), m_meta_blk_cookie);
         }
         m_is_disk_bm_dirty.store(false); // No longer dirty now, needs to be set before releasing the buffer
         release_underlying_buffer();

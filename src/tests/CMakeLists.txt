@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.13)
 include (${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
 include_directories (BEFORE ../include/)
 include_directories (BEFORE ../lib/)
+include_directories (BEFORE ../tests/)
 include_directories (BEFORE .)
 add_subdirectory(test_scripts)
 
