@@ -1,12 +1,12 @@
 pipeline {
-    agent any
+    agent { label 'sds-builder-2204' }
     triggers {
           cron('TZ=US/Pacific\nH H(0-2) * * *')
     }
 
     environment {
         ORG = 'sds'
-        ECR_URL = 'ecr.vip.ebayc3.com'
+        ECR_URL = 'hub.tess.io'
         ARTIFACTORY_PASS = credentials('ARTIFACTORY_PASS')
         CONAN_USER = 'sds'
         failed_stage = ""
@@ -24,7 +24,7 @@ pipeline {
                 script {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     VER = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
-                    NIGHTLY_TAG = "master-nightly-debug"
+                    NIGHTLY_TAG = "master-nightly-debug-4.0"
                     ECR_PATH = "${ECR_URL}/${ORG}/${PROJECT}"
                     failed_stage = ""
                 }
@@ -40,16 +40,9 @@ pipeline {
                 }
                 stage("Build") {
                     steps {
-                        sh "conan create --build missing -o sisl:prerelease=True -o homestore:sanitize=True -o homestore:testing=full -o homestore:skip_testing=True -pr debug . ${PROJECT}/${VER}@"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_load' -exec cp {} .jenkins/test_load \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_volume' -exec cp {} .jenkins/test_volume \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/check_btree' -exec cp {} .jenkins/check_btree \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/hs_svc_tool ' -exec cp {} .jenkins/hs_svc_tool \\;"
-                        sh "find . -type f -wholename '*test_scripts/vol_test.py' -exec cp -a {} .jenkins/vol_test.py \\;"
-                        sh "find ${CONAN_USER_HOME} -type d -wholename '*bin/scripts' -exec cp -a {} .jenkins/scripts \\;"
-                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
+                        sh "conan create --build missing -o sisl:prerelease=True  -pr debug . ${PROJECT}/${VER}@"
+                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_index_btree' -exec cp {} .jenkins/test_index_btree \\;"
+                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/scripts/btree_test.py' -exec cp -a {} .jenkins/btree_test.py \\;"
                     }
                     post {
                         failure {
@@ -74,14 +67,6 @@ pipeline {
                         failure { script { failed_stage = "Image" } }
                     }
                 }
-            }
-        }
-   }
-
-   post {
-        failure {
-            script {
-                     slackSend color: '#E43237', channel: '#homestore-build', message: "@here [Nightly] HomeStore build *${PROJECT}/${VER}* has had a failure in the stage ${failed_stage}: ${BUILD_URL}"
             }
         }
    }
