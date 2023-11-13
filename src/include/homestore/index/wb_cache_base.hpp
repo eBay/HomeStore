@@ -52,13 +52,13 @@ public:
 
     /// @brief Start a chain of related btree buffers. Typically a chain is creating from second and third pairs and
     /// then first is prepended to the chain. In case the second buffer is already with the WB cache, it will create a
-    /// new buffer for both second and third.
+    /// new buffer for both second and third. We append the buffers to a list in dependency chain.
     /// @param second Second btree buffer in the chain. It will be updated to copy of second buffer if buffer already
     /// has dependencies.
     /// @param third Thrid btree buffer in the chain. It will be updated to copy of third buffer if buffer already
     /// has dependencies.
     /// @return Returns if the buffer had to be copied
-    virtual std::tuple< bool, bool > create_chain(IndexBufferPtr& second, IndexBufferPtr& third, CPContext* cp_ctx) = 0;
+    virtual std::pair< bool, bool > create_chain(IndexBufferPtr& second, IndexBufferPtr& third, CPContext* cp_ctx) = 0;
 
     /// @brief Prepend to the chain that was already created with second
     /// @param first
@@ -73,7 +73,7 @@ public:
     /// @brief Copy buffer
     /// @param cur_buf
     /// @return
-    virtual IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf) const = 0;
+    virtual IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext* context) const = 0;
 };
 
 } // namespace homestore

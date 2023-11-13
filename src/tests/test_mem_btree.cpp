@@ -41,14 +41,15 @@ SISL_OPTION_GROUP(
     (num_entries, "", "num_entries", "number of entries to test with",
      ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
     (disable_merge, "", "disable_merge", "disable_merge", ::cxxopts::value< bool >()->default_value("0"), ""),
-    (n_threads, "", "n_threads", "number of threads", ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-    (n_fibers, "", "n_fibers", "number of fibers", ::cxxopts::value< uint32_t >()->default_value("10"), "number"),
+    (num_threads, "", "num_threads", "number of threads", ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
+    (num_fibers, "", "num_fibers", "number of fibers", ::cxxopts::value< uint32_t >()->default_value("10"), "number"),
     (operation_list, "", "operation_list", "operation list instead of default created following by percentage",
      ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
     (preload_size, "", "preload_size", "number of entries to preload tree with",
      ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
     (seed, "", "seed", "random engine seed, use random if not defined",
-     ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
+     ::cxxopts::value< uint64_t >()->default_value("0"), "number"),
+    (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"))
 
 struct FixedLenBtreeTest {
     using BtreeType = MemBtree< TestFixedKey, TestFixedValue >;
@@ -265,7 +266,7 @@ TYPED_TEST(BtreeTest, RandomRemoveRange) {
         this->put(i, btree_put_type::INSERT);
     }
     // generate keys including out of bound
-    static thread_local std::uniform_int_distribution< uint32_t > s_rand_key_generator{0, 2 * num_entries};
+    static thread_local std::uniform_int_distribution< uint32_t > s_rand_key_generator{0, num_entries};
     //    this->print_keys();
     LOGINFO("Step 2: Do range remove for maximum of {} iterations", num_iters);
     for (uint32_t i{0}; (i < num_iters) && this->m_shadow_map.size(); ++i) {
@@ -289,10 +290,10 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType > {
     BtreeConcurrentTest() { this->m_is_multi_threaded = true; }
 
     void SetUp() override {
-        LOGINFO("Starting iomgr with {} threads", SISL_OPTIONS["n_threads"].as< uint32_t >());
-        ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = SISL_OPTIONS["n_threads"].as< uint32_t >(),
+        LOGINFO("Starting iomgr with {} threads", SISL_OPTIONS["num_threads"].as< uint32_t >());
+        ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >(),
                                                      .is_spdk = false,
-                                                     .num_fibers = 1 + SISL_OPTIONS["n_fibers"].as< uint32_t >(),
+                                                     .num_fibers = 1 + SISL_OPTIONS["num_fibers"].as< uint32_t >(),
                                                      .app_mem_size_mb = 0,
                                                      .hugepage_size_mb = 0});
 

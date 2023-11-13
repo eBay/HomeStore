@@ -42,13 +42,21 @@ SISL_OPTIONS_ENABLE(logging, test_index_btree, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_index_btree)
 
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-// TODO increase num_entries to 65k as io mgr page size is 512 and its slow.
+
+// TODO Add tests to do write,remove after recovery.
+// TODO Test with var len key with io mgr page size is 512.
 
 SISL_OPTION_GROUP(test_index_btree,
                   (num_iters, "", "num_iters", "number of iterations for rand ops",
-                   ::cxxopts::value< uint32_t >()->default_value("1500"), "number"),
+                   ::cxxopts::value< uint32_t >()->default_value("500"), "number"),
                   (num_entries, "", "num_entries", "number of entries to test with",
-                   ::cxxopts::value< uint32_t >()->default_value("15000"), "number"),
+                   ::cxxopts::value< uint32_t >()->default_value("5000"), "number"),
+                  (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"),
+                  (disable_merge, "", "disable_merge", "disable_merge", ::cxxopts::value< bool >()->default_value("0"), ""),
+                  (operation_list, "", "operation_list", "operation list instead of default created following by percentage",
+                   ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
+                  (preload_size, "", "preload_size", "number of entries to preload tree with",
+                   ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
                   (seed, "", "seed", "random engine seed, use random if not defined",
                    ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
@@ -159,12 +167,7 @@ struct BtreeTest : public BtreeTestHelper< TestType > {
     }
 };
 
-// TODO sanal fix the varkey issue.
-// using BtreeTypes = testing::Types< FixedLenBtreeTest, VarKeySizeBtreeTest, VarValueSizeBtreeTest,
-// VarObjSizeBtreeTest
-// >;
-
-using BtreeTypes = testing::Types< FixedLenBtreeTest >;
+using BtreeTypes = testing::Types< FixedLenBtreeTest, VarKeySizeBtreeTest, VarValueSizeBtreeTest, VarObjSizeBtreeTest >;
 
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 
@@ -225,7 +228,6 @@ TYPED_TEST(BtreeTest, RandomInsert) {
     this->get_all();
 }
 
-#if 0
 TYPED_TEST(BtreeTest, SequentialRemove) {
     LOGINFO("SequentialRemove test start");
     // Forward sequential insert
@@ -280,7 +282,6 @@ TYPED_TEST(BtreeTest, RandomRemove) {
     }
     this->get_all();
 }
-#endif
 
 TYPED_TEST(BtreeTest, RangeUpdate) {
     LOGINFO("RangeUpdate test start");
@@ -309,10 +310,14 @@ TYPED_TEST(BtreeTest, CpFlush) {
     for (uint32_t i = 0; i < num_entries; ++i) {
         this->put(i, btree_put_type::INSERT);
     }
+
+    // Remove some of the entries.
+    for (uint32_t i = 0; i < num_entries; i += 10) {
+        this->remove_one(i);
+    }
+
     LOGINFO("Query {} entries and validate with pagination of 75 entries", num_entries / 2);
     this->do_query(0, num_entries / 2 - 1, 75);
-
-    this->print(std::string("before.txt"));
 
     LOGINFO("Trigger checkpoint flush.");
     test_common::HSTestHelper::trigger_cp(true /* wait */);
@@ -320,12 +325,14 @@ TYPED_TEST(BtreeTest, CpFlush) {
     LOGINFO("Query {} entries and validate with pagination of 75 entries", num_entries);
     this->do_query(0, num_entries - 1, 75);
 
+    this->print(std::string("before.txt"));
+
     this->destroy_btree();
 
     // Restart homestore. m_bt is updated by the TestIndexServiceCallback.
     this->restart_homestore();
 
-    std::this_thread::sleep_for(std::chrono::seconds{3});
+    std::this_thread::sleep_for(std::chrono::seconds{1});
     LOGINFO("Restarted homestore with index recovered");
 
     this->print(std::string("after.txt"));
@@ -373,7 +380,7 @@ TYPED_TEST(BtreeTest, MultipleCpFlush) {
     // Restart homestore. m_bt is updated by the TestIndexServiceCallback.
     this->restart_homestore();
 
-    std::this_thread::sleep_for(std::chrono::seconds{3});
+    std::this_thread::sleep_for(std::chrono::seconds{1});
     LOGINFO(" Restarted homestore with index recovered");
     this->print(std::string("after.txt"));
 
@@ -388,24 +395,41 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
     LOGINFO("ThreadedCpFlush test start");
 
     const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
-    bool stop_cp_flush = false;
-    auto io_thread = std::thread([this, num_entries] {
+    bool stop = false;
+    std::atomic< uint32_t > last_index{0};
+    auto insert_io_thread = std::thread([this, num_entries, &last_index] {
         LOGINFO("Do Forward sequential insert for {} entries", num_entries);
+        uint32_t j = 0;
         for (uint32_t i = 0; i < num_entries; ++i) {
             this->put(i, btree_put_type::INSERT);
+            last_index = i;
         }
     });
 
-    auto cp_flush_thread = std::thread([this, &stop_cp_flush] {
-        while (!stop_cp_flush) {
-            LOGINFO("Trigger checkpoint flush wait=false.");
-            test_common::HSTestHelper::trigger_cp(false /* wait */);
+    auto remove_io_thread = std::thread([this, &stop, num_entries, &last_index] {
+        LOGINFO("Do random removes for {} entries", num_entries);
+        while (!stop) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+            // Remove a random entry.
+            std::uniform_int_distribution< uint32_t > rand{0, last_index.load()};
+            auto rm_idx = rand(g_re);
+            LOGINFO("Removing entry {}", rm_idx);
+            this->remove_one(rm_idx);
+        }
+    });
+
+    auto cp_flush_thread = std::thread([this, &stop] {
+        while (!stop) {
             std::this_thread::sleep_for(std::chrono::seconds{1});
+            LOGINFO("Trigger checkpoint flush wait=true.");
+            test_common::HSTestHelper::trigger_cp(false /* wait */);
+            LOGINFO("Trigger checkpoint flush wait=true done.");
         }
     });
 
-    io_thread.join();
-    stop_cp_flush = true;
+    insert_io_thread.join();
+    stop = true;
+    remove_io_thread.join();
     cp_flush_thread.join();
 
     LOGINFO("Trigger checkpoint flush wait=true.");
@@ -420,7 +444,7 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
     // Restart homestore. m_bt is updated by the TestIndexServiceCallback.
     this->restart_homestore();
 
-    std::this_thread::sleep_for(std::chrono::seconds{3});
+    std::this_thread::sleep_for(std::chrono::seconds{1});
     LOGINFO(" Restarted homestore with index recovered");
     this->print(std::string("after.txt"));
 
@@ -429,6 +453,97 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
     LOGINFO("Query {} entries and validate with pagination of 1000 entries", num_entries);
     this->do_query(0, num_entries - 1, 1000);
     LOGINFO("ThreadedCpFlush test end");
+}
+
+template < typename TestType >
+struct BtreeConcurrentTest : public BtreeTestHelper< TestType > {
+
+    using T = TestType;
+    using K = typename TestType::KeyType;
+    using V = typename TestType::ValueType;
+    class TestIndexServiceCallbacks : public IndexServiceCallbacks {
+    public:
+        TestIndexServiceCallbacks(BtreeConcurrentTest* test) : m_test(test) {}
+        std::shared_ptr< IndexTableBase > on_index_table_found(const superblk< index_table_sb >& sb) override {
+            LOGINFO("Index table recovered");
+            LOGINFO("Root bnode_id {} version {}", sb->root_node, sb->link_version);
+            m_test->m_bt = std::make_shared< typename T::BtreeType >(sb, m_test->m_cfg);
+            return m_test->m_bt;
+        }
+
+    private:
+        BtreeConcurrentTest* m_test;
+    };
+
+    BtreeConcurrentTest() { this->m_is_multi_threaded = true; }
+
+    void SetUp() override {
+        test_common::HSTestHelper::start_homestore(
+            "test_index_btree",
+            {{HS_SERVICE::META, {.size_pct = 10.0}},
+             {HS_SERVICE::INDEX, {.size_pct = 70.0, .index_svc_cbs = new TestIndexServiceCallbacks(this)}}});
+
+        LOGINFO("Node size {} ", hs()->index_service().node_size());
+        this->m_cfg = BtreeConfig(hs()->index_service().node_size());
+
+        auto uuid = boost::uuids::random_generator()();
+        auto parent_uuid = boost::uuids::random_generator()();
+
+        // Test cp flush of write back.
+        HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+            s.generic.cache_max_throttle_cnt = 10000;
+            HS_SETTINGS_FACTORY().save();
+        });
+        homestore::hs()->resource_mgr().reset_dirty_buf_qd();
+
+        // Create index table and attach to index service.
+        BtreeTestHelper< TestType >::SetUp();
+        this->m_bt = std::make_shared< typename T::BtreeType >(uuid, parent_uuid, 0, this->m_cfg);
+        hs()->index_service().add_index_table(this->m_bt);
+        LOGINFO("Added index table to index service");
+    }
+
+    void TearDown() override {
+        BtreeTestHelper< TestType >::TearDown();
+        test_common::HSTestHelper::shutdown_homestore();
+    }
+};
+
+TYPED_TEST_SUITE(BtreeConcurrentTest, BtreeTypes);
+TYPED_TEST(BtreeConcurrentTest, ConcurrentAllOps) {
+    // range put is not supported for non-extent keys
+    std::vector< std::string > input_ops = {"put:20", "remove:20", "range_put:20", "range_remove:20", "query:20"};
+    std::vector< std::pair< std::string, int > > ops;
+    if (SISL_OPTIONS.count("operation_list")) {
+        input_ops = SISL_OPTIONS["operation_list"].as< std::vector< std::string > >();
+    }
+    int total = std::accumulate(input_ops.begin(), input_ops.end(), 0, [](int sum, const auto& str) {
+        std::vector< std::string > tokens;
+        boost::split(tokens, str, boost::is_any_of(":"));
+        if (tokens.size() == 2) {
+            try {
+                return sum + std::stoi(tokens[1]);
+            } catch (const std::exception&) {
+                // Invalid frequency, ignore this element
+            }
+        }
+        return sum; // Ignore malformed strings
+    });
+
+    std::transform(input_ops.begin(), input_ops.end(), std::back_inserter(ops), [total](const auto& str) {
+        std::vector< std::string > tokens;
+        boost::split(tokens, str, boost::is_any_of(":"));
+        if (tokens.size() == 2) {
+            try {
+                return std::make_pair(tokens[0], (int)(100.0 * std::stoi(tokens[1]) / total));
+            } catch (const std::exception&) {
+                // Invalid frequency, ignore this element
+            }
+        }
+        return std::make_pair(std::string(), 0);
+    });
+
+    this->multi_op_execute(ops);
 }
 
 int main(int argc, char* argv[]) {
