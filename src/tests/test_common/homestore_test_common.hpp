@@ -39,6 +39,8 @@ const std::string USER_WANT_DIRECT_IO{"USER_WANT_DIRECT_IO"};               // u
 SISL_OPTION_GROUP(test_common_setup,
                   (num_threads, "", "num_threads", "number of threads",
                    ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
+                  (num_fibers, "", "num_fibers", "number of fibers per thread",
+                   ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
                   (num_devs, "", "num_devs", "number of devices to create",
                    ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
                   (dev_size_mb, "", "dev_size_mb", "size of each device in MB",
@@ -111,7 +113,8 @@ public:
                                 hs_before_services_starting_cb_t cb = nullptr, bool restart = false) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-        auto nthreads = SISL_OPTIONS["num_threads"].as< uint32_t >();
+        auto num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
+        auto num_fibers = SISL_OPTIONS["num_fibers"].as< uint32_t >();
         auto is_spdk = SISL_OPTIONS["spdk"].as< bool >();
 
         if (restart) {
@@ -145,11 +148,11 @@ public:
 
         if (is_spdk) {
             LOGINFO("Spdk with more than 2 threads will cause overburden test systems, changing nthreads to 2");
-            nthreads = 2;
+            num_threads = 2;
         }
 
-        LOGINFO("Starting iomgr with {} threads, spdk: {}", nthreads, is_spdk);
-        ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = nthreads, .is_spdk = is_spdk});
+        LOGINFO("Starting iomgr with {} threads, spdk: {}", num_threads, is_spdk);
+        ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = num_threads, .is_spdk = is_spdk, .num_fibers = num_fibers});
 
         auto const http_port = SISL_OPTIONS["http_port"].as< int >();
         if (http_port != 0) {

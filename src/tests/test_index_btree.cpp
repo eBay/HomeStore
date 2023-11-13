@@ -51,6 +51,12 @@ SISL_OPTION_GROUP(test_index_btree,
                    ::cxxopts::value< uint32_t >()->default_value("500"), "number"),
                   (num_entries, "", "num_entries", "number of entries to test with",
                    ::cxxopts::value< uint32_t >()->default_value("5000"), "number"),
+                  (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"),
+                  (disable_merge, "", "disable_merge", "disable_merge", ::cxxopts::value< bool >()->default_value("0"), ""),
+                  (operation_list, "", "operation_list", "operation list instead of default created following by percentage",
+                   ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
+                  (preload_size, "", "preload_size", "number of entries to preload tree with",
+                   ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
                   (seed, "", "seed", "random engine seed, use random if not defined",
                    ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
@@ -447,6 +453,97 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
     LOGINFO("Query {} entries and validate with pagination of 1000 entries", num_entries);
     this->do_query(0, num_entries - 1, 1000);
     LOGINFO("ThreadedCpFlush test end");
+}
+
+template < typename TestType >
+struct BtreeConcurrentTest : public BtreeTestHelper< TestType > {
+
+    using T = TestType;
+    using K = typename TestType::KeyType;
+    using V = typename TestType::ValueType;
+    class TestIndexServiceCallbacks : public IndexServiceCallbacks {
+    public:
+        TestIndexServiceCallbacks(BtreeConcurrentTest* test) : m_test(test) {}
+        std::shared_ptr< IndexTableBase > on_index_table_found(const superblk< index_table_sb >& sb) override {
+            LOGINFO("Index table recovered");
+            LOGINFO("Root bnode_id {} version {}", sb->root_node, sb->link_version);
+            m_test->m_bt = std::make_shared< typename T::BtreeType >(sb, m_test->m_cfg);
+            return m_test->m_bt;
+        }
+
+    private:
+        BtreeConcurrentTest* m_test;
+    };
+
+    BtreeConcurrentTest() { this->m_is_multi_threaded = true; }
+
+    void SetUp() override {
+        test_common::HSTestHelper::start_homestore(
+            "test_index_btree",
+            {{HS_SERVICE::META, {.size_pct = 10.0}},
+             {HS_SERVICE::INDEX, {.size_pct = 70.0, .index_svc_cbs = new TestIndexServiceCallbacks(this)}}});
+
+        LOGINFO("Node size {} ", hs()->index_service().node_size());
+        this->m_cfg = BtreeConfig(hs()->index_service().node_size());
+
+        auto uuid = boost::uuids::random_generator()();
+        auto parent_uuid = boost::uuids::random_generator()();
+
+        // Test cp flush of write back.
+        HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+            s.generic.cache_max_throttle_cnt = 10000;
+            HS_SETTINGS_FACTORY().save();
+        });
+        homestore::hs()->resource_mgr().reset_dirty_buf_qd();
+
+        // Create index table and attach to index service.
+        BtreeTestHelper< TestType >::SetUp();
+        this->m_bt = std::make_shared< typename T::BtreeType >(uuid, parent_uuid, 0, this->m_cfg);
+        hs()->index_service().add_index_table(this->m_bt);
+        LOGINFO("Added index table to index service");
+    }
+
+    void TearDown() override {
+        BtreeTestHelper< TestType >::TearDown();
+        test_common::HSTestHelper::shutdown_homestore();
+    }
+};
+
+TYPED_TEST_SUITE(BtreeConcurrentTest, BtreeTypes);
+TYPED_TEST(BtreeConcurrentTest, ConcurrentAllOps) {
+    // range put is not supported for non-extent keys
+    std::vector< std::string > input_ops = {"put:20", "remove:20", "range_put:20", "range_remove:20", "query:20"};
+    std::vector< std::pair< std::string, int > > ops;
+    if (SISL_OPTIONS.count("operation_list")) {
+        input_ops = SISL_OPTIONS["operation_list"].as< std::vector< std::string > >();
+    }
+    int total = std::accumulate(input_ops.begin(), input_ops.end(), 0, [](int sum, const auto& str) {
+        std::vector< std::string > tokens;
+        boost::split(tokens, str, boost::is_any_of(":"));
+        if (tokens.size() == 2) {
+            try {
+                return sum + std::stoi(tokens[1]);
+            } catch (const std::exception&) {
+                // Invalid frequency, ignore this element
+            }
+        }
+        return sum; // Ignore malformed strings
+    });
+
+    std::transform(input_ops.begin(), input_ops.end(), std::back_inserter(ops), [total](const auto& str) {
+        std::vector< std::string > tokens;
+        boost::split(tokens, str, boost::is_any_of(":"));
+        if (tokens.size() == 2) {
+            try {
+                return std::make_pair(tokens[0], (int)(100.0 * std::stoi(tokens[1]) / total));
+            } catch (const std::exception&) {
+                // Invalid frequency, ignore this element
+            }
+        }
+        return std::make_pair(std::string(), 0);
+    });
+
+    this->multi_op_execute(ops);
 }
 
 int main(int argc, char* argv[]) {
