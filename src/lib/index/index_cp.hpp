@@ -97,7 +97,6 @@ public:
         auto it = m_dirty_buf_list.begin();
         while (it != m_dirty_buf_list.end()) {
             IndexBufferPtr buf = *it;
-            ;
             std::set< IndexBuffer* > visited;
             check_cycle_recurse(buf, visited);
             ++it;
