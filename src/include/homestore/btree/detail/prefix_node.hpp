@@ -771,7 +771,7 @@ private:
         phdr->tail_slot = phdr->used_slots;
     }
 
-#ifdef _DEBUG
+#ifndef NDEBUG
     void validate_sanity() {
         uint32_t i{0};
         // validate if keys are in ascending order
