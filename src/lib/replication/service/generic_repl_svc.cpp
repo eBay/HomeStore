@@ -33,7 +33,8 @@ std::unique_ptr< GenericReplService > GenericReplService::create(cshared< ReplAp
     }
 }
 
-GenericReplService::GenericReplService(cshared< ReplApplication >& repl_app) : m_repl_app{repl_app} {
+GenericReplService::GenericReplService(cshared< ReplApplication >& repl_app) :
+        m_repl_app{repl_app}, m_my_uuid{repl_app->get_my_repl_id()} {
     meta_service().register_handler(
         get_meta_blk_name(),
         [this](meta_blk* mblk, sisl::byte_view buf, size_t) { rd_super_blk_found(std::move(buf), voidptr_cast(mblk)); },
@@ -45,8 +46,8 @@ void GenericReplService::stop() {
     m_rd_map.clear();
 }
 
-AsyncReplResult< shared< ReplDev > > GenericReplService::create_repl_dev(uuid_t group_id,
-                                                                         std::set< uuid_t, std::less<> >&& members) {
+AsyncReplResult< shared< ReplDev > >
+GenericReplService::create_repl_dev(group_id_t group_id, std::set< replica_id_t, std::less<> >&& members) {
     // Ensure idempotency of the repl_dev creation
     auto it = m_rd_map.end();
     bool happened = false;
@@ -68,10 +69,6 @@ AsyncReplResult< shared< ReplDev > > GenericReplService::create_repl_dev(uuid_t 
         }
     }
 
-    // Create whatever underlying implementation of repl_dev needs to be for fresh creation of repl_dev
-    auto const result = create_replica_set(group_id, std::move(members)).get();
-    if (!bool(result)) { return make_async_error< shared< ReplDev > >(result.error()); }
-
     // Now we need to create local repl dev instance which is actually creates entry, state machine etc
     // according the the underlying implementation
     superblk< repl_dev_superblk > rd_sb{get_meta_blk_name()};
@@ -79,6 +76,15 @@ AsyncReplResult< shared< ReplDev > > GenericReplService::create_repl_dev(uuid_t 
     rd_sb->group_id = group_id;
 
     auto repl_dev = create_local_repl_dev_instance(rd_sb, false /* load_existing */);
+
+    // Create whatever underlying implementation of repl_dev needs to be for fresh creation of repl_dev
+    auto const result = create_replica_set(group_id, std::move(members)).get();
+    if (!bool(result)) {
+        std::unique_lock lg(m_rd_map_mtx);
+        m_rd_map.erase(group_id);
+        return make_async_error< shared< ReplDev > >(result.error());
+    }
+
     auto listener = m_repl_app->create_repl_dev_listener(group_id);
     listener->set_repl_dev(repl_dev.get());
     repl_dev->attach_listener(std::move(listener));
@@ -91,7 +97,7 @@ AsyncReplResult< shared< ReplDev > > GenericReplService::create_repl_dev(uuid_t 
     return make_async_success(repl_dev);
 }
 
-ReplResult< shared< ReplDev > > GenericReplService::get_repl_dev(uuid_t group_id) const {
+ReplResult< shared< ReplDev > > GenericReplService::get_repl_dev(group_id_t group_id) const {
     std::shared_lock lg(m_rd_map_mtx);
     if (auto it = m_rd_map.find(group_id); it != m_rd_map.end()) { return it->second; }
     return folly::makeUnexpected(ReplServiceError::SERVER_NOT_FOUND);
@@ -137,19 +143,21 @@ void SoloReplService::start() {
     hs()->cp_mgr().register_consumer(cp_consumer_t::REPLICATION_SVC, std::make_unique< SoloReplServiceCPHandler >());
 }
 
-AsyncReplResult<> SoloReplService::replace_member(uuid_t group_id, uuid_t member_out, uuid_t member_in) const {
+AsyncReplResult<> SoloReplService::replace_member(group_id_t group_id, replica_id_t member_out,
+                                                  replica_id_t member_in) const {
     return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
 }
 
-AsyncReplResult<> SoloReplService::create_replica_set(uuid_t group_id, std::set< uuid_t, std::less<> >&& members) {
+AsyncReplResult<> SoloReplService::create_replica_set(group_id_t group_id,
+                                                      std::set< replica_id_t, std::less<> >&& members) {
     return make_async_success<>();
 }
 
-AsyncReplResult<> SoloReplService::join_replica_set(uuid_t group_id, cshared< ReplDev >& repl_dev) {
+AsyncReplResult<> SoloReplService::join_replica_set(group_id_t group_id, cshared< ReplDev >& repl_dev) {
     return make_async_success<>();
 }
 
-shared< ReplDev > SoloReplService::create_local_repl_dev_instance(superblk< repl_dev_superblk > const& rd_sb,
+shared< ReplDev > SoloReplService::create_local_repl_dev_instance(superblk< repl_dev_superblk >& rd_sb,
                                                                   bool load_existing) {
     return std::make_shared< SoloReplDev >(rd_sb, load_existing);
 }

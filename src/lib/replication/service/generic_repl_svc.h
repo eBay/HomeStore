@@ -31,12 +31,16 @@
 
 namespace homestore {
 
+static std::string const PUSH_DATA{"push_data"};
+static std::string const FETCH_DATA{"fetch_data"};
+
 struct repl_dev_superblk;
 class GenericReplService : public ReplicationService {
 protected:
     shared< ReplApplication > m_repl_app;
     std::shared_mutex m_rd_map_mtx;
-    std::map< uuid_t, shared< ReplDev > > m_rd_map;
+    std::map< group_id_t, shared< ReplDev > > m_rd_map;
+    replica_id_t m_my_uuid;
 
 public:
     static std::unique_ptr< GenericReplService > create(cshared< ReplApplication >& repl_app);
@@ -46,16 +50,19 @@ public:
     virtual void stop();
     meta_sub_type get_meta_blk_name() const override { return "repl_dev"; }
 
-    AsyncReplResult< shared< ReplDev > > create_repl_dev(uuid_t group_id,
-                                                         std::set< uuid_t, std::less<> >&& members) override;
-    ReplResult< shared< ReplDev > > get_repl_dev(uuid_t group_id) const override;
+    AsyncReplResult< shared< ReplDev > > create_repl_dev(group_id_t group_id,
+                                                         std::set< replica_id_t, std::less<> >&& members) override;
+    ReplResult< shared< ReplDev > > get_repl_dev(group_id_t group_id) const override;
     void iterate_repl_devs(std::function< void(cshared< ReplDev >&) > const& cb) override;
     hs_stats get_cap_stats() const override;
 
+    replica_id_t get_my_repl_uuid() const { return m_my_uuid; }
+
 protected:
-    virtual AsyncReplResult<> create_replica_set(uuid_t group_id, std::set< uuid_t, std::less<> >&& members) = 0;
-    virtual AsyncReplResult<> join_replica_set(uuid_t group_id, cshared< ReplDev >& repl_dev) = 0;
-    virtual shared< ReplDev > create_local_repl_dev_instance(superblk< repl_dev_superblk > const& rd_sb,
+    virtual AsyncReplResult<> create_replica_set(group_id_t group_id,
+                                                 std::set< replica_id_t, std::less<> >&& members) = 0;
+    virtual AsyncReplResult<> join_replica_set(group_id_t group_id, cshared< ReplDev >& repl_dev) = 0;
+    virtual shared< ReplDev > create_local_repl_dev_instance(superblk< repl_dev_superblk >& rd_sb,
                                                              bool load_existing) = 0;
     virtual uint32_t rd_super_blk_size() const = 0;
 
@@ -68,13 +75,13 @@ public:
     SoloReplService(cshared< ReplApplication >& repl_app);
     void start() override;
 
-    AsyncReplResult<> replace_member(uuid_t group_id, uuid_t member_out, uuid_t member_in) const override;
+    AsyncReplResult<> replace_member(group_id_t group_id, replica_id_t member_out,
+                                     replica_id_t member_in) const override;
 
 private:
-    AsyncReplResult<> create_replica_set(uuid_t group_id, std::set< uuid_t, std::less<> >&& members) override;
-    AsyncReplResult<> join_replica_set(uuid_t group_id, cshared< ReplDev >& repl_dev) override;
-    shared< ReplDev > create_local_repl_dev_instance(superblk< repl_dev_superblk > const& rd_sb,
-                                                     bool load_existing) override;
+    AsyncReplResult<> create_replica_set(group_id_t group_id, std::set< uuid_t, std::less<> >&& members) override;
+    AsyncReplResult<> join_replica_set(group_id_t group_id, cshared< ReplDev >& repl_dev) override;
+    shared< ReplDev > create_local_repl_dev_instance(superblk< repl_dev_superblk >& rd_sb, bool load_existing) override;
     uint32_t rd_super_blk_size() const override;
 };
 

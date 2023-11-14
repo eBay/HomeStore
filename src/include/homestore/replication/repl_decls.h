@@ -18,8 +18,8 @@ using blkid_list_t = folly::small_vector< BlkId, 4 >;
 // Fully qualified domain pba, unique pba id across replica set
 struct RemoteBlkId {
     RemoteBlkId() = default;
-    RemoteBlkId(uint32_t s, const BlkId& b) : server_id{s}, blkid{b} {}
-    uint32_t server_id{0};
+    RemoteBlkId(int32_t s, const MultiBlkId& b) : server_id{s}, blkid{b} {}
+    int32_t server_id{0};
     MultiBlkId blkid;
 
     bool operator==(RemoteBlkId const& o) const { return (server_id == o.server_id) && (blkid == o.blkid); }
@@ -27,9 +27,8 @@ struct RemoteBlkId {
 
 using remote_blkid_list_t = folly::small_vector< RemoteBlkId, 4 >;
 
-// data service api names
-static std::string const SEND_DATA{"send_data"};
-static std::string const FETCH_DATA{"fetch_data"};
+using replica_id_t = uuid_t;
+using group_id_t = uuid_t;
 
 } // namespace homestore
 

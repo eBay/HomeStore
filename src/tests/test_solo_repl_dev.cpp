@@ -174,7 +174,7 @@ public:
         void on_rollback(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
                          cintrusive< repl_req_ctx >& ctx) override {}
 
-        blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header, cintrusive< repl_req_ctx >& ctx) override {
+        blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) override {
             return blk_alloc_hints{};
         }
 
@@ -194,8 +194,8 @@ public:
         std::unique_ptr< ReplDevListener > create_repl_dev_listener(uuid_t) override {
             return std::make_unique< Listener >(m_test);
         }
-        std::string lookup_peer(uuid_t uuid) const override { return std::string(""); }
-        uint16_t lookup_port() const override { return 0; }
+        std::pair< std::string, uint16_t > lookup_peer(uuid_t uuid) const override { return std::make_pair("", 0u); }
+        replica_id_t get_my_repl_id() const override { return hs_utils::gen_random_uuid(); }
     };
 
 protected:

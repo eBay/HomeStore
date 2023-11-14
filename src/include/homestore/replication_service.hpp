@@ -64,15 +64,16 @@ public:
     /// @param members List of members to form this group
     /// @param listener state machine listener of all the events happening on the repl_dev (commit, precommit etc)
     /// @return A Future ReplDev on success or Future ReplServiceError upon error
-    virtual AsyncReplResult< shared< ReplDev > > create_repl_dev(uuid_t group_id,
-                                                                 std::set< uuid_t, std::less<> >&& members) = 0;
+    virtual AsyncReplResult< shared< ReplDev > > create_repl_dev(group_id_t group_id,
+                                                                 std::set< replica_id_t, std::less<> >&& members) = 0;
 
-    virtual AsyncReplResult<> replace_member(uuid_t group_id, uuid_t member_out, uuid_t member_in) const = 0;
+    virtual AsyncReplResult<> replace_member(group_id_t group_id, replica_id_t member_out,
+                                             replica_id_t member_in) const = 0;
 
     /// @brief Get the repl dev for a given group id if it is already created or opened
     /// @param group_id Group id interested in
     /// @return ReplDev is opened or ReplServiceError::SERVER_NOT_FOUND if it doesn't exist
-    virtual ReplResult< shared< ReplDev > > get_repl_dev(uuid_t group_id) const = 0;
+    virtual ReplResult< shared< ReplDev > > get_repl_dev(group_id_t group_id) const = 0;
 
     /// @brief Iterate over all repl devs and then call the callback provided
     /// @param cb Callback with repl dev
@@ -97,11 +98,13 @@ public:
 
     // Called when the repl dev is found upon restart of the homestore instance. The caller should return an instance of
     // Listener corresponding to the ReplDev which will be used to perform the precommit/commit/rollback.
-    virtual std::unique_ptr< ReplDevListener > create_repl_dev_listener(uuid_t group_id) = 0;
+    virtual std::unique_ptr< ReplDevListener > create_repl_dev_listener(group_id_t group_id) = 0;
 
-    virtual std::string lookup_peer(uuid_t uuid) const = 0;
+    // Given the uuid of the peer, get their address and port
+    virtual std::pair< std::string, uint16_t > lookup_peer(replica_id_t uuid) const = 0;
 
-    virtual uint16_t lookup_port() const = 0;
+    // Get the current application/server repl uuid
+    virtual replica_id_t get_my_repl_id() const = 0;
 };
 
 } // namespace homestore

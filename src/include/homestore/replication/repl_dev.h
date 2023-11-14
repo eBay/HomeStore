@@ -14,12 +14,7 @@ namespace nuraft {
 template < typename T >
 using ptr = std::shared_ptr< T >;
 
-// class buffer;
-class buffer {
-public:
-    static ptr< buffer > alloc(uint32_t size) { return std::make_shared< buffer >(); }
-}; // Temporary till we get nuraft included by homestore impl
-
+class buffer;
 } // namespace nuraft
 
 namespace homestore {
@@ -30,10 +25,11 @@ using repl_req_ptr_t = boost::intrusive_ptr< repl_req_ctx >;
 
 VENUM(repl_req_state_t, uint32_t,
       INIT = 0,               // Initial state
-      DATA_RECEIVED = 1 << 1, // Data has been received and being written to the storage
-      DATA_WRITTEN = 1 << 2,  // Data has been written to the storage
-      LOG_RECEIVED = 1 << 3,  // Log is received and waiting for data
-      LOG_FLUSHED = 1 << 4    // Log has been flushed
+      BLK_ALLOCATED = 1 << 1, // Local block is allocated
+      DATA_RECEIVED = 1 << 2, // Data has been received and being written to the storage
+      DATA_WRITTEN = 1 << 3,  // Data has been written to the storage
+      LOG_RECEIVED = 1 << 4,  // Log is received and waiting for data
+      LOG_FLUSHED = 1 << 5    // Log has been flushed
 )
 
 struct repl_key {
@@ -47,6 +43,9 @@ struct repl_key {
                 std::hash< uint64_t >()(rk.dsn);
         }
     };
+
+    bool operator==(repl_key const& other) const = default;
+    std::string to_string() const { return fmt::format("server={}, term={}, dsn={}", server_id, term, dsn); }
 };
 
 struct repl_journal_entry;
@@ -80,8 +79,8 @@ public:
 
     //////////////// Replication state related section /////////////////
     std::mutex state_mtx;
-    std::atomic< repl_req_state_t > state{repl_req_state_t::INIT}; // State of the replication request
-    folly::Promise< folly::Unit > data_written_promise;            // Promise to be fulfilled when data is written
+    std::atomic< uint32_t > state{uint32_cast(repl_req_state_t::INIT)}; // State of the replication request
+    folly::Promise< folly::Unit > data_written_promise;                 // Promise to be fulfilled when data is written
 
     //////////////// Communication packet/builder section /////////////////
     sisl::io_blob_list_t pkts;
@@ -156,9 +155,9 @@ public:
     /// write. In cases where caller don't care about the hints can return default blk_alloc_hints.
     ///
     /// @param header Header originally passed with repl_dev::async_alloc_write() api on the leader
-    /// @param Original context passed as part of repl_dev::async_alloc_write
+    /// @param data_size Size needed to be allocated for
     /// @return Expected to return blk_alloc_hints for this write
-    virtual blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header, cintrusive< repl_req_ctx >& ctx) = 0;
+    virtual blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) = 0;
 
     /// @brief Called when the replica set is being stopped
     virtual void on_replica_stop() = 0;
@@ -217,14 +216,23 @@ public:
 
     /// @brief Gets the group_id this repldev is working for
     /// @return group_id
-    virtual uuid_t group_id() const = 0;
+    virtual group_id_t group_id() const = 0;
+
+    /// @brief Gets the block size with which IO will happen on this device
+    /// @return Block size
+    virtual uint32_t get_blk_size() const = 0;
 
     virtual void attach_listener(std::unique_ptr< ReplDevListener > listener) { m_listener = std::move(listener); }
-
-    virtual uint32_t get_blk_size() const = 0;
 
 protected:
     std::unique_ptr< ReplDevListener > m_listener;
 };
 
 } // namespace homestore
+
+template <>
+struct fmt::formatter< homestore::repl_key > : fmt::formatter< std::string > {
+    auto format(const homestore::repl_key& a, format_context& ctx) const {
+        return fmt::formatter< std::string >::format(a.to_string(), ctx);
+    }
+};

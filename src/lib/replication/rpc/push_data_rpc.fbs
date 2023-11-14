@@ -1,0 +1,13 @@
+native_include "boost/uuid/uuid.hpp";
+namespace homestore;
+
+table PushDataRequest {
+    issuer_replica_id : int32;   // Replica id of the issuer
+    raft_term : uint64;          // Raft term number
+    dsn : uint64;                // Data Sequence number
+    user_header: [ubyte];        // User header bytes
+    user_key : [ubyte];          // User key data
+    data_size : uint32;          // Data size, actual data is sent as separate blob not by flatbuffer
+}
+
+root_type PushDataRequest;
