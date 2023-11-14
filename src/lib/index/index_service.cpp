@@ -19,6 +19,7 @@
 #include "index/wb_cache.hpp"
 #include "index/index_cp.hpp"
 #include "common/homestore_utils.hpp"
+#include "common/homestore_assert.hpp"
 #include "device/virtual_dev.hpp"
 #include "device/physical_dev.hpp"
 #include "device/chunk.h"

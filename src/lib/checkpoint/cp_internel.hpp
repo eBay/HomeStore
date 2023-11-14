@@ -14,25 +14,32 @@
  *
  *********************************************************************************/
 #pragma once
-#include <homestore/checkpoint/cp_mgr.hpp>
-#include <homestore/checkpoint/cp.hpp>
-#include <homestore/homestore_decl.hpp>
+#include <atomic>
+#include <array>
+#include <memory>
+#include <mutex>
+
+#include <sisl/logging/logging.h>
+#include <iomgr/iomgr.hpp>
+#include <folly/futures/SharedPromise.h>
 
 namespace homestore {
-
-class DataSvcCPCallbacks : public CPCallbacks {
+class CPManager;
+class CPWatchdog {
 public:
-    DataSvcCPCallbacks(shared< VirtualDev > vdev);
-    virtual ~DataSvcCPCallbacks() = default;
-
-public:
-    std::unique_ptr< CPContext > on_switchover_cp(CP* cur_cp, CP* new_cp) override;
-    folly::Future< bool > cp_flush(CP* cp) override;
-    void cp_cleanup(CP* cp) override;
-    int cp_progress_percent() override;
+    CPWatchdog(CPManager* cp_mgr);
+    void set_cp(CP* cp);
+    void reset_cp();
+    void cp_watchdog_timer();
+    void stop();
 
 private:
-    shared< VirtualDev > m_vdev;
+    CP* m_cp;
+    CPManager* m_cp_mgr;
+    std::shared_mutex m_cp_mtx;
+    Clock::time_point m_last_state_ch_time;
+    uint64_t m_timer_sec{0};
+    iomgr::timer_handle_t m_timer_hdl;
+    uint32_t m_progress_pct{0};
 };
-
 } // namespace homestore

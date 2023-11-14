@@ -20,9 +20,8 @@
 #include <mutex>
 
 #include <sisl/logging/logging.h>
-#include <iomgr/iomgr.hpp>
+#include <sisl/utility/atomic_counter.hpp>
 #include <folly/futures/SharedPromise.h>
-#include "common/homestore_assert.hpp"
 
 /*
  * These are the design requirements of this class. If we don't follow these requirements then there can be serious
@@ -50,6 +49,7 @@ SISL_LOGGING_DECL(cp, replay)
     HS_PERIODIC_DETAILED_LOG(level, cp, "cp_id", cp_id, , , msg, ##__VA_ARGS__)
 #define CP_LOG(level, cp_id, msg, ...) HS_SUBMOD_LOG(level, cp, , "cp_id", cp_id, msg, ##__VA_ARGS__)
 
+typedef int64_t cp_id_t;
 ENUM(cp_status_t, uint8_t,
      cp_unknown, // It is not inited yet.
 
@@ -66,6 +66,16 @@ ENUM(cp_status_t, uint8_t,
      cp_cleaning);
 
 class CPContext;
+class CPManager;
+
+VENUM(cp_consumer_t, uint8_t,
+      HS_CLIENT = 0,       // Client of the homestore module
+      INDEX_SVC = 1,       // Index service module
+      BLK_DATA_SVC = 2,    // Block data service module
+      REPLICATION_SVC = 3, // Replication service module
+      SENTINEL = 4         // Should always be the last in this list
+);
+
 struct CP {
     std::atomic< cp_status_t > m_cp_status{cp_status_t::cp_unknown};
     sisl::atomic_counter< int64_t > m_enter_cnt;
@@ -88,24 +98,5 @@ public:
     std::string to_string() const {
         return fmt::format("CP={}: status={}, enter_count={}", m_cp_id, enum_name(get_status()), m_enter_cnt.get());
     }
-};
-
-class CPManager;
-class CPWatchdog {
-public:
-    CPWatchdog(CPManager* cp_mgr);
-    void set_cp(CP* cp);
-    void reset_cp();
-    void cp_watchdog_timer();
-    void stop();
-
-private:
-    CP* m_cp;
-    CPManager* m_cp_mgr;
-    std::shared_mutex m_cp_mtx;
-    Clock::time_point m_last_state_ch_time;
-    uint64_t m_timer_sec{0};
-    iomgr::timer_handle_t m_timer_hdl;
-    uint32_t m_progress_pct{0};
 };
 } // namespace homestore

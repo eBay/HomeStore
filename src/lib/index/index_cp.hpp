@@ -20,8 +20,8 @@
 #include <homestore/index/index_internal.hpp>
 #include <homestore/index_service.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
+#include <homestore/checkpoint/cp.hpp>
 
-#include "checkpoint/cp.hpp"
 #include "device/virtual_dev.hpp"
 
 SISL_LOGGING_DECL(wbcache)
@@ -37,7 +37,6 @@ public:
     sisl::ConcurrentInsertVector< IndexBufferPtr >::iterator m_dirty_buf_it;
 
 public:
-
     IndexCPContext(CP* cp) : VDevCPContext(cp) {}
     virtual ~IndexCPContext() = default;
 
@@ -97,7 +96,8 @@ public:
         // Use dfs to find if the graph is cycle
         auto it = m_dirty_buf_list.begin();
         while (it != m_dirty_buf_list.end()) {
-            IndexBufferPtr buf = *it;;
+            IndexBufferPtr buf = *it;
+            ;
             std::set< IndexBuffer* > visited;
             check_cycle_recurse(buf, visited);
             ++it;
@@ -152,7 +152,6 @@ public:
         RELEASE_ASSERT_EQ(issue, false, "Found issue with wait_for_leaders");
     }
 };
-
 
 class IndexWBCache;
 class IndexCPCallbacks : public CPCallbacks {
