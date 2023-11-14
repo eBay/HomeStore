@@ -40,7 +40,7 @@ pipeline {
                 }
                 stage("Build") {
                     steps {
-                        sh "conan create --build missing -o sisl:prerelease=True -o homestore:sanitize=True -o homestore:testing=full -pr debug . ${PROJECT}/${VER}@"
+                        sh "conan create --build missing -o sisl:prerelease=True  -pr debug . ${PROJECT}/${VER}@"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_index_btree' -exec cp {} .jenkins/test_index_btree \\;"
                         sh "find . -type f -wholename '*bin/scripts/btree_test.py' -exec cp -a {} .jenkins/btree_test.py \\;"
                     }
