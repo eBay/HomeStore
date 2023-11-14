@@ -5,19 +5,9 @@ include_directories (BEFORE .)
 
 flatbuffers_generate_headers(
     TARGET hs_replication_fb 
-    SCHEMAS rpc/push_data_rpc.fbs
+    SCHEMAS push_data_rpc.fbs
     FLAGS "--cpp"
 )
-#build_flatbuffers(
-#    rpc/push_data_rpc.fbs
-#    ""
-#    hs_replication_fb
-#    ""
-#    "${CMAKE_CURRENT_BINARY_DIR}/generated/"
-#    ""
-#    ""
-#    )
-#target_link_libraries(hs_replication_fb ${COMMON_DEPS})
 
 add_library(hs_replication OBJECT)
 target_sources(hs_replication PRIVATE
