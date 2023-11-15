@@ -22,7 +22,7 @@
 #include <homestore/homestore.hpp>
 #include <homestore/meta_service.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
-#include "checkpoint/cp.hpp"
+#include <homestore/checkpoint/cp.hpp>
 #include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;

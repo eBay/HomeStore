@@ -14,10 +14,10 @@
  * *
  * *********************************************************************************/
 #include <homestore/checkpoint/cp_mgr.hpp>
+#include <homestore/checkpoint/cp.hpp>
 #include <homestore/meta_service.hpp>
 
 #include "append_blk_allocator.h"
-#include "checkpoint/cp.hpp"
 
 namespace homestore {
 

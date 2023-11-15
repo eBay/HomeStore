@@ -25,10 +25,10 @@
 #include <sisl/utility/enum.hpp>
 
 #include <homestore/superblk_handler.hpp>
+#include <homestore/checkpoint/cp.hpp>
 
 namespace homestore {
 static constexpr size_t MAX_CP_COUNT{2};
-typedef int64_t cp_id_t;
 
 class CPMgrMetrics : public sisl::MetricsGroup {
 public:
@@ -46,15 +46,6 @@ public:
     ~CPMgrMetrics() { deregister_me_from_farm(); }
 };
 
-VENUM(cp_consumer_t, uint8_t,
-      HS_CLIENT = 0,       // Client of the homestore module
-      INDEX_SVC = 1,       // Index service module
-      BLK_DATA_SVC = 2,    // Block data service module
-      REPLICATION_SVC = 3, // Replication service module
-      SENTINEL = 4         // Should always be the last in this list
-);
-
-struct CP;
 class CPContext {
 protected:
     CP* m_cp;
