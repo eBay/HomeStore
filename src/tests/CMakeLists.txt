@@ -95,6 +95,10 @@ if (${io_tests})
     target_sources(test_solo_repl_dev PRIVATE test_solo_repl_dev.cpp)
     target_link_libraries(test_solo_repl_dev homestore ${COMMON_TEST_DEPS} GTest::gmock)
 
+    add_executable(test_home_raft_logstore)
+    target_sources(test_home_raft_logstore PRIVATE test_home_raft_logstore.cpp)
+    target_link_libraries(test_home_raft_logstore homestore ${COMMON_TEST_DEPS} GTest::gmock)
+
     can_build_epoll_io_tests(epoll_tests)
     if(${epoll_tests})
         add_test(NAME LogStore-Epoll COMMAND ${CMAKE_SOURCE_DIR}/test_wrap.sh ${CMAKE_BINARY_DIR}/bin/test_log_store)
