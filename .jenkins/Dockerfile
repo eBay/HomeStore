@@ -12,6 +12,7 @@ RUN set -eux; \
     apt-get install net-tools; \
     rm -rf /var/lib/apt/lists/*;
 
+
 COPY scripts /usr/local/bin/scripts
 COPY test_index_btree /usr/local/bin/test_index_btree
 #COPY btree_test.py /usr/local/bin/scripts/btree_test.py
