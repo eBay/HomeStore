@@ -13,9 +13,9 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*;
 
 
-COPY scripts /usr/local/bin/scripts
+#COPY scripts /usr/local/bin/scripts
 COPY test_index_btree /usr/local/bin/test_index_btree
-#COPY btree_test.py /usr/local/bin/scripts/btree_test.py
+COPY btree_test.py /usr/local/bin/scripts/btree_test.py
 #COPY hs_svc_tool /usr/local/bin/hs_svc_tool
 
 EXPOSE 5000
