@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-## @file btree_test.py
-
 import subprocess
 import os
 import sys
