@@ -145,7 +145,7 @@ void MetaBlkService::load_ssb() {
     const BlkId bid = m_meta_vdev_context->first_blkid;
     HS_LOG(INFO, metablk, "Loading meta ssb blkid: {}", bid.to_string());
 
-    m_sb_vdev->commit_blk(bid);
+    m_sb_vdev->commit_blk(bid, true);
     m_ssb = r_cast< meta_blk_sb* >(hs_utils::iobuf_alloc(block_size(), sisl::buftag::metablk, align_size()));
     std::memset(uintptr_cast(m_ssb), 0, block_size());
     read(bid, uintptr_cast(m_ssb), block_size());
@@ -251,7 +251,7 @@ bool MetaBlkService::scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_
         prev_meta_bid = bid;
 
         // mark allocated for this block
-        m_sb_vdev->commit_blk(mblk->hdr.h.bid);
+        m_sb_vdev->commit_blk(mblk->hdr.h.bid, true);
 
         // populate overflow blk chain;
         auto obid = mblk->hdr.h.ovf_bid;
@@ -301,12 +301,12 @@ bool MetaBlkService::scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_
             ovf_blk_hdrs[obid.to_integer()] = ovf_hdr;
 
             // allocate overflow bid;
-            m_sb_vdev->commit_blk(obid);
+            m_sb_vdev->commit_blk(obid, true);
 
             // allocate data bid
             auto* data_bid = ovf_hdr->get_data_bid();
             for (decltype(ovf_hdr->h.nbids) i{0}; i < ovf_hdr->h.nbids; ++i) {
-                m_sb_vdev->commit_blk(data_bid[i]);
+                m_sb_vdev->commit_blk(data_bid[i], true);
             }
 
             // move on to next overflow blk

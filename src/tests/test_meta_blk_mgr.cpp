@@ -119,6 +119,11 @@ public:
         return true;
     }
 
+    void restart_homestore() {
+        test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", {{HS_SERVICE::META, {.size_pct = 85.0}}},
+                                                   nullptr /* before_svc_start_cb */, true /* restart */);
+    }
+
     uint64_t io_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
 
     void gen_rand_buf(uint8_t* s, const uint32_t len) {
@@ -773,6 +778,31 @@ TEST_F(VMetaBlkMgrTest, random_dependency_test) {
 
     this->deregister_client_inlcuding_dependencies();
 
+    this->shutdown();
+}
+
+TEST_F(VMetaBlkMgrTest, recovery_test) {
+    mtype = "Test_MetaService_recovery";
+    reset_counters();
+    m_start_time = Clock::now();
+    this->register_client();
+
+    // since we are using overflow metablk with 64K metadata, which will cause consume anther 2 metablks
+    auto max_write_times = m_mbm->available_blks() * m_mbm->block_size() / (64 * Ki + 8 * Ki);
+    // write 1/2 of the available blks;
+    for (uint64_t i = 0; i < max_write_times / 2; i++) {
+        EXPECT_GT(this->do_sb_write(true, uint64_cast(64 * Ki)), uint64_cast(0));
+    }
+
+    // restart homestore
+    this->restart_homestore();
+    // write another 1/2 of the available blks to make sure we can write after recovery
+    // during the write, HS metablk service will check the allocated metablk is unique
+    reset_counters();
+    this->register_client();
+    for (uint64_t i = 0; i < (max_write_times / 2); i++) {
+        EXPECT_GT(this->do_sb_write(true, uint64_cast(64 * Ki)), uint64_cast(0));
+    }
     this->shutdown();
 }
 

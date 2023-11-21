@@ -149,8 +149,9 @@ public:
     /// during recovery where alloc_blk is called but before it was checkpointed, it crashed and we are trying to
     /// recover Please note that even calling this method is not guaranteed to persisted until checkpoint is taken.
     /// @param blkid BlkId to commit explicitly.
+    /// @param recovering : Is this commit happening during recovery
     /// @return Allocation Status
-    virtual BlkAllocStatus commit_blk(BlkId const& blkid);
+    virtual BlkAllocStatus commit_blk(BlkId const& blkid, bool recovering = false);
 
     virtual void free_blk(BlkId const& b, VDevCPContext* vctx = nullptr);
 
