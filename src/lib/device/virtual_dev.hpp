@@ -151,7 +151,7 @@ public:
     /// @param blkid BlkId to commit explicitly.
     /// @param recovering : Is this commit happening during recovery
     /// @return Allocation Status
-    virtual BlkAllocStatus commit_blk(BlkId const& blkid, bool recovering = false);
+    virtual BlkAllocStatus commit_blk(BlkId const& blkid);
 
     virtual void free_blk(BlkId const& b, VDevCPContext* vctx = nullptr);
 

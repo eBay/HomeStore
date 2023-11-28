@@ -145,9 +145,10 @@ bool VirtualDev::is_blk_alloced(BlkId const& blkid) const {
     return m_dmgr.get_chunk(blkid.chunk_num())->blk_allocator()->is_blk_alloced(blkid);
 }
 
-BlkAllocStatus VirtualDev::commit_blk(BlkId const& blkid, bool recovering) {
+BlkAllocStatus VirtualDev::commit_blk(BlkId const& blkid) {
     Chunk* chunk = m_dmgr.get_chunk_mutable(blkid.chunk_num());
     HS_LOG(DEBUG, device, "commit_blk: bid {}", blkid.to_string());
+    auto const recovering = homestore::hs()->is_initializing();
     if (!recovering) {
         HS_DBG_ASSERT(is_blk_alloced(blkid), "commiting blkid {} not allocated", blkid.to_string());
     } else {
