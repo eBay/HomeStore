@@ -923,7 +923,7 @@ SISL_OPTION_GROUP(
     (bitmap, "", "bitmap", "bitmap test", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 int main(int argc, char* argv[]) {
-    ::testing::GTEST_FLAG(filter) = "*random*";
+    ::testing::GTEST_FLAG(filter) = "*random*:VMetaBlkMgrTest.recovery_test";
     ::testing::InitGoogleTest(&argc, argv);
     SISL_OPTIONS_LOAD(argc, argv, logging, test_meta_blk_mgr, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_meta_blk_mgr");
