@@ -16,6 +16,7 @@ struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::
 public:
     virtual ~repl_req_ctx();
     int64_t get_lsn() const { return lsn; }
+    MultiBlkId const& get_local_blkid() const { return local_blkid; }
 
 private:
     sisl::blob header;                          // User header
