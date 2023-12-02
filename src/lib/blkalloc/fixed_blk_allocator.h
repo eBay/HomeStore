@@ -34,6 +34,7 @@ public:
 
     BlkAllocStatus alloc_contiguous(BlkId& bid) override;
     BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
+    BlkAllocStatus mark_blk_allocated(BlkId const& b) override;
     void free(BlkId const& b) override;
 
     blk_num_t available_blks() const override;

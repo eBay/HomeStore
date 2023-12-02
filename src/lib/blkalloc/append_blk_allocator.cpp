@@ -121,6 +121,8 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
 
 BlkAllocStatus AppendBlkAllocator::alloc_on_disk(BlkId const&) { return BlkAllocStatus::SUCCESS; }
 
+BlkAllocStatus AppendBlkAllocator::mark_blk_allocated(BlkId const&) { return BlkAllocStatus::SUCCESS; }
+
 void AppendBlkAllocator::free_on_disk(BlkId const&) {}
 
 bool AppendBlkAllocator::is_blk_alloced_on_disk(BlkId const&, bool) const { return false; }

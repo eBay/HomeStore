@@ -78,8 +78,9 @@ public:
     BlkAllocStatus alloc_contiguous(BlkId& bid) override;
     BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
     void free(BlkId const& b) override;
-
     BlkAllocStatus alloc_on_disk(BlkId const& in_bid) override;
+    BlkAllocStatus mark_blk_allocated(BlkId const& b) override;
+
     void free_on_disk(BlkId const& b) override;
     bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const override;
 
