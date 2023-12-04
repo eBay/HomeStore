@@ -23,22 +23,15 @@ Chunk::Chunk(PhysicalDev* pdev, const chunk_info& cinfo, uint32_t chunk_slot) :
         m_chunk_info{cinfo}, m_pdev{pdev}, m_chunk_slot{chunk_slot}, m_stream_id{pdev->chunk_to_stream_id(cinfo)} {}
 
 std::string Chunk::to_string() const {
-    return fmt::format("chunk_id={}, vdev_id={}, start_offset={}, size={}, end_of_chunk={}, slot_num_in_pdev={} "
+    return fmt::format("chunk_id={}, vdev_id={}, start_offset={}, size={}, slot_num_in_pdev={} "
                        "pdev_ordinal={} vdev_ordinal={} stream_id={}",
-                       chunk_id(), vdev_id(), start_offset(), in_bytes(size()), end_of_chunk(), slot_number(),
-                       pdev_ordinal(), vdev_ordinal(), stream_id());
+                       chunk_id(), vdev_id(), start_offset(), in_bytes(size()), slot_number(), pdev_ordinal(),
+                       vdev_ordinal(), stream_id());
 }
 
 void Chunk::set_user_private(const sisl::blob& data) {
     std::unique_lock lg{m_mgmt_mutex};
     m_chunk_info.set_user_private(data);
-    m_chunk_info.compute_checksum();
-    write_chunk_info();
-}
-
-void Chunk::update_end_of_chunk(uint64_t end_offset) {
-    std::unique_lock lg{m_mgmt_mutex};
-    m_chunk_info.end_of_chunk_size = end_offset;
     m_chunk_info.compute_checksum();
     write_chunk_info();
 }
@@ -59,7 +52,6 @@ nlohmann::json Chunk::get_status([[maybe_unused]] int log_level) const {
     j["vdev_id"] = vdev_id();
     j["start_offset"] = start_offset();
     j["size"] = size();
-    j["end_of_chunk_size"] = end_of_chunk();
     j["slot_alloced?"] = is_busy();
     return j;
 }

@@ -37,6 +37,7 @@
 #include <homestore/superblk_handler.hpp>
 #include "common/homestore_config.hpp"
 #include "device/chunk.h"
+#include "device/journal_vdev.hpp"
 
 namespace homestore {
 
@@ -51,15 +52,15 @@ static constexpr uint32_t max_log_group{2};
 /*
  * LogGroup Layout:
  *
- *   <----        Log Group Header         ---> <--   Record 1   --> <--   Record 2   -->        <-- -  Inline data area  --> 
+ *   <----        Log Group Header         ---> <--   Record 1   --> <--   Record 2   -->        <-- -  Inline data area  -->
  *  |----------------------------------------- |--------------------|--------------------|      |----------------|-----------|----------------|
  *  |#records|...| oob area   | inline area    | Size | data offset | Size | data offset | ...  | Record #1 data |     ...   |   OOB Record 1 |
  *  |----------------------------------------- |--------------------|--------------------|      |----------------|-----------|----------------|
- *                      |             |                     |                                     ^                            ^ 
+ *                      |             |                     |                                     ^                            ^
  *                      |             |                     |                                     |                            |
  *                      |             |                      -------------------------------------|                            |
  *                      |             ------------------------------------------------------------|                            |
- *                      |------------------------------------------------------------------------------------------------------|         
+ *                      |------------------------------------------------------------------------------------------------------|
  */
 // clang-format on
 
@@ -549,7 +550,8 @@ class JournalVirtualDev;
 
 class log_stream_reader {
 public:
-    log_stream_reader(off_t device_cursor, JournalVirtualDev* vdev, uint64_t min_read_size);
+    log_stream_reader(off_t device_cursor, JournalVirtualDev* vdev, shared< JournalVirtualDev::Descriptor > vdev_jd,
+                      uint64_t min_read_size);
     log_stream_reader(const log_stream_reader&) = delete;
     log_stream_reader& operator=(const log_stream_reader&) = delete;
     log_stream_reader(log_stream_reader&&) noexcept = delete;
@@ -564,6 +566,7 @@ private:
 
 private:
     JournalVirtualDev* m_vdev;
+    shared< JournalVirtualDev::Descriptor > m_vdev_jd; // Journal descriptor.
     sisl::byte_view m_cur_log_buf;
     off_t m_first_group_cursor;
     off_t m_cur_read_bytes{0};
@@ -805,7 +808,8 @@ private:
     bool m_stopped{false}; // Is Logdev stopped. We don't need lock here, because it is updated under flush lock
     logstore_family_id_t m_family_id; // The family id this logdev is part of
     JournalVirtualDev* m_vdev{nullptr};
-    HomeStoreSafePtr m_hs; // Back pointer to homestore
+    shared< JournalVirtualDev::Descriptor > m_vdev_jd; // Journal descriptor.
+    HomeStoreSafePtr m_hs;                             // Back pointer to homestore
 
     std::multimap< logid_t, logstore_id_t > m_garbage_store_ids;
     Clock::time_point m_last_flush_time;

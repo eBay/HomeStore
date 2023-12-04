@@ -436,8 +436,8 @@ public:
         test_common::HSTestHelper::start_homestore(
             "test_log_store",
             {{HS_SERVICE::META, {.size_pct = 5.0}},
-             {HS_SERVICE::LOG_REPLICATED, {.size_pct = 42.0}},
-             {HS_SERVICE::LOG_LOCAL, {.size_pct = 42.0}}},
+             {HS_SERVICE::LOG_REPLICATED, {.size_pct = 5.0, .chunk_size = 32 * 1024 * 1024}},
+             {HS_SERVICE::LOG_LOCAL, {.size_pct = 5.0, .chunk_size = 32 * 1024 * 1024}}},
             [this, restart, n_log_stores]() {
                 if (restart) {
                     for (uint32_t i{0}; i < n_log_stores; ++i) {

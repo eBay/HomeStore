@@ -79,13 +79,13 @@ struct chunk_info {
 
     uint64_t chunk_start_offset{0}; // 0: Start offset of the chunk within a pdev
     uint64_t chunk_size{0};         // 8: Chunk size
-    uint64_t end_of_chunk_size{0};  // 16: The offset indicates end of chunk.
-    uint32_t vdev_id{0};            // 24: Virtual device id this chunk hosts. UINT32_MAX if chunk is free
-    uint32_t chunk_id{0};           // 28: ID for this chunk - unique for entire homestore across devices
-    uint32_t chunk_ordinal{0};      // 32: Chunk ordinal within the vdev on this pdev
-    uint8_t chunk_allocated{0x00};  // 36: Is chunk allocated or free
-    uint16_t checksum{0};           // 37: checksum of this chunk info
-    uint8_t padding[25]{};          // 39: pad to make it 128 bytes total
+
+    uint32_t vdev_id{0};           // 24: Virtual device id this chunk hosts. UINT32_MAX if chunk is free
+    uint32_t chunk_id{0};          // 28: ID for this chunk - unique for entire homestore across devices
+    uint32_t chunk_ordinal{0};     // 32: Chunk ordinal within the vdev on this pdev
+    uint8_t chunk_allocated{0x00}; // 36: Is chunk allocated or free
+    uint16_t checksum{0};          // 37: checksum of this chunk info
+    uint8_t padding[25]{};         // 39: pad to make it 128 bytes total
     uint8_t chunk_selector_private[selector_private_size]{}; // 64: Chunk selector private area
     uint8_t user_private[user_private_size]{};               // 128: Opaque user of the chunk information
 
@@ -99,7 +99,9 @@ struct chunk_info {
         std::memcpy(&chunk_selector_private, data.cbytes(), std::min(data.size(), uint32_cast(selector_private_size)));
     }
     void set_user_private(const sisl::blob& data) {
-        std::memcpy(&user_private, data.cbytes(), std::min(data.size(), uint32_cast(user_private_size)));
+        if (data.size() != 0) {
+            std::memcpy(&user_private, data.cbytes(), std::min(data.size(), uint32_cast(user_private_size)));
+        }
     }
 
     void compute_checksum() {
@@ -171,8 +173,10 @@ public:
     /// @param size: Size of each chunk
     /// @param ordinal: Ordinal for a pdev within the vdev. This is useful to match similar vdevs from different pdevs
     /// for mirroring
+    /// @param private_data: data to be stored in chunk private space.
     /// @return Shared instance of chunk class created
-    shared< Chunk > create_chunk(uint32_t chunk_id, uint32_t vdev_id, uint64_t size, uint32_t ordinal);
+    shared< Chunk > create_chunk(uint32_t chunk_id, uint32_t vdev_id, uint64_t size, uint32_t ordinal,
+                                 const sisl::blob& private_data = {});
 
     void load_chunks(std::function< bool(cshared< Chunk >&) >&& chunk_found_cb);
     void remove_chunks(std::vector< shared< Chunk > >& chunks);
@@ -227,7 +231,8 @@ public:
 
 private:
     void do_remove_chunk(cshared< Chunk >& chunk);
-    void populate_chunk_info(chunk_info* cinfo, uint32_t vdev_id, uint64_t size, uint32_t chunk_id, uint32_t ordinal);
+    void populate_chunk_info(chunk_info* cinfo, uint32_t vdev_id, uint64_t size, uint32_t chunk_id, uint32_t ordinal,
+                             const sisl::blob& private_data);
     void free_chunk_info(chunk_info* cinfo);
     ChunkInterval find_next_chunk_area(uint64_t size) const;
 };

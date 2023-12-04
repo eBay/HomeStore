@@ -59,7 +59,11 @@ void LogDev::start(bool format, JournalVirtualDev* vdev) {
     HS_LOG_ASSERT((m_store_found_cb != nullptr), "Expected Log store found callback to be registered");
     HS_LOG_ASSERT((m_logfound_cb != nullptr), "Expected Logs found callback to be registered");
 
+    // Each family has one journal descriptor.
     m_vdev = vdev;
+    m_vdev_jd = m_vdev->open(m_family_id);
+    RELEASE_ASSERT(m_vdev_jd, "Journal descriptor is null");
+
     if (m_flush_size_multiple == 0) { m_flush_size_multiple = m_vdev->optimal_page_size(); }
     THIS_LOGDEV_LOG(INFO, "Initializing logdev with flush size multiple={}", m_flush_size_multiple);
 
@@ -73,7 +77,8 @@ void LogDev::start(bool format, JournalVirtualDev* vdev) {
     if (format) {
         HS_LOG_ASSERT(m_logdev_meta.is_empty(), "Expected meta to be not present");
         m_logdev_meta.create();
-        m_vdev->update_data_start_offset(0);
+
+        m_vdev_jd->update_data_start_offset(0);
     } else {
         HS_LOG_ASSERT(!m_logdev_meta.is_empty(), "Expected meta data to be read already before loading");
         auto const store_list = m_logdev_meta.load();
@@ -86,12 +91,13 @@ void LogDev::start(bool format, JournalVirtualDev* vdev) {
         THIS_LOGDEV_LOG(INFO, "get start vdev offset during recovery {} log indx {} ",
                         m_logdev_meta.get_start_dev_offset(), m_logdev_meta.get_start_log_idx());
 
-        m_vdev->update_data_start_offset(m_logdev_meta.get_start_dev_offset());
+        m_vdev_jd->update_data_start_offset(m_logdev_meta.get_start_dev_offset());
         m_log_idx = m_logdev_meta.get_start_log_idx();
         do_load(m_logdev_meta.get_start_dev_offset());
         m_log_records->reinit(m_log_idx);
         m_last_flush_idx = m_log_idx - 1;
     }
+
     m_flush_timer_hdl = iomanager.schedule_global_timer(
         HS_DYNAMIC_CONFIG(logstore.flush_timer_frequency_us) * 1000, true, nullptr /* cookie */,
         iomgr::reactor_regex::all_worker,
@@ -143,7 +149,7 @@ void LogDev::stop() {
 }
 
 void LogDev::do_load(const off_t device_cursor) {
-    log_stream_reader lstream{device_cursor, m_vdev, m_flush_size_multiple};
+    log_stream_reader lstream{device_cursor, m_vdev, m_vdev_jd, m_flush_size_multiple};
     logid_t loaded_from{-1};
 
     off_t group_dev_offset;
@@ -201,7 +207,7 @@ void LogDev::do_load(const off_t device_cursor) {
 
     // Update the tail offset with where we finally end up loading, so that new append entries can be written from
     // here.
-    m_vdev->update_tail_offset(group_dev_offset);
+    m_vdev_jd->update_tail_offset(group_dev_offset);
 }
 
 void LogDev::assert_next_pages(log_stream_reader& lstream) {
@@ -236,7 +242,7 @@ int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_nu
 
 log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_record_header) {
     auto buf = sisl::make_byte_array(initial_read_size, m_flush_size_multiple, sisl::buftag::logread);
-    m_vdev->sync_pread(buf->bytes(), initial_read_size, key.dev_offset);
+    m_vdev_jd->sync_pread(buf->bytes(), initial_read_size, key.dev_offset);
 
     auto* header = r_cast< const log_group_header* >(buf->cbytes());
     HS_REL_ASSERT_EQ(header->magic_word(), LOG_GROUP_HDR_MAGIC, "Log header corrupted with magic mismatch!");
@@ -263,7 +269,7 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
         auto const rounded_size =
             sisl::round_up(record_header->size + data_offset - rounded_data_offset, m_vdev->align_size());
         auto new_buf = sisl::make_byte_array(rounded_size, m_vdev->align_size(), sisl::buftag::logread);
-        m_vdev->sync_pread(new_buf->bytes(), rounded_size, key.dev_offset + rounded_data_offset);
+        m_vdev_jd->sync_pread(new_buf->bytes(), rounded_size, key.dev_offset + rounded_data_offset);
         ret_view = sisl::byte_view{new_buf, s_cast< uint32_t >(data_offset - rounded_data_offset), record_header->size};
     }
 
@@ -385,10 +391,11 @@ bool LogDev::flush_if_needed(int64_t threshold_size) {
         auto sz = m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
         HS_REL_ASSERT_GE((sz - lg->actual_data_size()), 0, "size {} lg size{}", sz, lg->actual_data_size());
 
-        off_t offset = m_vdev->alloc_next_append_blk(lg->header()->total_size());
+        off_t offset = m_vdev_jd->alloc_next_append_blk(lg->header()->total_size());
         lg->m_log_dev_offset = offset;
         HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
         THIS_LOGDEV_LOG(TRACE, "Flush prepared, flushing data size={} at offset={}", lg->actual_data_size(), offset);
+
         do_flush(lg);
         return true;
     } else {
@@ -419,7 +426,7 @@ void LogDev::do_flush_write(LogGroup* lg) {
     THIS_LOGDEV_LOG(TRACE, "vdev offset={} log group total size={}", lg->m_log_dev_offset, lg->header()->total_size());
 
     // write log
-    m_vdev->async_pwritev(lg->iovecs().data(), int_cast(lg->iovecs().size()), lg->m_log_dev_offset)
+    m_vdev_jd->async_pwritev(lg->iovecs().data(), int_cast(lg->iovecs().size()), lg->m_log_dev_offset)
         .thenValue([this, lg](auto) { on_flush_completion(lg); });
 }
 
@@ -524,7 +531,7 @@ uint64_t LogDev::truncate(const logdev_key& key) {
         HS_PERIODIC_LOG(INFO, logstore, "Truncating log device upto log_id={} vdev_offset={} truncated {} log records",
                         key.idx, key.dev_offset, num_records_to_truncate);
         m_log_records->truncate(key.idx);
-        m_vdev->truncate(key.dev_offset);
+        m_vdev_jd->truncate(key.dev_offset);
         m_last_truncate_idx = key.idx;
 
         {
@@ -551,7 +558,6 @@ uint64_t LogDev::truncate(const logdev_key& key) {
 
             // We can remove the rollback records of those upto which logid is getting truncated
             m_logdev_meta.remove_rollback_record_upto(key.idx, false /* persist_now */);
-
             m_logdev_meta.persist();
 #ifdef _PRERELEASE
             if (garbage_collect && iomgr_flip::instance()->test_flip("logdev_abort_after_garbage")) {

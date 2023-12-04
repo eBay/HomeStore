@@ -120,6 +120,7 @@ void LogStoreFamily::device_truncate(const std::shared_ptr< truncate_req >& treq
         iomanager.run_on_forget(logstore_service().truncate_thread(), [this, treq]() {
             const logdev_key trunc_upto = do_device_truncate(treq->dry_run);
             bool done{false};
+
             if (treq->cb || treq->wait_till_done) {
                 {
                     std::lock_guard< std::mutex > lk{treq->mtx};
@@ -129,7 +130,10 @@ void LogStoreFamily::device_truncate(const std::shared_ptr< truncate_req >& treq
             }
             if (done) {
                 if (treq->cb) { treq->cb(treq->m_trunc_upto_result); }
-                if (treq->wait_till_done) { treq->cv.notify_one(); }
+                if (treq->wait_till_done) {
+                    std::lock_guard< std::mutex > lk{treq->mtx};
+                    treq->cv.notify_one();
+                }
             }
             m_log_dev.unlock_flush();
         });

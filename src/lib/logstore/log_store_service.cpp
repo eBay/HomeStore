@@ -43,7 +43,7 @@ LogStoreService::LogStoreService() :
                             std::make_unique< LogStoreFamily >(CTRL_LOG_FAMILY_IDX)} {}
 
 folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, logstore_family_id_t family,
-                                                              uint32_t num_chunks) {
+                                                              uint32_t chunk_size) {
     const auto atomic_page_size = hs()->device_mgr()->atomic_page_size(HSDevType::Fast);
 
     hs_vdev_context hs_ctx;
@@ -62,9 +62,11 @@ folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, log
     // future, we can let consumer set it by then;
     auto vdev =
         hs()->device_mgr()->create_vdev(vdev_parameters{.vdev_name = name,
-                                                        .vdev_size = size,
-                                                        .num_chunks = num_chunks,
+                                                        .size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC,
+                                                        .vdev_size = 0,
+                                                        .num_chunks = 0,
                                                         .blk_size = atomic_page_size,
+                                                        .chunk_size = chunk_size,
                                                         .dev_type = HSDevType::Fast,
                                                         .alloc_type = blk_allocator_type_t::none,
                                                         .chunk_sel_type = chunk_selector_type_t::ROUND_ROBIN,

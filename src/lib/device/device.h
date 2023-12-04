@@ -42,15 +42,17 @@ struct vdev_info {
     uint32_t num_mirrors{0};                   // 12: Total number of mirrors
     uint32_t blk_size{0};                      // 16: IO block size for this vdev
     uint32_t num_primary_chunks{0};            // 20: number of primary chunks
-    uint8_t slot_allocated{0};                 // 24: Is this current slot allocated
-    uint8_t failed{0};                         // 25: set to true if disk is replaced
-    uint8_t hs_dev_type{0};                    // 26: PDev dev type (as in fast or data)
-    uint8_t multi_pdev_choice{0};              // 27: Choice when multiple pdevs are present (vdev_multi_pdev_opts_t)
-    char name[64];                             // 28: Name of the vdev
-    uint16_t checksum{0};                      // 92: Checksum of this entire Block
-    uint8_t alloc_type;                        // 94: Allocator type of this vdev
-    uint8_t chunk_sel_type;                    // 95: Chunk Selector type of this vdev_id
-    uint8_t padding[160]{};                    // 96: Pad to make it 256 bytes total
+    uint32_t chunk_size{0};                    // 24: chunk size used in vdev.
+    vdev_size_type_t size_type{};              // 28: Whether its a static or dynamic type.
+    uint8_t slot_allocated{0};                 // 29: Is this current slot allocated
+    uint8_t failed{0};                         // 30: set to true if disk is replaced
+    uint8_t hs_dev_type{0};                    // 31: PDev dev type (as in fast or data)
+    uint8_t multi_pdev_choice{0};              // 32: Choice when multiple pdevs are present (vdev_multi_pdev_opts_t)
+    char name[64];                             // 33: Name of the vdev
+    uint16_t checksum{0};                      // 97: Checksum of this entire Block
+    uint8_t alloc_type;                        // 98: Allocator type of this vdev
+    uint8_t chunk_sel_type;                    // 99: Chunk Selector type of this vdev_id
+    uint8_t padding[155]{};                    // 100: Pad to make it 256 bytes total
     uint8_t user_private[user_private_size]{}; // 128: User specific information
 
     uint32_t get_vdev_id() const { return vdev_id; }
@@ -94,11 +96,13 @@ ENUM(chunk_selector_t, uint8_t, // What are the options to select chunk to alloc
 
 struct vdev_parameters {
     std::string vdev_name;                  // Name of the vdev
+    vdev_size_type_t size_type{};           // Wether size is static or dynamic.
     uint64_t vdev_size;                     // Current Vdev size.
-    uint32_t num_chunks;                    // Total number of primary chunks.
+    uint32_t num_chunks{};                  // Total number of primary chunks.
                                             // NOTE: If pdev opts is ALL_PDEV_STRIPED, then num_chunks would round off
                                             // to number of pdevs evenly
     uint32_t blk_size;                      // Block size vdev operates on
+    uint32_t chunk_size{};                  // Chunk size provided for dynamic vdev.
     HSDevType dev_type;                     // Which physical device type this vdev belongs to (FAST or DATA)
     blk_allocator_type_t alloc_type;        // which allocator type this vdev wants to be with;
     chunk_selector_type_t chunk_sel_type;   // which chunk selector type this vdev wants to be with;
@@ -154,21 +158,28 @@ public:
     shared< VirtualDev > create_vdev(vdev_parameters&& vdev_param);
 
     const Chunk* get_chunk(uint32_t chunk_id) const {
+        std::unique_lock lg{m_vdev_mutex};
         return (chunk_id == INVALID_CHUNK_ID) ? nullptr : m_chunks[chunk_id].get();
     }
 
     Chunk* get_chunk_mutable(uint32_t chunk_id) {
+        std::unique_lock lg{m_vdev_mutex};
         return (chunk_id == INVALID_CHUNK_ID) ? nullptr : m_chunks[chunk_id].get();
     }
 
     uint32_t atomic_page_size(HSDevType dtype) const;
     uint32_t optimal_page_size(HSDevType dtype) const;
+    uint32_t align_size(HSDevType dtype) const;
 
     std::vector< PhysicalDev* > get_pdevs_by_dev_type(HSDevType dtype) const;
     std::vector< shared< VirtualDev > > get_vdevs() const;
 
     uint64_t total_capacity() const;
     uint64_t total_capacity(HSDevType dtype) const;
+
+    shared< Chunk > create_chunk(HSDevType dev_type, uint32_t vdev_id, uint64_t chunk_size, const sisl::blob& data);
+    void remove_chunk(shared< Chunk > chunk);
+    void remove_chunk_locked(shared< Chunk > chunk);
 
 private:
     void load_vdevs();
@@ -180,5 +191,53 @@ private:
 
     const std::vector< PhysicalDev* >& pdevs_by_type_internal(HSDevType dtype) const;
 }; // class DeviceManager
+
+// Chunk pool is used to get chunks when there is no space
+// and its cheaper compared to create a chunk on the fly.
+// Creating chunk on the fly causes sync write.
+class ChunkPool {
+public:
+    struct Params {
+        uint64_t pool_capacity;
+        // Private data used when creating chunks.
+        std::function< sisl::blob() > init_private_data_cb;
+        uint8_t hs_dev_type;
+        uint32_t vdev_id;
+        uint64_t chunk_size;
+    };
+
+    ChunkPool(DeviceManager& dmgr, Params&& param);
+    ~ChunkPool();
+
+    // Start the chunk pool.
+    void start();
+
+    // Add chunk to the pool. If the queue is full,
+    // chunk removed from the system. Returns if
+    // if we could reuse chunk by adding back to pool.
+    bool enqueue(shared< Chunk >& chunk);
+
+    // Get a chunk from the pool.
+    shared< Chunk > dequeue();
+
+    // Returns the capacity of the chunk pool.
+    uint64_t capacity() { return m_params.pool_capacity; }
+    uint64_t size() { return m_pool.size(); }
+
+private:
+    // Producer thread.
+    void producer();
+
+private:
+    DeviceManager& m_dmgr;
+    Params m_params;
+    std::list< shared< Chunk > > m_pool;
+    uint32_t m_pool_capacity;
+    std::condition_variable m_pool_cv;
+    std::mutex m_pool_mutex;
+    std::thread m_producer_thread;
+    bool m_run_pool{false};
+    folly::Promise< folly::Unit > m_pool_halt;
+};
 
 } // namespace homestore
