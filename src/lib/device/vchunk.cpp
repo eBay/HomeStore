@@ -23,6 +23,8 @@ void VChunk::set_user_private(const sisl::blob& data) { m_internal_chunk->set_us
 
 const uint8_t* VChunk::get_user_private() const { return m_internal_chunk->user_private(); };
 
+blk_num_t VChunk::get_total_blks() const { return m_internal_chunk->blk_allocator()->get_total_blks(); }
+
 blk_num_t VChunk::available_blks() const { return m_internal_chunk->blk_allocator()->available_blks(); }
 
 blk_num_t VChunk::get_freeable_nblks() const { return m_internal_chunk->blk_allocator()->get_freeable_nblks(); }

@@ -29,6 +29,7 @@ public:
 
     void set_user_private(const sisl::blob& data);
     const uint8_t* get_user_private() const;
+    blk_num_t get_total_blks() const;
     blk_num_t available_blks() const;
     blk_num_t get_freeable_nblks() const;
     blk_num_t get_defrag_nblks() const;
