@@ -109,10 +109,10 @@ struct BtreeTest : public BtreeTestHelper< TestType > {
     class TestIndexServiceCallbacks : public IndexServiceCallbacks {
     public:
         TestIndexServiceCallbacks(BtreeTest* test) : m_test(test) {}
-        std::shared_ptr< IndexTableBase > on_index_table_found(const superblk< index_table_sb >& sb) override {
+        std::shared_ptr< IndexTableBase > on_index_table_found(superblk< index_table_sb >&& sb) override {
             LOGINFO("Index table recovered");
             LOGINFO("Root bnode_id {} version {}", sb->root_node, sb->link_version);
-            m_test->m_bt = std::make_shared< typename T::BtreeType >(sb, m_test->m_cfg);
+            m_test->m_bt = std::make_shared< typename T::BtreeType >(std::move(sb), m_test->m_cfg);
             return m_test->m_bt;
         }
 
@@ -464,10 +464,10 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType > {
     class TestIndexServiceCallbacks : public IndexServiceCallbacks {
     public:
         TestIndexServiceCallbacks(BtreeConcurrentTest* test) : m_test(test) {}
-        std::shared_ptr< IndexTableBase > on_index_table_found(const superblk< index_table_sb >& sb) override {
+        std::shared_ptr< IndexTableBase > on_index_table_found(superblk< index_table_sb >&& sb) override {
             LOGINFO("Index table recovered");
             LOGINFO("Root bnode_id {} version {}", sb->root_node, sb->link_version);
-            m_test->m_bt = std::make_shared< typename T::BtreeType >(sb, m_test->m_cfg);
+            m_test->m_bt = std::make_shared< typename T::BtreeType >(std::move(sb), m_test->m_cfg);
             return m_test->m_bt;
         }
 

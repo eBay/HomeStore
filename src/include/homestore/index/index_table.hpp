@@ -45,8 +45,7 @@ public:
         if (status != btree_status_t::success) { throw std::runtime_error(fmt::format("Unable to create root node")); }
     }
 
-    IndexTable(const superblk< index_table_sb >& sb, const BtreeConfig& cfg) : Btree< K, V >{cfg} {
-        m_sb = sb;
+    IndexTable(superblk< index_table_sb >&& sb, const BtreeConfig& cfg) : Btree< K, V >{cfg}, m_sb{std::move(sb)} {
         Btree< K, V >::set_root_node_info(BtreeLinkInfo{m_sb->root_node, m_sb->link_version});
     }
 

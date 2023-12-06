@@ -5,8 +5,8 @@
 #include "replication/repl_dev/solo_repl_dev.h"
 
 namespace homestore {
-SoloReplDev::SoloReplDev(superblk< repl_dev_superblk > const& rd_sb, bool load_existing) :
-        m_rd_sb{rd_sb}, m_group_id{m_rd_sb->gid} {
+SoloReplDev::SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existing) :
+    m_rd_sb{std::move(rd_sb)}, m_group_id{m_rd_sb->gid} {
     if (load_existing) {
         logstore_service().open_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, m_rd_sb->data_journal_id, true,
                                           bind_this(SoloReplDev::on_data_journal_created, 1));
@@ -14,6 +14,7 @@ SoloReplDev::SoloReplDev(superblk< repl_dev_superblk > const& rd_sb, bool load_e
         m_data_journal =
             logstore_service().create_new_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, true /* append_mode */);
         m_rd_sb->data_journal_id = m_data_journal->get_store_id();
+        m_rd_sb.write();
     }
 }
 
