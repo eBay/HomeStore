@@ -35,6 +35,13 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_form
     }
 
     // for both fresh start and recovery, firstly init m_sb fields;
+    m_sb.create(sizeof(append_blk_sb_t));
+    m_sb.set_name(get_name());
+    m_sb->allocator_id = id;
+    m_sb->last_append_offset = m_last_append_offset;
+    m_sb->freeable_nblks = m_freeable_nblks;
+
+#if 0
     for (uint8_t i = 0; i < m_sb.size(); ++i) {
         m_sb[i].set_name(get_name());
         m_sb[i].create(sizeof(append_blkalloc_ctx));
@@ -43,22 +50,25 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_form
         m_sb[i]->last_append_offset = 0;
         m_sb[i]->freeable_nblks = m_freeable_nblks;
     }
+#endif
 
     // for recovery boot, fields will also be recovered from metablks;
 }
 
 void AppendBlkAllocator::on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
+    m_sb.load(buf, meta_cookie);
+#if 0
     // load all dirty buffer from the same starting point;
     for (uint8_t i = 0; i < m_sb.size(); ++i) {
         m_sb[i].load(buf, meta_cookie);
     }
-
+#endif
     // recover in-memory counter/offset from metablk;
-    m_last_append_offset = m_sb[0]->last_append_offset;
-    m_freeable_nblks = m_sb[0]->freeable_nblks;
+    m_last_append_offset = m_sb->last_append_offset;
+    m_freeable_nblks = m_sb->freeable_nblks;
 
-    HS_REL_ASSERT_EQ(m_sb[0]->magic, append_blkalloc_sb_magic, "Invalid AppendBlkAlloc metablk, magic mismatch");
-    HS_REL_ASSERT_EQ(m_sb[0]->version, append_blkalloc_sb_version, "Invalid version of AppendBlkAllocator metablk");
+    HS_REL_ASSERT_EQ(m_sb->magic, append_blkalloc_sb_magic, "Invalid AppendBlkAlloc metablk, magic mismatch");
+    HS_REL_ASSERT_EQ(m_sb->version, append_blkalloc_sb_version, "Invalid version of AppendBlkAllocator metablk");
 }
 
 //
@@ -135,9 +145,12 @@ bool AppendBlkAllocator::is_blk_alloced_on_disk(BlkId const&, bool) const { retu
 void AppendBlkAllocator::cp_flush(CP* cp) {
     const auto idx = cp->id() % MAX_CP_COUNT;
     // check if current cp's context has dirty buffer already
-    if (m_sb[idx]->is_dirty) {
+    if (m_dirty_sb[idx].is_dirty) {
+        m_sb->last_append_offset = m_dirty_sb[idx].last_append_offset;
+        m_sb->freeable_nblks = m_dirty_sb[idx].freeable_nblks;
+
         // write to metablk;
-        m_sb[idx].write();
+        m_sb.write();
 
         // clear this dirty buff's dirty flag;
         clear_dirty_offset(idx);
@@ -146,14 +159,14 @@ void AppendBlkAllocator::cp_flush(CP* cp) {
 
 // updating current cp's dirty buffer context;
 void AppendBlkAllocator::set_dirty_offset(const uint8_t idx) {
-    m_sb[idx]->is_dirty = true;
+    m_dirty_sb[idx].is_dirty = true;
 
-    m_sb[idx]->last_append_offset = m_last_append_offset;
-    m_sb[idx]->freeable_nblks = m_freeable_nblks;
+    m_dirty_sb[idx].last_append_offset = m_last_append_offset;
+    m_dirty_sb[idx].freeable_nblks = m_freeable_nblks;
 }
 
 // clearing current cp context's dirty flag;
-void AppendBlkAllocator::clear_dirty_offset(const uint8_t idx) { m_sb[idx]->is_dirty = false; }
+void AppendBlkAllocator::clear_dirty_offset(const uint8_t idx) { m_dirty_sb[idx].is_dirty = false; }
 
 //
 // free operation does:
