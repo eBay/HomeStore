@@ -71,6 +71,10 @@ public:
 
     virtual ~VariableNode() = default;
 
+    uint32_t occupied_size() const override {
+        return (get_var_node_header_const()->m_init_available_space - sizeof(var_node_header) - available_size());
+    }
+
     /* Insert the key and value in provided index
      * Assumption: Node lock is already taken */
     btree_status_t insert(uint32_t ind, const BtreeKey& key, const BtreeValue& val) override {
@@ -518,9 +522,7 @@ public:
 #if 0
         std::string delimiter = print_friendly ? "\n" : "\t";
         auto str = fmt::format("{}{}.{} nEntries={} {} ",
-        auto str = fmt::format("{}{}.{} nEntries={} {} ",
                                print_friendly ? "------------------------------------------------------------\n" : "",
-                               this->node_id(), this->link_version(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
                                this->node_id(), this->link_version(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
         if (!this->is_leaf() && (this->has_valid_edge())) {
             fmt::format_to(std::back_inserter(str), "edge_id={}.{}", this->edge_info().m_bnodeid,

@@ -294,9 +294,7 @@ public:
 
     void multi_op_execute(const std::vector< std::pair< std::string, int > >& op_list) {
         preload(SISL_OPTIONS["preload_size"].as< uint32_t >());
-        print_keys();
         run_in_parallel(op_list);
-        print_keys();
     }
 
     void print(const std::string& file = "") const { m_bt->print_tree(file); }

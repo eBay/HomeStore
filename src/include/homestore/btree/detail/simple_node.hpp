@@ -230,9 +230,7 @@ public:
 #if 0
         std::string delimiter = print_friendly ? "\n" : "\t";
         auto str = fmt::format("{}{}.{} nEntries={} {} ",
-        auto str = fmt::format("{}{}.{} nEntries={} {} ",
                                print_friendly ? "------------------------------------------------------------\n" : "",
-                               this->node_id(), this->link_version(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
                                this->node_id(), this->link_version(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
         if (!this->is_leaf() && (this->has_valid_edge())) {
             fmt::format_to(std::back_inserter(str), "edge_id={}.{}", this->edge_info().m_bnodeid,
