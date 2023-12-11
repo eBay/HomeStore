@@ -43,31 +43,22 @@ protected:
     replica_id_t m_my_uuid;
 
 public:
-    static std::unique_ptr< GenericReplService > create(cshared< ReplApplication >& repl_app);
+    static std::shared_ptr< GenericReplService > create(cshared< ReplApplication >& repl_app);
 
     GenericReplService(cshared< ReplApplication >& repl_app);
     virtual void start() = 0;
     virtual void stop();
     meta_sub_type get_meta_blk_name() const override { return "repl_dev"; }
 
-    AsyncReplResult< shared< ReplDev > > create_repl_dev(group_id_t group_id,
-                                                         std::set< replica_id_t, std::less<> >&& members) override;
     ReplResult< shared< ReplDev > > get_repl_dev(group_id_t group_id) const override;
     void iterate_repl_devs(std::function< void(cshared< ReplDev >&) > const& cb) override;
-    hs_stats get_cap_stats() const override;
 
+    hs_stats get_cap_stats() const override;
     replica_id_t get_my_repl_uuid() const { return m_my_uuid; }
 
 protected:
-    virtual AsyncReplResult<> create_replica_set(group_id_t group_id,
-                                                 std::set< replica_id_t, std::less<> >&& members) = 0;
-    virtual AsyncReplResult<> join_replica_set(group_id_t group_id, cshared< ReplDev >& repl_dev) = 0;
-    virtual shared< ReplDev > create_local_repl_dev_instance(superblk< repl_dev_superblk >& rd_sb,
-                                                             bool load_existing) = 0;
-    virtual uint32_t rd_super_blk_size() const = 0;
-
-private:
-    void rd_super_blk_found(sisl::byte_view const& buf, void* meta_cookie);
+    virtual void add_repl_dev(group_id_t group_id, shared< ReplDev > rdev);
+    virtual void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) = 0;
 };
 
 class SoloReplService : public GenericReplService {
@@ -75,14 +66,11 @@ public:
     SoloReplService(cshared< ReplApplication >& repl_app);
     void start() override;
 
+    AsyncReplResult< shared< ReplDev > > create_repl_dev(group_id_t group_id,
+                                                         std::set< replica_id_t > const& members) override;
+    void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) override;
     AsyncReplResult<> replace_member(group_id_t group_id, replica_id_t member_out,
                                      replica_id_t member_in) const override;
-
-private:
-    AsyncReplResult<> create_replica_set(group_id_t group_id, std::set< uuid_t, std::less<> >&& members) override;
-    AsyncReplResult<> join_replica_set(group_id_t group_id, cshared< ReplDev >& repl_dev) override;
-    shared< ReplDev > create_local_repl_dev_instance(superblk< repl_dev_superblk >& rd_sb, bool load_existing) override;
-    uint32_t rd_super_blk_size() const override;
 };
 
 class SoloReplServiceCPHandler : public CPCallbacks {

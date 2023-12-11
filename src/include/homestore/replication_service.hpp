@@ -65,7 +65,7 @@ public:
     /// @param listener state machine listener of all the events happening on the repl_dev (commit, precommit etc)
     /// @return A Future ReplDev on success or Future ReplServiceError upon error
     virtual AsyncReplResult< shared< ReplDev > > create_repl_dev(group_id_t group_id,
-                                                                 std::set< replica_id_t, std::less<> >&& members) = 0;
+                                                                 std::set< replica_id_t > const& members) = 0;
 
     virtual AsyncReplResult<> replace_member(group_id_t group_id, replica_id_t member_out,
                                              replica_id_t member_in) const = 0;
@@ -98,7 +98,7 @@ public:
 
     // Called when the repl dev is found upon restart of the homestore instance. The caller should return an instance of
     // Listener corresponding to the ReplDev which will be used to perform the precommit/commit/rollback.
-    virtual std::unique_ptr< ReplDevListener > create_repl_dev_listener(group_id_t group_id) = 0;
+    virtual shared< ReplDevListener > create_repl_dev_listener(group_id_t group_id) = 0;
 
     // Given the uuid of the peer, get their address and port
     virtual std::pair< std::string, uint16_t > lookup_peer(replica_id_t uuid) const = 0;

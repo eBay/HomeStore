@@ -191,8 +191,8 @@ public:
 
         repl_impl_type get_impl_type() const override { return repl_impl_type::solo; }
         bool need_timeline_consistency() const { return true; }
-        std::unique_ptr< ReplDevListener > create_repl_dev_listener(uuid_t) override {
-            return std::make_unique< Listener >(m_test);
+        shared< ReplDevListener > create_repl_dev_listener(uuid_t) override {
+            return std::make_shared< Listener >(m_test);
         }
         std::pair< std::string, uint16_t > lookup_peer(uuid_t uuid) const override { return std::make_pair("", 0u); }
         replica_id_t get_my_repl_id() const override { return hs_utils::gen_random_uuid(); }
@@ -256,7 +256,7 @@ public:
         }
 
         if (data_size != 0) {
-            req->write_sgs = HSTestHelper::create_sgs(data_size, g_block_size, max_size_per_iov, hdr->data_pattern);
+            req->write_sgs = HSTestHelper::create_sgs(data_size, max_size_per_iov, hdr->data_pattern);
         }
 
         auto& rdev = (rand() % 2) ? m_repl_dev1 : m_repl_dev2;
@@ -274,7 +274,7 @@ public:
 
         uint32_t size = blkids.blk_count() * g_block_size;
         if (size) {
-            auto read_sgs = HSTestHelper::create_sgs(size, g_block_size, size);
+            auto read_sgs = HSTestHelper::create_sgs(size, size);
             LOGDEBUG("[{}] Validating replay of lsn={} blkid = {}", boost::uuids::to_string(rdev.group_id()), lsn,
                      blkids.to_string());
             rdev.async_read(blkids, read_sgs, size)
@@ -298,7 +298,7 @@ public:
     void on_write_complete(ReplDev& rdev, intrusive< test_repl_req > req) {
         // If we did send some data to the repl_dev, validate it by doing async_read
         if (req->write_sgs.size != 0) {
-            req->read_sgs = HSTestHelper::create_sgs(req->write_sgs.size, g_block_size, req->write_sgs.size);
+            req->read_sgs = HSTestHelper::create_sgs(req->write_sgs.size, req->write_sgs.size);
 
             auto const cap = hs()->repl_service().get_cap_stats();
             LOGDEBUG("Write complete with cap stats: used={} total={}", cap.used_capacity, cap.total_capacity);

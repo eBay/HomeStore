@@ -3,10 +3,12 @@ include (${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
 include_directories (BEFORE ..)
 include_directories (BEFORE .)
 
+list(APPEND SCHEMA_FLAGS "--scoped-enums" "--gen-name-strings" "--cpp-std=c++17" "--cpp-static-reflection" "--reflect-names")
+
 flatbuffers_generate_headers(
     TARGET hs_replication_fb 
     SCHEMAS push_data_rpc.fbs
-    FLAGS "--cpp"
+    FLAGS ${SCHEMA_FLAGS}
 )
 
 add_library(hs_replication OBJECT)

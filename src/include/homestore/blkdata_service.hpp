@@ -172,6 +172,13 @@ public:
     uint32_t get_blk_size() const { return m_blk_size; }
 
     /**
+     * @brief : get the blk size of this data service;
+     *
+     * @return : blk size
+     */
+    uint32_t get_align_size() const;
+
+    /**
      * @brief : get the read block tracker handle;
      *
      * @return : the read block tracker pointer;

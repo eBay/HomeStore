@@ -40,6 +40,17 @@ struct repl_journal_entry {
     uint32_t key_size;
     uint32_t value_size;
     // Followed by user_header, then key, then MultiBlkId/value
+
+    std::string to_string() const {
+        return fmt::format("version={}.{}, code={}, server_id={}, dsn={}, header_size={}, key_size={}, value_size={}",
+                           major_version, minor_version, enum_name(code), server_id, dsn, user_header_size, key_size,
+                           value_size);
+    }
+
+    std::string to_compact_string() const {
+        return fmt::format("dsn={}, header_size={}, key_size={}, value_size={}", major_version, minor_version,
+                           enum_name(code), server_id, dsn, user_header_size, key_size, value_size);
+    }
 };
 
 #pragma pack(1)
@@ -53,6 +64,7 @@ struct repl_dev_superblk {
     logstore_id_t data_journal_id; // Logstore id for the data journal
     int64_t commit_lsn;            // LSN upto which this replica has committed
     int64_t checkpoint_lsn;        // LSN upto which this replica have checkpointed the data
+    uint64_t group_ordinal;        // Ordinal number which will be used to indicate the rdevXYZ for debugging
 
     uint64_t get_magic() const { return magic; }
     uint32_t get_version() const { return version; }

@@ -12,6 +12,7 @@ uint64_t ReplLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
     if (rreq) {
         lsn = HomeRaftLogStore::append(rreq->raft_journal_buf());
         m_sm.link_lsn_to_req(rreq, int64_cast(lsn));
+        RD_LOG(INFO, "Raft Channel: Received log entry rreq=[{}]", rreq->to_compact_string());
     } else {
         lsn = HomeRaftLogStore::append(entry);
     }
@@ -23,6 +24,7 @@ void ReplLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& entry
     if (rreq) {
         HomeRaftLogStore::write_at(index, rreq->raft_journal_buf());
         m_sm.link_lsn_to_req(rreq, int64_cast(index));
+        RD_LOG(INFO, "Raft Channel: Received log entry rreq=[{}]", rreq->to_compact_string());
     } else {
         HomeRaftLogStore::write_at(index, entry);
     }
@@ -33,7 +35,7 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
     // leader. Leader will call the flush as part of commit after receiving quorum, upon which time, there is a high
     // possibility the log entry is already flushed.
     if (!m_rd.is_leader()) {
-        int64_t end_lsn = int64_cast(start_lsn + count);
+        int64_t end_lsn = int64_cast(start_lsn + count - 1);
 
         // Start fetch the batch of data for this lsn range from remote if its not available yet.
         auto reqs = sisl::VectorPool< repl_req_ptr_t >::alloc();
@@ -56,11 +58,13 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
 
         // Mark all the pbas also completely written
         for (auto const& rreq : *reqs) {
-            rreq->state.fetch_or(uint32_cast(repl_req_state_t::LOG_FLUSHED));
+            if (rreq) { rreq->state.fetch_or(uint32_cast(repl_req_state_t::LOG_FLUSHED)); }
         }
 
         sisl::VectorPool< repl_req_ptr_t >::free(reqs);
     }
 }
+
+std::string ReplLogStore::rdev_name() const { return m_rd.rdev_name(); }
 
 } // namespace homestore

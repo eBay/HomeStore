@@ -47,17 +47,16 @@ public:
     std::string lookup_peer(nuraft_mesg::peer_id_t const&) override;
     std::shared_ptr< nuraft_mesg::mesg_state_mgr > create_state_mgr(int32_t srv_id,
                                                                     nuraft_mesg::group_id_t const& group_id) override;
-    shared< nuraft_mesg::Manager > msg_manager() { return m_msg_mgr; }
+    nuraft_mesg::Manager& msg_manager() { return *m_msg_mgr; }
 
 protected:
     ///////////////////// Overrides of GenericReplService ////////////////////
     void start() override;
-    AsyncReplResult< shared< ReplDev > > create_repl_dev(uuid_t group_id,
-                                                         std::set< uuid_t, std::less<> >&& members) override;
-    AsyncReplResult<> create_replica_set(uuid_t group_id, std::set< uuid_t, std::less<> >&& members) override;
-    AsyncReplResult<> join_replica_set(uuid_t group_id, cshared< ReplDev >& repl_dev) override;
-    shared< ReplDev > create_local_repl_dev_instance(superblk< repl_dev_superblk >& sb, bool load_existing) override;
-    uint32_t rd_super_blk_size() const override;
+    AsyncReplResult< shared< ReplDev > > create_repl_dev(group_id_t group_id,
+                                                         std::set< replica_id_t > const& members) override;
+    void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) override;
+    AsyncReplResult<> replace_member(group_id_t group_id, replica_id_t member_out,
+                                     replica_id_t member_in) const override;
 
 private:
     void raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie);
@@ -65,7 +64,7 @@ private:
 
 class RaftReplServiceCPHandler : public CPCallbacks {
 public:
-    RaftReplServiceCPHandler();
+    RaftReplServiceCPHandler() = default;
     virtual ~RaftReplServiceCPHandler() = default;
 
 public:

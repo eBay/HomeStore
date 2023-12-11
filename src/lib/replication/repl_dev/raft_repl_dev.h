@@ -36,8 +36,9 @@ private:
     shared< RaftStateMachine > m_state_machine;
     RaftReplService& m_repl_svc;
     folly::ConcurrentHashMap< repl_key, repl_req_ptr_t, repl_key::Hasher > m_repl_key_req_map;
-    shared< nuraft_mesg::Manager > m_msg_mgr;
+    nuraft_mesg::Manager& m_msg_mgr;
     group_id_t m_group_id;     // Replication Group id
+    std::string m_rdev_name;   // Short name for the group for easy debugging
     replica_id_t m_my_repl_id; // This replica's uuid
     int32_t m_raft_server_id;  // Server ID used by raft (unique within raft group)
     shared< ReplLogStore > m_data_journal;
@@ -55,6 +56,8 @@ private:
 
     std::atomic< uint64_t > m_next_dsn{0}; // Data Sequence Number that will keep incrementing for each data entry
 
+    static std::atomic< uint64_t > s_next_group_ordinal;
+
 public:
     friend class RaftStateMachine;
 
@@ -71,6 +74,9 @@ public:
     void async_free_blks(int64_t lsn, MultiBlkId const& blkid) override;
     bool is_leader() const override;
     group_id_t group_id() const override { return m_group_id; }
+    std::string group_id_str() const { return boost::uuids::to_string(m_group_id); }
+    std::string rdev_name() const { return m_rdev_name; }
+    std::string my_replica_id_str() const { return boost::uuids::to_string(m_my_repl_id); }
     uint32_t get_blk_size() const override;
     repl_lsn_t get_last_commit_lsn() const { return m_commit_upto_lsn.load(); }
 
@@ -106,7 +112,7 @@ protected:
 private:
     shared< nuraft::log_store > data_journal() { return m_data_journal; }
     void push_data_to_all_followers(repl_req_ptr_t const& rreq);
-    void on_push_data_received(sisl::io_blob const& incoming_buf, intrusive< sisl::GenericRpcData >& rpc_data);
+    void on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data);
 };
 
 } // namespace homestore

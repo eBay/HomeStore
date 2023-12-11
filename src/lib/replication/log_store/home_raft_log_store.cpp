@@ -52,9 +52,8 @@ static nuraft::ptr< nuraft::log_entry > to_nuraft_log_entry(const log_buffer& lo
 }
 
 static uint64_t extract_term(const log_buffer& log_bytes) {
-    auto const se_buf = SEBuf{log_bytes.size(), log_bytes.bytes()};
-    SEBufSerializer ss(se_buf);
-    return ss.getU64();
+    uint8_t const* raw_ptr = log_bytes.bytes();
+    return (*r_cast< uint64_t const* >(raw_ptr));
 }
 
 HomeRaftLogStore::HomeRaftLogStore(logstore_id_t logstore_id) {
@@ -142,7 +141,7 @@ void HomeRaftLogStore::write_at(ulong index, raft_buf_ptr_t& buffer) {
 }
 
 void HomeRaftLogStore::end_of_append_batch(ulong start, ulong cnt) {
-    store_lsn_t end_lsn = to_store_lsn(start + cnt);
+    store_lsn_t end_lsn = to_store_lsn(start + cnt - 1);
     m_log_store->flush_sync(end_lsn);
     m_last_durable_lsn = end_lsn;
 }

@@ -29,7 +29,7 @@ class StateMachineStore;
                             fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}:{}] "},                          \
                                             fmt::make_format_args(file_name(__FILE__), __LINE__));                     \
                             fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}={}] "},                          \
-                                            fmt::make_format_args("rd", m_group_id));                                  \
+                                            fmt::make_format_args("rd", rdev_name()));                                 \
                             fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb},                               \
                                             fmt::make_format_args(std::forward< decltype(args) >(args)...));           \
                             return true;                                                                               \
@@ -45,7 +45,7 @@ class StateMachineStore;
                                 fmt::make_format_args(file_name(__FILE__), __LINE__));                                 \
                 sisl::logging::default_cmp_assert_formatter(buf, msgcb, std::forward< decltype(args) >(args)...);      \
                 fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}={}] "},                                      \
-                                fmt::make_format_args("rd", m_group_id));                                              \
+                                fmt::make_format_args("rd", rdev_name()));                                             \
                 return true;                                                                                           \
             },                                                                                                         \
             ##__VA_ARGS__);                                                                                            \
@@ -55,7 +55,7 @@ class StateMachineStore;
         assert_type##_ASSERT_FMT(cond,                                                                                 \
                                  ([&](fmt::memory_buffer& buf, const char* const msgcb, auto&&... args) -> bool {      \
                                      fmt::vformat_to(fmt::appender{buf}, fmt::string_view{"[{}={}] "},                 \
-                                                     fmt::make_format_args("rd", m_group_id));                         \
+                                                     fmt::make_format_args("rd", rdev_name()));                        \
                                      fmt::vformat_to(fmt::appender{buf}, fmt::string_view{msgcb},                      \
                                                      fmt::make_format_args(std::forward< decltype(args) >(args)...));  \
                                      return true;                                                                      \
@@ -90,7 +90,6 @@ private:
     nuraft::ptr< nuraft::buffer > m_success_ptr; // Preallocate the success return to raft
     // iomgr::timer_handle_t m_wait_blkid_write_timer_hdl{iomgr::null_timer_handle};
     bool m_resync_mode{false};
-    group_id_t m_group_id; // Cache the group_id to avoid duplicate RD_LOG and RD_LOG
 
 public:
     RaftStateMachine(RaftReplDev& rd);
@@ -114,6 +113,8 @@ public:
     void link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn);
     repl_req_ptr_t lsn_to_req(int64_t lsn);
     nuraft_mesg::repl_service_ctx* group_msg_service();
+
+    std::string rdev_name() const;
 
 private:
     void after_precommit_in_leader(const nuraft::raft_server::req_ext_cb_params& params);

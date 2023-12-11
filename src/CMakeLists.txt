@@ -8,7 +8,7 @@ find_package(isa-l REQUIRED)
 find_package(iomgr REQUIRED)
 find_package(farmhash REQUIRED)
 find_package(GTest REQUIRED)
-find_package(nuraft_mesg REQUIRED)
+find_package(NuraftMesg REQUIRED)
 
 set (COMMON_DEPS
         iomgr::iomgr
@@ -16,7 +16,7 @@ set (COMMON_DEPS
         isa-l::isa-l
         sisl::sisl
         nuraft::nuraft
-        nuraft_mesg::nuraft_mesg
+        NuraftMesg::NuraftMesg
     )
 
 set(COMMON_TEST_DEPS

@@ -231,4 +231,6 @@ uint64_t BlkDataService::get_total_capacity() const { return m_vdev->size(); }
 
 uint64_t BlkDataService::get_used_capacity() const { return m_vdev->used_size(); }
 
+uint32_t BlkDataService::get_align_size() const { return m_vdev->align_size(); }
+
 } // namespace homestore

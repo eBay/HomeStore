@@ -17,6 +17,12 @@ using ptr = std::shared_ptr< T >;
 class buffer;
 } // namespace nuraft
 
+namespace sisl {
+class GenericRpcData;
+}
+
+void intrusive_ptr_release(sisl::GenericRpcData*);
+
 namespace homestore {
 class ReplDev;
 struct repl_req_ctx;
@@ -25,11 +31,11 @@ using repl_req_ptr_t = boost::intrusive_ptr< repl_req_ctx >;
 
 VENUM(repl_req_state_t, uint32_t,
       INIT = 0,               // Initial state
-      BLK_ALLOCATED = 1 << 1, // Local block is allocated
-      DATA_RECEIVED = 1 << 2, // Data has been received and being written to the storage
-      DATA_WRITTEN = 1 << 3,  // Data has been written to the storage
-      LOG_RECEIVED = 1 << 4,  // Log is received and waiting for data
-      LOG_FLUSHED = 1 << 5    // Log has been flushed
+      BLK_ALLOCATED = 1 << 0, // Local block is allocated
+      DATA_RECEIVED = 1 << 1, // Data has been received and being written to the storage
+      DATA_WRITTEN = 1 << 2,  // Data has been written to the storage
+      LOG_RECEIVED = 1 << 3,  // Log is received and waiting for data
+      LOG_FLUSHED = 1 << 4    // Log has been flushed
 )
 
 struct repl_key {
@@ -62,11 +68,15 @@ public:
     raft_buf_ptr_t& raft_journal_buf();
     uint8_t* raw_journal_buf();
 
+    std::string to_string() const;
+    std::string to_compact_string() const;
+
 public:
-    repl_key rkey;     // Unique key for the request
-    sisl::blob header; // User header
-    sisl::blob key;    // User supplied key for this req
-    int64_t lsn{0};    // Lsn for this replication req
+    repl_key rkey;           // Unique key for the request
+    sisl::blob header;       // User header
+    sisl::blob key;          // User supplied key for this req
+    int64_t lsn{0};          // Lsn for this replication req
+    bool is_proposer{false}; // Is the repl_req proposed by this node
 
     //////////////// Value related section /////////////////
     sisl::sg_list value;      // Raw value - applicable only to leader req
@@ -85,6 +95,8 @@ public:
     //////////////// Communication packet/builder section /////////////////
     sisl::io_blob_list_t pkts;
     flatbuffers::FlatBufferBuilder fb_builder;
+    sisl::io_blob_safe buf_for_unaligned_data;
+    intrusive< sisl::GenericRpcData > rpc_data;
 };
 
 //
@@ -94,7 +106,7 @@ class ReplDevListener {
 public:
     virtual ~ReplDevListener() = default;
 
-    void set_repl_dev(ReplDev* rdev) { m_repl_dev = std::move(rdev); }
+    void set_repl_dev(ReplDev* rdev) { m_repl_dev = rdev; }
     virtual ReplDev* repl_dev() { return m_repl_dev; }
 
     /// @brief Called when the log entry has been committed in the replica set.
@@ -222,10 +234,10 @@ public:
     /// @return Block size
     virtual uint32_t get_blk_size() const = 0;
 
-    virtual void attach_listener(std::unique_ptr< ReplDevListener > listener) { m_listener = std::move(listener); }
+    virtual void attach_listener(shared< ReplDevListener > listener) { m_listener = std::move(listener); }
 
 protected:
-    std::unique_ptr< ReplDevListener > m_listener;
+    shared< ReplDevListener > m_listener;
 };
 
 } // namespace homestore

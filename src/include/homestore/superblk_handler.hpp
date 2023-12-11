@@ -49,7 +49,7 @@ public:
         return m_sb;
     }
 
-    T* create(uint32_t size) {
+    T* create(uint32_t size = sizeof(T)) {
         if (meta_service().is_aligned_buf_needed(size)) {
             auto al_sz = meta_service().align_size();
             m_raw_buf = sisl::make_byte_array(uint32_cast(sisl::round_up(size, al_sz)), al_sz, sisl::buftag::metablk);
