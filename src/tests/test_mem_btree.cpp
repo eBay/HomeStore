@@ -22,12 +22,11 @@
 #include <sisl/utility/enum.hpp>
 #include <boost/algorithm/string.hpp>
 
+#include <homestore/btree/mem_btree.hpp>
+#include "test_common/range_scheduler.hpp"
 #include <homestore/btree/detail/simple_node.hpp>
 #include <homestore/btree/detail/varlen_node.hpp>
 #include <homestore/btree/detail/prefix_node.hpp>
-#include <homestore/btree/mem_btree.hpp>
-#include "test_common/range_scheduler.hpp"
-#include "btree_helpers/btree_test_kvs.hpp"
 #include "btree_helpers/btree_test_helper.hpp"
 
 using namespace homestore;
@@ -92,10 +91,12 @@ struct PrefixIntervalBtreeTest {
 };
 
 template < typename TestType >
-struct BtreeTest : public BtreeTestHelper< TestType > {
+struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     using T = TestType;
     using K = typename TestType::KeyType;
     using V = typename TestType::ValueType;
+
+    BtreeTest() : testing::Test() {}
 
     void SetUp() override {
         BtreeTestHelper< TestType >::SetUp();
@@ -282,12 +283,12 @@ TYPED_TEST(BtreeTest, RandomRemoveRange) {
 }
 
 template < typename TestType >
-struct BtreeConcurrentTest : public BtreeTestHelper< TestType > {
+struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     using T = TestType;
     using K = typename TestType::KeyType;
     using V = typename TestType::ValueType;
 
-    BtreeConcurrentTest() { this->m_is_multi_threaded = true; }
+    BtreeConcurrentTest() : testing::Test() { this->m_is_multi_threaded = true; }
 
     void SetUp() override {
         LOGINFO("Starting iomgr with {} threads", SISL_OPTIONS["num_threads"].as< uint32_t >());

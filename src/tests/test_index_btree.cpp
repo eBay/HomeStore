@@ -13,27 +13,17 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
-
-#include <random>
-#include <map>
-#include <memory>
 #include <gtest/gtest.h>
 #include <boost/uuid/random_generator.hpp>
 
-#include <iomgr/io_environment.hpp>
-#include <sisl/options/options.h>
-#include <sisl/logging/logging.h>
 #include <sisl/utility/enum.hpp>
-#include <homestore/btree/detail/simple_node.hpp>
-#include <homestore/btree/detail/varlen_node.hpp>
-#include <homestore/homestore.hpp>
-#include <homestore/index/index_table.hpp>
 #include "common/homestore_config.hpp"
 #include "common/resource_mgr.hpp"
 #include "test_common/homestore_test_common.hpp"
 #include "test_common/range_scheduler.hpp"
-#include "btree_helpers/btree_test_kvs.hpp"
 #include "btree_helpers/btree_test_helper.hpp"
+#include "btree_helpers/btree_test_kvs.hpp"
+#include "btree_helpers/btree_decls.h"
 
 using namespace homestore;
 
@@ -46,62 +36,23 @@ std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 // TODO Add tests to do write,remove after recovery.
 // TODO Test with var len key with io mgr page size is 512.
 
-SISL_OPTION_GROUP(test_index_btree,
-                  (num_iters, "", "num_iters", "number of iterations for rand ops",
-                   ::cxxopts::value< uint32_t >()->default_value("500"), "number"),
-                  (num_entries, "", "num_entries", "number of entries to test with",
-                   ::cxxopts::value< uint32_t >()->default_value("5000"), "number"),
-                  (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"),
-                  (disable_merge, "", "disable_merge", "disable_merge", ::cxxopts::value< bool >()->default_value("0"), ""),
-                  (operation_list, "", "operation_list", "operation list instead of default created following by percentage",
-                   ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
-                  (preload_size, "", "preload_size", "number of entries to preload tree with",
-                   ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
-                  (seed, "", "seed", "random engine seed, use random if not defined",
-                   ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
-
-struct FixedLenBtreeTest {
-    using BtreeType = IndexTable< TestFixedKey, TestFixedValue >;
-    using KeyType = TestFixedKey;
-    using ValueType = TestFixedValue;
-    static constexpr btree_node_type leaf_node_type = btree_node_type::FIXED;
-    static constexpr btree_node_type interior_node_type = btree_node_type::FIXED;
-};
-
-struct VarKeySizeBtreeTest {
-    using BtreeType = IndexTable< TestVarLenKey, TestFixedValue >;
-    using KeyType = TestVarLenKey;
-    using ValueType = TestFixedValue;
-    static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_KEY;
-    static constexpr btree_node_type interior_node_type = btree_node_type::VAR_KEY;
-};
-
-struct VarValueSizeBtreeTest {
-    using BtreeType = IndexTable< TestFixedKey, TestVarLenValue >;
-    using KeyType = TestFixedKey;
-    using ValueType = TestVarLenValue;
-    static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_VALUE;
-    static constexpr btree_node_type interior_node_type = btree_node_type::FIXED;
-};
-
-struct VarObjSizeBtreeTest {
-    using BtreeType = IndexTable< TestVarLenKey, TestVarLenValue >;
-    using KeyType = TestVarLenKey;
-    using ValueType = TestVarLenValue;
-    static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_OBJECT;
-    static constexpr btree_node_type interior_node_type = btree_node_type::VAR_OBJECT;
-};
-
-struct PrefixIntervalBtreeTest {
-    using BtreeType = IndexTable< TestIntervalKey, TestIntervalValue >;
-    using KeyType = TestIntervalKey;
-    using ValueType = TestIntervalValue;
-    static constexpr btree_node_type leaf_node_type = btree_node_type::PREFIX;
-    static constexpr btree_node_type interior_node_type = btree_node_type::FIXED;
-};
+SISL_OPTION_GROUP(
+    test_index_btree,
+    (num_iters, "", "num_iters", "number of iterations for rand ops",
+     ::cxxopts::value< uint32_t >()->default_value("500"), "number"),
+    (num_entries, "", "num_entries", "number of entries to test with",
+     ::cxxopts::value< uint32_t >()->default_value("5000"), "number"),
+    (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"),
+    (disable_merge, "", "disable_merge", "disable_merge", ::cxxopts::value< bool >()->default_value("0"), ""),
+    (operation_list, "", "operation_list", "operation list instead of default created following by percentage",
+     ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
+    (preload_size, "", "preload_size", "number of entries to preload tree with",
+     ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
+    (seed, "", "seed", "random engine seed, use random if not defined",
+     ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
 template < typename TestType >
-struct BtreeTest : public BtreeTestHelper< TestType > {
+struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     using T = TestType;
     using K = typename TestType::KeyType;
     using V = typename TestType::ValueType;
@@ -119,6 +70,8 @@ struct BtreeTest : public BtreeTestHelper< TestType > {
     private:
         BtreeTest* m_test;
     };
+
+    BtreeTest() : testing::Test() {}
 
     void SetUp() override {
         test_common::HSTestHelper::start_homestore(
@@ -167,7 +120,7 @@ struct BtreeTest : public BtreeTestHelper< TestType > {
     }
 };
 
-using BtreeTypes = testing::Types< FixedLenBtreeTest, VarKeySizeBtreeTest, VarValueSizeBtreeTest, VarObjSizeBtreeTest >;
+using BtreeTypes = testing::Types< FixedLenBtree, VarKeySizeBtree, VarValueSizeBtree, VarObjSizeBtree >;
 
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 
@@ -456,7 +409,7 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
 }
 
 template < typename TestType >
-struct BtreeConcurrentTest : public BtreeTestHelper< TestType > {
+struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testing::Test {
 
     using T = TestType;
     using K = typename TestType::KeyType;
@@ -475,7 +428,7 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType > {
         BtreeConcurrentTest* m_test;
     };
 
-    BtreeConcurrentTest() { this->m_is_multi_threaded = true; }
+    BtreeConcurrentTest() : testing::Test() { this->m_is_multi_threaded = true; }
 
     void SetUp() override {
         test_common::HSTestHelper::start_homestore(
@@ -513,35 +466,10 @@ TYPED_TEST_SUITE(BtreeConcurrentTest, BtreeTypes);
 TYPED_TEST(BtreeConcurrentTest, ConcurrentAllOps) {
     // range put is not supported for non-extent keys
     std::vector< std::string > input_ops = {"put:20", "remove:20", "range_put:20", "range_remove:20", "query:20"};
-    std::vector< std::pair< std::string, int > > ops;
     if (SISL_OPTIONS.count("operation_list")) {
         input_ops = SISL_OPTIONS["operation_list"].as< std::vector< std::string > >();
     }
-    int total = std::accumulate(input_ops.begin(), input_ops.end(), 0, [](int sum, const auto& str) {
-        std::vector< std::string > tokens;
-        boost::split(tokens, str, boost::is_any_of(":"));
-        if (tokens.size() == 2) {
-            try {
-                return sum + std::stoi(tokens[1]);
-            } catch (const std::exception&) {
-                // Invalid frequency, ignore this element
-            }
-        }
-        return sum; // Ignore malformed strings
-    });
-
-    std::transform(input_ops.begin(), input_ops.end(), std::back_inserter(ops), [total](const auto& str) {
-        std::vector< std::string > tokens;
-        boost::split(tokens, str, boost::is_any_of(":"));
-        if (tokens.size() == 2) {
-            try {
-                return std::make_pair(tokens[0], (int)(100.0 * std::stoi(tokens[1]) / total));
-            } catch (const std::exception&) {
-                // Invalid frequency, ignore this element
-            }
-        }
-        return std::make_pair(std::string(), 0);
-    });
+    auto ops = this->build_op_list(input_ops);
 
     this->multi_op_execute(ops);
 }
