@@ -314,36 +314,10 @@ TYPED_TEST_SUITE(BtreeConcurrentTest, BtreeTypes);
 TYPED_TEST(BtreeConcurrentTest, ConcurrentAllOps) {
     // range put is not supported for non-extent keys
     std::vector< std::string > input_ops = {"put:20", "remove:20", "range_put:20", "range_remove:20", "query:20"};
-    std::vector< std::pair< std::string, int > > ops;
-
     if (SISL_OPTIONS.count("operation_list")) {
         input_ops = SISL_OPTIONS["operation_list"].as< std::vector< std::string > >();
     }
-    int total = std::accumulate(input_ops.begin(), input_ops.end(), 0, [](int sum, const auto& str) {
-        std::vector< std::string > tokens;
-        boost::split(tokens, str, boost::is_any_of(":"));
-        if (tokens.size() == 2) {
-            try {
-                return sum + std::stoi(tokens[1]);
-            } catch (const std::exception&) {
-                // Invalid frequency, ignore this element
-            }
-        }
-        return sum; // Ignore malformed strings
-    });
-
-    std::transform(input_ops.begin(), input_ops.end(), std::back_inserter(ops), [total](const auto& str) {
-        std::vector< std::string > tokens;
-        boost::split(tokens, str, boost::is_any_of(":"));
-        if (tokens.size() == 2) {
-            try {
-                return std::make_pair(tokens[0], (int)(100.0 * std::stoi(tokens[1]) / total));
-            } catch (const std::exception&) {
-                // Invalid frequency, ignore this element
-            }
-        }
-        return std::make_pair(std::string(), 0);
-    });
+    auto ops = this->build_op_list(input_ops);
 
     this->multi_op_execute(ops);
 }

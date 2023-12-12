@@ -432,6 +432,5 @@ protected:
         });
 
         return ops;
-        // this->run_in_parallel(ops);
     }
 };
