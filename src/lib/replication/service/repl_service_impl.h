@@ -73,7 +73,7 @@ public:
 
 
 private:
-    shared< ReplDev > create_repl_dev_instance(superblk< repl_dev_superblk > const& rd_sb, bool load_existing);
+    shared< ReplDev > create_repl_dev_instance(superblk< repl_dev_superblk > &&rd_sb, bool load_existing);
     void rd_super_blk_found(sisl::byte_view const& buf, void* meta_cookie);
 };
 

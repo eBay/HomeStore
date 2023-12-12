@@ -63,7 +63,7 @@ void IndexService::meta_blk_found(const sisl::byte_view& buf, void* meta_cookie)
     // IndexTable instance
     superblk< index_table_sb > sb;
     sb.load(buf, meta_cookie);
-    add_index_table(m_svc_cbs->on_index_table_found(sb));
+    add_index_table(m_svc_cbs->on_index_table_found(std::move(sb)));
 }
 
 void IndexService::start() {

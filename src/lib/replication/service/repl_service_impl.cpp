@@ -63,10 +63,9 @@ ReplicationServiceImpl::create_repl_dev(uuid_t group_id, std::set< std::string, 
     rd_sb.create(sizeof(repl_dev_superblk));
     rd_sb->gid = group_id;
 
-    shared< ReplDev > repl_dev = create_repl_dev_instance(rd_sb, false /* load_existing */);
+    shared< ReplDev > repl_dev = create_repl_dev_instance(std::move(rd_sb), false /* load_existing */);
     listener->set_repl_dev(repl_dev.get());
     repl_dev->attach_listener(std::move(listener));
-    rd_sb.write();
     return make_async_success(std::move(repl_dev));
 }
 
@@ -115,7 +114,7 @@ folly::Future< ReplServiceError > ReplicationServiceImpl::replace_member(uuid_t 
     return folly::makeFuture< ReplServiceError >(ReplServiceError::NOT_IMPLEMENTED);
 }
 
-shared< ReplDev > ReplicationServiceImpl::create_repl_dev_instance(superblk< repl_dev_superblk > const& rd_sb,
+shared< ReplDev > ReplicationServiceImpl::create_repl_dev_instance(superblk< repl_dev_superblk >&& rd_sb,
                                                                    bool load_existing) {
     auto it = m_rd_map.end();
     bool happened = false;
@@ -129,7 +128,7 @@ shared< ReplDev > ReplicationServiceImpl::create_repl_dev_instance(superblk< rep
 
     shared< ReplDev > repl_dev;
     if (m_repl_type == repl_impl_type::solo) {
-        repl_dev = std::make_shared< SoloReplDev >(rd_sb, load_existing);
+        repl_dev = std::make_shared< SoloReplDev >(std::move(rd_sb), load_existing);
     } else {
         HS_REL_ASSERT(false, "Repl impl type = {} is not supported yet", enum_name(m_repl_type));
     }
@@ -143,11 +142,11 @@ void ReplicationServiceImpl::rd_super_blk_found(sisl::byte_view const& buf, void
     rd_sb.load(buf, meta_cookie);
     HS_DBG_ASSERT_EQ(rd_sb->get_magic(), repl_dev_superblk::REPL_DEV_SB_MAGIC, "Invalid rdev metablk, magic mismatch");
     HS_DBG_ASSERT_EQ(rd_sb->get_version(), repl_dev_superblk::REPL_DEV_SB_VERSION, "Invalid version of rdev metablk");
-
-    shared< ReplDev > repl_dev = create_repl_dev_instance(rd_sb, true /* load_existing */);
+    auto rd_sb_gid = rd_sb->gid;
+    shared< ReplDev > repl_dev = create_repl_dev_instance(std::move(rd_sb), true /* load_existing */);
     {
         std::unique_lock lg(m_rd_map_mtx);
-        auto it = m_pending_open.find(rd_sb->gid);
+        auto it = m_pending_open.find(rd_sb_gid);
         if (it != m_pending_open.end()) {
             auto& li_info = it->second;
             // Someone waiting for this repl dev to open, call them to attach the listener and provide the value

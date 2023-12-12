@@ -32,7 +32,7 @@ class VirtualDev;
 class IndexServiceCallbacks {
 public:
     virtual ~IndexServiceCallbacks() = default;
-    virtual std::shared_ptr< IndexTableBase > on_index_table_found(superblk< index_table_sb > const&) {
+    virtual std::shared_ptr< IndexTableBase > on_index_table_found(superblk< index_table_sb >&&) {
         assert(0);
         return nullptr;
     }
