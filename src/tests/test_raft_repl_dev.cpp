@@ -252,9 +252,6 @@ int main(int argc, char* argv[]) {
     ::testing::InitGoogleTest(&parsed_argc, argv);
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_raft_repl_dev, iomgr, test_common_setup, test_repl_common_setup);
 
-    int tmp_argc = 1;
-    ::folly::Init(&tmp_argc, &argv, true);
-
     FLAGS_folly_global_cpu_executor_threads = 4;
     g_helper = std::make_unique< test_common::HSReplTestHelper >("test_raft_repl_dev", orig_argv);
     g_helper->setup();

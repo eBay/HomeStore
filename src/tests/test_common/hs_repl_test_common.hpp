@@ -154,6 +154,9 @@ public:
             ipc_data_ = static_cast< IPCData* >(region_->get_address());
         }
 
+        int tmp_argc = 1;
+        folly_ = std::make_unique< folly::Init >(&tmp_argc, &argv_, true);
+
         LOGINFO("Starting Homestore replica={}", replica_num_);
         test_common::HSTestHelper::start_homestore(
             name_ + std::to_string(replica_num_),
@@ -228,6 +231,7 @@ private:
     boost::process::group proc_grp_;
     std::unique_ptr< bip::shared_memory_object > shm_;
     std::unique_ptr< bip::mapped_region > region_;
+    std::unique_ptr< folly::Init > folly_;
 
     std::mutex groups_mtx_;
     std::condition_variable group_created_cv_;
