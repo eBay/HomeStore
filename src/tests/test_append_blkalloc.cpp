@@ -285,9 +285,7 @@ TEST_F(AppendBlkAllocatorTest, TestWriteThenRecovey) {
 
 SISL_OPTION_GROUP(test_append_blkalloc,
                   (run_time, "", "run_time", "running time in seconds",
-                   ::cxxopts::value< uint64_t >()->default_value("30"), "number"),
-                  (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("300"),
-                   "number"));
+                   ::cxxopts::value< uint64_t >()->default_value("30"), "number"));
 
 int main(int argc, char* argv[]) {
     int parsed_argc{argc};

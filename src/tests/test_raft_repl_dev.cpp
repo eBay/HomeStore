@@ -22,6 +22,8 @@
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 #include <sisl/fds/buffer.hpp>
+#include <folly/init/Init.h>
+#include <folly/executors/GlobalExecutor.h>
 #include <gtest/gtest.h>
 
 #include <homestore/blk.h>
@@ -244,11 +246,16 @@ TEST_F(RaftReplDevTest, All_Append) {
 }
 
 int main(int argc, char* argv[]) {
-    char** orig_argv = argv;
     int parsed_argc{argc};
+    char** orig_argv = argv;
+
     ::testing::InitGoogleTest(&parsed_argc, argv);
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_raft_repl_dev, iomgr, test_common_setup, test_repl_common_setup);
 
+    int tmp_argc = 1;
+    ::folly::Init(&tmp_argc, &argv, true);
+
+    FLAGS_folly_global_cpu_executor_threads = 4;
     g_helper = std::make_unique< test_common::HSReplTestHelper >("test_raft_repl_dev", orig_argv);
     g_helper->setup();
 

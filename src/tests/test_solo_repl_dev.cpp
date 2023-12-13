@@ -60,63 +60,6 @@ static constexpr uint64_t Ki{1024};
 static constexpr uint64_t Mi{Ki * Ki};
 static constexpr uint64_t Gi{Ki * Mi};
 
-struct Runner {
-    uint64_t total_tasks{0};
-    uint32_t qdepth{8};
-    std::atomic< uint64_t > issued_tasks{0};
-    std::atomic< uint64_t > pending_tasks{0};
-    std::function< void(void) > task;
-    folly::Promise< folly::Unit > comp_promise;
-
-    Runner(uint64_t num_tasks, uint32_t qd = 8) : total_tasks{num_tasks}, qdepth{qd} {
-        if (total_tasks < (uint64_t)qdepth) { total_tasks = qdepth; }
-    }
-
-    Runner() : Runner{SISL_OPTIONS["num_io"].as< uint64_t >()} {}
-
-    void set_task(std::function< void(void) > f) { task = std::move(f); }
-
-    folly::Future< folly::Unit > execute() {
-        for (uint32_t i{0}; i < qdepth; ++i) {
-            run_task();
-        }
-        return comp_promise.getFuture();
-    }
-
-    void next_task() {
-        auto ptasks = pending_tasks.fetch_sub(1) - 1;
-        if ((issued_tasks.load() < total_tasks)) {
-            run_task();
-        } else if (ptasks == 0) {
-            comp_promise.setValue();
-        }
-    }
-
-    void run_task() {
-        ++issued_tasks;
-        ++pending_tasks;
-        iomanager.run_on_forget(iomgr::reactor_regex::random_worker, task);
-    }
-};
-
-struct Waiter {
-    std::atomic< uint64_t > expected_comp{0};
-    std::atomic< uint64_t > actual_comp{0};
-    folly::Promise< folly::Unit > comp_promise;
-
-    Waiter(uint64_t num_op) : expected_comp{num_op} {}
-    Waiter() : Waiter{SISL_OPTIONS["num_io"].as< uint64_t >()} {}
-
-    folly::Future< folly::Unit > start(std::function< void(void) > f) {
-        f();
-        return comp_promise.getFuture();
-    }
-
-    void one_complete() {
-        if ((actual_comp.fetch_add(1) + 1) >= expected_comp.load()) { comp_promise.setValue(); }
-    }
-};
-
 struct test_repl_req : public repl_req_ctx {
     sisl::byte_array header;
     sisl::byte_array key;
@@ -199,8 +142,8 @@ public:
     };
 
 protected:
-    Runner m_io_runner;
-    Waiter m_task_waiter;
+    test_common::Runner m_io_runner;
+    test_common::Waiter m_task_waiter;
     shared< ReplDev > m_repl_dev1;
     shared< ReplDev > m_repl_dev2;
     uuid_t m_uuid1;
@@ -353,8 +296,6 @@ TEST_F(SoloReplDevTest, TestHeaderOnly) {
 }
 
 SISL_OPTION_GROUP(test_solo_repl_dev,
-                  (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("300"),
-                   "number"),
                   (block_size, "", "block_size", "block size to io",
                    ::cxxopts::value< uint32_t >()->default_value("4096"), "number"));
 

@@ -91,13 +91,13 @@ struct Runner {
     Runner(const Runner&) = delete;
     Runner& operator=(const Runner&) = delete;
 
-    void set_num_tasks(uint64_t num_tasks) {
-        total_tasks_ = num_tasks;
+    void set_num_tasks(uint64_t num_tasks) { total_tasks_ = std::max((uint64_t)qdepth_, num_tasks); }
+    void set_task(std::function< void(void) > f) {
         issued_tasks_.store(0);
         completed_tasks_.store(0);
         comp_promise_ = folly::Promise< folly::Unit >{};
+        task_ = std::move(f);
     }
-    void set_task(std::function< void(void) > f) { task_ = std::move(f); }
 
     folly::Future< folly::Unit > execute() {
         for (uint32_t i{0}; i < qdepth_; ++i) {

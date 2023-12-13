@@ -816,13 +816,13 @@ TEST_F(BlkDataServiceTest, TestRandMixIOLoad) {
 
 // Stream related test
 
-SISL_OPTION_GROUP(
-    test_data_service,
-    (run_time, "", "run_time", "running time in seconds", ::cxxopts::value< uint64_t >()->default_value("30"),
-     "number"),
-    (min_io_size, "", "min_io_size", "mim io size", ::cxxopts::value< uint32_t >()->default_value("4096"), "number"),
-    (max_io_size, "", "max_io_size", "max io size", ::cxxopts::value< uint32_t >()->default_value("4096"), "number"),
-    (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("300"), "number"));
+SISL_OPTION_GROUP(test_data_service,
+                  (run_time, "", "run_time", "running time in seconds",
+                   ::cxxopts::value< uint64_t >()->default_value("30"), "number"),
+                  (min_io_size, "", "min_io_size", "mim io size", ::cxxopts::value< uint32_t >()->default_value("4096"),
+                   "number"),
+                  (max_io_size, "", "max_io_size", "max io size", ::cxxopts::value< uint32_t >()->default_value("4096"),
+                   "number"));
 
 int main(int argc, char* argv[]) {
     int parsed_argc{argc};
