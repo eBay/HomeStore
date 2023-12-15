@@ -20,10 +20,10 @@ on:
         type: string
 
 jobs:
-  SislDeps:
-    uses: eBay/sisl/.github/workflows/build_dependencies.yml@master
+  Sisl10Deps:
+    uses: eBay/sisl/.github/workflows/build_dependencies.yml@stable/v10.x
     with:
-      branch: master
+      branch: stable/v10.x
       platform: ${{ inputs.platform }}
       build-type: ${{ inputs.build-type }}
       malloc-impl: ${{ inputs.malloc-impl }}
@@ -32,7 +32,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
 
   IOMgrDeps:
-    needs: SislDeps
+    needs: Sisl10Deps
     uses: eBay/iomanager/.github/workflows/build_dependencies.yml@master
     with:
       branch: master
