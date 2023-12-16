@@ -41,6 +41,10 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_form
     m_sb->last_append_offset = m_last_append_offset;
     m_sb->freeable_nblks = m_freeable_nblks;
 
+    for (auto i = 0ul; i < m_dirty_sb.size(); ++i) {
+        m_dirty_sb[i].is_dirty = false;
+    }
+
     // for recovery boot, fields will also be recovered from metablks;
 }
 
