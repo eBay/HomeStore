@@ -22,6 +22,7 @@
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 #include <sisl/settings/settings.hpp>
+#include <iomgr/io_environment.hpp>
 #include <homestore/homestore.hpp>
 #include <homestore/index_service.hpp>
 #include <homestore/replication_service.hpp>
@@ -152,7 +153,8 @@ public:
         }
 
         LOGINFO("Starting iomgr with {} threads, spdk: {}", num_threads, is_spdk);
-        ioenvironment.with_iomgr(iomgr::iomgr_params{.num_threads = num_threads, .is_spdk = is_spdk, .num_fibers = num_fibers});
+        ioenvironment.with_iomgr(
+            iomgr::iomgr_params{.num_threads = num_threads, .is_spdk = is_spdk, .num_fibers = num_fibers});
 
         auto const http_port = SISL_OPTIONS["http_port"].as< int >();
         if (http_port != 0) {
@@ -305,4 +307,4 @@ public:
         }
     }
 };
-} // namespace test_common
+}; // namespace test_common
