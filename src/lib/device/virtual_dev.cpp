@@ -150,9 +150,10 @@ BlkAllocStatus VirtualDev::commit_blk(BlkId const& blkid) {
     HS_LOG(DEBUG, device, "commit_blk: bid {}", blkid.to_string());
     auto const recovering = homestore::hs()->is_initializing();
     if (!recovering) {
-        HS_DBG_ASSERT(is_blk_alloced(blkid), "commiting blkid {} is not allocated in non-recovery mode", blkid.to_string());
+        HS_DBG_ASSERT(is_blk_alloced(blkid), "commiting blkid {} is not allocated in non-recovery mode",
+                      blkid.to_string());
     } else {
-       chunk->blk_allocator_mutable()->mark_blk_allocated(blkid);
+        chunk->blk_allocator_mutable()->mark_blk_allocated(blkid);
     }
     return chunk->blk_allocator_mutable()->alloc_on_disk(blkid);
 }
@@ -169,8 +170,13 @@ BlkAllocStatus VirtualDev::alloc_contiguous_blks(blk_count_t nblks, blk_alloc_hi
         } else {
             ret = alloc_blks(nblks, hints, mbid);
         }
-        HS_REL_ASSERT_EQ(mbid.num_pieces(), 1, "out blkid more than 1 entries will lead to blk leak!");
-        out_blkid = mbid.to_single_blkid();
+
+        if (ret == BlkAllocStatus::SUCCESS || (ret == BlkAllocStatus::PARTIAL && hints.partial_alloc_ok)) {
+            HS_REL_ASSERT_EQ(mbid.num_pieces(), 1, "out blkid more than 1 entries will lead to blk leak!");
+            out_blkid = mbid.to_single_blkid();
+        }
+
+        // for failure case, fall through and return the status to caller;
     } catch (const std::exception& e) {
         ret = BlkAllocStatus::FAILED;
         HS_DBG_ASSERT(0, "{}", e.what());
@@ -235,6 +241,13 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
 
         auto nblks_this_iter = out_bid.blk_count();
         nblks_remain = (nblks_remain < nblks_this_iter) ? 0 : (nblks_remain - nblks_this_iter);
+
+        if (status != BlkAllocStatus::SUCCESS && status != BlkAllocStatus::PARTIAL) {
+            out_blkids.pop_back();
+            // all chunks has been tried, but still failed to allocate;
+            // break out and return status to caller;
+            break;
+        }
     } while (nblks_remain);
 
     return status;
