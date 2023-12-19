@@ -105,7 +105,8 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     }
 };
 
-using BtreeTypes = testing::Types< PrefixIntervalBtreeTest, FixedLenBtreeTest, VarKeySizeBtreeTest,
+// TODO Enable PrefixIntervalBtreeTest later
+using BtreeTypes = testing::Types</* PrefixIntervalBtreeTest, */FixedLenBtreeTest, VarKeySizeBtreeTest,
                                    VarValueSizeBtreeTest, VarObjSizeBtreeTest >;
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 

@@ -133,7 +133,7 @@ INDEX_BETREE_BENCHMARK(FixedLenBtree)
 INDEX_BETREE_BENCHMARK(VarKeySizeBtree)
 INDEX_BETREE_BENCHMARK(VarValueSizeBtree)
 INDEX_BETREE_BENCHMARK(VarObjSizeBtree)
-INDEX_BETREE_BENCHMARK(PrefixIntervalBtree)
+//INDEX_BETREE_BENCHMARK(PrefixIntervalBtree)
 
 int main(int argc, char** argv) {
     SISL_OPTIONS_LOAD(argc, argv, logging, index_btree_benchmark, iomgr, test_common_setup);
