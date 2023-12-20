@@ -25,7 +25,11 @@
 
 #include <boost/icl/split_interval_set.hpp>
 #include <nlohmann/json.hpp>
+#ifndef NO_ISAL
 #include <isa-l/crc.h>
+#else
+#include "common/crc.h"
+#endif
 #include <sisl/metrics/metrics.hpp>
 #include <sisl/logging/logging.h>
 #include <homestore/homestore_decl.hpp>

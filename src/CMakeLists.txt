@@ -3,25 +3,29 @@ cmake_minimum_required(VERSION 3.13)
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 
 find_package(Threads)
-find_library(LIB_AIO aio REQUIRED)
-find_package(isa-l REQUIRED)
-find_package(iomgr REQUIRED)
-find_package(farmhash REQUIRED)
-find_package(GTest REQUIRED)
+find_library(LIB_AIO aio QUIET REQUIRED)
+find_package(isa-l QUIET)
+find_package(iomgr QUIET REQUIRED)
+find_package(farmhash QUIET REQUIRED)
+find_package(GTest QUIET REQUIRED)
 
-set (COMMON_DEPS
-        iomgr::iomgr
-        farmhash::farmhash
-        isa-l::isa-l
-        sisl::sisl
-    )
+list(APPEND COMMON_DEPS
+    iomgr::iomgr
+    farmhash::farmhash
+    sisl::sisl
+)
+if (${isa-l_FOUND})
+    list(APPEND COMMON_DEPS isa-l::isa-l)
+else ()
+    add_flags("-DNO_ISAL")
+endif()
 
-set(COMMON_TEST_DEPS
-        ${COMMON_DEPS}
-        ${spdk_LIBRARY_LIST}
-        ${dpdk_LIBRARY_LIST}
-        GTest::gmock
-    )
+list(APPEND COMMON_TEST_DEPS
+    ${COMMON_DEPS}
+    ${spdk_LIBRARY_LIST}
+    ${dpdk_LIBRARY_LIST}
+    GTest::gmock
+)
 
 include_directories (BEFORE lib/)
 include_directories (BEFORE include/)

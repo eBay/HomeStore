@@ -17,7 +17,11 @@
 #include <map>
 #include <vector>
 
+#ifndef NO_ISAL
 #include <isa-l/crc.h>
+#else
+#include "common/crc.h"
+#endif
 #include <iomgr/iomgr.hpp>
 #include <sisl/fds/sparse_vector.hpp>
 #include <homestore/homestore_decl.hpp>

@@ -25,7 +25,11 @@
 #include "btree_internal.hpp"
 #include <homestore/btree/btree_kv.hpp>
 // #include <iomgr/iomgr_flip.hpp>
+#ifndef NO_ISAL
 #include <isa-l/crc.h>
+#else
+#include "common/crc.h"
+#endif
 
 namespace homestore {
 ENUM(locktype_t, uint8_t, NONE, READ, WRITE)
