@@ -15,11 +15,6 @@
  *********************************************************************************/
 #include <cstring>
 
-#ifndef NO_ISAL
-#include <isa-l/crc.h>
-#else
-#endif
-
 #include <homestore/logstore/log_store.hpp>
 #include "common/homestore_assert.hpp"
 #include "log_dev.hpp"

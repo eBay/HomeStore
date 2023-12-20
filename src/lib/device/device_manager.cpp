@@ -15,11 +15,7 @@
 #include <vector>
 
 #include <iomgr/iomgr.hpp>
-#ifndef NO_ISAL
-#include <isa-l/crc.h>
-#else
 #include "common/crc.h"
-#endif
 #include <sisl/logging/logging.h>
 
 #include <boost/uuid/random_generator.hpp>

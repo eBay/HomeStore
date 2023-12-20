@@ -1,5 +1,11 @@
 #pragma once
 
+// Only x86 and x86_64 supported by Intel Storage Acceleration library
+#ifndef NO_ISAL
+#include <isa-l/crc.h>
+
+#else
+
 #define MAX_ITER 8
 
 extern "C" {
@@ -37,3 +43,4 @@ static inline uint32_t crc32_ieee(uint32_t seed, const unsigned char* buf, uint6
     return ~rem;
 }
 }
+#endif
