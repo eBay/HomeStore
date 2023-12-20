@@ -53,6 +53,7 @@ set(HOMESTORE_OBJECTS
     $<TARGET_OBJECTS:hs_datasvc>
     $<TARGET_OBJECTS:hs_replication>
     lib/homestore.cpp
+    lib/crc.cpp
     #$<TARGET_OBJECTS:hs_cp>
     #$<TARGET_OBJECTS:indx_mgr>
 )
