@@ -17,7 +17,7 @@
 #include <map>
 #include <vector>
 
-#include "common/crc.h"
+#include <homestore/crc.h>
 #include <iomgr/iomgr.hpp>
 #include <sisl/fds/sparse_vector.hpp>
 #include <homestore/homestore_decl.hpp>

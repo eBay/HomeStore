@@ -24,7 +24,7 @@
 #include <sisl/utility/obj_life_counter.hpp>
 #include "btree_internal.hpp"
 #include <homestore/btree/btree_kv.hpp>
-#include "common/crc.h"
+#include <homestore/crc.h>
 
 namespace homestore {
 ENUM(locktype_t, uint8_t, NONE, READ, WRITE)
