@@ -13,8 +13,6 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
-#include <isa-l/crc.h>
-
 #include "device/chunk.h"
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"

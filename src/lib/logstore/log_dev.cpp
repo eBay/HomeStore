@@ -19,7 +19,6 @@
 #include <iterator>
 
 #include <sisl/fds/vector_pool.hpp>
-#include <isa-l/crc.h>
 #include <iomgr/iomgr_flip.hpp>
 
 #include <homestore/logstore_service.hpp>
