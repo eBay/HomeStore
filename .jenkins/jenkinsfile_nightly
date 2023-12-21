@@ -42,7 +42,10 @@ pipeline {
                     steps {
                         sh "conan create --build missing -o sisl:prerelease=True -o homestore:sanitize=True -o homestore:skip_testing=True -pr debug . ${PROJECT}/${VER}@"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_index_btree' -exec cp {} .jenkins/test_index_btree \\;"
+                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr\\;"
+                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store\\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/scripts/btree_test.py' -exec install -Dm755 {} .jenkins/btree_test.py \\; "
+                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/scripts/log_meta_test.py' -exec install -Dm755 {} .jenkins/log_meta_test.py \\; "
                     }
                     post {
                         failure {
