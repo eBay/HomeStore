@@ -1,5 +1,6 @@
 /*********************************************************************************
- * Modifications Copyright 2017-2023 eBay Inc.
+ * Modifications Copyright 2017-2019 eBay Inc.
+ *
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,31 +14,32 @@
  *
  *********************************************************************************/
 #pragma once
+#include <atomic>
+#include <array>
+#include <memory>
+#include <mutex>
 
-#include <sisl/fds/buffer.hpp>
-#include <homestore/blk.h>
-#include <homestore/homestore_decl.hpp>
+#include <sisl/logging/logging.h>
+#include <iomgr/iomgr.hpp>
+#include <folly/futures/SharedPromise.h>
 
 namespace homestore {
-class Chunk;
-
-class VChunk {
+class CPManager;
+class CPWatchdog {
 public:
-    VChunk(cshared< Chunk > const&);
-
-    ~VChunk() = default;
-
-    void set_user_private(const sisl::blob& data);
-    const uint8_t* get_user_private() const;
-    blk_num_t get_total_blks() const;
-    blk_num_t available_blks() const;
-    blk_num_t get_freeable_nblks() const;
-    blk_num_t get_defrag_nblks() const;
-    uint32_t get_pdev_id() const;
-    uint16_t get_chunk_id() const;
-    cshared< Chunk > get_internal_chunk() const;
+    CPWatchdog(CPManager* cp_mgr);
+    void set_cp(CP* cp);
+    void reset_cp();
+    void cp_watchdog_timer();
+    void stop();
 
 private:
-    shared< Chunk > m_internal_chunk;
+    CP* m_cp;
+    CPManager* m_cp_mgr;
+    std::shared_mutex m_cp_mtx;
+    Clock::time_point m_last_state_ch_time;
+    uint64_t m_timer_sec{0};
+    iomgr::timer_handle_t m_timer_hdl;
+    uint32_t m_progress_pct{0};
 };
 } // namespace homestore

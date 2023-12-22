@@ -61,7 +61,7 @@ private:
 public:
     friend class RaftStateMachine;
 
-    RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk >& rd_sb, bool load_existing);
+    RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk >&& rd_sb, bool load_existing);
     virtual ~RaftReplDev() = default;
 
     void destroy();

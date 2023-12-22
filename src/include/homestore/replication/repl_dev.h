@@ -7,7 +7,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <folly/futures/Future.h>
 #include <sisl/fds/buffer.hpp>
-
+#include <sisl/grpc/generic_service.hpp>
 #include <homestore/replication/repl_decls.h>
 
 namespace nuraft {
@@ -16,12 +16,6 @@ using ptr = std::shared_ptr< T >;
 
 class buffer;
 } // namespace nuraft
-
-namespace sisl {
-class GenericRpcData;
-}
-
-void intrusive_ptr_release(sisl::GenericRpcData*);
 
 namespace homestore {
 class ReplDev;
@@ -61,6 +55,7 @@ struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::
 public:
     virtual ~repl_req_ctx();
     int64_t get_lsn() const { return lsn; }
+    MultiBlkId const& get_local_blkid() const { return local_blkid; }
 
     uint64_t dsn() const { return rkey.dsn; }
     uint64_t term() const { return rkey.term; }

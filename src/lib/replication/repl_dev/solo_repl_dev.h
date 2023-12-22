@@ -35,7 +35,7 @@ private:
     std::atomic< logstore_seq_num_t > m_commit_upto{-1};
 
 public:
-    SoloReplDev(superblk< repl_dev_superblk > const& rd_sb, bool load_existing);
+    SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existing);
     virtual ~SoloReplDev() = default;
 
     void async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,

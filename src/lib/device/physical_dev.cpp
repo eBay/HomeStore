@@ -22,7 +22,6 @@
 #include <iomgr/iomgr.hpp>
 #include <iomgr/iomgr_flip.hpp>
 #include <sisl/fds/utils.hpp>
-#include <isa-l/crc.h>
 
 #include <homestore/homestore_decl.hpp>
 #include "device/chunk.h"

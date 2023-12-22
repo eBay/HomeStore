@@ -22,7 +22,7 @@
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
 #include "common/resource_mgr.hpp"
-#include "cp.hpp"
+#include "cp_internal.hpp"
 
 namespace homestore {
 thread_local std::stack< CP* > CPGuard::t_cp_stack;

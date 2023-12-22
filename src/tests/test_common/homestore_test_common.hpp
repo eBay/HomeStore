@@ -22,6 +22,7 @@
 #include <sisl/logging/logging.h>
 #include <sisl/options/options.h>
 #include <sisl/settings/settings.hpp>
+#include <iomgr/io_environment.hpp>
 #include <homestore/homestore.hpp>
 #include <homestore/index_service.hpp>
 #include <homestore/replication_service.hpp>
@@ -374,4 +375,4 @@ public:
         }
     }
 };
-} // namespace test_common
+}; // namespace test_common

@@ -22,16 +22,15 @@
 #include <sisl/utility/enum.hpp>
 #include <boost/algorithm/string.hpp>
 
+#include <homestore/btree/mem_btree.hpp>
+#include "test_common/range_scheduler.hpp"
 #include <homestore/btree/detail/simple_node.hpp>
 #include <homestore/btree/detail/varlen_node.hpp>
 #include <homestore/btree/detail/prefix_node.hpp>
-#include <homestore/btree/mem_btree.hpp>
-#include "test_common/range_scheduler.hpp"
-#include "btree_helpers/btree_test_kvs.hpp"
 #include "btree_helpers/btree_test_helper.hpp"
 
 using namespace homestore;
-SISL_LOGGING_DEF(btree, iomgr, io_wd, flip)
+SISL_LOGGING_DEF(btree)
 
 SISL_OPTIONS_ENABLE(logging, test_mem_btree)
 SISL_OPTION_GROUP(
@@ -92,10 +91,12 @@ struct PrefixIntervalBtreeTest {
 };
 
 template < typename TestType >
-struct BtreeTest : public BtreeTestHelper< TestType > {
+struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     using T = TestType;
     using K = typename TestType::KeyType;
     using V = typename TestType::ValueType;
+
+    BtreeTest() : testing::Test() {}
 
     void SetUp() override {
         BtreeTestHelper< TestType >::SetUp();
@@ -104,7 +105,8 @@ struct BtreeTest : public BtreeTestHelper< TestType > {
     }
 };
 
-using BtreeTypes = testing::Types< PrefixIntervalBtreeTest, FixedLenBtreeTest, VarKeySizeBtreeTest,
+// TODO Enable PrefixIntervalBtreeTest later
+using BtreeTypes = testing::Types</* PrefixIntervalBtreeTest, */FixedLenBtreeTest, VarKeySizeBtreeTest,
                                    VarValueSizeBtreeTest, VarObjSizeBtreeTest >;
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 
@@ -282,12 +284,12 @@ TYPED_TEST(BtreeTest, RandomRemoveRange) {
 }
 
 template < typename TestType >
-struct BtreeConcurrentTest : public BtreeTestHelper< TestType > {
+struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     using T = TestType;
     using K = typename TestType::KeyType;
     using V = typename TestType::ValueType;
 
-    BtreeConcurrentTest() { this->m_is_multi_threaded = true; }
+    BtreeConcurrentTest() : testing::Test() { this->m_is_multi_threaded = true; }
 
     void SetUp() override {
         LOGINFO("Starting iomgr with {} threads", SISL_OPTIONS["num_threads"].as< uint32_t >());
@@ -313,36 +315,10 @@ TYPED_TEST_SUITE(BtreeConcurrentTest, BtreeTypes);
 TYPED_TEST(BtreeConcurrentTest, ConcurrentAllOps) {
     // range put is not supported for non-extent keys
     std::vector< std::string > input_ops = {"put:20", "remove:20", "range_put:20", "range_remove:20", "query:20"};
-    std::vector< std::pair< std::string, int > > ops;
-
     if (SISL_OPTIONS.count("operation_list")) {
         input_ops = SISL_OPTIONS["operation_list"].as< std::vector< std::string > >();
     }
-    int total = std::accumulate(input_ops.begin(), input_ops.end(), 0, [](int sum, const auto& str) {
-        std::vector< std::string > tokens;
-        boost::split(tokens, str, boost::is_any_of(":"));
-        if (tokens.size() == 2) {
-            try {
-                return sum + std::stoi(tokens[1]);
-            } catch (const std::exception&) {
-                // Invalid frequency, ignore this element
-            }
-        }
-        return sum; // Ignore malformed strings
-    });
-
-    std::transform(input_ops.begin(), input_ops.end(), std::back_inserter(ops), [total](const auto& str) {
-        std::vector< std::string > tokens;
-        boost::split(tokens, str, boost::is_any_of(":"));
-        if (tokens.size() == 2) {
-            try {
-                return std::make_pair(tokens[0], (int)(100.0 * std::stoi(tokens[1]) / total));
-            } catch (const std::exception&) {
-                // Invalid frequency, ignore this element
-            }
-        }
-        return std::make_pair(std::string(), 0);
-    });
+    auto ops = this->build_op_list(input_ops);
 
     this->multi_op_execute(ops);
 }

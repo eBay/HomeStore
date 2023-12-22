@@ -24,7 +24,6 @@
 
 #include <sisl/fds/compress.hpp>
 #include <sisl/fds/utils.hpp>
-#include <isa-l/crc.h>
 #include <iomgr/iomgr_flip.hpp>
 
 #include <homestore/meta_service.hpp>
