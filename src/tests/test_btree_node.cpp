@@ -31,7 +31,7 @@ static constexpr uint32_t g_max_keys{6000};
 static std::uniform_int_distribution< uint32_t > g_randkey_generator{0, g_max_keys - 1};
 
 using namespace homestore;
-SISL_LOGGING_INIT(btree, iomgr, flip, io_wd)
+SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
 
 struct FixedLenNodeTest {
     using NodeType = SimpleNode< TestFixedKey, TestFixedValue >;

@@ -45,7 +45,7 @@
 using namespace homestore;
 
 RCU_REGISTER_INIT
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
 SISL_OPTIONS_ENABLE(logging, test_meta_blk_mgr, iomgr, test_common_setup)
@@ -885,7 +885,6 @@ SISL_OPTION_GROUP(
      "number"),
     (max_write_size, "", "max_write_size", "maximum write size",
      ::cxxopts::value< uint32_t >()->default_value("524288"), "number"),
-    (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("300"), "number"),
     (overflow, "", "overflow", "always do overflow", ::cxxopts::value< uint32_t >()->default_value("0"), "number"),
     (per_update, "", "per_update", "update percentage", ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
     (per_write, "", "per_write", "write percentage", ::cxxopts::value< uint32_t >()->default_value("60"), "number"),

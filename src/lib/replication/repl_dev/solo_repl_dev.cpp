@@ -1,9 +1,10 @@
+#include <boost/smart_ptr/intrusive_ref_counter.hpp>
+#include "replication/repl_dev/solo_repl_dev.h"
+#include "replication/repl_dev/common.h"
 #include <homestore/blkdata_service.hpp>
 #include <homestore/logstore_service.hpp>
 #include <homestore/superblk_handler.hpp>
 #include "common/homestore_assert.hpp"
-#include "replication/repl_dev/solo_repl_dev.h"
-#include "replication/repl_dev/common.h"
 
 namespace homestore {
 SoloReplDev::SoloReplDev(superblk< repl_dev_superblk > const& rd_sb, bool load_existing) :
@@ -35,7 +36,8 @@ void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
     if (rreq->value.size) {
         // Step 1: Alloc Blkid
         auto status = data_service().alloc_blks(uint32_cast(rreq->value.size),
-                                                m_listener->get_blk_alloc_hints(rreq->header, rreq), rreq->local_blkid);
+                                                m_listener->get_blk_alloc_hints(rreq->header, rreq->value.size),
+                                                rreq->local_blkid);
         HS_REL_ASSERT_EQ(status, BlkAllocStatus::SUCCESS);
 
         // Write the data

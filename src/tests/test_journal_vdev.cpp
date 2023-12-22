@@ -40,7 +40,7 @@
 using namespace homestore;
 
 RCU_REGISTER_INIT
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
 
 SISL_OPTIONS_ENABLE(logging, test_vdev, iomgr, test_common_setup)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
@@ -342,8 +342,6 @@ SISL_OPTION_GROUP(test_vdev,
                    ::cxxopts::value< uint32_t >()->default_value("8192"), "number"),
                   (run_time, "", "run_time", "running time in seconds",
                    ::cxxopts::value< uint64_t >()->default_value("30"), "number"),
-                  (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("3000"),
-                   "number"),
                   (per_read, "", "per_read", "read percentage of io that are reads",
                    ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
                   (per_write, "", "per_write", "write percentage of io that are writes",

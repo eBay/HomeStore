@@ -114,7 +114,7 @@ private:
     std::unique_ptr< MetaBlkService > m_meta_service;
     std::unique_ptr< LogStoreService > m_log_service;
     std::unique_ptr< IndexService > m_index_service;
-    std::unique_ptr< ReplicationService > m_repl_service;
+    std::shared_ptr< ReplicationService > m_repl_service;
 
     std::unique_ptr< DeviceManager > m_dev_mgr;
     shared< sisl::logging::logger_t > m_periodic_logger;

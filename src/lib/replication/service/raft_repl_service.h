@@ -18,71 +18,60 @@
 #include <string>
 #include <shared_mutex>
 
+#include <folly/Expected.h>
+#include <folly/futures/Future.h>
+#include <nuraft_mesg/nuraft_mesg.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <sisl/logging/logging.h>
 
-#include <folly/Expected.h>
-#include <folly/futures/Future.h>
 #include <homestore/homestore.hpp>
-#include <homestore/replication_service.hpp>
-#include <homestore/replication/repl_dev.h>
-#include <homestore/checkpoint/cp_mgr.hpp>
 #include <homestore/superblk_handler.hpp>
+#include "replication/service/generic_repl_svc.h"
 
 namespace homestore {
 
-static std::string const PUSH_DATA{"push_data"};
-static std::string const FETCH_DATA{"fetch_data"};
-
 struct repl_dev_superblk;
-class GenericReplService : public ReplicationService {
-protected:
-    shared< ReplApplication > m_repl_app;
-    std::shared_mutex m_rd_map_mtx;
-    std::map< group_id_t, shared< ReplDev > > m_rd_map;
-    replica_id_t m_my_uuid;
+class RaftReplService : public GenericReplService,
+                        public nuraft_mesg::MessagingApplication,
+                        public std::enable_shared_from_this< RaftReplService > {
+private:
+    shared< nuraft_mesg::Manager > m_msg_mgr;
+    json_superblk m_config_sb;
 
 public:
-    static std::shared_ptr< GenericReplService > create(cshared< ReplApplication >& repl_app);
+    RaftReplService(cshared< ReplApplication >& repl_app);
 
-    GenericReplService(cshared< ReplApplication >& repl_app);
-    virtual void start() = 0;
-    virtual void stop();
-    meta_sub_type get_meta_blk_name() const override { return "repl_dev"; }
+    static ReplServiceError to_repl_error(nuraft::cmd_result_code code);
 
-    ReplResult< shared< ReplDev > > get_repl_dev(group_id_t group_id) const override;
-    void iterate_repl_devs(std::function< void(cshared< ReplDev >&) > const& cb) override;
-
-    hs_stats get_cap_stats() const override;
-    replica_id_t get_my_repl_uuid() const { return m_my_uuid; }
+    ///////////////////// Overrides of nuraft_mesg::MessagingApplication ////////////////////
+    std::string lookup_peer(nuraft_mesg::peer_id_t const&) override;
+    std::shared_ptr< nuraft_mesg::mesg_state_mgr > create_state_mgr(int32_t srv_id,
+                                                                    nuraft_mesg::group_id_t const& group_id) override;
+    nuraft_mesg::Manager& msg_manager() { return *m_msg_mgr; }
 
 protected:
-    virtual void add_repl_dev(group_id_t group_id, shared< ReplDev > rdev);
-    virtual void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) = 0;
-};
-
-class SoloReplService : public GenericReplService {
-public:
-    SoloReplService(cshared< ReplApplication >& repl_app);
+    ///////////////////// Overrides of GenericReplService ////////////////////
     void start() override;
-
     AsyncReplResult< shared< ReplDev > > create_repl_dev(group_id_t group_id,
                                                          std::set< replica_id_t > const& members) override;
     void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) override;
     AsyncReplResult<> replace_member(group_id_t group_id, replica_id_t member_out,
                                      replica_id_t member_in) const override;
+
+private:
+    void raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie);
 };
 
-class SoloReplServiceCPHandler : public CPCallbacks {
+class RaftReplServiceCPHandler : public CPCallbacks {
 public:
-    SoloReplServiceCPHandler() = default;
-    virtual ~SoloReplServiceCPHandler() = default;
+    RaftReplServiceCPHandler() = default;
+    virtual ~RaftReplServiceCPHandler() = default;
 
+public:
     std::unique_ptr< CPContext > on_switchover_cp(CP* cur_cp, CP* new_cp) override;
     folly::Future< bool > cp_flush(CP* cp) override;
     void cp_cleanup(CP* cp) override;
     int cp_progress_percent() override;
 };
 
-extern ReplicationService& repl_service();
 } // namespace homestore

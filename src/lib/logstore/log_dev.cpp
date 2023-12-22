@@ -236,18 +236,10 @@ int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_nu
 }
 
 log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_record_header) {
-    static thread_local sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logread > read_buf;
+    auto buf = sisl::make_byte_array(initial_read_size, m_flush_size_multiple, sisl::buftag::logread);
+    m_vdev->sync_pread(buf->bytes(), initial_read_size, key.dev_offset);
 
-    // First read the offset and read the log_group. Then locate the log_idx within that and get the actual data
-    // Read about 4K of buffer
-    if (!read_buf) {
-        read_buf = sisl::aligned_unique_ptr< uint8_t, sisl::buftag::logread >::make_sized(m_flush_size_multiple,
-                                                                                          initial_read_size);
-    }
-    auto rbuf = read_buf.get();
-    m_vdev->sync_pread(rbuf, initial_read_size, key.dev_offset);
-
-    auto* header = r_cast< const log_group_header* >(rbuf);
+    auto* header = r_cast< const log_group_header* >(buf->cbytes());
     HS_REL_ASSERT_EQ(header->magic_word(), LOG_GROUP_HDR_MAGIC, "Log header corrupted with magic mismatch!");
     HS_REL_ASSERT_EQ(header->get_version(), log_group_header::header_version, "Log header version mismatch!");
     HS_REL_ASSERT_LE(header->start_idx(), key.idx, "log key offset does not match with log_idx");
@@ -257,44 +249,30 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
     // We can only do crc match in read if we have read all the blocks. We don't want to aggressively read more data
     // than we need to just to compare CRC for read operation. It can be done during recovery.
     if (header->total_size() <= initial_read_size) {
-        crc32_t const crc = crc32_ieee(init_crc32, reinterpret_cast< const uint8_t* >(rbuf) + sizeof(log_group_header),
+        crc32_t const crc = crc32_ieee(init_crc32, (buf->cbytes() + sizeof(log_group_header)),
                                        header->total_size() - sizeof(log_group_header));
         HS_REL_ASSERT_EQ(header->this_group_crc(), crc, "CRC mismatch on read data");
     }
-
     auto record_header = header->nth_record(key.idx - header->start_log_idx);
     uint32_t const data_offset = (record_header->offset + (record_header->get_inlined() ? 0 : header->oob_data_offset));
 
-    sisl::byte_array b = sisl::make_byte_array(uint32_cast(record_header->size));
-    if ((data_offset + b->size()) < initial_read_size) {
-        std::memcpy(static_cast< void* >(b->bytes()), static_cast< const void* >(rbuf + data_offset),
-                    b->size()); // Already read them enough, copy the data
+    sisl::byte_view ret_view;
+    if ((data_offset + record_header->size) < initial_read_size) {
+        ret_view = sisl::byte_view{buf, data_offset, record_header->size};
     } else {
-        // Round them data offset to dma boundary in-order to make sure pread on direct io succeed. We need to skip
-        // the rounded portion while copying to user buffer
         auto const rounded_data_offset = sisl::round_down(data_offset, m_vdev->align_size());
-        auto const rounded_size = sisl::round_up(b->size() + data_offset - rounded_data_offset, m_vdev->align_size());
-
-        // Allocate a fresh aligned buffer, if size cannot fit standard size
-        if (rounded_size > initial_read_size) {
-            rbuf = hs_utils::iobuf_alloc(rounded_size, sisl::buftag::logread, m_vdev->align_size());
-        }
-
-        /*        THIS_LOGDEV_LOG(TRACE,
-                                "Addln read as data resides outside initial_read_size={} key.idx={}
-           key.group_dev_offset={} " "data_offset={} size={} rounded_data_offset={} rounded_size={}", initial_read_size,
-           key.idx, key.dev_offset, data_offset, b.size(), rounded_data_offset, rounded_size); */
-        m_vdev->sync_pread(rbuf, rounded_size, key.dev_offset + rounded_data_offset);
-        std::memcpy(static_cast< void* >(b->bytes()),
-                    static_cast< const void* >(rbuf + data_offset - rounded_data_offset), b->size());
-
-        // Free the buffer in case we allocated above
-        if (rounded_size > initial_read_size) { hs_utils::iobuf_free(rbuf, sisl::buftag::logread); }
+        auto const rounded_size =
+            sisl::round_up(record_header->size + data_offset - rounded_data_offset, m_vdev->align_size());
+        auto new_buf = sisl::make_byte_array(rounded_size, m_vdev->align_size(), sisl::buftag::logread);
+        m_vdev->sync_pread(new_buf->bytes(), rounded_size, key.dev_offset + rounded_data_offset);
+        ret_view = sisl::byte_view{new_buf, s_cast< uint32_t >(data_offset - rounded_data_offset), record_header->size};
     }
+
     return_record_header =
         serialized_log_record(record_header->size, record_header->offset, record_header->get_inlined(),
                               record_header->store_seq_num, record_header->store_id);
-    return log_buffer{b};
+
+    return ret_view;
 }
 
 logstore_id_t LogDev::reserve_store_id() {

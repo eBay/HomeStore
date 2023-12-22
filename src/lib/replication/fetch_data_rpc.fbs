@@ -1,0 +1,34 @@
+namespace homestore;
+
+table RequestEntry {
+    lsn : int64;                 // LSN of the raft log if known
+    raft_term : uint64;          // Raft term number
+    dsn : uint64;                // Data Sequence number
+    user_header: [ubyte];        // User header bytes
+    user_key : [ubyte];          // User key data
+    blkid_originator : int32;    // Originally which replica's blkid is this
+    remote_blkid : [ubyte];      // Serialized remote blkid
+}
+
+table FetchDataRequest {
+    entries : [RequestEntry];    // Array of request entries
+}
+
+table ResponseEntry {
+    lsn : [int64];        // LSN of the raft log if known
+    dsn : uint64;         // Data Sequence number
+    raft_term : uint64;   // Raft term number
+    data_size : uint32;   // Size of the data which is sent as separate non flatbuffer
+}
+
+table FetchDataResponse {
+    issuer_replica_id : int32;   // Replica id of the issuer
+    entries : [ResponseEntry];   // Array of request entries
+}
+
+table FetchData {
+    request : FetchDataRequest;
+    response : FetchDataResponse;
+}
+
+root_type FetchData;

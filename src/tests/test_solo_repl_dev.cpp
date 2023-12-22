@@ -47,7 +47,7 @@
 using namespace homestore;
 using namespace test_common;
 
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, test_solo_repl_dev, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_solo_repl_dev)
 
@@ -59,63 +59,6 @@ static uint32_t g_block_size;
 static constexpr uint64_t Ki{1024};
 static constexpr uint64_t Mi{Ki * Ki};
 static constexpr uint64_t Gi{Ki * Mi};
-
-struct Runner {
-    uint64_t total_tasks{0};
-    uint32_t qdepth{8};
-    std::atomic< uint64_t > issued_tasks{0};
-    std::atomic< uint64_t > pending_tasks{0};
-    std::function< void(void) > task;
-    folly::Promise< folly::Unit > comp_promise;
-
-    Runner(uint64_t num_tasks, uint32_t qd = 8) : total_tasks{num_tasks}, qdepth{qd} {
-        if (total_tasks < (uint64_t)qdepth) { total_tasks = qdepth; }
-    }
-
-    Runner() : Runner{SISL_OPTIONS["num_io"].as< uint64_t >()} {}
-
-    void set_task(std::function< void(void) > f) { task = std::move(f); }
-
-    folly::Future< folly::Unit > execute() {
-        for (uint32_t i{0}; i < qdepth; ++i) {
-            run_task();
-        }
-        return comp_promise.getFuture();
-    }
-
-    void next_task() {
-        auto ptasks = pending_tasks.fetch_sub(1) - 1;
-        if ((issued_tasks.load() < total_tasks)) {
-            run_task();
-        } else if (ptasks == 0) {
-            comp_promise.setValue();
-        }
-    }
-
-    void run_task() {
-        ++issued_tasks;
-        ++pending_tasks;
-        iomanager.run_on_forget(iomgr::reactor_regex::random_worker, task);
-    }
-};
-
-struct Waiter {
-    std::atomic< uint64_t > expected_comp{0};
-    std::atomic< uint64_t > actual_comp{0};
-    folly::Promise< folly::Unit > comp_promise;
-
-    Waiter(uint64_t num_op) : expected_comp{num_op} {}
-    Waiter() : Waiter{SISL_OPTIONS["num_io"].as< uint64_t >()} {}
-
-    folly::Future< folly::Unit > start(std::function< void(void) > f) {
-        f();
-        return comp_promise.getFuture();
-    }
-
-    void one_complete() {
-        if ((actual_comp.fetch_add(1) + 1) >= expected_comp.load()) { comp_promise.setValue(); }
-    }
-};
 
 struct test_repl_req : public repl_req_ctx {
     sisl::byte_array header;
@@ -174,7 +117,7 @@ public:
         void on_rollback(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
                          cintrusive< repl_req_ctx >& ctx) override {}
 
-        blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header, cintrusive< repl_req_ctx >& ctx) override {
+        blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) override {
             return blk_alloc_hints{};
         }
 
@@ -191,16 +134,16 @@ public:
 
         repl_impl_type get_impl_type() const override { return repl_impl_type::solo; }
         bool need_timeline_consistency() const { return true; }
-        std::unique_ptr< ReplDevListener > create_repl_dev_listener(uuid_t) override {
-            return std::make_unique< Listener >(m_test);
+        shared< ReplDevListener > create_repl_dev_listener(uuid_t) override {
+            return std::make_shared< Listener >(m_test);
         }
-        std::string lookup_peer(uuid_t uuid) const override { return std::string(""); }
-        uint16_t lookup_port() const override { return 0; }
+        std::pair< std::string, uint16_t > lookup_peer(uuid_t uuid) const override { return std::make_pair("", 0u); }
+        replica_id_t get_my_repl_id() const override { return hs_utils::gen_random_uuid(); }
     };
 
 protected:
-    Runner m_io_runner;
-    Waiter m_task_waiter;
+    test_common::Runner m_io_runner;
+    test_common::Waiter m_task_waiter;
     shared< ReplDev > m_repl_dev1;
     shared< ReplDev > m_repl_dev2;
     uuid_t m_uuid1;
@@ -256,7 +199,7 @@ public:
         }
 
         if (data_size != 0) {
-            req->write_sgs = HSTestHelper::create_sgs(data_size, g_block_size, max_size_per_iov, hdr->data_pattern);
+            req->write_sgs = HSTestHelper::create_sgs(data_size, max_size_per_iov, hdr->data_pattern);
         }
 
         auto& rdev = (rand() % 2) ? m_repl_dev1 : m_repl_dev2;
@@ -274,7 +217,7 @@ public:
 
         uint32_t size = blkids.blk_count() * g_block_size;
         if (size) {
-            auto read_sgs = HSTestHelper::create_sgs(size, g_block_size, size);
+            auto read_sgs = HSTestHelper::create_sgs(size, size);
             LOGDEBUG("[{}] Validating replay of lsn={} blkid = {}", boost::uuids::to_string(rdev.group_id()), lsn,
                      blkids.to_string());
             rdev.async_read(blkids, read_sgs, size)
@@ -298,7 +241,7 @@ public:
     void on_write_complete(ReplDev& rdev, intrusive< test_repl_req > req) {
         // If we did send some data to the repl_dev, validate it by doing async_read
         if (req->write_sgs.size != 0) {
-            req->read_sgs = HSTestHelper::create_sgs(req->write_sgs.size, g_block_size, req->write_sgs.size);
+            req->read_sgs = HSTestHelper::create_sgs(req->write_sgs.size, req->write_sgs.size);
 
             auto const cap = hs()->repl_service().get_cap_stats();
             LOGDEBUG("Write complete with cap stats: used={} total={}", cap.used_capacity, cap.total_capacity);
@@ -353,8 +296,6 @@ TEST_F(SoloReplDevTest, TestHeaderOnly) {
 }
 
 SISL_OPTION_GROUP(test_solo_repl_dev,
-                  (num_io, "", "num_io", "number of io", ::cxxopts::value< uint64_t >()->default_value("300"),
-                   "number"),
                   (block_size, "", "block_size", "block size to io",
                    ::cxxopts::value< uint32_t >()->default_value("4096"), "number"));
 

@@ -31,7 +31,7 @@
 
 using namespace homestore;
 RCU_REGISTER_INIT
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
 
 std::vector< logdev_key > s_logdev_keys;
 static uint64_t first_offset{~static_cast< uint64_t >(0)};

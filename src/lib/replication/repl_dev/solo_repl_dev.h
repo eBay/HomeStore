@@ -14,6 +14,7 @@
  *********************************************************************************/
 #pragma once
 
+#include <boost/smart_ptr/intrusive_ref_counter.hpp>
 #include <boost/intrusive_ptr.hpp>
 
 #include <homestore/replication_service.hpp>

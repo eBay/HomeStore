@@ -99,7 +99,7 @@ public:
      * @return A Future that will resolve to an error code indicating the result of the write operation.
      */
     folly::Future< std::error_code > async_write(const char* buf, uint32_t size, MultiBlkId const& bid,
-                                                 bool part_of_batch);
+                                                 bool part_of_batch = false);
     /**
      * @brief : asynchronous write with input block ids;
      *
@@ -170,6 +170,13 @@ public:
      * @return : blk size
      */
     uint32_t get_blk_size() const { return m_blk_size; }
+
+    /**
+     * @brief : get the blk size of this data service;
+     *
+     * @return : blk size
+     */
+    uint32_t get_align_size() const;
 
     /**
      * @brief : get the read block tracker handle;
