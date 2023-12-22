@@ -111,7 +111,7 @@ protected:
 
 private:
     shared< nuraft::log_store > data_journal() { return m_data_journal; }
-    void push_data_to_all_followers(repl_req_ptr_t const& rreq);
+    void push_data_to_all_followers(repl_req_ptr_t rreq);
     void on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data);
 };
 

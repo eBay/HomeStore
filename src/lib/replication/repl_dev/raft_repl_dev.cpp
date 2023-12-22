@@ -99,7 +99,7 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
     }
 }
 
-void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t const& rreq) {
+void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq) {
     auto& builder = rreq->fb_builder;
 
     // Prepare the rpc request packet with all repl_reqs details
