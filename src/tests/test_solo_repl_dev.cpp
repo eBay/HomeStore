@@ -47,7 +47,7 @@
 using namespace homestore;
 using namespace test_common;
 
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, test_solo_repl_dev, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_solo_repl_dev)
 

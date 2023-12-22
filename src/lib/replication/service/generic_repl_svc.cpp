@@ -47,46 +47,6 @@ void GenericReplService::stop() {
     m_rd_map.clear();
 }
 
-#if 0
-AsyncReplResult< shared< ReplDev > > GenericReplService::create_repl_dev(group_id_t group_id,
-                                                                         std::set< replica_id_t > const& members) {
-    // Ensure idempotency of the repl_dev creation
-    auto it = m_rd_map.end();
-    bool happened = false;
-    {
-        std::unique_lock lg(m_rd_map_mtx);
-        std::tie(it, happened) = m_rd_map.emplace(std::make_pair(group_id, nullptr));
-
-        if (!happened) {
-            if (it == m_rd_map.end()) {
-                // We should never reach here, as we have failed to emplace in map, but couldn't find entry
-                DEBUG_ASSERT(false, "Unable to put the repl_dev in rd map");
-                return make_async_error< shared< ReplDev > >(ReplServiceError::SERVER_ALREADY_EXISTS);
-            } else if (it->second == nullptr) {
-                // Re-entrant, where we have already created the entry, but not yet created the local repl dev instance
-                // which actually creates state machine etc according the the underlying implementation
-                it->second = create_local_repl_dev_instance(group_id);
-            }
-            return make_async_success< shared< ReplDev > >(it->second);
-        }
-    }
-
-    // Create whatever underlying implementation of repl_dev needs to be for fresh creation of repl_dev. This will call
-    // back create_repl_dev, but this time we should group_id in the map, so we will return the repl_dev
-    auto const result = create_replica_set(group_id, std::move(members)).get();
-    if (!bool(result)) {
-        std::unique_lock lg(m_rd_map_mtx);
-        m_rd_map.erase(group_id);
-        return make_async_error< shared< ReplDev > >(result.error());
-    }
-
-    {
-        std::shared_lock lg(m_rd_map_mtx);
-        return make_async_success< shared< ReplDev > >(m_rd_map.at(group_id));
-    }
-}
-#endif
-
 ReplResult< shared< ReplDev > > GenericReplService::get_repl_dev(group_id_t group_id) const {
     std::shared_lock lg(m_rd_map_mtx);
     if (auto it = m_rd_map.find(group_id); it != m_rd_map.end()) { return it->second; }

@@ -220,63 +220,6 @@ void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
     add_repl_dev(group_id, rdev);
 }
 
-#if 0
-AsyncReplResult<> RaftReplService::create_replica_set(uuid_t group_id, std::set< replica_id_t > const& members) {
-    if (members.size() > 0) {
-        // If there are multiple members, then it is the first time we are creating this entire replica set
-        // and the current member assumes leadership. In that case, create a new group and add all members
-        if (auto const status = m_msg_mgr->create_group(group_id, "homestore_replication").get(); !status) {
-            return make_async_error(to_repl_error(status.error()));
-        }
-
-        auto my_id = m_repl_app->get_my_repl_id();
-        for (auto& member : members) {
-            if (member == my_id) { continue; } // Skip myself
-            if (auto const status = m_msg_mgr->add_member(group_id, member).get(); !status) {
-                return make_async_error(to_repl_error(status.error()));
-            }
-        }
-    }
-    return make_async_success<>();
-}
-
-AsyncReplResult<> RaftReplService::join_replica_set(uuid_t group_id, cshared< ReplDev >& repl_dev) {
-    m_msg_mgr->join_group(group_id, "homestore_replication",
-                          std::dynamic_pointer_cast< nuraft_mesg::mesg_state_mgr >(repl_dev));
-    return make_async_success<>();
-}
-
-shared< ReplDev > RaftReplService::create_local_repl_dev_instance(group_id_t group_id) {
-    superblk< raft_repl_dev_superblk > rd_sb{get_meta_blk_name()};
-    rd_sb.create();
-    rd_sb->group_id = group_id;
-    rd_sb->is_timeline_consistent = m_repl_app->need_timeline_consistency();
-
-    auto rdev = std::make_shared< RaftReplDev >(*this, rsb, false /* load_existing */);
-    rdev->use_config(json_superblk{get_meta_blk_name() + "_raft_config"});
-
-    auto listener = m_repl_app->create_repl_dev_listener(group_id);
-    listener->set_repl_dev(rdev.get());
-    rdev->attach_listener(std::move(listener));
-    rd_sb.write();
-
-    return rdev;
-}
-
-shared< ReplDev > RaftReplService::create_local_repl_dev_instance(superblk< repl_dev_superblk >& sb) {
-    auto& rsb = r_cast< superblk< raft_repl_dev_superblk >& >(sb);
-    auto rdev = std::make_shared< RaftReplDev >(*this, rsb, true /* load_existing */);
-    rdev->use_config(json_superblk{get_meta_blk_name() + "_raft_config"});
-
-    auto listener = m_repl_app->create_repl_dev_listener(group_id);
-    listener->set_repl_dev(rdev.get());
-    rdev->attach_listener(std::move(listener));
-    return rdev;
-}
-
-uint32_t RaftReplService::rd_super_blk_size() const { return sizeof(raft_repl_dev_superblk); }
-#endif
-
 AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, replica_id_t member_out,
                                                   replica_id_t member_in) const {
     return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);

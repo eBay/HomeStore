@@ -28,7 +28,7 @@
 
 #include "logstore/log_dev.hpp"
 
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
 RCU_REGISTER_INIT
 
 static constexpr size_t ITERATIONS{100000};

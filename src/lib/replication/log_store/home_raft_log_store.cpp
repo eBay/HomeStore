@@ -43,9 +43,9 @@ static nuraft::ptr< nuraft::log_entry > to_nuraft_log_entry(const log_buffer& lo
     uint64_t term = *r_cast< uint64_t const* >(raw_ptr);
     raw_ptr += sizeof(uint64_t);
     nuraft::log_val_type type = static_cast< nuraft::log_val_type >(*raw_ptr);
-    raw_ptr += sizeof(uint8_t);
+    raw_ptr += sizeof(nuraft::log_val_type);
 
-    size_t data_len = log_bytes.size() - sizeof(uint64_t) - sizeof(uint8_t);
+    size_t data_len = log_bytes.size() - sizeof(uint64_t) - sizeof(nuraft::log_val_type);
     auto nb = nuraft::buffer::alloc(data_len);
     nb->put_raw(raw_ptr, data_len);
     return nuraft::cs_new< nuraft::log_entry >(term, nb, type);

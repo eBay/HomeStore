@@ -72,7 +72,7 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
     if (!rreq) { auto rreq = repl_req_ptr_t(new repl_req_ctx{}); }
     rreq->header = header;
     rreq->key = key;
-    rreq->value = std::move(value);
+    rreq->value = value;
 
     // If it is header only entry, directly propose to the raft
     if (rreq->value.size) {
@@ -91,11 +91,11 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
             HS_REL_ASSERT(!err, "Error in writing data"); // TODO: Find a way to return error to the Listener
             rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_WRITTEN));
             m_state_machine->propose_to_raft(std::move(rreq));
-            // if (rreq->state.load() & uint32_cast(repl_req_state_t::LOG_FLUSHED)) { report_committed(std::move(rreq));
-            // }
         });
     } else {
         RD_LOG(INFO, "Skipping data channel send since value size is 0");
+        rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_WRITTEN));
+        m_state_machine->propose_to_raft(std::move(rreq));
     }
 }
 

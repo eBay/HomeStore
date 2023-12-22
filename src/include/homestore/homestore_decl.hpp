@@ -198,7 +198,6 @@ struct cap_attrs {
 
 ////////////// Misc ///////////////////
 #define HOMESTORE_LOG_MODS                                                                                             \
-    btree, device, blkalloc, flip, cp, metablk, wbcache, logstore, transient, replication, nuraft, nuraft_mesg,        \
-        grpc_server, IOMGR_LOG_MODS
+    btree, device, blkalloc, cp, metablk, wbcache, logstore, transient, replication, nuraft_mesg, nuraft, IOMGR_LOG_MODS
 
 } // namespace homestore

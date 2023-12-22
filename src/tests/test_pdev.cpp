@@ -34,7 +34,7 @@
 #include "device/physical_dev.hpp"
 
 using namespace homestore;
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, test_pdev, iomgr)
 
 SISL_OPTION_GROUP(test_pdev,

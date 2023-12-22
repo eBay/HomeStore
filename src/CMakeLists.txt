@@ -16,7 +16,7 @@ set (COMMON_DEPS
         isa-l::isa-l
         sisl::sisl
         nuraft::nuraft
-        NuraftMesg::NuraftMesg
+        NuraftMesg::proto
     )
 
 set(COMMON_TEST_DEPS
