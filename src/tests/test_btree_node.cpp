@@ -14,9 +14,6 @@
  *
  *********************************************************************************/
 #include <gtest/gtest.h>
-#include <random>
-#include <map>
-#include <memory>
 
 #include <sisl/options/options.h>
 #include <sisl/logging/logging.h>

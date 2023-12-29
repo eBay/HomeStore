@@ -335,14 +335,23 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
 
         auto& old_ith_node = old_nodes[src_cursor.ith_node];
         auto const nentries = new_node->copy_by_size(m_bt_cfg, *old_ith_node, src_cursor.nth_entry, available_size);
+        total_size -= new_node->occupied_size();
         if (old_ith_node->total_entries() == (src_cursor.nth_entry + nentries)) {
             // Copied entire node
             ++src_cursor.ith_node;
             src_cursor.nth_entry = 0;
             available_size = balanced_size - new_node->occupied_size();
         } else {
-            src_cursor.nth_entry += nentries;
-            available_size = 0;
+            //  If it is the last node supposed to be, check if the remaining entries can be copied and not creating a
+            //  new nodes. This will make the last new node a little skewed from balanced size due to large key/values but
+            //  avoid making extra new node.
+            if (new_nodes.size() == num_nodes - 1 && total_size < new_node->available_size()) {
+                available_size = new_node->available_size();
+                src_cursor.nth_entry += nentries;
+            } else {
+                src_cursor.nth_entry += nentries;
+                available_size = 0;
+            }
         }
     }
 
@@ -362,6 +371,7 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
     }
 
     if (!K::is_fixed_size()) {
+#if 0
         // Lets see if we have enough room in parent node to accommodate changes. This is needed only if the key is not
         // fixed length. For fixed length node merge will always result in less or equal size
         auto excess_releasing_nodes =
@@ -375,14 +385,13 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             goto out;
         }
 
-#if 0
+#endif
         // we first calculate the least amount of space being released after removing excess children. the key size
         // cannot be taken account; so we know for sure that value (i.e., linkinfo) and also its record will be freed.
         // If the end_idx is the parent's edge, the space is not released eventually.
         auto excess_releasing_nodes =
             old_nodes.size() - new_nodes.size() - (parent_node->total_entries() == end_idx) ? 1 : 0;
-        auto minimum_releasing_excess_size =
-            excess_releasing_nodes * (BtreeLinkInfo::get_fixed_size() + parent_node->get_record_size());
+        auto minimum_releasing_excess_size = excess_releasing_nodes * (BtreeLinkInfo::get_fixed_size());
 
         // aside from releasing size due to excess node, K::get_max_size is needed for each updating element
         // at worst case (linkinfo and record remain the same for old and new nodes). The number of updating elements
@@ -396,7 +405,6 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             ret = btree_status_t::merge_not_required;
             goto out;
         }
-#endif
     }
 
     // Now it is time to commit things and at this point no going back, since in-place write nodes are modified

@@ -29,11 +29,16 @@ static constexpr uint64_t append_blkalloc_sb_magic{0xd0d0d02b};
 static constexpr uint64_t append_blkalloc_sb_version{0x1};
 
 #pragma pack(1)
-struct append_blkalloc_ctx {
+struct append_blk_sb_t {
     uint64_t magic{append_blkalloc_sb_magic};
     uint32_t version{append_blkalloc_sb_version};
+    allocator_id_t allocator_id; // doesn't expect this to be changed once initialized;
+    blk_num_t freeable_nblks;
+    blk_num_t last_append_offset;
+};
+
+struct append_blk_dirty_buf_t {
     bool is_dirty; // this field is needed for cp_flush, but not necessarily needed for persistence;
-    allocator_id_t allocator_id;
     blk_num_t freeable_nblks;
     blk_num_t last_append_offset;
 };
@@ -78,8 +83,9 @@ public:
     BlkAllocStatus alloc_contiguous(BlkId& bid) override;
     BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
     void free(BlkId const& b) override;
-
     BlkAllocStatus alloc_on_disk(BlkId const& in_bid) override;
+    BlkAllocStatus mark_blk_allocated(BlkId const& b) override;
+
     void free_on_disk(BlkId const& b) override;
     bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const override;
 
@@ -135,7 +141,8 @@ private:
     blk_num_t m_last_append_offset{0}; // last appended offset in blocks;
     blk_num_t m_freeable_nblks{0};
     AppendBlkAllocMetrics m_metrics;
-    std::array< superblk< append_blkalloc_ctx >, MAX_CP_COUNT > m_sb;
+    superblk< append_blk_sb_t > m_sb;                              // only cp will be writing to this disk
+    std::array< append_blk_dirty_buf_t, MAX_CP_COUNT > m_dirty_sb; // keep track of dirty sb;
 };
 
 } // namespace homestore

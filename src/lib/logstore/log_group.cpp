@@ -15,8 +15,6 @@
  *********************************************************************************/
 #include <cstring>
 
-#include <isa-l/crc.h>
-
 #include <homestore/logstore/log_store.hpp>
 #include "common/homestore_assert.hpp"
 #include "log_dev.hpp"

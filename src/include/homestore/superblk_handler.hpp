@@ -33,6 +33,30 @@ public:
 
     superblk(const std::string& meta_name = "") { set_name(meta_name); }
 
+    superblk(const superblk&) = delete;
+    superblk& operator=(const superblk&) = delete;
+
+    superblk(superblk&& rhs) noexcept
+         : m_meta_mgr_cookie(rhs.m_meta_mgr_cookie)
+           , m_raw_buf(std::move(rhs.m_raw_buf))
+           , m_sb(rhs.m_sb)
+           , m_metablk_name(std::move(rhs.m_metablk_name)) {
+	rhs.m_meta_mgr_cookie = nullptr;
+	rhs.m_sb = nullptr;
+    }
+
+    superblk& operator=(superblk&& rhs) noexcept {
+        if (this != &rhs) {
+            m_meta_mgr_cookie = rhs.m_meta_mgr_cookie;
+            m_raw_buf = std::move(rhs.m_raw_buf);
+            m_sb = rhs.m_sb;
+            m_metablk_name = std::move(rhs.m_metablk_name);
+            rhs.m_meta_mgr_cookie = nullptr;
+            rhs.m_sb = nullptr;
+	}
+	return *this;
+    }
+
     void set_name(const std::string& meta_name) {
         if (meta_name.empty()) {
             m_metablk_name = "meta_blk_" + std::to_string(next_count());

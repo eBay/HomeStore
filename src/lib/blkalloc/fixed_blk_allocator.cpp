@@ -66,6 +66,8 @@ BlkAllocStatus FixedBlkAllocator::alloc_contiguous(BlkId& out_blkid) {
     return m_blk_q.read(out_blkid) ? BlkAllocStatus::SUCCESS : BlkAllocStatus::SPACE_FULL;
 }
 
+BlkAllocStatus FixedBlkAllocator::mark_blk_allocated(BlkId const& b) { return BlkAllocStatus::SUCCESS;}
+
 void FixedBlkAllocator::free(BlkId const& b) {
     HS_DBG_ASSERT_EQ(b.blk_count(), 1, "Multiple blk free for FixedBlkAllocator? allocated by different allocator?");
 

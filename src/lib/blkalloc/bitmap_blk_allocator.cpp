@@ -83,7 +83,10 @@ bool BitmapBlkAllocator::is_blk_alloced_on_disk(const BlkId& b, bool use_lock) c
 }
 
 BlkAllocStatus BitmapBlkAllocator::alloc_on_disk(BlkId const& bid) {
-    if (!is_persistent()) { return BlkAllocStatus::FAILED; }
+    if (!is_persistent()) {
+        //for non-persistent bitmap nothing is needed to do. So always return success
+        return BlkAllocStatus::SUCCESS;
+    }
 
     rcu_read_lock();
     auto list = get_alloc_blk_list();

@@ -13,37 +13,35 @@
  * specific language governing permissions and limitations under the License.
  *
  *********************************************************************************/
+#pragma once
+
 #include <random>
 #include <map>
+#include <atomic>
 #include <memory>
-#include <gtest/gtest.h>
 #include <iomgr/io_environment.hpp>
 #include <sisl/options/options.h>
 #include <sisl/logging/logging.h>
 #include <sisl/utility/enum.hpp>
 #include <boost/algorithm/string.hpp>
 
-#include <homestore/btree/detail/simple_node.hpp>
-#include <homestore/btree/detail/varlen_node.hpp>
-#include <homestore/btree/detail/prefix_node.hpp>
 #include <homestore/btree/mem_btree.hpp>
 #include "test_common/range_scheduler.hpp"
 #include "shadow_map.hpp"
-#include "btree_test_kvs.hpp"
 
 static constexpr uint32_t g_node_size{4096};
 
 template < typename TestType >
-struct BtreeTestHelper : public testing::Test {
+struct BtreeTestHelper {
     using T = TestType;
     using K = typename TestType::KeyType;
     using V = typename TestType::ValueType;
     using mutex = iomgr::FiberManagerLib::shared_mutex;
     using op_func_t = std::function< void(void) >;
 
-    BtreeTestHelper() : testing::Test(), m_shadow_map{SISL_OPTIONS["num_entries"].as< uint32_t >()} {}
+    BtreeTestHelper() : m_shadow_map{SISL_OPTIONS["num_entries"].as< uint32_t >()} {}
 
-    void SetUp() override {
+    void SetUp() {
         m_cfg.m_leaf_node_type = T::leaf_node_type;
         m_cfg.m_int_node_type = T::interior_node_type;
         m_max_range_input = SISL_OPTIONS["num_entries"].as< uint32_t >();
@@ -66,7 +64,7 @@ struct BtreeTestHelper : public testing::Test {
         m_operations["query"] = std::bind(&BtreeTestHelper::query_random, this);
     }
 
-    void TearDown() override {}
+    void TearDown() {}
 
 protected:
     std::shared_ptr< typename T::BtreeType > m_bt;
@@ -82,6 +80,7 @@ protected:
     std::condition_variable m_test_done_cv;
 
     std::random_device m_re;
+    std::atomic< uint32_t > m_num_ops{0};
 
 public:
     void preload(uint32_t preload_size) {
@@ -109,6 +108,8 @@ public:
         }
         LOGINFO("Preload Done");
     }
+
+    uint32_t get_op_num() const { return m_num_ops.load(); }
 
     ////////////////////// All put operation variants ///////////////////////////////
     void put(uint64_t k, btree_put_type put_type) { do_put(k, put_type, V::generate_rand()); }
@@ -294,9 +295,7 @@ public:
 
     void multi_op_execute(const std::vector< std::pair< std::string, int > >& op_list) {
         preload(SISL_OPTIONS["preload_size"].as< uint32_t >());
-        print_keys();
         run_in_parallel(op_list);
-        print_keys();
     }
 
     void print(const std::string& file = "") const { m_bt->print_tree(file); }
@@ -366,6 +365,7 @@ private:
         }
     }
 
+protected:
     void run_in_parallel(const std::vector< std::pair< std::string, int > >& op_list) {
         auto test_count = m_fibers.size();
         for (auto it = m_fibers.begin(); it < m_fibers.end(); ++it) {
@@ -381,10 +381,13 @@ private:
                 // Construct a weighted distribution based on the input frequencies
                 std::discrete_distribution< uint32_t > s_rand_op_generator(weights.begin(), weights.end());
                 auto m_start_time = Clock::now();
+
                 auto time_to_stop = [this, m_start_time]() {return (get_elapsed_time_sec(m_start_time) > m_run_time);};
+
                 for (uint32_t i = 0; i < num_iters_per_thread && !time_to_stop(); i++) {
                     uint32_t op_idx = s_rand_op_generator(re);
                     (this->m_operations[op_list[op_idx].first])();
+                    m_num_ops.fetch_add(1);
                 }
                 {
                     std::unique_lock lg(m_test_done_mtx);
@@ -398,5 +401,36 @@ private:
             m_test_done_cv.wait(lk, [&]() { return test_count == 0; });
         }
         LOGINFO("ALL parallel jobs joined");
+    }
+
+    std::vector< std::pair< std::string, int > > build_op_list(std::vector< std::string >& input_ops) {
+        std::vector< std::pair< std::string, int > > ops;
+        int total = std::accumulate(input_ops.begin(), input_ops.end(), 0, [](int sum, const auto& str) {
+            std::vector< std::string > tokens;
+            boost::split(tokens, str, boost::is_any_of(":"));
+            if (tokens.size() == 2) {
+                try {
+                    return sum + std::stoi(tokens[1]);
+                } catch (const std::exception&) {
+                    // Invalid frequency, ignore this element
+                }
+            }
+            return sum; // Ignore malformed strings
+        });
+
+        std::transform(input_ops.begin(), input_ops.end(), std::back_inserter(ops), [total](const auto& str) {
+            std::vector< std::string > tokens;
+            boost::split(tokens, str, boost::is_any_of(":"));
+            if (tokens.size() == 2) {
+                try {
+                    return std::make_pair(tokens[0], (int)(100.0 * std::stoi(tokens[1]) / total));
+                } catch (const std::exception&) {
+                    // Invalid frequency, ignore this element
+                }
+            }
+            return std::make_pair(std::string(), 0);
+        });
+
+        return ops;
     }
 };

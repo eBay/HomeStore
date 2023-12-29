@@ -52,7 +52,6 @@
  *               Handling :- logdev doesn't support any read error. It panic for read errors.
  * If HS see write error/read error during recovery then it panic the system.
  */
-
 namespace homestore {
 HomeStoreSafePtr HomeStore::s_instance{nullptr};
 
