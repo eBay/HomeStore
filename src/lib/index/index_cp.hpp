@@ -37,6 +37,7 @@ public:
     sisl::ConcurrentInsertVector< IndexBufferPtr >::iterator m_dirty_buf_it;
 
 public:
+
     IndexCPContext(CP* cp) : VDevCPContext(cp) {}
     virtual ~IndexCPContext() = default;
 
@@ -151,6 +152,7 @@ public:
         RELEASE_ASSERT_EQ(issue, false, "Found issue with wait_for_leaders");
     }
 };
+
 
 class IndexWBCache;
 class IndexCPCallbacks : public CPCallbacks {

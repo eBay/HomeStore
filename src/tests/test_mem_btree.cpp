@@ -30,7 +30,8 @@
 #include "btree_helpers/btree_test_helper.hpp"
 
 using namespace homestore;
-SISL_LOGGING_INIT(btree, iomgr, io_wd, flip)
+SISL_LOGGING_DEF(btree)
+SISL_LOGGING_INIT(btree)
 
 SISL_OPTIONS_ENABLE(logging, test_mem_btree)
 SISL_OPTION_GROUP(

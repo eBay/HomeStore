@@ -8,10 +8,15 @@ find_package(isa-l QUIET)
 find_package(iomgr QUIET REQUIRED)
 find_package(farmhash QUIET REQUIRED)
 find_package(GTest QUIET REQUIRED)
+find_package(NuraftMesg QUIET REQUIRED)
 
 list(APPEND COMMON_DEPS
     iomgr::iomgr
     farmhash::farmhash
+    -Wl,--whole-archive
+    NuraftMesg::proto
+    -Wl,--no-whole-archive
+    nuraft::nuraft
     sisl::sisl
 )
 if (${isa-l_FOUND})
@@ -54,6 +59,7 @@ set(HOMESTORE_OBJECTS
     $<TARGET_OBJECTS:hs_replication>
     lib/homestore.cpp
     lib/crc.cpp
+    lib/logging.cpp
     #$<TARGET_OBJECTS:hs_cp>
     #$<TARGET_OBJECTS:indx_mgr>
 )

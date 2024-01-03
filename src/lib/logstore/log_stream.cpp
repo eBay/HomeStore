@@ -20,7 +20,6 @@
 #include "log_dev.hpp"
 #include "device/journal_vdev.hpp"
 
-
 namespace homestore {
 SISL_LOGGING_DECL(logstore)
 
@@ -44,7 +43,7 @@ read_again:
     }
 
     HS_REL_ASSERT_GE(m_cur_log_buf.size(), m_read_size_multiple);
-    const auto* header = r_cast< log_group_header* >(m_cur_log_buf.bytes());
+    const auto* header = r_cast< log_group_header const* >(m_cur_log_buf.bytes());
     if (header->magic_word() != LOG_GROUP_HDR_MAGIC) {
         LOGINFOMOD(logstore, "Logdev data not seeing magic at pos {}, must have come to end of logdev",
                    m_vdev->dev_offset(m_cur_read_bytes));
@@ -133,18 +132,13 @@ sisl::byte_view log_stream_reader::group_in_next_page() {
 sisl::byte_view log_stream_reader::read_next_bytes(uint64_t nbytes) {
     // TO DO: Might need to address alignment based on data or fast type
     auto out_buf =
-        hs_utils::create_byte_view(nbytes + m_cur_log_buf.size(), true, sisl::buftag::logread, m_vdev->align_size());
-    auto ret_buf = out_buf;
-    if (m_cur_log_buf.size()) {
-        memcpy(out_buf.bytes(), m_cur_log_buf.bytes(), m_cur_log_buf.size());
-        out_buf.move_forward(m_cur_log_buf.size());
-    }
+        hs_utils::make_byte_array(nbytes + m_cur_log_buf.size(), true, sisl::buftag::logread, m_vdev->align_size());
+    if (m_cur_log_buf.size()) { memcpy(out_buf->bytes(), m_cur_log_buf.bytes(), m_cur_log_buf.size()); }
 
     const auto prev_pos = m_vdev->seeked_pos();
-    m_vdev->sync_next_read(out_buf.bytes(), nbytes);
+    m_vdev->sync_next_read(out_buf->bytes() + m_cur_log_buf.size(), nbytes);
     LOGINFOMOD(logstore, "LogStream read {} bytes from vdev offset {} and vdev cur offset {}", nbytes, prev_pos,
                m_vdev->seeked_pos());
-    ret_buf.set_size(nbytes + m_cur_log_buf.size());
-    return ret_buf;
+    return sisl::byte_view{out_buf};
 }
 } // namespace homestore

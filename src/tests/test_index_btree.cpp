@@ -33,6 +33,7 @@ SISL_LOGGING_DECL(test_index_btree)
 
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
+
 // TODO Add tests to do write,remove after recovery.
 // TODO Test with var len key with io mgr page size is 512.
 
@@ -409,6 +410,7 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
 }
 
 template < typename TestType >
+
 struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testing::Test {
 
     using T = TestType;
@@ -417,6 +419,7 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
     class TestIndexServiceCallbacks : public IndexServiceCallbacks {
     public:
         TestIndexServiceCallbacks(BtreeConcurrentTest* test) : m_test(test) {}
+
         std::shared_ptr< IndexTableBase > on_index_table_found(superblk< index_table_sb >&& sb) override {
             LOGINFO("Index table recovered");
             LOGINFO("Root bnode_id {} version {}", sb->root_node, sb->link_version);
@@ -427,6 +430,7 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
     private:
         BtreeConcurrentTest* m_test;
     };
+
 
     BtreeConcurrentTest() : testing::Test() { this->m_is_multi_threaded = true; }
 

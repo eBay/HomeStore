@@ -7,7 +7,7 @@
 
 #include <homestore/blk.h>
 
-SISL_LOGGING_INIT(test_blkid, iomgr, flip, io_wd)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, test_blkid)
 
 SISL_OPTION_GROUP(test_blkid,
@@ -29,7 +29,7 @@ TEST(BlkIdTest, SingleBlkIdBasic) {
     ASSERT_EQ(b2.is_multi(), false);
 
     sisl::blob buf = b2.serialize();
-    ASSERT_EQ(buf.size, sizeof(uint64_t));
+    ASSERT_EQ(buf.size(), sizeof(uint64_t));
 
     BlkId b3;
     b3.deserialize(buf, true);

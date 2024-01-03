@@ -381,9 +381,9 @@ protected:
                 // Construct a weighted distribution based on the input frequencies
                 std::discrete_distribution< uint32_t > s_rand_op_generator(weights.begin(), weights.end());
                 auto m_start_time = Clock::now();
-                auto time_to_stop = [this, m_start_time]() {
-                    return (get_elapsed_time_sec(m_start_time) > m_run_time);
-                };
+
+                auto time_to_stop = [this, m_start_time]() {return (get_elapsed_time_sec(m_start_time) > m_run_time);};
+
                 for (uint32_t i = 0; i < num_iters_per_thread && !time_to_stop(); i++) {
                     uint32_t op_idx = s_rand_op_generator(re);
                     (this->m_operations[op_list[op_idx].first])();

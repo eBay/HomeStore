@@ -93,7 +93,7 @@ public:
         K prevKey;
         while (i < this->total_entries()) {
             K key = BtreeNode::get_nth_key< K >(i, false);
-            uint64_t kp = *(uint64_t*)key.serialize().bytes;
+            uint64_t kp = *(uint64_t*)key.serialize().bytes();
             if (i > 0 && prevKey.compare(key) > 0) {
                 DEBUG_ASSERT(false, "Found non sorted entry: {} -> {}", kp, to_string());
             }
@@ -140,16 +140,16 @@ public:
             sisl::blob kblob = key.serialize();
             sisl::blob vblob = val.serialize();
 
-            DEBUG_ASSERT_EQ(kblob.size, key.serialized_size(),
+            DEBUG_ASSERT_EQ(kblob.size(), key.serialized_size(),
                             "Key Serialized size returned different after serialization");
-            DEBUG_ASSERT_EQ(vblob.size, val.serialized_size(),
+            DEBUG_ASSERT_EQ(vblob.size(), val.serialized_size(),
                             "Value Serialized size returned different after serialization");
 
             // we can avoid memcpy if addresses of val_ptr and vblob.bytes is same. In place update
-            if (key_ptr != kblob.bytes) { std::memcpy(key_ptr, kblob.bytes, kblob.size); }
-            if (val_ptr != vblob.bytes) { std::memcpy(val_ptr, vblob.bytes, vblob.size); }
-            set_nth_key_len(get_nth_record_mutable(ind), kblob.size);
-            set_nth_value_len(get_nth_record_mutable(ind), vblob.size);
+            if (key_ptr != kblob.cbytes()) { std::memcpy(key_ptr, kblob.cbytes(), kblob.size()); }
+            if (val_ptr != vblob.cbytes()) { std::memcpy(val_ptr, vblob.cbytes(), vblob.size()); }
+            set_nth_key_len(get_nth_record_mutable(ind), kblob.size());
+            set_nth_value_len(get_nth_record_mutable(ind), vblob.size());
             get_var_node_header()->m_available_space += cur_obj_size - new_obj_size;
             this->inc_gen();
         } else {
@@ -228,13 +228,8 @@ public:
         bool full_move{false};
         while (ind >= end_ind) {
             // Get the ith key and value blob and then remove the entry from here and insert to the other node
-            sisl::blob kb;
-            kb.bytes = (uint8_t*)get_nth_obj(ind);
-            kb.size = get_nth_key_size(ind);
-
-            sisl::blob vb;
-            vb.bytes = kb.bytes + kb.size;
-            vb.size = get_nth_value_size(ind);
+            sisl::blob const kb{get_nth_obj(ind), get_nth_key_size(ind)};
+            sisl::blob const vb{kb.cbytes() + kb.size(), get_nth_value_size(ind)};
 
             auto sz = other.insert(0, kb, vb);
             if (!sz) { break; }
@@ -269,15 +264,10 @@ public:
 
         uint32_t ind = this->total_entries() - 1;
         while (ind > 0) {
-            sisl::blob kb;
-            kb.bytes = (uint8_t*)get_nth_obj(ind);
-            kb.size = get_nth_key_size(ind);
+            sisl::blob const kb{get_nth_obj(ind), get_nth_key_size(ind)};
+            sisl::blob const vb{kb.cbytes() + kb.size(), get_nth_value_size(ind)};
 
-            sisl::blob vb;
-            vb.bytes = kb.bytes + kb.size;
-            vb.size = get_nth_value_size(ind);
-
-            if ((kb.size + vb.size + this->get_record_size()) > size_to_move) {
+            if ((kb.size() + vb.size() + this->get_record_size()) > size_to_move) {
                 // We reached threshold of how much we could move
                 break;
             }
@@ -326,11 +316,11 @@ public:
         auto idx = start_idx;
         uint32_t n = 0;
         while (idx < other.total_entries()) {
-            sisl::blob kb{(uint8_t*)other.get_nth_obj(idx), other.get_nth_key_size(idx)};
-            sisl::blob vb{kb.bytes + kb.size, other.get_nth_value_size(idx)};
+            sisl::blob const kb{(uint8_t*)other.get_nth_obj(idx), other.get_nth_key_size(idx)};
+            sisl::blob const vb{kb.cbytes() + kb.size(), other.get_nth_value_size(idx)};
 
             // We reached threshold of how much we could move
-            if ((kb.size + vb.size + other.get_record_size()) > copy_size) { break; }
+            if ((kb.size() + vb.size() + other.get_record_size()) > copy_size) { break; }
 
             auto sz = insert(this->total_entries(), kb, vb);
             if (sz == 0) { break; }
@@ -356,8 +346,8 @@ public:
         auto idx = start_idx;
         uint32_t n = 0;
         while (n < nentries) {
-            sisl::blob kb{(uint8_t*)other.get_nth_obj(idx), other.get_nth_key_size(idx)};
-            sisl::blob vb{kb.bytes + kb.size, other.get_nth_value_size(idx)};
+            sisl::blob const kb{other.get_nth_obj(idx), other.get_nth_key_size(idx)};
+            sisl::blob const vb{kb.cbytes() + kb.size(), other.get_nth_value_size(idx)};
 
             auto sz = insert(this->total_entries(), kb, vb);
             if (sz == 0) { break; }
@@ -465,8 +455,8 @@ public:
     void set_nth_key(uint32_t ind, const BtreeKey& key) {
         const auto kb = key.serialize();
         assert(ind < this->total_entries());
-        assert(kb.size == get_nth_key_size(ind));
-        memcpy(uintptr_cast(get_nth_obj(ind)), kb.bytes, kb.size);
+        assert(kb.size() == get_nth_key_size(ind));
+        memcpy(uintptr_cast(get_nth_obj(ind)), kb.cbytes(), kb.size());
     }
 
     bool has_room_for_put(btree_put_type put_type, uint32_t key_size, uint32_t value_size) const override {
@@ -589,7 +579,7 @@ protected:
         assert(ind <= this->total_entries());
         LOGTRACEMOD(btree, "{}:{}:{}:{}", ind, get_var_node_header()->tail_offset(), get_arena_free_space(),
                     get_var_node_header()->available_space());
-        uint16_t obj_size = key_blob.size + val_blob.size;
+        uint16_t obj_size = key_blob.size() + val_blob.size();
         uint16_t to_insert_size = obj_size + this->get_record_size();
         if (to_insert_size > get_var_node_header()->available_space()) {
             RELEASE_ASSERT(false, "insert failed insert size {} available size {}", to_insert_size,
@@ -615,15 +605,15 @@ protected:
         get_var_node_header()->m_available_space -= (obj_size + this->get_record_size());
 
         // Create a new record
-        set_nth_key_len(rec_ptr, key_blob.size);
-        set_nth_value_len(rec_ptr, val_blob.size);
+        set_nth_key_len(rec_ptr, key_blob.size());
+        set_nth_value_len(rec_ptr, val_blob.size());
         set_record_data_offset(rec_ptr, get_var_node_header()->m_tail_arena_offset);
 
         // Copy the contents of key and value in the offset
         uint8_t* raw_data_ptr = offset_to_ptr_mutable(get_var_node_header()->m_tail_arena_offset);
-        memcpy(raw_data_ptr, key_blob.bytes, key_blob.size);
-        raw_data_ptr += key_blob.size;
-        memcpy(raw_data_ptr, val_blob.bytes, val_blob.size);
+        memcpy(raw_data_ptr, key_blob.cbytes(), key_blob.size());
+        raw_data_ptr += key_blob.size();
+        memcpy(raw_data_ptr, val_blob.cbytes(), val_blob.size());
 
         // Increment the entries and generation number
         this->inc_entries();

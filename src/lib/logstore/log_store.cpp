@@ -95,7 +95,7 @@ void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
 
     m_records.create(req->seq_num);
     COUNTER_INCREMENT(m_metrics, logstore_append_count, 1);
-    HISTOGRAM_OBSERVE(m_metrics, logstore_record_size, req->data.size);
+    HISTOGRAM_OBSERVE(m_metrics, logstore_record_size, req->data.size());
     m_logdev.append_async(m_store_id, req->seq_num, req->data, static_cast< void* >(req));
 }
 

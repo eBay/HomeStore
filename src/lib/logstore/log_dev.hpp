@@ -104,11 +104,11 @@ struct log_record {
     log_record& operator=(log_record&&) noexcept = delete;
     ~log_record() = default;
 
-    size_t serialized_size() const { return sizeof(serialized_log_record) + data.size; }
+    size_t serialized_size() const { return sizeof(serialized_log_record) + data.size(); }
     bool is_inlineable(const uint64_t flush_size_multiple) const {
         // Need inlining if size is smaller or size/buffer is not in dma'ble boundary.
-        return (is_size_inlineable(data.size, flush_size_multiple) ||
-                ((reinterpret_cast< uintptr_t >(data.bytes) % flush_size_multiple) != 0) || !data.aligned);
+        return (is_size_inlineable(data.size(), flush_size_multiple) ||
+                ((r_cast< const uintptr_t >(data.cbytes()) % flush_size_multiple) != 0) || !data.is_aligned());
     }
 
     static bool is_size_inlineable(const size_t sz, const uint64_t flush_size_multiple) {
@@ -159,11 +159,7 @@ struct log_group_header {
         assert(idx - start_log_idx < n_log_records);
 
         const serialized_log_record* const lr{nth_record(start_log_idx - idx)};
-
-        sisl::blob b{};
-        b.bytes = const_cast< uint8_t* >(lr->get_inlined() ? inline_area() : oob_area()) + lr->offset;
-        b.size = lr->size;
-        return b;
+        return sisl::blob{(lr->get_inlined() ? inline_area() : oob_area() + lr->offset), lr->size};
     }
 
     uint32_t magic_word() const { return magic; }
@@ -252,7 +248,7 @@ public:
     void stop();
     void reset(const uint32_t max_records);
     void create_overflow_buf(const uint32_t min_needed);
-    bool add_record(const log_record& record, const int64_t log_idx);
+    bool add_record(log_record& record, const int64_t log_idx);
     bool can_accomodate(const log_record& record) const { return (m_nrecords <= m_max_records); }
 
     const iovec_array& finish(const crc32_t prev_crc);
@@ -809,7 +805,7 @@ private:
     bool m_stopped{false}; // Is Logdev stopped. We don't need lock here, because it is updated under flush lock
     logstore_family_id_t m_family_id; // The family id this logdev is part of
     JournalVirtualDev* m_vdev{nullptr};
-    HomeStoreSafePtr m_hs;            // Back pointer to homestore
+    HomeStoreSafePtr m_hs; // Back pointer to homestore
 
     std::multimap< logid_t, logstore_id_t > m_garbage_store_ids;
     Clock::time_point m_last_flush_time;

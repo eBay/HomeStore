@@ -5,8 +5,7 @@ from conans import CMake
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "4.9.4"
-
+    version = "5.0.1"
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
     topics = ("ebay", "nublox")
@@ -57,6 +56,7 @@ class HomestoreConan(ConanFile):
     def requirements(self):
         self.requires("iomgr/[~=11, include_prerelease=True]@oss/master")
         self.requires("sisl/[~=11, include_prerelease=True]@oss/master")
+        self.requires("nuraft_mesg/[~=2, include_prerelease=True]@oss/main")
 
         self.requires("farmhash/cci.20190513@")
         if self.settings.arch in ['x86', 'x86_64']:

@@ -50,6 +50,8 @@ SISL_OPTION_GROUP(test_common_setup,
                    ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
                   (http_port, "", "http_port", "http port (0 for no http, -1 for random, rest specific value)",
                    ::cxxopts::value< int >()->default_value("-1"), "number"),
+                  (num_io, "", "num_io", "number of IO operations",
+                   ::cxxopts::value< uint64_t >()->default_value("300"), "number"),
                   (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 SETTINGS_INIT(iomgrcfg::IomgrSettings, iomgr_config);
@@ -74,6 +76,71 @@ inline static uint32_t generate_random_http_port() {
     LOGINFO("random port generated = {}", http_port);
     return http_port;
 }
+
+struct Runner {
+    uint64_t total_tasks_{0};
+    uint32_t qdepth_{8};
+    std::atomic< uint64_t > issued_tasks_{0};
+    std::atomic< uint64_t > completed_tasks_{0};
+    std::function< void(void) > task_;
+    folly::Promise< folly::Unit > comp_promise_;
+
+    Runner(uint64_t num_tasks, uint32_t qd = 8) : total_tasks_{num_tasks}, qdepth_{qd} {
+        if (total_tasks_ < (uint64_t)qdepth_) { total_tasks_ = qdepth_; }
+    }
+    Runner() : Runner{SISL_OPTIONS["num_io"].as< uint64_t >()} {}
+    Runner(const Runner&) = delete;
+    Runner& operator=(const Runner&) = delete;
+
+    void set_num_tasks(uint64_t num_tasks) { total_tasks_ = std::max((uint64_t)qdepth_, num_tasks); }
+    void set_task(std::function< void(void) > f) {
+        issued_tasks_.store(0);
+        completed_tasks_.store(0);
+        comp_promise_ = folly::Promise< folly::Unit >{};
+        task_ = std::move(f);
+    }
+
+    folly::Future< folly::Unit > execute() {
+        for (uint32_t i{0}; i < qdepth_; ++i) {
+            run_task();
+        }
+        return comp_promise_.getFuture();
+    }
+
+    void next_task() {
+        auto ctasks = completed_tasks_.fetch_add(1);
+        if ((issued_tasks_.load() < total_tasks_)) {
+            run_task();
+        } else if ((ctasks + 1) == total_tasks_) {
+            comp_promise_.setValue();
+        }
+    }
+
+    void run_task() {
+        ++issued_tasks_;
+        iomanager.run_on_forget(iomgr::reactor_regex::random_worker, task_);
+    }
+};
+
+struct Waiter {
+    std::atomic< uint64_t > expected_comp{0};
+    std::atomic< uint64_t > actual_comp{0};
+    folly::Promise< folly::Unit > comp_promise;
+
+    Waiter(uint64_t num_op) : expected_comp{num_op} {}
+    Waiter() : Waiter{SISL_OPTIONS["num_io"].as< uint64_t >()} {}
+    Waiter(const Waiter&) = delete;
+    Waiter& operator=(const Waiter&) = delete;
+
+    folly::Future< folly::Unit > start(std::function< void(void) > f) {
+        f();
+        return comp_promise.getFuture();
+    }
+
+    void one_complete() {
+        if ((actual_comp.fetch_add(1) + 1) >= expected_comp.load()) { comp_promise.setValue(); }
+    }
+};
 
 class HSTestHelper {
 private:
@@ -100,7 +167,7 @@ public:
         uint32_t blk_size{0};
         shared< ChunkSelector > custom_chunk_selector{nullptr};
         IndexServiceCallbacks* index_svc_cbs{nullptr};
-        repl_impl_type repl_impl{repl_impl_type::solo};
+        shared< ReplApplication > repl_app{nullptr};
         chunk_num_t num_chunks{1};
     };
 
@@ -175,7 +242,7 @@ public:
             } else if ((svc == HS_SERVICE::LOG_REPLICATED) || (svc == HS_SERVICE::LOG_LOCAL)) {
                 hsi->with_log_service();
             } else if (svc == HS_SERVICE::REPLICATION) {
-                hsi->with_repl_data_service(tp.repl_impl, tp.custom_chunk_selector);
+                hsi->with_repl_data_service(tp.repl_app, tp.custom_chunk_selector);
             }
         }
         bool need_format =
@@ -219,15 +286,16 @@ public:
         }
     }
 
-    static void validate_data_buf(uint8_t* buf, uint64_t size, uint64_t pattern = 0) {
-        uint64_t* ptr = r_cast< uint64_t* >(buf);
+    static void validate_data_buf(uint8_t const* buf, uint64_t size, uint64_t pattern = 0) {
+        uint64_t const* ptr = r_cast< uint64_t const* >(buf);
         for (uint64_t i = 0ul; i < size / sizeof(uint64_t); ++i) {
             HS_REL_ASSERT_EQ(ptr[i], ((pattern == 0) ? i : pattern), "data_buf mismatch at offset={}", i);
         }
     }
 
-    static sisl::sg_list create_sgs(uint64_t io_size, uint32_t blk_size, uint32_t max_size_per_iov,
+    static sisl::sg_list create_sgs(uint64_t io_size, uint32_t max_size_per_iov,
                                     std::optional< uint64_t > fill_data_pattern = std::nullopt) {
+        auto blk_size = SISL_OPTIONS["block_size"].as< uint32_t >();
         HS_REL_ASSERT_EQ(io_size % blk_size, 0, "io_size should be a multiple of blk_size");
         HS_REL_ASSERT_EQ(max_size_per_iov % blk_size, 0, "max_size_per_iov should be a multiple of blk_size");
 

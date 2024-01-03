@@ -96,10 +96,10 @@ struct chunk_info {
     void set_free() { chunk_allocated = 0x00; }
 
     void set_selector_private(const sisl::blob& data) {
-        std::memcpy(&chunk_selector_private, data.bytes, std::min(data.size, uint32_cast(selector_private_size)));
+        std::memcpy(&chunk_selector_private, data.cbytes(), std::min(data.size(), uint32_cast(selector_private_size)));
     }
     void set_user_private(const sisl::blob& data) {
-        std::memcpy(&user_private, data.bytes, std::min(data.size, uint32_cast(user_private_size)));
+        std::memcpy(&user_private, data.cbytes(), std::min(data.size(), uint32_cast(user_private_size)));
     }
 
     void compute_checksum() {
@@ -148,7 +148,7 @@ public:
     static uint64_t get_dev_size(const std::string& devname);
 
     std::error_code read_super_block(uint8_t* buf, uint32_t sb_size, uint64_t offset);
-    void write_super_block(uint8_t* buf, uint32_t sb_size, uint64_t offset);
+    void write_super_block(uint8_t const* buf, uint32_t sb_size, uint64_t offset);
     void close_device();
 
     //////////////////////////// Chunk Creation/Load related methods /////////////////////////////////////////

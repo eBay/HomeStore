@@ -183,9 +183,7 @@ public:
 
     void get_nth_key_internal(uint32_t ind, BtreeKey& out_key, bool copy) const override {
         DEBUG_ASSERT_LT(ind, this->total_entries(), "node={}", to_string());
-        sisl::blob b;
-        b.bytes = (uint8_t*)(this->node_data_area_const() + (get_nth_obj_size(ind) * ind));
-        b.size = get_nth_key_size(ind);
+        sisl::blob b{this->node_data_area_const() + (get_nth_obj_size(ind) * ind), get_nth_key_size(ind)};
         out_key.deserialize(b, copy);
     }
 
@@ -322,11 +320,11 @@ public:
             set_nth_value(ind, v);
         } else {
             uint8_t* entry = this->node_data_area() + (get_nth_obj_size(ind) * ind);
-            sisl::blob key_blob = k.serialize();
-            memcpy((void*)entry, key_blob.bytes, key_blob.size);
+            sisl::blob const key_blob = k.serialize();
+            memcpy((void*)entry, key_blob.cbytes(), key_blob.size());
 
-            sisl::blob val_blob = v.serialize();
-            memcpy((void*)(entry + key_blob.size), val_blob.bytes, val_blob.size);
+            sisl::blob const val_blob = v.serialize();
+            memcpy((void*)(entry + key_blob.size()), val_blob.cbytes(), val_blob.size());
         }
     }
 
@@ -343,20 +341,20 @@ public:
 
     void set_nth_key(uint32_t ind, BtreeKey* key) {
         uint8_t* entry = this->node_data_area() + (get_nth_obj_size(ind) * ind);
-        sisl::blob b = key->serialize();
-        memcpy(entry, b.bytes, b.size);
+        sisl::blob const b = key->serialize();
+        memcpy(entry, b.cbytes(), b.size());
     }
 
     void set_nth_value(uint32_t ind, const BtreeValue& v) {
         sisl::blob b = v.serialize();
         if (ind >= this->total_entries()) {
             RELEASE_ASSERT_EQ(this->is_leaf(), false, "setting value outside bounds on leaf node");
-            DEBUG_ASSERT_EQ(b.size, sizeof(BtreeLinkInfo::bnode_link_info),
+            DEBUG_ASSERT_EQ(b.size(), sizeof(BtreeLinkInfo::bnode_link_info),
                             "Invalid value size being set for non-leaf node");
-            this->set_edge_info(*r_cast< BtreeLinkInfo::bnode_link_info* >(b.bytes));
+            this->set_edge_info(*r_cast< BtreeLinkInfo::bnode_link_info const* >(b.cbytes()));
         } else {
             uint8_t* entry = this->node_data_area() + (get_nth_obj_size(ind) * ind) + get_nth_key_size(ind);
-            std::memcpy(entry, b.bytes, b.size);
+            std::memcpy(entry, b.cbytes(), b.size());
         }
     }
 };
