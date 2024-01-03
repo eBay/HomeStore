@@ -37,6 +37,7 @@ if (${build_nonio_tests})
     add_executable(test_mem_btree ${TEST_MEMBTREE_SOURCE_FILES})
     target_link_libraries(test_mem_btree ${COMMON_TEST_DEPS} GTest::gtest)
     add_test(NAME MemBtree COMMAND test_mem_btree)
+    set_tests_properties(MemBtree PROPERTIES TIMEOUT 180)
 
     add_executable(test_blk_read_tracker)
     target_sources(test_blk_read_tracker PRIVATE test_blk_read_tracker.cpp ../lib/blkdata_svc/blk_read_tracker.cpp ../lib/blkalloc/blk.cpp)

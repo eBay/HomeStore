@@ -49,7 +49,7 @@
 using namespace homestore;
 
 RCU_REGISTER_INIT
-SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, test_data_service, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_data_service)
 

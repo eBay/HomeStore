@@ -40,7 +40,7 @@
 using namespace homestore;
 
 RCU_REGISTER_INIT
-SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 SISL_OPTIONS_ENABLE(logging, test_vdev, iomgr, test_common_setup)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;

@@ -42,7 +42,7 @@ void* globle_helper{nullptr};
 
 #define GET_BENCHMARK_HELPER(BTREE_TYPE) static_cast< IndexBtreeBenchmark< BTREE_TYPE >* >(globle_helper)
 
-SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 SISL_OPTIONS_ENABLE(logging, index_btree_benchmark, iomgr, test_common_setup)
 

@@ -40,8 +40,8 @@
 
 using namespace homestore;
 
-SISL_LOGGING_DECL(test_raft_repl_dev)
-SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
+SISL_LOGGING_DEF(test_raft_repl_dev)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 SISL_OPTION_GROUP(test_raft_repl_dev,
                   (block_size, "", "block_size", "block size to io",

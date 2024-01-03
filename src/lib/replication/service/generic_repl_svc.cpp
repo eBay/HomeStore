@@ -119,7 +119,8 @@ void SoloReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
 
     {
         std::unique_lock lg(m_rd_map_mtx);
-        auto [it, happened] = m_rd_map.emplace(group_id, rdev);
+        auto [_, happened] = m_rd_map.emplace(group_id, rdev);
+        (void) happened;
         HS_DBG_ASSERT(happened, "Unable to put the repl_dev in rd map for group_id={}", group_id);
     }
 }

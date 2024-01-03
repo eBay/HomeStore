@@ -35,7 +35,7 @@
 #include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
-SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
 SISL_OPTIONS_ENABLE(logging, log_store_benchmark, iomgr, test_common_setup)

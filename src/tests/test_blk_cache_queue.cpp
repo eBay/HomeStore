@@ -28,7 +28,7 @@
 #include "blkalloc/varsize_blk_allocator.h"
 #include "blkalloc/blk_cache_queue.h"
 
-SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 using namespace homestore;
 

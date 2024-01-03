@@ -10,7 +10,7 @@
 
 using namespace homestore;
 
-SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 static constexpr uint32_t g_max_logsize{512};
 static std::random_device g_rd{};

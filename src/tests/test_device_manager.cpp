@@ -35,7 +35,7 @@
 #include "device/virtual_dev.hpp"
 
 using namespace homestore;
-SISL_LOGGING_DEF(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, test_device_manager, iomgr)
 
 SISL_OPTION_GROUP(test_device_manager,

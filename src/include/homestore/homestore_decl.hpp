@@ -196,8 +196,8 @@ struct cap_attrs {
 };
 #endif
 
+} // namespace homestore
+
 ////////////// Misc ///////////////////
 #define HOMESTORE_LOG_MODS                                                                                             \
-    btree, device, blkalloc, cp, metablk, wbcache, logstore, transient, replication, nuraft
-
-} // namespace homestore
+    btree, device, blkalloc, cp, metablk, wbcache, logstore, transient, replication
