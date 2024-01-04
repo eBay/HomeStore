@@ -1,12 +1,14 @@
+#include <boost/smart_ptr/intrusive_ref_counter.hpp>
+#include "replication/repl_dev/solo_repl_dev.h"
+#include "replication/repl_dev/common.h"
 #include <homestore/blkdata_service.hpp>
 #include <homestore/logstore_service.hpp>
 #include <homestore/superblk_handler.hpp>
 #include "common/homestore_assert.hpp"
-#include "replication/repl_dev/solo_repl_dev.h"
 
 namespace homestore {
 SoloReplDev::SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existing) :
-    m_rd_sb{std::move(rd_sb)}, m_group_id{m_rd_sb->gid} {
+        m_rd_sb{std::move(rd_sb)}, m_group_id{m_rd_sb->group_id} {
     if (load_existing) {
         logstore_service().open_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, m_rd_sb->data_journal_id, true,
                                           bind_this(SoloReplDev::on_data_journal_created, 1));
@@ -25,8 +27,8 @@ void SoloReplDev::on_data_journal_created(shared< HomeLogStore > log_store) {
 }
 
 void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
-                                    intrusive< repl_req_ctx > rreq) {
-    if (!rreq) { auto rreq = intrusive< repl_req_ctx >(new repl_req_ctx{}); }
+                                    repl_req_ptr_t rreq) {
+    if (!rreq) { auto rreq = repl_req_ptr_t(new repl_req_ctx{}); }
     rreq->header = header;
     rreq->key = key;
     rreq->value = std::move(value);
@@ -35,7 +37,8 @@ void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
     if (rreq->value.size) {
         // Step 1: Alloc Blkid
         auto status = data_service().alloc_blks(uint32_cast(rreq->value.size),
-                                                m_listener->get_blk_alloc_hints(rreq->header, rreq), rreq->local_blkid);
+                                                m_listener->get_blk_alloc_hints(rreq->header, rreq->value.size),
+                                                rreq->local_blkid);
         HS_REL_ASSERT_EQ(status, BlkAllocStatus::SUCCESS);
 
         // Write the data
@@ -50,32 +53,32 @@ void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
     }
 }
 
-void SoloReplDev::write_journal(intrusive< repl_req_ctx > rreq) {
-    uint32_t entry_size = sizeof(repl_journal_entry) + rreq->header.size + rreq->key.size +
+void SoloReplDev::write_journal(repl_req_ptr_t rreq) {
+    uint32_t entry_size = sizeof(repl_journal_entry) + rreq->header.size() + rreq->key.size() +
         (rreq->value.size ? rreq->local_blkid.serialized_size() : 0);
-    rreq->alloc_journal_entry(entry_size);
-    rreq->journal_entry->code = journal_type_t::HS_DATA;
-    rreq->journal_entry->user_header_size = rreq->header.size;
-    rreq->journal_entry->key_size = rreq->key.size;
+    rreq->alloc_journal_entry(entry_size, false /* is_raft_buf */);
+    rreq->journal_entry->code = journal_type_t::HS_LARGE_DATA;
+    rreq->journal_entry->user_header_size = rreq->header.size();
+    rreq->journal_entry->key_size = rreq->key.size();
 
     uint8_t* raw_ptr = uintptr_cast(rreq->journal_entry) + sizeof(repl_journal_entry);
-    if (rreq->header.size) {
-        std::memcpy(raw_ptr, rreq->header.bytes, rreq->header.size);
-        raw_ptr += rreq->header.size;
+    if (rreq->header.size()) {
+        std::memcpy(raw_ptr, rreq->header.cbytes(), rreq->header.size());
+        raw_ptr += rreq->header.size();
     }
 
-    if (rreq->key.size) {
-        std::memcpy(raw_ptr, rreq->key.bytes, rreq->key.size);
-        raw_ptr += rreq->key.size;
+    if (rreq->key.size()) {
+        std::memcpy(raw_ptr, rreq->key.cbytes(), rreq->key.size());
+        raw_ptr += rreq->key.size();
     }
 
     if (rreq->value.size) {
-        auto b = rreq->local_blkid.serialize();
-        std::memcpy(raw_ptr, b.bytes, b.size);
-        raw_ptr += b.size;
+        auto const b = rreq->local_blkid.serialize();
+        std::memcpy(raw_ptr, b.cbytes(), b.size());
+        raw_ptr += b.size();
     }
 
-    m_data_journal->append_async(sisl::io_blob{rreq->journal_buf.get(), entry_size, false /* is_aligned */},
+    m_data_journal->append_async(sisl::io_blob{rreq->raw_journal_buf(), entry_size, false /* is_aligned */},
                                  nullptr /* cookie */,
                                  [this, rreq](int64_t lsn, sisl::io_blob&, homestore::logdev_key, void*) mutable {
                                      rreq->lsn = lsn;
@@ -90,13 +93,13 @@ void SoloReplDev::write_journal(intrusive< repl_req_ctx > rreq) {
 }
 
 void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
-    repl_journal_entry* entry = r_cast< repl_journal_entry* >(buf.bytes());
+    repl_journal_entry const* entry = r_cast< repl_journal_entry const* >(buf.bytes());
     uint32_t remain_size = buf.size() - sizeof(repl_journal_entry);
     HS_REL_ASSERT_EQ(entry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
                      "Mismatched version of journal entry found");
-    HS_REL_ASSERT_EQ(entry->code, journal_type_t::HS_DATA, "Found a journal entry which is not data");
+    HS_REL_ASSERT_EQ(entry->code, journal_type_t::HS_LARGE_DATA, "Found a journal entry which is not data");
 
-    uint8_t* raw_ptr = r_cast< uint8_t* >(entry) + sizeof(repl_journal_entry);
+    uint8_t const* raw_ptr = r_cast< uint8_t const* >(entry) + sizeof(repl_journal_entry);
     sisl::blob header{raw_ptr, entry->user_header_size};
     HS_REL_ASSERT_GE(remain_size, entry->user_header_size, "Invalid journal entry, header_size mismatch");
     raw_ptr += entry->user_header_size;
@@ -137,12 +140,5 @@ void SoloReplDev::cp_flush(CP*) {
 
 void SoloReplDev::cp_cleanup(CP*) { m_data_journal->truncate(m_rd_sb->checkpoint_lsn); }
 
-void repl_req_ctx::alloc_journal_entry(uint32_t size) {
-    journal_buf = std::unique_ptr< uint8_t[] >(new uint8_t[size]);
-    journal_entry = new (journal_buf.get()) repl_journal_entry();
-}
-
-repl_req_ctx::~repl_req_ctx() {
-    if (journal_entry) { journal_entry->~repl_journal_entry(); }
-}
 } // namespace homestore
+

@@ -51,6 +51,8 @@ class HomeStore;
 class CPManager;
 class VirtualDev;
 class ChunkSelector;
+class ReplDevListener;
+class ReplApplication;
 
 using HomeStoreSafePtr = std::shared_ptr< HomeStore >;
 
@@ -96,12 +98,6 @@ struct HS_SERVICE {
     }
 };
 
-VENUM(repl_impl_type, uint8_t,
-      server_side,     // Completely homestore controlled replication
-      client_assisted, // Client assisting in replication
-      solo             // For single node - no replication
-);
-
 /*
  * IO errors handling by homestore.
  * Write error :- Reason :- Disk error, space full,btree node read fail
@@ -118,7 +114,7 @@ private:
     std::unique_ptr< MetaBlkService > m_meta_service;
     std::unique_ptr< LogStoreService > m_log_service;
     std::unique_ptr< IndexService > m_index_service;
-    std::unique_ptr< ReplicationService > m_repl_service;
+    std::shared_ptr< ReplicationService > m_repl_service;
 
     std::unique_ptr< DeviceManager > m_dev_mgr;
     shared< sisl::logging::logger_t > m_periodic_logger;
@@ -149,7 +145,7 @@ public:
     HomeStore& with_data_service(cshared< ChunkSelector >& custom_chunk_selector = nullptr);
     HomeStore& with_log_service();
     HomeStore& with_index_service(std::unique_ptr< IndexServiceCallbacks > cbs);
-    HomeStore& with_repl_data_service(repl_impl_type repl_type,
+    HomeStore& with_repl_data_service(cshared< ReplApplication >& repl_app,
                                       cshared< ChunkSelector >& custom_chunk_selector = nullptr);
 
     bool start(const hs_input_params& input, hs_before_services_starting_cb_t svcs_starting_cb = nullptr);

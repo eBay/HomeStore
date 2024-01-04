@@ -20,10 +20,22 @@ on:
         type: string
 
 jobs:
-  Sisl10Deps:
-    uses: eBay/sisl/.github/workflows/build_dependencies.yml@stable/v10.x
+  SislDeps:
+    uses: eBay/sisl/.github/workflows/build_dependencies.yml@master
     with:
-      branch: stable/v10.x
+      branch: master
+      platform: ${{ inputs.platform }}
+      build-type: ${{ inputs.build-type }}
+      malloc-impl: ${{ inputs.malloc-impl }}
+      prerelease: ${{ inputs.prerelease }}
+      tooling: None
+    if: ${{ github.event_name != 'pull_request' }}
+
+  NuraftMesgDeps:
+    needs: SislDeps
+    uses: eBay/nuraft_mesg/.github/workflows/build_dependencies.yml@main
+    with:
+      branch: main
       platform: ${{ inputs.platform }}
       build-type: ${{ inputs.build-type }}
       malloc-impl: ${{ inputs.malloc-impl }}
@@ -32,7 +44,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
 
   IOMgrDeps:
-    needs: Sisl10Deps
+    needs: SislDeps
     uses: eBay/iomanager/.github/workflows/build_dependencies.yml@master
     with:
       branch: master
@@ -44,7 +56,7 @@ jobs:
     if: ${{ github.event_name != 'pull_request' }}
 
   HomestoreDeps:
-    needs: IOMgrDeps
+    needs: [IOMgrDeps, NuraftMesgDeps]
     uses: ./.github/workflows/build_dependencies.yml
     with:
       branch: ${{ github.ref }}

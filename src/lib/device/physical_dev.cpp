@@ -22,7 +22,6 @@
 #include <iomgr/iomgr.hpp>
 #include <iomgr/iomgr_flip.hpp>
 #include <sisl/fds/utils.hpp>
-#include <isa-l/crc.h>
 
 #include <homestore/homestore_decl.hpp>
 #include "device/chunk.h"
@@ -117,7 +116,7 @@ PhysicalDev::PhysicalDev(const dev_info& dinfo, int oflags, const pdev_info_head
 
 PhysicalDev::~PhysicalDev() { close_device(); }
 
-void PhysicalDev::write_super_block(uint8_t* buf, uint32_t sb_size, uint64_t offset) {
+void PhysicalDev::write_super_block(uint8_t const* buf, uint32_t sb_size, uint64_t offset) {
     auto err_c = m_drive_iface->sync_write(m_iodev.get(), c_charptr_cast(buf), sb_size, offset);
 
     if (m_super_blk_in_footer) {
@@ -223,7 +222,7 @@ void PhysicalDev::submit_batch() { m_drive_iface->submit_batch(); }
 void PhysicalDev::format_chunks() {
     m_chunk_info_slots = std::make_unique< sisl::Bitset >(hs_super_blk::chunk_info_bitmap_size(m_dev_info));
     auto bitmap_mem = m_chunk_info_slots->serialize(m_pdev_info.dev_attr.align_size);
-    write_super_block(bitmap_mem->bytes, bitmap_mem->size, hs_super_blk::chunk_sb_offset());
+    write_super_block(bitmap_mem->cbytes(), bitmap_mem->size(), hs_super_blk::chunk_sb_offset());
 }
 
 std::vector< shared< Chunk > > PhysicalDev::create_chunks(const std::vector< uint32_t >& chunk_ids, uint32_t vdev_id,
@@ -261,7 +260,7 @@ std::vector< shared< Chunk > > PhysicalDev::create_chunks(const std::vector< uin
 
         // Finally serialize the entire bitset and persist the chunk info bitmap itself
         auto bitmap_mem = m_chunk_info_slots->serialize(m_pdev_info.dev_attr.align_size);
-        write_super_block(bitmap_mem->bytes, bitmap_mem->size, hs_super_blk::chunk_sb_offset());
+        write_super_block(bitmap_mem->cbytes(), bitmap_mem->size(), hs_super_blk::chunk_sb_offset());
     } catch (const std::out_of_range& e) {
         LOGERROR("Creation of chunks failed because of space, removing {} partially created chunks", ret_chunks.size());
         for (auto& chunk : ret_chunks) {
@@ -295,7 +294,7 @@ shared< Chunk > PhysicalDev::create_chunk(uint32_t chunk_id, uint32_t vdev_id, u
         get_stream(chunk).m_chunks_map.insert(std::pair{chunk_id, chunk});
 
         auto bitmap_mem = m_chunk_info_slots->serialize(m_pdev_info.dev_attr.align_size);
-        write_super_block(bitmap_mem->bytes, bitmap_mem->size, hs_super_blk::chunk_sb_offset());
+        write_super_block(bitmap_mem->cbytes(), bitmap_mem->size(), hs_super_blk::chunk_sb_offset());
 
         cinfo->~chunk_info();
         hs_utils::iobuf_free(buf, sisl::buftag::superblk);
@@ -330,7 +329,7 @@ void PhysicalDev::load_chunks(std::function< bool(cshared< Chunk >&) >&& chunk_f
     // Read the chunk info bitmap area from super block and load them into in-memory bitmap of chunk slots
     auto buf_arr = make_byte_array(hs_super_blk::chunk_info_bitmap_size(m_dev_info), m_pdev_info.dev_attr.align_size,
                                    sisl::buftag::superblk);
-    read_super_block(buf_arr->bytes, buf_arr->size, hs_super_blk::chunk_sb_offset());
+    read_super_block(buf_arr->bytes(), buf_arr->size(), hs_super_blk::chunk_sb_offset());
     m_chunk_info_slots = std::make_unique< sisl::Bitset >(buf_arr);
 
     // Walk through each of the chunk info and create corresponding chunks
@@ -390,7 +389,7 @@ void PhysicalDev::do_remove_chunk(cshared< Chunk >& chunk) {
     // Reset the info slot and write it to super block
     m_chunk_info_slots->reset_bit(chunk->slot_number());
     auto bitmap_mem = m_chunk_info_slots->serialize(m_pdev_info.dev_attr.align_size);
-    write_super_block(bitmap_mem->bytes, bitmap_mem->size, hs_super_blk::chunk_sb_offset());
+    write_super_block(bitmap_mem->cbytes(), bitmap_mem->size(), hs_super_blk::chunk_sb_offset());
 
     get_stream(chunk).m_chunks_map.erase(chunk->chunk_id());
     cinfo->~chunk_info();

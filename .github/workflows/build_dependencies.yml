@@ -108,7 +108,7 @@ jobs:
       uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
       with:
         load_any: 'True'
-        key_prefix: Sisl10Deps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+        key_prefix: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Retrieve Dependencies
@@ -119,12 +119,29 @@ jobs:
         ref: master
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
+    - name: Retrieve Dependencies
+      uses: actions/checkout@v3
+      with:
+        repository: eBay/nuraft_mesg
+        path: import/nuraft_mesg
+        ref: main
+      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
+
     - name: Load IOMgr Cache
       uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
       with:
         testing: 'False'
         path: import/iomgr
         key_prefix: IOMgrDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+        fail_on_cache_miss: true
+      if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
+
+    - name: Load NuraftMesg Cache
+      uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
+      with:
+        testing: 'False'
+        path: import/nuraft_mesg
+        key_prefix: NuMesgDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
         fail_on_cache_miss: true
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
 
@@ -139,6 +156,7 @@ jobs:
         sudo apt-get install -y python3-pyelftools libaio-dev
         python -m pip install pyelftools
         conan export import/iomgr oss/master
+        conan export import/nuraft_mesg oss/main
         cached_pkgs=$(ls -1d ~/.conan/data/*/*/*/*/package | sed 's,.*data/,,' | cut -d'/' -f1,2 | paste -sd',' - -)
         echo "::info:: Pre-cached: ${cached_pkgs}"
       if: ${{ inputs.testing == 'True' || steps.restore-cache.outputs.cache-hit != 'true' }}
@@ -150,6 +168,7 @@ jobs:
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
             -o sisl:testing=False \
             -o iomgr:testing=off \
+            -o nuraft_mesg:testing=False \
             -o testing=off \
             -s build_type=${{ inputs.build-type }} \
             --build missing \
@@ -166,7 +185,7 @@ jobs:
       uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
       with:
         load_any: 'True'
-        key_prefix: Sisl10Deps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+        key_prefix: SislDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
       if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
     - name: Reload IOMgr Cache
@@ -178,6 +197,15 @@ jobs:
         fail_on_cache_miss: true
       if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
 
+    - name: Reload NuraftMesg Cache
+      uses: eBay/sisl/.github/actions/load_conan@stable/v8.x
+      with:
+        testing: 'False'
+        path: import/nuraft_mesg
+        key_prefix: NuMesgDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
+        fail_on_cache_miss: true
+      if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
+
     - name: Create and Test Package
       run: |
         sanitize=$([[ "${{ inputs.tooling }}" == "Sanitize" ]] && echo "True" || echo "False")
@@ -186,6 +214,7 @@ jobs:
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
             -o sisl:testing=False \
             -o iomgr:testing=off \
+            -o nuraft_mesg:testing=False \
             -o homestore:sanitize=${sanitize} \
             -s build_type=${{ inputs.build-type }} \
             --build missing \
@@ -199,6 +228,7 @@ jobs:
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
             -o sisl:testing=False \
             -o iomgr:testing=off \
+            -o nuraft_mesg:testing=False \
             -o coverage=True \
             -s build_type=${{ inputs.build-type }} \
             --build missing \

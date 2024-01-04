@@ -32,7 +32,7 @@ uint32_t BlkId::serialized_size() const { return sizeof(BlkId); }
 uint32_t BlkId::expected_serialized_size() { return sizeof(BlkId); }
 
 void BlkId::deserialize(sisl::blob const& b, bool copy) {
-    serialized* other = r_cast< serialized* >(b.bytes);
+    serialized* other = r_cast< serialized const* >(b.cbytes());
     s = *other;
 }
 
@@ -100,9 +100,9 @@ uint32_t MultiBlkId::serialized_size() const {
 }
 
 void MultiBlkId::deserialize(sisl::blob const& b, bool copy) {
-    MultiBlkId* other = r_cast< MultiBlkId* >(b.bytes);
+    MultiBlkId* other = r_cast< MultiBlkId const* >(b.cbytes());
     s = other->s;
-    if (b.size == sizeof(BlkId)) {
+    if (b.size() == sizeof(BlkId)) {
         n_addln_piece = 0;
     } else {
         n_addln_piece = other->n_addln_piece;
@@ -116,6 +116,8 @@ uint32_t MultiBlkId::expected_serialized_size(uint16_t num_pieces) {
     if (num_pieces > 1) { sz += sizeof(uint16_t) + ((num_pieces - 1) * sizeof(chain_blkid)); }
     return sz;
 }
+
+uint32_t MultiBlkId::max_serialized_size() { return expected_serialized_size(max_pieces); }
 
 uint16_t MultiBlkId::num_pieces() const { return BlkId::is_valid() ? n_addln_piece + 1 : 0; }
 

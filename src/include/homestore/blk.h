@@ -133,6 +133,7 @@ public:
     BlkId to_single_blkid() const;
 
     static uint32_t expected_serialized_size(uint16_t num_pieces);
+    static uint32_t max_serialized_size();
     static int compare(MultiBlkId const& one, MultiBlkId const& two);
 
     struct iterator {

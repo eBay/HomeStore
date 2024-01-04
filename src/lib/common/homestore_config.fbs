@@ -189,6 +189,36 @@ table MetaBlkStore {
     sanity_check_interval: uint32 = 10 (hotswap);
 }
 
+table Consensus {
+    // Backoff for any rpc failure
+    rpc_backoff_ms: uint32 = 250;
+
+    // Frequency of Raft heartbeat
+    heartbeat_period_ms: uint32 = 250;
+
+    // Re-election timeout low and high mark
+    elect_to_low_ms: uint32 = 900;
+    elect_to_high_ms: uint32 = 1400;
+
+    // When a new member is being synced, the batch size of number of logs to be shipped
+    log_sync_batch_size: int32 = 100;
+
+    // Log distance with which snapshot/compact needs to happen. 0 means snapshot is disabled
+    snapshot_freq_distance: int32 = 0;
+
+    // Max append batch size
+    max_append_batch_size: int32 = 64;
+
+    // Threshold of log gap from leader to consider a replica as stale
+    stale_log_gap_hi_threshold: int32 = 200;
+
+    // Threshold of log gap from leader to consider a replica as come out of stale and became fresh
+    stale_log_gap_lo_threshold: int32 = 30;
+
+    // Minimum log gap a replica has to be from leader before joining the replica set.
+    min_log_gap_to_join: int32 = 30;
+}
+
 table HomeStoreSettings {
     version: uint32 = 1;
     generic: Generic;
@@ -199,6 +229,7 @@ table HomeStoreSettings {
     logstore: LogStore;
     resource_limits: ResourceLimits;
     metablk: MetaBlkStore;
+    consensus: Consensus;
 }
 
 root_type HomeStoreSettings;

@@ -17,7 +17,7 @@
 #include <map>
 #include <vector>
 
-#include <isa-l/crc.h>
+#include <homestore/crc.h>
 #include <iomgr/iomgr.hpp>
 #include <sisl/fds/sparse_vector.hpp>
 #include <homestore/homestore_decl.hpp>
@@ -71,7 +71,7 @@ struct vdev_info {
     void set_pdev_choice(vdev_multi_pdev_opts_t opts) { multi_pdev_choice = enum_value(opts); }
 
     void set_user_private(const sisl::blob& data) {
-        std::memcpy(&user_private, data.bytes, std::min(data.size, uint32_cast(user_private_size)));
+        std::memcpy(&user_private, data.cbytes(), std::min(data.size(), uint32_cast(user_private_size)));
     }
     uint8_t* get_user_private_mutable() { return &(user_private[0]); }
     const uint8_t* get_user_private() const { return &(user_private[0]); }
