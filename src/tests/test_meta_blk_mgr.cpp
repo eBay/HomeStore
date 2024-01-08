@@ -88,6 +88,7 @@ public:
     std::vector< meta_sub_type > actual_cb_order;
     std::vector< meta_sub_type > actual_on_complete_cb_order;
     std::vector< void* > cookies;
+    bool enable_dependency_chain{false};
 
     VMetaBlkMgrTest() = default;
     VMetaBlkMgrTest(const VMetaBlkMgrTest&) = delete;
@@ -120,8 +121,12 @@ public:
     }
 
     void restart_homestore() {
+        auto before_services_starting_cb = [this]() {
+            register_client();
+            if (enable_dependency_chain) { register_client_inlcuding_dependencies(); }
+        };
         test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", {{HS_SERVICE::META, {.size_pct = 85.0}}},
-                                                   nullptr /* before_svc_start_cb */, true /* restart */);
+                                                   std::move(before_services_starting_cb), true /* restart */);
     }
 
     uint64_t io_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
@@ -457,32 +462,16 @@ public:
         return (aligned_rand(re) == s_cast< uint8_t >(1));
     }
 
-    void recover() {
-        // TODO: This scan_blks and recover should be replaced with actual TestHelper::start_homestore with restart
-        // on. That way, we don't need to simulate all these calls here
-        // do recover and callbacks will be triggered;
-        m_cb_blks.clear();
-        hs()->cp_mgr().shutdown();
-        hs()->cp_mgr().start(false /* first_time_boot */);
-        m_mbm->recover(false);
-    }
-
     void recover_with_on_complete() {
-        // TODO: This scan_blks and recover should be replaced with actual TestHelper::start_homestore with restart
-        // on. That way, we don't need to simulate all these calls here
-        // do recover and callbacks will be triggered;
+        // restart will cause recovery and callbacks will be triggered
         m_cb_blks.clear();
-        hs()->cp_mgr().shutdown();
-        hs()->cp_mgr().start(false /* first_time_boot */);
-        m_mbm->recover(true);
+        restart_homestore();
     }
 
     void validate() {
         // verify received blks via callbaks are all good;
         verify_cb_blks();
     }
-
-    void scan_blks() { m_mbm->scan_meta_blks(); }
 
     meta_op_type get_op() {
         static thread_local bool keep_remove{false};
@@ -571,6 +560,7 @@ public:
     }
 
     void register_client_inlcuding_dependencies() {
+        enable_dependency_chain = true;
         m_mbm = &(meta_service());
         m_total_wrt_sz = m_mbm->used_size();
 
@@ -639,6 +629,8 @@ public:
     }
 
     void deregister_client_inlcuding_dependencies() {
+        enable_dependency_chain = false;
+
         m_mbm->deregister_handler("A");
         m_mbm->deregister_handler("B");
         m_mbm->deregister_handler("C");
@@ -742,9 +734,6 @@ TEST_F(VMetaBlkMgrTest, random_dependency_test) {
 
     iomanager.iobuf_free(buf);
 
-    // simulate reboot case that MetaBlkMgr will scan the disk for all the metablks that were written;
-    this->scan_blks();
-
     this->recover_with_on_complete();
 
     std::unordered_map< meta_sub_type, int > actual_first_cb_order_map;
@@ -777,7 +766,6 @@ TEST_F(VMetaBlkMgrTest, random_dependency_test) {
     EXPECT_TRUE(actual_first_cb_order_map["F"] < actual_first_cb_order_map["C"]);
 
     this->deregister_client_inlcuding_dependencies();
-
     this->shutdown();
 }
 
@@ -816,10 +804,7 @@ TEST_F(VMetaBlkMgrTest, random_load_test) {
 
     this->do_rand_load();
 
-    // simulate reboot case that MetaBlkMgr will scan the disk for all the metablks that were written;
-    this->scan_blks();
-
-    this->recover();
+    this->recover_with_on_complete();
 
     this->validate();
 
@@ -861,11 +846,7 @@ TEST_F(VMetaBlkMgrTest, RecoveryFromBadData) {
     // Then do a recovery, the data read from disk should be uncompressed and match the size we saved in its metablk
     // header. If size mismatch, it will hit assert failure;
     //
-
-    // simulate reboot case that MetaBlkMgr will scan the disk for all the metablks that were written;
-    this->scan_blks();
-
-    this->recover();
+    this->recover_with_on_complete();
 
     this->validate();
 
@@ -892,11 +873,7 @@ TEST_F(VMetaBlkMgrTest, CompressionBackoff) {
     // Then do a recovery, the data read from disk should be uncompressed and match the size we saved in its metablk
     // header. If size mismatch, it will hit assert failure;
     //
-
-    // simulate reboot case that MetaBlkMgr will scan the disk for all the metablks that were written;
-    this->scan_blks();
-
-    this->recover();
+    this->recover_with_on_complete();
 
     this->validate();
 

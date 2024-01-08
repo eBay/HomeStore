@@ -640,6 +640,7 @@ BlkAllocStatus VarsizeBlkAllocator::mark_blk_allocated(BlkId const& bid) {
                              "Expected end bit to be smaller than portion end bit");
 #endif
         m_cache_bm->set_bits(bid.blk_num(), bid.blk_count());
+        incr_alloced_blk_count(bid.blk_count());
     }
     BLKALLOC_LOG(TRACE, "mark blk alloced directly to portion={} blkid={} set_bits_count={}",
                      blknum_to_portion_num(bid.blk_num()), bid.to_string(), get_alloced_blk_count());

@@ -50,9 +50,7 @@ public:
     }
 
     void destroy() override {
-        auto cpg = hs()->cp_mgr().cp_guard();
-        auto op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
-        Btree< K, V >::destroy_btree(op_context);
+        Btree< K, V >::destroy_btree(nullptr);
     }
 
     btree_status_t init() {

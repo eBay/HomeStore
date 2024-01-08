@@ -74,10 +74,16 @@ void CPManager::shutdown() {
     LOGINFO("Stopping cp timer");
     iomanager.cancel_timer(m_cp_timer_hdl, true);
     m_cp_timer_hdl = iomgr::null_timer_handle;
+    m_cp_shutdown_initiated = true;
 
-    auto cp = get_cur_cp();
-    delete (cp);
+    LOGINFO("Trigger cp flush");
+    auto success = trigger_cp_flush(true /* force */).get();
+    HS_REL_ASSERT_EQ(success, true, "CP Flush failed");
+    LOGINFO("Trigger cp done");
+
+    delete (m_cur_cp);
     rcu_xchg_pointer(&m_cur_cp, nullptr);
+
     m_metrics.reset();
     if (m_wd_cp) {
         m_wd_cp->stop();
@@ -220,11 +226,23 @@ void CPManager::on_cp_flush_done(CP* cp) {
         m_sb.write();
 
         cleanup_cp(cp);
-        cp->m_comp_promise.setValue(true);
 
-        m_in_flush_phase = false;
+        // Setting promise will cause the CP manager destructor to cleanup
+        // before getting a chance to do the checking if shutdown has been
+        // initiated or not.
+        auto shutdown_initiated = m_cp_shutdown_initiated.load();
+        auto promise = std::move(cp->m_comp_promise);
+
         m_wd_cp->reset_cp();
         delete cp;
+
+        promise.setValue(true);
+        if (shutdown_initiated) {
+            // If shutdown initiated, dont trigger another CP.
+            // Dont access any cp state after this.
+            return;
+        }
+        m_in_flush_phase = false;
 
         // Trigger CP in case there is one back to back CP
         {
