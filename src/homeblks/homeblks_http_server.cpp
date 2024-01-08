@@ -75,6 +75,8 @@ void HomeBlksHttpServer::setup_routes() {
                                      iomgr::url_t::localhost);
         http_server_ptr->setup_route(Http::Method::Get, "/api/v1/getStatus",
                                      Routes::bind(&HomeBlksHttpServer::get_status, this));
+        http_server_ptr->setup_route(Http::Method::Get, "/api/v1/utilization/:volumeUUID",
+                                     Routes::bind(&HomeBlksHttpServer::get_utilization, this));
         http_server_ptr->setup_route(Http::Method::Get, "/api/v1/verifyBitmap",
                                      Routes::bind(&HomeBlksHttpServer::verify_bitmap, this), iomgr::url_t::localhost);
         http_server_ptr->setup_route(Http::Method::Get, "/api/v1/dumpDiskMetaBlks",
@@ -151,7 +153,26 @@ void HomeBlksHttpServer::set_log_level(const Pistache::Rest::Request& request,
 
     response.send(Pistache::Http::Code::Ok, resp);
 }
+void HomeBlksHttpServer::get_utilization(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response)
+{
+    const std::string vol_uuid{request.param(":volumeUUID").as<std::string>()};
+    if (vol_uuid.length() == 0) {
+        response.send(Pistache::Http::Code::Bad_Request, "empty vol_uuid!");
+        return;
+    }
 
+    boost::uuids::string_generator gen;
+    boost::uuids::uuid uuid = gen(vol_uuid);
+    const auto vol = VolInterface::get_instance()->lookup_volume(uuid);
+    if (!vol) {
+        response.send(Pistache::Http::Code::Bad_Request, "vol not found!");
+        return;
+    }
+    const auto total_data_size = VolInterface::get_instance()->get_system_capacity().initial_total_data_meta_size;
+    const auto vol_used = VolInterface::get_instance()->get_used_size(vol);
+    auto resp = std::to_string(static_cast<double> (vol_used) / total_data_size);
+    response.send(Pistache::Http::Code::Ok, resp);
+}
 void HomeBlksHttpServer::get_log_level(const Pistache::Rest::Request& request,
                                        Pistache::Http::ResponseWriter response) {
     std::string logmodule;

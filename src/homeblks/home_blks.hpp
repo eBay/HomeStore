@@ -232,6 +232,7 @@ public:
     virtual const char* get_name(const VolumePtr& vol) override;
     virtual uint64_t get_page_size(const VolumePtr& vol) override;
     virtual uint64_t get_size(const VolumePtr& vol) override;
+    virtual uint64_t get_used_size(const VolumePtr& vol) override;
     virtual boost::uuids::uuid get_uuid(VolumePtr vol) override;
     virtual sisl::blob at_offset(const blk_buf_t& buf, uint32_t offset) override;
 
