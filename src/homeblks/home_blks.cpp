@@ -634,6 +634,11 @@ bool HomeBlks::verify_index_bm() {
     return true;
 }
 
+uint64_t HomeBlks::get_used_size(const VolumePtr& vol) {
+    /* Update per volume status */
+   return  vol->get_used_size().used_total_size;
+}
+
 sisl::status_response HomeBlks::get_status(const sisl::status_request& request) {
     sisl::status_response response;
     /* Update per volume status */

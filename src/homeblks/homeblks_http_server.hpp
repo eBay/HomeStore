@@ -51,6 +51,7 @@ public:
     void verify_metablk_store(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
     void wakeup_init(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
     void copy_vol(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
+    void get_utilization(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
 
 #ifdef _PRERELEASE
     void set_safe_mode(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response);
