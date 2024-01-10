@@ -230,14 +230,13 @@ void HomeStore::shutdown() {
 
     LOGINFO("Homestore shutdown is started");
 
-    if (has_repl_data_service()) {
-        s_cast< GenericReplService* >(m_repl_service.get())->stop();
-        m_repl_service.reset();
-    }
-
     if (has_index_service()) {
         m_index_service->stop();
         //        m_index_service.reset();
+    }
+    if (has_repl_data_service()) {
+        s_cast< GenericReplService* >(m_repl_service.get())->stop();
+        m_repl_service.reset();
     }
 
     if (has_log_service()) {

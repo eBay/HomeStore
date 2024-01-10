@@ -62,8 +62,9 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
     RD_LOG(INFO, "Started {} RaftReplDev group_id={}, replica_id={}, raft_server_id={} commited_lsn={} next_dsn={}",
            (load_existing ? "Existing" : "New"), group_id_str(), my_replica_id_str(), m_raft_server_id,
            m_commit_upto_lsn.load(), m_next_dsn.load());
+
     m_msg_mgr.bind_data_service_request(PUSH_DATA, m_group_id, bind_this(RaftReplDev::on_push_data_received, 1));
-    // m_msg_mgr.bind_data_service_request(FETCH_DATA, m_group_id, bind_this(RaftReplDev::on_fetch_data_received, 2));
+    m_msg_mgr.bind_data_service_request(FETCH_DATA, m_group_id, bind_this(RaftReplDev::on_fetch_data_received, 1));
 }
 
 void RaftReplDev::use_config(json_superblk raft_config_sb) { m_raft_config_sb = std::move(raft_config_sb); }
@@ -128,6 +129,8 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq) {
             rreq->pkts.clear();
         });
 }
+
+void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {}
 
 void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
     auto const& incoming_buf = rpc_data->request_blob();
@@ -222,6 +225,46 @@ repl_req_ptr_t RaftReplDev::follower_create_req(repl_key const& rkey, sisl::blob
     return rreq;
 }
 
+void RaftReplDev::check_and_fetch_remote_data_if_needed(std::vector< repl_req_ptr_t >* rreqs) {
+    // Pop any entries that are already completed - from the entries list as well as from map
+    rreqs->erase(std::remove_if(
+                     rreqs->begin(), rreqs->end(),
+                     [this](repl_req_ptr_t const& rreq) {
+                         if (rreq == nullptr) { return true; }
+
+                         if (rreq->state.load() & uint32_cast(repl_req_state_t::DATA_WRITTEN)) {
+                             m_repl_key_req_map.erase(rreq->rkey); // Remove=Pop from map as well, since it is completed
+                             RD_LOG(INFO,
+                                    "Raft Channel: Data write completed and blkid mapped, removing from map: rreq=[{}]",
+                                    rreq->to_compact_string());
+                             return true; // Remove from the pending list
+                         } else {
+                             return false;
+                         }
+                     }),
+                 rreqs->end());
+
+    if (rreqs->size()) {
+        // Some data not completed yet, let's fetch from remote;
+        fetch_data_from_leader(rreqs);
+    }
+}
+
+void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
+    group_msg_service()->data_service_request_unidirectional(nuraft_mesg::role_regex::ALL, FETCH_DATA, );
+
+#if 0
+    m_repl_svc_ctx->data_service_request(
+                FETCH_DATA,
+                        data_rpc::serialize(data_channel_rpc_hdr{m_group_id, 0 /*replace with replica id*/}, remote_pbas,
+                                                        m_state_store.get(), {}),
+                                [this](sisl::io_blob const& incoming_buf) {
+                                            auto null_rpc_data = boost::intrusive_ptr< sisl::GenericRpcData >(nullptr);
+                                                        m_state_machine->on_data_received(incoming_buf, null_rpc_data);
+                                                                });
+#endif
+}
+
 AsyncNotify RaftReplDev::notify_after_data_written(std::vector< repl_req_ptr_t >* rreqs) {
     std::vector< folly::SemiFuture< folly::Unit > > futs;
     futs.reserve(rreqs->size());
@@ -248,23 +291,19 @@ AsyncNotify RaftReplDev::notify_after_data_written(std::vector< repl_req_ptr_t >
     // All the entries are done already, no need to wait
     if (rreqs->size() == 0) { return folly::makeFuture< folly::Unit >(folly::Unit{}); }
 
-#if 0
     // We are yet to support reactive fetch from remote.
-    if (m_resync_mode) {
+    if (is_resync_mode()) {
         // if in resync mode, fetch data from remote immediately;
-        check_and_fetch_remote_data(std::move(rreqs));
+        check_and_fetch_remote_data(rreqs);
     } else {
-        // some blkids are not in completed state, let's schedule a timer to check it again;
+        // some data are not in completed state, let's schedule a timer to check it again;
         // we wait for data channel to fill in the data. Still if its not done we trigger a fetch from remote;
-        m_wait_blkid_write_timer_hdl = iomanager.schedule_thread_timer( // timer wakes up in current thread;
-            HS_DYNAMIC_CONFIG(repl->wait_blkid_write_timer_sec) * 1000 * 1000 * 1000, false /* recurring */,
-            nullptr /* cookie */, [this, std::move(rreqs)](auto) {
-                check_and_fetch_remote_data(std::move(rreqs));
-            });
+        m_wait_data_timer_hdl = iomanager.schedule_thread_timer( // timer wakes up in current thread;
+            HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_sec) * 1000 * 1000 * 1000, false /* recurring */,
+            nullptr /* cookie */, [this, rreqs](auto) { check_and_fetch_remote_data(rreqs); });
     }
-    return ret;
-#endif
 
+    // block waiting here until all the futs are ready (data channel filled in and promises are made);
     return folly::collectAll(futs).deferValue([this, rreqs](auto&& e) {
         for (auto const& rreq : *rreqs) {
             HS_DBG_ASSERT(rreq->state.load() & uint32_cast(repl_req_state_t::DATA_WRITTEN),

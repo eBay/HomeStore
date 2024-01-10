@@ -217,6 +217,9 @@ table Consensus {
 
     // Minimum log gap a replica has to be from leader before joining the replica set.
     min_log_gap_to_join: int32 = 30;
+    
+    // amount of time in seconds to wait on data write before fetch data from remote;
+    wait_data_write_timer_sec: uint32 =  30 (hotswap);
 }
 
 table HomeStoreSettings {

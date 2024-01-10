@@ -55,6 +55,9 @@ private:
     iomgr::timer_handle_t m_sb_flush_timer_hdl;
 
     std::atomic< uint64_t > m_next_dsn{0}; // Data Sequence Number that will keep incrementing for each data entry
+                                           //
+    iomgr::timer_handle_t m_wait_data_timer_hdl{iomgr::null_timer_handle};
+    bool m_resync_mode{false};
 
     static std::atomic< uint64_t > s_next_group_ordinal;
 
@@ -113,6 +116,12 @@ private:
     shared< nuraft::log_store > data_journal() { return m_data_journal; }
     void push_data_to_all_followers(repl_req_ptr_t rreq);
     void on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data);
+
+    void on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data);
+
+    void check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rreqs);
+
+    void fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs);
 };
 
 } // namespace homestore
