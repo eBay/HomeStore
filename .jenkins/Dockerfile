@@ -10,6 +10,7 @@ RUN set -eux; \
     apt-get upgrade -y; \
     apt-get install iputils-ping; \
     apt-get install net-tools; \
+    apt-get install lsof; \
     rm -rf /var/lib/apt/lists/*;
 
 COPY test_index_btree /usr/local/bin/test_index_btree
