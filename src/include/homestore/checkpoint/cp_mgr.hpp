@@ -154,6 +154,7 @@ private:
     superblk< cp_mgr_super_block > m_sb;
     std::vector< iomgr::io_fiber_t > m_cp_io_fibers;
     iomgr::timer_handle_t m_cp_timer_hdl;
+    std::atomic< bool > m_cp_shutdown_initiated{false};
 
 public:
     CPManager();

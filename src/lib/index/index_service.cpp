@@ -78,11 +78,6 @@ void IndexService::start() {
 
 void IndexService::stop() {
     std::unique_lock lg(m_index_map_mtx);
-    auto fut = homestore::hs()->cp_mgr().trigger_cp_flush(true /* force */);
-    auto success = std::move(fut).get();
-    HS_REL_ASSERT_EQ(success, true, "CP Flush failed");
-    LOGINFO("CP Flush completed");
-
     for (auto [id, tbl] : m_index_map) {
         tbl->destroy();
     }
