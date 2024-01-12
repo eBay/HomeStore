@@ -79,8 +79,8 @@ protected:
             if (count == SISL_OPTIONS["replicas"].as< uint32_t >()) {
                 phase_ = new_phase;
                 cv_.notify_all();
-            }
-            cv_.wait(lg, [this, new_phase]() { return (phase_ == new_phase); });
+            } else
+                cv_.wait(lg, [this, new_phase]() { return (phase_ == new_phase); });
         }
     };
 
@@ -136,6 +136,11 @@ public:
         if (replica_num_ == 0) {
             // Erase previous shmem and create a new shmem with IPCData structure
             bip::shared_memory_object::remove("raft_repl_test_shmem");
+
+            // kill the previous processes using the port
+            for (uint32_t i = 0; i < num_replicas; ++i)
+                check_and_kill(SISL_OPTIONS["base_port"].as< uint16_t >() + i);
+
             shm_ = std::make_unique< bip::shared_memory_object >(bip::create_only, "raft_repl_test_shmem",
                                                                  bip::read_write);
             shm_->truncate(sizeof(IPCData));
@@ -222,6 +227,22 @@ public:
     void sync_for_cleanup_start() { ipc_data_->sync_for_cleanup_start(); }
     void sync_dataset_size(uint64_t dataset_size) { ipc_data_->test_dataset_size_ = dataset_size; }
     uint64_t dataset_size() const { return ipc_data_->test_dataset_size_; }
+
+    void check_and_kill(int port) {
+        std::string command = "lsof -t -i:" + std::to_string(port);
+        if (system(command.c_str())) {
+            std::cout << "Port " << port << " is not in use." << std::endl;
+        } else {
+            std::cout << "Port " << port << " is in use. Trying to kill the process..." << std::endl;
+            command += " | xargs kill -9";
+            int result = system(command.c_str());
+            if (result == 0) {
+                std::cout << "Killed the process using port " << port << std::endl;
+            } else {
+                std::cout << "Failed to kill the process." << std::endl;
+            }
+        }
+    }
 
 private:
     uint16_t replica_num_;
