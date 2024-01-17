@@ -413,7 +413,7 @@ public:
 
         LOGINFO("compression ratio limit changed to: {}", HS_DYNAMIC_CONFIG(metablk.compress_ratio_limit));
 
-        do_sb_write(true /* do_overflow */, 15 * Mi);
+        do_sb_write(true /* do_overflow */, 5 * Mi);
 
         HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
             s.metablk.compress_ratio_limit = 0; // this will disallow every compression attempt;
@@ -423,7 +423,7 @@ public:
         LOGINFO("compression ratio limit changed to: {}", HS_DYNAMIC_CONFIG(metablk.compress_ratio_limit));
 
         // since we only wrote 1 metablk, it will always pick up the same one;
-        do_sb_update(true /* aligned */, 12 * Mi);
+        do_sb_update(true /* aligned */, 5 * Mi);
     }
 
     void do_rand_load() {
