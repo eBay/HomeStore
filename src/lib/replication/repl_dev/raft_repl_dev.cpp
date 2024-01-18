@@ -9,9 +9,11 @@
 #include <homestore/superblk_handler.hpp>
 
 #include "common/homestore_assert.hpp"
+#include "common/homestore_config.hpp"
 #include "replication/service/raft_repl_service.h"
 #include "replication/repl_dev/raft_repl_dev.h"
 #include "push_data_rpc_generated.h"
+#include "fetch_data_rpc_generated.h"
 
 namespace homestore {
 std::atomic< uint64_t > RaftReplDev::s_next_group_ordinal{1};
@@ -130,7 +132,60 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq) {
         });
 }
 
-void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {}
+void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
+    auto const& incoming_buf = rpc_data->request_blob();
+    auto fetch_req = GetSizePrefixedFetchData(incoming_buf.cbytes());
+
+    RD_LOG(INFO, "Data Channel: FetchData received: {}",
+           flatbuffers::FlatBufferToString(incoming_buf.cbytes(), FetchDataRequestTypeTable()));
+
+    std::vector< sisl::sg_list > sgs_vec;
+    for (auto const& req : *(fetch_req->request()->entries())) {
+        auto const& lsn = req->lsn();
+        auto const& term = req->raft_term();
+        auto const& dsn = req->dsn();
+        auto const& header = req->user_header();
+        auto const& key = req->user_key();
+        auto const& originator = req->blkid_originator();
+        auto const& remote_blkid = req->remote_blkid();
+
+        // fetch data based on the remote_blkid
+        if (originator == server_id()) {
+            // We are the originator of the blkid, read data locally;
+            MultiBlkId local_blkid;
+
+            // convert remote_blkid serialized data to local blkid
+            local_blkid.deserialize(sisl::blob{remote_blkid->Data(), remote_blkid->size()}, true /* copy */);
+
+            // prepare the sgs data buffer to read into;
+            auto const total_size = local_blkid.blk_count() * get_blk_size();
+            sisl::sg_list sgs;
+            shared< uint8_t > iov_base(iomanager.iobuf_alloc(get_blk_size(), total_size),
+                                       [](uint8_t* buf) { iomanager.iobuf_free(buf); });
+            sgs.size = total_size;
+            sgs.iovs.emplace_back(iovec{.iov_base = iov_base.get(), .iov_len = total_size});
+
+            // accumulate the sgs for later use (send back to the requester));
+            sgs_vec.push_back(sgs);
+
+            async_read(local_blkid, sgs, total_size).thenValue([this, rpc_data](auto&& err) {
+                RD_REL_ASSERT(!err, "Error in reading data"); // TODO: Find a way to return error to the Listener
+            });
+        } else {
+            // TODO: if we are not the originator, we need to fetch based on lsn;
+            // To be implemented;
+        }
+    }
+
+    // now prepare the io_blob_list to response back to requester;
+    nuraft_mesg::io_blob_list_t pkts = sisl::io_blob_list_t{};
+    for (auto const& sgs : sgs_vec) {
+        auto const ret = sisl::io_blob::sg_list_to_ioblob_list(sgs);
+        pkts.insert(pkts.end(), ret.begin(), ret.end());
+    }
+
+    group_msg_service()->send_data_service_response(pkts, rpc_data);
+}
 
 void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
     auto const& incoming_buf = rpc_data->request_blob();
@@ -151,11 +206,13 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
 
     RD_LOG(INFO, "Data Channel: Received data rreq=[{}]", rreq->to_compact_string());
 
-    if (rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_RECEIVED)) &
-        uint32_cast(repl_req_state_t::DATA_RECEIVED)) {
+    // if (rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_RECEIVED)) &
+    if (rreq->state.load() & (uint32_cast(repl_req_state_t::DATA_RECEIVED))) {
         // We already received the data before, just ignore this data
         // TODO: Should we forcibly overwrite the data with new data?
         return;
+    } else {
+        rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_RECEIVED));
     }
 
     // Get the data portion from the buffer
@@ -225,7 +282,7 @@ repl_req_ptr_t RaftReplDev::follower_create_req(repl_key const& rkey, sisl::blob
     return rreq;
 }
 
-void RaftReplDev::check_and_fetch_remote_data_if_needed(std::vector< repl_req_ptr_t >* rreqs) {
+void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rreqs) {
     // Pop any entries that are already completed - from the entries list as well as from map
     rreqs->erase(std::remove_if(
                      rreqs->begin(), rreqs->end(),
@@ -246,23 +303,105 @@ void RaftReplDev::check_and_fetch_remote_data_if_needed(std::vector< repl_req_pt
 
     if (rreqs->size()) {
         // Some data not completed yet, let's fetch from remote;
-        fetch_data_from_leader(rreqs);
+        fetch_data_from_remote(rreqs);
     }
 }
 
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
-    group_msg_service()->data_service_request_unidirectional(nuraft_mesg::role_regex::ALL, FETCH_DATA, );
+    std::vector<::flatbuffers::Offset< RequestEntry > > entries;
+    for (auto const& rreq : *rreqs) {
+        auto& builder = rreq->fb_builder;
+        entries.push_back(CreateRequestEntry(builder, rreq->get_lsn(), rreq->term(), rreq->dsn(),
+                                             builder.CreateVector(rreq->header.cbytes(), rreq->header.size()),
+                                             builder.CreateVector(rreq->key.cbytes(), rreq->key.size()),
+                                             rreq->remote_blkid.server_id /* blkid_originator */,
+                                             builder.CreateVector(rreq->remote_blkid.blkid.serialize().cbytes(),
+                                                                  rreq->remote_blkid.blkid.serialized_size())));
+        RD_LOG(INFO, "Data Channel: Fetching data from remote: rreq=[{}]", rreq->to_compact_string());
+    }
 
-#if 0
-    m_repl_svc_ctx->data_service_request(
-                FETCH_DATA,
-                        data_rpc::serialize(data_channel_rpc_hdr{m_group_id, 0 /*replace with replica id*/}, remote_pbas,
-                                                        m_state_store.get(), {}),
-                                [this](sisl::io_blob const& incoming_buf) {
-                                            auto null_rpc_data = boost::intrusive_ptr< sisl::GenericRpcData >(nullptr);
-                                                        m_state_machine->on_data_received(incoming_buf, null_rpc_data);
-                                                                });
-#endif
+    // FIXME: which builder should we use here, because it will be released in the callback;
+    // by reusing the 1st builder, when the it will also on be released once;
+    auto& builder = (*rreqs)[0]->fb_builder;
+    builder.FinishSizePrefixed(CreateFetchDataRequest(builder, builder.CreateVector(entries)));
+
+    // leader can change, on the receiving side, we need to check if the leader is still the one who originated the
+    // blkid;
+    group_msg_service()
+        ->data_service_request_bidirectional(
+            nuraft_mesg::role_regex::LEADER, FETCH_DATA,
+            sisl::io_blob_list_t{sisl::io_blob{builder.GetBufferPointer(), builder.GetSize(), false /* is_aligned */}})
+        .via(&folly::InlineExecutor::instance())
+        .thenValue([this, rreqs](auto e) {
+            RD_REL_ASSERT(!!e, "Error in fetching data");
+
+            auto raw_data = e.value().cbytes();
+            auto total_size = e.value().size();
+
+            for (auto const& rreq : *rreqs) {
+                auto const data_size = rreq->remote_blkid.blkid.blk_count() * get_blk_size();
+                {
+                    // if data is already received, skip it;
+                    // aquire lock here to avoid two threads are trying to do the same thing;
+                    if (rreq->state.load() & uint32_cast(repl_req_state_t::BLK_ALLOCATED)) {
+                        // very unlikely to arrive here, but if data got received during we fetch, let the data channel
+                        // handle data written;
+                        raw_data += data_size;
+                        total_size -= data_size;
+
+                        // if blk is already allocated, validate if blk is valid and size matches;
+                        RD_DBG_ASSERT(rreq->local_blkid.is_valid(), "Invalid blkid for rreq={}",
+                                      rreq->to_compact_string());
+                        auto const local_size = rreq->local_blkid.blk_count() * get_blk_size();
+                        RD_DBG_ASSERT_EQ(data_size, local_size,
+                                         "Data size mismatch for rreq={} blkid={}, remote size: {}, local size: {}",
+                                         rreq->to_compact_string(), rreq->local_blkid.to_string(), data_size,
+                                         local_size);
+
+                        RD_LOG(INFO,
+                               "Data Channel: Data already received for rreq=[{}], skip and move on to next rreq.",
+                               rreq->to_compact_string());
+                        continue;
+                    } else {
+                        std::unique_lock< std::mutex > lg(rreq->state_mtx);
+                        if (rreq->state.load() & uint32_cast(repl_req_state_t::BLK_ALLOCATED)) { continue; }
+
+                        // if blk is not allocated, we need to allocate it;
+                        rreq->local_blkid =
+                            do_alloc_blk(data_size, m_listener->get_blk_alloc_hints(rreq->header, data_size));
+
+                        rreq->state.fetch_or(uint32_cast(repl_req_state_t::BLK_ALLOCATED));
+                    }
+                }
+
+                auto data = raw_data;
+                if (((uintptr_t)raw_data % data_service().get_align_size()) != 0) {
+                    // Unaligned buffer, create a new buffer and copy the entire buf
+                    rreq->buf_for_unaligned_data =
+                        std::move(sisl::io_blob_safe(data_size, data_service().get_align_size()));
+                    std::memcpy(rreq->buf_for_unaligned_data.bytes(), data, data_size);
+                    data = rreq->buf_for_unaligned_data.cbytes();
+                }
+
+                // Schedule a write and upon completion, mark the data as written.
+                data_service()
+                    .async_write(r_cast< const char* >(data), data_size, rreq->local_blkid)
+                    .thenValue([this, rreq](auto&& err) {
+                        RD_REL_ASSERT(!err,
+                                      "Error in writing data"); // TODO: Find a way to return error to the Listener
+                        rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_WRITTEN));
+                        rreq->data_written_promise.setValue();
+                        RD_LOG(INFO, "Data Channel: Data Write completed rreq=[{}]", rreq->to_compact_string());
+                    });
+
+                // move the raw_data pointer to next rreq's data;
+                raw_data += data_size;
+                total_size -= data_size;
+                rreq->fb_builder.Release();
+            }
+
+            RD_DBG_ASSERT_EQ(total_size, 0, "Total size mismatch, some data is not consumed");
+        });
 }
 
 AsyncNotify RaftReplDev::notify_after_data_written(std::vector< repl_req_ptr_t >* rreqs) {

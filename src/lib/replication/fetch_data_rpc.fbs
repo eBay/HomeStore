@@ -6,7 +6,7 @@ table RequestEntry {
     dsn : uint64;                // Data Sequence number
     user_header: [ubyte];        // User header bytes
     user_key : [ubyte];          // User key data
-    blkid_originator : int32;    // Originally which replica's blkid is this
+    blkid_originator : int32;    // Server_id: Originally which replica's blkid is this
     remote_blkid : [ubyte];      // Serialized remote blkid
 }
 
