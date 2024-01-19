@@ -634,9 +634,21 @@ bool HomeBlks::verify_index_bm() {
     return true;
 }
 
-uint64_t HomeBlks::get_used_size(const VolumePtr& vol) {
+std::map<boost::uuids::uuid, uint64_t> HomeBlks::get_used_size(const VolumePtr& vol) {
     /* Update per volume status */
-   return  vol->get_used_size().used_total_size;
+    std::map<boost::uuids::uuid, uint64_t> utils_map;
+    std::unique_lock< std::recursive_mutex > lg(m_vol_lock);
+    if (vol == nullptr){
+        auto it{m_volume_map.begin()};
+        while (it != m_volume_map.end()) {
+            const VolumePtr& vol{it->second};
+            utils_map[it->first] = vol->get_used_size().used_total_size;
+            ++it;
+        }
+    } else {
+        utils_map[vol->get_uuid()] = vol->get_used_size().used_total_size;
+    }
+   return  utils_map;
 }
 
 sisl::status_response HomeBlks::get_status(const sisl::status_request& request) {
