@@ -24,8 +24,6 @@
 #include <cassert>
 
 namespace homestore {
-using mutex = iomgr::FiberManagerLib::shared_mutex;
-
 static std::pair< uint64_t, uint64_t > get_next_contiguous_set_bits(const sisl::Bitset& bm, uint64_t search_start_bit,
                                                                     uint64_t max_count) {
     uint64_t first_set_bit{sisl::Bitset::npos};
@@ -48,9 +46,7 @@ class RangeScheduler {
 private:
     sisl::Bitset m_existing_keys;
     sisl::Bitset m_working_keys;
-    mutex m_set_lock;
     std::uniform_int_distribution< uint32_t > m_rand_start_key_generator;
-
     std::random_device m_rd;
 
 public:
@@ -58,68 +54,63 @@ public:
         m_rand_start_key_generator = std::uniform_int_distribution< uint32_t >(0, num_keys - 1);
     }
 
-    void remove_keys_from_working(uint32_t s, uint32_t e) {
-        std::unique_lock< mutex > lk(m_set_lock);
-        remove_from_working(s, e);
-    }
+    void remove_keys_from_working(uint32_t s, uint32_t e) { remove_from_working(s, e); }
 
     void put_key(uint32_t key) {
-        std::unique_lock< mutex > lk(m_set_lock);
         add_to_existing(key);
         remove_from_working(key);
     }
 
     void put_keys(uint32_t start_key, uint32_t end_key) {
-        std::unique_lock< mutex > lk(m_set_lock);
         add_to_existing(start_key, end_key);
         remove_from_working(start_key, end_key);
     }
 
     void remove_key(uint32_t key) {
-        std::unique_lock< mutex > lk(m_set_lock);
         remove_from_existing(key);
         remove_from_working(key);
     }
 
     void remove_keys(uint32_t start_key, uint32_t end_key) {
-        std::unique_lock< mutex > lk(m_set_lock);
         remove_from_existing(start_key, end_key);
         remove_from_working(start_key, end_key);
     }
 
     std::pair< uint32_t, uint32_t > pick_random_non_existing_keys(uint32_t max_keys) {
         std::pair< uint32_t, uint32_t > ret;
+        auto max_tries = 10;
         do {
             ret = try_pick_random_non_existing_keys(max_keys);
             if (ret.first != UINT32_MAX) { break; }
-        } while (true);
+        } while (--max_tries);
 
         return ret;
     }
 
     std::pair< uint32_t, uint32_t > pick_random_existing_keys(uint32_t max_keys) {
         std::pair< uint32_t, uint32_t > ret;
+        auto max_tries = 10;
         do {
             ret = try_pick_random_existing_keys(max_keys);
             if (ret.first != UINT32_MAX) { break; }
-        } while (true);
+        } while (--max_tries);
 
         return ret;
     }
 
     std::pair< uint32_t, uint32_t > pick_random_non_working_keys(uint32_t max_keys) {
         std::pair< uint32_t, uint32_t > ret;
+        auto max_tries = 10;
         do {
             ret = try_pick_random_non_working_keys(max_keys);
             if (ret.first != UINT32_MAX) { break; }
-        } while (true);
+        } while (--max_tries);
 
         return ret;
     }
 
 private:
     std::pair< uint32_t, uint32_t > try_pick_random_non_existing_keys(uint32_t max_keys) {
-        std::unique_lock< mutex > lk(m_set_lock);
         if ((m_existing_keys.size() - m_existing_keys.get_set_count()) == 0) {
             throw std::out_of_range("All keys are being worked on right now");
         }
@@ -137,7 +128,6 @@ private:
     }
 
     std::pair< uint32_t, uint32_t > try_pick_random_existing_keys(uint32_t max_keys) {
-        std::unique_lock< mutex > lk(m_set_lock);
         if (m_existing_keys.get_set_count() == 0) {
             DEBUG_ASSERT(false, "Couldn't find one existing keys");
             throw std::out_of_range("Couldn't find one existing keys");
@@ -157,8 +147,6 @@ private:
     }
 
     std::pair< uint32_t, uint32_t > try_pick_random_non_working_keys(uint32_t max_keys) {
-        std::unique_lock< mutex > lk(m_set_lock);
-
         uint32_t const search_start = m_rand_start_key_generator(m_rd);
         auto bb = m_working_keys.get_next_contiguous_n_reset_bits(search_start, max_keys);
 

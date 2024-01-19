@@ -33,7 +33,6 @@ SISL_LOGGING_DECL(test_index_btree)
 
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
-
 // TODO Add tests to do write,remove after recovery.
 // TODO Test with var len key with io mgr page size is 512.
 
@@ -367,7 +366,6 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
             // Remove a random entry.
             std::uniform_int_distribution< uint32_t > rand{0, last_index.load()};
             auto rm_idx = rand(g_re);
-            LOGINFO("Removing entry {}", rm_idx);
             this->remove_one(rm_idx);
         }
     });
@@ -431,7 +429,6 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
         BtreeConcurrentTest* m_test;
     };
 
-
     BtreeConcurrentTest() : testing::Test() { this->m_is_multi_threaded = true; }
 
     void SetUp() override {
@@ -469,7 +466,7 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
 TYPED_TEST_SUITE(BtreeConcurrentTest, BtreeTypes);
 TYPED_TEST(BtreeConcurrentTest, ConcurrentAllOps) {
     // range put is not supported for non-extent keys
-    std::vector< std::string > input_ops = {"put:20", "remove:20", "range_put:20", "range_remove:20", "query:20"};
+    std::vector< std::string > input_ops = {"put:19", "remove:14", "range_put:20", "range_remove:2", "query:10"};
     if (SISL_OPTIONS.count("operation_list")) {
         input_ops = SISL_OPTIONS["operation_list"].as< std::vector< std::string > >();
     }

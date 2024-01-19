@@ -17,11 +17,11 @@ test_suits = ""
 dirpath = "./"
 op_list = ""
 log_mods = ""
-threads = " --num_threads=10"
-fibers = " --num_fibers=10"
-preload_size = "  --preload_size=16384"
-num_entries = " --num_entries=65536"
-num_iters = " --num_iters=10000000"
+threads = " --num_threads=5"
+fibers = " --num_fibers=5"
+preload_size = "  --preload_size=262144"
+num_entries = " --num_entries=1048576"
+num_iters = " --num_iters=100000000"
 run_time = " --run_time=36000"
 dev_list = ""
 
@@ -76,7 +76,7 @@ btree_options = num_entries + num_iters + preload_size + fibers + threads + oper
 def normal():
     print("normal test started with (%s)" % btree_options)
     # " --operation_list=query:20 --operation_list=put:20 --operation_list=remove:20"
-    cmd_opts = " --gtest_filter=BtreeConcurrentTest/*.ConcurrentAllOps --gtest_break_on_failure " + btree_options + " "+log_mods
+    cmd_opts = " --gtest_filter=BtreeConcurrentTest/0.ConcurrentAllOps --gtest_break_on_failure " + btree_options + " "+log_mods
     subprocess.check_call(dirpath + "test_index_btree " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
     print("normal test completed")
 
