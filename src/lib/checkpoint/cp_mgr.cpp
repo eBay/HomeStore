@@ -275,7 +275,7 @@ void CPManager::start_cp_thread() {
     auto ctx = std::make_shared< Context >();
 
     // Start a reactor with 9 fibers (8 for sync io)
-    iomanager.create_reactor("cp_io", iomgr::INTERRUPT_LOOP, 8u, [this, &ctx](bool is_started) {
+    iomanager.create_reactor("cp_io", iomgr::INTERRUPT_LOOP, 8u, [this, ctx](bool is_started) {
         if (is_started) {
             {
                 std::unique_lock< std::mutex > lk{ctx->mtx};

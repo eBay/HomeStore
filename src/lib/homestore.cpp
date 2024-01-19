@@ -240,7 +240,7 @@ void HomeStore::shutdown() {
 
     if (has_index_service()) {
         m_index_service->stop();
-        //        m_index_service.reset();
+        // m_index_service.reset();
     }
 
     if (has_log_service()) {
@@ -257,6 +257,10 @@ void HomeStore::shutdown() {
 
     m_dev_mgr->close_devices();
     m_dev_mgr.reset();
+
+#ifdef _PRERELEASE
+    flip::Flip::instance().stop_rpc_server();
+#endif
 
     HomeStore::reset_instance();
     LOGINFO("Homestore is completed its shutdown");

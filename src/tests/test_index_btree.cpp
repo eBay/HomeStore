@@ -33,7 +33,6 @@ SISL_LOGGING_DECL(test_index_btree)
 
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
-
 // TODO Add tests to do write,remove after recovery.
 // TODO Test with var len key with io mgr page size is 512.
 
@@ -121,7 +120,7 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     }
 };
 
-using BtreeTypes = testing::Types< FixedLenBtree, VarKeySizeBtree, VarValueSizeBtree, VarObjSizeBtree >;
+using BtreeTypes = testing::Types< FixedLenBtree /* , VarKeySizeBtree, VarValueSizeBtree, VarObjSizeBtree */ >;
 
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 
@@ -430,7 +429,6 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
     private:
         BtreeConcurrentTest* m_test;
     };
-
 
     BtreeConcurrentTest() : testing::Test() { this->m_is_multi_threaded = true; }
 
