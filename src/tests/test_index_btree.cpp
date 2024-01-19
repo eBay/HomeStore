@@ -366,7 +366,6 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
             // Remove a random entry.
             std::uniform_int_distribution< uint32_t > rand{0, last_index.load()};
             auto rm_idx = rand(g_re);
-            LOGINFO("Removing entry {}", rm_idx);
             this->remove_one(rm_idx);
         }
     });
@@ -467,7 +466,7 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
 TYPED_TEST_SUITE(BtreeConcurrentTest, BtreeTypes);
 TYPED_TEST(BtreeConcurrentTest, ConcurrentAllOps) {
     // range put is not supported for non-extent keys
-    std::vector< std::string > input_ops = {"put:20", "remove:20", "range_put:20", "range_remove:20", "query:20"};
+    std::vector< std::string > input_ops = {"put:19", "remove:14", "range_put:20", "range_remove:2", "query:10"};
     if (SISL_OPTIONS.count("operation_list")) {
         input_ops = SISL_OPTIONS["operation_list"].as< std::vector< std::string > >();
     }
