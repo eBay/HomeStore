@@ -331,7 +331,7 @@ bool MetaBlkService::scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_
             mblk->hdr.h.compressed = 0;
             mblk->hdr.h.context_sz = read_sz;
         } else {
-            LOGINFO("[type={}], meta blk size check passed!", mblk->hdr.h.type);
+            LOGDEBUG("[type={}], meta blk size check passed!", mblk->hdr.h.type);
         }
 
         // move on to next meta blk;

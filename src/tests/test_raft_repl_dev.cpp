@@ -25,7 +25,7 @@
 #include <folly/init/Init.h>
 #include <folly/executors/GlobalExecutor.h>
 #include <gtest/gtest.h>
-
+#include <iomgr/iomgr_flip.hpp>
 #include <homestore/blk.h>
 #include <homestore/homestore.hpp>
 #include <homestore/homestore_decl.hpp>
@@ -220,10 +220,24 @@ public:
 
     TestReplicatedDB& pick_one_db() { return *dbs_[0]; }
 
+#ifdef _PRERELEASE
+    void set_flip_point(const std::string flip_name) {
+        flip::FlipCondition null_cond;
+        flip::FlipFrequency freq;
+        freq.set_count(1);
+        freq.set_percent(100);
+        m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
+        LOGDEBUG("Flip {} set", flip_name);
+    }
+#endif
+
 private:
     std::vector< std::shared_ptr< TestReplicatedDB > > dbs_;
+#ifdef _PRERELEASE
+    flip::FlipClient m_fc{iomgr_flip::instance()};
+#endif
 };
-
+#if 0
 TEST_F(RaftReplDevTest, All_Append) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
@@ -239,6 +253,30 @@ TEST_F(RaftReplDevTest, All_Append) {
     this->wait_for_all_writes(g_helper->dataset_size());
 
     g_helper->sync_for_verify_start();
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_all_data();
+
+    g_helper->sync_for_cleanup_start();
+}
+#endif
+TEST_F(RaftReplDevTest, All_Append_with_Fetch_Remote_Data) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    set_flip_point("simulate_fetch_remote_data");
+
+    if (g_helper->replica_num() == 0) {
+        g_helper->sync_dataset_size(SISL_OPTIONS["num_io"].as< uint64_t >());
+        auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+        LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
+        g_helper->runner().set_task([this, block_size]() { this->generate_writes(block_size, block_size); });
+        g_helper->runner().execute().get();
+    }
+
+    this->wait_for_all_writes(g_helper->dataset_size());
+
+    g_helper->sync_for_verify_start();
+
     LOGINFO("Validate all data written so far by reading them");
     this->validate_all_data();
 

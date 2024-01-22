@@ -1,7 +1,7 @@
 #include <flatbuffers/idl.h>
 #include <flatbuffers/minireflect.h>
 #include <folly/executors/InlineExecutor.h>
-
+#include <iomgr/iomgr_flip.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <sisl/grpc/generic_service.hpp>
 #include <homestore/blkdata_service.hpp>
@@ -10,6 +10,7 @@
 
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
+// #include "common/homestore_flip.hpp"
 #include "replication/service/raft_repl_service.h"
 #include "replication/repl_dev/raft_repl_dev.h"
 #include "push_data_rpc_generated.h"
@@ -140,7 +141,19 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
            flatbuffers::FlatBufferToString(incoming_buf.cbytes(), FetchDataRequestTypeTable()));
 
     std::vector< sisl::sg_list > sgs_vec;
+
+    struct Context {
+        std::condition_variable cv;
+        std::mutex mtx;
+        size_t outstanding_read_cnt;
+    };
+
+    auto ctx = std::make_shared< Context >();
+    ctx->outstanding_read_cnt = fetch_req->request()->entries()->size();
+
     for (auto const& req : *(fetch_req->request()->entries())) {
+        LOGINFO("Data Channel: FetchData received: lsn={}", req->lsn());
+
         auto const& lsn = req->lsn();
         auto const& term = req->raft_term();
         auto const& dsn = req->dsn();
@@ -168,14 +181,29 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
             // accumulate the sgs for later use (send back to the requester));
             sgs_vec.push_back(sgs);
 
-            async_read(local_blkid, sgs, total_size).thenValue([this, rpc_data](auto&& err) {
+            async_read(local_blkid, sgs, total_size).thenValue([this, &ctx](auto&& err) {
                 RD_REL_ASSERT(!err, "Error in reading data"); // TODO: Find a way to return error to the Listener
+                {
+                    std::unique_lock< std::mutex > lk{ctx->mtx};
+                    --(ctx->outstanding_read_cnt);
+                }
+                ctx->cv.notify_one();
             });
         } else {
             // TODO: if we are not the originator, we need to fetch based on lsn;
             // To be implemented;
+            LOGINFO("I am not the originaltor for the requested blks, originaltor: {}, server_id: {}.", originator,
+                    server_id());
         }
     }
+
+    {
+        // wait for read to complete;
+        std::unique_lock< std::mutex > lk{ctx->mtx};
+        ctx->cv.wait(lk, [&ctx] { return (ctx->outstanding_read_cnt == 0); });
+    }
+
+    LOGINFO("Data Channel: FetchData response prepared: sg_vec.size={}", sgs_vec.size());
 
     // now prepare the io_blob_list to response back to requester;
     nuraft_mesg::io_blob_list_t pkts = sisl::io_blob_list_t{};
@@ -188,6 +216,11 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
 }
 
 void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
+    if (iomgr_flip::instance()->test_flip("simulate_fetch_remote_data")) {
+        RD_LOG(INFO, "Data Channel: Flip is enabled, skip on_push_data_received to simulate fetch remote data");
+        return;
+    }
+
     auto const& incoming_buf = rpc_data->request_blob();
     auto const fb_size =
         flatbuffers::ReadScalar< flatbuffers::uoffset_t >(incoming_buf.cbytes()) + sizeof(flatbuffers::uoffset_t);
@@ -309,6 +342,7 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rre
 
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
     std::vector<::flatbuffers::Offset< RequestEntry > > entries;
+    entries.reserve(rreqs->size());
     for (auto const& rreq : *rreqs) {
         auto& builder = rreq->fb_builder;
         entries.push_back(CreateRequestEntry(builder, rreq->get_lsn(), rreq->term(), rreq->dsn(),
@@ -338,11 +372,12 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
             auto raw_data = e.value().cbytes();
             auto total_size = e.value().size();
 
+            LOGINFO("Data Channel: FetchData response received: size={}", total_size);
+
             for (auto const& rreq : *rreqs) {
                 auto const data_size = rreq->remote_blkid.blkid.blk_count() * get_blk_size();
                 {
                     // if data is already received, skip it;
-                    // aquire lock here to avoid two threads are trying to do the same thing;
                     if (rreq->state.load() & uint32_cast(repl_req_state_t::BLK_ALLOCATED)) {
                         // very unlikely to arrive here, but if data got received during we fetch, let the data channel
                         // handle data written;
@@ -363,6 +398,7 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
                                rreq->to_compact_string());
                         continue;
                     } else {
+                        // aquire lock here to avoid two threads are trying to do the same thing;
                         std::unique_lock< std::mutex > lg(rreq->state_mtx);
                         if (rreq->state.load() & uint32_cast(repl_req_state_t::BLK_ALLOCATED)) { continue; }
 
@@ -397,7 +433,12 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
                 // move the raw_data pointer to next rreq's data;
                 raw_data += data_size;
                 total_size -= data_size;
+
+                // TODO: Should we release it after all reqs are processed?
                 rreq->fb_builder.Release();
+
+                LOGINFO("Data Channel: Data fetched from remote: rreq=[{}], data_size: {}, total_size: {}",
+                        rreq->to_compact_string(), data_size, total_size);
             }
 
             RD_DBG_ASSERT_EQ(total_size, 0, "Total size mismatch, some data is not consumed");
@@ -435,11 +476,14 @@ AsyncNotify RaftReplDev::notify_after_data_written(std::vector< repl_req_ptr_t >
         // if in resync mode, fetch data from remote immediately;
         check_and_fetch_remote_data(rreqs);
     } else {
+        check_and_fetch_remote_data(rreqs);
+#if 0 
         // some data are not in completed state, let's schedule a timer to check it again;
         // we wait for data channel to fill in the data. Still if its not done we trigger a fetch from remote;
         m_wait_data_timer_hdl = iomanager.schedule_thread_timer( // timer wakes up in current thread;
             HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_sec) * 1000 * 1000 * 1000, false /* recurring */,
             nullptr /* cookie */, [this, rreqs](auto) { check_and_fetch_remote_data(rreqs); });
+#endif
     }
 
     // block waiting here until all the futs are ready (data channel filled in and promises are made);
