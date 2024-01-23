@@ -41,6 +41,7 @@ protected:
     std::shared_mutex m_rd_map_mtx;
     std::map< group_id_t, shared< ReplDev > > m_rd_map;
     replica_id_t m_my_uuid;
+    std::vector< std::pair< sisl::byte_view, void* > > m_sb_bufs;
 
 public:
     static std::shared_ptr< GenericReplService > create(cshared< ReplApplication >& repl_app);
@@ -65,6 +66,7 @@ class SoloReplService : public GenericReplService {
 public:
     SoloReplService(cshared< ReplApplication >& repl_app);
     void start() override;
+    void stop() override;
 
     AsyncReplResult< shared< ReplDev > > create_repl_dev(group_id_t group_id,
                                                          std::set< replica_id_t > const& members) override;

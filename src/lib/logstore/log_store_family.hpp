@@ -28,7 +28,7 @@
 #include <string>
 
 #include <sisl/fds/buffer.hpp>
-#include <folly/Synchronized.h>
+#include <folly/futures/SharedPromise.h>
 
 #include <homestore/logstore_service.hpp>
 #include <homestore/logstore/log_store_internal.hpp>
@@ -37,10 +37,10 @@
 namespace homestore {
 struct log_dump_req;
 
-struct logstore_info_t {
-    std::shared_ptr< HomeLogStore > m_log_store;
-    log_store_opened_cb_t m_on_log_store_opened;
+struct logstore_info {
+    std::shared_ptr< HomeLogStore > log_store;
     bool append_mode;
+    folly::SharedPromise< std::shared_ptr< HomeLogStore > > promise{};
 };
 
 struct truncate_req {
@@ -71,8 +71,9 @@ public:
     void start(const bool format, JournalVirtualDev* blk_store);
     void stop();
 
-    std::shared_ptr< HomeLogStore > create_new_log_store(bool append_mode = false);
-    void open_log_store(logstore_id_t store_id, bool append_mode, const log_store_opened_cb_t& on_open_cb);
+    shared< HomeLogStore > create_new_log_store(bool append_mode = false);
+    folly::Future< shared< HomeLogStore > > open_log_store(logstore_id_t store_id, bool append_mode);
+
     bool close_log_store(logstore_id_t store_id) {
         // TODO: Implement this method
         return true;
@@ -101,8 +102,8 @@ private:
     void on_batch_completion(HomeLogStore* log_store, uint32_t nremaining_in_batch, logdev_key flush_ld_key);
 
 private:
-    folly::SharedMutexWritePriority m_store_map_mtx;
-    std::unordered_map< logstore_id_t, logstore_info_t > m_id_logstore_map;
+    mutable folly::SharedMutexWritePriority m_store_map_mtx;
+    std::unordered_map< logstore_id_t, logstore_info > m_id_logstore_map;
     std::unordered_map< logstore_id_t, uint64_t > m_unopened_store_io;
     std::unordered_set< logstore_id_t > m_unopened_store_id;
     std::unordered_map< logstore_id_t, logid_t > m_last_flush_info;

@@ -50,7 +50,9 @@ void CPManager::start(bool first_time_boot) {
         create_first_cp();
         m_sb.write();
     }
+}
 
+void CPManager::start_timer() {
     LOGINFO("cp timer is set to {} usec", HS_DYNAMIC_CONFIG(generic.cp_timer_us));
     m_cp_timer_hdl = iomanager.schedule_global_timer(
         HS_DYNAMIC_CONFIG(generic.cp_timer_us) * 1000, true, nullptr /*cookie*/, iomgr::reactor_regex::all_worker,

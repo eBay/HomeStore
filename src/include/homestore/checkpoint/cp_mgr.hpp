@@ -160,7 +160,13 @@ public:
     CPManager();
     virtual ~CPManager();
 
+    /// @brief Start the CPManager, which creates a first cp session.
+    /// @param first_time_boot
     void start(bool first_time_boot);
+
+    /// @brief Start the cp timer so that periodic cps are started
+    void start_timer();
+
     /// @brief Shutdown the checkpoint manager services. It will not trigger a flush, but cancels any existing
     /// checkpoint session abruptly. If caller needs clean shutdown, then they explicitly needs to trigger cp flush
     /// before calling shutdown.

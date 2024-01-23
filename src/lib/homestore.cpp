@@ -116,19 +116,23 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
     std::call_once(flag1, [this]() {
         m_periodic_logger =
             sisl::logging::CreateCustomLogger("homestore", "_periodic", false, true /* tee_to_stdout_stderr */);
+        sisl::logging::SetLogPattern("[%D %T.%f] [%^%L%$] [%t] %v", m_periodic_logger);
     });
-    sisl::logging::SetLogPattern("[%D %T.%f] [%^%L%$] [%t] %v", m_periodic_logger);
 
     HomeStoreDynamicConfig::init_settings_default();
 
     LOGINFO("Homestore is loading with following services: {}", m_services.list());
     if (has_meta_service()) { m_meta_service = std::make_unique< MetaBlkService >(); }
-    if (has_log_service()) { m_log_service = std::make_unique< LogStoreService >(); }
-    if (has_data_service()) { m_data_service = std::make_unique< BlkDataService >(std::move(s_custom_chunk_selector)); }
     if (has_index_service()) { m_index_service = std::make_unique< IndexService >(std::move(s_index_cbs)); }
     if (has_repl_data_service()) {
         m_repl_service = GenericReplService::create(std::move(s_repl_app));
+        m_log_service = std::make_unique< LogStoreService >();
         m_data_service = std::make_unique< BlkDataService >(std::move(s_custom_chunk_selector));
+    } else {
+        if (has_log_service()) { m_log_service = std::make_unique< LogStoreService >(); }
+        if (has_data_service()) {
+            m_data_service = std::make_unique< BlkDataService >(std::move(s_custom_chunk_selector));
+        }
     }
     m_cp_mgr = std::make_unique< CPManager >();
     m_dev_mgr = std::make_unique< DeviceManager >(input.devices, bind_this(HomeStore::create_vdev_cb, 2));
@@ -208,17 +212,18 @@ void HomeStore::do_start() {
 
     if (has_index_service()) { m_index_service->start(); }
 
-    if (has_data_service()) {
-        m_data_service->start();
-    } else if (has_repl_data_service()) {
-        m_data_service->start();
-        s_cast< GenericReplService* >(m_repl_service.get())->start();
+    if (has_repl_data_service()) {
+        s_cast< GenericReplService* >(m_repl_service.get())->start(); // Replservice starts logstore & data service
+    } else {
+        if (has_data_service()) { m_data_service->start(); }
+        if (has_log_service() && inp_params.auto_recovery) {
+            // In case of custom recovery, let consumer starts the recovery and it is consumer module's responsibilities
+            // to start log store
+            m_log_service->start(is_first_time_boot() /* format */);
+        }
     }
 
-    // In case of custom recovery, let consumer starts the recovery and it is consumer module's responsibilities
-    // to start log store
-    if (has_log_service() && inp_params.auto_recovery) { m_log_service->start(is_first_time_boot() /* format */); }
-
+    m_cp_mgr->start_timer();
     m_init_done = true;
 }
 
@@ -234,8 +239,17 @@ void HomeStore::shutdown() {
     m_cp_mgr.reset();
 
     if (has_repl_data_service()) {
+        // Log and Data services are stopped by repl service
         s_cast< GenericReplService* >(m_repl_service.get())->stop();
+        m_log_service.reset();
+        m_data_service.reset();
         m_repl_service.reset();
+    } else {
+        if (has_log_service()) {
+            m_log_service->stop();
+            m_log_service.reset();
+        }
+        if (has_data_service()) { m_data_service.reset(); }
     }
 
     if (has_index_service()) {
@@ -243,17 +257,10 @@ void HomeStore::shutdown() {
         // m_index_service.reset();
     }
 
-    if (has_log_service()) {
-        m_log_service->stop();
-        m_log_service.reset();
-    }
-
     if (has_meta_service()) {
         m_meta_service->stop();
         m_meta_service.reset();
     }
-
-    if (has_data_service()) { m_data_service.reset(); }
 
     m_dev_mgr->close_devices();
     m_dev_mgr.reset();

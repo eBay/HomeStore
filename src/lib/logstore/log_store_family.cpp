@@ -63,7 +63,7 @@ void LogStoreFamily::start(bool format, JournalVirtualDev* blk_store) {
         // Also call the logstore to inform that start/replay is completed.
         if (!format) {
             for (auto& p : m_id_logstore_map) {
-                auto& lstore{p.second.m_log_store};
+                auto& lstore{p.second.log_store};
                 if (lstore && lstore->get_log_replay_done_cb()) {
                     lstore->get_log_replay_done_cb()(lstore, lstore->seq_num() - 1);
                     lstore->truncate(lstore->truncated_upto());
@@ -90,18 +90,25 @@ std::shared_ptr< HomeLogStore > LogStoreFamily::create_new_log_store(bool append
         folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);
         const auto it = m_id_logstore_map.find(store_id);
         HS_REL_ASSERT((it == m_id_logstore_map.end()), "store_id {}-{} already exists", m_family_id, store_id);
-        m_id_logstore_map.insert(std::make_pair<>(store_id, logstore_info_t{lstore, nullptr, append_mode}));
+        m_id_logstore_map.insert(std::pair(store_id, logstore_info{.log_store = lstore, .append_mode = append_mode}));
     }
     LOGINFO("Created log store id {}-{}", m_family_id, store_id);
     return lstore;
 }
 
-void LogStoreFamily::open_log_store(logstore_id_t store_id, bool append_mode, const log_store_opened_cb_t& on_open_cb) {
+folly::Future< shared< HomeLogStore > > LogStoreFamily::open_log_store(logstore_id_t store_id, bool append_mode) {
     folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);
-    const auto it = m_id_logstore_map.find(store_id);
-    HS_REL_ASSERT((it == m_id_logstore_map.end()), "store_id {}-{} already exists", m_family_id, store_id);
-    LOGINFO("Opening log store id {}-{}", m_family_id, store_id);
-    m_id_logstore_map.insert(std::make_pair<>(store_id, logstore_info_t{nullptr, on_open_cb, append_mode}));
+    auto it = m_id_logstore_map.find(store_id);
+    if (it == m_id_logstore_map.end()) {
+        bool happened;
+        std::tie(it, happened) = m_id_logstore_map.insert(std::pair(store_id,
+                                                                    logstore_info{
+                                                                        .log_store = nullptr,
+                                                                        .append_mode = append_mode,
+                                                                    }));
+        HS_REL_ASSERT_EQ(happened, true, "Unable to insert logstore into id_logstore_map");
+    }
+    return it->second.promise.getFuture();
 }
 
 void LogStoreFamily::remove_log_store(logstore_id_t store_id) {
@@ -139,9 +146,10 @@ void LogStoreFamily::device_truncate(const std::shared_ptr< truncate_req >& treq
 
 void LogStoreFamily::on_log_store_found(logstore_id_t store_id, const logstore_superblk& sb) {
     folly::SharedMutexWritePriority::ReadHolder holder(m_store_map_mtx);
-    const auto it = m_id_logstore_map.find(store_id);
+    auto it = m_id_logstore_map.find(store_id);
     if (it == m_id_logstore_map.end()) {
-        LOGERROR("Store Id {}-{} found but not opened yet.", m_family_id, store_id);
+        LOGERROR("Store Id {}-{} found but not opened yet, it will be discarded after logstore is started", m_family_id,
+                 store_id);
         m_unopened_store_id.insert(store_id);
         m_unopened_store_io.insert(std::make_pair<>(store_id, 0));
         return;
@@ -149,9 +157,9 @@ void LogStoreFamily::on_log_store_found(logstore_id_t store_id, const logstore_s
 
     LOGINFO("Found a logstore store_id={}-{} with start seq_num={}, Creating a new HomeLogStore instance", m_family_id,
             store_id, sb.m_first_seq_num);
-    auto& l_info = const_cast< logstore_info_t& >(it->second);
-    l_info.m_log_store = std::make_shared< HomeLogStore >(*this, store_id, l_info.append_mode, sb.m_first_seq_num);
-    if (l_info.m_on_log_store_opened) l_info.m_on_log_store_opened(l_info.m_log_store);
+    logstore_info& info = it->second;
+    info.log_store = std::make_shared< HomeLogStore >(*this, store_id, info.append_mode, sb.m_first_seq_num);
+    info.promise.setValue(info.log_store);
 }
 
 static thread_local std::vector< std::shared_ptr< HomeLogStore > > s_cur_flush_batch_stores;
@@ -185,7 +193,7 @@ void LogStoreFamily::on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, l
             ++unopened_it->second;
             return;
         }
-        log_store = it->second.m_log_store.get();
+        log_store = it->second.log_store.get();
     }
     if (!log_store) { return; }
     log_store->on_log_found(seq_num, ld_key, flush_ld_key, buf);
@@ -228,7 +236,7 @@ logdev_key LogStoreFamily::do_device_truncate(bool dry_run) {
     {
         folly::SharedMutexWritePriority::ReadHolder holder(m_store_map_mtx);
         for (auto& id_logstore : m_id_logstore_map) {
-            auto& store_ptr = id_logstore.second.m_log_store;
+            auto& store_ptr = id_logstore.second.log_store;
             const auto& trunc_info = store_ptr->pre_device_truncation();
 
             if (!trunc_info.pending_dev_truncation && !trunc_info.active_writes_not_part_of_truncation) {
@@ -286,8 +294,8 @@ nlohmann::json LogStoreFamily::dump_log_store(const log_dump_req& dump_req) {
     if (dump_req.log_store == nullptr) {
         folly::SharedMutexWritePriority::ReadHolder holder(m_store_map_mtx);
         for (auto& id_logstore : m_id_logstore_map) {
-            auto store_ptr{id_logstore.second.m_log_store};
-            const std::string id{std::to_string(store_ptr->get_store_id())};
+            auto store_ptr = id_logstore.second.log_store;
+            const std::string id = std::to_string(store_ptr->get_store_id());
             // must use operator= construction as copy construction results in error
             nlohmann::json val = store_ptr->dump_log_store(dump_req);
             json_dump[id] = std::move(val);
@@ -316,7 +324,7 @@ nlohmann::json LogStoreFamily::get_status(int verbosity) const {
     {
         folly::SharedMutexWritePriority::ReadHolder holder(m_store_map_mtx);
         for (const auto& [id, lstore] : m_id_logstore_map) {
-            js["logstore_id_" + std::to_string(id)] = lstore.m_log_store->get_status(verbosity);
+            js["logstore_id_" + std::to_string(id)] = lstore.log_store->get_status(verbosity);
         }
     }
     return js;

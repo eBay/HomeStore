@@ -31,42 +31,42 @@ public:
         return ++s_count;
     }
 
-    superblk(const std::string& meta_name = "") { set_name(meta_name); }
+    superblk(const std::string& sub_name = "") { set_name(sub_name); }
 
     superblk(const superblk&) = delete;
     superblk& operator=(const superblk&) = delete;
 
-    superblk(superblk&& rhs) noexcept
-         : m_meta_mgr_cookie(rhs.m_meta_mgr_cookie)
-           , m_raw_buf(std::move(rhs.m_raw_buf))
-           , m_sb(rhs.m_sb)
-           , m_metablk_name(std::move(rhs.m_metablk_name)) {
-	rhs.m_meta_mgr_cookie = nullptr;
-	rhs.m_sb = nullptr;
+    superblk(superblk&& rhs) noexcept :
+            m_meta_blk(rhs.m_meta_blk),
+            m_raw_buf(std::move(rhs.m_raw_buf)),
+            m_sb(rhs.m_sb),
+            m_meta_sub_name(std::move(rhs.m_meta_sub_name)) {
+        rhs.m_meta_blk = nullptr;
+        rhs.m_sb = nullptr;
     }
 
     superblk& operator=(superblk&& rhs) noexcept {
         if (this != &rhs) {
-            m_meta_mgr_cookie = rhs.m_meta_mgr_cookie;
+            m_meta_blk = rhs.m_meta_blk;
             m_raw_buf = std::move(rhs.m_raw_buf);
             m_sb = rhs.m_sb;
-            m_metablk_name = std::move(rhs.m_metablk_name);
-            rhs.m_meta_mgr_cookie = nullptr;
+            m_meta_sub_name = std::move(rhs.m_meta_sub_name);
+            rhs.m_meta_blk = nullptr;
             rhs.m_sb = nullptr;
-	}
-	return *this;
+        }
+        return *this;
     }
 
-    void set_name(const std::string& meta_name) {
-        if (meta_name.empty()) {
-            m_metablk_name = "meta_blk_" + std::to_string(next_count());
+    void set_name(const std::string& sub_name) {
+        if (sub_name.empty()) {
+            m_meta_sub_name = "meta_blk_" + std::to_string(next_count());
         } else {
-            m_metablk_name = meta_name;
+            m_meta_sub_name = sub_name;
         }
     }
 
-    T* load(const sisl::byte_view& buf, void* meta_cookie) {
-        m_meta_mgr_cookie = voidptr_cast(meta_cookie);
+    T* load(const sisl::byte_view& buf, void* meta_blk) {
+        m_meta_blk = voidptr_cast(meta_blk);
         m_raw_buf = meta_service().is_aligned_buf_needed(buf.size()) ? buf.extract(meta_service().align_size())
                                                                      : buf.extract(0);
         m_sb = r_cast< T* >(m_raw_buf->bytes());
@@ -85,9 +85,9 @@ public:
     }
 
     void destroy() {
-        if (m_meta_mgr_cookie) {
-            meta_service().remove_sub_sb(m_meta_mgr_cookie);
-            m_meta_mgr_cookie = nullptr;
+        if (m_meta_blk) {
+            meta_service().remove_sub_sb(m_meta_blk);
+            m_meta_blk = nullptr;
         }
         m_raw_buf.reset();
         m_sb = nullptr;
@@ -97,10 +97,10 @@ public:
     sisl::byte_array raw_buf() { return m_raw_buf; }
 
     void write() {
-        if (m_meta_mgr_cookie) {
-            meta_service().update_sub_sb(m_raw_buf->cbytes(), m_raw_buf->size(), m_meta_mgr_cookie);
+        if (m_meta_blk) {
+            meta_service().update_sub_sb(m_raw_buf->cbytes(), m_raw_buf->size(), m_meta_blk);
         } else {
-            meta_service().add_sub_sb(m_metablk_name, m_raw_buf->cbytes(), m_raw_buf->size(), m_meta_mgr_cookie);
+            meta_service().add_sub_sb(m_meta_sub_name, m_raw_buf->cbytes(), m_raw_buf->size(), m_meta_blk);
         }
     }
 
@@ -111,17 +111,17 @@ public:
     T& operator*() { return *m_sb; }
 
 private:
-    void* m_meta_mgr_cookie{nullptr};
+    void* m_meta_blk{nullptr};
     sisl::byte_array m_raw_buf;
     T* m_sb{nullptr};
-    std::string m_metablk_name;
+    std::string m_meta_sub_name;
 };
 
 class json_superblk {
 private:
-    void* m_meta_mgr_cookie{nullptr};
+    void* m_meta_blk{nullptr};
     nlohmann::json m_json_sb;
-    std::string m_metablk_name;
+    std::string m_meta_sub_name;
 
 public:
     static uint64_t next_count() {
@@ -129,24 +129,24 @@ public:
         return ++s_count;
     }
 
-    json_superblk(const std::string& meta_name = "") { set_name(meta_name); }
+    json_superblk(const std::string& sub_name = "") { set_name(sub_name); }
 
-    void set_name(const std::string& meta_name) {
-        if (meta_name.empty()) {
-            m_metablk_name = "meta_blk_" + std::to_string(next_count());
+    void set_name(const std::string& sub_name) {
+        if (sub_name.empty()) {
+            m_meta_sub_name = "meta_blk_" + std::to_string(next_count());
         } else {
-            m_metablk_name = meta_name;
+            m_meta_sub_name = sub_name;
         }
     }
 
-    nlohmann::json& load(const sisl::byte_view& buf, void* meta_cookie) {
-        m_meta_mgr_cookie = voidptr_cast(meta_cookie);
+    nlohmann::json& load(const sisl::byte_view& buf, void* meta_blk) {
+        m_meta_blk = voidptr_cast(meta_blk);
         std::string_view const b{c_charptr_cast(buf.bytes()), buf.size()};
 
         try {
             m_json_sb = nlohmann::json::from_msgpack(b);
         } catch (nlohmann::json::exception const& e) {
-            DEBUG_ASSERT(false, "Failed to load superblk for meta_blk={}", m_metablk_name);
+            DEBUG_ASSERT(false, "Failed to load superblk for meta_blk={}", m_meta_sub_name);
             return m_json_sb;
         }
         return m_json_sb;
@@ -155,9 +155,9 @@ public:
     nlohmann::json& create() { return m_json_sb; }
 
     void destroy() {
-        if (m_meta_mgr_cookie) {
-            meta_service().remove_sub_sb(m_meta_mgr_cookie);
-            m_meta_mgr_cookie = nullptr;
+        if (m_meta_blk) {
+            meta_service().remove_sub_sb(m_meta_blk);
+            m_meta_blk = nullptr;
         }
         m_json_sb = nlohmann::json{};
     }
@@ -166,10 +166,10 @@ public:
 
     void write() {
         auto do_write = [this](sisl::blob const& b) {
-            if (m_meta_mgr_cookie) {
-                meta_service().update_sub_sb(b.cbytes(), b.size(), m_meta_mgr_cookie);
+            if (m_meta_blk) {
+                meta_service().update_sub_sb(b.cbytes(), b.size(), m_meta_blk);
             } else {
-                meta_service().add_sub_sb(m_metablk_name, b.cbytes(), b.size(), m_meta_mgr_cookie);
+                meta_service().add_sub_sb(m_meta_sub_name, b.cbytes(), b.size(), m_meta_blk);
             }
         };
 

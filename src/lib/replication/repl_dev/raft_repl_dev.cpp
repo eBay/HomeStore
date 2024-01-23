@@ -38,11 +38,12 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
         }
 
         if (m_rd_sb->is_timeline_consistent) {
-            logstore_service().open_log_store(LogStoreService::CTRL_LOG_FAMILY_IDX, m_rd_sb->free_blks_journal_id,
-                                              false, [this](shared< HomeLogStore > log_store) {
-                                                  m_free_blks_journal = std::move(log_store);
-                                                  m_rd_sb->free_blks_journal_id = m_free_blks_journal->get_store_id();
-                                              });
+            logstore_service()
+                .open_log_store(LogStoreService::CTRL_LOG_FAMILY_IDX, m_rd_sb->free_blks_journal_id, false)
+                .thenValue([this](auto log_store) {
+                    m_free_blks_journal = std::move(log_store);
+                    m_rd_sb->free_blks_journal_id = m_free_blks_journal->get_store_id();
+                });
         }
     } else {
         m_data_journal = std::make_shared< ReplLogStore >(*this, *m_state_machine);
@@ -66,6 +67,18 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
     // m_msg_mgr.bind_data_service_request(FETCH_DATA, m_group_id, bind_this(RaftReplDev::on_fetch_data_received, 2));
 }
 
+bool RaftReplDev::join_group() {
+    auto raft_result =
+        m_msg_mgr.join_group(m_group_id, "homestore_replication",
+                             std::dynamic_pointer_cast< nuraft_mesg::mesg_state_mgr >(shared_from_this()));
+    if (!raft_result) {
+        HS_DBG_ASSERT(false, "Unable to join the group_id={} with error={}", boost::uuids::to_string(m_group_id),
+                      raft_result.error());
+        return false;
+    }
+    return true;
+}
+
 void RaftReplDev::use_config(json_superblk raft_config_sb) { m_raft_config_sb = std::move(raft_config_sb); }
 
 void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
@@ -85,18 +98,29 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
         auto status = data_service().alloc_blks(uint32_cast(rreq->value.size),
                                                 m_listener->get_blk_alloc_hints(rreq->header, rreq->value.size),
                                                 rreq->local_blkid);
-        HS_REL_ASSERT_EQ(status, BlkAllocStatus::SUCCESS);
+        if (status != BlkAllocStatus::SUCCESS) {
+            HS_DBG_ASSERT_EQ(status, BlkAllocStatus::SUCCESS, "Unable to allocate blks");
+            handle_error(rreq, ReplServiceError::NO_SPACE_LEFT);
+            return;
+        }
+        rreq->state.fetch_or(uint32_cast(repl_req_state_t::BLK_ALLOCATED));
 
         // Write the data
         data_service().async_write(rreq->value, rreq->local_blkid).thenValue([this, rreq](auto&& err) {
-            HS_REL_ASSERT(!err, "Error in writing data"); // TODO: Find a way to return error to the Listener
-            rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_WRITTEN));
-            m_state_machine->propose_to_raft(std::move(rreq));
+            if (!err) {
+                rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_WRITTEN));
+                auto raft_status = m_state_machine->propose_to_raft(std::move(rreq));
+                if (raft_status != ReplServiceError::OK) { handle_error(rreq, raft_status); }
+            } else {
+                HS_DBG_ASSERT(false, "Error in writing data");
+                handle_error(rreq, ReplServiceError::DRIVE_WRITE_ERROR);
+            }
         });
     } else {
         RD_LOG(INFO, "Skipping data channel send since value size is 0");
         rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_WRITTEN));
-        m_state_machine->propose_to_raft(std::move(rreq));
+        auto raft_status = m_state_machine->propose_to_raft(std::move(rreq));
+        if (raft_status != ReplServiceError::OK) { handle_error(rreq, raft_status); }
     }
 }
 
@@ -120,13 +144,58 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq) {
 
     group_msg_service()
         ->data_service_request_unidirectional(nuraft_mesg::role_regex::ALL, PUSH_DATA, rreq->pkts)
-        .via(&folly::InlineExecutor::instance())
-        .thenValue([this, rreq = std::move(rreq)](auto e) {
+        .deferValue([this, rreq = std::move(rreq)](auto e) {
+            if (e.hasError()) {
+                RD_LOG(ERROR, "Data Channel: Error in pushing data to all followers: rreq=[{}] error={}",
+                       rreq->to_compact_string(), e.error());
+                handle_error(rreq, RaftReplService::to_repl_error(e.error()));
+                return;
+            }
             // Release the buffer which holds the packets
             RD_LOG(INFO, "Data Channel: Data push completed for rreq=[{}]", rreq->to_compact_string());
             rreq->fb_builder.Release();
             rreq->pkts.clear();
         });
+}
+
+void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err) {
+    if (err == ReplServiceError::OK) { return; }
+
+    auto s = rreq->state.load();
+    if ((s & uint32_cast(repl_req_state_t::ERRORED)) ||
+        !(rreq->state.compare_exchange_strong(s, s | uint32_cast(repl_req_state_t::ERRORED)))) {
+        RD_LOG(INFO, "Raft Channel: Error in processing rreq=[{}] error={} already errored", rreq->to_compact_string(),
+               err);
+        return;
+    }
+
+    // Free the blks which is allocated already
+    RD_LOG(INFO, "Raft Channel: Error in processing rreq=[{}] error={}", rreq->to_compact_string(), err);
+    if (rreq->state.load() & uint32_cast(repl_req_state_t::BLK_ALLOCATED)) {
+        auto blkid = rreq->local_blkid;
+        data_service().async_free_blk(blkid).thenValue([blkid](auto&& err) {
+            HS_LOG_ASSERT(!err, "freeing blkid={} upon error failed, potential to cause blk leak", blkid.to_string());
+        });
+    }
+
+    HS_DBG_ASSERT(!(rreq->state.load() & uint32_cast(repl_req_state_t::LOG_FLUSHED)),
+                  "Unexpected state, received error after log is flushed for rreq=[{}]", rreq->to_compact_string());
+
+    if (rreq->is_proposer) {
+        // Notify the proposer about the error
+        m_listener->on_error(err, rreq->header, rreq->key, rreq);
+        rreq->fb_builder.Release();
+        rreq->pkts.clear();
+    } else {
+        // Complete the response hence proposer can free up its resources
+        rreq->header = sisl::blob{};
+        rreq->key = sisl::blob{};
+        rreq->pkts = sisl::io_blob_list_t{};
+        if (rreq->rpc_data) {
+            rreq->rpc_data->send_response();
+            rreq->rpc_data = nullptr;
+        }
+    }
 }
 
 void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
@@ -171,10 +240,14 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
     data_service()
         .async_write(r_cast< const char* >(data), push_req->data_size(), rreq->local_blkid)
         .thenValue([this, rreq](auto&& err) {
-            RD_REL_ASSERT(!err, "Error in writing data"); // TODO: Find a way to return error to the Listener
-            rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_WRITTEN));
-            rreq->data_written_promise.setValue();
-            RD_LOG(INFO, "Data Channel: Data Write completed rreq=[{}]", rreq->to_compact_string());
+            if (err) {
+                RD_DBG_ASSERT(false, "Error in writing data");
+                handle_error(rreq, ReplServiceError::DRIVE_WRITE_ERROR);
+            } else {
+                rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_WRITTEN));
+                rreq->data_written_promise.setValue();
+                RD_LOG(INFO, "Data Channel: Data Write completed rreq=[{}]", rreq->to_compact_string());
+            }
         });
 }
 
@@ -287,6 +360,16 @@ void RaftReplDev::async_free_blks(int64_t, MultiBlkId const& bid) {
     // TODO: For timeline consistency required, we should retain the blkid that is changed and write that to another
     // journal.
     data_service().async_free_blk(bid);
+}
+
+AsyncReplResult<> RaftReplDev::become_leader() {
+    return m_msg_mgr.become_leader(m_group_id).deferValue([this](auto&& e) {
+        if (e.hasError()) {
+            RD_LOG(ERROR, "Error in becoming leader: {}", e.error());
+            return make_async_error<>(RaftReplService::to_repl_error(e.error()));
+        }
+        return make_async_success<>();
+    });
 }
 
 bool RaftReplDev::is_leader() const { return m_repl_svc_ctx->is_raft_leader(); }
@@ -418,6 +501,8 @@ void RaftReplDev::leave() {
 
 ///////////////////////////////////  Private metohds ////////////////////////////////////
 void RaftReplDev::report_committed(repl_req_ptr_t rreq) {
+    if (rreq->local_blkid.is_valid()) { data_service().commit_blk(rreq->local_blkid); }
+
     auto prev_lsn = m_commit_upto_lsn.exchange(rreq->lsn);
     RD_DBG_ASSERT_GT(rreq->lsn, prev_lsn, "Out of order commit of lsns, it is not expected in RaftReplDev");
 

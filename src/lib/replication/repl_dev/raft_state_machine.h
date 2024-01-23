@@ -108,7 +108,7 @@ public:
     nuraft::ptr< nuraft::snapshot > last_snapshot() override { return nullptr; }
 
     ////////// APIs outside of nuraft::state_machine requirements ////////////////////
-    void propose_to_raft(repl_req_ptr_t rreq);
+    ReplServiceError propose_to_raft(repl_req_ptr_t rreq);
     repl_req_ptr_t transform_journal_entry(nuraft::ptr< nuraft::log_entry >& lentry);
     void link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn);
     repl_req_ptr_t lsn_to_req(int64_t lsn);

@@ -59,6 +59,7 @@ protected:
     struct IPCData {
         bip::interprocess_mutex mtx_;
         bip::interprocess_condition cv_;
+        bip::interprocess_mutex exec_mtx_;
 
         repl_test_phase_t phase_{repl_test_phase_t::REGISTER};
         uint32_t registered_count_{0};
@@ -79,8 +80,10 @@ protected:
             if (count == SISL_OPTIONS["replicas"].as< uint32_t >()) {
                 phase_ = new_phase;
                 cv_.notify_all();
-            } else
+            } else {
                 cv_.wait(lg, [this, new_phase]() { return (phase_ == new_phase); });
+            }
+            count = 0;
         }
     };
 
@@ -123,6 +126,7 @@ public:
     void setup() {
         replica_num_ = SISL_OPTIONS["replica_num"].as< uint16_t >();
         sisl::logging::SetLogger(name_ + std::string("_replica_") + std::to_string(replica_num_));
+        sisl::logging::SetLogPattern("[%D %T%z] [%^%L%$] [%n] [%t] %v");
         auto const num_replicas = SISL_OPTIONS["replicas"].as< uint32_t >();
 
         boost::uuids::string_generator gen;
@@ -149,7 +153,8 @@ public:
 
             for (uint32_t i{1}; i < num_replicas; ++i) {
                 LOGINFO("Spawning Homestore replica={} instance", i);
-                boost::process::child c(argv_[0], "--replica_num", std::to_string(i), proc_grp_);
+                boost::process::child c(argv_[0], "--log_mods", "replication:trace", "--replica_num", std::to_string(i),
+                                        proc_grp_);
                 c.detach();
             }
         } else {
@@ -180,6 +185,27 @@ public:
     void reset_setup() {
         teardown();
         setup();
+    }
+
+    void restart() {
+        test_common::HSTestHelper::start_homestore(
+            name_ + std::to_string(replica_num_),
+            {{HS_SERVICE::REPLICATION, {.repl_app = std::make_unique< TestReplApplication >(*this)}},
+             {HS_SERVICE::LOG_REPLICATED, {}},
+             {HS_SERVICE::LOG_LOCAL, {}}},
+            nullptr, true /* restart */);
+    }
+
+    void restart_one_by_one() {
+        exclusive_replica([&]() {
+            LOGINFO("Restarting Homestore replica={}", replica_num_);
+            test_common::HSTestHelper::start_homestore(
+                name_ + std::to_string(replica_num_),
+                {{HS_SERVICE::REPLICATION, {.repl_app = std::make_unique< TestReplApplication >(*this)}},
+                 {HS_SERVICE::LOG_REPLICATED, {}},
+                 {HS_SERVICE::LOG_LOCAL, {}}},
+                nullptr, true /* restart */);
+        });
     }
 
     uint16_t replica_num() const { return replica_num_; }
@@ -222,11 +248,23 @@ public:
         return listener;
     }
 
+    void unregister_listener(shared< ReplDevListener > listener) {
+        {
+            std::unique_lock lg(groups_mtx_);
+            repl_groups_.erase(listener->repl_dev()->group_id());
+        }
+    }
+
     void sync_for_test_start() { ipc_data_->sync_for_test_start(); }
     void sync_for_verify_start() { ipc_data_->sync_for_verify_start(); }
     void sync_for_cleanup_start() { ipc_data_->sync_for_cleanup_start(); }
     void sync_dataset_size(uint64_t dataset_size) { ipc_data_->test_dataset_size_ = dataset_size; }
     uint64_t dataset_size() const { return ipc_data_->test_dataset_size_; }
+
+    void exclusive_replica(std::function< void() > const& f) {
+        std::unique_lock< bip::interprocess_mutex > lg(ipc_data_->exec_mtx_);
+        f();
+    }
 
     void check_and_kill(int port) {
         std::string command = "lsof -t -i:" + std::to_string(port);
