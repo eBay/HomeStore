@@ -81,8 +81,8 @@ void RaftReplService::start() {
         .token_client_ = std::dynamic_pointer_cast< sisl::GrpcTokenClient >(ioenvironment.get_token_client())};
     m_msg_mgr = nuraft_mesg::init_messaging(params, weak_from_this(), true /* with_data_channel */);
 
-    LOGINFOMOD(replication, "Starting RaftReplService with server_uuid={} port={}",
-               boost::uuids::to_string(params.server_uuid_), params.mesg_port_);
+    LOGINFO("Starting RaftReplService with server_uuid={} port={}", boost::uuids::to_string(params.server_uuid_),
+            params.mesg_port_);
 
     // Step 2: Register all RAFT parameters. At the end of this step, raft is ready to be created/join group
     auto r_params = nuraft::raft_params()

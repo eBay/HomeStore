@@ -125,7 +125,6 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
     if (has_meta_service()) { m_meta_service = std::make_unique< MetaBlkService >(); }
     if (has_index_service()) { m_index_service = std::make_unique< IndexService >(std::move(s_index_cbs)); }
     if (has_repl_data_service()) {
-        m_repl_service = GenericReplService::create(std::move(s_repl_app));
         m_log_service = std::make_unique< LogStoreService >();
         m_data_service = std::make_unique< BlkDataService >(std::move(s_custom_chunk_selector));
     } else {
@@ -195,6 +194,11 @@ void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format
 }
 
 void HomeStore::do_start() {
+    // when coming here:
+    // 1 if this is the first_time_boot, , the repl app already gets its uuid from upper layer
+    // 2 if this is not the first_time_boot, the repl app already gets its uuid from the metaservice
+    // now , we can safely initialize GenericReplService , which will get a correct uuid through get_my_repl_uuid()
+    if (has_repl_data_service()) m_repl_service = GenericReplService::create(std::move(s_repl_app));
     const auto& inp_params = HomeStoreStaticConfig::instance().input;
 
     uint64_t cache_size = resource_mgr().get_cache_size();
