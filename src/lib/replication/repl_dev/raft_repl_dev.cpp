@@ -137,10 +137,7 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
     auto const& incoming_buf = rpc_data->request_blob();
     auto fetch_req = GetSizePrefixedFetchData(incoming_buf.cbytes());
 
-    LOGINFO("Data Channel: FetchData received: fetch_req.size={}", fetch_req->request()->entries()->size());
-
-    // RD_LOG(INFO, "Data Channel: FetchData received: {}", flatbuffers::FlatBufferToString(incoming_buf.cbytes(),
-    // FetchDataRequestTypeTable()));
+    RD_LOG(INFO, "Data Channel: FetchData received: fetch_req.size={}", fetch_req->request()->entries()->size());
 
     std::vector< sisl::sg_list > sgs_vec;
 
@@ -154,7 +151,7 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
     ctx->outstanding_read_cnt = fetch_req->request()->entries()->size();
 
     for (auto const& req : *(fetch_req->request()->entries())) {
-        LOGINFO("Data Channel: FetchData received: lsn={}", req->lsn());
+        RD_LOG(INFO, "Data Channel: FetchData received: lsn={}", req->lsn());
 
         auto const& lsn = req->lsn();
         auto const& term = req->raft_term();
@@ -171,8 +168,6 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
 
             // convert remote_blkid serialized data to local blkid
             local_blkid.deserialize(sisl::blob{remote_blkid->Data(), remote_blkid->size()}, true /* copy */);
-
-            LOGINFO("local_blkid: {}.", local_blkid.to_string());
 
             // prepare the sgs data buffer to read into;
             auto const total_size = local_blkid.blk_count() * get_blk_size();
@@ -199,8 +194,8 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
         } else {
             // TODO: if we are not the originator, we need to fetch based on lsn;
             // To be implemented;
-            LOGINFO("I am not the originaltor for the requested blks, originaltor: {}, server_id: {}.", originator,
-                    server_id());
+            RD_LOG(INFO, "I am not the originaltor for the requested blks, originaltor: {}, server_id: {}.", originator,
+                   server_id());
         }
     }
 
@@ -209,8 +204,6 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
         std::unique_lock< std::mutex > lk{ctx->mtx};
         ctx->cv.wait(lk, [&ctx] { return (ctx->outstanding_read_cnt == 0); });
     }
-
-    LOGINFO("Data Channel: FetchData response prepared: sg_vec.size={}", sgs_vec.size());
 
     // now prepare the io_blob_list to response back to requester;
     nuraft_mesg::io_blob_list_t pkts = sisl::io_blob_list_t{};
@@ -247,15 +240,12 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
         return;
     }
 
-    LOGINFO("Data Channel: before follower_create_req, server_id={}, term={}, dsn={}", push_req->issuer_replica_id(),
-            push_req->raft_term(), push_req->dsn());
     auto rreq = follower_create_req(
         repl_key{.server_id = push_req->issuer_replica_id(), .term = push_req->raft_term(), .dsn = push_req->dsn()},
         header, key, push_req->data_size());
     rreq->rpc_data = rpc_data;
 
-    // RD_LOG(INFO, "Data Channel: Received data rreq=[{}]", rreq->to_compact_string());
-    LOGINFO("Data Channel: Received data rreq=[{}]", rreq->to_compact_string());
+    RD_LOG(INFO, "Data Channel: Received data rreq=[{}]", rreq->to_compact_string());
 
     if (rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_RECEIVED)) &
         uint32_cast(repl_req_state_t::DATA_RECEIVED)) {
@@ -313,8 +303,7 @@ repl_req_ptr_t RaftReplDev::follower_create_req(repl_key const& rkey, sisl::blob
             RD_REL_ASSERT(blob_equals(user_header, rreq->header), "User header mismatch for repl_key={}",
                           rkey.to_string());
             RD_REL_ASSERT(blob_equals(user_key, rreq->key), "User key mismatch for repl_key={}", rkey.to_string());
-            // RD_LOG(INFO, "Repl_key=[{}] already received  ", rkey.to_string());
-            LOGINFO("Repl_key=[{}] already received  ", rkey.to_string());
+            RD_LOG(INFO, "Repl_key=[{}] already received  ", rkey.to_string());
             return rreq;
         }
     }
@@ -329,14 +318,12 @@ repl_req_ptr_t RaftReplDev::follower_create_req(repl_key const& rkey, sisl::blob
     rreq->local_blkid = do_alloc_blk(data_size, m_listener->get_blk_alloc_hints(user_header, data_size));
     rreq->state.fetch_or(uint32_cast(repl_req_state_t::BLK_ALLOCATED));
 
-    LOGINFO("in follower_create_req: rreq={}, addr={}", rreq->to_compact_string(),
-            reinterpret_cast< uintptr_t >(rreq.get()));
+    RD_LOG(INFO, "in follower_create_req: rreq={}, addr={}", rreq->to_compact_string(),
+           reinterpret_cast< uintptr_t >(rreq.get()));
     return rreq;
 }
 
 void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rreqs) {
-    LOGINFO("Data Channel: Checking if data is already received for rreqs.size={}", rreqs->size());
-
     // Pop any entries that are already completed - from the entries list as well as from map
     rreqs->erase(std::remove_if(
                      rreqs->begin(), rreqs->end(),
@@ -355,7 +342,6 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rre
                      }),
                  rreqs->end());
 
-    LOGINFO("Data Channel: Checking if data is already received for rreqs.size={}", rreqs->size());
     if (rreqs->size()) {
         // Some data not completed yet, let's fetch from remote;
         fetch_data_from_remote(rreqs);
@@ -368,7 +354,6 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
 
-    LOGINFO("Data Channel: Checking if data is already received for rreqs.size={}", rreqs->size());
     for (auto const& rreq : *rreqs) {
         entries.push_back(CreateRequestEntry(*builder, rreq->get_lsn(), rreq->term(), rreq->dsn(),
                                              builder->CreateVector(rreq->header.cbytes(), rreq->header.size()),
@@ -376,9 +361,6 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
                                              rreq->remote_blkid.server_id /* blkid_originator */,
                                              builder->CreateVector(rreq->remote_blkid.blkid.serialize().cbytes(),
                                                                    rreq->remote_blkid.blkid.serialized_size())));
-        // RD_LOG(INFO, "Data Channel: Fetching data from remote: rreq=[{}]", rreq->to_compact_string());
-        LOGINFO("Data Channel: Fetching data from remote: rreq=[{}], addr={}", rreq->to_compact_string(),
-                reinterpret_cast< uintptr_t >(rreq.get()));
     }
 
     builder->FinishSizePrefixed(
@@ -397,8 +379,6 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
 
             auto raw_data = e.value().cbytes();
             auto total_size = e.value().size();
-
-            LOGINFO("Data Channel: FetchData response received: size={}", total_size);
 
             for (auto const& rreq : *rreqs) {
                 auto const data_size = rreq->remote_blkid.blkid.blk_count() * get_blk_size();
@@ -466,7 +446,8 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
                 raw_data += data_size;
                 total_size -= data_size;
 
-                LOGINFO(
+                RD_LOG(
+                    INFO,
                     "Data Channel: Data fetched from remote: rreq=[{}], data_size: {}, total_size: {}, local_blkid: {}",
                     rreq->to_compact_string(), data_size, total_size, rreq->local_blkid.to_string());
             }
@@ -481,7 +462,6 @@ AsyncNotify RaftReplDev::notify_after_data_written(std::vector< repl_req_ptr_t >
     std::vector< folly::SemiFuture< folly::Unit > > futs;
     futs.reserve(rreqs->size());
 
-    LOGINFO("Data Channel: Checking if data is already received for rreqs.size={}", rreqs->size());
     // Pop any entries that are already completed - from the entries list as well as from map
     rreqs->erase(std::remove_if(
                      rreqs->begin(), rreqs->end(),
@@ -501,7 +481,6 @@ AsyncNotify RaftReplDev::notify_after_data_written(std::vector< repl_req_ptr_t >
                      }),
                  rreqs->end());
 
-    LOGINFO("Data Channel: Checking if data is already received for rreqs.size={}", rreqs->size());
     // All the entries are done already, no need to wait
     if (rreqs->size() == 0) { return folly::makeFuture< folly::Unit >(folly::Unit{}); }
 
