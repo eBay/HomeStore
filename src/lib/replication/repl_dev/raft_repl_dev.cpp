@@ -137,8 +137,10 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
     auto const& incoming_buf = rpc_data->request_blob();
     auto fetch_req = GetSizePrefixedFetchData(incoming_buf.cbytes());
 
-    RD_LOG(INFO, "Data Channel: FetchData received: {}",
-           flatbuffers::FlatBufferToString(incoming_buf.cbytes(), FetchDataRequestTypeTable()));
+    LOGINFO("Data Channel: FetchData received: fetch_req.size={}", fetch_req->request()->entries()->size());
+
+    // RD_LOG(INFO, "Data Channel: FetchData received: {}", flatbuffers::FlatBufferToString(incoming_buf.cbytes(),
+    // FetchDataRequestTypeTable()));
 
     std::vector< sisl::sg_list > sgs_vec;
 
@@ -170,13 +172,18 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
             // convert remote_blkid serialized data to local blkid
             local_blkid.deserialize(sisl::blob{remote_blkid->Data(), remote_blkid->size()}, true /* copy */);
 
+            LOGINFO("local_blkid: {}.", local_blkid.to_string());
+
             // prepare the sgs data buffer to read into;
             auto const total_size = local_blkid.blk_count() * get_blk_size();
             sisl::sg_list sgs;
+#if 0
             shared< uint8_t > iov_base(iomanager.iobuf_alloc(get_blk_size(), total_size),
                                        [](uint8_t* buf) { iomanager.iobuf_free(buf); });
+#endif
             sgs.size = total_size;
-            sgs.iovs.emplace_back(iovec{.iov_base = iov_base.get(), .iov_len = total_size});
+            sgs.iovs.emplace_back(
+                iovec{.iov_base = iomanager.iobuf_alloc(get_blk_size(), total_size), .iov_len = total_size});
 
             // accumulate the sgs for later use (send back to the requester));
             sgs_vec.push_back(sgs);
@@ -213,39 +220,48 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
     }
 
     group_msg_service()->send_data_service_response(pkts, rpc_data);
+
+    for (auto const& sgs : sgs_vec) {
+        for (auto const& iov : sgs.iovs) {
+            iomanager.iobuf_free(reinterpret_cast< uint8_t* >(iov.iov_base));
+        }
+    }
 }
 
 void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
-    if (iomgr_flip::instance()->test_flip("simulate_fetch_remote_data")) {
-        RD_LOG(INFO, "Data Channel: Flip is enabled, skip on_push_data_received to simulate fetch remote data");
-        return;
-    }
-
     auto const& incoming_buf = rpc_data->request_blob();
     auto const fb_size =
         flatbuffers::ReadScalar< flatbuffers::uoffset_t >(incoming_buf.cbytes()) + sizeof(flatbuffers::uoffset_t);
     auto push_req = GetSizePrefixedPushDataRequest(incoming_buf.cbytes());
     sisl::blob header = sisl::blob{push_req->user_header()->Data(), push_req->user_header()->size()};
     sisl::blob key = sisl::blob{push_req->user_key()->Data(), push_req->user_key()->size()};
-
+#if 0
     RD_LOG(TRACE, "PushData received on data channel: {}",
            flatbuffers::FlatBufferToString(incoming_buf.cbytes() + sizeof(flatbuffers::uoffset_t),
                                            PushDataRequestTypeTable()));
+#endif
+    if (iomgr_flip::instance()->test_flip("simulate_fetch_remote_data")) {
+        LOGINFO("Data Channel: Flip is enabled, skip on_push_data_received to simulate fetch remote data, "
+                "server_id={}, term={}, dsn={}",
+                push_req->issuer_replica_id(), push_req->raft_term(), push_req->dsn());
+        return;
+    }
 
+    LOGINFO("Data Channel: before follower_create_req, server_id={}, term={}, dsn={}", push_req->issuer_replica_id(),
+            push_req->raft_term(), push_req->dsn());
     auto rreq = follower_create_req(
         repl_key{.server_id = push_req->issuer_replica_id(), .term = push_req->raft_term(), .dsn = push_req->dsn()},
         header, key, push_req->data_size());
     rreq->rpc_data = rpc_data;
 
-    RD_LOG(INFO, "Data Channel: Received data rreq=[{}]", rreq->to_compact_string());
+    // RD_LOG(INFO, "Data Channel: Received data rreq=[{}]", rreq->to_compact_string());
+    LOGINFO("Data Channel: Received data rreq=[{}]", rreq->to_compact_string());
 
-    // if (rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_RECEIVED)) &
-    if (rreq->state.load() & (uint32_cast(repl_req_state_t::DATA_RECEIVED))) {
+    if (rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_RECEIVED)) &
+        uint32_cast(repl_req_state_t::DATA_RECEIVED)) {
         // We already received the data before, just ignore this data
         // TODO: Should we forcibly overwrite the data with new data?
         return;
-    } else {
-        rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_RECEIVED));
     }
 
     // Get the data portion from the buffer
@@ -297,7 +313,8 @@ repl_req_ptr_t RaftReplDev::follower_create_req(repl_key const& rkey, sisl::blob
             RD_REL_ASSERT(blob_equals(user_header, rreq->header), "User header mismatch for repl_key={}",
                           rkey.to_string());
             RD_REL_ASSERT(blob_equals(user_key, rreq->key), "User key mismatch for repl_key={}", rkey.to_string());
-            RD_LOG(INFO, "Repl_key=[{}] already received  ", rkey.to_string());
+            // RD_LOG(INFO, "Repl_key=[{}] already received  ", rkey.to_string());
+            LOGINFO("Repl_key=[{}] already received  ", rkey.to_string());
             return rreq;
         }
     }
@@ -312,10 +329,14 @@ repl_req_ptr_t RaftReplDev::follower_create_req(repl_key const& rkey, sisl::blob
     rreq->local_blkid = do_alloc_blk(data_size, m_listener->get_blk_alloc_hints(user_header, data_size));
     rreq->state.fetch_or(uint32_cast(repl_req_state_t::BLK_ALLOCATED));
 
+    LOGINFO("in follower_create_req: rreq={}, addr={}", rreq->to_compact_string(),
+            reinterpret_cast< uintptr_t >(rreq.get()));
     return rreq;
 }
 
 void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rreqs) {
+    LOGINFO("Data Channel: Checking if data is already received for rreqs.size={}", rreqs->size());
+
     // Pop any entries that are already completed - from the entries list as well as from map
     rreqs->erase(std::remove_if(
                      rreqs->begin(), rreqs->end(),
@@ -334,6 +355,7 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rre
                      }),
                  rreqs->end());
 
+    LOGINFO("Data Channel: Checking if data is already received for rreqs.size={}", rreqs->size());
     if (rreqs->size()) {
         // Some data not completed yet, let's fetch from remote;
         fetch_data_from_remote(rreqs);
@@ -343,30 +365,34 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rre
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
     std::vector<::flatbuffers::Offset< RequestEntry > > entries;
     entries.reserve(rreqs->size());
+
+    shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
+
+    LOGINFO("Data Channel: Checking if data is already received for rreqs.size={}", rreqs->size());
     for (auto const& rreq : *rreqs) {
-        auto& builder = rreq->fb_builder;
-        entries.push_back(CreateRequestEntry(builder, rreq->get_lsn(), rreq->term(), rreq->dsn(),
-                                             builder.CreateVector(rreq->header.cbytes(), rreq->header.size()),
-                                             builder.CreateVector(rreq->key.cbytes(), rreq->key.size()),
+        entries.push_back(CreateRequestEntry(*builder, rreq->get_lsn(), rreq->term(), rreq->dsn(),
+                                             builder->CreateVector(rreq->header.cbytes(), rreq->header.size()),
+                                             builder->CreateVector(rreq->key.cbytes(), rreq->key.size()),
                                              rreq->remote_blkid.server_id /* blkid_originator */,
-                                             builder.CreateVector(rreq->remote_blkid.blkid.serialize().cbytes(),
-                                                                  rreq->remote_blkid.blkid.serialized_size())));
-        RD_LOG(INFO, "Data Channel: Fetching data from remote: rreq=[{}]", rreq->to_compact_string());
+                                             builder->CreateVector(rreq->remote_blkid.blkid.serialize().cbytes(),
+                                                                   rreq->remote_blkid.blkid.serialized_size())));
+        // RD_LOG(INFO, "Data Channel: Fetching data from remote: rreq=[{}]", rreq->to_compact_string());
+        LOGINFO("Data Channel: Fetching data from remote: rreq=[{}], addr={}", rreq->to_compact_string(),
+                reinterpret_cast< uintptr_t >(rreq.get()));
     }
 
-    // FIXME: which builder should we use here, because it will be released in the callback;
-    // by reusing the 1st builder, when the it will also on be released once;
-    auto& builder = (*rreqs)[0]->fb_builder;
-    builder.FinishSizePrefixed(CreateFetchDataRequest(builder, builder.CreateVector(entries)));
+    builder->FinishSizePrefixed(
+        CreateFetchData(*builder, CreateFetchDataRequest(*builder, builder->CreateVector(entries))));
 
     // leader can change, on the receiving side, we need to check if the leader is still the one who originated the
     // blkid;
     group_msg_service()
         ->data_service_request_bidirectional(
             nuraft_mesg::role_regex::LEADER, FETCH_DATA,
-            sisl::io_blob_list_t{sisl::io_blob{builder.GetBufferPointer(), builder.GetSize(), false /* is_aligned */}})
+            sisl::io_blob_list_t{
+                sisl::io_blob{builder->GetBufferPointer(), builder->GetSize(), false /* is_aligned */}})
         .via(&folly::InlineExecutor::instance())
-        .thenValue([this, rreqs](auto e) {
+        .thenValue([this, builder, rreqs](auto e) {
             RD_REL_ASSERT(!!e, "Error in fetching data");
 
             auto raw_data = e.value().cbytes();
@@ -376,14 +402,27 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
 
             for (auto const& rreq : *rreqs) {
                 auto const data_size = rreq->remote_blkid.blkid.blk_count() * get_blk_size();
-                {
-                    // if data is already received, skip it;
-                    if (rreq->state.load() & uint32_cast(repl_req_state_t::BLK_ALLOCATED)) {
-                        // very unlikely to arrive here, but if data got received during we fetch, let the data channel
-                        // handle data written;
-                        raw_data += data_size;
-                        total_size -= data_size;
+                // if data is already received, skip it because someone is already doing the write;
+                if (rreq->state.load() & uint32_cast(repl_req_state_t::DATA_RECEIVED)) {
+                    // very unlikely to arrive here, but if data got received during we fetch, let the data channel
+                    // handle data written;
+                    raw_data += data_size;
+                    total_size -= data_size;
 
+                    // if blk is already allocated, validate if blk is valid and size matches;
+                    RD_DBG_ASSERT(rreq->local_blkid.is_valid(), "Invalid blkid for rreq={}", rreq->to_compact_string());
+                    auto const local_size = rreq->local_blkid.blk_count() * get_blk_size();
+                    RD_DBG_ASSERT_EQ(data_size, local_size,
+                                     "Data size mismatch for rreq={} blkid={}, remote size: {}, local size: {}",
+                                     rreq->to_compact_string(), rreq->local_blkid.to_string(), data_size, local_size);
+
+                    RD_LOG(INFO, "Data Channel: Data already received for rreq=[{}], skip and move on to next rreq.",
+                           rreq->to_compact_string());
+                    continue;
+                } else {
+                    // aquire lock here to avoid two threads are trying to do the same thing;
+                    std::unique_lock< std::mutex > lg(rreq->state_mtx);
+                    if (rreq->state.load() & uint32_cast(repl_req_state_t::BLK_ALLOCATED)) {
                         // if blk is already allocated, validate if blk is valid and size matches;
                         RD_DBG_ASSERT(rreq->local_blkid.is_valid(), "Invalid blkid for rreq={}",
                                       rreq->to_compact_string());
@@ -392,21 +431,14 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
                                          "Data size mismatch for rreq={} blkid={}, remote size: {}, local size: {}",
                                          rreq->to_compact_string(), rreq->local_blkid.to_string(), data_size,
                                          local_size);
-
-                        RD_LOG(INFO,
-                               "Data Channel: Data already received for rreq=[{}], skip and move on to next rreq.",
-                               rreq->to_compact_string());
-                        continue;
                     } else {
-                        // aquire lock here to avoid two threads are trying to do the same thing;
-                        std::unique_lock< std::mutex > lg(rreq->state_mtx);
-                        if (rreq->state.load() & uint32_cast(repl_req_state_t::BLK_ALLOCATED)) { continue; }
-
                         // if blk is not allocated, we need to allocate it;
                         rreq->local_blkid =
                             do_alloc_blk(data_size, m_listener->get_blk_alloc_hints(rreq->header, data_size));
 
-                        rreq->state.fetch_or(uint32_cast(repl_req_state_t::BLK_ALLOCATED));
+                        // we are about to write the data, so mark both blk allocated and data received;
+                        rreq->state.fetch_or(
+                            uint32_cast(repl_req_state_t::BLK_ALLOCATED | repl_req_state_t::DATA_RECEIVED));
                     }
                 }
 
@@ -434,12 +466,12 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
                 raw_data += data_size;
                 total_size -= data_size;
 
-                // TODO: Should we release it after all reqs are processed?
-                rreq->fb_builder.Release();
-
-                LOGINFO("Data Channel: Data fetched from remote: rreq=[{}], data_size: {}, total_size: {}",
-                        rreq->to_compact_string(), data_size, total_size);
+                LOGINFO(
+                    "Data Channel: Data fetched from remote: rreq=[{}], data_size: {}, total_size: {}, local_blkid: {}",
+                    rreq->to_compact_string(), data_size, total_size, rreq->local_blkid.to_string());
             }
+
+            builder->Release();
 
             RD_DBG_ASSERT_EQ(total_size, 0, "Total size mismatch, some data is not consumed");
         });
@@ -449,6 +481,7 @@ AsyncNotify RaftReplDev::notify_after_data_written(std::vector< repl_req_ptr_t >
     std::vector< folly::SemiFuture< folly::Unit > > futs;
     futs.reserve(rreqs->size());
 
+    LOGINFO("Data Channel: Checking if data is already received for rreqs.size={}", rreqs->size());
     // Pop any entries that are already completed - from the entries list as well as from map
     rreqs->erase(std::remove_if(
                      rreqs->begin(), rreqs->end(),
@@ -468,6 +501,7 @@ AsyncNotify RaftReplDev::notify_after_data_written(std::vector< repl_req_ptr_t >
                      }),
                  rreqs->end());
 
+    LOGINFO("Data Channel: Checking if data is already received for rreqs.size={}", rreqs->size());
     // All the entries are done already, no need to wait
     if (rreqs->size() == 0) { return folly::makeFuture< folly::Unit >(folly::Unit{}); }
 

@@ -15,7 +15,7 @@ table FetchDataRequest {
 }
 
 table ResponseEntry {
-    lsn : [int64];        // LSN of the raft log if known
+    lsn : int64;        // LSN of the raft log if known
     dsn : uint64;         // Data Sequence number
     raft_term : uint64;   // Raft term number
     data_size : uint32;   // Size of the data which is sent as separate non flatbuffer
