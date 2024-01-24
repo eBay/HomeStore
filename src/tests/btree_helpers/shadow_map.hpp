@@ -138,6 +138,21 @@ public:
             func(key, value);
         }
     }
+    std::string to_string() const {
+        std::string result;
+        std::stringstream ss;
+        const int key_width = 20;
+
+        // Format the key-value pairs and insert them into the result string
+        ss << std::left << std::setw(key_width) << "KEY"
+           << " "
+           << "VaLUE" << '\n';
+        foreach ([&](const auto& key, const auto& value) {
+            ss << std::left << std::setw(key_width) << key.to_string() << " " << value.to_string() << '\n';
+        });
+        result = ss.str();
+        return result;
+    }
 
     std::pair< uint32_t, uint32_t > pick_random_non_existing_keys(uint32_t max_keys) {
         do {
@@ -171,5 +186,29 @@ public:
     void remove_keys(uint32_t start_key, uint32_t end_key) {
         std::lock_guard lock{m_mutex};
         m_range_scheduler.remove_keys(start_key, end_key);
+    }
+
+    void save(const std::string& filename) {
+        std::lock_guard lock{m_mutex};
+        std::ofstream file(filename);
+        for (const auto& [key, value] : m_map) {
+            file << key << " " << value << '\n';
+        }
+        file.close();
+    }
+
+    void load(const std::string& filename) {
+        std::lock_guard lock{m_mutex};
+        std::ifstream file(filename);
+        if (file.is_open()) {
+            m_map.clear();
+            K key;
+            V value;
+            while (file >> key >> value) {
+                m_map.emplace(key, std::move(value));
+                m_range_scheduler.put_key(key.key());
+            }
+            file.close();
+        }
     }
 };

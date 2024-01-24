@@ -6,6 +6,8 @@ import os
 import sys
 import getopt
 import sys
+import time
+import random
 
 sys.stdout.flush()
 import requests
@@ -19,8 +21,8 @@ op_list = ""
 log_mods = ""
 threads = " --num_threads=5"
 fibers = " --num_fibers=5"
-preload_size = "  --preload_size=262144"
-num_entries = " --num_entries=1048576"
+preload_size = "  --preload_size=262144" # 256K
+num_entries = " --num_entries=2097152" # 2M
 num_iters = " --num_iters=100000000"
 run_time = " --run_time=36000"
 dev_list = ""
@@ -70,20 +72,54 @@ if bool(dev_list and dev_list.strip()):
     addln_opts += ' --device_list '
     addln_opts += dev_list
 
-btree_options = num_entries + num_iters + preload_size + fibers + threads + operations + run_time + addln_opts
+btree_options = num_entries + num_iters + preload_size + fibers + threads + operations + addln_opts
 
 
-def normal():
-    print("normal test started with (%s)" % btree_options)
+def long_runnig_index():
+    print("normal test started with (%s)" % (btree_options+ " " + run_time))
     # " --operation_list=query:20 --operation_list=put:20 --operation_list=remove:20"
-    cmd_opts = " --gtest_filter=BtreeConcurrentTest/0.ConcurrentAllOps --gtest_break_on_failure " + btree_options + " "+log_mods
+    cmd_opts = "--gtest_filter=BtreeConcurrentTest/0.ConcurrentAllOps --gtest_break_on_failure " + btree_options + " "+log_mods + run_time
     subprocess.check_call(dirpath + "test_index_btree " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    print("Long running test completed")
+
+def function_normal(runtime, cleanup_after_shutdown=False, init_device=False):
+    normal_options = "--gtest_filter=BtreeConcurrentTest/0.ConcurrentAllOps --gtest_break_on_failure " + btree_options + " " + log_mods + " --run_time " + str(runtime)
+    cmd_opts = normal_options + " --cleanup_after_shutdown=" + str(cleanup_after_shutdown) + " --init_device=" + str(init_device)
+    print("normal test started with (%s)" % cmd_opts)
+    subprocess.check_call(dirpath + "test_index_btree " +
+                          cmd_opts, stderr=subprocess.STDOUT, shell=True)
     print("normal test completed")
 
+def function_crash(runtime, cleanup_after_shutdown=False, init_device=False):
+    normal_options ="   --gtest_filter=BtreeConcurrentTest/0.ConcurrentAllOps --gtest_break_on_failure " + btree_options + " "+log_mods +" --enable_crash"
+    cmd_opts = normal_options +" --cleanup_after_shutdown=" + str(cleanup_after_shutdown) + " --init_device="+str(init_device) +" --run_time " + str(runtime)
+    subprocess.check_call(dirpath + "test_index_btree " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
+    print("crash test completed")
+
+def crash_recovery_framework():
+    total_run_time = 30 * 3600
+    normal_run_time = 10 * 60
+    crash_run_time = 10 * 60
+    crash_execution_frequency = 0
+
+    function_normal(normal_run_time, False, True)
+    elapsed_time = normal_run_time
+
+    while elapsed_time <= total_run_time:
+        start_time = time.time()
+        p = random.randint(0, 100) # some distribution
+        if p < crash_execution_frequency:
+             function_crash(crash_run_time, False, False)
+        else:
+            function_normal(min(normal_run_time, total_run_time - elapsed_time), False, False)
+        end_time = time.time()
+        elapsed_time += end_time - start_time
+    function_normal(0, True, False) #cleanup after shutdown
+    print("crash recovery test completed")
 
 def nightly():
-    normal()
-
+    long_runnig_index()
+    # crash_recovery_framework()
 
 # The name of the method to be called is the var test_suits
 eval(f"{test_suits}()")

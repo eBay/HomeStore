@@ -122,6 +122,13 @@ public:
         return os;
     }
 
+    friend std::istream& operator>>(std::istream& is, TestFixedKey& k) {
+        uint64_t key;
+        is >> key;
+        k = TestFixedKey{key};
+        return is;
+    }
+
     bool operator<(const TestFixedKey& o) const { return (compare(o) < 0); }
     bool operator==(const TestFixedKey& other) const { return (compare(other) == 0); }
 
@@ -222,6 +229,13 @@ public:
     friend std::ostream& operator<<(std::ostream& os, const TestVarLenKey& k) {
         os << k.to_string();
         return os;
+    }
+
+    friend std::istream& operator>>(std::istream& is, TestVarLenKey& k) {
+        uint64_t key;
+        is >> key;
+        k = TestVarLenKey{key};
+        return is;
     }
 
     bool operator<(const TestVarLenKey& o) const { return (compare(o) < 0); }
@@ -355,6 +369,15 @@ public:
         os << k.to_string();
         return os;
     }
+
+    friend std::istream& operator>>(std::istream& is, TestIntervalKey& k) {
+        uint32_t m_base;
+        uint32_t m_offset;
+        char dummy;
+        is >> m_base >> dummy >> m_offset;
+        k = TestIntervalKey{m_base, m_offset};
+        return is;
+    }
 };
 
 class TestFixedValue : public BtreeValue {
@@ -388,6 +411,13 @@ public:
     friend std::ostream& operator<<(std::ostream& os, const TestFixedValue& v) {
         os << v.to_string();
         return os;
+    }
+
+    friend std::istream& operator>>(std::istream& is, TestFixedValue& v) {
+        uint32_t value;
+        is >> value;
+        v = TestFixedValue{value};
+        return is;
     }
 
     // This is not mandatory overridden method for BtreeValue, but for testing comparision
@@ -436,6 +466,13 @@ public:
     friend std::ostream& operator<<(std::ostream& os, const TestVarLenValue& v) {
         os << v.to_string();
         return os;
+    }
+
+    friend std::istream& operator>>(std::istream& is, TestVarLenValue& v) {
+        std::string value;
+        is >> value;
+        v = TestVarLenValue{value};
+        return is;
     }
 
     // This is not mandatory overridden method for BtreeValue, but for testing comparision
@@ -487,6 +524,15 @@ public:
     friend std::ostream& operator<<(std::ostream& os, const TestIntervalValue& v) {
         os << v.to_string();
         return os;
+    }
+
+    friend std::istream& operator>>(std::istream& is, TestIntervalValue& v) {
+        uint32_t m_base_val;
+        uint16_t m_offset;
+        char dummy;
+        is >> m_base_val >> dummy >> m_offset;
+        v = TestIntervalValue{m_base_val, m_offset};
+        return is;
     }
 
     ///////////////////////////// Overriding methods of BtreeIntervalValue //////////////////////////

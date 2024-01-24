@@ -180,14 +180,15 @@ public:
                                 bool default_data_svc_alloc_type = true);
 #endif
     static void start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
-                                hs_before_services_starting_cb_t cb = nullptr, bool restart = false) {
+                                hs_before_services_starting_cb_t cb = nullptr, bool fake_restart = false,
+                                bool init_device = true) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
         auto num_fibers = SISL_OPTIONS["num_fibers"].as< uint32_t >();
         auto is_spdk = SISL_OPTIONS["spdk"].as< bool >();
 
-        if (restart) {
+        if (fake_restart) {
             shutdown_homestore(false);
             std::this_thread::sleep_for(std::chrono::seconds{5});
         }
@@ -210,7 +211,7 @@ public:
                 s_dev_names.emplace_back(std::string{"/tmp/" + test_name + "_" + std::to_string(i + 1)});
             }
 
-            if (!restart) { init_files(s_dev_names, dev_size); }
+            if (!fake_restart && init_device) { init_files(s_dev_names, dev_size); }
             for (const auto& fname : s_dev_names) {
                 device_info.emplace_back(std::filesystem::canonical(fname).string(), homestore::HSDevType::Data);
             }
