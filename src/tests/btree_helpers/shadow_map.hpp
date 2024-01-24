@@ -48,7 +48,7 @@ public:
     }
 
     std::pair< K, K > pick_existing_range(const K& start_key, uint32_t max_count) const {
-        std::shared_lock lock{m_mutex};
+        std::lock_guard lock{m_mutex};
         auto const start_it = m_map.lower_bound(start_key);
         auto it = start_it;
         uint32_t count = 0;
@@ -59,12 +59,12 @@ public:
     }
 
     bool exists(const K& key) const {
-        std::shared_lock lock{m_mutex};
+        std::lock_guard lock{m_mutex};
         return m_map.find(key) != m_map.end();
     }
 
     bool exists_in_range(const K& key, uint64_t start_k, uint64_t end_k) const {
-        std::shared_lock lock{m_mutex};
+        std::lock_guard lock{m_mutex};
         const auto itlower = m_map.lower_bound(K{start_k});
         const auto itupper = m_map.upper_bound(K{end_k});
         auto it = itlower;
@@ -76,7 +76,7 @@ public:
     }
 
     uint64_t size() const {
-        std::shared_lock lock{m_mutex};
+        std::lock_guard lock{m_mutex};
         return m_map.size();
     }
 
@@ -87,10 +87,19 @@ public:
     }
 
     void validate_data(const K& key, const V& btree_val) const {
-        std::shared_lock lock{m_mutex};
+        std::lock_guard lock{m_mutex};
         const auto r = m_map.find(key);
         ASSERT_NE(r, m_map.end()) << "Key " << key.to_string() << " is not present in shadow map";
         ASSERT_EQ(btree_val, r->second) << "Found value in btree doesn't return correct data for key=" << r->first;
+    }
+
+    void remove_and_check(const K& key, const V& btree_val) {
+        std::lock_guard lock{m_mutex};
+        const auto r = m_map.find(key);
+        ASSERT_NE(r, m_map.end()) << "Key " << key.to_string() << " is not present in shadow map";
+        ASSERT_EQ(btree_val, r->second) << "Found value in btree doesn't return correct data for key=" << r->first;
+        m_map.erase(key);
+        m_range_scheduler.remove_key(key.key());
     }
 
     void erase(const K& key) {
@@ -101,7 +110,7 @@ public:
 
     void range_erase(const K& start_key, uint32_t count) {
         std::lock_guard lock{m_mutex};
-        auto const it = m_map.lower_bound(start_key);
+        auto it = m_map.lower_bound(start_key);
         uint32_t i{0};
         while ((it != m_map.cend()) && (i++ < count)) {
             it = m_map.erase(it);
@@ -124,25 +133,34 @@ public:
     const std::map< K, V >& map_const() const { return m_map; }
 
     void foreach (std::function< void(K, V) > func) const {
-        std::shared_lock lock{m_mutex};
+        std::lock_guard lock{m_mutex};
         for (const auto& [key, value] : m_map) {
             func(key, value);
         }
     }
 
     std::pair< uint32_t, uint32_t > pick_random_non_existing_keys(uint32_t max_keys) {
-        std::shared_lock lock{m_mutex};
-        return m_range_scheduler.pick_random_non_existing_keys(max_keys);
+        do {
+            std::lock_guard lock{m_mutex};
+            auto ret = m_range_scheduler.pick_random_non_existing_keys(max_keys);
+            if (ret.first != UINT32_MAX) { return ret; }
+        } while (true);
     }
 
     std::pair< uint32_t, uint32_t > pick_random_existing_keys(uint32_t max_keys) {
-        std::shared_lock lock{m_mutex};
-        return m_range_scheduler.pick_random_existing_keys(max_keys);
+        do {
+            std::lock_guard lock{m_mutex};
+            auto ret = m_range_scheduler.pick_random_existing_keys(max_keys);
+            if (ret.first != UINT32_MAX) { return ret; }
+        } while (true);
     }
 
     std::pair< uint32_t, uint32_t > pick_random_non_working_keys(uint32_t max_keys) {
-        std::shared_lock lock{m_mutex};
-        return m_range_scheduler.pick_random_non_working_keys(max_keys);
+        do {
+            std::lock_guard lock{m_mutex};
+            auto ret = m_range_scheduler.pick_random_non_working_keys(max_keys);
+            if (ret.first != UINT32_MAX) { return ret; }
+        } while (true);
     }
 
     void remove_keys_from_working(uint32_t s, uint32_t e) {
