@@ -106,6 +106,8 @@ ENUM(chunk_selector_type_t, uint8_t, // What are the options to select chunk to 
      ALWAYS_CALLER_CONTROLLED        // Expect the caller to always provide the specific chunkid
 );
 
+ENUM(vdev_size_type_t, uint8_t, VDEV_SIZE_STATIC, VDEV_SIZE_DYNAMIC);
+
 ////////////// All structs ///////////////////
 struct dev_info {
     explicit dev_info(std::string name, HSDevType type = HSDevType::Data) : dev_name{std::move(name)}, dev_type{type} {}
@@ -148,7 +150,9 @@ static std::string in_bytes(uint64_t sz) {
 struct hs_format_params {
     float size_pct;
     uint32_t num_chunks{1};
+    uint64_t chunk_size{0};
     uint32_t block_size{0};
+    vdev_size_type_t vdev_size_type{vdev_size_type_t::VDEV_SIZE_STATIC};
     blk_allocator_type_t alloc_type{blk_allocator_type_t::varsize};
     chunk_selector_type_t chunk_sel_type{chunk_selector_type_t::ROUND_ROBIN};
 };
@@ -199,5 +203,4 @@ struct cap_attrs {
 } // namespace homestore
 
 ////////////// Misc ///////////////////
-#define HOMESTORE_LOG_MODS                                                                                             \
-    btree, device, blkalloc, cp, metablk, wbcache, logstore, transient, replication
+#define HOMESTORE_LOG_MODS btree, device, blkalloc, cp, metablk, wbcache, logstore, transient, replication, journalvdev

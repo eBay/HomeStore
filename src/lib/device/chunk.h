@@ -49,7 +49,6 @@ public:
     bool is_busy() const { return m_chunk_info.is_allocated(); }
     uint32_t vdev_id() const { return m_chunk_info.vdev_id; }
     uint16_t chunk_id() const { return static_cast< uint16_t >(m_chunk_info.chunk_id); }
-    uint64_t end_of_chunk() const { return m_chunk_info.end_of_chunk_size; }
     uint32_t pdev_ordinal() const { return m_chunk_info.chunk_ordinal; }
     const uint8_t* user_private() { return &m_chunk_info.user_private[0]; }
     uint32_t stream_id() const { return m_stream_id; }
@@ -62,7 +61,6 @@ public:
     BlkAllocator* blk_allocator_mutable() { return m_blk_allocator.get(); }
 
     ////////////// Setters /////////////////////
-    void update_end_of_chunk(uint64_t end_offset);
     void set_user_private(const sisl::blob& data);
     void set_block_allocator(cshared< BlkAllocator >& blkalloc) { m_blk_allocator = blkalloc; }
     void set_vdev_ordinal(uint32_t vdev_ordinal) { m_vdev_ordinal = vdev_ordinal; }

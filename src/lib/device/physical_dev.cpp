@@ -242,7 +242,7 @@ std::vector< shared< Chunk > > PhysicalDev::create_chunks(const std::vector< uin
             auto ptr = buf;
             for (auto cslot = b.start_bit; cslot < b.start_bit + b.nbits; ++cslot, ++cit, ptr += chunk_info::size) {
                 chunk_info* cinfo = new (ptr) chunk_info();
-                populate_chunk_info(cinfo, vdev_id, size, chunk_ids[cit], cit);
+                populate_chunk_info(cinfo, vdev_id, size, chunk_ids[cit], cit, {});
 
                 auto chunk = std::make_shared< Chunk >(this, *cinfo, cslot);
                 ret_chunks.push_back(chunk);
@@ -271,7 +271,8 @@ std::vector< shared< Chunk > > PhysicalDev::create_chunks(const std::vector< uin
     return ret_chunks;
 }
 
-shared< Chunk > PhysicalDev::create_chunk(uint32_t chunk_id, uint32_t vdev_id, uint64_t size, uint32_t ordinal) {
+shared< Chunk > PhysicalDev::create_chunk(uint32_t chunk_id, uint32_t vdev_id, uint64_t size, uint32_t ordinal,
+                                          const sisl::blob& user_private) {
     std::unique_lock lg{m_chunk_op_mtx};
 
     // We need to alloc a slot to store the chunk_info in the super blk
@@ -285,7 +286,7 @@ shared< Chunk > PhysicalDev::create_chunk(uint32_t chunk_id, uint32_t vdev_id, u
     shared< Chunk > chunk;
 
     try {
-        populate_chunk_info(cinfo, vdev_id, size, chunk_id, ordinal);
+        populate_chunk_info(cinfo, vdev_id, size, chunk_id, ordinal, user_private);
 
         // Locate and write the chunk info in the super blk area
         write_super_block(buf, chunk_info::size, chunk_info_offset_nth(cslot));
@@ -402,7 +403,7 @@ uint64_t PhysicalDev::chunk_info_offset_nth(uint32_t slot) const {
 }
 
 void PhysicalDev::populate_chunk_info(chunk_info* cinfo, uint32_t vdev_id, uint64_t size, uint32_t chunk_id,
-                                      uint32_t ordinal) {
+                                      uint32_t ordinal, const sisl::blob& private_data) {
     // Find the free area for chunk data within between data_start_offset() and data_end_offset()
     auto ival = find_next_chunk_area(size);
     m_chunk_data_area.insert(ival);
@@ -413,6 +414,7 @@ void PhysicalDev::populate_chunk_info(chunk_info* cinfo, uint32_t vdev_id, uint6
     cinfo->chunk_id = chunk_id;
     cinfo->chunk_ordinal = ordinal;
     cinfo->set_allocated();
+    cinfo->set_user_private(private_data);
     cinfo->compute_checksum();
 }
 
