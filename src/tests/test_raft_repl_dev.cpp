@@ -334,7 +334,39 @@ TEST_F(RaftReplDevTest, All_Append_Fetch_Remote_Data) {
     // TODO: seems with filip and fetch remote, the data size is not correct;
     LOGINFO("Validate all data written so far by reading them");
     this->validate_all_data();
+    g_helper->sync_for_cleanup_start();
+}
 
+TEST_F(RaftReplDevTest, All_ReplService) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+    auto repl_dev = dynamic_pointer_cast< RaftReplDev >(pick_one_db().repl_dev());
+    auto group_id = repl_dev->group_id();
+    auto my_id_str = repl_dev->my_replica_id_str();
+
+    auto leader = repl_dev->get_leader_id();
+    ASSERT_TRUE(leader != replica_id_t())
+        << "Error getting leader id for group_id=" << boost::uuids::to_string(group_id).c_str();
+    auto leader_str = boost::uuids::to_string(leader);
+    LOGINFO("Got raft leader {} for group {}", leader_str, group_id);
+
+    if (g_helper->replica_num() == 0) {
+        ASSERT_TRUE(leader_str == my_id_str)
+            << "Leader id " << leader_str.c_str() << " should  equals to my ID " << my_id_str.c_str();
+    } else {
+        ASSERT_TRUE(leader_str != my_id_str) << "I am a follower, Leader id " << leader_str.c_str()
+                                             << " should not equals to my ID " << my_id_str.c_str();
+    }
+
+    auto peers_info = repl_dev->get_replication_status();
+    LOGINFO("Got peers_info size {} for group {}", peers_info.size(), group_id);
+    if (g_helper->replica_num() == 0) {
+        auto const num_replicas = SISL_OPTIONS["replicas"].as< uint32_t >();
+        EXPECT_TRUE(peers_info.size() == num_replicas)
+            << "Expecting peers_info size " << peers_info.size() << " but got " << peers_info.size();
+    } else {
+        EXPECT_TRUE(peers_info.size() == 0) << "Expecting zero length on follower, got " << peers_info.size();
+    }
     g_helper->sync_for_cleanup_start();
 }
 

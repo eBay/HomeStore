@@ -271,6 +271,8 @@ AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, replica_i
     return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
 }
 
+
+
 ///////////////////// RaftReplService CP Callbacks /////////////////////////////
 std::unique_ptr< CPContext > RaftReplServiceCPHandler::on_switchover_cp(CP* cur_cp, CP* new_cp) { return nullptr; }
 

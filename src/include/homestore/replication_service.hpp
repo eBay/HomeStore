@@ -20,6 +20,7 @@ VENUM(repl_impl_type, uint8_t,
       solo             // For single node - no replication
 );
 
+
 class ReplApplication;
 
 class ReplicationService {

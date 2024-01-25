@@ -239,6 +239,13 @@ public:
     /// @return true or false
     virtual bool is_leader() const = 0;
 
+    /// @brief get the leader replica_id of given group
+    virtual const replica_id_t get_leader_id() const = 0;
+
+    /// @brief get replication status. If called on follower member
+    /// this API can return empty result.
+    virtual std::vector<peer_info> get_replication_status() const = 0;
+
     /// @brief Gets the group_id this repldev is working for
     /// @return group_id
     virtual group_id_t group_id() const = 0;

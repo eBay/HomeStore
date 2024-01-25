@@ -65,6 +65,15 @@ using remote_blkid_list_t = folly::small_vector< RemoteBlkId, 4 >;
 using replica_id_t = uuid_t;
 using group_id_t = uuid_t;
 
+struct peer_info {
+    // Peer ID.
+    replica_id_t id_;
+    // The last replication index that the peer has, from this server's point of view.
+    uint64_t replication_idx_;
+    // The elapsed time since the last successful response from this peer, set to 0 on leader
+    uint64_t last_succ_resp_us_;
+};
+
 } // namespace homestore
 
 // hash function definitions
