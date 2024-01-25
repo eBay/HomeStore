@@ -8,8 +8,6 @@ pipeline {
         CONAN_USER = 'oss'
         TARGET_BRANCH = 'master'
         STABLE_BRANCH = 'stable/v*'
-        built_chain = ''
-        failed_pkg = ''
     }
 
     parameters {
@@ -92,11 +90,7 @@ pipeline {
                     steps {
                         script {
                             def hobj_res = build job: "HomeObject/main", parameters: [[$class: 'StringParameterValue', name: 'upstream_triggered', value: 'true']], propagate: true
-                            built_chain = "${built_chain}" + ", " + "$hobj_res.buildVariables.pkg_version"
                         }
-                    }
-                    post {
-                        failure { script { failed_pkg = "HomeObject" } }
                     }
                 }
             }
@@ -106,11 +100,7 @@ pipeline {
     post {
         failure {
             script {
-                if ("${failed_pkg}" != "") {
-                    slackSend color: '#E43237', channel: '#homestore-build', message: "@here HomeStore downstream pkg - *${failed_pkg}* build failed.\n*URL:* ${BUILD_URL}\nIf result not expected, revert (aka `conan remove -r ebay-local`) these pkgs: ```${built_chain}```"
-                } else {
                     slackSend color: '#E43237', channel: '#homestore-build', message: "@here HomeStore build *${PROJECT}/${TAG}* has had a failure : ${BUILD_URL}"
-                }
             }
         }
         success {
