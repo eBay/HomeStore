@@ -930,6 +930,8 @@ void MetaBlkService::free_ovf_blk_chain(const BlkId& obid) {
         // free on-disk data bid
         auto* data_bid = ovf_hdr->get_data_bid();
         for (decltype(ovf_hdr->h.nbids) i{0}; i < ovf_hdr->h.nbids; ++i) {
+            HS_LOG(DEBUG, metablk, "before freeing data bid: {}, mstore used size: {}", data_bid[i].to_string(),
+                   m_sb_vdev->used_size());
             m_sb_vdev->free_blk(data_bid[i]);
             total_nblks_freed += data_bid[i].blk_count();
 

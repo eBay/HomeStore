@@ -495,7 +495,9 @@ private:
             sg->size += iov_len;
         }
 
-        return inst().async_alloc_write(*(sg.get()), blk_alloc_hints{}, out_bids, false /* part_of_batch*/);
+        auto fut = inst().async_alloc_write(*(sg.get()), blk_alloc_hints{}, out_bids, false /* part_of_batch*/);
+        inst().commit_blk(out_bids);
+        return fut;
     }
 
     void verify_read_blk_crc(sisl::sg_list& sg, std::vector< uint64_t > read_crc_vec) {

@@ -50,7 +50,7 @@ struct BtreeTestHelper {
         if (m_is_multi_threaded) {
             std::mutex mtx;
             m_run_time = SISL_OPTIONS["run_time"].as< uint32_t >();
-            iomanager.run_on_wait(iomgr::reactor_regex::all_io, [this, &mtx]() {
+            iomanager.run_on_wait(iomgr::reactor_regex::all_worker, [this, &mtx]() {
                 auto fv = iomanager.sync_io_capable_fibers();
                 std::unique_lock lg(mtx);
                 m_fibers.insert(m_fibers.end(), fv.begin(), fv.end());
@@ -84,27 +84,30 @@ protected:
 
 public:
     void preload(uint32_t preload_size) {
-        const auto chunk_size = preload_size / m_fibers.size();
-        const auto last_chunk_size = preload_size % chunk_size ?: chunk_size;
-        auto test_count = m_fibers.size();
+        if (preload_size) {
+            const auto n_fibers = std::min(preload_size, (uint32_t)m_fibers.size());
+            const auto chunk_size = preload_size / n_fibers;
+            const auto last_chunk_size = preload_size % chunk_size ?: chunk_size;
+            auto test_count = n_fibers;
 
-        for (std::size_t i = 0; i < m_fibers.size(); ++i) {
-            const auto start_range = i * chunk_size;
-            const auto end_range = start_range + ((i == m_fibers.size() - 1) ? last_chunk_size : chunk_size);
-            iomanager.run_on_forget(m_fibers[i], [this, start_range, end_range, &test_count]() {
-                for (uint32_t i = start_range; i < end_range; i++) {
-                    put(i, btree_put_type::INSERT);
-                }
-                {
-                    std::unique_lock lg(m_test_done_mtx);
-                    if (--test_count == 0) { m_test_done_cv.notify_one(); }
-                }
-            });
-        }
+            for (std::size_t i = 0; i < n_fibers; ++i) {
+                const auto start_range = i * chunk_size;
+                const auto end_range = start_range + ((i == n_fibers - 1) ? last_chunk_size : chunk_size);
+                iomanager.run_on_forget(m_fibers[i], [this, start_range, end_range, &test_count]() {
+                    for (uint32_t i = start_range; i < end_range; i++) {
+                        put(i, btree_put_type::INSERT);
+                    }
+                    {
+                        std::unique_lock lg(m_test_done_mtx);
+                        if (--test_count == 0) { m_test_done_cv.notify_one(); }
+                    }
+                });
+            }
 
-        {
-            std::unique_lock< std::mutex > lk(m_test_done_mtx);
-            m_test_done_cv.wait(lk, [&]() { return test_count == 0; });
+            {
+                std::unique_lock< std::mutex > lk(m_test_done_mtx);
+                m_test_done_cv.wait(lk, [&]() { return test_count == 0; });
+            }
         }
         LOGINFO("Preload Done");
     }
@@ -157,15 +160,13 @@ public:
         auto pk = std::make_unique< K >(k);
 
         auto rreq = BtreeSingleRemoveRequest{pk.get(), existing_v.get()};
+        rreq.enable_route_tracing();
         bool removed = (m_bt->remove(rreq) == btree_status_t::success);
 
         ASSERT_EQ(removed, m_shadow_map.exists(*pk))
             << "Removal of key " << pk->key() << " status doesn't match with shadow";
 
-        if (removed) {
-            m_shadow_map.validate_data(rreq.key(), (const V&)rreq.value());
-            m_shadow_map.erase(rreq.key());
-        }
+        if (removed) { m_shadow_map.remove_and_check(*pk, *existing_v); }
     }
 
     void remove_random() {
@@ -213,13 +214,16 @@ public:
             auto const expected_count = std::min(remaining, batch_size);
 
             ASSERT_EQ(out_vector.size(), expected_count) << "Received incorrect value on query pagination";
-            remaining -= expected_count;
 
-            if (remaining == 0) {
+            if (remaining < batch_size) {
                 ASSERT_EQ(ret, btree_status_t::success) << "Expected success on query";
-            } else {
+            } else if (remaining > batch_size) {
                 ASSERT_EQ(ret, btree_status_t::has_more) << "Expected query to return has_more";
+            } else if (remaining == batch_size) {
+                // we don't know, go to the next round
             }
+
+            remaining -= expected_count;
 
             for (size_t idx{0}; idx < out_vector.size(); ++idx) {
                 ASSERT_EQ(out_vector[idx].second, it->second)
@@ -253,7 +257,7 @@ public:
             *copy_key = key;
             auto out_v = std::make_unique< V >();
             auto req = BtreeSingleGetRequest{copy_key.get(), out_v.get()};
-
+            req.enable_route_tracing();
             const auto ret = m_bt->get(req);
             ASSERT_EQ(ret, btree_status_t::success) << "Missing key " << key << " in btree but present in shadow map";
             ASSERT_EQ((const V&)req.value(), value)
@@ -265,7 +269,7 @@ public:
         auto pk = std::make_unique< K >(k);
         auto out_v = std::make_unique< V >();
         auto req = BtreeSingleGetRequest{pk.get(), out_v.get()};
-
+        req.enable_route_tracing();
         const auto status = m_bt->get(req);
         if (status == btree_status_t::success) {
             m_shadow_map.validate_data(req.key(), (const V&)req.value());
@@ -279,6 +283,7 @@ public:
         auto out_v = std::make_unique< V >();
         auto req =
             BtreeGetAnyRequest< K >{BtreeKeyRange< K >{K{start_k}, true, K{end_k}, true}, out_k.get(), out_v.get()};
+        req.enable_route_tracing();
         const auto status = m_bt->get(req);
 
         if (status == btree_status_t::success) {
@@ -335,6 +340,7 @@ private:
         auto existing_v = std::make_unique< V >();
         K key = K{k};
         auto sreq = BtreeSinglePutRequest{&key, &value, put_type, existing_v.get()};
+        sreq.enable_route_tracing();
         bool done = (m_bt->put(sreq) == btree_status_t::success);
 
         if (put_type == btree_put_type::INSERT) {
@@ -351,43 +357,73 @@ private:
         K end_key = K{end_k};
 
         auto rreq = BtreeRangeRemoveRequest< K >{BtreeKeyRange< K >{start_key, true, end_key, true}};
+        rreq.enable_route_tracing();
         auto const ret = m_bt->remove(rreq);
 
-        m_shadow_map.range_erase(start_key, end_key);
-
         if (all_existing) {
+            m_shadow_map.range_erase(start_key, end_key);
             ASSERT_EQ((ret == btree_status_t::success), true)
                 << "not a successful remove op for range " << start_k << "-" << end_k;
-        }
-
-        if (start_k < m_max_range_input) {
-            m_shadow_map.remove_keys(start_k, std::min(end_k, uint64_cast(m_max_range_input - 1)));
+        } else if (start_k < m_max_range_input) {
+            K end_range{std::min(end_k, uint64_cast(m_max_range_input - 1))};
+            m_shadow_map.range_erase(start_key, end_range);
         }
     }
 
 protected:
     void run_in_parallel(const std::vector< std::pair< std::string, int > >& op_list) {
         auto test_count = m_fibers.size();
-        for (auto it = m_fibers.begin(); it < m_fibers.end(); ++it) {
-            iomanager.run_on_forget(*it, [this, &test_count, op_list]() {
+        const auto total_iters = SISL_OPTIONS["num_iters"].as< uint32_t >();
+        const auto num_iters_per_thread = total_iters / m_fibers.size();
+        const auto extra_iters = total_iters % num_iters_per_thread;
+        LOGINFO("number of fibers {} num_iters_per_thread {} extra_iters {} ", m_fibers.size(), num_iters_per_thread,
+                extra_iters);
+
+        for (uint32_t fiber_id = 0; fiber_id < m_fibers.size(); ++fiber_id) {
+            auto num_iters_this_fiber = num_iters_per_thread + (fiber_id < extra_iters ? 1 : 0);
+            iomanager.run_on_forget(m_fibers[fiber_id], [this, fiber_id, &test_count, op_list, num_iters_this_fiber]() {
                 std::random_device g_rd{};
                 std::default_random_engine re{g_rd()};
-                const auto num_iters_per_thread =
-                    sisl::round_up(SISL_OPTIONS["num_iters"].as< uint32_t >() / m_fibers.size(), m_fibers.size());
                 std::vector< uint32_t > weights;
                 std::transform(op_list.begin(), op_list.end(), std::back_inserter(weights),
                                [](const auto& pair) { return pair.second; });
 
+                double progress_interval = (double)num_iters_this_fiber / 20; // 5% of the total number of iterations
+                double progress_thresh = progress_interval;                  // threshold for progress interval
+                double elapsed_time, progress_percent, last_progress_time = 0;
+
                 // Construct a weighted distribution based on the input frequencies
                 std::discrete_distribution< uint32_t > s_rand_op_generator(weights.begin(), weights.end());
                 auto m_start_time = Clock::now();
+                auto time_to_stop = [this, m_start_time]() {
+                    return (get_elapsed_time_sec(m_start_time) > m_run_time);
+                };
 
-                auto time_to_stop = [this, m_start_time]() {return (get_elapsed_time_sec(m_start_time) > m_run_time);};
-
-                for (uint32_t i = 0; i < num_iters_per_thread && !time_to_stop(); i++) {
+                for (uint32_t i = 0; i < num_iters_this_fiber && !time_to_stop(); i++) {
                     uint32_t op_idx = s_rand_op_generator(re);
                     (this->m_operations[op_list[op_idx].first])();
                     m_num_ops.fetch_add(1);
+
+                    if (fiber_id == 0) {
+                        elapsed_time = get_elapsed_time_sec(m_start_time);
+                        progress_percent = (double)i / num_iters_this_fiber * 100;
+
+                        // check progress every 5% of the total number of iterations or every 30 seconds
+                        bool print_time = false;
+                        if (i >= progress_thresh) {
+                            progress_thresh += progress_interval;
+                            print_time = true;
+                        }
+                        if (elapsed_time - last_progress_time > 30) {
+                            last_progress_time = elapsed_time;
+                            print_time = true;
+                        }
+                        if (print_time) {
+                            LOGINFO("Progress: iterations completed ({:.2f}%)- Elapsed time: {:.0f} seconds of total "
+                                    "{} - total entries: {}",
+                                    progress_percent, elapsed_time, m_run_time, m_shadow_map.size());
+                        }
+                    }
                 }
                 {
                     std::unique_lock lg(m_test_done_mtx);

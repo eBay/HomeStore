@@ -221,7 +221,7 @@ public:
 
         LOGINFO("Starting iomgr with {} threads, spdk: {}", num_threads, is_spdk);
         ioenvironment.with_iomgr(
-            iomgr::iomgr_params{.num_threads = num_threads, .is_spdk = is_spdk, .num_fibers = num_fibers});
+            iomgr::iomgr_params{.num_threads = num_threads, .is_spdk = is_spdk, .num_fibers = 1 + num_fibers});
 
         auto const http_port = SISL_OPTIONS["http_port"].as< int >();
         if (http_port != 0) {
