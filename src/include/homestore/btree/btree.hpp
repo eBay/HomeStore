@@ -91,6 +91,7 @@ public:
 
     void print_tree(const std::string& file = "") const;
     void print_tree_keys() const;
+    uint64_t count_keys(bnodeid_t bnodeid) const;
 
     nlohmann::json get_metrics_in_json(bool updated = true);
     bnodeid_t root_node_id() const;

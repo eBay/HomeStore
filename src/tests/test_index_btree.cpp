@@ -48,6 +48,9 @@ SISL_OPTION_GROUP(
      ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
     (preload_size, "", "preload_size", "number of entries to preload tree with",
      ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
+    (init_device, "", "init_device", "init device", ::cxxopts::value< bool >()->default_value("1"), ""),
+    (cleanup_after_shutdown, "", "cleanup_after_shutdown", "cleanup after shutdown",
+     ::cxxopts::value< bool >()->default_value("1"), ""),
     (seed, "", "seed", "random engine seed, use random if not defined",
      ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
@@ -421,6 +424,9 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
         std::shared_ptr< IndexTableBase > on_index_table_found(superblk< index_table_sb >&& sb) override {
             LOGINFO("Index table recovered");
             LOGINFO("Root bnode_id {} version {}", sb->root_node, sb->link_version);
+            m_test->m_cfg = BtreeConfig(hs()->index_service().node_size());
+            m_test->m_cfg.m_leaf_node_type = T::leaf_node_type;
+            m_test->m_cfg.m_int_node_type = T::interior_node_type;
             m_test->m_bt = std::make_shared< typename T::BtreeType >(std::move(sb), m_test->m_cfg);
             return m_test->m_bt;
         }
@@ -431,11 +437,19 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
 
     BtreeConcurrentTest() : testing::Test() { this->m_is_multi_threaded = true; }
 
+    void restart_homestore() {
+        test_common::HSTestHelper::start_homestore(
+            "test_index_btree",
+            {{HS_SERVICE::META, {}}, {HS_SERVICE::INDEX, {.index_svc_cbs = new TestIndexServiceCallbacks(this)}}},
+            nullptr, true /* restart */);
+    }
+
     void SetUp() override {
         test_common::HSTestHelper::start_homestore(
             "test_index_btree",
             {{HS_SERVICE::META, {.size_pct = 10.0}},
-             {HS_SERVICE::INDEX, {.size_pct = 70.0, .index_svc_cbs = new TestIndexServiceCallbacks(this)}}});
+             {HS_SERVICE::INDEX, {.size_pct = 70.0, .index_svc_cbs = new TestIndexServiceCallbacks(this)}}},
+            nullptr, false, SISL_OPTIONS["init_device"].as< bool >());
 
         LOGINFO("Node size {} ", hs()->index_service().node_size());
         this->m_cfg = BtreeConfig(hs()->index_service().node_size());
@@ -452,27 +466,54 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
 
         // Create index table and attach to index service.
         BtreeTestHelper< TestType >::SetUp();
-        this->m_bt = std::make_shared< typename T::BtreeType >(uuid, parent_uuid, 0, this->m_cfg);
+        if (this->m_bt == nullptr) {
+            this->m_bt = std::make_shared< typename T::BtreeType >(uuid, parent_uuid, 0, this->m_cfg);
+        } else {
+            populate_shadow_map();
+        }
+
         hs()->index_service().add_index_table(this->m_bt);
         LOGINFO("Added index table to index service");
     }
+    void populate_shadow_map() {
+        this->m_shadow_map.load(m_shadow_filename);
+        ASSERT_EQ(this->m_shadow_map.size(), this->m_bt->count_keys(this->m_bt->root_node_id()))
+            << "shadow map size and tree size mismatch";
+        this->get_all();
+    }
 
     void TearDown() override {
+        bool cleanup = SISL_OPTIONS["cleanup_after_shutdown"].as< bool >();
+        LOGINFO("cleanup the dump map and index data? {}", cleanup);
+        if (!cleanup) {
+            this->m_shadow_map.save(m_shadow_filename);
+        } else {
+            if (std::filesystem::remove(m_shadow_filename)) {
+                LOGINFO("File {} removed successfully", m_shadow_filename);
+            } else {
+                LOGINFO("Error: failed to remove {}", m_shadow_filename);
+            }
+        }
+        LOGINFO("Teardown with Root bnode_id {} tree size: {}", this->m_bt->root_node_id(),
+                this->m_bt->count_keys(this->m_bt->root_node_id()));
         BtreeTestHelper< TestType >::TearDown();
-        test_common::HSTestHelper::shutdown_homestore();
+        test_common::HSTestHelper::shutdown_homestore(cleanup);
     }
+
+private:
+    const std::string m_shadow_filename = "shadow_map.txt";
 };
 
 TYPED_TEST_SUITE(BtreeConcurrentTest, BtreeTypes);
 TYPED_TEST(BtreeConcurrentTest, ConcurrentAllOps) {
     // range put is not supported for non-extent keys
-    std::vector< std::string > input_ops = {"put:19", "remove:14", "range_put:20", "range_remove:2", "query:10"};
+    std::vector< std::string > input_ops = {"put:18", "remove:14", "range_put:20", "range_remove:2", "query:10"};
     if (SISL_OPTIONS.count("operation_list")) {
         input_ops = SISL_OPTIONS["operation_list"].as< std::vector< std::string > >();
     }
     auto ops = this->build_op_list(input_ops);
 
-    this->multi_op_execute(ops);
+    this->multi_op_execute(ops, !SISL_OPTIONS["init_device"].as< bool >());
 }
 
 int main(int argc, char* argv[]) {

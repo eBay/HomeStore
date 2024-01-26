@@ -169,6 +169,28 @@ void Btree< K, V >::to_string_keys(bnodeid_t bnodeid, std::string& buf) const {
 }
 
 template < typename K, typename V >
+uint64_t Btree< K, V >::count_keys(bnodeid_t bnodeid) const {
+    BtreeNodePtr node;
+    locktype_t acq_lock = locktype_t::READ;
+    if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) { return 0; }
+    uint64_t result = 0;
+    if (!node->is_leaf()) {
+        uint32_t i = 0;
+        while (i < node->total_entries()) {
+            BtreeLinkInfo p;
+            node->get_nth_value(i, &p, false);
+            result += count_keys(p.bnode_id());
+            ++i;
+        }
+        if (node->has_valid_edge()) { result += count_keys(node->edge_id()); }
+    } else {
+        result = node->total_entries();
+    }
+    unlock_node(node, acq_lock);
+    return result;
+}
+
+template < typename K, typename V >
 void Btree< K, V >::validate_sanity_child(const BtreeNodePtr& parent_node, uint32_t ind) const {
     BtreeLinkInfo child_info;
     K child_first_key;
