@@ -158,12 +158,14 @@ std::pair< bool, bool > IndexWBCache::create_chain(IndexBufferPtr& second, Index
     auto old_third = third;
     if (!second->is_clean()) {
         auto new_second = copy_buffer(second, cp_ctx);
+        chain = second;
         second = new_second;
         second_copied = true;
     }
 
     if (!third->is_clean()) {
         auto new_third = copy_buffer(third, cp_ctx);
+        chain = third;
         third = new_third;
         third_copied = true;
     }
@@ -171,10 +173,11 @@ std::pair< bool, bool > IndexWBCache::create_chain(IndexBufferPtr& second, Index
     // Append parent(third) to the left child(second).
     second->m_next_buffer = third;
     third->m_wait_for_leaders.increment(1);
-    if (chain != second) {
+    if (second_copied || third_copied) {
         // We want buffers to be append to the end of the chain which are related.
         // If we split a node multiple times in same or different CP's, each dirty buffer will be
-        // added to the end of that chain.
+        // added to the end of that chain. Whichever dependent buffer is dirty, we add this
+        // parent-left combination to the end of that chain.
         while (chain->m_next_buffer.lock() != nullptr) {
             chain = chain->m_next_buffer.lock();
         }
