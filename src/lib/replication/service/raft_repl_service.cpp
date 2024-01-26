@@ -95,7 +95,7 @@ void RaftReplService::start() {
                         .with_stale_log_gap(HS_DYNAMIC_CONFIG(consensus.stale_log_gap_hi_threshold))
                         .with_fresh_log_gap(HS_DYNAMIC_CONFIG(consensus.stale_log_gap_lo_threshold))
                         .with_snapshot_enabled(HS_DYNAMIC_CONFIG(consensus.snapshot_freq_distance))
-                        .with_leadership_expiry(-1 /* never expires */) // >>> debug only
+                        //.with_leadership_expiry(-1 /* never expires */) // >>> debug only
                         .with_reserved_log_items(0) // In reality ReplLogStore retains much more than this
                         .with_auto_forwarding(false);
     r_params.return_method_ = nuraft::raft_params::async_handler;

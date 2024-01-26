@@ -120,7 +120,7 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq) {
            flatbuffers::FlatBufferToString(builder.GetBufferPointer() + sizeof(flatbuffers::uoffset_t),
                                            PushDataRequestTypeTable()));*/
 
-    RD_LOG(INFO, "Data Channel: Pushing data to all followers: rreq=[{}]", rreq->to_compact_string());
+    LOGINFO("Data Channel: Pushing data to all followers: rreq=[{}]", rreq->to_compact_string());
 
     group_msg_service()
         ->data_service_request_unidirectional(nuraft_mesg::role_regex::ALL, PUSH_DATA, rreq->pkts)
@@ -172,10 +172,6 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
             // prepare the sgs data buffer to read into;
             auto const total_size = local_blkid.blk_count() * get_blk_size();
             sisl::sg_list sgs;
-#if 0
-            shared< uint8_t > iov_base(iomanager.iobuf_alloc(get_blk_size(), total_size),
-                                       [](uint8_t* buf) { iomanager.iobuf_free(buf); });
-#endif
             sgs.size = total_size;
             sgs.iovs.emplace_back(
                 iovec{.iov_base = iomanager.iobuf_alloc(get_blk_size(), total_size), .iov_len = total_size});
@@ -212,13 +208,16 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
         pkts.insert(pkts.end(), ret.begin(), ret.end());
     }
 
-    group_msg_service()->send_data_service_response(pkts, rpc_data);
-
-    for (auto const& sgs : sgs_vec) {
-        for (auto const& iov : sgs.iovs) {
-            iomanager.iobuf_free(reinterpret_cast< uint8_t* >(iov.iov_base));
+    // copy by value to avoid since it is on stack;
+    rpc_data->set_comp_cb([sgs_vec](boost::intrusive_ptr< sisl::GenericRpcData >&) {
+        for (auto const& sgs : sgs_vec) {
+            for (auto const& iov : sgs.iovs) {
+                iomanager.iobuf_free(reinterpret_cast< uint8_t* >(iov.iov_base));
+            }
         }
-    }
+    });
+
+    group_msg_service()->send_data_service_response(pkts, rpc_data);
 }
 
 void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
@@ -228,22 +227,18 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
     auto push_req = GetSizePrefixedPushDataRequest(incoming_buf.cbytes());
     sisl::blob header = sisl::blob{push_req->user_header()->Data(), push_req->user_header()->size()};
     sisl::blob key = sisl::blob{push_req->user_key()->Data(), push_req->user_key()->size()};
-#if 0
-    RD_LOG(TRACE, "PushData received on data channel: {}",
-           flatbuffers::FlatBufferToString(incoming_buf.cbytes() + sizeof(flatbuffers::uoffset_t),
-                                           PushDataRequestTypeTable()));
-#endif
+
+    auto rreq = follower_create_req(
+        repl_key{.server_id = push_req->issuer_replica_id(), .term = push_req->raft_term(), .dsn = push_req->dsn()},
+        header, key, push_req->data_size());
+    rreq->rpc_data = rpc_data;
+
     if (iomgr_flip::instance()->test_flip("simulate_fetch_remote_data")) {
         LOGINFO("Data Channel: Flip is enabled, skip on_push_data_received to simulate fetch remote data, "
                 "server_id={}, term={}, dsn={}",
                 push_req->issuer_replica_id(), push_req->raft_term(), push_req->dsn());
         return;
     }
-
-    auto rreq = follower_create_req(
-        repl_key{.server_id = push_req->issuer_replica_id(), .term = push_req->raft_term(), .dsn = push_req->dsn()},
-        header, key, push_req->data_size());
-    rreq->rpc_data = rpc_data;
 
     RD_LOG(INFO, "Data Channel: Received data rreq=[{}]", rreq->to_compact_string());
 
@@ -361,6 +356,8 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
                                              rreq->remote_blkid.server_id /* blkid_originator */,
                                              builder->CreateVector(rreq->remote_blkid.blkid.serialize().cbytes(),
                                                                    rreq->remote_blkid.blkid.serialized_size())));
+        LOGINFO("Fetching data from remote: rreq=[{}], remote_blkid={}", rreq->to_compact_string(),
+                rreq->remote_blkid.blkid.to_string());
     }
 
     builder->FinishSizePrefixed(
@@ -429,6 +426,8 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
                         std::move(sisl::io_blob_safe(data_size, data_service().get_align_size()));
                     std::memcpy(rreq->buf_for_unaligned_data.bytes(), data, data_size);
                     data = rreq->buf_for_unaligned_data.cbytes();
+                    RD_DBG_ASSERT(((uintptr_t)data % data_service().get_align_size()) == 0,
+                                  "Data is still not aligned after copy");
                 }
 
                 // Schedule a write and upon completion, mark the data as written.
@@ -446,8 +445,7 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
                 raw_data += data_size;
                 total_size -= data_size;
 
-                RD_LOG(
-                    INFO,
+                LOGINFO(
                     "Data Channel: Data fetched from remote: rreq=[{}], data_size: {}, total_size: {}, local_blkid: {}",
                     rreq->to_compact_string(), data_size, total_size, rreq->local_blkid.to_string());
             }
@@ -490,7 +488,7 @@ AsyncNotify RaftReplDev::notify_after_data_written(std::vector< repl_req_ptr_t >
         check_and_fetch_remote_data(rreqs);
     } else {
         check_and_fetch_remote_data(rreqs);
-#if 0 
+#if 0
         // some data are not in completed state, let's schedule a timer to check it again;
         // we wait for data channel to fill in the data. Still if its not done we trigger a fetch from remote;
         m_wait_data_timer_hdl = iomanager.schedule_thread_timer( // timer wakes up in current thread;

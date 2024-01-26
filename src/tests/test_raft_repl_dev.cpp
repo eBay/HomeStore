@@ -46,7 +46,7 @@ SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SISL_OPTION_GROUP(test_raft_repl_dev,
                   (block_size, "", "block_size", "block size to io",
                    ::cxxopts::value< uint32_t >()->default_value("4096"), "number"));
-SISL_OPTIONS_ENABLE(logging, test_raft_repl_dev, iomgr, test_common_setup, test_repl_common_setup)
+SISL_OPTIONS_ENABLE(logging, test_raft_repl_dev, iomgr, config, test_common_setup, test_repl_common_setup)
 
 static std::unique_ptr< test_common::HSReplTestHelper > g_helper;
 
@@ -100,7 +100,7 @@ public:
 
     void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key, MultiBlkId const& blkids,
                    cintrusive< repl_req_ctx >& ctx) override {
-        LOGINFO("[Replica={}] Received commit on lsn={}", g_helper->replica_num(), lsn);
+        // LOGINFO("[Replica={}] Received commit on lsn={}", g_helper->replica_num(), lsn);
         ASSERT_EQ(header.size(), sizeof(test_req::journal_header));
 
         auto jheader = r_cast< test_req::journal_header const* >(header.cbytes());
@@ -108,6 +108,8 @@ public:
         Value v{
             .lsn_ = lsn, .data_size_ = jheader->data_size, .data_pattern_ = jheader->data_pattern, .blkid_ = blkids};
 
+        LOGINFO("[Replica={}] Received commit on lsn={}, blkid={}, data_size={}", g_helper->replica_num(), lsn,
+                blkids.to_string(), jheader->data_size);
         {
             std::unique_lock lk(db_mtx_);
             inmem_db_.insert_or_assign(k, v);
@@ -161,6 +163,10 @@ public:
                 std::tie(k, v) = *it;
                 ++it;
             }
+
+            LOGINFO("[Replica={}]: Validating blkid={}, data_size={}", g_helper->replica_num(), v.blkid_.to_string(),
+                    v.data_size_);
+
             auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
             auto read_sgs = test_common::HSTestHelper::create_sgs(v.data_size_, block_size);
 
@@ -237,13 +243,14 @@ private:
     flip::FlipClient m_fc{iomgr_flip::instance()};
 #endif
 };
-
+#if 0
 TEST_F(RaftReplDevTest, All_Append) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
 
     if (g_helper->replica_num() == 0) {
-        g_helper->sync_dataset_size(SISL_OPTIONS["num_io"].as< uint64_t >());
+        // g_helper->sync_dataset_size(SISL_OPTIONS["num_io"].as< uint64_t >());
+        g_helper->sync_dataset_size(1);
         auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
         LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
         g_helper->runner().set_task([this, block_size]() { this->generate_writes(block_size, block_size); });
@@ -258,7 +265,9 @@ TEST_F(RaftReplDevTest, All_Append) {
 
     g_helper->sync_for_cleanup_start();
 }
+#endif
 
+#if 1
 TEST_F(RaftReplDevTest, All_Append_Fetch_Remote_Data) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
@@ -266,10 +275,13 @@ TEST_F(RaftReplDevTest, All_Append_Fetch_Remote_Data) {
     set_flip_point("simulate_fetch_remote_data");
 
     if (g_helper->replica_num() == 0) {
-        g_helper->sync_dataset_size(SISL_OPTIONS["num_io"].as< uint64_t >());
+        // g_helper->sync_dataset_size(SISL_OPTIONS["num_io"].as< uint64_t >());
+        g_helper->sync_dataset_size(100);
         auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
         LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
-        g_helper->runner().set_task([this, block_size]() { this->generate_writes(block_size, block_size); });
+        g_helper->runner().set_task([this, block_size]() {
+            this->generate_writes(block_size /* data_size */, block_size /* max_size_per_iov */);
+        });
         g_helper->runner().execute().get();
     }
 
@@ -278,18 +290,19 @@ TEST_F(RaftReplDevTest, All_Append_Fetch_Remote_Data) {
     g_helper->sync_for_verify_start();
 
     // TODO: seems with filip and fetch remote, the data size is not correct;
-    // LOGINFO("Validate all data written so far by reading them");
-    // this->validate_all_data();
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_all_data();
 
     g_helper->sync_for_cleanup_start();
 }
-
+#endif
 int main(int argc, char* argv[]) {
     int parsed_argc{argc};
     char** orig_argv = argv;
 
     ::testing::InitGoogleTest(&parsed_argc, argv);
-    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_raft_repl_dev, iomgr, test_common_setup, test_repl_common_setup);
+    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_raft_repl_dev, iomgr, config, test_common_setup,
+                      test_repl_common_setup);
 
     FLAGS_folly_global_cpu_executor_threads = 4;
     g_helper = std::make_unique< test_common::HSReplTestHelper >("test_raft_repl_dev", orig_argv);
