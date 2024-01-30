@@ -174,9 +174,6 @@ public:
                 ++it;
             }
 
-            LOGINFO("[Replica={}]: Validating blkid={}, data_size={}", g_helper->replica_num(), v.blkid_.to_string(),
-                    v.data_size_);
-
             auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
             auto read_sgs = test_common::HSTestHelper::create_sgs(v.data_size_, block_size);
 
@@ -315,7 +312,9 @@ TEST_F(RaftReplDevTest, All_Append_Fetch_Remote_Data) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
 
+#ifdef _PRERELEASE
     set_flip_point("simulate_fetch_remote_data");
+#endif
 
     if (g_helper->replica_num() == 0) {
         // g_helper->sync_dataset_size(SISL_OPTIONS["num_io"].as< uint64_t >());

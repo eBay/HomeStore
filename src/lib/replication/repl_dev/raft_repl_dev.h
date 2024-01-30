@@ -126,7 +126,6 @@ private:
 
     bool is_resync_mode() { return m_resync_mode; }
     void handle_error(repl_req_ptr_t const& rreq, ReplServiceError err);
-
 };
 
 } // namespace homestore

@@ -560,15 +560,17 @@ AsyncNotify RaftReplDev::notify_after_data_written(std::vector< repl_req_ptr_t >
         // if in resync mode, fetch data from remote immediately;
         check_and_fetch_remote_data(rreqs);
     } else {
-        // check_and_fetch_remote_data(rreqs);
+        check_and_fetch_remote_data(rreqs);
         // some data are not in completed state, let's schedule a timer to check it again;
         // we wait for data channel to fill in the data. Still if its not done we trigger a fetch from remote;
+#if 0
         m_wait_data_timer_hdl = iomanager.schedule_global_timer( // timer wakes up in current thread;
             HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_sec) * 1000 * 1000 * 1000, false /* recurring */,
-            nullptr /* cookie */, iomgr::reactor_regex::all_worker, [this, rreqs](auto) {
+            nullptr /* cookie */, iomgr::reactor_regex::all_worker, [this, rreqs](auto /*cookie*/) {
                 LOGINFO("Data Channel: Wait data write timer fired, checking if data is written");
                 check_and_fetch_remote_data(rreqs);
             });
+#endif
     }
 
     // block waiting here until all the futs are ready (data channel filled in and promises are made);
