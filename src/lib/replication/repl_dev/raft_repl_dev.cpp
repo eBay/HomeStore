@@ -232,14 +232,14 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
         repl_key{.server_id = push_req->issuer_replica_id(), .term = push_req->raft_term(), .dsn = push_req->dsn()},
         header, key, push_req->data_size());
     rreq->rpc_data = rpc_data;
-
+#ifdef _PRERELEASE
     if (iomgr_flip::instance()->test_flip("simulate_fetch_remote_data")) {
         LOGINFO("Data Channel: Flip is enabled, skip on_push_data_received to simulate fetch remote data, "
                 "server_id={}, term={}, dsn={}",
                 push_req->issuer_replica_id(), push_req->raft_term(), push_req->dsn());
         return;
     }
-
+#endif
     RD_LOG(INFO, "Data Channel: Received data rreq=[{}]", rreq->to_compact_string());
 
     if (rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_RECEIVED)) &
