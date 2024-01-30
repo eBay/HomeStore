@@ -442,10 +442,9 @@ public:
                 if (restart) {
                     for (uint32_t i{0}; i < n_log_stores; ++i) {
                         SampleLogStoreClient* client = m_log_store_clients[i].get();
-                        logstore_service().open_log_store(client->m_family, client->m_store_id, false /* append_mode */,
-                                                          [i, this, client](std::shared_ptr< HomeLogStore > log_store) {
-                                                              client->set_log_store(log_store);
-                                                          });
+                        logstore_service()
+                            .open_log_store(client->m_family, client->m_store_id, false /* append_mode */)
+                            .thenValue([i, this, client](auto log_store) { client->set_log_store(log_store); });
                     }
                 }
             },

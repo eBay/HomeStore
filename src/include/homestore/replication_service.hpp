@@ -4,47 +4,15 @@
 #include <string>
 #include <variant>
 
-#include <folly/futures/Future.h>
 #include <sisl/utility/enum.hpp>
 #include <homestore/replication/repl_decls.h>
 #include <homestore/meta_service.hpp>
 
 namespace homestore {
 
-// clang-format off
-VENUM(ReplServiceError, int32_t,
-      OK = 0,         // Everything OK
-      CANCELLED = -1, // Request was cancelled
-      TIMEOUT = -2, 
-      NOT_LEADER = -3, 
-      BAD_REQUEST = -4, 
-      SERVER_ALREADY_EXISTS = -5, 
-      CONFIG_CHANGING = -6,
-      SERVER_IS_JOINING = -7, 
-      SERVER_NOT_FOUND = -8, 
-      CANNOT_REMOVE_LEADER = -9, 
-      SERVER_IS_LEAVING = -10,
-      TERM_MISMATCH = -11, 
-      RESULT_NOT_EXIST_YET = -10000, 
-      NOT_IMPLEMENTED = -10001,
-      FAILED = -32768);
-// clang-format on
-
 class ReplDev;
 class ReplDevListener;
 struct hs_stats;
-
-template < typename V, typename E >
-using Result = folly::Expected< V, E >;
-
-template < class V >
-using ReplResult = Result< V, ReplServiceError >;
-
-template < class V, class E >
-using AsyncResult = folly::SemiFuture< Result< V, E > >;
-
-template < class V = folly::Unit >
-using AsyncReplResult = AsyncResult< V, ReplServiceError >;
 
 VENUM(repl_impl_type, uint8_t,
       server_side,     // Completely homestore controlled replication

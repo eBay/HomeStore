@@ -45,8 +45,10 @@ SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 SISL_OPTION_GROUP(test_raft_repl_dev,
                   (block_size, "", "block_size", "block size to io",
-                   ::cxxopts::value< uint32_t >()->default_value("4096"), "number"));
-SISL_OPTIONS_ENABLE(logging, test_raft_repl_dev, iomgr, test_common_setup, test_repl_common_setup)
+                   ::cxxopts::value< uint32_t >()->default_value("4096"), "number"),
+                  (num_raft_groups, "", "num_raft_groups", "number of raft groups per test",
+                   ::cxxopts::value< uint32_t >()->default_value("1"), "number"));
+SISL_OPTIONS_ENABLE(logging, test_raft_repl_dev, iomgr, config, test_common_setup, test_repl_common_setup)
 
 static std::unique_ptr< test_common::HSReplTestHelper > g_helper;
 
@@ -100,13 +102,15 @@ public:
 
     void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key, MultiBlkId const& blkids,
                    cintrusive< repl_req_ctx >& ctx) override {
-        LOGINFO("[Replica={}] Received commit on lsn={}", g_helper->replica_num(), lsn);
         ASSERT_EQ(header.size(), sizeof(test_req::journal_header));
 
         auto jheader = r_cast< test_req::journal_header const* >(header.cbytes());
         Key k{.id_ = *(r_cast< uint64_t const* >(key.cbytes()))};
         Value v{
             .lsn_ = lsn, .data_size_ = jheader->data_size, .data_pattern_ = jheader->data_pattern, .blkid_ = blkids};
+
+        LOGINFO("[Replica={}] Received commit on lsn={} key={} value[blkid={} pattern={}]", g_helper->replica_num(),
+                lsn, k.id_, v.blkid_.to_string(), v.data_pattern_);
 
         {
             std::unique_lock lk(db_mtx_);
@@ -127,6 +131,12 @@ public:
         LOGINFO("[Replica={}] Received rollback on lsn={}", g_helper->replica_num(), lsn);
     }
 
+    void on_error(ReplServiceError error, const sisl::blob& header, const sisl::blob& key,
+                  cintrusive< repl_req_ctx >& ctx) override {
+        LOGINFO("[Replica={}] Received error={} on key={}", g_helper->replica_num(), enum_name(error),
+                *(r_cast< uint64_t const* >(key.cbytes())));
+    }
+
     blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) override {
         return blk_alloc_hints{};
     }
@@ -134,9 +144,10 @@ public:
     void on_replica_stop() override {}
 
     void db_write(uint64_t data_size, uint32_t max_size_per_iov) {
+        static std::atomic< uint32_t > s_uniq_num{0};
         auto req = intrusive< test_req >(new test_req());
         req->jheader.data_size = data_size;
-        req->jheader.data_pattern = ((long long)rand() << 32) | rand();
+        req->jheader.data_pattern = ((long long)rand() << 32) | ++s_uniq_num;
         auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
 
         if (data_size != 0) {
@@ -171,6 +182,8 @@ public:
                                                                  v.data_pattern_);
                     iomanager.iobuf_free(uintptr_cast(iov.iov_base));
                 }
+                LOGINFO("Validated successfully key={} value[blkid={} pattern={}]", k.id_, v.blkid_.to_string(),
+                        v.data_pattern_);
                 g_helper->runner().next_task();
             });
         });
@@ -191,9 +204,11 @@ class RaftReplDevTest : public testing::Test {
 public:
     void SetUp() override {
         // By default it will create one db
-        auto db = std::make_shared< TestReplicatedDB >();
-        g_helper->register_listener(db);
-        dbs_.emplace_back(std::move(db));
+        for (uint32_t i{0}; i < SISL_OPTIONS["num_raft_groups"].as< uint32_t >(); ++i) {
+            auto db = std::make_shared< TestReplicatedDB >();
+            g_helper->register_listener(db);
+            dbs_.emplace_back(std::move(db));
+        }
     }
 
     void generate_writes(uint64_t data_size, uint32_t max_size_per_iov) {
@@ -220,28 +235,59 @@ public:
 
     TestReplicatedDB& pick_one_db() { return *dbs_[0]; }
 
+    void switch_all_db_leader() {
+        for (auto const& db : dbs_) {
+            do {
+                auto result = db->repl_dev()->become_leader().get();
+                if (result.hasError()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                } else {
+                    break;
+                }
+            } while (true);
+        }
+    }
+
 private:
     std::vector< std::shared_ptr< TestReplicatedDB > > dbs_;
 };
 
-TEST_F(RaftReplDevTest, All_Append) {
+TEST_F(RaftReplDevTest, All_Append_Restart_Append) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
 
+    uint64_t exp_entries = SISL_OPTIONS["num_io"].as< uint64_t >();
     if (g_helper->replica_num() == 0) {
-        g_helper->sync_dataset_size(SISL_OPTIONS["num_io"].as< uint64_t >());
         auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
         LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
         g_helper->runner().set_task([this, block_size]() { this->generate_writes(block_size, block_size); });
         g_helper->runner().execute().get();
     }
-
-    this->wait_for_all_writes(g_helper->dataset_size());
+    this->wait_for_all_writes(exp_entries);
 
     g_helper->sync_for_verify_start();
     LOGINFO("Validate all data written so far by reading them");
     this->validate_all_data();
+    g_helper->sync_for_cleanup_start();
 
+    LOGINFO("Restart all the homestore replicas");
+    g_helper->restart();
+    g_helper->sync_for_test_start();
+
+    exp_entries += SISL_OPTIONS["num_io"].as< uint64_t >();
+    if (g_helper->replica_num() == 0) {
+        LOGINFO("Switch the leader to replica_num = 0");
+        this->switch_all_db_leader();
+
+        LOGINFO("Post restart write the data again");
+        auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+        g_helper->runner().set_task([this, block_size]() { this->generate_writes(block_size, block_size); });
+        g_helper->runner().execute().get();
+    }
+    this->wait_for_all_writes(exp_entries);
+
+    LOGINFO("Validate all data written (including pre-restart data) by reading them");
+    this->validate_all_data();
     g_helper->sync_for_cleanup_start();
 }
 
@@ -250,7 +296,8 @@ int main(int argc, char* argv[]) {
     char** orig_argv = argv;
 
     ::testing::InitGoogleTest(&parsed_argc, argv);
-    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_raft_repl_dev, iomgr, test_common_setup, test_repl_common_setup);
+    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, config, test_raft_repl_dev, iomgr, test_common_setup,
+                      test_repl_common_setup);
 
     FLAGS_folly_global_cpu_executor_threads = 4;
     g_helper = std::make_unique< test_common::HSReplTestHelper >("test_raft_repl_dev", orig_argv);

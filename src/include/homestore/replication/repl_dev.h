@@ -29,7 +29,8 @@ VENUM(repl_req_state_t, uint32_t,
       DATA_RECEIVED = 1 << 1, // Data has been received and being written to the storage
       DATA_WRITTEN = 1 << 2,  // Data has been written to the storage
       LOG_RECEIVED = 1 << 3,  // Log is received and waiting for data
-      LOG_FLUSHED = 1 << 4    // Log has been flushed
+      LOG_FLUSHED = 1 << 4,   // Log has been flushed
+      ERRORED = 1 << 5        // Error has happened and cleaned up
 )
 
 struct repl_key {
@@ -149,11 +150,24 @@ public:
     /// NOTE: Listener should do the free any resources created as part of pre-commit.
     ///
     /// @param lsn - The log sequence number getting rolled back
-    /// @param header - Header originally passed with repl_dev::write() api
-    /// @param key - Key originally passed with repl_dev::write() api
-    /// @param ctx - Context passed as part of the replica_set::write() api
+    /// @param header - Header originally passed with ReplDev::async_alloc_write() api
+    /// @param key - Key originally passed with ReplDev::async_alloc_write() api
+    /// @param ctx - Context passed as part of the ReplDev::async_alloc_write() api
     virtual void on_rollback(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
                              cintrusive< repl_req_ctx >& ctx) = 0;
+
+    /// @brief Called when the async_alloc_write call failed to initiate replication
+    ///
+    /// Called only on the node which called async_alloc_write
+    ///
+    ///
+    /// NOTE: Listener should do the free any resources created as part of pre-commit.
+    ///
+    /// @param header - Header originally passed with ReplDev::async_alloc_write() api
+    /// @param key - Key originally passed with ReplDev::async_alloc_write() api
+    /// @param ctx - Context passed as part of the ReplDev::async_alloc_write() api
+    virtual void on_error(ReplServiceError error, const sisl::blob& header, const sisl::blob& key,
+                          cintrusive< repl_req_ctx >& ctx) = 0;
 
     /// @brief Called when replication module is trying to allocate a block to write the value
     ///
@@ -176,7 +190,7 @@ private:
 class ReplDev {
 public:
     ReplDev() = default;
-    virtual ~ReplDev() = default;
+    virtual ~ReplDev() { detach_listener(); }
 
     /// @brief Replicate the data to the replica set. This method goes through the
     /// following steps:
@@ -217,6 +231,10 @@ public:
     /// @param blkids - blkids to be freed.
     virtual void async_free_blks(int64_t lsn, MultiBlkId const& blkid) = 0;
 
+    /// @brief Try to switch the current replica where this method called to become a leader.
+    /// @return True if it is successful, false otherwise.
+    virtual AsyncReplResult<> become_leader() = 0;
+
     /// @brief Checks if this replica is the leader in this ReplDev
     /// @return true or false
     virtual bool is_leader() const = 0;
@@ -230,6 +248,13 @@ public:
     virtual uint32_t get_blk_size() const = 0;
 
     virtual void attach_listener(shared< ReplDevListener > listener) { m_listener = std::move(listener); }
+
+    virtual void detach_listener() {
+        if (m_listener) {
+            m_listener->set_repl_dev(nullptr);
+            m_listener.reset();
+        }
+    }
 
 protected:
     shared< ReplDevListener > m_listener;

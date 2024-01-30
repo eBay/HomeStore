@@ -3,6 +3,7 @@
 #include <sisl/fds/utils.hpp>
 #include <sisl/fds/vector_pool.hpp>
 
+#include "service/raft_repl_service.h"
 #include "repl_dev/raft_state_machine.h"
 #include "repl_dev/raft_repl_dev.h"
 
@@ -59,7 +60,7 @@ raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params
 
 uint64_t RaftStateMachine::last_commit_index() { return uint64_cast(m_rd.get_last_commit_lsn()); }
 
-void RaftStateMachine::propose_to_raft(repl_req_ptr_t rreq) {
+ReplServiceError RaftStateMachine::propose_to_raft(repl_req_ptr_t rreq) {
     uint32_t val_size = rreq->value.size ? rreq->local_blkid.serialized_size() : 0;
     uint32_t entry_size = sizeof(repl_journal_entry) + rreq->header.size() + rreq->key.size() + val_size;
     rreq->alloc_journal_entry(entry_size, true /* raft_buf */);
@@ -98,8 +99,15 @@ void RaftStateMachine::propose_to_raft(repl_req_ptr_t rreq) {
 
     RD_LOG(TRACE, "Raft Channel: journal_entry=[{}] ", rreq->journal_entry->to_string());
 
-    m_rd.raft_server()->append_entries_ext(*vec, param);
+    auto append_status = m_rd.raft_server()->append_entries_ext(*vec, param);
     sisl::VectorPool< raft_buf_ptr_t >::free(vec);
+
+    if (append_status && !append_status->get_accepted()) {
+        RD_LOG(ERROR, "Raft Channel: Failed to propose rreq=[{}] result_code={}", rreq->to_compact_string(),
+               append_status->get_result_code());
+        return RaftReplService::to_repl_error(append_status->get_result_code());
+    }
+    return ReplServiceError::OK;
 }
 
 repl_req_ptr_t RaftStateMachine::transform_journal_entry(nuraft::ptr< nuraft::log_entry >& lentry) {
@@ -109,25 +117,41 @@ repl_req_ptr_t RaftStateMachine::transform_journal_entry(nuraft::ptr< nuraft::lo
     // We don't want to transform anything that is not an app log
     if (lentry->get_val_type() != nuraft::log_val_type::app_log) { return nullptr; }
 
-    repl_journal_entry* jentry = r_cast< repl_journal_entry* >(lentry->get_buf().data_begin());
-    RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
-                      "Mismatched version of journal entry received from RAFT peer");
+    // Validate the journal entry and see if it needs to be processed
+    {
+        repl_journal_entry* tmp_jentry = r_cast< repl_journal_entry* >(lentry->get_buf().data_begin());
+        RELEASE_ASSERT_EQ(tmp_jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
+                          "Mismatched version of journal entry received from RAFT peer");
 
-    RD_LOG(TRACE, "Received Raft log_entry=[term={}], journal_entry=[{}] ", lentry->get_term(), jentry->to_string());
+        RD_LOG(TRACE, "Received Raft log_entry=[term={}], journal_entry=[{}] ", lentry->get_term(),
+               tmp_jentry->to_string());
 
-    // For inline data we don't need to transform anything
-    if (jentry->code != journal_type_t::HS_LARGE_DATA) { return nullptr; }
+        // For inline data we don't need to transform anything
+        if (tmp_jentry->code != journal_type_t::HS_LARGE_DATA) { return nullptr; }
 
-    sisl::blob const header = sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry), jentry->user_header_size};
-    sisl::blob const key = sisl::blob{header.cbytes() + header.size(), jentry->key_size};
-    DEBUG_ASSERT_GT(jentry->value_size, 0, "Entry marked as large data, but value size is notified as 0");
+        DEBUG_ASSERT_GT(tmp_jentry->value_size, 0, "Entry marked as large data, but value size is notified as 0");
+    }
+
+    auto log_to_journal_entry = [](raft_buf_ptr_t const& log_buf, auto const log_buf_data_offset) {
+        repl_journal_entry* jentry = r_cast< repl_journal_entry* >(log_buf->data_begin() + log_buf_data_offset);
+        sisl::blob const header =
+            sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry), jentry->user_header_size};
+        sisl::blob const key = sisl::blob{header.cbytes() + header.size(), jentry->key_size};
+        return std::make_tuple(jentry, header, key);
+    };
+
+    // Serialize the log_entry buffer which returns the actual raft log_entry buffer.
+    auto log_buf = lentry->serialize();
+    auto const log_buf_data_offset = log_buf->size() - lentry->get_buf().size();
+    auto const [jentry, header, key] = log_to_journal_entry(log_buf, log_buf_data_offset);
 
     // From the repl_key, get the repl_req. In cases where log stream got here first, this method will create a new
     // repl_req and return that back. Fill up all of the required journal entry inside the repl_req
     auto rreq = m_rd.follower_create_req(
         repl_key{.server_id = jentry->server_id, .term = lentry->get_term(), .dsn = jentry->dsn}, header, key,
         jentry->value_size);
-    rreq->journal_buf = lentry->serialize();
+    rreq->journal_buf = std::move(log_buf);
+    rreq->journal_entry = jentry;
 
     MultiBlkId entry_blkid;
     entry_blkid.deserialize(sisl::blob{key.cbytes() + key.size(), jentry->value_size}, true /* copy */);
@@ -141,6 +165,7 @@ repl_req_ptr_t RaftStateMachine::transform_journal_entry(nuraft::ptr< nuraft::lo
         auto new_buf = nuraft::buffer::expand(*rreq->raft_journal_buf(),
                                               rreq->raft_journal_buf()->size() + local_size - remote_size);
         blkid_location = uintptr_cast(new_buf->data_begin()) + rreq->raft_journal_buf()->size() - jentry->value_size;
+        std::tie(rreq->journal_entry, rreq->header, rreq->key) = log_to_journal_entry(new_buf, log_buf_data_offset);
         rreq->journal_buf = std::move(new_buf);
     } else {
         // Can do in-place replace of remote blkid with local blkid.
@@ -148,7 +173,6 @@ repl_req_ptr_t RaftStateMachine::transform_journal_entry(nuraft::ptr< nuraft::lo
             jentry->value_size;
     }
     std::memcpy(blkid_location, rreq->local_blkid.serialize().cbytes(), local_size);
-    rreq->journal_entry = r_cast< repl_journal_entry* >(rreq->raft_journal_buf()->data_begin());
 
     return rreq;
 }

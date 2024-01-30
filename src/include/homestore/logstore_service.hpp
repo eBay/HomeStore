@@ -92,8 +92,7 @@ public:
      *
      * @return std::shared_ptr< HomeLogStore >
      */
-    std::shared_ptr< HomeLogStore > create_new_log_store(const logstore_family_id_t family_id,
-                                                         const bool append_mode = false);
+    shared< HomeLogStore > create_new_log_store(logstore_family_id_t family_id, bool append_mode = false);
 
     /**
      * @brief Open an existing log store and does a recovery. It then creates an instance of this logstore and
@@ -102,8 +101,8 @@ public:
      * @param store_id: Store ID of the log store to open
      * @return std::shared_ptr< HomeLogStore >
      */
-    void open_log_store(const logstore_family_id_t family_id, const logstore_id_t store_id, const bool append_mode,
-                        const log_store_opened_cb_t& on_open_cb);
+    folly::Future< shared< HomeLogStore > > open_log_store(logstore_family_id_t family_id, logstore_id_t store_id,
+                                                           bool append_mode);
 
     /**
      * @brief Close the log store instance and free-up the resources

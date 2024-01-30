@@ -46,6 +46,7 @@ public:
 
     void async_free_blks(int64_t lsn, MultiBlkId const& blkid) override;
 
+    AsyncReplResult<> become_leader() override { return make_async_error(ReplServiceError::OK); }
     bool is_leader() const override { return true; }
 
     uuid_t group_id() const override { return m_group_id; }
@@ -56,7 +57,6 @@ public:
     void cp_cleanup(CP* cp);
 
 private:
-    void on_data_journal_created(shared< HomeLogStore > log_store);
     void write_journal(repl_req_ptr_t rreq);
     void on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx);
 };

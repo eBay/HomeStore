@@ -17,6 +17,8 @@
 #include <chrono>
 
 #include <boost/uuid/string_generator.hpp>
+#include <homestore/blkdata_service.hpp>
+#include <homestore/logstore_service.hpp>
 #include "common/homestore_config.hpp"
 #include "common/homestore_assert.hpp"
 #include "replication/service/raft_repl_service.h"
@@ -58,32 +60,31 @@ ReplServiceError RaftReplService::to_repl_error(nuraft::cmd_result_code code) {
 }
 
 RaftReplService::RaftReplService(cshared< ReplApplication >& repl_app) : GenericReplService{repl_app} {
+    m_config_sb_bufs.reserve(100);
     meta_service().register_handler(
         get_meta_blk_name() + "_raft_config",
         [this](meta_blk* mblk, sisl::byte_view buf, size_t) {
-            raft_group_config_found(std::move(buf), voidptr_cast(mblk));
+            m_config_sb_bufs.emplace_back(std::pair(std::move(buf), voidptr_cast(mblk)));
         },
         nullptr, false, std::optional< meta_subtype_vec_t >({get_meta_blk_name()}));
 }
 
 void RaftReplService::start() {
-    /*auto params = nuraft_mesg::Manager::Params{
+    // Step 1: Initialize the Nuraft messaging service, which starts the nuraft service
+    auto params = nuraft_mesg::Manager::Params{
         .server_uuid_ = m_my_uuid,
         .mesg_port_ = m_repl_app->lookup_peer(m_my_uuid).second,
         .default_group_type_ = "homestore_replication",
         .ssl_key_ = ioenvironment.get_ssl_key(),
         .ssl_cert_ = ioenvironment.get_ssl_cert(),
         .token_verifier_ = std::dynamic_pointer_cast< sisl::GrpcTokenVerifier >(ioenvironment.get_token_verifier()),
-        .token_client_ = std::dynamic_pointer_cast< sisl::GrpcTokenClient >(ioenvironment.get_token_client())};*/
-    auto params = nuraft_mesg::Manager::Params();
-    params.server_uuid_ = m_my_uuid;
-    params.mesg_port_ = m_repl_app->lookup_peer(m_my_uuid).second;
-    params.default_group_type_ = "homestore_replication";
+        .token_client_ = std::dynamic_pointer_cast< sisl::GrpcTokenClient >(ioenvironment.get_token_client())};
     m_msg_mgr = nuraft_mesg::init_messaging(params, weak_from_this(), true /* with_data_channel */);
 
     LOGINFOMOD(replication, "Starting RaftReplService with server_uuid={} port={}",
                boost::uuids::to_string(params.server_uuid_), params.mesg_port_);
 
+    // Step 2: Register all RAFT parameters. At the end of this step, raft is ready to be created/join group
     auto r_params = nuraft::raft_params()
                         .with_election_timeout_lower(HS_DYNAMIC_CONFIG(consensus.elect_to_low_ms))
                         .with_election_timeout_upper(HS_DYNAMIC_CONFIG(consensus.elect_to_high_ms))
@@ -100,22 +101,68 @@ void RaftReplService::start() {
     r_params.return_method_ = nuraft::raft_params::async_handler;
     m_msg_mgr->register_mgr_type(params.default_group_type_, r_params);
 
+    // Step 3: Load all the repl devs from the cached superblks. This step creates the ReplDev instances and adds to
+    // list. It is still not joined the Raft group yet
+    for (auto const& [buf, mblk] : m_sb_bufs) {
+        load_repl_dev(buf, voidptr_cast(mblk));
+    }
+    m_sb_bufs.clear();
+
+    // Step 4: Load all the raft group configs from the cached superblks. We have 2 superblks for each raft group
+    // a) repl_dev configuration (loaded in step 3). This block is updated on every append and persisted on next cp.
+    // b) raft group configuration (loaded in this step). This block is updated on every config change and persisted
+    // instantly
+    //
+    // We need to first load the repl_dev with its config and then attach the raft config to that repl dev.
+    for (auto const& [buf, mblk] : m_config_sb_bufs) {
+        raft_group_config_found(buf, voidptr_cast(mblk));
+    }
+    m_config_sb_bufs.clear();
+
+    // Step 5: Start the data and logstore service now. This step is essential before we can ask Raft to join groups etc
+    hs()->data_service().start();
+    hs()->logstore_service().start(hs()->is_first_time_boot());
+
+    // Step 6: Iterate all the repl dev and ask each one of the join the raft group.
+    for (auto it = m_rd_map.begin(); it != m_rd_map.end();) {
+        auto rdev = std::dynamic_pointer_cast< RaftReplDev >(it->second);
+        if (!rdev->join_group()) {
+            it = m_rd_map.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    // Step 7: Register to CPManager to ensure we can flush the superblk.
     hs()->cp_mgr().register_consumer(cp_consumer_t::REPLICATION_SVC, std::make_unique< RaftReplServiceCPHandler >());
+}
+
+void RaftReplService::stop() {
+    GenericReplService::stop();
+    m_msg_mgr.reset();
+    hs()->logstore_service().stop();
 }
 
 void RaftReplService::raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie) {
     json_superblk group_config;
     auto& js = group_config.load(buf, meta_cookie);
+
+    DEBUG_ASSERT(js.contains("group_id"), "Missing group_id field in raft_config superblk");
     std::string gid_str = js["group_id"];
     RELEASE_ASSERT(!gid_str.empty(), "Invalid raft_group config found");
 
     boost::uuids::string_generator gen;
-    uuid_t uuid = gen(gid_str);
+    uuid_t group_id = gen(gid_str);
 
-    auto v = get_repl_dev(uuid);
-    RELEASE_ASSERT(bool(v), "Not able to find the group_id corresponding, has repl_dev superblk not loaded yet?");
+    auto v = get_repl_dev(group_id);
+    RELEASE_ASSERT(bool(v), "Can't find the group_id={}, has repl_dev superblk not loaded yet?",
+                   boost::uuids::to_string(group_id));
 
-    (std::dynamic_pointer_cast< RaftReplDev >(*v))->use_config(std::move(group_config));
+    auto rdev = std::dynamic_pointer_cast< RaftReplDev >(*v);
+    auto listener = m_repl_app->create_repl_dev_listener(group_id);
+    listener->set_repl_dev(rdev.get());
+    rdev->attach_listener(std::move(listener));
+    rdev->use_config(std::move(group_config));
 }
 
 std::string RaftReplService::lookup_peer(nuraft_mesg::peer_id_t const& peer) {
@@ -125,6 +172,8 @@ std::string RaftReplService::lookup_peer(nuraft_mesg::peer_id_t const& peer) {
 
 shared< nuraft_mesg::mesg_state_mgr > RaftReplService::create_state_mgr(int32_t srv_id,
                                                                         nuraft_mesg::group_id_t const& group_id) {
+    LOGINFO("Creating RAFT state manager for server_id={} group_id={}", srv_id, boost::uuids::to_string(group_id));
+
     auto result = get_repl_dev(group_id);
     if (result) { return std::dynamic_pointer_cast< nuraft_mesg::mesg_state_mgr >(result.value()); }
 
@@ -136,7 +185,12 @@ shared< nuraft_mesg::mesg_state_mgr > RaftReplService::create_state_mgr(int32_t 
 
     // Create a new instance of Raft ReplDev (which is the state manager this method is looking for)
     auto rdev = std::make_shared< RaftReplDev >(*this, std::move(rd_sb), false /* load_existing */);
-    rdev->use_config(json_superblk{get_meta_blk_name() + "_raft_config"});
+
+    // Create a raft config for this repl_dev and assign it to the repl_dev
+    auto raft_config_sb = json_superblk{get_meta_blk_name() + "_raft_config"};
+    (*raft_config_sb)["group_id"] = boost::uuids::to_string(group_id);
+    raft_config_sb.write();
+    rdev->use_config(std::move(raft_config_sb));
 
     // Attach the listener to the raft
     auto listener = m_repl_app->create_repl_dev_listener(group_id);
@@ -170,6 +224,8 @@ AsyncReplResult< shared< ReplDev > > RaftReplService::create_repl_dev(group_id_t
                             boost::uuids::to_string(member));
                     break;
                 } else if (result.error() != nuraft::CONFIG_CHANGING) {
+                    LOGWARN("Groupid={}, add member={} failed with error={}", boost::uuids::to_string(group_id),
+                            boost::uuids::to_string(member), result.error());
                     return make_async_error< shared< ReplDev > >(to_repl_error(result.error()));
                 } else {
                     LOGWARN("Config is changing for group_id={} while adding member={}, retry operation in a second",
@@ -204,14 +260,6 @@ void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
 
     // Create an instance of ReplDev from loaded superblk
     auto rdev = std::make_shared< RaftReplDev >(*this, std::move(rd_sb), true /* load_existing */);
-
-    // Try to join the RAFT group
-    auto raft_result = m_msg_mgr->join_group(group_id, "homestore_replication",
-                                             std::dynamic_pointer_cast< nuraft_mesg::mesg_state_mgr >(rdev));
-    if (!raft_result) {
-        HS_DBG_ASSERT(false, "Unable to join the group_id={} with error={}", boost::uuids::to_string(group_id).c_str(),
-                      raft_result.error());
-    }
 
     // Add the RaftReplDev to the list of repl_devs
     add_repl_dev(group_id, rdev);

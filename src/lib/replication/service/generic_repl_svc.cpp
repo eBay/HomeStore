@@ -15,6 +15,7 @@
 #include <sisl/logging/logging.h>
 #include <homestore/meta_service.hpp>
 #include <homestore/blkdata_service.hpp>
+#include <homestore/logstore_service.hpp>
 #include "common/homestore_assert.hpp"
 #include "replication/service/generic_repl_svc.h"
 #include "replication/service/raft_repl_service.h"
@@ -36,15 +37,20 @@ std::shared_ptr< GenericReplService > GenericReplService::create(cshared< ReplAp
 
 GenericReplService::GenericReplService(cshared< ReplApplication >& repl_app) :
         m_repl_app{repl_app}, m_my_uuid{repl_app->get_my_repl_id()} {
+    m_sb_bufs.reserve(100);
     meta_service().register_handler(
         get_meta_blk_name(),
-        [this](meta_blk* mblk, sisl::byte_view buf, size_t) { load_repl_dev(std::move(buf), voidptr_cast(mblk)); },
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t) {
+            m_sb_bufs.emplace_back(std::pair(std::move(buf), voidptr_cast(mblk)));
+        },
         nullptr);
 }
 
 void GenericReplService::stop() {
-    std::unique_lock lg{m_rd_map_mtx};
-    m_rd_map.clear();
+    {
+        std::unique_lock lg{m_rd_map_mtx};
+        m_rd_map.clear();
+    }
 }
 
 ReplResult< shared< ReplDev > > GenericReplService::get_repl_dev(group_id_t group_id) const {
@@ -77,8 +83,21 @@ hs_stats GenericReplService::get_cap_stats() const {
 SoloReplService::SoloReplService(cshared< ReplApplication >& repl_app) : GenericReplService{repl_app} {}
 
 void SoloReplService::start() {
+    for (auto const& [buf, mblk] : m_sb_bufs) {
+        load_repl_dev(buf, voidptr_cast(mblk));
+    }
+    m_sb_bufs.clear();
+
+    hs()->data_service().start();
+    hs()->logstore_service().start(hs()->is_first_time_boot());
+
     // Register to CP to flush the super blk and truncate the logstore
     hs()->cp_mgr().register_consumer(cp_consumer_t::REPLICATION_SVC, std::make_unique< SoloReplServiceCPHandler >());
+}
+
+void SoloReplService::stop() {
+    GenericReplService::stop();
+    hs()->logstore_service().stop();
 }
 
 AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t group_id,
@@ -120,7 +139,7 @@ void SoloReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
     {
         std::unique_lock lg(m_rd_map_mtx);
         auto [_, happened] = m_rd_map.emplace(group_id, rdev);
-        (void) happened;
+        (void)happened;
         HS_DBG_ASSERT(happened, "Unable to put the repl_dev in rd map for group_id={}", group_id);
     }
 }

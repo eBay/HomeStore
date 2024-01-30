@@ -37,6 +37,7 @@ class RaftReplService : public GenericReplService,
 private:
     shared< nuraft_mesg::Manager > m_msg_mgr;
     json_superblk m_config_sb;
+    std::vector< std::pair< sisl::byte_view, void* > > m_config_sb_bufs;
 
 public:
     RaftReplService(cshared< ReplApplication >& repl_app);
@@ -52,6 +53,8 @@ public:
 protected:
     ///////////////////// Overrides of GenericReplService ////////////////////
     void start() override;
+    void stop() override;
+
     AsyncReplResult< shared< ReplDev > > create_repl_dev(group_id_t group_id,
                                                          std::set< replica_id_t > const& members) override;
     void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) override;

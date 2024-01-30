@@ -67,13 +67,14 @@ HomeRaftLogStore::HomeRaftLogStore(logstore_id_t logstore_id) {
     } else {
         m_logstore_id = logstore_id;
         LOGDEBUGMOD(replication, "Opening existing home log store id={}", logstore_id);
-        logstore_service().open_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, logstore_id, true,
-                                          [this](shared< HomeLogStore > log_store) {
-                                              m_log_store = std::move(log_store);
-                                              DEBUG_ASSERT_EQ(m_logstore_id, m_log_store->get_store_id(),
-                                                              "Mismatch in passed and create logstore id");
-                                              REPL_STORE_LOG(DEBUG, "Home Log store created/opened successfully");
-                                          });
+        logstore_service()
+            .open_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, logstore_id, true)
+            .thenValue([this](auto log_store) {
+                m_log_store = std::move(log_store);
+                DEBUG_ASSERT_EQ(m_logstore_id, m_log_store->get_store_id(),
+                                "Mismatch in passed and create logstore id");
+                REPL_STORE_LOG(DEBUG, "Home Log store created/opened successfully");
+            });
     }
 }
 
@@ -85,20 +86,17 @@ void HomeRaftLogStore::remove_store() {
 
 ulong HomeRaftLogStore::next_slot() const {
     uint64_t next_slot = to_repl_lsn(m_log_store->get_contiguous_issued_seq_num(m_last_durable_lsn)) + 1;
-    REPL_STORE_LOG(DEBUG, "next_slot()={}", next_slot);
     return next_slot;
 }
 
 ulong HomeRaftLogStore::start_index() const {
     // start_index starts from 1.
     ulong start_index = std::max((repl_lsn_t)1, to_repl_lsn(m_log_store->truncated_upto()) + 1);
-    REPL_STORE_LOG(DEBUG, "start_index()={}", start_index);
     return start_index;
 }
 
 nuraft::ptr< nuraft::log_entry > HomeRaftLogStore::last_entry() const {
     store_lsn_t max_seq = m_log_store->get_contiguous_issued_seq_num(m_last_durable_lsn);
-    REPL_STORE_LOG(DEBUG, "last_entry() store seqnum={}", max_seq);
     if (max_seq < 0) { return m_dummy_log_entry; }
 
     nuraft::ptr< nuraft::log_entry > nle;

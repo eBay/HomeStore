@@ -173,12 +173,6 @@ public:
         vdev_size_type_t vdev_size_type{vdev_size_type_t::VDEV_SIZE_STATIC};
     };
 
-#if 0
-    static void start_homestore(const std::string& test_name, float meta_pct, float data_log_pct, float ctrl_log_pct,
-                                float data_pct, float index_pct, hs_before_services_starting_cb_t cb,
-                                bool restart = false, std::unique_ptr< IndexServiceCallbacks > index_svc_cb = nullptr,
-                                bool default_data_svc_alloc_type = true);
-#endif
     static void start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
                                 hs_before_services_starting_cb_t cb = nullptr, bool fake_restart = false,
                                 bool init_device = true) {
@@ -190,6 +184,7 @@ public:
 
         if (fake_restart) {
             shutdown_homestore(false);
+            // sisl::GrpcAsyncClientWorker::shutdown_all();
             std::this_thread::sleep_for(std::chrono::seconds{5});
         }
 

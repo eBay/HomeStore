@@ -105,18 +105,18 @@ void LogStoreService::stop() {
     }
 }
 
-std::shared_ptr< HomeLogStore > LogStoreService::create_new_log_store(const logstore_family_id_t family_id,
-                                                                      const bool append_mode) {
+shared< HomeLogStore > LogStoreService::create_new_log_store(const logstore_family_id_t family_id,
+                                                             const bool append_mode) {
     HS_REL_ASSERT_LT(family_id, num_log_families);
     COUNTER_INCREMENT(m_metrics, logstores_count, 1);
     return m_logstore_families[family_id]->create_new_log_store(append_mode);
 }
 
-void LogStoreService::open_log_store(const logstore_family_id_t family_id, const logstore_id_t store_id,
-                                     const bool append_mode, const log_store_opened_cb_t& on_open_cb) {
+folly::Future< shared< HomeLogStore > > LogStoreService::open_log_store(logstore_family_id_t family_id,
+                                                                        logstore_id_t store_id, bool append_mode) {
     HS_REL_ASSERT_LT(family_id, num_log_families);
     COUNTER_INCREMENT(m_metrics, logstores_count, 1);
-    return m_logstore_families[family_id]->open_log_store(store_id, append_mode, on_open_cb);
+    return m_logstore_families[family_id]->open_log_store(store_id, append_mode);
 }
 
 void LogStoreService::remove_log_store(const logstore_family_id_t family_id, const logstore_id_t store_id) {
