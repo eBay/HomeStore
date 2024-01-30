@@ -162,7 +162,6 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq) {
         });
 }
 
-
 void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
     auto const& incoming_buf = rpc_data->request_blob();
     auto fetch_req = GetSizePrefixedFetchData(incoming_buf.cbytes());
@@ -249,7 +248,7 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
 
     group_msg_service()->send_data_service_response(pkts, rpc_data);
 }
-  
+
 void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err) {
     if (err == ReplServiceError::OK) { return; }
 
@@ -561,14 +560,15 @@ AsyncNotify RaftReplDev::notify_after_data_written(std::vector< repl_req_ptr_t >
         // if in resync mode, fetch data from remote immediately;
         check_and_fetch_remote_data(rreqs);
     } else {
-        check_and_fetch_remote_data(rreqs);
-#if 0
+        // check_and_fetch_remote_data(rreqs);
         // some data are not in completed state, let's schedule a timer to check it again;
         // we wait for data channel to fill in the data. Still if its not done we trigger a fetch from remote;
-        m_wait_data_timer_hdl = iomanager.schedule_thread_timer( // timer wakes up in current thread;
+        m_wait_data_timer_hdl = iomanager.schedule_global_timer( // timer wakes up in current thread;
             HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_sec) * 1000 * 1000 * 1000, false /* recurring */,
-            nullptr /* cookie */, [this, rreqs](auto) { check_and_fetch_remote_data(rreqs); });
-#endif
+            nullptr /* cookie */, iomgr::reactor_regex::all_worker, [this, rreqs](auto) {
+                LOGINFO("Data Channel: Wait data write timer fired, checking if data is written");
+                check_and_fetch_remote_data(rreqs);
+            });
     }
 
     // block waiting here until all the futs are ready (data channel filled in and promises are made);
