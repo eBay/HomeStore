@@ -31,7 +31,9 @@ using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
 
 class RaftReplService;
 class CP;
-class RaftReplDev : public ReplDev, public nuraft_mesg::mesg_state_mgr {
+class RaftReplDev : public ReplDev,
+                    public nuraft_mesg::mesg_state_mgr,
+                    public std::enable_shared_from_this< RaftReplDev > {
 private:
     shared< RaftStateMachine > m_state_machine;
     RaftReplService& m_repl_svc;
@@ -67,6 +69,7 @@ public:
     RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk >&& rd_sb, bool load_existing);
     virtual ~RaftReplDev() = default;
 
+    bool join_group();
     void destroy();
 
     //////////////// All ReplDev overrides/implementation ///////////////////////
@@ -75,6 +78,7 @@ public:
     folly::Future< std::error_code > async_read(MultiBlkId const& blkid, sisl::sg_list& sgs, uint32_t size,
                                                 bool part_of_batch = false) override;
     void async_free_blks(int64_t lsn, MultiBlkId const& blkid) override;
+    AsyncReplResult<> become_leader() override;
     bool is_leader() const override;
     group_id_t group_id() const override { return m_group_id; }
     std::string group_id_str() const { return boost::uuids::to_string(m_group_id); }
@@ -116,12 +120,13 @@ private:
     shared< nuraft::log_store > data_journal() { return m_data_journal; }
     void push_data_to_all_followers(repl_req_ptr_t rreq);
     void on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data);
-
     void on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data);
     void check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rreqs);
     void fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs);
 
     bool is_resync_mode() { return m_resync_mode; }
+    void handle_error(repl_req_ptr_t const& rreq, ReplServiceError err);
+
 };
 
 } // namespace homestore
