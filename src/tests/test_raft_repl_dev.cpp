@@ -240,7 +240,6 @@ public:
 
     TestReplicatedDB& pick_one_db() { return *dbs_[0]; }
 
-
 #ifdef _PRERELEASE
     void set_flip_point(const std::string flip_name) {
         flip::FlipCondition null_cond;
@@ -264,7 +263,6 @@ public:
             } while (true);
         }
     }
-
 
 private:
     std::vector< std::shared_ptr< TestReplicatedDB > > dbs_;
@@ -312,9 +310,7 @@ TEST_F(RaftReplDevTest, All_Append_Restart_Append) {
     this->validate_all_data();
     g_helper->sync_for_cleanup_start();
 }
-#endif
 
-#if 1
 TEST_F(RaftReplDevTest, All_Append_Fetch_Remote_Data) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
@@ -342,7 +338,7 @@ TEST_F(RaftReplDevTest, All_Append_Fetch_Remote_Data) {
 
     g_helper->sync_for_cleanup_start();
 }
-#endif
+
 int main(int argc, char* argv[]) {
     int parsed_argc{argc};
     char** orig_argv = argv;
