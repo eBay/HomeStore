@@ -79,6 +79,7 @@ struct blkalloc_cp;
 
 class VirtualDev;
 ENUM(vdev_event_t, uint8_t, SIZE_THRESHOLD_REACHED, VDEV_ERRORED_OUT);
+
 using vdev_event_cb_t = std::function< void(VirtualDev&, vdev_event_t, const std::string&) >;
 class VDevCPContext;
 
@@ -108,11 +109,19 @@ public:
     VirtualDev& operator=(VirtualDev&&) noexcept = delete;
     virtual ~VirtualDev() = default;
 
+    /// @brief Run any initialization of the vdev after recovery or first time.
+    virtual void init() {}
+
     /// @brief Adds chunk to the vdev. It is expected that this will happen at startup time and hence it only
     /// takes lock for writing and not reading
     ///
     /// @param chunk Chunk to be added
     virtual void add_chunk(cshared< Chunk >& chunk, bool is_fresh_chunk);
+
+    /// @brief Remove chunk from the vdev.
+    ///
+    /// @param chunk Chunk to be removed.
+    virtual void remove_chunk(cshared< Chunk >& chunk);
 
     /// @brief Formats the vdev asynchronously by zeroing the entire vdev. It will use underlying physical device
     /// capabilities to zero them if fast zero is possible, otherwise will zero block by block
@@ -270,6 +279,8 @@ public:
     virtual uint64_t used_size() const;
     virtual uint64_t num_chunks() const { return m_vdev_info.num_primary_chunks; }
     virtual uint32_t block_size() const { return m_vdev_info.blk_size; }
+    virtual vdev_info info() const { return m_vdev_info; }
+    virtual void update_info(const vdev_info& info) { m_vdev_info = info; }
     virtual uint32_t num_mirrors() const { return 0; }
     virtual std::string to_string() const;
     virtual nlohmann::json get_status(int log_level) const;

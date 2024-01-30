@@ -123,6 +123,13 @@ void VirtualDev::add_chunk(cshared< Chunk >& chunk, bool is_fresh_chunk) {
     m_chunk_selector->add_chunk(chunk);
 }
 
+void VirtualDev::remove_chunk(cshared< Chunk >& chunk) {
+    std::unique_lock lg{m_mgmt_mutex};
+    auto iter = std::remove_if(m_all_chunks.begin(), m_all_chunks.end(), [chunk](auto c) { return c == chunk; });
+    m_all_chunks.erase(iter, m_all_chunks.end());
+    m_chunk_selector->remove_chunk(chunk);
+}
+
 folly::Future< std::error_code > VirtualDev::async_format() {
     static thread_local std::vector< folly::Future< std::error_code > > s_futs;
     s_futs.clear();
@@ -533,17 +540,12 @@ nlohmann::json VirtualDev::get_status(int log_level) const {
     return j;
 }
 
-uint32_t VirtualDev::align_size() const {
-    auto* pdev = *(m_pdevs.begin());
-    return pdev->align_size();
-}
+uint32_t VirtualDev::align_size() const { return m_dmgr.align_size(static_cast< HSDevType >(m_vdev_info.hs_dev_type)); }
 uint32_t VirtualDev::optimal_page_size() const {
-    auto* pdev = *(m_pdevs.begin());
-    return pdev->optimal_page_size();
+    return m_dmgr.optimal_page_size(static_cast< HSDevType >(m_vdev_info.hs_dev_type));
 }
 uint32_t VirtualDev::atomic_page_size() const {
-    auto* pdev = *(m_pdevs.begin());
-    return pdev->atomic_page_size();
+    return m_dmgr.atomic_page_size(static_cast< HSDevType >(m_vdev_info.hs_dev_type));
 }
 
 std::string VirtualDev::to_string() const { return ""; }
@@ -598,6 +600,7 @@ int VirtualDev::cp_progress_percent() { return 100; }
 ///////////////////////// VirtualDev Private Methods /////////////////////////////
 uint64_t VirtualDev::to_dev_offset(BlkId const& b, Chunk** chunk) const {
     *chunk = m_dmgr.get_chunk_mutable(b.chunk_num());
+    RELEASE_ASSERT(*chunk, "Chunk got null {}", b.chunk_num());
     return uint64_cast(b.blk_num()) * block_size() + uint64_cast((*chunk)->start_offset());
 }
 

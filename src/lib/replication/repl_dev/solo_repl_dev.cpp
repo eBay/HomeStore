@@ -138,6 +138,7 @@ void SoloReplDev::cp_flush(CP*) {
     m_rd_sb.write();
 }
 
-void SoloReplDev::cp_cleanup(CP*) { /* m_data_journal->truncate(m_rd_sb->checkpoint_lsn); */ }
+void SoloReplDev::cp_cleanup(CP*) { /* m_data_journal->truncate(m_rd_sb->checkpoint_lsn); */
+}
 
 } // namespace homestore

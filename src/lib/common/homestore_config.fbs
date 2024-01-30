@@ -140,6 +140,9 @@ table Generic {
     // percentage of cache used to create indx mempool. It should be more than 100 to 
     // take into account some floating buffers in writeback cache.
     indx_mempool_percent : uint32 = 110;
+
+    // Number of chunks in journal chunk pool.
+    journal_chunk_pool_capacity: uint32 = 5;
 }
 
 table ResourceLimits {

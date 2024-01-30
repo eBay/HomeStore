@@ -169,6 +169,8 @@ public:
         IndexServiceCallbacks* index_svc_cbs{nullptr};
         shared< ReplApplication > repl_app{nullptr};
         chunk_num_t num_chunks{1};
+        uint64_t chunk_size{32 * 1024 * 1024}; // Chunk size in MB.
+        vdev_size_type_t vdev_size_type{vdev_size_type_t::VDEV_SIZE_STATIC};
     };
 
 #if 0
@@ -178,14 +180,15 @@ public:
                                 bool default_data_svc_alloc_type = true);
 #endif
     static void start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
-                                hs_before_services_starting_cb_t cb = nullptr, bool restart = false) {
+                                hs_before_services_starting_cb_t cb = nullptr, bool fake_restart = false,
+                                bool init_device = true) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
         auto num_fibers = SISL_OPTIONS["num_fibers"].as< uint32_t >();
         auto is_spdk = SISL_OPTIONS["spdk"].as< bool >();
 
-        if (restart) {
+        if (fake_restart) {
             shutdown_homestore(false);
             std::this_thread::sleep_for(std::chrono::seconds{5});
         }
@@ -208,7 +211,7 @@ public:
                 s_dev_names.emplace_back(std::string{"/tmp/" + test_name + "_" + std::to_string(i + 1)});
             }
 
-            if (!restart) { init_files(s_dev_names, dev_size); }
+            if (!fake_restart && init_device) { init_files(s_dev_names, dev_size); }
             for (const auto& fname : s_dev_names) {
                 device_info.emplace_back(std::filesystem::canonical(fname).string(), homestore::HSDevType::Data);
             }
@@ -249,24 +252,29 @@ public:
             hsi->start(hs_input_params{.devices = device_info, .app_mem_size = app_mem_size}, std::move(cb));
 
         if (need_format) {
-            hsi->format_and_start(
-                {{HS_SERVICE::META, {.size_pct = svc_params[HS_SERVICE::META].size_pct}},
-                 {HS_SERVICE::LOG_REPLICATED, {.size_pct = svc_params[HS_SERVICE::LOG_REPLICATED].size_pct}},
-                 {HS_SERVICE::LOG_LOCAL, {.size_pct = svc_params[HS_SERVICE::LOG_LOCAL].size_pct}},
-                 {HS_SERVICE::DATA,
-                  {.size_pct = svc_params[HS_SERVICE::DATA].size_pct,
-                   .num_chunks = svc_params[HS_SERVICE::DATA].num_chunks,
-                   .alloc_type = svc_params[HS_SERVICE::DATA].blkalloc_type,
-                   .chunk_sel_type = svc_params[HS_SERVICE::DATA].custom_chunk_selector
-                       ? chunk_selector_type_t::CUSTOM
-                       : chunk_selector_type_t::ROUND_ROBIN}},
-                 {HS_SERVICE::INDEX, {.size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
-                 {HS_SERVICE::REPLICATION,
-                  {.size_pct = svc_params[HS_SERVICE::REPLICATION].size_pct,
-                   .alloc_type = svc_params[HS_SERVICE::REPLICATION].blkalloc_type,
-                   .chunk_sel_type = svc_params[HS_SERVICE::REPLICATION].custom_chunk_selector
-                       ? chunk_selector_type_t::CUSTOM
-                       : chunk_selector_type_t::ROUND_ROBIN}}});
+            hsi->format_and_start({{HS_SERVICE::META, {.size_pct = svc_params[HS_SERVICE::META].size_pct}},
+                                   {HS_SERVICE::LOG_REPLICATED,
+                                    {.size_pct = 1,
+                                     .chunk_size = svc_params[HS_SERVICE::LOG_REPLICATED].chunk_size,
+                                     .vdev_size_type = svc_params[HS_SERVICE::LOG_REPLICATED].vdev_size_type}},
+                                   {HS_SERVICE::LOG_LOCAL,
+                                    {.size_pct = 1,
+                                     .chunk_size = svc_params[HS_SERVICE::LOG_LOCAL].chunk_size,
+                                     .vdev_size_type = svc_params[HS_SERVICE::LOG_LOCAL].vdev_size_type}},
+                                   {HS_SERVICE::DATA,
+                                    {.size_pct = svc_params[HS_SERVICE::DATA].size_pct,
+                                     .num_chunks = svc_params[HS_SERVICE::DATA].num_chunks,
+                                     .alloc_type = svc_params[HS_SERVICE::DATA].blkalloc_type,
+                                     .chunk_sel_type = svc_params[HS_SERVICE::DATA].custom_chunk_selector
+                                         ? chunk_selector_type_t::CUSTOM
+                                         : chunk_selector_type_t::ROUND_ROBIN}},
+                                   {HS_SERVICE::INDEX, {.size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
+                                   {HS_SERVICE::REPLICATION,
+                                    {.size_pct = svc_params[HS_SERVICE::REPLICATION].size_pct,
+                                     .alloc_type = svc_params[HS_SERVICE::REPLICATION].blkalloc_type,
+                                     .chunk_sel_type = svc_params[HS_SERVICE::REPLICATION].custom_chunk_selector
+                                         ? chunk_selector_type_t::CUSTOM
+                                         : chunk_selector_type_t::ROUND_ROBIN}}});
         }
     }
 

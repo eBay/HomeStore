@@ -78,7 +78,6 @@ protected:
     std::vector< iomgr::io_fiber_t > m_fibers;
     std::mutex m_test_done_mtx;
     std::condition_variable m_test_done_cv;
-
     std::random_device m_re;
     std::atomic< uint32_t > m_num_ops{0};
 
@@ -298,8 +297,8 @@ public:
         }
     }
 
-    void multi_op_execute(const std::vector< std::pair< std::string, int > >& op_list) {
-        preload(SISL_OPTIONS["preload_size"].as< uint32_t >());
+    void multi_op_execute(const std::vector< std::pair< std::string, int > >& op_list, bool skip_preload = false) {
+        if (!skip_preload) { preload(SISL_OPTIONS["preload_size"].as< uint32_t >()); }
         run_in_parallel(op_list);
     }
 
@@ -389,7 +388,7 @@ protected:
                                [](const auto& pair) { return pair.second; });
 
                 double progress_interval = (double)num_iters_this_fiber / 20; // 5% of the total number of iterations
-                double progress_thresh = progress_interval;                  // threshold for progress interval
+                double progress_thresh = progress_interval;                   // threshold for progress interval
                 double elapsed_time, progress_percent, last_progress_time = 0;
 
                 // Construct a weighted distribution based on the input frequencies

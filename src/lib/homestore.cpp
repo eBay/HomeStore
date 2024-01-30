@@ -165,10 +165,10 @@ void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format
             m_meta_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast), fparams.num_chunks);
         } else if ((svc_type & HS_SERVICE::LOG_REPLICATED) && has_log_service()) {
             futs.emplace_back(m_log_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast),
-                                                         LogStoreService::DATA_LOG_FAMILY_IDX, fparams.num_chunks));
+                                                         LogStoreService::DATA_LOG_FAMILY_IDX, fparams.chunk_size));
         } else if ((svc_type & HS_SERVICE::LOG_LOCAL) && has_log_service()) {
             futs.emplace_back(m_log_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast),
-                                                         LogStoreService::CTRL_LOG_FAMILY_IDX, fparams.num_chunks));
+                                                         LogStoreService::CTRL_LOG_FAMILY_IDX, fparams.chunk_size));
         } else if ((svc_type & HS_SERVICE::DATA) && has_data_service()) {
             m_data_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Data), fparams.block_size,
                                         fparams.alloc_type, fparams.chunk_sel_type, fparams.num_chunks);

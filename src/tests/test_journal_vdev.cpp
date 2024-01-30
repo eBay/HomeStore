@@ -22,6 +22,7 @@
 #include <memory>
 #include <mutex>
 #include <random>
+#include <vector>
 
 #include <gtest/gtest.h>
 #include <iomgr/io_environment.hpp>
@@ -42,7 +43,7 @@ using namespace homestore;
 RCU_REGISTER_INIT
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
-SISL_OPTIONS_ENABLE(logging, test_vdev, iomgr, test_common_setup)
+SISL_OPTIONS_ENABLE(logging, test_journal_vdev, iomgr, test_common_setup)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
 struct Param {
@@ -57,32 +58,58 @@ struct Param {
     uint32_t max_wrt_sz;
     uint32_t truncate_watermark_percentage;
 };
-SISL_LOGGING_DECL(test_vdev)
+SISL_LOGGING_DECL(test_journal_vdev)
 static Param gp;
 
 // trigger truncate when used space ratio reaches more than 80%
 constexpr uint32_t dma_alignment = 512;
 
-class VDevIOTest : public ::testing::Test {
+class VDevJournalIOTest : public ::testing::Test {
+public:
+    const std::map< uint32_t, test_common::HSTestHelper::test_params > svc_params = {};
+
+    virtual void SetUp() override {
+        auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
+        auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
+        test_common::HSTestHelper::start_homestore(
+            "test_journal_vdev",
+            {{HS_SERVICE::META, {.size_pct = 15.0}},
+             {HS_SERVICE::LOG_REPLICATED,
+              {.chunk_size = 32 * 1024 * 1024, .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
+             {HS_SERVICE::LOG_LOCAL,
+              {.chunk_size = 32 * 1024 * 1024, .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}}},
+            nullptr /* starting_cb */, false /* restart */);
+    }
+
+    virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
+
+    void restart_homestore() {
+        test_common::HSTestHelper::start_homestore(
+            "test_journal_vdev",
+            {{HS_SERVICE::META, {.size_pct = 15.0}},
+             {HS_SERVICE::LOG_REPLICATED,
+              {.chunk_size = 32 * 1024 * 1024, .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
+             {HS_SERVICE::LOG_LOCAL,
+              {.chunk_size = 32 * 1024 * 1024, .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}}},
+            nullptr /* starting_cb */, true /* restart */);
+    }
+};
+
+class JournalDescriptorTest {
     struct write_info {
         uint64_t size;
         uint64_t crc;
     };
 
 public:
-    virtual void SetUp() override {
-        auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
-        auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
+    JournalDescriptorTest(logdev_id_t id) : m_logdev_id(id) { reinit(); }
 
-        test_common::HSTestHelper::start_homestore("test_journal_vdev",
-                                                   {{HS_SERVICE::META, {.size_pct = 15.0}},
-                                                    {HS_SERVICE::LOG_REPLICATED, {.size_pct = 75.0}},
-                                                    {HS_SERVICE::LOG_LOCAL, {.size_pct = 5.0}}});
+    std::shared_ptr< JournalVirtualDev::Descriptor > vdev_jd() { return m_vdev_jd; }
 
-        m_vdev = hs()->logstore_service().get_vdev(homestore::LogStoreService::DATA_LOG_FAMILY_IDX);
+    void reinit() {
+        auto vdev = hs()->logstore_service().get_vdev(homestore::LogStoreService::DATA_LOG_FAMILY_IDX);
+        m_vdev_jd = vdev->open(m_logdev_id);
     }
-
-    virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
 
     uint64_t get_elapsed_time(Clock::time_point start) {
         std::chrono::seconds sec = std::chrono::duration_cast< std::chrono::seconds >(Clock::now() - start);
@@ -108,10 +135,9 @@ public:
         return false;
     }
 
-    void execute() {
+    void longrunning() {
         m_start_time = Clock::now();
         // m_store = HomeBlks::instance()->get_data_logdev_blkstore();
-        m_total_size = m_vdev->size();
 
         while (keep_running()) {
             if (do_write()) {
@@ -129,7 +155,7 @@ public:
     // get random truncate offset between [m_start_off + used_space*20%, m_start_off + used_space*80%], rounded up to
     // 512 bytes;
     off_t get_rand_truncate_offset() {
-        auto used_space = m_vdev->used_size();
+        auto used_space = m_vdev_jd->used_size();
 
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine generator{rd()};
@@ -137,24 +163,25 @@ public:
                                                                  m_start_off + (used_space * 4) / 5};
 
         auto rand_off = dist(generator);
-        auto off = sisl::round_up(rand_off, dma_alignment);
+        off_t off = sisl::round_up(rand_off, dma_alignment);
 
         // if it is larger than total size, ring back to valid offset;
-        return off >= m_total_size ? (off - m_total_size) : off;
+        assert(off <= m_vdev_jd->end_offset());
+        return off >= m_vdev_jd->end_offset() ? (off - m_vdev_jd->end_offset()) : off;
     }
 
     void truncate(off_t off_to_truncate) {
-        LOGINFO("truncating to offset: 0x{}, start: 0x{}, tail: 0x{}", to_hex(off_to_truncate),
-                to_hex(m_vdev->data_start_offset()), to_hex(m_vdev->tail_offset()));
+        LOGDEBUG("truncating to offset: 0x{}, start: 0x{}, tail: 0x{}", to_hex(off_to_truncate),
+                 to_hex(m_vdev_jd->data_start_offset()), to_hex(m_vdev_jd->tail_offset()));
 
         validate_truncate_offset(off_to_truncate);
 
-        auto tail_before = m_vdev->tail_offset();
-        m_vdev->truncate(off_to_truncate);
-        auto tail_after = m_vdev->tail_offset();
+        auto tail_before = m_vdev_jd->tail_offset();
+        m_vdev_jd->truncate(off_to_truncate);
+        auto tail_after = m_vdev_jd->tail_offset();
 
         HS_DBG_ASSERT_EQ(tail_before, tail_after);
-        HS_DBG_ASSERT_EQ(off_to_truncate, m_vdev->data_start_offset());
+        HS_DBG_ASSERT_EQ(off_to_truncate, m_vdev_jd->data_start_offset());
 
         if (off_to_truncate > m_start_off) {
             // remove the offsets before truncate offset, since they are not valid for read anymore;
@@ -167,8 +194,8 @@ public:
                 }
             }
         } else { // truncate offset is before m_start_off;
-            LOGINFO("truncating before start offset, looping back to beginning devices at offset: 0x{}",
-                    to_hex(off_to_truncate));
+            LOGDEBUG("truncating before start offset, looping back to beginning devices at offset: 0x{}",
+                     to_hex(off_to_truncate));
             m_truncate_loop_back_cnt++;
             // remove the offsets before truncate offset and after m_start_off;
             for (auto it = m_off_to_info_map.begin(); it != m_off_to_info_map.end();) {
@@ -192,50 +219,51 @@ public:
 
         auto elapsed_time = get_elapsed_time(pt_start);
         if (elapsed_time > print_every_n_secs) {
-            LOGINFO("write: {}, read: {}, truncate: {}, truncate_loop_back: {}", m_wrt_cnt, m_read_cnt, m_truncate_cnt,
-                    m_truncate_loop_back_cnt);
+            LOGDEBUG("write: {}, read: {}, truncate: {}, truncate_loop_back: {}", m_wrt_cnt, m_read_cnt, m_truncate_cnt,
+                     m_truncate_loop_back_cnt);
             pt_start = Clock::now();
         }
     }
 
     void space_usage_asserts() {
-        auto used_space = m_vdev->used_size();
-        auto start_off = m_vdev->data_start_offset();
+        auto used_space = m_vdev_jd->used_size();
+        auto start_off = m_vdev_jd->data_start_offset();
 
-        HS_DBG_ASSERT_GT(m_total_size, 0);
-        HS_DBG_ASSERT_LT(used_space, m_total_size);
+        HS_DBG_ASSERT_GT(m_vdev_jd->size(), 0);
+        HS_DBG_ASSERT_LT(used_space, m_vdev_jd->size());
         HS_DBG_ASSERT_EQ(start_off, m_start_off);
     }
 
     bool time_to_truncate() {
-        auto used_space = m_vdev->used_size();
+        auto used_space = m_vdev_jd->used_size();
 
-        if (gp.truncate_watermark_percentage <= (100 * used_space / m_total_size)) { return true; }
+        if (gp.truncate_watermark_percentage <= (100 * used_space / m_vdev_jd->size())) { return true; }
         return false;
     }
 
     void validate_truncate_offset(off_t off) {
-        HS_DBG_ASSERT_LE((uint64_t)off, m_total_size);
+        HS_DBG_ASSERT_LE(off, m_vdev_jd->end_offset());
 
         validate_read_offset(off);
     }
 
     void validate_write_offset(off_t off, uint64_t sz) {
-        auto tail_offset = m_vdev->tail_offset();
-        auto start_offset = m_vdev->data_start_offset();
+        auto tail_offset = m_vdev_jd->tail_offset();
+        auto start_offset = m_vdev_jd->data_start_offset();
 
-        HS_DBG_ASSERT_LE(off + sz, m_vdev->size());
+        HS_DBG_ASSERT_LE(off + static_cast< off_t >(sz), m_vdev_jd->end_offset());
 
-        if ((off + sz) == m_vdev->size()) {
-            HS_DBG_ASSERT_EQ((uint64_t)0, (uint64_t)tail_offset);
+        if ((off + sz) == m_vdev_jd->size()) {
+            // TODO confirm if this needed if no loop back.
+            // HS_DBG_ASSERT_EQ((uint64_t)0, (uint64_t)tail_offset);
         } else {
             HS_DBG_ASSERT_EQ((uint64_t)(off + sz), (uint64_t)tail_offset);
         }
     }
 
     void validate_read_offset(off_t off) {
-        auto tail_offset = m_vdev->tail_offset();
-        auto start_offset = m_vdev->data_start_offset();
+        auto tail_offset = m_vdev_jd->tail_offset();
+        auto start_offset = m_vdev_jd->data_start_offset();
 
         HS_DBG_ASSERT_EQ(m_start_off, start_offset);
         if (start_offset < tail_offset) {
@@ -251,24 +279,39 @@ public:
         auto it = m_off_to_info_map.begin();
         std::advance(it, rand() % m_off_to_info_map.size());
         auto off_to_read = it->first;
+        read_and_validate(off_to_read);
+    }
 
-        LOGDEBUG("reading on offset: 0x{}, size: {}, start: 0x{}, tail: 0x{}", to_hex(off_to_read), it->second.size,
-                 to_hex(m_start_off), to_hex(m_vdev->tail_offset()));
+    void read_all() {
+        // Validate all the offsets.
+        for (const auto& iter : m_off_to_info_map) {
+            read_and_validate(iter.first);
+        }
+    }
 
-        // validate_read_offset(off_to_read);
+    void read_and_validate(off_t off_to_read) {
+        auto& write_info = m_off_to_info_map[off_to_read];
+        LOGDEBUG("reading on offset: 0x{}, size: {}, start: 0x{}, tail: 0x{}", to_hex(off_to_read), write_info.size,
+                 to_hex(m_start_off), to_hex(m_vdev_jd->tail_offset()));
 
-        auto buf = iomanager.iobuf_alloc(512, it->second.size);
-        m_vdev->sync_pread(buf, (size_t)it->second.size, (off_t)off_to_read);
+        validate_read_offset(off_to_read);
 
-        auto crc = util::Hash64((const char*)buf, (size_t)it->second.size);
-        HS_DBG_ASSERT_EQ(crc, it->second.crc, "CRC Mismatch: read out crc: {}, saved write: {}", crc, it->second.crc);
+        auto buf = iomanager.iobuf_alloc(512, write_info.size);
+        auto ec = m_vdev_jd->sync_pread(buf, (size_t)write_info.size, (off_t)off_to_read);
+        HS_REL_ASSERT(!ec, "Error in reading");
+        auto count = *(uint64_t*)buf;
+
+        auto crc = util::Hash64((const char*)buf, (size_t)write_info.size);
+        HS_DBG_ASSERT_EQ(crc, write_info.crc,
+                         "CRC Mismatch: offset: 0x{} size: {} count: {} read out crc: {}, saved write: {}",
+                         to_hex(off_to_read), write_info.size, count, crc, write_info.crc);
         iomanager.iobuf_free(buf);
         m_read_cnt++;
     }
 
     void random_write() {
         auto sz_to_wrt = rand_size();
-        auto off_to_wrt = m_vdev->alloc_next_append_blk(sz_to_wrt);
+        auto off_to_wrt = m_vdev_jd->alloc_next_append_blk(sz_to_wrt);
 
         auto it = m_off_to_info_map.find(off_to_wrt);
         if (it != m_off_to_info_map.end()) {
@@ -280,18 +323,20 @@ public:
 
         validate_write_offset(off_to_wrt, sz_to_wrt);
 
-        LOGDEBUG("writing to offset: 0x{}, size: {}, start: 0x{}, tail: 0x{}", to_hex(off_to_wrt), sz_to_wrt,
-                 to_hex(m_start_off), to_hex(m_vdev->tail_offset()));
-
+        m_wrt_cnt++;
         auto buf = iomanager.iobuf_alloc(512, sz_to_wrt);
         gen_rand_buf(buf, sz_to_wrt);
+        *(uint64_t*)buf = m_wrt_cnt;
 
-        m_vdev->sync_pwrite(buf, sz_to_wrt, off_to_wrt);
-        HS_DBG_ASSERT_LT((size_t)off_to_wrt, (size_t)m_total_size);
+        m_vdev_jd->sync_pwrite(buf, sz_to_wrt, off_to_wrt);
+        HS_DBG_ASSERT_LT((size_t)off_to_wrt, (size_t)m_vdev_jd->end_offset());
 
-        m_wrt_cnt++;
         m_off_to_info_map[off_to_wrt].size = sz_to_wrt;
         m_off_to_info_map[off_to_wrt].crc = util::Hash64((const char*)buf, (size_t)sz_to_wrt);
+
+        LOGDEBUG("writing to bytes offset: 0x{}, size: {}, write_count: {} start: 0x{}, tail: 0x{} crc: 0x{}",
+                 to_hex(off_to_wrt), sz_to_wrt, m_wrt_cnt, to_hex(m_start_off), to_hex(m_vdev_jd->tail_offset()),
+                 m_off_to_info_map[off_to_wrt].crc);
 
         iomanager.iobuf_free(buf);
     }
@@ -315,20 +360,115 @@ public:
     }
 
 private:
+    logdev_id_t m_logdev_id = 0;
     off_t m_start_off = 0;
     uint64_t m_wrt_cnt = 0;
     uint64_t m_read_cnt = 0;
     uint64_t m_truncate_cnt = 0;
     uint64_t m_truncate_loop_back_cnt = 0;
-    uint64_t m_total_size = 0;
     std::map< off_t, write_info > m_off_to_info_map;
     Clock::time_point m_start_time;
-    std::shared_ptr< JournalVirtualDev > m_vdev;
+    std::shared_ptr< JournalVirtualDev::Descriptor > m_vdev_jd;
+    friend class VDevJournalIOTest;
 };
 
-TEST_F(VDevIOTest, VDevIOTest) { this->execute(); }
+// TODO add more tests covering unclean shutdown and more corner cases.
 
-SISL_OPTION_GROUP(test_vdev,
+TEST_F(VDevJournalIOTest, LongRunning) {
+    // Create multiple journal descriptors and run long running test
+    // of random read, write and truncate parallely.
+    auto num_vdev_jd = SISL_OPTIONS["num_vdev_jd"].as< uint32_t >();
+    std::vector< std::thread > threads;
+    for (uint32_t i = 0; i < num_vdev_jd; i++) {
+        logdev_id_t id = i + 2; // 0 and 1 are used for data and control logdev family.
+        threads.emplace_back(std::thread([id] { JournalDescriptorTest(id).longrunning(); }));
+    }
+    for (auto& t : threads)
+        t.join();
+}
+
+TEST_F(VDevJournalIOTest, Recovery) {
+    // Create multiple journal descriptors and add log entries, truncate
+    // do restart, add more entries and verify the log entries.
+    gp.fixed_wrt_sz_enabled = true;
+    gp.fixed_wrt_sz = 1024;
+    int num_entries = 1024;
+
+    auto num_vdev_jd = SISL_OPTIONS["num_vdev_jd"].as< uint32_t >();
+    std::vector< JournalDescriptorTest > tests;
+    for (uint32_t i = 0; i < num_vdev_jd; i++) {
+        logdev_id_t id = i + 2; // 0 and 1 are used for data and control logdev family.
+        tests.emplace_back(JournalDescriptorTest(id));
+    }
+
+    LOGINFO("Add log entries");
+    // Write 512k logs which should create more chunks dynamically.
+    for (uint32_t i = 0; i < tests.size(); i++) {
+        for (int j = 0; j < num_entries; j++) {
+            tests[i].random_write();
+        }
+    }
+
+    // Validate all logs.
+    LOGINFO("Validate log entries");
+    for (uint32_t i = 0; i < tests.size(); i++) {
+        tests[i].read_all();
+    }
+
+    // Truncate and validate logs.
+    for (uint32_t i = 0; i < tests.size(); i++) {
+        tests[i].truncate(tests[i].get_rand_truncate_offset());
+        tests[i].read_all();
+    }
+
+    LOGINFO("Restart homestore");
+
+    // Record the offsets of the journal descriptors.
+    std::vector< uint64_t > last_tail_offset, last_start_offset;
+    for (uint32_t i = 0; i < tests.size(); i++) {
+        auto vdev_jd = tests[i].vdev_jd();
+        last_tail_offset.push_back(vdev_jd->tail_offset());
+        last_start_offset.push_back(vdev_jd->data_start_offset());
+    }
+
+    // Restart homestore.
+    restart_homestore();
+
+    // Set the offsets after restart.
+    for (uint32_t i = 0; i < tests.size(); i++) {
+        tests[i].reinit();
+        auto vdev_jd = tests[i].vdev_jd();
+        vdev_jd->update_data_start_offset(last_start_offset[i]);
+        vdev_jd->update_tail_offset(last_tail_offset[i]);
+    }
+
+    // Validate all logs.
+    for (uint32_t i = 0; i < tests.size(); i++) {
+        tests[i].read_all();
+    }
+
+    LOGINFO("Add log entries");
+    // Write 512k logs which should create more chunks dynamically.
+    for (uint32_t i = 0; i < tests.size(); i++) {
+        for (int j = 0; j < num_entries; j++) {
+            tests[i].random_write();
+        }
+    }
+
+    // Validate all logs.
+    for (uint32_t i = 0; i < tests.size(); i++) {
+        tests[i].read_all();
+    }
+
+    // Truncate and validate all logs.
+    LOGINFO("Validate log entries");
+    for (uint32_t i = 0; i < tests.size(); i++) {
+        tests[i].truncate(tests[i].get_rand_truncate_offset());
+        tests[i].read_all();
+    }
+}
+
+SISL_OPTION_GROUP(test_journal_vdev,
                   (truncate_watermark_percentage, "", "truncate_watermark_percentage",
                    "percentage of space usage to trigger truncate", ::cxxopts::value< uint32_t >()->default_value("80"),
                    "number"),
@@ -345,12 +485,15 @@ SISL_OPTION_GROUP(test_vdev,
                   (per_read, "", "per_read", "read percentage of io that are reads",
                    ::cxxopts::value< uint32_t >()->default_value("20"), "number"),
                   (per_write, "", "per_write", "write percentage of io that are writes",
-                   ::cxxopts::value< uint32_t >()->default_value("80"), "number"));
+                   ::cxxopts::value< uint32_t >()->default_value("80"), "number"),
+                  (num_vdev_jd, "", "num_vdev_jd", "number of descriptors for journal vdev",
+                   ::cxxopts::value< uint32_t >()->default_value("4"), "number"));
 
 int main(int argc, char* argv[]) {
-    SISL_OPTIONS_LOAD(argc, argv, logging, test_vdev, iomgr, test_common_setup);
-    ::testing::InitGoogleTest(&argc, argv);
-    sisl::logging::SetLogger("test_vdev");
+    int parsed_argc = argc;
+    ::testing::InitGoogleTest(&parsed_argc, argv);
+    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_journal_vdev, iomgr, test_common_setup);
+    sisl::logging::SetLogger("test_journal_vdev");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%n] [%t] %v");
 
     gp.num_io = SISL_OPTIONS["num_io"].as< uint64_t >();

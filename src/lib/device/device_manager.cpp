@@ -209,28 +209,60 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
     for (const auto& d : m_dev_infos) {
         max_num_chunks += hs_super_blk::max_chunks_in_pdev(d);
     }
-    auto input_num_chunks = vparam.num_chunks;
-    vparam.num_chunks = std::min(vparam.num_chunks, max_num_chunks);
-    if (input_num_chunks != vparam.num_chunks) {
-        LOGINFO("{} Virtual device is attempted to be created with num_chunks={}, it needs to be adjust to "
-                "new_num_chunks={}",
-                vparam.vdev_name, in_bytes(input_num_chunks), in_bytes(vparam.num_chunks));
-    }
 
     auto input_vdev_size = vparam.vdev_size;
-    vparam.vdev_size = sisl::round_up(vparam.vdev_size, vparam.num_chunks * vparam.blk_size);
-    if (input_vdev_size != vparam.vdev_size) {
-        LOGINFO("{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}",
-                vparam.vdev_name, in_bytes(input_vdev_size), in_bytes(vparam.vdev_size));
-    }
+    if (vparam.size_type == vdev_size_type_t::VDEV_SIZE_STATIC) {
+        // If its static size, vdev_size should be provided.
+        RELEASE_ASSERT_GT(vparam.vdev_size, 0, "Vdev size cant be 0");
 
-    uint32_t chunk_size = vparam.vdev_size / vparam.num_chunks;
+        // Either num_chunks or chunk_size can be provided and we calculate the other.
+        if (vparam.num_chunks != 0) {
+            vparam.vdev_size = sisl::round_up(vparam.vdev_size, vparam.num_chunks * vparam.blk_size);
+            if (input_vdev_size != vparam.vdev_size) {
+                LOGINFO(
+                    "{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}",
+                    vparam.vdev_name, in_bytes(input_vdev_size), in_bytes(vparam.vdev_size));
+            }
+
+            auto input_num_chunks = vparam.num_chunks;
+            vparam.num_chunks = std::min(vparam.num_chunks, max_num_chunks);
+            if (input_num_chunks != vparam.num_chunks) {
+                LOGINFO("{} Virtual device is attempted to be created with num_chunks={}, it needs to be adjust to "
+                        "new_num_chunks={}",
+                        vparam.vdev_name, in_bytes(input_num_chunks), in_bytes(vparam.num_chunks));
+            }
+            vparam.chunk_size = vparam.vdev_size / vparam.num_chunks;
+        } else if (vparam.chunk_size != 0) {
+            auto input_chunk_size = vparam.chunk_size;
+            vparam.chunk_size = std::min(vparam.chunk_size, hs_super_blk::MAX_CHUNKS_IN_SYSTEM);
+            if (input_chunk_size != vparam.chunk_size) {
+                LOGINFO("{} Virtual device is attempted to be created with chunk_size={}, it needs to be adjust to "
+                        "new_chunk_size={}",
+                        vparam.vdev_name, in_bytes(input_chunk_size), in_bytes(vparam.chunk_size));
+            }
+
+            vparam.vdev_size = sisl::round_up(vparam.vdev_size, vparam.chunk_size);
+            if (input_vdev_size != vparam.vdev_size) {
+                LOGINFO(
+                    "{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}",
+                    vparam.vdev_name, in_bytes(input_vdev_size), in_bytes(vparam.vdev_size));
+            }
+
+            vparam.num_chunks = vparam.vdev_size / vparam.chunk_size;
+        } else {
+            RELEASE_ASSERT(false, "Both num_chunks and chunk_size cant be zero for vdev");
+        }
+
+    } else {
+        // We need chunk_size. We start with zero num_chunks.
+        RELEASE_ASSERT_GT(vparam.chunk_size, 0, "Chunk size should be provided");
+    }
 
     LOGINFO(
         "New Virtal Dev={} of size={} with id={} is attempted to be created with multi_pdev_opts={}. The params are "
         "adjusted as follows: VDev_Size={} Num_pdevs={} Total_chunks_across_all_pdevs={} Each_Chunk_Size={}",
         vparam.vdev_name, in_bytes(input_vdev_size), vdev_id, vparam.multi_pdev_opts, in_bytes(vparam.vdev_size),
-        pdevs.size(), vparam.num_chunks, in_bytes(chunk_size));
+        pdevs.size(), vparam.num_chunks, in_bytes(vparam.chunk_size));
 
     // Convert the vparameters to the vdev_info
     auto buf = hs_utils::iobuf_alloc(vdev_info::size, sisl::buftag::superblk, pdevs[0]->align_size());
@@ -242,24 +274,31 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
     m_vdevs[vdev_id] = vdev;
 
     // Create initial chunk based on current size
-    for (auto& pdev : pdevs) {
-        std::vector< uint32_t > chunk_ids;
+    if (vparam.num_chunks != 0) {
+        for (auto& pdev : pdevs) {
+            std::vector< uint32_t > chunk_ids;
 
-        // Create chunk ids for all chunks in each of these pdevs
-        for (uint32_t c{0}; c < vparam.num_chunks / pdevs.size(); ++c) {
-            auto chunk_id = m_chunk_id_bm.get_next_reset_bit(0u);
-            if (chunk_id == sisl::Bitset::npos) { throw std::out_of_range("System has no room for additional chunks"); }
-            m_chunk_id_bm.set_bit(chunk_id);
-            chunk_ids.push_back(chunk_id);
-        }
+            // Create chunk ids for all chunks in each of these pdevs
+            for (uint32_t c{0}; c < vparam.num_chunks / pdevs.size(); ++c) {
+                auto chunk_id = m_chunk_id_bm.get_next_reset_bit(0u);
+                if (chunk_id == sisl::Bitset::npos) {
+                    throw std::out_of_range("System has no room for additional chunks");
+                }
+                m_chunk_id_bm.set_bit(chunk_id);
+                chunk_ids.push_back(chunk_id);
+            }
 
-        // Create all chunks at one shot and add each one to the vdev
-        auto chunks = pdev->create_chunks(chunk_ids, vdev_id, chunk_size);
-        for (auto& chunk : chunks) {
-            vdev->add_chunk(chunk, true /* fresh_chunk */);
-            m_chunks[chunk->chunk_id()] = chunk;
+            // Create all chunks at one shot and add each one to the vdev
+            auto chunks = pdev->create_chunks(chunk_ids, vdev_id, vparam.chunk_size);
+            for (auto& chunk : chunks) {
+                vdev->add_chunk(chunk, true /* fresh_chunk */);
+                m_chunks[chunk->chunk_id()] = chunk;
+            }
         }
     }
+
+    // Handle any initialization needed.
+    vdev->init();
 
     // Locate and write the vdev info in the super blk area of all pdevs this vdev will be created on
     for (auto& pdev : pdevs) {
@@ -299,11 +338,99 @@ void DeviceManager::load_vdevs() {
                 }
                 m_chunk_id_bm.set_bit(chunk->chunk_id());
                 m_chunks[chunk->chunk_id()] = chunk;
+                HS_LOG(TRACE, device, "loaded chunks {} ", chunk->to_string())
                 m_vdevs[chunk->vdev_id()]->add_chunk(chunk, false /* fresh_chunk */);
                 return true;
             });
         }
     }
+
+    // Run initialization of all vdevs.
+    for (auto& vdev : m_vdevs) {
+        vdev->init();
+    }
+}
+
+shared< Chunk > DeviceManager::create_chunk(HSDevType dev_type, uint32_t vdev_id, uint64_t chunk_size,
+                                            const sisl::blob& data) {
+    std::unique_lock lg{m_vdev_mutex};
+    auto pdevs = pdevs_by_type_internal(dev_type);
+    auto chunk_id = m_chunk_id_bm.get_next_reset_bit(0u);
+    if (chunk_id == sisl::Bitset::npos) { throw std::out_of_range("System has no room for additional chunk"); }
+    m_chunk_id_bm.set_bit(chunk_id);
+
+    shared< Chunk > chunk;
+    PhysicalDev* pdev = nullptr;
+    // Create a chunk on any pdev of device type.
+    for (const auto& dev : pdevs) {
+        // Ordinal added in add_chunk.
+        chunk = dev->create_chunk(chunk_id, vdev_id, chunk_size, 0 /* ordinal */, data);
+        if (chunk != nullptr) {
+            pdev = dev;
+            break;
+        }
+    }
+
+    if (!chunk) { throw std::out_of_range("Unable to create chunk on physical devices"); }
+
+    auto vdev = m_vdevs[vdev_id];
+    vdev->add_chunk(chunk, true /* fresh_chunk */);
+    m_chunks[chunk->chunk_id()] = chunk;
+
+    auto buf = hs_utils::iobuf_alloc(vdev_info::size, sisl::buftag::superblk, pdev->align_size());
+    auto vdev_info = vdev->info();
+    vdev_info.vdev_size += chunk_size;
+    vdev_info.num_primary_chunks++;
+    vdev_info.compute_checksum();
+
+    // Update the vdev info.
+    vdev->update_info(vdev_info);
+    std::memcpy(buf, &vdev_info, sizeof(vdev_info));
+    uint64_t offset = hs_super_blk::vdev_sb_offset() + (vdev_id * vdev_info::size);
+    pdev->write_super_block(buf, vdev_info::size, offset);
+    hs_utils::iobuf_free(buf, sisl::buftag::superblk);
+
+    HS_LOG(TRACE, device, "Created chunk id={} dev_type={} vdev_id={} size={}", chunk_id, (uint8_t)dev_type, vdev_id,
+           chunk_size);
+    return chunk;
+}
+
+void DeviceManager::remove_chunk(shared< Chunk > chunk) {
+    std::unique_lock lg{m_vdev_mutex};
+    remove_chunk_locked(chunk);
+}
+
+void DeviceManager::remove_chunk_locked(shared< Chunk > chunk) {
+    auto chunk_id = chunk->chunk_id();
+    auto vdev_id = chunk->vdev_id();
+
+    // Reset chunk id bitmap.
+    m_chunk_id_bm.reset_bit(chunk_id);
+
+    // Delete from the physical dev.
+    auto pdev = chunk->physical_dev_mutable();
+    pdev->remove_chunk(chunk);
+
+    // Remove from the vdev.
+    auto vdev = m_vdevs[vdev_id];
+    vdev->remove_chunk(chunk);
+
+    m_chunks[chunk_id].reset();
+
+    // Update the vdev info.
+    auto buf = hs_utils::iobuf_alloc(vdev_info::size, sisl::buftag::superblk, pdev->align_size());
+    auto vdev_info = vdev->info();
+    vdev_info.vdev_size -= vdev_info.chunk_size;
+    vdev_info.num_primary_chunks--;
+    vdev_info.compute_checksum();
+
+    vdev->update_info(vdev_info);
+    std::memcpy(buf, &vdev_info, sizeof(vdev_info));
+    uint64_t offset = hs_super_blk::vdev_sb_offset() + (vdev_id * vdev_info::size);
+    pdev->write_super_block(buf, vdev_info::size, offset);
+    hs_utils::iobuf_free(buf, sisl::buftag::superblk);
+
+    HS_LOG(TRACE, device, "Removed chunk id={} vdev_id={}", chunk_id, vdev_id);
 }
 
 uint32_t DeviceManager::populate_pdev_info(const dev_info& dinfo, const iomgr::drive_attributes& attr,
@@ -348,6 +475,7 @@ static void populate_vdev_info(const vdev_parameters& vparam, uint32_t vdev_id,
     out_info->blk_size = vparam.blk_size;
     out_info->num_primary_chunks =
         (vparam.multi_pdev_opts == vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED) ? pdevs.size() : 1u;
+    out_info->chunk_size = vparam.chunk_size;
     out_info->set_allocated();
     out_info->set_dev_type(vparam.dev_type);
     out_info->set_pdev_choice(vparam.multi_pdev_opts);
@@ -405,6 +533,7 @@ uint32_t DeviceManager::atomic_page_size(HSDevType dtype) const {
 uint32_t DeviceManager::optimal_page_size(HSDevType dtype) const {
     return pdevs_by_type_internal(dtype)[0]->optimal_page_size();
 }
+uint32_t DeviceManager::align_size(HSDevType dtype) const { return pdevs_by_type_internal(dtype)[0]->align_size(); }
 
 std::vector< shared< VirtualDev > > DeviceManager::get_vdevs() const {
     std::vector< shared< VirtualDev > > ret_v;
@@ -419,6 +548,95 @@ uint64_t hs_super_blk::vdev_super_block_size() { return (hs_super_blk::MAX_VDEVS
 
 uint64_t hs_super_blk::chunk_super_block_size(const dev_info& dinfo) {
     return chunk_info_bitmap_size(dinfo) + (max_chunks_in_pdev(dinfo) * chunk_info::size);
+}
+
+ChunkPool::ChunkPool(DeviceManager& dmgr, Params&& params) : m_dmgr(dmgr), m_params(std::move(params)) {}
+
+ChunkPool::~ChunkPool() {
+    {
+        std::unique_lock< std::mutex > lk{m_pool_mutex};
+        m_run_pool = false;
+        m_pool_cv.notify_one();
+    }
+    // Wait for the chunk pool to finish.
+    m_pool_halt.getFuture().get();
+    m_producer_thread.join();
+}
+
+void ChunkPool::start() {
+    RELEASE_ASSERT(!m_run_pool, "Pool already started");
+    {
+        std::unique_lock< std::mutex > lk{m_pool_mutex};
+        m_run_pool = true;
+    }
+    m_producer_thread = std::thread(&ChunkPool::producer, this);
+    HS_LOG(INFO, device, "Starting chunk pool for vdev {}", m_params.vdev_id);
+}
+
+void ChunkPool::producer() {
+    // Fill the chunk pool.
+    while (true) {
+        // Wait until run is false or pool is less than half the capacity
+        // so that consumer have space to release unused chunks back to pool.
+        std::unique_lock< std::mutex > lk{m_pool_mutex};
+        m_pool_cv.wait(lk, [this] {
+            if (m_run_pool == false) return true;
+            if (m_pool.size() < (m_params.pool_capacity / 2)) return true;
+            return false;
+        });
+
+        if (!m_run_pool) {
+            m_pool_halt.setValue();
+            return;
+        }
+
+        auto private_data = m_params.init_private_data_cb();
+        auto chunk = m_dmgr.create_chunk(static_cast< HSDevType >(m_params.hs_dev_type), m_params.vdev_id,
+                                         m_params.chunk_size, std::move(private_data));
+        RELEASE_ASSERT(chunk, "Cannot create chunk");
+        m_pool.push_back(chunk);
+        HS_LOG(TRACE, device, "Produced chunk to pool id {} type {} vdev {} size {}", chunk->chunk_id(),
+               m_params.hs_dev_type, m_params.vdev_id, m_params.chunk_size);
+        m_pool_cv.notify_one();
+    }
+}
+
+shared< Chunk > ChunkPool::dequeue() {
+    RELEASE_ASSERT(m_run_pool, "Pool not started");
+    shared< Chunk > chunk;
+    {
+        std::unique_lock< std::mutex > lk{m_pool_mutex};
+        m_pool_cv.wait(lk, [this] { return !m_pool.empty(); });
+        chunk = m_pool.back();
+        m_pool.pop_back();
+    }
+    RELEASE_ASSERT(chunk, "Chunk invalid");
+    HS_LOG(TRACE, device, "Dequeue chunk {} from pool", chunk->chunk_id());
+    m_pool_cv.notify_one();
+    return chunk;
+}
+
+bool ChunkPool::enqueue(shared< Chunk >& chunk) {
+    RELEASE_ASSERT(chunk, "Chunk invalid");
+    bool reuse = false;
+    {
+        std::unique_lock< std::mutex > lk{m_pool_mutex};
+        if (m_pool.size() < m_params.pool_capacity) {
+            chunk->set_user_private(m_params.init_private_data_cb());
+            m_pool.push_back(chunk);
+            reuse = true;
+            HS_LOG(TRACE, device, "Enqueue chunk {} to pool", chunk->chunk_id());
+        }
+    }
+
+    if (!reuse) {
+        // If cache is full, remove the chunk.
+        HS_LOG(TRACE, device, "Cache is full removing chunk {}", chunk->chunk_id());
+        m_dmgr.remove_chunk(chunk);
+    } else {
+        m_pool_cv.notify_one();
+    }
+    return reuse;
 }
 
 } // namespace homestore
