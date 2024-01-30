@@ -36,7 +36,7 @@ void ResourceMgr::dec_dirty_buf_size(const uint32_t size) {
     HS_REL_ASSERT_GT(size, 0);
     const int64_t dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_sub(size, std::memory_order_relaxed);
     COUNTER_DECREMENT(m_metrics, dirty_buf_cnt, size);
-    HS_REL_ASSERT_GE(dirty_buf_cnt, 0);
+    HS_REL_ASSERT_GE(dirty_buf_cnt, size);
 }
 
 void ResourceMgr::register_dirty_buf_exceed_cb(exceed_limit_cb_t cb) { m_dirty_buf_exceed_cb = std::move(cb); }
@@ -48,10 +48,6 @@ void ResourceMgr::inc_free_blk(int size) {
     auto sz = m_hs_fb_size.fetch_add(size, std::memory_order_relaxed);
     COUNTER_INCREMENT(m_metrics, free_blk_size_in_cp, size);
     COUNTER_INCREMENT(m_metrics, free_blk_cnt_in_cp, 1);
-
-    if (m_dirty_buf_exceed_cb && (cnt > get_free_blk_cnt_limit() || sz > get_free_blk_size_limit())) {
-        m_dirty_buf_exceed_cb(cnt);
-    }
 }
 
 void ResourceMgr::dec_free_blk(int size) {
