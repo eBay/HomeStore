@@ -108,7 +108,7 @@ AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t
     auto rdev = std::make_shared< SoloReplDev >(std::move(rd_sb), false /* load_existing */);
 
     auto listener = m_repl_app->create_repl_dev_listener(group_id);
-    listener->set_repl_dev(rdev.get());
+    listener->set_repl_dev(rdev);
     rdev->attach_listener(std::move(listener));
 
     {
@@ -133,7 +133,7 @@ void SoloReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
     auto rdev = std::make_shared< SoloReplDev >(std::move(rd_sb), true /* load_existing */);
 
     auto listener = m_repl_app->create_repl_dev_listener(group_id);
-    listener->set_repl_dev(rdev.get());
+    listener->set_repl_dev(rdev);
     rdev->attach_listener(std::move(listener));
 
     {
