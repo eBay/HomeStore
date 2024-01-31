@@ -37,6 +37,7 @@ sisl::byte_view log_stream_reader::next_group(off_t* out_dev_offset) {
         uint64_cast(sisl::round_up(HS_DYNAMIC_CONFIG(logstore.bulk_read_size), m_read_size_multiple));
     uint64_t min_needed{m_read_size_multiple};
     sisl::byte_view ret_buf;
+    *out_dev_offset = m_vdev_jd->dev_offset(m_cur_read_bytes);
 
 read_again:
     if (m_cur_log_buf.size() < min_needed) {
@@ -145,7 +146,9 @@ sisl::byte_view log_stream_reader::read_next_bytes(uint64_t nbytes) {
     if (m_cur_log_buf.size()) { memcpy(out_buf->bytes(), m_cur_log_buf.bytes(), m_cur_log_buf.size()); }
 
     const auto prev_pos = m_vdev_jd->seeked_pos();
-    m_vdev_jd->sync_next_read(out_buf->bytes() + m_cur_log_buf.size(), nbytes);
+    auto sz_read = m_vdev_jd->sync_next_read(out_buf->bytes() + m_cur_log_buf.size(), nbytes);
+    if (sz_read == 0) { return {}; }
+
     LOGINFOMOD(logstore, "LogStream read {} bytes from vdev offset {} and vdev cur offset {}", nbytes, prev_pos,
                m_vdev_jd->seeked_pos());
     return sisl::byte_view{out_buf};

@@ -108,6 +108,7 @@ void LogDev::start(bool format, JournalVirtualDev* vdev) {
 }
 
 void LogDev::stop() {
+    THIS_LOGDEV_LOG(INFO, "Logdev stopping family {}", m_family_id);
     HS_LOG_ASSERT((m_pending_flush_size == 0), "LogDev stop attempted while writes to logdev are pending completion");
     const bool locked_now = run_under_flush_lock([this]() {
         {
@@ -144,19 +145,20 @@ void LogDev::stop() {
         m_log_group_pool[i].stop();
     }
 
-    THIS_LOGDEV_LOG(INFO, "LogDev stopped successfully");
+    THIS_LOGDEV_LOG(INFO, "LogDev stopped successfully family {}", m_family_id);
     m_hs.reset();
 }
 
 void LogDev::do_load(const off_t device_cursor) {
     log_stream_reader lstream{device_cursor, m_vdev, m_vdev_jd, m_flush_size_multiple};
     logid_t loaded_from{-1};
+    off_t group_dev_offset = 0;
 
-    off_t group_dev_offset;
+    THIS_LOGDEV_LOG(TRACE, "LogDev::do_load start {} ", m_family_id);
+
     do {
         const auto buf = lstream.next_group(&group_dev_offset);
         if (buf.size() == 0) {
-            assert_next_pages(lstream);
             THIS_LOGDEV_LOG(INFO, "LogDev loaded log_idx in range of [{} - {}]", loaded_from, m_log_idx - 1);
             break;
         }
@@ -201,6 +203,7 @@ void LogDev::do_load(const off_t device_cursor) {
             }
             ++i;
         }
+
         m_log_idx = header->start_idx() + i;
         m_last_crc = header->cur_grp_crc;
     } while (true);
@@ -208,6 +211,7 @@ void LogDev::do_load(const off_t device_cursor) {
     // Update the tail offset with where we finally end up loading, so that new append entries can be written from
     // here.
     m_vdev_jd->update_tail_offset(group_dev_offset);
+    THIS_LOGDEV_LOG(TRACE, "LogDev::do_load end {} ", m_family_id);
 }
 
 void LogDev::assert_next_pages(log_stream_reader& lstream) {
@@ -220,8 +224,8 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
             auto* header = r_cast< const log_group_header* >(buf.bytes());
             HS_REL_ASSERT_GT(m_log_idx.load(std::memory_order_acquire), header->start_idx(),
                              "Found a header with future log_idx after reaching end of log. Hence rbuf which was read "
-                             "must have been corrupted, Header: {}",
-                             *header);
+                             "must have been corrupted, Family {} Header: {}",
+                             m_family_id, *header);
         }
     }
 }
@@ -528,7 +532,8 @@ uint64_t LogDev::truncate(const logdev_key& key) {
     HS_DBG_ASSERT_GE(key.idx, m_last_truncate_idx);
     uint64_t const num_records_to_truncate = static_cast< uint64_t >(key.idx - m_last_truncate_idx);
     if (num_records_to_truncate > 0) {
-        HS_PERIODIC_LOG(INFO, logstore, "Truncating log device upto log_id={} vdev_offset={} truncated {} log records",
+        HS_PERIODIC_LOG(INFO, logstore,
+                        "Truncating log device upto {} log_id={} vdev_offset={} truncated {} log records", m_family_id,
                         key.idx, key.dev_offset, num_records_to_truncate);
         m_log_records->truncate(key.idx);
         m_vdev_jd->truncate(key.dev_offset);
