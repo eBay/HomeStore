@@ -49,7 +49,6 @@
 #include <homestore/logstore_service.hpp>
 
 #include "logstore/log_dev.hpp"
-#include "logstore/log_store_family.hpp"
 #include "test_common/homestore_test_common.hpp"
 
 using namespace homestore;
@@ -76,7 +75,7 @@ struct test_log_data {
     }
 };
 
-typedef std::function< void(logstore_family_id_t, logstore_seq_num_t, logdev_key) > test_log_store_comp_cb_t;
+typedef std::function< void(logdev_id_t, logstore_seq_num_t, logdev_key) > test_log_store_comp_cb_t;
 class Timer {
 public:
     Timer() : beg_{clock_::now()} {}
@@ -99,15 +98,15 @@ class SampleLogStoreClient {
 public:
     friend class SampleDB;
 
-    SampleLogStoreClient(std::shared_ptr< HomeLogStore > store, const logstore_family_id_t family_idx,
+    SampleLogStoreClient(std::shared_ptr< HomeLogStore > store, const logdev_id_t logdev_id,
                          const test_log_store_comp_cb_t& cb) :
-            m_store_id{store->get_store_id()}, m_comp_cb{cb}, m_family{family_idx} {
+            m_store_id{store->get_store_id()}, m_comp_cb{cb}, m_logdev_id{logdev_id} {
         set_log_store(store);
     }
 
-    explicit SampleLogStoreClient(const logstore_family_id_t family_idx, const test_log_store_comp_cb_t& cb) :
-            SampleLogStoreClient(logstore_service().create_new_log_store(family_idx, false /* append_mode */),
-                                 family_idx, cb) {}
+    explicit SampleLogStoreClient(const logdev_id_t logdev_id, const test_log_store_comp_cb_t& cb) :
+            SampleLogStoreClient(logstore_service().create_new_log_store(logdev_id, false /* append_mode */), logdev_id,
+                                 cb) {}
 
     SampleLogStoreClient(const SampleLogStoreClient&) = delete;
     SampleLogStoreClient(SampleLogStoreClient&&) noexcept = delete;
@@ -161,7 +160,7 @@ public:
                                              } else {
                                                  std::free(voidptr_cast(d));
                                              }
-                                             m_comp_cb(m_family, seq_num, ld_key);
+                                             m_comp_cb(m_logdev_id, seq_num, ld_key);
                                          });
             }
         }
@@ -308,13 +307,26 @@ public:
     }
 
     void rollback_validate(uint32_t num_lsns_to_rollback) {
+        std::mutex mtx;
+        std::condition_variable cv;
+        bool rollback_done = false;
         auto const upto_lsn = m_cur_lsn.fetch_sub(num_lsns_to_rollback) - num_lsns_to_rollback - 1;
-        m_log_store->rollback_async(upto_lsn, nullptr);
-        ASSERT_EQ(m_log_store->get_contiguous_completed_seq_num(-1), upto_lsn)
-            << "Last completed seq num is not reset after rollback";
-        ASSERT_EQ(m_log_store->get_contiguous_issued_seq_num(-1), upto_lsn)
-            << "Last issued seq num is not reset after rollback";
-        read_validate(true);
+        m_log_store->rollback_async(upto_lsn, [&](logstore_seq_num_t) {
+            ASSERT_EQ(m_log_store->get_contiguous_completed_seq_num(-1), upto_lsn)
+                << "Last completed seq num is not reset after rollback";
+            ASSERT_EQ(m_log_store->get_contiguous_issued_seq_num(-1), upto_lsn)
+                << "Last issued seq num is not reset after rollback";
+            read_validate(true);
+            {
+                std::unique_lock lock(mtx);
+                rollback_done = true;
+            }
+            cv.notify_one();
+        });
+
+        // We wait till async rollback is finished as we do validation.
+        std::unique_lock lock(mtx);
+        cv.wait(lock, [&rollback_done] { return rollback_done == true; });
     }
 
     void read(const logstore_seq_num_t lsn) {
@@ -323,8 +335,7 @@ public:
     }
 
     void rollback_record_count(uint32_t expected_count) {
-        auto actual_count =
-            m_log_store->get_family().logdev().log_dev_meta().num_rollback_records(m_log_store->get_store_id());
+        auto actual_count = m_log_store->get_logdev()->log_dev_meta().num_rollback_records(m_log_store->get_store_id());
         ASSERT_EQ(actual_count, expected_count);
     }
 
@@ -403,7 +414,7 @@ private:
     folly::Synchronized< std::map< logstore_seq_num_t, bool > > m_hole_lsns;
     int64_t m_n_recovered_lsns = 0;
     int64_t m_n_recovered_truncated_lsns = 0;
-    logstore_family_id_t m_family;
+    logdev_id_t m_logdev_id;
 };
 
 uint64_t SampleLogStoreClient::s_max_flush_multiple = 0;
@@ -436,14 +447,14 @@ public:
         test_common::HSTestHelper::start_homestore(
             "test_log_store",
             {{HS_SERVICE::META, {.size_pct = 5.0}},
-             {HS_SERVICE::LOG_REPLICATED, {.size_pct = 5.0, .chunk_size = 32 * 1024 * 1024}},
-             {HS_SERVICE::LOG_LOCAL, {.size_pct = 5.0, .chunk_size = 32 * 1024 * 1024}}},
+             {HS_SERVICE::LOG, {.size_pct = 84.0, .chunk_size = 32 * 1024 * 1024}}},
             [this, restart, n_log_stores]() {
                 if (restart) {
                     for (uint32_t i{0}; i < n_log_stores; ++i) {
                         SampleLogStoreClient* client = m_log_store_clients[i].get();
+                        logstore_service().open_logdev(client->m_logdev_id);
                         logstore_service()
-                            .open_log_store(client->m_family, client->m_store_id, false /* append_mode */)
+                            .open_log_store(client->m_logdev_id, client->m_store_id, false /* append_mode */)
                             .thenValue([i, this, client](auto log_store) { client->set_log_store(log_store); });
                     }
                 }
@@ -451,15 +462,13 @@ public:
             restart);
 
         if (!restart) {
+            auto logdev_id = logstore_service().create_new_logdev();
             for (uint32_t i{0}; i < n_log_stores; ++i) {
-                auto family_idx =
-                    ((i % 2) == 0) ? LogStoreService::DATA_LOG_FAMILY_IDX : LogStoreService::CTRL_LOG_FAMILY_IDX;
                 m_log_store_clients.push_back(std::make_unique< SampleLogStoreClient >(
-                    family_idx, bind_this(SampleDB::on_log_insert_completion, 3)));
+                    logdev_id, bind_this(SampleDB::on_log_insert_completion, 3)));
             }
             SampleLogStoreClient::s_max_flush_multiple =
-                std::max(logstore_service().data_logdev().get_flush_size_multiple(),
-                         logstore_service().ctrl_logdev().get_flush_size_multiple());
+                logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
         }
     }
 
@@ -468,7 +477,8 @@ public:
         if (cleanup) { m_log_store_clients.clear(); }
     }
 
-    void on_log_insert_completion(logstore_family_id_t fid, logstore_seq_num_t lsn, logdev_key ld_key) {
+    void on_log_insert_completion(logdev_id_t fid, logstore_seq_num_t lsn, logdev_key ld_key) {
+        if (m_highest_log_idx.count(fid) == 0) { m_highest_log_idx[fid] = std::atomic{-1}; }
         atomic_update_max(m_highest_log_idx[fid], ld_key.idx);
         if (m_io_closure) m_io_closure(fid, lsn, ld_key);
     }
@@ -477,7 +487,7 @@ public:
         bool removed{false};
         for (auto it = std::begin(m_log_store_clients); it != std::end(m_log_store_clients); ++it) {
             if ((*it)->m_log_store->get_store_id() == store_id) {
-                logstore_service().remove_log_store((*it)->m_family, store_id);
+                logstore_service().remove_log_store((*it)->m_logdev_id, store_id);
                 m_log_store_clients.erase(it);
                 removed = true;
                 break;
@@ -486,7 +496,9 @@ public:
         return removed;
     }
 
-    logid_t highest_log_idx(logstore_family_id_t fid) const { return m_highest_log_idx[fid].load(); }
+    logid_t highest_log_idx(logdev_id_t fid) {
+        return m_highest_log_idx.count(fid) ? m_highest_log_idx[fid].load() : -1;
+    }
 
 private:
     const static std::string s_fpath_root;
@@ -494,7 +506,7 @@ private:
     std::function< void() > m_on_schedule_io_cb;
     test_log_store_comp_cb_t m_io_closure;
     std::vector< std::unique_ptr< SampleLogStoreClient > > m_log_store_clients;
-    std::array< std::atomic< logid_t >, LogStoreService::num_log_families > m_highest_log_idx = {-1, -1};
+    std::map< logdev_id_t, std::atomic< logid_t > > m_highest_log_idx;
 };
 
 const std::string SampleDB::s_fpath_root{"/tmp/log_store_dev_"};
@@ -553,7 +565,7 @@ protected:
         }
     }
 
-    void on_insert_completion([[maybe_unused]] logstore_family_id_t fid, logstore_seq_num_t lsn, logdev_key ld_key) {
+    void on_insert_completion([[maybe_unused]] logdev_id_t fid, logstore_seq_num_t lsn, logdev_key ld_key) {
         bool notify{false};
         uint64_t waiting_to_issue{0};
         {
@@ -592,12 +604,12 @@ protected:
 
         size_t dump_sz{0};
         int64_t rec_count{0};
-        for (logstore_family_id_t fid{0}; fid < LogStoreService::num_log_families; ++fid) {
-            auto* family = (fid == 0) ? logstore_service().data_log_family() : logstore_service().ctrl_log_family();
-            nlohmann::json json_dump = family->dump_log_store(dump_req);
+        auto logdev_vec = logstore_service().get_all_logdevs();
+        for (auto& logdev : logdev_vec) {
+            nlohmann::json json_dump = logdev->dump_log_store(dump_req);
             dump_sz += json_dump.size();
 
-            LOGINFO("Printing json dump of all logstores in family_id{}. \n {}", fid, json_dump.dump());
+            LOGINFO("Printing json dump of all logstores in logdev {}. \n {}", logdev->get_id(), json_dump.dump());
             for (const auto& logdump : json_dump) {
                 const auto itr = logdump.find("log_records");
                 if (itr != std::end(logdump)) { rec_count += static_cast< int64_t >(logdump["log_records"].size()); }
@@ -613,7 +625,7 @@ protected:
             if (lsc->m_log_store->get_store_id() != id) { continue; }
 
             log_dump_req dump_req;
-            const auto fid = lsc->m_family;
+            const auto fid = lsc->m_logdev_id;
 
             if (print_content) dump_req.verbosity_level = log_dump_verbosity::CONTENT;
             dump_req.log_store = lsc->m_log_store;
@@ -621,9 +633,9 @@ protected:
             dump_req.end_seq_num = end_seq;
 
             // must use operator= construction as copy construction results in error
-            auto* family = (fid == 0) ? logstore_service().data_log_family() : logstore_service().ctrl_log_family();
-            nlohmann::json json_dump = family->dump_log_store(dump_req);
-            LOGINFO("Printing json dump of family_id={} logstore id {}, start_seq {}, end_seq {}, \n\n {}", fid, id,
+            auto logdev = lsc->m_log_store->get_logdev();
+            nlohmann::json json_dump = logdev->dump_log_store(dump_req);
+            LOGINFO("Printing json dump of logdev={} logstore id {}, start_seq {}, end_seq {}, \n\n {}", fid, id,
                     start_seq, end_seq, json_dump.dump());
             const auto itr_id = json_dump.find(std::to_string(id));
             if (itr_id != std::end(json_dump)) {
@@ -641,11 +653,11 @@ protected:
         }
     }
 
-    int find_garbage_upto(logstore_family_id_t family_idx, logid_t idx) {
+    int find_garbage_upto(logdev_id_t logdev_id, logid_t idx) {
         int count{0};
-        auto it = std::begin(m_garbage_stores_upto[family_idx]);
+        auto it = std::begin(m_garbage_stores_upto[logdev_id]);
 
-        while (it != std::end(m_garbage_stores_upto[family_idx])) {
+        while (it != std::end(m_garbage_stores_upto[logdev_id])) {
             if (it->first > idx) { return count; }
             ++it;
             ++count;
@@ -683,7 +695,7 @@ protected:
 
         bool failed{false};
         logstore_service().device_truncate(
-            [this, is_parallel_to_write, &failed](const auto& trunc_lds) {
+            [this, is_parallel_to_write, &failed](auto& trunc_lds) {
                 bool expect_forward_progress{true};
                 uint32_t n_fully_truncated{0};
                 if (is_parallel_to_write) {
@@ -700,14 +712,14 @@ protected:
                 }
 
                 if (expect_forward_progress) {
-                    for (logstore_family_id_t fid{0}; fid < trunc_lds.size(); ++fid) {
-                        const auto trunc_loc = trunc_lds[fid];
+                    for (auto [fid, trunc_loc] : trunc_lds) {
                         if (trunc_loc == logdev_key::out_of_bound_ld_key()) {
                             LOGINFO("No forward progress for device truncation yet.");
                         } else {
                             // Validate the truncation is actually moving forward
-                            if (trunc_loc.idx <= m_truncate_log_idx[fid].load()) { failed = true; }
-                            ASSERT_GT(trunc_loc.idx, m_truncate_log_idx[fid].load());
+                            auto idx = m_truncate_log_idx.count(fid) ? m_truncate_log_idx[fid].load() : -1;
+                            if (trunc_loc.idx <= idx) { failed = true; }
+                            ASSERT_GT(trunc_loc.idx, idx);
                             m_truncate_log_idx[fid].store(trunc_loc.idx);
                         }
                     }
@@ -718,8 +730,10 @@ protected:
             true /* wait_till_done */);
         ASSERT_FALSE(failed);
 
-        for (logstore_family_id_t fid{0}; fid < LogStoreService::num_log_families; ++fid) {
-            const auto upto_count = find_garbage_upto(fid, m_truncate_log_idx[fid].load());
+        for (auto& logdev : logstore_service().get_all_logdevs()) {
+            auto fid = logdev->get_id();
+            auto idx = m_truncate_log_idx.count(fid) ? m_truncate_log_idx[fid].load() : -1;
+            const auto upto_count = find_garbage_upto(fid, idx);
             std::remove_const_t< decltype(upto_count) > count{0};
             for (auto it = std::begin(m_garbage_stores_upto[fid]); count < upto_count; ++count) {
                 it = m_garbage_stores_upto[fid].erase(it);
@@ -762,11 +776,11 @@ protected:
         size_t actual_garbage_ids{0};
         size_t exp_garbage_store_count{0};
 
-        for (logstore_family_id_t fid{0}; fid < LogStoreService::num_log_families; ++fid) {
+        for (auto& logdev : logstore_service().get_all_logdevs()) {
+            auto fid = logdev->get_id();
             std::vector< logstore_id_t > reg_ids, garbage_ids;
-            LogDev& ld = (fid == LogStoreService::DATA_LOG_FAMILY_IDX) ? logstore_service().data_logdev()
-                                                                       : logstore_service().ctrl_logdev();
-            ld.get_registered_store_ids(reg_ids, garbage_ids);
+
+            logdev->get_registered_store_ids(reg_ids, garbage_ids);
             actual_valid_ids += reg_ids.size() - garbage_ids.size();
             actual_garbage_ids += garbage_ids.size();
 
@@ -782,7 +796,7 @@ protected:
 
     void delete_validate(uint32_t idx) {
         auto& db = SampleDB::instance();
-        auto fid = db.m_log_store_clients[idx]->m_family;
+        auto fid = db.m_log_store_clients[idx]->m_logdev_id;
         validate_num_stores();
 
         const auto l_idx = db.highest_log_idx(fid);
@@ -840,8 +854,8 @@ protected:
     uint64_t m_nrecords_waiting_to_complete{0};
     std::mutex m_pending_mtx;
     std::condition_variable m_pending_cv;
-    std::array< std::atomic< logid_t >, LogStoreService::num_log_families > m_truncate_log_idx = {-1, -1};
-    std::array< std::map< logid_t, uint32_t >, LogStoreService::num_log_families > m_garbage_stores_upto;
+    std::map< logdev_id_t, std::atomic< logid_t > > m_truncate_log_idx;
+    std::map< logdev_id_t, std::map< logid_t, uint32_t > > m_garbage_stores_upto;
     std::array< uint32_t, 100 > m_store_distribution;
 
     uint32_t m_q_depth{64};
@@ -1232,8 +1246,8 @@ TEST_F(LogStoreTest, WriteSyncThenRead) {
 
     for (uint32_t iteration{0}; iteration < iterations; ++iteration) {
         LOGINFO("Iteration {}", iteration);
-        std::shared_ptr< HomeLogStore > tmp_log_store =
-            logstore_service().create_new_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, false);
+        auto logdev_id = logstore_service().create_new_logdev();
+        auto tmp_log_store = logstore_service().create_new_log_store(logdev_id, false);
         const auto store_id = tmp_log_store->get_store_id();
         LOGINFO("Created new log store -> id {}", store_id);
         const unsigned count{10};
@@ -1261,7 +1275,7 @@ TEST_F(LogStoreTest, WriteSyncThenRead) {
             ASSERT_EQ(actual, expected) << "Data mismatch for LSN=" << store_id << ":" << i << " size=" << tl->size;
         }
 
-        logstore_service().remove_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, store_id);
+        logstore_service().remove_log_store(logdev_id, store_id);
         LOGINFO("Remove logstore -> i {}", store_id);
     }
 }

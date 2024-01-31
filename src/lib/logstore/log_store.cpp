@@ -23,7 +23,6 @@
 #include <homestore/homestore.hpp>
 #include <homestore/logstore_service.hpp>
 #include "common/homestore_assert.hpp"
-#include "log_store_family.hpp"
 #include "log_dev.hpp"
 
 namespace homestore {
@@ -33,17 +32,17 @@ SISL_LOGGING_DECL(logstore)
 #define THIS_LOGSTORE_PERIODIC_LOG(level, msg, ...)                                                                    \
     HS_PERIODIC_DETAILED_LOG(level, logstore, "store", m_fq_name, , , msg, __VA_ARGS__)
 
-HomeLogStore::HomeLogStore(LogStoreFamily& family, logstore_id_t id, bool append_mode, logstore_seq_num_t start_lsn) :
+HomeLogStore::HomeLogStore(std::shared_ptr< LogDev > logdev, logstore_id_t id, bool append_mode,
+                           logstore_seq_num_t start_lsn) :
         m_store_id{id},
-        m_logstore_family{family},
-        m_logdev{family.logdev()},
+        m_logdev{logdev},
         m_records{"HomeLogStoreRecords", start_lsn - 1},
         m_append_mode{append_mode},
         m_seq_num{start_lsn},
-        m_fq_name{fmt::format("{}.{}", family.get_family_id(), id)},
+        m_fq_name{fmt::format("{}.{}", logdev->get_id(), id)},
         m_metrics{logstore_service().metrics()} {
     m_truncation_barriers.reserve(10000);
-    m_safe_truncation_boundary.ld_key = m_logdev.get_last_flush_ld_key();
+    m_safe_truncation_boundary.ld_key = m_logdev->get_last_flush_ld_key();
     m_safe_truncation_boundary.seq_num.store(start_lsn - 1, std::memory_order_release);
 }
 
@@ -83,7 +82,7 @@ void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     HS_LOG_ASSERT((cb || m_comp_cb), "Expected either cb is not null or default cb registered");
     req->cb = (cb ? cb : m_comp_cb);
     req->start_time = Clock::now();
-    if (req->seq_num == 0) { m_safe_truncation_boundary.ld_key = m_logdev.get_last_flush_ld_key(); }
+    if (req->seq_num == 0) { m_safe_truncation_boundary.ld_key = m_logdev->get_last_flush_ld_key(); }
 #ifndef NDEBUG
     const auto trunc_upto_lsn = truncated_upto();
     if (req->seq_num <= trunc_upto_lsn) {
@@ -96,7 +95,7 @@ void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     m_records.create(req->seq_num);
     COUNTER_INCREMENT(m_metrics, logstore_append_count, 1);
     HISTOGRAM_OBSERVE(m_metrics, logstore_record_size, req->data.size());
-    m_logdev.append_async(m_store_id, req->seq_num, req->data, static_cast< void* >(req));
+    m_logdev->append_async(m_store_id, req->seq_num, req->data, static_cast< void* >(req));
 }
 
 void HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie,
@@ -141,7 +140,7 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
     //                   ld_key.idx, ld_key.dev_offset);
     COUNTER_INCREMENT(m_metrics, logstore_read_count, 1);
     serialized_log_record header;
-    const auto b = m_logdev.read(ld_key, header);
+    const auto b = m_logdev->read(ld_key, header);
     HISTOGRAM_OBSERVE(m_metrics, logstore_read_latency, get_elapsed_time_us(start_time));
     return b;
 }
@@ -152,7 +151,7 @@ void HomeLogStore::read_async(logstore_req* req, const log_found_cb_t& cb) {
     auto record = m_records.at(req->seq_num);
     logdev_key ld_key = record.m_dev_key;
     req->cb = cb;
-    m_logdev.read_async(ld_key, (void*)req);
+    m_logdev->read_async(ld_key, (void*)req);
 }
 
 void HomeLogStore::read_async(logstore_seq_num_t seq_num, void* cookie, const log_found_cb_t& cb) {
@@ -243,7 +242,7 @@ void HomeLogStore::truncate(logstore_seq_num_t upto_seq_num, bool in_memory_trun
 
     // First try to block the flushing of logdevice and if we are successfully able to do, then
     auto shared_this = shared_from_this();
-    m_logdev.run_under_flush_lock([shared_this, upto_seq_num]() {
+    m_logdev->run_under_flush_lock([shared_this, upto_seq_num]() {
         shared_this->do_truncate(upto_seq_num);
         return true;
     });
@@ -255,7 +254,7 @@ void HomeLogStore::do_truncate(logstore_seq_num_t upto_seq_num) {
     m_safe_truncation_boundary.seq_num.store(upto_seq_num, std::memory_order_release);
 
     // Need to update the superblock with meta, we don't persist yet, will be done as part of log dev truncation
-    m_logdev.update_store_superblk(m_store_id, logstore_superblk{upto_seq_num + 1}, false /* persist_now */);
+    m_logdev->update_store_superblk(m_store_id, logstore_superblk{upto_seq_num + 1}, false /* persist_now */);
 
     const int ind = search_max_le(upto_seq_num);
     if (ind < 0) {
@@ -346,7 +345,7 @@ nlohmann::json HomeLogStore::dump_log_store(const log_dump_req& dump_req) {
             nlohmann::json json_val = nlohmann::json::object();
             serialized_log_record record_header;
 
-            const auto log_buffer{m_logdev.read(record.m_dev_key, record_header)};
+            const auto log_buffer{m_logdev->read(record.m_dev_key, record_header)};
 
             try {
                 json_val["size"] = static_cast< uint32_t >(record_header.size);
@@ -376,7 +375,7 @@ void HomeLogStore::foreach (int64_t start_idx, const std::function< bool(logstor
     m_records.foreach_all_completed(start_idx, [&](int64_t cur_idx, homestore::logstore_record& record) -> bool {
         // do a sync read
         serialized_log_record header;
-        auto log_buf = m_logdev.read(record.m_dev_key, header);
+        auto log_buf = m_logdev->read(record.m_dev_key, header);
         return cb(cur_idx, log_buf);
     });
 }
@@ -412,7 +411,7 @@ void HomeLogStore::flush_sync(logstore_seq_num_t upto_seq_num) {
         if (!m_records.status(upto_seq_num).is_active) { return; }
 
         // Step 3: Force a flush (with least threshold)
-        m_logdev.flush_if_needed(1);
+        m_logdev->flush_if_needed(1);
 
         // Step 4: Wait for completion
         m_sync_flush_cv.wait(lk, [this, upto_seq_num] { return !m_records.status(upto_seq_num).is_active; });
@@ -445,10 +444,10 @@ uint64_t HomeLogStore::rollback_async(logstore_seq_num_t to_lsn, on_rollback_cb_
                                                m_records.at(from_lsn).m_dev_key.idx); // Get the logid range to rollback
     m_records.rollback(to_lsn); // Rollback all bitset records and from here on, we can't access any lsns beyond to_lsn
 
-    m_logdev.run_under_flush_lock([logid_range, to_lsn, this, comp_cb = std::move(cb)]() {
+    m_logdev->run_under_flush_lock([logid_range, to_lsn, this, comp_cb = std::move(cb)]() {
         iomanager.run_on_forget(logstore_service().truncate_thread(), [logid_range, to_lsn, this, comp_cb]() {
             // Rollback the log_ids in the range, for this log store (which persists this info in its superblk)
-            m_logdev.rollback(m_store_id, logid_range);
+            m_logdev->rollback(m_store_id, logid_range);
 
             // Remove all truncation barriers on rolled back lsns
             for (auto it = std::rbegin(m_truncation_barriers); it != std::rend(m_truncation_barriers); ++it) {
@@ -460,7 +459,7 @@ uint64_t HomeLogStore::rollback_async(logstore_seq_num_t to_lsn, on_rollback_cb_
             }
             m_flush_batch_max_lsn = invalid_lsn(); // Reset the flush batch for next batch.
             if (comp_cb) { comp_cb(to_lsn); }
-            m_logdev.unlock_flush();
+            m_logdev->unlock_flush();
         });
         return false;
     });
@@ -478,7 +477,7 @@ nlohmann::json HomeLogStore::get_status(int verbosity) const {
     js["truncation_pending_on_device?"] = m_safe_truncation_boundary.pending_dev_truncation;
     js["truncation_parallel_to_writes?"] = m_safe_truncation_boundary.active_writes_not_part_of_truncation;
     js["logstore_records"] = m_records.get_status(verbosity);
-    js["logstore_sb_first_lsn"] = m_logdev.log_dev_meta().store_superblk(m_store_id).m_first_seq_num;
+    js["logstore_sb_first_lsn"] = m_logdev->log_dev_meta().store_superblk(m_store_id).m_first_seq_num;
     return js;
 }
 

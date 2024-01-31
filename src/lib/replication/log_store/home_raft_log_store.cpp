@@ -56,31 +56,31 @@ static uint64_t extract_term(const log_buffer& log_bytes) {
     return (*r_cast< uint64_t const* >(raw_ptr));
 }
 
-HomeRaftLogStore::HomeRaftLogStore(logstore_id_t logstore_id) {
+HomeRaftLogStore::HomeRaftLogStore(logdev_id_t logdev_id, logstore_id_t logstore_id) {
     m_dummy_log_entry = nuraft::cs_new< nuraft::log_entry >(0, nuraft::buffer::alloc(0), nuraft::log_val_type::app_log);
 
     if (logstore_id == UINT32_MAX) {
-        m_log_store = logstore_service().create_new_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, true);
+        m_logdev_id = logstore_service().create_new_logdev();
+        m_log_store = logstore_service().create_new_log_store(m_logdev_id, true);
         if (!m_log_store) { throw std::runtime_error("Failed to create log store"); }
         m_logstore_id = m_log_store->get_store_id();
-        LOGDEBUGMOD(replication, "Opened new home log store id={}", m_logstore_id);
+        LOGDEBUGMOD(replication, "Opened new home log dev = {} store id={}", m_logdev_id, m_logstore_id);
     } else {
+        m_logdev_id = logdev_id;
         m_logstore_id = logstore_id;
-        LOGDEBUGMOD(replication, "Opening existing home log store id={}", logstore_id);
-        logstore_service()
-            .open_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, logstore_id, true)
-            .thenValue([this](auto log_store) {
-                m_log_store = std::move(log_store);
-                DEBUG_ASSERT_EQ(m_logstore_id, m_log_store->get_store_id(),
-                                "Mismatch in passed and create logstore id");
-                REPL_STORE_LOG(DEBUG, "Home Log store created/opened successfully");
-            });
+        LOGDEBUGMOD(replication, "Opening existing home log dev = {} store id={}", m_logdev_id, logstore_id);
+        logstore_service().open_logdev(m_logdev_id);
+        logstore_service().open_log_store(m_logdev_id, logstore_id, true).thenValue([this](auto log_store) {
+            m_log_store = std::move(log_store);
+            DEBUG_ASSERT_EQ(m_logstore_id, m_log_store->get_store_id(), "Mismatch in passed and create logstore id");
+            REPL_STORE_LOG(DEBUG, "Home Log store created/opened successfully");
+        });
     }
 }
 
 void HomeRaftLogStore::remove_store() {
     REPL_STORE_LOG(DEBUG, "Logstore is being physically removed");
-    logstore_service().remove_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, m_logstore_id);
+    logstore_service().remove_log_store(m_logdev_id, m_logstore_id);
     m_log_store.reset();
 }
 

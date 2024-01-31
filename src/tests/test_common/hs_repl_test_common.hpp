@@ -172,8 +172,7 @@ public:
             name_ + std::to_string(replica_num_),
             {{HS_SERVICE::META, {.size_pct = 5.0}},
              {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_app = std::make_unique< TestReplApplication >(*this)}},
-             {HS_SERVICE::LOG_REPLICATED, {.size_pct = 20.0}},
-             {HS_SERVICE::LOG_LOCAL, {.size_pct = 2.0}}});
+             {HS_SERVICE::LOG, {.size_pct = 20.0}}});
     }
 
     void teardown() {
@@ -191,8 +190,7 @@ public:
         test_common::HSTestHelper::start_homestore(
             name_ + std::to_string(replica_num_),
             {{HS_SERVICE::REPLICATION, {.repl_app = std::make_unique< TestReplApplication >(*this)}},
-             {HS_SERVICE::LOG_REPLICATED, {}},
-             {HS_SERVICE::LOG_LOCAL, {}}},
+             {HS_SERVICE::LOG, {}}},
             nullptr, true /* restart */);
     }
 
@@ -202,8 +200,7 @@ public:
             test_common::HSTestHelper::start_homestore(
                 name_ + std::to_string(replica_num_),
                 {{HS_SERVICE::REPLICATION, {.repl_app = std::make_unique< TestReplApplication >(*this)}},
-                 {HS_SERVICE::LOG_REPLICATED, {}},
-                 {HS_SERVICE::LOG_LOCAL, {}}},
+                 {HS_SERVICE::LOG, {}}},
                 nullptr, true /* restart */);
         });
     }

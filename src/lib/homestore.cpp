@@ -40,7 +40,6 @@
 #include "device/virtual_dev.hpp"
 #include "common/resource_mgr.hpp"
 #include "meta/meta_sb.hpp"
-#include "logstore/log_store_family.hpp"
 #include "replication/service/generic_repl_svc.h"
 
 /*
@@ -78,13 +77,13 @@ HomeStore& HomeStore::with_index_service(std::unique_ptr< IndexServiceCallbacks 
 }
 
 HomeStore& HomeStore::with_log_service() {
-    m_services.svcs |= HS_SERVICE::LOG_REPLICATED | HS_SERVICE::LOG_LOCAL;
+    m_services.svcs |= HS_SERVICE::LOG;
     return *this;
 }
 
 HomeStore& HomeStore::with_repl_data_service(cshared< ReplApplication >& repl_app,
                                              cshared< ChunkSelector >& custom_chunk_selector) {
-    m_services.svcs |= HS_SERVICE::REPLICATION | HS_SERVICE::LOG_REPLICATED | HS_SERVICE::LOG_LOCAL;
+    m_services.svcs |= HS_SERVICE::REPLICATION | HS_SERVICE::LOG;
     m_services.svcs &= ~HS_SERVICE::DATA; // ReplicationDataSvc or DataSvc are mutually exclusive
     s_repl_app = repl_app;
     s_custom_chunk_selector = std::move(custom_chunk_selector);
@@ -166,12 +165,10 @@ void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format
 
         if ((svc_type & HS_SERVICE::META) && has_meta_service()) {
             m_meta_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast), fparams.num_chunks);
-        } else if ((svc_type & HS_SERVICE::LOG_REPLICATED) && has_log_service()) {
-            futs.emplace_back(m_log_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast),
-                                                         LogStoreService::DATA_LOG_FAMILY_IDX, fparams.chunk_size));
-        } else if ((svc_type & HS_SERVICE::LOG_LOCAL) && has_log_service()) {
-            futs.emplace_back(m_log_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast),
-                                                         LogStoreService::CTRL_LOG_FAMILY_IDX, fparams.chunk_size));
+
+        } else if ((svc_type & HS_SERVICE::LOG) && has_log_service()) {
+            futs.emplace_back(
+                m_log_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast), fparams.chunk_size));
         } else if ((svc_type & HS_SERVICE::DATA) && has_data_service()) {
             m_data_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Data), fparams.block_size,
                                         fparams.alloc_type, fparams.chunk_sel_type, fparams.num_chunks);
@@ -309,7 +306,7 @@ bool HomeStore::has_repl_data_service() const { return m_services.svcs & HS_SERV
 bool HomeStore::has_meta_service() const { return m_services.svcs & HS_SERVICE::META; }
 bool HomeStore::has_log_service() const {
     auto const s = m_services.svcs;
-    return (s & (HS_SERVICE::LOG_REPLICATED | HS_SERVICE::LOG_LOCAL));
+    return (s & HS_SERVICE::LOG);
 }
 
 #if 0
@@ -347,18 +344,9 @@ shared< VirtualDev > HomeStore::create_vdev_cb(const vdev_info& vinfo, bool load
     auto vdev_context = r_cast< const hs_vdev_context* >(vinfo.get_user_private());
 
     switch (vdev_context->type) {
-    case hs_vdev_type_t::DATA_LOGDEV_VDEV:
-        if (has_log_service()) {
-            ret_vdev = m_log_service->open_vdev(vinfo, LogStoreService::DATA_LOG_FAMILY_IDX, load_existing);
-        }
+    case hs_vdev_type_t::LOGDEV_VDEV:
+        if (has_log_service()) { ret_vdev = m_log_service->open_vdev(vinfo, load_existing); }
         break;
-
-    case hs_vdev_type_t::CTRL_LOGDEV_VDEV:
-        if (has_log_service()) {
-            ret_vdev = m_log_service->open_vdev(vinfo, LogStoreService::CTRL_LOG_FAMILY_IDX, load_existing);
-        }
-        break;
-
     case hs_vdev_type_t::META_VDEV:
         if (has_meta_service()) { ret_vdev = m_meta_service->open_vdev(vinfo, load_existing); }
         break;

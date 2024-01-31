@@ -162,6 +162,7 @@ private:
     }
 
 private:
+    homestore::logdev_id_t m_logdev_id{UINT32_MAX};
     homestore::logstore_id_t m_store_id{UINT32_MAX};
     std::unique_ptr< HomeRaftLogStore > m_rls;
     sisl::sparse_vector< std::string > m_shadow_log;
@@ -173,15 +174,15 @@ private:
 class TestRaftLogStore : public ::testing::Test {
 public:
     void SetUp() {
-        test_common::HSTestHelper::start_homestore("test_home_raft_log_store",
-                                                   {{HS_SERVICE::META, {.size_pct = 5.0}},
-                                                    {HS_SERVICE::LOG_REPLICATED, {.size_pct = 70.0}},
-                                                    {HS_SERVICE::LOG_LOCAL, {.size_pct = 2.0}}});
+        test_common::HSTestHelper::start_homestore(
+            "test_home_raft_log_store", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::LOG, {.size_pct = 72.0}}});
         m_leader_store.m_rls = std::make_unique< HomeRaftLogStore >();
         m_leader_store.m_store_id = m_leader_store.m_rls->logstore_id();
+        m_leader_store.m_logdev_id = m_leader_store.m_rls->logdev_id();
 
         m_follower_store.m_rls = std::make_unique< HomeRaftLogStore >();
         m_follower_store.m_store_id = m_follower_store.m_rls->logstore_id();
+        m_follower_store.m_logdev_id = m_follower_store.m_rls->logdev_id();
     }
 
     void restart() {
@@ -189,11 +190,12 @@ public:
         m_follower_store.m_rls.reset();
 
         test_common::HSTestHelper::start_homestore(
-            "test_home_raft_log_store",
-            {{HS_SERVICE::META, {}}, {HS_SERVICE::LOG_REPLICATED, {}}, {HS_SERVICE::LOG_LOCAL, {}}},
+            "test_home_raft_log_store", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::LOG, {.size_pct = 72.0}}},
             [this]() {
-                m_leader_store.m_rls = std::make_unique< HomeRaftLogStore >(m_leader_store.m_store_id);
-                m_follower_store.m_rls = std::make_unique< HomeRaftLogStore >(m_follower_store.m_store_id);
+                m_leader_store.m_rls =
+                    std::make_unique< HomeRaftLogStore >(m_leader_store.m_logdev_id, m_leader_store.m_store_id);
+                m_follower_store.m_rls =
+                    std::make_unique< HomeRaftLogStore >(m_follower_store.m_logdev_id, m_follower_store.m_store_id);
             },
             true /* restart */);
     }

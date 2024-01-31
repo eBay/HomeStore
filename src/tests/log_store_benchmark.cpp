@@ -55,8 +55,8 @@ class BenchLogStore {
 public:
     friend class SampleDB;
     BenchLogStore() {
-        m_log_store =
-            logstore_service().create_new_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, true /* append_mode */);
+        m_logdev_id = logstore_service().create_new_logdev();
+        m_log_store = logstore_service().create_new_log_store(m_logdev_id, true /* append_mode */);
         m_log_store->register_log_found_cb(bind_this(BenchLogStore::on_log_found, 3));
         m_nth_entry.store(0);
         generate_rand_data();
@@ -141,6 +141,7 @@ private:
     }
 
 private:
+    logdev_id_t m_logdev_id;
     std::shared_ptr< HomeLogStore > m_log_store;
     std::atomic< int32_t > m_outstanding{0};
     std::atomic< int64_t > m_nth_entry{0};
@@ -155,7 +156,6 @@ private:
     uint32_t m_iteration{1};
 
     std::vector< std::string > m_data;
-    logstore_family_id_t m_family;
     logstore_id_t m_store_id;
 };
 
@@ -168,10 +168,8 @@ static void test_append(benchmark::State& state) {
 }
 
 static void setup() {
-    test_common::HSTestHelper::start_homestore("test_log_store",
-                                               {{HS_SERVICE::META, {.size_pct = 5.0}},
-                                                {HS_SERVICE::LOG_REPLICATED, {.size_pct = 85.0}},
-                                                {HS_SERVICE::LOG_LOCAL, {.size_pct = 2.0}}});
+    test_common::HSTestHelper::start_homestore(
+        "test_log_store", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::LOG, {.size_pct = 87.0}}});
 }
 
 static void teardown() { test_common::HSTestHelper::shutdown_homestore(); }

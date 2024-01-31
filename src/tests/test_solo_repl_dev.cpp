@@ -159,8 +159,10 @@ public:
             "test_solo_repl_dev",
             {{HS_SERVICE::META, {.size_pct = 5.0}},
              {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_app = std::make_unique< Application >(*this)}},
-             {HS_SERVICE::LOG_REPLICATED, {.size_pct = 20.0}},
-             {HS_SERVICE::LOG_LOCAL, {.size_pct = 2.0}}});
+             {HS_SERVICE::LOG,
+              {.size_pct = 22.0,
+               .chunk_size = 32 * 1024 * 1024,
+               .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}}});
         m_uuid1 = hs_utils::gen_random_uuid();
         m_uuid2 = hs_utils::gen_random_uuid();
         m_repl_dev1 = hs()->repl_service().create_repl_dev(m_uuid1, {}).get().value();
@@ -179,9 +181,12 @@ public:
 
         test_common::HSTestHelper::start_homestore(
             "test_solo_repl_dev",
-            {{HS_SERVICE::REPLICATION, {.repl_app = std::make_unique< Application >(*this)}},
-             {HS_SERVICE::LOG_REPLICATED, {}},
-             {HS_SERVICE::LOG_LOCAL, {}}},
+            {{HS_SERVICE::META, {.size_pct = 5.0}},
+             {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_app = std::make_unique< Application >(*this)}},
+             {HS_SERVICE::LOG,
+              {.size_pct = 22.0,
+               .chunk_size = 32 * 1024 * 1024,
+               .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}}},
             nullptr, true /* restart */);
 
         m_repl_dev1 = hs()->repl_service().get_repl_dev(m_uuid1).value();

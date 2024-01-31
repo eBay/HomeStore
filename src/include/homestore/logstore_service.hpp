@@ -41,7 +41,6 @@ public:
     LogStoreServiceMetrics& operator=(LogStoreServiceMetrics&&) noexcept = delete;
 };
 
-class LogStoreFamily;
 class HomeLogStore;
 class LogDev;
 struct logdev_key;
@@ -49,18 +48,13 @@ class VirtualDev;
 class JournalVirtualDev;
 struct vdev_info;
 struct log_dump_req;
+struct logdev_superblk;
 
 class LogStoreService {
     friend class HomeLogStore;
-    friend class LogStoreFamily;
     friend class LogDev;
 
 public:
-    static constexpr logstore_family_id_t DATA_LOG_FAMILY_IDX{0};
-    static constexpr logstore_family_id_t CTRL_LOG_FAMILY_IDX{1};
-    static constexpr size_t num_log_families = CTRL_LOG_FAMILY_IDX + 1;
-    typedef std::function< void(const std::array< logdev_key, num_log_families >&) > device_truncate_cb_t;
-
     LogStoreService();
     LogStoreService(const LogStoreService&) = delete;
     LogStoreService(LogStoreService&&) noexcept = delete;
@@ -82,35 +76,52 @@ public:
     void stop();
 
     /**
+     * @brief Create a brand new log dev. A logdev manages a list of chunks and state about the log offsets.
+     * Internally each logdev has a journal descriptor which maintains the data start and tail offsets and list of
+     * chunks. Logdev can start with zero chunks and dynamically add chunks based on write request.
+     * @return Newly created log dev id.
+     */
+    logdev_id_t create_new_logdev();
+
+    /**
+     * @brief Open a log dev.
+     *
+     * @param logdev_id: Logdev ID
+     * @return Newly created log dev id.
+     */
+    void open_logdev(logdev_id_t logdev_id);
+
+    /**
      * @brief Create a brand new log store (both in-memory and on device) and returns its instance. It also book
      * keeps the created log store and user can get this instance of log store by using logstore_id
      *
-     * @param family_id: Logstores can be created on different log_devs. As of now we only support data log_dev and
-     * ctrl log dev. The idx indicates which log device it is from. Its a mandatory parameter.
+     * @param logdev_id: Logstores can be created on different log_devs.
      * @param append_mode: If the log store have to be in append mode, user can call append_async and do not need to
      * maintain the log_idx. Else user is expected to keep track of the log idx. Default to false
      *
      * @return std::shared_ptr< HomeLogStore >
      */
-    shared< HomeLogStore > create_new_log_store(logstore_family_id_t family_id, bool append_mode = false);
+    std::shared_ptr< HomeLogStore > create_new_log_store(logdev_id_t logdev_id, bool append_mode = false);
 
     /**
      * @brief Open an existing log store and does a recovery. It then creates an instance of this logstore and
      * returns
-     *
+     * @param logdev_id: Logdev ID of the log store to close
      * @param store_id: Store ID of the log store to open
+     * @param append_mode: Append or not.
+     * @param on_open_cb: Callback to be called once log store is opened.
      * @return std::shared_ptr< HomeLogStore >
      */
-    folly::Future< shared< HomeLogStore > > open_log_store(logstore_family_id_t family_id, logstore_id_t store_id,
+    folly::Future< shared< HomeLogStore > > open_log_store(logdev_id_t logdev_id, logstore_id_t store_id,
                                                            bool append_mode);
 
     /**
      * @brief Close the log store instance and free-up the resources
-     *
+     * @param logdev_id: Logdev ID of the log store to close
      * @param store_id: Store ID of the log store to close
      * @return true on success
      */
-    bool close_log_store(const logstore_family_id_t family_id, const logstore_id_t store_id) {
+    bool close_log_store(logdev_id_t logdev_id, logstore_id_t store_id) {
         // TODO: Implement this method
         return true;
     }
@@ -121,7 +132,7 @@ public:
      *
      * @param store_id
      */
-    void remove_log_store(const logstore_family_id_t family_id, const logstore_id_t store_id);
+    void remove_log_store(logdev_id_t logdev_id, logstore_id_t store_id);
 
     /**
      * @brief Schedule a truncate all the log stores physically on the device.
@@ -131,24 +142,18 @@ public:
      * Default to false
      * @param dry_run: If the truncate is a real one or just dry run to simulate the truncation
      */
-    void device_truncate(const device_truncate_cb_t& cb = nullptr, const bool wait_till_done = false,
-                         const bool dry_run = false);
+    void device_truncate(const device_truncate_cb_t& cb = nullptr, bool wait_till_done = false, bool dry_run = false);
 
-    folly::Future< std::error_code > create_vdev(uint64_t size, logstore_family_id_t family, uint32_t chunk_size);
-    shared< VirtualDev > open_vdev(const vdev_info& vinfo, logstore_family_id_t family, bool load_existing);
-    shared< JournalVirtualDev > get_vdev(logstore_family_id_t family) const {
-        return (family == DATA_LOG_FAMILY_IDX) ? m_data_logdev_vdev : m_ctrl_logdev_vdev;
-    }
+    folly::Future< std::error_code > create_vdev(uint64_t size, uint32_t chunk_size);
+    std::shared_ptr< VirtualDev > open_vdev(const vdev_info& vinfo, bool load_existing);
+    std::shared_ptr< JournalVirtualDev > get_vdev() const { return m_logdev_vdev; }
+    std::vector< std::shared_ptr< LogDev > > get_all_logdevs();
+    std::shared_ptr< LogDev > get_logdev(logdev_id_t id);
 
     nlohmann::json dump_log_store(const log_dump_req& dum_req);
-    nlohmann::json get_status(const int verbosity) const;
+    nlohmann::json get_status(int verbosity) const;
 
     LogStoreServiceMetrics& metrics() { return m_metrics; }
-    LogStoreFamily* data_log_family() { return m_logstore_families[DATA_LOG_FAMILY_IDX].get(); }
-    LogStoreFamily* ctrl_log_family() { return m_logstore_families[CTRL_LOG_FAMILY_IDX].get(); }
-
-    LogDev& data_logdev();
-    LogDev& ctrl_logdev();
 
     uint32_t used_size() const;
     uint32_t total_size() const;
@@ -156,13 +161,18 @@ public:
     iomgr::io_fiber_t truncate_thread() { return m_truncate_fiber; }
 
 private:
+    std::shared_ptr< LogDev > create_new_logdev_internal(logdev_id_t logdev_id);
+    void logdev_super_blk_found(const sisl::byte_view& buf, void* meta_cookie);
+    void rollback_super_blk_found(const sisl::byte_view& buf, void* meta_cookie);
     void start_threads();
     void flush_if_needed();
 
 private:
-    std::array< std::unique_ptr< LogStoreFamily >, num_log_families > m_logstore_families;
-    std::shared_ptr< JournalVirtualDev > m_data_logdev_vdev;
-    std::shared_ptr< JournalVirtualDev > m_ctrl_logdev_vdev;
+    std::unordered_map< logdev_id_t, std::shared_ptr< LogDev > > m_id_logdev_map;
+    std::unique_ptr< sisl::IDReserver > m_id_reserver;
+    folly::SharedMutexWritePriority m_logdev_map_mtx;
+
+    std::shared_ptr< JournalVirtualDev > m_logdev_vdev;
     iomgr::io_fiber_t m_truncate_fiber;
     iomgr::io_fiber_t m_flush_fiber;
     LogStoreServiceMetrics m_metrics;

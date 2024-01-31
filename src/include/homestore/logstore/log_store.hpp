@@ -35,7 +35,6 @@
 
 namespace homestore {
 
-class LogStoreFamily;
 class LogDev;
 class LogStoreServiceMetrics;
 
@@ -44,7 +43,7 @@ typedef std::function< void(logstore_seq_num_t) > on_rollback_cb_t;
 
 class HomeLogStore : public std::enable_shared_from_this< HomeLogStore > {
 public:
-    HomeLogStore(LogStoreFamily& family, logstore_id_t id, bool append_mode, logstore_seq_num_t start_lsn);
+    HomeLogStore(std::shared_ptr< LogDev > logdev, logstore_id_t id, bool append_mode, logstore_seq_num_t start_lsn);
     HomeLogStore(const HomeLogStore&) = delete;
     HomeLogStore(HomeLogStore&&) noexcept = delete;
     HomeLogStore& operator=(const HomeLogStore&) = delete;
@@ -266,7 +265,7 @@ public:
 
     auto seq_num() const { return m_seq_num.load(std::memory_order_acquire); }
 
-    LogStoreFamily& get_family() { return m_logstore_family; }
+    std::shared_ptr< LogDev > get_logdev() { return m_logdev; }
 
     nlohmann::json dump_log_store(const log_dump_req& dump_req = log_dump_req());
 
@@ -285,8 +284,7 @@ private:
     int search_max_le(logstore_seq_num_t input_sn);
 
     logstore_id_t m_store_id;
-    LogStoreFamily& m_logstore_family;
-    LogDev& m_logdev;
+    std::shared_ptr< LogDev > m_logdev;
     sisl::StreamTracker< logstore_record > m_records;
     bool m_append_mode{false};
     log_req_comp_cb_t m_comp_cb;
