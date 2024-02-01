@@ -6,7 +6,7 @@ table RequestEntry {
     dsn : uint64;                // Data Sequence number
     user_header: [ubyte];        // User header bytes
     user_key : [ubyte];          // User key data
-    blkid_originator : int32;    // Originally which replica's blkid is this
+    blkid_originator : int32;    // Server_id: Originally which replica's blkid is this
     remote_blkid : [ubyte];      // Serialized remote blkid
 }
 
@@ -15,7 +15,7 @@ table FetchDataRequest {
 }
 
 table ResponseEntry {
-    lsn : [int64];        // LSN of the raft log if known
+    lsn : int64;        // LSN of the raft log if known
     dsn : uint64;         // Data Sequence number
     raft_term : uint64;   // Raft term number
     data_size : uint32;   // Size of the data which is sent as separate non flatbuffer

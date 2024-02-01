@@ -7,7 +7,7 @@ list(APPEND SCHEMA_FLAGS "--scoped-enums" "--gen-name-strings" "--cpp-std=c++17"
 
 flatbuffers_generate_headers(
     TARGET hs_replication_fb 
-    SCHEMAS push_data_rpc.fbs
+    SCHEMAS push_data_rpc.fbs fetch_data_rpc.fbs
     FLAGS ${SCHEMA_FLAGS}
 )
 

@@ -145,6 +145,8 @@ repl_req_ptr_t RaftStateMachine::transform_journal_entry(nuraft::ptr< nuraft::lo
     auto const log_buf_data_offset = log_buf->size() - lentry->get_buf().size();
     auto const [jentry, header, key] = log_to_journal_entry(log_buf, log_buf_data_offset);
 
+    LOGINFO("Received Raft server_id={}, term={}, dsn={}, journal_entry=[{}] ", jentry->server_id, lentry->get_term(),
+            jentry->dsn, jentry->to_string());
     // From the repl_key, get the repl_req. In cases where log stream got here first, this method will create a new
     // repl_req and return that back. Fill up all of the required journal entry inside the repl_req
     auto rreq = m_rd.follower_create_req(

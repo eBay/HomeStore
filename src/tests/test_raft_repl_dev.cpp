@@ -25,7 +25,7 @@
 #include <folly/init/Init.h>
 #include <folly/executors/GlobalExecutor.h>
 #include <gtest/gtest.h>
-
+#include <iomgr/iomgr_flip.hpp>
 #include <homestore/blk.h>
 #include <homestore/homestore.hpp>
 #include <homestore/homestore_decl.hpp>
@@ -48,6 +48,7 @@ SISL_OPTION_GROUP(test_raft_repl_dev,
                    ::cxxopts::value< uint32_t >()->default_value("4096"), "number"),
                   (num_raft_groups, "", "num_raft_groups", "number of raft groups per test",
                    ::cxxopts::value< uint32_t >()->default_value("1"), "number"));
+
 SISL_OPTIONS_ENABLE(logging, test_raft_repl_dev, iomgr, config, test_common_setup, test_repl_common_setup)
 
 static std::unique_ptr< test_common::HSReplTestHelper > g_helper;
@@ -172,6 +173,7 @@ public:
                 std::tie(k, v) = *it;
                 ++it;
             }
+
             auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
             auto read_sgs = test_common::HSTestHelper::create_sgs(v.data_size_, block_size);
 
@@ -235,6 +237,17 @@ public:
 
     TestReplicatedDB& pick_one_db() { return *dbs_[0]; }
 
+#ifdef _PRERELEASE
+    void set_flip_point(const std::string flip_name) {
+        flip::FlipCondition null_cond;
+        flip::FlipFrequency freq;
+        freq.set_count(1);
+        freq.set_percent(100);
+        m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
+        LOGDEBUG("Flip {} set", flip_name);
+    }
+#endif
+
     void switch_all_db_leader() {
         for (auto const& db : dbs_) {
             do {
@@ -250,9 +263,13 @@ public:
 
 private:
     std::vector< std::shared_ptr< TestReplicatedDB > > dbs_;
+#ifdef _PRERELEASE
+    flip::FlipClient m_fc{iomgr_flip::instance()};
+#endif
 };
 
 TEST_F(RaftReplDevTest, All_Append_Restart_Append) {
+
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
 
@@ -291,11 +308,42 @@ TEST_F(RaftReplDevTest, All_Append_Restart_Append) {
     g_helper->sync_for_cleanup_start();
 }
 
+TEST_F(RaftReplDevTest, All_Append_Fetch_Remote_Data) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+#ifdef _PRERELEASE
+    set_flip_point("simulate_fetch_remote_data");
+#endif
+
+    if (g_helper->replica_num() == 0) {
+        // g_helper->sync_dataset_size(SISL_OPTIONS["num_io"].as< uint64_t >());
+        g_helper->sync_dataset_size(100);
+        auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+        LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
+        g_helper->runner().set_task([this, block_size]() {
+            this->generate_writes(block_size /* data_size */, block_size /* max_size_per_iov */);
+        });
+        g_helper->runner().execute().get();
+    }
+
+    this->wait_for_all_writes(g_helper->dataset_size());
+
+    g_helper->sync_for_verify_start();
+
+    // TODO: seems with filip and fetch remote, the data size is not correct;
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_all_data();
+
+    g_helper->sync_for_cleanup_start();
+}
+
 int main(int argc, char* argv[]) {
     int parsed_argc{argc};
     char** orig_argv = argv;
 
     ::testing::InitGoogleTest(&parsed_argc, argv);
+
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, config, test_raft_repl_dev, iomgr, test_common_setup,
                       test_repl_common_setup);
 
