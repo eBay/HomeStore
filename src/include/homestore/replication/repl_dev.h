@@ -102,8 +102,8 @@ class ReplDevListener {
 public:
     virtual ~ReplDevListener() = default;
 
-    void set_repl_dev(ReplDev* rdev) { m_repl_dev = rdev; }
-    virtual ReplDev* repl_dev() { return m_repl_dev; }
+    void set_repl_dev(shared< ReplDev > rdev) { m_repl_dev = rdev; }
+    shared< ReplDev > repl_dev() { return m_repl_dev.lock(); }
 
     /// @brief Called when the log entry has been committed in the replica set.
     ///
@@ -184,7 +184,7 @@ public:
     virtual void on_replica_stop() = 0;
 
 private:
-    ReplDev* m_repl_dev;
+    std::weak_ptr< ReplDev > m_repl_dev;
 };
 
 class ReplDev {

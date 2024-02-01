@@ -81,8 +81,8 @@ void RaftReplService::start() {
         .token_client_ = std::dynamic_pointer_cast< sisl::GrpcTokenClient >(ioenvironment.get_token_client())};
     m_msg_mgr = nuraft_mesg::init_messaging(params, weak_from_this(), true /* with_data_channel */);
 
-    LOGINFOMOD(replication, "Starting RaftReplService with server_uuid={} port={}",
-               boost::uuids::to_string(params.server_uuid_), params.mesg_port_);
+    LOGINFO("Starting RaftReplService with server_uuid={} port={}", boost::uuids::to_string(params.server_uuid_),
+            params.mesg_port_);
 
     // Step 2: Register all RAFT parameters. At the end of this step, raft is ready to be created/join group
     auto r_params = nuraft::raft_params()
@@ -161,7 +161,7 @@ void RaftReplService::raft_group_config_found(sisl::byte_view const& buf, void* 
 
     auto rdev = std::dynamic_pointer_cast< RaftReplDev >(*v);
     auto listener = m_repl_app->create_repl_dev_listener(group_id);
-    listener->set_repl_dev(rdev.get());
+    listener->set_repl_dev(rdev);
     rdev->attach_listener(std::move(listener));
     rdev->use_config(std::move(group_config));
 }
@@ -195,7 +195,7 @@ shared< nuraft_mesg::mesg_state_mgr > RaftReplService::create_state_mgr(int32_t 
 
     // Attach the listener to the raft
     auto listener = m_repl_app->create_repl_dev_listener(group_id);
-    listener->set_repl_dev(rdev.get());
+    listener->set_repl_dev(rdev);
     rdev->attach_listener(std::move(listener));
 
     // Add the repl dev to the map
