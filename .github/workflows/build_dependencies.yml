@@ -166,7 +166,6 @@ jobs:
         conan install \
             -o sisl:prerelease=${{ inputs.prerelease }} \
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
-            -o sisl:testing=False \
             -o iomgr:testing=off \
             -o nuraft_mesg:testing=False \
             -o testing=off \
@@ -212,7 +211,6 @@ jobs:
         conan create \
             -o sisl:prerelease=${{ inputs.prerelease }} \
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
-            -o sisl:testing=False \
             -o iomgr:testing=off \
             -o nuraft_mesg:testing=False \
             -o homestore:sanitize=${sanitize} \
@@ -226,7 +224,6 @@ jobs:
         conan install \
             -o sisl:prerelease=${{ inputs.prerelease }} \
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
-            -o sisl:testing=False \
             -o iomgr:testing=off \
             -o nuraft_mesg:testing=False \
             -o coverage=True \
