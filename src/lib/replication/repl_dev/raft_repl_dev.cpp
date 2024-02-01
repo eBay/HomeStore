@@ -2,6 +2,8 @@
 #include <flatbuffers/minireflect.h>
 #include <folly/executors/InlineExecutor.h>
 #include <iomgr/iomgr_flip.hpp>
+#include <boost/lexical_cast.hpp>
+
 #include <sisl/fds/buffer.hpp>
 #include <sisl/grpc/generic_service.hpp>
 #include <homestore/blkdata_service.hpp>
@@ -609,6 +611,22 @@ AsyncReplResult<> RaftReplDev::become_leader() {
 }
 
 bool RaftReplDev::is_leader() const { return m_repl_svc_ctx->is_raft_leader(); }
+
+const replica_id_t RaftReplDev::get_leader_id() const {
+    auto leader = m_repl_svc_ctx->raft_leader_id();
+    return boost::lexical_cast< replica_id_t >(leader);
+}
+
+std::vector< peer_info > RaftReplDev::get_replication_status() const {
+    std::vector< peer_info > pi;
+    auto rep_status = m_repl_svc_ctx->get_raft_status();
+    for (auto const& pinfo : rep_status) {
+        pi.emplace_back(peer_info{.id_ = boost::lexical_cast< replica_id_t >(pinfo.id_),
+                                  .replication_idx_ = pinfo.last_log_idx_,
+                                  .last_succ_resp_us_ = pinfo.last_succ_resp_us_});
+    }
+    return pi;
+}
 
 uint32_t RaftReplDev::get_blk_size() const { return data_service().get_blk_size(); }
 
