@@ -103,7 +103,7 @@ public:
     virtual ~ReplDevListener() = default;
 
     void set_repl_dev(shared< ReplDev > rdev) { m_repl_dev = rdev; }
-    virtual shared< ReplDev > repl_dev() { return m_repl_dev.lock(); }
+    shared< ReplDev > repl_dev() { return m_repl_dev.lock(); }
 
     /// @brief Called when the log entry has been committed in the replica set.
     ///
