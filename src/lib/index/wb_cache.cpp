@@ -307,7 +307,8 @@ void IndexWBCache::get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_c
     // First attempt to execute any follower buffer flush
     if (prev_flushed_buf) {
         auto next_buffer = prev_flushed_buf->m_next_buffer.lock();
-        if (next_buffer && next_buffer->m_wait_for_leaders.decrement_testz()) {
+        if (next_buffer && next_buffer->state() == index_buf_state_t::DIRTY &&
+            next_buffer->m_wait_for_leaders.decrement_testz()) {
             bufs.emplace_back(next_buffer);
             ++count;
         }

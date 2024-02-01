@@ -37,7 +37,6 @@ public:
     sisl::ConcurrentInsertVector< IndexBufferPtr >::iterator m_dirty_buf_it;
 
 public:
-
     IndexCPContext(CP* cp) : VDevCPContext(cp) {}
     virtual ~IndexCPContext() = default;
 
@@ -66,17 +65,12 @@ public:
         // Display all buffers and its dependencies and state.
         std::unordered_map< IndexBuffer*, std::vector< IndexBuffer* > > parents;
 
-        auto it = m_dirty_buf_list.begin();
-        while (it != m_dirty_buf_list.end()) {
+        m_dirty_buf_list.foreach_entry([&parents](IndexBufferPtr buf) {
             // Add this buf to his children.
-            IndexBufferPtr buf = *it;
             parents[buf->m_next_buffer.lock().get()].emplace_back(buf.get());
-            ++it;
-        }
+        });
 
-        it = m_dirty_buf_list.begin();
-        while (it != m_dirty_buf_list.end()) {
-            IndexBufferPtr buf = *it;
+        m_dirty_buf_list.foreach_entry([&str, &parents](IndexBufferPtr buf) {
             fmt::format_to(std::back_inserter(str), "{}", buf->to_string());
             auto first = true;
             for (const auto& p : parents[buf.get()]) {
@@ -87,9 +81,7 @@ public:
                 fmt::format_to(std::back_inserter(str), " {}({})", r_cast< void* >(p), s_cast< int >(p->state()));
             }
             fmt::format_to(std::back_inserter(str), "\n");
-            ++it;
-        }
-
+        });
         return str;
     }
 
@@ -152,7 +144,6 @@ public:
         RELEASE_ASSERT_EQ(issue, false, "Found issue with wait_for_leaders");
     }
 };
-
 
 class IndexWBCache;
 class IndexCPCallbacks : public CPCallbacks {
