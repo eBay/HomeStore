@@ -125,8 +125,8 @@ void VirtualDev::add_chunk(cshared< Chunk >& chunk, bool is_fresh_chunk) {
 
 void VirtualDev::remove_chunk(cshared< Chunk >& chunk) {
     std::unique_lock lg{m_mgmt_mutex};
-    auto iter = std::remove_if(m_all_chunks.begin(), m_all_chunks.end(), [chunk](auto c) { return c == chunk; });
-    m_all_chunks.erase(iter, m_all_chunks.end());
+    m_all_chunks[chunk->chunk_id()].reset();
+    m_all_chunks[chunk->chunk_id()] = nullptr;
     m_chunk_selector->remove_chunk(chunk);
 }
 
