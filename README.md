@@ -87,7 +87,7 @@ Primary Author: Harihara Kadayam
 Primary Developers:
 [Harihara Kadayam](https://github.com/hkadayam),
 [Yaming Kuang](https://github.com/yamingk),
-[Brian Szmyd](https://github.com/szmyd)
+[Brian Szmyd](https://github.com/szmyd),
 [Rishabh Mittal](https://github.com/rimittal)
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the
