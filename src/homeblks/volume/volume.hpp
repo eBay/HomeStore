@@ -464,6 +464,10 @@ public:
      * @return :- no_error if there is no error. It doesn't throw any exception
      */
     std::error_condition write(const vol_interface_req_ptr& hb_req);
+    std::error_condition write_internal(const vol_interface_req_ptr& hb_req);
+    std::error_condition write_thin_provisioning(const vol_interface_req_ptr& hb_req);
+
+
 
     /* Write to lba
      * @param hb_req :- it expects this request to be created
