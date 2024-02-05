@@ -71,27 +71,29 @@ public:
     virtual void SetUp() override {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-        test_common::HSTestHelper::start_homestore(
-            "test_journal_vdev",
-            {{HS_SERVICE::META, {.size_pct = 15.0}},
-             {HS_SERVICE::LOG_REPLICATED,
-              {.chunk_size = 32 * 1024 * 1024, .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
-             {HS_SERVICE::LOG_LOCAL,
-              {.chunk_size = 32 * 1024 * 1024, .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}}},
-            nullptr /* starting_cb */, false /* restart */);
+        test_common::HSTestHelper::start_homestore("test_journal_vdev",
+                                                   {
+                                                       {HS_SERVICE::META, {.size_pct = 15.0}},
+                                                       {HS_SERVICE::LOG,
+                                                        {.size_pct = 50.0,
+                                                         .chunk_size = 32 * 1024 * 1024,
+                                                         .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
+                                                   },
+                                                   nullptr /* starting_cb */, false /* restart */);
     }
 
     virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
 
     void restart_homestore() {
-        test_common::HSTestHelper::start_homestore(
-            "test_journal_vdev",
-            {{HS_SERVICE::META, {.size_pct = 15.0}},
-             {HS_SERVICE::LOG_REPLICATED,
-              {.chunk_size = 32 * 1024 * 1024, .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
-             {HS_SERVICE::LOG_LOCAL,
-              {.chunk_size = 32 * 1024 * 1024, .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}}},
-            nullptr /* starting_cb */, true /* restart */);
+        test_common::HSTestHelper::start_homestore("test_journal_vdev",
+                                                   {
+                                                       {HS_SERVICE::META, {.size_pct = 15.0}},
+                                                       {HS_SERVICE::LOG,
+                                                        {.size_pct = 50.0,
+                                                         .chunk_size = 32 * 1024 * 1024,
+                                                         .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
+                                                   },
+                                                   nullptr /* starting_cb */, true /* restart */);
     }
 };
 
@@ -107,7 +109,7 @@ public:
     std::shared_ptr< JournalVirtualDev::Descriptor > vdev_jd() { return m_vdev_jd; }
 
     void reinit() {
-        auto vdev = hs()->logstore_service().get_vdev(homestore::LogStoreService::DATA_LOG_FAMILY_IDX);
+        auto vdev = hs()->logstore_service().get_vdev();
         m_vdev_jd = vdev->open(m_logdev_id);
     }
 

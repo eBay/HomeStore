@@ -29,6 +29,7 @@ class CP;
 
 class SoloReplDev : public ReplDev {
 private:
+    logdev_id_t m_logdev_id;
     std::shared_ptr< HomeLogStore > m_data_journal;
     superblk< repl_dev_superblk > m_rd_sb;
     uuid_t m_group_id;

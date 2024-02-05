@@ -35,7 +35,7 @@ using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
 
 class HomeRaftLogStore : public nuraft::log_store {
 public:
-    HomeRaftLogStore(homestore::logstore_id_t logstore_id = UINT32_MAX);
+    HomeRaftLogStore(logdev_id_t logdev_id = UINT32_MAX, homestore::logstore_id_t logstore_id = UINT32_MAX);
     virtual ~HomeRaftLogStore() = default;
 
     void remove_store();
@@ -170,9 +170,11 @@ public:
     virtual ulong last_durable_index() override;
 
     logstore_id_t logstore_id() const { return m_logstore_id; }
+    logdev_id_t logdev_id() const { return m_logdev_id; }
 
 private:
     logstore_id_t m_logstore_id;
+    logdev_id_t m_logdev_id;
     shared< HomeLogStore > m_log_store;
     nuraft::ptr< nuraft::log_entry > m_dummy_log_entry;
     store_lsn_t m_last_durable_lsn{-1};

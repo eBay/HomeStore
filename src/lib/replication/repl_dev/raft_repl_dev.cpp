@@ -31,7 +31,8 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
     m_state_machine = std::make_shared< RaftStateMachine >(*this);
 
     if (load_existing) {
-        m_data_journal = std::make_shared< ReplLogStore >(*this, *m_state_machine, m_rd_sb->data_journal_id);
+        m_data_journal =
+            std::make_shared< ReplLogStore >(*this, *m_state_machine, m_rd_sb->logdev_id, m_rd_sb->logstore_id);
         m_next_dsn = m_rd_sb->last_applied_dsn + 1;
         m_commit_upto_lsn = m_rd_sb->commit_lsn;
         m_last_flushed_commit_lsn = m_commit_upto_lsn;
@@ -44,7 +45,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
 
         if (m_rd_sb->is_timeline_consistent) {
             logstore_service()
-                .open_log_store(LogStoreService::CTRL_LOG_FAMILY_IDX, m_rd_sb->free_blks_journal_id, false)
+                .open_log_store(m_rd_sb->logdev_id, m_rd_sb->free_blks_journal_id, false)
                 .thenValue([this](auto log_store) {
                     m_free_blks_journal = std::move(log_store);
                     m_rd_sb->free_blks_journal_id = m_free_blks_journal->get_store_id();
@@ -52,14 +53,14 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
         }
     } else {
         m_data_journal = std::make_shared< ReplLogStore >(*this, *m_state_machine);
-        m_rd_sb->data_journal_id = m_data_journal->logstore_id();
+        m_rd_sb->logdev_id = m_data_journal->logdev_id();
+        m_rd_sb->logstore_id = m_data_journal->logstore_id();
         m_rd_sb->last_applied_dsn = 0;
         m_rd_sb->group_ordinal = s_next_group_ordinal.fetch_add(1);
         m_rdev_name = fmt::format("rdev{}", m_rd_sb->group_ordinal);
 
         if (m_rd_sb->is_timeline_consistent) {
-            m_free_blks_journal =
-                logstore_service().create_new_log_store(LogStoreService::CTRL_LOG_FAMILY_IDX, false /* append_mode */);
+            m_free_blks_journal = logstore_service().create_new_log_store(m_rd_sb->logdev_id, false /* append_mode */);
             m_rd_sb->free_blks_journal_id = m_free_blks_journal->get_store_id();
         }
         m_rd_sb.write();

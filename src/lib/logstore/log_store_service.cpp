@@ -29,7 +29,6 @@
 #include "common/homestore_status_mgr.hpp"
 #include "device/journal_vdev.hpp"
 #include "device/physical_dev.hpp"
-#include "log_store_family.hpp"
 #include "log_dev.hpp"
 
 namespace homestore {
@@ -38,30 +37,34 @@ SISL_LOGGING_DECL(logstore)
 LogStoreService& logstore_service() { return hs()->logstore_service(); }
 
 /////////////////////////////////////// LogStoreService Section ///////////////////////////////////////
-LogStoreService::LogStoreService() :
-        m_logstore_families{std::make_unique< LogStoreFamily >(DATA_LOG_FAMILY_IDX),
-                            std::make_unique< LogStoreFamily >(CTRL_LOG_FAMILY_IDX)} {}
+LogStoreService::LogStoreService() {
+    m_id_reserver = std::make_unique< sisl::IDReserver >();
+    meta_service().register_handler(
+        logdev_sb_meta_name,
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+            logdev_super_blk_found(std::move(buf), voidptr_cast(mblk));
+        },
+        nullptr);
 
-folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, logstore_family_id_t family,
-                                                              uint32_t chunk_size) {
+    meta_service().register_handler(
+        logdev_rollback_sb_meta_name,
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
+            rollback_super_blk_found(std::move(buf), voidptr_cast(mblk));
+        },
+        nullptr);
+}
+
+folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, uint32_t chunk_size) {
     const auto atomic_page_size = hs()->device_mgr()->atomic_page_size(HSDevType::Fast);
 
     hs_vdev_context hs_ctx;
-    std::string name;
-
-    if (family == DATA_LOG_FAMILY_IDX) {
-        name = "data_logdev";
-        hs_ctx.type = hs_vdev_type_t::DATA_LOGDEV_VDEV;
-    } else {
-        name = "ctrl_logdev";
-        hs_ctx.type = hs_vdev_type_t::CTRL_LOGDEV_VDEV;
-    }
+    hs_ctx.type = hs_vdev_type_t::LOGDEV_VDEV;
 
     // reason we set alloc_type/chunk_sel_type here instead of by homestore logstore service consumer is because
     // consumer doesn't care or understands the underlying alloc/chunkSel for this service, if this changes in the
     // future, we can let consumer set it by then;
     auto vdev =
-        hs()->device_mgr()->create_vdev(vdev_parameters{.vdev_name = name,
+        hs()->device_mgr()->create_vdev(vdev_parameters{.vdev_name = "LogDev",
                                                         .size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC,
                                                         .vdev_size = 0,
                                                         .num_chunks = 0,
@@ -76,14 +79,10 @@ folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, log
     return vdev->async_format();
 }
 
-shared< VirtualDev > LogStoreService::open_vdev(const vdev_info& vinfo, logstore_family_id_t family,
-                                                bool load_existing) {
+std::shared_ptr< VirtualDev > LogStoreService::open_vdev(const vdev_info& vinfo, bool load_existing) {
+    RELEASE_ASSERT(m_logdev_vdev == nullptr, "Duplicate journal vdev");
     auto vdev = std::make_shared< JournalVirtualDev >(*(hs()->device_mgr()), vinfo, nullptr);
-    if (family == DATA_LOG_FAMILY_IDX) {
-        m_data_logdev_vdev = std::dynamic_pointer_cast< JournalVirtualDev >(vdev);
-    } else {
-        m_ctrl_logdev_vdev = std::dynamic_pointer_cast< JournalVirtualDev >(vdev);
-    }
+    m_logdev_vdev = std::dynamic_pointer_cast< JournalVirtualDev >(vdev);
     return vdev;
 }
 
@@ -93,49 +92,145 @@ void LogStoreService::start(bool format) {
     // Create an truncate thread loop which handles truncation which does sync IO
     start_threads();
 
-    // Start the logstore families
-    m_logstore_families[DATA_LOG_FAMILY_IDX]->start(format, m_data_logdev_vdev.get());
-    m_logstore_families[CTRL_LOG_FAMILY_IDX]->start(format, m_ctrl_logdev_vdev.get());
+    for (auto& [logdev_id, logdev] : m_id_logdev_map) {
+        logdev->start(format, m_logdev_vdev.get());
+    }
 }
 
 void LogStoreService::stop() {
     device_truncate(nullptr, true, false);
-    for (auto& f : m_logstore_families) {
-        f->stop();
+    for (auto& [id, logdev] : m_id_logdev_map) {
+        logdev->stop();
+    }
+    {
+        folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
+        m_id_logdev_map.clear();
+    }
+    m_id_reserver.reset();
+}
+
+logdev_id_t LogStoreService::create_new_logdev() {
+    folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
+    logdev_id_t logdev_id = m_id_reserver->reserve();
+    auto logdev = create_new_logdev_internal(logdev_id);
+    logdev->start(true /* format */, m_logdev_vdev.get());
+    COUNTER_INCREMENT(m_metrics, logdevs_count, 1);
+    LOGINFO("Created log dev id {}", logdev_id);
+    return logdev_id;
+}
+
+std::shared_ptr< LogDev > LogStoreService::create_new_logdev_internal(logdev_id_t logdev_id) {
+    auto logdev = std::make_shared< LogDev >(logdev_id);
+    const auto it = m_id_logdev_map.find(logdev_id);
+    HS_REL_ASSERT((it == m_id_logdev_map.end()), "logdev id {} already exists", logdev_id);
+    m_id_logdev_map.insert(std::make_pair<>(logdev_id, logdev));
+    return logdev;
+}
+
+void LogStoreService::open_logdev(logdev_id_t logdev_id) {
+    folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
+    const auto it = m_id_logdev_map.find(logdev_id);
+    if (it == m_id_logdev_map.end()) {
+        m_id_reserver->reserve(logdev_id);
+        create_new_logdev_internal(logdev_id);
     }
 }
 
-shared< HomeLogStore > LogStoreService::create_new_log_store(const logstore_family_id_t family_id,
-                                                             const bool append_mode) {
-    HS_REL_ASSERT_LT(family_id, num_log_families);
-    COUNTER_INCREMENT(m_metrics, logstores_count, 1);
-    return m_logstore_families[family_id]->create_new_log_store(append_mode);
+std::vector< std::shared_ptr< LogDev > > LogStoreService::get_all_logdevs() {
+    folly::SharedMutexWritePriority::ReadHolder holder(m_logdev_map_mtx);
+    std::vector< std::shared_ptr< LogDev > > res;
+    for (auto& [id, logdev] : m_id_logdev_map) {
+        res.push_back(logdev);
+    }
+    return res;
 }
 
-folly::Future< shared< HomeLogStore > > LogStoreService::open_log_store(logstore_family_id_t family_id,
-                                                                        logstore_id_t store_id, bool append_mode) {
-    HS_REL_ASSERT_LT(family_id, num_log_families);
-    COUNTER_INCREMENT(m_metrics, logstores_count, 1);
-    return m_logstore_families[family_id]->open_log_store(store_id, append_mode);
+std::shared_ptr< LogDev > LogStoreService::get_logdev(logdev_id_t id) {
+    folly::SharedMutexWritePriority::ReadHolder holder(m_logdev_map_mtx);
+    const auto it = m_id_logdev_map.find(id);
+    HS_REL_ASSERT((it != m_id_logdev_map.end()), "logdev id {} doesnt exists", id);
+    return it->second;
 }
 
-void LogStoreService::remove_log_store(const logstore_family_id_t family_id, const logstore_id_t store_id) {
-    HS_REL_ASSERT_LT(family_id, num_log_families);
-    m_logstore_families[family_id]->remove_log_store(store_id);
+void LogStoreService::logdev_super_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
+    superblk< logdev_superblk > sb;
+    sb.load(buf, meta_cookie);
+    HS_REL_ASSERT_EQ(sb->get_magic(), logdev_superblk::LOGDEV_SB_MAGIC, "Invalid logdev metablk, magic mismatch");
+    HS_REL_ASSERT_EQ(sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Invalid version of logdev metablk");
+    {
+        folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
+        std::shared_ptr< LogDev > logdev;
+        auto id = sb->logdev_id;
+        const auto it = m_id_logdev_map.find(id);
+        if (it == m_id_logdev_map.end()) {
+            m_id_reserver->reserve(id);
+            logdev = create_new_logdev_internal(id);
+        } else {
+            logdev = it->second;
+        }
+
+        logdev->log_dev_meta().logdev_super_blk_found(buf, meta_cookie);
+    }
+}
+
+void LogStoreService::rollback_super_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
+    superblk< rollback_superblk > rollback_sb;
+    rollback_sb.load(buf, meta_cookie);
+    HS_REL_ASSERT_EQ(rollback_sb->get_magic(), rollback_superblk::ROLLBACK_SB_MAGIC, "Rollback sb magic mismatch");
+    HS_REL_ASSERT_EQ(rollback_sb->get_version(), rollback_superblk::ROLLBACK_SB_VERSION,
+                     "Rollback sb version mismatch");
+    {
+        folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
+        std::shared_ptr< LogDev > logdev;
+        auto id = rollback_sb->logdev_id;
+        const auto it = m_id_logdev_map.find(id);
+        if (it == m_id_logdev_map.end()) {
+            m_id_reserver->reserve(id);
+            logdev = create_new_logdev_internal(id);
+        } else {
+            logdev = it->second;
+        }
+
+        logdev->log_dev_meta().rollback_super_blk_found(buf, meta_cookie);
+    }
+}
+
+std::shared_ptr< HomeLogStore > LogStoreService::create_new_log_store(logdev_id_t logdev_id, bool append_mode) {
+    folly::SharedMutexWritePriority::ReadHolder holder(m_logdev_map_mtx);
+    COUNTER_INCREMENT(m_metrics, logstores_count, 1);
+    const auto it = m_id_logdev_map.find(logdev_id);
+    HS_REL_ASSERT((it != m_id_logdev_map.end()), "logdev id {} doesnt exist", logdev_id);
+    return it->second->create_new_log_store(append_mode);
+}
+
+folly::Future< shared< HomeLogStore > > LogStoreService::open_log_store(logdev_id_t logdev_id, logstore_id_t store_id,
+                                                                        bool append_mode) {
+    folly::SharedMutexWritePriority::ReadHolder holder(m_logdev_map_mtx);
+    const auto it = m_id_logdev_map.find(logdev_id);
+    HS_REL_ASSERT((it != m_id_logdev_map.end()), "logdev id {} doesnt exist", logdev_id);
+    COUNTER_INCREMENT(m_metrics, logstores_count, 1);
+    return it->second->open_log_store(store_id, append_mode);
+}
+
+void LogStoreService::remove_log_store(logdev_id_t logdev_id, logstore_id_t store_id) {
+    folly::SharedMutexWritePriority::ReadHolder holder(m_logdev_map_mtx);
+    COUNTER_INCREMENT(m_metrics, logstores_count, 1);
+    const auto it = m_id_logdev_map.find(logdev_id);
+    HS_REL_ASSERT((it != m_id_logdev_map.end()), "logdev id {} doesnt exist", logdev_id);
+    it->second->remove_log_store(store_id);
     COUNTER_DECREMENT(m_metrics, logstores_count, 1);
 }
 
-void LogStoreService::device_truncate(const device_truncate_cb_t& cb, const bool wait_till_done, const bool dry_run) {
+void LogStoreService::device_truncate(const device_truncate_cb_t& cb, bool wait_till_done, bool dry_run) {
     const auto treq = std::make_shared< truncate_req >();
     treq->wait_till_done = wait_till_done;
     treq->dry_run = dry_run;
     treq->cb = cb;
-    if (treq->wait_till_done) { treq->trunc_outstanding = m_logstore_families.size(); }
+    if (treq->wait_till_done) { treq->trunc_outstanding = m_id_logdev_map.size(); }
 
-    for (auto& l : m_logstore_families) {
-        l->device_truncate(treq);
+    for (auto& [id, logdev] : m_id_logdev_map) {
+        logdev->device_truncate_under_lock(treq);
     }
-
     if (treq->wait_till_done) {
         std::unique_lock< std::mutex > lk{treq->mtx};
         treq->cv.wait(lk, [&] { return (treq->trunc_outstanding == 0); });
@@ -143,13 +238,10 @@ void LogStoreService::device_truncate(const device_truncate_cb_t& cb, const bool
 }
 
 void LogStoreService::flush_if_needed() {
-    for (auto& f : m_logstore_families) {
-        f->logdev().flush_if_needed();
+    for (auto& [id, logdev] : m_id_logdev_map) {
+        logdev->flush_if_needed();
     }
 }
-
-LogDev& LogStoreService::data_logdev() { return data_log_family()->logdev(); }
-LogDev& LogStoreService::ctrl_logdev() { return ctrl_log_family()->logdev(); }
 
 void LogStoreService::start_threads() {
     struct Context {
@@ -193,41 +285,32 @@ void LogStoreService::start_threads() {
 nlohmann::json LogStoreService::dump_log_store(const log_dump_req& dump_req) {
     nlohmann::json json_dump{}; // create root object
     if (dump_req.log_store == nullptr) {
-        for (auto& family : m_logstore_families) {
-            json_dump[family->get_name()] = family->dump_log_store(dump_req);
+        for (auto& [id, logdev] : m_id_logdev_map) {
+            json_dump[logdev->get_id()] = logdev->dump_log_store(dump_req);
         }
     } else {
-        auto& family = dump_req.log_store->get_family();
+        auto logdev = dump_req.log_store->get_logdev();
         // must use operator= construction as copy construction results in error
-        nlohmann::json val = family.dump_log_store(dump_req);
-        json_dump[family.get_name()] = std::move(val);
+        nlohmann::json val = logdev->dump_log_store(dump_req);
+        json_dump[logdev->get_id()] = std::move(val);
     }
     return json_dump;
 }
 
 nlohmann::json LogStoreService::get_status(const int verbosity) const {
     nlohmann::json js;
-    for (auto& l : m_logstore_families) {
-        js[l->get_name()] = l->get_status(verbosity);
+    for (auto& [id, logdev] : m_id_logdev_map) {
+        js[logdev->get_id()] = logdev->get_status(verbosity);
     }
     return js;
 }
 
-uint32_t LogStoreService::used_size() const {
-    uint32_t sz{0};
-    if (m_data_logdev_vdev) { sz += m_data_logdev_vdev->used_size(); }
-    if (m_ctrl_logdev_vdev) { sz += m_ctrl_logdev_vdev->used_size(); }
-    return sz;
-}
+uint32_t LogStoreService::used_size() const { return m_logdev_vdev->used_size(); }
 
-uint32_t LogStoreService::total_size() const {
-    uint32_t sz{0};
-    if (m_data_logdev_vdev) { sz += m_data_logdev_vdev->size(); }
-    if (m_ctrl_logdev_vdev) { sz += m_ctrl_logdev_vdev->size(); }
-    return sz;
-}
+uint32_t LogStoreService::total_size() const { return m_logdev_vdev->size(); }
 
 LogStoreServiceMetrics::LogStoreServiceMetrics() : sisl::MetricsGroup("LogStores", "AllLogStores") {
+    REGISTER_COUNTER(logdevs_count, "Total number of log devs", sisl::_publish_as::publish_as_gauge);
     REGISTER_COUNTER(logstores_count, "Total number of log stores", sisl::_publish_as::publish_as_gauge);
     REGISTER_COUNTER(logstore_append_count, "Total number of append requests to log stores", "logstore_op_count",
                      {"op", "write"});

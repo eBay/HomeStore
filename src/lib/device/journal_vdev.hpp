@@ -25,12 +25,11 @@
 #include "device.h"
 #include "physical_dev.hpp"
 #include "virtual_dev.hpp"
+#include <homestore/logstore/log_store_internal.hpp>
 
 namespace homestore {
 typedef std::function< void(const off_t ret_off) > alloc_next_blk_cb_t;
 using journal_id_t = uint64_t;
-// Each logstore family is associated to a single logdevice.
-using logdev_id_t = uint64_t;
 
 // Chunks used for journal vdev has journal related info stored in chunk private data.
 // Each log device has a list of journal chunk data with next_chunk.

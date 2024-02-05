@@ -56,8 +56,7 @@ class ReplApplication;
 
 using HomeStoreSafePtr = std::shared_ptr< HomeStore >;
 
-VENUM(hs_vdev_type_t, uint32_t, DATA_VDEV = 1, INDEX_VDEV = 2, META_VDEV = 3, DATA_LOGDEV_VDEV = 4,
-      CTRL_LOGDEV_VDEV = 5);
+VENUM(hs_vdev_type_t, uint32_t, DATA_VDEV = 1, INDEX_VDEV = 2, META_VDEV = 3, LOGDEV_VDEV = 4);
 
 #pragma pack(1)
 struct hs_vdev_context {
@@ -76,11 +75,10 @@ struct hs_stats {
 
 struct HS_SERVICE {
     static constexpr uint32_t META = 1 << 0;
-    static constexpr uint32_t LOG_REPLICATED = 1 << 1;
-    static constexpr uint32_t LOG_LOCAL = 1 << 2;
-    static constexpr uint32_t DATA = 1 << 3;
-    static constexpr uint32_t INDEX = 1 << 4;
-    static constexpr uint32_t REPLICATION = 1 << 5;
+    static constexpr uint32_t LOG = 1 << 1;
+    static constexpr uint32_t DATA = 1 << 2;
+    static constexpr uint32_t INDEX = 1 << 3;
+    static constexpr uint32_t REPLICATION = 1 << 4;
 
     uint32_t svcs;
 
@@ -91,8 +89,7 @@ struct HS_SERVICE {
         if (svcs & META) { str += "meta,"; }
         if (svcs & DATA) { str += "data,"; }
         if (svcs & INDEX) { str += "index,"; }
-        if (svcs & LOG_REPLICATED) { str += "log_replicated,"; }
-        if (svcs & LOG_LOCAL) { str += "log_local,"; }
+        if (svcs & LOG) { str += "log,"; }
         if (svcs & REPLICATION) { str += "replication,"; }
         return str;
     }

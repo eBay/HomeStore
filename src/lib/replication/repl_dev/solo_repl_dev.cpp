@@ -10,17 +10,19 @@ namespace homestore {
 SoloReplDev::SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existing) :
         m_rd_sb{std::move(rd_sb)}, m_group_id{m_rd_sb->group_id} {
     if (load_existing) {
+        logstore_service().open_logdev(m_rd_sb->logdev_id);
         logstore_service()
-            .open_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, m_rd_sb->data_journal_id, true /* append_mode */)
+            .open_log_store(m_rd_sb->logdev_id, m_rd_sb->logstore_id, true /* append_mode */)
             .thenValue([this](auto log_store) {
                 m_data_journal = std::move(log_store);
-                m_rd_sb->data_journal_id = m_data_journal->get_store_id();
+                m_rd_sb->logstore_id = m_data_journal->get_store_id();
                 m_data_journal->register_log_found_cb(bind_this(SoloReplDev::on_log_found, 3));
             });
     } else {
-        m_data_journal =
-            logstore_service().create_new_log_store(LogStoreService::DATA_LOG_FAMILY_IDX, true /* append_mode */);
-        m_rd_sb->data_journal_id = m_data_journal->get_store_id();
+        m_logdev_id = logstore_service().create_new_logdev();
+        m_data_journal = logstore_service().create_new_log_store(m_logdev_id, true /* append_mode */);
+        m_rd_sb->logstore_id = m_data_journal->get_store_id();
+        m_rd_sb->logdev_id = m_logdev_id;
         m_rd_sb.write();
     }
 }

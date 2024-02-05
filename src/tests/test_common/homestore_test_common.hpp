@@ -237,7 +237,7 @@ public:
                 hsi->with_data_service(tp.custom_chunk_selector);
             } else if (svc == HS_SERVICE::INDEX) {
                 hsi->with_index_service(std::unique_ptr< IndexServiceCallbacks >(tp.index_svc_cbs));
-            } else if ((svc == HS_SERVICE::LOG_REPLICATED) || (svc == HS_SERVICE::LOG_LOCAL)) {
+            } else if ((svc == HS_SERVICE::LOG)) {
                 hsi->with_log_service();
             } else if (svc == HS_SERVICE::REPLICATION) {
                 hsi->with_repl_data_service(tp.repl_app, tp.custom_chunk_selector);
@@ -248,14 +248,10 @@ public:
 
         if (need_format) {
             hsi->format_and_start({{HS_SERVICE::META, {.size_pct = svc_params[HS_SERVICE::META].size_pct}},
-                                   {HS_SERVICE::LOG_REPLICATED,
-                                    {.size_pct = 1,
-                                     .chunk_size = svc_params[HS_SERVICE::LOG_REPLICATED].chunk_size,
-                                     .vdev_size_type = svc_params[HS_SERVICE::LOG_REPLICATED].vdev_size_type}},
-                                   {HS_SERVICE::LOG_LOCAL,
-                                    {.size_pct = 1,
-                                     .chunk_size = svc_params[HS_SERVICE::LOG_LOCAL].chunk_size,
-                                     .vdev_size_type = svc_params[HS_SERVICE::LOG_LOCAL].vdev_size_type}},
+                                   {HS_SERVICE::LOG,
+                                    {.size_pct = svc_params[HS_SERVICE::LOG].size_pct,
+                                     .chunk_size = svc_params[HS_SERVICE::LOG].chunk_size,
+                                     .vdev_size_type = svc_params[HS_SERVICE::LOG].vdev_size_type}},
                                    {HS_SERVICE::DATA,
                                     {.size_pct = svc_params[HS_SERVICE::DATA].size_pct,
                                      .num_chunks = svc_params[HS_SERVICE::DATA].num_chunks,
