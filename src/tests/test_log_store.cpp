@@ -682,14 +682,22 @@ protected:
             const auto c_seq_num = lsc->m_log_store->get_contiguous_completed_seq_num(-1);
             if (t_seq_num == c_seq_num) {
                 ++skip_truncation;
+                LOGINFO("Skipping truncation for store {}", lsc->m_log_store->get_store_id());
                 continue;
             }
+            LOGINFO("Before truncation store store {} truncated_upto {} completed_seq_num {} ",
+                    lsc->m_log_store->get_store_id(), lsc->m_log_store->truncated_upto(),
+                    lsc->m_log_store->get_contiguous_completed_seq_num(-1));
             lsc->truncate(lsc->m_log_store->get_contiguous_completed_seq_num(-1));
             lsc->read_validate();
+            LOGINFO("After truncation store store {} truncated_upto {} completed_seq_num {} ",
+                    lsc->m_log_store->get_store_id(), lsc->m_log_store->truncated_upto(),
+                    lsc->m_log_store->get_contiguous_completed_seq_num(-1));
         }
 
         if (skip_truncation) {
             /* not needed to call device truncate as one log store is not truncated */
+            LOGINFO("Skip device truncation");
             return;
         }
 
@@ -755,7 +763,12 @@ protected:
         }
     }
 
-    void rollback_validate(uint32_t num_lsns_to_rollback) { pick_log_store()->rollback_validate(num_lsns_to_rollback); }
+    void rollback_validate(uint32_t num_lsns_to_rollback, int32_t store_client = -1) {
+        auto lsc = pick_log_store();
+        if (store_client != -1) { lsc = SampleDB::instance().m_log_store_clients[store_client].get(); }
+
+        lsc->rollback_validate(num_lsns_to_rollback);
+    }
 
     void post_truncate_rollback_validate() {
         for (size_t i{0}; i < SampleDB::instance().m_log_store_clients.size(); ++i) {
@@ -1143,8 +1156,11 @@ TEST_F(LogStoreTest, FlushSync) {
 }
 
 TEST_F(LogStoreTest, Rollback) {
+    // We insert in all logstore so that truncate of all stores can do
+    // device truncate all together and all rollback records are removed.
+    auto n_log_stores = SISL_OPTIONS["num_logstores"].as< uint32_t >();
     LOGINFO("Step 1: Reinit the 500 records on a single logstore to start rollback test");
-    this->init(500, {std::make_pair(1ull, 100)}); // Last entry = 500
+    this->init(n_log_stores * 500); // Last entry = 500
 
     LOGINFO("Step 2: Issue sequential inserts with q depth of 10");
     this->kickstart_inserts(1, 10);
@@ -1153,37 +1169,37 @@ TEST_F(LogStoreTest, Rollback) {
     this->wait_for_inserts();
 
     LOGINFO("Step 4: Rollback last 50 entries and validate if pre-rollback entries are intact");
-    this->rollback_validate(50); // Last entry = 450
+    this->rollback_validate(50, 1); // Last entry = 450, Store 1
 
     LOGINFO("Step 5: Append 25 entries after rollback is completed");
-    this->init(25, {std::make_pair(1ull, 100)});
+    this->init(25);
     this->kickstart_inserts(1, 10);
-    this->wait_for_inserts(); // Last entry = 475
+    this->wait_for_inserts(); // Last entry = 475, Store 1
 
     LOGINFO("Step 7: Rollback again for 75 entries even before previous rollback entry");
-    this->rollback_validate(75); // Last entry = 400
+    this->rollback_validate(75, 1); // Last entry = 400
 
     LOGINFO("Step 8: Append 25 entries after second rollback is completed");
-    this->init(25, {std::make_pair(1ull, 100)});
+    this->init(25);
     this->kickstart_inserts(1, 10);
-    this->wait_for_inserts(); // Last entry = 425
+    this->wait_for_inserts(); // Last entry = 425, Store 1
 
     LOGINFO("Step 9: Restart homestore and ensure all rollbacks are effectively validated");
     SampleDB::instance().start_homestore(true /* restart */);
     this->recovery_validate();
 
     LOGINFO("Step 10: Post recovery, append another 25 entries");
-    this->init(25, {std::make_pair(1ull, 100)});
+    this->init(25);
     this->kickstart_inserts(1, 5);
-    this->wait_for_inserts(); // Last entry = 450
+    this->wait_for_inserts(); // Last entry = 450, Store 1
 
     LOGINFO("Step 11: Rollback again for 75 entries even before previous rollback entry");
-    this->rollback_validate(75); // Last entry = 375
+    this->rollback_validate(75, 1); // Last entry = 375
 
     LOGINFO("Step 12: After 3rd rollback, append another 25 entries");
-    this->init(25, {std::make_pair(1ull, 100)});
+    this->init(25);
     this->kickstart_inserts(1, 5);
-    this->wait_for_inserts(); // Last entry = 400
+    this->wait_for_inserts(); // Last entry = 400, Store 1
 
     LOGINFO("Step 13: Truncate all entries");
     this->truncate_validate();
@@ -1193,7 +1209,7 @@ TEST_F(LogStoreTest, Rollback) {
     this->recovery_validate();
 
     LOGINFO("Step 15: Append 25 entries after truncation is completed");
-    this->init(25, {std::make_pair(1ull, 100)});
+    this->init(25);
     this->kickstart_inserts(1, 10);
     this->wait_for_inserts(); // Last entry = 425
 
