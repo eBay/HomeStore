@@ -19,8 +19,8 @@ test_suits = ""
 dirpath = "./"
 op_list = ""
 log_mods = ""
-threads = " --num_threads=5"
-fibers = " --num_fibers=5"
+threads = " --num_threads=2"
+fibers = " --num_fibers=2"
 preload_size = "  --preload_size=262144" # 256K
 num_entries = " --num_entries=2097152" # 2M
 num_iters = " --num_iters=100000000"
@@ -76,10 +76,10 @@ btree_options = num_entries + num_iters + preload_size + fibers + threads + oper
 class TestFailedError(Exception):
     pass
 
-def long_runnig_index():
+def long_runnig_index(type=0):
     print("normal test started with (%s)" % (btree_options+ " " + run_time))
     # " --operation_list=query:20 --operation_list=put:20 --operation_list=remove:20"
-    cmd_opts = "--gtest_filter=BtreeConcurrentTest/0.ConcurrentAllOps --gtest_break_on_failure " + btree_options + " "+log_mods + run_time
+    cmd_opts = "--gtest_filter=BtreeConcurrentTest/" + str(type) +".ConcurrentAllOps --gtest_break_on_failure " + btree_options + " "+log_mods + run_time
     subprocess.check_call(dirpath + "test_index_btree " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
     print("Long running test completed")
 
@@ -137,8 +137,8 @@ def test_index_btree():
     while True:
         try:
             #TODO enable for other types when fix is available for varlen node types.
-            #for type in range(4):
-                long_running_clean_shutdown(0)
+            for type in range(4):
+                long_running_clean_shutdown(type)
         except:
             print("Test failed: {}".format(e))
             break
@@ -147,7 +147,11 @@ def test_index_btree():
     time.sleep(60)
 
 def nightly():
-    # long_runnig_index()
+    long_runnig_index(0)
+    long_runnig_index(1)
+    long_runnig_index(2)
+    long_runnig_index(3)
+
     # long_running_clean_shutdown()
     test_index_btree()
     # crash_recovery_framework()
