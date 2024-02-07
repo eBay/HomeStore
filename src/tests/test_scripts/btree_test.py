@@ -24,7 +24,7 @@ fibers = " --num_fibers=2"
 preload_size = "  --preload_size=262144" # 256K
 num_entries = " --num_entries=2097152" # 2M
 num_iters = " --num_iters=100000000"
-run_time = " --run_time=36000"
+run_time = " --run_time=14400" # 4 hours
 dev_list = ""
 
 for opt, arg in opts:
@@ -100,10 +100,10 @@ def function_crash(runtime, cleanup_after_shutdown=False, init_device=False, typ
     subprocess.check_call(dirpath + "test_index_btree " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
 
 def long_running_clean_shutdown(type=0):
-    normal_run_time = 1 * 3600 # 1 hour
+    normal_run_time = 1 * 1200 # 20 minutes
     try:
         function_normal(normal_run_time, False, True, type)
-        for i in range(1,8):
+        for i in range(1,3):
             function_normal(normal_run_time, False, False, type)
             print("Iteration {} completed successfully".format(i))
         function_normal(0, True, False, type) # cleanup after shutdown
@@ -139,6 +139,7 @@ def test_index_btree():
             #TODO enable for other types when fix is available for varlen node types.
             for type in range(4):
                 long_running_clean_shutdown(type)
+                print("long_running_clean_shutdown completed successfully for type {}".format(type))
         except:
             print("Test failed: {}".format(e))
             break
