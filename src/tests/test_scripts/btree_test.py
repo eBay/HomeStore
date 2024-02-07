@@ -73,7 +73,8 @@ if bool(dev_list and dev_list.strip()):
     addln_opts += dev_list
 
 btree_options = num_entries + num_iters + preload_size + fibers + threads + operations + addln_opts
-
+class TestFailedError(Exception):
+    pass
 
 def long_runnig_index():
     print("normal test started with (%s)" % (btree_options+ " " + run_time))
@@ -82,19 +83,34 @@ def long_runnig_index():
     subprocess.check_call(dirpath + "test_index_btree " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
     print("Long running test completed")
 
-def function_normal(runtime, cleanup_after_shutdown=False, init_device=False):
-    normal_options = "--gtest_filter=BtreeConcurrentTest/0.ConcurrentAllOps --gtest_break_on_failure " + btree_options + " " + log_mods + " --run_time " + str(runtime)
+def function_normal(runtime, cleanup_after_shutdown=False, init_device=False, type=0):
+    normal_options = "--gtest_filter=BtreeConcurrentTest/" + str(type) +".ConcurrentAllOps --gtest_break_on_failure " + btree_options + " " + log_mods + " --run_time " + str(runtime)
     cmd_opts = normal_options + " --cleanup_after_shutdown=" + str(cleanup_after_shutdown) + " --init_device=" + str(init_device)
     print("normal test started with (%s)" % cmd_opts)
-    subprocess.check_call(dirpath + "test_index_btree " +
+    try:
+        subprocess.check_call(dirpath + "test_index_btree " +
                           cmd_opts, stderr=subprocess.STDOUT, shell=True)
-    print("normal test completed")
+    except subprocess.CalledProcessError as e:
+        print("UT failed: {}".format(e))
+        raise TestFailedError("UT failed for type {}".format(type))
 
-def function_crash(runtime, cleanup_after_shutdown=False, init_device=False):
-    normal_options ="   --gtest_filter=BtreeConcurrentTest/0.ConcurrentAllOps --gtest_break_on_failure " + btree_options + " "+log_mods +" --enable_crash"
+def function_crash(runtime, cleanup_after_shutdown=False, init_device=False, type=0):
+    normal_options ="   --gtest_filter=BtreeConcurrentTest/" + str(type) +".ConcurrentAllOps --gtest_break_on_failure " + btree_options + " "+log_mods +" --enable_crash"
     cmd_opts = normal_options +" --cleanup_after_shutdown=" + str(cleanup_after_shutdown) + " --init_device="+str(init_device) +" --run_time " + str(runtime)
     subprocess.check_call(dirpath + "test_index_btree " + cmd_opts, stderr=subprocess.STDOUT, shell=True)
-    print("crash test completed")
+
+def long_running_clean_shutdown(type=0):
+    normal_run_time = 1 * 3600 # 1 hour
+    try:
+        function_normal(normal_run_time, False, True, type)
+        for i in range(1,8):
+            function_normal(normal_run_time, False, False, type)
+            print("Iteration {} completed successfully".format(i))
+        function_normal(0, True, False, type) # cleanup after shutdown
+        print("All iterations completed successfully for type {}".format(type))
+    except TestFailedError as e:
+        print("Test failed: {}".format(e))
+        raise
 
 def crash_recovery_framework():
     total_run_time = 30 * 3600
@@ -109,7 +125,7 @@ def crash_recovery_framework():
         start_time = time.time()
         p = random.randint(0, 100) # some distribution
         if p < crash_execution_frequency:
-             function_crash(crash_run_time, False, False)
+            function_crash(crash_run_time, False, False)
         else:
             function_normal(min(normal_run_time, total_run_time - elapsed_time), False, False)
         end_time = time.time()
@@ -117,8 +133,23 @@ def crash_recovery_framework():
     function_normal(0, True, False) #cleanup after shutdown
     print("crash recovery test completed")
 
+def test_index_btree():
+    while True:
+        try:
+            #TODO enable for other types when fix is available for varlen node types.
+            #for type in range(4):
+                long_running_clean_shutdown(0)
+        except:
+            print("Test failed: {}".format(e))
+            break
+
+    # wait for 1 minute before running again
+    time.sleep(60)
+
 def nightly():
-    long_runnig_index()
+    # long_runnig_index()
+    # long_running_clean_shutdown()
+    test_index_btree()
     # crash_recovery_framework()
 
 # The name of the method to be called is the var test_suits
