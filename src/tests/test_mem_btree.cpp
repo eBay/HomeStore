@@ -239,7 +239,6 @@ TYPED_TEST(BtreeTest, SimpleRemoveRange) {
 TYPED_TEST(BtreeTest, RandomRemove) {
     // Forward sequential insert
     const auto num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
-    const auto num_iters = SISL_OPTIONS["num_iters"].as< uint32_t >();
 
     LOGINFO("Step 1: Do forward sequential insert for {} entries", num_entries);
     for (uint32_t i{0}; i < num_entries; ++i) {
@@ -251,8 +250,8 @@ TYPED_TEST(BtreeTest, RandomRemove) {
 
     // shuffle keys in [0, num_entries)
     std::random_shuffle(vec.begin(), vec.end());
-    LOGINFO("Step 2: Do remove one by one for {} iterations", num_iters);
-    for (uint32_t i{0}; i < num_iters; ++i) {
+    LOGINFO("Step 2: Do remove one by one for {} entries", num_entries);
+    for (uint32_t i{0}; i < num_entries; ++i) {
         this->remove_one(vec[i]);
     }
 
