@@ -225,6 +225,9 @@ table Consensus {
     
     // Leadership expiry 120 seconds
     leadership_expiry_ms: uint32 = 120000;
+
+    // data fetch max size limit in MB
+    data_fetch_max_size_mb: uint32 = 2;
 }
 
 table HomeStoreSettings {

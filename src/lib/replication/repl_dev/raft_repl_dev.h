@@ -125,8 +125,8 @@ private:
     void on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data);
     void on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data);
     void check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rreqs);
-    void fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs);
-
+    void fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs);
+    auto get_max_data_fetch_size() const;
     bool is_resync_mode() { return m_resync_mode; }
     void handle_error(repl_req_ptr_t const& rreq, ReplServiceError err);
 };

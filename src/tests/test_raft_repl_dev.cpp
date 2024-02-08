@@ -390,6 +390,65 @@ TEST_F(RaftReplDevTest, All_restart_one_follower_inc_resync) {
     g_helper->sync_for_cleanup_start();
 }
 
+//
+// staging the fetch remote data with flip point;
+//
+TEST_F(RaftReplDevTest, All_restart_one_follower_inc_resync_with_staging) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+#ifdef _PRERELEASE
+    set_flip_point("simulate_staging_fetch_data");
+#endif
+
+    // step-0: do some IO before restart one member;
+    uint64_t exp_entries = 20;
+    if (g_helper->replica_num() == 0) {
+        g_helper->runner().set_num_tasks(20);
+        auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+        LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
+        g_helper->runner().set_task([this, block_size]() {
+            this->generate_writes(block_size /* data_size */, block_size /* max_size_per_iov */);
+        });
+        g_helper->runner().execute().get();
+    }
+
+    // step-1: wait for all writes to be completed
+    this->wait_for_all_writes(exp_entries);
+
+    // step-2: restart one non-leader replica
+    if (g_helper->replica_num() == 1) {
+        LOGINFO("Restart homestore: replica_num = 1");
+        g_helper->restart();
+        g_helper->sync_for_test_start();
+    }
+
+    exp_entries += SISL_OPTIONS["num_io"].as< uint64_t >();
+    // step-3: on leader, wait for a while for replica-1 to finish shutdown so that it can be removed from raft-groups
+    // and following I/O issued by leader won't be pushed to relica-1;
+    if (g_helper->replica_num() == 0) {
+        LOGINFO("Wait for grpc connection to replica-1 to expire and removed from raft-groups.");
+        std::this_thread::sleep_for(std::chrono::seconds{5});
+
+        g_helper->runner().set_num_tasks(SISL_OPTIONS["num_io"].as< uint64_t >());
+
+        // before replica-1 started, issue I/O so that replica-1 is lagging behind;
+        auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+        LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
+        g_helper->runner().set_task([this, block_size]() {
+            this->generate_writes(block_size /* data_size */, block_size /* max_size_per_iov */);
+        });
+        g_helper->runner().execute().get();
+    }
+
+    this->wait_for_all_writes(exp_entries);
+
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_all_data();
+    g_helper->sync_for_cleanup_start();
+}
+
 // TODO
 // double restart:
 // 1. restart one follower(F1) while I/O keep running.

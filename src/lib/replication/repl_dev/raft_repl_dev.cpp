@@ -399,6 +399,16 @@ repl_req_ptr_t RaftReplDev::follower_create_req(repl_key const& rkey, sisl::blob
     return rreq;
 }
 
+auto RaftReplDev::get_max_data_fetch_size() const {
+#ifdef _PRERELEASE
+    if (iomgr_flip::instance()->test_flip("simulate_staging_fetch_data")) {
+        LOGINFO("Flip simulate_staging_fetch_data is enabled, return max_data_fetch_size: 16K");
+        return 4 * 4096ull;
+    }
+#endif
+    return HS_DYNAMIC_CONFIG(consensus.data_fetch_max_size_mb) * 1024 * 1024ull;
+}
+
 void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rreqs) {
     // Pop any entries that are already completed - from the entries list as well as from map
     rreqs->erase(std::remove_if(
@@ -420,21 +430,37 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rre
 
     if (rreqs->size()) {
         // Some data not completed yet, let's fetch from remote;
-        fetch_data_from_remote(rreqs);
+        auto total_size_to_fetch = 0ul;
+        std::vector< repl_req_ptr_t > next_batch_rreqs;
+        const auto max_batch_size = get_max_data_fetch_size();
+        for (auto const& rreq : *rreqs) {
+            auto const& size = rreq->remote_blkid.blkid.blk_count() * get_blk_size();
+            if ((total_size_to_fetch + size) >= max_batch_size) {
+                fetch_data_from_remote(std::move(next_batch_rreqs));
+                next_batch_rreqs.clear();
+                total_size_to_fetch = 0;
+            }
+
+            total_size_to_fetch += size;
+            next_batch_rreqs.emplace_back(rreq);
+        }
+
+        // check if there is any left over not processed;
+        if (next_batch_rreqs.size()) { fetch_data_from_remote(std::move(next_batch_rreqs)); }
     }
 }
 
-void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
-    if (rreqs->size() == 0) { return; }
+void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
+    if (rreqs.size() == 0) { return; }
 
     std::vector<::flatbuffers::Offset< RequestEntry > > entries;
-    entries.reserve(rreqs->size());
+    entries.reserve(rreqs.size());
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
-    RD_LOG(INFO, "Data Channel : FetchData from remote: rreq.size={}, my server_id={}", rreqs->size(), server_id());
-    auto const& originator = rreqs->front()->remote_blkid.server_id;
+    RD_LOG(INFO, "Data Channel : FetchData from remote: rreq.size={}, my server_id={}", rreqs.size(), server_id());
+    auto const& originator = rreqs.front()->remote_blkid.server_id;
 
-    for (auto const& rreq : *rreqs) {
+    for (auto const& rreq : rreqs) {
         entries.push_back(CreateRequestEntry(*builder, rreq->get_lsn(), rreq->term(), rreq->dsn(),
                                              builder->CreateVector(rreq->header.cbytes(), rreq->header.size()),
                                              builder->CreateVector(rreq->key.cbytes(), rreq->key.size()),
@@ -469,8 +495,8 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
                 RD_LOG(INFO,
                        "Not able to fetching data from originator={}, error={}, probably originator is down. Will "
                        "retry when new leader start appending log entries",
-                       rreqs->front()->remote_blkid.server_id, e.error());
-                for (auto const& rreq : *rreqs) {
+                       rreqs.front()->remote_blkid.server_id, e.error());
+                for (auto const& rreq : rreqs) {
                     handle_error(rreq, RaftReplService::to_repl_error(e.error()));
                 }
                 return;
@@ -482,12 +508,12 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
             RD_DBG_ASSERT(total_size > 0, "Empty response from remote");
             RD_DBG_ASSERT(raw_data, "Empty response from remote");
 
-            RD_LOG(INFO, "Data Channel: FetchData completed for reques.size()={} ", rreqs->size());
+            RD_LOG(INFO, "Data Channel: FetchData completed for reques.size()={} ", rreqs.size());
 
             thread_local std::vector< folly::Future< std::error_code > > futs; // static is impplied
             futs.clear();
 
-            for (auto const& rreq : *rreqs) {
+            for (auto const& rreq : rreqs) {
                 auto const data_size = rreq->remote_blkid.blkid.blk_count() * get_blk_size();
                 // if data is already received, skip it because someone is already doing the write;
                 if (rreq->state.load() & uint32_cast(repl_req_state_t::DATA_RECEIVED)) {
@@ -564,7 +590,7 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
                     }
                 }
 
-                for (auto const& rreq : *rreqs) {
+                for (auto const& rreq : rreqs) {
                     rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_WRITTEN));
                     rreq->data_written_promise.setValue();
                     RD_LOG(TRACE, "Data Channel: Data Write completed rreq=[{}]", rreq->to_compact_string());
