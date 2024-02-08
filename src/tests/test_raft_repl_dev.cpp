@@ -41,7 +41,7 @@
 using namespace homestore;
 
 SISL_LOGGING_DEF(test_raft_repl_dev)
-SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
+SISL_LOGGING_INIT(HOMESTORE_LOG_MODS, nuraft_mesg)
 
 SISL_OPTION_GROUP(test_raft_repl_dev,
                   (block_size, "", "block_size", "block size to io",
@@ -331,44 +331,72 @@ TEST_F(RaftReplDevTest, All_Append_Fetch_Remote_Data) {
 
     g_helper->sync_for_verify_start();
 
-    // TODO: seems with filip and fetch remote, the data size is not correct;
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_all_data();
+
+    g_helper->sync_for_cleanup_start();
+}
+
+// do some io before restart;
+TEST_F(RaftReplDevTest, All_restart_one_follower_inc_resync) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    // step-0: do some IO before restart one member;
+    uint64_t exp_entries = 20;
+    if (g_helper->replica_num() == 0) {
+        g_helper->runner().set_num_tasks(20);
+        auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+        LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
+        g_helper->runner().set_task([this, block_size]() {
+            this->generate_writes(block_size /* data_size */, block_size /* max_size_per_iov */);
+        });
+        g_helper->runner().execute().get();
+    }
+
+    // step-1: wait for all writes to be completed
+    this->wait_for_all_writes(exp_entries);
+
+    // step-2: restart one non-leader replica
+    if (g_helper->replica_num() == 1) {
+        LOGINFO("Restart homestore: replica_num = 1");
+        g_helper->restart();
+        g_helper->sync_for_test_start();
+    }
+
+    exp_entries += SISL_OPTIONS["num_io"].as< uint64_t >();
+    // step-3: on leader, wait for a while for replica-1 to finish shutdown so that it can be removed from raft-groups
+    // and following I/O issued by leader won't be pushed to relica-1;
+    if (g_helper->replica_num() == 0) {
+        LOGINFO("Wait for grpc connection to replica-1 to expire and removed from raft-groups.");
+        std::this_thread::sleep_for(std::chrono::seconds{5});
+
+        g_helper->runner().set_num_tasks(SISL_OPTIONS["num_io"].as< uint64_t >());
+
+        // before replica-1 started, issue I/O so that replica-1 is lagging behind;
+        auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+        LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
+        g_helper->runner().set_task([this, block_size]() {
+            this->generate_writes(block_size /* data_size */, block_size /* max_size_per_iov */);
+        });
+        g_helper->runner().execute().get();
+    }
+
+    this->wait_for_all_writes(exp_entries);
+
+    g_helper->sync_for_verify_start();
     LOGINFO("Validate all data written so far by reading them");
     this->validate_all_data();
     g_helper->sync_for_cleanup_start();
 }
 
-TEST_F(RaftReplDevTest, All_ReplService) {
-    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
-    g_helper->sync_for_test_start();
-    auto repl_dev = dynamic_pointer_cast< RaftReplDev >(pick_one_db().repl_dev());
-    auto group_id = repl_dev->group_id();
-    auto my_id_str = repl_dev->my_replica_id_str();
-
-    auto leader = repl_dev->get_leader_id();
-    ASSERT_TRUE(leader != replica_id_t())
-        << "Error getting leader id for group_id=" << boost::uuids::to_string(group_id).c_str();
-    auto leader_str = boost::uuids::to_string(leader);
-    LOGINFO("Got raft leader {} for group {}", leader_str, group_id);
-
-    if (g_helper->replica_num() == 0) {
-        ASSERT_TRUE(leader_str == my_id_str)
-            << "Leader id " << leader_str.c_str() << " should  equals to my ID " << my_id_str.c_str();
-    } else {
-        ASSERT_TRUE(leader_str != my_id_str) << "I am a follower, Leader id " << leader_str.c_str()
-                                             << " should not equals to my ID " << my_id_str.c_str();
-    }
-
-    auto peers_info = repl_dev->get_replication_status();
-    LOGINFO("Got peers_info size {} for group {}", peers_info.size(), group_id);
-    if (g_helper->replica_num() == 0) {
-        auto const num_replicas = SISL_OPTIONS["replicas"].as< uint32_t >();
-        EXPECT_TRUE(peers_info.size() == num_replicas)
-            << "Expecting peers_info size " << peers_info.size() << " but got " << peers_info.size();
-    } else {
-        EXPECT_TRUE(peers_info.size() == 0) << "Expecting zero length on follower, got " << peers_info.size();
-    }
-    g_helper->sync_for_cleanup_start();
-}
+// TODO
+// double restart:
+// 1. restart one follower(F1) while I/O keep running.
+// 2. after F1 reboots and leader is resyncing with F1 (after sending the appended entries), this leader also retarts.
+// 3. F1 should receive error from grpc saying originator not there.
+// 4. F2 should be appending entries to F1 and F1 should be able to catch up with F2 (fetch data from F2).
+//
 
 int main(int argc, char* argv[]) {
     int parsed_argc{argc};

@@ -58,7 +58,8 @@ private:
 
     std::atomic< uint64_t > m_next_dsn{0}; // Data Sequence Number that will keep incrementing for each data entry
                                            //
-    iomgr::timer_handle_t m_wait_data_timer_hdl{iomgr::null_timer_handle};
+    iomgr::timer_handle_t m_wait_data_timer_hdl{
+        iomgr::null_timer_handle}; // non-recurring timer doesn't need to be cancelled on shutdown;
     bool m_resync_mode{false};
 
     static std::atomic< uint64_t > s_next_group_ordinal;
@@ -81,7 +82,7 @@ public:
     AsyncReplResult<> become_leader() override;
     bool is_leader() const override;
     const replica_id_t get_leader_id() const override;
-    std::vector<peer_info> get_replication_status() const override;
+    std::vector< peer_info > get_replication_status() const override;
     group_id_t group_id() const override { return m_group_id; }
     std::string group_id_str() const { return boost::uuids::to_string(m_group_id); }
     std::string rdev_name() const { return m_rdev_name; }

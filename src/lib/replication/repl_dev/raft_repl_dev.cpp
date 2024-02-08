@@ -6,6 +6,7 @@
 
 #include <sisl/fds/buffer.hpp>
 #include <sisl/grpc/generic_service.hpp>
+#include <sisl/grpc/rpc_client.hpp>
 #include <homestore/blkdata_service.hpp>
 #include <homestore/logstore_service.hpp>
 #include <homestore/superblk_handler.hpp>
@@ -147,7 +148,7 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq) {
            flatbuffers::FlatBufferToString(builder.GetBufferPointer() + sizeof(flatbuffers::uoffset_t),
                                            PushDataRequestTypeTable()));*/
 
-    LOGINFO("Data Channel: Pushing data to all followers: rreq=[{}]", rreq->to_compact_string());
+    RD_LOG(INFO, "Data Channel: Pushing data to all followers: rreq=[{}]", rreq->to_compact_string());
 
     group_msg_service()
         ->data_service_request_unidirectional(nuraft_mesg::role_regex::ALL, PUSH_DATA, rreq->pkts)
@@ -192,6 +193,10 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
         auto const& key = req->user_key();
         auto const& originator = req->blkid_originator();
         auto const& remote_blkid = req->remote_blkid();
+
+        // release this assert if in the future we want to fetch from non-originator;
+        RD_REL_ASSERT(originator == server_id(),
+                      "Not expect to receive fetch data from remote when I am not the originator of this request");
 
         // fetch data based on the remote_blkid
         if (originator == server_id()) {
@@ -420,10 +425,14 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rre
 }
 
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
+    if (rreqs->size() == 0) { return; }
+
     std::vector<::flatbuffers::Offset< RequestEntry > > entries;
     entries.reserve(rreqs->size());
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
+    RD_LOG(INFO, "Data Channel : FetchData from remote: rreq.size={}, my server_id={}", rreqs->size(), server_id());
+    auto const& originator = rreqs->front()->remote_blkid.server_id;
 
     for (auto const& rreq : *rreqs) {
         entries.push_back(CreateRequestEntry(*builder, rreq->get_lsn(), rreq->term(), rreq->dsn(),
@@ -432,8 +441,14 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
                                              rreq->remote_blkid.server_id /* blkid_originator */,
                                              builder->CreateVector(rreq->remote_blkid.blkid.serialize().cbytes(),
                                                                    rreq->remote_blkid.blkid.serialized_size())));
-        LOGINFO("Fetching data from remote: rreq=[{}], remote_blkid={}", rreq->to_compact_string(),
-                rreq->remote_blkid.blkid.to_string());
+        // releax this assert if there is a case in same batch originator can be different (can't think of one now)
+        // but if there were to be such case, we need to group rreqs by originator and send them in separate
+        // batches;
+        RD_DBG_ASSERT(rreq->remote_blkid.server_id == originator, "Unexpected originator for rreq={}",
+                      rreq->to_compact_string());
+
+        RD_LOG(TRACE, "Fetching data from originator={}, remote: rreq=[{}], remote_blkid={}, my server_id={}",
+               originator, rreq->to_compact_string(), rreq->remote_blkid.blkid.to_string(), server_id());
     }
 
     builder->FinishSizePrefixed(
@@ -443,15 +458,34 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
     // blkid;
     group_msg_service()
         ->data_service_request_bidirectional(
-            nuraft_mesg::role_regex::LEADER, FETCH_DATA,
+            originator, FETCH_DATA,
             sisl::io_blob_list_t{
                 sisl::io_blob{builder->GetBufferPointer(), builder->GetSize(), false /* is_aligned */}})
         .via(&folly::InlineExecutor::instance())
         .thenValue([this, builder, rreqs](auto e) {
-            RD_REL_ASSERT(!!e, "Error in fetching data");
+            if (!e) {
+                // if we are here, it means the original who sent the log entries are down.
+                // we need to handle error and when the other member becomes leader, it will resend the log entries;
+                RD_LOG(INFO,
+                       "Not able to fetching data from originator={}, error={}, probably originator is down. Will "
+                       "retry when new leader start appending log entries",
+                       rreqs->front()->remote_blkid.server_id, e.error());
+                for (auto const& rreq : *rreqs) {
+                    handle_error(rreq, RaftReplService::to_repl_error(e.error()));
+                }
+                return;
+            }
 
-            auto raw_data = e.value().cbytes();
-            auto total_size = e.value().size();
+            auto raw_data = e.value()->response_blob().cbytes();
+            auto total_size = e.value()->response_blob().size();
+
+            RD_DBG_ASSERT(total_size > 0, "Empty response from remote");
+            RD_DBG_ASSERT(raw_data, "Empty response from remote");
+
+            RD_LOG(INFO, "Data Channel: FetchData completed for reques.size()={} ", rreqs->size());
+
+            thread_local std::vector< folly::Future< std::error_code > > futs; // static is impplied
+            futs.clear();
 
             for (auto const& rreq : *rreqs) {
                 auto const data_size = rreq->remote_blkid.blkid.blk_count() * get_blk_size();
@@ -507,24 +541,35 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
                 }
 
                 // Schedule a write and upon completion, mark the data as written.
-                data_service()
-                    .async_write(r_cast< const char* >(data), data_size, rreq->local_blkid)
-                    .thenValue([this, rreq](auto&& err) {
-                        RD_REL_ASSERT(!err,
-                                      "Error in writing data"); // TODO: Find a way to return error to the Listener
-                        rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_WRITTEN));
-                        rreq->data_written_promise.setValue();
-                        RD_LOG(INFO, "Data Channel: Data Write completed rreq=[{}]", rreq->to_compact_string());
-                    });
+                futs.emplace_back(
+                    data_service().async_write(r_cast< const char* >(data), data_size, rreq->local_blkid));
 
                 // move the raw_data pointer to next rreq's data;
                 raw_data += data_size;
                 total_size -= data_size;
 
-                LOGINFO(
-                    "Data Channel: Data fetched from remote: rreq=[{}], data_size: {}, total_size: {}, local_blkid: {}",
-                    rreq->to_compact_string(), data_size, total_size, rreq->local_blkid.to_string());
+                RD_LOG(INFO,
+                       "Data Channel: Data fetched from remote: rreq=[{}], data_size: {}, total_size: {}, "
+                       "local_blkid: {}",
+                       rreq->to_compact_string(), data_size, total_size, rreq->local_blkid.to_string());
             }
+
+            folly::collectAllUnsafe(futs).thenValue([this, rreqs, e = std::move(e)](auto&& vf) {
+                for (auto const& err_c : vf) {
+                    if (sisl_unlikely(err_c.value())) {
+                        auto ec = err_c.value();
+                        RD_LOG(ERROR, "Error in writing data: {}", ec.value());
+                        // TODO: actually will never arrive here as iomgr will assert (should not assert but
+                        // to raise alert and leave the raft group);
+                    }
+                }
+
+                for (auto const& rreq : *rreqs) {
+                    rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_WRITTEN));
+                    rreq->data_written_promise.setValue();
+                    RD_LOG(TRACE, "Data Channel: Data Write completed rreq=[{}]", rreq->to_compact_string());
+                }
+            });
 
             builder->Release();
 
@@ -563,17 +608,14 @@ AsyncNotify RaftReplDev::notify_after_data_written(std::vector< repl_req_ptr_t >
         // if in resync mode, fetch data from remote immediately;
         check_and_fetch_remote_data(rreqs);
     } else {
-        check_and_fetch_remote_data(rreqs);
         // some data are not in completed state, let's schedule a timer to check it again;
         // we wait for data channel to fill in the data. Still if its not done we trigger a fetch from remote;
-#if 0
         m_wait_data_timer_hdl = iomanager.schedule_global_timer( // timer wakes up in current thread;
             HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_sec) * 1000 * 1000 * 1000, false /* recurring */,
             nullptr /* cookie */, iomgr::reactor_regex::all_worker, [this, rreqs](auto /*cookie*/) {
-                LOGINFO("Data Channel: Wait data write timer fired, checking if data is written");
+                RD_LOG(INFO, "Data Channel: Wait data write timer fired, checking if data is written");
                 check_and_fetch_remote_data(rreqs);
             });
-#endif
     }
 
     // block waiting here until all the futs are ready (data channel filled in and promises are made);

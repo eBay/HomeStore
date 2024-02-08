@@ -185,7 +185,7 @@ public:
         if (fake_restart) {
             shutdown_homestore(false);
             // sisl::GrpcAsyncClientWorker::shutdown_all();
-            std::this_thread::sleep_for(std::chrono::seconds{5});
+            std::this_thread::sleep_for(std::chrono::seconds{10});
         }
 
         std::vector< homestore::dev_info > device_info;
