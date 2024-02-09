@@ -174,6 +174,9 @@ struct TestCfg {
     uint32_t p_vol_files_space;
     std::string flip_name;
     std::string vol_copy_file_path;
+    uint32_t p_zero_buffer;
+    uint32_t zero_buffer_period;
+    bool thin_provision_enable{false};
 
     bool verify_csum() { return verify_type == verify_type_t::csum; }
     bool verify_data() { return verify_type == verify_type_t::data; }
@@ -575,6 +578,7 @@ class VolTest : public ::testing::Test {
     friend class VolCreateDeleteJob;
     friend class IOTestJob;
     friend class VolVerifyJob;
+    friend class IOManualTestJob;
 
 protected:
     std::atomic< size_t > outstanding_ios;
@@ -620,12 +624,20 @@ public:
         // vol_create_del_test = false;
         // move_verify_to_done = false;
         print_startTime = Clock::now();
+        if (tcfg.thin_provision_enable) {
+            HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.generic.boot_thin_provisioning = true; });
+            HS_SETTINGS_FACTORY().save();
+        }
 
         // outstanding_ios = 0;
     }
 
     virtual ~VolTest() override {
         if (init_buf) { iomanager.iobuf_free(static_cast< uint8_t* >(init_buf)); }
+        if (tcfg.thin_provision_enable) {
+            HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.generic.boot_thin_provisioning = false; });
+            HS_SETTINGS_FACTORY().save();
+        }
     }
 
     VolTest(const VolTest&) = delete;
@@ -1675,8 +1687,7 @@ protected:
         // lba: [0, max_vol_blks - max_blks)
         std::uniform_int_distribution< uint64_t > lba_random{0, vinfo->max_vol_blks - max_blks - 1};
         // nlbas: [1, max_blks]
-//        std::uniform_int_distribution< uint32_t > nlbas_random{1, max_blks};
-        std::uniform_int_distribution< uint32_t > nlbas_random{1, 5};
+        std::uniform_int_distribution< uint32_t > nlbas_random{1, max_blks};
 
         // we won't be writing more then 128 blocks in one io
         uint32_t attempt{1};
@@ -1816,22 +1827,22 @@ protected:
 
         const uint64_t page_size{VolInterface::get_instance()->get_page_size(vol)};
         const uint64_t size{nlbas * page_size};
+        static std::atomic< uint32_t > remaining_period{tcfg.zero_buffer_period};
+        uint32_t zero_counts_per_period = tcfg.p_zero_buffer * tcfg.zero_buffer_period / 100;
         boost::intrusive_ptr< io_req_t > vreq{};
-
-        static thread_local std::random_device rd{};
-        static thread_local std::default_random_engine engine{rd()};
-        static thread_local std::uniform_int_distribution< uint8_t > dist{0, 1};
-
         if (tcfg.write_cache) {
             uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
             HS_REL_ASSERT_NOTNULL(wbuf);
 
             populate_buf(wbuf, size, lba, vinfo.get());
-            populate_zero_buf(wbuf, size, vinfo.get());
+            if (HS_DYNAMIC_CONFIG(generic->boot_thin_provisioning) &&
+                remaining_period.fetch_sub(1) < zero_counts_per_period) {
+                populate_zero_buf(wbuf, size);
+            }
             vreq = boost::intrusive_ptr< io_req_t >(
                 new io_req_t(vinfo, Op_type::WRITE, wbuf, lba, nlbas, tcfg.verify_csum(), tcfg.write_cache));
         } else {
-            static bool send_iovec{false};
+            static bool send_iovec{true};
             std::vector< iovec > iovecs{};
             if (send_iovec) {
                 for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
@@ -1840,7 +1851,14 @@ protected:
                     iovec iov{static_cast< void* >(wbuf), static_cast< size_t >(page_size)};
                     iovecs.emplace_back(std::move(iov));
                     populate_buf(wbuf, page_size, lba + lba_num, vinfo.get());
-                    populate_zero_buf(wbuf, size, vinfo.get());
+                }
+                if (HS_DYNAMIC_CONFIG(generic->boot_thin_provisioning) &&
+                    remaining_period.fetch_sub(1) < zero_counts_per_period) {
+                    for (const auto& iovec : iovecs) {
+                        auto data = static_cast< uint8_t* >(iovec.iov_base);
+                        const size_t size = iovec.iov_len;
+                        populate_zero_buf(data, size);
+                    }
                 }
 
                 vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, Op_type::WRITE, std::move(iovecs), lba,
@@ -1848,13 +1866,17 @@ protected:
             } else {
                 uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
                 populate_buf(wbuf, size, lba, vinfo.get());
-                populate_zero_buf(wbuf, size, vinfo.get());
+                if (HS_DYNAMIC_CONFIG(generic->boot_thin_provisioning) &&
+                    remaining_period.fetch_sub(1) < zero_counts_per_period) {
+                    populate_zero_buf(wbuf, size);
+                }
                 HS_REL_ASSERT_NOTNULL(wbuf);
 
                 vreq = boost::intrusive_ptr< io_req_t >{
                     new io_req_t(vinfo, Op_type::WRITE, wbuf, lba, nlbas, tcfg.verify_csum(), tcfg.write_cache)};
             }
-            //            send_iovec = !send_iovec;
+            if (remaining_period.load() == 0) { remaining_period.store(tcfg.zero_buffer_period); }
+            send_iovec = !send_iovec;
         }
         vreq->cookie = static_cast< void* >(this);
 
@@ -1867,40 +1889,6 @@ protected:
                  (tcfg.write_cache != 0 ? true : false));
         if (ret_io != no_error) { return false; }
         return true;
-    }
-
-    void populate_zero_buf(uint8_t* buf, const uint64_t size, const vol_info_t* const vinfo) {
-        auto page_size = VolInterface::get_instance()->get_page_size(vinfo->vol);
-        auto nlbas = size / page_size;
-        static thread_local std::random_device rd{};
-        static thread_local std::default_random_engine engine{rd()};
-        static thread_local std::uniform_int_distribution< uint8_t > dist{0, 100};
-//        std::fill_n(buf + nlbas/2 * page_size, page_size, 0);
-//        {
-//            // first zero
-//            std::fill_n(buf, page_size, 0);
-//        }
-        {
-            // first x lbas the non_zero the rest zero
-
-            if (nlbas >= 2)
-                std::fill_n(buf + page_size, (nlbas -1) *page_size, 0);
-        }
-//        {
-//            // randomly 5% of lbas can be zero
-//            for (long unsigned int i = 0; i < nlbas; ++i) {
-//                if (dist(engine) < 5) { std::fill_n(buf + i * page_size, page_size, 0); }
-//            }
-//        }
-//        {
-//            // one lba in the middle can be zero    (two sub non empty ranges)
-//            std::uniform_int_distribution< uint8_t > ran_lba{1, nlbas-1};
-//            auto l1=  ran_lba(engine);
-//            auto l2=  ran_lba(engine);
-//            auto lb1 = std::min(l1,l2);
-//            auto lb2 = std::max(l1,l2);
-//            std::fill_n(buf + l1 * page_size, (lb2 -lb1 +1) *page_size, 0);
-//        }
     }
 
     void populate_buf(uint8_t* const buf, const uint64_t size, const uint64_t lba, const vol_info_t* const vinfo) {
@@ -1921,8 +1909,9 @@ protected:
         }
     }
 
+    void populate_zero_buf(uint8_t* buf, const uint64_t size) { std::fill_n(buf, size, 0); }
+
     bool read_vol(const uint32_t cur, const uint64_t lba, const uint32_t nlbas) {
-        return true;
         const auto vinfo{m_voltest->m_vol_info[cur]};
         const auto vol{vinfo->vol};
         if (vol == nullptr) { return false; }
@@ -2000,8 +1989,6 @@ protected:
     }
 
     bool verify(const boost::intrusive_ptr< io_req_t >& req, const bool can_panic = true) const {
-        return true;
-#if 0
         const auto& vol_req{static_cast< vol_interface_req_ptr >(req)};
 
         const auto verify_buffer{[this, &req, &can_panic](const uint8_t* const validate_buffer,
@@ -2107,9 +2094,200 @@ protected:
         tcfg.verify_csum() ? (HS_REL_ASSERT_EQ(total_size_read_csum, req->verify_size))
                            : (HS_REL_ASSERT_EQ(total_size_read, req->original_size));
         return true;
-#endif
+    }
+};
+
+// This test job is used to test the IOs with manual requests. For sake of simplicity, we will use the same volume for
+// all requests. The caller needs to load the requests before starting the job. The requests are loaded in the form of
+// Write with three or four parameters and Read with three parameters. The value is optional and is used only for write
+// requests.
+class IOManualTestJob : public TestJob {
+public:
+    using TupleVariant = std::variant< std::tuple< std::string, uint64_t, uint32_t >,
+                                       std::tuple< std::string, uint64_t, uint32_t, uint8_t > >;
+    using RequestVector = std::vector< IOManualTestJob::TupleVariant >;
+    IOManualTestJob(VolTest* const test) : TestJob(test, 1, true) {
+        vol = m_voltest->m_vol_info[0]->vol;
+        vinfo = m_voltest->m_vol_info[0];
+        page_size = VolInterface::get_instance()->get_page_size(vol);
+        const auto vol_size = VolInterface::get_instance()->get_size(vol);
+        const auto max_lbas = vol_size / page_size;
+        m_validate_buf.resize(max_lbas);
+        std::fill(m_validate_buf.begin(), m_validate_buf.end(), 0);
+        LOGINFO("Manual volume size {} max_lbas {}", vol_size, max_lbas);
+    }
+    virtual ~IOManualTestJob() override = default;
+    IOManualTestJob(const IOManualTestJob&) = delete;
+    IOManualTestJob(IOManualTestJob&&) noexcept = delete;
+    IOManualTestJob& operator=(const IOManualTestJob&) = delete;
+    IOManualTestJob& operator=(IOManualTestJob&&) noexcept = delete;
+
+    virtual void run_one_iteration() override {
+        if (m_outstanding_ios.load() == 0 && m_current_request < m_requests.size()) {
+            const auto& request = m_requests[m_current_request];
+            if (std::holds_alternative< std::tuple< std::string, uint64_t, uint32_t > >(request)) {
+                auto& tuple = std::get< std::tuple< std::string, uint64_t, uint32_t > >(request);
+                auto start_lba = std::get< 1 >(tuple);
+                auto nlbas = std::get< 2 >(tuple);
+                if (std::get< 0 >(tuple) == "write") {
+                    write_vol(start_lba, nlbas);
+                    auto it = m_validate_buf.begin() + start_lba;
+                    std::fill(it, it + nlbas, 0);
+                } else {
+                    read_vol(start_lba, nlbas);
+                }
+            } else if (std::holds_alternative< std::tuple< std::string, uint64_t, uint32_t, uint8_t > >(request)) {
+                auto& tuple = std::get< std::tuple< std::string, uint64_t, uint32_t, uint8_t > >(request);
+                auto start_lba = std::get< 1 >(tuple);
+                auto nlbas = std::get< 2 >(tuple);
+                auto value = std::get< 3 >(tuple);
+                if (std::get< 0 >(tuple) == "write") {
+                    write_vol(start_lba, nlbas, value);
+                    auto it = m_validate_buf.begin() + start_lba;
+                    std::fill(it, it + nlbas, value);
+                } else {
+                    // in case, the caller mistakenly added a value for a read request, we will ignore the value
+                    read_vol(start_lba, nlbas);
+                }
+            }
+        }
     }
 
+    void on_one_iteration_completed(const boost::intrusive_ptr< io_req_t >& req) override {
+        --m_outstanding_ios;
+        if (req->op_type == Op_type::READ) { verify_request(req); }
+        req->vol_info->ref_cnt.decrement_testz(1);
+    }
+    uint64_t read_buffer(std::vector< iovec >& iovecs, uint8_t* buf) {
+        uint8_t* current_position = buf;
+        for (const auto& iov : iovecs) {
+            std::memcpy(current_position, iov.iov_base, iov.iov_len);
+            current_position += iov.iov_len;
+        }
+        return static_cast< uint64_t >(current_position - buf);
+    }
+    void verify_request(const boost::intrusive_ptr< io_req_t >& req) {
+        std::shared_ptr< uint8_t > buf(new uint8_t[req->nlbas * page_size]);
+        std::fill_n(buf.get(), req->nlbas * page_size, 0);
+        auto total_size_read = read_buffer(req->iovecs, buf.get());
+        HS_REL_ASSERT_EQ(req->nlbas * page_size, total_size_read);
+        auto raw_buf = buf.get();
+        for (size_t i = 0; i < req->nlbas; i++) {
+            HS_REL_ASSERT_EQ(raw_buf[i * page_size], m_validate_buf[req->lba + i]);
+        }
+    }
+    bool time_to_stop() const override { return m_current_request == m_requests.size(); }
+
+    virtual bool is_job_done() const override { return (m_outstanding_ios == 0); }
+    bool is_async_job() const override { return true; }
+    std::string job_name() const { return "IO Manual Job"; }
+    void load_requests(RequestVector& requests) { m_requests = requests; }
+
+protected:
+    VolumePtr vol;
+    std::shared_ptr< vol_info_t > vinfo;
+    uint64_t page_size;
+    std::atomic< uint64_t > m_outstanding_ios{0};
+    std::atomic< uint64_t > m_current_request{0};
+    std::vector< uint8_t > m_validate_buf;
+    RequestVector m_requests;
+
+    bool write_vol(const uint64_t lba, const uint32_t nlbas, const uint8_t value = 0) {
+        ++m_current_request;
+        ++m_outstanding_ios;
+        const uint64_t size{nlbas * page_size};
+        boost::intrusive_ptr< io_req_t > vreq{};
+        if (tcfg.write_cache) {
+            uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
+            populate_buf(wbuf, size, value);
+            vreq = boost::intrusive_ptr< io_req_t >(
+                new io_req_t(vinfo, Op_type::WRITE, wbuf, lba, nlbas, tcfg.verify_csum(), tcfg.write_cache));
+        } else {
+            static bool send_iovec{true};
+            std::vector< iovec > iovecs{};
+            if (send_iovec) {
+                for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
+                    uint8_t* const wbuf{iomanager.iobuf_alloc(512, page_size)};
+                    iovec iov{static_cast< void* >(wbuf), static_cast< size_t >(page_size)};
+                    iovecs.emplace_back(std::move(iov));
+                    populate_buf(wbuf, page_size, value);
+                }
+                vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, Op_type::WRITE, std::move(iovecs), lba,
+                                                                     nlbas, tcfg.verify_csum(), tcfg.write_cache));
+            } else {
+                uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
+                populate_buf(wbuf, size, value);
+                vreq = boost::intrusive_ptr< io_req_t >{
+                    new io_req_t(vinfo, Op_type::WRITE, wbuf, lba, nlbas, tcfg.verify_csum(), tcfg.write_cache)};
+            }
+            send_iovec = !send_iovec;
+        }
+        vreq->cookie = static_cast< void* >(this);
+
+        ++m_voltest->output.write_cnt;
+        vinfo->ref_cnt.increment(1);
+        const auto ret_io{VolInterface::get_instance()->write(vol, vreq)};
+        LOGDEBUG("Wrote lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas,
+                 m_outstanding_ios.load(), (tcfg.write_iovec != 0 ? true : false),
+                 (tcfg.write_cache != 0 ? true : false));
+        if (ret_io != no_error) { return false; }
+        return true;
+    }
+
+    void populate_buf(uint8_t* buf, const uint64_t size, const uint8_t value = 0) { std::fill_n(buf, size, value); }
+
+    bool read_vol(const uint64_t lba, const uint32_t nlbas) {
+        ++m_current_request;
+        if (read_vol_internal(vinfo, vol, lba, nlbas, false)) { return true; }
+        return false;
+    }
+
+    boost::intrusive_ptr< io_req_t > read_vol_internal(std::shared_ptr< vol_info_t > vinfo, VolumePtr vol,
+                                                       const uint64_t lba, const uint32_t nlbas,
+                                                       const bool sync = false) {
+        boost::intrusive_ptr< io_req_t > vreq{};
+        if (tcfg.read_cache) {
+            vreq = boost::intrusive_ptr< io_req_t >{
+                new io_req_t{vinfo, Op_type::READ, nullptr, lba, nlbas, tcfg.verify_csum(), tcfg.read_cache, sync}};
+        } else {
+            static bool send_iovec{true};
+            if (send_iovec) {
+                std::vector< iovec > iovecs{};
+                for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
+                    uint8_t* const rbuf{iomanager.iobuf_alloc(512, page_size)};
+                    std::memset(static_cast< void* >(rbuf), 0, page_size);
+
+                    HS_REL_ASSERT_NOTNULL(rbuf);
+                    iovec iov{static_cast< void* >(rbuf), static_cast< size_t >(page_size)};
+                    iovecs.emplace_back(std::move(iov));
+                }
+
+                vreq = boost::intrusive_ptr< io_req_t >{new io_req_t{vinfo, Op_type::READ, std::move(iovecs), lba,
+                                                                     nlbas, tcfg.verify_csum(), tcfg.read_cache, sync}};
+            } else {
+                uint8_t* const rbuf{iomanager.iobuf_alloc(512, nlbas * page_size)};
+                std::memset(static_cast< void* >(rbuf), 0, nlbas * page_size);
+                vreq = boost::intrusive_ptr< io_req_t >{
+                    new io_req_t{vinfo, Op_type::READ, rbuf, lba, nlbas, tcfg.verify_csum(), tcfg.read_cache, sync}};
+            }
+            send_iovec = !send_iovec;
+        }
+        vreq->cookie = static_cast< void* >(this);
+
+        ++m_voltest->output.read_cnt;
+        ++m_outstanding_ios;
+        vinfo->ref_cnt.increment(1);
+        const auto ret_io{VolInterface::get_instance()->read(vol, vreq)};
+        LOGDEBUG("Read lba: {}, nlbas: {} outstanding_ios={}, iovec(s)={}, cache={}", lba, nlbas,
+                 m_outstanding_ios.load(), (tcfg.read_iovec != 0 ? true : false),
+                 (tcfg.read_cache != 0 ? true : false));
+        if (sync) {
+            --m_outstanding_ios;
+            vinfo->ref_cnt.decrement(1);
+        }
+        if (ret_io != no_error) { return nullptr; }
+        return vreq;
+    }
 };
 
 class VolVerifyJob : public IOTestJob {
@@ -2269,20 +2447,42 @@ TEST_F(VolTest, init_io_test) {
     this->shutdown();
     if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
-
 TEST_F(VolTest, thin_test) {
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.generic.boot_thin_provisioning = true; });
+    HS_SETTINGS_FACTORY().save();
+    tcfg.max_vols = 1;
+    tcfg.verify_type = static_cast< verify_type_t >(3);
+    tcfg.max_disk_capacity = 1 * (1ul << 30); // 1GB
+    tcfg.p_volume_size = 1;                   // 1% of 2 (devices) * 1G = 20 MB volume
+    output.print("thin_test");
+
     this->start_homestore();
-    std::unique_ptr< VolCreateDeleteJob > cdjob;
-    if (tcfg.create_del_with_io || tcfg.delete_with_io) {
-        cdjob = std::make_unique< VolCreateDeleteJob >(this);
-        this->start_job(cdjob.get(), wait_type::no_wait);
-    }
 
-    this->start_io_job();
-    output.print("init_io_test");
+    std::unique_ptr< IOManualTestJob > job;
+    job = std::make_unique< IOManualTestJob >(this);
+    // request = op=[write|read], lba, nlbas [value], value is optional and is used only for write requests and If not
+    // provided, it defaults to 0.
+    IOManualTestJob::RequestVector reqs = {
+        // Case one:  normal read (no zero padding)
+        std::make_tuple("write", 0, 100, 4), std::make_tuple("read", 5, 20),
+        // Case two:  zero padding, read after write
+        std::make_tuple("write", 1, 10), std::make_tuple("read", 1, 20), std::make_tuple("read", 5, 3),
+        // Case three:  zero padding, overlapping for read
+        std::make_tuple("write", 100, 200), std::make_tuple("read", 150, 250),
+        // Case four: no write
+        std::make_tuple("read", 800, 5)};
+    job->load_requests(reqs);
 
-    if (tcfg.create_del_with_io || tcfg.delete_with_io) { cdjob->wait_for_completion(); }
+    this->start_job(job.get(), wait_type::for_completion);
+
+    LOGINFO("All volumes are deleted, do a shutdown of homestore");
     this->shutdown();
+
+    LOGINFO("Shutdown of homestore is completed, removing files");
+    this->remove_files();
+
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.generic.boot_thin_provisioning = false; });
+    HS_SETTINGS_FACTORY().save();
 }
 
 /*!
@@ -2743,6 +2943,13 @@ SISL_OPTION_GROUP(
     (io_size, "", "io_size", "io size in KB", ::cxxopts::value< uint32_t >()->default_value("4"), "io_size"),
     (vol_copy_file_path, "", "vol_copy_file_path", "file path for copied volume",
      ::cxxopts::value< std::string >()->default_value(""), "path [...]"),
+    (p_zero_buffer, "", "p_zero_buffer",
+     "percentage of zero buffer occurrence for testing thin provisioning within period",
+     ::cxxopts::value< uint32_t >()->default_value("70"), "0 to 100"),
+    (zero_buffer_period, "", "zero_buffer_period", " the period of consecutive zero buffer occurrence",
+     ::cxxopts::value< uint32_t >()->default_value("100"), "0 to 100"),
+    (thin_provision_enable, "", "thin_provision_enable", " enable thin provisioning",
+     ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (unmap_frequency, "", "unmap_frequency", "do unmap for every N",
      ::cxxopts::value< uint64_t >()->default_value("100"), "unmap_frequency"))
 
@@ -2819,6 +3026,9 @@ int main(int argc, char* argv[]) {
     gcfg.app_mem_size_in_gb = SISL_OPTIONS["app_mem_size_in_gb"].as< uint32_t >();
     gcfg.vol_copy_file_path = SISL_OPTIONS["vol_copy_file_path"].as< std::string >();
     const auto io_size_in_kb = SISL_OPTIONS["io_size"].as< uint32_t >();
+    gcfg.p_zero_buffer = SISL_OPTIONS["p_zero_buffer"].as< uint32_t >();
+    gcfg.zero_buffer_period = SISL_OPTIONS["zero_buffer_period"].as< uint32_t >();
+    gcfg.thin_provision_enable = SISL_OPTIONS["thin_provision_enable"].as< uint32_t >() != 0 ? true : false;
     gcfg.io_size = io_size_in_kb * 1024;
 
     HS_REL_ASSERT(io_size_in_kb && (io_size_in_kb % 4 == 0),

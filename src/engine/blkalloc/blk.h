@@ -102,7 +102,7 @@ public:
     bool operator==(const BlkId& other) noexcept { return (compare(*this, other) == 0); }
 
     void invalidate() { set(blk_num_t{0}, blk_count_t{0}, s_chunk_num_mask); }
-    // return invalid_blk_id() { return blk_count_t{0}; }
+
     [[nodiscard]] bool is_valid() const { return (m_chunk_num != s_chunk_num_mask); }
 
     [[nodiscard]] BlkId get_blkid_at(const uint32_t offset, const uint32_t pagesz) const {

@@ -334,50 +334,19 @@ indx_tbl* Volume::recover_indx_tbl(btree_super_block& sb, btree_cp_sb& cp_info) 
                            SnapMgr::add_read_tracker, &cp_info);
     return static_cast< indx_tbl* >(tbl);
 }
-static std::vector< bool > find_non_zero_data(const uint8_t* buf, size_t size, uint32_t nlbas) {
-    std::vector< bool > empty_blocks;
 
-    auto is_buf_empty = [](const uint8_t* buf, size_t size) -> bool {
-        return buf[0] == 0 && !std::memcmp(buf, buf + 1, size - 1);
-    };
-    for (uint32_t count{0}; count < nlbas; ++count) {
-        empty_blocks.push_back(!is_buf_empty(buf, size));
-        buf += size;
-    }
-    return empty_blocks;
-}
-static std::vector< std::pair< int, int > > get_true_intervals(const std::vector< bool >& empty_blocks) {
-    std::vector< std::pair< int, int > > result;
-
-    int start = -1;
-    for (std::size_t i = 0; i < empty_blocks.size(); ++i) {
-        if (empty_blocks[i]) {
-            if (start == -1) { start = i; }
-        } else {
-            if (start != -1) {
-                result.emplace_back(start, i - start);
-                start = -1;
-            }
-        }
-    }
-
-    if (start != -1) { result.emplace_back(start, empty_blocks.size() - start); }
-
-    return result;
-}
-
+#if 0
+// TODO: use these functions for near future optimization of write path for thin provisioning volumes to enable skipping
+//  writing empty blocks in subrange intervals for requested buffer instead of detecting the all-zero-buffer requests.
 static std::vector< std::pair< int, int > > compute_range_intervals(const uint8_t* buf, size_t page_size,
                                                                     uint32_t nlbas, bool empty_blocks = false) {
     std::vector< std::pair< int, int > > intervals;
     bool in_empty_region = false;
     int current_range_start = -1;
     int current_range_length = 1;
-    auto is_buf_empty = [](const uint8_t* buf, size_t size) -> bool {
-        return buf[0] == 0 && !std::memcmp(buf, buf + 1, size - 1);
-    };
     for (uint32_t i = 0; i < nlbas; i++) {
         const uint8_t* page_start = buf + (i * page_size);
-        bool is_page_empty = (empty_blocks == is_buf_empty(page_start, page_size));
+        bool is_page_empty = (empty_blocks == is_buf_zero(page_start, page_size));
         if (is_page_empty) {
             if (!in_empty_region) {
                 current_range_start = i;
@@ -395,16 +364,7 @@ static std::vector< std::pair< int, int > > compute_range_intervals(const uint8_
     return intervals;
 }
 
-std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
-    if (!HB_DYNAMIC_CONFIG(general_config->boot_thin_provisioning)){
-        return write_internal(iface_req);
-    }
-    std::error_condition ret{no_error};
-    auto buf = static_cast< uint8_t* >(iface_req->buffer);
-    auto nlbas = iface_req->nlbas;
-    auto start_lba = iface_req->lba;
-    auto non_empty_blocks = compute_range_intervals(buf, get_page_size(), nlbas, false);
-//    auto vreq = volume_req::make(iface_req);
+static std::string print_ranges(lba_t start_lba, const std::vector< std::pair< int, int > >& intervals) {
     auto intervals_to_string = [start_lba](const std::vector< std::pair< int, int > >& intervals) -> std::string {
         std::vector< std::string > result_strings;
         std::transform(intervals.begin(), intervals.end(), std::back_inserter(result_strings),
@@ -416,67 +376,28 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
                        });
         return std::accumulate(result_strings.begin(), result_strings.end(), std::string(""));
     };
-    LOGINFO("original req <{}, {}> => [{}]", iface_req->lba, iface_req->nlbas, intervals_to_string(non_empty_blocks));
-    for (const auto &interval : non_empty_blocks) {
-//#if 0
-        iface_req->lba = start_lba + interval.first;
-        iface_req->nlbas = interval.second;
-        iface_req->buffer = buf + (interval.first * get_page_size());
-        iface_req->iovecs.clear();
-
-
-        ret = write_internal(iface_req);
-        if (ret != no_error) {
-            return ret;
-        }
-//#endif
-#if 0
-        auto lba = start_lba + interval.first;
-        auto nlbas = interval.second;
-        const auto buffer = buf + (interval.first * get_page_size());
-        auto req = std::make_unique<vol_interface_req>(buffer, lba, nlbas, iface_req->sync, iface_req->cache);
-
-        req->vol_instance = shared_from_this();
-        req->part_of_batch = iface_req->part_of_batch;
-        req->op_type = Op_type::WRITE;
-        LOGINFO("sending request to write_internal with lba: {}, nlbas: {} buffer :{}", req->lba, req->nlbas, req->buffer);
-        //extra
-        req->read_buf_list = iface_req->read_buf_list;
-        req->err =  iface_req->err;
-        req->request_id = iface_req->request_id;
-        req->cache = iface_req->cache;
-        req->sync = iface_req->sync;
-        req->is_fail_completed = iface_req->is_fail_completed.load();
-        req->cookie = iface_req->cookie;
-
-        ret = write_internal(req.get());
-        for (auto x: iface_req->read_buf_list) {
-            req->read_buf_list.push_back(x);
-
-        }
-        for (auto p: iface_req->iovecs) {
-            req->iovecs.push_back(p);
-
-        }
-        //        vol_interface_req i_req(buffer, start_lba, nlbas, iface_req->sync, iface_req->cache);
-//        i_req.request_id = iface_req->request_id;
-//        auto ret = write_internal(&i_req);
-//        if (ret != no_error) {
-//            return ret;
-//        }
+    return intervals_to_string(intervals);
+}
 #endif
+
+std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
+    std::error_condition ret{no_error};
+    if (!HS_DYNAMIC_CONFIG(generic->boot_thin_provisioning)) {
+        return write_internal(iface_req);
+    } else {
+        if (iface_req->is_zero_request(get_page_size())) {
+            THIS_VOL_LOG(TRACE, volume, iface_req, "zero request <{}, {}>", iface_req->lba, iface_req->nlbas);
+            iface_req->op_type = Op_type::UNMAP;
+            ret = unmap(iface_req);
+        } else {
+            ret = write_internal(iface_req);
+        }
     }
-    iface_req->buffer = (void*)(buf);
-    iface_req->nlbas = nlbas;
-    iface_req->lba = start_lba;
-//    check_and_complete_req(vreq, ret);
-//    interface_req_done(iface_req);
+    iface_req->op_type = Op_type::WRITE;
     return ret;
 }
-//std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
-//
-//}
- std::error_condition Volume::write_internal(const vol_interface_req_ptr& iface_req) {
+
+std::error_condition Volume::write_internal(const vol_interface_req_ptr& iface_req) {
     static thread_local std::vector< BlkId > bid{};
     std::error_condition ret{no_error};
 
@@ -485,9 +406,6 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     auto vreq = volume_req::make(iface_req);
     THIS_VOL_LOG(TRACE, volume, vreq, "write: lba={}, nlbas={}, cache={}", vreq->lba(), vreq->nlbas(),
                  vreq->use_cache());
-    LOGINFO("\nwrite: lba={}, nlbas={}, cache={} buffer= {}", vreq->lba(), vreq->nlbas(),
-                 vreq->use_cache(), iface_req->buffer);
-    print_tree();
     COUNTER_INCREMENT(m_metrics, volume_outstanding_data_write_count, 1);
 
     // Sanity checks
@@ -515,7 +433,6 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
         uint64_t start_lba{vreq->lba()};
 
         for (size_t i{0}; i < bid.size(); ++i) {
-            LOGINFO("bid[{}]: {}", i, bid[i].to_string());
             if (bid[i].get_nblks() == 0) {
                 // It should not happen. But it happened once so adding a safe check in case it happens again
                 VOL_LOG_ASSERT(0, vreq, "{}", bid[i].to_string());
@@ -548,10 +465,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
                 }
             } else {
                 // scatter/gather write
-
                 const auto& iovecs{std::get< volume_req::IoVecData >(vreq->data)};
-                LOGINFO("write: lba={}, nlbas={}, data size/pagesize: {} iovec[0]_len {} buffer{} iovecs.iov_data {} size {}", vreq->lba(), vreq->nlbas(),
-                        data_size/get_page_size(), static_cast< uint64_t >(iovecs.get().at(0).iov_len)/4096, iface_req->buffer, iovecs.get().at(0).iov_base, iovecs.get().size());
                 const auto write_iovecs{get_next_iovecs(write_transversal, iovecs, data_size)};
 
                 // TO DO: Add option to insert into cache if write cache option true
@@ -597,11 +511,7 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     }
 
 done:
-//    if (!HB_DYNAMIC_CONFIG(general_config->boot_thin_provisioning)){
-         LOGINFO("done calls for check and complete write? {}: lba={}, nlbas={}", vreq->is_write(), vreq->lba(), vreq->nlbas());
-        check_and_complete_req(vreq, ret);
-//    }
-
+    check_and_complete_req(vreq, ret);
     return ret;
 }
 
@@ -736,8 +646,6 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
                 vreq->state = volume_req_state::journal_io;
                 vreq->indx_start_time = Clock::now();
                 auto ireq = boost::static_pointer_cast< indx_req >(vreq);
-                LOGINFO("complete write? {}: lba={}, nlbas={}, cache={}", vreq->is_write(), vreq->lba(), vreq->nlbas(),
-                        vreq->use_cache());
                 (vreq->is_unmap()) ? m_indx_mgr->unmap(ireq) : m_indx_mgr->update_indx(ireq);
                 COUNTER_INCREMENT(m_metrics, volume_outstanding_metadata_write_count, 1);
             }
@@ -781,12 +689,7 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
             }
 #endif
             THIS_VOL_LOG(TRACE, volume, vreq, "IO DONE");
-            if (vreq->is_write() && HB_DYNAMIC_CONFIG(general_config->boot_thin_provisioning)){
-
-                }
-                else{
-                    interface_req_done(vreq->iface_req);
-                }
+            interface_req_done(vreq->iface_req);
         }
         shutdown_if_needed();
     }
@@ -815,7 +718,7 @@ void Volume::process_indx_completions(const indx_req_ptr& ireq, std::error_condi
 
     THIS_VOL_LOG(TRACE, volume, vreq, "metadata_complete: status={}", vreq->err().message());
     HISTOGRAM_OBSERVE(m_metrics, volume_map_write_latency, get_elapsed_time_us(vreq->indx_start_time));
-    LOGINFO("process_indx_completions calls for check and complete write? {}: lba={}, nlbas={}", vreq->is_write(), vreq->lba(), vreq->nlbas());
+
     check_and_complete_req(vreq, err);
 }
 
@@ -924,7 +827,7 @@ mapping* Volume::get_active_indx() {
 void Volume::process_read_indx_completions(const boost::intrusive_ptr< indx_req >& ireq, std::error_condition err) {
     auto ret = no_error;
     auto vreq = boost::static_pointer_cast< volume_req >(ireq);
-    LOGINFO("process_read_indx_completions calls for check and complete read? {}: lba={}, nlbas={}", vreq->is_read_op(), vreq->lba(), vreq->nlbas());
+
     // if there is error or nothing to read anymore, complete this req;
     if (err != no_error) {
         ret = err;
@@ -1048,7 +951,6 @@ read_done:
 /* It is not lock protected. It should be called only by thread for a vreq */
 volume_child_req_ptr Volume::create_vol_child_req(const BlkId& bid, const volume_req_ptr& vreq,
                                                   const uint64_t start_lba, const lba_count_t nlbas) {
-
     volume_child_req_ptr vc_req = volume_child_req::make_request();
     vc_req->parent_req = vreq;
     vc_req->is_read = vreq->is_read_op();
@@ -1059,7 +961,6 @@ volume_child_req_ptr Volume::create_vol_child_req(const BlkId& bid, const volume
     vc_req->use_cache = vreq->use_cache();
     vc_req->part_of_batch = vreq->iface_req->part_of_batch;
     vc_req->request_id = vreq->request_id;
-    LOGINFO("create_vol_child_req calls for check and complete write? {}: lba={}, nlbas={}", vreq->is_write(), vreq->lba(), vreq->nlbas());
 
     assert((bid.data_size(HomeBlks::instance()->get_data_pagesz()) % get_page_size()) == 0);
     vc_req->nlbas = nlbas;

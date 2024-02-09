@@ -34,9 +34,6 @@ table GeneralConfig {
     // These fields should only be changed by agent through workflow
     boot_restricted_mode: bool = false;
     boot_safe_mode: bool = false;
-
-    // This field is for enabling thin provisioing on booting
-    boot_thin_provisioning: bool = true;
 }
 
 table HomeBlksSettings {
