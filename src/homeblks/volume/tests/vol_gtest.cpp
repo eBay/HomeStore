@@ -174,6 +174,9 @@ struct TestCfg {
     uint32_t p_vol_files_space;
     std::string flip_name;
     std::string vol_copy_file_path;
+    uint32_t p_zero_buffer;
+    uint32_t zero_buffer_period;
+    bool thin_provision_enable{false};
 
     bool verify_csum() { return verify_type == verify_type_t::csum; }
     bool verify_data() { return verify_type == verify_type_t::data; }
@@ -620,12 +623,20 @@ public:
         // vol_create_del_test = false;
         // move_verify_to_done = false;
         print_startTime = Clock::now();
+        if (tcfg.thin_provision_enable) {
+            HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.generic.boot_thin_provisioning = true; });
+            HS_SETTINGS_FACTORY().save();
+        }
 
         // outstanding_ios = 0;
     }
 
     virtual ~VolTest() override {
         if (init_buf) { iomanager.iobuf_free(static_cast< uint8_t* >(init_buf)); }
+        if (tcfg.thin_provision_enable) {
+            HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.generic.boot_thin_provisioning = false; });
+            HS_SETTINGS_FACTORY().save();
+        }
     }
 
     VolTest(const VolTest&) = delete;
@@ -1675,8 +1686,7 @@ protected:
         // lba: [0, max_vol_blks - max_blks)
         std::uniform_int_distribution< uint64_t > lba_random{0, vinfo->max_vol_blks - max_blks - 1};
         // nlbas: [1, max_blks]
-//        std::uniform_int_distribution< uint32_t > nlbas_random{1, max_blks};
-        std::uniform_int_distribution< uint32_t > nlbas_random{1, 5};
+        std::uniform_int_distribution< uint32_t > nlbas_random{1, max_blks};
 
         // we won't be writing more then 128 blocks in one io
         uint32_t attempt{1};
@@ -1816,22 +1826,22 @@ protected:
 
         const uint64_t page_size{VolInterface::get_instance()->get_page_size(vol)};
         const uint64_t size{nlbas * page_size};
+        static std::atomic< uint32_t > remaining_period{tcfg.zero_buffer_period};
+        uint32_t zero_counts_per_period = tcfg.p_zero_buffer * tcfg.zero_buffer_period / 100;
         boost::intrusive_ptr< io_req_t > vreq{};
-
-        static thread_local std::random_device rd{};
-        static thread_local std::default_random_engine engine{rd()};
-        static thread_local std::uniform_int_distribution< uint8_t > dist{0, 1};
-
         if (tcfg.write_cache) {
             uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
             HS_REL_ASSERT_NOTNULL(wbuf);
 
             populate_buf(wbuf, size, lba, vinfo.get());
-            populate_zero_buf(wbuf, size, vinfo.get());
+            if (HS_DYNAMIC_CONFIG(generic->boot_thin_provisioning) &&
+                remaining_period.fetch_sub(1) < zero_counts_per_period) {
+                populate_zero_buf(wbuf, size);
+            }
             vreq = boost::intrusive_ptr< io_req_t >(
                 new io_req_t(vinfo, Op_type::WRITE, wbuf, lba, nlbas, tcfg.verify_csum(), tcfg.write_cache));
         } else {
-            static bool send_iovec{false};
+            static bool send_iovec{true};
             std::vector< iovec > iovecs{};
             if (send_iovec) {
                 for (uint32_t lba_num{0}; lba_num < nlbas; ++lba_num) {
@@ -1840,7 +1850,14 @@ protected:
                     iovec iov{static_cast< void* >(wbuf), static_cast< size_t >(page_size)};
                     iovecs.emplace_back(std::move(iov));
                     populate_buf(wbuf, page_size, lba + lba_num, vinfo.get());
-                    populate_zero_buf(wbuf, size, vinfo.get());
+                }
+                if (HS_DYNAMIC_CONFIG(generic->boot_thin_provisioning) &&
+                    remaining_period.fetch_sub(1) < zero_counts_per_period) {
+                    for (const auto& iovec : iovecs) {
+                        auto data = static_cast< uint8_t* >(iovec.iov_base);
+                        const size_t size = iovec.iov_len;
+                        populate_zero_buf(data, size);
+                    }
                 }
 
                 vreq = boost::intrusive_ptr< io_req_t >(new io_req_t(vinfo, Op_type::WRITE, std::move(iovecs), lba,
@@ -1848,13 +1865,17 @@ protected:
             } else {
                 uint8_t* const wbuf{iomanager.iobuf_alloc(512, size)};
                 populate_buf(wbuf, size, lba, vinfo.get());
-                populate_zero_buf(wbuf, size, vinfo.get());
+                if (HS_DYNAMIC_CONFIG(generic->boot_thin_provisioning) &&
+                    remaining_period.fetch_sub(1) < zero_counts_per_period) {
+                    populate_zero_buf(wbuf, size);
+                }
                 HS_REL_ASSERT_NOTNULL(wbuf);
 
                 vreq = boost::intrusive_ptr< io_req_t >{
                     new io_req_t(vinfo, Op_type::WRITE, wbuf, lba, nlbas, tcfg.verify_csum(), tcfg.write_cache)};
             }
-            //            send_iovec = !send_iovec;
+            if (remaining_period.load() == 0) { remaining_period.store(tcfg.zero_buffer_period); }
+            send_iovec = !send_iovec;
         }
         vreq->cookie = static_cast< void* >(this);
 
@@ -1867,40 +1888,6 @@ protected:
                  (tcfg.write_cache != 0 ? true : false));
         if (ret_io != no_error) { return false; }
         return true;
-    }
-
-    void populate_zero_buf(uint8_t* buf, const uint64_t size, const vol_info_t* const vinfo) {
-        auto page_size = VolInterface::get_instance()->get_page_size(vinfo->vol);
-        auto nlbas = size / page_size;
-        static thread_local std::random_device rd{};
-        static thread_local std::default_random_engine engine{rd()};
-        static thread_local std::uniform_int_distribution< uint8_t > dist{0, 100};
-//        std::fill_n(buf + nlbas/2 * page_size, page_size, 0);
-//        {
-//            // first zero
-//            std::fill_n(buf, page_size, 0);
-//        }
-        {
-            // first x lbas the non_zero the rest zero
-
-            if (nlbas >= 2)
-                std::fill_n(buf + page_size, (nlbas -1) *page_size, 0);
-        }
-//        {
-//            // randomly 5% of lbas can be zero
-//            for (long unsigned int i = 0; i < nlbas; ++i) {
-//                if (dist(engine) < 5) { std::fill_n(buf + i * page_size, page_size, 0); }
-//            }
-//        }
-//        {
-//            // one lba in the middle can be zero    (two sub non empty ranges)
-//            std::uniform_int_distribution< uint8_t > ran_lba{1, nlbas-1};
-//            auto l1=  ran_lba(engine);
-//            auto l2=  ran_lba(engine);
-//            auto lb1 = std::min(l1,l2);
-//            auto lb2 = std::max(l1,l2);
-//            std::fill_n(buf + l1 * page_size, (lb2 -lb1 +1) *page_size, 0);
-//        }
     }
 
     void populate_buf(uint8_t* const buf, const uint64_t size, const uint64_t lba, const vol_info_t* const vinfo) {
@@ -1921,8 +1908,9 @@ protected:
         }
     }
 
+    void populate_zero_buf(uint8_t* buf, const uint64_t size) { std::fill_n(buf, size, 0); }
+
     bool read_vol(const uint32_t cur, const uint64_t lba, const uint32_t nlbas) {
-        return true;
         const auto vinfo{m_voltest->m_vol_info[cur]};
         const auto vol{vinfo->vol};
         if (vol == nullptr) { return false; }
@@ -2000,8 +1988,6 @@ protected:
     }
 
     bool verify(const boost::intrusive_ptr< io_req_t >& req, const bool can_panic = true) const {
-        return true;
-#if 0
         const auto& vol_req{static_cast< vol_interface_req_ptr >(req)};
 
         const auto verify_buffer{[this, &req, &can_panic](const uint8_t* const validate_buffer,
@@ -2107,9 +2093,7 @@ protected:
         tcfg.verify_csum() ? (HS_REL_ASSERT_EQ(total_size_read_csum, req->verify_size))
                            : (HS_REL_ASSERT_EQ(total_size_read, req->original_size));
         return true;
-#endif
     }
-
 };
 
 class VolVerifyJob : public IOTestJob {
@@ -2270,19 +2254,14 @@ TEST_F(VolTest, init_io_test) {
     if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
-TEST_F(VolTest, thin_test) {
+TEST_F(VolTest, thin_provisioning_test) {
+    tcfg.precreate_volume = false;
     this->start_homestore();
-    std::unique_ptr< VolCreateDeleteJob > cdjob;
-    if (tcfg.create_del_with_io || tcfg.delete_with_io) {
-        cdjob = std::make_unique< VolCreateDeleteJob >(this);
-        this->start_job(cdjob.get(), wait_type::no_wait);
-    }
 
-    this->start_io_job();
-    output.print("init_io_test");
-
-    if (tcfg.create_del_with_io || tcfg.delete_with_io) { cdjob->wait_for_completion(); }
+    auto cdjob{std::make_unique< VolCreateDeleteJob >(this)};
+    this->start_job(cdjob.get(), wait_type::for_completion);
     this->shutdown();
+    if (tcfg.remove_file_on_shutdown) { this->remove_files(); }
 }
 
 /*!
@@ -2743,6 +2722,13 @@ SISL_OPTION_GROUP(
     (io_size, "", "io_size", "io size in KB", ::cxxopts::value< uint32_t >()->default_value("4"), "io_size"),
     (vol_copy_file_path, "", "vol_copy_file_path", "file path for copied volume",
      ::cxxopts::value< std::string >()->default_value(""), "path [...]"),
+    (p_zero_buffer, "", "p_zero_buffer",
+     "percentage of zero buffer occurrence for testing thin provisioning within period",
+     ::cxxopts::value< uint32_t >()->default_value("70"), "0 to 100"),
+    (zero_buffer_period, "", "zero_buffer_period", " the period of consecutive zero buffer occurrence",
+     ::cxxopts::value< uint32_t >()->default_value("100"), "0 to 100"),
+    (thin_provision_enable, "", "thin_provision_enable", " enable thin provisioning",
+     ::cxxopts::value< uint32_t >()->default_value("0"), "flag"),
     (unmap_frequency, "", "unmap_frequency", "do unmap for every N",
      ::cxxopts::value< uint64_t >()->default_value("100"), "unmap_frequency"))
 
@@ -2819,6 +2805,9 @@ int main(int argc, char* argv[]) {
     gcfg.app_mem_size_in_gb = SISL_OPTIONS["app_mem_size_in_gb"].as< uint32_t >();
     gcfg.vol_copy_file_path = SISL_OPTIONS["vol_copy_file_path"].as< std::string >();
     const auto io_size_in_kb = SISL_OPTIONS["io_size"].as< uint32_t >();
+    gcfg.p_zero_buffer = SISL_OPTIONS["p_zero_buffer"].as< uint32_t >();
+    gcfg.zero_buffer_period = SISL_OPTIONS["zero_buffer_period"].as< uint32_t >();
+    gcfg.thin_provision_enable = SISL_OPTIONS["thin_provision_enable"].as< uint32_t >() != 0 ? true : false;
     gcfg.io_size = io_size_in_kb * 1024;
 
     HS_REL_ASSERT(io_size_in_kb && (io_size_in_kb % 4 == 0),
