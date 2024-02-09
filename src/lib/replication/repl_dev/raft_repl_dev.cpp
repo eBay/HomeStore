@@ -184,15 +184,11 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
     ctx->outstanding_read_cnt = fetch_req->request()->entries()->size();
 
     for (auto const& req : *(fetch_req->request()->entries())) {
-        RD_LOG(INFO, "Data Channel: FetchData received: lsn={}", req->lsn());
-
         auto const& lsn = req->lsn();
-        auto const& term = req->raft_term();
-        auto const& dsn = req->dsn();
-        auto const& header = req->user_header();
-        auto const& key = req->user_key();
         auto const& originator = req->blkid_originator();
         auto const& remote_blkid = req->remote_blkid();
+
+        RD_LOG(INFO, "Data Channel: FetchData received: lsn={}", lsn);
 
         // release this assert if in the future we want to fetch from non-originator;
         RD_REL_ASSERT(originator == server_id(),
@@ -224,11 +220,6 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
                 }
                 ctx->cv.notify_one();
             });
-        } else {
-            // TODO: if we are not the originator, we need to fetch based on lsn;
-            // To be implemented;
-            RD_LOG(INFO, "I am not the originaltor for the requested blks, originaltor: {}, server_id: {}.", originator,
-                   server_id());
         }
     }
 
@@ -502,8 +493,8 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
                 return;
             }
 
-            auto raw_data = e.value()->response_blob().cbytes();
-            auto total_size = e.value()->response_blob().size();
+            auto raw_data = e.value().response_blob().cbytes();
+            auto total_size = e.value().response_blob().size();
 
             RD_DBG_ASSERT(total_size > 0, "Empty response from remote");
             RD_DBG_ASSERT(raw_data, "Empty response from remote");
