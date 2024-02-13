@@ -360,6 +360,8 @@ void PhysicalDev::load_chunks(std::function< bool(cshared< Chunk >&) >&& chunk_f
             cinfo->checksum = info_crc;
 
             auto chunk = std::make_shared< Chunk >(this, *cinfo, cslot);
+            m_chunk_data_area.insert(
+                ChunkInterval::right_open(cinfo->chunk_start_offset, cinfo->chunk_start_offset + cinfo->chunk_size));
             if (chunk_found_cb(chunk)) { get_stream(chunk).m_chunks_map.insert(std::pair{cinfo->chunk_id, chunk}); }
         }
         hs_utils::iobuf_free(buf, sisl::buftag::superblk);
