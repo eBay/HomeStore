@@ -174,6 +174,62 @@ TEST_F(DeviceMgrTest, StripedVDevCreation) {
     this->validate_striped_vdevs();
 }
 
+TEST_F(DeviceMgrTest, CreateChunk) {
+    // Create dynamically chunks and verify no two chunks ahve same start offset.
+    uint64_t avail_size{0};
+    for (auto& pdev : m_pdevs) {
+        avail_size += pdev->data_size();
+    }
+
+    LOGINFO("Step 1: Creating test_vdev with size={}", in_bytes(avail_size));
+    auto vdev =
+        m_dmgr->create_vdev(homestore::vdev_parameters{.vdev_name = "test_vdev",
+                                                       .size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC,
+                                                       .vdev_size = avail_size,
+                                                       .num_chunks = 0,
+                                                       .blk_size = 512,
+                                                       .chunk_size = 512 * 1024,
+                                                       .dev_type = HSDevType::Data,
+                                                       .alloc_type = blk_allocator_type_t::none,
+                                                       .chunk_sel_type = chunk_selector_type_t::NONE,
+                                                       .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
+                                                       .context_data = sisl::blob{}});
+
+    auto num_chunks = 10;
+    LOGINFO("Step 2: Creating {} chunks", num_chunks);
+    std::unordered_map< uint32_t, chunk_info > chunk_info_map;
+    std::unordered_set< uint64_t > chunk_start;
+
+    for (int i = 0; i < num_chunks; i++) {
+        auto chunk = m_dmgr->create_chunk(HSDevType::Data, vdev->info().vdev_id, 512 * 1024, {});
+        chunk_info_map[chunk->chunk_id()] = chunk->info();
+        auto [_, inserted] = chunk_start.insert(chunk->info().chunk_start_offset);
+        ASSERT_EQ(inserted, true) << "chunk start duplicate " << chunk->info().chunk_start_offset;
+    }
+
+    LOGINFO("Step 3: Restarting homestore");
+    this->restart();
+
+    LOGINFO("Step 4: Creating additional {} chunks", num_chunks);
+    for (int i = 0; i < num_chunks; i++) {
+        auto chunk = m_dmgr->create_chunk(HSDevType::Data, vdev->info().vdev_id, 512 * 1024, {});
+        chunk_info_map[chunk->chunk_id()] = chunk->info();
+        auto [_, inserted] = chunk_start.insert(chunk->info().chunk_start_offset);
+        ASSERT_EQ(inserted, true) << "chunk start duplicate " << chunk->info().chunk_start_offset;
+    }
+
+    chunk_start.clear();
+    auto chunk_vec = m_dmgr->get_chunks();
+    ASSERT_EQ(chunk_vec.size(), num_chunks * 2);
+    for (const auto& chunk : chunk_vec) {
+        ASSERT_EQ(chunk->info().chunk_start_offset, chunk_info_map[chunk->chunk_id()].chunk_start_offset)
+            << "Chunk offsets mismatch";
+        auto [_, inserted] = chunk_start.insert(chunk->info().chunk_start_offset);
+        ASSERT_EQ(inserted, true) << "chunk start duplicate " << chunk->info().chunk_start_offset;
+    }
+    vdev.reset();
+}
+
 int main(int argc, char* argv[]) {
     SISL_OPTIONS_LOAD(argc, argv, logging, test_device_manager, iomgr);
     ::testing::InitGoogleTest(&argc, argv);

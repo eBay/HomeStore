@@ -169,7 +169,7 @@ static void test_append(benchmark::State& state) {
 
 static void setup() {
     test_common::HSTestHelper::start_homestore(
-        "test_log_store", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::LOG, {.size_pct = 87.0}}});
+        "test_log_store_bench", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::LOG, {.size_pct = 87.0}}});
 }
 
 static void teardown() { test_common::HSTestHelper::shutdown_homestore(); }

@@ -68,9 +68,11 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
         m_rd_sb.write();
     }
 
-    RD_LOG(INFO, "Started {} RaftReplDev group_id={}, replica_id={}, raft_server_id={} commited_lsn={} next_dsn={}",
+    RD_LOG(INFO,
+           "Started {} RaftReplDev group_id={}, replica_id={}, raft_server_id={} commited_lsn={} next_dsn={} "
+           "log_dev={} log_store={}",
            (load_existing ? "Existing" : "New"), group_id_str(), my_replica_id_str(), m_raft_server_id,
-           m_commit_upto_lsn.load(), m_next_dsn.load());
+           m_commit_upto_lsn.load(), m_next_dsn.load(), m_rd_sb->logdev_id, m_rd_sb->logstore_id);
 
     m_msg_mgr.bind_data_service_request(PUSH_DATA, m_group_id, bind_this(RaftReplDev::on_push_data_received, 1));
     m_msg_mgr.bind_data_service_request(FETCH_DATA, m_group_id, bind_this(RaftReplDev::on_fetch_data_received, 1));
@@ -466,7 +468,7 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rre
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     if (rreqs.size() == 0) { return; }
 
-    std::vector<::flatbuffers::Offset< RequestEntry > > entries;
+    std::vector< ::flatbuffers::Offset< RequestEntry > > entries;
     entries.reserve(rreqs.size());
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();

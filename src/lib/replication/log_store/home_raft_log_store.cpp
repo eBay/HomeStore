@@ -64,11 +64,11 @@ HomeRaftLogStore::HomeRaftLogStore(logdev_id_t logdev_id, logstore_id_t logstore
         m_log_store = logstore_service().create_new_log_store(m_logdev_id, true);
         if (!m_log_store) { throw std::runtime_error("Failed to create log store"); }
         m_logstore_id = m_log_store->get_store_id();
-        LOGDEBUGMOD(replication, "Opened new home log dev = {} store id={}", m_logdev_id, m_logstore_id);
+        LOGDEBUGMOD(replication, "Opened new home log_dev={} log_store={}", m_logdev_id, m_logstore_id);
     } else {
         m_logdev_id = logdev_id;
         m_logstore_id = logstore_id;
-        LOGDEBUGMOD(replication, "Opening existing home log dev = {} store id={}", m_logdev_id, logstore_id);
+        LOGDEBUGMOD(replication, "Opening existing home log_dev={} log_store={}", m_logdev_id, logstore_id);
         logstore_service().open_logdev(m_logdev_id);
         logstore_service().open_log_store(m_logdev_id, logstore_id, true).thenValue([this](auto log_store) {
             m_log_store = std::move(log_store);

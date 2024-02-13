@@ -247,12 +247,13 @@ std::vector< shared< Chunk > > PhysicalDev::create_chunks(const std::vector< uin
                 auto chunk = std::make_shared< Chunk >(this, *cinfo, cslot);
                 ret_chunks.push_back(chunk);
                 get_stream(chunk).m_chunks_map.insert(std::pair{chunk_ids[cit], std::move(chunk)});
-
+                HS_LOG(INFO, device, "Creating chunk {}", chunk->to_string());
                 cinfo->~chunk_info();
             }
 
             m_chunk_info_slots->set_bits(b.start_bit, b.nbits);
             write_super_block(buf, chunk_info::size * b.nbits, chunk_info_offset_nth(b.start_bit));
+
             hs_utils::iobuf_free(buf, sisl::buftag::superblk);
 
             chunks_remaining -= b.nbits;
@@ -296,6 +297,7 @@ shared< Chunk > PhysicalDev::create_chunk(uint32_t chunk_id, uint32_t vdev_id, u
 
         auto bitmap_mem = m_chunk_info_slots->serialize(m_pdev_info.dev_attr.align_size);
         write_super_block(bitmap_mem->cbytes(), bitmap_mem->size(), hs_super_blk::chunk_sb_offset());
+        HS_LOG(INFO, device, "Created chunk {}", chunk->to_string());
 
         cinfo->~chunk_info();
         hs_utils::iobuf_free(buf, sisl::buftag::superblk);
@@ -397,6 +399,7 @@ void PhysicalDev::do_remove_chunk(cshared< Chunk >& chunk) {
     get_stream(chunk).m_chunks_map.erase(chunk->chunk_id());
     cinfo->~chunk_info();
     hs_utils::iobuf_free(buf, sisl::buftag::superblk);
+    HS_LOG(DEBUG, device, "Removed chunk {}", chunk->to_string());
 }
 
 uint64_t PhysicalDev::chunk_info_offset_nth(uint32_t slot) const {
@@ -418,11 +421,14 @@ void PhysicalDev::populate_chunk_info(chunk_info* cinfo, uint32_t vdev_id, uint6
     cinfo->set_allocated();
     cinfo->set_user_private(private_data);
     cinfo->compute_checksum();
+    auto [_, inserted] = m_chunk_start.insert(cinfo->chunk_start_offset);
+    RELEASE_ASSERT(inserted, "Duplicate start offset {} for chunk {}", cinfo->chunk_start_offset, cinfo->chunk_id);
 }
 
 void PhysicalDev::free_chunk_info(chunk_info* cinfo) {
     auto ival = ChunkInterval::right_open(cinfo->chunk_start_offset, cinfo->chunk_start_offset + cinfo->chunk_size);
     m_chunk_data_area.erase(ival);
+    m_chunk_start.erase(cinfo->chunk_start_offset);
 
     cinfo->set_free();
     cinfo->checksum = 0;
