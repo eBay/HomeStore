@@ -25,6 +25,7 @@ public:
     uint64_t append(nuraft::ptr< nuraft::log_entry >& entry) override;
     void write_at(ulong index, nuraft::ptr< nuraft::log_entry >& entry) override;
     void end_of_append_batch(ulong start_lsn, ulong count) override;
+    bool compact(ulong last_lsn) override;
 
 private:
     std::string rdev_name() const;
