@@ -77,12 +77,12 @@ We welcome contributions. If you find any bugs, potential flaws and edge cases, 
 discussions, please submit issues or pull requests.
 
 Contact
-Harihara Kadayam hkadayam@ebay.com
+[Harihara Kadayam](mailto:harihara.kadayam@gmail.com)
 
 ## License Information
 Copyright 2021 eBay Inc.
 
-Primary Author: Harihara Kadayam
+Primary Author: [Harihara Kadayam](https://github.com/hkadayam),[Rishabh Mittal](https://github.com/mittalrishabh)
 
 Primary Developers:
 [Harihara Kadayam](https://github.com/hkadayam),
