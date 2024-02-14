@@ -205,7 +205,6 @@ void HomeStore::do_start() {
 
     m_meta_service->start(m_dev_mgr->is_first_time_boot());
     m_cp_mgr->start(is_first_time_boot());
-    m_resource_mgr->set_total_cap(m_dev_mgr->total_capacity());
 
     if (has_index_service()) { m_index_service->start(); }
 
@@ -221,6 +220,8 @@ void HomeStore::do_start() {
     }
 
     m_cp_mgr->start_timer();
+
+    m_resource_mgr->start(m_dev_mgr->total_capacity());
     m_init_done = true;
 }
 

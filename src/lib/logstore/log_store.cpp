@@ -287,7 +287,7 @@ const truncation_info& HomeLogStore::pre_device_truncation() {
 
 // NOTE: This method assumes the flush lock is already acquired by the caller
 void HomeLogStore::post_device_truncation(const logdev_key& trunc_upto_loc) {
-    if (trunc_upto_loc.idx >= m_safe_truncation_boundary.ld_key.idx) {
+    if (trunc_upto_loc.idx >= m_safe_truncation_boundary.ld_key.idx) { // ???: Why it is >=, not == ?
         // This method is expected to be called always with this
         m_safe_truncation_boundary.pending_dev_truncation = false;
         m_safe_truncation_boundary.ld_key = trunc_upto_loc;

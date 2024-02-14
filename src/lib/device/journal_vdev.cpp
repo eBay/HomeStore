@@ -51,6 +51,15 @@ JournalVirtualDev::JournalVirtualDev(DeviceManager& dmgr, const vdev_info& vinfo
                 return private_blob;
             },
             m_vdev_info.hs_dev_type, m_vdev_info.vdev_id, m_vdev_info.chunk_size});
+
+    resource_mgr().register_journal_vdev_exceed_cb([this]([[maybe_unused]] int64_t dirty_buf_count, bool critical) {
+        this->trigger_cp_flush(false /* force */);
+
+        if (critical) {
+            // call resource autit to replicaiton service to free up some space immediately
+            hs()->repl_service().resource_audit();
+        }
+    });
 }
 
 JournalVirtualDev::~JournalVirtualDev() {}
@@ -561,6 +570,21 @@ void JournalVirtualDev::Descriptor::truncate(off_t truncate_offset) {
     m_write_sz_in_total.fetch_sub(size_to_truncate, std::memory_order_relaxed);
     m_truncate_done = true;
 
+    //
+    // Conceptually in rare case(not poosible for NuObject, possibly true for NuBlox2.0) truncate itself can't garunteen
+    // the space is freed up upto satisfy resource manager. e.g. multiple log stores on this same descriptor and one
+    // logstore lagging really behind and not able to truncate much space. Doing multiple truncation won't help in this
+    // case.
+    //
+    // In this rare case, the next write on this descrptor will set ready flag again.
+    //
+    // And any write on any other descriptor will trigger a high_watermark_check, and if it were to trigger critial
+    // alert on this vdev, truncation will be made immediately on all descriptors;
+    //
+    // If still no space can be freed, there is nothing we can't here to back pressure to above layer by rejecting log
+    // writes on this descriptor;
+    //
+    unset_ready_for_truncate();
     HS_PERIODIC_LOG(DEBUG, journalvdev, "After truncate desc {}", to_string());
 }
 
@@ -625,8 +649,18 @@ bool JournalVirtualDev::Descriptor::is_offset_at_last_chunk(off_t bytes_offset) 
     return false;
 }
 
+//
+// This API is ways called in single thread
+//
 void JournalVirtualDev::Descriptor::high_watermark_check() {
-    if (resource_mgr().check_journal_size(used_size(), size())) {
+    // high watermark check for the individual journal descriptor;
+    if (resource_mgr()->check_journal_descriptor_size(used_size())) {
+        // the next resource manager audit will call truncation for this descriptor;
+        set_ready_for_truncation();
+    }
+
+    // high watermark check for the entire journal vdev;
+    if (resource_mgr().check_journal_vdev_size(m_vdev.used_size(), m_vdev.size())) {
         COUNTER_INCREMENT(m_vdev.m_metrics, vdev_high_watermark_count, 1);
 
         if (m_vdev.m_event_cb && m_truncate_done) {

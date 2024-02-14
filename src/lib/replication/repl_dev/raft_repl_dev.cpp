@@ -867,12 +867,14 @@ void RaftReplDev::report_committed(repl_req_ptr_t rreq) {
 }
 
 void RaftReplDev::cp_flush(CP*) {
-    auto lsn = m_commit_upto_lsn.load();
+    auto const lsn = m_commit_upto_lsn.load();
+    auto const clsn = m_compact_lsn.load();
+
     if (lsn == m_last_flushed_commit_lsn) {
         // Not dirtied since last flush ignore
         return;
     }
-
+    m_rd_sb->compact_lsn = clsn;
     m_rd_sb->commit_lsn = lsn;
     m_rd_sb->checkpoint_lsn = lsn;
     m_rd_sb->last_applied_dsn = m_next_dsn.load();
@@ -881,4 +883,7 @@ void RaftReplDev::cp_flush(CP*) {
 }
 
 void RaftReplDev::cp_cleanup(CP*) {}
+#if 0
+void RaftReplDev::truncate_if_needed() { m_data_journal->truncate_if_needed(); }
+#endif
 } // namespace homestore
