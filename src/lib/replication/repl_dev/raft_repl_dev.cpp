@@ -6,6 +6,7 @@
 
 #include <sisl/fds/buffer.hpp>
 #include <sisl/grpc/generic_service.hpp>
+#include <sisl/grpc/rpc_client.hpp>
 #include <homestore/blkdata_service.hpp>
 #include <homestore/logstore_service.hpp>
 #include <homestore/superblk_handler.hpp>
@@ -450,8 +451,8 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t >* rreqs) {
         .thenValue([this, builder, rreqs](auto e) {
             RD_REL_ASSERT(!!e, "Error in fetching data");
 
-            auto raw_data = e.value().cbytes();
-            auto total_size = e.value().size();
+            auto raw_data = e.value().response_blob().cbytes();
+            auto total_size = e.value().response_blob().size();
 
             for (auto const& rreq : *rreqs) {
                 auto const data_size = rreq->remote_blkid.blkid.blk_count() * get_blk_size();
