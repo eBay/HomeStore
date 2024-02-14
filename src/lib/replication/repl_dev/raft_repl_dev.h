@@ -75,6 +75,8 @@ private:
     raft_repl_dev_superblk m_sb_in_mem;                // Cached version which is used to read and for staging
 
     std::atomic< repl_lsn_t > m_commit_upto_lsn{0}; // LSN which was lastly written, to track flushes
+    std::atomic< repl_lsn_t > m_compact_lsn{0};     // LSN upto which it was compacted, it is used to track where to
+                                                    // maximum lsn the data journal can truncate to;
     repl_lsn_t m_last_flushed_commit_lsn{0};        // LSN upto which it was flushed to persistent store
     iomgr::timer_handle_t m_sb_flush_timer_hdl;
 
@@ -127,6 +129,11 @@ public:
     AsyncNotify notify_after_data_written(std::vector< repl_req_ptr_t >* rreqs);
     void cp_flush(CP* cp);
     void cp_cleanup(CP* cp);
+
+    /// @brief This method is called when the data journal is compacted
+    ///
+    /// @param upto_lsn : LSN upto which the data journal was compacted
+    void on_compact(repl_lsn_t upto_lsn) { m_compact_lsn.store(upto_lsn); }
 
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////
