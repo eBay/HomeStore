@@ -211,7 +211,6 @@ jobs:
         sanitize=$([[ "${{ inputs.tooling }}" == "Sanitize" ]] && echo "True" || echo "False")
         pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
         conan create \
-            -c tools.build:skip_test=True \
             ${pre} \
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
             -o iomgr:testing=off \
@@ -225,7 +224,6 @@ jobs:
       run: |
         pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
         conan install \
-            -c tools.build:skip_test=True \
             ${pre} \
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
             -o iomgr:testing=off \
