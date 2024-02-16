@@ -149,7 +149,7 @@ folly::Future< std::error_code > VirtualDev::async_format() {
 }
 
 bool VirtualDev::is_blk_alloced(BlkId const& blkid) const {
-    return m_dmgr.get_chunk(blkid.chunk_num())->blk_allocator()->is_blk_alloced(blkid);
+    return m_dmgr.get_chunk(blkid.chunk_num())->blk_allocator()->is_blk_alloced(blkid, true /* lock */);
 }
 
 BlkAllocStatus VirtualDev::commit_blk(BlkId const& blkid) {
