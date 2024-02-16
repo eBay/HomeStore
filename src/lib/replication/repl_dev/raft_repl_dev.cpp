@@ -188,7 +188,7 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
         auto const& originator = req->blkid_originator();
         auto const& remote_blkid = req->remote_blkid();
 
-        RD_LOG(INFO, "Data Channel: FetchData received: lsn={}", lsn);
+        RD_LOG(DEBUG, "Data Channel: FetchData received: lsn={}", lsn);
 
         // release this assert if in the future we want to fetch from non-originator;
         RD_REL_ASSERT(originator == server_id(),
@@ -448,7 +448,7 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     entries.reserve(rreqs.size());
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
-    RD_LOG(INFO, "Data Channel : FetchData from remote: rreq.size={}, my server_id={}", rreqs.size(), server_id());
+    RD_LOG(DEBUG, "Data Channel : FetchData from remote: rreq.size={}, my server_id={}", rreqs.size(), server_id());
     auto const& originator = rreqs.front()->remote_blkid.server_id;
 
     for (auto const& rreq : rreqs) {
@@ -496,7 +496,7 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
             auto raw_data = e.value().response_blob().cbytes();
             auto total_size = e.value().response_blob().size();
 
-            RD_DBG_ASSERT(total_size > 0, "Empty response from remote");
+            RD_DBG_ASSERT_GT(total_size, 0, "Empty response from remote");
             RD_DBG_ASSERT(raw_data, "Empty response from remote");
 
             RD_LOG(INFO, "Data Channel: FetchData completed for reques.size()={} ", rreqs.size());
