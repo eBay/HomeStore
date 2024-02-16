@@ -360,7 +360,7 @@ TEST_F(RaftReplDevTest, All_restart_one_follower_inc_resync) {
     // step-2: restart one non-leader replica
     if (g_helper->replica_num() == 1) {
         LOGINFO("Restart homestore: replica_num = 1");
-        g_helper->restart();
+        g_helper->restart(10 /* shutdown_delay_sec */);
         g_helper->sync_for_test_start();
     }
 
@@ -419,7 +419,7 @@ TEST_F(RaftReplDevTest, All_restart_one_follower_inc_resync_with_staging) {
     // step-2: restart one non-leader replica
     if (g_helper->replica_num() == 1) {
         LOGINFO("Restart homestore: replica_num = 1");
-        g_helper->restart();
+        g_helper->restart(10 /* shutdown_delay_sec */);
         g_helper->sync_for_test_start();
     }
 

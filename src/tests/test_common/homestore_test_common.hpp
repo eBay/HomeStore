@@ -175,7 +175,7 @@ public:
 
     static void start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
                                 hs_before_services_starting_cb_t cb = nullptr, bool fake_restart = false,
-                                bool init_device = true) {
+                                bool init_device = true, uint32_t shutdown_delay_sec = 5) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
@@ -185,7 +185,7 @@ public:
         if (fake_restart) {
             shutdown_homestore(false);
             // sisl::GrpcAsyncClientWorker::shutdown_all();
-            std::this_thread::sleep_for(std::chrono::seconds{10});
+            std::this_thread::sleep_for(std::chrono::seconds{shutdown_delay_sec});
         }
 
         std::vector< homestore::dev_info > device_info;

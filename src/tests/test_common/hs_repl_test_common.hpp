@@ -186,12 +186,12 @@ public:
         setup();
     }
 
-    void restart() {
+    void restart(uint32_t shutdown_delay_secs = 5) {
         test_common::HSTestHelper::start_homestore(
             name_ + std::to_string(replica_num_),
             {{HS_SERVICE::REPLICATION, {.repl_app = std::make_unique< TestReplApplication >(*this)}},
              {HS_SERVICE::LOG, {}}},
-            nullptr, true /* restart */);
+            nullptr, true /* restart */, true /* init_device */, shutdown_delay_secs);
     }
 
     void restart_one_by_one() {
