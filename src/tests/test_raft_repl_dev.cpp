@@ -345,7 +345,7 @@ TEST_F(RaftReplDevTest, All_restart_one_follower_inc_resync) {
     // step-0: do some IO before restart one member;
     uint64_t exp_entries = 20;
     if (g_helper->replica_num() == 0) {
-        g_helper->runner().set_num_tasks(20);
+        g_helper->runner().set_num_tasks(exp_entries);
         auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
         LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
         g_helper->runner().set_task([this, block_size]() {
