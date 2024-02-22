@@ -71,6 +71,7 @@ RaftReplService::RaftReplService(cshared< ReplApplication >& repl_app) : Generic
 
 void RaftReplService::start() {
     // Step 1: Initialize the Nuraft messaging service, which starts the nuraft service
+    m_my_uuid = m_repl_app->get_my_repl_id();
     auto params = nuraft_mesg::Manager::Params{
         .server_uuid_ = m_my_uuid,
         .mesg_port_ = m_repl_app->lookup_peer(m_my_uuid).second,
@@ -270,8 +271,6 @@ AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, replica_i
                                                   replica_id_t member_in) const {
     return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
 }
-
-
 
 ///////////////////// RaftReplService CP Callbacks /////////////////////////////
 std::unique_ptr< CPContext > RaftReplServiceCPHandler::on_switchover_cp(CP* cur_cp, CP* new_cp) { return nullptr; }
