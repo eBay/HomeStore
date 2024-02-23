@@ -177,7 +177,7 @@ public:
 
     void teardown() {
         LOGINFO("Stopping Homestore replica={}", replica_num_);
-        sisl::GrpcAsyncClientWorker::shutdown_all();
+        // sisl::GrpcAsyncClientWorker::shutdown_all();
         test_common::HSTestHelper::shutdown_homestore();
     }
 
