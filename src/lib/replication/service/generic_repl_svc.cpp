@@ -35,8 +35,7 @@ std::shared_ptr< GenericReplService > GenericReplService::create(cshared< ReplAp
     }
 }
 
-GenericReplService::GenericReplService(cshared< ReplApplication >& repl_app) :
-        m_repl_app{repl_app}, m_my_uuid{repl_app->get_my_repl_id()} {
+GenericReplService::GenericReplService(cshared< ReplApplication >& repl_app) : m_repl_app{repl_app} {
     m_sb_bufs.reserve(100);
     meta_service().register_handler(
         get_meta_blk_name(),
