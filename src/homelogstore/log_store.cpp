@@ -237,7 +237,15 @@ void HomeLogStore::truncate(const logstore_seq_num_t upto_seq_num, const bool in
     if (locked_now) { m_logdev.unlock_flush(); }
 }
 
-void HomeLogStore::truncate_sync(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only) {
+void HomeLogStore::fast_forward(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only) {
+    // Check if we need to fill any gaps in the logstore
+    auto const last_idx{get_contiguous_issued_seq_num(std::max(0l, truncated_upto()))};
+    HS_REL_ASSERT_GE(last_idx, 0l, "Negative sequence number: {} [Logstore id ={}]", last_idx, m_store_id);
+    auto const next_slot{last_idx + 1};
+    for (auto curr_idx = next_slot; upto_seq_num >= curr_idx; ++curr_idx) {
+        fill_gap(curr_idx);
+    }
+
 #ifndef NDEBUG
     const auto s{m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire)};
     // Don't check this if we don't know our truncation boundary. The call is made to inform us about

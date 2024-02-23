@@ -398,11 +398,11 @@ public:
 
     /**
      * @brief Truncate the logs for this log store upto the seq_num provided (inclusive) and persist the metablock
-     * before returning. This API makes sure the log idx is durable after the truncation.
-     *
-     * see above truncate method for more details on parameters
+     * before returning. If the next available slot is less than upto_seq_num, it will fill the gaps.
+     * This API makes sure the log idx is durable after the truncation.
+     * See above truncate method for more details on parameters
      */
-    void truncate_sync(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only = true);
+    void fast_forward(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only = true);
 
     /**
      * @brief Fill the gap in the seq_num with a dummy value. This ensures that get_contiguous_issued and completed
