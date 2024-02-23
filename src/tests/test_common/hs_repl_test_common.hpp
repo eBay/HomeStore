@@ -121,7 +121,7 @@ public:
 public:
     friend class TestReplApplication;
 
-    HSReplTestHelper(std::string const& name, char** argv) : name_{name}, argv_{argv} {}
+    HSReplTestHelper(std::string const& name, int argc, char** argv) : name_{name}, argc_{argc}, argv_{argv} {}
 
     void setup() {
         replica_num_ = SISL_OPTIONS["replica_num"].as< uint16_t >();
@@ -153,8 +153,13 @@ public:
 
             for (uint32_t i{1}; i < num_replicas; ++i) {
                 LOGINFO("Spawning Homestore replica={} instance", i);
-                boost::process::child c(argv_[0], "--log_mods", "replication:trace", "--replica_num", std::to_string(i),
-                                        proc_grp_);
+                std::string cmd_line;
+                fmt::format_to(std::back_inserter(cmd_line), "{} --replica_num {}", argv_[0], i);
+                for (int j{1}; j < argc_; ++j) {
+                    fmt::format_to(std::back_inserter(cmd_line), " {}", argv_[j]);
+                }
+                boost::process::child c(boost::process::cmd = cmd_line, proc_grp_);
+                // boost::process::child c(argv_[0], "--replica_num", std::to_string(i), proc_grp_);
                 c.detach();
             }
         } else {
@@ -282,6 +287,7 @@ public:
 private:
     uint16_t replica_num_;
     std::string name_;
+    int argc_;
     char** argv_;
 
     boost::process::group proc_grp_;
