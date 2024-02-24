@@ -909,14 +909,6 @@ static uint64_t curr_trunc_start(std::shared_ptr< HomeLogStore >& _log_store) {
     return std::max(0l, _log_store->truncated_upto());
 }
 
-static auto start_index(std::shared_ptr< HomeLogStore >& _log_store) { return curr_trunc_start(_log_store) + 1; }
-
-static auto next_slot(std::shared_ptr< HomeLogStore >& _log_store) {
-    auto const last_idx = _log_store->get_contiguous_issued_seq_num(curr_trunc_start(_log_store));
-    EXPECT_TRUE(last_idx >= 0l);
-    return static_cast< uint64_t >(last_idx) + 1;
-}
-
 TEST_F(LogStoreTest, TruncateDurability) {
     auto _hs_log_store =
         SampleDB::instance()
@@ -925,6 +917,15 @@ TEST_F(LogStoreTest, TruncateDurability) {
                 HomeLogStoreMgr::CTRL_LOG_FAMILY_IDX, [](logstore_family_id_t, logstore_seq_num_t, logdev_key) {}))
             .get()
             ->get_log_store();
+
+    auto const start_index = [](std::shared_ptr< HomeLogStore >& _log_store) {
+        return curr_trunc_start(_log_store) + 1;
+    };
+    auto const next_slot = [](std::shared_ptr< HomeLogStore >& _log_store) {
+        auto const last_idx = _log_store->get_contiguous_issued_seq_num(curr_trunc_start(_log_store));
+        EXPECT_TRUE(last_idx >= 0l);
+        return static_cast< uint64_t >(last_idx) + 1;
+    };
 
     uint64_t last_idx{100};
     for (auto i = 0u; i < last_idx; ++i) {
