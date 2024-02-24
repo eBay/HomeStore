@@ -46,6 +46,7 @@
 
 #include "api/vol_interface.hpp"
 #include "test_common/homestore_test_common.hpp"
+#include "engine/common/homestore_flip.hpp"
 
 #include "../log_store.hpp"
 
@@ -113,6 +114,9 @@ public:
         m_log_store = store;
         m_log_store->register_log_found_cb(bind_this(SampleLogStoreClient::on_log_found, 3));
     }
+
+    auto get_log_store() { return m_log_store; }
+    static void set_validate_on_log_found(const bool flag) { validate_on_log_found = flag; }
 
     void reset_recovery() {
         m_n_recovered_lsns = 0;
@@ -305,6 +309,7 @@ public:
     }
 
     void on_log_found(const logstore_seq_num_t lsn, const log_buffer buf, void* const ctx) {
+        if (!validate_on_log_found) { return; }
         LOGDEBUG("Recovered lsn {}:{} with log data of size {}", m_log_store->get_store_id(), lsn, buf.size())
         EXPECT_LE(lsn, m_cur_lsn.load()) << "Recovered incorrect lsn " << m_log_store->get_store_id() << ":" << lsn
                                          << "Expected less than cur_lsn " << m_cur_lsn.load();
@@ -370,6 +375,7 @@ private:
 private:
     static constexpr uint32_t max_data_size = 1024;
     static uint64_t s_max_flush_multiple;
+    inline static bool validate_on_log_found = true;
 
     logstore_id_t m_store_id;
     test_log_store_comp_cb_t m_comp_cb;
@@ -482,7 +488,7 @@ public:
 
         if (SISL_OPTIONS.count("http_port")) {
             test_common::set_fixed_http_port(SISL_OPTIONS["http_port"].as< uint32_t >());
-        }else {
+        } else {
             test_common::set_random_http_port();
         }
         VolInterface::init(params, restart);
@@ -553,6 +559,8 @@ public:
     [[nodiscard]] logid_t highest_log_idx(const logstore_family_id_t fid) const {
         return m_highest_log_idx[fid].load();
     }
+
+    std::vector< std::unique_ptr< SampleLogStoreClient > >& log_store_clients() { return m_log_store_clients; }
 
 private:
     const static std::string s_fpath_root;
@@ -896,6 +904,99 @@ protected:
     uint32_t m_batch_size{1};
     uint32_t m_holes_per_batch{0};
 };
+
+static uint64_t curr_trunc_start(std::shared_ptr< HomeLogStore >& _log_store) {
+    return std::max(0l, _log_store->truncated_upto());
+}
+
+static auto start_index(std::shared_ptr< HomeLogStore >& _log_store) { return curr_trunc_start(_log_store) + 1; }
+
+static auto next_slot(std::shared_ptr< HomeLogStore >& _log_store) {
+    auto const last_idx = _log_store->get_contiguous_issued_seq_num(curr_trunc_start(_log_store));
+    EXPECT_TRUE(last_idx >= 0l);
+    return static_cast< uint64_t >(last_idx) + 1;
+}
+
+TEST_F(LogStoreTest, TruncateDurability) {
+    auto _hs_log_store =
+        SampleDB::instance()
+            .log_store_clients()
+            .emplace_back(std::make_unique< SampleLogStoreClient >(
+                HomeLogStoreMgr::CTRL_LOG_FAMILY_IDX, [](logstore_family_id_t, logstore_seq_num_t, logdev_key) {}))
+            .get()
+            ->get_log_store();
+
+    uint64_t last_idx{100};
+    for (auto i = 0u; i < last_idx; ++i) {
+        bool io_memory{false};
+        auto* const d{SampleLogStoreClient::prepare_data(i, io_memory)};
+
+        EXPECT_TRUE(_hs_log_store->write_sync(next_slot(_hs_log_store),
+                                              {reinterpret_cast< uint8_t* >(d), d->total_size(), false}));
+
+        if (io_memory) {
+            iomanager.iobuf_free(reinterpret_cast< uint8_t* >(d));
+        } else {
+            std::free(static_cast< void* >(d));
+        }
+    }
+    // ls range should be [1, 100]
+    EXPECT_EQ(start_index(_hs_log_store), 1ul);
+    EXPECT_EQ(next_slot(_hs_log_store), last_idx + 1);
+
+// set flip to avoid logdev metablk persistance
+#ifdef _PRERELEASE
+    flip::FlipClient* fc{HomeStoreFlip::client_instance()};
+    flip::FlipFrequency freq;
+    freq.set_count(1);
+    freq.set_percent(100);
+    fc->inject_noreturn_flip("logstore_test_skip_persist", {}, freq);
+#endif
+
+    // fill gaps and truncate upto 150. ls is now [151, 151]
+    uint64_t truncate_upto{150};
+    for (auto curr_idx = next_slot(_hs_log_store); truncate_upto >= curr_idx; ++curr_idx) {
+        _hs_log_store->fill_gap(curr_idx);
+    }
+    _hs_log_store->truncate(truncate_upto);
+    // validate the satrt and end of the ls
+    EXPECT_EQ(start_index(_hs_log_store), truncate_upto + 1);
+    EXPECT_EQ(next_slot(_hs_log_store), truncate_upto + 1);
+
+    // restart homestore
+    const auto num_devs{SISL_OPTIONS["num_devs"].as< uint32_t >()}; // num devices
+    const auto dev_size_bytes{SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024};
+    const auto num_threads{SISL_OPTIONS["num_threads"].as< uint32_t >()};
+    const auto num_logstores{SISL_OPTIONS["num_logstores"].as< uint32_t >() + 1};
+    SampleLogStoreClient::set_validate_on_log_found(false);
+    SampleDB::instance().start_homestore(num_devs, dev_size_bytes, num_threads, num_logstores, true /* restart */);
+
+    _hs_log_store = SampleDB::instance().log_store_clients().back()->get_log_store();
+    // We are simulating a crash by setting the logstore_test_skip_persist flip which does not persist metablk
+    // This will invalidate truncate call above and set logstore to [1 100]
+    EXPECT_EQ(1ul, start_index(_hs_log_store));
+    EXPECT_EQ(last_idx + 1, next_slot(_hs_log_store));
+
+    // fast_forward should be resilient to crashe and should be able to recover
+
+    uint64_t fast_forward_upto{350};
+    _hs_log_store->fast_forward(fast_forward_upto);
+#ifdef _PRERELEASE
+    flip::FlipFrequency freq1;
+    freq1.set_count(1);
+    freq1.set_percent(100);
+    fc->inject_noreturn_flip("logstore_test_skip_persist", {}, freq1);
+#endif
+    EXPECT_EQ(start_index(_hs_log_store), fast_forward_upto + 1);
+    EXPECT_EQ(next_slot(_hs_log_store), fast_forward_upto + 1);
+
+    SampleDB::instance().start_homestore(num_devs, dev_size_bytes, num_threads, num_logstores, true /* restart */);
+    EXPECT_EQ(start_index(_hs_log_store), fast_forward_upto + 1);
+    EXPECT_EQ(next_slot(_hs_log_store), fast_forward_upto + 1);
+
+    EXPECT_TRUE(SampleDB::instance().delete_log_store(_hs_log_store->get_store_id()));
+    SampleLogStoreClient::set_validate_on_log_found(true);
+}
 
 TEST_F(LogStoreTest, BurstRandInsertThenTruncate) {
     const auto num_records{SISL_OPTIONS["num_records"].as< uint32_t >()};
