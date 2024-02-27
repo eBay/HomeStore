@@ -402,7 +402,7 @@ public:
      * This API makes sure the log idx is durable after the truncation.
      * See above truncate method for more details on parameters
      */
-    void fast_forward(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only = true);
+    void sync_truncate(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only = true);
 
     /**
      * @brief Fill the gap in the seq_num with a dummy value. This ensures that get_contiguous_issued and completed

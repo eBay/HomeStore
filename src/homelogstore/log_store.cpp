@@ -237,7 +237,7 @@ void HomeLogStore::truncate(const logstore_seq_num_t upto_seq_num, const bool in
     if (locked_now) { m_logdev.unlock_flush(); }
 }
 
-void HomeLogStore::fast_forward(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only) {
+void HomeLogStore::sync_truncate(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only) {
     // Check if we need to fill any gaps in the logstore
     auto const last_idx{get_contiguous_issued_seq_num(std::max(0l, truncated_upto()))};
     HS_REL_ASSERT_GE(last_idx, 0l, "Negative sequence number: {} [Logstore id ={}]", last_idx, m_store_id);
@@ -291,7 +291,7 @@ void HomeLogStore::do_truncate(const logstore_seq_num_t upto_seq_num, const bool
     m_records.truncate(upto_seq_num);
     m_safe_truncation_boundary.seq_num.store(upto_seq_num, std::memory_order_release);
 
-    // Need to update the superblock with meta, we don't persist yet, will be done as part of log dev truncation
+    // Need to update the superblock with meta, in case we don't persist yet, will be done as part of log dev truncation
     m_logdev.update_store_superblk(m_store_id, logstore_superblk{upto_seq_num + 1}, persist_now /* persist_now */);
 
     const int ind{search_max_le(upto_seq_num)};

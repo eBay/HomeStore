@@ -981,7 +981,7 @@ TEST_F(LogStoreTest, TruncateDurability) {
     // fast_forward should be resilient to crashe and should be able to recover
 
     uint64_t fast_forward_upto{350};
-    _hs_log_store->fast_forward(fast_forward_upto);
+    _hs_log_store->sync_truncate(fast_forward_upto);
 #ifdef _PRERELEASE
     flip::FlipFrequency freq1;
     freq1.set_count(1);
