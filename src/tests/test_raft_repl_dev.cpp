@@ -105,9 +105,10 @@ public:
                    cintrusive< repl_req_ctx >& ctx) override {
         ASSERT_EQ(header.size(), sizeof(test_req::journal_header));
 
+        m_num_commits.fetch_add(1, std::memory_order_relaxed);
+
         auto jheader = r_cast< test_req::journal_header const* >(header.cbytes());
-        // Key k{.id_ = *(r_cast< uint64_t const* >(key.cbytes()))};
-        Key k{.id_ = static_cast< uint64_t >(lsn)};
+        Key k{.id_ = *(r_cast< uint64_t const* >(key.cbytes()))};
         Value v{
             .lsn_ = lsn, .data_size_ = jheader->data_size, .data_pattern_ = jheader->data_pattern, .blkid_ = blkids};
 
@@ -192,6 +193,7 @@ public:
         });
         g_helper->runner().execute().get();
     }
+    uint64_t db_num_writes() const { return m_num_commits.load(std::memory_order_relaxed); }
 
     uint64_t db_size() const {
         std::shared_lock lk(db_mtx_);
@@ -201,6 +203,7 @@ public:
 private:
     std::map< Key, Value > inmem_db_;
     std::shared_mutex db_mtx_;
+    std::atomic< uint64_t > m_num_commits{0};
 };
 
 class RaftReplDevTest : public testing::Test {
@@ -222,7 +225,7 @@ public:
         while (true) {
             uint64_t total_writes{0};
             for (auto const& db : dbs_) {
-                total_writes += db->db_size();
+                total_writes += db->db_num_writes();
             }
 
             if (total_writes >= exp_writes) { break; }
