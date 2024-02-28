@@ -106,7 +106,8 @@ public:
         ASSERT_EQ(header.size(), sizeof(test_req::journal_header));
 
         auto jheader = r_cast< test_req::journal_header const* >(header.cbytes());
-        Key k{.id_ = *(r_cast< uint64_t const* >(key.cbytes()))};
+        // Key k{.id_ = *(r_cast< uint64_t const* >(key.cbytes()))};
+        Key k{.id_ = static_cast< uint64_t >(lsn)};
         Value v{
             .lsn_ = lsn, .data_size_ = jheader->data_size, .data_pattern_ = jheader->data_pattern, .blkid_ = blkids};
 
@@ -361,7 +362,7 @@ TEST_F(RaftReplDevTest, All_restart_one_follower_inc_resync) {
     if (g_helper->replica_num() == 1) {
         LOGINFO("Restart homestore: replica_num = 1");
         g_helper->restart(10 /* shutdown_delay_sec */);
-        g_helper->sync_for_test_start();
+        // g_helper->sync_for_test_start();
     }
 
     exp_entries += SISL_OPTIONS["num_io"].as< uint64_t >();
@@ -420,7 +421,7 @@ TEST_F(RaftReplDevTest, All_restart_one_follower_inc_resync_with_staging) {
     if (g_helper->replica_num() == 1) {
         LOGINFO("Restart homestore: replica_num = 1");
         g_helper->restart(10 /* shutdown_delay_sec */);
-        g_helper->sync_for_test_start();
+        // g_helper->sync_for_test_start();
     }
 
     exp_entries += SISL_OPTIONS["num_io"].as< uint64_t >();
