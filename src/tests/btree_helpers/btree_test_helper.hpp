@@ -92,15 +92,44 @@ public:
             for (std::size_t i = 0; i < n_fibers; ++i) {
                 const auto start_range = i * chunk_size;
                 const auto end_range = start_range + ((i == n_fibers - 1) ? last_chunk_size : chunk_size);
-                iomanager.run_on_forget(m_fibers[i], [this, start_range, end_range, &test_count]() {
-                    for (uint32_t i = start_range; i < end_range; i++) {
-                        put(i, btree_put_type::INSERT);
-                    }
-                    {
-                        std::unique_lock lg(m_test_done_mtx);
-                        if (--test_count == 0) { m_test_done_cv.notify_one(); }
-                    }
-                });
+                auto fiber_id = i;
+                iomanager.run_on_forget(
+                    m_fibers[i], [this, start_range, end_range, &test_count, fiber_id, preload_size]() {
+                        double progress_interval =
+                            (double)(end_range - start_range) / 20; // 5% of the total number of iterations
+                        double progress_thresh = progress_interval; // threshold for progress interval
+                        double elapsed_time, progress_percent, last_progress_time = 0;
+                        auto m_start_time = Clock::now();
+
+                        for (uint32_t i = start_range; i < end_range; i++) {
+                            put(i, btree_put_type::INSERT);
+                            if (fiber_id == 0) {
+                                elapsed_time = get_elapsed_time_sec(m_start_time);
+                                progress_percent = (double)(i - start_range) / (end_range - start_range) * 100;
+
+                                // check progress every 5% of the total number of iterations or every 30 seconds
+                                bool print_time = false;
+                                if (i >= progress_thresh) {
+                                    progress_thresh += progress_interval;
+                                    print_time = true;
+                                }
+                                if (elapsed_time - last_progress_time > 30) {
+                                    last_progress_time = elapsed_time;
+                                    print_time = true;
+                                }
+                                if (print_time) {
+                                    LOGINFO("Progress: iterations completed ({:.2f}%)- Elapsed time: {:.0f} seconds- "
+                                            "populated entries: {} ({:.2f}%)",
+                                            progress_percent, elapsed_time, m_shadow_map.size(),
+                                            m_shadow_map.size() * 100.0 / preload_size);
+                                }
+                            }
+                        }
+                        {
+                            std::unique_lock lg(m_test_done_mtx);
+                            if (--test_count == 0) { m_test_done_cv.notify_one(); }
+                        }
+                    });
             }
 
             {
@@ -419,8 +448,9 @@ protected:
                         }
                         if (print_time) {
                             LOGINFO("Progress: iterations completed ({:.2f}%)- Elapsed time: {:.0f} seconds of total "
-                                    "{} - total entries: {}",
-                                    progress_percent, elapsed_time, m_run_time, m_shadow_map.size());
+                                    "{} ({:.2f}%) - total entries: {} ({:.2f}%)",
+                                    progress_percent, elapsed_time, m_run_time, elapsed_time * 100.0 / m_run_time,
+                                    m_shadow_map.size(), m_shadow_map.size() * 100.0 / m_max_range_input);
                         }
                     }
                 }

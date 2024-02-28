@@ -87,13 +87,11 @@ void LogDev::start(bool format, JournalVirtualDev* vdev) {
         m_last_flush_idx = m_log_idx - 1;
     }
 
-    m_flush_timer_hdl = iomanager.schedule_global_timer(
-        HS_DYNAMIC_CONFIG(logstore.flush_timer_frequency_us) * 1000, true, nullptr /* cookie */,
-        iomgr::reactor_regex::all_worker,
-        [this](void*) {
-            if (m_pending_flush_size.load() && !m_is_flushing.load(std::memory_order_relaxed)) { flush_if_needed(); }
-        },
-        true /* wait_to_schedule */);
+    iomanager.run_on_wait(logstore_service().flush_thread(), [this]() {
+        m_flush_timer_hdl = iomanager.schedule_thread_timer(HS_DYNAMIC_CONFIG(logstore.flush_timer_frequency_us) * 1000,
+                                                            true /* recurring */, nullptr /* cookie */,
+                                                            [this](void*) { flush_if_needed(); });
+    });
 
     handle_unopened_log_stores(format);
 
@@ -133,7 +131,8 @@ void LogDev::stop() {
     }
 
     // cancel the timer
-    iomanager.cancel_timer(m_flush_timer_hdl, true);
+    iomanager.run_on_wait(logstore_service().flush_thread(),
+                          [this]() { iomanager.cancel_timer(m_flush_timer_hdl, true); });
 
     {
         folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);

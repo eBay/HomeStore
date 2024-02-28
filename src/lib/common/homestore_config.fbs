@@ -111,7 +111,7 @@ table LogStore {
 
     // Logdev will flush the logs only in a dedicated thread. Turn this on, if flush IO doesn't want to
     // intervene with data IO path.
-    flush_only_in_dedicated_thread: bool = false;
+    flush_only_in_dedicated_thread: bool = true;
 }
 
 table Generic {

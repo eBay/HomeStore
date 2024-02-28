@@ -52,6 +52,8 @@ SISL_OPTION_GROUP(test_raft_repl_dev,
 SISL_OPTIONS_ENABLE(logging, test_raft_repl_dev, iomgr, config, test_common_setup, test_repl_common_setup)
 
 static std::unique_ptr< test_common::HSReplTestHelper > g_helper;
+static std::random_device g_rd{};
+static std::default_random_engine g_re{g_rd()};
 
 class TestReplicatedDB : public homestore::ReplDevListener {
 public:
@@ -177,20 +179,25 @@ public:
                 ++it;
             }
 
-            auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
-            auto read_sgs = test_common::HSTestHelper::create_sgs(v.data_size_, block_size);
+            if (v.data_size_ != 0) {
+                auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+                auto read_sgs = test_common::HSTestHelper::create_sgs(v.data_size_, block_size);
 
-            repl_dev()->async_read(v.blkid_, read_sgs, v.data_size_).thenValue([read_sgs, k, v](auto const ec) {
-                RELEASE_ASSERT(!ec, "Read of blkid={} for key={} error={}", v.blkid_.to_string(), k.id_, ec.message());
-                for (auto const& iov : read_sgs.iovs) {
-                    test_common::HSTestHelper::validate_data_buf(uintptr_cast(iov.iov_base), iov.iov_len,
-                                                                 v.data_pattern_);
-                    iomanager.iobuf_free(uintptr_cast(iov.iov_base));
-                }
-                LOGINFO("Validated successfully key={} value[blkid={} pattern={}]", k.id_, v.blkid_.to_string(),
-                        v.data_pattern_);
+                repl_dev()->async_read(v.blkid_, read_sgs, v.data_size_).thenValue([read_sgs, k, v](auto const ec) {
+                    RELEASE_ASSERT(!ec, "Read of blkid={} for key={} error={}", v.blkid_.to_string(), k.id_,
+                                   ec.message());
+                    for (auto const& iov : read_sgs.iovs) {
+                        test_common::HSTestHelper::validate_data_buf(uintptr_cast(iov.iov_base), iov.iov_len,
+                                                                     v.data_pattern_);
+                        iomanager.iobuf_free(uintptr_cast(iov.iov_base));
+                    }
+                    LOGINFO("Validated successfully key={} value[blkid={} pattern={}]", k.id_, v.blkid_.to_string(),
+                            v.data_pattern_);
+                    g_helper->runner().next_task();
+                });
+            } else {
                 g_helper->runner().next_task();
-            });
+            }
         });
         g_helper->runner().execute().get();
     }
@@ -275,7 +282,6 @@ private:
 };
 
 TEST_F(RaftReplDevTest, All_Append_Restart_Append) {
-
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
 
@@ -283,7 +289,10 @@ TEST_F(RaftReplDevTest, All_Append_Restart_Append) {
     if (g_helper->replica_num() == 0) {
         auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
         LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
-        g_helper->runner().set_task([this, block_size]() { this->generate_writes(block_size, block_size); });
+        g_helper->runner().set_task([this, block_size]() {
+            static std::normal_distribution<> num_blks_gen{3.0, 2.0};
+            this->generate_writes(std::abs(std::round(num_blks_gen(g_re))) * block_size, block_size);
+        });
         g_helper->runner().execute().get();
     }
     this->wait_for_all_writes(exp_entries);
@@ -304,7 +313,10 @@ TEST_F(RaftReplDevTest, All_Append_Restart_Append) {
 
         LOGINFO("Post restart write the data again");
         auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
-        g_helper->runner().set_task([this, block_size]() { this->generate_writes(block_size, block_size); });
+        g_helper->runner().set_task([this, block_size]() {
+            static std::normal_distribution<> num_blks_gen{3.0, 2.0};
+            this->generate_writes(std::abs(std::round(num_blks_gen(g_re))) * block_size, block_size);
+        });
         g_helper->runner().execute().get();
     }
     this->wait_for_all_writes(exp_entries);
@@ -531,7 +543,7 @@ int main(int argc, char* argv[]) {
                       test_repl_common_setup);
 
     FLAGS_folly_global_cpu_executor_threads = 4;
-    g_helper = std::make_unique< test_common::HSReplTestHelper >("test_raft_repl_dev", orig_argv);
+    g_helper = std::make_unique< test_common::HSReplTestHelper >("test_raft_repl_dev", argc, orig_argv);
     g_helper->setup();
 
     (g_helper->replica_num() == 0) ? ::testing::GTEST_FLAG(filter) = "*Primary_*:*All_*"
