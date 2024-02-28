@@ -973,10 +973,12 @@ TEST_F(LogStoreTest, TruncateDurability) {
     SampleDB::instance().start_homestore(num_devs, dev_size_bytes, num_threads, num_logstores, true /* restart */);
 
     _hs_log_store = SampleDB::instance().log_store_clients().back()->get_log_store();
+#ifdef _PRERELEASE
     // We are simulating a crash by setting the logstore_test_skip_persist flip which does not persist metablk
     // This will invalidate truncate call above and set logstore to [1 100]
     EXPECT_EQ(1ul, start_index(_hs_log_store));
     EXPECT_EQ(last_idx + 1, next_slot(_hs_log_store));
+#endif
 
     // fast_forward should be resilient to crashe and should be able to recover
 
