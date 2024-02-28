@@ -273,7 +273,7 @@ private:
     flip::FlipClient m_fc{iomgr_flip::instance()};
 #endif
 };
-#if 0
+
 TEST_F(RaftReplDevTest, All_Append_Restart_Append) {
 
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
@@ -453,8 +453,7 @@ TEST_F(RaftReplDevTest, All_restart_one_follower_inc_resync_with_staging) {
     this->validate_all_data();
     g_helper->sync_for_cleanup_start();
 }
-#endif
-#if 1
+
 // do some io before restart;
 TEST_F(RaftReplDevTest, All_restart_leader) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
@@ -513,7 +512,7 @@ TEST_F(RaftReplDevTest, All_restart_leader) {
     this->validate_all_data();
     g_helper->sync_for_cleanup_start();
 }
-#endif
+
 // TODO
 // double restart:
 // 1. restart one follower(F1) while I/O keep running.
