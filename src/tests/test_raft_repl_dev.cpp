@@ -111,7 +111,7 @@ public:
         ASSERT_EQ(header.size(), sizeof(test_req::journal_header));
 
         auto jheader = r_cast< test_req::journal_header const* >(header.cbytes());
-        Key k{.id_ = static_cast< uint64_t >(lsn)};
+        Key k{.id_ = *(r_cast< uint64_t const* >(key.cbytes()))};
         Value v{
             .lsn_ = lsn, .data_size_ = jheader->data_size, .data_pattern_ = jheader->data_pattern, .blkid_ = blkids};
 
