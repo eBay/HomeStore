@@ -45,7 +45,7 @@ struct log_dump_req {
     std::shared_ptr< HomeLogStore > log_store; // if null all log stores are dumped
     logstore_seq_num_t start_seq_num;          // empty_key if from start of log file
     logstore_seq_num_t end_seq_num;            // empty_key if till last log entry
-    logstore_seq_num_t batch_size = 0;                    // Size of the output batch.
+    logstore_seq_num_t batch_size = 0;         // Size of the output batch.
 };
 
 struct logstore_record {
@@ -94,7 +94,7 @@ struct logstore_req {
         if (req->is_internal_req) { sisl::ObjectAllocator< logstore_req >::deallocate(req); }
     }
 
-    friend class sisl::ObjectAllocator<logstore_req>;
+    friend class sisl::ObjectAllocator< logstore_req >;
 
 private:
     logstore_req() = default;
@@ -397,6 +397,14 @@ public:
     void truncate(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only = true);
 
     /**
+     * @brief Truncate the logs for this log store upto the seq_num provided (inclusive) and persist the metablock
+     * before returning. If the next available slot is less than upto_seq_num, it will fill the gaps.
+     * This API makes sure the log idx is durable after the truncation.
+     * See above truncate method for more details on parameters
+     */
+    void sync_truncate(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only = true);
+
+    /**
      * @brief Fill the gap in the seq_num with a dummy value. This ensures that get_contiguous_issued and completed
      * seq_num methods move forward. The filled data is not readable and any attempt to read this seq_num will
      * result in out_of_range exception.
@@ -513,7 +521,7 @@ private:
     void on_log_found(const logstore_seq_num_t seq_num, const logdev_key ld_key, const logdev_key flush_ld_key,
                       const log_buffer buf);
     void on_batch_completion(const logdev_key& flush_batch_ld_key);
-    void do_truncate(const logstore_seq_num_t upto_seq_num);
+    void do_truncate(const logstore_seq_num_t upto_seq_num, const bool persist_now);
     [[nodiscard]] int search_max_le(const logstore_seq_num_t input_sn);
 
 private:
