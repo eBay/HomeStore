@@ -29,6 +29,25 @@ struct raft_repl_dev_superblk : public repl_dev_superblk {
 
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
 
+class RaftReplDevMetrics : public sisl::MetricsGroup {
+public:
+    explicit RaftReplDevMetrics(const char* inst_name) : sisl::MetricsGroup("RaftReplDev", inst_name) {
+        REGISTER_COUNTER(read_err_cnt, "total read error count", "read_err_cnt", {"op", "read"});
+        REGISTER_COUNTER(write_err_cnt, "total write error count", "write_err_cnt", {"op", "write"});
+        REGISTER_COUNTER(fetch_err_cnt, "total fetch data error count", "fetch_err_cnt", {"op", "fetch"});
+
+        REGISTER_COUNTER(fetch_rreq_cnt, "total fetch data count", "fetch_data_req_cnt", {"op", "fetch"});
+
+        register_me_to_farm();
+    }
+
+    RaftReplDevMetrics(const RaftReplDevMetrics&) = delete;
+    RaftReplDevMetrics(RaftReplDevMetrics&&) noexcept = delete;
+    RaftReplDevMetrics& operator=(const RaftReplDevMetrics&) = delete;
+    RaftReplDevMetrics& operator=(RaftReplDevMetrics&&) noexcept = delete;
+    ~RaftReplDevMetrics() { deregister_me_from_farm(); }
+};
+
 class RaftReplService;
 class CP;
 class RaftReplDev : public ReplDev,
@@ -61,6 +80,8 @@ private:
     iomgr::timer_handle_t m_wait_data_timer_hdl{
         iomgr::null_timer_handle}; // non-recurring timer doesn't need to be cancelled on shutdown;
     bool m_resync_mode{false};
+
+    RaftReplDevMetrics m_metrics;
 
     static std::atomic< uint64_t > s_next_group_ordinal;
 

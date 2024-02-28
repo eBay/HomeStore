@@ -28,7 +28,8 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
         m_group_id{rd_sb->group_id},
         m_my_repl_id{svc.get_my_repl_uuid()},
         m_raft_server_id{nuraft_mesg::to_server_id(m_my_repl_id)},
-        m_rd_sb{std::move(rd_sb)} {
+        m_rd_sb{std::move(rd_sb)},
+        m_metrics{fmt::format("{}_{}", group_id_str(), m_raft_server_id).c_str()} {
     m_state_machine = std::make_shared< RaftStateMachine >(*this);
 
     if (load_existing) {
@@ -213,7 +214,11 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
             sgs_vec.push_back(sgs);
 
             async_read(local_blkid, sgs, total_size).thenValue([this, &ctx](auto&& err) {
-                RD_REL_ASSERT(!err, "Error in reading data"); // TODO: Find a way to return error to the Listener
+                if (err) {
+                    COUNTER_INCREMENT(m_metrics, read_err_cnt, 1);
+                    RD_REL_ASSERT(false, "Error in reading data"); // TODO: Find a way to return error to the Listener
+                }
+
                 {
                     std::unique_lock< std::mutex > lk{ctx->mtx};
                     --(ctx->outstanding_read_cnt);
@@ -334,6 +339,7 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
         .async_write(r_cast< const char* >(data), push_req->data_size(), rreq->local_blkid)
         .thenValue([this, rreq](auto&& err) {
             if (err) {
+                COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
                 RD_DBG_ASSERT(false, "Error in writing data");
                 handle_error(rreq, ReplServiceError::DRIVE_WRITE_ERROR);
             } else {
@@ -471,6 +477,8 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     builder->FinishSizePrefixed(
         CreateFetchData(*builder, CreateFetchDataRequest(*builder, builder->CreateVector(entries))));
 
+    COUNTER_INCREMENT(m_metrics, fetch_rreq_cnt, 1);
+
     // leader can change, on the receiving side, we need to check if the leader is still the one who originated the
     // blkid;
     group_msg_service()
@@ -487,11 +495,14 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
                        "Not able to fetching data from originator={}, error={}, probably originator is down. Will "
                        "retry when new leader start appending log entries",
                        rreqs.front()->remote_blkid.server_id, e.error());
+                COUNTER_INCREMENT(m_metrics, fetch_err_cnt, 1);
                 for (auto const& rreq : rreqs) {
                     handle_error(rreq, RaftReplService::to_repl_error(e.error()));
                 }
                 return;
             }
+
+            COUNTER_INCREMENT(m_metrics, fetch_rreq_cnt, 1);
 
             auto raw_data = e.value().response_blob().cbytes();
             auto total_size = e.value().response_blob().size();
@@ -575,6 +586,7 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
                 for (auto const& err_c : vf) {
                     if (sisl_unlikely(err_c.value())) {
                         auto ec = err_c.value();
+                        COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
                         RD_LOG(ERROR, "Error in writing data: {}", ec.value());
                         // TODO: actually will never arrive here as iomgr will assert (should not assert but
                         // to raise alert and leave the raft group);
