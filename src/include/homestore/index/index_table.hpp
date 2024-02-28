@@ -75,16 +75,30 @@ public:
 
     template < typename ReqT >
     btree_status_t put(ReqT& put_req) {
-        auto cpg = hs()->cp_mgr().cp_guard();
-        put_req.m_op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
-        return Btree< K, V >::put(put_req);
+        auto ret = btree_status_t::success;
+        do {
+            auto cpg = hs()->cp_mgr().cp_guard();
+            put_req.m_op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
+            ret = Btree< K, V >::put(put_req);
+            if (ret == btree_status_t::cp_mismatch) {
+                LOGTRACEMOD(wbcache, "CP Mismatch, retrying put");
+            }
+        } while (ret == btree_status_t::cp_mismatch);
+        return ret;
     }
 
     template < typename ReqT >
     btree_status_t remove(ReqT& remove_req) {
-        auto cpg = hs()->cp_mgr().cp_guard();
-        remove_req.m_op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
-        return Btree< K, V >::remove(remove_req);
+        auto ret = btree_status_t::success;
+        do {
+            auto cpg = hs()->cp_mgr().cp_guard();
+            remove_req.m_op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
+            ret =  Btree< K, V >::remove(remove_req);
+            if (ret == btree_status_t::cp_mismatch) {
+                LOGTRACEMOD(wbcache, "CP Mismatch, retrying remove");
+            }
+        } while (ret == btree_status_t::cp_mismatch);
+        return ret;
     }
 
 protected:
