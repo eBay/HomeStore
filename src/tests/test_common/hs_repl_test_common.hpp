@@ -81,11 +81,9 @@ protected:
                 phase_ = new_phase;
                 cv_.notify_all();
             } else {
-                LOGINFO("Waiting for all replicas to reach phase={}, count={}", new_phase, count);
                 cv_.wait(lg, [this, new_phase]() { return (phase_ == new_phase); });
             }
 
-            LOGINFO("All replicas reached phase={}", new_phase);
             count = 0;
         }
     };
@@ -185,7 +183,7 @@ public:
 
     void teardown() {
         LOGINFO("Stopping Homestore replica={}", replica_num_);
-        sisl::GrpcAsyncClientWorker::shutdown_all();
+        // sisl::GrpcAsyncClientWorker::shutdown_all();
         test_common::HSTestHelper::shutdown_homestore();
     }
 
