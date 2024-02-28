@@ -118,8 +118,9 @@ public:
     //////////////// Methods needed for other Raft classes to access /////////////////
     void use_config(json_superblk raft_config_sb);
     void report_committed(repl_req_ptr_t rreq);
-    repl_req_ptr_t follower_create_req(repl_key const& rkey, sisl::blob const& user_header, sisl::blob const& user_key,
-                                       uint32_t data_size);
+    repl_req_ptr_t repl_key_to_req(repl_key const& rkey) const;
+    repl_req_ptr_t applier_create_req(repl_key const& rkey, sisl::blob const& user_header, sisl::blob const& user_key,
+                                      uint32_t data_size);
     AsyncNotify notify_after_data_written(std::vector< repl_req_ptr_t >* rreqs);
     void cp_flush(CP* cp);
     void cp_cleanup(CP* cp);
@@ -147,7 +148,6 @@ private:
     void on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data);
     void check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rreqs);
     void fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs);
-    auto get_max_data_fetch_size() const;
     bool is_resync_mode() { return m_resync_mode; }
     void handle_error(repl_req_ptr_t const& rreq, ReplServiceError err);
 };

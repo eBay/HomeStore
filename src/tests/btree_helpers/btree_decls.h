@@ -35,11 +35,11 @@ struct VarKeySizeBtree {
 };
 
 struct VarValueSizeBtree {
-    using BtreeType = IndexTable< TestVarLenKey, TestVarLenValue >;
-    using KeyType = TestVarLenKey;
+    using BtreeType = IndexTable< TestFixedKey, TestVarLenValue >;
+    using KeyType = TestFixedKey;
     using ValueType = TestVarLenValue;
-    static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_OBJECT;
-    static constexpr btree_node_type interior_node_type = btree_node_type::VAR_OBJECT;
+    static constexpr btree_node_type leaf_node_type = btree_node_type::VAR_VALUE;
+    static constexpr btree_node_type interior_node_type = btree_node_type::FIXED;
 };
 
 struct VarObjSizeBtree {
