@@ -115,7 +115,7 @@ if (${io_tests})
         # add_test(NAME SoloReplDev-Epoll COMMAND ${CMAKE_BINARY_DIR}/bin/test_solo_repl_dev)
         # add_test(NAME HomeRaftLogStore-Epoll COMMAND ${CMAKE_BINARY_DIR}/bin/test_home_raft_logstore)
         add_test(NAME RaftReplDev-Epoll COMMAND ${CMAKE_BINARY_DIR}/bin/test_raft_repl_dev)
-        SET_TESTS_PROPERTIES(RaftReplDev-Epoll PROPERTIES DEPENDS "DataSerice-Epoll; MetaBlkMgr-Epoll; HomeRaftLogStore-Epoll; SoloReplDev-Epoll; LogStore-Epoll; IndexBtree; MemBtree")
+        SET_TESTS_PROPERTIES(RaftReplDev-Epoll PROPERTIES DEPENDS IndexBtree MetaBlkMgr-Epoll JournalVDev)
         set_tests_properties(RaftReplDev-Epoll PROPERTIES TIMEOUT 12000)
     endif()
 
