@@ -211,8 +211,8 @@ jobs:
     - name: Setup tmate session
       uses: mxschmitt/action-tmate@v3
       with:
-      limit-access-to-actor: true
-      detached: true
+        limit-access-to-actor: true
+        detached: true
 
     - name: Create and Test Package
       run: |
