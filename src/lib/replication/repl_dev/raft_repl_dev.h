@@ -29,6 +29,28 @@ struct raft_repl_dev_superblk : public repl_dev_superblk {
 
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
 
+class RaftReplDevMetrics : public sisl::MetricsGroup {
+public:
+    explicit RaftReplDevMetrics(const char* inst_name) : sisl::MetricsGroup("RaftReplDev", inst_name) {
+        REGISTER_COUNTER(read_err_cnt, "total read error count", "read_err_cnt", {"op", "read"});
+        REGISTER_COUNTER(write_err_cnt, "total write error count", "write_err_cnt", {"op", "write"});
+        REGISTER_COUNTER(fetch_err_cnt, "total fetch data error count", "fetch_err_cnt", {"op", "fetch"});
+
+        REGISTER_COUNTER(fetch_rreq_cnt, "total fetch data count", "fetch_data_req_cnt", {"op", "fetch"});
+        REGISTER_COUNTER(fetch_total_blk_size, "total fetch data blocks size", "fetch_total_blk_size", {"op", "fetch"});
+        REGISTER_COUNTER(fetch_total_entries_cnt, "total fetch total entries count", "fetch_total_entries_cnt",
+                         {"op", "fetch"});
+
+        register_me_to_farm();
+    }
+
+    RaftReplDevMetrics(const RaftReplDevMetrics&) = delete;
+    RaftReplDevMetrics(RaftReplDevMetrics&&) noexcept = delete;
+    RaftReplDevMetrics& operator=(const RaftReplDevMetrics&) = delete;
+    RaftReplDevMetrics& operator=(RaftReplDevMetrics&&) noexcept = delete;
+    ~RaftReplDevMetrics() { deregister_me_from_farm(); }
+};
+
 class RaftReplService;
 class CP;
 class RaftReplDev : public ReplDev,
@@ -61,6 +83,8 @@ private:
     iomgr::timer_handle_t m_wait_data_timer_hdl{
         iomgr::null_timer_handle}; // non-recurring timer doesn't need to be cancelled on shutdown;
     bool m_resync_mode{false};
+
+    RaftReplDevMetrics m_metrics;
 
     static std::atomic< uint64_t > s_next_group_ordinal;
 
@@ -97,8 +121,9 @@ public:
     //////////////// Methods needed for other Raft classes to access /////////////////
     void use_config(json_superblk raft_config_sb);
     void report_committed(repl_req_ptr_t rreq);
-    repl_req_ptr_t follower_create_req(repl_key const& rkey, sisl::blob const& user_header, sisl::blob const& user_key,
-                                       uint32_t data_size);
+    repl_req_ptr_t repl_key_to_req(repl_key const& rkey) const;
+    repl_req_ptr_t applier_create_req(repl_key const& rkey, sisl::blob const& user_header, sisl::blob const& user_key,
+                                      uint32_t data_size);
     AsyncNotify notify_after_data_written(std::vector< repl_req_ptr_t >* rreqs);
     void cp_flush(CP* cp);
     void cp_cleanup(CP* cp);
@@ -126,7 +151,6 @@ private:
     void on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data);
     void check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rreqs);
     void fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs);
-    auto get_max_data_fetch_size() const;
     bool is_resync_mode() { return m_resync_mode; }
     void handle_error(repl_req_ptr_t const& rreq, ReplServiceError err);
 };

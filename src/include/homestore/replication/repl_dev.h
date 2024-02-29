@@ -71,13 +71,14 @@ public:
     repl_key rkey;           // Unique key for the request
     sisl::blob header;       // User header
     sisl::blob key;          // User supplied key for this req
-    int64_t lsn{0};          // Lsn for this replication req
+    int64_t lsn{-1};         // Lsn for this replication req
     bool is_proposer{false}; // Is the repl_req proposed by this node
 
     //////////////// Value related section /////////////////
-    sisl::sg_list value;      // Raw value - applicable only to leader req
-    MultiBlkId local_blkid;   // Local BlkId for the value
-    RemoteBlkId remote_blkid; // Corresponding remote blkid for the value
+    sisl::sg_list value;       // Raw value - applicable only to leader req
+    MultiBlkId local_blkid;    // Local BlkId for the value
+    RemoteBlkId remote_blkid;  // Corresponding remote blkid for the value
+    bool value_inlined{false}; // Is the value inlined in the header itself
 
     //////////////// Journal/Buf related section /////////////////
     std::variant< std::unique_ptr< uint8_t[] >, raft_buf_ptr_t > journal_buf; // Buf for the journal entry
@@ -244,7 +245,7 @@ public:
 
     /// @brief get replication status. If called on follower member
     /// this API can return empty result.
-    virtual std::vector<peer_info> get_replication_status() const = 0;
+    virtual std::vector< peer_info > get_replication_status() const = 0;
 
     /// @brief Gets the group_id this repldev is working for
     /// @return group_id

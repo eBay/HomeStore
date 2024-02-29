@@ -36,6 +36,8 @@ void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
 
     // If it is header only entry, directly write to the journal
     if (rreq->value.size) {
+        rreq->value_inlined = false;
+
         // Step 1: Alloc Blkid
         auto status = data_service().alloc_blks(uint32_cast(rreq->value.size),
                                                 m_listener->get_blk_alloc_hints(rreq->header, rreq->value.size),
@@ -50,6 +52,7 @@ void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
                 write_journal(std::move(rreq));
             });
     } else {
+        rreq->value_inlined = true;
         write_journal(std::move(rreq));
     }
 }
