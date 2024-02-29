@@ -14,6 +14,10 @@ if (${build_nonio_tests})
     # Ignoring sign-compare only for this test file because it uses folly concurrent_skip_list which violates this check.
     set_source_files_properties(test_blkalloc.cpp PROPERTIES COMPILE_OPTIONS "-Wno-sign-compare" )
 
+    add_executable(test_raft_repl_dev)
+    target_sources(test_raft_repl_dev PRIVATE test_raft_repl_dev.cpp)
+    target_link_libraries(test_raft_repl_dev homestore ${COMMON_TEST_DEPS} GTest::gmock)
+    add_test(NAME RaftReplDev-Epoll COMMAND ${CMAKE_BINARY_DIR}/bin/test_raft_repl_dev)
 
     add_executable(test_blkalloc)
     target_sources(test_blkalloc PRIVATE test_blkalloc.cpp $<TARGET_OBJECTS:hs_blkalloc>)
@@ -104,9 +108,6 @@ if (${io_tests})
     target_sources(test_home_raft_logstore PRIVATE test_home_raft_logstore.cpp)
     target_link_libraries(test_home_raft_logstore homestore ${COMMON_TEST_DEPS} GTest::gmock)
 
-    add_executable(test_raft_repl_dev)
-    target_sources(test_raft_repl_dev PRIVATE test_raft_repl_dev.cpp)
-    target_link_libraries(test_raft_repl_dev homestore ${COMMON_TEST_DEPS} GTest::gmock)
 
     can_build_epoll_io_tests(epoll_tests)
     if(${epoll_tests})
@@ -116,8 +117,8 @@ if (${io_tests})
 
         # add_test(NAME SoloReplDev-Epoll COMMAND ${CMAKE_BINARY_DIR}/bin/test_solo_repl_dev)
         # add_test(NAME HomeRaftLogStore-Epoll COMMAND ${CMAKE_BINARY_DIR}/bin/test_home_raft_logstore)
-        add_test(NAME RaftReplDev-Epoll COMMAND ${CMAKE_BINARY_DIR}/bin/test_raft_repl_dev)
-        #SET_TESTS_PROPERTIES(RaftReplDev-Epoll PROPERTIES DEPENDS MemBtree)
+        # add_test(NAME RaftReplDev-Epoll COMMAND ${CMAKE_BINARY_DIR}/bin/test_raft_repl_dev)
+        # SET_TESTS_PROPERTIES(RaftReplDev-Epoll PROPERTIES DEPENDS MemBtree)
     endif()
 
     can_build_spdk_io_tests(spdk_tests)
