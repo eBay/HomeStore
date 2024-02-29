@@ -83,6 +83,7 @@ on:
 jobs:
   BuildHomestoreDeps:
     runs-on: ${{ inputs.platform }}
+    timeout-minutes: 24000
     steps:
     - name: Retrieve Code
       uses: actions/checkout@v3
@@ -205,6 +206,13 @@ jobs:
         key_prefix: NuMesgDeps-${{ inputs.platform }}-${{ inputs.build-type }}-${{ inputs.malloc-impl }}-${{ inputs.prerelease }}
         fail_on_cache_miss: true
       if: ${{ inputs.testing == 'True' && github.event_name != 'pull_request' && steps.restore-cache.outputs.cache-hit != 'true' }}
+
+    - uses: actions/checkout@v3
+    - name: Setup tmate session
+      uses: mxschmitt/action-tmate@v3
+      with:
+      limit-access-to-actor: true
+      detached: true
 
     - name: Create and Test Package
       run: |
