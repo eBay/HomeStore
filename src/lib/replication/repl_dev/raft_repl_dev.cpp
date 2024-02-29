@@ -466,7 +466,7 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t >* rre
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     if (rreqs.size() == 0) { return; }
 
-    std::vector< ::flatbuffers::Offset< RequestEntry > > entries;
+    std::vector<::flatbuffers::Offset< RequestEntry > > entries;
     entries.reserve(rreqs.size());
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
@@ -494,6 +494,7 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
         CreateFetchData(*builder, CreateFetchDataRequest(*builder, builder->CreateVector(entries))));
 
     COUNTER_INCREMENT(m_metrics, fetch_rreq_cnt, 1);
+    COUNTER_INCREMENT(m_metrics, fetch_total_entries_cnt, rreqs.size());
 
     // leader can change, on the receiving side, we need to check if the leader is still the one who originated the
     // blkid;
@@ -518,10 +519,11 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
                 return;
             }
 
-            COUNTER_INCREMENT(m_metrics, fetch_rreq_cnt, 1);
-
             auto raw_data = e.value().response_blob().cbytes();
             auto total_size = e.value().response_blob().size();
+
+            COUNTER_INCREMENT(m_metrics, fetch_rreq_cnt, 1);
+            COUNTER_INCREMENT(m_metrics, fetch_total_blk_size, total_size);
 
             RD_DBG_ASSERT_GT(total_size, 0, "Empty response from remote");
             RD_DBG_ASSERT(raw_data, "Empty response from remote");
