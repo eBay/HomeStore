@@ -212,7 +212,7 @@ public:
 private:
     std::map< Key, Value > inmem_db_;
     std::shared_mutex db_mtx_;
-    std::atomic< uint64_t > m_num_commits;
+    std::atomic< uint64_t > m_num_commits{0};
 };
 
 class RaftReplDevTest : public testing::Test {
