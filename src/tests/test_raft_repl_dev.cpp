@@ -105,6 +105,9 @@ public:
 
     void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key, MultiBlkId const& blkids,
                    cintrusive< repl_req_ctx >& ctx) override {
+
+        m_num_commits.fetch_add(1, std::memory_order_relaxed);
+
         ASSERT_EQ(header.size(), sizeof(test_req::journal_header));
 
         auto jheader = r_cast< test_req::journal_header const* >(header.cbytes());
@@ -199,6 +202,8 @@ public:
         g_helper->runner().execute().get();
     }
 
+    uint64_t db_num_writes() const { return m_num_commits.load(std::memory_order_relaxed); }
+
     uint64_t db_size() const {
         std::shared_lock lk(db_mtx_);
         return inmem_db_.size();
@@ -207,6 +212,7 @@ public:
 private:
     std::map< Key, Value > inmem_db_;
     std::shared_mutex db_mtx_;
+    std::atomic< uint64_t > m_num_commits;
 };
 
 class RaftReplDevTest : public testing::Test {
@@ -228,7 +234,7 @@ public:
         while (true) {
             uint64_t total_writes{0};
             for (auto const& db : dbs_) {
-                total_writes += db->db_size();
+                total_writes += db->db_num_writes();
             }
 
             if (total_writes >= exp_writes) { break; }
@@ -373,7 +379,7 @@ TEST_F(RaftReplDevTest, All_restart_one_follower_inc_resync) {
     if (g_helper->replica_num() == 1) {
         LOGINFO("Restart homestore: replica_num = 1");
         g_helper->restart(10 /* shutdown_delay_sec */);
-        g_helper->sync_for_test_start();
+        // g_helper->sync_for_test_start();
     }
 
     exp_entries += SISL_OPTIONS["num_io"].as< uint64_t >();
@@ -401,7 +407,6 @@ TEST_F(RaftReplDevTest, All_restart_one_follower_inc_resync) {
     this->validate_all_data();
     g_helper->sync_for_cleanup_start();
 }
-
 //
 // staging the fetch remote data with flip point;
 //
@@ -432,7 +437,7 @@ TEST_F(RaftReplDevTest, All_restart_one_follower_inc_resync_with_staging) {
     if (g_helper->replica_num() == 1) {
         LOGINFO("Restart homestore: replica_num = 1");
         g_helper->restart(10 /* shutdown_delay_sec */);
-        g_helper->sync_for_test_start();
+        // g_helper->sync_for_test_start();
     }
 
     exp_entries += SISL_OPTIONS["num_io"].as< uint64_t >();
@@ -454,6 +459,65 @@ TEST_F(RaftReplDevTest, All_restart_one_follower_inc_resync_with_staging) {
     }
 
     this->wait_for_all_writes(exp_entries);
+
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_all_data();
+    g_helper->sync_for_cleanup_start();
+}
+
+// do some io before restart;
+TEST_F(RaftReplDevTest, All_restart_leader) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    // step-0: do some IO before restart one member;
+    uint64_t exp_entries = 20;
+    if (g_helper->replica_num() == 0) {
+        g_helper->runner().set_num_tasks(exp_entries);
+        auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+        LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
+        g_helper->runner().set_task([this, block_size]() {
+            this->generate_writes(block_size /* data_size */, block_size /* max_size_per_iov */);
+        });
+        g_helper->runner().execute().get();
+    }
+
+    // step-1: wait for all writes to be completed
+    this->wait_for_all_writes(exp_entries);
+
+    // step-2: restart leader replica
+    if (g_helper->replica_num() == 0) {
+        LOGINFO("Restart homestore: replica_num = 0");
+        g_helper->restart(10 /* shutdown_delay_sec */);
+        // g_helper->sync_for_test_start();
+    }
+
+    exp_entries += SISL_OPTIONS["num_io"].as< uint64_t >();
+    // step-3: on leader, wait for a while for replica-1 to finish shutdown so that it can be removed from raft-groups
+    // and following I/O issued by leader won't be pushed to relica-1;
+    if (g_helper->replica_num() == 1) {
+        LOGINFO("Wait for grpc connection to replica-0 to be removed from raft-groups, and wait for awhile before "
+                "sending new I/O.");
+        std::this_thread::sleep_for(std::chrono::seconds{5});
+
+        LOGINFO("Switch the leader to replica_num = 1");
+        switch_all_db_leader();
+
+        g_helper->runner().set_num_tasks(SISL_OPTIONS["num_io"].as< uint64_t >());
+
+        // before replica-1 started, issue I/O so that replica-1 is lagging behind;
+        auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+        LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
+        g_helper->runner().set_task([this, block_size]() {
+            this->generate_writes(block_size /* data_size */, block_size /* max_size_per_iov */);
+        });
+        g_helper->runner().execute().get();
+    }
+
+    this->wait_for_all_writes(exp_entries);
+
+    if (g_helper->replica_num() != 0) { std::this_thread::sleep_for(std::chrono::seconds{10}); }
 
     g_helper->sync_for_verify_start();
     LOGINFO("Validate all data written so far by reading them");
