@@ -104,6 +104,9 @@ if (${io_tests})
     target_sources(test_home_raft_logstore PRIVATE test_home_raft_logstore.cpp)
     target_link_libraries(test_home_raft_logstore homestore ${COMMON_TEST_DEPS} GTest::gmock)
 
+    add_executable(test_raft_repl_dev)
+    target_sources(test_raft_repl_dev PRIVATE test_raft_repl_dev.cpp)
+    target_link_libraries(test_raft_repl_dev homestore ${COMMON_TEST_DEPS} GTest::gmock)
 
     can_build_epoll_io_tests(epoll_tests)
     if(${epoll_tests})
