@@ -522,7 +522,6 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
             auto raw_data = e.value().response_blob().cbytes();
             auto total_size = e.value().response_blob().size();
 
-            COUNTER_INCREMENT(m_metrics, fetch_rreq_cnt, 1);
             COUNTER_INCREMENT(m_metrics, fetch_total_blk_size, total_size);
 
             RD_DBG_ASSERT_GT(total_size, 0, "Empty response from remote");
