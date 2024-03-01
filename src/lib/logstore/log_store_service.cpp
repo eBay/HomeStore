@@ -98,7 +98,7 @@ void LogStoreService::start(bool format) {
 }
 
 void LogStoreService::stop() {
-    device_truncate(nullptr, true, false);
+    // device_truncate(nullptr, true, false);
     for (auto& [id, logdev] : m_id_logdev_map) {
         logdev->stop();
     }
