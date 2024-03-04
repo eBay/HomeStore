@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - stable/v3.x
+      - thin_provisioning
 
 jobs:
   Build:

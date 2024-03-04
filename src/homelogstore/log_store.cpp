@@ -228,7 +228,7 @@ void HomeLogStore::truncate(const logstore_seq_num_t upto_seq_num, const bool in
     // First try to block the flushing of logdevice and if we are successfully able to do, then
     auto shared_this{shared_from_this()};
     const bool locked_now{m_logdev.try_lock_flush([shared_this, upto_seq_num, in_memory_truncate_only]() {
-        shared_this->do_truncate(upto_seq_num);
+        shared_this->do_truncate(upto_seq_num, false /*persist meta now*/);
         if (!in_memory_truncate_only) {
             [[maybe_unused]] const auto key{shared_this->get_family().do_device_truncate()};
         }
@@ -237,13 +237,62 @@ void HomeLogStore::truncate(const logstore_seq_num_t upto_seq_num, const bool in
     if (locked_now) { m_logdev.unlock_flush(); }
 }
 
+void HomeLogStore::sync_truncate(const logstore_seq_num_t upto_seq_num, const bool in_memory_truncate_only) {
+    // Check if we need to fill any gaps in the logstore
+    auto const last_idx{get_contiguous_issued_seq_num(std::max(0l, truncated_upto()))};
+    HS_REL_ASSERT_GE(last_idx, 0l, "Negative sequence number: {} [Logstore id ={}]", last_idx, m_store_id);
+    auto const next_slot{last_idx + 1};
+    for (auto curr_idx = next_slot; upto_seq_num >= curr_idx; ++curr_idx) {
+        fill_gap(curr_idx);
+    }
+
+#ifndef NDEBUG
+    const auto s{m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire)};
+    // Don't check this if we don't know our truncation boundary. The call is made to inform us about
+    // correct truncation point.
+    if (s != -1) {
+        HS_DBG_ASSERT_LE(upto_seq_num, get_contiguous_completed_seq_num(s),
+                         "Logstore {} expects truncation to be contiguously completed", m_store_id);
+    }
+#endif
+
+    struct Context {
+        std::mutex truncate_mutex;
+        std::condition_variable truncate_cv;
+        bool truncate_done{false};
+    };
+    auto ctx{std::make_shared< Context >()};
+
+    auto shared_this{shared_from_this()};
+    const bool locked_now{m_logdev.try_lock_flush([shared_this, upto_seq_num, in_memory_truncate_only, ctx]() {
+        shared_this->do_truncate(upto_seq_num, true /*persist meta now*/);
+        if (!in_memory_truncate_only) {
+            [[maybe_unused]] const auto key{shared_this->get_family().do_device_truncate()};
+        }
+        {
+            std::unique_lock< std::mutex > lk{ctx->truncate_mutex};
+            ctx->truncate_done = true;
+        }
+        ctx->truncate_cv.notify_one();
+    })};
+
+    if (locked_now) {
+        m_logdev.unlock_flush();
+    } else {
+        {
+            std::unique_lock< std::mutex > lk{ctx->truncate_mutex};
+            ctx->truncate_cv.wait(lk, [&ctx] { return ctx->truncate_done; });
+        }
+    }
+}
+
 // NOTE: This method assumes the flush lock is already acquired by the caller
-void HomeLogStore::do_truncate(const logstore_seq_num_t upto_seq_num) {
+void HomeLogStore::do_truncate(const logstore_seq_num_t upto_seq_num, const bool persist_now) {
     m_records.truncate(upto_seq_num);
     m_safe_truncation_boundary.seq_num.store(upto_seq_num, std::memory_order_release);
 
-    // Need to update the superblock with meta, we don't persist yet, will be done as part of log dev truncation
-    m_logdev.update_store_superblk(m_store_id, logstore_superblk{upto_seq_num + 1}, false /* persist_now */);
+    // Need to update the superblock with meta, in case we don't persist yet, will be done as part of log dev truncation
+    m_logdev.update_store_superblk(m_store_id, logstore_superblk{upto_seq_num + 1}, persist_now /* persist_now */);
 
     const int ind{search_max_le(upto_seq_num)};
     if (ind < 0) {

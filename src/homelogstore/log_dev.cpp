@@ -682,6 +682,13 @@ std::vector< std::pair< logstore_id_t, logstore_superblk > > LogDevMetadata::loa
 }
 
 void LogDevMetadata::persist() {
+#ifdef _PRERELEASE
+    if (homestore_flip->test_flip("logstore_test_skip_persist")) {
+        LOGINFO("skipping persist of logdev metadata");
+        return;
+    }
+#endif
+
     if (m_meta_mgr_cookie) {
         MetaBlkMgrSI()->update_sub_sb(static_cast< const void* >(m_raw_buf->bytes), m_raw_buf->size, m_meta_mgr_cookie);
     } else {
