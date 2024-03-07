@@ -83,6 +83,7 @@ on:
 jobs:
   BuildHomestoreDeps:
     runs-on: ${{ inputs.platform }}
+    timeout-minutes: 1440
     steps:
     - name: Retrieve Code
       uses: actions/checkout@v3
@@ -212,11 +213,12 @@ jobs:
       with:
         limit-access-to-actor: true
         detached: true
-    
+
     - name: Create and Test Package
       run: |
         sanitize=$([[ "${{ inputs.tooling }}" == "Sanitize" ]] && echo "True" || echo "False")
         pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
+        sudo rm -rf /usr/local/lib/android/
         conan create \
             ${pre} \
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \
