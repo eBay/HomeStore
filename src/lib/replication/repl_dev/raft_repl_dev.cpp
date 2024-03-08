@@ -121,7 +121,7 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
         // Write the data
         data_service().async_write(rreq->value, rreq->local_blkid).thenValue([this, rreq](auto&& err) {
             if (!err) {
-                auto raft_status = m_state_machine->propose_to_raft(std::move(rreq));
+                auto raft_status = m_state_machine->propose_to_raft(rreq);
                 if (raft_status != ReplServiceError::OK) { handle_error(rreq, raft_status); }
             } else {
                 HS_DBG_ASSERT(false, "Error in writing data");
@@ -131,7 +131,7 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
     } else {
         rreq->value_inlined = true;
         RD_LOG(DEBUG, "Skipping data channel send since value size is 0");
-        auto raft_status = m_state_machine->propose_to_raft(std::move(rreq));
+        auto raft_status = m_state_machine->propose_to_raft(rreq);
         if (raft_status != ReplServiceError::OK) { handle_error(rreq, raft_status); }
     }
 }
