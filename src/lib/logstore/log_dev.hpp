@@ -136,6 +136,7 @@ struct log_group_header {
     uint32_t footer_offset;      // offset of where footer starts
     crc32_t prev_grp_crc;        // Checksum of the previous group that was written
     crc32_t cur_grp_crc;         // Checksum of the current group record
+    logdev_id_t logdev_id;       // Logdev id
 
     log_group_header() : magic{LOG_GROUP_HDR_MAGIC}, version{header_version} {}
     log_group_header(const log_group_header&) = delete;
@@ -195,9 +196,10 @@ struct fmt::formatter< homestore::log_group_header > {
         return fmt::format_to(
             ctx.out(),
             "magic = {} version={} n_log_records = {} start_log_idx = {} group_size = {} inline_data_offset = {} "
-            "oob_data_offset = {} prev_grp_crc = {} cur_grp_crc = {}",
+            "oob_data_offset = {} prev_grp_crc = {} cur_grp_crc = {} logdev = {}",
             header.magic, header.version, header.n_log_records, header.start_log_idx, header.group_size,
-            header.inline_data_offset, header.oob_data_offset, header.prev_grp_crc, header.cur_grp_crc);
+            header.inline_data_offset, header.oob_data_offset, header.prev_grp_crc, header.cur_grp_crc,
+            header.logdev_id);
     }
 };
 
@@ -253,7 +255,7 @@ public:
     bool add_record(log_record& record, const int64_t log_idx);
     bool can_accomodate(const log_record& record) const { return (m_nrecords <= m_max_records); }
 
-    const iovec_array& finish(const crc32_t prev_crc);
+    const iovec_array& finish(logdev_id_t logdev_id, const crc32_t prev_crc);
     crc32_t compute_crc();
 
     log_group_header* header() { return reinterpret_cast< log_group_header* >(m_cur_log_buf); }
@@ -635,6 +637,18 @@ public:
     void stop();
 
     /**
+     * @brief Start the flush timer.
+     *
+     */
+    void start_timer();
+
+    /**
+     * @brief Stop the flush timer.
+     *
+     */
+    void stop_timer();
+
+    /**
      * @brief Append the data to the log device asynchronously. The buffer that is passed is expected to be valid, till
      * the append callback is done.
      *
@@ -648,7 +662,7 @@ public:
      * @return logid_t : log_idx of the log of the data.
      */
     logid_t append_async(logstore_id_t store_id, logstore_seq_num_t seq_num, const sisl::io_blob& data,
-                         void* cb_context);
+                         void* cb_context, bool flush_wait = false);
 
     /**
      * @brief Read the log id from the device offset
@@ -781,7 +795,6 @@ public:
     void device_truncate_under_lock(const std::shared_ptr< truncate_req >& treq);
     logdev_key do_device_truncate(bool dry_run = false);
     void handle_unopened_log_stores(bool format);
-
     logdev_id_t get_id() { return m_logdev_id; }
 
 private:
@@ -858,7 +871,7 @@ private:
     uint32_t m_log_group_idx{0};
     std::atomic< bool > m_flush_status = false;
     // Timer handle
-    iomgr::timer_handle_t m_flush_timer_hdl;
+    iomgr::timer_handle_t m_flush_timer_hdl{iomgr::null_timer_handle};
 }; // LogDev
 
 } // namespace homestore

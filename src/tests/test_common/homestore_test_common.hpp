@@ -23,6 +23,7 @@
 #include <sisl/options/options.h>
 #include <sisl/settings/settings.hpp>
 #include <iomgr/io_environment.hpp>
+#include <iomgr/iomgr_flip.hpp>
 #include <homestore/homestore.hpp>
 #include <homestore/index_service.hpp>
 #include <homestore/replication_service.hpp>
@@ -170,6 +171,7 @@ public:
         shared< ReplApplication > repl_app{nullptr};
         chunk_num_t num_chunks{1};
         uint64_t chunk_size{32 * 1024 * 1024}; // Chunk size in MB.
+        uint64_t min_chunk_size{0};
         vdev_size_type_t vdev_size_type{vdev_size_type_t::VDEV_SIZE_STATIC};
     };
 
@@ -246,6 +248,11 @@ public:
         bool need_format =
             hsi->start(hs_input_params{.devices = device_info, .app_mem_size = app_mem_size}, std::move(cb));
 
+        // We need to set the min chunk size before homestore format
+        if (svc_params[HS_SERVICE::LOG].min_chunk_size != 0) {
+            set_min_chunk_size(svc_params[HS_SERVICE::LOG].min_chunk_size);
+        }
+
         if (need_format) {
             hsi->format_and_start({{HS_SERVICE::META, {.size_pct = svc_params[HS_SERVICE::META].size_pct}},
                                    {HS_SERVICE::LOG,
@@ -276,6 +283,21 @@ public:
 
         if (cleanup) { remove_files(s_dev_names); }
         s_dev_names.clear();
+    }
+
+    static void set_min_chunk_size(uint64_t chunk_size) {
+#ifdef _PRERELEASE
+        LOGINFO("Set minimum chunk size {}", chunk_size);
+        flip::FlipClient* fc = iomgr_flip::client_instance();
+
+        flip::FlipFrequency freq;
+        freq.set_count(2000000);
+        freq.set_percent(100);
+
+        flip::FlipCondition dont_care_cond;
+        fc->create_condition("", flip::Operator::DONT_CARE, (int)1, &dont_care_cond);
+        fc->inject_retval_flip< long >("set_minimum_chunk_size", {dont_care_cond}, freq, chunk_size);
+#endif
     }
 
     static void fill_data_buf(uint8_t* buf, uint64_t size, uint64_t pattern = 0) {

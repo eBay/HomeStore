@@ -117,13 +117,14 @@ bool LogGroup::new_iovec_for_footer() const {
     return ((m_inline_data_pos + sizeof(log_group_footer)) >= m_cur_buf_len || m_oob_data_pos != 0);
 }
 
-const iovec_array& LogGroup::finish(const crc32_t prev_crc) {
+const iovec_array& LogGroup::finish(logdev_id_t logdev_id, const crc32_t prev_crc) {
     // add footer
     auto footer = add_and_get_footer();
 
     m_iovecs[0].iov_len = sisl::round_up(m_iovecs[0].iov_len, m_flush_multiple_size);
 
     log_group_header* hdr = new (header()) log_group_header{};
+    hdr->logdev_id = logdev_id;
     hdr->n_log_records = m_nrecords;
     hdr->prev_grp_crc = prev_crc;
     hdr->inline_data_offset = sizeof(log_group_header) + (m_max_records * sizeof(serialized_log_record));

@@ -543,6 +543,16 @@ std::vector< shared< VirtualDev > > DeviceManager::get_vdevs() const {
     return ret_v;
 }
 
+std::vector< shared< Chunk > > DeviceManager::get_chunks() const {
+    std::unique_lock lg{m_vdev_mutex};
+    std::vector< shared< Chunk > > res;
+    res.reserve(m_chunks.size());
+    for (auto& chunk : m_chunks) {
+        if (chunk) res.push_back(chunk);
+    }
+    return res;
+}
+
 // Some of the hs_super_blk details
 uint64_t hs_super_blk::vdev_super_block_size() { return (hs_super_blk::MAX_VDEVS_IN_SYSTEM * vdev_info::size); }
 

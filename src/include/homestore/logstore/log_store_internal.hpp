@@ -125,6 +125,7 @@ struct logstore_req {
     bool is_internal_req;       // If the req is created internally by HomeLogStore itself
     log_req_comp_cb_t cb;       // Callback upon completion of write (overridden than default)
     Clock::time_point start_time;
+    bool flush_wait{false}; // Wait for the flush to happen
 
     logstore_req(const logstore_req&) = delete;
     logstore_req& operator=(const logstore_req&) = delete;
