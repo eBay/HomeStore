@@ -142,6 +142,8 @@ table Generic {
     // percentage of cache used to create indx mempool. It should be more than 100 to 
     // take into account some floating buffers in writeback cache.
     indx_mempool_percent : uint32 = 110;
+
+    boot_thin_provisioning: bool = false;
 }
 
 table ResourceLimits {

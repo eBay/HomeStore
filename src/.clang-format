@@ -18,7 +18,6 @@ AlignOperands:   false
 AlignTrailingComments: true
 AllowShortBlocksOnASingleLine: true
 AllowShortIfStatementsOnASingleLine: true
-AllowShortBlocksOnASingleLine: true
 AllowShortCaseLabelsOnASingleLine: false
 # AllowShortFunctionsOnASingleLine: InlineOnly
 # AllowShortLoopsOnASingleLine: false

@@ -114,6 +114,22 @@ struct vol_interface_req : public sisl::ObjLifeCounter< vol_interface_req > {
     bool is_write() const { return op_type == Op_type::WRITE; }
     bool is_unmap() const { return op_type == Op_type::UNMAP; }
 
+    bool is_zero_request(const uint64_t page_size) {
+        if (iovecs.empty()) {
+            return !buffer || hs_utils::is_buf_zero(static_cast< uint8_t* >(buffer), nlbas * page_size);
+        }
+        return is_iovec_zero();
+    }
+
+    bool is_iovec_zero() {
+        for (const auto& iovec : iovecs) {
+            auto data = static_cast< uint8_t* >(iovec.iov_base);
+            const size_t size = iovec.iov_len;
+            if (!hs_utils::is_buf_zero(data, size)) { return false; }
+        }
+        return true;
+    }
+
     friend void intrusive_ptr_add_ref(vol_interface_req* req) { req->refcount.increment(1); }
 
     friend void intrusive_ptr_release(vol_interface_req* req) {
@@ -316,7 +332,7 @@ public:
 
     virtual const char* get_name(const VolumePtr& vol) = 0;
     virtual uint64_t get_size(const VolumePtr& vol) = 0;
-    virtual std::map<boost::uuids::uuid, uint64_t> get_used_size(const VolumePtr& vol) = 0;
+    virtual std::map< boost::uuids::uuid, uint64_t > get_used_size(const VolumePtr& vol) = 0;
     virtual uint64_t get_page_size(const VolumePtr& vol) = 0;
     virtual boost::uuids::uuid get_uuid(std::shared_ptr< Volume > vol) = 0;
     virtual sisl::blob at_offset(const boost::intrusive_ptr< BlkBuffer >& buf, uint32_t offset) = 0;
