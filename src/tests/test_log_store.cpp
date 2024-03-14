@@ -320,8 +320,9 @@ public:
 
     void recovery_validate() {
         LOGINFO("Truncated upto {}", get_truncated_upto());
-        LOGINFO("Totally recovered {} non-truncated lsns and {} truncated lsns for store {}", m_n_recovered_lsns,
-                m_n_recovered_truncated_lsns, m_log_store->get_store_id());
+        LOGINFO("Totally recovered {} non-truncated lsns and {} truncated lsns for store {} log_dev {}",
+                m_n_recovered_lsns, m_n_recovered_truncated_lsns, m_log_store->get_store_id(),
+                m_log_store->get_logdev()->get_id());
         if (m_n_recovered_lsns != (m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1)) {
             EXPECT_EQ(m_n_recovered_lsns, m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1)
                 << "Recovered " << m_n_recovered_lsns << " valid lsns for store " << m_log_store->get_store_id()
@@ -1296,6 +1297,8 @@ int main(int argc, char* argv[]) {
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_log_store, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_log_store");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
+    sisl::logging::SetModuleLogLevel("logstore", spdlog::level::level_enum::trace);
+    sisl::logging::SetModuleLogLevel("journalvdev", spdlog::level::level_enum::debug);
 
     SampleDB::instance().start_homestore();
     const int ret = RUN_ALL_TESTS();

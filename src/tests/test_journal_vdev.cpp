@@ -76,7 +76,8 @@ public:
                                                        {HS_SERVICE::META, {.size_pct = 15.0}},
                                                        {HS_SERVICE::LOG,
                                                         {.size_pct = 50.0,
-                                                         .chunk_size = 32 * 1024 * 1024,
+                                                         .chunk_size = 8 * 1024 * 1024,
+                                                         .min_chunk_size = 8 * 1024 * 1024,
                                                          .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
                                                    },
                                                    nullptr /* starting_cb */, false /* restart */);
@@ -90,7 +91,8 @@ public:
                                                        {HS_SERVICE::META, {.size_pct = 15.0}},
                                                        {HS_SERVICE::LOG,
                                                         {.size_pct = 50.0,
-                                                         .chunk_size = 32 * 1024 * 1024,
+                                                         .chunk_size = 8 * 1024 * 1024,
+                                                         .min_chunk_size = 8 * 1024 * 1024,
                                                          .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
                                                    },
                                                    nullptr /* starting_cb */, true /* restart */);
@@ -103,14 +105,33 @@ class JournalDescriptorTest {
         uint64_t crc;
     };
 
+    struct VerifyDescriptor {
+        uint64_t ds{0};
+        uint64_t end{0};
+        uint64_t writesz{0};
+        uint64_t tail{0};
+        uint64_t rsvdsz{0};
+        int32_t chunks{0};
+        bool trunc{false};
+        uint64_t total{0};
+        uint64_t seek{0};
+    };
+
 public:
-    JournalDescriptorTest(logdev_id_t id) : m_logdev_id(id) { reinit(); }
+    JournalDescriptorTest(logdev_id_t id) : m_logdev_id(id) { restore(); }
 
     std::shared_ptr< JournalVirtualDev::Descriptor > vdev_jd() { return m_vdev_jd; }
 
-    void reinit() {
+    void save() {
+        last_start_offset = m_vdev_jd->data_start_offset();
+        last_tail_offset = m_vdev_jd->tail_offset();
+    }
+
+    void restore() {
         auto vdev = hs()->logstore_service().get_vdev();
         m_vdev_jd = vdev->open(m_logdev_id);
+        m_vdev_jd->update_data_start_offset(last_start_offset);
+        m_vdev_jd->update_tail_offset(last_tail_offset);
     }
 
     uint64_t get_elapsed_time(Clock::time_point start) {
@@ -173,8 +194,7 @@ public:
     }
 
     void truncate(off_t off_to_truncate) {
-        LOGDEBUG("truncating to offset: 0x{}, start: 0x{}, tail: 0x{}", to_hex(off_to_truncate),
-                 to_hex(m_vdev_jd->data_start_offset()), to_hex(m_vdev_jd->tail_offset()));
+        LOGDEBUG("truncating to offset: 0x{}, desc: {}", to_hex(off_to_truncate), m_vdev_jd->to_string());
 
         validate_truncate_offset(off_to_truncate);
 
@@ -182,8 +202,10 @@ public:
         m_vdev_jd->truncate(off_to_truncate);
         auto tail_after = m_vdev_jd->tail_offset();
 
-        HS_DBG_ASSERT_EQ(tail_before, tail_after);
-        HS_DBG_ASSERT_EQ(off_to_truncate, m_vdev_jd->data_start_offset());
+        if (m_vdev_jd->num_chunks_used()) {
+            HS_DBG_ASSERT_EQ(tail_before, tail_after);
+            HS_DBG_ASSERT_EQ(off_to_truncate, m_vdev_jd->data_start_offset());
+        }
 
         if (off_to_truncate > m_start_off) {
             // remove the offsets before truncate offset, since they are not valid for read anymore;
@@ -231,9 +253,13 @@ public:
         auto used_space = m_vdev_jd->used_size();
         auto start_off = m_vdev_jd->data_start_offset();
 
-        HS_DBG_ASSERT_GT(m_vdev_jd->size(), 0);
-        HS_DBG_ASSERT_LT(used_space, m_vdev_jd->size());
-        HS_DBG_ASSERT_EQ(start_off, m_start_off);
+        if (m_vdev_jd->num_chunks_used() != 0) {
+            HS_DBG_ASSERT_GT(m_vdev_jd->size(), 0);
+            HS_DBG_ASSERT_LE(used_space, m_vdev_jd->size());
+            HS_DBG_ASSERT_EQ(start_off, m_start_off);
+        } else {
+            HS_DBG_ASSERT_EQ(m_vdev_jd->size(), 0);
+        }
     }
 
     bool time_to_truncate() {
@@ -270,7 +296,7 @@ public:
         HS_DBG_ASSERT_EQ(m_start_off, start_offset);
         if (start_offset < tail_offset) {
             HS_DBG_ASSERT_GE(off, start_offset, "Wrong offset: {}, start_off: {}", off, start_offset);
-            HS_DBG_ASSERT_LT(off, tail_offset, "Wrong offset: {}, tail_offset: {}", off, tail_offset);
+            HS_DBG_ASSERT_LE(off, tail_offset, "Wrong offset: {}, tail_offset: {}", off, tail_offset);
         } else {
             HS_DBG_ASSERT(off < tail_offset || off >= start_offset, "Wrong offset: {}, start: {}, tail: {}", off,
                           start_offset, tail_offset);
@@ -311,8 +337,9 @@ public:
         m_read_cnt++;
     }
 
-    void random_write() {
-        auto sz_to_wrt = rand_size();
+    void random_write() { alloc_write(rand_size()); }
+    void fixed_write(int size) { alloc_write(size); }
+    void alloc_write(int sz_to_wrt) {
         auto off_to_wrt = m_vdev_jd->alloc_next_append_blk(sz_to_wrt);
 
         auto it = m_off_to_info_map.find(off_to_wrt);
@@ -361,6 +388,17 @@ public:
         return sisl::round_up(dist(generator), dma_alignment);
     }
 
+    void verify_journal_descriptor(shared< JournalVirtualDev::Descriptor > logdev_jd, VerifyDescriptor d) {
+        LOGINFO("{}", logdev_jd->to_string());
+        ASSERT_EQ(logdev_jd->data_start_offset(), d.ds);
+        ASSERT_EQ(logdev_jd->end_offset(), d.end);
+        ASSERT_EQ(logdev_jd->write_sz_in_total(), d.writesz);
+        ASSERT_EQ(logdev_jd->reserved_size(), d.rsvdsz);
+        ASSERT_EQ(logdev_jd->num_chunks_used(), d.chunks);
+        ASSERT_EQ(logdev_jd->truncate_done(), d.trunc);
+        ASSERT_EQ(logdev_jd->size(), d.total);
+    }
+
 private:
     logdev_id_t m_logdev_id = 0;
     off_t m_start_off = 0;
@@ -371,6 +409,8 @@ private:
     std::map< off_t, write_info > m_off_to_info_map;
     Clock::time_point m_start_time;
     std::shared_ptr< JournalVirtualDev::Descriptor > m_vdev_jd;
+    uint64_t last_tail_offset = 0;
+    uint64_t last_start_offset = 0;
     friend class VDevJournalIOTest;
 };
 
@@ -426,22 +466,16 @@ TEST_F(VDevJournalIOTest, Recovery) {
     LOGINFO("Restart homestore");
 
     // Record the offsets of the journal descriptors.
-    std::vector< uint64_t > last_tail_offset, last_start_offset;
-    for (uint32_t i = 0; i < tests.size(); i++) {
-        auto vdev_jd = tests[i].vdev_jd();
-        last_tail_offset.push_back(vdev_jd->tail_offset());
-        last_start_offset.push_back(vdev_jd->data_start_offset());
+    for (auto& t : tests) {
+        t.save();
     }
 
     // Restart homestore.
     restart_homestore();
 
-    // Set the offsets after restart.
-    for (uint32_t i = 0; i < tests.size(); i++) {
-        tests[i].reinit();
-        auto vdev_jd = tests[i].vdev_jd();
-        vdev_jd->update_data_start_offset(last_start_offset[i]);
-        vdev_jd->update_tail_offset(last_tail_offset[i]);
+    // Restore the offsets after restart.
+    for (auto& t : tests) {
+        t.restore();
     }
 
     // Validate all logs.
@@ -468,6 +502,107 @@ TEST_F(VDevJournalIOTest, Recovery) {
         tests[i].truncate(tests[i].get_rand_truncate_offset());
         tests[i].read_all();
     }
+}
+
+TEST_F(VDevJournalIOTest, MultipleChunkTest) {
+    // Chunk size is 8MB and each data log entry will be of size 3MB to create gaps.
+    uint64_t MB = 1024 * 1024;
+    uint64_t chunk_size = 8 * MB;
+    uint64_t data_size = 3 * MB;
+    JournalDescriptorTest test(1);
+    auto log_dev_jd = test.vdev_jd();
+
+    auto restart_restore = [&]() {
+        test.save();
+        restart_homestore();
+        test.restore();
+        log_dev_jd = test.vdev_jd();
+    };
+
+    // clang-format off
+    // Initially no chunks used and offsets are zero.
+    uint64_t writesz = 0;
+    test.verify_journal_descriptor(log_dev_jd, {.ds = 0x0, .end = 0, .writesz = writesz, .rsvdsz = 0, .chunks = 0,
+                                   .trunc = false, .total = 0, .seek = 0x0});
+
+    // Insert two entries. Create one chunk 1.
+    LOGINFO("Inserting two entries");
+    for (int i = 0; i < 2; i++) {
+        test.fixed_write(data_size);
+    }
+
+    // Verify write size has two data entries and one chunk.
+    writesz = 2 * data_size;
+    test.verify_journal_descriptor(log_dev_jd, {.ds = 0x0, .end = chunk_size, .writesz = writesz, .rsvdsz = 0,
+                                   .chunks = 1, .trunc = false, .total = chunk_size, .seek = 0x0});
+
+    // Add three more entries. Now chunk 2 and 3 has to be created.
+    LOGINFO("Inserting three entries");
+    for (int i = 0; i < 3; i++) {
+        test.fixed_write(data_size);
+    }
+
+    // Total three chunks of 8MB, write size will be two whole chunk and last chunk 3 contains
+    // one data log entries. There will be gap at the end of chunk 1 and 2.
+    writesz = 2 * chunk_size + data_size;
+    test.verify_journal_descriptor(log_dev_jd, {.ds = 0x0, .end = 3 * chunk_size, .writesz = writesz, .rsvdsz = 0,
+                                   .chunks = 3, .trunc = false, .total = 3 * chunk_size, .seek = 0x0});
+    test.read_all();
+
+    // Restart homestore and restore the offsets.
+    LOGINFO("Restart homestore");
+    restart_restore();
+
+    // Verify the same as above after restart.
+    test.verify_journal_descriptor(log_dev_jd, {.ds = 0x0, .end = 3 * chunk_size, .writesz = writesz, .rsvdsz = 0,
+                                   .chunks = 3, .trunc = false, .total = 3 * chunk_size, .seek = 0x0});
+    test.read_all();
+
+    // Add one data entry. No additional chunks because there is enough space in chunk 3 but write size increased.
+    LOGINFO("Inserting one entry");
+    test.fixed_write(data_size);
+    writesz = 2 * chunk_size + 2 * data_size;
+    test.verify_journal_descriptor(log_dev_jd, {.ds = 0x0, .end = 3 * chunk_size, .writesz = writesz, .rsvdsz = 0,
+                                   .chunks = 3, .trunc = false, .total = 3 * chunk_size, .seek = 0x0});
+
+    // Add one data entry. No more space in chunk 3. Additional chunk 4 created.
+    LOGINFO("Inserting one entry");
+    test.fixed_write(data_size);
+    writesz = 3 * chunk_size + data_size;
+    test.verify_journal_descriptor(log_dev_jd, {.ds = 0x0, .end = 4 * chunk_size, .writesz = writesz, .rsvdsz = 0,
+                                   .chunks = 4, .trunc = false, .total = 4 * chunk_size, .seek = 0x0});
+
+    // Truncate two data entries. No change in chunk count, only write size and data start changed.
+    LOGINFO("Truncating two entries");
+    uint64_t trunc_sz = 2 * data_size;
+    uint64_t trunc_offset = 2 * data_size;
+    test.truncate(trunc_offset);
+    test.verify_journal_descriptor(log_dev_jd, {.ds = 0x600000, .end = 4 * chunk_size, .writesz = writesz - trunc_sz,
+                                   .rsvdsz = 0, .chunks = 4, .trunc = true, .total = 4 * chunk_size, .seek = 0x0});
+
+    // Truncate one more entry. Release one chunk back and reduce chunk count. Increase the data start.
+    LOGINFO("Truncating one entry");
+    trunc_offset = chunk_size + data_size;
+    trunc_sz = chunk_size + data_size;
+    test.truncate(trunc_offset);
+    test.verify_journal_descriptor(log_dev_jd, {.ds = 0xb00000, .end = 4 * chunk_size, .writesz = writesz - trunc_sz,
+                                   .rsvdsz = 0, .chunks = 3, .trunc = true, .total = 3 * chunk_size, .seek = 0x0});
+
+    // Restart homestore and restore the offsets.
+    LOGINFO("Restart homestore");
+    restart_restore();
+    test.verify_journal_descriptor(log_dev_jd, {.ds = 0xb00000, .end = 4 * chunk_size, .writesz = writesz - trunc_sz,
+                                   .rsvdsz = 0, .chunks = 3, .trunc = false, .total = 3 * chunk_size, .seek = 0x0});
+    test.read_all();
+
+    // Truncate all entries. Num chunks 1, write sz should be 0.
+    LOGINFO("Truncating all entries");
+    trunc_offset = log_dev_jd->tail_offset();
+    test.truncate(trunc_offset);
+    test.verify_journal_descriptor(log_dev_jd, {.ds = 0x1b00000, .end = 0x2000000, .writesz = 0, .rsvdsz = 0,
+                                   .chunks = 1, .trunc = true, .total = 8388608, .seek = 0x0});
+
+    // clang-format on
 }
 
 SISL_OPTION_GROUP(test_journal_vdev,
