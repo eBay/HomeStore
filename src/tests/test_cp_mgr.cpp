@@ -32,7 +32,6 @@ SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, test_cp_mgr, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_cp_mgr)
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-
 SISL_OPTION_GROUP(test_cp_mgr,
                   (num_records, "", "num_records", "number of record to test",
                    ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),

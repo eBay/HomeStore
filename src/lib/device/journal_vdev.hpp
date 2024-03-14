@@ -63,7 +63,7 @@ public:
 
         off_t m_data_start_offset{0};                   // Start offset of where actual data begin for this vdev
         std::atomic< uint64_t > m_write_sz_in_total{0}; //  Size will be decreased by truncate and increased by append;
-        bool m_truncate_done{true};
+        bool m_truncate_done{false};
         uint64_t m_reserved_sz{0};                       // write size within chunk, used to check chunk boundary;
         std::vector< shared< Chunk > > m_journal_chunks; // Chunks part of this journal in order.
         uint64_t m_total_size{0};                        // Total size of all chunks.
@@ -226,6 +226,14 @@ public:
         off_t data_start_offset() const { return m_data_start_offset; }
 
         off_t end_offset() const { return m_end_offset; }
+
+        uint64_t write_sz_in_total() const { return m_write_sz_in_total.load(); }
+
+        uint32_t num_chunks_used() const { return m_journal_chunks.size(); }
+
+        bool truncate_done() const { return m_truncate_done; }
+
+        uint64_t reserved_size() const { return m_reserved_sz; }
 
         /**
          * @brief : persist start logical offset to vdev's super block
