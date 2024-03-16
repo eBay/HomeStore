@@ -186,7 +186,7 @@ public:
 
         if (fake_restart) {
             shutdown_homestore(false);
-            // sisl::GrpcAsyncClientWorker::shutdown_all();
+            sisl::GrpcAsyncClientWorker::shutdown_all();
             std::this_thread::sleep_for(std::chrono::seconds{shutdown_delay_sec});
         }
 

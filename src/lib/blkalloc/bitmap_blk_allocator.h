@@ -102,7 +102,7 @@ public:
 
 private:
     void do_init();
-    sisl::ThreadVector< BlkId >* get_alloc_blk_list();
+    sisl::ThreadVector< MultiBlkId >* get_alloc_blk_list();
     void on_meta_blk_found(void* mblk_cookie, sisl::byte_view const& buf, size_t size);
 
     // Acquire the underlying bitmap buffer and while the caller has acquired, all the new allocations
@@ -116,7 +116,7 @@ protected:
     blk_num_t m_blks_per_portion;
 
 private:
-    sisl::ThreadVector< BlkId >* m_alloc_blkid_list{nullptr};
+    sisl::ThreadVector< MultiBlkId >* m_alloc_blkid_list{nullptr};
     std::unique_ptr< BlkAllocPortion[] > m_blk_portions;
     std::unique_ptr< sisl::Bitset > m_disk_bm{nullptr};
     std::atomic< bool > m_is_disk_bm_dirty{true}; // initially disk_bm treated as dirty

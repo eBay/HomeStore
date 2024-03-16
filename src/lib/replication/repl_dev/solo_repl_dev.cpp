@@ -40,7 +40,7 @@ void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
 
         // Step 1: Alloc Blkid
         auto status = data_service().alloc_blks(uint32_cast(rreq->value.size),
-                                                m_listener->get_blk_alloc_hints(rreq->header, rreq->value.size),
+                                                m_listener->get_blk_alloc_hints(rreq->header, rreq->value.size).value(),
                                                 rreq->local_blkid);
         HS_REL_ASSERT_EQ(status, BlkAllocStatus::SUCCESS);
 
@@ -61,7 +61,7 @@ void SoloReplDev::write_journal(repl_req_ptr_t rreq) {
     uint32_t entry_size = sizeof(repl_journal_entry) + rreq->header.size() + rreq->key.size() +
         (rreq->value.size ? rreq->local_blkid.serialized_size() : 0);
     rreq->alloc_journal_entry(entry_size, false /* is_raft_buf */);
-    rreq->journal_entry->code = journal_type_t::HS_LARGE_DATA;
+    rreq->journal_entry->code = journal_type_t::HS_DATA_LINKED;
     rreq->journal_entry->user_header_size = rreq->header.size();
     rreq->journal_entry->key_size = rreq->key.size();
 
@@ -101,7 +101,7 @@ void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     uint32_t remain_size = buf.size() - sizeof(repl_journal_entry);
     HS_REL_ASSERT_EQ(entry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
                      "Mismatched version of journal entry found");
-    HS_REL_ASSERT_EQ(entry->code, journal_type_t::HS_LARGE_DATA, "Found a journal entry which is not data");
+    HS_REL_ASSERT_EQ(entry->code, journal_type_t::HS_DATA_LINKED, "Found a journal entry which is not data");
 
     uint8_t const* raw_ptr = r_cast< uint8_t const* >(entry) + sizeof(repl_journal_entry);
     sisl::blob header{raw_ptr, entry->user_header_size};

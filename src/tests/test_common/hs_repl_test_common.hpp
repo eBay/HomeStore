@@ -68,16 +68,25 @@ protected:
         uint32_t cleanup_start_count_{0};
         uint64_t test_dataset_size_{0};
 
-        void sync_for_member_start() { sync_for(registered_count_, repl_test_phase_t::MEMBER_START); }
-        void sync_for_test_start() { sync_for(test_start_count_, repl_test_phase_t::TEST_RUN); }
-        void sync_for_verify_start() { sync_for(verify_start_count_, repl_test_phase_t::VALIDATE); }
-        void sync_for_cleanup_start() { sync_for(cleanup_start_count_, repl_test_phase_t::CLEANUP); }
+        void sync_for_member_start(uint32_t num_members = 0) {
+            sync_for(registered_count_, repl_test_phase_t::MEMBER_START, num_members);
+        }
+        void sync_for_test_start(uint32_t num_members = 0) {
+            sync_for(test_start_count_, repl_test_phase_t::TEST_RUN, num_members);
+        }
+        void sync_for_verify_start(uint32_t num_members = 0) {
+            sync_for(verify_start_count_, repl_test_phase_t::VALIDATE, num_members);
+        }
+        void sync_for_cleanup_start(uint32_t num_members = 0) {
+            sync_for(cleanup_start_count_, repl_test_phase_t::CLEANUP, num_members);
+        }
 
     private:
-        void sync_for(uint32_t& count, repl_test_phase_t new_phase) {
+        void sync_for(uint32_t& count, repl_test_phase_t new_phase, uint32_t max_count = 0) {
+            if (max_count == 0) { max_count = SISL_OPTIONS["replicas"].as< uint32_t >(); }
             std::unique_lock< bip::interprocess_mutex > lg(mtx_);
             ++count;
-            if (count == SISL_OPTIONS["replicas"].as< uint32_t >()) {
+            if (count == max_count) {
                 phase_ = new_phase;
                 cv_.notify_all();
             } else {
@@ -122,7 +131,8 @@ public:
 public:
     friend class TestReplApplication;
 
-    HSReplTestHelper(std::string const& name, int argc, char** argv) : name_{name}, argc_{argc}, argv_{argv} {}
+    HSReplTestHelper(std::string const& name, std::vector< std::string > const& args, char** argv) :
+            name_{name}, args_{args}, argv_{argv} {}
 
     void setup() {
         replica_num_ = SISL_OPTIONS["replica_num"].as< uint16_t >();
@@ -155,12 +165,11 @@ public:
             for (uint32_t i{1}; i < num_replicas; ++i) {
                 LOGINFO("Spawning Homestore replica={} instance", i);
                 std::string cmd_line;
-                fmt::format_to(std::back_inserter(cmd_line), "{} --replica_num {}", argv_[0], i);
-                for (int j{1}; j < argc_; ++j) {
-                    fmt::format_to(std::back_inserter(cmd_line), " {}", argv_[j]);
+                fmt::format_to(std::back_inserter(cmd_line), "{} --replica_num {}", args_[0], i);
+                for (int j{1}; j < (int)args_.size(); ++j) {
+                    fmt::format_to(std::back_inserter(cmd_line), " {}", args_[j]);
                 }
                 boost::process::child c(boost::process::cmd = cmd_line, proc_grp_);
-                // boost::process::child c(argv_[0], "--replica_num", std::to_string(i), proc_grp_);
                 c.detach();
             }
         } else {
@@ -185,6 +194,7 @@ public:
         LOGINFO("Stopping Homestore replica={}", replica_num_);
         // sisl::GrpcAsyncClientWorker::shutdown_all();
         test_common::HSTestHelper::shutdown_homestore();
+        sisl::GrpcAsyncClientWorker::shutdown_all();
     }
 
     void reset_setup() {
@@ -192,7 +202,7 @@ public:
         setup();
     }
 
-    void restart(uint32_t shutdown_delay_secs = 5) {
+    void restart(uint32_t shutdown_delay_secs = 5u) {
         test_common::HSTestHelper::start_homestore(
             name_ + std::to_string(replica_num_),
             {{HS_SERVICE::REPLICATION, {.repl_app = std::make_unique< TestReplApplication >(*this)}},
@@ -212,6 +222,19 @@ public:
     }
 
     uint16_t replica_num() const { return replica_num_; }
+    homestore::replica_id_t my_replica_id() const { return my_replica_id_; }
+    homestore::replica_id_t replica_id(uint16_t member_id) const {
+        auto it = std::find_if(members_.begin(), members_.end(),
+                               [member_id](auto const& p) { return p.second == member_id; });
+        if (it != members_.end()) { return it->first; }
+        return boost::uuids::nil_uuid();
+    }
+
+    uint16_t member_id(homestore::replica_id_t replica_id) const {
+        auto it = members_.find(replica_id);
+        if (it != members_.end()) { return it->second; }
+        return members_.size();
+    }
 
     Runner& runner() { return io_runner_; }
 
@@ -258,9 +281,9 @@ public:
         }
     }
 
-    void sync_for_test_start() { ipc_data_->sync_for_test_start(); }
-    void sync_for_verify_start() { ipc_data_->sync_for_verify_start(); }
-    void sync_for_cleanup_start() { ipc_data_->sync_for_cleanup_start(); }
+    void sync_for_test_start(uint32_t num_members = 0) { ipc_data_->sync_for_test_start(num_members); }
+    void sync_for_verify_start(uint32_t num_members = 0) { ipc_data_->sync_for_verify_start(num_members); }
+    void sync_for_cleanup_start(uint32_t num_members = 0) { ipc_data_->sync_for_cleanup_start(num_members); }
     void sync_dataset_size(uint64_t dataset_size) { ipc_data_->test_dataset_size_ = dataset_size; }
     uint64_t dataset_size() const { return ipc_data_->test_dataset_size_; }
 
@@ -288,7 +311,7 @@ public:
 private:
     uint16_t replica_num_;
     std::string name_;
-    int argc_;
+    std::vector< std::string > args_;
     char** argv_;
 
     boost::process::group proc_grp_;

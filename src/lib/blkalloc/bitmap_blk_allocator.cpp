@@ -134,22 +134,6 @@ void BitmapBlkAllocator::free_on_disk(BlkId const& bid) {
         BlkAllocPortion& portion = blknum_to_portion(b.blk_num());
         {
             auto lock{portion.portion_auto_lock()};
-            if (!hs()->is_initializing()) {
-                // During recovery we might try to free the entry which is already freed while replaying the
-                // journal, This assert is valid only post recovery.
-                if (!m_disk_bm->is_bits_set(b.blk_num(), b.blk_count())) {
-                    BLKALLOC_LOG(ERROR, "bit not set {} nblks {} chunk number {}", b.blk_num(), b.blk_count(),
-                                 m_chunk_id);
-                    for (blk_count_t i{0}; i < b.blk_count(); ++i) {
-                        if (!m_disk_bm->is_bits_set(b.blk_num() + i, 1)) {
-                            BLKALLOC_LOG(ERROR, "bit not set {}", b.blk_num() + i);
-                        }
-                    }
-                    BLKALLOC_REL_ASSERT(m_disk_bm->is_bits_set(b.blk_num(), b.blk_count()),
-                                        "Expected disk bits to set blk num {} num blks {}", b.blk_num(), b.blk_count());
-                }
-            }
-
             m_disk_bm->reset_bits(b.blk_num(), b.blk_count());
         }
     };
@@ -168,7 +152,7 @@ void BitmapBlkAllocator::free_on_disk(BlkId const& bid) {
 sisl::byte_array BitmapBlkAllocator::acquire_underlying_buffer() {
     // prepare and temporary alloc list, where blkalloc is accumulated till underlying buffer is released.
     // RCU will wait for all I/Os that are still in critical section (allocating on disk bm) to complete and exit;
-    auto alloc_list_ptr = new sisl::ThreadVector< BlkId >();
+    auto alloc_list_ptr = new sisl::ThreadVector< MultiBlkId >();
     auto old_alloc_list_ptr = rcu_xchg_pointer(&m_alloc_blkid_list, alloc_list_ptr);
     synchronize_rcu();
 
@@ -195,7 +179,7 @@ void BitmapBlkAllocator::release_underlying_buffer() {
 /* Get status */
 nlohmann::json BitmapBlkAllocator::get_status(int) const { return nlohmann::json{}; }
 
-sisl::ThreadVector< BlkId >* BitmapBlkAllocator::get_alloc_blk_list() {
+sisl::ThreadVector< MultiBlkId >* BitmapBlkAllocator::get_alloc_blk_list() {
     auto p = rcu_dereference(m_alloc_blkid_list);
     return p;
 }

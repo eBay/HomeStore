@@ -20,7 +20,7 @@ static std::pair< sisl::blob, sisl::blob > header_only_extract(nuraft::buffer& b
     repl_journal_entry* jentry = r_cast< repl_journal_entry* >(buf.data_begin());
     RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
                       "Mismatched version of journal entry received from RAFT peer");
-    RELEASE_ASSERT_EQ(jentry->code, journal_type_t::HS_HEADER_ONLY,
+    RELEASE_ASSERT_EQ(jentry->code, journal_type_t::HS_DATA_INLINED,
                       "Trying to extract header on non-header only entry");
     sisl::blob const header = sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry), jentry->user_header_size};
     sisl::blob const key = sisl::blob{header.cbytes() + header.size(), jentry->key_size};
@@ -31,7 +31,8 @@ ReplServiceError RaftStateMachine::propose_to_raft(repl_req_ptr_t rreq) {
     uint32_t val_size = rreq->value_inlined ? 0 : rreq->local_blkid.serialized_size();
     uint32_t entry_size = sizeof(repl_journal_entry) + rreq->header.size() + rreq->key.size() + val_size;
     rreq->alloc_journal_entry(entry_size, true /* raft_buf */);
-    rreq->journal_entry->code = (rreq->value_inlined) ? journal_type_t::HS_HEADER_ONLY : journal_type_t::HS_LARGE_DATA;
+    rreq->journal_entry->code =
+        (rreq->value_inlined) ? journal_type_t::HS_DATA_INLINED : journal_type_t::HS_DATA_LINKED;
     rreq->journal_entry->server_id = m_rd.server_id();
     rreq->journal_entry->dsn = rreq->dsn();
     rreq->journal_entry->user_header_size = rreq->header.size();
@@ -59,7 +60,7 @@ ReplServiceError RaftStateMachine::propose_to_raft(repl_req_ptr_t rreq) {
     auto* vec = sisl::VectorPool< raft_buf_ptr_t >::alloc();
     vec->push_back(rreq->raft_journal_buf());
 
-    RD_LOG(TRACE, "Raft Channel: journal_entry=[{}] ", rreq->journal_entry->to_string());
+    RD_LOG(TRACE, "Raft Channel: propose journal_entry=[{}] ", rreq->journal_entry->to_string());
 
     auto append_status = m_rd.raft_server()->append_entries(*vec);
     sisl::VectorPool< raft_buf_ptr_t >::free(vec);
@@ -72,85 +73,120 @@ ReplServiceError RaftStateMachine::propose_to_raft(repl_req_ptr_t rreq) {
     return ReplServiceError::OK;
 }
 
-repl_req_ptr_t RaftStateMachine::transform_journal_entry(nuraft::ptr< nuraft::log_entry >& lentry) {
+repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entry& lentry) {
     // Validate the journal entry and see if it needs to be transformed
-
-    repl_journal_entry* tmp_jentry = r_cast< repl_journal_entry* >(lentry->get_buf().data_begin());
-    RELEASE_ASSERT_EQ(tmp_jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
+    repl_journal_entry* jentry = r_cast< repl_journal_entry* >(lentry.get_buf().data_begin());
+    RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
                       "Mismatched version of journal entry received from RAFT peer");
 
-    RD_LOG(TRACE, "Received Raft log_entry=[term={}], journal_entry=[{}] ", lentry->get_term(),
-           tmp_jentry->to_string());
+    RD_LOG(TRACE, "Raft Channel: Localizing Raft log_entry: term={}, journal_entry=[{}] ", jentry->server_id,
+           lentry.get_term(), jentry->dsn, jentry->to_string());
 
-    if (tmp_jentry->server_id == m_rd.server_id()) {
-        // We are the proposer for this entry, lets pull the request from the map. We don't need any actual
-        // transformation here, because the entry is already is local
-        repl_key rkey{.server_id = tmp_jentry->server_id, .term = lentry->get_term(), .dsn = tmp_jentry->dsn};
-        auto rreq = m_rd.repl_key_to_req(rkey);
-        RELEASE_ASSERT(rreq != nullptr,
-                       "Log entry write with local server_id rkey={} but its corresponding req is missting in map",
-                       rkey.to_string());
-        DEBUG_ASSERT(rreq->is_proposer, "Log entry has same server_id={}, but rreq says its not a proposer",
-                     m_rd.server_id())
-        return rreq;
-    }
-
-    auto log_to_journal_entry = [](raft_buf_ptr_t const& log_buf, auto log_buf_data_offset) {
-        repl_journal_entry* jentry = r_cast< repl_journal_entry* >(log_buf->data_begin() + log_buf_data_offset);
+    // Extract the user header and user key from the journal entry
+    auto entry_to_hdr_and_key = [](repl_journal_entry* jentry) {
         sisl::blob const header =
             sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry), jentry->user_header_size};
         sisl::blob const key = sisl::blob{header.cbytes() + header.size(), jentry->key_size};
-        return std::make_tuple(jentry, header, key);
+        return std::make_tuple(header, key);
     };
+    auto const [header, key] = entry_to_hdr_and_key(jentry);
+    repl_key const rkey{.server_id = jentry->server_id, .term = lentry.get_term(), .dsn = jentry->dsn};
 
-    // Serialize the log_entry buffer which returns the actual raft log_entry buffer.
-    raft_buf_ptr_t log_buf;
-    size_t log_buf_data_offset;
-    if (tmp_jentry->code == journal_type_t::HS_LARGE_DATA) {
-        DEBUG_ASSERT_GT(tmp_jentry->value_size, 0, "Entry marked as large data, but value size is notified as 0");
-        log_buf = lentry->serialize();
-        log_buf_data_offset = log_buf->size() - lentry->get_buf().size();
-    } else {
-        DEBUG_ASSERT_EQ(tmp_jentry->value_size, 0, "Entry marked as inline data, but value size is not 0");
-        log_buf = lentry->get_buf_ptr();
-        log_buf_data_offset = 0;
-    }
-
-    auto const [jentry, header, key] = log_to_journal_entry(log_buf, log_buf_data_offset);
-    RD_LOG(DEBUG, "Received Raft server_id={}, term={}, dsn={}, journal_entry=[{}] ", jentry->server_id,
-           lentry->get_term(), jentry->dsn, jentry->to_string());
-
-    // From the repl_key, get the repl_req. In cases where log stream got here first, this method will create a new
-    // repl_req and return that back. Fill up all of the required journal entry inside the repl_req
-    auto rreq = m_rd.applier_create_req(
-        repl_key{.server_id = jentry->server_id, .term = lentry->get_term(), .dsn = jentry->dsn}, header, key,
-        jentry->value_size);
-    rreq->journal_buf = std::move(log_buf);
-    rreq->journal_entry = jentry;
-
-    if (jentry->value_size > 0) {
+    // Create a new rreq (or) Pull rreq from the map given the repl_key, header and key. Any new rreq will
+    // allocate the blks (in case of large data). We will use the new blkid and transform the current journal entry's
+    // blkid with this new one
+    repl_req_ptr_t rreq;
+    if ((jentry->code == journal_type_t::HS_DATA_LINKED) && (jentry->value_size > 0)) {
         MultiBlkId entry_blkid;
         entry_blkid.deserialize(sisl::blob{key.cbytes() + key.size(), jentry->value_size}, true /* copy */);
+
+        rreq = m_rd.applier_create_req(rkey, header, key, (entry_blkid.blk_count() * m_rd.get_blk_size()),
+                                       false /* is_data_channel */);
+        if (rreq == nullptr) { goto out; }
+
         rreq->remote_blkid = RemoteBlkId{jentry->server_id, entry_blkid};
 
         auto const local_size = rreq->local_blkid.serialized_size();
         auto const remote_size = entry_blkid.serialized_size();
-        uint8_t* blkid_location;
+        auto const size_before_value = lentry.get_buf().size() - jentry->value_size;
+
+        // It is possible that serialized size of the blkid allocated could be different (even though it
+        // allocates the same size as remote), because we support scatterred writes on different physical blocks. In
+        // that case, we need to completely prepare a new journal_entry buffer and assign that buffer to log_entry
         if (local_size > remote_size) {
-            // We need to copy the entire log_entry to accomodate local blkid
-            auto new_buf = nuraft::buffer::expand(*rreq->raft_journal_buf(),
-                                                  rreq->raft_journal_buf()->size() + local_size - remote_size);
-            blkid_location =
-                uintptr_cast(new_buf->data_begin()) + rreq->raft_journal_buf()->size() - jentry->value_size;
-            std::tie(rreq->journal_entry, rreq->header, rreq->key) = log_to_journal_entry(new_buf, log_buf_data_offset);
-            rreq->journal_buf = std::move(new_buf);
-        } else {
-            // Can do in-place replace of remote blkid with local blkid.
-            blkid_location = uintptr_cast(rreq->raft_journal_buf()->data_begin()) + rreq->raft_journal_buf()->size() -
-                jentry->value_size;
+            DEBUG_ASSERT(false, "We don't support different count of local blkid and remote blkid yet");
+            raft_buf_ptr_t new_buf = nuraft::buffer::alloc(lentry.get_buf().size() + local_size - remote_size);
+
+            std::memcpy(new_buf->data_begin(), lentry.get_buf().data_begin(), size_before_value);
+            jentry = r_cast< repl_journal_entry* >(new_buf->data_begin());
+            std::tie(rreq->header, rreq->key) = entry_to_hdr_and_key(jentry);
+            // lentry.change_buf(std::move(new_buf));
         }
+
+        uint8_t* blkid_location = uintptr_cast(lentry.get_buf().data_begin()) + size_before_value;
         std::memcpy(blkid_location, rreq->local_blkid.serialize().cbytes(), local_size);
+    } else {
+        rreq = m_rd.applier_create_req(rkey, header, key, jentry->value_size, false /* is_data_channel */);
     }
+    rreq->journal_buf = lentry.get_buf_ptr();
+    rreq->journal_entry = jentry;
+    rreq->is_jentry_localize_pending = false; // Journal entry is already localized here
+
+out:
+    if (rreq == nullptr) {
+        RD_LOG(ERROR,
+               "Failed to localize journal entry rkey={} jentry=[{}], we return error and let Raft resend this req",
+               rkey.to_string(), jentry->to_string());
+    }
+    return rreq;
+}
+
+repl_req_ptr_t RaftStateMachine::localize_journal_entry_finish(nuraft::log_entry& lentry) {
+    // Try to locate the rreq based on the log_entry.
+    // If we are able to locate that req in the map for this entry, it could be one of
+    //  a) This is an inline data and don't need any localization
+    //  b) This is a proposer and thus don't need any localization
+    //  c) This is an indirect data and we received raft entry append from leader and localized the journal entry.
+    //  d) This is an indirect data and we received only on data channel, but no raft entry append from leader. This
+    //     would mean _prepare is never called but directly finish is called. This can happen if that the leader is not
+    //     the original proposer (perhaps unsupported scenario at this time)
+    //
+    // On case a), b), we return the rreq as is. For case c), we just need to localize the actual server_id as well (as
+    // finishing step). For case d), we prepare the localization of journal entry and then finish them
+    //
+    //
+    // If we are not able to locate that req in the map for this entry, it means that no entry from raft leader is
+    // appended and data channel has not received a data. This is typical scenario if we do unpack().
+    //
+    // In this case, we call prepare the localization of journal entry ourselves and then finish them
+    //
+    repl_journal_entry* jentry = r_cast< repl_journal_entry const* >(lentry.get_buf().data_begin());
+    RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
+                      "Mismatched version of journal entry received from RAFT peer");
+
+    repl_key rkey{.server_id = jentry->server_id, .term = lentry.get_term(), .dsn = jentry->dsn};
+
+    auto rreq = m_rd.repl_key_to_req(rkey);
+    if ((rreq == nullptr) || (rreq->is_jentry_localize_pending)) {
+        rreq = localize_journal_entry_prepare(lentry);
+        if (rreq == nullptr) {
+            RELEASE_ASSERT(rreq != nullptr,
+                           "We get an indirect data for rkey=[{}], jentry=[{}] not as part of Raft Append but "
+                           "indirectly through possibly unpack() and in those cases, if we are not able to alloc "
+                           "location to write the data, there is no recourse. So we must crash this system ",
+                           rkey.to_string(), jentry->to_string());
+            return nullptr;
+        }
+    }
+
+    if (rreq->is_proposer) {
+        DEBUG_ASSERT_EQ(jentry->server_id, m_rd.server_id(),
+                        "Expected rkey={}, jentry={} proposer request to have local server_id in journal entry",
+                        rkey.to_string(), jentry->to_string());
+        return rreq;
+    }
+    jentry->server_id = m_rd.server_id();
+
     return rreq;
 }
 

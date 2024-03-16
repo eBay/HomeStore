@@ -97,7 +97,7 @@ void RaftReplService::start() {
                         .with_stale_log_gap(HS_DYNAMIC_CONFIG(consensus.stale_log_gap_hi_threshold))
                         .with_fresh_log_gap(HS_DYNAMIC_CONFIG(consensus.stale_log_gap_lo_threshold))
                         .with_snapshot_enabled(HS_DYNAMIC_CONFIG(consensus.snapshot_freq_distance))
-                        //.with_leadership_expiry(-1 /* never expires */) // >>> debug only
+                        .with_leadership_expiry(HS_DYNAMIC_CONFIG(consensus.leadership_expiry_ms))
                         .with_reserved_log_items(0) // In reality ReplLogStore retains much more than this
                         .with_auto_forwarding(false);
     r_params.return_method_ = nuraft::raft_params::async_handler;
@@ -137,9 +137,13 @@ void RaftReplService::start() {
 
     // Step 7: Register to CPManager to ensure we can flush the superblk.
     hs()->cp_mgr().register_consumer(cp_consumer_t::REPLICATION_SVC, std::make_unique< RaftReplServiceCPHandler >());
+
+    // Step 8: Start a reaper thread which wakes up time-to-time and fetches pending data or cleans up old requests etc
+    start_reaper_thread();
 }
 
 void RaftReplService::stop() {
+    stop_reaper_thread();
     GenericReplService::stop();
     m_msg_mgr.reset();
     hs()->logstore_service().stop();
@@ -271,6 +275,84 @@ AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, replica_i
                                                   replica_id_t member_in) const {
     return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
 }
+
+////////////////////// Reaper Thread related //////////////////////////////////
+void RaftReplService::start_reaper_thread() {
+    folly::Promise< folly::Unit > p;
+    auto f = p.getFuture();
+    iomanager.create_reactor("repl_svc_reaper", iomgr::INTERRUPT_LOOP, 1u, [this, &p](bool is_started) mutable {
+        if (is_started) {
+            m_reaper_fiber = iomanager.iofiber_self();
+
+#if 0
+                // Schedule the rdev garbage collector timer
+                m_rdev_gc_timer_hdl = iomanager.schedule_thread_timer(
+                    HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 *
+                    1000, true /* recurring */, nullptr, [this] { gc_repl_devs(); });
+#endif
+
+            // Check for queued fetches at the minimum every second
+            uint64_t interval_ns =
+                std::min(HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_ms) * 1000 * 1000, 1ul * 1000 * 1000 * 1000);
+            m_rdev_fetch_timer_hdl = iomanager.schedule_thread_timer(interval_ns, true /* recurring */, nullptr,
+                                                                     [this](void*) { fetch_pending_data(); });
+
+            p.setValue();
+        } else {
+            // Cancel all recurring timers started
+#if 0
+            iomanager.cancel_timer(m_rdev_gc_timer_hdl, true /* wait */);
+#endif
+            iomanager.cancel_timer(m_rdev_fetch_timer_hdl, true /* wait */);
+        }
+    });
+    std::move(f).get();
+}
+
+void RaftReplService::stop_reaper_thread() {
+    iomanager.run_on_wait(m_reaper_fiber, [] { iomanager.stop_io_loop(); });
+}
+
+void RaftReplService::add_to_fetch_queue(cshared< RaftReplDev >& rdev, std::vector< repl_req_ptr_t > const& rreqs) {
+    std::unique_lock lg(m_pending_fetch_mtx);
+    m_pending_fetch_batches.push(std::make_pair(rdev, rreqs));
+}
+
+void RaftReplService::fetch_pending_data() {
+    std::unique_lock lg(m_pending_fetch_mtx);
+    while (!m_pending_fetch_batches.empty()) {
+        auto const& [d, rreqs] = m_pending_fetch_batches.front();
+        if (get_elapsed_time_ms(rreqs.at(0)->created_time()) < HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_ms)) {
+            break;
+        }
+        auto const next_batch = std::move(rreqs);
+        auto rdev = d;
+        m_pending_fetch_batches.pop();
+        lg.unlock();
+
+        rdev->check_and_fetch_remote_data(next_batch);
+        lg.lock();
+    }
+}
+
+#if 0
+void RaftReplService::gc_repl_devs() {
+    std::unique_lock lg(m_rd_map_mtx);
+    for (it = m_rd_map.begin(); it != m_rd_map.end();) {
+        auto rdev = std::dynamic_pointer_cast< RaftReplDev >(it->second);
+        if (rdev->is_destroy_pending() &&
+            (get_elapsed_time_sec(rdev->destroyed_time()) >=
+             HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec))) {
+            LOGINFOMOD(replication,
+                       "ReplDev group_id={} was destroyed, shutting down the raft group in delayed fashion now");
+            m_msg_mgr->leave_group(rdev->group_id());
+            it = m_rd_map.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+#endif
 
 ///////////////////// RaftReplService CP Callbacks /////////////////////////////
 std::unique_ptr< CPContext > RaftReplServiceCPHandler::on_switchover_cp(CP* cur_cp, CP* new_cp) { return nullptr; }

@@ -38,17 +38,21 @@ static constexpr store_lsn_t to_store_lsn(uint64_t raft_lsn) { return s_cast< st
 static constexpr store_lsn_t to_store_lsn(repl_lsn_t repl_lsn) { return repl_lsn - 1; }
 static constexpr repl_lsn_t to_repl_lsn(store_lsn_t store_lsn) { return store_lsn + 1; }
 
-static nuraft::ptr< nuraft::log_entry > to_nuraft_log_entry(const log_buffer& log_bytes) {
-    uint8_t const* raw_ptr = log_bytes.bytes();
+static nuraft::ptr< nuraft::log_entry > to_nuraft_log_entry(sisl::blob const& log_blob) {
+    uint8_t const* raw_ptr = log_blob.cbytes();
     uint64_t term = *r_cast< uint64_t const* >(raw_ptr);
     raw_ptr += sizeof(uint64_t);
     nuraft::log_val_type type = static_cast< nuraft::log_val_type >(*raw_ptr);
     raw_ptr += sizeof(nuraft::log_val_type);
 
-    size_t data_len = log_bytes.size() - sizeof(uint64_t) - sizeof(nuraft::log_val_type);
+    size_t data_len = log_blob.size() - sizeof(uint64_t) - sizeof(nuraft::log_val_type);
     auto nb = nuraft::buffer::alloc(data_len);
     nb->put_raw(raw_ptr, data_len);
     return nuraft::cs_new< nuraft::log_entry >(term, nb, type);
+}
+
+static nuraft::ptr< nuraft::log_entry > to_nuraft_log_entry(const log_buffer& log_bytes) {
+    return to_nuraft_log_entry(log_bytes.get_blob());
 }
 
 static uint64_t extract_term(const log_buffer& log_bytes) {
@@ -115,27 +119,23 @@ ulong HomeRaftLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
     REPL_STORE_LOG(TRACE, "append entry term={}, log_val_type={} size={}", entry->get_term(),
                    static_cast< uint32_t >(entry->get_val_type()), entry->get_buf().size());
     auto buf = entry->serialize();
-    return append(buf);
-}
-
-ulong HomeRaftLogStore::append(raft_buf_ptr_t& buffer) {
-    auto next_seq = m_log_store->append_async(
-        sisl::io_blob{buffer->data_begin(), uint32_cast(buffer->size()), false /* is_aligned */}, nullptr /* cookie */,
-        [buffer](int64_t, sisl::io_blob&, logdev_key, void*) {});
+    auto const next_seq =
+        m_log_store->append_async(sisl::io_blob{buf->data_begin(), uint32_cast(buf->size()), false /* is_aligned */},
+                                  nullptr /* cookie */, [buf](int64_t, sisl::io_blob&, logdev_key, void*) {});
     return to_repl_lsn(next_seq);
 }
 
 void HomeRaftLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& entry) {
     auto buf = entry->serialize();
-    write_at(index, buf);
-}
 
-void HomeRaftLogStore::write_at(ulong index, raft_buf_ptr_t& buffer) {
     m_log_store->rollback_async(to_store_lsn(index) - 1, nullptr);
+
     // we need to reset the durable lsn, because its ok to set to lower number as it will be updated on next flush
     // calls, but it is dangerous to set higher number.
     m_last_durable_lsn = -1;
-    append(buffer);
+
+    m_log_store->append_async(sisl::io_blob{buf->data_begin(), uint32_cast(buf->size()), false /* is_aligned */},
+                              nullptr /* cookie */, [buf](int64_t, sisl::io_blob&, logdev_key, void*) {});
 }
 
 void HomeRaftLogStore::end_of_append_batch(ulong start, ulong cnt) {
@@ -232,12 +232,14 @@ void HomeRaftLogStore::apply_pack(ulong index, nuraft::buffer& pack) {
 
     for (int i{0}; i < num_entries; ++i) {
         size_t entry_len;
-        auto* entry = const_cast< nuraft::byte* >(pack.get_bytes(entry_len));
-        [[maybe_unused]] auto store_sn =
-            m_log_store->append_async(sisl::io_blob{entry, uint32_cast(entry_len), false}, nullptr, nullptr);
-        REPL_STORE_LOG(TRACE, "unpacking nth_entry={} of size={}, lsn={}", i + 1, entry_len, to_repl_lsn(store_sn));
+        auto* entry = pack.get_bytes(entry_len);
+        sisl::blob b{entry, uint32_cast(entry_len)};
+
+        auto nle = to_nuraft_log_entry(b);
+        this->append(nle);
+        REPL_STORE_LOG(TRACE, "unpacking nth_entry={} of size={}, lsn={}", i + 1, entry_len, slot + i);
     }
-    m_log_store->flush_sync(to_store_lsn(index) + num_entries - 1);
+    this->end_of_append_batch(slot, num_entries);
 }
 
 bool HomeRaftLogStore::compact(ulong compact_lsn) {

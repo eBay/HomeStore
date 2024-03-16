@@ -220,14 +220,14 @@ table Consensus {
     // Minimum log gap a replica has to be from leader before joining the replica set.
     min_log_gap_to_join: int32 = 30;
     
-    // amount of time in seconds to wait on data write before fetch data from remote;
-    wait_data_write_timer_sec: uint32 =  30 (hotswap);
+    // amount of time in millis to wait on data write before fetch data from remote;
+    wait_data_write_timer_ms: uint64 = 1500 (hotswap);
     
-    // Leadership expiry 120 seconds
-    leadership_expiry_ms: uint32 = 120000;
+    // Leadership expiry (=0 indicates 20 times heartbeat period), set -1 to never expire
+    leadership_expiry_ms: int32 = 0;
 
-    // data fetch max size limit in MB
-    data_fetch_max_size_mb: uint32 = 2;
+    // data fetch max size limit in KB (2MB by default)
+    data_fetch_max_size_kb: uint32 = 2048;
 }
 
 table HomeStoreSettings {

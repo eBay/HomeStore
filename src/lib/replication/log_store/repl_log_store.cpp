@@ -10,15 +10,10 @@ uint64_t ReplLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
     // We don't want to transform anything that is not an app log
     if (entry->get_val_type() != nuraft::log_val_type::app_log) { return HomeRaftLogStore::append(entry); }
 
-    repl_req_ptr_t rreq = m_sm.transform_journal_entry(entry);
-    ulong lsn;
-    if (rreq->is_proposer || rreq->value_inlined) {
-        // No need of any transformation for proposer or inline data, since the entry is already meaningful
-        lsn = HomeRaftLogStore::append(entry);
-    } else {
-        lsn = HomeRaftLogStore::append(rreq->raft_journal_buf());
-    }
+    repl_req_ptr_t rreq = m_sm.localize_journal_entry_finish(*entry);
+    ulong lsn = HomeRaftLogStore::append(entry);
     m_sm.link_lsn_to_req(rreq, int64_cast(lsn));
+
     RD_LOG(DEBUG, "Raft Channel: Received append log entry rreq=[{}]", rreq->to_compact_string());
     return lsn;
 }
@@ -30,13 +25,8 @@ void ReplLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& entry
         return;
     }
 
-    repl_req_ptr_t rreq = m_sm.transform_journal_entry(entry);
-    if (rreq->is_proposer || rreq->value_inlined) {
-        // No need of any transformation for proposer or inline data, since the entry is already meaningful
-        HomeRaftLogStore::write_at(index, entry);
-    } else {
-        HomeRaftLogStore::write_at(index, rreq->raft_journal_buf());
-    }
+    repl_req_ptr_t rreq = m_sm.localize_journal_entry_finish(*entry);
+    HomeRaftLogStore::write_at(index, entry);
     m_sm.link_lsn_to_req(rreq, int64_cast(index));
     RD_LOG(DEBUG, "Raft Channel: Received write_at log entry rreq=[{}]", rreq->to_compact_string());
 }
@@ -51,10 +41,7 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
         // Skip this call in proposer, since this method will synchronously flush the data, which is not required for
         // leader. Proposer will call the flush as part of commit after receiving quorum, upon which time, there is a
         // high possibility the log entry is already flushed.
-        if (rreq && rreq->is_proposer) {
-            RD_LOG(TRACE, "Raft Channel: Ignoring to flush proposer request rreq=[{}]", rreq->to_compact_string());
-            continue;
-        }
+        if (rreq && rreq->is_proposer) { continue; }
         reqs->emplace_back(std::move(rreq));
     }
 

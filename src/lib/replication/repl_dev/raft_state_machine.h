@@ -109,7 +109,8 @@ public:
 
     ////////// APIs outside of nuraft::state_machine requirements ////////////////////
     ReplServiceError propose_to_raft(repl_req_ptr_t rreq);
-    repl_req_ptr_t transform_journal_entry(nuraft::ptr< nuraft::log_entry >& lentry);
+    repl_req_ptr_t localize_journal_entry_prepare(nuraft::log_entry& lentry);
+    repl_req_ptr_t localize_journal_entry_finish(nuraft::log_entry& lentry);
     void link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn);
     repl_req_ptr_t lsn_to_req(int64_t lsn);
     nuraft_mesg::repl_service_ctx* group_msg_service();
