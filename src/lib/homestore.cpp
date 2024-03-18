@@ -147,14 +147,61 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
 }
 
 void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format_opts) {
-    auto total_pct_sum = 0.0f;
-    for (const auto& [svc_type, fparams] : format_opts) {
-        total_pct_sum += fparams.size_pct;
+
+    auto get_optimal_dev_type = [this](const uint32_t svc_type) -> HSDevType {
+        const auto& inp_params = HomeStoreStaticConfig::instance().input;
+        if (svc_type & HS_SERVICE::META || svc_type & HS_SERVICE::LOG || svc_type & HS_SERVICE::INDEX) {
+            if (inp_params.has_fast_dev()) {
+                return HSDevType::Fast;
+            } else {
+                return HSDevType::Data;
+            }
+        } else {
+            return HSDevType::Data;
+        }
+    };
+    std::map< HSDevType, float > total_pct_by_type = {{HSDevType::Fast, 0.0f}, {HSDevType::Data, 0.0f}};
+    // applying optimal placement for auto
+    for (auto& [svc_type, fparams] : format_opts) {
+        if ((svc_type & HS_SERVICE::META) && has_meta_service()) {
+            if (fparams.dev_type == HSDevType::Auto) { fparams.dev_type = get_optimal_dev_type(svc_type); }
+            total_pct_by_type[fparams.dev_type] += fparams.size_pct;
+        } else if ((svc_type & HS_SERVICE::LOG) && has_log_service()) {
+            if (fparams.dev_type == HSDevType::Auto) { fparams.dev_type = get_optimal_dev_type(svc_type); }
+            total_pct_by_type[fparams.dev_type] += fparams.size_pct;
+        } else if ((svc_type & HS_SERVICE::DATA) && has_data_service()) {
+            if (fparams.dev_type == HSDevType::Auto) { fparams.dev_type = get_optimal_dev_type(svc_type); }
+            total_pct_by_type[fparams.dev_type] += fparams.size_pct;
+        } else if ((svc_type & HS_SERVICE::INDEX) && has_index_service()) {
+            if (fparams.dev_type == HSDevType::Auto) { fparams.dev_type = get_optimal_dev_type(svc_type); }
+            total_pct_by_type[fparams.dev_type] += fparams.size_pct;
+        } else if ((svc_type & HS_SERVICE::REPLICATION) && has_repl_data_service()) {
+            if (fparams.dev_type == HSDevType::Auto) { fparams.dev_type = get_optimal_dev_type(svc_type); }
+            total_pct_by_type[fparams.dev_type] += fparams.size_pct;
+        }
     }
 
-    if (total_pct_sum > 100.0f) {
-        LOGERROR("Total percentage of all services is greater than 100.0f, total_pct_sum={}", total_pct_sum);
-        throw std::invalid_argument("total percentage of all services is greater than 100.0f");
+    // Sanity check, each type accumulated pct <=100%
+    auto all_pct = 0;
+    for (const auto& [DevType, total_pct] : total_pct_by_type) {
+        all_pct + = total_pct;
+        if (total_pct > 100.0f) {
+            LOGERROR("Total percentage of services on Device type {} is greater than 100.0f, total_pct_sum={}", DevType,
+                     total_pct);
+            throw std::invalid_argument("total percentage of on Device type {} services is greater than 100.0f");
+        }
+    }
+    // Sanity check , at least one service should be placed on some device type
+    if (all_pct == 0) {
+        LOGERROR("No services are configured to be placed on any device type");
+        throw std::invalid_argument("No services are configured to be placed on any device type");
+    }
+
+    // Sanity check, should have fast if fast pct >0
+    if (total_pct_by_type[HSDevType::Fast] > 0 && !HomeStoreStaticConfig::instance().input.has_fast_dev()) {
+        LOGERROR("Fast device is not configured but services are configured to be placed on fast device");
+        throw std::invalid_argument(
+            "Fast device is not configured but services are configured to be placed on fast device");
     }
 
     m_dev_mgr->format_devices();
@@ -365,7 +412,7 @@ shared< VirtualDev > HomeStore::create_vdev_cb(const vdev_info& vinfo, bool load
 }
 
 uint64_t HomeStore::pct_to_size(float pct, HSDevType dev_type) const {
-    uint64_t sz = uint64_cast((pct * static_cast< double >(m_dev_mgr->total_capacity())) / 100);
+    uint64_t sz = uint64_cast((pct * static_cast< double >(m_dev_mgr->total_capacity(dev_type))) / 100);
     return sisl::round_up(sz, m_dev_mgr->optimal_page_size(dev_type));
 }
 
