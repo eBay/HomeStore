@@ -27,10 +27,7 @@ public:
     void write_at(ulong index, nuraft::ptr< nuraft::log_entry >& entry) override;
     void end_of_append_batch(ulong start_lsn, ulong count) override;
     bool compact(ulong last_lsn) override;
-#if 0
-    ////////////////////////  function non-override ////////////////////////
-    void truncate_if_needed();
-#endif
+
 private:
     std::string rdev_name() const;
 };

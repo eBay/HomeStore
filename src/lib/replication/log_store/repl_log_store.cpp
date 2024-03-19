@@ -90,9 +90,4 @@ bool ReplLogStore::compact(ulong last_lsn) {
     m_rd.on_compact(last_lsn);
     return HomeRaftLogStore::compact(last_lsn);
 }
-#if 0
-void ReplLogStore::truncate_if_needed() {
-    if (m_log_store->ready_for_truncate()) { m_log_store->truncate(); }
-}
-#endif
 } // namespace homestore
