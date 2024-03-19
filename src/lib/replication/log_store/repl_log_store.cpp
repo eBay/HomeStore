@@ -86,4 +86,8 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
 
 std::string ReplLogStore::rdev_name() const { return m_rd.rdev_name(); }
 
+bool ReplLogStore::compact(ulong last_lsn) {
+    m_rd.on_compact(last_lsn);
+    return HomeRaftLogStore::compact(last_lsn);
+}
 } // namespace homestore

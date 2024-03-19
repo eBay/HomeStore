@@ -744,14 +744,6 @@ public:
     void unlock_flush(bool do_flush = true);
 
     /**
-     * @brief : truncate up to input log id;
-     *
-     * @param key : the key containing log id that needs to be truncate up to;
-     * @return number of records to truncate
-     */
-    uint64_t truncate(const logdev_key& key);
-
-    /**
      * @brief Rollback the logid range specific to the given store id. This method persists the information
      * synchronously to the underlying storage. Once rolledback those logids in this range are ignored (only for
      * this logstore) during load.
@@ -793,11 +785,20 @@ public:
                      log_buffer buf, uint32_t nremaining_in_batch);
     void on_batch_completion(HomeLogStore* log_store, uint32_t nremaining_in_batch, logdev_key flush_ld_key);
     void device_truncate_under_lock(const std::shared_ptr< truncate_req >& treq);
-    logdev_key do_device_truncate(bool dry_run = false);
     void handle_unopened_log_stores(bool format);
     logdev_id_t get_id() { return m_logdev_id; }
 
 private:
+    /**
+     * @brief : truncate up to input log id;
+     *
+     * @param key : the key containing log id that needs to be truncate up to;
+     * @return number of records to truncate
+     */
+    uint64_t truncate(const logdev_key& key);
+
+    logdev_key do_device_truncate(bool dry_run = false);
+
     LogGroup* make_log_group(uint32_t estimated_records) {
         m_log_group_pool[m_log_group_idx].reset(estimated_records);
         return &m_log_group_pool[m_log_group_idx];
@@ -822,6 +823,8 @@ private:
     void assert_next_pages(log_stream_reader& lstream);
     void set_flush_status(bool flush_status);
     bool get_flush_status();
+
+    logid_t get_reserved_log_truncation_idx() const;
 
 private:
     std::unique_ptr< sisl::StreamTracker< log_record > >
