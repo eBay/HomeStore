@@ -36,8 +36,8 @@ IndexService::IndexService(std::unique_ptr< IndexServiceCallbacks > cbs) : m_svc
         nullptr);
 }
 
-void IndexService::create_vdev(uint64_t size, uint32_t num_chunks) {
-    auto const atomic_page_size = hs()->device_mgr()->atomic_page_size(HSDevType::Fast);
+void IndexService::create_vdev(uint64_t size, HSDevType devType, uint32_t num_chunks) {
+    auto const atomic_page_size = hs()->device_mgr()->atomic_page_size(devType);
     hs_vdev_context vdev_ctx;
     vdev_ctx.type = hs_vdev_type_t::INDEX_VDEV;
 
@@ -45,7 +45,7 @@ void IndexService::create_vdev(uint64_t size, uint32_t num_chunks) {
                                                     .vdev_size = size,
                                                     .num_chunks = num_chunks,
                                                     .blk_size = atomic_page_size,
-                                                    .dev_type = HSDevType::Fast,
+                                                    .dev_type = devType,
                                                     .alloc_type = blk_allocator_type_t::fixed,
                                                     .chunk_sel_type = chunk_selector_type_t::ROUND_ROBIN,
                                                     .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,

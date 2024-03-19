@@ -184,7 +184,7 @@ void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format
     // Sanity check, each type accumulated pct <=100%
     auto all_pct = 0;
     for (const auto& [DevType, total_pct] : total_pct_by_type) {
-        all_pct + = total_pct;
+        all_pct += total_pct;
         if (total_pct > 100.0f) {
             LOGERROR("Total percentage of services on Device type {} is greater than 100.0f, total_pct_sum={}", DevType,
                      total_pct);
@@ -212,19 +212,23 @@ void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format
         if (fparams.size_pct == 0) { continue; }
 
         if ((svc_type & HS_SERVICE::META) && has_meta_service()) {
-            m_meta_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast), fparams.num_chunks);
+            m_meta_service->create_vdev(pct_to_size(fparams.size_pct, fparams.dev_type), fparams.dev_type,
+                                        fparams.num_chunks);
 
         } else if ((svc_type & HS_SERVICE::LOG) && has_log_service()) {
-            futs.emplace_back(
-                m_log_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast), fparams.chunk_size));
-        } else if ((svc_type & HS_SERVICE::DATA) && has_data_service()) {
-            m_data_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Data), fparams.block_size,
-                                        fparams.alloc_type, fparams.chunk_sel_type, fparams.num_chunks);
+            futs.emplace_back(m_log_service->create_vdev(pct_to_size(fparams.size_pct, fparams.dev_type),
+                                                         fparams.dev_type, fparams.chunk_size));
         } else if ((svc_type & HS_SERVICE::INDEX) && has_index_service()) {
-            m_index_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast), fparams.num_chunks);
+            m_index_service->create_vdev(pct_to_size(fparams.size_pct, fparams.dev_type), fparams.dev_type,
+                                         fparams.num_chunks);
+        } else if ((svc_type & HS_SERVICE::DATA) && has_data_service()) {
+            m_data_service->create_vdev(pct_to_size(fparams.size_pct, fparams.dev_type), fparams.dev_type,
+                                        fparams.block_size, fparams.alloc_type, fparams.chunk_sel_type,
+                                        fparams.num_chunks);
         } else if ((svc_type & HS_SERVICE::REPLICATION) && has_repl_data_service()) {
-            m_data_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Data), fparams.block_size,
-                                        fparams.alloc_type, fparams.chunk_sel_type, fparams.num_chunks);
+            m_data_service->create_vdev(pct_to_size(fparams.size_pct, fparams.dev_type), fparams.dev_type,
+                                        fparams.block_size, fparams.alloc_type, fparams.chunk_sel_type,
+                                        fparams.num_chunks);
         }
     }
 
