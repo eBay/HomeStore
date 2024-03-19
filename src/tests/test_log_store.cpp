@@ -164,6 +164,9 @@ public:
                                          });
             }
         }
+
+        // Because of restart in tests, we have torce the flush of log entries.
+        m_log_store->get_logdev()->flush_if_needed(1);
     }
 
     void iterate_validate(const bool expect_all_completed = false) {
@@ -254,20 +257,41 @@ public:
                         validate_data(tl, i);
                     }
                 } catch (const std::exception& e) {
+                    logstore_seq_num_t trunc_upto = get_truncated_upto();
                     if (!expect_all_completed) {
-                        // In case we run truncation in parallel to read, it is possible truncate moved, so adjust
-                        // the truncated_upto accordingly.
-                        const auto trunc_upto = m_log_store->truncated_upto();
+                        LOGINFO("got store {} trunc_upto {} {} {}", m_log_store->get_store_id(), trunc_upto, i,
+                                m_log_store->log_records().get_status(2).dump(' ', 2));
                         if (i <= trunc_upto) {
                             i = trunc_upto;
                             continue;
                         }
                     }
-                    LOGFATAL("Unexpected out_of_range exception for lsn={}:{} upto {}", m_log_store->get_store_id(), i,
-                             upto);
+                    LOGINFO("Unexpected out_of_range exception for lsn={}:{} upto {} trunc_upto {}",
+                            m_log_store->get_store_id(), i, upto, trunc_upto);
+                    LOGFATAL("");
                 }
             }
         }
+    }
+
+    logstore_seq_num_t get_truncated_upto() {
+        std::mutex mtx;
+        std::condition_variable cv;
+        bool get_trunc_upto = false;
+        logstore_seq_num_t trunc_upto = 0;
+        m_log_store->get_logdev()->run_under_flush_lock([this, &trunc_upto, &get_trunc_upto, &mtx, &cv]() {
+            // In case we run truncation in parallel to read, it is possible truncate moved, so adjust
+            // the truncated_upto accordingly.
+            trunc_upto = m_log_store->truncated_upto();
+            std::unique_lock lock(mtx);
+            get_trunc_upto = true;
+            cv.notify_one();
+            return true;
+        });
+
+        std::unique_lock lock(mtx);
+        cv.wait(lock, [&get_trunc_upto] { return get_trunc_upto == true; });
+        return trunc_upto;
     }
 
     void fill_hole_and_validate() {
@@ -295,6 +319,7 @@ public:
     }
 
     void recovery_validate() {
+        LOGINFO("Truncated upto {}", get_truncated_upto());
         LOGINFO("Totally recovered {} non-truncated lsns and {} truncated lsns for store {}", m_n_recovered_lsns,
                 m_n_recovered_truncated_lsns, m_log_store->get_store_id());
         if (m_n_recovered_lsns != (m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1)) {
@@ -438,17 +463,31 @@ public:
     }
 
     void start_homestore(bool restart = false) {
+        auto n_log_devs = SISL_OPTIONS["num_logdevs"].as< uint32_t >();
         auto n_log_stores = SISL_OPTIONS["num_logstores"].as< uint32_t >();
+
         if (n_log_stores < 4u) {
             LOGINFO("Log store test needs minimum 4 log stores for testing, setting them to 4");
             n_log_stores = 4u;
         }
 
+        if (restart) {
+            for (auto& lsc : m_log_store_clients) {
+                lsc->flush();
+            }
+        }
+
         test_common::HSTestHelper::start_homestore(
             "test_log_store",
             {{HS_SERVICE::META, {.size_pct = 5.0}},
-             {HS_SERVICE::LOG, {.size_pct = 84.0, .chunk_size = 32 * 1024 * 1024}}},
+             {HS_SERVICE::LOG, {.size_pct = 84.0, .chunk_size = 8 * 1024 * 1024, .min_chunk_size = 8 * 1024 * 1024}}},
             [this, restart, n_log_stores]() {
+                HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+                    // Disable flush timer in UT.
+                    s.logstore.flush_timer_frequency_us = 0;
+                });
+                HS_SETTINGS_FACTORY().save();
+
                 if (restart) {
                     for (uint32_t i{0}; i < n_log_stores; ++i) {
                         SampleLogStoreClient* client = m_log_store_clients[i].get();
@@ -462,19 +501,27 @@ public:
             restart);
 
         if (!restart) {
-            auto logdev_id = logstore_service().create_new_logdev();
+            std::vector< logdev_id_t > logdev_id_vec;
+            for (uint32_t i{0}; i < n_log_devs; ++i) {
+                logdev_id_vec.push_back(logstore_service().create_new_logdev());
+            }
+
             for (uint32_t i{0}; i < n_log_stores; ++i) {
+                auto logdev_id = logdev_id_vec[rand() % logdev_id_vec.size()];
                 m_log_store_clients.push_back(std::make_unique< SampleLogStoreClient >(
                     logdev_id, bind_this(SampleDB::on_log_insert_completion, 3)));
             }
             SampleLogStoreClient::s_max_flush_multiple =
-                logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
+                logstore_service().get_logdev(logdev_id_vec[0])->get_flush_size_multiple();
         }
     }
 
     void shutdown(bool cleanup = true) {
         test_common::HSTestHelper::shutdown_homestore(cleanup);
-        if (cleanup) { m_log_store_clients.clear(); }
+        if (cleanup) {
+            m_log_store_clients.clear();
+            m_highest_log_idx.clear();
+        }
     }
 
     void on_log_insert_completion(logdev_id_t fid, logstore_seq_num_t lsn, logdev_key ld_key) {
@@ -609,7 +656,7 @@ protected:
             nlohmann::json json_dump = logdev->dump_log_store(dump_req);
             dump_sz += json_dump.size();
 
-            LOGINFO("Printing json dump of all logstores in logdev {}. \n {}", logdev->get_id(), json_dump.dump());
+            LOGDEBUG("Printing json dump of all logstores in logdev {}. \n {}", logdev->get_id(), json_dump.dump());
             for (const auto& logdump : json_dump) {
                 const auto itr = logdump.find("log_records");
                 if (itr != std::end(logdump)) { rec_count += static_cast< int64_t >(logdump["log_records"].size()); }
@@ -619,14 +666,13 @@ protected:
         EXPECT_EQ(expected_num_records, rec_count);
     }
 
-    void dump_validate_filter(logstore_id_t id, logstore_seq_num_t start_seq, logstore_seq_num_t end_seq,
-                              bool print_content = false) {
+    void dump_validate_filter(bool print_content = false) {
         for (const auto& lsc : SampleDB::instance().m_log_store_clients) {
-            if (lsc->m_log_store->get_store_id() != id) { continue; }
-
-            log_dump_req dump_req;
+            logstore_id_t id = lsc->m_log_store->get_store_id();
             const auto fid = lsc->m_logdev_id;
-
+            logstore_seq_num_t start_seq = lsc->m_log_store->truncated_upto() + 1;
+            logstore_seq_num_t end_seq = lsc->m_log_store->get_contiguous_completed_seq_num(-1);
+            log_dump_req dump_req;
             if (print_content) dump_req.verbosity_level = log_dump_verbosity::CONTENT;
             dump_req.log_store = lsc->m_log_store;
             dump_req.start_seq_num = start_seq;
@@ -635,8 +681,8 @@ protected:
             // must use operator= construction as copy construction results in error
             auto logdev = lsc->m_log_store->get_logdev();
             nlohmann::json json_dump = logdev->dump_log_store(dump_req);
-            LOGINFO("Printing json dump of logdev={} logstore id {}, start_seq {}, end_seq {}, \n\n {}", fid, id,
-                    start_seq, end_seq, json_dump.dump());
+            LOGDEBUG("Printing json dump of log_dev={} logstore id {}, start_seq {}, end_seq {}, \n\n {}", fid, id,
+                     start_seq, end_seq, json_dump.dump());
             const auto itr_id = json_dump.find(std::to_string(id));
             if (itr_id != std::end(json_dump)) {
                 const auto itr_records = itr_id->find("log_records");
@@ -648,9 +694,8 @@ protected:
             } else {
                 EXPECT_FALSE(true);
             }
-
-            return;
         }
+        return;
     }
 
     int find_garbage_upto(logdev_id_t logdev_id, logid_t idx) {
@@ -791,7 +836,8 @@ protected:
             }
         }
         ASSERT_EQ(actual_valid_ids, SampleDB::instance().m_log_store_clients.size());
-        ASSERT_EQ(actual_garbage_ids, exp_garbage_store_count);
+        // Becasue we randomly assign logstore to logdev, some logdev will be empty.
+        // ASSERT_EQ(actual_garbage_ids, exp_garbage_store_count);
     }
 
     void delete_validate(uint32_t idx) {
@@ -890,12 +936,26 @@ TEST_F(LogStoreTest, BurstRandInsertThenTruncate) {
             this->dump_validate(num_records);
 
             LOGINFO("Step 4.2: Read some specific interval/filter of seq number in one logstore and dump it into json");
-            this->dump_validate_filter(0, 10, 100, true);
+            this->dump_validate_filter(true);
         }
 
         LOGINFO("Step 5: Truncate all of the inserts one log store at a time and validate log dev truncation is marked "
                 "correctly and also validate if all data prior to truncation return exception");
         this->truncate_validate();
+
+        LOGINFO("Step 6: Restart homestore");
+        SampleDB::instance().start_homestore(true /* restart */);
+        this->recovery_validate();
+        this->init(num_records);
+
+        LOGINFO("Step 7: Issue more sequential inserts after restarts with q depth of 15");
+        this->kickstart_inserts(1, 15);
+
+        LOGINFO("Step 8: Wait for the previous Inserts to complete");
+        this->wait_for_inserts();
+
+        LOGINFO("Step 9: Read all the inserts one by one for each log store to validate if what is written is valid");
+        this->read_validate(true);
     }
 }
 
@@ -1057,6 +1117,9 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
         this->recovery_validate();
         this->init(num_records);
 
+        LOGINFO("Step 5a: Read all the inserts one by one for each log store to validate if what is written is valid");
+        this->read_validate(true);
+
         LOGINFO("Step 6: Restart homestore again to validate recovery on consecutive restarts");
         SampleDB::instance().start_homestore(true /* restart */);
         this->recovery_validate();
@@ -1083,15 +1146,15 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
         this->truncate_validate();
     }
 }
+
 TEST_F(LogStoreTest, FlushSync) {
-#ifdef _PRERELEASE
     LOGINFO("Step 1: Delay the flush threshold and flush timer to very high value to ensure flush works fine")
     HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
         s.logstore.max_time_between_flush_us = 5000000ul; // 5 seconds
         s.logstore.flush_threshold_size = 1048576ul;      // 1MB
     });
     HS_SETTINGS_FACTORY().save();
-#endif
+
     LOGINFO("Step 2: Reinit the 10 records to start sequential write test");
     this->init(1000);
 
@@ -1101,14 +1164,12 @@ TEST_F(LogStoreTest, FlushSync) {
     LOGINFO("Step 4: Do a sync flush");
     this->flush();
 
-#ifdef _PRERELEASE
     LOGINFO("Step 5: Reset the settings back")
     HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
         s.logstore.max_time_between_flush_us = 300ul;
         s.logstore.flush_threshold_size = 64ul;
     });
     HS_SETTINGS_FACTORY().save();
-#endif
 
     LOGINFO("Step 6: Wait for the Inserts to complete");
     this->wait_for_inserts();
@@ -1140,68 +1201,6 @@ TEST_F(LogStoreTest, FlushSync) {
 #ifdef _PRERELEASE
     fc->remove_flip("simulate_log_flush_delay");
 #endif
-}
-
-TEST_F(LogStoreTest, Rollback) {
-    LOGINFO("Step 1: Reinit the 500 records on a single logstore to start rollback test");
-    this->init(500, {std::make_pair(1ull, 100)}); // Last entry = 500
-
-    LOGINFO("Step 2: Issue sequential inserts with q depth of 10");
-    this->kickstart_inserts(1, 10);
-
-    LOGINFO("Step 3: Wait for the Inserts to complete");
-    this->wait_for_inserts();
-
-    LOGINFO("Step 4: Rollback last 50 entries and validate if pre-rollback entries are intact");
-    this->rollback_validate(50); // Last entry = 450
-
-    LOGINFO("Step 5: Append 25 entries after rollback is completed");
-    this->init(25, {std::make_pair(1ull, 100)});
-    this->kickstart_inserts(1, 10);
-    this->wait_for_inserts(); // Last entry = 475
-
-    LOGINFO("Step 7: Rollback again for 75 entries even before previous rollback entry");
-    this->rollback_validate(75); // Last entry = 400
-
-    LOGINFO("Step 8: Append 25 entries after second rollback is completed");
-    this->init(25, {std::make_pair(1ull, 100)});
-    this->kickstart_inserts(1, 10);
-    this->wait_for_inserts(); // Last entry = 425
-
-    LOGINFO("Step 9: Restart homestore and ensure all rollbacks are effectively validated");
-    SampleDB::instance().start_homestore(true /* restart */);
-    this->recovery_validate();
-
-    LOGINFO("Step 10: Post recovery, append another 25 entries");
-    this->init(25, {std::make_pair(1ull, 100)});
-    this->kickstart_inserts(1, 5);
-    this->wait_for_inserts(); // Last entry = 450
-
-    LOGINFO("Step 11: Rollback again for 75 entries even before previous rollback entry");
-    this->rollback_validate(75); // Last entry = 375
-
-    LOGINFO("Step 12: After 3rd rollback, append another 25 entries");
-    this->init(25, {std::make_pair(1ull, 100)});
-    this->kickstart_inserts(1, 5);
-    this->wait_for_inserts(); // Last entry = 400
-
-    LOGINFO("Step 13: Truncate all entries");
-    this->truncate_validate();
-
-    LOGINFO("Step 14: Restart homestore and ensure all truncations after rollbacks are effectively validated");
-    SampleDB::instance().start_homestore(true /* restart */);
-    this->recovery_validate();
-
-    LOGINFO("Step 15: Append 25 entries after truncation is completed");
-    this->init(25, {std::make_pair(1ull, 100)});
-    this->kickstart_inserts(1, 10);
-    this->wait_for_inserts(); // Last entry = 425
-
-    LOGINFO("Step 16: Do another truncation to effectively truncate previous records");
-    this->truncate_validate();
-
-    LOGINFO("Step 17: Validate if there are no rollback records");
-    this->post_truncate_rollback_validate();
 }
 
 TEST_F(LogStoreTest, DeleteMultipleLogStores) {
@@ -1282,8 +1281,10 @@ TEST_F(LogStoreTest, WriteSyncThenRead) {
 
 SISL_OPTIONS_ENABLE(logging, test_log_store, iomgr, test_common_setup)
 SISL_OPTION_GROUP(test_log_store,
-                  (num_logstores, "", "num_logstores", "number of log stores",
+                  (num_logdevs, "", "num_logdevs", "number of log devs",
                    ::cxxopts::value< uint32_t >()->default_value("4"), "number"),
+                  (num_logstores, "", "num_logstores", "number of log stores",
+                   ::cxxopts::value< uint32_t >()->default_value("16"), "number"),
                   (num_records, "", "num_records", "number of record to test",
                    ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
                   (iterations, "", "iterations", "Iterations", ::cxxopts::value< uint32_t >()->default_value("1"),

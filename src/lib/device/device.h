@@ -173,6 +173,7 @@ public:
 
     std::vector< PhysicalDev* > get_pdevs_by_dev_type(HSDevType dtype) const;
     std::vector< shared< VirtualDev > > get_vdevs() const;
+    std::vector< shared< Chunk > > get_chunks() const;
 
     uint64_t total_capacity() const;
     uint64_t total_capacity(HSDevType dtype) const;

@@ -110,7 +110,8 @@ public:
      * @param cookie : Any cookie or context which will passed back in the callback
      * @param cb Callback upon completion which is called with the status, seq_num and cookie that was passed.
      */
-    void write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie, const log_write_comp_cb_t& cb);
+    void write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie, const log_write_comp_cb_t& cb,
+                     bool flush_wait = false);
 
     /**
      * @brief This method appends the blob into the log and it returns the generated seq number
@@ -209,6 +210,8 @@ public:
         const auto ts{m_safe_truncation_boundary.seq_num.load(std::memory_order_acquire)};
         return (ts == std::numeric_limits< logstore_seq_num_t >::max()) ? -1 : ts;
     }
+
+    sisl::StreamTracker< logstore_record >& log_records() { return m_records; }
 
     /**
      * @brief iterator to get all the log buffers;

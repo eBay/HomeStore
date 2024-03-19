@@ -17,6 +17,7 @@
 #include <map>
 #include <vector>
 
+#include <iomgr/iomgr_flip.hpp>
 #include <iomgr/iomgr.hpp>
 #include <sisl/fds/sparse_vector.hpp>
 #include <homestore/homestore_decl.hpp>
@@ -193,9 +194,13 @@ public:
         return (dinfo.dev_type == HSDevType::Fast) ? EXTRA_SB_SIZE_FOR_FAST_DEVICE : EXTRA_SB_SIZE_FOR_DATA_DEVICE;
     }
     static uint32_t max_chunks_in_pdev(const dev_info& dinfo) {
-        return (dinfo.dev_size - 1) /
-            ((dinfo.dev_type == HSDevType::Fast) ? MIN_CHUNK_SIZE_FAST_DEVICE : MIN_CHUNK_SIZE_DATA_DEVICE) +
-            1;
+        uint64_t min_chunk_size =
+            (dinfo.dev_type == HSDevType::Fast) ? MIN_CHUNK_SIZE_FAST_DEVICE : MIN_CHUNK_SIZE_DATA_DEVICE;
+#ifdef _PRERELEASE
+        auto chunk_size = iomgr_flip::instance()->get_test_flip< long >("set_minimum_chunk_size");
+        if (chunk_size) { min_chunk_size = chunk_size.get(); }
+#endif
+        return (dinfo.dev_size - 1) / min_chunk_size + 1;
     }
 };
 

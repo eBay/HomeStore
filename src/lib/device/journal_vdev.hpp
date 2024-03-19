@@ -239,12 +239,7 @@ public:
          *
          * @param offset : the start logical offset to be persisted
          */
-        void update_data_start_offset(off_t offset) {
-            m_data_start_offset = offset;
-            auto data_start_offset_aligned = sisl::round_down(m_data_start_offset, m_vdev.info().chunk_size);
-            m_end_offset = data_start_offset_aligned + m_journal_chunks.size() * m_vdev.info().chunk_size;
-            RELEASE_ASSERT_EQ(m_end_offset - data_start_offset_aligned, m_total_size, "offset size mismatch");
-        }
+        void update_data_start_offset(off_t offset);
 
         /**
          * @brief : get the logical tail offset;
@@ -309,11 +304,20 @@ public:
         uint64_t available_blks() const { return available_size() / m_vdev.block_size(); }
 
         /**
+         * @brief : Check if the offset_bytes lies at the last chunk.
+         *
+         * @return : check if last chunk or not.
+         */
+        bool is_offset_at_last_chunk(off_t offset_bytes);
+
+        /**
          * @brief Get the status of the journal vdev and its internal structures
          * @param log_level: Log level to do verbosity.
          * @return Json containing internal details
          */
         nlohmann::json get_status(int log_level) const;
+
+        logdev_id_t logdev_id() const { return m_logdev_id; }
 
         std::string to_string() const;
 
@@ -367,7 +371,7 @@ public:
         //                                off_t& offset_in_chunk) const;
 
         // Return the chunk, its index and offset in the chunk list.
-        std::tuple< shared< Chunk >, uint32_t, off_t > offset_to_chunk(off_t log_offset) const;
+        std::tuple< shared< Chunk >, uint32_t, off_t > offset_to_chunk(off_t log_offset, bool check = true) const;
 
         bool validate_append_size(size_t count) const;
 
@@ -415,7 +419,7 @@ private:
     // Cache the chunks. Getting a chunk from the pool causes a single write of the
     // last chunk in the list to update its end_of_chunk and next_chunk.
     std::unique_ptr< ChunkPool > m_chunk_pool;
-    std::shared_ptr< JournalChunkPrivate > init_private_data;
+    std::shared_ptr< JournalChunkPrivate > m_init_private_data;
 };
 
 } // namespace homestore

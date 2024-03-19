@@ -136,6 +136,7 @@ private:
     ChunkIntervalSet m_chunk_data_area;                 // Range of chunks data area created
     std::unique_ptr< sisl::Bitset > m_chunk_info_slots; // Slots to write the chunk info
     uint32_t m_chunk_sb_size{0};                        // Total size of the chunk sb at present
+    std::unordered_set< uint64_t > m_chunk_start;       // Store and verify start offset of all chunks for debugging.
 
 public:
     PhysicalDev(const dev_info& dinfo, int oflags, const pdev_info_header& pinfo);

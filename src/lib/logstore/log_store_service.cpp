@@ -60,6 +60,14 @@ folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, uin
     hs_vdev_context hs_ctx;
     hs_ctx.type = hs_vdev_type_t::LOGDEV_VDEV;
 
+#ifdef _PRERELEASE
+    auto min_size = iomgr_flip::instance()->get_test_flip< long >("set_minimum_chunk_size");
+    if (min_size) {
+        chunk_size = min_size.get();
+        LOGINFO("Flip set_minimum_chunk_size is enabled, min_chunk_size now is {}", chunk_size);
+    }
+#endif
+
     // reason we set alloc_type/chunk_sel_type here instead of by homestore logstore service consumer is because
     // consumer doesn't care or understands the underlying alloc/chunkSel for this service, if this changes in the
     // future, we can let consumer set it by then;
@@ -115,7 +123,6 @@ logdev_id_t LogStoreService::create_new_logdev() {
     auto logdev = create_new_logdev_internal(logdev_id);
     logdev->start(true /* format */, m_logdev_vdev.get());
     COUNTER_INCREMENT(m_metrics, logdevs_count, 1);
-    LOGINFO("Created log dev id {}", logdev_id);
     return logdev_id;
 }
 

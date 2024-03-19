@@ -35,9 +35,9 @@ namespace homestore {
 
 SISL_LOGGING_DECL(logstore)
 
-#define THIS_LOGDEV_LOG(level, msg, ...) HS_SUBMOD_LOG(level, logstore, , "logdev", m_logdev_id, msg, __VA_ARGS__)
+#define THIS_LOGDEV_LOG(level, msg, ...) HS_SUBMOD_LOG(level, logstore, , "log_dev", m_logdev_id, msg, __VA_ARGS__)
 #define THIS_LOGDEV_PERIODIC_LOG(level, msg, ...)                                                                      \
-    HS_PERIODIC_DETAILED_LOG(level, logstore, "logdev", m_logdev_id, , , msg, __VA_ARGS__)
+    HS_PERIODIC_DETAILED_LOG(level, logstore, "log_dev", m_logdev_id, , , msg, __VA_ARGS__)
 
 static bool has_data_service() { return HomeStore::instance()->has_data_service(); }
 // static BlkDataService& data_service() { return HomeStore::instance()->data_service(); }
@@ -87,12 +87,7 @@ void LogDev::start(bool format, JournalVirtualDev* vdev) {
         m_last_flush_idx = m_log_idx - 1;
     }
 
-    iomanager.run_on_wait(logstore_service().flush_thread(), [this]() {
-        m_flush_timer_hdl = iomanager.schedule_thread_timer(HS_DYNAMIC_CONFIG(logstore.flush_timer_frequency_us) * 1000,
-                                                            true /* recurring */, nullptr /* cookie */,
-                                                            [this](void*) { flush_if_needed(); });
-    });
-
+    start_timer();
     handle_unopened_log_stores(format);
 
     {
@@ -130,9 +125,7 @@ void LogDev::stop() {
         m_block_flush_q_cv.wait(lk, [&] { return m_stopped; });
     }
 
-    // cancel the timer
-    iomanager.run_on_wait(logstore_service().flush_thread(),
-                          [this]() { iomanager.cancel_timer(m_flush_timer_hdl, true); });
+    stop_timer();
 
     {
         folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);
@@ -158,12 +151,31 @@ void LogDev::stop() {
     m_hs.reset();
 }
 
+void LogDev::start_timer() {
+    // Currently only tests set it to 0.
+    if (HS_DYNAMIC_CONFIG(logstore.flush_timer_frequency_us) == 0) { return; }
+
+    iomanager.run_on_wait(logstore_service().flush_thread(), [this]() {
+        m_flush_timer_hdl = iomanager.schedule_thread_timer(HS_DYNAMIC_CONFIG(logstore.flush_timer_frequency_us) * 1000,
+                                                            true /* recurring */, nullptr /* cookie */,
+                                                            [this](void*) { flush_if_needed(); });
+    });
+}
+
+void LogDev::stop_timer() {
+    if (m_flush_timer_hdl != iomgr::null_timer_handle) {
+        // cancel the timer
+        iomanager.run_on_wait(logstore_service().flush_thread(),
+                              [this]() { iomanager.cancel_timer(m_flush_timer_hdl, true); });
+    }
+}
+
 void LogDev::do_load(const off_t device_cursor) {
     log_stream_reader lstream{device_cursor, m_vdev, m_vdev_jd, m_flush_size_multiple};
     logid_t loaded_from{-1};
     off_t group_dev_offset = 0;
 
-    THIS_LOGDEV_LOG(TRACE, "LogDev::do_load start {} ", m_logdev_id);
+    THIS_LOGDEV_LOG(TRACE, "LogDev::do_load start log_dev={} ", m_logdev_id);
 
     do {
         const auto buf = lstream.next_group(&group_dev_offset);
@@ -180,6 +192,7 @@ void LogDev::do_load(const off_t device_cursor) {
             break;
         }
 
+        THIS_LOGDEV_LOG(INFO, "Found log group header offset=0x{} header {}", to_hex(group_dev_offset), *header);
         HS_REL_ASSERT_EQ(header->start_idx(), m_log_idx.load(), "log indx is not the expected one");
         if (loaded_from == -1) { loaded_from = header->start_idx(); }
 
@@ -239,15 +252,16 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
 }
 
 int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, const sisl::io_blob& data,
-                             void* cb_context) {
+                             void* cb_context, bool flush_wait) {
     auto prev_size = m_pending_flush_size.fetch_add(data.size(), std::memory_order_relaxed);
     const auto idx = m_log_idx.fetch_add(1, std::memory_order_acq_rel);
     auto threshold_size = LogDev::flush_data_threshold_size();
     m_log_records->create(idx, store_id, seq_num, data, cb_context);
 
-    if (prev_size < threshold_size && ((prev_size + data.size()) >= threshold_size) &&
-        !m_is_flushing.load(std::memory_order_relaxed)) {
-        flush_if_needed();
+    if (flush_wait ||
+        ((prev_size < threshold_size && ((prev_size + data.size()) >= threshold_size) &&
+          !m_is_flushing.load(std::memory_order_relaxed)))) {
+        flush_if_needed(flush_wait ? 1 : -1);
     }
     return idx;
 }
@@ -257,11 +271,17 @@ log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_rec
     m_vdev_jd->sync_pread(buf->bytes(), initial_read_size, key.dev_offset);
 
     auto* header = r_cast< const log_group_header* >(buf->cbytes());
-    HS_REL_ASSERT_EQ(header->magic_word(), LOG_GROUP_HDR_MAGIC, "Log header corrupted with magic mismatch!");
-    HS_REL_ASSERT_EQ(header->get_version(), log_group_header::header_version, "Log header version mismatch!");
-    HS_REL_ASSERT_LE(header->start_idx(), key.idx, "log key offset does not match with log_idx");
-    HS_REL_ASSERT_GT((header->start_idx() + header->nrecords()), key.idx, "log key offset does not match with log_idx");
-    HS_LOG_ASSERT_GE(header->total_size(), header->_inline_data_offset(), "Inconsistent size data in log group");
+    // THIS_LOGDEV_LOG(TRACE, "Logdev read log group header {}", *header);
+    HS_REL_ASSERT_EQ(header->magic_word(), LOG_GROUP_HDR_MAGIC, "Log header corrupted with magic mismatch! {} {}",
+                     m_logdev_id, *header);
+    HS_REL_ASSERT_EQ(header->get_version(), log_group_header::header_version, "Log header version mismatch!  {} {}",
+                     m_logdev_id, *header);
+    HS_REL_ASSERT_LE(header->start_idx(), key.idx, "log key offset does not match with log_idx {} }{}", m_logdev_id,
+                     *header);
+    HS_REL_ASSERT_GT((header->start_idx() + header->nrecords()), key.idx,
+                     "log key offset does not match with log_idx {} {}", m_logdev_id, *header);
+    HS_LOG_ASSERT_GE(header->total_size(), header->_inline_data_offset(), "Inconsistent size data in log group {} {}",
+                     m_logdev_id, *header);
 
     // We can only do crc match in read if we have read all the blocks. We don't want to aggressively read more data
     // than we need to just to compare CRC for read operation. It can be done during recovery.
@@ -336,7 +356,7 @@ LogGroup* LogDev::prepare_flush(const int32_t estimated_records) {
                                                  }
                                              });
 
-    lg->finish(get_prev_crc());
+    lg->finish(m_logdev_id, get_prev_crc());
     if (sisl_unlikely(flushing_upto_idx == -1)) { return nullptr; }
     lg->m_flush_log_idx_from = m_last_flush_idx + 1;
     lg->m_flush_log_idx_upto = flushing_upto_idx;
@@ -345,7 +365,6 @@ LogGroup* LogDev::prepare_flush(const int32_t estimated_records) {
     HS_DBG_ASSERT_GT(lg->header()->oob_data_offset, 0);
 
     THIS_LOGDEV_LOG(DEBUG, "Flushing upto log_idx={}", flushing_upto_idx);
-    THIS_LOGDEV_LOG(DEBUG, "Log Group: {}", *lg);
     return lg;
 }
 
@@ -371,7 +390,8 @@ bool LogDev::flush_if_needed(int64_t threshold_size) {
     if (flush_by_size || flush_by_time) {
         // First off, check if we can flush in this thread itself, if not, schedule it into different thread
         if (!can_flush_in_this_thread()) {
-            iomanager.run_on_forget(logstore_service().flush_thread(), [this]() { flush_if_needed(); });
+            iomanager.run_on_forget(logstore_service().flush_thread(),
+                                    [this, threshold_size]() { flush_if_needed(threshold_size); });
             return false;
         }
 
@@ -406,8 +426,9 @@ bool LogDev::flush_if_needed(int64_t threshold_size) {
         off_t offset = m_vdev_jd->alloc_next_append_blk(lg->header()->total_size());
         lg->m_log_dev_offset = offset;
         HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
-        THIS_LOGDEV_LOG(TRACE, "Flush prepared, flushing data size={} at offset={}", lg->actual_data_size(), offset);
-
+        THIS_LOGDEV_LOG(TRACE, "Flushing log group data size={} at offset=0x{} log_group={}", lg->actual_data_size(),
+                        to_hex(offset), *lg);
+        // THIS_LOGDEV_LOG(DEBUG, "Log Group: {}", *lg);
         do_flush(lg);
         return true;
     } else {
@@ -508,8 +529,8 @@ void LogDev::unlock_flush(bool do_flush) {
             }
             if (!cb()) {
                 // NOTE: Under this if condition DO NOT ASSUME flush lock is still being held. This is because
-                // callee is saying, I will unlock the flush lock on my own and before returning from cb to here, the
-                // callee could have schedule a job in other thread and unlock the flush.
+                // callee is saying, I will unlock the flush lock on my own and before returning from cb to here,
+                // the callee could have schedule a job in other thread and unlock the flush.
                 std::unique_lock lk{m_block_flush_q_mutex};
                 THIS_LOGDEV_LOG(DEBUG,
                                 "flush cb wanted to hold onto the flush lock, so putting the {} remaining entries back "
@@ -539,14 +560,14 @@ void LogDev::unlock_flush(bool do_flush) {
 uint64_t LogDev::truncate(const logdev_key& key) {
     HS_DBG_ASSERT_GE(key.idx, m_last_truncate_idx);
     uint64_t const num_records_to_truncate = static_cast< uint64_t >(key.idx - m_last_truncate_idx);
-    LOGINFO("LogDev::truncate {}", num_records_to_truncate);
+    THIS_LOGDEV_LOG(DEBUG, "LogDev::truncate num {} idx {}", num_records_to_truncate, key.idx);
     if (num_records_to_truncate > 0) {
         HS_PERIODIC_LOG(INFO, logstore,
-                        "Truncating log device upto logdev {} log_id={} vdev_offset={} truncated {} log records",
+                        "Truncating log device upto log_dev={} log_id={} vdev_offset={} truncated {} log records",
                         m_logdev_id, key.idx, key.dev_offset, num_records_to_truncate);
         m_log_records->truncate(key.idx);
         m_vdev_jd->truncate(key.dev_offset);
-        LOGINFO("LogDev::truncate {}", key.idx);
+        THIS_LOGDEV_LOG(DEBUG, "LogDev::truncate done {} ", key.idx);
         m_last_truncate_idx = key.idx;
 
         {
@@ -562,8 +583,8 @@ uint64_t LogDev::truncate(const logdev_key& key) {
             for (auto it{std::cbegin(m_garbage_store_ids)}; it != std::cend(m_garbage_store_ids);) {
                 if (it->first > key.idx) break;
 
-                HS_PERIODIC_LOG(INFO, logstore, "Garbage collecting the log store id {} log_idx={}", it->second,
-                                it->first);
+                HS_PERIODIC_LOG(DEBUG, logstore, "Garbage collecting the log_dev={} log_store={} log_idx={}",
+                                m_logdev_id, it->second, it->first);
                 m_logdev_meta.unreserve_store(it->second, false /* persist_now */);
                 it = m_garbage_store_ids.erase(it);
 #ifdef _PRERELEASE
@@ -573,11 +594,11 @@ uint64_t LogDev::truncate(const logdev_key& key) {
 
             // We can remove the rollback records of those upto which logid is getting truncated
             m_logdev_meta.remove_rollback_record_upto(key.idx, false /* persist_now */);
-            LOGINFO("LogDev::truncate remove rollback {}", key.idx);
+            THIS_LOGDEV_LOG(DEBUG, "LogDev::truncate remove rollback {}", key.idx);
             m_logdev_meta.persist();
 #ifdef _PRERELEASE
             if (garbage_collect && iomgr_flip::instance()->test_flip("logdev_abort_after_garbage")) {
-                LOGINFO("logdev aborting after unreserving garbage ids");
+                THIS_LOGDEV_LOG(INFO, "logdev aborting after unreserving garbage ids");
                 raise(SIGKILL);
             }
 #endif
@@ -604,9 +625,9 @@ void LogDev::handle_unopened_log_stores(bool format) {
     }
     m_unopened_store_io.clear();
 
-    // If there are any unopened storeids found, loop and check again if they are indeed open later. Unopened log store
-    // could be possible if the ids are deleted, but it is delayed to remove from store id reserver. In that case,
-    // do the remove from store id reserver now.
+    // If there are any unopened storeids found, loop and check again if they are indeed open later. Unopened log
+    // store could be possible if the ids are deleted, but it is delayed to remove from store id reserver. In that
+    // case, do the remove from store id reserver now.
     // TODO: At present we are assuming all unopened store ids could be removed. In future have a callback to this
     // start routine, which takes the list of unopened store ids and can return a new set, which can be removed.
     {
@@ -632,7 +653,7 @@ std::shared_ptr< HomeLogStore > LogDev::create_new_log_store(bool append_mode) {
         HS_REL_ASSERT((it == m_id_logstore_map.end()), "store_id {}-{} already exists", m_logdev_id, store_id);
         m_id_logstore_map.insert(std::pair(store_id, logstore_info{.log_store = lstore, .append_mode = append_mode}));
     }
-    LOGINFO("Created log store id {}-{}", m_logdev_id, store_id);
+    LOGINFO("Created log store log_dev={} log_store={}", m_logdev_id, store_id);
     return lstore;
 }
 
@@ -652,7 +673,7 @@ folly::Future< shared< HomeLogStore > > LogDev::open_log_store(logstore_id_t sto
 }
 
 void LogDev::remove_log_store(logstore_id_t store_id) {
-    LOGINFO("Removing log store id {}-{}", m_logdev_id, store_id);
+    LOGINFO("Removing log_dev={} log_store={}", m_logdev_id, store_id);
     {
         folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);
         auto ret = m_id_logstore_map.erase(store_id);
@@ -696,8 +717,8 @@ void LogDev::on_log_store_found(logstore_id_t store_id, const logstore_superblk&
         return;
     }
 
-    LOGINFO("Found a logstore store_id={}-{} with start seq_num={}, Creating a new HomeLogStore instance", m_logdev_id,
-            store_id, sb.m_first_seq_num);
+    LOGINFO("Found a logstore log_dev={} log_store={} with start seq_num={}, Creating a new HomeLogStore instance",
+            m_logdev_id, store_id, sb.m_first_seq_num);
     logstore_info& info = it->second;
     info.log_store =
         std::make_shared< HomeLogStore >(shared_from_this(), store_id, info.append_mode, sb.m_first_seq_num);
@@ -808,10 +829,10 @@ logdev_key LogDev::do_device_truncate(bool dry_run) {
     }
 
     if ((min_safe_ld_key == logdev_key::out_of_bound_ld_key()) || (min_safe_ld_key.idx < 0)) {
-        HS_PERIODIC_LOG(
-            INFO, logstore,
-            "[Logdev={}] No log store append on any log stores, skipping device truncation, all_logstore_info:<{}>",
-            m_logdev_id, dbg_str);
+        HS_PERIODIC_LOG(INFO, logstore,
+                        "[log_dev={}] No log store append on any log stores, skipping device truncation, "
+                        "all_logstore_info:<{}>",
+                        m_logdev_id, dbg_str);
         return min_safe_ld_key;
     }
 
@@ -820,7 +841,7 @@ logdev_key LogDev::do_device_truncate(bool dry_run) {
     // Got the safest log id to truncate and actually truncate upto the safe log idx to the log device
     if (!dry_run) { truncate(min_safe_ld_key); }
     HS_PERIODIC_LOG(INFO, logstore,
-                    "[Logdev={}] LogDevice truncate, all_logstore_info:<{}> safe log dev key to truncate={}",
+                    "[log_dev={}] LogDevice truncate, all_logstore_info:<{}> safe log dev key to truncate={}",
                     m_logdev_id, dbg_str, min_safe_ld_key);
 
     // We call post device truncation only to the log stores whose prepared truncation points are fully
@@ -1064,7 +1085,7 @@ void LogDevMetadata::remove_rollback_record_upto(logid_t upto_id, bool persist_n
     uint32_t n_removed{0};
     for (auto i = m_rollback_sb->num_records; i > 0; --i) {
         auto& rec = m_rollback_sb->at(i - 1);
-        LOGINFO("Removing record sb {} {}", rec.idx_range.second, upto_id);
+        HS_LOG(TRACE, logstore, "Removing record sb {} {}", rec.idx_range.second, upto_id);
         if (rec.idx_range.second <= upto_id) {
             m_rollback_sb->remove_ith_record(i - 1);
             ++n_removed;
@@ -1073,7 +1094,7 @@ void LogDevMetadata::remove_rollback_record_upto(logid_t upto_id, bool persist_n
 
     if (n_removed) {
         for (auto it = m_rollback_info.begin(); it != m_rollback_info.end();) {
-            LOGINFO("Removing info {} {}", it->second.second, upto_id);
+            HS_LOG(TRACE, logstore, "Removing info {} {}", it->second.second, upto_id);
             if (it->second.second <= upto_id) {
                 it = m_rollback_info.erase(it);
             } else {

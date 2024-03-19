@@ -28,9 +28,9 @@
 namespace homestore {
 SISL_LOGGING_DECL(logstore)
 
-#define THIS_LOGSTORE_LOG(level, msg, ...) HS_SUBMOD_LOG(level, logstore, , "store", m_fq_name, msg, __VA_ARGS__)
+#define THIS_LOGSTORE_LOG(level, msg, ...) HS_SUBMOD_LOG(level, logstore, , "log_store", m_fq_name, msg, __VA_ARGS__)
 #define THIS_LOGSTORE_PERIODIC_LOG(level, msg, ...)                                                                    \
-    HS_PERIODIC_DETAILED_LOG(level, logstore, "store", m_fq_name, , , msg, __VA_ARGS__)
+    HS_PERIODIC_DETAILED_LOG(level, logstore, "log_store", m_fq_name, , , msg, __VA_ARGS__)
 
 HomeLogStore::HomeLogStore(std::shared_ptr< LogDev > logdev, logstore_id_t id, bool append_mode,
                            logstore_seq_num_t start_lsn) :
@@ -39,7 +39,7 @@ HomeLogStore::HomeLogStore(std::shared_ptr< LogDev > logdev, logstore_id_t id, b
         m_records{"HomeLogStoreRecords", start_lsn - 1},
         m_append_mode{append_mode},
         m_seq_num{start_lsn},
-        m_fq_name{fmt::format("{}.{}", logdev->get_id(), id)},
+        m_fq_name{fmt::format("{} log_dev={}", id, logdev->get_id())},
         m_metrics{logstore_service().metrics()} {
     m_truncation_barriers.reserve(10000);
     m_safe_truncation_boundary.ld_key = m_logdev->get_last_flush_ld_key();
@@ -57,18 +57,19 @@ bool HomeLogStore::write_sync(logstore_seq_num_t seq_num, const sisl::io_blob& b
         bool ret{false};
     };
     auto ctx = std::make_shared< Context >();
-    this->write_async(seq_num, b, nullptr,
-                      [seq_num, this, ctx](homestore::logstore_seq_num_t seq_num_cb,
-                                           [[maybe_unused]] const sisl::io_blob& b, homestore::logdev_key ld_key,
-                                           [[maybe_unused]] void* cb_ctx) {
-                          HS_DBG_ASSERT((ld_key && seq_num == seq_num_cb), "Write_Async failed or corrupted");
-                          {
-                              std::unique_lock< std::mutex > lk{ctx->write_mutex};
-                              ctx->write_done = true;
-                              ctx->ret = true;
-                          }
-                          ctx->write_cv.notify_one();
-                      });
+    this->write_async(
+        seq_num, b, nullptr,
+        [seq_num, this, ctx](homestore::logstore_seq_num_t seq_num_cb, [[maybe_unused]] const sisl::io_blob& b,
+                             homestore::logdev_key ld_key, [[maybe_unused]] void* cb_ctx) {
+            HS_DBG_ASSERT((ld_key && seq_num == seq_num_cb), "Write_Async failed or corrupted");
+            {
+                std::unique_lock< std::mutex > lk{ctx->write_mutex};
+                ctx->write_done = true;
+                ctx->ret = true;
+            }
+            ctx->write_cv.notify_one();
+        },
+        true /* flush_wait */);
 
     {
         std::unique_lock< std::mutex > lk{ctx->write_mutex};
@@ -95,14 +96,15 @@ void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     m_records.create(req->seq_num);
     COUNTER_INCREMENT(m_metrics, logstore_append_count, 1);
     HISTOGRAM_OBSERVE(m_metrics, logstore_record_size, req->data.size());
-    m_logdev->append_async(m_store_id, req->seq_num, req->data, static_cast< void* >(req));
+    m_logdev->append_async(m_store_id, req->seq_num, req->data, static_cast< void* >(req), req->flush_wait);
 }
 
 void HomeLogStore::write_async(logstore_seq_num_t seq_num, const sisl::io_blob& b, void* cookie,
-                               const log_write_comp_cb_t& cb) {
+                               const log_write_comp_cb_t& cb, bool flush_wait) {
     // Form an internal request and issue the write
     auto* req = logstore_req::make(this, seq_num, b, true /* is_write_req */);
     req->cookie = cookie;
+    req->flush_wait = flush_wait;
 
     write_async(req, [cb](logstore_req* req, logdev_key written_lkey) {
         if (cb) { cb(req->seq_num, req->data, written_lkey, req->cookie); }
@@ -121,7 +123,7 @@ log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
     // If seq_num has not been flushed yet, but issued, then we flush them before reading
     auto const s = m_records.status(seq_num);
     if (s.is_out_of_range || s.is_hole) {
-        // THIS_LOGSTORE_LOG(DEBUG, "ld_key not valid {}", seq_num);
+        // THIS_LOGSTORE_LOG(ERROR, "ld_key not valid {}", seq_num);
         throw std::out_of_range("key not valid");
     } else if (!s.is_completed) {
         THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} before flushed, doing flush first", m_store_id, seq_num);
