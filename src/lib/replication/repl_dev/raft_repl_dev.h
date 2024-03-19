@@ -116,6 +116,8 @@ public:
     uint32_t get_blk_size() const override;
     repl_lsn_t get_last_commit_lsn() const { return m_commit_upto_lsn.load(); }
 
+    // void truncate_if_needed() override;
+
     //////////////// Accessor/shortcut methods ///////////////////////
     nuraft_mesg::repl_service_ctx* group_msg_service();
     nuraft::raft_server* raft_server();

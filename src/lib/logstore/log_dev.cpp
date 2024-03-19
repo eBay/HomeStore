@@ -662,25 +662,27 @@ void LogDev::remove_log_store(logstore_id_t store_id) {
 }
 
 void LogDev::device_truncate_under_lock(const std::shared_ptr< truncate_req >& treq) {
-    run_under_flush_lock([this, treq]() {
-        iomanager.run_on_forget(logstore_service().truncate_thread(), [this, treq]() {
-            const logdev_key trunc_upto = do_device_truncate(treq->dry_run);
-            bool done{false};
-            if (treq->cb || treq->wait_till_done) {
-                {
-                    std::lock_guard< std::mutex > lk{treq->mtx};
-                    done = (--treq->trunc_outstanding == 0);
-                    treq->m_trunc_upto_result[m_logdev_id] = trunc_upto;
+    if (m_vdev_jd->ready_for_truncate()) {
+        run_under_flush_lock([this, treq]() {
+            iomanager.run_on_forget(logstore_service().truncate_thread(), [this, treq]() {
+                const logdev_key trunc_upto = do_device_truncate(treq->dry_run);
+                bool done{false};
+                if (treq->cb || treq->wait_till_done) {
+                    {
+                        std::lock_guard< std::mutex > lk{treq->mtx};
+                        done = (--treq->trunc_outstanding == 0);
+                        treq->m_trunc_upto_result[m_logdev_id] = trunc_upto;
+                    }
                 }
-            }
-            if (done) {
-                if (treq->cb) { treq->cb(treq->m_trunc_upto_result); }
-                if (treq->wait_till_done) { treq->cv.notify_one(); }
-            }
-            unlock_flush();
+                if (done) {
+                    if (treq->cb) { treq->cb(treq->m_trunc_upto_result); }
+                    if (treq->wait_till_done) { treq->cv.notify_one(); }
+                }
+                unlock_flush();
+            });
+            return false; // Do not release the flush lock yet, the scheduler will unlock it.
         });
-        return false; // Do not release the flush lock yet, the scheduler will unlock it.
-    });
+    }
 }
 
 void LogDev::on_log_store_found(logstore_id_t store_id, const logstore_superblk& sb) {
@@ -761,6 +763,12 @@ void LogDev::on_batch_completion(HomeLogStore* log_store, uint32_t nremaining_in
     }
 }
 
+uint32_t LogDev::get_reserved_log_truncation_idx() const {
+    // TODO: are there any holes between m_log_idx and m_last_truncate_idx;
+    auto const total_in_use_ids = m_log_idx.load() - m_last_truncate_idx;
+    return std::min(total_in_use_ids, HS_DYNAMIC_CONFIG(resource_limits.logdev_num_log_entries_threadhold));
+}
+
 logdev_key LogDev::do_device_truncate(bool dry_run) {
     static thread_local std::vector< std::shared_ptr< HomeLogStore > > m_min_trunc_stores;
     static thread_local std::vector< std::shared_ptr< HomeLogStore > > m_non_participating_stores;
@@ -806,6 +814,8 @@ logdev_key LogDev::do_device_truncate(bool dry_run) {
             m_logdev_id, dbg_str);
         return min_safe_ld_key;
     }
+
+    min_safe_ld_key = std::min(min_safe_ld_key.idx, get_reserved_log_truncation_idx());
 
     // Got the safest log id to truncate and actually truncate upto the safe log idx to the log device
     if (!dry_run) { truncate(min_safe_ld_key); }

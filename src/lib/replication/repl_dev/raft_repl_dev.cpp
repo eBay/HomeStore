@@ -881,4 +881,7 @@ void RaftReplDev::cp_flush(CP*) {
 }
 
 void RaftReplDev::cp_cleanup(CP*) {}
+#if 0
+void RaftReplDev::truncate_if_needed() { m_data_journal->truncate_if_needed(); }
+#endif
 } // namespace homestore
