@@ -106,7 +106,7 @@ void LogStoreService::start(bool format) {
 }
 
 void LogStoreService::stop() {
-    device_truncate(nullptr, true, false);
+    // device_truncate(nullptr, true, false);
     for (auto& [id, logdev] : m_id_logdev_map) {
         logdev->stop();
     }
@@ -238,6 +238,7 @@ void LogStoreService::device_truncate(const device_truncate_cb_t& cb, bool wait_
     for (auto& [id, logdev] : m_id_logdev_map) {
         logdev->device_truncate_under_lock(treq);
     }
+
     if (treq->wait_till_done) {
         std::unique_lock< std::mutex > lk{treq->mtx};
         treq->cv.wait(lk, [&] { return (treq->trunc_outstanding == 0); });

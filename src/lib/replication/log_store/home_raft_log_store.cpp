@@ -251,7 +251,7 @@ bool HomeRaftLogStore::compact(ulong compact_lsn) {
         }
     }
     m_log_store->flush_sync(to_store_lsn(compact_lsn));
-    m_log_store->truncate(to_store_lsn(compact_lsn));
+    // m_log_store->truncate(to_store_lsn(compact_lsn));
     return true;
 }
 

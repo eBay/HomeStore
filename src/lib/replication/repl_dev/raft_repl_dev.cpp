@@ -505,7 +505,7 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreq
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     if (rreqs.size() == 0) { return; }
 
-    std::vector< ::flatbuffers::Offset< RequestEntry > > entries;
+    std::vector<::flatbuffers::Offset< RequestEntry > > entries;
     entries.reserve(rreqs.size());
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
@@ -986,12 +986,14 @@ void RaftReplDev::report_committed(repl_req_ptr_t rreq) {
 }
 
 void RaftReplDev::cp_flush(CP*) {
-    auto lsn = m_commit_upto_lsn.load();
+    auto const lsn = m_commit_upto_lsn.load();
+    auto const clsn = m_compact_lsn.load();
+
     if (lsn == m_last_flushed_commit_lsn) {
         // Not dirtied since last flush ignore
         return;
     }
-
+    m_rd_sb->compact_lsn = clsn;
     m_rd_sb->commit_lsn = lsn;
     m_rd_sb->checkpoint_lsn = lsn;
     m_rd_sb->last_applied_dsn = m_next_dsn.load();

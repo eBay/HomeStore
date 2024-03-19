@@ -14,13 +14,33 @@
  *
  *********************************************************************************/
 #include <homestore/homestore.hpp>
+#include <homestore/logstore_service.hpp>
 #include "resource_mgr.hpp"
 #include "homestore_assert.hpp"
 
 namespace homestore {
 ResourceMgr& resource_mgr() { return hs()->resource_mgr(); }
 
-void ResourceMgr::set_total_cap(uint64_t total_cap) { m_total_cap = total_cap; }
+void ResourceMgr::start(uint64_t total_cap) {
+    m_total_cap = total_cap;
+    start_timer();
+}
+
+void ResourceMgr::start_timer() {
+    auto const res_mgr_timer_ms = HS_DYNAMIC_CONFIG(resource_limits.resource_audit_timer_ms);
+    LOGINFO("resource audit timer is set to {} usec", res_mgr_timer_ms);
+
+    m_res_audit_timer_hdl = iomanager.schedule_global_timer(
+        res_mgr_timer_ms * 1000 * 1000, true /* recurring */, nullptr /* cookie */, iomgr::reactor_regex::all_worker,
+        [this](void*) {
+            // all resource timely audit routine should arrive here;
+            hs()->logstore_service().device_truncate();
+
+            // TODO: add device_truncate callback to audit how much space was freed per each LogDev and add related
+            // metrics;
+        },
+        true /* wait_to_schedule */);
+}
 
 /* monitor dirty buffer count */
 void ResourceMgr::inc_dirty_buf_size(const uint32_t size) {
@@ -28,7 +48,7 @@ void ResourceMgr::inc_dirty_buf_size(const uint32_t size) {
     const auto dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_add(size, std::memory_order_relaxed);
     COUNTER_INCREMENT(m_metrics, dirty_buf_cnt, size);
     if (m_dirty_buf_exceed_cb && ((dirty_buf_cnt + size) > get_dirty_buf_limit())) {
-        m_dirty_buf_exceed_cb(dirty_buf_cnt + size);
+        m_dirty_buf_exceed_cb(dirty_buf_cnt + size, false /* critical */);
     }
 }
 
@@ -106,22 +126,37 @@ uint64_t ResourceMgr::get_cache_size() const {
     return ((HS_STATIC_CONFIG(input.io_mem_size()) * HS_DYNAMIC_CONFIG(resource_limits.cache_size_percent)) / 100);
 }
 
-/* monitor journal size */
-bool ResourceMgr::check_journal_size(const uint64_t used_size, const uint64_t total_size) {
-    if (m_journal_exceed_cb) {
+bool ResourceMgr::check_journal_descriptor_size(const uint64_t used_size) const {
+    return (used_size >= get_journal_descriptor_size_limit());
+}
+
+/* monitor journal vdev size */
+bool ResourceMgr::check_journal_vdev_size(const uint64_t used_size, const uint64_t total_size) {
+    if (m_journal_vdev_exceed_cb) {
         const uint32_t used_pct = (100 * used_size / total_size);
-        if (used_pct >= HS_DYNAMIC_CONFIG(resource_limits.journal_size_percent)) {
-            m_journal_exceed_cb(used_size);
+        if (used_pct >= get_journal_vdev_size_limit()) {
+            m_journal_vdev_exceed_cb(used_size, used_pct >= get_journal_vdev_size_critical_limit() /* is_critical */);
             HS_LOG_EVERY_N(WARN, base, 50, "high watermark hit, used percentage: {}, high watermark percentage: {}",
-                           used_pct, HS_DYNAMIC_CONFIG(resource_limits.journal_size_percent));
+                           used_pct, get_journal_vdev_size_limit());
             return true;
         }
     }
     return false;
 }
-void ResourceMgr::register_journal_exceed_cb(exceed_limit_cb_t cb) { m_journal_exceed_cb = std::move(cb); }
 
-uint32_t ResourceMgr::get_journal_size_limit() const { return HS_DYNAMIC_CONFIG(resource_limits.journal_size_percent); }
+void ResourceMgr::register_journal_vdev_exceed_cb(exceed_limit_cb_t cb) { m_journal_vdev_exceed_cb = std::move(cb); }
+
+uint32_t ResourceMgr::get_journal_descriptor_size_limit() const {
+    return HS_DYNAMIC_CONFIG(resource_limits.journal_descriptor_size_threshold_mb) * 1024 * 1024;
+}
+
+uint32_t ResourceMgr::get_journal_vdev_size_critical_limit() const {
+    return HS_DYNAMIC_CONFIG(resource_limits.journal_vdev_size_percent_critical);
+}
+
+uint32_t ResourceMgr::get_journal_vdev_size_limit() const {
+    return HS_DYNAMIC_CONFIG(resource_limits.journal_vdev_size_percent);
+}
 
 /* monitor chunk size */
 void ResourceMgr::check_chunk_free_size_and_trigger_cp(uint64_t free_size, uint64_t alloc_size) {}

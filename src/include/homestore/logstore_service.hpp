@@ -158,6 +158,8 @@ public:
     uint32_t used_size() const;
     uint32_t total_size() const;
     iomgr::io_fiber_t flush_thread() { return m_flush_fiber; }
+
+    // called by LogDev truncate;
     iomgr::io_fiber_t truncate_thread() { return m_truncate_fiber; }
 
 private:

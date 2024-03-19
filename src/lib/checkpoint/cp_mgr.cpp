@@ -37,7 +37,7 @@ CPManager::CPManager() :
         nullptr);
 
     resource_mgr().register_dirty_buf_exceed_cb(
-        [this]([[maybe_unused]] int64_t dirty_buf_count) { this->trigger_cp_flush(false /* false */); });
+        [this]([[maybe_unused]] int64_t dirty_buf_count, bool critical) { this->trigger_cp_flush(false /* force */); });
 
     start_cp_thread();
 }
