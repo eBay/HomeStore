@@ -57,8 +57,6 @@ public:
     hs_stats get_cap_stats() const override;
     replica_id_t get_my_repl_uuid() const { return m_my_uuid; }
 
-    // void resource_audit() override;
-
 protected:
     virtual void add_repl_dev(group_id_t group_id, shared< ReplDev > rdev);
     virtual void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) = 0;
