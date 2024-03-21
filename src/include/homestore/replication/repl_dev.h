@@ -92,6 +92,7 @@ public:
     //////////////// Replication state related section /////////////////
     std::mutex state_mtx;
     std::atomic< uint32_t > state{uint32_cast(repl_req_state_t::INIT)}; // State of the replication request
+    folly::Promise< folly::Unit > data_received_promise;                // Promise to be fulfilled when data is received
     folly::Promise< folly::Unit > data_written_promise;                 // Promise to be fulfilled when data is written
 
     //////////////// Communication packet/builder section /////////////////

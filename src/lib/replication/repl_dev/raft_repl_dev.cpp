@@ -8,6 +8,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <sisl/grpc/generic_service.hpp>
 #include <sisl/grpc/rpc_client.hpp>
+#include <sisl/fds/vector_pool.hpp>
 #include <homestore/blkdata_service.hpp>
 #include <homestore/logstore_service.hpp>
 #include <homestore/superblk_handler.hpp>
@@ -178,7 +179,8 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq) {
 
     group_msg_service()
         ->data_service_request_unidirectional(nuraft_mesg::role_regex::ALL, PUSH_DATA, rreq->pkts)
-        .deferValue([this, rreq = std::move(rreq)](auto e) {
+        .via(&folly::InlineExecutor::instance())
+        .thenValue([this, rreq = std::move(rreq)](auto e) {
             if (e.hasError()) {
                 RD_LOG(ERROR, "Data Channel: Error in pushing data to all followers: rreq=[{}] error={}",
                        rreq->to_compact_string(), e.error());
@@ -269,13 +271,15 @@ void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err)
     auto s = rreq->state.load();
     if ((s & uint32_cast(repl_req_state_t::ERRORED)) ||
         !(rreq->state.compare_exchange_strong(s, s | uint32_cast(repl_req_state_t::ERRORED)))) {
-        RD_LOG(ERROR, "Raft Channel: Error in processing rreq=[{}] error={} already errored", rreq->to_compact_string(),
-               err);
+        RD_LOG(ERROR, "Raft Channel: Error in processing rreq=[{}] error={} already errored", rreq->to_string(), err);
         return;
     }
 
+    // Remove from the map and thus its no longer accessible from applier_create_req
+    m_repl_key_req_map.erase(rreq->rkey);
+
     // Free the blks which is allocated already
-    RD_LOG(ERROR, "Raft Channel: Error in processing rreq=[{}] error={}", rreq->to_compact_string(), err);
+    RD_LOG(ERROR, "Raft Channel: Error in processing rreq=[{}] error={}", rreq->to_string(), err);
     if (rreq->state.load() & uint32_cast(repl_req_state_t::BLK_ALLOCATED)) {
         auto blkid = rreq->local_blkid;
         data_service().async_free_blk(blkid).thenValue([blkid](auto&& err) {
@@ -284,7 +288,7 @@ void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err)
     }
 
     HS_DBG_ASSERT(!(rreq->state.load() & uint32_cast(repl_req_state_t::LOG_FLUSHED)),
-                  "Unexpected state, received error after log is flushed for rreq=[{}]", rreq->to_compact_string());
+                  "Unexpected state, received error after log is flushed for rreq=[{}]", rreq->to_string());
 
     if (rreq->is_proposer) {
         // Notify the proposer about the error
@@ -309,7 +313,7 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
         flatbuffers::ReadScalar< flatbuffers::uoffset_t >(incoming_buf.cbytes()) + sizeof(flatbuffers::uoffset_t);
     auto push_req = GetSizePrefixedPushDataRequest(incoming_buf.cbytes());
     sisl::blob header = sisl::blob{push_req->user_header()->Data(), push_req->user_header()->size()};
-    sisl::blob key = sisl::blob{push_req->user_key()->Data(), push_req->user_key()->size()};
+    // sisl::blob key = sisl::blob{push_req->user_key()->Data(), push_req->user_key()->size()};
     repl_key rkey{.server_id = push_req->issuer_replica_id(), .term = push_req->raft_term(), .dsn = push_req->dsn()};
 
 #ifdef _PRERELEASE
@@ -321,7 +325,7 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
     }
 #endif
 
-    auto rreq = applier_create_req(rkey, header, key, push_req->data_size(), true /* is_data_channel */);
+    auto rreq = applier_create_req(rkey, header, push_req->data_size(), true /* is_data_channel */);
     if (rreq == nullptr) {
         RD_LOG(ERROR,
                "Data Channel: Creating rreq on applier has failed, will ignore the push and let Raft channel send "
@@ -366,6 +370,8 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
                 RD_LOG(DEBUG, "Data Channel: Data Write completed rreq=[{}]", rreq->to_compact_string());
             }
         });
+
+    rreq->data_received_promise.setValue();
 }
 
 static bool blob_equals(sisl::blob const& a, sisl::blob const& b) {
@@ -379,8 +385,7 @@ repl_req_ptr_t RaftReplDev::repl_key_to_req(repl_key const& rkey) const {
     return it->second;
 }
 
-repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, sisl::blob const& user_header,
-                                               sisl::blob const& user_key, uint32_t data_size,
+repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, sisl::blob const& user_header, uint32_t data_size,
                                                [[maybe_unused]] bool is_data_channel) {
     auto const [it, happened] = m_repl_key_req_map.try_emplace(rkey, repl_req_ptr_t(new repl_req_ctx()));
     RD_DBG_ASSERT((it != m_repl_key_req_map.end()), "Unexpected error in map_repl_key_to_req");
@@ -389,8 +394,6 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, sisl::blob 
     // There is no data portion, so there is not requied to allocate
     if (data_size == 0) {
         rreq->rkey = rkey;
-        rreq->header = user_header;
-        rreq->key = user_key;
         rreq->value_inlined = true;
         return rreq;
     }
@@ -400,9 +403,9 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, sisl::blob 
         // case we need to return the req.
         if (rreq->state.load() & uint32_cast(repl_req_state_t::BLK_ALLOCATED)) {
             // Do validation if we have the correct mapping
-            RD_REL_ASSERT(blob_equals(user_header, rreq->header), "User header mismatch for repl_key={}",
-                          rkey.to_string());
-            RD_REL_ASSERT(blob_equals(user_key, rreq->key), "User key mismatch for repl_key={}", rkey.to_string());
+            // RD_REL_ASSERT(blob_equals(user_header, rreq->header), "User header mismatch for repl_key={}",
+            //              rkey.to_string());
+            // RD_REL_ASSERT(blob_equals(user_key, rreq->key), "User key mismatch for repl_key={}", rkey.to_string());
             RD_LOG(DEBUG, "Repl_key=[{}] already received  ", rkey.to_string());
             return rreq;
         }
@@ -444,8 +447,6 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, sisl::blob 
     }
 
     rreq->rkey = rkey;
-    rreq->header = user_header;
-    rreq->key = user_key;
     rreq->value_inlined = false;
     rreq->is_jentry_localize_pending = true; // Journal entry needs to be localized
     rreq->state.fetch_or(uint32_cast(repl_req_state_t::BLK_ALLOCATED));
@@ -457,7 +458,7 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, sisl::blob 
 
 static auto get_max_data_fetch_size() { return HS_DYNAMIC_CONFIG(consensus.data_fetch_max_size_kb) * 1024ull; }
 
-void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t > const& rreqs) {
+void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreqs) {
     auto total_size_to_fetch = 0ul;
     std::vector< repl_req_ptr_t > next_batch_rreqs;
     auto const max_batch_size = get_max_data_fetch_size();
@@ -542,6 +543,17 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
                        "Not able to fetching data from originator={}, error={}, probably originator is down. Will "
                        "retry when new leader start appending log entries",
                        rreqs.front()->remote_blkid.server_id, e.error());
+                for (auto const& rreq : rreqs) {
+                    // TODO: Set the data_received promise with error, so that waiting threads can be unblocked and
+                    // reject the request. Without that, it will timeout and then reject it.
+
+                    // We could have get to a scenario, where didn't receive the data at the time of fetch, but we
+                    // received after issuing fetch and that leader has already switched. In this case, we don't want to
+                    // fail the request.
+                    if (!(rreq->state.load() & uint32_cast(repl_req_state_t::DATA_RECEIVED))) {
+                        handle_error(rreq, RaftReplService::to_repl_error(e.error()));
+                    }
+                }
                 COUNTER_INCREMENT(m_metrics, fetch_err_cnt, 1);
                 return;
             }
@@ -562,7 +574,8 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
             for (auto const& rreq : rreqs) {
                 auto const data_size = rreq->remote_blkid.blkid.blk_count() * get_blk_size();
                 // if data is already received, skip it because someone is already doing the write;
-                if (rreq->state.load() & uint32_cast(repl_req_state_t::DATA_RECEIVED)) {
+                if (rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_RECEIVED)) &
+                    uint32_cast(repl_req_state_t::DATA_RECEIVED)) {
                     // very unlikely to arrive here, but if data got received during we fetch, let the data channel
                     // handle data written;
                     raw_data += data_size;
@@ -579,31 +592,13 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
                            rreq->to_compact_string());
                     continue;
                 } else {
-                    // aquire lock here to avoid two threads are trying to do the same thing;
-                    std::unique_lock< std::mutex > lg(rreq->state_mtx);
-                    if (rreq->state.load() & uint32_cast(repl_req_state_t::BLK_ALLOCATED)) {
-                        // if blk is already allocated, validate if blk is valid and size matches;
-                        RD_DBG_ASSERT(rreq->local_blkid.is_valid(), "Invalid blkid for rreq={}",
-                                      rreq->to_compact_string());
-                        auto const local_size = rreq->local_blkid.blk_count() * get_blk_size();
-                        RD_DBG_ASSERT_EQ(data_size, local_size,
-                                         "Data size mismatch for rreq={} blkid={}, remote size: {}, local size: {}",
-                                         rreq->to_compact_string(), rreq->local_blkid.to_string(), data_size,
-                                         local_size);
-                    } else {
-                        // TODO: Handle hints result not available or blk not allocated
-                        auto hints_result = m_listener->get_blk_alloc_hints(rreq->header, data_size);
-                        RD_REL_ASSERT(hints_result.hasValue(), "Failed to get hints for the blk alloc during fetch");
-
-                        auto const status =
-                            data_service().alloc_blks(sisl::round_up(data_size, data_service().get_blk_size()),
-                                                      hints_result.value(), rreq->local_blkid);
-                        RD_REL_ASSERT_EQ(status, BlkAllocStatus::SUCCESS, "alloc_blks returned null, no space left!");
-
-                        // we are about to write the data, so mark both blk allocated and data received;
-                        rreq->state.fetch_or(
-                            uint32_cast(repl_req_state_t::BLK_ALLOCATED | repl_req_state_t::DATA_RECEIVED));
-                    }
+                    // if blk is already allocated, validate if blk is valid and size matches;
+                    RD_DBG_ASSERT(rreq->local_blkid.is_valid(), "Invalid blkid for rreq={}", rreq->to_compact_string());
+                    RD_DBG_ASSERT_EQ(data_size, rreq->local_blkid.blk_count() * get_blk_size(),
+                                     "Data size mismatch for rreq={} blkid={}, remote size: {}, local size: {}",
+                                     rreq->to_compact_string(), rreq->local_blkid.to_string(), data_size,
+                                     rreq->local_blkid.blk_count() * get_blk_size());
+                    rreq->data_received_promise.setValue();
                 }
 
                 auto data = raw_data;
@@ -655,51 +650,102 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
         });
 }
 
-AsyncNotify RaftReplDev::notify_after_data_written(std::vector< repl_req_ptr_t >* rreqs) {
-    std::vector< folly::SemiFuture< folly::Unit > > futs;
-    futs.reserve(rreqs->size());
+bool RaftReplDev::wait_for_data_receive(std::vector< repl_req_ptr_t > const& rreqs, uint64_t timeout_ms) {
+    std::vector< folly::Future< folly::Unit > > futs;
+    std::vector< repl_req_ptr_t > only_wait_reqs;
+    only_wait_reqs.reserve(rreqs.size());
+    futs.reserve(rreqs.size());
 
-    // Pop any entries that are already completed - from the entries list as well as from map
-    rreqs->erase(std::remove_if(rreqs->begin(), rreqs->end(),
-                                [this, &futs](repl_req_ptr_t const& rreq) {
-                                    if ((rreq == nullptr) || (rreq->value_inlined)) { return true; }
+    for (auto const& rreq : rreqs) {
+        if ((rreq == nullptr) || (rreq->value_inlined) ||
+            (rreq->state.load() & uint32_cast(repl_req_state_t::DATA_RECEIVED))) {
+            continue;
+        }
+        only_wait_reqs.emplace_back(rreq);
+        futs.emplace_back(rreq->data_received_promise.getFuture());
+    }
 
-                                    if (rreq->state.load() & uint32_cast(repl_req_state_t::DATA_WRITTEN)) {
-                                        RD_LOG(DEBUG, "Raft Channel: Data write completed and blkid mapped: rreq=[{}]",
-                                               rreq->to_compact_string());
-                                        return true; // Remove from the pending list
-                                    } else {
-                                        RD_LOG(TRACE, "Data Channel: Data write pending rreq=[{}]",
-                                               rreq->to_compact_string());
-                                        futs.emplace_back(rreq->data_written_promise.getSemiFuture());
-                                        return false;
-                                    }
-                                }),
-                 rreqs->end());
+    // All the data has been received already, no need to wait
+    if (futs.size() == 0) { return true; }
 
-    // All the entries are done already, no need to wait
-    if (rreqs->size() == 0) { return folly::makeFuture< folly::Unit >(folly::Unit{}); }
+    // If we are currently in resync mode, we can fetch the data immediately. Otherwise, stage it and wait for
+    // sometime before do an explicit fetch. This is so that, it is possible raft channel has come ahead of data
+    // channel and waiting for sometime avoid expensive fetch. On steady state, after a little bit of wait data
+    // would be reached automatically.
+    RD_LOG(DEBUG,
+           "We haven't received data for {} out {} in reqs batch, will fetch and wait for {} ms, in_resync_mode()={} ",
+           only_wait_reqs.size(), rreqs.size(), timeout_ms, is_resync_mode());
 
-    // If we are currently in resync mode, we can fetch the data immediately. Otherwise, stage it and wait for sometime
-    // before do an explicit fetch. This is so that, it is possible raft channel has come ahead of data channel and
-    // waiting for sometime avoid expensive fetch. On steady state, after a little bit of wait data would be reached
-    // automatically.
     if (is_resync_mode()) {
-        check_and_fetch_remote_data(*rreqs);
+        check_and_fetch_remote_data(std::move(only_wait_reqs));
     } else {
-        m_repl_svc.add_to_fetch_queue(shared_from_this(), *rreqs);
+        m_repl_svc.add_to_fetch_queue(shared_from_this(), std::move(only_wait_reqs));
     }
 
     // block waiting here until all the futs are ready (data channel filled in and promises are made);
-    return folly::collectAll(futs).deferValue([this, rreqs](auto&& e) {
+    auto all_futs = folly::collectAllUnsafe(futs).wait(std::chrono::milliseconds(timeout_ms));
+    return (all_futs.isReady());
+}
+
+folly::Future< folly::Unit > RaftReplDev::notify_after_data_written(std::vector< repl_req_ptr_t >* rreqs) {
+    std::vector< folly::Future< folly::Unit > > futs;
+    futs.reserve(rreqs->size());
+    std::vector< repl_req_ptr_t > unreceived_data_reqs;
+
+    // Walk through the list of requests and wait for the data to be received and written
+    for (auto const& rreq : *rreqs) {
+        if ((rreq == nullptr) || (rreq->value_inlined)) { continue; }
+        auto const status = rreq->state.load();
+        if (status & uint32_cast(repl_req_state_t::DATA_WRITTEN)) {
+            RD_LOG(DEBUG, "Raft Channel: Data write completed and blkid mapped: rreq=[{}]", rreq->to_compact_string());
+            continue;
+        }
+
+        if (!(status & uint32_cast(repl_req_state_t::DATA_RECEIVED))) {
+            // This is a relatively rare scenario which can happen, where the data is not received or localized yet,
+            // because it was called as part of pack/unpack i.e bulk data transfer for a new replica. For these cases,
+            // the first step of localization doesn't happen (because raft isn't going to give us append_entry handler
+            // callback). Hence we do that step of receiving data now. The same scenario can happen in case of leader is
+            // not the propose (i.e raft forwarding is enabled)
+            unreceived_data_reqs.emplace_back(rreq);
+        } else {
+            futs.emplace_back(rreq->data_written_promise.getFuture());
+        }
+    }
+
+    if (!unreceived_data_reqs.empty()) {
+        // Wait 10 times the actual data fetch timeout during normal scenario. We do that because, unlike in normal
+        // scenario where can reject the append and let raft retry the log_entry send (which will cause fetch retry),
+        // this flow can't fail or reject. So only option is to wait longer and if it fails, either
+        // a) Crash this node and let addition of new raft server fail (or)
+        // b) Make this node is unavailable for read and allow it to write (which is an incorrect data) and let
+        // remediation flow, replace this node. This atleast allow other repl_dev's in the system accessibly instead of
+        // crashing the entire node.
+        //
+        // TODO: We are doing option a) now, but we should support option b)
+        if (!wait_for_data_receive(unreceived_data_reqs, HS_DYNAMIC_CONFIG(consensus.data_receive_timeout_ms) * 10)) {
+            HS_REL_ASSERT(false, "Data fetch timeout, should not happen");
+        }
+        for (auto const& rreq : unreceived_data_reqs) {
+            futs.emplace_back(rreq->data_written_promise.getFuture());
+        }
+    }
+
+    // All the entries are done already, no need to wait
+    if (futs.size() == 0) { return folly::makeFuture< folly::Unit >(folly::Unit{}); }
+
+    return folly::collectAllUnsafe(futs).thenValue([this, rreqs](auto&& e) {
+#ifndef NDEBUG
         for (auto const& rreq : *rreqs) {
+            if ((rreq == nullptr) || (rreq->value_inlined)) { continue; }
             HS_DBG_ASSERT(rreq->state.load() & uint32_cast(repl_req_state_t::DATA_WRITTEN),
                           "Data written promise raised without updating DATA_WRITTEN state for rkey={}",
                           rreq->rkey.to_string());
             RD_LOG(DEBUG, "Raft Channel: Data write completed and blkid mapped: rreq=[{}]", rreq->to_compact_string());
         }
+#endif
         RD_LOG(TRACE, "Data Channel: {} pending reqs's data are written", rreqs->size());
-        return folly::makeSemiFuture< folly::Unit >(folly::Unit{});
+        return folly::makeFuture< folly::Unit >(folly::Unit{});
     });
 }
 
@@ -715,7 +761,7 @@ void RaftReplDev::async_free_blks(int64_t, MultiBlkId const& bid) {
 }
 
 AsyncReplResult<> RaftReplDev::become_leader() {
-    return m_msg_mgr.become_leader(m_group_id).deferValue([this](auto&& e) {
+    return m_msg_mgr.become_leader(m_group_id).via(&folly::InlineExecutor::instance()).thenValue([this](auto&& e) {
         if (e.hasError()) {
             RD_LOG(ERROR, "Error in becoming leader: {}", e.error());
             return make_async_error<>(RaftReplService::to_repl_error(e.error()));
@@ -870,6 +916,8 @@ void RaftReplDev::leave() {
 
 std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nuraft::cb_func::Type type,
                                                                               nuraft::cb_func::Param* param) {
+    auto ret = nuraft::cb_func::ReturnCode::Ok;
+
     if (type == nuraft::cb_func::Type::GotAppendEntryReqFromLeader) {
         auto raft_req = r_cast< nuraft::req_msg* >(param->ctx);
         auto const& entries = raft_req->log_entries();
@@ -878,17 +926,30 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
             RD_LOG(TRACE, "Raft channel: Received {} append entries on follower from leader, localizing them",
                    entries.size());
 
+            auto reqs = sisl::VectorPool< repl_req_ptr_t >::alloc();
             for (auto& entry : entries) {
                 if (entry->get_val_type() != nuraft::log_val_type::app_log) { continue; }
-                if (m_state_machine->localize_journal_entry_prepare(*entry) == nullptr) {
+                auto req = m_state_machine->localize_journal_entry_prepare(*entry);
+                if (req == nullptr) {
+                    sisl::VectorPool< repl_req_ptr_t >::free(reqs);
                     return {true, nuraft::cb_func::ReturnCode::ReturnNull};
                 }
+                reqs->emplace_back(std::move(req));
             }
-        }
-        return {true, nuraft::cb_func::ReturnCode::Ok};
-    }
 
-    return {false, nuraft::cb_func::ReturnCode::Ok};
+            // Wait till we receive the data from its originator for all the requests
+            if (!wait_for_data_receive(*reqs, HS_DYNAMIC_CONFIG(consensus.data_receive_timeout_ms))) {
+                for (auto const& rreq : *reqs) {
+                    handle_error(rreq, ReplServiceError::TIMEOUT);
+                }
+                ret = nuraft::cb_func::ReturnCode::ReturnNull;
+            }
+            sisl::VectorPool< repl_req_ptr_t >::free(reqs);
+        }
+        return {true, ret};
+    } else {
+        return {false, ret};
+    }
 }
 
 ///////////////////////////////////  Private metohds ////////////////////////////////////
@@ -900,6 +961,11 @@ void RaftReplDev::report_committed(repl_req_ptr_t rreq) {
 
     auto prev_lsn = m_commit_upto_lsn.exchange(rreq->lsn);
     RD_DBG_ASSERT_GT(rreq->lsn, prev_lsn, "Out of order commit of lsns, it is not expected in RaftReplDev");
+
+    auto cur_dsn = m_next_dsn.load(std::memory_order_relaxed);
+    while (cur_dsn <= rreq->dsn()) {
+        m_next_dsn.compare_exchange_strong(cur_dsn, rreq->dsn() + 1);
+    }
 
     RD_LOG(DEBUG, "Raft channel: Commit rreq=[{}]", rreq->to_compact_string());
     m_listener->on_commit(rreq->lsn, rreq->header, rreq->key, rreq->local_blkid, rreq);

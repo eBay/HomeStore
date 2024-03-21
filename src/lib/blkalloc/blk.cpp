@@ -41,8 +41,7 @@ void BlkId::invalidate() { s.m_nblks = 0; }
 bool BlkId::is_valid() const { return (blk_count() > 0); }
 
 std::string BlkId::to_string() const {
-    return is_valid() ? fmt::format("BlkNum={} nblks={} chunk={}", blk_num(), blk_count(), chunk_num())
-                      : "Invalid_Blkid";
+    return is_valid() ? fmt::format("blk#={} count={} chunk={}", blk_num(), blk_count(), chunk_num()) : "Invalid_Blkid";
 }
 
 int BlkId::compare(const BlkId& one, const BlkId& two) {
@@ -126,12 +125,12 @@ bool MultiBlkId::has_room() const { return (n_addln_piece < max_addln_pieces); }
 MultiBlkId::iterator MultiBlkId::iterate() const { return MultiBlkId::iterator{*this}; }
 
 std::string MultiBlkId::to_string() const {
-    std::string str = "MultiBlks: {";
+    std::string str = "[";
     auto it = iterate();
     while (auto const b = it.next()) {
-        str += (b->to_string() + " ");
+        str += "{" + (b->to_string() + "},");
     }
-    str += std::string("}");
+    str += std::string("]");
     return str;
 }
 

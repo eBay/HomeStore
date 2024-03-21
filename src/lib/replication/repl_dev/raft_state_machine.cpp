@@ -82,14 +82,21 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
     RD_LOG(TRACE, "Raft Channel: Localizing Raft log_entry: term={}, journal_entry=[{}] ", jentry->server_id,
            lentry.get_term(), jentry->dsn, jentry->to_string());
 
-    // Extract the user header and user key from the journal entry
-    auto entry_to_hdr_and_key = [](repl_journal_entry* jentry) {
-        sisl::blob const header =
-            sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry), jentry->user_header_size};
-        sisl::blob const key = sisl::blob{header.cbytes() + header.size(), jentry->key_size};
-        return std::make_tuple(header, key);
+    auto entry_to_hdr = [](repl_journal_entry* jentry) {
+        return sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry), jentry->user_header_size};
     };
-    auto const [header, key] = entry_to_hdr_and_key(jentry);
+
+    auto entry_to_key = [](repl_journal_entry* jentry) {
+        return sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry) + jentry->user_header_size,
+                          jentry->key_size};
+    };
+
+    auto entry_to_val = [](repl_journal_entry* jentry) {
+        return sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry) + jentry->user_header_size +
+                              jentry->key_size,
+                          jentry->value_size};
+    };
+
     repl_key const rkey{.server_id = jentry->server_id, .term = lentry.get_term(), .dsn = jentry->dsn};
 
     // Create a new rreq (or) Pull rreq from the map given the repl_key, header and key. Any new rreq will
@@ -98,9 +105,9 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
     repl_req_ptr_t rreq;
     if ((jentry->code == journal_type_t::HS_DATA_LINKED) && (jentry->value_size > 0)) {
         MultiBlkId entry_blkid;
-        entry_blkid.deserialize(sisl::blob{key.cbytes() + key.size(), jentry->value_size}, true /* copy */);
+        entry_blkid.deserialize(entry_to_val(jentry), true /* copy */);
 
-        rreq = m_rd.applier_create_req(rkey, header, key, (entry_blkid.blk_count() * m_rd.get_blk_size()),
+        rreq = m_rd.applier_create_req(rkey, entry_to_hdr(jentry), (entry_blkid.blk_count() * m_rd.get_blk_size()),
                                        false /* is_data_channel */);
         if (rreq == nullptr) { goto out; }
 
@@ -119,17 +126,18 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
 
             std::memcpy(new_buf->data_begin(), lentry.get_buf().data_begin(), size_before_value);
             jentry = r_cast< repl_journal_entry* >(new_buf->data_begin());
-            std::tie(rreq->header, rreq->key) = entry_to_hdr_and_key(jentry);
             // lentry.change_buf(std::move(new_buf));
         }
 
         uint8_t* blkid_location = uintptr_cast(lentry.get_buf().data_begin()) + size_before_value;
         std::memcpy(blkid_location, rreq->local_blkid.serialize().cbytes(), local_size);
     } else {
-        rreq = m_rd.applier_create_req(rkey, header, key, jentry->value_size, false /* is_data_channel */);
+        rreq = m_rd.applier_create_req(rkey, entry_to_hdr(jentry), jentry->value_size, false /* is_data_channel */);
     }
     rreq->journal_buf = lentry.get_buf_ptr();
     rreq->journal_entry = jentry;
+    rreq->header = entry_to_hdr(jentry);
+    rreq->key = entry_to_key(jentry);
     rreq->is_jentry_localize_pending = false; // Journal entry is already localized here
 
 out:
@@ -171,7 +179,7 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_finish(nuraft::log_entry
         rreq = localize_journal_entry_prepare(lentry);
         if (rreq == nullptr) {
             RELEASE_ASSERT(rreq != nullptr,
-                           "We get an indirect data for rkey=[{}], jentry=[{}] not as part of Raft Append but "
+                           "We get an linked data for rkey=[{}], jentry=[{}] not as part of Raft Append but "
                            "indirectly through possibly unpack() and in those cases, if we are not able to alloc "
                            "location to write the data, there is no recourse. So we must crash this system ",
                            rkey.to_string(), jentry->to_string());

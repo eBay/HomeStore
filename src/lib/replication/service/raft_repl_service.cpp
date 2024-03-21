@@ -313,9 +313,9 @@ void RaftReplService::stop_reaper_thread() {
     iomanager.run_on_wait(m_reaper_fiber, [] { iomanager.stop_io_loop(); });
 }
 
-void RaftReplService::add_to_fetch_queue(cshared< RaftReplDev >& rdev, std::vector< repl_req_ptr_t > const& rreqs) {
+void RaftReplService::add_to_fetch_queue(cshared< RaftReplDev >& rdev, std::vector< repl_req_ptr_t > rreqs) {
     std::unique_lock lg(m_pending_fetch_mtx);
-    m_pending_fetch_batches.push(std::make_pair(rdev, rreqs));
+    m_pending_fetch_batches.push(std::make_pair(rdev, std::move(rreqs)));
 }
 
 void RaftReplService::fetch_pending_data() {
@@ -330,7 +330,7 @@ void RaftReplService::fetch_pending_data() {
         m_pending_fetch_batches.pop();
         lg.unlock();
 
-        rdev->check_and_fetch_remote_data(next_batch);
+        rdev->check_and_fetch_remote_data(std::move(next_batch));
         lg.lock();
     }
 }

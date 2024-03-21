@@ -44,8 +44,8 @@ std::string repl_req_ctx::to_string() const {
 }
 
 std::string repl_req_ctx::to_compact_string() const {
-    return fmt::format("dsn={} term={} lsn={} Blkid={} state=[{}]", rkey.dsn, rkey.term, lsn, local_blkid.to_string(),
-                       req_state_name(state.load()));
+    return fmt::format("dsn={} term={} lsn={} local_blkid={} state=[{}]", rkey.dsn, rkey.term, lsn,
+                       local_blkid.to_string(), req_state_name(state.load()));
 }
 
 } // namespace homestore

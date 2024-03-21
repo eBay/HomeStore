@@ -56,7 +56,7 @@ public:
     std::shared_ptr< nuraft_mesg::mesg_state_mgr > create_state_mgr(int32_t srv_id,
                                                                     nuraft_mesg::group_id_t const& group_id) override;
     nuraft_mesg::Manager& msg_manager() { return *m_msg_mgr; }
-    void add_to_fetch_queue(cshared< RaftReplDev >& rdev, std::vector< repl_req_ptr_t > const& rreqs);
+    void add_to_fetch_queue(cshared< RaftReplDev >& rdev, std::vector< repl_req_ptr_t > rreqs);
 
 protected:
     ///////////////////// Overrides of GenericReplService ////////////////////

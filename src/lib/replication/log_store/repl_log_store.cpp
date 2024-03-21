@@ -61,9 +61,9 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
         HomeRaftLogStore::end_of_append_batch(start_lsn, count);
 
         // Wait for the fetch and write to be completed successfully.
-        std::move(fut).get();
+        std::move(fut).wait();
 
-        // Mark all the pbas also completely written
+        // Mark all the reqs also completely written
         for (auto const& rreq : *reqs) {
             if (rreq) { rreq->state.fetch_or(uint32_cast(repl_req_state_t::LOG_FLUSHED)); }
         }

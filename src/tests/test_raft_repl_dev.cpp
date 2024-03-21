@@ -435,67 +435,18 @@ TEST_F(RaftReplDevTest, Follower_Incremental_Resync) {
     g_helper->sync_for_cleanup_start();
 }
 
-#if 0
-//
-// staging the fetch remote data with flip point;
-//
-TEST_F(RaftReplDevTest, Follower_Incr_Resync_With_Staging) {
-    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
-    g_helper->sync_for_test_start();
-
-#ifdef _PRERELEASE
-    set_basic_flip("simulate_staging_fetch_data");
-#endif
-
-    // step-0: do some IO before restart one member;
-    uint64_t exp_entries = 20;
-    if (g_helper->replica_num() == 0) {
-        g_helper->runner().set_num_tasks(20);
-        this->write_on_leader();
-    }
-
-    // step-1: wait for all writes to be completed
-    this->wait_for_all_commits();
-
-    // step-2: restart one non-leader replica
-    if (g_helper->replica_num() == 1) {
-        LOGINFO("Restart homestore: replica_num = 1");
-        g_helper->restart(10 /* shutdown_delay_sec */);
-        // g_helper->sync_for_test_start();
-    }
-
-    exp_entries += SISL_OPTIONS["num_io"].as< uint64_t >();
-    // step-3: on leader, wait for a while for replica-1 to finish shutdown so that it can be removed from raft-groups
-    // and following I/O issued by leader won't be pushed to relica-1;
-    if (g_helper->replica_num() == 0) {
-        LOGINFO("Wait for grpc connection to replica-1 to expire and removed from raft-groups.");
-        std::this_thread::sleep_for(std::chrono::seconds{5});
-
-        g_helper->runner().set_num_tasks(SISL_OPTIONS["num_io"].as< uint64_t >());
-
-        // before replica-1 started, issue I/O so that replica-1 is lagging behind;
-        this->write_on_leader();
-    }
-
-    this->wait_for_all_commits();
-
-    g_helper->sync_for_verify_start();
-    LOGINFO("Validate all data written so far by reading them");
-    this->validate_data();
-    g_helper->sync_for_cleanup_start();
-}
-#endif
-
 #ifdef _PRERELEASE
 TEST_F(RaftReplDevTest, Follower_Reject_Append) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
 
-    LOGINFO("Set flip to fake reject append entries in both data and raft channels. We slow down data channel "
-            "occassionally so that raft channel reject can be hit");
-    set_basic_flip("fake_reject_append_data_channel", 5, 10);
-    set_basic_flip("fake_reject_append_raft_channel", 10, 100);
-    set_delay_flip("slow_down_data_channel", 10000ull, 10, 10);
+    if (g_helper->replica_num() != 0) {
+        LOGINFO("Set flip to fake reject append entries in both data and raft channels. We slow down data channel "
+                "occassionally so that raft channel reject can be hit");
+        set_basic_flip("fake_reject_append_data_channel", 5, 10);
+        set_basic_flip("fake_reject_append_raft_channel", 10, 100);
+        set_delay_flip("slow_down_data_channel", 10000ull, 10, 10);
+    }
 
     LOGINFO("Write to leader and then wait for all the commits on all replica despite drop/slow_down");
     this->write_on_leader(SISL_OPTIONS["num_io"].as< uint64_t >(), true /* wait_for_all_commits */);
