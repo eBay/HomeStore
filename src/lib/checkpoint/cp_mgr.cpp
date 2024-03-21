@@ -291,7 +291,7 @@ void CPManager::start_cp_thread() {
 
     {
         std::unique_lock< std::mutex > lk{ctx->mtx};
-        ctx->cv.wait(lk, [&ctx] { return (ctx->thread_cnt == 1); });
+        ctx->cv.wait(lk, [ctx] { return (ctx->thread_cnt == 1); });
     }
 }
 

@@ -260,7 +260,7 @@ void LogStoreService::start_threads() {
 
     m_flush_fiber = nullptr;
     iomanager.create_reactor("log_flush_thread", iomgr::TIGHT_LOOP | iomgr::ADAPTIVE_LOOP, 1 /* num_fibers */,
-                             [this, &ctx](bool is_started) {
+                             [this, ctx](bool is_started) {
                                  if (is_started) {
                                      m_flush_fiber = iomanager.iofiber_self();
                                      {
@@ -273,7 +273,7 @@ void LogStoreService::start_threads() {
 
     m_truncate_fiber = nullptr;
     iomanager.create_reactor("logstore_truncater", iomgr::INTERRUPT_LOOP, 2 /* num_fibers */,
-                             [this, &ctx](bool is_started) {
+                             [this, ctx](bool is_started) {
                                  if (is_started) {
                                      m_truncate_fiber = iomanager.sync_io_capable_fibers()[0];
                                      {
@@ -285,7 +285,7 @@ void LogStoreService::start_threads() {
                              });
     {
         std::unique_lock< std::mutex > lk{ctx->mtx};
-        ctx->cv.wait(lk, [&ctx] { return (ctx->thread_cnt == 2); });
+        ctx->cv.wait(lk, [ctx] { return (ctx->thread_cnt == 2); });
     }
 }
 

@@ -57,7 +57,7 @@ void IndexWBCache::start_flush_threads() {
 
     for (int32_t i{0}; i < nthreads; ++i) {
         iomanager.create_reactor("index_cp_flush" + std::to_string(i), iomgr::INTERRUPT_LOOP, 1u,
-                                 [this, &ctx](bool is_started) {
+                                 [this, ctx](bool is_started) {
                                      if (is_started) {
                                          {
                                              std::unique_lock< std::mutex > lk{ctx->mtx};
@@ -71,7 +71,7 @@ void IndexWBCache::start_flush_threads() {
 
     {
         std::unique_lock< std::mutex > lk{ctx->mtx};
-        ctx->cv.wait(lk, [&ctx, nthreads] { return (ctx->thread_cnt == nthreads); });
+        ctx->cv.wait(lk, [ctx, nthreads] { return (ctx->thread_cnt == nthreads); });
     }
 }
 
