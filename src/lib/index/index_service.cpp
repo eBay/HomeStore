@@ -68,8 +68,7 @@ void IndexService::meta_blk_found(const sisl::byte_view& buf, void* meta_cookie)
 
 void IndexService::start() {
     // Start Writeback cache
-    m_wb_cache = std::make_unique< IndexWBCache >(m_vdev, hs()->evictor(),
-                                                  hs()->device_mgr()->atomic_page_size(HSDevType::Fast));
+    m_wb_cache = std::make_unique< IndexWBCache >(m_vdev, hs()->evictor(), m_vdev->atomic_page_size());
 
     // Register to CP for flush dirty buffers
     hs()->cp_mgr().register_consumer(cp_consumer_t::INDEX_SVC,
@@ -94,7 +93,7 @@ void IndexService::remove_index_table(const std::shared_ptr< IndexTableBase >& t
     m_index_map.erase(tbl->uuid());
 }
 
-uint32_t IndexService::node_size() const { return hs()->device_mgr()->atomic_page_size(HSDevType::Fast); }
+uint32_t IndexService::node_size() const { return m_vdev->atomic_page_size(); }
 
 uint64_t IndexService::used_size() const {
     auto size{0};

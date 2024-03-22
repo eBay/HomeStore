@@ -138,7 +138,11 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
 
     if (!m_dev_mgr->is_first_time_boot()) {
         m_dev_mgr->load_devices();
-        hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Fast}));
+        if (input.has_fast_dev()) {
+            hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Fast}));
+        } else {
+            hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Data}));
+        }
         do_start();
         return false;
     } else {
@@ -205,7 +209,12 @@ void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format
     }
 
     m_dev_mgr->format_devices();
-    hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Fast}));
+    if (HomeStoreStaticConfig::instance().input.has_fast_dev()) {
+        hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Fast}));
+    } else {
+        hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Data}));
+    }
+
 
     std::vector< folly::Future< std::error_code > > futs;
     for (const auto& [svc_type, fparams] : format_opts) {
