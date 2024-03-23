@@ -12,6 +12,7 @@
 #include <homestore/blkdata_service.hpp>
 #include <homestore/logstore_service.hpp>
 #include <homestore/superblk_handler.hpp>
+#include <homestore/crc.h>
 
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
@@ -143,12 +144,12 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
 
         // Write the data
         data_service().async_write(rreq->value, rreq->local_blkid).thenValue([this, rreq](auto&& err) {
-            if (!err) {
+            if (err) {
+                HS_DBG_ASSERT(false, "Error in writing data, err_code={}", err.value());
+                handle_error(rreq, ReplServiceError::DRIVE_WRITE_ERROR);
+            } else {
                 auto raft_status = m_state_machine->propose_to_raft(rreq);
                 if (raft_status != ReplServiceError::OK) { handle_error(rreq, raft_status); }
-            } else {
-                HS_DBG_ASSERT(false, "Error in writing data");
-                handle_error(rreq, ReplServiceError::DRIVE_WRITE_ERROR);
             }
         });
     } else {
@@ -239,11 +240,17 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
     }
 
     folly::collectAllUnsafe(futs).thenValue(
-        [this, rpc_data = std::move(rpc_data), sgs_vec = std::move(sgs_vec)](auto err) {
-            if (err) {
-                COUNTER_INCREMENT(m_metrics, read_err_cnt, 1);
-                RD_REL_ASSERT(false, "Error in reading data"); // TODO: Find a way to return error to the Listener
+        [this, rpc_data = std::move(rpc_data), sgs_vec = std::move(sgs_vec)](auto&& vf) {
+            for (auto const& err_c : vf) {
+                if (sisl_unlikely(err_c.value())) {
+                    COUNTER_INCREMENT(m_metrics, read_err_cnt, 1);
+                    RD_REL_ASSERT(false, "Error in reading data");
+                    // TODO: Find a way to return error to the Listener
+                    // TODO: actually will never arrive here as iomgr will assert
+                    // (should not assert but to raise alert and leave the raft group);
+                }
             }
+
             RD_LOG(DEBUG, "Data Channel: FetchData data read completed for {} buffers", sgs_vec.size());
 
             // now prepare the io_blob_list to response back to requester;
@@ -252,6 +259,10 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
                 auto const ret = sisl::io_blob::sg_list_to_ioblob_list(sgs);
                 pkts.insert(pkts.end(), ret.begin(), ret.end());
             }
+
+            // TODO: Temporary code
+            crc32_t const crc = crc32_ieee(init_crc32, pkts.front().cbytes(), pkts.front().size());
+            RD_LOG(DEBUG, "Data Channel: FetchData data read completed for {} buffers, crc={}", sgs_vec.size(), crc);
 
             rpc_data->set_comp_cb([sgs_vec = std::move(sgs_vec)](boost::intrusive_ptr< sisl::GenericRpcData >&) {
                 for (auto const& sgs : sgs_vec) {
@@ -287,8 +298,10 @@ void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err)
         });
     }
 
-    HS_DBG_ASSERT(!(rreq->state.load() & uint32_cast(repl_req_state_t::LOG_FLUSHED)),
-                  "Unexpected state, received error after log is flushed for rreq=[{}]", rreq->to_string());
+    // TODO: Validate if this is a correct assert or not. Is it possible that the log is already flushed and we receive
+    // a new request for the same log?
+    // HS_DBG_ASSERT(!(rreq->state.load() & uint32_cast(repl_req_state_t::LOG_FLUSHED)),
+    //               "Unexpected state, received error after log is flushed for rreq=[{}]", rreq->to_string());
 
     if (rreq->is_proposer) {
         // Notify the proposer about the error
@@ -356,13 +369,17 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
         data = rreq->buf_for_unaligned_data.cbytes();
     }
 
+    // TODO: Temporary
+    crc32_t const crc = crc32_ieee(init_crc32, data, push_req->data_size());
+    RD_LOG(DEBUG, "Data Channel: PushData received for rreq=[{}] crc={}", rreq->to_string(), crc);
+
     // Schedule a write and upon completion, mark the data as written.
     data_service()
         .async_write(r_cast< const char* >(data), push_req->data_size(), rreq->local_blkid)
         .thenValue([this, rreq](auto&& err) {
             if (err) {
                 COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
-                RD_DBG_ASSERT(false, "Error in writing data");
+                RD_DBG_ASSERT(false, "Error in writing data, error_code={}", err.value());
                 handle_error(rreq, ReplServiceError::DRIVE_WRITE_ERROR);
             } else {
                 rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_WRITTEN));
@@ -535,14 +552,14 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
             sisl::io_blob_list_t{
                 sisl::io_blob{builder->GetBufferPointer(), builder->GetSize(), false /* is_aligned */}})
         .via(&folly::InlineExecutor::instance())
-        .thenValue([this, builder, rreqs = std::move(rreqs)](auto e) {
-            if (!e) {
+        .thenValue([this, builder, rreqs = std::move(rreqs)](auto response) {
+            if (!response) {
                 // if we are here, it means the original who sent the log entries are down.
                 // we need to handle error and when the other member becomes leader, it will resend the log entries;
                 RD_LOG(ERROR,
                        "Not able to fetching data from originator={}, error={}, probably originator is down. Will "
                        "retry when new leader start appending log entries",
-                       rreqs.front()->remote_blkid.server_id, e.error());
+                       rreqs.front()->remote_blkid.server_id, response.error());
                 for (auto const& rreq : rreqs) {
                     // TODO: Set the data_received promise with error, so that waiting threads can be unblocked and
                     // reject the request. Without that, it will timeout and then reject it.
@@ -551,103 +568,100 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
                     // received after issuing fetch and that leader has already switched. In this case, we don't want to
                     // fail the request.
                     if (!(rreq->state.load() & uint32_cast(repl_req_state_t::DATA_RECEIVED))) {
-                        handle_error(rreq, RaftReplService::to_repl_error(e.error()));
+                        handle_error(rreq, RaftReplService::to_repl_error(response.error()));
                     }
                 }
                 COUNTER_INCREMENT(m_metrics, fetch_err_cnt, 1);
                 return;
             }
 
-            auto raw_data = e.value().response_blob().cbytes();
-            auto total_size = e.value().response_blob().size();
+            builder->Release();
 
-            COUNTER_INCREMENT(m_metrics, fetch_total_blk_size, total_size);
+            iomanager.run_on_forget(iomgr::reactor_regex::random_worker,
+                                    [this, r = std::move(response.value()), rreqs = std::move(rreqs)]() {
+                                        handle_fetch_data_response(std::move(r), std::move(rreqs));
+                                    });
+        });
+}
 
-            RD_DBG_ASSERT_GT(total_size, 0, "Empty response from remote");
-            RD_DBG_ASSERT(raw_data, "Empty response from remote");
+void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse response,
+                                             std::vector< repl_req_ptr_t > rreqs) {
+    auto raw_data = response.response_blob().cbytes();
+    auto total_size = response.response_blob().size();
 
-            RD_LOG(DEBUG, "Data Channel: FetchData completed for {} requests", rreqs.size());
+    COUNTER_INCREMENT(m_metrics, fetch_total_blk_size, total_size);
 
-            thread_local std::vector< folly::Future< std::error_code > > futs; // static is impplied
-            futs.clear();
+    RD_DBG_ASSERT_GT(total_size, 0, "Empty response from remote");
+    RD_DBG_ASSERT(raw_data, "Empty response from remote");
 
-            for (auto const& rreq : rreqs) {
-                auto const data_size = rreq->remote_blkid.blkid.blk_count() * get_blk_size();
-                // if data is already received, skip it because someone is already doing the write;
-                if (rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_RECEIVED)) &
-                    uint32_cast(repl_req_state_t::DATA_RECEIVED)) {
-                    // very unlikely to arrive here, but if data got received during we fetch, let the data channel
-                    // handle data written;
-                    raw_data += data_size;
-                    total_size -= data_size;
+    RD_LOG(DEBUG, "Data Channel: FetchData completed for {} requests", rreqs.size());
 
-                    // if blk is already allocated, validate if blk is valid and size matches;
-                    RD_DBG_ASSERT(rreq->local_blkid.is_valid(), "Invalid blkid for rreq={}", rreq->to_compact_string());
-                    auto const local_size = rreq->local_blkid.blk_count() * get_blk_size();
-                    RD_DBG_ASSERT_EQ(data_size, local_size,
-                                     "Data size mismatch for rreq={} blkid={}, remote size: {}, local size: {}",
-                                     rreq->to_compact_string(), rreq->local_blkid.to_string(), data_size, local_size);
+    for (auto const& rreq : rreqs) {
+        auto const data_size = rreq->remote_blkid.blkid.blk_count() * get_blk_size();
+        // if data is already received, skip it because someone is already doing the write;
+        if (rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_RECEIVED)) &
+            uint32_cast(repl_req_state_t::DATA_RECEIVED)) {
+            // very unlikely to arrive here, but if data got received during we fetch, let the data channel
+            // handle data written;
+            raw_data += data_size;
+            total_size -= data_size;
 
-                    RD_LOG(DEBUG, "Data Channel: Data already received for rreq=[{}], skip and move on to next rreq.",
-                           rreq->to_compact_string());
-                    continue;
+            // if blk is already allocated, validate if blk is valid and size matches;
+            RD_DBG_ASSERT(rreq->local_blkid.is_valid(), "Invalid blkid for rreq={}", rreq->to_compact_string());
+            auto const local_size = rreq->local_blkid.blk_count() * get_blk_size();
+            RD_DBG_ASSERT_EQ(data_size, local_size,
+                             "Data size mismatch for rreq={} blkid={}, remote size: {}, local size: {}",
+                             rreq->to_compact_string(), rreq->local_blkid.to_string(), data_size, local_size);
+
+            RD_LOG(DEBUG, "Data Channel: Data already received for rreq=[{}], skip and move on to next rreq.",
+                   rreq->to_compact_string());
+            continue;
+        } else {
+            // Blk must be already allocated, validate if blk is valid and size matches;
+            RD_DBG_ASSERT(rreq->state.load() & uint32_cast(repl_req_state_t::BLK_ALLOCATED),
+                          "Req in map, but blk is not allocated for rreq={}", rreq->to_compact_string());
+            RD_DBG_ASSERT(rreq->local_blkid.is_valid(), "Invalid blkid for rreq={}", rreq->to_compact_string());
+            RD_DBG_ASSERT_EQ(data_size, rreq->local_blkid.blk_count() * get_blk_size(),
+                             "Data size mismatch for rreq={} blkid={}, remote size: {}, local size: {}",
+                             rreq->to_compact_string(), rreq->local_blkid.to_string(), data_size,
+                             rreq->local_blkid.blk_count() * get_blk_size());
+            rreq->data_received_promise.setValue();
+        }
+
+        auto data = raw_data;
+        if (((uintptr_t)raw_data % data_service().get_align_size()) != 0) {
+            // Unaligned buffer, create a new buffer and copy the entire buf
+            rreq->buf_for_unaligned_data = std::move(sisl::io_blob_safe(data_size, data_service().get_align_size()));
+            std::memcpy(rreq->buf_for_unaligned_data.bytes(), data, data_size);
+            data = rreq->buf_for_unaligned_data.cbytes();
+            RD_DBG_ASSERT(((uintptr_t)data % data_service().get_align_size()) == 0,
+                          "Data is still not aligned after copy");
+        }
+
+        // Schedule a write and upon completion, mark the data as written.
+        data_service()
+            .async_write(r_cast< const char* >(data), data_size, rreq->local_blkid)
+            .thenValue([this, rreq, response](auto&& err) {
+                if (err) {
+                    COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
+                    RD_DBG_ASSERT(false, "Error in writing data, error_code={}", err.value());
+                    handle_error(rreq, ReplServiceError::DRIVE_WRITE_ERROR);
                 } else {
-                    // if blk is already allocated, validate if blk is valid and size matches;
-                    RD_DBG_ASSERT(rreq->local_blkid.is_valid(), "Invalid blkid for rreq={}", rreq->to_compact_string());
-                    RD_DBG_ASSERT_EQ(data_size, rreq->local_blkid.blk_count() * get_blk_size(),
-                                     "Data size mismatch for rreq={} blkid={}, remote size: {}, local size: {}",
-                                     rreq->to_compact_string(), rreq->local_blkid.to_string(), data_size,
-                                     rreq->local_blkid.blk_count() * get_blk_size());
-                    rreq->data_received_promise.setValue();
-                }
-
-                auto data = raw_data;
-                if (((uintptr_t)raw_data % data_service().get_align_size()) != 0) {
-                    // Unaligned buffer, create a new buffer and copy the entire buf
-                    rreq->buf_for_unaligned_data =
-                        std::move(sisl::io_blob_safe(data_size, data_service().get_align_size()));
-                    std::memcpy(rreq->buf_for_unaligned_data.bytes(), data, data_size);
-                    data = rreq->buf_for_unaligned_data.cbytes();
-                    RD_DBG_ASSERT(((uintptr_t)data % data_service().get_align_size()) == 0,
-                                  "Data is still not aligned after copy");
-                }
-
-                // Schedule a write and upon completion, mark the data as written.
-                futs.emplace_back(
-                    data_service().async_write(r_cast< const char* >(data), data_size, rreq->local_blkid));
-
-                // move the raw_data pointer to next rreq's data;
-                raw_data += data_size;
-                total_size -= data_size;
-
-                RD_LOG(DEBUG,
-                       "Data Channel: Data fetched from remote: rreq=[{}], data_size: {}, total_size: {}, "
-                       "local_blkid: {}",
-                       rreq->to_compact_string(), data_size, total_size, rreq->local_blkid.to_string());
-            }
-
-            folly::collectAllUnsafe(futs).thenValue([this, rreqs, e = std::move(e)](auto&& vf) {
-                for (auto const& err_c : vf) {
-                    if (sisl_unlikely(err_c.value())) {
-                        auto ec = err_c.value();
-                        COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
-                        RD_LOG(ERROR, "Error in writing data: {}", ec.value());
-                        // TODO: actually will never arrive here as iomgr will assert (should not assert but
-                        // to raise alert and leave the raft group);
-                    }
-                }
-
-                for (auto const& rreq : rreqs) {
                     rreq->state.fetch_or(uint32_cast(repl_req_state_t::DATA_WRITTEN));
                     rreq->data_written_promise.setValue();
                     RD_LOG(TRACE, "Data Channel: Data Write completed rreq=[{}]", rreq->to_compact_string());
                 }
             });
 
-            builder->Release();
+        // move the raw_data pointer to next rreq's data;
+        raw_data += data_size;
+        total_size -= data_size;
 
-            RD_DBG_ASSERT_EQ(total_size, 0, "Total size mismatch, some data is not consumed");
-        });
+        RD_LOG(DEBUG, "Data Channel: Data fetched from remote: rreq=[{}], data_size: {}, total_size: {}",
+               rreq->to_compact_string(), data_size, total_size);
+    }
+
+    RD_DBG_ASSERT_EQ(total_size, 0, "Total size mismatch, some data is not consumed");
 }
 
 bool RaftReplDev::wait_for_data_receive(std::vector< repl_req_ptr_t > const& rreqs, uint64_t timeout_ms) {
@@ -703,10 +717,10 @@ folly::Future< folly::Unit > RaftReplDev::notify_after_data_written(std::vector<
 
         if (!(status & uint32_cast(repl_req_state_t::DATA_RECEIVED))) {
             // This is a relatively rare scenario which can happen, where the data is not received or localized yet,
-            // because it was called as part of pack/unpack i.e bulk data transfer for a new replica. For these cases,
-            // the first step of localization doesn't happen (because raft isn't going to give us append_entry handler
-            // callback). Hence we do that step of receiving data now. The same scenario can happen in case of leader is
-            // not the propose (i.e raft forwarding is enabled)
+            // because it was called as part of pack/unpack i.e bulk data transfer for a new replica. For these
+            // cases, the first step of localization doesn't happen (because raft isn't going to give us
+            // append_entry handler callback). Hence we do that step of receiving data now. The same scenario can
+            // happen in case of leader is not the propose (i.e raft forwarding is enabled)
             unreceived_data_reqs.emplace_back(rreq);
         } else {
             futs.emplace_back(rreq->data_written_promise.getFuture());
@@ -715,12 +729,11 @@ folly::Future< folly::Unit > RaftReplDev::notify_after_data_written(std::vector<
 
     if (!unreceived_data_reqs.empty()) {
         // Wait 10 times the actual data fetch timeout during normal scenario. We do that because, unlike in normal
-        // scenario where can reject the append and let raft retry the log_entry send (which will cause fetch retry),
-        // this flow can't fail or reject. So only option is to wait longer and if it fails, either
-        // a) Crash this node and let addition of new raft server fail (or)
-        // b) Make this node is unavailable for read and allow it to write (which is an incorrect data) and let
-        // remediation flow, replace this node. This atleast allow other repl_dev's in the system accessibly instead of
-        // crashing the entire node.
+        // scenario where can reject the append and let raft retry the log_entry send (which will cause fetch
+        // retry), this flow can't fail or reject. So only option is to wait longer and if it fails, either a) Crash
+        // this node and let addition of new raft server fail (or) b) Make this node is unavailable for read and
+        // allow it to write (which is an incorrect data) and let remediation flow, replace this node. This atleast
+        // allow other repl_dev's in the system accessibly instead of crashing the entire node.
         //
         // TODO: We are doing option a) now, but we should support option b)
         if (!wait_for_data_receive(unreceived_data_reqs, HS_DYNAMIC_CONFIG(consensus.data_receive_timeout_ms) * 10)) {

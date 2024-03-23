@@ -79,8 +79,8 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
     RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
                       "Mismatched version of journal entry received from RAFT peer");
 
-    RD_LOG(TRACE, "Raft Channel: Localizing Raft log_entry: term={}, journal_entry=[{}] ", jentry->server_id,
-           lentry.get_term(), jentry->dsn, jentry->to_string());
+    RD_LOG(TRACE, "Raft Channel: Localizing Raft log_entry: server_id={}, term={}, journal_entry=[{}] ",
+           jentry->server_id, lentry.get_term(), jentry->to_string());
 
     auto entry_to_hdr = [](repl_journal_entry* jentry) {
         return sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry), jentry->user_header_size};

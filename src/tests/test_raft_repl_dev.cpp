@@ -188,6 +188,8 @@ public:
                 auto read_sgs = test_common::HSTestHelper::create_sgs(v.data_size_, block_size);
 
                 repl_dev()->async_read(v.blkid_, read_sgs, v.data_size_).thenValue([read_sgs, k, v](auto const ec) {
+                    LOGINFOMOD(replication, "Validating key={} value[blkid={} pattern={}]", k.id_, v.blkid_.to_string(),
+                               v.data_pattern_);
                     RELEASE_ASSERT(!ec, "Read of blkid={} for key={} error={}", v.blkid_.to_string(), k.id_,
                                    ec.message());
                     for (auto const& iov : read_sgs.iovs) {
@@ -195,8 +197,6 @@ public:
                                                                      v.data_pattern_);
                         iomanager.iobuf_free(uintptr_cast(iov.iov_base));
                     }
-                    LOGINFOMOD(replication, "Validated successfully key={} value[blkid={} pattern={}]", k.id_,
-                               v.blkid_.to_string(), v.data_pattern_);
                     g_helper->runner().next_task();
                 });
             } else {
@@ -310,24 +310,32 @@ public:
     }
 
     void write_on_leader(uint32_t num_entries, bool wait_for_commit = true) {
-        auto leader_uuid = dbs_[0]->repl_dev()->get_leader_id();
+        do {
+            auto leader_uuid = dbs_[0]->repl_dev()->get_leader_id();
 
-        if (!leader_uuid.is_nil() && (leader_uuid == g_helper->my_replica_id())) {
-            LOGINFO("Writing {} entries since I am the leader my_uuid={}", num_entries,
-                    boost::uuids::to_string(g_helper->my_replica_id()));
-            auto const block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
-            g_helper->runner().set_num_tasks(num_entries);
+            if (leader_uuid.is_nil()) {
+                LOGINFO("Waiting for leader to be elected");
+                std::this_thread::sleep_for(std::chrono::milliseconds{500});
+            } else if (leader_uuid == g_helper->my_replica_id()) {
+                LOGINFO("Writing {} entries since I am the leader my_uuid={}", num_entries,
+                        boost::uuids::to_string(g_helper->my_replica_id()));
+                auto const block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+                g_helper->runner().set_num_tasks(num_entries);
 
-            LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
-            g_helper->runner().set_task([this, block_size]() {
-                static std::normal_distribution<> num_blks_gen{3.0, 2.0};
-                this->generate_writes(std::abs(std::round(num_blks_gen(g_re))) * block_size, block_size);
-            });
-            g_helper->runner().execute().get();
-        } else {
-            LOGINFO("{} entries were written on the leader_uuid={} my_uuid={}", num_entries,
-                    boost::uuids::to_string(leader_uuid), boost::uuids::to_string(g_helper->my_replica_id()));
-        }
+                LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
+                g_helper->runner().set_task([this, block_size]() {
+                    static std::normal_distribution<> num_blks_gen{3.0, 2.0};
+                    this->generate_writes(std::abs(std::round(num_blks_gen(g_re))) * block_size, block_size);
+                });
+                g_helper->runner().execute().get();
+                break;
+            } else {
+                LOGINFO("{} entries were written on the leader_uuid={} my_uuid={}", num_entries,
+                        boost::uuids::to_string(leader_uuid), boost::uuids::to_string(g_helper->my_replica_id()));
+                break;
+            }
+        } while (true);
+
         written_entries_ += num_entries;
         if (wait_for_commit) { this->wait_for_all_commits(); }
     }
@@ -384,7 +392,10 @@ TEST_F(RaftReplDevTest, Follower_Fetch_OnActive_ReplicaGroup) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
 
-    set_basic_flip("drop_push_data_request");
+    if (g_helper->replica_num() != 0) {
+        LOGINFO("Set flip to fake fetch data request on data channel");
+        set_basic_flip("drop_push_data_request");
+    }
     this->write_on_leader(100, true /* wait_for_commit */);
 
     g_helper->sync_for_verify_start();
