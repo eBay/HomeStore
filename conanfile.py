@@ -55,9 +55,9 @@ class HomestoreConan(ConanFile):
         self.build_requires("gtest/1.14.0")
 
     def requirements(self):
-        self.requires("iomgr/[~=11, include_prerelease=True]@oss/master")
-        self.requires("sisl/[~=11, include_prerelease=True]@oss/master")
-        self.requires("nuraft_mesg/[~=3, include_prerelease=True]@oss/main")
+        self.requires("iomgr/[~=11.2, include_prerelease=True]@oss/master")
+        self.requires("sisl/[~=12, include_prerelease=True]@oss/master")
+        self.requires("nuraft_mesg/[~=3.3, include_prerelease=True]@oss/main")
 
         self.requires("farmhash/cci.20190513@")
         if self.settings.arch in ['x86', 'x86_64']:
