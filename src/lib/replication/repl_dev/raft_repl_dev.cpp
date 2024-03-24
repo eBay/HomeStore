@@ -12,7 +12,6 @@
 #include <homestore/blkdata_service.hpp>
 #include <homestore/logstore_service.hpp>
 #include <homestore/superblk_handler.hpp>
-#include <homestore/crc.h>
 
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
@@ -260,10 +259,6 @@ void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_
                 pkts.insert(pkts.end(), ret.begin(), ret.end());
             }
 
-            // TODO: Temporary code
-            crc32_t const crc = crc32_ieee(init_crc32, pkts.front().cbytes(), pkts.front().size());
-            RD_LOG(DEBUG, "Data Channel: FetchData data read completed for {} buffers, crc={}", sgs_vec.size(), crc);
-
             rpc_data->set_comp_cb([sgs_vec = std::move(sgs_vec)](boost::intrusive_ptr< sisl::GenericRpcData >&) {
                 for (auto const& sgs : sgs_vec) {
                     for (auto const& iov : sgs.iovs) {
@@ -368,10 +363,6 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
         std::memcpy(rreq->buf_for_unaligned_data.bytes(), data, push_req->data_size());
         data = rreq->buf_for_unaligned_data.cbytes();
     }
-
-    // TODO: Temporary
-    crc32_t const crc = crc32_ieee(init_crc32, data, push_req->data_size());
-    RD_LOG(DEBUG, "Data Channel: PushData received for rreq=[{}] crc={}", rreq->to_string(), crc);
 
     // Schedule a write and upon completion, mark the data as written.
     data_service()
