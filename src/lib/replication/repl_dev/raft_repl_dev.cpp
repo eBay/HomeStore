@@ -988,6 +988,8 @@ void RaftReplDev::report_committed(repl_req_ptr_t rreq) {
 void RaftReplDev::cp_flush(CP*) {
     auto const lsn = m_commit_upto_lsn.load();
     auto const clsn = m_compact_lsn.load();
+    auto const slsn = m_snapshot_lsn.load();
+    auto const sterm = m_snapshot_log_term.load();
 
     if (lsn == m_last_flushed_commit_lsn) {
         // Not dirtied since last flush ignore
@@ -996,6 +998,8 @@ void RaftReplDev::cp_flush(CP*) {
     m_rd_sb->compact_lsn = clsn;
     m_rd_sb->commit_lsn = lsn;
     m_rd_sb->checkpoint_lsn = lsn;
+    m_rd_sb->snapshot_lsn = slsn;
+    m_rd_sb->snapshot_log_term = sterm;
     m_rd_sb->last_applied_dsn = m_next_dsn.load();
     m_rd_sb.write();
     m_last_flushed_commit_lsn = lsn;

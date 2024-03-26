@@ -263,8 +263,6 @@ public:
     /// @return Block size
     virtual uint32_t get_blk_size() const = 0;
 
-    virtual void truncate_if_needed() = 0;
-
     virtual void attach_listener(shared< ReplDevListener > listener) { m_listener = std::move(listener); }
 
     virtual void detach_listener() {

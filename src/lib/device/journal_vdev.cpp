@@ -24,6 +24,8 @@
 #include <iomgr/iomgr_flip.hpp>
 #include <homestore/homestore.hpp>
 #include <homestore/logstore_service.hpp>
+#include <homestore/replication_service.hpp>
+#include "replication/repl_dev/raft_repl_dev.h"
 #include "device/chunk.h"
 #include "device/device.h"
 #include "device/physical_dev.hpp"
@@ -57,10 +59,7 @@ JournalVirtualDev::JournalVirtualDev(DeviceManager& dmgr, const vdev_info& vinfo
         // either it is critical or non-critical, call cp_flush;
         hs()->cp_mgr().trigger_cp_flush(false /* force */);
 
-        if (critical) {
-            // if this is critical, call log store service to do device truncate immediately to free up spaces;
-            hs()->logstore_service().device_truncate();
-        }
+        if (critical) { resource_mgr().trigger_truncate(); }
     });
 }
 
@@ -586,7 +585,7 @@ void JournalVirtualDev::Descriptor::truncate(off_t truncate_offset) {
     // If still no space can be freed, there is nothing we can't here to back pressure to above layer by rejecting log
     // writes on this descriptor;
     //
-    unset_ready_for_truncate();
+    // unset_ready_for_truncate();
     HS_PERIODIC_LOG(DEBUG, journalvdev, "After truncate desc {}", to_string());
 }
 
@@ -655,11 +654,13 @@ bool JournalVirtualDev::Descriptor::is_offset_at_last_chunk(off_t bytes_offset) 
 // This API is ways called in single thread
 //
 void JournalVirtualDev::Descriptor::high_watermark_check() {
+#if 0
     // high watermark check for the individual journal descriptor;
     if (resource_mgr().check_journal_descriptor_size(used_size())) {
         // the next resource manager audit will call truncation for this descriptor;
         set_ready_for_truncate();
     }
+#endif
 
     // high watermark check for the entire journal vdev;
     if (resource_mgr().check_journal_vdev_size(m_vdev.used_size(), m_vdev.size())) {

@@ -173,6 +173,8 @@ public:
      * to set this to true on cases where there are multiple log stores, so that once all in-memory truncation is
      * completed, a device truncation can be triggered for all the logstores. The device truncation is more
      * expensive and grouping them together yields better results.
+     *
+     * Note: this flag currently is not used, meaning all truncate is in memory only;
      * @return number of records to truncate
      */
     void truncate(logstore_seq_num_t upto_seq_num, bool in_memory_truncate_only = true);

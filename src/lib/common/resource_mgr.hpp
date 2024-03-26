@@ -93,6 +93,8 @@ public:
 
     void reset_dirty_buf_qd();
 
+    void trigger_truncate();
+
 private:
     int64_t get_dirty_buf_limit() const;
     void start_timer();

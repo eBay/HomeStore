@@ -556,6 +556,51 @@ TEST_F(RaftReplDevTest, Drop_Raft_Entry_Switch_Leader) {
 // 4. F2 should be appending entries to F1 and F1 should be able to catch up with F2 (fetch data from F2).
 //
 
+TEST_F(RaftReplDevTest, All_snapshot_and_compact) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    uint64_t exp_entries = SISL_OPTIONS["num_io"].as< uint64_t >();
+    if (g_helper->replica_num() == 0) {
+        auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+        LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
+        g_helper->runner().set_task([this, block_size]() {
+            static std::normal_distribution<> num_blks_gen{3.0, 2.0};
+            this->generate_writes(std::abs(std::round(num_blks_gen(g_re))) * block_size, block_size);
+        });
+        g_helper->runner().execute().get();
+    }
+    this->wait_for_all_writes(exp_entries);
+
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_all_data();
+    g_helper->sync_for_cleanup_start();
+
+    LOGINFO("Restart all the homestore replicas");
+    g_helper->restart();
+    g_helper->sync_for_test_start();
+
+    exp_entries += SISL_OPTIONS["num_io"].as< uint64_t >();
+    if (g_helper->replica_num() == 0) {
+        LOGINFO("Switch the leader to replica_num = 0");
+        this->switch_all_db_leader();
+
+        LOGINFO("Post restart write the data again");
+        auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+        g_helper->runner().set_task([this, block_size]() {
+            static std::normal_distribution<> num_blks_gen{3.0, 2.0};
+            this->generate_writes(std::abs(std::round(num_blks_gen(g_re))) * block_size, block_size);
+        });
+        g_helper->runner().execute().get();
+    }
+    this->wait_for_all_writes(exp_entries);
+
+    LOGINFO("Validate all data written (including pre-restart data) by reading them");
+    this->validate_all_data();
+    g_helper->sync_for_cleanup_start();
+}
+
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
     char** orig_argv = argv;

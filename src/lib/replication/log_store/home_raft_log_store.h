@@ -29,8 +29,6 @@
 
 namespace homestore {
 
-using store_lsn_t = int64_t;
-using repl_lsn_t = int64_t;
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
 
 class HomeRaftLogStore : public nuraft::log_store {
@@ -137,7 +135,7 @@ public:
      * @param index The start log index number (inclusive).
      * @param pack
      */
-    virtual void apply_pack(ulong index, nuraft::buffer& pack);
+    virtual void apply_pack(ulong index, nuraft::buffer& pack) override;
 
     /**
      * Compact the log store by purging all log entries,
@@ -169,8 +167,13 @@ public:
      */
     virtual ulong last_durable_index() override;
 
+public:
+    // non-override functions from nuraft::log_store
     logstore_id_t logstore_id() const { return m_logstore_id; }
     logdev_id_t logdev_id() const { return m_logdev_id; }
+
+    ulong last_index() const;
+    void truncate(uint32_t num_reserved_cnt);
 
 private:
     logstore_id_t m_logstore_id;
