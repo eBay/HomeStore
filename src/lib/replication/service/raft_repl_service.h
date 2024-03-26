@@ -63,6 +63,7 @@ protected:
 
 private:
     void raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie);
+    uint32_t get_snapshot_freq_distance() const;
 };
 
 class RaftReplServiceCPHandler : public CPCallbacks {

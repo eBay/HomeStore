@@ -21,7 +21,10 @@ struct raft_repl_dev_superblk : public repl_dev_superblk {
     uint32_t raft_sb_version{RAFT_REPL_DEV_SB_VERSION};
     logstore_id_t free_blks_journal_id; // Logstore id for storing free blkid records
     uint8_t is_timeline_consistent; // Flag to indicate whether the recovery of followers need to be timeline consistent
-    uint64_t last_applied_dsn;      // Last applied data sequence number
+    uint64_t last_applied_dsn;      // Last applied data sequence Number
+
+    repl_lsn_t snapshot_lsn{0};
+    uint64_t snapshot_log_term{0};
 
     uint32_t get_raft_sb_version() const { return raft_sb_version; }
 };
@@ -76,6 +79,8 @@ private:
 
     std::atomic< repl_lsn_t > m_commit_upto_lsn{0}; // LSN which was lastly written, to track flushes
     std::atomic< repl_lsn_t > m_compact_lsn{0};     // LSN upto which it was compacted, it is used to track where to
+    std::atomic< repl_lsn_t > m_snapshot_lsn{0};    // LSN upto which latest snapshot was taken
+    std::atomic< uint64_t > m_snapshot_log_term{0}; // LSN's corresponding term upto which latest snapshot was taken
                                                     // maximum lsn the data journal can truncate to;
     repl_lsn_t m_last_flushed_commit_lsn{0};        // LSN upto which it was flushed to persistent store
     iomgr::timer_handle_t m_sb_flush_timer_hdl;
@@ -136,6 +141,13 @@ public:
     ///
     /// @param upto_lsn : LSN upto which the data journal was compacted
     void on_compact(repl_lsn_t upto_lsn) { m_compact_lsn.store(upto_lsn); }
+
+    void on_create_snapshot(repl_lsn_t snapshot_log_idx, repl_lsn_t snapshot_log_term) {
+        m_snapshot_lsn.store(snapshot_log_idx);
+        m_snapshot_log_term.store(snapshot_log_term);
+    }
+
+    void truncate(uint32_t num_reserved_entries) { m_data_journal->truncate(num_reserved_entries); }
 
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////

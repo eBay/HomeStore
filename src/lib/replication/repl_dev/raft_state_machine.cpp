@@ -205,6 +205,7 @@ nuraft_mesg::repl_service_ctx* RaftStateMachine::group_msg_service() { return m_
 
 void RaftStateMachine::create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done) {
     RD_LOG(DEBUG, "create_snapshot {}/{}", s.get_last_log_idx(), s.get_last_log_term());
+    m_rd.on_create_snapshot(s.get_last_log_idx(), s.get_last_log_term());
     auto null_except = std::shared_ptr< std::exception >();
     auto ret_val{false};
     if (when_done) when_done(ret_val, null_except);

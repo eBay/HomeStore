@@ -784,9 +784,11 @@ public:
     void on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key, logdev_key flush_ld_key,
                      log_buffer buf, uint32_t nremaining_in_batch);
     void on_batch_completion(HomeLogStore* log_store, uint32_t nremaining_in_batch, logdev_key flush_ld_key);
-    void device_truncate_under_lock(const std::shared_ptr< truncate_req >& treq);
+    void device_truncate_under_lock(const std::shared_ptr< truncate_req > treq);
     void handle_unopened_log_stores(bool format);
     logdev_id_t get_id() { return m_logdev_id; }
+
+    bool ready_for_truncate() const { return m_vdev_jd->ready_for_truncate(); }
 
 private:
     /**
@@ -823,8 +825,6 @@ private:
     void assert_next_pages(log_stream_reader& lstream);
     void set_flush_status(bool flush_status);
     bool get_flush_status();
-
-    uint32_t get_reserved_log_truncation_idx() const;
 
 private:
     std::unique_ptr< sisl::StreamTracker< log_record > >

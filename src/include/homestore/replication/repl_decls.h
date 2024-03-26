@@ -65,6 +65,9 @@ using remote_blkid_list_t = folly::small_vector< RemoteBlkId, 4 >;
 using replica_id_t = uuid_t;
 using group_id_t = uuid_t;
 
+using store_lsn_t = int64_t;
+using repl_lsn_t = int64_t;
+
 struct peer_info {
     // Peer ID.
     replica_id_t id_;

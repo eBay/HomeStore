@@ -15,8 +15,10 @@
  *********************************************************************************/
 #include <homestore/homestore.hpp>
 #include <homestore/logstore_service.hpp>
+#include <homestore/replication_service.hpp>
 #include "resource_mgr.hpp"
 #include "homestore_assert.hpp"
+#include "replication/repl_dev/raft_repl_dev.h"
 
 namespace homestore {
 ResourceMgr& resource_mgr() { return hs()->resource_mgr(); }
@@ -24,6 +26,24 @@ ResourceMgr& resource_mgr() { return hs()->resource_mgr(); }
 void ResourceMgr::start(uint64_t total_cap) {
     m_total_cap = total_cap;
     start_timer();
+}
+
+void ResourceMgr::trigger_truncate() {
+    if (hs()->has_repl_data_service()) {
+        // first make sure all repl dev's unlyding raft log store make corresponding reservation during
+        // truncate -- set the safe truncate boundary for each raft log store;
+        hs()->repl_service().iterate_repl_devs([](cshared< ReplDev >& rd) {
+            // lock is already taken by repl service layer;
+            std::dynamic_pointer_cast< RaftReplDev >(rd)->truncate(
+                HS_DYNAMIC_CONFIG(resource_limits.raft_logstore_reserve_threadhold));
+        });
+
+        // next do device truncate which go through all logdevs and truncate them;
+        hs()->logstore_service().device_truncate();
+    }
+
+    // TODO: add device_truncate callback to audit how much space was freed per each LogDev and add related
+    // metrics;
 }
 
 void ResourceMgr::start_timer() {
@@ -34,10 +54,7 @@ void ResourceMgr::start_timer() {
         res_mgr_timer_ms * 1000 * 1000, true /* recurring */, nullptr /* cookie */, iomgr::reactor_regex::all_worker,
         [this](void*) {
             // all resource timely audit routine should arrive here;
-            hs()->logstore_service().device_truncate();
-
-            // TODO: add device_truncate callback to audit how much space was freed per each LogDev and add related
-            // metrics;
+            this->trigger_truncate();
         },
         true /* wait_to_schedule */);
 }

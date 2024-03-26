@@ -104,6 +104,7 @@ public:
     void rollback(uint64_t lsn, nuraft::buffer&) override { LOGCRITICAL("Unimplemented rollback on: [{}]", lsn); }
 
     bool apply_snapshot(nuraft::snapshot&) override { return false; }
+
     void create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done) override;
     nuraft::ptr< nuraft::snapshot > last_snapshot() override { return nullptr; }
 

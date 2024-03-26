@@ -56,6 +56,21 @@ static uint64_t extract_term(const log_buffer& log_bytes) {
     return (*r_cast< uint64_t const* >(raw_ptr));
 }
 
+void HomeRaftLogStore::truncate(uint32_t num_reserved_cnt) {
+    auto const last_lsn = last_index();
+    auto const start_lsn = start_index();
+
+    if (start_lsn + num_reserved_cnt >= last_lsn) {
+        // Nothing to truncate
+        return;
+    } else {
+        // FIXME: move to periodic log
+        REPL_STORE_LOG(DEBUG, "Truncating log entries from {} to {}", start_lsn, last_lsn - num_reserved_cnt);
+        auto truncate_lsn = last_lsn - num_reserved_cnt;
+        m_log_store->truncate(truncate_lsn);
+    }
+}
+
 HomeRaftLogStore::HomeRaftLogStore(logdev_id_t logdev_id, logstore_id_t logstore_id) {
     m_dummy_log_entry = nuraft::cs_new< nuraft::log_entry >(0, nuraft::buffer::alloc(0), nuraft::log_val_type::app_log);
 
@@ -87,6 +102,11 @@ void HomeRaftLogStore::remove_store() {
 ulong HomeRaftLogStore::next_slot() const {
     uint64_t next_slot = to_repl_lsn(m_log_store->get_contiguous_issued_seq_num(m_last_durable_lsn)) + 1;
     return next_slot;
+}
+
+ulong HomeRaftLogStore::last_index() const {
+    uint64_t last_index = m_log_store->get_contiguous_completed_seq_num(m_last_durable_lsn);
+    return last_index;
 }
 
 ulong HomeRaftLogStore::start_index() const {
