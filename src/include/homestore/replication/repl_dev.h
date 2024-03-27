@@ -7,6 +7,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <folly/futures/Future.h>
 #include <sisl/fds/buffer.hpp>
+#include <sisl/fds/utils.hpp>
 #include <sisl/grpc/generic_service.hpp>
 #include <homestore/replication/repl_decls.h>
 
@@ -54,6 +55,7 @@ struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::
     friend class SoloReplDev;
 
 public:
+    repl_req_ctx() { start_time = Clock::now(); }
     virtual ~repl_req_ctx();
     int64_t get_lsn() const { return lsn; }
     MultiBlkId const& get_local_blkid() const { return local_blkid; }
@@ -66,13 +68,15 @@ public:
 
     std::string to_string() const;
     std::string to_compact_string() const;
+    Clock::time_point created_time() const { return start_time; }
 
 public:
-    repl_key rkey;           // Unique key for the request
-    sisl::blob header;       // User header
-    sisl::blob key;          // User supplied key for this req
-    int64_t lsn{-1};         // Lsn for this replication req
-    bool is_proposer{false}; // Is the repl_req proposed by this node
+    repl_key rkey;                // Unique key for the request
+    sisl::blob header;            // User header
+    sisl::blob key;               // User supplied key for this req
+    int64_t lsn{-1};              // Lsn for this replication req
+    bool is_proposer{false};      // Is the repl_req proposed by this node
+    Clock::time_point start_time; // Start time of the request
 
     //////////////// Value related section /////////////////
     sisl::sg_list value;       // Raw value - applicable only to leader req
@@ -83,10 +87,12 @@ public:
     //////////////// Journal/Buf related section /////////////////
     std::variant< std::unique_ptr< uint8_t[] >, raft_buf_ptr_t > journal_buf; // Buf for the journal entry
     repl_journal_entry* journal_entry{nullptr};                               // pointer to the journal entry
+    bool is_jentry_localize_pending{false}; // Is the journal entry needs to be localized from remote
 
     //////////////// Replication state related section /////////////////
     std::mutex state_mtx;
     std::atomic< uint32_t > state{uint32_cast(repl_req_state_t::INIT)}; // State of the replication request
+    folly::Promise< folly::Unit > data_received_promise;                // Promise to be fulfilled when data is received
     folly::Promise< folly::Unit > data_written_promise;                 // Promise to be fulfilled when data is written
 
     //////////////// Communication packet/builder section /////////////////
@@ -178,8 +184,10 @@ public:
     ///
     /// @param header Header originally passed with repl_dev::async_alloc_write() api on the leader
     /// @param data_size Size needed to be allocated for
-    /// @return Expected to return blk_alloc_hints for this write
-    virtual blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) = 0;
+    /// @return Expected to return blk_alloc_hints for this write. If the hints are not available, then return the
+    /// error. It is to be noted this method should return error only in very abnornal cases as in some code flow, an
+    /// error would result in a crash or stall of the entire commit thread.
+    virtual ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) = 0;
 
     /// @brief Called when the replica set is being stopped
     virtual void on_replica_stop() = 0;
@@ -241,7 +249,7 @@ public:
     virtual bool is_leader() const = 0;
 
     /// @brief get the leader replica_id of given group
-    virtual const replica_id_t get_leader_id() const = 0;
+    virtual replica_id_t get_leader_id() const = 0;
 
     /// @brief get replication status. If called on follower member
     /// this API can return empty result.

@@ -22,8 +22,9 @@
 #include <homestore/superblk_handler.hpp>
 
 namespace homestore {
-VENUM(journal_type_t, uint16_t, HS_LARGE_DATA = 0, HS_HEADER_ONLY = 1)
+VENUM(journal_type_t, uint16_t, HS_DATA_LINKED = 0, HS_DATA_INLINED = 1)
 
+#pragma pack(1)
 struct repl_journal_entry {
     static constexpr uint16_t JOURNAL_ENTRY_MAJOR = 1;
     static constexpr uint16_t JOURNAL_ENTRY_MINOR = 1;
@@ -34,8 +35,8 @@ struct repl_journal_entry {
     uint16_t minor_version{JOURNAL_ENTRY_MINOR};
 
     journal_type_t code;
-    int32_t server_id;
-    uint64_t dsn; // Data seq number
+    int32_t server_id; // Server id from where journal entry is originated
+    uint64_t dsn;      // Data seq number
     uint32_t user_header_size;
     uint32_t key_size;
     uint32_t value_size;
@@ -53,7 +54,6 @@ struct repl_journal_entry {
     }
 };
 
-#pragma pack(1)
 struct repl_dev_superblk {
     static constexpr uint64_t REPL_DEV_SB_MAGIC = 0xABCDF00D;
     static constexpr uint32_t REPL_DEV_SB_VERSION = 1;

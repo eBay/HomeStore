@@ -8,7 +8,7 @@
 #include <homestore/blk.h>
 
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
-SISL_OPTIONS_ENABLE(logging, test_blkid)
+SISL_OPTIONS_ENABLE(logging, test_blkid, nuraft_mesg)
 
 SISL_OPTION_GROUP(test_blkid,
                   (num_iterations, "", "num_iterations", "number of iterations",
@@ -65,7 +65,7 @@ TEST(BlkIdTest, SingleBlkIdInMap) {
 TEST(BlkIdTest, MultiBlkIdTest) {
     MultiBlkId mb1;
     ASSERT_EQ(mb1.is_valid(), false);
-    ASSERT_EQ(mb1.to_string(), "MultiBlks: {}");
+    ASSERT_EQ(mb1.to_string(), "[]");
     ASSERT_EQ(mb1.is_multi(), true);
     ASSERT_EQ(mb1.num_pieces(), 0);
 

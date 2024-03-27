@@ -14,6 +14,7 @@
  *********************************************************************************/
 #pragma once
 #include <map>
+#include <queue>
 #include <set>
 #include <string>
 #include <shared_mutex>
@@ -31,6 +32,8 @@
 namespace homestore {
 
 struct repl_dev_superblk;
+class RaftReplDev;
+
 class RaftReplService : public GenericReplService,
                         public nuraft_mesg::MessagingApplication,
                         public std::enable_shared_from_this< RaftReplService > {
@@ -38,6 +41,10 @@ private:
     shared< nuraft_mesg::Manager > m_msg_mgr;
     json_superblk m_config_sb;
     std::vector< std::pair< sisl::byte_view, void* > > m_config_sb_bufs;
+    std::mutex m_pending_fetch_mtx;
+    std::queue< std::pair< shared< RaftReplDev >, std::vector< repl_req_ptr_t > > > m_pending_fetch_batches;
+    iomgr::timer_handle_t m_rdev_fetch_timer_hdl;
+    iomgr::io_fiber_t m_reaper_fiber;
 
 public:
     RaftReplService(cshared< ReplApplication >& repl_app);
@@ -49,6 +56,7 @@ public:
     std::shared_ptr< nuraft_mesg::mesg_state_mgr > create_state_mgr(int32_t srv_id,
                                                                     nuraft_mesg::group_id_t const& group_id) override;
     nuraft_mesg::Manager& msg_manager() { return *m_msg_mgr; }
+    void add_to_fetch_queue(cshared< RaftReplDev >& rdev, std::vector< repl_req_ptr_t > rreqs);
 
 protected:
     ///////////////////// Overrides of GenericReplService ////////////////////
@@ -63,6 +71,9 @@ protected:
 
 private:
     void raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie);
+    void start_reaper_thread();
+    void stop_reaper_thread();
+    void fetch_pending_data();
 };
 
 class RaftReplServiceCPHandler : public CPCallbacks {

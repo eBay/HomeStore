@@ -117,7 +117,7 @@ public:
         void on_rollback(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
                          cintrusive< repl_req_ctx >& ctx) override {}
 
-        blk_alloc_hints get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) override {
+        ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) override {
             return blk_alloc_hints{};
         }
 
