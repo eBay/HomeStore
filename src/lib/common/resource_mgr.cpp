@@ -28,14 +28,28 @@ void ResourceMgr::start(uint64_t total_cap) {
     start_timer();
 }
 
+//
+// 1. Conceptually in rare case(not poosible for NuObject, possibly true for NuBlox2.0) truncate itself can't garunteen
+//    the space is freed up upto satisfy resource manager. e.g. multiple log stores on this same descriptor and one
+//    logstore lagging really behind and not able to truncate much space. Doing multiple truncation won't help in this
+//    case.
+// 2. And any write on any other descriptor will trigger a high_watermark_check, and if it were to trigger critial
+//    alert on this vdev, truncation will be made immediately on all descriptors;
+// 3. If still no space can be freed, there is nothing we can't here to back pressure to above layer by rejecting log
+//    writes on this descriptor;
+//
 void ResourceMgr::trigger_truncate() {
     if (hs()->has_repl_data_service()) {
         // first make sure all repl dev's unlyding raft log store make corresponding reservation during
         // truncate -- set the safe truncate boundary for each raft log store;
         hs()->repl_service().iterate_repl_devs([](cshared< ReplDev >& rd) {
             // lock is already taken by repl service layer;
-            std::dynamic_pointer_cast< RaftReplDev >(rd)->truncate(
-                HS_DYNAMIC_CONFIG(resource_limits.raft_logstore_reserve_threadhold));
+            auto num_resv_threshold = HS_DYNAMIC_CONFIG(resource_limits.raft_logstore_reserve_threshold);
+#ifdef _PRERELEASE
+            if (iomgr_flip::instance()->test_flip("simulate_raft_logstore_compact")) { num_resv_threshold = 0; }
+#endif
+
+            std::dynamic_pointer_cast< RaftReplDev >(rd)->truncate(num_resv_threshold);
         });
 
         // next do device truncate which go through all logdevs and truncate them;

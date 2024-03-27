@@ -799,6 +799,17 @@ private:
      */
     uint64_t truncate(const logdev_key& key);
 
+    /**
+     * Truncates the device.
+     *
+     * This function truncates the device and returns the corresponding logdev_key.
+     *
+     * @param dry_run If set to true, the function performs a dry run without actually truncating the device, it only
+     * updates the corresponding truncation barriers, pretending the truncation happened without actually discarding the
+     * log entries on device.
+     *
+     * @return The logdev_key representing the truncated device.
+     */
     logdev_key do_device_truncate(bool dry_run = false);
 
     LogGroup* make_log_group(uint32_t estimated_records) {

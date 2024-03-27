@@ -168,7 +168,7 @@ table ResourceLimits {
     journal_descriptor_size_threshold_mb: uint32 = 2048(hotswap);
 
     /* num entries that raft logstore wants to reserve -- its truncate should not across this */
-    raft_logstore_reserve_threadhold: uint32 = 2000000(hotswap);   
+    raft_logstore_reserve_threshold: uint32 = 2000000(hotswap);   
     
     /* resource audit timer in ms */
     resource_audit_timer_ms: uint32 = 120000;
@@ -240,8 +240,6 @@ table Consensus {
 
     // data fetch max size limit in MB
     data_fetch_max_size_mb: uint32 = 2;
-    
-    
 }
 
 table HomeStoreSettings {

@@ -43,8 +43,8 @@ HomeLogStore::HomeLogStore(std::shared_ptr< LogDev > logdev, logstore_id_t id, b
         m_metrics{logstore_service().metrics()} {
     m_truncation_barriers.reserve(10000);
     m_safe_truncation_boundary.ld_key = m_logdev->get_last_flush_ld_key();
-    THIS_LOGSTORE_LOG(INFO, "m_safe_truncation_boundary.ld_key={}", m_safe_truncation_boundary.ld_key);
     m_safe_truncation_boundary.seq_num.store(start_lsn - 1, std::memory_order_release);
+    THIS_LOGSTORE_LOG(TRACE, "m_safe_truncation_boundary.ld_key={}", m_safe_truncation_boundary.ld_key);
 }
 
 bool HomeLogStore::write_sync(logstore_seq_num_t seq_num, const sisl::io_blob& b) {
@@ -86,7 +86,7 @@ void HomeLogStore::write_async(logstore_req* req, const log_req_comp_cb_t& cb) {
     req->start_time = Clock::now();
     if (req->seq_num == 0) {
         m_safe_truncation_boundary.ld_key = m_logdev->get_last_flush_ld_key();
-        THIS_LOGSTORE_LOG(INFO, "m_safe_truncation_boundary.ld_key={}", m_safe_truncation_boundary.ld_key);
+        THIS_LOGSTORE_LOG(TRACE, "m_safe_truncation_boundary.ld_key={}", m_safe_truncation_boundary.ld_key);
     }
 #ifndef NDEBUG
     const auto trunc_upto_lsn = truncated_upto();
@@ -278,7 +278,7 @@ void HomeLogStore::do_truncate(logstore_seq_num_t upto_seq_num) {
         (ind == static_cast< int >(m_truncation_barriers.size() - 1)));
 
     m_safe_truncation_boundary.ld_key = m_truncation_barriers[ind].ld_key;
-    THIS_LOGSTORE_LOG(INFO, "m_safe_truncation_boundary.ld_key={}", m_safe_truncation_boundary.ld_key);
+    THIS_LOGSTORE_LOG(TRACE, "m_safe_truncation_boundary.ld_key={}", m_safe_truncation_boundary.ld_key);
     m_safe_truncation_boundary.pending_dev_truncation = true;
 
     m_truncation_barriers.erase(m_truncation_barriers.begin(), m_truncation_barriers.begin() + ind + 1);
@@ -292,17 +292,12 @@ const truncation_info& HomeLogStore::pre_device_truncation() {
 
 // NOTE: This method assumes the flush lock is already acquired by the caller
 void HomeLogStore::post_device_truncation(const logdev_key& trunc_upto_loc) {
-    THIS_LOGSTORE_LOG(INFO, "m_safe_truncation_boundary.ld_key={}", m_safe_truncation_boundary.ld_key);
     if (trunc_upto_loc.idx >= m_safe_truncation_boundary.ld_key.idx) {
         // This method is expected to be called always with this
         m_safe_truncation_boundary.pending_dev_truncation = false;
         m_safe_truncation_boundary.ld_key = trunc_upto_loc;
-        THIS_LOGSTORE_LOG(INFO, "m_safe_truncation_boundary.ld_key={}", m_safe_truncation_boundary.ld_key);
+        THIS_LOGSTORE_LOG(TRACE, "m_safe_truncation_boundary.ld_key={}", m_safe_truncation_boundary.ld_key);
     } else {
-        THIS_LOGSTORE_LOG(
-            ERROR, "Invalid truncation location={} for logstore={} which is lesser than safe truncation boundary={}",
-            trunc_upto_loc, m_store_id, m_safe_truncation_boundary.ld_key);
-
         HS_REL_ASSERT(0,
                       "We expect post_device_truncation to be called only for logstores which has min of all "
                       "truncation boundaries");

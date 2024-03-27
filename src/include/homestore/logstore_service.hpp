@@ -159,7 +159,11 @@ public:
     uint32_t total_size() const;
     iomgr::io_fiber_t flush_thread() { return m_flush_fiber; }
 
-    // called by LogDev truncate;
+    /**
+     * This is used when the actual LogDev truncate is triggered;
+     *
+     * @return The IO fiber associated with the truncate thread.
+     */
     iomgr::io_fiber_t truncate_thread() { return m_truncate_fiber; }
 
 private:
