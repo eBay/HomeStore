@@ -276,18 +276,80 @@ public:
 
     nlohmann::json get_status(int verbosity) const;
 
+    /**
+     * Retrieves the truncation information before device truncation.
+     *
+     * @return A constant reference to the truncation_info object representing the truncation information.
+     */
     const truncation_info& pre_device_truncation();
+
+    /**
+     * \brief post device truncation processing.
+     *
+     * This function is used to update safe truncation boundary to the specified `trunc_upto_key`.
+     *
+     * \param trunc_upto_key The key indicating the log entry up to which truncation has been performed.
+     */
     void post_device_truncation(const logdev_key& trunc_upto_key);
+
+    /**
+     * Handles the completion of a write operation in the log store.
+     *
+     * @param req The logstore_req object representing the completed write operation.
+     * @param ld_key The logdev_key associated with the completed write operation.
+     */
     void on_write_completion(logstore_req* req, const logdev_key& ld_key);
+
+    /**
+     * \brief Handles the completion of a read operation in the log store.
+     *
+     * This function is called when a read operation in the log store has completed.
+     * It takes a pointer to a logstore_req object and a logdev_key object as parameters.
+     *
+     * \param req The pointer to the logstore_req object representing the read request.
+     * \param ld_key The logdev_key object representing the key used for the read operation.
+     */
     void on_read_completion(logstore_req* req, const logdev_key& ld_key);
+
+    /**
+     * @brief Handles the event when a log is found.
+     *
+     * This function is called when a log is found in the log store. It takes the sequence number of the log,
+     * the log device key, the flush log device key, and the log buffer as parameters.
+     *
+     * During LogDev::do_load during recovery boot, whenever a log is found, the associated logstore's on_log_found
+     * method is called.
+     *
+     * @param seq_num The sequence number of the log.
+     * @param ld_key The log device key.
+     * @param flush_ld_key The flush log device key.
+     * @param buf The log buffer.
+     */
     void on_log_found(logstore_seq_num_t seq_num, const logdev_key& ld_key, const logdev_key& flush_ld_key,
                       log_buffer buf);
+    /**
+     * @brief Handles the completion of a batch flush operation to update internal state.
+     *
+     * This function is called when a batch flush operation is completed.
+     * It takes a `logdev_key` parameter that represents the key of the flushed batch.
+     *
+     * This function is also called during log store recovery;
+     *
+     * @param flush_batch_ld_key The key of the flushed batch.
+     */
     void on_batch_completion(const logdev_key& flush_batch_ld_key);
 
 private:
+    /**
+     * Truncates the log store up to the specified sequence number.
+     *
+     * @param upto_seq_num The sequence number up to which the log store should be truncated.
+     */
     void do_truncate(logstore_seq_num_t upto_seq_num);
+
     int search_max_le(logstore_seq_num_t input_sn);
 
+private:
     logstore_id_t m_store_id;
     std::shared_ptr< LogDev > m_logdev;
     sisl::StreamTracker< logstore_record > m_records;

@@ -571,21 +571,6 @@ void JournalVirtualDev::Descriptor::truncate(off_t truncate_offset) {
     m_write_sz_in_total.fetch_sub(size_to_truncate, std::memory_order_relaxed);
     m_truncate_done = true;
 
-    //
-    // Conceptually in rare case(not poosible for NuObject, possibly true for NuBlox2.0) truncate itself can't garunteen
-    // the space is freed up upto satisfy resource manager. e.g. multiple log stores on this same descriptor and one
-    // logstore lagging really behind and not able to truncate much space. Doing multiple truncation won't help in this
-    // case.
-    //
-    // In this rare case, the next write on this descrptor will set ready flag again.
-    //
-    // And any write on any other descriptor will trigger a high_watermark_check, and if it were to trigger critial
-    // alert on this vdev, truncation will be made immediately on all descriptors;
-    //
-    // If still no space can be freed, there is nothing we can't here to back pressure to above layer by rejecting log
-    // writes on this descriptor;
-    //
-    // unset_ready_for_truncate();
     HS_PERIODIC_LOG(DEBUG, journalvdev, "After truncate desc {}", to_string());
 }
 
