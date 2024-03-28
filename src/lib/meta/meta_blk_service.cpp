@@ -46,8 +46,8 @@ MetaBlkService& meta_service() { return hs()->meta_service(); }
 
 MetaBlkService::MetaBlkService(const char* name) : m_metrics{name} { m_last_mblk_id = std::make_unique< BlkId >(); }
 
-void MetaBlkService::create_vdev(uint64_t size, uint32_t num_chunks) {
-    const auto phys_page_size = hs()->device_mgr()->optimal_page_size(HSDevType::Fast);
+void MetaBlkService::create_vdev(uint64_t size, HSDevType devType, uint32_t num_chunks) {
+    const auto phys_page_size = hs()->device_mgr()->optimal_page_size(devType);
 
     meta_vdev_context meta_ctx;
     meta_ctx.type = hs_vdev_type_t::META_VDEV;
@@ -56,7 +56,7 @@ void MetaBlkService::create_vdev(uint64_t size, uint32_t num_chunks) {
                                                     .vdev_size = size,
                                                     .num_chunks = num_chunks,
                                                     .blk_size = phys_page_size,
-                                                    .dev_type = HSDevType::Fast,
+                                                    .dev_type = devType,
                                                     .alloc_type = blk_allocator_type_t::varsize,
                                                     .chunk_sel_type = chunk_selector_type_t::ROUND_ROBIN,
                                                     .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,

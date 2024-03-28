@@ -87,7 +87,7 @@ constexpr uint16_t MAX_UUID_LEN{128};
 static constexpr hs_uuid_t INVALID_SYSTEM_UUID{0};
 
 ///////////// All Enums //////////////////////////
-ENUM(HSDevType, uint8_t, Data, Fast);
+ENUM(HSDevType, uint8_t, Auto, Data, Fast);
 ENUM(Op_type, uint8_t, READ, WRITE, UNMAP);
 VENUM(PhysicalDevGroup, uint8_t, DATA = 0, FAST = 1, META = 2);
 ENUM(io_flag, uint8_t,
@@ -148,7 +148,8 @@ static std::string in_bytes(uint64_t sz) {
 }
 
 struct hs_format_params {
-    float size_pct;
+    HSDevType dev_type{HSDevType::Data};
+    float size_pct; // size pct to that type
     uint32_t num_chunks{1};
     uint64_t chunk_size{0};
     uint32_t block_size{0};
@@ -176,6 +177,7 @@ public:
     nlohmann::json to_json() const;
     std::string to_string() const { return to_json().dump(4); }
     uint64_t io_mem_size() const { return (hugepage_size != 0) ? hugepage_size : app_mem_size; }
+    bool has_fast_dev() const { return std::any_of(devices.begin(), devices.end(), [](const dev_info& d) { return d.dev_type == HSDevType::Fast; }); }
 };
 
 struct hs_engine_config {

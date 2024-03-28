@@ -103,7 +103,7 @@ public:
     ~MetaBlkService() = default;
 
     // Creates the vdev that is needed to initialize the device
-    void create_vdev(uint64_t size, uint32_t num_chunks);
+    void create_vdev(uint64_t size, HSDevType devType, uint32_t num_chunks);
 
     // Open the existing vdev which is represented by the vdev_info
     shared< VirtualDev > open_vdev(const vdev_info& vinfo, bool load_existing);
