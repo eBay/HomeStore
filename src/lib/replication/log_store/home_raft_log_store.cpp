@@ -16,6 +16,8 @@
 #include "home_raft_log_store.h"
 #include "storage_engine_buffer.h"
 #include <sisl/fds/utils.hpp>
+#include "common/homestore_assert.hpp"
+#include <homestore/homestore.hpp>
 
 using namespace homestore;
 
@@ -60,17 +62,28 @@ static uint64_t extract_term(const log_buffer& log_bytes) {
     return (*r_cast< uint64_t const* >(raw_ptr));
 }
 
-void HomeRaftLogStore::truncate(uint32_t num_reserved_cnt) {
+void HomeRaftLogStore::truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_lsn) {
     auto const last_lsn = last_index();
     auto const start_lsn = start_index();
 
     if (start_lsn + num_reserved_cnt >= last_lsn) {
-        // Nothing to truncate
+        HS_PERIODIC_LOG(TRACE, replication,
+                        "Store={} LogDev={}: Bypassing truncating because of reserved logs entries is not enough. "
+                        "start_lsn={}, resv_cnt={}, last_lsn={}",
+                        m_logstore_id, m_logdev_id, start_lsn, num_reserved_cnt, last_lsn);
         return;
     } else {
-        HS_PERIODIC_LOG(INFO, "Store={}: Truncating log entries from {} to {}", m_store_id, start_lsn,
-                        last_lsn - num_reserved_cnt);
-        auto truncate_lsn = last_lsn - num_reserved_cnt;
+        //
+        // truncate_lsn can not accross compact_lsn passed down by raft server;
+        //
+        // When will it happen:
+        // compact_lsn can be smaller than last_lsn - num_reserved_cnt, when raft is configured with
+        // snapshot_distance of a large value, and dynamic config "resvered log entries" a smaller value.
+        //
+        auto truncate_lsn = std::min(last_lsn - num_reserved_cnt, (ulong)to_store_lsn(compact_lsn));
+
+        HS_PERIODIC_LOG(INFO, replication, "Store={} LogDev={}: Truncating log entries from {} to {}, compact_lsn={}",
+                        m_logstore_id, m_logdev_id, start_lsn, truncate_lsn, compact_lsn);
         m_log_store->truncate(truncate_lsn);
     }
 }

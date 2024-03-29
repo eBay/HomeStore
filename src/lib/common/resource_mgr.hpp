@@ -76,9 +76,36 @@ public:
     /* get cache size */
     uint64_t get_cache_size() const;
 
-    /* monitor journal size */
+    /**
+     * @brief Checks if the journal virtual device (vdev) size is within the specified limits.
+     *
+     * This function compares the used size of the journal vdev with the total size of the vdev
+     * and returns true if the used size is within the limits, and false otherwise.
+     *
+     * If it exceeds the limit, it will call the callback function registered with register_journal_vdev_exceed_cb().
+     *
+     * @param used_size The used size of the journal vdev.
+     * @param total_size The total size of the journal vdev.
+     * @return true if the used size is within the limits, false otherwise.
+     */
     bool check_journal_vdev_size(const uint64_t used_size, const uint64_t total_size);
+
+    /**
+     * @brief Checks if the given used size is within the acceptable range for the journal descriptor.
+     *
+     * This function checks if the used size of the journal descriptor is within the acceptable range.
+     * The acceptable range is determined by the implementation of the resource manager.
+     *
+     * @param used_size The used size of the journal descriptor.
+     * @return true if the used size is within the acceptable range, false otherwise.
+     */
     bool check_journal_descriptor_size(const uint64_t used_size) const;
+
+    /**
+     * Registers a callback function to be called when the journal virtual device exceeds its limit.
+     *
+     * @param cb The callback function to be registered.
+     */
     void register_journal_vdev_exceed_cb(exceed_limit_cb_t cb);
 
     uint32_t get_journal_vdev_size_limit() const;
@@ -94,10 +121,18 @@ public:
 
     void reset_dirty_buf_qd();
 
+    /**
+     * Triggers the truncation process.
+     * This function is responsible for initiating the truncation process.
+     */
     void trigger_truncate();
 
 private:
     int64_t get_dirty_buf_limit() const;
+
+    /**
+     * Starts resource manager resource audit timer.
+     */
     void start_timer();
 
 private:

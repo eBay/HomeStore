@@ -784,7 +784,17 @@ public:
     void on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key, logdev_key flush_ld_key,
                      log_buffer buf, uint32_t nremaining_in_batch);
     void on_batch_completion(HomeLogStore* log_store, uint32_t nremaining_in_batch, logdev_key flush_ld_key);
+
+    /**
+     * Truncates the device under lock.
+     *
+     * This function is responsible for truncating the device based on the provided truncate request.
+     * The truncation operation is performed under a lock to ensure thread safety.
+     *
+     * @param treq The truncate request to be processed.
+     */
     void device_truncate_under_lock(const std::shared_ptr< truncate_req > treq);
+
     void handle_unopened_log_stores(bool format);
     logdev_id_t get_id() { return m_logdev_id; }
 

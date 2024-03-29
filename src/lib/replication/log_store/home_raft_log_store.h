@@ -172,8 +172,21 @@ public:
     logstore_id_t logstore_id() const { return m_logstore_id; }
     logdev_id_t logdev_id() const { return m_logdev_id; }
 
+    /**
+     * Returns the last completed index in the log store.
+     *
+     * @return The last completed index in the log store.
+     */
     ulong last_index() const;
-    void truncate(uint32_t num_reserved_cnt);
+
+    /**
+     * Truncates the log store
+     *
+     * @param num_reserved_cnt The number of log entries to be reserved.
+     * @param compact_lsn This is the truncation barrier passed down by raft server. Truncation should not across this
+     * LSN;
+     */
+    void truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_lsn);
 
 private:
     logstore_id_t m_logstore_id;

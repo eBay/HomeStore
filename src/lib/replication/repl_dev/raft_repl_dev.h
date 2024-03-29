@@ -76,10 +76,8 @@ private:
 
     std::atomic< repl_lsn_t > m_commit_upto_lsn{0}; // LSN which was lastly written, to track flushes
     std::atomic< repl_lsn_t > m_compact_lsn{0};     // LSN upto which it was compacted, it is used to track where to
-    std::atomic< repl_lsn_t > m_snapshot_lsn{0};    // LSN upto which latest snapshot was taken
-    std::atomic< uint64_t > m_snapshot_log_term{0}; // LSN's corresponding term upto which latest snapshot was taken
-                                                    // maximum lsn the data journal can truncate to;
-    repl_lsn_t m_last_flushed_commit_lsn{0};        // LSN upto which it was flushed to persistent store
+
+    repl_lsn_t m_last_flushed_commit_lsn{0}; // LSN upto which it was flushed to persistent store
     iomgr::timer_handle_t m_sb_flush_timer_hdl;
 
     std::atomic< uint64_t > m_next_dsn{0}; // Data Sequence Number that will keep incrementing for each data entry
@@ -140,8 +138,26 @@ public:
     /// @param upto_lsn : LSN upto which the data journal was compacted
     void on_compact(repl_lsn_t upto_lsn) { m_compact_lsn.store(upto_lsn); }
 
+    /**
+     * \brief Handles the creation of a snapshot.
+     *
+     * This function is called when a snapshot needs to be created in the replication process.
+     * It takes a reference to a `nuraft::snapshot` object and a handler for the asynchronous result.
+     * The handler will be called when the snapshot creation is completed.
+     *
+     * \param s The snapshot object to be created.
+     * \param when_done The handler to be called when the snapshot creation is completed.
+     */
     void on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done);
-    void truncate(uint32_t num_reserved_entries) { m_data_journal->truncate(num_reserved_entries); }
+
+    /**
+     * Truncates the replication log by providing a specified number of reserved entries.
+     *
+     * @param num_reserved_entries The number of reserved entries of the replication log.
+     */
+    void truncate(uint32_t num_reserved_entries) {
+        m_data_journal->truncate(num_reserved_entries, m_compact_lsn.load());
+    }
 
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////
