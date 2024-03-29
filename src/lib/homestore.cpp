@@ -236,6 +236,8 @@ void HomeStore::shutdown() {
     m_cp_mgr->shutdown();
     m_cp_mgr.reset();
 
+    m_resource_mgr->stop();
+
     if (has_repl_data_service()) {
         // Log and Data services are stopped by repl service
         s_cast< GenericReplService* >(m_repl_service.get())->stop();

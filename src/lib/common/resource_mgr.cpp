@@ -16,6 +16,7 @@
 #include <homestore/homestore.hpp>
 #include <homestore/logstore_service.hpp>
 #include <homestore/replication_service.hpp>
+#include <iomgr/iomgr_flip.hpp>
 #include "resource_mgr.hpp"
 #include "homestore_assert.hpp"
 #include "replication/repl_dev/raft_repl_dev.h"
@@ -27,7 +28,11 @@ void ResourceMgr::start(uint64_t total_cap) {
     m_total_cap = total_cap;
     start_timer();
 }
-
+void ResourceMgr::stop() {
+    LOGINFO("Cancel resource manager timer.");
+    iomanager.cancel_timer(m_res_audit_timer_hdl);
+    m_res_audit_timer_hdl = iomgr::null_timer_handle;
+}
 //
 // 1. Conceptually in rare case(not poosible for NuObject, possibly true for NuBlox2.0) truncate itself can't garunteen
 //    the space is freed up upto satisfy resource manager. e.g. multiple log stores on this same descriptor and one
@@ -44,12 +49,8 @@ void ResourceMgr::trigger_truncate() {
         // truncate -- set the safe truncate boundary for each raft log store;
         hs()->repl_service().iterate_repl_devs([](cshared< ReplDev >& rd) {
             // lock is already taken by repl service layer;
-            auto num_resv_threshold = HS_DYNAMIC_CONFIG(resource_limits.raft_logstore_reserve_threshold);
-#ifdef _PRERELEASE
-            if (iomgr_flip::instance()->test_flip("simulate_raft_logstore_compact")) { num_resv_threshold = 0; }
-#endif
-
-            std::dynamic_pointer_cast< RaftReplDev >(rd)->truncate(num_resv_threshold);
+            std::dynamic_pointer_cast< RaftReplDev >(rd)->truncate(
+                HS_DYNAMIC_CONFIG(resource_limits.raft_logstore_reserve_threshold));
         });
 
         // next do device truncate which go through all logdevs and truncate them;

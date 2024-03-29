@@ -50,6 +50,11 @@ struct repl_key {
     std::string to_string() const { return fmt::format("server={}, term={}, dsn={}", server_id, term, dsn); }
 };
 
+struct repl_snapshot {
+    uint64_t last_log_idx_{0};
+    uint64_t last_log_term_{0};
+};
+
 struct repl_journal_entry;
 struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::thread_safe_counter > {
     friend class SoloReplDev;
@@ -191,6 +196,9 @@ public:
 
     /// @brief Called when the replica set is being stopped
     virtual void on_replica_stop() = 0;
+
+    /// @brief Called when the snapshot is being created by nuraft;
+    virtual AsyncReplResult<> on_create_snapshot(repl_snapshot& s) = 0;
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;

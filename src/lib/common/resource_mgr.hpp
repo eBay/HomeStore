@@ -45,6 +45,7 @@ const uint32_t max_qd_multiplier = 32;
 class ResourceMgr {
 public:
     void start(uint64_t total_cap);
+    void stop();
 
     /* monitor dirty buffer count */
     void inc_dirty_buf_size(const uint32_t size);

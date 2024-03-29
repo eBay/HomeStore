@@ -61,7 +61,8 @@ static uint64_t extract_term(const log_buffer& log_bytes) {
 }
 
 void HomeRaftLogStore::truncate(uint32_t num_reserved_cnt) {
-    auto const last_lsn = last_index();
+    // auto const last_lsn = last_index();
+    auto const last_lsn = next_slot() - 1;
     auto const start_lsn = start_index();
 
     if (start_lsn + num_reserved_cnt >= last_lsn) {

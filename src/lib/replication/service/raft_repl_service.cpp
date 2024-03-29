@@ -14,6 +14,7 @@
  *********************************************************************************/
 #include <sisl/logging/logging.h>
 #include <iomgr/io_environment.hpp>
+#include <iomgr/iomgr_flip.hpp>
 #include <chrono>
 
 #include <boost/uuid/string_generator.hpp>
@@ -69,16 +70,6 @@ RaftReplService::RaftReplService(cshared< ReplApplication >& repl_app) : Generic
         nullptr, false, std::optional< meta_subtype_vec_t >({get_meta_blk_name()}));
 }
 
-uint32_t RaftReplService::get_snapshot_freq_distance() const {
-#ifdef _PRERELEASE
-    if (iomgr_flip::instance()->test_flip("simulate_snapshot_distance")) {
-        LOGINFO("Simulating snapshot distance");
-        return 10;
-    }
-#endif
-    return HS_DYNAMIC_CONFIG(consensus.snapshot_freq_distance);
-}
-
 void RaftReplService::start() {
     // Step 1: Initialize the Nuraft messaging service, which starts the nuraft service
     m_my_uuid = m_repl_app->get_my_repl_id();
@@ -106,7 +97,7 @@ void RaftReplService::start() {
                         .with_log_sync_stopping_gap(HS_DYNAMIC_CONFIG(consensus.min_log_gap_to_join))
                         .with_stale_log_gap(HS_DYNAMIC_CONFIG(consensus.stale_log_gap_hi_threshold))
                         .with_fresh_log_gap(HS_DYNAMIC_CONFIG(consensus.stale_log_gap_lo_threshold))
-                        .with_snapshot_enabled(get_snapshot_freq_distance())
+                        .with_snapshot_enabled(HS_DYNAMIC_CONFIG(consensus.snapshot_freq_distance))
                         .with_leadership_expiry(HS_DYNAMIC_CONFIG(consensus.leadership_expiry_ms))
                         .with_reserved_log_items(0) // In reality ReplLogStore retains much more than this
                         .with_auto_forwarding(false);
