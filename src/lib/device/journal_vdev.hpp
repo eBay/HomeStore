@@ -78,11 +78,11 @@ public:
 
         // Create and append the chunk to m_journal_chunks.
         void append_chunk();
-
+#if 0
         bool ready_for_truncate() const { return m_ready_for_truncate.load(std::memory_order_relaxed); }
         void set_ready_for_truncate() { m_ready_for_truncate.store(true, std::memory_order_relaxed); }
         void unset_ready_for_truncate() { m_ready_for_truncate.store(false, std::memory_order_relaxed); }
-
+#endif
         /**
          * @brief : allocate space specified by input size.
          * this API will always be called in single thread;

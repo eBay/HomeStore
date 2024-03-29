@@ -14,7 +14,6 @@
  *********************************************************************************/
 #include <sisl/logging/logging.h>
 #include <iomgr/io_environment.hpp>
-#include <iomgr/iomgr_flip.hpp>
 #include <chrono>
 
 #include <boost/uuid/string_generator.hpp>
@@ -68,16 +67,6 @@ RaftReplService::RaftReplService(cshared< ReplApplication >& repl_app) : Generic
             m_config_sb_bufs.emplace_back(std::pair(std::move(buf), voidptr_cast(mblk)));
         },
         nullptr, false, std::optional< meta_subtype_vec_t >({get_meta_blk_name()}));
-}
-
-uint32_t RaftReplService::get_snapshot_freq_distance() const {
-#ifdef _PRERELEASE
-    if (iomgr_flip::instance()->test_flip("simulate_snapshot_distance")) {
-        LOGINFO("Simulating snapshot distance");
-        return 10;
-    }
-#endif
-    return HS_DYNAMIC_CONFIG(consensus.snapshot_freq_distance);
 }
 
 void RaftReplService::start() {

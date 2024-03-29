@@ -68,8 +68,8 @@ void HomeRaftLogStore::truncate(uint32_t num_reserved_cnt) {
         // Nothing to truncate
         return;
     } else {
-        // FIXME: move to periodic log
-        REPL_STORE_LOG(DEBUG, "Truncating log entries from {} to {}", start_lsn, last_lsn - num_reserved_cnt);
+        HS_PERIODIC_LOG(INFO, "Store={}: Truncating log entries from {} to {}", m_store_id, start_lsn,
+                        last_lsn - num_reserved_cnt);
         auto truncate_lsn = last_lsn - num_reserved_cnt;
         m_log_store->truncate(truncate_lsn);
     }

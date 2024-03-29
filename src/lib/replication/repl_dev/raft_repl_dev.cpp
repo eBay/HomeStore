@@ -109,7 +109,8 @@ bool RaftReplDev::join_group() {
 void RaftReplDev::use_config(json_superblk raft_config_sb) { m_raft_config_sb = std::move(raft_config_sb); }
 
 void RaftReplDev::on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done) {
-    RD_LOG(DEBUG, "create_snapshot {}/{}", s.get_last_log_idx(), s.get_last_log_term());
+    HS_PERIODIC_LOG(DEBUG, "repl_dev={}: create_snapshot last_idx={}/term={}", rdev_name(), s.get_last_log_idx(),
+                    s.get_last_log_term());
     repl_snapshot snapshot{.last_log_idx_ = s.get_last_log_idx(), .last_log_term_ = s.get_last_log_term()};
     auto result = m_listener->on_create_snapshot(snapshot).get();
     auto null_except = std::shared_ptr< std::exception >();
@@ -1008,8 +1009,6 @@ void RaftReplDev::cp_flush(CP*) {
     m_rd_sb->compact_lsn = clsn;
     m_rd_sb->commit_lsn = lsn;
     m_rd_sb->checkpoint_lsn = lsn;
-    m_rd_sb->snapshot_lsn = slsn;
-    m_rd_sb->snapshot_log_term = sterm;
     m_rd_sb->last_applied_dsn = m_next_dsn.load();
     m_rd_sb.write();
     m_last_flushed_commit_lsn = lsn;

@@ -23,9 +23,6 @@ struct raft_repl_dev_superblk : public repl_dev_superblk {
     uint8_t is_timeline_consistent; // Flag to indicate whether the recovery of followers need to be timeline consistent
     uint64_t last_applied_dsn;      // Last applied data sequence Number
 
-    repl_lsn_t snapshot_lsn{0};
-    uint64_t snapshot_log_term{0};
-
     uint32_t get_raft_sb_version() const { return raft_sb_version; }
 };
 #pragma pack()

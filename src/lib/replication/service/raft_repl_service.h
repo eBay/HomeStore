@@ -75,8 +75,6 @@ private:
     void start_reaper_thread();
     void stop_reaper_thread();
     void fetch_pending_data();
-
-    uint32_t get_snapshot_freq_distance() const;
 };
 
 class RaftReplServiceCPHandler : public CPCallbacks {

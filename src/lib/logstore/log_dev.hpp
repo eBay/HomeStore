@@ -788,7 +788,7 @@ public:
     void handle_unopened_log_stores(bool format);
     logdev_id_t get_id() { return m_logdev_id; }
 
-    bool ready_for_truncate() const { return m_vdev_jd->ready_for_truncate(); }
+    // bool ready_for_truncate() const { return m_vdev_jd->ready_for_truncate(); }
 
 private:
     /**
