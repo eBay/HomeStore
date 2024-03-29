@@ -144,12 +144,6 @@ public:
     void on_compact(repl_lsn_t upto_lsn) { m_compact_lsn.store(upto_lsn); }
 
     void on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done);
-#if 0
-    void on_create_snapshot(repl_lsn_t snapshot_log_idx, repl_lsn_t snapshot_log_term) {
-        m_snapshot_lsn.store(snapshot_log_idx);
-        m_snapshot_log_term.store(snapshot_log_term);
-    }
-#endif
     void truncate(uint32_t num_reserved_entries) { m_data_journal->truncate(num_reserved_entries); }
 
 protected:
