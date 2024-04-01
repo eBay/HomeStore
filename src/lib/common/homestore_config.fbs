@@ -238,6 +238,10 @@ table Consensus {
     // Leadership expiry (=0 indicates 20 times heartbeat period), set -1 to never expire
     leadership_expiry_ms: int32 = 0;
 
+    // Num reserved log items while triggering compact from raft server;
+    // This is not the real number reserved log items, it is the maximum truncation barrier (truncate can't across this);
+    num_reserved_log_items: uint32 = 2000;
+
     // data fetch max size limit in KB (2MB by default)
     data_fetch_max_size_kb: uint32 = 2048;
 

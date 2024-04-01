@@ -111,13 +111,14 @@ bool RaftReplDev::join_group() {
 void RaftReplDev::use_config(json_superblk raft_config_sb) { m_raft_config_sb = std::move(raft_config_sb); }
 
 void RaftReplDev::on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done) {
-    HS_PERIODIC_LOG(DEBUG, replication, "repl_dev={}: create_snapshot last_idx={}/term={}", rdev_name(),
-                    s.get_last_log_idx(), s.get_last_log_term());
+    RD_LOG(DEBUG, "create_snapshot last_idx={}/term={}", s.get_last_log_idx(), s.get_last_log_term());
     repl_snapshot snapshot{.last_log_idx_ = s.get_last_log_idx(), .last_log_term_ = s.get_last_log_term()};
     auto result = m_listener->on_create_snapshot(snapshot).get();
     auto null_except = std::shared_ptr< std::exception >();
     HS_REL_ASSERT(result.hasError() == false, "Not expecting creating snapshot to return false. ");
-    auto ret_val{false};
+    m_last_snapshot = nuraft::cs_new< nuraft::snapshot >(s.get_last_log_idx(), s.get_last_log_term(),
+                                                         s.get_last_config(), s.size(), s.get_type());
+    auto ret_val{true};
     if (when_done) { when_done(ret_val, null_except); }
 }
 

@@ -253,4 +253,6 @@ void RaftStateMachine::create_snapshot(nuraft::snapshot& s, nuraft::async_result
 }
 
 std::string RaftStateMachine::rdev_name() const { return m_rd.rdev_name(); }
+
+nuraft::ptr< nuraft::snapshot > RaftStateMachine::last_snapshot() { return m_rd.get_last_snapshot(); }
 } // namespace homestore

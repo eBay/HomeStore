@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include <libnuraft/ptr.hxx>
 #include <nuraft_mesg/nuraft_mesg.hpp>
 #include <nuraft_mesg/mesg_state_mgr.hpp>
 #include <sisl/fds/buffer.hpp>
@@ -88,6 +89,8 @@ private:
 
     RaftReplDevMetrics m_metrics;
 
+    nuraft::ptr< nuraft::snapshot > m_last_snapshot{nullptr};
+
     static std::atomic< uint64_t > s_next_group_ordinal;
 
 public:
@@ -158,6 +161,8 @@ public:
     void truncate(uint32_t num_reserved_entries) {
         m_data_journal->truncate(num_reserved_entries, m_compact_lsn.load());
     }
+
+    nuraft::ptr< nuraft::snapshot > get_last_snapshot() { return m_last_snapshot; }
 
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////

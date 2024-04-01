@@ -106,7 +106,7 @@ public:
     bool apply_snapshot(nuraft::snapshot&) override { return false; }
 
     void create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done) override;
-    nuraft::ptr< nuraft::snapshot > last_snapshot() override { return nullptr; }
+    nuraft::ptr< nuraft::snapshot > last_snapshot() override;
 
     ////////// APIs outside of nuraft::state_machine requirements ////////////////////
     ReplServiceError propose_to_raft(repl_req_ptr_t rreq);

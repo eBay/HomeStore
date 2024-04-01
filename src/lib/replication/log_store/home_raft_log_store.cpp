@@ -67,10 +67,10 @@ void HomeRaftLogStore::truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_ls
     auto const start_lsn = start_index();
 
     if (start_lsn + num_reserved_cnt >= last_lsn) {
-        HS_PERIODIC_LOG(TRACE, replication,
-                        "Store={} LogDev={}: Bypassing truncating because of reserved logs entries is not enough. "
-                        "start_lsn={}, resv_cnt={}, last_lsn={}",
-                        m_logstore_id, m_logdev_id, start_lsn, num_reserved_cnt, last_lsn);
+        REPL_STORE_LOG(DEBUG,
+                       "Store={} LogDev={}: Bypassing truncating because of reserved logs entries is not enough. "
+                       "start_lsn={}, resv_cnt={}, last_lsn={}",
+                       m_logstore_id, m_logdev_id, start_lsn, num_reserved_cnt, last_lsn);
         return;
     } else {
         //
@@ -82,8 +82,8 @@ void HomeRaftLogStore::truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_ls
         //
         auto truncate_lsn = std::min(last_lsn - num_reserved_cnt, (ulong)to_store_lsn(compact_lsn));
 
-        HS_PERIODIC_LOG(INFO, replication, "Store={} LogDev={}: Truncating log entries from {} to {}, compact_lsn={}",
-                        m_logstore_id, m_logdev_id, start_lsn, truncate_lsn, compact_lsn);
+        REPL_STORE_LOG(INFO, "LogDev={}: Truncating log entries from {} to {}, compact_lsn={}, last_lsn={}",
+                       m_logdev_id, start_lsn, truncate_lsn, compact_lsn, last_lsn);
         m_log_store->truncate(truncate_lsn);
     }
 }
