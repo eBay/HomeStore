@@ -87,7 +87,7 @@ constexpr uint16_t MAX_UUID_LEN{128};
 static constexpr hs_uuid_t INVALID_SYSTEM_UUID{0};
 
 ///////////// All Enums //////////////////////////
-ENUM(HSDevType, uint8_t, Auto, Data, Fast);
+ENUM(HSDevType, uint8_t, Data, Fast);
 ENUM(Op_type, uint8_t, READ, WRITE, UNMAP);
 VENUM(PhysicalDevGroup, uint8_t, DATA = 0, FAST = 1, META = 2);
 ENUM(io_flag, uint8_t,

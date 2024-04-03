@@ -152,37 +152,10 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
 
 void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format_opts) {
 
-    auto get_optimal_dev_type = [this](const uint32_t svc_type) -> HSDevType {
-        const auto& inp_params = HomeStoreStaticConfig::instance().input;
-        if (svc_type & HS_SERVICE::META || svc_type & HS_SERVICE::LOG || svc_type & HS_SERVICE::INDEX) {
-            if (inp_params.has_fast_dev()) {
-                return HSDevType::Fast;
-            } else {
-                return HSDevType::Data;
-            }
-        } else {
-            return HSDevType::Data;
-        }
-    };
     std::map< HSDevType, float > total_pct_by_type = {{HSDevType::Fast, 0.0f}, {HSDevType::Data, 0.0f}};
-    // applying optimal placement for auto
-    for (auto& [svc_type, fparams] : format_opts) {
-        if ((svc_type & HS_SERVICE::META) && has_meta_service()) {
-            if (fparams.dev_type == HSDevType::Auto) { fparams.dev_type = get_optimal_dev_type(svc_type); }
-            total_pct_by_type[fparams.dev_type] += fparams.size_pct;
-        } else if ((svc_type & HS_SERVICE::LOG) && has_log_service()) {
-            if (fparams.dev_type == HSDevType::Auto) { fparams.dev_type = get_optimal_dev_type(svc_type); }
-            total_pct_by_type[fparams.dev_type] += fparams.size_pct;
-        } else if ((svc_type & HS_SERVICE::DATA) && has_data_service()) {
-            if (fparams.dev_type == HSDevType::Auto) { fparams.dev_type = get_optimal_dev_type(svc_type); }
-            total_pct_by_type[fparams.dev_type] += fparams.size_pct;
-        } else if ((svc_type & HS_SERVICE::INDEX) && has_index_service()) {
-            if (fparams.dev_type == HSDevType::Auto) { fparams.dev_type = get_optimal_dev_type(svc_type); }
-            total_pct_by_type[fparams.dev_type] += fparams.size_pct;
-        } else if ((svc_type & HS_SERVICE::REPLICATION) && has_repl_data_service()) {
-            if (fparams.dev_type == HSDevType::Auto) { fparams.dev_type = get_optimal_dev_type(svc_type); }
-            total_pct_by_type[fparams.dev_type] += fparams.size_pct;
-        }
+    // Accumulate total percentage of services on each device type
+    for (const auto& [svc_type, fparams] : format_opts) {
+        total_pct_by_type[fparams.dev_type] += fparams.size_pct;
     }
 
     // Sanity check, each type accumulated pct <=100%
