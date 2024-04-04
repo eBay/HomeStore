@@ -44,6 +44,7 @@ private:
     std::mutex m_pending_fetch_mtx;
     std::queue< std::pair< shared< RaftReplDev >, std::vector< repl_req_ptr_t > > > m_pending_fetch_batches;
     iomgr::timer_handle_t m_rdev_fetch_timer_hdl;
+    iomgr::timer_handle_t m_rdev_gc_timer_hdl;
     iomgr::io_fiber_t m_reaper_fiber;
 
 public:
@@ -75,6 +76,7 @@ private:
     void start_reaper_thread();
     void stop_reaper_thread();
     void fetch_pending_data();
+    void gc_repl_devs();
 };
 
 class RaftReplServiceCPHandler : public CPCallbacks {

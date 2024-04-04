@@ -284,12 +284,10 @@ void RaftReplService::start_reaper_thread() {
         if (is_started) {
             m_reaper_fiber = iomanager.iofiber_self();
 
-#if 0
-                // Schedule the rdev garbage collector timer
-                m_rdev_gc_timer_hdl = iomanager.schedule_thread_timer(
-                    HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 *
-                    1000, true /* recurring */, nullptr, [this] { gc_repl_devs(); });
-#endif
+            // Schedule the rdev garbage collector timer
+            m_rdev_gc_timer_hdl = iomanager.schedule_thread_timer(
+                HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 * 1000, true /* recurring */,
+                nullptr, [this](void*) { gc_repl_devs(); });
 
             // Check for queued fetches at the minimum every second
             uint64_t interval_ns =
@@ -335,16 +333,16 @@ void RaftReplService::fetch_pending_data() {
     }
 }
 
-#if 0
 void RaftReplService::gc_repl_devs() {
     std::unique_lock lg(m_rd_map_mtx);
-    for (it = m_rd_map.begin(); it != m_rd_map.end();) {
+    for (auto it = m_rd_map.begin(); it != m_rd_map.end();) {
         auto rdev = std::dynamic_pointer_cast< RaftReplDev >(it->second);
         if (rdev->is_destroy_pending() &&
             (get_elapsed_time_sec(rdev->destroyed_time()) >=
              HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec))) {
             LOGINFOMOD(replication,
-                       "ReplDev group_id={} was destroyed, shutting down the raft group in delayed fashion now");
+                       "ReplDev group_id={} was destroyed, shutting down the raft group in delayed fashion now",
+                       rdev->group_id());
             m_msg_mgr->leave_group(rdev->group_id());
             it = m_rd_map.erase(it);
         } else {
@@ -352,7 +350,6 @@ void RaftReplService::gc_repl_devs() {
         }
     }
 }
-#endif
 
 ///////////////////// RaftReplService CP Callbacks /////////////////////////////
 std::unique_ptr< CPContext > RaftReplServiceCPHandler::on_switchover_cp(CP* cur_cp, CP* new_cp) { return nullptr; }

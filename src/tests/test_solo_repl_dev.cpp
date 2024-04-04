@@ -127,7 +127,7 @@ public:
                       cintrusive< repl_req_ctx >& ctx) override {
             LOGINFO("Received error={} on repl_dev", enum_name(error));
         }
-        void on_replica_stop() override {}
+        void on_destroy() override {}
     };
 
     class Application : public ReplApplication {

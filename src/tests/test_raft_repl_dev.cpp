@@ -115,9 +115,6 @@ public:
 
     void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key, MultiBlkId const& blkids,
                    cintrusive< repl_req_ctx >& ctx) override {
-
-        m_num_commits.fetch_add(1, std::memory_order_relaxed);
-
         ASSERT_EQ(header.size(), sizeof(test_req::journal_header));
 
         auto jheader = r_cast< test_req::journal_header const* >(header.cbytes());
@@ -134,7 +131,7 @@ public:
             ++commit_count_;
         }
 
-        if (ctx->is_proposer) { g_helper->runner().next_task(); }
+        if (ctx->is_proposer()) { g_helper->runner().next_task(); }
     }
 
     bool on_pre_commit(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
@@ -161,7 +158,7 @@ public:
         return blk_alloc_hints{};
     }
 
-    void on_replica_stop() override {}
+    void on_destroy() override {}
 
     void db_write(uint64_t data_size, uint32_t max_size_per_iov) {
         static std::atomic< uint32_t > s_uniq_num{0};
@@ -230,7 +227,6 @@ private:
     std::map< Key, Value > inmem_db_;
     uint64_t commit_count_{0};
     std::shared_mutex db_mtx_;
-    std::atomic< uint64_t > m_num_commits;
 };
 
 class RaftReplDevTest : public testing::Test {
@@ -243,6 +239,16 @@ public:
             dbs_.emplace_back(std::move(db));
         }
     }
+
+#if 0
+    void TearDown() override {
+        for (auto const& db : dbs_) {
+            g_helper->unregister_listener(db);
+            auto err = listener->repl_dev()->destroy_group().get();
+            ASSERT_EQ(err, ReplServiceError::OK) << "Error in destroying the group";
+        }
+    }
+#endif
 
     void generate_writes(uint64_t data_size, uint32_t max_size_per_iov) {
         pick_one_db().db_write(data_size, max_size_per_iov);
