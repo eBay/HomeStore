@@ -54,8 +54,8 @@ LogStoreService::LogStoreService() {
         nullptr);
 }
 
-folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, uint32_t chunk_size) {
-    const auto atomic_page_size = hs()->device_mgr()->atomic_page_size(HSDevType::Fast);
+folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, HSDevType devType, uint32_t chunk_size) {
+    const auto atomic_page_size = hs()->device_mgr()->atomic_page_size(devType);
 
     hs_vdev_context hs_ctx;
     hs_ctx.type = hs_vdev_type_t::LOGDEV_VDEV;
@@ -78,7 +78,7 @@ folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, uin
                                                         .num_chunks = 0,
                                                         .blk_size = atomic_page_size,
                                                         .chunk_size = chunk_size,
-                                                        .dev_type = HSDevType::Fast,
+                                                        .dev_type = devType,
                                                         .alloc_type = blk_allocator_type_t::none,
                                                         .chunk_sel_type = chunk_selector_type_t::ROUND_ROBIN,
                                                         .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,

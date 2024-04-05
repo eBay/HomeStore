@@ -65,7 +65,7 @@ public:
      * @param chunk_sel_type The type of chunk selector to use for the virtual device.
      * @param num_chunks The number of chunks to use for the virtual device.
      */
-    void create_vdev(uint64_t size, uint32_t blk_size, blk_allocator_type_t alloc_type,
+    void create_vdev(uint64_t size, HSDevType devType, uint32_t blk_size, blk_allocator_type_t alloc_type,
                      chunk_selector_type_t chunk_sel_type, uint32_t num_chunks);
 
     /**
