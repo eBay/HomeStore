@@ -49,6 +49,7 @@ public:
     explicit AppendBlkAllocMetrics(const char* inst_name) : sisl::MetricsGroup("AppendBlkAlloc", inst_name) {
         REGISTER_COUNTER(num_alloc, "Number of blks alloc attempts");
         REGISTER_COUNTER(num_alloc_failure, "Number of blk alloc failures");
+        REGISTER_COUNTER(num_reclaimed, "Number of blk reclaimed from tail");
 
         register_me_to_farm();
     }
@@ -87,6 +88,7 @@ public:
     BlkAllocStatus mark_blk_allocated(BlkId const& b) override;
 
     void free_on_disk(BlkId const& b) override;
+    void reclaim_tail_nblks(blk_count_t nblks) override;
     bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const override;
 
     /**

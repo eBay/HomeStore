@@ -74,6 +74,7 @@ public:
     virtual void load() = 0;
     BlkAllocStatus alloc_on_disk(BlkId const& in_bid) override;
     void free_on_disk(BlkId const& b) override;
+    void reclaim_tail_nblks(blk_count_t nblks) override{};
     bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const override;
     void cp_flush(CP* cp) override;
 

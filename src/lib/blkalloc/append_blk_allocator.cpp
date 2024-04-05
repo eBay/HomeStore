@@ -123,6 +123,18 @@ BlkAllocStatus AppendBlkAllocator::mark_blk_allocated(BlkId const&) { return Blk
 
 void AppendBlkAllocator::free_on_disk(BlkId const&) {}
 
+// note that this function will force to reclaim nblks from the tail, so make sure the nblks at tail are not in use
+// or have been copied to another chunk for later access;
+void AppendBlkAllocator::reclaim_tail_nblks(blk_count_t nblks) {
+    std::unique_lock lk(m_mtx);
+    auto cur_cp = hs()->cp_mgr().cp_guard();
+    m_last_append_offset -= nblks;
+    m_freeable_nblks += nblks;
+    set_dirty_offset(cur_cp->id() % MAX_CP_COUNT);
+
+    COUNTER_INCREMENT(m_metrics, num_reclaimed, nblks);
+}
+
 bool AppendBlkAllocator::is_blk_alloced_on_disk(BlkId const&, bool) const { return false; }
 
 //

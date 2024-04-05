@@ -157,6 +157,9 @@ public:
     virtual void free(BlkId const& id) = 0;
     virtual void free_on_disk(BlkId const& bid) = 0;
 
+    // Reclaim nblks from the tail of the chunk
+    virtual void reclaim_tail_nblks(blk_count_t nblks) = 0;
+
     virtual blk_num_t available_blks() const = 0;
     virtual blk_num_t get_freeable_nblks() const = 0;
     virtual blk_num_t get_defrag_nblks() const = 0;
