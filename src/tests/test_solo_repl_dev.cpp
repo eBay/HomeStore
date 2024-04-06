@@ -109,7 +109,7 @@ public:
             }
         }
 
-        AsyncReplResult<> on_create_snapshot(repl_snapshot& s) override { return make_async_success<>(); }
+        AsyncReplResult<> create_snapshot(repl_snapshot& s) override { return make_async_success<>(); }
 
         bool on_pre_commit(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
                            cintrusive< repl_req_ctx >& ctx) override {

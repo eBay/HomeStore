@@ -69,7 +69,6 @@ public:
         uint64_t m_total_size{0};                        // Total size of all chunks.
         off_t m_end_offset{0};        // Offset right to window. Never reduced. Increased in multiple of chunk size.
         bool m_end_offset_set{false}; // Adjust the m_end_offset only once during init.
-        std::atomic< bool > m_ready_for_truncate{false}; // reset by truncation thread and set by append thread;
         friend class JournalVirtualDev;
 
     public:
@@ -78,11 +77,7 @@ public:
 
         // Create and append the chunk to m_journal_chunks.
         void append_chunk();
-#if 0
-        bool ready_for_truncate() const { return m_ready_for_truncate.load(std::memory_order_relaxed); }
-        void set_ready_for_truncate() { m_ready_for_truncate.store(true, std::memory_order_relaxed); }
-        void unset_ready_for_truncate() { m_ready_for_truncate.store(false, std::memory_order_relaxed); }
-#endif
+
         /**
          * @brief : allocate space specified by input size.
          * this API will always be called in single thread;

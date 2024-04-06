@@ -164,11 +164,12 @@ table ResourceLimits {
     /* journal size used percentage critical watermark -- trigger truncation */
     journal_vdev_size_percent_critical: uint32 = 90;
 
-    /* journal descriptor size (NuObject: Per PG) Threshold in MB -- ready for truncation */
+    /* [not used] journal descriptor size (NuObject: Per PG) Threshold in MB -- ready for truncation */
     journal_descriptor_size_threshold_mb: uint32 = 2048(hotswap);
 
     /* num entries that raft logstore wants to reserve -- its truncate should not across this */
-    raft_logstore_reserve_threshold: uint32 = 2000000(hotswap);   
+    /* 0 means HomeStore doesn't reserve anything and let nuraft controlls the truncation */
+    raft_logstore_reserve_threshold: uint32 = 0 (hotswap);   
     
     /* resource audit timer in ms */
     resource_audit_timer_ms: uint32 = 120000;
@@ -218,7 +219,10 @@ table Consensus {
     log_sync_batch_size: int32 = 100;
 
     // Log distance with which snapshot/compact needs to happen. 0 means snapshot is disabled
-    snapshot_freq_distance: int32 = 20000;
+    snapshot_freq_distance: uint32 = 2000;
+
+    // Num reserved log items while triggering compact from raft server;
+    num_reserved_log_items: uint32 = 20000;
 
     // Max append batch size
     max_append_batch_size: int32 = 64;
@@ -237,10 +241,6 @@ table Consensus {
     
     // Leadership expiry (=0 indicates 20 times heartbeat period), set -1 to never expire
     leadership_expiry_ms: int32 = 0;
-
-    // Num reserved log items while triggering compact from raft server;
-    // This is not the real number reserved log items, it is the maximum truncation barrier (truncate can't across this);
-    num_reserved_log_items: uint32 = 2000;
 
     // data fetch max size limit in KB (2MB by default)
     data_fetch_max_size_kb: uint32 = 2048;

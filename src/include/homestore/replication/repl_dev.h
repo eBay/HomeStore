@@ -10,6 +10,7 @@
 #include <sisl/fds/utils.hpp>
 #include <sisl/grpc/generic_service.hpp>
 #include <homestore/replication/repl_decls.h>
+#include <libnuraft/snapshot.hxx>
 
 namespace nuraft {
 template < typename T >
@@ -198,7 +199,7 @@ public:
     virtual void on_replica_stop() = 0;
 
     /// @brief Called when the snapshot is being created by nuraft;
-    virtual AsyncReplResult<> on_create_snapshot(repl_snapshot& s) = 0;
+    virtual AsyncReplResult<> create_snapshot(repl_snapshot& s) = 0;
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;

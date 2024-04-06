@@ -278,13 +278,23 @@ void HomeRaftLogStore::apply_pack(ulong index, nuraft::buffer& pack) {
 bool HomeRaftLogStore::compact(ulong compact_lsn) {
     auto cur_max_lsn = m_log_store->get_contiguous_issued_seq_num(m_last_durable_lsn);
     if (cur_max_lsn < to_store_lsn(compact_lsn)) {
+        // release this assert if for some use case, we should tolorant this case;
+        // for now, don't expect this case to happen.
+        RELEASE_ASSERT(false, "compact_lsn={} is beyond the current max_lsn={}", compact_lsn, cur_max_lsn);
+
         // We need to fill the remaining entries with dummy data.
         for (auto lsn{cur_max_lsn + 1}; lsn <= to_store_lsn(compact_lsn); ++lsn) {
             append(m_dummy_log_entry);
         }
     }
+
     m_log_store->flush_sync(to_store_lsn(compact_lsn));
+
+    // we rely on resrouce mgr timer to trigger truncate for all log stores in system;
+    // this will be friendly for multiple logstore on same logdev;
+
     // m_log_store->truncate(to_store_lsn(compact_lsn));
+
     return true;
 }
 

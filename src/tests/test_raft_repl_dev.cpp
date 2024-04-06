@@ -155,7 +155,7 @@ public:
                    *(r_cast< uint64_t const* >(key.cbytes())));
     }
 
-    AsyncReplResult<> on_create_snapshot(repl_snapshot& s) override { return make_async_success<>(); }
+    AsyncReplResult<> create_snapshot(repl_snapshot& s) override { return make_async_success<>(); }
 
     ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) override {
         return blk_alloc_hints{};
