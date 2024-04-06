@@ -138,7 +138,11 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
 
     if (!m_dev_mgr->is_first_time_boot()) {
         m_dev_mgr->load_devices();
-        hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Fast}));
+        if (input.has_fast_dev()) {
+            hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Fast}));
+        } else {
+            hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Data}));
+        }
         do_start();
         return false;
     } else {
@@ -147,37 +151,66 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
 }
 
 void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format_opts) {
-    auto total_pct_sum = 0.0f;
+
+    std::map< HSDevType, float > total_pct_by_type = {{HSDevType::Fast, 0.0f}, {HSDevType::Data, 0.0f}};
+    // Accumulate total percentage of services on each device type
     for (const auto& [svc_type, fparams] : format_opts) {
-        total_pct_sum += fparams.size_pct;
+        total_pct_by_type[fparams.dev_type] += fparams.size_pct;
     }
 
-    if (total_pct_sum > 100.0f) {
-        LOGERROR("Total percentage of all services is greater than 100.0f, total_pct_sum={}", total_pct_sum);
-        throw std::invalid_argument("total percentage of all services is greater than 100.0f");
+    // Sanity check, each type accumulated pct <=100%
+    auto all_pct = 0;
+    for (const auto& [DevType, total_pct] : total_pct_by_type) {
+        all_pct += total_pct;
+        if (total_pct > 100.0f) {
+            LOGERROR("Total percentage of services on Device type {} is greater than 100.0f, total_pct_sum={}", DevType,
+                     total_pct);
+            throw std::invalid_argument("total percentage of on Device type {} services is greater than 100.0f");
+        }
+    }
+    // Sanity check , at least one service should be placed on some device type
+    if (all_pct == 0) {
+        LOGERROR("No services are configured to be placed on any device type");
+        throw std::invalid_argument("No services are configured to be placed on any device type");
+    }
+
+    // Sanity check, should have fast if fast pct >0
+    if (total_pct_by_type[HSDevType::Fast] > 0 && !HomeStoreStaticConfig::instance().input.has_fast_dev()) {
+        LOGERROR("Fast device is not configured but services are configured to be placed on fast device");
+        throw std::invalid_argument(
+            "Fast device is not configured but services are configured to be placed on fast device");
     }
 
     m_dev_mgr->format_devices();
-    hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Fast}));
+    if (HomeStoreStaticConfig::instance().input.has_fast_dev()) {
+        hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Fast}));
+    } else {
+        hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Data}));
+    }
+
 
     std::vector< folly::Future< std::error_code > > futs;
     for (const auto& [svc_type, fparams] : format_opts) {
         if (fparams.size_pct == 0) { continue; }
 
         if ((svc_type & HS_SERVICE::META) && has_meta_service()) {
-            m_meta_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast), fparams.num_chunks);
+            m_meta_service->create_vdev(pct_to_size(fparams.size_pct, fparams.dev_type), fparams.dev_type,
+                                        fparams.num_chunks);
 
         } else if ((svc_type & HS_SERVICE::LOG) && has_log_service()) {
-            futs.emplace_back(
-                m_log_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast), fparams.chunk_size));
-        } else if ((svc_type & HS_SERVICE::DATA) && has_data_service()) {
-            m_data_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Data), fparams.block_size,
-                                        fparams.alloc_type, fparams.chunk_sel_type, fparams.num_chunks);
+            futs.emplace_back(m_log_service->create_vdev(pct_to_size(fparams.size_pct, fparams.dev_type),
+                                                         fparams.dev_type, fparams.chunk_size));
         } else if ((svc_type & HS_SERVICE::INDEX) && has_index_service()) {
-            m_index_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Fast), fparams.num_chunks);
+            m_index_service->create_vdev(pct_to_size(fparams.size_pct, fparams.dev_type), fparams.dev_type,
+                                         fparams.num_chunks);
+        } else if ((svc_type & HS_SERVICE::DATA) && has_data_service()) {
+            m_data_service->create_vdev(pct_to_size(fparams.size_pct, fparams.dev_type), fparams.dev_type,
+                                        fparams.block_size, fparams.alloc_type, fparams.chunk_sel_type,
+                                        fparams.num_chunks);
         } else if ((svc_type & HS_SERVICE::REPLICATION) && has_repl_data_service()) {
-            m_data_service->create_vdev(pct_to_size(fparams.size_pct, HSDevType::Data), fparams.block_size,
-                                        fparams.alloc_type, fparams.chunk_sel_type, fparams.num_chunks);
+            m_data_service->create_vdev(pct_to_size(fparams.size_pct, fparams.dev_type), fparams.dev_type,
+                                        fparams.block_size, fparams.alloc_type, fparams.chunk_sel_type,
+                                        fparams.num_chunks);
         }
     }
 
@@ -368,7 +401,7 @@ shared< VirtualDev > HomeStore::create_vdev_cb(const vdev_info& vinfo, bool load
 }
 
 uint64_t HomeStore::pct_to_size(float pct, HSDevType dev_type) const {
-    uint64_t sz = uint64_cast((pct * static_cast< double >(m_dev_mgr->total_capacity())) / 100);
+    uint64_t sz = uint64_cast((pct * static_cast< double >(m_dev_mgr->total_capacity(dev_type))) / 100);
     return sisl::round_up(sz, m_dev_mgr->optimal_page_size(dev_type));
 }
 
