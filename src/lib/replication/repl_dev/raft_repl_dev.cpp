@@ -112,12 +112,11 @@ void RaftReplDev::use_config(json_superblk raft_config_sb) { m_raft_config_sb = 
 
 void RaftReplDev::on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done) {
     RD_LOG(DEBUG, "create_snapshot last_idx={}/term={}", s.get_last_log_idx(), s.get_last_log_term());
-    repl_snapshot snapshot{.last_log_idx_ = s.get_last_log_idx(), .last_log_term_ = s.get_last_log_term()};
-    auto result = m_listener->create_snapshot(snapshot).get();
+    auto snp_ctx = std::make_shared< nuraft_snapshot_context >(s);
+    auto result = m_listener->create_snapshot(snp_ctx).get();
     auto null_except = std::shared_ptr< std::exception >();
     HS_REL_ASSERT(result.hasError() == false, "Not expecting creating snapshot to return false. ");
-    m_last_snapshot = nuraft::cs_new< nuraft::snapshot >(s.get_last_log_idx(), s.get_last_log_term(),
-                                                         s.get_last_config(), s.size(), s.get_type());
+
     auto ret_val{true};
     if (when_done) { when_done(ret_val, null_except); }
 }
@@ -519,7 +518,7 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreq
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     if (rreqs.size() == 0) { return; }
 
-    std::vector<::flatbuffers::Offset< RequestEntry > > entries;
+    std::vector< ::flatbuffers::Offset< RequestEntry > > entries;
     entries.reserve(rreqs.size());
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
@@ -947,6 +946,8 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
             auto reqs = sisl::VectorPool< repl_req_ptr_t >::alloc();
             for (auto& entry : entries) {
                 if (entry->get_val_type() != nuraft::log_val_type::app_log) { continue; }
+                if (entry->get_buf_ptr()->size() == 0) { continue; }
+
                 auto req = m_state_machine->localize_journal_entry_prepare(*entry);
                 if (req == nullptr) {
                     sisl::VectorPool< repl_req_ptr_t >::free(reqs);

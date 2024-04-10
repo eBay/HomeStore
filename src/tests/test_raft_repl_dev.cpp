@@ -31,6 +31,7 @@
 #include <homestore/blk.h>
 #include <homestore/homestore.hpp>
 #include <homestore/homestore_decl.hpp>
+#include <homestore/blkdata_service.hpp>
 #include <homestore/replication_service.hpp>
 #include <homestore/replication/repl_dev.h>
 #include "common/homestore_config.hpp"
@@ -77,6 +78,11 @@ public:
         uint64_t data_size_;
         uint64_t data_pattern_;
         MultiBlkId blkid_;
+    };
+
+    struct KeyValuePair {
+        Key key;
+        Value value;
     };
 
     struct test_req : public repl_req_ctx {
@@ -131,6 +137,7 @@ public:
         {
             std::unique_lock lk(db_mtx_);
             inmem_db_.insert_or_assign(k, v);
+            last_committed_lsn = lsn;
             ++commit_count_;
         }
 
@@ -155,7 +162,72 @@ public:
                    *(r_cast< uint64_t const* >(key.cbytes())));
     }
 
-    AsyncReplResult<> create_snapshot(repl_snapshot& s) override { return make_async_success<>(); }
+    AsyncReplResult<> create_snapshot(shared< snapshot_context > context) override {
+        auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(context)->nuraft_snapshot();
+        LOGINFOMOD(replication, "[Replica={}] Got snapshot callback term={} idx={}", g_helper->replica_num(),
+                   s->get_last_log_term(), s->get_last_log_idx());
+        m_last_snapshot = context;
+        return make_async_success<>();
+    }
+
+    int read_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) override {
+        auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(context)->nuraft_snapshot();
+        LOGINFOMOD(replication, "[Replica={}] Read logical snapshot callback obj_id={} term={} idx={}",
+                   g_helper->replica_num(), snp_data->offset, s->get_last_log_term(), s->get_last_log_idx());
+
+        if (snp_data->offset == 0) {
+            snp_data->is_last_obj = false;
+            snp_data->blob = sisl::io_blob_safe(sizeof(ulong));
+        } else {
+            int64_t follower_last_lsn = snp_data->offset;
+            std::vector< KeyValuePair > kv_snapshot_data;
+            LOGINFOMOD(replication, "[Replica={}] Read logical snapshot callback follower lsn={}",
+                       g_helper->replica_num(), follower_last_lsn);
+            for (auto& [k, v] : inmem_db_) {
+                if (v.lsn_ > follower_last_lsn) {
+                    kv_snapshot_data.emplace_back(k, v);
+                    LOGINFOMOD(replication, "[Replica={}] Read logical snapshot callback fetching lsn={} {} {}",
+                               g_helper->replica_num(), v.lsn_, v.data_size_, v.data_pattern_);
+                }
+            }
+
+            int64_t kv_snapshot_data_size = sizeof(KeyValuePair) * kv_snapshot_data.size();
+            LOGINFOMOD(replication, "Snapshot size {}", kv_snapshot_data_size);
+
+            sisl::io_blob_safe blob{static_cast< uint32_t >(kv_snapshot_data_size)};
+            std::memcpy(blob.bytes(), kv_snapshot_data.data(), kv_snapshot_data_size);
+            snp_data->blob = std::move(blob);
+            snp_data->is_last_obj = true;
+        }
+        return 0;
+    }
+
+    void snapshot_data_write(uint64_t data_size, uint64_t data_pattern, MultiBlkId& out_blkids) {
+        auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+        auto write_sgs = test_common::HSTestHelper::create_sgs(data_size, block_size, data_pattern);
+        auto fut = homestore::data_service().async_alloc_write(write_sgs, blk_alloc_hints{}, out_blkids);
+        std::move(fut).get();
+    }
+
+    void write_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) override {
+        // TODO
+    }
+
+    bool apply_snapshot(shared< snapshot_context > context) override {
+        auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(context)->nuraft_snapshot();
+        LOGINFOMOD(replication, "[Replica={}] Apply snapshot term={} idx={}", g_helper->replica_num(),
+                   s->get_last_log_term(), s->get_last_log_idx());
+        return true;
+    }
+
+    shared< snapshot_context > last_snapshot() override {
+        if (!m_last_snapshot) return nullptr;
+
+        auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(m_last_snapshot)->nuraft_snapshot();
+        LOGINFOMOD(replication, "[Replica={}] Last snapshot term={} idx={}", g_helper->replica_num(),
+                   s->get_last_log_term(), s->get_last_log_idx());
+        return m_last_snapshot;
+    }
 
     ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) override {
         return blk_alloc_hints{};
@@ -226,11 +298,25 @@ public:
         return inmem_db_.size();
     }
 
+    void create_snapshot() {
+        auto raft_repl_dev = std::dynamic_pointer_cast< RaftReplDev >(repl_dev());
+        ulong snapshot_idx = raft_repl_dev->raft_server()->create_snapshot();
+        LOGINFO("Manually create snapshot got index {}", snapshot_idx);
+    }
+
+    void truncate(int num_reserved_entries) {
+        auto raft_repl_dev = std::dynamic_pointer_cast< RaftReplDev >(repl_dev());
+        raft_repl_dev->truncate(num_reserved_entries);
+        LOGINFO("Manually truncated");
+    }
+
 private:
     std::map< Key, Value > inmem_db_;
     uint64_t commit_count_{0};
     std::shared_mutex db_mtx_;
     std::atomic< uint64_t > m_num_commits;
+    uint64_t last_committed_lsn{0};
+    std::shared_ptr< snapshot_context > m_last_snapshot{nullptr};
 };
 
 class RaftReplDevTest : public testing::Test {
@@ -360,6 +446,9 @@ public:
             std::this_thread::sleep_for(std::chrono::seconds{5});
         }
     }
+
+    void create_snapshot() { dbs_[0]->create_snapshot(); }
+    void truncate(int num_reserved_entries) { dbs_[0]->truncate(num_reserved_entries); }
 
 private:
     std::vector< std::shared_ptr< TestReplicatedDB > > dbs_;
@@ -577,6 +666,67 @@ TEST_F(RaftReplDevTest, Snapshot_and_Compact) {
     g_helper->sync_for_cleanup_start();
 }
 
+TEST_F(RaftReplDevTest, BaselineTest) {
+    // Testing the baseline resync where leader creates snapshot and truncate entries.
+    // To simulate that write 10 entries to leader. Restart follower 1 with sleep 20s.
+    // Write to leader again to create 10 additional entries which follower 1 doesnt have.
+    // This is the baseline data. Truncate and snapshot on leader. Wait for commit for leader
+    // and follower 2. Write to leader again 10 entries after snapshot to create entries
+    // for incremental resync. We can create snapshot manually or triggered by raft.
+    // Verify all nodes got 30 entries.
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+#ifdef _PRERELEASE
+    // If debug build we set flip to force truncate.
+    if (g_helper->replica_num() == 0) {
+        LOGINFO("Set force home logstore truncate");
+        set_basic_flip("force_home_raft_log_truncate");
+    }
+#endif
+
+    // Write on leader.
+    uint64_t entries_per_attempt = 10;
+    this->write_on_leader(entries_per_attempt, true /* wait_for_commit */);
+
+    // Restart follower-1 with delay.
+    this->restart_replica(1, 20 /* shutdown_delay_sec */);
+
+    // Write on leader again.
+    this->write_on_leader(entries_per_attempt, false /* wait_for_commit */);
+
+    if (g_helper->replica_num() == 0 || g_helper->replica_num() == 2) {
+        // Wait for commmit on leader and follower-2
+        this->wait_for_all_commits();
+        LOGINFO("Got all commits for replica 0 and 2");
+    }
+
+#ifndef _PRERELEASE
+    if (g_helper->replica_num() == 0) {
+        // For non debug build leader does manual snapshot and truncate
+        LOGINFO("Leader create snapshot and truncate");
+        this->create_snapshot();
+        this->truncate(0);
+    }
+#endif
+
+    // Write on leader to have some entries for increment resync.
+    this->write_on_leader(entries_per_attempt, false /* wait_for_commit */);
+    if (g_helper->replica_num() == 0 || g_helper->replica_num() == 2) {
+        // Wait for commmit on leader and follower-2
+        this->wait_for_all_commits();
+        LOGINFO("Got all commits for replica 0 and 2 second time");
+    }
+
+    // Validate all have 30 log entries and corresponding entries.
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate all data written so far by reading them");
+    // TODO enable after write_snapshot_data is implemented.
+    // this->validate_data();
+    g_helper->sync_for_cleanup_start();
+    LOGINFO("BaselineTest done");
+}
+
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
     char** orig_argv = argv;
@@ -600,10 +750,15 @@ int main(int argc, char* argv[]) {
     HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
         s.consensus.leadership_expiry_ms = -1; // -1 means never expires;
 
+        // Snapshot and truncation tests needs num reserved to be 0 and distance 10.
+        s.consensus.num_reserved_log_items = 0;
+        s.consensus.snapshot_freq_distance = 10;
+
         // only reset when user specified the value for test;
         if (SISL_OPTIONS.count("snapshot_distance")) {
             s.consensus.snapshot_freq_distance = SISL_OPTIONS["snapshot_distance"].as< uint32_t >();
         }
+
         if (SISL_OPTIONS.count("num_raft_logs_resv")) {
             s.resource_limits.raft_logstore_reserve_threshold = SISL_OPTIONS["num_raft_logs_resv"].as< uint32_t >();
         }

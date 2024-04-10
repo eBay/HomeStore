@@ -103,10 +103,13 @@ public:
     raft_buf_ptr_t commit_ext(const nuraft::state_machine::ext_op_params& params) override;
     void rollback(uint64_t lsn, nuraft::buffer&) override { LOGCRITICAL("Unimplemented rollback on: [{}]", lsn); }
 
-    bool apply_snapshot(nuraft::snapshot&) override { return false; }
-
     void create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done) override;
     nuraft::ptr< nuraft::snapshot > last_snapshot() override;
+    int read_logical_snp_obj(nuraft::snapshot& s, void*& user_ctx, ulong obj_id, raft_buf_ptr_t& data_out,
+                             bool& is_last_obj) override;
+    void save_logical_snp_obj(nuraft::snapshot& s, ulong& obj_id, nuraft::buffer& data, bool is_first_obj,
+                              bool is_last_obj) override;
+    bool apply_snapshot(nuraft::snapshot& s) override;
 
     ////////// APIs outside of nuraft::state_machine requirements ////////////////////
     ReplServiceError propose_to_raft(repl_req_ptr_t rreq);
