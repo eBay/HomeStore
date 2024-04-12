@@ -472,11 +472,19 @@ off_t JournalVirtualDev::Descriptor::dev_offset(off_t nbytes) const {
 }
 
 void JournalVirtualDev::Descriptor::update_data_start_offset(off_t offset) {
-    m_data_start_offset = offset;
-    auto data_start_offset_aligned = sisl::round_down(m_data_start_offset, m_vdev.info().chunk_size);
-    m_end_offset = data_start_offset_aligned + m_journal_chunks.size() * m_vdev.info().chunk_size;
-    LOGINFOMOD(journalvdev, "Updated data start offset off 0x{} {}", to_hex(offset), to_string());
-    RELEASE_ASSERT_EQ(m_end_offset - data_start_offset_aligned, m_total_size, "offset size mismatch {}", to_string());
+    if (!m_journal_chunks.empty()) {
+        m_data_start_offset = offset;
+        auto data_start_offset_aligned = sisl::round_down(m_data_start_offset, m_vdev.info().chunk_size);
+        m_end_offset = data_start_offset_aligned + m_journal_chunks.size() * m_vdev.info().chunk_size;
+        LOGINFOMOD(journalvdev, "Updated data start offset off 0x{} {}", to_hex(offset), to_string());
+        RELEASE_ASSERT_EQ(m_end_offset - data_start_offset_aligned, m_total_size, "offset size mismatch {}",
+                          to_string());
+    } else {
+        // If there are no chunks, we round up to the next chunk size.
+        m_data_start_offset = sisl::round_up(offset, m_vdev.info().chunk_size);
+        m_end_offset = m_data_start_offset;
+        LOGINFOMOD(journalvdev, "No chunks, updated data start offset off 0x{} {}", to_hex(offset), to_string());
+    }
 }
 
 off_t JournalVirtualDev::Descriptor::tail_offset(bool reserve_space_include) const {
@@ -536,6 +544,9 @@ void JournalVirtualDev::Descriptor::truncate(off_t truncate_offset) {
     for (auto it = m_journal_chunks.begin(); it != m_journal_chunks.end();) {
         auto chunk = *it;
         start += chunk->size();
+
+        // Also if its the last chunk and there is no data after truncate, we release chunk.
+        auto write_sz_in_total = m_write_sz_in_total.load(std::memory_order_relaxed);
         if (start >= truncate_offset) { break; }
 
         m_total_size -= chunk->size();
@@ -551,6 +562,7 @@ void JournalVirtualDev::Descriptor::truncate(off_t truncate_offset) {
         // to know the end offset of the log dev during recovery.
         // Format and add back to pool.
         m_vdev.m_chunk_pool->enqueue(chunk);
+        LOGINFOMOD(journalvdev, "After truncate released chunk {}", chunk->to_string());
     }
 
     // Update our start offset, to keep track of actual size
@@ -561,7 +573,7 @@ void JournalVirtualDev::Descriptor::truncate(off_t truncate_offset) {
     m_write_sz_in_total.fetch_sub(size_to_truncate, std::memory_order_relaxed);
     m_truncate_done = true;
 
-    HS_PERIODIC_LOG(DEBUG, journalvdev, "After truncate desc {}", to_string());
+    HS_PERIODIC_LOG(INFO, journalvdev, "After truncate desc {}", to_string());
 }
 
 #if 0
