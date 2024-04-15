@@ -207,7 +207,8 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
     // Adjust the maximum number chunks requested before round up vdev size.
     uint32_t max_num_chunks = 0;
     for (const auto& d : m_dev_infos) {
-        max_num_chunks += hs_super_blk::max_chunks_in_pdev(d);
+        // we need to consider only the devices of the same type as the vdev
+        if (d.dev_type == vparam.dev_type) max_num_chunks += hs_super_blk::max_chunks_in_pdev(d);
     }
 
     auto input_vdev_size = vparam.vdev_size;
@@ -217,13 +218,6 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
 
         // Either num_chunks or chunk_size can be provided and we calculate the other.
         if (vparam.num_chunks != 0) {
-            vparam.vdev_size = sisl::round_up(vparam.vdev_size, vparam.num_chunks * vparam.blk_size);
-            if (input_vdev_size != vparam.vdev_size) {
-                LOGINFO(
-                    "{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}",
-                    vparam.vdev_name, in_bytes(input_vdev_size), in_bytes(vparam.vdev_size));
-            }
-
             auto input_num_chunks = vparam.num_chunks;
             vparam.num_chunks = std::min(vparam.num_chunks, max_num_chunks);
             if (input_num_chunks != vparam.num_chunks) {
@@ -231,6 +225,14 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
                         "new_num_chunks={}",
                         vparam.vdev_name, in_bytes(input_num_chunks), in_bytes(vparam.num_chunks));
             }
+
+            vparam.vdev_size = sisl::round_up(vparam.vdev_size, vparam.num_chunks * vparam.blk_size);
+            if (input_vdev_size != vparam.vdev_size) {
+                LOGINFO(
+                    "{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}",
+                    vparam.vdev_name, in_bytes(input_vdev_size), in_bytes(vparam.vdev_size));
+            }
+
             vparam.chunk_size = vparam.vdev_size / vparam.num_chunks;
         } else if (vparam.chunk_size != 0) {
             auto input_chunk_size = vparam.chunk_size;
