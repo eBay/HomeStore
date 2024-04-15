@@ -77,6 +77,15 @@ public:
     void start_homestore(bool restart = false, hs_before_services_starting_cb_t starting_cb = nullptr) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
+        if (starting_cb == nullptr) {
+            starting_cb = [this]() {
+                HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+                    // Disable flush timer in UT.
+                    s.logstore.flush_timer_frequency_us = 0;
+                });
+                HS_SETTINGS_FACTORY().save();
+            };
+        }
         test_common::HSTestHelper::start_homestore("test_log_dev",
                                                    {
                                                        {HS_SERVICE::META, {.size_pct = 15.0}},
@@ -91,7 +100,7 @@ public:
 
     virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
 
-    test_log_data* prepare_data(const logstore_seq_num_t lsn, bool& io_memory) {
+    test_log_data* prepare_data(const logstore_seq_num_t lsn, bool& io_memory, uint32_t fixed_size = 0) {
         static thread_local std::random_device rd{};
         static thread_local std::default_random_engine re{rd()};
         uint32_t sz{0};
@@ -100,14 +109,18 @@ public:
         // Generate buffer of random size and fill with specific data
         std::uniform_int_distribution< uint8_t > gen_percentage{0, 99};
         std::uniform_int_distribution< uint32_t > gen_data_size{0, max_data_size - 1};
+        if (fixed_size == 0) {
+            sz = gen_data_size(re);
+        } else {
+            sz = fixed_size;
+        }
         if (gen_percentage(re) < static_cast< uint8_t >(10)) {
             // 10% of data is dma'ble aligned boundary
-            const auto alloc_sz = sisl::round_up(gen_data_size(re) + sizeof(test_log_data), s_max_flush_multiple);
+            const auto alloc_sz = sisl::round_up(sz + sizeof(test_log_data), s_max_flush_multiple);
             raw_buf = iomanager.iobuf_alloc(dma_address_boundary, alloc_sz);
             sz = alloc_sz - sizeof(test_log_data);
             io_memory = true;
         } else {
-            sz = gen_data_size(re);
             raw_buf = static_cast< uint8_t* >(std::malloc(sizeof(test_log_data) + sz));
             io_memory = false;
         }
@@ -132,9 +145,9 @@ public:
                                     << " size=" << d->size;
     }
 
-    void insert_sync(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t lsn) {
+    void insert_sync(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t lsn, uint32_t fixed_size = 0) {
         bool io_memory{false};
-        auto* d = prepare_data(lsn, io_memory);
+        auto* d = prepare_data(lsn, io_memory, fixed_size);
         const bool succ = log_store->write_sync(lsn, {uintptr_cast(d), d->total_size(), false});
         EXPECT_TRUE(succ);
         LOGINFO("Written sync data for LSN -> {}:{}", log_store->get_store_id(), lsn);
@@ -145,10 +158,11 @@ public:
         }
     }
 
-    void kickstart_inserts(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t& cur_lsn, int64_t batch) {
+    void kickstart_inserts(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t& cur_lsn, int64_t batch,
+                           uint32_t fixed_size = 0) {
         auto last = cur_lsn + batch;
         for (; cur_lsn < last; cur_lsn++) {
-            insert_sync(log_store, cur_lsn);
+            insert_sync(log_store, cur_lsn, fixed_size);
         }
     }
 
