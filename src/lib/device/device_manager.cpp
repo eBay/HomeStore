@@ -192,6 +192,7 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
     std::vector< PhysicalDev* > pdevs = pdevs_by_type_internal(vparam.dev_type);
     RELEASE_ASSERT_GT(pdevs.size(), 0, "Unable to find any pdevs for given vdev type, can't create vdev");
     RELEASE_ASSERT(vparam.blk_size % pdevs[0]->align_size() == 0, "blk_size should be multiple of pdev align_size");
+    RELEASE_ASSERT(vparam.blk_size % 512 == 0, "blk_size should be multiple of 512bytes to be DMA aligned");
     // Identify the number of chunks
     if (vparam.multi_pdev_opts == vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED) {
         auto total_streams = std::accumulate(pdevs.begin(), pdevs.end(), 0u,
@@ -208,9 +209,8 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
     // Based on the min chunk size, we calculate the max number of chunks that can be created in each target pdev
     uint32_t min_chunk_size = hs_super_blk::min_chunk_size(vparam.dev_type);
     // FIXME: it is possible that each vdev is less than max_num_chunks, but total is more than MAX_CHUNKS_IN_SYSTEM.
-    uint32_t max_num_chunks = vparam.vdev_size / min_chunk_size > hs_super_blk::MAX_CHUNKS_IN_SYSTEM
-        ? hs_super_blk::MAX_CHUNKS_IN_SYSTEM
-        : vparam.vdev_size / min_chunk_size;
+    // uint32 convert is safe as it only overflow when vdev size > 64PB with 16MB min_chunk_size.
+    uint32_t max_num_chunks = std::min(uint32_t(vparam.vdev_size / min_chunk_size), hs_super_blk::MAX_CHUNKS_IN_SYSTEM);
 
     auto input_vdev_size = vparam.vdev_size;
     if (vparam.size_type == vdev_size_type_t::VDEV_SIZE_STATIC) {
