@@ -80,6 +80,7 @@ public:
             });
         m_dmgr->is_first_time_boot() ? m_dmgr->format_devices() : m_dmgr->load_devices();
         m_pdevs = m_dmgr->get_pdevs_by_dev_type(homestore::HSDevType::Data);
+        m_vdevs = m_dmgr->get_vdevs();
     }
 
     void restart() {
