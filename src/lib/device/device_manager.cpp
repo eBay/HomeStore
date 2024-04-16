@@ -188,11 +188,9 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
     if (vdev_id == sisl::Bitset::npos) { throw std::out_of_range("System has no room for additional vdev"); }
     m_vdev_id_bm.set_bit(vdev_id);
 
-    // Determine if we have a devices available on requested dev_tier. If so use them, else fallback to data tier
     std::vector< PhysicalDev* > pdevs = pdevs_by_type_internal(vparam.dev_type);
     RELEASE_ASSERT_GT(pdevs.size(), 0, "Unable to find any pdevs for given vdev type, can't create vdev");
     RELEASE_ASSERT(vparam.blk_size % pdevs[0]->align_size() == 0, "blk_size should be multiple of pdev align_size");
-    RELEASE_ASSERT(vparam.blk_size % 512 == 0, "blk_size should be multiple of 512bytes to be DMA aligned");
     // Identify the number of chunks
     if (vparam.multi_pdev_opts == vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED) {
         auto total_streams = std::accumulate(pdevs.begin(), pdevs.end(), 0u,
