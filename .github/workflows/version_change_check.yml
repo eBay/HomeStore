@@ -1,0 +1,23 @@
+name: Check Version Update
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+jobs:
+  check-file:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 2
+      - name: Check if file is modified
+        run: |
+          if git diff -r HEAD^1 HEAD -- conanfile.py | egrep "[ ]+version = "; then
+            echo "Version is updated with this PR, OK"
+          else
+            echo "Conan version is not updated with this PR. Please update that to allow PR merge"
+            exit 1
+          fi

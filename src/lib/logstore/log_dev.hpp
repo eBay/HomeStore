@@ -797,6 +797,7 @@ public:
 
     void handle_unopened_log_stores(bool format);
     logdev_id_t get_id() { return m_logdev_id; }
+    shared< JournalVirtualDev::Descriptor > get_journal_descriptor() const { return m_vdev_jd; }
 
     // bool ready_for_truncate() const { return m_vdev_jd->ready_for_truncate(); }
 
@@ -896,6 +897,7 @@ private:
     std::atomic< bool > m_flush_status = false;
     // Timer handle
     iomgr::timer_handle_t m_flush_timer_hdl{iomgr::null_timer_handle};
+
 }; // LogDev
 
 } // namespace homestore
