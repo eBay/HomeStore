@@ -52,8 +52,6 @@ public:
     virtual hs_stats get_cap_stats() const = 0;
 
     virtual meta_sub_type get_meta_blk_name() const = 0;
-
-    // virtual void resource_audit() = 0;
 };
 
 //////////////// Application which uses Replication needs to be provide the following callbacks ////////////////

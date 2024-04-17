@@ -86,7 +86,8 @@ public:
      *
      * @param used_size The used size of the journal vdev.
      * @param total_size The total size of the journal vdev.
-     * @return true if the used size is within the limits, false otherwise.
+     * @return true if the used size is exceeding the limits, false if not exceeding limit or caller didn't registered
+     * any callback (caller not interested).
      */
     bool check_journal_vdev_size(const uint64_t used_size, const uint64_t total_size);
 
@@ -97,7 +98,7 @@ public:
      * The acceptable range is determined by the implementation of the resource manager.
      *
      * @param used_size The used size of the journal descriptor.
-     * @return true if the used size is within the acceptable range, false otherwise.
+     * @return true if the used size is exceeding the acceptable range, false otherwise.
      */
     bool check_journal_descriptor_size(const uint64_t used_size) const;
 

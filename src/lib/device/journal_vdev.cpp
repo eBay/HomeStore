@@ -59,7 +59,10 @@ JournalVirtualDev::JournalVirtualDev(DeviceManager& dmgr, const vdev_info& vinfo
         // either it is critical or non-critical, call cp_flush;
         hs()->cp_mgr().trigger_cp_flush(false /* force */);
 
-        if (critical) { resource_mgr().trigger_truncate(); }
+        if (critical) {
+            LOGINFO("Critical journal vdev size threshold reached. Triggering truncate.");
+            resource_mgr().trigger_truncate();
+        }
     });
 }
 

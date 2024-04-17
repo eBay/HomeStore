@@ -47,7 +47,7 @@ void ResourceMgr::stop() {
 //
 void ResourceMgr::trigger_truncate() {
     if (hs()->has_repl_data_service()) {
-        // first make sure all repl dev's unlyding raft log store make corresponding reservation during
+        // first make sure all repl dev's underlying raft log store make corresponding reservation during
         // truncate -- set the safe truncate boundary for each raft log store;
         hs()->repl_service().iterate_repl_devs([](cshared< ReplDev >& rd) {
             // lock is already taken by repl service layer;

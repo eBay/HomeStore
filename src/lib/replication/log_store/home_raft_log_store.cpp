@@ -68,7 +68,7 @@ void HomeRaftLogStore::truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_ls
 
     if (start_lsn + num_reserved_cnt >= last_lsn) {
         REPL_STORE_LOG(DEBUG,
-                       "Store={} LogDev={}: Bypassing truncating because of reserved logs entries is not enough. "
+                       "Store={} LogDev={}: Skipping truncating because of reserved logs entries is not enough. "
                        "start_lsn={}, resv_cnt={}, last_lsn={}",
                        m_logstore_id, m_logdev_id, start_lsn, num_reserved_cnt, last_lsn);
         return;
