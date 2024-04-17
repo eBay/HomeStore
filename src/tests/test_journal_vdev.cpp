@@ -76,8 +76,8 @@ public:
                                                        {HS_SERVICE::META, {.size_pct = 15.0}},
                                                        {HS_SERVICE::LOG,
                                                         {.size_pct = 50.0,
-                                                         .chunk_size = 8 * 1024 * 1024,
-                                                         .min_chunk_size = 8 * 1024 * 1024,
+                                                         .chunk_size = 16 * 1024 * 1024,
+                                                         .min_chunk_size = 16 * 1024 * 1024,
                                                          .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
                                                    },
                                                    nullptr /* starting_cb */, false /* restart */);
@@ -91,8 +91,8 @@ public:
                                                        {HS_SERVICE::META, {.size_pct = 15.0}},
                                                        {HS_SERVICE::LOG,
                                                         {.size_pct = 50.0,
-                                                         .chunk_size = 8 * 1024 * 1024,
-                                                         .min_chunk_size = 8 * 1024 * 1024,
+                                                         .chunk_size = 16 * 1024 * 1024,
+                                                         .min_chunk_size = 16 * 1024 * 1024,
                                                          .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
                                                    },
                                                    nullptr /* starting_cb */, true /* restart */);
@@ -505,10 +505,10 @@ TEST_F(VDevJournalIOTest, Recovery) {
 }
 
 TEST_F(VDevJournalIOTest, MultipleChunkTest) {
-    // Chunk size is 8MB and each data log entry will be of size 3MB to create gaps.
+    // Chunk size is 16MB and each data log entry will be of size 6MB to create gaps.
     uint64_t MB = 1024 * 1024;
-    uint64_t chunk_size = 8 * MB;
-    uint64_t data_size = 3 * MB;
+    uint64_t chunk_size = 16 * MB;
+    uint64_t data_size = 6 * MB;
     JournalDescriptorTest test(1);
     auto log_dev_jd = test.vdev_jd();
 
@@ -577,7 +577,7 @@ TEST_F(VDevJournalIOTest, MultipleChunkTest) {
     uint64_t trunc_sz = 2 * data_size;
     uint64_t trunc_offset = 2 * data_size;
     test.truncate(trunc_offset);
-    test.verify_journal_descriptor(log_dev_jd, {.ds = 0x600000, .end = 4 * chunk_size, .writesz = writesz - trunc_sz,
+    test.verify_journal_descriptor(log_dev_jd, {.ds = trunc_offset, .end = 4 * chunk_size, .writesz = writesz - trunc_sz,
                                    .rsvdsz = 0, .chunks = 4, .trunc = true, .total = 4 * chunk_size, .seek = 0x0});
 
     // Truncate one more entry. Release one chunk back and reduce chunk count. Increase the data start.
@@ -585,13 +585,13 @@ TEST_F(VDevJournalIOTest, MultipleChunkTest) {
     trunc_offset = chunk_size + data_size;
     trunc_sz = chunk_size + data_size;
     test.truncate(trunc_offset);
-    test.verify_journal_descriptor(log_dev_jd, {.ds = 0xb00000, .end = 4 * chunk_size, .writesz = writesz - trunc_sz,
+    test.verify_journal_descriptor(log_dev_jd, {.ds = trunc_offset, .end = 4 * chunk_size, .writesz = writesz - trunc_sz,
                                    .rsvdsz = 0, .chunks = 3, .trunc = true, .total = 3 * chunk_size, .seek = 0x0});
 
     // Restart homestore and restore the offsets.
     LOGINFO("Restart homestore");
     restart_restore();
-    test.verify_journal_descriptor(log_dev_jd, {.ds = 0xb00000, .end = 4 * chunk_size, .writesz = writesz - trunc_sz,
+    test.verify_journal_descriptor(log_dev_jd, {.ds = trunc_offset, .end = 4 * chunk_size, .writesz = writesz - trunc_sz,
                                    .rsvdsz = 0, .chunks = 3, .trunc = false, .total = 3 * chunk_size, .seek = 0x0});
     test.read_all();
 
@@ -599,8 +599,8 @@ TEST_F(VDevJournalIOTest, MultipleChunkTest) {
     LOGINFO("Truncating all entries");
     trunc_offset = log_dev_jd->tail_offset();
     test.truncate(trunc_offset);
-    test.verify_journal_descriptor(log_dev_jd, {.ds = 0x1b00000, .end = 0x2000000, .writesz = 0, .rsvdsz = 0,
-                                   .chunks = 1, .trunc = true, .total = 8388608, .seek = 0x0});
+    test.verify_journal_descriptor(log_dev_jd, {.ds = trunc_offset, .end = 4 * chunk_size, .writesz = 0, .rsvdsz = 0,
+                                   .chunks = 1, .trunc = true, .total = chunk_size, .seek = 0x0});
 
     // clang-format on
 }

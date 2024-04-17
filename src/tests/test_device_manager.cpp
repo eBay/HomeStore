@@ -80,6 +80,7 @@ public:
             });
         m_dmgr->is_first_time_boot() ? m_dmgr->format_devices() : m_dmgr->load_devices();
         m_pdevs = m_dmgr->get_pdevs_by_dev_type(homestore::HSDevType::Data);
+        m_vdevs = m_dmgr->get_vdevs();
     }
 
     void restart() {
@@ -121,6 +122,7 @@ public:
             std::map< const PhysicalDev*, uint32_t > chunks_in_pdev_count;
             for (const auto& chunk : chunks) {
                 ASSERT_EQ(chunk->size(), size) << "All chunks are not equally sized in vdev";
+                ASSERT_EQ(chunk->is_align(), true) << "All chunks should be aligned";
 
                 auto [it, inserted] = chunks_in_pdev_count.insert(std::pair(chunk->physical_dev(), 1u));
                 if (!inserted) { ++(it->second); }
@@ -140,7 +142,7 @@ TEST_F(DeviceMgrTest, StripedVDevCreation) {
         avail_size += pdev->data_size();
     }
 
-    uint32_t size_pct = 2;
+    uint32_t size_pct = 4;
     uint64_t remain_size = avail_size;
 
     LOGINFO("Step 1: Creating {} vdevs with combined size as {}", num_test_vdevs, in_bytes(avail_size));
@@ -172,6 +174,29 @@ TEST_F(DeviceMgrTest, StripedVDevCreation) {
 
     LOGINFO("Step 4: Post Restart validate if all vdevs are loaded with correct number of chunks");
     this->validate_striped_vdevs();
+}
+
+TEST_F(DeviceMgrTest, SmallStripedVDevCreation) {
+    std::string name = "test_vdev_small";
+
+    // Create a vdev small to one minimal chunk per pdev
+    auto num_chunks = uint32_cast(m_pdevs.size() * 2);
+    auto size = m_pdevs.size() * hs_super_blk::min_chunk_size(homestore::HSDevType::Data);
+
+    LOGINFO("Step 1: Creating vdev of name={} with size={}", name, in_bytes(size));
+    auto vdev =
+        m_dmgr->create_vdev(homestore::vdev_parameters{.vdev_name = name,
+                                                       .vdev_size = size,
+                                                       .num_chunks = num_chunks,
+                                                       .blk_size = 4096,
+                                                       .dev_type = HSDevType::Data,
+                                                       .alloc_type = blk_allocator_type_t::none,
+                                                       .chunk_sel_type = chunk_selector_type_t::NONE,
+                                                       .multi_pdev_opts = vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED,
+                                                       .context_data = sisl::blob{}});
+
+
+    ASSERT_EQ(vdev->get_chunks().size(), m_pdevs.size()) << "Expected vdev to be created with 1 chunk per pdev";
 }
 
 TEST_F(DeviceMgrTest, CreateChunk) {
