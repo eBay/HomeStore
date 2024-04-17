@@ -47,6 +47,10 @@ public:
     uint64_t start_offset() const { return m_chunk_info.chunk_start_offset; }
     uint64_t size() const { return m_chunk_info.chunk_size; }
     bool is_busy() const { return m_chunk_info.is_allocated(); }
+    bool is_align() const {
+        return (m_chunk_info.chunk_start_offset % m_pdev->align_size() == 0) &&
+            (m_chunk_info.chunk_size % m_pdev->align_size() == 0);
+    }
     uint32_t vdev_id() const { return m_chunk_info.vdev_id; }
     uint16_t chunk_id() const { return static_cast< uint16_t >(m_chunk_info.chunk_id); }
     uint32_t pdev_ordinal() const { return m_chunk_info.chunk_ordinal; }

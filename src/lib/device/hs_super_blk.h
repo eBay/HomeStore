@@ -202,6 +202,15 @@ public:
 #endif
         return (dinfo.dev_size - 1) / min_chunk_size + 1;
     }
+    static uint32_t min_chunk_size(HSDevType dtype) {
+        uint64_t min_chunk_size =
+            (dtype == HSDevType::Fast) ? MIN_CHUNK_SIZE_FAST_DEVICE : MIN_CHUNK_SIZE_DATA_DEVICE;
+#ifdef _PRERELEASE
+        auto chunk_size = iomgr_flip::instance()->get_test_flip< long >("set_minimum_chunk_size");
+        if (chunk_size) { min_chunk_size = chunk_size.get(); }
+#endif
+        return min_chunk_size;
+    }
 };
 
 } // namespace homestore

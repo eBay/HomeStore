@@ -23,6 +23,7 @@
 #include <homestore/homestore_decl.hpp>
 #include "device/chunk.h"
 #include "device/device.h"
+#include "device/hs_super_blk.h"
 #include "device/physical_dev.hpp"
 #include "device/virtual_dev.hpp"
 #include "common/homestore_utils.hpp"
@@ -187,10 +188,9 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
     if (vdev_id == sisl::Bitset::npos) { throw std::out_of_range("System has no room for additional vdev"); }
     m_vdev_id_bm.set_bit(vdev_id);
 
-    // Determine if we have a devices available on requested dev_tier. If so use them, else fallback to data tier
     std::vector< PhysicalDev* > pdevs = pdevs_by_type_internal(vparam.dev_type);
-    RELEASE_ASSERT_GT(pdevs.size(), 0, "Unable to find any pdevs for even data tier, can't create vdev");
-
+    RELEASE_ASSERT_GT(pdevs.size(), 0, "Unable to find any pdevs for given vdev type, can't create vdev");
+    RELEASE_ASSERT(vparam.blk_size % pdevs[0]->align_size() == 0, "blk_size should be multiple of pdev align_size");
     // Identify the number of chunks
     if (vparam.multi_pdev_opts == vdev_multi_pdev_opts_t::ALL_PDEV_STRIPED) {
         auto total_streams = std::accumulate(pdevs.begin(), pdevs.end(), 0u,
@@ -204,11 +204,11 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
         pdevs.erase(pdevs.begin() + 1, pdevs.end()); // TODO: Pick random one
     }
 
-    // Adjust the maximum number chunks requested before round up vdev size.
-    uint32_t max_num_chunks = 0;
-    for (const auto& d : m_dev_infos) {
-        max_num_chunks += hs_super_blk::max_chunks_in_pdev(d);
-    }
+    // Based on the min chunk size, we calculate the max number of chunks that can be created in each target pdev
+    uint32_t min_chunk_size = hs_super_blk::min_chunk_size(vparam.dev_type);
+    // FIXME: it is possible that each vdev is less than max_num_chunks, but total is more than MAX_CHUNKS_IN_SYSTEM.
+    // uint32 convert is safe as it only overflow when vdev size > 64PB with 16MB min_chunk_size.
+    uint32_t max_num_chunks = std::min(uint32_t(vparam.vdev_size / min_chunk_size), hs_super_blk::MAX_CHUNKS_IN_SYSTEM);
 
     auto input_vdev_size = vparam.vdev_size;
     if (vparam.size_type == vdev_size_type_t::VDEV_SIZE_STATIC) {
@@ -217,13 +217,6 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
 
         // Either num_chunks or chunk_size can be provided and we calculate the other.
         if (vparam.num_chunks != 0) {
-            vparam.vdev_size = sisl::round_up(vparam.vdev_size, vparam.num_chunks * vparam.blk_size);
-            if (input_vdev_size != vparam.vdev_size) {
-                LOGINFO(
-                    "{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}",
-                    vparam.vdev_name, in_bytes(input_vdev_size), in_bytes(vparam.vdev_size));
-            }
-
             auto input_num_chunks = vparam.num_chunks;
             vparam.num_chunks = std::min(vparam.num_chunks, max_num_chunks);
             if (input_num_chunks != vparam.num_chunks) {
@@ -231,17 +224,28 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
                         "new_num_chunks={}",
                         vparam.vdev_name, in_bytes(input_num_chunks), in_bytes(vparam.num_chunks));
             }
+
+            // this ensure chunk_size % vparam.blk_size == 0
+            vparam.vdev_size = sisl::round_down(vparam.vdev_size, vparam.num_chunks * vparam.blk_size);
+            if (input_vdev_size != vparam.vdev_size) {
+                LOGINFO(
+                    "{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}"
+                    " to be the multiple of {} (num_chunks {} * blk_size {}).",
+                    vparam.vdev_name, input_vdev_size, vparam.vdev_size,
+                    in_bytes(vparam.num_chunks * vparam.blk_size), vparam.num_chunks, in_bytes(vparam.blk_size));
+            }
             vparam.chunk_size = vparam.vdev_size / vparam.num_chunks;
         } else if (vparam.chunk_size != 0) {
             auto input_chunk_size = vparam.chunk_size;
-            vparam.chunk_size = std::min(vparam.chunk_size, hs_super_blk::MAX_CHUNKS_IN_SYSTEM);
+            vparam.chunk_size = std::max(vparam.chunk_size, min_chunk_size);
+            vparam.chunk_size = sisl::round_up(vparam.chunk_size, vparam.blk_size);
             if (input_chunk_size != vparam.chunk_size) {
                 LOGINFO("{} Virtual device is attempted to be created with chunk_size={}, it needs to be adjust to "
                         "new_chunk_size={}",
                         vparam.vdev_name, in_bytes(input_chunk_size), in_bytes(vparam.chunk_size));
             }
 
-            vparam.vdev_size = sisl::round_up(vparam.vdev_size, vparam.chunk_size);
+            vparam.vdev_size = sisl::round_down(vparam.vdev_size, vparam.chunk_size);
             if (input_vdev_size != vparam.vdev_size) {
                 LOGINFO(
                     "{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}",
@@ -256,7 +260,29 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
     } else {
         // We need chunk_size. We start with zero num_chunks.
         RELEASE_ASSERT_GT(vparam.chunk_size, 0, "Chunk size should be provided");
+        auto input_chunk_size = vparam.chunk_size;
+        vparam.chunk_size = std::max(vparam.chunk_size, min_chunk_size);
+        vparam.chunk_size = sisl::round_up(vparam.chunk_size, vparam.blk_size);
+        if (input_chunk_size != vparam.chunk_size) {
+            LOGINFO("{} Virtual device is attempted to be created with chunk_size={}, it needs to be adjust to "
+                    "new_chunk_size={}",
+                    vparam.vdev_name, in_bytes(input_chunk_size), in_bytes(vparam.chunk_size));
+        }
+
+        vparam.vdev_size = sisl::round_down(vparam.vdev_size, vparam.chunk_size);
+        if (input_vdev_size != vparam.vdev_size) {
+            LOGINFO(
+                "{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}",
+                vparam.vdev_name, in_bytes(input_vdev_size), in_bytes(vparam.vdev_size));
+        }
     }
+    // sanity checks
+    RELEASE_ASSERT(vparam.vdev_size % vparam.chunk_size == 0, "vdev_size should be multiple of chunk_size");
+    RELEASE_ASSERT(vparam.chunk_size % vparam.blk_size == 0, "chunk_size should be multiple of blk_size");
+    RELEASE_ASSERT(vparam.chunk_size >= min_chunk_size, "chunk_size should be greater than or equal to min_chunk_size");
+
+    RELEASE_ASSERT(vparam.num_chunks <= max_num_chunks, "num_chunks should be less than or equal to max_num_chunks");
+    RELEASE_ASSERT(input_vdev_size >= vparam.vdev_size, "vdev_size should be less than or equal to input_vdev_size");
 
     LOGINFO(
         "New Virtal Dev={} of size={} with id={} is attempted to be created with multi_pdev_opts={}. The params are "
