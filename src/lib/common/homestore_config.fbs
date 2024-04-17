@@ -221,7 +221,7 @@ table Consensus {
     // Log distance with which snapshot/compact needs to happen. 0 means snapshot is disabled
     snapshot_freq_distance: uint32 = 2000;
 
-    // Num reserved log items while triggering compact from raft server;
+    // Num reserved log items while triggering compact from raft server, only consumed by nuraft server;
     num_reserved_log_items: uint32 = 20000;
 
     // Max append batch size
