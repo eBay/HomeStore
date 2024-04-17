@@ -218,7 +218,11 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
         // Either num_chunks or chunk_size can be provided and we calculate the other.
         if (vparam.num_chunks != 0) {
             auto input_num_chunks = vparam.num_chunks;
+            // max chunk size is 4GB (uint32_max), capping it by tune up num_chunks
+            uint32_t min_num_chunks = (vparam.vdev_size - 1) / std::numeric_limits< uint32_t >::max() + 1;
+            vparam.num_chunks = std::max(vparam.num_chunks, min_num_chunks);
             vparam.num_chunks = std::min(vparam.num_chunks, max_num_chunks);
+
             if (input_num_chunks != vparam.num_chunks) {
                 LOGINFO("{} Virtual device is attempted to be created with num_chunks={}, it needs to be adjust to "
                         "new_num_chunks={}",
@@ -231,8 +235,8 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
                 LOGINFO(
                     "{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}"
                     " to be the multiple of {} (num_chunks {} * blk_size {}).",
-                    vparam.vdev_name, input_vdev_size, vparam.vdev_size,
-                    in_bytes(vparam.num_chunks * vparam.blk_size), vparam.num_chunks, in_bytes(vparam.blk_size));
+                    vparam.vdev_name, input_vdev_size, vparam.vdev_size, in_bytes(vparam.num_chunks * vparam.blk_size),
+                    vparam.num_chunks, in_bytes(vparam.blk_size));
             }
             vparam.chunk_size = vparam.vdev_size / vparam.num_chunks;
         } else if (vparam.chunk_size != 0) {
@@ -271,9 +275,8 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
 
         vparam.vdev_size = sisl::round_down(vparam.vdev_size, vparam.chunk_size);
         if (input_vdev_size != vparam.vdev_size) {
-            LOGINFO(
-                "{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}",
-                vparam.vdev_name, in_bytes(input_vdev_size), in_bytes(vparam.vdev_size));
+            LOGINFO("{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}",
+                    vparam.vdev_name, in_bytes(input_vdev_size), in_bytes(vparam.vdev_size));
         }
     }
     // sanity checks
