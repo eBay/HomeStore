@@ -49,7 +49,15 @@ SISL_OPTION_GROUP(test_raft_repl_dev,
                   (block_size, "", "block_size", "block size to io",
                    ::cxxopts::value< uint32_t >()->default_value("4096"), "number"),
                   (num_raft_groups, "", "num_raft_groups", "number of raft groups per test",
-                   ::cxxopts::value< uint32_t >()->default_value("1"), "number"));
+                   ::cxxopts::value< uint32_t >()->default_value("1"), "number"),
+                  // for below replication parameter, their default value always get from dynamic config, only used
+                  // when specified by user
+                  (snapshot_distance, "", "snapshot_distance", "distance between snapshots",
+                   ::cxxopts::value< uint32_t >()->default_value("0"), "number"),
+                  (num_raft_logs_resv, "", "num_raft_logs_resv", "number of raft logs reserved",
+                   ::cxxopts::value< uint32_t >()->default_value("0"), "number"),
+                  (res_mgr_audit_timer_ms, "", "res_mgr_audit_timer_ms", "resource manager audit timer",
+                   ::cxxopts::value< uint32_t >()->default_value("0"), "number"));
 
 SISL_OPTIONS_ENABLE(logging, test_raft_repl_dev, iomgr, config, test_common_setup, test_repl_common_setup)
 
@@ -146,6 +154,8 @@ public:
         LOGINFOMOD(replication, "[Replica={}] Received error={} on key={}", g_helper->replica_num(), enum_name(error),
                    *(r_cast< uint64_t const* >(key.cbytes())));
     }
+
+    AsyncReplResult<> create_snapshot(repl_snapshot& s) override { return make_async_success<>(); }
 
     ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) override {
         return blk_alloc_hints{};
@@ -548,13 +558,24 @@ TEST_F(RaftReplDevTest, Drop_Raft_Entry_Switch_Leader) {
 }
 #endif
 
-// TODO
-// double restart:
-// 1. restart one follower(F1) while I/O keep running.
-// 2. after F1 reboots and leader is resyncing with F1 (after sending the appended entries), this leader also retarts.
-// 3. F1 should receive error from grpc saying originator not there.
-// 4. F2 should be appending entries to F1 and F1 should be able to catch up with F2 (fetch data from F2).
 //
+// This test case should be run in long running mode to see the effect of snapshot and compaction
+// Example:
+// ./bin/test_raft_repl_dev --gtest_filter=*Snapshot_and_Compact* --log_mods replication:debug --num_io=999999
+// --snapshot_distance=200 --num_raft_logs_resv=20000 --res_mgr_audit_timer_ms=120000
+//
+TEST_F(RaftReplDevTest, Snapshot_and_Compact) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+
+    uint64_t entries_per_attempt = SISL_OPTIONS["num_io"].as< uint64_t >();
+    this->write_on_leader(entries_per_attempt, true /* wait_for_commit on all replicas */);
+
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_data();
+    g_helper->sync_for_cleanup_start();
+}
 
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
@@ -571,10 +592,25 @@ int main(int argc, char* argv[]) {
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, config, test_raft_repl_dev, iomgr, test_common_setup,
                       test_repl_common_setup);
 
+    //
     // Entire test suite assumes that once a replica takes over as leader, it stays until it is explicitly yielded.
     // Otherwise it is very hard to control or accurately test behavior. Hence we forcibly override the
     // leadership_expiry time.
-    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) { s.consensus.leadership_expiry_ms = -1; });
+    //
+    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+        s.consensus.leadership_expiry_ms = -1; // -1 means never expires;
+
+        // only reset when user specified the value for test;
+        if (SISL_OPTIONS.count("snapshot_distance")) {
+            s.consensus.snapshot_freq_distance = SISL_OPTIONS["snapshot_distance"].as< uint32_t >();
+        }
+        if (SISL_OPTIONS.count("num_raft_logs_resv")) {
+            s.resource_limits.raft_logstore_reserve_threshold = SISL_OPTIONS["num_raft_logs_resv"].as< uint32_t >();
+        }
+        if (SISL_OPTIONS.count("res_mgr_audit_timer_ms")) {
+            s.resource_limits.resource_audit_timer_ms = SISL_OPTIONS["res_mgr_audit_timer_ms"].as< uint32_t >();
+        }
+    });
     HS_SETTINGS_FACTORY().save();
 
     FLAGS_folly_global_cpu_executor_threads = 4;

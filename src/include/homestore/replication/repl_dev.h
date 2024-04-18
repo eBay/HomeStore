@@ -10,6 +10,7 @@
 #include <sisl/fds/utils.hpp>
 #include <sisl/grpc/generic_service.hpp>
 #include <homestore/replication/repl_decls.h>
+#include <libnuraft/snapshot.hxx>
 
 namespace nuraft {
 template < typename T >
@@ -48,6 +49,11 @@ struct repl_key {
 
     bool operator==(repl_key const& other) const = default;
     std::string to_string() const { return fmt::format("server={}, term={}, dsn={}", server_id, term, dsn); }
+};
+
+struct repl_snapshot {
+    uint64_t last_log_idx_{0};
+    uint64_t last_log_term_{0};
 };
 
 struct repl_journal_entry;
@@ -191,6 +197,9 @@ public:
 
     /// @brief Called when the replica set is being stopped
     virtual void on_replica_stop() = 0;
+
+    /// @brief Called when the snapshot is being created by nuraft;
+    virtual AsyncReplResult<> create_snapshot(repl_snapshot& s) = 0;
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;

@@ -744,14 +744,6 @@ public:
     void unlock_flush(bool do_flush = true);
 
     /**
-     * @brief : truncate up to input log id;
-     *
-     * @param key : the key containing log id that needs to be truncate up to;
-     * @return number of records to truncate
-     */
-    uint64_t truncate(const logdev_key& key);
-
-    /**
      * @brief Rollback the logid range specific to the given store id. This method persists the information
      * synchronously to the underlying storage. Once rolledback those logids in this range are ignored (only for
      * this logstore) during load.
@@ -792,13 +784,45 @@ public:
     void on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key, logdev_key flush_ld_key,
                      log_buffer buf, uint32_t nremaining_in_batch);
     void on_batch_completion(HomeLogStore* log_store, uint32_t nremaining_in_batch, logdev_key flush_ld_key);
-    void device_truncate_under_lock(const std::shared_ptr< truncate_req >& treq);
-    logdev_key do_device_truncate(bool dry_run = false);
+
+    /**
+     * Truncates the device under lock.
+     *
+     * This function is responsible for truncating the device based on the provided truncate request.
+     * The truncation operation is performed under a lock to ensure thread safety.
+     *
+     * @param treq The truncate request to be processed.
+     */
+    void device_truncate_under_lock(const std::shared_ptr< truncate_req > treq);
+
     void handle_unopened_log_stores(bool format);
     logdev_id_t get_id() { return m_logdev_id; }
     shared< JournalVirtualDev::Descriptor > get_journal_descriptor() const { return m_vdev_jd; }
 
+    // bool ready_for_truncate() const { return m_vdev_jd->ready_for_truncate(); }
+
 private:
+    /**
+     * @brief : truncate up to input log id;
+     *
+     * @param key : the key containing log id that needs to be truncate up to;
+     * @return number of records to truncate
+     */
+    uint64_t truncate(const logdev_key& key);
+
+    /**
+     * Truncates the device.
+     *
+     * This function truncates the device and returns the corresponding logdev_key.
+     *
+     * @param dry_run If set to true, the function performs a dry run without actually truncating the device, it only
+     * updates the corresponding truncation barriers, pretending the truncation happened without actually discarding the
+     * log entries on device.
+     *
+     * @return The logdev_key representing the truncated device.
+     */
+    logdev_key do_device_truncate(bool dry_run = false);
+
     LogGroup* make_log_group(uint32_t estimated_records) {
         m_log_group_pool[m_log_group_idx].reset(estimated_records);
         return &m_log_group_pool[m_log_group_idx];

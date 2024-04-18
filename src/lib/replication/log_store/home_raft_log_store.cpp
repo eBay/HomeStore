@@ -16,6 +16,8 @@
 #include "home_raft_log_store.h"
 #include "storage_engine_buffer.h"
 #include <sisl/fds/utils.hpp>
+#include "common/homestore_assert.hpp"
+#include <homestore/homestore.hpp>
 
 using namespace homestore;
 
@@ -60,6 +62,32 @@ static uint64_t extract_term(const log_buffer& log_bytes) {
     return (*r_cast< uint64_t const* >(raw_ptr));
 }
 
+void HomeRaftLogStore::truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_lsn) {
+    auto const last_lsn = last_index();
+    auto const start_lsn = start_index();
+
+    if (start_lsn + num_reserved_cnt >= last_lsn) {
+        REPL_STORE_LOG(DEBUG,
+                       "Store={} LogDev={}: Skipping truncating because of reserved logs entries is not enough. "
+                       "start_lsn={}, resv_cnt={}, last_lsn={}",
+                       m_logstore_id, m_logdev_id, start_lsn, num_reserved_cnt, last_lsn);
+        return;
+    } else {
+        //
+        // truncate_lsn can not accross compact_lsn passed down by raft server;
+        //
+        // When will it happen:
+        // compact_lsn can be smaller than last_lsn - num_reserved_cnt, when raft is configured with
+        // snapshot_distance of a large value, and dynamic config "resvered log entries" a smaller value.
+        //
+        auto truncate_lsn = std::min(last_lsn - num_reserved_cnt, (ulong)to_store_lsn(compact_lsn));
+
+        REPL_STORE_LOG(INFO, "LogDev={}: Truncating log entries from {} to {}, compact_lsn={}, last_lsn={}",
+                       m_logdev_id, start_lsn, truncate_lsn, compact_lsn, last_lsn);
+        m_log_store->truncate(truncate_lsn);
+    }
+}
+
 HomeRaftLogStore::HomeRaftLogStore(logdev_id_t logdev_id, logstore_id_t logstore_id) {
     m_dummy_log_entry = nuraft::cs_new< nuraft::log_entry >(0, nuraft::buffer::alloc(0), nuraft::log_val_type::app_log);
 
@@ -91,6 +119,11 @@ void HomeRaftLogStore::remove_store() {
 ulong HomeRaftLogStore::next_slot() const {
     uint64_t next_slot = to_repl_lsn(m_log_store->get_contiguous_issued_seq_num(m_last_durable_lsn)) + 1;
     return next_slot;
+}
+
+ulong HomeRaftLogStore::last_index() const {
+    uint64_t last_index = m_log_store->get_contiguous_completed_seq_num(m_last_durable_lsn);
+    return last_index;
 }
 
 ulong HomeRaftLogStore::start_index() const {
@@ -245,13 +278,23 @@ void HomeRaftLogStore::apply_pack(ulong index, nuraft::buffer& pack) {
 bool HomeRaftLogStore::compact(ulong compact_lsn) {
     auto cur_max_lsn = m_log_store->get_contiguous_issued_seq_num(m_last_durable_lsn);
     if (cur_max_lsn < to_store_lsn(compact_lsn)) {
+        // release this assert if for some use case, we should tolorant this case;
+        // for now, don't expect this case to happen.
+        RELEASE_ASSERT(false, "compact_lsn={} is beyond the current max_lsn={}", compact_lsn, cur_max_lsn);
+
         // We need to fill the remaining entries with dummy data.
         for (auto lsn{cur_max_lsn + 1}; lsn <= to_store_lsn(compact_lsn); ++lsn) {
             append(m_dummy_log_entry);
         }
     }
+
     m_log_store->flush_sync(to_store_lsn(compact_lsn));
-    m_log_store->truncate(to_store_lsn(compact_lsn));
+
+    // we rely on resrouce mgr timer to trigger truncate for all log stores in system;
+    // this will be friendly for multiple logstore on same logdev;
+
+    // m_log_store->truncate(to_store_lsn(compact_lsn));
+
     return true;
 }
 

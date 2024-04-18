@@ -40,6 +40,8 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
         m_next_dsn = m_rd_sb->last_applied_dsn + 1;
         m_commit_upto_lsn = m_rd_sb->commit_lsn;
         m_last_flushed_commit_lsn = m_commit_upto_lsn;
+        m_compact_lsn = m_rd_sb->compact_lsn;
+
         m_rdev_name = fmt::format("rdev{}", m_rd_sb->group_ordinal);
 
         // Its ok not to do compare exchange, because loading is always single threaded as of now
@@ -107,6 +109,18 @@ bool RaftReplDev::join_group() {
 }
 
 void RaftReplDev::use_config(json_superblk raft_config_sb) { m_raft_config_sb = std::move(raft_config_sb); }
+
+void RaftReplDev::on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done) {
+    RD_LOG(DEBUG, "create_snapshot last_idx={}/term={}", s.get_last_log_idx(), s.get_last_log_term());
+    repl_snapshot snapshot{.last_log_idx_ = s.get_last_log_idx(), .last_log_term_ = s.get_last_log_term()};
+    auto result = m_listener->create_snapshot(snapshot).get();
+    auto null_except = std::shared_ptr< std::exception >();
+    HS_REL_ASSERT(result.hasError() == false, "Not expecting creating snapshot to return false. ");
+    m_last_snapshot = nuraft::cs_new< nuraft::snapshot >(s.get_last_log_idx(), s.get_last_log_term(),
+                                                         s.get_last_config(), s.size(), s.get_type());
+    auto ret_val{true};
+    if (when_done) { when_done(ret_val, null_except); }
+}
 
 void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
                                     repl_req_ptr_t rreq) {
@@ -505,7 +519,7 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreq
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     if (rreqs.size() == 0) { return; }
 
-    std::vector< ::flatbuffers::Offset< RequestEntry > > entries;
+    std::vector<::flatbuffers::Offset< RequestEntry > > entries;
     entries.reserve(rreqs.size());
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
@@ -986,12 +1000,14 @@ void RaftReplDev::report_committed(repl_req_ptr_t rreq) {
 }
 
 void RaftReplDev::cp_flush(CP*) {
-    auto lsn = m_commit_upto_lsn.load();
+    auto const lsn = m_commit_upto_lsn.load();
+    auto const clsn = m_compact_lsn.load();
+
     if (lsn == m_last_flushed_commit_lsn) {
         // Not dirtied since last flush ignore
         return;
     }
-
+    m_rd_sb->compact_lsn = clsn;
     m_rd_sb->commit_lsn = lsn;
     m_rd_sb->checkpoint_lsn = lsn;
     m_rd_sb->last_applied_dsn = m_next_dsn.load();

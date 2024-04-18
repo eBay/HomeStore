@@ -80,14 +80,15 @@ public:
 
         /**
          * @brief : allocate space specified by input size.
+         * this API will always be called in single thread;
          *
          * @param size : size to be allocated
          *
          * @return : the start unique offset of the allocated space
          *
          * Possible calling sequence:
-         * offset_1 = reserve(size1);
-         * offset_2 = reserve(size2);
+         * offset_1 = alloc_next_append_blk(size1);
+         * offset_2 = alloc_next_append_blk(size2);
          * write_at_offset(offset_2);
          * write_at_offset(offset_1);
          */

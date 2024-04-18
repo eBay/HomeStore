@@ -14,13 +14,67 @@
  *
  *********************************************************************************/
 #include <homestore/homestore.hpp>
+#include <homestore/logstore_service.hpp>
+#include <homestore/replication_service.hpp>
+#include <iomgr/iomgr_flip.hpp>
 #include "resource_mgr.hpp"
 #include "homestore_assert.hpp"
+#include "replication/repl_dev/raft_repl_dev.h"
 
 namespace homestore {
 ResourceMgr& resource_mgr() { return hs()->resource_mgr(); }
 
-void ResourceMgr::set_total_cap(uint64_t total_cap) { m_total_cap = total_cap; }
+void ResourceMgr::start(uint64_t total_cap) {
+    m_total_cap = total_cap;
+    start_timer();
+}
+
+void ResourceMgr::stop() {
+    LOGINFO("Cancel resource manager timer.");
+    iomanager.cancel_timer(m_res_audit_timer_hdl);
+    m_res_audit_timer_hdl = iomgr::null_timer_handle;
+}
+
+//
+// 1. Conceptually in rare case(not poosible for NuObject, possibly true for NuBlox2.0) truncate itself can't garunteen
+//    the space is freed up upto satisfy resource manager. e.g. multiple log stores on this same descriptor and one
+//    logstore lagging really behind and not able to truncate much space. Doing multiple truncation won't help in this
+//    case.
+// 2. And any write on any other descriptor will trigger a high_watermark_check, and if it were to trigger critial
+//    alert on this vdev, truncation will be made immediately on all descriptors;
+// 3. If still no space can be freed, there is nothing we can't here to back pressure to above layer by rejecting log
+//    writes on this descriptor;
+//
+void ResourceMgr::trigger_truncate() {
+    if (hs()->has_repl_data_service()) {
+        // first make sure all repl dev's underlying raft log store make corresponding reservation during
+        // truncate -- set the safe truncate boundary for each raft log store;
+        hs()->repl_service().iterate_repl_devs([](cshared< ReplDev >& rd) {
+            // lock is already taken by repl service layer;
+            std::dynamic_pointer_cast< RaftReplDev >(rd)->truncate(
+                HS_DYNAMIC_CONFIG(resource_limits.raft_logstore_reserve_threshold));
+        });
+
+        // next do device truncate which go through all logdevs and truncate them;
+        hs()->logstore_service().device_truncate();
+    }
+
+    // TODO: add device_truncate callback to audit how much space was freed per each LogDev and add related
+    // metrics;
+}
+
+void ResourceMgr::start_timer() {
+    auto const res_mgr_timer_ms = HS_DYNAMIC_CONFIG(resource_limits.resource_audit_timer_ms);
+    LOGINFO("resource audit timer is set to {} usec", res_mgr_timer_ms);
+
+    m_res_audit_timer_hdl = iomanager.schedule_global_timer(
+        res_mgr_timer_ms * 1000 * 1000, true /* recurring */, nullptr /* cookie */, iomgr::reactor_regex::all_worker,
+        [this](void*) {
+            // all resource timely audit routine should arrive here;
+            this->trigger_truncate();
+        },
+        true /* wait_to_schedule */);
+}
 
 /* monitor dirty buffer count */
 void ResourceMgr::inc_dirty_buf_size(const uint32_t size) {
@@ -28,7 +82,7 @@ void ResourceMgr::inc_dirty_buf_size(const uint32_t size) {
     const auto dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_add(size, std::memory_order_relaxed);
     COUNTER_INCREMENT(m_metrics, dirty_buf_cnt, size);
     if (m_dirty_buf_exceed_cb && ((dirty_buf_cnt + size) > get_dirty_buf_limit())) {
-        m_dirty_buf_exceed_cb(dirty_buf_cnt + size);
+        m_dirty_buf_exceed_cb(dirty_buf_cnt + size, false /* critical */);
     }
 }
 
@@ -106,22 +160,37 @@ uint64_t ResourceMgr::get_cache_size() const {
     return ((HS_STATIC_CONFIG(input.io_mem_size()) * HS_DYNAMIC_CONFIG(resource_limits.cache_size_percent)) / 100);
 }
 
-/* monitor journal size */
-bool ResourceMgr::check_journal_size(const uint64_t used_size, const uint64_t total_size) {
-    if (m_journal_exceed_cb) {
+bool ResourceMgr::check_journal_descriptor_size(const uint64_t used_size) const {
+    return (used_size >= get_journal_descriptor_size_limit());
+}
+
+/* monitor journal vdev size */
+bool ResourceMgr::check_journal_vdev_size(const uint64_t used_size, const uint64_t total_size) {
+    if (m_journal_vdev_exceed_cb) {
         const uint32_t used_pct = (100 * used_size / total_size);
-        if (used_pct >= HS_DYNAMIC_CONFIG(resource_limits.journal_size_percent)) {
-            m_journal_exceed_cb(used_size);
+        if (used_pct >= get_journal_vdev_size_limit()) {
+            m_journal_vdev_exceed_cb(used_size, used_pct >= get_journal_vdev_size_critical_limit() /* is_critical */);
             HS_LOG_EVERY_N(WARN, base, 50, "high watermark hit, used percentage: {}, high watermark percentage: {}",
-                           used_pct, HS_DYNAMIC_CONFIG(resource_limits.journal_size_percent));
+                           used_pct, get_journal_vdev_size_limit());
             return true;
         }
     }
     return false;
 }
-void ResourceMgr::register_journal_exceed_cb(exceed_limit_cb_t cb) { m_journal_exceed_cb = std::move(cb); }
 
-uint32_t ResourceMgr::get_journal_size_limit() const { return HS_DYNAMIC_CONFIG(resource_limits.journal_size_percent); }
+void ResourceMgr::register_journal_vdev_exceed_cb(exceed_limit_cb_t cb) { m_journal_vdev_exceed_cb = std::move(cb); }
+
+uint32_t ResourceMgr::get_journal_descriptor_size_limit() const {
+    return HS_DYNAMIC_CONFIG(resource_limits.journal_descriptor_size_threshold_mb) * 1024 * 1024;
+}
+
+uint32_t ResourceMgr::get_journal_vdev_size_critical_limit() const {
+    return HS_DYNAMIC_CONFIG(resource_limits.journal_vdev_size_percent_critical);
+}
+
+uint32_t ResourceMgr::get_journal_vdev_size_limit() const {
+    return HS_DYNAMIC_CONFIG(resource_limits.journal_vdev_size_percent);
+}
 
 /* monitor chunk size */
 void ResourceMgr::check_chunk_free_size_and_trigger_cp(uint64_t free_size, uint64_t alloc_size) {}

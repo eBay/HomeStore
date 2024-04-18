@@ -238,7 +238,6 @@ void HomeStore::do_start() {
 
     m_meta_service->start(m_dev_mgr->is_first_time_boot());
     m_cp_mgr->start(is_first_time_boot());
-    m_resource_mgr->set_total_cap(m_dev_mgr->total_capacity());
 
     if (has_index_service()) { m_index_service->start(); }
 
@@ -254,6 +253,8 @@ void HomeStore::do_start() {
     }
 
     m_cp_mgr->start_timer();
+
+    m_resource_mgr->start(m_dev_mgr->total_capacity());
     m_init_done = true;
 }
 
@@ -267,6 +268,8 @@ void HomeStore::shutdown() {
 
     m_cp_mgr->shutdown();
     m_cp_mgr.reset();
+
+    m_resource_mgr->stop();
 
     if (has_repl_data_service()) {
         // Log and Data services are stopped by repl service
