@@ -43,6 +43,12 @@ Random Access circular buffer. Typically not used directly but levaraged by othe
 * libaio-dev (assuming Ubuntu)
 * uuid-dev (assuming Ubuntu)
 
+### Versioning
+We use modified semantic versioning for this project, <X.Y.Z> 
+* Bump X for every major release cut by maintainer.
+* Bump Y for every incompatible changes.
+* Bump Z for others, like compatible api addtion/bug fix.
+
 ### Dependencies
 * SISL
 ```
