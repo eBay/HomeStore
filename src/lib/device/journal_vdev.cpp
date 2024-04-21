@@ -23,6 +23,9 @@
 #include <sisl/logging/logging.h>
 #include <iomgr/iomgr_flip.hpp>
 #include <homestore/homestore.hpp>
+#include <homestore/logstore_service.hpp>
+#include <homestore/replication_service.hpp>
+#include "replication/repl_dev/raft_repl_dev.h"
 #include "device/chunk.h"
 #include "device/device.h"
 #include "device/physical_dev.hpp"
@@ -51,6 +54,16 @@ JournalVirtualDev::JournalVirtualDev(DeviceManager& dmgr, const vdev_info& vinfo
                 return private_blob;
             },
             m_vdev_info.hs_dev_type, m_vdev_info.vdev_id, m_vdev_info.chunk_size});
+
+    resource_mgr().register_journal_vdev_exceed_cb([this]([[maybe_unused]] int64_t dirty_buf_count, bool critical) {
+        // either it is critical or non-critical, call cp_flush;
+        hs()->cp_mgr().trigger_cp_flush(false /* force */);
+
+        if (critical) {
+            LOGINFO("Critical journal vdev size threshold reached. Triggering truncate.");
+            resource_mgr().trigger_truncate();
+        }
+    });
 }
 
 JournalVirtualDev::~JournalVirtualDev() {}
@@ -637,8 +650,20 @@ bool JournalVirtualDev::Descriptor::is_offset_at_last_chunk(off_t bytes_offset) 
     return false;
 }
 
+//
+// This API is ways called in single thread
+//
 void JournalVirtualDev::Descriptor::high_watermark_check() {
-    if (resource_mgr().check_journal_size(used_size(), size())) {
+#if 0
+    // high watermark check for the individual journal descriptor;
+    if (resource_mgr().check_journal_descriptor_size(used_size())) {
+        // the next resource manager audit will call truncation for this descriptor;
+        set_ready_for_truncate();
+    }
+#endif
+
+    // high watermark check for the entire journal vdev;
+    if (resource_mgr().check_journal_vdev_size(m_vdev.used_size(), m_vdev.size())) {
         COUNTER_INCREMENT(m_vdev.m_metrics, vdev_high_watermark_count, 1);
 
         if (m_vdev.m_event_cb && m_truncate_done) {

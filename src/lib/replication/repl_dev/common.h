@@ -16,6 +16,7 @@
 
 #include <boost/intrusive_ptr.hpp>
 
+#include <homestore/replication/repl_decls.h>
 #include <homestore/replication_service.hpp>
 #include <homestore/replication/repl_dev.h>
 #include <homestore/logstore/log_store.hpp>
@@ -63,8 +64,9 @@ struct repl_dev_superblk {
     uuid_t group_id; // group_id of this replica set
     logdev_id_t logdev_id;
     logstore_id_t logstore_id; // Logstore id for the data journal
-    int64_t commit_lsn;        // LSN upto which this replica has committed
-    int64_t checkpoint_lsn;    // LSN upto which this replica have checkpointed the data
+    repl_lsn_t commit_lsn;     // LSN upto which this replica has committed
+    repl_lsn_t checkpoint_lsn; // LSN upto which this replica have checkpointed the Data
+    repl_lsn_t compact_lsn;    // maximum LSN that can be compacted to
     uint64_t group_ordinal;    // Ordinal number which will be used to indicate the rdevXYZ for debugging
 
     uint64_t get_magic() const { return magic; }

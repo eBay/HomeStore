@@ -39,12 +39,13 @@ public:
     ~RsrcMgrMetrics() { deregister_me_from_farm(); }
 };
 
-typedef std::function< void(int64_t /* dirty_buf_cnt */) > exceed_limit_cb_t;
+typedef std::function< void(int64_t /* dirty_buf_cnt */, bool /* critical */) > exceed_limit_cb_t;
 const uint32_t max_qd_multiplier = 32;
 
 class ResourceMgr {
 public:
-    void set_total_cap(uint64_t total_cap);
+    void start(uint64_t total_cap);
+    void stop();
 
     /* monitor dirty buffer count */
     void inc_dirty_buf_size(const uint32_t size);
@@ -75,11 +76,42 @@ public:
     /* get cache size */
     uint64_t get_cache_size() const;
 
-    /* monitor journal size */
-    bool check_journal_size(const uint64_t used_size, const uint64_t total_size);
-    void register_journal_exceed_cb(exceed_limit_cb_t cb);
+    /**
+     * @brief Checks if the journal virtual device (vdev) size is within the specified limits.
+     *
+     * This function compares the used size of the journal vdev with the total size of the vdev
+     * and returns true if the used size is within the limits, and false otherwise.
+     *
+     * If it exceeds the limit, it will call the callback function registered with register_journal_vdev_exceed_cb().
+     *
+     * @param used_size The used size of the journal vdev.
+     * @param total_size The total size of the journal vdev.
+     * @return true if the used size is exceeding the limits, false if not exceeding limit or caller didn't registered
+     * any callback (caller not interested).
+     */
+    bool check_journal_vdev_size(const uint64_t used_size, const uint64_t total_size);
 
-    uint32_t get_journal_size_limit() const;
+    /**
+     * @brief Checks if the given used size is within the acceptable range for the journal descriptor.
+     *
+     * This function checks if the used size of the journal descriptor is within the acceptable range.
+     * The acceptable range is determined by the implementation of the resource manager.
+     *
+     * @param used_size The used size of the journal descriptor.
+     * @return true if the used size is exceeding the acceptable range, false otherwise.
+     */
+    bool check_journal_descriptor_size(const uint64_t used_size) const;
+
+    /**
+     * Registers a callback function to be called when the journal virtual device exceeds its limit.
+     *
+     * @param cb The callback function to be registered.
+     */
+    void register_journal_vdev_exceed_cb(exceed_limit_cb_t cb);
+
+    uint32_t get_journal_vdev_size_limit() const;
+    uint32_t get_journal_vdev_size_critical_limit() const;
+    uint32_t get_journal_descriptor_size_limit() const;
 
     /* monitor chunk size */
     void check_chunk_free_size_and_trigger_cp(uint64_t free_size, uint64_t alloc_size);
@@ -90,9 +122,21 @@ public:
 
     void reset_dirty_buf_qd();
 
+    /**
+     * Triggers the truncation process.
+     * This function is responsible for initiating the truncation process.
+     */
+    void trigger_truncate();
+
 private:
     int64_t get_dirty_buf_limit() const;
 
+    /**
+     * Starts resource manager resource audit timer.
+     */
+    void start_timer();
+
+private:
     std::atomic< int64_t > m_hs_dirty_buf_cnt;
     std::atomic< int64_t > m_hs_fb_cnt;  // free count
     std::atomic< int64_t > m_hs_fb_size; // free size
@@ -100,10 +144,14 @@ private:
     std::atomic< int64_t > m_memory_used_in_recovery;
     std::atomic< uint32_t > m_flush_dirty_buf_q_depth{64};
     uint64_t m_total_cap;
+
+    // TODO: make it event_cb
     exceed_limit_cb_t m_dirty_buf_exceed_cb;
     exceed_limit_cb_t m_free_blks_exceed_cb;
-    exceed_limit_cb_t m_journal_exceed_cb;
+    exceed_limit_cb_t m_journal_vdev_exceed_cb;
     RsrcMgrMetrics m_metrics;
+
+    iomgr::timer_handle_t m_res_audit_timer_hdl;
 };
 
 extern ResourceMgr& resource_mgr();

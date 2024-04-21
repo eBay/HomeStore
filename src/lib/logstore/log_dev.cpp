@@ -507,6 +507,7 @@ bool LogDev::run_under_flush_lock(const flush_blocked_callback& cb) {
         }
     }
 
+    // the contract here is if cb return falses, it means it will unlock_flush by itself (in another thread);
     if (cb()) { unlock_flush(); }
     return true;
 }
@@ -682,7 +683,7 @@ void LogDev::remove_log_store(logstore_id_t store_id) {
     unreserve_store_id(store_id);
 }
 
-void LogDev::device_truncate_under_lock(const std::shared_ptr< truncate_req >& treq) {
+void LogDev::device_truncate_under_lock(const std::shared_ptr< truncate_req > treq) {
     run_under_flush_lock([this, treq]() {
         iomanager.run_on_forget(logstore_service().truncate_thread(), [this, treq]() {
             const logdev_key trunc_upto = do_device_truncate(treq->dry_run);
@@ -698,6 +699,7 @@ void LogDev::device_truncate_under_lock(const std::shared_ptr< truncate_req >& t
                 if (treq->cb) { treq->cb(treq->m_trunc_upto_result); }
                 if (treq->wait_till_done) { treq->cv.notify_one(); }
             }
+
             unlock_flush();
         });
         return false; // Do not release the flush lock yet, the scheduler will unlock it.
