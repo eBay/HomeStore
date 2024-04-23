@@ -226,7 +226,10 @@ raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params
     return m_success_ptr;
 }
 
-uint64_t RaftStateMachine::last_commit_index() { return uint64_cast(m_rd.get_last_commit_lsn()); }
+uint64_t RaftStateMachine::last_commit_index() {
+    RD_LOG(DEBUG, "Raft channel: last_commit_index {}", uint64_cast(m_rd.get_last_commit_lsn()));
+    return uint64_cast(m_rd.get_last_commit_lsn());
+}
 
 void RaftStateMachine::link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn) {
     rreq->lsn = lsn;
@@ -252,7 +255,48 @@ void RaftStateMachine::create_snapshot(nuraft::snapshot& s, nuraft::async_result
     m_rd.on_create_snapshot(s, when_done);
 }
 
+int RaftStateMachine::read_logical_snp_obj(nuraft::snapshot& s, void*& user_ctx, ulong obj_id, raft_buf_ptr_t& data_out,
+                                           bool& is_last_obj) {
+    auto snp_ctx = std::make_shared< nuraft_snapshot_context >(s);
+    auto snp_data = std::make_shared< snapshot_data >();
+    snp_data->user_ctx = user_ctx;
+    snp_data->offset = obj_id;
+    snp_data->is_last_obj = is_last_obj;
+
+    // Listener will read the snapshot data and we pass through the same.
+    int ret = m_rd.m_listener->read_snapshot_data(snp_ctx, snp_data);
+    if (ret < 0) return ret;
+
+    // Update user_ctx and whether is_last_obj
+    user_ctx = snp_data->user_ctx;
+    is_last_obj = snp_data->is_last_obj;
+
+    // We are doing a copy here.
+    data_out = nuraft::buffer::alloc(snp_data->blob.size());
+    nuraft::buffer_serializer bs(data_out);
+    bs.put_raw(snp_data->blob.cbytes(), snp_data->blob.size());
+    return ret;
+}
+
+void RaftStateMachine::save_logical_snp_obj(nuraft::snapshot& s, ulong& obj_id, nuraft::buffer& data, bool is_first_obj,
+                                            bool is_last_obj) {
+    obj_id++;
+    // TODO
+}
+
+bool RaftStateMachine::apply_snapshot(nuraft::snapshot& s) {
+    m_rd.set_last_commit_lsn(s.get_last_log_idx());
+    m_rd.m_data_journal->set_last_durable_lsn(s.get_last_log_idx());
+    auto snp_ctx = std::make_shared< nuraft_snapshot_context >(s);
+    return m_rd.m_listener->apply_snapshot(snp_ctx);
+}
+
 std::string RaftStateMachine::rdev_name() const { return m_rd.rdev_name(); }
 
-nuraft::ptr< nuraft::snapshot > RaftStateMachine::last_snapshot() { return m_rd.get_last_snapshot(); }
+nuraft::ptr< nuraft::snapshot > RaftStateMachine::last_snapshot() {
+    auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(m_rd.m_listener->last_snapshot());
+    if (s == nullptr) return nullptr;
+    return s->nuraft_snapshot();
+}
+
 } // namespace homestore

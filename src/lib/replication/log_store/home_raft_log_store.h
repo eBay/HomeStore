@@ -179,6 +179,8 @@ public:
      */
     ulong last_index() const;
 
+    void set_last_durable_lsn(repl_lsn_t lsn);
+
     /**
      * Truncates the log store
      *

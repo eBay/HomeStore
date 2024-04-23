@@ -65,8 +65,12 @@ void ResourceMgr::trigger_truncate() {
 
 void ResourceMgr::start_timer() {
     auto const res_mgr_timer_ms = HS_DYNAMIC_CONFIG(resource_limits.resource_audit_timer_ms);
-    LOGINFO("resource audit timer is set to {} usec", res_mgr_timer_ms);
+    if (res_mgr_timer_ms == 0) {
+        LOGINFO("resource audit timer is 0. Disabling timer");
+        return;
+    }
 
+    LOGINFO("resource audit timer is set to {} usec", res_mgr_timer_ms);
     m_res_audit_timer_hdl = iomanager.schedule_global_timer(
         res_mgr_timer_ms * 1000 * 1000, true /* recurring */, nullptr /* cookie */, iomgr::reactor_regex::all_worker,
         [this](void*) {

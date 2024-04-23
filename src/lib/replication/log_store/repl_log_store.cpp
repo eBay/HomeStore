@@ -9,7 +9,7 @@ namespace homestore {
 uint64_t ReplLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
     // We don't want to transform anything that is not an app log
     if (entry->get_val_type() != nuraft::log_val_type::app_log) { return HomeRaftLogStore::append(entry); }
-
+    if (entry->get_buf_ptr()->size() == 0) { return HomeRaftLogStore::append(entry); }
     repl_req_ptr_t rreq = m_sm.localize_journal_entry_finish(*entry);
     ulong lsn = HomeRaftLogStore::append(entry);
     m_sm.link_lsn_to_req(rreq, int64_cast(lsn));
