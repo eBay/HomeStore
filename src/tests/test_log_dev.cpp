@@ -77,15 +77,13 @@ public:
     void start_homestore(bool restart = false, hs_before_services_starting_cb_t starting_cb = nullptr) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-        if (starting_cb == nullptr) {
-            starting_cb = [this]() {
-                HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
-                    // Disable flush timer in UT.
-                    s.logstore.flush_timer_frequency_us = 0;
-                });
-                HS_SETTINGS_FACTORY().save();
-            };
-        }
+        HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+            // Disable flush timer in UT.
+            s.logstore.flush_timer_frequency_us = 0;
+            s.resource_limits.resource_audit_timer_ms = 0;
+        });
+        HS_SETTINGS_FACTORY().save();
+
         test_common::HSTestHelper::start_homestore("test_log_dev",
                                                    {
                                                        {HS_SERVICE::META, {.size_pct = 15.0}},
@@ -284,11 +282,6 @@ TEST_F(LogDevTest, Rollback) {
     auto restart = [&]() {
         std::promise< bool > p;
         auto starting_cb = [&]() {
-            HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
-                // Disable flush timer in UT.
-                s.logstore.flush_timer_frequency_us = 0;
-            });
-            HS_SETTINGS_FACTORY().save();
             logstore_service().open_logdev(logdev_id);
             logstore_service().open_log_store(logdev_id, store_id, false /* append_mode */).thenValue([&](auto store) {
                 log_store = store;
