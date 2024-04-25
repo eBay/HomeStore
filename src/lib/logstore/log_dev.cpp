@@ -514,11 +514,12 @@ bool LogDev::run_under_flush_lock(const flush_blocked_callback& cb) {
 
 void LogDev::unlock_flush(bool do_flush) {
     std::vector< flush_blocked_callback >* flush_q{nullptr};
-
-    if (m_block_flush_q != nullptr) {
+    {
         std::unique_lock lk{m_block_flush_q_mutex};
-        flush_q = m_block_flush_q;
-        m_block_flush_q = nullptr;
+        if (m_block_flush_q != nullptr) {
+            flush_q = m_block_flush_q;
+            m_block_flush_q = nullptr;
+        }
     }
 
     if (flush_q) {

@@ -484,8 +484,9 @@ public:
              {HS_SERVICE::LOG, {.size_pct = 84.0, .chunk_size = 8 * 1024 * 1024, .min_chunk_size = 8 * 1024 * 1024}}},
             [this, restart, n_log_stores]() {
                 HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
-                    // Disable flush timer in UT.
+                    // Disable flush and resource mgr timer in UT.
                     s.logstore.flush_timer_frequency_us = 0;
+                    s.resource_limits.resource_audit_timer_ms = 0;
                 });
                 HS_SETTINGS_FACTORY().save();
 
