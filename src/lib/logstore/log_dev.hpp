@@ -501,6 +501,7 @@ public:
     ~LogDevMetadata() = default;
 
     logdev_superblk* create(logdev_id_t id);
+    void destroy();
     void reset();
     std::vector< std::pair< logstore_id_t, logstore_superblk > > load();
     void persist();
@@ -614,7 +615,7 @@ public:
         return HS_DYNAMIC_CONFIG(logstore.flush_threshold_size) - sizeof(log_group_header);
     }
 
-    LogDev(logdev_id_t logdev_id);
+    LogDev(logdev_id_t logdev_id, JournalVirtualDev* vdev);
     LogDev(const LogDev&) = delete;
     LogDev& operator=(const LogDev&) = delete;
     LogDev(LogDev&&) noexcept = delete;
@@ -626,15 +627,20 @@ public:
      * to the recovery. It is expected that all callbacks are registered before calling the start.
      *
      * @param format: Do we need to format the logdev or not.
-     * @param blk_store: The blk_store associated to this logdev
      */
-    void start(bool format, JournalVirtualDev* vdev);
+    void start(bool format);
 
     /**
      * @brief Stop the logdev. It resets all the parameters it is using and thus can be started later
      *
      */
     void stop();
+
+    /**
+     * @brief Destroy the logdev metablks.
+     *
+     */
+    void destroy();
 
     /**
      * @brief Start the flush timer.
@@ -798,6 +804,7 @@ public:
     void handle_unopened_log_stores(bool format);
     logdev_id_t get_id() { return m_logdev_id; }
     shared< JournalVirtualDev::Descriptor > get_journal_descriptor() const { return m_vdev_jd; }
+    bool is_stopped() { return m_stopped; }
 
     // bool ready_for_truncate() const { return m_vdev_jd->ready_for_truncate(); }
 
@@ -854,7 +861,7 @@ private:
     std::atomic< logid_t > m_log_idx{0};            // Generator of log idx
     std::atomic< int64_t > m_pending_flush_size{0}; // How much flushable logs are pending
     std::atomic< bool > m_is_flushing{false}; // Is LogDev currently flushing (so far supports one flusher at a time)
-    bool m_stopped{false}; // Is Logdev stopped. We don't need lock here, because it is updated under flush lock
+    bool m_stopped{true}; // Is Logdev stopped. We don't need lock here, because it is updated under flush lock
     logdev_id_t m_logdev_id;
     JournalVirtualDev* m_vdev{nullptr};
     shared< JournalVirtualDev::Descriptor > m_vdev_jd; // Journal descriptor.

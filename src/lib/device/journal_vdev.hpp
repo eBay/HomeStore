@@ -401,6 +401,9 @@ public:
     // where log entries are stored. It also mantains offsets, size etc.
     shared< Descriptor > open(logdev_id_t id);
 
+    // Destroy a logdev and release all the chunks related to the logdev.
+    void destroy(logdev_id_t id);
+
     /**
      * @brief Get the status of the journal vdev and its internal structures
      * @param log_level: Log level to do verbosity.
@@ -410,7 +413,9 @@ public:
 
     uint64_t used_size() const override;
     uint64_t available_blks() const override;
+    uint64_t num_descriptors() const { return m_journal_descriptors.size(); }
 
+    void remove_journal_chunks(std::vector< shared< Chunk > >& chunks);
     void update_chunk_private(shared< Chunk >& chunk, JournalChunkPrivate* chunk_private);
     uint64_t get_end_of_chunk(shared< Chunk >& chunk) const;
 
