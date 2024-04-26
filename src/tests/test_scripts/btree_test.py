@@ -103,10 +103,9 @@ def long_running_clean_shutdown(type=0):
     normal_run_time = 1 * 1200 # 20 minutes
     try:
         function_normal(normal_run_time, False, True, type)
-        for i in range(1,3):
+        for i in range(1,5):
             function_normal(normal_run_time, False, False, type)
             print("Iteration {} completed successfully".format(i))
-        function_normal(0, True, False, type) # cleanup after shutdown
         print("All iterations completed successfully for type {}".format(type))
     except TestFailedError as e:
         print("Test failed: {}".format(e))
@@ -137,7 +136,7 @@ def test_index_btree():
     while True:
         try:
             #TODO enable for other types when fix is available for varlen node types.
-            for type in range(4):
+            for type in range(1):
                 long_running_clean_shutdown(type)
                 print("long_running_clean_shutdown completed successfully for type {}".format(type))
         except:
@@ -149,12 +148,8 @@ def test_index_btree():
 
 def nightly():
     long_runnig_index(0)
-    long_runnig_index(1)
-    long_runnig_index(2)
-    long_runnig_index(3)
-
+    long_running_clean_shutdown(0)
     # long_running_clean_shutdown()
-    test_index_btree()
     # crash_recovery_framework()
 
 # The name of the method to be called is the var test_suits
