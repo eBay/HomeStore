@@ -104,7 +104,7 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
 
     void TearDown() override {
         BtreeTestHelper< TestType >::TearDown();
-        test_common::HSTestHelper::shutdown_homestore();
+        test_common::HSTestHelper::shutdown_homestore(false);
     }
 
     void restart_homestore() {
@@ -496,7 +496,7 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
         LOGINFO("Teardown with Root bnode_id {} tree size: {}", this->m_bt->root_node_id(),
                 this->m_bt->count_keys(this->m_bt->root_node_id()));
         BtreeTestHelper< TestType >::TearDown();
-        test_common::HSTestHelper::shutdown_homestore(cleanup);
+        test_common::HSTestHelper::shutdown_homestore(false);
     }
 
 private:
