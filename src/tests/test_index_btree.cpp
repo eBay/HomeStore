@@ -465,7 +465,7 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
 
         // Create index table and attach to index service.
         BtreeTestHelper< TestType >::SetUp();
-        if (this->m_bt == nullptr) {
+        if (this->m_bt == nullptr || SISL_OPTIONS["init_device"].as< bool >()) {
             this->m_bt = std::make_shared< typename T::BtreeType >(uuid, parent_uuid, 0, this->m_cfg);
         } else {
             populate_shadow_map();
