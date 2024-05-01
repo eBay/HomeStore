@@ -135,41 +135,13 @@ public:
     void use_config(json_superblk raft_config_sb);
     void handle_commit(repl_req_ptr_t rreq);
     repl_req_ptr_t repl_key_to_req(repl_key const& rkey) const;
-    repl_req_ptr_t applier_create_req(repl_key const& rkey, sisl::blob const& user_header, sisl::blob const& key,
-                                      uint32_t data_size, bool is_data_channel);
+    repl_req_ptr_t applier_create_req(repl_key const& rkey, journal_type_t code, sisl::blob const& user_header,
+                                      sisl::blob const& key, uint32_t data_size, bool is_data_channel);
     folly::Future< folly::Unit > notify_after_data_written(std::vector< repl_req_ptr_t >* rreqs);
     void check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreqs);
     void cp_flush(CP* cp);
     void cp_cleanup(CP* cp);
     void become_ready();
-
-    /// @brief This method is called when the data journal is compacted
-    ///
-    /// @param upto_lsn : LSN upto which the data journal was compacted
-    void on_compact(repl_lsn_t upto_lsn) { m_compact_lsn.store(upto_lsn); }
-
-    /**
-     * \brief Handles the creation of a snapshot.
-     *
-     * This function is called when a snapshot needs to be created in the replication process.
-     * It takes a reference to a `nuraft::snapshot` object and a handler for the asynchronous result.
-     * The handler will be called when the snapshot creation is completed.
-     *
-     * \param s The snapshot object to be created.
-     * \param when_done The handler to be called when the snapshot creation is completed.
-     */
-    void on_create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done);
-
-    /**
-     * Truncates the replication log by providing a specified number of reserved entries.
-     *
-     * @param num_reserved_entries The number of reserved entries of the replication log.
-     */
-    void truncate(uint32_t num_reserved_entries) {
-        m_data_journal->truncate(num_reserved_entries, m_compact_lsn.load());
-    }
-
-    nuraft::ptr< nuraft::snapshot > get_last_snapshot() { return m_last_snapshot; }
 
     /// @brief This method is called when the data journal is compacted
     ///

@@ -80,7 +80,7 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
         MultiBlkId entry_blkid;
         entry_blkid.deserialize(entry_to_val(jentry), true /* copy */);
 
-        rreq = m_rd.applier_create_req(rkey, entry_to_hdr(jentry), entry_to_key(jentry),
+        rreq = m_rd.applier_create_req(rkey, jentry->code, entry_to_hdr(jentry), entry_to_key(jentry),
                                        (entry_blkid.blk_count() * m_rd.get_blk_size()), false /* is_data_channel */);
         if (rreq == nullptr) { goto out; }
 
@@ -105,8 +105,8 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
         uint8_t* blkid_location = uintptr_cast(lentry.get_buf().data_begin()) + size_before_value;
         std::memcpy(blkid_location, rreq->local_blkid().serialize().cbytes(), local_size);
     } else {
-        rreq = m_rd.applier_create_req(rkey, entry_to_hdr(jentry), entry_to_key(jentry), jentry->value_size,
-                                       false /* is_data_channel */);
+        rreq = m_rd.applier_create_req(rkey, jentry->code, entry_to_hdr(jentry), entry_to_key(jentry),
+                                       jentry->value_size, false /* is_data_channel */);
     }
 
     // We might have localized the journal entry with new blkid. We need to also update the header/key pointers pointing

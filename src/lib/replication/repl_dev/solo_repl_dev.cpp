@@ -30,7 +30,9 @@ SoloReplDev::SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existi
 void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
                                     repl_req_ptr_t rreq) {
     if (!rreq) { auto rreq = repl_req_ptr_t(new repl_req_ctx{}); }
-    rreq->init(repl_key{.server_id = 0, .term = 1, .dsn = 1}, true, header, key, value.size);
+    rreq->init(repl_key{.server_id = 0, .term = 1, .dsn = 1},
+               value.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED, true, header, key,
+               value.size);
 
     // If it is header only entry, directly write to the journal
     if (rreq->has_linked_data()) {
@@ -111,7 +113,6 @@ void SoloReplDev::cp_flush(CP*) {
     m_rd_sb.write();
 }
 
-void SoloReplDev::cp_cleanup(CP*) { /* m_data_journal->truncate(m_rd_sb->checkpoint_lsn); */
-}
+void SoloReplDev::cp_cleanup(CP*) { /* m_data_journal->truncate(m_rd_sb->checkpoint_lsn); */ }
 
 } // namespace homestore

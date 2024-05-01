@@ -274,11 +274,16 @@ public:
         return listener;
     }
 
-    void unregister_listener(shared< ReplDevListener > listener) {
+    void unregister_listener(homestore::group_id_t group_id) {
         {
             std::unique_lock lg(groups_mtx_);
-            repl_groups_.erase(listener->repl_dev()->group_id());
+            repl_groups_.erase(group_id);
         }
+    }
+
+    size_t num_listeners() const {
+        std::unique_lock lg(groups_mtx_);
+        return repl_groups_.size();
     }
 
     void sync_for_test_start(uint32_t num_members = 0) { ipc_data_->sync_for_test_start(num_members); }

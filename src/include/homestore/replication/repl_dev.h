@@ -71,9 +71,9 @@ struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::
 public:
     repl_req_ctx() { m_start_time = Clock::now(); }
     virtual ~repl_req_ctx();
-    void init(repl_key rkey, bool is_proposer, sisl::blob const& user_header, sisl::blob const& key,
-              uint32_t data_size);
-    void init(journal_type_t op_code);
+    void init(repl_key rkey, journal_type_t op_code, bool is_proposer, sisl::blob const& user_header,
+              sisl::blob const& key, uint32_t data_size);
+
     /////////////////////// All getters ///////////////////////
     repl_key const& rkey() const { return m_rkey; }
     uint64_t dsn() const { return m_rkey.dsn; }
@@ -241,7 +241,9 @@ public:
     /// error would result in a crash or stall of the entire commit thread.
     virtual ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) = 0;
 
-    /// @brief Called when the repl_dev is being destroyed. After this call, the repl_dev is no longer valid.
+    /// @brief Called when the repl_dev is being destroyed. The consumer is expected to clean up any related resources.
+    /// However, it is expected that this call be idempotent. It is possible in rare scenarios that this can be called
+    /// after restart in case crash happened during the destroy.
     virtual void on_destroy() = 0;
 
     /// @brief Called when the snapshot is being created by nuraft;

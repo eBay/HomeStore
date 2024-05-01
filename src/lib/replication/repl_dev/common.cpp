@@ -8,20 +8,21 @@
 
 namespace homestore {
 
-void repl_req_ctx::init(repl_key rkey, bool is_proposer, sisl::blob const& user_header, sisl::blob const& key,
-                        uint32_t data_size) {
+void repl_req_ctx::init(repl_key rkey, journal_type_t op_code, bool is_proposer, sisl::blob const& user_header,
+                        sisl::blob const& key, uint32_t data_size) {
     m_rkey = std::move(rkey);
-    m_op_code = data_size > 0 ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED;
+#ifndef NDEBUG
+    if (data_size > 0) {
+        DEBUG_ASSERT_EQ(op_code, journal_type_t::HS_DATA_LINKED, "Calling wrong init method");
+    } else {
+        DEBUG_ASSERT_NE(op_code, journal_type_t::HS_DATA_LINKED, "Calling wrong init method");
+    }
+#endif
+    m_op_code = op_code;
     m_is_proposer = is_proposer;
     m_header = user_header;
     m_key = key;
     m_is_jentry_localize_pending = (!is_proposer && (data_size > 0)); // Pending on the applier and with linked data
-}
-
-void repl_req_ctx::init(journal_type_t op_code) {
-    DEBUG_ASSERT(op_code != journal_type_t::HS_DATA_LINKED || op_code != journal_type_t::HS_DATA_INLINED,
-                 "Calling wrong init method for op_code={}", op_code);
-    m_op_code = op_code;
 }
 
 repl_req_ctx::~repl_req_ctx() {
@@ -181,10 +182,10 @@ static std::string req_state_name(uint32_t state) {
 }
 
 std::string repl_req_ctx::to_string() const {
-    return fmt::format(
-        "repl_key=[{}], lsn={} state=[{}] m_headersize={} m_keysize={} is_proposer={} local_blkid={} remote_blkid={}",
-        m_rkey.to_string(), m_lsn, req_state_name(uint32_cast(state())), m_header.size(), m_key.size(), m_is_proposer,
-        m_local_blkid.to_string(), m_remote_blkid.blkid.to_string());
+    return fmt::format("repl_key=[{}], lsn={} state=[{}] m_headersize={} m_keysize={} is_proposer={} "
+                       "local_blkid={} remote_blkid={}",
+                       m_rkey.to_string(), m_lsn, req_state_name(uint32_cast(state())), m_header.size(), m_key.size(),
+                       m_is_proposer, m_local_blkid.to_string(), m_remote_blkid.blkid.to_string());
 }
 
 std::string repl_req_ctx::to_compact_string() const {
