@@ -97,8 +97,6 @@ public:
 
     raft_buf_ptr_t& raft_journal_buf();
     uint8_t* raw_journal_buf();
-    flatbuffers::FlatBufferBuilder& create_fb_builder() { return m_fb_builder; }
-    void release_fb_builder() { m_fb_builder.Release(); }
 
     /////////////////////// Non modifiers methods //////////////////
     std::string to_string() const;
@@ -106,20 +104,58 @@ public:
     Clock::time_point created_time() const { return m_start_time; }
 
     /////////////////////// All Modifiers methods //////////////////
+
+    /// @brief Anytime a request needs to allocate blks for the data locally, this method needs to be called. This will
+    /// call the listener blk_alloc_hints and then allocate the blks from data service and update the state.
+    /// @param listener Listener associated with the repl_dev
+    /// @param data_size Size of the data for which blks are to be allocated
+    /// @return Any error in getting hints or allocating blkids
     ReplServiceError alloc_local_blks(cshared< ReplDevListener >& listener, uint32_t data_size);
+
+    /// @brief  This method creates the journal entry for the repl_req. It will allocate the buffer for the journal
+    /// entry and build the basic journal entry
+    /// @param is_raft_buf Is the journal entry buffer has to be raft_buf or plain buf. For Raft repl service, it will
+    /// have to be true
+    /// @param server_id Server id which is originating this request
     void create_journal_entry(bool is_raft_buf, int32_t server_id);
+
+    /// @brief Change the journal entry buffer to new_buf and adjust the header and key if adjust_hdr_key is true. It is
+    /// expected that the original buffer is already created as raft buffer type.
+    /// @param new_buf New raft buffer to be used
+    /// @param adjust_hdr_key If the header, key of this request has to be adjusted to the new buffer
     void change_raft_journal_buf(raft_buf_ptr_t new_buf, bool adjust_hdr_key);
-    void set_remote_blkid(RemoteBlkId const& rbid) { m_remote_blkid = rbid; }
-    void set_lsn(int64_t lsn);
+
+    /// @brief Save the data that was pushed by the remote node for this request. When a push data rpc is called with
+    /// the data, this method is called to save them to the request and make it shareable. This method makes a copy of
+    /// the data in case the buffer is not aligned.
+    /// @param pushed_data Data that was received from the RPC. This is used to keep the data alive
+    /// @param data Data pointer
+    /// @param data_size Size of the data
+    /// @return true if the request didn't receive the data already, false otherwise
     bool save_pushed_data(intrusive< sisl::GenericRpcData > const& pushed_data, uint8_t const* data,
                           uint32_t data_size);
+
+    /// @brief Save the data that was fetched from the remote node for this request. When a fetch data rpc is called
+    /// with the data, this method is called to save them to the request and make it shareable. This method makes a copy
+    /// of the data in case the buffer is not aligned.
+    /// @param fetched_data Data from RPC which fetched the data. This is used to keep the data alive
+    /// @param data Data pointer
+    /// @param data_size Size of the data
+    /// @return true if the request didn't receive the data already, false otherwise
     bool save_fetched_data(sisl::GenericClientResponse const& fetched_data, uint8_t const* data, uint32_t data_size);
+
+    void set_remote_blkid(RemoteBlkId const& rbid) { m_remote_blkid = rbid; }
+    void set_lsn(int64_t lsn);
     void add_state(repl_req_state_t s);
     bool add_state_if_not_already(repl_req_state_t s);
     void clear();
+    flatbuffers::FlatBufferBuilder& create_fb_builder() { return m_fb_builder; }
+    void release_fb_builder() { m_fb_builder.Release(); }
 
 public:
-    // We keep this public since they are considered thread safe
+    // IMPORTANT: Avoid declaring variables public, since this structure carries various entries and try to work in
+    // lockless way. As a result, we keep only those which are considered thread safe and others are accessed with
+    // methods.
     folly::Promise< folly::Unit > m_data_received_promise; // Promise to be fulfilled when data is received
     folly::Promise< folly::Unit > m_data_written_promise;  // Promise to be fulfilled when data is written
     sisl::io_blob_list_t m_pkts;                           // Pkts used for sending data

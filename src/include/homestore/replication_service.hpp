@@ -35,8 +35,8 @@ public:
     virtual AsyncReplResult< shared< ReplDev > > create_repl_dev(group_id_t group_id,
                                                                  std::set< replica_id_t > const& members) = 0;
 
-    /// @brief Removes the entire Repl Device and completely the replica device. While the underlying replica group is
-    /// destroyed, all its resources are not released until garbage collection of repl devices kick in.
+    /// @brief Removes the entire Repl Device. The underlying replica group is marked as destroy_pending and all its
+    /// resources are not released until garbage collection of repl devices kick in.
     /// @param group_id Group ID to be removed
     /// @return A Future which gets called after schedule to release (before garbage collection is kicked in)
     virtual folly::SemiFuture< ReplServiceError > remove_repl_dev(group_id_t group_id) = 0;

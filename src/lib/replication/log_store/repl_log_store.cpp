@@ -40,8 +40,9 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
         auto rreq = m_sm.lsn_to_req(lsn);
         // Skip this call in proposer, since this method will synchronously flush the data, which is not required for
         // leader. Proposer will call the flush as part of commit after receiving quorum, upon which time, there is a
-        // high possibility the log entry is already flushed.
-        if (rreq && rreq->is_proposer()) { continue; }
+        // high possibility the log entry is already flushed. Skip it for rreq == nullptr which is the case for raft
+        // config entries.
+        if ((rreq == nullptr) || rreq->is_proposer()) { continue; }
         reqs->emplace_back(std::move(rreq));
     }
 

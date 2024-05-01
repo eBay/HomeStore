@@ -340,7 +340,7 @@ folly::Future< folly::Unit > RaftReplDev::notify_after_data_written(std::vector<
 
     // Walk through the list of requests and wait for the data to be received and written
     for (auto const& rreq : *rreqs) {
-        if ((rreq == nullptr) || (!rreq->has_linked_data())) { continue; }
+        if (!rreq->has_linked_data()) { continue; }
         auto const status = uint32_cast(rreq->state());
         if (status & uint32_cast(repl_req_state_t::DATA_WRITTEN)) {
             RD_LOGD("Raft Channel: Data write completed and blkid mapped: rreq=[{}]", rreq->to_compact_string());
