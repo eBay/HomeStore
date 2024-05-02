@@ -38,22 +38,22 @@ const std::string FLIP_SLOW_PATH_EVERY_NTH{"USER_SET_SLOW_PATH_EVERY_NTH"}; // u
 const std::string BLKSTORE_FORMAT_OFF{"USER_WANT_BLKSTORE_FORMAT_OFF"};     // used for debug purpose;
 const std::string USER_WANT_DIRECT_IO{"USER_WANT_DIRECT_IO"};               // used for HDD direct io mode;
 
-SISL_OPTION_GROUP(test_common_setup,
-                  (num_threads, "", "num_threads", "number of threads",
-                   ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-                  (num_fibers, "", "num_fibers", "number of fibers per thread",
-                   ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-                  (num_devs, "", "num_devs", "number of devices to create",
-                   ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
-                  (dev_size_mb, "", "dev_size_mb", "size of each device in MB",
-                   ::cxxopts::value< uint64_t >()->default_value("1024"), "number"),
-                  (device_list, "", "device_list", "Device List instead of default created",
-                   ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
-                  (http_port, "", "http_port", "http port (0 for no http, -1 for random, rest specific value)",
-                   ::cxxopts::value< int >()->default_value("-1"), "number"),
-                  (num_io, "", "num_io", "number of IO operations",
-                   ::cxxopts::value< uint64_t >()->default_value("300"), "number"),
-                  (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
+SISL_OPTION_GROUP(
+    test_common_setup,
+    (num_threads, "", "num_threads", "number of threads", ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
+    (num_fibers, "", "num_fibers", "number of fibers per thread", ::cxxopts::value< uint32_t >()->default_value("2"),
+     "number"),
+    (num_devs, "", "num_devs", "number of devices to create", ::cxxopts::value< uint32_t >()->default_value("2"),
+     "number"),
+    (dev_size_mb, "", "dev_size_mb", "size of each device in MB", ::cxxopts::value< uint64_t >()->default_value("1024"),
+     "number"),
+    (device_list, "", "device_list", "Device List instead of default created",
+     ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
+    (http_port, "", "http_port", "http port (0 for no http, -1 for random, rest specific value)",
+     ::cxxopts::value< int >()->default_value("-1"), "number"),
+    (num_io, "", "num_io", "number of IO operations", ::cxxopts::value< uint64_t >()->default_value("300"), "number"),
+    (qdepth, "", "qdepth", "Max outstanding operations", ::cxxopts::value< uint32_t >()->default_value("8"), "number"),
+    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 SETTINGS_INIT(iomgrcfg::IomgrSettings, iomgr_config);
 
@@ -89,7 +89,7 @@ struct Runner {
     Runner(uint64_t num_tasks, uint32_t qd = 8) : total_tasks_{num_tasks}, qdepth_{qd} {
         if (total_tasks_ < (uint64_t)qdepth_) { total_tasks_ = qdepth_; }
     }
-    Runner() : Runner{SISL_OPTIONS["num_io"].as< uint64_t >()} {}
+    Runner() : Runner{SISL_OPTIONS["num_io"].as< uint64_t >(), SISL_OPTIONS["qdepth"].as< uint32_t >()} {}
     Runner(const Runner&) = delete;
     Runner& operator=(const Runner&) = delete;
 

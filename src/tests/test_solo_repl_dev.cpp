@@ -127,7 +127,7 @@ public:
                       cintrusive< repl_req_ctx >& ctx) override {
             LOGINFO("Received error={} on repl_dev", enum_name(error));
         }
-        void on_replica_stop() override {}
+        void on_destroy() override {}
     };
 
     class Application : public ReplApplication {
@@ -262,7 +262,7 @@ public:
                     RELEASE_ASSERT(!err, "Error during async_read");
 
                     LOGDEBUG("[{}] Write complete with lsn={} for size={} blkids={}",
-                             boost::uuids::to_string(rdev.group_id()), req->get_lsn(), req->write_sgs.size,
+                             boost::uuids::to_string(rdev.group_id()), req->lsn(), req->write_sgs.size,
                              req->written_blkids.to_string());
                     auto hdr = r_cast< test_repl_req::journal_header* >(req->header->bytes());
                     HS_REL_ASSERT_EQ(hdr->data_size, req->read_sgs.size,

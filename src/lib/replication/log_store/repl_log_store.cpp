@@ -14,7 +14,7 @@ uint64_t ReplLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
     ulong lsn = HomeRaftLogStore::append(entry);
     m_sm.link_lsn_to_req(rreq, int64_cast(lsn));
 
-    RD_LOG(DEBUG, "Raft Channel: Received append log entry rreq=[{}]", rreq->to_compact_string());
+    RD_LOGD("Raft Channel: Received append log entry rreq=[{}]", rreq->to_compact_string());
     return lsn;
 }
 
@@ -28,7 +28,7 @@ void ReplLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& entry
     repl_req_ptr_t rreq = m_sm.localize_journal_entry_finish(*entry);
     HomeRaftLogStore::write_at(index, entry);
     m_sm.link_lsn_to_req(rreq, int64_cast(index));
-    RD_LOG(DEBUG, "Raft Channel: Received write_at log entry rreq=[{}]", rreq->to_compact_string());
+    RD_LOGD("Raft Channel: Received write_at log entry rreq=[{}]", rreq->to_compact_string());
 }
 
 void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
@@ -40,13 +40,14 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
         auto rreq = m_sm.lsn_to_req(lsn);
         // Skip this call in proposer, since this method will synchronously flush the data, which is not required for
         // leader. Proposer will call the flush as part of commit after receiving quorum, upon which time, there is a
-        // high possibility the log entry is already flushed.
-        if (rreq && rreq->is_proposer) { continue; }
+        // high possibility the log entry is already flushed. Skip it for rreq == nullptr which is the case for raft
+        // config entries.
+        if ((rreq == nullptr) || rreq->is_proposer()) { continue; }
         reqs->emplace_back(std::move(rreq));
     }
 
-    RD_LOG(TRACE, "Raft Channel: end_of_append_batch start_lsn={} count={} num_data_to_be_written={}", start_lsn, count,
-           reqs->size());
+    RD_LOGT("Raft Channel: end_of_append_batch start_lsn={} count={} num_data_to_be_written={}", start_lsn, count,
+            reqs->size());
 
     // All requests are from proposer for data write, so as mentioned above we can skip the flush for now
     if (!reqs->empty()) {
@@ -65,7 +66,7 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
 
         // Mark all the reqs also completely written
         for (auto const& rreq : *reqs) {
-            if (rreq) { rreq->state.fetch_or(uint32_cast(repl_req_state_t::LOG_FLUSHED)); }
+            if (rreq) { rreq->add_state(repl_req_state_t::LOG_FLUSHED); }
         }
     }
     sisl::VectorPool< repl_req_ptr_t >::free(reqs);

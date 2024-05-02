@@ -30,70 +30,41 @@ SoloReplDev::SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existi
 void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
                                     repl_req_ptr_t rreq) {
     if (!rreq) { auto rreq = repl_req_ptr_t(new repl_req_ctx{}); }
-    rreq->header = header;
-    rreq->key = key;
-    rreq->value = std::move(value);
+    rreq->init(repl_key{.server_id = 0, .term = 1, .dsn = 1},
+               value.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED, true, header, key,
+               value.size);
 
     // If it is header only entry, directly write to the journal
-    if (rreq->value.size) {
-        rreq->value_inlined = false;
-
+    if (rreq->has_linked_data()) {
         // Step 1: Alloc Blkid
-        auto status = data_service().alloc_blks(uint32_cast(rreq->value.size),
-                                                m_listener->get_blk_alloc_hints(rreq->header, rreq->value.size).value(),
-                                                rreq->local_blkid);
-        HS_REL_ASSERT_EQ(status, BlkAllocStatus::SUCCESS);
+        auto const status = rreq->alloc_local_blks(m_listener, value.size);
+        HS_REL_ASSERT_EQ(status, ReplServiceError::OK, "Error in allocating local blks");
 
         // Write the data
-        data_service()
-            .async_write(rreq->value, rreq->local_blkid)
-            .thenValue([this, rreq = std::move(rreq)](auto&& err) {
-                HS_REL_ASSERT(!err, "Error in writing data"); // TODO: Find a way to return error to the Listener
-                write_journal(std::move(rreq));
-            });
+        data_service().async_write(value, rreq->local_blkid()).thenValue([this, rreq = std::move(rreq)](auto&& err) {
+            HS_REL_ASSERT(!err, "Error in writing data"); // TODO: Find a way to return error to the Listener
+            write_journal(std::move(rreq));
+        });
     } else {
-        rreq->value_inlined = true;
         write_journal(std::move(rreq));
     }
 }
 
 void SoloReplDev::write_journal(repl_req_ptr_t rreq) {
-    uint32_t entry_size = sizeof(repl_journal_entry) + rreq->header.size() + rreq->key.size() +
-        (rreq->value.size ? rreq->local_blkid.serialized_size() : 0);
-    rreq->alloc_journal_entry(entry_size, false /* is_raft_buf */);
-    rreq->journal_entry->code = journal_type_t::HS_DATA_LINKED;
-    rreq->journal_entry->user_header_size = rreq->header.size();
-    rreq->journal_entry->key_size = rreq->key.size();
+    rreq->create_journal_entry(false /* raft_buf */, 1);
 
-    uint8_t* raw_ptr = uintptr_cast(rreq->journal_entry) + sizeof(repl_journal_entry);
-    if (rreq->header.size()) {
-        std::memcpy(raw_ptr, rreq->header.cbytes(), rreq->header.size());
-        raw_ptr += rreq->header.size();
-    }
+    m_data_journal->append_async(
+        sisl::io_blob{rreq->raw_journal_buf(), rreq->journal_entry_size(), false /* is_aligned */},
+        nullptr /* cookie */, [this, rreq](int64_t lsn, sisl::io_blob&, homestore::logdev_key, void*) mutable {
+            rreq->set_lsn(lsn);
+            m_listener->on_pre_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq);
 
-    if (rreq->key.size()) {
-        std::memcpy(raw_ptr, rreq->key.cbytes(), rreq->key.size());
-        raw_ptr += rreq->key.size();
-    }
+            auto cur_lsn = m_commit_upto.load();
+            if (cur_lsn < lsn) { m_commit_upto.compare_exchange_strong(cur_lsn, lsn); }
 
-    if (rreq->value.size) {
-        auto const b = rreq->local_blkid.serialize();
-        std::memcpy(raw_ptr, b.cbytes(), b.size());
-        raw_ptr += b.size();
-    }
-
-    m_data_journal->append_async(sisl::io_blob{rreq->raw_journal_buf(), entry_size, false /* is_aligned */},
-                                 nullptr /* cookie */,
-                                 [this, rreq](int64_t lsn, sisl::io_blob&, homestore::logdev_key, void*) mutable {
-                                     rreq->lsn = lsn;
-                                     m_listener->on_pre_commit(rreq->lsn, rreq->header, rreq->key, rreq);
-
-                                     auto cur_lsn = m_commit_upto.load();
-                                     if (cur_lsn < lsn) { m_commit_upto.compare_exchange_strong(cur_lsn, lsn); }
-
-                                     data_service().commit_blk(rreq->local_blkid);
-                                     m_listener->on_commit(rreq->lsn, rreq->header, rreq->key, rreq->local_blkid, rreq);
-                                 });
+            data_service().commit_blk(rreq->local_blkid());
+            m_listener->on_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq->local_blkid(), rreq);
+        });
 }
 
 void SoloReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
@@ -142,7 +113,6 @@ void SoloReplDev::cp_flush(CP*) {
     m_rd_sb.write();
 }
 
-void SoloReplDev::cp_cleanup(CP*) { /* m_data_journal->truncate(m_rd_sb->checkpoint_lsn); */
-}
+void SoloReplDev::cp_cleanup(CP*) { /* m_data_journal->truncate(m_rd_sb->checkpoint_lsn); */ }
 
 } // namespace homestore

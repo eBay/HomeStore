@@ -142,6 +142,9 @@ table Generic {
 
     // Number of chunks in journal chunk pool.
     journal_chunk_pool_capacity: uint32 = 5;
+
+    // Check for repl_dev cleanup in this interval
+    repl_dev_cleanup_interval_sec : uint32 = 60;
 }
 
 table ResourceLimits {

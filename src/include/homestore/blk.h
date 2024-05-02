@@ -78,7 +78,7 @@ public:
 
     void invalidate();
     uint64_t to_integer() const;
-    sisl::blob serialize(); // TODO: Consider making this const, perhaps returns const uint8_t version of blob
+    sisl::blob serialize() const;
     void deserialize(sisl::blob const& b, bool copy);
     uint32_t serialized_size() const;
     std::string to_string() const;
@@ -125,7 +125,7 @@ public:
     bool operator>(MultiBlkId const& other) const { return (compare(*this, other) > 0); }
     bool operator<(MultiBlkId const& other) const { return (compare(*this, other) < 0); }
 
-    sisl::blob serialize();
+    sisl::blob serialize() const;
     uint32_t serialized_size() const;
     void deserialize(sisl::blob const& b, bool copy);
 

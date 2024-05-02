@@ -9,6 +9,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <sisl/fds/utils.hpp>
 #include <sisl/grpc/generic_service.hpp>
+#include <sisl/grpc/rpc_client.hpp>
 #include <homestore/replication/repl_decls.h>
 #include <libnuraft/snapshot.hxx>
 
@@ -21,6 +22,7 @@ class buffer;
 
 namespace homestore {
 class ReplDev;
+class ReplDevListener;
 struct repl_req_ctx;
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
 using repl_req_ptr_t = boost::intrusive_ptr< repl_req_ctx >;
@@ -33,6 +35,12 @@ VENUM(repl_req_state_t, uint32_t,
       LOG_RECEIVED = 1 << 3,  // Log is received and waiting for data
       LOG_FLUSHED = 1 << 4,   // Log has been flushed
       ERRORED = 1 << 5        // Error has happened and cleaned up
+)
+
+VENUM(journal_type_t, uint16_t,
+      HS_DATA_LINKED = 0,  // Linked data where each entry will store physical blkid where data reside
+      HS_DATA_INLINED = 1, // Data is inlined in the header of journal entry
+      HS_CTRL_DESTROY = 2  // Control message to destroy the repl_dev
 )
 
 struct repl_key {
@@ -61,51 +69,125 @@ struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::
     friend class SoloReplDev;
 
 public:
-    repl_req_ctx() { start_time = Clock::now(); }
+    repl_req_ctx() { m_start_time = Clock::now(); }
     virtual ~repl_req_ctx();
-    int64_t get_lsn() const { return lsn; }
-    MultiBlkId const& get_local_blkid() const { return local_blkid; }
+    void init(repl_key rkey, journal_type_t op_code, bool is_proposer, sisl::blob const& user_header,
+              sisl::blob const& key, uint32_t data_size);
 
-    uint64_t dsn() const { return rkey.dsn; }
-    uint64_t term() const { return rkey.term; }
-    void alloc_journal_entry(uint32_t size, bool is_raft_buf);
+    /////////////////////// All getters ///////////////////////
+    repl_key const& rkey() const { return m_rkey; }
+    uint64_t dsn() const { return m_rkey.dsn; }
+    uint64_t term() const { return m_rkey.term; }
+    int64_t lsn() const { return m_lsn; }
+    bool is_proposer() const { return m_is_proposer; }
+    journal_type_t op_code() const { return m_op_code; }
+
+    sisl::blob const& header() const { return m_header; }
+    sisl::blob const& key() const { return m_key; }
+    MultiBlkId const& local_blkid() const { return m_local_blkid; }
+    RemoteBlkId const& remote_blkid() const { return m_remote_blkid; }
+    const char* data() const { return r_cast< const char* >(m_data); }
+    repl_req_state_t state() const { return repl_req_state_t(m_state.load()); }
+    bool has_state(repl_req_state_t s) const { return m_state.load() & uint32_cast(s); }
+    repl_journal_entry const* journal_entry() const { return m_journal_entry; }
+    uint32_t journal_entry_size() const;
+    bool is_localize_pending() const { return m_is_jentry_localize_pending; }
+    bool is_data_inlined() const { return (m_op_code == journal_type_t::HS_DATA_INLINED); }
+    bool has_linked_data() const { return (m_op_code == journal_type_t::HS_DATA_LINKED); }
+
     raft_buf_ptr_t& raft_journal_buf();
     uint8_t* raw_journal_buf();
 
+    /////////////////////// Non modifiers methods //////////////////
     std::string to_string() const;
     std::string to_compact_string() const;
-    Clock::time_point created_time() const { return start_time; }
+    Clock::time_point created_time() const { return m_start_time; }
+
+    /////////////////////// All Modifiers methods //////////////////
+
+    /// @brief Anytime a request needs to allocate blks for the data locally, this method needs to be called. This will
+    /// call the listener blk_alloc_hints and then allocate the blks from data service and update the state.
+    /// @param listener Listener associated with the repl_dev
+    /// @param data_size Size of the data for which blks are to be allocated
+    /// @return Any error in getting hints or allocating blkids
+    ReplServiceError alloc_local_blks(cshared< ReplDevListener >& listener, uint32_t data_size);
+
+    /// @brief  This method creates the journal entry for the repl_req. It will allocate the buffer for the journal
+    /// entry and build the basic journal entry
+    /// @param is_raft_buf Is the journal entry buffer has to be raft_buf or plain buf. For Raft repl service, it will
+    /// have to be true
+    /// @param server_id Server id which is originating this request
+    void create_journal_entry(bool is_raft_buf, int32_t server_id);
+
+    /// @brief Change the journal entry buffer to new_buf and adjust the header and key if adjust_hdr_key is true. It is
+    /// expected that the original buffer is already created as raft buffer type.
+    /// @param new_buf New raft buffer to be used
+    /// @param adjust_hdr_key If the header, key of this request has to be adjusted to the new buffer
+    void change_raft_journal_buf(raft_buf_ptr_t new_buf, bool adjust_hdr_key);
+
+    /// @brief Save the data that was pushed by the remote node for this request. When a push data rpc is called with
+    /// the data, this method is called to save them to the request and make it shareable. This method makes a copy of
+    /// the data in case the buffer is not aligned.
+    /// @param pushed_data Data that was received from the RPC. This is used to keep the data alive
+    /// @param data Data pointer
+    /// @param data_size Size of the data
+    /// @return true if the request didn't receive the data already, false otherwise
+    bool save_pushed_data(intrusive< sisl::GenericRpcData > const& pushed_data, uint8_t const* data,
+                          uint32_t data_size);
+
+    /// @brief Save the data that was fetched from the remote node for this request. When a fetch data rpc is called
+    /// with the data, this method is called to save them to the request and make it shareable. This method makes a copy
+    /// of the data in case the buffer is not aligned.
+    /// @param fetched_data Data from RPC which fetched the data. This is used to keep the data alive
+    /// @param data Data pointer
+    /// @param data_size Size of the data
+    /// @return true if the request didn't receive the data already, false otherwise
+    bool save_fetched_data(sisl::GenericClientResponse const& fetched_data, uint8_t const* data, uint32_t data_size);
+
+    void set_remote_blkid(RemoteBlkId const& rbid) { m_remote_blkid = rbid; }
+    void set_lsn(int64_t lsn);
+    void add_state(repl_req_state_t s);
+    bool add_state_if_not_already(repl_req_state_t s);
+    void clear();
+    flatbuffers::FlatBufferBuilder& create_fb_builder() { return m_fb_builder; }
+    void release_fb_builder() { m_fb_builder.Release(); }
 
 public:
-    repl_key rkey;                // Unique key for the request
-    sisl::blob header;            // User header
-    sisl::blob key;               // User supplied key for this req
-    int64_t lsn{-1};              // Lsn for this replication req
-    bool is_proposer{false};      // Is the repl_req proposed by this node
-    Clock::time_point start_time; // Start time of the request
+    // IMPORTANT: Avoid declaring variables public, since this structure carries various entries and try to work in
+    // lockless way. As a result, we keep only those which are considered thread safe and others are accessed with
+    // methods.
+    folly::Promise< folly::Unit > m_data_received_promise; // Promise to be fulfilled when data is received
+    folly::Promise< folly::Unit > m_data_written_promise;  // Promise to be fulfilled when data is written
+    sisl::io_blob_list_t m_pkts;                           // Pkts used for sending data
+    std::mutex m_state_mtx;
 
-    //////////////// Value related section /////////////////
-    sisl::sg_list value;       // Raw value - applicable only to leader req
-    MultiBlkId local_blkid;    // Local BlkId for the value
-    RemoteBlkId remote_blkid;  // Corresponding remote blkid for the value
-    bool value_inlined{false}; // Is the value inlined in the header itself
+private:
+    repl_key m_rkey;                                           // Unique key for the request
+    sisl::blob m_header;                                       // User header
+    sisl::blob m_key;                                          // User supplied key for this req
+    int64_t m_lsn{-1};                                         // Lsn for this replication req
+    bool m_is_proposer{false};                                 // Is the repl_req proposed by this node
+    Clock::time_point m_start_time;                            // Start time of the request
+    journal_type_t m_op_code{journal_type_t::HS_DATA_INLINED}; // Operation code for this request
 
-    //////////////// Journal/Buf related section /////////////////
-    std::variant< std::unique_ptr< uint8_t[] >, raft_buf_ptr_t > journal_buf; // Buf for the journal entry
-    repl_journal_entry* journal_entry{nullptr};                               // pointer to the journal entry
-    bool is_jentry_localize_pending{false}; // Is the journal entry needs to be localized from remote
+    /////////////// Data related section /////////////////
+    MultiBlkId m_local_blkid;   // Local BlkId for the data
+    RemoteBlkId m_remote_blkid; // Corresponding remote blkid for the data
+    uint8_t const* m_data;      // Raw data pointer containing the actual data
 
-    //////////////// Replication state related section /////////////////
-    std::mutex state_mtx;
-    std::atomic< uint32_t > state{uint32_cast(repl_req_state_t::INIT)}; // State of the replication request
-    folly::Promise< folly::Unit > data_received_promise;                // Promise to be fulfilled when data is received
-    folly::Promise< folly::Unit > data_written_promise;                 // Promise to be fulfilled when data is written
+    /////////////// Journal/Buf related section /////////////////
+    std::variant< std::unique_ptr< uint8_t[] >, raft_buf_ptr_t > m_journal_buf; // Buf for the journal entry
+    repl_journal_entry* m_journal_entry{nullptr};                               // pointer to the journal entry
+    bool m_is_jentry_localize_pending{false}; // Is the journal entry needs to be localized from remote
 
-    //////////////// Communication packet/builder section /////////////////
-    sisl::io_blob_list_t pkts;
-    flatbuffers::FlatBufferBuilder fb_builder;
-    sisl::io_blob_safe buf_for_unaligned_data;
-    intrusive< sisl::GenericRpcData > rpc_data;
+    /////////////// Replication state related section /////////////////
+    std::atomic< uint32_t > m_state{uint32_cast(repl_req_state_t::INIT)}; // State of the replication request
+
+    /////////////// Communication packet/builder section /////////////////
+    flatbuffers::FlatBufferBuilder m_fb_builder;
+    sisl::io_blob_safe m_buf_for_unaligned_data;
+    intrusive< sisl::GenericRpcData > m_pushed_data;
+    sisl::GenericClientResponse m_fetched_data;
 };
 
 //
@@ -195,8 +277,10 @@ public:
     /// error would result in a crash or stall of the entire commit thread.
     virtual ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) = 0;
 
-    /// @brief Called when the replica set is being stopped
-    virtual void on_replica_stop() = 0;
+    /// @brief Called when the repl_dev is being destroyed. The consumer is expected to clean up any related resources.
+    /// However, it is expected that this call be idempotent. It is possible in rare scenarios that this can be called
+    /// after restart in case crash happened during the destroy.
+    virtual void on_destroy() = 0;
 
     /// @brief Called when the snapshot is being created by nuraft;
     virtual AsyncReplResult<> create_snapshot(repl_snapshot& s) = 0;

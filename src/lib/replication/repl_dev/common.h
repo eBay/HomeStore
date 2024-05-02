@@ -23,7 +23,6 @@
 #include <homestore/superblk_handler.hpp>
 
 namespace homestore {
-VENUM(journal_type_t, uint16_t, HS_DATA_LINKED = 0, HS_DATA_INLINED = 1)
 
 #pragma pack(1)
 struct repl_journal_entry {
