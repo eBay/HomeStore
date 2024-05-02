@@ -62,6 +62,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
         m_rd_sb->logdev_id = m_data_journal->logdev_id();
         m_rd_sb->logstore_id = m_data_journal->logstore_id();
         m_rd_sb->last_applied_dsn = 0;
+        m_rd_sb->destroy_pending = 0x0;
         m_rd_sb->group_ordinal = s_next_group_ordinal.fetch_add(1);
         m_rdev_name = fmt::format("rdev{}", m_rd_sb->group_ordinal);
 
