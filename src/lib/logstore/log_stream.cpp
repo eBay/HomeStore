@@ -69,13 +69,15 @@ read_again:
     // and it can happen that log group headers couldnt match. In that case check we dont error
     // if its the last chunk or not with is_offset_at_last_chunk else raise assert.
     // compare it with prev crc
+    auto dev_offset = m_vdev_jd->dev_offset(m_cur_read_bytes);
     if (m_prev_crc != 0 && m_prev_crc != header->prev_grp_crc) {
         // we reached at the end
+
         LOGINFOMOD(logstore,
-                   "we have reached the end. crc doesn't match offset {} prev crc {} header prev crc {} log_dev={}",
-                   m_vdev_jd->dev_offset(m_cur_read_bytes), header->prev_grp_crc, m_prev_crc, m_vdev_jd->logdev_id());
-        *out_dev_offset = m_vdev_jd->dev_offset(m_cur_read_bytes);
-        if (!m_vdev_jd->is_offset_at_last_chunk(m_cur_read_bytes)) {
+                   "we have reached the end. crc doesn't match offset 0x{} prev crc {} header prev crc {} log_dev={}",
+                   to_hex(dev_offset), header->prev_grp_crc, m_prev_crc, m_vdev_jd->logdev_id());
+        *out_dev_offset = dev_offset;
+        if (!m_vdev_jd->is_offset_at_last_chunk(dev_offset)) {
             HS_REL_ASSERT(0, "data is corrupted {}", m_vdev_jd->logdev_id());
         }
         // move it by dma boundary if header is not valid
@@ -95,8 +97,8 @@ read_again:
     LOGTRACEMOD(logstore,
                 "Logstream read log group of size={} nrecords={} journal_dev_offset {} cur_read_bytes {} buf size "
                 "remaining {} log_dev={}",
-                header->total_size(), header->nrecords(), m_vdev_jd->dev_offset(m_cur_read_bytes), m_cur_read_bytes,
-                m_cur_log_buf.size(), m_vdev_jd->logdev_id());
+                header->total_size(), header->nrecords(), to_hex(dev_offset), m_cur_read_bytes, m_cur_log_buf.size(),
+                m_vdev_jd->logdev_id());
 
     // At this point data seems to be valid. Lets see if a data is written completely by comparing the footer
     const auto* footer = r_cast< log_group_footer* >((uint64_t)m_cur_log_buf.bytes() + header->footer_offset);
@@ -105,13 +107,13 @@ read_again:
                    "last write is not completely written. footer magic {} footer start_log_idx {} header log indx {} "
                    "log_dev={}",
                    footer->magic, footer->start_log_idx, header->start_log_idx, m_vdev_jd->logdev_id());
-        *out_dev_offset = m_vdev_jd->dev_offset(m_cur_read_bytes);
+        if (!m_vdev_jd->is_offset_at_last_chunk(dev_offset)) {
+            HS_REL_ASSERT(0, "data is corrupted {}", m_vdev_jd->logdev_id());
+        }
+        *out_dev_offset = dev_offset;
         // move it by dma boundary if header is not valid
         m_prev_crc = 0;
         m_cur_read_bytes += m_read_size_multiple;
-        if (!m_vdev_jd->is_offset_at_last_chunk(m_cur_read_bytes)) {
-            HS_REL_ASSERT(0, "data is corrupted {}", m_vdev_jd->logdev_id());
-        }
         return ret_buf;
     }
 
@@ -123,10 +125,9 @@ read_again:
                    (header->total_size() - sizeof(log_group_header)));
     if (cur_crc != header->cur_grp_crc) {
         /* This is a valid entry so crc should match */
-        LOGERRORMOD(logstore, "crc doesn't match {} log_dev={}", m_vdev_jd->dev_offset(m_cur_read_bytes),
-                    m_vdev_jd->logdev_id());
+        LOGERRORMOD(logstore, "crc doesn't match {} log_dev={}", dev_offset, m_vdev_jd->logdev_id());
         HS_REL_ASSERT(0, "data is corrupted {}", m_vdev_jd->logdev_id());
-        *out_dev_offset = m_vdev_jd->dev_offset(m_cur_read_bytes);
+        *out_dev_offset = dev_offset;
 
         // move it by dma boundary if header is not valid
         m_prev_crc = 0;
@@ -138,7 +139,7 @@ read_again:
     m_prev_crc = cur_crc;
 
     ret_buf = m_cur_log_buf;
-    *out_dev_offset = m_vdev_jd->dev_offset(m_cur_read_bytes);
+    *out_dev_offset = dev_offset;
     m_cur_read_bytes += header->total_size();
     m_cur_log_buf.move_forward(header->total_size());
 
