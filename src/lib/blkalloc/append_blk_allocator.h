@@ -36,12 +36,6 @@ struct append_blk_sb_t {
     blk_num_t freeable_nblks;
     blk_num_t last_append_offset;
 };
-
-struct append_blk_dirty_buf_t {
-    bool is_dirty; // this field is needed for cp_flush, but not necessarily needed for persistence;
-    blk_num_t freeable_nblks;
-    blk_num_t last_append_offset;
-};
 #pragma pack()
 
 class AppendBlkAllocMetrics : public sisl::MetricsGroup {
@@ -84,7 +78,7 @@ public:
     BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
     void free(BlkId const& b) override;
     BlkAllocStatus alloc_on_disk(BlkId const& in_bid) override;
-    BlkAllocStatus mark_blk_allocated(BlkId const& b) override;
+    BlkAllocStatus alloc_on_cache(BlkId const& b) override;
 
     void free_on_disk(BlkId const& b) override;
     bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const override;
@@ -137,12 +131,11 @@ private:
     void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
 
 private:
-    std::mutex m_mtx;                  // thread_safe, TODO: open option for consumer to choose to go lockless;
-    blk_num_t m_last_append_offset{0}; // last appended offset in blocks;
-    blk_num_t m_freeable_nblks{0};
+    std::atomic< blk_num_t > m_last_append_offset{0}; // last appended offset in blocks;
+    std::atomic< blk_num_t > m_freeable_nblks{0};
+    std::atomic< bool > m_is_dirty{false};
     AppendBlkAllocMetrics m_metrics;
-    superblk< append_blk_sb_t > m_sb;                              // only cp will be writing to this disk
-    std::array< append_blk_dirty_buf_t, MAX_CP_COUNT > m_dirty_sb; // keep track of dirty sb;
+    superblk< append_blk_sb_t > m_sb; // only cp will be writing to this disk
 };
 
 } // namespace homestore

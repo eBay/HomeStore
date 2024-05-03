@@ -160,7 +160,6 @@ struct BlkAllocatorTest {
                 // add block group size to map
                 blk_list(slab_idx).add(blk_num);
             }
-
         } else {
             // add blocks individually to each slab
             for (blk_count_t i{0}; i < bid.blk_count(); ++i) {
@@ -380,8 +379,16 @@ struct FixedBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
     virtual void SetUp() override{};
     virtual void TearDown() override{};
 
-    bool alloc_blk(const BlkAllocStatus exp_status, BlkId& bid, const bool track_block_group) {
-        const auto ret = m_allocator->alloc_contiguous(bid);
+    bool alloc_blk(BlkAllocStatus exp_status, BlkId& bid, bool track_block_group) {
+        return do_alloc_blk(exp_status, bid, track_block_group, false /* specific_blk */);
+    }
+
+    bool alloc_on_cache(BlkAllocStatus exp_status, BlkId& bid, bool track_block_group) {
+        return do_alloc_blk(exp_status, bid, track_block_group, true /* specific_blk */);
+    }
+
+    bool do_alloc_blk(BlkAllocStatus exp_status, BlkId& bid, bool track_block_group, bool specific_blk = false) {
+        const auto ret = specific_blk ? m_allocator->alloc_on_cache(bid) : m_allocator->alloc_contiguous(bid);
         if (ret != exp_status) {
             {
                 std::scoped_lock< std::mutex > lock{s_print_mutex};
@@ -491,8 +498,8 @@ struct VarsizeBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
 public:
     [[nodiscard]] uint64_t preload(const uint64_t count, const bool is_contiguous,
                                    const size_generator_t& size_generator, const bool track_block_group) {
-        const auto nthreads{std::clamp< uint32_t >(std::thread::hardware_concurrency(), 2,
-                                                   SISL_OPTIONS["num_threads"].as< uint32_t >())};
+        const auto nthreads = std::clamp< uint32_t >(std::thread::hardware_concurrency(), 2,
+                                                     SISL_OPTIONS["num_threads"].as< uint32_t >());
         std::atomic< uint64_t > total_alloced{0};
         run_parallel(nthreads, count, [&](const uint64_t count_per_thread, std::atomic< bool >& terminate_flag) {
             for (uint64_t i{0}; (i < count_per_thread) && !terminate_flag;) {
@@ -562,46 +569,65 @@ public:
 TEST_F(FixedBlkAllocatorTest, alloc_free_fixed_size) {
     const auto nthreads{
         std::clamp< uint32_t >(std::thread::hardware_concurrency(), 2, SISL_OPTIONS["num_threads"].as< uint32_t >())};
-    LOGINFO("Step 1: Pre allocate {} objects in {} threads", m_total_count / 2, nthreads);
-    run_parallel(nthreads, m_total_count / 2,
-                 [&](const uint64_t count_per_thread, std::atomic< bool >& terminate_flag) {
-                     for (uint64_t i{0}; (i < count_per_thread) && !terminate_flag; ++i) {
-                         BlkId bid;
-                         if (!alloc_blk(BlkAllocStatus::SUCCESS, bid, false)) { terminate_flag = true; }
-                     }
-                 });
+
+    std::vector< BlkId > reserved_blkids;
+
+    LOGINFO("Step 0: Reserve {} blks to be not allocated", nthreads);
+    for (blk_num_t i = 0; i < nthreads; ++i) {
+        reserved_blkids.emplace_back(BlkId{i * i, 1, 0});
+        ASSERT_TRUE(alloc_on_cache(BlkAllocStatus::SUCCESS, reserved_blkids.back(), false /* track_blk_group */));
+    }
+
+    const auto count = m_total_count - nthreads;
+
+    LOGINFO("Step 1: Pre allocate {} objects in {} threads", count / 2, nthreads);
+    run_parallel(nthreads, count / 2, [&](const uint64_t count_per_thread, std::atomic< bool >& terminate_flag) {
+        for (uint64_t i{0}; (i < count_per_thread) && !terminate_flag; ++i) {
+            BlkId bid;
+            if (!alloc_blk(BlkAllocStatus::SUCCESS, bid, false)) { terminate_flag = true; }
+        }
+    });
     validate_count();
 
-    LOGINFO("Step 2: Free {} blks randomly in {} threads ", m_total_count / 4, nthreads);
-    run_parallel(nthreads, m_total_count / 4,
-                 [&](const uint64_t count_per_thread, std::atomic< bool >& terminate_flag) {
-                     for (uint64_t i{0}; (i < count_per_thread) && !terminate_flag; ++i) {
-                         [[maybe_unused]] const BlkId blkId{free_random_alloced_blk(false)};
-                     }
-                 });
+    LOGINFO("Step 2: Free {} blks randomly in {} threads ", count / 4, nthreads);
+    run_parallel(nthreads, count / 4, [&](const uint64_t count_per_thread, std::atomic< bool >& terminate_flag) {
+        for (uint64_t i{0}; (i < count_per_thread) && !terminate_flag; ++i) {
+            [[maybe_unused]] const BlkId blkId{free_random_alloced_blk(false)};
+        }
+    });
     validate_count();
 
-    LOGINFO("Step 3: Fill in the remaining {} blks to empty the device in {} threads", m_total_count * 3 / 4, nthreads);
-    run_parallel(nthreads, m_total_count * 3 / 4,
-                 [&](const uint64_t count_per_thread, std::atomic< bool >& terminate_flag) {
-                     for (uint64_t i{0}; (i < count_per_thread) && !terminate_flag; ++i) {
-                         BlkId bid;
-                         if (!alloc_blk(BlkAllocStatus::SUCCESS, bid, false)) { terminate_flag = true; }
-                     }
-                 });
+    LOGINFO("Step 3: Fill in the remaining {} blks to empty the device in {} threads", count * 3 / 4, nthreads);
+    run_parallel(nthreads, count * 3 / 4, [&](const uint64_t count_per_thread, std::atomic< bool >& terminate_flag) {
+        for (uint64_t i{0}; (i < count_per_thread) && !terminate_flag; ++i) {
+            BlkId bid;
+            if (!alloc_blk(BlkAllocStatus::SUCCESS, bid, false)) { terminate_flag = true; }
+        }
+    });
     validate_count();
 
     BlkId bid;
     LOGINFO("Step 4: Validate if further allocation result in space full error");
     ASSERT_TRUE(alloc_blk(BlkAllocStatus::SPACE_FULL, bid, false));
 
-    LOGINFO("Step 5: Free up 2 blocks and make sure 2 more alloc is successful and do FIFO allocation");
-    const BlkId free_bid1{free_random_alloced_blk(false)};
-    const BlkId free_bid2{free_random_alloced_blk(false)};
+    LOGINFO("Step 5: Free up {} blocks ({} previously reserved and 2 new) and make sure 2 more alloc is successful and "
+            "do FIFO allocation",
+            nthreads + 2, nthreads);
 
-    BlkId bid1;
+    for (blk_num_t i = 0; i < nthreads; ++i) {
+        ASSERT_TRUE(free_blk(reserved_blkids[i].blk_num()));
+    }
+    BlkId const free_bid1 = free_random_alloced_blk(false);
+    BlkId const free_bid2 = free_random_alloced_blk(false);
+
+    for (blk_num_t i = 0; i < nthreads; ++i) {
+        BlkId bid;
+        ASSERT_TRUE(alloc_blk(BlkAllocStatus::SUCCESS, bid, false));
+        ASSERT_EQ(BlkId::compare(bid, reserved_blkids[i]), 0) << "Order of block allocation not expected";
+    }
+
+    BlkId bid1, bid2;
     ASSERT_TRUE(alloc_blk(BlkAllocStatus::SUCCESS, bid1, false));
-    BlkId bid2;
     ASSERT_TRUE(alloc_blk(BlkAllocStatus::SUCCESS, bid2, false));
     ASSERT_EQ(BlkId::compare(bid1, free_bid1), 0) << "Order of block allocation not expected";
     ASSERT_EQ(BlkId::compare(bid2, free_bid2), 0) << "Order of block allocation not expected";

@@ -626,9 +626,9 @@ blk_count_t VarsizeBlkAllocator::alloc_blks_direct(blk_count_t nblks, blk_alloc_
     return (nblks - nblks_remain);
 }
 
-//since this function will only be called during HS recovery, we can safe to update the cache bitmap directly without
-//touching the slab caches.
-BlkAllocStatus VarsizeBlkAllocator::mark_blk_allocated(BlkId const& bid) {
+// since this function will only be called during HS recovery, we can safe to update the cache bitmap directly without
+// touching the slab caches.
+BlkAllocStatus VarsizeBlkAllocator::alloc_on_cache(BlkId const& bid) {
     BlkAllocPortion& portion = blknum_to_portion(bid.blk_num());
     {
         auto lock{portion.portion_auto_lock()};
@@ -637,13 +637,13 @@ BlkAllocStatus VarsizeBlkAllocator::mark_blk_allocated(BlkId const& bid) {
         auto const end_blk_id = start_blk_id + get_blks_per_portion() - 1;
         HS_DBG_ASSERT_LE(start_blk_id, bid.blk_num(), "Expected start bit to be greater than portion start bit");
         HS_DBG_ASSERT_GE(end_blk_id, (bid.blk_num() + bid.blk_count() - 1),
-                             "Expected end bit to be smaller than portion end bit");
+                         "Expected end bit to be smaller than portion end bit");
 #endif
         m_cache_bm->set_bits(bid.blk_num(), bid.blk_count());
         incr_alloced_blk_count(bid.blk_count());
     }
     BLKALLOC_LOG(TRACE, "mark blk alloced directly to portion={} blkid={} set_bits_count={}",
-                     blknum_to_portion_num(bid.blk_num()), bid.to_string(), get_alloced_blk_count());
+                 blknum_to_portion_num(bid.blk_num()), bid.to_string(), get_alloced_blk_count());
     return BlkAllocStatus::SUCCESS;
 }
 

@@ -152,7 +152,7 @@ public:
     virtual BlkAllocStatus alloc_contiguous(BlkId& bid) = 0;
     virtual BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) = 0;
     virtual BlkAllocStatus alloc_on_disk(BlkId const& bid) = 0;
-    virtual BlkAllocStatus mark_blk_allocated(BlkId const& bid) = 0;
+    virtual BlkAllocStatus alloc_on_cache(BlkId const& bid) = 0;
 
     virtual void free(BlkId const& id) = 0;
     virtual void free_on_disk(BlkId const& bid) = 0;

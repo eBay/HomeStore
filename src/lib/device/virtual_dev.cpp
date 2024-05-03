@@ -161,7 +161,7 @@ BlkAllocStatus VirtualDev::commit_blk(BlkId const& blkid) {
         HS_DBG_ASSERT(is_blk_alloced(blkid), "commiting blkid {} is not allocated in non-recovery mode",
                       blkid.to_string());
     } else {
-        chunk->blk_allocator_mutable()->mark_blk_allocated(blkid);
+        chunk->blk_allocator_mutable()->alloc_on_cache(blkid);
     }
     return chunk->blk_allocator_mutable()->alloc_on_disk(blkid);
 }

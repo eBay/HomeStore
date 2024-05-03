@@ -30,7 +30,7 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_form
         nullptr);
 
     if (need_format) {
-        m_freeable_nblks = available_blks();
+        m_freeable_nblks = 0;
         m_last_append_offset = 0;
     }
 
@@ -41,22 +41,18 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_form
     m_sb->last_append_offset = m_last_append_offset;
     m_sb->freeable_nblks = m_freeable_nblks;
 
-    for (auto i = 0ul; i < m_dirty_sb.size(); ++i) {
-        m_dirty_sb[i].is_dirty = false;
-    }
-
     // for recovery boot, fields will also be recovered from metablks;
 }
 
 void AppendBlkAllocator::on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
     m_sb.load(buf, meta_cookie);
 
-    // recover in-memory counter/offset from metablk;
-    m_last_append_offset = m_sb->last_append_offset;
-    m_freeable_nblks = m_sb->freeable_nblks;
-
     HS_REL_ASSERT_EQ(m_sb->magic, append_blkalloc_sb_magic, "Invalid AppendBlkAlloc metablk, magic mismatch");
     HS_REL_ASSERT_EQ(m_sb->version, append_blkalloc_sb_version, "Invalid version of AppendBlkAllocator metablk");
+
+    // recover in-memory counter/offset from metablk;
+    m_last_append_offset.store(m_sb->last_append_offset);
+    m_freeable_nblks.store(m_sb->freeable_nblks);
 }
 
 //
@@ -65,31 +61,13 @@ void AppendBlkAllocator::on_meta_blk_found(const sisl::byte_view& buf, void* met
 //
 // alloc a single block;
 //
-BlkAllocStatus AppendBlkAllocator::alloc_contiguous(BlkId& bid) {
-    std::unique_lock lk(m_mtx);
-    if (available_blks() < 1) {
-        COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
-        LOGERROR("No space left to serve request nblks: 1, available_blks: {}", available_blks());
-        return BlkAllocStatus::SPACE_FULL;
-    }
-
-    bid = BlkId{m_last_append_offset, 1, m_chunk_id};
-
-    auto cur_cp = hs()->cp_mgr().cp_guard();
-    ++m_last_append_offset;
-    --m_freeable_nblks;
-    set_dirty_offset(cur_cp->id() % MAX_CP_COUNT);
-
-    COUNTER_INCREMENT(m_metrics, num_alloc, 1);
-    return BlkAllocStatus::SUCCESS;
-}
+BlkAllocStatus AppendBlkAllocator::alloc_contiguous(BlkId& bid) { return alloc(1, blk_alloc_hints{}, bid); }
 
 //
 // For append blk allocator, the assumption is only one writer will append data on one chunk.
 // If we want to change above design, we can open this api for vector allocation;
 //
 BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hints& hint, BlkId& out_bid) {
-    std::unique_lock lk(m_mtx);
     if (available_blks() < nblks) {
         COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
         LOGERROR("No space left to serve request nblks: {}, available_blks: {}", nblks, available_blks());
@@ -102,59 +80,37 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
     }
 
     // Push 1 blk to the vector which has all the requested nblks;
-    out_bid = BlkId{m_last_append_offset, nblks, m_chunk_id};
-
-    auto cur_cp = hs()->cp_mgr().cp_guard();
-    m_last_append_offset += nblks;
-    m_freeable_nblks -= nblks;
-
-    // it is guaranteed that dirty buffer always contains updates of current_cp or next_cp, it will
-    // never get dirty buffer from across updates;
-    set_dirty_offset(cur_cp->id() % MAX_CP_COUNT);
+    out_bid = BlkId{m_last_append_offset.fetch_add(nblks), nblks, m_chunk_id};
 
     COUNTER_INCREMENT(m_metrics, num_alloc, 1);
 
     return BlkAllocStatus::SUCCESS;
 }
 
-BlkAllocStatus AppendBlkAllocator::alloc_on_disk(BlkId const&) { return BlkAllocStatus::SUCCESS; }
+BlkAllocStatus AppendBlkAllocator::alloc_on_disk(BlkId const&) {
+    m_is_dirty.store(true);
+    return BlkAllocStatus::SUCCESS;
+}
 
-BlkAllocStatus AppendBlkAllocator::mark_blk_allocated(BlkId const&) { return BlkAllocStatus::SUCCESS; }
+BlkAllocStatus AppendBlkAllocator::alloc_on_cache(BlkId const& blkid) {
+    auto new_offset = blkid.blk_num() + blkid.blk_count();
+    auto cur_offset = m_last_append_offset.load();
+    do {
+        if (cur_offset >= new_offset) { break; } // Already allocated
+    } while (!m_last_append_offset.compare_exchange_weak(cur_offset, new_offset));
+    return BlkAllocStatus::SUCCESS;
+}
 
-void AppendBlkAllocator::free_on_disk(BlkId const&) {}
-
-bool AppendBlkAllocator::is_blk_alloced_on_disk(BlkId const&, bool) const { return false; }
-
-//
-// cp_flush doesn't need CPGuard as it is triggered by CPMgr which already handles the reference check;
-//
-// cp_flush should not block alloc/free;
-//
 void AppendBlkAllocator::cp_flush(CP* cp) {
-    const auto idx = cp->id() % MAX_CP_COUNT;
     // check if current cp's context has dirty buffer already
-    if (m_dirty_sb[idx].is_dirty) {
-        m_sb->last_append_offset = m_dirty_sb[idx].last_append_offset;
-        m_sb->freeable_nblks = m_dirty_sb[idx].freeable_nblks;
+    if (m_is_dirty.exchange(false)) {
+        m_sb->last_append_offset = m_last_append_offset.load();
+        m_sb->freeable_nblks = m_freeable_nblks.load();
 
         // write to metablk;
         m_sb.write();
-
-        // clear this dirty buff's dirty flag;
-        clear_dirty_offset(idx);
     }
 }
-
-// updating current cp's dirty buffer context;
-void AppendBlkAllocator::set_dirty_offset(const uint8_t idx) {
-    m_dirty_sb[idx].is_dirty = true;
-
-    m_dirty_sb[idx].last_append_offset = m_last_append_offset;
-    m_dirty_sb[idx].freeable_nblks = m_freeable_nblks;
-}
-
-// clearing current cp context's dirty flag;
-void AppendBlkAllocator::clear_dirty_offset(const uint8_t idx) { m_dirty_sb[idx].is_dirty = false; }
 
 //
 // free operation does:
@@ -162,26 +118,30 @@ void AppendBlkAllocator::clear_dirty_offset(const uint8_t idx) { m_dirty_sb[idx]
 // 2. if the blk being freed happens to be last block, move last_append_offset backwards accordingly;
 //
 void AppendBlkAllocator::free(const BlkId& bid) {
-    std::unique_lock lk(m_mtx);
-    auto cur_cp = hs()->cp_mgr().cp_guard();
-    const auto n = bid.blk_count();
-    m_freeable_nblks += n;
-    if (bid.blk_num() + n == m_last_append_offset) {
-        // we are freeing the the last blk id, let's rewind.
-        m_last_append_offset -= n;
-    }
-    set_dirty_offset(cur_cp->id() % MAX_CP_COUNT);
+    auto const nblks = bid.blk_count();
+    auto exp_last_offset = bid.blk_num() + nblks;
+    auto const new_offset = m_last_append_offset - nblks;
+    if (m_last_append_offset.compare_exchange_strong(exp_last_offset, new_offset)) { return; }
+
+    // Freeing something in the middle, increment the count
+    m_freeable_nblks.fetch_add(nblks);
 }
+
+void AppendBlkAllocator::free_on_disk(BlkId const&) { m_is_dirty.store(true); }
 
 bool AppendBlkAllocator::is_blk_alloced(const BlkId& in_bid, bool) const {
     // blk_num starts from 0;
-    return in_bid.blk_num() < get_used_blks();
+    return in_bid.blk_num() < m_last_append_offset;
+}
+
+bool AppendBlkAllocator::is_blk_alloced_on_disk(BlkId const& bid, bool) const {
+    return bid.blk_num() < m_sb->last_append_offset;
 }
 
 std::string AppendBlkAllocator::get_name() const { return "AppendBlkAlloc_chunk_" + std::to_string(m_chunk_id); }
 
 std::string AppendBlkAllocator::to_string() const {
-    return fmt::format("{}, last_append_offset: {}", get_name(), m_last_append_offset);
+    return fmt::format("{}, last_append_offset: {}", get_name(), m_last_append_offset.load(std::memory_order_relaxed));
 }
 
 blk_num_t AppendBlkAllocator::available_blks() const { return get_total_blks() - get_used_blks(); }
@@ -190,7 +150,13 @@ blk_num_t AppendBlkAllocator::get_used_blks() const { return m_last_append_offse
 
 blk_num_t AppendBlkAllocator::get_freeable_nblks() const { return m_freeable_nblks; }
 
-blk_num_t AppendBlkAllocator::get_defrag_nblks() const { return get_freeable_nblks() - available_blks(); }
+blk_num_t AppendBlkAllocator::get_defrag_nblks() const { return get_freeable_nblks() + available_blks(); }
 
-nlohmann::json AppendBlkAllocator::get_status(int log_level) const { return nlohmann::json{}; }
+nlohmann::json AppendBlkAllocator::get_status(int log_level) const {
+    nlohmann::json j;
+    j["total_blks"] = get_total_blks();
+    j["next_append_blk_num"] = m_last_append_offset.load();
+    j["freeable_nblks"] = m_freeable_nblks.load();
+    return j;
+}
 } // namespace homestore
