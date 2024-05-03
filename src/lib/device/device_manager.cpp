@@ -273,7 +273,8 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
                     vparam.vdev_name, in_bytes(input_chunk_size), in_bytes(vparam.chunk_size));
         }
 
-        vparam.vdev_size = sisl::round_down(vparam.vdev_size, vparam.chunk_size);
+        // For dynamic size vdev, size starts with zero.
+        vparam.vdev_size = 0;
         if (input_vdev_size != vparam.vdev_size) {
             LOGINFO("{} Virtual device is attempted to be created with size={}, it needs to be rounded to new_size={}",
                     vparam.vdev_name, in_bytes(input_vdev_size), in_bytes(vparam.vdev_size));
@@ -285,7 +286,6 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
     RELEASE_ASSERT(vparam.chunk_size >= min_chunk_size, "chunk_size should be greater than or equal to min_chunk_size");
 
     RELEASE_ASSERT(vparam.num_chunks <= max_num_chunks, "num_chunks should be less than or equal to max_num_chunks");
-    RELEASE_ASSERT(input_vdev_size >= vparam.vdev_size, "vdev_size should be less than or equal to input_vdev_size");
 
     LOGINFO(
         "New Virtal Dev={} of size={} with id={} is attempted to be created with multi_pdev_opts={}. The params are "
@@ -419,7 +419,7 @@ shared< Chunk > DeviceManager::create_chunk(HSDevType dev_type, uint32_t vdev_id
     pdev->write_super_block(buf, vdev_info::size, offset);
     hs_utils::iobuf_free(buf, sisl::buftag::superblk);
 
-    HS_LOG(TRACE, device, "Created chunk id={} dev_type={} vdev_id={} size={}", chunk_id, (uint8_t)dev_type, vdev_id,
+    HS_LOG(DEBUG, device, "Created chunk_id={} dev_type={} vdev_id={} size={}", chunk_id, (uint8_t)dev_type, vdev_id,
            chunk_size);
     return chunk;
 }
@@ -459,7 +459,7 @@ void DeviceManager::remove_chunk_locked(shared< Chunk > chunk) {
     pdev->write_super_block(buf, vdev_info::size, offset);
     hs_utils::iobuf_free(buf, sisl::buftag::superblk);
 
-    HS_LOG(TRACE, device, "Removed chunk id={} vdev_id={}", chunk_id, vdev_id);
+    HS_LOG(DEBUG, device, "Removed chunk_id={} vdev_id={}", chunk_id, vdev_id);
 }
 
 uint32_t DeviceManager::populate_pdev_info(const dev_info& dinfo, const iomgr::drive_attributes& attr,
@@ -512,6 +512,7 @@ static void populate_vdev_info(const vdev_parameters& vparam, uint32_t vdev_id,
     out_info->set_user_private(vparam.context_data);
     out_info->alloc_type = s_cast< uint8_t >(vparam.alloc_type);
     out_info->chunk_sel_type = s_cast< uint8_t >(vparam.chunk_sel_type);
+    out_info->size_type = vparam.size_type;
     out_info->compute_checksum();
 }
 
@@ -609,7 +610,7 @@ void ChunkPool::start() {
         m_run_pool = true;
     }
     m_producer_thread = std::thread(&ChunkPool::producer, this);
-    HS_LOG(INFO, device, "Starting chunk pool for vdev {}", m_params.vdev_id);
+    HS_LOG(INFO, device, "Starting chunk pool for vdev_id={}", m_params.vdev_id);
 }
 
 void ChunkPool::producer() {
@@ -634,7 +635,7 @@ void ChunkPool::producer() {
                                          m_params.chunk_size, std::move(private_data));
         RELEASE_ASSERT(chunk, "Cannot create chunk");
         m_pool.push_back(chunk);
-        HS_LOG(TRACE, device, "Produced chunk to pool id {} type {} vdev {} size {}", chunk->chunk_id(),
+        HS_LOG(TRACE, device, "Produced chunk to pool chunk_id={} type={} vdev_id={} size {}", chunk->chunk_id(),
                m_params.hs_dev_type, m_params.vdev_id, m_params.chunk_size);
         m_pool_cv.notify_one();
     }

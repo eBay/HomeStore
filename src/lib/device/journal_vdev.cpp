@@ -125,7 +125,19 @@ void JournalVirtualDev::init() {
         if (!visited_chunks.count(chunk->chunk_id())) { orphan_chunks.push_back(chunk); }
     }
 
-    for (auto& chunk : orphan_chunks) {
+    // Remove the orphan chunks.
+    if (!orphan_chunks.empty()) {
+        LOGINFOMOD(journalvdev, "Removing orphan chunks");
+        remove_journal_chunks(orphan_chunks);
+    }
+
+    // Start the chunk pool.
+    m_chunk_pool->start();
+    LOGINFO("Journal vdev init done");
+}
+
+void JournalVirtualDev::remove_journal_chunks(std::vector< shared< Chunk > >& chunks) {
+    for (auto& chunk : chunks) {
         auto* data = r_cast< JournalChunkPrivate* >(const_cast< uint8_t* >(chunk->user_private()));
         auto chunk_id = chunk->chunk_id();
         auto logdev_id = data->logdev_id;
@@ -135,14 +147,9 @@ void JournalVirtualDev::init() {
         *data = JournalChunkPrivate{};
         update_chunk_private(chunk, data);
 
-        LOGINFOMOD(journalvdev, "Removing orphan chunk {} found for logdev {} next {}.", chunk_id, logdev_id,
-                   next_chunk);
+        LOGINFOMOD(journalvdev, "Removing chunk {} found for logdev {} next {}.", chunk_id, logdev_id, next_chunk);
         m_dmgr.remove_chunk_locked(chunk);
     }
-
-    // Start the chunk pool.
-    m_chunk_pool->start();
-    LOGINFO("Journal vdev init done");
 }
 
 void JournalVirtualDev::update_chunk_private(shared< Chunk >& chunk, JournalChunkPrivate* private_data) {
@@ -169,6 +176,19 @@ shared< JournalVirtualDev::Descriptor > JournalVirtualDev::open(logdev_id_t logd
                    chunk->to_string());
     }
     return it->second;
+}
+
+void JournalVirtualDev::destroy(logdev_id_t logdev_id) {
+    auto it = m_journal_descriptors.find(logdev_id);
+    if (it == m_journal_descriptors.end()) {
+        LOGERROR("logdev not found log_dev={}", logdev_id);
+        return;
+    }
+
+    // Remove all the chunks.
+    remove_journal_chunks(it->second->m_journal_chunks);
+    m_journal_descriptors.erase(it);
+    LOGINFOMOD(journalvdev, "Journal vdev destroyed log_dev={}", logdev_id);
 }
 
 void JournalVirtualDev::Descriptor::append_chunk() {

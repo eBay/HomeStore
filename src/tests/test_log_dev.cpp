@@ -336,6 +336,106 @@ TEST_F(LogDevTest, Rollback) {
     rollback_records_validate(log_store, 0 /* expected_count */);
 }
 
+TEST_F(LogDevTest, CreateRemoveLogDev) {
+    auto num_logdev = SISL_OPTIONS["num_logdevs"].as< uint32_t >();
+    std::vector< std::shared_ptr< HomeLogStore > > log_stores;
+    auto vdev = logstore_service().get_vdev();
+
+    // Create log dev, logstore, write some io. Delete all of them and
+    // verify the size of vdev and count of logdev.
+    auto log_devs = logstore_service().get_all_logdevs();
+    ASSERT_EQ(log_devs.size(), 0);
+    ASSERT_EQ(logstore_service().used_size(), 0);
+    ASSERT_EQ(vdev->num_descriptors(), 0);
+
+    for (uint32_t i{0}; i < num_logdev; ++i) {
+        auto id = logstore_service().create_new_logdev();
+        s_max_flush_multiple = logstore_service().get_logdev(id)->get_flush_size_multiple();
+        auto store = logstore_service().create_new_log_store(id, false);
+        log_stores.push_back(store);
+    }
+
+    // Used size is still 0.
+    ASSERT_EQ(logstore_service().used_size(), 0);
+    ASSERT_EQ(vdev->num_descriptors(), num_logdev);
+
+    log_devs = logstore_service().get_all_logdevs();
+    ASSERT_EQ(log_devs.size(), num_logdev);
+
+    for (auto& log_store : log_stores) {
+        const unsigned count{10};
+        for (unsigned i{0}; i < count; ++i) {
+            // Insert new entry.
+            insert_sync(log_store, i);
+            // Verify the entry.
+            read_verify(log_store, i);
+        }
+    }
+
+    // Used size should be non zero.
+    ASSERT_GT(logstore_service().used_size(), 0);
+
+    for (auto& store : log_stores) {
+        logstore_service().remove_log_store(store->get_logdev()->get_id(), store->get_store_id());
+    }
+    for (auto& store : log_stores) {
+        logstore_service().destroy_log_dev(store->get_logdev()->get_id());
+    }
+
+    // Test we released all chunks
+    log_devs = logstore_service().get_all_logdevs();
+    ASSERT_EQ(log_devs.size(), 0);
+    ASSERT_EQ(vdev->num_descriptors(), 0);
+    ASSERT_EQ(logstore_service().used_size(), 0);
+}
+
+TEST_F(LogDevTest, DeleteUnopenedLogDev) {
+    auto num_logdev = SISL_OPTIONS["num_logdevs"].as< uint32_t >();
+    std::vector< std::shared_ptr< HomeLogStore > > log_stores;
+    auto vdev = logstore_service().get_vdev();
+
+    // Test deletion of unopened logdev.
+    std::set< logdev_id_t > id_set, unopened_id_set;
+    for (uint32_t i{0}; i < num_logdev; ++i) {
+        auto id = logstore_service().create_new_logdev();
+        id_set.insert(id);
+        if (i >= num_logdev / 2) { unopened_id_set.insert(id); }
+        s_max_flush_multiple = logstore_service().get_logdev(id)->get_flush_size_multiple();
+        auto store = logstore_service().create_new_log_store(id, false);
+        log_stores.push_back(store);
+    }
+
+    // Write to all logstores so that there is atleast one chunk in each logdev.
+    for (auto& log_store : log_stores) {
+        const unsigned count{10};
+        for (unsigned i{0}; i < count; ++i) {
+            // Insert new entry.
+            insert_sync(log_store, i);
+            // Verify the entry.
+            read_verify(log_store, i);
+        }
+    }
+
+    // Restart homestore with only half of the logdev's open. Rest will be deleted as they are unopened.
+    auto restart = [&]() {
+        auto starting_cb = [&]() {
+            auto it = id_set.begin();
+            for (uint32_t i{0}; i < id_set.size() / 2; i++, it++) {
+                logstore_service().open_logdev(*it);
+            }
+        };
+        start_homestore(true /* restart */, starting_cb);
+    };
+    LOGINFO("Restart homestore");
+    restart();
+
+    auto log_devs = logstore_service().get_all_logdevs();
+    ASSERT_EQ(log_devs.size(), id_set.size() / 2);
+    for (auto& logdev : log_devs) {
+        ASSERT_EQ(unopened_id_set.count(logdev->get_id()), 0);
+    }
+}
+
 SISL_OPTION_GROUP(test_log_dev,
                   (num_logdevs, "", "num_logdevs", "number of log devs",
                    ::cxxopts::value< uint32_t >()->default_value("4"), "number"),

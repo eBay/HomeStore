@@ -901,8 +901,7 @@ void RaftReplDev::permanent_destroy() {
     m_rd_sb.destroy();
     m_raft_config_sb.destroy();
     m_data_journal->remove_store();
-
-    // TODO: Add remove_log_dev from logstore_service() here once its implemented
+    logstore_service().destroy_log_dev(m_data_journal->logdev_id());
 }
 
 void RaftReplDev::leave() {
