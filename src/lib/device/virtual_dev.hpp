@@ -299,6 +299,7 @@ public:
 
 private:
     uint64_t to_dev_offset(BlkId const& b, Chunk** chunk) const;
+    bool is_chunk_loaded(cshared< Chunk >& chunk) const;
     BlkAllocStatus alloc_blks_from_chunk(blk_count_t nblks, blk_alloc_hints const& hints, MultiBlkId& out_blkid,
                                          Chunk* chunk);
 };
