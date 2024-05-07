@@ -41,6 +41,11 @@ private:
     std::vector< iomgr::io_fiber_t > m_cp_flush_fibers;
     std::mutex m_flush_mtx;
 
+#ifdef _PRERELEASE
+    std::mutex flip_mtx;
+    std::map< IndexBufferPtr, std::vector< std::string > > crashing_buffers;
+#endif
+
 public:
     IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, const std::shared_ptr< sisl::Evictor >& evictor,
                  uint32_t node_size);
@@ -55,8 +60,10 @@ public:
 
     //////////////////// CP Related API section /////////////////////////////////
     folly::Future< bool > async_cp_flush(IndexCPContext* context);
-    IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext *cp_ctx) const;
-
+    IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext* cp_ctx) const;
+#ifdef _PRERELEASE
+    void add_to_crashing_buffers(IndexBufferPtr, std::string) override;
+#endif
 private:
     void start_flush_threads();
     void process_write_completion(IndexCPContext* cp_ctx, IndexBufferPtr pbuf);

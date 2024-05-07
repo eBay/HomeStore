@@ -56,6 +56,13 @@ public:
     CP* cp() { return m_cp; }
     cp_id_t id() const;
     void complete(bool status) { m_flush_comp.setValue(status); }
+#ifdef _PRERELEASE
+    void abrupt() {
+        m_cp->m_abrupt_cp.store(true);
+        complete(true);
+    }
+    bool is_abrupt() { return m_cp->m_abrupt_cp.load(); }
+#endif
     folly::Future< bool > get_future() { return m_flush_comp.getFuture(); }
 
     virtual ~CPContext() = default;
@@ -145,16 +152,17 @@ class CPManager {
 
 private:
     CP* m_cur_cp{nullptr}; // Current CP information
-    std::atomic< bool > m_in_flush_phase{false};
     std::unique_ptr< CPMgrMetrics > m_metrics;
-    std::mutex trigger_cp_mtx;
-    Clock::time_point m_cp_start_time;
+    std::mutex m_trigger_cp_mtx;
     std::array< std::unique_ptr< CPCallbacks >, (size_t)cp_consumer_t::SENTINEL > m_cp_cb_table;
     std::unique_ptr< CPWatchdog > m_wd_cp;
     superblk< cp_mgr_super_block > m_sb;
     std::vector< iomgr::io_fiber_t > m_cp_io_fibers;
     iomgr::timer_handle_t m_cp_timer_hdl;
-    std::atomic< bool > m_cp_shutdown_initiated{false};
+    bool m_cp_shutdown_initiated{false};
+    bool m_in_flush_phase{false};
+    bool m_pending_trigger_cp{false}; // Is there is a waiter for a cp flush to start
+    folly::SharedPromise< bool > m_pending_trigger_cp_comp;
 
 public:
     CPManager();
@@ -221,5 +229,6 @@ private:
     void cleanup_cp(CP* cp);
     void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
     void start_cp_thread();
+    folly::Future< bool > do_trigger_cp_flush(bool force, bool flush_on_shutdown);
 };
 } // namespace homestore

@@ -69,10 +69,13 @@ struct persistent_hdr_t {
 
     persistent_hdr_t() : nentries{0}, leaf{0}, valid_node{1} {}
     std::string to_string() const {
-        return fmt::format("magic={} version={} csum={} node_id={} next_node={} nentries={} node_type={} is_leaf={} "
-                           "valid_node={} node_gen={} link_version={} edge_nodeid={}, edge_link_version={} level={} ",
-                           magic, version, checksum, node_id, next_node, nentries, node_type, leaf, valid_node,
-                           node_gen, link_version, edge_info.m_bnodeid, edge_info.m_link_version, level);
+        std::string sleaf = leaf ? "LEAF" : "INTERIOR";
+        std::string snext = next_node == empty_bnodeid ? "" : fmt::format("next_node={}", next_node);
+        std::string edge = edge_info.m_bnodeid == empty_bnodeid
+            ? ""
+            : "edge:" + std::to_string(edge_info.m_bnodeid) + "." + std::to_string(edge_info.m_link_version);
+        return fmt::format("magic={} version={} csum={} node: {}.{} level:{} nEntries={}  {} {} {} node_gen={} ", magic,
+                           version, checksum, node_id, link_version, level, nentries, sleaf, snext, edge, node_gen);
     }
 };
 #pragma pack()
@@ -104,6 +107,7 @@ public:
 
     // Identify if a node is a leaf node or not, from raw buffer, by just reading persistent_hdr_t
     static bool identify_leaf_node(uint8_t* buf) { return (r_cast< persistent_hdr_t* >(buf))->leaf; }
+    static std::string to_string_buf(uint8_t* buf) { return (r_cast< persistent_hdr_t* >(buf))->to_string(); }
 
     /// @brief Finds the index of the entry with the specified key in the node.
     ///

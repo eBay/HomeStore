@@ -23,6 +23,7 @@
 #include <homestore/index_service.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
 #include <homestore/index/wb_cache_base.hpp>
+#include <iomgr/iomgr_flip.hpp>
 
 SISL_LOGGING_DECL(wbcache)
 
@@ -147,6 +148,11 @@ protected:
         for (const auto& right_child_node : new_nodes) {
             auto right_child = IndexBtreeNode::convert(right_child_node.get());
             write_node_impl(right_child_node, context);
+#ifdef _PRERELEASE
+            if (iomgr_flip::instance()->test_flip("index_right_sibling")) {
+                index_service().wb_cache().add_to_crashing_buffers(right_child->m_idx_buf, "index_right_sibling");
+            }
+#endif
             wb_cache().prepend_to_chain(right_child->m_idx_buf, left_child_buf);
         }
 
@@ -160,10 +166,27 @@ protected:
             }
             return str;
         };
-
+#ifdef _PRERELEASE
+        if (iomgr_flip::instance()->test_flip("index_left_sibling")) {
+            index_service().wb_cache().add_to_crashing_buffers(left_child_idx_node->m_idx_buf, "index_left_sibling");
+        }
+#endif
         LOGTRACEMOD(wbcache, "{}", trace_index_bufs());
         write_node_impl(left_child_node, context);
         write_node_impl(parent_node, context);
+
+#ifdef _PRERELEASE
+        if (iomgr_flip::instance()->test_flip("index_parent_non_root")) {
+            if(parent_node->node_id()!= this->root_node_id()){
+                index_service().wb_cache().add_to_crashing_buffers(parent_idx_node->m_idx_buf, "index_parent_non_root");
+            }
+        }
+        if (iomgr_flip::instance()->test_flip("index_parent_root")) {
+            if(parent_node->node_id()== this->root_node_id()) {
+                index_service().wb_cache().add_to_crashing_buffers(left_child_idx_node->m_idx_buf, "index_parent_root");
+            }
+        }
+#endif
 
         return btree_status_t::success;
     }

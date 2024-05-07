@@ -23,6 +23,7 @@
 #include <sisl/options/options.h>
 #include <sisl/logging/logging.h>
 #include <sisl/utility/enum.hpp>
+#include <iomgr/iomgr_flip.hpp>
 #include <boost/algorithm/string.hpp>
 
 #include <homestore/btree/mem_btree.hpp>
@@ -80,8 +81,21 @@ protected:
     std::condition_variable m_test_done_cv;
     std::random_device m_re;
     std::atomic< uint32_t > m_num_ops{0};
-
+#ifdef _PRERELEASE
+    flip::FlipClient m_fc{iomgr_flip::instance()};
+#endif
 public:
+#ifdef _PRERELEASE
+    void set_flip_point(const std::string flip_name) {
+        flip::FlipCondition null_cond;
+        flip::FlipFrequency freq;
+        freq.set_count(10000);
+        freq.set_percent(1);
+        m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
+        m_bt->set_flip_point(flip_name);
+        LOGDEBUG("Flip {} set", flip_name);
+    }
+#endif
     void preload(uint32_t preload_size) {
         if (preload_size) {
             const auto n_fibers = std::min(preload_size, (uint32_t)m_fibers.size());
