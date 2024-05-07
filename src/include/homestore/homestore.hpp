@@ -169,7 +169,6 @@ public:
     ResourceMgr& resource_mgr() { return *m_resource_mgr.get(); }
     CPManager& cp_mgr() { return *m_cp_mgr.get(); }
     shared< sisl::Evictor > evictor() { return m_evictor; }
-
 private:
     void init_cache();
     shared< VirtualDev > create_vdev_cb(const vdev_info& vinfo, bool load_existing);

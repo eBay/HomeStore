@@ -74,6 +74,14 @@ public:
     /// @param cur_buf
     /// @return
     virtual IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext* context) const = 0;
+
+#ifdef _PRERELEASE
+    /// @brief add the buffer to crashing buffers list. In transact_write_nodes(), it will be called. During flushing
+    /// wbcache, it will be checked. If the buffer is in the list, cp_abrupt happens.
+    /// @param first index buffer
+    /// @param second the reason
+    virtual void add_to_crashing_buffers(IndexBufferPtr, std::string reason) = 0;
+#endif
 };
 
 } // namespace homestore

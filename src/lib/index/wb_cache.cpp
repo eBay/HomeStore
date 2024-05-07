@@ -151,7 +151,12 @@ retry:
         goto retry;
     }
 }
-
+#ifdef _PRERELEASE
+void IndexWBCache::add_to_crashing_buffers(IndexBufferPtr buf, std::string reason) {
+    std::unique_lock lg(flip_mtx);
+    this->crashing_buffers[buf].push_back(reason);
+}
+#endif
 std::pair< bool, bool > IndexWBCache::create_chain(IndexBufferPtr& second, IndexBufferPtr& third, CPContext* cp_ctx) {
     bool second_copied{false}, third_copied{false};
     auto chain = second;
@@ -241,6 +246,25 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
 void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr buf, bool part_of_batch) {
     LOGTRACEMOD(wbcache, "cp {} buf {}", cp_ctx->id(), buf->to_string());
     buf->set_state(index_buf_state_t::FLUSHING);
+
+#ifdef _PRERELEASE
+
+    if (cp_ctx->is_abrupt()) {
+        LOGTRACEMOD(wbcache, "The cp {} is abrupt! for {}", cp_ctx->id(), BtreeNode::to_string_buf(buf->raw_buffer()));
+        return;
+    }
+    if (auto it = crashing_buffers.find(buf);it != crashing_buffers.end()) {
+        const auto& reasons = it->second;
+        std::string formatted_reasons = fmt::format("[{}]", fmt::join(reasons, ", "));
+        LOGTRACEMOD(wbcache, "Buffer {} is in crashing_buffers with reason(s): {} - Buffer info: {}",
+                    buf->to_string(), formatted_reasons, BtreeNode::to_string_buf(buf->raw_buffer()));
+        crashing_buffers.clear();
+        cp_ctx->abrupt();
+        return;
+    }
+#endif
+    LOGTRACEMOD(wbcache, "flushing cp {} buf {} info: {}", cp_ctx->id(), buf->to_string(),
+            BtreeNode::to_string_buf(buf->raw_buffer()));
     m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid, part_of_batch)
         .thenValue([buf, cp_ctx](auto) {
             auto& pthis = s_cast< IndexWBCache& >(wb_cache()); // Avoiding more than 16 bytes capture

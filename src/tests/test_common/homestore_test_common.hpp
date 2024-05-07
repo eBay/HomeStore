@@ -53,7 +53,9 @@ SISL_OPTION_GROUP(
      ::cxxopts::value< int >()->default_value("-1"), "number"),
     (num_io, "", "num_io", "number of IO operations", ::cxxopts::value< uint64_t >()->default_value("300"), "number"),
     (qdepth, "", "qdepth", "Max outstanding operations", ::cxxopts::value< uint32_t >()->default_value("8"), "number"),
-    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
+    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+    (flip_list, "", "flip_list", "btree flip list", ::cxxopts::value< std::vector< std::string > >(), "flips [...]"),
+    (enable_crash, "", "enable_crash", "enable crash", ::cxxopts::value< bool >()->default_value("0"), ""));
 
 SETTINGS_INIT(iomgrcfg::IomgrSettings, iomgr_config);
 
@@ -174,7 +176,6 @@ public:
         uint64_t min_chunk_size{0};
         vdev_size_type_t vdev_size_type{vdev_size_type_t::VDEV_SIZE_STATIC};
     };
-
     static void start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
                                 hs_before_services_starting_cb_t cb = nullptr, bool fake_restart = false,
                                 bool init_device = true, uint32_t shutdown_delay_sec = 5) {

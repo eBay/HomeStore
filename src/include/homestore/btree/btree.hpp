@@ -39,6 +39,31 @@ struct BtreeThreadVariables {
     BtreeNodePtr force_split_node{nullptr};
 };
 
+struct BTREE_FLIPS {
+    static constexpr uint32_t INDEX_PARENT_NON_ROOT = 1 << 0;
+    static constexpr uint32_t INDEX_PARENT_ROOT = 1 << 1;
+    static constexpr uint32_t INDEX_LEFT_SIBLING = 1 << 2;
+    static constexpr uint32_t INDEX_RIGHT_SIBLING = 1 << 3;
+
+    uint32_t flips;
+    BTREE_FLIPS() : flips{0} {}
+    std::string list() const {
+        std::string str;
+        if (flips & INDEX_PARENT_NON_ROOT) { str += "index_parent_non_root,"; }
+        if (flips & INDEX_PARENT_ROOT) { str += "index_parent_root,"; }
+        if (flips & INDEX_LEFT_SIBLING) { str += "index_left_sibling,"; }
+        if (flips & INDEX_RIGHT_SIBLING) { str += "index_right_sibling,"; }
+        return str;
+    }
+    void set_flip(uint32_t flip) { flips |= flip; }
+    void set_flip(std::string flip) {
+        if (flip == "index_parent_non_root") { set_flip(INDEX_PARENT_NON_ROOT); }
+        if (flip == "index_parent_root") { set_flip(INDEX_PARENT_ROOT); }
+        if (flip == "index_left_sibling") { set_flip(INDEX_LEFT_SIBLING); }
+        if (flip == "index_right_sibling") { set_flip(INDEX_RIGHT_SIBLING); }
+    }
+};
+
 template < typename K, typename V >
 class Btree {
 private:
@@ -52,7 +77,9 @@ private:
 #ifndef NDEBUG
     std::atomic< uint64_t > m_req_id{0};
 #endif
-
+#ifdef _PRERELEASE
+    BTREE_FLIPS m_flips;
+#endif
     // This workaround of BtreeThreadVariables is needed instead of directly declaring statics
     // to overcome the gcc bug, pointer here: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66944
     static BtreeThreadVariables* bt_thread_vars() {
@@ -100,6 +127,16 @@ public:
 
     // static void set_io_flip();
     // static void set_error_flip();
+#ifdef _PRERELEASE
+    void set_flip_point(std::string flip) {
+        m_flips.set_flip(flip);
+    }
+    void set_flips(std::vector< std::string > flips) {
+        for (const auto& flip : flips) {
+            set_flip_point(flip);
+        }
+    }
+#endif
 
 protected:
     /////////////////////////// Methods the underlying store is expected to handle ///////////////////////////
