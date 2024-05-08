@@ -159,15 +159,15 @@ public:
 
     const Chunk* get_chunk(uint32_t chunk_id) const {
         std::unique_lock lg{m_vdev_mutex};
-        // if a pdev is misssing when restart, chunk_id from cleint might be larger than m_chunks.size()
-        if (chunk_id == INVALID_CHUNK_ID || chunk_id >= m_chunks.size()) return nullptr;
+        // if a pdev is misssing when restart, chunk_id from client might be larger than m_chunks.size()
+        if (!m_chunks.index_exists(chunk_id)) return nullptr;
         return m_chunks[chunk_id].get();
     }
 
     Chunk* get_chunk_mutable(uint32_t chunk_id) {
         std::unique_lock lg{m_vdev_mutex};
         // if a pdev is misssing when restart, chunk_id from client might be larger than m_chunks.size()
-        if (chunk_id == INVALID_CHUNK_ID || chunk_id >= m_chunks.size()) return nullptr;
+        if (!m_chunks.index_exists(chunk_id)) return nullptr;
         return m_chunks[chunk_id].get();
     }
 

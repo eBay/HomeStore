@@ -335,7 +335,7 @@ folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32
 
 folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
                                                          uint64_t offset_in_chunk) {
-    if (sisl_unlikely(!is_chunk_loaded(chunk))) {
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
         return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
     }
     auto const dev_offset = chunk->start_offset() + offset_in_chunk;
@@ -371,7 +371,7 @@ folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, cons
 
 folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, const int iovcnt, cshared< Chunk >& chunk,
                                                           uint64_t offset_in_chunk) {
-    if (sisl_unlikely(!is_chunk_loaded(chunk))) {
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
         return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
     }
     auto const dev_offset = chunk->start_offset() + offset_in_chunk;
@@ -400,7 +400,7 @@ std::error_code VirtualDev::sync_write(const char* buf, uint32_t size, BlkId con
 
 std::error_code VirtualDev::sync_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
                                        uint64_t offset_in_chunk) {
-    if (sisl_unlikely(!is_chunk_loaded(chunk))) {
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
         return std::make_error_code(std::errc::resource_unavailable_try_again);
     }
     return chunk->physical_dev_mutable()->sync_write(buf, size, chunk->start_offset() + offset_in_chunk);
@@ -427,7 +427,7 @@ std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, BlkId cons
 
 std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, cshared< Chunk >& chunk,
                                         uint64_t offset_in_chunk) {
-    if (sisl_unlikely(!is_chunk_loaded(chunk))) {
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
         return std::make_error_code(std::errc::resource_unavailable_try_again);
     }
     uint64_t const dev_offset = chunk->start_offset() + offset_in_chunk;
@@ -482,7 +482,7 @@ std::error_code VirtualDev::sync_read(char* buf, uint32_t size, BlkId const& bid
 }
 
 std::error_code VirtualDev::sync_read(char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk) {
-    if (sisl_unlikely(!is_chunk_loaded(chunk))) {
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
         return std::make_error_code(std::errc::resource_unavailable_try_again);
     }
     return chunk->physical_dev_mutable()->sync_read(buf, size, chunk->start_offset() + offset_in_chunk);
@@ -508,7 +508,7 @@ std::error_code VirtualDev::sync_readv(iovec* iov, int iovcnt, BlkId const& bid)
 }
 
 std::error_code VirtualDev::sync_readv(iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk) {
-    if (sisl_unlikely(!is_chunk_loaded(chunk))) {
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
         return std::make_error_code(std::errc::resource_unavailable_try_again);
     }
     uint64_t const dev_offset = chunk->start_offset() + offset_in_chunk;
@@ -652,7 +652,7 @@ uint64_t VirtualDev::to_dev_offset(BlkId const& b, Chunk** chunk) const {
     return uint64_cast(b.blk_num()) * block_size() + uint64_cast((*chunk)->start_offset());
 }
 
-bool VirtualDev::is_chunk_loaded(cshared< Chunk >& chunk) const {
+bool VirtualDev::is_chunk_available(cshared< Chunk >& chunk) const {
     return m_dmgr.get_chunk(chunk->chunk_id()) != nullptr;
 }
 
