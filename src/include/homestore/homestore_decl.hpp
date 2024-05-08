@@ -83,6 +83,7 @@ static constexpr uint32_t INVALID_PDEV_ID{std::numeric_limits< uint32_t >::max()
 static constexpr uint32_t INVALID_VDEV_ID{std::numeric_limits< uint32_t >::max()};
 static constexpr uint32_t INVALID_CHUNK_ID{std::numeric_limits< uint32_t >::max()};
 static constexpr uint32_t INVALID_DEV_ID{std::numeric_limits< uint32_t >::max()};
+static constexpr uint64_t INVALID_DEV_OFFSET{std::numeric_limits< uint64_t >::max()};
 constexpr uint16_t MAX_UUID_LEN{128};
 static constexpr hs_uuid_t INVALID_SYSTEM_UUID{0};
 
@@ -177,7 +178,10 @@ public:
     nlohmann::json to_json() const;
     std::string to_string() const { return to_json().dump(4); }
     uint64_t io_mem_size() const { return (hugepage_size != 0) ? hugepage_size : app_mem_size; }
-    bool has_fast_dev() const { return std::any_of(devices.begin(), devices.end(), [](const dev_info& d) { return d.dev_type == HSDevType::Fast; }); }
+    bool has_fast_dev() const {
+        return std::any_of(devices.begin(), devices.end(),
+                           [](const dev_info& d) { return d.dev_type == HSDevType::Fast; });
+    }
 };
 
 struct hs_engine_config {

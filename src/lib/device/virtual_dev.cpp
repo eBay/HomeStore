@@ -33,6 +33,7 @@
 #include <sisl/logging/logging.h>
 #include <sisl/utility/atomic_counter.hpp>
 #include <iomgr/iomgr_flip.hpp>
+#include <homestore/homestore_decl.hpp>
 
 #include "device/chunk.h"
 #include "device/physical_dev.hpp"
@@ -309,6 +310,8 @@ uint64_t VirtualDev::get_len(const iovec* iov, int iovcnt) {
     return len;
 }
 
+// for all writes functions, we don't expect to get invalid dev_offset, since we will never allocate blkid from missing
+// chunk(missing pdev);
 ////////////////////////// async write section //////////////////////////////////
 folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32_t size, BlkId const& bid,
                                                          bool part_of_batch) {
@@ -316,6 +319,10 @@ folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32
 
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        // TODO: define a new error code for missing pdev case;
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
+    }
     auto* pdev = chunk->physical_dev_mutable();
 
     HS_LOG(TRACE, device, "Writing in device: {}, offset = {}", pdev->pdev_id(), dev_offset);
@@ -328,6 +335,9 @@ folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32
 
 folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
                                                          uint64_t offset_in_chunk) {
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
+    }
     auto const dev_offset = chunk->start_offset() + offset_in_chunk;
     auto* pdev = chunk->physical_dev_mutable();
 
@@ -345,6 +355,9 @@ folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, cons
 
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
+    }
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
 
@@ -358,6 +371,9 @@ folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, cons
 
 folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, const int iovcnt, cshared< Chunk >& chunk,
                                                           uint64_t offset_in_chunk) {
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
+    }
     auto const dev_offset = chunk->start_offset() + offset_in_chunk;
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
@@ -376,11 +392,17 @@ std::error_code VirtualDev::sync_write(const char* buf, uint32_t size, BlkId con
 
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     return chunk->physical_dev_mutable()->sync_write(buf, size, dev_offset);
 }
 
 std::error_code VirtualDev::sync_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
                                        uint64_t offset_in_chunk) {
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     return chunk->physical_dev_mutable()->sync_write(buf, size, chunk->start_offset() + offset_in_chunk);
 }
 
@@ -389,6 +411,9 @@ std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, BlkId cons
 
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
 
@@ -402,6 +427,9 @@ std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, BlkId cons
 
 std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, cshared< Chunk >& chunk,
                                         uint64_t offset_in_chunk) {
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     uint64_t const dev_offset = chunk->start_offset() + offset_in_chunk;
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
@@ -414,6 +442,8 @@ std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, cshared< C
     return pdev->sync_writev(iov, iovcnt, size, dev_offset);
 }
 
+// for read, chunk might be missing in case of pdev is gone(for example , breakfix), so we need to check if chunk is
+// loaded before proceeding with read;
 ////////////////////////////////// async read section ///////////////////////////////////////////////
 folly::Future< std::error_code > VirtualDev::async_read(char* buf, uint64_t size, BlkId const& bid,
                                                         bool part_of_batch) {
@@ -421,6 +451,9 @@ folly::Future< std::error_code > VirtualDev::async_read(char* buf, uint64_t size
 
     Chunk* pchunk;
     uint64_t const dev_offset = to_dev_offset(bid, &pchunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
+    }
     return pchunk->physical_dev_mutable()->async_read(buf, size, dev_offset, part_of_batch);
 }
 
@@ -430,6 +463,9 @@ folly::Future< std::error_code > VirtualDev::async_readv(iovec* iovs, int iovcnt
 
     Chunk* pchunk;
     uint64_t const dev_offset = to_dev_offset(bid, &pchunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
+    }
     return pchunk->physical_dev_mutable()->async_readv(iovs, iovcnt, size, dev_offset, part_of_batch);
 }
 
@@ -439,10 +475,16 @@ std::error_code VirtualDev::sync_read(char* buf, uint32_t size, BlkId const& bid
 
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     return chunk->physical_dev_mutable()->sync_read(buf, size, dev_offset);
 }
 
 std::error_code VirtualDev::sync_read(char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk) {
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     return chunk->physical_dev_mutable()->sync_read(buf, size, chunk->start_offset() + offset_in_chunk);
 }
 
@@ -451,6 +493,9 @@ std::error_code VirtualDev::sync_readv(iovec* iov, int iovcnt, BlkId const& bid)
 
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
 
@@ -463,6 +508,9 @@ std::error_code VirtualDev::sync_readv(iovec* iov, int iovcnt, BlkId const& bid)
 }
 
 std::error_code VirtualDev::sync_readv(iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk) {
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     uint64_t const dev_offset = chunk->start_offset() + offset_in_chunk;
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
@@ -600,8 +648,12 @@ int VirtualDev::cp_progress_percent() { return 100; }
 ///////////////////////// VirtualDev Private Methods /////////////////////////////
 uint64_t VirtualDev::to_dev_offset(BlkId const& b, Chunk** chunk) const {
     *chunk = m_dmgr.get_chunk_mutable(b.chunk_num());
-    RELEASE_ASSERT(*chunk, "Chunk got null {}", b.chunk_num());
+    if (!(*chunk)) return INVALID_DEV_OFFSET;
     return uint64_cast(b.blk_num()) * block_size() + uint64_cast((*chunk)->start_offset());
+}
+
+bool VirtualDev::is_chunk_available(cshared< Chunk >& chunk) const {
+    return m_dmgr.get_chunk(chunk->chunk_id()) != nullptr;
 }
 
 } // namespace homestore
