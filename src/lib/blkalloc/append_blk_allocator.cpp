@@ -133,13 +133,24 @@ void AppendBlkAllocator::cp_flush(CP* cp) {
 //
 void AppendBlkAllocator::free(const BlkId& bid) {
     // If we are freeing the last block, just move the offset back
-    auto const nblks = bid.blk_count();
-    auto exp_last_offset = bid.blk_num() + nblks;
-    auto const new_offset = m_last_append_offset - nblks;
+    // If we are freeing the last block, just move the offset back
+    blk_num_t cur_last_offset = m_last_append_offset.load();
+    auto const input_last_offset = bid.blk_num() + bid.blk_count();
+    blk_num_t new_last_offset;
+    bool freeing_in_middle{false};
+    do {
+        if (input_last_offset == cur_last_offset) {
+            new_last_offset = bid.blk_num();
+            freeing_in_middle = false;
+        } else {
+            new_last_offset = cur_last_offset;
+            freeing_in_middle = true;
+        }
+    } while (!m_last_append_offset.compare_exchange_weak(cur_last_offset, new_last_offset));
 
-    if (!m_last_append_offset.compare_exchange_strong(exp_last_offset, new_offset)) {
+    if (freeing_in_middle) {
         // Freeing something in the middle, increment the count
-        m_freeable_nblks.fetch_add(nblks);
+        m_freeable_nblks.fetch_add(bid.blk_count());
     }
 }
 
