@@ -32,13 +32,14 @@ AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_form
     if (need_format) {
         m_freeable_nblks = 0;
         m_last_append_offset = 0;
+        m_commit_offset = 0;
     }
 
     // for both fresh start and recovery, firstly init m_sb fields;
     m_sb.create(sizeof(append_blk_sb_t));
     m_sb.set_name(get_name());
     m_sb->allocator_id = id;
-    m_sb->last_append_offset = m_last_append_offset;
+    m_sb->commit_offset = m_last_append_offset;
     m_sb->freeable_nblks = m_freeable_nblks;
 
     // for recovery boot, fields will also be recovered from metablks;
@@ -51,13 +52,11 @@ void AppendBlkAllocator::on_meta_blk_found(const sisl::byte_view& buf, void* met
     HS_REL_ASSERT_EQ(m_sb->version, append_blkalloc_sb_version, "Invalid version of AppendBlkAllocator metablk");
 
     // recover in-memory counter/offset from metablk;
-    m_last_append_offset.store(m_sb->last_append_offset);
+    m_last_append_offset.store(m_sb->commit_offset);
+    m_commit_offset.store(m_sb->commit_offset);
     m_freeable_nblks.store(m_sb->freeable_nblks);
 }
 
-//
-// Every time buffer is being dirtied, it needs to be within CPGuard().
-// It garunteens either this dirty buffer is flushed in current cp or next cp as a whole;
 //
 // alloc a single block;
 //
@@ -87,16 +86,31 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
     return BlkAllocStatus::SUCCESS;
 }
 
-BlkAllocStatus AppendBlkAllocator::alloc_on_disk(BlkId const&) {
-    m_is_dirty.store(true);
+// Reserve on disk will update the commit_offset with the new_offset, if its above the current commit_offset.
+BlkAllocStatus AppendBlkAllocator::reserve_on_disk(BlkId const& blkid) {
+    auto cpg = hs()->cp_mgr().cp_guard();
+    auto new_offset = blkid.blk_num() + blkid.blk_count();
+    auto cur_offset = m_commit_offset.load();
+    bool modified{true};
+    do {
+        if (cur_offset >= new_offset) {
+            // Already allocated
+            modified = false;
+            break;
+        }
+    } while (!m_commit_offset.compare_exchange_weak(cur_offset, new_offset));
+
+    if (modified) { m_is_dirty.store(true); }
     return BlkAllocStatus::SUCCESS;
 }
 
-BlkAllocStatus AppendBlkAllocator::alloc_on_cache(BlkId const& blkid) {
+// Given that AppendBlkAllocator uses highest of all offsets during the commit during recovery, we don't need to
+// individually recover each block.
+BlkAllocStatus AppendBlkAllocator::reserve_on_cache(BlkId const& blkid) {
     auto new_offset = blkid.blk_num() + blkid.blk_count();
     auto cur_offset = m_last_append_offset.load();
     do {
-        if (cur_offset >= new_offset) { break; } // Already allocated
+        if (cur_offset >= new_offset) { break; }
     } while (!m_last_append_offset.compare_exchange_weak(cur_offset, new_offset));
     return BlkAllocStatus::SUCCESS;
 }
@@ -104,7 +118,7 @@ BlkAllocStatus AppendBlkAllocator::alloc_on_cache(BlkId const& blkid) {
 void AppendBlkAllocator::cp_flush(CP* cp) {
     // check if current cp's context has dirty buffer already
     if (m_is_dirty.exchange(false)) {
-        m_sb->last_append_offset = m_last_append_offset.load();
+        m_sb->commit_offset = m_commit_offset.load();
         m_sb->freeable_nblks = m_freeable_nblks.load();
 
         // write to metablk;
@@ -118,45 +132,47 @@ void AppendBlkAllocator::cp_flush(CP* cp) {
 // 2. if the blk being freed happens to be last block, move last_append_offset backwards accordingly;
 //
 void AppendBlkAllocator::free(const BlkId& bid) {
+    // If we are freeing the last block, just move the offset back
     auto const nblks = bid.blk_count();
     auto exp_last_offset = bid.blk_num() + nblks;
     auto const new_offset = m_last_append_offset - nblks;
-    if (m_last_append_offset.compare_exchange_strong(exp_last_offset, new_offset)) { return; }
 
-    // Freeing something in the middle, increment the count
-    m_freeable_nblks.fetch_add(nblks);
+    if (!m_last_append_offset.compare_exchange_strong(exp_last_offset, new_offset)) {
+        // Freeing something in the middle, increment the count
+        m_freeable_nblks.fetch_add(nblks);
+    }
 }
 
 void AppendBlkAllocator::free_on_disk(BlkId const&) { m_is_dirty.store(true); }
 
 bool AppendBlkAllocator::is_blk_alloced(const BlkId& in_bid, bool) const {
     // blk_num starts from 0;
-    return in_bid.blk_num() < m_last_append_offset;
+    return in_bid.blk_num() < get_used_blks();
 }
 
 bool AppendBlkAllocator::is_blk_alloced_on_disk(BlkId const& bid, bool) const {
-    return bid.blk_num() < m_sb->last_append_offset;
+    return bid.blk_num() < m_sb->commit_offset;
 }
 
 std::string AppendBlkAllocator::get_name() const { return "AppendBlkAlloc_chunk_" + std::to_string(m_chunk_id); }
 
 std::string AppendBlkAllocator::to_string() const {
-    return fmt::format("{}, last_append_offset: {}", get_name(), m_last_append_offset.load(std::memory_order_relaxed));
+    return fmt::format("{}, last_append_offset: {} fragmented_nblks={}", get_name(),
+                       m_last_append_offset.load(std::memory_order_relaxed), get_fragmented_nblks());
 }
 
 blk_num_t AppendBlkAllocator::available_blks() const { return get_total_blks() - get_used_blks(); }
 
-blk_num_t AppendBlkAllocator::get_used_blks() const { return m_last_append_offset; }
+blk_num_t AppendBlkAllocator::get_used_blks() const { return m_last_append_offset.load(std::memory_order_relaxed); }
 
-blk_num_t AppendBlkAllocator::get_freeable_nblks() const { return m_freeable_nblks; }
-
-blk_num_t AppendBlkAllocator::get_defrag_nblks() const { return get_freeable_nblks() + available_blks(); }
+blk_num_t AppendBlkAllocator::get_fragmented_nblks() const { return m_freeable_nblks.load(std::memory_order_relaxed); }
 
 nlohmann::json AppendBlkAllocator::get_status(int log_level) const {
     nlohmann::json j;
     j["total_blks"] = get_total_blks();
-    j["next_append_blk_num"] = m_last_append_offset.load();
-    j["freeable_nblks"] = m_freeable_nblks.load();
+    j["next_append_blk_num"] = m_last_append_offset.load(std::memory_order_relaxed);
+    j["commit_offset"] = m_commit_offset.load(std::memory_order_relaxed);
+    j["freeable_nblks"] = m_freeable_nblks.load(std::memory_order_relaxed);
     return j;
 }
 } // namespace homestore

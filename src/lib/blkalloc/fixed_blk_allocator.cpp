@@ -87,9 +87,9 @@ BlkAllocStatus FixedBlkAllocator::alloc([[maybe_unused]] blk_count_t nblks, blk_
 
 BlkAllocStatus FixedBlkAllocator::alloc_contiguous(BlkId& out_blkid) { return alloc(1, {}, out_blkid); }
 
-BlkAllocStatus FixedBlkAllocator::alloc_on_cache(BlkId const& b) {
+BlkAllocStatus FixedBlkAllocator::reserve_on_cache(BlkId const& b) {
     std::lock_guard lg(m_mark_blk_mtx);
-    HS_DBG_ASSERT(m_state == state_t::RECOVERING, "alloc_on_cache called on non-recovery path");
+    HS_DBG_ASSERT(m_state == state_t::RECOVERING, "reserve_on_cache called on non-recovery path");
     m_marked_blks.insert(b.blk_num());
     return BlkAllocStatus::SUCCESS;
 }
@@ -103,15 +103,9 @@ void FixedBlkAllocator::free(BlkId const& b) {
 
 blk_num_t FixedBlkAllocator::available_blks() const { return m_free_blk_q.sizeGuess(); }
 
-blk_num_t FixedBlkAllocator::get_freeable_nblks() const {
+blk_num_t FixedBlkAllocator::get_fragmented_nblks() const {
     // TODO: implement this
-    HS_DBG_ASSERT_EQ(false, true, "FixedBlkAllocator get_freeable_nblks Not implemented");
-    return 0;
-}
-
-blk_num_t FixedBlkAllocator::get_defrag_nblks() const {
-    // TODO: implement this
-    HS_DBG_ASSERT_EQ(false, true, "FixedBlkAllocator get_defrag_nblks Not implemented");
+    HS_DBG_ASSERT_EQ(false, true, "FixedBlkAllocator get_fragmented_nblks Not implemented");
     return 0;
 }
 

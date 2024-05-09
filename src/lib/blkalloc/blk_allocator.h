@@ -97,42 +97,42 @@ VENUM(BlkOpStatus, uint8_t,
 
 ENUM(BlkAllocatorState, uint8_t, INIT, WAITING, SWEEP_SCHEDULED, SWEEPING, EXITING, DONE);
 
-/* We have the following design requirement it is used in auto recovery mode
- *  - Free BlkIDs should not be re allocated until its free status is persisted on disk. Reasons :-
- *          - It helps is reconstructing btree in crash as it depends on old blkid to read the data
- *          - Different volume recovery doesn't need to dependent on each other. We can sequence based recovery
- *            instead of time based recovery.
- *  - Allocate BlkIDs should not be persisted until it is persisted in journal. If system crash after writing to
- *    in use bm but before writing to journal then blkid will be leak forever.
- *
- * To achieve the above requirements we free blks in three phase
- *      - accumulate all the blkids in the consumer
- *      - Reset bits in disk bitmap only
- *      - persist disk bitmap
- *      - Reset bits in cache bitmap. It is available to reallocate now.
- *  Note :- Blks can be freed directly to the cache if it is not set disk bitmap. This can happen in scenarios like
- *  write failure after blkid allocation.
- *
- *  Allocation of blks also happen in two phase
- *      - Allocate blkid. This blkid will already be set in cache bitmap
- *      - Consumer will persist entry in journal
- *      - Set bit in disk bitmap. Entry is set disk bitmap only when consumer have made sure that they are going to
- *        replay this entry. otherwise there will be disk leak
- *  Note :- Allocate blk should always be done in two phase if auto recovery is set.
- *
- *
- * Blk allocator has two recoveries auto recovery and manual recovery
- * 1. auto recovery :- disk bit map is persisted. Consumers only have to replay journal. It is used by volume and
- * btree.
- * 2. manual recovery :- disk bit map is not persisted. Consumers have to scan its index table to set blks
- * allocated. It is used meta blk manager. Base class manages disk_bitmap as it is common to all blk allocator.
- *
- * Disk bitmap is persisted only during checkpoints. These two things always be true while disk bitmap is persisting
- * 1. It contains atleast all the blks allocated upto that checkpoint. It can contain blks allocated for next
- *    checkpoints also.
- * 2. It contains blks freed only upto that checkpoint.
- */
-
+////////////////////////////////////// BlkAllocator Design //////////////////////////////////////////////
+//
+// BlkAllocator is a generic class to allocate and free blocks. It is a base class upon which different allocators are
+// derived from. This class provides generic framework for them to allocate, free and recover those blks.
+//
+// There are 3 levels where allocated/free blks for the blkallocator is maintained
+//   1. cache version
+//   2. on-disk version
+//   3. Actual persistent version in the devices.
+//
+// Allocation/Reservation:
+// All allocation happens from the cache version of the blkallocator. Based on different blkallocator, it searches and
+// picks available free blk and respond to that call. When the blks are ready to be committed, it calls commit_blk of
+// the vdev, which calls reserve_on_disk() of the blkallocator to reserve the blkids in the on-disk version.
+//
+// When the blkids are reserved in the on-disk version, it is not yet written to the actual devices. It is written
+// as part of the next CP.
+//
+// Upon restart, there are 2 types of mismatches possible between state of blks before restart and
+// after restart.
+//  a) Blks that are allocated in cache version prior to restart, but they are not committed yet.
+//  b) Blks that are marked reserved in on-disk version prior to restart, but they are not persisted yet.
+//
+// During recovery phase after restart the persistent version is loaded and updated into the on-disk version and also
+// copies that on-disk version to cache version. BlkAllocator requires consumer to maintain the allocated blkids in
+// journal and replay them during restart. When the consumer replays, it calls VirtualDev::commit_blk() calls
+// reserve_on_cache() and reserve_on_disk() (only during recovery, otherwise it calls only reserve_on_disk()).
+// reserve_on_cache() will mark the blkids in the cache as allocated and reserve_on_disk() marks the blkids in on-disk
+// version as allocated.
+//
+// Free:
+// Freeing the blocks is done in a slightly different way, where blkallocator free will free the blk from cache version.
+// Then the virtual dev will call free_on_disk() which will free from the on-disk version and expected to persist them.
+// Since there is no additional phase of uncommitted free_blk. Free blks are always committed entries. Blkallocator free
+// is idempotent.
+//
 class CP;
 class BlkAllocator {
 public:
@@ -151,15 +151,14 @@ public:
 
     virtual BlkAllocStatus alloc_contiguous(BlkId& bid) = 0;
     virtual BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) = 0;
-    virtual BlkAllocStatus alloc_on_disk(BlkId const& bid) = 0;
-    virtual BlkAllocStatus alloc_on_cache(BlkId const& bid) = 0;
+    virtual BlkAllocStatus reserve_on_disk(BlkId const& bid) = 0;
+    virtual BlkAllocStatus reserve_on_cache(BlkId const& bid) = 0;
 
     virtual void free(BlkId const& id) = 0;
     virtual void free_on_disk(BlkId const& bid) = 0;
 
     virtual blk_num_t available_blks() const = 0;
-    virtual blk_num_t get_freeable_nblks() const = 0;
-    virtual blk_num_t get_defrag_nblks() const = 0;
+    virtual blk_num_t get_fragmented_nblks() const = 0;
     virtual blk_num_t get_used_blks() const = 0;
     virtual bool is_blk_alloced(BlkId const& b, bool use_lock = false) const = 0;
     virtual bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const = 0;

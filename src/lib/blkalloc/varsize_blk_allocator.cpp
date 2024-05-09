@@ -628,7 +628,7 @@ blk_count_t VarsizeBlkAllocator::alloc_blks_direct(blk_count_t nblks, blk_alloc_
 
 // since this function will only be called during HS recovery, we can safe to update the cache bitmap directly without
 // touching the slab caches.
-BlkAllocStatus VarsizeBlkAllocator::alloc_on_cache(BlkId const& bid) {
+BlkAllocStatus VarsizeBlkAllocator::reserve_on_cache(BlkId const& bid) {
     BlkAllocPortion& portion = blknum_to_portion(bid.blk_num());
     {
         auto lock{portion.portion_auto_lock()};
@@ -739,15 +739,9 @@ bool VarsizeBlkAllocator::is_blk_alloced(BlkId const& bid, bool use_lock) const 
 
 blk_num_t VarsizeBlkAllocator::available_blks() const { return get_total_blks() - get_used_blks(); }
 
-blk_num_t VarsizeBlkAllocator::get_freeable_nblks() const {
+blk_num_t VarsizeBlkAllocator::get_fragmented_nblks() const {
     // TODO: implement this
-    BLKALLOC_REL_ASSERT(false, "VarsizeBlkAllocator get_freeable_nblks Not implemented")
-    return 0;
-}
-
-blk_num_t VarsizeBlkAllocator::get_defrag_nblks() const {
-    // TODO: implement this
-    BLKALLOC_REL_ASSERT(false, "VarsizeBlkAllocator get_defrag_nblks Not implemented")
+    BLKALLOC_REL_ASSERT(false, "VarsizeBlkAllocator get_fragmented_nblks Not implemented")
     return 0;
 }
 

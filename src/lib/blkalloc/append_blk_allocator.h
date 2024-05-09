@@ -34,7 +34,7 @@ struct append_blk_sb_t {
     uint32_t version{append_blkalloc_sb_version};
     allocator_id_t allocator_id; // doesn't expect this to be changed once initialized;
     blk_num_t freeable_nblks;
-    blk_num_t last_append_offset;
+    blk_num_t commit_offset;
 };
 #pragma pack()
 
@@ -77,8 +77,8 @@ public:
     BlkAllocStatus alloc_contiguous(BlkId& bid) override;
     BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
     void free(BlkId const& b) override;
-    BlkAllocStatus alloc_on_disk(BlkId const& in_bid) override;
-    BlkAllocStatus alloc_on_cache(BlkId const& b) override;
+    BlkAllocStatus reserve_on_disk(BlkId const& in_bid) override;
+    BlkAllocStatus reserve_on_cache(BlkId const& b) override;
 
     void free_on_disk(BlkId const& b) override;
     bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const override;
@@ -96,16 +96,10 @@ public:
     blk_num_t get_used_blks() const override;
 
     /**
-     * @brief : the number of freeable blocks by the AppendBlkAllocator.
-     * @return : the number of freeable blocks.
+     * @brief : the number of blocks that have been fragmented by the free
+     * @return : the number of fragmented blks
      */
-    blk_num_t get_freeable_nblks() const;
-
-    /**
-     * @brief : the number of blocks that have been allocated by the AppendBlkAllocator.
-     * @return : the number of allocated blocks.
-     */
-    blk_num_t get_defrag_nblks() const;
+    blk_num_t get_fragmented_nblks() const;
 
     /**
      * @brief : check if the input blk id is allocated or not.
@@ -114,13 +108,6 @@ public:
     bool is_blk_alloced(const BlkId& in_bid, bool use_lock = false) const override;
 
     std::string to_string() const override;
-
-    /// @brief : needs to be called with cp_guard();
-    void set_dirty_offset(const uint8_t idx);
-
-    /// @brief : clear dirty is best effort;
-    /// offset flush is idempotent;
-    void clear_dirty_offset(const uint8_t idx);
 
     void cp_flush(CP* cp) override;
 
@@ -133,6 +120,7 @@ private:
 private:
     std::atomic< blk_num_t > m_last_append_offset{0}; // last appended offset in blocks;
     std::atomic< blk_num_t > m_freeable_nblks{0};
+    std::atomic< blk_num_t > m_commit_offset{0}; // commit offset in on-disk version
     std::atomic< bool > m_is_dirty{false};
     AppendBlkAllocMetrics m_metrics;
     superblk< append_blk_sb_t > m_sb; // only cp will be writing to this disk

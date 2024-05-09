@@ -376,19 +376,19 @@ struct FixedBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
     FixedBlkAllocatorTest& operator=(FixedBlkAllocatorTest&&) noexcept = delete;
     virtual ~FixedBlkAllocatorTest() override = default;
 
-    virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void SetUp() override {};
+    virtual void TearDown() override {};
 
     bool alloc_blk(BlkAllocStatus exp_status, BlkId& bid, bool track_block_group) {
         return do_alloc_blk(exp_status, bid, track_block_group, false /* specific_blk */);
     }
 
-    bool alloc_on_cache(BlkAllocStatus exp_status, BlkId& bid, bool track_block_group) {
+    bool reserve_on_cache(BlkAllocStatus exp_status, BlkId& bid, bool track_block_group) {
         return do_alloc_blk(exp_status, bid, track_block_group, true /* specific_blk */);
     }
 
     bool do_alloc_blk(BlkAllocStatus exp_status, BlkId& bid, bool track_block_group, bool specific_blk = false) {
-        const auto ret = specific_blk ? m_allocator->alloc_on_cache(bid) : m_allocator->alloc_contiguous(bid);
+        const auto ret = specific_blk ? m_allocator->reserve_on_cache(bid) : m_allocator->alloc_contiguous(bid);
         if (ret != exp_status) {
             {
                 std::scoped_lock< std::mutex > lock{s_print_mutex};
@@ -429,8 +429,8 @@ struct VarsizeBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
     VarsizeBlkAllocatorTest& operator=(VarsizeBlkAllocatorTest&&) noexcept = delete;
     virtual ~VarsizeBlkAllocatorTest() override = default;
 
-    virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void SetUp() override {};
+    virtual void TearDown() override {};
 
     void create_allocator(const bool use_slabs = true) {
         VarsizeBlkAllocConfig cfg{4096,  4096, 4096u,    static_cast< uint64_t >(m_total_count) * 4096,
@@ -575,7 +575,7 @@ TEST_F(FixedBlkAllocatorTest, alloc_free_fixed_size) {
     LOGINFO("Step 0: Reserve {} blks to be not allocated", nthreads);
     for (blk_num_t i = 0; i < nthreads; ++i) {
         reserved_blkids.emplace_back(BlkId{i * i, 1, 0});
-        ASSERT_TRUE(alloc_on_cache(BlkAllocStatus::SUCCESS, reserved_blkids.back(), false /* track_blk_group */));
+        ASSERT_TRUE(reserve_on_cache(BlkAllocStatus::SUCCESS, reserved_blkids.back(), false /* track_blk_group */));
     }
 
     const auto count = m_total_count - nthreads;

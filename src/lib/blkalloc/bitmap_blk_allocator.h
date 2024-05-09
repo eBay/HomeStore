@@ -72,7 +72,7 @@ public:
     virtual ~BitmapBlkAllocator() = default;
 
     virtual void load() = 0;
-    BlkAllocStatus alloc_on_disk(BlkId const& in_bid) override;
+    BlkAllocStatus reserve_on_disk(BlkId const& in_bid) override;
     void free_on_disk(BlkId const& b) override;
     bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const override;
     void cp_flush(CP* cp) override;
