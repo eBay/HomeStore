@@ -51,7 +51,7 @@ LogStoreService::LogStoreService() {
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
             rollback_super_blk_found(std::move(buf), voidptr_cast(mblk));
         },
-        nullptr);
+        nullptr, true, std::optional< meta_subtype_vec_t >({logdev_sb_meta_name}));
 }
 
 folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, HSDevType devType, uint32_t chunk_size) {
@@ -175,7 +175,9 @@ void LogStoreService::open_logdev(logdev_id_t logdev_id) {
         m_id_reserver->reserve(logdev_id);
         auto logdev = std::make_shared< LogDev >(logdev_id, m_logdev_vdev.get());
         m_id_logdev_map.emplace(logdev_id, logdev);
+        LOGDEBUGMOD(logstore, "log_dev={} does not exist, created!", logdev_id);
     }
+    m_unopened_logdev.erase(logdev_id);
     LOGDEBUGMOD(logstore, "Opened log_dev={}", logdev_id);
 }
 
@@ -206,17 +208,17 @@ void LogStoreService::logdev_super_blk_found(const sisl::byte_view& buf, void* m
         auto id = sb->logdev_id;
         LOGDEBUGMOD(logstore, "Log dev superblk found logdev={}", id);
         const auto it = m_id_logdev_map.find(id);
-        if (it == m_id_logdev_map.end()) {
-            LOGERROR("logdev={} found but not opened yet, it will be discarded after logstore is started", id);
-            m_unopened_logdev.insert(id);
-        }
-
         // We could update the logdev map either with logdev or rollback superblks found callbacks.
         if (it != m_id_logdev_map.end()) {
             logdev = it->second;
         } else {
             logdev = std::make_shared< LogDev >(id, m_logdev_vdev.get());
             m_id_logdev_map.emplace(id, logdev);
+            // when recover logdev meta blk, we get all the logdevs from the superblk. we put them in m_unopened_logdev
+            // too. after logdev meta blks are all recovered, when a client opens a logdev, we remove it from
+            // m_unopened_logdev. so that when we start log service, all the left items in m_unopened_logdev are those
+            // not open, which can be destroyed
+            m_unopened_logdev.insert(id);
         }
 
         logdev->log_dev_meta().logdev_super_blk_found(buf, meta_cookie);
@@ -235,11 +237,6 @@ void LogStoreService::rollback_super_blk_found(const sisl::byte_view& buf, void*
         auto id = rollback_sb->logdev_id;
         LOGDEBUGMOD(logstore, "Log dev rollback superblk found logdev={}", id);
         const auto it = m_id_logdev_map.find(id);
-        if (it == m_id_logdev_map.end()) {
-            LOGERROR("logdev={} found but not opened yet, it will be discarded after logstore is started", id);
-            m_unopened_logdev.insert(id);
-        }
-
         if (it != m_id_logdev_map.end()) {
             logdev = it->second;
         } else {
