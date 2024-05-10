@@ -169,14 +169,14 @@ std::string AppendBlkAllocator::get_name() const { return "AppendBlkAlloc_chunk_
 
 std::string AppendBlkAllocator::to_string() const {
     return fmt::format("{}, last_append_offset: {} fragmented_nblks={}", get_name(),
-                       m_last_append_offset.load(std::memory_order_relaxed), get_fragmented_nblks());
+                       m_last_append_offset.load(std::memory_order_relaxed), get_defrag_nblks());
 }
 
 blk_num_t AppendBlkAllocator::available_blks() const { return get_total_blks() - get_used_blks(); }
 
 blk_num_t AppendBlkAllocator::get_used_blks() const { return m_last_append_offset.load(std::memory_order_relaxed); }
 
-blk_num_t AppendBlkAllocator::get_fragmented_nblks() const { return m_freeable_nblks.load(std::memory_order_relaxed); }
+blk_num_t AppendBlkAllocator::get_defrag_nblks() const { return m_freeable_nblks.load(std::memory_order_relaxed); }
 
 nlohmann::json AppendBlkAllocator::get_status(int log_level) const {
     nlohmann::json j;

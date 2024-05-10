@@ -103,9 +103,9 @@ void FixedBlkAllocator::free(BlkId const& b) {
 
 blk_num_t FixedBlkAllocator::available_blks() const { return m_free_blk_q.sizeGuess(); }
 
-blk_num_t FixedBlkAllocator::get_fragmented_nblks() const {
+blk_num_t FixedBlkAllocator::get_defrag_nblks() const {
     // TODO: implement this
-    HS_DBG_ASSERT_EQ(false, true, "FixedBlkAllocator get_fragmented_nblks Not implemented");
+    HS_DBG_ASSERT_EQ(false, true, "FixedBlkAllocator get_defrag_nblks Not implemented");
     return 0;
 }
 

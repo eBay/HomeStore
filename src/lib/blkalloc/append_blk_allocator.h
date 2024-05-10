@@ -99,7 +99,7 @@ public:
      * @brief : the number of blocks that have been fragmented by the free
      * @return : the number of fragmented blks
      */
-    blk_num_t get_fragmented_nblks() const;
+    blk_num_t get_defrag_nblks() const;
 
     /**
      * @brief : check if the input blk id is allocated or not.

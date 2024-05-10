@@ -158,7 +158,7 @@ public:
     virtual void free_on_disk(BlkId const& bid) = 0;
 
     virtual blk_num_t available_blks() const = 0;
-    virtual blk_num_t get_fragmented_nblks() const = 0;
+    virtual blk_num_t get_defrag_nblks() const = 0;
     virtual blk_num_t get_used_blks() const = 0;
     virtual bool is_blk_alloced(BlkId const& b, bool use_lock = false) const = 0;
     virtual bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const = 0;

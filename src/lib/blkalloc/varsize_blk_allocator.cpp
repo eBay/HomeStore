@@ -739,9 +739,9 @@ bool VarsizeBlkAllocator::is_blk_alloced(BlkId const& bid, bool use_lock) const 
 
 blk_num_t VarsizeBlkAllocator::available_blks() const { return get_total_blks() - get_used_blks(); }
 
-blk_num_t VarsizeBlkAllocator::get_fragmented_nblks() const {
+blk_num_t VarsizeBlkAllocator::get_defrag_nblks() const {
     // TODO: implement this
-    BLKALLOC_REL_ASSERT(false, "VarsizeBlkAllocator get_fragmented_nblks Not implemented")
+    BLKALLOC_REL_ASSERT(false, "VarsizeBlkAllocator get_defrag_nblks Not implemented")
     return 0;
 }
 
