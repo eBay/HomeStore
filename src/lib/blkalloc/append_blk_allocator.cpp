@@ -88,7 +88,8 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
 
 // Reserve on disk will update the commit_offset with the new_offset, if its above the current commit_offset.
 BlkAllocStatus AppendBlkAllocator::reserve_on_disk(BlkId const& blkid) {
-    auto cpg = hs()->cp_mgr().cp_guard();
+    HS_DBG_ASSERT(is_blk_alloced(blkid), "Trying to reserve on disk for unallocated blkid={}", blkid);
+
     auto new_offset = blkid.blk_num() + blkid.blk_count();
     auto cur_offset = m_commit_offset.load();
     bool modified{true};
@@ -133,7 +134,6 @@ void AppendBlkAllocator::cp_flush(CP* cp) {
 //
 void AppendBlkAllocator::free(const BlkId& bid) {
     // If we are freeing the last block, just move the offset back
-    // If we are freeing the last block, just move the offset back
     blk_num_t cur_last_offset = m_last_append_offset.load();
     auto const input_last_offset = bid.blk_num() + bid.blk_count();
     blk_num_t new_last_offset;
@@ -151,10 +151,11 @@ void AppendBlkAllocator::free(const BlkId& bid) {
     if (freeing_in_middle) {
         // Freeing something in the middle, increment the count
         m_freeable_nblks.fetch_add(bid.blk_count());
+    } else {
+        m_commit_offset.store(m_last_append_offset.load());
     }
+    m_is_dirty.store(true);
 }
-
-void AppendBlkAllocator::free_on_disk(BlkId const&) { m_is_dirty.store(true); }
 
 bool AppendBlkAllocator::is_blk_alloced(const BlkId& in_bid, bool) const {
     // blk_num starts from 0;

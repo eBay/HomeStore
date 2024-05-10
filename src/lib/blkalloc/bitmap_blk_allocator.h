@@ -73,7 +73,6 @@ public:
 
     virtual void load() = 0;
     BlkAllocStatus reserve_on_disk(BlkId const& in_bid) override;
-    void free_on_disk(BlkId const& b) override;
     bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const override;
     void cp_flush(CP* cp) override;
 
@@ -99,6 +98,9 @@ public:
     void incr_alloced_blk_count(blk_count_t nblks) { m_alloced_blk_count.fetch_add(nblks, std::memory_order_relaxed); }
     void decr_alloced_blk_count(blk_count_t nblks) { m_alloced_blk_count.fetch_sub(nblks, std::memory_order_relaxed); }
     int64_t get_alloced_blk_count() const { return m_alloced_blk_count.load(std::memory_order_acquire); }
+
+protected:
+    void free_on_disk(BlkId const& b);
 
 private:
     void do_init();

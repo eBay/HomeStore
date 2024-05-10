@@ -287,7 +287,6 @@ void VirtualDev::free_blk(BlkId const& bid, VDevCPContext* vctx) {
         } else {
             BlkAllocator* allocator = m_dmgr.get_chunk_mutable(b.chunk_num())->blk_allocator_mutable();
             allocator->free(b);
-            if (m_auto_recovery) { allocator->free_on_disk(b); }
         }
     };
 
@@ -637,7 +636,6 @@ void VirtualDev::cp_flush(VDevCPContext* v_cp_ctx) {
     // allocation on the new CP dirty collection session which is ongoing
     for (auto const& b : v_cp_ctx->m_free_blkid_list) {
         BlkAllocator* allocator = m_dmgr.get_chunk_mutable(b.chunk_num())->blk_allocator_mutable();
-        if (m_auto_recovery) { allocator->free_on_disk(b); }
         allocator->free(b);
     }
 }

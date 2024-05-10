@@ -651,6 +651,8 @@ void VarsizeBlkAllocator::free(BlkId const& bid) {
     blk_count_t n_freed = (m_cfg.m_use_slabs && (bid.blk_count() <= m_cfg.highest_slab_blks_count()))
         ? free_blks_slab(r_cast< MultiBlkId const& >(bid))
         : free_blks_direct(r_cast< MultiBlkId const& >(bid));
+
+    if (is_persistent()) { free_on_disk(bid); }
     decr_alloced_blk_count(n_freed);
     BLKALLOC_LOG(TRACE, "Freed blk_num={}", bid.to_string());
 }

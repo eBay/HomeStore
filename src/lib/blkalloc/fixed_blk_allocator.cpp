@@ -99,6 +99,8 @@ void FixedBlkAllocator::free(BlkId const& b) {
 
     const auto pushed = m_free_blk_q.write(b.blk_num());
     HS_DBG_ASSERT_EQ(pushed, true, "Expected to be able to push the blk on fixed capacity Q");
+
+    if (is_persistent()) { free_on_disk(b); }
 }
 
 blk_num_t FixedBlkAllocator::available_blks() const { return m_free_blk_q.sizeGuess(); }

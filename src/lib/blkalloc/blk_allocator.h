@@ -129,9 +129,8 @@ ENUM(BlkAllocatorState, uint8_t, INIT, WAITING, SWEEP_SCHEDULED, SWEEPING, EXITI
 //
 // Free:
 // Freeing the blocks is done in a slightly different way, where blkallocator free will free the blk from cache version.
-// Then the virtual dev will call free_on_disk() which will free from the on-disk version and expected to persist them.
-// Since there is no additional phase of uncommitted free_blk. Free blks are always committed entries. Blkallocator free
-// is idempotent.
+// and also on disk version and will be persisted on next cp. In other words, free blks are always committed entries.
+// Blkallocator free is idempotent.
 //
 class CP;
 class BlkAllocator {
@@ -155,7 +154,6 @@ public:
     virtual BlkAllocStatus reserve_on_cache(BlkId const& bid) = 0;
 
     virtual void free(BlkId const& id) = 0;
-    virtual void free_on_disk(BlkId const& bid) = 0;
 
     virtual blk_num_t available_blks() const = 0;
     virtual blk_num_t get_defrag_nblks() const = 0;

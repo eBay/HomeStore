@@ -80,7 +80,6 @@ public:
     BlkAllocStatus reserve_on_disk(BlkId const& in_bid) override;
     BlkAllocStatus reserve_on_cache(BlkId const& b) override;
 
-    void free_on_disk(BlkId const& b) override;
     bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const override;
 
     /**
@@ -118,9 +117,9 @@ private:
     void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
 
 private:
-    std::atomic< blk_num_t > m_last_append_offset{0}; // last appended offset in blocks;
-    std::atomic< blk_num_t > m_freeable_nblks{0};
-    std::atomic< blk_num_t > m_commit_offset{0}; // commit offset in on-disk version
+    std::atomic< blk_num_t > m_last_append_offset{0}; // last appended offset in blocks in memory
+    std::atomic< blk_num_t > m_freeable_nblks{0};     // count of blks fragmentedly freed (both on-disk and in-memory)
+    std::atomic< blk_num_t > m_commit_offset{0};      // offset in on-disk version
     std::atomic< bool > m_is_dirty{false};
     AppendBlkAllocMetrics m_metrics;
     superblk< append_blk_sb_t > m_sb; // only cp will be writing to this disk
