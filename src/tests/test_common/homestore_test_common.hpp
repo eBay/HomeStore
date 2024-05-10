@@ -177,7 +177,8 @@ public:
 
     static void start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
                                 hs_before_services_starting_cb_t cb = nullptr, bool fake_restart = false,
-                                bool init_device = true, uint32_t shutdown_delay_sec = 5) {
+                                bool init_device = true, uint32_t shutdown_delay_sec = 5,
+                                std::vector< std::string > cust_dev_names = {}) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
@@ -190,8 +191,9 @@ public:
         }
 
         std::vector< homestore::dev_info > device_info;
-        if (SISL_OPTIONS.count("device_list")) {
-            s_dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
+        if (!cust_dev_names.empty() || SISL_OPTIONS.count("device_list")) {
+            cust_dev_names.empty() ? s_dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >()
+                                   : s_dev_names = std::move(cust_dev_names);
             LOGINFO("Taking input dev_list: {}",
                     std::accumulate(
                         s_dev_names.begin(), s_dev_names.end(), std::string(""),

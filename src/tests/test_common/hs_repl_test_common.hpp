@@ -42,7 +42,9 @@ SISL_OPTION_GROUP(test_repl_common_setup,
                    ::cxxopts::value< uint16_t >()->default_value("4000"), "number"),
                   (replica_num, "", "replica_num",
                    "Internal replica num (used to lauch multi process) - don't override",
-                   ::cxxopts::value< uint16_t >()->default_value("0"), "number"));
+                   ::cxxopts::value< uint16_t >()->default_value("0"), "number"),
+                  (replica_dev_list, "", "replica_dev_list", "Device list for all replicas",
+                   ::cxxopts::value< std::vector< std::string > >(), "path [...]"));
 
 std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
@@ -148,6 +150,27 @@ public:
             members_.insert(std::pair(replica_id, i));
         }
 
+        // example:
+        // --num_replicas 3 --replica_dev_list replica_0_dev_1, replica_0_dev_2, replica_0_dev_3, replica_1_dev_1,
+        // replica_1_dev_2, replica_1_dev_3, replica_2_dev_1, replica_2_dev_2, replica_2_dev_3    // every replica 2
+        // devs;
+        // --num_replicas 3 --replica_dev_list replica_0_dev_1, replica_1_dev_1, replica_2_dev_1  // <<< every
+        // replica has 1 dev;
+        std::vector< std::string > dev_list_all;
+        std::vector< std::vector< std::string > > rdev_list(num_replicas);
+        if (SISL_OPTIONS.count("replica_dev_list")) {
+            dev_list_all = SISL_OPTIONS["replica_dev_list"].as< std::vector< std::string > >();
+            RELEASE_ASSERT(dev_list_all.size() % num_replicas == 0,
+                           "Number of replica devices should be times of number replicas");
+            LOGINFO("Device list from input={}", fmt::join(dev_list_all, ","));
+            uint32_t num_devs_per_replica = dev_list_all.size() / num_replicas;
+            for (uint32_t i{0}; i < num_replicas; ++i) {
+                for (uint32_t j{0}; j < num_devs_per_replica; ++j) {
+                    rdev_list[i].push_back(dev_list_all[i * num_devs_per_replica + j]);
+                }
+            }
+        }
+
         if (replica_num_ == 0) {
             // Erase previous shmem and create a new shmem with IPCData structure
             bip::shared_memory_object::remove("raft_repl_test_shmem");
@@ -164,6 +187,7 @@ public:
 
             for (uint32_t i{1}; i < num_replicas; ++i) {
                 LOGINFO("Spawning Homestore replica={} instance", i);
+
                 std::string cmd_line;
                 fmt::format_to(std::back_inserter(cmd_line), "{} --replica_num {}", args_[0], i);
                 for (int j{1}; j < (int)args_.size(); ++j) {
@@ -187,7 +211,9 @@ public:
             name_ + std::to_string(replica_num_),
             {{HS_SERVICE::META, {.size_pct = 5.0}},
              {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_app = std::make_unique< TestReplApplication >(*this)}},
-             {HS_SERVICE::LOG, {.size_pct = 20.0}}});
+             {HS_SERVICE::LOG, {.size_pct = 20.0}}},
+            nullptr /*hs_before_svc_start_cb*/, false /*fake_restart*/, true /*init_device*/,
+            5u /*shutdown_delay_secs*/, std::move(rdev_list[replica_num_]));
     }
 
     void teardown() {
