@@ -214,11 +214,10 @@ public:
     BlkAllocStatus alloc_contiguous(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid);
     BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
     BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, std::vector< BlkId >& out_blkids);
-    BlkAllocStatus mark_blk_allocated(BlkId const& b) override;
+    BlkAllocStatus reserve_on_cache(BlkId const& b) override;
     void free(BlkId const& blk_id) override;
 
     blk_num_t available_blks() const override;
-    blk_num_t get_freeable_nblks() const override;
     blk_num_t get_defrag_nblks() const override;
     blk_num_t get_used_blks() const override;
     bool is_blk_alloced(BlkId const& in_bid, bool use_lock = false) const override;
