@@ -220,8 +220,10 @@ void PhysicalDev::submit_batch() { m_drive_iface->submit_batch(); }
 
 //////////////////////////// Chunk Creation/Load related methods /////////////////////////////////////////
 void PhysicalDev::format_chunks() {
-    m_chunk_info_slots = std::make_unique< sisl::Bitset >(hs_super_blk::chunk_info_bitmap_size(m_dev_info));
+    auto const bitmap_size = hs_super_blk::chunk_info_bitmap_size(m_dev_info);
+    m_chunk_info_slots = std::make_unique< sisl::Bitset >(sisl::Bitset::max_possible_bits(bitmap_size));
     auto bitmap_mem = m_chunk_info_slots->serialize(m_pdev_info.dev_attr.align_size);
+    HS_REL_ASSERT_EQ(bitmap_mem->size(), bitmap_size, "Bitmap size mismatch with expected size");
     write_super_block(bitmap_mem->cbytes(), bitmap_mem->size(), hs_super_blk::chunk_sb_offset());
 }
 
@@ -235,7 +237,7 @@ std::vector< shared< Chunk > > PhysicalDev::create_chunks(const std::vector< uin
 
     try {
         while (chunks_remaining > 0) {
-            auto b = m_chunk_info_slots->get_next_contiguous_n_reset_bits(0u, chunks_remaining);
+            auto b = m_chunk_info_slots->get_next_contiguous_n_reset_bits(0u, std::nullopt, 1u, chunks_remaining);
             if (b.nbits == 0) { throw std::out_of_range("System has no room for additional chunk"); }
 
             buf = hs_utils::iobuf_alloc(chunk_info::size * b.nbits, sisl::buftag::superblk,
