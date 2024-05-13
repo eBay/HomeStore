@@ -213,7 +213,7 @@ public:
              {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_app = std::make_unique< TestReplApplication >(*this)}},
              {HS_SERVICE::LOG, {.size_pct = 20.0}}},
             nullptr /*hs_before_svc_start_cb*/, false /*fake_restart*/, true /*init_device*/,
-            5u /*shutdown_delay_secs*/, std::move(rdev_list[replica_num_]));
+            5u /*shutdown_delay_secs*/, rdev_list[replica_num_]);
     }
 
     void teardown() {
@@ -233,7 +233,7 @@ public:
             name_ + std::to_string(replica_num_),
             {{HS_SERVICE::REPLICATION, {.repl_app = std::make_unique< TestReplApplication >(*this)}},
              {HS_SERVICE::LOG, {}}},
-            nullptr, true /* restart */, true /* init_device */, shutdown_delay_secs);
+            nullptr, true /* fake_restart */, false /* init_device */, shutdown_delay_secs);
     }
 
     void restart_one_by_one() {
@@ -243,7 +243,7 @@ public:
                 name_ + std::to_string(replica_num_),
                 {{HS_SERVICE::REPLICATION, {.repl_app = std::make_unique< TestReplApplication >(*this)}},
                  {HS_SERVICE::LOG, {}}},
-                nullptr, true /* restart */);
+                nullptr, true /* fake_restart */, false /* init_device */, 5u /* shutdown_delay_secs */);
         });
     }
 

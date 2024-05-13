@@ -28,6 +28,7 @@
 #include <homestore/index_service.hpp>
 #include <homestore/replication_service.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
+#include <../lib/device/hs_super_blk.h>
 #include <iomgr/iomgr_config_generated.h>
 #include <common/homestore_assert.hpp>
 
@@ -199,7 +200,27 @@ public:
                         s_dev_names.begin(), s_dev_names.end(), std::string(""),
                         [](const std::string& ss, const std::string& s) { return ss.empty() ? s : ss + "," + s; }));
 
+            // zero the homestore pdev's first block for each device;
+            auto const zero_size = hs_super_blk::first_block_size();
+            std::vector< int > zeros(zero_size, 0);
+            for (auto const& d : cust_dev_names) {
+                if (!std::filesystem::exists(d)) {
+                    LOGINFO("Device {} does not exist", d);
+                    HS_REL_ASSERT(false, "Device does not exist");
+                }
+
+                auto fd = ::open(d.c_str(), O_RDWR | O_CREAT, 0640);
+                HS_REL_ASSERT(fd != -1, "Failed to open device");
+
+                auto const write_sz =
+                    pwrite(fd, zeros.data(), zero_size /* size */, hs_super_blk::first_block_offset() /* offset */);
+                HS_REL_ASSERT(write_sz == zero_size, "Failed to write to device");
+                LOGINFO("Successfully zeroed the 1st {} of device {}", zero_size, d);
+                ::close(fd);
+            }
+
             for (const auto& name : s_dev_names) {
+                iomgr::DriveInterface::emulate_drive_type(name, iomgr::drive_type::block_hdd);
                 device_info.emplace_back(name, homestore::HSDevType::Data);
             }
         } else {
