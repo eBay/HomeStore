@@ -55,8 +55,7 @@ class HomestoreConan(ConanFile):
         self.build_requires("gtest/1.14.0")
 
     def requirements(self):
-        #self.requires("iomgr/[~11.3, include_prerelease=True]@oss/master")
-        self.requires("iomgr/11.3.1@yakuang/master")
+        self.requires("iomgr/[~11.3, include_prerelease=True]@oss/master")
         self.requires("sisl/[~12.2, include_prerelease=True]@oss/master")
         self.requires("nuraft_mesg/[^3.4, include_prerelease=True]@oss/main")
 

@@ -169,6 +169,8 @@ public:
                     rdev_list[i].push_back(dev_list_all[i * num_devs_per_replica + j]);
                 }
             }
+
+            dev_list_ = std::move(rdev_list[replica_num_]);
         }
 
         if (replica_num_ == 0) {
@@ -213,7 +215,7 @@ public:
              {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_app = std::make_unique< TestReplApplication >(*this)}},
              {HS_SERVICE::LOG, {.size_pct = 20.0}}},
             nullptr /*hs_before_svc_start_cb*/, false /*fake_restart*/, true /*init_device*/,
-            5u /*shutdown_delay_secs*/, rdev_list[replica_num_]);
+            5u /*shutdown_delay_secs*/, dev_list_);
     }
 
     void teardown() {
@@ -233,7 +235,7 @@ public:
             name_ + std::to_string(replica_num_),
             {{HS_SERVICE::REPLICATION, {.repl_app = std::make_unique< TestReplApplication >(*this)}},
              {HS_SERVICE::LOG, {}}},
-            nullptr, true /* fake_restart */, false /* init_device */, shutdown_delay_secs);
+            nullptr, true /* fake_restart */, false /* init_device */, shutdown_delay_secs, dev_list_);
     }
 
     void restart_one_by_one() {
@@ -243,7 +245,7 @@ public:
                 name_ + std::to_string(replica_num_),
                 {{HS_SERVICE::REPLICATION, {.repl_app = std::make_unique< TestReplApplication >(*this)}},
                  {HS_SERVICE::LOG, {}}},
-                nullptr, true /* fake_restart */, false /* init_device */, 5u /* shutdown_delay_secs */);
+                nullptr, true /* fake_restart */, false /* init_device */, 5u /* shutdown_delay_secs */, dev_list_);
         });
     }
 
@@ -344,6 +346,8 @@ private:
     std::string name_;
     std::vector< std::string > args_;
     char** argv_;
+
+    std::vector< std::string > dev_list_;
 
     boost::process::group proc_grp_;
     std::unique_ptr< bip::shared_memory_object > shm_;
