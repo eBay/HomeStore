@@ -504,14 +504,13 @@ public:
 
         if (!restart) {
             std::vector< logdev_id_t > logdev_id_vec;
-            for (uint32_t i{0}; i < n_log_devs; ++i) {
+            for (uint32_t i{0}; i < n_log_stores; ++i) {
                 logdev_id_vec.push_back(logstore_service().create_new_logdev());
             }
 
             for (uint32_t i{0}; i < n_log_stores; ++i) {
-                auto logdev_id = logdev_id_vec[rand() % logdev_id_vec.size()];
                 m_log_store_clients.push_back(std::make_unique< SampleLogStoreClient >(
-                    logdev_id, bind_this(SampleDB::on_log_insert_completion, 3)));
+                    logdev_id_vec[i], bind_this(SampleDB::on_log_insert_completion, 3)));
             }
             SampleLogStoreClient::s_max_flush_multiple =
                 logstore_service().get_logdev(logdev_id_vec[0])->get_flush_size_multiple();

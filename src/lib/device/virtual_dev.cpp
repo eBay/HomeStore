@@ -161,9 +161,9 @@ BlkAllocStatus VirtualDev::commit_blk(BlkId const& blkid) {
         HS_DBG_ASSERT(is_blk_alloced(blkid), "commiting blkid {} is not allocated in non-recovery mode",
                       blkid.to_string());
     } else {
-        chunk->blk_allocator_mutable()->mark_blk_allocated(blkid);
+        chunk->blk_allocator_mutable()->reserve_on_cache(blkid);
     }
-    return chunk->blk_allocator_mutable()->alloc_on_disk(blkid);
+    return chunk->blk_allocator_mutable()->reserve_on_disk(blkid);
 }
 
 BlkAllocStatus VirtualDev::alloc_contiguous_blks(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) {
@@ -286,7 +286,6 @@ void VirtualDev::free_blk(BlkId const& bid, VDevCPContext* vctx) {
             vctx->m_free_blkid_list.push_back(b);
         } else {
             BlkAllocator* allocator = m_dmgr.get_chunk_mutable(b.chunk_num())->blk_allocator_mutable();
-            if (m_auto_recovery) { allocator->free_on_disk(b); }
             allocator->free(b);
         }
     };
@@ -637,7 +636,6 @@ void VirtualDev::cp_flush(VDevCPContext* v_cp_ctx) {
     // allocation on the new CP dirty collection session which is ongoing
     for (auto const& b : v_cp_ctx->m_free_blkid_list) {
         BlkAllocator* allocator = m_dmgr.get_chunk_mutable(b.chunk_num())->blk_allocator_mutable();
-        if (m_auto_recovery) { allocator->free_on_disk(b); }
         allocator->free(b);
     }
 }

@@ -34,12 +34,11 @@ public:
 
     BlkAllocStatus alloc_contiguous(BlkId& bid) override;
     BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
-    BlkAllocStatus mark_blk_allocated(BlkId const& b) override;
+    BlkAllocStatus reserve_on_cache(BlkId const& b) override;
     void free(BlkId const& b) override;
 
     blk_num_t available_blks() const override;
     blk_num_t get_used_blks() const override;
-    blk_num_t get_freeable_nblks() const override;
     blk_num_t get_defrag_nblks() const override;
     bool is_blk_alloced(BlkId const& in_bid, bool use_lock = false) const override;
     std::string to_string() const override;
@@ -48,6 +47,11 @@ private:
     blk_num_t init_portion(BlkAllocPortion& portion, blk_num_t start_blk_num);
 
 private:
-    folly::MPMCQueue< BlkId > m_blk_q;
+    enum class state_t : uint8_t { RECOVERING, ACTIVE };
+
+    state_t m_state{state_t::RECOVERING};
+    std::unordered_set< blk_num_t > m_marked_blks; // Keep track of all blks which are marked as allocated
+    std::mutex m_mark_blk_mtx;                     // Mutex used while removing marked_blks from blk_q
+    folly::MPMCQueue< blk_num_t > m_free_blk_q;
 };
 } // namespace homestore
