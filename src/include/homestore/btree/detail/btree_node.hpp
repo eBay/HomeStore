@@ -46,36 +46,35 @@ static constexpr uint8_t BTREE_NODE_MAGIC = 0xab;
 
 #pragma pack(1)
 struct persistent_hdr_t {
-    uint8_t magic{BTREE_NODE_MAGIC};
-    uint8_t version{BTREE_NODE_VERSION};
-    uint16_t checksum{0};
+    uint8_t magic{BTREE_NODE_MAGIC};     // offset=0
+    uint8_t version{BTREE_NODE_VERSION}; // offset=1
+    uint16_t checksum{0};                // offset=2
 
-    bnodeid_t node_id{empty_bnodeid};
-    bnodeid_t next_node{empty_bnodeid};
-
-    uint32_t nentries : 30;
+    uint32_t nentries : 30; // offset 4
     uint32_t leaf : 1;
     uint32_t valid_node : 1;
 
-    uint64_t node_gen{0};                     // Generation of this node, incremented on every update
-    uint64_t link_version{0};                 // Version of the link between its parent, updated if structure changes
-    BtreeLinkInfo::bnode_link_info edge_info; // Edge entry information
+    bnodeid_t node_id{empty_bnodeid};   // offset=8
+    bnodeid_t next_node{empty_bnodeid}; // offset=16
 
-    uint16_t level;    // Level of the node within the tree
-    uint8_t node_type; // Type of the node (simple vs varlen etc..)
-    uint8_t reserved1;
-    uint16_t node_size;
-    uint16_t reserved2;
+    uint64_t node_gen{0};     // offset=24: Generation of this node, incremented on every update
+    uint64_t link_version{0}; // offset=32: Version of the link between its parent, updated if structure changes
+    BtreeLinkInfo::bnode_link_info edge_info; // offset=40: Edge entry information
+
+    int64_t modified_cp_id{0};    // offset=56: Checkpoint ID of the last modification of this node
+    uint16_t level;               // offset=64: Level of the node within the tree
+    uint16_t node_size;           // offset=66: Size of node, max 64K
+    uint8_t node_type;            // offset=68: Type of the node (simple vs varlen etc..)
+    uint8_t reserved[3]{0, 0, 0}; // offset=69-72: Reserved
 
     persistent_hdr_t() : nentries{0}, leaf{0}, valid_node{1} {}
     std::string to_string() const {
-        std::string sleaf = leaf ? "LEAF" : "INTERIOR";
-        std::string snext = next_node == empty_bnodeid ? "" : fmt::format("next_node={}", next_node);
-        std::string edge = edge_info.m_bnodeid == empty_bnodeid
-            ? ""
-            : "edge:" + std::to_string(edge_info.m_bnodeid) + "." + std::to_string(edge_info.m_link_version);
-        return fmt::format("magic={} version={} csum={} node: {}.{} level:{} nEntries={}  {} {} {} node_gen={} ", magic,
-                           version, checksum, node_id, link_version, level, nentries, sleaf, snext, edge, node_gen);
+        return fmt::format("magic={} version={} csum={} node_id={} next_node={} nentries={} node_type={} is_leaf={} "
+                           "valid_node={} node_gen={} modified_cp_id={} link_version={} edge_nodeid={}, "
+                           "edge_link_version={} level={} ",
+                           magic, version, checksum, node_id, next_node, nentries, node_type, leaf, valid_node,
+                           node_gen, modified_cp_id, link_version, edge_info.m_bnodeid, edge_info.m_link_version,
+                           level);
     }
 };
 #pragma pack()
@@ -107,7 +106,9 @@ public:
 
     // Identify if a node is a leaf node or not, from raw buffer, by just reading persistent_hdr_t
     static bool identify_leaf_node(uint8_t* buf) { return (r_cast< persistent_hdr_t* >(buf))->leaf; }
-    static BtreeLinkInfo::bnode_link_info identify_edge_info(uint8_t* buf) { return (r_cast< persistent_hdr_t* >(buf))->edge_info; }
+    static BtreeLinkInfo::bnode_link_info identify_edge_info(uint8_t* buf) {
+        return (r_cast< persistent_hdr_t* >(buf))->edge_info;
+    }
     static std::string to_string_buf(uint8_t* buf) { return (r_cast< persistent_hdr_t* >(buf))->to_string(); }
 
     /// @brief Finds the index of the entry with the specified key in the node.
@@ -392,6 +393,7 @@ protected:
     }
 
 public:
+    void update_phys_buf(uint8_t* buf) { m_phys_node_buf = buf; }
     persistent_hdr_t* get_persistent_header() { return r_cast< persistent_hdr_t* >(m_phys_node_buf); }
     const persistent_hdr_t* get_persistent_header_const() const {
         return r_cast< const persistent_hdr_t* >(m_phys_node_buf);
@@ -485,6 +487,7 @@ public:
         return (edge_id() != empty_bnodeid);
     }
 
+    void set_modified_cp_id(int64_t id) { get_persistent_header()->modified_cp_id = id; }
     friend void intrusive_ptr_add_ref(BtreeNode* node) { node->m_refcount.increment(1); }
 
     friend void intrusive_ptr_release(BtreeNode* node) {

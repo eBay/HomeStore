@@ -43,6 +43,8 @@ private:
     std::unique_ptr< IndexServiceCallbacks > m_svc_cbs;
     std::unique_ptr< IndexWBCacheBase > m_wb_cache;
     std::shared_ptr< VirtualDev > m_vdev;
+    std::pair< meta_blk*, sisl::byte_view > m_wbcache_sb{
+        std::pair< meta_blk*, sisl::byte_view >{nullptr, sisl::byte_view{}}};
 
     mutable std::mutex m_index_map_mtx;
     std::map< uuid_t, std::shared_ptr< IndexTableBase > > m_index_map;
@@ -72,7 +74,7 @@ public:
     IndexWBCacheBase& wb_cache() { return *m_wb_cache; }
 
 private:
-    void meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
+    void itable_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
 };
 
 extern IndexService& index_service();

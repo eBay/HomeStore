@@ -31,8 +31,8 @@ namespace homestore {
 
 IndexWBCacheBase& wb_cache() { return index_service().wb_cache(); }
 
-IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, const std::shared_ptr< sisl::Evictor >& evictor,
-                           uint32_t node_size) :
+IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair< meta_blk*, sisl::byte_view > sb,
+                           const std::shared_ptr< sisl::Evictor >& evictor, uint32_t node_size) :
         m_vdev{vdev},
         m_cache{
             evictor, 100000, node_size,
@@ -41,8 +41,14 @@ IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, const std:
                 const auto& hnode = (sisl::SingleEntryHashNode< BtreeNodePtr >&)rec;
                 return (hnode.m_value->m_refcount.test_le(1));
             }},
-        m_node_size{node_size} {
+        m_node_size{node_size},
+        m_meta_blk{sb.first} {
     start_flush_threads();
+
+    // We need to register the consumer first before recovery, so that recovery can use the cp_ctx created to add/track
+    // recovered new nodes.
+    hs()->cp_mgr().register_consumer(cp_consumer_t::INDEX_SVC, std::move(std::make_unique< IndexCPCallbacks >(this)));
+    recover_new_nodes(std::move(sb.second));
 }
 
 void IndexWBCache::start_flush_threads() {
@@ -75,7 +81,73 @@ void IndexWBCache::start_flush_threads() {
     }
 }
 
+void IndexWBCache::recover_new_nodes(sisl::byte_view sb) {
+    // If sb is empty, its possible a first time boot.
+    if ((sb.bytes() == nullptr) || (sb.size() == 0)) { return; }
+
+    auto cpg = hs()->cp_mgr().cp_guard();
+    auto cp_ctx = r_cast< IndexCPContext* >(cpg.context(cp_consumer_t::INDEX_SVC));
+    cp_id_t cur_cp_id = cpg->id();
+
+    auto const* new_blks_sb = r_cast< IndexCPContext::new_blks_sb_t const* >(sb.bytes());
+    if (new_blks_sb->cp_id != cur_cp_id) {
+        // On clean shutdown, cp_id would be lesser than the current cp_id, in that case ignore this sb
+        HS_DBG_ASSERT_LT(new_blks_sb->cp_id, cur_cp_id, "Persisted cp in wbcache_sb is more than current cp");
+        return;
+    }
+
+    LOGINFOMOD(wbcache, "Prior to restart allocated {} new blks, validating if they need to be persisted",
+               new_blks_sb->num_blks);
+
+    std::unordered_map< BlkId, sisl::io_blob_safe > cached_inplace_nodes;
+    for (auto i = 0u; i < new_blks_sb->num_blks; ++i) {
+        auto const& [inplace_p, new_p] = new_blks_sb->blks[i];
+        auto const inplace_blkid = BlkId{inplace_p.first, (blk_count_t)1, inplace_p.second};
+        auto const new_blkid = BlkId{new_p.first, (blk_count_t)1, new_p.second};
+
+        // Read the new btree node
+        sisl::io_blob_safe node_buf(m_node_size, 512);
+        m_vdev->sync_read(r_cast< char* >(node_buf.bytes()), m_node_size, new_blkid);
+
+        // Invalid node indicates it was never written during cp_flush prior to unclean shutdown, ignore the blkid
+        if (!IndexTableBase::is_valid_btree_node(node_buf)) { continue; }
+
+        // Read the inplace node and find out if they have same cp_id as new_blks. If so, the inplace node is also
+        // written and in that case the new_node should be retained. It means the first part of dependency chain was
+        // already persisted prior to unclean shutdown. If its not written, we can discard the new_node.
+        // Note: There can be multiple new_blks point to the same in-place node, so we keep them cached.
+        auto it = cached_inplace_nodes.find(inplace_blkid);
+        if (it == cached_inplace_nodes.end()) {
+            sisl::io_blob_safe inplace_buf(m_node_size, 512);
+            m_vdev->sync_read(r_cast< char* >(inplace_buf.bytes()), m_node_size, inplace_blkid);
+
+            if (!IndexTableBase::is_valid_btree_node(inplace_buf)) {
+                HS_LOG_ASSERT(false, "Inplace node is invalid btree node at blkid={}, should not happen",
+                              inplace_blkid);
+                continue;
+            }
+            bool happened;
+            std::tie(it, happened) =
+                cached_inplace_nodes.emplace(std::make_pair(inplace_blkid, std::move(inplace_buf)));
+        }
+
+        if (IndexTableBase::modified_cp_id(it->second) == cur_cp_id) {
+            LOGDEBUGMOD(wbcache, "Inplace node={} has been written prior to unclean shutdown, retaining new_node={} ",
+                        inplace_blkid.to_string(), new_blkid.to_string());
+            // Put them in current cp, to support unclean shutdown during recovery
+            cp_ctx->track_new_blk(inplace_blkid, new_blkid);
+            m_vdev->commit_blk(new_blkid);
+        } else {
+            LOGDEBUGMOD(wbcache, "Inplace node={} was not written prior to unclean shutdowm, so discarding new_node={}",
+                        inplace_blkid.to_string(), new_blkid.to_string());
+        }
+    }
+}
+
 BtreeNodePtr IndexWBCache::alloc_buf(node_initializer_t&& node_initializer) {
+    auto cpg = hs()->cp_mgr().cp_guard();
+    auto cp_ctx = r_cast< IndexCPContext* >(cpg.context(cp_consumer_t::INDEX_SVC));
+
     // Alloc a block of data from underlying vdev
     BlkId blkid;
     auto ret = m_vdev->alloc_contiguous_blks(1, blk_alloc_hints{}, blkid);
@@ -83,6 +155,8 @@ BtreeNodePtr IndexWBCache::alloc_buf(node_initializer_t&& node_initializer) {
 
     // Alloc buffer and initialize the node
     auto idx_buf = std::make_shared< IndexBuffer >(blkid, m_node_size, m_vdev->align_size());
+    idx_buf->m_created_cp_id = cpg->id();
+    idx_buf->m_dirtied_cp_id = cpg->id();
     auto node = node_initializer(idx_buf);
 
     // Add the node to the cache
@@ -96,53 +170,11 @@ BtreeNodePtr IndexWBCache::alloc_buf(node_initializer_t&& node_initializer) {
     return node;
 }
 
-void IndexWBCache::realloc_buf(const IndexBufferPtr& buf) {
-    // Commit the blk which was previously allocated
-    auto alloc_status = m_vdev->commit_blk(buf->m_blkid);
-    if (alloc_status != BlkAllocStatus::SUCCESS) HS_REL_ASSERT(0, "Failed to commit blk: {}", buf->m_blkid.to_string());
-}
-
 void IndexWBCache::write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* cp_ctx) {
     // TODO upsert always returns false even if it succeeds.
-    m_cache.upsert(node);
+    if (node != nullptr) { m_cache.upsert(node); }
     r_cast< IndexCPContext* >(cp_ctx)->add_to_dirty_list(buf);
     resource_mgr().inc_dirty_buf_size(m_node_size);
-}
-
-IndexBufferPtr IndexWBCache::copy_buffer(const IndexBufferPtr& cur_buf, const CPContext* cp_ctx) const {
-    IndexBufferPtr new_buf = nullptr;
-    bool copied = false;
-
-    // When we copy the buffer we check if the node buffer is clean or not. If its clean
-    // we could reuse it otherwise create a copy.
-    if (cur_buf->is_clean()) {
-        // Refer to the same node buffer.
-        new_buf = std::make_shared< IndexBuffer >(cur_buf->m_node_buf, cur_buf->m_blkid);
-    } else {
-        // If its not clean, we do deep copy.
-        new_buf = std::make_shared< IndexBuffer >(cur_buf->m_blkid, m_node_size, m_vdev->align_size());
-        std::memcpy(new_buf->raw_buffer(), cur_buf->raw_buffer(), m_node_size);
-        copied = true;
-    }
-
-    LOGTRACEMOD(wbcache, "cp {} new_buf {} cur_buf {} cur_buf_blkid {} copied {}", cp_ctx->id(),
-                static_cast< void* >(new_buf.get()), static_cast< void* >(cur_buf.get()), cur_buf->m_blkid.to_integer(),
-                copied);
-    return new_buf;
-}
-
-std::pair<bnodeid_t, uint64_t> IndexWBCache::get_root(bnodeid_t super_node_id) {
-    LOGINFO("read bufeer id {}", super_node_id);
-    auto const blkid = BlkId{super_node_id};
-    auto idx_buf = std::make_shared< IndexBuffer >(blkid, m_node_size, m_vdev->align_size());
-    auto raw_buf = idx_buf->raw_buffer();
-
-    m_vdev->sync_read(r_cast< char* >(raw_buf), m_node_size, blkid);
-    LOGINFO("\n\n\n raw buf  {}", BtreeNode::to_string_buf(idx_buf->raw_buffer()));
-    auto root_info = BtreeNode::identify_edge_info(idx_buf->raw_buffer());
-
-    return {root_info.m_bnodeid, root_info.m_link_version};
-
 }
 
 void IndexWBCache::read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) {
@@ -154,9 +186,8 @@ retry:
 
     // Read the buffer from virtual device
     auto idx_buf = std::make_shared< IndexBuffer >(blkid, m_node_size, m_vdev->align_size());
-    auto raw_buf = idx_buf->raw_buffer();
+    m_vdev->sync_read(r_cast< char* >(idx_buf->raw_buffer()), m_node_size, blkid);
 
-    m_vdev->sync_read(r_cast< char* >(raw_buf), m_node_size, blkid);
     // Create the btree node out of buffer
     node = node_initializer(idx_buf);
 
@@ -167,54 +198,78 @@ retry:
         goto retry;
     }
 }
-#ifdef _PRERELEASE
-void IndexWBCache::add_to_crashing_buffers(IndexBufferPtr buf, std::string reason) {
-    std::unique_lock lg(flip_mtx);
-    this->crashing_buffers[buf].push_back(reason);
+
+bool IndexWBCache::get_writable_buf(const BtreeNodePtr& node, CPContext* context) {
+    IndexCPContext* icp_ctx = r_cast< IndexCPContext* >(context);
+    auto& idx_buf = IndexBtreeNode::convert(node.get())->m_idx_buf;
+    if (idx_buf->m_dirtied_cp_id == icp_ctx->id()) {
+        return true; // For same cp, we don't need a copy, we can rewrite on the same buffer
+    } else if (idx_buf->m_dirtied_cp_id > icp_ctx->id()) {
+        return false; // We are asked to provide the buffer of an older CP, which is not possible
+    }
+
+    // If buffer is in clean state, which means it is already flushed, we can reuse the same buffer, if not
+    // we must copy the buffer and return the new buffer.
+    if (!idx_buf->is_clean()) {
+        HS_DBG_ASSERT_EQ(idx_buf->m_dirtied_cp_id, icp_ctx->id() - 1,
+                         "Buffer is dirty, but its dirtied_cp_id is neither current nor previous cp id");
+
+        // If its not clean, we do deep copy.
+        auto new_buf = std::make_shared< IndexBuffer >(idx_buf->m_blkid, m_node_size, m_vdev->align_size());
+        std::memcpy(new_buf->raw_buffer(), idx_buf->raw_buffer(), m_node_size);
+
+        node->update_phys_buf(new_buf->raw_buffer());
+        LOGTRACEMOD(wbcache, "cp={} cur_buf={} for node={} is dirtied by cp={} copying new_buf={}", icp_ctx->id(),
+                    static_cast< void* >(idx_buf.get()), node->node_id(), idx_buf->m_dirtied_cp_id,
+                    static_cast< void* >(new_buf.get()));
+        idx_buf = std::move(new_buf);
+    }
+    idx_buf->m_dirtied_cp_id = icp_ctx->id();
+    return true;
 }
-#endif
-std::pair< bool, bool > IndexWBCache::create_chain(IndexBufferPtr& second, IndexBufferPtr& third, CPContext* cp_ctx) {
-    bool second_copied{false}, third_copied{false};
-    auto chain = second;
-    auto old_third = third;
-    if (!second->is_clean()) {
-        auto new_second = copy_buffer(second, cp_ctx);
-        chain = second;
-        second = new_second;
-        second_copied = true;
-    }
 
-    if (!third->is_clean()) {
-        auto new_third = copy_buffer(third, cp_ctx);
-        chain = third;
-        third = new_third;
-        third_copied = true;
-    }
+void IndexWBCache::link_buf(IndexBufferPtr& up_buf, IndexBufferPtr& down_buf, CPContext* cp_ctx) {
+    HS_DBG_ASSERT_NE((void*)up_buf->m_up_buffer.lock().get(), (void*)down_buf.get(), "Cyclic dependency detected");
+    IndexBufferPtr real_up_buf = up_buf;
+    IndexCPContext* icp_ctx = r_cast< IndexCPContext* >(cp_ctx);
 
-    // Append parent(third) to the left child(second).
-    second->m_next_buffer = third;
-    third->m_wait_for_leaders.increment(1);
-    if (second_copied || third_copied) {
-        // We want buffers to be append to the end of the chain which are related.
-        // If we split a node multiple times in same or different CP's, each dirty buffer will be
-        // added to the end of that chain. Whichever dependent buffer is dirty, we add this
-        // parent-left combination to the end of that chain.
-        while (chain->m_next_buffer.lock() != nullptr) {
-            chain = chain->m_next_buffer.lock();
+    if (down_buf->m_up_buffer.lock() == up_buf) {
+        // Already linked, nothing to do
+        HS_DBG_ASSERT(!up_buf->m_wait_for_down_buffers.testz(),
+                      "Up buffer waiting count is zero, whereas down buf is already linked to up buf");
+        HS_DBG_ASSERT_EQ(up_buf->m_dirtied_cp_id, down_buf->m_dirtied_cp_id,
+                         "Up buffer is not modified by current cp, but down buffer is linked to it");
+#ifndef NDEBUG
+        bool found{false};
+        for (auto const& dbuf : up_buf->m_down_buffers) {
+            if (dbuf.lock() == down_buf) {
+                found = true;
+                break;
+            }
         }
-
-        chain->m_next_buffer = second;
-        second->m_wait_for_leaders.increment(1);
+        HS_DBG_ASSERT(found, "Down buffer is linked to Up buf, but up_buf doesn't have down_buf in its list");
+#endif
+        return;
     }
 
-    return {second_copied, third_copied};
-}
+    // If down_buf is created as part of this cp_id, its a new buffer and we need to track the new blks, so that upon
+    // recovery we can pre-commit these new blkids.
+    if (down_buf->m_created_cp_id == icp_ctx->id()) {
+        // If the up buffer is also a new buffer created as part of cp, we need to link it with real up buffer, which
+        // was created part of earlier cps.
+        if (up_buf->m_created_cp_id == cp_ctx->id()) {
+            real_up_buf = up_buf->m_up_buffer.lock();
+            HS_DBG_ASSERT(real_up_buf, "Up buffer is new buffer, but it doesn't have parent buffer, its not expected");
+            icp_ctx->track_new_blk(real_up_buf->m_blkid, down_buf->m_blkid);
+        }
+    }
 
-void IndexWBCache::prepend_to_chain(const IndexBufferPtr& first, const IndexBufferPtr& second) {
-    assert(first->m_next_buffer.lock() != second);
-    assert(first->m_next_buffer.lock() == nullptr);
-    first->m_next_buffer = second;
-    second->m_wait_for_leaders.increment(1);
+    // Now we link the child to the real parent
+    real_up_buf->m_wait_for_down_buffers.increment(1);
+    down_buf->m_up_buffer = real_up_buf;
+#ifndef NDEBUG
+    real_up_buf->m_down_buffers.emplace_back(down_buf);
+#endif
 }
 
 void IndexWBCache::free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
@@ -235,12 +290,13 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
         return folly::makeFuture< bool >(true); // nothing to flush
     }
 
-#ifndef NDEBUG
-    // Check no cycles or invalid wait_for_leader count in the dirty buffer
-    // dependency graph.
-    // cp_ctx->check_wait_for_leaders();
-    // cp_ctx->check_cycle();
-#endif
+    // First thing is to flush the new_blks created as part of the CP.
+    auto const& new_blk_sb_buf = cp_ctx->new_blk_buf();
+    if (m_meta_blk) {
+        meta_service().update_sub_sb(new_blk_sb_buf.cbytes(), new_blk_sb_buf.size(), m_meta_blk);
+    } else {
+        meta_service().add_sub_sb("wb_cache", new_blk_sb_buf.cbytes(), new_blk_sb_buf.size(), m_meta_blk);
+    }
 
     cp_ctx->prepare_flush_iteration();
 
@@ -270,13 +326,13 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr buf, 
         LOGINFO("The cp {} is abrupt! for {}", cp_ctx->id(), BtreeNode::to_string_buf(buf->raw_buffer()));
         return;
     }
-    if (auto it = crashing_buffers.find(buf);it != crashing_buffers.end()) {
+    if (auto it = crashing_buffers.find(buf); it != crashing_buffers.end()) {
         const auto& reasons = it->second;
-                std::string formatted_reasons = fmt::format("[{}]", fmt::join(reasons, ", "));
-        LOGTRACEMOD(wbcache, "Buffer {} is in crashing_buffers with reason(s): {} - Buffer info: {}",
-                    buf->to_string(), formatted_reasons, BtreeNode::to_string_buf(buf->raw_buffer()));
-        LOGINFO("Buffer {} is in crashing_buffers with reason(s): {} - Buffer info: {}",
-                    buf->to_string(), formatted_reasons, BtreeNode::to_string_buf(buf->raw_buffer()));
+        std::string formatted_reasons = fmt::format("[{}]", fmt::join(reasons, ", "));
+        LOGTRACEMOD(wbcache, "Buffer {} is in crashing_buffers with reason(s): {} - Buffer info: {}", buf->to_string(),
+                    formatted_reasons, BtreeNode::to_string_buf(buf->raw_buffer()));
+        LOGINFO("Buffer {} is in crashing_buffers with reason(s): {} - Buffer info: {}", buf->to_string(),
+                formatted_reasons, BtreeNode::to_string_buf(buf->raw_buffer()));
         LOGINFO(" CP context info: {}", cp_ctx->to_string());
         crashing_buffers.clear();
         cp_ctx->abrupt();
@@ -284,7 +340,7 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr buf, 
     }
 #endif
     LOGTRACEMOD(wbcache, "flushing cp {} buf {} info: {}", cp_ctx->id(), buf->to_string(),
-            BtreeNode::to_string_buf(buf->raw_buffer()));
+                BtreeNode::to_string_buf(buf->raw_buffer()));
     m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid, part_of_batch)
         .thenValue([buf, cp_ctx](auto) {
             auto& pthis = s_cast< IndexWBCache& >(wb_cache()); // Avoiding more than 16 bytes capture
@@ -323,8 +379,10 @@ std::pair< IndexBufferPtr, bool > IndexWBCache::on_buf_flush_done(IndexCPContext
 std::pair< IndexBufferPtr, bool > IndexWBCache::on_buf_flush_done_internal(IndexCPContext* cp_ctx,
                                                                            IndexBufferPtr& buf) {
     static thread_local std::vector< IndexBufferPtr > t_buf_list;
+#ifndef NDEBUG
+    buf->m_down_buffers.clear();
+#endif
     buf->set_state(index_buf_state_t::CLEAN);
-
     t_buf_list.clear();
 
     if (cp_ctx->m_dirty_buf_count.decrement_testz()) {
@@ -350,9 +408,12 @@ void IndexWBCache::get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_c
 
     // First attempt to execute any follower buffer flush
     if (prev_flushed_buf) {
-        auto next_buffer = prev_flushed_buf->m_next_buffer.lock();
-        if (next_buffer && next_buffer->state() == index_buf_state_t::DIRTY &&
-            next_buffer->m_wait_for_leaders.decrement_testz()) {
+        auto next_buffer = prev_flushed_buf->m_up_buffer.lock();
+        if (next_buffer && next_buffer->m_wait_for_down_buffers.decrement_testz()) {
+            HS_DBG_ASSERT(next_buffer->state() == index_buf_state_t::DIRTY,
+                          "Trying to flush a parent buffer after child buffer is completed, but parent buffer is "
+                          "not in dirty state, but in {} state",
+                          (int)next_buffer->state());
             bufs.emplace_back(next_buffer);
             ++count;
         }
@@ -363,7 +424,7 @@ void IndexWBCache::get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_c
         std::optional< IndexBufferPtr > buf = cp_ctx->next_dirty();
         if (!buf) { break; } // End of list
 
-        if ((*buf)->m_wait_for_leaders.testz()) {
+        if ((*buf)->m_wait_for_down_buffers.testz()) {
             bufs.emplace_back(std::move(*buf));
             ++count;
         } else {

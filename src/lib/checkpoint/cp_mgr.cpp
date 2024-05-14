@@ -135,6 +135,7 @@ void CPManager::cp_ref(CP* cp) {
 void CPManager::cp_io_exit(CP* cp) {
     HS_DBG_ASSERT_NE(cp->m_cp_status, cp_status_t::cp_flushing);
     if (cp->m_enter_cnt.decrement_testz(1) && (cp->m_cp_status == cp_status_t::cp_flush_prepare)) {
+        m_wd_cp->set_cp(cp);
         cp_start_flush(cp);
     }
 }

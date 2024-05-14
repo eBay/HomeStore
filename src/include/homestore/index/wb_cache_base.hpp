@@ -39,32 +39,16 @@ public:
     /// @return Node which was created by the node_initializer
     virtual BtreeNodePtr alloc_buf(node_initializer_t&& node_initializer) = 0;
 
-    /// @brief Reallocate the buffer from writeback cache perspective. Typically buffer itself is not modified.
-    /// @param buf Buffer to reallocate
-    virtual void realloc_buf(const IndexBufferPtr& buf) = 0;
-
     /// @brief Write buffer
     /// @param buf
     /// @param context
     virtual void write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* context) = 0;
 
     virtual void read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) = 0;
-    virtual std::pair<bnodeid_t, uint64_t> get_root(bnodeid_t super_node_id) = 0;
 
-    /// @brief Start a chain of related btree buffers. Typically a chain is creating from second and third pairs and
-    /// then first is prepended to the chain. In case the second buffer is already with the WB cache, it will create a
-    /// new buffer for both second and third. We append the buffers to a list in dependency chain.
-    /// @param second Second btree buffer in the chain. It will be updated to copy of second buffer if buffer already
-    /// has dependencies.
-    /// @param third Thrid btree buffer in the chain. It will be updated to copy of third buffer if buffer already
-    /// has dependencies.
-    /// @return Returns if the buffer had to be copied
-    virtual std::pair< bool, bool > create_chain(IndexBufferPtr& second, IndexBufferPtr& third, CPContext* cp_ctx) = 0;
+    virtual bool get_writable_buf(const BtreeNodePtr& node, CPContext* context) = 0;
 
-    /// @brief Prepend to the chain that was already created with second
-    /// @param first
-    /// @param second
-    virtual void prepend_to_chain(const IndexBufferPtr& first, const IndexBufferPtr& second) = 0;
+    virtual void link_buf(IndexBufferPtr& up, IndexBufferPtr& down, CPContext* context) = 0;
 
     /// @brief Free the buffer allocated and remove it from wb cache
     /// @param buf
@@ -74,15 +58,7 @@ public:
     /// @brief Copy buffer
     /// @param cur_buf
     /// @return
-    virtual IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext* context) const = 0;
-
-#ifdef _PRERELEASE
-    /// @brief add the buffer to crashing buffers list. In transact_write_nodes(), it will be called. During flushing
-    /// wbcache, it will be checked. If the buffer is in the list, cp_abrupt happens.
-    /// @param first index buffer
-    /// @param second the reason
-    virtual void add_to_crashing_buffers(IndexBufferPtr, std::string reason) = 0;
-#endif
+    // virtual IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext* context) const = 0;
 };
 
 } // namespace homestore

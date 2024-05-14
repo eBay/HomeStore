@@ -58,11 +58,6 @@ private:
 
     void free_node_impl(const BtreeNodePtr& node, void* context) override { intrusive_ptr_release(node.get()); }
 
-    btree_status_t prepare_node_txn(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
-                                    void* context) override {
-        return btree_status_t::success;
-    }
-
     btree_status_t transact_write_nodes(const folly::small_vector< BtreeNodePtr, 3 >& new_nodes,
                                         const BtreeNodePtr& child_node, const BtreeNodePtr& parent_node,
                                         void* context) override {
@@ -74,27 +69,6 @@ private:
         return btree_status_t::success;
     }
 
-    void update_super_info(bnodeid_t super_node, uint64_t version) override {}
-    void retrieve_root_node() override {}
-
-#if 0
-    static void ref_node(MemBtreeNode* bn) {
-        auto mbh = (mem_btree_node_header*)bn;
-        LOGMSG_ASSERT_EQ(mbh->magic, 0xDEADBEEF, "Invalid Magic for Membtree node {}, Metrics {}", bn->to_string(),
-                         sisl::MetricsFarm::getInstance().get_result_in_json_string());
-        mbh->refcount.increment();
-    }
-
-    static void deref_node(MemBtreeNode* bn) {
-        auto mbh = (mem_btree_node_header*)bn;
-        LOGMSG_ASSERT_EQ(mbh->magic, 0xDEADBEEF, "Invalid Magic for Membtree node {}, Metrics {}", bn->to_string(),
-                         sisl::MetricsFarm::getInstance().get_result_in_json_string());
-        if (mbh->refcount.decrement_testz()) {
-            mbh->magic = 0;
-            bn->~MemBtreeNode();
-            deallocate_mem((uint8_t*)bn);
-        }
-    }
-#endif
+    void update_new_root_info(bnodeid_t root_node, uint64_t version) override {}
 };
 } // namespace homestore

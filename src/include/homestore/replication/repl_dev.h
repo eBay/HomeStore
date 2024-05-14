@@ -65,7 +65,8 @@ struct repl_snapshot {
 };
 
 struct repl_journal_entry;
-struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::thread_safe_counter > {
+struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::thread_safe_counter >,
+                      sisl::ObjLifeCounter< repl_req_ctx > {
     friend class SoloReplDev;
 
 public:

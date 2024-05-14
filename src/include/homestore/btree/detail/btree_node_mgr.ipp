@@ -35,7 +35,7 @@ btree_status_t Btree< K, V >::create_root_node(void* op_context) {
     if (root == nullptr) { return btree_status_t::space_not_avail; }
 
     root->set_level(0u);
-    auto ret = write_node(root, op_context);
+    auto const ret = write_node(root, op_context);
     if (ret != btree_status_t::success) {
         free_node(root, locktype_t::NONE, op_context);
         return btree_status_t::space_not_avail;
@@ -143,13 +143,6 @@ btree_status_t Btree< K, V >::upgrade_node_locks(const BtreeNodePtr& parent_node
         return btree_status_t::retry;
     }
 
-    ret = prepare_node_txn(parent_node, child_node, context);
-    if (ret != btree_status_t::success) {
-        unlock_node(child_node, locktype_t::WRITE);
-        unlock_node(parent_node, locktype_t::WRITE);
-        return ret;
-    }
-
 #if 0
 #ifdef _PRERELEASE
     {
@@ -180,32 +173,6 @@ btree_status_t Btree< K, V >::upgrade_node_locks(const BtreeNodePtr& parent_node
 
     return ret;
 }
-
-#if 0
-template < typename K, typename V >
-btree_status_t Btree< K, V >::upgrade_node(const BtreeNodePtr& node, locktype_t prev_lock, void* context,
-                                           uint64_t prev_gen) {
-    if (prev_lock == locktype_t::READ) { unlock_node(node, locktype_t::READ); }
-    if (prev_lock != locktype_t::WRITE) {
-        auto const ret = lock_node(node, locktype_t::WRITE, context);
-        if (ret != btree_status_t::success) { return ret; }
-    }
-
-    // If the node has been made invalid (probably by merge nodes) ask caller to start over again, but before
-    // that cleanup or free this node if there is no one waiting.
-    if (!node->is_valid_node()) {
-        unlock_node(node, locktype_t::WRITE);
-        return btree_status_t::retry;
-    }
-
-    // If node has been updated, while we have upgraded, ask caller to start all over again.
-    if (prev_gen != node->node_gen()) {
-        unlock_node(node, locktype_t::WRITE);
-        return btree_status_t::retry;
-    }
-    return btree_status_t::success;
-}
-#endif
 
 template < typename K, typename V >
 btree_status_t Btree< K, V >::_lock_node(const BtreeNodePtr& node, locktype_t type, void* context, const char* fname,

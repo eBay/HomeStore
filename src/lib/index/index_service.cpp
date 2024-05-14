@@ -16,6 +16,7 @@
 #include <homestore/homestore.hpp>
 #include <homestore/index_service.hpp>
 #include <homestore/index/index_internal.hpp>
+#include <homestore/btree/detail/btree_node.hpp>
 #include "index/wb_cache.hpp"
 #include "index/index_cp.hpp"
 #include "common/homestore_utils.hpp"
@@ -31,8 +32,13 @@ IndexService::IndexService(std::unique_ptr< IndexServiceCallbacks > cbs) : m_svc
     meta_service().register_handler(
         "index",
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-            meta_blk_found(std::move(buf), voidptr_cast(mblk));
+            itable_meta_blk_found(std::move(buf), voidptr_cast(mblk));
         },
+        nullptr);
+
+    meta_service().register_handler(
+        "wb_cache",
+        [this](meta_blk* mblk, sisl::byte_view buf, size_t size) { m_wbcache_sb = std::pair{mblk, std::move(buf)}; },
         nullptr);
 }
 
@@ -58,7 +64,7 @@ shared< VirtualDev > IndexService::open_vdev(const vdev_info& vinfo, bool load_e
     return m_vdev;
 }
 
-void IndexService::meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
+void IndexService::itable_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
     // We have found an index table superblock. Notify the callback which should convert the superblock into actual
     // IndexTable instance
     superblk< index_table_sb > sb;
@@ -68,11 +74,8 @@ void IndexService::meta_blk_found(const sisl::byte_view& buf, void* meta_cookie)
 
 void IndexService::start() {
     // Start Writeback cache
-    m_wb_cache = std::make_unique< IndexWBCache >(m_vdev, hs()->evictor(), m_vdev->atomic_page_size());
-
-    // Register to CP for flush dirty buffers
-    hs()->cp_mgr().register_consumer(cp_consumer_t::INDEX_SVC,
-                                     std::move(std::make_unique< IndexCPCallbacks >(m_wb_cache.get())));
+    m_wb_cache = std::make_unique< IndexWBCache >(m_vdev, std::move(m_wbcache_sb), hs()->evictor(),
+                                                  hs()->device_mgr()->atomic_page_size(HSDevType::Fast));
 }
 
 void IndexService::stop() {
@@ -104,16 +107,34 @@ uint64_t IndexService::used_size() const {
     return size;
 }
 
-NodeBuffer::NodeBuffer(uint32_t buf_size, uint32_t align_size) :
-        m_bytes{hs_utils::iobuf_alloc(buf_size, sisl::buftag::btree_node, align_size)} {}
-
-NodeBuffer::~NodeBuffer() { hs_utils::iobuf_free(m_bytes, sisl::buftag::btree_node); }
-
+/////////////////////// IndexBuffer methods //////////////////////////
 IndexBuffer::IndexBuffer(BlkId blkid, uint32_t buf_size, uint32_t align_size) :
-        m_node_buf{std::make_shared< NodeBuffer >(buf_size, align_size)}, m_blkid{blkid} {}
+        m_blkid{blkid}, m_bytes{hs_utils::iobuf_alloc(buf_size, sisl::buftag::btree_node, align_size)} {}
 
-IndexBuffer::IndexBuffer(NodeBufferPtr node_buf, BlkId blkid) : m_node_buf(node_buf), m_blkid(blkid) {}
+IndexBuffer::IndexBuffer(uint8_t* raw_bytes, BlkId blkid) : m_blkid(blkid), m_bytes{raw_bytes} {}
 
-IndexBuffer::~IndexBuffer() { m_node_buf.reset(); }
+IndexBuffer::~IndexBuffer() { hs_utils::iobuf_free(m_bytes, sisl::buftag::btree_node); }
 
+MetaIndexBuffer::MetaIndexBuffer(superblk< index_table_sb >& sb) : IndexBuffer{nullptr, BlkId{}}, m_sb{sb} {
+    m_is_meta_buf = true;
+}
+
+/////////////////////// IndexTableBase static methods //////////////////////////
+bool IndexTableBase::is_valid_btree_node(sisl::blob const& buf) {
+    auto phdr = r_cast< persistent_hdr_t const* >(buf.cbytes());
+    if ((phdr->magic != BTREE_NODE_MAGIC) || (phdr->version != BTREE_NODE_VERSION)) { return false; }
+    if (phdr->node_size != buf.size()) { return false; }
+    if (phdr->node_id == empty_bnodeid) { return false; }
+
+    auto const exp_checksum =
+        crc16_t10dif(bt_init_crc_16, (buf.cbytes() + sizeof(persistent_hdr_t)), buf.size() - sizeof(persistent_hdr_t));
+    if (phdr->checksum != exp_checksum) { return false; }
+
+    return phdr->valid_node;
+}
+
+cp_id_t IndexTableBase::modified_cp_id(sisl::blob const& buf) {
+    auto phdr = r_cast< persistent_hdr_t const* >(buf.cbytes());
+    return phdr->modified_cp_id;
+}
 } // namespace homestore

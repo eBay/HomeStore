@@ -37,9 +37,14 @@ private:
     std::shared_ptr< VirtualDev > m_vdev;
     sisl::SimpleCache< BlkId, BtreeNodePtr > m_cache;
     uint32_t m_node_size;
-
     std::vector< iomgr::io_fiber_t > m_cp_flush_fibers;
     std::mutex m_flush_mtx;
+    void* m_meta_blk;
+
+#ifdef _PRERELEASE
+    std::mutex flip_mtx;
+    std::map< IndexBufferPtr, std::vector< std::string > > crashing_buffers;
+#endif
 
 #ifdef _PRERELEASE
     std::mutex flip_mtx;
@@ -47,16 +52,15 @@ private:
 #endif
 
 public:
-    IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, const std::shared_ptr< sisl::Evictor >& evictor,
-                 uint32_t node_size);
+    IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair< meta_blk*, sisl::byte_view > sb,
+                 const std::shared_ptr< sisl::Evictor >& evictor, uint32_t node_size);
 
     BtreeNodePtr alloc_buf(node_initializer_t&& node_initializer) override;
-    void realloc_buf(const IndexBufferPtr& buf) override;
     void write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* cp_ctx) override;
     void read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) override;
-    std::pair<bnodeid_t, uint64_t> get_root(bnodeid_t super_node_id) override;
-    std::pair< bool, bool > create_chain(IndexBufferPtr& second, IndexBufferPtr& third, CPContext* cp_ctx) override;
-    void prepend_to_chain(const IndexBufferPtr& first, const IndexBufferPtr& second) override;
+
+    bool get_writable_buf(const BtreeNodePtr& node, CPContext* context) override;
+    void link_buf(IndexBufferPtr& up, IndexBufferPtr& down, CPContext* cp_ctx) override;
     void free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) override;
 
     //////////////////// CP Related API section /////////////////////////////////
@@ -67,6 +71,7 @@ public:
 #endif
 private:
     void start_flush_threads();
+    void recover_new_nodes(sisl::byte_view sb);
     void process_write_completion(IndexCPContext* cp_ctx, IndexBufferPtr pbuf);
     void do_flush_one_buf(IndexCPContext* cp_ctx, const IndexBufferPtr buf, bool part_of_batch);
     std::pair< IndexBufferPtr, bool > on_buf_flush_done(IndexCPContext* cp_ctx, IndexBufferPtr& buf);

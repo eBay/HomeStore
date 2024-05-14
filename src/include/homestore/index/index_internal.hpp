@@ -21,6 +21,7 @@
 #include <homestore/blk.h>
 #include <homestore/homestore_decl.hpp>
 #include <homestore/btree/detail/btree_internal.hpp>
+#include <homestore/superblk_handler.hpp>
 
 namespace homestore {
 
@@ -55,6 +56,9 @@ public:
     virtual uuid_t uuid() const = 0;
     virtual uint64_t used_size() const = 0;
     virtual void destroy() = 0;
+
+    static bool is_valid_btree_node(sisl::blob const& buf);
+    static cp_id_t modified_cp_id(sisl::blob const& buf);
 };
 
 enum class index_buf_state_t : uint8_t {
@@ -65,68 +69,53 @@ enum class index_buf_state_t : uint8_t {
 
 ///////////////////////// Btree Node and Buffer Portion //////////////////////////
 
-
-// Multiple IndexBuffer could point to the same NodeBuffer if its clean.
-struct NodeBuffer;
-typedef std::shared_ptr< NodeBuffer > NodeBufferPtr;
-struct NodeBuffer {
-    uint8_t* m_bytes{nullptr};                                          // Actual data buffer
-    std::atomic< index_buf_state_t > m_state{index_buf_state_t::CLEAN}; // Is buffer yet to persist?
-    NodeBuffer(uint32_t buf_size, uint32_t align_size);
-    ~NodeBuffer();
-};
-
 // IndexBuffer is for each CP. The dependent index buffers are chained using
-// m_next_buffer and each buffer is flushed only its wait_for_leaders reaches 0
+// m_up_buffer and each buffer is flushed only its wait_for_leaders reaches 0
 // which means all its dependent buffers are flushed.
 struct IndexBuffer;
 typedef std::shared_ptr< IndexBuffer > IndexBufferPtr;
 struct IndexBuffer {
-    NodeBufferPtr m_node_buf;
-    BlkId m_blkid;                              // BlkId where this needs to be persisted
-    std::weak_ptr< IndexBuffer > m_next_buffer; // Next buffer in the chain
-    // Number of leader buffers we are waiting for before we write this buffer
-    sisl::atomic_counter< int > m_wait_for_leaders{0};
+    BlkId m_blkid;                                                      // BlkId where this needs to be persisted
+    cp_id_t m_dirtied_cp_id{-1};                                        // Last CP that dirtied this index buffer
+    cp_id_t m_created_cp_id{-1};                                        // CP id when this buffer is created.
+    std::atomic< index_buf_state_t > m_state{index_buf_state_t::CLEAN}; // Is buffer yet to persist?
+    uint8_t m_is_meta_buf{false};                                       // Is the index buffer writing to metablk?
+    uint8_t* m_bytes{nullptr};                                          // Actual data buffer
+
+    std::weak_ptr< IndexBuffer > m_up_buffer;               // Parent buffer in the chain to persisted
+    sisl::atomic_counter< int > m_wait_for_down_buffers{0}; // Number of children need to wait for before persisting
+#ifndef NDEBUG
+    // Down buffers are not mandatory members, but only to keep track of any bugs and asserts
+    std::vector< std::weak_ptr< IndexBuffer > > m_down_buffers;
+#endif
 
     IndexBuffer(BlkId blkid, uint32_t buf_size, uint32_t align_size);
-    IndexBuffer(NodeBufferPtr node_buf, BlkId blkid);
+    IndexBuffer(uint8_t* raw_bytes, BlkId blkid);
     ~IndexBuffer();
 
     BlkId blkid() const { return m_blkid; }
-    uint8_t* raw_buffer() {
-        RELEASE_ASSERT(m_node_buf, "Node buffer null blkid {}", m_blkid.to_integer());
-        return m_node_buf->m_bytes;
-    }
-
-    bool is_clean() const {
-        RELEASE_ASSERT(m_node_buf, "Node buffer null blkid {}", m_blkid.to_integer());
-        return (m_node_buf->m_state.load() == index_buf_state_t::CLEAN);
-    }
-
-    index_buf_state_t state() const {
-        RELEASE_ASSERT(m_node_buf, "Node buffer null blkid {}", m_blkid.to_integer());
-        return m_node_buf->m_state;
-    }
-
-    void set_state(index_buf_state_t state) {
-        RELEASE_ASSERT(m_node_buf, "Node buffer null blkid {}", m_blkid.to_integer());
-        m_node_buf->m_state = state;
-    }
+    uint8_t* raw_buffer() { return m_bytes; }
+    bool is_clean() const { return (m_state.load() == index_buf_state_t::CLEAN); }
+    index_buf_state_t state() const { return m_state.load(); }
+    void set_state(index_buf_state_t st) { m_state.store(st); }
+    void mark_meta_buf() { m_is_meta_buf = true; }
 
     std::string to_string() const {
-        auto str = fmt::format("IndexBuffer {} blkid={}", reinterpret_cast< void* >(const_cast< IndexBuffer* >(this)),
-                               m_blkid.to_integer());
-        if (m_node_buf == nullptr) {
-            fmt::format_to(std::back_inserter(str), " node_buf=nullptr");
-        } else {
-            fmt::format_to(std::back_inserter(str), " state={} node_buf={}",
-                           static_cast< int >(m_node_buf->m_state.load()), static_cast< void* >(m_node_buf->m_bytes));
-        }
-        fmt::format_to(std::back_inserter(str), " next_buffer={} wait_for={}",
-                       m_next_buffer.lock() ? reinterpret_cast< void* >(m_next_buffer.lock().get()) : 0,
-                       m_wait_for_leaders.get());
-        return str;
+        return fmt::format("IndexBuffer={} node_id={} state={} created_cp={} dirtied_cp={} up_buffer={} "
+                           "down_wait_count={} node_buf={}",
+                           voidptr_cast(const_cast< IndexBuffer* >(this)), m_blkid.to_integer(), int_cast(state()),
+                           m_created_cp_id, m_dirtied_cp_id,
+                           voidptr_cast(m_up_buffer.lock() ? m_up_buffer.lock().get() : nullptr),
+                           m_wait_for_down_buffers.get(), voidptr_cast(m_bytes));
     }
+};
+
+// This is a special buffer which is used to write to the meta block
+struct MetaIndexBuffer : public IndexBuffer {
+    MetaIndexBuffer(superblk< index_table_sb >& sb);
+
+private:
+    superblk< index_table_sb >& m_sb;
 };
 
 class BtreeNode;
@@ -134,8 +123,7 @@ typedef boost::intrusive_ptr< BtreeNode > BtreeNodePtr;
 
 struct IndexBtreeNode {
 public:
-    IndexBufferPtr m_idx_buf;     // Buffer backing this node
-    cp_id_t m_last_mod_cp_id{-1}; // This node is previously modified by the cp id;
+    IndexBufferPtr m_idx_buf; // Buffer backing this node
 
 public:
     IndexBtreeNode(const IndexBufferPtr& buf) : m_idx_buf{buf} {}

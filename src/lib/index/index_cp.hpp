@@ -30,6 +30,17 @@ namespace homestore {
 class BtreeNode;
 struct IndexCPContext : public VDevCPContext {
 public:
+    using compact_blkid_t = std::pair< blk_num_t, chunk_num_t >;
+    using inplace_new_pair_t = std::pair< compact_blkid_t, compact_blkid_t >;
+#pragma pack(1)
+    struct new_blks_sb_t {
+        cp_id_t cp_id;
+        uint32_t num_blks{0};
+        inplace_new_pair_t blks[1]; // C++ std probhits 0 size array
+    };
+#pragma pack()
+
+public:
     std::atomic< uint64_t > m_num_nodes_added{0};
     std::atomic< uint64_t > m_num_nodes_removed{0};
     sisl::ConcurrentInsertVector< IndexBufferPtr > m_dirty_buf_list;
@@ -37,112 +48,25 @@ public:
     std::mutex m_flush_buffer_mtx;
     sisl::ConcurrentInsertVector< IndexBufferPtr >::iterator m_dirty_buf_it;
 
+    iomgr::FiberManagerLib::mutex m_new_blk_mtx;
+    sisl::io_blob_safe m_new_blk_buf;
+
 public:
-    IndexCPContext(CP* cp) : VDevCPContext(cp) {}
+    IndexCPContext(CP* cp);
     virtual ~IndexCPContext() = default;
 
-    void add_to_dirty_list(const IndexBufferPtr& buf) {
-        m_dirty_buf_list.push_back(buf);
-        buf->set_state(index_buf_state_t::DIRTY);
-        m_dirty_buf_count.increment(1);
-    }
-
-    bool any_dirty_buffers() const { return !m_dirty_buf_count.testz(); }
-
-    void prepare_flush_iteration() { m_dirty_buf_it = m_dirty_buf_list.begin(); }
-
-    std::optional< IndexBufferPtr > next_dirty() {
-        if (m_dirty_buf_it == m_dirty_buf_list.end()) { return std::nullopt; }
-        IndexBufferPtr ret = *m_dirty_buf_it;
-        ++m_dirty_buf_it;
-        return ret;
-    }
-    std::string to_string() {
-        std::string str{fmt::format("IndexCPContext cpid={} dirty_buf_count={} dirty_buf_list_size={}\n", m_cp->id(),
-                                    m_dirty_buf_count.get(), m_dirty_buf_list.size())};
-
-        // Mapping from a node to all its parents in the graph.
-        // Display all buffers and its dependencies and state.
-        std::unordered_map< IndexBuffer*, std::vector< IndexBuffer* > > parents;
-
-        m_dirty_buf_list.foreach_entry([&parents](IndexBufferPtr buf) {
-            // Add this buf to his children.
-            parents[buf->m_next_buffer.lock().get()].emplace_back(buf.get());
-        });
-        m_dirty_buf_list.foreach_entry([&str, &parents](IndexBufferPtr buf) {
-            std::vector<std::string> states={"CLEAN", "DIRTY", "FLUSHING"};
-            fmt::format_to(std::back_inserter(str), "{} \n info:  {}", buf->to_string(), BtreeNode::to_string_buf(buf->raw_buffer()));
-            auto first = true;
-            for (const auto& p : parents[buf.get()]) {
-                if (first) {
-                    fmt::format_to(std::back_inserter(str), "\nDepends:");
-                    first = false;
-                }
-                fmt::format_to(std::back_inserter(str), " {}({}) ", r_cast< void* >(p), states[s_cast< int >(p->state())]);
-            }
-            fmt::format_to(std::back_inserter(str), "\n");
-        });
-        return str;
-    }
-
-    void check_cycle() {
-        // Use dfs to find if the graph is cycle
-        auto it = m_dirty_buf_list.begin();
-        while (it != m_dirty_buf_list.end()) {
-            IndexBufferPtr buf = *it;
-            std::set< IndexBuffer* > visited;
-            check_cycle_recurse(buf, visited);
-            ++it;
-        }
-    }
-
-    void check_cycle_recurse(IndexBufferPtr buf, std::set< IndexBuffer* >& visited) const {
-        if (visited.count(buf.get()) != 0) {
-            LOGERROR("Cycle found for {}", buf->to_string());
-            for (auto& x : visited) {
-                LOGERROR("Path : {}", x->to_string());
-            }
-            return;
-        }
-
-        visited.insert(buf.get());
-        if (buf->m_next_buffer.lock()) { check_cycle_recurse(buf->m_next_buffer.lock(), visited); }
-    }
-
-    void check_wait_for_leaders() {
-        // Use the next buffer as indegree to find if wait_for_leaders is invalid.
-        std::unordered_map< IndexBuffer*, int > wait_for_leaders;
-        IndexBufferPtr buf;
-
-        // Store the wait for leader count for each buffer.
-        auto it = m_dirty_buf_list.begin();
-        while (it != m_dirty_buf_list.end()) {
-            buf = *it;
-            wait_for_leaders[buf.get()] = buf->m_wait_for_leaders.get();
-            ++it;
-        }
-
-        // Decrement the count using the next buffer.
-        it = m_dirty_buf_list.begin();
-        while (it != m_dirty_buf_list.end()) {
-            buf = *it;
-            auto next_buf = buf->m_next_buffer.lock();
-            if (next_buf.get() == nullptr) continue;
-            wait_for_leaders[next_buf.get()]--;
-            ++it;
-        }
-
-        bool issue = false;
-        for (const auto& [buf, waits] : wait_for_leaders) {
-            // Any value other than zero means the dependency graph is invalid.
-            if (waits != 0) {
-                issue = true;
-                LOGERROR("Leaders wait not zero cp {} buf {} waits {}", id(), buf->to_string(), waits);
-            }
-        }
-
-        RELEASE_ASSERT_EQ(issue, false, "Found issue with wait_for_leaders");
-    }
+    void track_new_blk(BlkId const& inplace_blkid, BlkId const& new_blkid);
+    void add_to_dirty_list(const IndexBufferPtr& buf);
+    bool any_dirty_buffers() const;
+    void prepare_flush_iteration();
+    std::optional< IndexBufferPtr > next_dirty();
+    std::string to_string();
+    std::string to_string_with_dags();
+    void check_cycle();
+    void check_cycle_recurse(IndexBufferPtr buf, std::set< IndexBuffer* >& visited) const;
+    void check_wait_for_leaders();
+    sisl::io_blob_safe const& new_blk_buf() const { return m_new_blk_buf; }
+    void log_dags();
 };
 
 class IndexWBCache;

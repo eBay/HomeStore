@@ -152,8 +152,6 @@ protected:
     virtual btree_status_t write_node_impl(const BtreeNodePtr& node, void* context) = 0;
     virtual btree_status_t refresh_node(const BtreeNodePtr& node, bool for_read_modify_write, void* context) const = 0;
     virtual void free_node_impl(const BtreeNodePtr& node, void* context) = 0;
-    virtual btree_status_t prepare_node_txn(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
-                                            void* context) = 0;
     virtual btree_status_t transact_write_nodes(const folly::small_vector< BtreeNodePtr, 3 >& new_nodes,
                                                 const BtreeNodePtr& child_node, const BtreeNodePtr& parent_node,
                                                 void* context) = 0;
