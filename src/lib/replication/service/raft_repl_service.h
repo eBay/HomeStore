@@ -78,6 +78,7 @@ private:
     void stop_reaper_thread();
     void fetch_pending_data();
     void gc_repl_devs();
+    void gc_repl_reqs();
 };
 
 class RaftReplServiceCPHandler : public CPCallbacks {

@@ -173,6 +173,8 @@ public:
 
     void wait_for_logstore_ready() { m_data_journal->wait_for_log_store_ready(); }
 
+    void gc_repl_reqs();
+
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////
     nuraft::ptr< nuraft::cluster_config > load_config() override;

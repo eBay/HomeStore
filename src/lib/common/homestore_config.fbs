@@ -250,6 +250,9 @@ table Consensus {
 
     // Timeout for data to be received after raft entry after which raft entry is rejected.
     data_receive_timeout_ms: uint64 = 10000;
+
+    // ReplDev Reqs timeout in seconds.
+    repl_req_timeout_sec: uint32 = 300;
 }
 
 table HomeStoreSettings {
