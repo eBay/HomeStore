@@ -87,6 +87,69 @@ void IndexWBCache::start_flush_threads() {
     }
 }
 
+void IndexWBCache::recover_new_nodes(sisl::byte_view sb) {
+    // If sb is empty, its possible a first time boot.
+    if ((sb.bytes() == nullptr) || (sb.size() == 0)) { return; }
+
+    auto cpg = hs()->cp_mgr().cp_guard();
+    auto cp_ctx = r_cast< IndexCPContext* >(cpg.context(cp_consumer_t::INDEX_SVC));
+    cp_id_t cur_cp_id = cpg->id();
+
+    auto const* new_blks_sb = r_cast< IndexCPContext::new_blks_sb_t const* >(sb.bytes());
+    if (new_blks_sb->cp_id != cur_cp_id) {
+        // On clean shutdown, cp_id would be lesser than the current cp_id, in that case ignore this sb
+        HS_DBG_ASSERT_LT(new_blks_sb->cp_id, cur_cp_id, "Persisted cp in wbcache_sb is more than current cp");
+        return;
+    }
+
+    LOGINFOMOD(wbcache, "Prior to restart allocated {} new blks, validating if they need to be persisted",
+               new_blks_sb->num_blks);
+
+    std::unordered_map< BlkId, sisl::io_blob_safe > cached_inplace_nodes;
+    for (auto i = 0u; i < new_blks_sb->num_blks; ++i) {
+        auto const& [inplace_p, new_p] = new_blks_sb->blks[i];
+        auto const inplace_blkid = BlkId{inplace_p.first, (blk_count_t)1, inplace_p.second};
+        auto const new_blkid = BlkId{new_p.first, (blk_count_t)1, new_p.second};
+
+        // Read the new btree node
+        sisl::io_blob_safe node_buf(m_node_size, 512);
+        m_vdev->sync_read(r_cast< char* >(node_buf.bytes()), m_node_size, new_blkid);
+
+        // Invalid node indicates it was never written during cp_flush prior to unclean shutdown, ignore the blkid
+        if (!IndexTableBase::is_valid_btree_node(node_buf)) { continue; }
+
+        // Read the inplace node and find out if they have same cp_id as new_blks. If so, the inplace node is also
+        // written and in that case the new_node should be retained. It means the first part of dependency chain was
+        // already persisted prior to unclean shutdown. If its not written, we can discard the new_node.
+        // Note: There can be multiple new_blks point to the same in-place node, so we keep them cached.
+        auto it = cached_inplace_nodes.find(inplace_blkid);
+        if (it == cached_inplace_nodes.end()) {
+            sisl::io_blob_safe inplace_buf(m_node_size, 512);
+            m_vdev->sync_read(r_cast< char* >(inplace_buf.bytes()), m_node_size, inplace_blkid);
+
+            if (!IndexTableBase::is_valid_btree_node(inplace_buf)) {
+                HS_LOG_ASSERT(false, "Inplace node is invalid btree node at blkid={}, should not happen",
+                              inplace_blkid);
+                continue;
+            }
+            bool happened;
+            std::tie(it, happened) =
+                cached_inplace_nodes.emplace(std::make_pair(inplace_blkid, std::move(inplace_buf)));
+        }
+
+        if (IndexTableBase::modified_cp_id(it->second) == cur_cp_id) {
+            LOGDEBUGMOD(wbcache, "Inplace node={} has been written prior to unclean shutdown, retaining new_node={} ",
+                        inplace_blkid.to_string(), new_blkid.to_string());
+            // Put them in current cp, to support unclean shutdown during recovery
+            cp_ctx->track_new_blk(inplace_blkid, new_blkid);
+            m_vdev->commit_blk(new_blkid);
+        } else {
+            LOGDEBUGMOD(wbcache, "Inplace node={} was not written prior to unclean shutdowm, so discarding new_node={}",
+                        inplace_blkid.to_string(), new_blkid.to_string());
+        }
+    }
+}
+
 BtreeNodePtr IndexWBCache::alloc_buf(node_initializer_t&& node_initializer) {
     auto cpg = cp_mgr().cp_guard();
     auto cp_ctx = r_cast< IndexCPContext* >(cpg.context(cp_consumer_t::INDEX_SVC));
