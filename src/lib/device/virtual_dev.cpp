@@ -55,8 +55,8 @@ namespace homestore {
 #define SYNC_FLIP_INJECTION(IO_TYPE)                                                                                   \
     if (iomgr_flip::instance()->test_flip("IO_TYPE_failure")) { return std::make_error_code(std::errc::io_error); }    \
     if (iomgr_flip::instance()->test_flip("IO_TYPE_stuck")) {                                                          \
-        std::this_thread::sleep_for(std::chrono::hours(24 * 365 * 100)); // Sleep for 100 years\
-        return std::make_error_code(std::errc::resource_unavailable_try_again);\
+        std::this_thread::sleep_for(std::chrono::hours(24 * 365 * 100)); /* Sleep for 100 years */                     \
+        return std::make_error_code(std::errc::resource_unavailable_try_again);                                        \
     }
 
 #define ASYNC_FLIP_INJECTION(IO_TYPE)                                                                                  \
@@ -64,9 +64,9 @@ namespace homestore {
         return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::io_error));                        \
     }                                                                                                                  \
     if (iomgr_flip::instance()->test_flip("IO_TYPE_stuck")) {                                                          \
-        std::this_thread::sleep_for(std::chrono::hours(24 * 365 * 100)); // Sleep for 100 years\
-    return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));\
-}
+        std::this_thread::sleep_for(std::chrono::hours(24 * 365 * 100)); /* Sleep for 100 years */                     \
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));  \
+    }
 #endif
 
 static std::shared_ptr< BlkAllocator > create_blk_allocator(blk_allocator_type_t btype, uint32_t vblock_size,
