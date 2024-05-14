@@ -237,13 +237,9 @@ void LogStoreService::rollback_super_blk_found(const sisl::byte_view& buf, void*
         auto id = rollback_sb->logdev_id;
         LOGDEBUGMOD(logstore, "Log dev rollback superblk found logdev={}", id);
         const auto it = m_id_logdev_map.find(id);
-        if (it != m_id_logdev_map.end()) {
-            logdev = it->second;
-        } else {
-            logdev = std::make_shared< LogDev >(id, m_logdev_vdev.get());
-            m_id_logdev_map.emplace(id, logdev);
-        }
-
+        HS_REL_ASSERT((it != m_id_logdev_map.end()),
+                      "found a rollback_super_blk of logdev id {}, but the logdev with id {} doesnt exist", id);
+        logdev = it->second;
         logdev->log_dev_meta().rollback_super_blk_found(buf, meta_cookie);
     }
 }
