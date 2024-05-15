@@ -188,11 +188,14 @@ public:
      */
     void truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_lsn);
 
+    void wait_for_log_store_ready();
+
 private:
     logstore_id_t m_logstore_id;
     logdev_id_t m_logdev_id;
     shared< HomeLogStore > m_log_store;
     nuraft::ptr< nuraft::log_entry > m_dummy_log_entry;
     store_lsn_t m_last_durable_lsn{-1};
+    folly::Future< folly::Unit > m_log_store_future;
 };
 } // namespace homestore

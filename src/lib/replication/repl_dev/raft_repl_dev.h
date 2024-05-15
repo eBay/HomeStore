@@ -171,6 +171,8 @@ public:
 
     nuraft::ptr< nuraft::snapshot > get_last_snapshot() { return m_last_snapshot; }
 
+    void wait_for_logstore_ready() { m_data_journal->wait_for_log_store_ready(); }
+
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////
     nuraft::ptr< nuraft::cluster_config > load_config() override;

@@ -51,6 +51,24 @@ SISL_LOGGING_DECL(device)
 
 namespace homestore {
 
+#ifdef _PRERELEASE
+#define SYNC_FLIP_INJECTION(IO_TYPE)                                                                                   \
+    if (iomgr_flip::instance()->test_flip("IO_TYPE_failure")) { return std::make_error_code(std::errc::io_error); }    \
+    if (iomgr_flip::instance()->test_flip("IO_TYPE_stuck")) {                                                          \
+        std::this_thread::sleep_for(std::chrono::hours(24 * 365 * 100)); /* Sleep for 100 years */                     \
+        return std::make_error_code(std::errc::resource_unavailable_try_again);                                        \
+    }
+
+#define ASYNC_FLIP_INJECTION(IO_TYPE)                                                                                  \
+    if (iomgr_flip::instance()->test_flip("IO_TYPE_failure")) {                                                        \
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::io_error));                        \
+    }                                                                                                                  \
+    if (iomgr_flip::instance()->test_flip("IO_TYPE_stuck")) {                                                          \
+        std::this_thread::sleep_for(std::chrono::hours(24 * 365 * 100)); /* Sleep for 100 years */                     \
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));  \
+    }
+#endif
+
 static std::shared_ptr< BlkAllocator > create_blk_allocator(blk_allocator_type_t btype, uint32_t vblock_size,
                                                             uint32_t ppage_sz, uint32_t align_sz, uint64_t size,
                                                             bool is_auto_recovery, uint32_t unique_id, bool is_init) {
@@ -316,6 +334,10 @@ folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32
                                                          bool part_of_batch) {
     HS_DBG_ASSERT_EQ(bid.is_multi(), false, "async_write needs individual pieces of blkid - not MultiBlkid");
 
+#ifdef _PRERELEASE
+    ASYNC_FLIP_INJECTION(blk_write)
+#endif
+
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
     if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
@@ -334,6 +356,10 @@ folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32
 
 folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
                                                          uint64_t offset_in_chunk) {
+#ifdef _PRERELEASE
+    ASYNC_FLIP_INJECTION(blk_write)
+#endif
+
     if (sisl_unlikely(!is_chunk_available(chunk))) {
         return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
     }
@@ -351,6 +377,10 @@ folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32
 folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, const int iovcnt, BlkId const& bid,
                                                           bool part_of_batch) {
     HS_DBG_ASSERT_EQ(bid.is_multi(), false, "async_writev needs individual pieces of blkid - not MultiBlkid");
+
+#ifdef _PRERELEASE
+    ASYNC_FLIP_INJECTION(blk_write)
+#endif
 
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
@@ -370,6 +400,9 @@ folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, cons
 
 folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, const int iovcnt, cshared< Chunk >& chunk,
                                                           uint64_t offset_in_chunk) {
+#ifdef _PRERELEASE
+    ASYNC_FLIP_INJECTION(blk_write)
+#endif
     if (sisl_unlikely(!is_chunk_available(chunk))) {
         return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
     }
@@ -388,7 +421,9 @@ folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, cons
 ////////////////////////// sync write section //////////////////////////////////
 std::error_code VirtualDev::sync_write(const char* buf, uint32_t size, BlkId const& bid) {
     HS_DBG_ASSERT_EQ(bid.is_multi(), false, "sync_write needs individual pieces of blkid - not MultiBlkid");
-
+#ifdef _PRERELEASE
+    SYNC_FLIP_INJECTION(blk_write)
+#endif
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
     if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
@@ -399,6 +434,9 @@ std::error_code VirtualDev::sync_write(const char* buf, uint32_t size, BlkId con
 
 std::error_code VirtualDev::sync_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
                                        uint64_t offset_in_chunk) {
+#ifdef _PRERELEASE
+    SYNC_FLIP_INJECTION(blk_write)
+#endif
     if (sisl_unlikely(!is_chunk_available(chunk))) {
         return std::make_error_code(std::errc::resource_unavailable_try_again);
     }
@@ -407,7 +445,9 @@ std::error_code VirtualDev::sync_write(const char* buf, uint32_t size, cshared< 
 
 std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, BlkId const& bid) {
     HS_DBG_ASSERT_EQ(bid.is_multi(), false, "sync_writev needs individual pieces of blkid - not MultiBlkid");
-
+#ifdef _PRERELEASE
+    SYNC_FLIP_INJECTION(blk_write)
+#endif
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
     if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
@@ -426,6 +466,9 @@ std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, BlkId cons
 
 std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, cshared< Chunk >& chunk,
                                         uint64_t offset_in_chunk) {
+#ifdef _PRERELEASE
+    SYNC_FLIP_INJECTION(blk_write)
+#endif
     if (sisl_unlikely(!is_chunk_available(chunk))) {
         return std::make_error_code(std::errc::resource_unavailable_try_again);
     }
@@ -447,6 +490,9 @@ std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, cshared< C
 folly::Future< std::error_code > VirtualDev::async_read(char* buf, uint64_t size, BlkId const& bid,
                                                         bool part_of_batch) {
     HS_DBG_ASSERT_EQ(bid.is_multi(), false, "async_read needs individual pieces of blkid - not MultiBlkid");
+#ifdef _PRERELEASE
+    ASYNC_FLIP_INJECTION(blk_read)
+#endif
 
     Chunk* pchunk;
     uint64_t const dev_offset = to_dev_offset(bid, &pchunk);
@@ -459,6 +505,9 @@ folly::Future< std::error_code > VirtualDev::async_read(char* buf, uint64_t size
 folly::Future< std::error_code > VirtualDev::async_readv(iovec* iovs, int iovcnt, uint64_t size, BlkId const& bid,
                                                          bool part_of_batch) {
     HS_DBG_ASSERT_EQ(bid.is_multi(), false, "async_readv needs individual pieces of blkid - not MultiBlkid");
+#ifdef _PRERELEASE
+    ASYNC_FLIP_INJECTION(blk_read)
+#endif
 
     Chunk* pchunk;
     uint64_t const dev_offset = to_dev_offset(bid, &pchunk);
@@ -471,6 +520,9 @@ folly::Future< std::error_code > VirtualDev::async_readv(iovec* iovs, int iovcnt
 ////////////////////////////////////////// sync read section ////////////////////////////////////////////
 std::error_code VirtualDev::sync_read(char* buf, uint32_t size, BlkId const& bid) {
     HS_DBG_ASSERT_EQ(bid.is_multi(), false, "sync_read needs individual pieces of blkid - not MultiBlkid");
+#ifdef _PRERELEASE
+    SYNC_FLIP_INJECTION(blk_read)
+#endif
 
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
@@ -481,6 +533,9 @@ std::error_code VirtualDev::sync_read(char* buf, uint32_t size, BlkId const& bid
 }
 
 std::error_code VirtualDev::sync_read(char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk) {
+#ifdef _PRERELEASE
+    SYNC_FLIP_INJECTION(blk_read)
+#endif
     if (sisl_unlikely(!is_chunk_available(chunk))) {
         return std::make_error_code(std::errc::resource_unavailable_try_again);
     }
@@ -489,6 +544,9 @@ std::error_code VirtualDev::sync_read(char* buf, uint32_t size, cshared< Chunk >
 
 std::error_code VirtualDev::sync_readv(iovec* iov, int iovcnt, BlkId const& bid) {
     HS_DBG_ASSERT_EQ(bid.is_multi(), false, "sync_readv needs individual pieces of blkid - not MultiBlkid");
+#ifdef _PRERELEASE
+    SYNC_FLIP_INJECTION(blk_read)
+#endif
 
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
@@ -507,6 +565,9 @@ std::error_code VirtualDev::sync_readv(iovec* iov, int iovcnt, BlkId const& bid)
 }
 
 std::error_code VirtualDev::sync_readv(iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk) {
+#ifdef _PRERELEASE
+    SYNC_FLIP_INJECTION(blk_read)
+#endif
     if (sisl_unlikely(!is_chunk_available(chunk))) {
         return std::make_error_code(std::errc::resource_unavailable_try_again);
     }
