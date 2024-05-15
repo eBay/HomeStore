@@ -1122,11 +1122,8 @@ void MetaBlkService::recover_meta_block(meta_blk* mblk) {
         // if subsystem registered crc protection, verify crc before sending to subsystem;
         if (itr->second.do_crc) {
             const auto crc = crc32_ieee(init_crc32, buf->cbytes(), mblk->hdr.h.context_sz);
-
-            HS_REL_ASSERT_EQ(crc, uint32_cast(mblk->hdr.h.crc),
-                             "[type={}], CRC mismatch: {}/{}, on mblk bid: {}, context_sz: {}", mblk->hdr.h.type, crc,
-                             uint32_cast(mblk->hdr.h.crc), mblk->hdr.h.bid.to_string(),
-                             uint64_cast(mblk->hdr.h.context_sz));
+            HS_REL_ASSERT_EQ(crc, uint32_cast(mblk->hdr.h.crc), "CRC mismatch: {}/{}, meta_blk details: {}", crc,
+                             uint32_cast(mblk->hdr.h.crc), mblk->hdr.h.to_string());
         } else {
             HS_LOG(DEBUG, metablk, "[type={}] meta blk found with bypassing crc.", mblk->hdr.h.type);
         }
