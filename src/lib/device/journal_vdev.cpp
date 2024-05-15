@@ -34,6 +34,7 @@
 #include "common/homestore_assert.hpp"
 #include "common/homestore_utils.hpp"
 #include "common/resource_mgr.hpp"
+#include "common/crash_simulator.hpp"
 
 SISL_LOGGING_DECL(journalvdev)
 
@@ -45,15 +46,15 @@ JournalVirtualDev::JournalVirtualDev(DeviceManager& dmgr, const vdev_info& vinfo
     m_init_private_data = std::make_shared< JournalChunkPrivate >();
     m_chunk_pool = std::make_unique< ChunkPool >(
         dmgr,
-        ChunkPool::Params{
-            HS_DYNAMIC_CONFIG(generic.journal_chunk_pool_capacity),
-            [this]() {
-                m_init_private_data->created_at = get_time_since_epoch_ms();
-                m_init_private_data->end_of_chunk = m_vdev_info.chunk_size;
-                sisl::blob private_blob{r_cast< uint8_t* >(m_init_private_data.get()), sizeof(JournalChunkPrivate)};
-                return private_blob;
-            },
-            m_vdev_info.hs_dev_type, m_vdev_info.vdev_id, m_vdev_info.chunk_size});
+        ChunkPool::Params{HS_DYNAMIC_CONFIG(generic.journal_chunk_pool_capacity),
+                          [this]() {
+                              m_init_private_data->created_at = get_time_since_epoch_ms();
+                              m_init_private_data->end_of_chunk = m_vdev_info.chunk_size;
+                              sisl::blob private_blob{r_cast< uint8_t* >(m_init_private_data.get()),
+                                                      sizeof(JournalChunkPrivate)};
+                              return private_blob;
+                          },
+                          m_vdev_info.hs_dev_type, m_vdev_info.vdev_id, m_vdev_info.chunk_size});
 
     resource_mgr().register_journal_vdev_exceed_cb([this]([[maybe_unused]] int64_t dirty_buf_count, bool critical) {
         // either it is critical or non-critical, call cp_flush;
@@ -245,14 +246,14 @@ off_t JournalVirtualDev::Descriptor::alloc_next_append_blk(size_t sz) {
         LOGDEBUGMOD(journalvdev, "No space left for size {} Creating chunk desc {}", sz, to_string());
 
 #ifdef _PRERELEASE
-        iomgr_flip::test_and_abort("abort_before_update_eof_cur_chunk");
+        if (hs()->crash_simulator().crash_if_flip_set("abort_before_update_eof_cur_chunk")) { return tail_offset(); }
 #endif
 
         // Append a chunk to m_journal_chunks list. This will increase the m_end_offset.
         append_chunk();
 
 #ifdef _PRERELEASE
-        iomgr_flip::test_and_abort("abort_after_update_eof_next_chunk");
+        if (hs()->crash_simulator().crash_if_flip_set("abort_after_update_eof_next_chunk")) { return tail_offset(); }
 #endif
 
         RELEASE_ASSERT((tail_offset() + static_cast< off_t >(sz)) < m_end_offset, "No space for append blk");

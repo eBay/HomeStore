@@ -54,6 +54,10 @@ class ChunkSelector;
 class ReplDevListener;
 class ReplApplication;
 
+#ifdef _PRERELEASE
+class CrashSimulator;
+#endif
+
 using HomeStoreSafePtr = std::shared_ptr< HomeStore >;
 
 VENUM(hs_vdev_type_t, uint32_t, DATA_VDEV = 1, INDEX_VDEV = 2, META_VDEV = 3, LOGDEV_VDEV = 4);
@@ -169,6 +173,12 @@ public:
     ResourceMgr& resource_mgr() { return *m_resource_mgr.get(); }
     CPManager& cp_mgr() { return *m_cp_mgr.get(); }
     shared< sisl::Evictor > evictor() { return m_evictor; }
+
+#ifdef _PRERELEASE
+    HomeStore& with_crash_simulator(std::function< void(void) > restart_cb);
+    CrashSimulator& crash_simulator() { return *m_crash_simulator; }
+    unique< CrashSimulator > m_crash_simulator;
+#endif
 
 private:
     void init_cache();
