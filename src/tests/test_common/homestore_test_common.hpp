@@ -245,10 +245,12 @@ public:
                 hsi->with_repl_data_service(tp.repl_app, tp.custom_chunk_selector);
             }
         }
+#ifdef _PRERELEASE
         hsi->with_crash_simulator([=]() {
             LOGINFO("CrashSimulator::crash() is called - restarting homestore");
             start_homestore(test_name, svc_params, cb, true /* fake_restart */, false /* init_device */);
         });
+#endif
 
         bool need_format =
             hsi->start(hs_input_params{.devices = device_info, .app_mem_size = app_mem_size}, std::move(cb));
