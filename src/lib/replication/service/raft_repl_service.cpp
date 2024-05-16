@@ -128,6 +128,7 @@ void RaftReplService::start() {
     // Step 6: Iterate all the repl dev and ask each one of the join the raft group.
     for (auto it = m_rd_map.begin(); it != m_rd_map.end();) {
         auto rdev = std::dynamic_pointer_cast< RaftReplDev >(it->second);
+        rdev->wait_for_logstore_ready();
         if (!rdev->join_group()) {
             it = m_rd_map.erase(it);
         } else {
