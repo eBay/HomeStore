@@ -196,9 +196,14 @@ void MetaBlkService::format_ssb() {
 // m_meta_lock should be while calling this function;
 void MetaBlkService::write_ssb() {
     // write current ovf blk to disk;
-    try {
-        m_sb_vdev->sync_write((const char*)m_ssb, block_size(), m_ssb->bid);
-    } catch (std::exception& e) { HS_REL_ASSERT(false, "exception happen during write {}", e.what()); }
+    auto error = m_sb_vdev->sync_write((const char*)m_ssb, block_size(), m_ssb->bid);
+    if (error.value()) {
+        // the offset and buffer length is printed in the error messages of iomgr.
+        // buf address here is to show whether the buffer is aligned or not.
+        // TODO: hanle this error properly
+        HS_REL_ASSERT(false, "error happens happen during write ssb: {}, buf address: {}", error.what(),
+                      (const char*)m_ssb);
+    }
 
     LOGINFO("Successfully write m_ssb to disk: {}", m_ssb->to_string());
 
@@ -436,9 +441,14 @@ void MetaBlkService::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const uint
     HS_DBG_ASSERT_LE(ovf_hdr->h.context_sz + offset, sz);
 
     // write current ovf blk to disk;
-    try {
-        m_sb_vdev->sync_write((const char*)ovf_hdr, block_size(), ovf_hdr->h.bid);
-    } catch (std::exception& e) { HS_REL_ASSERT(false, "exception happen during write {}", e.what()); }
+    auto error = m_sb_vdev->sync_write((const char*)ovf_hdr, block_size(), ovf_hdr->h.bid);
+    if (error.value()) {
+        // the offset and buffer length is printed in the error messages of iomgr.
+        // buf address here is to show whether the buffer is aligned or not.
+        // TODO: hanle this error properly
+        HS_REL_ASSERT(false, "error happens happen during write: {}, buf address: {}", error.what(),
+                      (const char*)ovf_hdr);
+    }
 
     // NOTE: The start write pointer which is context data pointer plus offset must be dma boundary aligned
     // TO DO: Might need to differentiate based on data or fast type
@@ -488,9 +498,14 @@ void MetaBlkService::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const uint
             size_written += (ovf_hdr->h.context_sz - size_written);
         }
 
-        try {
-            m_sb_vdev->sync_write(r_cast< const char* >(cur_ptr), cur_size, data_bid[i]);
-        } catch (std::exception& e) { HS_REL_ASSERT(false, "exception happen during write {}", e.what()); }
+        auto error = m_sb_vdev->sync_write(r_cast< const char* >(cur_ptr), cur_size, data_bid[i]);
+        if (error.value()) {
+            // the offset and buffer length is printed in the error messages of iomgr.
+            // buf address here is to show whether the buffer is aligned or not.
+            // TODO: hanle this error properly
+            HS_REL_ASSERT(false, "error happens happen during write: {}, buf address: {}", error.what(),
+                          r_cast< const char* >(cur_ptr));
+        }
     }
 
     if (data_buf) { hs_utils::iobuf_free(data_buf, sisl::buftag::metablk); }
@@ -501,9 +516,14 @@ void MetaBlkService::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const uint
 
 void MetaBlkService::write_meta_blk_to_disk(meta_blk* mblk) {
     // write current ovf blk to disk;
-    try {
-        m_sb_vdev->sync_write((const char*)mblk, block_size(), mblk->hdr.h.bid);
-    } catch (std::exception& e) { HS_REL_ASSERT(false, "exception happen during write {}", e.what()); }
+    auto error = m_sb_vdev->sync_write((const char*)mblk, block_size(), mblk->hdr.h.bid);
+    if (error.value()) {
+        // the offset and buffer length is printed in the error messages of iomgr.
+        // buf address here is to show whether the buffer is aligned or not.
+        // TODO: hanle this error properly
+        HS_REL_ASSERT(false, "error happens happen during write_meta_blk_to_disk: {}, buf address: {}", error.what(),
+                      (const char*)mblk);
+    }
 }
 
 //
