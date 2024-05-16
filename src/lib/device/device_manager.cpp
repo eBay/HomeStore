@@ -36,19 +36,16 @@ static int determine_open_flags(io_flag oflags) {
 
     switch (oflags) {
     case io_flag::BUFFERED_IO:
-        // open_flags = O_RDWR | O_CREAT;
-        open_flags = O_RDWR;
+        open_flags = O_RDWR | O_CREAT;
         break;
     case io_flag::READ_ONLY:
         open_flags = O_RDONLY;
         break;
     case io_flag::DIRECT_IO:
-        // open_flags = O_RDWR | O_CREAT | O_DIRECT;
-        open_flags = O_RDWR | O_DIRECT;
+        open_flags = O_RDWR | O_CREAT | O_DIRECT;
         break;
     default:
-        // open_flags = O_RDWR | O_CREAT;
-        open_flags = O_RDWR;
+        open_flags = O_RDWR | O_CREAT;
     }
 
     return open_flags;
