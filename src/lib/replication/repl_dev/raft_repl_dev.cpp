@@ -38,7 +38,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
         m_data_journal =
             std::make_shared< ReplLogStore >(*this, *m_state_machine, m_rd_sb->logdev_id, m_rd_sb->logstore_id);
         m_next_dsn = m_rd_sb->last_applied_dsn + 1;
-        m_commit_upto_lsn = m_rd_sb->commit_lsn;
+        m_commit_upto_lsn = m_rd_sb->durable_commit_lsn;
         m_last_flushed_commit_lsn = m_commit_upto_lsn;
         m_compact_lsn = m_rd_sb->compact_lsn;
 
@@ -470,7 +470,7 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreq
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     if (rreqs.size() == 0) { return; }
 
-    std::vector< ::flatbuffers::Offset< RequestEntry > > entries;
+    std::vector<::flatbuffers::Offset< RequestEntry > > entries;
     entries.reserve(rreqs.size());
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
@@ -959,6 +959,13 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
     }
 }
 
+void RaftReplDev::flush_durable_commit_lsn() {
+    auto const lsn = m_commit_upto_lsn.load();
+    std::unique_lock lg{m_sb_mtx};
+    m_rd_sb->durable_commit_lsn = lsn;
+    m_rd_sb.write();
+}
+
 ///////////////////////////////////  Private metohds ////////////////////////////////////
 void RaftReplDev::cp_flush(CP*) {
     auto const lsn = m_commit_upto_lsn.load();
@@ -968,8 +975,10 @@ void RaftReplDev::cp_flush(CP*) {
         // Not dirtied since last flush ignore
         return;
     }
+
+    std::unique_lock lg{m_sb_mtx};
     m_rd_sb->compact_lsn = clsn;
-    m_rd_sb->commit_lsn = lsn;
+    m_rd_sb->durable_commit_lsn = lsn;
     m_rd_sb->checkpoint_lsn = lsn;
     m_rd_sb->last_applied_dsn = m_next_dsn.load();
     m_rd_sb.write();

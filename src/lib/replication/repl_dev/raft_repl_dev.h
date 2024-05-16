@@ -83,6 +83,8 @@ private:
     std::atomic< repl_lsn_t > m_commit_upto_lsn{0}; // LSN which was lastly written, to track flushes
     std::atomic< repl_lsn_t > m_compact_lsn{0};     // LSN upto which it was compacted, it is used to track where to
 
+    std::mutex m_sb_mtx; // Lock to protect the repl dev superblock
+
     repl_lsn_t m_last_flushed_commit_lsn{0}; // LSN upto which it was flushed to persistent store
     iomgr::timer_handle_t m_sb_flush_timer_hdl;
 
@@ -172,6 +174,11 @@ public:
     nuraft::ptr< nuraft::snapshot > get_last_snapshot() { return m_last_snapshot; }
 
     void wait_for_logstore_ready() { m_data_journal->wait_for_log_store_ready(); }
+
+    /**
+     * Flush the durable commit LSN to the superblock
+     */
+    void flush_durable_commit_lsn();
 
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////
