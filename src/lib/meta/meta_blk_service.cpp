@@ -201,7 +201,7 @@ void MetaBlkService::write_ssb() {
         // the offset and buffer length is printed in the error messages of iomgr.
         // buf address here is to show whether the buffer is aligned or not.
         // TODO: hanle this error properly
-        HS_REL_ASSERT(false, "error happens happen during write ssb: {}, buf address: {}", error.what(),
+        HS_REL_ASSERT(false, "error happens happen during write ssb: {}, buf address: {}", error.value(),
                       (const char*)m_ssb);
     }
 
@@ -446,7 +446,7 @@ void MetaBlkService::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const uint
         // the offset and buffer length is printed in the error messages of iomgr.
         // buf address here is to show whether the buffer is aligned or not.
         // TODO: hanle this error properly
-        HS_REL_ASSERT(false, "error happens happen during write: {}, buf address: {}", error.what(),
+        HS_REL_ASSERT(false, "error happens happen during write: {}, buf address: {}", error.value(),
                       (const char*)ovf_hdr);
     }
 
@@ -503,7 +503,7 @@ void MetaBlkService::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const uint
             // the offset and buffer length is printed in the error messages of iomgr.
             // buf address here is to show whether the buffer is aligned or not.
             // TODO: hanle this error properly
-            HS_REL_ASSERT(false, "error happens happen during write: {}, buf address: {}", error.what(),
+            HS_REL_ASSERT(false, "error happens happen during write: {}, buf address: {}", error.value(),
                           r_cast< const char* >(cur_ptr));
         }
     }
@@ -521,7 +521,7 @@ void MetaBlkService::write_meta_blk_to_disk(meta_blk* mblk) {
         // the offset and buffer length is printed in the error messages of iomgr.
         // buf address here is to show whether the buffer is aligned or not.
         // TODO: hanle this error properly
-        HS_REL_ASSERT(false, "error happens happen during write_meta_blk_to_disk: {}, buf address: {}", error.what(),
+        HS_REL_ASSERT(false, "error happens happen during write_meta_blk_to_disk: {}, buf address: {}", error.value(),
                       (const char*)mblk);
     }
 }
