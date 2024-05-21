@@ -988,19 +988,24 @@ void RaftReplDev::gc_repl_reqs() {
 
         if (rreq->is_expired()) {
             expired_keys.push_back(key);
-            RD_LOGD("Raft Channel: rreq=[{}] is expired, cleaning up", rreq->to_compact_string());
+            RD_LOGD("rreq=[{}] is expired, cleaning up", rreq->to_compact_string());
+
             // do garbage collection
             // 1. free the allocated blocks
             if (rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) {
                 auto blkid = rreq->local_blkid();
-                data_service().async_free_blk(blkid).thenValue([blkid](auto&& err) {
+                data_service().async_free_blk(blkid).thenValue([this, blkid](auto&& err) {
                     HS_LOG_ASSERT(!err, "freeing blkid={} upon error failed, potential to cause blk leak",
                                   blkid.to_string());
+                    RD_LOGD("blkid={} freed successfully", blkid.to_string());
                 });
             }
 
             // 2. remove from the m_repl_key_req_map
-            m_repl_key_req_map.erase(rreq->rkey());
+            // handle_error during fetch data response might have already removed the rreq from the this map
+            if (m_repl_key_req_map.find(rreq->rkey()) != m_repl_key_req_map.end()) {
+                m_repl_key_req_map.erase(rreq->rkey());
+            }
         }
     });
 
