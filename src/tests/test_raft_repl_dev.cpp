@@ -686,6 +686,9 @@ TEST_F(RaftReplDevTest, GCReplReqs) {
     // Step 2: Restart replica-0 (Leader)
     this->restart_replica(0, 10);
 
+    LOGINFO("After original leader is shutdown, insert more entries into the new leader");
+    this->write_on_leader(100, true /* wait for commit on all replicas */);
+
     g_helper->sync_for_verify_start();
 
     LOGINFO("Validate all data written so far by reading them");

@@ -336,8 +336,8 @@ void RaftReplService::start_reaper_thread() {
             m_rdev_gc_timer_hdl = iomanager.schedule_thread_timer(
                 HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 * 1000, true /* recurring */,
                 nullptr, [this](void*) {
-                    gc_repl_devs();
                     gc_repl_reqs();
+                    gc_repl_devs();
                 });
 
             // Check for queued fetches at the minimum every second
@@ -384,7 +384,7 @@ void RaftReplService::fetch_pending_data() {
 
 void RaftReplService::gc_repl_reqs() {
     std::shared_lock lg(m_rd_map_mtx);
-    for (auto it = m_rd_map.begin(); it != m_rd_map.end();) {
+    for (auto it = m_rd_map.begin(); it != m_rd_map.end(); ++it) {
         auto rdev = std::dynamic_pointer_cast< RaftReplDev >(it->second);
         rdev->gc_repl_reqs();
     }
