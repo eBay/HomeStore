@@ -28,6 +28,7 @@
 #include <homestore/index_service.hpp>
 #include <homestore/replication_service.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
+#include <device/hs_super_blk.h>
 #include <iomgr/iomgr_config_generated.h>
 #include <common/homestore_assert.hpp>
 
@@ -177,7 +178,8 @@ public:
 
     static void start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
                                 hs_before_services_starting_cb_t cb = nullptr, bool fake_restart = false,
-                                bool init_device = true, uint32_t shutdown_delay_sec = 5) {
+                                bool init_device = true, uint32_t shutdown_delay_sec = 5,
+                                std::vector< std::string > cust_dev_names = {}) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
@@ -190,14 +192,37 @@ public:
         }
 
         std::vector< homestore::dev_info > device_info;
-        if (SISL_OPTIONS.count("device_list")) {
-            s_dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
+        if (!cust_dev_names.empty() || SISL_OPTIONS.count("device_list")) {
+            cust_dev_names.empty() ? s_dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >()
+                                   : s_dev_names = std::move(cust_dev_names);
             LOGINFO("Taking input dev_list: {}",
                     std::accumulate(
                         s_dev_names.begin(), s_dev_names.end(), std::string(""),
                         [](const std::string& ss, const std::string& s) { return ss.empty() ? s : ss + "," + s; }));
 
+            if (init_device && !fake_restart) {
+                // zero the homestore pdev's first block for each device;
+                auto const zero_size = hs_super_blk::first_block_size() * 1024;
+                std::vector< int > zeros(zero_size, 0);
+                for (auto const& d : s_dev_names) {
+                    if (!std::filesystem::exists(d)) {
+                        LOGINFO("Device {} does not exist", d);
+                        HS_REL_ASSERT(false, "Device does not exist");
+                    }
+
+                    auto fd = ::open(d.c_str(), O_RDWR, 0640);
+                    HS_REL_ASSERT(fd != -1, "Failed to open device");
+
+                    auto const write_sz =
+                        pwrite(fd, zeros.data(), zero_size /* size */, hs_super_blk::first_block_offset() /* offset */);
+                    HS_REL_ASSERT(write_sz == zero_size, "Failed to write to device");
+                    LOGINFO("Successfully zeroed the 1st {} of device {}", zero_size, d);
+                    ::close(fd);
+                }
+            }
+
             for (const auto& name : s_dev_names) {
+                // iomgr::DriveInterface::emulate_drive_type(name, iomgr::drive_type::block_hdd);
                 device_info.emplace_back(name, homestore::HSDevType::Data);
             }
         } else {
