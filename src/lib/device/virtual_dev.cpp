@@ -118,7 +118,8 @@ void VirtualDev::add_chunk(cshared< Chunk >& chunk, bool is_fresh_chunk) {
                                    chunk->physical_dev()->align_size(), chunk->size(), m_auto_recovery,
                                    chunk->chunk_id(), is_fresh_chunk);
     chunk->set_block_allocator(std::move(ba));
-    chunk->set_vdev_ordinal(m_all_chunks.size());
+    // TODO: when vdev_ordinal is  used, revisit here to make sure it is set correctly;
+    chunk->set_vdev_ordinal(m_total_chunk_num++);
     m_pdevs.insert(chunk->physical_dev_mutable());
     m_all_chunks[chunk->chunk_id()] = chunk;
     m_chunk_selector->add_chunk(chunk);
@@ -128,6 +129,7 @@ void VirtualDev::remove_chunk(cshared< Chunk >& chunk) {
     std::unique_lock lg{m_mgmt_mutex};
     m_all_chunks[chunk->chunk_id()].reset();
     m_all_chunks[chunk->chunk_id()] = nullptr;
+    m_total_chunk_num++;
     m_chunk_selector->remove_chunk(chunk);
 }
 
@@ -136,6 +138,7 @@ folly::Future< std::error_code > VirtualDev::async_format() {
     s_futs.clear();
 
     for (auto& chunk : m_all_chunks) {
+        if (!chunk) continue;
         auto* pdev = chunk->physical_dev_mutable();
         LOGINFO("writing zero for chunk: {}, size: {}, offset: {}", chunk->chunk_id(), in_bytes(chunk->size()),
                 chunk->start_offset());
@@ -222,7 +225,7 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
                     (status == BlkAllocStatus::PARTIAL && hints.partial_alloc_ok)) {
                     break;
                 }
-            } while (++attempt < m_all_chunks.size());
+            } while (++attempt < m_total_chunk_num);
         }
 
         if ((status != BlkAllocStatus::SUCCESS) && !((status == BlkAllocStatus::PARTIAL) && hints.partial_alloc_ok)) {
@@ -564,6 +567,7 @@ void VirtualDev::submit_batch() {
 uint64_t VirtualDev::available_blks() const {
     uint64_t avl_blks{0};
     for (auto& chunk : m_all_chunks) {
+        if (!chunk) continue;
         avl_blks += chunk->blk_allocator()->available_blks();
     }
     return avl_blks;
@@ -572,6 +576,7 @@ uint64_t VirtualDev::available_blks() const {
 uint64_t VirtualDev::used_size() const {
     uint64_t alloc_cnt{0};
     for (auto& chunk : m_all_chunks) {
+        if (!chunk) continue;
         alloc_cnt += chunk->blk_allocator()->get_used_blks();
     }
     return (alloc_cnt * block_size());
@@ -590,6 +595,7 @@ nlohmann::json VirtualDev::get_status(int log_level) const {
 
     try {
         for (auto& chunk : m_all_chunks) {
+            if (!chunk) continue;
             nlohmann::json chunk_j;
             chunk_j["ChunkInfo"] = chunk->get_status(log_level);
             if (chunk->blk_allocator() != nullptr) {

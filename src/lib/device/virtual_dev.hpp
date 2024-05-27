@@ -94,6 +94,7 @@ protected:
     std::mutex m_mgmt_mutex;          // Any mutex taken for management operations (like adding/removing chunks).
     std::set< PhysicalDev* > m_pdevs; // PDevs this vdev is working on
     sisl::sparse_vector< shared< Chunk > > m_all_chunks; // All chunks part of this vdev
+    uint64_t m_total_chunk_num{0};                       // Total number of chunks
     std::shared_ptr< ChunkSelector > m_chunk_selector;   // Instance of chunk selector
     blk_allocator_type_t m_allocator_type;
     chunk_selector_type_t m_chunk_selector_type;
@@ -284,6 +285,7 @@ public:
     virtual uint32_t num_mirrors() const { return 0; }
     virtual std::string to_string() const;
     virtual nlohmann::json get_status(int log_level) const;
+    virtual uint64_t get_total_chunk_num() const { return m_total_chunk_num; }
 
     uint32_t align_size() const;
     uint32_t optimal_page_size() const;
