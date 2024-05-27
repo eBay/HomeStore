@@ -57,6 +57,7 @@ void BlkDataService::create_vdev(uint64_t size, HSDevType devType, uint32_t blk_
 
 // both first_time_boot and recovery path will come here
 shared< VirtualDev > BlkDataService::open_vdev(const vdev_info& vinfo, bool load_existing) {
+    if (m_vdev) return m_vdev;
     m_vdev = std::make_shared< VirtualDev >(*(hs()->device_mgr()), vinfo, nullptr, true /* auto_recovery */,
                                             std::move(m_custom_chunk_selector));
     m_blk_size = vinfo.blk_size;
@@ -197,11 +198,16 @@ BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& 
 void BlkDataService::commit_blk(MultiBlkId const& blkid) {
     if (blkid.num_pieces() == 1) {
         // Shortcut to most common case
-        m_vdev->commit_blk(blkid);
+        auto alloc_status = m_vdev->commit_blk(blkid);
+        // if any error happens when committing the blk to data service, we should assert and crash to stopping writing
+        // to this node.
+        if (alloc_status != BlkAllocStatus::SUCCESS) HS_REL_ASSERT(0, "Failed to commit blk: {} ", blkid.to_string());
     } else {
         auto it = blkid.iterate();
         while (auto const bid = it.next()) {
-            m_vdev->commit_blk(*bid);
+            auto alloc_status = m_vdev->commit_blk(*bid);
+            if (alloc_status != BlkAllocStatus::SUCCESS)
+                HS_REL_ASSERT(0, "Failed to commit blk: {} ", blkid.to_string());
         }
     }
 }
@@ -211,13 +217,18 @@ folly::Future< std::error_code > BlkDataService::async_free_blk(MultiBlkId const
     folly::Promise< std::error_code > promise;
     auto f = promise.getFuture();
 
-    m_blk_read_tracker->wait_on(bids, [this, bids, p = std::move(promise)]() mutable {
-        {
-            auto cpg = hs()->cp_mgr().cp_guard();
-            m_vdev->free_blk(bids, s_cast< VDevCPContext* >(cpg.context(cp_consumer_t::BLK_DATA_SVC)));
-        }
-        p.setValue(std::error_code{});
-    });
+    if (!m_vdev->is_blk_exist(bids)) {
+        promise.setValue(std::make_error_code(std::errc::resource_unavailable_try_again));
+    } else {
+        m_blk_read_tracker->wait_on(bids, [this, bids, p = std::move(promise)]() mutable {
+            {
+                auto cpg = hs()->cp_mgr().cp_guard();
+                m_vdev->free_blk(bids, s_cast< VDevCPContext* >(cpg.context(cp_consumer_t::BLK_DATA_SVC)));
+            }
+            p.setValue(std::error_code{});
+        });
+    }
+
     return f;
 }
 

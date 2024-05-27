@@ -144,10 +144,11 @@ void DeviceManager::load_devices() {
     RELEASE_ASSERT_EQ(m_first_blk_hdr.version, first_block_header::CURRENT_SUPERBLOCK_VERSION,
                       "We don't support superblock version upgrade yet");
 
-    RELEASE_ASSERT_EQ(m_first_blk_hdr.num_pdevs, m_dev_infos.size(),
-                      "WARNING: The homestore is formatted with {} devices, but restarted with {} devices. Homestore "
-                      "does not support dynamic addition/removal of devices",
-                      m_first_blk_hdr.num_pdevs, m_dev_infos.size());
+    if (m_first_blk_hdr.num_pdevs != m_dev_infos.size()) {
+        // enable start with missing drives
+        LOGWARN("Homestore is formatted with {} devices, but restarted with {} devices.", m_first_blk_hdr.num_pdevs,
+                m_dev_infos.size());
+    }
 
     for (const auto& d : m_dev_infos) {
         first_block fblk = PhysicalDev::read_first_block(d.dev_name, device_open_flags(d.dev_name));
@@ -356,6 +357,8 @@ void DeviceManager::load_vdevs() {
     // There are some vdevs load their chunks in each of pdev
     if (m_vdevs.size()) {
         for (auto& pdev : m_all_pdevs) {
+            // we might have some missing pdevs in the sparse_vector m_all_pdevs, so skip them
+            if (!pdev) continue;
             pdev->load_chunks([this](cshared< Chunk >& chunk) -> bool {
                 // Found a chunk for which vdev information is missing
                 if (m_vdevs[chunk->vdev_id()] == nullptr) {
@@ -482,6 +485,7 @@ uint32_t DeviceManager::populate_pdev_info(const dev_info& dinfo, const iomgr::d
 uint64_t DeviceManager::total_capacity() const {
     uint64_t cap{0};
     for (const auto& pdev : m_all_pdevs) {
+        if (!pdev) continue;
         cap += pdev->data_size();
     }
     return cap;

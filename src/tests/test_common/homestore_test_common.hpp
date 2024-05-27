@@ -44,7 +44,7 @@ SISL_OPTION_GROUP(
     (num_threads, "", "num_threads", "number of threads", ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
     (num_fibers, "", "num_fibers", "number of fibers per thread", ::cxxopts::value< uint32_t >()->default_value("2"),
      "number"),
-    (num_devs, "", "num_devs", "number of devices to create", ::cxxopts::value< uint32_t >()->default_value("2"),
+    (num_devs, "", "num_devs", "number of devices to create", ::cxxopts::value< uint32_t >()->default_value("3"),
      "number"),
     (dev_size_mb, "", "dev_size_mb", "size of each device in MB", ::cxxopts::value< uint64_t >()->default_value("1024"),
      "number"),
@@ -179,7 +179,7 @@ public:
     static void start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
                                 hs_before_services_starting_cb_t cb = nullptr, bool fake_restart = false,
                                 bool init_device = true, uint32_t shutdown_delay_sec = 5,
-                                std::vector< std::string > cust_dev_names = {}) {
+                                std::vector< std::pair< std::string, homestore::HSDevType > > cust_dev_names = {}) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
@@ -193,8 +193,13 @@ public:
 
         std::vector< homestore::dev_info > device_info;
         if (!cust_dev_names.empty() || SISL_OPTIONS.count("device_list")) {
-            cust_dev_names.empty() ? s_dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >()
-                                   : s_dev_names = std::move(cust_dev_names);
+            if (cust_dev_names.empty())
+                s_dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
+            else {
+                for (auto& [name, _] : cust_dev_names) {
+                    s_dev_names.emplace_back(name);
+                }
+            }
             LOGINFO("Taking input dev_list: {}",
                     std::accumulate(
                         s_dev_names.begin(), s_dev_names.end(), std::string(""),
@@ -221,10 +226,17 @@ public:
                 }
             }
 
-            for (const auto& name : s_dev_names) {
-                // iomgr::DriveInterface::emulate_drive_type(name, iomgr::drive_type::block_hdd);
-                device_info.emplace_back(name, homestore::HSDevType::Data);
+            if (cust_dev_names.empty()) {
+                for (const auto& name : s_dev_names) {
+                    // iomgr::DriveInterface::emulate_drive_type(name, iomgr::drive_type::block_hdd);
+                    device_info.emplace_back(name, homestore::HSDevType::Data);
+                }
+            } else {
+                for (const auto& [name, dev_type] : cust_dev_names) {
+                    device_info.emplace_back(name, dev_type);
+                }
             }
+
         } else {
             /* create files */
             LOGINFO("creating {} device files with each of size {} ", ndevices, homestore::in_bytes(dev_size));
@@ -234,7 +246,11 @@ public:
 
             if (!fake_restart && init_device) { init_files(s_dev_names, dev_size); }
             for (const auto& fname : s_dev_names) {
-                device_info.emplace_back(std::filesystem::canonical(fname).string(), homestore::HSDevType::Data);
+                if (device_info.empty())
+                    // First device is fast device
+                    device_info.emplace_back(std::filesystem::canonical(fname).string(), homestore::HSDevType::Fast);
+                else
+                    device_info.emplace_back(std::filesystem::canonical(fname).string(), homestore::HSDevType::Data);
             }
         }
 
@@ -278,25 +294,27 @@ public:
         }
 
         if (need_format) {
-            hsi->format_and_start({{HS_SERVICE::META, {.size_pct = svc_params[HS_SERVICE::META].size_pct}},
-                                   {HS_SERVICE::LOG,
-                                    {.size_pct = svc_params[HS_SERVICE::LOG].size_pct,
-                                     .chunk_size = svc_params[HS_SERVICE::LOG].chunk_size,
-                                     .vdev_size_type = svc_params[HS_SERVICE::LOG].vdev_size_type}},
-                                   {HS_SERVICE::DATA,
-                                    {.size_pct = svc_params[HS_SERVICE::DATA].size_pct,
-                                     .num_chunks = svc_params[HS_SERVICE::DATA].num_chunks,
-                                     .alloc_type = svc_params[HS_SERVICE::DATA].blkalloc_type,
-                                     .chunk_sel_type = svc_params[HS_SERVICE::DATA].custom_chunk_selector
-                                         ? chunk_selector_type_t::CUSTOM
-                                         : chunk_selector_type_t::ROUND_ROBIN}},
-                                   {HS_SERVICE::INDEX, {.size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
-                                   {HS_SERVICE::REPLICATION,
-                                    {.size_pct = svc_params[HS_SERVICE::REPLICATION].size_pct,
-                                     .alloc_type = svc_params[HS_SERVICE::REPLICATION].blkalloc_type,
-                                     .chunk_sel_type = svc_params[HS_SERVICE::REPLICATION].custom_chunk_selector
-                                         ? chunk_selector_type_t::CUSTOM
-                                         : chunk_selector_type_t::ROUND_ROBIN}}});
+            hsi->format_and_start(
+                {{HS_SERVICE::META,
+                  {.dev_type = homestore::HSDevType::Fast, .size_pct = svc_params[HS_SERVICE::META].size_pct}},
+                 {HS_SERVICE::LOG,
+                  {.size_pct = svc_params[HS_SERVICE::LOG].size_pct,
+                   .chunk_size = svc_params[HS_SERVICE::LOG].chunk_size,
+                   .vdev_size_type = svc_params[HS_SERVICE::LOG].vdev_size_type}},
+                 {HS_SERVICE::DATA,
+                  {.size_pct = svc_params[HS_SERVICE::DATA].size_pct,
+                   .num_chunks = svc_params[HS_SERVICE::DATA].num_chunks,
+                   .alloc_type = svc_params[HS_SERVICE::DATA].blkalloc_type,
+                   .chunk_sel_type = svc_params[HS_SERVICE::DATA].custom_chunk_selector
+                       ? chunk_selector_type_t::CUSTOM
+                       : chunk_selector_type_t::ROUND_ROBIN}},
+                 {HS_SERVICE::INDEX, {.size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
+                 {HS_SERVICE::REPLICATION,
+                  {.size_pct = svc_params[HS_SERVICE::REPLICATION].size_pct,
+                   .alloc_type = svc_params[HS_SERVICE::REPLICATION].blkalloc_type,
+                   .chunk_sel_type = svc_params[HS_SERVICE::REPLICATION].custom_chunk_selector
+                       ? chunk_selector_type_t::CUSTOM
+                       : chunk_selector_type_t::ROUND_ROBIN}}});
         }
     }
 

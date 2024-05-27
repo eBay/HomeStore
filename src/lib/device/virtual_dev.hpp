@@ -293,6 +293,7 @@ public:
     const std::set< PhysicalDev* >& get_pdevs() const { return m_pdevs; }
     std::vector< shared< Chunk > > get_chunks() const;
     shared< Chunk > get_next_chunk(cshared< Chunk >& chunk) const;
+    bool is_blk_exist(MultiBlkId const& b) const;
 
     ///////////////////////// Meta operations on vdev ////////////////////////
     void update_vdev_private(const sisl::blob& data);
