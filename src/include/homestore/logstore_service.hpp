@@ -29,6 +29,7 @@
 
 #include <homestore/homestore_decl.hpp>
 #include <homestore/logstore/log_store.hpp>
+#include <homestore/superblk_handler.hpp>
 
 namespace homestore {
 
@@ -49,6 +50,17 @@ class JournalVirtualDev;
 struct vdev_info;
 struct log_dump_req;
 struct logdev_superblk;
+
+static constexpr uint64_t logstore_service_sb_magic{0xb0b0c01b};
+static constexpr uint32_t logstore_service_sb_version{0x1};
+
+#pragma pack(1)
+struct logstore_service_super_block {
+    uint64_t magic{logstore_service_sb_magic};
+    uint32_t version{logstore_service_sb_version};
+    uint32_t m_last_logdev_id{0};
+};
+#pragma pack()
 
 class LogStoreService {
     friend class HomeLogStore;
@@ -173,9 +185,12 @@ public:
      */
     iomgr::io_fiber_t truncate_thread() { return m_truncate_fiber; }
 
+    void delete_unopened_logdevs();
+
 private:
     std::shared_ptr< LogDev > create_new_logdev_internal(logdev_id_t logdev_id);
-    void delete_unopened_logdevs();
+    void on_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
+    logdev_id_t get_next_logdev_id();
     void logdev_super_blk_found(const sisl::byte_view& buf, void* meta_cookie);
     void rollback_super_blk_found(const sisl::byte_view& buf, void* meta_cookie);
     void start_threads();
@@ -183,7 +198,6 @@ private:
 
 private:
     std::unordered_map< logdev_id_t, std::shared_ptr< LogDev > > m_id_logdev_map;
-    std::unique_ptr< sisl::IDReserver > m_id_reserver;
     folly::SharedMutexWritePriority m_logdev_map_mtx;
 
     std::shared_ptr< JournalVirtualDev > m_logdev_vdev;
@@ -191,6 +205,7 @@ private:
     iomgr::io_fiber_t m_flush_fiber;
     LogStoreServiceMetrics m_metrics;
     std::unordered_set< logdev_id_t > m_unopened_logdev;
+    superblk< logstore_service_super_block > m_sb;
 };
 
 extern LogStoreService& logstore_service();

@@ -436,6 +436,8 @@ TEST_F(LogDevTest, DeleteUnopenedLogDev) {
     LOGINFO("Restart homestore");
     restart();
 
+    // Explicitly call delete for unopened ones.
+    hs()->logstore_service().delete_unopened_logdevs();
     auto log_devs = logstore_service().get_all_logdevs();
     ASSERT_EQ(log_devs.size(), id_set.size() / 2);
     for (auto& logdev : log_devs) {

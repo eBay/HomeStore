@@ -36,6 +36,8 @@
 #include "common/homestore_config.hpp"
 #include "common/homestore_assert.hpp"
 #include "common/homestore_utils.hpp"
+
+#define private public
 #include "test_common/hs_repl_test_common.hpp"
 #include "replication/service/raft_repl_service.h"
 #include "replication/repl_dev/raft_repl_dev.h"
@@ -251,10 +253,21 @@ public:
                 ASSERT_EQ(err, ReplServiceError::OK) << "Error in destroying the group";
             });
         }
+
+        for (auto const& db : dbs_) {
+            auto repl_dev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
+            do {
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                auto& raft_repl_svc = dynamic_cast< RaftReplService& >(hs()->repl_service());
+                raft_repl_svc.gc_repl_devs();
+                LOGINFO("Waiting for repl dev to get destroyed");
+            } while (!repl_dev->is_destroyed());
+        }
     }
 
     void generate_writes(uint64_t data_size, uint32_t max_size_per_iov, shared< TestReplicatedDB > db = nullptr) {
         if (db == nullptr) { db = pick_one_db(); }
+        LOGINFO("Writing on group_id={}", db->repl_dev()->group_id());
         db->db_write(data_size, max_size_per_iov);
     }
 
@@ -563,9 +576,12 @@ TEST_F(RaftReplDevTest, Leader_Restart) {
     // Step 1: Fill up entries on all replicas
     uint64_t entries_per_attempt = SISL_OPTIONS["num_io"].as< uint64_t >();
     this->write_on_leader(entries_per_attempt, true /* wait for commit on all replicas */);
+    std::this_thread::sleep_for(std::chrono::seconds(3));
 
     // Step 2: Restart replica-0 (Leader) with a very long delay so that it is lagging behind
-    this->restart_replica(0, 10 /* shutdown_delay_sec */);
+    LOGINFO("Restart leader");
+    this->restart_replica(0, 15 /* shutdown_delay_sec */);
+    std::this_thread::sleep_for(std::chrono::seconds(3));
 
     // Step 3: While the original leader is down, write entries into the new leader
     LOGINFO("After original leader is shutdown, insert more entries into the new leader");
@@ -647,14 +663,16 @@ TEST_F(RaftReplDevTest, RemoveReplDev) {
     this->write_on_leader(entries_per_attempt, false /* wait for commit on all */, dbs_.back());
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
     this->remove_db(dbs_.back(), true /* wait_for_removal */);
+    std::this_thread::sleep_for(std::chrono::seconds(2));
 
     // Step 3: Shutdown one of the follower and remove another repl_dev, once the follower is up, it should remove the
     // repl_dev and proceed
     LOGINFO("Shutdown one of the followers (replica=1) and then remove dbs on other members. Expect replica=1 to "
             "remove after it is up");
     this->restart_replica(1, 15 /* shutdown_delay_sec */);
+    LOGINFO("After restart replica 1 {}", dbs_.size());
     this->remove_db(dbs_.back(), true /* wait_for_removal */);
-
+    LOGINFO("Remove last db {}", dbs_.size());
     // TODO: Once generic crash flip/test_infra is available, use flip to crash during removal and restart them to see
     // if records are being removed
     g_helper->sync_for_cleanup_start();
@@ -682,9 +700,11 @@ TEST_F(RaftReplDevTest, GCReplReqs) {
     }
 
     this->write_on_leader(100 /* num_entries */, true /* wait_for_commit */);
+    std::this_thread::sleep_for(std::chrono::seconds(2));
 
     // Step 2: Restart replica-0 (Leader)
     this->restart_replica(0, 10);
+    std::this_thread::sleep_for(std::chrono::seconds(2));
 
     LOGINFO("After original leader is shutdown, insert more entries into the new leader");
     this->write_on_leader(100, true /* wait for commit on all replicas */);
@@ -726,6 +746,7 @@ int main(int argc, char* argv[]) {
     //
     HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
         s.consensus.leadership_expiry_ms = -1; // -1 means never expires;
+        s.generic.repl_dev_cleanup_interval_sec = 0;
 
         // only reset when user specified the value for test;
         if (SISL_OPTIONS.count("snapshot_distance")) {
