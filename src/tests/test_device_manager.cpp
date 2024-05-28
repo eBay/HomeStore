@@ -22,7 +22,6 @@
 #include <memory>
 #include <mutex>
 #include <random>
-#include <algorithm>
 
 #include <gtest/gtest.h>
 #include <iomgr/io_environment.hpp>
@@ -119,14 +118,8 @@ public:
             auto chunks = vdev->get_chunks();
             ASSERT_EQ(vdev->get_total_chunk_num(), m_pdevs.size() * 2)
                 << "Expected vdev to be created with 2 chunks per pdev";
-
-            uint64_t size = 0;
-            for (const auto& chunk : chunks) {
-                if (!chunk) continue;
-                size = chunk->size();
-                break;
-            }
-
+            // the last item in chunks must not be nullptr
+            auto size = chunks[chunks.size() - 1]->size();
             std::map< const PhysicalDev*, uint32_t > chunks_in_pdev_count;
             for (const auto& chunk : chunks) {
                 if (!chunk) continue;
