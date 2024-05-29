@@ -46,6 +46,7 @@ public:
     virtual void write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* context) = 0;
 
     virtual void read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) = 0;
+    virtual std::pair<bnodeid_t, uint64_t> get_root(bnodeid_t super_node_id) = 0;
 
     virtual bool get_writable_buf(const BtreeNodePtr& node, CPContext* context) = 0;
 

@@ -202,15 +202,24 @@ btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
     K split_key;
     BtreeNodePtr child_node = nullptr;
     btree_status_t ret = btree_status_t::success;
+    btree_status_t ret2 = btree_status_t::success;
     BtreeNodePtr root;
     BtreeNodePtr new_root;
+    BtreeNodePtr super_node;
 
     m_btree_lock.lock();
     ret = read_and_lock_node(m_root_node_info.bnode_id(), root, locktype_t::WRITE, locktype_t::WRITE, req.m_op_context);
+    ret2 = read_and_lock_node(m_super_node_info.bnode_id(), super_node, locktype_t::WRITE, locktype_t::WRITE,
+                              req.m_op_context);
     if (ret != btree_status_t::success) { goto done; }
+    if (ret2 != btree_status_t::success) {
+        unlock_node(root, locktype_t::WRITE);
+        goto done;
+    }
 
     if (!is_split_needed(root, req)) {
         unlock_node(root, locktype_t::WRITE);
+        unlock_node(super_node, locktype_t::WRITE);
         goto done;
     }
 
@@ -218,6 +227,7 @@ btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
     if (new_root == nullptr) {
         ret = btree_status_t::space_not_avail;
         unlock_node(root, locktype_t::WRITE);
+        unlock_node(super_node, locktype_t::WRITE);
         goto done;
     }
     new_root->set_level(root->level() + 1);
@@ -240,10 +250,13 @@ btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
         root = std::move(child_node);
         on_root_changed(root, req.m_op_context); // Revert it back
         unlock_node(root, locktype_t::WRITE);
+
     } else {
+        //        LOGINFO(" split happens for new root {}", root->node_id());
         if (req.route_tracing) { append_route_trace(req, child_node, btree_event_t::SPLIT); }
         m_root_node_info = BtreeLinkInfo{root->node_id(), root->link_version()};
         unlock_node(child_node, locktype_t::WRITE);
+        unlock_node(super_node, locktype_t::WRITE);
         COUNTER_INCREMENT(m_metrics, btree_depth, 1);
     }
 
@@ -301,6 +314,17 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const 
 
 template < typename K, typename V >
 template < typename ReqT >
+// bool Btree< K, V >::is_split_needed(const BtreeNodePtr& node, ReqT& req) const {
+//     if (!node->is_leaf()) { // if internal node, size is atmost one additional entry, size of K/V
+//         return node->total_entries() > 2;
+//     } else if constexpr (std::is_same_v< ReqT, BtreeRangePutRequest< K > >) {
+//         return node->total_entries() > 2;
+//     } else if constexpr (std::is_same_v< ReqT, BtreeSinglePutRequest >) {
+//         return node->total_entries() > 2;
+//     } else {
+//         return false;
+//     }
+// }
 bool Btree< K, V >::is_split_needed(const BtreeNodePtr& node, ReqT& req) const {
     if (!node->is_leaf()) { // if internal node, size is atmost one additional entry, size of K/V
         return !node->has_room_for_put(btree_put_type::UPSERT, K::get_max_size(), BtreeLinkInfo::get_fixed_size());
