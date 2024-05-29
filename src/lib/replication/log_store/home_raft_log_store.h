@@ -189,6 +189,7 @@ public:
     void truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_lsn);
 
     void wait_for_log_store_ready();
+    void register_log_found_cb(const log_found_cb_t& cb) { m_log_store->register_log_found_cb(cb); }
 
 private:
     logstore_id_t m_logstore_id;

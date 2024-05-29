@@ -208,6 +208,7 @@ private:
     bool is_resync_mode() { return m_resync_mode; }
     void handle_error(repl_req_ptr_t const& rreq, ReplServiceError err);
     bool wait_for_data_receive(std::vector< repl_req_ptr_t > const& rreqs, uint64_t timeout_ms);
+    void on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx);
 };
 
 } // namespace homestore

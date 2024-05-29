@@ -37,6 +37,8 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
     if (load_existing) {
         m_data_journal =
             std::make_shared< ReplLogStore >(*this, *m_state_machine, m_rd_sb->logdev_id, m_rd_sb->logstore_id);
+        m_data_journal->register_log_found_cb(
+            [this](logstore_seq_num_t lsn, log_buffer buf, void* key) { on_log_found(lsn, buf, key); });
         m_next_dsn = m_rd_sb->last_applied_dsn + 1;
         m_commit_upto_lsn = m_rd_sb->durable_commit_lsn;
         m_last_flushed_commit_lsn = m_commit_upto_lsn;
@@ -297,14 +299,13 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
         }
     }
 
+    // We need to allocate the block, since entry doesn't exist or if it exist, two threads are trying to do the same
+    // thing. So take state mutex and allocate the blk
+    std::unique_lock< std::mutex > lg(rreq->m_state_mtx);
     rreq->init(rkey, code, false /* is_proposer */, user_header, key, data_size);
 
     // There is no data portion, so there is not need to allocate
     if (!rreq->has_linked_data()) { return rreq; }
-
-    // We need to allocate the block, since entry doesn't exist or if it exist, two threads are trying to do the same
-    // thing. So take state mutex and allocate the blk
-    std::unique_lock< std::mutex > lg(rreq->m_state_mtx);
     if (rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) { return rreq; }
 
     auto alloc_status = rreq->alloc_local_blks(m_listener, data_size);
@@ -986,4 +987,54 @@ void RaftReplDev::cp_flush(CP*) {
 }
 
 void RaftReplDev::cp_cleanup(CP*) {}
+
+void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
+    // apply the log entry if the lsn is between checkpoint lsn and durable commit lsn
+    if (m_rd_sb->checkpoint_lsn >= lsn || m_rd_sb->durable_commit_lsn <= lsn) { return; }
+
+    // 1. Get the log entry and prepare rreq
+    nuraft::log_entry const* lentry = r_cast< nuraft::log_entry const* >(buf.bytes());
+    repl_journal_entry* jentry = r_cast< repl_journal_entry* >(lentry->get_buf().data_begin());
+    RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
+                      "Mismatched version of journal entry received from RAFT peer");
+
+    RD_LOGT("Raft Channel: Applying Raft log_entry upon recovery: server_id={}, term={}, journal_entry=[{}] ",
+            jentry->server_id, lentry->get_term(), jentry->to_string());
+
+    auto entry_to_hdr = [](repl_journal_entry* jentry) {
+        return sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry), jentry->user_header_size};
+    };
+
+    auto entry_to_key = [](repl_journal_entry* jentry) {
+        return sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry) + jentry->user_header_size,
+                          jentry->key_size};
+    };
+
+    auto entry_to_val = [](repl_journal_entry* jentry) {
+        return sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry) + jentry->user_header_size +
+                              jentry->key_size,
+                          jentry->value_size};
+    };
+
+    repl_key const rkey{.server_id = jentry->server_id, .term = lentry->get_term(), .dsn = jentry->dsn};
+
+    auto const [it, happened] = m_repl_key_req_map.try_emplace(rkey, repl_req_ptr_t(new repl_req_ctx()));
+    RD_DBG_ASSERT((it != m_repl_key_req_map.end()), "Unexpected error in map_repl_key_to_req");
+    auto rreq = it->second;
+    RD_DBG_ASSERT(happened, "rreq already exists for rkey={}", rkey.to_string());
+    MultiBlkId entry_blkid;
+    entry_blkid.deserialize(entry_to_val(jentry), true /* copy */);
+    rreq->set_local_blkid(entry_blkid);
+    rreq->init(rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry), entry_to_key(jentry),
+               (entry_blkid.blk_count() * get_blk_size()));
+
+    RD_DBG_ASSERT(rreq, "rreq is nullptr for rkey={}", rkey.to_string());
+
+    // 2. Pre-commit the log entry
+    m_listener->on_pre_commit(lsn, entry_to_hdr(jentry), entry_to_key(jentry), nullptr);
+
+    // 3. Commit the log entry
+    handle_commit(rreq);
+}
+
 } // namespace homestore
