@@ -35,7 +35,7 @@ btree_status_t Btree< K, V >::create_root_node(void* op_context) {
     if (root == nullptr) { return btree_status_t::space_not_avail; }
 
     root->set_level(0u);
-    auto const ret = write_node(root, op_context);
+    auto ret = write_node(root, op_context);
     if (ret != btree_status_t::success) {
         free_node(root, locktype_t::NONE, op_context);
         return btree_status_t::space_not_avail;

@@ -70,7 +70,6 @@ class Btree {
 protected:
     mutable iomgr::FiberManagerLib::shared_mutex m_btree_lock;
     BtreeLinkInfo m_root_node_info;
-    BtreeLinkInfo m_super_node_info;
 
     BtreeMetrics m_metrics;
     std::atomic< bool > m_destroyed{false};
@@ -124,7 +123,6 @@ public:
 
     uint64_t root_link_version() const;
     void set_root_node_info(const BtreeLinkInfo& info);
-    void set_super_node_info(const BtreeLinkInfo& info);
 
     // static void set_io_flip();
     // static void set_error_flip();
@@ -140,7 +138,6 @@ public:
 
 protected:
     /////////////////////////// Methods the underlying store is expected to handle ///////////////////////////
-    virtual void retrieve_root_node() = 0;
     virtual BtreeNodePtr alloc_node(bool is_leaf) = 0;
     virtual BtreeNode* init_node(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf) const;
     virtual btree_status_t read_node_impl(bnodeid_t id, BtreeNodePtr& node) const = 0;
