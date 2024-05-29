@@ -231,4 +231,6 @@ private:
     void start_cp_thread();
     folly::Future< bool > do_trigger_cp_flush(bool force, bool flush_on_shutdown);
 };
+
+extern CPManager& cp_mgr();
 } // namespace homestore

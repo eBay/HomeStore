@@ -42,6 +42,11 @@ btree_status_t Btree< K, V >::do_put(const BtreeNodePtr& my_node, locktype_t cur
         return ret;
     }
 
+    auto unlock_lambda = [this](const BtreeNodePtr& node, locktype_t& cur_lock) {
+        unlock_node(node, cur_lock);
+        cur_lock = locktype_t::NONE;
+    };
+
 retry:
     uint32_t start_idx{0};
     uint32_t end_idx{0};
@@ -67,14 +72,6 @@ retry:
 
     curr_idx = start_idx;
     while (curr_idx <= end_idx) { // iterate all matched childrens
-#if 0
-#ifdef _PRERELEASE
-        if (curr_idx - start_idx > 1 && iomgr_flip::instance()->test_flip("btree_leaf_node_split")) {
-            ret = btree_status_t::retry;
-            goto out;
-        }
-#endif
-#endif
         locktype_t child_cur_lock = locktype_t::NONE;
 
         // Get the childPtr for given key.
@@ -95,37 +92,22 @@ retry:
 
         // Directly get write lock for leaf, since its an insert.
         child_cur_lock = (child_node->is_leaf()) ? locktype_t::WRITE : locktype_t::READ;
-
-        // If the child and child_info link in the parent mismatch, we need to do btree repair, it might have
-        // encountered a crash in-between the split or merge and only partial commit happened.
-        if (is_split_needed(child_node, req) || is_repair_needed(child_node, child_info)) {
+        if (is_split_needed(child_node, req)) {
             ret = upgrade_node_locks(my_node, child_node, curlock, child_cur_lock, req.m_op_context);
             if (ret != btree_status_t::success) {
                 BT_NODE_LOG(DEBUG, my_node, "Upgrade of node lock failed, retrying from root");
-                curlock = locktype_t::NONE; // upgrade_node_lock releases all locks on failure
-                child_cur_lock = locktype_t::NONE;
                 goto out;
             }
-            curlock = child_cur_lock = locktype_t::WRITE;
 
-            if (is_repair_needed(child_node, child_info)) {
-                BT_NODE_LOG(TRACE, child_node, "Node repair needed");
-                ret = repair_split(my_node, child_node, curr_idx, req.m_op_context);
-            } else {
-                K split_key;
-                BT_NODE_LOG(TRACE, my_node, "Split node needed");
-                ret = split_node(my_node, child_node, curr_idx, &split_key, req.m_op_context);
-            }
-            unlock_node(child_node, locktype_t::WRITE);
-            child_cur_lock = locktype_t::NONE;
+            K split_key;
+            BT_NODE_LOG(TRACE, my_node, "Split node needed");
+            ret = split_node(my_node, child_node, curr_idx, &split_key, req.m_op_context);
+            unlock_lambda(child_node, child_cur_lock);
+            if (ret != btree_status_t::success) { goto out; }
 
-            if (ret != btree_status_t::success) {
-                goto out;
-            } else {
-                if (req.route_tracing) { append_route_trace(req, child_node, btree_event_t::SPLIT); }
-                COUNTER_INCREMENT(m_metrics, btree_split_count, 1);
-                goto retry; // After split, retry search and walk down.
-            }
+            if (req.route_tracing) { append_route_trace(req, child_node, btree_event_t::SPLIT); }
+            COUNTER_INCREMENT(m_metrics, btree_split_count, 1);
+            goto retry; // After split, retry search and walk down.
         }
 
         // Get subrange if it is a range update
@@ -171,8 +153,7 @@ retry:
         if (curr_idx == end_idx) {
             // If we have reached the last index, unlock before traversing down, because we no longer need
             // this lock. Holding this lock will impact performance unncessarily.
-            unlock_node(my_node, curlock);
-            curlock = locktype_t::NONE;
+            unlock_lambda(my_node, curlock);
         }
 
         ret = do_put(child_node, child_cur_lock, req);
@@ -181,7 +162,7 @@ retry:
         ++curr_idx;
     }
 out:
-    if (curlock != locktype_t::NONE) { unlock_node(my_node, curlock); }
+    if (curlock != locktype_t::NONE) { unlock_lambda(my_node, curlock); }
     return ret;
     // Warning: Do not access childNode or myNode beyond this point, since it would
     // have been unlocked by the recursive function and it could also been deleted.
@@ -221,24 +202,15 @@ btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
     K split_key;
     BtreeNodePtr child_node = nullptr;
     btree_status_t ret = btree_status_t::success;
-    btree_status_t ret2 = btree_status_t::success;
     BtreeNodePtr root;
     BtreeNodePtr new_root;
-    BtreeNodePtr super_node;
 
     m_btree_lock.lock();
     ret = read_and_lock_node(m_root_node_info.bnode_id(), root, locktype_t::WRITE, locktype_t::WRITE, req.m_op_context);
-    ret2 = read_and_lock_node(m_super_node_info.bnode_id(), super_node, locktype_t::WRITE, locktype_t::WRITE,
-                              req.m_op_context);
     if (ret != btree_status_t::success) { goto done; }
-    if (ret2 != btree_status_t::success) {
-        unlock_node(root, locktype_t::WRITE);
-        goto done;
-    }
 
-    if (!is_split_needed(root, req) && !is_repair_needed(root, m_root_node_info)) {
+    if (!is_split_needed(root, req)) {
         unlock_node(root, locktype_t::WRITE);
-        unlock_node(super_node, locktype_t::WRITE);
         goto done;
     }
 
@@ -246,37 +218,32 @@ btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
     if (new_root == nullptr) {
         ret = btree_status_t::space_not_avail;
         unlock_node(root, locktype_t::WRITE);
-        unlock_node(super_node, locktype_t::WRITE);
         goto done;
     }
     new_root->set_level(root->level() + 1);
 
-    BT_NODE_LOG(DEBUG, root, "Root node is full, creating new root node={}", new_root->node_id());
-    //    LOGINFO("Root node is full, creating new root node={} old root {}", new_root->node_id(),root->node_id() );
+    BT_NODE_LOG(DEBUG, root, "Root node={} is full, creating new root node={}", root->node_id(), new_root->node_id());
     child_node = std::move(root);
     root = std::move(new_root);
-    BT_NODE_DBG_ASSERT_EQ(root->total_entries(), 0, root);
 
-    if (is_repair_needed(child_node, m_root_node_info)) {
-        ret = repair_split(root, child_node, root->total_entries(), req.m_op_context);
-    } else {
-        ret = split_node(root, child_node, root->total_entries(), &split_key, req.m_op_context);
+    // We need to notify about the root change, before splitting the node, so that correct dependencies are set
+    ret = on_root_changed(root, req.m_op_context);
+    if (ret != btree_status_t::success) {
+        free_node(root, locktype_t::WRITE, req.m_op_context);
+        unlock_node(child_node, locktype_t::WRITE);
+        goto done;
     }
 
+    ret = split_node(root, child_node, root->total_entries(), &split_key, req.m_op_context);
     if (ret != btree_status_t::success) {
         free_node(root, locktype_t::WRITE, req.m_op_context);
         root = std::move(child_node);
-        //        LOGINFO(" split FAILS to happen for new root {}", root->node_id());
-        unlock_node(super_node, locktype_t::WRITE);
+        on_root_changed(root, req.m_op_context); // Revert it back
         unlock_node(root, locktype_t::WRITE);
-
     } else {
-        //        LOGINFO(" split happens for new root {}", root->node_id());
         if (req.route_tracing) { append_route_trace(req, child_node, btree_event_t::SPLIT); }
-
         m_root_node_info = BtreeLinkInfo{root->node_id(), root->link_version()};
         unlock_node(child_node, locktype_t::WRITE);
-        unlock_node(super_node, locktype_t::WRITE);
         COUNTER_INCREMENT(m_metrics, btree_depth, 1);
     }
 
@@ -299,7 +266,7 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const 
     child_node2->set_next_bnode(child_node1->next_bnode());
     child_node1->set_next_bnode(child_node2->node_id());
     child_node2->set_level(child_node1->level());
-    uint32_t child1_filled_size = m_bt_cfg.node_data_size() - child_node1->available_size();
+    uint32_t child1_filled_size = child_node1->node_data_size() - child_node1->available_size();
 
     auto split_size = m_bt_cfg.split_size(child1_filled_size);
     uint32_t res = child_node1->move_out_to_right_by_size(m_bt_cfg, *child_node2, split_size);
@@ -325,7 +292,7 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const 
     BT_NODE_LOG(DEBUG, child_node1, "Left child");
     BT_NODE_LOG(DEBUG, child_node2, "Right child");
 
-    ret = transact_write_nodes({child_node2}, child_node1, parent_node, context);
+    ret = transact_nodes({child_node2}, {}, child_node1, parent_node, context);
 
     // NOTE: Do not access parentInd after insert, since insert would have
     // shifted parentNode to the right.
@@ -334,17 +301,6 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const 
 
 template < typename K, typename V >
 template < typename ReqT >
-// bool Btree< K, V >::is_split_needed(const BtreeNodePtr& node, ReqT& req) const {
-//     if (!node->is_leaf()) { // if internal node, size is atmost one additional entry, size of K/V
-//         return node->total_entries() > 2;
-//     } else if constexpr (std::is_same_v< ReqT, BtreeRangePutRequest< K > >) {
-//         return node->total_entries() > 2;
-//     } else if constexpr (std::is_same_v< ReqT, BtreeSinglePutRequest >) {
-//         return node->total_entries() > 2;
-//     } else {
-//         return false;
-//     }
-// }
 bool Btree< K, V >::is_split_needed(const BtreeNodePtr& node, ReqT& req) const {
     if (!node->is_leaf()) { // if internal node, size is atmost one additional entry, size of K/V
         return !node->has_room_for_put(btree_put_type::UPSERT, K::get_max_size(), BtreeLinkInfo::get_fixed_size());
@@ -355,13 +311,5 @@ bool Btree< K, V >::is_split_needed(const BtreeNodePtr& node, ReqT& req) const {
     } else {
         return false;
     }
-}
-
-template < typename K, typename V >
-btree_status_t Btree< K, V >::repair_split(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node1,
-                                           uint32_t parent_split_idx, void* context) {
-    parent_node->update(parent_split_idx, BtreeLinkInfo{child_node1->next_bnode(), child_node1->link_version()});
-    parent_node->insert(parent_split_idx, child_node1->get_last_key< K >(), child_node1->link_info());
-    return write_node(parent_node, context);
 }
 } // namespace homestore

@@ -46,11 +46,6 @@ private:
     std::map< IndexBufferPtr, std::vector< std::string > > crashing_buffers;
 #endif
 
-#ifdef _PRERELEASE
-    std::mutex flip_mtx;
-    std::map< IndexBufferPtr, std::vector< std::string > > crashing_buffers;
-#endif
-
 public:
     IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair< meta_blk*, sisl::byte_view > sb,
                  const std::shared_ptr< sisl::Evictor >& evictor, uint32_t node_size);
@@ -60,25 +55,36 @@ public:
     void read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) override;
 
     bool get_writable_buf(const BtreeNodePtr& node, CPContext* context) override;
-    void link_buf(IndexBufferPtr& up, IndexBufferPtr& down, CPContext* cp_ctx) override;
+    void transact_bufs(uint32_t index_ordinal, IndexBufferPtr const& parent_buf, IndexBufferPtr const& child_buf,
+                       IndexBufferPtrList const& new_node_bufs, IndexBufferPtrList const& freed_node_bufs,
+                       CPContext* cp_ctx) override;
     void free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) override;
+    bool refresh_meta_buf(shared< MetaIndexBuffer >& meta_buf, CPContext* cp_ctx) override;
 
     //////////////////// CP Related API section /////////////////////////////////
     folly::Future< bool > async_cp_flush(IndexCPContext* context);
     IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext* cp_ctx) const;
 #ifdef _PRERELEASE
-    void add_to_crashing_buffers(IndexBufferPtr, std::string) override;
+    void add_to_crashing_buffers(IndexBufferPtr, std::string);
 #endif
+
+    void recover(sisl::byte_view sb);
+
 private:
     void start_flush_threads();
     void recover_new_nodes(sisl::byte_view sb);
-    void process_write_completion(IndexCPContext* cp_ctx, IndexBufferPtr pbuf);
-    void do_flush_one_buf(IndexCPContext* cp_ctx, const IndexBufferPtr buf, bool part_of_batch);
-    std::pair< IndexBufferPtr, bool > on_buf_flush_done(IndexCPContext* cp_ctx, IndexBufferPtr& buf);
-    std::pair< IndexBufferPtr, bool > on_buf_flush_done_internal(IndexCPContext* cp_ctx, IndexBufferPtr& buf);
+    void process_write_completion(IndexCPContext* cp_ctx, IndexBufferPtr const& pbuf);
+    void do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const& buf, bool part_of_batch);
+    void link_buf(IndexBufferPtr const& up, IndexBufferPtr const& down, bool is_sibling_link, CPContext* cp_ctx);
 
-    void get_next_bufs(IndexCPContext* cp_ctx, uint32_t max_count, std::vector< IndexBufferPtr >& bufs);
-    void get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_count, IndexBufferPtr prev_flushed_buf,
-                                std::vector< IndexBufferPtr >& bufs);
+    std::pair< IndexBufferPtr, bool > on_buf_flush_done(IndexCPContext* cp_ctx, IndexBufferPtr const& buf);
+    std::pair< IndexBufferPtr, bool > on_buf_flush_done_internal(IndexCPContext* cp_ctx, IndexBufferPtr const& buf);
+
+    void get_next_bufs(IndexCPContext* cp_ctx, uint32_t max_count, IndexBufferPtrList& bufs);
+    void get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_count, IndexBufferPtr const& prev_flushed_buf,
+                                IndexBufferPtrList& bufs);
+
+    void process_up_buf(IndexBufferPtr const& buf, bool do_repair);
+    bool was_node_committed(IndexBufferPtr const& buf);
 };
 } // namespace homestore

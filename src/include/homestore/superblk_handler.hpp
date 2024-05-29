@@ -121,6 +121,9 @@ public:
     const T* operator->() const { return m_sb; }
     T& operator*() { return *m_sb; }
 
+    std::string name() const { return m_meta_sub_name; }
+    void* meta_blk() const { return m_meta_blk; }
+
 private:
     void* m_meta_blk{nullptr};
     sisl::byte_array m_raw_buf;

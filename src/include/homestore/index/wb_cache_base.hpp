@@ -25,7 +25,8 @@ namespace homestore {
 
 class BtreeNode;
 using BtreeNodePtr = boost::intrusive_ptr< BtreeNode >;
-typedef std::function< BtreeNodePtr(const IndexBufferPtr&) > node_initializer_t;
+using BtreeNodeList = folly::small_vector< BtreeNodePtr, 3 >;
+using node_initializer_t = std::function< BtreeNodePtr(const IndexBufferPtr&) >;
 
 struct CPContext;
 
@@ -48,7 +49,11 @@ public:
 
     virtual bool get_writable_buf(const BtreeNodePtr& node, CPContext* context) = 0;
 
-    virtual void link_buf(IndexBufferPtr& up, IndexBufferPtr& down, CPContext* context) = 0;
+    virtual bool refresh_meta_buf(shared< MetaIndexBuffer >& meta_buf, CPContext* cp_ctx) = 0;
+
+    virtual void transact_bufs(uint32_t index_ordinal, IndexBufferPtr const& parent_buf,
+                               IndexBufferPtr const& child_buf, IndexBufferPtrList const& new_node_bufs,
+                               IndexBufferPtrList const& freed_node_bufs, CPContext* cp_ctx) = 0;
 
     /// @brief Free the buffer allocated and remove it from wb cache
     /// @param buf

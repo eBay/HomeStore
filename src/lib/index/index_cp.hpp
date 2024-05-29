@@ -30,13 +30,79 @@ namespace homestore {
 class BtreeNode;
 struct IndexCPContext : public VDevCPContext {
 public:
-    using compact_blkid_t = std::pair< blk_num_t, chunk_num_t >;
-    using inplace_new_pair_t = std::pair< compact_blkid_t, compact_blkid_t >;
 #pragma pack(1)
-    struct new_blks_sb_t {
+    using compact_blkid_t = std::pair< blk_num_t, chunk_num_t >;
+    enum class op_t : uint8_t { child_new, child_freed, parent_inplace, child_inplace };
+    struct txn_record {
+        uint8_t num_new_ids;
+        uint8_t num_freed_ids;
+        uint8_t has_inplace_parent : 1;
+        uint8_t has_inplace_child : 1;
+        uint8_t is_parent_meta : 1; // Is the parent buffer a meta buffer
+        uint8_t reserved1 : 5;
+        uint8_t reserved{0};
+        uint32_t index_ordinal;
+        compact_blkid_t ids[1]; // C++ std probhits 0 size array
+
+        txn_record(uint32_t ordinal) :
+                num_new_ids{0},
+                num_freed_ids{0},
+                has_inplace_parent{0x0},
+                has_inplace_child{0x0},
+                is_parent_meta{0x0},
+                index_ordinal{ordinal} {}
+
+        uint32_t total_ids() const {
+            return (num_new_ids + num_freed_ids + has_inplace_parent ? 1 : 0 + has_inplace_child ? 1 : 0);
+        }
+
+        uint32_t size() const { return sizeof(txn_record) - (total_ids() - 1) * sizeof(compact_blkid_t); }
+        static uint32_t size_for_num_ids(uint8_t n) { return sizeof(txn_record) + (n - 1) * sizeof(compact_blkid_t); }
+        void append(op_t op, BlkId const& blk) {
+            if (op == op_t::parent_inplace) {
+                DEBUG_ASSERT(has_inplace_parent == 0x0, "Duplicate inplace parent in same txn record");
+                has_inplace_parent = 0x1;
+            } else if (op == op_t::child_inplace) {
+                DEBUG_ASSERT(has_inplace_child == 0x0, "Duplicate inplace child in same txn record");
+                has_inplace_child = 0x1;
+            } else if (op == op_t::child_new) {
+                DEBUG_ASSERT_LT(num_new_ids, 0xff, "Too many new ids in txn record");
+                ids[num_new_ids++] = std::make_pair(blk.blk_num(), blk.chunk_num());
+            } else if (op == op_t::child_freed) {
+                DEBUG_ASSERT_LT(num_freed_ids, 0xff, "Too many freed ids in txn record");
+                ids[num_freed_ids++] = std::make_pair(blk.blk_num(), blk.chunk_num());
+            } else {
+                DEBUG_ASSERT(false, "Invalid op type");
+            }
+        }
+
+        BlkId blk_id(uint8_t idx) const {
+            DEBUG_ASSERT_LT(idx, total_ids(), "Index out of bounds");
+            return BlkId{ids[idx].first, (blk_count_t)1u, ids[idx].second};
+        }
+    };
+
+    struct txn_journal {
         cp_id_t cp_id;
-        uint32_t num_blks{0};
-        inplace_new_pair_t blks[1]; // C++ std probhits 0 size array
+        uint32_t num_txns{0};
+        uint32_t size{sizeof(txn_journal)}; // Total size including this header
+
+        struct append_guard {
+            txn_journal* m_journal;
+            txn_record* m_rec;
+            append_guard(txn_journal* journal, uint32_t ordinal) : m_journal{journal} {
+                m_rec = new (uintptr_cast(m_journal) + m_journal->size) txn_record(ordinal);
+            }
+            ~append_guard() { m_journal->size += m_rec->size(); }
+            txn_record* operator->() { return m_rec; }
+            txn_record& operator*() { return *m_rec; }
+        };
+
+        // Followed by index_txns records
+        append_guard append_record(uint32_t ordinal) {
+            ++num_txns;
+            return append_guard(this, ordinal);
+        }
     };
 #pragma pack()
 
@@ -48,25 +114,35 @@ public:
     std::mutex m_flush_buffer_mtx;
     sisl::ConcurrentInsertVector< IndexBufferPtr >::iterator m_dirty_buf_it;
 
-    iomgr::FiberManagerLib::mutex m_new_blk_mtx;
-    sisl::io_blob_safe m_new_blk_buf;
+    iomgr::FiberManagerLib::mutex m_txn_journal_mtx;
+    sisl::io_blob_safe m_txn_journal_buf;
 
 public:
     IndexCPContext(CP* cp);
     virtual ~IndexCPContext() = default;
 
-    void track_new_blk(BlkId const& inplace_blkid, BlkId const& new_blkid);
+    // void track_new_blk(BlkId const& inplace_blkid, BlkId const& new_blkid);
+    void add_to_txn_journal(uint32_t index_ordinal, const IndexBufferPtr& parent_buf,
+                            const IndexBufferPtr& left_child_buf, const IndexBufferPtrList& created_bufs,
+                            const IndexBufferPtrList& freed_buf);
+    std::map< BlkId, IndexBufferPtr > recover(sisl::byte_view sb);
+
+    sisl::io_blob_safe const& journal_buf() const { return m_txn_journal_buf; }
+
     void add_to_dirty_list(const IndexBufferPtr& buf);
     bool any_dirty_buffers() const;
     void prepare_flush_iteration();
     std::optional< IndexBufferPtr > next_dirty();
     std::string to_string();
     std::string to_string_with_dags();
+
+private:
     void check_cycle();
     void check_cycle_recurse(IndexBufferPtr buf, std::set< IndexBuffer* >& visited) const;
     void check_wait_for_leaders();
-    sisl::io_blob_safe const& new_blk_buf() const { return m_new_blk_buf; }
     void log_dags();
+
+    void process_txn_record(txn_record const* rec, std::map< BlkId, IndexBufferPtr >& buf_map);
 };
 
 class IndexWBCache;

@@ -27,6 +27,8 @@
 namespace homestore {
 thread_local std::stack< CP* > CPGuard::t_cp_stack;
 
+CPManager& cp_mgr() { return hs()->cp_mgr(); }
+
 CPManager::CPManager() :
         m_metrics{std::make_unique< CPMgrMetrics >()},
         m_wd_cp{std::make_unique< CPWatchdog >(this)},
