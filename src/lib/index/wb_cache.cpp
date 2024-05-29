@@ -131,6 +131,20 @@ IndexBufferPtr IndexWBCache::copy_buffer(const IndexBufferPtr& cur_buf, const CP
     return new_buf;
 }
 
+std::pair<bnodeid_t, uint64_t> IndexWBCache::get_root(bnodeid_t super_node_id) {
+    LOGINFO("read bufeer id {}", super_node_id);
+    auto const blkid = BlkId{super_node_id};
+    auto idx_buf = std::make_shared< IndexBuffer >(blkid, m_node_size, m_vdev->align_size());
+    auto raw_buf = idx_buf->raw_buffer();
+
+    m_vdev->sync_read(r_cast< char* >(raw_buf), m_node_size, blkid);
+    LOGINFO("\n\n\n raw buf  {}", BtreeNode::to_string_buf(idx_buf->raw_buffer()));
+    auto root_info = BtreeNode::identify_edge_info(idx_buf->raw_buffer());
+
+    return {root_info.m_bnodeid, root_info.m_link_version};
+
+}
+
 void IndexWBCache::read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) {
     auto const blkid = BlkId{id};
 
@@ -143,7 +157,6 @@ retry:
     auto raw_buf = idx_buf->raw_buffer();
 
     m_vdev->sync_read(r_cast< char* >(raw_buf), m_node_size, blkid);
-
     // Create the btree node out of buffer
     node = node_initializer(idx_buf);
 
@@ -254,13 +267,17 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr buf, 
 
     if (cp_ctx->is_abrupt()) {
         LOGTRACEMOD(wbcache, "The cp {} is abrupt! for {}", cp_ctx->id(), BtreeNode::to_string_buf(buf->raw_buffer()));
+        LOGINFO("The cp {} is abrupt! for {}", cp_ctx->id(), BtreeNode::to_string_buf(buf->raw_buffer()));
         return;
     }
     if (auto it = crashing_buffers.find(buf);it != crashing_buffers.end()) {
         const auto& reasons = it->second;
-        std::string formatted_reasons = fmt::format("[{}]", fmt::join(reasons, ", "));
+                std::string formatted_reasons = fmt::format("[{}]", fmt::join(reasons, ", "));
         LOGTRACEMOD(wbcache, "Buffer {} is in crashing_buffers with reason(s): {} - Buffer info: {}",
                     buf->to_string(), formatted_reasons, BtreeNode::to_string_buf(buf->raw_buffer()));
+        LOGINFO("Buffer {} is in crashing_buffers with reason(s): {} - Buffer info: {}",
+                    buf->to_string(), formatted_reasons, BtreeNode::to_string_buf(buf->raw_buffer()));
+        LOGINFO(" CP context info: {}", cp_ctx->to_string());
         crashing_buffers.clear();
         cp_ctx->abrupt();
         return;

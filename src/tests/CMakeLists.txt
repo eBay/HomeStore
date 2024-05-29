@@ -77,6 +77,12 @@ if (${io_tests})
     set_property(TEST IndexBtree PROPERTY ENVIRONMENT "ASAN_OPTIONS=detect_stack_use_after_return=true")
     set_tests_properties(IndexBtree PROPERTIES TIMEOUT 1200)
 
+    set(TEST_RRECOVERINDEX_SOURCE_FILES test_index_recovery.cpp)
+    add_executable(test_index_recovery ${TEST_RRECOVERINDEX_SOURCE_FILES})
+    target_link_libraries(test_index_recovery homestore ${COMMON_TEST_DEPS} GTest::gtest)
+    add_test(NAME IndexRecovery COMMAND test_index_recovery)
+    #    set_property(TEST IndexRecovery PROPERTY ENVIRONMENT "ASAN_OPTIONS=detect_stack_use_after_return=true")
+
     add_executable(test_data_service)
     target_sources(test_data_service PRIVATE test_data_service.cpp)
     target_link_libraries(test_data_service homestore ${COMMON_TEST_DEPS} GTest::gmock)

@@ -90,10 +90,14 @@ public:
         flip::FlipCondition null_cond;
         flip::FlipFrequency freq;
         freq.set_count(10000);
-        freq.set_percent(1);
+        freq.set_percent(100);
         m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
         m_bt->set_flip_point(flip_name);
-        LOGDEBUG("Flip {} set", flip_name);
+        LOGINFO("Flip {} set", flip_name);
+    }
+    void reset_flip_point(const std::string flip_name) {
+        m_fc.remove_flip(flip_name);
+        LOGINFO("Flip {} reset", flip_name);
     }
 #endif
     void preload(uint32_t preload_size) {
@@ -157,7 +161,7 @@ public:
     uint32_t get_op_num() const { return m_num_ops.load(); }
 
     ////////////////////// All put operation variants ///////////////////////////////
-    void put(uint64_t k, btree_put_type put_type) { do_put(k, put_type, V::generate_rand()); }
+    void put(uint64_t k, btree_put_type put_type, bool expect = true) { do_put(k, put_type, V::generate_rand(), expect); }
 
     void put_random() {
         auto [start_k, end_k] = m_shadow_map.pick_random_non_existing_keys(1);
@@ -378,20 +382,22 @@ public:
     }
 
 private:
-    void do_put(uint64_t k, btree_put_type put_type, V const& value) {
+    void do_put(uint64_t k, btree_put_type put_type, V const& value, bool expect_success = true) {
         auto existing_v = std::make_unique< V >();
         K key = K{k};
         auto sreq = BtreeSinglePutRequest{&key, &value, put_type, existing_v.get()};
         sreq.enable_route_tracing();
-        bool done = (m_bt->put(sreq) == btree_status_t::success);
+//        bool done = (m_bt->put(sreq) == btree_status_t::success);
+        bool done = expect_success ? (m_bt->put(sreq) == btree_status_t::success) : m_bt->put(sreq) == btree_status_t::put_failed;
 
         if (put_type == btree_put_type::INSERT) {
             ASSERT_EQ(done, !m_shadow_map.exists(key));
         } else {
             ASSERT_EQ(done, m_shadow_map.exists(key));
         }
-
-        m_shadow_map.put_and_check(key, value, *existing_v, done);
+        if(expect_success) {
+            m_shadow_map.put_and_check(key, value, *existing_v, done);
+        }
     }
 
     void do_range_remove(uint64_t start_k, uint64_t end_k, bool all_existing) {

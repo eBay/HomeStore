@@ -49,6 +49,7 @@ public:
     virtual void write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* context) = 0;
 
     virtual void read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) = 0;
+    virtual std::pair<bnodeid_t, uint64_t> get_root(bnodeid_t super_node_id) = 0;
 
     /// @brief Start a chain of related btree buffers. Typically a chain is creating from second and third pairs and
     /// then first is prepended to the chain. In case the second buffer is already with the WB cache, it will create a

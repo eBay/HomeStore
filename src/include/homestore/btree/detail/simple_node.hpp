@@ -225,11 +225,11 @@ public:
     }
 
     std::string to_string_keys(bool print_friendly = false) const override {
-#if 0
         std::string delimiter = print_friendly ? "\n" : "\t";
-        auto str = fmt::format("{}{}.{} nEntries={} {} ",
+        std::string snext = this->next_bnode() == empty_bnodeid? "": fmt::format("next_node={}", this->next_bnode());
+        auto str = fmt::format("{}{}.{} level:{} nEntries={} {} {} node_gen={} ",
                                print_friendly ? "------------------------------------------------------------\n" : "",
-                               this->node_id(), this->link_version(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"));
+                               this->node_id(), this->link_version(), this->level(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"), snext, this->node_gen());
         if (!this->is_leaf() && (this->has_valid_edge())) {
             fmt::format_to(std::back_inserter(str), "edge_id={}.{}", this->edge_info().m_bnodeid,
                            this->edge_info().m_link_version);
@@ -280,8 +280,6 @@ public:
             fmt::format_to(std::back_inserter(str), "-{}]", cur_key);
         }
         return str;
-#endif
-        return {};
     }
 
     uint8_t* get_node_context() override { return uintptr_cast(this) + sizeof(SimpleNode< K, V >); }

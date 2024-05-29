@@ -74,7 +74,8 @@ private:
         return btree_status_t::success;
     }
 
-    void update_new_root_info(bnodeid_t root_node, uint64_t version) override {}
+    void update_super_info(bnodeid_t super_node, uint64_t version) override {}
+    void retrieve_root_node() override {}
 
 #if 0
     static void ref_node(MemBtreeNode* bn) {

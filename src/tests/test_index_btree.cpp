@@ -65,7 +65,7 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
         TestIndexServiceCallbacks(BtreeTest* test) : m_test(test) {}
         std::shared_ptr< IndexTableBase > on_index_table_found(superblk< index_table_sb >&& sb) override {
             LOGINFO("Index table recovered");
-            LOGINFO("Root bnode_id {} version {}", sb->root_node, sb->link_version);
+            LOGINFO("Root bnode_id {} version {}", sb->super_node, sb->super_link_version);
             m_test->m_bt = std::make_shared< typename T::BtreeType >(std::move(sb), m_test->m_cfg);
             return m_test->m_bt;
         }
@@ -422,7 +422,7 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
 
         std::shared_ptr< IndexTableBase > on_index_table_found(superblk< index_table_sb >&& sb) override {
             LOGINFO("Index table recovered");
-            LOGINFO("Root bnode_id {} version {}", sb->root_node, sb->link_version);
+            LOGINFO("Root bnode_id {} version {}", sb->super_node, sb->super_link_version);
             m_test->m_cfg = BtreeConfig(hs()->index_service().node_size());
             m_test->m_cfg.m_leaf_node_type = T::leaf_node_type;
             m_test->m_cfg.m_int_node_type = T::interior_node_type;

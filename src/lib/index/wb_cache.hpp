@@ -54,6 +54,7 @@ public:
     void realloc_buf(const IndexBufferPtr& buf) override;
     void write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* cp_ctx) override;
     void read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) override;
+    std::pair<bnodeid_t, uint64_t> get_root(bnodeid_t super_node_id) override;
     std::pair< bool, bool > create_chain(IndexBufferPtr& second, IndexBufferPtr& third, CPContext* cp_ctx) override;
     void prepend_to_chain(const IndexBufferPtr& first, const IndexBufferPtr& second) override;
     void free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) override;

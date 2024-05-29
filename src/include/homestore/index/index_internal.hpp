@@ -38,8 +38,8 @@ struct index_table_sb {
     uuid_t parent_uuid; // UUID of the parent container of index (controlled by user)
 
     // Btree Section
-    bnodeid_t root_node{empty_bnodeid}; // Btree Root Node ID
-    uint64_t link_version{0};
+    bnodeid_t super_node{empty_bnodeid}; // Btree Root Node ID
+    uint64_t super_link_version{0};
     int64_t index_size{0}; // Size of the Index
     // seq_id_t last_seq_id{-1};           // TODO: See if this is needed
 

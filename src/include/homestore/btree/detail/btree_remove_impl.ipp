@@ -214,7 +214,6 @@ btree_status_t Btree< K, V >::check_collapse_root(ReqT& req) {
 
     free_node(root, locktype_t::WRITE, req.m_op_context);
     m_root_node_info = child->link_info();
-    update_new_root_info(m_root_node_info.bnode_id(), m_root_node_info.link_version());
     unlock_node(child, locktype_t::WRITE);
 
     // TODO: Have a precommit code here to notify the change in root node id

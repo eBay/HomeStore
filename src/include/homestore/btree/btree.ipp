@@ -53,6 +53,10 @@ template < typename K, typename V >
 void Btree< K, V >::set_root_node_info(const BtreeLinkInfo& info) {
     m_root_node_info = info;
 }
+template < typename K, typename V >
+void Btree< K, V >::set_super_node_info(const BtreeLinkInfo& info) {
+    m_super_node_info = info;
+}
 
 template < typename K, typename V >
 std::pair< btree_status_t, uint64_t > Btree< K, V >::destroy_btree(void* context) {
@@ -334,7 +338,7 @@ void Btree< K, V >::print_tree_keys() const {
     to_string_keys(m_root_node_info.bnode_id(), buf);
     m_btree_lock.unlock_shared();
 
-    BT_LOG(INFO, "Pre order traversal of tree:\n<{}>", buf);
+    LOGINFO("Pre order traversal of tree:\n<{}>", buf);
 }
 
 template < typename K, typename V >
@@ -345,6 +349,10 @@ nlohmann::json Btree< K, V >::get_metrics_in_json(bool updated) {
 template < typename K, typename V >
 bnodeid_t Btree< K, V >::root_node_id() const {
     return m_root_node_info.bnode_id();
+}
+template < typename K, typename V >
+bnodeid_t Btree< K, V >::super_node_id() const {
+    return m_super_node_info.bnode_id();
 }
 
 template < typename K, typename V >

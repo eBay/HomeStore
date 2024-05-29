@@ -107,6 +107,7 @@ public:
 
     // Identify if a node is a leaf node or not, from raw buffer, by just reading persistent_hdr_t
     static bool identify_leaf_node(uint8_t* buf) { return (r_cast< persistent_hdr_t* >(buf))->leaf; }
+    static BtreeLinkInfo::bnode_link_info identify_edge_info(uint8_t* buf) { return (r_cast< persistent_hdr_t* >(buf))->edge_info; }
     static std::string to_string_buf(uint8_t* buf) { return (r_cast< persistent_hdr_t* >(buf))->to_string(); }
 
     /// @brief Finds the index of the entry with the specified key in the node.

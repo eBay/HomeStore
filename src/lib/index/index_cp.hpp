@@ -21,12 +21,13 @@
 #include <homestore/index_service.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
 #include <homestore/checkpoint/cp.hpp>
-
+#include <homestore/btree/detail/btree_node.hpp>
 #include "device/virtual_dev.hpp"
 
 SISL_LOGGING_DECL(wbcache)
 
 namespace homestore {
+class BtreeNode;
 struct IndexCPContext : public VDevCPContext {
 public:
     std::atomic< uint64_t > m_num_nodes_added{0};
@@ -56,9 +57,8 @@ public:
         ++m_dirty_buf_it;
         return ret;
     }
-
     std::string to_string() {
-        std::string str{fmt::format("IndexCPContext cpid={} dirty_buf_count={} dirty_buf_list_size={}", m_cp->id(),
+        std::string str{fmt::format("IndexCPContext cpid={} dirty_buf_count={} dirty_buf_list_size={}\n", m_cp->id(),
                                     m_dirty_buf_count.get(), m_dirty_buf_list.size())};
 
         // Mapping from a node to all its parents in the graph.
@@ -69,16 +69,16 @@ public:
             // Add this buf to his children.
             parents[buf->m_next_buffer.lock().get()].emplace_back(buf.get());
         });
-
         m_dirty_buf_list.foreach_entry([&str, &parents](IndexBufferPtr buf) {
-            fmt::format_to(std::back_inserter(str), "{}", buf->to_string());
+            std::vector<std::string> states={"CLEAN", "DIRTY", "FLUSHING"};
+            fmt::format_to(std::back_inserter(str), "{} \n info:  {}", buf->to_string(), BtreeNode::to_string_buf(buf->raw_buffer()));
             auto first = true;
             for (const auto& p : parents[buf.get()]) {
                 if (first) {
                     fmt::format_to(std::back_inserter(str), "\nDepends:");
                     first = false;
                 }
-                fmt::format_to(std::back_inserter(str), " {}({})", r_cast< void* >(p), s_cast< int >(p->state()));
+                fmt::format_to(std::back_inserter(str), " {}({}) ", r_cast< void* >(p), states[s_cast< int >(p->state())]);
             }
             fmt::format_to(std::back_inserter(str), "\n");
         });

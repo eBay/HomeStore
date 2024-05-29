@@ -43,11 +43,11 @@ public:
         m_sb->user_sb_size = user_sb_size;
 
         auto status = init();
-        if (status != btree_status_t::success) { throw std::runtime_error(fmt::format("Unable to create root node")); }
+        if (status != btree_status_t::success) { throw std::runtime_error(fmt::format("Unable to create root/super node")); }
     }
 
     IndexTable(superblk< index_table_sb >&& sb, const BtreeConfig& cfg) : Btree< K, V >{cfg}, m_sb{std::move(sb)} {
-        Btree< K, V >::set_root_node_info(BtreeLinkInfo{m_sb->root_node, m_sb->link_version});
+        this->set_super_node_info(BtreeLinkInfo{m_sb->super_node, m_sb->super_link_version});
     }
 
     void destroy() override {
@@ -56,8 +56,22 @@ public:
 
     btree_status_t init() {
         auto cp = hs()->cp_mgr().cp_guard();
-        auto ret = Btree< K, V >::init((void*)cp.context(cp_consumer_t::INDEX_SVC));
-        update_new_root_info(Btree< K, V >::root_node_id(), Btree< K, V >::root_link_version());
+        auto cp_context = (void*)cp->context(cp_consumer_t::INDEX_SVC);
+        BtreeNodePtr root =  Btree< K, V >::alloc_leaf_node();
+        if (root == nullptr) { return btree_status_t::space_not_avail; }
+        BtreeNodePtr super_node =  Btree< K, V >::alloc_leaf_node();
+        if (super_node == nullptr) {
+            Btree< K, V >::free_node(root, locktype_t::NONE, cp_context);
+            return btree_status_t::space_not_avail;
+        }
+        root->set_level(0u);
+
+        auto ret = transact_write_nodes({}, root, super_node, cp_context);
+        Btree< K, V >::set_root_node_info(BtreeLinkInfo{root->node_id(), root->link_version()});
+        Btree< K, V >::set_super_node_info(BtreeLinkInfo{super_node->node_id(), super_node->link_version()});
+        super_node->set_edge_value(root->link_info());
+        LOGINFO("IndexTable::init root {} super {}", root->node_id(), super_node->node_id());
+        update_super_info(super_node->node_id(), super_node->link_version());
         return ret;
     }
 
@@ -67,11 +81,35 @@ public:
     const superblk< index_table_sb >& mutable_super_blk() const { return m_sb; }
     std::string btree_store_type() const override { return "INDEX_BTREE"; }
 
-    void update_new_root_info(bnodeid_t root_node, uint64_t version) override {
-        m_sb->root_node = root_node;
-        m_sb->link_version = version;
+    void retrieve_root_node() {
+        auto super_node_id = this->super_node_id();
+//        this->m_btree_lock.lock_shared();
+//        btree_status_t ret;
+//        BtreeNodePtr root;
+//        BtreeNodePtr super_node;
+
+//        {
+//            auto cp = hs()->cp_mgr().cp_guard();
+//            auto cp_context = (void*)cp->context(cp_consumer_t::INDEX_SVC);
+            LOGINFO("reading root node {}", super_node_id);
+//            ret = this->read_and_lock_node(super_node_id, super_node, locktype_t::READ, locktype_t::READ, cp_context);
+            auto root_info = wb_cache().get_root(super_node_id);
+//        }
+//        if (ret == btree_status_t::success) {
+//            auto root_link_info = super_node->get_edge_value();
+//            this->set_root_node_info(root_link_info);
+//            this->unlock_node(super_node, locktype_t::READ);
+//        }
+//        this->m_btree_lock.unlock_shared();
+//        LOGINFO("retrieve::init root {} super {}", root->node_id(), super_node->node_id());
+          this->set_root_node_info(BtreeLinkInfo::bnode_link_info{root_info.first,root_info.second});
+            LOGINFO("retrieve::init root {}", root_info.first);
+    }
+    void update_super_info(bnodeid_t super_node, uint64_t version) override {
+        m_sb->super_node = super_node;
+        m_sb->super_link_version = version;
         m_sb.write();
-        BT_LOG(DEBUG, "Updated index superblk root bnode_id {} version {}", root_node, version);
+        BT_LOG(DEBUG, "Updated index superblk super bnode_id {} version {}", super_node, version);
     }
 
     template < typename ReqT >
@@ -183,6 +221,7 @@ protected:
         }
         if (iomgr_flip::instance()->test_flip("index_parent_root")) {
             if(parent_node->node_id()== this->root_node_id()) {
+                LOGINFO("Adding parent to crashing buffers {} ", parent_node->node_id());
                 index_service().wb_cache().add_to_crashing_buffers(left_child_idx_node->m_idx_buf, "index_parent_root");
             }
         }

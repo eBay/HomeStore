@@ -66,9 +66,10 @@ struct BTREE_FLIPS {
 
 template < typename K, typename V >
 class Btree {
-private:
+protected:
     mutable iomgr::FiberManagerLib::shared_mutex m_btree_lock;
     BtreeLinkInfo m_root_node_info;
+    BtreeLinkInfo m_super_node_info;
 
     BtreeMetrics m_metrics;
     std::atomic< bool > m_destroyed{false};
@@ -122,8 +123,10 @@ public:
 
     nlohmann::json get_metrics_in_json(bool updated = true);
     bnodeid_t root_node_id() const;
+    bnodeid_t super_node_id() const;
     uint64_t root_link_version() const;
     void set_root_node_info(const BtreeLinkInfo& info);
+    void set_super_node_info(const BtreeLinkInfo& info);
 
     // static void set_io_flip();
     // static void set_error_flip();
@@ -136,10 +139,12 @@ public:
             set_flip_point(flip);
         }
     }
+    std::string flip_list() const { return m_flips.list(); }
 #endif
 
 protected:
     /////////////////////////// Methods the underlying store is expected to handle ///////////////////////////
+    virtual void retrieve_root_node() = 0;
     virtual BtreeNodePtr alloc_node(bool is_leaf) = 0;
     virtual BtreeNode* init_node(uint8_t* node_buf, uint32_t node_ctx_size, bnodeid_t id, bool init_buf,
                                  bool is_leaf) const;
@@ -154,7 +159,7 @@ protected:
                                                 void* context) = 0;
 
     virtual std::string btree_store_type() const = 0;
-    virtual void update_new_root_info(bnodeid_t root_node, uint64_t version) = 0;
+    virtual void update_super_info(bnodeid_t super_node, uint64_t version) = 0;
 
     /////////////////////////// Methods the application use case is expected to handle ///////////////////////////
 
