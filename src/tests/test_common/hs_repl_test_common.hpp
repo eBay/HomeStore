@@ -210,13 +210,12 @@ public:
         folly_ = std::make_unique< folly::Init >(&tmp_argc, &argv_, true);
 
         LOGINFO("Starting Homestore replica={}", replica_num_);
-        test_common::HSTestHelper::start_homestore(
+        m_token = test_common::HSTestHelper::start_homestore(
             name_ + std::to_string(replica_num_),
             {{HS_SERVICE::META, {.size_pct = 5.0}},
              {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_app = std::make_unique< TestReplApplication >(*this)}},
              {HS_SERVICE::LOG, {.size_pct = 20.0}}},
-            nullptr /*hs_before_svc_start_cb*/, false /*fake_restart*/, true /*init_device*/,
-            5u /*shutdown_delay_secs*/, dev_list_);
+            nullptr /*hs_before_svc_start_cb*/, dev_list_);
     }
 
     void teardown() {
@@ -233,21 +232,15 @@ public:
     }
 
     void restart(uint32_t shutdown_delay_secs = 5u) {
-        test_common::HSTestHelper::start_homestore(
-            name_ + std::to_string(replica_num_),
-            {{HS_SERVICE::REPLICATION, {.repl_app = std::make_unique< TestReplApplication >(*this)}},
-             {HS_SERVICE::LOG, {}}},
-            nullptr, true /* fake_restart */, false /* init_device */, shutdown_delay_secs, dev_list_);
+        m_token.params(HS_SERVICE::REPLICATION).repl_app = std::make_unique< TestReplApplication >(*this);
+        test_common::HSTestHelper::restart_homestore(m_token, shutdown_delay_secs);
     }
 
     void restart_one_by_one() {
-        exclusive_replica([&]() {
+        exclusive_replica([this]() {
             LOGINFO("Restarting Homestore replica={}", replica_num_);
-            test_common::HSTestHelper::start_homestore(
-                name_ + std::to_string(replica_num_),
-                {{HS_SERVICE::REPLICATION, {.repl_app = std::make_unique< TestReplApplication >(*this)}},
-                 {HS_SERVICE::LOG, {}}},
-                nullptr, true /* fake_restart */, false /* init_device */, 5u /* shutdown_delay_secs */, dev_list_);
+            m_token.params(HS_SERVICE::REPLICATION).repl_app = std::make_unique< TestReplApplication >(*this);
+            test_common::HSTestHelper::restart_homestore(m_token, 5u /* shutdown_delay_secs */);
         });
     }
 
@@ -371,5 +364,6 @@ private:
     IPCData* ipc_data_;
 
     Runner io_runner_;
+    HSTestHelper::test_token m_token;
 };
 } // namespace test_common

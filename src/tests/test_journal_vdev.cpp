@@ -67,36 +67,27 @@ constexpr uint32_t dma_alignment = 512;
 class VDevJournalIOTest : public ::testing::Test {
 public:
     const std::map< uint32_t, test_common::HSTestHelper::test_params > svc_params = {};
+    test_common::HSTestHelper::test_token m_token;
 
     virtual void SetUp() override {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-        test_common::HSTestHelper::start_homestore("test_journal_vdev",
-                                                   {
-                                                       {HS_SERVICE::META, {.size_pct = 15.0}},
-                                                       {HS_SERVICE::LOG,
-                                                        {.size_pct = 50.0,
-                                                         .chunk_size = 16 * 1024 * 1024,
-                                                         .min_chunk_size = 16 * 1024 * 1024,
-                                                         .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
-                                                   },
-                                                   nullptr /* starting_cb */, false /* restart */);
+        m_token =
+            test_common::HSTestHelper::start_homestore("test_journal_vdev",
+                                                       {
+                                                           {HS_SERVICE::META, {.size_pct = 15.0}},
+                                                           {HS_SERVICE::LOG,
+                                                            {.size_pct = 50.0,
+                                                             .chunk_size = 16 * 1024 * 1024,
+                                                             .min_chunk_size = 16 * 1024 * 1024,
+                                                             .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
+                                                       },
+                                                       nullptr /* starting_cb */);
     }
 
     virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
 
-    void restart_homestore() {
-        test_common::HSTestHelper::start_homestore("test_journal_vdev",
-                                                   {
-                                                       {HS_SERVICE::META, {.size_pct = 15.0}},
-                                                       {HS_SERVICE::LOG,
-                                                        {.size_pct = 50.0,
-                                                         .chunk_size = 16 * 1024 * 1024,
-                                                         .min_chunk_size = 16 * 1024 * 1024,
-                                                         .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
-                                                   },
-                                                   nullptr /* starting_cb */, true /* restart */);
-    }
+    void restart_homestore() { test_common::HSTestHelper::restart_homestore(m_token); }
 };
 
 class JournalDescriptorTest {

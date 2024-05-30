@@ -64,7 +64,6 @@ static void change_cp_time(uint64_t value_us) {
 
 template < typename TestType >
 struct BtreeRecoveryTest : public BtreeTestHelper< TestType >, public ::testing::Test {
-
     using T = TestType;
     using K = typename TestType::KeyType;
     using V = typename TestType::ValueType;
@@ -74,7 +73,7 @@ struct BtreeRecoveryTest : public BtreeTestHelper< TestType >, public ::testing:
 
         std::shared_ptr< IndexTableBase > on_index_table_found(superblk< index_table_sb >&& sb) override {
             LOGINFO("Index table recovered");
-            LOGINFO("root bnode_id {} version {}", sb->root_node, sb->link_version);
+            LOGINFO("root bnode_id {} version {}", sb->root_node, sb->root_link_version);
             m_test->m_cfg = BtreeConfig(hs()->index_service().node_size());
             m_test->m_cfg.m_leaf_node_type = T::leaf_node_type;
             m_test->m_cfg.m_int_node_type = T::interior_node_type;
@@ -89,11 +88,10 @@ struct BtreeRecoveryTest : public BtreeTestHelper< TestType >, public ::testing:
     BtreeRecoveryTest() : testing::Test() {}
 
     void restart_homestore() {
-        test_common::HSTestHelper::start_homestore(
-            "test_index_recovery",
-            {{HS_SERVICE::META, {}}, {HS_SERVICE::INDEX, {.index_svc_cbs = new TestIndexServiceCallbacks(this)}}},
-            nullptr, true, false /* restart */);
+        m_token.params(HS_SERVICE::INDEX).index_svc_cbs = new TestIndexServiceCallbacks(this);
+        test_common::HSTestHelper::restart_homestore(m_token);
     }
+
     void destroy_btree() {
         auto cpg = hs()->cp_mgr().cp_guard();
         auto op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
@@ -103,11 +101,11 @@ struct BtreeRecoveryTest : public BtreeTestHelper< TestType >, public ::testing:
     }
 
     void SetUp() override {
-        test_common::HSTestHelper::start_homestore(
+        m_token = test_common::HSTestHelper::start_homestore(
             "test_index_recovery",
             {{HS_SERVICE::META, {.size_pct = 10.0}},
              {HS_SERVICE::INDEX, {.size_pct = 70.0, .index_svc_cbs = new TestIndexServiceCallbacks(this)}}},
-            nullptr, false, SISL_OPTIONS["init_device"].as< bool >());
+            nullptr, {}, SISL_OPTIONS["init_device"].as< bool >());
 
         LOGINFO("Node size {} ", hs()->index_service().node_size());
         this->m_cfg = BtreeConfig(hs()->index_service().node_size());
@@ -130,7 +128,7 @@ struct BtreeRecoveryTest : public BtreeTestHelper< TestType >, public ::testing:
         if (this->m_bt == nullptr) {
             this->m_bt = std::make_shared< typename T::BtreeType >(uuid, parent_uuid, 0, this->m_cfg);
         } else {
-            this->m_bt->retrieve_root_node();
+            // this->m_bt->retrieve_root_node();
             LOGINFO("root bnode_id {} version {}", this->m_bt->root_node_id(), this->m_bt->root_link_version());
             test_common::HSTestHelper::trigger_cp(true /* wait */);
             populate_shadow_map();
@@ -167,6 +165,7 @@ struct BtreeRecoveryTest : public BtreeTestHelper< TestType >, public ::testing:
 
 private:
     const std::string m_shadow_filename = "/tmp/shadow_map.txt";
+    test_common::HSTestHelper::test_token m_token;
 };
 using BtreeTypes = testing::Types< FixedLenBtree /*, VarKeySizeBtree, VarValueSizeBtree, VarObjSizeBtree */ >;
 

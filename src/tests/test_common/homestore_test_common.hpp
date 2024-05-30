@@ -178,10 +178,34 @@ public:
         vdev_size_type_t vdev_size_type{vdev_size_type_t::VDEV_SIZE_STATIC};
     };
 
-    static void start_homestore(const std::string& test_name, std::map< uint32_t, test_params > const& svc_params_tmp,
-                                hs_before_services_starting_cb_t cb = nullptr, bool fake_restart = false,
-                                bool init_device = true, uint32_t shutdown_delay_sec = 5,
-                                std::vector< std::pair< std::string, homestore::HSDevType > > cust_dev_names = {}) {
+    struct test_token {
+        std::string name_;
+        std::map< uint32_t, test_params > svc_params_;
+        hs_before_services_starting_cb_t cb_{nullptr};
+        std::vector< std::pair< std::string, homestore::HSDevType > > cust_dev_names_;
+
+        test_params& params(uint32_t svc) { return svc_params_[svc]; }
+        hs_before_services_starting_cb_t& cb() { return cb_; }
+    };
+
+    static test_token start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
+                                      hs_before_services_starting_cb_t cb = nullptr,
+                                      std::vector< std::pair< std::string, homestore::HSDevType > > cust_dev_names = {},
+                                      bool init_device = true) {
+        test_token token{.name_ = test_name,
+                         .svc_params_ = std::move(svc_params),
+                         .cb_ = cb,
+                         .cust_dev_names_ = std::move(cust_dev_names)};
+        do_start_homestore(token, false /* fake_restart */, init_device);
+        return token;
+    }
+
+    static void restart_homestore(test_token& token, uint32_t shutdown_delay_sec = 5) {
+        do_start_homestore(token, true /* fake_restart*/, false /* init_device */, shutdown_delay_sec);
+    }
+
+    static void do_start_homestore(test_token& token, bool fake_restart = false, bool init_device = true,
+                                   uint32_t shutdown_delay_sec = 5) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
@@ -244,7 +268,7 @@ public:
             /* create files */
             LOGINFO("creating {} device files with each of size {} ", ndevices, homestore::in_bytes(dev_size));
             for (uint32_t i{0}; i < ndevices; ++i) {
-                s_dev_names.emplace_back(std::string{"/tmp/" + test_name + "_" + std::to_string(i + 1)});
+                s_dev_names.emplace_back(std::string{"/tmp/" + token.name_ + "_" + std::to_string(i + 1)});
             }
 
             if (!fake_restart && init_device) { init_files(s_dev_names, dev_size); }
@@ -283,7 +307,7 @@ public:
 
         using namespace homestore;
         auto hsi = HomeStore::instance();
-        for (auto& [svc, tp] : svc_params) {
+        for (auto& [svc, tp] : token.svc_params_) {
             if (svc == HS_SERVICE::DATA) {
                 hsi->with_data_service(tp.custom_chunk_selector);
             } else if (svc == HS_SERVICE::INDEX) {
@@ -305,11 +329,12 @@ public:
             hsi->start(hs_input_params{.devices = device_info, .app_mem_size = app_mem_size}, std::move(cb));
 
         // We need to set the min chunk size before homestore format
-        if (svc_params.contains(HS_SERVICE::LOG) && svc_params[HS_SERVICE::LOG].min_chunk_size != 0) {
-            set_min_chunk_size(svc_params[HS_SERVICE::LOG].min_chunk_size);
+        if (token.svc_params_.contains(HS_SERVICE::LOG) && token.svc_params_[HS_SERVICE::LOG].min_chunk_size != 0) {
+            set_min_chunk_size(token.svc_params_[HS_SERVICE::LOG].min_chunk_size);
         }
 
         if (need_format) {
+            auto svc_params = token.svc_params_;
             hsi->format_and_start(
                 {{HS_SERVICE::META,
                   {.dev_type = homestore::HSDevType::Fast, .size_pct = svc_params[HS_SERVICE::META].size_pct}},
