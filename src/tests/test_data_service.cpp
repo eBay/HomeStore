@@ -249,7 +249,7 @@ public:
 
         // get all the pdevs of this vdev
         auto drives = data_vdev->get_pdevs();
-        RELEASE_ASSERT_EQ(drives.size(), 2, "missing drive test expecting 2 Data drives");
+        RELEASE_ASSERT_EQ(drives.size() > 1, true, "missing drive test expecting at least 2 Data drives");
         auto it = drives.begin();
         // missing_pdev is the pdev that will be missing after restart;
         auto missing_pdev = (*it++);
@@ -291,9 +291,9 @@ public:
         auto sg_write_ptr1 = std::make_shared< sisl::sg_list >();
         hints.chunk_id_hint = chunk_in_living_pdev->chunk_id();
         ++m_outstanding_io_cnt;
-        write_sgs(io_size, sg_write_ptr1, 4, living_drive_blk, hints).thenValue([this, sg_write_ptr1](auto&& err) {
+        write_sgs(io_size, sg_write_ptr1, 4, living_drive_blk, hints).thenValue([this](auto&& err) {
             RELEASE_ASSERT(!err, "Write error");
-            free(*sg_write_ptr1);
+            // do not free , use it when test write
             --m_outstanding_io_cnt;
             ++m_total_io_comp_cnt;
         });
@@ -301,9 +301,9 @@ public:
         hints.chunk_id_hint = chunk_in_missing_pdev->chunk_id();
         auto sg_write_ptr2 = std::make_shared< sisl::sg_list >();
         ++m_outstanding_io_cnt;
-        write_sgs(io_size, sg_write_ptr2, 4, missing_drive_blk, hints).thenValue([this, sg_write_ptr2](auto&& err) {
+        write_sgs(io_size, sg_write_ptr2, 4, missing_drive_blk, hints).thenValue([this](auto&& err) {
             RELEASE_ASSERT(!err, "Write error");
-            free(*sg_write_ptr2);
+            // free(*sg_write_ptr2); do not free , use it when test write
             --m_outstanding_io_cnt;
             ++m_total_io_comp_cnt;
         });
@@ -319,7 +319,10 @@ public:
             // can not lose fast drive
             start_with_devices.emplace_back(pdev->get_devname(), homestore::HSDevType::Fast);
         // lose one data drive
-        start_with_devices.emplace_back(living_pdev->get_devname(), homestore::HSDevType::Data);
+        for (auto& pdev : drives) {
+            if (pdev->pdev_id() != missing_pdev->pdev_id())
+                start_with_devices.emplace_back(living_pdev->get_devname(), homestore::HSDevType::Data);
+        }
 
         // restart with the given drive list
         test_common::HSTestHelper::start_homestore(
@@ -353,7 +356,32 @@ public:
 
         wait_for_outstanding_io_done();
 
-        LOGINFO("Step 6: free the blk from missing data drive");
+        LOGINFO("Step 6: write the blk to living data drive");
+        ++m_outstanding_io_cnt;
+        inst()
+            .async_write(*(sg_write_ptr1.get()), living_drive_blk, false)
+            .thenValue([this, sg_write_ptr1](auto&& err) {
+                RELEASE_ASSERT(!err, "should not be able to write blk on living drive");
+                free(*sg_write_ptr1);
+                --m_outstanding_io_cnt;
+                ++m_total_io_comp_cnt;
+            });
+
+        LOGINFO("Step 7: write the blk to missing data drive");
+        ++m_outstanding_io_cnt;
+        inst()
+            .async_write(*(sg_write_ptr2.get()), missing_drive_blk, false)
+            .thenValue([this, sg_write_ptr2](auto&& err) {
+                RELEASE_ASSERT_EQ(err == std::make_error_code(std::errc::resource_unavailable_try_again), true,
+                                  "should not be able to write blk on living drive");
+                free(*sg_write_ptr2);
+                --m_outstanding_io_cnt;
+                ++m_total_io_comp_cnt;
+            });
+
+        wait_for_outstanding_io_done();
+
+        LOGINFO("Step 8: free the blk from missing data drive");
         ++m_outstanding_io_cnt;
         inst().async_free_blk(missing_drive_blk).thenValue([this](auto&& err) {
             RELEASE_ASSERT_EQ(err == std::make_error_code(std::errc::resource_unavailable_try_again), true,
@@ -362,7 +390,7 @@ public:
             ++m_total_io_comp_cnt;
         });
 
-        LOGINFO("Step 7: free the blk from living data drive");
+        LOGINFO("Step 9: free the blk from living data drive");
         ++m_outstanding_io_cnt;
         inst().async_free_blk(living_drive_blk).thenValue([this](auto&& err) {
             RELEASE_ASSERT(!err, "should be able to free blk on living drive");
@@ -960,9 +988,9 @@ TEST_F(BlkDataServiceTest, TestRestartWithMissingDrive) {
     auto io_size = 4 * Mi;
     LOGINFO("Step 1: find two chunks in different pdevs.");
     write_and_restart_with_missing_data_drive(io_size);
-    LOGINFO("Step 8: wait for read and verify done.");
+    LOGINFO("Step 10: wait for read and verify done.");
     wait_for_outstanding_io_done();
-    LOGINFO("Step 9: I/O completed, do shutdown.");
+    LOGINFO("Step 11: I/O completed, do shutdown.");
 }
 
 // Stream related test

@@ -254,6 +254,12 @@ public:
             }
         }
 
+        if (!fake_restart)
+            HS_REL_ASSERT_EQ(device_info.size() > 2, true,
+                             "if not fake restart, we need at least 3 device to run the ut of simulating restart with "
+                             "missing drive. current device num is {}",
+                             device_info.size());
+
         if (is_spdk) {
             LOGINFO("Spdk with more than 2 threads will cause overburden test systems, changing nthreads to 2");
             num_threads = 2;

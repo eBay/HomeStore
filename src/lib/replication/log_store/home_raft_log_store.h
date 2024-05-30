@@ -190,6 +190,8 @@ public:
 
     void wait_for_log_store_ready();
 
+    void register_log_replay_done_cb(const log_replay_done_cb_t& cb);
+
 private:
     logstore_id_t m_logstore_id;
     logdev_id_t m_logdev_id;

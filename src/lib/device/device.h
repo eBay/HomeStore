@@ -123,6 +123,7 @@ private:
     int m_ssd_open_flags;
     first_block_header m_first_blk_hdr;
     bool m_first_time_boot{false};
+    bool m_boot_in_degraded_mode{false};
 
     sisl::sparse_vector< std::unique_ptr< PhysicalDev > > m_all_pdevs;
     std::map< HSDevType, std::vector< PhysicalDev* > > m_pdevs_by_type;
@@ -150,6 +151,7 @@ public:
     void format_devices();
     void load_devices();
     void close_devices();
+    bool is_boot_in_degraded_mode() const { return m_boot_in_degraded_mode; }
 
     /// @brief Create a VirtualDev based on input parameters
     /// @param vdev_param Parameters defining all the essential inputs to create virtual device

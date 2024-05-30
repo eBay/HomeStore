@@ -145,9 +145,10 @@ void DeviceManager::load_devices() {
                       "We don't support superblock version upgrade yet");
 
     if (m_first_blk_hdr.num_pdevs != m_dev_infos.size()) {
-        // enable start with missing drives
+        // enable start with missing drives. now it is in degraded mode
         LOGWARN("Homestore is formatted with {} devices, but restarted with {} devices.", m_first_blk_hdr.num_pdevs,
                 m_dev_infos.size());
+        m_boot_in_degraded_mode = true;
     }
 
     for (const auto& d : m_dev_infos) {
