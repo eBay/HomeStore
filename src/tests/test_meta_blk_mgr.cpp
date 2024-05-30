@@ -129,7 +129,7 @@ protected:
             test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", {{HS_SERVICE::META, {.size_pct = 85.0}}});
     }
 
-    void TearDown() override{};
+    void TearDown() override {};
 
 public:
     [[nodiscard]] uint64_t get_elapsed_time(const Clock::time_point& start) {
