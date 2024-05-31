@@ -129,7 +129,7 @@ void VirtualDev::remove_chunk(cshared< Chunk >& chunk) {
     std::unique_lock lg{m_mgmt_mutex};
     m_all_chunks[chunk->chunk_id()].reset();
     m_all_chunks[chunk->chunk_id()] = nullptr;
-    m_total_chunk_num++;
+    m_total_chunk_num--;
     m_chunk_selector->remove_chunk(chunk);
 }
 

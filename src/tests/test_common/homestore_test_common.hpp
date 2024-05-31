@@ -295,7 +295,7 @@ public:
             hsi->start(hs_input_params{.devices = device_info, .app_mem_size = app_mem_size}, std::move(cb));
 
         // We need to set the min chunk size before homestore format
-        if (svc_params[HS_SERVICE::LOG].min_chunk_size != 0) {
+        if (svc_params.contains(HS_SERVICE::LOG) && svc_params[HS_SERVICE::LOG].min_chunk_size != 0) {
             set_min_chunk_size(svc_params[HS_SERVICE::LOG].min_chunk_size);
         }
 
@@ -304,7 +304,8 @@ public:
                 {{HS_SERVICE::META,
                   {.dev_type = homestore::HSDevType::Fast, .size_pct = svc_params[HS_SERVICE::META].size_pct}},
                  {HS_SERVICE::LOG,
-                  {.size_pct = svc_params[HS_SERVICE::LOG].size_pct,
+                  {.dev_type = homestore::HSDevType::Fast,
+                   .size_pct = svc_params[HS_SERVICE::LOG].size_pct,
                    .chunk_size = svc_params[HS_SERVICE::LOG].chunk_size,
                    .vdev_size_type = svc_params[HS_SERVICE::LOG].vdev_size_type}},
                  {HS_SERVICE::DATA,

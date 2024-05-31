@@ -81,7 +81,10 @@ void JournalVirtualDev::init() {
 
     // Traverse the chunks and find the heads of the logdev_id's.
     for (auto& chunk : m_all_chunks) {
-        RELEASE_ASSERT(chunk.get() != nullptr, "missing chunk in Journal_vdev, crash!")
+        // for journal_vdev, the chunk is created dynamicly, so it`s expected for chunk with spcific chunk id to be
+        // nullptr.
+        // TODO: when a chunk is nullptr, find a way to idenfy it`s noraml or chunk lost
+        if (!chunk) continue;
         auto* data = r_cast< JournalChunkPrivate* >(const_cast< uint8_t* >(chunk->user_private()));
         auto chunk_id = chunk->chunk_id();
         auto logdev_id = data->logdev_id;
@@ -123,7 +126,7 @@ void JournalVirtualDev::init() {
     // Remove chunk will affect the m_all_chunks so keep a separate list.
     std::vector< shared< Chunk > > orphan_chunks;
     for (auto& chunk : m_all_chunks) {
-        RELEASE_ASSERT(chunk.get() != nullptr, "missing chunk in Journal_vdev, crash!")
+        if (!chunk) continue;
         if (!visited_chunks.count(chunk->chunk_id())) { orphan_chunks.push_back(chunk); }
     }
 
