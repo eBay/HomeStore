@@ -195,26 +195,17 @@ BlkAllocStatus BlkDataService::alloc_blks(uint32_t size, const blk_alloc_hints& 
     return m_vdev->alloc_blks(nblks, hints, out_blkids);
 }
 
-void BlkDataService::commit_blk(MultiBlkId const& blkid, bool should_ignore_failure) {
+BlkAllocStatus BlkDataService::commit_blk(MultiBlkId const& blkid) {
     if (blkid.num_pieces() == 1) {
         // Shortcut to most common case
-        auto alloc_status = m_vdev->commit_blk(blkid);
-        // if any error happens when committing the blk to data service, we should assert and crash to stopping writing
-        // to this node.
-        if (alloc_status != BlkAllocStatus::SUCCESS) {
-            if (should_ignore_failure) return;
-            HS_REL_ASSERT(0, "Failed to commit blk: {} ", blkid.to_string());
-        }
-    } else {
-        auto it = blkid.iterate();
-        while (auto const bid = it.next()) {
-            auto alloc_status = m_vdev->commit_blk(*bid);
-            if (alloc_status != BlkAllocStatus::SUCCESS) {
-                if (should_ignore_failure) break;
-                HS_REL_ASSERT(0, "Failed to commit blk: {} ", blkid.to_string());
-            }
-        }
+        return m_vdev->commit_blk(blkid);
     }
+    auto it = blkid.iterate();
+    while (auto const bid = it.next()) {
+        auto alloc_status = m_vdev->commit_blk(*bid);
+        if (alloc_status != BlkAllocStatus::SUCCESS) return alloc_status;
+    }
+    return BlkAllocStatus::SUCCESS;
 }
 
 folly::Future< std::error_code > BlkDataService::async_free_blk(MultiBlkId const& bids) {

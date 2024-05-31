@@ -142,7 +142,7 @@ public:
      *
      * @param bid The MultiBlkId of the block to commit.
      */
-    void commit_blk(MultiBlkId const& bid, bool should_ignore_failure = false);
+    BlkAllocStatus commit_blk(MultiBlkId const& bid);
 
     /**
      * @brief Allocates a contiguous block of disk space of the given size.

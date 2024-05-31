@@ -666,12 +666,12 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
 
 void RaftReplDev::handle_commit(repl_req_ptr_t rreq) {
     if (rreq->local_blkid().is_valid()) {
-        if (hs()->device_mgr()->is_boot_in_degraded_mode() && m_log_store_replay_done)
-            // if booting in degraded mode and replaying log, bypass commit_blk failure to keep homestore from crashing
-            // and  enable booting other pdevs successfully
-            data_service().commit_blk(rreq->local_blkid(), true);
-        else
-            data_service().commit_blk(rreq->local_blkid());
+        if (data_service().commit_blk(rreq->local_blkid()) != BlkAllocStatus::SUCCESS) {
+            if (hs()->device_mgr()->is_boot_in_degraded_mode() && m_log_store_replay_done)
+                return;
+            else
+                RD_DBG_ASSERT(false, "fail to commit blk when applying log in non-degraded mode.")
+        }
     }
 
     // Remove the request from repl_key map.
