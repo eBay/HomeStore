@@ -448,7 +448,7 @@ void DeviceManager::remove_chunk_locked(shared< Chunk > chunk) {
     auto vdev = m_vdevs[vdev_id];
     vdev->remove_chunk(chunk);
 
-    m_chunks[chunk_id].reset();
+    m_chunks.erase(chunk_id);
 
     // Update the vdev info.
     auto buf = hs_utils::iobuf_alloc(vdev_info::size, sisl::buftag::superblk, pdev->align_size());
@@ -582,7 +582,7 @@ std::vector< shared< Chunk > > DeviceManager::get_chunks() const {
     std::unique_lock lg{m_vdev_mutex};
     std::vector< shared< Chunk > > res;
     res.reserve(m_chunks.size());
-    for (auto& chunk : m_chunks) {
+    for (auto& [_, chunk] : m_chunks) {
         if (chunk) res.push_back(chunk);
     }
     return res;

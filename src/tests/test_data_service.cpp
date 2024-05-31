@@ -265,7 +265,7 @@ public:
 
         // we can keep all the chunks of a pdev in a vector, but that will be only used for this test,
         // so, we do not do this for now. we can modify the logic here if we add that vector in the future.
-        for (auto& chunk : chunks) {
+        for (auto& [_, chunk] : chunks) {
             if (!chunk) continue;
             if (chunk_in_missing_pdev && chunk_in_living_pdev) break;
             if (!chunk_in_missing_pdev && (chunk->physical_dev() == missing_pdev)) {

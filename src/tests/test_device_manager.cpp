@@ -119,10 +119,9 @@ public:
             ASSERT_EQ(vdev->get_total_chunk_num(), m_pdevs.size() * 2)
                 << "Expected vdev to be created with 2 chunks per pdev";
             // the last item in chunks must not be nullptr
-            auto size = chunks[chunks.size() - 1]->size();
+            auto size = chunks.begin()->second->size();
             std::map< const PhysicalDev*, uint32_t > chunks_in_pdev_count;
-            for (const auto& chunk : chunks) {
-                if (!chunk) continue;
+            for (const auto& [_, chunk] : chunks) {
                 ASSERT_EQ(chunk->size(), size) << "All chunks are not equally sized in vdev";
                 ASSERT_EQ(chunk->is_align(), true) << "All chunks should be aligned";
 

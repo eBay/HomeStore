@@ -127,8 +127,7 @@ void VirtualDev::add_chunk(cshared< Chunk >& chunk, bool is_fresh_chunk) {
 
 void VirtualDev::remove_chunk(cshared< Chunk >& chunk) {
     std::unique_lock lg{m_mgmt_mutex};
-    m_all_chunks[chunk->chunk_id()].reset();
-    m_all_chunks[chunk->chunk_id()] = nullptr;
+    m_all_chunks.erase(chunk->chunk_id());
     m_total_chunk_num--;
     m_chunk_selector->remove_chunk(chunk);
 }
@@ -137,8 +136,7 @@ folly::Future< std::error_code > VirtualDev::async_format() {
     static thread_local std::vector< folly::Future< std::error_code > > s_futs;
     s_futs.clear();
 
-    for (auto& chunk : m_all_chunks) {
-        if (!chunk) continue;
+    for (auto& [_, chunk] : m_all_chunks) {
         auto* pdev = chunk->physical_dev_mutable();
         LOGINFO("writing zero for chunk: {}, size: {}, offset: {}", chunk->chunk_id(), in_bytes(chunk->size()),
                 chunk->start_offset());
@@ -566,8 +564,7 @@ void VirtualDev::submit_batch() {
 
 uint64_t VirtualDev::available_blks() const {
     uint64_t avl_blks{0};
-    for (auto& chunk : m_all_chunks) {
-        if (!chunk) continue;
+    for (auto& [_, chunk] : m_all_chunks) {
         avl_blks += chunk->blk_allocator()->available_blks();
     }
     return avl_blks;
@@ -575,18 +572,17 @@ uint64_t VirtualDev::available_blks() const {
 
 uint64_t VirtualDev::used_size() const {
     uint64_t alloc_cnt{0};
-    for (auto& chunk : m_all_chunks) {
-        if (!chunk) continue;
+    for (auto& [_, chunk] : m_all_chunks) {
         alloc_cnt += chunk->blk_allocator()->get_used_blks();
     }
     return (alloc_cnt * block_size());
 }
 
-std::vector< shared< Chunk > > VirtualDev::get_chunks() const { return m_all_chunks; }
+std::map< uint16_t, shared< Chunk > > VirtualDev::get_chunks() const { return m_all_chunks; }
 
 bool VirtualDev::is_blk_exist(MultiBlkId const& b) const {
     auto chunk_num = b.chunk_num();
-    return m_all_chunks.index_exists(chunk_num) && m_all_chunks[chunk_num] != nullptr;
+    return m_all_chunks.contains(chunk_num);
 }
 
 /* Get status for all chunks */
@@ -594,8 +590,7 @@ nlohmann::json VirtualDev::get_status(int log_level) const {
     nlohmann::json j;
 
     try {
-        for (auto& chunk : m_all_chunks) {
-            if (!chunk) continue;
+        for (auto& [_, chunk] : m_all_chunks) {
             nlohmann::json chunk_j;
             chunk_j["ChunkInfo"] = chunk->get_status(log_level);
             if (chunk->blk_allocator() != nullptr) {
@@ -617,8 +612,8 @@ uint32_t VirtualDev::atomic_page_size() const {
 
 std::string VirtualDev::to_string() const { return ""; }
 
-shared< Chunk > VirtualDev::get_next_chunk(cshared< Chunk >& chunk) const {
-    return m_all_chunks[(chunk->vdev_ordinal() + 1) % m_all_chunks.size()];
+shared< Chunk > VirtualDev::get_next_chunk(cshared< Chunk >& chunk) {
+    return m_all_chunks[(chunk->chunk_id() + 1) % m_all_chunks.size()];
 }
 
 void VirtualDev::update_vdev_private(const sisl::blob& private_data) {
