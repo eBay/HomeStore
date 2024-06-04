@@ -100,6 +100,12 @@ struct IndexBuffer : public sisl::ObjLifeCounter< IndexBuffer > {
     std::vector< std::weak_ptr< IndexBuffer > > m_down_buffers;
     std::shared_ptr< IndexBuffer > m_prev_up_buffer; // Keep a copy for debugging
 #endif
+
+#ifdef _PRERELEASE
+    bool m_crash_flag_on{false};
+    void set_crash_flag() { m_crash_flag_on = true; }
+#endif
+
     uint32_t m_index_ordinal{0};  // Ordinal of the index table this buffer belongs to, used only during recovery
     uint8_t m_is_meta_buf{false}; // Is the index buffer writing to metablk?
     bool m_node_freed{false};

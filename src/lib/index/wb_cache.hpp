@@ -64,10 +64,6 @@ public:
     //////////////////// CP Related API section /////////////////////////////////
     folly::Future< bool > async_cp_flush(IndexCPContext* context);
     IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext* cp_ctx) const;
-#ifdef _PRERELEASE
-    void add_to_crashing_buffers(IndexBufferPtr, std::string);
-#endif
-
     void recover(sisl::byte_view sb);
 
 private:

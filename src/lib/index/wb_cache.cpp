@@ -203,11 +203,63 @@ bool IndexWBCache::refresh_meta_buf(shared< MetaIndexBuffer >& meta_buf, CPConte
     return true;
 }
 
+#ifdef _PRERELEASE
+static void set_crash_flips(IndexBufferPtr const& parent_buf, IndexBufferPtr const& child_buf,
+                            IndexBufferPtrList const& new_node_bufs, IndexBufferPtrList const& freed_node_bufs) {
+    // TODO: Need an API from flip to quickly check if flip is enabled, so this method doesn't check flip_enabled a
+    // bunch of times.
+    if ((new_node_bufs.size() == 1) && freed_node_bufs.empty()) {
+        // Its a split node situation
+        if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_meta")) {
+            if (parent_buf->is_meta_buf()) { parent_buf->set_crash_flag(); }
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_root")) {
+            if (parent_buf->is_meta_buf()) { child_buf->set_crash_flag(); }
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_parent")) {
+            parent_buf->set_crash_flag();
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_left_child")) {
+            child_buf->set_crash_flag();
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_right_child")) {
+            new_node_bufs[0]->set_crash_flag();
+        }
+    } else if (!freed_node_bufs.empty() && (new_node_bufs.size() != freed_node_bufs.size())) {
+        // Its a merge nodes sitation
+        if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_meta")) {
+            if (parent_buf->is_meta_buf()) { parent_buf->set_crash_flag(); }
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_root")) {
+            if (parent_buf->is_meta_buf()) { child_buf->set_crash_flag(); }
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_parent")) {
+            parent_buf->set_crash_flag();
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_left_child")) {
+            child_buf->set_crash_flag();
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_right_child")) {
+            if (!new_node_bufs.empty()) { new_node_bufs[0]->set_crash_flag(); }
+        }
+    } else if (!freed_node_bufs.empty() && (new_node_bufs.size() == freed_node_bufs.size())) {
+        // Its a rebalance node situation
+        if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_meta")) {
+            if (parent_buf->is_meta_buf()) { parent_buf->set_crash_flag(); }
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_root")) {
+            if (parent_buf->is_meta_buf()) { child_buf->set_crash_flag(); }
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_parent")) {
+            parent_buf->set_crash_flag();
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_left_child")) {
+            child_buf->set_crash_flag();
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_right_child")) {
+            if (!new_node_bufs.empty()) { new_node_bufs[0]->set_crash_flag(); }
+        }
+    }
+}
+#endif
+
 void IndexWBCache::transact_bufs(uint32_t index_ordinal, IndexBufferPtr const& parent_buf,
                                  IndexBufferPtr const& child_buf, IndexBufferPtrList const& new_node_bufs,
                                  IndexBufferPtrList const& freed_node_bufs, CPContext* cp_ctx) {
     IndexCPContext* icp_ctx = r_cast< IndexCPContext* >(cp_ctx);
     if (parent_buf) { link_buf(parent_buf, child_buf, false /* is_sibling_link */, cp_ctx); }
+
+#ifdef _PRERELEASE
+    set_crash_flips(parent_buf, child_buf, new_node_bufs, freed_node_bufs);
+#endif
 
     for (auto const& buf : new_node_bufs) {
         link_buf(child_buf, buf, true /* is_sibling_link */, cp_ctx);
@@ -217,9 +269,9 @@ void IndexWBCache::transact_bufs(uint32_t index_ordinal, IndexBufferPtr const& p
         if (!buf->m_wait_for_down_buffers.testz()) {
             // This buffer has some down bufs depending on it. It can happen for an upper level interior node, where
             // lower level node (say leaf) has split causing it to write entries in this node, but this node is now
-            // merging with other node, causing it to free. In these rare instances, we link this node to the new node
-            // resulting in waiting for all the down bufs to be flushed before up buf can flush (this buf is not written
-            // anyways)
+            // merging with other node, causing it to free. In these rare instances, we link this node to the new
+            // node resulting in waiting for all the down bufs to be flushed before up buf can flush (this buf is
+            // not written anyways)
             link_buf(child_buf, buf, true /* is_sibling_link */, cp_ctx);
         }
     }
@@ -235,28 +287,29 @@ void IndexWBCache::link_buf(IndexBufferPtr const& up_buf, IndexBufferPtr const& 
     IndexBufferPtr real_up_buf = up_buf;
     IndexCPContext* icp_ctx = r_cast< IndexCPContext* >(cp_ctx);
 
-    // Condition 1: If the down buffer and up buffer are both created by the current cp_id, unconditionally we need to
-    // link it with up_buffer's up_buffer. In other words, there should never a link between down and up buffers created
-    // in current generation (cp). In real terms, it means all new buffers can be flushed independently to each other
-    // and dependency is needed only for the buffers created in previous cps.
+    // Condition 1: If the down buffer and up buffer are both created by the current cp_id, unconditionally we need
+    // to link it with up_buffer's up_buffer. In other words, there should never a link between down and up buffers
+    // created in current generation (cp). In real terms, it means all new buffers can be flushed independently to
+    // each other and dependency is needed only for the buffers created in previous cps.
     if ((down_buf->m_created_cp_id == icp_ctx->id()) && (up_buf->m_created_cp_id == icp_ctx->id())) {
         real_up_buf = up_buf->m_up_buffer;
         HS_DBG_ASSERT(real_up_buf,
                       "Up buffer is newly created in this cp, but it doesn't have its own up_buffer, its not expected");
     }
 
-    // Condition 2: If down_buf already has an up_buf, we can override it newly passed up_buf it only in case of sibling
-    // link. Say there is a parent node P1 and child C0, C1 (all 3 created in previous cps). Consider the scenarios
+    // Condition 2: If down_buf already has an up_buf, we can override it newly passed up_buf it only in case of
+    // sibling link. Say there is a parent node P1 and child C0, C1 (all 3 created in previous cps). Consider the
+    // scenarios
     //
     // Scenario 1: Following thing happens:
     // 1. Child C1 first splits and thus chain will have P1 <-- C1 <-- C2.
-    // 2. Child C2 splits further creating C3 and writes to P1, the link_buf(P1, C2, is_sibling=false) will be called
-    // first. In this instance, we don't want to break the above chain, because C2 should rely on C1 for its repair.
-    // The link_buf calls will be
-    //   a) link_buf(P1, C2, is_sibling=false),  => P1 <-- C1 <-- C2 (because C2 has up_buffer C1 and not a sibling so
-    //   no override)
-    //   b) link_buf(C2, C3, is_sibling=true),   => P1 <--- C1 <-- C2, C3 (because of Condition 1, where C2, C3 are
-    //   created in this CP, so link C3 with C2's real_up_buf = C2)
+    // 2. Child C2 splits further creating C3 and writes to P1, the link_buf(P1, C2, is_sibling=false) will be
+    // called first. In this instance, we don't want to break the above chain, because C2 should rely on C1 for its
+    // repair. The link_buf calls will be
+    //   a) link_buf(P1, C2, is_sibling=false),  => P1 <-- C1 <-- C2 (because C2 has up_buffer C1 and not a sibling
+    //   so no override)
+    //   b) link_buf(C2, C3, is_sibling=true),   => P1 <--- C1 <-- { C2, C3 } (because of Condition 1,
+    //      where C2, C3 are created in this CP, so link C3 with C2's real_up_buf = C2)
     //
     // Scenario 2: Following thing happens:
     // 1. Child C1 first splits and thus chain will have P1 <-- C1 <-- C2.

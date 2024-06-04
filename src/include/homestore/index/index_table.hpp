@@ -162,21 +162,6 @@ protected:
             freed_node_bufs.push_back(static_cast< IndexBtreeNode* >(freed_node.get())->m_idx_buf);
             this->free_node(freed_node, locktype_t::WRITE, context);
         }
-#if 0
-#ifdef _PRERELEASE
-        if (iomgr_flip::instance()->test_flip("index_parent_non_root")) {
-            if (parent_node->node_id() != this->root_node_id()) {
-                wb_cache().add_to_crashing_buffers(parent_idx_node->m_idx_buf, "index_parent_non_root");
-            }
-        }
-        if (iomgr_flip::instance()->test_flip("index_parent_root")) {
-            if (parent_node->node_id() == this->root_node_id()) {
-                LOGINFO("Adding parent to crashing buffers {} ", parent_node->node_id());
-                wb_cache().add_to_crashing_buffers(left_child_idx_node->m_idx_buf, "index_parent_root");
-            }
-        }
-#endif
-#endif
 
         wb_cache().transact_bufs(ordinal(), parent_buf, left_child_buf, new_node_bufs, freed_node_bufs, cp_ctx);
         return btree_status_t::success;

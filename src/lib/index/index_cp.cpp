@@ -202,7 +202,7 @@ void IndexCPContext::process_txn_record(txn_record const* rec, std::map< BlkId, 
                 buf = std::make_shared< IndexBuffer >(nullptr, bid);
             }
 
-            auto [it2, happened] = buf_map.insert(std::make_pair(bid, buf));
+            [[maybe_unused]] auto [it2, happened] = buf_map.insert(std::make_pair(bid, buf));
             DEBUG_ASSERT(happened, "buf_map insert failed");
 
             buf->m_dirtied_cp_id = cpg->id();
