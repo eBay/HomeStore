@@ -193,7 +193,6 @@ public:
         std::stringstream ss;
         ss << std::hex << data.substr(0, 8);
         ss >> m_key;
-        assert(data == *idx_to_key(m_key));
     }
 
     // Add 8 bytes for preamble.

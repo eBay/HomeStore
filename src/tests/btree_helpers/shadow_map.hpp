@@ -144,9 +144,7 @@ public:
         const int key_width = 20;
 
         // Format the key-value pairs and insert them into the result string
-        ss << std::left << std::setw(key_width) << "KEY"
-           << " "
-           << "VaLUE" << '\n';
+        ss << std::left << std::setw(key_width) << "KEY" << " " << "VALUE" << '\n';
         foreach ([&](const auto& key, const auto& value) {
             ss << std::left << std::setw(key_width) << key.to_string() << " " << value.to_string() << '\n';
         });
@@ -188,27 +186,49 @@ public:
         m_range_scheduler.remove_keys(start_key, end_key);
     }
 
-    void save(const std::string& filename) {
-        std::lock_guard lock{m_mutex};
-        std::ofstream file(filename);
-        for (const auto& [key, value] : m_map) {
-            file << key << " " << value << '\n';
+    void save(const std::filesystem::path& filename) {
+        std::scoped_lock lock{m_mutex};
+        std::ofstream file(filename, std::ios::binary);
+        if (!file) {
+            throw std::runtime_error("Error opening file for writing: " + filename.string());
         }
-        file.close();
+        for (const auto& [key, value] : m_map) {
+            auto s_Key = key.serialize();
+            auto s_value = value.serialize();
+            uint32_t k_size = s_Key.size();
+            uint32_t v_size = s_value.size();
+
+            file.write(reinterpret_cast< const char* >(&k_size), sizeof(k_size));
+            file.write(reinterpret_cast< const char* >(s_Key.cbytes()), k_size);
+            file.write(reinterpret_cast< const char* >(&v_size), sizeof(v_size));
+            file.write(reinterpret_cast< const char* >(s_value.cbytes()), v_size);
+        }
     }
 
-    void load(const std::string& filename) {
-        std::lock_guard lock{m_mutex};
-        std::ifstream file(filename);
-        if (file.is_open()) {
-            m_map.clear();
-            K key;
-            V value;
-            while (file >> key >> value) {
-                m_map.emplace(key, std::move(value));
-                m_range_scheduler.put_key(key.key());
-            }
-            file.close();
+    void load(const std::filesystem::path& filename) {
+        uint32_t k_size;
+        uint32_t v_size;
+        K key;
+        V value;
+        std::scoped_lock lock{m_mutex};
+        std::ifstream file(filename, std::ios::binary);
+        if (!file) {
+            throw std::runtime_error("Error opening file for writing: " + filename.string());
+        }
+
+        while (file.peek() != EOF) {
+            file.read(reinterpret_cast< char* >(&k_size), sizeof(k_size));
+            std::vector< uint8_t > k_buffer(k_size);
+            file.read(reinterpret_cast< char* >(k_buffer.data()), k_size);
+            file.read(reinterpret_cast< char* >(&v_size), sizeof(v_size));
+            std::vector< uint8_t > v_buffer(v_size);
+            file.read(reinterpret_cast< char* >(v_buffer.data()), v_size);
+
+            key.deserialize(sisl::blob(k_buffer.data(), k_size), true);
+            value.deserialize(sisl::blob(v_buffer.data(), v_size), true);
+
+            m_map.emplace(key, std::move(value));
+            m_range_scheduler.put_key(key.key());
         }
     }
 };

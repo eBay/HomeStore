@@ -15,7 +15,6 @@
  *********************************************************************************/
 #include <gtest/gtest.h>
 #include <boost/uuid/random_generator.hpp>
-
 #include <sisl/utility/enum.hpp>
 #include "common/homestore_config.hpp"
 #include "common/resource_mgr.hpp"

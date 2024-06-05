@@ -39,6 +39,7 @@ def parse_arguments():
     parser.add_argument('--dev_list', help='Device list', default='')
     parser.add_argument('--cleanup_after_shutdown', help='Cleanup after shutdown', type=bool, default=False)
     parser.add_argument('--init_device', help='Initialize device', type=bool, default=True)
+    parser.add_argument('--type', help='node type', type=int, default=0)
 
     # Parse the known arguments and ignore any unknown arguments
     args, unknown = parser.parse_known_args()
@@ -80,12 +81,13 @@ def long_running_clean_shutdown(options, type=0):
 def main():
     options = parse_arguments()
     test_suite_name = options['test_suits']
+    tree_type = options['type']
     try:
         # Retrieve the function based on the name provided in options['test_suits']
         test_suite_function = globals().get(test_suite_name)
         if callable(test_suite_function):
             print(f"Running {test_suite_name} with options: {options}")
-            test_suite_function(options)
+            test_suite_function(options, tree_type)
         else:
             print(f"Test suite '{test_suite_name}' is not a callable function.")
     except KeyError:
@@ -94,9 +96,13 @@ def main():
 
 def long_running(*args):
     options = parse_arguments()
-    long_runnig_index(options)
-    long_running_clean_shutdown(options)
-
+    tree_type = options['type']
+    try:
+        long_runnig_index(options, tree_type)
+        long_running_clean_shutdown(options, tree_type)
+    except TestFailedError as e:
+        print(f"Test failed: {e}")
+        raise
 
 if __name__ == "__main__":
     main()
