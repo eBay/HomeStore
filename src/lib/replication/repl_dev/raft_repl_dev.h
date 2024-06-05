@@ -98,6 +98,7 @@ private:
     nuraft::ptr< nuraft::snapshot > m_last_snapshot{nullptr};
 
     static std::atomic< uint64_t > s_next_group_ordinal;
+    bool m_log_store_replay_done{false};
 
 public:
     friend class RaftStateMachine;

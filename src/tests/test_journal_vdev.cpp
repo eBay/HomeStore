@@ -507,8 +507,11 @@ TEST_F(VDevJournalIOTest, Recovery) {
 TEST_F(VDevJournalIOTest, MultipleChunkTest) {
     // Chunk size is 16MB and each data log entry will be of size 6MB to create gaps.
     uint64_t MB = 1024 * 1024;
-    uint64_t chunk_size = 16 * MB;
-    uint64_t data_size = 6 * MB;
+    // the chunk_size should be set according to dev type
+    uint64_t chunk_size = hs()->logstore_service().get_vdev()->info().chunk_size;
+    // accourding to the orginal logic, datasize/chunksize == 3 / 8
+    // here, we use this proportion to make sure the flowing test case pass
+    uint64_t data_size = chunk_size * 3 / 8;
     JournalDescriptorTest test(1);
     auto log_dev_jd = test.vdev_jd();
 

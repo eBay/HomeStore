@@ -32,6 +32,10 @@
 #include <homestore/blk.h>
 #include <homestore/homestore.hpp>
 #include <homestore/homestore_decl.hpp>
+#include "device/device.h"
+#include "device/physical_dev.hpp"
+#include "device/virtual_dev.hpp"
+#include "device/chunk.h"
 #include "common/homestore_config.hpp"
 #include "common/homestore_assert.hpp"
 #include "blkalloc/blk_allocator.h"
@@ -237,6 +241,162 @@ public:
 
                 this->finish_and_notify();
             });
+    }
+
+    void write_and_restart_with_missing_data_drive(const uint64_t io_size) {
+        vdev_info vinfo;
+        auto data_vdev = inst().open_vdev(vinfo, true);
+
+        // get all the pdevs of this vdev
+        auto drives = data_vdev->get_pdevs();
+        RELEASE_ASSERT_EQ(drives.size() > 1, true, "missing drive test expecting at least 2 Data drives");
+        auto it = drives.begin();
+        // missing_pdev is the pdev that will be missing after restart;
+        auto missing_pdev = (*it++);
+        // living_pdev is the pdev that will be living after restart;
+        auto living_pdev = *it;
+
+        // get all the chunks of this vdev
+        auto chunks = data_vdev->get_chunks();
+
+        // try to find a chunk for each pdev
+        shared< Chunk > chunk_in_missing_pdev;
+        shared< Chunk > chunk_in_living_pdev;
+
+        // we can keep all the chunks of a pdev in a vector, but that will be only used for this test,
+        // so, we do not do this for now. we can modify the logic here if we add that vector in the future.
+        for (auto& [_, chunk] : chunks) {
+            if (!chunk) continue;
+            if (chunk_in_missing_pdev && chunk_in_living_pdev) break;
+            if (!chunk_in_missing_pdev && (chunk->physical_dev() == missing_pdev)) {
+                chunk_in_missing_pdev = chunk;
+                continue;
+            }
+            if (!chunk_in_living_pdev && chunk->physical_dev() == living_pdev) {
+                chunk_in_living_pdev = chunk;
+                continue;
+            }
+        }
+
+        RELEASE_ASSERT(chunk_in_missing_pdev, "can not find a chunk on missing drive");
+        RELEASE_ASSERT(chunk_in_living_pdev, "can not find a chunk on living drive");
+
+        LOGINFO("Step 2: write data to these two chunks.");
+        // write blks to both of the chunks
+        MultiBlkId missing_drive_blk;
+        MultiBlkId living_drive_blk;
+
+        blk_alloc_hints hints;
+
+        auto sg_write_ptr1 = std::make_shared< sisl::sg_list >();
+        hints.chunk_id_hint = chunk_in_living_pdev->chunk_id();
+        ++m_outstanding_io_cnt;
+        write_sgs(io_size, sg_write_ptr1, 4, living_drive_blk, hints).thenValue([this](auto&& err) {
+            RELEASE_ASSERT(!err, "Write error");
+            // do not free , use it when test write
+            --m_outstanding_io_cnt;
+            ++m_total_io_comp_cnt;
+        });
+
+        hints.chunk_id_hint = chunk_in_missing_pdev->chunk_id();
+        auto sg_write_ptr2 = std::make_shared< sisl::sg_list >();
+        ++m_outstanding_io_cnt;
+        write_sgs(io_size, sg_write_ptr2, 4, missing_drive_blk, hints).thenValue([this](auto&& err) {
+            RELEASE_ASSERT(!err, "Write error");
+            // free(*sg_write_ptr2); do not free , use it when test write
+            --m_outstanding_io_cnt;
+            ++m_total_io_comp_cnt;
+        });
+
+        // Wait for write operations to complete
+        wait_for_outstanding_io_done();
+
+        LOGINFO("Step 3: restart with missing data drive(pdev).");
+        auto dev_mgr = homestore::HomeStore::instance()->device_mgr();
+        std::vector< std::pair< std::string, homestore::HSDevType > > start_with_devices;
+        auto fast_pdevs = dev_mgr->get_pdevs_by_dev_type(homestore::HSDevType::Fast);
+        for (auto& pdev : fast_pdevs)
+            // can not lose fast drive
+            start_with_devices.emplace_back(pdev->get_devname(), homestore::HSDevType::Fast);
+        // lose one data drive
+        for (auto& pdev : drives) {
+            if (pdev->pdev_id() != missing_pdev->pdev_id())
+                start_with_devices.emplace_back(living_pdev->get_devname(), homestore::HSDevType::Data);
+        }
+
+        // restart with the given drive list
+        test_common::HSTestHelper::start_homestore(
+            "test_data_service", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::DATA, {.size_pct = 80.0}}},
+            nullptr, true, false, 5, start_with_devices);
+
+        LOGINFO("Step 4: read the blk from missing data drive");
+        auto sg = std::make_shared< sisl::sg_list >();
+        sg->size = io_size;
+        struct iovec iov;
+        iov.iov_len = io_size;
+        iov.iov_base = iomanager.iobuf_alloc(512, iov.iov_len);
+        sg->iovs.push_back(iov);
+
+        ++m_outstanding_io_cnt;
+        inst().async_read(missing_drive_blk, *sg, io_size).thenValue([this](auto&& err) {
+            RELEASE_ASSERT_EQ(err == std::make_error_code(std::errc::resource_unavailable_try_again), true,
+                              "should not be able to read blk on missing drive");
+            --m_outstanding_io_cnt;
+            ++m_total_io_comp_cnt;
+        });
+
+        ++m_outstanding_io_cnt;
+        LOGINFO("Step 5: read the blk from living data drive");
+        inst().async_read(living_drive_blk, *sg, io_size).thenValue([this, sg](auto&& err) {
+            RELEASE_ASSERT(!err, "should be able to read blk on living drive");
+            free(*sg);
+            --m_outstanding_io_cnt;
+            ++m_total_io_comp_cnt;
+        });
+
+        wait_for_outstanding_io_done();
+
+        LOGINFO("Step 6: write the blk to living data drive");
+        ++m_outstanding_io_cnt;
+        inst()
+            .async_write(*(sg_write_ptr1.get()), living_drive_blk, false)
+            .thenValue([this, sg_write_ptr1](auto&& err) {
+                RELEASE_ASSERT(!err, "should not be able to write blk on living drive");
+                free(*sg_write_ptr1);
+                --m_outstanding_io_cnt;
+                ++m_total_io_comp_cnt;
+            });
+
+        LOGINFO("Step 7: write the blk to missing data drive");
+        ++m_outstanding_io_cnt;
+        inst()
+            .async_write(*(sg_write_ptr2.get()), missing_drive_blk, false)
+            .thenValue([this, sg_write_ptr2](auto&& err) {
+                RELEASE_ASSERT_EQ(err == std::make_error_code(std::errc::resource_unavailable_try_again), true,
+                                  "should not be able to write blk on living drive");
+                free(*sg_write_ptr2);
+                --m_outstanding_io_cnt;
+                ++m_total_io_comp_cnt;
+            });
+
+        wait_for_outstanding_io_done();
+
+        LOGINFO("Step 8: free the blk from missing data drive");
+        ++m_outstanding_io_cnt;
+        inst().async_free_blk(missing_drive_blk).thenValue([this](auto&& err) {
+            RELEASE_ASSERT_EQ(err == std::make_error_code(std::errc::resource_unavailable_try_again), true,
+                              "should not be able to free blk on living drive");
+            --m_outstanding_io_cnt;
+            ++m_total_io_comp_cnt;
+        });
+
+        LOGINFO("Step 9: free the blk from living data drive");
+        ++m_outstanding_io_cnt;
+        inst().async_free_blk(living_drive_blk).thenValue([this](auto&& err) {
+            RELEASE_ASSERT(!err, "should be able to free blk on living drive");
+            --m_outstanding_io_cnt;
+            ++m_total_io_comp_cnt;
+        });
     }
 
     //
@@ -481,7 +641,8 @@ private:
     // normally it should be freed in after_write_cb;
     //
     folly::Future< std::error_code > write_sgs(uint64_t io_size, cshared< sisl::sg_list > sg, uint32_t num_iovs,
-                                               MultiBlkId& out_bids) {
+                                               MultiBlkId& out_bids,
+                                               std::optional< blk_alloc_hints > hints = std::nullopt) {
         // TODO: What if iov_len is not multiple of 4Ki?
         HS_DBG_ASSERT_EQ(io_size % (4 * Ki * num_iovs), 0, "Expecting iov_len : {} to be multiple of {}.",
                          io_size / num_iovs, 4 * Ki);
@@ -494,8 +655,8 @@ private:
             sg->iovs.push_back(iov);
             sg->size += iov_len;
         }
-
-        auto fut = inst().async_alloc_write(*(sg.get()), blk_alloc_hints{}, out_bids, false /* part_of_batch*/);
+        auto fut = inst().async_alloc_write(*(sg.get()), hints.value_or(blk_alloc_hints{}), out_bids,
+                                            false /* part_of_batch*/);
         inst().commit_blk(out_bids);
         return fut;
     }
@@ -814,6 +975,22 @@ TEST_F(BlkDataServiceTest, TestRandMixIOLoad) {
 
     // Wait for the I/O operations to complete
     wait_for_outstanding_io_done();
+}
+
+/**
+ * @brief homestore can be started with a missing drive.
+ * 1 all the blks in the missing drive can not be read.
+ * 2 all the blks in the alive drives should be able to read;
+ *
+ * we do not support restart with a missing Fast Drive, where meta data is stored;
+ */
+TEST_F(BlkDataServiceTest, TestRestartWithMissingDrive) {
+    auto io_size = 4 * Mi;
+    LOGINFO("Step 1: find two chunks in different pdevs.");
+    write_and_restart_with_missing_data_drive(io_size);
+    LOGINFO("Step 10: wait for read and verify done.");
+    wait_for_outstanding_io_done();
+    LOGINFO("Step 11: I/O completed, do shutdown.");
 }
 
 // Stream related test

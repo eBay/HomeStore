@@ -169,8 +169,9 @@ public:
                     rdev_list[i].push_back(dev_list_all[i * num_devs_per_replica + j]);
                 }
             }
-
-            dev_list_ = std::move(rdev_list[replica_num_]);
+            for (auto const& dev : rdev_list[replica_num_]) {
+                dev_list_.emplace_back(dev, homestore::HSDevType::Data);
+            }
         }
 
         if (replica_num_ == 0) {
@@ -348,7 +349,7 @@ private:
     std::vector< std::string > args_;
     char** argv_;
 
-    std::vector< std::string > dev_list_;
+    std::vector< std::pair< std::string, homestore::HSDevType > > dev_list_;
 
     boost::process::group proc_grp_;
     std::unique_ptr< bip::shared_memory_object > shm_;
