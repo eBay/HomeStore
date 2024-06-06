@@ -30,6 +30,7 @@
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
 #include "common/homestore_utils.hpp"
+#include "common/crash_simulator.hpp"
 
 namespace homestore {
 
@@ -604,7 +605,8 @@ uint64_t LogDev::truncate(const logdev_key& key) {
 #ifdef _PRERELEASE
             if (garbage_collect && iomgr_flip::instance()->test_flip("logdev_abort_after_garbage")) {
                 THIS_LOGDEV_LOG(INFO, "logdev aborting after unreserving garbage ids");
-                raise(SIGKILL);
+                hs()->crash_simulator().crash();
+                return num_records_to_truncate;
             }
 #endif
         }

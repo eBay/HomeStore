@@ -32,6 +32,7 @@
 #include <homestore/chunk_selector.h>
 #include "common/homestore_flip.hpp"
 #include "common/homestore_utils.hpp"
+#include "common/crash_simulator.hpp"
 #include "device/device.h"
 #include "device/virtual_dev.hpp"
 #include "device/physical_dev.hpp"
@@ -732,7 +733,7 @@ void MetaBlkService::write_meta_blk_internal(meta_blk* mblk, const uint8_t* cont
         mblk->hdr.h.ovf_bid = obid;
 
 #ifdef _PRERELEASE
-        iomgr_flip::test_and_abort("write_with_ovf_abort");
+        if (hs()->crash_simulator().crash_if_flip_set("write_with_ovf_abort")) { return; }
 #endif
     }
 
@@ -745,7 +746,7 @@ void MetaBlkService::write_meta_blk_internal(meta_blk* mblk, const uint8_t* cont
     write_meta_blk_to_disk(mblk);
 
 #ifdef _PRERELEASE
-    iomgr_flip::test_and_abort("write_sb_abort");
+    if (hs()->crash_simulator().crash_if_flip_set("write_sb_abort")) { return; }
 #endif
 }
 
@@ -834,7 +835,7 @@ void MetaBlkService::update_sub_sb(const uint8_t* context_data, uint64_t sz, voi
     write_meta_blk_internal(mblk, context_data, sz);
 
 #ifdef _PRERELEASE
-    iomgr_flip::test_and_abort("update_sb_abort");
+    if (hs()->crash_simulator().crash_if_flip_set("update_sb_abort")) { return; }
 #endif
 
     // free the overflow bid if it is there
@@ -933,7 +934,7 @@ std::error_condition MetaBlkService::remove_sub_sb(void* cookie) {
     free_meta_blk(rm_blk);
 
 #ifdef _PRERELEASE
-    iomgr_flip::test_and_abort("remove_sb_abort");
+    if (hs()->crash_simulator().crash_if_flip_set("remove_sb_abort")) { return no_error; }
 #endif
 
     HS_LOG(DEBUG, metablk, "after remove, mstore used size: {}", m_sb_vdev->used_size());

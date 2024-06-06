@@ -176,7 +176,7 @@ public:
         vdev_size_type_t vdev_size_type{vdev_size_type_t::VDEV_SIZE_STATIC};
     };
 
-    static void start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
+    static void start_homestore(const std::string& test_name, std::map< uint32_t, test_params > const& svc_params_tmp,
                                 hs_before_services_starting_cb_t cb = nullptr, bool fake_restart = false,
                                 bool init_device = true, uint32_t shutdown_delay_sec = 5,
                                 std::vector< std::pair< std::string, homestore::HSDevType > > cust_dev_names = {}) {
@@ -191,6 +191,7 @@ public:
             std::this_thread::sleep_for(std::chrono::seconds{shutdown_delay_sec});
         }
 
+        std::map< uint32_t, test_params > svc_params = std::move(svc_params_tmp);
         std::vector< homestore::dev_info > device_info;
         if (!cust_dev_names.empty() || SISL_OPTIONS.count("device_list")) {
             if (cust_dev_names.empty())
@@ -291,6 +292,13 @@ public:
                 hsi->with_repl_data_service(tp.repl_app, tp.custom_chunk_selector);
             }
         }
+#ifdef _PRERELEASE
+        hsi->with_crash_simulator([=]() {
+            LOGINFO("CrashSimulator::crash() is called - restarting homestore");
+            start_homestore(test_name, svc_params, cb, true /* fake_restart */, false /* init_device */);
+        });
+#endif
+
         bool need_format =
             hsi->start(hs_input_params{.devices = device_info, .app_mem_size = app_mem_size}, std::move(cb));
 

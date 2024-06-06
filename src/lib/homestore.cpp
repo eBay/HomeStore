@@ -41,6 +41,7 @@
 #include "common/resource_mgr.hpp"
 #include "meta/meta_sb.hpp"
 #include "replication/service/generic_repl_svc.h"
+#include "common/crash_simulator.hpp"
 
 /*
  * IO errors handling by homestore.
@@ -90,6 +91,13 @@ HomeStore& HomeStore::with_repl_data_service(cshared< ReplApplication >& repl_ap
     return *this;
 }
 
+#ifdef _PRERELEASE
+HomeStore& HomeStore::with_crash_simulator(std::function< void(void) > cb) {
+    m_crash_simulator = std::make_unique< CrashSimulator >(std::move(cb));
+    return *this;
+}
+#endif
+
 bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_cb_t svcs_starting_cb) {
     auto& hs_config = HomeStoreStaticConfig::instance();
     hs_config.input = input;
@@ -119,6 +127,12 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
     });
 
     HomeStoreDynamicConfig::init_settings_default();
+
+#ifdef _PRERELEASE
+    // Start a default crash simulator which raises SIGKILL, in case user has not provided with_crash_simulator()
+    // callback
+    if (m_crash_simulator == nullptr) { m_crash_simulator = std::make_unique< CrashSimulator >(nullptr); }
+#endif
 
     LOGINFO("Homestore is loading with following services: {}", m_services.list());
     if (has_meta_service()) { m_meta_service = std::make_unique< MetaBlkService >(); }
@@ -151,7 +165,6 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
 }
 
 void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format_opts) {
-
     std::map< HSDevType, float > total_pct_by_type = {{HSDevType::Fast, 0.0f}, {HSDevType::Data, 0.0f}};
     // Accumulate total percentage of services on each device type
     for (const auto& [svc_type, fparams] : format_opts) {
@@ -187,7 +200,6 @@ void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format
     } else {
         hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Data}));
     }
-
 
     std::vector< folly::Future< std::error_code > > futs;
     for (const auto& [svc_type, fparams] : format_opts) {
