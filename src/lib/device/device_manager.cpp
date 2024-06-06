@@ -144,10 +144,12 @@ void DeviceManager::load_devices() {
     RELEASE_ASSERT_EQ(m_first_blk_hdr.version, first_block_header::CURRENT_SUPERBLOCK_VERSION,
                       "We don't support superblock version upgrade yet");
 
-    RELEASE_ASSERT_EQ(m_first_blk_hdr.num_pdevs, m_dev_infos.size(),
-                      "WARNING: The homestore is formatted with {} devices, but restarted with {} devices. Homestore "
-                      "does not support dynamic addition/removal of devices",
-                      m_first_blk_hdr.num_pdevs, m_dev_infos.size());
+    if (m_first_blk_hdr.num_pdevs != m_dev_infos.size()) {
+        // enable start with missing drives. now it is in degraded mode
+        LOGWARN("Homestore is formatted with {} devices, but restarted with {} devices.", m_first_blk_hdr.num_pdevs,
+                m_dev_infos.size());
+        m_boot_in_degraded_mode = true;
+    }
 
     for (const auto& d : m_dev_infos) {
         first_block fblk = PhysicalDev::read_first_block(d.dev_name, device_open_flags(d.dev_name));
@@ -356,6 +358,8 @@ void DeviceManager::load_vdevs() {
     // There are some vdevs load their chunks in each of pdev
     if (m_vdevs.size()) {
         for (auto& pdev : m_all_pdevs) {
+            // we might have some missing pdevs in the sparse_vector m_all_pdevs, so skip them
+            if (!pdev) continue;
             pdev->load_chunks([this](cshared< Chunk >& chunk) -> bool {
                 // Found a chunk for which vdev information is missing
                 if (m_vdevs[chunk->vdev_id()] == nullptr) {
@@ -444,7 +448,7 @@ void DeviceManager::remove_chunk_locked(shared< Chunk > chunk) {
     auto vdev = m_vdevs[vdev_id];
     vdev->remove_chunk(chunk);
 
-    m_chunks[chunk_id].reset();
+    m_chunks.erase(chunk_id);
 
     // Update the vdev info.
     auto buf = hs_utils::iobuf_alloc(vdev_info::size, sisl::buftag::superblk, pdev->align_size());
@@ -482,6 +486,7 @@ uint32_t DeviceManager::populate_pdev_info(const dev_info& dinfo, const iomgr::d
 uint64_t DeviceManager::total_capacity() const {
     uint64_t cap{0};
     for (const auto& pdev : m_all_pdevs) {
+        if (!pdev) continue;
         cap += pdev->data_size();
     }
     return cap;
@@ -577,7 +582,7 @@ std::vector< shared< Chunk > > DeviceManager::get_chunks() const {
     std::unique_lock lg{m_vdev_mutex};
     std::vector< shared< Chunk > > res;
     res.reserve(m_chunks.size());
-    for (auto& chunk : m_chunks) {
+    for (auto& [_, chunk] : m_chunks) {
         if (chunk) res.push_back(chunk);
     }
     return res;

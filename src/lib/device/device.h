@@ -123,12 +123,13 @@ private:
     int m_ssd_open_flags;
     first_block_header m_first_blk_hdr;
     bool m_first_time_boot{false};
+    bool m_boot_in_degraded_mode{false};
 
     sisl::sparse_vector< std::unique_ptr< PhysicalDev > > m_all_pdevs;
     std::map< HSDevType, std::vector< PhysicalDev* > > m_pdevs_by_type;
     uint32_t m_cur_pdev_id{0};
 
-    sisl::sparse_vector< shared< Chunk > > m_chunks;                // Chunks organized as array (indexed on chunk id)
+    std::map< uint16_t, shared< Chunk > > m_chunks;                 // Chunks organized as array (indexed on chunk id)
     sisl::Bitset m_chunk_id_bm{hs_super_blk::MAX_CHUNKS_IN_SYSTEM}; // Bitmap to keep track of chunk ids available
 
     std::mutex m_vdev_mutex;                                      // Create/Remove operation of vdev synchronization
@@ -150,6 +151,7 @@ public:
     void format_devices();
     void load_devices();
     void close_devices();
+    bool is_boot_in_degraded_mode() const { return m_boot_in_degraded_mode; }
 
     /// @brief Create a VirtualDev based on input parameters
     /// @param vdev_param Parameters defining all the essential inputs to create virtual device
@@ -157,17 +159,12 @@ public:
     /// @return
     shared< VirtualDev > create_vdev(vdev_parameters&& vdev_param);
 
-    const Chunk* get_chunk(uint32_t chunk_id) const {
-        std::unique_lock lg{m_vdev_mutex};
-        // if a pdev is misssing when restart, chunk_id from client might be larger than m_chunks.size()
-        if (!m_chunks.index_exists(chunk_id)) return nullptr;
-        return m_chunks[chunk_id].get();
-    }
+    const Chunk* get_chunk(uint16_t chunk_id) { return get_chunk_mutable(chunk_id); }
 
-    Chunk* get_chunk_mutable(uint32_t chunk_id) {
+    Chunk* get_chunk_mutable(uint16_t chunk_id) {
         std::unique_lock lg{m_vdev_mutex};
         // if a pdev is misssing when restart, chunk_id from client might be larger than m_chunks.size()
-        if (!m_chunks.index_exists(chunk_id)) return nullptr;
+        if (!m_chunks.contains(chunk_id)) return nullptr;
         return m_chunks[chunk_id].get();
     }
 
