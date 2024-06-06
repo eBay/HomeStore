@@ -145,6 +145,7 @@ public:
     bool save_fetched_data(sisl::GenericClientResponse const& fetched_data, uint8_t const* data, uint32_t data_size);
 
     void set_remote_blkid(RemoteBlkId const& rbid) { m_remote_blkid = rbid; }
+    void set_local_blkid(MultiBlkId const& lbid) { m_local_blkid = lbid; } // Only used during recovery
     void set_lsn(int64_t lsn);
     void add_state(repl_req_state_t s);
     bool add_state_if_not_already(repl_req_state_t s);

@@ -108,11 +108,12 @@ uint32_t SoloReplDev::get_blk_size() const { return data_service().get_blk_size(
 
 void SoloReplDev::cp_flush(CP*) {
     auto lsn = m_commit_upto.load();
-    m_rd_sb->commit_lsn = lsn;
+    m_rd_sb->durable_commit_lsn = lsn;
     m_rd_sb->checkpoint_lsn = lsn;
     m_rd_sb.write();
 }
 
-void SoloReplDev::cp_cleanup(CP*) { /* m_data_journal->truncate(m_rd_sb->checkpoint_lsn); */ }
+void SoloReplDev::cp_cleanup(CP*) { /* m_data_journal->truncate(m_rd_sb->checkpoint_lsn); */
+}
 
 } // namespace homestore

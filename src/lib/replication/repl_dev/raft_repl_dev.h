@@ -83,6 +83,8 @@ private:
     std::atomic< repl_lsn_t > m_commit_upto_lsn{0}; // LSN which was lastly written, to track flushes
     std::atomic< repl_lsn_t > m_compact_lsn{0};     // LSN upto which it was compacted, it is used to track where to
 
+    std::mutex m_sb_mtx; // Lock to protect the repl dev superblock
+
     repl_lsn_t m_last_flushed_commit_lsn{0}; // LSN upto which it was flushed to persistent store
     iomgr::timer_handle_t m_sb_flush_timer_hdl;
 
@@ -174,6 +176,11 @@ public:
 
     void wait_for_logstore_ready() { m_data_journal->wait_for_log_store_ready(); }
 
+    /**
+     * Flush the durable commit LSN to the superblock
+     */
+    void flush_durable_commit_lsn();
+
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////
     nuraft::ptr< nuraft::cluster_config > load_config() override;
@@ -202,6 +209,7 @@ private:
     bool is_resync_mode() { return m_resync_mode; }
     void handle_error(repl_req_ptr_t const& rreq, ReplServiceError err);
     bool wait_for_data_receive(std::vector< repl_req_ptr_t > const& rreqs, uint64_t timeout_ms);
+    void on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx);
 };
 
 } // namespace homestore

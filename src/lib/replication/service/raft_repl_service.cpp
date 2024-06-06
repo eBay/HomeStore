@@ -343,6 +343,12 @@ void RaftReplService::start_reaper_thread() {
             m_rdev_fetch_timer_hdl = iomanager.schedule_thread_timer(interval_ns, true /* recurring */, nullptr,
                                                                      [this](void*) { fetch_pending_data(); });
 
+            // Flush durable commit lsns to superblock
+            // FIXUP: what is the best value for flush_durable_commit_interval_ms?
+            m_flush_durable_commit_timer_hdl = iomanager.schedule_thread_timer(
+                HS_DYNAMIC_CONFIG(consensus.flush_durable_commit_interval_ms) * 1000 * 1000, true /* recurring */,
+                nullptr, [this](void*) { flush_durable_commit_lsn(); });
+
             p.setValue();
         } else {
             // Cancel all recurring timers started
@@ -350,6 +356,7 @@ void RaftReplService::start_reaper_thread() {
             iomanager.cancel_timer(m_rdev_gc_timer_hdl, true /* wait */);
 #endif
             iomanager.cancel_timer(m_rdev_fetch_timer_hdl, true /* wait */);
+            iomanager.cancel_timer(m_flush_durable_commit_timer_hdl, true /* wait */);
         }
     });
     std::move(f).get();
@@ -396,6 +403,15 @@ void RaftReplService::gc_repl_devs() {
         } else {
             ++it;
         }
+    }
+}
+
+void RaftReplService::flush_durable_commit_lsn() {
+    std::unique_lock lg(m_rd_map_mtx);
+    for (auto& rdev_parent : m_rd_map) {
+        // FIXUP: is it safe to access rdev_parent here?
+        auto rdev = std::dynamic_pointer_cast< RaftReplDev >(rdev_parent.second);
+        rdev->flush_durable_commit_lsn();
     }
 }
 
