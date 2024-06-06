@@ -18,6 +18,7 @@
 // #include "common/homestore_flip.hpp"
 #include "replication/service/raft_repl_service.h"
 #include "replication/repl_dev/raft_repl_dev.h"
+#include "device/device.h"
 #include "push_data_rpc_generated.h"
 #include "fetch_data_rpc_generated.h"
 
@@ -37,6 +38,8 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
     if (load_existing) {
         m_data_journal =
             std::make_shared< ReplLogStore >(*this, *m_state_machine, m_rd_sb->logdev_id, m_rd_sb->logstore_id);
+        m_data_journal->register_log_replay_done_cb(
+            [this](std::shared_ptr< HomeLogStore > hs, logstore_seq_num_t lsn) { m_log_store_replay_done = true; });
         m_next_dsn = m_rd_sb->last_applied_dsn + 1;
         m_commit_upto_lsn = m_rd_sb->commit_lsn;
         m_last_flushed_commit_lsn = m_commit_upto_lsn;
@@ -662,7 +665,14 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
 }
 
 void RaftReplDev::handle_commit(repl_req_ptr_t rreq) {
-    if (rreq->local_blkid().is_valid()) { data_service().commit_blk(rreq->local_blkid()); }
+    if (rreq->local_blkid().is_valid()) {
+        if (data_service().commit_blk(rreq->local_blkid()) != BlkAllocStatus::SUCCESS) {
+            if (hs()->device_mgr()->is_boot_in_degraded_mode() && m_log_store_replay_done)
+                return;
+            else
+                RD_DBG_ASSERT(false, "fail to commit blk when applying log in non-degraded mode.")
+        }
+    }
 
     // Remove the request from repl_key map.
     m_repl_key_req_map.erase(rreq->rkey());

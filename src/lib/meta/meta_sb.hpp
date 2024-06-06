@@ -134,10 +134,11 @@ struct meta_blk_hdr_s {
     uint8_t pad[7];
 
     std::string to_string() const {
-        return fmt::format("type: {}, version: {}, magic: {}, crc: {}, next_bid: {}, prev_bid: {}, ovf_bid: {}, "
-                           "self_bid: {}, compressed: {}",
-                           type, version, magic, crc, next_bid.to_string(), prev_bid.to_string(), ovf_bid.to_string(),
-                           bid.to_string(), compressed);
+        return fmt::format(
+            "magic: {}, type: {}, version: {}, gen_cnt: {}, crc: {}, next_bid: {}, prev_bid: {}, "
+            "ovf_bid: {}, self_bid: {}, context_sz: {}, compressed_sz: {}, src_context_sz : {}, compressed: {} ",
+            magic, type, version, gen_cnt, crc, next_bid.to_string(), prev_bid.to_string(), ovf_bid.to_string(),
+            bid.to_string(), context_sz, compressed_sz, src_context_sz, compressed);
     }
 };
 #pragma pack()

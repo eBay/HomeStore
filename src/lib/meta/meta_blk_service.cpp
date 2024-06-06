@@ -145,7 +145,10 @@ void MetaBlkService::load_ssb() {
     const BlkId bid = m_meta_vdev_context->first_blkid;
     HS_LOG(INFO, metablk, "Loading meta ssb blkid: {}", bid.to_string());
 
-    m_sb_vdev->commit_blk(bid);
+    auto alloc_status = m_sb_vdev->commit_blk(bid);
+    // if any error happens when committing the blk to meta service, we should assert and crash
+    if (alloc_status != BlkAllocStatus::SUCCESS) HS_REL_ASSERT(0, "Failed to commit blk: {} ", bid.to_string());
+
     m_ssb = r_cast< meta_blk_sb* >(hs_utils::iobuf_alloc(block_size(), sisl::buftag::metablk, align_size()));
     std::memset(uintptr_cast(m_ssb), 0, block_size());
     read(bid, uintptr_cast(m_ssb), block_size());
@@ -197,9 +200,14 @@ void MetaBlkService::format_ssb() {
 // m_meta_lock should be while calling this function;
 void MetaBlkService::write_ssb() {
     // write current ovf blk to disk;
-    try {
-        m_sb_vdev->sync_write((const char*)m_ssb, block_size(), m_ssb->bid);
-    } catch (std::exception& e) { HS_REL_ASSERT(false, "exception happen during write {}", e.what()); }
+    auto error = m_sb_vdev->sync_write((const char*)m_ssb, block_size(), m_ssb->bid);
+    if (error.value()) {
+        // the offset and buffer length is printed in the error messages of iomgr.
+        // buf address here is to show whether the buffer is aligned or not.
+        // TODO: hanle this error properly
+        HS_REL_ASSERT(false, "error happens happen during write ssb: {}, buf address: {}", error.value(),
+                      (const char*)m_ssb);
+    }
 
     LOGINFO("Successfully write m_ssb to disk: {}", m_ssb->to_string());
 
@@ -251,7 +259,8 @@ bool MetaBlkService::scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_
         prev_meta_bid = bid;
 
         // mark allocated for this block
-        m_sb_vdev->commit_blk(mblk->hdr.h.bid);
+        auto alloc_status = m_sb_vdev->commit_blk(mblk->hdr.h.bid);
+        if (alloc_status != BlkAllocStatus::SUCCESS) HS_REL_ASSERT(0, "Failed to commit blk: {} ", bid.to_string());
 
         // populate overflow blk chain;
         auto obid = mblk->hdr.h.ovf_bid;
@@ -301,12 +310,15 @@ bool MetaBlkService::scan_and_load_meta_blks(meta_blk_map_t& meta_blks, ovf_hdr_
             ovf_blk_hdrs[obid.to_integer()] = ovf_hdr;
 
             // allocate overflow bid;
-            m_sb_vdev->commit_blk(obid);
+            auto alloc_status = m_sb_vdev->commit_blk(obid);
+            if (alloc_status != BlkAllocStatus::SUCCESS) HS_REL_ASSERT(0, "Failed to commit blk: {}", bid.to_string());
 
             // allocate data bid
             auto* data_bid = ovf_hdr->get_data_bid();
             for (decltype(ovf_hdr->h.nbids) i{0}; i < ovf_hdr->h.nbids; ++i) {
-                m_sb_vdev->commit_blk(data_bid[i]);
+                auto alloc_status = m_sb_vdev->commit_blk(data_bid[i]);
+                if (alloc_status != BlkAllocStatus::SUCCESS)
+                    HS_REL_ASSERT(0, "Failed to commit blk: {}", bid.to_string());
             }
 
             // move on to next overflow blk
@@ -437,9 +449,14 @@ void MetaBlkService::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const uint
     HS_DBG_ASSERT_LE(ovf_hdr->h.context_sz + offset, sz);
 
     // write current ovf blk to disk;
-    try {
-        m_sb_vdev->sync_write((const char*)ovf_hdr, block_size(), ovf_hdr->h.bid);
-    } catch (std::exception& e) { HS_REL_ASSERT(false, "exception happen during write {}", e.what()); }
+    auto error = m_sb_vdev->sync_write((const char*)ovf_hdr, block_size(), ovf_hdr->h.bid);
+    if (error.value()) {
+        // the offset and buffer length is printed in the error messages of iomgr.
+        // buf address here is to show whether the buffer is aligned or not.
+        // TODO: hanle this error properly
+        HS_REL_ASSERT(false, "error happens happen during write: {}, buf address: {}", error.value(),
+                      (const char*)ovf_hdr);
+    }
 
     // NOTE: The start write pointer which is context data pointer plus offset must be dma boundary aligned
     // TO DO: Might need to differentiate based on data or fast type
@@ -489,9 +506,14 @@ void MetaBlkService::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const uint
             size_written += (ovf_hdr->h.context_sz - size_written);
         }
 
-        try {
-            m_sb_vdev->sync_write(r_cast< const char* >(cur_ptr), cur_size, data_bid[i]);
-        } catch (std::exception& e) { HS_REL_ASSERT(false, "exception happen during write {}", e.what()); }
+        auto error = m_sb_vdev->sync_write(r_cast< const char* >(cur_ptr), cur_size, data_bid[i]);
+        if (error.value()) {
+            // the offset and buffer length is printed in the error messages of iomgr.
+            // buf address here is to show whether the buffer is aligned or not.
+            // TODO: hanle this error properly
+            HS_REL_ASSERT(false, "error happens happen during write: {}, buf address: {}", error.value(),
+                          r_cast< const char* >(cur_ptr));
+        }
     }
 
     if (data_buf) { hs_utils::iobuf_free(data_buf, sisl::buftag::metablk); }
@@ -502,9 +524,14 @@ void MetaBlkService::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const uint
 
 void MetaBlkService::write_meta_blk_to_disk(meta_blk* mblk) {
     // write current ovf blk to disk;
-    try {
-        m_sb_vdev->sync_write((const char*)mblk, block_size(), mblk->hdr.h.bid);
-    } catch (std::exception& e) { HS_REL_ASSERT(false, "exception happen during write {}", e.what()); }
+    auto error = m_sb_vdev->sync_write((const char*)mblk, block_size(), mblk->hdr.h.bid);
+    if (error.value()) {
+        // the offset and buffer length is printed in the error messages of iomgr.
+        // buf address here is to show whether the buffer is aligned or not.
+        // TODO: hanle this error properly
+        HS_REL_ASSERT(false, "error happens happen during write_meta_blk_to_disk: {}, buf address: {}", error.value(),
+                      (const char*)mblk);
+    }
 }
 
 //
@@ -1123,11 +1150,8 @@ void MetaBlkService::recover_meta_block(meta_blk* mblk) {
         // if subsystem registered crc protection, verify crc before sending to subsystem;
         if (itr->second.do_crc) {
             const auto crc = crc32_ieee(init_crc32, buf->cbytes(), mblk->hdr.h.context_sz);
-
-            HS_REL_ASSERT_EQ(crc, uint32_cast(mblk->hdr.h.crc),
-                             "[type={}], CRC mismatch: {}/{}, on mblk bid: {}, context_sz: {}", mblk->hdr.h.type, crc,
-                             uint32_cast(mblk->hdr.h.crc), mblk->hdr.h.bid.to_string(),
-                             uint64_cast(mblk->hdr.h.context_sz));
+            HS_REL_ASSERT_EQ(crc, uint32_cast(mblk->hdr.h.crc), "CRC mismatch: {}/{}, meta_blk details: {}", crc,
+                             uint32_cast(mblk->hdr.h.crc), mblk->hdr.h.to_string());
         } else {
             HS_LOG(DEBUG, metablk, "[type={}] meta blk found with bypassing crc.", mblk->hdr.h.type);
         }

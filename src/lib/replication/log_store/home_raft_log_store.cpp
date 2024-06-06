@@ -314,4 +314,8 @@ ulong HomeRaftLogStore::last_durable_index() {
 
 void HomeRaftLogStore::wait_for_log_store_ready() { m_log_store_future.wait(); }
 
+void HomeRaftLogStore::register_log_replay_done_cb(const log_replay_done_cb_t& cb) {
+    m_log_store->register_log_replay_done_cb(cb);
+};
+
 } // namespace homestore
