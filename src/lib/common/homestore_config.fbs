@@ -252,7 +252,7 @@ table Consensus {
     data_receive_timeout_ms: uint64 = 10000;
 
     // Frequency to flush durable commit LSN in millis
-    flush_durable_commit_interval_ms: uint64 = 100;
+    flush_durable_commit_interval_ms: uint64 = 500;
 }
 
 table HomeStoreSettings {

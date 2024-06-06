@@ -352,7 +352,6 @@ void RaftReplService::start_reaper_thread() {
             p.setValue();
         } else {
             // Cancel all recurring timers started
-            // FIXUP: When do we cancle the recurring timers?
 #if 0
             iomanager.cancel_timer(m_rdev_gc_timer_hdl, true /* wait */);
 #endif

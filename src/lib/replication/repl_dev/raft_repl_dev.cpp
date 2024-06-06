@@ -36,12 +36,11 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
     m_state_machine = std::make_shared< RaftStateMachine >(*this);
 
     if (load_existing) {
-        m_data_journal =
-            std::make_shared< ReplLogStore >(*this, *m_state_machine, m_rd_sb->logdev_id, m_rd_sb->logstore_id);
-        m_data_journal->register_log_found_cb(
-            [this](logstore_seq_num_t lsn, log_buffer buf, void* key) { on_log_found(lsn, buf, key); });
-        m_data_journal->register_log_replay_done_cb(
-            [this](std::shared_ptr< HomeLogStore > hs, logstore_seq_num_t lsn) { m_log_store_replay_done = true; });
+        m_data_journal = std::make_shared< ReplLogStore >(
+            *this, *m_state_machine,
+            [this](logstore_seq_num_t lsn, log_buffer buf, void* key) { on_log_found(lsn, buf, key); },
+            [this](std::shared_ptr< HomeLogStore > hs, logstore_seq_num_t lsn) { m_log_store_replay_done = true; },
+            m_rd_sb->logdev_id, m_rd_sb->logstore_id);
         m_next_dsn = m_rd_sb->last_applied_dsn + 1;
         m_commit_upto_lsn = m_rd_sb->durable_commit_lsn;
         m_last_flushed_commit_lsn = m_commit_upto_lsn;
@@ -63,7 +62,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
                 });
         }
     } else {
-        m_data_journal = std::make_shared< ReplLogStore >(*this, *m_state_machine);
+        m_data_journal = std::make_shared< ReplLogStore >(*this, *m_state_machine, nullptr, nullptr);
         m_rd_sb->logdev_id = m_data_journal->logdev_id();
         m_rd_sb->logstore_id = m_data_journal->logstore_id();
         m_rd_sb->last_applied_dsn = 0;
@@ -474,7 +473,7 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreq
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     if (rreqs.size() == 0) { return; }
 
-    std::vector<::flatbuffers::Offset< RequestEntry > > entries;
+    std::vector< ::flatbuffers::Offset< RequestEntry > > entries;
     entries.reserve(rreqs.size());
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
@@ -1000,7 +999,7 @@ void RaftReplDev::cp_cleanup(CP*) {}
 
 void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
     // apply the log entry if the lsn is between checkpoint lsn and durable commit lsn
-    if (m_rd_sb->checkpoint_lsn >= lsn || m_rd_sb->durable_commit_lsn <= lsn) { return; }
+    if (lsn < m_rd_sb->checkpoint_lsn || lsn > m_rd_sb->durable_commit_lsn) { return; }
 
     // 1. Get the log entry and prepare rreq
     nuraft::log_entry const* lentry = r_cast< nuraft::log_entry const* >(buf.bytes());
@@ -1034,11 +1033,9 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     RD_DBG_ASSERT(happened, "rreq already exists for rkey={}", rkey.to_string());
     MultiBlkId entry_blkid;
     entry_blkid.deserialize(entry_to_val(jentry), true /* copy */);
-    rreq->set_local_blkid(entry_blkid);
     rreq->init(rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry), entry_to_key(jentry),
                (entry_blkid.blk_count() * get_blk_size()));
-
-    RD_DBG_ASSERT(rreq, "rreq is nullptr for rkey={}", rkey.to_string());
+    rreq->set_local_blkid(entry_blkid);
 
     // 2. Pre-commit the log entry
     m_listener->on_pre_commit(lsn, entry_to_hdr(jentry), entry_to_key(jentry), nullptr);
