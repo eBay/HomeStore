@@ -45,6 +45,7 @@ private:
     std::queue< std::pair< shared< RaftReplDev >, std::vector< repl_req_ptr_t > > > m_pending_fetch_batches;
     iomgr::timer_handle_t m_rdev_fetch_timer_hdl;
     iomgr::timer_handle_t m_rdev_gc_timer_hdl;
+    iomgr::timer_handle_t m_flush_durable_commit_timer_hdl;
     iomgr::io_fiber_t m_reaper_fiber;
 
 public:
@@ -79,6 +80,8 @@ private:
     void fetch_pending_data();
     void gc_repl_devs();
     void gc_repl_reqs();
+    void flush_durable_commit_lsn();
+
 };
 
 class RaftReplServiceCPHandler : public CPCallbacks {

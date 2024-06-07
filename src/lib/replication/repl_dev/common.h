@@ -62,11 +62,11 @@ struct repl_dev_superblk {
     uint32_t version{REPL_DEV_SB_VERSION};
     uuid_t group_id; // group_id of this replica set
     logdev_id_t logdev_id;
-    logstore_id_t logstore_id; // Logstore id for the data journal
-    repl_lsn_t commit_lsn;     // LSN upto which this replica has committed
-    repl_lsn_t checkpoint_lsn; // LSN upto which this replica have checkpointed the Data
-    repl_lsn_t compact_lsn;    // maximum LSN that can be compacted to
-    uint64_t group_ordinal;    // Ordinal number which will be used to indicate the rdevXYZ for debugging
+    logstore_id_t logstore_id;     // Logstore id for the data journal
+    repl_lsn_t durable_commit_lsn; // LSN upto which this replica has committed
+    repl_lsn_t checkpoint_lsn;     // LSN upto which this replica have checkpointed the Data
+    repl_lsn_t compact_lsn;        // maximum LSN that can be compacted to
+    uint64_t group_ordinal;        // Ordinal number which will be used to indicate the rdevXYZ for debugging
 
     uint64_t get_magic() const { return magic; }
     uint32_t get_version() const { return version; }

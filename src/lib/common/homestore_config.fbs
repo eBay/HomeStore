@@ -253,6 +253,9 @@ table Consensus {
 
     // ReplDev Reqs timeout in seconds.
     repl_req_timeout_sec: uint32 = 300;
+
+    // Frequency to flush durable commit LSN in millis
+    flush_durable_commit_interval_ms: uint64 = 500;
 }
 
 table HomeStoreSettings {

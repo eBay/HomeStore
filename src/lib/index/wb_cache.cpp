@@ -90,13 +90,16 @@ BtreeNodePtr IndexWBCache::alloc_buf(node_initializer_t&& node_initializer) {
     HS_REL_ASSERT_EQ(done, true, "Unable to add alloc'd node to cache, low memory or duplicate inserts?");
 
     // The entire index is updated in the commit path, so we alloc the blk and commit them right away
-    m_vdev->commit_blk(blkid);
+    auto alloc_status = m_vdev->commit_blk(blkid);
+    // if any error happens when committing the blk to index service, we should assert and crash
+    if (alloc_status != BlkAllocStatus::SUCCESS) HS_REL_ASSERT(0, "Failed to commit blk: {}", blkid.to_string());
     return node;
 }
 
 void IndexWBCache::realloc_buf(const IndexBufferPtr& buf) {
     // Commit the blk which was previously allocated
-    m_vdev->commit_blk(buf->m_blkid);
+    auto alloc_status = m_vdev->commit_blk(buf->m_blkid);
+    if (alloc_status != BlkAllocStatus::SUCCESS) HS_REL_ASSERT(0, "Failed to commit blk: {}", buf->m_blkid.to_string());
 }
 
 void IndexWBCache::write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* cp_ctx) {
