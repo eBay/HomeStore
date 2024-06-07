@@ -304,29 +304,45 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
     shared< VirtualDev > vdev = m_vdev_create_cb(*vinfo, false /* load_existing */);
     m_vdevs[vdev_id] = vdev;
 
-    // Create initial chunk based on current size
-    if (vparam.num_chunks != 0) {
-        for (auto& pdev : pdevs) {
-            std::vector< uint32_t > chunk_ids;
+    // different type might have different capacity, so we need to spread all the newly created chunks to all pdevs
+    // according to their capacity
 
-            // Create chunk ids for all chunks in each of these pdevs
-            for (uint32_t c{0}; c < vparam.num_chunks / pdevs.size(); ++c) {
-                auto chunk_id = m_chunk_id_bm.get_next_reset_bit(0u);
-                if (chunk_id == sisl::Bitset::npos) {
-                    throw std::out_of_range("System has no room for additional chunks");
-                }
-                m_chunk_id_bm.set_bit(chunk_id);
-                chunk_ids.push_back(chunk_id);
-            }
+    // the total size of all pdevs of a certain type
+    auto total_type_size =
+        std::accumulate(pdevs.begin(), pdevs.end(), 0u, [](int r, const PhysicalDev* a) { return r + a->data_size(); });
 
-            // Create all chunks at one shot and add each one to the vdev
-            auto chunks = pdev->create_chunks(chunk_ids, vdev_id, vparam.chunk_size);
-            for (auto& chunk : chunks) {
-                vdev->add_chunk(chunk, true /* fresh_chunk */);
-                m_chunks[chunk->chunk_id()] = chunk;
-            }
+    uint32_t total_created_chunks{0};
+
+    for (auto& pdev : pdevs) {
+        if (total_created_chunks >= vparam.num_chunks) break;
+        std::vector< uint32_t > chunk_ids;
+
+        // the total number of chunks will be created in this pdev
+        auto total_chunk_num_in_pdev =
+            static_cast< uint32_t >(vparam.num_chunks * (pdev->data_size() / static_cast< float >(total_type_size)));
+
+        LOGINFO("{} chunks is created on pdev {} for vdev {}", total_chunk_num_in_pdev, pdev->get_devname(),
+                vparam.vdev_name)
+
+        // Create chunk ids for all chunks in each of these pdevs
+        for (uint32_t c{0}; c < total_chunk_num_in_pdev; ++c) {
+            auto chunk_id = m_chunk_id_bm.get_next_reset_bit(0u);
+            if (chunk_id == sisl::Bitset::npos) { throw std::out_of_range("System has no room for additional chunks"); }
+            m_chunk_id_bm.set_bit(chunk_id);
+            chunk_ids.push_back(chunk_id);
         }
+
+        // Create all chunks at one shot and add each one to the vdev
+        auto chunks = pdev->create_chunks(chunk_ids, vdev_id, vparam.chunk_size);
+        for (auto& chunk : chunks) {
+            vdev->add_chunk(chunk, true /* fresh_chunk */);
+            m_chunks[chunk->chunk_id()] = chunk;
+        }
+
+        total_created_chunks += total_chunk_num_in_pdev;
     }
+
+    LOGINFO("{} chunks is created for vdev {}, expected {}", total_created_chunks, vparam.vdev_name, vparam.num_chunks);
 
     // Handle any initialization needed.
     vdev->init();
