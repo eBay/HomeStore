@@ -199,7 +199,7 @@ raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params
 }
 
 void RaftStateMachine::iterate_repl_reqs(std::function< void(int64_t, repl_req_ptr_t rreq) > const& cb) {
-    for (auto const& [key, rreq] : m_lsn_req_map) {
+    for (auto const [key, rreq] : m_lsn_req_map) {
         cb(key, rreq);
     }
 }
