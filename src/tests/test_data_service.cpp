@@ -83,7 +83,7 @@ public:
 
     virtual void SetUp() override {
         m_blk_crc_map.clear();
-        test_common::HSTestHelper::start_homestore(
+        m_token = test_common::HSTestHelper::start_homestore(
             "test_data_service", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::DATA, {.size_pct = 80.0}}});
 
         if (gp.min_io_size % homestore::data_service().get_blk_size() ||
@@ -313,21 +313,23 @@ public:
 
         LOGINFO("Step 3: restart with missing data drive(pdev).");
         auto dev_mgr = homestore::HomeStore::instance()->device_mgr();
-        std::vector< std::pair< std::string, homestore::HSDevType > > start_with_devices;
+        std::vector< dev_info > start_with_devices;
         auto fast_pdevs = dev_mgr->get_pdevs_by_dev_type(homestore::HSDevType::Fast);
-        for (auto& pdev : fast_pdevs)
+        for (auto& pdev : fast_pdevs) {
             // can not lose fast drive
             start_with_devices.emplace_back(pdev->get_devname(), homestore::HSDevType::Fast);
+        }
+
         // lose one data drive
         for (auto& pdev : drives) {
-            if (pdev->pdev_id() != missing_pdev->pdev_id())
+            if (pdev->pdev_id() != missing_pdev->pdev_id()) {
                 start_with_devices.emplace_back(living_pdev->get_devname(), homestore::HSDevType::Data);
+            }
         }
 
         // restart with the given drive list
-        test_common::HSTestHelper::start_homestore(
-            "test_data_service", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::DATA, {.size_pct = 80.0}}},
-            nullptr, true, false, 5, start_with_devices);
+        m_token.devs_ = start_with_devices;
+        test_common::HSTestHelper::restart_homestore(m_token);
 
         LOGINFO("Step 4: read the blk from missing data drive");
         auto sg = std::make_shared< sisl::sg_list >();
@@ -825,6 +827,7 @@ private:
     std::unordered_set< uint64_t > m_outstanding_free_bid;
     std::atomic< uint64_t > m_outstanding_io_cnt{0};
     std::atomic< uint64_t > m_total_io_comp_cnt{0};
+    test_common::HSTestHelper::test_token m_token;
 };
 
 //
