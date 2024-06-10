@@ -162,6 +162,25 @@ private:
         }
     }
 
+    static void init_raw_devices(const std::vector< homestore::dev_info >& devs) {
+        auto const zero_size = hs_super_blk::first_block_size() * 1024;
+        std::vector< int > zeros(zero_size, 0);
+        for (auto const& dinfo : devs) {
+            if (!std::filesystem::exists(dinfo.dev_name)) {
+                HS_REL_ASSERT(false, "Device {} does not exist", dinfo.dev_name);
+            }
+
+            auto fd = ::open(dinfo.dev_name.c_str(), O_RDWR, 0640);
+            HS_REL_ASSERT(fd != -1, "Failed to open device");
+
+            auto const write_sz =
+                pwrite(fd, zeros.data(), zero_size /* size */, hs_super_blk::first_block_offset() /* offset */);
+            HS_REL_ASSERT(write_sz == zero_size, "Failed to write to device");
+            LOGINFO("Successfully zeroed the 1st {} bytes of device {}", zero_size, dinfo.dev_name);
+            ::close(fd);
+        }
+    }
+
     static std::vector< std::string > s_dev_names;
 
 public:
@@ -182,7 +201,7 @@ public:
         std::string name_;
         std::map< uint32_t, test_params > svc_params_;
         hs_before_services_starting_cb_t cb_{nullptr};
-        std::vector< std::pair< std::string, homestore::HSDevType > > cust_dev_names_;
+        std::vector< homestore::dev_info > devs_;
 
         test_params& params(uint32_t svc) { return svc_params_[svc]; }
         hs_before_services_starting_cb_t& cb() { return cb_; }
@@ -190,12 +209,8 @@ public:
 
     static test_token start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
                                       hs_before_services_starting_cb_t cb = nullptr,
-                                      std::vector< std::pair< std::string, homestore::HSDevType > > cust_dev_names = {},
-                                      bool init_device = true) {
-        test_token token{.name_ = test_name,
-                         .svc_params_ = std::move(svc_params),
-                         .cb_ = cb,
-                         .cust_dev_names_ = std::move(cust_dev_names)};
+                                      std::vector< homestore::dev_info > devs = {}, bool init_device = true) {
+        test_token token{.name_ = test_name, .svc_params_ = std::move(svc_params), .cb_ = cb, .devs_ = std::move(devs)};
         do_start_homestore(token, false /* fake_restart */, init_device);
         return token;
     }
@@ -217,53 +232,23 @@ public:
             std::this_thread::sleep_for(std::chrono::seconds{shutdown_delay_sec});
         }
 
-        std::map< uint32_t, test_params > svc_params = std::move(svc_params_tmp);
         std::vector< homestore::dev_info > device_info;
-        if (!cust_dev_names.empty() || SISL_OPTIONS.count("device_list")) {
-            if (cust_dev_names.empty())
-                s_dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
-            else {
-                for (auto& [name, _] : cust_dev_names) {
-                    s_dev_names.emplace_back(name);
-                }
-            }
-            LOGINFO("Taking input dev_list: {}",
-                    std::accumulate(
-                        s_dev_names.begin(), s_dev_names.end(), std::string(""),
-                        [](const std::string& ss, const std::string& s) { return ss.empty() ? s : ss + "," + s; }));
-
-            if (init_device && !fake_restart) {
-                // zero the homestore pdev's first block for each device;
-                auto const zero_size = hs_super_blk::first_block_size() * 1024;
-                std::vector< int > zeros(zero_size, 0);
-                for (auto const& d : s_dev_names) {
-                    if (!std::filesystem::exists(d)) {
-                        LOGINFO("Device {} does not exist", d);
-                        HS_REL_ASSERT(false, "Device does not exist");
-                    }
-
-                    auto fd = ::open(d.c_str(), O_RDWR, 0640);
-                    HS_REL_ASSERT(fd != -1, "Failed to open device");
-
-                    auto const write_sz =
-                        pwrite(fd, zeros.data(), zero_size /* size */, hs_super_blk::first_block_offset() /* offset */);
-                    HS_REL_ASSERT(write_sz == zero_size, "Failed to write to device");
-                    LOGINFO("Successfully zeroed the 1st {} of device {}", zero_size, d);
-                    ::close(fd);
-                }
-            }
-
-            if (cust_dev_names.empty()) {
-                for (const auto& name : s_dev_names) {
+        if (!token.devs_.empty() || SISL_OPTIONS.count("device_list")) {
+            if (token.devs_.empty()) {
+                auto const devs = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
+                for (const auto& name : devs) {
                     // iomgr::DriveInterface::emulate_drive_type(name, iomgr::drive_type::block_hdd);
-                    device_info.emplace_back(name, homestore::HSDevType::Data);
+                    token.devs_.emplace_back(name, homestore::HSDevType::Data);
                 }
             } else {
-                for (const auto& [name, dev_type] : cust_dev_names) {
-                    device_info.emplace_back(name, dev_type);
-                }
-            }
+                LOGINFO("Taking input dev_list: {}",
+                        std::accumulate(token.devs_.begin(), token.devs_.end(), std::string(""),
+                                        [](const std::string& s, const homestore::dev_info& dinfo) {
+                                            return s.empty() ? dinfo.dev_name : s + "," + dinfo.dev_name;
+                                        }));
 
+                if (init_device && !fake_restart) { init_raw_devices(token.devs_); }
+            }
         } else {
             /* create files */
             LOGINFO("creating {} device files with each of size {} ", ndevices, homestore::in_bytes(dev_size));
@@ -273,19 +258,18 @@ public:
 
             if (!fake_restart && init_device) { init_files(s_dev_names, dev_size); }
             for (const auto& fname : s_dev_names) {
-                if (device_info.empty())
-                    // First device is fast device
-                    device_info.emplace_back(std::filesystem::canonical(fname).string(), homestore::HSDevType::Fast);
-                else
-                    device_info.emplace_back(std::filesystem::canonical(fname).string(), homestore::HSDevType::Data);
+                token.devs_.emplace_back(std::filesystem::canonical(fname).string(),
+                                         token.devs_.empty()
+                                             ? homestore::HSDevType::Fast
+                                             : homestore::HSDevType::Data); // First device is fast device
             }
         }
 
         if (!fake_restart)
-            HS_REL_ASSERT_EQ(device_info.size() > 2, true,
+            HS_REL_ASSERT_EQ(token.devs_.size() > 2, true,
                              "if not fake restart, we need at least 3 device to run the ut of simulating restart with "
                              "missing drive. current device num is {}",
-                             device_info.size());
+                             token.devs_.size());
 
         if (is_spdk) {
             LOGINFO("Spdk with more than 2 threads will cause overburden test systems, changing nthreads to 2");
@@ -319,14 +303,13 @@ public:
             }
         }
 #ifdef _PRERELEASE
-        hsi->with_crash_simulator([=]() {
+        hsi->with_crash_simulator([copied_token = token](void) mutable {
             LOGINFO("CrashSimulator::crash() is called - restarting homestore");
-            start_homestore(test_name, svc_params, cb, true /* fake_restart */, false /* init_device */);
+            HSTestHelper::restart_homestore(copied_token);
         });
 #endif
 
-        bool need_format =
-            hsi->start(hs_input_params{.devices = device_info, .app_mem_size = app_mem_size}, std::move(cb));
+        bool need_format = hsi->start(hs_input_params{.devices = token.devs_, .app_mem_size = app_mem_size}, token.cb_);
 
         // We need to set the min chunk size before homestore format
         if (token.svc_params_.contains(HS_SERVICE::LOG) && token.svc_params_[HS_SERVICE::LOG].min_chunk_size != 0) {

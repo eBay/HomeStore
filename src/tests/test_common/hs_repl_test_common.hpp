@@ -342,7 +342,7 @@ private:
     std::vector< std::string > args_;
     char** argv_;
 
-    std::vector< std::pair< std::string, homestore::HSDevType > > dev_list_;
+    std::vector< homestore::dev_info > dev_list_;
 
     boost::process::group proc_grp_;
     std::unique_ptr< bip::shared_memory_object > shm_;
