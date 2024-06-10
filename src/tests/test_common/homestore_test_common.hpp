@@ -239,9 +239,7 @@ public:
                 for (const auto& name : devs) {
                     // TODO:: Add support for fast and data devices in device_list
                     token.devs_.emplace_back(name,
-                                             token.devs_.empty()
-                                                 ? homestore::HSDevType::Fast
-                                                 : homestore::HSDevType::Data); // First device is fast device
+                                             homestore::HSDevType::Data); // First device is fast device
                 }
             } else {
                 LOGINFO("Taking input dev_list: {}",
