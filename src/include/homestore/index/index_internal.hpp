@@ -121,7 +121,6 @@ struct IndexBuffer : public sisl::ObjLifeCounter< IndexBuffer > {
     void set_state(index_buf_state_t st) { m_state.store(st); }
     bool is_meta_buf() const { return m_is_meta_buf; }
 
-    void usage_log() const;
     std::string to_string() const;
 };
 

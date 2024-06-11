@@ -41,11 +41,6 @@ private:
     std::mutex m_flush_mtx;
     void* m_meta_blk;
 
-#ifdef _PRERELEASE
-    std::mutex flip_mtx;
-    std::map< IndexBufferPtr, std::vector< std::string > > crashing_buffers;
-#endif
-
 public:
     IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair< meta_blk*, sisl::byte_view > sb,
                  const std::shared_ptr< sisl::Evictor >& evictor, uint32_t node_size);

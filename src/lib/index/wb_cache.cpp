@@ -26,15 +26,13 @@
 #include "device/virtual_dev.hpp"
 #include "common/resource_mgr.hpp"
 
+#ifdef _PRERELEASE
+#include "common/crash_simulator.hpp"
+#endif
+
 SISL_LOGGING_DECL(wbcache)
 
 namespace homestore {
-
-void usage_log(const IndexBufferPtr& buf, const std::string& msg) {
-    /*LOGINFO("{}: Buf={} state={} create/dirty_cp={}/{} down_wait#={} use_count={}", msg,
-            voidptr_cast(const_cast< IndexBuffer* >(buf.get())), int_cast(buf->state()), buf->m_created_cp_id,
-            buf->m_dirtied_cp_id, buf->m_wait_for_down_buffers.get(), buf.use_count());*/
-}
 
 IndexWBCacheBase& wb_cache() { return index_service().wb_cache(); }
 
@@ -108,8 +106,6 @@ BtreeNodePtr IndexWBCache::alloc_buf(node_initializer_t&& node_initializer) {
     bool done = m_cache.insert(node);
     HS_REL_ASSERT_EQ(done, true, "Unable to add alloc'd node to cache, low memory or duplicate inserts?");
 
-    usage_log(idx_buf, "After init");
-
     // The entire index is updated in the commit path, so we alloc the blk and commit them right away
     auto alloc_status = m_vdev->commit_blk(blkid);
     // if any error happens when committing the blk to index service, we should assert and crash
@@ -119,12 +115,8 @@ BtreeNodePtr IndexWBCache::alloc_buf(node_initializer_t&& node_initializer) {
 
 void IndexWBCache::write_buf(const BtreeNodePtr& node, const IndexBufferPtr& buf, CPContext* cp_ctx) {
     // TODO upsert always returns false even if it succeeds.
-    if (node != nullptr) {
-        m_cache.upsert(node);
-        usage_log(buf, "After inserting to cache");
-    }
+    if (node != nullptr) { m_cache.upsert(node); }
     r_cast< IndexCPContext* >(cp_ctx)->add_to_dirty_list(buf);
-    usage_log(buf, "After adding to dirty list");
     resource_mgr().inc_dirty_buf_size(m_node_size);
 }
 
@@ -133,10 +125,7 @@ void IndexWBCache::read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t
 
 retry:
     // Check if the blkid is already in cache, if not load and put it into the cache
-    if (m_cache.get(blkid, node)) {
-        usage_log(static_cast< IndexBtreeNode* >(node.get())->m_idx_buf, "After read cache hit");
-        return;
-    }
+    if (m_cache.get(blkid, node)) { return; }
 
     // Read the buffer from virtual device
     auto idx_buf = std::make_shared< IndexBuffer >(blkid, m_node_size, m_vdev->align_size());
@@ -151,7 +140,6 @@ retry:
         // There is a race between 2 concurrent reads from vdev and other party won the race. Re-read from cache
         goto retry;
     }
-    usage_log(idx_buf, "After read cache miss and insert to cache");
 }
 
 bool IndexWBCache::get_writable_buf(const BtreeNodePtr& node, CPContext* context) {
@@ -173,9 +161,6 @@ bool IndexWBCache::get_writable_buf(const BtreeNodePtr& node, CPContext* context
         auto new_buf = std::make_shared< IndexBuffer >(idx_buf->m_blkid, m_node_size, m_vdev->align_size());
         new_buf->m_created_cp_id = idx_buf->m_created_cp_id;
         std::memcpy(new_buf->raw_buffer(), idx_buf->raw_buffer(), m_node_size);
-
-        usage_log(idx_buf, "Forced copy - Current Dirty buf");
-        usage_log(new_buf, "Forced copy - New clean buf");
 
         node->update_phys_buf(new_buf->raw_buffer());
         LOGTRACEMOD(wbcache, "cp={} cur_buf={} for node={} is dirtied by cp={} copying new_buf={}", icp_ctx->id(),
@@ -357,16 +342,12 @@ void IndexWBCache::link_buf(IndexBufferPtr const& up_buf, IndexBufferPtr const& 
 #ifndef NDEBUG
     real_up_buf->m_down_buffers.emplace_back(down_buf);
 #endif
-
-    usage_log(real_up_buf, "After link buf - Up buf");
-    usage_log(down_buf, "After link buf - Down buf");
 }
 
 void IndexWBCache::free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
     BtreeNodePtr node;
     bool done = m_cache.remove(buf->m_blkid, node);
     HS_REL_ASSERT_EQ(done, true, "Race on cache removal of btree blkid?");
-    usage_log(buf, "After free buf - remove from cache");
 
     resource_mgr().inc_free_blk(m_node_size);
     m_vdev->free_blk(buf->m_blkid, s_cast< VDevCPContext* >(cp_ctx));
@@ -469,10 +450,12 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
 
     // First thing is to flush the new_blks created as part of the CP.
     auto const& journal_buf = cp_ctx->journal_buf();
-    if (m_meta_blk) {
-        meta_service().update_sub_sb(journal_buf.cbytes(), journal_buf.size(), m_meta_blk);
-    } else {
-        meta_service().add_sub_sb("wb_cache", journal_buf.cbytes(), journal_buf.size(), m_meta_blk);
+    if (journal_buf.size() != 0) {
+        if (m_meta_blk) {
+            meta_service().update_sub_sb(journal_buf.cbytes(), journal_buf.size(), m_meta_blk);
+        } else {
+            meta_service().add_sub_sb("wb_cache", journal_buf.cbytes(), journal_buf.size(), m_meta_blk);
+        }
     }
 
     cp_ctx->prepare_flush_iteration();
@@ -496,14 +479,12 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
     buf->set_state(index_buf_state_t::FLUSHING);
 
 #ifdef _PRERELEASE
-    if (auto it = crashing_buffers.find(buf); it != crashing_buffers.end()) {
-        const auto& reasons = it->second;
-        LOGTRACEMOD(wbcache, "Buffer {} is in crashing_buffers with reason(s): [{}] - Buffer info: {}",
-                    buf->to_string(), fmt::join(reasons, ", "), BtreeNode::to_string_buf(buf->raw_buffer()));
-        crashing_buffers.clear();
-        return;
+    if (buf->m_crash_flag_on) {
+        LOGINFOMOD(wbcache, "Simulating crash while writing buffer {}", buf->to_string());
+        hs()->crash_simulator().crash();
     }
 #endif
+
     if (buf->is_meta_buf()) {
         LOGTRACEMOD(wbcache, "flushing cp {} meta buf {} possibly because of root split", cp_ctx->id(),
                     buf->to_string());
@@ -517,7 +498,6 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
     } else {
         LOGTRACEMOD(wbcache, "flushing cp {} buf {} info: {}", cp_ctx->id(), buf->to_string(),
                     BtreeNode::to_string_buf(buf->raw_buffer()));
-        usage_log(buf, "After issuing flush");
         m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid, part_of_batch)
             .thenValue([buf, cp_ctx](auto) {
                 auto& pthis = s_cast< IndexWBCache& >(wb_cache()); // Avoiding more than 16 bytes capture
@@ -562,7 +542,6 @@ std::pair< IndexBufferPtr, bool > IndexWBCache::on_buf_flush_done_internal(Index
 #endif
     buf->set_state(index_buf_state_t::CLEAN);
 
-    usage_log(buf, "After finishing flush");
     if (cp_ctx->m_dirty_buf_count.decrement_testz()) {
         return std::make_pair(nullptr, false);
     } else {
