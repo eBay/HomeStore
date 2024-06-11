@@ -614,10 +614,14 @@ blk_count_t VarsizeBlkAllocator::alloc_blks_direct(blk_count_t nblks, blk_alloc_
                 cur_blk_id = b.start_bit + b.nbits;
             }
         }
-        if (++portion_num == get_num_portions()) { portion_num = 0; }
-        BLKALLOC_LOG(TRACE, "alloc direct unable to find in prev portion, searching in portion={}, start_portion={}",
-                     portion_num, m_start_portion_num);
-    } while (nblks_remain && (portion_num != m_start_portion_num) && !hints.is_contiguous && out_blkid.has_room());
+        if (nblks_remain) {
+            auto curr_portion = portion_num;
+            if (++portion_num == get_num_portions()) { portion_num = 0; }
+            BLKALLOC_LOG(
+                TRACE, "alloc direct unable to find in curr portion {}, will searching in portion={}, start_portion={}",
+                curr_portion, portion_num, m_start_portion_num);
+        }
+    } while (nblks_remain && (portion_num != m_start_portion_num) && (out_blkid.num_pieces() < max_pieces));
 
     // save which portion we were at for next allocation;
     m_start_portion_num = portion_num;
