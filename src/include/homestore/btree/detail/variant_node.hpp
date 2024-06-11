@@ -25,13 +25,13 @@ template < typename V >
 static V dummy_value;
 
 template < typename K, typename V >
-class VariantNode : public BtreeNode {
+class VariantNode : public StoreSpecificBtreeNode {
 public:
     using BtreeNode::get_nth_key_size;
     using BtreeNode::get_nth_value;
 
     VariantNode(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf, BtreeConfig const& cfg) :
-            BtreeNode(node_buf, id, init_buf, is_leaf, cfg) {}
+            StoreSpecificBtreeNode(node_buf, id, init_buf, is_leaf, cfg) {}
 
     ///////////////////////////////////////// Get related APIs of the node /////////////////////////////////////////
 

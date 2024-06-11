@@ -21,13 +21,91 @@
 #include <homestore/index_service.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
 #include <homestore/checkpoint/cp.hpp>
-
+#include <homestore/btree/detail/btree_node.hpp>
 #include "device/virtual_dev.hpp"
 
 SISL_LOGGING_DECL(wbcache)
 
 namespace homestore {
+class BtreeNode;
 struct IndexCPContext : public VDevCPContext {
+public:
+#pragma pack(1)
+    using compact_blkid_t = std::pair< blk_num_t, chunk_num_t >;
+    enum class op_t : uint8_t { child_new, child_freed, parent_inplace, child_inplace };
+    struct txn_record {
+        uint8_t num_new_ids;
+        uint8_t num_freed_ids;
+        uint8_t has_inplace_parent : 1;
+        uint8_t has_inplace_child : 1;
+        uint8_t is_parent_meta : 1; // Is the parent buffer a meta buffer
+        uint8_t reserved1 : 5;
+        uint8_t reserved{0};
+        uint32_t index_ordinal;
+        compact_blkid_t ids[1]; // C++ std probhits 0 size array
+
+        txn_record(uint32_t ordinal) :
+                num_new_ids{0},
+                num_freed_ids{0},
+                has_inplace_parent{0x0},
+                has_inplace_child{0x0},
+                is_parent_meta{0x0},
+                index_ordinal{ordinal} {}
+
+        uint32_t total_ids() const {
+            return (num_new_ids + num_freed_ids + has_inplace_parent ? 1 : 0 + has_inplace_child ? 1 : 0);
+        }
+
+        uint32_t size() const { return sizeof(txn_record) - (total_ids() - 1) * sizeof(compact_blkid_t); }
+        static uint32_t size_for_num_ids(uint8_t n) { return sizeof(txn_record) + (n - 1) * sizeof(compact_blkid_t); }
+        void append(op_t op, BlkId const& blk) {
+            if (op == op_t::parent_inplace) {
+                DEBUG_ASSERT(has_inplace_parent == 0x0, "Duplicate inplace parent in same txn record");
+                has_inplace_parent = 0x1;
+            } else if (op == op_t::child_inplace) {
+                DEBUG_ASSERT(has_inplace_child == 0x0, "Duplicate inplace child in same txn record");
+                has_inplace_child = 0x1;
+            } else if (op == op_t::child_new) {
+                DEBUG_ASSERT_LT(num_new_ids, 0xff, "Too many new ids in txn record");
+                ids[num_new_ids++] = std::make_pair(blk.blk_num(), blk.chunk_num());
+            } else if (op == op_t::child_freed) {
+                DEBUG_ASSERT_LT(num_freed_ids, 0xff, "Too many freed ids in txn record");
+                ids[num_freed_ids++] = std::make_pair(blk.blk_num(), blk.chunk_num());
+            } else {
+                DEBUG_ASSERT(false, "Invalid op type");
+            }
+        }
+
+        BlkId blk_id(uint8_t idx) const {
+            DEBUG_ASSERT_LT(idx, total_ids(), "Index out of bounds");
+            return BlkId{ids[idx].first, (blk_count_t)1u, ids[idx].second};
+        }
+    };
+
+    struct txn_journal {
+        cp_id_t cp_id;
+        uint32_t num_txns{0};
+        uint32_t size{sizeof(txn_journal)}; // Total size including this header
+
+        struct append_guard {
+            txn_journal* m_journal;
+            txn_record* m_rec;
+            append_guard(txn_journal* journal, uint32_t ordinal) : m_journal{journal} {
+                m_rec = new (uintptr_cast(m_journal) + m_journal->size) txn_record(ordinal);
+            }
+            ~append_guard() { m_journal->size += m_rec->size(); }
+            txn_record* operator->() { return m_rec; }
+            txn_record& operator*() { return *m_rec; }
+        };
+
+        // Followed by index_txns records
+        append_guard append_record(uint32_t ordinal) {
+            ++num_txns;
+            return append_guard(this, ordinal);
+        }
+    };
+#pragma pack()
+
 public:
     std::atomic< uint64_t > m_num_nodes_added{0};
     std::atomic< uint64_t > m_num_nodes_removed{0};
@@ -36,113 +114,35 @@ public:
     std::mutex m_flush_buffer_mtx;
     sisl::ConcurrentInsertVector< IndexBufferPtr >::iterator m_dirty_buf_it;
 
+    iomgr::FiberManagerLib::mutex m_txn_journal_mtx;
+    sisl::io_blob_safe m_txn_journal_buf;
+
 public:
-    IndexCPContext(CP* cp) : VDevCPContext(cp) {}
+    IndexCPContext(CP* cp);
     virtual ~IndexCPContext() = default;
 
-    void add_to_dirty_list(const IndexBufferPtr& buf) {
-        m_dirty_buf_list.push_back(buf);
-        buf->set_state(index_buf_state_t::DIRTY);
-        m_dirty_buf_count.increment(1);
-    }
+    // void track_new_blk(BlkId const& inplace_blkid, BlkId const& new_blkid);
+    void add_to_txn_journal(uint32_t index_ordinal, const IndexBufferPtr& parent_buf,
+                            const IndexBufferPtr& left_child_buf, const IndexBufferPtrList& created_bufs,
+                            const IndexBufferPtrList& freed_buf);
+    std::map< BlkId, IndexBufferPtr > recover(sisl::byte_view sb);
 
-    bool any_dirty_buffers() const { return !m_dirty_buf_count.testz(); }
+    sisl::io_blob_safe const& journal_buf() const { return m_txn_journal_buf; }
 
-    void prepare_flush_iteration() { m_dirty_buf_it = m_dirty_buf_list.begin(); }
+    void add_to_dirty_list(const IndexBufferPtr& buf);
+    bool any_dirty_buffers() const;
+    void prepare_flush_iteration();
+    std::optional< IndexBufferPtr > next_dirty();
+    std::string to_string();
+    std::string to_string_with_dags();
 
-    std::optional< IndexBufferPtr > next_dirty() {
-        if (m_dirty_buf_it == m_dirty_buf_list.end()) { return std::nullopt; }
-        IndexBufferPtr ret = *m_dirty_buf_it;
-        ++m_dirty_buf_it;
-        return ret;
-    }
+private:
+    void check_cycle();
+    void check_cycle_recurse(IndexBufferPtr buf, std::set< IndexBuffer* >& visited) const;
+    void check_wait_for_leaders();
+    void log_dags();
 
-    std::string to_string() {
-        std::string str{fmt::format("IndexCPContext cpid={} dirty_buf_count={} dirty_buf_list_size={}", m_cp->id(),
-                                    m_dirty_buf_count.get(), m_dirty_buf_list.size())};
-
-        // Mapping from a node to all its parents in the graph.
-        // Display all buffers and its dependencies and state.
-        std::unordered_map< IndexBuffer*, std::vector< IndexBuffer* > > parents;
-
-        m_dirty_buf_list.foreach_entry([&parents](IndexBufferPtr buf) {
-            // Add this buf to his children.
-            parents[buf->m_next_buffer.lock().get()].emplace_back(buf.get());
-        });
-
-        m_dirty_buf_list.foreach_entry([&str, &parents](IndexBufferPtr buf) {
-            fmt::format_to(std::back_inserter(str), "{}", buf->to_string());
-            auto first = true;
-            for (const auto& p : parents[buf.get()]) {
-                if (first) {
-                    fmt::format_to(std::back_inserter(str), "\nDepends:");
-                    first = false;
-                }
-                fmt::format_to(std::back_inserter(str), " {}({})", r_cast< void* >(p), s_cast< int >(p->state()));
-            }
-            fmt::format_to(std::back_inserter(str), "\n");
-        });
-        return str;
-    }
-
-    void check_cycle() {
-        // Use dfs to find if the graph is cycle
-        auto it = m_dirty_buf_list.begin();
-        while (it != m_dirty_buf_list.end()) {
-            IndexBufferPtr buf = *it;
-            std::set< IndexBuffer* > visited;
-            check_cycle_recurse(buf, visited);
-            ++it;
-        }
-    }
-
-    void check_cycle_recurse(IndexBufferPtr buf, std::set< IndexBuffer* >& visited) const {
-        if (visited.count(buf.get()) != 0) {
-            LOGERROR("Cycle found for {}", buf->to_string());
-            for (auto& x : visited) {
-                LOGERROR("Path : {}", x->to_string());
-            }
-            return;
-        }
-
-        visited.insert(buf.get());
-        if (buf->m_next_buffer.lock()) { check_cycle_recurse(buf->m_next_buffer.lock(), visited); }
-    }
-
-    void check_wait_for_leaders() {
-        // Use the next buffer as indegree to find if wait_for_leaders is invalid.
-        std::unordered_map< IndexBuffer*, int > wait_for_leaders;
-        IndexBufferPtr buf;
-
-        // Store the wait for leader count for each buffer.
-        auto it = m_dirty_buf_list.begin();
-        while (it != m_dirty_buf_list.end()) {
-            buf = *it;
-            wait_for_leaders[buf.get()] = buf->m_wait_for_leaders.get();
-            ++it;
-        }
-
-        // Decrement the count using the next buffer.
-        it = m_dirty_buf_list.begin();
-        while (it != m_dirty_buf_list.end()) {
-            buf = *it;
-            auto next_buf = buf->m_next_buffer.lock();
-            if (next_buf.get() == nullptr) continue;
-            wait_for_leaders[next_buf.get()]--;
-            ++it;
-        }
-
-        bool issue = false;
-        for (const auto& [buf, waits] : wait_for_leaders) {
-            // Any value other than zero means the dependency graph is invalid.
-            if (waits != 0) {
-                issue = true;
-                LOGERROR("Leaders wait not zero cp {} buf {} waits {}", id(), buf->to_string(), waits);
-            }
-        }
-
-        RELEASE_ASSERT_EQ(issue, false, "Found issue with wait_for_leaders");
-    }
+    void process_txn_record(txn_record const* rec, std::map< BlkId, IndexBufferPtr >& buf_map);
 };
 
 class IndexWBCache;

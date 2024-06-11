@@ -476,33 +476,32 @@ public:
             for (auto& lsc : m_log_store_clients) {
                 lsc->flush();
             }
-        }
+            test_common::HSTestHelper::restart_homestore(m_token);
+        } else {
+            m_token = test_common::HSTestHelper::start_homestore(
+                "test_log_store",
+                {{HS_SERVICE::META, {.size_pct = 5.0}},
+                 {HS_SERVICE::LOG,
+                  {.size_pct = 84.0, .chunk_size = 8 * 1024 * 1024, .min_chunk_size = 8 * 1024 * 1024}}},
+                [this, restart, n_log_stores]() {
+                    HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+                        // Disable flush and resource mgr timer in UT.
+                        s.logstore.flush_timer_frequency_us = 0;
+                        s.resource_limits.resource_audit_timer_ms = 0;
+                    });
+                    HS_SETTINGS_FACTORY().save();
 
-        test_common::HSTestHelper::start_homestore(
-            "test_log_store",
-            {{HS_SERVICE::META, {.size_pct = 5.0}},
-             {HS_SERVICE::LOG, {.size_pct = 84.0, .chunk_size = 8 * 1024 * 1024, .min_chunk_size = 8 * 1024 * 1024}}},
-            [this, restart, n_log_stores]() {
-                HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
-                    // Disable flush and resource mgr timer in UT.
-                    s.logstore.flush_timer_frequency_us = 0;
-                    s.resource_limits.resource_audit_timer_ms = 0;
-                });
-                HS_SETTINGS_FACTORY().save();
-
-                if (restart) {
-                    for (uint32_t i{0}; i < n_log_stores; ++i) {
-                        SampleLogStoreClient* client = m_log_store_clients[i].get();
-                        logstore_service().open_logdev(client->m_logdev_id);
-                        logstore_service()
-                            .open_log_store(client->m_logdev_id, client->m_store_id, false /* append_mode */)
-                            .thenValue([i, this, client](auto log_store) { client->set_log_store(log_store); });
+                    if (restart) {
+                        for (uint32_t i{0}; i < n_log_stores; ++i) {
+                            SampleLogStoreClient* client = m_log_store_clients[i].get();
+                            logstore_service().open_logdev(client->m_logdev_id);
+                            logstore_service()
+                                .open_log_store(client->m_logdev_id, client->m_store_id, false /* append_mode */)
+                                .thenValue([i, this, client](auto log_store) { client->set_log_store(log_store); });
+                        }
                     }
-                }
-            },
-            restart);
+                });
 
-        if (!restart) {
             std::vector< logdev_id_t > logdev_id_vec;
             for (uint32_t i{0}; i < n_log_stores; ++i) {
                 logdev_id_vec.push_back(logstore_service().create_new_logdev());
@@ -555,6 +554,7 @@ private:
     test_log_store_comp_cb_t m_io_closure;
     std::vector< std::unique_ptr< SampleLogStoreClient > > m_log_store_clients;
     std::map< logdev_id_t, std::atomic< logid_t > > m_highest_log_idx;
+    test_common::HSTestHelper::test_token m_token;
 };
 
 const std::string SampleDB::s_fpath_root{"/tmp/log_store_dev_"};
@@ -569,8 +569,8 @@ public:
     virtual ~LogStoreTest() override = default;
 
 protected:
-    virtual void SetUp() override{};
-    virtual void TearDown() override{};
+    virtual void SetUp() override {};
+    virtual void TearDown() override {};
 
     void init(uint64_t n_total_records, const std::vector< std::pair< size_t, int > >& inp_freqs = {}) {
         // m_nrecords_waiting_to_issue = std::lround(n_total_records / _batch_size) * _batch_size;

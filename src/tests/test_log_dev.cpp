@@ -69,6 +69,7 @@ struct test_log_data {
 class LogDevTest : public ::testing::Test {
 public:
     const std::map< uint32_t, test_common::HSTestHelper::test_params > svc_params = {};
+    test_common::HSTestHelper::test_token m_token;
     static constexpr uint32_t max_data_size = 1024;
     uint64_t s_max_flush_multiple = 0;
 
@@ -84,16 +85,22 @@ public:
         });
         HS_SETTINGS_FACTORY().save();
 
-        test_common::HSTestHelper::start_homestore("test_log_dev",
-                                                   {
-                                                       {HS_SERVICE::META, {.size_pct = 15.0}},
-                                                       {HS_SERVICE::LOG,
-                                                        {.size_pct = 50.0,
-                                                         .chunk_size = 8 * 1024 * 1024,
-                                                         .min_chunk_size = 8 * 1024 * 1024,
-                                                         .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
-                                                   },
-                                                   starting_cb, restart);
+        if (restart) {
+            m_token.cb() = starting_cb;
+            test_common::HSTestHelper::restart_homestore(m_token);
+        } else {
+            m_token = test_common::HSTestHelper::start_homestore(
+                "test_log_dev",
+                {
+                    {HS_SERVICE::META, {.size_pct = 15.0}},
+                    {HS_SERVICE::LOG,
+                     {.size_pct = 50.0,
+                      .chunk_size = 8 * 1024 * 1024,
+                      .min_chunk_size = 8 * 1024 * 1024,
+                      .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
+                },
+                starting_cb);
+        }
     }
 
     virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }

@@ -15,6 +15,8 @@
  *********************************************************************************/
 #include <gtest/gtest.h>
 
+#define StoreSpecificBtreeNode homestore::BtreeNode
+
 #include <sisl/options/options.h>
 #include <sisl/logging/logging.h>
 #include <sisl/utility/enum.hpp>
@@ -75,7 +77,6 @@ struct NodeTest : public testing::Test {
     BtreeConfig m_cfg{g_node_size};
 
     void SetUp() override {
-        m_cfg.set_node_data_size(m_cfg.node_size() - sizeof(persistent_hdr_t));
         m_node1_buf = std::unique_ptr< uint8_t[] >(new uint8_t[g_node_size]);
         m_node2_buf = std::unique_ptr< uint8_t[] >(new uint8_t[g_node_size]);
 
