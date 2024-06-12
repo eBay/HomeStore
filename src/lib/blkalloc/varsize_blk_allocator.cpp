@@ -582,6 +582,8 @@ blk_count_t VarsizeBlkAllocator::alloc_blks_direct(blk_count_t nblks, blk_alloc_
     if (m_start_portion_num == INVALID_PORTION_NUM) { m_start_portion_num = m_rand_portion_num_generator(re); }
 
     auto portion_num = m_start_portion_num;
+    // save m_start_portion_num to local variable as m_start_portion_num can be changed by other threads.
+    auto start_portion_num = m_start_portion_num;
     auto const max_pieces = hints.is_contiguous ? 1u : MultiBlkId::max_pieces;
 
     blk_count_t const min_blks = hints.is_contiguous ? nblks : std::min< blk_count_t >(nblks, hints.min_blks_per_piece);
@@ -618,10 +620,10 @@ blk_count_t VarsizeBlkAllocator::alloc_blks_direct(blk_count_t nblks, blk_alloc_
             auto curr_portion = portion_num;
             if (++portion_num == get_num_portions()) { portion_num = 0; }
             BLKALLOC_LOG(
-                TRACE, "alloc direct unable to find in curr portion {}, will searching in portion={}, start_portion={}",
-                curr_portion, portion_num, m_start_portion_num);
+                TRACE, "alloc direct unable to find in curr portion {}, will searching in portion={}, start_portion={},continue={}, out_blkid num_pieces={} , max_pieces={}",
+                curr_portion, portion_num, start_portion_num, hints.is_contiguous, out_blkid.num_pieces(), max_pieces);
         }
-    } while (nblks_remain && (portion_num != m_start_portion_num) && (out_blkid.num_pieces() < max_pieces));
+    } while (nblks_remain && (portion_num != start_portion_num) && (out_blkid.num_pieces() < max_pieces));
 
     // save which portion we were at for next allocation;
     m_start_portion_num = portion_num;
