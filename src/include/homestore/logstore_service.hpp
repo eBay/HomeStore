@@ -92,6 +92,13 @@ public:
     void open_logdev(logdev_id_t logdev_id);
 
     /**
+     * @brief Destroy a log dev.
+     *
+     * @param logdev_id: Logdev ID
+     */
+    void destroy_log_dev(logdev_id_t logdev_id);
+
+    /**
      * @brief Create a brand new log store (both in-memory and on device) and returns its instance. It also book
      * keeps the created log store and user can get this instance of log store by using logstore_id
      *
@@ -168,6 +175,7 @@ public:
 
 private:
     std::shared_ptr< LogDev > create_new_logdev_internal(logdev_id_t logdev_id);
+    void delete_unopened_logdevs();
     void logdev_super_blk_found(const sisl::byte_view& buf, void* meta_cookie);
     void rollback_super_blk_found(const sisl::byte_view& buf, void* meta_cookie);
     void start_threads();
@@ -182,6 +190,7 @@ private:
     iomgr::io_fiber_t m_truncate_fiber;
     iomgr::io_fiber_t m_flush_fiber;
     LogStoreServiceMetrics m_metrics;
+    std::unordered_set< logdev_id_t > m_unopened_logdev;
 };
 
 extern LogStoreService& logstore_service();

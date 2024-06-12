@@ -254,20 +254,12 @@ private:
 
 public:
     BtreeConfig(uint32_t node_size, const std::string& btree_name = "") :
-            m_node_size{node_size},
-            m_node_data_size{node_size},
-            m_btree_name{btree_name.empty() ? std::string("btree") : btree_name} {
-        m_ideal_fill_size = (uint32_t)(m_node_data_size * m_ideal_fill_pct) / 100;
-        m_suggested_min_size = (uint32_t)(m_node_data_size * m_suggested_min_pct) / 100;
+            m_node_size{node_size}, m_btree_name{btree_name.empty() ? std::string("btree") : btree_name} {
+        set_node_data_size(node_size - 512); // Just put estimate at this point of time.
     }
 
     virtual ~BtreeConfig() = default;
     uint32_t node_size() const { return m_node_size; };
-
-    uint32_t split_size(uint32_t filled_size) const { return uint32_cast(filled_size * m_split_pct) / 100; }
-    uint32_t ideal_fill_size() const { return m_ideal_fill_size; }
-    uint32_t suggested_min_size() const { return m_suggested_min_size; }
-    uint32_t node_data_size() const { return m_node_data_size; }
 
     void set_node_data_size(uint32_t data_size) {
         m_node_data_size = data_size;
@@ -275,14 +267,19 @@ public:
         m_suggested_min_size = (uint32_t)(m_node_data_size * m_suggested_min_pct) / 100;
     }
 
+    uint32_t split_size(uint32_t filled_size) const { return uint32_cast(filled_size * m_split_pct) / 100; }
+    uint32_t ideal_fill_size() const { return m_ideal_fill_size; }
+    uint32_t suggested_min_size() const { return m_suggested_min_size; }
+    uint32_t node_data_size() const { return m_node_data_size; }
+
     void set_ideal_fill_pct(uint8_t pct) {
         m_ideal_fill_pct = pct;
-        m_ideal_fill_size = (uint32_t)(m_node_data_size * m_ideal_fill_pct) / 100;
+        m_ideal_fill_size = (uint32_t)(node_data_size() * m_ideal_fill_pct) / 100;
     }
 
     void set_suggested_min_size(uint8_t pct) {
         m_suggested_min_pct = pct;
-        m_suggested_min_size = (uint32_t)(m_node_data_size * m_suggested_min_pct) / 100;
+        m_suggested_min_size = (uint32_t)(node_data_size() * m_suggested_min_pct) / 100;
     }
 
     const std::string& name() const { return m_btree_name; }

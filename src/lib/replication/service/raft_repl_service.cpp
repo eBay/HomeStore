@@ -111,7 +111,7 @@ void RaftReplService::start() {
     m_sb_bufs.clear();
 
     // Step 4: Load all the raft group configs from the cached superblks. We have 2 superblks for each raft group
-    // a) repl_dev configuration (loaded in step 3). This block is updated on every append and persisted on next cp.
+    // a) repl_dev configuration (loaded in step 3). This block is updated on every append and persisted on a.
     // b) raft group configuration (loaded in this step). This block is updated on every config change and persisted
     // instantly
     //
@@ -128,6 +128,7 @@ void RaftReplService::start() {
     // Step 6: Iterate all the repl dev and ask each one of the join the raft group.
     for (auto it = m_rd_map.begin(); it != m_rd_map.end();) {
         auto rdev = std::dynamic_pointer_cast< RaftReplDev >(it->second);
+        rdev->wait_for_logstore_ready();
         if (!rdev->join_group()) {
             it = m_rd_map.erase(it);
         } else {
@@ -161,8 +162,14 @@ void RaftReplService::raft_group_config_found(sisl::byte_view const& buf, void* 
     uuid_t group_id = gen(gid_str);
 
     auto v = get_repl_dev(group_id);
-    RELEASE_ASSERT(bool(v), "Can't find the group_id={}, has repl_dev superblk not loaded yet?",
-                   boost::uuids::to_string(group_id));
+    if (!bool(v)) {
+        LOGWARNMOD(
+            replication,
+            "Unable to find group_id={}, may be repl_dev was destroyed, we will destroy the raft_group_config as well",
+            boost::uuids::to_string(group_id));
+        group_config.destroy();
+        return;
+    }
 
     auto rdev = std::dynamic_pointer_cast< RaftReplDev >(*v);
     auto listener = m_repl_app->create_repl_dev_listener(group_id);
@@ -178,7 +185,8 @@ std::string RaftReplService::lookup_peer(nuraft_mesg::peer_id_t const& peer) {
 
 shared< nuraft_mesg::mesg_state_mgr > RaftReplService::create_state_mgr(int32_t srv_id,
                                                                         nuraft_mesg::group_id_t const& group_id) {
-    LOGINFO("Creating RAFT state manager for server_id={} group_id={}", srv_id, boost::uuids::to_string(group_id));
+    LOGINFOMOD(replication, "Creating RAFT state manager for server_id={} group_id={}", srv_id,
+               boost::uuids::to_string(group_id));
 
     auto result = get_repl_dev(group_id);
     if (result) { return std::dynamic_pointer_cast< nuraft_mesg::mesg_state_mgr >(result.value()); }
@@ -226,16 +234,17 @@ AsyncReplResult< shared< ReplDev > > RaftReplService::create_repl_dev(group_id_t
             do {
                 auto const result = m_msg_mgr->add_member(group_id, member).get();
                 if (result) {
-                    LOGINFO("Groupid={}, new member={} added", boost::uuids::to_string(group_id),
-                            boost::uuids::to_string(member));
+                    LOGINFOMOD(replication, "Groupid={}, new member={} added", boost::uuids::to_string(group_id),
+                               boost::uuids::to_string(member));
                     break;
                 } else if (result.error() != nuraft::CONFIG_CHANGING) {
-                    LOGWARN("Groupid={}, add member={} failed with error={}", boost::uuids::to_string(group_id),
-                            boost::uuids::to_string(member), result.error());
+                    LOGWARNMOD(replication, "Groupid={}, add member={} failed with error={}",
+                               boost::uuids::to_string(group_id), boost::uuids::to_string(member), result.error());
                     return make_async_error< shared< ReplDev > >(to_repl_error(result.error()));
                 } else {
-                    LOGWARN("Config is changing for group_id={} while adding member={}, retry operation in a second",
-                            boost::uuids::to_string(group_id), boost::uuids::to_string(member));
+                    LOGWARNMOD(replication,
+                               "Config is changing for group_id={} while adding member={}, retry operation in a second",
+                               boost::uuids::to_string(group_id), boost::uuids::to_string(member));
                     std::this_thread::sleep_for(std::chrono::seconds(1));
                 }
             } while (true);
@@ -245,6 +254,40 @@ AsyncReplResult< shared< ReplDev > > RaftReplService::create_repl_dev(group_id_t
     auto result = get_repl_dev(group_id);
     return result ? make_async_success< shared< ReplDev > >(result.value())
                   : make_async_error< shared< ReplDev > >(ReplServiceError::SERVER_NOT_FOUND);
+}
+
+// Remove repl_dev for raft is a 3 step process.
+// Step 1: The leader of the repl_dev proposes all members an entry to delete the entire group. As part of commit of
+// this entry, all members call leave() method, which does the following:
+//      a) Mark in cache that the group is destroyed, so no subsequent write operations are permitted (relevant to
+//      leader only)
+//      b) Call the upper_layer on_destroy(), so that consumers persistent meta information can be deleted.
+//      c) Update the superblk with destroy_pending flag set to 1
+//      d) Mark the entry as committed lsn.
+//
+// If the node crash between step 1a and 1c, given that the entry is not marked committed yet and the fact that actual
+// removal of raft groups in lazy fashion, once this member starts back again and rejoins the raft group and the peers
+// will send the removal_raft_group entry again and this member will re-commit this entry and proceed step 1a through
+// step 3. However, there is a possibility that this node comes backup after the lazy removal time, in which case the
+// other members of raft group are long gone and this will be the only member. This case can never be solved and hence
+// will let some sort of scrubber to clean that up. Such cases are extremely rare and thus can leave it to scrubber
+//
+// Step 2: Separate reaper thread which wakes up on pre-determined interval and check if the raft group destroy time is
+// up. If so, it will call Nuraft leave_group() call, which call RaftReplDev::permanent_destroy() method.
+//
+// Step 3: RaftReplDev::permanent_destroy() method will remove the superblk and logstore. This is followed up RAFT
+// server shutdown.
+//
+// If there is a crash after Step 1, but before Step 3, upon crash startup, we see that superblk has destroy_pending
+// set. In that case, it will not join the raft group and hence no need to do leave_group() and permanent_destroy().
+// It merely needs to cleanup the superblk. Given that logstore is not opened, HomeLogStoreService will automatically
+// purge any unopened logstores.
+//
+folly::SemiFuture< ReplServiceError > RaftReplService::remove_repl_dev(group_id_t group_id) {
+    auto rdev_result = get_repl_dev(group_id);
+    if (!rdev_result) { return folly::makeSemiFuture< ReplServiceError >(ReplServiceError::SERVER_NOT_FOUND); }
+
+    return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())->destroy_group();
 }
 
 void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) {
@@ -261,6 +304,11 @@ void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
     if (rdev_result) {
         HS_DBG_ASSERT("Group ID={} already loaded and added to repl_dev list, duplicate load?",
                       boost::uuids::to_string(group_id).c_str());
+        return;
+    }
+
+    if (rd_sb->destroy_pending == 0x1) {
+        LOGINFOMOD(replication, "ReplDev group_id={} was destroyed, skipping the load", group_id);
         return;
     }
 
@@ -284,18 +332,22 @@ void RaftReplService::start_reaper_thread() {
         if (is_started) {
             m_reaper_fiber = iomanager.iofiber_self();
 
-#if 0
-                // Schedule the rdev garbage collector timer
-                m_rdev_gc_timer_hdl = iomanager.schedule_thread_timer(
-                    HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 *
-                    1000, true /* recurring */, nullptr, [this] { gc_repl_devs(); });
-#endif
+            // Schedule the rdev garbage collector timer
+            m_rdev_gc_timer_hdl = iomanager.schedule_thread_timer(
+                HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 * 1000, true /* recurring */,
+                nullptr, [this](void*) { gc_repl_devs(); });
 
             // Check for queued fetches at the minimum every second
             uint64_t interval_ns =
                 std::min(HS_DYNAMIC_CONFIG(consensus.wait_data_write_timer_ms) * 1000 * 1000, 1ul * 1000 * 1000 * 1000);
             m_rdev_fetch_timer_hdl = iomanager.schedule_thread_timer(interval_ns, true /* recurring */, nullptr,
                                                                      [this](void*) { fetch_pending_data(); });
+
+            // Flush durable commit lsns to superblock
+            // FIXUP: what is the best value for flush_durable_commit_interval_ms?
+            m_flush_durable_commit_timer_hdl = iomanager.schedule_thread_timer(
+                HS_DYNAMIC_CONFIG(consensus.flush_durable_commit_interval_ms) * 1000 * 1000, true /* recurring */,
+                nullptr, [this](void*) { flush_durable_commit_lsn(); });
 
             p.setValue();
         } else {
@@ -304,6 +356,7 @@ void RaftReplService::start_reaper_thread() {
             iomanager.cancel_timer(m_rdev_gc_timer_hdl, true /* wait */);
 #endif
             iomanager.cancel_timer(m_rdev_fetch_timer_hdl, true /* wait */);
+            iomanager.cancel_timer(m_flush_durable_commit_timer_hdl, true /* wait */);
         }
     });
     std::move(f).get();
@@ -335,16 +388,16 @@ void RaftReplService::fetch_pending_data() {
     }
 }
 
-#if 0
 void RaftReplService::gc_repl_devs() {
     std::unique_lock lg(m_rd_map_mtx);
-    for (it = m_rd_map.begin(); it != m_rd_map.end();) {
+    for (auto it = m_rd_map.begin(); it != m_rd_map.end();) {
         auto rdev = std::dynamic_pointer_cast< RaftReplDev >(it->second);
         if (rdev->is_destroy_pending() &&
             (get_elapsed_time_sec(rdev->destroyed_time()) >=
              HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec))) {
             LOGINFOMOD(replication,
-                       "ReplDev group_id={} was destroyed, shutting down the raft group in delayed fashion now");
+                       "ReplDev group_id={} was destroyed, shutting down the raft group in delayed fashion now",
+                       rdev->group_id());
             m_msg_mgr->leave_group(rdev->group_id());
             it = m_rd_map.erase(it);
         } else {
@@ -352,7 +405,15 @@ void RaftReplService::gc_repl_devs() {
         }
     }
 }
-#endif
+
+void RaftReplService::flush_durable_commit_lsn() {
+    std::unique_lock lg(m_rd_map_mtx);
+    for (auto& rdev_parent : m_rd_map) {
+        // FIXUP: is it safe to access rdev_parent here?
+        auto rdev = std::dynamic_pointer_cast< RaftReplDev >(rdev_parent.second);
+        rdev->flush_durable_commit_lsn();
+    }
+}
 
 ///////////////////// RaftReplService CP Callbacks /////////////////////////////
 std::unique_ptr< CPContext > RaftReplServiceCPHandler::on_switchover_cp(CP* cur_cp, CP* new_cp) { return nullptr; }

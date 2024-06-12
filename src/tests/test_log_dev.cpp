@@ -69,6 +69,7 @@ struct test_log_data {
 class LogDevTest : public ::testing::Test {
 public:
     const std::map< uint32_t, test_common::HSTestHelper::test_params > svc_params = {};
+    test_common::HSTestHelper::test_token m_token;
     static constexpr uint32_t max_data_size = 1024;
     uint64_t s_max_flush_multiple = 0;
 
@@ -77,25 +78,29 @@ public:
     void start_homestore(bool restart = false, hs_before_services_starting_cb_t starting_cb = nullptr) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-        if (starting_cb == nullptr) {
-            starting_cb = [this]() {
-                HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
-                    // Disable flush timer in UT.
-                    s.logstore.flush_timer_frequency_us = 0;
-                });
-                HS_SETTINGS_FACTORY().save();
-            };
+        HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
+            // Disable flush timer in UT.
+            s.logstore.flush_timer_frequency_us = 0;
+            s.resource_limits.resource_audit_timer_ms = 0;
+        });
+        HS_SETTINGS_FACTORY().save();
+
+        if (restart) {
+            m_token.cb() = starting_cb;
+            test_common::HSTestHelper::restart_homestore(m_token);
+        } else {
+            m_token = test_common::HSTestHelper::start_homestore(
+                "test_log_dev",
+                {
+                    {HS_SERVICE::META, {.size_pct = 15.0}},
+                    {HS_SERVICE::LOG,
+                     {.size_pct = 50.0,
+                      .chunk_size = 8 * 1024 * 1024,
+                      .min_chunk_size = 8 * 1024 * 1024,
+                      .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
+                },
+                starting_cb);
         }
-        test_common::HSTestHelper::start_homestore("test_log_dev",
-                                                   {
-                                                       {HS_SERVICE::META, {.size_pct = 15.0}},
-                                                       {HS_SERVICE::LOG,
-                                                        {.size_pct = 50.0,
-                                                         .chunk_size = 8 * 1024 * 1024,
-                                                         .min_chunk_size = 8 * 1024 * 1024,
-                                                         .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
-                                                   },
-                                                   starting_cb, restart);
     }
 
     virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
@@ -284,11 +289,6 @@ TEST_F(LogDevTest, Rollback) {
     auto restart = [&]() {
         std::promise< bool > p;
         auto starting_cb = [&]() {
-            HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
-                // Disable flush timer in UT.
-                s.logstore.flush_timer_frequency_us = 0;
-            });
-            HS_SETTINGS_FACTORY().save();
             logstore_service().open_logdev(logdev_id);
             logstore_service().open_log_store(logdev_id, store_id, false /* append_mode */).thenValue([&](auto store) {
                 log_store = store;
@@ -341,6 +341,106 @@ TEST_F(LogDevTest, Rollback) {
 
     LOGINFO("Step 15: Validate if there are no rollback records");
     rollback_records_validate(log_store, 0 /* expected_count */);
+}
+
+TEST_F(LogDevTest, CreateRemoveLogDev) {
+    auto num_logdev = SISL_OPTIONS["num_logdevs"].as< uint32_t >();
+    std::vector< std::shared_ptr< HomeLogStore > > log_stores;
+    auto vdev = logstore_service().get_vdev();
+
+    // Create log dev, logstore, write some io. Delete all of them and
+    // verify the size of vdev and count of logdev.
+    auto log_devs = logstore_service().get_all_logdevs();
+    ASSERT_EQ(log_devs.size(), 0);
+    ASSERT_EQ(logstore_service().used_size(), 0);
+    ASSERT_EQ(vdev->num_descriptors(), 0);
+
+    for (uint32_t i{0}; i < num_logdev; ++i) {
+        auto id = logstore_service().create_new_logdev();
+        s_max_flush_multiple = logstore_service().get_logdev(id)->get_flush_size_multiple();
+        auto store = logstore_service().create_new_log_store(id, false);
+        log_stores.push_back(store);
+    }
+
+    // Used size is still 0.
+    ASSERT_EQ(logstore_service().used_size(), 0);
+    ASSERT_EQ(vdev->num_descriptors(), num_logdev);
+
+    log_devs = logstore_service().get_all_logdevs();
+    ASSERT_EQ(log_devs.size(), num_logdev);
+
+    for (auto& log_store : log_stores) {
+        const unsigned count{10};
+        for (unsigned i{0}; i < count; ++i) {
+            // Insert new entry.
+            insert_sync(log_store, i);
+            // Verify the entry.
+            read_verify(log_store, i);
+        }
+    }
+
+    // Used size should be non zero.
+    ASSERT_GT(logstore_service().used_size(), 0);
+
+    for (auto& store : log_stores) {
+        logstore_service().remove_log_store(store->get_logdev()->get_id(), store->get_store_id());
+    }
+    for (auto& store : log_stores) {
+        logstore_service().destroy_log_dev(store->get_logdev()->get_id());
+    }
+
+    // Test we released all chunks
+    log_devs = logstore_service().get_all_logdevs();
+    ASSERT_EQ(log_devs.size(), 0);
+    ASSERT_EQ(vdev->num_descriptors(), 0);
+    ASSERT_EQ(logstore_service().used_size(), 0);
+}
+
+TEST_F(LogDevTest, DeleteUnopenedLogDev) {
+    auto num_logdev = SISL_OPTIONS["num_logdevs"].as< uint32_t >();
+    std::vector< std::shared_ptr< HomeLogStore > > log_stores;
+    auto vdev = logstore_service().get_vdev();
+
+    // Test deletion of unopened logdev.
+    std::set< logdev_id_t > id_set, unopened_id_set;
+    for (uint32_t i{0}; i < num_logdev; ++i) {
+        auto id = logstore_service().create_new_logdev();
+        id_set.insert(id);
+        if (i >= num_logdev / 2) { unopened_id_set.insert(id); }
+        s_max_flush_multiple = logstore_service().get_logdev(id)->get_flush_size_multiple();
+        auto store = logstore_service().create_new_log_store(id, false);
+        log_stores.push_back(store);
+    }
+
+    // Write to all logstores so that there is atleast one chunk in each logdev.
+    for (auto& log_store : log_stores) {
+        const unsigned count{10};
+        for (unsigned i{0}; i < count; ++i) {
+            // Insert new entry.
+            insert_sync(log_store, i);
+            // Verify the entry.
+            read_verify(log_store, i);
+        }
+    }
+
+    // Restart homestore with only half of the logdev's open. Rest will be deleted as they are unopened.
+    auto restart = [&]() {
+        auto starting_cb = [&]() {
+            auto it = id_set.begin();
+            for (uint32_t i{0}; i < id_set.size() / 2; i++, it++) {
+                logstore_service().open_logdev(*it);
+            }
+        };
+        start_homestore(true /* restart */, starting_cb);
+    };
+    LOGINFO("Restart homestore");
+    restart();
+
+    auto log_devs = logstore_service().get_all_logdevs();
+    ASSERT_EQ(log_devs.size(), id_set.size() / 2);
+    for (auto& logdev : log_devs) {
+        ASSERT_EQ(unopened_id_set.count(logdev->get_id()), 0);
+    }
 }
 
 SISL_OPTION_GROUP(test_log_dev,

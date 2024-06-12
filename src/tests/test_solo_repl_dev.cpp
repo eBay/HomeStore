@@ -127,7 +127,7 @@ public:
                       cintrusive< repl_req_ctx >& ctx) override {
             LOGINFO("Received error={} on repl_dev", enum_name(error));
         }
-        void on_replica_stop() override {}
+        void on_destroy() override {}
     };
 
     class Application : public ReplApplication {
@@ -154,10 +154,11 @@ protected:
     shared< ReplDev > m_repl_dev2;
     uuid_t m_uuid1;
     uuid_t m_uuid2;
+    test_common::HSTestHelper::test_token m_token;
 
 public:
     virtual void SetUp() override {
-        test_common::HSTestHelper::start_homestore(
+        m_token = test_common::HSTestHelper::start_homestore(
             "test_solo_repl_dev",
             {{HS_SERVICE::META, {.size_pct = 5.0}},
              {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_app = std::make_unique< Application >(*this)}},
@@ -180,16 +181,7 @@ public:
     void restart() {
         m_repl_dev1.reset();
         m_repl_dev2.reset();
-
-        test_common::HSTestHelper::start_homestore(
-            "test_solo_repl_dev",
-            {{HS_SERVICE::META, {.size_pct = 5.0}},
-             {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_app = std::make_unique< Application >(*this)}},
-             {HS_SERVICE::LOG,
-              {.size_pct = 22.0,
-               .chunk_size = 32 * 1024 * 1024,
-               .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}}},
-            nullptr, true /* restart */);
+        test_common::HSTestHelper::restart_homestore(m_token);
 
         m_repl_dev1 = hs()->repl_service().get_repl_dev(m_uuid1).value();
         m_repl_dev2 = hs()->repl_service().get_repl_dev(m_uuid2).value();
@@ -262,7 +254,7 @@ public:
                     RELEASE_ASSERT(!err, "Error during async_read");
 
                     LOGDEBUG("[{}] Write complete with lsn={} for size={} blkids={}",
-                             boost::uuids::to_string(rdev.group_id()), req->get_lsn(), req->write_sgs.size,
+                             boost::uuids::to_string(rdev.group_id()), req->lsn(), req->write_sgs.size,
                              req->written_blkids.to_string());
                     auto hdr = r_cast< test_repl_req::journal_header* >(req->header->bytes());
                     HS_REL_ASSERT_EQ(hdr->data_size, req->read_sgs.size,

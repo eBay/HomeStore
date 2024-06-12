@@ -246,7 +246,7 @@ std::vector< shared< Chunk > > PhysicalDev::create_chunks(const std::vector< uin
 
                 auto chunk = std::make_shared< Chunk >(this, *cinfo, cslot);
                 ret_chunks.push_back(chunk);
-                get_stream(chunk).m_chunks_map.insert(std::pair{chunk_ids[cit], std::move(chunk)});
+                get_stream(chunk).m_chunks_map.insert(std::pair{chunk_ids[cit], chunk});
                 HS_LOG(INFO, device, "Creating chunk {}", chunk->to_string());
                 cinfo->~chunk_info();
             }

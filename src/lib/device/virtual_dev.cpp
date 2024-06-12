@@ -33,6 +33,7 @@
 #include <sisl/logging/logging.h>
 #include <sisl/utility/atomic_counter.hpp>
 #include <iomgr/iomgr_flip.hpp>
+#include <homestore/homestore_decl.hpp>
 
 #include "device/chunk.h"
 #include "device/physical_dev.hpp"
@@ -41,6 +42,7 @@
 #include "common/error.h"
 #include "common/homestore_assert.hpp"
 #include "common/homestore_utils.hpp"
+#include "common/crash_simulator.hpp"
 #include "blkalloc/varsize_blk_allocator.h"
 #include "device/round_robin_chunk_selector.h"
 #include "blkalloc/append_blk_allocator.h"
@@ -117,16 +119,17 @@ void VirtualDev::add_chunk(cshared< Chunk >& chunk, bool is_fresh_chunk) {
                                    chunk->physical_dev()->align_size(), chunk->size(), m_auto_recovery,
                                    chunk->chunk_id(), is_fresh_chunk);
     chunk->set_block_allocator(std::move(ba));
-    chunk->set_vdev_ordinal(m_all_chunks.size());
+    // TODO: when vdev_ordinal is  used, revisit here to make sure it is set correctly;
+    chunk->set_vdev_ordinal(m_total_chunk_num++);
     m_pdevs.insert(chunk->physical_dev_mutable());
-    m_all_chunks.push_back(chunk);
+    m_all_chunks[chunk->chunk_id()] = chunk;
     m_chunk_selector->add_chunk(chunk);
 }
 
 void VirtualDev::remove_chunk(cshared< Chunk >& chunk) {
     std::unique_lock lg{m_mgmt_mutex};
-    m_all_chunks[chunk->chunk_id()].reset();
-    m_all_chunks[chunk->chunk_id()] = nullptr;
+    m_all_chunks.erase(chunk->chunk_id());
+    m_total_chunk_num--;
     m_chunk_selector->remove_chunk(chunk);
 }
 
@@ -134,7 +137,7 @@ folly::Future< std::error_code > VirtualDev::async_format() {
     static thread_local std::vector< folly::Future< std::error_code > > s_futs;
     s_futs.clear();
 
-    for (auto& chunk : m_all_chunks) {
+    for (auto& [_, chunk] : m_all_chunks) {
         auto* pdev = chunk->physical_dev_mutable();
         LOGINFO("writing zero for chunk: {}, size: {}, offset: {}", chunk->chunk_id(), in_bytes(chunk->size()),
                 chunk->start_offset());
@@ -154,15 +157,20 @@ bool VirtualDev::is_blk_alloced(BlkId const& blkid) const {
 
 BlkAllocStatus VirtualDev::commit_blk(BlkId const& blkid) {
     Chunk* chunk = m_dmgr.get_chunk_mutable(blkid.chunk_num());
+    // if we start with missing drive, we will have no chunk for this blkid;
+    if (!chunk) {
+        HS_LOG(ERROR, device, "fail to commit_blk: bid {}", blkid.to_string());
+        return BlkAllocStatus::INVALID_DEV;
+    }
     HS_LOG(DEBUG, device, "commit_blk: bid {}", blkid.to_string());
     auto const recovering = homestore::hs()->is_initializing();
     if (!recovering) {
         HS_DBG_ASSERT(is_blk_alloced(blkid), "commiting blkid {} is not allocated in non-recovery mode",
                       blkid.to_string());
     } else {
-        chunk->blk_allocator_mutable()->mark_blk_allocated(blkid);
+        chunk->blk_allocator_mutable()->reserve_on_cache(blkid);
     }
-    return chunk->blk_allocator_mutable()->alloc_on_disk(blkid);
+    return chunk->blk_allocator_mutable()->reserve_on_disk(blkid);
 }
 
 BlkAllocStatus VirtualDev::alloc_contiguous_blks(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) {
@@ -200,6 +208,7 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
         if (hints.chunk_id_hint) {
             // this is a target-chunk allocation;
             chunk = m_dmgr.get_chunk_mutable(*(hints.chunk_id_hint));
+            if (!chunk) return BlkAllocStatus::INVALID_DEV;
             status = alloc_blks_from_chunk(nblks, hints, out_blkid, chunk);
             // don't look for other chunks because user wants allocation on chunk_id_hint only;
         } else {
@@ -215,7 +224,7 @@ BlkAllocStatus VirtualDev::alloc_blks(blk_count_t nblks, blk_alloc_hints const& 
                     (status == BlkAllocStatus::PARTIAL && hints.partial_alloc_ok)) {
                     break;
                 }
-            } while (++attempt < m_all_chunks.size());
+            } while (++attempt < m_total_chunk_num);
         }
 
         if ((status != BlkAllocStatus::SUCCESS) && !((status == BlkAllocStatus::PARTIAL) && hints.partial_alloc_ok)) {
@@ -284,8 +293,10 @@ void VirtualDev::free_blk(BlkId const& bid, VDevCPContext* vctx) {
             // We don't want to accumulate here for append blk allocator.
             vctx->m_free_blkid_list.push_back(b);
         } else {
-            BlkAllocator* allocator = m_dmgr.get_chunk_mutable(b.chunk_num())->blk_allocator_mutable();
-            if (m_auto_recovery) { allocator->free_on_disk(b); }
+            auto chunk = m_dmgr.get_chunk_mutable(b.chunk_num());
+            // try to free a blk in a missing chunk, crash if it happens;
+            if (!chunk) HS_DBG_ASSERT(false, "chunk is missing for blkid {}", b.to_string());
+            BlkAllocator* allocator = chunk->blk_allocator_mutable();
             allocator->free(b);
         }
     };
@@ -309,13 +320,23 @@ uint64_t VirtualDev::get_len(const iovec* iov, int iovcnt) {
     return len;
 }
 
+// for all writes functions, we don't expect to get invalid dev_offset, since we will never allocate blkid from missing
+// chunk(missing pdev);
 ////////////////////////// async write section //////////////////////////////////
 folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32_t size, BlkId const& bid,
                                                          bool part_of_batch) {
     HS_DBG_ASSERT_EQ(bid.is_multi(), false, "async_write needs individual pieces of blkid - not MultiBlkid");
 
+#ifdef _PRERELEASE
+    if (hs()->crash_simulator().is_crashed()) { return folly::makeFuture< std::error_code >(std::error_code()); }
+#endif
+
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        // TODO: define a new error code for missing pdev case;
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
+    }
     auto* pdev = chunk->physical_dev_mutable();
 
     HS_LOG(TRACE, device, "Writing in device: {}, offset = {}", pdev->pdev_id(), dev_offset);
@@ -328,6 +349,13 @@ folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32
 
 folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
                                                          uint64_t offset_in_chunk) {
+#ifdef _PRERELEASE
+    if (hs()->crash_simulator().is_crashed()) { return folly::makeFuture< std::error_code >(std::error_code()); }
+#endif
+
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
+    }
     auto const dev_offset = chunk->start_offset() + offset_in_chunk;
     auto* pdev = chunk->physical_dev_mutable();
 
@@ -342,9 +370,15 @@ folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32
 folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, const int iovcnt, BlkId const& bid,
                                                           bool part_of_batch) {
     HS_DBG_ASSERT_EQ(bid.is_multi(), false, "async_writev needs individual pieces of blkid - not MultiBlkid");
+#ifdef _PRERELEASE
+    if (hs()->crash_simulator().is_crashed()) { return folly::makeFuture< std::error_code >(std::error_code()); }
+#endif
 
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
+    }
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
 
@@ -358,6 +392,13 @@ folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, cons
 
 folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, const int iovcnt, cshared< Chunk >& chunk,
                                                           uint64_t offset_in_chunk) {
+#ifdef _PRERELEASE
+    if (hs()->crash_simulator().is_crashed()) { return folly::makeFuture< std::error_code >(std::error_code()); }
+#endif
+
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
+    }
     auto const dev_offset = chunk->start_offset() + offset_in_chunk;
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
@@ -372,23 +413,44 @@ folly::Future< std::error_code > VirtualDev::async_writev(const iovec* iov, cons
 
 ////////////////////////// sync write section //////////////////////////////////
 std::error_code VirtualDev::sync_write(const char* buf, uint32_t size, BlkId const& bid) {
+#ifdef _PRERELEASE
+    if (hs()->crash_simulator().is_crashed()) { return std::error_code{}; }
+#endif
+
     HS_DBG_ASSERT_EQ(bid.is_multi(), false, "sync_write needs individual pieces of blkid - not MultiBlkid");
 
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     return chunk->physical_dev_mutable()->sync_write(buf, size, dev_offset);
 }
 
 std::error_code VirtualDev::sync_write(const char* buf, uint32_t size, cshared< Chunk >& chunk,
                                        uint64_t offset_in_chunk) {
+#ifdef _PRERELEASE
+    if (hs()->crash_simulator().is_crashed()) { return std::error_code{}; }
+#endif
+
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     return chunk->physical_dev_mutable()->sync_write(buf, size, chunk->start_offset() + offset_in_chunk);
 }
 
 std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, BlkId const& bid) {
     HS_DBG_ASSERT_EQ(bid.is_multi(), false, "sync_writev needs individual pieces of blkid - not MultiBlkid");
 
+#ifdef _PRERELEASE
+    if (hs()->crash_simulator().is_crashed()) { return std::error_code{}; }
+#endif
+
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
 
@@ -402,6 +464,14 @@ std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, BlkId cons
 
 std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, cshared< Chunk >& chunk,
                                         uint64_t offset_in_chunk) {
+#ifdef _PRERELEASE
+    if (hs()->crash_simulator().is_crashed()) { return std::error_code{}; }
+#endif
+
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
+
     uint64_t const dev_offset = chunk->start_offset() + offset_in_chunk;
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
@@ -414,6 +484,8 @@ std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, cshared< C
     return pdev->sync_writev(iov, iovcnt, size, dev_offset);
 }
 
+// for read, chunk might be missing in case of pdev is gone(for example , breakfix), so we need to check if chunk is
+// loaded before proceeding with read;
 ////////////////////////////////// async read section ///////////////////////////////////////////////
 folly::Future< std::error_code > VirtualDev::async_read(char* buf, uint64_t size, BlkId const& bid,
                                                         bool part_of_batch) {
@@ -421,6 +493,9 @@ folly::Future< std::error_code > VirtualDev::async_read(char* buf, uint64_t size
 
     Chunk* pchunk;
     uint64_t const dev_offset = to_dev_offset(bid, &pchunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
+    }
     return pchunk->physical_dev_mutable()->async_read(buf, size, dev_offset, part_of_batch);
 }
 
@@ -430,6 +505,9 @@ folly::Future< std::error_code > VirtualDev::async_readv(iovec* iovs, int iovcnt
 
     Chunk* pchunk;
     uint64_t const dev_offset = to_dev_offset(bid, &pchunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        return folly::makeFuture< std::error_code >(std::make_error_code(std::errc::resource_unavailable_try_again));
+    }
     return pchunk->physical_dev_mutable()->async_readv(iovs, iovcnt, size, dev_offset, part_of_batch);
 }
 
@@ -439,10 +517,16 @@ std::error_code VirtualDev::sync_read(char* buf, uint32_t size, BlkId const& bid
 
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     return chunk->physical_dev_mutable()->sync_read(buf, size, dev_offset);
 }
 
 std::error_code VirtualDev::sync_read(char* buf, uint32_t size, cshared< Chunk >& chunk, uint64_t offset_in_chunk) {
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     return chunk->physical_dev_mutable()->sync_read(buf, size, chunk->start_offset() + offset_in_chunk);
 }
 
@@ -451,6 +535,9 @@ std::error_code VirtualDev::sync_readv(iovec* iov, int iovcnt, BlkId const& bid)
 
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
+    if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
 
@@ -463,6 +550,9 @@ std::error_code VirtualDev::sync_readv(iovec* iov, int iovcnt, BlkId const& bid)
 }
 
 std::error_code VirtualDev::sync_readv(iovec* iov, int iovcnt, cshared< Chunk >& chunk, uint64_t offset_in_chunk) {
+    if (sisl_unlikely(!is_chunk_available(chunk))) {
+        return std::make_error_code(std::errc::resource_unavailable_try_again);
+    }
     uint64_t const dev_offset = chunk->start_offset() + offset_in_chunk;
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
@@ -507,7 +597,7 @@ void VirtualDev::submit_batch() {
 
 uint64_t VirtualDev::available_blks() const {
     uint64_t avl_blks{0};
-    for (auto& chunk : m_all_chunks) {
+    for (auto& [_, chunk] : m_all_chunks) {
         avl_blks += chunk->blk_allocator()->available_blks();
     }
     return avl_blks;
@@ -515,20 +605,25 @@ uint64_t VirtualDev::available_blks() const {
 
 uint64_t VirtualDev::used_size() const {
     uint64_t alloc_cnt{0};
-    for (auto& chunk : m_all_chunks) {
+    for (auto& [_, chunk] : m_all_chunks) {
         alloc_cnt += chunk->blk_allocator()->get_used_blks();
     }
     return (alloc_cnt * block_size());
 }
 
-std::vector< shared< Chunk > > VirtualDev::get_chunks() const { return m_all_chunks; }
+std::map< uint16_t, shared< Chunk > > VirtualDev::get_chunks() const { return m_all_chunks; }
+
+bool VirtualDev::is_blk_exist(MultiBlkId const& b) const {
+    auto chunk_num = b.chunk_num();
+    return m_all_chunks.contains(chunk_num);
+}
 
 /* Get status for all chunks */
 nlohmann::json VirtualDev::get_status(int log_level) const {
     nlohmann::json j;
 
     try {
-        for (auto& chunk : m_all_chunks) {
+        for (auto& [_, chunk] : m_all_chunks) {
             nlohmann::json chunk_j;
             chunk_j["ChunkInfo"] = chunk->get_status(log_level);
             if (chunk->blk_allocator() != nullptr) {
@@ -550,8 +645,8 @@ uint32_t VirtualDev::atomic_page_size() const {
 
 std::string VirtualDev::to_string() const { return ""; }
 
-shared< Chunk > VirtualDev::get_next_chunk(cshared< Chunk >& chunk) const {
-    return m_all_chunks[(chunk->vdev_ordinal() + 1) % m_all_chunks.size()];
+shared< Chunk > VirtualDev::get_next_chunk(cshared< Chunk >& chunk) {
+    return m_all_chunks[(chunk->chunk_id() + 1) % m_all_chunks.size()];
 }
 
 void VirtualDev::update_vdev_private(const sisl::blob& private_data) {
@@ -588,8 +683,10 @@ void VirtualDev::cp_flush(VDevCPContext* v_cp_ctx) {
     // All of the blkids which were captured in the current vdev cp context will now be freed and hence available for
     // allocation on the new CP dirty collection session which is ongoing
     for (auto const& b : v_cp_ctx->m_free_blkid_list) {
-        BlkAllocator* allocator = m_dmgr.get_chunk_mutable(b.chunk_num())->blk_allocator_mutable();
-        if (m_auto_recovery) { allocator->free_on_disk(b); }
+        auto chunk = m_dmgr.get_chunk_mutable(b.chunk_num());
+        // try to free a blk in a missing chunk, crash if it happens;
+        if (!chunk) HS_DBG_ASSERT(false, "chunk is missing for blkid {}", b.to_string());
+        BlkAllocator* allocator = chunk->blk_allocator_mutable();
         allocator->free(b);
     }
 }
@@ -600,8 +697,12 @@ int VirtualDev::cp_progress_percent() { return 100; }
 ///////////////////////// VirtualDev Private Methods /////////////////////////////
 uint64_t VirtualDev::to_dev_offset(BlkId const& b, Chunk** chunk) const {
     *chunk = m_dmgr.get_chunk_mutable(b.chunk_num());
-    RELEASE_ASSERT(*chunk, "Chunk got null {}", b.chunk_num());
+    if (!(*chunk)) return INVALID_DEV_OFFSET;
     return uint64_cast(b.blk_num()) * block_size() + uint64_cast((*chunk)->start_offset());
+}
+
+bool VirtualDev::is_chunk_available(cshared< Chunk >& chunk) const {
+    return m_dmgr.get_chunk(chunk->chunk_id()) != nullptr;
 }
 
 } // namespace homestore

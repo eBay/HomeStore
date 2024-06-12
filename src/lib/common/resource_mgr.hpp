@@ -151,7 +151,7 @@ private:
     exceed_limit_cb_t m_journal_vdev_exceed_cb;
     RsrcMgrMetrics m_metrics;
 
-    iomgr::timer_handle_t m_res_audit_timer_hdl;
+    iomgr::timer_handle_t m_res_audit_timer_hdl{iomgr::null_timer_handle};
 };
 
 extern ResourceMgr& resource_mgr();

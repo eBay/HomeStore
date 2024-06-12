@@ -75,7 +75,7 @@ read_again:
                    "we have reached the end. crc doesn't match offset {} prev crc {} header prev crc {} log_dev={}",
                    m_vdev_jd->dev_offset(m_cur_read_bytes), header->prev_grp_crc, m_prev_crc, m_vdev_jd->logdev_id());
         *out_dev_offset = m_vdev_jd->dev_offset(m_cur_read_bytes);
-        if (!m_vdev_jd->is_offset_at_last_chunk(m_cur_read_bytes)) {
+        if (!m_vdev_jd->is_offset_at_last_chunk(*out_dev_offset)) {
             HS_REL_ASSERT(0, "data is corrupted {}", m_vdev_jd->logdev_id());
         }
         // move it by dma boundary if header is not valid
@@ -109,7 +109,7 @@ read_again:
         // move it by dma boundary if header is not valid
         m_prev_crc = 0;
         m_cur_read_bytes += m_read_size_multiple;
-        if (!m_vdev_jd->is_offset_at_last_chunk(m_cur_read_bytes)) {
+        if (!m_vdev_jd->is_offset_at_last_chunk(*out_dev_offset)) {
             HS_REL_ASSERT(0, "data is corrupted {}", m_vdev_jd->logdev_id());
         }
         return ret_buf;

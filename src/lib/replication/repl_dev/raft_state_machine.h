@@ -79,6 +79,13 @@ class StateMachineStore;
 #define RD_REL_ASSERT_GT(val1, val2, ...) RD_ASSERT_CMP(RELEASE, val1, >, val2, ##__VA_ARGS__)
 #define RD_REL_ASSERT_GE(val1, val2, ...) RD_ASSERT_CMP(RELEASE, val1, >=, val2, ##__VA_ARGS__)
 
+#define RD_LOGT(...) RD_LOG(TRACE, ##__VA_ARGS__)
+#define RD_LOGD(...) RD_LOG(DEBUG, ##__VA_ARGS__)
+#define RD_LOGI(...) RD_LOG(INFO, ##__VA_ARGS__)
+#define RD_LOGW(...) RD_LOG(WARN, ##__VA_ARGS__)
+#define RD_LOGE(...) RD_LOG(ERROR, ##__VA_ARGS__)
+#define RD_LOGC(...) RD_LOG(CRITICAL, ##__VA_ARGS__)
+
 using AsyncNotify = folly::SemiFuture< folly::Unit >;
 using AsyncNotifier = folly::Promise< folly::Unit >;
 
@@ -102,6 +109,7 @@ public:
     raft_buf_ptr_t pre_commit_ext(const nuraft::state_machine::ext_op_params& params) override;
     raft_buf_ptr_t commit_ext(const nuraft::state_machine::ext_op_params& params) override;
     void rollback(uint64_t lsn, nuraft::buffer&) override { LOGCRITICAL("Unimplemented rollback on: [{}]", lsn); }
+    void become_ready();
 
     bool apply_snapshot(nuraft::snapshot&) override { return false; }
 

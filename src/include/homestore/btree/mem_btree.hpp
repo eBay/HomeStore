@@ -14,6 +14,12 @@
  *
  *********************************************************************************/
 #pragma once
+#ifdef StoreSpecificBtreeNode
+#undef StoreSpecificBtreeNode
+#endif
+
+#define StoreSpecificBtreeNode BtreeNode
+
 #include "btree.ipp"
 
 namespace homestore {
@@ -25,6 +31,8 @@ private:
 public:
     MemBtree(const BtreeConfig& cfg) : Btree< K, V >(cfg) {
         BT_LOG(INFO, "New {} being created: Node size {}", btree_store_type(), cfg.node_size());
+        auto const status = this->create_root_node(nullptr);
+        if (status != btree_status_t::success) { throw std::runtime_error(fmt::format("Unable to create root node")); }
     }
 
     virtual ~MemBtree() {
@@ -39,7 +47,7 @@ private:
         std::shared_ptr< uint8_t[] > ptr(new uint8_t[this->m_bt_cfg.node_size()]);
         node_buf_ptr_vec.emplace_back(ptr);
 
-        auto new_node = this->init_node(ptr.get(), 0u, bnodeid_t{0}, true, is_leaf);
+        auto new_node = this->init_node(ptr.get(), bnodeid_t{0}, true, is_leaf);
         new_node->set_node_id(bnodeid_t{r_cast< std::uintptr_t >(new_node)});
         new_node->m_refcount.increment();
         return BtreeNodePtr{new_node};
@@ -58,42 +66,21 @@ private:
 
     void free_node_impl(const BtreeNodePtr& node, void* context) override { intrusive_ptr_release(node.get()); }
 
-    btree_status_t prepare_node_txn(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
-                                    void* context) override {
-        return btree_status_t::success;
-    }
-
-    btree_status_t transact_write_nodes(const folly::small_vector< BtreeNodePtr, 3 >& new_nodes,
-                                        const BtreeNodePtr& child_node, const BtreeNodePtr& parent_node,
-                                        void* context) override {
+    btree_status_t transact_nodes(const BtreeNodeList& new_nodes, const BtreeNodeList& freed_nodes,
+                                  const BtreeNodePtr& left_child_node, const BtreeNodePtr& parent_node,
+                                  void* context) override {
         for (const auto& node : new_nodes) {
             this->write_node(node, context);
         }
-        this->write_node(child_node, context);
+        this->write_node(left_child_node, context);
         this->write_node(parent_node, context);
+
+        for (const auto& node : freed_nodes) {
+            this->free_node(node, locktype_t::WRITE, context);
+        }
         return btree_status_t::success;
     }
 
-    void update_new_root_info(bnodeid_t root_node, uint64_t version) override {}
-
-#if 0
-    static void ref_node(MemBtreeNode* bn) {
-        auto mbh = (mem_btree_node_header*)bn;
-        LOGMSG_ASSERT_EQ(mbh->magic, 0xDEADBEEF, "Invalid Magic for Membtree node {}, Metrics {}", bn->to_string(),
-                         sisl::MetricsFarm::getInstance().get_result_in_json_string());
-        mbh->refcount.increment();
-    }
-
-    static void deref_node(MemBtreeNode* bn) {
-        auto mbh = (mem_btree_node_header*)bn;
-        LOGMSG_ASSERT_EQ(mbh->magic, 0xDEADBEEF, "Invalid Magic for Membtree node {}, Metrics {}", bn->to_string(),
-                         sisl::MetricsFarm::getInstance().get_result_in_json_string());
-        if (mbh->refcount.decrement_testz()) {
-            mbh->magic = 0;
-            bn->~MemBtreeNode();
-            deallocate_mem((uint8_t*)bn);
-        }
-    }
-#endif
+    btree_status_t on_root_changed(BtreeNodePtr const&, void*) override { return btree_status_t::success; }
 };
 } // namespace homestore

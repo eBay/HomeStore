@@ -51,7 +51,7 @@ LogStoreService::LogStoreService() {
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
             rollback_super_blk_found(std::move(buf), voidptr_cast(mblk));
         },
-        nullptr);
+        nullptr, true, std::optional< meta_subtype_vec_t >({logdev_sb_meta_name}));
 }
 
 folly::Future< std::error_code > LogStoreService::create_vdev(uint64_t size, HSDevType devType, uint32_t chunk_size) {
@@ -97,11 +97,13 @@ std::shared_ptr< VirtualDev > LogStoreService::open_vdev(const vdev_info& vinfo,
 void LogStoreService::start(bool format) {
     // hs()->status_mgr()->register_status_cb("LogStore", bind_this(LogStoreService::get_status, 1));
 
+    delete_unopened_logdevs();
+
     // Create an truncate thread loop which handles truncation which does sync IO
     start_threads();
 
     for (auto& [logdev_id, logdev] : m_id_logdev_map) {
-        logdev->start(format, m_logdev_vdev.get());
+        logdev->start(format);
     }
 }
 
@@ -121,13 +123,45 @@ logdev_id_t LogStoreService::create_new_logdev() {
     folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
     logdev_id_t logdev_id = m_id_reserver->reserve();
     auto logdev = create_new_logdev_internal(logdev_id);
-    logdev->start(true /* format */, m_logdev_vdev.get());
+    logdev->start(true /* format */);
     COUNTER_INCREMENT(m_metrics, logdevs_count, 1);
+    LOGINFO("Created log_dev={}", logdev_id);
     return logdev_id;
 }
 
+void LogStoreService::destroy_log_dev(logdev_id_t logdev_id) {
+    folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
+    const auto it = m_id_logdev_map.find(logdev_id);
+    if (it == m_id_logdev_map.end()) { return; }
+
+    // Stop the logdev and release all the chunks from the journal vdev.
+    auto& logdev = it->second;
+    if (!logdev->is_stopped()) {
+        // Stop the logdev if its started.
+        logdev->stop();
+    }
+
+    // First release all chunks.
+    m_logdev_vdev->destroy(logdev_id);
+
+    // Destroy the metablks for logdev.
+    logdev->destroy();
+
+    m_id_logdev_map.erase(it);
+    COUNTER_DECREMENT(m_metrics, logdevs_count, 1);
+    LOGINFO("Removed log_dev={}", logdev_id);
+}
+
+void LogStoreService::delete_unopened_logdevs() {
+    for (auto logdev_id : m_unopened_logdev) {
+        LOGINFO("Deleting unopened log_dev={}", logdev_id);
+        destroy_log_dev(logdev_id);
+    }
+    m_unopened_logdev.clear();
+}
+
 std::shared_ptr< LogDev > LogStoreService::create_new_logdev_internal(logdev_id_t logdev_id) {
-    auto logdev = std::make_shared< LogDev >(logdev_id);
+    auto logdev = std::make_shared< LogDev >(logdev_id, m_logdev_vdev.get());
     const auto it = m_id_logdev_map.find(logdev_id);
     HS_REL_ASSERT((it == m_id_logdev_map.end()), "logdev id {} already exists", logdev_id);
     m_id_logdev_map.insert(std::make_pair<>(logdev_id, logdev));
@@ -139,8 +173,12 @@ void LogStoreService::open_logdev(logdev_id_t logdev_id) {
     const auto it = m_id_logdev_map.find(logdev_id);
     if (it == m_id_logdev_map.end()) {
         m_id_reserver->reserve(logdev_id);
-        create_new_logdev_internal(logdev_id);
+        auto logdev = std::make_shared< LogDev >(logdev_id, m_logdev_vdev.get());
+        m_id_logdev_map.emplace(logdev_id, logdev);
+        LOGDEBUGMOD(logstore, "log_dev={} does not exist, created!", logdev_id);
     }
+    m_unopened_logdev.erase(logdev_id);
+    LOGDEBUGMOD(logstore, "Opened log_dev={}", logdev_id);
 }
 
 std::vector< std::shared_ptr< LogDev > > LogStoreService::get_all_logdevs() {
@@ -168,12 +206,19 @@ void LogStoreService::logdev_super_blk_found(const sisl::byte_view& buf, void* m
         folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
         std::shared_ptr< LogDev > logdev;
         auto id = sb->logdev_id;
+        LOGDEBUGMOD(logstore, "Log dev superblk found logdev={}", id);
         const auto it = m_id_logdev_map.find(id);
-        if (it == m_id_logdev_map.end()) {
-            m_id_reserver->reserve(id);
-            logdev = create_new_logdev_internal(id);
-        } else {
+        // We could update the logdev map either with logdev or rollback superblks found callbacks.
+        if (it != m_id_logdev_map.end()) {
             logdev = it->second;
+        } else {
+            logdev = std::make_shared< LogDev >(id, m_logdev_vdev.get());
+            m_id_logdev_map.emplace(id, logdev);
+            // when recover logdev meta blk, we get all the logdevs from the superblk. we put them in m_unopened_logdev
+            // too. after logdev meta blks are all recovered, when a client opens a logdev, we remove it from
+            // m_unopened_logdev. so that when we start log service, all the left items in m_unopened_logdev are those
+            // not open, which can be destroyed
+            m_unopened_logdev.insert(id);
         }
 
         logdev->log_dev_meta().logdev_super_blk_found(buf, meta_cookie);
@@ -190,20 +235,17 @@ void LogStoreService::rollback_super_blk_found(const sisl::byte_view& buf, void*
         folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
         std::shared_ptr< LogDev > logdev;
         auto id = rollback_sb->logdev_id;
+        LOGDEBUGMOD(logstore, "Log dev rollback superblk found logdev={}", id);
         const auto it = m_id_logdev_map.find(id);
-        if (it == m_id_logdev_map.end()) {
-            m_id_reserver->reserve(id);
-            logdev = create_new_logdev_internal(id);
-        } else {
-            logdev = it->second;
-        }
-
+        HS_REL_ASSERT((it != m_id_logdev_map.end()),
+                      "found a rollback_super_blk of logdev id {}, but the logdev with id {} doesnt exist", id);
+        logdev = it->second;
         logdev->log_dev_meta().rollback_super_blk_found(buf, meta_cookie);
     }
 }
 
 std::shared_ptr< HomeLogStore > LogStoreService::create_new_log_store(logdev_id_t logdev_id, bool append_mode) {
-    folly::SharedMutexWritePriority::ReadHolder holder(m_logdev_map_mtx);
+    folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
     COUNTER_INCREMENT(m_metrics, logstores_count, 1);
     const auto it = m_id_logdev_map.find(logdev_id);
     HS_REL_ASSERT((it != m_id_logdev_map.end()), "logdev id {} doesnt exist", logdev_id);
@@ -220,7 +262,7 @@ folly::Future< shared< HomeLogStore > > LogStoreService::open_log_store(logdev_i
 }
 
 void LogStoreService::remove_log_store(logdev_id_t logdev_id, logstore_id_t store_id) {
-    folly::SharedMutexWritePriority::ReadHolder holder(m_logdev_map_mtx);
+    folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
     COUNTER_INCREMENT(m_metrics, logstores_count, 1);
     const auto it = m_id_logdev_map.find(logdev_id);
     HS_REL_ASSERT((it != m_id_logdev_map.end()), "logdev id {} doesnt exist", logdev_id);

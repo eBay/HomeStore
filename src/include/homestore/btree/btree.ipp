@@ -45,11 +45,6 @@ template < typename K, typename V >
 Btree< K, V >::~Btree() = default;
 
 template < typename K, typename V >
-btree_status_t Btree< K, V >::init(void* op_context) {
-    return create_root_node(op_context);
-}
-
-template < typename K, typename V >
 void Btree< K, V >::set_root_node_info(const BtreeLinkInfo& info) {
     m_root_node_info = info;
 }
@@ -195,7 +190,7 @@ retry:
             goto out;
         }
 
-        BT_NODE_LOG_ASSERT_EQ(root->has_valid_edge(), true, root, "Orphaned root with no entries and edge");
+        BT_NODE_LOG_ASSERT_EQ(root->has_valid_edge(), true, root, "Orphaned root with no entries and no edge");
         unlock_node(root, acq_lock);
         m_btree_lock.unlock_shared();
 
@@ -334,7 +329,7 @@ void Btree< K, V >::print_tree_keys() const {
     to_string_keys(m_root_node_info.bnode_id(), buf);
     m_btree_lock.unlock_shared();
 
-    BT_LOG(INFO, "Pre order traversal of tree:\n<{}>", buf);
+    LOGINFO("Pre order traversal of tree:\n<{}>", buf);
 }
 
 template < typename K, typename V >
@@ -350,11 +345,6 @@ bnodeid_t Btree< K, V >::root_node_id() const {
 template < typename K, typename V >
 uint64_t Btree< K, V >::root_link_version() const {
     return m_root_node_info.link_version();
-}
-
-template < typename K, typename V >
-bool Btree< K, V >::is_repair_needed(const BtreeNodePtr& child_node, const BtreeLinkInfo& child_info) {
-    return child_info.link_version() != child_node->link_version();
 }
 
 // TODO: Commenting out flip till we figure out how to move flip dependency inside sisl package.

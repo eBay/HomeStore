@@ -42,6 +42,11 @@ btree_status_t Btree< K, V >::create_root_node(void* op_context) {
     }
 
     m_root_node_info = BtreeLinkInfo{root->node_id(), root->link_version()};
+    ret = on_root_changed(root, op_context);
+    if (ret != btree_status_t::success) {
+        free_node(root, locktype_t::NONE, op_context);
+        m_root_node_info = BtreeLinkInfo{};
+    }
     return ret;
 }
 
@@ -116,7 +121,8 @@ void Btree< K, V >::read_node_or_fail(bnodeid_t id, BtreeNodePtr& node) const {
  */
 template < typename K, typename V >
 btree_status_t Btree< K, V >::upgrade_node_locks(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
-                                                 locktype_t parent_cur_lock, locktype_t child_cur_lock, void* context) {
+                                                 locktype_t& parent_cur_lock, locktype_t& child_cur_lock,
+                                                 void* context) {
     btree_status_t ret = btree_status_t::success;
 
     auto const parent_prev_gen = parent_node->node_gen();
@@ -126,30 +132,29 @@ btree_status_t Btree< K, V >::upgrade_node_locks(const BtreeNodePtr& parent_node
     unlock_node(parent_node, parent_cur_lock);
 
     ret = lock_node(parent_node, locktype_t::WRITE, context);
-    if (ret != btree_status_t::success) { return ret; }
+    if (ret != btree_status_t::success) {
+        parent_cur_lock = child_cur_lock = locktype_t::NONE;
+        return ret;
+    }
 
     ret = lock_node(child_node, locktype_t::WRITE, context);
     if (ret != btree_status_t::success) {
         unlock_node(parent_node, locktype_t::WRITE);
+        parent_cur_lock = child_cur_lock = locktype_t::NONE;
         return ret;
     }
 
     // If the node things have been changed between unlock and lock example, it has been made invalid (probably by merge
     // nodes) ask caller to start over again.
-    if (!parent_node->is_valid_node() || (parent_prev_gen != parent_node->node_gen()) || !child_node->is_valid_node() ||
-        (child_prev_gen != child_node->node_gen())) {
+    if (parent_node->is_node_deleted() || (parent_prev_gen != parent_node->node_gen()) ||
+        child_node->is_node_deleted() || (child_prev_gen != child_node->node_gen())) {
         unlock_node(child_node, locktype_t::WRITE);
         unlock_node(parent_node, locktype_t::WRITE);
+        parent_cur_lock = child_cur_lock = locktype_t::NONE;
         return btree_status_t::retry;
     }
 
-    ret = prepare_node_txn(parent_node, child_node, context);
-    if (ret != btree_status_t::success) {
-        unlock_node(child_node, locktype_t::WRITE);
-        unlock_node(parent_node, locktype_t::WRITE);
-        return ret;
-    }
-
+    parent_cur_lock = child_cur_lock = locktype_t::WRITE;
 #if 0
 #ifdef _PRERELEASE
     {
@@ -181,31 +186,23 @@ btree_status_t Btree< K, V >::upgrade_node_locks(const BtreeNodePtr& parent_node
     return ret;
 }
 
-#if 0
 template < typename K, typename V >
-btree_status_t Btree< K, V >::upgrade_node(const BtreeNodePtr& node, locktype_t prev_lock, void* context,
-                                           uint64_t prev_gen) {
-    if (prev_lock == locktype_t::READ) { unlock_node(node, locktype_t::READ); }
-    if (prev_lock != locktype_t::WRITE) {
-        auto const ret = lock_node(node, locktype_t::WRITE, context);
-        if (ret != btree_status_t::success) { return ret; }
-    }
+btree_status_t Btree< K, V >::upgrade_node_lock(const BtreeNodePtr& node, locktype_t& cur_lock, void* context) {
+    auto const prev_gen = node->node_gen();
 
-    // If the node has been made invalid (probably by merge nodes) ask caller to start over again, but before
-    // that cleanup or free this node if there is no one waiting.
-    if (!node->is_valid_node()) {
+    unlock_node(node, cur_lock);
+    cur_lock = locktype_t::NONE;
+
+    auto ret = lock_node(node, locktype_t::WRITE, context);
+    if (ret != btree_status_t::success) { return ret; }
+
+    if (node->is_node_deleted() || (prev_gen != node->node_gen())) {
         unlock_node(node, locktype_t::WRITE);
         return btree_status_t::retry;
     }
-
-    // If node has been updated, while we have upgraded, ask caller to start all over again.
-    if (prev_gen != node->node_gen()) {
-        unlock_node(node, locktype_t::WRITE);
-        return btree_status_t::retry;
-    }
-    return btree_status_t::success;
+    cur_lock = locktype_t::WRITE;
+    return ret;
 }
-#endif
 
 template < typename K, typename V >
 btree_status_t Btree< K, V >::_lock_node(const BtreeNodePtr& node, locktype_t type, void* context, const char* fname,
@@ -251,48 +248,40 @@ BtreeNodePtr Btree< K, V >::alloc_interior_node() {
 }
 
 template < typename T, typename... Args >
-static BtreeNode* create_node(uint32_t node_ctx_size, Args&&... args) {
-    uint8_t* raw_mem = new uint8_t[sizeof(T) + node_ctx_size];
-    return dynamic_cast< BtreeNode* >(new (raw_mem) T(std::forward< Args >(args)...));
+static BtreeNode* create_node(Args&&... args) {
+    return dynamic_cast< BtreeNode* >(new T(std::forward< Args >(args)...));
 }
 
 template < typename K, typename V >
-BtreeNode* Btree< K, V >::init_node(uint8_t* node_buf, uint32_t node_ctx_size, bnodeid_t id, bool init_buf,
-                                    bool is_leaf) const {
+BtreeNode* Btree< K, V >::init_node(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf) const {
     BtreeNode* n{nullptr};
     btree_node_type node_type = is_leaf ? m_bt_cfg.leaf_node_type() : m_bt_cfg.interior_node_type();
 
     switch (node_type) {
     case btree_node_type::VAR_OBJECT:
-        n = is_leaf ? create_node< VarObjSizeNode< K, V > >(node_ctx_size, node_buf, id, init_buf, true, this->m_bt_cfg)
-                    : create_node< VarObjSizeNode< K, BtreeLinkInfo > >(node_ctx_size, node_buf, id, init_buf, false,
-                                                                        this->m_bt_cfg);
+        n = is_leaf ? create_node< VarObjSizeNode< K, V > >(node_buf, id, init_buf, true, this->m_bt_cfg)
+                    : create_node< VarObjSizeNode< K, BtreeLinkInfo > >(node_buf, id, init_buf, false, this->m_bt_cfg);
         break;
 
     case btree_node_type::FIXED:
-        n = is_leaf ? create_node< SimpleNode< K, V > >(node_ctx_size, node_buf, id, init_buf, true, this->m_bt_cfg)
-                    : create_node< SimpleNode< K, BtreeLinkInfo > >(node_ctx_size, node_buf, id, init_buf, false,
-                                                                    this->m_bt_cfg);
+        n = is_leaf ? create_node< SimpleNode< K, V > >(node_buf, id, init_buf, true, this->m_bt_cfg)
+                    : create_node< SimpleNode< K, BtreeLinkInfo > >(node_buf, id, init_buf, false, this->m_bt_cfg);
         break;
 
     case btree_node_type::VAR_VALUE:
         n = is_leaf
-            ? create_node< VarValueSizeNode< K, V > >(node_ctx_size, node_buf, id, init_buf, true, this->m_bt_cfg)
-            : create_node< VarValueSizeNode< K, BtreeLinkInfo > >(node_ctx_size, node_buf, id, init_buf, false,
-                                                                  this->m_bt_cfg);
+            ? create_node< VarValueSizeNode< K, V > >(node_buf, id, init_buf, true, this->m_bt_cfg)
+            : create_node< VarValueSizeNode< K, BtreeLinkInfo > >(node_buf, id, init_buf, false, this->m_bt_cfg);
         break;
 
     case btree_node_type::VAR_KEY:
-        n = is_leaf ? create_node< VarKeySizeNode< K, V > >(node_ctx_size, node_buf, id, init_buf, true, this->m_bt_cfg)
-                    : create_node< VarKeySizeNode< K, BtreeLinkInfo > >(node_ctx_size, node_buf, id, init_buf, false,
-                                                                        this->m_bt_cfg);
+        n = is_leaf ? create_node< VarKeySizeNode< K, V > >(node_buf, id, init_buf, true, this->m_bt_cfg)
+                    : create_node< VarKeySizeNode< K, BtreeLinkInfo > >(node_buf, id, init_buf, false, this->m_bt_cfg);
         break;
 
     case btree_node_type::PREFIX:
-        n = is_leaf
-            ? create_node< FixedPrefixNode< K, V > >(node_ctx_size, node_buf, id, init_buf, true, this->m_bt_cfg)
-            : create_node< FixedPrefixNode< K, BtreeLinkInfo > >(node_ctx_size, node_buf, id, init_buf, false,
-                                                                 this->m_bt_cfg);
+        n = is_leaf ? create_node< FixedPrefixNode< K, V > >(node_buf, id, init_buf, true, this->m_bt_cfg)
+                    : create_node< FixedPrefixNode< K, BtreeLinkInfo > >(node_buf, id, init_buf, false, this->m_bt_cfg);
         break;
 
     default:
@@ -310,7 +299,7 @@ void Btree< K, V >::free_node(const BtreeNodePtr& node, locktype_t cur_lock, voi
     COUNTER_DECREMENT_IF_ELSE(m_metrics, node->is_leaf(), btree_leaf_node_count, btree_int_node_count, 1);
     if (cur_lock != locktype_t::NONE) {
         BT_NODE_DBG_ASSERT_NE(cur_lock, locktype_t::READ, node, "We can't free a node with read lock type right?");
-        node->set_valid_node(false);
+        node->set_node_deleted();
         unlock_node(node, cur_lock);
     }
     --m_total_nodes;

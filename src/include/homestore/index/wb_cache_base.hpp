@@ -25,7 +25,8 @@ namespace homestore {
 
 class BtreeNode;
 using BtreeNodePtr = boost::intrusive_ptr< BtreeNode >;
-typedef std::function< BtreeNodePtr(const IndexBufferPtr&) > node_initializer_t;
+using BtreeNodeList = folly::small_vector< BtreeNodePtr, 3 >;
+using node_initializer_t = std::function< BtreeNodePtr(const IndexBufferPtr&) >;
 
 struct CPContext;
 
@@ -39,10 +40,6 @@ public:
     /// @return Node which was created by the node_initializer
     virtual BtreeNodePtr alloc_buf(node_initializer_t&& node_initializer) = 0;
 
-    /// @brief Reallocate the buffer from writeback cache perspective. Typically buffer itself is not modified.
-    /// @param buf Buffer to reallocate
-    virtual void realloc_buf(const IndexBufferPtr& buf) = 0;
-
     /// @brief Write buffer
     /// @param buf
     /// @param context
@@ -50,20 +47,13 @@ public:
 
     virtual void read_buf(bnodeid_t id, BtreeNodePtr& node, node_initializer_t&& node_initializer) = 0;
 
-    /// @brief Start a chain of related btree buffers. Typically a chain is creating from second and third pairs and
-    /// then first is prepended to the chain. In case the second buffer is already with the WB cache, it will create a
-    /// new buffer for both second and third. We append the buffers to a list in dependency chain.
-    /// @param second Second btree buffer in the chain. It will be updated to copy of second buffer if buffer already
-    /// has dependencies.
-    /// @param third Thrid btree buffer in the chain. It will be updated to copy of third buffer if buffer already
-    /// has dependencies.
-    /// @return Returns if the buffer had to be copied
-    virtual std::pair< bool, bool > create_chain(IndexBufferPtr& second, IndexBufferPtr& third, CPContext* cp_ctx) = 0;
+    virtual bool get_writable_buf(const BtreeNodePtr& node, CPContext* context) = 0;
 
-    /// @brief Prepend to the chain that was already created with second
-    /// @param first
-    /// @param second
-    virtual void prepend_to_chain(const IndexBufferPtr& first, const IndexBufferPtr& second) = 0;
+    virtual bool refresh_meta_buf(shared< MetaIndexBuffer >& meta_buf, CPContext* cp_ctx) = 0;
+
+    virtual void transact_bufs(uint32_t index_ordinal, IndexBufferPtr const& parent_buf,
+                               IndexBufferPtr const& child_buf, IndexBufferPtrList const& new_node_bufs,
+                               IndexBufferPtrList const& freed_node_bufs, CPContext* cp_ctx) = 0;
 
     /// @brief Free the buffer allocated and remove it from wb cache
     /// @param buf
@@ -73,7 +63,7 @@ public:
     /// @brief Copy buffer
     /// @param cur_buf
     /// @return
-    virtual IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext* context) const = 0;
+    // virtual IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext* context) const = 0;
 };
 
 } // namespace homestore

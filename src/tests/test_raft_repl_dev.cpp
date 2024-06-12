@@ -115,9 +115,6 @@ public:
 
     void on_commit(int64_t lsn, sisl::blob const& header, sisl::blob const& key, MultiBlkId const& blkids,
                    cintrusive< repl_req_ctx >& ctx) override {
-
-        m_num_commits.fetch_add(1, std::memory_order_relaxed);
-
         ASSERT_EQ(header.size(), sizeof(test_req::journal_header));
 
         auto jheader = r_cast< test_req::journal_header const* >(header.cbytes());
@@ -134,7 +131,7 @@ public:
             ++commit_count_;
         }
 
-        if (ctx->is_proposer) { g_helper->runner().next_task(); }
+        if (ctx->is_proposer()) { g_helper->runner().next_task(); }
     }
 
     bool on_pre_commit(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
@@ -161,7 +158,11 @@ public:
         return blk_alloc_hints{};
     }
 
-    void on_replica_stop() override {}
+    void on_destroy() override {
+        LOGINFOMOD(replication, "[Replica={}] Group={} is being destroyed", g_helper->replica_num(),
+                   boost::uuids::to_string(repl_dev()->group_id()));
+        g_helper->unregister_listener(repl_dev()->group_id());
+    }
 
     void db_write(uint64_t data_size, uint32_t max_size_per_iov) {
         static std::atomic< uint32_t > s_uniq_num{0};
@@ -230,7 +231,6 @@ private:
     std::map< Key, Value > inmem_db_;
     uint64_t commit_count_{0};
     std::shared_mutex db_mtx_;
-    std::atomic< uint64_t > m_num_commits;
 };
 
 class RaftReplDevTest : public testing::Test {
@@ -244,8 +244,18 @@ public:
         }
     }
 
-    void generate_writes(uint64_t data_size, uint32_t max_size_per_iov) {
-        pick_one_db().db_write(data_size, max_size_per_iov);
+    void TearDown() override {
+        for (auto const& db : dbs_) {
+            run_on_leader(db, [this, db]() {
+                auto err = hs()->repl_service().remove_repl_dev(db->repl_dev()->group_id()).get();
+                ASSERT_EQ(err, ReplServiceError::OK) << "Error in destroying the group";
+            });
+        }
+    }
+
+    void generate_writes(uint64_t data_size, uint32_t max_size_per_iov, shared< TestReplicatedDB > db = nullptr) {
+        if (db == nullptr) { db = pick_one_db(); }
+        db->db_write(data_size, max_size_per_iov);
     }
 
     void wait_for_all_commits() { wait_for_commits(written_entries_); }
@@ -270,7 +280,7 @@ public:
         }
     }
 
-    TestReplicatedDB& pick_one_db() { return *dbs_[0]; }
+    shared< TestReplicatedDB > pick_one_db() { return dbs_[0]; }
 
 #ifdef _PRERELEASE
     void set_basic_flip(const std::string flip_name, uint32_t count = 1, uint32_t percent = 100) {
@@ -319,7 +329,23 @@ public:
         }
     }
 
-    void write_on_leader(uint32_t num_entries, bool wait_for_commit = true) {
+    void run_on_leader(std::shared_ptr< TestReplicatedDB > db, auto&& lambda) {
+        do {
+            auto leader_uuid = db->repl_dev()->get_leader_id();
+
+            if (leader_uuid.is_nil()) {
+                LOGINFO("Waiting for leader to be elected");
+                std::this_thread::sleep_for(std::chrono::milliseconds{500});
+            } else if (leader_uuid == g_helper->my_replica_id()) {
+                lambda();
+                break;
+            } else {
+                break;
+            }
+        } while (true);
+    }
+
+    void write_on_leader(uint32_t num_entries, bool wait_for_commit = true, shared< TestReplicatedDB > db = nullptr) {
         do {
             auto leader_uuid = dbs_[0]->repl_dev()->get_leader_id();
 
@@ -333,11 +359,11 @@ public:
                 g_helper->runner().set_num_tasks(num_entries);
 
                 LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
-                g_helper->runner().set_task([this, block_size]() {
+                g_helper->runner().set_task([this, block_size, db]() {
                     static std::normal_distribution<> num_blks_gen{3.0, 2.0};
-                    this->generate_writes(std::abs(std::round(num_blks_gen(g_re))) * block_size, block_size);
+                    this->generate_writes(std::abs(std::round(num_blks_gen(g_re))) * block_size, block_size, db);
                 });
-                g_helper->runner().execute().get();
+                if (wait_for_commit) { g_helper->runner().execute().get(); }
                 break;
             } else {
                 LOGINFO("{} entries were written on the leader_uuid={} my_uuid={}", num_entries,
@@ -348,6 +374,31 @@ public:
 
         written_entries_ += num_entries;
         if (wait_for_commit) { this->wait_for_all_commits(); }
+    }
+
+    void remove_db(std::shared_ptr< TestReplicatedDB > db, bool wait_for_removal) {
+        this->run_on_leader(db, [this, db]() {
+            auto err = hs()->repl_service().remove_repl_dev(db->repl_dev()->group_id()).get();
+            ASSERT_EQ(err, ReplServiceError::OK) << "Error in destroying the group";
+        });
+
+        // Remove the db from the dbs_ list and check if count matches with repl_device
+        for (auto it = dbs_.begin(); it != dbs_.end(); ++it) {
+            if (*it == db) {
+                dbs_.erase(it);
+                break;
+            }
+        }
+
+        if (wait_for_removal) { wait_for_listener_destroy(dbs_.size()); }
+    }
+
+    void wait_for_listener_destroy(uint64_t exp_listeners) {
+        while (true) {
+            auto total_listeners = g_helper->num_listeners();
+            if (total_listeners == exp_listeners) { break; }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     }
 
     void restart_replica(uint16_t replica, uint32_t shutdown_delay_sec = 5u) {
@@ -361,7 +412,7 @@ public:
         }
     }
 
-private:
+protected:
     std::vector< std::shared_ptr< TestReplicatedDB > > dbs_;
     uint32_t written_entries_{0};
 
@@ -577,6 +628,38 @@ TEST_F(RaftReplDevTest, Snapshot_and_Compact) {
     g_helper->sync_for_cleanup_start();
 }
 
+TEST_F(RaftReplDevTest, RemoveReplDev) {
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+
+    // Step 1: Create 2 more repldevs
+    LOGINFO("Create 2 more ReplDevs");
+    for (uint32_t i{0}; i < 2; ++i) {
+        auto db = std::make_shared< TestReplicatedDB >();
+        g_helper->register_listener(db);
+        this->dbs_.emplace_back(std::move(db));
+    }
+    g_helper->sync_for_test_start();
+
+    // Step 2: While IO is ongoing, we remove one of the repl_dev
+    uint64_t entries_per_attempt = SISL_OPTIONS["num_io"].as< uint64_t >();
+    LOGINFO("Inserting {} entries on the leader and concurrently remove that repl_dev while IO is ongoing",
+            entries_per_attempt);
+    this->write_on_leader(entries_per_attempt, false /* wait for commit on all */, dbs_.back());
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    this->remove_db(dbs_.back(), true /* wait_for_removal */);
+
+    // Step 3: Shutdown one of the follower and remove another repl_dev, once the follower is up, it should remove the
+    // repl_dev and proceed
+    LOGINFO("Shutdown one of the followers (replica=1) and then remove dbs on other members. Expect replica=1 to "
+            "remove after it is up");
+    this->restart_replica(1, 15 /* shutdown_delay_sec */);
+    this->remove_db(dbs_.back(), true /* wait_for_removal */);
+
+    // TODO: Once generic crash flip/test_infra is available, use flip to crash during removal and restart them to see
+    // if records are being removed
+    g_helper->sync_for_cleanup_start();
+}
+
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
     char** orig_argv = argv;
@@ -617,12 +700,14 @@ int main(int argc, char* argv[]) {
     g_helper = std::make_unique< test_common::HSReplTestHelper >("test_raft_repl_dev", args, orig_argv);
     g_helper->setup();
 
-#if 0
-    (g_helper->replica_num() == 0) ? ::testing::GTEST_FLAG(filter) = "*Primary_*:*All_*"
-                                   : ::testing::GTEST_FLAG(filter) = "*Secondary_*::*All_*";
-#endif
-
     auto ret = RUN_ALL_TESTS();
     g_helper->teardown();
+
+    std::string str;
+    sisl::ObjCounterRegistry::foreach ([&str](const std::string& name, int64_t created, int64_t alive) {
+        fmt::format_to(std::back_inserter(str), "{}: created={} alive={}\n", name, created, alive);
+    });
+    LOGINFO("Object Life Counter\n:{}", str);
+
     return ret;
 }

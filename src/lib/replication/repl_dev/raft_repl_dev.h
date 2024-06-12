@@ -6,6 +6,7 @@
 #include <nuraft_mesg/nuraft_mesg.hpp>
 #include <nuraft_mesg/mesg_state_mgr.hpp>
 #include <sisl/fds/buffer.hpp>
+#include <sisl/fds/utils.hpp>
 #include <homestore/replication/repl_dev.h>
 #include <homestore/superblk_handler.hpp>
 #include <homestore/logstore/log_store.hpp>
@@ -22,13 +23,16 @@ struct raft_repl_dev_superblk : public repl_dev_superblk {
     uint32_t raft_sb_version{RAFT_REPL_DEV_SB_VERSION};
     logstore_id_t free_blks_journal_id; // Logstore id for storing free blkid records
     uint8_t is_timeline_consistent; // Flag to indicate whether the recovery of followers need to be timeline consistent
-    uint64_t last_applied_dsn;      // Last applied data sequence Number
+    uint64_t last_applied_dsn;      // Last applied data sequence number
+    uint8_t destroy_pending;        // Flag to indicate whether the group is in destroy pending state
 
     uint32_t get_raft_sb_version() const { return raft_sb_version; }
 };
 #pragma pack()
 
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
+
+ENUM(repl_dev_stage_t, uint8_t, INIT, ACTIVE, DESTROYING, DESTROYED);
 
 class RaftReplDevMetrics : public sisl::MetricsGroup {
 public:
@@ -68,6 +72,7 @@ private:
     int32_t m_raft_server_id;  // Server ID used by raft (unique within raft group)
     shared< ReplLogStore > m_data_journal;
     shared< HomeLogStore > m_free_blks_journal;
+    sisl::urcu_scoped_ptr< repl_dev_stage_t > m_stage;
 
     std::mutex m_config_mtx;
     superblk< raft_repl_dev_superblk > m_rd_sb;        // Superblk where we store the state machine etc
@@ -78,20 +83,24 @@ private:
     std::atomic< repl_lsn_t > m_commit_upto_lsn{0}; // LSN which was lastly written, to track flushes
     std::atomic< repl_lsn_t > m_compact_lsn{0};     // LSN upto which it was compacted, it is used to track where to
 
+    std::mutex m_sb_mtx; // Lock to protect the repl dev superblock
+
     repl_lsn_t m_last_flushed_commit_lsn{0}; // LSN upto which it was flushed to persistent store
     iomgr::timer_handle_t m_sb_flush_timer_hdl;
 
     std::atomic< uint64_t > m_next_dsn{0}; // Data Sequence Number that will keep incrementing for each data entry
-                                           //
+
     iomgr::timer_handle_t m_wait_data_timer_hdl{
         iomgr::null_timer_handle}; // non-recurring timer doesn't need to be cancelled on shutdown;
     bool m_resync_mode{false};
-
+    Clock::time_point m_destroyed_time;
+    folly::Promise< ReplServiceError > m_destroy_promise;
     RaftReplDevMetrics m_metrics;
 
     nuraft::ptr< nuraft::snapshot > m_last_snapshot{nullptr};
 
     static std::atomic< uint64_t > s_next_group_ordinal;
+    bool m_log_store_replay_done{false};
 
 public:
     friend class RaftStateMachine;
@@ -100,7 +109,7 @@ public:
     virtual ~RaftReplDev() = default;
 
     bool join_group();
-    void destroy();
+    folly::SemiFuture< ReplServiceError > destroy_group();
 
     //////////////// All ReplDev overrides/implementation ///////////////////////
     void async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
@@ -118,8 +127,8 @@ public:
     std::string my_replica_id_str() const { return boost::uuids::to_string(m_my_repl_id); }
     uint32_t get_blk_size() const override;
     repl_lsn_t get_last_commit_lsn() const { return m_commit_upto_lsn.load(); }
-
-    // void truncate_if_needed() override;
+    bool is_destroy_pending() const;
+    Clock::time_point destroyed_time() const { return m_destroyed_time; }
 
     //////////////// Accessor/shortcut methods ///////////////////////
     nuraft_mesg::repl_service_ctx* group_msg_service();
@@ -127,14 +136,15 @@ public:
 
     //////////////// Methods needed for other Raft classes to access /////////////////
     void use_config(json_superblk raft_config_sb);
-    void report_committed(repl_req_ptr_t rreq);
+    void handle_commit(repl_req_ptr_t rreq);
     repl_req_ptr_t repl_key_to_req(repl_key const& rkey) const;
-    repl_req_ptr_t applier_create_req(repl_key const& rkey, sisl::blob const& user_header, uint32_t data_size,
-                                      bool is_data_channel);
+    repl_req_ptr_t applier_create_req(repl_key const& rkey, journal_type_t code, sisl::blob const& user_header,
+                                      sisl::blob const& key, uint32_t data_size, bool is_data_channel);
     folly::Future< folly::Unit > notify_after_data_written(std::vector< repl_req_ptr_t >* rreqs);
     void check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreqs);
     void cp_flush(CP* cp);
     void cp_cleanup(CP* cp);
+    void become_ready();
 
     /// @brief This method is called when the data journal is compacted
     ///
@@ -164,6 +174,13 @@ public:
 
     nuraft::ptr< nuraft::snapshot > get_last_snapshot() { return m_last_snapshot; }
 
+    void wait_for_logstore_ready() { m_data_journal->wait_for_log_store_ready(); }
+
+    /**
+     * Flush the durable commit LSN to the superblock
+     */
+    void flush_durable_commit_lsn();
+
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////
     nuraft::ptr< nuraft::cluster_config > load_config() override;
@@ -184,7 +201,7 @@ protected:
 
 private:
     shared< nuraft::log_store > data_journal() { return m_data_journal; }
-    void push_data_to_all_followers(repl_req_ptr_t rreq);
+    void push_data_to_all_followers(repl_req_ptr_t rreq, sisl::sg_list const& data);
     void on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data);
     void on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data);
     void fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs);
@@ -192,6 +209,7 @@ private:
     bool is_resync_mode() { return m_resync_mode; }
     void handle_error(repl_req_ptr_t const& rreq, ReplServiceError err);
     bool wait_for_data_receive(std::vector< repl_req_ptr_t > const& rreqs, uint64_t timeout_ms);
+    void on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx);
 };
 
 } // namespace homestore

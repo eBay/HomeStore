@@ -27,6 +27,8 @@
 namespace homestore {
 thread_local std::stack< CP* > CPGuard::t_cp_stack;
 
+CPManager& cp_mgr() { return hs()->cp_mgr(); }
+
 CPManager::CPManager() :
         m_metrics{std::make_unique< CPMgrMetrics >()},
         m_wd_cp{std::make_unique< CPWatchdog >(this)},
@@ -76,10 +78,14 @@ void CPManager::shutdown() {
     LOGINFO("Stopping cp timer");
     iomanager.cancel_timer(m_cp_timer_hdl, true);
     m_cp_timer_hdl = iomgr::null_timer_handle;
-    m_cp_shutdown_initiated = true;
 
-    LOGINFO("Trigger cp flush");
-    auto success = trigger_cp_flush(true /* force */).get();
+    {
+        std::unique_lock< std::mutex > lk(m_trigger_cp_mtx);
+        m_cp_shutdown_initiated = true;
+    }
+
+    LOGINFO("Trigger cp flush at CP shutdown");
+    auto success = do_trigger_cp_flush(true /* force */, true /* flush_on_shutdown */).get();
     HS_REL_ASSERT_EQ(success, true, "CP Flush failed");
     LOGINFO("Trigger cp done");
 
@@ -131,6 +137,7 @@ void CPManager::cp_ref(CP* cp) {
 void CPManager::cp_io_exit(CP* cp) {
     HS_DBG_ASSERT_NE(cp->m_cp_status, cp_status_t::cp_flushing);
     if (cp->m_enter_cnt.decrement_testz(1) && (cp->m_cp_status == cp_status_t::cp_flush_prepare)) {
+        m_wd_cp->set_cp(cp);
         cp_start_flush(cp);
     }
 }
@@ -141,63 +148,67 @@ CP* CPManager::get_cur_cp() {
 }
 
 folly::Future< bool > CPManager::trigger_cp_flush(bool force) {
-    // check the state of previous CP flush
-    bool expected = false;
-    auto ret = m_in_flush_phase.compare_exchange_strong(expected, true);
-    if (!ret) {
-        // There is already an existing CP on-going, but if force is set, we create a back-to-back CP.
-        if (force) {
-            std::unique_lock< std::mutex > lk(trigger_cp_mtx);
-            auto cur_cp = cp_guard();
-            HS_DBG_ASSERT_NE(cur_cp->m_cp_status, cp_status_t::cp_flush_prepare);
-            // If multiple threads call trigger, they all get the future from the same promise.
-            if (!cur_cp->m_cp_waiting_to_trigger) {
-                cur_cp->m_comp_promise = std::move(folly::SharedPromise< bool >{});
-                cur_cp->m_cp_waiting_to_trigger = true;
+    return do_trigger_cp_flush(force, false /* flush_on_shutdown */);
+}
+
+folly::Future< bool > CPManager::do_trigger_cp_flush(bool force, bool flush_on_shutdown) {
+    std::unique_lock< std::mutex > lk(m_trigger_cp_mtx);
+
+    if (m_in_flush_phase) {
+        // If we are already flushing, we create a back-to-back CP queue only if force is set and if we are not in
+        // shutdown phase. Triggering a back-2-back CP in shutdown state is dangerous, as it can cause the CPManager to
+        // be destructed while back-2-back CP is triggered.
+        if (force && (!m_cp_shutdown_initiated || flush_on_shutdown)) {
+            if (!m_pending_trigger_cp) {
+                m_pending_trigger_cp = true;
+                m_pending_trigger_cp_comp = std::move(folly::SharedPromise< bool >{});
             }
-            return cur_cp->m_comp_promise.getFuture();
+
+            // If multiple threads call trigger, they all get the future from the same promise.
+            return m_pending_trigger_cp_comp.getFuture();
         } else {
             return folly::makeFuture< bool >(false);
         }
     }
+    m_in_flush_phase = true;
 
     folly::Future< bool > ret_fut = folly::Future< bool >::makeEmpty();
-    {
-        auto cur_cp = cp_guard();
-        cur_cp->m_cp_status = cp_status_t::cp_trigger;
-        HS_PERIODIC_LOG(INFO, cp, "<<<<<<<<<<< Triggering flush of the CP {}", cur_cp->to_string());
-        COUNTER_INCREMENT(*m_metrics, cp_cnt, 1);
-        m_cp_start_time = Clock::now();
+    auto cur_cp = cp_guard();
+    cur_cp->m_cp_status = cp_status_t::cp_trigger;
+    HS_PERIODIC_LOG(INFO, cp, "<<<<<<<<<<< Triggering flush of the CP {}", cur_cp->to_string());
+    COUNTER_INCREMENT(*m_metrics, cp_cnt, 1);
+    m_wd_cp->set_cp(cur_cp.get());
 
-        /* allocate a new cp */
-        auto new_cp = new CP(this);
-        {
-            std::unique_lock< std::mutex > lk(trigger_cp_mtx);
-            new_cp->m_cp_id = cur_cp->m_cp_id + 1;
+    // allocate a new cp and ask consumers to switchover to new cp
+    auto new_cp = new CP(this);
+    new_cp->m_cp_id = cur_cp->m_cp_id + 1;
 
-            HS_PERIODIC_LOG(DEBUG, cp, "Create New CP session", new_cp->id());
-            size_t idx{0};
-            for (auto& consumer : m_cp_cb_table) {
-                if (consumer) { new_cp->m_contexts[idx] = std::move(consumer->on_switchover_cp(cur_cp.get(), new_cp)); }
-                ++idx;
-            }
-
-            HS_PERIODIC_LOG(DEBUG, cp, "CP Attached completed, proceed to exit cp critical section");
-            if (cur_cp->m_cp_waiting_to_trigger) {
-                // Triggered because of back-2-back CP, generate a different future. Actual future which it was attached
-                // originally by the caller will be untouched and completed upto CP completion/
-                ret_fut = folly::makeFuture< bool >(true);
-            } else {
-                cur_cp->m_comp_promise = std::move(folly::SharedPromise< bool >{});
-                ret_fut = cur_cp->m_comp_promise.getFuture();
-            }
-            cur_cp->m_cp_status = cp_status_t::cp_flush_prepare;
-            new_cp->m_cp_status = cp_status_t::cp_io_ready;
-            rcu_xchg_pointer(&m_cur_cp, new_cp);
-            synchronize_rcu();
-        }
-        // At this point we are sure that there is no thread working on prev_cp without incrementing the cp_enter cnt
+    HS_PERIODIC_LOG(DEBUG, cp, "Create New CP session", new_cp->id());
+    size_t idx{0};
+    for (auto& consumer : m_cp_cb_table) {
+        if (consumer) { new_cp->m_contexts[idx] = std::move(consumer->on_switchover_cp(cur_cp.get(), new_cp)); }
+        ++idx;
     }
+
+    HS_PERIODIC_LOG(DEBUG, cp, "CP Attached completed, proceed to exit cp critical section");
+    if (m_pending_trigger_cp) {
+        // Triggered because of back-2-back CP, use the pending promise/future.
+        cur_cp->m_comp_promise = std::move(m_pending_trigger_cp_comp);
+        m_pending_trigger_cp = false;
+    } else {
+        cur_cp->m_comp_promise = std::move(folly::SharedPromise< bool >{});
+    }
+    ret_fut = cur_cp->m_comp_promise.getFuture();
+
+    cur_cp->m_cp_status = cp_status_t::cp_flush_prepare;
+    new_cp->m_cp_status = cp_status_t::cp_io_ready;
+    rcu_xchg_pointer(&m_cur_cp, new_cp);
+    synchronize_rcu();
+
+    // At this point we are sure that there is no thread working on prev_cp without incrementing the cp_enter count
+    // We need to unlock the trigger mtx section before cp_guard goes out of context, because exit cp critical section
+    // might start cp flush and we don't want that to hold this mutex.
+    lk.unlock();
 
     HS_PERIODIC_LOG(DEBUG, cp, "CP critical section done, doing cp_io_exit");
     return ret_fut;
@@ -229,33 +240,28 @@ void CPManager::on_cp_flush_done(CP* cp) {
 
         cleanup_cp(cp);
 
-        // Setting promise will cause the CP manager destructor to cleanup
-        // before getting a chance to do the checking if shutdown has been
-        // initiated or not.
-        auto shutdown_initiated = m_cp_shutdown_initiated.load();
+        // Setting promise will cause the CP manager destructor to cleanup before getting a chance to do the
+        // checking if shutdown has been initiated or not.
         auto promise = std::move(cp->m_comp_promise);
-
         m_wd_cp->reset_cp();
         delete cp;
 
-        promise.setValue(true);
-        if (shutdown_initiated) {
-            // If shutdown initiated, dont trigger another CP.
-            // Dont access any cp state after this.
-            return;
-        }
-        m_in_flush_phase = false;
+        bool trigger_back_2_back_cp{false};
 
-        // Trigger CP in case there is one back to back CP
         {
-            auto cur_cp = cp_guard();
-            if (cur_cp.get() == nullptr) { return; }
-            m_wd_cp->set_cp(cur_cp.get());
-            if (cur_cp->m_cp_waiting_to_trigger) {
-                HS_PERIODIC_LOG(INFO, cp, "Triggering back to back CP");
-                COUNTER_INCREMENT(*m_metrics, back_to_back_cps, 1);
-                trigger_cp_flush(false);
-            }
+            std::unique_lock< std::mutex > lk(m_trigger_cp_mtx);
+            m_in_flush_phase = false;
+            trigger_back_2_back_cp = m_pending_trigger_cp;
+        }
+
+        promise.setValue(true);
+
+        // Dont access any cp state after this, in case trigger_back_2_back_cp is false, because its false on
+        // cp_shutdown_initated and setting this promise could destruct the CPManager itself.
+        if (trigger_back_2_back_cp) {
+            HS_PERIODIC_LOG(INFO, cp, "Triggering back to back CP");
+            COUNTER_INCREMENT(*m_metrics, back_to_back_cps, 1);
+            trigger_cp_flush(false);
         }
     });
 }

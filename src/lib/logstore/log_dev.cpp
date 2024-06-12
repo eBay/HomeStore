@@ -30,6 +30,7 @@
 #include "common/homestore_assert.hpp"
 #include "common/homestore_config.hpp"
 #include "common/homestore_utils.hpp"
+#include "common/crash_simulator.hpp"
 
 namespace homestore {
 
@@ -42,18 +43,16 @@ SISL_LOGGING_DECL(logstore)
 static bool has_data_service() { return HomeStore::instance()->has_data_service(); }
 // static BlkDataService& data_service() { return HomeStore::instance()->data_service(); }
 
-LogDev::LogDev(const logdev_id_t id) : m_logdev_id{id} {
+LogDev::LogDev(const logdev_id_t id, JournalVirtualDev* vdev) : m_logdev_id{id}, m_vdev(vdev) {
     m_flush_size_multiple = HS_DYNAMIC_CONFIG(logstore->flush_size_multiple_logdev);
+    // Each logdev has one journal descriptor.
+    m_vdev_jd = m_vdev->open(m_logdev_id);
+    RELEASE_ASSERT(m_vdev_jd, "Journal descriptor is null");
 }
 
 LogDev::~LogDev() = default;
 
-void LogDev::start(bool format, JournalVirtualDev* vdev) {
-    // Each logdev has one journal descriptor.
-    m_vdev = vdev;
-    m_vdev_jd = m_vdev->open(m_logdev_id);
-    RELEASE_ASSERT(m_vdev_jd, "Journal descriptor is null");
-
+void LogDev::start(bool format) {
     if (m_flush_size_multiple == 0) { m_flush_size_multiple = m_vdev->optimal_page_size(); }
     THIS_LOGDEV_LOG(INFO, "Initializing logdev with flush size multiple={}", m_flush_size_multiple);
 
@@ -106,7 +105,7 @@ void LogDev::start(bool format, JournalVirtualDev* vdev) {
 }
 
 void LogDev::stop() {
-    THIS_LOGDEV_LOG(INFO, "Logdev stopping id {}", m_logdev_id);
+    THIS_LOGDEV_LOG(INFO, "Logdev stopping log_dev={}", m_logdev_id);
     HS_LOG_ASSERT((m_pending_flush_size == 0), "LogDev stop attempted while writes to logdev are pending completion");
     const bool locked_now = run_under_flush_lock([this]() {
         {
@@ -149,6 +148,11 @@ void LogDev::stop() {
 
     THIS_LOGDEV_LOG(INFO, "LogDev stopped successfully id {}", m_logdev_id);
     m_hs.reset();
+}
+
+void LogDev::destroy() {
+    THIS_LOGDEV_LOG(INFO, "Logdev destroy metablks log_dev={}", m_logdev_id);
+    m_logdev_meta.destroy();
 }
 
 void LogDev::start_timer() {
@@ -514,11 +518,12 @@ bool LogDev::run_under_flush_lock(const flush_blocked_callback& cb) {
 
 void LogDev::unlock_flush(bool do_flush) {
     std::vector< flush_blocked_callback >* flush_q{nullptr};
-
-    if (m_block_flush_q != nullptr) {
+    {
         std::unique_lock lk{m_block_flush_q_mutex};
-        flush_q = m_block_flush_q;
-        m_block_flush_q = nullptr;
+        if (m_block_flush_q != nullptr) {
+            flush_q = m_block_flush_q;
+            m_block_flush_q = nullptr;
+        }
     }
 
     if (flush_q) {
@@ -600,7 +605,8 @@ uint64_t LogDev::truncate(const logdev_key& key) {
 #ifdef _PRERELEASE
             if (garbage_collect && iomgr_flip::instance()->test_flip("logdev_abort_after_garbage")) {
                 THIS_LOGDEV_LOG(INFO, "logdev aborting after unreserving garbage ids");
-                raise(SIGKILL);
+                hs()->crash_simulator().crash();
+                return num_records_to_truncate;
             }
 #endif
         }
@@ -917,6 +923,11 @@ logdev_superblk* LogDevMetadata::create(logdev_id_t id) {
     m_rollback_sb->logdev_id = id;
     m_rollback_sb.write();
     return sb;
+}
+
+void LogDevMetadata::destroy() {
+    m_rollback_sb.destroy();
+    m_sb.destroy();
 }
 
 void LogDevMetadata::reset() {

@@ -21,6 +21,15 @@
 #include <homestore/blk.h>
 #include <homestore/homestore_decl.hpp>
 #include <homestore/btree/detail/btree_internal.hpp>
+#include <homestore/btree/detail/btree_node.hpp>
+#include <homestore/superblk_handler.hpp>
+
+#pragma once
+#ifdef StoreSpecificBtreeNode
+#undef StoreSpecificBtreeNode
+#endif
+
+#define StoreSpecificBtreeNode homestore::IndexBtreeNode
 
 namespace homestore {
 
@@ -39,22 +48,31 @@ struct index_table_sb {
 
     // Btree Section
     bnodeid_t root_node{empty_bnodeid}; // Btree Root Node ID
-    uint64_t link_version{0};
-    int64_t index_size{0}; // Size of the Index
+    uint64_t root_link_version{0};      // Link version to btree root node
+    int64_t index_size{0};              // Size of the Index
     // seq_id_t last_seq_id{-1};           // TODO: See if this is needed
+
+    uint32_t ordinal{0}; // Ordinal of the Index
 
     uint32_t user_sb_size; // Size of the user superblk
     uint8_t user_sb_bytes[0];
 };
 #pragma pack()
 
+struct IndexBuffer;
+using IndexBufferPtr = std::shared_ptr< IndexBuffer >;
+using IndexBufferPtrList = folly::small_vector< IndexBufferPtr, 3 >;
+
 // An Empty base class to have the IndexService not having to template and refer the IndexTable virtual class
 class IndexTableBase {
 public:
     virtual ~IndexTableBase() = default;
     virtual uuid_t uuid() const = 0;
+    virtual uint32_t ordinal() const = 0;
     virtual uint64_t used_size() const = 0;
     virtual void destroy() = 0;
+    virtual void repair_node(IndexBufferPtr const& buf) = 0;
+    virtual void repair_root(IndexBufferPtr const& buf) = 0;
 };
 
 enum class index_buf_state_t : uint8_t {
@@ -65,83 +83,68 @@ enum class index_buf_state_t : uint8_t {
 
 ///////////////////////// Btree Node and Buffer Portion //////////////////////////
 
-
-// Multiple IndexBuffer could point to the same NodeBuffer if its clean.
-struct NodeBuffer;
-typedef std::shared_ptr< NodeBuffer > NodeBufferPtr;
-struct NodeBuffer {
-    uint8_t* m_bytes{nullptr};                                          // Actual data buffer
-    std::atomic< index_buf_state_t > m_state{index_buf_state_t::CLEAN}; // Is buffer yet to persist?
-    NodeBuffer(uint32_t buf_size, uint32_t align_size);
-    ~NodeBuffer();
-};
-
 // IndexBuffer is for each CP. The dependent index buffers are chained using
-// m_next_buffer and each buffer is flushed only its wait_for_leaders reaches 0
+// m_up_buffer and each buffer is flushed only its wait_for_leaders reaches 0
 // which means all its dependent buffers are flushed.
-struct IndexBuffer;
-typedef std::shared_ptr< IndexBuffer > IndexBufferPtr;
-struct IndexBuffer {
-    NodeBufferPtr m_node_buf;
-    BlkId m_blkid;                              // BlkId where this needs to be persisted
-    std::weak_ptr< IndexBuffer > m_next_buffer; // Next buffer in the chain
-    // Number of leader buffers we are waiting for before we write this buffer
-    sisl::atomic_counter< int > m_wait_for_leaders{0};
+struct IndexBuffer : public sisl::ObjLifeCounter< IndexBuffer > {
+    BlkId m_blkid;                                                      // BlkId where this needs to be persisted
+    cp_id_t m_dirtied_cp_id{-1};                                        // Last CP that dirtied this index buffer
+    cp_id_t m_created_cp_id{-1};                                        // CP id when this buffer is created.
+    std::atomic< index_buf_state_t > m_state{index_buf_state_t::CLEAN}; // Is buffer yet to persist?
+    uint8_t* m_bytes{nullptr};                                          // Actual data buffer
+
+    std::shared_ptr< IndexBuffer > m_up_buffer;             // Parent buffer in the chain to persisted
+    sisl::atomic_counter< int > m_wait_for_down_buffers{0}; // Number of children need to wait for before persisting
+#ifndef NDEBUG
+    // Down buffers are not mandatory members, but only to keep track of any bugs and asserts
+    std::vector< std::weak_ptr< IndexBuffer > > m_down_buffers;
+    std::shared_ptr< IndexBuffer > m_prev_up_buffer; // Keep a copy for debugging
+#endif
+
+#ifdef _PRERELEASE
+    bool m_crash_flag_on{false};
+    void set_crash_flag() { m_crash_flag_on = true; }
+#endif
+
+    uint32_t m_index_ordinal{0};  // Ordinal of the index table this buffer belongs to, used only during recovery
+    uint8_t m_is_meta_buf{false}; // Is the index buffer writing to metablk?
+    bool m_node_freed{false};
 
     IndexBuffer(BlkId blkid, uint32_t buf_size, uint32_t align_size);
-    IndexBuffer(NodeBufferPtr node_buf, BlkId blkid);
-    ~IndexBuffer();
+    IndexBuffer(uint8_t* raw_bytes, BlkId blkid);
+    virtual ~IndexBuffer();
 
     BlkId blkid() const { return m_blkid; }
-    uint8_t* raw_buffer() {
-        RELEASE_ASSERT(m_node_buf, "Node buffer null blkid {}", m_blkid.to_integer());
-        return m_node_buf->m_bytes;
-    }
+    uint8_t* raw_buffer() { return m_bytes; }
+    bool is_clean() const { return (m_state.load() == index_buf_state_t::CLEAN); }
+    index_buf_state_t state() const { return m_state.load(); }
+    void set_state(index_buf_state_t st) { m_state.store(st); }
+    bool is_meta_buf() const { return m_is_meta_buf; }
 
-    bool is_clean() const {
-        RELEASE_ASSERT(m_node_buf, "Node buffer null blkid {}", m_blkid.to_integer());
-        return (m_node_buf->m_state.load() == index_buf_state_t::CLEAN);
-    }
-
-    index_buf_state_t state() const {
-        RELEASE_ASSERT(m_node_buf, "Node buffer null blkid {}", m_blkid.to_integer());
-        return m_node_buf->m_state;
-    }
-
-    void set_state(index_buf_state_t state) {
-        RELEASE_ASSERT(m_node_buf, "Node buffer null blkid {}", m_blkid.to_integer());
-        m_node_buf->m_state = state;
-    }
-
-    std::string to_string() const {
-        auto str = fmt::format("IndexBuffer {} blkid={}", reinterpret_cast< void* >(const_cast< IndexBuffer* >(this)),
-                               m_blkid.to_integer());
-        if (m_node_buf == nullptr) {
-            fmt::format_to(std::back_inserter(str), " node_buf=nullptr");
-        } else {
-            fmt::format_to(std::back_inserter(str), " state={} node_buf={}",
-                           static_cast< int >(m_node_buf->m_state.load()), static_cast< void* >(m_node_buf->m_bytes));
-        }
-        fmt::format_to(std::back_inserter(str), " next_buffer={} wait_for={}",
-                       m_next_buffer.lock() ? reinterpret_cast< void* >(m_next_buffer.lock().get()) : 0,
-                       m_wait_for_leaders.get());
-        return str;
-    }
+    std::string to_string() const;
 };
 
-class BtreeNode;
-typedef boost::intrusive_ptr< BtreeNode > BtreeNodePtr;
+// This is a special buffer which is used to write to the meta block
+struct MetaIndexBuffer : public IndexBuffer {
+    MetaIndexBuffer(superblk< index_table_sb >& sb);
+    MetaIndexBuffer(shared< MetaIndexBuffer > const& other);
+    virtual ~MetaIndexBuffer();
+    void copy_sb_to_buf();
 
-struct IndexBtreeNode {
+    superblk< index_table_sb >& m_sb;
+};
+
+struct IndexBtreeNode : public BtreeNode {
 public:
-    IndexBufferPtr m_idx_buf;     // Buffer backing this node
-    cp_id_t m_last_mod_cp_id{-1}; // This node is previously modified by the cp id;
+    IndexBufferPtr m_idx_buf; // Buffer backing this node
 
 public:
-    IndexBtreeNode(const IndexBufferPtr& buf) : m_idx_buf{buf} {}
-    ~IndexBtreeNode() { m_idx_buf.reset(); }
+    template < typename... Args >
+    IndexBtreeNode(Args&&... args) : BtreeNode(std::forward< Args >(args)...) {}
+    virtual ~IndexBtreeNode() { m_idx_buf.reset(); }
+
+    void attach_buf(IndexBufferPtr const& buf) { m_idx_buf = buf; }
     uint8_t* raw_buffer() { return m_idx_buf->raw_buffer(); }
-    static IndexBtreeNode* convert(BtreeNode* bt_node);
 };
 
 } // namespace homestore

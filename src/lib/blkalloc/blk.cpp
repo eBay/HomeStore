@@ -26,7 +26,7 @@ BlkId::BlkId(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num) : s{0x
 
 uint64_t BlkId::to_integer() const { return *r_cast< const uint64_t* >(&s); }
 
-sisl::blob BlkId::serialize() { return sisl::blob{r_cast< uint8_t* >(&s), sizeof(serialized)}; }
+sisl::blob BlkId::serialize() const { return sisl::blob{r_cast< uint8_t const* >(&s), sizeof(serialized)}; }
 
 uint32_t BlkId::serialized_size() const { return sizeof(BlkId); }
 uint32_t BlkId::expected_serialized_size() { return sizeof(BlkId); }
@@ -90,7 +90,7 @@ void MultiBlkId::add(blk_num_t blk_num, blk_count_t nblks, chunk_num_t chunk_num
 
 void MultiBlkId::add(BlkId const& b) { add(b.blk_num(), b.blk_count(), b.chunk_num()); }
 
-sisl::blob MultiBlkId::serialize() { return sisl::blob{r_cast< uint8_t* >(this), serialized_size()}; }
+sisl::blob MultiBlkId::serialize() const { return sisl::blob{r_cast< uint8_t const* >(this), serialized_size()}; }
 
 uint32_t MultiBlkId::serialized_size() const {
     uint32_t sz = BlkId::serialized_size();

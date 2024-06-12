@@ -34,6 +34,7 @@
 #include "common/homestore_assert.hpp"
 #include "common/homestore_utils.hpp"
 #include "common/resource_mgr.hpp"
+#include "common/crash_simulator.hpp"
 
 SISL_LOGGING_DECL(journalvdev)
 
@@ -45,15 +46,15 @@ JournalVirtualDev::JournalVirtualDev(DeviceManager& dmgr, const vdev_info& vinfo
     m_init_private_data = std::make_shared< JournalChunkPrivate >();
     m_chunk_pool = std::make_unique< ChunkPool >(
         dmgr,
-        ChunkPool::Params{
-            HS_DYNAMIC_CONFIG(generic.journal_chunk_pool_capacity),
-            [this]() {
-                m_init_private_data->created_at = get_time_since_epoch_ms();
-                m_init_private_data->end_of_chunk = m_vdev_info.chunk_size;
-                sisl::blob private_blob{r_cast< uint8_t* >(m_init_private_data.get()), sizeof(JournalChunkPrivate)};
-                return private_blob;
-            },
-            m_vdev_info.hs_dev_type, m_vdev_info.vdev_id, m_vdev_info.chunk_size});
+        ChunkPool::Params{HS_DYNAMIC_CONFIG(generic.journal_chunk_pool_capacity),
+                          [this]() {
+                              m_init_private_data->created_at = get_time_since_epoch_ms();
+                              m_init_private_data->end_of_chunk = m_vdev_info.chunk_size;
+                              sisl::blob private_blob{r_cast< uint8_t* >(m_init_private_data.get()),
+                                                      sizeof(JournalChunkPrivate)};
+                              return private_blob;
+                          },
+                          m_vdev_info.hs_dev_type, m_vdev_info.vdev_id, m_vdev_info.chunk_size});
 
     resource_mgr().register_journal_vdev_exceed_cb([this]([[maybe_unused]] int64_t dirty_buf_count, bool critical) {
         // either it is critical or non-critical, call cp_flush;
@@ -80,7 +81,7 @@ void JournalVirtualDev::init() {
     std::unordered_set< chunk_num_t > visited_chunks;
 
     // Traverse the chunks and find the heads of the logdev_id's.
-    for (auto& chunk : m_all_chunks) {
+    for (auto& [_, chunk] : m_all_chunks) {
         auto* data = r_cast< JournalChunkPrivate* >(const_cast< uint8_t* >(chunk->user_private()));
         auto chunk_id = chunk->chunk_id();
         auto logdev_id = data->logdev_id;
@@ -121,11 +122,23 @@ void JournalVirtualDev::init() {
     // Chunks which are not in visited set are orphans and needs to be cleaned up.
     // Remove chunk will affect the m_all_chunks so keep a separate list.
     std::vector< shared< Chunk > > orphan_chunks;
-    for (auto& chunk : m_all_chunks) {
+    for (auto& [_, chunk] : m_all_chunks) {
         if (!visited_chunks.count(chunk->chunk_id())) { orphan_chunks.push_back(chunk); }
     }
 
-    for (auto& chunk : orphan_chunks) {
+    // Remove the orphan chunks.
+    if (!orphan_chunks.empty()) {
+        LOGINFOMOD(journalvdev, "Removing orphan chunks");
+        remove_journal_chunks(orphan_chunks);
+    }
+
+    // Start the chunk pool.
+    m_chunk_pool->start();
+    LOGINFO("Journal vdev init done");
+}
+
+void JournalVirtualDev::remove_journal_chunks(std::vector< shared< Chunk > >& chunks) {
+    for (auto& chunk : chunks) {
         auto* data = r_cast< JournalChunkPrivate* >(const_cast< uint8_t* >(chunk->user_private()));
         auto chunk_id = chunk->chunk_id();
         auto logdev_id = data->logdev_id;
@@ -135,14 +148,9 @@ void JournalVirtualDev::init() {
         *data = JournalChunkPrivate{};
         update_chunk_private(chunk, data);
 
-        LOGINFOMOD(journalvdev, "Removing orphan chunk {} found for logdev {} next {}.", chunk_id, logdev_id,
-                   next_chunk);
+        LOGINFOMOD(journalvdev, "Removing chunk {} found for logdev {} next {}.", chunk_id, logdev_id, next_chunk);
         m_dmgr.remove_chunk_locked(chunk);
     }
-
-    // Start the chunk pool.
-    m_chunk_pool->start();
-    LOGINFO("Journal vdev init done");
 }
 
 void JournalVirtualDev::update_chunk_private(shared< Chunk >& chunk, JournalChunkPrivate* private_data) {
@@ -169,6 +177,19 @@ shared< JournalVirtualDev::Descriptor > JournalVirtualDev::open(logdev_id_t logd
                    chunk->to_string());
     }
     return it->second;
+}
+
+void JournalVirtualDev::destroy(logdev_id_t logdev_id) {
+    auto it = m_journal_descriptors.find(logdev_id);
+    if (it == m_journal_descriptors.end()) {
+        LOGERROR("logdev not found log_dev={}", logdev_id);
+        return;
+    }
+
+    // Remove all the chunks.
+    remove_journal_chunks(it->second->m_journal_chunks);
+    m_journal_descriptors.erase(it);
+    LOGINFOMOD(journalvdev, "Journal vdev destroyed log_dev={}", logdev_id);
 }
 
 void JournalVirtualDev::Descriptor::append_chunk() {
@@ -225,14 +246,14 @@ off_t JournalVirtualDev::Descriptor::alloc_next_append_blk(size_t sz) {
         LOGDEBUGMOD(journalvdev, "No space left for size {} Creating chunk desc {}", sz, to_string());
 
 #ifdef _PRERELEASE
-        iomgr_flip::test_and_abort("abort_before_update_eof_cur_chunk");
+        if (hs()->crash_simulator().crash_if_flip_set("abort_before_update_eof_cur_chunk")) { return tail_offset(); }
 #endif
 
         // Append a chunk to m_journal_chunks list. This will increase the m_end_offset.
         append_chunk();
 
 #ifdef _PRERELEASE
-        iomgr_flip::test_and_abort("abort_after_update_eof_next_chunk");
+        if (hs()->crash_simulator().crash_if_flip_set("abort_after_update_eof_next_chunk")) { return tail_offset(); }
 #endif
 
         RELEASE_ASSERT((tail_offset() + static_cast< off_t >(sz)) < m_end_offset, "No space for append blk");

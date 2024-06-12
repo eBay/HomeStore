@@ -29,46 +29,18 @@ static std::pair< sisl::blob, sisl::blob > header_only_extract(nuraft::buffer& b
 }
 
 ReplServiceError RaftStateMachine::propose_to_raft(repl_req_ptr_t rreq) {
-    uint32_t val_size = rreq->value_inlined ? 0 : rreq->local_blkid.serialized_size();
-    uint32_t entry_size = sizeof(repl_journal_entry) + rreq->header.size() + rreq->key.size() + val_size;
-    rreq->alloc_journal_entry(entry_size, true /* raft_buf */);
-    rreq->journal_entry->code =
-        (rreq->value_inlined) ? journal_type_t::HS_DATA_INLINED : journal_type_t::HS_DATA_LINKED;
-    rreq->journal_entry->server_id = m_rd.server_id();
-    rreq->journal_entry->dsn = rreq->dsn();
-    rreq->journal_entry->user_header_size = rreq->header.size();
-    rreq->journal_entry->key_size = rreq->key.size();
-    rreq->journal_entry->value_size = val_size;
-
-    rreq->is_proposer = true;
-    uint8_t* raw_ptr = uintptr_cast(rreq->journal_entry) + sizeof(repl_journal_entry);
-    if (rreq->header.size()) {
-        std::memcpy(raw_ptr, rreq->header.cbytes(), rreq->header.size());
-        raw_ptr += rreq->header.size();
-    }
-
-    if (rreq->key.size()) {
-        std::memcpy(raw_ptr, rreq->key.cbytes(), rreq->key.size());
-        raw_ptr += rreq->key.size();
-    }
-
-    if (rreq->value.size) {
-        auto const b = rreq->local_blkid.serialize();
-        std::memcpy(raw_ptr, b.cbytes(), b.size());
-        raw_ptr += b.size();
-    }
+    rreq->create_journal_entry(true /* raft_buf */, m_rd.server_id());
+    RD_LOGT("Raft Channel: propose journal_entry=[{}] ", rreq->journal_entry()->to_string());
 
     auto* vec = sisl::VectorPool< raft_buf_ptr_t >::alloc();
     vec->push_back(rreq->raft_journal_buf());
-
-    RD_LOG(TRACE, "Raft Channel: propose journal_entry=[{}] ", rreq->journal_entry->to_string());
 
     auto append_status = m_rd.raft_server()->append_entries(*vec);
     sisl::VectorPool< raft_buf_ptr_t >::free(vec);
 
     if (append_status && !append_status->get_accepted()) {
-        RD_LOG(ERROR, "Raft Channel: Failed to propose rreq=[{}] result_code={}", rreq->to_compact_string(),
-               append_status->get_result_code());
+        RD_LOGE("Raft Channel: Failed to propose rreq=[{}] result_code={}", rreq->to_compact_string(),
+                append_status->get_result_code());
         return RaftReplService::to_repl_error(append_status->get_result_code());
     }
     return ReplServiceError::OK;
@@ -80,8 +52,8 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
     RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
                       "Mismatched version of journal entry received from RAFT peer");
 
-    RD_LOG(TRACE, "Raft Channel: Localizing Raft log_entry: server_id={}, term={}, journal_entry=[{}] ",
-           jentry->server_id, lentry.get_term(), jentry->to_string());
+    RD_LOGT("Raft Channel: Localizing Raft log_entry: server_id={}, term={}, journal_entry=[{}] ", jentry->server_id,
+            lentry.get_term(), jentry->to_string());
 
     auto entry_to_hdr = [](repl_journal_entry* jentry) {
         return sisl::blob{uintptr_cast(jentry) + sizeof(repl_journal_entry), jentry->user_header_size};
@@ -108,13 +80,13 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
         MultiBlkId entry_blkid;
         entry_blkid.deserialize(entry_to_val(jentry), true /* copy */);
 
-        rreq = m_rd.applier_create_req(rkey, entry_to_hdr(jentry), (entry_blkid.blk_count() * m_rd.get_blk_size()),
-                                       false /* is_data_channel */);
+        rreq = m_rd.applier_create_req(rkey, jentry->code, entry_to_hdr(jentry), entry_to_key(jentry),
+                                       (entry_blkid.blk_count() * m_rd.get_blk_size()), false /* is_data_channel */);
         if (rreq == nullptr) { goto out; }
 
-        rreq->remote_blkid = RemoteBlkId{jentry->server_id, entry_blkid};
+        rreq->set_remote_blkid(RemoteBlkId{jentry->server_id, entry_blkid});
 
-        auto const local_size = rreq->local_blkid.serialized_size();
+        auto const local_size = rreq->local_blkid().serialized_size();
         auto const remote_size = entry_blkid.serialized_size();
         auto const size_before_value = lentry.get_buf().size() - jentry->value_size;
 
@@ -131,15 +103,16 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_prepare(nuraft::log_entr
         }
 
         uint8_t* blkid_location = uintptr_cast(lentry.get_buf().data_begin()) + size_before_value;
-        std::memcpy(blkid_location, rreq->local_blkid.serialize().cbytes(), local_size);
+        std::memcpy(blkid_location, rreq->local_blkid().serialize().cbytes(), local_size);
     } else {
-        rreq = m_rd.applier_create_req(rkey, entry_to_hdr(jentry), jentry->value_size, false /* is_data_channel */);
+        rreq = m_rd.applier_create_req(rkey, jentry->code, entry_to_hdr(jentry), entry_to_key(jentry),
+                                       jentry->value_size, false /* is_data_channel */);
     }
-    rreq->journal_buf = lentry.get_buf_ptr();
-    rreq->journal_entry = jentry;
-    rreq->header = entry_to_hdr(jentry);
-    rreq->key = entry_to_key(jentry);
-    rreq->is_jentry_localize_pending = false; // Journal entry is already localized here
+
+    // We might have localized the journal entry with new blkid. We need to also update the header/key pointers pointing
+    // to the data in the raft journal entry. It is possible that header/key pointers are pointing to the data ptrs that
+    // was created during push/fetch data. The following step ensures that all information are localized
+    rreq->change_raft_journal_buf(lentry.get_buf_ptr(), true /* adjust_hdr_key */);
 
 out:
     if (rreq == nullptr) {
@@ -176,7 +149,7 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_finish(nuraft::log_entry
     repl_key rkey{.server_id = jentry->server_id, .term = lentry.get_term(), .dsn = jentry->dsn};
 
     auto rreq = m_rd.repl_key_to_req(rkey);
-    if ((rreq == nullptr) || (rreq->is_jentry_localize_pending)) {
+    if ((rreq == nullptr) || (rreq->is_localize_pending())) {
         rreq = localize_journal_entry_prepare(lentry);
         if (rreq == nullptr) {
             RELEASE_ASSERT(rreq != nullptr,
@@ -188,7 +161,7 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_finish(nuraft::log_entry
         }
     }
 
-    if (rreq->is_proposer) {
+    if (rreq->is_proposer()) {
         DEBUG_ASSERT_EQ(jentry->server_id, m_rd.server_id(),
                         "Expected rkey={}, jentry={} proposer request to have local server_id in journal entry",
                         rkey.to_string(), jentry->to_string());
@@ -203,8 +176,8 @@ raft_buf_ptr_t RaftStateMachine::pre_commit_ext(nuraft::state_machine::ext_op_pa
     int64_t lsn = s_cast< int64_t >(params.log_idx);
 
     repl_req_ptr_t rreq = lsn_to_req(lsn);
-    RD_LOG(DEBUG, "Raft channel: Precommit rreq=[{}]", rreq->to_compact_string());
-    m_rd.m_listener->on_pre_commit(rreq->lsn, rreq->header, rreq->key, rreq);
+    RD_LOGD("Raft channel: Precommit rreq=[{}]", rreq->to_compact_string());
+    m_rd.m_listener->on_pre_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq);
 
     return m_success_ptr;
 }
@@ -213,24 +186,25 @@ raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params
     int64_t lsn = s_cast< int64_t >(params.log_idx);
 
     repl_req_ptr_t rreq = lsn_to_req(lsn);
-    RD_LOG(DEBUG, "Raft channel: Received Commit message rreq=[{}]", rreq->to_compact_string());
-    if (rreq->is_proposer) {
+    RD_LOGD("Raft channel: Received Commit message rreq=[{}]", rreq->to_compact_string());
+    if (rreq->is_proposer()) {
         // This is the time to ensure flushing of journal happens in the proposer
         if (m_rd.m_data_journal->last_durable_index() < uint64_cast(lsn)) { m_rd.m_data_journal->flush(); }
-        rreq->state.fetch_or(uint32_cast(repl_req_state_t::LOG_FLUSHED));
+        rreq->add_state(repl_req_state_t::LOG_FLUSHED);
     }
 
-    m_lsn_req_map.erase(rreq->lsn);
-    m_rd.report_committed(rreq);
+    m_rd.handle_commit(rreq);
 
     return m_success_ptr;
 }
 
 uint64_t RaftStateMachine::last_commit_index() { return uint64_cast(m_rd.get_last_commit_lsn()); }
 
+void RaftStateMachine::become_ready() { m_rd.become_ready(); }
+
 void RaftStateMachine::link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn) {
-    rreq->lsn = lsn;
-    rreq->state.fetch_or(uint32_cast(repl_req_state_t::LOG_RECEIVED));
+    rreq->set_lsn(lsn);
+    rreq->add_state(repl_req_state_t::LOG_RECEIVED);
     [[maybe_unused]] auto r = m_lsn_req_map.insert(lsn, std::move(rreq));
     RD_DBG_ASSERT_EQ(r.second, true, "lsn={} already in precommit list", lsn);
 }
@@ -242,7 +216,7 @@ repl_req_ptr_t RaftStateMachine::lsn_to_req(int64_t lsn) {
     if (it == m_lsn_req_map.cend()) { return nullptr; }
 
     repl_req_ptr_t rreq = it->second;
-    RD_DBG_ASSERT_EQ(lsn, rreq->lsn, "lsn req map mismatch");
+    RD_DBG_ASSERT_EQ(lsn, rreq->lsn(), "lsn req map mismatch");
     return rreq;
 }
 

@@ -89,6 +89,7 @@ public:
     std::vector< meta_sub_type > actual_on_complete_cb_order;
     std::vector< void* > cookies;
     bool enable_dependency_chain{false};
+    test_common::HSTestHelper::test_token m_token;
 
     VMetaBlkMgrTest() = default;
     VMetaBlkMgrTest(const VMetaBlkMgrTest&) = delete;
@@ -100,10 +101,11 @@ public:
 
 protected:
     void SetUp() override {
-        test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", {{HS_SERVICE::META, {.size_pct = 85.0}}});
+        m_token =
+            test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", {{HS_SERVICE::META, {.size_pct = 85.0}}});
     }
 
-    void TearDown() override{};
+    void TearDown() override {};
 
 public:
     [[nodiscard]] uint64_t get_elapsed_time(const Clock::time_point& start) {
@@ -125,8 +127,8 @@ public:
             register_client();
             if (enable_dependency_chain) { register_client_inlcuding_dependencies(); }
         };
-        test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", {{HS_SERVICE::META, {.size_pct = 85.0}}},
-                                                   std::move(before_services_starting_cb), true /* restart */);
+        m_token.cb_ = before_services_starting_cb;
+        test_common::HSTestHelper::restart_homestore(m_token);
     }
 
     uint64_t io_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }

@@ -21,9 +21,8 @@
 
 namespace homestore {
 FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig const& cfg, bool is_fresh, chunk_num_t chunk_id) :
-        BitmapBlkAllocator(cfg, is_fresh, chunk_id), m_blk_q{get_total_blks()} {
+        BitmapBlkAllocator(cfg, is_fresh, chunk_id), m_free_blk_q{get_total_blks()} {
     LOGINFO("FixedBlkAllocator total blks: {}", get_total_blks());
-
     if (is_fresh || !is_persistent()) { load(); }
 }
 
@@ -43,7 +42,7 @@ blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion& portion, blk_num_t st
         if (portion.get_portion_num() != cur_portion.get_portion_num()) break;
 
         if (!is_persistent() || get_disk_bitmap()->is_bits_reset(blk_num, 1)) {
-            const auto pushed = m_blk_q.write(BlkId{blk_num, 1, m_chunk_id});
+            const auto pushed = m_free_blk_q.write(blk_num);
             HS_DBG_ASSERT_EQ(pushed, true, "Expected to be able to push the blk on fixed capacity Q");
         }
         ++blk_num;
@@ -55,33 +54,56 @@ blk_num_t FixedBlkAllocator::init_portion(BlkAllocPortion& portion, blk_num_t st
 bool FixedBlkAllocator::is_blk_alloced(BlkId const& b, bool use_lock) const { return true; }
 
 BlkAllocStatus FixedBlkAllocator::alloc([[maybe_unused]] blk_count_t nblks, blk_alloc_hints const&, BlkId& out_blkid) {
-    HS_DBG_ASSERT_EQ(nblks, 1, "FixedBlkAllocator does not support multiple blk allocation yet");
-    return alloc_contiguous(r_cast< BlkId& >(out_blkid));
-}
+    if (m_state == state_t::RECOVERING) {
+        // Possibly first few attempts to allocate; under lock, remove all the blks which are marked to be removed from
+        // the free list
+        std::lock_guard lg(m_mark_blk_mtx);
+        if (!m_marked_blks.empty()) {
+            auto const count = available_blks();
+            for (uint64_t i{0}; ((i < count) && !m_marked_blks.empty()); ++i) {
+                blk_num_t blk_num;
+                if (!m_free_blk_q.read(blk_num)) { break; }
 
-BlkAllocStatus FixedBlkAllocator::alloc_contiguous(BlkId& out_blkid) {
+                if (m_marked_blks.find(blk_num) != m_marked_blks.end()) {
+                    m_marked_blks.erase(blk_num); // This blk needs to be skipped
+                } else {
+                    m_free_blk_q.write(blk_num); // This blk is not marked, put it back at the end of queue
+                }
+            }
+            HS_DBG_ASSERT(m_marked_blks.empty(), "All marked blks should have been removed from free list");
+        }
+        m_state = state_t::ACTIVE;
+    }
+
 #ifdef _PRERELEASE
     if (iomgr_flip::instance()->test_flip("fixed_blkalloc_no_blks")) { return BlkAllocStatus::SPACE_FULL; }
 #endif
-    return m_blk_q.read(out_blkid) ? BlkAllocStatus::SUCCESS : BlkAllocStatus::SPACE_FULL;
+    blk_num_t blk_num;
+    if (!m_free_blk_q.read(blk_num)) { return BlkAllocStatus::SPACE_FULL; }
+
+    out_blkid = BlkId{blk_num, 1, m_chunk_id};
+    return BlkAllocStatus::SUCCESS;
 }
 
-BlkAllocStatus FixedBlkAllocator::mark_blk_allocated(BlkId const& b) { return BlkAllocStatus::SUCCESS;}
+BlkAllocStatus FixedBlkAllocator::alloc_contiguous(BlkId& out_blkid) { return alloc(1, {}, out_blkid); }
+
+BlkAllocStatus FixedBlkAllocator::reserve_on_cache(BlkId const& b) {
+    std::lock_guard lg(m_mark_blk_mtx);
+    HS_DBG_ASSERT(m_state == state_t::RECOVERING, "reserve_on_cache called on non-recovery path");
+    m_marked_blks.insert(b.blk_num());
+    return BlkAllocStatus::SUCCESS;
+}
 
 void FixedBlkAllocator::free(BlkId const& b) {
     HS_DBG_ASSERT_EQ(b.blk_count(), 1, "Multiple blk free for FixedBlkAllocator? allocated by different allocator?");
 
-    const auto pushed = m_blk_q.write(b);
+    const auto pushed = m_free_blk_q.write(b.blk_num());
     HS_DBG_ASSERT_EQ(pushed, true, "Expected to be able to push the blk on fixed capacity Q");
+
+    if (is_persistent()) { free_on_disk(b); }
 }
 
-blk_num_t FixedBlkAllocator::available_blks() const { return m_blk_q.sizeGuess(); }
-
-blk_num_t FixedBlkAllocator::get_freeable_nblks() const {
-    // TODO: implement this
-    HS_DBG_ASSERT_EQ(false, true, "FixedBlkAllocator get_freeable_nblks Not implemented");
-    return 0;
-}
+blk_num_t FixedBlkAllocator::available_blks() const { return m_free_blk_q.sizeGuess(); }
 
 blk_num_t FixedBlkAllocator::get_defrag_nblks() const {
     // TODO: implement this

@@ -123,6 +123,10 @@ AsyncReplResult< shared< ReplDev > > SoloReplService::create_repl_dev(group_id_t
     return make_async_success< shared< ReplDev > >(rdev);
 }
 
+folly::SemiFuture< ReplServiceError > SoloReplService::remove_repl_dev(group_id_t group_id) {
+    return folly::makeSemiFuture< ReplServiceError >(ReplServiceError::NOT_IMPLEMENTED);
+}
+
 void SoloReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) {
     superblk< repl_dev_superblk > rd_sb{get_meta_blk_name()};
     rd_sb.load(buf, meta_cookie);

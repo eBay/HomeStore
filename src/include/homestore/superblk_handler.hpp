@@ -78,7 +78,18 @@ public:
             auto al_sz = meta_service().align_size();
             m_raw_buf = sisl::make_byte_array(uint32_cast(sisl::round_up(size, al_sz)), al_sz, sisl::buftag::metablk);
         } else {
-            m_raw_buf = sisl::make_byte_array(uint32_cast(size), 0, sisl::buftag::metablk);
+            m_raw_buf = sisl::make_byte_array(size, 0, sisl::buftag::metablk);
+        }
+        m_sb = new (m_raw_buf->bytes()) T();
+        return m_sb;
+    }
+
+    T* resize(uint32_t size) {
+        if (meta_service().is_aligned_buf_needed(size)) {
+            auto al_sz = meta_service().align_size();
+            m_raw_buf->buf_realloc(uint32_cast(sisl::round_up(size, al_sz)), al_sz, sisl::buftag::metablk);
+        } else {
+            m_raw_buf->buf_realloc(size, 0, sisl::buftag::metablk);
         }
         m_sb = new (m_raw_buf->bytes()) T();
         return m_sb;
@@ -109,6 +120,9 @@ public:
     T* operator->() { return m_sb; }
     const T* operator->() const { return m_sb; }
     T& operator*() { return *m_sb; }
+
+    std::string name() const { return m_meta_sub_name; }
+    void* meta_blk() const { return m_meta_blk; }
 
 private:
     void* m_meta_blk{nullptr};

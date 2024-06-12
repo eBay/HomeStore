@@ -82,7 +82,7 @@ bool BitmapBlkAllocator::is_blk_alloced_on_disk(const BlkId& b, bool use_lock) c
     }
 }
 
-BlkAllocStatus BitmapBlkAllocator::alloc_on_disk(BlkId const& bid) {
+BlkAllocStatus BitmapBlkAllocator::reserve_on_disk(BlkId const& bid) {
     if (!is_persistent()) {
         // for non-persistent bitmap nothing is needed to do. So always return success
         return BlkAllocStatus::SUCCESS;
@@ -170,7 +170,7 @@ void BitmapBlkAllocator::release_underlying_buffer() {
     auto it = old_alloc_list_ptr->begin(true /* latest */);
     const BlkId* bid{nullptr};
     while ((bid = old_alloc_list_ptr->next(it)) != nullptr) {
-        alloc_on_disk(*bid);
+        reserve_on_disk(*bid);
     }
     old_alloc_list_ptr->clear();
     delete (old_alloc_list_ptr);

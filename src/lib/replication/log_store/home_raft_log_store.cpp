@@ -66,11 +66,13 @@ void HomeRaftLogStore::truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_ls
     auto const last_lsn = last_index();
     auto const start_lsn = start_index();
 
-    if (start_lsn + num_reserved_cnt >= last_lsn) {
+    // compact_lsn will be zero on first time boot, so we should not truncate in that case.
+    if (compact_lsn == 0 || (start_lsn + num_reserved_cnt >= last_lsn)) {
         REPL_STORE_LOG(DEBUG,
-                       "Store={} LogDev={}: Skipping truncating because of reserved logs entries is not enough. "
-                       "start_lsn={}, resv_cnt={}, last_lsn={}",
-                       m_logstore_id, m_logdev_id, start_lsn, num_reserved_cnt, last_lsn);
+                       "Store={} LogDev={}: Skipping truncating because of reserved logs entries is not enough or "
+                       "compact_lsn is zero. "
+                       "start_lsn={}, resv_cnt={}, last_lsn={}, compact_lsn={}",
+                       m_logstore_id, m_logdev_id, start_lsn, num_reserved_cnt, last_lsn, compact_lsn);
         return;
     } else {
         //
@@ -102,11 +104,13 @@ HomeRaftLogStore::HomeRaftLogStore(logdev_id_t logdev_id, logstore_id_t logstore
         m_logstore_id = logstore_id;
         LOGDEBUGMOD(replication, "Opening existing home log_dev={} log_store={}", m_logdev_id, logstore_id);
         logstore_service().open_logdev(m_logdev_id);
-        logstore_service().open_log_store(m_logdev_id, logstore_id, true).thenValue([this](auto log_store) {
-            m_log_store = std::move(log_store);
-            DEBUG_ASSERT_EQ(m_logstore_id, m_log_store->get_store_id(), "Mismatch in passed and create logstore id");
-            REPL_STORE_LOG(DEBUG, "Home Log store created/opened successfully");
-        });
+        m_log_store_future =
+            logstore_service().open_log_store(m_logdev_id, logstore_id, true).thenValue([this](auto log_store) {
+                m_log_store = std::move(log_store);
+                DEBUG_ASSERT_EQ(m_logstore_id, m_log_store->get_store_id(),
+                                "Mismatch in passed and create logstore id");
+                REPL_STORE_LOG(DEBUG, "Home Log store created/opened successfully");
+            });
     }
 }
 
@@ -307,4 +311,11 @@ ulong HomeRaftLogStore::last_durable_index() {
     m_last_durable_lsn = m_log_store->get_contiguous_completed_seq_num(m_last_durable_lsn);
     return to_repl_lsn(m_last_durable_lsn);
 }
+
+void HomeRaftLogStore::wait_for_log_store_ready() { m_log_store_future.wait(); }
+
+void HomeRaftLogStore::register_log_replay_done_cb(const log_replay_done_cb_t& cb) {
+    m_log_store->register_log_replay_done_cb(cb);
+};
+
 } // namespace homestore
