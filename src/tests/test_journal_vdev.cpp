@@ -67,36 +67,27 @@ constexpr uint32_t dma_alignment = 512;
 class VDevJournalIOTest : public ::testing::Test {
 public:
     const std::map< uint32_t, test_common::HSTestHelper::test_params > svc_params = {};
+    test_common::HSTestHelper::test_token m_token;
 
     virtual void SetUp() override {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-        test_common::HSTestHelper::start_homestore("test_journal_vdev",
-                                                   {
-                                                       {HS_SERVICE::META, {.size_pct = 15.0}},
-                                                       {HS_SERVICE::LOG,
-                                                        {.size_pct = 50.0,
-                                                         .chunk_size = 16 * 1024 * 1024,
-                                                         .min_chunk_size = 16 * 1024 * 1024,
-                                                         .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
-                                                   },
-                                                   nullptr /* starting_cb */, false /* restart */);
+        m_token =
+            test_common::HSTestHelper::start_homestore("test_journal_vdev",
+                                                       {
+                                                           {HS_SERVICE::META, {.size_pct = 15.0}},
+                                                           {HS_SERVICE::LOG,
+                                                            {.size_pct = 50.0,
+                                                             .chunk_size = 16 * 1024 * 1024,
+                                                             .min_chunk_size = 16 * 1024 * 1024,
+                                                             .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
+                                                       },
+                                                       nullptr /* starting_cb */);
     }
 
     virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
 
-    void restart_homestore() {
-        test_common::HSTestHelper::start_homestore("test_journal_vdev",
-                                                   {
-                                                       {HS_SERVICE::META, {.size_pct = 15.0}},
-                                                       {HS_SERVICE::LOG,
-                                                        {.size_pct = 50.0,
-                                                         .chunk_size = 16 * 1024 * 1024,
-                                                         .min_chunk_size = 16 * 1024 * 1024,
-                                                         .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
-                                                   },
-                                                   nullptr /* starting_cb */, true /* restart */);
-    }
+    void restart_homestore() { test_common::HSTestHelper::restart_homestore(m_token); }
 };
 
 class JournalDescriptorTest {
@@ -202,10 +193,7 @@ public:
         m_vdev_jd->truncate(off_to_truncate);
         auto tail_after = m_vdev_jd->tail_offset();
 
-        if (m_vdev_jd->num_chunks_used()) {
-            HS_DBG_ASSERT_EQ(tail_before, tail_after);
-            HS_DBG_ASSERT_EQ(off_to_truncate, m_vdev_jd->data_start_offset());
-        }
+        if (m_vdev_jd->num_chunks_used()) { HS_DBG_ASSERT_EQ(tail_before, tail_after); }
 
         if (off_to_truncate > m_start_off) {
             // remove the offsets before truncate offset, since they are not valid for read anymore;
@@ -251,12 +239,10 @@ public:
 
     void space_usage_asserts() {
         auto used_space = m_vdev_jd->used_size();
-        auto start_off = m_vdev_jd->data_start_offset();
 
         if (m_vdev_jd->num_chunks_used() != 0) {
             HS_DBG_ASSERT_GT(m_vdev_jd->size(), 0);
             HS_DBG_ASSERT_LE(used_space, m_vdev_jd->size());
-            HS_DBG_ASSERT_EQ(start_off, m_start_off);
         } else {
             HS_DBG_ASSERT_EQ(m_vdev_jd->size(), 0);
         }
@@ -293,7 +279,6 @@ public:
         auto tail_offset = m_vdev_jd->tail_offset();
         auto start_offset = m_vdev_jd->data_start_offset();
 
-        HS_DBG_ASSERT_EQ(m_start_off, start_offset);
         if (start_offset < tail_offset) {
             HS_DBG_ASSERT_GE(off, start_offset, "Wrong offset: {}, start_off: {}", off, start_offset);
             HS_DBG_ASSERT_LE(off, tail_offset, "Wrong offset: {}, tail_offset: {}", off, tail_offset);
@@ -532,10 +517,10 @@ TEST_F(VDevJournalIOTest, MultipleChunkTest) {
     LOGINFO("Inserting two entries");
     for (int i = 0; i < 2; i++) {
         test.fixed_write(data_size);
+        writesz += data_size;
     }
 
     // Verify write size has two data entries and one chunk.
-    writesz = 2 * data_size;
     test.verify_journal_descriptor(log_dev_jd, {.ds = 0x0, .end = chunk_size, .writesz = writesz, .rsvdsz = 0,
                                    .chunks = 1, .trunc = false, .total = chunk_size, .seek = 0x0});
 
@@ -575,35 +560,42 @@ TEST_F(VDevJournalIOTest, MultipleChunkTest) {
     test.verify_journal_descriptor(log_dev_jd, {.ds = 0x0, .end = 4 * chunk_size, .writesz = writesz, .rsvdsz = 0,
                                    .chunks = 4, .trunc = false, .total = 4 * chunk_size, .seek = 0x0});
 
-    // Truncate two data entries. No change in chunk count, only write size and data start changed.
+    // Truncate two data entries. Num chunks reduced to 3. Write and total size reduce by 1 chunk.
     LOGINFO("Truncating two entries");
-    uint64_t trunc_sz = 2 * data_size;
     uint64_t trunc_offset = 2 * data_size;
+    writesz -= chunk_size;
     test.truncate(trunc_offset);
-    test.verify_journal_descriptor(log_dev_jd, {.ds = trunc_offset, .end = 4 * chunk_size, .writesz = writesz - trunc_sz,
-                                   .rsvdsz = 0, .chunks = 4, .trunc = true, .total = 4 * chunk_size, .seek = 0x0});
+    test.verify_journal_descriptor(log_dev_jd, {.ds = chunk_size, .end = 4 * chunk_size, .writesz = writesz,
+                                   .rsvdsz = 0, .chunks = 3, .trunc = true, .total = 3 * chunk_size, .seek = 0x0});
 
-    // Truncate one more entry. Release one chunk back and reduce chunk count. Increase the data start.
+    // Truncate one more entry.
     LOGINFO("Truncating one entry");
     trunc_offset = chunk_size + data_size;
-    trunc_sz = chunk_size + data_size;
     test.truncate(trunc_offset);
-    test.verify_journal_descriptor(log_dev_jd, {.ds = trunc_offset, .end = 4 * chunk_size, .writesz = writesz - trunc_sz,
+    test.verify_journal_descriptor(log_dev_jd, {.ds = trunc_offset, .end = 4 * chunk_size, .writesz = writesz - data_size,
                                    .rsvdsz = 0, .chunks = 3, .trunc = true, .total = 3 * chunk_size, .seek = 0x0});
 
     // Restart homestore and restore the offsets.
     LOGINFO("Restart homestore");
     restart_restore();
-    test.verify_journal_descriptor(log_dev_jd, {.ds = trunc_offset, .end = 4 * chunk_size, .writesz = writesz - trunc_sz,
+    test.verify_journal_descriptor(log_dev_jd, {.ds = trunc_offset, .end = 4 * chunk_size, .writesz = writesz - data_size,
                                    .rsvdsz = 0, .chunks = 3, .trunc = false, .total = 3 * chunk_size, .seek = 0x0});
     test.read_all();
 
-    // Truncate all entries. Num chunks 1, write sz should be 0.
+    // Truncate one more entry. This will release one more chunk.
+    LOGINFO("Truncating one entry");
+    trunc_offset = chunk_size + 2 * data_size;
+    writesz -= chunk_size;
+    test.truncate(trunc_offset);
+    test.verify_journal_descriptor(log_dev_jd, {.ds = 2 * chunk_size, .end = 4 * chunk_size, .writesz = writesz,
+                                   .rsvdsz = 0, .chunks = 2, .trunc = true, .total = 2 * chunk_size, .seek = 0x0});
+
+    // Truncate all entries. Release all chunks. Num chunks 0, write sz should be 0.
     LOGINFO("Truncating all entries");
     trunc_offset = log_dev_jd->tail_offset();
     test.truncate(trunc_offset);
-    test.verify_journal_descriptor(log_dev_jd, {.ds = trunc_offset, .end = 4 * chunk_size, .writesz = 0, .rsvdsz = 0,
-                                   .chunks = 1, .trunc = true, .total = chunk_size, .seek = 0x0});
+    test.verify_journal_descriptor(log_dev_jd, {.ds =  4 * chunk_size, .end = 4 * chunk_size, .writesz = 0, .rsvdsz = 0,
+                                   .chunks = 0, .trunc = true, .total = 0, .seek = 0x0});
 
     // clang-format on
 }

@@ -19,10 +19,12 @@
 #include <vector>
 
 #include <iomgr/iomgr.hpp>
+#include <sisl/fds/id_reserver.hpp>
 #include <homestore/homestore_decl.hpp>
 #include <homestore/index/index_internal.hpp>
 #include <homestore/superblk_handler.hpp>
 #include <homestore/index/wb_cache_base.hpp>
+
 namespace homestore {
 
 class IndexWBCacheBase;
@@ -43,9 +45,13 @@ private:
     std::unique_ptr< IndexServiceCallbacks > m_svc_cbs;
     std::unique_ptr< IndexWBCacheBase > m_wb_cache;
     std::shared_ptr< VirtualDev > m_vdev;
+    std::pair< meta_blk*, sisl::byte_view > m_wbcache_sb{
+        std::pair< meta_blk*, sisl::byte_view >{nullptr, sisl::byte_view{}}};
+    std::unique_ptr< sisl::IDReserver > m_ordinal_reserver;
 
     mutable std::mutex m_index_map_mtx;
     std::map< uuid_t, std::shared_ptr< IndexTableBase > > m_index_map;
+    std::unordered_map< uint32_t, std::shared_ptr< IndexTableBase > > m_ordinal_index_map;
 
 public:
     IndexService(std::unique_ptr< IndexServiceCallbacks > cbs);
@@ -65,14 +71,21 @@ public:
     // Add/Remove Index Table to/from the index service
     void add_index_table(const std::shared_ptr< IndexTableBase >& tbl);
     void remove_index_table(const std::shared_ptr< IndexTableBase >& tbl);
+    std::shared_ptr< IndexTableBase > get_index_table(uuid_t uuid) const;
+    std::shared_ptr< IndexTableBase > get_index_table(uint32_t ordinal) const;
+
+    // Reserve an ordinal for the index table
+    uint32_t reserve_ordinal();
 
     uint64_t used_size() const;
     uint32_t node_size() const;
+    void repair_index_node(uint32_t ordinal, IndexBufferPtr const& node_buf);
+    void repair_index_root(uint32_t ordinal, IndexBufferPtr const& root_buf);
 
     IndexWBCacheBase& wb_cache() { return *m_wb_cache; }
 
 private:
-    void meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
+    void itable_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
 };
 
 extern IndexService& index_service();

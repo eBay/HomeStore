@@ -24,6 +24,7 @@
 
 #include <homestore/btree/mem_btree.hpp>
 #include "test_common/range_scheduler.hpp"
+#include <homestore/btree/mem_btree.hpp>
 #include <homestore/btree/detail/simple_node.hpp>
 #include <homestore/btree/detail/varlen_node.hpp>
 #include <homestore/btree/detail/prefix_node.hpp>
@@ -102,12 +103,11 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     void SetUp() override {
         BtreeTestHelper< TestType >::SetUp();
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
-        this->m_bt->init(nullptr);
     }
 };
 
 // TODO Enable PrefixIntervalBtreeTest later
-using BtreeTypes = testing::Types</* PrefixIntervalBtreeTest, */FixedLenBtreeTest, VarKeySizeBtreeTest,
+using BtreeTypes = testing::Types< /* PrefixIntervalBtreeTest, */ FixedLenBtreeTest, VarKeySizeBtreeTest,
                                    VarValueSizeBtreeTest, VarObjSizeBtreeTest >;
 TYPED_TEST_SUITE(BtreeTest, BtreeTypes);
 
@@ -301,7 +301,6 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
 
         BtreeTestHelper< TestType >::SetUp();
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
-        this->m_bt->init(nullptr);
     }
 
     void TearDown() override {

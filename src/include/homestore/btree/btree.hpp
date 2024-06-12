@@ -32,6 +32,7 @@ SISL_LOGGING_DECL(btree)
 namespace homestore {
 
 using BtreeNodePtr = boost::intrusive_ptr< BtreeNode >;
+using BtreeNodeList = folly::small_vector< BtreeNodePtr, 3 >;
 
 struct BtreeThreadVariables {
     std::vector< btree_locked_node_info > wr_locked_nodes;
@@ -39,9 +40,34 @@ struct BtreeThreadVariables {
     BtreeNodePtr force_split_node{nullptr};
 };
 
+struct BTREE_FLIPS {
+    static constexpr uint32_t INDEX_PARENT_NON_ROOT = 1 << 0;
+    static constexpr uint32_t INDEX_PARENT_ROOT = 1 << 1;
+    static constexpr uint32_t INDEX_LEFT_SIBLING = 1 << 2;
+    static constexpr uint32_t INDEX_RIGHT_SIBLING = 1 << 3;
+
+    uint32_t flips;
+    BTREE_FLIPS() : flips{0} {}
+    std::string list() const {
+        std::string str;
+        if (flips & INDEX_PARENT_NON_ROOT) { str += "index_parent_non_root,"; }
+        if (flips & INDEX_PARENT_ROOT) { str += "index_parent_root,"; }
+        if (flips & INDEX_LEFT_SIBLING) { str += "index_left_sibling,"; }
+        if (flips & INDEX_RIGHT_SIBLING) { str += "index_right_sibling,"; }
+        return str;
+    }
+    void set_flip(uint32_t flip) { flips |= flip; }
+    void set_flip(std::string flip) {
+        if (flip == "index_parent_non_root") { set_flip(INDEX_PARENT_NON_ROOT); }
+        if (flip == "index_parent_root") { set_flip(INDEX_PARENT_ROOT); }
+        if (flip == "index_left_sibling") { set_flip(INDEX_LEFT_SIBLING); }
+        if (flip == "index_right_sibling") { set_flip(INDEX_RIGHT_SIBLING); }
+    }
+};
+
 template < typename K, typename V >
 class Btree {
-private:
+protected:
     mutable iomgr::FiberManagerLib::shared_mutex m_btree_lock;
     BtreeLinkInfo m_root_node_info;
 
@@ -52,7 +78,9 @@ private:
 #ifndef NDEBUG
     std::atomic< uint64_t > m_req_id{0};
 #endif
-
+#ifdef _PRERELEASE
+    BTREE_FLIPS m_flips;
+#endif
     // This workaround of BtreeThreadVariables is needed instead of directly declaring statics
     // to overcome the gcc bug, pointer here: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=66944
     static BtreeThreadVariables* bt_thread_vars() {
@@ -63,8 +91,6 @@ private:
         return fiber_map[this_id].get();
     }
 
-    static bool is_repair_needed(const BtreeNodePtr& child_node, const BtreeLinkInfo& child_info);
-
 protected:
     BtreeConfig m_bt_cfg;
 
@@ -72,7 +98,6 @@ public:
     /////////////////////////////////////// All External APIs /////////////////////////////
     Btree(const BtreeConfig& cfg);
     virtual ~Btree();
-    virtual btree_status_t init(void* op_context);
 
     template < typename ReqT >
     btree_status_t put(ReqT& put_req);
@@ -95,29 +120,35 @@ public:
 
     nlohmann::json get_metrics_in_json(bool updated = true);
     bnodeid_t root_node_id() const;
+
     uint64_t root_link_version() const;
     void set_root_node_info(const BtreeLinkInfo& info);
 
     // static void set_io_flip();
     // static void set_error_flip();
+#ifdef _PRERELEASE
+    void set_flip_point(std::string flip) { m_flips.set_flip(flip); }
+    void set_flips(std::vector< std::string > flips) {
+        for (const auto& flip : flips) {
+            set_flip_point(flip);
+        }
+    }
+    std::string flip_list() const { return m_flips.list(); }
+#endif
 
 protected:
     /////////////////////////// Methods the underlying store is expected to handle ///////////////////////////
     virtual BtreeNodePtr alloc_node(bool is_leaf) = 0;
-    virtual BtreeNode* init_node(uint8_t* node_buf, uint32_t node_ctx_size, bnodeid_t id, bool init_buf,
-                                 bool is_leaf) const;
+    virtual BtreeNode* init_node(uint8_t* node_buf, bnodeid_t id, bool init_buf, bool is_leaf) const;
     virtual btree_status_t read_node_impl(bnodeid_t id, BtreeNodePtr& node) const = 0;
     virtual btree_status_t write_node_impl(const BtreeNodePtr& node, void* context) = 0;
     virtual btree_status_t refresh_node(const BtreeNodePtr& node, bool for_read_modify_write, void* context) const = 0;
     virtual void free_node_impl(const BtreeNodePtr& node, void* context) = 0;
-    virtual btree_status_t prepare_node_txn(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
-                                            void* context) = 0;
-    virtual btree_status_t transact_write_nodes(const folly::small_vector< BtreeNodePtr, 3 >& new_nodes,
-                                                const BtreeNodePtr& child_node, const BtreeNodePtr& parent_node,
-                                                void* context) = 0;
-
+    virtual btree_status_t transact_nodes(const BtreeNodeList& new_nodes, const BtreeNodeList& freed_nodes,
+                                          const BtreeNodePtr& left_child_node, const BtreeNodePtr& parent_node,
+                                          void* context) = 0;
+    virtual btree_status_t on_root_changed(BtreeNodePtr const& root, void* context) = 0;
     virtual std::string btree_store_type() const = 0;
-    virtual void update_new_root_info(bnodeid_t root_node, uint64_t version) = 0;
 
     /////////////////////////// Methods the application use case is expected to handle ///////////////////////////
 
@@ -137,8 +168,8 @@ protected:
                                            BtreeNodePtr& child_node, locktype_t int_lock_type,
                                            locktype_t leaf_lock_type, void* context) const;
     btree_status_t upgrade_node_locks(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node,
-                                      locktype_t parent_cur_lock, locktype_t child_cur_lock, void* context);
-    btree_status_t upgrade_node(const BtreeNodePtr& node, locktype_t prev_lock, void* context, uint64_t prev_gen);
+                                      locktype_t& parent_cur_lock, locktype_t& child_cur_lock, void* context);
+    btree_status_t upgrade_node_lock(const BtreeNodePtr& node, locktype_t& cur_lock, void* context);
     btree_status_t _lock_node(const BtreeNodePtr& node, locktype_t type, void* context, const char* fname,
                               int line) const;
     void unlock_node(const BtreeNodePtr& node, locktype_t type) const;
@@ -167,6 +198,7 @@ protected:
     void validate_sanity_child(const BtreeNodePtr& parent_node, uint32_t ind) const;
     void validate_sanity_next_child(const BtreeNodePtr& parent_node, uint32_t ind) const;
     void print_node(const bnodeid_t& bnodeid) const;
+
     void append_route_trace(BtreeRequest& req, const BtreeNodePtr& node, btree_event_t event, uint32_t start_idx = 0,
                             uint32_t end_idx = 0) const;
 
@@ -188,8 +220,6 @@ protected:
     btree_status_t split_node(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node, uint32_t parent_ind,
                               K* out_split_key, void* context);
     btree_status_t mutate_extents_in_leaf(const BtreeNodePtr& my_node, BtreeRangePutRequest< K >& rpreq);
-    btree_status_t repair_split(const BtreeNodePtr& parent_node, const BtreeNodePtr& child_node1,
-                                uint32_t parent_split_idx, void* context);
 
     ///////// Remove Impl Methods
     template < typename ReqT >
@@ -201,8 +231,6 @@ protected:
     btree_status_t merge_nodes(const BtreeNodePtr& parent_node, const BtreeNodePtr& leftmost_node, uint32_t start_indx,
                                uint32_t end_indx, void* context);
     bool remove_extents_in_leaf(const BtreeNodePtr& node, BtreeRangeRemoveRequest< K >& rrreq);
-    btree_status_t repair_merge(const BtreeNodePtr& parent_node, const BtreeNodePtr& left_child,
-                                uint32_t parent_merge_idx, void* context);
 
     ///////// Query Impl Methods
     btree_status_t do_sweep_query(BtreeNodePtr& my_node, BtreeQueryRequest< K >& qreq,

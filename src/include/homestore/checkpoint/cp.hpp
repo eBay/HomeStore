@@ -81,10 +81,12 @@ struct CP {
     std::atomic< cp_status_t > m_cp_status{cp_status_t::cp_unknown};
     sisl::atomic_counter< int64_t > m_enter_cnt;
     CPManager* m_cp_mgr;
-    bool m_cp_waiting_to_trigger{false}; // it is waiting for previous cp to complete
     cp_id_t m_cp_id;
     std::array< std::unique_ptr< CPContext >, (size_t)cp_consumer_t::SENTINEL > m_contexts;
     folly::SharedPromise< bool > m_comp_promise;
+#ifdef _PRERELEASE
+    std::atomic< bool > m_abrupt_cp{false};
+#endif
 
 public:
     CP(CPManager* mgr) : m_cp_mgr{mgr} {}

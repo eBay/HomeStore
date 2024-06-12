@@ -272,7 +272,11 @@ int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_nu
 
 log_buffer LogDev::read(const logdev_key& key, serialized_log_record& return_record_header) {
     auto buf = sisl::make_byte_array(initial_read_size, m_flush_size_multiple, sisl::buftag::logread);
-    m_vdev_jd->sync_pread(buf->bytes(), initial_read_size, key.dev_offset);
+    auto ec = m_vdev_jd->sync_pread(buf->bytes(), initial_read_size, key.dev_offset);
+    if (ec) {
+        LOGERROR("Failed to read from ournal vdev log_dev={} {} {}", m_logdev_id, ec.value(), ec.message());
+        return {};
+    }
 
     auto* header = r_cast< const log_group_header* >(buf->cbytes());
     // THIS_LOGDEV_LOG(TRACE, "Logdev read log group header {}", *header);
@@ -572,15 +576,15 @@ uint64_t LogDev::truncate(const logdev_key& key) {
                         "Truncating log device upto log_dev={} log_id={} vdev_offset={} truncated {} log records",
                         m_logdev_id, key.idx, key.dev_offset, num_records_to_truncate);
         m_log_records->truncate(key.idx);
-        m_vdev_jd->truncate(key.dev_offset);
-        THIS_LOGDEV_LOG(DEBUG, "LogDev::truncate done {} ", key.idx);
+        off_t new_offset = m_vdev_jd->truncate(key.dev_offset);
+        THIS_LOGDEV_LOG(DEBUG, "LogDev::truncate done {} offset old {} new {}", key.idx, key.dev_offset, new_offset);
         m_last_truncate_idx = key.idx;
 
         {
             std::unique_lock< std::mutex > lk{m_meta_mutex};
 
             // Update the start offset to be read upon restart
-            m_logdev_meta.set_start_dev_offset(key.dev_offset, key.idx + 1, false /* persist_now */);
+            m_logdev_meta.set_start_dev_offset(new_offset, key.idx + 1, false /* persist_now */);
 
             // Now that store is truncated, we can reclaim the store ids which are garbaged (if any) earlier
 #ifdef _PRERELEASE
@@ -660,7 +664,7 @@ std::shared_ptr< HomeLogStore > LogDev::create_new_log_store(bool append_mode) {
         HS_REL_ASSERT((it == m_id_logstore_map.end()), "store_id {}-{} already exists", m_logdev_id, store_id);
         m_id_logstore_map.insert(std::pair(store_id, logstore_info{.log_store = lstore, .append_mode = append_mode}));
     }
-    LOGINFO("Created log store log_dev={} log_store={}", m_logdev_id, store_id);
+    HS_LOG(INFO, logstore, "Created log store log_dev={} log_store={}", m_logdev_id, store_id);
     return lstore;
 }
 
@@ -936,7 +940,9 @@ void LogDevMetadata::reset() {
 }
 
 void LogDevMetadata::logdev_super_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
+
     m_sb.load(buf, meta_cookie);
+    LOGINFO("Logdev superblk found log_dev={}", m_sb->logdev_id);
     HS_REL_ASSERT_EQ(m_sb->get_magic(), logdev_superblk::LOGDEV_SB_MAGIC, "Invalid logdev metablk, magic mismatch");
     HS_REL_ASSERT_EQ(m_sb->get_version(), logdev_superblk::LOGDEV_SB_VERSION, "Invalid version of logdev metablk");
 }

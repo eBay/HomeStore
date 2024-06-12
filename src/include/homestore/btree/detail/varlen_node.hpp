@@ -62,8 +62,8 @@ public:
         if (init) {
             // Tail arena points to the edge of the node as data arena grows backwards. Entire space is now available
             // except for the header itself
-            get_var_node_header()->m_init_available_space = cfg.node_data_size();
-            get_var_node_header()->m_tail_arena_offset = cfg.node_data_size();
+            get_var_node_header()->m_init_available_space = this->node_data_size();
+            get_var_node_header()->m_tail_arena_offset = this->node_data_size();
             get_var_node_header()->m_available_space =
                 get_var_node_header()->m_tail_arena_offset - sizeof(var_node_header);
         }
@@ -190,12 +190,12 @@ public:
         this->inc_gen();
     }
 
-    void remove_all(const BtreeConfig& cfg) override {
+    void remove_all(const BtreeConfig&) override {
         this->sub_entries(this->total_entries());
         this->invalidate_edge();
         this->inc_gen();
-        get_var_node_header()->m_init_available_space = cfg.node_data_size();
-        get_var_node_header()->m_tail_arena_offset = cfg.node_data_size();
+        get_var_node_header()->m_init_available_space = this->node_data_size();
+        get_var_node_header()->m_tail_arena_offset = this->node_data_size();
         get_var_node_header()->m_available_space = get_var_node_header()->m_tail_arena_offset - sizeof(var_node_header);
 #ifndef NDEBUG
         validate_sanity();
@@ -567,8 +567,6 @@ public:
 #endif
         return {};
     }
-
-    uint8_t* get_node_context() override { return uintptr_cast(this) + sizeof(VariableNode< K, V >); }
 
     /*int compare_nth_key_range(const BtreeKeyRange& range, uint32_t ind) const {
         return get_nth_key(ind, false).compare_range(range);
