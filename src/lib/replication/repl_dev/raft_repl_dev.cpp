@@ -473,7 +473,7 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreq
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     if (rreqs.size() == 0) { return; }
 
-    std::vector< ::flatbuffers::Offset< RequestEntry > > entries;
+    std::vector<::flatbuffers::Offset< RequestEntry > > entries;
     entries.reserve(rreqs.size());
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
@@ -996,6 +996,42 @@ void RaftReplDev::cp_flush(CP*) {
 }
 
 void RaftReplDev::cp_cleanup(CP*) {}
+
+void RaftReplDev::gc_repl_reqs() {
+    std::vector< int64_t > expired_keys;
+    m_state_machine->iterate_repl_reqs([this, &expired_keys](auto key, auto rreq) {
+        if (rreq->is_proposer()) {
+            // don't clean up proposer's request
+            return;
+        }
+
+        if (rreq->is_expired()) {
+            expired_keys.push_back(key);
+            RD_LOGD("rreq=[{}] is expired, cleaning up", rreq->to_compact_string());
+
+            // do garbage collection
+            // 1. free the allocated blocks
+            if (rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) {
+                auto blkid = rreq->local_blkid();
+                data_service().async_free_blk(blkid).thenValue([this, blkid](auto&& err) {
+                    HS_LOG_ASSERT(!err, "freeing blkid={} upon error failed, potential to cause blk leak",
+                                  blkid.to_string());
+                    RD_LOGD("blkid={} freed successfully", blkid.to_string());
+                });
+            }
+
+            // 2. remove from the m_repl_key_req_map
+            // handle_error during fetch data response might have already removed the rreq from the this map
+            if (m_repl_key_req_map.find(rreq->rkey()) != m_repl_key_req_map.end()) {
+                m_repl_key_req_map.erase(rreq->rkey());
+            }
+        }
+    });
+
+    for (auto const& l : expired_keys) {
+        m_state_machine->unlink_lsn_to_req(l);
+    }
+}
 
 void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
     // apply the log entry if the lsn is between checkpoint lsn and durable commit lsn

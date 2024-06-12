@@ -103,6 +103,7 @@ public:
     std::string to_string() const;
     std::string to_compact_string() const;
     Clock::time_point created_time() const { return m_start_time; }
+    bool is_expired() const;
 
     /////////////////////// All Modifiers methods //////////////////
 

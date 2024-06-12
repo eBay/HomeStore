@@ -176,6 +176,8 @@ public:
 
     void wait_for_logstore_ready() { m_data_journal->wait_for_log_store_ready(); }
 
+    void gc_repl_reqs();
+
     /**
      * Flush the durable commit LSN to the superblock
      */

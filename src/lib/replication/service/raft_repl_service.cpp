@@ -335,7 +335,10 @@ void RaftReplService::start_reaper_thread() {
             // Schedule the rdev garbage collector timer
             m_rdev_gc_timer_hdl = iomanager.schedule_thread_timer(
                 HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 * 1000, true /* recurring */,
-                nullptr, [this](void*) { gc_repl_devs(); });
+                nullptr, [this](void*) {
+                    gc_repl_reqs();
+                    gc_repl_devs();
+                });
 
             // Check for queued fetches at the minimum every second
             uint64_t interval_ns =
@@ -352,9 +355,7 @@ void RaftReplService::start_reaper_thread() {
             p.setValue();
         } else {
             // Cancel all recurring timers started
-#if 0
             iomanager.cancel_timer(m_rdev_gc_timer_hdl, true /* wait */);
-#endif
             iomanager.cancel_timer(m_rdev_fetch_timer_hdl, true /* wait */);
             iomanager.cancel_timer(m_flush_durable_commit_timer_hdl, true /* wait */);
         }
@@ -385,6 +386,14 @@ void RaftReplService::fetch_pending_data() {
 
         rdev->check_and_fetch_remote_data(std::move(next_batch));
         lg.lock();
+    }
+}
+
+void RaftReplService::gc_repl_reqs() {
+    std::shared_lock lg(m_rd_map_mtx);
+    for (auto it = m_rd_map.begin(); it != m_rd_map.end(); ++it) {
+        auto rdev = std::dynamic_pointer_cast< RaftReplDev >(it->second);
+        rdev->gc_repl_reqs();
     }
 }
 

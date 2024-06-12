@@ -92,7 +92,7 @@ using AsyncNotifier = folly::Promise< folly::Unit >;
 class RaftReplDev;
 class RaftStateMachine : public nuraft::state_machine {
 private:
-    folly::ConcurrentHashMap< int64_t, repl_req_ptr_t > m_lsn_req_map;
+    folly::ConcurrentHashMap< int64_t /*lsn*/, repl_req_ptr_t > m_lsn_req_map;
     RaftReplDev& m_rd;
     nuraft::ptr< nuraft::buffer > m_success_ptr; // Preallocate the success return to raft
     // iomgr::timer_handle_t m_wait_blkid_write_timer_hdl{iomgr::null_timer_handle};
@@ -121,8 +121,11 @@ public:
     repl_req_ptr_t localize_journal_entry_prepare(nuraft::log_entry& lentry);
     repl_req_ptr_t localize_journal_entry_finish(nuraft::log_entry& lentry);
     void link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn);
+    void unlink_lsn_to_req(int64_t lsn);
     repl_req_ptr_t lsn_to_req(int64_t lsn);
     nuraft_mesg::repl_service_ctx* group_msg_service();
+
+    void iterate_repl_reqs(std::function< void(int64_t, repl_req_ptr_t rreq) > const& cb);
 
     std::string rdev_name() const;
 

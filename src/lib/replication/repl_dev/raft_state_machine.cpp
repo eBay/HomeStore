@@ -198,9 +198,20 @@ raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params
     return m_success_ptr;
 }
 
+void RaftStateMachine::iterate_repl_reqs(std::function< void(int64_t, repl_req_ptr_t rreq) > const& cb) {
+    for (auto [key, rreq] : m_lsn_req_map) {
+        cb(key, rreq);
+    }
+}
+
 uint64_t RaftStateMachine::last_commit_index() { return uint64_cast(m_rd.get_last_commit_lsn()); }
 
 void RaftStateMachine::become_ready() { m_rd.become_ready(); }
+
+void RaftStateMachine::unlink_lsn_to_req(int64_t lsn) {
+    auto const it = m_lsn_req_map.find(lsn);
+    if (it != m_lsn_req_map.cend()) { m_lsn_req_map.erase(lsn); }
+}
 
 void RaftStateMachine::link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn) {
     rreq->set_lsn(lsn);
