@@ -432,8 +432,9 @@ struct VarsizeBlkAllocatorTest : public ::testing::Test, BlkAllocatorTest {
     virtual void SetUp() override {};
     virtual void TearDown() override {};
 
-    void create_allocator(const bool use_slabs = true) {
-        VarsizeBlkAllocConfig cfg{4096,  4096, 4096u,    static_cast< uint64_t >(m_total_count) * 4096,
+    void create_allocator(const bool use_slabs = true, uint64_t size = 0) {
+        if (size == 0) { size = static_cast< uint64_t >(m_total_count); }
+        VarsizeBlkAllocConfig cfg{4096,  4096, 4096u,    size * 4096,
                                   false, "",   use_slabs};
         m_allocator = std::make_unique< VarsizeBlkAllocator >(cfg, true, 0);
     }
@@ -635,28 +636,34 @@ TEST_F(FixedBlkAllocatorTest, alloc_free_fixed_size) {
 }
 
 namespace {
-void alloc_free_var_contiguous_unirandsize(VarsizeBlkAllocatorTest* const block_test_pointer) {
+void alloc_free_var_contiguous_unirandsize(VarsizeBlkAllocatorTest* const block_test_pointer, uint64_t capacity) {
     const auto nthreads{
         std::clamp< uint32_t >(std::thread::hardware_concurrency(), 2, SISL_OPTIONS["num_threads"].as< uint32_t >())};
+    auto max_rand_size{std::max(capacity/4096, uint64_t(2))};
+    std::uniform_int_distribution< blk_count_t > s_rand_size_generator{1, static_cast< blk_count_t >(max_rand_size)};
+
+    auto rand_func =  [&s_rand_size_generator]() -> blk_count_t {
+        return s_rand_size_generator(g_re);
+    };
     const uint8_t prealloc_pct{5};
     LOGINFO("Step 1: Pre allocate {}% of total blks which is {} blks in {} threads", prealloc_pct,
-            block_test_pointer->m_total_count * prealloc_pct / 100, nthreads);
+            capacity * prealloc_pct / 100, nthreads);
     [[maybe_unused]] const auto preload_alloced{
-        block_test_pointer->preload(block_test_pointer->m_total_count * prealloc_pct / 100, true /* is_contiguous */,
-                                    BlkAllocatorTest::uniform_rand_size, true)};
+        block_test_pointer->preload(capacity * prealloc_pct / 100, true /* is_contiguous */,
+                                    rand_func, true)};
 
     auto num_iters{SISL_OPTIONS["iters"].as< uint64_t >()};
     const uint64_t divisor{1024};
-    if (num_iters > block_test_pointer->m_total_count / divisor) {
+    if (num_iters > capacity / divisor) {
         LOGINFO("For contiguous_unirandsize test, iters={} cannot be more than 1/{}th of total count={}. Adjusting",
-                num_iters, divisor, block_test_pointer->m_total_count);
-        num_iters = block_test_pointer->m_total_count / divisor;
+                num_iters, divisor, capacity);
+        num_iters = capacity / divisor;
     }
     const uint8_t runtime_pct{10};
     LOGINFO("Step 2: Do alloc/free contiguous blks with completely random size ratio_range=[{}-{}] threads={} iters={}",
             prealloc_pct, runtime_pct, nthreads, num_iters);
     const auto result{block_test_pointer->do_alloc_free(num_iters, true /* is_contiguous */,
-                                                        BlkAllocatorTest::uniform_rand_size, runtime_pct,
+                                                        rand_func, runtime_pct,
                                                         false /* round_blks */, true)};
 }
 } // namespace
@@ -664,13 +671,20 @@ void alloc_free_var_contiguous_unirandsize(VarsizeBlkAllocatorTest* const block_
 TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_unirandsize_with_slabs) {
     // test with slabs
     create_allocator();
-    alloc_free_var_contiguous_unirandsize(this);
+    alloc_free_var_contiguous_unirandsize(this, m_total_count);
+}
+
+TEST_F(VarsizeBlkAllocatorTest, small_allocator_with_slab) {
+    // test with slabs
+    auto size = 4224;
+    create_allocator(true, size);
+    alloc_free_var_contiguous_unirandsize(this, size);
 }
 
 TEST_F(VarsizeBlkAllocatorTest, alloc_free_var_contiguous_unirandsize_without_slabs) {
     // test without slabs
     create_allocator(false);
-    alloc_free_var_contiguous_unirandsize(this);
+    alloc_free_var_contiguous_unirandsize(this, m_total_count);
 }
 
 namespace {
