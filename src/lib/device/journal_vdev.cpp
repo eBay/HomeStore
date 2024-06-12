@@ -153,6 +153,19 @@ void JournalVirtualDev::remove_journal_chunks(std::vector< shared< Chunk > >& ch
     }
 }
 
+void JournalVirtualDev::release_chunk_to_pool(shared< Chunk > chunk) {
+    // Clear the private chunk data before adding to pool.
+    auto* data = r_cast< JournalChunkPrivate* >(const_cast< uint8_t* >(chunk->user_private()));
+    *data = JournalChunkPrivate{};
+    update_chunk_private(chunk, data);
+
+    // We ideally want to zero out chunks as chunks are reused after free across
+    // logdev's. But zero out chunk is very expensive, We look at crc mismatches
+    // to know the end offset of the log dev during recovery.
+    m_chunk_pool->enqueue(chunk);
+    LOGINFOMOD(journalvdev, "Released chunk to pool {}", chunk->to_string());
+}
+
 void JournalVirtualDev::update_chunk_private(shared< Chunk >& chunk, JournalChunkPrivate* private_data) {
     sisl::blob private_blob{r_cast< uint8_t* >(private_data), sizeof(JournalChunkPrivate)};
     chunk->set_user_private(private_blob);
@@ -173,7 +186,7 @@ shared< JournalVirtualDev::Descriptor > JournalVirtualDev::open(logdev_id_t logd
 
     LOGINFOMOD(journalvdev, "Opened journal vdev descriptor log_dev={}", logdev_id);
     for (auto& chunk : it->second->m_journal_chunks) {
-        LOGINFOMOD(journalvdev, " log_dev={} end_of_chunk={} chunk={}", logdev_id, get_end_of_chunk(chunk),
+        LOGINFOMOD(journalvdev, "log_dev={} end_of_chunk={} chunk {}", logdev_id, to_hex(get_end_of_chunk(chunk)),
                    chunk->to_string());
     }
     return it->second;
@@ -243,7 +256,7 @@ off_t JournalVirtualDev::Descriptor::alloc_next_append_blk(size_t sz) {
 
     if ((tail_offset() + static_cast< off_t >(sz)) >= m_end_offset) {
         // not enough space left, add a new chunk.
-        LOGDEBUGMOD(journalvdev, "No space left for size {} Creating chunk desc {}", sz, to_string());
+        LOGINFOMOD(journalvdev, "No space left for size {} Creating chunk desc {}", sz, to_string());
 
 #ifdef _PRERELEASE
         if (hs()->crash_simulator().crash_if_flip_set("abort_before_update_eof_cur_chunk")) { return tail_offset(); }
@@ -374,13 +387,13 @@ void JournalVirtualDev::Descriptor::sync_pwritev(const iovec* iov, int iovcnt, o
 }
 
 /////////////////////////////// Read Section //////////////////////////////////
-size_t JournalVirtualDev::Descriptor::sync_next_read(uint8_t* buf, size_t size_rd) {
-    if (m_journal_chunks.empty()) { return 0; }
+int64_t JournalVirtualDev::Descriptor::sync_next_read(uint8_t* buf, size_t size_rd) {
+    if (m_journal_chunks.empty()) { return -1; }
 
     HS_REL_ASSERT_LE(m_seek_cursor, m_end_offset, "seek_cursor {} exceeded end_offset {}", m_seek_cursor, m_end_offset);
     if (m_seek_cursor >= m_end_offset) {
         LOGTRACEMOD(journalvdev, "sync_next_read reached end of chunks");
-        return 0;
+        return -1;
     }
 
     auto [chunk, _, offset_in_chunk] = offset_to_chunk(m_seek_cursor);
@@ -401,6 +414,10 @@ size_t JournalVirtualDev::Descriptor::sync_next_read(uint8_t* buf, size_t size_r
         // truncate size to what is left;
         size_rd = end_of_chunk - offset_in_chunk;
         across_chunk = true;
+        if (size_rd == 0) {
+            // If there are no more data in the current chunk, move the seek_cursor to the next chunk.
+            m_seek_cursor += (chunk->size() - end_of_chunk);
+        }
     }
 
     if (buf == nullptr) { return size_rd; }
@@ -506,6 +523,7 @@ off_t JournalVirtualDev::Descriptor::dev_offset(off_t nbytes) const {
 }
 
 void JournalVirtualDev::Descriptor::update_data_start_offset(off_t offset) {
+    // Refactor this code to truncate.
     if (!m_journal_chunks.empty()) {
         m_data_start_offset = offset;
         auto data_start_offset_aligned = sisl::round_down(m_data_start_offset, m_vdev.info().chunk_size);
@@ -543,11 +561,9 @@ void JournalVirtualDev::Descriptor::update_tail_offset(off_t tail) {
     LOGINFOMOD(journalvdev, "Updated tail offset arg 0x{} desc {} ", to_hex(tail), to_string());
 }
 
-void JournalVirtualDev::Descriptor::truncate(off_t truncate_offset) {
+off_t JournalVirtualDev::Descriptor::truncate(off_t truncate_offset) {
     const off_t ds_off = data_start_offset();
-
     COUNTER_INCREMENT(m_vdev.m_metrics, vdev_truncate_count, 1);
-
     HS_PERIODIC_LOG(DEBUG, journalvdev, "truncating to logical offset: 0x{} desc {}", to_hex(truncate_offset),
                     to_string());
 
@@ -560,11 +576,27 @@ void JournalVirtualDev::Descriptor::truncate(off_t truncate_offset) {
     }
 
     // Find the chunk which has the truncation offset. This will be the new
-    // head chunk in the list. We first update the is_head is true of this chunk.
+    // head chunk in the list. We first update the is_head to true for that new head chunk.
     // So if a crash happens after this, we could have two chunks which has is_head
     // true in the list and during recovery we select head with the highest creation
-    // timestamp and reuse or cleanup the other.
-    auto [new_head_chunk, _, offset_in_chunk] = offset_to_chunk(truncate_offset);
+    // timestamp and cleanup the other. We check if the truncation offset happens to be
+    // between the end_of_chunk mark and actual chunk end. In that case there is not data
+    // in that chunk and we release this chunk and select the next chunk.
+    bool update_truncate_offset = false;
+    auto [new_head_chunk, index, offset_in_chunk] = offset_to_chunk(truncate_offset);
+    auto end_new_head_chunk = m_vdev.get_end_of_chunk(new_head_chunk);
+    if (offset_in_chunk >= static_cast< int64_t >(end_new_head_chunk)) {
+        // If the truncation offset is same as end_of_chunk, we dont have any more
+        // data in this chunk to read. Select the next chunk. Else fall through which
+        //  means all chunks no chunks left in in this journal and all chunks will be released.
+        if (++index <= (m_journal_chunks.size() - 1)) {
+            // Go to the next chunk to make it the new head chunk.
+            new_head_chunk = m_journal_chunks[index];
+            update_truncate_offset = true;
+            size_to_truncate += (new_head_chunk->size() - end_new_head_chunk);
+        }
+    }
+
     auto* private_data = r_cast< JournalChunkPrivate* >(const_cast< uint8_t* >(new_head_chunk->user_private()));
     private_data->is_head = true;
     private_data->logdev_id = m_logdev_id;
@@ -572,34 +604,63 @@ void JournalVirtualDev::Descriptor::truncate(off_t truncate_offset) {
 
     // Find all chunks which needs to be removed from the start of m_journal_chunks.
     // We stop till the truncation offset. Start from the old data_start_offset.
-    // Align the data_start_offset to the chunk_size as we deleting chunks and
-    // all chunks are same size in a journal vdev.
-    uint32_t start = sisl::round_down(ds_off, m_vdev.info().chunk_size);
+    // All the chunks which are covered inside the truncate offset are released.
+    // cover_offset is a logical offset.
+    index = 0;
+    off_t tail_off =
+        static_cast< off_t >(data_start_offset() + m_write_sz_in_total.load(std::memory_order_relaxed)) + m_reserved_sz;
+    auto chunk_size = m_vdev.info().chunk_size;
+    HS_PERIODIC_LOG(DEBUG, journalvdev, "Truncate begin truncate {} desc {}", to_hex(truncate_offset), to_string());
+
+#ifdef _PRERELEASE
+    for (auto it = m_journal_chunks.begin(); it != m_journal_chunks.end(); ++it) {
+        auto chunk = *it;
+        auto* private_data = r_cast< JournalChunkPrivate* >(const_cast< uint8_t* >(chunk->user_private()));
+        LOGINFOMOD(journalvdev, "log_dev={} chunk_id={} is_head={}", m_logdev_id, chunk->chunk_id(),
+                   private_data->is_head)
+    }
+#endif
+
+    off_t cover_offset = sisl::round_down(data_start_offset(), chunk_size);
+    auto total_num_chunks = m_journal_chunks.size();
     for (auto it = m_journal_chunks.begin(); it != m_journal_chunks.end();) {
         auto chunk = *it;
-        start += chunk->size();
+        off_t end_of_chunk = m_vdev.get_end_of_chunk(chunk);
+        off_t chunk_hole = 0;
+        if (index == total_num_chunks - 1) {
+            // If its the last chunk, only read upto the tail_offset
+            // There are no holes in the last chunk.
+            cover_offset += (tail_off % chunk_size);
+        } else {
+            // For other chunks take the whole size.
+            cover_offset += chunk_size;
+            chunk_hole = (chunk_size - end_of_chunk);
+        }
 
-        // Also if its the last chunk and there is no data after truncate, we release chunk.
-        auto write_sz_in_total = m_write_sz_in_total.load(std::memory_order_relaxed);
-        if (start >= truncate_offset) { break; }
+        index++;
 
-        m_total_size -= chunk->size();
-        it = m_journal_chunks.erase(it);
+        // Check if the offset is inside the truncate offset. We also check if the truncate offset lies
+        // between end_of_chunk - chunk_size. If either condition satifies, we release the chunks.
+        if (cover_offset <= truncate_offset || ((cover_offset - chunk_hole) <= truncate_offset)) {
+            m_total_size -= chunk->size();
+            it = m_journal_chunks.erase(it);
 
-        // Clear the private chunk data before adding to pool.
-        auto* data = r_cast< JournalChunkPrivate* >(const_cast< uint8_t* >(chunk->user_private()));
-        *data = JournalChunkPrivate{};
-        m_vdev.update_chunk_private(chunk, data);
-
-        // We ideally want to zero out chunks as chunks are reused after free across
-        // logdev's. But zero out chunk is very expensive, We look at crc mismatches
-        // to know the end offset of the log dev during recovery.
-        // Format and add back to pool.
-        m_vdev.m_chunk_pool->enqueue(chunk);
-        LOGINFOMOD(journalvdev, "After truncate released chunk {}", chunk->to_string());
+            // Release the chunk back to pool.
+            LOGINFOMOD(journalvdev,
+                       "Released chunk_id={} log_dev={} cover={} truncate_offset={} tail={} end_of_chunk={} desc {}",
+                       chunk->chunk_id(), m_logdev_id, to_hex(cover_offset), to_hex(truncate_offset), to_hex(tail_off),
+                       m_vdev.get_end_of_chunk(chunk), to_string());
+            m_vdev.release_chunk_to_pool(chunk);
+        } else {
+            ++it;
+        }
     }
 
-    // Update our start offset, to keep track of actual size
+    if (update_truncate_offset) {
+        // Update the truncate offset to align with the chunk size.
+        truncate_offset = sisl::round_up(truncate_offset, m_vdev.info().chunk_size);
+    }
+
     HS_REL_ASSERT_LE(truncate_offset, m_end_offset, "truncate offset less than end offset");
     update_data_start_offset(truncate_offset);
 
@@ -607,7 +668,17 @@ void JournalVirtualDev::Descriptor::truncate(off_t truncate_offset) {
     m_write_sz_in_total.fetch_sub(size_to_truncate, std::memory_order_relaxed);
     m_truncate_done = true;
 
-    HS_PERIODIC_LOG(INFO, journalvdev, "After truncate desc {}", to_string());
+#ifdef _PRERELEASE
+    for (auto it = m_journal_chunks.begin(); it != m_journal_chunks.end(); ++it) {
+        auto chunk = *it;
+        auto* private_data = r_cast< JournalChunkPrivate* >(const_cast< uint8_t* >(chunk->user_private()));
+        LOGINFOMOD(journalvdev, "log_dev={} chunk_id={} is_head={}", m_logdev_id, chunk->chunk_id(),
+                   private_data->is_head)
+    }
+#endif
+
+    HS_PERIODIC_LOG(DEBUG, journalvdev, "Truncate end truncate {} desc {}", to_hex(truncate_offset), to_string());
+    return data_start_offset();
 }
 
 #if 0

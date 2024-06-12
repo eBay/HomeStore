@@ -125,7 +125,7 @@ logdev_id_t LogStoreService::create_new_logdev() {
     auto logdev = create_new_logdev_internal(logdev_id);
     logdev->start(true /* format */);
     COUNTER_INCREMENT(m_metrics, logdevs_count, 1);
-    LOGINFO("Created log_dev={}", logdev_id);
+    HS_LOG(INFO, logstore, "Created log_dev={}", logdev_id);
     return logdev_id;
 }
 
@@ -149,12 +149,12 @@ void LogStoreService::destroy_log_dev(logdev_id_t logdev_id) {
 
     m_id_logdev_map.erase(it);
     COUNTER_DECREMENT(m_metrics, logdevs_count, 1);
-    LOGINFO("Removed log_dev={}", logdev_id);
+    HS_LOG(INFO, logstore, "Removed log_dev={}", logdev_id);
 }
 
 void LogStoreService::delete_unopened_logdevs() {
     for (auto logdev_id : m_unopened_logdev) {
-        LOGINFO("Deleting unopened log_dev={}", logdev_id);
+        HS_LOG(INFO, logstore, "Deleting unopened log_dev={}", logdev_id);
         destroy_log_dev(logdev_id);
     }
     m_unopened_logdev.clear();
@@ -178,7 +178,7 @@ void LogStoreService::open_logdev(logdev_id_t logdev_id) {
         LOGDEBUGMOD(logstore, "log_dev={} does not exist, created!", logdev_id);
     }
     m_unopened_logdev.erase(logdev_id);
-    LOGDEBUGMOD(logstore, "Opened log_dev={}", logdev_id);
+    HS_LOG(INFO, logstore, "Opened log_dev={}", logdev_id);
 }
 
 std::vector< std::shared_ptr< LogDev > > LogStoreService::get_all_logdevs() {
@@ -206,7 +206,7 @@ void LogStoreService::logdev_super_blk_found(const sisl::byte_view& buf, void* m
         folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
         std::shared_ptr< LogDev > logdev;
         auto id = sb->logdev_id;
-        LOGDEBUGMOD(logstore, "Log dev superblk found logdev={}", id);
+        HS_LOG(DEBUG, logstore, "Log dev superblk found logdev={}", id);
         const auto it = m_id_logdev_map.find(id);
         // We could update the logdev map either with logdev or rollback superblks found callbacks.
         if (it != m_id_logdev_map.end()) {
@@ -235,7 +235,7 @@ void LogStoreService::rollback_super_blk_found(const sisl::byte_view& buf, void*
         folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
         std::shared_ptr< LogDev > logdev;
         auto id = rollback_sb->logdev_id;
-        LOGDEBUGMOD(logstore, "Log dev rollback superblk found logdev={}", id);
+        HS_LOG(DEBUG, logstore, "Log dev rollback superblk found logdev={}", id);
         const auto it = m_id_logdev_map.find(id);
         HS_REL_ASSERT((it != m_id_logdev_map.end()),
                       "found a rollback_super_blk of logdev id {}, but the logdev with id {} doesnt exist", id);

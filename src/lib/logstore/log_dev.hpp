@@ -569,7 +569,7 @@ public:
     sisl::byte_view group_in_next_page();
 
 private:
-    sisl::byte_view read_next_bytes(uint64_t nbytes);
+    sisl::byte_view read_next_bytes(uint64_t nbytes, bool& end_of_stream);
 
 private:
     JournalVirtualDev* m_vdev;
