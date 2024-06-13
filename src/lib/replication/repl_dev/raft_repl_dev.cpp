@@ -1038,6 +1038,10 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
 
     // 1. Get the log entry and prepare rreq
     nuraft::log_entry const* lentry = r_cast< nuraft::log_entry const* >(buf.bytes());
+
+    // TODO: Handle the case where the log entry is not app_log, example config logs
+    if(lentry->get_val_type() != nuraft::log_val_type::app_log) { return; }
+
     repl_journal_entry* jentry = r_cast< repl_journal_entry* >(lentry->get_buf().data_begin());
     RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
                       "Mismatched version of journal entry received from RAFT peer");
