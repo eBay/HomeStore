@@ -237,8 +237,11 @@ public:
             if (token.devs_.empty()) {
                 auto const devs = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
                 for (const auto& name : devs) {
-                    // iomgr::DriveInterface::emulate_drive_type(name, iomgr::drive_type::block_hdd);
-                    token.devs_.emplace_back(name, homestore::HSDevType::Data);
+                    // TODO:: Add support for fast and data devices in device_list
+                    token.devs_.emplace_back(name,
+                                             token.devs_.empty()
+                                                 ? homestore::HSDevType::Fast
+                                                 : homestore::HSDevType::Data); // First device is fast device
                 }
             } else {
                 LOGINFO("Taking input dev_list: {}",
@@ -246,9 +249,8 @@ public:
                                         [](const std::string& s, const homestore::dev_info& dinfo) {
                                             return s.empty() ? dinfo.dev_name : s + "," + dinfo.dev_name;
                                         }));
-
-                if (init_device && !fake_restart) { init_raw_devices(token.devs_); }
             }
+            if (init_device && !fake_restart) init_raw_devices(token.devs_);
         } else {
             /* create files */
             LOGINFO("creating {} device files with each of size {} ", ndevices, homestore::in_bytes(dev_size));
@@ -265,11 +267,12 @@ public:
             }
         }
 
-        if (!fake_restart)
-            HS_REL_ASSERT_EQ(token.devs_.size() > 2, true,
-                             "if not fake restart, we need at least 3 device to run the ut of simulating restart with "
-                             "missing drive. current device num is {}",
-                             token.devs_.size());
+        if (!fake_restart && token.name_ == "test_data_service")
+            HS_REL_ASSERT_EQ(
+                token.devs_.size() > 2, true,
+                "if not fake restart, we need at least 3 device to run the data_service ut of simulating restart with "
+                "missing drive. current device num is {}",
+                token.devs_.size());
 
         if (is_spdk) {
             LOGINFO("Spdk with more than 2 threads will cause overburden test systems, changing nthreads to 2");
@@ -333,7 +336,8 @@ public:
                    .chunk_sel_type = svc_params[HS_SERVICE::DATA].custom_chunk_selector
                        ? chunk_selector_type_t::CUSTOM
                        : chunk_selector_type_t::ROUND_ROBIN}},
-                 {HS_SERVICE::INDEX, {.size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
+                 {HS_SERVICE::INDEX,
+                  {.dev_type = homestore::HSDevType::Fast, .size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
                  {HS_SERVICE::REPLICATION,
                   {.size_pct = svc_params[HS_SERVICE::REPLICATION].size_pct,
                    .alloc_type = svc_params[HS_SERVICE::REPLICATION].blkalloc_type,

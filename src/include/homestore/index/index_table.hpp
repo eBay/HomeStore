@@ -23,6 +23,7 @@
 #include <homestore/index_service.hpp>
 #include <homestore/checkpoint/cp_mgr.hpp>
 #include <homestore/index/wb_cache_base.hpp>
+#include <homestore/btree/detail/btree_internal.hpp>
 #include <iomgr/iomgr_flip.hpp>
 
 SISL_LOGGING_DECL(wbcache)
@@ -127,12 +128,12 @@ protected:
         auto prev_state = idx_node->m_idx_buf->m_state.exchange(index_buf_state_t::DIRTY);
         if (prev_state == index_buf_state_t::CLEAN) {
             // It was clean before, dirtying it first time, add it to the wb_cache list to flush
-            HS_DBG_ASSERT_EQ(idx_node->m_idx_buf->m_dirtied_cp_id, cp_ctx->id(),
+            BT_DBG_ASSERT_EQ(idx_node->m_idx_buf->m_dirtied_cp_id, cp_ctx->id(),
                              "Writing a node which was not acquired by this cp");
             wb_cache().write_buf(node, idx_node->m_idx_buf, cp_ctx);
             LOGTRACEMOD(wbcache, "add to dirty list cp {} {}", cp_ctx->id(), idx_node->m_idx_buf->to_string());
         } else {
-            HS_DBG_ASSERT_NE(
+            BT_DBG_ASSERT_NE(
                 (int)prev_state, (int)index_buf_state_t::FLUSHING,
                 "Writing on a node buffer which was currently in flushing state on cur_cp={} buffer_cp_id={}",
                 cp_ctx->id(), idx_node->m_idx_buf->m_dirtied_cp_id)
@@ -211,7 +212,7 @@ protected:
         auto const last_parent_key = parent_node->get_last_key< K >();
         auto const is_parent_edge_node = parent_node->has_valid_edge();
         if ((parent_node->total_entries() == 0) && !is_parent_edge_node) {
-            HS_LOG_ASSERT(false, "Parent node={} is empty and not an edge node but was asked to repair",
+            BT_LOG_ASSERT(false, "Parent node={} is empty and not an edge node but was asked to repair",
                           parent_node->node_id());
             return btree_status_t::not_found;
         }
@@ -222,7 +223,7 @@ protected:
         auto ret = this->get_child_and_lock_node(parent_node, 0, child_info, child_node, locktype_t::READ,
                                                  locktype_t::READ, cp_ctx);
         if (ret != btree_status_t::success) {
-            HS_LOG_ASSERT(false, "Parent node={} repair failed, because first child_node get has failed with ret={}",
+            BT_LOG_ASSERT(false, "Parent node={} repair failed, because first child_node get has failed with ret={}",
                           parent_node->node_id(), enum_name(ret));
             return ret;
         }
@@ -239,7 +240,7 @@ protected:
         BtreeNodeList new_parent_nodes;
         do {
             if (child_node->has_valid_edge()) {
-                HS_DBG_ASSERT(!is_parent_edge_node,
+                BT_DBG_ASSERT(!is_parent_edge_node,
                               "Child node={} is an edge node but parent_node={} is not an edge node",
                               child_node->node_id(), parent_node->node_id());
                 cur_parent->set_edge_value(BtreeLinkInfo{child_node->node_id(), child_node->link_version()});
@@ -277,7 +278,7 @@ protected:
             // Move to the next child node
             auto const next_node_id = child_node->next_bnode();
             if (next_node_id == empty_bnodeid) {
-                HS_LOG_ASSERT(
+                BT_LOG_ASSERT(
                     false,
                     "Child node={} next_node_id is empty, while its not a edge node, parent_node={} repair is partial",
                     child_node->node_id(), parent_node->node_id());
@@ -287,7 +288,7 @@ protected:
 
             ret = this->read_and_lock_node(next_node_id, child_node, locktype_t::READ, locktype_t::READ, cp_ctx);
             if (ret != btree_status_t::success) {
-                HS_LOG_ASSERT(false, "Parent node={} repair is partial, because child_node get has failed with ret={}",
+                BT_LOG_ASSERT(false, "Parent node={} repair is partial, because child_node get has failed with ret={}",
                               parent_node->node_id(), enum_name(ret));
                 break;
             }
