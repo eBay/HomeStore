@@ -308,8 +308,8 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
     // according to their capacity
 
     // the total size of all pdevs of a certain type
-    auto total_type_size =
-        std::accumulate(pdevs.begin(), pdevs.end(), 0u, [](int r, const PhysicalDev* a) { return r + a->data_size(); });
+    uint64_t total_type_size = std::accumulate(pdevs.begin(), pdevs.end(), 0ull,
+                                               [](uint64_t r, const PhysicalDev* a) { return r + a->data_size(); });
 
     LOGINFO("total size of type {} in this homestore is  {}", vparam.dev_type, total_type_size)
 
@@ -322,6 +322,10 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
         // the total number of chunks will be created in this pdev
         auto total_chunk_num_in_pdev =
             static_cast< uint32_t >(vparam.num_chunks * (pdev->data_size() / static_cast< float >(total_type_size)));
+
+        RELEASE_ASSERT(vparam.num_chunks >= total_chunk_num_in_pdev,
+                       "chunks in pdev {} is {},  larger than total chunks {} , which is expected to be created ",
+                       pdev->get_devname(), total_chunk_num_in_pdev, vparam.num_chunks);
 
         LOGINFO("{} chunks is created on pdev {} for vdev {}, pdev data size is {}", total_chunk_num_in_pdev,
                 pdev->get_devname(), vparam.vdev_name, pdev->data_size());
@@ -345,7 +349,6 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
     }
 
     LOGINFO("{} chunks is created for vdev {}, expected {}", total_created_chunks, vparam.vdev_name, vparam.num_chunks);
-
     // Handle any initialization needed.
     vdev->init();
 
