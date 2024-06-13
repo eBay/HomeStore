@@ -336,7 +336,8 @@ public:
                    .chunk_sel_type = svc_params[HS_SERVICE::DATA].custom_chunk_selector
                        ? chunk_selector_type_t::CUSTOM
                        : chunk_selector_type_t::ROUND_ROBIN}},
-                 {HS_SERVICE::INDEX, {.size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
+                 {HS_SERVICE::INDEX,
+                  {.dev_type = homestore::HSDevType::Fast, .size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
                  {HS_SERVICE::REPLICATION,
                   {.size_pct = svc_params[HS_SERVICE::REPLICATION].size_pct,
                    .alloc_type = svc_params[HS_SERVICE::REPLICATION].blkalloc_type,
