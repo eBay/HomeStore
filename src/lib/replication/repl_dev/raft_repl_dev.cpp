@@ -37,10 +37,9 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
 
     if (load_existing) {
         m_data_journal = std::make_shared< ReplLogStore >(
-            *this, *m_state_machine,
+            *this, *m_state_machine, m_rd_sb->logdev_id, m_rd_sb->logstore_id,
             [this](logstore_seq_num_t lsn, log_buffer buf, void* key) { on_log_found(lsn, buf, key); },
-            [this](std::shared_ptr< HomeLogStore > hs, logstore_seq_num_t lsn) { m_log_store_replay_done = true; },
-            m_rd_sb->logdev_id, m_rd_sb->logstore_id);
+            [this](std::shared_ptr< HomeLogStore > hs, logstore_seq_num_t lsn) { m_log_store_replay_done = true; });
         m_next_dsn = m_rd_sb->last_applied_dsn + 1;
         m_commit_upto_lsn = m_rd_sb->durable_commit_lsn;
         m_last_flushed_commit_lsn = m_commit_upto_lsn;
@@ -62,7 +61,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
                 });
         }
     } else {
-        m_data_journal = std::make_shared< ReplLogStore >(*this, *m_state_machine, nullptr, nullptr);
+        m_data_journal = std::make_shared< ReplLogStore >(*this, *m_state_machine);
         m_rd_sb->logdev_id = m_data_journal->logdev_id();
         m_rd_sb->logstore_id = m_data_journal->logstore_id();
         m_rd_sb->last_applied_dsn = 0;
