@@ -37,10 +37,9 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
 
     if (load_existing) {
         m_data_journal = std::make_shared< ReplLogStore >(
-            *this, *m_state_machine,
+            *this, *m_state_machine, m_rd_sb->logdev_id, m_rd_sb->logstore_id,
             [this](logstore_seq_num_t lsn, log_buffer buf, void* key) { on_log_found(lsn, buf, key); },
-            [this](std::shared_ptr< HomeLogStore > hs, logstore_seq_num_t lsn) { m_log_store_replay_done = true; },
-            m_rd_sb->logdev_id, m_rd_sb->logstore_id);
+            [this](std::shared_ptr< HomeLogStore > hs, logstore_seq_num_t lsn) { m_log_store_replay_done = true; });
         m_next_dsn = m_rd_sb->last_applied_dsn + 1;
         m_commit_upto_lsn = m_rd_sb->durable_commit_lsn;
         m_last_flushed_commit_lsn = m_commit_upto_lsn;
@@ -62,7 +61,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
                 });
         }
     } else {
-        m_data_journal = std::make_shared< ReplLogStore >(*this, *m_state_machine, nullptr, nullptr);
+        m_data_journal = std::make_shared< ReplLogStore >(*this, *m_state_machine);
         m_rd_sb->logdev_id = m_data_journal->logdev_id();
         m_rd_sb->logstore_id = m_data_journal->logstore_id();
         m_rd_sb->last_applied_dsn = 0;
@@ -1039,6 +1038,10 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
 
     // 1. Get the log entry and prepare rreq
     nuraft::log_entry const* lentry = r_cast< nuraft::log_entry const* >(buf.bytes());
+
+    // TODO: Handle the case where the log entry is not app_log, example config logs
+    if(lentry->get_val_type() != nuraft::log_val_type::app_log) { return; }
+
     repl_journal_entry* jentry = r_cast< repl_journal_entry* >(lentry->get_buf().data_begin());
     RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,
                       "Mismatched version of journal entry received from RAFT peer");

@@ -33,7 +33,9 @@ using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
 
 class HomeRaftLogStore : public nuraft::log_store {
 public:
-    HomeRaftLogStore(logdev_id_t logdev_id = UINT32_MAX, homestore::logstore_id_t logstore_id = UINT32_MAX);
+    HomeRaftLogStore(logdev_id_t logdev_id = UINT32_MAX, homestore::logstore_id_t logstore_id = UINT32_MAX,
+                     log_found_cb_t const& log_found_cb = nullptr,
+                     log_replay_done_cb_t const& log_replay_done_cb = nullptr);
     virtual ~HomeRaftLogStore() = default;
 
     void remove_store();
@@ -189,9 +191,6 @@ public:
     void truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_lsn);
 
     void wait_for_log_store_ready();
-    void register_log_found_cb(const log_found_cb_t& cb) { m_log_store->register_log_found_cb(cb); }
-
-    void register_log_replay_done_cb(const log_replay_done_cb_t& cb);
 
 private:
     logstore_id_t m_logstore_id;
