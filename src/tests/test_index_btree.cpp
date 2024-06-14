@@ -31,8 +31,6 @@ SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, test_index_btree, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_index_btree)
 
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-
 // TODO Add tests to do write,remove after recovery.
 // TODO Test with var len key with io mgr page size is 512.
 
@@ -85,7 +83,7 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     BtreeTest() : testing::Test() {}
 
     void SetUp() override {
-        m_token = test_common::HSTestHelper::start_homestore(
+        m_helper.start_homestore(
             "test_index_btree",
             {{HS_SERVICE::META, {.size_pct = 10.0}},
              {HS_SERVICE::INDEX, {.size_pct = 70.0, .index_svc_cbs = new TestIndexServiceCallbacks(this)}}});
@@ -112,14 +110,14 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
 
     void TearDown() override {
         BtreeTestHelper< TestType >::TearDown();
-        test_common::HSTestHelper::shutdown_homestore(false);
+        m_helper.shutdown_homestore(false);
         this->m_bt.reset();
         log_obj_life_counter();
     }
 
     void restart_homestore() {
-        m_token.params(HS_SERVICE::INDEX).index_svc_cbs = new TestIndexServiceCallbacks(this);
-        test_common::HSTestHelper::restart_homestore(m_token);
+        m_helper.params(HS_SERVICE::INDEX).index_svc_cbs = new TestIndexServiceCallbacks(this);
+        m_helper.restart_homestore();
     }
 
     void destroy_btree() {
@@ -130,7 +128,7 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
         this->m_bt.reset();
     }
 
-    test_common::HSTestHelper::test_token m_token;
+    test_common::HSTestHelper m_helper;
 };
 
 using BtreeTypes = testing::Types< FixedLenBtree, VarKeySizeBtree, VarValueSizeBtree, VarObjSizeBtree >;
@@ -420,7 +418,6 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
 }
 
 template < typename TestType >
-
 struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testing::Test {
     using T = TestType;
     using K = typename TestType::KeyType;
@@ -445,10 +442,13 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
 
     BtreeConcurrentTest() : testing::Test() { this->m_is_multi_threaded = true; }
 
-    void restart_homestore() { test_common::HSTestHelper::restart_homestore(m_token); }
+    void restart_homestore() {
+        m_helper.params(HS_SERVICE::INDEX).index_svc_cbs = new TestIndexServiceCallbacks(this);
+        m_helper.restart_homestore();
+    }
 
     void SetUp() override {
-        m_token = test_common::HSTestHelper::start_homestore(
+        m_helper.start_homestore(
             "test_index_btree",
             {{HS_SERVICE::META, {.size_pct = 10.0}},
              {HS_SERVICE::INDEX, {.size_pct = 70.0, .index_svc_cbs = new TestIndexServiceCallbacks(this)}}},
@@ -478,6 +478,7 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
         hs()->index_service().add_index_table(this->m_bt);
         LOGINFO("Added index table to index service");
     }
+
     void populate_shadow_map() {
         this->m_shadow_map.load(m_shadow_filename);
         ASSERT_EQ(this->m_shadow_map.size(), this->m_bt->count_keys(this->m_bt->root_node_id()))
@@ -500,12 +501,12 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
         LOGINFO("Teardown with Root bnode_id {} tree size: {}", this->m_bt->root_node_id(),
                 this->m_bt->count_keys(this->m_bt->root_node_id()));
         BtreeTestHelper< TestType >::TearDown();
-        test_common::HSTestHelper::shutdown_homestore(false);
+        m_helper.shutdown_homestore(false);
     }
 
 private:
     const std::string m_shadow_filename = "/tmp/shadow_map.txt";
-    test_common::HSTestHelper::test_token m_token;
+    test_common::HSTestHelper m_helper;
 };
 
 TYPED_TEST_SUITE(BtreeConcurrentTest, BtreeTypes);

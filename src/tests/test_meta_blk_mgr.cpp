@@ -50,7 +50,6 @@ using namespace homestore;
 
 RCU_REGISTER_INIT
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
 SISL_OPTIONS_ENABLE(logging, test_meta_blk_mgr, iomgr, test_common_setup)
 
@@ -113,7 +112,7 @@ public:
     std::vector< meta_sub_type > actual_on_complete_cb_order;
     std::vector< void* > cookies;
     bool enable_dependency_chain{false};
-    test_common::HSTestHelper::test_token m_token;
+    test_common::HSTestHelper m_helper;
 
     VMetaBlkMgrTest() = default;
     VMetaBlkMgrTest(const VMetaBlkMgrTest&) = delete;
@@ -124,10 +123,7 @@ public:
     virtual ~VMetaBlkMgrTest() override = default;
 
 protected:
-    void SetUp() override {
-        m_token =
-            test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", {{HS_SERVICE::META, {.size_pct = 85.0}}});
-    }
+    void SetUp() override { m_helper.start_homestore("test_meta_blk_mgr", {{HS_SERVICE::META, {.size_pct = 85.0}}}); }
 
     void TearDown() override {};
 
@@ -147,12 +143,12 @@ public:
     }
 
     void restart_homestore() {
-        auto before_services_starting_cb = [this]() {
+        m_helper.change_start_cb([this]() {
             register_client();
-            if (enable_dependency_chain) { register_client_inlcuding_dependencies(); }
-        };
-        m_token.cb_ = before_services_starting_cb;
-        test_common::HSTestHelper::restart_homestore(m_token);
+            if (enable_dependency_chain) { register_client_including_dependencies(); }
+        });
+
+        m_helper.restart_homestore();
     }
 
     uint64_t io_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
@@ -571,7 +567,7 @@ public:
             m_write_sbs.clear();
             m_cb_blks.clear();
         }
-        test_common::HSTestHelper::shutdown_homestore();
+        m_helper.shutdown_homestore();
     }
 
     void reset_counters() {
@@ -599,7 +595,7 @@ public:
             [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
     }
 
-    void register_client_inlcuding_dependencies() {
+    void register_client_including_dependencies() {
         enable_dependency_chain = true;
         m_mbm = &(meta_service());
         m_total_wrt_sz = m_mbm->used_size();
@@ -668,7 +664,7 @@ public:
             [this](bool success) { actual_on_complete_cb_order.push_back("F"); }, false);
     }
 
-    void deregister_client_inlcuding_dependencies() {
+    void deregister_client_including_dependencies() {
         enable_dependency_chain = false;
 
         m_mbm->deregister_handler("A");
@@ -752,7 +748,7 @@ TEST_F(VMetaBlkMgrTest, single_read_test) {
 TEST_F(VMetaBlkMgrTest, random_dependency_test) {
     reset_counters();
     m_start_time = Clock::now();
-    this->register_client_inlcuding_dependencies();
+    this->register_client_including_dependencies();
 
     // add sub super block out of order
     uint8_t* buf = iomanager.iobuf_alloc(512, 1);
@@ -805,7 +801,7 @@ TEST_F(VMetaBlkMgrTest, random_dependency_test) {
     EXPECT_TRUE(actual_first_cb_order_map["E"] < actual_first_cb_order_map["B"]);
     EXPECT_TRUE(actual_first_cb_order_map["F"] < actual_first_cb_order_map["C"]);
 
-    this->deregister_client_inlcuding_dependencies();
+    this->deregister_client_including_dependencies();
     this->shutdown();
 }
 

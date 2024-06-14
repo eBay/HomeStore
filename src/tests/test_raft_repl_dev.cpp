@@ -295,26 +295,6 @@ public:
 
     shared< TestReplicatedDB > pick_one_db() { return dbs_[0]; }
 
-#ifdef _PRERELEASE
-    void set_basic_flip(const std::string flip_name, uint32_t count = 1, uint32_t percent = 100) {
-        flip::FlipCondition null_cond;
-        flip::FlipFrequency freq;
-        freq.set_count(count);
-        freq.set_percent(percent);
-        m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
-        LOGDEBUG("Flip {} set", flip_name);
-    }
-
-    void set_delay_flip(const std::string flip_name, uint64_t delay_usec, uint32_t count = 1, uint32_t percent = 100) {
-        flip::FlipCondition null_cond;
-        flip::FlipFrequency freq;
-        freq.set_count(count);
-        freq.set_percent(percent);
-        m_fc.inject_delay_flip(flip_name, {null_cond}, freq, delay_usec);
-        LOGDEBUG("Flip {} set", flip_name);
-    }
-#endif
-
     void assign_leader(uint16_t replica) {
         LOGINFO("Switch the leader to replica_num = {}", replica);
         if (g_helper->replica_num() == replica) {
@@ -468,7 +448,7 @@ TEST_F(RaftReplDevTest, Follower_Fetch_OnActive_ReplicaGroup) {
 
     if (g_helper->replica_num() != 0) {
         LOGINFO("Set flip to fake fetch data request on data channel");
-        set_basic_flip("drop_push_data_request");
+        g_helper->set_basic_flip("drop_push_data_request");
     }
     this->write_on_leader(100, true /* wait_for_commit */);
 
@@ -528,9 +508,9 @@ TEST_F(RaftReplDevTest, Follower_Reject_Append) {
     if (g_helper->replica_num() != 0) {
         LOGINFO("Set flip to fake reject append entries in both data and raft channels. We slow down data channel "
                 "occassionally so that raft channel reject can be hit");
-        set_basic_flip("fake_reject_append_data_channel", 5, 10);
-        set_basic_flip("fake_reject_append_raft_channel", 10, 100);
-        set_delay_flip("slow_down_data_channel", 10000ull, 10, 10);
+        g_helper->set_basic_flip("fake_reject_append_data_channel", 5, 10);
+        g_helper->set_basic_flip("fake_reject_append_raft_channel", 10, 100);
+        g_helper->set_delay_flip("slow_down_data_channel", 10000ull, 10, 10);
     }
 
     LOGINFO("Write to leader and then wait for all the commits on all replica despite drop/slow_down");
@@ -603,7 +583,7 @@ TEST_F(RaftReplDevTest, Drop_Raft_Entry_Switch_Leader) {
 
     if (g_helper->replica_num() == 2) {
         LOGINFO("Set flip to fake drop append entries in raft channel of replica=2");
-        set_basic_flip("fake_drop_append_raft_channel", 2, 75);
+        test_common::HSTestHelper::set_basic_flip("fake_drop_append_raft_channel", 2, 75);
     }
 
     uint64_t exp_entries = SISL_OPTIONS["num_io"].as< uint64_t >();
@@ -614,7 +594,7 @@ TEST_F(RaftReplDevTest, Drop_Raft_Entry_Switch_Leader) {
 
     if (g_helper->replica_num() == 2) {
         LOGINFO("Set flip to fake drop append entries in raft channel of replica=2 again");
-        set_basic_flip("fake_drop_append_raft_channel", 1, 100);
+        test_common::HSTestHelper::set_basic_flip("fake_drop_append_raft_channel", 1, 100);
     } else {
         g_helper->sync_dataset_size(1);
         if (g_helper->replica_num() == 0) { this->write_on_leader(); }

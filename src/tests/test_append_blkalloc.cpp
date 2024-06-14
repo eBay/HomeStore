@@ -48,8 +48,6 @@ SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, test_append_blkalloc, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_append_blkalloc)
 
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-
 constexpr uint64_t Ki{1024};
 constexpr uint64_t Mi{Ki * Ki};
 constexpr uint64_t Gi{Ki * Mi};
@@ -66,16 +64,14 @@ public:
     BlkDataService& inst() { return homestore::data_service(); }
 
     virtual void SetUp() override {
-        m_token = test_common::HSTestHelper::start_homestore(
+        m_helper.start_homestore(
             "test_append_blkalloc",
             {{HS_SERVICE::META, {.size_pct = 5.0}},
              {HS_SERVICE::DATA,
               {.size_pct = 80.0, .blkalloc_type = homestore::blk_allocator_type_t::append, .num_chunks = 65000}}});
     }
 
-    virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
-
-    void restart_homestore() { test_common::HSTestHelper::restart_homestore(m_token); }
+    virtual void TearDown() override { m_helper.shutdown_homestore(); }
 
     void reset_io_job_done() { m_io_job_done = false; }
 
@@ -186,11 +182,11 @@ private:
             });
     }
 
-private:
+protected:
     std::mutex m_mtx;
     std::condition_variable m_cv;
     bool m_io_job_done{false};
-    test_common::HSTestHelper::test_token m_token;
+    test_common::HSTestHelper m_helper;
 };
 
 TEST_F(AppendBlkAllocatorTest, TestBasicWrite) {
@@ -258,7 +254,7 @@ TEST_F(AppendBlkAllocatorTest, TestWriteThenRecovey) {
     test_common::HSTestHelper::trigger_cp(true /* wait */);
 
     LOGINFO("Step 4: cp completed, restart homestore.");
-    this->restart_homestore();
+    m_helper.restart_homestore();
 
     std::this_thread::sleep_for(std::chrono::seconds{3});
     LOGINFO("Step 5: Restarted homestore with data service recovered");

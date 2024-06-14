@@ -36,7 +36,6 @@
 
 using namespace homestore;
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
 SISL_OPTIONS_ENABLE(logging, log_store_benchmark, iomgr, test_common_setup)
 SISL_OPTION_GROUP(log_store_benchmark,
@@ -50,6 +49,7 @@ SISL_OPTION_GROUP(log_store_benchmark,
                    ::cxxopts::value< uint32_t >()->default_value("1024"), "number"));
 
 static constexpr size_t ITERATIONS{100000};
+static test_common::HSTestHelper s_helper;
 
 class BenchLogStore {
 public:
@@ -168,11 +168,11 @@ static void test_append(benchmark::State& state) {
 }
 
 static void setup() {
-    test_common::HSTestHelper::start_homestore(
-        "test_log_store_bench", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::LOG, {.size_pct = 87.0}}});
+    s_helper.start_homestore("test_log_store_bench",
+                             {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::LOG, {.size_pct = 87.0}}});
 }
 
-static void teardown() { test_common::HSTestHelper::shutdown_homestore(); }
+static void teardown() { s_helper.shutdown_homestore(); }
 
 // BENCHMARK(test_append)->Iterations(10)->Threads(SISL_OPTIONS["num_threads"].as< uint32_t >());
 BENCHMARK(test_append)->Iterations(1);

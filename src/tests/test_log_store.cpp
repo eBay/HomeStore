@@ -54,7 +54,6 @@
 using namespace homestore;
 RCU_REGISTER_INIT
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
 struct test_log_data {
     test_log_data() = default;
@@ -522,7 +521,7 @@ public:
     }
 
     void shutdown(bool cleanup = true) {
-        test_common::HSTestHelper::shutdown_homestore(cleanup);
+        m_helper.shutdown_homestore(cleanup);
         if (cleanup) {
             m_log_store_clients.clear();
             m_highest_log_idx.clear();
@@ -559,7 +558,7 @@ private:
     test_log_store_comp_cb_t m_io_closure;
     std::vector< std::unique_ptr< SampleLogStoreClient > > m_log_store_clients;
     std::map< logdev_id_t, std::atomic< logid_t > > m_highest_log_idx;
-    test_common::HSTestHelper::test_token m_token;
+    test_common::HSTestHelper m_helper;
 };
 
 const std::string SampleDB::s_fpath_root{"/tmp/log_store_dev_"};
