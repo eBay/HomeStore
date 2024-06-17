@@ -3,6 +3,7 @@
 #include <sisl/grpc/rpc_call.hpp>
 #include <homestore/blkdata_service.hpp>
 #include <homestore/replication/repl_dev.h>
+#include <common/homestore_config.hpp>
 #include "replication/repl_dev/common.h"
 #include <libnuraft/nuraft.hxx>
 
@@ -194,6 +195,10 @@ std::string repl_req_ctx::to_compact_string() const {
     }
     return fmt::format("dsn={} term={} lsn={} op={} local_blkid={} state=[{}]", m_rkey.dsn, m_rkey.term, m_lsn,
                        enum_name(m_op_code), m_local_blkid.to_string(), req_state_name(uint32_cast(state())));
+}
+
+bool repl_req_ctx::is_expired() const {
+    return get_elapsed_time_sec(m_start_time) > HS_DYNAMIC_CONFIG(consensus.repl_req_timeout_sec);
 }
 
 } // namespace homestore

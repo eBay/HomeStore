@@ -54,7 +54,9 @@ SISL_OPTION_GROUP(
      ::cxxopts::value< int >()->default_value("-1"), "number"),
     (num_io, "", "num_io", "number of IO operations", ::cxxopts::value< uint64_t >()->default_value("300"), "number"),
     (qdepth, "", "qdepth", "Max outstanding operations", ::cxxopts::value< uint32_t >()->default_value("8"), "number"),
-    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
+    (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
+    (flip_list, "", "flip_list", "btree flip list", ::cxxopts::value< std::vector< std::string > >(), "flips [...]"),
+    (enable_crash, "", "enable_crash", "enable crash", ::cxxopts::value< bool >()->default_value("0"), ""));
 
 SETTINGS_INIT(iomgrcfg::IomgrSettings, iomgr_config);
 
@@ -160,6 +162,25 @@ private:
         }
     }
 
+    static void init_raw_devices(const std::vector< homestore::dev_info >& devs) {
+        auto const zero_size = hs_super_blk::first_block_size() * 1024;
+        std::vector< int > zeros(zero_size, 0);
+        for (auto const& dinfo : devs) {
+            if (!std::filesystem::exists(dinfo.dev_name)) {
+                HS_REL_ASSERT(false, "Device {} does not exist", dinfo.dev_name);
+            }
+
+            auto fd = ::open(dinfo.dev_name.c_str(), O_RDWR, 0640);
+            HS_REL_ASSERT(fd != -1, "Failed to open device");
+
+            auto const write_sz =
+                pwrite(fd, zeros.data(), zero_size /* size */, hs_super_blk::first_block_offset() /* offset */);
+            HS_REL_ASSERT(write_sz == zero_size, "Failed to write to device");
+            LOGINFO("Successfully zeroed the 1st {} bytes of device {}", zero_size, dinfo.dev_name);
+            ::close(fd);
+        }
+    }
+
     static std::vector< std::string > s_dev_names;
 
 public:
@@ -176,10 +197,30 @@ public:
         vdev_size_type_t vdev_size_type{vdev_size_type_t::VDEV_SIZE_STATIC};
     };
 
-    static void start_homestore(const std::string& test_name, std::map< uint32_t, test_params > const& svc_params_tmp,
-                                hs_before_services_starting_cb_t cb = nullptr, bool fake_restart = false,
-                                bool init_device = true, uint32_t shutdown_delay_sec = 5,
-                                std::vector< std::pair< std::string, homestore::HSDevType > > cust_dev_names = {}) {
+    struct test_token {
+        std::string name_;
+        std::map< uint32_t, test_params > svc_params_;
+        hs_before_services_starting_cb_t cb_{nullptr};
+        std::vector< homestore::dev_info > devs_;
+
+        test_params& params(uint32_t svc) { return svc_params_[svc]; }
+        hs_before_services_starting_cb_t& cb() { return cb_; }
+    };
+
+    static test_token start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
+                                      hs_before_services_starting_cb_t cb = nullptr,
+                                      std::vector< homestore::dev_info > devs = {}, bool init_device = true) {
+        test_token token{.name_ = test_name, .svc_params_ = std::move(svc_params), .cb_ = cb, .devs_ = std::move(devs)};
+        do_start_homestore(token, false /* fake_restart */, init_device);
+        return token;
+    }
+
+    static void restart_homestore(test_token& token, uint32_t shutdown_delay_sec = 5) {
+        do_start_homestore(token, true /* fake_restart*/, false /* init_device */, shutdown_delay_sec);
+    }
+
+    static void do_start_homestore(test_token& token, bool fake_restart = false, bool init_device = true,
+                                   uint32_t shutdown_delay_sec = 5) {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
         auto num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
@@ -191,75 +232,47 @@ public:
             std::this_thread::sleep_for(std::chrono::seconds{shutdown_delay_sec});
         }
 
-        std::map< uint32_t, test_params > svc_params = std::move(svc_params_tmp);
         std::vector< homestore::dev_info > device_info;
-        if (!cust_dev_names.empty() || SISL_OPTIONS.count("device_list")) {
-            if (cust_dev_names.empty())
-                s_dev_names = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
-            else {
-                for (auto& [name, _] : cust_dev_names) {
-                    s_dev_names.emplace_back(name);
-                }
-            }
-            LOGINFO("Taking input dev_list: {}",
-                    std::accumulate(
-                        s_dev_names.begin(), s_dev_names.end(), std::string(""),
-                        [](const std::string& ss, const std::string& s) { return ss.empty() ? s : ss + "," + s; }));
-
-            if (init_device && !fake_restart) {
-                // zero the homestore pdev's first block for each device;
-                auto const zero_size = hs_super_blk::first_block_size() * 1024;
-                std::vector< int > zeros(zero_size, 0);
-                for (auto const& d : s_dev_names) {
-                    if (!std::filesystem::exists(d)) {
-                        LOGINFO("Device {} does not exist", d);
-                        HS_REL_ASSERT(false, "Device does not exist");
-                    }
-
-                    auto fd = ::open(d.c_str(), O_RDWR, 0640);
-                    HS_REL_ASSERT(fd != -1, "Failed to open device");
-
-                    auto const write_sz =
-                        pwrite(fd, zeros.data(), zero_size /* size */, hs_super_blk::first_block_offset() /* offset */);
-                    HS_REL_ASSERT(write_sz == zero_size, "Failed to write to device");
-                    LOGINFO("Successfully zeroed the 1st {} of device {}", zero_size, d);
-                    ::close(fd);
-                }
-            }
-
-            if (cust_dev_names.empty()) {
-                for (const auto& name : s_dev_names) {
-                    // iomgr::DriveInterface::emulate_drive_type(name, iomgr::drive_type::block_hdd);
-                    device_info.emplace_back(name, homestore::HSDevType::Data);
+        if (!token.devs_.empty() || SISL_OPTIONS.count("device_list")) {
+            if (token.devs_.empty()) {
+                auto const devs = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
+                for (const auto& name : devs) {
+                    // TODO:: Add support for fast and data devices in device_list
+                    token.devs_.emplace_back(name,
+                                             token.devs_.empty()
+                                                 ? homestore::HSDevType::Fast
+                                                 : homestore::HSDevType::Data); // First device is fast device
                 }
             } else {
-                for (const auto& [name, dev_type] : cust_dev_names) {
-                    device_info.emplace_back(name, dev_type);
-                }
+                LOGINFO("Taking input dev_list: {}",
+                        std::accumulate(token.devs_.begin(), token.devs_.end(), std::string(""),
+                                        [](const std::string& s, const homestore::dev_info& dinfo) {
+                                            return s.empty() ? dinfo.dev_name : s + "," + dinfo.dev_name;
+                                        }));
             }
-
+            if (init_device && !fake_restart) init_raw_devices(token.devs_);
         } else {
             /* create files */
             LOGINFO("creating {} device files with each of size {} ", ndevices, homestore::in_bytes(dev_size));
             for (uint32_t i{0}; i < ndevices; ++i) {
-                s_dev_names.emplace_back(std::string{"/tmp/" + test_name + "_" + std::to_string(i + 1)});
+                s_dev_names.emplace_back(std::string{"/tmp/" + token.name_ + "_" + std::to_string(i + 1)});
             }
 
             if (!fake_restart && init_device) { init_files(s_dev_names, dev_size); }
             for (const auto& fname : s_dev_names) {
-                if (device_info.empty())
-                    // First device is fast device
-                    device_info.emplace_back(std::filesystem::canonical(fname).string(), homestore::HSDevType::Fast);
-                else
-                    device_info.emplace_back(std::filesystem::canonical(fname).string(), homestore::HSDevType::Data);
+                token.devs_.emplace_back(std::filesystem::canonical(fname).string(),
+                                         token.devs_.empty()
+                                             ? homestore::HSDevType::Fast
+                                             : homestore::HSDevType::Data); // First device is fast device
             }
         }
 
-        if (!fake_restart)
-            HS_REL_ASSERT_EQ(device_info.size() > 2, true,
-                             "if not fake restart, we need at least 3 device to run the ut of simulating restart with "
-                             "missing drive. current device num is {}",
-                             device_info.size());
+        if (!fake_restart && token.name_ == "test_data_service")
+            HS_REL_ASSERT_EQ(
+                token.devs_.size() > 2, true,
+                "if not fake restart, we need at least 3 device to run the data_service ut of simulating restart with "
+                "missing drive. current device num is {}",
+                token.devs_.size());
 
         if (is_spdk) {
             LOGINFO("Spdk with more than 2 threads will cause overburden test systems, changing nthreads to 2");
@@ -281,7 +294,7 @@ public:
 
         using namespace homestore;
         auto hsi = HomeStore::instance();
-        for (auto& [svc, tp] : svc_params) {
+        for (auto& [svc, tp] : token.svc_params_) {
             if (svc == HS_SERVICE::DATA) {
                 hsi->with_data_service(tp.custom_chunk_selector);
             } else if (svc == HS_SERVICE::INDEX) {
@@ -293,21 +306,21 @@ public:
             }
         }
 #ifdef _PRERELEASE
-        hsi->with_crash_simulator([=]() {
+        hsi->with_crash_simulator([copied_token = token](void) mutable {
             LOGINFO("CrashSimulator::crash() is called - restarting homestore");
-            start_homestore(test_name, svc_params, cb, true /* fake_restart */, false /* init_device */);
+            HSTestHelper::restart_homestore(copied_token);
         });
 #endif
 
-        bool need_format =
-            hsi->start(hs_input_params{.devices = device_info, .app_mem_size = app_mem_size}, std::move(cb));
+        bool need_format = hsi->start(hs_input_params{.devices = token.devs_, .app_mem_size = app_mem_size}, token.cb_);
 
         // We need to set the min chunk size before homestore format
-        if (svc_params.contains(HS_SERVICE::LOG) && svc_params[HS_SERVICE::LOG].min_chunk_size != 0) {
-            set_min_chunk_size(svc_params[HS_SERVICE::LOG].min_chunk_size);
+        if (token.svc_params_.contains(HS_SERVICE::LOG) && token.svc_params_[HS_SERVICE::LOG].min_chunk_size != 0) {
+            set_min_chunk_size(token.svc_params_[HS_SERVICE::LOG].min_chunk_size);
         }
 
         if (need_format) {
+            auto svc_params = token.svc_params_;
             hsi->format_and_start(
                 {{HS_SERVICE::META,
                   {.dev_type = homestore::HSDevType::Fast, .size_pct = svc_params[HS_SERVICE::META].size_pct}},
@@ -323,7 +336,8 @@ public:
                    .chunk_sel_type = svc_params[HS_SERVICE::DATA].custom_chunk_selector
                        ? chunk_selector_type_t::CUSTOM
                        : chunk_selector_type_t::ROUND_ROBIN}},
-                 {HS_SERVICE::INDEX, {.size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
+                 {HS_SERVICE::INDEX,
+                  {.dev_type = homestore::HSDevType::Fast, .size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
                  {HS_SERVICE::REPLICATION,
                   {.size_pct = svc_params[HS_SERVICE::REPLICATION].size_pct,
                    .alloc_type = svc_params[HS_SERVICE::REPLICATION].blkalloc_type,

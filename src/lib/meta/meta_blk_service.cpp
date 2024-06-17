@@ -794,7 +794,7 @@ void MetaBlkService::_cookie_sanity_check(const void* cookie) const {
 // 2. update the meta_blk
 // 3. free old ovf_bid if there is any
 //
-void MetaBlkService::update_sub_sb(const uint8_t* context_data, uint64_t sz, void*& cookie) {
+void MetaBlkService::update_sub_sb(const uint8_t* context_data, uint64_t sz, void* cookie) {
     std::lock_guard< decltype(m_meta_mtx) > lg{m_meta_mtx};
     HS_REL_ASSERT_EQ(m_inited, true, "accessing metablk store before init is not allowed.");
 

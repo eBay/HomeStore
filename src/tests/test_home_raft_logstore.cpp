@@ -174,7 +174,7 @@ private:
 class TestRaftLogStore : public ::testing::Test {
 public:
     void SetUp() {
-        test_common::HSTestHelper::start_homestore(
+        m_token = test_common::HSTestHelper::start_homestore(
             "test_home_raft_log_store", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::LOG, {.size_pct = 72.0}}});
         m_leader_store.m_rls = std::make_unique< HomeRaftLogStore >();
         m_leader_store.m_store_id = m_leader_store.m_rls->logstore_id();
@@ -189,15 +189,14 @@ public:
         m_leader_store.m_rls.reset();
         m_follower_store.m_rls.reset();
 
-        test_common::HSTestHelper::start_homestore(
-            "test_home_raft_log_store", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::LOG, {.size_pct = 72.0}}},
-            [this]() {
-                m_leader_store.m_rls =
-                    std::make_unique< HomeRaftLogStore >(m_leader_store.m_logdev_id, m_leader_store.m_store_id);
-                m_follower_store.m_rls =
-                    std::make_unique< HomeRaftLogStore >(m_follower_store.m_logdev_id, m_follower_store.m_store_id);
-            },
-            true /* restart */);
+        m_token.cb_ = [this]() {
+            m_leader_store.m_rls =
+                std::make_unique< HomeRaftLogStore >(m_leader_store.m_logdev_id, m_leader_store.m_store_id);
+            m_follower_store.m_rls =
+                std::make_unique< HomeRaftLogStore >(m_follower_store.m_logdev_id, m_follower_store.m_store_id);
+        };
+
+        test_common::HSTestHelper::restart_homestore(m_token);
     }
 
     virtual void TearDown() override {
@@ -209,6 +208,7 @@ public:
 protected:
     RaftLogStoreClient m_leader_store;
     RaftLogStoreClient m_follower_store;
+    test_common::HSTestHelper::test_token m_token;
 };
 
 TEST_F(TestRaftLogStore, lifecycle_test) {

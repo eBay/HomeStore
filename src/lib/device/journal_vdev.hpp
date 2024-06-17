@@ -158,9 +158,9 @@ public:
          *
          * @return : On success, the number of bytes read is returned (zero indicates end of file), and the cursor is
          * advanced by this number. it is not an error if this number is smaller than the number requested, because it
-         * can be end of chunk, since read won't across chunk.
+         * can be end of chunk, since read won't across chunk. Returns -1 if there are no bytes available to read.
          */
-        size_t sync_next_read(uint8_t* buf, size_t count_in);
+        int64_t sync_next_read(uint8_t* buf, size_t count_in);
 
         /**
          * @brief : reads up to count bytes at offset into the buffer starting at buf.
@@ -275,8 +275,9 @@ public:
          * 1. update in-memory counter of total write size.
          * 2. update vdev superblock of the new start logical offset that is being truncate to;
          *
+         * @return : return the new data start offset after truncation.
          */
-        void truncate(off_t truncate_offset);
+        off_t truncate(off_t truncate_offset);
 
         /**
          * @brief : get the total size in journal
@@ -416,6 +417,7 @@ public:
     uint64_t num_descriptors() const { return m_journal_descriptors.size(); }
 
     void remove_journal_chunks(std::vector< shared< Chunk > >& chunks);
+    void release_chunk_to_pool(shared< Chunk > chunk);
     void update_chunk_private(shared< Chunk >& chunk, JournalChunkPrivate* chunk_private);
     uint64_t get_end_of_chunk(shared< Chunk >& chunk) const;
 

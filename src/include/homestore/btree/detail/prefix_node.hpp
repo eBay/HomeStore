@@ -523,8 +523,6 @@ public:
 #endif
     }
 
-    uint8_t* get_node_context() override { return uintptr_cast(this) + sizeof(FixedPrefixNode< K, V >); }
-
     uint32_t get_nth_obj_size(uint32_t) const override { return get_key_size() + get_value_size(); }
 
     uint32_t num_entries_by_size(uint32_t start_idx, uint32_t size) const {

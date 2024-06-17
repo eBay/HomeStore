@@ -19,12 +19,8 @@ private:
 
 public:
     template < typename... Args >
-    ReplLogStore(RaftReplDev& rd, RaftStateMachine& sm, const log_found_cb_t& log_found_cb,
-                 const log_replay_done_cb_t& log_replay_done_cb, Args&&... args) :
-            HomeRaftLogStore{std::forward< Args >(args)...}, m_rd{rd}, m_sm{sm} {
-        register_log_found_cb(log_found_cb);
-        register_log_replay_done_cb(log_replay_done_cb);
-    }
+    ReplLogStore(RaftReplDev& rd, RaftStateMachine& sm, Args&&... args) :
+            HomeRaftLogStore(std::forward< Args >(args)...), m_rd{rd}, m_sm{sm} {}
 
     ////////////////////////  function override ////////////////////////
     uint64_t append(nuraft::ptr< nuraft::log_entry >& entry) override;

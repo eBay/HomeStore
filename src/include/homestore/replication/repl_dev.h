@@ -65,7 +65,8 @@ struct repl_snapshot {
 };
 
 struct repl_journal_entry;
-struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::thread_safe_counter > {
+struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::thread_safe_counter >,
+                      sisl::ObjLifeCounter< repl_req_ctx > {
     friend class SoloReplDev;
 
 public:
@@ -102,6 +103,7 @@ public:
     std::string to_string() const;
     std::string to_compact_string() const;
     Clock::time_point created_time() const { return m_start_time; }
+    bool is_expired() const;
 
     /////////////////////// All Modifiers methods //////////////////
 

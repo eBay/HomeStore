@@ -164,7 +164,7 @@ public:
      * @param sz : size of context_data
      * @param cookie : handle to address the unique subsytem sb that is being updated;
      */
-    void update_sub_sb(const uint8_t* context_data, uint64_t sz, void*& cookie);
+    void update_sub_sb(const uint8_t* context_data, uint64_t sz, void* cookie);
 
     // size_t read_sub_sb(const meta_sub_type type, sisl::byte_view& buf);
     void read_sub_sb(meta_sub_type type);
