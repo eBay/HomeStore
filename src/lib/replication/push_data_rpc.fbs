@@ -8,6 +8,7 @@ table PushDataRequest {
     user_header: [ubyte];        // User header bytes
     user_key : [ubyte];          // User key data
     data_size : uint32;          // Data size, actual data is sent as separate blob not by flatbuffer
+    time_ms: uint64;             // time point when originator pushed this request;
 }
 
 root_type PushDataRequest;
