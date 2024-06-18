@@ -70,6 +70,16 @@ read_again:
         return ret_buf;
     }
 
+    if (header->logdev_id != m_vdev_jd->logdev_id()) {
+        LOGINFOMOD(logstore, "Entries found for different logdev {} at pos {}, must have come to end of log_dev={}",
+                   header->logdev_id, m_vdev_jd->dev_offset(m_cur_read_bytes), m_vdev_jd->logdev_id());
+        *out_dev_offset = m_vdev_jd->dev_offset(m_cur_read_bytes);
+        // move it by dma boundary if header is not valid
+        m_prev_crc = 0;
+        m_cur_read_bytes += m_read_size_multiple;
+        return ret_buf;
+    }
+
     // Because reuse chunks without cleaning up, we could get chunks used by other logdev's
     // and it can happen that log group headers couldnt match. In that case check we dont error
     // if its the last chunk or not with is_offset_at_last_chunk else raise assert.

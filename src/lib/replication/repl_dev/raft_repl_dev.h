@@ -32,7 +32,7 @@ struct raft_repl_dev_superblk : public repl_dev_superblk {
 
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
 
-ENUM(repl_dev_stage_t, uint8_t, INIT, ACTIVE, DESTROYING, DESTROYED);
+ENUM(repl_dev_stage_t, uint8_t, INIT, ACTIVE, DESTROYING, DESTROYED, PERMANENT_DESTROYED);
 
 class RaftReplDevMetrics : public sisl::MetricsGroup {
 public:
@@ -128,6 +128,7 @@ public:
     uint32_t get_blk_size() const override;
     repl_lsn_t get_last_commit_lsn() const { return m_commit_upto_lsn.load(); }
     bool is_destroy_pending() const;
+    bool is_destroyed() const;
     Clock::time_point destroyed_time() const { return m_destroyed_time; }
 
     //////////////// Accessor/shortcut methods ///////////////////////

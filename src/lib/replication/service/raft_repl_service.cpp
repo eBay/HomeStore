@@ -141,6 +141,9 @@ void RaftReplService::start() {
 
     // Step 8: Start a reaper thread which wakes up time-to-time and fetches pending data or cleans up old requests etc
     start_reaper_thread();
+
+    // Delete any unopened logstores.
+    hs()->logstore_service().delete_unopened_logdevs();
 }
 
 void RaftReplService::stop() {

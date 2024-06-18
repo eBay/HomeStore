@@ -184,8 +184,10 @@ raft_buf_ptr_t RaftStateMachine::pre_commit_ext(nuraft::state_machine::ext_op_pa
 
 raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params const& params) {
     int64_t lsn = s_cast< int64_t >(params.log_idx);
-
+    RD_LOGD("Raft channel: Received Commit message lsn {} store {} logdev {} size {}", lsn,
+            m_rd.m_data_journal->logstore_id(), m_rd.m_data_journal->logdev_id(), params.data->size());
     repl_req_ptr_t rreq = lsn_to_req(lsn);
+    if (!rreq) { RD_LOGD("Raft channel got null rreq"); }
     RD_LOGD("Raft channel: Received Commit message rreq=[{}]", rreq->to_compact_string());
     if (rreq->is_proposer()) {
         // This is the time to ensure flushing of journal happens in the proposer

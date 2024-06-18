@@ -56,7 +56,6 @@ public:
 
     hs_stats get_cap_stats() const override;
     replica_id_t get_my_repl_uuid() const { return m_my_uuid; }
-
     // void resource_audit() override;
 
 protected:

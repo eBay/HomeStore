@@ -74,7 +74,6 @@ protected:
 
 private:
     void raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie);
-
     void start_reaper_thread();
     void stop_reaper_thread();
     void fetch_pending_data();

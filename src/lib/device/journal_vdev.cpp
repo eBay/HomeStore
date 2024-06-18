@@ -208,6 +208,10 @@ void JournalVirtualDev::destroy(logdev_id_t logdev_id) {
 void JournalVirtualDev::Descriptor::append_chunk() {
     // Get a new chunk from the pool.
     auto new_chunk = m_vdev.m_chunk_pool->dequeue();
+#if 0
+    auto* pdev = new_chunk->physical_dev_mutable();
+    pdev->sync_write_zero(new_chunk->size(), new_chunk->start_offset());
+#endif
 
     // Increase the right window and total size.
     m_total_size += new_chunk->size();

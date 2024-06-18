@@ -124,6 +124,7 @@ folly::SemiFuture< ReplServiceError > RaftReplDev::destroy_group() {
     if (err != ReplServiceError::OK) {
         m_stage.update([](auto* stage) { *stage = repl_dev_stage_t::ACTIVE; });
         return folly::makeSemiFuture< ReplServiceError >(std::move(err));
+        LOGERROR("RaftReplDev::destroy_group failed {}", err);
     }
 
     return m_destroy_promise.getSemiFuture();
@@ -896,6 +897,7 @@ nuraft::ptr< nuraft::log_store > RaftReplDev::load_log_store() { return m_data_j
 int32_t RaftReplDev::server_id() { return m_raft_server_id; }
 
 bool RaftReplDev::is_destroy_pending() const { return (m_rd_sb->destroy_pending == 0x1); }
+bool RaftReplDev::is_destroyed() const { return (*m_stage.access().get() == repl_dev_stage_t::PERMANENT_DESTROYED); }
 
 ///////////////////////////////////  nuraft_mesg::mesg_state_mgr overrides ////////////////////////////////////
 void RaftReplDev::become_ready() {
@@ -907,10 +909,12 @@ uint32_t RaftReplDev::get_logstore_id() const { return m_data_journal->logstore_
 std::shared_ptr< nuraft::state_machine > RaftReplDev::get_state_machine() { return m_state_machine; }
 
 void RaftReplDev::permanent_destroy() {
+    RD_LOGI("Permanent destroy for raft repl dev");
     m_rd_sb.destroy();
     m_raft_config_sb.destroy();
     m_data_journal->remove_store();
     logstore_service().destroy_log_dev(m_data_journal->logdev_id());
+    m_stage.update([](auto* stage) { *stage = repl_dev_stage_t::PERMANENT_DESTROYED; });
 }
 
 void RaftReplDev::leave() {
@@ -927,6 +931,7 @@ void RaftReplDev::leave() {
     m_rd_sb->destroy_pending = 0x1;
     m_rd_sb.write();
 
+    RD_LOGI("RaftReplDev leave group");
     m_destroy_promise.setValue(ReplServiceError::OK); // In case proposer is waiting for the destroy to complete
 }
 
