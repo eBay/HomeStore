@@ -32,6 +32,10 @@
 #include <sisl/options/options.h>
 #include <sisl/flip/flip_client.hpp>
 #include <gtest/gtest.h>
+extern "C" {
+#include <openssl/evp.h>
+#include <openssl/md5.h>
+}
 
 #include <homestore/homestore.hpp>
 #include <homestore/meta_service.hpp>
@@ -78,6 +82,26 @@ struct sb_info_t {
     void* cookie;
     std::string str;
 };
+
+static std::string md5_sum(const char *buf, size_t sz) {
+    std::array< unsigned char, MD5_DIGEST_LENGTH > result;
+    uint32_t md_len;
+    auto mdctx = EVP_MD_CTX_new();
+    EVP_DigestInit_ex2(mdctx, EVP_md5(), nullptr);
+    EVP_DigestUpdate(mdctx, buf, sz);
+    EVP_DigestFinal_ex(mdctx, result.data(), &md_len);
+    EVP_MD_CTX_free(mdctx);
+    RELEASE_ASSERT(md_len == MD5_DIGEST_LENGTH, "Bad digest length, expected [{}] got [{}]!", MD5_DIGEST_LENGTH,
+                   md_len);
+
+    // convert to hex
+    std::ostringstream ss;
+    ss << std::hex;
+    for (auto const c : result) {
+        ss << std::setw(2) << std::setfill('0') << static_cast< unsigned >(c);
+    }
+    return ss.str();
+}
 
 class VMetaBlkMgrTest : public ::testing::Test {
 public:
@@ -176,7 +200,7 @@ public:
         uint64_t size_written{0};
         while (free_size > 0) {
             if (free_size >= gp.max_wrt_sz) {
-                size_written = do_sb_write(do_overflow());
+                size_written = do_sb_write(do_overflow(), 0);
             } else {
                 size_written = do_sb_write(false, m_mbm->meta_blk_context_sz());
                 HS_REL_ASSERT_EQ(size_written, m_mbm->block_size());
@@ -230,7 +254,7 @@ public:
 
             // save to cache
             m_write_sbs[bid].cookie = cookie;
-            m_write_sbs[bid].str = std::string(r_cast< const char* >(buf), sz_to_wrt);
+            m_write_sbs[bid].str = md5_sum(r_cast< const char* >(buf), sz_to_wrt);
 
             ret_size_written = total_size_written(cookie);
             m_total_wrt_sz += ret_size_written;
@@ -243,7 +267,7 @@ public:
             done_read = true;
             m_mbm->read_sub_sb(mtype);
             const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()];
-            const std::string write_buf_str{r_cast< char* >(buf), sz_to_wrt};
+	    const std::string write_buf_str = m_write_sbs[mblk->hdr.h.bid.to_integer()].str;
             const auto ret = read_buf_str.compare(write_buf_str);
             if (mblk->hdr.h.compressed == false) {
                 HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
@@ -360,7 +384,7 @@ public:
             const auto bid = s_cast< const meta_blk* >(cookie)->hdr.h.bid.to_integer();
             HS_DBG_ASSERT(m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
             m_write_sbs[bid].cookie = cookie;
-            m_write_sbs[bid].str = std::string{r_cast< const char* >(buf), sz_to_wrt};
+            m_write_sbs[bid].str = md5_sum(r_cast< const char* >(buf), sz_to_wrt);
 
             // verify context_sz
             const meta_blk* mblk = s_cast< const meta_blk* >(cookie);
@@ -555,7 +579,7 @@ public:
             [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
                 if (mblk) {
                     std::unique_lock< std::mutex > lg{m_mtx};
-                    m_cb_blks[mblk->hdr.h.bid.to_integer()] = std::string{r_cast< const char* >(buf.bytes()), size};
+                    m_cb_blks[mblk->hdr.h.bid.to_integer()] = md5_sum(r_cast< const char* >(buf.bytes()), size);
                 }
             },
             [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
@@ -777,11 +801,16 @@ TEST_F(VMetaBlkMgrTest, recovery_test) {
     m_start_time = Clock::now();
     this->register_client();
 
+    static constexpr uint64_t blkstore_overhead = 4 * 1024ul * 1024ul; // 4MB
+    EXPECT_EQ(m_mbm->available_blks() * m_mbm->block_size(), m_mbm->total_size() - m_mbm->used_size());
     // since we are using overflow metablk with 64K metadata, which will cause consume anther 2 metablks
-    auto max_write_times = (m_mbm->available_blks() * m_mbm->block_size() - 4 * Mi) / (64 * Ki + 8 * Ki);
+    auto max_write_times = (m_mbm->total_size() - m_mbm->used_size() - blkstore_overhead) / (64 * Ki + 8 * Ki);
+    LOGINFO("max_write_times {}", max_write_times);
+
     // write 1/2 of the available blks;
     for (uint64_t i = 0; i < max_write_times / 2; i++) {
         EXPECT_GT(this->do_sb_write(true, uint64_cast(64 * Ki)), uint64_cast(0));
+        LOGINFO("iter {}, available_blks {}", i, m_mbm->available_blks());
     }
 
     // restart homestore
@@ -792,7 +821,7 @@ TEST_F(VMetaBlkMgrTest, recovery_test) {
     this->register_client();
     for (uint64_t i = 0; i < (max_write_times / 2); i++) {
         EXPECT_GT(this->do_sb_write(true, uint64_cast(64 * Ki)), uint64_cast(0));
-        LOGDEBUG("iter {}, available_blks {}", i, m_mbm->available_blks());
+        LOGINFO("iter {}, available_blks {}", i, m_mbm->available_blks());
     }
     this->shutdown();
 }
