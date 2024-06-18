@@ -379,7 +379,7 @@ public:
             iomanager.iobuf_free(buf);
         } else {
             if (unaligned_addr) {
-                delete[] (buf - unaligned_shift);
+                delete[](buf - unaligned_shift);
             } else {
                 delete[] buf;
             }
@@ -778,7 +778,7 @@ TEST_F(VMetaBlkMgrTest, recovery_test) {
     this->register_client();
 
     // since we are using overflow metablk with 64K metadata, which will cause consume anther 2 metablks
-    auto max_write_times = m_mbm->available_blks() * m_mbm->block_size() / (64 * Ki + 8 * Ki);
+    auto max_write_times = (m_mbm->available_blks() * m_mbm->block_size() - 4 * Mi) / (64 * Ki + 8 * Ki);
     // write 1/2 of the available blks;
     for (uint64_t i = 0; i < max_write_times / 2; i++) {
         EXPECT_GT(this->do_sb_write(true, uint64_cast(64 * Ki)), uint64_cast(0));
@@ -792,6 +792,7 @@ TEST_F(VMetaBlkMgrTest, recovery_test) {
     this->register_client();
     for (uint64_t i = 0; i < (max_write_times / 2); i++) {
         EXPECT_GT(this->do_sb_write(true, uint64_cast(64 * Ki)), uint64_cast(0));
+        LOGDEBUG("iter {}, available_blks {}", i, m_mbm->available_blks());
     }
     this->shutdown();
 }
