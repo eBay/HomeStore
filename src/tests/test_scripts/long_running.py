@@ -6,6 +6,7 @@ import sys
 import argparse
 import index_test
 import log_meta_test
+import data_test
 
 
 def parse_arguments():
@@ -26,8 +27,8 @@ def logstore_long_running(*args):
 def meta_long_running(*args):
     log_meta_test.meta_long_running(*args)
 
-# def data_long_running(*args):
-#     data.long_running(*args)
+def data_long_running(*args):
+    data_test.long_running(*args)
 
 
 def main():
@@ -41,8 +42,8 @@ def main():
             logstore_long_running(service_args)
         elif args.test_suits == 'meta_long_running':
             meta_long_running(service_args)
-        # elif args.test_suits == 'data_long_running':
-        #     data_long_running(service_args)
+        elif args.test_suits == 'data_long_running':
+            data_long_running(service_args)
         else:
             print(f"Unknown test suite: {args.test_suits}")
             sys.exit(1)

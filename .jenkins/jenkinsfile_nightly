@@ -44,10 +44,12 @@ pipeline {
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_index_btree' -exec cp {} .jenkins/test_index_btree \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
+                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_data_service' -exec cp {} .jenkins/test_data_service \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_raft_repl_dev' -exec cp {} .jenkins/test_raft_repl_dev \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_solo_repl_dev' -exec cp {} .jenkins/test_solo_repl_dev \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/scripts/index_test.py' -exec install -Dm755 {} .jenkins/index_test.py \\; "
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/scripts/log_meta_test.py' -exec install -Dm755 {} .jenkins/log_meta_test.py \\; "
+                        sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/scripts/data_test.py' -exec install -Dm755 {} .jenkins/data_test.py \\; "
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/scripts/long_running.py' -exec install -Dm755 {} .jenkins/long_running.py \\; "
                     }
                     post {
