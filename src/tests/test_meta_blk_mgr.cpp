@@ -83,7 +83,7 @@ struct sb_info_t {
     std::string str;
 };
 
-static std::string md5_sum(const char *buf, size_t sz) {
+static std::string md5_sum(const char* buf, size_t sz) {
     std::array< unsigned char, MD5_DIGEST_LENGTH > result;
     uint32_t md_len;
     auto mdctx = EVP_MD_CTX_new();
@@ -105,7 +105,7 @@ static std::string md5_sum(const char *buf, size_t sz) {
 
 class VMetaBlkMgrTest : public ::testing::Test {
 public:
-    enum class meta_op_type : uint8_t { write = 1, update = 2, remove = 3, read = 4 };
+    enum class meta_op_type : uint8_t { write = 1, update = 2, remove = 3, read = 4, restart = 5 };
 
     std::string mtype;
     Clock::time_point m_start_time;
@@ -129,7 +129,7 @@ protected:
             test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", {{HS_SERVICE::META, {.size_pct = 85.0}}});
     }
 
-    void TearDown() override {};
+    void TearDown() override{};
 
 public:
     [[nodiscard]] uint64_t get_elapsed_time(const Clock::time_point& start) {
@@ -267,7 +267,7 @@ public:
             done_read = true;
             m_mbm->read_sub_sb(mtype);
             const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()];
-	    const std::string write_buf_str = m_write_sbs[mblk->hdr.h.bid.to_integer()].str;
+            const std::string write_buf_str = m_write_sbs[mblk->hdr.h.bid.to_integer()].str;
             const auto ret = read_buf_str.compare(write_buf_str);
             if (mblk->hdr.h.compressed == false) {
                 HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
@@ -454,7 +454,10 @@ public:
 
     void do_rand_load() {
         while (keep_running()) {
-            switch (get_op()) {
+            auto op = get_op();
+            LOGDEBUG("rand load, io seq {}, type {}", total_op_cnt(), uint8_t(op));
+
+            switch (op) {
             case meta_op_type::write: {
                 do_sb_write(do_overflow());
             } break;
@@ -463,6 +466,10 @@ public:
                 break;
             case meta_op_type::update:
                 do_sb_update(do_aligned());
+                break;
+            case meta_op_type::restart:
+                recover_with_on_complete();
+                validate();
                 break;
             default:
                 break;
@@ -519,7 +526,9 @@ public:
             }
         }
 
-        if (do_write()) {
+        if (do_restart()) {
+            return meta_op_type::restart;
+        } else if (do_write()) {
             return meta_op_type::write;
         } else if (do_update()) {
             return meta_op_type::update;
@@ -547,6 +556,11 @@ public:
 
     bool do_write() const {
         if (write_ratio() < gp.per_write) { return true; }
+        return false;
+    }
+
+    bool do_restart() const {
+        if (total_op_cnt() > 0 && (total_op_cnt() % 8192) == 0) { return true; }
         return false;
     }
 
@@ -806,6 +820,10 @@ TEST_F(VMetaBlkMgrTest, recovery_test) {
     // since we are using overflow metablk with 64K metadata, which will cause consume anther 2 metablks
     auto max_write_times = (m_mbm->total_size() - m_mbm->used_size() - blkstore_overhead) / (64 * Ki + 8 * Ki);
     LOGINFO("max_write_times {}", max_write_times);
+
+    // capping the max write times to 50K to avoid long running test
+    // with real drive.
+    if (max_write_times >= 50000) { max_write_times = 50000; }
 
     // write 1/2 of the available blks;
     for (uint64_t i = 0; i < max_write_times / 2; i++) {
