@@ -199,10 +199,10 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq, sisl::sg_list 
     auto& builder = rreq->create_fb_builder();
 
     // Prepare the rpc request packet with all repl_reqs details
-    builder.FinishSizePrefixed(
-        CreatePushDataRequest(builder, server_id(), rreq->term(), rreq->dsn(),
-                              builder.CreateVector(rreq->header().cbytes(), rreq->header().size()),
-                              builder.CreateVector(rreq->key().cbytes(), rreq->key().size()), data.size));
+    builder.FinishSizePrefixed(CreatePushDataRequest(
+        builder, server_id(), rreq->term(), rreq->dsn(),
+        builder.CreateVector(rreq->header().cbytes(), rreq->header().size()),
+        builder.CreateVector(rreq->key().cbytes(), rreq->key().size()), data.size, get_time_since_epoch_ms()));
 
     rreq->m_pkts = sisl::io_blob::sg_list_to_ioblob_list(data);
     rreq->m_pkts.insert(rreq->m_pkts.begin(), sisl::io_blob{builder.GetBufferPointer(), builder.GetSize(), false});
@@ -240,6 +240,9 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
     sisl::blob header = sisl::blob{push_req->user_header()->Data(), push_req->user_header()->size()};
     sisl::blob key = sisl::blob{push_req->user_key()->Data(), push_req->user_key()->size()};
     repl_key rkey{.server_id = push_req->issuer_replica_id(), .term = push_req->raft_term(), .dsn = push_req->dsn()};
+    auto const req_orig_time_ms = push_req->time_ms();
+
+    LOGINFO("Data Channel: PushData received: time diff={} ms.", get_elapsed_time_ms(req_orig_time_ms));
 
 #ifdef _PRERELEASE
     if (iomgr_flip::instance()->test_flip("drop_push_data_request")) {
@@ -265,10 +268,11 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
         return;
     }
 
+    auto const push_data_rcv_time = Clock::now();
     // Schedule a write and upon completion, mark the data as written.
     data_service()
         .async_write(r_cast< const char* >(rreq->data()), push_req->data_size(), rreq->local_blkid())
-        .thenValue([this, rreq](auto&& err) {
+        .thenValue([this, rreq, push_data_rcv_time](auto&& err) {
             if (err) {
                 COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
                 RD_DBG_ASSERT(false, "Error in writing data, error_code={}", err.value());
@@ -277,6 +281,16 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
                 rreq->add_state(repl_req_state_t::DATA_WRITTEN);
                 rreq->m_data_written_promise.setValue();
                 RD_LOGD("Data Channel: Data Write completed rreq=[{}]", rreq->to_compact_string());
+                const auto data_log_diff_us =
+                    push_data_rcv_time.time_since_epoch().count() > rreq->created_time().time_since_epoch().count()
+                    ? get_elapsed_time_us(rreq->created_time(), push_data_rcv_time)
+                    : get_elapsed_time_us(push_data_rcv_time, rreq->created_time());
+
+                LOGINFO("Data Channel: Data write completed for rreq=[{}], from_rreq_created_to_data_received_us={}, "
+                        "from_data_received_to_written_time_in_hs_us={}, from_rreq_creation_to_data_written_us={}, "
+                        "local_blkid.num_pieces={}",
+                        rreq->to_compact_string(), data_log_diff_us, get_elapsed_time_us(push_data_rcv_time),
+                        get_elapsed_time_us(rreq->created_time()), rreq->local_blkid().num_pieces());
             }
         });
 }
