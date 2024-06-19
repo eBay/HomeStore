@@ -49,6 +49,13 @@ bool hs_utils::mod_aligned_sz(size_t size_to_check, size_t align_sz) {
     return !(size_to_check & static_cast< size_t >(align_sz - 1)); // return true if it is aligned.
 }
 
+bool hs_utils::is_ptr_aligned(void* ptr, std::size_t alignment) {
+    // Cast the pointer to uintptr_t, which is an integer type capable of holding a pointer
+    auto intptr = reinterpret_cast<std::uintptr_t>(ptr);
+    // Check if the pointer is a multiple of the alignment
+    return (intptr % alignment) == 0;
+}
+
 sisl::byte_view hs_utils::create_byte_view(const uint64_t size, const bool is_aligned_needed, const sisl::buftag tag,
                                            const size_t alignment) {
     return (is_aligned_needed) ? sisl::byte_view{static_cast< uint32_t >(aligned_size(size, alignment)),
