@@ -403,7 +403,7 @@ public:
             iomanager.iobuf_free(buf);
         } else {
             if (unaligned_addr) {
-                delete[](buf - unaligned_shift);
+                delete[] (buf - unaligned_shift);
             } else {
                 delete[] buf;
             }
@@ -423,7 +423,8 @@ public:
 
             // the saved buf should be equal to the buf received in the recover callback;
             const int ret = it->second.str.compare(it_cb->second.str);
-            HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, callback: {}.", it->second.str, it_cb->second.str);
+            HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, callback: {}.", it->second.str,
+                          it_cb->second.str);
         }
     }
 
@@ -475,6 +476,8 @@ public:
                 break;
             }
         }
+        LOGINFO("rand load test finished, total ops: {}, write ops: {}, remove ops:{}, update ops: {}, restart: {}",
+                total_op_cnt(), m_wrt_cnt, m_rm_cnt, m_update_cnt, m_restart_cnt);
     }
 
     bool do_overflow() const {
@@ -595,8 +598,8 @@ public:
             [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
                 if (mblk) {
                     std::unique_lock< std::mutex > lg{m_mtx};
-                    m_cb_blks[mblk->hdr.h.bid.to_integer()] = sb_info_t {
-                        mblk, md5_sum(r_cast< const char* >(buf.bytes()), size)};
+                    m_cb_blks[mblk->hdr.h.bid.to_integer()] =
+                        sb_info_t{mblk, md5_sum(r_cast< const char* >(buf.bytes()), size)};
                 }
             },
             [this](bool success) {
@@ -689,8 +692,8 @@ public:
             [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
                 if (mblk) {
                     std::unique_lock< std::mutex > lg{m_mtx};
-                    m_cb_blks[mblk->hdr.h.bid.to_integer()] = sb_info_t {
-                        mblk, md5_sum(r_cast< const char* >(buf.bytes()), size)};
+                    m_cb_blks[mblk->hdr.h.bid.to_integer()] =
+                        sb_info_t{mblk, md5_sum(r_cast< const char* >(buf.bytes()), size)};
                 }
             },
             [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
@@ -714,7 +717,7 @@ public:
     uint64_t m_total_wrt_sz{0};
     MetaBlkService* m_mbm{nullptr};
     std::map< uint64_t, sb_info_t > m_write_sbs; // during write, save blkid to buf map;
-    std::map< uint64_t, sb_info_t > m_cb_blks; // during recover, save blkid to buf map;
+    std::map< uint64_t, sb_info_t > m_cb_blks;   // during recover, save blkid to buf map;
     std::mutex m_mtx;
 #ifdef _PRERELEASE
     flip::FlipClient m_fc{HomeStoreFlip::instance()};
