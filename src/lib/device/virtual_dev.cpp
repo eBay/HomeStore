@@ -339,8 +339,7 @@ folly::Future< std::error_code > VirtualDev::async_write(const char* buf, uint32
     }
     auto* pdev = chunk->physical_dev_mutable();
 
-    // HS_LOG(TRACE, device, "Writing in device: {}, offset = {}, size ={}", pdev->pdev_id(), dev_offset, size);
-    LOGINFO("Writing in device: {}, offset = {}, size ={}", pdev->pdev_id(), dev_offset, size);
+    HS_LOG(TRACE, device, "Writing in device: {}, offset = {}, size ={}", pdev->pdev_id(), dev_offset, size);
     COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
     if (sisl_unlikely(!hs_utils::mod_aligned_sz(dev_offset, pdev->align_size()))) {
         COUNTER_INCREMENT(m_metrics, unalign_writes, 1);

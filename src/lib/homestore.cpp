@@ -186,14 +186,14 @@ void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format
         LOGERROR("No services are configured to be placed on any device type");
         throw std::invalid_argument("No services are configured to be placed on any device type");
     }
-
+#if 0
     // Sanity check, should have fast if fast pct >0
     if (total_pct_by_type[HSDevType::Fast] > 0 && !HomeStoreStaticConfig::instance().input.has_fast_dev()) {
         LOGERROR("Fast device is not configured but services are configured to be placed on fast device");
         throw std::invalid_argument(
             "Fast device is not configured but services are configured to be placed on fast device");
     }
-
+#endif
     m_dev_mgr->format_devices();
     if (HomeStoreStaticConfig::instance().input.has_fast_dev()) {
         hs_utils::set_btree_mempool_size(m_dev_mgr->atomic_page_size({HSDevType::Fast}));

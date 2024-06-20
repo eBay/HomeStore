@@ -46,6 +46,35 @@ public:
         REGISTER_COUNTER(fetch_total_entries_cnt, "total fetch total entries count", "fetch_total_entries_cnt",
                          {"op", "fetch"});
 
+        // TODO: do we want to put this under _PRERELEASE only?
+        REGISTER_COUNTER(total_read_cnt, "total write count", "total_write_cnt", {"op", "read"}); // placeholder
+        REGISTER_COUNTER(total_write_cnt, "total read count", "total_read_cnt", {"op", "write"});
+        REGISTER_COUNTER(outstanding_data_read_cnt, "Total data outstanding read cnt",
+                         sisl::_publish_as::publish_as_gauge); // placeholder
+        REGISTER_COUNTER(outstanding_data_write_cnt, "Total data outstanding write cnt",
+                         sisl::_publish_as::publish_as_gauge);
+        REGISTER_COUNTER(outstanding_data_fetch_cnt, "Total data outstanding fetch cnt",
+                         sisl::_publish_as::publish_as_gauge);
+
+        // leader: data write latency;
+        // follower: from rreq push data received to data write completion;
+        REGISTER_HISTOGRAM(rreq_data_write_latency_us, "rreq data write latency in us", "rreq_data_op_latency",
+                           {"op", "write"});
+        REGISTER_HISTOGRAM(rreq_data_read_latency_us, "rreq data read latency in us", "rreq_data_op_latency",
+                           {"op", "read"}); // placeholder
+        // latency from follower->originator->follower, not including actual data write on follower;
+        REGISTER_HISTOGRAM(rreq_data_fetch_latency_us, "rreq data fetch latency in us", "rreq_data_op_latency",
+                           {"op", "fetch"});
+
+        /* from rreq creation to data ops completion */
+        REGISTER_HISTOGRAM(rreq_total_data_read_latency_us, "rreq data read latency in us", "rdev_data_op_latency",
+                           {"op", "read"}); // placeholder
+        REGISTER_HISTOGRAM(rreq_total_data_write_latency_us, "rreq data write latency in us", "rdev_data_op_latency",
+                           {"op", "write"});
+
+        REGISTER_HISTOGRAM(rreq_pieces_per_write, "Number of individual pieces per write",
+                           HistogramBucketsType(LinearUpto64Buckets));
+
         register_me_to_farm();
     }
 

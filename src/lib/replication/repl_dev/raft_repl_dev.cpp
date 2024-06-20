@@ -177,16 +177,33 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
             return;
         }
 
+        COUNTER_INCREMENT(m_metrics, total_write_cnt, 1);
+        COUNTER_INCREMENT(m_metrics, outstanding_data_write_cnt, 1);
+
+        auto const data_write_start_time = Clock::now();
         // Write the data
-        data_service().async_write(data, rreq->local_blkid()).thenValue([this, rreq](auto&& err) {
-            if (err) {
-                HS_DBG_ASSERT(false, "Error in writing data, err_code={}", err.value());
-                handle_error(rreq, ReplServiceError::DRIVE_WRITE_ERROR);
-            } else {
-                auto raft_status = m_state_machine->propose_to_raft(rreq);
-                if (raft_status != ReplServiceError::OK) { handle_error(rreq, raft_status); }
-            }
-        });
+        data_service()
+            .async_write(data, rreq->local_blkid())
+            .thenValue([this, rreq, data_write_start_time](auto&& err) {
+                // update outstanding no matter error or not;
+                COUNTER_DECREMENT(m_metrics, outstanding_data_write_cnt, 1);
+
+                if (err) {
+                    HS_DBG_ASSERT(false, "Error in writing data, err_code={}", err.value());
+                    handle_error(rreq, ReplServiceError::DRIVE_WRITE_ERROR);
+                } else {
+                    // update metrics for originated rreq;
+                    const auto write_num_pieces = rreq->local_blkid().num_pieces();
+                    HISTOGRAM_OBSERVE(m_metrics, rreq_pieces_per_write, write_num_pieces);
+                    HISTOGRAM_OBSERVE(m_metrics, rreq_data_write_latency_us,
+                                      get_elapsed_time_us(data_write_start_time));
+                    HISTOGRAM_OBSERVE(m_metrics, rreq_total_data_write_latency_us,
+                                      get_elapsed_time_us(rreq->created_time()));
+
+                    auto raft_status = m_state_machine->propose_to_raft(rreq);
+                    if (raft_status != ReplServiceError::OK) { handle_error(rreq, raft_status); }
+                }
+            });
     } else {
         RD_LOGD("Skipping data channel send since value size is 0");
         rreq->add_state(repl_req_state_t::DATA_WRITTEN);
@@ -242,7 +259,7 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
     repl_key rkey{.server_id = push_req->issuer_replica_id(), .term = push_req->raft_term(), .dsn = push_req->dsn()};
     auto const req_orig_time_ms = push_req->time_ms();
 
-    LOGINFO("Data Channel: PushData received: time diff={} ms.", get_elapsed_time_ms(req_orig_time_ms));
+    RD_LOGD("Data Channel: PushData received: time diff={} ms.", get_elapsed_time_ms(req_orig_time_ms));
 
 #ifdef _PRERELEASE
     if (iomgr_flip::instance()->test_flip("drop_push_data_request")) {
@@ -268,11 +285,17 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
         return;
     }
 
+    COUNTER_INCREMENT(m_metrics, total_write_cnt, 1);
+    COUNTER_INCREMENT(m_metrics, outstanding_data_write_cnt, 1);
+
     auto const push_data_rcv_time = Clock::now();
     // Schedule a write and upon completion, mark the data as written.
     data_service()
         .async_write(r_cast< const char* >(rreq->data()), push_req->data_size(), rreq->local_blkid())
         .thenValue([this, rreq, push_data_rcv_time](auto&& err) {
+            // update outstanding no matter error or not;
+            COUNTER_DECREMENT(m_metrics, outstanding_data_write_cnt, 1);
+
             if (err) {
                 COUNTER_INCREMENT(m_metrics, write_err_cnt, 1);
                 RD_DBG_ASSERT(false, "Error in writing data, error_code={}", err.value());
@@ -280,17 +303,25 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
             } else {
                 rreq->add_state(repl_req_state_t::DATA_WRITTEN);
                 rreq->m_data_written_promise.setValue();
-                RD_LOGD("Data Channel: Data Write completed rreq=[{}]", rreq->to_compact_string());
+                // RD_LOGD("Data Channel: Data Write completed rreq=[{}]", rreq->to_compact_string());
                 const auto data_log_diff_us =
                     push_data_rcv_time.time_since_epoch().count() > rreq->created_time().time_since_epoch().count()
                     ? get_elapsed_time_us(rreq->created_time(), push_data_rcv_time)
                     : get_elapsed_time_us(push_data_rcv_time, rreq->created_time());
 
-                LOGINFO("Data Channel: Data write completed for rreq=[{}], from_rreq_created_to_data_received_us={}, "
-                        "from_data_received_to_written_time_in_hs_us={}, from_rreq_creation_to_data_written_us={}, "
+                auto const data_write_latency = get_elapsed_time_us(push_data_rcv_time);
+                auto const total_data_write_latency = get_elapsed_time_us(rreq->created_time());
+                auto const write_num_pieces = rreq->local_blkid().num_pieces();
+
+                HISTOGRAM_OBSERVE(m_metrics, rreq_pieces_per_write, write_num_pieces);
+                HISTOGRAM_OBSERVE(m_metrics, rreq_data_write_latency_us, data_write_latency);
+                HISTOGRAM_OBSERVE(m_metrics, rreq_total_data_write_latency_us, total_data_write_latency);
+
+                RD_LOGI("Data Channel: Data write completed for rreq=[{}], time_diff_data_log_us={}, "
+                        "data_write_latency_us={}, total_data_write_latency_us(rreq creation to write complete)={}, "
                         "local_blkid.num_pieces={}",
-                        rreq->to_compact_string(), data_log_diff_us, get_elapsed_time_us(push_data_rcv_time),
-                        get_elapsed_time_us(rreq->created_time()), rreq->local_blkid().num_pieces());
+                        rreq->to_compact_string(), data_log_diff_us, data_write_latency, total_data_write_latency,
+                        write_num_pieces);
             }
         });
 }
@@ -516,16 +547,24 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
 
     COUNTER_INCREMENT(m_metrics, fetch_rreq_cnt, 1);
     COUNTER_INCREMENT(m_metrics, fetch_total_entries_cnt, rreqs.size());
+    COUNTER_INCREMENT(m_metrics, outstanding_data_fetch_cnt, 1);
 
     // leader can change, on the receiving side, we need to check if the leader is still the one who originated the
     // blkid;
+    auto const fetch_start_time = Clock::now();
     group_msg_service()
         ->data_service_request_bidirectional(
             originator, FETCH_DATA,
             sisl::io_blob_list_t{
                 sisl::io_blob{builder->GetBufferPointer(), builder->GetSize(), false /* is_aligned */}})
         .via(&folly::InlineExecutor::instance())
-        .thenValue([this, builder, rreqs = std::move(rreqs)](auto response) {
+        .thenValue([this, builder, rreqs = std::move(rreqs), fetch_start_time](auto response) {
+            COUNTER_DECREMENT(m_metrics, outstanding_data_fetch_cnt, 1);
+            auto const fetch_latency_us = get_elapsed_time_us(fetch_start_time);
+            HISTOGRAM_OBSERVE(m_metrics, rreq_data_fetch_latency_us, fetch_latency_us);
+
+            RD_LOGD("Data Channel: FetchData from remote completed, time taken={} ms", fetch_latency_us);
+
             if (!response) {
                 // if we are here, it means the original who sent the log entries are down.
                 // we need to handle error and when the other member becomes leader, it will resend the log entries;
@@ -659,15 +698,32 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
             RD_LOGD("Data Channel: Data already received for rreq=[{}], skip and move on to next rreq.",
                     rreq->to_compact_string());
         } else {
+            auto const data_write_start_time = Clock::now();
+            COUNTER_INCREMENT(m_metrics, total_write_cnt, 1);
+            COUNTER_INCREMENT(m_metrics, outstanding_data_write_cnt, 1);
             data_service()
                 .async_write(r_cast< const char* >(rreq->data()), data_size, rreq->local_blkid())
-                .thenValue([this, rreq](auto&& err) {
+                .thenValue([this, rreq, data_write_start_time](auto&& err) {
+                    // update outstanding no matter error or not;
+                    COUNTER_DECREMENT(m_metrics, outstanding_data_write_cnt, 1);
+                    auto const data_write_latency = get_elapsed_time_us(data_write_start_time);
+                    auto const total_data_write_latency = get_elapsed_time_us(rreq->created_time());
+                    auto const write_num_pieces = rreq->local_blkid().num_pieces();
+
+                    HISTOGRAM_OBSERVE(m_metrics, rreq_pieces_per_write, write_num_pieces);
+                    HISTOGRAM_OBSERVE(m_metrics, rreq_data_write_latency_us, data_write_latency);
+                    HISTOGRAM_OBSERVE(m_metrics, rreq_total_data_write_latency_us, total_data_write_latency);
+
                     RD_REL_ASSERT(!err,
                                   "Error in writing data"); // TODO: Find a way to return error to the Listener
                     rreq->add_state(repl_req_state_t::DATA_WRITTEN);
                     rreq->m_data_written_promise.setValue();
-                    RD_LOGI("Data Channel: Data Write completed rreq=[{}]", rreq->to_compact_string());
+
+                    RD_LOGI("Data Channel: Data Write completed rreq=[{}], data_write_latency_us={}, "
+                            "total_write_latency_us={}, write_num_pieces={}",
+                            rreq->to_compact_string(), data_write_latency, total_data_write_latency, write_num_pieces);
                 });
+
             RD_LOGD("Data Channel: Data fetched from remote: rreq=[{}], data_size: {}, total_size: {}, local_blkid: {}",
                     rreq->to_compact_string(), data_size, total_size, rreq->local_blkid().to_string());
         }
@@ -1059,7 +1115,7 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     nuraft::log_entry const* lentry = r_cast< nuraft::log_entry const* >(buf.bytes());
 
     // TODO: Handle the case where the log entry is not app_log, example config logs
-    if(lentry->get_val_type() != nuraft::log_val_type::app_log) { return; }
+    if (lentry->get_val_type() != nuraft::log_val_type::app_log) { return; }
 
     repl_journal_entry* jentry = r_cast< repl_journal_entry* >(lentry->get_buf().data_begin());
     RELEASE_ASSERT_EQ(jentry->major_version, repl_journal_entry::JOURNAL_ENTRY_MAJOR,

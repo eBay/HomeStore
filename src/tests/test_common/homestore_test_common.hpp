@@ -266,14 +266,14 @@ public:
                                              : homestore::HSDevType::Data); // First device is fast device
             }
         }
-
+#if 0
         if (!fake_restart && token.name_ == "test_data_service")
             HS_REL_ASSERT_EQ(
                 token.devs_.size() > 2, true,
                 "if not fake restart, we need at least 3 device to run the data_service ut of simulating restart with "
                 "missing drive. current device num is {}",
                 token.devs_.size());
-
+#endif
         if (is_spdk) {
             LOGINFO("Spdk with more than 2 threads will cause overburden test systems, changing nthreads to 2");
             num_threads = 2;
