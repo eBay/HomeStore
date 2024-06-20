@@ -303,7 +303,6 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
             } else {
                 rreq->add_state(repl_req_state_t::DATA_WRITTEN);
                 rreq->m_data_written_promise.setValue();
-                // RD_LOGD("Data Channel: Data Write completed rreq=[{}]", rreq->to_compact_string());
                 const auto data_log_diff_us =
                     push_data_rcv_time.time_since_epoch().count() > rreq->created_time().time_since_epoch().count()
                     ? get_elapsed_time_us(rreq->created_time(), push_data_rcv_time)
