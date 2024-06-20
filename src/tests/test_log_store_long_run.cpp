@@ -174,7 +174,10 @@ public:
             return;
         }
 
+        if ((m_cur_lsn - num_lsns_to_rollback - 1) <= m_log_store->get_contiguous_issued_seq_num(-1)) { return; }
+
         auto const upto_lsn = m_cur_lsn.fetch_sub(num_lsns_to_rollback) - num_lsns_to_rollback - 1;
+
         m_log_store->rollback_async(upto_lsn, [&](logstore_seq_num_t) {
             ASSERT_EQ(m_log_store->get_contiguous_completed_seq_num(-1), upto_lsn)
                 << "Last completed seq num is not reset after rollback";
@@ -317,7 +320,7 @@ public:
             test_common::HSTestHelper::restart_homestore(m_token);
         } else {
             m_token = test_common::HSTestHelper::start_homestore(
-                "test_log_store",
+                "test_log_store_long_run",
                 {{HS_SERVICE::META, {.size_pct = 5.0}},
                  {HS_SERVICE::LOG,
                   {.size_pct = 84.0, .chunk_size = 8 * 1024 * 1024, .min_chunk_size = 8 * 1024 * 1024}}},
@@ -615,8 +618,8 @@ TEST_F(LogStoreLongRun, LongRunning) {
     }
 }
 
-SISL_OPTIONS_ENABLE(logging, test_log_store, iomgr, test_common_setup)
-SISL_OPTION_GROUP(test_log_store,
+SISL_OPTIONS_ENABLE(logging, test_log_store_long_run, iomgr, test_common_setup)
+SISL_OPTION_GROUP(test_log_store_long_run,
                   (num_logstores, "", "num_logstores", "number of log stores",
                    ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
                   (num_records, "", "num_records", "number of record to test",
@@ -629,11 +632,11 @@ SISL_OPTION_GROUP(test_log_store,
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
     ::testing::InitGoogleTest(&parsed_argc, argv);
-    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_log_store, iomgr, test_common_setup);
-    sisl::logging::SetLogger("test_log_store");
+    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_log_store_long_run, iomgr, test_common_setup);
+    sisl::logging::SetLogger("test_log_store_long_run");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
-    sisl::logging::SetModuleLogLevel("logstore", spdlog::level::level_enum::debug);
-    sisl::logging::SetModuleLogLevel("journalvdev", spdlog::level::level_enum::info);
+    // sisl::logging::SetModuleLogLevel("logstore", spdlog::level::level_enum::debug);
+    // sisl::logging::SetModuleLogLevel("journalvdev", spdlog::level::level_enum::info);
 
     const int ret = RUN_ALL_TESTS();
     return ret;
