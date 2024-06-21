@@ -197,7 +197,9 @@ public:
     void change_device_list(std::vector< homestore::dev_info > devs) { m_token.devs_ = std::move(devs); }
     test_params& params(uint32_t svc) { return m_token.svc_params_[svc]; }
 
+#ifdef _PRERELEASE
     void wait_for_crash_recovery() { m_crash_recovered.getFuture().get(); }
+#endif
 
     void set_min_chunk_size(uint64_t chunk_size) {
 #ifdef _PRERELEASE
@@ -347,13 +349,11 @@ private:
             auto const devs = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
             for (const auto& name : devs) {
                 // iomgr::DriveInterface::emulate_drive_type(name, iomgr::drive_type::block_hdd);
-                m_token.devs_.emplace_back(name, homestore::HSDevType::Data);
+                m_token.devs_.emplace_back(name,
+                                           m_token.devs_.empty()
+                                               ? homestore::HSDevType::Fast
+                                               : homestore::HSDevType::Data); // First device is fast device
             }
-
-            HS_REL_ASSERT_EQ(m_token.devs_.size() > 2, true,
-                             "if not fake restart, we need at least 3 device to run the ut of simulating restart with "
-                             "missing drive. current device num is {}",
-                             m_token.devs_.size());
 
             LOGINFO("Taking input dev_list: {}",
                     std::accumulate(m_token.devs_.begin(), m_token.devs_.end(), std::string(""),
