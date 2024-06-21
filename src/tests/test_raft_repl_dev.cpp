@@ -676,7 +676,7 @@ TEST_F(RaftReplDevTest, GCReplReqs) {
 
     if (g_helper->replica_num() != 0) {
         LOGINFO("Set flip to fake fetch data request on data channel");
-        set_basic_flip("drop_push_data_request");
+        g_helper->set_basic_flip("drop_push_data_request");
     }
 
     this->write_on_leader(100 /* num_entries */, true /* wait_for_commit */);
