@@ -34,6 +34,7 @@ public:
     static void iobuf_free(uint8_t* const ptr, const sisl::buftag tag, const size_t size);
     static uint64_t aligned_size(const size_t size, const size_t alignment);
     static bool mod_aligned_sz(const size_t size_to_check, const size_t align_sz);
+    static bool is_ptr_aligned(void* ptr, std::size_t alignment);
     static sisl::byte_view create_byte_view(const uint64_t size, const bool is_aligned_needed, const sisl::buftag tag,
                                             const size_t alignment);
     static sisl::io_blob create_io_blob(const uint64_t size, const bool is_aligned_needed, const sisl::buftag tag,

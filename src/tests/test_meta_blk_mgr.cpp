@@ -266,7 +266,7 @@ public:
         if (!done_read) {
             done_read = true;
             m_mbm->read_sub_sb(mtype);
-            const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()];
+            const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()].str;
             const std::string write_buf_str = m_write_sbs[mblk->hdr.h.bid.to_integer()].str;
             const auto ret = read_buf_str.compare(write_buf_str);
             if (mblk->hdr.h.compressed == false) {
@@ -327,7 +327,7 @@ public:
 
         {
             std::unique_lock< std::mutex > lg{m_mtx};
-            const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()];
+            const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()].str;
             const std::string write_buf_str{str};
             const auto ret = read_buf_str.compare(write_buf_str);
             HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
@@ -403,7 +403,7 @@ public:
             iomanager.iobuf_free(buf);
         } else {
             if (unaligned_addr) {
-                delete[](buf - unaligned_shift);
+                delete[] (buf - unaligned_shift);
             } else {
                 delete[] buf;
             }
@@ -422,8 +422,9 @@ public:
             HS_DBG_ASSERT(it_cb != std::cend(m_cb_blks), "Saved bid during write not found in recover callback.");
 
             // the saved buf should be equal to the buf received in the recover callback;
-            const int ret = it->second.str.compare(it_cb->second);
-            HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, callback: {}.", it->second.str, it_cb->second);
+            const int ret = it->second.str.compare(it_cb->second.str);
+            HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, callback: {}.", it->second.str,
+                          it_cb->second.str);
         }
     }
 
@@ -475,6 +476,8 @@ public:
                 break;
             }
         }
+        LOGINFO("rand load test finished, total ops: {}, write ops: {}, remove ops:{}, update ops: {}, restart: {}",
+                total_op_cnt(), m_wrt_cnt, m_rm_cnt, m_update_cnt, m_restart_cnt);
     }
 
     bool do_overflow() const {
@@ -497,6 +500,7 @@ public:
 
     void recover_with_on_complete() {
         // restart will cause recovery and callbacks will be triggered
+        ++m_restart_cnt;
         m_cb_blks.clear();
         restart_homestore();
     }
@@ -504,6 +508,8 @@ public:
     void validate() {
         // verify received blks via callbaks are all good;
         verify_cb_blks();
+        m_write_sbs.swap(m_cb_blks);
+        m_cb_blks.clear();
     }
 
     meta_op_type get_op() {
@@ -537,7 +543,7 @@ public:
         }
     }
 
-    uint64_t total_op_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
+    uint64_t total_op_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt + m_restart_cnt; }
 
     uint32_t write_ratio() const {
         if (m_wrt_cnt == 0) return 0;
@@ -579,24 +585,28 @@ public:
         m_update_cnt = 0;
         m_rm_cnt = 0;
         m_total_wrt_sz = 0;
+        m_restart_cnt = 0;
     }
 
     void register_client() {
         m_mbm = &(meta_service());
         m_total_wrt_sz = m_mbm->used_size();
-
         HS_REL_ASSERT_EQ(m_mbm->total_size() - m_total_wrt_sz, m_mbm->available_blks() * m_mbm->block_size());
-
         m_mbm->deregister_handler(mtype);
         m_mbm->register_handler(
             mtype,
             [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
                 if (mblk) {
                     std::unique_lock< std::mutex > lg{m_mtx};
-                    m_cb_blks[mblk->hdr.h.bid.to_integer()] = md5_sum(r_cast< const char* >(buf.bytes()), size);
+                    m_cb_blks[mblk->hdr.h.bid.to_integer()] =
+                        sb_info_t{mblk, md5_sum(r_cast< const char* >(buf.bytes()), size)};
                 }
             },
-            [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
+            [this](bool success) {
+                HS_DBG_ASSERT_EQ(success, true);
+                m_total_wrt_sz = m_mbm->used_size();
+                HS_REL_ASSERT_EQ(m_mbm->total_size() - m_total_wrt_sz, m_mbm->available_blks() * m_mbm->block_size());
+            });
     }
 
     void register_client_inlcuding_dependencies() {
@@ -682,7 +692,8 @@ public:
             [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
                 if (mblk) {
                     std::unique_lock< std::mutex > lg{m_mtx};
-                    m_cb_blks[mblk->hdr.h.bid.to_integer()] = std::string{r_cast< const char* >(buf.bytes()), size};
+                    m_cb_blks[mblk->hdr.h.bid.to_integer()] =
+                        sb_info_t{mblk, md5_sum(r_cast< const char* >(buf.bytes()), size)};
                 }
             },
             [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
@@ -702,10 +713,11 @@ public:
     uint64_t m_wrt_cnt{0};
     uint64_t m_update_cnt{0};
     uint64_t m_rm_cnt{0};
+    uint64_t m_restart_cnt{0};
     uint64_t m_total_wrt_sz{0};
     MetaBlkService* m_mbm{nullptr};
     std::map< uint64_t, sb_info_t > m_write_sbs; // during write, save blkid to buf map;
-    std::map< uint64_t, std::string > m_cb_blks; // during recover, save blkid to buf map;
+    std::map< uint64_t, sb_info_t > m_cb_blks;   // during recover, save blkid to buf map;
     std::mutex m_mtx;
 #ifdef _PRERELEASE
     flip::FlipClient m_fc{HomeStoreFlip::instance()};
