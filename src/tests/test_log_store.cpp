@@ -54,7 +54,6 @@
 using namespace homestore;
 RCU_REGISTER_INIT
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
 struct test_log_data {
     test_log_data() = default;
@@ -475,7 +474,8 @@ public:
             for (auto& lsc : m_log_store_clients) {
                 lsc->flush();
             }
-            m_token.cb_ = [this, n_log_stores]() {
+
+            m_helper.change_start_cb([this, n_log_stores]() {
                 HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
                     // Disable flush and resource mgr timer in UT.
                     s.logstore.flush_timer_frequency_us = 0;
@@ -490,10 +490,10 @@ public:
                         .open_log_store(client->m_logdev_id, client->m_store_id, false /* append_mode */)
                         .thenValue([i, this, client](auto log_store) { client->set_log_store(log_store); });
                 }
-            };
-            test_common::HSTestHelper::restart_homestore(m_token);
+            });
+            m_helper.restart_homestore();
         } else {
-            m_token = test_common::HSTestHelper::start_homestore(
+            m_helper.start_homestore(
                 "test_log_store",
                 {{HS_SERVICE::META, {.size_pct = 5.0}},
                  {HS_SERVICE::LOG,
@@ -522,7 +522,7 @@ public:
     }
 
     void shutdown(bool cleanup = true) {
-        test_common::HSTestHelper::shutdown_homestore(cleanup);
+        m_helper.shutdown_homestore(cleanup);
         if (cleanup) {
             m_log_store_clients.clear();
             m_highest_log_idx.clear();
@@ -559,7 +559,7 @@ private:
     test_log_store_comp_cb_t m_io_closure;
     std::vector< std::unique_ptr< SampleLogStoreClient > > m_log_store_clients;
     std::map< logdev_id_t, std::atomic< logid_t > > m_highest_log_idx;
-    test_common::HSTestHelper::test_token m_token;
+    test_common::HSTestHelper m_helper;
 };
 
 const std::string SampleDB::s_fpath_root{"/tmp/log_store_dev_"};

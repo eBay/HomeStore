@@ -57,8 +57,6 @@ SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, test_data_service, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_data_service)
 
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-
 constexpr uint64_t Ki{1024};
 constexpr uint64_t Mi{Ki * Ki};
 constexpr uint64_t Gi{Ki * Mi};
@@ -83,8 +81,8 @@ public:
 
     virtual void SetUp() override {
         m_blk_crc_map.clear();
-        m_token = test_common::HSTestHelper::start_homestore(
-            "test_data_service", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::DATA, {.size_pct = 80.0}}});
+        m_helper.start_homestore("test_data_service",
+                                 {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::DATA, {.size_pct = 80.0}}});
 
         if (gp.min_io_size % homestore::data_service().get_blk_size() ||
             gp.max_io_size % homestore::data_service().get_blk_size()) {
@@ -95,7 +93,7 @@ public:
         }
     }
 
-    virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
+    virtual void TearDown() override { m_helper.shutdown_homestore(); }
 
     void free(sisl::sg_list& sg) { test_common::HSTestHelper::free(sg); }
 
@@ -328,8 +326,8 @@ public:
         }
 
         // restart with the given drive list
-        m_token.devs_ = start_with_devices;
-        test_common::HSTestHelper::restart_homestore(m_token);
+        m_helper.change_device_list(start_with_devices);
+        m_helper.restart_homestore();
 
         LOGINFO("Step 4: read the blk from missing data drive");
         auto sg = std::make_shared< sisl::sg_list >();
@@ -827,7 +825,7 @@ private:
     std::unordered_set< uint64_t > m_outstanding_free_bid;
     std::atomic< uint64_t > m_outstanding_io_cnt{0};
     std::atomic< uint64_t > m_total_io_comp_cnt{0};
-    test_common::HSTestHelper::test_token m_token;
+    test_common::HSTestHelper m_helper;
 };
 
 //

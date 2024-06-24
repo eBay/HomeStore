@@ -29,7 +29,7 @@
 
 using namespace homestore;
 
-#define INDEX_BETREE_BENCHMARK(BTREE_TYPE)                                                                             \
+#define INDEX_BTREE_BENCHMARK(BTREE_TYPE)                                                                              \
     BENCHMARK(run_benchmark< BTREE_TYPE >)                                                                             \
         ->Setup(BM_Setup< BTREE_TYPE >)                                                                                \
         ->Teardown(BM_Teardown< BTREE_TYPE >)                                                                          \
@@ -38,12 +38,9 @@ using namespace homestore;
         ->Name(#BTREE_TYPE);
 
 // this is used to splite the setup and teardown from the benchmark to get a more accurate result
-void* globle_helper{nullptr};
-
-#define GET_BENCHMARK_HELPER(BTREE_TYPE) static_cast< IndexBtreeBenchmark< BTREE_TYPE >* >(globle_helper)
+void* g_btree_helper{nullptr};
 
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 SISL_OPTIONS_ENABLE(logging, index_btree_benchmark, iomgr, test_common_setup)
 
 SISL_OPTION_GROUP(index_btree_benchmark,
@@ -69,8 +66,8 @@ struct IndexBtreeBenchmark : public BtreeTestHelper< TestType > {
     ~IndexBtreeBenchmark() { TearDown(); }
 
     void SetUp() {
-        test_common::HSTestHelper::start_homestore(
-            "index_btree_benchmark", {{HS_SERVICE::META, {.size_pct = 10.0}}, {HS_SERVICE::INDEX, {.size_pct = 70.0}}});
+        m_helper.start_homestore("index_btree_benchmark",
+                                 {{HS_SERVICE::META, {.size_pct = 10.0}}, {HS_SERVICE::INDEX, {.size_pct = 70.0}}});
 
         this->m_cfg = BtreeConfig(hs()->index_service().node_size());
         this->m_is_multi_threaded = true;
@@ -87,30 +84,32 @@ struct IndexBtreeBenchmark : public BtreeTestHelper< TestType > {
 
     void TearDown() {
         BtreeTestHelper< TestType >::TearDown();
-        test_common::HSTestHelper::shutdown_homestore();
+        m_helper.shutdown_homestore();
     }
 
     void run_benchmark() { this->run_in_parallel(m_op_list); }
 
 private:
+    test_common::HSTestHelper m_helper;
     std::vector< std::pair< std::string, int > > m_op_list;
 };
 
 template < class BenchmarkType >
 void BM_Setup(const benchmark::State& state) {
-    globle_helper = new IndexBtreeBenchmark< BenchmarkType >();
-    auto helper = GET_BENCHMARK_HELPER(BenchmarkType);
+    g_btree_helper = new IndexBtreeBenchmark< BenchmarkType >();
+    auto helper = s_cast< IndexBtreeBenchmark< BenchmarkType >* >(g_btree_helper);
     helper->preload(SISL_OPTIONS["preload_size"].as< uint32_t >());
 }
 
 template < class BenchmarkType >
 void BM_Teardown(const benchmark::State& state) {
-    delete GET_BENCHMARK_HELPER(BenchmarkType);
+    auto helper = s_cast< IndexBtreeBenchmark< BenchmarkType >* >(g_btree_helper);
+    delete helper;
 }
 
 template < class BenchmarkType >
 void add_custom_counter(benchmark::State& state) {
-    auto helper = GET_BENCHMARK_HELPER(BenchmarkType);
+    auto helper = s_cast< IndexBtreeBenchmark< BenchmarkType >* >(g_btree_helper);
     auto totol_ops = helper->get_op_num();
     state.counters["thread_num"] = SISL_OPTIONS["num_threads"].as< uint32_t >();
     state.counters["fiber_num"] = SISL_OPTIONS["num_fibers"].as< uint32_t >();
@@ -122,18 +121,18 @@ void add_custom_counter(benchmark::State& state) {
 
 template < class BenchmarkType >
 void run_benchmark(benchmark::State& state) {
-    auto helper = GET_BENCHMARK_HELPER(BenchmarkType);
+    auto helper = s_cast< IndexBtreeBenchmark< BenchmarkType >* >(g_btree_helper);
     for (auto _ : state) {
         helper->run_benchmark();
     }
     add_custom_counter< BenchmarkType >(state);
 }
 
-INDEX_BETREE_BENCHMARK(FixedLenBtree)
-INDEX_BETREE_BENCHMARK(VarKeySizeBtree)
-INDEX_BETREE_BENCHMARK(VarValueSizeBtree)
-INDEX_BETREE_BENCHMARK(VarObjSizeBtree)
-//INDEX_BETREE_BENCHMARK(PrefixIntervalBtree)
+INDEX_BTREE_BENCHMARK(FixedLenBtree)
+INDEX_BTREE_BENCHMARK(VarKeySizeBtree)
+INDEX_BTREE_BENCHMARK(VarValueSizeBtree)
+INDEX_BTREE_BENCHMARK(VarObjSizeBtree)
+// INDEX_BTREE_BENCHMARK(PrefixIntervalBtree)
 
 int main(int argc, char** argv) {
     SISL_OPTIONS_LOAD(argc, argv, logging, index_btree_benchmark, iomgr, test_common_setup);
