@@ -31,7 +31,6 @@ SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 SISL_OPTIONS_ENABLE(logging, test_cp_mgr, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_cp_mgr)
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
 SISL_OPTION_GROUP(test_cp_mgr,
                   (num_records, "", "num_records", "number of record to test",
@@ -86,10 +85,11 @@ public:
 class TestCPMgr : public ::testing::Test {
 public:
     void SetUp() override {
-        test_common::HSTestHelper::start_homestore("test_cp", {{HS_SERVICE::META, {.size_pct = 85.0}}});
+        m_helper.start_homestore("test_cp", {{HS_SERVICE::META, {.size_pct = 85.0}}});
         hs()->cp_mgr().register_consumer(cp_consumer_t::HS_CLIENT, std::move(std::make_unique< TestCPCallbacks >()));
     }
-    void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
+
+    void TearDown() override { m_helper.shutdown_homestore(); }
 
     void simulate_io() {
         iomanager.run_on_forget(iomgr::reactor_regex::least_busy_worker, [this]() {
@@ -140,6 +140,9 @@ public:
             std::move(fut).thenValue(on_complete);
         }
     }
+
+private:
+    test_common::HSTestHelper m_helper;
 };
 
 TEST_F(TestCPMgr, cp_start_and_flush) {

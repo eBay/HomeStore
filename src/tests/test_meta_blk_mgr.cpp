@@ -32,6 +32,10 @@
 #include <sisl/options/options.h>
 #include <sisl/flip/flip_client.hpp>
 #include <gtest/gtest.h>
+extern "C" {
+#include <openssl/evp.h>
+#include <openssl/md5.h>
+}
 
 #include <homestore/homestore.hpp>
 #include <homestore/meta_service.hpp>
@@ -46,7 +50,6 @@ using namespace homestore;
 
 RCU_REGISTER_INIT
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
 SISL_OPTIONS_ENABLE(logging, test_meta_blk_mgr, iomgr, test_common_setup)
 
@@ -79,9 +82,29 @@ struct sb_info_t {
     std::string str;
 };
 
+static std::string md5_sum(const char* buf, size_t sz) {
+    std::array< unsigned char, MD5_DIGEST_LENGTH > result;
+    uint32_t md_len;
+    auto mdctx = EVP_MD_CTX_new();
+    EVP_DigestInit_ex2(mdctx, EVP_md5(), nullptr);
+    EVP_DigestUpdate(mdctx, buf, sz);
+    EVP_DigestFinal_ex(mdctx, result.data(), &md_len);
+    EVP_MD_CTX_free(mdctx);
+    RELEASE_ASSERT(md_len == MD5_DIGEST_LENGTH, "Bad digest length, expected [{}] got [{}]!", MD5_DIGEST_LENGTH,
+                   md_len);
+
+    // convert to hex
+    std::ostringstream ss;
+    ss << std::hex;
+    for (auto const c : result) {
+        ss << std::setw(2) << std::setfill('0') << static_cast< unsigned >(c);
+    }
+    return ss.str();
+}
+
 class VMetaBlkMgrTest : public ::testing::Test {
 public:
-    enum class meta_op_type : uint8_t { write = 1, update = 2, remove = 3, read = 4 };
+    enum class meta_op_type : uint8_t { write = 1, update = 2, remove = 3, read = 4, restart = 5 };
 
     std::string mtype;
     Clock::time_point m_start_time;
@@ -89,7 +112,7 @@ public:
     std::vector< meta_sub_type > actual_on_complete_cb_order;
     std::vector< void* > cookies;
     bool enable_dependency_chain{false};
-    test_common::HSTestHelper::test_token m_token;
+    test_common::HSTestHelper m_helper;
 
     VMetaBlkMgrTest() = default;
     VMetaBlkMgrTest(const VMetaBlkMgrTest&) = delete;
@@ -100,10 +123,7 @@ public:
     virtual ~VMetaBlkMgrTest() override = default;
 
 protected:
-    void SetUp() override {
-        m_token =
-            test_common::HSTestHelper::start_homestore("test_meta_blk_mgr", {{HS_SERVICE::META, {.size_pct = 85.0}}});
-    }
+    void SetUp() override { m_helper.start_homestore("test_meta_blk_mgr", {{HS_SERVICE::META, {.size_pct = 85.0}}}); }
 
     void TearDown() override {};
 
@@ -123,12 +143,12 @@ public:
     }
 
     void restart_homestore() {
-        auto before_services_starting_cb = [this]() {
+        m_helper.change_start_cb([this]() {
             register_client();
-            if (enable_dependency_chain) { register_client_inlcuding_dependencies(); }
-        };
-        m_token.cb_ = before_services_starting_cb;
-        test_common::HSTestHelper::restart_homestore(m_token);
+            if (enable_dependency_chain) { register_client_including_dependencies(); }
+        });
+
+        m_helper.restart_homestore();
     }
 
     uint64_t io_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
@@ -176,7 +196,7 @@ public:
         uint64_t size_written{0};
         while (free_size > 0) {
             if (free_size >= gp.max_wrt_sz) {
-                size_written = do_sb_write(do_overflow());
+                size_written = do_sb_write(do_overflow(), 0);
             } else {
                 size_written = do_sb_write(false, m_mbm->meta_blk_context_sz());
                 HS_REL_ASSERT_EQ(size_written, m_mbm->block_size());
@@ -230,7 +250,7 @@ public:
 
             // save to cache
             m_write_sbs[bid].cookie = cookie;
-            m_write_sbs[bid].str = std::string(r_cast< const char* >(buf), sz_to_wrt);
+            m_write_sbs[bid].str = md5_sum(r_cast< const char* >(buf), sz_to_wrt);
 
             ret_size_written = total_size_written(cookie);
             m_total_wrt_sz += ret_size_written;
@@ -242,8 +262,8 @@ public:
         if (!done_read) {
             done_read = true;
             m_mbm->read_sub_sb(mtype);
-            const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()];
-            const std::string write_buf_str{r_cast< char* >(buf), sz_to_wrt};
+            const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()].str;
+            const std::string write_buf_str = m_write_sbs[mblk->hdr.h.bid.to_integer()].str;
             const auto ret = read_buf_str.compare(write_buf_str);
             if (mblk->hdr.h.compressed == false) {
                 HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
@@ -303,7 +323,7 @@ public:
 
         {
             std::unique_lock< std::mutex > lg{m_mtx};
-            const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()];
+            const auto read_buf_str = m_cb_blks[mblk->hdr.h.bid.to_integer()].str;
             const std::string write_buf_str{str};
             const auto ret = read_buf_str.compare(write_buf_str);
             HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, read: {}.", write_buf_str, read_buf_str);
@@ -360,7 +380,7 @@ public:
             const auto bid = s_cast< const meta_blk* >(cookie)->hdr.h.bid.to_integer();
             HS_DBG_ASSERT(m_write_sbs.find(bid) == m_write_sbs.end(), "cookie already in the map.");
             m_write_sbs[bid].cookie = cookie;
-            m_write_sbs[bid].str = std::string{r_cast< const char* >(buf), sz_to_wrt};
+            m_write_sbs[bid].str = md5_sum(r_cast< const char* >(buf), sz_to_wrt);
 
             // verify context_sz
             const meta_blk* mblk = s_cast< const meta_blk* >(cookie);
@@ -379,7 +399,7 @@ public:
             iomanager.iobuf_free(buf);
         } else {
             if (unaligned_addr) {
-                delete[](buf - unaligned_shift);
+                delete[] (buf - unaligned_shift);
             } else {
                 delete[] buf;
             }
@@ -398,8 +418,9 @@ public:
             HS_DBG_ASSERT(it_cb != std::cend(m_cb_blks), "Saved bid during write not found in recover callback.");
 
             // the saved buf should be equal to the buf received in the recover callback;
-            const int ret = it->second.str.compare(it_cb->second);
-            HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, callback: {}.", it->second.str, it_cb->second);
+            const int ret = it->second.str.compare(it_cb->second.str);
+            HS_DBG_ASSERT(ret == 0, "Context data mismatch: Saved: {}, callback: {}.", it->second.str,
+                          it_cb->second.str);
         }
     }
 
@@ -430,7 +451,10 @@ public:
 
     void do_rand_load() {
         while (keep_running()) {
-            switch (get_op()) {
+            auto op = get_op();
+            LOGDEBUG("rand load, io seq {}, type {}", total_op_cnt(), uint8_t(op));
+
+            switch (op) {
             case meta_op_type::write: {
                 do_sb_write(do_overflow());
             } break;
@@ -440,10 +464,16 @@ public:
             case meta_op_type::update:
                 do_sb_update(do_aligned());
                 break;
+            case meta_op_type::restart:
+                recover_with_on_complete();
+                validate();
+                break;
             default:
                 break;
             }
         }
+        LOGINFO("rand load test finished, total ops: {}, write ops: {}, remove ops:{}, update ops: {}, restart: {}",
+                total_op_cnt(), m_wrt_cnt, m_rm_cnt, m_update_cnt, m_restart_cnt);
     }
 
     bool do_overflow() const {
@@ -466,6 +496,7 @@ public:
 
     void recover_with_on_complete() {
         // restart will cause recovery and callbacks will be triggered
+        ++m_restart_cnt;
         m_cb_blks.clear();
         restart_homestore();
     }
@@ -473,6 +504,8 @@ public:
     void validate() {
         // verify received blks via callbaks are all good;
         verify_cb_blks();
+        m_write_sbs.swap(m_cb_blks);
+        m_cb_blks.clear();
     }
 
     meta_op_type get_op() {
@@ -495,7 +528,9 @@ public:
             }
         }
 
-        if (do_write()) {
+        if (do_restart()) {
+            return meta_op_type::restart;
+        } else if (do_write()) {
             return meta_op_type::write;
         } else if (do_update()) {
             return meta_op_type::update;
@@ -504,7 +539,7 @@ public:
         }
     }
 
-    uint64_t total_op_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt; }
+    uint64_t total_op_cnt() const { return m_update_cnt + m_wrt_cnt + m_rm_cnt + m_restart_cnt; }
 
     uint32_t write_ratio() const {
         if (m_wrt_cnt == 0) return 0;
@@ -526,6 +561,11 @@ public:
         return false;
     }
 
+    bool do_restart() const {
+        if (total_op_cnt() > 0 && (total_op_cnt() % 8192) == 0) { return true; }
+        return false;
+    }
+
     void shutdown() {
         {
             std::unique_lock< std::mutex > lk(m_mtx);
@@ -533,7 +573,7 @@ public:
             m_write_sbs.clear();
             m_cb_blks.clear();
         }
-        test_common::HSTestHelper::shutdown_homestore();
+        m_helper.shutdown_homestore();
     }
 
     void reset_counters() {
@@ -541,27 +581,31 @@ public:
         m_update_cnt = 0;
         m_rm_cnt = 0;
         m_total_wrt_sz = 0;
+        m_restart_cnt = 0;
     }
 
     void register_client() {
         m_mbm = &(meta_service());
         m_total_wrt_sz = m_mbm->used_size();
-
         HS_REL_ASSERT_EQ(m_mbm->total_size() - m_total_wrt_sz, m_mbm->available_blks() * m_mbm->block_size());
-
         m_mbm->deregister_handler(mtype);
         m_mbm->register_handler(
             mtype,
             [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
                 if (mblk) {
                     std::unique_lock< std::mutex > lg{m_mtx};
-                    m_cb_blks[mblk->hdr.h.bid.to_integer()] = std::string{r_cast< const char* >(buf.bytes()), size};
+                    m_cb_blks[mblk->hdr.h.bid.to_integer()] =
+                        sb_info_t{mblk, md5_sum(r_cast< const char* >(buf.bytes()), size)};
                 }
             },
-            [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
+            [this](bool success) {
+                HS_DBG_ASSERT_EQ(success, true);
+                m_total_wrt_sz = m_mbm->used_size();
+                HS_REL_ASSERT_EQ(m_mbm->total_size() - m_total_wrt_sz, m_mbm->available_blks() * m_mbm->block_size());
+            });
     }
 
-    void register_client_inlcuding_dependencies() {
+    void register_client_including_dependencies() {
         enable_dependency_chain = true;
         m_mbm = &(meta_service());
         m_total_wrt_sz = m_mbm->used_size();
@@ -630,7 +674,7 @@ public:
             [this](bool success) { actual_on_complete_cb_order.push_back("F"); }, false);
     }
 
-    void deregister_client_inlcuding_dependencies() {
+    void deregister_client_including_dependencies() {
         enable_dependency_chain = false;
 
         m_mbm->deregister_handler("A");
@@ -644,7 +688,8 @@ public:
             [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
                 if (mblk) {
                     std::unique_lock< std::mutex > lg{m_mtx};
-                    m_cb_blks[mblk->hdr.h.bid.to_integer()] = std::string{r_cast< const char* >(buf.bytes()), size};
+                    m_cb_blks[mblk->hdr.h.bid.to_integer()] =
+                        sb_info_t{mblk, md5_sum(r_cast< const char* >(buf.bytes()), size)};
                 }
             },
             [this](bool success) { HS_DBG_ASSERT_EQ(success, true); });
@@ -664,10 +709,11 @@ public:
     uint64_t m_wrt_cnt{0};
     uint64_t m_update_cnt{0};
     uint64_t m_rm_cnt{0};
+    uint64_t m_restart_cnt{0};
     uint64_t m_total_wrt_sz{0};
     MetaBlkService* m_mbm{nullptr};
     std::map< uint64_t, sb_info_t > m_write_sbs; // during write, save blkid to buf map;
-    std::map< uint64_t, std::string > m_cb_blks; // during recover, save blkid to buf map;
+    std::map< uint64_t, sb_info_t > m_cb_blks;   // during recover, save blkid to buf map;
     std::mutex m_mtx;
 #ifdef _PRERELEASE
     flip::FlipClient m_fc{HomeStoreFlip::instance()};
@@ -714,7 +760,7 @@ TEST_F(VMetaBlkMgrTest, single_read_test) {
 TEST_F(VMetaBlkMgrTest, random_dependency_test) {
     reset_counters();
     m_start_time = Clock::now();
-    this->register_client_inlcuding_dependencies();
+    this->register_client_including_dependencies();
 
     // add sub super block out of order
     uint8_t* buf = iomanager.iobuf_alloc(512, 1);
@@ -767,7 +813,7 @@ TEST_F(VMetaBlkMgrTest, random_dependency_test) {
     EXPECT_TRUE(actual_first_cb_order_map["E"] < actual_first_cb_order_map["B"]);
     EXPECT_TRUE(actual_first_cb_order_map["F"] < actual_first_cb_order_map["C"]);
 
-    this->deregister_client_inlcuding_dependencies();
+    this->deregister_client_including_dependencies();
     this->shutdown();
 }
 
@@ -777,11 +823,20 @@ TEST_F(VMetaBlkMgrTest, recovery_test) {
     m_start_time = Clock::now();
     this->register_client();
 
+    static constexpr uint64_t blkstore_overhead = 4 * 1024ul * 1024ul; // 4MB
+    EXPECT_EQ(m_mbm->available_blks() * m_mbm->block_size(), m_mbm->total_size() - m_mbm->used_size());
     // since we are using overflow metablk with 64K metadata, which will cause consume anther 2 metablks
-    auto max_write_times = (m_mbm->available_blks() * m_mbm->block_size() - 4 * Mi) / (64 * Ki + 8 * Ki);
+    auto max_write_times = (m_mbm->total_size() - m_mbm->used_size() - blkstore_overhead) / (64 * Ki + 8 * Ki);
+    LOGINFO("max_write_times {}", max_write_times);
+
+    // capping the max write times to 50K to avoid long running test
+    // with real drive.
+    if (max_write_times >= 50000) { max_write_times = 50000; }
+
     // write 1/2 of the available blks;
     for (uint64_t i = 0; i < max_write_times / 2; i++) {
         EXPECT_GT(this->do_sb_write(true, uint64_cast(64 * Ki)), uint64_cast(0));
+        LOGINFO("iter {}, available_blks {}", i, m_mbm->available_blks());
     }
 
     // restart homestore
@@ -792,7 +847,7 @@ TEST_F(VMetaBlkMgrTest, recovery_test) {
     this->register_client();
     for (uint64_t i = 0; i < (max_write_times / 2); i++) {
         EXPECT_GT(this->do_sb_write(true, uint64_cast(64 * Ki)), uint64_cast(0));
-        LOGDEBUG("iter {}, available_blks {}", i, m_mbm->available_blks());
+        LOGINFO("iter {}, available_blks {}", i, m_mbm->available_blks());
     }
     this->shutdown();
 }

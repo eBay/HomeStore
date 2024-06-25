@@ -100,60 +100,63 @@ public:
     }
 #endif
     void preload(uint32_t preload_size) {
-        if (preload_size) {
-            const auto n_fibers = std::min(preload_size, (uint32_t)m_fibers.size());
-            const auto chunk_size = preload_size / n_fibers;
-            const auto last_chunk_size = preload_size % chunk_size ?: chunk_size;
-            auto test_count = n_fibers;
-
-            for (std::size_t i = 0; i < n_fibers; ++i) {
-                const auto start_range = i * chunk_size;
-                const auto end_range = start_range + ((i == n_fibers - 1) ? last_chunk_size : chunk_size);
-                auto fiber_id = i;
-                iomanager.run_on_forget(
-                    m_fibers[i], [this, start_range, end_range, &test_count, fiber_id, preload_size]() {
-                        double progress_interval =
-                            (double)(end_range - start_range) / 20; // 5% of the total number of iterations
-                        double progress_thresh = progress_interval; // threshold for progress interval
-                        double elapsed_time, progress_percent, last_progress_time = 0;
-                        auto m_start_time = Clock::now();
-
-                        for (uint32_t i = start_range; i < end_range; i++) {
-                            put(i, btree_put_type::INSERT);
-                            if (fiber_id == 0) {
-                                elapsed_time = get_elapsed_time_sec(m_start_time);
-                                progress_percent = (double)(i - start_range) / (end_range - start_range) * 100;
-
-                                // check progress every 5% of the total number of iterations or every 30 seconds
-                                bool print_time = false;
-                                if (i >= progress_thresh) {
-                                    progress_thresh += progress_interval;
-                                    print_time = true;
-                                }
-                                if (elapsed_time - last_progress_time > 30) {
-                                    last_progress_time = elapsed_time;
-                                    print_time = true;
-                                }
-                                if (print_time) {
-                                    LOGINFO("Progress: iterations completed ({:.2f}%)- Elapsed time: {:.0f} seconds- "
-                                            "populated entries: {} ({:.2f}%)",
-                                            progress_percent, elapsed_time, m_shadow_map.size(),
-                                            m_shadow_map.size() * 100.0 / preload_size);
-                                }
-                            }
-                        }
-                        {
-                            std::unique_lock lg(m_test_done_mtx);
-                            if (--test_count == 0) { m_test_done_cv.notify_one(); }
-                        }
-                    });
-            }
-
-            {
-                std::unique_lock< std::mutex > lk(m_test_done_mtx);
-                m_test_done_cv.wait(lk, [&]() { return test_count == 0; });
-            }
+        if (preload_size == 0) {
+            LOGINFO("Preload Skipped");
+            return;
         }
+
+        const auto n_fibers = std::min(preload_size, (uint32_t)m_fibers.size());
+        const auto chunk_size = preload_size / n_fibers;
+        const auto last_chunk_size = preload_size % chunk_size ?: chunk_size;
+        auto test_count = n_fibers;
+
+        for (std::size_t i = 0; i < n_fibers; ++i) {
+            const auto start_range = i * chunk_size;
+            const auto end_range = start_range + ((i == n_fibers - 1) ? last_chunk_size : chunk_size) - 1;
+            auto fiber_id = i;
+            iomanager.run_on_forget(m_fibers[i], [this, start_range, end_range, &test_count, fiber_id, preload_size]() {
+                double progress_interval =
+                    (double)(end_range - start_range) / 20; // 5% of the total number of iterations
+                double progress_thresh = progress_interval; // threshold for progress interval
+                double elapsed_time, progress_percent, last_progress_time = 0;
+                auto m_start_time = Clock::now();
+
+                for (uint32_t i = start_range; i < end_range; i++) {
+                    put(i, btree_put_type::INSERT);
+                    if (fiber_id == 0) {
+                        elapsed_time = get_elapsed_time_sec(m_start_time);
+                        progress_percent = (double)(i - start_range) / (end_range - start_range) * 100;
+
+                        // check progress every 5% of the total number of iterations or every 30 seconds
+                        bool print_time = false;
+                        if (i >= progress_thresh) {
+                            progress_thresh += progress_interval;
+                            print_time = true;
+                        }
+                        if (elapsed_time - last_progress_time > 30) {
+                            last_progress_time = elapsed_time;
+                            print_time = true;
+                        }
+                        if (print_time) {
+                            LOGINFO("Progress: iterations completed ({:.2f}%)- Elapsed time: {:.0f} seconds- "
+                                    "populated entries: {} ({:.2f}%)",
+                                    progress_percent, elapsed_time, m_shadow_map.size(),
+                                    m_shadow_map.size() * 100.0 / preload_size);
+                        }
+                    }
+                }
+                {
+                    std::unique_lock lg(m_test_done_mtx);
+                    if (--test_count == 0) { m_test_done_cv.notify_one(); }
+                }
+            });
+        }
+
+        {
+            std::unique_lock< std::mutex > lk(m_test_done_mtx);
+            m_test_done_cv.wait(lk, [&]() { return test_count == 0; });
+        }
+
         LOGINFO("Preload Done");
     }
 
@@ -169,6 +172,18 @@ public:
         RELEASE_ASSERT_EQ(start_k, end_k, "Range scheduler pick_random_non_existing_keys issue");
 
         do_put(start_k, btree_put_type::INSERT, V::generate_rand());
+    }
+
+    void force_upsert(uint64_t k) {
+        auto existing_v = std::make_unique< V >();
+        K key = K{k};
+        V value = V::generate_rand();
+        auto sreq = BtreeSinglePutRequest{&key, &value, btree_put_type::UPSERT, existing_v.get()};
+        sreq.enable_route_tracing();
+
+        auto const ret = m_bt->put(sreq);
+        ASSERT_EQ(ret, btree_status_t::success) << "Upsert key=" << k << " failed with error=" << enum_name(ret);
+        m_shadow_map.force_put(k, value);
     }
 
     void range_put(uint32_t start_k, uint32_t end_k, V const& value, bool update) {
@@ -346,7 +361,16 @@ public:
     }
 
     void multi_op_execute(const std::vector< std::pair< std::string, int > >& op_list, bool skip_preload = false) {
-        if (!skip_preload) { preload(SISL_OPTIONS["preload_size"].as< uint32_t >()); }
+        if (!skip_preload) {
+            auto preload_size = SISL_OPTIONS["preload_size"].as< uint32_t >();
+            auto const num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
+            if (preload_size > num_entries / 2) {
+                LOGWARN("Preload size={} is more than half of num_entries, setting preload_size to {}", preload_size,
+                        num_entries / 2);
+                preload_size = num_entries / 2;
+            }
+            preload(preload_size);
+        }
         run_in_parallel(op_list);
     }
 
@@ -388,13 +412,12 @@ private:
         K key = K{k};
         auto sreq = BtreeSinglePutRequest{&key, &value, put_type, existing_v.get()};
         sreq.enable_route_tracing();
-        //        bool done = (m_bt->put(sreq) == btree_status_t::success);
         bool done = expect_success ? (m_bt->put(sreq) == btree_status_t::success)
                                    : m_bt->put(sreq) == btree_status_t::put_failed;
 
         if (put_type == btree_put_type::INSERT) {
             ASSERT_EQ(done, !m_shadow_map.exists(key));
-        } else {
+        } else if (put_type == btree_put_type::UPDATE) {
             ASSERT_EQ(done, m_shadow_map.exists(key));
         }
         if (expect_success) { m_shadow_map.put_and_check(key, value, *existing_v, done); }
@@ -488,7 +511,7 @@ protected:
         LOGINFO("ALL parallel jobs joined");
     }
 
-    std::vector< std::pair< std::string, int > > build_op_list(std::vector< std::string >& input_ops) {
+    std::vector< std::pair< std::string, int > > build_op_list(std::vector< std::string > const& input_ops) {
         std::vector< std::pair< std::string, int > > ops;
         int total = std::accumulate(input_ops.begin(), input_ops.end(), 0, [](int sum, const auto& str) {
             std::vector< std::string > tokens;

@@ -54,7 +54,6 @@
 using namespace homestore;
 RCU_REGISTER_INIT
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
 struct test_log_data {
     test_log_data() = default;
@@ -174,7 +173,10 @@ public:
             return;
         }
 
+        if ((m_cur_lsn - num_lsns_to_rollback - 1) <= m_log_store->get_contiguous_issued_seq_num(-1)) { return; }
+
         auto const upto_lsn = m_cur_lsn.fetch_sub(num_lsns_to_rollback) - num_lsns_to_rollback - 1;
+
         m_log_store->rollback_async(upto_lsn, [&](logstore_seq_num_t) {
             ASSERT_EQ(m_log_store->get_contiguous_completed_seq_num(-1), upto_lsn)
                 << "Last completed seq num is not reset after rollback";
@@ -299,7 +301,7 @@ public:
             for (auto& lsc : m_log_store_clients) {
                 lsc->flush();
             }
-            m_token.cb_ = [this, n_log_stores]() {
+            m_helper.change_start_cb([this, n_log_stores]() {
                 HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
                     // Disable flush and resource mgr timer in UT.
                     s.logstore.flush_timer_frequency_us = 0;
@@ -313,11 +315,11 @@ public:
                         .open_log_store(client->m_logdev_id, client->m_store_id, false /* append_mode */)
                         .thenValue([i, this, client](auto log_store) { client->set_log_store(log_store); });
                 }
-            };
-            test_common::HSTestHelper::restart_homestore(m_token);
+            });
+            m_helper.restart_homestore();
         } else {
-            m_token = test_common::HSTestHelper::start_homestore(
-                "test_log_store",
+            m_helper.start_homestore(
+                "test_log_store_long_run",
                 {{HS_SERVICE::META, {.size_pct = 5.0}},
                  {HS_SERVICE::LOG,
                   {.size_pct = 84.0, .chunk_size = 8 * 1024 * 1024, .min_chunk_size = 8 * 1024 * 1024}}},
@@ -342,7 +344,7 @@ public:
     }
 
     void shutdown(bool cleanup = true) {
-        test_common::HSTestHelper::shutdown_homestore(cleanup);
+        m_helper.shutdown_homestore(cleanup);
         if (cleanup) {
             m_log_store_clients.clear();
             m_highest_log_idx.clear();
@@ -557,7 +559,7 @@ private:
     uint32_t m_batch_size{1};
     std::random_device rd{};
     std::default_random_engine re{rd()};
-    test_common::HSTestHelper::test_token m_token;
+    test_common::HSTestHelper m_helper;
 };
 
 TEST_F(LogStoreLongRun, LongRunning) {
@@ -615,8 +617,8 @@ TEST_F(LogStoreLongRun, LongRunning) {
     }
 }
 
-SISL_OPTIONS_ENABLE(logging, test_log_store, iomgr, test_common_setup)
-SISL_OPTION_GROUP(test_log_store,
+SISL_OPTIONS_ENABLE(logging, test_log_store_long_run, iomgr, test_common_setup)
+SISL_OPTION_GROUP(test_log_store_long_run,
                   (num_logstores, "", "num_logstores", "number of log stores",
                    ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
                   (num_records, "", "num_records", "number of record to test",
@@ -629,11 +631,11 @@ SISL_OPTION_GROUP(test_log_store,
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
     ::testing::InitGoogleTest(&parsed_argc, argv);
-    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_log_store, iomgr, test_common_setup);
-    sisl::logging::SetLogger("test_log_store");
+    SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_log_store_long_run, iomgr, test_common_setup);
+    sisl::logging::SetLogger("test_log_store_long_run");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
-    sisl::logging::SetModuleLogLevel("logstore", spdlog::level::level_enum::debug);
-    sisl::logging::SetModuleLogLevel("journalvdev", spdlog::level::level_enum::info);
+    // sisl::logging::SetModuleLogLevel("logstore", spdlog::level::level_enum::debug);
+    // sisl::logging::SetModuleLogLevel("journalvdev", spdlog::level::level_enum::info);
 
     const int ret = RUN_ALL_TESTS();
     return ret;

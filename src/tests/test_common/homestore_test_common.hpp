@@ -147,41 +147,7 @@ struct Waiter {
 };
 
 class HSTestHelper {
-private:
-    static void remove_files(const std::vector< std::string >& file_paths) {
-        for (const auto& fpath : file_paths) {
-            if (std::filesystem::exists(fpath)) { std::filesystem::remove(fpath); }
-        }
-    }
-
-    static void init_files(const std::vector< std::string >& file_paths, uint64_t dev_size) {
-        remove_files(file_paths);
-        for (const auto& fpath : file_paths) {
-            std::ofstream ofs{fpath, std::ios::binary | std::ios::out | std::ios::trunc};
-            std::filesystem::resize_file(fpath, dev_size);
-        }
-    }
-
-    static void init_raw_devices(const std::vector< homestore::dev_info >& devs) {
-        auto const zero_size = hs_super_blk::first_block_size() * 1024;
-        std::vector< int > zeros(zero_size, 0);
-        for (auto const& dinfo : devs) {
-            if (!std::filesystem::exists(dinfo.dev_name)) {
-                HS_REL_ASSERT(false, "Device {} does not exist", dinfo.dev_name);
-            }
-
-            auto fd = ::open(dinfo.dev_name.c_str(), O_RDWR, 0640);
-            HS_REL_ASSERT(fd != -1, "Failed to open device");
-
-            auto const write_sz =
-                pwrite(fd, zeros.data(), zero_size /* size */, hs_super_blk::first_block_offset() /* offset */);
-            HS_REL_ASSERT(write_sz == zero_size, "Failed to write to device");
-            LOGINFO("Successfully zeroed the 1st {} bytes of device {}", zero_size, dinfo.dev_name);
-            ::close(fd);
-        }
-    }
-
-    static std::vector< std::string > s_dev_names;
+    friend class HSReplTestHelper;
 
 public:
     struct test_params {
@@ -207,156 +173,37 @@ public:
         hs_before_services_starting_cb_t& cb() { return cb_; }
     };
 
-    static test_token start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
-                                      hs_before_services_starting_cb_t cb = nullptr,
-                                      std::vector< homestore::dev_info > devs = {}, bool init_device = true) {
-        test_token token{.name_ = test_name, .svc_params_ = std::move(svc_params), .cb_ = cb, .devs_ = std::move(devs)};
-        do_start_homestore(token, false /* fake_restart */, init_device);
-        return token;
+    virtual void start_homestore(const std::string& test_name, std::map< uint32_t, test_params >&& svc_params,
+                                 hs_before_services_starting_cb_t cb = nullptr,
+                                 std::vector< homestore::dev_info > devs = {}, bool init_device = true) {
+        m_token =
+            test_token{.name_ = test_name, .svc_params_ = std::move(svc_params), .cb_ = cb, .devs_ = std::move(devs)};
+        do_start_homestore(false /* fake_restart */, init_device);
     }
 
-    static void restart_homestore(test_token& token, uint32_t shutdown_delay_sec = 5) {
-        do_start_homestore(token, true /* fake_restart*/, false /* init_device */, shutdown_delay_sec);
+
+    virtual void restart_homestore(uint32_t shutdown_delay_sec = 5) {
+        do_start_homestore(true /* fake_restart*/, false /* init_device */, shutdown_delay_sec);
+
     }
 
-    static void do_start_homestore(test_token& token, bool fake_restart = false, bool init_device = true,
-                                   uint32_t shutdown_delay_sec = 5) {
-        auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
-        auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-        auto num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
-        auto num_fibers = SISL_OPTIONS["num_fibers"].as< uint32_t >();
-        auto is_spdk = SISL_OPTIONS["spdk"].as< bool >();
-
-        if (fake_restart) {
-            shutdown_homestore(false);
-            std::this_thread::sleep_for(std::chrono::seconds{shutdown_delay_sec});
-        }
-
-        std::vector< homestore::dev_info > device_info;
-        if (!token.devs_.empty() || SISL_OPTIONS.count("device_list")) {
-            if (token.devs_.empty()) {
-                auto const devs = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
-                for (const auto& name : devs) {
-                    // TODO:: Add support for fast and data devices in device_list
-                    token.devs_.emplace_back(name,
-                                             token.devs_.empty()
-                                                 ? homestore::HSDevType::Fast
-                                                 : homestore::HSDevType::Data); // First device is fast device
-                }
-            } else {
-                LOGINFO("Taking input dev_list: {}",
-                        std::accumulate(token.devs_.begin(), token.devs_.end(), std::string(""),
-                                        [](const std::string& s, const homestore::dev_info& dinfo) {
-                                            return s.empty() ? dinfo.dev_name : s + "," + dinfo.dev_name;
-                                        }));
-            }
-            if (init_device && !fake_restart) init_raw_devices(token.devs_);
-        } else {
-            /* create files */
-            LOGINFO("creating {} device files with each of size {} ", ndevices, homestore::in_bytes(dev_size));
-            for (uint32_t i{0}; i < ndevices; ++i) {
-                s_dev_names.emplace_back(std::string{"/tmp/" + token.name_ + "_" + std::to_string(i + 1)});
-            }
-
-            if (!fake_restart && init_device) { init_files(s_dev_names, dev_size); }
-            for (const auto& fname : s_dev_names) {
-                token.devs_.emplace_back(std::filesystem::canonical(fname).string(),
-                                         token.devs_.empty()
-                                             ? homestore::HSDevType::Fast
-                                             : homestore::HSDevType::Data); // First device is fast device
-            }
-        }
-#if 0
-        if (!fake_restart && token.name_ == "test_data_service")
-            HS_REL_ASSERT_EQ(
-                token.devs_.size() > 2, true,
-                "if not fake restart, we need at least 3 device to run the data_service ut of simulating restart with "
-                "missing drive. current device num is {}",
-                token.devs_.size());
-#endif
-        if (is_spdk) {
-            LOGINFO("Spdk with more than 2 threads will cause overburden test systems, changing nthreads to 2");
-            num_threads = 2;
-        }
-
-        LOGINFO("Starting iomgr with {} threads, spdk: {}", num_threads, is_spdk);
-        ioenvironment.with_iomgr(
-            iomgr::iomgr_params{.num_threads = num_threads, .is_spdk = is_spdk, .num_fibers = 1 + num_fibers});
-
-        auto const http_port = SISL_OPTIONS["http_port"].as< int >();
-        if (http_port != 0) {
-            set_fixed_http_port((http_port == -1) ? generate_random_http_port() : uint32_cast(http_port));
-            ioenvironment.with_http_server();
-        }
-
-        const uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
-        LOGINFO("Initialize and start HomeStore with app_mem_size = {}", homestore::in_bytes(app_mem_size));
-
-        using namespace homestore;
-        auto hsi = HomeStore::instance();
-        for (auto& [svc, tp] : token.svc_params_) {
-            if (svc == HS_SERVICE::DATA) {
-                hsi->with_data_service(tp.custom_chunk_selector);
-            } else if (svc == HS_SERVICE::INDEX) {
-                hsi->with_index_service(std::unique_ptr< IndexServiceCallbacks >(tp.index_svc_cbs));
-            } else if ((svc == HS_SERVICE::LOG)) {
-                hsi->with_log_service();
-            } else if (svc == HS_SERVICE::REPLICATION) {
-                hsi->with_repl_data_service(tp.repl_app, tp.custom_chunk_selector);
-            }
-        }
-#ifdef _PRERELEASE
-        hsi->with_crash_simulator([copied_token = token](void) mutable {
-            LOGINFO("CrashSimulator::crash() is called - restarting homestore");
-            HSTestHelper::restart_homestore(copied_token);
-        });
-#endif
-
-        bool need_format = hsi->start(hs_input_params{.devices = token.devs_, .app_mem_size = app_mem_size}, token.cb_);
-
-        // We need to set the min chunk size before homestore format
-        if (token.svc_params_.contains(HS_SERVICE::LOG) && token.svc_params_[HS_SERVICE::LOG].min_chunk_size != 0) {
-            set_min_chunk_size(token.svc_params_[HS_SERVICE::LOG].min_chunk_size);
-        }
-
-        if (need_format) {
-            auto svc_params = token.svc_params_;
-            hsi->format_and_start(
-                {{HS_SERVICE::META,
-                  {.dev_type = homestore::HSDevType::Fast, .size_pct = svc_params[HS_SERVICE::META].size_pct}},
-                 {HS_SERVICE::LOG,
-                  {.dev_type = homestore::HSDevType::Fast,
-                   .size_pct = svc_params[HS_SERVICE::LOG].size_pct,
-                   .chunk_size = svc_params[HS_SERVICE::LOG].chunk_size,
-                   .vdev_size_type = svc_params[HS_SERVICE::LOG].vdev_size_type}},
-                 {HS_SERVICE::DATA,
-                  {.size_pct = svc_params[HS_SERVICE::DATA].size_pct,
-                   .num_chunks = svc_params[HS_SERVICE::DATA].num_chunks,
-                   .alloc_type = svc_params[HS_SERVICE::DATA].blkalloc_type,
-                   .chunk_sel_type = svc_params[HS_SERVICE::DATA].custom_chunk_selector
-                       ? chunk_selector_type_t::CUSTOM
-                       : chunk_selector_type_t::ROUND_ROBIN}},
-                 {HS_SERVICE::INDEX,
-                  {.dev_type = homestore::HSDevType::Fast, .size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
-                 {HS_SERVICE::REPLICATION,
-                  {.size_pct = svc_params[HS_SERVICE::REPLICATION].size_pct,
-                   .alloc_type = svc_params[HS_SERVICE::REPLICATION].blkalloc_type,
-                   .chunk_sel_type = svc_params[HS_SERVICE::REPLICATION].custom_chunk_selector
-                       ? chunk_selector_type_t::CUSTOM
-                       : chunk_selector_type_t::ROUND_ROBIN}}});
-        }
-    }
-
-    static void shutdown_homestore(bool cleanup = true) {
+    virtual void shutdown_homestore(bool cleanup = true) {
         homestore::HomeStore::instance()->shutdown();
         homestore::HomeStore::reset_instance();
         iomanager.stop();
 
-        if (cleanup) { remove_files(s_dev_names); }
-        s_dev_names.clear();
+        if (cleanup) { remove_files(m_generated_devs); }
     }
 
-    static void set_min_chunk_size(uint64_t chunk_size) {
+    void change_start_cb(hs_before_services_starting_cb_t cb) { m_token.cb() = cb; }
+    void change_device_list(std::vector< homestore::dev_info > devs) { m_token.devs_ = std::move(devs); }
+    test_params& params(uint32_t svc) { return m_token.svc_params_[svc]; }
+
+#ifdef _PRERELEASE
+    void wait_for_crash_recovery() { m_crash_recovered.getFuture().get(); }
+#endif
+
+    void set_min_chunk_size(uint64_t chunk_size) {
 #ifdef _PRERELEASE
         LOGINFO("Set minimum chunk size {}", chunk_size);
         flip::FlipClient* fc = iomgr_flip::client_instance();
@@ -370,6 +217,26 @@ public:
         fc->inject_retval_flip< long >("set_minimum_chunk_size", {dont_care_cond}, freq, chunk_size);
 #endif
     }
+
+#ifdef _PRERELEASE
+    void set_basic_flip(const std::string flip_name, uint32_t count = 1, uint32_t percent = 100) {
+        flip::FlipCondition null_cond;
+        flip::FlipFrequency freq;
+        freq.set_count(count);
+        freq.set_percent(percent);
+        m_fc.inject_noreturn_flip(flip_name, {null_cond}, freq);
+        LOGDEBUG("Flip {} set", flip_name);
+    }
+
+    void set_delay_flip(const std::string flip_name, uint64_t delay_usec, uint32_t count = 1, uint32_t percent = 100) {
+        flip::FlipCondition null_cond;
+        flip::FlipFrequency freq;
+        freq.set_count(count);
+        freq.set_percent(percent);
+        m_fc.inject_delay_flip(flip_name, {null_cond}, freq, delay_usec);
+        LOGDEBUG("Flip {} set", flip_name);
+    }
+#endif
 
     static void fill_data_buf(uint8_t* buf, uint64_t size, uint64_t pattern = 0) {
         uint64_t* ptr = r_cast< uint64_t* >(buf);
@@ -466,5 +333,166 @@ public:
             std::move(fut).thenValue(on_complete);
         }
     }
+
+private:
+    void do_start_homestore(bool fake_restart = false, bool init_device = true, uint32_t shutdown_delay_sec = 5) {
+        auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
+        auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
+        auto num_threads = SISL_OPTIONS["num_threads"].as< uint32_t >();
+        auto num_fibers = SISL_OPTIONS["num_fibers"].as< uint32_t >();
+        auto is_spdk = SISL_OPTIONS["spdk"].as< bool >();
+
+        if (fake_restart) {
+            // Fake restart, device list is unchanged.
+            shutdown_homestore(false);
+            std::this_thread::sleep_for(std::chrono::seconds{shutdown_delay_sec});
+        } else if (SISL_OPTIONS.count("device_list")) {
+            // User has provided explicit device list, use that and initialize them
+            auto const devs = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
+            for (const auto& name : devs) {
+                // iomgr::DriveInterface::emulate_drive_type(name, iomgr::drive_type::block_hdd);
+                m_token.devs_.emplace_back(name,
+                                           m_token.devs_.empty()
+                                               ? homestore::HSDevType::Fast
+                                               : homestore::HSDevType::Data); // First device is fast device
+            }
+
+            LOGINFO("Taking input dev_list: {}",
+                    std::accumulate(m_token.devs_.begin(), m_token.devs_.end(), std::string(""),
+                                    [](const std::string& s, const homestore::dev_info& dinfo) {
+                                        return s.empty() ? dinfo.dev_name : s + "," + dinfo.dev_name;
+                                    }));
+
+            if (init_device) { init_raw_devices(m_token.devs_); }
+        } else {
+            for (uint32_t i{0}; i < ndevices; ++i) {
+                m_generated_devs.emplace_back(std::string{"/tmp/" + m_token.name_ + "_" + std::to_string(i + 1)});
+            }
+            if (init_device) {
+                LOGINFO("creating {} device files with each of size {} ", ndevices, homestore::in_bytes(dev_size));
+                init_files(m_generated_devs, dev_size);
+            }
+            for (auto const& fname : m_generated_devs) {
+                m_token.devs_.emplace_back(std::filesystem::canonical(fname).string(),
+                                           m_token.devs_.empty()
+                                               ? homestore::HSDevType::Fast
+                                               : homestore::HSDevType::Data); // First device is fast device
+            }
+        }
+
+        if (is_spdk) {
+            LOGINFO("Spdk with more than 2 threads will cause overburden test systems, changing nthreads to 2");
+            num_threads = 2;
+        }
+
+        LOGINFO("Starting iomgr with {} threads, spdk: {}", num_threads, is_spdk);
+        ioenvironment.with_iomgr(
+            iomgr::iomgr_params{.num_threads = num_threads, .is_spdk = is_spdk, .num_fibers = 1 + num_fibers});
+
+        auto const http_port = SISL_OPTIONS["http_port"].as< int >();
+        if (http_port != 0) {
+            set_fixed_http_port((http_port == -1) ? generate_random_http_port() : uint32_cast(http_port));
+            ioenvironment.with_http_server();
+        }
+
+        const uint64_t app_mem_size = ((ndevices * dev_size) * 15) / 100;
+        LOGINFO("Initialize and start HomeStore with app_mem_size = {}", homestore::in_bytes(app_mem_size));
+
+        using namespace homestore;
+        auto hsi = HomeStore::instance();
+        for (auto& [svc, tp] : m_token.svc_params_) {
+            if (svc == HS_SERVICE::DATA) {
+                hsi->with_data_service(tp.custom_chunk_selector);
+            } else if (svc == HS_SERVICE::INDEX) {
+                hsi->with_index_service(std::unique_ptr< IndexServiceCallbacks >(tp.index_svc_cbs));
+            } else if ((svc == HS_SERVICE::LOG)) {
+                hsi->with_log_service();
+            } else if (svc == HS_SERVICE::REPLICATION) {
+                hsi->with_repl_data_service(tp.repl_app, tp.custom_chunk_selector);
+            }
+        }
+#ifdef _PRERELEASE
+        hsi->with_crash_simulator([this](void) mutable {
+            LOGINFO("CrashSimulator::crash() is called - restarting homestore");
+            this->restart_homestore();
+            m_crash_recovered.setValue();
+        });
+#endif
+
+        bool need_format =
+            hsi->start(hs_input_params{.devices = m_token.devs_, .app_mem_size = app_mem_size}, m_token.cb_);
+
+        // We need to set the min chunk size before homestore format
+        if (m_token.svc_params_.contains(HS_SERVICE::LOG) && m_token.svc_params_[HS_SERVICE::LOG].min_chunk_size != 0) {
+            set_min_chunk_size(m_token.svc_params_[HS_SERVICE::LOG].min_chunk_size);
+        }
+
+        if (need_format) {
+            auto svc_params = m_token.svc_params_;
+            hsi->format_and_start(
+                {{HS_SERVICE::META,
+                  {.dev_type = homestore::HSDevType::Fast, .size_pct = svc_params[HS_SERVICE::META].size_pct}},
+                 {HS_SERVICE::LOG,
+                  {.dev_type = homestore::HSDevType::Fast,
+                   .size_pct = svc_params[HS_SERVICE::LOG].size_pct,
+                   .chunk_size = svc_params[HS_SERVICE::LOG].chunk_size,
+                   .vdev_size_type = svc_params[HS_SERVICE::LOG].vdev_size_type}},
+                 {HS_SERVICE::DATA,
+                  {.size_pct = svc_params[HS_SERVICE::DATA].size_pct,
+                   .num_chunks = svc_params[HS_SERVICE::DATA].num_chunks,
+                   .alloc_type = svc_params[HS_SERVICE::DATA].blkalloc_type,
+                   .chunk_sel_type = svc_params[HS_SERVICE::DATA].custom_chunk_selector
+                       ? chunk_selector_type_t::CUSTOM
+                       : chunk_selector_type_t::ROUND_ROBIN}},
+                 {HS_SERVICE::INDEX, {.size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
+                 {HS_SERVICE::REPLICATION,
+                  {.size_pct = svc_params[HS_SERVICE::REPLICATION].size_pct,
+                   .alloc_type = svc_params[HS_SERVICE::REPLICATION].blkalloc_type,
+                   .chunk_sel_type = svc_params[HS_SERVICE::REPLICATION].custom_chunk_selector
+                       ? chunk_selector_type_t::CUSTOM
+                       : chunk_selector_type_t::ROUND_ROBIN}}});
+        }
+    }
+
+    void remove_files(const std::vector< std::string >& file_paths) {
+        for (const auto& fpath : file_paths) {
+            if (std::filesystem::exists(fpath)) { std::filesystem::remove(fpath); }
+        }
+    }
+
+    void init_files(const std::vector< std::string >& file_paths, uint64_t dev_size) {
+        remove_files(file_paths);
+        for (const auto& fpath : file_paths) {
+            std::ofstream ofs{fpath, std::ios::binary | std::ios::out | std::ios::trunc};
+            std::filesystem::resize_file(fpath, dev_size);
+        }
+    }
+
+    void init_raw_devices(const std::vector< homestore::dev_info >& devs) {
+        auto const zero_size = hs_super_blk::first_block_size() * 1024;
+        std::vector< int > zeros(zero_size, 0);
+        for (auto const& dinfo : devs) {
+            if (!std::filesystem::exists(dinfo.dev_name)) {
+                HS_REL_ASSERT(false, "Device {} does not exist", dinfo.dev_name);
+            }
+
+            auto fd = ::open(dinfo.dev_name.c_str(), O_RDWR, 0640);
+            HS_REL_ASSERT(fd != -1, "Failed to open device");
+
+            auto const write_sz =
+                pwrite(fd, zeros.data(), zero_size /* size */, hs_super_blk::first_block_offset() /* offset */);
+            HS_REL_ASSERT(write_sz == zero_size, "Failed to write to device");
+            LOGINFO("Successfully zeroed the 1st {} bytes of device {}", zero_size, dinfo.dev_name);
+            ::close(fd);
+        }
+    }
+
+protected:
+    test_token m_token;
+    std::vector< std::string > m_generated_devs;
+#ifdef _PRERELEASE
+    flip::FlipClient m_fc{iomgr_flip::instance()};
+    folly::Promise< folly::Unit > m_crash_recovered;
+#endif
 };
-}; // namespace test_common
+} // namespace test_common

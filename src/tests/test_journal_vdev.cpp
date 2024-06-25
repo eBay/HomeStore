@@ -44,7 +44,6 @@ RCU_REGISTER_INIT
 SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 
 SISL_OPTIONS_ENABLE(logging, test_journal_vdev, iomgr, test_common_setup)
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
 struct Param {
     uint64_t num_io;
@@ -66,28 +65,24 @@ constexpr uint32_t dma_alignment = 512;
 
 class VDevJournalIOTest : public ::testing::Test {
 public:
-    const std::map< uint32_t, test_common::HSTestHelper::test_params > svc_params = {};
-    test_common::HSTestHelper::test_token m_token;
+    test_common::HSTestHelper m_helper;
 
     virtual void SetUp() override {
         auto const ndevices = SISL_OPTIONS["num_devs"].as< uint32_t >();
         auto const dev_size = SISL_OPTIONS["dev_size_mb"].as< uint64_t >() * 1024 * 1024;
-        m_token =
-            test_common::HSTestHelper::start_homestore("test_journal_vdev",
-                                                       {
-                                                           {HS_SERVICE::META, {.size_pct = 15.0}},
-                                                           {HS_SERVICE::LOG,
-                                                            {.size_pct = 50.0,
-                                                             .chunk_size = 16 * 1024 * 1024,
-                                                             .min_chunk_size = 16 * 1024 * 1024,
-                                                             .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
-                                                       },
-                                                       nullptr /* starting_cb */);
+        m_helper.start_homestore("test_journal_vdev",
+                                 {
+                                     {HS_SERVICE::META, {.size_pct = 15.0}},
+                                     {HS_SERVICE::LOG,
+                                      {.size_pct = 50.0,
+                                       .chunk_size = 16 * 1024 * 1024,
+                                       .min_chunk_size = 16 * 1024 * 1024,
+                                       .vdev_size_type = vdev_size_type_t::VDEV_SIZE_DYNAMIC}},
+                                 },
+                                 nullptr /* starting_cb */);
     }
 
-    virtual void TearDown() override { test_common::HSTestHelper::shutdown_homestore(); }
-
-    void restart_homestore() { test_common::HSTestHelper::restart_homestore(m_token); }
+    virtual void TearDown() override { m_helper.shutdown_homestore(); }
 };
 
 class JournalDescriptorTest {
@@ -456,7 +451,7 @@ TEST_F(VDevJournalIOTest, Recovery) {
     }
 
     // Restart homestore.
-    restart_homestore();
+    m_helper.restart_homestore();
 
     // Restore the offsets after restart.
     for (auto& t : tests) {
@@ -502,7 +497,7 @@ TEST_F(VDevJournalIOTest, MultipleChunkTest) {
 
     auto restart_restore = [&]() {
         test.save();
-        restart_homestore();
+        m_helper.restart_homestore();
         test.restore();
         log_dev_jd = test.vdev_jd();
     };
