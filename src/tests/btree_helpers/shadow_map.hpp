@@ -8,11 +8,12 @@ class ShadowMap {
 private:
     std::map< K, V > m_map;
     RangeScheduler m_range_scheduler;
+    uint32_t m_max_keys;
     using mutex = iomgr::FiberManagerLib::shared_mutex;
     mutex m_mutex;
 
 public:
-    ShadowMap(uint32_t num_keys) : m_range_scheduler(num_keys) {}
+    ShadowMap(uint32_t num_keys) : m_range_scheduler(num_keys), m_max_keys{num_keys} {}
 
     void put_and_check(const K& key, const V& val, const V& old_val, bool expected_success) {
         std::lock_guard lock{m_mutex};
@@ -21,6 +22,12 @@ public:
         if (!happened) {
             ASSERT_EQ(old_val, it->second) << "Put: Existing value doesn't return correct data for key: " << it->first;
         }
+        m_range_scheduler.put_key(key.key());
+    }
+
+    void force_put(const K& key, const V& val) {
+        std::lock_guard lock{m_mutex};
+        m_map.insert_or_assign(key, val);
         m_range_scheduler.put_key(key.key());
     }
 
@@ -57,6 +64,8 @@ public:
         }
         return std::pair(start_it->first, it->first);
     }
+
+    uint32_t max_keys() const { return m_max_keys; }
 
     bool exists(const K& key) const {
         std::lock_guard lock{m_mutex};
@@ -128,6 +137,38 @@ public:
         m_range_scheduler.remove_keys(start_key.key(), end_key.key());
     }
 
+    std::vector< std::pair< K, bool > > diff(ShadowMap< K, V > const& other) {
+        auto it1 = m_map.begin();
+        auto it2 = other.m_map.begin();
+        std::vector< std::pair< K, bool > > ret_diff;
+
+        while ((it1 != m_map.end()) && (it2 != m_map.end())) {
+            auto const x = it1->first.compare(it2->first);
+            if (x == 0) {
+                ++it1;
+                ++it2;
+            } else if (x < 0) {
+                // Has in current map, add it to addition
+                ret_diff.emplace_back(it1->first, true /* addition */);
+                ++it1;
+            } else {
+                ret_diff.emplace_back(it2->first, false /* addition */);
+                ++it2;
+            }
+        }
+
+        while (it1 != m_map.end()) {
+            ret_diff.emplace_back(it1->first, true /* addition */);
+            ++it1;
+        }
+
+        while (it2 != other.m_map.end()) {
+            ret_diff.emplace_back(it1->first, false /* addition */);
+            ++it2;
+        }
+        return ret_diff;
+    }
+
     mutex& guard() { return m_mutex; }
     std::map< K, V >& map() { return m_map; }
     const std::map< K, V >& map_const() const { return m_map; }
@@ -144,12 +185,11 @@ public:
         const int key_width = 20;
 
         // Format the key-value pairs and insert them into the result string
-        ss << std::left << std::setw(key_width) << "KEY"
-           << " "
-           << "VaLUE" << '\n';
+        ss << std::left << std::setw(key_width) << "KEY" << " " << "VaLUE" << '\n';
         foreach ([&](const auto& key, const auto& value) {
             ss << std::left << std::setw(key_width) << key.to_string() << " " << value.to_string() << '\n';
-        });
+        })
+            ;
         result = ss.str();
         return result;
     }

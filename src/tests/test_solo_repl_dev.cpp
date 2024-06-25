@@ -51,7 +51,6 @@ SISL_LOGGING_INIT(HOMESTORE_LOG_MODS)
 SISL_OPTIONS_ENABLE(logging, test_solo_repl_dev, iomgr, test_common_setup)
 SISL_LOGGING_DECL(test_solo_repl_dev)
 
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 static thread_local std::random_device g_rd{};
 static thread_local std::default_random_engine g_re{g_rd()};
 static uint32_t g_block_size;
@@ -154,11 +153,11 @@ protected:
     shared< ReplDev > m_repl_dev2;
     uuid_t m_uuid1;
     uuid_t m_uuid2;
-    test_common::HSTestHelper::test_token m_token;
+    test_common::HSTestHelper m_helper;
 
 public:
     virtual void SetUp() override {
-        m_token = test_common::HSTestHelper::start_homestore(
+        m_helper.start_homestore(
             "test_solo_repl_dev",
             {{HS_SERVICE::META, {.size_pct = 5.0}},
              {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_app = std::make_unique< Application >(*this)}},
@@ -175,13 +174,13 @@ public:
     virtual void TearDown() override {
         m_repl_dev1.reset();
         m_repl_dev2.reset();
-        test_common::HSTestHelper::shutdown_homestore();
+        m_helper.shutdown_homestore();
     }
 
     void restart() {
         m_repl_dev1.reset();
         m_repl_dev2.reset();
-        test_common::HSTestHelper::restart_homestore(m_token);
+        m_helper.restart_homestore();
 
         m_repl_dev1 = hs()->repl_service().get_repl_dev(m_uuid1).value();
         m_repl_dev2 = hs()->repl_service().get_repl_dev(m_uuid2).value();

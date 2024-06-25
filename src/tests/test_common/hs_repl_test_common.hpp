@@ -46,8 +46,6 @@ SISL_OPTION_GROUP(test_repl_common_setup,
                   (replica_dev_list, "", "replica_dev_list", "Device list for all replicas",
                    ::cxxopts::value< std::vector< std::string > >(), "path [...]"));
 
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
-
 using namespace homestore;
 namespace bip = boost::interprocess;
 
@@ -56,7 +54,7 @@ namespace test_common {
 VENUM(ipc_packet_op_t, uint32_t, WAKE_UP = 0, CLEAN_EXIT = 1, UNCLEAN_EXIT = 2, PEER_GOING_DOWN = 3);
 ENUM(repl_test_phase_t, uint32_t, REGISTER, MEMBER_START, TEST_RUN, VALIDATE, CLEANUP);
 
-class HSReplTestHelper {
+class HSReplTestHelper : public HSTestHelper {
 protected:
     struct IPCData {
         bip::interprocess_mutex mtx_;
@@ -210,7 +208,7 @@ public:
         folly_ = std::make_unique< folly::Init >(&tmp_argc, &argv_, true);
 
         LOGINFO("Starting Homestore replica={}", replica_num_);
-        m_token = test_common::HSTestHelper::start_homestore(
+        start_homestore(
             name_ + std::to_string(replica_num_),
             {{HS_SERVICE::META, {.size_pct = 5.0}},
              {HS_SERVICE::REPLICATION, {.size_pct = 60.0, .repl_app = std::make_unique< TestReplApplication >(*this)}},
@@ -222,7 +220,7 @@ public:
         LOGINFO("Stopping Homestore replica={}", replica_num_);
         // sisl::GrpcAsyncClientWorker::shutdown_all();
         // don't remove device if it is real drive;
-        test_common::HSTestHelper::shutdown_homestore(dev_list_.empty() /* cleanup */);
+        shutdown_homestore(dev_list_.empty() /* cleanup */);
         sisl::GrpcAsyncClientWorker::shutdown_all();
     }
 
@@ -233,14 +231,14 @@ public:
 
     void restart(uint32_t shutdown_delay_secs = 5u) {
         m_token.params(HS_SERVICE::REPLICATION).repl_app = std::make_unique< TestReplApplication >(*this);
-        test_common::HSTestHelper::restart_homestore(m_token, shutdown_delay_secs);
+        restart_homestore(shutdown_delay_secs);
     }
 
     void restart_one_by_one() {
         exclusive_replica([this]() {
             LOGINFO("Restarting Homestore replica={}", replica_num_);
             m_token.params(HS_SERVICE::REPLICATION).repl_app = std::make_unique< TestReplApplication >(*this);
-            test_common::HSTestHelper::restart_homestore(m_token, 5u /* shutdown_delay_secs */);
+            restart_homestore(5u /* shutdown_delay_secs */);
         });
     }
 
@@ -364,6 +362,5 @@ private:
     IPCData* ipc_data_;
 
     Runner io_runner_;
-    HSTestHelper::test_token m_token;
 };
 } // namespace test_common

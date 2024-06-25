@@ -16,7 +16,6 @@ static constexpr uint32_t g_max_logsize{512};
 static std::random_device g_rd{};
 static std::default_random_engine g_re{g_rd()};
 static std::uniform_int_distribution< uint32_t > g_randlogsize_generator{2, g_max_logsize};
-std::vector< std::string > test_common::HSTestHelper::s_dev_names;
 
 static constexpr std::array< const char, 62 > alphanum{
     '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K',
@@ -174,8 +173,8 @@ private:
 class TestRaftLogStore : public ::testing::Test {
 public:
     void SetUp() {
-        m_token = test_common::HSTestHelper::start_homestore(
-            "test_home_raft_log_store", {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::LOG, {.size_pct = 72.0}}});
+        m_helper.start_homestore("test_home_raft_log_store",
+                                 {{HS_SERVICE::META, {.size_pct = 5.0}}, {HS_SERVICE::LOG, {.size_pct = 72.0}}});
         m_leader_store.m_rls = std::make_unique< HomeRaftLogStore >();
         m_leader_store.m_store_id = m_leader_store.m_rls->logstore_id();
         m_leader_store.m_logdev_id = m_leader_store.m_rls->logdev_id();
@@ -189,26 +188,26 @@ public:
         m_leader_store.m_rls.reset();
         m_follower_store.m_rls.reset();
 
-        m_token.cb_ = [this]() {
+        m_helper.change_start_cb([this]() {
             m_leader_store.m_rls =
                 std::make_unique< HomeRaftLogStore >(m_leader_store.m_logdev_id, m_leader_store.m_store_id);
             m_follower_store.m_rls =
                 std::make_unique< HomeRaftLogStore >(m_follower_store.m_logdev_id, m_follower_store.m_store_id);
-        };
+        });
 
-        test_common::HSTestHelper::restart_homestore(m_token);
+        m_helper.restart_homestore();
     }
 
     virtual void TearDown() override {
         m_leader_store.m_rls.reset();
         m_follower_store.m_rls.reset();
-        test_common::HSTestHelper::shutdown_homestore();
+        m_helper.shutdown_homestore();
     }
 
 protected:
     RaftLogStoreClient m_leader_store;
     RaftLogStoreClient m_follower_store;
-    test_common::HSTestHelper::test_token m_token;
+    test_common::HSTestHelper m_helper;
 };
 
 TEST_F(TestRaftLogStore, lifecycle_test) {
