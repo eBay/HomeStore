@@ -142,7 +142,7 @@ public:
         auto it2 = other.m_map.begin();
         std::vector< std::pair< K, bool > > ret_diff;
 
-        while ((it1 != m_map.end()) && (it2 != m_map.end())) {
+        while ((it1 != m_map.end()) && (it2 != other.m_map.end())) {
             auto const x = it1->first.compare(it2->first);
             if (x == 0) {
                 ++it1;

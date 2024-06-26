@@ -68,12 +68,12 @@ BlkAllocStatus AppendBlkAllocator::alloc_contiguous(BlkId& bid) { return alloc(1
 //
 BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hints& hint, BlkId& out_bid) {
     if (available_blks() < nblks) {
-        //COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
+        // COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
         LOGERROR("No space left to serve request nblks: {}, available_blks: {}", nblks, available_blks());
         return BlkAllocStatus::SPACE_FULL;
     } else if (nblks > max_blks_per_blkid()) {
         // consumer(vdev) already handles this case.
-        //COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
+        // COUNTER_INCREMENT(m_metrics, num_alloc_failure, 1);
         LOGERROR("Can't serve request nblks: {} larger than max_blks_in_op: {}", nblks, max_blks_per_blkid());
         return BlkAllocStatus::FAILED;
     }
@@ -81,7 +81,7 @@ BlkAllocStatus AppendBlkAllocator::alloc(blk_count_t nblks, const blk_alloc_hint
     // Push 1 blk to the vector which has all the requested nblks;
     out_bid = BlkId{m_last_append_offset.fetch_add(nblks), nblks, m_chunk_id};
 
-    //COUNTER_INCREMENT(m_metrics, num_alloc, 1);
+    // COUNTER_INCREMENT(m_metrics, num_alloc, 1);
 
     return BlkAllocStatus::SUCCESS;
 }

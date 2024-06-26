@@ -46,6 +46,7 @@ public:
         m_sb->parent_uuid = parent_uuid;
         m_sb->user_sb_size = user_sb_size;
         m_sb.write();
+
         m_sb_buffer = std::make_shared< MetaIndexBuffer >(m_sb);
 
         // Create a root node which is a leaf node.
@@ -56,7 +57,18 @@ public:
 
     IndexTable(superblk< index_table_sb >&& sb, const BtreeConfig& cfg) : Btree< K, V >{cfg}, m_sb{std::move(sb)} {
         m_sb_buffer = std::make_shared< MetaIndexBuffer >(m_sb);
-        this->set_root_node_info(BtreeLinkInfo{m_sb->root_node, m_sb->root_link_version});
+
+        // After recovery, we see that root node is empty, which means that after btree is created, we crashed.
+        // So create new root node, which is essential for btree to function.
+        if (m_sb->root_node == empty_bnodeid) {
+            auto cp = hs()->cp_mgr().cp_guard();
+            auto const status = this->create_root_node((void*)cp.context(cp_consumer_t::INDEX_SVC));
+            if (status != btree_status_t::success) {
+                throw std::runtime_error(fmt::format("Unable to create root node"));
+            }
+        } else {
+            this->set_root_node_info(BtreeLinkInfo{m_sb->root_node, m_sb->root_link_version});
+        }
     }
 
     void destroy() override {

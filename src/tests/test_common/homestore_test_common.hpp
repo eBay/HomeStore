@@ -198,7 +198,10 @@ public:
     test_params& params(uint32_t svc) { return m_token.svc_params_[svc]; }
 
 #ifdef _PRERELEASE
-    void wait_for_crash_recovery() { m_crash_recovered.getFuture().get(); }
+    void wait_for_crash_recovery() {
+        m_crash_recovered.getFuture().get();
+        m_crash_recovered = folly::Promise< folly::Unit >();
+    }
 #endif
 
     void set_min_chunk_size(uint64_t chunk_size) {

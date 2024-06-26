@@ -696,6 +696,13 @@ void VirtualDev::cp_flush(VDevCPContext* v_cp_ctx) {
 // sync-ops during cp_flush, so return 100;
 int VirtualDev::cp_progress_percent() { return 100; }
 
+void VirtualDev::recovery_completed() {
+    if (m_allocator_type != blk_allocator_type_t::append) {
+        m_chunk_selector->foreach_chunks(
+            [this](cshared< Chunk >& chunk) { chunk->blk_allocator_mutable()->recovery_completed(); });
+    }
+}
+
 ///////////////////////// VirtualDev Private Methods /////////////////////////////
 uint64_t VirtualDev::to_dev_offset(BlkId const& b, Chunk** chunk) const {
     *chunk = m_dmgr.get_chunk_mutable(b.chunk_num());
