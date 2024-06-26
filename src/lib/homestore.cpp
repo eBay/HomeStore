@@ -264,9 +264,17 @@ void HomeStore::do_start() {
         }
     }
 
-    m_cp_mgr->start_timer();
+    // If this is the first time boot, we need to commit the formatting so that it will not be considered as first time
+    // boot going forward on next reboot.
+    if (m_dev_mgr->is_first_time_boot()) {
+        // Take the first CP after we have initialized all subsystems and wait for it to complete.
+        m_cp_mgr->trigger_cp_flush(true /* force */).get();
+        m_dev_mgr->commit_formatting();
+    }
 
+    m_cp_mgr->start_timer();
     m_resource_mgr->start(m_dev_mgr->total_capacity());
+
     m_init_done = true;
 }
 

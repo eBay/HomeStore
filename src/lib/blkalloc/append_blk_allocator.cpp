@@ -22,7 +22,7 @@
 namespace homestore {
 
 AppendBlkAllocator::AppendBlkAllocator(const BlkAllocConfig& cfg, bool need_format, allocator_id_t id) :
-        BlkAllocator{cfg, id}, m_metrics{get_name().c_str()} {
+        BlkAllocator{cfg, id}, m_metrics{get_name().c_str()}, m_sb{get_name()} {
     // TODO: try to make all append_blk_allocator instances use same client type to reduce metablk's cache footprint;
     meta_service().register_handler(
         get_name(),

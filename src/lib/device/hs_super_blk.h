@@ -131,8 +131,10 @@ struct first_block {
     static constexpr uint32_t HOMESTORE_MAGIC{0xCEEDDEEB}; // Magic written as first bytes on each device
 
 public:
-    uint64_t magic{0};              // Header magic expected to be at the top of block
-    uint32_t checksum{0};           // Checksum of the entire first block (excluding this field)
+    uint64_t magic{0};                // Header magic expected to be at the top of block
+    uint32_t checksum{0};             // Checksum of the entire first block (excluding this field)
+    uint32_t formatting_done : 1 {0}; // Has formatting completed yet
+    uint32_t reserved : 31 {0};
     first_block_header hdr;         // Information about the entire system
     pdev_info_header this_pdev_hdr; // Information about the current pdev
 
@@ -141,7 +143,8 @@ public:
 
     bool is_valid() const {
         return ((magic == HOMESTORE_MAGIC) &&
-                (std::string(hdr.product_name) == std::string(first_block_header::PRODUCT_NAME)));
+                (std::string(hdr.product_name) == std::string(first_block_header::PRODUCT_NAME) &&
+                 (formatting_done != 0x0)));
     }
 
     std::string to_string() const {
@@ -203,8 +206,7 @@ public:
         return (dinfo.dev_size - 1) / min_chunk_size + 1;
     }
     static uint32_t min_chunk_size(HSDevType dtype) {
-        uint64_t min_chunk_size =
-            (dtype == HSDevType::Fast) ? MIN_CHUNK_SIZE_FAST_DEVICE : MIN_CHUNK_SIZE_DATA_DEVICE;
+        uint64_t min_chunk_size = (dtype == HSDevType::Fast) ? MIN_CHUNK_SIZE_FAST_DEVICE : MIN_CHUNK_SIZE_DATA_DEVICE;
 #ifdef _PRERELEASE
         auto chunk_size = iomgr_flip::instance()->get_test_flip< long >("set_minimum_chunk_size");
         if (chunk_size) { min_chunk_size = chunk_size.get(); }

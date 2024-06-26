@@ -69,16 +69,23 @@ uint32_t IndexService::reserve_ordinal() { return m_ordinal_reserver->reserve();
 
 void IndexService::itable_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
     // We have found an index table superblock. Notify the callback which should convert the superblock into actual
-    // IndexTable instance
-    superblk< index_table_sb > sb;
-    sb.load(buf, meta_cookie);
-    add_index_table(m_svc_cbs->on_index_table_found(std::move(sb)));
+    // IndexTable instance. This callback will be called twice, first time when it boots before IndexService starts and
+    // once as part of IndexService start, will read all metablks and then call this. We process everything after
+    // IndexService has been started, because writeback cache would have recovered all nodes by now.
+    if (m_wb_cache) {
+        superblk< index_table_sb > sb;
+        sb.load(buf, meta_cookie);
+        add_index_table(m_svc_cbs->on_index_table_found(std::move(sb)));
+    }
 }
 
 void IndexService::start() {
     // Start Writeback cache
     m_wb_cache = std::make_unique< IndexWBCache >(m_vdev, std::move(m_wbcache_sb), hs()->evictor(),
                                                   hs()->device_mgr()->atomic_page_size(HSDevType::Fast));
+
+    // Read the index metablks again
+    meta_service().read_sub_sb("index");
 }
 
 void IndexService::stop() { m_wb_cache.reset(); }

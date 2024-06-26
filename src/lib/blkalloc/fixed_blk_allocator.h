@@ -36,6 +36,7 @@ public:
     BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
     BlkAllocStatus reserve_on_cache(BlkId const& b) override;
     void free(BlkId const& b) override;
+    void recovery_completed() override;
 
     blk_num_t available_blks() const override;
     blk_num_t get_used_blks() const override;

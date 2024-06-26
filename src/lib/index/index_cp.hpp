@@ -34,52 +34,76 @@ public:
     using compact_blkid_t = std::pair< blk_num_t, chunk_num_t >;
     enum class op_t : uint8_t { child_new, child_freed, parent_inplace, child_inplace };
     struct txn_record {
+        uint8_t has_inplace_parent : 1; // Do we have parent_id in the list of ids. It will be first
+        uint8_t has_inplace_child : 1;  // Do we have child_id in the list of ids. It will be second
+        uint8_t is_parent_meta : 1;     // Is the parent buffer a meta buffer
+        uint8_t reserved1 : 5;
         uint8_t num_new_ids;
         uint8_t num_freed_ids;
-        uint8_t has_inplace_parent : 1;
-        uint8_t has_inplace_child : 1;
-        uint8_t is_parent_meta : 1; // Is the parent buffer a meta buffer
-        uint8_t reserved1 : 5;
         uint8_t reserved{0};
         uint32_t index_ordinal;
         compact_blkid_t ids[1]; // C++ std probhits 0 size array
 
         txn_record(uint32_t ordinal) :
-                num_new_ids{0},
-                num_freed_ids{0},
                 has_inplace_parent{0x0},
                 has_inplace_child{0x0},
                 is_parent_meta{0x0},
+                num_new_ids{0},
+                num_freed_ids{0},
                 index_ordinal{ordinal} {}
 
         uint32_t total_ids() const {
-            return (num_new_ids + num_freed_ids + has_inplace_parent ? 1 : 0 + has_inplace_child ? 1 : 0);
+            return (num_new_ids + num_freed_ids + ((has_inplace_parent == 0x1) ? 1 : 0) +
+                    ((has_inplace_child == 0x1) ? 1 : 0));
         }
 
-        uint32_t size() const { return sizeof(txn_record) - (total_ids() - 1) * sizeof(compact_blkid_t); }
+        uint32_t size() const { return sizeof(txn_record) + (total_ids() - 1) * sizeof(compact_blkid_t); }
         static uint32_t size_for_num_ids(uint8_t n) { return sizeof(txn_record) + (n - 1) * sizeof(compact_blkid_t); }
+
+        uint32_t next_slot() const {
+            return ((has_inplace_parent == 0x1) ? 1 : 0) + ((has_inplace_child == 0x1) ? 1 : 0) + num_new_ids +
+                num_freed_ids;
+        }
+
         void append(op_t op, BlkId const& blk) {
+            auto const compact_blk = std::make_pair(blk.blk_num(), blk.chunk_num());
+            auto const slot = next_slot();
             if (op == op_t::parent_inplace) {
                 DEBUG_ASSERT(has_inplace_parent == 0x0, "Duplicate inplace parent in same txn record");
+                DEBUG_ASSERT((has_inplace_child == 0x0) && (num_new_ids == 0) && (num_freed_ids == 0),
+                             "Ordering of append is not correct");
                 has_inplace_parent = 0x1;
             } else if (op == op_t::child_inplace) {
                 DEBUG_ASSERT(has_inplace_child == 0x0, "Duplicate inplace child in same txn record");
                 has_inplace_child = 0x1;
             } else if (op == op_t::child_new) {
                 DEBUG_ASSERT_LT(num_new_ids, 0xff, "Too many new ids in txn record");
-                ids[num_new_ids++] = std::make_pair(blk.blk_num(), blk.chunk_num());
+                ++num_new_ids;
             } else if (op == op_t::child_freed) {
                 DEBUG_ASSERT_LT(num_freed_ids, 0xff, "Too many freed ids in txn record");
-                ids[num_freed_ids++] = std::make_pair(blk.blk_num(), blk.chunk_num());
+                ++num_freed_ids;
             } else {
                 DEBUG_ASSERT(false, "Invalid op type");
             }
+            ids[slot] = compact_blk;
         }
 
         BlkId blk_id(uint8_t idx) const {
             DEBUG_ASSERT_LT(idx, total_ids(), "Index out of bounds");
             return BlkId{ids[idx].first, (blk_count_t)1u, ids[idx].second};
         }
+
+        std::string parent_id_string() const {
+            return (has_inplace_parent == 0x1) ? fmt::format("chunk={}, blk={}", ids[0].second, ids[0].first) : "empty";
+        }
+
+        std::string child_id_string() const {
+            auto const idx = (has_inplace_parent == 0x1) ? 1 : 0;
+            return (has_inplace_child == 0x1) ? fmt::format("chunk={}, blk={}", ids[idx].second, ids[idx].first)
+                                              : "empty";
+        }
+
+        std::string to_string() const;
     };
 
     struct txn_journal {
@@ -103,6 +127,9 @@ public:
             ++num_txns;
             return append_guard(this, ordinal);
         }
+
+        std::string to_string() const;
+        void log_records() const;
     };
 #pragma pack()
 

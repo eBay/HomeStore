@@ -193,13 +193,16 @@ static void set_crash_flips(IndexBufferPtr const& parent_buf, IndexBufferPtr con
                             IndexBufferPtrList const& new_node_bufs, IndexBufferPtrList const& freed_node_bufs) {
     // TODO: Need an API from flip to quickly check if flip is enabled, so this method doesn't check flip_enabled a
     // bunch of times.
-    if ((new_node_bufs.size() == 1) && freed_node_bufs.empty()) {
+    if (parent_buf->is_meta_buf()) {
+        // Split or merge happening on root
+        if (iomgr_flip::instance()->test_flip("crash_flush_on_meta")) {
+            parent_buf->set_crash_flag();
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_root")) {
+            child_buf->set_crash_flag();
+        }
+    } else if ((new_node_bufs.size() == 1) && freed_node_bufs.empty()) {
         // Its a split node situation
-        if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_meta")) {
-            if (parent_buf->is_meta_buf()) { parent_buf->set_crash_flag(); }
-        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_root")) {
-            if (parent_buf->is_meta_buf()) { child_buf->set_crash_flag(); }
-        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_parent")) {
+        if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_parent")) {
             parent_buf->set_crash_flag();
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_left_child")) {
             child_buf->set_crash_flag();
@@ -208,11 +211,7 @@ static void set_crash_flips(IndexBufferPtr const& parent_buf, IndexBufferPtr con
         }
     } else if (!freed_node_bufs.empty() && (new_node_bufs.size() != freed_node_bufs.size())) {
         // Its a merge nodes sitation
-        if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_meta")) {
-            if (parent_buf->is_meta_buf()) { parent_buf->set_crash_flag(); }
-        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_root")) {
-            if (parent_buf->is_meta_buf()) { child_buf->set_crash_flag(); }
-        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_parent")) {
+        if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_parent")) {
             parent_buf->set_crash_flag();
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_left_child")) {
             child_buf->set_crash_flag();
@@ -221,11 +220,7 @@ static void set_crash_flips(IndexBufferPtr const& parent_buf, IndexBufferPtr con
         }
     } else if (!freed_node_bufs.empty() && (new_node_bufs.size() == freed_node_bufs.size())) {
         // Its a rebalance node situation
-        if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_meta")) {
-            if (parent_buf->is_meta_buf()) { parent_buf->set_crash_flag(); }
-        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_root")) {
-            if (parent_buf->is_meta_buf()) { child_buf->set_crash_flag(); }
-        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_parent")) {
+        if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_parent")) {
             parent_buf->set_crash_flag();
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_left_child")) {
             child_buf->set_crash_flag();
@@ -261,9 +256,20 @@ void IndexWBCache::transact_bufs(uint32_t index_ordinal, IndexBufferPtr const& p
         }
     }
 
-    icp_ctx->add_to_txn_journal(index_ordinal, child_buf->m_up_buffer,
-                                new_node_bufs.size() ? new_node_bufs[0]->m_up_buffer : nullptr, new_node_bufs,
-                                freed_node_bufs);
+    if (new_node_bufs.empty() && freed_node_bufs.empty()) {
+        // This is an update for meta, root transaction.
+        DEBUG_ASSERT_EQ(child_buf->m_created_cp_id, icp_ctx->id(),
+                        "Root buffer is not created by current cp (for split root), its not expected");
+        icp_ctx->add_to_txn_journal(index_ordinal, parent_buf, nullptr, {child_buf}, {});
+    } else {
+        icp_ctx->add_to_txn_journal(index_ordinal,          // Ordinal
+                                    child_buf->m_up_buffer, // real up buffer
+                                    new_node_bufs.empty() ? freed_node_bufs[0]->m_up_buffer
+                                                          : new_node_bufs[0]->m_up_buffer, // real in place child
+                                    new_node_bufs,                                         // new node bufs
+                                    freed_node_bufs                                        // free_node_bufs
+        );
+    }
 }
 
 void IndexWBCache::link_buf(IndexBufferPtr const& up_buf, IndexBufferPtr const& down_buf, bool is_sibling_link,
@@ -356,7 +362,10 @@ void IndexWBCache::free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
 //////////////////// Recovery Related section /////////////////////////////////
 void IndexWBCache::recover(sisl::byte_view sb) {
     // If sb is empty, its possible a first time boot.
-    if ((sb.bytes() == nullptr) || (sb.size() == 0)) { return; }
+    if ((sb.bytes() == nullptr) || (sb.size() == 0)) {
+        m_vdev->recovery_completed();
+        return;
+    }
 
     // Recover the CP Context with the buf_map of all the buffers that were dirtied in the last cp with its
     // relationship (up/down buf links) as it was by the cp that was flushing the buffers prior to unclean shutdown.
@@ -392,6 +401,8 @@ void IndexWBCache::recover(sisl::byte_view sb) {
     for (auto const& buf : new_bufs) {
         process_up_buf(buf->m_up_buffer, false /* do_repair */);
     }
+
+    m_vdev->recovery_completed();
 }
 
 void IndexWBCache::process_up_buf(IndexBufferPtr const& buf, bool do_repair) {
@@ -444,7 +455,13 @@ bool IndexWBCache::was_node_committed(IndexBufferPtr const& buf) {
 folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
     LOGTRACEMOD(wbcache, "cp_ctx {}", cp_ctx->to_string());
     if (!cp_ctx->any_dirty_buffers()) {
-        CP_PERIODIC_LOG(DEBUG, cp_ctx->id(), "Btree does not have any dirty buffers to flush");
+        if (cp_ctx->id() == 0) {
+            // For the first CP, we need to flush the journal buffer to the meta blk
+            LOGINFO("First time boot cp, we shall flush the vdev to ensure all cp information is created");
+            m_vdev->cp_flush(cp_ctx);
+        } else {
+            CP_PERIODIC_LOG(DEBUG, cp_ctx->id(), "Btree does not have any dirty buffers to flush");
+        }
         return folly::makeFuture< bool >(true); // nothing to flush
     }
 

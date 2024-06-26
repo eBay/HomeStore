@@ -116,6 +116,7 @@ void DeviceManager::format_devices() {
         first_block* fblk = r_cast< first_block* >(buf);
         fblk->magic = first_block::HOMESTORE_MAGIC;
         fblk->checksum = 0;          // Computed while writing the first block
+        fblk->formatting_done = 0x0; // Formatting is not done yet, until homestore is completely started
         fblk->hdr = m_first_blk_hdr; // Entire header is copied as is
         auto pdev_id = populate_pdev_info(dinfo, attr, m_first_blk_hdr.system_uuid, fblk->this_pdev_hdr);
         fblk->checksum = crc32_ieee(init_crc32, uintptr_cast(fblk), first_block::s_atomic_fb_size);
@@ -174,6 +175,27 @@ void DeviceManager::load_devices() {
     }
 
     load_vdevs();
+}
+
+void DeviceManager::commit_formatting() {
+    auto buf = hs_utils::iobuf_alloc(hs_super_blk::first_block_size(), sisl::buftag::superblk, 512);
+    for (auto& pdev : m_all_pdevs) {
+        if (!pdev) { continue; }
+
+        auto err = pdev->read_super_block(buf, hs_super_blk::first_block_size(), hs_super_blk::first_block_offset());
+        if (err) {
+            LOGERROR("Failed to read first block from device={}, error={}", pdev->get_devname(), err.message());
+            continue;
+        }
+
+        first_block* fblk = r_cast< first_block* >(buf);
+        fblk->formatting_done = 0x1;
+        fblk->checksum = crc32_ieee(init_crc32, uintptr_cast(fblk), first_block::s_atomic_fb_size);
+
+        pdev->write_super_block(buf, hs_super_blk::first_block_size(), hs_super_blk::first_block_offset());
+    }
+    hs_utils::iobuf_free(buf, sisl::buftag::superblk);
+    LOGINFO("HomeStore formatting is committed on all physical devices");
 }
 
 void DeviceManager::close_devices() {

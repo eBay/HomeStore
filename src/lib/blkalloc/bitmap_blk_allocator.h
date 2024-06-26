@@ -76,6 +76,7 @@ public:
     bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const override;
     void cp_flush(CP* cp) override;
 
+    void recovery_completed() override {}
     blk_num_t get_num_portions() const { return (m_num_blks - 1) / m_blks_per_portion + 1; }
     blk_num_t get_blks_per_portion() const { return m_blks_per_portion; }
 
