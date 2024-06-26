@@ -267,7 +267,7 @@ public:
 
     void generate_writes(uint64_t data_size, uint32_t max_size_per_iov, shared< TestReplicatedDB > db = nullptr) {
         if (db == nullptr) { db = pick_one_db(); }
-        LOGINFO("Writing on group_id={}", db->repl_dev()->group_id());
+        // LOGINFO("Writing on group_id={}", db->repl_dev()->group_id());
         db->db_write(data_size, max_size_per_iov);
     }
 

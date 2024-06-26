@@ -181,8 +181,10 @@ public:
         do_start_homestore(false /* fake_restart */, init_device);
     }
 
+
     virtual void restart_homestore(uint32_t shutdown_delay_sec = 5) {
         do_start_homestore(true /* fake_restart*/, false /* init_device */, shutdown_delay_sec);
+
     }
 
     virtual void shutdown_homestore(bool cleanup = true) {
