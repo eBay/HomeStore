@@ -110,9 +110,7 @@ std::string IndexCPContext::to_string() {
 
 void IndexCPContext::to_string_dot(const std::string& filename) {
     std::ofstream file(filename);
-    if (!file.is_open()) {
-        throw std::runtime_error("Failed to open file: " + filename);
-    }
+    if (!file.is_open()) { throw std::runtime_error("Failed to open file: " + filename); }
 
     file << "digraph G {\n";
 
@@ -124,12 +122,19 @@ void IndexCPContext::to_string_dot(const std::string& filename) {
         parents[buf->m_up_buffer.get()].emplace_back(buf.get());
     });
     m_dirty_buf_list.foreach_entry([&file, &parents, this](IndexBufferPtr buf) {
-        std::vector<std::string> colors={"lightgreen", "lightcoral", "lightyellow"};
-        auto sbuf =  BtreeNode::to_string_buf(buf->raw_buffer());
+        std::vector< std::string > colors = {"lightgreen", "lightcoral", "lightyellow"};
+        auto sbuf = BtreeNode::to_string_buf(buf->raw_buffer());
         auto pos = sbuf.find("LEAF");
-        if (pos != std::string::npos) {sbuf.insert(pos+4, "<br/>");}else {pos = sbuf.find("INTERIOR"); if (pos != std::string::npos) { sbuf.insert(pos + 8, "<br/>"); }}
-        file << fmt::format("\"{}\" [shape={}, label=< <b>{}</b><br/>{} >, fillcolor=\"{}\", style=\"filled\", fontname=\"bold\"];\n", r_cast< void* >(buf.get()),
-            m_cp->id()==buf->m_created_cp_id?"ellipse":"box", buf->to_string_dot(),sbuf,colors[s_cast< int >(buf->state())]);
+        if (pos != std::string::npos) {
+            sbuf.insert(pos + 4, "<br/>");
+        } else {
+            pos = sbuf.find("INTERIOR");
+            if (pos != std::string::npos) { sbuf.insert(pos + 8, "<br/>"); }
+        }
+        file << fmt::format(
+            "\"{}\" [shape={}, label=< <b>{}</b><br/>{} >, fillcolor=\"{}\", style=\"filled\", fontname=\"bold\"];\n",
+            r_cast< void* >(buf.get()), m_cp->id() == buf->m_created_cp_id ? "ellipse" : "box", buf->to_string_dot(),
+            sbuf, colors[s_cast< int >(buf->state())]);
         for (const auto& p : parents[buf.get()]) {
             file << fmt::format("\"{}\" -> \"{}\";\n", r_cast< void* >(p), r_cast< void* >(buf.get()));
         }
@@ -257,9 +262,7 @@ void IndexCPContext::process_txn_record(txn_record const* rec, std::map< BlkId, 
                     break;
                 }
             }
-            if (found){
-                return buf;
-            }
+            if (found) { return buf; }
             real_up_buf->m_down_buffers.emplace_back(buf);
 #endif
             real_up_buf->m_wait_for_down_buffers.increment(1);
