@@ -54,7 +54,8 @@ namespace homestore {
 
 static std::shared_ptr< BlkAllocator > create_blk_allocator(blk_allocator_type_t btype, uint32_t vblock_size,
                                                             uint32_t ppage_sz, uint32_t align_sz, uint64_t size,
-                                                            bool is_auto_recovery, uint32_t unique_id, bool is_init) {
+                                                            bool is_auto_recovery, uint32_t unique_id, bool is_init,
+                                                            bool use_slab_in_blk_allocator) {
     switch (btype) {
     case blk_allocator_type_t::fixed: {
         BlkAllocConfig cfg{vblock_size, align_sz, size, is_auto_recovery,
@@ -68,7 +69,7 @@ static std::shared_ptr< BlkAllocator > create_blk_allocator(blk_allocator_type_t
                                   size,
                                   is_auto_recovery,
                                   std::string("varsize_chunk_") + std::to_string(unique_id),
-                                  is_data_drive_hdd() ? false : true /* use_slabs */};
+                                  !is_data_drive_hdd() && use_slab_in_blk_allocator /* use_slabs */};
         // HS_DBG_ASSERT_EQ((size % MIN_DATA_CHUNK_SIZE(ppage_sz)), 0);
         return std::make_shared< VarsizeBlkAllocator >(cfg, is_init, unique_id);
     }
@@ -84,7 +85,7 @@ static std::shared_ptr< BlkAllocator > create_blk_allocator(blk_allocator_type_t
 }
 
 VirtualDev::VirtualDev(DeviceManager& dmgr, vdev_info const& vinfo, vdev_event_cb_t event_cb, bool is_auto_recovery,
-                       shared< ChunkSelector > custom_chunk_selector) :
+                       shared< ChunkSelector > custom_chunk_selector, bool use_slab_in_blk_allocator) :
         m_vdev_info{vinfo},
         m_dmgr{dmgr},
         m_name{vinfo.name},
@@ -92,7 +93,8 @@ VirtualDev::VirtualDev(DeviceManager& dmgr, vdev_info const& vinfo, vdev_event_c
         m_metrics{vinfo.name},
         m_allocator_type{vinfo.alloc_type},
         m_chunk_selector_type{vinfo.chunk_sel_type},
-        m_auto_recovery{is_auto_recovery} {
+        m_auto_recovery{is_auto_recovery},
+        m_use_slab_in_blk_allocator{use_slab_in_blk_allocator} {
     switch (m_chunk_selector_type) {
     case chunk_selector_type_t::ROUND_ROBIN: {
         m_chunk_selector = std::make_shared< RoundRobinChunkSelector >(false /* dynamically add chunk */);
@@ -117,7 +119,7 @@ void VirtualDev::add_chunk(cshared< Chunk >& chunk, bool is_fresh_chunk) {
     std::unique_lock lg{m_mgmt_mutex};
     auto ba = create_blk_allocator(m_allocator_type, block_size(), chunk->physical_dev()->optimal_page_size(),
                                    chunk->physical_dev()->align_size(), chunk->size(), m_auto_recovery,
-                                   chunk->chunk_id(), is_fresh_chunk);
+                                   chunk->chunk_id(), is_fresh_chunk, m_use_slab_in_blk_allocator);
     chunk->set_block_allocator(std::move(ba));
     // TODO: when vdev_ordinal is  used, revisit here to make sure it is set correctly;
     chunk->set_vdev_ordinal(m_total_chunk_num++);
