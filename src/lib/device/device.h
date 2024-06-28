@@ -52,8 +52,9 @@ struct vdev_info {
     uint16_t checksum{0};                      // 97: Checksum of this entire Block
     uint8_t alloc_type;                        // 98: Allocator type of this vdev
     uint8_t chunk_sel_type;                    // 99: Chunk Selector type of this vdev_id
-    uint8_t padding[155]{};                    // 100: Pad to make it 256 bytes total
-    uint8_t user_private[user_private_size]{}; // 128: User specific information
+    uint8_t use_slab_allocator{0};             // 100: Use slab allocator for this vdev
+    uint8_t padding[154]{};                    // 101: Padding to make it 256 bytes
+    uint8_t user_private[user_private_size]{}; // 128: User sepcific information
 
     uint32_t get_vdev_id() const { return vdev_id; }
     uint64_t get_size() const { return vdev_size; }
@@ -108,6 +109,7 @@ struct vdev_parameters {
     chunk_selector_type_t chunk_sel_type;   // which chunk selector type this vdev wants to be with;
     vdev_multi_pdev_opts_t multi_pdev_opts; // How data to be placed on multiple vdevs
     sisl::blob context_data;                // Context data about this vdev
+    bool use_slab_allocator{false};         // Use slab allocator for this vdev
 };
 
 class VirtualDev;

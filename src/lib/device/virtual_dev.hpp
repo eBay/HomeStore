@@ -103,7 +103,7 @@ protected:
 
 public:
     VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, vdev_event_cb_t event_cb, bool is_auto_recovery,
-               shared< ChunkSelector > custom_chunk_selector = nullptr, bool use_slab_in_blk_allocator = false);
+               shared< ChunkSelector > custom_chunk_selector = nullptr);
 
     VirtualDev(VirtualDev const& other) = delete;
     VirtualDev& operator=(VirtualDev const& other) = delete;
