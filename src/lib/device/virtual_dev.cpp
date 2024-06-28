@@ -94,7 +94,7 @@ VirtualDev::VirtualDev(DeviceManager& dmgr, vdev_info const& vinfo, vdev_event_c
         m_allocator_type{vinfo.alloc_type},
         m_chunk_selector_type{vinfo.chunk_sel_type},
         m_auto_recovery{is_auto_recovery},
-        m_use_slab_in_blk_allocator{vdev_info.use_slab_in_blk_allocator} {
+        m_use_slab_in_blk_allocator{vinfo.use_slab_allocator ? true : false} {
     switch (m_chunk_selector_type) {
     case chunk_selector_type_t::ROUND_ROBIN: {
         m_chunk_selector = std::make_shared< RoundRobinChunkSelector >(false /* dynamically add chunk */);
