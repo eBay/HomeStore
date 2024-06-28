@@ -567,6 +567,7 @@ public:
 #endif
         return {};
     }
+    std::string to_dot_keys() const override { return "NOT Supported"; }
 
     /*int compare_nth_key_range(const BtreeKeyRange& range, uint32_t ind) const {
         return get_nth_key(ind, false).compare_range(range);

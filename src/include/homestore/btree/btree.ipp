@@ -314,7 +314,7 @@ void Btree< K, V >::print_tree(const std::string& file) const {
     to_string(m_root_node_info.bnode_id(), buf);
     m_btree_lock.unlock_shared();
 
-    BT_LOG(INFO, "Pre order traversal of tree:\n<{}>", buf);
+    LOGINFO( "Pre order traversal of tree:\n<{}>", buf);
     if (!file.empty()) {
         std::ofstream o(file);
         o.write(buf.c_str(), buf.size());
@@ -330,6 +330,46 @@ void Btree< K, V >::print_tree_keys() const {
     m_btree_lock.unlock_shared();
 
     LOGINFO("Pre order traversal of tree:\n<{}>", buf);
+}
+
+template < typename K, typename V >
+std::string Btree< K, V >::visualize_tree_keys(const std::string& file) const {
+    std::map< uint32_t, std::vector< uint64_t > > level_map;
+    std::map< uint64_t, BtreeVisualizeVariables > info_map;
+    std::string buf = "digraph G\n"
+                      "{ \n"
+                      "ranksep = 3.0;\n"
+                      R"(graph [splines="polyline"];
+)";
+
+    m_btree_lock.lock_shared();
+    to_dot_keys(m_root_node_info.bnode_id(), buf, level_map, info_map);
+    m_btree_lock.unlock_shared();
+    for (const auto& [child, info] : info_map) {
+        if (info.parent) {
+            buf += fmt::format(R"(
+            "{}":connector{} -> "{}":"key{}" [splines=false];)",
+                               info.parent, info.index, child, info.midPoint);
+        }
+    }
+
+    std::string result;
+    for (const auto& [key, values] : level_map) {
+        result += "{rank=same; ";
+        std::vector< std::string > quotedValues;
+        std::transform(values.begin(), values.end(), std::back_inserter(quotedValues),
+                       [](uint64_t value) { return fmt::format("\"{}\"", value); });
+
+        result += fmt::to_string(fmt::join(quotedValues, " ")) + "}\n";
+    }
+
+    buf += "\n" + result + " }\n";
+    if (!file.empty()) {
+        std::ofstream o(file);
+        o.write(buf.c_str(), buf.size());
+        o.flush();
+    }
+    return buf;
 }
 
 template < typename K, typename V >

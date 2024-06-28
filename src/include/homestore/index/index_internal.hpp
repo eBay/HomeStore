@@ -122,6 +122,7 @@ struct IndexBuffer : public sisl::ObjLifeCounter< IndexBuffer > {
     bool is_meta_buf() const { return m_is_meta_buf; }
 
     std::string to_string() const;
+    std::string to_string_dot() const;
 };
 
 // This is a special buffer which is used to write to the meta block

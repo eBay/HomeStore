@@ -108,18 +108,25 @@ public:
     }
 
     void repair_node(IndexBufferPtr const& idx_buf) override {
-        BtreeNode* n = this->init_node(idx_buf->raw_buffer(), idx_buf->blkid().to_integer(), true,
+        BtreeNode* n = this->init_node(idx_buf->raw_buffer(), idx_buf->blkid().to_integer(), false /* init_buf */,
                                        BtreeNode::identify_leaf_node(idx_buf->raw_buffer()));
         static_cast< IndexBtreeNode* >(n)->attach_buf(idx_buf);
         auto cpg = cp_mgr().cp_guard();
+        //m_dirtied_cp_id was set in -1. It is time to make it dirty
+        idx_buf->m_dirtied_cp_id = cpg->id();
+        LOGTRACEMOD(wbcache, "repair_node cp {} {}", cpg->id(), idx_buf->to_string());
         repair_links(BtreeNodePtr{n}, (void*)cpg.context(cp_consumer_t::INDEX_SVC));
     }
 
     void repair_root(IndexBufferPtr const& root_buf) override {
-        BtreeNode* n = this->init_node(root_buf->raw_buffer(), root_buf->blkid().to_integer(), true,
+        BtreeNode* n = this->init_node(root_buf->raw_buffer(), root_buf->blkid().to_integer(), false /* init_buf */,
                                        BtreeNode::identify_leaf_node(root_buf->raw_buffer()));
         static_cast< IndexBtreeNode* >(n)->attach_buf(root_buf);
         auto cpg = cp_mgr().cp_guard();
+        //m_dirtied_cp_id was set in -1. It is time to make it dirty
+        root_buf->m_dirtied_cp_id = cpg->id();
+        LOGTRACEMOD(wbcache, "repair_root cp {} {}", cpg->id(), root_buf->to_string());
+
         on_root_changed(n, (void*)cpg.context(cp_consumer_t::INDEX_SVC));
     }
 
@@ -140,18 +147,20 @@ protected:
         auto prev_state = idx_node->m_idx_buf->m_state.exchange(index_buf_state_t::DIRTY);
         if (prev_state == index_buf_state_t::CLEAN) {
             // It was clean before, dirtying it first time, add it to the wb_cache list to flush
-            BT_DBG_ASSERT_EQ(idx_node->m_idx_buf->m_dirtied_cp_id, cp_ctx->id(),
-                             "Writing a node which was not acquired by this cp");
+            if(idx_node->m_idx_buf->m_dirtied_cp_id !=-1) {
+                BT_DBG_ASSERT_EQ(idx_node->m_idx_buf->m_dirtied_cp_id, cp_ctx->id(),
+                                 "Writing a node which was not acquired by this cp");
+            }
             wb_cache().write_buf(node, idx_node->m_idx_buf, cp_ctx);
+            node->set_checksum();
+            node->set_modified_cp_id(cp_ctx->id());
             LOGTRACEMOD(wbcache, "add to dirty list cp {} {}", cp_ctx->id(), idx_node->m_idx_buf->to_string());
         } else {
             BT_DBG_ASSERT_NE(
                 (int)prev_state, (int)index_buf_state_t::FLUSHING,
                 "Writing on a node buffer which was currently in flushing state on cur_cp={} buffer_cp_id={}",
-                cp_ctx->id(), idx_node->m_idx_buf->m_dirtied_cp_id)
+                cp_ctx->id(), idx_node->m_idx_buf->m_dirtied_cp_id);
         }
-        node->set_checksum();
-        node->set_modified_cp_id(cp_ctx->id());
         return btree_status_t::success;
     }
 
@@ -168,7 +177,8 @@ protected:
             new_node_bufs.push_back(static_cast< IndexBtreeNode* >(right_child_node.get())->m_idx_buf);
         }
         write_node_impl(left_child_node, context);
-        write_node_impl(parent_node, context);
+        // during recovery it is possible that there is no parent_node
+        if (parent_node.get() != nullptr) {write_node_impl(parent_node, context); }
 
         IndexBufferPtrList freed_node_bufs;
         for (const auto& freed_node : freed_nodes) {
@@ -176,7 +186,7 @@ protected:
             this->free_node(freed_node, locktype_t::WRITE, context);
         }
 
-        wb_cache().transact_bufs(ordinal(), parent_buf, left_child_buf, new_node_bufs, freed_node_bufs, cp_ctx);
+        wb_cache().transact_bufs(ordinal(), parent_node.get() ? parent_buf : nullptr, left_child_buf, new_node_bufs, freed_node_bufs, cp_ctx);
         return btree_status_t::success;
     }
 
@@ -218,7 +228,7 @@ protected:
     }
 
     btree_status_t repair_links(BtreeNodePtr const& parent_node, void* cp_ctx) {
-        BT_LOG(DEBUG, "Repairing links for parent node {}", parent_node->node_id());
+        BT_LOG(DEBUG, "Repairing links for parent node {}", parent_node->to_string());
 
         // Get the last key in the node
         auto const last_parent_key = parent_node->get_last_key< K >();
@@ -252,7 +262,7 @@ protected:
         BtreeNodeList new_parent_nodes;
         do {
             if (child_node->has_valid_edge()) {
-                BT_DBG_ASSERT(!is_parent_edge_node,
+                BT_DBG_ASSERT(is_parent_edge_node,
                               "Child node={} is an edge node but parent_node={} is not an edge node",
                               child_node->node_id(), parent_node->node_id());
                 cur_parent->set_edge_value(BtreeLinkInfo{child_node->node_id(), child_node->link_version()});
@@ -288,6 +298,7 @@ protected:
                                BtreeLinkInfo{child_node->node_id(), child_node->link_version()});
 
             // Move to the next child node
+            this->unlock_node(child_node, locktype_t::READ);
             auto const next_node_id = child_node->next_bnode();
             if (next_node_id == empty_bnodeid) {
                 BT_LOG_ASSERT(
@@ -305,6 +316,7 @@ protected:
                 break;
             }
         } while (true);
+        this->unlock_node(child_node, locktype_t::READ);
 
         if (ret == btree_status_t::success) {
             ret = transact_nodes(new_parent_nodes, {}, parent_node, nullptr, cp_ctx);

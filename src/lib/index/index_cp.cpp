@@ -81,7 +81,7 @@ std::optional< IndexBufferPtr > IndexCPContext::next_dirty() {
 }
 
 std::string IndexCPContext::to_string() {
-    std::string str{fmt::format("IndexCPContext cpid={} dirty_buf_count={} dirty_buf_list_size={}", m_cp->id(),
+    std::string str{fmt::format("IndexCPContext cpid={} dirty_buf_count={} dirty_buf_list_size={}\n", m_cp->id(),
                                 m_dirty_buf_count.get(), m_dirty_buf_list.size())};
 
     // Mapping from a node to all its parents in the graph.
@@ -106,6 +106,37 @@ std::string IndexCPContext::to_string() {
         fmt::format_to(std::back_inserter(str), "\n");
     });
     return str;
+}
+
+void IndexCPContext::to_string_dot(const std::string& filename) {
+    std::ofstream file(filename);
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to open file: " + filename);
+    }
+
+    file << "digraph G {\n";
+
+    // Mapping from a node to all its parents in the graph.
+    std::unordered_map< IndexBuffer*, std::vector< IndexBuffer* > > parents;
+
+    m_dirty_buf_list.foreach_entry([&parents](IndexBufferPtr buf) {
+        // Add this buf to his children.
+        parents[buf->m_up_buffer.get()].emplace_back(buf.get());
+    });
+    m_dirty_buf_list.foreach_entry([&file, &parents, this](IndexBufferPtr buf) {
+        std::vector<std::string> colors={"lightgreen", "lightcoral", "lightyellow"};
+        auto sbuf =  BtreeNode::to_string_buf(buf->raw_buffer());
+        auto pos = sbuf.find("LEAF");
+        if (pos != std::string::npos) {sbuf.insert(pos+4, "<br/>");}else {pos = sbuf.find("INTERIOR"); if (pos != std::string::npos) { sbuf.insert(pos + 8, "<br/>"); }}
+        file << fmt::format("\"{}\" [shape={}, label=< <b>{}</b><br/>{} >, fillcolor=\"{}\", style=\"filled\", fontname=\"bold\"];\n", r_cast< void* >(buf.get()),
+            m_cp->id()==buf->m_created_cp_id?"ellipse":"box", buf->to_string_dot(),sbuf,colors[s_cast< int >(buf->state())]);
+        for (const auto& p : parents[buf.get()]) {
+            file << fmt::format("\"{}\" -> \"{}\";\n", r_cast< void* >(p), r_cast< void* >(buf.get()));
+        }
+    });
+    file << "}\n";
+
+    file.close();
 }
 
 std::string IndexCPContext::to_string_with_dags() {
@@ -215,6 +246,22 @@ void IndexCPContext::process_txn_record(txn_record const* rec, std::map< BlkId, 
         if (up_buf) {
             DEBUG_ASSERT(((buf->m_up_buffer == nullptr) || (buf->m_up_buffer == up_buf)), "Inconsistent up buffer");
             auto real_up_buf = (up_buf->m_created_cp_id == cpg->id()) ? up_buf->m_up_buffer : up_buf;
+
+#ifndef NDEBUG
+            //  if (!is_sibling_link || (buf->m_up_buffer == real_up_buf)) { return buf;}
+            //  Already linked with same buf or its not a sibling link to override
+            bool found{false};
+            for (auto const& dbuf : real_up_buf->m_down_buffers) {
+                if (dbuf.lock() == buf) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found){
+                return buf;
+            }
+            real_up_buf->m_down_buffers.emplace_back(buf);
+#endif
             real_up_buf->m_wait_for_down_buffers.increment(1);
             buf->m_up_buffer = real_up_buf;
         }

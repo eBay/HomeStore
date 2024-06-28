@@ -59,7 +59,7 @@ public:
     //////////////////// CP Related API section /////////////////////////////////
     folly::Future< bool > async_cp_flush(IndexCPContext* context);
     IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext* cp_ctx) const;
-    void recover(sisl::byte_view sb);
+    void recover(sisl::byte_view sb) override;
 
 private:
     void start_flush_threads();

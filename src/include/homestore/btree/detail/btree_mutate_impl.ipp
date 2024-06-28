@@ -303,13 +303,24 @@ template < typename K, typename V >
 template < typename ReqT >
 bool Btree< K, V >::is_split_needed(const BtreeNodePtr& node, ReqT& req) const {
     if (!node->is_leaf()) { // if internal node, size is atmost one additional entry, size of K/V
-        return !node->has_room_for_put(btree_put_type::UPSERT, K::get_max_size(), BtreeLinkInfo::get_fixed_size());
+        return node->total_entries() >= 3;
     } else if constexpr (std::is_same_v< ReqT, BtreeRangePutRequest< K > >) {
-        return !node->has_room_for_put(req.m_put_type, req.first_key_size(), req.m_newval->serialized_size());
+        return node->total_entries() >= 3;
     } else if constexpr (std::is_same_v< ReqT, BtreeSinglePutRequest >) {
-        return !node->has_room_for_put(req.m_put_type, req.key().serialized_size(), req.value().serialized_size());
+        return node->total_entries() >= 3;;
     } else {
         return false;
     }
 }
+//bool Btree< K, V >::is_split_needed(const BtreeNodePtr& node, ReqT& req) const {
+//    if (!node->is_leaf()) { // if internal node, size is atmost one additional entry, size of K/V
+//        return !node->has_room_for_put(btree_put_type::UPSERT, K::get_max_size(), BtreeLinkInfo::get_fixed_size());
+//    } else if constexpr (std::is_same_v< ReqT, BtreeRangePutRequest< K > >) {
+//        return !node->has_room_for_put(req.m_put_type, req.first_key_size(), req.m_newval->serialized_size());
+//    } else if constexpr (std::is_same_v< ReqT, BtreeSinglePutRequest >) {
+//        return !node->has_room_for_put(req.m_put_type, req.key().serialized_size(), req.value().serialized_size());
+//    } else {
+//        return false;
+//    }
+//}
 } // namespace homestore

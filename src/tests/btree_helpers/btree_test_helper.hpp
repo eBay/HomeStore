@@ -274,7 +274,7 @@ public:
             qreq.enable_route_tracing();
             auto const ret = m_bt->query(qreq, out_vector);
             auto const expected_count = std::min(remaining, batch_size);
-
+            this->print_keys();
             ASSERT_EQ(out_vector.size(), expected_count) << "Received incorrect value on query pagination";
 
             if (remaining < batch_size) {
@@ -376,6 +376,7 @@ public:
 
     void print(const std::string& file = "") const { m_bt->print_tree(file); }
     void print_keys() const { m_bt->print_tree_keys(); }
+    void visualize_keys(const std::string &file) const { m_bt->visualize_tree_keys( file ); }
 
     void compare_files(const std::string& before, const std::string& after) {
         std::ifstream b(before, std::ifstream::ate);

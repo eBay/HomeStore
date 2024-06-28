@@ -162,6 +162,7 @@ public:
     std::optional< IndexBufferPtr > next_dirty();
     std::string to_string();
     std::string to_string_with_dags();
+    void to_string_dot(const std::string& filename);
 
 private:
     void check_cycle();

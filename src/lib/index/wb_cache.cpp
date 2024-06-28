@@ -54,7 +54,6 @@ IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair<
     // We need to register the consumer first before recovery, so that recovery can use the cp_ctx created to add/track
     // recovered new nodes.
     cp_mgr().register_consumer(cp_consumer_t::INDEX_SVC, std::move(std::make_unique< IndexCPCallbacks >(this)));
-    recover(std::move(sb.second));
 }
 
 void IndexWBCache::start_flush_threads() {
@@ -184,6 +183,7 @@ bool IndexWBCache::refresh_meta_buf(shared< MetaIndexBuffer >& meta_buf, CPConte
         new_buf->m_dirtied_cp_id = cp_ctx->id();
         write_buf(nullptr, new_buf, cp_ctx);
         meta_buf = new_buf; // Replace the meta_buf with new buf
+        LOGTRACEMOD(wbcache, "meta buf {} is created in cp {}", meta_buf->to_string(), cp_ctx->id());
     }
     return true;
 }
@@ -193,7 +193,7 @@ static void set_crash_flips(IndexBufferPtr const& parent_buf, IndexBufferPtr con
                             IndexBufferPtrList const& new_node_bufs, IndexBufferPtrList const& freed_node_bufs) {
     // TODO: Need an API from flip to quickly check if flip is enabled, so this method doesn't check flip_enabled a
     // bunch of times.
-    if (parent_buf->is_meta_buf()) {
+    if (parent_buf && parent_buf->is_meta_buf()) {
         // Split or merge happening on root
         if (iomgr_flip::instance()->test_flip("crash_flush_on_meta")) {
             parent_buf->set_crash_flag();
@@ -258,8 +258,10 @@ void IndexWBCache::transact_bufs(uint32_t index_ordinal, IndexBufferPtr const& p
 
     if (new_node_bufs.empty() && freed_node_bufs.empty()) {
         // This is an update for meta, root transaction.
-        DEBUG_ASSERT_EQ(child_buf->m_created_cp_id, icp_ctx->id(),
-                        "Root buffer is not created by current cp (for split root), its not expected");
+        if(child_buf->m_created_cp_id != -1) {
+            DEBUG_ASSERT_EQ(child_buf->m_created_cp_id, icp_ctx->id(),
+                            "Root buffer is not created by current cp (for split root), its not expected");
+        }
         icp_ctx->add_to_txn_journal(index_ordinal, parent_buf, nullptr, {child_buf}, {});
     } else {
         icp_ctx->add_to_txn_journal(index_ordinal,          // Ordinal
@@ -270,6 +272,12 @@ void IndexWBCache::transact_bufs(uint32_t index_ordinal, IndexBufferPtr const& p
                                     freed_node_bufs                                        // free_node_bufs
         );
     }
+#if 0
+    static int id = 0;
+    auto filename = "transact_bufs_"+std::to_string(id++)+ "_" +std::to_string(rand()%100)+".dot";
+    LOGINFO("Transact cp is in cp\n{} and storing in {}\n\n\n", icp_ctx->to_string(), filename);
+    icp_ctx->to_string_dot(filename);
+#endif
 }
 
 void IndexWBCache::link_buf(IndexBufferPtr const& up_buf, IndexBufferPtr const& down_buf, bool is_sibling_link,
@@ -285,7 +293,7 @@ void IndexWBCache::link_buf(IndexBufferPtr const& up_buf, IndexBufferPtr const& 
     if (up_buf->m_created_cp_id == icp_ctx->id()) {
         real_up_buf = up_buf->m_up_buffer;
         HS_DBG_ASSERT(real_up_buf,
-                      "Up buffer is newly created in this cp, but it doesn't have its own up_buffer, its not expected");
+                "Up buffer is newly created in this cp, but it doesn't have its own up_buffer, its not expected");
     }
 
     // Condition 2: If down_buf already has an up_buf, we can override it newly passed up_buf it only in case of
@@ -317,7 +325,7 @@ void IndexWBCache::link_buf(IndexBufferPtr const& up_buf, IndexBufferPtr const& 
     // This link is acheived by unconditionally changing the link in case of is_sibling=true to passed up_buf, but
     // conditionally do it in case of parent link where it already has a link don't override it.
     if (down_buf->m_up_buffer != nullptr) {
-        HS_DBG_ASSERT_LT(down_buf->m_up_buffer->m_created_cp_id, icp_ctx->id(),
+            HS_DBG_ASSERT_LT(down_buf->m_up_buffer->m_created_cp_id, icp_ctx->id(),
                          "down_buf=[{}] up_buffer=[{}] should never have been created on same cp",
                          down_buf->to_string(), down_buf->m_up_buffer->to_string());
 
@@ -326,6 +334,8 @@ void IndexWBCache::link_buf(IndexBufferPtr const& up_buf, IndexBufferPtr const& 
             real_up_buf = down_buf->m_up_buffer;
             HS_DBG_ASSERT(!real_up_buf->m_wait_for_down_buffers.testz(),
                           "Up buffer waiting count is zero, whereas down buf is already linked to up buf");
+            if(!(real_up_buf->m_dirtied_cp_id == down_buf->m_dirtied_cp_id) || (real_up_buf->is_meta_buf()))
+            { icp_ctx->to_string_dot ("crash5.dot"); }
             HS_DBG_ASSERT((real_up_buf->m_dirtied_cp_id == down_buf->m_dirtied_cp_id) || (real_up_buf->is_meta_buf()),
                           "Up buffer is not modified by current cp, but down buffer is linked to it");
 #ifndef NDEBUG
@@ -391,9 +401,31 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                 // this blk again, so that it will not be reallocated for other node during repair.
                 m_vdev->commit_blk(buf->m_blkid);
                 new_bufs.push_back(buf);
+            }else{
+               // In th recovery path, an uncommited node has a set of commited down bufs and also a set of uncommited down bufs. In repair a node must wait ONLY for nodes that are the part of recovery path. So here, we corrected the down wait of up bufs for unreached path
+                if(was_node_committed(buf) && !was_node_committed(buf->m_up_buffer)){
+                    LOGINFO(" \n\t\t Mehdi: buf {} was commited but up_buffer {} was not commited, hence discarded ", voidptr_cast(buf.get()), voidptr_cast(buf->m_up_buffer.get()));
+                    buf->m_up_buffer->m_wait_for_down_buffers.decrement(1);
+                }
             }
         }
     }
+
+#if 0
+  // I keep it here to see the down_waits are set correctly for up buffers
+    // list of all recovered bufs
+        std::string log = "\n\n\t\t\t\t\t recovered bufs (#of bufs = " + std::to_string(bufs.size()) +" ) \n";
+        for (auto const& [_, buf] : bufs) {
+            fmt::format_to(std::back_inserter(log), "{}\n", buf->to_string());
+        }
+        LOGINFO("{}",log);
+    // list of new_bufs
+        std::string log2 = "\n\n\t\t\t\t\t new_bufs (#of new bufs " +  std::to_string(new_bufs.size()) + " )\n";
+        for (auto const& buf : new_bufs) {
+            fmt::format_to(std::back_inserter(log2), "{}\n", buf->to_string());
+        }
+        LOGINFO("{}", log2);
+#endif
 
     // Second iteration we start from the lowest levels (which are all new_bufs) and check if up_buffers need to be
     // repaired. All L1 buffers are not needed to repair, because they are sibling nodes and so we pass false in
@@ -401,7 +433,6 @@ void IndexWBCache::recover(sisl::byte_view sb) {
     for (auto const& buf : new_bufs) {
         process_up_buf(buf->m_up_buffer, false /* do_repair */);
     }
-
     m_vdev->recovery_completed();
 }
 
@@ -411,11 +442,19 @@ void IndexWBCache::process_up_buf(IndexBufferPtr const& buf, bool do_repair) {
         // repair
         buf->m_dirtied_cp_id = -1;
     }
-
     if (!buf->m_wait_for_down_buffers.decrement_testz()) { return; }
 
     // One of the down buffer indicated that it has to repair our node, so we issue a repair
-    if (buf->m_dirtied_cp_id == -1) { index_service().repair_index_node(buf->m_index_ordinal, buf); }
+    if (buf->m_dirtied_cp_id == -1) {
+        if(buf->m_up_buffer->is_meta_buf()){
+            LOGTRACEMOD(wbcache, "repair_index_root for buf {}", buf->to_string());
+            index_service().repair_index_root(buf->m_index_ordinal, buf);
+        }else
+        {
+            LOGTRACEMOD(wbcache, "repair_index_node for buf {}", buf->to_string());
+            index_service().repair_index_node(buf->m_index_ordinal, buf);
+        }
+    }
 
     // If there is an up buffer on next level, we need to process them and ask them to repair in case they were not
     // written as part of this CP.
@@ -464,6 +503,10 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
         }
         return folly::makeFuture< bool >(true); // nothing to flush
     }
+    // if is_crashed don't do anything
+        if (hs()->crash_simulator().is_crashed()) {
+            return folly::makeFuture< bool >(true); // nothing to flush
+        }
 
     // First thing is to flush the new_blks created as part of the CP.
     auto const& journal_buf = cp_ctx->journal_buf();
@@ -492,13 +535,24 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
 }
 
 void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const& buf, bool part_of_batch) {
+#ifdef _PRERELEASE
+    if (hs()->crash_simulator().is_crashed()) {
+        LOGINFOMOD(wbcache, "crash simulation is ongoing");
+        return;
+    }
+#endif
+
     LOGTRACEMOD(wbcache, "cp {} buf {}", cp_ctx->id(), buf->to_string());
     buf->set_state(index_buf_state_t::FLUSHING);
 
 #ifdef _PRERELEASE
     if (buf->m_crash_flag_on) {
-        LOGINFOMOD(wbcache, "Simulating crash while writing buffer {}", buf->to_string());
+        std::string filename = "crash_buf_"+std::to_string(cp_ctx->id())+".dot";
+        LOGINFOMOD(wbcache, "Simulating crash while writing buffer {},  stored in file {}", buf->to_string(), filename);
+        cp_ctx->to_string_dot(filename);
         hs()->crash_simulator().crash();
+        cp_ctx->complete(true);
+        return;
     }
 #endif
 
@@ -526,6 +580,11 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
 }
 
 void IndexWBCache::process_write_completion(IndexCPContext* cp_ctx, IndexBufferPtr const& buf) {
+    if (hs()->crash_simulator().is_crashed()) {
+        LOGINFOMOD(wbcache, "process_write_completion don't do anything for {}", buf->to_string());
+        cp_ctx->complete(true);
+        return;
+    }
     LOGTRACEMOD(wbcache, "cp {} buf {}", cp_ctx->id(), buf->to_string());
     resource_mgr().dec_dirty_buf_size(m_node_size);
     auto [next_buf, has_more] = on_buf_flush_done(cp_ctx, buf);
