@@ -539,6 +539,7 @@ static void populate_vdev_info(const vdev_parameters& vparam, uint32_t vdev_id,
     out_info->alloc_type = s_cast< uint8_t >(vparam.alloc_type);
     out_info->chunk_sel_type = s_cast< uint8_t >(vparam.chunk_sel_type);
     out_info->size_type = vparam.size_type;
+    out_info->use_slab_allocator = vparam.use_slab_allocator ? 1 : 0;
     out_info->compute_checksum();
 }
 

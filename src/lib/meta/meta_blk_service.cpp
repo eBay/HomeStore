@@ -465,7 +465,9 @@ void MetaBlkService::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const uint
     size_t write_size = ovf_hdr->h.context_sz;
     uint8_t* context_data_aligned{nullptr};
     if (!hs_utils::is_ptr_aligned(write_context_data, align_sz) || !hs_utils::mod_aligned_sz(write_size, align_sz)) {
-        HS_LOG_EVERY_N(WARN, metablk, 50, "[type={}] Unaligned address found for input context_data, ptr {}, size {}, align {} ", type, (void *)write_context_data, write_size, align_sz);
+        HS_LOG_EVERY_N(WARN, metablk, 50,
+                       "[type={}] Unaligned address found for input context_data, ptr {}, size {}, align {} ", type,
+                       (void*)write_context_data, write_size, align_sz);
         const size_t aligned_write_size = uint64_cast(sisl::round_up(write_size, align_sz));
         context_data_aligned = hs_utils::iobuf_alloc(aligned_write_size, sisl::buftag::metablk, align_size());
         std::memcpy(context_data_aligned, write_context_data, write_size);
@@ -507,7 +509,9 @@ void MetaBlkService::write_ovf_blk_to_disk(meta_blk_ovf_hdr* ovf_hdr, const uint
         }
 
         // check if the buffer is aligned
-        HS_REL_ASSERT(hs_utils::is_ptr_aligned(cur_ptr, align_sz) || hs_utils::mod_aligned_sz(cur_size, align_sz), "Unaligned address found for input context_data, ptr {}, size {}, align {} ", (void *)cur_ptr, cur_size, align_sz);
+        HS_REL_ASSERT(hs_utils::is_ptr_aligned(cur_ptr, align_sz) || hs_utils::mod_aligned_sz(cur_size, align_sz),
+                      "Unaligned address found for input context_data, ptr {}, size {}, align {} ", (void*)cur_ptr,
+                      cur_size, align_sz);
         auto error = m_sb_vdev->sync_write(r_cast< const char* >(cur_ptr), cur_size, data_bid[i]);
         if (error.value()) {
             // the offset and buffer length is printed in the error messages of iomgr.
@@ -611,8 +615,9 @@ void MetaBlkService::write_meta_blk_ovf(BlkId& out_obid, const uint8_t* context_
     context_data_blkids.clear();
     alloc_meta_blks(sisl::round_up(sz, block_size()), context_data_blkids);
 
-    HS_LOG(DEBUG, metablk, "Context data size {}, rounded up to {}, block_size {},  allocated {} blkIDs, mstore used size: {}", sz,  sisl::round_up(sz, block_size()), block_size(), context_data_blkids.size(),
-           m_sb_vdev->used_size());
+    HS_LOG(DEBUG, metablk,
+           "Context data size {}, rounded up to {}, block_size {},  allocated {} blkIDs, mstore used size: {}", sz,
+           sisl::round_up(sz, block_size()), block_size(), context_data_blkids.size(), m_sb_vdev->used_size());
 
     // return the 1st ovf header blk id to caller;
     alloc_meta_blk(out_obid);

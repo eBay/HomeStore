@@ -99,6 +99,7 @@ protected:
     blk_allocator_type_t m_allocator_type;
     chunk_selector_type_t m_chunk_selector_type;
     bool m_auto_recovery;
+    bool m_use_slab_in_blk_allocator;
 
 public:
     VirtualDev(DeviceManager& dmgr, const vdev_info& vinfo, vdev_event_cb_t event_cb, bool is_auto_recovery,
