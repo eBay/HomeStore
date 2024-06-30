@@ -130,7 +130,7 @@ ulong HomeRaftLogStore::next_slot() const {
 }
 
 ulong HomeRaftLogStore::last_index() const {
-    uint64_t last_index = m_log_store->get_contiguous_completed_seq_num(m_last_durable_lsn);
+    uint64_t last_index = to_repl_lsn(m_log_store->get_contiguous_completed_seq_num(m_last_durable_lsn));
     return last_index;
 }
 
