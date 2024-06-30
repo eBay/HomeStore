@@ -29,6 +29,7 @@
 #include <sisl/fds/buffer.hpp>
 #include <sisl/fds/stream_tracker.hpp>
 #include <folly/Synchronized.h>
+#include <folly/futures/Future.h>
 #include <nlohmann/json.hpp>
 
 #include <homestore/logstore/log_store_internal.hpp>
@@ -368,7 +369,7 @@ private:
     // Sync flush sections
     std::atomic< logstore_seq_num_t > m_sync_flush_waiter_lsn{invalid_lsn()};
     std::mutex m_sync_flush_mtx;
-    std::condition_variable m_sync_flush_cv;
+    folly::Promise< folly::Unit > m_sync_flush_promise;
 
     std::vector< seq_ld_key_pair > m_truncation_barriers; // List of truncation barriers
     truncation_info m_safe_truncation_boundary;
