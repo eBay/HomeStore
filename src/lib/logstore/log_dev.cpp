@@ -134,8 +134,8 @@ void LogDev::stop() {
     m_log_records = nullptr;
     m_logdev_meta.reset();
     m_log_idx.store(0);
-    m_pending_flush_size.store(0);
-    m_is_flushing.store(false);
+    m_pending_flush_size.store(0, std::memory_order_release);
+    m_is_flushing.store(false, std::memory_order_release);
     m_last_flush_idx = -1;
     m_last_truncate_idx = -1;
     m_last_crc = INVALID_CRC32_VALUE;
@@ -257,14 +257,14 @@ void LogDev::assert_next_pages(log_stream_reader& lstream) {
 
 int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_num_t seq_num, const sisl::io_blob& data,
                              void* cb_context, bool flush_wait) {
-    auto prev_size = m_pending_flush_size.fetch_add(data.size(), std::memory_order_relaxed);
+    auto prev_size = m_pending_flush_size.fetch_add(data.size(), std::memory_order_acq_rel);
     const auto idx = m_log_idx.fetch_add(1, std::memory_order_acq_rel);
     auto threshold_size = LogDev::flush_data_threshold_size();
     m_log_records->create(idx, store_id, seq_num, data, cb_context);
 
     if (flush_wait ||
         ((prev_size < threshold_size && ((prev_size + data.size()) >= threshold_size) &&
-          !m_is_flushing.load(std::memory_order_relaxed)))) {
+          !m_is_flushing.load(std::memory_order_acquire)))) {
         flush_if_needed(flush_wait ? 1 : -1);
     }
     return idx;
@@ -390,7 +390,7 @@ bool LogDev::flush_if_needed(int64_t threshold_size) {
     if (threshold_size < 0) { threshold_size = LogDev::flush_data_threshold_size(); }
 
     const auto elapsed_time = get_elapsed_time_us(m_last_flush_time);
-    auto const pending_sz = m_pending_flush_size.load(std::memory_order_relaxed);
+    auto const pending_sz = m_pending_flush_size.load(std::memory_order_acquire);
     bool const flush_by_size = (pending_sz >= threshold_size);
     bool const flush_by_time =
         !flush_by_size && pending_sz && (elapsed_time > HS_DYNAMIC_CONFIG(logstore.max_time_between_flush_us));
@@ -428,7 +428,7 @@ bool LogDev::flush_if_needed(int64_t threshold_size) {
             unlock_flush(false);
             return false;
         }
-        auto sz = m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
+        auto sz = m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_acq_rel);
         HS_REL_ASSERT_GE((sz - lg->actual_data_size()), 0, "size {} lg size{}", sz, lg->actual_data_size());
 
         off_t offset = m_vdev_jd->alloc_next_append_blk(lg->header()->total_size());

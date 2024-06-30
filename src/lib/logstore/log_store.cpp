@@ -187,10 +187,7 @@ void HomeLogStore::on_write_completion(logstore_req* req, const logdev_key& ld_k
     auto lsn = req->seq_num;
     (req->cb) ? req->cb(req, ld_key) : m_comp_cb(req, ld_key);
 
-    if (m_sync_flush_waiter_lsn.load() == lsn) {
-        // Sync flush is waiting for this lsn to be completed, wake up the sync flush cv
-        m_sync_flush_cv.notify_one();
-    }
+    if (m_sync_flush_waiter_lsn.load() <= lsn && !m_sync_flush_promise.isFulfilled()) m_sync_flush_promise.setValue();
 }
 
 void HomeLogStore::on_read_completion(logstore_req* req, const logdev_key& ld_key) {
@@ -412,6 +409,7 @@ void HomeLogStore::flush_sync(logstore_seq_num_t upto_seq_num) {
 
         // Step 1: Mark the waiter lsn to the seqnum we wanted to wait for. The completion of every lsn checks
         // for this and if this lsn is completed, will make a callback which signals the cv.
+        m_sync_flush_promise = std::move(folly::Promise< folly::Unit >());
         m_sync_flush_waiter_lsn.store(upto_seq_num);
 
         // Step 2: After marking this lsn, we again do a check, to avoid a race where completion checked for no lsn
@@ -422,7 +420,7 @@ void HomeLogStore::flush_sync(logstore_seq_num_t upto_seq_num) {
         m_logdev->flush_if_needed(1);
 
         // Step 4: Wait for completion
-        m_sync_flush_cv.wait(lk, [this, upto_seq_num] { return !m_records.status(upto_seq_num).is_active; });
+        m_sync_flush_promise.getFuture().get();
 
         // NOTE: We are not resetting the lsn because same seq number should never have 2 completions and thus not
         // doing it saves an atomic instruction
