@@ -125,14 +125,17 @@ logstore_seq_num_t HomeLogStore::append_async(const sisl::io_blob& b, void* cook
 
 log_buffer HomeLogStore::read_sync(logstore_seq_num_t seq_num) {
     // If seq_num has not been flushed yet, but issued, then we flush them before reading
-    auto const s = m_records.status(seq_num);
+    auto s = m_records.status(seq_num);
+    THIS_LOGSTORE_LOG(DEBUG, "read_sync seq_num {}, is_active {}, is_complete {}, is_hole {}, is_out_of_range {}", seq_num, s.is_active, s.is_completed, s.is_hole, s.is_out_of_range);
     if (s.is_out_of_range || s.is_hole) {
         // THIS_LOGSTORE_LOG(ERROR, "ld_key not valid {}", seq_num);
         throw std::out_of_range("key not valid");
     } else if (!s.is_completed) {
-        THIS_LOGSTORE_LOG(TRACE, "Reading lsn={}:{} before flushed, doing flush first", m_store_id, seq_num);
+        THIS_LOGSTORE_LOG(DEBUG, "Reading lsn={}:{} before flushed, doing flush first", m_store_id, seq_num);
         flush_sync(seq_num);
+        THIS_LOGSTORE_LOG(DEBUG, "After flushing, seq_num {}, is_active {}, is_complete {}, is_hole {}, is_out_of_range {}", seq_num, s.is_active, s.is_completed, s.is_hole, s.is_out_of_range);
     }
+    s = m_records.status(seq_num);
 
     const auto record = m_records.at(seq_num);
     const logdev_key ld_key = record.m_dev_key;
@@ -422,8 +425,18 @@ void HomeLogStore::flush_sync(logstore_seq_num_t upto_seq_num) {
         m_logdev->flush_if_needed(1);
 
         // Step 4: Wait for completion
-        m_sync_flush_cv.wait(lk, [this, upto_seq_num] { return !m_records.status(upto_seq_num).is_active; });
-
+	bool pred = false;
+	do {
+            pred = m_sync_flush_cv.wait_for(lk, std::chrono::milliseconds(10), [this, upto_seq_num] {
+			auto s =m_records.status(upto_seq_num);
+			THIS_LOGSTORE_LOG(DEBUG, "cv waitfor callback, seq_num {}, is_active {}, is_complete {}, is_hole {}, is_out_of_range {}", upto_seq_num, s.is_active, s.is_completed, s.is_hole, s.is_out_of_range);
+			return !m_records.status(upto_seq_num).is_active; });
+	    if (!pred) {
+                THIS_LOGSTORE_LOG(DEBUG, "pred is false, continue to wait");
+	    } else {
+		THIS_LOGSTORE_LOG(DEBUG, "pred is true, exiting cv");
+	    }
+	} while (!pred);
         // NOTE: We are not resetting the lsn because same seq number should never have 2 completions and thus not
         // doing it saves an atomic instruction
     }
