@@ -464,6 +464,7 @@ public:
      * @return :- no_error if there is no error. It doesn't throw any exception
      */
     std::error_condition write(const vol_interface_req_ptr& hb_req);
+    std::error_condition write_internal(const vol_interface_req_ptr& hb_req);
 
     /* Read from lba
      * @param hb_req :- it expects this request to be created
@@ -729,7 +730,7 @@ struct volume_req : indx_req {
         csum_t* j_csum = (csum_t*)mem;
 
         if (!is_unmap() && active_nlbas_written != nlbas()) {
-            VOL_ERROR_LOG(vol()->get_name(), "all lbas are not written. lba written {}, lba supposed to write{}",
+            VOL_ERROR_LOG(vol()->get_name(), "all lbas are not written. lba written {}, lba supposed to write: {}",
                           active_nlbas_written, nlbas());
         }
         for (lba_count_t i{0}; !is_unmap() && i < active_nlbas_written; ++i) {

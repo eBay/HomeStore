@@ -38,6 +38,8 @@ public:
     static sisl::byte_array make_byte_array(const uint64_t size, const bool is_aligned_needed, const sisl::buftag tag,
                                             const size_t alignment);
     static hs_uuid_t gen_system_uuid();
+    static uint16_t crc_zero(const size_t size);
+    static bool is_buf_zero(const uint8_t* buf, size_t size);
     static std::string encodeBase64(const uint8_t* first, std::size_t size);
     static std::string encodeBase64(const sisl::byte_view& b);
     template <typename T> static void decodeBase64(const std::string &encoded_data, T out);

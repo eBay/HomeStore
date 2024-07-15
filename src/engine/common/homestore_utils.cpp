@@ -18,6 +18,7 @@
 #include <boost/archive/iterators/base64_from_binary.hpp>
 #include <boost/archive/iterators/binary_from_base64.hpp>
 #include <boost/archive/iterators/transform_width.hpp>
+#include <isa-l/crc.h>
 
 namespace homestore {
 uint8_t* hs_utils::iobuf_alloc(const size_t size, const sisl::buftag tag, const size_t alignment) {
@@ -76,6 +77,42 @@ sisl::byte_array hs_utils::extract_byte_array(const sisl::byte_view& b, const bo
     return (is_aligned_needed) ? b.extract(alignment) : b.extract(0);
 };
 
+constexpr unsigned long long operator"" _KB(unsigned long long x) { return x * 1024; }
+
+constexpr std::array< size_t, 7 > predefined_sizes = {4_KB, 8_KB, 16_KB, 32_KB, 64_KB, 128_KB, 256_KB};
+
+// Function to initialize the CRC map with predefined sizes
+void initialize_crc_map(std::map< size_t, uint16_t >& crc_map) {
+    std::vector< uint8_t > zero_buf;
+    for (auto s : predefined_sizes) {
+        zero_buf.resize(s, 0); // Resize buffer to the required size, filling with zeros
+        crc_map[s] = crc16_t10dif(init_crc_16, zero_buf.data(), s);
+    }
+}
+
+uint16_t hs_utils::crc_zero(const size_t size) {
+    static std::map< size_t, uint16_t > crc_map;
+    static std::once_flag init_flag;
+
+    // Thread-safe initialization of the CRC map
+    std::call_once(init_flag, initialize_crc_map, std::ref(crc_map));
+
+    // Check if the size is already in the map
+    if (auto it = crc_map.find(size); it != crc_map.end()) { return it->second; }
+
+    std::vector< uint8_t > zero_buf(size, 0);
+    return crc16_t10dif(init_crc_16, zero_buf.data(), size);
+}
+
+bool hs_utils::is_buf_zero(const uint8_t* buf, size_t size) {
+    // TODO: subsample the buffer to detect zero request instead of working on the whole buffer to achieve constant
+    //  processing time for large buffer size requests. Needs to investigate the performance impact of this change
+    //  in end2end testing.
+    auto zero_crc = crc_zero(size);
+    const auto crc = crc16_t10dif(init_crc_16, buf, size);
+    return (crc == zero_crc) ? (buf[0] == 0 && !std::memcmp(buf, buf + 1, size - 1)) : false;
+}
+
 std::string hs_utils::encodeBase64(const uint8_t* first, std::size_t size) {
     using Base64FromBinary = boost::archive::iterators::base64_from_binary<
         boost::archive::iterators::transform_width< const char*, // sequence of chars
@@ -90,15 +127,12 @@ std::string hs_utils::encodeBase64(const uint8_t* first, std::size_t size) {
     return encoded.append(bytes_to_pad, '=');
 }
 
-std::string hs_utils::encodeBase64(const sisl::byte_view& b){
-    return encodeBase64(b.bytes(), b.size());
-}
+std::string hs_utils::encodeBase64(const sisl::byte_view& b) { return encodeBase64(b.bytes(), b.size()); }
 
-template <typename T>
-void hs_utils::decodeBase64(const std::string &encoded_data, T out)
-{
+template < typename T >
+void hs_utils::decodeBase64(const std::string& encoded_data, T out) {
     using BinaryFromBase64 = boost::archive::iterators::transform_width<
-        boost::archive::iterators::binary_from_base64<std::string::const_iterator>,
+        boost::archive::iterators::binary_from_base64< std::string::const_iterator >,
         8, // get a view of 8 bit
         6  // from a sequence of 6 bit
         >;
@@ -107,14 +141,13 @@ void hs_utils::decodeBase64(const std::string &encoded_data, T out)
     std::replace(begin(unpadded_data), end(unpadded_data), '=', 'A'); // A_64 == \0
 
     std::string decoded_data{BinaryFromBase64{begin(unpadded_data)},
-                        BinaryFromBase64{begin(unpadded_data) + unpadded_data.length()}};
+                             BinaryFromBase64{begin(unpadded_data) + unpadded_data.length()}};
 
     decoded_data.erase(end(decoded_data) - bytes_to_pad, end(decoded_data));
     std::copy(begin(decoded_data), end(decoded_data), out);
 }
 
-std::string hs_utils::decodeBase64(const std::string &encoded_data)
-{
+std::string hs_utils::decodeBase64(const std::string& encoded_data) {
     std::string rv;
     decodeBase64(encoded_data, std::back_inserter(rv));
     return rv;
