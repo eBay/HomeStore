@@ -1,10 +1,9 @@
-name: Homestore Merge Build
+name: Homestore 3.x Build
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - master
       - stable/v3.x
 
 jobs:
