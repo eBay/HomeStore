@@ -249,6 +249,11 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq, sisl::sg_list 
 
 void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
     auto const& incoming_buf = rpc_data->request_blob();
+    if (!incoming_buf.cbytes()) {
+        RD_LOGW("Data Channel: PushData received with empty buffer, ignoring this call");
+        rpc_data->send_response();
+        return;
+    }
     auto const fb_size =
         flatbuffers::ReadScalar< flatbuffers::uoffset_t >(incoming_buf.cbytes()) + sizeof(flatbuffers::uoffset_t);
     auto push_req = GetSizePrefixedPushDataRequest(incoming_buf.cbytes());
@@ -597,6 +602,11 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
 
 void RaftReplDev::on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
     auto const& incoming_buf = rpc_data->request_blob();
+    if (!incoming_buf.cbytes()) {
+        RD_LOGW("Data Channel: PushData received with empty buffer, ignoring this call");
+        rpc_data->send_response();
+        return;
+    }
     auto fetch_req = GetSizePrefixedFetchData(incoming_buf.cbytes());
 
     RD_LOGD("Data Channel: FetchData received: fetch_req.size={}", fetch_req->request()->entries()->size());

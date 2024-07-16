@@ -5,7 +5,7 @@ from conans import CMake
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "6.4.24"
+    version = "6.4.25"
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
     topics = ("ebay", "nublox")
@@ -30,7 +30,6 @@ class HomestoreConan(ConanFile):
                 'testing': 'epoll_mode',
                 'skip_testing': False,
             }
-
 
     generators = "cmake", "cmake_find_package"
     exports_sources = "cmake/*", "src/*", "CMakeLists.txt", "test_wrap.sh", "LICENSE"
