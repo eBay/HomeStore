@@ -176,10 +176,11 @@ void HomeLogStore::read_async(logstore_seq_num_t seq_num, void* cookie, const lo
 #endif
 
 void HomeLogStore::on_write_completion(logstore_req* req, const logdev_key& ld_key) {
+    std::unique_lock lk(m_sync_flush_mtx);
     // Upon completion, create the mapping between seq_num and log dev key
     m_records.update(req->seq_num, [&](logstore_record& rec) -> bool {
         rec.m_dev_key = ld_key;
-        // THIS_LOGSTORE_LOG(DEBUG, "Completed write of lsn {} logdev_key={}", req->seq_num, ld_key);
+        THIS_LOGSTORE_LOG(DEBUG, "Completed write of store lsn {} logdev_key={}", req->seq_num, ld_key);
         return true;
     });
     // assert(flush_ld_key.idx >= m_last_flush_ldkey.idx);
@@ -405,6 +406,7 @@ void HomeLogStore::flush_sync(logstore_seq_num_t upto_seq_num) {
     HS_DBG_ASSERT_EQ(LogDev::can_flush_in_this_thread(), false,
                      "Logstore flush sync cannot be called on same thread which could do logdev flush");
 
+    std::unique_lock lk(m_single_sync_flush_mtx);
     if (upto_seq_num == invalid_lsn()) { upto_seq_num = m_records.active_upto(); }
 
     // if we have flushed already, we are done

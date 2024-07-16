@@ -212,7 +212,7 @@ table Consensus {
     rpc_backoff_ms: uint32 = 250;
 
     // Frequency of Raft heartbeat
-    heartbeat_period_ms: uint32 = 250;
+    heartbeat_period_ms: uint32 = 500;
 
     // Re-election timeout low and high mark
     elect_to_low_ms: uint32 = 800;

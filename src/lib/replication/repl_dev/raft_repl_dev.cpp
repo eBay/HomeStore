@@ -148,13 +148,15 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
                                     repl_req_ptr_t rreq) {
     if (!rreq) { auto rreq = repl_req_ptr_t(new repl_req_ctx{}); }
 
-    auto const guard = m_stage.access();
-    if (auto const stage = *guard.get(); stage != repl_dev_stage_t::ACTIVE) {
-        RD_LOGW("Raft channel: Not ready to accept writes, stage={}", enum_name(stage));
-        handle_error(rreq,
-                     (stage == repl_dev_stage_t::INIT) ? ReplServiceError::SERVER_IS_JOINING
-                                                       : ReplServiceError::SERVER_IS_LEAVING);
-        return;
+    {
+        auto const guard = m_stage.access();
+        if (auto const stage = *guard.get(); stage != repl_dev_stage_t::ACTIVE) {
+            RD_LOGW("Raft channel: Not ready to accept writes, stage={}", enum_name(stage));
+            handle_error(rreq,
+                         (stage == repl_dev_stage_t::INIT) ? ReplServiceError::SERVER_IS_JOINING
+                                                           : ReplServiceError::SERVER_IS_LEAVING);
+            return;
+        }
     }
 
     rreq->init(repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
@@ -517,7 +519,7 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreq
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     if (rreqs.size() == 0) { return; }
 
-    std::vector<::flatbuffers::Offset< RequestEntry > > entries;
+    std::vector< ::flatbuffers::Offset< RequestEntry > > entries;
     entries.reserve(rreqs.size());
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();

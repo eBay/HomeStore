@@ -368,6 +368,7 @@ private:
     // Sync flush sections
     std::atomic< logstore_seq_num_t > m_sync_flush_waiter_lsn{invalid_lsn()};
     std::mutex m_sync_flush_mtx;
+    std::mutex m_single_sync_flush_mtx;
     std::condition_variable m_sync_flush_cv;
 
     std::vector< seq_ld_key_pair > m_truncation_barriers; // List of truncation barriers
