@@ -168,7 +168,8 @@ public:
                 }
             }
             for (auto const& dev : rdev_list[replica_num_]) {
-                dev_list_.emplace_back(dev, homestore::HSDevType::Data);
+                dev_list_.emplace_back(dev,
+                                       dev_list_.empty() ? homestore::HSDevType::Fast : homestore::HSDevType::Data);
             }
         }
 
