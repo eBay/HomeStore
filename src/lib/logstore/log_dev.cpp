@@ -262,6 +262,11 @@ int64_t LogDev::append_async(const logstore_id_t store_id, const logstore_seq_nu
     auto threshold_size = LogDev::flush_data_threshold_size();
     m_log_records->create(idx, store_id, seq_num, data, cb_context);
 
+    if (HS_DYNAMIC_CONFIG(logstore.flush_threshold_size) == 0) {
+        // This is set in tests to disable implicit flush. This will be removed in future.
+        return idx;
+    }
+
     if (flush_wait ||
         ((prev_size < threshold_size && ((prev_size + data.size()) >= threshold_size) &&
           !m_is_flushing.load(std::memory_order_relaxed)))) {

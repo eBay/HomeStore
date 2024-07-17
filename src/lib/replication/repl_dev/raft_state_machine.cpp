@@ -7,6 +7,8 @@
 #include "service/raft_repl_service.h"
 #include "repl_dev/raft_state_machine.h"
 #include "repl_dev/raft_repl_dev.h"
+#include <homestore/homestore.hpp>
+#include "common/homestore_config.hpp"
 
 SISL_LOGGING_DECL(replication)
 
@@ -187,11 +189,10 @@ raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params
     RD_LOGD("Raft channel: Received Commit message lsn {} store {} logdev {} size {}", lsn,
             m_rd.m_data_journal->logstore_id(), m_rd.m_data_journal->logdev_id(), params.data->size());
     repl_req_ptr_t rreq = lsn_to_req(lsn);
-    if (!rreq) { RD_LOGD("Raft channel got null rreq"); }
+    RD_DBG_ASSERT(rreq != nullptr, "Raft channel got null rreq");
     RD_LOGD("Raft channel: Received Commit message rreq=[{}]", rreq->to_compact_string());
     if (rreq->is_proposer()) {
         // This is the time to ensure flushing of journal happens in the proposer
-        if (m_rd.m_data_journal->last_durable_index() < uint64_cast(lsn)) { m_rd.m_data_journal->flush(); }
         rreq->add_state(repl_req_state_t::LOG_FLUSHED);
     }
 

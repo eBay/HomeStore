@@ -728,6 +728,10 @@ int main(int argc, char* argv[]) {
         s.consensus.leadership_expiry_ms = -1; // -1 means never expires;
         s.generic.repl_dev_cleanup_interval_sec = 0;
 
+        // Disable implicit flush and timer.
+        s.logstore.flush_threshold_size = 0;
+        s.logstore.flush_timer_frequency_us = 0;
+
         // only reset when user specified the value for test;
         if (SISL_OPTIONS.count("snapshot_distance")) {
             s.consensus.snapshot_freq_distance = SISL_OPTIONS["snapshot_distance"].as< uint32_t >();

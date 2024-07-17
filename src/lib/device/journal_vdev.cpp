@@ -284,7 +284,8 @@ off_t JournalVirtualDev::Descriptor::alloc_next_append_blk(size_t sz) {
     // update reserved size;
     m_reserved_sz += sz;
 
-    high_watermark_check();
+    // TODO enable after resource manager changes.
+    // high_watermark_check();
 
     // assert that returnning logical offset is in good range
     HS_DBG_ASSERT_LE(tail_off, m_end_offset);
