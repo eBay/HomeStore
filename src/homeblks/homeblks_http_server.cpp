@@ -155,12 +155,13 @@ void HomeBlksHttpServer::set_log_level(const Pistache::Rest::Request& request,
 
     response.send(Pistache::Http::Code::Ok, resp);
 }
-void HomeBlksHttpServer::get_utilization(const Pistache::Rest::Request& request, Pistache::Http::ResponseWriter response)
-{
-    const std::string vol_uuid = request.hasParam(":volumeUUID") ? request.param(":volumeUUID").as<std::string>():"";
+void HomeBlksHttpServer::get_utilization(const Pistache::Rest::Request& request,
+                                         Pistache::Http::ResponseWriter response) {
+    const std::string vol_uuid =
+        request.hasParam(":volumeUUID") ? request.param(":volumeUUID").as< std::string >() : "";
 
     VolumePtr vol = nullptr;
-    if (vol_uuid.length() != 0) {
+    if (vol_uuid.length()) {
         boost::uuids::string_generator gen;
         boost::uuids::uuid uuid = gen(vol_uuid);
         vol = VolInterface::get_instance()->lookup_volume(uuid);
@@ -170,10 +171,14 @@ void HomeBlksHttpServer::get_utilization(const Pistache::Rest::Request& request,
         }
     }
     nlohmann::json resp;
-    const auto total_data_size = VolInterface::get_instance()->get_system_capacity().initial_total_data_meta_size;
+    nlohmann::json partitions = nlohmann::json::array();
     for (auto [uuid, vol_used] : VolInterface::get_instance()->get_used_size(vol)) {
-        resp[boost::uuids::to_string(uuid)] = std::to_string(static_cast<double> (vol_used)/ total_data_size);
+        nlohmann::json partition;
+        partition["id"] = boost::uuids::to_string(uuid);
+        partition["usedCapacity"] = vol_used;
+        partitions.push_back(partition);
     }
+    resp["partitions"] = partitions;
     response.send(Pistache::Http::Code::Ok, resp.dump());
 }
 void HomeBlksHttpServer::get_log_level(const Pistache::Rest::Request& request,
