@@ -179,6 +179,7 @@ raft_buf_ptr_t RaftStateMachine::pre_commit_ext(nuraft::state_machine::ext_op_pa
 
     repl_req_ptr_t rreq = lsn_to_req(lsn);
     RD_LOGD("Raft channel: Precommit rreq=[{}]", rreq->to_compact_string());
+    // Fixme: Check return value of on_pre_commit
     m_rd.m_listener->on_pre_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq);
 
     return m_success_ptr;
@@ -195,7 +196,7 @@ raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params
         // This is the time to ensure flushing of journal happens in the proposer
         rreq->add_state(repl_req_state_t::LOG_FLUSHED);
     }
-
+    // Fixme: Check return value of handle_commit
     m_rd.handle_commit(rreq);
 
     return m_success_ptr;
@@ -204,6 +205,17 @@ raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params
 void RaftStateMachine::commit_config(const ulong log_idx, raft_cluster_config_ptr_t& new_conf) {
     RD_LOGD("Raft channel: Commit new cluster conf , log_idx = {}", log_idx);
     // TODO:add more logic here if necessary
+}
+
+void RaftStateMachine::rollback_ext(const nuraft::state_machine::ext_op_params& params) {
+    int64_t lsn = s_cast< int64_t >(params.log_idx);
+    RD_LOGD("Raft channel: Received rollback message lsn {}, store {}, logdev {}", lsn,
+            m_rd.m_data_journal->logstore_id(), m_rd.m_data_journal->logdev_id());
+    repl_req_ptr_t rreq = lsn_to_req(lsn);
+    RD_DBG_ASSERT(rreq != nullptr, "Raft channel got null rreq");
+    RD_LOGD("Raft channel: rollback rreq=[{}]", rreq->to_compact_string());
+    // Fixme: Check return value of on_rollback
+    m_rd.m_listener->on_rollback(rreq->lsn(), rreq->header(), rreq->key(), rreq);
 }
 
 void RaftStateMachine::iterate_repl_reqs(std::function< void(int64_t, repl_req_ptr_t rreq) > const& cb) {
