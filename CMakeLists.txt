@@ -11,12 +11,7 @@ include (cmake/Flags.cmake)
 set(CMAKE_CXX_STANDARD 20)
 enable_testing()
 
-if(EXISTS ${CMAKE_CURRENT_BINARY_DIR}/conanbuildinfo.cmake)
-    include(${CMAKE_CURRENT_BINARY_DIR}/conanbuildinfo.cmake)
-    conan_basic_setup(TARGETS)
-else ()
-    message(WARNING "Conan Build file does not exist, trying to build without!")
-endif ()
+include (cmake/test_mode.cmake)
 
 if (DEFINED CONAN_BUILD_COVERAGE)
   if (${CONAN_BUILD_COVERAGE})

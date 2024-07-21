@@ -14,5 +14,5 @@ target_sources(hs_common PRIVATE
     )
 target_link_libraries(hs_common ${COMMON_DEPS})
 
-set(FLATBUFFERS_FLATC_EXECUTABLE ${flatbuffers_LIB_DIRS}/../bin/flatc)
+set(FLATBUFFERS_FLATC_EXECUTABLE ${flatbuffers_INCLUDE_DIR}/../bin/flatc)
 settings_gen_cpp(${FLATBUFFERS_FLATC_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/generated/ hs_common homestore_config.fbs)
