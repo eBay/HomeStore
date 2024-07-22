@@ -390,6 +390,11 @@ bool LogDev::can_flush_in_this_thread() {
 // our threshold. If so, it first flushes whats accumulated so far and then add the pending flush size counter with
 // the new record size
 bool LogDev::flush_if_needed(int64_t threshold_size) {
+    {
+        std::unique_lock< std::mutex > lk{m_block_flush_q_mutex};
+        if (m_stopped) { return false; }
+    }
+
     // If after adding the record size, if we have enough to flush or if its been too much time before we actually
     // flushed, attempt to flush by setting the atomic bool variable.
     if (threshold_size < 0) { threshold_size = LogDev::flush_data_threshold_size(); }
