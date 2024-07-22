@@ -58,7 +58,7 @@ class HomestoreConan(ConanFile):
 
         self.requires("farmhash/cci.20190513@", transitive_headers=True)
         if self.settings.arch in ['x86', 'x86_64']:
-            self.requires("isa-l/2.30.0")
+            self.requires("isa-l/2.30.0", transitive_headers=True)
 
     def imports(self):
         self.copy(root_package="sisl", pattern="*", dst="bin/scripts/python/flip/", src="bindings/flip/python/", keep_path=False)
