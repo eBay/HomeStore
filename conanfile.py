@@ -60,7 +60,7 @@ class HomestoreConan(ConanFile):
         self.requires("farmhash/cci.20190513@")
         if self.settings.arch in ['x86', 'x86_64']:
             self.requires("isa-l/2.30.0")
-        self.requires("spdk/21.07.y")
+        self.requires("spdk/nbi.21.07.y")
 
     def build(self):
         cmake = CMake(self)
