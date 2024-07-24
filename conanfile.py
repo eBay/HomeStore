@@ -107,6 +107,9 @@ class HomestoreConan(ConanFile):
 
     def package_info(self):
         self.cpp_info.libs = ["homestore"]
+        if not self.settings.arch in ['x86', 'x86_64']:
+            self.cpp_info.defines.append("NO_ISAL")
+
         if self.options.sanitize:
             self.cpp_info.sharedlinkflags.append("-fsanitize=address")
             self.cpp_info.exelinkflags.append("-fsanitize=address")
