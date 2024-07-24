@@ -5,7 +5,7 @@ from conans import CMake
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "6.4.26"
+    version = "6.4.27"
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
     topics = ("ebay", "nublox")
@@ -60,7 +60,7 @@ class HomestoreConan(ConanFile):
         self.requires("farmhash/cci.20190513@")
         if self.settings.arch in ['x86', 'x86_64']:
             self.requires("isa-l/2.30.0")
-        self.requires("spdk/21.07.y")
+        self.requires("spdk/nbi.21.07.y")
 
     def build(self):
         cmake = CMake(self)
