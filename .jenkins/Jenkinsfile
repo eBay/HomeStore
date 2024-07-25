@@ -1,5 +1,5 @@
 pipeline {
-    agent { label 'sds-builder-2204' }
+    agent { label 'sds-builder-v5' }
 
     environment {
         ORG = 'sds'
@@ -21,7 +21,6 @@ pipeline {
             } }
             steps {
                 script {
-                    sh(script: "sed -Ei 's, version = .*\"([[:digit:]]+\\.[[:digit:]]+\\.[[:digit:]]+).*, version = \"\\1-${env.BUILD_NUMBER}\",' conanfile.py")
                     BUILD_MISSING = "--build missing"
                 }
             }
@@ -45,6 +44,7 @@ pipeline {
                     CONAN_CHANNEL = sh(script: "echo ${BRANCH_NAME} | sed -E 's,(\\w+-?\\d*)/.*,\\1,' | sed -E 's,-,_,' | tr -d '\n'", returnStdout: true)
                     ECR_PATH = "${ECR_URL}/${ORG}/${PROJECT}"
                     TAG = "${VER}@${CONAN_USER}/${CONAN_CHANNEL}"
+                    CONAN_FLAGS="--name ${PROJECT} --user ${CONAN_USER} --channel ${CONAN_CHANNEL}"
                     slackSend color: '#0063D1', channel: '#sds-ci', message: "*${PROJECT}/${TAG}* is building: ${BUILD_URL}"
                     env.pkg_version = "${PROJECT}/${TAG}"
                 }
@@ -64,10 +64,10 @@ pipeline {
             steps {
                  sh "hostname ; \
                     echo $NODE_NAME ; \
-                    conan create ${BUILD_MISSING} -pr debug -o ${PROJECT}:sanitize=True . ${PROJECT}/${TAG} ; \
-                    conan create ${BUILD_MISSING} -pr debug . ${PROJECT}/${TAG} ; \
-                    conan create ${BUILD_MISSING} -pr test -o sisl:malloc_impl=tcmalloc . ${PROJECT}/${TAG} ; \
-                    conan create ${BUILD_MISSING} -pr test -o sisl:prerelease=True -o sisl:malloc_impl=tcmalloc . ${PROJECT}/${TAG} ; \
+                    conan create ${BUILD_MISSING} -s:h build_type=Debug -o ${PROJECT}/*:sanitize=True ${CONAN_FLAGS} . ; \
+                    conan create ${BUILD_MISSING} -s:h build_type=Debug ${CONAN_FLAGS} . ; \
+                    conan create ${BUILD_MISSING} -s:h build_type=RelWithDebInfo -o sisl/*:malloc_impl=tcmalloc ${CONAN_FLAGS} . ; \
+                    conan create ${BUILD_MISSING} -s:h build_type=RelWithDebInfo -o sisl/*:prerelease=True -o sisl/*:malloc_impl=tcmalloc ${CONAN_FLAGS} . ; \
                     "
             }
              post {
@@ -80,8 +80,9 @@ pipeline {
                 expression { !(env.BRANCH_NAME =~ /PR-/) }
             }
             steps {
-                sh "conan user -r ebay-local -p ${ARTIFACTORY_PASS} _service_sds"
-                sh "conan upload ${PROJECT}/${TAG} -c --all -r ebay-local"
+                sh "conan remote login -p ${ARTIFACTORY_PASS} ebay-local _service_sds"
+                sh "conan graph info ./ | grep 'ref: ' | awk '{print \$2}'  | sort | uniq | grep -v ${PROJECT} | grep -v '#' | while read pkg; do conan upload -r ebay-local -c \"\${pkg}\"; done"
+                sh "conan upload ${PROJECT}/${TAG} -c -r ebay-local"
             }
         }
         stage("Downstream Build") {

@@ -9,7 +9,7 @@ required_conan_version = ">=1.60.0"
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "6.4.29"
+    version = "6.4.30"
 
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
@@ -52,9 +52,9 @@ class HomestoreConan(ConanFile):
         self.test_requires("gtest/1.14.0")
 
     def requirements(self):
-        self.requires("iomgr/[~11.3, include_prerelease=True]@oss/master", transitive_headers=True)
-        self.requires("sisl/[~12.2, include_prerelease=True]@oss/master", transitive_headers=True)
-        self.requires("nuraft_mesg/[^3.4, include_prerelease=True]@oss/main", transitive_headers=True)
+        self.requires("iomgr/[^11.3]@oss/master", transitive_headers=True)
+        self.requires("sisl/[^12.2]@oss/master", transitive_headers=True)
+        self.requires("nuraft_mesg/[^3.4]@oss/main", transitive_headers=True)
 
         self.requires("farmhash/cci.20190513@", transitive_headers=True)
         if self.settings.arch in ['x86', 'x86_64']:
