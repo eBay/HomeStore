@@ -276,7 +276,7 @@ void IndexWBCache::link_buf(IndexBufferPtr const& up_buf, IndexBufferPtr const& 
     // to link it with up_buffer's up_buffer. In other words, there should never a link between down and up buffers
     // created in current generation (cp). In real terms, it means all new buffers can be flushed independently to
     // each other and dependency is needed only for the buffers created in previous cps.
-    if ((down_buf->m_created_cp_id == icp_ctx->id()) && (up_buf->m_created_cp_id == icp_ctx->id())) {
+    if (up_buf->m_created_cp_id == icp_ctx->id()) {
         real_up_buf = up_buf->m_up_buffer;
         HS_DBG_ASSERT(real_up_buf,
                       "Up buffer is newly created in this cp, but it doesn't have its own up_buffer, its not expected");
