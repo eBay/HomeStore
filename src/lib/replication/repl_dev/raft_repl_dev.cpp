@@ -250,12 +250,14 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq, sisl::sg_list 
 }
 
 void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
+    auto const push_data_rcv_time = Clock::now();
     auto const& incoming_buf = rpc_data->request_blob();
     if (!incoming_buf.cbytes()) {
         RD_LOGW("Data Channel: PushData received with empty buffer, ignoring this call");
         rpc_data->send_response();
         return;
     }
+
     auto const fb_size =
         flatbuffers::ReadScalar< flatbuffers::uoffset_t >(incoming_buf.cbytes()) + sizeof(flatbuffers::uoffset_t);
     auto push_req = GetSizePrefixedPushDataRequest(incoming_buf.cbytes());
@@ -295,7 +297,6 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
     COUNTER_INCREMENT(m_metrics, total_write_cnt, 1);
     COUNTER_INCREMENT(m_metrics, outstanding_data_write_cnt, 1);
 
-    auto const push_data_rcv_time = Clock::now();
     // Schedule a write and upon completion, mark the data as written.
     data_service()
         .async_write(r_cast< const char* >(rreq->data()), push_req->data_size(), rreq->local_blkid())
@@ -320,10 +321,10 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
                 auto const write_num_pieces = rreq->local_blkid().num_pieces();
 
                 HISTOGRAM_OBSERVE(m_metrics, rreq_pieces_per_write, write_num_pieces);
-                HISTOGRAM_OBSERVE(m_metrics, rreq_data_write_latency_us, data_write_latency);
+                HISTOGRAM_OBSERVE(m_metrics, rreq_push_data_latency_us, data_write_latency);
                 HISTOGRAM_OBSERVE(m_metrics, rreq_total_data_write_latency_us, total_data_write_latency);
 
-                RD_LOGI("Data Channel: Data write completed for rreq=[{}], time_diff_data_log_us={}, "
+                RD_LOGD("Data Channel: Data write completed for rreq=[{}], time_diff_data_log_us={}, "
                         "data_write_latency_us={}, total_data_write_latency_us(rreq creation to write complete)={}, "
                         "local_blkid.num_pieces={}",
                         rreq->to_compact_string(), data_log_diff_us, data_write_latency, total_data_write_latency,
@@ -730,7 +731,7 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
                     rreq->add_state(repl_req_state_t::DATA_WRITTEN);
                     rreq->m_data_written_promise.setValue();
 
-                    RD_LOGI("Data Channel: Data Write completed rreq=[{}], data_write_latency_us={}, "
+                    RD_LOGD("Data Channel: Data Write completed rreq=[{}], data_write_latency_us={}, "
                             "total_write_latency_us={}, write_num_pieces={}",
                             rreq->to_compact_string(), data_write_latency, total_data_write_latency, write_num_pieces);
                 });
