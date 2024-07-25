@@ -13,9 +13,7 @@ find_package(NuraftMesg QUIET REQUIRED)
 list(APPEND COMMON_DEPS
     iomgr::iomgr
     farmhash::farmhash
-    -Wl,--whole-archive
-    NuraftMesg::proto
-    -Wl,--no-whole-archive
+    nuraft_mesg::proto
     nuraft::nuraft
     sisl::sisl
 )

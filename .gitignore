@@ -104,5 +104,6 @@ cmake-*/**
 
 # Visual Studio
 CMakeSettings.json
+CMakeUserPresets.json
 .vs/**
 .cache

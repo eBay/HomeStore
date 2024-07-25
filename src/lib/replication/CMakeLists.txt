@@ -1,5 +1,3 @@
-include (${CMAKE_SOURCE_DIR}/cmake/test_mode.cmake)
-
 include_directories (BEFORE ..)
 include_directories (BEFORE .)
 
@@ -24,6 +22,6 @@ target_sources(hs_replication PRIVATE
     )
 target_link_libraries(hs_replication PRIVATE ${COMMON_DEPS} hs_common hs_replication_fb)
 
-#set(FLATBUFFERS_FLATC_EXECUTABLE ${flatbuffers_LIB_DIRS}/../bin/flatc)
+#set(FLATBUFFERS_FLATC_EXECUTABLE ${flatbuffers_INCLUDE_DIR}/../bin/flatc)
 #flatbuffer_gen_cpp(${FLATBUFFERS_FLATC_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/generated/ hs_replication rpc/push_data_rpc.fbs rpc/fetch_data_rpc.fbs)
 
