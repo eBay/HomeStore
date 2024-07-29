@@ -69,14 +69,13 @@ class HomestoreConan(ConanFile):
     def generate(self):
         # This generates "conan_toolchain.cmake" in self.generators_folder
         tc = CMakeToolchain(self)
-        if not self.conf.get("tools.build:skip_test", default=False):
-            tc.variables["BUILD_TESTING"] = "ON"
+        if self.options.testing != "off":
+            tc.variables["TEST_TARGET"] = self.options.testing
         tc.variables["CONAN_CMAKE_SILENT_OUTPUT"] = "ON"
         tc.variables['CMAKE_EXPORT_COMPILE_COMMANDS'] = 'ON'
         tc.variables["CTEST_OUTPUT_ON_FAILURE"] = "ON"
         tc.variables["MEMORY_SANITIZER_ON"] = "OFF"
         tc.variables["BUILD_COVERAGE"] = "OFF"
-        tc.variables["TEST_TARGET"] = self.options.testing
         if self.settings.build_type == "Debug":
             if self.options.get_safe("coverage"):
                 tc.variables['BUILD_COVERAGE'] = 'ON'
