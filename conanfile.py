@@ -84,8 +84,6 @@ class HomestoreConan(ConanFile):
             self.cpp.package.exelinkflags.append("-fsanitize=address")
             self.cpp.package.sharedlinkflags.append("-fsanitize=undefined")
             self.cpp.package.exelinkflags.append("-fsanitize=undefined")
-        if self.settings.os == "Linux":
-            self.cpp.package.system_libs.append("aio")
 
     def generate(self):
         # This generates "conan_toolchain.cmake" in self.generators_folder
