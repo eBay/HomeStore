@@ -79,12 +79,6 @@ class HomestoreConan(ConanFile):
         if not self.settings.arch in ['x86', 'x86_64']:
             self.cpp.package.defines.append("NO_ISAL")
 
-        if self.options.sanitize:
-            self.cpp.package.sharedlinkflags.append("-fsanitize=address")
-            self.cpp.package.exelinkflags.append("-fsanitize=address")
-            self.cpp.package.sharedlinkflags.append("-fsanitize=undefined")
-            self.cpp.package.exelinkflags.append("-fsanitize=undefined")
-
     def generate(self):
         # This generates "conan_toolchain.cmake" in self.generators_folder
         tc = CMakeToolchain(self)
@@ -122,3 +116,12 @@ class HomestoreConan(ConanFile):
         copy(self, "*.so", self.build_folder, join(self.package_folder, "lib"), keep_path=False)
         copy(self, "*.dylib", self.build_folder, join(self.package_folder, "lib"), keep_path=False)
         copy(self, "*.dll", self.build_folder, join(self.package_folder, "lib"), keep_path=False)
+
+    def package_info(self):
+        if self.options.sanitize:
+            self.cpp_info.sharedlinkflags.append("-fsanitize=address")
+            self.cpp_info.exelinkflags.append("-fsanitize=address")
+            self.cpp_info.sharedlinkflags.append("-fsanitize=undefined")
+            self.cpp_info.exelinkflags.append("-fsanitize=undefined")
+        if self.settings.os == "Linux":
+            self.cpp_info.system_libs.append("aio")
