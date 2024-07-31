@@ -51,8 +51,8 @@ private:
     enum class state_t : uint8_t { RECOVERING, ACTIVE };
 
     state_t m_state{state_t::RECOVERING};
-    std::unordered_set< blk_num_t > m_marked_blks; // Keep track of all blks which are marked as allocated
-    std::mutex m_mark_blk_mtx;                     // Mutex used while removing marked_blks from blk_q
+    std::unordered_set< blk_num_t > m_reserved_blks; // Keep track of all blks which are reserved as allocated
+    std::mutex m_reserve_blk_mtx;                    // Mutex used while removing marked_blks from blk_q
     folly::MPMCQueue< blk_num_t > m_free_blk_q;
 };
 } // namespace homestore

@@ -201,6 +201,9 @@ public:
     }
 
     bool has_room_for_put(btree_put_type put_type, uint32_t key_size, uint32_t value_size) const override {
+#ifdef _PRERELEASE
+        // return (this->total_entries() <= 3);
+#endif
         return ((put_type == btree_put_type::UPSERT) || (put_type == btree_put_type::INSERT))
             ? (get_available_entries() > 0)
             : true;
@@ -214,7 +217,7 @@ public:
                                (this->is_leaf() ? "LEAF" : "INTERIOR"), snext);
         if (!this->is_leaf() && (this->has_valid_edge())) {
             auto sedge = this->has_valid_edge() ? "edge:" + std::to_string(this->edge_info().m_bnodeid) + "." +
-                                                      std::to_string(this->edge_info().m_link_version)
+                    std::to_string(this->edge_info().m_link_version)
                                                 : "";
             fmt::format_to(std::back_inserter(str), "{}", sedge);
         }
@@ -229,71 +232,71 @@ public:
 
     std::string to_string_keys(bool print_friendly = false) const override {
         // FIXME: Implement this, key may not be a unit32_t
-//        return "";
-//#if 0
-            std::string delimiter = print_friendly ? "\n" : "\t";
-            std::string snext = this->next_bnode() == empty_bnodeid ? "" : fmt::format("next_node={}", this->next_bnode());
-            auto str = fmt::format("{}{}.{} level:{} nEntries={} {} {} node_gen={} ",
-                                print_friendly ? "------------------------------------------------------------\n" : "",
-                                this->node_id(), this->link_version(), this->level(), this->total_entries(),
-                                (this->is_leaf() ? "LEAF" : "INTERIOR"), snext, this->node_gen());
-            if (!this->is_leaf() && (this->has_valid_edge())) {
-                fmt::format_to(std::back_inserter(str), "edge_id={}.{}", this->edge_info().m_bnodeid,
-                            this->edge_info().m_link_version);
-            }
-            if (this->total_entries() == 0) {
-                fmt::format_to(std::back_inserter(str), " [EMPTY] ");
-                return str;
-            }
-            if (!this->is_leaf()) {
-                fmt::format_to(std::back_inserter(str), " [");
-                for (uint32_t i{0}; i < this->total_entries(); ++i) {
-                    uint32_t cur_key = BtreeNode::get_nth_key< K >(i, false).key();
-                    BtreeLinkInfo child_info;
-                    get_nth_value(i, &child_info, false /* copy */);
-                    fmt::format_to(std::back_inserter(str), "{}.{} {}", cur_key, child_info.link_version(),
-                                i == this->total_entries() - 1 ? "" : ", ");
-                }
-                fmt::format_to(std::back_inserter(str), "]");
-                return str;
-            }
-            uint32_t prev_key = BtreeNode::get_nth_key< K >(0, false).key();
-            uint32_t cur_key = prev_key;
-            uint32_t last_key = BtreeNode::get_nth_key< K >(this->total_entries() - 1, false).key();
-            if (last_key - prev_key == this->total_entries() - 1) {
-                if (this->total_entries() == 1)
-                    fmt::format_to(std::back_inserter(str), "{}[{}]", delimiter, prev_key);
-                else
-                    fmt::format_to(std::back_inserter(str), "{}[{}-{}]", delimiter, prev_key, last_key);
-                return str;
-            }
-            fmt::format_to(std::back_inserter(str), "{}0 - [{}", delimiter, prev_key);
-            uint32_t start_interval_key = prev_key;
-            for (uint32_t i{1}; i < this->total_entries(); ++i) {
-                cur_key = BtreeNode::get_nth_key< K >(i, false).key();
-                if (cur_key != prev_key + 1) {
-                    if (start_interval_key == prev_key) {
-                        fmt::format_to(std::back_inserter(str), "-{}]{}{}- [{}", prev_key, delimiter, i, cur_key);
-                    } else {
-                        fmt::format_to(std::back_inserter(str), "]{}{}- [{}", delimiter, i, cur_key);
-                    }
-                    start_interval_key = cur_key;
-                }
-                prev_key = cur_key;
-            }
-
-            if (start_interval_key == prev_key) {
-                fmt::format_to(std::back_inserter(str), "]");
-            } else {
-                fmt::format_to(std::back_inserter(str), "-{}]", cur_key);
-            }
+        //        return "";
+        // #if 0
+        std::string delimiter = print_friendly ? "\n" : "\t";
+        std::string snext = this->next_bnode() == empty_bnodeid ? "" : fmt::format("next_node={}", this->next_bnode());
+        auto str = fmt::format("{}{}.{} level:{} nEntries={} {} {} node_gen={} ",
+                               print_friendly ? "------------------------------------------------------------\n" : "",
+                               this->node_id(), this->link_version(), this->level(), this->total_entries(),
+                               (this->is_leaf() ? "LEAF" : "INTERIOR"), snext, this->node_gen());
+        if (!this->is_leaf() && (this->has_valid_edge())) {
+            fmt::format_to(std::back_inserter(str), "edge_id={}.{}", this->edge_info().m_bnodeid,
+                           this->edge_info().m_link_version);
+        }
+        if (this->total_entries() == 0) {
+            fmt::format_to(std::back_inserter(str), " [EMPTY] ");
             return str;
-//#endif
+        }
+        if (!this->is_leaf()) {
+            fmt::format_to(std::back_inserter(str), " [");
+            for (uint32_t i{0}; i < this->total_entries(); ++i) {
+                uint32_t cur_key = BtreeNode::get_nth_key< K >(i, false).key();
+                BtreeLinkInfo child_info;
+                get_nth_value(i, &child_info, false /* copy */);
+                fmt::format_to(std::back_inserter(str), "{}.{} {}", cur_key, child_info.link_version(),
+                               i == this->total_entries() - 1 ? "" : ", ");
+            }
+            fmt::format_to(std::back_inserter(str), "]");
+            return str;
+        }
+        uint32_t prev_key = BtreeNode::get_nth_key< K >(0, false).key();
+        uint32_t cur_key = prev_key;
+        uint32_t last_key = BtreeNode::get_nth_key< K >(this->total_entries() - 1, false).key();
+        if (last_key - prev_key == this->total_entries() - 1) {
+            if (this->total_entries() == 1)
+                fmt::format_to(std::back_inserter(str), "{}[{}]", delimiter, prev_key);
+            else
+                fmt::format_to(std::back_inserter(str), "{}[{}-{}]", delimiter, prev_key, last_key);
+            return str;
+        }
+        fmt::format_to(std::back_inserter(str), "{}0 - [{}", delimiter, prev_key);
+        uint32_t start_interval_key = prev_key;
+        for (uint32_t i{1}; i < this->total_entries(); ++i) {
+            cur_key = BtreeNode::get_nth_key< K >(i, false).key();
+            if (cur_key != prev_key + 1) {
+                if (start_interval_key == prev_key) {
+                    fmt::format_to(std::back_inserter(str), "-{}]{}{}- [{}", prev_key, delimiter, i, cur_key);
+                } else {
+                    fmt::format_to(std::back_inserter(str), "]{}{}- [{}", delimiter, i, cur_key);
+                }
+                start_interval_key = cur_key;
+            }
+            prev_key = cur_key;
+        }
+
+        if (start_interval_key == prev_key) {
+            fmt::format_to(std::back_inserter(str), "]");
+        } else {
+            fmt::format_to(std::back_inserter(str), "-{}]", cur_key);
+        }
+        return str;
+        // #endif
     }
 
     std::string to_dot_keys() const override {
         std::string str;
-        std::string snext = this->next_bnode() == empty_bnodeid? "": fmt::format("next_node={}", this->next_bnode());
+        std::string snext = this->next_bnode() == empty_bnodeid ? "" : fmt::format("next_node={}", this->next_bnode());
         str += fmt::format(R"("{}" [
                 shape = none,
                 labelloc="c",
@@ -317,11 +320,14 @@ public:
                 <td port="connector{}"></td><td port="key{}">{}.{}</td>)",
                                    i, i, cur_key, child_info.link_version());
             }
-            std::string sedge = this->has_valid_edge() ? "edge:" + std::to_string( this->edge_info().m_bnodeid) + "." + std::to_string( this->edge_info().m_link_version):"";
+            std::string sedge = this->has_valid_edge() ? "edge:" + std::to_string(this->edge_info().m_bnodeid) + "." +
+                    std::to_string(this->edge_info().m_link_version)
+                                                       : "";
             str += fmt::format(R"(
                 <td port="connector{}"></td>
-                <td>{}.{}<br/> gen={}<br/>{} {} </td></tr></table>>];)",this->total_entries(),this->node_id(), this->link_version(), this->node_gen(), snext, sedge );
-
+                <td>{}.{}<br/> gen={}<br/>{} {} </td></tr></table>>];)",
+                               this->total_entries(), this->node_id(), this->link_version(), this->node_gen(), snext,
+                               sedge);
 
         } else {
             std::string keys_buf = "";

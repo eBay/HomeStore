@@ -34,7 +34,7 @@ namespace homestore {
 using BtreeNodePtr = boost::intrusive_ptr< BtreeNode >;
 using BtreeNodeList = folly::small_vector< BtreeNodePtr, 3 >;
 
-struct BtreeVisualizeVariables{
+struct BtreeVisualizeVariables {
     uint64_t parent;
     uint64_t midPoint;
     uint64_t index;
@@ -120,8 +120,8 @@ public:
     virtual std::pair< btree_status_t, uint64_t > destroy_btree(void* context);
     nlohmann::json get_status(int log_level) const;
 
-    void print_tree(const std::string& file = "") const;
-    void print_tree_keys() const;
+    void dump_tree_to_file(const std::string& file = "") const;
+    std::string to_string_keys() const;
     std::string visualize_tree_keys(const std::string& file) const;
     uint64_t count_keys(bnodeid_t bnodeid) const;
 
@@ -202,8 +202,7 @@ protected:
     uint64_t get_child_node_cnt(bnodeid_t bnodeid) const;
     void to_string(bnodeid_t bnodeid, std::string& buf) const;
     void to_string_keys(bnodeid_t bnodeid, std::string& buf) const;
-    void to_dot_keys(bnodeid_t bnodeid, std::string& buf,
-                     std::map< uint32_t, std::vector< uint64_t > >& l_map,
+    void to_dot_keys(bnodeid_t bnodeid, std::string& buf, std::map< uint32_t, std::vector< uint64_t > >& l_map,
                      std::map< uint64_t, BtreeVisualizeVariables >& info_map) const;
     void validate_sanity_child(const BtreeNodePtr& parent_node, uint32_t ind) const;
     void validate_sanity_next_child(const BtreeNodePtr& parent_node, uint32_t ind) const;

@@ -40,6 +40,7 @@ private:
     std::vector< iomgr::io_fiber_t > m_cp_flush_fibers;
     std::mutex m_flush_mtx;
     void* m_meta_blk;
+    bool m_in_recovery{false};
 
 public:
     IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair< meta_blk*, sisl::byte_view > sb,
@@ -75,7 +76,7 @@ private:
     void get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_count, IndexBufferPtr const& prev_flushed_buf,
                                 IndexBufferPtrList& bufs);
 
-    void process_up_buf(IndexBufferPtr const& buf, bool do_repair);
+    void recover_buf(IndexBufferPtr const& buf);
     bool was_node_committed(IndexBufferPtr const& buf);
 };
 } // namespace homestore

@@ -57,9 +57,20 @@ BlkAllocStatus FixedBlkAllocator::alloc([[maybe_unused]] blk_count_t nblks, blk_
 #ifdef _PRERELEASE
     if (iomgr_flip::instance()->test_flip("fixed_blkalloc_no_blks")) { return BlkAllocStatus::SPACE_FULL; }
 #endif
+retry:
     blk_num_t blk_num;
     if (!m_free_blk_q.read(blk_num)) { return BlkAllocStatus::SPACE_FULL; }
 
+    if (m_state != state_t::ACTIVE) {
+        // We are not in active state, means we must be recovering. During recovery state, if any of the blks which are
+        // committed, we shouldn't be allocating those blocks. So remove from free blk q and retry another blk
+        std::lock_guard lg(m_reserve_blk_mtx);
+        if ((m_state == state_t::RECOVERING) && (m_reserved_blks.find(blk_num) != m_reserved_blks.end())) {
+            m_reserved_blks.erase(blk_num); // This blk can be removed from reserved, because its no longer free (since
+                                            // we also removed from free_blk q)
+            goto retry;
+        }
+    }
     out_blkid = BlkId{blk_num, 1, m_chunk_id};
     return BlkAllocStatus::SUCCESS;
 }
@@ -67,26 +78,25 @@ BlkAllocStatus FixedBlkAllocator::alloc([[maybe_unused]] blk_count_t nblks, blk_
 BlkAllocStatus FixedBlkAllocator::alloc_contiguous(BlkId& out_blkid) { return alloc(1, {}, out_blkid); }
 
 BlkAllocStatus FixedBlkAllocator::reserve_on_cache(BlkId const& b) {
-    std::lock_guard lg(m_mark_blk_mtx);
-    if (m_state == state_t::RECOVERING) { m_marked_blks.insert(b.blk_num()); }
+    std::lock_guard lg(m_reserve_blk_mtx);
+    if (m_state == state_t::RECOVERING) { m_reserved_blks.insert(b.blk_num()); }
     return BlkAllocStatus::SUCCESS;
 }
 
 void FixedBlkAllocator::recovery_completed() {
-    std::lock_guard lg(m_mark_blk_mtx);
-    if (!m_marked_blks.empty()) {
+    std::lock_guard lg(m_reserve_blk_mtx);
+    if (!m_reserved_blks.empty()) {
         auto const count = available_blks();
-        for (uint64_t i{0}; ((i < count) && !m_marked_blks.empty()); ++i) {
+        for (uint64_t i{0}; ((i < count) && !m_reserved_blks.empty()); ++i) {
             blk_num_t blk_num;
             if (!m_free_blk_q.read(blk_num)) { break; }
 
-            if (m_marked_blks.find(blk_num) != m_marked_blks.end()) {
-                m_marked_blks.erase(blk_num); // This blk needs to be skipped
-            } else {
+            if (m_reserved_blks.find(blk_num) == m_reserved_blks.end()) {
                 m_free_blk_q.write(blk_num); // This blk is not marked, put it back at the end of queue
             }
         }
-        HS_DBG_ASSERT(m_marked_blks.empty(), "All marked blks should have been removed from free list");
+        // We no longer need any reserved blks, since all of them are now marked as allocated
+        m_reserved_blks.clear();
     }
     m_state = state_t::ACTIVE;
 }
@@ -97,6 +107,13 @@ void FixedBlkAllocator::free(BlkId const& b) {
     const auto pushed = m_free_blk_q.write(b.blk_num());
     HS_DBG_ASSERT_EQ(pushed, true, "Expected to be able to push the blk on fixed capacity Q");
 
+    if (m_state != state_t::ACTIVE) {
+        std::lock_guard lg(m_reserve_blk_mtx);
+        if (m_state == state_t::RECOVERING) {
+            // If we are in recovering state and freeing blk would removed it from being reserved as well.
+            m_reserved_blks.erase(b.blk_num());
+        }
+    }
     if (is_persistent()) { free_on_disk(b); }
 }
 

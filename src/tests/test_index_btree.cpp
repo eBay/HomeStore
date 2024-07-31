@@ -288,7 +288,7 @@ TYPED_TEST(BtreeTest, CpFlush) {
     LOGINFO("Query {} entries and validate with pagination of 75 entries", num_entries);
     this->do_query(0, num_entries - 1, 75);
 
-    this->print(std::string("before.txt"));
+    this->dump_to_file(std::string("before.txt"));
 
     this->destroy_btree();
 
@@ -298,7 +298,7 @@ TYPED_TEST(BtreeTest, CpFlush) {
     std::this_thread::sleep_for(std::chrono::seconds{1});
     LOGINFO("Restarted homestore with index recovered");
 
-    this->print(std::string("after.txt"));
+    this->dump_to_file(std::string("after.txt"));
 
     LOGINFO("Query {} entries", num_entries);
     this->do_query(0, num_entries - 1, 1000);
@@ -336,7 +336,7 @@ TYPED_TEST(BtreeTest, MultipleCpFlush) {
     LOGINFO("Query {} entries and validate with pagination of 75 entries", num_entries);
     this->do_query(0, num_entries - 1, 75);
 
-    this->print(std::string("before.txt"));
+    this->dump_to_file(std::string("before.txt"));
 
     this->destroy_btree();
 
@@ -345,7 +345,7 @@ TYPED_TEST(BtreeTest, MultipleCpFlush) {
 
     std::this_thread::sleep_for(std::chrono::seconds{1});
     LOGINFO(" Restarted homestore with index recovered");
-    this->print(std::string("after.txt"));
+    this->dump_to_file(std::string("after.txt"));
 
     this->compare_files("before.txt", "after.txt");
 
@@ -400,7 +400,7 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
     LOGINFO("Query {} entries and validate with pagination of 75 entries", num_entries);
     this->do_query(0, num_entries - 1, 75);
 
-    this->print(std::string("before.txt"));
+    this->dump_to_file(std::string("before.txt"));
     this->destroy_btree();
 
     // Restart homestore. m_bt is updated by the TestIndexServiceCallback.
@@ -408,7 +408,7 @@ TYPED_TEST(BtreeTest, ThreadedCpFlush) {
 
     std::this_thread::sleep_for(std::chrono::seconds{1});
     LOGINFO(" Restarted homestore with index recovered");
-    this->print(std::string("after.txt"));
+    this->dump_to_file(std::string("after.txt"));
 
     this->compare_files("before.txt", "after.txt");
 

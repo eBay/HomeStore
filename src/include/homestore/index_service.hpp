@@ -47,6 +47,7 @@ private:
     std::shared_ptr< VirtualDev > m_vdev;
     std::pair< meta_blk*, sisl::byte_view > m_wbcache_sb{
         std::pair< meta_blk*, sisl::byte_view >{nullptr, sisl::byte_view{}}};
+    std::vector< std::pair< meta_blk*, sisl::byte_view > > m_itable_sbs;
     std::unique_ptr< sisl::IDReserver > m_ordinal_reserver;
 
     mutable std::mutex m_index_map_mtx;
@@ -80,12 +81,8 @@ public:
     uint64_t used_size() const;
     uint32_t node_size() const;
     void repair_index_node(uint32_t ordinal, IndexBufferPtr const& node_buf);
-    void repair_index_root(uint32_t ordinal, IndexBufferPtr const& root_buf);
 
     IndexWBCacheBase& wb_cache() { return *m_wb_cache; }
-
-private:
-    void itable_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie);
 };
 
 extern IndexService& index_service();

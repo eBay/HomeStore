@@ -308,13 +308,13 @@ nlohmann::json Btree< K, V >::get_status(int log_level) const {
 }
 
 template < typename K, typename V >
-void Btree< K, V >::print_tree(const std::string& file) const {
+void Btree< K, V >::dump_tree_to_file(const std::string& file) const {
     std::string buf;
     m_btree_lock.lock_shared();
     to_string(m_root_node_info.bnode_id(), buf);
     m_btree_lock.unlock_shared();
 
-    LOGINFO( "Pre order traversal of tree:\n<{}>", buf);
+    BT_LOG(INFO, "Pre order traversal of tree:\n<{}>", buf);
     if (!file.empty()) {
         std::ofstream o(file);
         o.write(buf.c_str(), buf.size());
@@ -323,13 +323,13 @@ void Btree< K, V >::print_tree(const std::string& file) const {
 }
 
 template < typename K, typename V >
-void Btree< K, V >::print_tree_keys() const {
+std::string Btree< K, V >::to_string_keys() const {
     std::string buf;
     m_btree_lock.lock_shared();
     to_string_keys(m_root_node_info.bnode_id(), buf);
     m_btree_lock.unlock_shared();
 
-    LOGINFO("Pre order traversal of tree:\n<{}>", buf);
+    return buf;
 }
 
 template < typename K, typename V >
