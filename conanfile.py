@@ -1,7 +1,7 @@
 from conan import ConanFile
 from conan.errors import ConanInvalidConfiguration
 from conan.tools.build import check_min_cppstd
-from conan.tools.cmake import CMakeToolchain, CMakeDeps, CMake, cmake_layout
+from conan.tools.cmake import CMakeToolchain, CMakeDeps, CMake
 from conan.tools.files import copy
 from os.path import join
 
@@ -9,7 +9,7 @@ required_conan_version = ">=1.60.0"
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "6.4.32"
+    version = "6.4.33"
 
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
@@ -64,7 +64,28 @@ class HomestoreConan(ConanFile):
         self.copy(root_package="sisl", pattern="*", dst="bin/scripts/python/flip/", src="bindings/flip/python/", keep_path=False)
 
     def layout(self):
-        cmake_layout(self)
+        self.folders.source = "."
+        self.folders.build = join("build", str(self.settings.build_type))
+        self.folders.generators = join(self.folders.build, "generators")
+
+        self.cpp.source.includedirs = ["src/include"]
+
+        self.cpp.build.libdirs = ["src"]
+
+        self.cpp.package.libs = ["homestore"]
+        self.cpp.package.includedirs = ["include"] # includedirs is already set to 'include' by
+        self.cpp.package.libdirs = ["lib"]
+
+        if not self.settings.arch in ['x86', 'x86_64']:
+            self.cpp.package.defines.append("NO_ISAL")
+
+        if self.options.sanitize:
+            self.cpp.package.sharedlinkflags.append("-fsanitize=address")
+            self.cpp.package.exelinkflags.append("-fsanitize=address")
+            self.cpp.package.sharedlinkflags.append("-fsanitize=undefined")
+            self.cpp.package.exelinkflags.append("-fsanitize=undefined")
+        if self.settings.os == "Linux":
+            self.cpp.package.system_libs.append("aio")
 
     def generate(self):
         # This generates "conan_toolchain.cmake" in self.generators_folder
@@ -103,16 +124,3 @@ class HomestoreConan(ConanFile):
         copy(self, "*.so", self.build_folder, join(self.package_folder, "lib"), keep_path=False)
         copy(self, "*.dylib", self.build_folder, join(self.package_folder, "lib"), keep_path=False)
         copy(self, "*.dll", self.build_folder, join(self.package_folder, "lib"), keep_path=False)
-
-    def package_info(self):
-        self.cpp_info.libs = ["homestore"]
-        if not self.settings.arch in ['x86', 'x86_64']:
-            self.cpp_info.defines.append("NO_ISAL")
-
-        if self.options.sanitize:
-            self.cpp_info.sharedlinkflags.append("-fsanitize=address")
-            self.cpp_info.exelinkflags.append("-fsanitize=address")
-            self.cpp_info.sharedlinkflags.append("-fsanitize=undefined")
-            self.cpp_info.exelinkflags.append("-fsanitize=undefined")
-        if self.settings.os == "Linux":
-            self.cpp_info.system_libs.append("aio")
