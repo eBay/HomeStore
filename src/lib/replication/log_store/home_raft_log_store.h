@@ -200,4 +200,22 @@ private:
     store_lsn_t m_last_durable_lsn{-1};
     folly::Future< folly::Unit > m_log_store_future;
 };
+
+// helper methods
+static nuraft::ptr< nuraft::log_entry > to_nuraft_log_entry(sisl::blob const& log_blob) {
+    uint8_t const* raw_ptr = log_blob.cbytes();
+    uint64_t term = *r_cast< uint64_t const* >(raw_ptr);
+    raw_ptr += sizeof(uint64_t);
+    nuraft::log_val_type type = static_cast< nuraft::log_val_type >(*raw_ptr);
+    raw_ptr += sizeof(nuraft::log_val_type);
+
+    size_t data_len = log_blob.size() - sizeof(uint64_t) - sizeof(nuraft::log_val_type);
+    auto nb = nuraft::buffer::alloc(data_len);
+    nb->put_raw(raw_ptr, data_len);
+    return nuraft::cs_new< nuraft::log_entry >(term, nb, type);
+}
+
+static nuraft::ptr< nuraft::log_entry > to_nuraft_log_entry(const log_buffer& log_bytes) {
+    return to_nuraft_log_entry(log_bytes.get_blob());
+}
 } // namespace homestore
