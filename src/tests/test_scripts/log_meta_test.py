@@ -93,8 +93,8 @@ def meta_nightly(options, addln_opts):
 
 def logstore_nightly(options, addln_opts):
     print("log store test started")
-    cmd_opts = "--iterations=10"
-    subprocess.check_call(options.dirpath + "test_log_store " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
+    cmd_opts = "--run_time=86400"
+    subprocess.check_call(options.dirpath + "test_log_store_long_run " + cmd_opts + addln_opts, stderr=subprocess.STDOUT, shell=True)
 
     print("log store test completed")
 
