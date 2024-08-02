@@ -60,6 +60,7 @@ void log_obj_life_counter() {
     LOGINFO("Object Life Counter\n:{}", str);
 }
 
+#ifdef _PRERELEASE
 template < typename TestType >
 struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestType >, public ::testing::Test {
     using T = TestType;
@@ -263,6 +264,7 @@ TYPED_TEST(IndexCrashTest, SplitOnLeftEdge) {
     LOGINFO("Step 9: Query all entries and validate with pagination of 80 entries");
     this->query_all_paginate(80);
 }
+#endif
 
 int main(int argc, char* argv[]) {
     int parsed_argc{argc};
@@ -276,6 +278,10 @@ int main(int argc, char* argv[]) {
         LOGINFO("Using seed {} to sow the random generation", seed);
         g_re.seed(seed);
     }
-    auto ret = RUN_ALL_TESTS();
-    return ret;
+
+#ifdef _PRERELEASE
+    return RUN_ALL_TESTS();
+#else
+    return 0;
+#endif
 }
