@@ -86,6 +86,7 @@ conaninfo.txt
 compile_commands.json
 graph_info.json
 *_log
+conan_imports_manifest.txt
 
 # ctags
 tags

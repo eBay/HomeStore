@@ -1124,7 +1124,7 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     if (lsn < m_rd_sb->checkpoint_lsn || lsn > m_rd_sb->durable_commit_lsn) { return; }
 
     // 1. Get the log entry and prepare rreq
-    nuraft::log_entry const* lentry = r_cast< nuraft::log_entry const* >(buf.bytes());
+    auto const lentry = to_nuraft_log_entry(buf);
 
     // TODO: Handle the case where the log entry is not app_log, example config logs
     if (lentry->get_val_type() != nuraft::log_val_type::app_log) { return; }
