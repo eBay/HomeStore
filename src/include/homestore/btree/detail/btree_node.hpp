@@ -354,6 +354,41 @@ public:
     void lock_acknowledge() { m_trans_hdr.upgraders.decrement(1); }
     bool any_upgrade_waiters() const { return (!m_trans_hdr.upgraders.testz()); }
 
+    template < typename K, typename V >
+    std::string to_custom_string(to_string_cb_t< K, V > const& cb) const {
+        std::string snext =
+            (this->next_bnode() == empty_bnodeid) ? "" : fmt::format(" next_node={}", this->next_bnode());
+        auto str = fmt::format("id={}.{} level={} nEntries={} {}{} node_gen={} ", this->node_id(), this->link_version(),
+                               this->level(), this->total_entries(), (this->is_leaf() ? "LEAF" : "INTERIOR"), snext,
+                               this->node_gen());
+        if (this->has_valid_edge()) {
+            fmt::format_to(std::back_inserter(str), " edge={}.{}", this->edge_info().m_bnodeid,
+                           this->edge_info().m_link_version);
+        }
+
+        if (this->total_entries() == 0) {
+            fmt::format_to(std::back_inserter(str), " [EMPTY] ");
+            return str;
+        } else if (this->is_leaf()) {
+            std::vector< std::pair< K, V > > entries;
+            for (uint32_t i{0}; i < this->total_entries(); ++i) {
+                V v;
+                get_nth_value(i, &v, false);
+                entries.emplace_back(std::make_pair(get_nth_key< K >(i, false), v));
+            }
+            fmt::format_to(std::back_inserter(str), " Keys=[{}]", cb(entries));
+            return str;
+        } else {
+            fmt::format_to(std::back_inserter(str), " Keys=[");
+            for (uint32_t i{0}; i < this->total_entries(); ++i) {
+                fmt::format_to(std::back_inserter(str), "{}{}", get_nth_key< K >(i, false).to_string(),
+                               (i == this->total_entries() - 1) ? "" : ", ");
+            }
+            fmt::format_to(std::back_inserter(str), "]");
+        }
+        return str;
+    }
+
 public:
     // Public method which needs to be implemented by variants
     virtual btree_status_t insert(uint32_t ind, const BtreeKey& key, const BtreeValue& val) = 0;
@@ -391,7 +426,6 @@ public:
     }
 
     virtual std::string to_string(bool print_friendly = false) const = 0;
-    virtual std::string to_string_keys(bool print_friendly = false) const = 0;
     virtual std::string to_dot_keys() const = 0;
 
 protected:

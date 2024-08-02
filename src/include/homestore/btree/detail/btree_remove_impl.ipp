@@ -119,7 +119,7 @@ retry:
                     goto retry;
                 } else if (ret == btree_status_t::merge_not_required) {
                     BT_NODE_LOG(DEBUG, my_node, "merge is not required for child = {} keys: {}", curr_idx,
-                                child_node->to_string_keys());
+                                child_node->to_string());
                 }
             }
         }

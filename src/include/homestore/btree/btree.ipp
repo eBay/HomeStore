@@ -323,10 +323,10 @@ void Btree< K, V >::dump_tree_to_file(const std::string& file) const {
 }
 
 template < typename K, typename V >
-std::string Btree< K, V >::to_string_keys() const {
+std::string Btree< K, V >::to_custom_string(to_string_cb_t< K, V > const& cb) const {
     std::string buf;
     m_btree_lock.lock_shared();
-    to_string_keys(m_root_node_info.bnode_id(), buf);
+    to_custom_string_internal(m_root_node_info.bnode_id(), buf, cb);
     m_btree_lock.unlock_shared();
 
     return buf;

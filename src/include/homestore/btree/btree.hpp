@@ -121,7 +121,7 @@ public:
     nlohmann::json get_status(int log_level) const;
 
     void dump_tree_to_file(const std::string& file = "") const;
-    std::string to_string_keys() const;
+    std::string to_custom_string(to_string_cb_t< K, V > const& cb) const;
     std::string visualize_tree_keys(const std::string& file) const;
     uint64_t count_keys(bnodeid_t bnodeid) const;
 
@@ -201,7 +201,7 @@ protected:
     uint64_t get_btree_node_cnt() const;
     uint64_t get_child_node_cnt(bnodeid_t bnodeid) const;
     void to_string(bnodeid_t bnodeid, std::string& buf) const;
-    void to_string_keys(bnodeid_t bnodeid, std::string& buf) const;
+    void to_custom_string_internal(bnodeid_t bnodeid, std::string& buf, to_string_cb_t< K, V > const& cb) const;
     void to_dot_keys(bnodeid_t bnodeid, std::string& buf, std::map< uint32_t, std::vector< uint64_t > >& l_map,
                      std::map< uint64_t, BtreeVisualizeVariables >& info_map) const;
     void validate_sanity_child(const BtreeNodePtr& parent_node, uint32_t ind) const;
