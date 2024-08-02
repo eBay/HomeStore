@@ -33,7 +33,7 @@ IndexService::IndexService(std::unique_ptr< IndexServiceCallbacks > cbs) : m_svc
     meta_service().register_handler(
         "index",
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
-            itable_meta_blk_found(std::move(buf), voidptr_cast(mblk));
+            m_itable_sbs.emplace_back(std::pair{mblk, std::move(buf)});
         },
         nullptr);
 
@@ -67,18 +67,26 @@ shared< VirtualDev > IndexService::open_vdev(const vdev_info& vinfo, bool load_e
 
 uint32_t IndexService::reserve_ordinal() { return m_ordinal_reserver->reserve(); }
 
-void IndexService::itable_meta_blk_found(const sisl::byte_view& buf, void* meta_cookie) {
-    // We have found an index table superblock. Notify the callback which should convert the superblock into actual
-    // IndexTable instance
-    superblk< index_table_sb > sb;
-    sb.load(buf, meta_cookie);
-    add_index_table(m_svc_cbs->on_index_table_found(std::move(sb)));
-}
-
 void IndexService::start() {
     // Start Writeback cache
-    m_wb_cache = std::make_unique< IndexWBCache >(m_vdev, std::move(m_wbcache_sb), hs()->evictor(),
+    m_wb_cache = std::make_unique< IndexWBCache >(m_vdev, m_wbcache_sb, hs()->evictor(),
                                                   hs()->device_mgr()->atomic_page_size(HSDevType::Fast));
+
+    // Load any index tables which are to loaded from meta blk
+    for (auto const& [meta_cookie, buf] : m_itable_sbs) {
+        superblk< index_table_sb > sb;
+        sb.load(buf, meta_cookie);
+        add_index_table(m_svc_cbs->on_index_table_found(std::move(sb)));
+    }
+
+    // Recover the writeback cache, which in-turns recovers any index table nodes
+    m_wb_cache->recover(m_wbcache_sb.second);
+
+    // Notify each table that we have completed recovery
+    std::unique_lock lg(m_index_map_mtx);
+    for (const auto& [_, tbl] : m_index_map) {
+        tbl->recovery_completed();
+    }
 }
 
 void IndexService::stop() { m_wb_cache.reset(); }
@@ -109,12 +117,11 @@ std::shared_ptr< IndexTableBase > IndexService::get_index_table(uint32_t ordinal
 
 void IndexService::repair_index_node(uint32_t ordinal, IndexBufferPtr const& node_buf) {
     auto tbl = get_index_table(ordinal);
-    if (tbl) { tbl->repair_node(node_buf); }
-}
-
-void IndexService::repair_index_root(uint32_t ordinal, IndexBufferPtr const& root_buf) {
-    auto tbl = get_index_table(ordinal);
-    if (tbl) { tbl->repair_root(root_buf); }
+    if (tbl) {
+        tbl->repair_node(node_buf);
+    } else {
+        HS_DBG_ASSERT(false, "Index corresponding to ordinal={} has not been loaded yet, unexpected", ordinal);
+    }
 }
 
 uint32_t IndexService::node_size() const { return m_vdev->atomic_page_size(); }
@@ -144,11 +151,35 @@ std::string IndexBuffer::to_string() const {
                            voidptr_cast(const_cast< IndexBuffer* >(this)), m_index_ordinal, int_cast(state()),
                            m_created_cp_id, m_dirtied_cp_id, m_wait_for_down_buffers.get(), m_node_freed);
     } else {
-        return fmt::format("Buf={} index={} state={} create/dirty_cp={}/{} down_wait#={} {} node=[{}] ",
+        // store m_down_buffers in a string
+        std::string down_bufs = "";
+#ifndef NDEBUG
+        for (auto const& down_buf : m_down_buffers) {
+            if (auto ptr = down_buf.lock()) {
+                fmt::format_to(std::back_inserter(down_bufs), "[{}]", voidptr_cast(ptr.get()));
+            }
+        }
+#endif
+
+        return fmt::format("Buf={} index={} state={} create/dirty_cp={}/{} down_wait#={}{} up={} node=[{}] down=[{}]",
                            voidptr_cast(const_cast< IndexBuffer* >(this)), m_index_ordinal, int_cast(state()),
-                           m_created_cp_id, m_dirtied_cp_id, m_wait_for_down_buffers.get(), m_node_freed ? "Freed" : "",
-                           r_cast< persistent_hdr_t const* >(m_bytes)->to_compact_string());
+                           m_created_cp_id, m_dirtied_cp_id, m_wait_for_down_buffers.get(),
+                           m_node_freed ? " Freed" : "", voidptr_cast(const_cast< IndexBuffer* >(m_up_buffer.get())),
+                           (m_bytes == nullptr) ? "not attached yet"
+                                                : r_cast< persistent_hdr_t const* >(m_bytes)->to_compact_string(),
+                           down_bufs);
     }
+}
+std::string IndexBuffer::to_string_dot() const {
+    auto str = fmt::format("IndexBuffer {} ", reinterpret_cast< void* >(const_cast< IndexBuffer* >(this)));
+    if (m_bytes == nullptr) {
+        fmt::format_to(std::back_inserter(str), " node_buf=nullptr ");
+    } else {
+        fmt::format_to(std::back_inserter(str), " node_buf={} {} created/dirtied={}/{} {}  down_wait#={}",
+                       static_cast< void* >(m_bytes), m_is_meta_buf ? "[META]" : "", m_created_cp_id, m_dirtied_cp_id,
+                       m_node_freed ? "FREED" : "", m_wait_for_down_buffers.get());
+    }
+    return str;
 }
 
 MetaIndexBuffer::MetaIndexBuffer(superblk< index_table_sb >& sb) : IndexBuffer{nullptr, BlkId{}}, m_sb{sb} {

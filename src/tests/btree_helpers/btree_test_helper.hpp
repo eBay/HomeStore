@@ -274,7 +274,7 @@ public:
             qreq.enable_route_tracing();
             auto const ret = m_bt->query(qreq, out_vector);
             auto const expected_count = std::min(remaining, batch_size);
-
+            // this->print_keys();
             ASSERT_EQ(out_vector.size(), expected_count) << "Received incorrect value on query pagination";
 
             if (remaining < batch_size) {
@@ -374,8 +374,29 @@ public:
         run_in_parallel(op_list);
     }
 
-    void print(const std::string& file = "") const { m_bt->print_tree(file); }
-    void print_keys() const { m_bt->print_tree_keys(); }
+    void dump_to_file(const std::string& file = "") const { m_bt->dump_tree_to_file(file); }
+    void print_keys(const std::string& preamble = "") const {
+        auto print_key_range = [](std::vector< std::pair< K, V > > const& kvs) -> std::string {
+            uint32_t start = 0;
+            std::string str;
+            for (uint32_t i{1}; i <= kvs.size(); ++i) {
+                if ((i == kvs.size()) || (kvs[i].first.key() != kvs[i - 1].first.key() + 1)) {
+                    if ((i - start) > 1) {
+                        fmt::format_to(std::back_inserter(str), "{}-{}{}", kvs[start].first.key(),
+                                       kvs[i - 1].first.key(), (i == kvs.size()) ? "" : ", ");
+                    } else {
+                        fmt::format_to(std::back_inserter(str), "{}{}", kvs[start].first.key(),
+                                       (i == kvs.size()) ? "" : ", ");
+                    }
+                    start = i;
+                }
+            }
+            return str;
+        };
+
+        LOGINFO("{}{}", preamble.empty() ? "" : preamble + ":\n", m_bt->to_custom_string(print_key_range));
+    }
+    void visualize_keys(const std::string& file) const { m_bt->visualize_tree_keys(file); }
 
     void compare_files(const std::string& before, const std::string& after) {
         std::ifstream b(before, std::ifstream::ate);

@@ -68,11 +68,11 @@ class IndexTableBase {
 public:
     virtual ~IndexTableBase() = default;
     virtual uuid_t uuid() const = 0;
+    virtual void recovery_completed() = 0;
     virtual uint32_t ordinal() const = 0;
     virtual uint64_t used_size() const = 0;
     virtual void destroy() = 0;
     virtual void repair_node(IndexBufferPtr const& buf) = 0;
-    virtual void repair_root(IndexBufferPtr const& buf) = 0;
 };
 
 enum class index_buf_state_t : uint8_t {
@@ -122,6 +122,7 @@ struct IndexBuffer : public sisl::ObjLifeCounter< IndexBuffer > {
     bool is_meta_buf() const { return m_is_meta_buf; }
 
     std::string to_string() const;
+    std::string to_string_dot() const;
 };
 
 // This is a special buffer which is used to write to the meta block

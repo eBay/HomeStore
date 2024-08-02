@@ -83,7 +83,12 @@ public:
             m_dev_infos, [this](const homestore::vdev_info&, bool load_existing) -> shared< homestore::VirtualDev > {
                 return nullptr;
             });
-        m_dmgr->is_first_time_boot() ? m_dmgr->format_devices() : m_dmgr->load_devices();
+        if (m_dmgr->is_first_time_boot()) {
+            m_dmgr->format_devices();
+            m_dmgr->commit_formatting();
+        } else {
+            m_dmgr->load_devices();
+        }
         m_first_data_pdev = m_dmgr->get_pdevs_by_dev_type(homestore::HSDevType::Data)[0];
         m_first_fast_pdev = m_dmgr->get_pdevs_by_dev_type(homestore::HSDevType::Fast)[0];
     }

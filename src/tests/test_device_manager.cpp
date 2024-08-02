@@ -78,7 +78,12 @@ public:
 
                 return std::make_shared< homestore::VirtualDev >(*m_dmgr, vinfo_tmp, nullptr /* event_cb */, false);
             });
-        m_dmgr->is_first_time_boot() ? m_dmgr->format_devices() : m_dmgr->load_devices();
+        if (m_dmgr->is_first_time_boot()) {
+            m_dmgr->format_devices();
+            m_dmgr->commit_formatting();
+        } else {
+            m_dmgr->load_devices();
+        }
         m_pdevs = m_dmgr->get_pdevs_by_dev_type(homestore::HSDevType::Data);
         m_vdevs = m_dmgr->get_vdevs();
     }
