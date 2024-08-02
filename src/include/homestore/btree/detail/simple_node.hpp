@@ -230,6 +230,7 @@ public:
 
     std::string to_dot_keys() const override {
         std::string str;
+#if 0
         std::string snext = this->next_bnode() == empty_bnodeid ? "" : fmt::format("next_node={}", this->next_bnode());
         str += fmt::format(R"("{}" [
                 shape = none,
@@ -314,6 +315,7 @@ public:
                                     1, this->node_id(), this->link_version(), this->node_gen(), snext);
             return str + keys_buf;
         }
+#endif
         return str;
     }
 
