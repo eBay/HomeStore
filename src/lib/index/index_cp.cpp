@@ -265,8 +265,11 @@ void IndexCPContext::process_txn_record(txn_record const* rec, std::map< BlkId, 
             if (found) { return buf; }
             real_up_buf->m_down_buffers.emplace_back(buf);
 #endif
-            real_up_buf->m_wait_for_down_buffers.increment(1);
-            buf->m_up_buffer = real_up_buf;
+
+            if (buf->m_up_buffer != real_up_buf) {
+                real_up_buf->m_wait_for_down_buffers.increment(1);
+                buf->m_up_buffer = real_up_buf;
+            }
         }
         return buf;
     };

@@ -137,18 +137,20 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
     void reapply_after_crash() {
         ShadowMap< K, V > snapshot_map{this->m_shadow_map.max_keys()};
         snapshot_map.load(m_shadow_filename);
-        LOGINFO("\tSnapshot before crash\n{}", snapshot_map.to_string());
+        LOGDEBUG("\tSnapshot before crash\n{}", snapshot_map.to_string());
         auto diff = this->m_shadow_map.diff(snapshot_map);
+
+        // visualize tree after crash
+        // std::string recovered_tree_filename = "tree_after_crash_" + to_string(rand() % 100) + ".dot";
+        // this->visualize_keys(recovered_tree_filename);
+        // LOGINFO(" tree after recovered stored in {}", recovered_tree_filename);
+
         std::string dif_str = "KEY \tADDITION\n";
         for (const auto& [k, addition] : diff) {
             dif_str += fmt::format(" {} \t{}\n", k.key(), addition);
         }
-        // visualize tree after crash
-        std::string recovered_tree_filename = "tree_after_crash_" + to_string(rand() % 100) + ".dot";
-        // this->visualize_keys(recovered_tree_filename);
-        LOGINFO(" tree after recovered stored in {}", recovered_tree_filename);
-        // test_common::HSTestHelper::trigger_cp(true);
-        LOGINFO("Diff between shadow map and snapshot map\n{}\n", dif_str);
+        LOGDEBUG("Diff between shadow map and snapshot map\n{}\n", dif_str);
+
         for (const auto& [k, addition] : diff) {
             // this->print_keys(fmt::format("reapply: before inserting key {}", k.key()));
             //  this->visualize_keys(recovered_tree_filename);
@@ -244,8 +246,8 @@ TYPED_TEST(IndexCrashTest, SplitOnLeftEdge) {
     this->set_basic_flip("crash_flush_on_split_at_left_child");
     this->visualize_keys("tree_before_insert.dot");
     for (auto k = num_entries / 4; k < num_entries / 2; ++k) {
-        LOGINFO("inserting key {}", k);
-        this->visualize_keys("tree_before_" + to_string(k) + ".dot");
+        // LOGINFO("inserting key {}", k);
+        // this->visualize_keys("tree_before_" + to_string(k) + ".dot");
         this->put(k, btree_put_type::INSERT, true /* expect_success */);
     }
     this->visualize_keys("tree_before_crash.dot");
