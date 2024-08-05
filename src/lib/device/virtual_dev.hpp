@@ -275,6 +275,8 @@ public:
 
     std::unique_ptr< CPContext > create_cp_context(CP* cp);
 
+    void recovery_completed();
+
     ////////////////////////// Standard Getters ///////////////////////////////
     virtual uint64_t available_blks() const;
     virtual uint64_t size() const { return m_vdev_info.vdev_size; }

@@ -109,7 +109,7 @@ public:
     std::string to_string() const override;
 
     void cp_flush(CP* cp) override;
-
+    void recovery_completed() override {}
     nlohmann::json get_status(int log_level) const override;
 
 private:

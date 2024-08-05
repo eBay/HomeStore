@@ -151,6 +151,7 @@ public:
 
     bool is_first_time_boot() const { return m_first_time_boot; }
     void format_devices();
+    void commit_formatting();
     void load_devices();
     void close_devices();
     bool is_boot_in_degraded_mode() const { return m_boot_in_degraded_mode; }

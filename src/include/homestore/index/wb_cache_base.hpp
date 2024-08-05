@@ -64,6 +64,7 @@ public:
     /// @param cur_buf
     /// @return
     // virtual IndexBufferPtr copy_buffer(const IndexBufferPtr& cur_buf, const CPContext* context) const = 0;
+    virtual void recover(sisl::byte_view sb) = 0;
 };
 
 } // namespace homestore

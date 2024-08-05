@@ -644,7 +644,7 @@ public:
         return str;
     }
 
-    std::string to_string_keys(bool print_friendly = false) const override { return "NOT Supported"; }
+    std::string to_dot_keys() const override { return "NOT Supported"; }
 
 private:
     uint16_t add_prefix(BtreeKey const& key, BtreeValue const& val) {

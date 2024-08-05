@@ -36,6 +36,7 @@ public:
     BlkAllocStatus alloc(blk_count_t nblks, blk_alloc_hints const& hints, BlkId& out_blkid) override;
     BlkAllocStatus reserve_on_cache(BlkId const& b) override;
     void free(BlkId const& b) override;
+    void recovery_completed() override;
 
     blk_num_t available_blks() const override;
     blk_num_t get_used_blks() const override;
@@ -50,8 +51,8 @@ private:
     enum class state_t : uint8_t { RECOVERING, ACTIVE };
 
     state_t m_state{state_t::RECOVERING};
-    std::unordered_set< blk_num_t > m_marked_blks; // Keep track of all blks which are marked as allocated
-    std::mutex m_mark_blk_mtx;                     // Mutex used while removing marked_blks from blk_q
+    std::unordered_set< blk_num_t > m_reserved_blks; // Keep track of all blks which are reserved as allocated
+    std::mutex m_reserve_blk_mtx;                    // Mutex used while removing marked_blks from blk_q
     folly::MPMCQueue< blk_num_t > m_free_blk_q;
 };
 } // namespace homestore

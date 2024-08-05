@@ -196,7 +196,7 @@ void LogDev::do_load(const off_t device_cursor) {
             break;
         }
 
-        THIS_LOGDEV_LOG(INFO, "Found log group header offset=0x{} header {}", to_hex(group_dev_offset), *header);
+        THIS_LOGDEV_LOG(DEBUG, "Found log group header offset=0x{} header {}", to_hex(group_dev_offset), *header);
         HS_REL_ASSERT_EQ(header->start_idx(), m_log_idx.load(), "log indx is not the expected one");
         if (loaded_from == -1) { loaded_from = header->start_idx(); }
 
@@ -838,7 +838,7 @@ logdev_key LogDev::do_device_truncate(bool dry_run) {
     }
 
     if ((min_safe_ld_key == logdev_key::out_of_bound_ld_key()) || (min_safe_ld_key.idx < 0)) {
-        HS_PERIODIC_LOG(INFO, logstore,
+        HS_PERIODIC_LOG(DEBUG, logstore,
                         "[log_dev={}] No log store append on any log stores, skipping device truncation, "
                         "all_logstore_info:<{}>",
                         m_logdev_id, dbg_str);

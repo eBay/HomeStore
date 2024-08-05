@@ -215,6 +215,9 @@ class BtreeNode;
 void intrusive_ptr_add_ref(BtreeNode* node);
 void intrusive_ptr_release(BtreeNode* node);
 
+template < typename K, typename V >
+using to_string_cb_t = std::function< std::string(std::vector< std::pair< K, V > > const&) >;
+
 ENUM(btree_event_t, uint8_t, READ, MUTATE, REMOVE, SPLIT, REPAIR, MERGE);
 
 struct trace_route_entry {
