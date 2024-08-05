@@ -1162,6 +1162,7 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     rreq->init(rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry), entry_to_key(jentry),
                (entry_blkid.blk_count() * get_blk_size()));
     rreq->set_local_blkid(entry_blkid);
+    rreq->set_lsn(lsn);
 
     // 2. Pre-commit the log entry
     m_listener->on_pre_commit(lsn, entry_to_hdr(jentry), entry_to_key(jentry), nullptr);
