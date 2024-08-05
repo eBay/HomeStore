@@ -299,20 +299,6 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const 
     return ret;
 }
 
-// template < typename K, typename V >
-// template < typename ReqT >
-// bool Btree< K, V >::is_split_needed(const BtreeNodePtr& node, ReqT& req) const {
-//     if (!node->is_leaf()) { // if internal node, size is atmost one additional entry, size of K/V
-//         return node->total_entries() >= 3;
-//     } else if constexpr (std::is_same_v< ReqT, BtreeRangePutRequest< K > >) {
-//         return node->total_entries() >= 3;
-//     } else if constexpr (std::is_same_v< ReqT, BtreeSinglePutRequest >) {
-//         return node->total_entries() >= 3;;
-//     } else {
-//         return false;
-//     }
-// }
-
 template < typename K, typename V >
 template < typename ReqT >
 bool Btree< K, V >::is_split_needed(const BtreeNodePtr& node, ReqT& req) const {
