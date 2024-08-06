@@ -227,10 +227,16 @@ public:
         }
         return str;
     }
-
     std::string to_dot_keys() const override {
+        return to_dot_keys_impl(std::is_same<K, uint64_t>{});
+    }
+
+    std::string to_dot_keys_impl(std::false_type) const {
+        return "";
+    }
+
+    std::string to_dot_keys_impl(std::true_type) const {
         std::string str;
-#if 0
         std::string snext = this->next_bnode() == empty_bnodeid ? "" : fmt::format("next_node={}", this->next_bnode());
         str += fmt::format(R"("{}" [
                 shape = none,
@@ -315,7 +321,6 @@ public:
                                     1, this->node_id(), this->link_version(), this->node_gen(), snext);
             return str + keys_buf;
         }
-#endif
         return str;
     }
 
