@@ -23,7 +23,7 @@ pipeline {
             steps {
                 script {
                     PROJECT = sh(script: "grep -m 1 'name =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
-                    VER = sh(script: "grep -m 1 'version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
+                    VER = sh(script: "grep -m 1 ' version =' conanfile.py | awk '{print \$3}' | tr -d '\n' | tr -d '\"'", returnStdout: true)
                     NIGHTLY_TAG = "master-nightly-debug-4.0"
                     ECR_PATH = "${ECR_URL}/${ORG}/${PROJECT}"
                     failed_stage = ""
@@ -40,7 +40,7 @@ pipeline {
                 }
                 stage("Build") {
                     steps {
-                        sh "conan create --build missing -o homestore:sanitize=True -o homestore:skip_testing=True -pr debug . ${PROJECT}/${VER}@"
+                        sh "conan create --build missing -o homestore:sanitize=True -o iomgr:testing=off -c tools.build:skip_test=True -pr debug . ${PROJECT}/${VER}@"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_index_btree' -exec cp {} .jenkins/test_index_btree \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*bin/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
