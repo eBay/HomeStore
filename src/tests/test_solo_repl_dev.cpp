@@ -122,6 +122,8 @@ public:
             return blk_alloc_hints{};
         }
 
+        void on_restart() override { LOGINFO("ReplDev restarted"); }
+
         void on_error(ReplServiceError error, const sisl::blob& header, const sisl::blob& key,
                       cintrusive< repl_req_ctx >& ctx) override {
             LOGINFO("Received error={} on repl_dev", enum_name(error));

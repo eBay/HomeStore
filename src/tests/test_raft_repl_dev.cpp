@@ -148,6 +148,11 @@ public:
         LOGINFOMOD(replication, "[Replica={}] Received rollback on lsn={}", g_helper->replica_num(), lsn);
     }
 
+    void on_restart() {
+        LOGINFOMOD(replication, "restarted repl dev for [Replica={}] Group={}", g_helper->replica_num(),
+                   boost::uuids::to_string(repl_dev()->group_id()));
+    }
+
     void on_error(ReplServiceError error, const sisl::blob& header, const sisl::blob& key,
                   cintrusive< repl_req_ctx >& ctx) override {
         LOGINFOMOD(replication, "[Replica={}] Received error={} on key={}", g_helper->replica_num(), enum_name(error),

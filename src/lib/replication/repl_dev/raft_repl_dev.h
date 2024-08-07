@@ -228,6 +228,11 @@ public:
      */
     void flush_durable_commit_lsn();
 
+    /**
+     * \brief This method is called during restart to notify the upper layer
+     */
+    void on_restart();
+
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////
     nuraft::ptr< nuraft::cluster_config > load_config() override;

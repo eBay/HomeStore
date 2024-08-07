@@ -1178,4 +1178,6 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     handle_commit(rreq, true /* recovery */);
 }
 
+void RaftReplDev::on_restart() { m_listener->on_restart(); }
+
 } // namespace homestore
