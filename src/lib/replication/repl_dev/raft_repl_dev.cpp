@@ -1123,7 +1123,7 @@ void RaftReplDev::gc_repl_reqs() {
 
 void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
     // apply the log entry if the lsn is between checkpoint lsn and durable commit lsn
-    if (lsn < m_rd_sb->checkpoint_lsn || lsn > m_rd_sb->durable_commit_lsn) { return; }
+    if (lsn < m_rd_sb->checkpoint_lsn) { return; }
 
     // 1. Get the log entry and prepare rreq
     auto const lentry = to_nuraft_log_entry(buf);
@@ -1165,6 +1165,11 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
                (entry_blkid.blk_count() * get_blk_size()));
     rreq->set_local_blkid(entry_blkid);
     rreq->set_lsn(lsn);
+
+    if (lsn > m_rd_sb->durable_commit_lsn) {
+        m_state_machine->link_lsn_to_req(rreq, int64_cast(lsn));
+        return;
+    }
 
     // 2. Pre-commit the log entry
     m_listener->on_pre_commit(lsn, entry_to_hdr(jentry), entry_to_key(jentry), nullptr);
