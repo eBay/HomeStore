@@ -117,7 +117,8 @@ void RaftReplService::start() {
     //
     // We need to first load the repl_dev with its config and then attach the raft config to that repl dev.
     for (auto const& [buf, mblk] : m_config_sb_bufs) {
-        raft_group_config_found(buf, voidptr_cast(mblk));
+        auto rdev = raft_group_config_found(buf, voidptr_cast(mblk));
+        rdev->on_restart();
     }
     m_config_sb_bufs.clear();
 
@@ -153,7 +154,7 @@ void RaftReplService::stop() {
     hs()->logstore_service().stop();
 }
 
-void RaftReplService::raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie) {
+RaftReplDev* RaftReplService::raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie) {
     json_superblk group_config;
     auto& js = group_config.load(buf, meta_cookie);
 
@@ -171,7 +172,7 @@ void RaftReplService::raft_group_config_found(sisl::byte_view const& buf, void* 
             "Unable to find group_id={}, may be repl_dev was destroyed, we will destroy the raft_group_config as well",
             boost::uuids::to_string(group_id));
         group_config.destroy();
-        return;
+        return nullptr;
     }
 
     auto rdev = std::dynamic_pointer_cast< RaftReplDev >(*v);
@@ -179,6 +180,7 @@ void RaftReplService::raft_group_config_found(sisl::byte_view const& buf, void* 
     listener->set_repl_dev(rdev);
     rdev->attach_listener(std::move(listener));
     rdev->use_config(std::move(group_config));
+    return rdev.get();
 }
 
 std::string RaftReplService::lookup_peer(nuraft_mesg::peer_id_t const& peer) {

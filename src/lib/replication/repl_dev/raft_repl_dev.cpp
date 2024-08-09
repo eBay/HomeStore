@@ -746,7 +746,7 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
     RD_DBG_ASSERT_EQ(total_size, 0, "Total size mismatch, some data is not consumed");
 }
 
-void RaftReplDev::handle_commit(repl_req_ptr_t rreq) {
+void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
     if (rreq->local_blkid().is_valid()) {
         if (data_service().commit_blk(rreq->local_blkid()) != BlkAllocStatus::SUCCESS) {
             if (hs()->device_mgr()->is_boot_in_degraded_mode() && m_log_store_replay_done)
@@ -771,8 +771,10 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq) {
         m_listener->on_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq->local_blkid(), rreq);
     }
 
-    auto prev_lsn = m_commit_upto_lsn.exchange(rreq->lsn());
-    RD_DBG_ASSERT_GT(rreq->lsn(), prev_lsn, "Out of order commit of lsns, it is not expected in RaftReplDev");
+    if (!recovery) {
+        auto prev_lsn = m_commit_upto_lsn.exchange(rreq->lsn());
+        RD_DBG_ASSERT_GT(rreq->lsn(), prev_lsn, "Out of order commit of lsns, it is not expected in RaftReplDev");
+    }
 
     if (!rreq->is_proposer()) { rreq->clear(); }
 }
@@ -1122,7 +1124,7 @@ void RaftReplDev::gc_repl_reqs() {
 
 void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
     // apply the log entry if the lsn is between checkpoint lsn and durable commit lsn
-    if (lsn < m_rd_sb->checkpoint_lsn || lsn > m_rd_sb->durable_commit_lsn) { return; }
+    if (lsn < m_rd_sb->checkpoint_lsn) { return; }
 
     // 1. Get the log entry and prepare rreq
     auto const lentry = to_nuraft_log_entry(buf);
@@ -1163,12 +1165,20 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     rreq->init(rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry), entry_to_key(jentry),
                (entry_blkid.blk_count() * get_blk_size()));
     rreq->set_local_blkid(entry_blkid);
+    rreq->set_lsn(lsn);
+
+    if (lsn > m_rd_sb->durable_commit_lsn) {
+        m_state_machine->link_lsn_to_req(rreq, int64_cast(lsn));
+        return;
+    }
 
     // 2. Pre-commit the log entry
     m_listener->on_pre_commit(lsn, entry_to_hdr(jentry), entry_to_key(jentry), nullptr);
 
     // 3. Commit the log entry
-    handle_commit(rreq);
+    handle_commit(rreq, true /* recovery */);
 }
+
+void RaftReplDev::on_restart() { m_listener->on_restart(); }
 
 } // namespace homestore

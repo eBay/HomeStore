@@ -305,6 +305,10 @@ public:
     virtual void on_rollback(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
                              cintrusive< repl_req_ctx >& ctx) = 0;
 
+    /// @brief Called when the replDev is created after restart. The consumer is expected to recover all the modules
+    /// necessary to replay/commit the logs.
+    virtual void on_restart() = 0;
+
     /// @brief Called when the async_alloc_write call failed to initiate replication
     ///
     /// Called only on the node which called async_alloc_write
