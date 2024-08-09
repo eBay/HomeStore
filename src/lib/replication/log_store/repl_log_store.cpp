@@ -8,7 +8,7 @@ namespace homestore {
 
 uint64_t ReplLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
     // We don't want to transform anything that is not an app log
-    if (entry->get_val_type() != nuraft::log_val_type::app_log) {
+    if (entry->get_val_type() != nuraft::log_val_type::app_log || entry->get_buf_ptr()->size() == 0) {
         ulong lsn = HomeRaftLogStore::append(entry);
         RD_LOGD("append entry term={}, log_val_type={} lsn={} size={}", entry->get_term(),
                 static_cast< uint32_t >(entry->get_val_type()), lsn, entry->get_buf().size());
@@ -57,8 +57,8 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
         }
     }
 
-    RD_LOGT("Raft Channel: end_of_append_batch start_lsn={} count={} num_data_to_be_written={}", start_lsn, count,
-            reqs->size());
+    RD_LOGT("Raft Channel: end_of_append_batch start_lsn={} count={} num_data_to_be_written={} {}", start_lsn, count,
+            reqs->size(), proposer_reqs->size());
 
     // All requests are from proposer for data write, so as mentioned above we can skip the flush for now
     if (!reqs->empty()) {

@@ -191,6 +191,7 @@ public:
     void truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_lsn);
 
     void wait_for_log_store_ready();
+    void set_last_durable_lsn(repl_lsn_t lsn);
 
 private:
     logstore_id_t m_logstore_id;
