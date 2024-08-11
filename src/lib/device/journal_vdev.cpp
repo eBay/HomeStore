@@ -46,15 +46,15 @@ JournalVirtualDev::JournalVirtualDev(DeviceManager& dmgr, const vdev_info& vinfo
     m_init_private_data = std::make_shared< JournalChunkPrivate >();
     m_chunk_pool = std::make_unique< ChunkPool >(
         dmgr,
-        ChunkPool::Params{HS_DYNAMIC_CONFIG(generic.journal_chunk_pool_capacity),
-                          [this]() {
-                              m_init_private_data->created_at = get_time_since_epoch_ms();
-                              m_init_private_data->end_of_chunk = m_vdev_info.chunk_size;
-                              sisl::blob private_blob{r_cast< uint8_t* >(m_init_private_data.get()),
-                                                      sizeof(JournalChunkPrivate)};
-                              return private_blob;
-                          },
-                          m_vdev_info.hs_dev_type, m_vdev_info.vdev_id, m_vdev_info.chunk_size});
+        ChunkPool::Params{
+            HS_DYNAMIC_CONFIG(generic.journal_chunk_pool_capacity),
+            [this]() {
+                m_init_private_data->created_at = get_time_since_epoch_ms();
+                m_init_private_data->end_of_chunk = m_vdev_info.chunk_size;
+                sisl::blob private_blob{r_cast< uint8_t* >(m_init_private_data.get()), sizeof(JournalChunkPrivate)};
+                return private_blob;
+            },
+            m_vdev_info.hs_dev_type, m_vdev_info.vdev_id, m_vdev_info.chunk_size});
 
     resource_mgr().register_journal_vdev_exceed_cb([this]([[maybe_unused]] int64_t dirty_buf_count, bool critical) {
         // either it is critical or non-critical, call cp_flush;
@@ -370,16 +370,16 @@ folly::Future< std::error_code > JournalVirtualDev::Descriptor::async_pwritev(co
     return m_vdev.async_writev(iov, iovcnt, chunk, offset_in_chunk);
 }
 
-void JournalVirtualDev::Descriptor::sync_pwrite(const uint8_t* buf, size_t size, off_t offset) {
+std::error_code JournalVirtualDev::Descriptor::sync_pwrite(const uint8_t* buf, size_t size, off_t offset) {
 
     HS_REL_ASSERT_LE(size, m_reserved_sz, "Write size: larger then reserved size is not allowed!");
     m_reserved_sz -= size; // update reserved size
 
     auto const [chunk, index, offset_in_chunk] = process_pwrite_offset(size, offset);
-    m_vdev.sync_write(r_cast< const char* >(buf), size, chunk, offset_in_chunk);
+    return m_vdev.sync_write(r_cast< const char* >(buf), size, chunk, offset_in_chunk);
 }
 
-void JournalVirtualDev::Descriptor::sync_pwritev(const iovec* iov, int iovcnt, off_t offset) {
+std::error_code JournalVirtualDev::Descriptor::sync_pwritev(const iovec* iov, int iovcnt, off_t offset) {
     auto const size = VirtualDev::get_len(iov, iovcnt);
 
     // if size is smaller than reserved size, it means write will never be overlapping start offset;
@@ -388,7 +388,7 @@ void JournalVirtualDev::Descriptor::sync_pwritev(const iovec* iov, int iovcnt, o
 
     m_reserved_sz -= size;
     auto const [chunk, _, offset_in_chunk] = process_pwrite_offset(size, offset);
-    m_vdev.sync_writev(iov, iovcnt, chunk, offset_in_chunk);
+    return m_vdev.sync_writev(iov, iovcnt, chunk, offset_in_chunk);
 }
 
 /////////////////////////////// Read Section //////////////////////////////////

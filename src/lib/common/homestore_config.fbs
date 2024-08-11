@@ -112,6 +112,11 @@ table LogStore {
     // Logdev will flush the logs only in a dedicated thread. Turn this on, if flush IO doesn't want to
     // intervene with data IO path.
     flush_only_in_dedicated_thread: bool = true;
+
+    //we support 3 flush mode , 1(inline), 2 (timer) and 4(explicitly), mixed flush mode is also supportted
+    //for example, if we want inline and explicitly, we just set the flush mode to 1+4 = 5
+    //for nuobject case, we only support explicitly mode
+    flush_mode: uint32 = 4;
 }
 
 table Generic {

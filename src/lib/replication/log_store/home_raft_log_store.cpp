@@ -37,8 +37,12 @@ SISL_LOGGING_DECL(replication)
                         msg, ##__VA_ARGS__);
 
 namespace homestore {
-static constexpr store_lsn_t to_store_lsn(uint64_t raft_lsn) { return s_cast< store_lsn_t >(raft_lsn) - 1; }
-static constexpr store_lsn_t to_store_lsn(repl_lsn_t repl_lsn) { return repl_lsn - 1; }
+static constexpr logstore_seq_num_t to_store_lsn(uint64_t raft_lsn) {
+    return static_cast< logstore_seq_num_t >(raft_lsn - 1);
+}
+static constexpr logstore_seq_num_t to_store_lsn(repl_lsn_t repl_lsn) {
+    return static_cast< logstore_seq_num_t >(repl_lsn - 1);
+}
 static constexpr repl_lsn_t to_repl_lsn(store_lsn_t store_lsn) { return store_lsn + 1; }
 
 static uint64_t extract_term(const log_buffer& log_bytes) {
@@ -70,12 +74,18 @@ void HomeRaftLogStore::truncate(uint32_t num_reserved_cnt, repl_lsn_t compact_ls
 
         REPL_STORE_LOG(INFO, "LogDev={}: Truncating log entries from {} to {}, compact_lsn={}, last_lsn={}",
                        m_logdev_id, start_lsn, truncate_lsn, compact_lsn, last_lsn);
+        // this will only truncate in memory.
+        // we rely on resrouce mgr timer to trigger real truncate for all log stores in system;
+        // this will be friendly for multiple logstore on same logdev;
         m_log_store->truncate(truncate_lsn);
     }
 }
 
 HomeRaftLogStore::HomeRaftLogStore(logdev_id_t logdev_id, logstore_id_t logstore_id, log_found_cb_t const& log_found_cb,
-                                   log_replay_done_cb_t const& log_replay_done_cb) {
+                                   log_replay_done_cb_t const& log_replay_done_cb) :
+        // TODO: make this capacity configurable if necessary
+        // repl_lsn starts from 1, so we set lsn 0 to be dummy
+        m_log_entry_cache(100, std::make_pair(0, nullptr)) {
     m_dummy_log_entry = nuraft::cs_new< nuraft::log_entry >(0, nuraft::buffer::alloc(0), nuraft::log_val_type::app_log);
 
     if (logstore_id == UINT32_MAX) {
@@ -127,6 +137,13 @@ ulong HomeRaftLogStore::start_index() const {
 nuraft::ptr< nuraft::log_entry > HomeRaftLogStore::last_entry() const {
     store_lsn_t max_seq = m_log_store->get_contiguous_issued_seq_num(m_last_durable_lsn);
     if (max_seq < 0) { return m_dummy_log_entry; }
+    ulong lsn = to_repl_lsn(max_seq);
+    auto position_in_cache = lsn % m_log_entry_cache.size();
+    {
+        std::shared_lock lk(m_mutex);
+        auto nle = m_log_entry_cache[position_in_cache];
+        if (nle.first == lsn) return nle.second;
+    }
 
     nuraft::ptr< nuraft::log_entry > nle;
     try {
@@ -147,13 +164,20 @@ ulong HomeRaftLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
     auto const next_seq =
         m_log_store->append_async(sisl::io_blob{buf->data_begin(), uint32_cast(buf->size()), false /* is_aligned */},
                                   nullptr /* cookie */, [buf](int64_t, sisl::io_blob&, logdev_key, void*) {});
-    return to_repl_lsn(next_seq);
+    ulong lsn = to_repl_lsn(next_seq);
+
+    auto position_in_cache = lsn % m_log_entry_cache.size();
+    {
+        std::unique_lock lk(m_mutex);
+        m_log_entry_cache[position_in_cache] = std::make_pair(lsn, entry);
+    }
+    return lsn;
 }
 
 void HomeRaftLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& entry) {
     auto buf = entry->serialize();
 
-    m_log_store->rollback_async(to_store_lsn(index) - 1, nullptr);
+    m_log_store->rollback(to_store_lsn(index) - 1);
 
     // we need to reset the durable lsn, because its ok to set to lower number as it will be updated on next flush
     // calls, but it is dangerous to set higher number.
@@ -164,10 +188,10 @@ void HomeRaftLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& e
 }
 
 void HomeRaftLogStore::end_of_append_batch(ulong start, ulong cnt) {
-    store_lsn_t end_lsn = to_store_lsn(start + cnt - 1);
-    m_log_store->flush_sync(end_lsn);
-    REPL_STORE_LOG(DEBUG, "end_of_append_batch flushed upto start={} cnt={} lsn={}", start, cnt, start + cnt - 1);
+    auto end_lsn = to_store_lsn(start + cnt - 1);
+    m_log_store->flush(end_lsn);
     m_last_durable_lsn = end_lsn;
+    REPL_STORE_LOG(TRACE, "end_of_append_batch flushed upto start={} cnt={} lsn={}", start, cnt, start + cnt - 1);
 }
 
 nuraft::ptr< std::vector< nuraft::ptr< nuraft::log_entry > > > HomeRaftLogStore::log_entries(ulong start, ulong end) {
@@ -185,6 +209,13 @@ nuraft::ptr< std::vector< nuraft::ptr< nuraft::log_entry > > > HomeRaftLogStore:
 }
 
 nuraft::ptr< nuraft::log_entry > HomeRaftLogStore::entry_at(ulong index) {
+    auto positio_in_cache = index % m_log_entry_cache.size();
+    {
+        std::shared_lock lk(m_mutex);
+        auto nle = m_log_entry_cache[positio_in_cache];
+        if (nle.first == index) return nle.second;
+    }
+
     nuraft::ptr< nuraft::log_entry > nle;
     try {
         auto log_bytes = m_log_store->read_sync(to_store_lsn(index));
@@ -197,6 +228,13 @@ nuraft::ptr< nuraft::log_entry > HomeRaftLogStore::entry_at(ulong index) {
 }
 
 ulong HomeRaftLogStore::term_at(ulong index) {
+    auto positio_in_cache = index % m_log_entry_cache.size();
+    {
+        std::shared_lock lk(m_mutex);
+        auto nle = m_log_entry_cache[positio_in_cache];
+        if (nle.first == index) return nle.second->get_term();
+    }
+
     ulong term;
     try {
         auto log_bytes = m_log_store->read_sync(to_store_lsn(index));
@@ -247,7 +285,7 @@ void HomeRaftLogStore::apply_pack(ulong index, nuraft::buffer& pack) {
     auto slot = next_slot();
     if (index < slot) {
         // We are asked to apply/insert data behind next slot, so we must rollback before index and then append
-        m_log_store->rollback_async(to_store_lsn(index) - 1, nullptr);
+        m_log_store->rollback(to_store_lsn(index) - 1);
     } else if (index > slot) {
         // We are asked to apply/insert data after next slot, so we need to fill in with dummy entries upto the slot
         // before append the entries
@@ -285,11 +323,11 @@ bool HomeRaftLogStore::compact(ulong compact_lsn) {
         }
     }
 
-    m_log_store->flush_sync(to_store_lsn(compact_lsn));
+    m_log_store->flush(to_store_lsn(compact_lsn));
 
-    // we rely on resrouce mgr timer to trigger truncate for all log stores in system;
+    // this will only truncate in memory, and not on disk;
+    // we rely on resrouce mgr timer to trigger real truncate for all log stores in system;
     // this will be friendly for multiple logstore on same logdev;
-
 #ifdef _PRERELEASE
     if (iomgr_flip::instance()->test_flip("force_home_raft_log_truncate")) {
         REPL_STORE_LOG(TRACE, "Flip force_home_raft_log_truncate is enabled, force truncation, compact_lsn={}",
@@ -302,7 +340,7 @@ bool HomeRaftLogStore::compact(ulong compact_lsn) {
 }
 
 bool HomeRaftLogStore::flush() {
-    m_log_store->flush_sync();
+    m_log_store->flush();
     return true;
 }
 

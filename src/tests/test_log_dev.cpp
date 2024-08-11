@@ -149,8 +149,7 @@ public:
     void insert_sync(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t lsn, uint32_t fixed_size = 0) {
         bool io_memory{false};
         auto* d = prepare_data(lsn, io_memory, fixed_size);
-        const bool succ = log_store->write_sync(lsn, {uintptr_cast(d), d->total_size(), false});
-        EXPECT_TRUE(succ);
+        log_store->write_and_flush(lsn, {uintptr_cast(d), d->total_size(), false});
         LOGINFO("Written sync data for LSN -> {}:{}", log_store->get_store_id(), lsn);
         if (io_memory) {
             iomanager.iobuf_free(uintptr_cast(d));
@@ -188,26 +187,7 @@ public:
             try {
                 read_verify(log_store, lsn);
             } catch (const std::exception& ex) {
-                logstore_seq_num_t trunc_upto = 0;
-                std::mutex mtx;
-                std::condition_variable cv;
-                bool get_trunc_upto = false;
-                log_store->get_logdev()->run_under_flush_lock(
-                    [this, log_store, &trunc_upto, &get_trunc_upto, &mtx, &cv] {
-                        // In case we run truncation in parallel to read, it is possible
-                        // the truncated_upto accordingly.
-                        trunc_upto = log_store->truncated_upto();
-                        std::unique_lock lock(mtx);
-                        get_trunc_upto = true;
-                        cv.notify_one();
-                        return true;
-                    });
-                std::unique_lock lock(mtx);
-                cv.wait(lock, [&get_trunc_upto] { return get_trunc_upto == true; });
-                if (lsn <= trunc_upto) {
-                    lsn = trunc_upto;
-                    continue;
-                }
+                auto trunc_upto = log_store->truncated_upto();
                 LOGFATAL("Failed to read at upto {} lsn {} trunc_upto {}", upto, lsn, trunc_upto);
             }
         }
@@ -215,27 +195,10 @@ public:
 
     void rollback_validate(std::shared_ptr< HomeLogStore > log_store, logstore_seq_num_t& cur_lsn,
                            uint32_t num_lsns_to_rollback) {
-        std::mutex mtx;
-        std::condition_variable cv;
-        bool rollback_done = false;
         cur_lsn -= num_lsns_to_rollback;
         auto const upto_lsn = cur_lsn - 1;
-        log_store->rollback_async(upto_lsn, [&](logstore_seq_num_t) {
-            ASSERT_EQ(log_store->get_contiguous_completed_seq_num(-1), upto_lsn)
-                << "Last completed seq num is not reset after rollback";
-            ASSERT_EQ(log_store->get_contiguous_issued_seq_num(-1), upto_lsn)
-                << "Last issued seq num is not reset after rollback";
-            read_all_verify(log_store);
-            {
-                std::unique_lock lock(mtx);
-                rollback_done = true;
-            }
-            cv.notify_one();
-        });
-
-        // We wait till async rollback is finished as we do validation.
-        std::unique_lock lock(mtx);
-        cv.wait(lock, [&rollback_done] { return rollback_done == true; });
+        log_store->rollback(upto_lsn);
+        read_all_verify(log_store);
     }
 
     void truncate_validate(std::shared_ptr< HomeLogStore > log_store) {
@@ -243,7 +206,7 @@ public:
         LOGINFO("truncate_validate upto {}", upto);
         log_store->truncate(upto);
         read_all_verify(log_store);
-        logstore_service().device_truncate(nullptr /* cb */, true /* wait_till_done */);
+        logstore_service().device_truncate();
     }
 
     void rollback_records_validate(std::shared_ptr< HomeLogStore > log_store, uint32_t expected_count) {
