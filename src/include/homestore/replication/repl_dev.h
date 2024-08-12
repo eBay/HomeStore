@@ -59,9 +59,60 @@ struct repl_key {
     std::string to_string() const { return fmt::format("server={}, term={}, dsn={}", server_id, term, dsn); }
 };
 
-struct repl_snapshot {
-    uint64_t last_log_idx_{0};
-    uint64_t last_log_term_{0};
+using repl_snapshot = nuraft::snapshot;
+using repl_snapshot_ptr = nuraft::ptr< nuraft::snapshot >;
+
+// Consumers of the ReplDevListener dont have to know what underlying
+// snapshot implementation is used. Consumers can export and save the state
+// of the snapshot using serialize and load the state using deserialize.
+class snapshot_context {
+public:
+    snapshot_context(int64_t lsn) : lsn_(lsn) {}
+    virtual ~snapshot_context() = default;
+    virtual void deserialize(const sisl::io_blob_safe& snp_ctx) = 0;
+    virtual sisl::io_blob_safe serialize() = 0;
+    int64_t get_lsn() { return lsn_; }
+
+protected:
+    int64_t lsn_;
+};
+
+class nuraft_snapshot_context : public snapshot_context {
+public:
+    nuraft_snapshot_context(nuraft::snapshot& snp) : snapshot_context(snp.get_last_log_idx()) {
+        auto snp_buf = snp.serialize();
+        snapshot_ = nuraft::snapshot::deserialize(*snp_buf);
+    }
+
+    void deserialize(const sisl::io_blob_safe& snp_ctx) override {
+        // Load the context from the io blob to nuraft buffer.
+        auto snp_buf = nuraft::buffer::alloc(snp_ctx.size());
+        nuraft::buffer_serializer bs(snp_buf);
+        bs.put_raw(snp_ctx.cbytes(), snp_ctx.size());
+        snapshot_ = nuraft::snapshot::deserialize(bs);
+        lsn_ = snapshot_->get_last_log_idx();
+    }
+
+    sisl::io_blob_safe serialize() override {
+        // Dump the context from nuraft buffer to the io blob.
+        auto snp_buf = snapshot_->serialize();
+        sisl::io_blob_safe blob{s_cast< size_t >(snp_buf->size())};
+        std::memcpy(blob.bytes(), snp_buf->data_begin(), snp_buf->size());
+        return blob;
+    }
+
+    nuraft::ptr< nuraft::snapshot > nuraft_snapshot() { return snapshot_; }
+
+private:
+    nuraft::ptr< nuraft::snapshot > snapshot_;
+};
+
+struct snapshot_data {
+    void* user_ctx{nullptr};
+    int64_t offset{0};
+    sisl::io_blob_safe blob;
+    bool is_first_obj{false};
+    bool is_last_obj{false};
 };
 
 struct repl_journal_entry;
@@ -254,6 +305,10 @@ public:
     virtual void on_rollback(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
                              cintrusive< repl_req_ctx >& ctx) = 0;
 
+    /// @brief Called when the replDev is created after restart. The consumer is expected to recover all the modules
+    /// necessary to replay/commit the logs.
+    virtual void on_restart() = 0;
+
     /// @brief Called when the async_alloc_write call failed to initiate replication
     ///
     /// Called only on the node which called async_alloc_write
@@ -285,8 +340,30 @@ public:
     /// after restart in case crash happened during the destroy.
     virtual void on_destroy() = 0;
 
-    /// @brief Called when the snapshot is being created by nuraft;
-    virtual AsyncReplResult<> create_snapshot(repl_snapshot& s) = 0;
+    /// @brief Called when the snapshot is being created by nuraft
+    virtual AsyncReplResult<> create_snapshot(shared< snapshot_context > context) = 0;
+
+    /// @brief Called when nuraft does the baseline resync and in the end apply snapshot.
+    virtual bool apply_snapshot(shared< snapshot_context > context) = 0;
+
+    /// @brief Get the last snapshot saved.
+    virtual shared< snapshot_context > last_snapshot() = 0;
+
+    /// @brief Called on the leader side when the follower wants to do baseline resync and leader
+    /// uses offset given by the follower to the know the current state of the follower.
+    /// Leader sends the snapshot data to the follower in batch. This callback is called multiple
+    /// times on the leader till all the data is transferred to the follower. is_last_obj in
+    /// snapshot_data will be true once all the data has been trasnferred. After this the raft on
+    /// the follower side can do the incremental resync.
+    virtual int read_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) = 0;
+
+    /// @brief Called on the follower when the leader sends the data during the baseline resyc.
+    /// is_last_obj in in snapshot_data will be true once all the data has been transfered.
+    /// After this the raft on the follower side can do the incremental resync.
+    virtual void write_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) = 0;
+
+    /// @brief Free up user-defined context inside the snapshot_data that is allocated during read_snapshot_data.
+    virtual void free_user_snp_ctx(void*& user_snp_ctx) = 0;
 
 private:
     std::weak_ptr< ReplDev > m_repl_dev;

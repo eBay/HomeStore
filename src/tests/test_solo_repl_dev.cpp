@@ -108,8 +108,16 @@ public:
             }
         }
 
-        AsyncReplResult<> create_snapshot(repl_snapshot& s) override { return make_async_success<>(); }
-
+        AsyncReplResult<> create_snapshot(shared< snapshot_context > context) override {
+            return make_async_success<>();
+        }
+        int read_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) override {
+            return 0;
+        }
+        void write_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) override {}
+        bool apply_snapshot(shared< snapshot_context > context) override { return true; }
+        shared< snapshot_context > last_snapshot() override { return nullptr; }
+        void free_user_snp_ctx(void*& user_snp_ctx) override {}
         bool on_pre_commit(int64_t lsn, const sisl::blob& header, const sisl::blob& key,
                            cintrusive< repl_req_ctx >& ctx) override {
             return true;
@@ -121,6 +129,8 @@ public:
         ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) override {
             return blk_alloc_hints{};
         }
+
+        void on_restart() override { LOGINFO("ReplDev restarted"); }
 
         void on_error(ReplServiceError error, const sisl::blob& header, const sisl::blob& key,
                       cintrusive< repl_req_ctx >& ctx) override {

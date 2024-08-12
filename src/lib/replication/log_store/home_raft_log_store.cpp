@@ -18,6 +18,7 @@
 #include <sisl/fds/utils.hpp>
 #include "common/homestore_assert.hpp"
 #include <homestore/homestore.hpp>
+#include <iomgr/iomgr_flip.hpp>
 
 using namespace homestore;
 
@@ -165,6 +166,7 @@ void HomeRaftLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& e
 void HomeRaftLogStore::end_of_append_batch(ulong start, ulong cnt) {
     store_lsn_t end_lsn = to_store_lsn(start + cnt - 1);
     m_log_store->flush_sync(end_lsn);
+    REPL_STORE_LOG(DEBUG, "end_of_append_batch flushed upto start={} cnt={} lsn={}", start, cnt, start + cnt - 1);
     m_last_durable_lsn = end_lsn;
 }
 
@@ -172,9 +174,13 @@ nuraft::ptr< std::vector< nuraft::ptr< nuraft::log_entry > > > HomeRaftLogStore:
     auto out_vec = std::make_shared< std::vector< nuraft::ptr< nuraft::log_entry > > >();
     m_log_store->foreach (to_store_lsn(start), [end, &out_vec](store_lsn_t cur, const log_buffer& entry) -> bool {
         bool ret = (cur < to_store_lsn(end) - 1);
-        if (cur < to_store_lsn(end)) { out_vec->emplace_back(to_nuraft_log_entry(entry)); }
+        if (cur < to_store_lsn(end)) {
+            // REPL_STORE_LOG(TRACE, "log_entries lsn={}", cur + 1);
+            out_vec->emplace_back(to_nuraft_log_entry(entry));
+        }
         return ret;
     });
+    REPL_STORE_LOG(TRACE, "Num log entries start={} end={} num_entries={}", start, end, out_vec->size());
     return out_vec;
 }
 
@@ -184,7 +190,7 @@ nuraft::ptr< nuraft::log_entry > HomeRaftLogStore::entry_at(ulong index) {
         auto log_bytes = m_log_store->read_sync(to_store_lsn(index));
         nle = to_nuraft_log_entry(log_bytes);
     } catch (const std::exception& e) {
-        REPL_STORE_LOG(ERROR, "entry_at({}) index out_of_range", index);
+        REPL_STORE_LOG(ERROR, "entry_at({}) index out_of_range start {} end {}", index, start_index(), last_index());
         throw e;
     }
     return nle;
@@ -196,7 +202,7 @@ ulong HomeRaftLogStore::term_at(ulong index) {
         auto log_bytes = m_log_store->read_sync(to_store_lsn(index));
         term = extract_term(log_bytes);
     } catch (const std::exception& e) {
-        REPL_STORE_LOG(ERROR, "term_at({}) index out_of_range", index);
+        REPL_STORE_LOG(ERROR, "term_at({}) index out_of_range start {} end {}", index, start_index(), last_index());
         throw e;
     }
     return term;
@@ -271,7 +277,7 @@ bool HomeRaftLogStore::compact(ulong compact_lsn) {
     if (cur_max_lsn < to_store_lsn(compact_lsn)) {
         // release this assert if for some use case, we should tolorant this case;
         // for now, don't expect this case to happen.
-        RELEASE_ASSERT(false, "compact_lsn={} is beyond the current max_lsn={}", compact_lsn, cur_max_lsn);
+        // RELEASE_ASSERT(false, "compact_lsn={} is beyond the current max_lsn={}", compact_lsn, cur_max_lsn);
 
         // We need to fill the remaining entries with dummy data.
         for (auto lsn{cur_max_lsn + 1}; lsn <= to_store_lsn(compact_lsn); ++lsn) {
@@ -284,7 +290,13 @@ bool HomeRaftLogStore::compact(ulong compact_lsn) {
     // we rely on resrouce mgr timer to trigger truncate for all log stores in system;
     // this will be friendly for multiple logstore on same logdev;
 
-    // m_log_store->truncate(to_store_lsn(compact_lsn));
+#ifdef _PRERELEASE
+    if (iomgr_flip::instance()->test_flip("force_home_raft_log_truncate")) {
+        REPL_STORE_LOG(TRACE, "Flip force_home_raft_log_truncate is enabled, force truncation, compact_lsn={}",
+                       compact_lsn);
+        m_log_store->truncate(to_store_lsn(compact_lsn));
+    }
+#endif
 
     return true;
 }
@@ -300,5 +312,7 @@ ulong HomeRaftLogStore::last_durable_index() {
 }
 
 void HomeRaftLogStore::wait_for_log_store_ready() { m_log_store_future.wait(); }
+
+void HomeRaftLogStore::set_last_durable_lsn(repl_lsn_t lsn) { m_last_durable_lsn = to_store_lsn(lsn); }
 
 } // namespace homestore

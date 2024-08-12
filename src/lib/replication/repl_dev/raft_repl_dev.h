@@ -140,8 +140,6 @@ private:
     folly::Promise< ReplServiceError > m_destroy_promise;
     RaftReplDevMetrics m_metrics;
 
-    nuraft::ptr< nuraft::snapshot > m_last_snapshot{nullptr};
-
     static std::atomic< uint64_t > s_next_group_ordinal;
     bool m_log_store_replay_done{false};
 
@@ -170,6 +168,7 @@ public:
     std::string my_replica_id_str() const { return boost::uuids::to_string(m_my_repl_id); }
     uint32_t get_blk_size() const override;
     repl_lsn_t get_last_commit_lsn() const { return m_commit_upto_lsn.load(); }
+    void set_last_commit_lsn(repl_lsn_t lsn) { m_commit_upto_lsn.store(lsn); }
     bool is_destroy_pending() const;
     bool is_destroyed() const;
     Clock::time_point destroyed_time() const { return m_destroyed_time; }
@@ -181,7 +180,7 @@ public:
 
     //////////////// Methods needed for other Raft classes to access /////////////////
     void use_config(json_superblk raft_config_sb);
-    void handle_commit(repl_req_ptr_t rreq);
+    void handle_commit(repl_req_ptr_t rreq, bool recovery = false);
     repl_req_ptr_t repl_key_to_req(repl_key const& rkey) const;
     repl_req_ptr_t applier_create_req(repl_key const& rkey, journal_type_t code, sisl::blob const& user_header,
                                       sisl::blob const& key, uint32_t data_size, bool is_data_channel);
@@ -217,8 +216,6 @@ public:
         m_data_journal->truncate(num_reserved_entries, m_compact_lsn.load());
     }
 
-    nuraft::ptr< nuraft::snapshot > get_last_snapshot() { return m_last_snapshot; }
-
     void wait_for_logstore_ready() { m_data_journal->wait_for_log_store_ready(); }
 
     void gc_repl_reqs();
@@ -227,6 +224,11 @@ public:
      * Flush the durable commit LSN to the superblock
      */
     void flush_durable_commit_lsn();
+
+    /**
+     * \brief This method is called during restart to notify the upper layer
+     */
+    void on_restart();
 
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////
