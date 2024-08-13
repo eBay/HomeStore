@@ -391,6 +391,11 @@ public:
             });
         }
 
+        if (g_helper->replica_num() == 0) {
+            // Leader sleeps here because follower-1 needs some time to find the leader after restart.
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+        }
+
         for (auto const& db : dbs_) {
             if (db->is_zombie()) { continue; }
             auto repl_dev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
@@ -767,6 +772,7 @@ TEST_F(RaftReplDevTest, Snapshot_and_Compact) {
 
 TEST_F(RaftReplDevTest, RemoveReplDev) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->set_basic_flip("disable_periodic_gc_repl_dev");
 
     // Step 1: Create 2 more repldevs
     LOGINFO("Create 2 more ReplDevs");
@@ -804,11 +810,6 @@ TEST_F(RaftReplDevTest, RemoveReplDev) {
     } else {
         this->remove_db(dbs_.back(), true /* wait_for_removal */);
         LOGINFO("Remove last replica={} num_db={}", g_helper->replica_num(), dbs_.size());
-    }
-
-    if (g_helper->replica_num() == 0) {
-        // Leader sleeps here because follower-1 needs some time to find the leader after restart.
-        std::this_thread::sleep_for(std::chrono::seconds(20));
     }
 
     // TODO: Once generic crash flip/test_infra is available, use flip to crash during removal and restart them to
@@ -944,7 +945,7 @@ int main(int argc, char* argv[]) {
     //
     HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
         s.consensus.leadership_expiry_ms = -1; // -1 means never expires;
-        s.generic.repl_dev_cleanup_interval_sec = 1;
+        s.generic.repl_dev_cleanup_interval_sec = 0;
 
         // Disable implicit flush and timer.
         s.logstore.flush_threshold_size = 0;

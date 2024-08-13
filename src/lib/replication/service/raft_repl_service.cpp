@@ -14,6 +14,7 @@
  *********************************************************************************/
 #include <sisl/logging/logging.h>
 #include <iomgr/io_environment.hpp>
+#include <iomgr/iomgr_flip.hpp>
 #include <chrono>
 
 #include <boost/uuid/string_generator.hpp>
@@ -118,6 +119,7 @@ void RaftReplService::start() {
     // We need to first load the repl_dev with its config and then attach the raft config to that repl dev.
     for (auto const& [buf, mblk] : m_config_sb_bufs) {
         auto rdev = raft_group_config_found(buf, voidptr_cast(mblk));
+        if (!rdev) { continue; }
         rdev->on_restart();
     }
     m_config_sb_bufs.clear();
@@ -342,6 +344,9 @@ void RaftReplService::start_reaper_thread() {
                 HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 * 1000, true /* recurring */,
                 nullptr, [this](void*) {
                     gc_repl_reqs();
+#ifdef _PRERELEASE
+                    if (iomgr_flip::instance()->test_flip("disable_periodic_gc_repl_dev")) { return; }
+#endif
                     gc_repl_devs();
                 });
 

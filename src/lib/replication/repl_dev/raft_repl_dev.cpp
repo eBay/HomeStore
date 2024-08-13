@@ -230,20 +230,20 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq, sisl::sg_list 
            flatbuffers::FlatBufferToString(builder.GetBufferPointer() + sizeof(flatbuffers::uoffset_t),
                                            PushDataRequestTypeTable()));*/
 
-    RD_LOGD("Data Channel: Pushing data to all followers: rreq=[{}]", rreq->to_compact_string());
+    RD_LOGD("Data Channel: Pushing data to all followers: rreq=[{}]", rreq->to_string());
 
     group_msg_service()
         ->data_service_request_unidirectional(nuraft_mesg::role_regex::ALL, PUSH_DATA, rreq->m_pkts)
         .via(&folly::InlineExecutor::instance())
         .thenValue([this, rreq = std::move(rreq)](auto e) {
             if (e.hasError()) {
-                RD_LOGE("Data Channel: Error in pushing data to all followers: rreq=[{}] error={}",
-                        rreq->to_compact_string(), e.error());
+                RD_LOGE("Data Channel: Error in pushing data to all followers: rreq=[{}] error={}", rreq->to_string(),
+                        e.error());
                 handle_error(rreq, RaftReplService::to_repl_error(e.error()));
                 return;
             }
             // Release the buffer which holds the packets
-            RD_LOGD("Data Channel: Data push completed for rreq=[{}]", rreq->to_compact_string());
+            RD_LOGD("Data Channel: Data push completed for rreq=[{}]", rreq->to_string());
             rreq->release_fb_builder();
             rreq->m_pkts.clear();
         });
