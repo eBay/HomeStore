@@ -23,7 +23,7 @@
 namespace homestore {
 SISL_LOGGING_DECL(logstore)
 
-log_stream_reader::log_stream_reader(off_t device_cursor, JournalVirtualDev* vdev,
+log_stream_reader::log_stream_reader(off_t device_cursor, shared< JournalVirtualDev > vdev,
                                      shared< JournalVirtualDev::Descriptor > vdev_jd, uint64_t read_size_multiple) :
         m_vdev{vdev},
         m_vdev_jd{std::move(vdev_jd)},
@@ -164,7 +164,7 @@ sisl::byte_view log_stream_reader::group_in_next_page() {
 }
 
 sisl::byte_view log_stream_reader::read_next_bytes(uint64_t nbytes, bool& end_of_stream) {
-    // TO DO: Might need to address alignment based on data or fast type
+    // TODO: Might need to address alignment based on data or fast type
     const auto prev_pos = m_vdev_jd->seeked_pos();
     auto sz_to_read = m_vdev_jd->sync_next_read(nullptr, nbytes);
     if (sz_to_read == -1) {

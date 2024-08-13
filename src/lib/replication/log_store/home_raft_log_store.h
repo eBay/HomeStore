@@ -200,6 +200,10 @@ private:
     nuraft::ptr< nuraft::log_entry > m_dummy_log_entry;
     store_lsn_t m_last_durable_lsn{-1};
     folly::Future< folly::Unit > m_log_store_future;
+
+    // raft log entry cache related members
+    std::shared_mutex m_mutex;
+    std::vector< std::pair< ulong, nuraft::ptr< nuraft::log_entry > > > m_log_entry_cache;
 };
 
 // helper methods

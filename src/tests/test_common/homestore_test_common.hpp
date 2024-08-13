@@ -190,7 +190,10 @@ public:
         homestore::HomeStore::reset_instance();
         iomanager.stop();
 
-        if (cleanup) { remove_files(m_generated_devs); }
+        if (cleanup) {
+            remove_files(m_generated_devs);
+            m_generated_devs.clear();
+        }
     }
 
     void change_start_cb(hs_before_services_starting_cb_t cb) { m_token.cb() = cb; }

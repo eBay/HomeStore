@@ -155,13 +155,8 @@ public:
 
     /**
      * @brief Schedule a truncate all the log stores physically on the device.
-     *
-     * @param cb [OPTIONAL] Callback once truncation is completed, if provided (Default no callback)
-     * @param wait_till_done [OPTIONAL] Wait for the truncation to complete before returning from this method.
-     * Default to false
-     * @param dry_run: If the truncate is a real one or just dry run to simulate the truncation
      */
-    void device_truncate(const device_truncate_cb_t& cb = nullptr, bool wait_till_done = false, bool dry_run = false);
+    void device_truncate();
 
     folly::Future< std::error_code > create_vdev(uint64_t size, HSDevType devType, uint32_t chunk_size);
     std::shared_ptr< VirtualDev > open_vdev(const vdev_info& vinfo, bool load_existing);
@@ -178,13 +173,6 @@ public:
     uint32_t total_size() const;
     iomgr::io_fiber_t flush_thread() { return m_flush_fiber; }
 
-    /**
-     * This is used when the actual LogDev truncate is triggered;
-     *
-     * @return The IO fiber associated with the truncate thread.
-     */
-    iomgr::io_fiber_t truncate_thread() { return m_truncate_fiber; }
-
     void delete_unopened_logdevs();
 
 private:
@@ -194,14 +182,13 @@ private:
     void logdev_super_blk_found(const sisl::byte_view& buf, void* meta_cookie);
     void rollback_super_blk_found(const sisl::byte_view& buf, void* meta_cookie);
     void start_threads();
-    void flush_if_needed();
+    void flush();
 
 private:
     std::unordered_map< logdev_id_t, std::shared_ptr< LogDev > > m_id_logdev_map;
     folly::SharedMutexWritePriority m_logdev_map_mtx;
 
     std::shared_ptr< JournalVirtualDev > m_logdev_vdev;
-    iomgr::io_fiber_t m_truncate_fiber;
     iomgr::io_fiber_t m_flush_fiber;
     LogStoreServiceMetrics m_metrics;
     std::unordered_set< logdev_id_t > m_unopened_logdev;
