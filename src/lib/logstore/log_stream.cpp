@@ -61,8 +61,8 @@ read_again:
     HS_REL_ASSERT_GE(m_cur_log_buf.size(), m_read_size_multiple);
     const auto* header = r_cast< log_group_header const* >(m_cur_log_buf.bytes());
     if (header->magic_word() != LOG_GROUP_HDR_MAGIC) {
-        LOGERROR("Logdev data not seeing magic at pos {}, must have come to end of log_dev={}",
-                 m_vdev_jd->dev_offset(m_cur_read_bytes), m_vdev_jd->logdev_id());
+        LOGDEBUGMOD(logstore, "Logdev data not seeing magic at pos {}, must have come to end of log_dev={}",
+                    m_vdev_jd->dev_offset(m_cur_read_bytes), m_vdev_jd->logdev_id());
         *out_dev_offset = m_vdev_jd->dev_offset(m_cur_read_bytes);
         // move it by dma boundary if header is not valid
         m_prev_crc = 0;
@@ -86,8 +86,9 @@ read_again:
     // compare it with prev crc
     if (m_prev_crc != 0 && m_prev_crc != header->prev_grp_crc) {
         // we reached at the end
-        LOGERROR("we have reached the end. crc doesn't match offset {} prev crc {} header prev crc {} log_dev={}",
-                 m_vdev_jd->dev_offset(m_cur_read_bytes), header->prev_grp_crc, m_prev_crc, m_vdev_jd->logdev_id());
+        LOGDEBUGMOD(logstore,
+                    "we have reached the end. crc doesn't match offset {} prev crc {} header prev crc {} log_dev={}",
+                    m_vdev_jd->dev_offset(m_cur_read_bytes), header->prev_grp_crc, m_prev_crc, m_vdev_jd->logdev_id());
         *out_dev_offset = m_vdev_jd->dev_offset(m_cur_read_bytes);
         if (!m_vdev_jd->is_offset_at_last_chunk(*out_dev_offset)) {
             HS_REL_ASSERT(0, "data is corrupted {}", m_vdev_jd->logdev_id());

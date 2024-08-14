@@ -500,8 +500,12 @@ public:
     }
 
     void on_log_insert_completion(logdev_id_t fid, logstore_seq_num_t lsn, logdev_key ld_key) {
-        if (m_highest_log_idx.count(fid) == 0) { m_highest_log_idx[fid] = std::atomic{-1}; }
-        atomic_update_max(m_highest_log_idx[fid], ld_key.idx);
+        {
+            std::unique_lock lock{m_completion_mtx};
+            if (m_highest_log_idx.count(fid) == 0) { m_highest_log_idx[fid] = std::atomic{-1}; }
+            atomic_update_max(m_highest_log_idx[fid], ld_key.idx);
+        }
+
         if (m_io_closure) m_io_closure(fid, lsn, ld_key);
     }
 
@@ -529,6 +533,7 @@ private:
     std::vector< std::unique_ptr< SampleLogStoreClient > > m_log_store_clients;
     std::map< logdev_id_t, std::atomic< logid_t > > m_highest_log_idx;
     test_common::HSTestHelper m_helper;
+    std::mutex m_completion_mtx;
 };
 
 class LogStoreTest : public ::testing::Test {
