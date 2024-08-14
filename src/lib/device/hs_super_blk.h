@@ -183,7 +183,9 @@ public:
     static uint64_t chunk_super_block_size(const dev_info& dinfo);
     static uint64_t chunk_info_bitmap_size(const dev_info& dinfo) {
         // Chunk bitmap area has bitmap of max_chunks rounded off to 4k page
-        return sisl::round_up(bitset_serialized::nbytes(hs_super_blk::max_chunks_in_pdev(dinfo)), 4096));
+        // add 4KB headroom for bitmap serialized header
+        auto bytes = sisl::round_up(hs_super_blk::max_chunks_in_pdev(dinfo), 8) / 8 + 4096;
+        return sisl::round_up(bytes, 4096);
     }
 
     static uint64_t total_size(const dev_info& dinfo) { return total_used_size(dinfo) + future_padding_size(dinfo); }
@@ -197,13 +199,10 @@ public:
         return (dinfo.dev_type == HSDevType::Fast) ? EXTRA_SB_SIZE_FOR_FAST_DEVICE : EXTRA_SB_SIZE_FOR_DATA_DEVICE;
     }
     static uint32_t max_chunks_in_pdev(const dev_info& dinfo) {
-        uint64_t min_chunk_size =
-            (dinfo.dev_type == HSDevType::Fast) ? MIN_CHUNK_SIZE_FAST_DEVICE : MIN_CHUNK_SIZE_DATA_DEVICE;
-#ifdef _PRERELEASE
-        auto chunk_size = iomgr_flip::instance()->get_test_flip< long >("set_minimum_chunk_size");
-        if (chunk_size) { min_chunk_size = chunk_size.get(); }
-#endif
-        return (dinfo.dev_size - 1) / min_chunk_size + 1;
+        uint64_t min_c_size = min_chunk_size(dinfo.dev_type);
+        // Do not round up , for a device with 128MB and min_chunk_size = 16MB, we should get 8 chunks
+        // for a device with 100MB and min_chunk_size = 16MB, we should get 6 chunks, not 7.
+        return dinfo.dev_size / min_c_size;
     }
     static uint32_t min_chunk_size(HSDevType dtype) {
         uint64_t min_chunk_size = (dtype == HSDevType::Fast) ? MIN_CHUNK_SIZE_FAST_DEVICE : MIN_CHUNK_SIZE_DATA_DEVICE;
