@@ -491,7 +491,7 @@ public:
 
                 LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
                 g_helper->runner().set_task([this, block_size, db]() {
-                    static std::normal_distribution<> num_blks_gen{3.0, 2.0};
+                    static std::normal_distribution<> num_blks_gen{128.0, 0.0};
                     this->generate_writes(std::abs(std::round(num_blks_gen(g_re))) * block_size, block_size, db);
                 });
                 if (wait_for_commit) { g_helper->runner().execute().get(); }

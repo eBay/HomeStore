@@ -338,9 +338,11 @@ void RaftReplService::start_reaper_thread() {
             m_reaper_fiber = iomanager.iofiber_self();
 
             // Schedule the rdev garbage collector timer
+            LOGINFOMOD(replication, "Reaper Thread: scheduling GC every {} seconds", HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec));
             m_rdev_gc_timer_hdl = iomanager.schedule_thread_timer(
                 HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 * 1000, true /* recurring */,
                 nullptr, [this](void*) {
+                    LOGINFOMOD(replication, "Reaper Thread: Doing GC");
                     gc_repl_reqs();
                     gc_repl_devs();
                 });
