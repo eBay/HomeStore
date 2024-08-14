@@ -1,7 +1,7 @@
 from conan import ConanFile
 from conan.errors import ConanInvalidConfiguration
 from conan.tools.build import check_min_cppstd
-from conan.tools.cmake import CMakeToolchain, CMakeDeps, CMake, cmake_layout
+from conan.tools.cmake import CMakeToolchain, CMakeDeps, CMake
 from conan.tools.files import copy
 from os.path import join
 
@@ -9,7 +9,8 @@ required_conan_version = ">=1.60.0"
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "6.4.44"
+    version = "6.4.45"
+
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
     topics = ("ebay", "nublox")
@@ -63,7 +64,20 @@ class HomestoreConan(ConanFile):
         self.copy(root_package="sisl", pattern="*", dst="bin/scripts/python/flip/", src="bindings/flip/python/", keep_path=False)
 
     def layout(self):
-        cmake_layout(self)
+        self.folders.source = "."
+        self.folders.build = join("build", str(self.settings.build_type))
+        self.folders.generators = join(self.folders.build, "generators")
+
+        self.cpp.source.includedirs = ["src/include"]
+
+        self.cpp.build.libdirs = ["src"]
+
+        self.cpp.package.libs = ["homestore"]
+        self.cpp.package.includedirs = ["include"] # includedirs is already set to 'include' by
+        self.cpp.package.libdirs = ["lib"]
+
+        if not self.settings.arch in ['x86', 'x86_64']:
+            self.cpp.package.defines.append("NO_ISAL")
 
     def generate(self):
         # This generates "conan_toolchain.cmake" in self.generators_folder
@@ -104,10 +118,6 @@ class HomestoreConan(ConanFile):
         copy(self, "*.dll", self.build_folder, join(self.package_folder, "lib"), keep_path=False)
 
     def package_info(self):
-        self.cpp_info.libs = ["homestore"]
-        if not self.settings.arch in ['x86', 'x86_64']:
-            self.cpp_info.defines.append("NO_ISAL")
-
         if self.options.sanitize:
             self.cpp_info.sharedlinkflags.append("-fsanitize=address")
             self.cpp_info.exelinkflags.append("-fsanitize=address")
