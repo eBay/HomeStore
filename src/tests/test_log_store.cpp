@@ -495,6 +495,7 @@ public:
         m_helper.shutdown_homestore(cleanup);
         if (cleanup) {
             m_log_store_clients.clear();
+            std::unique_lock lock{m_completion_mtx};
             m_highest_log_idx.clear();
         }
     }
@@ -523,6 +524,7 @@ public:
     }
 
     logid_t highest_log_idx(logdev_id_t fid) {
+        std::unique_lock lock{m_completion_mtx};
         return m_highest_log_idx.count(fid) ? m_highest_log_idx[fid].load() : -1;
     }
 
