@@ -13,8 +13,8 @@ enable_testing()
 
 include (cmake/test_mode.cmake)
 
-if (DEFINED CONAN_BUILD_COVERAGE)
-  if (${CONAN_BUILD_COVERAGE})
+if (DEFINED BUILD_COVERAGE)
+  if (${BUILD_COVERAGE})
     include (cmake/CodeCoverage.cmake)
     APPEND_COVERAGE_COMPILER_FLAGS()
     SETUP_TARGET_FOR_COVERAGE_GCOVR_XML(NAME coverage EXECUTABLE ctest DEPENDENCIES )
