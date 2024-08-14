@@ -36,6 +36,10 @@ FreeBlkCacheQueue::FreeBlkCacheQueue(const SlabCacheConfig& cfg, BlkAllocMetrics
         blk_num_t sum{0};
         for (const auto& p : slab_cfg.m_level_distribution_pct) {
             const blk_num_t limit{static_cast< blk_num_t >((static_cast< double >(slab_cfg.max_entries) * p) / 100.0)};
+            if (limit == 0) {
+                BLKALLOC_LOG(WARN, "Slab config distribution is zero, skipping this layer");
+                continue;
+            }
             sum += limit;
             level_limits.push_back(limit);
         }
