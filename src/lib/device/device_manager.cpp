@@ -440,7 +440,13 @@ shared< Chunk > DeviceManager::create_chunk(HSDevType dev_type, uint32_t vdev_id
     // Create a chunk on any pdev of device type.
     for (const auto& dev : pdevs) {
         // Ordinal added in add_chunk.
-        chunk = dev->create_chunk(chunk_id, vdev_id, chunk_size, 0 /* ordinal */, data);
+        try {
+            chunk = dev->create_chunk(chunk_id, vdev_id, chunk_size, 0 /* ordinal */, data);
+        } catch (std::out_of_range const& e) {
+            HS_LOG(DEBUG, device, "can not create new chunk on dev {}, try next one!", dev->get_devname());
+            continue;
+        }
+
         if (chunk != nullptr) {
             pdev = dev;
             break;

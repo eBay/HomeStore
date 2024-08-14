@@ -231,14 +231,15 @@ std::vector< shared< Chunk > > PhysicalDev::create_chunks(const std::vector< uin
     std::unique_lock lg{m_chunk_op_mtx};
     auto chunks_remaining = chunk_ids.size();
     uint32_t cit{0};
+    uint8_t* buf{nullptr};
 
     try {
         while (chunks_remaining > 0) {
             auto b = m_chunk_info_slots->get_next_contiguous_n_reset_bits(0u, chunks_remaining);
             if (b.nbits == 0) { throw std::out_of_range("System has no room for additional chunk"); }
 
-            auto buf = hs_utils::iobuf_alloc(chunk_info::size * b.nbits, sisl::buftag::superblk,
-                                             m_pdev_info.dev_attr.align_size);
+            buf = hs_utils::iobuf_alloc(chunk_info::size * b.nbits, sisl::buftag::superblk,
+                                        m_pdev_info.dev_attr.align_size);
             auto ptr = buf;
             for (auto cslot = b.start_bit; cslot < b.start_bit + b.nbits; ++cslot, ++cit, ptr += chunk_info::size) {
                 chunk_info* cinfo = new (ptr) chunk_info();
@@ -255,7 +256,7 @@ std::vector< shared< Chunk > > PhysicalDev::create_chunks(const std::vector< uin
             write_super_block(buf, chunk_info::size * b.nbits, chunk_info_offset_nth(b.start_bit));
 
             hs_utils::iobuf_free(buf, sisl::buftag::superblk);
-
+            buf = nullptr;
             chunks_remaining -= b.nbits;
         }
 
@@ -264,6 +265,8 @@ std::vector< shared< Chunk > > PhysicalDev::create_chunks(const std::vector< uin
         write_super_block(bitmap_mem->cbytes(), bitmap_mem->size(), hs_super_blk::chunk_sb_offset());
     } catch (const std::out_of_range& e) {
         LOGERROR("Creation of chunks failed because of space, removing {} partially created chunks", ret_chunks.size());
+        // exception is thrown out by populate_chunk_info
+        if (buf) hs_utils::iobuf_free(buf, sisl::buftag::superblk);
         for (auto& chunk : ret_chunks) {
             do_remove_chunk(chunk);
         }
