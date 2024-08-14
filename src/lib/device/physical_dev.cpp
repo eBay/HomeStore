@@ -220,8 +220,9 @@ void PhysicalDev::submit_batch() { m_drive_iface->submit_batch(); }
 
 //////////////////////////// Chunk Creation/Load related methods /////////////////////////////////////////
 void PhysicalDev::format_chunks() {
-    m_chunk_info_slots = std::make_unique< sisl::Bitset >(std::max(1u, hs_super_blk::max_chunks_in_pdev(m_dev_info)));
-    auto bitmap_mem = m_chunk_info_slots->serialize(m_pdev_info.dev_attr.align_size);
+    m_chunk_info_slots = std::make_unique< sisl::Bitset >(std::max(1u, hs_super_blk::max_chunks_in_pdev(m_dev_info)),
+                                                          /* align size */ 4096);
+    auto bitmap_mem = m_chunk_info_slots->serialize(/* align size */ 4096);
     HS_REL_ASSERT_LE(bitmap_mem->size(), hs_super_blk::chunk_info_bitmap_size(m_dev_info),
                      "Chunk info serialized bitmap mismatch with expected size");
     write_super_block(bitmap_mem->cbytes(), bitmap_mem->size(), hs_super_blk::chunk_sb_offset());

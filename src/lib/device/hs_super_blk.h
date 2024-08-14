@@ -183,7 +183,7 @@ public:
     static uint64_t chunk_super_block_size(const dev_info& dinfo);
     static uint64_t chunk_info_bitmap_size(const dev_info& dinfo) {
         // Chunk bitmap area has bitmap of max_chunks rounded off to 4k page
-        return sisl::round_up(std::max(1u, hs_super_blk::max_chunks_in_pdev(dinfo) / 8), 4096);
+        return sisl::round_up(bitset_serialized::nbytes(hs_super_blk::max_chunks_in_pdev(dinfo)), 4096));
     }
 
     static uint64_t total_size(const dev_info& dinfo) { return total_used_size(dinfo) + future_padding_size(dinfo); }
