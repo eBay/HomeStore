@@ -144,10 +144,19 @@ public:
         /// @param buf : buffer pointing to the data being written
         /// @param size : size of buffer to be written
         /// @param offset : offset to be written
-        /// @return : On success, the number of bytes written is returned, or -1 on error.
-        void sync_pwrite(const uint8_t* buf, size_t size, off_t offset);
+        /// @return : error_code
+        std::error_code sync_pwrite(const uint8_t* buf, size_t size, off_t offset);
 
-        void sync_pwritev(const iovec* iov, int iovcnt, off_t offset);
+        /// @brief writes up to count bytes from the buffer starting at buf at offset offset. The cursor is not
+        /// changed. pwrite always use offset returned from alloc_next_append_blk to do the write;pwrite should not
+        /// across chunk boundaries because alloc_next_append_blk guarantees offset returned always doesn't across chunk
+        /// boundary;
+        ///
+        /// @param iov : the iovec that holds vector of data buffers
+        /// @param offset : offset to be written
+        /// @param offset : offset to be written
+        /// @return : error_code
+        std::error_code sync_pwritev(const iovec* iov, int iovcnt, off_t offset);
 
         /**
          * @brief : read up to count bytes into the buffer starting at buf.

@@ -261,7 +261,6 @@ public:
     log_group_header* header() { return reinterpret_cast< log_group_header* >(m_cur_log_buf); }
     const log_group_header* header() const { return reinterpret_cast< const log_group_header* >(m_cur_log_buf); }
     iovec_array const& iovecs() const { return m_iovecs; }
-    // uint32_t data_size() const { return header()->group_size - sizeof(log_group_header); }
     uint32_t actual_data_size() const { return m_actual_data_size; }
     uint32_t nrecords() const { return m_nrecords; }
 
@@ -293,9 +292,6 @@ public:
     off_t m_log_dev_offset;
 
     uint64_t m_flush_multiple_size{0};
-    Clock::time_point m_flush_finish_time;            // Time at which flush is completed
-    Clock::time_point m_post_flush_msg_rcvd_time;     // Time at which flush done message delivered
-    Clock::time_point m_post_flush_process_done_time; // Time at which entire log group cb is called
 
 private:
     log_group_footer* add_and_get_footer();
@@ -385,21 +381,6 @@ std::basic_ostream< charT, traits >& operator<<(std::basic_ostream< charT, trait
 }
 
 } // namespace homestore
-
-namespace fmt {
-template <>
-struct formatter< homestore::logdev_key > {
-    template < typename ParseContext >
-    constexpr auto parse(ParseContext& ctx) {
-        return ctx.begin();
-    }
-
-    template < typename FormatContext >
-    auto format(homestore::logdev_key const& k, FormatContext& ctx) {
-        return format_to(ctx.out(), "[idx={} dev_offset={}]", k.idx, k.dev_offset);
-    }
-};
-} // namespace fmt
 
 namespace homestore {
 using log_buffer = sisl::byte_view;
@@ -501,7 +482,6 @@ public:
     ~LogDevMetadata() = default;
 
     logdev_superblk* create(logdev_id_t id);
-    void destroy();
     void reset();
     std::vector< std::pair< logstore_id_t, logstore_superblk > > load();
     void persist();
@@ -530,6 +510,7 @@ public:
 
     void logdev_super_blk_found(const sisl::byte_view& buf, void* meta_cookie);
     void rollback_super_blk_found(const sisl::byte_view& buf, void* meta_cookie);
+    void destroy();
 
 private:
     bool resize_logdev_sb_if_needed();
@@ -540,7 +521,6 @@ private:
     }
 
     uint32_t store_capacity() const;
-    void remove_all_rollback_records(logstore_id_t id);
 
 private:
     superblk< logdev_superblk > m_sb;
@@ -557,8 +537,8 @@ class JournalVirtualDev;
 
 class log_stream_reader {
 public:
-    log_stream_reader(off_t device_cursor, JournalVirtualDev* vdev, shared< JournalVirtualDev::Descriptor > vdev_jd,
-                      uint64_t min_read_size);
+    log_stream_reader(off_t device_cursor, std::shared_ptr< JournalVirtualDev > vdev,
+                      shared< JournalVirtualDev::Descriptor > vdev_jd, uint64_t min_read_size);
     log_stream_reader(const log_stream_reader&) = delete;
     log_stream_reader& operator=(const log_stream_reader&) = delete;
     log_stream_reader(log_stream_reader&&) noexcept = delete;
@@ -572,7 +552,7 @@ private:
     sisl::byte_view read_next_bytes(uint64_t nbytes, bool& end_of_stream);
 
 private:
-    JournalVirtualDev* m_vdev;
+    std::shared_ptr< JournalVirtualDev > m_vdev;
     shared< JournalVirtualDev::Descriptor > m_vdev_jd; // Journal descriptor.
     sisl::byte_view m_cur_log_buf;
     off_t m_first_group_cursor;
@@ -586,36 +566,26 @@ struct logstore_info {
     bool append_mode;
     folly::SharedPromise< std::shared_ptr< HomeLogStore > > promise{};
 };
-struct truncate_req {
-    std::mutex mtx;
-    std::condition_variable cv;
-    bool wait_till_done{false};
-    bool dry_run{false};
-    device_truncate_cb_t cb;
-    std::unordered_map< logdev_id_t, logdev_key > m_trunc_upto_result;
-    int trunc_outstanding{0};
-};
 
 static std::string const logdev_sb_meta_name{"Logdev_sb"};
 static std::string const logdev_rollback_sb_meta_name{"Logdev_rollback_sb"};
+
+VENUM(flush_mode_t, uint32_t, // Various flush modes (can be or'ed together)
+      INLINE = 1 << 0,        // Allow flush inline with the append
+      TIMER = 1 << 1,         // Allow timer based automatic flush
+      EXPLICIT = 1 << 2,      // Allow explcitly user calling flush
+);
 
 class LogDev : public std::enable_shared_from_this< LogDev > {
     friend class HomeLogStore;
 
 public:
-    // NOTE: Possibly change these in future to include constant correctness
-    typedef std::function< void(logstore_id_t, logdev_key, logdev_key, uint32_t nremaining_in_batch, void*) >
-        log_append_comp_callback;
-    typedef std::function< void(logstore_id_t, logstore_seq_num_t, logdev_key, logdev_key, log_buffer, uint32_t) >
-        log_found_callback;
-    typedef std::function< void(logstore_id_t, const logstore_superblk&) > store_found_callback;
-    typedef std::function< bool(void) > flush_blocked_callback;
-
     static inline int64_t flush_data_threshold_size() {
         return HS_DYNAMIC_CONFIG(logstore.flush_threshold_size) - sizeof(log_group_header);
     }
 
-    LogDev(logdev_id_t logdev_id, JournalVirtualDev* vdev);
+    LogDev(logdev_id_t logdev_id,
+           flush_mode_t flush_mode = static_cast< flush_mode_t >(HS_DYNAMIC_CONFIG(logstore.flush_mode)));
     LogDev(const LogDev&) = delete;
     LogDev& operator=(const LogDev&) = delete;
     LogDev(LogDev&&) noexcept = delete;
@@ -627,8 +597,9 @@ public:
      * to the recovery. It is expected that all callbacks are registered before calling the start.
      *
      * @param format: Do we need to format the logdev or not.
+     * @param blk_store: The blk_store associated to this logdev
      */
-    void start(bool format);
+    void start(bool format, std::shared_ptr< JournalVirtualDev > vdev);
 
     /**
      * @brief Stop the logdev. It resets all the parameters it is using and thus can be started later
@@ -637,22 +608,16 @@ public:
     void stop();
 
     /**
+     * @brief return whether the logdev is stopped or not
+     *
+     */
+    bool is_stopped();
+
+    /**
      * @brief Destroy the logdev metablks.
      *
      */
     void destroy();
-
-    /**
-     * @brief Start the flush timer.
-     *
-     */
-    void start_timer();
-
-    /**
-     * @brief Stop the flush timer.
-     *
-     */
-    void stop_timer();
 
     /**
      * @brief Append the data to the log device asynchronously. The buffer that is passed is expected to be valid, till
@@ -668,33 +633,107 @@ public:
      * @return logid_t : log_idx of the log of the data.
      */
     logid_t append_async(logstore_id_t store_id, logstore_seq_num_t seq_num, const sisl::io_blob& data,
-                         void* cb_context, bool flush_wait = false);
+                         void* cb_context);
 
     /**
      * @brief Read the log id from the device offset
      *
-     * @param idx log_id to read
-     * @param dev_offset device offset of the log id which was provided upon append. This is needed to locate the log
-     * idx within the device. A log data can be looked up only by pair of log_id and dev_offset.
-     *
-     * @param record_header Pass the pointer to the header of the read record
+     * @param logdev_key : log_id and dev_offset pair to read
      *
      * @return log_buffer : Opaque structure which contains the data blob and its size. It is safe buffer and hence it
      * need not be freed and can be cheaply passed it around.
      */
-    log_buffer read(const logdev_key& key, serialized_log_record& record_header);
+    log_buffer read(const logdev_key& key);
 
     /**
-     * @brief Load the data from the blkstore starting with offset. This method loads data in bulk and then call
-     * the registered logfound_cb with key and buffer. NOTE: This method is not thread safe. It is expected to be called
-     * during recovery
+     * @brief Read the log id from the device offset
      *
-     * @param offset Log blkstore device offset.
+     * @param logdev_key : log_id and dev_offset pair to read
+     *
+     * @param record_header Pass the pointer to the header of the read record
      */
-    void load(uint64_t offset);
+    void read_record_header(const logdev_key& key, serialized_log_record& record_header);
 
-    // callback from blkstore, registered at vdev creation;
-    // void process_logdev_completions(const boost::intrusive_ptr< virtualdev_req >& vd_req);
+    /// @brief Flush the log device in case if pending data size is at least the threshold size. This is a blocking call
+    /// and hence it is required to run on thread/fiber which can run blocking io. If not run on such thread, it will
+    /// redirect the flush to a flush thread and run there.
+    ///
+    /// @param threshold_size [Optional]: Size in bytes after which it will flush, if set to -1, will use default size
+    ///
+    /// @return bool : True if it has flushed the data, false otherwise
+    bool flush_if_necessary(int64_t threshold_size = -1);
+
+    /// @brief : Look at all logstore and find out the safest point upto which it can truncate and truncate them.
+    ///
+    /// @return number of log records it has truncated
+    uint64_t truncate();
+
+    /**
+     * @brief Rollback the logid range specific to the given store id. This method persists the information
+     * synchronously to the underlying storage. Once rolledback those logids in this range are ignored (only for
+     * this logstore) during load.
+     *
+     * @param store_id : Store id whose logids are to be rolled back or invalidated
+     * @param id_range : Log id range to rollback/invalidate
+     */
+    void rollback(logstore_id_t store_id, logid_range_t id_range);
+
+    /**
+     * @brief This method get all the store ids that are registered already and out of them which are being garbaged
+     * and waiting to be garbage collected. Predominant use of this method is for validation and testing
+     *
+     * @param registered out - Reference to the vector where all registered ids are pushed
+     * @param garbage out - Reference to the vector where all garbage ids
+     */
+    void get_registered_store_ids(std::vector< logstore_id_t >& registered, std::vector< logstore_id_t >& garbage);
+
+    nlohmann::json dump_log_store(const log_dump_req& dum_req);
+    nlohmann::json get_status(int verbosity) const;
+
+    //////////////////// Logstore management ///////////////////////
+    /// @brief Create a new log store under this log device
+    /// @param append_mode Is this log store is append mode or not. If append mode, write_async call fails and only
+    /// append_async calls succeed.
+    ///
+    /// @return shared< HomeLogStore > : The newly created log store
+    shared< HomeLogStore > create_new_log_store(bool append_mode = false);
+
+    /// @brief Open the log store which was created under this log device. It expects that log store id is already
+    /// created. Behavior of opening a log store which was never created is unknown. One can create log store in
+    /// non-append mode, but upon restart, it can be opened in append_mode. Log store is not usable until the future is
+    /// armed with logstore. It is expected that caller calls this method before LogDev::start() is called, otherwise
+    /// unopened log devs and log stores are removed.
+    ///
+    /// @param store_id Store id to open the log store
+    /// @param append_mode Is this log store is append mode or not. If append mode, write_async call fails and only
+    /// append_async calls succeed.
+    /// @return future< shared< HomeLogStore > > : Future which will be set with the log store once it is opened
+    folly::Future< shared< HomeLogStore > > open_log_store(logstore_id_t store_id, bool append_mode);
+
+    /// @brief Remove the log store and its associated resources
+    /// @param store_id Store id that was created/opened
+    void remove_log_store(logstore_id_t store_id);
+
+    /// @return externally visible lock to avoid flush concurrently
+    auto flush_guard() { return std::unique_lock(m_flush_mtx); }
+
+    /// @brief do flush under the protection of flush guard
+    bool flush_under_guard();
+
+    ///////////////// Getters ///////////////////////
+    LogDevMetadata& log_dev_meta() { return m_logdev_meta; }
+    logdev_id_t get_id() const { return m_logdev_id; }
+    uint64_t get_flush_size_multiple() const { return m_flush_size_multiple; }
+
+private:
+    void start_timer();
+    void stop_timer();
+
+    bool allow_inline_flush() const { return uint32_cast(m_flush_mode) & uint32_cast(flush_mode_t::INLINE); }
+    bool allow_timer_flush() const { return uint32_cast(m_flush_mode) & uint32_cast(flush_mode_t::TIMER); }
+    bool allow_explicit_flush() const { return uint32_cast(m_flush_mode) & uint32_cast(flush_mode_t::EXPLICIT); }
+
+    void verify_log_group_header(const logid_t idx, const log_group_header* header);
 
     /**
      * @brief Reserve logstore id and persist if needed. It persists the entire map about the logstore id inside the
@@ -711,124 +750,11 @@ public:
      */
     void unreserve_store_id(logstore_id_t store_id);
 
-    /**
-     * @brief Is the given store id already reserved.
-     *
-     * @return true or false
-     */
-    bool is_reserved_store_id(logstore_id_t id);
-
-    /**
-     * @brief This method persist the store ids reserved/unreserved inside the vdev super block
-     */
-    void persist_store_ids();
-
-    /**
-     * @brief This method get all the store ids that are registered already and out of them which are being garbaged
-     * and waiting to be garbage collected. Predominant use of this method is for validation and testing
-     *
-     * @param registered out - Reference to the vector where all registered ids are pushed
-     * @param garbage out - Reference to the vector where all garbage ids
-     */
-    void get_registered_store_ids(std::vector< logstore_id_t >& registered, std::vector< logstore_id_t >& garbage);
-
-    crc32_t get_prev_crc() const { return m_last_crc; }
-
-    /**
-     * @brief This method attempts to block the log flush and then make a callback cb. If it is already blocked,
-     * then after previous flush is completed, it will make the callback (while log flush is still under blocked state)
-     *
-     * @param cb Callback
-     * @return true or false based on if it is able to block the flush right away.
-     */
-    bool run_under_flush_lock(const flush_blocked_callback& cb);
-
-    /**
-     * @brief Unblock the flush. While unblocking if there are other requests to block or any flush pending it first
-     * executes them before unblocking
-     */
-    void unlock_flush(bool do_flush = true);
-
-    /**
-     * @brief Rollback the logid range specific to the given store id. This method persists the information
-     * synchronously to the underlying storage. Once rolledback those logids in this range are ignored (only for
-     * this logstore) during load.
-     *
-     * @param store_id : Store id whose logids are to be rolled back or invalidated
-     * @param id_range : Log id range to rollback/invalidate
-     */
-    void rollback(logstore_id_t store_id, logid_range_t id_range);
-
-    void update_store_superblk(logstore_id_t idx, const logstore_superblk& meta, bool persist_now);
-
-    nlohmann::json dump_log_store(const log_dump_req& dum_req);
-    nlohmann::json get_status(int verbosity) const;
-
-    bool flush_if_needed(int64_t threshold_size = -1);
-
-    bool is_aligned_buf_needed(size_t size) const {
-        return (log_record::is_size_inlineable(size, m_flush_size_multiple) == false);
-    }
-
-    uint64_t get_flush_size_multiple() const { return m_flush_size_multiple; }
-    logdev_key get_last_flush_ld_key() const { return logdev_key{m_last_flush_idx, m_last_flush_dev_offset}; }
-
-    LogDevMetadata& log_dev_meta() { return m_logdev_meta; }
-    static bool can_flush_in_this_thread();
-
-    // Logstore management.
-    std::shared_ptr< HomeLogStore > create_new_log_store(bool append_mode = false);
-    folly::Future< shared< HomeLogStore > > open_log_store(logstore_id_t store_id, bool append_mode);
-    bool close_log_store(logstore_id_t store_id) {
-        // TODO: Implement this method
-        return true;
-    }
-    void remove_log_store(logstore_id_t store_id);
-    void on_io_completion(logstore_id_t id, logdev_key ld_key, logdev_key flush_idx, uint32_t nremaining_in_batch,
-                          void* ctx);
+    void on_flush_completion(LogGroup* lg);
     void on_log_store_found(logstore_id_t store_id, const logstore_superblk& sb);
+    void handle_unopened_log_stores(bool format);
     void on_logfound(logstore_id_t id, logstore_seq_num_t seq_num, logdev_key ld_key, logdev_key flush_ld_key,
                      log_buffer buf, uint32_t nremaining_in_batch);
-    void on_batch_completion(HomeLogStore* log_store, uint32_t nremaining_in_batch, logdev_key flush_ld_key);
-
-    /**
-     * Truncates the device under lock.
-     *
-     * This function is responsible for truncating the device based on the provided truncate request.
-     * The truncation operation is performed under a lock to ensure thread safety.
-     *
-     * @param treq The truncate request to be processed.
-     */
-    void device_truncate_under_lock(const std::shared_ptr< truncate_req > treq);
-
-    void handle_unopened_log_stores(bool format);
-    logdev_id_t get_id() { return m_logdev_id; }
-    shared< JournalVirtualDev::Descriptor > get_journal_descriptor() const { return m_vdev_jd; }
-    bool is_stopped() { return m_stopped; }
-
-    // bool ready_for_truncate() const { return m_vdev_jd->ready_for_truncate(); }
-
-private:
-    /**
-     * @brief : truncate up to input log id;
-     *
-     * @param key : the key containing log id that needs to be truncate up to;
-     * @return number of records to truncate
-     */
-    uint64_t truncate(const logdev_key& key);
-
-    /**
-     * Truncates the device.
-     *
-     * This function truncates the device and returns the corresponding logdev_key.
-     *
-     * @param dry_run If set to true, the function performs a dry run without actually truncating the device, it only
-     * updates the corresponding truncation barriers, pretending the truncation happened without actually discarding the
-     * log entries on device.
-     *
-     * @return The logdev_key representing the truncated device.
-     */
-    logdev_key do_device_truncate(bool dry_run = false);
 
     LogGroup* make_log_group(uint32_t estimated_records) {
         m_log_group_pool[m_log_group_idx].reset(estimated_records);
@@ -838,73 +764,53 @@ private:
     void free_log_group(LogGroup* lg) { m_log_group_idx = !m_log_group_idx; }
 
     LogGroup* prepare_flush(int32_t estimated_record);
-
-    void do_flush(LogGroup* lg);
-    void do_flush_write(LogGroup* lg);
-    void flush_by_size(uint32_t min_threshold, uint32_t new_record_size = 0, logid_t new_idx = -1);
-    void on_flush_completion(LogGroup* lg);
     void do_load(off_t offset);
-
-#if 0
-    log_group_header* read_validate_header(uint8_t* buf, uint32_t size, bool* read_more);
-    sisl::byte_array read_next_header(uint32_t max_buf_reads);
-#endif
-
-    void _persist_info_block();
     void assert_next_pages(log_stream_reader& lstream);
-    void set_flush_status(bool flush_status);
-    bool get_flush_status();
+
+    /// @brief force to flush the log device
+    /// @return whether real flush is done
+    bool flush();
+
+    bool can_flush_in_this_thread();
 
 private:
-    std::unique_ptr< sisl::StreamTracker< log_record > >
-        m_log_records;                              // The container which stores all in-memory log records
-    std::atomic< logid_t > m_log_idx{0};            // Generator of log idx
-    std::atomic< int64_t > m_pending_flush_size{0}; // How much flushable logs are pending
-    std::atomic< bool > m_is_flushing{false}; // Is LogDev currently flushing (so far supports one flusher at a time)
-    bool m_stopped{true}; // Is Logdev stopped. We don't need lock here, because it is updated under flush lock
+    std::unique_ptr< sisl::StreamTracker< log_record > > m_log_records; // Container stores all in-memory log records
+    std::atomic< logid_t > m_log_idx{0};                                // Generator of log idx
+    std::atomic< int64_t > m_pending_flush_size{0};                     // How much flushable logs are pending
+    bool m_stopped{false}; // Is Logdev stopped. We don't need lock here, because it is updated under flush lock
     logdev_id_t m_logdev_id;
-    JournalVirtualDev* m_vdev{nullptr};
+    std::shared_ptr< JournalVirtualDev > m_vdev;
     shared< JournalVirtualDev::Descriptor > m_vdev_jd; // Journal descriptor.
     HomeStoreSafePtr m_hs;                             // Back pointer to homestore
+    flush_mode_t m_flush_mode;
 
     folly::SharedMutexWritePriority m_store_map_mtx;
     std::unordered_map< logstore_id_t, logstore_info > m_id_logstore_map;
     std::unordered_map< logstore_id_t, uint64_t > m_unopened_store_io;
     std::unordered_set< logstore_id_t > m_unopened_store_id;
-    std::unordered_map< logstore_id_t, logid_t > m_last_flush_info;
-
     std::multimap< logid_t, logstore_id_t > m_garbage_store_ids;
     Clock::time_point m_last_flush_time;
 
     logid_t m_last_flush_idx{-1}; // Track last flushed, last device offset and truncated log idx
-    off_t m_last_flush_dev_offset{0};
-    logid_t m_last_truncate_idx{-1};
-
+    logid_t m_last_truncate_idx{std::numeric_limits< logid_t >::min()}; // logdev truncate up to this idx
     crc32_t m_last_crc{INVALID_CRC32_VALUE};
-    log_append_comp_callback m_append_comp_cb{nullptr};
-    log_found_callback m_logfound_cb{nullptr};
-    store_found_callback m_store_found_cb{nullptr};
 
     // LogDev Info block related fields
     std::mutex m_meta_mutex;
     LogDevMetadata m_logdev_meta;
-
-    // Block flush Q request Q
-    std::mutex m_block_flush_q_mutex;
-    std::condition_variable m_block_flush_q_cv;
-    std::mutex m_comp_mutex;
-    std::vector< flush_blocked_callback >* m_block_flush_q{nullptr};
-
-    void* m_sb_cookie{nullptr};
     uint64_t m_flush_size_multiple{0};
 
     // Pool for creating log group
     LogGroup m_log_group_pool[max_log_group];
     uint32_t m_log_group_idx{0};
-    std::atomic< bool > m_flush_status = false;
     // Timer handle
     iomgr::timer_handle_t m_flush_timer_hdl{iomgr::null_timer_handle};
 
+    // if we support inline flush mode, we might schedule flush operation in the same thread(for exampel, in the
+    // callback of the append_async we schedule another flush.), so we need the lock to be locked for multitimes in the
+    // same thread.
+    iomgr::FiberManagerLib::mutex m_flush_mtx;
+    std::atomic_uint64_t m_pending_callback{0};
 }; // LogDev
 
 } // namespace homestore

@@ -115,7 +115,7 @@ void LogStoreService::start(bool format) {
     start_threads();
 
     for (auto& [logdev_id, logdev] : m_id_logdev_map) {
-        logdev->start(format);
+        logdev->start(format, m_logdev_vdev);
     }
 }
 
@@ -140,7 +140,7 @@ logdev_id_t LogStoreService::create_new_logdev() {
     folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
     logdev_id_t logdev_id = get_next_logdev_id();
     auto logdev = create_new_logdev_internal(logdev_id);
-    logdev->start(true /* format */);
+    logdev->start(true /* format */, m_logdev_vdev);
     COUNTER_INCREMENT(m_metrics, logdevs_count, 1);
     HS_LOG(INFO, logstore, "Created log_dev={}", logdev_id);
     return logdev_id;
@@ -181,7 +181,7 @@ void LogStoreService::delete_unopened_logdevs() {
 }
 
 std::shared_ptr< LogDev > LogStoreService::create_new_logdev_internal(logdev_id_t logdev_id) {
-    auto logdev = std::make_shared< LogDev >(logdev_id, m_logdev_vdev.get());
+    auto logdev = std::make_shared< LogDev >(logdev_id);
     const auto it = m_id_logdev_map.find(logdev_id);
     HS_REL_ASSERT((it == m_id_logdev_map.end()), "logdev id {} already exists", logdev_id);
     m_id_logdev_map.insert(std::make_pair<>(logdev_id, logdev));
@@ -192,7 +192,7 @@ void LogStoreService::open_logdev(logdev_id_t logdev_id) {
     folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
     const auto it = m_id_logdev_map.find(logdev_id);
     if (it == m_id_logdev_map.end()) {
-        auto logdev = std::make_shared< LogDev >(logdev_id, m_logdev_vdev.get());
+        auto logdev = std::make_shared< LogDev >(logdev_id);
         m_id_logdev_map.emplace(logdev_id, logdev);
         LOGDEBUGMOD(logstore, "log_dev={} does not exist, created!", logdev_id);
     }
@@ -231,7 +231,7 @@ void LogStoreService::logdev_super_blk_found(const sisl::byte_view& buf, void* m
             logdev = it->second;
             HS_LOG(DEBUG, logstore, "Log dev superblk found log_dev={}", id);
         } else {
-            logdev = std::make_shared< LogDev >(id, m_logdev_vdev.get());
+            logdev = std::make_shared< LogDev >(id);
             m_id_logdev_map.emplace(id, logdev);
             // when recover logdev meta blk, we get all the logdevs from the superblk. we put them in m_unopened_logdev
             // too. after logdev meta blks are all recovered, when a client opens a logdev, we remove it from
@@ -290,27 +290,15 @@ void LogStoreService::remove_log_store(logdev_id_t logdev_id, logstore_id_t stor
     COUNTER_DECREMENT(m_metrics, logstores_count, 1);
 }
 
-void LogStoreService::device_truncate(const device_truncate_cb_t& cb, bool wait_till_done, bool dry_run) {
-    const auto treq = std::make_shared< truncate_req >();
-    treq->wait_till_done = wait_till_done;
-    treq->dry_run = dry_run;
-    treq->cb = cb;
-    if (treq->wait_till_done) { treq->trunc_outstanding = m_id_logdev_map.size(); }
-
+void LogStoreService::device_truncate() {
     // TODO: make device_truncate_under_lock return future and do collectAllFutures;
-    for (auto& [id, logdev] : m_id_logdev_map) {
-        logdev->device_truncate_under_lock(treq);
-    }
-
-    if (treq->wait_till_done) {
-        std::unique_lock< std::mutex > lk{treq->mtx};
-        treq->cv.wait(lk, [&] { return (treq->trunc_outstanding == 0); });
-    }
+    for (auto& [id, logdev] : m_id_logdev_map)
+        logdev->truncate();
 }
 
-void LogStoreService::flush_if_needed() {
+void LogStoreService::flush() {
     for (auto& [id, logdev] : m_id_logdev_map) {
-        logdev->flush_if_needed();
+        logdev->flush_under_guard();
     }
 }
 
@@ -334,22 +322,9 @@ void LogStoreService::start_threads() {
                                      ctx->cv.notify_one();
                                  }
                              });
-
-    m_truncate_fiber = nullptr;
-    iomanager.create_reactor("logstore_truncater", iomgr::INTERRUPT_LOOP, 2 /* num_fibers */,
-                             [this, ctx](bool is_started) {
-                                 if (is_started) {
-                                     m_truncate_fiber = iomanager.sync_io_capable_fibers()[0];
-                                     {
-                                         std::unique_lock< std::mutex > lk{ctx->mtx};
-                                         ++(ctx->thread_cnt);
-                                     }
-                                     ctx->cv.notify_one();
-                                 }
-                             });
     {
         std::unique_lock< std::mutex > lk{ctx->mtx};
-        ctx->cv.wait(lk, [ctx] { return (ctx->thread_cnt == 2); });
+        ctx->cv.wait(lk, [ctx] { return (ctx->thread_cnt == 1); });
     }
 }
 
@@ -398,6 +373,7 @@ LogStoreServiceMetrics::LogStoreServiceMetrics() : sisl::MetricsGroup("LogStores
     REGISTER_HISTOGRAM(logdev_flush_done_msg_time_ns, "Logdev flush completion msg time in ns");
     REGISTER_HISTOGRAM(logdev_post_flush_processing_latency,
                        "Logdev post flush processing (including callbacks) latency");
+    REGISTER_HISTOGRAM(logdev_flush_time_us, "time elapsed since last flush time in us");
     REGISTER_HISTOGRAM(logdev_fsync_time_us, "Logdev fsync completion time in us");
 
     register_me_to_farm();

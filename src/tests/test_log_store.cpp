@@ -165,7 +165,7 @@ public:
         }
 
         // Because of restart in tests, we have torce the flush of log entries.
-        m_log_store->get_logdev()->flush_if_needed(1);
+        m_log_store->get_logdev()->flush_if_necessary(1);
     }
 
     void iterate_validate(const bool expect_all_completed = false) {
@@ -273,25 +273,7 @@ public:
         }
     }
 
-    logstore_seq_num_t get_truncated_upto() {
-        std::mutex mtx;
-        std::condition_variable cv;
-        bool get_trunc_upto = false;
-        logstore_seq_num_t trunc_upto = 0;
-        m_log_store->get_logdev()->run_under_flush_lock([this, &trunc_upto, &get_trunc_upto, &mtx, &cv]() {
-            // In case we run truncation in parallel to read, it is possible truncate moved, so adjust
-            // the truncated_upto accordingly.
-            trunc_upto = m_log_store->truncated_upto();
-            std::unique_lock lock(mtx);
-            get_trunc_upto = true;
-            cv.notify_one();
-            return true;
-        });
-
-        std::unique_lock lock(mtx);
-        cv.wait(lock, [&get_trunc_upto] { return get_trunc_upto == true; });
-        return trunc_upto;
-    }
+    logstore_seq_num_t get_truncated_upto() { return m_log_store->truncated_upto(); }
 
     void fill_hole_and_validate() {
         const auto start = m_log_store->truncated_upto();
@@ -321,7 +303,8 @@ public:
         LOGINFO("Totally recovered {} non-truncated lsns and {} truncated lsns for store {} log_dev {}",
                 m_n_recovered_lsns, m_n_recovered_truncated_lsns, m_log_store->get_store_id(),
                 m_log_store->get_logdev()->get_id());
-        if (m_n_recovered_lsns != (m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1)) {
+        if (m_truncated_upto_lsn.load() > 0 &&
+            m_n_recovered_lsns != (m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1)) {
             EXPECT_EQ(m_n_recovered_lsns, m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1)
                 << "Recovered " << m_n_recovered_lsns << " valid lsns for store " << m_log_store->get_store_id()
                 << " Expected to have " << m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1
@@ -331,26 +314,13 @@ public:
     }
 
     void rollback_validate(uint32_t num_lsns_to_rollback) {
-        std::mutex mtx;
-        std::condition_variable cv;
-        bool rollback_done = false;
         auto const upto_lsn = m_cur_lsn.fetch_sub(num_lsns_to_rollback) - num_lsns_to_rollback - 1;
-        m_log_store->rollback_async(upto_lsn, [&](logstore_seq_num_t) {
-            ASSERT_EQ(m_log_store->get_contiguous_completed_seq_num(-1), upto_lsn)
-                << "Last completed seq num is not reset after rollback";
-            ASSERT_EQ(m_log_store->get_contiguous_issued_seq_num(-1), upto_lsn)
-                << "Last issued seq num is not reset after rollback";
-            read_validate(true);
-            {
-                std::unique_lock lock(mtx);
-                rollback_done = true;
-            }
-            cv.notify_one();
-        });
-
-        // We wait till async rollback is finished as we do validation.
-        std::unique_lock lock(mtx);
-        cv.wait(lock, [&rollback_done] { return rollback_done == true; });
+        m_log_store->rollback(upto_lsn);
+        ASSERT_EQ(m_log_store->get_contiguous_completed_seq_num(-1), upto_lsn)
+            << "Last completed seq num is not reset after rollback";
+        ASSERT_EQ(m_log_store->get_contiguous_issued_seq_num(-1), upto_lsn)
+            << "Last issued seq num is not reset after rollback";
+        read_validate(true);
     }
 
     void read(const logstore_seq_num_t lsn) {
@@ -379,7 +349,7 @@ public:
         m_truncated_upto_lsn = lsn;
     }
 
-    void flush() { m_log_store->flush_sync(); }
+    void flush() { m_log_store->flush(); }
 
     bool has_all_lsns_truncated() const { return (m_truncated_upto_lsn.load() == (m_cur_lsn.load() - 1)); }
 
@@ -508,13 +478,13 @@ public:
                 });
 
             std::vector< logdev_id_t > logdev_id_vec;
-            for (uint32_t i{0}; i < n_log_stores; ++i) {
+            for (uint32_t i{0}; i < n_log_devs; ++i) {
                 logdev_id_vec.push_back(logstore_service().create_new_logdev());
             }
 
             for (uint32_t i{0}; i < n_log_stores; ++i) {
                 m_log_store_clients.push_back(std::make_unique< SampleLogStoreClient >(
-                    logdev_id_vec[i], bind_this(SampleDB::on_log_insert_completion, 3)));
+                    logdev_id_vec[i % n_log_devs], bind_this(SampleDB::on_log_insert_completion, 3)));
             }
             SampleLogStoreClient::s_max_flush_multiple =
                 logstore_service().get_logdev(logdev_id_vec[0])->get_flush_size_multiple();
@@ -525,13 +495,18 @@ public:
         m_helper.shutdown_homestore(cleanup);
         if (cleanup) {
             m_log_store_clients.clear();
+            std::unique_lock lock{m_completion_mtx};
             m_highest_log_idx.clear();
         }
     }
 
     void on_log_insert_completion(logdev_id_t fid, logstore_seq_num_t lsn, logdev_key ld_key) {
-        if (m_highest_log_idx.count(fid) == 0) { m_highest_log_idx[fid] = std::atomic{-1}; }
-        atomic_update_max(m_highest_log_idx[fid], ld_key.idx);
+        {
+            std::unique_lock lock{m_completion_mtx};
+            if (m_highest_log_idx.count(fid) == 0) { m_highest_log_idx[fid] = std::atomic{-1}; }
+            atomic_update_max(m_highest_log_idx[fid], ld_key.idx);
+        }
+
         if (m_io_closure) m_io_closure(fid, lsn, ld_key);
     }
 
@@ -549,20 +524,19 @@ public:
     }
 
     logid_t highest_log_idx(logdev_id_t fid) {
+        std::unique_lock lock{m_completion_mtx};
         return m_highest_log_idx.count(fid) ? m_highest_log_idx[fid].load() : -1;
     }
 
 private:
-    const static std::string s_fpath_root;
     std::vector< std::string > m_dev_names;
     std::function< void() > m_on_schedule_io_cb;
     test_log_store_comp_cb_t m_io_closure;
     std::vector< std::unique_ptr< SampleLogStoreClient > > m_log_store_clients;
     std::map< logdev_id_t, std::atomic< logid_t > > m_highest_log_idx;
     test_common::HSTestHelper m_helper;
+    std::mutex m_completion_mtx;
 };
-
-const std::string SampleDB::s_fpath_root{"/tmp/log_store_dev_"};
 
 class LogStoreTest : public ::testing::Test {
 public:
@@ -574,8 +548,8 @@ public:
     virtual ~LogStoreTest() override = default;
 
 protected:
-    virtual void SetUp() override {};
-    virtual void TearDown() override {};
+    virtual void SetUp() override { SampleDB::instance().start_homestore(); };
+    virtual void TearDown() override { SampleDB::instance().shutdown(); };
 
     void init(uint64_t n_total_records, const std::vector< std::pair< size_t, int > >& inp_freqs = {}) {
         // m_nrecords_waiting_to_issue = std::lround(n_total_records / _batch_size) * _batch_size;
@@ -735,7 +709,7 @@ protected:
                 ++skip_truncation;
                 continue;
             }
-            lsc->truncate(lsc->m_log_store->get_contiguous_completed_seq_num(-1));
+            lsc->truncate(c_seq_num);
             lsc->read_validate();
         }
 
@@ -744,42 +718,41 @@ protected:
             return;
         }
 
-        bool failed{false};
-        logstore_service().device_truncate(
-            [this, is_parallel_to_write, &failed](auto& trunc_lds) {
-                bool expect_forward_progress{true};
-                uint32_t n_fully_truncated{0};
-                if (is_parallel_to_write) {
-                    for (const auto& lsc : SampleDB::instance().m_log_store_clients) {
-                        if (lsc->has_all_lsns_truncated()) ++n_fully_truncated;
-                    }
+        logstore_service().device_truncate();
 
-                    // While inserts are going on, truncation can guaranteed to be forward progressed if none of the
-                    // log stores are fully truncated. If all stores are fully truncated, its obvious no progress,
-                    // but even if one of the store is fully truncated, then it might be possible that logstore is
-                    // holding lowest logdev location and waiting for next flush to finish to move the safe logdev
-                    // location.
-                    expect_forward_progress = (n_fully_truncated == 0);
-                }
+        bool expect_forward_progress{true};
+        uint32_t n_fully_truncated{0};
+        if (is_parallel_to_write) {
+            for (const auto& lsc : SampleDB::instance().m_log_store_clients) {
+                if (lsc->has_all_lsns_truncated()) ++n_fully_truncated;
+            }
 
-                if (expect_forward_progress) {
-                    for (auto [fid, trunc_loc] : trunc_lds) {
-                        if (trunc_loc == logdev_key::out_of_bound_ld_key()) {
-                            LOGINFO("No forward progress for device truncation yet.");
-                        } else {
-                            // Validate the truncation is actually moving forward
-                            auto idx = m_truncate_log_idx.count(fid) ? m_truncate_log_idx[fid].load() : -1;
-                            if (trunc_loc.idx <= idx) { failed = true; }
-                            ASSERT_GT(trunc_loc.idx, idx);
-                            m_truncate_log_idx[fid].store(trunc_loc.idx);
-                        }
-                    }
+            // While inserts are going on, truncation can guaranteed to be forward progressed if none of the
+            // log stores are fully truncated. If all stores are fully truncated, its obvious no progress,
+            // but even if one of the store is fully truncated, then it might be possible that logstore is
+            // holding lowest logdev location and waiting for next flush to finish to move the safe logdev
+            // location.
+            expect_forward_progress = (n_fully_truncated == 0);
+        }
+
+        if (expect_forward_progress) {
+            // we have multiple log_store for each logdev, so we need to update the highest truncated lsn and then do
+            // the verification
+            for (const auto& lsc : SampleDB::instance().m_log_store_clients) {
+                auto fid = lsc->m_log_store->get_logdev()->get_id();
+                auto trunc_loc = lsc->m_log_store->get_trunc_ld_key();
+                if (trunc_loc == logdev_key::out_of_bound_ld_key()) {
+                    LOGINFO("No forward progress for device truncation yet.")
                 } else {
-                    LOGINFO("Do not expect forward progress for device truncation");
+                    auto idx = m_truncate_log_idx.count(fid) ? m_truncate_log_idx[fid].load() : -1;
+                    if (trunc_loc.idx > m_truncate_log_idx[fid].load()) {
+                        m_truncate_log_idx[fid].store(trunc_loc.idx);
+                    }
                 }
-            },
-            true /* wait_till_done */);
-        ASSERT_FALSE(failed);
+            }
+        } else {
+            LOGINFO("Do not expect forward progress for device truncation");
+        }
 
         for (auto& logdev : logstore_service().get_all_logdevs()) {
             auto fid = logdev->get_id();
@@ -790,6 +763,7 @@ protected:
                 it = m_garbage_stores_upto[fid].erase(it);
             }
         }
+
         validate_num_stores();
     }
 
@@ -965,8 +939,6 @@ TEST_F(LogStoreTest, BurstRandInsertThenTruncate) {
     }
 }
 
-// TODO evaluate this test is valid and enable after fixing the flush lock.
-#if 0
 TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
     const auto num_records = SISL_OPTIONS["num_records"].as< uint32_t >();
     const auto iterations = SISL_OPTIONS["iterations"].as< uint32_t >();
@@ -1004,7 +976,6 @@ TEST_F(LogStoreTest, BurstSeqInsertAndTruncateInParallel) {
         this->truncate_validate();
     }
 }
-#endif
 
 TEST_F(LogStoreTest, RandInsertsWithHoles) {
     const auto num_records = SISL_OPTIONS["num_records"].as< uint32_t >();
@@ -1122,7 +1093,7 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
         this->iterate_validate(true);
 
         LOGINFO("Step 5: Restart homestore");
-        SampleDB::instance().start_homestore(true /* restart */);
+        SampleDB::instance().start_homestore(true);
         this->recovery_validate();
         this->init(num_records);
 
@@ -1130,7 +1101,7 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
         this->read_validate(true);
 
         LOGINFO("Step 6: Restart homestore again to validate recovery on consecutive restarts");
-        SampleDB::instance().start_homestore(true /* restart */);
+        SampleDB::instance().start_homestore(true);
         this->recovery_validate();
         this->init(num_records);
 
@@ -1147,7 +1118,7 @@ TEST_F(LogStoreTest, ThrottleSeqInsertThenRecover) {
         this->iterate_validate(true);
 
         LOGINFO("Step 10: Restart homestore again to validate recovery after inserts");
-        SampleDB::instance().start_homestore(true /* restart */);
+        SampleDB::instance().start_homestore(true);
         this->recovery_validate();
         this->init(num_records);
 
@@ -1263,8 +1234,7 @@ TEST_F(LogStoreTest, WriteSyncThenRead) {
 
             bool io_memory{false};
             auto* d = SampleLogStoreClient::prepare_data(i, io_memory);
-            const bool succ = tmp_log_store->write_sync(i, {uintptr_cast(d), d->total_size(), false});
-            EXPECT_TRUE(succ);
+            tmp_log_store->write_and_flush(i, {uintptr_cast(d), d->total_size(), false});
             LOGINFO("Written sync data for LSN -> {}", i);
 
             if (io_memory) {
@@ -1292,7 +1262,8 @@ SISL_OPTIONS_ENABLE(logging, test_log_store, iomgr, test_common_setup)
 SISL_OPTION_GROUP(test_log_store,
                   (num_logdevs, "", "num_logdevs", "number of log devs",
                    ::cxxopts::value< uint32_t >()->default_value("4"), "number"),
-                  (num_logstores, "", "num_logstores", "number of log stores",
+                  (num_logstores, "", "num_logstores",
+                   "number of log stores in all, they will spread to each logdev evenly",
                    ::cxxopts::value< uint32_t >()->default_value("16"), "number"),
                   (num_records, "", "num_records", "number of record to test",
                    ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
@@ -1307,9 +1278,5 @@ int main(int argc, char* argv[]) {
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
     sisl::logging::SetModuleLogLevel("logstore", spdlog::level::level_enum::trace);
     sisl::logging::SetModuleLogLevel("journalvdev", spdlog::level::level_enum::debug);
-
-    SampleDB::instance().start_homestore();
-    const int ret = RUN_ALL_TESTS();
-    SampleDB::instance().shutdown(SISL_OPTIONS["num_devs"].as< uint32_t >());
-    return ret;
+    return RUN_ALL_TESTS();
 }

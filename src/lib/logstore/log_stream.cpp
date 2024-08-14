@@ -23,7 +23,7 @@
 namespace homestore {
 SISL_LOGGING_DECL(logstore)
 
-log_stream_reader::log_stream_reader(off_t device_cursor, JournalVirtualDev* vdev,
+log_stream_reader::log_stream_reader(off_t device_cursor, shared< JournalVirtualDev > vdev,
                                      shared< JournalVirtualDev::Descriptor > vdev_jd, uint64_t read_size_multiple) :
         m_vdev{vdev},
         m_vdev_jd{std::move(vdev_jd)},
@@ -61,8 +61,8 @@ read_again:
     HS_REL_ASSERT_GE(m_cur_log_buf.size(), m_read_size_multiple);
     const auto* header = r_cast< log_group_header const* >(m_cur_log_buf.bytes());
     if (header->magic_word() != LOG_GROUP_HDR_MAGIC) {
-        LOGERROR("Logdev data not seeing magic at pos {}, must have come to end of log_dev={}",
-                 m_vdev_jd->dev_offset(m_cur_read_bytes), m_vdev_jd->logdev_id());
+        LOGDEBUGMOD(logstore, "Logdev data not seeing magic at pos {}, must have come to end of log_dev={}",
+                    m_vdev_jd->dev_offset(m_cur_read_bytes), m_vdev_jd->logdev_id());
         *out_dev_offset = m_vdev_jd->dev_offset(m_cur_read_bytes);
         // move it by dma boundary if header is not valid
         m_prev_crc = 0;
@@ -86,8 +86,9 @@ read_again:
     // compare it with prev crc
     if (m_prev_crc != 0 && m_prev_crc != header->prev_grp_crc) {
         // we reached at the end
-        LOGERROR("we have reached the end. crc doesn't match offset {} prev crc {} header prev crc {} log_dev={}",
-                 m_vdev_jd->dev_offset(m_cur_read_bytes), header->prev_grp_crc, m_prev_crc, m_vdev_jd->logdev_id());
+        LOGDEBUGMOD(logstore,
+                    "we have reached the end. crc doesn't match offset {} prev crc {} header prev crc {} log_dev={}",
+                    m_vdev_jd->dev_offset(m_cur_read_bytes), header->prev_grp_crc, m_prev_crc, m_vdev_jd->logdev_id());
         *out_dev_offset = m_vdev_jd->dev_offset(m_cur_read_bytes);
         if (!m_vdev_jd->is_offset_at_last_chunk(*out_dev_offset)) {
             HS_REL_ASSERT(0, "data is corrupted {}", m_vdev_jd->logdev_id());
@@ -164,7 +165,7 @@ sisl::byte_view log_stream_reader::group_in_next_page() {
 }
 
 sisl::byte_view log_stream_reader::read_next_bytes(uint64_t nbytes, bool& end_of_stream) {
-    // TO DO: Might need to address alignment based on data or fast type
+    // TODO: Might need to address alignment based on data or fast type
     const auto prev_pos = m_vdev_jd->seeked_pos();
     auto sz_to_read = m_vdev_jd->sync_next_read(nullptr, nbytes);
     if (sz_to_read == -1) {

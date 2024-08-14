@@ -32,7 +32,6 @@
 #include <nlohmann/json.hpp>
 
 namespace homestore {
-
 ///////////////////// All typedefs ///////////////////////////////
 class logstore_req;
 class HomeLogStore;
@@ -50,7 +49,6 @@ typedef std::function< void(logstore_seq_num_t, sisl::io_blob&, logdev_key, void
 typedef std::function< void(logstore_seq_num_t, log_buffer, void*) > log_found_cb_t;
 typedef std::function< void(std::shared_ptr< HomeLogStore >) > log_store_opened_cb_t;
 typedef std::function< void(std::shared_ptr< HomeLogStore >, logstore_seq_num_t) > log_replay_done_cb_t;
-typedef std::function< void(const std::unordered_map< logdev_id_t, logdev_key >&) > device_truncate_cb_t;
 
 typedef int64_t logid_t;
 
@@ -58,8 +56,7 @@ struct logdev_key {
     logid_t idx;
     off_t dev_offset;
 
-    constexpr logdev_key(const logid_t idx = std::numeric_limits< logid_t >::min(),
-                         const off_t dev_offset = std::numeric_limits< uint64_t >::min()) :
+    constexpr logdev_key(const logid_t idx = -1, const off_t dev_offset = std::numeric_limits< uint64_t >::min()) :
             idx{idx}, dev_offset{dev_offset} {}
     logdev_key(const logdev_key&) = default;
     logdev_key& operator=(const logdev_key&) = default;
@@ -72,11 +69,11 @@ struct logdev_key {
     operator bool() const { return is_valid(); }
     bool is_valid() const { return !is_lowest() && !is_highest(); }
 
-    bool is_lowest() const { return (idx == std::numeric_limits< logid_t >::min()); }
+    bool is_lowest() const { return (idx == -1); }
     bool is_highest() const { return (idx == std::numeric_limits< logid_t >::max()); }
 
     void set_lowest() {
-        idx = std::numeric_limits< logid_t >::min();
+        idx = -1;
         dev_offset = std::numeric_limits< uint64_t >::min();
     }
 
@@ -109,9 +106,11 @@ struct log_dump_req {
 
 struct logstore_record {
     logdev_key m_dev_key;
+    // indicates the safe truncation point of the log store
+    logdev_key m_trunc_key;
 
     logstore_record() = default;
-    logstore_record(const logdev_key& key) : m_dev_key{key} {}
+    logstore_record(const logdev_key& key, const logdev_key& trunc_key) : m_dev_key{key}, m_trunc_key{trunc_key} {}
 };
 
 class HomeLogStore;
@@ -121,7 +120,6 @@ struct logstore_req {
     logstore_seq_num_t seq_num; // Log store specific seq_num (which could be monotonically increaseing with logstore)
     sisl::io_blob data;         // Data blob containing data
     void* cookie;               // User generated cookie (considered as opaque)
-    bool is_write;              // Directon of IO
     bool is_internal_req;       // If the req is created internally by HomeLogStore itself
     log_req_comp_cb_t cb;       // Callback upon completion of write (overridden than default)
     Clock::time_point start_time;
@@ -138,13 +136,11 @@ struct logstore_req {
         // TODO: Implement this method
         return 0;
     }
-    static logstore_req* make(HomeLogStore* store, logstore_seq_num_t seq_num, const sisl::io_blob& data,
-                              bool is_write_req = true) {
+    static logstore_req* make(HomeLogStore* store, logstore_seq_num_t seq_num, const sisl::io_blob& data) {
         logstore_req* req = new logstore_req();
         req->log_store = store;
         req->seq_num = seq_num;
         req->data = data;
-        req->is_write = is_write_req;
         req->is_internal_req = true;
         req->cb = nullptr;
 
@@ -156,25 +152,6 @@ struct logstore_req {
     }
 
     logstore_req() = default;
-};
-
-struct seq_ld_key_pair {
-    logstore_seq_num_t seq_num{-1};
-    logdev_key ld_key;
-};
-
-struct truncation_info {
-    // Safe log dev location upto which it is truncatable
-    logdev_key ld_key{std::numeric_limits< logid_t >::min(), 0};
-
-    // LSN of this log store upto which it is truncated
-    std::atomic< logstore_seq_num_t > seq_num{-1};
-
-    // Is there any entry which is already store truncated but waiting for device truncation
-    bool pending_dev_truncation{false};
-
-    // Any truncation entries/barriers which are not part of this truncation
-    bool active_writes_not_part_of_truncation{false};
 };
 
 #pragma pack(1)

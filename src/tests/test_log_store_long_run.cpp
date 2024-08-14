@@ -105,6 +105,8 @@ public:
 
     void insert_next_batch(uint32_t batch_size) {
         const auto cur_lsn = m_cur_lsn.fetch_add(batch_size);
+        LOGINFO("cur_lsn is {} for store {} log_dev {}", cur_lsn, m_log_store->get_store_id(),
+                m_log_store->get_logdev()->get_id());
         insert(cur_lsn, batch_size, false);
     }
 
@@ -135,7 +137,7 @@ public:
         }
 
         // Because of restart in tests, we have torce the flush of log entries.
-        m_log_store->get_logdev()->flush_if_needed(1);
+        m_log_store->get_logdev()->flush_if_necessary(1);
     }
 
     void read_validate(const bool expect_all_completed = false) {
@@ -164,35 +166,19 @@ public:
     }
 
     void rollback_validate(uint32_t num_lsns_to_rollback) {
-        std::mutex mtx;
-        std::condition_variable cv;
-        bool rollback_done = false;
 
         if (m_log_store->truncated_upto() == m_log_store->get_contiguous_completed_seq_num(-1)) {
             // No records to rollback.
             return;
         }
-
         if ((m_cur_lsn - num_lsns_to_rollback - 1) <= m_log_store->get_contiguous_issued_seq_num(-1)) { return; }
-
         auto const upto_lsn = m_cur_lsn.fetch_sub(num_lsns_to_rollback) - num_lsns_to_rollback - 1;
-
-        m_log_store->rollback_async(upto_lsn, [&](logstore_seq_num_t) {
-            ASSERT_EQ(m_log_store->get_contiguous_completed_seq_num(-1), upto_lsn)
-                << "Last completed seq num is not reset after rollback";
-            ASSERT_EQ(m_log_store->get_contiguous_issued_seq_num(-1), upto_lsn)
-                << "Last issued seq num is not reset after rollback";
-            read_validate(true);
-            {
-                std::unique_lock lock(mtx);
-                rollback_done = true;
-            }
-            cv.notify_one();
-        });
-
-        // We wait till async rollback is finished as we do validation.
-        std::unique_lock lock(mtx);
-        cv.wait(lock, [&rollback_done] { return rollback_done == true; });
+        m_log_store->rollback(upto_lsn);
+        ASSERT_EQ(m_log_store->get_contiguous_completed_seq_num(-1), upto_lsn)
+            << "Last completed seq num is not reset after rollback";
+        ASSERT_EQ(m_log_store->get_contiguous_issued_seq_num(-1), upto_lsn)
+            << "Last issued seq num is not reset after rollback";
+        read_validate(true);
     }
 
     void recovery_validate() {
@@ -204,13 +190,14 @@ public:
             EXPECT_EQ(m_n_recovered_lsns, m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1)
                 << "Recovered " << m_n_recovered_lsns << " valid lsns for store " << m_log_store->get_store_id()
                 << " Expected to have " << m_cur_lsn.load() - m_truncated_upto_lsn.load() - 1
-                << " lsns: m_cur_lsn=" << m_cur_lsn.load() << " truncated_upto_lsn=" << m_truncated_upto_lsn;
+                << " lsns: m_cur_lsn=" << m_cur_lsn.load() << " truncated_upto_lsn=" << m_truncated_upto_lsn
+                << "store id=" << m_log_store->get_store_id() << " log_dev id=" << m_log_store->get_logdev()->get_id();
             assert(false);
         }
     }
 
     void on_log_found(const logstore_seq_num_t lsn, const log_buffer buf, void* ctx) {
-        LOGDEBUG("Recovered lsn {}:{} with log data of size {}", m_log_store->get_store_id(), lsn, buf.size())
+        // LOGINFO("Recovered lsn {}:{} with log data of size {}", m_log_store->get_store_id(), lsn, buf.size())
         EXPECT_LE(lsn, m_cur_lsn.load()) << "Recovered incorrect lsn " << m_log_store->get_store_id() << ":" << lsn
                                          << "Expected less than cur_lsn " << m_cur_lsn.load();
         auto* tl = r_cast< test_log_data const* >(buf.bytes());
@@ -221,11 +208,12 @@ public:
     }
 
     void truncate(const logstore_seq_num_t lsn) {
+        if (lsn <= m_truncated_upto_lsn) return;
         m_log_store->truncate(lsn);
         m_truncated_upto_lsn = lsn;
     }
 
-    void flush() { m_log_store->flush_sync(); }
+    void flush() { m_log_store->flush(); }
 
     bool has_all_lsns_truncated() const { return (m_truncated_upto_lsn.load() == (m_cur_lsn.load() - 1)); }
 
@@ -292,6 +280,7 @@ class LogStoreLongRun : public ::testing::Test {
 public:
     void start_homestore(bool restart = false) {
         auto n_log_stores = SISL_OPTIONS["num_logstores"].as< uint32_t >();
+        auto n_log_devs = SISL_OPTIONS["num_logdevs"].as< uint32_t >();
         if (n_log_stores < 4u) {
             LOGINFO("Log store test needs minimum 4 log stores for testing, setting them to 4");
             n_log_stores = 4u;
@@ -322,7 +311,7 @@ public:
                 "test_log_store_long_run",
                 {{HS_SERVICE::META, {.size_pct = 5.0}},
                  {HS_SERVICE::LOG,
-                  {.size_pct = 84.0, .chunk_size = 8 * 1024 * 1024, .min_chunk_size = 8 * 1024 * 1024}}},
+                  {.size_pct = 84.0, .chunk_size = 64 * 1024 * 1024, .min_chunk_size = 8 * 1024 * 1024}}},
                 [this, restart, n_log_stores]() {
                     HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
                         // Disable flush and resource mgr timer in UT.
@@ -332,41 +321,33 @@ public:
                     HS_SETTINGS_FACTORY().save();
                 });
 
-            logdev_id_t logdev_id;
-            for (uint32_t i{0}; i < n_log_stores; ++i) {
-                logdev_id = logstore_service().create_new_logdev();
+            std::vector< logdev_id_t > logdev_id_vec;
+            for (uint32_t i{0}; i < n_log_devs; ++i)
+                logdev_id_vec.push_back(logstore_service().create_new_logdev());
+
+            for (uint32_t i{0}; i < n_log_stores; ++i)
                 m_log_store_clients.push_back(std::make_unique< SampleLogStoreClient >(
-                    logdev_id, bind_this(LogStoreLongRun::on_log_insert_completion, 3)));
-            }
+                    logdev_id_vec[i % n_log_devs], bind_this(LogStoreLongRun::on_log_insert_completion, 3)));
+
             SampleLogStoreClient::s_max_flush_multiple =
-                logstore_service().get_logdev(logdev_id)->get_flush_size_multiple();
+                logstore_service().get_logdev(logdev_id_vec[0])->get_flush_size_multiple();
         }
     }
 
     void shutdown(bool cleanup = true) {
         m_helper.shutdown_homestore(cleanup);
-        if (cleanup) {
-            m_log_store_clients.clear();
-            m_highest_log_idx.clear();
-        }
+        if (cleanup) { m_log_store_clients.clear(); }
     }
 
-    bool delete_log_store(logstore_id_t store_id) {
-        bool removed{false};
+    void delete_log_store(logstore_id_t store_id) {
         for (auto it = std::begin(m_log_store_clients); it != std::end(m_log_store_clients); ++it) {
             if ((*it)->m_log_store->get_store_id() == store_id) {
-                logstore_service().remove_log_store((*it)->m_logdev_id, store_id);
-                logstore_service().destroy_log_dev((*it)->m_logdev_id);
+                auto log_dev_id = (*it)->m_logdev_id;
+                logstore_service().remove_log_store(log_dev_id, store_id);
                 m_log_store_clients.erase(it);
-                removed = true;
                 break;
             }
         }
-        return removed;
-    }
-
-    logid_t highest_log_idx(logdev_id_t fid) {
-        return m_highest_log_idx.count(fid) ? m_highest_log_idx[fid].load() : -1;
     }
 
     void init() {
@@ -408,8 +389,6 @@ public:
     }
 
     void on_log_insert_completion(logdev_id_t fid, logstore_seq_num_t lsn, logdev_key ld_key) {
-        if (m_highest_log_idx.count(fid) == 0) { m_highest_log_idx[fid] = std::atomic{-1}; }
-        atomic_update_max(m_highest_log_idx[fid], ld_key.idx);
         on_insert_completion(fid, lsn, ld_key);
     }
 
@@ -451,18 +430,13 @@ public:
 
         for (size_t i{0}; i < m_log_store_clients.size(); ++i) {
             const auto& lsc = m_log_store_clients[i];
-
-            // lsc->truncate(lsc->m_cur_lsn.load() - 1);
-            const auto t_seq_num = lsc->m_log_store->truncated_upto();
+            const auto t_seq_num = lsc->m_log_store->truncated_upto() + 1;
             const auto c_seq_num = lsc->m_log_store->get_contiguous_completed_seq_num(-1);
             if (t_seq_num == c_seq_num) {
                 ++skip_truncation;
                 continue;
             }
-
-            // Truncate at random point between last truncated and completed seq num.
-            std::uniform_int_distribution< int64_t > gen_data_size{t_seq_num, c_seq_num};
-            lsc->truncate(gen_data_size(rd));
+            lsc->truncate(c_seq_num);
             lsc->read_validate();
         }
 
@@ -471,13 +445,8 @@ public:
             return;
         }
 
-        logstore_service().device_truncate(
-            [this](auto& trunc_lds) {
-                for (auto [fid, trunc_loc] : trunc_lds) {
-                    m_truncate_log_idx[fid].store(trunc_loc.idx);
-                }
-            },
-            true /* wait_till_done */);
+        logstore_service().device_truncate();
+
         validate_num_stores();
     }
 
@@ -498,8 +467,6 @@ public:
         // Delete a random logstore.
         std::uniform_int_distribution< uint64_t > gen{0, m_log_store_clients.size() - 1};
         uint64_t idx = gen(rd);
-        auto fid = m_log_store_clients[idx]->m_logdev_id;
-
         delete_log_store(m_log_store_clients[idx]->m_store_id);
         validate_num_stores();
 
@@ -512,20 +479,13 @@ public:
 
     void validate_num_stores() {
         size_t actual_valid_ids{0};
-        size_t actual_garbage_ids{0};
-        size_t exp_garbage_store_count{0};
-        size_t actual_logdevs{0};
 
         for (auto& logdev : logstore_service().get_all_logdevs()) {
-            auto fid = logdev->get_id();
             std::vector< logstore_id_t > reg_ids, garbage_ids;
-
             logdev->get_registered_store_ids(reg_ids, garbage_ids);
             actual_valid_ids += reg_ids.size() - garbage_ids.size();
-            actual_logdevs++;
         }
 
-        ASSERT_EQ(actual_logdevs, m_log_store_clients.size());
         ASSERT_EQ(actual_valid_ids, m_log_store_clients.size());
     }
 
@@ -549,12 +509,10 @@ public:
 
 private:
     std::vector< std::unique_ptr< SampleLogStoreClient > > m_log_store_clients;
-    std::map< logdev_id_t, std::atomic< logid_t > > m_highest_log_idx;
     uint64_t m_nrecords_waiting_to_issue{0};
     uint64_t m_nrecords_waiting_to_complete{0};
     std::mutex m_pending_mtx;
     std::condition_variable m_pending_cv;
-    std::map< logdev_id_t, std::atomic< logid_t > > m_truncate_log_idx;
     uint32_t m_q_depth{64};
     uint32_t m_batch_size{1};
     std::random_device rd{};
@@ -565,6 +523,7 @@ private:
 TEST_F(LogStoreLongRun, LongRunning) {
     auto run_time = SISL_OPTIONS["run_time"].as< uint64_t >();
     auto num_iterations = SISL_OPTIONS["num_iterations"].as< uint32_t >();
+    auto num_records = SISL_OPTIONS["num_records"].as< uint32_t >();
     auto start_time = Clock::now();
     uint32_t iterations = 1;
 
@@ -572,7 +531,7 @@ TEST_F(LogStoreLongRun, LongRunning) {
 
     while (true) {
         // Start insert of 100 log entries on all logstores with num batch of 10 in parallel fashion as a burst.
-        kickstart_inserts(100 /* num_records */, 10 /* batch */, 5000 /* q_depth */);
+        kickstart_inserts(num_records, 10 /* batch */, 5000 /* q_depth */);
 
         // Wait for inserts.
         wait_for_inserts();
@@ -620,9 +579,11 @@ TEST_F(LogStoreLongRun, LongRunning) {
 SISL_OPTIONS_ENABLE(logging, test_log_store_long_run, iomgr, test_common_setup)
 SISL_OPTION_GROUP(test_log_store_long_run,
                   (num_logstores, "", "num_logstores", "number of log stores",
-                   ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
+                   ::cxxopts::value< uint32_t >()->default_value("100"), "number"),
+                  (num_logdevs, "", "num_logdevs", "number of log devs",
+                   ::cxxopts::value< uint32_t >()->default_value("10"), "number"),
                   (num_records, "", "num_records", "number of record to test",
-                   ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
+                   ::cxxopts::value< uint32_t >()->default_value("100"), "number"),
                   (num_iterations, "", "num_iterations", "Iterations",
                    ::cxxopts::value< uint32_t >()->default_value("1"), "the number of iterations to run each test"),
                   (run_time, "", "run_time", "running time in seconds",
@@ -634,9 +595,15 @@ int main(int argc, char* argv[]) {
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_log_store_long_run, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_log_store_long_run");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
-    // sisl::logging::SetModuleLogLevel("logstore", spdlog::level::level_enum::debug);
-    // sisl::logging::SetModuleLogLevel("journalvdev", spdlog::level::level_enum::info);
 
-    const int ret = RUN_ALL_TESTS();
-    return ret;
+    auto num_logstores = SISL_OPTIONS["num_logstores"].as< uint32_t >();
+    auto num_logdevs = SISL_OPTIONS["num_logdevs"].as< uint32_t >();
+
+    if (num_logstores < num_logdevs) {
+        LOGFATAL("num_logstores {} should be greater or equal than num_logdevs {} to make sure there is at least one "
+                 "logstore per logdev",
+                 num_logstores, num_logdevs);
+    }
+
+    return RUN_ALL_TESTS();
 }

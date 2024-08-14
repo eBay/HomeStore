@@ -22,7 +22,6 @@
 namespace homestore {
 FixedBlkAllocator::FixedBlkAllocator(BlkAllocConfig const& cfg, bool is_fresh, chunk_num_t chunk_id) :
         BitmapBlkAllocator(cfg, is_fresh, chunk_id), m_free_blk_q{get_total_blks()} {
-    LOGINFO("FixedBlkAllocator total blks: {}", get_total_blks());
     if (is_fresh || !is_persistent()) { load(); }
 }
 
