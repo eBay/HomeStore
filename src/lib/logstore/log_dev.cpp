@@ -494,7 +494,6 @@ void LogDev::on_flush_completion(LogGroup* lg) {
     m_last_flush_idx = upto_indx;
 
     // since we support out-of-order lsn write, so no need to guarantee the order of logstore write completion
-    // TODO:: add some logic to guarantee all the callback is done when stop.
     for (auto const& [idx, req] : req_map) {
         m_pending_callback++;
         iomanager.run_on_forget(iomgr::reactor_regex::random_worker, iomgr::fiber_regex::syncio_only,
