@@ -758,6 +758,8 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
 
     // Remove the request from repl_key map.
     m_repl_key_req_map.erase(rreq->rkey());
+    // Remove the request from lsn map.
+    m_state_machine->unlink_lsn_to_req(rreq->lsn());
 
     auto cur_dsn = m_next_dsn.load(std::memory_order_relaxed);
     while (cur_dsn <= rreq->dsn()) {
@@ -775,7 +777,6 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
         auto prev_lsn = m_commit_upto_lsn.exchange(rreq->lsn());
         RD_DBG_ASSERT_GT(rreq->lsn(), prev_lsn, "Out of order commit of lsns, it is not expected in RaftReplDev");
     }
-
     if (!rreq->is_proposer()) { rreq->clear(); }
 }
 
