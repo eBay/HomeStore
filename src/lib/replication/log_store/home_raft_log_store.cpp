@@ -43,7 +43,6 @@ static constexpr logstore_seq_num_t to_store_lsn(uint64_t raft_lsn) {
 static constexpr logstore_seq_num_t to_store_lsn(repl_lsn_t repl_lsn) {
     return static_cast< logstore_seq_num_t >(repl_lsn - 1);
 }
-static constexpr repl_lsn_t to_repl_lsn(store_lsn_t store_lsn) { return store_lsn + 1; }
 
 static uint64_t extract_term(const log_buffer& log_bytes) {
     uint8_t const* raw_ptr = log_bytes.bytes();
