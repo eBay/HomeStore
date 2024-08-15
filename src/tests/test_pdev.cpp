@@ -44,8 +44,10 @@ SISL_OPTION_GROUP(test_pdev,
                    ::cxxopts::value< uint32_t >()->default_value("2"), "number"),
                   (data_dev_size_mb, "", "data_dev_size_mb", "size of each data device in MB",
                    ::cxxopts::value< uint64_t >()->default_value("1024"), "number"),
+                  // in OrderlyChunkOpsWithRestart UT, we need to create 10 chunks on fast drive
+                  // ensure fast dev has > min_chunk_size_fast(32M) * 10 capacity.
                   (fast_dev_size_mb, "", "fast_dev_size_mb", "size of each fast device in MB",
-                   ::cxxopts::value< uint64_t >()->default_value("100"), "number"),
+                   ::cxxopts::value< uint64_t >()->default_value("400"), "number"),
                   (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));
 
 std::vector< std::string > g_data_dev_names;

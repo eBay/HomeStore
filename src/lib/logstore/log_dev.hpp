@@ -810,6 +810,7 @@ private:
     // callback of the append_async we schedule another flush.), so we need the lock to be locked for multitimes in the
     // same thread.
     iomgr::FiberManagerLib::mutex m_flush_mtx;
+    std::atomic_uint64_t m_pending_callback{0};
 }; // LogDev
 
 } // namespace homestore

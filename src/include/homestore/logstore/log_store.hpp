@@ -107,6 +107,14 @@ public:
      * @param b Blob of data to append
      * @param cookie Passed as is to the completion callback
      * @param completion_cb Completion callback which contains the seqnum, status and cookie
+     *
+     * Note that: completion_cb will be executed in background fibers, so different completion_cbs probabaly be executed
+     * concurrently. also, logstore does not guarantee the order of completion_cb execution. that means, the caller
+     * should:
+     *
+     * 1 add lock in the completion_cb if the caller wants to make sure the safety of concurrent execution.
+     * 2 keep in mind that the completion_cb probabaly be executed in different order than the append order.
+     *
      * @return internally generated sequence number
      */
     logstore_seq_num_t append_async(const sisl::io_blob& b, void* cookie, const log_write_comp_cb_t& completion_cb);
