@@ -121,7 +121,7 @@ struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::
     friend class SoloReplDev;
 
 public:
-    repl_req_ctx() { m_start_time = Clock::now(); }
+    repl_req_ctx() {}
     virtual ~repl_req_ctx();
     void init(repl_key rkey, journal_type_t op_code, bool is_proposer, sisl::blob const& user_header,
               sisl::blob const& key, uint32_t data_size);
@@ -154,6 +154,7 @@ public:
     std::string to_string() const;
     std::string to_compact_string() const;
     Clock::time_point created_time() const { return m_start_time; }
+    void set_created_time() { m_start_time = Clock::now(); }
     bool is_expired() const;
 
     /////////////////////// All Modifiers methods //////////////////
