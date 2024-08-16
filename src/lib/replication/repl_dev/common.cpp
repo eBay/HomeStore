@@ -108,6 +108,7 @@ void repl_req_ctx::set_lsn(int64_t lsn) {
     DEBUG_ASSERT((m_lsn == -1) || (m_lsn == lsn),
                  "Changing lsn for request={} on the fly can cause race condition, not expected", to_string());
     m_lsn = lsn;
+    LOGTRACEMOD(replication, "Setting lsn={} for request={}", lsn, to_string());
 }
 
 bool repl_req_ctx::save_pushed_data(intrusive< sisl::GenericRpcData > const& pushed_data, uint8_t const* data,

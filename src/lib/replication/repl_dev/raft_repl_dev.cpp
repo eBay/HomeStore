@@ -77,10 +77,11 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
     }
 
     RD_LOG(INFO,
-           "Started {} RaftReplDev group_id={}, replica_id={}, raft_server_id={} commited_lsn={} next_dsn={} "
+           "Started {} RaftReplDev group_id={}, replica_id={}, raft_server_id={} commited_lsn={}, compact_lsn={} "
+           "next_dsn={} "
            "log_dev={} log_store={}",
            (load_existing ? "Existing" : "New"), group_id_str(), my_replica_id_str(), m_raft_server_id,
-           m_commit_upto_lsn.load(), m_next_dsn.load(), m_rd_sb->logdev_id, m_rd_sb->logstore_id);
+           m_commit_upto_lsn.load(), m_compact_lsn.load(), m_next_dsn.load(), m_rd_sb->logdev_id, m_rd_sb->logstore_id);
 
 #ifdef _PRERELEASE
     m_msg_mgr.bind_data_service_request(PUSH_DATA, m_group_id, [this](intrusive< sisl::GenericRpcData >& rpc_data) {
@@ -230,20 +231,20 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq, sisl::sg_list 
            flatbuffers::FlatBufferToString(builder.GetBufferPointer() + sizeof(flatbuffers::uoffset_t),
                                            PushDataRequestTypeTable()));*/
 
-    RD_LOGD("Data Channel: Pushing data to all followers: rreq=[{}]", rreq->to_compact_string());
+    RD_LOGD("Data Channel: Pushing data to all followers: rreq=[{}]", rreq->to_string());
 
     group_msg_service()
         ->data_service_request_unidirectional(nuraft_mesg::role_regex::ALL, PUSH_DATA, rreq->m_pkts)
         .via(&folly::InlineExecutor::instance())
         .thenValue([this, rreq = std::move(rreq)](auto e) {
             if (e.hasError()) {
-                RD_LOGE("Data Channel: Error in pushing data to all followers: rreq=[{}] error={}",
-                        rreq->to_compact_string(), e.error());
+                RD_LOGE("Data Channel: Error in pushing data to all followers: rreq=[{}] error={}", rreq->to_string(),
+                        e.error());
                 handle_error(rreq, RaftReplService::to_repl_error(e.error()));
                 return;
             }
             // Release the buffer which holds the packets
-            RD_LOGD("Data Channel: Data push completed for rreq=[{}]", rreq->to_compact_string());
+            RD_LOGD("Data Channel: Data push completed for rreq=[{}]", rreq->to_string());
             rreq->release_fb_builder();
             rreq->m_pkts.clear();
         });
@@ -766,7 +767,7 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
         m_next_dsn.compare_exchange_strong(cur_dsn, rreq->dsn() + 1);
     }
 
-    RD_LOGD("Raft channel: Commit rreq=[{}]", rreq->to_compact_string());
+    RD_LOGD("Raft channel: Commit rreq=[{}]", rreq->to_string());
     if (rreq->op_code() == journal_type_t::HS_CTRL_DESTROY) {
         leave();
     } else {
@@ -775,7 +776,9 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
 
     if (!recovery) {
         auto prev_lsn = m_commit_upto_lsn.exchange(rreq->lsn());
-        RD_DBG_ASSERT_GT(rreq->lsn(), prev_lsn, "Out of order commit of lsns, it is not expected in RaftReplDev");
+        RD_DBG_ASSERT_GT(rreq->lsn(), prev_lsn,
+                         "Out of order commit of lsns, it is not expected in RaftReplDev. cur_lsns={}, prev_lsns={}",
+                         rreq->lsn(), prev_lsn);
     }
     if (!rreq->is_proposer()) { rreq->clear(); }
 }
@@ -1097,7 +1100,8 @@ void RaftReplDev::gc_repl_reqs() {
 
         if (rreq->is_expired()) {
             expired_keys.push_back(key);
-            RD_LOGD("rreq=[{}] is expired, cleaning up", rreq->to_compact_string());
+            RD_LOGD("rreq=[{}] is expired, cleaning up; elapsed_time_sec{};", rreq->to_string(),
+                    get_elapsed_time_sec(rreq->created_time()));
 
             // do garbage collection
             // 1. free the allocated blocks
@@ -1124,8 +1128,9 @@ void RaftReplDev::gc_repl_reqs() {
 }
 
 void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
+    auto repl_lsn = to_repl_lsn(lsn);
     // apply the log entry if the lsn is between checkpoint lsn and durable commit lsn
-    if (lsn < m_rd_sb->checkpoint_lsn) { return; }
+    if (repl_lsn < m_rd_sb->checkpoint_lsn) { return; }
 
     // 1. Get the log entry and prepare rreq
     auto const lentry = to_nuraft_log_entry(buf);
@@ -1166,15 +1171,16 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     rreq->init(rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry), entry_to_key(jentry),
                (entry_blkid.blk_count() * get_blk_size()));
     rreq->set_local_blkid(entry_blkid);
-    rreq->set_lsn(lsn);
+    rreq->set_lsn(repl_lsn);
+    RD_LOGD("Replay log on restart, rreq=[{}]", rreq->to_string());
 
-    if (lsn > m_rd_sb->durable_commit_lsn) {
-        m_state_machine->link_lsn_to_req(rreq, int64_cast(lsn));
+    if (repl_lsn > m_rd_sb->durable_commit_lsn) {
+        m_state_machine->link_lsn_to_req(rreq, int64_cast(repl_lsn));
         return;
     }
 
     // 2. Pre-commit the log entry
-    m_listener->on_pre_commit(lsn, entry_to_hdr(jentry), entry_to_key(jentry), nullptr);
+    m_listener->on_pre_commit(repl_lsn, entry_to_hdr(jentry), entry_to_key(jentry), nullptr);
 
     // 3. Commit the log entry
     handle_commit(rreq, true /* recovery */);

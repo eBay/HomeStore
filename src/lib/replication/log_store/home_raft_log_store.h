@@ -223,4 +223,6 @@ static nuraft::ptr< nuraft::log_entry > to_nuraft_log_entry(sisl::blob const& lo
 static nuraft::ptr< nuraft::log_entry > to_nuraft_log_entry(const log_buffer& log_bytes) {
     return to_nuraft_log_entry(log_bytes.get_blob());
 }
+
+static constexpr repl_lsn_t to_repl_lsn(store_lsn_t store_lsn) { return store_lsn + 1; }
 } // namespace homestore
