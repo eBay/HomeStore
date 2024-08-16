@@ -185,7 +185,16 @@ public:
         do_start_homestore(true /* fake_restart*/, false /* init_device */, shutdown_delay_sec);
     }
 
+    virtual void start_homestore() {
+        do_start_homestore(true /* fake_restart*/, false /* init_device */, 1 /* shutdown_delay_sec */);
+    }
+
     virtual void shutdown_homestore(bool cleanup = true) {
+        if (homestore::HomeStore::safe_instance() == nullptr) {
+            /* Already shutdown */
+            return;
+        }
+
         homestore::HomeStore::instance()->shutdown();
         homestore::HomeStore::reset_instance();
         iomanager.stop();
