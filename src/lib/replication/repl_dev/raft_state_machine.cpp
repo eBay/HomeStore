@@ -224,6 +224,8 @@ void RaftStateMachine::link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn) {
     rreq->add_state(repl_req_state_t::LOG_RECEIVED);
     [[maybe_unused]] auto r = m_lsn_req_map.insert(lsn, std::move(rreq));
     RD_DBG_ASSERT_EQ(r.second, true, "lsn={} already in precommit list", lsn);
+    // reset the rreq created_at time to now https://github.com/eBay/HomeStore/issues/506
+    rreq->set_created_time();
 }
 
 repl_req_ptr_t RaftStateMachine::lsn_to_req(int64_t lsn) {
