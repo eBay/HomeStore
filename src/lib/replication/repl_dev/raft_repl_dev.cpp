@@ -1180,7 +1180,7 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     }
 
     // 2. Pre-commit the log entry
-    m_listener->on_pre_commit(repl_lsn, entry_to_hdr(jentry), entry_to_key(jentry), nullptr);
+    m_listener->on_pre_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq);
 
     // 3. Commit the log entry
     handle_commit(rreq, true /* recovery */);
