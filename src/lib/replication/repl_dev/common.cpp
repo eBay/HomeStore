@@ -146,7 +146,10 @@ bool repl_req_ctx::save_fetched_data(sisl::GenericClientResponse const& fetched_
     return true;
 }
 
-void repl_req_ctx::add_state(repl_req_state_t s) { m_state.fetch_or(uint32_cast(s)); }
+void repl_req_ctx::add_state(repl_req_state_t s) {
+    m_state.fetch_or(uint32_cast(s));
+    m_timestamps[std::bit_width(uint32_cast(s))] = Clock::now();
+}
 
 bool repl_req_ctx::add_state_if_not_already(repl_req_state_t s) {
     bool changed{false};
@@ -154,11 +157,21 @@ bool repl_req_ctx::add_state_if_not_already(repl_req_state_t s) {
     while (!(cur_v & uint32_cast(s))) {
         if (m_state.compare_exchange_weak(cur_v, cur_v | uint32_cast(s))) {
             changed = true;
+            m_timestamps[std::bit_width(uint32_cast(s))] = Clock::now();
             break;
         }
     }
 
     return changed;
+}
+
+void repl_req_ctx::print_timestamps() const {
+    for (int i = 0; i < MAX_STATES; i++) {
+        if (m_timestamps[i] != Clock::time_point())
+            std::cout
+                << "State " << i << " Timestamp "
+                << std::chrono::duration_cast< std::chrono::milliseconds >(m_timestamps[i] - m_timestamps[0]).count();
+    }
 }
 
 void repl_req_ctx::clear() {
@@ -200,7 +213,7 @@ std::string repl_req_ctx::to_compact_string() const {
 }
 
 bool repl_req_ctx::is_expired() const {
-    return get_elapsed_time_sec(m_start_time) > HS_DYNAMIC_CONFIG(consensus.repl_req_timeout_sec);
+    return time_from(repl_req_state_t::LOG_RECEIVED) > HS_DYNAMIC_CONFIG(consensus.repl_req_timeout_sec);
 }
 
 } // namespace homestore

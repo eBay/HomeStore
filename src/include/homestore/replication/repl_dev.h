@@ -36,7 +36,8 @@ VENUM(repl_req_state_t, uint32_t,
       DATA_WRITTEN = 1 << 2,  // Data has been written to the storage
       LOG_RECEIVED = 1 << 3,  // Log is received and waiting for data
       LOG_FLUSHED = 1 << 4,   // Log has been flushed
-      ERRORED = 1 << 5        // Error has happened and cleaned up
+      ERRORED = 1 << 5,       // Error has happened and cleaned up
+      LAST_STATE              // Automatically adjusts to count the number of states
 )
 
 VENUM(journal_type_t, uint16_t,
@@ -125,7 +126,7 @@ struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::
     friend class SoloReplDev;
 
 public:
-    repl_req_ctx() {}
+    repl_req_ctx() { m_timestamps[std::bit_width(uint32_cast(repl_req_state_t::INIT))] = Clock::now(); }
     virtual ~repl_req_ctx();
     void init(repl_key rkey, journal_type_t op_code, bool is_proposer, sisl::blob const& user_header,
               sisl::blob const& key, uint32_t data_size);
@@ -156,8 +157,12 @@ public:
     /////////////////////// Non modifiers methods //////////////////
     std::string to_string() const;
     std::string to_compact_string() const;
-    Clock::time_point created_time() const { return m_start_time; }
-    void set_created_time() { m_start_time = Clock::now(); }
+    Clock::time_point created_time() const { return ts_of_state(repl_req_state_t::INIT); }
+    Clock::time_point ts_of_state(repl_req_state_t state) const {
+        return m_timestamps[std::bit_width(uint32_cast(state))];
+    }
+    uint64_t time_from(repl_req_state_t s) const { return get_elapsed_time_sec(ts_of_state(s)); }
+    void print_timestamps() const;
     bool is_expired() const;
 
     /////////////////////// All Modifiers methods //////////////////
@@ -221,6 +226,8 @@ public:
     std::mutex m_state_mtx;
 
 private:
+    static constexpr int MAX_STATES = std::bit_width(uint32_t(repl_req_state_t::LAST_STATE));
+    Clock::time_point m_timestamps[MAX_STATES];                // timestamp of reaching each state
     repl_key m_rkey;                                           // Unique key for the request
     sisl::blob m_header;                                       // User header
     sisl::blob m_key;                                          // User supplied key for this req
