@@ -229,8 +229,9 @@ public:
         }
         return str;
     }
+
     std::string to_dot_keys() const override {
-        return to_dot_keys_impl(std::is_same<K, uint64_t>{});
+        return to_dot_keys_impl(std::is_same<decltype(std::declval<K &>().key()), uint64_t>{});
     }
 
     std::string to_dot_keys_impl(std::false_type) const {

@@ -424,6 +424,8 @@ std::error_code VirtualDev::sync_write(const char* buf, uint32_t size, BlkId con
 
     Chunk* chunk;
     uint64_t const dev_offset = to_dev_offset(bid, &chunk);
+    HS_LOG(TRACE, device, "Writing sync in device: {}, offset = {}", chunk->physical_dev_mutable()->pdev_id(),
+           dev_offset);
     if (sisl_unlikely(dev_offset == INVALID_DEV_OFFSET)) {
         return std::make_error_code(std::errc::resource_unavailable_try_again);
     }
@@ -435,6 +437,9 @@ std::error_code VirtualDev::sync_write(const char* buf, uint32_t size, cshared< 
 #ifdef _PRERELEASE
     if (hs()->crash_simulator().is_crashed()) { return std::error_code{}; }
 #endif
+
+    HS_LOG(TRACE, device, "Writing sync in device: {}, offset = {}", chunk->physical_dev_mutable()->pdev_id(),
+           chunk->start_offset() + offset_in_chunk);
 
     if (sisl_unlikely(!is_chunk_available(chunk))) {
         return std::make_error_code(std::errc::resource_unavailable_try_again);
@@ -457,6 +462,8 @@ std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, BlkId cons
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
 
+    HS_LOG(TRACE, device, "Writing sync in device: {}, offset = {}", pdev->pdev_id(), dev_offset);
+
     COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
     if (sisl_unlikely(!hs_utils::mod_aligned_sz(dev_offset, pdev->align_size()))) {
         COUNTER_INCREMENT(m_metrics, unalign_writes, 1);
@@ -478,6 +485,8 @@ std::error_code VirtualDev::sync_writev(const iovec* iov, int iovcnt, cshared< C
     uint64_t const dev_offset = chunk->start_offset() + offset_in_chunk;
     auto const size = get_len(iov, iovcnt);
     auto* pdev = chunk->physical_dev_mutable();
+
+    HS_LOG(TRACE, device, "Writing sync in device: {}, offset = {}", pdev->pdev_id(), dev_offset);
 
     COUNTER_INCREMENT(m_metrics, vdev_write_count, 1);
     if (sisl_unlikely(!hs_utils::mod_aligned_sz(dev_offset, pdev->align_size()))) {

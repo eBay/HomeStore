@@ -213,12 +213,12 @@ static void set_crash_flips(IndexBufferPtr const& parent_buf, IndexBufferPtr con
                             IndexBufferPtrList const& new_node_bufs, IndexBufferPtrList const& freed_node_bufs) {
     // TODO: Need an API from flip to quickly check if flip is enabled, so this method doesn't check flip_enabled a
     // bunch of times.
-    if (parent_buf && parent_buf->is_meta_buf()) {
+    if (parent_buf == nullptr && child_buf->is_meta_buf()) {
         // Split or merge happening on root
         if (iomgr_flip::instance()->test_flip("crash_flush_on_meta")) {
-            parent_buf->set_crash_flag();
-        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_root")) {
             child_buf->set_crash_flag();
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_root")) {
+            new_node_bufs[0]->set_crash_flag();
         }
     } else if ((new_node_bufs.size() == 1) && freed_node_bufs.empty()) {
         // Its a split node situation
@@ -237,6 +237,8 @@ static void set_crash_flips(IndexBufferPtr const& parent_buf, IndexBufferPtr con
             child_buf->set_crash_flag();
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_right_child")) {
             if (!new_node_bufs.empty()) { new_node_bufs[0]->set_crash_flag(); }
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_freed_child")) {
+            freed_node_bufs[0]->set_crash_flag();
         }
     } else if (!freed_node_bufs.empty() && (new_node_bufs.size() == freed_node_bufs.size())) {
         // Its a rebalance node situation
@@ -246,6 +248,8 @@ static void set_crash_flips(IndexBufferPtr const& parent_buf, IndexBufferPtr con
             child_buf->set_crash_flag();
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_right_child")) {
             if (!new_node_bufs.empty()) { new_node_bufs[0]->set_crash_flag(); }
+        } else if (iomgr_flip::instance()->test_flip("crash_flush_on_freed_child")) {
+            freed_node_bufs[0]->set_crash_flag();
         }
     }
 }
@@ -265,15 +269,8 @@ void IndexWBCache::transact_bufs(uint32_t index_ordinal, IndexBufferPtr const& p
         link_buf(child_buf, buf, true /* is_sibling_link */, cp_ctx);
     }
 
-    for (auto const& buf : freed_node_bufs) {
-        if (!buf->m_wait_for_down_buffers.testz()) {
-            // This buffer has some down bufs depending on it. It can happen for an upper level interior node, where
-            // lower level node (say leaf) has split causing it to write entries in this node, but this node is now
-            // merging with other node, causing it to free. In these rare instances, we link this node to the new
-            // node resulting in waiting for all the down bufs to be flushed before up buf can flush (this buf is
-            // not written anyways)
-            link_buf(child_buf, buf, true /* is_sibling_link */, cp_ctx);
-        }
+    for (auto const &buf: freed_node_bufs) {
+        link_buf(child_buf, buf, true /* is_sibling_link */, cp_ctx);
     }
 
     if (new_node_bufs.empty() && freed_node_bufs.empty()) {
@@ -286,10 +283,11 @@ void IndexWBCache::transact_bufs(uint32_t index_ordinal, IndexBufferPtr const& p
     } else {
         icp_ctx->add_to_txn_journal(index_ordinal,          // Ordinal
                                     child_buf->m_up_buffer, // real up buffer
-                                    new_node_bufs.empty() ? freed_node_bufs[0]->m_up_buffer
-                                                          : new_node_bufs[0]->m_up_buffer, // real in place child
-                                    new_node_bufs,                                         // new node bufs
-                                    freed_node_bufs                                        // free_node_bufs
+                                    new_node_bufs.empty()
+                                        ? freed_node_bufs[0]->m_up_buffer
+                                        : new_node_bufs[0]->m_up_buffer, // real in place child
+                                    new_node_bufs, // new node bufs
+                                    freed_node_bufs // free_node_bufs
         );
     }
 #if 0
@@ -371,6 +369,21 @@ void IndexWBCache::link_buf(IndexBufferPtr const& up_buf, IndexBufferPtr const& 
     }
 
     // Now we link the down_buffer to the real up_buffer
+    if (down_buf->m_up_buffer) {
+        // release existing up_buffer's wait count
+        down_buf->m_up_buffer->m_wait_for_down_buffers.decrement();
+#ifndef NDEBUG
+        bool found{false};
+        for (auto it = down_buf->m_up_buffer->m_down_buffers.begin(); it != down_buf->m_up_buffer->m_down_buffers.end(); ++it) {
+            if (it->lock() == down_buf) {
+                down_buf->m_up_buffer->m_down_buffers.erase(it);
+                found = true;
+                break;
+            }
+        }
+        HS_DBG_ASSERT(found, "Down buffer is linked to Up buf, but up_buf doesn't have down_buf in its list");
+#endif
+    }
     real_up_buf->m_wait_for_down_buffers.increment(1);
     down_buf->m_up_buffer = real_up_buf;
 #ifndef NDEBUG
@@ -384,9 +397,13 @@ void IndexWBCache::free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
         bool done = m_cache.remove(buf->m_blkid, node);
         HS_REL_ASSERT_EQ(done, true, "Race on cache removal of btree blkid?");
     }
-
+    buf->m_node_freed = true;
     resource_mgr().inc_free_blk(m_node_size);
-    m_vdev->free_blk(buf->m_blkid, s_cast< VDevCPContext* >(cp_ctx));
+    if (buf->is_clean()) {
+        buf->set_state(index_buf_state_t::DIRTY);
+        r_cast<IndexCPContext *>(cp_ctx)->add_to_dirty_list(buf);
+        resource_mgr().inc_dirty_buf_size(m_node_size);
+    }
 }
 
 //////////////////// Recovery Related section /////////////////////////////////
@@ -418,31 +435,52 @@ void IndexWBCache::recover(sisl::byte_view sb) {
     // This has to be done before doing any repair, because repair can allocate blkids and we don't want to allocate
     // the same blkid which could clash with the blkid next in the buf list.
     //
-    // On the second pass, we only take the new nodes/bufs and then repair their up buffers, if needed.
-    std::vector< IndexBufferPtr > l0_bufs;
+    // On the second pass, we only take part of the parents/siblings and then repair them, if needed.
+    std::vector<IndexBufferPtr> pending_bufs;
+    std::vector<IndexBufferPtr> deleted_bufs;
     for (auto const& [_, buf] : bufs) {
-        if (buf->m_node_freed || (buf->m_created_cp_id == icp_ctx->id())) {
+        if (buf->m_node_freed) {
+            // Freed node
+            if (buf->m_bytes == nullptr) {
+                buf->m_bytes = hs_utils::iobuf_alloc(m_node_size, sisl::buftag::btree_node, m_vdev->align_size());
+                m_vdev->sync_read(r_cast<char *>(buf->m_bytes), m_node_size, buf->blkid());
+                buf->m_dirtied_cp_id = BtreeNode::get_modified_cp_id(buf->m_bytes);
+            }
+
             if (was_node_committed(buf)) {
-                if (was_node_committed(buf->m_up_buffer)) {
-                    if (buf->m_node_freed) {
-                        // Up buffer was written, so this buffer can be freed and thus can free the blk.
-                        m_vdev->free_blk(buf->m_blkid, s_cast< VDevCPContext* >(icp_ctx));
-                    } else {
-                        m_vdev->commit_blk(buf->m_blkid);
-                    }
-                    l0_bufs.push_back(buf);
-                } else {
-                    buf->m_up_buffer->m_wait_for_down_buffers.decrement();
+                // Mark this buffer as deleted, so that we can avoid using it anymore when repairing its parent's link
+                r_cast<persistent_hdr_t *>(buf->m_bytes)->node_deleted = true;
+                write_buf(nullptr, buf, icp_ctx);
+                deleted_bufs.push_back(buf);
+                pending_bufs.push_back(buf->m_up_buffer);
+            } else {
+                // (Up) buffer is not committed, node need to be kept and (potentially) repaired later
+                buf->m_node_freed = false;
+                if (buf->m_created_cp_id == icp_ctx->id()) {
+                    // New nodes need to be commited first
+                    m_vdev->commit_blk(buf->m_blkid);
                 }
+                pending_bufs.push_back(buf);
+                buf->m_wait_for_down_buffers.increment(1); // Purely for recover_buf() counter consistency
+            }
+        } else if (buf->m_created_cp_id == icp_ctx->id()) {
+            // New node
+            if (was_node_committed(buf) && was_node_committed(buf->m_up_buffer)) {
+                // Both current and up buffer is commited, we can safely commit the current block
+                m_vdev->commit_blk(buf->m_blkid);
+                pending_bufs.push_back(buf->m_up_buffer);
+            } else {
+                // Just ignore it
+                buf->m_up_buffer->m_wait_for_down_buffers.decrement();
             }
         }
     }
 
     LOGINFOMOD(wbcache, "Index Recovery detected {} nodes out of {} as new/freed nodes to be recovered in prev cp={}",
-               l0_bufs.size(), bufs.size(), icp_ctx->id());
+                pending_bufs.size(), bufs.size(), icp_ctx->id());
 
-    auto detailed_log = [this](std::map< BlkId, IndexBufferPtr > const& bufs,
-                               std::vector< IndexBufferPtr > const& l0_bufs) {
+    auto detailed_log = [this](std::map<BlkId, IndexBufferPtr> const &bufs,
+                               std::vector<IndexBufferPtr> const &pending_bufs) {
         // Logs to detect down_waits are set correctly for up buffers list of all recovered bufs
         std::string log = fmt::format("\trecovered bufs (#of bufs = {})\n", bufs.size());
         for (auto const& [_, buf] : bufs) {
@@ -450,20 +488,26 @@ void IndexWBCache::recover(sisl::byte_view sb) {
         }
 
         // list of new_bufs
-        fmt::format_to(std::back_inserter(log), "\n\tl0_bufs (#of bufs = {})\n", l0_bufs.size());
-        for (auto const& buf : l0_bufs) {
+        fmt::format_to(std::back_inserter(log), "\n\tpending_bufs (#of bufs = {})\n", pending_bufs.size());
+        for (auto const &buf: pending_bufs) {
             fmt::format_to(std::back_inserter(log), "{}\n", buf->to_string());
         }
         return log;
     };
-    LOGTRACEMOD(wbcache, "All unclean bufs list\n{}", detailed_log(bufs, l0_bufs));
+    LOGTRACEMOD(wbcache, "All unclean bufs list\n{}", detailed_log(bufs, pending_bufs));
 
-    // Second iteration we start from the lowest levels (which are all new_bufs) and check if up_buffers need to be
-    // repaired. All L1 buffers are not needed to repair, because they are sibling nodes and so we pass false in
-    // do_repair flag.
-    for (auto const& buf : l0_bufs) {
-        recover_buf(buf->m_up_buffer);
+    for (auto const &buf: pending_bufs) {
+        recover_buf(buf);
+        if (buf->m_bytes != nullptr && r_cast<persistent_hdr_t *>(buf->m_bytes)->node_deleted) {
+            // This buffer was marked as deleted during repair, so we also need to free it
+            deleted_bufs.push_back(buf);
+        }
     }
+
+    for (auto const &buf: deleted_bufs) {
+        m_vdev->free_blk(buf->m_blkid, s_cast<VDevCPContext *>(icp_ctx));
+    }
+
     m_in_recovery = false;
     m_vdev->recovery_completed();
 }
@@ -556,16 +600,17 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
 
 void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const& buf, bool part_of_batch) {
 #ifdef _PRERELEASE
+    if (hs()->crash_simulator().is_crashed()) {
+        LOGINFOMOD(wbcache, "crash simulation is ongoing, aid simulation by not flushing");
+        return;
+    }
     if (buf->m_crash_flag_on) {
-//        std::string filename = "crash_buf_" + std::to_string(cp_ctx->id()) + ".dot";
-//        LOGINFOMOD(wbcache, "Simulating crash while writing buffer {},  stored in file {}", buf->to_string(), filename);
-//        cp_ctx->to_string_dot(filename);
+        // std::string filename = "crash_buf_" + std::to_string(cp_ctx->id()) + ".dot";
+        // LOGINFOMOD(wbcache, "Simulating crash while writing buffer {},  stored in file {}", buf->to_string(), filename);
+        // cp_ctx->to_string_dot(filename);
         LOGINFOMOD(wbcache, "Simulating crash while writing buffer {}", buf->to_string());
         hs()->crash_simulator().crash();
         cp_ctx->complete(true);
-        return;
-    } else if (hs()->crash_simulator().is_crashed()) {
-        LOGINFOMOD(wbcache, "crash simulation is ongoing, aid simulation by not flushing");
         return;
     }
 #endif
@@ -574,17 +619,19 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
     buf->set_state(index_buf_state_t::FLUSHING);
 
     if (buf->is_meta_buf()) {
-        LOGTRACEMOD(wbcache, "flushing cp {} meta buf {} possibly because of root split", cp_ctx->id(),
+        LOGTRACEMOD(wbcache, "Flushing cp {} meta buf {} possibly because of root split", cp_ctx->id(),
                     buf->to_string());
         auto const& sb = r_cast< MetaIndexBuffer* >(buf.get())->m_sb;
-        meta_service().update_sub_sb(buf->m_bytes, sb.size(), sb.meta_blk());
+        if (!sb.is_empty()) {
+            meta_service().update_sub_sb(buf->m_bytes, sb.size(), sb.meta_blk());
+        }
         process_write_completion(cp_ctx, buf);
     } else if (buf->m_node_freed) {
-        LOGTRACEMOD(wbcache, "Not flushing buf {} as it was freed, its here for merely dependency", cp_ctx->id(),
-                    buf->to_string());
+        LOGTRACEMOD(wbcache, "Not flushing cp {} buf {} as it was freed", cp_ctx->id(), buf->to_string());
+        m_vdev->free_blk(buf->m_blkid, cp_ctx);
         process_write_completion(cp_ctx, buf);
     } else {
-        LOGTRACEMOD(wbcache, "flushing cp {} buf {} info: {}", cp_ctx->id(), buf->to_string(),
+        LOGTRACEMOD(wbcache, "Flushing cp {} buf {} info: {}", cp_ctx->id(), buf->to_string(),
                     BtreeNode::to_string_buf(buf->raw_buffer()));
         m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid, part_of_batch)
             .thenValue([buf, cp_ctx](auto) {
@@ -685,7 +732,7 @@ void IndexWBCache::get_next_bufs_internal(IndexCPContext* cp_ctx, uint32_t max_c
         std::optional< IndexBufferPtr > buf = cp_ctx->next_dirty();
         if (!buf) { break; } // End of list
 
-        if ((*buf)->m_wait_for_down_buffers.testz()) {
+        if ((*buf)->state() == index_buf_state_t::DIRTY && (*buf)->m_wait_for_down_buffers.testz()) {
             bufs.emplace_back(std::move(*buf));
             ++count;
         } else {

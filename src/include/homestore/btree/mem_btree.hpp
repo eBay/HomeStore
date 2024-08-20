@@ -81,6 +81,8 @@ private:
         return btree_status_t::success;
     }
 
-    btree_status_t on_root_changed(BtreeNodePtr const&, void*) override { return btree_status_t::success; }
+    btree_status_t on_root_changed(BtreeNodePtr const &, BtreeNodePtr const &, void *) override {
+        return btree_status_t::success;
+    }
 };
 } // namespace homestore

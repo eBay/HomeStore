@@ -199,7 +199,7 @@ btree_status_t Btree< K, V >::check_collapse_root(ReqT& req) {
         goto done;
     }
 
-    ret = on_root_changed(child, req.m_op_context);
+    ret = on_root_changed(child, root, req.m_op_context);
     if (ret != btree_status_t::success) {
         unlock_node(child, locktype_t::WRITE);
         unlock_node(root, locktype_t::WRITE);
@@ -476,7 +476,6 @@ btree_status_t Btree< K, V >::merge_nodes(const BtreeNodePtr& parent_node, const
             ++idx;
         }
 #endif
-
         ret = transact_nodes(new_nodes, old_nodes, leftmost_node, parent_node, context);
     }
 

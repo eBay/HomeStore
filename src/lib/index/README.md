@@ -91,7 +91,14 @@ Merge node happens somewhat similar to split node with respect to the atomicity 
 
 Homestore Index service creates 2 more new nodes to replace C30, C40 lets say C30' and C40' respectively and now C20 is linked to C30' and C40' and C30, C40 nodes are deleted.
 
-With this in perspective, dependency graph will link similar to split nodes with new nodes linked to left child, which is linked to parent node.
+We can notice that we have to choose 1 of the 2 node sets, `(C20, C30, C40)` or `(C20, C30', C40')` as the current
+state. **Whether we use the new nodes or the old ones completely depends on the persistence of leftmost child C20.**
+
+With this in perspective, dependency graph will link similar to split nodes with new nodes/freed nodes linked to left
+child, which is linked to parent node.
+
+(NOTE that logically the node release should depend on the leftmost child - but in practice let's do it in a simpler way
+since it would be very unlikely of freed nodes being overwritten in the same cp)
 
 ![Child_Node_Merge](../../../docs/imgs/Child_Node_Merge_1.png)
 

@@ -42,7 +42,7 @@ btree_status_t Btree< K, V >::create_root_node(void* op_context) {
     }
 
     m_root_node_info = BtreeLinkInfo{root->node_id(), root->link_version()};
-    ret = on_root_changed(root, op_context);
+    ret = on_root_changed(root, nullptr, op_context);
     if (ret != btree_status_t::success) {
         free_node(root, locktype_t::NONE, op_context);
         m_root_node_info = BtreeLinkInfo{};
