@@ -322,20 +322,7 @@ bool HomeRaftLogStore::compact(ulong compact_lsn) {
             append(m_dummy_log_entry);
         }
     }
-
-    m_log_store->flush(to_store_lsn(compact_lsn));
-
-    // this will only truncate in memory, and not on disk;
-    // we rely on resrouce mgr timer to trigger real truncate for all log stores in system;
-    // this will be friendly for multiple logstore on same logdev;
-#ifdef _PRERELEASE
-    if (iomgr_flip::instance()->test_flip("force_home_raft_log_truncate")) {
-        REPL_STORE_LOG(TRACE, "Flip force_home_raft_log_truncate is enabled, force truncation, compact_lsn={}",
-                       compact_lsn);
-        m_log_store->truncate(to_store_lsn(compact_lsn));
-    }
-#endif
-
+    m_log_store->truncate(to_store_lsn(compact_lsn));
     return true;
 }
 

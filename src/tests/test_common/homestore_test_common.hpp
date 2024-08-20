@@ -46,7 +46,7 @@ SISL_OPTION_GROUP(
      "number"),
     (num_devs, "", "num_devs", "number of devices to create", ::cxxopts::value< uint32_t >()->default_value("3"),
      "number"),
-    (dev_size_mb, "", "dev_size_mb", "size of each device in MB", ::cxxopts::value< uint64_t >()->default_value("1024"),
+    (dev_size_mb, "", "dev_size_mb", "size of each device in MB", ::cxxopts::value< uint64_t >()->default_value("2048"),
      "number"),
     (device_list, "", "device_list", "Device List instead of default created",
      ::cxxopts::value< std::vector< std::string > >(), "path [...]"),

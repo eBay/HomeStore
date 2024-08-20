@@ -435,32 +435,36 @@ bool LogDev::flush() {
         return false;
     }
 
-    LogGroup* lg = prepare_flush(new_idx - m_last_flush_idx + 4); // Estimate 4 more extra in case of parallel writes
-    if (sisl_unlikely(!lg)) {
-        THIS_LOGDEV_LOG(TRACE, "Log idx {} last_flush_idx {} prepare flush failed", new_idx, m_last_flush_idx);
-        return false;
+    for (; m_last_flush_idx < new_idx;) {
+        LogGroup* lg =
+            prepare_flush(new_idx - m_last_flush_idx + 4); // Estimate 4 more extra in case of parallel writes
+        if (sisl_unlikely(!lg)) {
+            THIS_LOGDEV_LOG(TRACE, "Log idx {} last_flush_idx {} prepare flush failed", new_idx, m_last_flush_idx);
+            return false;
+        }
+        auto sz = m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
+        HS_REL_ASSERT_GE((sz - lg->actual_data_size()), 0, "size {} lg size {}", sz, lg->actual_data_size());
+        off_t offset = m_vdev_jd->alloc_next_append_blk(lg->header()->total_size());
+        lg->m_log_dev_offset = offset;
+
+        HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
+        THIS_LOGDEV_LOG(TRACE, "Flushing log group data size={} at offset={} log_group={}", lg->actual_data_size(),
+                        offset, *lg);
+
+        HISTOGRAM_OBSERVE(logstore_service().m_metrics, logdev_flush_records_distribution, lg->nrecords());
+        HISTOGRAM_OBSERVE(logstore_service().m_metrics, logdev_flush_size_distribution, lg->actual_data_size());
+
+        // TODO:: add logic to handle this error in upper layer
+        auto error = m_vdev_jd->sync_pwritev(lg->iovecs().data(), int_cast(lg->iovecs().size()), lg->m_log_dev_offset);
+        if (error) {
+            THIS_LOGDEV_LOG(ERROR, "Fail to sync write to journal vde , error code {} : {}", error.value(),
+                            error.message());
+            return false;
+        }
+
+        on_flush_completion(lg);
     }
-    auto sz = m_pending_flush_size.fetch_sub(lg->actual_data_size(), std::memory_order_relaxed);
-    HS_REL_ASSERT_GE((sz - lg->actual_data_size()), 0, "size {} lg size {}", sz, lg->actual_data_size());
-    off_t offset = m_vdev_jd->alloc_next_append_blk(lg->header()->total_size());
-    lg->m_log_dev_offset = offset;
 
-    HS_REL_ASSERT_NE(lg->m_log_dev_offset, INVALID_OFFSET, "log dev is full");
-    THIS_LOGDEV_LOG(TRACE, "Flushing log group data size={} at offset={} log_group={}", lg->actual_data_size(), offset,
-                    *lg);
-
-    HISTOGRAM_OBSERVE(logstore_service().m_metrics, logdev_flush_records_distribution, lg->nrecords());
-    HISTOGRAM_OBSERVE(logstore_service().m_metrics, logdev_flush_size_distribution, lg->actual_data_size());
-
-    // FIXME:: add logic to handle this error in upper layer
-    auto error = m_vdev_jd->sync_pwritev(lg->iovecs().data(), int_cast(lg->iovecs().size()), lg->m_log_dev_offset);
-    if (error) {
-        THIS_LOGDEV_LOG(ERROR, "Fail to sync write to journal vde , error code {} : {}", error.value(),
-                        error.message());
-        return false;
-    }
-
-    on_flush_completion(lg);
     return true;
 }
 

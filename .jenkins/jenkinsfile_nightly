@@ -44,6 +44,7 @@ pipeline {
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_index_btree' -exec cp {} .jenkins/test_index_btree \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
+                        sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_home_raft_logstore' -exec cp {} .jenkins/test_home_raft_logstore \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_log_store_long_run' -exec cp {} .jenkins/test_log_store_long_run \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_data_service' -exec cp {} .jenkins/test_data_service \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_raft_repl_dev' -exec cp {} .jenkins/test_raft_repl_dev \\;"

@@ -15,6 +15,7 @@ RUN set -eux; \
 COPY test_index_btree /usr/local/bin/test_index_btree
 COPY test_meta_blk_mgr /usr/local/bin/test_meta_blk_mgr
 COPY test_log_store /usr/local/bin/test_log_store
+COPY test_home_raft_logstore /usr/local/bin/test_home_raft_logstore
 COPY test_log_store_long_run /usr/local/bin/test_log_store_long_run
 COPY test_data_service /usr/local/bin/test_data_service
 COPY test_raft_repl_dev /usr/local/bin/test_raft_repl_dev
