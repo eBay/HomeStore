@@ -435,6 +435,9 @@ bool LogDev::flush() {
         return false;
     }
 
+    // the amount of logs which one logGroup can flush has a upper limit. here we want to make sure all the logs that
+    // need to be flushed will definitely be flushed to physical dev, so we need this loop to create multiple log groups
+    // if necessary
     for (; m_last_flush_idx < new_idx;) {
         LogGroup* lg =
             prepare_flush(new_idx - m_last_flush_idx + 4); // Estimate 4 more extra in case of parallel writes
