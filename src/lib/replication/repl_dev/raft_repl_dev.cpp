@@ -526,7 +526,7 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreq
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     if (rreqs.size() == 0) { return; }
 
-    std::vector< ::flatbuffers::Offset< RequestEntry > > entries;
+    std::vector<::flatbuffers::Offset< RequestEntry > > entries;
     entries.reserve(rreqs.size());
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
@@ -1166,12 +1166,17 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     RD_DBG_ASSERT((it != m_repl_key_req_map.end()), "Unexpected error in map_repl_key_to_req");
     auto rreq = it->second;
     RD_DBG_ASSERT(happened, "rreq already exists for rkey={}", rkey.to_string());
-    MultiBlkId entry_blkid;
-    entry_blkid.deserialize(entry_to_val(jentry), true /* copy */);
-    rreq->init(rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry), entry_to_key(jentry),
-               (entry_blkid.blk_count() * get_blk_size()));
-    rreq->set_local_blkid(entry_blkid);
+    uint32_t data_size{0u};
+
+    if ((jentry->code == journal_type_t::HS_DATA_LINKED) && (jentry->value_size > 0)) {
+        MultiBlkId entry_blkid;
+        entry_blkid.deserialize(entry_to_val(jentry), true /* copy */);
+        data_size = entry_blkid.blk_count() * get_blk_size();
+        rreq->set_local_blkid(entry_blkid);
+    }
+
     rreq->set_lsn(repl_lsn);
+    rreq->init(rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry), entry_to_key(jentry), data_size);
     RD_LOGD("Replay log on restart, rreq=[{}]", rreq->to_string());
 
     if (repl_lsn > m_rd_sb->durable_commit_lsn) {
