@@ -261,6 +261,9 @@ table Consensus {
 
     // Frequency to flush durable commit LSN in millis
     flush_durable_commit_interval_ms: uint64 = 500;
+
+    // Log difference to determine if the follower is in resync mode
+    resync_log_idx_threshold: int64 = 100;
 }
 
 table HomeStoreSettings {

@@ -385,8 +385,7 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
         return nullptr;
     }
 
-    RD_LOGD("in follower_create_req: rreq={}, addr={}", rreq->to_compact_string(),
-            reinterpret_cast< uintptr_t >(rreq.get()));
+    RD_LOGD("in follower_create_req: rreq={}, addr={}", rreq->to_string(), reinterpret_cast< uintptr_t >(rreq.get()));
     return rreq;
 }
 
@@ -571,7 +570,7 @@ void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
             auto const fetch_latency_us = get_elapsed_time_us(fetch_start_time);
             HISTOGRAM_OBSERVE(m_metrics, rreq_data_fetch_latency_us, fetch_latency_us);
 
-            RD_LOGD("Data Channel: FetchData from remote completed, time taken={} ms", fetch_latency_us);
+            RD_LOGD("Data Channel: FetchData from remote completed, time taken={} us", fetch_latency_us);
 
             if (!response) {
                 // if we are here, it means the original who sent the log entries are down.
@@ -1031,6 +1030,12 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
         auto raft_req = r_cast< nuraft::req_msg* >(param->ctx);
         auto const& entries = raft_req->log_entries();
 
+        auto start_lsn = raft_req->get_last_log_idx() + 1;
+        RD_LOGD("Raft channel: Received {} append entries on follower from leader, term {}, lsn {} ~ {} , my commited "
+                "lsn {} , leader commmited lsn {}",
+                entries.size(), raft_req->get_last_log_term(), start_lsn, start_lsn + entries.size() - 1,
+                m_commit_upto_lsn.load(), raft_req->get_commit_idx());
+
         if (!entries.empty()) {
             RD_LOGT("Raft channel: Received {} append entries on follower from leader, localizing them",
                     entries.size());
@@ -1187,5 +1192,12 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
 }
 
 void RaftReplDev::on_restart() { m_listener->on_restart(); }
+
+bool RaftReplDev::is_resync_mode() {
+    int64_t const leader_commited_lsn = raft_server()->get_leader_committed_log_idx();
+    int64_t const my_log_idx = raft_server()->get_last_log_idx();
+    auto diff = leader_commited_lsn - my_log_idx;
+    return diff > HS_DYNAMIC_CONFIG(consensus.resync_log_idx_threshold);
+}
 
 } // namespace homestore

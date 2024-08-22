@@ -135,7 +135,6 @@ private:
 
     iomgr::timer_handle_t m_wait_data_timer_hdl{
         iomgr::null_timer_handle}; // non-recurring timer doesn't need to be cancelled on shutdown;
-    bool m_resync_mode{false};
     Clock::time_point m_destroyed_time;
     folly::Promise< ReplServiceError > m_destroy_promise;
     RaftReplDevMetrics m_metrics;
@@ -255,7 +254,7 @@ private:
     void on_fetch_data_received(intrusive< sisl::GenericRpcData >& rpc_data);
     void fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs);
     void handle_fetch_data_response(sisl::GenericClientResponse response, std::vector< repl_req_ptr_t > rreqs);
-    bool is_resync_mode() { return m_resync_mode; }
+    bool is_resync_mode();
     void handle_error(repl_req_ptr_t const& rreq, ReplServiceError err);
     bool wait_for_data_receive(std::vector< repl_req_ptr_t > const& rreqs, uint64_t timeout_ms);
     void on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx);
