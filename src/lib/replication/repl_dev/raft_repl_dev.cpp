@@ -1166,11 +1166,15 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     RD_DBG_ASSERT((it != m_repl_key_req_map.end()), "Unexpected error in map_repl_key_to_req");
     auto rreq = it->second;
     RD_DBG_ASSERT(happened, "rreq already exists for rkey={}", rkey.to_string());
-    MultiBlkId entry_blkid;
-    entry_blkid.deserialize(entry_to_val(jentry), true /* copy */);
-    rreq->init(rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry), entry_to_key(jentry),
-               (entry_blkid.blk_count() * get_blk_size()));
-    rreq->set_local_blkid(entry_blkid);
+    
+    if ((jentry->code == journal_type_t::HS_DATA_LINKED) && (jentry->value_size > 0)) {
+        MultiBlkId entry_blkid;
+        entry_blkid.deserialize(entry_to_val(jentry), true /* copy */);
+        rreq->init(rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry), entry_to_key(jentry),
+                (entry_blkid.blk_count() * get_blk_size()));
+        rreq->set_local_blkid(entry_blkid);
+    }
+    
     rreq->set_lsn(repl_lsn);
     RD_LOGD("Replay log on restart, rreq=[{}]", rreq->to_string());
 
