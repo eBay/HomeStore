@@ -243,7 +243,7 @@ shared< VirtualDev > DeviceManager::create_vdev(vdev_parameters&& vparam) {
         if (vparam.num_chunks != 0) {
             auto input_num_chunks = vparam.num_chunks;
             // max chunk size is 4GB (uint32_max), capping it by tune up num_chunks
-            uint32_t min_num_chunks = (vparam.vdev_size - 1) / std::numeric_limits< uint32_t >::max() + 1;
+            uint32_t min_num_chunks = (vparam.vdev_size - 1) / Chunk::MAX_CHUNK_SIZE + 1;
             vparam.num_chunks = std::max(vparam.num_chunks, min_num_chunks);
             vparam.num_chunks = std::min(vparam.num_chunks, max_num_chunks);
 

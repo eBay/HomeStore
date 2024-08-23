@@ -81,7 +81,7 @@ def meta_nightly(options, addln_opts):
     subprocess.check_call(options.dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT,
                           shell=True)
 
-    cmd_opts = "--min_write_size=10485760 --max_write_size=104857600 --bitmap=1"
+    cmd_opts = "--min_write_size=10485760 --max_write_size=80857600 --bitmap=1"
     subprocess.check_call(options.dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT,
                           shell=True)
 

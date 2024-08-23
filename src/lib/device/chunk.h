@@ -29,6 +29,9 @@ private:
     shared< BlkAllocator > m_blk_allocator;
 
 public:
+    static constexpr auto MAX_CHUNK_SIZE = std::numeric_limits< uint32_t >::max();
+
+public:
     friend class DeviceManager;
 
     Chunk(PhysicalDev* pdev, const chunk_info& cinfo, uint32_t chunk_slot);
