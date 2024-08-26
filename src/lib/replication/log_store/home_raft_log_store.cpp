@@ -315,7 +315,8 @@ bool HomeRaftLogStore::compact(ulong compact_lsn) {
         // release this assert if for some use case, we should tolorant this case;
         // for now, don't expect this case to happen.
         // RELEASE_ASSERT(false, "compact_lsn={} is beyond the current max_lsn={}", compact_lsn, cur_max_lsn);
-
+        REPL_STORE_LOG(DEBUG, "Adding dummy entries during compact from={} upto={}", cur_max_lsn + 1,
+                       to_store_lsn(compact_lsn));
         // We need to fill the remaining entries with dummy data.
         for (auto lsn{cur_max_lsn + 1}; lsn <= to_store_lsn(compact_lsn); ++lsn) {
             append(m_dummy_log_entry);

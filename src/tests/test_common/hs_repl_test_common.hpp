@@ -242,6 +242,13 @@ public:
         });
     }
 
+    void shutdown() { shutdown_homestore(false /* cleanup */); }
+
+    void start() {
+        m_token.params(HS_SERVICE::REPLICATION).repl_app = std::make_unique< TestReplApplication >(*this);
+        start_homestore();
+    }
+
     uint16_t replica_num() const { return replica_num_; }
     homestore::replica_id_t my_replica_id() const { return my_replica_id_; }
     homestore::replica_id_t replica_id(uint16_t member_id) const {
