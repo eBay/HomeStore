@@ -125,9 +125,9 @@ if (${io_tests})
         add_test(NAME MetaBlkMgr-Epoll COMMAND test_meta_blk_mgr)
         add_test(NAME DataService-Epoll COMMAND test_data_service)
 
-        # add_test(NAME SoloReplDev-Epoll COMMAND ${CMAKE_BINARY_DIR}/bin/test_solo_repl_dev)
-        # add_test(NAME HomeRaftLogStore-Epoll COMMAND ${CMAKE_BINARY_DIR}/bin/test_home_raft_logstore)
-        # add_test(NAME RaftReplDev-Epoll COMMAND ${CMAKE_BINARY_DIR}/bin/test_raft_repl_dev)
+        # add_test(NAME SoloReplDev-Epoll COMMAND test_solo_repl_dev)
+        # add_test(NAME HomeRaftLogStore-Epoll COMMAND test_home_raft_logstore)
+        add_test(NAME RaftReplDev-Epoll COMMAND test_raft_repl_dev)
     endif()
 
     can_build_spdk_io_tests(spdk_tests)

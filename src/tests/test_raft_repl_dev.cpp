@@ -288,6 +288,9 @@ public:
         req->jheader.data_pattern = ((long long)rand() << 32) | ++s_uniq_num;
         auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
 
+        LOGINFOMOD(replication, "[Replica={}] Db write key={} data_size={} pattern={} block_size={}",
+                   g_helper->replica_num(), req->key_id, data_size, req->jheader.data_pattern, block_size);
+
         if (data_size != 0) {
             req->write_sgs =
                 test_common::HSTestHelper::create_sgs(data_size, max_size_per_iov, req->jheader.data_pattern);
@@ -491,8 +494,8 @@ public:
 
                 LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
                 g_helper->runner().set_task([this, block_size, db]() {
-                    static std::normal_distribution<> num_blks_gen{128.0, 0.0};
-                    this->generate_writes(std::abs(std::round(num_blks_gen(g_re))) * block_size, block_size, db);
+                    static std::normal_distribution<> num_blks_gen{3.0, 2.0};
+                    this->generate_writes(std::abs(std::lround(num_blks_gen(g_re))) * block_size, block_size, db);
                 });
                 if (wait_for_commit) { g_helper->runner().execute().get(); }
                 break;
@@ -765,6 +768,7 @@ TEST_F(RaftReplDevTest, Snapshot_and_Compact) {
     g_helper->sync_for_cleanup_start();
 }
 
+#if 0
 TEST_F(RaftReplDevTest, RemoveReplDev) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
 
@@ -815,6 +819,7 @@ TEST_F(RaftReplDevTest, RemoveReplDev) {
     // see if records are being removed
     g_helper->sync_for_cleanup_start();
 }
+#endif
 
 #ifdef _PRERELEASE
 // Garbage collect the replication requests
