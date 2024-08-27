@@ -167,7 +167,8 @@ BlkAllocStatus VirtualDev::commit_blk(BlkId const& blkid) {
     HS_LOG(DEBUG, device, "commit_blk: bid {}", blkid.to_string());
     auto const recovering = homestore::hs()->is_initializing();
     if (!recovering) {
-        HS_DBG_ASSERT(is_blk_alloced(blkid), "commiting blkid {} is not allocated in non-recovery mode",
+        // in non-recovery mode, if a blk is committed without allocating, it will cause data corruption
+        HS_REL_ASSERT(is_blk_alloced(blkid), "commiting blkid {} is not allocated in non-recovery mode",
                       blkid.to_string());
     } else {
         chunk->blk_allocator_mutable()->reserve_on_cache(blkid);
