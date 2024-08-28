@@ -87,6 +87,13 @@ public:
     void write_at(ulong index, raft_buf_ptr_t& buffer);
 
     /**
+     * Discard all log entries larger than given `index`.
+     *
+     * @param index Log index number to overwrite.
+     */
+    void rollback(ulong index);
+
+    /**
      * Invoked after a batch of logs is written as a part of
      * a single append_entries request.
      *

@@ -102,6 +102,9 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
 }
 
 bool RaftReplDev::join_group() {
+    // our local log after commit_lsn may be invalid,  discard them
+    m_data_journal->rollback(m_commit_upto_lsn.load());
+
     auto raft_result =
         m_msg_mgr.join_group(m_group_id, "homestore_replication",
                              std::dynamic_pointer_cast< nuraft_mesg::mesg_state_mgr >(shared_from_this()));

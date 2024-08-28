@@ -186,6 +186,11 @@ void HomeRaftLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& e
                               nullptr /* cookie */, [buf](int64_t, sisl::io_blob&, logdev_key, void*) {});
 }
 
+void HomeRaftLogStore::rollback(int index)
+    m_log_store->rollback(to_store_lsn(index) - 1);
+    m_last_durable_lsn = -1;
+}
+
 void HomeRaftLogStore::end_of_append_batch(ulong start, ulong cnt) {
     auto end_lsn = to_store_lsn(start + cnt - 1);
     m_log_store->flush(end_lsn);
