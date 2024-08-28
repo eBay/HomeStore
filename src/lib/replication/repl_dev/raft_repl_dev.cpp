@@ -1135,7 +1135,7 @@ void RaftReplDev::gc_repl_reqs() {
 void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx) {
     auto repl_lsn = to_repl_lsn(lsn);
     // apply the log entry if the lsn is between checkpoint lsn and durable commit lsn
-    if (repl_lsn < m_rd_sb->checkpoint_lsn) { return; }
+    if (repl_lsn < m_rd_sb->checkpoint_lsn || repl_lsn > m_rd_sb->durable_commit_lsn)  { return; }
 
     // 1. Get the log entry and prepare rreq
     auto const lentry = to_nuraft_log_entry(buf);
@@ -1185,6 +1185,7 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     RD_LOGD("Replay log on restart, rreq=[{}]", rreq->to_string());
 
     if (repl_lsn > m_rd_sb->durable_commit_lsn) {
+        RD_LOGD("Replay log on restart, WE SHOULD NOT REACH HERE, rreq=[{}]", rreq->to_string());
         m_state_machine->link_lsn_to_req(rreq, int64_cast(repl_lsn));
         return;
     }
