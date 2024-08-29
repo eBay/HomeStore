@@ -202,7 +202,7 @@ public:
 
     bool has_room_for_put(btree_put_type put_type, uint32_t key_size, uint32_t value_size) const override {
 #ifdef _PRERELEASE
-        // return (this->total_entries() <= 3);
+         return (this->total_entries() <= 3);
 #endif
         return ((put_type == btree_put_type::UPSERT) || (put_type == btree_put_type::INSERT))
             ? (get_available_entries() > 0)

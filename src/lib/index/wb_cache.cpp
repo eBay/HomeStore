@@ -581,6 +581,7 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
                     BtreeNode::to_string_buf(buf->raw_buffer()));
         m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid, part_of_batch)
             .thenValue([buf, cp_ctx](auto) {
+                // TODO: crash may cause wb_cache() to be destroyed and return null pointer
                 auto& pthis = s_cast< IndexWBCache& >(wb_cache()); // Avoiding more than 16 bytes capture
                 pthis.process_write_completion(cp_ctx, buf);
             });
