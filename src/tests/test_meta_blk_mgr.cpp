@@ -125,7 +125,7 @@ public:
 protected:
     void SetUp() override { m_helper.start_homestore("test_meta_blk_mgr", {{HS_SERVICE::META, {.size_pct = 85.0}}}); }
 
-    void TearDown() override {};
+    void TearDown() override{};
 
 public:
     [[nodiscard]] uint64_t get_elapsed_time(const Clock::time_point& start) {
@@ -399,7 +399,7 @@ public:
             iomanager.iobuf_free(buf);
         } else {
             if (unaligned_addr) {
-                delete[] (buf - unaligned_shift);
+                delete[](buf - unaligned_shift);
             } else {
                 delete[] buf;
             }
@@ -585,6 +585,7 @@ public:
     }
 
     void register_client() {
+        LOGINFO("Registering client with type: {}", mtype);
         m_mbm = &(meta_service());
         m_total_wrt_sz = m_mbm->used_size();
         HS_REL_ASSERT_EQ(m_mbm->total_size() - m_total_wrt_sz, m_mbm->available_blks() * m_mbm->block_size());
