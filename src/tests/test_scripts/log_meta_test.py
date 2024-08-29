@@ -73,21 +73,26 @@ def meta_nightly(options, addln_opts):
     subprocess.check_call(options.dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT,
                           shell=True)
 
-    cmd_opts = "--run_time=7200 --num_io=1000000"
+    cmd_opts = "--gtest_filter=VMetaBlkMgrTest.random_load_test --run_time=7200 --num_io=1000000"
     subprocess.check_call(options.dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT,
                           shell=True)
 
-    cmd_opts = "--min_write_size=65536 --max_write_size=2097152 --run_time=14400 --num_io=1000000"
+    cmd_opts = "--gtest_filter=VMetaBlkMgrTest.random_load_test --min_write_size=65536 --max_write_size=2097152 --run_time=14400 --num_io=1000000"
     subprocess.check_call(options.dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT,
                           shell=True)
 
-    cmd_opts = "--min_write_size=10485760 --max_write_size=80857600 --bitmap=1"
+    cmd_opts = "--gtest_filter=VMetaBlkMgrTest.random_load_test --min_write_size=10485760 --max_write_size=60857600 --bitmap=1"
     subprocess.check_call(options.dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT,
                           shell=True)
 
-    cmd_opts = "--gtest_filter=VMetaBlkMgrTest.write_to_full_test"  # write to file instead of real disk to save time;
+    cmd_opts = "--gtest_filter=VMetaBlkMgrTest.random_load_test --min_write_size=10485760 --max_write_size=60857600 --bitmap=1"
     subprocess.check_call(options.dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT,
                           shell=True)
+
+    cmd_opts = "--gtest_filter=VMetaBlkMgrTest.random_load_test --gtest_filter=VMetaBlkMgrTest.write_to_full_test --use_file=true"  # write to file instead of real disk to save time;
+    subprocess.check_call(options.dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT,
+                          shell=True)
+
     print("meta blk store test completed")
 
 
