@@ -288,15 +288,8 @@ bool HomeLogStore::rollback(logstore_seq_num_t to_lsn) {
 	return true;
     }
 
-    if (to_lsn > m_tail_lsn.load()) {
-        HS_LOG_ASSERT(false, "Attempted to rollback to {} which is larger than tail_lsn {}", to_lsn, m_tail_lsn.load());
-        return false;
-    }
-
-    // Validate if the lsn to which it is rolledback to is not truncated.
-    auto ret = m_records.status(to_lsn);
-    if (ret.is_out_of_range) {
-        HS_LOG_ASSERT(false, "Attempted to rollback to {} which is already truncated", to_lsn);
+    if (to_lsn > m_tail_lsn.load() || to_lsn < m_start_lsn.load()) {
+        HS_LOG_ASSERT(false, "Attempted to rollback to {} which is not in the range of [{}, {}]", to_lsn, m_start_lsn.load(), m_tail_lsn.load());
         return false;
     }
 
