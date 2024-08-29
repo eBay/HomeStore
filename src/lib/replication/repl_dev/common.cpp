@@ -106,7 +106,8 @@ uint8_t* repl_req_ctx::raw_journal_buf() { return std::get< std::unique_ptr< uin
 
 void repl_req_ctx::set_lsn(int64_t lsn) {
     DEBUG_ASSERT((m_lsn == -1) || (m_lsn == lsn),
-                 "Changing lsn for request={} on the fly can cause race condition, not expected", to_string());
+                 "Changing lsn for request={} on the fly can cause race condition, not expected. lsn {}, m_lsn {}",
+                 to_string(), lsn, m_lsn);
     m_lsn = lsn;
     LOGTRACEMOD(replication, "Setting lsn={} for request={}", lsn, to_string());
 }

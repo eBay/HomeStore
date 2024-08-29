@@ -141,7 +141,6 @@ public:
             std::unique_lock lk(db_mtx_);
             inmem_db_.insert_or_assign(k, v);
             lsn_index_.emplace(lsn, v);
-            last_committed_lsn = lsn;
             ++commit_count_;
         }
 
@@ -193,7 +192,10 @@ public:
 
         int64_t next_lsn = snp_data->offset;
         std::vector< KeyValuePair > kv_snapshot_data;
-        for (auto iter = lsn_index_.find(next_lsn); iter != lsn_index_.end(); iter++) {
+        // we can not use find to get the next element, since if the next lsn is a config lsn , it will not be put into
+        // lsn_index_ and as a result, the find will return the end of the map. so here we use lower_bound to get the
+        // first element to be read and transfered.
+        for (auto iter = lsn_index_.lower_bound(next_lsn); iter != lsn_index_.end(); iter++) {
             auto& v = iter->second;
             kv_snapshot_data.emplace_back(Key{v.id_}, v);
             LOGTRACEMOD(replication, "[Replica={}] Read logical snapshot callback fetching lsn={} size={} pattern={}",
@@ -211,7 +213,7 @@ public:
         sisl::io_blob_safe blob{static_cast< uint32_t >(kv_snapshot_data_size)};
         std::memcpy(blob.bytes(), kv_snapshot_data.data(), kv_snapshot_data_size);
         snp_data->blob = std::move(blob);
-        snp_data->is_last_obj = false;
+        snp_data->is_last_obj = true;
         LOGINFOMOD(replication, "[Replica={}] Read logical snapshot callback obj_id={} term={} idx={} num_items={}",
                    g_helper->replica_num(), snp_data->offset, s->get_last_log_term(), s->get_last_log_idx(),
                    kv_snapshot_data.size());
@@ -231,18 +233,17 @@ public:
 
     void write_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) override {
         auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(context)->nuraft_snapshot();
-
+        auto last_committed_idx =
+            std::dynamic_pointer_cast< RaftReplDev >(repl_dev())->raft_server()->get_committed_log_idx();
         if (snp_data->offset == 0) {
-            // For obj_id 0 we sent back the last committed lsn.
-            snp_data->offset = last_committed_lsn;
-            LOGINFOMOD(replication, "[Replica={}] Save logical snapshot callback obj_id={} term={} idx={} is_last={}",
-                       g_helper->replica_num(), snp_data->offset, s->get_last_log_term(), s->get_last_log_idx(),
-                       snp_data->is_last_obj);
+            snp_data->offset = last_committed_idx + 1;
+            LOGINFOMOD(replication, "[Replica={}] Save logical snapshot callback return obj_id={}",
+                       g_helper->replica_num(), snp_data->offset);
             return;
         }
 
         size_t kv_snapshot_data_size = snp_data->blob.size();
-        if (kv_snapshot_data_size == 0) { return; }
+        if (kv_snapshot_data_size == 0) return;
 
         size_t num_items = kv_snapshot_data_size / sizeof(KeyValuePair);
         std::unique_lock lk(db_mtx_);
@@ -260,7 +261,6 @@ public:
                 value.blkid_ = out_blkids;
             }
             inmem_db_.insert_or_assign(key, value);
-            last_committed_lsn = value.lsn_;
             ++commit_count_;
             ptr++;
         }
@@ -269,7 +269,7 @@ public:
                    "[Replica={}] Save logical snapshot callback obj_id={} term={} idx={} is_last={} num_items={}",
                    g_helper->replica_num(), snp_data->offset, s->get_last_log_term(), s->get_last_log_idx(),
                    snp_data->is_last_obj, num_items);
-        snp_data->offset = last_committed_lsn + 1;
+        snp_data->offset = last_committed_idx + 1;
     }
 
     bool apply_snapshot(shared< snapshot_context > context) override {
@@ -392,7 +392,6 @@ private:
     std::map< int64_t, Value > lsn_index_;
     uint64_t commit_count_{0};
     std::shared_mutex db_mtx_;
-    uint64_t last_committed_lsn{0};
     std::shared_ptr< snapshot_context > m_last_snapshot{nullptr};
     std::mutex m_snapshot_lock;
     bool zombie_{false};
@@ -421,11 +420,23 @@ public:
         for (auto const& db : dbs_) {
             if (db->is_zombie()) { continue; }
             auto repl_dev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
+            int i = 0;
+            bool force_leave = false;
             do {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
                 auto& raft_repl_svc = dynamic_cast< RaftReplService& >(hs()->repl_service());
                 raft_repl_svc.gc_repl_devs();
                 LOGINFO("Waiting for repl dev to get destroyed");
+
+                // TODO: if leader is destroyed, but the follower does not receive the notification, it will not be
+                // destroyed for ever. we need handle this in raft_repl_dev. revisit here after making changes at
+                // raft_repl_dev side to hanle this case. this is a workaround to avoid the infinite loop for now.
+                if (i++ > 10 && !force_leave) {
+                    LOGWARN("Waiting for repl dev to get destroyed and it is leader, so do a force leave");
+                    repl_dev->force_leave();
+                    force_leave = true;
+                }
+
             } while (!repl_dev->is_destroyed());
         }
     }
@@ -919,16 +930,9 @@ TEST_F(RaftReplDevTest, BaselineTest) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
 
-#ifdef _PRERELEASE
-    // If debug build we set flip to force truncate.
-    if (g_helper->replica_num() == 0) {
-        LOGINFO("Set force home logstore truncate");
-        g_helper->set_basic_flip("force_home_raft_log_truncate");
-    }
-#endif
-
     // Write some entries on leader.
     uint64_t entries_per_attempt = 50;
+
     LOGINFO("Write on leader num_entries={}", entries_per_attempt);
     this->write_on_leader(entries_per_attempt, true /* wait_for_commit */);
 

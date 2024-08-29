@@ -31,6 +31,7 @@ struct raft_repl_dev_superblk : public repl_dev_superblk {
 #pragma pack()
 
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
+using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
 
 ENUM(repl_dev_stage_t, uint8_t, INIT, ACTIVE, DESTROYING, DESTROYED, PERMANENT_DESTROYED);
 
@@ -228,6 +229,14 @@ public:
      * \brief This method is called during restart to notify the upper layer
      */
     void on_restart();
+
+    /**
+     * \brief This method is called to force leave the group without waiting for committing the destroy message.
+     * it is used when the repl_dev is a stale member of a destroyed group. this stable member does not receive the
+     * destroy message. but the group is already destroyed, so no leader will send this message again to this stale
+     * member. we need to force leave the group to avoid the stale member to be a part of the group.
+     */
+    void force_leave() { leave(); }
 
 protected:
     //////////////// All nuraft::state_mgr overrides ///////////////////////
