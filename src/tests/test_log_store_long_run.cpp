@@ -166,11 +166,6 @@ public:
     }
 
     void rollback_validate(uint32_t num_lsns_to_rollback) {
-
-        if (m_log_store->truncated_upto() == m_log_store->get_contiguous_completed_seq_num(-1)) {
-            // No records to rollback.
-            return;
-        }
         if ((m_cur_lsn - num_lsns_to_rollback - 1) <= m_log_store->get_contiguous_issued_seq_num(-1)) { return; }
         auto const upto_lsn = m_cur_lsn.fetch_sub(num_lsns_to_rollback) - num_lsns_to_rollback - 1;
         m_log_store->rollback(upto_lsn);
