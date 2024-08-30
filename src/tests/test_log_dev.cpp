@@ -262,6 +262,9 @@ TEST_F(LogDevTest, Rollback) {
     logstore_seq_num_t cur_lsn = 0;
     kickstart_inserts(log_store, cur_lsn, 500);
 
+    LOGINFO("Step 3.0: Rollback last 0 entries and validate if pre-rollback entries are intact");
+    rollback_validate(log_store, cur_lsn, 0); // Last entry = 500
+
     LOGINFO("Step 3: Rollback last 50 entries and validate if pre-rollback entries are intact");
     rollback_validate(log_store, cur_lsn, 50); // Last entry = 450
 
