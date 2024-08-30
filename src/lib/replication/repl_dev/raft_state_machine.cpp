@@ -201,6 +201,11 @@ raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params
     return m_success_ptr;
 }
 
+void RaftStateMachine::commit_config(const ulong log_idx, raft_cluster_config_ptr_t& new_conf) {
+    RD_LOGD("Raft channel: Commit new cluster conf , log_idx = {}", log_idx);
+    // TODO:add more logic here if necessary
+}
+
 void RaftStateMachine::iterate_repl_reqs(std::function< void(int64_t, repl_req_ptr_t rreq) > const& cb) {
     for (auto [key, rreq] : m_lsn_req_map) {
         cb(key, rreq);

@@ -177,6 +177,7 @@ void HomeLogStore::on_log_found(logstore_seq_num_t seq_num, const logdev_key& ld
 
 void HomeLogStore::truncate(logstore_seq_num_t upto_lsn, bool in_memory_truncate_only) {
     if (upto_lsn < m_start_lsn) { return; }
+    flush();
 #ifndef NDEBUG
     auto cs = get_contiguous_completed_seq_num(0);
     if (upto_lsn > cs) {

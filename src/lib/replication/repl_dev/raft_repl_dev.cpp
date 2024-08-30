@@ -1050,7 +1050,13 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
                 if (entry->get_val_type() != nuraft::log_val_type::app_log) { continue; }
                 if (entry->get_buf_ptr()->size() == 0) { continue; }
                 auto req = m_state_machine->localize_journal_entry_prepare(*entry);
-                if (req == nullptr) {
+                // TODO :: we need to indentify whether this log entry should be appended to log store.
+                // 1 for lsn, if the req#lsn is not -1, it means this log has been localized and apeneded before, we
+                // should skip it.
+                // 2 for dsn, if the req#dsn is less than the next_dsn, it means this log has been
+                // committed, we should skip it.
+                // here, we only check the first condition for now. revisit here if we need to check the second
+                if (req == nullptr || req->lsn() != -1) {
                     sisl::VectorPool< repl_req_ptr_t >::free(reqs);
                     return {true, nuraft::cb_func::ReturnCode::ReturnNull};
                 }

@@ -26,6 +26,7 @@ class ReplDev;
 class ReplDevListener;
 struct repl_req_ctx;
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
+using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
 using repl_req_ptr_t = boost::intrusive_ptr< repl_req_ctx >;
 
 VENUM(repl_req_state_t, uint32_t,
@@ -57,7 +58,9 @@ struct repl_key {
     };
 
     bool operator==(repl_key const& other) const = default;
-    std::string to_string() const { return fmt::format("server={}, term={}, dsn={}", server_id, term, dsn); }
+    std::string to_string() const {
+        return fmt::format("server={}, term={}, dsn={}, hash={}", server_id, term, dsn, Hasher()(*this));
+    }
 };
 
 using repl_snapshot = nuraft::snapshot;
