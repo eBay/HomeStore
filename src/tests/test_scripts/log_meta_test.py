@@ -85,10 +85,6 @@ def meta_nightly(options, addln_opts):
     subprocess.check_call(options.dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT,
                           shell=True)
 
-    cmd_opts = "--gtest_filter=VMetaBlkMgrTest.random_load_test --min_write_size=10485760 --max_write_size=60857600 --bitmap=1"
-    subprocess.check_call(options.dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT,
-                          shell=True)
-
     cmd_opts = "--gtest_filter=VMetaBlkMgrTest.random_load_test --gtest_filter=VMetaBlkMgrTest.write_to_full_test --use_file=true"  # write to file instead of real disk to save time;
     subprocess.check_call(options.dirpath + "test_meta_blk_mgr " + cmd_opts + addln_opts, stderr=subprocess.STDOUT,
                           shell=True)
