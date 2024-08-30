@@ -18,6 +18,7 @@ template < typename T >
 using ptr = std::shared_ptr< T >;
 
 class buffer;
+class log_entry;
 } // namespace nuraft
 
 namespace homestore {
@@ -25,6 +26,7 @@ class ReplDev;
 class ReplDevListener;
 struct repl_req_ctx;
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
+using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
 using repl_req_ptr_t = boost::intrusive_ptr< repl_req_ctx >;
 
 VENUM(repl_req_state_t, uint32_t,
@@ -56,7 +58,9 @@ struct repl_key {
     };
 
     bool operator==(repl_key const& other) const = default;
-    std::string to_string() const { return fmt::format("server={}, term={}, dsn={}", server_id, term, dsn); }
+    std::string to_string() const {
+        return fmt::format("server={}, term={}, dsn={}, hash={}", server_id, term, dsn, Hasher()(*this));
+    }
 };
 
 using repl_snapshot = nuraft::snapshot;
@@ -149,7 +153,6 @@ public:
 
     raft_buf_ptr_t& raft_journal_buf();
     uint8_t* raw_journal_buf();
-
     /////////////////////// Non modifiers methods //////////////////
     std::string to_string() const;
     std::string to_compact_string() const;
@@ -203,6 +206,7 @@ public:
     void set_lsn(int64_t lsn);
     void add_state(repl_req_state_t s);
     bool add_state_if_not_already(repl_req_state_t s);
+    void set_lentry(nuraft::ptr< nuraft::log_entry > const& lentry) { m_lentry = lentry; }
     void clear();
     flatbuffers::FlatBufferBuilder& create_fb_builder() { return m_fb_builder; }
     void release_fb_builder() { m_fb_builder.Release(); }
@@ -234,6 +238,7 @@ private:
     std::variant< std::unique_ptr< uint8_t[] >, raft_buf_ptr_t > m_journal_buf; // Buf for the journal entry
     repl_journal_entry* m_journal_entry{nullptr};                               // pointer to the journal entry
     bool m_is_jentry_localize_pending{false}; // Is the journal entry needs to be localized from remote
+    nuraft::ptr< nuraft::log_entry > m_lentry;
 
     /////////////// Replication state related section /////////////////
     std::atomic< uint32_t > m_state{uint32_cast(repl_req_state_t::INIT)}; // State of the replication request

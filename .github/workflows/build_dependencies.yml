@@ -165,6 +165,7 @@ jobs:
     - name: Build Cache
       run: |
         pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
+        sudo rm -rf $ANDROID_HOME
         conan install \
             -c tools.build:skip_test=True \
             ${pre} \
@@ -219,7 +220,6 @@ jobs:
       run: |
         sanitize=$([[ "${{ inputs.tooling }}" == "Sanitize" ]] && echo "True" || echo "False")
         pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
-        sudo rm -rf /usr/local/lib/android/
         conan create \
             ${pre} \
             -o sisl:malloc_impl=${{ inputs.malloc-impl }} \

@@ -225,6 +225,7 @@ public:
      * @brief Rollback the given instance to the given sequence number
      *
      * @param to_lsn Sequence number back which logs are to be rollbacked
+     * the to_lsn will be the tail_lsn after rollback.
      * @return True on success
      */
     bool rollback(logstore_seq_num_t to_lsn);

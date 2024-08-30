@@ -30,6 +30,7 @@
 namespace homestore {
 
 using raft_buf_ptr_t = nuraft::ptr< nuraft::buffer >;
+using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
 
 class HomeRaftLogStore : public nuraft::log_store {
 public:

@@ -177,6 +177,7 @@ void HomeLogStore::on_log_found(logstore_seq_num_t seq_num, const logdev_key& ld
 
 void HomeLogStore::truncate(logstore_seq_num_t upto_lsn, bool in_memory_truncate_only) {
     if (upto_lsn < m_start_lsn) { return; }
+    flush();
 #ifndef NDEBUG
     auto cs = get_contiguous_completed_seq_num(0);
     if (upto_lsn > cs) {
@@ -283,13 +284,17 @@ void HomeLogStore::flush(logstore_seq_num_t upto_lsn) {
 }
 
 bool HomeLogStore::rollback(logstore_seq_num_t to_lsn) {
-    // Validate if the lsn to which it is rolledback to is not truncated.
-    auto ret = m_records.status(to_lsn + 1);
-    if (ret.is_out_of_range) {
-        HS_LOG_ASSERT(false, "Attempted to rollback to {} which is already truncated", to_lsn);
+    //Fast path
+    if (to_lsn == m_tail_lsn.load()) {
+	return true;
+    }
+
+    if (to_lsn > m_tail_lsn.load() || to_lsn < m_start_lsn.load()) {
+        HS_LOG_ASSERT(false, "Attempted to rollback to {} which is not in the range of [{}, {}]", to_lsn, m_start_lsn.load(), m_tail_lsn.load());
         return false;
     }
 
+    THIS_LOGSTORE_LOG(INFO, "Rolling back to {}, tail {}", to_lsn, m_tail_lsn.load());
     bool do_flush{false};
     do {
         {

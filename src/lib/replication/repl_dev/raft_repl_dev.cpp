@@ -77,11 +77,12 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
     }
 
     RD_LOG(INFO,
-           "Started {} RaftReplDev group_id={}, replica_id={}, raft_server_id={} commited_lsn={}, compact_lsn={} "
-           "next_dsn={} "
+           "Started {} RaftReplDev group_id={}, replica_id={}, raft_server_id={} commited_lsn={}, "
+           "compact_lsn={}, checkpoint_lsn:{}, next_dsn={} "
            "log_dev={} log_store={}",
            (load_existing ? "Existing" : "New"), group_id_str(), my_replica_id_str(), m_raft_server_id,
-           m_commit_upto_lsn.load(), m_compact_lsn.load(), m_next_dsn.load(), m_rd_sb->logdev_id, m_rd_sb->logstore_id);
+           m_commit_upto_lsn.load(), m_compact_lsn.load(), m_rd_sb->checkpoint_lsn, m_next_dsn.load(),
+           m_rd_sb->logdev_id, m_rd_sb->logstore_id);
 
 #ifdef _PRERELEASE
     m_msg_mgr.bind_data_service_request(PUSH_DATA, m_group_id, [this](intrusive< sisl::GenericRpcData >& rpc_data) {
@@ -746,7 +747,7 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
     RD_DBG_ASSERT_EQ(total_size, 0, "Total size mismatch, some data is not consumed");
 }
 
-void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
+void RaftReplDev::commit_blk(repl_req_ptr_t rreq) {
     if (rreq->local_blkid().is_valid()) {
         if (data_service().commit_blk(rreq->local_blkid()) != BlkAllocStatus::SUCCESS) {
             if (hs()->device_mgr()->is_boot_in_degraded_mode() && m_log_store_replay_done)
@@ -755,6 +756,10 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
                 RD_DBG_ASSERT(false, "fail to commit blk when applying log in non-degraded mode.")
         }
     }
+}
+
+void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
+    commit_blk(rreq);
 
     // Remove the request from repl_key map.
     m_repl_key_req_map.erase(rreq->rkey());
@@ -1045,7 +1050,13 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
                 if (entry->get_val_type() != nuraft::log_val_type::app_log) { continue; }
                 if (entry->get_buf_ptr()->size() == 0) { continue; }
                 auto req = m_state_machine->localize_journal_entry_prepare(*entry);
-                if (req == nullptr) {
+                // TODO :: we need to indentify whether this log entry should be appended to log store.
+                // 1 for lsn, if the req#lsn is not -1, it means this log has been localized and apeneded before, we
+                // should skip it.
+                // 2 for dsn, if the req#dsn is less than the next_dsn, it means this log has been
+                // committed, we should skip it.
+                // here, we only check the first condition for now. revisit here if we need to check the second
+                if (req == nullptr || req->lsn() != -1) {
                     sisl::VectorPool< repl_req_ptr_t >::free(reqs);
                     return {true, nuraft::cb_func::ReturnCode::ReturnNull};
                 }
@@ -1181,10 +1192,14 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     }
 
     rreq->set_lsn(repl_lsn);
+    // keep lentry in scope for the lyfe cycle of the rreq
+    rreq->set_lentry(lentry);
     rreq->init(rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry), entry_to_key(jentry), data_size);
     RD_LOGD("Replay log on restart, rreq=[{}]", rreq->to_string());
 
     if (repl_lsn > m_rd_sb->durable_commit_lsn) {
+        // In memory state of these blks is lost. Commit them now to avoid usage of same blk twice.
+        commit_blk(rreq);
         m_state_machine->link_lsn_to_req(rreq, int64_cast(repl_lsn));
         return;
     }
@@ -1202,7 +1217,12 @@ bool RaftReplDev::is_resync_mode() {
     int64_t const leader_commited_lsn = raft_server()->get_leader_committed_log_idx();
     int64_t const my_log_idx = raft_server()->get_last_log_idx();
     auto diff = leader_commited_lsn - my_log_idx;
-    return diff > HS_DYNAMIC_CONFIG(consensus.resync_log_idx_threshold);
+    bool resync_mode = (diff > HS_DYNAMIC_CONFIG(consensus.resync_log_idx_threshold));
+    if (resync_mode) {
+        RD_LOGD("Raft Channel: Resync mode, leader_commited_lsn={}, my_log_idx={}, diff={}", leader_commited_lsn,
+                my_log_idx, diff);
+    }
+    return resync_mode;
 }
 
 } // namespace homestore
