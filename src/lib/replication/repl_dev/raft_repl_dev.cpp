@@ -120,7 +120,19 @@ folly::SemiFuture< ReplServiceError > RaftReplDev::destroy_group() {
 
     // Propose to the group to destroy
     auto rreq = repl_req_ptr_t(new repl_req_ctx{});
-    rreq->init(repl_key{}, journal_type_t::HS_CTRL_DESTROY, true, sisl::blob{}, sisl::blob{}, 0);
+
+    // if we have a rreq {originator=1, term=1, dsn=0, lsn=7} in follower and a baseline resync is triggerd before the
+    // rreq is committed in the follower, then the on_commit of the rreq will not be called and as a result this rreq
+    // will become a garbage rreq in this follower. now if we trigger a destroy_group, a new rreq {originator=1, term=1,
+    // dsn=0} will created in the follower since the default dsn of a repl_key is 0.after the log of this rreq is
+    // appended to log store and get a new lsn, if we link the new lsn to the old rreq (rreq is identified by
+    // {originator, term, dsn}) which has alread have a lsn, then a assert will be throw out. pls refer to
+    // repl_req_ctx::set_lsn
+
+    // here, we set the dsn to a new one , which is definitely unique in the follower, so that the new rreq will not
+    // have a conflict with the old rreq.
+    rreq->init(repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
+               journal_type_t::HS_CTRL_DESTROY, true, sisl::blob{}, sisl::blob{}, 0);
 
     auto err = m_state_machine->propose_to_raft(std::move(rreq));
     if (err != ReplServiceError::OK) {
@@ -526,7 +538,7 @@ void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreq
 void RaftReplDev::fetch_data_from_remote(std::vector< repl_req_ptr_t > rreqs) {
     if (rreqs.size() == 0) { return; }
 
-    std::vector<::flatbuffers::Offset< RequestEntry > > entries;
+    std::vector< ::flatbuffers::Offset< RequestEntry > > entries;
     entries.reserve(rreqs.size());
 
     shared< flatbuffers::FlatBufferBuilder > builder = std::make_shared< flatbuffers::FlatBufferBuilder >();
@@ -1041,6 +1053,14 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
                 entries.size(), raft_req->get_last_log_term(), start_lsn, start_lsn + entries.size() - 1,
                 m_commit_upto_lsn.load(), raft_req->get_commit_idx());
 
+        if (start_lsn != m_data_journal->next_slot()) {
+            // if the start_lsn of this batch does not match the next_slot, drop this log batch
+            // this will happen when the leader is sending the logs which are already received and appended
+            RD_LOGD("start_lsn={} does not match the next_slot={}, dropping the log batch", start_lsn,
+                    m_data_journal->next_slot());
+            return {true, nuraft::cb_func::ReturnCode::ReturnNull};
+        }
+
         if (!entries.empty()) {
             RD_LOGT("Raft channel: Received {} append entries on follower from leader, localizing them",
                     entries.size());
@@ -1050,13 +1070,7 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
                 if (entry->get_val_type() != nuraft::log_val_type::app_log) { continue; }
                 if (entry->get_buf_ptr()->size() == 0) { continue; }
                 auto req = m_state_machine->localize_journal_entry_prepare(*entry);
-                // TODO :: we need to indentify whether this log entry should be appended to log store.
-                // 1 for lsn, if the req#lsn is not -1, it means this log has been localized and apeneded before, we
-                // should skip it.
-                // 2 for dsn, if the req#dsn is less than the next_dsn, it means this log has been
-                // committed, we should skip it.
-                // here, we only check the first condition for now. revisit here if we need to check the second
-                if (req == nullptr || req->lsn() != -1) {
+                if (req == nullptr) {
                     sisl::VectorPool< repl_req_ptr_t >::free(reqs);
                     return {true, nuraft::cb_func::ReturnCode::ReturnNull};
                 }
