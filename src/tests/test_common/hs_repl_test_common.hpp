@@ -137,7 +137,7 @@ public:
     void setup() {
         replica_num_ = SISL_OPTIONS["replica_num"].as< uint16_t >();
         sisl::logging::SetLogger(name_ + std::string("_replica_") + std::to_string(replica_num_));
-        sisl::logging::SetLogPattern("[%D %T%z] [%^%L%$] [%n] [%t] %v");
+        sisl::logging::SetLogPattern("[%D %T.%f] [%^%L%$] [%n] [%t] %v");
         auto const num_replicas = SISL_OPTIONS["replicas"].as< uint32_t >();
 
         boost::uuids::string_generator gen;
@@ -168,7 +168,8 @@ public:
                 }
             }
             for (auto const& dev : rdev_list[replica_num_]) {
-                dev_list_.emplace_back(dev, homestore::HSDevType::Data);
+                dev_list_.emplace_back(dev,
+                                       dev_list_.empty() ? homestore::HSDevType::Fast : homestore::HSDevType::Data);
             }
         }
 

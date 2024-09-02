@@ -359,6 +359,14 @@ private:
             // Fake restart, device list is unchanged.
             shutdown_homestore(false);
             std::this_thread::sleep_for(std::chrono::seconds{shutdown_delay_sec});
+        } else if (!m_token.devs_.empty()) {
+            // For those UTs already process device list, like test_raft_repl_dev.
+            LOGINFO("Using passed in dev_list: {}",
+                    std::accumulate(m_token.devs_.begin(), m_token.devs_.end(), std::string(""),
+                                    [](const std::string& s, const homestore::dev_info& dinfo) {
+                                        return s.empty() ? dinfo.dev_name : s + "," + dinfo.dev_name;
+                                    }));
+
         } else if (SISL_OPTIONS.count("device_list")) {
             // User has provided explicit device list, use that and initialize them
             auto const devs = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
@@ -440,6 +448,9 @@ private:
             set_min_chunk_size(m_token.svc_params_[HS_SERVICE::LOG].min_chunk_size);
         }
 
+        // in UT we assume first drive is FAST, rest are DATA.
+        bool has_data_drive = m_token.devs_.size() > 1;
+
         if (need_format) {
             auto svc_params = m_token.svc_params_;
             hsi->format_and_start(
@@ -460,7 +471,8 @@ private:
                  {HS_SERVICE::INDEX,
                   {.dev_type = homestore::HSDevType::Fast, .size_pct = svc_params[HS_SERVICE::INDEX].size_pct}},
                  {HS_SERVICE::REPLICATION,
-                  {.size_pct = svc_params[HS_SERVICE::REPLICATION].size_pct,
+                  {.dev_type = has_data_drive ? homestore::HSDevType::Data : homestore::HSDevType::Fast,
+                   .size_pct = svc_params[HS_SERVICE::REPLICATION].size_pct,
                    .alloc_type = svc_params[HS_SERVICE::REPLICATION].blkalloc_type,
                    .chunk_sel_type = svc_params[HS_SERVICE::REPLICATION].custom_chunk_selector
                        ? chunk_selector_type_t::CUSTOM
