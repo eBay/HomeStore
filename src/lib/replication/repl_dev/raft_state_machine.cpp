@@ -221,7 +221,10 @@ void RaftStateMachine::become_ready() { m_rd.become_ready(); }
 
 void RaftStateMachine::unlink_lsn_to_req(int64_t lsn) {
     auto const it = m_lsn_req_map.find(lsn);
-    if (it != m_lsn_req_map.cend()) { m_lsn_req_map.erase(lsn); }
+    if (it != m_lsn_req_map.cend()) {
+        RD_LOG(DEBUG, "Raft channel: erase lsn {},  rreq {}", lsn, it->second->to_string());
+        m_lsn_req_map.erase(lsn);
+    }
 }
 
 void RaftStateMachine::link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn) {
