@@ -1053,14 +1053,6 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
                 entries.size(), raft_req->get_last_log_term(), start_lsn, start_lsn + entries.size() - 1,
                 m_commit_upto_lsn.load(), raft_req->get_commit_idx());
 
-        if (start_lsn != m_data_journal->next_slot()) {
-            // if the start_lsn of this batch does not match the next_slot, drop this log batch
-            // this will happen when the leader is sending the logs which are already received and appended
-            RD_LOGD("start_lsn={} does not match the next_slot={}, dropping the log batch", start_lsn,
-                    m_data_journal->next_slot());
-            return {true, nuraft::cb_func::ReturnCode::ReturnNull};
-        }
-
         if (!entries.empty()) {
             RD_LOGT("Raft channel: Received {} append entries on follower from leader, localizing them",
                     entries.size());
