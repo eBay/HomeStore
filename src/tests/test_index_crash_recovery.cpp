@@ -41,7 +41,7 @@ SISL_OPTION_GROUP(
     (num_entries, "", "num_entries", "number of entries to test with",
      ::cxxopts::value< uint32_t >()->default_value("5000"), "number"),
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"),
-    (disable_merge, "", "disable_merge", "disable_merge", ::cxxopts::value< bool >()->default_value("0"), ""),
+    (max_keys_in_node, "", "max_keys_in_node", "max_keys_in_node", ::cxxopts::value< uint32_t >()->default_value("0"), ""),
     (operation_list, "", "operation_list", "operation list instead of default created following by percentage",
      ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
     (preload_size, "", "preload_size", "number of entries to preload tree with",
@@ -191,9 +191,11 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
 
         std::shared_ptr< IndexTableBase > on_index_table_found(superblk< index_table_sb >&& sb) override {
             LOGINFO("Index table recovered, root bnode_id {} version {}", sb->root_node, sb->root_link_version);
+
             m_test->m_cfg = BtreeConfig(hs()->index_service().node_size());
             m_test->m_cfg.m_leaf_node_type = T::leaf_node_type;
             m_test->m_cfg.m_int_node_type = T::interior_node_type;
+            m_test->m_cfg.m_max_keys_in_node = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
             m_test->m_bt = std::make_shared< typename T::BtreeType >(std::move(sb), m_test->m_cfg);
             return m_test->m_bt;
         }
@@ -221,7 +223,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
 
         LOGINFO("Node size {} ", hs()->index_service().node_size());
         this->m_cfg = BtreeConfig(hs()->index_service().node_size());
-
+        this->m_cfg.m_max_keys_in_node = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
         auto uuid = boost::uuids::random_generator()();
         auto parent_uuid = boost::uuids::random_generator()();
 
@@ -521,7 +523,6 @@ TYPED_TEST(IndexCrashTest, SplitCrash1) {
     OperationList operations;
     for (size_t i = 0; i < flips.size(); ++i) {
         this->destroy_btree();
-
         LOGINFO("Step 1-{}: Set flag {}", i + 1, flips[i]);
         this->set_basic_flip(flips[i]);
         operations = generator.generateOperations(num_entries, true /* reset */);
@@ -535,7 +536,7 @@ TYPED_TEST(IndexCrashTest, SplitCrash1) {
     }
 }
 
-TYPED_TEST(IndexCrashTest, SplitCrash2) {
+TYPED_TEST(IndexCrashTest, long_running_put_crash) {
     // Define the lambda function
     auto const num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
     SequenceGenerator generator(100 /*putFreq*/, 0 /* removeFreq*/, 0 /*start_range*/, num_entries -1 /*end_range*/);
@@ -544,6 +545,8 @@ TYPED_TEST(IndexCrashTest, SplitCrash2) {
     OperationList operations;
     for (size_t i = 0; i < 5; ++i) {
         LOGINFO("Step 1-{}: Set flag {}", i + 1, flips[i%flips.size()]);
+
+        this->set_basic_flip("reduce_node_entries");
         this->set_basic_flip(flips[i%flips.size()]);
         operations = generator.generateOperations(num_entries/10, false /* reset */);
         //        LOGINFO("Batch {} Operations:\n {} \n ", i + 1, generator.printOperations(operations));
@@ -559,6 +562,7 @@ TYPED_TEST(IndexCrashTest, SplitCrash2) {
 
 int main(int argc, char* argv[]) {
     int parsed_argc{argc};
+    ::testing::GTEST_FLAG(filter) = "-*long_running*";
     ::testing::InitGoogleTest(&parsed_argc, argv);
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_index_crash_recovery, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_index_crash_recovery");

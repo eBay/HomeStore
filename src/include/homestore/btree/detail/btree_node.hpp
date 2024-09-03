@@ -36,6 +36,7 @@ struct transient_hdr_t {
 
     /* these variables are accessed without taking lock and are not expected to change after init */
     uint8_t leaf_node{0};
+    uint64_t max_keys_in_node{0};
 
     bool is_leaf() const { return (leaf_node != 0); }
 };
@@ -113,6 +114,10 @@ public:
             DEBUG_ASSERT_EQ(version(), BTREE_NODE_VERSION);
         }
         m_trans_hdr.leaf_node = is_leaf;
+#ifdef _PRERELEASE
+        m_trans_hdr.max_keys_in_node = cfg.m_max_keys_in_node;
+#endif
+
     }
     virtual ~BtreeNode() = default;
 
@@ -327,6 +332,7 @@ public:
     uint16_t level() const { return get_persistent_header_const()->level; }
 
     // uint32_t total_entries() const { return (has_valid_edge() ? total_entries() + 1 : total_entries()); }
+    uint64_t max_keys_in_node() const { return m_trans_hdr.max_keys_in_node; }
 
     void lock(locktype_t l) const {
         if (l == locktype_t::READ) {
