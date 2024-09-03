@@ -262,10 +262,12 @@ raft_buf_ptr_t HomeRaftLogStore::pack(ulong index, int32_t cnt) {
     m_log_store->foreach (
         to_store_lsn(index),
         [this, &out_buf, &remain_cnt]([[maybe_unused]] store_lsn_t cur, const log_buffer& entry) mutable -> bool {
+            size_t const total_entry_size = entry.size() + sizeof(uint32_t);
             if (remain_cnt-- > 0) {
                 size_t avail_size = out_buf->size() - out_buf->pos();
-                if (avail_size < entry.size() + sizeof(uint32_t)) {
-                    avail_size += std::max(out_buf->size() * 2, (size_t)entry.size() + sizeof(uint32_t));
+                // available size of packing buffer should be able to hold entry.size() and the length of this entry
+                if (avail_size < total_entry_size) {
+                    avail_size += std::max(out_buf->size() * 2, total_entry_size);
                     out_buf = nuraft::buffer::expand(*out_buf, avail_size);
                 }
                 REPL_STORE_LOG(TRACE, "packing lsn={} of size={}, avail_size in buffer={}", to_repl_lsn(cur),

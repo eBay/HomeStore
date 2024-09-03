@@ -432,7 +432,7 @@ public:
                 // destroyed for ever. we need handle this in raft_repl_dev. revisit here after making changes at
                 // raft_repl_dev side to hanle this case. this is a workaround to avoid the infinite loop for now.
                 if (i++ > 10 && !force_leave) {
-                    LOGWARN("Waiting for repl dev to get destroyed and it is leader, so do a force leave");
+                    LOGWARN("has already waited for repl dev to get destroyed for 10 times, so do a force leave");
                     repl_dev->force_leave();
                     force_leave = true;
                 }
