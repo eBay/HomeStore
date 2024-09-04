@@ -42,6 +42,7 @@ pipeline {
                     steps {
                         sh "conan create --build missing -o homestore:sanitize=True -pr debug . ${PROJECT}/${VER}@"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_index_btree' -exec cp {} .jenkins/test_index_btree \\;"
+                        sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_index_crash_recovery' -exec cp {} .jenkins/test_index_crash_recovery \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_meta_blk_mgr' -exec cp {} .jenkins/test_meta_blk_mgr \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_log_store' -exec cp {} .jenkins/test_log_store \\;"
                         sh "find ${CONAN_USER_HOME} -type f -wholename '*tests/test_home_raft_logstore' -exec cp {} .jenkins/test_home_raft_logstore \\;"

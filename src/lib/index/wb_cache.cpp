@@ -551,9 +551,10 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
 void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const& buf, bool part_of_batch) {
 #ifdef _PRERELEASE
     if (buf->m_crash_flag_on) {
-        std::string filename = "crash_buf_" + std::to_string(cp_ctx->id()) + ".dot";
-        LOGINFOMOD(wbcache, "Simulating crash while writing buffer {},  stored in file {}", buf->to_string(), filename);
-        cp_ctx->to_string_dot(filename);
+//        std::string filename = "crash_buf_" + std::to_string(cp_ctx->id()) + ".dot";
+//        LOGINFOMOD(wbcache, "Simulating crash while writing buffer {},  stored in file {}", buf->to_string(), filename);
+//        cp_ctx->to_string_dot(filename);
+        LOGINFOMOD(wbcache, "Simulating crash while writing buffer {}", buf->to_string());
         hs()->crash_simulator().crash();
         cp_ctx->complete(true);
         return;
@@ -581,6 +582,7 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
                     BtreeNode::to_string_buf(buf->raw_buffer()));
         m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid, part_of_batch)
             .thenValue([buf, cp_ctx](auto) {
+                // TODO: crash may cause wb_cache() to be destroyed and return null pointer
                 auto& pthis = s_cast< IndexWBCache& >(wb_cache()); // Avoiding more than 16 bytes capture
                 pthis.process_write_completion(cp_ctx, buf);
             });
