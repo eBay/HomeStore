@@ -551,9 +551,10 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
 void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const& buf, bool part_of_batch) {
 #ifdef _PRERELEASE
     if (buf->m_crash_flag_on) {
-        std::string filename = "crash_buf_" + std::to_string(cp_ctx->id()) + ".dot";
-        LOGINFOMOD(wbcache, "Simulating crash while writing buffer {},  stored in file {}", buf->to_string(), filename);
-        cp_ctx->to_string_dot(filename);
+//        std::string filename = "crash_buf_" + std::to_string(cp_ctx->id()) + ".dot";
+//        LOGINFOMOD(wbcache, "Simulating crash while writing buffer {},  stored in file {}", buf->to_string(), filename);
+//        cp_ctx->to_string_dot(filename);
+        LOGINFOMOD(wbcache, "Simulating crash while writing buffer {}", buf->to_string());
         hs()->crash_simulator().crash();
         cp_ctx->complete(true);
         return;

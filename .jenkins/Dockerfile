@@ -13,6 +13,7 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*;
 
 COPY test_index_btree /usr/local/bin/test_index_btree
+COPY test_index_crash_recovery /usr/local/bin/test_index_crash_recovery
 COPY test_meta_blk_mgr /usr/local/bin/test_meta_blk_mgr
 COPY test_log_store /usr/local/bin/test_log_store
 COPY test_home_raft_logstore /usr/local/bin/test_home_raft_logstore

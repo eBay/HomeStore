@@ -34,23 +34,25 @@ SISL_LOGGING_DECL(test_index_crash_recovery)
 // TODO Add tests to do write,remove after recovery.
 // TODO Test with var len key with io mgr page size is 512.
 
-SISL_OPTION_GROUP(
-    test_index_crash_recovery,
-    (num_iters, "", "num_iters", "number of iterations for rand ops",
-     ::cxxopts::value< uint32_t >()->default_value("500"), "number"),
-    (num_entries, "", "num_entries", "number of entries to test with",
-     ::cxxopts::value< uint32_t >()->default_value("5000"), "number"),
-    (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"),
-    (max_keys_in_node, "", "max_keys_in_node", "max_keys_in_node", ::cxxopts::value< uint32_t >()->default_value("0"), ""),
-    (operation_list, "", "operation_list", "operation list instead of default created following by percentage",
-     ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
-    (preload_size, "", "preload_size", "number of entries to preload tree with",
-     ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
-    (init_device, "", "init_device", "init device", ::cxxopts::value< bool >()->default_value("1"), ""),
-    (cleanup_after_shutdown, "", "cleanup_after_shutdown", "cleanup after shutdown",
-     ::cxxopts::value< bool >()->default_value("1"), ""),
-    (seed, "", "seed", "random engine seed, use random if not defined",
-     ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
+SISL_OPTION_GROUP(test_index_crash_recovery,
+                  (num_iters, "", "num_iters", "number of iterations for rand ops",
+                   ::cxxopts::value< uint32_t >()->default_value("500"), "number"),
+                  (num_entries, "", "num_entries", "number of entries to test with",
+                   ::cxxopts::value< uint32_t >()->default_value("5000"), "number"),
+                  (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"),
+                   "seconds"),
+                  (max_keys_in_node, "", "max_keys_in_node", "max_keys_in_node",
+                   ::cxxopts::value< uint32_t >()->default_value("0"), ""),
+                  (operation_list, "", "operation_list",
+                   "operation list instead of default created following by percentage",
+                   ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
+                  (preload_size, "", "preload_size", "number of entries to preload tree with",
+                   ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
+                  (init_device, "", "init_device", "init device", ::cxxopts::value< bool >()->default_value("1"), ""),
+                  (cleanup_after_shutdown, "", "cleanup_after_shutdown", "cleanup after shutdown",
+                   ::cxxopts::value< bool >()->default_value("1"), ""),
+                  (seed, "", "seed", "random engine seed, use random if not defined",
+                   ::cxxopts::value< uint64_t >()->default_value("0"), "number"))
 
 void log_obj_life_counter() {
     std::string str;
@@ -115,15 +117,13 @@ public:
 
         return operations;
     }
-    __attribute__((noinline))
-    std::string showKeyState(uint64_t key) const {
+    __attribute__((noinline)) std::string showKeyState(uint64_t key) const {
         auto it = keyStates.find(key);
         if (it != keyStates.end()) { return it->second ? "Put" : "Remove"; }
         return "Not in keyStates";
     }
 
-    __attribute__((noinline))
-    static OperationList inspect(const OperationList& operations, uint32_t key) {
+    __attribute__((noinline)) static OperationList inspect(const OperationList& operations, uint32_t key) {
         OperationList occurrences;
         for (size_t i = 0; i < operations.size(); ++i) {
             const auto& [opKey, opType] = operations[i];
@@ -131,8 +131,7 @@ public:
         }
         return occurrences;
     }
-    __attribute__((noinline))
-    std::string printOperations(const OperationList& operations) const {
+    __attribute__((noinline)) std::string printOperations(const OperationList& operations) const {
         std::ostringstream oss;
         for (const auto& [key, opType] : operations) {
             std::string opTypeStr = (opType == OperationType::Put) ? "Put" : "Remove";
@@ -140,8 +139,7 @@ public:
         }
         return oss.str();
     }
-    __attribute__((noinline))
-    std::string printKeyOccurrences(const OperationList& operations) const {
+    __attribute__((noinline)) std::string printKeyOccurrences(const OperationList& operations) const {
         std::set< uint64_t > keys = collectUniqueKeys(operations);
         std::ostringstream oss;
         for (auto key : keys) {
@@ -247,23 +245,19 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             << "shadow map size and tree size mismatch";
         this->get_all();
     }
-    void destroy_btree() {
-        auto cpg = hs()->cp_mgr().cp_guard();
-        auto op_context = (void*)cpg.context(cp_consumer_t::INDEX_SVC);
-        const auto [ret, free_node_cnt] = this->m_bt->destroy_btree(op_context);
-        ASSERT_EQ(ret, btree_status_t::success) << "btree destroy failed";
-        this->m_bt.reset();
+
+    void reset_btree() {
+        this->m_bt->destroy();
         auto uuid = boost::uuids::random_generator()();
         auto parent_uuid = boost::uuids::random_generator()();
         this->m_bt = std::make_shared< typename T::BtreeType >(uuid, parent_uuid, 0, this->m_cfg);
         hs()->index_service().add_index_table(this->m_bt);
-        this->m_shadow_map.range_erase(0, SISL_OPTIONS["num_entries"].as< uint32_t >()-1);
-
+        this->m_shadow_map.range_erase(0, SISL_OPTIONS["num_entries"].as< uint32_t >() - 1);
     }
+
     void restart_homestore(uint32_t shutdown_delay_sec = 3) override {
         this->params(HS_SERVICE::INDEX).index_svc_cbs = new TestIndexServiceCallbacks(this);
         LOGINFO("\n\n\n\n\n\n shutdown homestore for index service Test\n\n\n\n\n");
-        //        this->m_shadow_map.save(this->m_shadow_filename);
         test_common::HSTestHelper::restart_homestore(shutdown_delay_sec);
     }
 
@@ -342,10 +336,10 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
     }
 
     void crash_and_recover(OperationList& operations, std::string filename = "") {
-        this->print_keys("Btree prior to CP and susbsequent simulated crash: ");
+        //        this->print_keys("Btree prior to CP and susbsequent simulated crash: ");
         test_common::HSTestHelper::trigger_cp(false);
         this->wait_for_crash_recovery();
-        this->print_keys("Post crash and recovery, btree structure:");
+        //        this->print_keys("Post crash and recovery, btree structure:");
 
         if (!filename.empty()) {
             LOGINFO("Visualize the tree file {}", filename);
@@ -354,7 +348,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
 
         this->reapply_after_crash(operations);
 
-        this->print_keys("\n\nafter reapply keys");
+        //        this->print_keys("\n\nafter reapply keys");
         if (!filename.empty()) {
             LOGINFO("Visualize the tree file after_reapply__{}", filename);
             this->visualize_keys("after_reapply__" + filename);
@@ -517,45 +511,64 @@ TYPED_TEST(IndexCrashTest, ManualMergeCrash){
 TYPED_TEST(IndexCrashTest, SplitCrash1) {
     // Define the lambda function
     auto const num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
-    SequenceGenerator generator(100 /*putFreq*/, 0 /* removeFreq*/, 0 /*start_range*/, num_entries -1 /*end_range*/);
+    SequenceGenerator generator(100 /*putFreq*/, 0 /* removeFreq*/, 0 /*start_range*/, num_entries - 1 /*end_range*/);
     vector< std::string > flips = {"crash_flush_on_split_at_parent", "crash_flush_on_split_at_left_child",
                                    "crash_flush_on_split_at_right_child"};
     OperationList operations;
     for (size_t i = 0; i < flips.size(); ++i) {
-        this->destroy_btree();
+        this->reset_btree();
         LOGINFO("Step 1-{}: Set flag {}", i + 1, flips[i]);
         this->set_basic_flip(flips[i]);
-        operations = generator.generateOperations(num_entries, true /* reset */);
-//        LOGINFO("Batch {} Operations:\n {} \n ", i + 1, generator.printOperations(operations));
-//        LOGINFO("Detailed Key Occurrences for Batch {}:\n {} \n ", i + 1, generator.printKeyOccurrences(operations));
+        operations = generator.generateOperations(num_entries -1 , true /* reset */);
+        //        LOGINFO("Batch {} Operations:\n {} \n ", i + 1, generator.printOperations(operations));
+        //        LOGINFO("Detailed Key Occurrences for Batch {}:\n {} \n ", i + 1,
+        //        generator.printKeyOccurrences(operations));
         for (auto [k, _] : operations) {
-//          LOGINFO("\t\t\t\t\t\t\t\t\t\t\t\t\tupserting entry {}", k);
+            //          LOGINFO("\t\t\t\t\t\t\t\t\t\t\t\t\tupserting entry {}", k);
             this->put(k, btree_put_type::INSERT, true /* expect_success */);
         }
-        this->crash_and_recover(operations, fmt::format("recover_tree_crash_{}.dot",i+1));
+        this->crash_and_recover(operations, fmt::format("recover_tree_crash_{}.dot", i + 1));
     }
 }
 
 TYPED_TEST(IndexCrashTest, long_running_put_crash) {
     // Define the lambda function
     auto const num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
-    SequenceGenerator generator(100 /*putFreq*/, 0 /* removeFreq*/, 0 /*start_range*/, num_entries -1 /*end_range*/);
+    SequenceGenerator generator(100 /*putFreq*/, 0 /* removeFreq*/, 0 /*start_range*/, num_entries - 1 /*end_range*/);
     vector< std::string > flips = {"crash_flush_on_split_at_parent", "crash_flush_on_split_at_left_child",
                                    "crash_flush_on_split_at_right_child"};
     OperationList operations;
-    for (size_t i = 0; i < 5; ++i) {
-        LOGINFO("Step 1-{}: Set flag {}", i + 1, flips[i%flips.size()]);
+    auto m_start_time = Clock::now();
+    auto time_to_stop = [this, m_start_time]() { return (get_elapsed_time_sec(m_start_time) > this->m_run_time); };
+    double elapsed_time, progress_percent, last_progress_time = 0;
+    for (size_t i = 0; !time_to_stop(); ++i) {
+        bool print_time = false;
+        elapsed_time = get_elapsed_time_sec(m_start_time);
 
-        this->set_basic_flip("reduce_node_entries");
-        this->set_basic_flip(flips[i%flips.size()]);
-        operations = generator.generateOperations(num_entries/10, false /* reset */);
+        this->reset_btree();
+        auto flip = flips[i % flips.size()];
+        LOGINFO("Step 1-{}: Set flag {}", i + 1, flip);
+
+        this->set_basic_flip(flip, 1, 10);
+        operations = generator.generateOperations(num_entries -1, true /* reset */);
+        //        operations = generator.generateOperations(num_entries/10, false /* reset */);
         //        LOGINFO("Batch {} Operations:\n {} \n ", i + 1, generator.printOperations(operations));
-        //        LOGINFO("Detailed Key Occurrences for Batch {}:\n {} \n ", i + 1, generator.printKeyOccurrences(operations));
+        //        LOGINFO("Detailed Key Occurrences for Batch {}:\n {} \n ", i + 1,
+        //        generator.printKeyOccurrences(operations));
         for (auto [k, _] : operations) {
             //          LOGINFO("\t\t\t\t\t\t\t\t\t\t\t\t\tupserting entry {}", k);
             this->put(k, btree_put_type::INSERT, true /* expect_success */);
         }
-        this->crash_and_recover(operations, fmt::format("recover_tree_crash_{}.dot",i+1));
+        this->crash_and_recover(operations/*,  fmt::format("recover_tree_crash_{}.dot", i + 1)*/);
+        if (elapsed_time - last_progress_time > 30) {
+            last_progress_time = elapsed_time;
+            print_time = true;
+        }
+        if (print_time) {
+            LOGINFO("\n\n\n\t\t\tProgress: {} iterations completed - Elapsed time: {:.0f} seconds of total "
+                    "{} ({:.2f}%)\n\n\n",
+                    i, elapsed_time, this->m_run_time, elapsed_time * 100.0 / this->m_run_time);
+        }
     }
 }
 #endif
