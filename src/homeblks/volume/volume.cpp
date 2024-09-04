@@ -335,51 +335,6 @@ indx_tbl* Volume::recover_indx_tbl(btree_super_block& sb, btree_cp_sb& cp_info) 
     return static_cast< indx_tbl* >(tbl);
 }
 
-#if 0
-// TODO: use these functions for near future optimization of write path for thin provisioning volumes to enable skipping
-//  writing empty blocks in subrange intervals for requested buffer instead of detecting the all-zero-buffer requests.
-static std::vector< std::pair< int, int > > compute_range_intervals(const uint8_t* buf, size_t page_size,
-                                                                    uint32_t nlbas, bool empty_blocks = false) {
-    std::vector< std::pair< int, int > > intervals;
-    bool in_empty_region = false;
-    int current_range_start = -1;
-    int current_range_length = 1;
-    for (uint32_t i = 0; i < nlbas; i++) {
-        const uint8_t* page_start = buf + (i * page_size);
-        bool is_page_empty = (empty_blocks == is_buf_zero(page_start, page_size));
-        if (is_page_empty) {
-            if (!in_empty_region) {
-                current_range_start = i;
-                current_range_length = 1;
-                in_empty_region = true;
-            } else {
-                current_range_length++;
-            }
-        } else {
-            if (in_empty_region) { intervals.push_back(std::make_pair(current_range_start, current_range_length)); }
-            in_empty_region = false;
-        }
-    }
-    if (in_empty_region) { intervals.push_back(std::make_pair(current_range_start, current_range_length)); }
-    return intervals;
-}
-
-static std::string print_ranges(lba_t start_lba, const std::vector< std::pair< int, int > >& intervals) {
-    auto intervals_to_string = [start_lba](const std::vector< std::pair< int, int > >& intervals) -> std::string {
-        std::vector< std::string > result_strings;
-        std::transform(intervals.begin(), intervals.end(), std::back_inserter(result_strings),
-                       [start_lba](const std::pair< int, int >& p) -> std::string {
-                           // Use a static buffer to hold the formatted string
-                           static char buffer[32];
-                           std::snprintf(buffer, sizeof(buffer), "<%ld,%d>", p.first + start_lba, p.second);
-                           return buffer;
-                       });
-        return std::accumulate(result_strings.begin(), result_strings.end(), std::string(""));
-    };
-    return intervals_to_string(intervals);
-}
-#endif
-
 std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
     std::error_condition ret{no_error};
     if (!HS_DYNAMIC_CONFIG(generic->enable_zero_padding)) {
@@ -388,6 +343,8 @@ std::error_condition Volume::write(const vol_interface_req_ptr& iface_req) {
         if (iface_req->is_zero_request(get_page_size())) {
             THIS_VOL_LOG(TRACE, volume, iface_req, "zero request <{}, {}>", iface_req->lba, iface_req->nlbas);
             iface_req->op_type = Op_type::UNMAP;
+            COUNTER_INCREMENT(m_metrics, volume_write_zero_buffer_requests, 1);
+            HISTOGRAM_OBSERVE(m_metrics, volume_write_zero_buffer_distribution, iface_req->nlbas);
             ret = unmap(iface_req);
         } else {
             ret = write_internal(iface_req);
