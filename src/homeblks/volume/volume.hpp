@@ -190,6 +190,11 @@ public:
         REGISTER_HISTOGRAM(volume_pieces_per_write, "Number of individual pieces per write",
                            HistogramBucketsType(LinearUpto64Buckets));
         REGISTER_COUNTER(volume_read_on_hole, "Number of reads from empty lba");
+        REGISTER_COUNTER(volume_write_zero_buffer_requests,
+                         "Number of zero buffer write requests in zero padding detection");
+        REGISTER_HISTOGRAM(volume_write_zero_buffer_distribution,
+                           "Distribution of volume write sizes for empty requests in zero padding detection",
+                           HistogramBucketsType(ExponentialOfTwoBuckets));
         REGISTER_HISTOGRAM(volume_pieces_per_read, "Number of individual pieces per read",
                            HistogramBucketsType(LinearUpto64Buckets));
         REGISTER_HISTOGRAM(volume_write_size_distribution, "Distribution of volume write sizes",
@@ -316,7 +321,7 @@ private:
     std::atomic< uint64_t > m_err_cnt = 0;
     sisl::atomic_counter< uint64_t > m_vol_ref_cnt = 0; // volume can not be destroy/shutdown until it is not zero
 
-    std::mutex m_sb_lock;                               // lock for updating vol's sb
+    std::mutex m_sb_lock; // lock for updating vol's sb
     sisl::byte_array m_sb_buf;
     indxmgr_stop_cb m_destroy_done_cb;
     std::atomic< bool > m_indx_mgr_destroy_started;
@@ -610,7 +615,7 @@ public:
     void migrate_sb();
     void recovery_start_phase1();
     void recovery_start_phase2();
-    static void fake_reboot(){};
+    static void fake_reboot() {};
     std::shared_ptr< SnapMgr > get_indx_mgr_instance() { return m_indx_mgr; }
     bool is_recovery_done() const {
         // if we are here but m_indx_mgr is nullptr, it means volume instance is created but index recovery is not done
