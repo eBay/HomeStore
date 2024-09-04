@@ -42,6 +42,7 @@ public:
     using BtreeNode::get_nth_value_size;
     using BtreeNode::to_string;
     using VariantNode< K, V >::get_nth_value;
+    using VariantNode< K, V >::max_keys_in_node;
 
     // Insert the key and value in provided index
     // Assumption: Node lock is already taken
@@ -202,7 +203,8 @@ public:
 
     bool has_room_for_put(btree_put_type put_type, uint32_t key_size, uint32_t value_size) const override {
 #ifdef _PRERELEASE
-        // return (this->total_entries() <= 3);
+        auto max_keys = max_keys_in_node();
+            if(max_keys) {return (this->total_entries() < max_keys);}
 #endif
         return ((put_type == btree_put_type::UPSERT) || (put_type == btree_put_type::INSERT))
             ? (get_available_entries() > 0)
