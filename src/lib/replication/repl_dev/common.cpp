@@ -192,9 +192,10 @@ std::string repl_req_ctx::to_string() const {
 }
 
 std::string repl_req_ctx::to_compact_string() const {
-    if (m_op_code == journal_type_t::HS_CTRL_DESTROY) {
+    if (m_op_code == journal_type_t::HS_CTRL_DESTROY || m_op_code == journal_type_t::HS_CTRL_REPLACE) {
         return fmt::format("term={} lsn={} op={}", m_rkey.term, m_lsn, enum_name(m_op_code));
     }
+
     return fmt::format("dsn={} term={} lsn={} op={} local_blkid={} state=[{}]", m_rkey.dsn, m_rkey.term, m_lsn,
                        enum_name(m_op_code), m_local_blkid.to_string(), req_state_name(uint32_cast(state())));
 }

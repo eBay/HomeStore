@@ -107,11 +107,92 @@ bool RaftReplDev::join_group() {
         m_msg_mgr.join_group(m_group_id, "homestore_replication",
                              std::dynamic_pointer_cast< nuraft_mesg::mesg_state_mgr >(shared_from_this()));
     if (!raft_result) {
-        HS_DBG_ASSERT(false, "Unable to join the group_id={} with error={}", boost::uuids::to_string(m_group_id),
-                      raft_result.error());
+        HS_DBG_ASSERT(false, "Unable to join the group_id={} with error={}", group_id_str(), raft_result.error());
         return false;
     }
     return true;
+}
+
+AsyncReplResult<> RaftReplDev::replace_member(replica_id_t member_out_uuid, replica_id_t member_in_uuid) {
+    LOGINFO("Replace member group_id={} member_out={} member_in={}", group_id_str(),
+            boost::uuids::to_string(member_out_uuid), boost::uuids::to_string(member_in_uuid));
+
+    // Step 1: Check if leader itself is requested to move out.
+    if (m_my_repl_id == member_out_uuid && m_my_repl_id == get_leader_id()) {
+        // If leader is the member requested to move out, then give up leadership and return error.
+        // Client will retry replace_member request to the new leader.
+        raft_server()->yield_leadership(true /* immediate */, -1 /* successor */);
+        RD_LOGI("Replace member leader is the member_out so yield leadership");
+        return make_async_error<>(ReplServiceError::NOT_LEADER);
+    }
+
+    // Step 2. Add the new member.
+    return m_msg_mgr.add_member(m_group_id, member_in_uuid)
+        .via(&folly::InlineExecutor::instance())
+        .thenValue([this, member_in_uuid, member_out_uuid](auto&& e) -> AsyncReplResult<> {
+            // TODO Currently we ignore the cancelled, fix nuraft_mesg to not timeout
+            // when adding member. Member is added to cluster config until member syncs fully
+            // with atleast stop gap. This will take a lot of time for block or
+            // object storage.
+            if (e.hasError()) {
+                // Ignore the server already exists as server already added to the cluster.
+                // The pg member change requests from control path are idemepotent and request
+                // can be resend and one of the add or remove can failed and has to retried.
+                if (e.error() == nuraft::cmd_result_code::CANCELLED ||
+                    e.error() == nuraft::cmd_result_code::SERVER_ALREADY_EXISTS) {
+                    RD_LOGW("Ignoring error returned from nuraft add_member {}", e.error());
+                } else {
+                    RD_LOGE("Replace member error in add member : {}", e.error());
+                    return make_async_error<>(RaftReplService::to_repl_error(e.error()));
+                }
+            }
+            auto member_out = boost::uuids::to_string(member_out_uuid);
+            auto member_in = boost::uuids::to_string(member_in_uuid);
+
+            RD_LOGI("Replace member added member={} to group_id={}", member_in, group_id_str());
+
+            // Step 3. Append log entry to mark the old member is out and new member is added.
+            auto rreq = repl_req_ptr_t(new repl_req_ctx{});
+            replace_members_ctx members;
+            std::copy(member_in_uuid.begin(), member_in_uuid.end(), members.in_replica_id.begin());
+            std::copy(member_out_uuid.begin(), member_out_uuid.end(), members.out_replica_id.begin());
+            sisl::blob header(r_cast< uint8_t* >(&members),
+                              members.in_replica_id.size() + members.out_replica_id.size());
+            rreq->init(
+                repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
+                journal_type_t::HS_CTRL_REPLACE, true, header, sisl::blob{}, 0);
+
+            auto err = m_state_machine->propose_to_raft(std::move(rreq));
+            if (err != ReplServiceError::OK) {
+                LOGERROR("Replace member propose to raft failed {}", err);
+                return make_async_error<>(std::move(err));
+            }
+
+            RD_LOGI("Replace member proposed to raft group_id={}", group_id_str());
+
+            // Step 4. Remove the old member. Even if the old member is temporarily
+            // down and recovers, nuraft mesg see member remove from cluster log
+            // entry and call exit_group() and leave().
+            return m_msg_mgr.rem_member(m_group_id, member_out_uuid)
+                .via(&folly::InlineExecutor::instance())
+                .thenValue([this, member_out](auto&& e) -> AsyncReplResult<> {
+                    if (e.hasError()) {
+                        // Ignore the server not found as server removed from the cluster
+                        // as requests are idempotent and can be resend.
+                        if (e.error() == nuraft::cmd_result_code::SERVER_NOT_FOUND) {
+                            RD_LOGW("Remove member not found in group error, ignoring");
+                        } else {
+                            // Its ok to retry this request as the request
+                            // of replace member is idempotent.
+                            RD_LOGE("Replace member failed to remove member : {}", e.error());
+                            return make_async_error<>(ReplServiceError::RETRY_REQUEST);
+                        }
+                    } else {
+                        RD_LOGI("Replace member removed member={} from group_id={}", member_out, group_id_str());
+                    }
+                    return make_async_success<>();
+                });
+        });
 }
 
 folly::SemiFuture< ReplServiceError > RaftReplDev::destroy_group() {
@@ -141,7 +222,7 @@ folly::SemiFuture< ReplServiceError > RaftReplDev::destroy_group() {
         LOGERROR("RaftReplDev::destroy_group failed {}", err);
     }
 
-    LOGINFO("Raft repl dev destroy_group={}", boost::uuids::to_string(m_group_id));
+    LOGINFO("Raft repl dev destroy_group={}", group_id_str());
     return m_destroy_promise.getSemiFuture();
 }
 
@@ -786,6 +867,8 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
     RD_LOGD("Raft channel: Commit rreq=[{}]", rreq->to_string());
     if (rreq->op_code() == journal_type_t::HS_CTRL_DESTROY) {
         leave();
+    } else if (rreq->op_code() == journal_type_t::HS_CTRL_REPLACE) {
+        replace_member(rreq);
     } else {
         m_listener->on_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq->local_blkid(), rreq);
     }
@@ -820,7 +903,8 @@ void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err)
                               blkid.to_string());
             });
         }
-    } else if (rreq->op_code() == journal_type_t::HS_CTRL_DESTROY) {
+    } else if (rreq->op_code() == journal_type_t::HS_CTRL_DESTROY ||
+               rreq->op_code() == journal_type_t::HS_CTRL_REPLACE) {
         if (rreq->is_proposer()) { m_destroy_promise.setValue(err); }
     }
 
@@ -834,6 +918,17 @@ void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err)
         m_listener->on_error(err, rreq->header(), rreq->key(), rreq);
     }
     rreq->clear();
+}
+
+void RaftReplDev::replace_member(repl_req_ptr_t rreq) {
+    auto members = r_cast< const replace_members_ctx* >(rreq->header().cbytes());
+    replica_id_t member_in, member_out;
+    std::copy(members->out_replica_id.begin(), members->out_replica_id.end(), member_out.begin());
+    std::copy(members->in_replica_id.begin(), members->in_replica_id.end(), member_in.begin());
+    RD_LOGI("Raft repl replace_member member_out={} member_in={}", boost::uuids::to_string(member_out),
+            boost::uuids::to_string(member_in));
+
+    m_listener->replace_member(member_out, member_in);
 }
 
 static bool blob_equals(sisl::blob const& a, sisl::blob const& b) {
@@ -971,12 +1066,14 @@ void RaftReplDev::save_config(const nuraft::cluster_config& config) {
     std::unique_lock lg{m_config_mtx};
     (*m_raft_config_sb)["config"] = serialize_cluster_config(config);
     m_raft_config_sb.write();
+    RD_LOGI("Saved config {}", (*m_raft_config_sb)["config"].dump());
 }
 
 void RaftReplDev::save_state(const nuraft::srv_state& state) {
     std::unique_lock lg{m_config_mtx};
     (*m_raft_config_sb)["state"] = nlohmann::json{{"term", state.get_term()}, {"voted_for", state.get_voted_for()}};
     m_raft_config_sb.write();
+    RD_LOGI("Saved state {}", (*m_raft_config_sb)["state"].dump());
 }
 
 nuraft::ptr< nuraft::srv_state > RaftReplDev::read_state() {
@@ -1013,7 +1110,7 @@ uint32_t RaftReplDev::get_logstore_id() const { return m_data_journal->logstore_
 std::shared_ptr< nuraft::state_machine > RaftReplDev::get_state_machine() { return m_state_machine; }
 
 void RaftReplDev::permanent_destroy() {
-    RD_LOGI("Permanent destroy for raft repl dev");
+    RD_LOGI("Permanent destroy for raft repl dev group_id={}", group_id_str());
     m_rd_sb.destroy();
     m_raft_config_sb.destroy();
     m_data_journal->remove_store();
@@ -1035,7 +1132,7 @@ void RaftReplDev::leave() {
     m_rd_sb->destroy_pending = 0x1;
     m_rd_sb.write();
 
-    RD_LOGI("RaftReplDev leave group");
+    RD_LOGI("RaftReplDev leave group_id={}", group_id_str());
     m_destroy_promise.setValue(ReplServiceError::OK); // In case proposer is waiting for the destroy to complete
 }
 

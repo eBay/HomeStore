@@ -35,6 +35,11 @@ using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
 
 ENUM(repl_dev_stage_t, uint8_t, INIT, ACTIVE, DESTROYING, DESTROYED, PERMANENT_DESTROYED);
 
+struct replace_members_ctx {
+    std::array< uint8_t, 16 > out_replica_id;
+    std::array< uint8_t, 16 > in_replica_id;
+};
+
 class RaftReplDevMetrics : public sisl::MetricsGroup {
 public:
     explicit RaftReplDevMetrics(const char* inst_name) : sisl::MetricsGroup("RaftReplDev", inst_name) {
@@ -150,6 +155,7 @@ public:
     virtual ~RaftReplDev() = default;
 
     bool join_group();
+    AsyncReplResult<> replace_member(replica_id_t member_out, replica_id_t member_in);
     folly::SemiFuture< ReplServiceError > destroy_group();
 
     //////////////// All ReplDev overrides/implementation ///////////////////////
@@ -268,6 +274,7 @@ private:
     bool wait_for_data_receive(std::vector< repl_req_ptr_t > const& rreqs, uint64_t timeout_ms);
     void on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx);
     void commit_blk(repl_req_ptr_t rreq);
+    void replace_member(repl_req_ptr_t rreq);
 };
 
 } // namespace homestore

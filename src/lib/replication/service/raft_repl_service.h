@@ -80,7 +80,6 @@ private:
     void gc_repl_devs();
     void gc_repl_reqs();
     void flush_durable_commit_lsn();
-
 };
 
 class RaftReplServiceCPHandler : public CPCallbacks {
