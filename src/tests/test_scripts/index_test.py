@@ -20,7 +20,7 @@ def run_test(options, type):
         raise TestFailedError(f"Test failed for type {type}")
     print("Test completed")
 
-def run_test(options):
+def run_crash_test(options):
     cmd_opts = f"--gtest_filter=IndexCrashTest/0.long_running_put_crash --gtest_break_on_failure --max_keys_in_node={options['max_keys_in_node']} --init_device={options['init_device']} {options['log_mods']} --run_time={options['run_time']} --num_entries={options['num_entries']} {options['dev_list']}"
     # print(f"Running test with options: {cmd_opts}")
     try:
@@ -91,7 +91,7 @@ def long_running_crash_put(options):
     print("Long running crash put started")
     options['num_entries'] = 20480 # 20K
     print(f"options: {options}")
-    run_test(options)
+    run_crash_test(options)
     print("Long running crash put completed")
 
 def main():
