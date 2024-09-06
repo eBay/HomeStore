@@ -34,7 +34,13 @@ SISL_LOGGING_DECL(wbcache)
 
 namespace homestore {
 
-IndexWBCacheBase& wb_cache() { return index_service().wb_cache(); }
+IndexWBCacheBase& wb_cache() {
+    try {
+        return index_service().wb_cache();
+    } catch (const std::runtime_error& e) {
+        throw std::runtime_error(fmt::format("Failed to access wb_cache: {}", e.what()));
+    }
+}
 
 IndexWBCache::IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair< meta_blk*, sisl::byte_view > sb,
                            const std::shared_ptr< sisl::Evictor >& evictor, uint32_t node_size) :
@@ -582,9 +588,12 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
                     BtreeNode::to_string_buf(buf->raw_buffer()));
         m_vdev->async_write(r_cast< const char* >(buf->raw_buffer()), m_node_size, buf->m_blkid, part_of_batch)
             .thenValue([buf, cp_ctx](auto) {
-                // TODO: crash may cause wb_cache() to be destroyed and return null pointer
-                auto& pthis = s_cast< IndexWBCache& >(wb_cache()); // Avoiding more than 16 bytes capture
-                pthis.process_write_completion(cp_ctx, buf);
+                try {
+                    auto& pthis = s_cast< IndexWBCache& >(wb_cache());
+                    pthis.process_write_completion(cp_ctx, buf);
+                } catch (const std::runtime_error& e) {
+                    LOGERROR("Failed to access write-back cache: {}", e.what());
+                }
             });
 
         if (!part_of_batch) { m_vdev->submit_batch(); }
