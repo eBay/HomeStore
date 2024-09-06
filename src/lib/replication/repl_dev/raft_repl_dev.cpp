@@ -1092,7 +1092,7 @@ void RaftReplDev::flush_durable_commit_lsn() {
 }
 
 ///////////////////////////////////  Private metohds ////////////////////////////////////
-void RaftReplDev::cp_flush(CP*) {
+void RaftReplDev::cp_flush(CP* cp) {
     auto const lsn = m_commit_upto_lsn.load();
     auto const clsn = m_compact_lsn.load();
 
@@ -1108,6 +1108,8 @@ void RaftReplDev::cp_flush(CP*) {
     m_rd_sb->last_applied_dsn = m_next_dsn.load();
     m_rd_sb.write();
     m_last_flushed_commit_lsn = lsn;
+    RD_LOGD("cp flush in raft repl dev, lsn={}, clsn={}, next_dsn={}, cp string:{}", lsn, clsn, m_next_dsn.load(),
+            cp->to_string());
 }
 
 void RaftReplDev::cp_cleanup(CP*) {}

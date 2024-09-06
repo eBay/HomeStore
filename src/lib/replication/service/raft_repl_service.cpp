@@ -185,6 +185,7 @@ RaftReplDev* RaftReplService::raft_group_config_found(sisl::byte_view const& buf
 
 std::string RaftReplService::lookup_peer(nuraft_mesg::peer_id_t const& peer) {
     auto const p = m_repl_app->lookup_peer(peer);
+    if (p.first.empty()) { return {}; }
     return p.first + ":" + std::to_string(p.second);
 }
 
