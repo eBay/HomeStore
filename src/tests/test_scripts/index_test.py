@@ -90,6 +90,7 @@ def long_running_clean_shutdown(options, type=0):
 def long_running_crash_put(options):
     print("Long running crash put started")
     options['num_entries'] = 20480 # 20K
+    options['init_device'] = True
     print(f"options: {options}")
     run_crash_test(options)
     print("Long running crash put completed")
