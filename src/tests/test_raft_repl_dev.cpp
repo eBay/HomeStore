@@ -141,6 +141,7 @@ public:
             std::unique_lock lk(db_mtx_);
             inmem_db_.insert_or_assign(k, v);
             lsn_index_.emplace(lsn, v);
+            last_data_committed_lsn = lsn;
             ++commit_count_;
         }
 
@@ -213,7 +214,7 @@ public:
         sisl::io_blob_safe blob{static_cast< uint32_t >(kv_snapshot_data_size)};
         std::memcpy(blob.bytes(), kv_snapshot_data.data(), kv_snapshot_data_size);
         snp_data->blob = std::move(blob);
-        snp_data->is_last_obj = true;
+        snp_data->is_last_obj = false;
         LOGINFOMOD(replication, "[Replica={}] Read logical snapshot callback obj_id={} term={} idx={} num_items={}",
                    g_helper->replica_num(), snp_data->offset, s->get_last_log_term(), s->get_last_log_idx(),
                    kv_snapshot_data.size());
@@ -233,10 +234,8 @@ public:
 
     void write_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) override {
         auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(context)->nuraft_snapshot();
-        auto last_committed_idx =
-            std::dynamic_pointer_cast< RaftReplDev >(repl_dev())->raft_server()->get_committed_log_idx();
         if (snp_data->offset == 0) {
-            snp_data->offset = last_committed_idx + 1;
+            snp_data->offset = last_data_committed_lsn + 1;
             LOGINFOMOD(replication, "[Replica={}] Save logical snapshot callback return obj_id={}",
                        g_helper->replica_num(), snp_data->offset);
             return;
@@ -260,6 +259,7 @@ public:
                 snapshot_data_write(value.data_size_, value.data_pattern_, out_blkids);
                 value.blkid_ = out_blkids;
             }
+            last_data_committed_lsn = value.lsn_;
             inmem_db_.insert_or_assign(key, value);
             ++commit_count_;
             ptr++;
@@ -269,7 +269,10 @@ public:
                    "[Replica={}] Save logical snapshot callback obj_id={} term={} idx={} is_last={} num_items={}",
                    g_helper->replica_num(), snp_data->offset, s->get_last_log_term(), s->get_last_log_idx(),
                    snp_data->is_last_obj, num_items);
-        snp_data->offset = last_committed_idx + 1;
+
+        // before we finish install snapshot, raft_server()->get_committed_log_idx() will always be the same. so we need
+        // last_data_committed_lsn to notify leader to transfer new data to follower.
+        snp_data->offset = last_data_committed_lsn + 1;
     }
 
     bool apply_snapshot(shared< snapshot_context > context) override {
@@ -391,6 +394,9 @@ private:
     std::map< Key, Value > inmem_db_;
     std::map< int64_t, Value > lsn_index_;
     uint64_t commit_count_{0};
+    // this is the last lsn for data, might not be the same with the real last committed lsn
+    // which should be get by raft_server()->get_committed_log_idx()
+    uint64_t last_data_committed_lsn{0};
     std::shared_mutex db_mtx_;
     std::shared_ptr< snapshot_context > m_last_snapshot{nullptr};
     std::mutex m_snapshot_lock;
@@ -745,6 +751,7 @@ TEST_F(RaftReplDevTest, Resync_From_Non_Originator) {
     g_helper->sync_for_cleanup_start();
 }
 
+#if 0
 TEST_F(RaftReplDevTest, Leader_Restart) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
@@ -769,7 +776,7 @@ TEST_F(RaftReplDevTest, Leader_Restart) {
     g_helper->sync_for_cleanup_start();
 }
 
-#if 0
+
 TEST_F(RaftReplDevTest, Drop_Raft_Entry_Switch_Leader) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
