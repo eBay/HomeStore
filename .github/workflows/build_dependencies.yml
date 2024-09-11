@@ -155,6 +155,7 @@ jobs:
     - name: Export Recipes
       run: |
         sudo apt-get install -y python3-pyelftools libaio-dev
+        sudo rm -rf $ANDROID_HOME
         python -m pip install pyelftools
         conan export import/iomgr oss/master
         conan export import/nuraft_mesg oss/main
@@ -165,7 +166,6 @@ jobs:
     - name: Build Cache
       run: |
         pre=$([[ "${{ inputs.build-type }}" != "Debug" ]] && echo "-o sisl:prerelease=${{ inputs.prerelease }}" || echo "")
-        sudo rm -rf $ANDROID_HOME
         conan install \
             -c tools.build:skip_test=True \
             ${pre} \
