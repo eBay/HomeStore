@@ -1276,7 +1276,7 @@ int main(int argc, char* argv[]) {
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_log_store, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_log_store");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
-    sisl::logging::SetModuleLogLevel("logstore", spdlog::level::level_enum::trace);
-    sisl::logging::SetModuleLogLevel("journalvdev", spdlog::level::level_enum::debug);
+    // sisl::logging::SetModuleLogLevel("logstore", spdlog::level::level_enum::trace);
+    // sisl::logging::SetModuleLogLevel("journalvdev", spdlog::level::level_enum::debug);
     return RUN_ALL_TESTS();
 }
