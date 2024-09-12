@@ -56,6 +56,8 @@ SISL_OPTION_GROUP(
     (qdepth, "", "qdepth", "Max outstanding operations", ::cxxopts::value< uint32_t >()->default_value("8"), "number"),
     (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"),
     (flip_list, "", "flip_list", "btree flip list", ::cxxopts::value< std::vector< std::string > >(), "flips [...]"),
+    (use_file, "", "use_file", "use file instead of real drive", ::cxxopts::value< bool >()->default_value("false"),
+     "true or false"),
     (enable_crash, "", "enable_crash", "enable crash", ::cxxopts::value< bool >()->default_value("0"), ""));
 
 SETTINGS_INIT(iomgrcfg::IomgrSettings, iomgr_config);
@@ -355,11 +357,17 @@ private:
         auto num_fibers = SISL_OPTIONS["num_fibers"].as< uint32_t >();
         auto is_spdk = SISL_OPTIONS["spdk"].as< bool >();
 
+        auto use_file = SISL_OPTIONS["use_file"].as< bool >();
+
+        if (use_file && SISL_OPTIONS.count("device_list")) {
+            LOGWARN("Ignoring device_list as use_file is set to true");
+        }
+
         if (fake_restart) {
             // Fake restart, device list is unchanged.
             shutdown_homestore(false);
             std::this_thread::sleep_for(std::chrono::seconds{shutdown_delay_sec});
-        } else if (SISL_OPTIONS.count("device_list")) {
+        } else if (SISL_OPTIONS.count("device_list") && !use_file) {
             // User has provided explicit device list, use that and initialize them
             auto const devs = SISL_OPTIONS["device_list"].as< std::vector< std::string > >();
             for (const auto& name : devs) {
