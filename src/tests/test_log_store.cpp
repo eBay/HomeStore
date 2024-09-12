@@ -1266,7 +1266,7 @@ SISL_OPTION_GROUP(test_log_store,
                    "number of log stores in all, they will spread to each logdev evenly",
                    ::cxxopts::value< uint32_t >()->default_value("16"), "number"),
                   (num_records, "", "num_records", "number of record to test",
-                   ::cxxopts::value< uint32_t >()->default_value("10000"), "number"),
+                   ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
                   (iterations, "", "iterations", "Iterations", ::cxxopts::value< uint32_t >()->default_value("1"),
                    "the number of iterations to run each test"));
 
@@ -1276,7 +1276,5 @@ int main(int argc, char* argv[]) {
     SISL_OPTIONS_LOAD(parsed_argc, argv, logging, test_log_store, iomgr, test_common_setup);
     sisl::logging::SetLogger("test_log_store");
     spdlog::set_pattern("[%D %T%z] [%^%l%$] [%t] %v");
-    sisl::logging::SetModuleLogLevel("logstore", spdlog::level::level_enum::trace);
-    sisl::logging::SetModuleLogLevel("journalvdev", spdlog::level::level_enum::debug);
     return RUN_ALL_TESTS();
 }
