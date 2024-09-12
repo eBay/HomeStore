@@ -49,7 +49,7 @@ def parse_arguments():
     parser.add_argument('--dev_list', help='Device list', default='')
     parser.add_argument('--cleanup_after_shutdown', help='Cleanup after shutdown', type=bool, default=False)
     parser.add_argument('--init_device', help='Initialize device', type=bool, default=True)
-    parser.add_argument('--max_keys_in_node', help='Maximum num of keys in btree nodes', type=int, default=5)
+    parser.add_argument('--max_keys_in_node', help='Maximum num of keys in btree nodes', type=int, default=20)
 
     # Parse the known arguments and ignore any unknown arguments
     args, unknown = parser.parse_known_args()

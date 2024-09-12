@@ -123,7 +123,7 @@ public:
         return "Not in keyStates";
     }
 
-    __attribute__((noinline)) static OperationList inspect(const OperationList& operations, uint32_t key) {
+    __attribute__((noinline)) static OperationList inspect(const OperationList& operations, uint64_t key) {
         OperationList occurrences;
         for (size_t i = 0; i < operations.size(); ++i) {
             const auto& [opKey, opType] = operations[i];
@@ -139,7 +139,7 @@ public:
         }
         return oss.str();
     }
-    __attribute__((noinline)) std::string printKeyOccurrences(const OperationList& operations) const {
+    __attribute__((noinline)) std::string printKeysOccurrences(const OperationList& operations) const {
         std::set< uint64_t > keys = collectUniqueKeys(operations);
         std::ostringstream oss;
         for (auto key : keys) {
@@ -149,6 +149,16 @@ public:
                 std::string opTypeStr = (operation == OperationType::Put) ? "Put" : "Remove";
                 oss << "Index: " << index << ", Operation: " << opTypeStr << "\n";
             }
+        }
+        return oss.str();
+    }
+    __attribute__((noinline)) std::string printKeyOccurrences(const OperationList& operations, uint64_t key ) const {
+        std::ostringstream oss;
+        auto keyOccurrences = inspect(operations, key);
+        oss << "Occurrences of key " << key << ":\n";
+        for (const auto& [index, operation] : keyOccurrences) {
+            std::string opTypeStr = (operation == OperationType::Put) ? "Put" : "Remove";
+                oss << "Index: " << index << ", Operation: " << opTypeStr << "\n";
         }
         return oss.str();
     }
@@ -545,18 +555,19 @@ TYPED_TEST(IndexCrashTest, long_running_put_crash) {
         bool print_time = false;
         elapsed_time = get_elapsed_time_sec(m_start_time);
 
-        this->reset_btree();
+//        this->reset_btree();
         auto flip = flips[i % flips.size()];
         LOGINFO("Step 1-{}: Set flag {}", i + 1, flip);
 
         this->set_basic_flip(flip, 1, 10);
-        operations = generator.generateOperations(num_entries -1, true /* reset */);
-        //        operations = generator.generateOperations(num_entries/10, false /* reset */);
+//        operations = generator.generateOperations(num_entries -1, true /* reset */);
+          operations = generator.generateOperations(num_entries/10, false /* reset */);
         //        LOGINFO("Batch {} Operations:\n {} \n ", i + 1, generator.printOperations(operations));
         //        LOGINFO("Detailed Key Occurrences for Batch {}:\n {} \n ", i + 1,
         //        generator.printKeyOccurrences(operations));
         for (auto [k, _] : operations) {
-            //          LOGINFO("\t\t\t\t\t\t\t\t\t\t\t\t\tupserting entry {}", k);
+//            LOGINFO("\t \t \t \t \t \t \t \t \t upserting entry {}", k);
+//            LOGINFO("{}",generator.printKeyOccurrences(operations, k));
             this->put(k, btree_put_type::INSERT, true /* expect_success */);
         }
         this->crash_and_recover(operations/*,  fmt::format("recover_tree_crash_{}.dot", i + 1)*/);
@@ -569,6 +580,8 @@ TYPED_TEST(IndexCrashTest, long_running_put_crash) {
                     "{} ({:.2f}%)\n\n\n",
                     i, elapsed_time, this->m_run_time, elapsed_time * 100.0 / this->m_run_time);
         }
+        this->print_keys(fmt::format("reapply: after iteration {}", i));
+
     }
 }
 #endif
