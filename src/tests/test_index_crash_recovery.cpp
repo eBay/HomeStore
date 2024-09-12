@@ -555,19 +555,18 @@ TYPED_TEST(IndexCrashTest, long_running_put_crash) {
         bool print_time = false;
         elapsed_time = get_elapsed_time_sec(m_start_time);
 
-//        this->reset_btree();
+        this->reset_btree();
         auto flip = flips[i % flips.size()];
         LOGINFO("Step 1-{}: Set flag {}", i + 1, flip);
 
         this->set_basic_flip(flip, 1, 10);
-//        operations = generator.generateOperations(num_entries -1, true /* reset */);
-          operations = generator.generateOperations(num_entries/10, false /* reset */);
+        operations = generator.generateOperations(num_entries -1, true /* reset */);
+        //        operations = generator.generateOperations(num_entries/10, false /* reset */);
         //        LOGINFO("Batch {} Operations:\n {} \n ", i + 1, generator.printOperations(operations));
         //        LOGINFO("Detailed Key Occurrences for Batch {}:\n {} \n ", i + 1,
         //        generator.printKeyOccurrences(operations));
         for (auto [k, _] : operations) {
-//            LOGINFO("\t \t \t \t \t \t \t \t \t upserting entry {}", k);
-//            LOGINFO("{}",generator.printKeyOccurrences(operations, k));
+            //          LOGINFO("\t\t\t\t\t\t\t\t\t\t\t\t\tupserting entry {}", k);
             this->put(k, btree_put_type::INSERT, true /* expect_success */);
         }
         this->crash_and_recover(operations/*,  fmt::format("recover_tree_crash_{}.dot", i + 1)*/);
