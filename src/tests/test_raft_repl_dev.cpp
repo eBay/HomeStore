@@ -1015,7 +1015,6 @@ int main(int argc, char* argv[]) {
 
         // Snapshot and truncation tests needs num reserved to be 0 and distance 10.
         s.consensus.num_reserved_log_items = 0;
-        s.consensus.snapshot_freq_distance = 10;
         s.resource_limits.resource_audit_timer_ms = 0;
 
         // only reset when user specified the value for test;
