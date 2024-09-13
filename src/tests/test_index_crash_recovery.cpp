@@ -123,7 +123,7 @@ public:
         return "Not in keyStates";
     }
 
-    __attribute__((noinline)) static OperationList inspect(const OperationList& operations, uint32_t key) {
+    __attribute__((noinline)) static OperationList inspect(const OperationList& operations, uint64_t key) {
         OperationList occurrences;
         for (size_t i = 0; i < operations.size(); ++i) {
             const auto& [opKey, opType] = operations[i];
@@ -139,7 +139,7 @@ public:
         }
         return oss.str();
     }
-    __attribute__((noinline)) std::string printKeyOccurrences(const OperationList& operations) const {
+    __attribute__((noinline)) std::string printKeysOccurrences(const OperationList& operations) const {
         std::set< uint64_t > keys = collectUniqueKeys(operations);
         std::ostringstream oss;
         for (auto key : keys) {
@@ -149,6 +149,16 @@ public:
                 std::string opTypeStr = (operation == OperationType::Put) ? "Put" : "Remove";
                 oss << "Index: " << index << ", Operation: " << opTypeStr << "\n";
             }
+        }
+        return oss.str();
+    }
+    __attribute__((noinline)) std::string printKeyOccurrences(const OperationList& operations, uint64_t key ) const {
+        std::ostringstream oss;
+        auto keyOccurrences = inspect(operations, key);
+        oss << "Occurrences of key " << key << ":\n";
+        for (const auto& [index, operation] : keyOccurrences) {
+            std::string opTypeStr = (operation == OperationType::Put) ? "Put" : "Remove";
+                oss << "Index: " << index << ", Operation: " << opTypeStr << "\n";
         }
         return oss.str();
     }
@@ -569,6 +579,8 @@ TYPED_TEST(IndexCrashTest, long_running_put_crash) {
                     "{} ({:.2f}%)\n\n\n",
                     i, elapsed_time, this->m_run_time, elapsed_time * 100.0 / this->m_run_time);
         }
+        this->print_keys(fmt::format("reapply: after iteration {}", i));
+
     }
 }
 #endif

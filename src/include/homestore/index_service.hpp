@@ -82,7 +82,10 @@ public:
     uint32_t node_size() const;
     void repair_index_node(uint32_t ordinal, IndexBufferPtr const& node_buf);
 
-    IndexWBCacheBase& wb_cache() { return *m_wb_cache; }
+    IndexWBCacheBase& wb_cache() {
+        if (!m_wb_cache) { throw std::runtime_error("Attempted to access a null pointer wb_cache"); }
+        return *m_wb_cache;
+    }
 };
 
 extern IndexService& index_service();

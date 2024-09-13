@@ -20,7 +20,7 @@ def run_test(options, type):
         raise TestFailedError(f"Test failed for type {type}")
     print("Test completed")
 
-def run_test(options):
+def run_crash_test(options):
     cmd_opts = f"--gtest_filter=IndexCrashTest/0.long_running_put_crash --gtest_break_on_failure --max_keys_in_node={options['max_keys_in_node']} --init_device={options['init_device']} {options['log_mods']} --run_time={options['run_time']} --num_entries={options['num_entries']} {options['dev_list']}"
     # print(f"Running test with options: {cmd_opts}")
     try:
@@ -49,7 +49,7 @@ def parse_arguments():
     parser.add_argument('--dev_list', help='Device list', default='')
     parser.add_argument('--cleanup_after_shutdown', help='Cleanup after shutdown', type=bool, default=False)
     parser.add_argument('--init_device', help='Initialize device', type=bool, default=True)
-    parser.add_argument('--max_keys_in_node', help='Maximum num of keys in btree nodes', type=int, default=5)
+    parser.add_argument('--max_keys_in_node', help='Maximum num of keys in btree nodes', type=int, default=20)
 
     # Parse the known arguments and ignore any unknown arguments
     args, unknown = parser.parse_known_args()
@@ -90,8 +90,9 @@ def long_running_clean_shutdown(options, type=0):
 def long_running_crash_put(options):
     print("Long running crash put started")
     options['num_entries'] = 20480 # 20K
+    options['init_device'] = True
     print(f"options: {options}")
-    run_test(options)
+    run_crash_test(options)
     print("Long running crash put completed")
 
 def main():

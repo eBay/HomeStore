@@ -167,7 +167,10 @@ public:
     BlkDataService& data_service() { return *m_data_service; }
     MetaBlkService& meta_service() { return *m_meta_service; }
     LogStoreService& logstore_service() { return *m_log_service; }
-    IndexService& index_service() { return *m_index_service; }
+    IndexService& index_service() {
+        if (!m_index_service) { throw std::runtime_error("index_service is nullptr"); }
+        return *m_index_service;
+    }
     ReplicationService& repl_service() { return *m_repl_service; }
     DeviceManager* device_mgr() { return m_dev_mgr.get(); }
     ResourceMgr& resource_mgr() { return *m_resource_mgr.get(); }
