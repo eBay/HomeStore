@@ -219,11 +219,19 @@ void CPManager::cp_start_flush(CP* cp) {
     HS_PERIODIC_LOG(INFO, cp, "Starting CP {} flush", cp->id());
     cp->m_cp_status = cp_status_t::cp_flushing;
 
-    for (auto& consumer : m_cp_cb_table) {
+    for (size_t svcid = 0; svcid < (size_t)cp_consumer_t::SENTINEL; svcid++) {
+        if (svcid == (size_t)cp_consumer_t::REPLICATION_SVC) {
+            continue;
+        }
+        auto& consumer = m_cp_cb_table[svcid];
         if (consumer) { futs.emplace_back(std::move(consumer->cp_flush(cp))); }
     }
 
     folly::collectAllUnsafe(futs).thenValue([this, cp](auto) {
+        // Sync flushing replication svc at last as the cp_lsn updated here
+        // other component should at least flushed to cp_lsn
+        auto& repl_cp = m_cp_cb_table[(size_t)cp_consumer_t::REPLICATION_SVC];
+        if (repl_cp) {repl_cp->cp_flush(cp).wait();}
         // All consumers have flushed for the cp
         on_cp_flush_done(cp);
     });
