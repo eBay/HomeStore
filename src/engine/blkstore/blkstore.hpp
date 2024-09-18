@@ -54,7 +54,7 @@ VENUM(BlkStoreCacheType, uint8_t, PASS_THRU = 0, WRITEBACK_CACHE = 1, WRITETHRU_
  * be either be discarded or copied into new buffer. This threshold dictates whats the value of (64K - N) upto which
  * it will copy. In other words ((64K - N) <= CACHE_DISCARD_THRESHOLD_SIZE) ? copy : discard
  */
-//#define CACHE_DISCARD_THRESHOLD_SIZE 16384
+// #define CACHE_DISCARD_THRESHOLD_SIZE 16384
 
 class BlkStoreConfig {
 public:
@@ -325,7 +325,7 @@ public:
     BlkAllocStatus alloc_contiguous_blk(const uint32_t size, blk_alloc_hints& hints, BlkId* const out_blkid) {
         // Allocate a block from the device manager
         assert(size % m_pagesz == 0);
-        const blk_count_t nblks{static_cast< blk_count_t >(size / m_pagesz)};
+        const uint32_t nblks{static_cast< uint32_t >(size / m_pagesz)};
         hints.is_contiguous = true;
         HS_DBG_ASSERT_LE(nblks, BlkId::max_blks_in_op(), "nblks {} more than max blks {}", nblks,
                          BlkId::max_blks_in_op());
@@ -336,14 +336,17 @@ public:
     BlkAllocStatus alloc_blk(const uint32_t size, blk_alloc_hints& hints, std::vector< BlkId >& out_blkid) {
         // Allocate a block from the device manager
         assert(size % m_pagesz == 0);
-        blk_count_t nblks{static_cast< blk_count_t >(size / m_pagesz)};
+        // Using a 16-bit value (blk_count_t) for page counts can lead to overflow issues when managing large storage
+        // devices. With a page size of 4096 bytes, a 16-bit value limits the addressable storage to 256 MB (65,536
+        // pages * 4096 bytes/page).
+        uint32_t nblks{static_cast< uint32_t >(size / m_pagesz)};
         if (nblks <= BlkId::max_blks_in_op()) {
             return (m_vdev.alloc_blk(nblks, hints, out_blkid));
         } else {
             while (nblks != 0) {
                 static thread_local std::vector< BlkId > result_blkid{};
                 result_blkid.clear();
-                const blk_count_t nblks_op{std::min(static_cast< blk_count_t >(BlkId::max_blks_in_op()), nblks)};
+                const uint32_t nblks_op{std::min(static_cast< uint32_t >(BlkId::max_blks_in_op()), nblks)};
                 const auto ret{m_vdev.alloc_blk(nblks_op, hints, result_blkid)};
                 if (ret != BlkAllocStatus::SUCCESS) { return ret; }
                 out_blkid.insert(std::end(out_blkid), std::make_move_iterator(std::begin(result_blkid)),
