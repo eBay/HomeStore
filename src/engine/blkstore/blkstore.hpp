@@ -325,11 +325,14 @@ public:
     BlkAllocStatus alloc_contiguous_blk(const uint32_t size, blk_alloc_hints& hints, BlkId* const out_blkid) {
         // Allocate a block from the device manager
         assert(size % m_pagesz == 0);
-        const uint32_t nblks{static_cast< uint32_t >(size / m_pagesz)};
+        static uint32_t max_suppoted_size = m_pagesz * std::numeric_limits< blk_count_t >::max();
+        HS_REL_ASSERT_LE(size, max_suppoted_size, "size {} more than max size limit of {}", size, max_suppoted_size);
+
+        const blk_count_t nblks{static_cast< blk_count_t >(size / m_pagesz)};
         hints.is_contiguous = true;
         HS_DBG_ASSERT_LE(nblks, BlkId::max_blks_in_op(), "nblks {} more than max blks {}", nblks,
                          BlkId::max_blks_in_op());
-        return (m_vdev.alloc_contiguous_blk(static_cast< blk_count_t >(nblks), hints, out_blkid));
+        return (m_vdev.alloc_contiguous_blk(nblks, hints, out_blkid));
     }
 
     /* Allocate a new block of the size based on the hints provided */
@@ -341,8 +344,6 @@ public:
         // pages * 4096 bytes/page).
         uint32_t nblks{static_cast< uint32_t >(size / m_pagesz)};
         if (nblks <= BlkId::max_blks_in_op()) {
-            auto max_val = std::numeric_limits< blk_count_t >::max();
-            HS_DBG_ASSERT_LE(nblks, max_val, "max_blks_in_op must be less than {}", max_val);
             return (m_vdev.alloc_blk(static_cast< blk_count_t >(nblks), hints, out_blkid));
         } else {
             while (nblks != 0) {

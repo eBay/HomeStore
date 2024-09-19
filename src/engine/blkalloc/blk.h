@@ -57,7 +57,11 @@ private:
     static constexpr uint64_t s_chunk_num_mask{(static_cast< uint64_t >(1) << CHUNK_NUM_BITS) - 1};
 
 public:
-    [[nodiscard]] static constexpr blk_count_t max_blks_in_op() { return (1 << NBLKS_BITS); }
+    [[nodiscard]] static constexpr blk_count_t max_blks_in_op() {
+        static_assert(NBLKS_BITS <= std::numeric_limits< blk_count_t >::digits,
+                      "NBLKS_BITS is too large and may cause overflow in blk_count_t");
+        return (1 << NBLKS_BITS);
+    }
     [[nodiscard]] static constexpr uint64_t max_id_int() {
         return (1ull << (BLK_NUM_BITS + NBLKS_BITS + CHUNK_NUM_BITS)) - 1;
     }
