@@ -73,8 +73,8 @@ public:
                                                          std::set< replica_id_t > const& members) override;
     folly::SemiFuture< ReplServiceError > remove_repl_dev(group_id_t group_id) override;
     void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) override;
-    AsyncReplResult<> replace_member(group_id_t group_id, replica_id_t member_out,
-                                     replica_id_t member_in) const override;
+    AsyncReplResult<> replace_member(group_id_t group_id, replica_id_t member_out, replica_id_t member_in,
+                                     uint32_t commit_quorum = 0) const override;
 };
 
 class SoloReplServiceCPHandler : public CPCallbacks {

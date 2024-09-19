@@ -155,7 +155,7 @@ public:
     virtual ~RaftReplDev() = default;
 
     bool join_group();
-    AsyncReplResult<> replace_member(replica_id_t member_out, replica_id_t member_in);
+    AsyncReplResult<> replace_member(replica_id_t member_out, replica_id_t member_in, uint32_t commit_quorum);
     folly::SemiFuture< ReplServiceError > destroy_group();
 
     //////////////// All ReplDev overrides/implementation ///////////////////////
@@ -275,6 +275,7 @@ private:
     void on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx);
     void commit_blk(repl_req_ptr_t rreq);
     void replace_member(repl_req_ptr_t rreq);
+    void reset_quorum_size(uint32_t commit_quorum);
 };
 
 } // namespace homestore
