@@ -117,7 +117,7 @@ SISL_OPTION_GROUP(hs_svc_tool,
                   (device_list, "", "device_list", "List of device paths",
                    ::cxxopts::value< std::vector< std::string > >(), "path [...]"),
                   (dev_size_gb, "", "dev_size_gb", "size of each device in GB",
-                   ::cxxopts::value< uint64_t >()->default_value("10"), "number"),
+                   ::cxxopts::value< uint64_t >()->default_value("5"), "number"),
                   (zero_boot_sb, "", "zero_boot_sb", "mark homestore init state",
                    ::cxxopts::value< bool >()->default_value("false"), "true or false"),
                   (spdk, "", "spdk", "spdk", ::cxxopts::value< bool >()->default_value("false"), "true or false"));

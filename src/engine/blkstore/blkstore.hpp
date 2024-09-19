@@ -329,7 +329,7 @@ public:
         hints.is_contiguous = true;
         HS_DBG_ASSERT_LE(nblks, BlkId::max_blks_in_op(), "nblks {} more than max blks {}", nblks,
                          BlkId::max_blks_in_op());
-        return (m_vdev.alloc_contiguous_blk(nblks, hints, out_blkid));
+        return (m_vdev.alloc_contiguous_blk(static_cast< blk_count_t >(nblks), hints, out_blkid));
     }
 
     /* Allocate a new block of the size based on the hints provided */
@@ -341,13 +341,15 @@ public:
         // pages * 4096 bytes/page).
         uint32_t nblks{static_cast< uint32_t >(size / m_pagesz)};
         if (nblks <= BlkId::max_blks_in_op()) {
-            return (m_vdev.alloc_blk(nblks, hints, out_blkid));
+            auto max_val = std::numeric_limits< blk_count_t >::max();
+            HS_DBG_ASSERT_LE(nblks, max_val, "max_blks_in_op must be less than {}", max_val);
+            return (m_vdev.alloc_blk(static_cast< blk_count_t >(nblks), hints, out_blkid));
         } else {
             while (nblks != 0) {
                 static thread_local std::vector< BlkId > result_blkid{};
                 result_blkid.clear();
                 const uint32_t nblks_op{std::min(static_cast< uint32_t >(BlkId::max_blks_in_op()), nblks)};
-                const auto ret{m_vdev.alloc_blk(nblks_op, hints, result_blkid)};
+                const auto ret{m_vdev.alloc_blk(static_cast< blk_count_t >(nblks_op), hints, result_blkid)};
                 if (ret != BlkAllocStatus::SUCCESS) { return ret; }
                 out_blkid.insert(std::end(out_blkid), std::make_move_iterator(std::begin(result_blkid)),
                                  std::make_move_iterator(std::end(result_blkid)));
