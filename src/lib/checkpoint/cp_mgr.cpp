@@ -218,7 +218,6 @@ void CPManager::cp_start_flush(CP* cp) {
     std::vector< folly::Future< bool > > futs;
     HS_PERIODIC_LOG(INFO, cp, "Starting CP {} flush", cp->id());
     cp->m_cp_status = cp_status_t::cp_flushing;
-
     for (size_t svcid = 0; svcid < (size_t)cp_consumer_t::SENTINEL; svcid++) {
         if (svcid == (size_t)cp_consumer_t::REPLICATION_SVC) {
             continue;

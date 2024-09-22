@@ -1189,9 +1189,10 @@ void RaftReplDev::flush_durable_commit_lsn() {
 }
 
 ///////////////////////////////////  Private metohds ////////////////////////////////////
-void RaftReplDev::cp_flush(CP* cp) {
-    auto const lsn = m_commit_upto_lsn.load();
-    auto const clsn = m_compact_lsn.load();
+void RaftReplDev::cp_flush(CP* cp, cshared<ReplDevCPContext> ctx) {
+    auto const lsn = ctx->cp_lsn;
+    auto const clsn = ctx->compacted_to_lsn;
+    auto const dsn = ctx->last_applied_dsn;
 
     if (lsn == m_last_flushed_commit_lsn) {
         // Not dirtied since last flush ignore
@@ -1202,11 +1203,25 @@ void RaftReplDev::cp_flush(CP* cp) {
     m_rd_sb->compact_lsn = clsn;
     m_rd_sb->durable_commit_lsn = lsn;
     m_rd_sb->checkpoint_lsn = lsn;
-    m_rd_sb->last_applied_dsn = m_next_dsn.load();
+    m_rd_sb->last_applied_dsn = dsn;
     m_rd_sb.write();
     m_last_flushed_commit_lsn = lsn;
     RD_LOGD("cp flush in raft repl dev, lsn={}, clsn={}, next_dsn={}, cp string:{}", lsn, clsn, m_next_dsn.load(),
             cp->to_string());
+}
+
+cshared<ReplDevCPContext> RaftReplDev::get_cp_ctx(CP* cp) {
+    auto const cp_lsn = m_commit_upto_lsn.load();
+    auto const clsn = m_compact_lsn.load();
+    auto const dsn = m_next_dsn.load();
+
+    RD_LOGD("getting cp_ctx for raft repl dev {}, cp_lsn={}, clsn={}, next_dsn={}, cp string:{}",
+            (void *)this, cp_lsn, clsn, dsn, cp->to_string());
+    auto dev_ctx = std::make_shared<ReplDevCPContext>();
+    dev_ctx->cp_lsn = cp_lsn;
+    dev_ctx->compacted_to_lsn = clsn;
+    dev_ctx->last_applied_dsn = dsn;
+    return dev_ctx;
 }
 
 void RaftReplDev::cp_cleanup(CP*) {}
