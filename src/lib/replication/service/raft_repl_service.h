@@ -82,6 +82,23 @@ private:
     void flush_durable_commit_lsn();
 };
 
+// cp context for repl_dev, repl_dev cp_lsn is critical cursor in the system,
+// anything below the cp_lsn we believed is persisted through cp and will not
+// go through replay.  The cp_lsn need to be kept into ctx when switchover_cp,
+// and the persist of repl_dev_cp need to be done after all other consumers succeed.
+
+struct ReplDevCPContext;
+
+class ReplSvcCPContext : public CPContext {
+    std::shared_mutex m_cp_map_mtx;
+    std::map< ReplDev*, cshared<ReplDevCPContext> > m_cp_ctx_map;
+public:
+    ReplSvcCPContext(CP* cp) : CPContext(cp){};
+    virtual ~ReplSvcCPContext() = default;
+    int add_repl_dev_ctx(ReplDev* dev, cshared<ReplDevCPContext> dev_ctx);
+    cshared<ReplDevCPContext> get_repl_dev_ctx(ReplDev* dev);
+};
+
 class RaftReplServiceCPHandler : public CPCallbacks {
 public:
     RaftReplServiceCPHandler() = default;
