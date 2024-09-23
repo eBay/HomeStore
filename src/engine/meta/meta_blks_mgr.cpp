@@ -1018,6 +1018,7 @@ void MetaBlkMgr::alloc_meta_blk(const uint64_t size, std::vector< BlkId >& bid) 
     try {
         const auto ret{m_sb_blk_store->alloc_blk(size, hints, bid)};
         HS_REL_ASSERT_EQ(ret, BlkAllocStatus::SUCCESS);
+        HS_REL_ASSERT_NE(bid.size(), 0);
 #ifndef NDEBUG
         uint64_t debug_size{0};
         for (size_t i{0}; i < bid.size(); ++i) {
