@@ -1317,6 +1317,12 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     // keep lentry in scope for the lyfe cycle of the rreq
     rreq->set_lentry(lentry);
     rreq->init(rkey, jentry->code, false /* is_proposer */, entry_to_hdr(jentry), entry_to_key(jentry), data_size);
+    // we load the log from log device, implies log flushed.  We only flush log after data is written to data device.
+    rreq->add_state(repl_req_state_t::BLK_ALLOCATED);
+    rreq->add_state(repl_req_state_t::DATA_RECEIVED);
+    rreq->add_state(repl_req_state_t::DATA_WRITTEN);
+    rreq->add_state(repl_req_state_t::LOG_RECEIVED);
+    rreq->add_state(repl_req_state_t::LOG_FLUSHED);
     RD_LOGD("Replay log on restart, rreq=[{}]", rreq->to_string());
 
     if (repl_lsn > m_rd_sb->durable_commit_lsn) {
