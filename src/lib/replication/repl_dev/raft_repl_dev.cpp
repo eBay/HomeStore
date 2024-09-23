@@ -1201,7 +1201,9 @@ void RaftReplDev::cp_flush(CP* cp, cshared<ReplDevCPContext> ctx) {
 
     std::unique_lock lg{m_sb_mtx};
     m_rd_sb->compact_lsn = clsn;
-    m_rd_sb->durable_commit_lsn = lsn;
+    // dc_lsn is also flushed in flush_durable_commit_lsn()
+    // we need to take a max to avoid rolling back.
+    m_rd_sb->durable_commit_lsn = std::max(lsn, m_rd_sb->durable_commit_lsn);
     m_rd_sb->checkpoint_lsn = lsn;
     m_rd_sb->last_applied_dsn = dsn;
     m_rd_sb.write();
