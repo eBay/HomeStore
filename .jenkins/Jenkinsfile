@@ -61,7 +61,7 @@ pipeline {
                 axes {
                     axis {
                         name 'BUILD_TYPE'
-                        values 'release', 'debug', 'test'
+                        values 'release', 'debug'
                     }
                 }
 
