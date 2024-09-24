@@ -184,10 +184,16 @@ folly::Future< bool > CPManager::do_trigger_cp_flush(bool force, bool flush_on_s
     new_cp->m_cp_id = cur_cp->m_cp_id + 1;
 
     HS_PERIODIC_LOG(DEBUG, cp, "Create New CP session", new_cp->id());
-    size_t idx{0};
-    for (auto& consumer : m_cp_cb_table) {
-        if (consumer) { new_cp->m_contexts[idx] = std::move(consumer->on_switchover_cp(cur_cp.get(), new_cp)); }
-        ++idx;
+    // sealer should be the first one to switch over
+    auto& sealer_cp = m_cp_cb_table[(size_t)cp_consumer_t::SEALER];
+    if (sealer_cp) {
+        new_cp->m_contexts[(size_t)cp_consumer_t::SEALER] = std::move(sealer_cp->on_switchover_cp(cur_cp.get(), new_cp));
+    }
+    // switch over other consumers
+    for (size_t svcid = 0; svcid < (size_t)cp_consumer_t::SENTINEL; svcid++) {
+        if (svcid == (size_t)cp_consumer_t::SEALER) { continue; }
+        auto& consumer = m_cp_cb_table[svcid];
+        if (consumer) { new_cp->m_contexts[svcid] = std::move(consumer->on_switchover_cp(cur_cp.get(), new_cp)); }
     }
 
     HS_PERIODIC_LOG(DEBUG, cp, "CP Attached completed, proceed to exit cp critical section");
@@ -219,18 +225,17 @@ void CPManager::cp_start_flush(CP* cp) {
     HS_PERIODIC_LOG(INFO, cp, "Starting CP {} flush", cp->id());
     cp->m_cp_status = cp_status_t::cp_flushing;
     for (size_t svcid = 0; svcid < (size_t)cp_consumer_t::SENTINEL; svcid++) {
-        if (svcid == (size_t)cp_consumer_t::REPLICATION_SVC) {
-            continue;
-        }
+        if (svcid == (size_t)cp_consumer_t::SEALER) { continue; }
         auto& consumer = m_cp_cb_table[svcid];
         if (consumer) { futs.emplace_back(std::move(consumer->cp_flush(cp))); }
     }
 
     folly::collectAllUnsafe(futs).thenValue([this, cp](auto) {
-        // Sync flushing replication svc at last as the cp_lsn updated here
-        // other component should at least flushed to cp_lsn
-        auto& repl_cp = m_cp_cb_table[(size_t)cp_consumer_t::REPLICATION_SVC];
-        if (repl_cp) {repl_cp->cp_flush(cp).wait();}
+        // Sync flushing SEALER svc which is the replication service
+        // at last as the cp_lsn updated here. Other component should
+        // at least flushed to cp_lsn.
+        auto& sealer_cp = m_cp_cb_table[(size_t)cp_consumer_t::SEALER];
+        if (sealer_cp) { sealer_cp->cp_flush(cp).wait(); }
         // All consumers have flushed for the cp
         on_cp_flush_done(cp);
     });
