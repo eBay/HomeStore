@@ -91,12 +91,12 @@ struct ReplDevCPContext;
 
 class ReplSvcCPContext : public CPContext {
     std::shared_mutex m_cp_map_mtx;
-    std::map< cshared< ReplDev >, cshared<ReplDevCPContext> > m_cp_ctx_map;
+    std::map< ReplDev*, cshared<ReplDevCPContext> > m_cp_ctx_map;
 public:
     ReplSvcCPContext(CP* cp) : CPContext(cp){};
     virtual ~ReplSvcCPContext() = default;
-    int add_repl_dev_ctx(cshared<ReplDev > dev, cshared<ReplDevCPContext> dev_ctx);
-    cshared<ReplDevCPContext> get_repl_dev_ctx(cshared<ReplDev > dev);
+    int add_repl_dev_ctx(ReplDev* dev, cshared<ReplDevCPContext> dev_ctx);
+    cshared<ReplDevCPContext> get_repl_dev_ctx(ReplDev* dev);
 };
 
 class RaftReplServiceCPHandler : public CPCallbacks {
