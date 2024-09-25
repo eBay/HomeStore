@@ -93,7 +93,12 @@ void RaftReplService::start() {
                         .with_hb_interval(HS_DYNAMIC_CONFIG(consensus.heartbeat_period_ms))
                         .with_max_append_size(HS_DYNAMIC_CONFIG(consensus.max_append_batch_size))
                         .with_log_sync_batch_size(HS_DYNAMIC_CONFIG(consensus.log_sync_batch_size))
+    // TODO to fix the log_gap thresholds when adding new member.
+    // When the option is enabled, new member is doing log sync is stuck after the first batch
+    // where if the option is disabled, new member is going through append entries and it works.
+#if 0
                         .with_log_sync_stopping_gap(HS_DYNAMIC_CONFIG(consensus.min_log_gap_to_join))
+#endif
                         .with_stale_log_gap(HS_DYNAMIC_CONFIG(consensus.stale_log_gap_hi_threshold))
                         .with_fresh_log_gap(HS_DYNAMIC_CONFIG(consensus.stale_log_gap_lo_threshold))
                         .with_snapshot_enabled(HS_DYNAMIC_CONFIG(consensus.snapshot_freq_distance))
@@ -327,7 +332,16 @@ void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
 
 AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, replica_id_t member_out,
                                                   replica_id_t member_in) const {
-    return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
+    auto rdev_result = get_repl_dev(group_id);
+    if (!rdev_result) { return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND); }
+
+    return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
+        ->replace_member(member_out, member_in)
+        .via(&folly::InlineExecutor::instance())
+        .thenValue([this](auto&& e) mutable {
+            if (e.hasError()) { return make_async_error<>(e.error()); }
+            return make_async_success<>();
+        });
 }
 
 ////////////////////// Reaper Thread related //////////////////////////////////

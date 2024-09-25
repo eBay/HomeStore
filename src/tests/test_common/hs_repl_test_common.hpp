@@ -38,6 +38,8 @@
 SISL_OPTION_GROUP(test_repl_common_setup,
                   (replicas, "", "replicas", "Total number of replicas",
                    ::cxxopts::value< uint32_t >()->default_value("3"), "number"),
+                  (spare_replicas, "", "spare_replicas", "Additional number of spare replicas not part of repldev",
+                   ::cxxopts::value< uint32_t >()->default_value("1"), "number"),
                   (base_port, "", "base_port", "Port number of first replica",
                    ::cxxopts::value< uint16_t >()->default_value("4000"), "number"),
                   (replica_num, "", "replica_num",
@@ -134,11 +136,12 @@ public:
     HSReplTestHelper(std::string const& name, std::vector< std::string > const& args, char** argv) :
             name_{name}, args_{args}, argv_{argv} {}
 
-    void setup() {
+    void setup(uint32_t num_replicas) {
+        num_replicas_ = num_replicas;
         replica_num_ = SISL_OPTIONS["replica_num"].as< uint16_t >();
+
         sisl::logging::SetLogger(name_ + std::string("_replica_") + std::to_string(replica_num_));
         sisl::logging::SetLogPattern("[%D %T%z] [%^%L%$] [%n] [%t] %v");
-        auto const num_replicas = SISL_OPTIONS["replicas"].as< uint32_t >();
 
         boost::uuids::string_generator gen;
         for (uint32_t i{0}; i < num_replicas; ++i) {
@@ -226,7 +229,7 @@ public:
 
     void reset_setup() {
         teardown();
-        setup();
+        setup(num_replicas_);
     }
 
     void restart(uint32_t shutdown_delay_secs = 5u) {
@@ -273,8 +276,12 @@ public:
 
         if (replica_num_ == 0) {
             std::set< homestore::replica_id_t > members;
-            std::transform(members_.begin(), members_.end(), std::inserter(members, members.end()),
-                           [](auto const& p) { return p.first; });
+            // By default we create repl dev with number of members equal to replicas argument.
+            // We dont add spare replica's to the group by default.
+            for (auto& m : members_) {
+                if (m.second < SISL_OPTIONS["replicas"].as< uint32_t >()) { members.insert(m.first); }
+            }
+
             group_id_t repl_group_id = hs_utils::gen_random_uuid();
             {
                 std::unique_lock lg(groups_mtx_);
@@ -299,6 +306,7 @@ public:
         auto listener = std::move(pending_listeners_[0]);
         repl_groups_.insert(std::pair(group_id, listener));
         pending_listeners_.erase(pending_listeners_.begin());
+        LOGINFO("Got listener for group_id={} replica={}", boost::uuids::to_string(group_id), replica_num_);
         return listener;
     }
 
@@ -346,6 +354,7 @@ private:
     std::string name_;
     std::vector< std::string > args_;
     char** argv_;
+    uint32_t num_replicas_;
 
     std::vector< homestore::dev_info > dev_list_;
 
