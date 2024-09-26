@@ -2,7 +2,7 @@ from conans import ConanFile, CMake, tools
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "3.8.4"
+    version = "3.8.5"
 
     homepage = "https://github.corp.ebay.com/SDS/homestore"
     description = "HomeStore"
