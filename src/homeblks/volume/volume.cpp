@@ -612,9 +612,11 @@ bool Volume::check_and_complete_req(const volume_req_ptr& vreq, const std::error
             HISTOGRAM_OBSERVE(m_metrics, volume_pieces_per_write, vreq->vc_req_cnt);
             HISTOGRAM_OBSERVE(m_metrics, volume_write_latency, latency_us);
         } else if (vreq->is_unmap()) {
+#ifndef NDEBUG
             HISTOGRAM_OBSERVE(m_metrics, volume_unmap_latency, latency_us);
             COUNTER_INCREMENT(m_metrics, volume_unmap_size_total, size);
             HISTOGRAM_OBSERVE(m_metrics, volume_unmap_size_distribution, size);
+#endif
         }
 
         if (latency_us > 5000000) { THIS_VOL_LOG(WARN, , vreq, "vol req took time {} us", latency_us); }

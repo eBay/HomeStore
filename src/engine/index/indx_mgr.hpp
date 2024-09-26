@@ -563,7 +563,6 @@ protected:
 class IndxMgrMetrics : public sisl::MetricsGroupWrapper {
 public:
     explicit IndxMgrMetrics(const char* const indx_name) : sisl::MetricsGroupWrapper{"Index", indx_name} {
-        REGISTER_COUNTER(indx_unmap_async_count, "Total number of async unmaps");
         REGISTER_HISTOGRAM(btree_msg_time, "time spent in sending message to btree", "btree_msg_time");
         register_me_to_farm();
     }
