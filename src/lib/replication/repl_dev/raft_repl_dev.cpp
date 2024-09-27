@@ -74,6 +74,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
             m_rd_sb->free_blks_journal_id = m_free_blks_journal->get_store_id();
         }
         m_rd_sb.write();
+	bind_data_service();
     }
 
     RD_LOG(INFO,
@@ -83,9 +84,13 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
            (load_existing ? "Existing" : "New"), group_id_str(), my_replica_id_str(), m_raft_server_id,
            m_commit_upto_lsn.load(), m_compact_lsn.load(), m_rd_sb->checkpoint_lsn, m_next_dsn.load(),
            m_rd_sb->logdev_id, m_rd_sb->logstore_id);
+}
 
+bool RaftReplDev::bind_data_service() {
+    RD_LOG(INFO, "Starting data channel, group_id={}, replica_id={}", group_id_str(), my_replica_id_str());
+    bool success = false;
 #ifdef _PRERELEASE
-    m_msg_mgr.bind_data_service_request(PUSH_DATA, m_group_id, [this](intrusive< sisl::GenericRpcData >& rpc_data) {
+    success = m_msg_mgr.bind_data_service_request(PUSH_DATA, m_group_id, [this](intrusive< sisl::GenericRpcData >& rpc_data) {
         if (iomgr_flip::instance()->delay_flip("slow_down_data_channel", [this, rpc_data]() mutable {
                 RD_LOGI("Resuming after slow down data channel flip");
                 on_push_data_received(rpc_data);
@@ -96,13 +101,22 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
         }
     });
 #else
-    m_msg_mgr.bind_data_service_request(PUSH_DATA, m_group_id, bind_this(RaftReplDev::on_push_data_received, 1));
+    success = m_msg_mgr.bind_data_service_request(PUSH_DATA, m_group_id, bind_this(RaftReplDev::on_push_data_received, 1));
 #endif
-
-    m_msg_mgr.bind_data_service_request(FETCH_DATA, m_group_id, bind_this(RaftReplDev::on_fetch_data_received, 1));
+    if (!success) {
+        RD_LOGE("Failed to bind data service request for PUSH_DATA");
+	return false;
+    }
+    success = m_msg_mgr.bind_data_service_request(FETCH_DATA, m_group_id, bind_this(RaftReplDev::on_fetch_data_received, 1));
+    if (!success) {
+        RD_LOGE("Failed to bind data service request for FETCH_DATA");
+	return false;
+    }
+    return true;
 }
 
 bool RaftReplDev::join_group() {
+    bind_data_service();
     auto raft_result =
         m_msg_mgr.join_group(m_group_id, "homestore_replication",
                              std::dynamic_pointer_cast< nuraft_mesg::mesg_state_mgr >(shared_from_this()));

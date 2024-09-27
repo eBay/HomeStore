@@ -128,14 +128,30 @@ void RaftReplService::start() {
     m_config_sb_bufs.clear();
 
     // Step 5: Start the data and logstore service now. This step is essential before we can ask Raft to join groups etc
-    hs()->data_service().start();
+
+    // It is crucial to start the logstore before the enalbe data channel. This is because during log replay,
+    // the commit_blks() function is called, which interacts with the allocator.
+    // Starting the data channel before the log replay is complete can lead to a race condition between
+    // PUSHDATA operations and log replay.
+    // For example, consider LSN 100 in the log store is associated with PBA1. After a restart, the allocator
+    // is only aware of allocations up to the last checkpoint and may consider PBA1 as available.
+    // If a PUSHDATA request is received during this time, PBA1 could be allocated again to a new request,
+    // leading to data corruption by overwriting the data associated with LSN 100.
+    // Now the data channel is started in join_group().
+
+    LOGINFO("Starting LogStore service, fist_boot = {}", hs()->is_first_time_boot());
     hs()->logstore_service().start(hs()->is_first_time_boot());
+    LOGINFO("Started LogStore service, log replay should already done till this point");
+    // all log stores are replayed, time to start data service.
+    LOGINFO("Starting DataService");
+    hs()->data_service().start();
 
     // Step 6: Iterate all the repl dev and ask each one of the join the raft group.
     for (auto it = m_rd_map.begin(); it != m_rd_map.end();) {
         auto rdev = std::dynamic_pointer_cast< RaftReplDev >(it->second);
         rdev->wait_for_logstore_ready();
         if (!rdev->join_group()) {
+	    HS_REL_ASSERT(false, "FAILED TO JOIN GROUP, PANIC HERE");
             it = m_rd_map.erase(it);
         } else {
             ++it;
@@ -358,7 +374,7 @@ void RaftReplService::start_reaper_thread() {
             m_rdev_gc_timer_hdl = iomanager.schedule_thread_timer(
                 HS_DYNAMIC_CONFIG(generic.repl_dev_cleanup_interval_sec) * 1000 * 1000 * 1000, true /* recurring */,
                 nullptr, [this](void*) {
-                    LOGINFOMOD(replication, "Reaper Thread: Doing GC");
+                    LOGDEBUGMOD(replication, "Reaper Thread: Doing GC");
                     gc_repl_reqs();
                     gc_repl_devs();
                 });
