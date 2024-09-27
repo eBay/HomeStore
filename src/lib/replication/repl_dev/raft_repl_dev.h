@@ -160,6 +160,7 @@ public:
     RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk >&& rd_sb, bool load_existing);
     virtual ~RaftReplDev() = default;
 
+    bool bind_data_service();
     bool join_group();
     AsyncReplResult<> replace_member(replica_id_t member_out, replica_id_t member_in);
     folly::SemiFuture< ReplServiceError > destroy_group();
