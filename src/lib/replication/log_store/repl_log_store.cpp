@@ -66,17 +66,18 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
         // a fetch and write. Once all requests are completed and written, these requests are poped out of the map and
         // the future will be ready.
         auto fut = m_rd.notify_after_data_written(reqs);
+        // Wait for the fetch and write to be completed successfully.
+        // It is essential to complete the data write before appending to the log. If the logs are flushed
+        // before the data is written, a restart and subsequent log replay occurs, as the in-memory state is lost,
+        // it leaves us uncertain about whether the data was actually written, potentially leading to data inconsistency.
+        std::move(fut).wait();
 
-        // In the meanwhile, we can flush the journal for this lsn batch. It is ok to flush the entries in log before
-        // actual data is written, because, even if we have the log, it doesn't mean data is committed, until state
-        // machine reports that. This way the flush and fetch both can run in parallel.
+        // Flushing log now.
         auto cur_time = std::chrono::steady_clock::now();
         HomeRaftLogStore::end_of_append_batch(start_lsn, count);
         HISTOGRAM_OBSERVE(m_rd.metrics(), raft_end_of_append_batch_latency_us, get_elapsed_time_us(cur_time));
 
         cur_time = std::chrono::steady_clock::now();
-        // Wait for the fetch and write to be completed successfully.
-        std::move(fut).wait();
         HISTOGRAM_OBSERVE(m_rd.metrics(), data_channel_wait_latency_us, get_elapsed_time_us(cur_time));
 
         // Mark all the reqs also completely written
