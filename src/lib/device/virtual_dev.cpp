@@ -574,13 +574,13 @@ folly::Future< std::error_code > VirtualDev::queue_fsync_pdevs() {
     assert(m_pdevs.size() > 0);
     if (m_pdevs.size() == 1) {
         auto* pdev = *(m_pdevs.begin());
-        HS_LOG(TRACE, device, "Flushing pdev {}", pdev->get_devname());
+        HS_LOG(DEBUG, device, "Flushing pdev {}", pdev->get_devname());
         return pdev->queue_fsync();
     } else {
         static thread_local std::vector< folly::Future< std::error_code > > s_futs;
         s_futs.clear();
         for (auto* pdev : m_pdevs) {
-            HS_LOG(TRACE, device, "Flushing pdev {}", pdev->get_devname());
+            HS_LOG(DEBUG, device, "Flushing pdev {}", pdev->get_devname());
             s_futs.emplace_back(pdev->queue_fsync());
         }
         return folly::collectAllUnsafe(s_futs).thenTry([](auto&& t) {
@@ -682,6 +682,13 @@ void VirtualDev::cp_flush(VDevCPContext* v_cp_ctx) {
     // pass down cp so that underlying components can get their customized CP context if needed;
     m_chunk_selector->foreach_chunks(
         [this, cp](cshared< Chunk >& chunk) { chunk->blk_allocator_mutable()->cp_flush(cp); });
+
+    // fsync the pdev to ensure even pdev open with buffer io, all data we have written prior to this point
+    // has been persisted to disk.
+    HS_LOG(DEBUG, device, "in CP flush, fsync-ing pdevs");
+    auto fut = queue_fsync_pdevs();
+    std::move(fut).wait();
+    HS_LOG(DEBUG, device, "in CP flush, pdevs fsync done");
 
     // All of the blkids which were captured in the current vdev cp context will now be freed and hence available for
     // allocation on the new CP dirty collection session which is ongoing
