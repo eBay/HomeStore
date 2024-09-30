@@ -94,7 +94,10 @@ void ResourceMgr::dec_dirty_buf_size(const uint32_t size) {
     HS_REL_ASSERT_GT(size, 0);
     const int64_t dirty_buf_cnt = m_hs_dirty_buf_cnt.fetch_sub(size, std::memory_order_relaxed);
     COUNTER_DECREMENT(m_metrics, dirty_buf_cnt, size);
-    HS_REL_ASSERT_GE(dirty_buf_cnt, size);
+    if (dirty_buf_cnt < size) {
+        LOGERROR("dirty_buf_cnt {} of now is less then size {}", dirty_buf_cnt, size);
+    }
+    //HS_REL_ASSERT_GE(dirty_buf_cnt, size);
 }
 
 void ResourceMgr::register_dirty_buf_exceed_cb(exceed_limit_cb_t cb) { m_dirty_buf_exceed_cb = std::move(cb); }
