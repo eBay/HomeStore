@@ -107,6 +107,12 @@ public:
 
 class RaftReplService;
 class CP;
+struct ReplDevCPContext {
+    repl_lsn_t cp_lsn;
+    repl_lsn_t compacted_to_lsn;
+    uint64_t last_applied_dsn;
+};
+
 class RaftReplDev : public ReplDev,
                     public nuraft_mesg::mesg_state_mgr,
                     public std::enable_shared_from_this< RaftReplDev > {
@@ -154,6 +160,7 @@ public:
     RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk >&& rd_sb, bool load_existing);
     virtual ~RaftReplDev() = default;
 
+    bool bind_data_service();
     bool join_group();
     AsyncReplResult<> replace_member(replica_id_t member_out, replica_id_t member_in);
     folly::SemiFuture< ReplServiceError > destroy_group();
@@ -192,7 +199,8 @@ public:
                                       sisl::blob const& key, uint32_t data_size, bool is_data_channel);
     folly::Future< folly::Unit > notify_after_data_written(std::vector< repl_req_ptr_t >* rreqs);
     void check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreqs);
-    void cp_flush(CP* cp);
+    void cp_flush(CP* cp, cshared<ReplDevCPContext> ctx);
+    cshared<ReplDevCPContext> get_cp_ctx(CP* cp);
     void cp_cleanup(CP* cp);
     void become_ready();
 
