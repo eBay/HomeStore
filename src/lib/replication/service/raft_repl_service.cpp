@@ -346,13 +346,13 @@ void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
     add_repl_dev(group_id, rdev);
 }
 
-AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, replica_id_t member_out,
-                                                  replica_id_t member_in) const {
+AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, replica_id_t member_out, replica_id_t member_in,
+                                                  uint32_t commit_quorum) const {
     auto rdev_result = get_repl_dev(group_id);
     if (!rdev_result) { return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND); }
 
     return std::dynamic_pointer_cast< RaftReplDev >(rdev_result.value())
-        ->replace_member(member_out, member_in)
+        ->replace_member(member_out, member_in, commit_quorum)
         .via(&folly::InlineExecutor::instance())
         .thenValue([this](auto&& e) mutable {
             if (e.hasError()) { return make_async_error<>(e.error()); }

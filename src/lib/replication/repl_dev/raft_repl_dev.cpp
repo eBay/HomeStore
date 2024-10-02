@@ -127,9 +127,15 @@ bool RaftReplDev::join_group() {
     return true;
 }
 
-AsyncReplResult<> RaftReplDev::replace_member(replica_id_t member_out_uuid, replica_id_t member_in_uuid) {
+AsyncReplResult<> RaftReplDev::replace_member(replica_id_t member_out_uuid, replica_id_t member_in_uuid,
+                                              uint32_t commit_quorum) {
     LOGINFO("Replace member group_id={} member_out={} member_in={}", group_id_str(),
             boost::uuids::to_string(member_out_uuid), boost::uuids::to_string(member_in_uuid));
+
+    if (commit_quorum >= 1) {
+        // Two members are down and leader cant form the quorum. Reduce the quorum size.
+        reset_quorum_size(commit_quorum);
+    }
 
     // Step 1: Check if leader itself is requested to move out.
     if (m_my_repl_id == member_out_uuid && m_my_repl_id == get_leader_id()) {
@@ -137,13 +143,14 @@ AsyncReplResult<> RaftReplDev::replace_member(replica_id_t member_out_uuid, repl
         // Client will retry replace_member request to the new leader.
         raft_server()->yield_leadership(true /* immediate */, -1 /* successor */);
         RD_LOGI("Replace member leader is the member_out so yield leadership");
+        reset_quorum_size(0);
         return make_async_error<>(ReplServiceError::NOT_LEADER);
     }
 
     // Step 2. Add the new member.
     return m_msg_mgr.add_member(m_group_id, member_in_uuid)
         .via(&folly::InlineExecutor::instance())
-        .thenValue([this, member_in_uuid, member_out_uuid](auto&& e) -> AsyncReplResult<> {
+        .thenValue([this, member_in_uuid, member_out_uuid, commit_quorum](auto&& e) -> AsyncReplResult<> {
             // TODO Currently we ignore the cancelled, fix nuraft_mesg to not timeout
             // when adding member. Member is added to cluster config until member syncs fully
             // with atleast stop gap. This will take a lot of time for block or
@@ -157,6 +164,7 @@ AsyncReplResult<> RaftReplDev::replace_member(replica_id_t member_out_uuid, repl
                     RD_LOGW("Ignoring error returned from nuraft add_member {}", e.error());
                 } else {
                     RD_LOGE("Replace member error in add member : {}", e.error());
+                    reset_quorum_size(0);
                     return make_async_error<>(RaftReplService::to_repl_error(e.error()));
                 }
             }
@@ -179,6 +187,7 @@ AsyncReplResult<> RaftReplDev::replace_member(replica_id_t member_out_uuid, repl
             auto err = m_state_machine->propose_to_raft(std::move(rreq));
             if (err != ReplServiceError::OK) {
                 LOGERROR("Replace member propose to raft failed {}", err);
+                reset_quorum_size(0);
                 return make_async_error<>(std::move(err));
             }
 
@@ -189,7 +198,7 @@ AsyncReplResult<> RaftReplDev::replace_member(replica_id_t member_out_uuid, repl
             // entry and call exit_group() and leave().
             return m_msg_mgr.rem_member(m_group_id, member_out_uuid)
                 .via(&folly::InlineExecutor::instance())
-                .thenValue([this, member_out](auto&& e) -> AsyncReplResult<> {
+                .thenValue([this, member_out, commit_quorum](auto&& e) -> AsyncReplResult<> {
                     if (e.hasError()) {
                         // Ignore the server not found as server removed from the cluster
                         // as requests are idempotent and can be resend.
@@ -199,14 +208,26 @@ AsyncReplResult<> RaftReplDev::replace_member(replica_id_t member_out_uuid, repl
                             // Its ok to retry this request as the request
                             // of replace member is idempotent.
                             RD_LOGE("Replace member failed to remove member : {}", e.error());
+                            reset_quorum_size(0);
                             return make_async_error<>(ReplServiceError::RETRY_REQUEST);
                         }
                     } else {
                         RD_LOGI("Replace member removed member={} from group_id={}", member_out, group_id_str());
                     }
+
+                    // Revert the quorum size back to 0.
+                    reset_quorum_size(0);
                     return make_async_success<>();
                 });
         });
+}
+
+void RaftReplDev::reset_quorum_size(uint32_t commit_quorum) {
+    RD_LOGI("Reset raft quorum size={}", commit_quorum);
+    nuraft::raft_params params = raft_server()->get_current_params();
+    params.with_custom_commit_quorum_size(commit_quorum);
+    params.with_custom_election_quorum_size(commit_quorum);
+    raft_server()->update_params(params);
 }
 
 folly::SemiFuture< ReplServiceError > RaftReplDev::destroy_group() {

@@ -610,11 +610,14 @@ public:
     void create_snapshot() { dbs_[0]->create_snapshot(); }
     void truncate(int num_reserved_entries) { dbs_[0]->truncate(num_reserved_entries); }
 
-    void replace_member(std::shared_ptr< TestReplicatedDB > db, replica_id_t member_out, replica_id_t member_in) {
-        this->run_on_leader(db, [this, db, member_out, member_in]() {
+    void replace_member(std::shared_ptr< TestReplicatedDB > db, replica_id_t member_out, replica_id_t member_in,
+                        uint32_t commit_quorum = 0) {
+        this->run_on_leader(db, [this, db, member_out, member_in, commit_quorum]() {
             LOGINFO("Replace member out={} in={}", boost::uuids::to_string(member_out),
                     boost::uuids::to_string(member_in));
-            auto v = hs()->repl_service().replace_member(db->repl_dev()->group_id(), member_out, member_in).get();
+            auto v = hs()->repl_service()
+                         .replace_member(db->repl_dev()->group_id(), member_out, member_in, commit_quorum)
+                         .get();
             ASSERT_EQ(v.hasError(), false) << "Error in replacing member";
         });
     }

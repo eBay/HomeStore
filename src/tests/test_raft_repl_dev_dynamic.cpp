@@ -65,8 +65,73 @@ TEST_F(ReplDevDynamicTest, ReplaceMember) {
     LOGINFO("ReplaceMember test done");
 }
 
+TEST_F(ReplDevDynamicTest, TwoMemberDown) {
+    LOGINFO("TwoMemberDown test started");
+
+    // Make two members down in a group and leader cant reach a quorum.
+    // We set the custom quorum size to 1 and call replace member.
+    // Leader should do some writes to validate it has reach quorum size.
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    auto db = dbs_.back();
+    auto num_replicas = SISL_OPTIONS["replicas"].as< uint32_t >();
+    auto num_members = SISL_OPTIONS["replicas"].as< uint32_t >() + SISL_OPTIONS["spare_replicas"].as< uint32_t >();
+
+    uint64_t num_io_entries = SISL_OPTIONS["num_io"].as< uint64_t >();
+
+    // Replace the last member in the group with index(num_replicas - 1) with a spare
+    // replica with index (num_replica). Member id's are 0,...,num_replicas-1, num_replicas,...,N
+    uint32_t member_out = num_replicas - 1;
+    uint32_t member_in = num_replicas;
+
+    g_helper->sync_for_test_start(num_members);
+
+    // Shutdown replica 1 and replica 2 to simulate two member down.
+    if (g_helper->replica_num() == 1) {
+        this->shutdown_replica(1);
+        LOGINFO("Shutdown replica 1");
+    }
+
+    if (g_helper->replica_num() == 2) {
+        this->shutdown_replica(2);
+        LOGINFO("Shutdown replica 2");
+    }
+
+    if (g_helper->replica_num() == 0) {
+        // Replace down replica 2 with spare replica 3 with commit quorum 1
+        // so that leader can go ahead with replacing member.
+        LOGINFO("Replace member started");
+        replace_member(db, g_helper->replica_id(member_out), g_helper->replica_id(member_in), 1 /* commit quorum*/);
+        this->write_on_leader(num_io_entries, true /* wait_for_commit */);
+        LOGINFO("Leader completed num_io={}", num_io_entries);
+    }
+
+    if (g_helper->replica_num() == member_in) {
+        wait_for_commits(num_io_entries);
+        LOGINFO("Member in got all commits");
+    }
+
+    if (g_helper->replica_num() == 0 || g_helper->replica_num() == member_in) {
+        // Validate data on leader replica 0 and replica 3
+        LOGINFO("Validate all data written so far by reading them replica={}", g_helper->replica_num());
+        this->validate_data();
+    }
+
+    g_helper->sync_for_cleanup_start(num_members);
+
+    if (g_helper->replica_num() == 1) {
+        LOGINFO("Start replica 1");
+        this->start_replica(1);
+    }
+    if (g_helper->replica_num() == 2) {
+        LOGINFO("Start replica 2");
+        this->start_replica(2);
+    }
+
+    LOGINFO("TwoMemberDown test done");
+}
+
 // TODO add more tests with leader and member restart, multiple member replace
-// leader replace, commit quorum
+// leader replace
 
 int main(int argc, char* argv[]) {
     int parsed_argc = argc;
@@ -89,7 +154,6 @@ int main(int argc, char* argv[]) {
     // leadership_expiry time.
     //
     HS_SETTINGS_FACTORY().modifiable_settings([](auto& s) {
-        s.consensus.leadership_expiry_ms = -1; // -1 means never expires;
         s.generic.repl_dev_cleanup_interval_sec = 1;
 
         // Disable implicit flush and timer.
