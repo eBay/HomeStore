@@ -252,6 +252,10 @@ public:
         start_homestore();
     }
 
+    void reinit_repl_app() {
+        m_token.params(HS_SERVICE::REPLICATION).repl_app = std::make_unique< TestReplApplication >(*this);
+    }
+
     uint16_t replica_num() const { return replica_num_; }
     homestore::replica_id_t my_replica_id() const { return my_replica_id_; }
     homestore::replica_id_t replica_id(uint16_t member_id) const {
@@ -315,6 +319,11 @@ public:
             std::unique_lock lg(groups_mtx_);
             repl_groups_.erase(group_id);
         }
+    }
+
+    void add_listener(std::shared_ptr< ReplDevListener > listener) {
+        std::unique_lock lg(groups_mtx_);
+        pending_listeners_.emplace_back(listener);
     }
 
     size_t num_listeners() const {
