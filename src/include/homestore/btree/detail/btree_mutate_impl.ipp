@@ -227,7 +227,7 @@ btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
     root = std::move(new_root);
 
     // We need to notify about the root change, before splitting the node, so that correct dependencies are set
-    ret = on_root_changed(root, req.m_op_context);
+    ret = on_root_changed(root, nullptr, req.m_op_context);
     if (ret != btree_status_t::success) {
         free_node(root, locktype_t::WRITE, req.m_op_context);
         unlock_node(child_node, locktype_t::WRITE);
@@ -236,9 +236,9 @@ btree_status_t Btree< K, V >::check_split_root(ReqT& req) {
 
     ret = split_node(root, child_node, root->total_entries(), &split_key, req.m_op_context);
     if (ret != btree_status_t::success) {
+        on_root_changed(child_node, root, req.m_op_context); // Revert it back
         free_node(root, locktype_t::WRITE, req.m_op_context);
         root = std::move(child_node);
-        on_root_changed(root, req.m_op_context); // Revert it back
         unlock_node(root, locktype_t::WRITE);
     } else {
         if (req.route_tracing) { append_route_trace(req, child_node, btree_event_t::SPLIT); }

@@ -154,7 +154,7 @@ protected:
     virtual btree_status_t transact_nodes(const BtreeNodeList& new_nodes, const BtreeNodeList& freed_nodes,
                                           const BtreeNodePtr& left_child_node, const BtreeNodePtr& parent_node,
                                           void* context) = 0;
-    virtual btree_status_t on_root_changed(BtreeNodePtr const& root, void* context) = 0;
+    virtual btree_status_t on_root_changed(BtreeNodePtr const &root, BtreeNodePtr const &freed_root, void *context) = 0;
     virtual std::string btree_store_type() const = 0;
 
     /////////////////////////// Methods the application use case is expected to handle ///////////////////////////
