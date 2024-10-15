@@ -85,6 +85,13 @@ void RaftReplService::start() {
     LOGINFO("Starting RaftReplService with server_uuid={} port={}", boost::uuids::to_string(params.server_uuid_),
             params.mesg_port_);
 
+    //check if ssl cert files are provided, if yes, monitor the changes
+    if (!params.ssl_key_.empty() && !params.ssl_cert_.empty()) {
+        ioenvironment.with_file_watcher();
+        monitor_cert_changes();
+    }
+    
+
     // Step 2: Register all RAFT parameters. At the end of this step, raft is ready to be created/join group
     auto r_params = nuraft::raft_params()
                         .with_election_timeout_lower(HS_DYNAMIC_CONFIG(consensus.elect_to_low_ms))
@@ -173,6 +180,46 @@ void RaftReplService::stop() {
     GenericReplService::stop();
     m_msg_mgr.reset();
     hs()->logstore_service().stop();
+}
+
+void RaftReplService::monitor_cert_changes() {
+    auto fw = ioenvironment.get_file_watcher();
+    auto cert_change_cb = [this](const std::string filepath, const bool deleted) {
+        LOGINFO("file change event for {}, deleted? {}", filepath, deleted)
+        // do not block file_watcher thread
+        std::thread restart_svc(&RaftReplService::restart_raft_svc, this, filepath, deleted);
+        restart_svc.detach();
+    };
+
+    //monitor ssl cert file
+    if (!fw->register_listener(ioenvironment.get_ssl_cert(), "hs_ssl_cert_watcher", cert_change_cb)) {
+        LOGERROR("Failed to register listner, {} to watch file {}, Not monitoring cert files",
+                   "hs_ssl_cert_watcher", ioenvironment.get_ssl_cert());
+    }
+    //monitor ssl key file
+    if (!fw->register_listener(ioenvironment.get_ssl_key(), "hs_ssl_key_watcher", cert_change_cb)) {
+        LOGERROR("Failed to register listner, {} to watch file {}, Not monitoring cert files",
+                   "hs_ssl_key_watcher", ioenvironment.get_ssl_key());
+    }
+}
+
+void RaftReplService::restart_raft_svc(const std::string filepath, const bool deleted){
+    if (deleted && !wait_for_cert(filepath)) {
+        LOGINFO("file {} deleted, ", filepath)
+        // wait for the deleted file to be added again
+        throw std::runtime_error(fmt::format("file {} not found! Can not start grpc server", filepath));
+    }
+    const std::unique_lock lock(raft_restart_mutex);
+    m_msg_mgr->restart_server();
+    if (deleted) { monitor_cert_changes(); }
+}
+
+bool RaftReplService::wait_for_cert(const std::string& filepath) {
+    for (auto i = cert_change_timeout; i > 0; --i) {
+        if (std::filesystem::exists(filepath)) { return true; }
+        std::this_thread::sleep_for(cert_check_sleep);
+    }
+    return false;
 }
 
 RaftReplDev* RaftReplService::raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie) {
