@@ -224,10 +224,13 @@ protected:
     }
 
     btree_status_t on_root_changed(BtreeNodePtr const& new_root, void* context) override {
+        // todo: if(m_sb->root_node == new_root->node_id() && m_sb->root_link_version == new_root->link_version()){
+        // return btree_status_t::success;}
         m_sb->root_node = new_root->node_id();
         m_sb->root_link_version = new_root->link_version();
 
         if (!wb_cache().refresh_meta_buf(m_sb_buffer, r_cast< CPContext* >(context))) {
+            LOGTRACEMOD(wbcache, "CP mismatch error - discard transact for meta node");
             return btree_status_t::cp_mismatch;
         }
 
@@ -285,7 +288,7 @@ protected:
             BT_LOG(INFO, "Repairing node={} child_node={} child_last_key={}", cur_parent->node_id(),
                    child_node->to_string(), child_last_key.to_string());
 
-            if (child_last_key.compare(last_parent_key) > 0) {
+            if (child_last_key.compare(last_parent_key) > 0 && !is_parent_edge_node) {
                 // We have reached the last key, we can stop now
                 break;
             }
@@ -313,6 +316,7 @@ protected:
                                BtreeLinkInfo{child_node->node_id(), child_node->link_version()});
 
             BT_LOG(INFO, "Repairing node={}, repaired so_far={}", cur_parent->node_id(), cur_parent->to_string());
+            LOGINFO("Repairing node={}, repaired so_far={}", cur_parent->node_id(), cur_parent->to_string());
 
             // Move to the next child node
             this->unlock_node(child_node, locktype_t::READ);
@@ -322,6 +326,9 @@ protected:
                               "Child node={} next_node_id is empty, while its not a edge node, parent_node={} "
                               "repair is partial",
                               child_node->node_id(), parent_node->node_id());
+                LOGINFO("Child node={} next_node_id is empty, while its not a edge node, parent_node={} "
+                        "repair is partial",
+                        child_node->node_id(), parent_node->node_id());
                 ret = btree_status_t::not_found;
                 break;
             }
@@ -330,6 +337,8 @@ protected:
             if (ret != btree_status_t::success) {
                 BT_LOG_ASSERT(false, "Parent node={} repair is partial, because child_node get has failed with ret={}",
                               parent_node->node_id(), enum_name(ret));
+                LOGINFO("Parent node={} repair is partial, because child_node get has failed with ret={}",
+                        parent_node->node_id(), enum_name(ret));
                 break;
             }
         } while (true);
@@ -342,6 +351,8 @@ protected:
         if (ret != btree_status_t::success) {
             BT_LOG(ERROR, "An error occurred status={} during repair of parent_node={}, aborting the repair",
                    enum_name(ret), parent_node->node_id());
+            LOGINFO("An error occurred status={} during repair of parent_node={}, aborting the repair", enum_name(ret),
+                    parent_node->node_id());
             std::memcpy(parent_node->m_phys_node_buf, tmp_buffer, this->m_bt_cfg.node_size());
         }
 

@@ -48,6 +48,8 @@ SISL_OPTION_GROUP(
      ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
     (preload_size, "", "preload_size", "number of entries to preload tree with",
      ::cxxopts::value< uint32_t >()->default_value("1000"), "number"),
+    (max_keys_in_node, "", "max_keys_in_node", "max_keys_in_node",
+     ::cxxopts::value< uint32_t >()->default_value("0"), ""),
     (seed, "", "seed", "random engine seed, use random if not defined",
      ::cxxopts::value< uint64_t >()->default_value("0"), "number"),
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"))
@@ -102,6 +104,7 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
 
     void SetUp() override {
         BtreeTestHelper< TestType >::SetUp();
+        this->m_cfg.m_max_keys_in_node = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
     }
 };
@@ -300,6 +303,7 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
                                                      .hugepage_size_mb = 0});
 
         BtreeTestHelper< TestType >::SetUp();
+        this->m_cfg.m_max_keys_in_node = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
     }
 

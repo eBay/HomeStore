@@ -201,6 +201,7 @@ void Btree< K, V >::to_dot_keys(bnodeid_t bnodeid, std::string& buf,
 
 template < typename K, typename V >
 uint64_t Btree< K, V >::count_keys(bnodeid_t bnodeid) const {
+    if (bnodeid == 0) { bnodeid = this->root_node_id(); }
     BtreeNodePtr node;
     locktype_t acq_lock = locktype_t::READ;
     if (read_and_lock_node(bnodeid, node, acq_lock, acq_lock, nullptr) != btree_status_t::success) { return 0; }

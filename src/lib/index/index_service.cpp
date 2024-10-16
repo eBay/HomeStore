@@ -91,6 +91,11 @@ void IndexService::start() {
 
 void IndexService::stop() { m_wb_cache.reset(); }
 
+uint64_t IndexService::num_tables() {
+    std::unique_lock lg(m_index_map_mtx);
+    return m_index_map.size();
+}
+
 void IndexService::add_index_table(const std::shared_ptr< IndexTableBase >& tbl) {
     std::unique_lock lg(m_index_map_mtx);
     m_index_map.insert(std::make_pair(tbl->uuid(), tbl));

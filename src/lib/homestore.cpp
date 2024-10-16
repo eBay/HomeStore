@@ -92,7 +92,7 @@ HomeStore& HomeStore::with_repl_data_service(cshared< ReplApplication >& repl_ap
 }
 
 #ifdef _PRERELEASE
-HomeStore& HomeStore::with_crash_simulator(std::function< void(void) > cb) {
+HomeStore& HomeStore::with_crash_simulator(std::function< void(bool) > cb) {
     m_crash_simulator = std::make_unique< CrashSimulator >(std::move(cb));
     return *this;
 }

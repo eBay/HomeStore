@@ -123,7 +123,7 @@ public:
     void dump_tree_to_file(const std::string& file = "") const;
     std::string to_custom_string(to_string_cb_t< K, V > const& cb) const;
     std::string visualize_tree_keys(const std::string& file) const;
-    uint64_t count_keys(bnodeid_t bnodeid) const;
+    uint64_t count_keys(bnodeid_t bnodeid = 0) const;
 
     nlohmann::json get_metrics_in_json(bool updated = true);
     bnodeid_t root_node_id() const;
