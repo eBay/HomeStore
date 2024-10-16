@@ -215,7 +215,8 @@ void RaftReplService::restart_raft_svc(const std::string filepath, const bool de
 }
 
 bool RaftReplService::wait_for_cert(const std::string& filepath) {
-    for (auto i = cert_change_timeout; i > 0; --i) {
+    auto attempts = cert_change_timeout/cert_check_sleep;
+    for (auto i = attempts; i > 0; --i) {
         if (std::filesystem::exists(filepath)) { return true; }
         std::this_thread::sleep_for(cert_check_sleep);
     }

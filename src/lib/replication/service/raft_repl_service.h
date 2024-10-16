@@ -31,7 +31,7 @@
 
 namespace homestore {
 
-constexpr auto cert_change_timeout = 1200;
+constexpr auto cert_change_timeout = std::chrono::seconds(1200);
 constexpr auto cert_check_sleep = std::chrono::seconds(1);
 
 struct repl_dev_superblk;
