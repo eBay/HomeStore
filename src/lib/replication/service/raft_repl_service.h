@@ -31,6 +31,9 @@
 
 namespace homestore {
 
+constexpr auto cert_change_timeout = std::chrono::seconds(1200);
+constexpr auto cert_check_sleep = std::chrono::seconds(1);
+
 struct repl_dev_superblk;
 class RaftReplDev;
 
@@ -47,7 +50,8 @@ private:
     iomgr::timer_handle_t m_rdev_gc_timer_hdl;
     iomgr::timer_handle_t m_flush_durable_commit_timer_hdl;
     iomgr::io_fiber_t m_reaper_fiber;
-
+    std::mutex raft_restart_mutex;
+    
 public:
     RaftReplService(cshared< ReplApplication >& repl_app);
 
@@ -80,6 +84,9 @@ private:
     void gc_repl_devs();
     void gc_repl_reqs();
     void flush_durable_commit_lsn();
+    void monitor_cert_changes();
+    void restart_raft_svc(const std::string filepath, const bool deleted);
+    bool wait_for_cert(const std::string& filepath);
 };
 
 // cp context for repl_dev, repl_dev cp_lsn is critical cursor in the system,
