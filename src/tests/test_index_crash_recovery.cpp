@@ -34,7 +34,8 @@ SISL_LOGGING_DECL(test_index_crash_recovery)
 // TODO Add tests to do write,remove after recovery.
 // TODO Test with var len key with io mgr page size is 512.
 
-SISL_OPTION_GROUP(test_index_crash_recovery,
+SISL_OPTION_GROUP(
+    test_index_crash_recovery,
     (num_entries, "", "num_entries", "number of entries to test with",
      ::cxxopts::value< uint32_t >()->default_value("5000"), "number"),
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"),
@@ -42,7 +43,8 @@ SISL_OPTION_GROUP(test_index_crash_recovery,
      ::cxxopts::value< uint32_t >()->default_value("100"), "number"),
     (num_entries_per_rounds, "", "num_entries_per_rounds", "number of entries per rounds",
      ::cxxopts::value< uint32_t >()->default_value("40"), "number"),
-    (max_keys_in_node, "", "max_keys_in_node", "max_keys_in_node", ::cxxopts::value< uint32_t >()->default_value("0"),""),
+    (max_keys_in_node, "", "max_keys_in_node", "max_keys_in_node", ::cxxopts::value< uint32_t >()->default_value("0"),
+     ""),
     (operation_list, "", "operation_list", "operation list instead of default created following by percentage",
      ::cxxopts::value< std::vector< std::string > >(), "operations [...]"),
     (preload_size, "", "preload_size", "number of entries to preload tree with",

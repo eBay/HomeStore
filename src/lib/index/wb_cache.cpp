@@ -333,13 +333,13 @@ void IndexWBCache::transact_bufs(uint32_t index_ordinal, IndexBufferPtr const& p
         fmt::format_to(std::back_inserter(txn), "\n{} - parent={} child={} new=[{}] freed=[{}]", txn_id, parent_str,
                        child_str, new_nodes, freed_nodes);
     }
-    LOGINFO("\n\ttranasction till now: cp: {} \n{}\n", icp_ctx->id(), txn);
+    LOGTRACEMOD(wbcache, "\ttranasction till now: cp: {} \n{}\n", icp_ctx->id(), txn);
     txn_id++;
 #endif
 #if 0
-    static int id=0;
+    static int id = 0;
     auto filename = fmt::format("txn_buf_{}_{}.dot", icp_ctx->id(), id++);
-    LOGINFO("Writing txn to file: {}", filename);
+    LOGTRACEMOD(wbcache,"Writing txn to file: {}", filename);
     icp_ctx->to_string_dot(filename);
 #endif
 }
@@ -627,12 +627,12 @@ bool IndexWBCache::was_node_committed(IndexBufferPtr const& buf) {
 folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
     LOGTRACEMOD(wbcache, "Starting Index CP Flush with cp \ndag={}\n\n cp context {}", cp_ctx->to_string_with_dags(),
                 cp_ctx->to_string());
-#ifdef _PRERELEASE
-    static int id = 0;
-    auto filename = "cp_" + std::to_string(id++) + "_" + std::to_string(rand() % 100) + ".dot";
-    LOGINFO("Transact cp storing in file {}\n\n\n", filename);
-    cp_ctx->to_string_dot(filename);
-#endif
+    // #ifdef _PRERELEASE
+    //     static int id = 0;
+    //     auto filename = "cp_" + std::to_string(id++) + "_" + std::to_string(rand() % 100) + ".dot";
+    //     LOGTRACEMOD(wbcache, "Transact cp storing in file {}\n\n\n", filename);
+    //     cp_ctx->to_string_dot(filename);
+    // #endif
     if (!cp_ctx->any_dirty_buffers()) {
         if (cp_ctx->id() == 0) {
             // For the first CP, we need to flush the journal buffer to the meta blk
@@ -646,7 +646,7 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
 
 #ifdef _PRERELEASE
     if (hs()->crash_simulator().is_crashed()) {
-        LOGINFOMOD(wbcache, "crash simulation is ongoing, so skip the cp flush");
+        LOGINFO("crash simulation is ongoing, so skip the cp flush");
         return folly::makeFuture< bool >(true);
     }
 #endif
@@ -656,10 +656,10 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
     auto txn = r_cast< IndexCPContext::txn_journal const* >(journal_buf.cbytes());
     if (journal_buf.size() != 0) {
         if (m_meta_blk) {
-            LOGINFO(" journal {} ", txn->to_string());
+            LOGTRACEMOD(wbcache, " journal {} ", txn->to_string());
             meta_service().update_sub_sb(journal_buf.cbytes(), journal_buf.size(), m_meta_blk);
         } else {
-            LOGINFO(" First time journal {} ", txn->to_string());
+            LOGTRACEMOD(wbcache, " First time journal {} ", txn->to_string());
             meta_service().add_sub_sb("wb_cache", journal_buf.cbytes(), journal_buf.size(), m_meta_blk);
         }
     }
@@ -692,7 +692,7 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
         return;
     } else if (hs()->crash_simulator().is_crashed()) {
         if (!print_once) {
-            LOGINFOMOD(wbcache, "crash simulation is ongoing, aid simulation by not flushing");
+            LOGINFO("crash simulation is ongoing, aid simulation by not flushing");
             print_once = true;
         }
         return;
