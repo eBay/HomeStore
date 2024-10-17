@@ -199,7 +199,8 @@ bool IndexWBCache::refresh_meta_buf(shared< MetaIndexBuffer >& meta_buf, CPConte
         LOGTRACEMOD(wbcache, "meta buf {} is already dirtied in cp {} now is in recovery {}", meta_buf->to_string(),
                     cp_ctx->id(), m_in_recovery);
         meta_buf->copy_sb_to_buf();
-        // TODO: corner case , meta buffer is dirtied by the same cp but not added to dirty list due to previously recovery mode
+        // TODO: corner case , meta buffer is dirtied by the same cp but not added to dirty list due to previously
+        // recovery mode
     } else {
         // We always create a new meta index buffer on every meta buf update, which copies the superblk
         auto new_buf = std::make_shared< MetaIndexBuffer >(meta_buf);
@@ -217,56 +218,39 @@ static void set_crash_flips(IndexBufferPtr const& parent_buf, IndexBufferPtr con
                             IndexBufferPtrList const& new_node_bufs, IndexBufferPtrList const& freed_node_bufs) {
     // TODO: Need an API from flip to quickly check if flip is enabled, so this method doesn't check flip_enabled a
     // bunch of times.
-//    IndexWBCache::m_flip_enabled = true;
-//    if(!IndexWBCache::m_flip_triggerer.empty()){return;}
     if (parent_buf && parent_buf->is_meta_buf()) {
         // Split or merge happening on root
         if (iomgr_flip::instance()->test_flip("crash_flush_on_meta")) {
             parent_buf->set_crash_flag();
-//            IndexWBCache::m_flip_triggerer = "crash_flush_on_meta";
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_root")) {
             child_buf->set_crash_flag();
-//            IndexWBCache::m_flip_triggerer = "crash_flush_on_root";
         }
     } else if ((new_node_bufs.size() == 1) && freed_node_bufs.empty()) {
         // Its a split node situation
         if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_parent")) {
             parent_buf->set_crash_flag();
-//            IndexWBCache::m_flip_triggerer = "crash_flush_on_split_at_parent";
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_left_child")) {
             child_buf->set_crash_flag();
-//            IndexWBCache::m_flip_triggerer = "crash_flush_on_split_at_left_child";
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_split_at_right_child")) {
             new_node_bufs[0]->set_crash_flag();
-//            IndexWBCache::m_flip_triggerer = "crash_flush_on_split_at_right_child";
         }
     } else if (!freed_node_bufs.empty() && (new_node_bufs.size() != freed_node_bufs.size())) {
         // Its a merge nodes sitation
         if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_parent")) {
             parent_buf->set_crash_flag();
-//            IndexWBCache::m_flip_triggerer = "crash_flush_on_merge_at_parent";
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_left_child")) {
             child_buf->set_crash_flag();
-//            IndexWBCache::m_flip_triggerer = "crash_flush_on_merge_at_left_child";
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_merge_at_right_child")) {
-            if (!new_node_bufs.empty()) {
-                new_node_bufs[0]->set_crash_flag();
-//                IndexWBCache::m_flip_triggerer = "crash_flush_on_merge_at_right_child";
-            }
+            if (!new_node_bufs.empty()) { new_node_bufs[0]->set_crash_flag(); }
         }
     } else if (!freed_node_bufs.empty() && (new_node_bufs.size() == freed_node_bufs.size())) {
         // Its a rebalance node situation
         if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_parent")) {
             parent_buf->set_crash_flag();
-//            IndexWBCache::m_flip_triggerer = "crash_flush_on_rebalance_at_parent";
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_left_child")) {
             child_buf->set_crash_flag();
-//            IndexWBCache::m_flip_triggerer = "crash_flush_on_rebalance_at_left_child";
         } else if (iomgr_flip::instance()->test_flip("crash_flush_on_rebalance_at_right_child")) {
-            if (!new_node_bufs.empty()) {
-                new_node_bufs[0]->set_crash_flag();
-//                IndexWBCache::m_flip_triggerer = "crash_flush_on_rebalance_at_right_child";
-            }
+            if (!new_node_bufs.empty()) { new_node_bufs[0]->set_crash_flag(); }
         }
     }
 }
@@ -339,15 +323,15 @@ void IndexWBCache::transact_bufs(uint32_t index_ordinal, IndexBufferPtr const& p
         for (auto const& buf : freed_node_bufs) {
             freed_nodes += std::to_string(buf->blkid().to_integer()) + ", ";
         }
-       std::string parent_str= (parent_buf && parent_buf->blkid().to_integer() != 0)
+        std::string parent_str = (parent_buf && parent_buf->blkid().to_integer() != 0)
             ? std::to_string(parent_buf->blkid().to_integer())
             : "empty";
-       std::string child_str = (child_buf && child_buf->blkid().to_integer() != 0)
+        std::string child_str = (child_buf && child_buf->blkid().to_integer() != 0)
             ? std::to_string(child_buf->blkid().to_integer())
             : "empty";
 
-        fmt::format_to(std::back_inserter(txn), "\n{} - parent={} child={} new=[{}] freed=[{}]", txn_id,
-                      parent_str, child_str, new_nodes, freed_nodes);
+        fmt::format_to(std::back_inserter(txn), "\n{} - parent={} child={} new=[{}] freed=[{}]", txn_id, parent_str,
+                       child_str, new_nodes, freed_nodes);
     }
     LOGINFO("\n\ttranasction till now: cp: {} \n{}\n", icp_ctx->id(), txn);
     txn_id++;
@@ -601,7 +585,8 @@ void IndexWBCache::recover(sisl::byte_view sb) {
 void IndexWBCache::recover_buf(IndexBufferPtr const& buf) {
     if (!buf->m_wait_for_down_buffers.decrement_testz()) {
         // TODO: remove the buf_>m_up_buffer from down_buffers list of buf->m_up_buffer
-        return; }
+        return;
+    }
 
     // All down buffers are completed and given a nod saying that they are committed. If this buffer is not committed,
     // then we need to repair this node/buffer. After that we will keep going to the next up level to repair them if
@@ -678,10 +663,7 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
             meta_service().add_sub_sb("wb_cache", journal_buf.cbytes(), journal_buf.size(), m_meta_blk);
         }
     }
-#ifdef _PRERELEASE
-    LOGTRACEMOD(wbcache, "Starting CP flush for cp {} dags {}", cp_ctx->id(), cp_ctx->num_dags());
-    m_num_finished_dags.store(cp_ctx->num_dags());
-#endif
+
     cp_ctx->prepare_flush_iteration();
 
     for (auto& fiber : m_cp_flush_fibers) {
@@ -770,33 +752,8 @@ void IndexWBCache::process_write_completion(IndexCPContext* cp_ctx, IndexBufferP
             m_vdev->cp_flush(cp_ctx); // This is a blocking io call
             cp_ctx->complete(true);
         });
-#ifdef _PRERELEASE
-        // nothing need to be crash!
-
-        if (!hs()->crash_simulator().is_crashed()) {
-            m_num_finished_dags--;
-            LOGINFO("\n\n\n\n\nNormal cp flush - NO crash, lets cp flush completed Finished {}",m_num_finished_dags.load());
-            if(m_num_finished_dags.load() == 0){
-                LOGINFO("\n\n\n\n\nAll cp flush completed, lets unblock homestore");
-                hs()->crash_simulator().proceed();
-            }
-            //                hs()->crash_simulator().proceed();
-        } else {
-            LOGINFO("\n\n\n\n\n Crash!? Why are we here???\n\n\n\n\n");
-        }
-#endif
     }
 }
-//#ifdef _PRERELEASE
-//void IndexWBCache::proceed_homeStore(){
-//        if (hs()->crash_simulator().is_crashed()) {
-//                LOGINFO("Crash simulation is ongoing, so skip the cp flush");
-//                return;
-//        }
-//        LOGINFO(" unblock homestore");
-//        hs()->crash_simulator().proceed();
-//}
-//#endif
 
 std::pair< IndexBufferPtr, bool > IndexWBCache::on_buf_flush_done(IndexCPContext* cp_ctx, IndexBufferPtr const& buf) {
     if (m_cp_flush_fibers.size() > 1) {

@@ -433,15 +433,10 @@ private:
             }
         }
 #ifdef _PRERELEASE
-        hsi->with_crash_simulator([this](bool shouldRestart) mutable {
-            if (shouldRestart) {
-                LOGWARN("CrashSimulator::crash() is called - restarting homestore");
-                this->restart_homestore();
-                m_crash_recovered.setValue();
-            } else {
-                LOGINFO("CrashSimulator does not find any instance of crashing, so let it proceed");
-            }
-            if (!m_crash_recovered.isFulfilled()) { m_crash_recovered.setValue(); }
+        hsi->with_crash_simulator([this](void) mutable {
+            LOGWARN("CrashSimulator::crash() is called - restarting homestore");
+            this->restart_homestore();
+            m_crash_recovered.setValue();
         });
 #endif
 
@@ -480,8 +475,6 @@ private:
                        : chunk_selector_type_t::ROUND_ROBIN}}});
         }
     }
-
-    void trigger_crash_recovered() { m_crash_recovered.setValue(); }
 
     void remove_files(const std::vector< std::string >& file_paths) {
         for (const auto& fpath : file_paths) {

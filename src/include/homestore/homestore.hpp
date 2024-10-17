@@ -178,7 +178,7 @@ public:
     shared< sisl::Evictor > evictor() { return m_evictor; }
 
 #ifdef _PRERELEASE
-    HomeStore& with_crash_simulator(std::function< void(bool) > restart_cb);
+    HomeStore& with_crash_simulator(std::function< void(void) > restart_cb);
     CrashSimulator& crash_simulator() { return *m_crash_simulator; }
     unique< CrashSimulator > m_crash_simulator;
 #endif

@@ -41,9 +41,6 @@ private:
     std::mutex m_flush_mtx;
     void* m_meta_blk;
     bool m_in_recovery{false};
-#ifdef _PRERELEASE
-    std::atomic<uint16_t> m_num_finished_dags{0};
-#endif
 public:
     IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair< meta_blk*, sisl::byte_view > sb,
                  const std::shared_ptr< sisl::Evictor >& evictor, uint32_t node_size);
