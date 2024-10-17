@@ -36,6 +36,8 @@ SISL_LOGGING_DECL(test_index_crash_recovery)
 
 SISL_OPTION_GROUP(
     test_index_crash_recovery,
+    (num_iters, "", "num_iters", "number of iterations for rand ops",
+     ::cxxopts::value< uint32_t >()->default_value("500"), "number"),
     (num_entries, "", "num_entries", "number of entries to test with",
      ::cxxopts::value< uint32_t >()->default_value("5000"), "number"),
     (run_time, "", "run_time", "run time for io", ::cxxopts::value< uint32_t >()->default_value("360000"), "seconds"),
@@ -428,7 +430,8 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             this->print_keys("Post crash and recovery, btree structure: ");
         }
         sanity_check(operations);
-        test_common::HSTestHelper::trigger_cp(true);
+        //        Added to the index service right after recovery. Not needed here
+        //        test_common::HSTestHelper::trigger_cp(true);
         LOGINFO("Before Reapply: {} keys in shadow map and actually {} in trees operation size {}",
                 this->m_shadow_map.size(), tree_key_count(), operations.size());
         this->reapply_after_crash(operations);

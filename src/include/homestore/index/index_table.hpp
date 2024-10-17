@@ -289,7 +289,7 @@ protected:
                    child_node->to_string(), child_last_key.to_string());
 
             if (child_last_key.compare(last_parent_key) > 0 && !is_parent_edge_node) {
-                // We have reached the last key, we can stop now
+                // We have reached the last key, and the parent node doesn't have edge, so we can stop now
                 break;
             }
 

@@ -104,7 +104,9 @@ struct BtreeTest : public BtreeTestHelper< TestType >, public ::testing::Test {
 
     void SetUp() override {
         BtreeTestHelper< TestType >::SetUp();
+#ifdef _PRERELEASE
         this->m_cfg.m_max_keys_in_node = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
+#endif
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
     }
 };
@@ -303,7 +305,9 @@ struct BtreeConcurrentTest : public BtreeTestHelper< TestType >, public ::testin
                                                      .hugepage_size_mb = 0});
 
         BtreeTestHelper< TestType >::SetUp();
+#ifdef _PRERELEASE
         this->m_cfg.m_max_keys_in_node = SISL_OPTIONS["max_keys_in_node"].as< uint32_t >();
+#endif
         this->m_bt = std::make_shared< typename T::BtreeType >(this->m_cfg);
     }
 

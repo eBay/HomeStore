@@ -486,6 +486,17 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                     }
                     l0_bufs.push_back(buf);
                     // insert upbuffer and its upbuffer to the recovering_upbuffers set until nullptr
+                    // suppose the following scenario that crash happened when flushing B
+                    //    ├── A (WAITING FOR B)
+                    //    │    ├── B (CRASHED)
+                    //    │    │    ├── C (FLUSHED)
+                    //    │    │    └── D (FLUSHED)
+                    //    │    │         └── E (FLUSHED)
+                    //    │    └── F (FLUSHED)
+                    //    └── G (FLUSHED)
+                    // we need to recover B and A. During recover_buf(A), we need to recover F and commit its blk. So in
+                    // this case, we give a second chance to new buffers to be a part of repair. There is still a case
+                    // that committing new buffers is not needed since they are not part of recovery paths.
                     auto up_buf = buf->m_up_buffer;
                     while (up_buf) {
                         recovering_upbuffers.insert(up_buf);
@@ -686,7 +697,7 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
     if (buf->m_crash_flag_on) {
         std::string filename = "crash_buf_" + std::to_string(cp_ctx->id()) + ".dot";
         LOGINFO("\nSimulating crash while writing buffer {},  stored in file {}", buf->to_string(), filename);
-        cp_ctx->to_string_dot(filename);
+        //        cp_ctx->to_string_dot(filename);
         hs()->crash_simulator().crash();
         cp_ctx->complete(true);
         return;
