@@ -446,7 +446,7 @@ public:
     void read_io(uint32_t io_size) {
         auto remaining_io_size = io_size;
         while (remaining_io_size > 0) {
-            auto const bid = get_rand_blkid_to_read(io_size);
+            auto const bid = get_rand_blkid_to_read(remaining_io_size);
             if (!bid.is_valid()) {
                 // didn't find any block to read, either write blk map is empty or
                 // all blks are pending on free.
@@ -456,6 +456,7 @@ public:
             // every piece in bid is a single block, e.g.  nblks = 1
             auto const nbids = bid.num_pieces();
             auto sub_io_size = nbids * inst().get_blk_size();
+	    HS_REL_ASSERT_LE(sub_io_size, remaining_io_size, "not expecting sub_io_size to exceed remaining_io_size");
 
             // we pass crc from lambda becaues if there is any async_free_blk, the written blks in the blkcrc map will
             // be removed by the time read thenVlue is called;
@@ -582,7 +583,7 @@ public:
         auto nbids = io_size / inst().get_blk_size();    // number of blks to read;
 
         // nbids should not exceed max pieces that MultiBlkId can hold;
-        nbids = std::max(nbids, MultiBlkId::max_addln_pieces);
+        nbids = std::min(nbids, MultiBlkId::max_addln_pieces);
 
         // make sure skip + nbids are in the range of m_blk_crc_map;
         if (skip_nbids + nbids > m_blk_crc_map.size()) { skip_nbids = m_blk_crc_map.size() - nbids; }
