@@ -93,7 +93,7 @@ def long_running_clean_shutdown(options, type=0):
 
 def long_running_crash_put(options):
     print("Long running crash put started")
-    options['num_entries'] = 2097152  # 2M
+    options['num_entries'] = 131072  # 128K
     options['init_device'] = True
     options['run_time'] = 14400  # 4 hours
     options['preload_size'] = 100

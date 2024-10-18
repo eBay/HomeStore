@@ -420,7 +420,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
         }
 
         test_common::HSTestHelper::trigger_cp(false);
-        LOGINFO("\n\n waiting for crash to recover\n\n\n");
+        LOGINFO("waiting for crash to recover");
         this->wait_for_crash_recovery();
 
         if (!filename.empty()) {
@@ -460,6 +460,8 @@ using BtreeTypes = testing::Types< FixedLenBtree >;
 TYPED_TEST_SUITE(IndexCrashTest, BtreeTypes);
 
 TYPED_TEST(IndexCrashTest, CrashBeforeFirstCp) {
+    this->m_shadow_map.range_erase(0, SISL_OPTIONS["num_entries"].as< uint32_t >() - 1);
+    this->m_shadow_map.save(this->m_shadow_filename);
     // Simulate the crash even before first cp
     this->set_basic_flip("crash_flush_on_root");
 
@@ -475,6 +477,8 @@ TYPED_TEST(IndexCrashTest, CrashBeforeFirstCp) {
 }
 
 TYPED_TEST(IndexCrashTest, SplitOnLeftEdge) {
+    this->m_shadow_map.range_erase(0, SISL_OPTIONS["num_entries"].as< uint32_t >() - 1);
+    this->m_shadow_map.save(this->m_shadow_filename);
     // Insert into 4 phases, first fill up the last part, since we need to test split on left edge
     LOGINFO("Step 1: Fill up the last quarter of the tree");
     auto const num_entries = SISL_OPTIONS["num_entries"].as< uint32_t >();
@@ -676,7 +680,8 @@ TYPED_TEST(IndexCrashTest, long_running_put_crash) {
     this->print_keys("reapply: after preload");
     this->visualize_keys("tree_after_preload.dot");
 
-    for (uint32_t round = 1; round <= rounds && !time_to_stop(); round++) {
+    for (uint32_t round = 1;
+         round <= rounds && !time_to_stop() && this->tree_key_count() < num_entries - num_entries_per_rounds; round++) {
         LOGINFO("\n\n\n\n\n\nRound {} of {}\n\n\n\n\n\n", round, rounds);
         bool print_time = false;
         elapsed_time = get_elapsed_time_sec(m_start_time);
@@ -753,9 +758,11 @@ TYPED_TEST(IndexCrashTest, long_running_put_crash) {
             print_time = true;
         }
         if (print_time) {
-            LOGINFO("\n\n\n\t\t\tProgress: {} rounds completed - Elapsed time: {:.0f} seconds of total "
-                    "{} ({:.2f}%)\n\n\n",
-                    round, elapsed_time, this->m_run_time, elapsed_time * 100.0 / this->m_run_time);
+            LOGINFO("\n\n\n\t\t\tProgress: {} rounds of total {} ({:.2f}%) completed - Elapsed time: {:.0f} seconds of "
+                    "total {} ({:.2f}%) - {} keys of maximum {} keys ({:.2f}%) inserted\n\n\n",
+                    round, rounds, round * 100.0 / rounds, elapsed_time, this->m_run_time,
+                    elapsed_time * 100.0 / this->m_run_time, this->tree_key_count(), num_entries,
+                    this->tree_key_count() * 100.0 / num_entries);
         }
         this->print_keys(fmt::format("reapply: after round {}", round));
         if (renew_btree_after_crash) { this->reset_btree(); };

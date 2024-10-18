@@ -434,6 +434,14 @@ void IndexWBCache::free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
 }
 
 //////////////////// Recovery Related section /////////////////////////////////
+void IndexWBCache::load_buf(IndexBufferPtr const& buf) {
+    if (buf->m_bytes == nullptr) {
+        buf->m_bytes = hs_utils::iobuf_alloc(m_node_size, sisl::buftag::btree_node, m_vdev->align_size());
+        m_vdev->sync_read(r_cast< char* >(buf->m_bytes), m_node_size, buf->blkid());
+        buf->m_dirtied_cp_id = BtreeNode::get_modified_cp_id(buf->m_bytes);
+    }
+}
+
 void IndexWBCache::recover(sisl::byte_view sb) {
     // If sb is empty, its possible a first time boot.
     if ((sb.bytes() == nullptr) || (sb.size() == 0)) {
@@ -451,13 +459,28 @@ void IndexWBCache::recover(sisl::byte_view sb) {
 
     LOGINFOMOD(wbcache, "Detected unclean shutdown, prior cp={} had to flush {} nodes, recovering... ", icp_ctx->id(),
                bufs.size());
+
 #ifdef _PRERELEASE
-    std::string log = fmt::format("\trecovering bufs (#of bufs = {}) before processing them\n", bufs.size());
-    for (auto const& [_, buf] : bufs) {
-        load_buf(buf);
-        fmt::format_to(std::back_inserter(log), "{}\n", buf->to_string());
-    }
-    LOGTRACEMOD(wbcache, "\n{}", log);
+    auto detailed_log = [this](std::map< BlkId, IndexBufferPtr > const& bufs,
+                               std::vector< IndexBufferPtr > const& l0_bufs) {
+        std::string log = fmt::format("\trecovered bufs (#of bufs = {})\n", bufs.size());
+        for (auto const& [_, buf] : bufs) {
+            load_buf(buf);
+            fmt::format_to(std::back_inserter(log), "{}\n", buf->to_string());
+        }
+
+        // list of new_bufs
+        if (!l0_bufs.empty()) {
+            fmt::format_to(std::back_inserter(log), "\n\tl0_bufs (#of bufs = {})\n", l0_bufs.size());
+            for (auto const& buf : l0_bufs) {
+                fmt::format_to(std::back_inserter(log), "{}\n", buf->to_string());
+            }
+        }
+        return log;
+    };
+
+    std::string log = fmt::format("Recovering bufs (#of bufs = {}) before processing them\n", bufs.size());
+    LOGTRACEMOD(wbcache, "{}\n{}", log, detailed_log(bufs, {}));
 #endif
 
     // At this point, we have the DAG structure (up/down dependency graph), exactly the same as prior to crash, with one
@@ -472,8 +495,6 @@ void IndexWBCache::recover(sisl::byte_view sb) {
     //
     // On the second pass, we only take the new nodes/bufs and then repair their up buffers, if needed.
     std::vector< IndexBufferPtr > l0_bufs;
-    std::set< IndexBufferPtr > recovering_upbuffers;
-    std::set< IndexBufferPtr > second_tier_buffers;
     for (auto const& [_, buf] : bufs) {
         if (buf->m_node_freed || (buf->m_created_cp_id == icp_ctx->id())) {
             if (was_node_committed(buf)) {
@@ -485,103 +506,32 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                         m_vdev->commit_blk(buf->m_blkid);
                     }
                     l0_bufs.push_back(buf);
-                    // insert upbuffer and its upbuffer to the recovering_upbuffers set until nullptr
-                    // suppose the following scenario that crash happened when flushing B
-                    //    ├── A (WAITING FOR B)
-                    //    │    ├── B (CRASHED)
-                    //    │    │    ├── C (FLUSHED)
-                    //    │    │    └── D (FLUSHED)
-                    //    │    │         └── E (FLUSHED)
-                    //    │    └── F (FLUSHED)
-                    //    └── G (FLUSHED)
-                    // we need to recover B and A. During recover_buf(A), we need to recover F and commit its blk. So in
-                    // this case, we give a second chance to new buffers to be a part of repair. There is still a case
-                    // that committing new buffers is not needed since they are not part of recovery paths.
-                    auto up_buf = buf->m_up_buffer;
-                    while (up_buf) {
-                        recovering_upbuffers.insert(up_buf);
-                        up_buf = up_buf->m_up_buffer;
-                    }
                 } else {
-                    // there is a chance it is a second tier buffer, so we need to repair it in the second pass
-                    if (!was_node_committed(buf->m_up_buffer)) {
-                        second_tier_buffers.insert(buf);
-                    } else {
-                        buf->m_up_buffer->m_wait_for_down_buffers.decrement();
+                    buf->m_up_buffer->m_wait_for_down_buffers.decrement();
 #ifndef NDEBUG
-                        bool found{false};
-                        for (auto it = buf->m_up_buffer->m_down_buffers.begin();
-                             it != buf->m_up_buffer->m_down_buffers.end(); ++it) {
-                            auto sp = it->lock();
-                            if (sp && sp == buf) {
-                                found = true;
-                                buf->m_up_buffer->m_down_buffers.erase(it);
-                                break;
-                            }
+                    bool found{false};
+                    for (auto it = buf->m_up_buffer->m_down_buffers.begin();
+                         it != buf->m_up_buffer->m_down_buffers.end(); ++it) {
+                        auto sp = it->lock();
+                        if (sp && sp == buf) {
+                            found = true;
+                            buf->m_up_buffer->m_down_buffers.erase(it);
+                            break;
                         }
-                        HS_DBG_ASSERT(found,
-                                      "Down buffer is linked to Up buf, but up_buf doesn't have down_buf in its list");
-#endif
                     }
-                }
-            }
-        }
-    }
-    // remove the second tier buffers from the recovering_upbuffers if they are in it and upgrade their up buffers
-    for (auto const& buf : second_tier_buffers) {
-        // if buf->m_up_buffers is in recovering_upbuffers, commit the buf  and add it to l0_bufs o.w, remove the
-        // down_count of upbuffer
-        if (recovering_upbuffers.find(buf->m_up_buffer) != recovering_upbuffers.end()) {
-            m_vdev->commit_blk(buf->m_blkid);
-            l0_bufs.push_back(buf);
-        } else {
-            buf->m_up_buffer->m_wait_for_down_buffers.decrement();
-#ifndef NDEBUG
-            bool found{false};
-            for (auto it = buf->m_up_buffer->m_down_buffers.begin(); it != buf->m_up_buffer->m_down_buffers.end();
-                 ++it) {
-                auto sp = it->lock();
-                if (sp && sp == buf) {
-                    found = true;
-                    buf->m_up_buffer->m_down_buffers.erase(it);
-                    break;
-                }
-            }
-            HS_DBG_ASSERT(found, "Down buffer is linked to Up buf, but up_buf doesn't have down_buf in its list");
+                    HS_DBG_ASSERT(found,
+                                  "Down buffer is linked to Up buf, but up_buf doesn't have down_buf in its list");
 #endif
+                }
+            }
         }
     }
 
+#ifdef _PRERELEASE
     LOGINFOMOD(wbcache, "Index Recovery detected {} nodes out of {} as new/freed nodes to be recovered in prev cp={}",
                l0_bufs.size(), bufs.size(), icp_ctx->id());
-
-    auto detailed_log = [this](std::map< BlkId, IndexBufferPtr > const& bufs,
-                               std::vector< IndexBufferPtr > const& l0_bufs,
-                               std::set< IndexBufferPtr > const& second_tier_buffers) {
-        // Logs to detect down_waits are set correctly for up buffers list of all recovered bufs
-        std::string log = fmt::format("\trecovered bufs (#of bufs = {})\n", bufs.size());
-        for (auto const& [_, buf] : bufs) {
-            fmt::format_to(std::back_inserter(log), "{}\n", buf->to_string());
-        }
-
-        fmt::format_to(std::back_inserter(log), "\n\tsecond pass bufs (#of bufs = {})\n", second_tier_buffers.size());
-
-        for (auto const& buf : second_tier_buffers) {
-            fmt::format_to(std::back_inserter(log), "{}\n", buf->to_string());
-        }
-
-        // list of new_bufs
-        fmt::format_to(std::back_inserter(log), "\n\tl0_bufs (#of bufs = {})\n", l0_bufs.size());
-        for (auto const& buf : l0_bufs) {
-            fmt::format_to(std::back_inserter(log), "{}", buf->to_string());
-            if (second_tier_buffers.find(buf) != second_tier_buffers.end()) {
-                fmt::format_to(std::back_inserter(log), " - second pass buffer");
-            }
-            fmt::format_to(std::back_inserter(log), "\n");
-        }
-        return log;
-    };
-    LOGTRACEMOD(wbcache, "All unclean bufs list\n{}", detailed_log(bufs, l0_bufs, second_tier_buffers));
+    LOGTRACEMOD(wbcache, "All unclean bufs list\n{}", detailed_log(bufs, l0_bufs));
+#endif
 
     // Second iteration we start from the lowest levels (which are all new_bufs) and check if up_buffers need to be
     // repaired. All L1 buffers are not needed to repair, because they are sibling nodes and so we pass false in
@@ -612,13 +562,7 @@ void IndexWBCache::recover_buf(IndexBufferPtr const& buf) {
 
     if (buf->m_up_buffer) { recover_buf(buf->m_up_buffer); }
 }
-void IndexWBCache::load_buf(IndexBufferPtr const& buf) {
-    if (buf->m_bytes == nullptr) {
-        buf->m_bytes = hs_utils::iobuf_alloc(m_node_size, sisl::buftag::btree_node, m_vdev->align_size());
-        m_vdev->sync_read(r_cast< char* >(buf->m_bytes), m_node_size, buf->blkid());
-        buf->m_dirtied_cp_id = BtreeNode::get_modified_cp_id(buf->m_bytes);
-    }
-}
+
 bool IndexWBCache::was_node_committed(IndexBufferPtr const& buf) {
     if (buf == nullptr) { return false; }
 
@@ -696,7 +640,7 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
     static std::once_flag flag;
     if (buf->m_crash_flag_on) {
         std::string filename = "crash_buf_" + std::to_string(cp_ctx->id()) + ".dot";
-        LOGINFO("\nSimulating crash while writing buffer {},  stored in file {}", buf->to_string(), filename);
+        LOGINFO("Simulating crash while writing buffer {},  stored in file {}", buf->to_string(), filename);
         //        cp_ctx->to_string_dot(filename);
         hs()->crash_simulator().crash();
         cp_ctx->complete(true);
@@ -726,9 +670,7 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
                 try {
                     auto& pthis = s_cast< IndexWBCache& >(wb_cache());
                     pthis.process_write_completion(cp_ctx, buf);
-                } catch (const std::runtime_error& e) {
-                    LOGERROR("Failed to access write-back cache: {}", e.what());
-                }
+                } catch (const std::runtime_error& e) { LOGERROR("Failed to access write-back cache: {}", e.what()); }
             });
 
         if (!part_of_batch) { m_vdev->submit_batch(); }
