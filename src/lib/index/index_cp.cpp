@@ -144,6 +144,7 @@ void IndexCPContext::to_string_dot(const std::string& filename) {
     file.close();
     LOGINFO("cp dag is stored in file {}", filename);
 }
+
 uint16_t IndexCPContext::num_dags()  {
     // count number of buffers whose up_buffers are nullptr
     uint16_t count = 0;
@@ -153,6 +154,7 @@ uint16_t IndexCPContext::num_dags()  {
     });
     return count;
 }
+
 std::string IndexCPContext::to_string_with_dags() {
     struct DagNode {
         IndexBufferPtr buf;

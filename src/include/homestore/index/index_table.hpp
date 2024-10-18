@@ -241,8 +241,8 @@ protected:
 
     btree_status_t repair_links(BtreeNodePtr const& parent_node, void* cp_ctx) {
         BT_LOG(DEBUG, "Repairing links for parent node {}", parent_node->to_string());
-
-        // Get the last key in the node
+        // TODO: is it possible that repairing many nodes causes an increase to level of btree? If so, then this needs
+        // to be handled. Get the last key in the node
         auto const last_parent_key = parent_node->get_last_key< K >();
         auto const is_parent_edge_node = parent_node->has_valid_edge();
         if ((parent_node->total_entries() == 0) && !is_parent_edge_node) {

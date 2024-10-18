@@ -454,7 +454,7 @@ void IndexWBCache::recover(sisl::byte_view sb) {
 #ifdef _PRERELEASE
     std::string log = fmt::format("\trecovering bufs (#of bufs = {}) before processing them\n", bufs.size());
     for (auto const& [_, buf] : bufs) {
-        laod_buf(buf);
+        load_buf(buf);
         fmt::format_to(std::back_inserter(log), "{}\n", buf->to_string());
     }
     LOGTRACEMOD(wbcache, "\n{}", log);
@@ -612,7 +612,7 @@ void IndexWBCache::recover_buf(IndexBufferPtr const& buf) {
 
     if (buf->m_up_buffer) { recover_buf(buf->m_up_buffer); }
 }
-void IndexWBCache::laod_buf(IndexBufferPtr const& buf) {
+void IndexWBCache::load_buf(IndexBufferPtr const& buf) {
     if (buf->m_bytes == nullptr) {
         buf->m_bytes = hs_utils::iobuf_alloc(m_node_size, sisl::buftag::btree_node, m_vdev->align_size());
         m_vdev->sync_read(r_cast< char* >(buf->m_bytes), m_node_size, buf->blkid());
@@ -629,7 +629,7 @@ bool IndexWBCache::was_node_committed(IndexBufferPtr const& buf) {
     }
 
     // All down_buf has indicated that they have seen this up buffer, now its time to repair them.
-    laod_buf(buf);
+    load_buf(buf);
     if (!BtreeNode::is_valid_node(sisl::blob{buf->m_bytes, m_node_size})) { return false; }
     return (buf->m_dirtied_cp_id == cp_mgr().cp_guard()->id());
 }
@@ -693,7 +693,7 @@ folly::Future< bool > IndexWBCache::async_cp_flush(IndexCPContext* cp_ctx) {
 
 void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const& buf, bool part_of_batch) {
 #ifdef _PRERELEASE
-    static bool print_once = false;
+    static std::once_flag flag;
     if (buf->m_crash_flag_on) {
         std::string filename = "crash_buf_" + std::to_string(cp_ctx->id()) + ".dot";
         LOGINFO("\nSimulating crash while writing buffer {},  stored in file {}", buf->to_string(), filename);
@@ -702,10 +702,7 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
         cp_ctx->complete(true);
         return;
     } else if (hs()->crash_simulator().is_crashed()) {
-        if (!print_once) {
-            LOGINFO("crash simulation is ongoing, aid simulation by not flushing");
-            print_once = true;
-        }
+        std::call_once(flag, []() { LOGINFO("Crash simulation is ongoing; aid simulation by not flushing."); });
         return;
     }
 #endif
@@ -730,7 +727,7 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
                     auto& pthis = s_cast< IndexWBCache& >(wb_cache());
                     pthis.process_write_completion(cp_ctx, buf);
                 } catch (const std::runtime_error& e) {
-                    LOGTRACEMOD(wbcache, "Failed to access write-back cache: {}", e.what());
+                    LOGERROR("Failed to access write-back cache: {}", e.what());
                 }
             });
 
@@ -740,12 +737,10 @@ void IndexWBCache::do_flush_one_buf(IndexCPContext* cp_ctx, IndexBufferPtr const
 
 void IndexWBCache::process_write_completion(IndexCPContext* cp_ctx, IndexBufferPtr const& buf) {
 #ifdef _PRERELEASE
-    static bool print_once = false;
+    static std::once_flag flag;
     if (hs()->crash_simulator().is_crashed()) {
-        if (!print_once) {
-            LOGINFOMOD(wbcache, "Crash simulation is ongoing, ignore all process_write_completion");
-            print_once = true;
-        }
+        std::call_once(
+            flag, []() { LOGINFOMOD(wbcache, "Crash simulation is ongoing, ignore all process_write_completion"); });
         return;
     }
 #endif
