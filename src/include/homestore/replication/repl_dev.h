@@ -348,7 +348,7 @@ public:
     virtual void on_destroy() = 0;
 
     /// @brief Called when replace member is performed.
-    virtual void replace_member(replica_id_t member_out, replica_id_t member_in) = 0;
+    virtual void on_replace_member(const replica_member_info& member_out, const replica_member_info& member_in) = 0;
 
     /// @brief Called when the snapshot is being created by nuraft
     virtual AsyncReplResult<> create_snapshot(shared< snapshot_context > context) = 0;

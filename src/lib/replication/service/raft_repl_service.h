@@ -51,7 +51,7 @@ private:
     iomgr::timer_handle_t m_flush_durable_commit_timer_hdl;
     iomgr::io_fiber_t m_reaper_fiber;
     std::mutex raft_restart_mutex;
-    
+
 public:
     RaftReplService(cshared< ReplApplication >& repl_app);
 
@@ -73,8 +73,8 @@ protected:
                                                          std::set< replica_id_t > const& members) override;
     folly::SemiFuture< ReplServiceError > remove_repl_dev(group_id_t group_id) override;
     void load_repl_dev(sisl::byte_view const& buf, void* meta_cookie) override;
-    AsyncReplResult<> replace_member(group_id_t group_id, replica_id_t member_out, replica_id_t member_in,
-                                     uint32_t commit_quorum = 0) const override;
+    AsyncReplResult<> replace_member(group_id_t group_id, const replica_member_info& member_out,
+                                     const replica_member_info& member_in, uint32_t commit_quorum = 0) const override;
 
 private:
     RaftReplDev* raft_group_config_found(sisl::byte_view const& buf, void* meta_cookie);
@@ -98,12 +98,13 @@ struct ReplDevCPContext;
 
 class ReplSvcCPContext : public CPContext {
     std::shared_mutex m_cp_map_mtx;
-    std::map< ReplDev*, cshared<ReplDevCPContext> > m_cp_ctx_map;
+    std::map< ReplDev*, cshared< ReplDevCPContext > > m_cp_ctx_map;
+
 public:
-    ReplSvcCPContext(CP* cp) : CPContext(cp){};
+    ReplSvcCPContext(CP* cp) : CPContext(cp) {};
     virtual ~ReplSvcCPContext() = default;
-    int add_repl_dev_ctx(ReplDev* dev, cshared<ReplDevCPContext> dev_ctx);
-    cshared<ReplDevCPContext> get_repl_dev_ctx(ReplDev* dev);
+    int add_repl_dev_ctx(ReplDev* dev, cshared< ReplDevCPContext > dev_ctx);
+    cshared< ReplDevCPContext > get_repl_dev_ctx(ReplDev* dev);
 };
 
 class RaftReplServiceCPHandler : public CPCallbacks {

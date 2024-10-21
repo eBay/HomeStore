@@ -85,12 +85,11 @@ void RaftReplService::start() {
     LOGINFO("Starting RaftReplService with server_uuid={} port={}", boost::uuids::to_string(params.server_uuid_),
             params.mesg_port_);
 
-    //check if ssl cert files are provided, if yes, monitor the changes
+    // check if ssl cert files are provided, if yes, monitor the changes
     if (!params.ssl_key_.empty() && !params.ssl_cert_.empty()) {
         ioenvironment.with_file_watcher();
         monitor_cert_changes();
     }
-    
 
     // Step 2: Register all RAFT parameters. At the end of this step, raft is ready to be created/join group
     auto r_params = nuraft::raft_params()
@@ -158,7 +157,7 @@ void RaftReplService::start() {
         auto rdev = std::dynamic_pointer_cast< RaftReplDev >(it->second);
         rdev->wait_for_logstore_ready();
         if (!rdev->join_group()) {
-	    HS_REL_ASSERT(false, "FAILED TO JOIN GROUP, PANIC HERE");
+            HS_REL_ASSERT(false, "FAILED TO JOIN GROUP, PANIC HERE");
             it = m_rd_map.erase(it);
         } else {
             ++it;
@@ -191,19 +190,19 @@ void RaftReplService::monitor_cert_changes() {
         restart_svc.detach();
     };
 
-    //monitor ssl cert file
+    // monitor ssl cert file
     if (!fw->register_listener(ioenvironment.get_ssl_cert(), "hs_ssl_cert_watcher", cert_change_cb)) {
-        LOGERROR("Failed to register listner, {} to watch file {}, Not monitoring cert files",
-                   "hs_ssl_cert_watcher", ioenvironment.get_ssl_cert());
+        LOGERROR("Failed to register listner, {} to watch file {}, Not monitoring cert files", "hs_ssl_cert_watcher",
+                 ioenvironment.get_ssl_cert());
     }
-    //monitor ssl key file
+    // monitor ssl key file
     if (!fw->register_listener(ioenvironment.get_ssl_key(), "hs_ssl_key_watcher", cert_change_cb)) {
-        LOGERROR("Failed to register listner, {} to watch file {}, Not monitoring cert files",
-                   "hs_ssl_key_watcher", ioenvironment.get_ssl_key());
+        LOGERROR("Failed to register listner, {} to watch file {}, Not monitoring cert files", "hs_ssl_key_watcher",
+                 ioenvironment.get_ssl_key());
     }
 }
 
-void RaftReplService::restart_raft_svc(const std::string filepath, const bool deleted){
+void RaftReplService::restart_raft_svc(const std::string filepath, const bool deleted) {
     if (deleted && !wait_for_cert(filepath)) {
         LOGINFO("file {} deleted, ", filepath)
         // wait for the deleted file to be added again
@@ -215,7 +214,7 @@ void RaftReplService::restart_raft_svc(const std::string filepath, const bool de
 }
 
 bool RaftReplService::wait_for_cert(const std::string& filepath) {
-    auto attempts = cert_change_timeout/cert_check_sleep;
+    auto attempts = cert_change_timeout / cert_check_sleep;
     for (auto i = attempts; i > 0; --i) {
         if (std::filesystem::exists(filepath)) { return true; }
         std::this_thread::sleep_for(cert_check_sleep);
@@ -394,8 +393,8 @@ void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
     add_repl_dev(group_id, rdev);
 }
 
-AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, replica_id_t member_out, replica_id_t member_in,
-                                                  uint32_t commit_quorum) const {
+AsyncReplResult<> RaftReplService::replace_member(group_id_t group_id, const replica_member_info& member_out,
+                                                  const replica_member_info& member_in, uint32_t commit_quorum) const {
     auto rdev_result = get_repl_dev(group_id);
     if (!rdev_result) { return make_async_error<>(ReplServiceError::SERVER_NOT_FOUND); }
 
