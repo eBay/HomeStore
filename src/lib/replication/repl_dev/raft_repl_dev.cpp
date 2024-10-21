@@ -74,7 +74,7 @@ RaftReplDev::RaftReplDev(RaftReplService& svc, superblk< raft_repl_dev_superblk 
             m_rd_sb->free_blks_journal_id = m_free_blks_journal->get_store_id();
         }
         m_rd_sb.write();
-	bind_data_service();
+        bind_data_service();
     }
 
     RD_LOG(INFO,
@@ -90,27 +90,30 @@ bool RaftReplDev::bind_data_service() {
     RD_LOG(INFO, "Starting data channel, group_id={}, replica_id={}", group_id_str(), my_replica_id_str());
     bool success = false;
 #ifdef _PRERELEASE
-    success = m_msg_mgr.bind_data_service_request(PUSH_DATA, m_group_id, [this](intrusive< sisl::GenericRpcData >& rpc_data) {
-        if (iomgr_flip::instance()->delay_flip("slow_down_data_channel", [this, rpc_data]() mutable {
-                RD_LOGI("Resuming after slow down data channel flip");
+    success =
+        m_msg_mgr.bind_data_service_request(PUSH_DATA, m_group_id, [this](intrusive< sisl::GenericRpcData >& rpc_data) {
+            if (iomgr_flip::instance()->delay_flip("slow_down_data_channel", [this, rpc_data]() mutable {
+                    RD_LOGI("Resuming after slow down data channel flip");
+                    on_push_data_received(rpc_data);
+                })) {
+                RD_LOGI("Slow down data channel flip is enabled, scheduling to call later");
+            } else {
                 on_push_data_received(rpc_data);
-            })) {
-            RD_LOGI("Slow down data channel flip is enabled, scheduling to call later");
-        } else {
-            on_push_data_received(rpc_data);
-        }
-    });
+            }
+        });
 #else
-    success = m_msg_mgr.bind_data_service_request(PUSH_DATA, m_group_id, bind_this(RaftReplDev::on_push_data_received, 1));
+    success =
+        m_msg_mgr.bind_data_service_request(PUSH_DATA, m_group_id, bind_this(RaftReplDev::on_push_data_received, 1));
 #endif
     if (!success) {
         RD_LOGE("Failed to bind data service request for PUSH_DATA");
-	return false;
+        return false;
     }
-    success = m_msg_mgr.bind_data_service_request(FETCH_DATA, m_group_id, bind_this(RaftReplDev::on_fetch_data_received, 1));
+    success =
+        m_msg_mgr.bind_data_service_request(FETCH_DATA, m_group_id, bind_this(RaftReplDev::on_fetch_data_received, 1));
     if (!success) {
         RD_LOGE("Failed to bind data service request for FETCH_DATA");
-	return false;
+        return false;
     }
     return true;
 }
@@ -127,10 +130,10 @@ bool RaftReplDev::join_group() {
     return true;
 }
 
-AsyncReplResult<> RaftReplDev::replace_member(replica_id_t member_out_uuid, replica_id_t member_in_uuid,
-                                              uint32_t commit_quorum) {
+AsyncReplResult<> RaftReplDev::replace_member(const replica_member_info& member_out,
+                                              const replica_member_info& member_in, uint32_t commit_quorum) {
     LOGINFO("Replace member group_id={} member_out={} member_in={}", group_id_str(),
-            boost::uuids::to_string(member_out_uuid), boost::uuids::to_string(member_in_uuid));
+            boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
 
     if (commit_quorum >= 1) {
         // Two members are down and leader cant form the quorum. Reduce the quorum size.
@@ -138,7 +141,7 @@ AsyncReplResult<> RaftReplDev::replace_member(replica_id_t member_out_uuid, repl
     }
 
     // Step 1: Check if leader itself is requested to move out.
-    if (m_my_repl_id == member_out_uuid && m_my_repl_id == get_leader_id()) {
+    if (m_my_repl_id == member_out.id && m_my_repl_id == get_leader_id()) {
         // If leader is the member requested to move out, then give up leadership and return error.
         // Client will retry replace_member request to the new leader.
         raft_server()->yield_leadership(true /* immediate */, -1 /* successor */);
@@ -148,9 +151,9 @@ AsyncReplResult<> RaftReplDev::replace_member(replica_id_t member_out_uuid, repl
     }
 
     // Step 2. Add the new member.
-    return m_msg_mgr.add_member(m_group_id, member_in_uuid)
+    return m_msg_mgr.add_member(m_group_id, member_in.id)
         .via(&folly::InlineExecutor::instance())
-        .thenValue([this, member_in_uuid, member_out_uuid, commit_quorum](auto&& e) -> AsyncReplResult<> {
+        .thenValue([this, member_in, member_out, commit_quorum](auto&& e) -> AsyncReplResult<> {
             // TODO Currently we ignore the cancelled, fix nuraft_mesg to not timeout
             // when adding member. Member is added to cluster config until member syncs fully
             // with atleast stop gap. This will take a lot of time for block or
@@ -168,18 +171,17 @@ AsyncReplResult<> RaftReplDev::replace_member(replica_id_t member_out_uuid, repl
                     return make_async_error<>(RaftReplService::to_repl_error(e.error()));
                 }
             }
-            auto member_out = boost::uuids::to_string(member_out_uuid);
-            auto member_in = boost::uuids::to_string(member_in_uuid);
 
-            RD_LOGI("Replace member added member={} to group_id={}", member_in, group_id_str());
+            RD_LOGI("Replace member added member={} to group_id={}", boost::uuids::to_string(member_in.id),
+                    group_id_str());
 
             // Step 3. Append log entry to mark the old member is out and new member is added.
             auto rreq = repl_req_ptr_t(new repl_req_ctx{});
             replace_members_ctx members;
-            std::copy(member_in_uuid.begin(), member_in_uuid.end(), members.in_replica_id.begin());
-            std::copy(member_out_uuid.begin(), member_out_uuid.end(), members.out_replica_id.begin());
-            sisl::blob header(r_cast< uint8_t* >(&members),
-                              members.in_replica_id.size() + members.out_replica_id.size());
+            members.replica_out = member_out;
+            members.replica_in = member_in;
+
+            sisl::blob header(r_cast< uint8_t* >(&members), sizeof(replace_members_ctx));
             rreq->init(
                 repl_key{.server_id = server_id(), .term = raft_server()->get_term(), .dsn = m_next_dsn.fetch_add(1)},
                 journal_type_t::HS_CTRL_REPLACE, true, header, sisl::blob{}, 0);
@@ -196,7 +198,7 @@ AsyncReplResult<> RaftReplDev::replace_member(replica_id_t member_out_uuid, repl
             // Step 4. Remove the old member. Even if the old member is temporarily
             // down and recovers, nuraft mesg see member remove from cluster log
             // entry and call exit_group() and leave().
-            return m_msg_mgr.rem_member(m_group_id, member_out_uuid)
+            return m_msg_mgr.rem_member(m_group_id, member_out.id)
                 .via(&folly::InlineExecutor::instance())
                 .thenValue([this, member_out, commit_quorum](auto&& e) -> AsyncReplResult<> {
                     if (e.hasError()) {
@@ -212,7 +214,8 @@ AsyncReplResult<> RaftReplDev::replace_member(replica_id_t member_out_uuid, repl
                             return make_async_error<>(ReplServiceError::RETRY_REQUEST);
                         }
                     } else {
-                        RD_LOGI("Replace member removed member={} from group_id={}", member_out, group_id_str());
+                        RD_LOGI("Replace member removed member={} from group_id={}",
+                                boost::uuids::to_string(member_out.id), group_id_str());
                     }
 
                     // Revert the quorum size back to 0.
@@ -957,13 +960,11 @@ void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err)
 
 void RaftReplDev::replace_member(repl_req_ptr_t rreq) {
     auto members = r_cast< const replace_members_ctx* >(rreq->header().cbytes());
-    replica_id_t member_in, member_out;
-    std::copy(members->out_replica_id.begin(), members->out_replica_id.end(), member_out.begin());
-    std::copy(members->in_replica_id.begin(), members->in_replica_id.end(), member_in.begin());
-    RD_LOGI("Raft repl replace_member member_out={} member_in={}", boost::uuids::to_string(member_out),
-            boost::uuids::to_string(member_in));
 
-    m_listener->replace_member(member_out, member_in);
+    RD_LOGI("Raft repl replace_member commit member_out={} member_in={}",
+            boost::uuids::to_string(members->replica_out.id), boost::uuids::to_string(members->replica_in.id));
+
+    m_listener->on_replace_member(members->replica_out, members->replica_in);
 }
 
 static bool blob_equals(sisl::blob const& a, sisl::blob const& b) {
@@ -1224,7 +1225,7 @@ void RaftReplDev::flush_durable_commit_lsn() {
 }
 
 ///////////////////////////////////  Private metohds ////////////////////////////////////
-void RaftReplDev::cp_flush(CP* cp, cshared<ReplDevCPContext> ctx) {
+void RaftReplDev::cp_flush(CP* cp, cshared< ReplDevCPContext > ctx) {
     auto const lsn = ctx->cp_lsn;
     auto const clsn = ctx->compacted_to_lsn;
     auto const dsn = ctx->last_applied_dsn;
@@ -1247,14 +1248,14 @@ void RaftReplDev::cp_flush(CP* cp, cshared<ReplDevCPContext> ctx) {
             cp->to_string());
 }
 
-cshared<ReplDevCPContext> RaftReplDev::get_cp_ctx(CP* cp) {
+cshared< ReplDevCPContext > RaftReplDev::get_cp_ctx(CP* cp) {
     auto const cp_lsn = m_commit_upto_lsn.load();
     auto const clsn = m_compact_lsn.load();
     auto const dsn = m_next_dsn.load();
 
-    RD_LOGD("getting cp_ctx for raft repl dev {}, cp_lsn={}, clsn={}, next_dsn={}, cp string:{}",
-            (void *)this, cp_lsn, clsn, dsn, cp->to_string());
-    auto dev_ctx = std::make_shared<ReplDevCPContext>();
+    RD_LOGD("getting cp_ctx for raft repl dev {}, cp_lsn={}, clsn={}, next_dsn={}, cp string:{}", (void*)this, cp_lsn,
+            clsn, dsn, cp->to_string());
+    auto dev_ctx = std::make_shared< ReplDevCPContext >();
     dev_ctx->cp_lsn = cp_lsn;
     dev_ctx->compacted_to_lsn = clsn;
     dev_ctx->last_applied_dsn = dsn;

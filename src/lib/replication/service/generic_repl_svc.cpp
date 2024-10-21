@@ -147,8 +147,8 @@ void SoloReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
     }
 }
 
-AsyncReplResult<> SoloReplService::replace_member(group_id_t group_id, replica_id_t member_out, replica_id_t member_in,
-                                                  uint32_t commit_quorum) const {
+AsyncReplResult<> SoloReplService::replace_member(group_id_t group_id, const replica_member_info& member_out,
+                                                  const replica_member_info& member_in, uint32_t commit_quorum) const {
     return make_async_error<>(ReplServiceError::NOT_IMPLEMENTED);
 }
 

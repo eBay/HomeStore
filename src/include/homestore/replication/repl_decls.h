@@ -78,6 +78,13 @@ struct peer_info {
     uint64_t last_succ_resp_us_;
 };
 
+struct replica_member_info {
+    static constexpr uint64_t max_name_len = 128;
+    replica_id_t id;
+    char name[max_name_len];
+    int32_t priority{0};
+};
+
 } // namespace homestore
 
 // hash function definitions

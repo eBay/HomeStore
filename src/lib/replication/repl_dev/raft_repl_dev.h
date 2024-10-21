@@ -36,8 +36,8 @@ using raft_cluster_config_ptr_t = nuraft::ptr< nuraft::cluster_config >;
 ENUM(repl_dev_stage_t, uint8_t, INIT, ACTIVE, DESTROYING, DESTROYED, PERMANENT_DESTROYED);
 
 struct replace_members_ctx {
-    std::array< uint8_t, 16 > out_replica_id;
-    std::array< uint8_t, 16 > in_replica_id;
+    replica_member_info replica_out;
+    replica_member_info replica_in;
 };
 
 class RaftReplDevMetrics : public sisl::MetricsGroup {
@@ -162,7 +162,8 @@ public:
 
     bool bind_data_service();
     bool join_group();
-    AsyncReplResult<> replace_member(replica_id_t member_out, replica_id_t member_in, uint32_t commit_quorum);
+    AsyncReplResult<> replace_member(const replica_member_info& member_out, const replica_member_info& member_in,
+                                     uint32_t commit_quorum);
     folly::SemiFuture< ReplServiceError > destroy_group();
 
     //////////////// All ReplDev overrides/implementation ///////////////////////
@@ -199,8 +200,8 @@ public:
                                       sisl::blob const& key, uint32_t data_size, bool is_data_channel);
     folly::Future< folly::Unit > notify_after_data_written(std::vector< repl_req_ptr_t >* rreqs);
     void check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreqs);
-    void cp_flush(CP* cp, cshared<ReplDevCPContext> ctx);
-    cshared<ReplDevCPContext> get_cp_ctx(CP* cp);
+    void cp_flush(CP* cp, cshared< ReplDevCPContext > ctx);
+    cshared< ReplDevCPContext > get_cp_ctx(CP* cp);
     void cp_cleanup(CP* cp);
     void become_ready();
 

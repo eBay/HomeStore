@@ -301,7 +301,10 @@ public:
     ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) override {
         return blk_alloc_hints{};
     }
-    void replace_member(replica_id_t member_out, replica_id_t member_in) override {}
+    void on_replace_member(const replica_member_info& member_out, const replica_member_info& member_in) override {
+        LOGINFO("[Replica={}] replace member out {} in {}", g_helper->replica_num(),
+                boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
+    }
 
     void on_destroy() override {
         LOGINFOMOD(replication, "[Replica={}] Group={} is being destroyed", g_helper->replica_num(),
@@ -615,9 +618,9 @@ public:
         this->run_on_leader(db, [this, db, member_out, member_in, commit_quorum]() {
             LOGINFO("Replace member out={} in={}", boost::uuids::to_string(member_out),
                     boost::uuids::to_string(member_in));
-            auto v = hs()->repl_service()
-                         .replace_member(db->repl_dev()->group_id(), member_out, member_in, commit_quorum)
-                         .get();
+            replica_member_info out{member_out, ""};
+            replica_member_info in{member_in, ""};
+            auto v = hs()->repl_service().replace_member(db->repl_dev()->group_id(), out, in, commit_quorum).get();
             ASSERT_EQ(v.hasError(), false) << "Error in replacing member";
         });
     }

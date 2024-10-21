@@ -136,7 +136,7 @@ public:
                       cintrusive< repl_req_ctx >& ctx) override {
             LOGINFO("Received error={} on repl_dev", enum_name(error));
         }
-        void replace_member(replica_id_t member_out, replica_id_t member_in) override {}
+        void on_replace_member(const replica_member_info& member_out, const replica_member_info& member_in) override {}
         void on_destroy() override {}
     };
 
