@@ -195,7 +195,8 @@ public:
 
         uint64_t size_written{0};
         while (free_size > 0) {
-            if (free_size >= gp.max_wrt_sz) {
+            // if it is overflow, 2 extra blocks are needed for ovf blk header and meta blk;
+            if (free_size -  2 * m_mbm->block_size()  >= gp.max_wrt_sz) {
                 size_written = do_sb_write(do_overflow(), 0);
             } else {
                 size_written = do_sb_write(false, m_mbm->meta_blk_context_sz());
