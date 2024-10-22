@@ -70,6 +70,7 @@ public:
     void stop();
 
     // Add/Remove Index Table to/from the index service
+    uint64_t num_tables();
     void add_index_table(const std::shared_ptr< IndexTableBase >& tbl);
     void remove_index_table(const std::shared_ptr< IndexTableBase >& tbl);
     std::shared_ptr< IndexTableBase > get_index_table(uuid_t uuid) const;

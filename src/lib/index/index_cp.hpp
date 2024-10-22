@@ -94,12 +94,12 @@ public:
         }
 
         std::string parent_id_string() const {
-            return (has_inplace_parent == 0x1) ? fmt::format("chunk={}, blk={}", ids[0].second, ids[0].first) : "empty";
+            return (has_inplace_parent == 0x1) ? fmt::format("{}", blk_id(0).to_integer()) : "empty";
         }
 
         std::string child_id_string() const {
             auto const idx = (has_inplace_parent == 0x1) ? 1 : 0;
-            return (has_inplace_child == 0x1) ? fmt::format("chunk={}, blk={}", ids[idx].second, ids[idx].first)
+            return (has_inplace_child == 0x1) ? fmt::format("{}", blk_id(idx).to_integer())
                                               : "empty";
         }
 
@@ -162,6 +162,7 @@ public:
     std::optional< IndexBufferPtr > next_dirty();
     std::string to_string();
     std::string to_string_with_dags();
+    uint16_t num_dags();
     void to_string_dot(const std::string& filename);
 
 private:

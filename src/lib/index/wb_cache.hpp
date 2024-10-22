@@ -41,7 +41,6 @@ private:
     std::mutex m_flush_mtx;
     void* m_meta_blk;
     bool m_in_recovery{false};
-
 public:
     IndexWBCache(const std::shared_ptr< VirtualDev >& vdev, std::pair< meta_blk*, sisl::byte_view > sb,
                  const std::shared_ptr< sisl::Evictor >& evictor, uint32_t node_size);
@@ -78,5 +77,6 @@ private:
 
     void recover_buf(IndexBufferPtr const& buf);
     bool was_node_committed(IndexBufferPtr const& buf);
+    void load_buf(IndexBufferPtr const& buf);
 };
 } // namespace homestore

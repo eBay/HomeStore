@@ -142,6 +142,17 @@ void IndexCPContext::to_string_dot(const std::string& filename) {
     file << "}\n";
 
     file.close();
+    LOGINFO("cp dag is stored in file {}", filename);
+}
+
+uint16_t IndexCPContext::num_dags()  {
+    // count number of buffers whose up_buffers are nullptr
+    uint16_t count = 0;
+    std::unique_lock lg{m_flush_buffer_mtx};
+    m_dirty_buf_list.foreach_entry([&count](IndexBufferPtr buf) {
+        if (buf->m_up_buffer == nullptr) { count++; }
+    });
+    return count;
 }
 
 std::string IndexCPContext::to_string_with_dags() {
@@ -219,6 +230,7 @@ std::map< BlkId, IndexBufferPtr > IndexCPContext::recover(sisl::byte_view sb) {
 
         process_txn_record(rec, buf_map);
         cur_ptr += rec->size();
+        LOGTRACEMOD(wbcache, "Recovered txn record: {}: {}", t, rec->to_string());
     }
 
     return buf_map;
@@ -314,8 +326,8 @@ std::string IndexCPContext::txn_record::to_string() const {
         if (id_count == 0) {
             fmt::format_to(std::back_inserter(str), "empty]");
         } else {
-            for (uint8_t i{0}; i < id_count; ++i, ++idx) {
-                fmt::format_to(std::back_inserter(str), "[chunk={}, blk={}],", ids[idx].second, ids[idx].first);
+            for (uint8_t i{0}; i < id_count; ++i) {
+                fmt::format_to(std::back_inserter(str), "[{}],", blk_id(idx++).to_integer());
             }
             fmt::format_to(std::back_inserter(str), "]");
         }
@@ -324,12 +336,13 @@ std::string IndexCPContext::txn_record::to_string() const {
     std::string str = fmt::format("ordinal={}, parent=[{}], in_place_child=[{}]", index_ordinal, parent_id_string(),
                                   child_id_string(), num_new_ids, num_freed_ids);
 
-    uint8_t idx = (has_inplace_parent == 0x1) ? 1 : 0 + (has_inplace_child == 0x1) ? 1 : 0;
+    uint8_t idx = ((has_inplace_parent == 0x1) ? 1 : 0) + ((has_inplace_child == 0x1) ? 1 : 0);
     fmt::format_to(std::back_inserter(str), ", new_ids=[");
     add_to_string(str, idx, num_new_ids);
 
     fmt::format_to(std::back_inserter(str), ", freed_ids=[");
     add_to_string(str, idx, num_freed_ids);
+    fmt::format_to(std::back_inserter(str), "{}", (is_parent_meta ? ", parent is meta" : ""));
     return str;
 }
 } // namespace homestore

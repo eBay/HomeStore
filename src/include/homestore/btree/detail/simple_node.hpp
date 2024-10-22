@@ -204,7 +204,7 @@ public:
     bool has_room_for_put(btree_put_type put_type, uint32_t key_size, uint32_t value_size) const override {
 #ifdef _PRERELEASE
         auto max_keys = max_keys_in_node();
-            if(max_keys) {return (this->total_entries() < max_keys);}
+        if(max_keys) {return (this->total_entries() < max_keys);}
 #endif
         return ((put_type == btree_put_type::UPSERT) || (put_type == btree_put_type::INSERT))
             ? (get_available_entries() > 0)
@@ -230,7 +230,7 @@ public:
         return str;
     }
     std::string to_dot_keys() const override {
-        return to_dot_keys_impl(std::is_same<K, uint64_t>{});
+        return to_dot_keys_impl(std::is_same<decltype(std::declval<K &>().key()), uint64_t>{});
     }
 
     std::string to_dot_keys_impl(std::false_type) const {

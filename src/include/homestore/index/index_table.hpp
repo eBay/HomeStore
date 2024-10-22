@@ -224,10 +224,13 @@ protected:
     }
 
     btree_status_t on_root_changed(BtreeNodePtr const& new_root, void* context) override {
+        // todo: if(m_sb->root_node == new_root->node_id() && m_sb->root_link_version == new_root->link_version()){
+        // return btree_status_t::success;}
         m_sb->root_node = new_root->node_id();
         m_sb->root_link_version = new_root->link_version();
 
         if (!wb_cache().refresh_meta_buf(m_sb_buffer, r_cast< CPContext* >(context))) {
+            LOGTRACEMOD(wbcache, "CP mismatch error - discard transact for meta node");
             return btree_status_t::cp_mismatch;
         }
 
@@ -238,8 +241,8 @@ protected:
 
     btree_status_t repair_links(BtreeNodePtr const& parent_node, void* cp_ctx) {
         BT_LOG(DEBUG, "Repairing links for parent node {}", parent_node->to_string());
-
-        // Get the last key in the node
+        // TODO: is it possible that repairing many nodes causes an increase to level of btree? If so, then this needs
+        // to be handled. Get the last key in the node
         auto const last_parent_key = parent_node->get_last_key< K >();
         auto const is_parent_edge_node = parent_node->has_valid_edge();
         if ((parent_node->total_entries() == 0) && !is_parent_edge_node) {
@@ -285,8 +288,8 @@ protected:
             BT_LOG(INFO, "Repairing node={} child_node={} child_last_key={}", cur_parent->node_id(),
                    child_node->to_string(), child_last_key.to_string());
 
-            if (child_last_key.compare(last_parent_key) > 0) {
-                // We have reached the last key, we can stop now
+            if (child_last_key.compare(last_parent_key) > 0 && !is_parent_edge_node) {
+                // We have reached the last key, and the parent node doesn't have edge, so we can stop now
                 break;
             }
 

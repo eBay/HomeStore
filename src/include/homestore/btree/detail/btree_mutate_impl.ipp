@@ -283,6 +283,11 @@ btree_status_t Btree< K, V >::split_node(const BtreeNodePtr& parent_node, const 
     child_node1->inc_link_version();
 
     // Update the existing parent node entry to point to second child ptr.
+    // Don't change the order. First update the parent node and then insert the new key. This is important for casee
+    // where the split key is the last key in the parent node. In this case, the split key should be inserted in the
+    // parent node. If we insert the split key first, then the split key will be inserted in the parent node and the
+    // last key in the parent node will be lost. This will lead to inconsistency in the tree. In case of empty parent
+    // (i.e., new root) or updating the edge, this order made sure that edge is updated.
     parent_node->update(parent_ind, child_node2->link_info());
     parent_node->insert(parent_ind, *out_split_key, child_node1->link_info());
 

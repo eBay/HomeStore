@@ -434,7 +434,7 @@ private:
         }
 #ifdef _PRERELEASE
         hsi->with_crash_simulator([this](void) mutable {
-            LOGINFO("CrashSimulator::crash() is called - restarting homestore");
+            LOGWARN("CrashSimulator::crash() is called - restarting homestore");
             this->restart_homestore();
             m_crash_recovered.setValue();
         });
