@@ -404,8 +404,9 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             req.enable_route_tracing();
             const auto ret = this->m_bt->get(req);
             ASSERT_EQ(ret, btree_status_t::success) << "Missing key " << key << " in btree but present in shadow map";
-            LOGINFO("{} - Key {}  passed sanity check!", count++, key.key());
         });
+        LOGINFO("Sanity check passed for {} keys!", count);
+
     }
 
     void crash_and_recover(OperationList& operations, std::string filename = "") {
@@ -439,7 +440,7 @@ struct IndexCrashTest : public test_common::HSTestHelper, BtreeTestHelper< TestT
             std::string re_filename = filename + "_after_reapply.dot";
             LOGINFO("Visualize the tree after reapply {}", re_filename);
             this->visualize_keys(re_filename);
-            this->print_keys("Post crash and recovery, btree structure: ");
+//            this->print_keys("Post crash and recovery, btree structure: ");
         }
 
         this->get_all();
