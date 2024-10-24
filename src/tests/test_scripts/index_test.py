@@ -52,6 +52,7 @@ def parse_arguments():
     parser.add_argument('--cleanup_after_shutdown', help='Cleanup after shutdown', type=bool, default=False)
     parser.add_argument('--init_device', help='Initialize device', type=bool, default=True)
     parser.add_argument('--max_keys_in_node', help='Maximum num of keys in btree nodes', type=int, default=5)
+    parser.add_argument('--min_keys_in_node', help='Minimum num of keys in btree nodes', type=int, default=2)
     parser.add_argument('--num_rounds', help='number of rounds for crash test', type=int, default=10000)
     parser.add_argument('--num_entries_per_rounds', help='number of rounds for crash test', type=int, default=60)
 

@@ -245,7 +245,9 @@ struct BtreeConfig {
     uint8_t m_split_pct{50};
     uint32_t m_max_merge_nodes{3};
 #ifdef _PRERELEASE
-        uint64_t m_max_keys_in_node{0};
+    // These are for testing purpose only
+    uint64_t m_max_keys_in_node{0};
+    uint64_t m_min_keys_in_node{0};
 #endif
     bool m_rebalance_turned_on{false};
     bool m_merge_turned_on{true};
