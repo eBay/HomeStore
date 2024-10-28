@@ -9,7 +9,7 @@ required_conan_version = ">=1.60.0"
 
 class HomestoreConan(ConanFile):
     name = "homestore"
-    version = "6.5.1"
+    version = "6.5.2"
 
     homepage = "https://github.com/eBay/Homestore"
     description = "HomeStore Storage Engine"
@@ -94,6 +94,8 @@ class HomestoreConan(ConanFile):
                 tc.variables['BUILD_COVERAGE'] = 'ON'
             elif self.options.get_safe("sanitize"):
                 tc.variables['MEMORY_SANITIZER_ON'] = 'ON'
+        tc.variables["CONAN_PACKAGE_NAME"] = self.name
+        tc.variables["CONAN_PACKAGE_VERSION"] = self.version
         tc.generate()
 
         # This generates "boost-config.cmake" and "grpc-config.cmake" etc in self.generators_folder

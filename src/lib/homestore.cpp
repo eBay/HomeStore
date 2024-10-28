@@ -21,6 +21,7 @@
 #include <sisl/fds/malloc_helper.hpp>
 #include <sisl/fds/buffer.hpp>
 #include <sisl/logging/logging.h>
+#include <sisl/version.hpp>
 #include <sisl/cache/lru_evictor.hpp>
 
 #include <homestore/blkdata_service.hpp>
@@ -58,6 +59,7 @@ HomeStoreSafePtr HomeStore::s_instance{nullptr};
 static std::unique_ptr< IndexServiceCallbacks > s_index_cbs;
 static shared< ChunkSelector > s_custom_chunk_selector{nullptr};
 static shared< ReplApplication > s_repl_app{nullptr};
+std::string version = PACKAGE_VERSION;
 
 HomeStore* HomeStore::instance() {
     if (s_instance == nullptr) { s_instance = std::make_shared< HomeStore >(); }
@@ -121,6 +123,12 @@ bool HomeStore::start(const hs_input_params& input, hs_before_services_starting_
 
     static std::once_flag flag1;
     std::call_once(flag1, [this]() {
+#ifndef NDEBUG
+        LOGINFO("HomeStore DEBUG version: {}", version);
+#else
+        LOGINFO("HomeStore RELEASE version: {}", version);
+#endif
+        sisl::VersionMgr::addVersion(PACKAGE_NAME, version::Semver200_version(PACKAGE_VERSION));
         m_periodic_logger =
             sisl::logging::CreateCustomLogger("homestore", "_periodic", false, true /* tee_to_stdout_stderr */);
         sisl::logging::SetLogPattern("[%D %T.%f] [%^%L%$] [%t] %v", m_periodic_logger);
