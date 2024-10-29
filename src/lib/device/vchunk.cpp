@@ -33,5 +33,7 @@ uint32_t VChunk::get_pdev_id() const { return m_internal_chunk->physical_dev()->
 
 uint16_t VChunk::get_chunk_id() const { return m_internal_chunk->chunk_id(); }
 
+uint64_t VChunk::size() const { return m_internal_chunk->size(); }
+
 cshared< Chunk > VChunk::get_internal_chunk() const { return m_internal_chunk; }
 } // namespace homestore
