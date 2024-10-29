@@ -37,6 +37,7 @@ struct transient_hdr_t {
     /* these variables are accessed without taking lock and are not expected to change after init */
     uint8_t leaf_node{0};
     uint64_t max_keys_in_node{0};
+    uint64_t min_keys_in_node{0}; // to specify the threshold for triggering merge
 
     bool is_leaf() const { return (leaf_node != 0); }
 };
@@ -116,6 +117,7 @@ public:
         m_trans_hdr.leaf_node = is_leaf;
 #ifdef _PRERELEASE
         m_trans_hdr.max_keys_in_node = cfg.m_max_keys_in_node;
+        m_trans_hdr.min_keys_in_node = cfg.m_min_keys_in_node;
 #endif
 
     }
@@ -299,6 +301,7 @@ public:
 
     template < typename K >
     K get_first_key() const {
+        if (total_entries() == 0) { return K{}; }
         return get_nth_key< K >(0, true);
     }
 
@@ -333,6 +336,7 @@ public:
 
     // uint32_t total_entries() const { return (has_valid_edge() ? total_entries() + 1 : total_entries()); }
     uint64_t max_keys_in_node() const { return m_trans_hdr.max_keys_in_node; }
+    uint64_t min_keys_in_node() const { return m_trans_hdr.min_keys_in_node; }
 
     void lock(locktype_t l) const {
         if (l == locktype_t::READ) {
@@ -392,6 +396,12 @@ public:
             }
             fmt::format_to(std::back_inserter(str), "]");
         }
+
+        // Should not happen
+        if (this->is_node_deleted()) {
+            fmt::format_to(std::back_inserter(str), " **DELETED** ");
+        }
+
         return str;
     }
 
@@ -527,15 +537,10 @@ public:
 
     virtual uint32_t occupied_size() const { return (node_data_size() - available_size()); }
     bool is_merge_needed(const BtreeConfig& cfg) const {
-#if 0
 #ifdef _PRERELEASE
-       if (iomgr_flip::instance()->test_flip("btree_merge_node") && occupied_size() < node_data_size) {
-           return true;
-       }
-
-       auto ret = iomgr_flip::instance()->get_test_flip< uint64_t >("btree_merge_node_pct");
-       if (ret && occupied_size() < (ret.get() * node_data_size() / 100)) { return true; }
-#endif
+        if (min_keys_in_node()) {
+            return total_entries() < min_keys_in_node();
+        }
 #endif
         return (occupied_size() < cfg.suggested_min_size());
     }

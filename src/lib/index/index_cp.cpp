@@ -261,7 +261,6 @@ void IndexCPContext::process_txn_record(txn_record const* rec, std::map< BlkId, 
         }
 
         if (up_buf) {
-            DEBUG_ASSERT(((buf->m_up_buffer == nullptr) || (buf->m_up_buffer == up_buf)), "Inconsistent up buffer");
             auto real_up_buf = (up_buf->m_created_cp_id == cpg->id()) ? up_buf->m_up_buffer : up_buf;
 
 #ifndef NDEBUG
@@ -279,6 +278,20 @@ void IndexCPContext::process_txn_record(txn_record const* rec, std::map< BlkId, 
 #endif
 
             if (buf->m_up_buffer != real_up_buf) {
+                if (buf->m_up_buffer) {
+                    buf->m_up_buffer->m_wait_for_down_buffers.decrement(1);
+#ifndef NDEBUG
+                    bool found{false};
+                    for (auto it = buf->m_up_buffer->m_down_buffers.begin(); it != buf->m_up_buffer->m_down_buffers.end(); ++it) {
+                        if (it->lock() == buf) {
+                            buf->m_up_buffer->m_down_buffers.erase(it);
+                            found = true;
+                            break;
+                        }
+                    }
+                    HS_DBG_ASSERT(found, "Down buffer is linked to Up buf, but up_buf doesn't have down_buf in its list");
+#endif
+                }
                 real_up_buf->m_wait_for_down_buffers.increment(1);
                 buf->m_up_buffer = real_up_buf;
             }
