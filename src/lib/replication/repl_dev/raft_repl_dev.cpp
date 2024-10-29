@@ -1265,39 +1265,79 @@ cshared< ReplDevCPContext > RaftReplDev::get_cp_ctx(CP* cp) {
 void RaftReplDev::cp_cleanup(CP*) {}
 
 void RaftReplDev::gc_repl_reqs() {
-    std::vector< int64_t > expired_keys;
-    m_state_machine->iterate_repl_reqs([this, &expired_keys](auto key, auto rreq) {
+    auto cur_dsn = m_next_dsn.load();
+    if (cur_dsn != 0) cur_dsn = cur_dsn - 1;
+    // On follower, any DSN below cur_dsn , should already be commited.
+    // That implies the rreq should already be removed from m_repl_key_req_map
+    std::vector< repl_req_ptr_t > expired_rreqs;
+
+    auto req_map_size = m_repl_key_req_map.size();
+    RD_LOGW("m_repl_key_req_map size is {};", req_map_size);
+    for (auto [key, rreq] : m_repl_key_req_map) {
+        // FIXME: Skipping proposer for now, the DSN in proposer increased in proposing stage, not when commit().
+        // Need other mechanism.
         if (rreq->is_proposer()) {
+            RD_LOGD("Skipping rreq=[{}] due to is_proposer, elapsed_time_sec{};", rreq->to_string(), get_elapsed_time_sec(rreq->created_time()));
+            // don't clean up proposer's request
+            continue;
+        }
+
+        if (rreq->dsn() < cur_dsn ) {
+            RD_LOGD("legacy req with commited DSN, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}", rreq->to_string(), rreq->dsn(),
+                    cur_dsn, cur_dsn - rreq->dsn());
+            // FIXME: Wait till the rreq expired is obviously safer, though as commited request will
+            //  be removed from map in on_commit(), we probably don't need wait till expired.
+	    if (rreq->is_expired()) {
+                RD_LOGD("Expired rreq =[{}], elapsed_time_sec {} ", rreq->to_string(), get_elapsed_time_sec(rreq->created_time()));
+                expired_rreqs.push_back(rreq);
+            }
+        }
+    }
+    int sm_req_cnt = 0;
+    // FIXME: we ensured data written before appending log to log store, in which we add rreq to state_machine
+    // and during pre-commit/commit we retrieve rreq from state_machine. Removing requests outside of state
+    // machine is risky.
+    // Below logs are logging only, can be removed once we get more confidence.
+    m_state_machine->iterate_repl_reqs([this, cur_dsn, &sm_req_cnt](auto key, auto rreq) {
+        sm_req_cnt++;
+        if (rreq->is_proposer()) {
+            RD_LOGD("Skipping rreq=[{}] due to is_proposer, elapsed_time_sec{};", rreq->to_string(),
+                    get_elapsed_time_sec(rreq->created_time()));
             // don't clean up proposer's request
             return;
         }
-
+        if (rreq->dsn() < cur_dsn) {
+            RD_LOGD("legacy req, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}", rreq->to_string(), rreq->dsn(),
+                    cur_dsn, cur_dsn - rreq->dsn());
+        }
         if (rreq->is_expired()) {
-            expired_keys.push_back(key);
             RD_LOGD("rreq=[{}] is expired, cleaning up; elapsed_time_sec{};", rreq->to_string(),
                     get_elapsed_time_sec(rreq->created_time()));
-
-            // do garbage collection
-            // 1. free the allocated blocks
-            if (rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) {
-                auto blkid = rreq->local_blkid();
-                data_service().async_free_blk(blkid).thenValue([this, blkid](auto&& err) {
-                    HS_LOG_ASSERT(!err, "freeing blkid={} upon error failed, potential to cause blk leak",
-                                  blkid.to_string());
-                    RD_LOGD("blkid={} freed successfully", blkid.to_string());
-                });
-            }
-
-            // 2. remove from the m_repl_key_req_map
-            // handle_error during fetch data response might have already removed the rreq from the this map
-            if (m_repl_key_req_map.find(rreq->rkey()) != m_repl_key_req_map.end()) {
-                m_repl_key_req_map.erase(rreq->rkey());
-            }
         }
     });
+    RD_LOGW("state_machine req map size is {};", sm_req_cnt);
 
-    for (auto const& l : expired_keys) {
-        m_state_machine->unlink_lsn_to_req(l);
+    for (auto removing_rreq : expired_rreqs) {
+        // do garbage collection
+        // 1. free the allocated blocks
+        RD_LOGI("Removing rreq [{}]", removing_rreq->to_string());
+        if (removing_rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) {
+            auto blkid = removing_rreq->local_blkid();
+            data_service().async_free_blk(blkid).thenValue([this, blkid](auto&& err) {
+                HS_LOG_ASSERT(!err, "freeing blkid={} upon error failed, potential to cause blk leak",
+                              blkid.to_string());
+                RD_LOGD("GC rreq: Releasing blkid={} freed successfully", blkid.to_string());
+            });
+        }
+        // 2. remove from the m_repl_key_req_map
+        if (m_repl_key_req_map.find(removing_rreq->rkey()) != m_repl_key_req_map.end()) {
+            m_repl_key_req_map.erase(removing_rreq->rkey());
+        }
+        // 3. remove from state-machine
+        if (removing_rreq->has_state(repl_req_state_t::LOG_FLUSHED)) {
+            RD_LOGW("Removing rreq [{}] from state machine, it is risky")
+            m_state_machine->unlink_lsn_to_req(removing_rreq->lsn());
+        }
     }
 }
 
