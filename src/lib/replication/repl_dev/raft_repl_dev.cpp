@@ -1192,7 +1192,7 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
 
             auto reqs = sisl::VectorPool< repl_req_ptr_t >::alloc();
             auto last_commit_lsn = uint64_cast(get_last_commit_lsn());
-            for (unsigned long i=0; i < entries.size(); i++) {
+            for (unsigned long i = 0; i < entries.size(); i++) {
                 auto& entry = entries[i];
                 auto lsn = start_lsn + i;
                 auto term = entry->get_term();
@@ -1201,8 +1201,8 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
                 // skipping localize for already committed log(dup), they anyway will be discard
                 // by nuraft before append_log.
                 if (lsn <= last_commit_lsn) {
-                    RD_LOGT("Raft channel: term {}, lsn {}, skipping dup, last_commit_lsn {}",
-                            term, lsn, last_commit_lsn);
+                    RD_LOGT("Raft channel: term {}, lsn {}, skipping dup, last_commit_lsn {}", term, lsn,
+                            last_commit_lsn);
                     continue;
                 }
                 // Those LSNs already in logstore but not yet committed, will be dedup here,
@@ -1290,18 +1290,20 @@ void RaftReplDev::gc_repl_reqs() {
         // FIXME: Skipping proposer for now, the DSN in proposer increased in proposing stage, not when commit().
         // Need other mechanism.
         if (rreq->is_proposer()) {
-            RD_LOGD("Skipping rreq=[{}] due to is_proposer, elapsed_time_sec{};", rreq->to_string(), get_elapsed_time_sec(rreq->created_time()));
+            RD_LOGD("Skipping rreq=[{}] due to is_proposer, elapsed_time_sec{};", rreq->to_string(),
+                    get_elapsed_time_sec(rreq->created_time()));
             // don't clean up proposer's request
             continue;
         }
 
-        if (rreq->dsn() < cur_dsn ) {
-            RD_LOGD("legacy req with commited DSN, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}", rreq->to_string(), rreq->dsn(),
-                    cur_dsn, cur_dsn - rreq->dsn());
+        if (rreq->dsn() < cur_dsn) {
+            RD_LOGD("legacy req with commited DSN, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}", rreq->to_string(),
+                    rreq->dsn(), cur_dsn, cur_dsn - rreq->dsn());
             // FIXME: Wait till the rreq expired is obviously safer, though as commited request will
             //  be removed from map in on_commit(), we probably don't need wait till expired.
-	    if (rreq->is_expired()) {
-                RD_LOGD("Expired rreq =[{}], elapsed_time_sec {} ", rreq->to_string(), get_elapsed_time_sec(rreq->created_time()));
+            if (rreq->is_expired()) {
+                RD_LOGD("Expired rreq =[{}], elapsed_time_sec {} ", rreq->to_string(),
+                        get_elapsed_time_sec(rreq->created_time()));
                 expired_rreqs.push_back(rreq);
             }
         }
@@ -1320,8 +1322,8 @@ void RaftReplDev::gc_repl_reqs() {
             return;
         }
         if (rreq->dsn() < cur_dsn) {
-            RD_LOGD("legacy req, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}", rreq->to_string(), rreq->dsn(),
-                    cur_dsn, cur_dsn - rreq->dsn());
+            RD_LOGD("legacy req, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}", rreq->to_string(), rreq->dsn(), cur_dsn,
+                    cur_dsn - rreq->dsn());
         }
         if (rreq->is_expired()) {
             RD_LOGD("rreq=[{}] is expired, cleaning up; elapsed_time_sec{};", rreq->to_string(),
