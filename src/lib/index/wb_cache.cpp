@@ -396,14 +396,8 @@ void IndexWBCache::link_buf(IndexBufferPtr const& up_buf, IndexBufferPtr const& 
             HS_DBG_ASSERT((real_up_buf->m_dirtied_cp_id == down_buf->m_dirtied_cp_id) || (real_up_buf->is_meta_buf()),
                           "Up buffer is not modified by current cp, but down buffer is linked to it");
 #ifndef NDEBUG
-            bool found{false};
-            for (auto const& dbuf : real_up_buf->m_down_buffers) {
-                if (dbuf.lock() == down_buf) {
-                    found = true;
-                    break;
-                }
-            }
-            HS_DBG_ASSERT(found, "Down buffer is linked to Up buf, but up_buf doesn't have down_buf in its list");
+            HS_DBG_ASSERT(real_up_buf->is_in_down_buffers(down_buf),
+                          "Down buffer is linked to Up buf, but up_buf doesn't have down_buf in its list");
 #endif
             return;
         }
@@ -412,25 +406,10 @@ void IndexWBCache::link_buf(IndexBufferPtr const& up_buf, IndexBufferPtr const& 
     // Now we link the down_buffer to the real up_buffer
     if (down_buf->m_up_buffer) {
         // release existing up_buffer's wait count
-        down_buf->m_up_buffer->m_wait_for_down_buffers.decrement();
-#ifndef NDEBUG
-        bool found{false};
-        for (auto it = down_buf->m_up_buffer->m_down_buffers.begin(); it != down_buf->m_up_buffer->m_down_buffers.end();
-             ++it) {
-            if (it->lock() == down_buf) {
-                down_buf->m_up_buffer->m_down_buffers.erase(it);
-                found = true;
-                break;
-            }
-        }
-        HS_DBG_ASSERT(found, "Down buffer is linked to Up buf, but up_buf doesn't have down_buf in its list");
-#endif
+        down_buf->m_up_buffer->remove_down_buffer(down_buf);
     }
-    real_up_buf->m_wait_for_down_buffers.increment(1);
     down_buf->m_up_buffer = real_up_buf;
-#ifndef NDEBUG
-    real_up_buf->m_down_buffers.emplace_back(down_buf);
-#endif
+    real_up_buf->add_down_buffer(down_buf);
 }
 
 void IndexWBCache::free_buf(const IndexBufferPtr& buf, CPContext* cp_ctx) {
@@ -535,21 +514,8 @@ void IndexWBCache::recover(sisl::byte_view sb) {
                 pending_bufs.push_back(buf->m_up_buffer);
             } else {
                 // Just ignore it
-                buf->m_up_buffer->m_wait_for_down_buffers.decrement();
-#ifndef NDEBUG
-                bool found{false};
-                for (auto it = buf->m_up_buffer->m_down_buffers.begin();
-                     it != buf->m_up_buffer->m_down_buffers.end(); ++it) {
-                    auto sp = it->lock();
-                    if (sp && sp == buf) {
-                        found = true;
-                        buf->m_up_buffer->m_down_buffers.erase(it);
-                        break;
-                    }
-                }
-                HS_DBG_ASSERT(found,
-                              "Down buffer is linked to Up buf, but up_buf doesn't have down_buf in its list");
-#endif
+                buf->m_up_buffer->remove_down_buffer(buf);
+                buf->m_up_buffer = nullptr;
             }
         }
     }
@@ -754,7 +720,10 @@ std::pair< IndexBufferPtr, bool > IndexWBCache::on_buf_flush_done_internal(Index
                                                                            IndexBufferPtr const& buf) {
     IndexBufferPtrList buf_list;
 #ifndef NDEBUG
-    buf->m_down_buffers.clear();
+    {
+        std::lock_guard lg(buf->m_down_buffers_mtx);
+        buf->m_down_buffers.clear();
+    }
 #endif
     buf->set_state(index_buf_state_t::CLEAN);
 
