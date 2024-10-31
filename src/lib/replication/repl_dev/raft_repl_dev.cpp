@@ -1316,17 +1316,17 @@ void RaftReplDev::gc_repl_reqs() {
     m_state_machine->iterate_repl_reqs([this, cur_dsn, &sm_req_cnt](auto key, auto rreq) {
         sm_req_cnt++;
         if (rreq->is_proposer()) {
-            RD_LOGD("Skipping rreq=[{}] due to is_proposer, elapsed_time_sec{};", rreq->to_string(),
+            RD_LOGD("StateMachine: Skipping rreq=[{}] due to is_proposer, elapsed_time_sec{};", rreq->to_string(),
                     get_elapsed_time_sec(rreq->created_time()));
             // don't clean up proposer's request
             return;
         }
         if (rreq->dsn() < cur_dsn) {
-            RD_LOGD("legacy req, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}", rreq->to_string(), rreq->dsn(), cur_dsn,
+            RD_LOGD("StateMachine: legacy req, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}", rreq->to_string(), rreq->dsn(), cur_dsn,
                     cur_dsn - rreq->dsn());
         }
         if (rreq->is_expired()) {
-            RD_LOGD("rreq=[{}] is expired, cleaning up; elapsed_time_sec{};", rreq->to_string(),
+            RD_LOGD("StateMachine: rreq=[{}] is expired, elapsed_time_sec{};", rreq->to_string(),
                     get_elapsed_time_sec(rreq->created_time()));
         }
     });
