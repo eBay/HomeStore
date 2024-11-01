@@ -204,7 +204,7 @@ public:
             kv_snapshot_data.emplace_back(Key{v.id_}, v);
             LOGTRACEMOD(replication, "[Replica={}] Read logical snapshot callback fetching lsn={} size={} pattern={}",
                         g_helper->replica_num(), v.lsn_, v.data_size_, v.data_pattern_);
-            if (kv_snapshot_data.size() >= 1000) { break; }
+            if (kv_snapshot_data.size() >= 10) { break; }
         }
 
         if (kv_snapshot_data.size() == 0) {
@@ -430,6 +430,7 @@ public:
         for (auto const& db : dbs_) {
             if (db->is_zombie()) { continue; }
             auto repl_dev = std::dynamic_pointer_cast< RaftReplDev >(db->repl_dev());
+            if (!repl_dev) continue;
             int i = 0;
             bool force_leave = false;
             do {
@@ -511,6 +512,11 @@ public:
     }
 
     void run_on_leader(std::shared_ptr< TestReplicatedDB > db, auto&& lambda) {
+        if (!db || !db->repl_dev()) {
+            // Spare which are not added to group will not have repl dev.
+            return;
+        }
+
         do {
             auto leader_uuid = db->repl_dev()->get_leader_id();
 
@@ -527,6 +533,8 @@ public:
     }
 
     void write_on_leader(uint32_t num_entries, bool wait_for_commit = true, shared< TestReplicatedDB > db = nullptr) {
+        if (dbs_[0]->repl_dev() == nullptr) return;
+
         do {
             auto leader_uuid = dbs_[0]->repl_dev()->get_leader_id();
 
@@ -614,14 +622,20 @@ public:
     void truncate(int num_reserved_entries) { dbs_[0]->truncate(num_reserved_entries); }
 
     void replace_member(std::shared_ptr< TestReplicatedDB > db, replica_id_t member_out, replica_id_t member_in,
-                        uint32_t commit_quorum = 0) {
-        this->run_on_leader(db, [this, db, member_out, member_in, commit_quorum]() {
+                        uint32_t commit_quorum = 0, ReplServiceError error = ReplServiceError::OK) {
+        this->run_on_leader(db, [this, error, db, member_out, member_in, commit_quorum]() {
             LOGINFO("Replace member out={} in={}", boost::uuids::to_string(member_out),
                     boost::uuids::to_string(member_in));
+
             replica_member_info out{member_out, ""};
             replica_member_info in{member_in, ""};
-            auto v = hs()->repl_service().replace_member(db->repl_dev()->group_id(), out, in, commit_quorum).get();
-            ASSERT_EQ(v.hasError(), false) << "Error in replacing member";
+            auto result = hs()->repl_service().replace_member(db->repl_dev()->group_id(), out, in, commit_quorum).get();
+            if (error == ReplServiceError::OK) {
+                ASSERT_EQ(result.hasError(), false) << "Error in replacing member";
+            } else {
+                ASSERT_EQ(result.hasError(), true) << "Error in replacing member";
+                ASSERT_EQ(result.error(), error);
+            }
         });
     }
 
