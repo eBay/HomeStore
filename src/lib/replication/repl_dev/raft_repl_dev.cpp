@@ -895,7 +895,7 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
     // Remove the request from repl_key map.
     m_repl_key_req_map.erase(rreq->rkey());
     // Remove the request from lsn map.
-    m_state_machine->unlink_lsn_to_req(rreq->lsn());
+    m_state_machine->unlink_lsn_to_req(rreq->lsn(), rreq);
 
     auto cur_dsn = m_next_dsn.load(std::memory_order_relaxed);
     while (cur_dsn <= rreq->dsn()) {
@@ -1351,7 +1351,7 @@ void RaftReplDev::gc_repl_reqs() {
         // 3. remove from state-machine
         if (removing_rreq->has_state(repl_req_state_t::LOG_FLUSHED)) {
             RD_LOGW("Removing rreq [{}] from state machine, it is risky")
-            m_state_machine->unlink_lsn_to_req(removing_rreq->lsn());
+            m_state_machine->unlink_lsn_to_req(removing_rreq->lsn(), removing_rreq);
         }
     }
 }
