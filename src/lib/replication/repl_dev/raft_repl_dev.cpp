@@ -1285,27 +1285,19 @@ void RaftReplDev::gc_repl_reqs() {
     std::vector< repl_req_ptr_t > expired_rreqs;
 
     auto req_map_size = m_repl_key_req_map.size();
-    RD_LOGW("m_repl_key_req_map size is {};", req_map_size);
+    RD_LOGI("m_repl_key_req_map size is {};", req_map_size);
     for (auto [key, rreq] : m_repl_key_req_map) {
         // FIXME: Skipping proposer for now, the DSN in proposer increased in proposing stage, not when commit().
         // Need other mechanism.
         if (rreq->is_proposer()) {
-            RD_LOGD("Skipping rreq=[{}] due to is_proposer, elapsed_time_sec{};", rreq->to_string(),
-                    get_elapsed_time_sec(rreq->created_time()));
             // don't clean up proposer's request
             continue;
         }
-
         if (rreq->dsn() < cur_dsn) {
-            RD_LOGD("legacy req with commited DSN, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}", rreq->to_string(),
-                    rreq->dsn(), cur_dsn, cur_dsn - rreq->dsn());
-            // FIXME: Wait till the rreq expired is obviously safer, though as commited request will
-            //  be removed from map in on_commit(), we probably don't need wait till expired.
-            if (rreq->is_expired()) {
-                RD_LOGD("Expired rreq =[{}], elapsed_time_sec {} ", rreq->to_string(),
-                        get_elapsed_time_sec(rreq->created_time()));
-                expired_rreqs.push_back(rreq);
-            }
+            RD_LOGD("legacy req with commited DSN, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}, elapsed_time_sec {}",
+                    rreq->to_string(), rreq->dsn(), cur_dsn, cur_dsn - rreq->dsn(),
+                    get_elapsed_time_sec(rreq->created_time()));
+            expired_rreqs.push_back(rreq);
         }
     }
     int sm_req_cnt = 0;
@@ -1316,21 +1308,19 @@ void RaftReplDev::gc_repl_reqs() {
     m_state_machine->iterate_repl_reqs([this, cur_dsn, &sm_req_cnt](auto key, auto rreq) {
         sm_req_cnt++;
         if (rreq->is_proposer()) {
-            RD_LOGD("StateMachine: Skipping rreq=[{}] due to is_proposer, elapsed_time_sec{};", rreq->to_string(),
-                    get_elapsed_time_sec(rreq->created_time()));
             // don't clean up proposer's request
             return;
         }
         if (rreq->dsn() < cur_dsn) {
-            RD_LOGD("StateMachine: legacy req, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}", rreq->to_string(), rreq->dsn(), cur_dsn,
-                    cur_dsn - rreq->dsn());
+            RD_LOGD("StateMachine: legacy req, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}", rreq->to_string(),
+                    rreq->dsn(), cur_dsn, cur_dsn - rreq->dsn());
         }
         if (rreq->is_expired()) {
             RD_LOGD("StateMachine: rreq=[{}] is expired, elapsed_time_sec{};", rreq->to_string(),
                     get_elapsed_time_sec(rreq->created_time()));
         }
     });
-    RD_LOGW("state_machine req map size is {};", sm_req_cnt);
+    RD_LOGI("state_machine req map size is {};", sm_req_cnt);
 
     for (auto removing_rreq : expired_rreqs) {
         // do garbage collection
