@@ -1,4 +1,5 @@
 #include <iomgr/iomgr_timer.hpp>
+#include <iomgr/iomgr_flip.hpp>
 #include <sisl/logging/logging.h>
 #include <sisl/fds/utils.hpp>
 #include <sisl/fds/vector_pool.hpp>
@@ -9,6 +10,7 @@
 #include "repl_dev/raft_repl_dev.h"
 #include <homestore/homestore.hpp>
 #include "common/homestore_config.hpp"
+#include "common/crash_simulator.hpp"
 
 SISL_LOGGING_DECL(replication)
 
@@ -300,6 +302,14 @@ void RaftStateMachine::save_logical_snp_obj(nuraft::snapshot& s, ulong& obj_id, 
 
     // Update the object offset.
     obj_id = snp_data->offset;
+
+#ifdef _PRERELEASE
+    if (iomgr_flip::instance()->test_flip("baseline_resync_restart_new_follower")) {
+        LOGINFO("Hit flip baseline_resync_restart_new_follower crashing");
+        hs()->crash_simulator().crash();
+        return;
+    }
+#endif
 }
 
 bool RaftStateMachine::apply_snapshot(nuraft::snapshot& s) {
