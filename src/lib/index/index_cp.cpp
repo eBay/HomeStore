@@ -266,33 +266,16 @@ void IndexCPContext::process_txn_record(txn_record const* rec, std::map< BlkId, 
 #ifndef NDEBUG
             //  if (!is_sibling_link || (buf->m_up_buffer == real_up_buf)) { return buf;}
             //  Already linked with same buf or its not a sibling link to override
-            bool found{false};
-            for (auto const& dbuf : real_up_buf->m_down_buffers) {
-                if (dbuf.lock() == buf) {
-                    found = true;
-                    break;
-                }
+            if (real_up_buf->is_in_down_buffers(buf)) {
+                return buf;
             }
-            if (found) { return buf; }
-            real_up_buf->m_down_buffers.emplace_back(buf);
 #endif
 
             if (buf->m_up_buffer != real_up_buf) {
                 if (buf->m_up_buffer) {
-                    buf->m_up_buffer->m_wait_for_down_buffers.decrement(1);
-#ifndef NDEBUG
-                    bool found{false};
-                    for (auto it = buf->m_up_buffer->m_down_buffers.begin(); it != buf->m_up_buffer->m_down_buffers.end(); ++it) {
-                        if (it->lock() == buf) {
-                            buf->m_up_buffer->m_down_buffers.erase(it);
-                            found = true;
-                            break;
-                        }
-                    }
-                    HS_DBG_ASSERT(found, "Down buffer is linked to Up buf, but up_buf doesn't have down_buf in its list");
-#endif
+                    buf->m_up_buffer->remove_down_buffer(buf);
                 }
-                real_up_buf->m_wait_for_down_buffers.increment(1);
+                real_up_buf->add_down_buffer(buf);
                 buf->m_up_buffer = real_up_buf;
             }
         }
