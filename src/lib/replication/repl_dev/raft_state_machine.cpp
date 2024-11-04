@@ -222,17 +222,11 @@ uint64_t RaftStateMachine::last_commit_index() {
 void RaftStateMachine::become_ready() { m_rd.become_ready(); }
 
 void RaftStateMachine::unlink_lsn_to_req(int64_t lsn, repl_req_ptr_t rreq) {
-    auto const it = m_lsn_req_map.find(lsn);
     // it is possible a LSN mapped to different rreq in history
     // due to log overwritten. Verify the rreq before removing
-    if (it != m_lsn_req_map.cend()) {
-        if (it->second == rreq) {
-            RD_LOG(DEBUG, "Raft channel: erase lsn {},  rreq {}", lsn, it->second->to_string());
-            m_lsn_req_map.erase(lsn);
-        } else {
-            RD_LOGC("Erasing lsn {} pointing to rreq{} differnt with providing rreq {}", lsn, it->second->to_string(),
-                    rreq->to_string());
-        }
+    auto deleted = m_lsn_req_map.erase_if_equal(lsn, rreq);
+    if (deleted) {
+        RD_LOG(DEBUG, "Raft channel: erase lsn {},  rreq {}", lsn, rreq->to_string());
     }
 }
 
