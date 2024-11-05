@@ -162,9 +162,12 @@ std::string IndexBuffer::to_string() const {
         // store m_down_buffers in a string
         std::string down_bufs = "";
 #ifndef NDEBUG
-        for (auto const& down_buf : m_down_buffers) {
-            if (auto ptr = down_buf.lock()) {
-                fmt::format_to(std::back_inserter(down_bufs), "[{}]", voidptr_cast(ptr.get()));
+        {
+            std::lock_guard lg(m_down_buffers_mtx);
+            for (auto const &down_buf: m_down_buffers) {
+                if (auto ptr = down_buf.lock()) {
+                    fmt::format_to(std::back_inserter(down_bufs), "[{}]", voidptr_cast(ptr.get()));
+                }
             }
         }
 #endif
@@ -178,6 +181,7 @@ std::string IndexBuffer::to_string() const {
                            down_bufs);
     }
 }
+
 std::string IndexBuffer::to_string_dot() const {
     auto str = fmt::format("IndexBuffer {} ", reinterpret_cast< void* >(const_cast< IndexBuffer* >(this)));
     if (m_bytes == nullptr) {
@@ -189,6 +193,45 @@ std::string IndexBuffer::to_string_dot() const {
     }
     return str;
 }
+
+void IndexBuffer::add_down_buffer(const IndexBufferPtr &buf) {
+    m_wait_for_down_buffers.increment();
+#ifndef NDEBUG
+    {
+        std::lock_guard lg(m_down_buffers_mtx);
+        m_down_buffers.push_back(buf);
+    }
+#endif
+}
+
+void IndexBuffer::remove_down_buffer(const IndexBufferPtr &buf) {
+    m_wait_for_down_buffers.decrement();
+#ifndef NDEBUG
+    bool found{false}; {
+        std::lock_guard lg(m_down_buffers_mtx);
+        for (auto it = buf->m_up_buffer->m_down_buffers.begin(); it != buf->m_up_buffer->m_down_buffers.end(); ++it) {
+            if (it->lock() == buf) {
+                buf->m_up_buffer->m_down_buffers.erase(it);
+                found = true;
+                break;
+            }
+        }
+    }
+    HS_DBG_ASSERT(found, "Down buffer is linked to up_buf, but up_buf doesn't have down_buf in its list");
+#endif
+}
+
+#ifndef NDEBUG
+bool IndexBuffer::is_in_down_buffers(const IndexBufferPtr &buf) {
+    std::lock_guard<std::mutex> lg(m_down_buffers_mtx);
+    for (auto const &dbuf: m_down_buffers) {
+        if (dbuf.lock() == buf) {
+            return true;
+        }
+    }
+    return false;
+}
+#endif
 
 MetaIndexBuffer::MetaIndexBuffer(superblk< index_table_sb >& sb) : IndexBuffer{nullptr, BlkId{}}, m_sb{sb} {
     m_is_meta_buf = true;

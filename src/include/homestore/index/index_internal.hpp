@@ -97,7 +97,8 @@ struct IndexBuffer : public sisl::ObjLifeCounter< IndexBuffer > {
     sisl::atomic_counter< int > m_wait_for_down_buffers{0}; // Number of children need to wait for before persisting
 #ifndef NDEBUG
     // Down buffers are not mandatory members, but only to keep track of any bugs and asserts
-    std::vector< std::weak_ptr< IndexBuffer > > m_down_buffers;
+    std::vector<std::weak_ptr<IndexBuffer> > m_down_buffers;
+    std::mutex m_down_buffers_mtx;
     std::shared_ptr< IndexBuffer > m_prev_up_buffer; // Keep a copy for debugging
 #endif
 
@@ -123,6 +124,13 @@ struct IndexBuffer : public sisl::ObjLifeCounter< IndexBuffer > {
 
     std::string to_string() const;
     std::string to_string_dot() const;
+
+    void add_down_buffer(const IndexBufferPtr &buf);
+
+    void remove_down_buffer(const IndexBufferPtr &buf);
+#ifndef NDEBUG
+    bool is_in_down_buffers(const IndexBufferPtr &buf);
+#endif
 };
 
 // This is a special buffer which is used to write to the meta block
