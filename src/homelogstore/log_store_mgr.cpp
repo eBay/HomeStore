@@ -188,8 +188,8 @@ HomeLogStoreMgrMetrics::HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores
                      {"op", "write"});
     REGISTER_COUNTER(logstore_read_count, "Total number of read requests to log stores", "logstore_op_count",
                      {"op", "read"});
-    REGISTER_HISTOGRAM(logstore_append_latency, "Logstore append latency", "logstore_op_latency", {"op", "write"});
-    REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"});
+    REGISTER_HISTOGRAM(logstore_append_latency, "Logstore append latency", "logstore_op_latency", {"op", "write"}, HistogramBucketsType(OpLatecyBuckets));
+    REGISTER_HISTOGRAM(logstore_read_latency, "Logstore read latency", "logstore_op_latency", {"op", "read"}, HistogramBucketsType(OpLatecyBuckets));
     REGISTER_HISTOGRAM(logdev_flush_size_distribution, "Distribution of flush data size",
                        HistogramBucketsType(ExponentialOfTwoBuckets));
     REGISTER_HISTOGRAM(logdev_flush_records_distribution, "Distribution of num records to flush",
@@ -198,7 +198,7 @@ HomeLogStoreMgrMetrics::HomeLogStoreMgrMetrics() : sisl::MetricsGroup("LogStores
                        HistogramBucketsType(ExponentialOfTwoBuckets));
     REGISTER_HISTOGRAM(logdev_flush_done_msg_time_ns, "Logdev flush completion msg time in ns");
     REGISTER_HISTOGRAM(logdev_post_flush_processing_latency,
-                       "Logdev post flush processing (including callbacks) latency");
+                       "Logdev post flush processing (including callbacks) latency", HistogramBucketsType(OpLatecyBuckets));
     REGISTER_HISTOGRAM(logdev_fsync_time_us, "Logdev fsync completion time in us");
 
     register_me_to_farm();
