@@ -1280,8 +1280,11 @@ void RaftReplDev::cp_cleanup(CP*) {}
 void RaftReplDev::gc_repl_reqs() {
     auto cur_dsn = m_next_dsn.load();
     if (cur_dsn != 0) cur_dsn = cur_dsn - 1;
-    // On follower, any DSN below cur_dsn , should already be commited.
-    // That implies the rreq should already be removed from m_repl_key_req_map
+    // On follower, DSN below cur_dsn should very likely be commited.
+    // It is not guaranteed because DSN and LSN are generated separately,
+    // DSN in async_alloc_write before pushing data, LSN later when
+    // proposing to raft. Two simultaneous write requests on leader can have
+    // <LSN=100, DSN=102> and <LSN=101, DSN =101> during the window.
     std::vector< repl_req_ptr_t > expired_rreqs;
 
     auto req_map_size = m_repl_key_req_map.size();
@@ -1293,7 +1296,8 @@ void RaftReplDev::gc_repl_reqs() {
             // don't clean up proposer's request
             continue;
         }
-        if (rreq->dsn() < cur_dsn) {
+        if (rreq->dsn() < cur_dsn && rreq->is_expired()) {
+            // The DSN can be out of order, wait till rreq expired.
             RD_LOGD("legacy req with commited DSN, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}, elapsed_time_sec {}",
                     rreq->to_string(), rreq->dsn(), cur_dsn, cur_dsn - rreq->dsn(),
                     get_elapsed_time_sec(rreq->created_time()));
@@ -1311,10 +1315,6 @@ void RaftReplDev::gc_repl_reqs() {
             // don't clean up proposer's request
             return;
         }
-        if (rreq->dsn() < cur_dsn) {
-            RD_LOGD("StateMachine: legacy req, rreq=[{}] , dsn = {}, next_dsn = {}, gap= {}", rreq->to_string(),
-                    rreq->dsn(), cur_dsn, cur_dsn - rreq->dsn());
-        }
         if (rreq->is_expired()) {
             RD_LOGD("StateMachine: rreq=[{}] is expired, elapsed_time_sec{};", rreq->to_string(),
                     get_elapsed_time_sec(rreq->created_time()));
@@ -1323,6 +1323,11 @@ void RaftReplDev::gc_repl_reqs() {
     RD_LOGI("state_machine req map size is {};", sm_req_cnt);
 
     for (auto removing_rreq : expired_rreqs) {
+        // once log flushed, the commit progress controlled by raft
+        if (removing_rreq->has_state(repl_req_state_t::LOG_FLUSHED)) {
+            RD_LOGI("Skipping GC rreq [{}] because it is in state machine", removing_rreq->to_string());
+            continue;
+        }
         // do garbage collection
         // 1. free the allocated blocks
         RD_LOGI("Removing rreq [{}]", removing_rreq->to_string());
@@ -1337,11 +1342,6 @@ void RaftReplDev::gc_repl_reqs() {
         // 2. remove from the m_repl_key_req_map
         if (m_repl_key_req_map.find(removing_rreq->rkey()) != m_repl_key_req_map.end()) {
             m_repl_key_req_map.erase(removing_rreq->rkey());
-        }
-        // 3. remove from state-machine
-        if (removing_rreq->has_state(repl_req_state_t::LOG_FLUSHED)) {
-            RD_LOGW("Removing rreq [{}] from state machine, it is risky")
-            m_state_machine->unlink_lsn_to_req(removing_rreq->lsn(), removing_rreq);
         }
     }
 }
