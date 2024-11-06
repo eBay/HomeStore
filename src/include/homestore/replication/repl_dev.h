@@ -126,7 +126,7 @@ struct repl_req_ctx : public boost::intrusive_ref_counter< repl_req_ctx, boost::
     friend class SoloReplDev;
 
 public:
-    repl_req_ctx() {}
+    repl_req_ctx() { m_start_time = Clock::now(); }
     virtual ~repl_req_ctx();
     void init(repl_key rkey, journal_type_t op_code, bool is_proposer, sisl::blob const& user_header,
               sisl::blob const& key, uint32_t data_size);
