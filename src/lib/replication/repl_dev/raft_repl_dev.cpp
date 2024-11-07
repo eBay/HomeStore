@@ -363,23 +363,30 @@ void RaftReplDev::push_data_to_all_followers(repl_req_ptr_t rreq, sisl::sg_list 
            flatbuffers::FlatBufferToString(builder.GetBufferPointer() + sizeof(flatbuffers::uoffset_t),
                                            PushDataRequestTypeTable()));*/
 
-    RD_LOGD("Data Channel: Pushing data to all followers: rreq=[{}]", rreq->to_string());
-
-    group_msg_service()
-        ->data_service_request_unidirectional(nuraft_mesg::role_regex::ALL, PUSH_DATA, rreq->m_pkts)
-        .via(&folly::InlineExecutor::instance())
-        .thenValue([this, rreq = std::move(rreq)](auto e) {
-            if (e.hasError()) {
-                RD_LOGE("Data Channel: Error in pushing data to all followers: rreq=[{}] error={}", rreq->to_string(),
-                        e.error());
-                handle_error(rreq, RaftReplService::to_repl_error(e.error()));
-                return;
+    auto peers = get_active_peers();
+    auto calls = std::vector< nuraft_mesg::NullAsyncResult >();
+    for (auto peer : peers) {
+        RD_LOGD("Data Channel: Pushing data to follower {}, rreq=[{}]", peer, rreq->to_string());
+        calls.push_back(group_msg_service()
+                            ->data_service_request_unidirectional(peer, PUSH_DATA, rreq->m_pkts)
+                            .via(&folly::InlineExecutor::instance()));
+    }
+    folly::collectAllUnsafe(calls).thenValue([this, rreq](auto&& v_res) {
+        for (auto const& res : v_res) {
+            if (sisl_likely(res.value())) {
+                auto r = res.value();
+                if (r.hasError()) {
+                    // Just logging PushData error, no action is needed as follower can try by fetchData.
+                    RD_LOGW("Data Channel: Error in pushing data to all followers: rreq=[{}] error={}",
+                            rreq->to_string(), r.error());
+                }
             }
-            // Release the buffer which holds the packets
-            RD_LOGD("Data Channel: Data push completed for rreq=[{}]", rreq->to_string());
-            rreq->release_fb_builder();
-            rreq->m_pkts.clear();
-        });
+        }
+        RD_LOGD("Data Channel: Data push completed for rreq=[{}]", rreq->to_string());
+        // Release the buffer which holds the packets
+        rreq->release_fb_builder();
+        rreq->m_pkts.clear();
+    });
 }
 
 void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_data) {
@@ -1037,6 +1044,25 @@ std::vector< peer_info > RaftReplDev::get_replication_status() const {
                                   .last_succ_resp_us_ = pinfo.last_succ_resp_us_});
     }
     return pi;
+}
+
+std::set< replica_id_t > RaftReplDev::get_active_peers() const {
+    auto repl_status = get_replication_status();
+    std::set< replica_id_t > res;
+    auto my_committed_idx = m_commit_upto_lsn.load();
+    uint64_t lagThreshold = my_committed_idx > HS_DYNAMIC_CONFIG(consensus.laggy_threshold)
+        ? my_committed_idx - HS_DYNAMIC_CONFIG(consensus.laggy_threshold)
+        : 0;
+    for (auto p : repl_status) {
+        if (p.id_ == m_my_repl_id) { continue; }
+        if (p.replication_idx_ >= lagThreshold) {
+            res.insert(p.id_);
+        } else {
+            RD_LOGW("Excluding peer {} from active_peers, lag {}, my lsn {}, peer lsn {}", p.id_,
+                    my_committed_idx - p.replication_idx_, my_committed_idx, p.replication_idx_);
+        }
+    }
+    return res;
 }
 
 uint32_t RaftReplDev::get_blk_size() const { return data_service().get_blk_size(); }
