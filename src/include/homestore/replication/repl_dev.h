@@ -143,7 +143,10 @@ public:
     sisl::blob const& key() const { return m_key; }
     MultiBlkId const& local_blkid() const { return m_local_blkid; }
     RemoteBlkId const& remote_blkid() const { return m_remote_blkid; }
-    const char* data() const { return r_cast< const char* >(m_data); }
+    const char* data() const {
+        DEBUG_ASSERT(m_data != nullptr, "m_data is nullptr, use before save_pushed/fetched_data or after release_data()");
+        return r_cast< const char* >(m_data);
+    }
     repl_req_state_t state() const { return repl_req_state_t(m_state.load()); }
     bool has_state(repl_req_state_t s) const { return m_state.load() & uint32_cast(s); }
     repl_journal_entry const* journal_entry() const { return m_journal_entry; }
@@ -209,6 +212,7 @@ public:
     bool add_state_if_not_already(repl_req_state_t s);
     void set_lentry(nuraft::ptr< nuraft::log_entry > const& lentry) { m_lentry = lentry; }
     void clear();
+    void release_data();
     flatbuffers::FlatBufferBuilder& create_fb_builder() { return m_fb_builder; }
     void release_fb_builder() { m_fb_builder.Release(); }
 
