@@ -208,8 +208,13 @@ void RaftStateMachine::commit_config(const ulong log_idx, raft_cluster_config_pt
     // TODO:add more logic here if necessary
 }
 
-void RaftStateMachine::rollback(const ulong log_idx, nuraft::buffer& data) {
-    int64_t lsn = s_cast< int64_t >(log_idx);
+void RaftStateMachine::rollback_config(const ulong log_idx, raft_cluster_config_ptr_t& conf) {
+    RD_LOGD("Raft channel: Rollback cluster conf , log_idx = {}", log_idx);
+    // TODO:add more logic here if necessary
+}
+
+void RaftStateMachine::rollback_ext(const nuraft::state_machine::ext_op_params& params) {
+    int64_t lsn = s_cast< int64_t >(params.log_idx);
     repl_req_ptr_t rreq = lsn_to_req(lsn);
     if (rreq == nullptr) {
         RD_LOG(ERROR, "Raft channel: Rollback lsn {} rreq not found", lsn);

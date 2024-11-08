@@ -109,7 +109,8 @@ public:
     raft_buf_ptr_t pre_commit_ext(const nuraft::state_machine::ext_op_params& params) override;
     raft_buf_ptr_t commit_ext(const nuraft::state_machine::ext_op_params& params) override;
     void commit_config(const ulong log_idx, raft_cluster_config_ptr_t& new_conf) override;
-    void rollback(const ulong log_idx, nuraft::buffer& data) override;
+    void rollback_config(const ulong log_idx, raft_cluster_config_ptr_t& conf) override;
+    void rollback_ext(const nuraft::state_machine::ext_op_params& params) override;
     void become_ready();
 
     void create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done) override;
