@@ -891,6 +891,25 @@ void RaftReplDev::commit_blk(repl_req_ptr_t rreq) {
     }
 }
 
+void RaftReplDev::handle_rollback(repl_req_ptr_t rreq) {
+    // 1. call the listener to rollback
+    m_listener->on_rollback(rreq->lsn(), rreq->header(), rreq->key(), rreq);
+
+    // 2. remove the request from maps
+    m_state_machine->unlink_lsn_to_req(rreq->lsn(), rreq);
+    m_repl_key_req_map.erase(rreq->rkey());
+
+    // 3. free the allocated blocks
+    if (rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) {
+        auto blkid = rreq->local_blkid();
+        data_service().async_free_blk(blkid).thenValue([this, blkid](auto&& err) {
+            HS_LOG_ASSERT(!err, "freeing blkid={} upon error failed, potential to cause blk leak",
+                          blkid.to_string());
+            RD_LOGD("Rollback rreq: Releasing blkid={} freed successfully", blkid.to_string());
+        });
+    }
+}
+
 void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
     commit_blk(rreq);
 

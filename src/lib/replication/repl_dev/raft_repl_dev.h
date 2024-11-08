@@ -195,6 +195,7 @@ public:
     //////////////// Methods needed for other Raft classes to access /////////////////
     void use_config(json_superblk raft_config_sb);
     void handle_commit(repl_req_ptr_t rreq, bool recovery = false);
+    void handle_rollback(repl_req_ptr_t rreq);
     repl_req_ptr_t repl_key_to_req(repl_key const& rkey) const;
     repl_req_ptr_t applier_create_req(repl_key const& rkey, journal_type_t code, sisl::blob const& user_header,
                                       sisl::blob const& key, uint32_t data_size, bool is_data_channel);
