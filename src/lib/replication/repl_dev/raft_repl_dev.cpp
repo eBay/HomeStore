@@ -401,8 +401,12 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
     auto const fb_size =
         flatbuffers::ReadScalar< flatbuffers::uoffset_t >(incoming_buf.cbytes()) + sizeof(flatbuffers::uoffset_t);
     auto push_req = GetSizePrefixedPushDataRequest(incoming_buf.cbytes());
-    HS_DBG_ASSERT_EQ(fb_size + push_req->data_size(), incoming_buf.size(), "Size mismatch of data size vs buffer size");
-
+    if (fb_size + push_req->data_size() != incoming_buf.size()) {
+        RD_LOGW("Data Channel: PushData received with size mismatch, header size {}, data size {}, received size {}",
+                fb_size, push_req->data_size(), incoming_buf.size());
+        rpc_data->send_response();
+        return;
+    }
     sisl::blob header = sisl::blob{push_req->user_header()->Data(), push_req->user_header()->size()};
     sisl::blob key = sisl::blob{push_req->user_key()->Data(), push_req->user_key()->size()};
     repl_key rkey{.server_id = push_req->issuer_replica_id(), .term = push_req->raft_term(), .dsn = push_req->dsn()};
