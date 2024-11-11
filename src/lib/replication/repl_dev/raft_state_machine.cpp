@@ -208,6 +208,23 @@ void RaftStateMachine::commit_config(const ulong log_idx, raft_cluster_config_pt
     // TODO:add more logic here if necessary
 }
 
+void RaftStateMachine::rollback_config(const ulong log_idx, raft_cluster_config_ptr_t& conf) {
+    RD_LOGD("Raft channel: Rollback cluster conf , log_idx = {}", log_idx);
+    // TODO:add more logic here if necessary
+}
+
+void RaftStateMachine::rollback_ext(const nuraft::state_machine::ext_op_params& params) {
+    int64_t lsn = s_cast< int64_t >(params.log_idx);
+    repl_req_ptr_t rreq = lsn_to_req(lsn);
+    if (rreq == nullptr) {
+        RD_LOG(ERROR, "Raft channel: Rollback lsn {} rreq not found", lsn);
+        return;
+    }
+
+    RD_LOGD("Raft channel: Rollback lsn {}, rreq=[{}]", lsn, rreq->to_string());
+    m_rd.handle_rollback(rreq);
+}
+
 void RaftStateMachine::iterate_repl_reqs(std::function< void(int64_t, repl_req_ptr_t rreq) > const& cb) {
     for (auto [key, rreq] : m_lsn_req_map) {
         cb(key, rreq);
@@ -236,7 +253,7 @@ void RaftStateMachine::link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn) {
     // reset the rreq created_at time to now https://github.com/eBay/HomeStore/issues/506
     rreq->set_created_time();
     [[maybe_unused]] auto r = m_lsn_req_map.insert(lsn, std::move(rreq));
-    RD_DBG_ASSERT_EQ(r.second, true, "lsn={} already in precommit list", lsn);
+    RD_DBG_ASSERT_EQ(r.second, true, "lsn={} already in precommit list, exist_term={}", lsn, r.first->second->term());
 }
 
 repl_req_ptr_t RaftStateMachine::lsn_to_req(int64_t lsn) {

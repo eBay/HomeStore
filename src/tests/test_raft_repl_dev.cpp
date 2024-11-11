@@ -152,6 +152,7 @@ TEST_F(RaftReplDevTest, Resync_From_Non_Originator) {
 }
 
 #if 0
+
 TEST_F(RaftReplDevTest, Leader_Restart) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
     g_helper->sync_for_test_start();
@@ -175,7 +176,6 @@ TEST_F(RaftReplDevTest, Leader_Restart) {
     this->validate_data();
     g_helper->sync_for_cleanup_start();
 }
-
 
 TEST_F(RaftReplDevTest, Drop_Raft_Entry_Switch_Leader) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());

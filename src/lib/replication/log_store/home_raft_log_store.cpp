@@ -184,6 +184,22 @@ void HomeRaftLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& e
 
     m_log_store->append_async(sisl::io_blob{buf->data_begin(), uint32_cast(buf->size()), false /* is_aligned */},
                               nullptr /* cookie */, [buf](int64_t, sisl::io_blob&, logdev_key, void*) {});
+
+    auto position_in_cache = index % m_log_entry_cache.size();
+    {
+        std::unique_lock lk(m_mutex);
+        m_log_entry_cache[position_in_cache] = std::make_pair(index, entry);
+
+        // remove all cached entries after this index
+        for (size_t i{0}; i < m_log_entry_cache.size(); ++i) {
+            if (m_log_entry_cache[i].first > index) {
+                m_log_entry_cache[i] = std::make_pair(0, nullptr);
+            }
+        }
+    }
+
+    // flushing the log before returning to ensure new(over-written) log is persisted to disk.
+    end_of_append_batch(index, 1);
 }
 
 void HomeRaftLogStore::end_of_append_batch(ulong start, ulong cnt) {
