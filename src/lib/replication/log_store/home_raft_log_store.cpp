@@ -190,6 +190,9 @@ void HomeRaftLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& e
         std::unique_lock lk(m_mutex);
         m_log_entry_cache[position_in_cache] = std::make_pair(index, entry);
     }
+
+    // flushing the log before returning to ensure new(over-written) log is persisted to disk.
+    end_of_append_batch(index, 1);
 }
 
 void HomeRaftLogStore::end_of_append_batch(ulong start, ulong cnt) {
