@@ -1050,12 +1050,12 @@ std::set< replica_id_t > RaftReplDev::get_active_peers() const {
     auto repl_status = get_replication_status();
     std::set< replica_id_t > res;
     auto my_committed_idx = m_commit_upto_lsn.load();
-    uint64_t lagThreshold = my_committed_idx > HS_DYNAMIC_CONFIG(consensus.laggy_threshold)
+    uint64_t least_active_repl_idx = my_committed_idx > HS_DYNAMIC_CONFIG(consensus.laggy_threshold)
         ? my_committed_idx - HS_DYNAMIC_CONFIG(consensus.laggy_threshold)
         : 0;
     for (auto p : repl_status) {
         if (p.id_ == m_my_repl_id) { continue; }
-        if (p.replication_idx_ >= lagThreshold) {
+        if (p.replication_idx_ >= least_active_repl_idx) {
             res.insert(p.id_);
         } else {
             RD_LOGW("Excluding peer {} from active_peers, lag {}, my lsn {}, peer lsn {}", p.id_,
