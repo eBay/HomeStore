@@ -264,6 +264,10 @@ table Consensus {
 
     // Log difference to determine if the follower is in resync mode
     resync_log_idx_threshold: int64 = 100;
+
+    // Log difference from leader's point of view,  to determine if the
+    // follower is laggy and if so, leader will stop pushing data until it drops under this threshold.
+    laggy_threshold: int64 = 2000;
 }
 
 table HomeStoreSettings {
