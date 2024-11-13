@@ -302,7 +302,10 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
 
     // If it is header only entry, directly propose to the raft
     if (rreq->has_linked_data()) {
-        push_data_to_all_followers(rreq, data);
+        // push the data to all followers asynchrounously, so that we can start following steps at leader ASAP
+        // it does not matter if the data push fails, as follower can always fetch the data from leader
+        iomanager.run_on_forget(iomgr::reactor_regex::random_worker, iomgr::fiber_regex::syncio_only,
+                                [this, rreq, data]() { push_data_to_all_followers(rreq, data); });
 
         // Step 1: Alloc Blkid
         auto const status = rreq->alloc_local_blks(m_listener, data.size);
@@ -910,8 +913,7 @@ void RaftReplDev::handle_rollback(repl_req_ptr_t rreq) {
     if (rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) {
         auto blkid = rreq->local_blkid();
         data_service().async_free_blk(blkid).thenValue([this, blkid](auto&& err) {
-            HS_LOG_ASSERT(!err, "freeing blkid={} upon error failed, potential to cause blk leak",
-                          blkid.to_string());
+            HS_LOG_ASSERT(!err, "freeing blkid={} upon error failed, potential to cause blk leak", blkid.to_string());
             RD_LOGD("Rollback rreq: Releasing blkid={} freed successfully", blkid.to_string());
         });
     }
