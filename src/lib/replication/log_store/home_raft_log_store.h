@@ -99,11 +99,33 @@ public:
     /**
      * Get log entries with index [start, end).
      *
+     * Return nullptr to indicate error if any log entry within the requested range
+     * could not be retrieved (e.g. due to external log truncation).
+     *
      * @param start The start log index number (inclusive).
      * @param end The end log index number (exclusive).
      * @return The log entries between [start, end).
      */
     virtual nuraft::ptr< std::vector< nuraft::ptr< nuraft::log_entry > > > log_entries(ulong start, ulong end) override;
+
+    /**
+     * Get log entries with index [start, end).
+     *
+     * The total size of the returned entries is limited by batch_size_hint.
+     *
+     * Return nullptr to indicate error if any log entry within the requested range
+     * could not be retrieved (e.g. due to external log truncation).
+     *
+     * @param start The start log index number (inclusive).
+     * @param end The end log index number (exclusive).
+     * @param batch_size_hint_in_bytes Total size (in bytes) of the returned entries,
+     *        see the detailed comment at
+     *        `state_machine::get_next_batch_size_hint_in_bytes()`.
+     * @return The log entries between [start, end) and limited by the total size
+     *         given by the batch_size_hint_in_bytes.
+     */
+    virtual nuraft::ptr< std::vector< nuraft::ptr< nuraft::log_entry > > >
+    log_entries_ext(ulong start, ulong end, int64_t batch_size_hint_in_bytes = 0) override;
 
     /**
      * Get the log entry at the specified log index number.
