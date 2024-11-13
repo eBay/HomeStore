@@ -99,18 +99,17 @@ void RaftReplService::start() {
                         .with_hb_interval(HS_DYNAMIC_CONFIG(consensus.heartbeat_period_ms))
                         .with_max_append_size(HS_DYNAMIC_CONFIG(consensus.max_append_batch_size))
                         .with_log_sync_batch_size(HS_DYNAMIC_CONFIG(consensus.log_sync_batch_size))
-    // TODO to fix the log_gap thresholds when adding new member.
-    // When the option is enabled, new member is doing log sync is stuck after the first batch
-    // where if the option is disabled, new member is going through append entries and it works.
-#if 0
                         .with_log_sync_stopping_gap(HS_DYNAMIC_CONFIG(consensus.min_log_gap_to_join))
-#endif
                         .with_stale_log_gap(HS_DYNAMIC_CONFIG(consensus.stale_log_gap_hi_threshold))
                         .with_fresh_log_gap(HS_DYNAMIC_CONFIG(consensus.stale_log_gap_lo_threshold))
                         .with_snapshot_enabled(HS_DYNAMIC_CONFIG(consensus.snapshot_freq_distance))
                         .with_leadership_expiry(HS_DYNAMIC_CONFIG(consensus.leadership_expiry_ms))
                         .with_reserved_log_items(HS_DYNAMIC_CONFIG(consensus.num_reserved_log_items))
                         .with_auto_forwarding(false);
+    // new_joiner_type fully disabled log pack behavior.
+    // There is no callback available for handling and localizing the log entries within the pack, which could
+    // result in data corruption.
+    r_params.use_new_joiner_type_ = true;
     r_params.return_method_ = nuraft::raft_params::async_handler;
     m_msg_mgr->register_mgr_type(params.default_group_type_, r_params);
 
