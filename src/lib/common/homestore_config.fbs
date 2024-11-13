@@ -242,7 +242,7 @@ table Consensus {
     stale_log_gap_lo_threshold: int32 = 30;
 
     // Minimum log gap a replica has to be from leader before joining the replica set.
-    min_log_gap_to_join: int32 = 30;
+    min_log_gap_to_join: int32 = 2147483647;
     
     // amount of time in millis to wait on data write before fetch data from remote;
     wait_data_write_timer_ms: uint64 = 1500 (hotswap);
