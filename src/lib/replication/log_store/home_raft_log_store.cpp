@@ -192,9 +192,7 @@ void HomeRaftLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& e
 
         // remove all cached entries after this index
         for (size_t i{0}; i < m_log_entry_cache.size(); ++i) {
-            if (m_log_entry_cache[i].first > index) {
-                m_log_entry_cache[i] = std::make_pair(0, nullptr);
-            }
+            if (m_log_entry_cache[i].first > index) { m_log_entry_cache[i] = std::make_pair(0, nullptr); }
         }
     }
 
@@ -221,6 +219,18 @@ nuraft::ptr< std::vector< nuraft::ptr< nuraft::log_entry > > > HomeRaftLogStore:
     });
     REPL_STORE_LOG(TRACE, "Num log entries start={} end={} num_entries={}", start, end, out_vec->size());
     return out_vec;
+}
+
+nuraft::ptr< std::vector< nuraft::ptr< nuraft::log_entry > > >
+HomeRaftLogStore::log_entries_ext(ulong start, ulong end, int64_t batch_size_hint_in_bytes) {
+    // in nuraft , batch_size_hint_in_bytes < 0 indicats that follower is busy now and do not want to receive any more
+    // log entries ATM. here we just send one log entry if this happens which is helpful for nuobject case and no harm
+    // to other case.
+    if (batch_size_hint_in_bytes < 0) end = start + 1;
+
+    // for the case where batch_size_hint_in_bytes >= 0, we do not take any size check here for now.
+    // TODO: limit the size of the returned entries by batch_size_hint_in_bytes int the future if necessary
+    return log_entries(start, end);
 }
 
 nuraft::ptr< nuraft::log_entry > HomeRaftLogStore::entry_at(ulong index) {
