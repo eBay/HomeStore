@@ -174,6 +174,7 @@ void repl_req_ctx::release_data() {
     // explicitly clear m_buf_for_unaligned_data as unaligned pushdata/fetchdata will be saved here
     m_buf_for_unaligned_data = sisl::io_blob_safe{};
     if (m_pushed_data) {
+        LOGTRACEMOD(replication, "m_pushed_data addr: {}", static_cast<void *>(m_pushed_data.get()));
         m_pushed_data->send_response();
         m_pushed_data = nullptr;
     }
