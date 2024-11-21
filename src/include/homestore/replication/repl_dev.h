@@ -112,9 +112,9 @@ private:
     nuraft::ptr< nuraft::snapshot > snapshot_;
 };
 
-struct snapshot_data {
+struct snapshot_obj {
     void* user_ctx{nullptr};
-    int64_t offset{0};
+    uint64_t offset{0};
     sisl::io_blob_safe blob;
     bool is_first_obj{false};
     bool is_last_obj{false};
@@ -368,16 +368,16 @@ public:
     /// uses offset given by the follower to the know the current state of the follower.
     /// Leader sends the snapshot data to the follower in batch. This callback is called multiple
     /// times on the leader till all the data is transferred to the follower. is_last_obj in
-    /// snapshot_data will be true once all the data has been trasnferred. After this the raft on
+    /// snapshot_obj will be true once all the data has been trasnferred. After this the raft on
     /// the follower side can do the incremental resync.
-    virtual int read_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) = 0;
+    virtual int read_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_obj) = 0;
 
     /// @brief Called on the follower when the leader sends the data during the baseline resyc.
-    /// is_last_obj in in snapshot_data will be true once all the data has been transfered.
+    /// is_last_obj in in snapshot_obj will be true once all the data has been transfered.
     /// After this the raft on the follower side can do the incremental resync.
-    virtual void write_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) = 0;
+    virtual void write_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_obj) = 0;
 
-    /// @brief Free up user-defined context inside the snapshot_data that is allocated during read_snapshot_data.
+    /// @brief Free up user-defined context inside the snapshot_obj that is allocated during read_snapshot_obj.
     virtual void free_user_snp_ctx(void*& user_snp_ctx) = 0;
 
 private:

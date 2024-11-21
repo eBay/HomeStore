@@ -182,7 +182,7 @@ public:
         return make_async_success<>();
     }
 
-    int read_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) override {
+    int read_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_data) override {
         auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(context)->nuraft_snapshot();
 
         if (snp_data->offset == 0) {
@@ -195,37 +195,37 @@ public:
         }
 
         int64_t next_lsn = snp_data->offset;
-        std::vector< KeyValuePair > kv_snapshot_data;
+        std::vector< KeyValuePair > kv_snapshot_obj;
         // we can not use find to get the next element, since if the next lsn is a config lsn , it will not be put into
         // lsn_index_ and as a result, the find will return the end of the map. so here we use lower_bound to get the
         // first element to be read and transfered.
         for (auto iter = lsn_index_.lower_bound(next_lsn); iter != lsn_index_.end(); iter++) {
             auto& v = iter->second;
-            kv_snapshot_data.emplace_back(Key{v.id_}, v);
+            kv_snapshot_obj.emplace_back(Key{v.id_}, v);
             LOGTRACEMOD(replication, "[Replica={}] Read logical snapshot callback fetching lsn={} size={} pattern={}",
                         g_helper->replica_num(), v.lsn_, v.data_size_, v.data_pattern_);
-            if (kv_snapshot_data.size() >= 10) { break; }
+            if (kv_snapshot_obj.size() >= 10) { break; }
         }
 
-        if (kv_snapshot_data.size() == 0) {
+        if (kv_snapshot_obj.size() == 0) {
             snp_data->is_last_obj = true;
             LOGINFOMOD(replication, "Snapshot is_last_obj is true");
             return 0;
         }
 
-        int64_t kv_snapshot_data_size = sizeof(KeyValuePair) * kv_snapshot_data.size();
-        sisl::io_blob_safe blob{static_cast< uint32_t >(kv_snapshot_data_size)};
-        std::memcpy(blob.bytes(), kv_snapshot_data.data(), kv_snapshot_data_size);
+        int64_t kv_snapshot_obj_size = sizeof(KeyValuePair) * kv_snapshot_obj.size();
+        sisl::io_blob_safe blob{static_cast< uint32_t >(kv_snapshot_obj_size)};
+        std::memcpy(blob.bytes(), kv_snapshot_obj.data(), kv_snapshot_obj_size);
         snp_data->blob = std::move(blob);
         snp_data->is_last_obj = false;
         LOGINFOMOD(replication, "[Replica={}] Read logical snapshot callback obj_id={} term={} idx={} num_items={}",
                    g_helper->replica_num(), snp_data->offset, s->get_last_log_term(), s->get_last_log_idx(),
-                   kv_snapshot_data.size());
+                   kv_snapshot_obj.size());
 
         return 0;
     }
 
-    void snapshot_data_write(uint64_t data_size, uint64_t data_pattern, MultiBlkId& out_blkids) {
+    void snapshot_obj_write(uint64_t data_size, uint64_t data_pattern, MultiBlkId& out_blkids) {
         auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
         auto write_sgs = test_common::HSTestHelper::create_sgs(data_size, block_size, data_pattern);
         auto fut = homestore::data_service().async_alloc_write(write_sgs, blk_alloc_hints{}, out_blkids);
@@ -235,7 +235,7 @@ public:
         }
     }
 
-    void write_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) override {
+    void write_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_data) override {
         auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(context)->nuraft_snapshot();
         auto last_committed_idx =
             std::dynamic_pointer_cast< RaftReplDev >(repl_dev())->raft_server()->get_committed_log_idx();
@@ -246,10 +246,10 @@ public:
             return;
         }
 
-        size_t kv_snapshot_data_size = snp_data->blob.size();
-        if (kv_snapshot_data_size == 0) return;
+        size_t kv_snapshot_obj_size = snp_data->blob.size();
+        if (kv_snapshot_obj_size == 0) return;
 
-        size_t num_items = kv_snapshot_data_size / sizeof(KeyValuePair);
+        size_t num_items = kv_snapshot_obj_size / sizeof(KeyValuePair);
         std::unique_lock lk(db_mtx_);
         auto ptr = r_cast< const KeyValuePair* >(snp_data->blob.bytes());
         for (size_t i = 0; i < num_items; i++) {
@@ -261,7 +261,7 @@ public:
             // Write to data service and inmem map.
             MultiBlkId out_blkids;
             if (value.data_size_ != 0) {
-                snapshot_data_write(value.data_size_, value.data_pattern_, out_blkids);
+                snapshot_obj_write(value.data_size_, value.data_pattern_, out_blkids);
                 value.blkid_ = out_blkids;
             }
             inmem_db_.insert_or_assign(key, value);
