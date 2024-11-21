@@ -168,6 +168,7 @@ void repl_req_ctx::clear() {
     m_pkts.clear();
 }
 
+// FIXME: Use lock to avoid concurrent release of data.
 void repl_req_ctx::release_data() {
     m_data = nullptr;
     // explicitly clear m_buf_for_unaligned_data as unaligned pushdata/fetchdata will be saved here
