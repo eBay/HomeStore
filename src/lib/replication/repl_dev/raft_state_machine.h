@@ -86,6 +86,8 @@ class StateMachineStore;
 #define RD_LOGE(...) RD_LOG(ERROR, ##__VA_ARGS__)
 #define RD_LOGC(...) RD_LOG(CRITICAL, ##__VA_ARGS__)
 
+static constexpr uint64_t snp_obj_id_type_mask = 0x8000000000000000;
+
 using AsyncNotify = folly::SemiFuture< folly::Unit >;
 using AsyncNotifier = folly::Promise< folly::Unit >;
 

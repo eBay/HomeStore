@@ -297,6 +297,12 @@ void RaftStateMachine::create_snapshot(nuraft::snapshot& s, nuraft::async_result
 
 int RaftStateMachine::read_logical_snp_obj(nuraft::snapshot& s, void*& user_ctx, ulong obj_id, raft_buf_ptr_t& data_out,
                                            bool& is_last_obj) {
+    if ((obj_id & snp_obj_id_type_mask) == 0) {
+        // This is the preserved msg for homestore to resync data
+        m_rd.create_snp_resync_data(data_out);
+        is_last_obj = false;
+        return 0;
+    }
     auto snp_ctx = std::make_shared< nuraft_snapshot_context >(s);
     auto snp_data = std::make_shared< snapshot_obj >();
     snp_data->user_ctx = user_ctx;
@@ -320,6 +326,14 @@ int RaftStateMachine::read_logical_snp_obj(nuraft::snapshot& s, void*& user_ctx,
 
 void RaftStateMachine::save_logical_snp_obj(nuraft::snapshot& s, ulong& obj_id, nuraft::buffer& data, bool is_first_obj,
                                             bool is_last_obj) {
+    if ((obj_id & snp_obj_id_type_mask) == 0) {
+        // Homestore preserved msg
+        if (m_rd.apply_snp_resync_data(data)) {
+            obj_id = snp_obj_id_type_mask;
+            LOGDEBUG("apply_snp_resync_data success, next obj_id={}", obj_id);
+        }
+        return;
+    }
     auto snp_ctx = std::make_shared< nuraft_snapshot_context >(s);
     auto snp_data = std::make_shared< snapshot_obj >();
     snp_data->offset = obj_id;

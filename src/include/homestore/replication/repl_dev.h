@@ -46,6 +46,10 @@ VENUM(journal_type_t, uint16_t,
       HS_CTRL_REPLACE = 3, // Control message to replace a member
 )
 
+// magic num comes from the first 8 bytes of 'echo homestore_resync_data | md5sum'
+static constexpr uint64_t HOMESTORE_RESYNC_DATA_MAGIC = 0xa65dbd27c213f327;
+static constexpr uint32_t HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1 = 0x01;
+
 struct repl_key {
     int32_t server_id{0}; // Server Id which this req is originated from
     uint64_t term;        // RAFT term number
@@ -118,6 +122,13 @@ struct snapshot_obj {
     sisl::io_blob_safe blob;
     bool is_first_obj{false};
     bool is_last_obj{false};
+};
+
+struct snp_repl_dev_data {
+    uint64_t magic_num{HOMESTORE_RESYNC_DATA_MAGIC};
+    uint32_t protocol_version{HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1};
+    uint32_t crc{0};
+    uint64_t dsn{0};
 };
 
 struct repl_journal_entry;

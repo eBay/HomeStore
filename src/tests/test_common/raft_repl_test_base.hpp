@@ -182,10 +182,22 @@ public:
         return make_async_success<>();
     }
 
+    static int64_t get_next_lsn(uint64_t& obj_id) {
+        return obj_id & 0x7fffffffffffffff;
+    }
+    static void set_resync_msg_type_bit(uint64_t& obj_id) {
+        obj_id |= 1ull << 63;
+    }
+
     int read_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_data) override {
         auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(context)->nuraft_snapshot();
+        if ((snp_data->offset & snp_obj_id_type_mask) == 0) {
+            LOGERRORMOD(replication, "invalid snapshot offset={}", snp_data->offset);
+            return -1;
+        }
 
-        if (snp_data->offset == 0) {
+        int64_t next_lsn = get_next_lsn(snp_data->offset);
+        if (next_lsn == 0) {
             snp_data->is_last_obj = false;
             snp_data->blob = sisl::io_blob_safe(sizeof(ulong));
             LOGINFOMOD(replication,
@@ -194,7 +206,6 @@ public:
             return 0;
         }
 
-        int64_t next_lsn = snp_data->offset;
         std::vector< KeyValuePair > kv_snapshot_obj;
         // we can not use find to get the next element, since if the next lsn is a config lsn , it will not be put into
         // lsn_index_ and as a result, the find will return the end of the map. so here we use lower_bound to get the
@@ -236,11 +247,17 @@ public:
     }
 
     void write_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_data) override {
+        if ((snp_data->offset & snp_obj_id_type_mask) == 0) {
+            LOGERRORMOD(replication, "invalid snapshot offset={}", snp_data->offset);
+            return;
+        }
+        int64_t next_lsn = get_next_lsn(snp_data->offset);
         auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(context)->nuraft_snapshot();
         auto last_committed_idx =
             std::dynamic_pointer_cast< RaftReplDev >(repl_dev())->raft_server()->get_committed_log_idx();
-        if (snp_data->offset == 0) {
+        if (next_lsn == 0) {
             snp_data->offset = last_committed_lsn + 1;
+            set_resync_msg_type_bit(snp_data->offset);
             LOGINFOMOD(replication, "[Replica={}] Save logical snapshot callback return obj_id={}",
                        g_helper->replica_num(), snp_data->offset);
             return;
@@ -271,6 +288,7 @@ public:
         }
 
         snp_data->offset = last_committed_lsn + 1;
+        set_resync_msg_type_bit(snp_data->offset);
         LOGINFOMOD(replication,
                    "[Replica={}] Save logical snapshot callback obj_id={} term={} idx={} is_last={} num_items={}",
                    g_helper->replica_num(), snp_data->offset, s->get_last_log_term(), s->get_last_log_idx(),
