@@ -144,7 +144,8 @@ public:
     MultiBlkId const& local_blkid() const { return m_local_blkid; }
     RemoteBlkId const& remote_blkid() const { return m_remote_blkid; }
     const char* data() const {
-        DEBUG_ASSERT(m_data != nullptr, "m_data is nullptr, use before save_pushed/fetched_data or after release_data()");
+        DEBUG_ASSERT(m_data != nullptr,
+                     "m_data is nullptr, use before save_pushed/fetched_data or after release_data()");
         return r_cast< const char* >(m_data);
     }
     repl_req_state_t state() const { return repl_req_state_t(m_state.load()); }
@@ -349,7 +350,7 @@ public:
     /// @brief Called when the repl_dev is being destroyed. The consumer is expected to clean up any related resources.
     /// However, it is expected that this call be idempotent. It is possible in rare scenarios that this can be called
     /// after restart in case crash happened during the destroy.
-    virtual void on_destroy() = 0;
+    virtual void on_destroy(const group_id_t& group_id) = 0;
 
     /// @brief Called when replace member is performed.
     virtual void on_replace_member(const replica_member_info& member_out, const replica_member_info& member_in) = 0;
@@ -449,6 +450,10 @@ public:
     /// @brief Gets the block size with which IO will happen on this device
     /// @return Block size
     virtual uint32_t get_blk_size() const = 0;
+
+    /// @brief Gets the last commit lsn of this repldev
+    /// @return last_commit_lsn
+    virtual repl_lsn_t get_last_commit_lsn() const = 0;
 
     virtual void attach_listener(shared< ReplDevListener > listener) { m_listener = std::move(listener); }
 

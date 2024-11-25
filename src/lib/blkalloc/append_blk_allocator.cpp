@@ -162,6 +162,13 @@ bool AppendBlkAllocator::is_blk_alloced(const BlkId& in_bid, bool) const {
     return in_bid.blk_num() < get_used_blks();
 }
 
+void AppendBlkAllocator::reset() {
+    m_last_append_offset.store(0);
+    m_freeable_nblks.store(0);
+    m_commit_offset.store(0);
+    m_is_dirty.store(true);
+}
+
 bool AppendBlkAllocator::is_blk_alloced_on_disk(BlkId const& bid, bool) const {
     return bid.blk_num() < m_sb->commit_offset;
 }
