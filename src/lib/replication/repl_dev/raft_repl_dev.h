@@ -182,7 +182,7 @@ public:
     std::string rdev_name() const { return m_rdev_name; }
     std::string my_replica_id_str() const { return boost::uuids::to_string(m_my_repl_id); }
     uint32_t get_blk_size() const override;
-    repl_lsn_t get_last_commit_lsn() const { return m_commit_upto_lsn.load(); }
+    repl_lsn_t get_last_commit_lsn() const override { return m_commit_upto_lsn.load(); }
     void set_last_commit_lsn(repl_lsn_t lsn) { m_commit_upto_lsn.store(lsn); }
     bool is_destroy_pending() const;
     bool is_destroyed() const;
@@ -229,9 +229,7 @@ public:
      *
      * @param num_reserved_entries The number of reserved entries of the replication log.
      */
-    void truncate(uint32_t num_reserved_entries) {
-        m_data_journal->truncate(num_reserved_entries, m_compact_lsn.load());
-    }
+    void truncate(uint32_t num_reserved_entries) { m_data_journal->truncate(num_reserved_entries, m_compact_lsn.load()); }
 
     void wait_for_logstore_ready() { m_data_journal->wait_for_log_store_ready(); }
 

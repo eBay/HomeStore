@@ -204,8 +204,32 @@ raft_buf_ptr_t RaftStateMachine::commit_ext(nuraft::state_machine::ext_op_params
 }
 
 void RaftStateMachine::commit_config(const ulong log_idx, raft_cluster_config_ptr_t& new_conf) {
+    // when reaching here, the config change log has already been committed, and the new config has been applied to the
+    // cluster
+
     RD_LOGD("Raft channel: Commit new cluster conf , log_idx = {}", log_idx);
-    // TODO:add more logic here if necessary
+
+#ifdef _PRERELEASE
+    auto& servers_in_new_conf = new_conf->get_servers();
+    std::vector< int32_t > server_ids_in_new_conf;
+    for (auto& server : servers_in_new_conf)
+        server_ids_in_new_conf.emplace_back(server->get_id());
+
+    auto my_id = m_rd.server_id();
+
+    std::ostringstream oss;
+    auto it = server_ids_in_new_conf.begin();
+    if (it != server_ids_in_new_conf.end()) {
+        oss << *it;
+        ++it;
+    }
+    for (; it != server_ids_in_new_conf.end(); ++it) {
+        oss << "," << *it;
+    }
+
+    RD_LOG(INFO, "Raft channel: server ids in new cluster conf : {}, my_id {}, group_id {}", oss.str(), my_id,
+           m_rd.group_id_str());
+#endif
 }
 
 void RaftStateMachine::rollback_config(const ulong log_idx, raft_cluster_config_ptr_t& conf) {
@@ -242,9 +266,7 @@ void RaftStateMachine::unlink_lsn_to_req(int64_t lsn, repl_req_ptr_t rreq) {
     // it is possible a LSN mapped to different rreq in history
     // due to log overwritten. Verify the rreq before removing
     auto deleted = m_lsn_req_map.erase_if_equal(lsn, rreq);
-    if (deleted) {
-        RD_LOG(DEBUG, "Raft channel: erase lsn {},  rreq {}", lsn, rreq->to_string());
-    }
+    if (deleted) { RD_LOG(DEBUG, "Raft channel: erase lsn {},  rreq {}", lsn, rreq->to_string()); }
 }
 
 void RaftStateMachine::link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn) {

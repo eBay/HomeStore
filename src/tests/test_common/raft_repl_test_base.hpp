@@ -306,10 +306,10 @@ public:
                 boost::uuids::to_string(member_out.id), boost::uuids::to_string(member_in.id));
     }
 
-    void on_destroy() override {
+    void on_destroy(const group_id_t& group_id) override {
         LOGINFOMOD(replication, "[Replica={}] Group={} is being destroyed", g_helper->replica_num(),
-                   boost::uuids::to_string(repl_dev()->group_id()));
-        g_helper->unregister_listener(repl_dev()->group_id());
+                   boost::uuids::to_string(group_id));
+        g_helper->unregister_listener(group_id);
     }
 
     void db_write(uint64_t data_size, uint32_t max_size_per_iov) {

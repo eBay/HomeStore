@@ -914,8 +914,7 @@ void RaftReplDev::handle_rollback(repl_req_ptr_t rreq) {
     if (rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) {
         auto blkid = rreq->local_blkid();
         data_service().async_free_blk(blkid).thenValue([this, blkid](auto&& err) {
-            HS_LOG_ASSERT(!err, "freeing blkid={} upon error failed, potential to cause blk leak",
-                          blkid.to_string());
+            HS_LOG_ASSERT(!err, "freeing blkid={} upon error failed, potential to cause blk leak", blkid.to_string());
             RD_LOGD("Rollback rreq: Releasing blkid={} freed successfully", blkid.to_string());
         });
     }
@@ -1212,7 +1211,7 @@ void RaftReplDev::leave() {
 
     // We let the listener know right away, so that they can cleanup persistent structures soonest. This will
     // reduce the time window of leaked resources if any
-    m_listener->on_destroy();
+    m_listener->on_destroy(group_id());
 
     // Persist that destroy pending in superblk, so that in case of crash before cleanup of resources, it can be done
     // post restart.
@@ -1227,7 +1226,8 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
                                                                               nuraft::cb_func::Param* param) {
     auto ret = nuraft::cb_func::ReturnCode::Ok;
 
-    if (type == nuraft::cb_func::Type::GotAppendEntryReqFromLeader) {
+    switch (type) {
+    case nuraft::cb_func::Type::GotAppendEntryReqFromLeader: {
         auto raft_req = r_cast< nuraft::req_msg* >(param->ctx);
         auto const& entries = raft_req->log_entries();
 
@@ -1276,9 +1276,29 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
             sisl::VectorPool< repl_req_ptr_t >::free(reqs);
         }
         return {true, ret};
-    } else {
-        return {false, ret};
     }
+
+    case nuraft::cb_func::Type::RemovedFromCluster: {
+        // a node will reach here when :
+        // 1. it is removed from the cluster and the new config(excluding this node) is being committed on this node
+        // 2. it is removed from the cluster , but the node is down and new config log(excluding this node) is not
+        // replicated to this removed node. when the node restart, leader will not send any append entry to this node,
+        // since it is not a member of the raft group. it will become a condidate and send request-vote request to other
+        // members of this raft group. a member will send RemovedFromCluster to the node if this member finds the node
+        // is no longer a member of the raft group.
+
+        // this will lazily cleanup the group
+        // TODO:cleanup this repl dev ASAP if necessary.
+        leave();
+
+        return {true, ret};
+    }
+
+    // TODO: Add more type handler if necessary
+    default:
+        break;
+    }
+    return {false, ret};
 }
 
 void RaftReplDev::flush_durable_commit_lsn() {

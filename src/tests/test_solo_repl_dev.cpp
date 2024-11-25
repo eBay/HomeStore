@@ -137,7 +137,7 @@ public:
             LOGINFO("Received error={} on repl_dev", enum_name(error));
         }
         void on_replace_member(const replica_member_info& member_out, const replica_member_info& member_in) override {}
-        void on_destroy() override {}
+        void on_destroy(const group_id_t& group_id) override {}
     };
 
     class Application : public ReplApplication {

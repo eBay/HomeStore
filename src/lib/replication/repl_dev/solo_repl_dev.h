@@ -56,6 +56,8 @@ public:
 
     uuid_t group_id() const override { return m_group_id; }
 
+    repl_lsn_t get_last_commit_lsn() const override { return 0; }
+
     uint32_t get_blk_size() const override;
 
     void cp_flush(CP* cp);

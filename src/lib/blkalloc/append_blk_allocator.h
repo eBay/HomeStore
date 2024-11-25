@@ -38,21 +38,21 @@ struct append_blk_sb_t {
 };
 #pragma pack()
 
-//class AppendBlkAllocMetrics : public sisl::MetricsGroup {
-//public:
-//    explicit AppendBlkAllocMetrics(const char* inst_name) : sisl::MetricsGroup("AppendBlkAlloc", inst_name) {
-//        REGISTER_COUNTER(num_alloc, "Number of blks alloc attempts");
-//        REGISTER_COUNTER(num_alloc_failure, "Number of blk alloc failures");
+// class AppendBlkAllocMetrics : public sisl::MetricsGroup {
+// public:
+//     explicit AppendBlkAllocMetrics(const char* inst_name) : sisl::MetricsGroup("AppendBlkAlloc", inst_name) {
+//         REGISTER_COUNTER(num_alloc, "Number of blks alloc attempts");
+//         REGISTER_COUNTER(num_alloc_failure, "Number of blk alloc failures");
 //
-//        register_me_to_farm();
-//    }
+//         register_me_to_farm();
+//     }
 //
-//    AppendBlkAllocMetrics(const AppendBlkAllocMetrics&) = delete;
-//    AppendBlkAllocMetrics(AppendBlkAllocMetrics&&) noexcept = delete;
-//    AppendBlkAllocMetrics& operator=(const AppendBlkAllocMetrics&) = delete;
-//    AppendBlkAllocMetrics& operator=(AppendBlkAllocMetrics&&) noexcept = delete;
-//    ~AppendBlkAllocMetrics() { deregister_me_from_farm(); }
-//};
+//     AppendBlkAllocMetrics(const AppendBlkAllocMetrics&) = delete;
+//     AppendBlkAllocMetrics(AppendBlkAllocMetrics&&) noexcept = delete;
+//     AppendBlkAllocMetrics& operator=(const AppendBlkAllocMetrics&) = delete;
+//     AppendBlkAllocMetrics& operator=(AppendBlkAllocMetrics&&) noexcept = delete;
+//     ~AppendBlkAllocMetrics() { deregister_me_from_farm(); }
+// };
 
 //
 // The assumption for AppendBlkAllocator:
@@ -108,6 +108,11 @@ public:
 
     std::string to_string() const override;
 
+    /**
+     * @brief : reset the allocator to initial state, so all the blks in this chunk are free.
+     */
+    void reset() override;
+
     void cp_flush(CP* cp) override;
     void recovery_completed() override {}
     nlohmann::json get_status(int log_level) const override;
@@ -121,7 +126,7 @@ private:
     std::atomic< blk_num_t > m_freeable_nblks{0};     // count of blks fragmentedly freed (both on-disk and in-memory)
     std::atomic< blk_num_t > m_commit_offset{0};      // offset in on-disk version
     std::atomic< bool > m_is_dirty{false};
-    //AppendBlkAllocMetrics m_metrics;
+    // AppendBlkAllocMetrics m_metrics;
     superblk< append_blk_sb_t > m_sb; // only cp will be writing to this disk
 };
 

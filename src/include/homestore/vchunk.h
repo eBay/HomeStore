@@ -36,6 +36,7 @@ public:
     uint16_t get_chunk_id() const;
     cshared< Chunk > get_internal_chunk() const;
     uint64_t size() const;
+    void reset();
 
 private:
     shared< Chunk > m_internal_chunk;

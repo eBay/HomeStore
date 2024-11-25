@@ -161,6 +161,7 @@ public:
     virtual bool is_blk_alloced(BlkId const& b, bool use_lock = false) const = 0;
     virtual bool is_blk_alloced_on_disk(BlkId const& b, bool use_lock = false) const = 0;
     virtual void recovery_completed() = 0;
+    virtual void reset() = 0;
 
     virtual std::string to_string() const = 0;
     virtual void cp_flush(CP* cp) = 0;
