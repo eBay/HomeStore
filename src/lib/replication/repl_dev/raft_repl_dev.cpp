@@ -453,8 +453,8 @@ void RaftReplDev::on_push_data_received(intrusive< sisl::GenericRpcData >& rpc_d
                 RD_DBG_ASSERT(false, "Error in writing data, error_code={}", err.value());
                 handle_error(rreq, ReplServiceError::DRIVE_WRITE_ERROR);
             } else {
-                rreq->add_state(repl_req_state_t::DATA_WRITTEN);
                 rreq->release_data();
+                rreq->add_state(repl_req_state_t::DATA_WRITTEN);
                 rreq->m_data_written_promise.setValue();
                 const auto data_log_diff_us =
                     push_data_rcv_time.time_since_epoch().count() > rreq->created_time().time_since_epoch().count()
@@ -872,8 +872,8 @@ void RaftReplDev::handle_fetch_data_response(sisl::GenericClientResponse respons
 
                     RD_REL_ASSERT(!err,
                                   "Error in writing data"); // TODO: Find a way to return error to the Listener
-                    rreq->add_state(repl_req_state_t::DATA_WRITTEN);
                     rreq->release_data();
+                    rreq->add_state(repl_req_state_t::DATA_WRITTEN);
                     rreq->m_data_written_promise.setValue();
 
                     RD_LOGD("Data Channel: Data Write completed rreq=[{}], data_write_latency_us={}, "

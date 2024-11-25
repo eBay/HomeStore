@@ -164,7 +164,6 @@ bool repl_req_ctx::add_state_if_not_already(repl_req_state_t s) {
 void repl_req_ctx::clear() {
     m_header = sisl::blob{};
     m_key = sisl::blob{};
-    release_data();
     m_pkts.clear();
 }
 
@@ -174,7 +173,9 @@ void repl_req_ctx::release_data() {
     // explicitly clear m_buf_for_unaligned_data as unaligned pushdata/fetchdata will be saved here
     m_buf_for_unaligned_data = sisl::io_blob_safe{};
     if (m_pushed_data) {
-        LOGTRACEMOD(replication, "m_pushed_data addr: {}", static_cast<void *>(m_pushed_data.get()));
+        LOGTRACEMOD(replication, "m_pushed_data addr={}, m_rkey={}, m_lsn={}",
+                    static_cast<void *>(m_pushed_data.get()),
+                    m_rkey.to_string(), m_lsn);
         m_pushed_data->send_response();
         m_pushed_data = nullptr;
     }
