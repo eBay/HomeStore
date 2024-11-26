@@ -226,11 +226,11 @@ void HomeStore::format_and_start(std::map< uint32_t, hs_format_params >&& format
         } else if ((svc_type & HS_SERVICE::DATA) && has_data_service()) {
             m_data_service->create_vdev(pct_to_size(fparams.size_pct, fparams.dev_type), fparams.dev_type,
                                         fparams.block_size, fparams.alloc_type, fparams.chunk_sel_type,
-                                        fparams.num_chunks);
+                                        fparams.num_chunks, fparams.chunk_size);
         } else if ((svc_type & HS_SERVICE::REPLICATION) && has_repl_data_service()) {
             m_data_service->create_vdev(pct_to_size(fparams.size_pct, fparams.dev_type), fparams.dev_type,
                                         fparams.block_size, fparams.alloc_type, fparams.chunk_sel_type,
-                                        fparams.num_chunks);
+                                        fparams.num_chunks, fparams.chunk_size);
         }
     }
 

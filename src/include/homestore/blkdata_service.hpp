@@ -56,17 +56,19 @@ public:
 
     /**
      * @brief Creates a new virtual device with the specified size and block size, using the specified
-     * block allocator and chunk selector types. The virtual device will be composed of the specified
-     * number of chunks.
+     * block allocator and chunk selector types. The virtual device will be composed of a number of chunks.
+     * Either `num_chunks` or `chunk_size` must be specified.
+     * Prioritize `num_chunks` over `chunk_size` if both are provided.
      *
      * @param size The size of the virtual device, in bytes.
      * @param blk_size The size of each block in the virtual device, in bytes.
      * @param alloc_type The type of block allocator to use for the virtual device.
      * @param chunk_sel_type The type of chunk selector to use for the virtual device.
      * @param num_chunks The number of chunks to use for the virtual device.
+     * @param chunk_size The size of chunks to use for the virtual device, in bytes.
      */
     void create_vdev(uint64_t size, HSDevType devType, uint32_t blk_size, blk_allocator_type_t alloc_type,
-                     chunk_selector_type_t chunk_sel_type, uint32_t num_chunks);
+                     chunk_selector_type_t chunk_sel_type, uint32_t num_chunks, uint32_t chunk_size);
 
     /**
      * @brief Opens a virtual device with the specified virtual device information.
