@@ -503,7 +503,7 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
     }
 
     // rreq->init will allocate the block if it has linked data.
-    auto status = rreq->init(rkey, code, false /* is_proposer */, user_header, key, data_size, m_listener);
+    auto status = rreq->init(rkey, code, m_raft_server_id == rkey.server_id, user_header, key, data_size, m_listener);
     if (!rreq->has_linked_data()) { return rreq; }
 #ifdef _PRERELEASE
     if (is_data_channel) {
