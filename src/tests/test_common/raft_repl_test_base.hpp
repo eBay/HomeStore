@@ -183,10 +183,10 @@ public:
     }
 
     static int64_t get_next_lsn(uint64_t& obj_id) {
-        return obj_id & 0x7fffffffffffffff;
+        return obj_id & ((1ULL << 63) - 1);
     }
     static void set_resync_msg_type_bit(uint64_t& obj_id) {
-        obj_id |= 1ull << 63;
+        obj_id |= 1ULL << 63;
     }
 
     int read_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_data) override {

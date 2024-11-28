@@ -124,6 +124,8 @@ struct snapshot_obj {
     bool is_last_obj{false};
 };
 
+//HomeStore has some meta information to be transmitted during the baseline resync,
+//Although now only dsn needs to be synced, this structure is defined as a general message, and we can easily add data if needed in the future.
 struct snp_repl_dev_data {
     uint64_t magic_num{HOMESTORE_RESYNC_DATA_MAGIC};
     uint32_t protocol_version{HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1};

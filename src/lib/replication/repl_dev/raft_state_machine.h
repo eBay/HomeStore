@@ -86,7 +86,9 @@ class StateMachineStore;
 #define RD_LOGE(...) RD_LOG(ERROR, ##__VA_ARGS__)
 #define RD_LOGC(...) RD_LOG(CRITICAL, ##__VA_ARGS__)
 
-static constexpr uint64_t snp_obj_id_type_mask = 0x8000000000000000;
+// For the logic snapshot obj_id, we use the highest bit to indicate the type of the snapshot message.
+// 0 is for HS, 1 is for Application.
+static constexpr uint64_t snp_obj_id_type_mask = 1ULL << 63;
 
 using AsyncNotify = folly::SemiFuture< folly::Unit >;
 using AsyncNotifier = folly::Promise< folly::Unit >;

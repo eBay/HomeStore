@@ -297,6 +297,8 @@ void RaftStateMachine::create_snapshot(nuraft::snapshot& s, nuraft::async_result
 
 int RaftStateMachine::read_logical_snp_obj(nuraft::snapshot& s, void*& user_ctx, ulong obj_id, raft_buf_ptr_t& data_out,
                                            bool& is_last_obj) {
+    // For Nuraft baseline resync, we separate the process into two layers: HomeStore layer and Application layer.
+    // We use the highest bit of the obj_id to indicate the message type: 0 is for HS, 1 is for Application.
     if ((obj_id & snp_obj_id_type_mask) == 0) {
         // This is the preserved msg for homestore to resync data
         m_rd.create_snp_resync_data(data_out);
@@ -363,7 +365,10 @@ bool RaftStateMachine::apply_snapshot(nuraft::snapshot& s) {
     m_rd.set_last_commit_lsn(s.get_last_log_idx());
     m_rd.m_data_journal->set_last_durable_lsn(s.get_last_log_idx());
     auto snp_ctx = std::make_shared< nuraft_snapshot_context >(s);
-    return m_rd.m_listener->apply_snapshot(snp_ctx);
+    auto res = m_rd.m_listener->apply_snapshot(snp_ctx);
+    //make sure the changes are flushed.
+    hs()->cp_mgr().trigger_cp_flush(true /* force */);
+    return res;
 }
 
 nuraft::ptr< nuraft::snapshot > RaftStateMachine::last_snapshot() {

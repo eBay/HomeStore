@@ -1510,15 +1510,19 @@ bool RaftReplDev::apply_snp_resync_data(nuraft::buffer& data) {
         return false;
     }
     auto received_crc = msg->crc;
-    msg->crc = 0;
     RD_LOGD("received snapshot resync msg, dsn={}, crc={}, received crc={}", msg->dsn, msg->crc, received_crc);
+    msg->crc = 0;
     auto computed_crc = crc32_ieee(0, reinterpret_cast< const unsigned char* >(msg),
                                    sizeof(snp_repl_dev_data));
     if (received_crc != computed_crc) {
         RD_LOGE("Snapshot resync data crc mismatch, received_crc={}, computed_crc={}", received_crc, computed_crc);
         return false;
     }
-    m_next_dsn = msg->dsn;
+    if (msg->dsn > m_next_dsn) {
+        m_next_dsn = msg->dsn;
+        RD_LOGD("Update next_dsn from {} to {}", m_next_dsn.load(), msg->dsn);
+        return true;
+    }
     return true;
 }
 
