@@ -249,6 +249,25 @@ void RaftStateMachine::rollback_ext(const nuraft::state_machine::ext_op_params& 
     m_rd.handle_rollback(rreq);
 }
 
+int64_t RaftStateMachine::get_next_batch_size_hint_in_bytes() { return next_batch_size_hint; }
+
+int64_t RaftStateMachine::inc_next_batch_size_hint() {
+    constexpr int64_t next_batch_size_hint_limit = 16;
+    // set to minimal if previous hint is negative (i.e do not want any log)
+    if (next_batch_size_hint < 0) {
+        next_batch_size_hint = 1;
+        return next_batch_size_hint;
+    }
+    // Exponential growth till next_batch_size_hint_limit,  set to 0 afterward means leader take control.
+    next_batch_size_hint = next_batch_size_hint * 2 > next_batch_size_hint_limit ? 0 : next_batch_size_hint * 2;
+    return next_batch_size_hint;
+}
+
+int64_t RaftStateMachine::reset_next_batch_size_hint(int64_t new_hint) {
+    next_batch_size_hint = new_hint;
+    return next_batch_size_hint;
+}
+
 void RaftStateMachine::iterate_repl_reqs(std::function< void(int64_t, repl_req_ptr_t rreq) > const& cb) {
     for (auto [key, rreq] : m_lsn_req_map) {
         cb(key, rreq);

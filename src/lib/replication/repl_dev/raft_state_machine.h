@@ -101,6 +101,7 @@ private:
     nuraft::ptr< nuraft::buffer > m_success_ptr; // Preallocate the success return to raft
     // iomgr::timer_handle_t m_wait_blkid_write_timer_hdl{iomgr::null_timer_handle};
     bool m_resync_mode{false};
+    int64_t next_batch_size_hint{0};
 
 public:
     RaftStateMachine(RaftReplDev& rd);
@@ -116,6 +117,7 @@ public:
     void rollback_config(const ulong log_idx, raft_cluster_config_ptr_t& conf) override;
     void rollback_ext(const nuraft::state_machine::ext_op_params& params) override;
     void become_ready();
+    int64_t get_next_batch_size_hint_in_bytes() override;
 
     void create_snapshot(nuraft::snapshot& s, nuraft::async_result< bool >::handler_type& when_done) override;
     int read_logical_snp_obj(nuraft::snapshot& s, void*& user_ctx, ulong obj_id, raft_buf_ptr_t& data_out,
@@ -138,6 +140,8 @@ public:
     void iterate_repl_reqs(std::function< void(int64_t, repl_req_ptr_t rreq) > const& cb);
 
     std::string rdev_name() const;
+    int64_t reset_next_batch_size_hint(int64_t new_hint);
+    int64_t inc_next_batch_size_hint();
 
     static bool is_hs_snp_obj(uint64_t obj_id) { return (obj_id & snp_obj_id_type_app) == 0; }
 

@@ -1261,6 +1261,13 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
                 auto req = m_state_machine->localize_journal_entry_prepare(*entry);
                 if (req == nullptr) {
                     sisl::VectorPool< repl_req_ptr_t >::free(reqs);
+		    // The hint set here will be used by the next after next appendEntry, the next one
+		    // always go with -1 from NuRraft code.
+		    //
+                    // We are rejecting this log entry, meaning we can accept previous log entries.
+		    // If there is nothing we can accept(i==0), that maens we are waiting for commit
+		    // of previous lsn, set it to 1 in this case.
+                    m_state_machine->reset_next_batch_size_hint(std::max(1ul, i));
                     return {true, nuraft::cb_func::ReturnCode::ReturnNull};
                 }
                 reqs->emplace_back(std::move(req));
@@ -1275,6 +1282,7 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
             }
             sisl::VectorPool< repl_req_ptr_t >::free(reqs);
         }
+        if (ret == nuraft::cb_func::ReturnCode::Ok) { m_state_machine->inc_next_batch_size_hint(); }
         return {true, ret};
     }
 
