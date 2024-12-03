@@ -1495,7 +1495,7 @@ void RaftReplDev::create_snp_resync_data(raft_buf_ptr_t& data_out) {
     snp_repl_dev_data msg;
     auto msg_size = sizeof(snp_repl_dev_data);
     msg.dsn = m_next_dsn;
-    auto crc = crc32_ieee(0, reinterpret_cast< const unsigned char* >(&msg), msg_size);
+    auto crc = crc32_ieee(init_crc32, reinterpret_cast< const unsigned char* >(&msg), msg_size);
     RD_LOGD("create snapshot resync msg, dsn={}, crc={}", msg.dsn, crc);
     msg.crc = crc;
     data_out = nuraft::buffer::alloc(msg_size);
@@ -1511,8 +1511,9 @@ bool RaftReplDev::apply_snp_resync_data(nuraft::buffer& data) {
     }
     auto received_crc = msg->crc;
     RD_LOGD("received snapshot resync msg, dsn={}, crc={}, received crc={}", msg->dsn, msg->crc, received_crc);
+    // Clear the crc field before verification, because the crc value computed by leader doesn't contain it.
     msg->crc = 0;
-    auto computed_crc = crc32_ieee(0, reinterpret_cast< const unsigned char* >(msg),
+    auto computed_crc = crc32_ieee(init_crc32, reinterpret_cast< const unsigned char* >(msg),
                                    sizeof(snp_repl_dev_data));
     if (received_crc != computed_crc) {
         RD_LOGE("Snapshot resync data crc mismatch, received_crc={}, computed_crc={}", received_crc, computed_crc);

@@ -88,7 +88,7 @@ class StateMachineStore;
 
 // For the logic snapshot obj_id, we use the highest bit to indicate the type of the snapshot message.
 // 0 is for HS, 1 is for Application.
-static constexpr uint64_t snp_obj_id_type_mask = 1ULL << 63;
+static constexpr uint64_t snp_obj_id_type_app = 1ULL << 63;
 
 using AsyncNotify = folly::SemiFuture< folly::Unit >;
 using AsyncNotifier = folly::Promise< folly::Unit >;
@@ -138,6 +138,8 @@ public:
     void iterate_repl_reqs(std::function< void(int64_t, repl_req_ptr_t rreq) > const& cb);
 
     std::string rdev_name() const;
+
+    static bool is_hs_snp_obj(uint64_t obj_id) { return (obj_id & snp_obj_id_type_app) == 0; }
 
 private:
     void after_precommit_in_leader(const nuraft::raft_server::req_ext_cb_params& params);

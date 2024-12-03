@@ -191,7 +191,11 @@ public:
 
     int read_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_data) override {
         auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(context)->nuraft_snapshot();
-        if ((snp_data->offset & snp_obj_id_type_mask) == 0) {
+        if(RaftStateMachine::is_hs_snp_obj(snp_data->offset)) {
+            LOGERRORMOD(replication, "invalid snapshot offset={}", snp_data->offset);
+            return -1;
+        }
+        if ((snp_data->offset & snp_obj_id_type_app) == 0) {
             LOGERRORMOD(replication, "invalid snapshot offset={}", snp_data->offset);
             return -1;
         }
@@ -247,7 +251,7 @@ public:
     }
 
     void write_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_data) override {
-        if ((snp_data->offset & snp_obj_id_type_mask) == 0) {
+        if (RaftStateMachine::is_hs_snp_obj(snp_data->offset)) {
             LOGERRORMOD(replication, "invalid snapshot offset={}", snp_data->offset);
             return;
         }
