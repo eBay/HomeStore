@@ -223,14 +223,27 @@ nuraft::ptr< std::vector< nuraft::ptr< nuraft::log_entry > > > HomeRaftLogStore:
 
 nuraft::ptr< std::vector< nuraft::ptr< nuraft::log_entry > > >
 HomeRaftLogStore::log_entries_ext(ulong start, ulong end, int64_t batch_size_hint_in_bytes) {
-    // in nuraft , batch_size_hint_in_bytes < 0 indicats that follower is busy now and do not want to receive any more
-    // log entries ATM. here we just send one log entry if this happens which is helpful for nuobject case and no harm
-    // to other case.
-    if (batch_size_hint_in_bytes < 0) end = start + 1;
-
-    // for the case where batch_size_hint_in_bytes >= 0, we do not take any size check here for now.
-    // TODO: limit the size of the returned entries by batch_size_hint_in_bytes int the future if necessary
-    return log_entries(start, end);
+    // WARNING: we interpret batch_size_hint_in_bytes as count as of now.
+    auto batch_size_hint_cnt = batch_size_hint_in_bytes;
+    auto new_end = end;
+    // batch_size_hint_in_bytes < 0 indicats that follower is busy now and do not want to receive any more log entry.
+    if (batch_size_hint_cnt < 0)
+        new_end = start;
+    else if (batch_size_hint_cnt > 0) {
+        // limit to the hint, also prevent overflow by a huge batch_size_hint_cnt
+        if (sisl_unlikely(start + (uint64_t)batch_size_hint_cnt < start)) {
+            new_end = end;
+        } else {
+            new_end = start + (uint64_t)batch_size_hint_cnt;
+        }
+        // limit to original end
+        new_end = std::min(new_end, end);
+    }
+    DEBUG_ASSERT(new_end <= end, "new end {} should be <= original end {}", new_end, end);
+    DEBUG_ASSERT(start <= new_end, "start {} should be <= new_end {}", start, new_end);
+    REPL_STORE_LOG(TRACE, "log_entries_ext, start={} end={}, hint {}, adjusted range {} ~ {}, cnt {}", start, end,
+                   batch_size_hint_cnt, start, new_end, new_end - start);
+    return log_entries(start, new_end);
 }
 
 nuraft::ptr< nuraft::log_entry > HomeRaftLogStore::entry_at(ulong index) {
