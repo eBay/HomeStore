@@ -111,10 +111,10 @@ public:
         AsyncReplResult<> create_snapshot(shared< snapshot_context > context) override {
             return make_async_success<>();
         }
-        int read_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) override {
+        int read_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_data) override {
             return 0;
         }
-        void write_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) override {}
+        void write_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_data) override {}
         bool apply_snapshot(shared< snapshot_context > context) override { return true; }
         shared< snapshot_context > last_snapshot() override { return nullptr; }
         void free_user_snp_ctx(void*& user_snp_ctx) override {}

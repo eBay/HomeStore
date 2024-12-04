@@ -46,6 +46,10 @@ VENUM(journal_type_t, uint16_t,
       HS_CTRL_REPLACE = 3, // Control message to replace a member
 )
 
+// magic num comes from the first 8 bytes of 'echo homestore_resync_data | md5sum'
+static constexpr uint64_t HOMESTORE_RESYNC_DATA_MAGIC = 0xa65dbd27c213f327;
+static constexpr uint32_t HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1 = 0x01;
+
 struct repl_key {
     int32_t server_id{0}; // Server Id which this req is originated from
     uint64_t term;        // RAFT term number
@@ -112,12 +116,21 @@ private:
     nuraft::ptr< nuraft::snapshot > snapshot_;
 };
 
-struct snapshot_data {
+struct snapshot_obj {
     void* user_ctx{nullptr};
-    int64_t offset{0};
+    uint64_t offset{0};
     sisl::io_blob_safe blob;
     bool is_first_obj{false};
     bool is_last_obj{false};
+};
+
+//HomeStore has some meta information to be transmitted during the baseline resync,
+//Although now only dsn needs to be synced, this structure is defined as a general message, and we can easily add data if needed in the future.
+struct snp_repl_dev_data {
+    uint64_t magic_num{HOMESTORE_RESYNC_DATA_MAGIC};
+    uint32_t protocol_version{HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1};
+    uint32_t crc{0};
+    uint64_t dsn{0};
 };
 
 struct repl_journal_entry;
@@ -368,16 +381,16 @@ public:
     /// uses offset given by the follower to the know the current state of the follower.
     /// Leader sends the snapshot data to the follower in batch. This callback is called multiple
     /// times on the leader till all the data is transferred to the follower. is_last_obj in
-    /// snapshot_data will be true once all the data has been trasnferred. After this the raft on
+    /// snapshot_obj will be true once all the data has been trasnferred. After this the raft on
     /// the follower side can do the incremental resync.
-    virtual int read_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) = 0;
+    virtual int read_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_obj) = 0;
 
     /// @brief Called on the follower when the leader sends the data during the baseline resyc.
-    /// is_last_obj in in snapshot_data will be true once all the data has been transfered.
+    /// is_last_obj in in snapshot_obj will be true once all the data has been transfered.
     /// After this the raft on the follower side can do the incremental resync.
-    virtual void write_snapshot_data(shared< snapshot_context > context, shared< snapshot_data > snp_data) = 0;
+    virtual void write_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_obj) = 0;
 
-    /// @brief Free up user-defined context inside the snapshot_data that is allocated during read_snapshot_data.
+    /// @brief Free up user-defined context inside the snapshot_obj that is allocated during read_snapshot_obj.
     virtual void free_user_snp_ctx(void*& user_snp_ctx) = 0;
 
 private:

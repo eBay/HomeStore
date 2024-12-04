@@ -1491,6 +1491,42 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     handle_commit(rreq, true /* recovery */);
 }
 
+void RaftReplDev::create_snp_resync_data(raft_buf_ptr_t& data_out) {
+    snp_repl_dev_data msg;
+    auto msg_size = sizeof(snp_repl_dev_data);
+    msg.dsn = m_next_dsn;
+    auto crc = crc32_ieee(init_crc32, reinterpret_cast< const unsigned char* >(&msg), msg_size);
+    RD_LOGD("create snapshot resync msg, dsn={}, crc={}", msg.dsn, crc);
+    msg.crc = crc;
+    data_out = nuraft::buffer::alloc(msg_size);
+    std::memcpy(data_out->data_begin(), &msg, msg_size);
+}
+
+bool RaftReplDev::apply_snp_resync_data(nuraft::buffer& data) {
+    auto msg = r_cast< snp_repl_dev_data* >(data.data_begin());
+    if (msg->magic_num != HOMESTORE_RESYNC_DATA_MAGIC || msg->protocol_version !=
+        HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1) {
+        RD_LOGE("Snapshot resync data validation failed, magic={}, version={}", msg->magic_num, msg->protocol_version);
+        return false;
+    }
+    auto received_crc = msg->crc;
+    RD_LOGD("received snapshot resync msg, dsn={}, crc={}, received crc={}", msg->dsn, msg->crc, received_crc);
+    // Clear the crc field before verification, because the crc value computed by leader doesn't contain it.
+    msg->crc = 0;
+    auto computed_crc = crc32_ieee(init_crc32, reinterpret_cast< const unsigned char* >(msg),
+                                   sizeof(snp_repl_dev_data));
+    if (received_crc != computed_crc) {
+        RD_LOGE("Snapshot resync data crc mismatch, received_crc={}, computed_crc={}", received_crc, computed_crc);
+        return false;
+    }
+    if (msg->dsn > m_next_dsn) {
+        m_next_dsn = msg->dsn;
+        RD_LOGD("Update next_dsn from {} to {}", m_next_dsn.load(), msg->dsn);
+        return true;
+    }
+    return true;
+}
+
 void RaftReplDev::on_restart() { m_listener->on_restart(); }
 
 bool RaftReplDev::is_resync_mode() {
