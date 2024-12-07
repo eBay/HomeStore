@@ -75,6 +75,10 @@ public:
     // Listener corresponding to the ReplDev which will be used to perform the precommit/commit/rollback.
     virtual shared< ReplDevListener > create_repl_dev_listener(group_id_t group_id) = 0;
 
+    // Called after all the repl devs are found upon restart of the homestore instance.
+    // it is a nice place for upper layer to recovery anything depends on repl_devs
+    virtual void on_repl_devs_init_completed() = 0;
+
     // Given the uuid of the peer, get their address and port
     virtual std::pair< std::string, uint16_t > lookup_peer(replica_id_t uuid) const = 0;
 
