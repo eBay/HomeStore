@@ -131,6 +131,8 @@ void RaftReplService::start() {
         rdev->on_restart();
     }
     m_config_sb_bufs.clear();
+    LOGINFO("Repl devs load completed, calling upper layer on_repl_devs_init_completed");
+    m_repl_app->on_repl_devs_init_completed();
 
     // Step 5: Start the data and logstore service now. This step is essential before we can ask Raft to join groups etc
 
