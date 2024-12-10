@@ -179,7 +179,7 @@ repl_req_ptr_t RaftStateMachine::localize_journal_entry_finish(nuraft::log_entry
 raft_buf_ptr_t RaftStateMachine::pre_commit_ext(nuraft::state_machine::ext_op_params const& params) {
     int64_t lsn = s_cast< int64_t >(params.log_idx);
 
-    repl_req_ptr_t rreq = lsn_to_req(lsn);
+    repl_req_ptr_t rreq = lsn_to_req(to_volatile_lsn(lsn));
     RD_LOGD("Raft channel: Precommit rreq=[{}]", rreq->to_compact_string());
     m_rd.m_listener->on_pre_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq);
 
@@ -293,8 +293,11 @@ void RaftStateMachine::link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn) {
     rreq->add_state(repl_req_state_t::LOG_RECEIVED);
     // reset the rreq created_at time to now https://github.com/eBay/HomeStore/issues/506
     rreq->set_created_time();
-    [[maybe_unused]] auto r = m_lsn_req_map.insert(lsn, std::move(rreq));
-    RD_DBG_ASSERT_EQ(r.second, true, "lsn={} already in precommit list, exist_term={}", lsn, r.first->second->term());
+    auto r = m_lsn_req_map.insert(lsn, std::move(rreq));
+    if (!r.second) {
+        RD_LOG(ERROR, "lsn={} already in precommit list, exist_term={}", lsn, r.first->second->term());
+        // TODO: we need to think about the case where volatile is in the map already, is it safe to overwrite it?
+    }
 }
 
 repl_req_ptr_t RaftStateMachine::lsn_to_req(int64_t lsn) {
@@ -399,5 +402,10 @@ nuraft::ptr< nuraft::snapshot > RaftStateMachine::last_snapshot() {
 void RaftStateMachine::free_user_snp_ctx(void*& user_snp_ctx) { m_rd.m_listener->free_user_snp_ctx(user_snp_ctx); }
 
 std::string RaftStateMachine::rdev_name() const { return m_rd.rdev_name(); }
+
+int64_t RaftStateMachine::to_volatile_lsn(ulong log_idx) {
+    RELEASE_ASSERT(log_idx <= INT64_MAX, "lsn={} is greater than INT64_MAX", log_idx);
+    return - int64_cast(log_idx);
+}
 
 } // namespace homestore

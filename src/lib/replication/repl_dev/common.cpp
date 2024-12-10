@@ -105,7 +105,7 @@ raft_buf_ptr_t& repl_req_ctx::raft_journal_buf() { return std::get< raft_buf_ptr
 uint8_t* repl_req_ctx::raw_journal_buf() { return std::get< std::unique_ptr< uint8_t[] > >(m_journal_buf).get(); }
 
 void repl_req_ctx::set_lsn(int64_t lsn) {
-    DEBUG_ASSERT((m_lsn == -1) || (m_lsn == lsn),
+    DEBUG_ASSERT((m_lsn == -1) || (m_lsn == lsn) || (m_lsn == -lsn),
                  "Changing lsn for request={} on the fly can cause race condition, not expected. lsn {}, m_lsn {}",
                  to_string(), lsn, m_lsn);
     m_lsn = lsn;

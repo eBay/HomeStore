@@ -145,6 +145,14 @@ public:
 
     static bool is_hs_snp_obj(uint64_t obj_id) { return (obj_id & snp_obj_id_type_app) == 0; }
 
+    // There are two types of logs in the m_lsn_req_map: volatile and non-volatile.
+    // A log is considered volatile until it is flushed to the log store at the end of the append operation.
+    // Before this flushing occurs, the log and its associated request can be treated as volatile.
+    // Therefore, the pre_commit operation should utilize the volatile log.
+    // Once the log is flushed to the log store, it converts to a non-volatile state.
+    // At this point, the commit operation can use the non-volatile one.
+    int64_t to_volatile_lsn(ulong log_idx);
+
 private:
     void after_precommit_in_leader(const nuraft::raft_server::req_ext_cb_params& params);
 };
