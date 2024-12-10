@@ -293,8 +293,12 @@ void RaftStateMachine::link_lsn_to_req(repl_req_ptr_t rreq, int64_t lsn) {
     rreq->add_state(repl_req_state_t::LOG_RECEIVED);
     // reset the rreq created_at time to now https://github.com/eBay/HomeStore/issues/506
     rreq->set_created_time();
-    [[maybe_unused]] auto r = m_lsn_req_map.insert(lsn, std::move(rreq));
-    RD_DBG_ASSERT_EQ(r.second, true, "lsn={} already in precommit list, exist_term={}", lsn, r.first->second->term());
+    auto r = m_lsn_req_map.insert(lsn, std::move(rreq));
+    if (!r.second) {
+        RD_LOG(ERROR, "lsn={} already in precommit list, exist_term={}, is_volatile={}",
+               lsn, r.first->second->term(), r.first->second->is_volatile());
+        // TODO: we need to think about the case where volatile is in the map already, is it safe to overwrite it?
+    }
 }
 
 repl_req_ptr_t RaftStateMachine::lsn_to_req(int64_t lsn) {
