@@ -594,7 +594,8 @@ folly::Future< folly::Unit > RaftReplDev::notify_after_data_written(std::vector<
     });
 }
 
-bool RaftReplDev::wait_for_data_receive(std::vector< repl_req_ptr_t > const& rreqs, uint64_t timeout_ms) {
+bool RaftReplDev::wait_for_data_receive(std::vector< repl_req_ptr_t > const& rreqs, uint64_t timeout_ms,
+                                        std::vector< repl_req_ptr_t >* timeout_rreqs) {
     std::vector< folly::Future< folly::Unit > > futs;
     std::vector< repl_req_ptr_t > only_wait_reqs;
     only_wait_reqs.reserve(rreqs.size());
@@ -627,8 +628,17 @@ bool RaftReplDev::wait_for_data_receive(std::vector< repl_req_ptr_t > const& rre
     }
 
     // block waiting here until all the futs are ready (data channel filled in and promises are made);
-    auto all_futs = folly::collectAllUnsafe(futs).wait(std::chrono::milliseconds(timeout_ms));
-    return (all_futs.isReady());
+    auto all_futs_ready = folly::collectAllUnsafe(futs).wait(std::chrono::milliseconds(timeout_ms)).isReady();
+    if (!all_futs_ready && timeout_rreqs != nullptr) {
+        timeout_rreqs->clear();
+        for (size_t i{0}; i < futs.size(); ++i) {
+            if (!futs[i].isReady()) {
+                timeout_rreqs->emplace_back(only_wait_reqs[i]);
+            }
+        }
+        all_futs_ready = timeout_rreqs->empty();
+    }
+    return all_futs_ready;
 }
 
 void RaftReplDev::check_and_fetch_remote_data(std::vector< repl_req_ptr_t > rreqs) {
@@ -953,18 +963,26 @@ void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
 
 void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err) {
     if (err == ReplServiceError::OK) { return; }
+    RD_LOGE("Raft Channel: Error in processing rreq=[{}] error={}", rreq->to_string(), err);
 
     if (!rreq->add_state_if_not_already(repl_req_state_t::ERRORED)) {
-        RD_LOGE("Raft Channel: Error in processing rreq=[{}] error={}", rreq->to_string(), err);
+        RD_LOGE("Raft Channel: Error has been added for rreq=[{}] error={}", rreq->to_string(), err);
         return;
     }
 
     // Remove from the map and thus its no longer accessible from applier_create_req
     m_repl_key_req_map.erase(rreq->rkey());
 
-    if (rreq->op_code() == journal_type_t::HS_DATA_INLINED) {
+    // Remove from the lsn map, so that it is no longer accessible from the state machine
+    // Since handle_error and append_log may occur concurrently,
+    // this removal is effective only if append_log is already processed
+    if (m_state_machine->lsn_to_req(rreq->lsn()) != nullptr) {
+        RD_LOGW("Raft Channel: rreq=[{}] already existed in state machine, removing it", rreq->to_string());
+        m_state_machine->unlink_lsn_to_req(rreq->lsn(), rreq);
+    }
+
+    if (rreq->op_code() == journal_type_t::HS_DATA_LINKED) {
         // Free the blks which is allocated already
-        RD_LOGE("Raft Channel: Error in processing rreq=[{}] error={}", rreq->to_string(), err);
         if (rreq->has_state(repl_req_state_t::BLK_ALLOCATED)) {
             auto blkid = rreq->local_blkid();
             data_service().async_free_blk(blkid).thenValue([blkid](auto&& err) {
@@ -1274,8 +1292,9 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
             }
 
             // Wait till we receive the data from its originator for all the requests
-            if (!wait_for_data_receive(*reqs, HS_DYNAMIC_CONFIG(consensus.data_receive_timeout_ms))) {
-                for (auto const& rreq : *reqs) {
+            std::vector< repl_req_ptr_t > timeout_rreqs;
+            if (!wait_for_data_receive(*reqs, HS_DYNAMIC_CONFIG(consensus.data_receive_timeout_ms), &timeout_rreqs)) {
+                for (auto const& rreq : timeout_rreqs) {
                     handle_error(rreq, ReplServiceError::TIMEOUT);
                 }
                 ret = nuraft::cb_func::ReturnCode::ReturnNull;
