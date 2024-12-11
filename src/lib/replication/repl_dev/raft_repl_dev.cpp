@@ -1197,11 +1197,13 @@ std::shared_ptr< nuraft::state_machine > RaftReplDev::get_state_machine() { retu
 
 void RaftReplDev::permanent_destroy() {
     RD_LOGI("Permanent destroy for raft repl dev group_id={}", group_id_str());
-    m_rd_sb.destroy();
     m_raft_config_sb.destroy();
     m_data_journal->remove_store();
     logstore_service().destroy_log_dev(m_data_journal->logdev_id());
     m_stage.update([](auto* stage) { *stage = repl_dev_stage_t::PERMANENT_DESTROYED; });
+    // we should destroy repl_dev superblk only after all the resources are cleaned up, so that is crash recovery
+    // occurs, we have a chance to find the stale repl_dev and reclaim all the stale resources.
+    m_rd_sb.destroy();
 }
 
 void RaftReplDev::leave() {
@@ -1261,12 +1263,12 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
                 auto req = m_state_machine->localize_journal_entry_prepare(*entry);
                 if (req == nullptr) {
                     sisl::VectorPool< repl_req_ptr_t >::free(reqs);
-		    // The hint set here will be used by the next after next appendEntry, the next one
-		    // always go with -1 from NuRraft code.
-		    //
+                    // The hint set here will be used by the next after next appendEntry, the next one
+                    // always go with -1 from NuRraft code.
+                    //
                     // We are rejecting this log entry, meaning we can accept previous log entries.
-		    // If there is nothing we can accept(i==0), that maens we are waiting for commit
-		    // of previous lsn, set it to 1 in this case.
+                    // If there is nothing we can accept(i==0), that maens we are waiting for commit
+                    // of previous lsn, set it to 1 in this case.
                     m_state_machine->reset_next_batch_size_hint(std::max(1ul, i));
                     return {true, nuraft::cb_func::ReturnCode::ReturnNull};
                 }
@@ -1512,8 +1514,8 @@ void RaftReplDev::create_snp_resync_data(raft_buf_ptr_t& data_out) {
 
 bool RaftReplDev::apply_snp_resync_data(nuraft::buffer& data) {
     auto msg = r_cast< snp_repl_dev_data* >(data.data_begin());
-    if (msg->magic_num != HOMESTORE_RESYNC_DATA_MAGIC || msg->protocol_version !=
-        HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1) {
+    if (msg->magic_num != HOMESTORE_RESYNC_DATA_MAGIC ||
+        msg->protocol_version != HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1) {
         RD_LOGE("Snapshot resync data validation failed, magic={}, version={}", msg->magic_num, msg->protocol_version);
         return false;
     }
@@ -1521,8 +1523,8 @@ bool RaftReplDev::apply_snp_resync_data(nuraft::buffer& data) {
     RD_LOGD("received snapshot resync msg, dsn={}, crc={}, received crc={}", msg->dsn, msg->crc, received_crc);
     // Clear the crc field before verification, because the crc value computed by leader doesn't contain it.
     msg->crc = 0;
-    auto computed_crc = crc32_ieee(init_crc32, reinterpret_cast< const unsigned char* >(msg),
-                                   sizeof(snp_repl_dev_data));
+    auto computed_crc =
+        crc32_ieee(init_crc32, reinterpret_cast< const unsigned char* >(msg), sizeof(snp_repl_dev_data));
     if (received_crc != computed_crc) {
         RD_LOGE("Snapshot resync data crc mismatch, received_crc={}, computed_crc={}", received_crc, computed_crc);
         return false;

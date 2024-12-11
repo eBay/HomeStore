@@ -384,7 +384,26 @@ void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
     }
 
     if (rd_sb->destroy_pending == 0x1) {
-        LOGINFOMOD(replication, "ReplDev group_id={} was destroyed, skipping the load", group_id);
+        LOGINFOMOD(replication, "ReplDev group_id={} was destroyed, reclaim the stale resource", group_id);
+        // if we do not add the repl_dev to m_rd_map, it will not be permanently destroyed since gc thread finds the
+        // pending destroy repl_dev only from m_rd_map. so, we should try to reclaim all the repl_dev stale resources
+        // here.
+
+        // 1 since we permanantly destroy the repl_dev here, it will not join_raft group where raft_server will be
+        // created. hence , no need to detroy it through nuraft_mesg, where raft_server will be shutdown.
+        // 2  m_raft_config_sb will be destroyed in raft_group_config_found() method if repl_dev is is not found, so
+        // skip it.
+
+        // 3 try to destroy logstore related resources.
+        logstore_id_t logstore_id = rd_sb->logstore_id;
+        logdev_id_t logdev_id = rd_sb->logdev_id;
+        LOGINFOMOD(replication, "remove logstore {} and logdev {} for group {}", logstore_id, logdev_id, group_id);
+        logstore_service().remove_log_store(logdev_id, logstore_id);
+        logstore_service().destroy_log_dev(logdev_id);
+
+        // 4 destroy the superblk, and after this,  the repl_dev will not be loaded and found again.
+        rd_sb.destroy();
+
         return;
     }
 
