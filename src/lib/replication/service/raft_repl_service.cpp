@@ -128,7 +128,8 @@ void RaftReplService::start() {
     // We need to first load the repl_dev with its config and then attach the raft config to that repl dev.
     for (auto const& [buf, mblk] : m_config_sb_bufs) {
         auto rdev = raft_group_config_found(buf, voidptr_cast(mblk));
-        rdev->on_restart();
+        // if repl_dev is in destroy_pending state, it will not be loaded.
+        if (rdev) rdev->on_restart();
     }
     m_config_sb_bufs.clear();
     LOGINFO("Repl devs load completed, calling upper layer on_repl_devs_init_completed");
