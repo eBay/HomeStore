@@ -641,7 +641,10 @@ void LogDev::remove_log_store(logstore_id_t store_id) {
     {
         folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);
         auto ret = m_id_logstore_map.erase(store_id);
-        HS_REL_ASSERT((ret == 1), "try to remove invalid store_id {}-{}", m_logdev_id, store_id);
+        if (ret == 0) {
+            LOGWARN("try to remove invalid store_id {}-{}", m_logdev_id, store_id);
+            return;
+        }
     }
     unreserve_store_id(store_id);
 }

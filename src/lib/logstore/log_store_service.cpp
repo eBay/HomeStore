@@ -286,7 +286,10 @@ void LogStoreService::remove_log_store(logdev_id_t logdev_id, logstore_id_t stor
     folly::SharedMutexWritePriority::WriteHolder holder(m_logdev_map_mtx);
     COUNTER_INCREMENT(m_metrics, logstores_count, 1);
     const auto it = m_id_logdev_map.find(logdev_id);
-    HS_REL_ASSERT((it != m_id_logdev_map.end()), "logdev id {} doesnt exist", logdev_id);
+    if (it == m_id_logdev_map.end()) {
+        HS_LOG(WARN, logstore, "logdev id {} doesnt exist", logdev_id);
+        return;
+    }
     it->second->remove_log_store(store_id);
     COUNTER_DECREMENT(m_metrics, logstores_count, 1);
 }
