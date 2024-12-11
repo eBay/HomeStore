@@ -1261,12 +1261,12 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
                 auto req = m_state_machine->localize_journal_entry_prepare(*entry);
                 if (req == nullptr) {
                     sisl::VectorPool< repl_req_ptr_t >::free(reqs);
-		    // The hint set here will be used by the next after next appendEntry, the next one
-		    // always go with -1 from NuRraft code.
-		    //
+                    // The hint set here will be used by the next after next appendEntry, the next one
+                    // always go with -1 from NuRraft code.
+                    //
                     // We are rejecting this log entry, meaning we can accept previous log entries.
-		    // If there is nothing we can accept(i==0), that maens we are waiting for commit
-		    // of previous lsn, set it to 1 in this case.
+                    // If there is nothing we can accept(i==0), that maens we are waiting for commit
+                    // of previous lsn, set it to 1 in this case.
                     m_state_machine->reset_next_batch_size_hint(std::max(1ul, i));
                     return {true, nuraft::cb_func::ReturnCode::ReturnNull};
                 }
@@ -1485,15 +1485,19 @@ void RaftReplDev::on_log_found(logstore_seq_num_t lsn, log_buffer buf, void* ctx
     rreq->add_state(repl_req_state_t::LOG_FLUSHED);
     RD_LOGD("Replay log on restart, rreq=[{}]", rreq->to_string());
 
+    // 2. Pre-commit the log entry as in nuraft pre-commit was called once log appended to logstore.
+    m_listener->on_pre_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq);
+
+    // LSN above dc_lsn we forgot their states,  they can either
+    // a. be committed before, but DC_LSN not yet flushed
+    // b. not yet committed,  might be committed or rollback
     if (repl_lsn > m_rd_sb->durable_commit_lsn) {
         // In memory state of these blks is lost. Commit them now to avoid usage of same blk twice.
         commit_blk(rreq);
+        // add rreq to state machine, state-machine will decide to commit or rollback this rreq.
         m_state_machine->link_lsn_to_req(rreq, int64_cast(repl_lsn));
         return;
     }
-
-    // 2. Pre-commit the log entry
-    m_listener->on_pre_commit(rreq->lsn(), rreq->header(), rreq->key(), rreq);
 
     // 3. Commit the log entry
     handle_commit(rreq, true /* recovery */);
@@ -1512,8 +1516,8 @@ void RaftReplDev::create_snp_resync_data(raft_buf_ptr_t& data_out) {
 
 bool RaftReplDev::apply_snp_resync_data(nuraft::buffer& data) {
     auto msg = r_cast< snp_repl_dev_data* >(data.data_begin());
-    if (msg->magic_num != HOMESTORE_RESYNC_DATA_MAGIC || msg->protocol_version !=
-        HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1) {
+    if (msg->magic_num != HOMESTORE_RESYNC_DATA_MAGIC ||
+        msg->protocol_version != HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1) {
         RD_LOGE("Snapshot resync data validation failed, magic={}, version={}", msg->magic_num, msg->protocol_version);
         return false;
     }
@@ -1521,8 +1525,8 @@ bool RaftReplDev::apply_snp_resync_data(nuraft::buffer& data) {
     RD_LOGD("received snapshot resync msg, dsn={}, crc={}, received crc={}", msg->dsn, msg->crc, received_crc);
     // Clear the crc field before verification, because the crc value computed by leader doesn't contain it.
     msg->crc = 0;
-    auto computed_crc = crc32_ieee(init_crc32, reinterpret_cast< const unsigned char* >(msg),
-                                   sizeof(snp_repl_dev_data));
+    auto computed_crc =
+        crc32_ieee(init_crc32, reinterpret_cast< const unsigned char* >(msg), sizeof(snp_repl_dev_data));
     if (received_crc != computed_crc) {
         RD_LOGE("Snapshot resync data crc mismatch, received_crc={}, computed_crc={}", received_crc, computed_crc);
         return false;
