@@ -124,8 +124,9 @@ struct snapshot_obj {
     bool is_last_obj{false};
 };
 
-//HomeStore has some meta information to be transmitted during the baseline resync,
-//Although now only dsn needs to be synced, this structure is defined as a general message, and we can easily add data if needed in the future.
+// HomeStore has some meta information to be transmitted during the baseline resync,
+// Although now only dsn needs to be synced, this structure is defined as a general message, and we can easily add data
+// if needed in the future.
 struct snp_repl_dev_data {
     uint64_t magic_num{HOMESTORE_RESYNC_DATA_MAGIC};
     uint32_t protocol_version{HOMESTORE_RESYNC_DATA_PROTOCOL_VERSION_V1};
@@ -467,6 +468,10 @@ public:
     /// @brief Gets the last commit lsn of this repldev
     /// @return last_commit_lsn
     virtual repl_lsn_t get_last_commit_lsn() const = 0;
+
+    /// @brief if this replica is ready for accepting client IO.
+    /// @return true if ready, false otherwise
+    virtual bool is_ready_for_traffic() const = 0;
 
     virtual void attach_listener(shared< ReplDevListener > listener) { m_listener = std::move(listener); }
 

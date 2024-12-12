@@ -385,7 +385,7 @@ bool RaftStateMachine::apply_snapshot(nuraft::snapshot& s) {
     m_rd.m_data_journal->set_last_durable_lsn(s.get_last_log_idx());
     auto snp_ctx = std::make_shared< nuraft_snapshot_context >(s);
     auto res = m_rd.m_listener->apply_snapshot(snp_ctx);
-    //make sure the changes are flushed.
+    // make sure the changes are flushed.
     hs()->cp_mgr().trigger_cp_flush(true /* force */).get();
     return res;
 }
