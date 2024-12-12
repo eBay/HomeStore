@@ -350,6 +350,10 @@ public:
 
     void validate_db_data() {
         g_helper->runner().set_num_tasks(inmem_db_.size());
+        while (!repl_dev()->is_ready_for_traffic()) {
+            LOGINFO("not yet ready for traffic, waiting");
+            std::this_thread::sleep_for(std::chrono::milliseconds{500});
+        }
 
         LOGINFOMOD(replication, "[{}]: Total {} keys committed, validating them",
                    boost::uuids::to_string(repl_dev()->group_id()), inmem_db_.size());
@@ -554,7 +558,8 @@ public:
         if (dbs_[0]->repl_dev() == nullptr) return;
 
         do {
-            auto leader_uuid = dbs_[0]->repl_dev()->get_leader_id();
+            auto repl_dev = dbs_[0]->repl_dev();
+            auto leader_uuid = repl_dev->get_leader_id();
 
             if (leader_uuid.is_nil()) {
                 LOGINFO("Waiting for leader to be elected");
@@ -562,6 +567,10 @@ public:
             } else if (leader_uuid == g_helper->my_replica_id()) {
                 LOGINFO("Writing {} entries since I am the leader my_uuid={}", num_entries,
                         boost::uuids::to_string(g_helper->my_replica_id()));
+                if (!repl_dev->is_ready_for_traffic()) {
+                    LOGINFO("leader is not yet ready for traffic, waiting");
+                    std::this_thread::sleep_for(std::chrono::milliseconds{500});
+                }
                 auto const block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
                 g_helper->runner().set_num_tasks(num_entries);
 

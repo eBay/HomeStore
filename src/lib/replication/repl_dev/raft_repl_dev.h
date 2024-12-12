@@ -137,6 +137,10 @@ private:
 
     std::atomic< repl_lsn_t > m_commit_upto_lsn{0}; // LSN which was lastly written, to track flushes
     std::atomic< repl_lsn_t > m_compact_lsn{0};     // LSN upto which it was compacted, it is used to track where to
+    // The `traffic_ready_lsn` variable holds the Log Sequence Number (LSN) up to which
+    // the state machine should committed to before accepting traffic. This threshold ensures that
+    // all potential committed log be committed before handling incoming requests.
+    std::atomic< repl_lsn_t > m_traffic_ready_lsn{0};
 
     std::mutex m_sb_mtx; // Lock to protect the repl dev superblock
 
@@ -187,6 +191,13 @@ public:
     bool is_destroy_pending() const;
     bool is_destroyed() const;
     Clock::time_point destroyed_time() const { return m_destroyed_time; }
+    bool is_ready_for_traffic() const {
+        auto committed_lsn = m_commit_upto_lsn.load();
+        auto gate = m_traffic_ready_lsn.load();
+        bool ready = committed_lsn >= gate;
+        if (!ready) { RD_LOGD("Not yet ready for traffic, committed to {} but gate is {}", committed_lsn, gate); }
+        return ready;
+    }
 
     //////////////// Accessor/shortcut methods ///////////////////////
     nuraft_mesg::repl_service_ctx* group_msg_service();
@@ -206,6 +217,20 @@ public:
     cshared< ReplDevCPContext > get_cp_ctx(CP* cp);
     void cp_cleanup(CP* cp);
     void become_ready();
+    void become_leader_cb() {
+        auto new_gate = raft_server()->get_last_log_idx();
+        repl_lsn_t existing_gate = 0;
+        if (!m_traffic_ready_lsn.compare_exchange_strong(existing_gate, new_gate)) {
+            // was a follower, m_traffic_ready_lsn should be zero on follower.
+            RD_REL_ASSERT(existing_gate == 0, "existing gate should be zero");
+        }
+        RD_LOGD("become_leader_cb: setting traffic_ready_lsn from {} to {}", existing_gate, new_gate);
+    };
+    void become_follower_cb() {
+        // m_traffic_ready_lsn should be zero on follower.
+        m_traffic_ready_lsn.store(0);
+        RD_LOGD("become_follower_cb setting  traffic_ready_lsn to 0");
+    }
 
     /// @brief This method is called when the data journal is compacted
     ///
@@ -270,8 +295,8 @@ protected:
     std::shared_ptr< nuraft::state_machine > get_state_machine() override;
     void permanent_destroy() override;
     void leave() override;
-    std::pair< bool, nuraft::cb_func::ReturnCode > handle_raft_event(nuraft::cb_func::Type,
-                                                                     nuraft::cb_func::Param*) override;
+
+    nuraft::cb_func::ReturnCode raft_event(nuraft::cb_func::Type, nuraft::cb_func::Param*) override;
 
 private:
     shared< nuraft::log_store > data_journal() { return m_data_journal; }

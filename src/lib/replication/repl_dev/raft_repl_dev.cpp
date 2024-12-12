@@ -1237,8 +1237,7 @@ void RaftReplDev::leave() {
     m_destroy_promise.setValue(ReplServiceError::OK); // In case proposer is waiting for the destroy to complete
 }
 
-std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nuraft::cb_func::Type type,
-                                                                              nuraft::cb_func::Param* param) {
+nuraft::cb_func::ReturnCode RaftReplDev::raft_event(nuraft::cb_func::Type type, nuraft::cb_func::Param* param) {
     auto ret = nuraft::cb_func::ReturnCode::Ok;
 
     switch (type) {
@@ -1283,7 +1282,7 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
                     // If there is nothing we can accept(i==0), that maens we are waiting for commit
                     // of previous lsn, set it to 1 in this case.
                     m_state_machine->reset_next_batch_size_hint(std::max(1ul, i));
-                    return {true, nuraft::cb_func::ReturnCode::ReturnNull};
+                    return nuraft::cb_func::ReturnCode::ReturnNull;
                 }
                 reqs->emplace_back(std::move(req));
             }
@@ -1298,7 +1297,21 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
             sisl::VectorPool< repl_req_ptr_t >::free(reqs);
         }
         if (ret == nuraft::cb_func::ReturnCode::Ok) { m_state_machine->inc_next_batch_size_hint(); }
-        return {true, ret};
+        return ret;
+    }
+    case nuraft::cb_func::Type::JoinedCluster:
+        RD_LOGD("Raft channel: Received JoinedCluster, implies become_follower");
+        become_follower_cb();
+        return nuraft::cb_func::ReturnCode::Ok;
+    case nuraft::cb_func::Type::BecomeFollower: {
+        RD_LOGD("Raft channel: Received BecomeFollower");
+        become_follower_cb();
+        return nuraft::cb_func::ReturnCode::Ok;
+    }
+    case nuraft::cb_func::Type::BecomeLeader: {
+        RD_LOGD("Raft channel: Received BecomeLeader");
+        become_leader_cb();
+        return nuraft::cb_func::ReturnCode::Ok;
     }
 
     // RemovedFromCluster will be handled in nuraft_mesg::generic_raft_event_handler where leave() is called
@@ -1307,7 +1320,7 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
     default:
         break;
     }
-    return {false, ret};
+    return nuraft::cb_func::ReturnCode::Ok;
 }
 
 void RaftReplDev::flush_durable_commit_lsn() {
