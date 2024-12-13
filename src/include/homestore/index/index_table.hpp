@@ -79,7 +79,7 @@ public:
 
     void destroy() override {
         auto cpg = cp_mgr().cp_guard();
-        Btree<K, V>::destroy_btree(cpg.context(cp_consumer_t::INDEX_SVC));
+        Btree< K, V >::destroy_btree(cpg.context(cp_consumer_t::INDEX_SVC));
         m_sb.destroy();
     }
 
@@ -114,11 +114,40 @@ public:
         return ret;
     }
 
+    void repair_root_node(IndexBufferPtr const& idx_buf) override {
+        LOGTRACEMOD(wbcache, "check if this was the previous root node {} for buf {} ", m_sb->root_node,
+                    idx_buf->to_string());
+        if (m_sb->root_node == idx_buf->blkid().to_integer()) {
+            // This is the root node, we need to update the root node in superblk
+            LOGTRACEMOD(wbcache, "{} is old root so we need to update the meta node ", idx_buf->to_string());
+            BtreeNode* n = this->init_node(idx_buf->raw_buffer(), idx_buf->blkid().to_integer(), false /* init_buf */,
+                                           BtreeNode::identify_leaf_node(idx_buf->raw_buffer()));
+            static_cast< IndexBtreeNode* >(n)->attach_buf(idx_buf);
+            auto edge_id = n->next_bnode();
+
+            BT_DBG_ASSERT(!n->has_valid_edge(),
+                          "root {} already has a valid edge {}, so we should have found the new root node",
+                          n->to_string(), n->get_edge_value().bnode_id());
+            n->set_next_bnode(empty_bnodeid);
+            n->set_edge_value(BtreeLinkInfo{edge_id, 0});
+            LOGTRACEMOD(wbcache, "change root node {}: edge updated to {} and invalidate the next node! ", n->node_id(),
+                        edge_id);
+            auto cpg = cp_mgr().cp_guard();
+            write_node_impl(n, (void*)cpg.context(cp_consumer_t::INDEX_SVC));
+
+        } else {
+            LOGTRACEMOD(wbcache, "This is not the root node, so we can ignore this repair call for buf {}",
+                        idx_buf->to_string());
+        }
+    }
+
     void repair_node(IndexBufferPtr const& idx_buf) override {
         if (idx_buf->is_meta_buf()) {
             // We cannot repair the meta buf on its own, we need to repair the root node which modifies the
             // meta_buf. It is ok to ignore this call, because repair will be done from root before meta_buf is
             // attempted to repair, which would have updated the meta_buf already.
+            LOGTRACEMOD(wbcache, "Ignoring repair on meta buf {} root id {} ", idx_buf->to_string(),
+                        this->root_node_id());
             return;
         }
         BtreeNode* n = this->init_node(idx_buf->raw_buffer(), idx_buf->blkid().to_integer(), false /* init_buf */,
@@ -134,13 +163,14 @@ public:
         // Only for interior nodes we need to repair its links
         if (!bn->is_leaf()) {
             LOGTRACEMOD(wbcache, "repair_node cp={} buf={}", cpg->id(), idx_buf->to_string());
-            repair_links(bn, (void *) cpg.context(cp_consumer_t::INDEX_SVC));
+            repair_links(bn, (void*)cpg.context(cp_consumer_t::INDEX_SVC));
         }
 
         if (idx_buf->m_up_buffer && idx_buf->m_up_buffer->is_meta_buf()) {
             // Our up buffer is a meta buffer, which means that we are the new root node, we need to update the
             // meta_buf with new root as well
-            on_root_changed(bn, (void *) cpg.context(cp_consumer_t::INDEX_SVC));
+            LOGTRACEMOD(wbcache, "root change for after repairing {}\n\n", idx_buf->to_string());
+            on_root_changed(bn, (void*)cpg.context(cp_consumer_t::INDEX_SVC));
         }
     }
 
@@ -227,10 +257,11 @@ protected:
         wb_cache().free_buf(n->m_idx_buf, r_cast< CPContext* >(context));
     }
 
-    btree_status_t
-    on_root_changed(BtreeNodePtr const &new_root, void *context) override {
+    btree_status_t on_root_changed(BtreeNodePtr const& new_root, void* context) override {
         // todo: if(m_sb->root_node == new_root->node_id() && m_sb->root_link_version == new_root->link_version()){
         // return btree_status_t::success;}
+        LOGTRACEMOD(wbcache, "root changed for index old_root={} new_root={}", m_sb->root_node,
+                    new_root->node_id());
         m_sb->root_node = new_root->node_id();
         m_sb->root_link_version = new_root->link_version();
 
@@ -240,7 +271,7 @@ protected:
         }
 
         auto& root_buf = static_cast< IndexBtreeNode* >(new_root.get())->m_idx_buf;
-        wb_cache().transact_bufs(ordinal(), m_sb_buffer, root_buf, {}, {}, r_cast<CPContext *>(context));
+        wb_cache().transact_bufs(ordinal(), m_sb_buffer, root_buf, {}, {}, r_cast< CPContext* >(context));
         return btree_status_t::success;
     }
 
@@ -257,7 +288,7 @@ protected:
         }
 
         // Get all original child ids as a support to check if we are beyond the last child node
-        std::set<bnodeid_t> orig_child_ids;
+        std::set< bnodeid_t > orig_child_ids;
         for (uint32_t i = 0; i < parent_node->total_entries(); ++i) {
             BtreeLinkInfo link_info;
             parent_node->get_nth_value(i, &link_info, true);
@@ -391,9 +422,7 @@ protected:
             }
         } while (true);
 
-        if (child_node) {
-            this->unlock_node(child_node, locktype_t::READ);
-        }
+        if (child_node) { this->unlock_node(child_node, locktype_t::READ); }
 
         if (parent_node->total_entries() == 0 && !parent_node->has_valid_edge()) {
             // We shouldn't have an empty interior node in the tree, let's delete it.
