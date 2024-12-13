@@ -1,10 +1,9 @@
-name: Homestore PR Build
+name: Homestore v3 PR Build
 
 on:
   pull_request:
     branches:
-      - master
-      - stable/**
+      - stable/v3.**
 
 jobs:
   Build:
