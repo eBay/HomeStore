@@ -273,12 +273,13 @@ std::shared_ptr< HomeLogStore > LogStoreService::create_new_log_store(logdev_id_
 }
 
 folly::Future< shared< HomeLogStore > > LogStoreService::open_log_store(logdev_id_t logdev_id, logstore_id_t store_id,
-                                                                        bool append_mode) {
+                                                                        bool append_mode, log_found_cb_t log_found_cb,
+                                                                        log_replay_done_cb_t log_replay_done_cb) {
     folly::SharedMutexWritePriority::ReadHolder holder(m_logdev_map_mtx);
     const auto it = m_id_logdev_map.find(logdev_id);
     HS_REL_ASSERT((it != m_id_logdev_map.end()), "logdev id {} doesnt exist", logdev_id);
     COUNTER_INCREMENT(m_metrics, logstores_count, 1);
-    return it->second->open_log_store(store_id, append_mode);
+    return it->second->open_log_store(store_id, append_mode, log_found_cb, log_replay_done_cb);
 }
 
 void LogStoreService::remove_log_store(logdev_id_t logdev_id, logstore_id_t store_id) {

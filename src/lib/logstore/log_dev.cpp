@@ -617,7 +617,9 @@ std::shared_ptr< HomeLogStore > LogDev::create_new_log_store(bool append_mode) {
     return lstore;
 }
 
-folly::Future< shared< HomeLogStore > > LogDev::open_log_store(logstore_id_t store_id, bool append_mode) {
+folly::Future< shared< HomeLogStore > > LogDev::open_log_store(logstore_id_t store_id, bool append_mode,
+                                                               log_found_cb_t log_found_cb,
+                                                               log_replay_done_cb_t log_replay_done_cb) {
     folly::SharedMutexWritePriority::WriteHolder holder(m_store_map_mtx);
     auto it = m_id_logstore_map.find(store_id);
     if (it == m_id_logstore_map.end()) {
@@ -626,6 +628,8 @@ folly::Future< shared< HomeLogStore > > LogDev::open_log_store(logstore_id_t sto
                                                                     logstore_info{
                                                                         .log_store = nullptr,
                                                                         .append_mode = append_mode,
+                                                                        .log_found_cb = log_found_cb,
+                                                                        .log_replay_done_cb = log_replay_done_cb,
                                                                     }));
         HS_REL_ASSERT_EQ(happened, true, "Unable to insert logstore into id_logstore_map");
     }
@@ -658,6 +662,8 @@ void LogDev::on_log_store_found(logstore_id_t store_id, const logstore_superblk&
     logstore_info& info = it->second;
     info.log_store =
         std::make_shared< HomeLogStore >(shared_from_this(), store_id, info.append_mode, sb.m_first_seq_num);
+    info.log_store->register_log_found_cb(info.log_found_cb);
+    info.log_store->register_log_replay_done_cb(info.log_replay_done_cb);
     info.promise.setValue(info.log_store);
 }
 
