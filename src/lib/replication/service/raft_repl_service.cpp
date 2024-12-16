@@ -394,12 +394,8 @@ void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
         // 2  m_raft_config_sb will be destroyed in raft_group_config_found() method if repl_dev is is not found, so
         // skip it.
 
-        // 3 try to destroy logstore related resources.
-        logstore_id_t logstore_id = rd_sb->logstore_id;
-        logdev_id_t logdev_id = rd_sb->logdev_id;
-        LOGINFOMOD(replication, "remove logstore {} and logdev {} for group {}", logstore_id, logdev_id, group_id);
-        logstore_service().remove_log_store(logdev_id, logstore_id);
-        logstore_service().destroy_log_dev(logdev_id);
+        // 3 logdev will be destroyed in delete_unopened_logdevs() if we don't open it(create repl_dev) here, so skip
+        // it.
 
         // 4 destroy the superblk, and after this,  the repl_dev will not be loaded and found again.
         rd_sb.destroy();
