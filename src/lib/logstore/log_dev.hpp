@@ -564,6 +564,8 @@ private:
 struct logstore_info {
     std::shared_ptr< HomeLogStore > log_store;
     bool append_mode;
+    log_found_cb_t log_found_cb{nullptr};
+    log_replay_done_cb_t log_replay_done_cb{nullptr};
     folly::SharedPromise< std::shared_ptr< HomeLogStore > > promise{};
 };
 
@@ -708,7 +710,9 @@ public:
     /// @param append_mode Is this log store is append mode or not. If append mode, write_async call fails and only
     /// append_async calls succeed.
     /// @return future< shared< HomeLogStore > > : Future which will be set with the log store once it is opened
-    folly::Future< shared< HomeLogStore > > open_log_store(logstore_id_t store_id, bool append_mode);
+    folly::Future< shared< HomeLogStore > > open_log_store(logstore_id_t store_id, bool append_mode,
+                                                           log_found_cb_t log_found_cb = nullptr,
+                                                           log_replay_done_cb_t log_replay_done_cb = nullptr);
 
     /// @brief Remove the log store and its associated resources
     /// @param store_id Store id that was created/opened

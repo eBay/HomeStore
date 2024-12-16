@@ -132,7 +132,8 @@ public:
      * @return std::shared_ptr< HomeLogStore >
      */
     folly::Future< shared< HomeLogStore > > open_log_store(logdev_id_t logdev_id, logstore_id_t store_id,
-                                                           bool append_mode);
+                                                           bool append_mode, log_found_cb_t log_found_cb = nullptr,
+                                                           log_replay_done_cb_t log_replay_done_cb = nullptr);
 
     /**
      * @brief Close the log store instance and free-up the resources

@@ -99,13 +99,11 @@ HomeRaftLogStore::HomeRaftLogStore(logdev_id_t logdev_id, logstore_id_t logstore
         LOGDEBUGMOD(replication, "Opening existing home log_dev={} log_store={}", m_logdev_id, logstore_id);
         logstore_service().open_logdev(m_logdev_id);
         m_log_store_future = logstore_service()
-                                 .open_log_store(m_logdev_id, logstore_id, true)
-                                 .thenValue([this, log_found_cb, log_replay_done_cb](auto log_store) {
+                                 .open_log_store(m_logdev_id, logstore_id, true, log_found_cb, log_replay_done_cb)
+                                 .thenValue([this](auto log_store) {
                                      m_log_store = std::move(log_store);
                                      DEBUG_ASSERT_EQ(m_logstore_id, m_log_store->get_store_id(),
                                                      "Mismatch in passed and create logstore id");
-                                     m_log_store->register_log_found_cb(log_found_cb);
-                                     m_log_store->register_log_replay_done_cb(log_replay_done_cb);
                                      REPL_STORE_LOG(DEBUG, "Home Log store created/opened successfully");
                                  });
     }
