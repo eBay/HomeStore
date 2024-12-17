@@ -36,7 +36,8 @@ VENUM(repl_req_state_t, uint32_t,
       DATA_WRITTEN = 1 << 2,  // Data has been written to the storage
       LOG_RECEIVED = 1 << 3,  // Log is received and waiting for data
       LOG_FLUSHED = 1 << 4,   // Log has been flushed
-      ERRORED = 1 << 5        // Error has happened and cleaned up
+      ERRORED = 1 << 5,        // Error has happened and cleaned up
+      DATA_COMMITTED = 1 << 6  // Data has already been committed, used in duplication handling, will skip commit_blk
 )
 
 VENUM(journal_type_t, uint16_t,

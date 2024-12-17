@@ -34,6 +34,7 @@ VENUM(ReplServiceError, int32_t,
       NOT_IMPLEMENTED = -10001,
       NO_SPACE_LEFT = -20000,
       DRIVE_WRITE_ERROR = -20001,
+      DATA_DUPLICATED = -20002,
       FAILED = -32768);
 // clang-format on
 
