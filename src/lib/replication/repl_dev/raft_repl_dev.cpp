@@ -302,7 +302,6 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
 
     // If it is header only entry, directly propose to the raft
     if (rreq->has_linked_data()) {
-        push_data_to_all_followers(rreq, data);
 
         // Step 1: Alloc Blkid
         auto const status = rreq->alloc_local_blks(m_listener, data.size);
@@ -311,6 +310,12 @@ void RaftReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& 
             handle_error(rreq, status);
             return;
         }
+        if (rreq->is_proposer() && rreq->has_state(repl_req_state_t::DATA_COMMITTED)) {
+            RD_LOGD("data blks has already been allocated and committed, failing this req");
+            handle_error(rreq, ReplServiceError::DATA_DUPLICATED);
+            return;
+        }
+        push_data_to_all_followers(rreq, data);
 
         COUNTER_INCREMENT(m_metrics, total_write_cnt, 1);
         COUNTER_INCREMENT(m_metrics, outstanding_data_write_cnt, 1);
@@ -521,8 +526,9 @@ repl_req_ptr_t RaftReplDev::applier_create_req(repl_key const& rkey, journal_typ
         }
     }
 #endif
-
-    if (alloc_status != ReplServiceError::OK) {
+    if (rreq->has_state(repl_req_state_t::DATA_COMMITTED)) {
+        RD_LOGI("For Repl_key=[{}] data already exists, skip", rkey.to_string());
+    } else if (alloc_status != ReplServiceError::OK) {
         RD_LOGE("For Repl_key=[{}] alloc hints returned error={}, failing this req", rkey.to_string(), alloc_status);
         // Do not call handle_error here, because handle_error is for rreq which needs to be terminated. This one can be
         // retried.
@@ -921,7 +927,7 @@ void RaftReplDev::handle_rollback(repl_req_ptr_t rreq) {
 }
 
 void RaftReplDev::handle_commit(repl_req_ptr_t rreq, bool recovery) {
-    commit_blk(rreq);
+    if (!rreq->has_state(repl_req_state_t::DATA_COMMITTED)) { commit_blk(rreq); }
 
     // Remove the request from repl_key map.
     m_repl_key_req_map.erase(rreq->rkey());
@@ -962,6 +968,12 @@ void RaftReplDev::handle_error(repl_req_ptr_t const& rreq, ReplServiceError err)
     // Remove from the map and thus its no longer accessible from applier_create_req
     m_repl_key_req_map.erase(rreq->rkey());
 
+    if (err == ReplServiceError::DATA_DUPLICATED) {
+        RD_LOGE("Raft Channel: Error in processing rreq=[{}] error={}", rreq->to_string(), err);
+        m_listener->on_error(err, rreq->header(), rreq->key(), rreq);
+        rreq->clear();
+        return;
+    }
     if (rreq->op_code() == journal_type_t::HS_DATA_INLINED) {
         // Free the blks which is allocated already
         RD_LOGE("Raft Channel: Error in processing rreq=[{}] error={}", rreq->to_string(), err);

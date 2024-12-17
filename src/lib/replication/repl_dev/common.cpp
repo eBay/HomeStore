@@ -91,6 +91,18 @@ ReplServiceError repl_req_ctx::alloc_local_blks(cshared< ReplDevListener >& list
     auto const hints_result = listener->get_blk_alloc_hints(m_header, data_size);
     if (hints_result.hasError()) { return hints_result.error(); }
 
+    if (hints_result.value().committed_blk_id.has_value()) {
+        //if the allocted_blk_id is already present, use it and skip allocation
+        m_local_blkid = hints_result.value().committed_blk_id.value();
+        add_state(repl_req_state_t::BLK_ALLOCATED);
+        add_state(repl_req_state_t::DATA_RECEIVED);
+        add_state(repl_req_state_t::DATA_WRITTEN);
+        add_state(repl_req_state_t::DATA_COMMITTED);
+        m_data_received_promise.setValue();
+        m_data_written_promise.setValue();
+        return ReplServiceError::OK;
+    }
+
     auto status = data_service().alloc_blks(sisl::round_up(uint32_cast(data_size), data_service().get_blk_size()),
                                             hints_result.value(), m_local_blkid);
     if (status != BlkAllocStatus::SUCCESS) {
