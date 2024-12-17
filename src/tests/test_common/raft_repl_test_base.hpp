@@ -94,8 +94,8 @@ public:
         struct journal_header {
             uint64_t data_size;
             uint64_t data_pattern;
+            uint64_t key_id; //put it in header to test duplication in alloc_local_blks
         };
-
         journal_header jheader;
         uint64_t key_id;
         sisl::sg_list write_sgs;
@@ -108,6 +108,7 @@ public:
             write_sgs.size = 0;
             read_sgs.size = 0;
             key_id = (uint64_t)rand() << 32 | rand();
+            jheader.key_id = key_id;
         }
 
         ~test_req() {
@@ -171,6 +172,7 @@ public:
                   cintrusive< repl_req_ctx >& ctx) override {
         LOGINFOMOD(replication, "[Replica={}] Received error={} on key={}", g_helper->replica_num(), enum_name(error),
                    *(r_cast< uint64_t const* >(key.cbytes())));
+        g_helper->runner().comp_promise_.setException(folly::make_exception_wrapper<ReplServiceError>(error));
     }
 
     AsyncReplResult<> create_snapshot(shared< snapshot_context > context) override {
@@ -316,7 +318,16 @@ public:
 
     void free_user_snp_ctx(void*& user_snp_ctx) override {}
 
-    ReplResult< blk_alloc_hints > get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) override {
+    ReplResult<blk_alloc_hints> get_blk_alloc_hints(sisl::blob const& header, uint32_t data_size) override {
+        auto jheader = r_cast<test_req::journal_header const*>(header.cbytes());
+        Key k{.id_ = jheader->key_id};
+        auto iter = inmem_db_.find(k);
+        if (iter != inmem_db_.end()) {
+            LOGDEBUG("data already exists in mem db, key={}", k.id_);
+            auto hints = blk_alloc_hints{};
+            hints.committed_blk_id = iter->second.blkid_;
+            return hints;
+        }
         return blk_alloc_hints{};
     }
     void on_replace_member(const replica_member_info& member_out, const replica_member_info& member_in) override {
@@ -335,6 +346,7 @@ public:
         auto req = intrusive< test_req >(new test_req());
         req->jheader.data_size = data_size;
         req->jheader.data_pattern = ((long long)rand() << 32) | ++s_uniq_num;
+        req->jheader.key_id = req->key_id;
         auto block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
 
         LOGINFOMOD(replication, "[Replica={}] Db write key={} data_size={} pattern={} block_size={}",
@@ -590,6 +602,68 @@ public:
 
         written_entries_ += num_entries;
         if (wait_for_commit) { this->wait_for_all_commits(); }
+    }
+    replica_id_t wait_and_get_leader_id() {
+        do {
+            auto leader_uuid = dbs_[0]->repl_dev()->get_leader_id();
+            if (leader_uuid.is_nil()) {
+                LOGINFO("Waiting for leader to be elected");
+                std::this_thread::sleep_for(std::chrono::milliseconds{500});
+            } else {
+                return leader_uuid;
+            }
+        } while (true);
+    }
+
+    ReplServiceError write_with_id(uint64_t id, bool wait_for_commit = true, shared< TestReplicatedDB > db = nullptr) {
+        if (dbs_[0]->repl_dev() == nullptr) return ReplServiceError::FAILED;
+        if (db == nullptr) { db = pick_one_db(); }
+        LOGINFO("Writing data {} since I am the leader my_uuid={}", id,
+                boost::uuids::to_string(g_helper->my_replica_id()));
+        auto const block_size = SISL_OPTIONS["block_size"].as< uint32_t >();
+
+        LOGINFO("Run on worker threads to schedule append on repldev for {} Bytes.", block_size);
+        g_helper->runner().set_num_tasks(1);
+        g_helper->runner().set_task([this, block_size, db, id]() {
+            static std::normal_distribution<> num_blks_gen{3.0, 1.0};
+            auto data_size = std::max(1L, std::abs(std::lround(num_blks_gen(g_re)))) * block_size;
+            ASSERT_GT(data_size, 0);
+            LOGINFO("data_size larger than 0, go ahead, data_size= {}.", data_size);
+            static std::atomic<uint32_t> s_uniq_num{0};
+            auto req = intrusive(new TestReplicatedDB::test_req());
+            req->jheader.data_size = data_size;
+            req->jheader.data_pattern = ((long long)rand() << 32) | ++s_uniq_num;
+            //overwrite the key_id with the id passed in
+            req->jheader.key_id = id;
+            req->key_id = id;
+
+            LOGINFOMOD(replication, "[Replica={}] Db write key={} data_size={} pattern={} block_size={}",
+                       g_helper->replica_num(), req->key_id, data_size, req->jheader.data_pattern, block_size);
+
+            if (data_size != 0) {
+                req->write_sgs =
+                    test_common::HSTestHelper::create_sgs(data_size, block_size, req->jheader.data_pattern);
+            }
+
+            db->repl_dev()->async_alloc_write(req->header_blob(), req->key_blob(), req->write_sgs, req);
+        });
+
+        if (!wait_for_commit) {
+            return ReplServiceError::OK;
+        }
+       try {
+           g_helper->runner().execute().get();
+           LOGDEBUG("write data task complete, id={}", id)
+       } catch (const ReplServiceError& e) {
+           LOGERRORMOD(replication, "[Replica={}] Error in writing data: id={}, error={}", g_helper->replica_num(),
+                      id, enum_name(e));
+           return e;
+       }
+
+        written_entries_ += 1;
+        LOGINFO("wait_for_commit={}", written_entries_);
+        this->wait_for_all_commits();
+        return ReplServiceError::OK;
     }
 
     void remove_db(std::shared_ptr< TestReplicatedDB > db, bool wait_for_removal) {
