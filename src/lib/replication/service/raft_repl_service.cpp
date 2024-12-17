@@ -128,7 +128,8 @@ void RaftReplService::start() {
     // We need to first load the repl_dev with its config and then attach the raft config to that repl dev.
     for (auto const& [buf, mblk] : m_config_sb_bufs) {
         auto rdev = raft_group_config_found(buf, voidptr_cast(mblk));
-        rdev->on_restart();
+        // if repl_dev is in destroy_pending state, it will not be loaded.
+        if (rdev) rdev->on_restart();
     }
     m_config_sb_bufs.clear();
     LOGINFO("Repl devs load completed, calling upper layer on_repl_devs_init_completed");
@@ -383,7 +384,22 @@ void RaftReplService::load_repl_dev(sisl::byte_view const& buf, void* meta_cooki
     }
 
     if (rd_sb->destroy_pending == 0x1) {
-        LOGINFOMOD(replication, "ReplDev group_id={} was destroyed, skipping the load", group_id);
+        LOGINFOMOD(replication, "ReplDev group_id={} was destroyed, reclaim the stale resource", group_id);
+        // if we do not add the repl_dev to m_rd_map, it will not be permanently destroyed since gc thread finds the
+        // pending destroy repl_dev only from m_rd_map. so, we should try to reclaim all the repl_dev stale resources
+        // here.
+
+        // 1 since we permanantly destroy the repl_dev here, it will not join_raft group where raft_server will be
+        // created. hence , no need to detroy it through nuraft_mesg, where raft_server will be shutdown.
+        // 2  m_raft_config_sb will be destroyed in raft_group_config_found() method if repl_dev is is not found, so
+        // skip it.
+
+        // 3 logdev will be destroyed in delete_unopened_logdevs() if we don't open it(create repl_dev) here, so skip
+        // it.
+
+        // 4 destroy the superblk, and after this,  the repl_dev will not be loaded and found again.
+        rd_sb.destroy();
+
         return;
     }
 
