@@ -264,6 +264,7 @@ int64_t LogDev::append_async(logstore_id_t store_id, logstore_seq_num_t seq_num,
 }
 
 log_buffer LogDev::read(const logdev_key& key) {
+    std::unique_lock lg = flush_guard();
     auto buf = sisl::make_byte_array(initial_read_size, m_flush_size_multiple, sisl::buftag::logread);
     auto ec = m_vdev_jd->sync_pread(buf->bytes(), initial_read_size, key.dev_offset);
     if (ec) {
@@ -292,6 +293,7 @@ log_buffer LogDev::read(const logdev_key& key) {
 }
 
 void LogDev::read_record_header(const logdev_key& key, serialized_log_record& return_record_header) {
+    std::unique_lock lg = flush_guard();
     auto buf = sisl::make_byte_array(initial_read_size, m_flush_size_multiple, sisl::buftag::logread);
     auto ec = m_vdev_jd->sync_pread(buf->bytes(), initial_read_size, key.dev_offset);
     if (ec) LOGERROR("Failed to read from Journal vdev log_dev={} {} {}", m_logdev_id, ec.value(), ec.message());
