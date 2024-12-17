@@ -15,6 +15,54 @@
 #include "test_common/raft_repl_test_base.hpp"
 
 class RaftReplDevTest : public RaftReplDevTestBase {};
+TEST_F(RaftReplDevTest, Write_Duplicated_Data) {
+    uint64_t total_writes = 1;
+    g_helper->runner().qdepth_ = total_writes;
+    g_helper->runner().total_tasks_ = total_writes;
+    LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
+    g_helper->sync_for_test_start();
+    auto leader_uuid = wait_and_get_leader_id();
+
+    uint64_t id;
+    TestReplicatedDB::Key stored_key;
+    TestReplicatedDB::Value stored_val;
+    if (leader_uuid == g_helper->my_replica_id()) {
+        id = (uint64_t)rand() << 32 | rand();
+        LOGINFO("going to write data with id={}", id);
+        this->write_with_id(id, true /* wait_for_commit */);
+        stored_key = dbs_[0]->inmem_db_.cbegin()->first;
+        ASSERT_EQ(id, stored_key.id_);
+    } else {
+        LOGINFO("I am not leader, leader_uuid={} my_uuid={}, do nothing",
+                boost::uuids::to_string(leader_uuid), boost::uuids::to_string(g_helper->my_replica_id()));
+    }
+    wait_for_commits(total_writes);
+
+    g_helper->sync_for_verify_start();
+    LOGINFO("Validate all data written so far by reading them");
+    this->validate_data();
+    /* test duplication
+    if duplication found in leader proposal, reject it;
+    if duplication found in the followers, skip it.
+    */
+    //1. write the same data again on leader, should fail
+    if (leader_uuid == g_helper->my_replica_id()) {
+        auto err = this->write_with_id(id, true /* wait_for_commit */);
+        ASSERT_EQ(ReplServiceError::DATA_DUPLICATED, err);
+
+        //2. delete it from the db to simulate duplication in followers(skip the duplication check in leader side)
+        dbs_[0]->inmem_db_.erase(stored_key);
+        LOGINFO("data with id={} has been deleted from db", id);
+        err = this->write_with_id(id, true /* wait_for_commit */);
+        ASSERT_EQ(ReplServiceError::OK, err);
+    }
+    if (leader_uuid != g_helper->my_replica_id()) {
+        wait_for_commits(total_writes + 1);
+        ASSERT_EQ(dbs_[0]->inmem_db_.size(), total_writes);
+    }
+
+    g_helper->sync_for_cleanup_start();
+}
 
 TEST_F(RaftReplDevTest, Write_Restart_Write) {
     LOGINFO("Homestore replica={} setup completed", g_helper->replica_num());
