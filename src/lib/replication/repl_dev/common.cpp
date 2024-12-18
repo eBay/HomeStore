@@ -6,11 +6,12 @@
 #include <common/homestore_config.hpp>
 #include "replication/repl_dev/common.h"
 #include <libnuraft/nuraft.hxx>
+#include <iomgr/iomgr_flip.hpp>
 
 namespace homestore {
 
-void repl_req_ctx::init(repl_key rkey, journal_type_t op_code, bool is_proposer, sisl::blob const& user_header,
-                        sisl::blob const& key, uint32_t data_size) {
+ReplServiceError repl_req_ctx::init(repl_key rkey, journal_type_t op_code, bool is_proposer, sisl::blob const& user_header,
+                        sisl::blob const& key, uint32_t data_size, cshared< ReplDevListener >& listener) {
     m_rkey = std::move(rkey);
 #ifndef NDEBUG
     if (data_size > 0) {
@@ -24,6 +25,14 @@ void repl_req_ctx::init(repl_key rkey, journal_type_t op_code, bool is_proposer,
     m_header = user_header;
     m_key = key;
     m_is_jentry_localize_pending = (!is_proposer && (data_size > 0)); // Pending on the applier and with linked data
+    if (has_linked_data()) {
+        auto alloc_status = alloc_local_blks(listener, data_size);
+        if (alloc_status != ReplServiceError::OK) {
+            LOGERROR("Allocate blk for rreq failed error={}", alloc_status);
+        }
+        return alloc_status;
+    }
+    return ReplServiceError::OK;
 }
 
 repl_req_ctx::~repl_req_ctx() {
@@ -93,6 +102,7 @@ ReplServiceError repl_req_ctx::alloc_local_blks(cshared< ReplDevListener >& list
 
     if (hints_result.value().committed_blk_id.has_value()) {
         //if the allocted_blk_id is already present, use it and skip allocation
+        LOGINFO("For Repl_key=[{}] data already exists, skip", rkey().to_string());
         m_local_blkid = hints_result.value().committed_blk_id.value();
         add_state(repl_req_state_t::BLK_ALLOCATED);
         add_state(repl_req_state_t::DATA_RECEIVED);
