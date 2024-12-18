@@ -47,8 +47,6 @@ LogDev::LogDev(const logstore_family_id_t f_id, const std::string& logdev_name) 
 
 LogDev::~LogDev() = default;
 
-void LogDev::meta_blk_found(meta_blk* const, const sisl::byte_view, const size_t) {}
-
 uint32_t LogDev::get_align_size() const { return m_blkstore->get_align_size(); }
 
 void LogDev::start(const bool format, JournalVirtualDev* blk_store) {
@@ -631,16 +629,16 @@ sisl::status_response LogDev::get_status(const sisl::status_request& request) co
 }
 
 /////////////////////////////// LogDevMetadata Section ///////////////////////////////////////
-LogDevMetadata::LogDevMetadata(const std::string& logdev_name) : m_metablk_name{logdev_name} {
+LogDevMetadata::LogDevMetadata(const std::string& logdev_name) : m_name{logdev_name} {
     MetaBlkMgrSI()->register_handler(
-        logdev_name + "_logdev_sb",
+        m_name,
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
             logdev_super_blk_found(std::move(buf), voidptr_cast(mblk));
         },
         nullptr);
 
     MetaBlkMgrSI()->register_handler(
-        logdev_name + "_rollback_sb",
+        m_name + "_rollback_sb",
         [this](meta_blk* mblk, sisl::byte_view buf, size_t size) {
             rollback_super_blk_found(std::move(buf), voidptr_cast(mblk));
         },
@@ -740,8 +738,8 @@ void LogDevMetadata::persist() {
         MetaBlkMgrSI()->update_sub_sb(static_cast< const void* >(m_raw_logdev_buf->bytes), m_raw_logdev_buf->size,
                                       m_logdev_cookie);
     } else {
-        MetaBlkMgrSI()->add_sub_sb(m_metablk_name, static_cast< const void* >(m_raw_logdev_buf->bytes),
-                                   m_raw_logdev_buf->size, m_logdev_cookie);
+        MetaBlkMgrSI()->add_sub_sb(m_name, static_cast< const void* >(m_raw_logdev_buf->bytes), m_raw_logdev_buf->size,
+                                   m_logdev_cookie);
     }
 
     if (m_rollback_info_dirty) {
@@ -749,7 +747,7 @@ void LogDevMetadata::persist() {
             MetaBlkMgrSI()->update_sub_sb(static_cast< const void* >(m_raw_rollback_buf->bytes),
                                           m_raw_rollback_buf->size, m_rollback_cookie);
         } else {
-            MetaBlkMgrSI()->add_sub_sb(m_metablk_name, static_cast< const void* >(m_raw_rollback_buf->bytes),
+            MetaBlkMgrSI()->add_sub_sb(m_name + "_rollback_sb", static_cast< const void* >(m_raw_rollback_buf->bytes),
                                        m_raw_rollback_buf->size, m_rollback_cookie);
         }
         m_rollback_info_dirty = false;

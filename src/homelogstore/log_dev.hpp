@@ -566,7 +566,7 @@ private:
 
     sisl::byte_array m_raw_logdev_buf;
     sisl::byte_array m_raw_rollback_buf;
-    std::string m_metablk_name;
+    std::string m_name;
     logdev_superblk* m_sb{nullptr};
     rollback_superblk* m_rollback_sb{nullptr};
     void* m_logdev_cookie{nullptr};
@@ -782,7 +782,6 @@ public:
      * @return number of records to truncate
      */
     [[nodiscard]] uint64_t truncate(const logdev_key& key);
-    void meta_blk_found(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
 
     /**
      * @brief Rollback the logid range specific to the given store id. This method persists the information

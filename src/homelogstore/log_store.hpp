@@ -149,8 +149,8 @@ public:
     HomeLogStoreMgr& operator=(HomeLogStoreMgr&&) noexcept = delete;
 
     [[nodiscard]] static HomeLogStoreMgr& instance();
-    static void data_meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
-    static void ctrl_meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
+//    static void data_meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
+//    static void ctrl_meta_blk_found_cb(meta_blk* const mblk, const sisl::byte_view buf, const size_t size);
     static void fake_reboot();
 
     /**
