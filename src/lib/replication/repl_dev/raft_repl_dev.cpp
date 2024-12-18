@@ -1183,7 +1183,7 @@ nuraft::ptr< nuraft::log_store > RaftReplDev::load_log_store() { return m_data_j
 
 int32_t RaftReplDev::server_id() { return m_raft_server_id; }
 
-bool RaftReplDev::is_destroy_pending() const { return (m_rd_sb->destroy_pending == 0x1); }
+bool RaftReplDev::is_destroy_pending() const { return (*m_stage.access().get() == repl_dev_stage_t::DESTROYED); }
 bool RaftReplDev::is_destroyed() const { return (*m_stage.access().get() == repl_dev_stage_t::PERMANENT_DESTROYED); }
 
 ///////////////////////////////////  nuraft_mesg::mesg_state_mgr overrides ////////////////////////////////////
@@ -1207,6 +1207,19 @@ void RaftReplDev::permanent_destroy() {
 }
 
 void RaftReplDev::leave() {
+    // this will be called in 3 cases :
+    //  1. commit log entry of journal_type_t::HS_CTRL_DESTROY
+    //  2. it is removed from the cluster and the new config(excluding this node) is being committed on this node
+    //  3. it is removed from the cluster , but the node is down and new config log(excluding this node) is not
+    //  replicated to this removed node. when the node restart, leader will not send any append entry to this node,
+    //  since it is not a member of the raft group. it will become a condidate and send request-vote request to other
+    //  members of this raft group. a member will send RemovedFromCluster to the node if this member finds the node
+    //  is no longer a member of the raft group.
+
+    // leave() will never be called concurrently, since config change and journal_type_t::HS_CTRL_DESTROY are all log
+    // entry, which will be committed sequentially.
+    if (is_destroy_pending()) return;
+
     // We update that this repl_dev in destroyed state, actual clean up of resources happen in reaper thread later
     m_stage.update([](auto* stage) { *stage = repl_dev_stage_t::DESTROYED; });
     m_destroyed_time = Clock::now();
@@ -1288,21 +1301,7 @@ std::pair< bool, nuraft::cb_func::ReturnCode > RaftReplDev::handle_raft_event(nu
         return {true, ret};
     }
 
-    case nuraft::cb_func::Type::RemovedFromCluster: {
-        // a node will reach here when :
-        // 1. it is removed from the cluster and the new config(excluding this node) is being committed on this node
-        // 2. it is removed from the cluster , but the node is down and new config log(excluding this node) is not
-        // replicated to this removed node. when the node restart, leader will not send any append entry to this node,
-        // since it is not a member of the raft group. it will become a condidate and send request-vote request to other
-        // members of this raft group. a member will send RemovedFromCluster to the node if this member finds the node
-        // is no longer a member of the raft group.
-
-        // this will lazily cleanup the group
-        // TODO:cleanup this repl dev ASAP if necessary.
-        leave();
-
-        return {true, ret};
-    }
+    // RemovedFromCluster will be handled in nuraft_mesg::generic_raft_event_handler where leave() is called
 
     // TODO: Add more type handler if necessary
     default:

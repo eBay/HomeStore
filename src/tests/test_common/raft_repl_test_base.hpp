@@ -182,16 +182,12 @@ public:
         return make_async_success<>();
     }
 
-    static int64_t get_next_lsn(uint64_t& obj_id) {
-        return obj_id & ((1ULL << 63) - 1);
-    }
-    static void set_resync_msg_type_bit(uint64_t& obj_id) {
-        obj_id |= 1ULL << 63;
-    }
+    static int64_t get_next_lsn(uint64_t& obj_id) { return obj_id & ((1ULL << 63) - 1); }
+    static void set_resync_msg_type_bit(uint64_t& obj_id) { obj_id |= 1ULL << 63; }
 
     int read_snapshot_obj(shared< snapshot_context > context, shared< snapshot_obj > snp_data) override {
         auto s = std::dynamic_pointer_cast< nuraft_snapshot_context >(context)->nuraft_snapshot();
-        if(RaftStateMachine::is_hs_snp_obj(snp_data->offset)) {
+        if (RaftStateMachine::is_hs_snp_obj(snp_data->offset)) {
             LOGERRORMOD(replication, "invalid snapshot offset={}", snp_data->offset);
             return -1;
         }

@@ -229,7 +229,9 @@ public:
      *
      * @param num_reserved_entries The number of reserved entries of the replication log.
      */
-    void truncate(uint32_t num_reserved_entries) { m_data_journal->truncate(num_reserved_entries, m_compact_lsn.load()); }
+    void truncate(uint32_t num_reserved_entries) {
+        m_data_journal->truncate(num_reserved_entries, m_compact_lsn.load());
+    }
 
     void wait_for_logstore_ready() { m_data_journal->wait_for_log_store_ready(); }
 
