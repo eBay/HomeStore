@@ -399,7 +399,8 @@ private:
     std::unique_ptr< HomeBlksHttpServer > m_hb_http_server;
 
     std::condition_variable m_cv_init_cmplt;  // wait for init to complete
-    std::condition_variable m_cv_wakeup_init; // wait for init to complete
+    std::condition_variable m_cv_wakeup_init; // wait for safe_mode to wakeup
+    bool woke_up {false}; // wait for safe_mode to wakeup
     std::mutex m_cv_mtx;
     bool m_rdy = false;
 
