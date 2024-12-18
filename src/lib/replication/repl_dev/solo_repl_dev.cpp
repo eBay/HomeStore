@@ -30,24 +30,18 @@ SoloReplDev::SoloReplDev(superblk< repl_dev_superblk >&& rd_sb, bool load_existi
 void SoloReplDev::async_alloc_write(sisl::blob const& header, sisl::blob const& key, sisl::sg_list const& value,
                                     repl_req_ptr_t rreq) {
     if (!rreq) { auto rreq = repl_req_ptr_t(new repl_req_ctx{}); }
-    rreq->init(repl_key{.server_id = 0, .term = 1, .dsn = 1},
-               value.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED, true, header, key,
-               value.size);
-
+    auto status = rreq->init(repl_key{.server_id = 0, .term = 1, .dsn = 1},
+                             value.size ? journal_type_t::HS_DATA_LINKED : journal_type_t::HS_DATA_INLINED, true,
+                             header, key, value.size, m_listener);
+    HS_REL_ASSERT_EQ(status, ReplServiceError::OK, "Error in allocating local blks");
     // If it is header only entry, directly write to the journal
-    if (rreq->has_linked_data()) {
-        // Step 1: Alloc Blkid
-        auto const status = rreq->alloc_local_blks(m_listener, value.size);
-        HS_REL_ASSERT_EQ(status, ReplServiceError::OK, "Error in allocating local blks");
-
+    if (rreq->has_linked_data() && !rreq->has_state(repl_req_state_t::DATA_WRITTEN)) {
         // Write the data
         data_service().async_write(value, rreq->local_blkid()).thenValue([this, rreq = std::move(rreq)](auto&& err) {
             HS_REL_ASSERT(!err, "Error in writing data"); // TODO: Find a way to return error to the Listener
             write_journal(std::move(rreq));
         });
-    } else {
-        write_journal(std::move(rreq));
-    }
+    } else { write_journal(std::move(rreq)); }
 }
 
 void SoloReplDev::write_journal(repl_req_ptr_t rreq) {
