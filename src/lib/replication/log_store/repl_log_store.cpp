@@ -17,7 +17,7 @@ uint64_t ReplLogStore::append(nuraft::ptr< nuraft::log_entry >& entry) {
 
     repl_req_ptr_t rreq = m_sm.localize_journal_entry_finish(*entry);
     ulong lsn = HomeRaftLogStore::append(entry);
-    m_sm.link_lsn_to_req(rreq, int64_cast(lsn));
+    m_sm.link_lsn_to_req(rreq, m_sm.to_volatile_lsn(lsn));
 
     RD_LOGD("Raft Channel: Received append log entry rreq=[{}]", rreq->to_compact_string());
     return lsn;
@@ -32,7 +32,7 @@ void ReplLogStore::write_at(ulong index, nuraft::ptr< nuraft::log_entry >& entry
 
     repl_req_ptr_t rreq = m_sm.localize_journal_entry_finish(*entry);
     HomeRaftLogStore::write_at(index, entry);
-    m_sm.link_lsn_to_req(rreq, int64_cast(index));
+    m_sm.link_lsn_to_req(rreq, m_sm.to_volatile_lsn(index));
     RD_LOGD("Raft Channel: Received write_at log entry rreq=[{}]", rreq->to_compact_string());
 }
 
@@ -43,7 +43,7 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
     auto reqs = sisl::VectorPool< repl_req_ptr_t >::alloc();
     auto proposer_reqs = sisl::VectorPool< repl_req_ptr_t >::alloc();
     for (int64_t lsn = int64_cast(start_lsn); lsn <= end_lsn; ++lsn) {
-        auto rreq = m_sm.lsn_to_req(lsn);
+        auto rreq = m_sm.lsn_to_req(m_sm.to_volatile_lsn(lsn));
         // Skip this call in proposer, since this method will synchronously flush the data, which is not required for
         // leader. Proposer will call the flush as part of commit after receiving quorum, upon which time, there is a
         // high possibility the log entry is already flushed. Skip it for rreq == nullptr which is the case for raft
@@ -93,6 +93,21 @@ void ReplLogStore::end_of_append_batch(ulong start_lsn, ulong count) {
             if (rreq) { rreq->add_state(repl_req_state_t::LOG_FLUSHED); }
         }
     }
+
+    // Convert volatile logs to non-volatile logs in state machine
+    for (int64_t lsn = int64_cast(start_lsn); lsn <= end_lsn; ++lsn) {
+        auto volatile_lsn = m_sm.to_volatile_lsn(lsn);
+        auto rreq = m_sm.lsn_to_req(volatile_lsn);
+        if (rreq != nullptr) {
+            if (rreq->has_state(repl_req_state_t::ERRORED)) {
+                RD_LOGE("Raft Channel: rreq=[{}] met some errors before", rreq->to_compact_string());
+                continue;
+            }
+            m_sm.link_lsn_to_req(rreq, lsn);
+            m_sm.unlink_lsn_to_req(volatile_lsn, rreq);
+        }
+    }
+
     sisl::VectorPool< repl_req_ptr_t >::free(reqs);
     sisl::VectorPool< repl_req_ptr_t >::free(proposer_reqs);
 }
